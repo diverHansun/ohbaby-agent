@@ -1,0 +1,227 @@
+/**
+ * Unit tests for validation functions.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { validateModelJson, validateApiKey } from '../validation.js';
+import { ConfigError } from '../types.js';
+
+describe('validateModelJson', () => {
+  const validConfig = {
+    provider: 'openai',
+    defaultModel: 'gpt-4',
+    apiConfig: {
+      baseUrl: 'https://api.openai.com/v1',
+      apiKeyEnv: 'OPENAI_API_KEY',
+    },
+    llmParams: {
+      temperature: 0.7,
+      maxTokens: 4096,
+    },
+  };
+
+  it('should pass for valid configuration', () => {
+    expect(() => validateModelJson(validConfig)).not.toThrow();
+  });
+
+  it('should throw for null input', () => {
+    expect(() => validateModelJson(null)).toThrow(ConfigError);
+  });
+
+  it('should throw for non-object input', () => {
+    expect(() => validateModelJson('string')).toThrow(ConfigError);
+  });
+
+  it('should throw for missing provider', () => {
+    const config = { ...validConfig, provider: undefined };
+    expect(() => validateModelJson(config)).toThrow(ConfigError);
+    expect(() => validateModelJson(config)).toThrow(/provider/);
+  });
+
+  it('should throw for missing defaultModel', () => {
+    const config = { ...validConfig, defaultModel: undefined };
+    expect(() => validateModelJson(config)).toThrow(ConfigError);
+    expect(() => validateModelJson(config)).toThrow(/defaultModel/);
+  });
+
+  it('should throw for missing apiConfig', () => {
+    const config = { ...validConfig, apiConfig: undefined };
+    expect(() => validateModelJson(config)).toThrow(ConfigError);
+    expect(() => validateModelJson(config)).toThrow(/apiConfig/);
+  });
+
+  it('should throw for missing apiConfig.baseUrl', () => {
+    const config = {
+      ...validConfig,
+      apiConfig: { ...validConfig.apiConfig, baseUrl: undefined },
+    };
+    expect(() => validateModelJson(config)).toThrow(ConfigError);
+    expect(() => validateModelJson(config)).toThrow(/baseUrl/);
+  });
+
+  it('should throw for missing apiConfig.apiKeyEnv', () => {
+    const config = {
+      ...validConfig,
+      apiConfig: { ...validConfig.apiConfig, apiKeyEnv: undefined },
+    };
+    expect(() => validateModelJson(config)).toThrow(ConfigError);
+    expect(() => validateModelJson(config)).toThrow(/apiKeyEnv/);
+  });
+
+  it('should throw for missing llmParams', () => {
+    const config = { ...validConfig, llmParams: undefined };
+    expect(() => validateModelJson(config)).toThrow(ConfigError);
+    expect(() => validateModelJson(config)).toThrow(/llmParams/);
+  });
+
+  it('should throw for missing llmParams.temperature', () => {
+    const config = {
+      ...validConfig,
+      llmParams: { ...validConfig.llmParams, temperature: undefined },
+    };
+    expect(() => validateModelJson(config)).toThrow(ConfigError);
+    expect(() => validateModelJson(config)).toThrow(/temperature/);
+  });
+
+  it('should throw for temperature below 0', () => {
+    const config = {
+      ...validConfig,
+      llmParams: { ...validConfig.llmParams, temperature: -0.1 },
+    };
+    expect(() => validateModelJson(config)).toThrow(ConfigError);
+    try {
+      validateModelJson(config);
+    } catch (error) {
+      expect((error as ConfigError).code).toBe('INVALID_TEMPERATURE');
+    }
+  });
+
+  it('should throw for temperature above 2', () => {
+    const config = {
+      ...validConfig,
+      llmParams: { ...validConfig.llmParams, temperature: 2.1 },
+    };
+    expect(() => validateModelJson(config)).toThrow(ConfigError);
+    try {
+      validateModelJson(config);
+    } catch (error) {
+      expect((error as ConfigError).code).toBe('INVALID_TEMPERATURE');
+    }
+  });
+
+  it('should accept temperature at boundary 0', () => {
+    const config = {
+      ...validConfig,
+      llmParams: { ...validConfig.llmParams, temperature: 0 },
+    };
+    expect(() => validateModelJson(config)).not.toThrow();
+  });
+
+  it('should accept temperature at boundary 2', () => {
+    const config = {
+      ...validConfig,
+      llmParams: { ...validConfig.llmParams, temperature: 2 },
+    };
+    expect(() => validateModelJson(config)).not.toThrow();
+  });
+
+  it('should throw for missing llmParams.maxTokens', () => {
+    const config = {
+      ...validConfig,
+      llmParams: { ...validConfig.llmParams, maxTokens: undefined },
+    };
+    expect(() => validateModelJson(config)).toThrow(ConfigError);
+    expect(() => validateModelJson(config)).toThrow(/maxTokens/);
+  });
+
+  it('should throw for maxTokens <= 0', () => {
+    const config = {
+      ...validConfig,
+      llmParams: { ...validConfig.llmParams, maxTokens: 0 },
+    };
+    expect(() => validateModelJson(config)).toThrow(ConfigError);
+    try {
+      validateModelJson(config);
+    } catch (error) {
+      expect((error as ConfigError).code).toBe('INVALID_MAX_TOKENS');
+    }
+  });
+
+  it('should throw for negative maxTokens', () => {
+    const config = {
+      ...validConfig,
+      llmParams: { ...validConfig.llmParams, maxTokens: -100 },
+    };
+    expect(() => validateModelJson(config)).toThrow(ConfigError);
+  });
+
+  it('should throw for non-integer maxTokens', () => {
+    const config = {
+      ...validConfig,
+      llmParams: { ...validConfig.llmParams, maxTokens: 100.5 },
+    };
+    expect(() => validateModelJson(config)).toThrow(ConfigError);
+  });
+
+  it('should accept maxTokens = 1', () => {
+    const config = {
+      ...validConfig,
+      llmParams: { ...validConfig.llmParams, maxTokens: 1 },
+    };
+    expect(() => validateModelJson(config)).not.toThrow();
+  });
+
+  it('should ignore extra fields', () => {
+    const config = {
+      ...validConfig,
+      extraField: 'ignored',
+      apiConfig: {
+        ...validConfig.apiConfig,
+        extraNested: 'also ignored',
+      },
+    };
+    expect(() => validateModelJson(config)).not.toThrow();
+  });
+});
+
+describe('validateApiKey', () => {
+  it('should pass for valid API key', () => {
+    expect(() => validateApiKey('sk-test-123', 'OPENAI_API_KEY')).not.toThrow();
+  });
+
+  it('should throw for undefined API key', () => {
+    expect(() => validateApiKey(undefined, 'OPENAI_API_KEY')).toThrow(ConfigError);
+    try {
+      validateApiKey(undefined, 'OPENAI_API_KEY');
+    } catch (error) {
+      expect((error as ConfigError).code).toBe('MISSING_API_KEY');
+      expect((error as ConfigError).context?.envVarName).toBe('OPENAI_API_KEY');
+    }
+  });
+
+  it('should throw for empty API key', () => {
+    expect(() => validateApiKey('', 'OPENAI_API_KEY')).toThrow(ConfigError);
+    try {
+      validateApiKey('', 'OPENAI_API_KEY');
+    } catch (error) {
+      expect((error as ConfigError).code).toBe('EMPTY_API_KEY');
+    }
+  });
+
+  it('should throw for whitespace-only API key', () => {
+    expect(() => validateApiKey('   ', 'OPENAI_API_KEY')).toThrow(ConfigError);
+    try {
+      validateApiKey('   ', 'OPENAI_API_KEY');
+    } catch (error) {
+      expect((error as ConfigError).code).toBe('EMPTY_API_KEY');
+    }
+  });
+
+  it('should include env var name in error message', () => {
+    try {
+      validateApiKey(undefined, 'MY_CUSTOM_KEY');
+    } catch (error) {
+      expect((error as ConfigError).message).toContain('MY_CUSTOM_KEY');
+    }
+  });
+});

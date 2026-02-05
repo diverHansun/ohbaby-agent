@@ -1,0 +1,10 @@
+.git
+.husky
+node_modules
+dist
+coverage
+*.md
+*.json
+*.yaml
+*.yml
+*.lock

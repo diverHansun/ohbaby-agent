@@ -1,0 +1,30 @@
+/**
+ * Message 模块
+ *
+ * 负责管理对话消息的类型定义、创建、存储和查询。
+ *
+ * 主要功能：
+ * - 消息和 Part 的 CRUD 操作
+ * - 消息格式转换（toModelMessages）
+ * - 事件广播
+ *
+ * 详见：docs/core/message/
+ */
+
+// 导出类型定义
+export * from './types'
+
+// 导出工厂函数
+export * from './factory'
+
+// 导出转换函数
+export * from './converter'
+
+// 导出事件类型
+export * from './events'
+
+// 导出 ID 生成器
+export * from './idGenerator'
+
+// 导出 MessageManager（需实现后启用）
+// export { createMessageManager, type MessageManager } from './manager'
