@@ -1,23 +1,8 @@
-# AppContext 应用状态
+# AppContext 已拆分
 
-> 待撰写：AppContext 详细设计
+本 Context 已按 State/Action 分离原则拆分为两个独立 Context：
 
-## 职责
+- [AppStateContext](./app-state-context.md) -- 应用只读状态（视图、弹窗队列、加载阶段）
+- [AppActionsContext](./app-actions-context.md) -- 应用状态变更动作（导航、弹窗操作、加载控制）
 
-管理应用级状态：
-
-- 当前视图（HomeView / ChatView / HelpView）
-- 对话框状态
-- 全局加载状态
-
-## State 定义
-
-待补充...
-
-## Actions
-
-待补充...
-
-## 使用示例
-
-待补充...
+拆分理由见 [contexts/index.md](./index.md) 第二章"设计原则"。

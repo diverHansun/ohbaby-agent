@@ -162,7 +162,7 @@ MessageList (容器 + 虚拟化)
 - `SessionDialog`：会话选择（普通优先级）
 - `ConfirmDialog`：通用确认（普通优先级）
 
-### D8: 键盘快捷键
+### D8: 键盘快捷键与鼠标交互
 
 统一处理全局键盘快捷键：
 - `Ctrl+C`（双击）：中断当前执行
@@ -171,20 +171,31 @@ MessageList (容器 + 虚拟化)
 - `Tab`：命令自动补全
 - `Esc`：关闭弹窗 / 返回上一视图
 
+通过 MouseContext 启用终端鼠标报告（SGR 鼠标协议）：
+- 鼠标滚轮：在消息列表中上下滚动
+- 鼠标点击：可与弹窗或交互元素交互
+
+键盘事件和鼠标事件均采用 Pub/Sub 订阅模式，不触发全局重渲染。
+
 ### D9: 加载状态
 
-显示加载状态，参考 gemini-cli 风格：
+在 Prompt 上方显示加载指示器，使用剑图标作为品牌标识：
 
 ```
-等待 LLM 响应时：
-✦ Thinking...
+lifecycle 执行中，等待 LLM 响应：
+[spinner] [sword] Thinking...
 
 工具执行中：
-⠋ Executing tool: read_file
+[spinner] [sword] Executing: read_file
 
 流式响应时：
-直接显示流式内容，无额外提示
+直接显示流式内容，加载指示器保持 Thinking 状态
+
+lifecycle 结束后：
+加载指示器隐藏
 ```
+
+加载状态由 Bus 事件驱动（Lifecycle.Event.Started/Completed、ToolScheduler.Event.ExecutionStarted/Completed），不需要人工状态机。
 
 ### D10: 事件订阅
 
@@ -239,7 +250,7 @@ MVP 阶段只使用单一主题，不提供主题切换功能。但通过 ThemeM
 
 1. **依赖 Ink 框架**：使用 React + Ink 构建终端 UI
 2. **依赖 Bus 模块**：通过 Bus 订阅事件实现响应式更新
-3. **依赖 Context 机制**：使用 React Context 管理全局状态
+3. **依赖 Context 机制**：使用 React Context 管理全局状态（6 个 Context：AppState、AppActions、Config、Session、Keypress、Mouse）
 4. **单一主题**：不支持主题切换，但预留扩展接口
 5. **虚拟化列表**：消息列表必须使用虚拟化，确保性能
 
@@ -248,6 +259,7 @@ MVP 阶段只使用单一主题，不提供主题切换功能。但通过 ThemeM
 1. 终端支持 ANSI 颜色和基本的终端控制序列
 2. 终端宽度足够显示状态栏内容（至少 80 列）
 3. Bus 事件发布是同步的，UI 能及时响应
+4. 终端支持 SGR 鼠标协议（`\x1b[?1000h\x1b[?1006h`），用于启用鼠标报告
 
 ---
 
@@ -307,3 +319,5 @@ MVP 阶段只使用单一主题，不提供主题切换功能。但通过 ThemeM
 - [x] 新增：Layout 层职责已明确
 - [x] 新增：Tab 自动补全已加入
 - [x] 新增：术语说明已添加
+- [x] 更新：D8 扩展为键盘快捷键与鼠标交互（SGR 鼠标协议）
+- [x] 更新：约束第 3 条明确 6 个 Context；假设第 4 条新增 SGR 鼠标支持假设

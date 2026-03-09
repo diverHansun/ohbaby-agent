@@ -210,21 +210,12 @@ interface HistoryItem {
 }
 
 /**
- * 自动补全状态
- */
-interface CompletionState {
-  suggestions: string[]       // 补全建议列表
-  selectedIndex: number       // 当前选中索引
-  prefix: string              // 输入前缀
-  visible: boolean            // 是否显示补全
-}
-
-/**
  * 自动补全建议（Inline 模式）
+ * 在光标后显示单个灰色建议，按 Tab 接受
  */
 interface InlineCompletion {
-  text: string                // 补全文本
-  displayText: string         // 显示文本（灰色）
+  text: string                // 接受补全后的完整文本
+  displayText: string         // 显示在光标后的灰色文本
 }
 ```
 
@@ -288,21 +279,25 @@ type ToolStatusColor = {
 }
 
 /**
- * 加载状态（增强版，参考 gemini-cli）
+ * 加载状态（简化版，事件驱动）
+ * 由 Lifecycle 和 ToolScheduler 的 Bus 事件驱动，无需人工状态机
  */
 interface LoadingState {
-  isLoading: boolean                   // 是否加载中
-  phase: 'idle' | 'thinking' | 'executing' | 'streaming'  // 加载阶段
-  message?: string                     // 加载提示文本
-  toolName?: string                    // 当 phase = 'executing' 时显示工具名
-  spinnerType: 'dots' | 'line'         // Spinner 类型
+  isActive: boolean                    // lifecycle 是否正在执行
+  activeToolName: string | null        // 当前执行的工具名（来自 ToolScheduler 事件）
 }
 
 /**
- * 加载状态显示
- * - thinking: "✦ Thinking..."
- * - executing: "⠋ Executing tool: {toolName}"
- * - streaming: 无提示，直接显示流式内容
+ * 加载状态显示规则：
+ * - isActive=false                    → 不渲染
+ * - isActive=true, activeToolName=null → "[spinner] [sword] Thinking..."
+ * - isActive=true, activeToolName=xxx  → "[spinner] [sword] Executing: xxx"
+ *
+ * 事件驱动链路：
+ * - Lifecycle.Event.Started           → isActive = true
+ * - ToolScheduler.Event.ExecutionStarted   → activeToolName = toolName
+ * - ToolScheduler.Event.ExecutionCompleted → activeToolName = null
+ * - Lifecycle.Event.Completed         → isActive = false, activeToolName = null
  */
 ```
 
@@ -342,14 +337,20 @@ function formatTokenDisplay(usage: StatusBarData['contextUsage']): string {
 
 ```typescript
 /**
- * AppContext 值类型
+ * AppStateContext 值类型（只读状态）
  */
-interface AppContextValue {
+interface AppStateContextValue {
   view: ViewState             // 视图状态
   dialog: DialogState         // 弹窗队列状态
   loading: LoadingState       // 加载状态
+}
 
-  // Actions
+/**
+ * AppActionsContext 值类型（动作，引用永不变化）
+ * 通过 useMemo([]) 稳定化，不会触发消费者重渲染
+ */
+interface AppActionsContextValue {
+  // 视图操作
   navigateTo: (view: ViewType) => void
   goBack: () => void
 
@@ -357,53 +358,83 @@ interface AppContextValue {
   enqueueDialog: (request: Omit<DialogRequest, 'id'>) => string  // 返回 ID
   closeCurrentDialog: () => void
 
+  // 加载状态
   setLoading: (state: Partial<LoadingState>) => void
 }
 
 /**
- * ConfigContext 值类型
+ * ConfigContext 值类型（只读，由 config 模块驱动）
  */
 interface ConfigContextValue {
   modelName: string           // 当前模型
   mode: 'ask' | 'plan' | 'agent'
   agentState: 'ask-before-edit' | 'edit-automatically'
   workingDirectory: string
-
-  // 由外部模块更新，UI 只读
 }
 
 /**
  * SessionContext 值类型
+ * 消息列表使用 useRef 存储（不触发重渲染），messageVersion 驱动 MessageList 刷新
  */
 interface SessionContextValue {
   sessionId: string | null    // 当前会话 ID
   sessionName: string | null  // 会话名称
-  messages: MessageWithParts[] // 消息列表（缓存）
-  tokenCount: number          // Token 使用量
+  messagesRef: React.MutableRefObject<MessageWithParts[]>  // 不触发重渲染
+  messageVersion: number      // 消息数量变化时递增，触发 MessageList 刷新
+  tokenUsage: TokenUsage      // Token 使用量（来自 Context.Event.UsageUpdated）
 
   // Actions
-  refreshMessages: () => Promise<void>
+  refreshMessages: () => void
   clearMessages: () => void
 }
 
 /**
- * KeypressContext 值类型
+ * Token 使用量
+ */
+interface TokenUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+}
+
+/**
+ * KeypressContext 值类型（Pub/Sub 模式，不触发重渲染）
  */
 interface KeypressContextValue {
-  lastKey: KeyInfo | null     // 最后按下的键
-  registerShortcut: (key: string, handler: () => void) => void
-  unregisterShortcut: (key: string) => void
+  subscribe: (handler: (key: KeyInfo) => void) => () => void   // 返回取消订阅函数
+  unsubscribe: (handler: (key: KeyInfo) => void) => void
 }
 
 /**
  * 按键信息
  */
 interface KeyInfo {
-  name: string                // 键名
-  ctrl: boolean               // Ctrl 修饰
-  shift: boolean              // Shift 修饰
-  alt: boolean                // Alt 修饰
-  meta: boolean               // Meta 修饰
+  name: string                // 键名（如 'return', 'escape', 'up', 'a' 等）
+  ctrl: boolean               // Ctrl 修饰键
+  shift: boolean              // Shift 修饰键
+  alt: boolean                // Alt 修饰键
+  meta: boolean               // Meta 修饰键
+  sequence: string            // 原始转义序列
+}
+
+/**
+ * MouseContext 值类型（Pub/Sub 模式，不触发重渲染）
+ */
+interface MouseContextValue {
+  subscribe: (handler: (event: MouseEvent) => void) => () => void
+  unsubscribe: (handler: (event: MouseEvent) => void) => void
+}
+
+/**
+ * 鼠标事件
+ */
+interface MouseEvent {
+  type: 'click' | 'scroll' | 'move'
+  x: number                   // 列（1-based）
+  y: number                   // 行（1-based）
+  button?: number             // 鼠标键（0=左键, 1=中键, 2=右键）
+  direction?: 'up' | 'down'  // scroll 时的方向
 }
 ```
 
@@ -540,10 +571,11 @@ dequeue() → 显示下一个或回到空闲
 
 | 数据 | 创建者 | 管理者 | 说明 |
 |------|--------|--------|------|
-| ViewState | AppContext | AppContext | UI 层内部状态 |
-| DialogState | AppContext | AppContext | UI 层内部状态，队列模式 |
+| ViewState | AppStateContext | AppStateContext | UI 层内部状态 |
+| DialogState | AppStateContext | AppStateContext | UI 层内部状态，队列模式 |
 | VirtualizedState | MessageList | MessageList | 组件内部状态 |
-| messages | message 模块 | SessionContext | 从 message 模块获取，缓存在 Context |
+| messages | message 模块 | SessionContext | 从 message 模块获取，存于 messagesRef |
+| messageVersion | SessionContext | SessionContext | 消息数量变化计数器，驱动 MessageList 刷新 |
 | config | config 模块 | ConfigContext | 从 config 模块获取，只读 |
 
 ---
@@ -558,5 +590,11 @@ dequeue() → 显示下一个或回到空闲
 - [x] 新增：弹窗队列类型已定义
 - [x] 新增：虚拟化相关类型已定义
 - [x] 新增：加载状态增强已定义
-- [x] 新增：自动补全类型已定义
+- [x] 新增：自动补全类型已定义（Inline 模式，已删除旧下拉式 CompletionState）
 - [x] 新增：术语说明已添加
+- [x] 更新：AppContextValue 已拆分为 AppStateContextValue + AppActionsContextValue
+- [x] 更新：SessionContextValue 使用 messagesRef + messageVersion（高性能设计）
+- [x] 更新：KeypressContextValue 改为 Pub/Sub subscribe/unsubscribe 模式
+- [x] 更新：新增 MouseEvent 和 MouseContextValue 类型定义
+- [x] 更新：TokenUsage 独立类型已定义
+- [x] 更新：数据归属表反映新的 AppStateContext 拆分

@@ -31,10 +31,14 @@ ui 模块采用 **React + Ink** 构建终端用户界面，内部分为以下子
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    Context Providers                        │
-│  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐   │
-│  │   App     │ │  Config   │ │  Session  │ │ Keypress  │   │
-│  │  Context  │ │  Context  │ │  Context  │ │  Context  │   │
-│  └───────────┘ └───────────┘ └───────────┘ └───────────┘   │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │
+│  │  Config  │ │ Keypress │ │  Mouse   │ │ AppState │       │
+│  │ Context  │ │ Context  │ │ Context  │ │ Context  │       │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘       │
+│  ┌──────────┐ ┌──────────┐                                  │
+│  │ Session  │ │AppActions│                                  │
+│  │ Context  │ │ Context  │                                  │
+│  └──────────┘ └──────────┘                                  │
 └─────────────────────────────────────────────────────────────┘
                             │
                             ▼
@@ -70,8 +74,12 @@ ui 模块采用 **React + Ink** 构建终端用户界面，内部分为以下子
 ┌─────────────────────────────────────────────────────────────┐
 │                        Hooks                                │
 │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐           │
-│  │useInput │ │useStream│ │useKey   │ │useAuto  │           │
-│  │         │ │         │ │  board  │ │  Scroll │           │
+│  │useStream│ │useKey   │ │useKey   │ │useMouse │           │
+│  │         │ │  press  │ │  board  │ │         │           │
+│  └─────────┘ └─────────┘ └─────────┘ └─────────┘           │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐           │
+│  │useInput │ │useHis   │ │useAuto  │ │usePerm  │           │
+│  │         │ │  tory   │ │  Scroll │ │ ission  │           │
 │  └─────────┘ └─────────┘ └─────────┘ └─────────┘           │
 └─────────────────────────────────────────────────────────────┘
                             │
@@ -101,10 +109,12 @@ ui 模块采用 **React + Ink** 构建终端用户界面，内部分为以下子
 - 与 React 生态天然契合
 
 **应用**：
-- `AppContext`：视图状态、弹窗状态
-- `ConfigContext`：模型、模式等配置
-- `SessionContext`：当前会话、消息缓存
-- `KeypressContext`：键盘输入状态
+- `AppStateContext`：视图状态、弹窗队列、加载状态（只读）
+- `AppActionsContext`：视图跳转、弹窗入队、加载控制（动作）
+- `ConfigContext`：模型、模式等配置（只读）
+- `SessionContext`：当前会话、消息缓存（含 messageVersion）
+- `KeypressContext`：键盘输入 Pub/Sub 订阅
+- `MouseContext`：鼠标事件 Pub/Sub 订阅
 
 #### Pattern 2: Custom Hook Pattern（自定义 Hook 模式）
 
@@ -116,11 +126,14 @@ ui 模块采用 **React + Ink** 构建终端用户界面，内部分为以下子
 - 保持组件简洁
 
 **应用**：
-- `useInput`：输入处理和命令分流
-- `useStream`：订阅 Bus 事件，处理流式响应
-- `useKeyboard`：全局键盘快捷键
-- `useHistory`：输入历史导航
-- `useAutoScroll`：自动滚动控制
+- `useStream`：订阅 Bus 事件，处理流式响应，驱动 SessionContext 更新
+- `useKeypress`：封装 KeypressContext 订阅，供组件级键盘监听使用
+- `useMouse`：封装 MouseContext 订阅，供组件级鼠标监听使用
+- `useInput`：输入处理和命令分流（slash 命令 vs 普通对话）
+- `useKeyboard`：全局键盘快捷键（Ctrl+C 双击中断、Shift+Tab 切换模式等）
+- `useHistory`：输入历史导航（上/下箭头键）
+- `useAutoScroll`：自动滚动控制（新消息到达时滚动到底部）
+- `usePermission`：权限请求事件 → 弹窗入队
 
 #### Pattern 3: Compound Component Pattern（复合组件模式）
 
@@ -232,9 +245,10 @@ src/ui/
 │
 ├── views/                      # 视图层
 │   ├── index.ts               # 视图导出
-│   ├── HomeView.tsx           # 首页视图
-│   ├── ChatView.tsx           # 对话视图
-│   └── HelpView.tsx           # 帮助视图
+│   ├── Router.tsx             # 视图路由（读 AppStateContext.view.current）
+│   ├── HomeView.tsx           # 首页视图（Logo + 引导提示）
+│   ├── ChatView.tsx           # 对话视图（MessageList）
+│   └── HelpView.tsx           # 帮助视图（双栏：快捷键 + 命令）
 │
 ├── components/                 # UI 组件
 │   ├── index.ts               # 组件导出
@@ -275,6 +289,8 @@ src/ui/
 │   │   ├── Collapsible.tsx    # 可折叠容器
 │   │   ├── MaxSizedBox.tsx    # 高度限制容器
 │   │   ├── Spinner.tsx        # 加载动画
+│   │   ├── LoadingIndicator.tsx   # 加载指示器（剑图标 + Spinner）
+│   │   ├── TipsBlock.tsx      # 首页引导提示
 │   │   ├── Typewriter.tsx     # 打字机效果
 │   │   └── DiffRenderer.tsx   # Diff 渲染器
 │   │
@@ -283,19 +299,23 @@ src/ui/
 │
 ├── context/                    # React Context
 │   ├── index.ts               # Context 导出
-│   ├── AppContext.tsx         # 应用状态 Context
+│   ├── AppStateContext.tsx    # 应用只读状态 Context（view/dialog/loading）
+│   ├── AppActionsContext.tsx  # 应用动作 Context（navigateTo/enqueueDialog 等）
 │   ├── ConfigContext.tsx      # 配置 Context
-│   ├── SessionContext.tsx     # 会话 Context
-│   └── KeypressContext.tsx    # 键盘输入 Context
+│   ├── SessionContext.tsx     # 会话 Context（消息缓存 + messageVersion）
+│   ├── KeypressContext.tsx    # 键盘输入 Context（Pub/Sub）
+│   └── MouseContext.tsx       # 鼠标事件 Context（Pub/Sub）
 │
 ├── hooks/                      # 自定义 Hooks
 │   ├── index.ts               # Hooks 导出
-│   ├── useInput.ts            # 输入处理
-│   ├── useStream.ts           # 流式响应订阅
-│   ├── useKeyboard.ts         # 键盘快捷键
-│   ├── useHistory.ts          # 输入历史
-│   ├── useAutoScroll.ts       # 自动滚动
-│   └── usePermission.ts       # 权限弹窗状态
+│   ├── useStream.ts           # 流式响应订阅（App.tsx，唯一）
+│   ├── useKeypress.ts         # 键盘事件订阅封装
+│   ├── useMouse.ts            # 鼠标事件订阅封装
+│   ├── useInput.ts            # 输入处理和命令分流（Prompt，唯一）
+│   ├── useKeyboard.ts         # 全局键盘快捷键（App.tsx，唯一）
+│   ├── useHistory.ts          # 输入历史导航（Prompt，唯一）
+│   ├── useAutoScroll.ts       # 自动滚动控制（MessageList，唯一）
+│   └── usePermission.ts       # 权限弹窗入队（DialogManager，唯一）
 │
 └── styles/                     # 样式定义
     ├── index.ts               # 样式导出
@@ -329,18 +349,22 @@ src/ui/
 // 职责：组装 Provider 树和布局
 export function App() {
   return (
-    <AppProvider>
-      <ConfigProvider>
-        <SessionProvider>
-          <KeypressProvider>
-            <DefaultLayout>
-              <Router />        {/* 根据视图状态渲染 View */}
-            </DefaultLayout>
-            <DialogManager />   {/* 弹窗队列管理 */}
-          </KeypressProvider>
-        </SessionProvider>
-      </ConfigProvider>
-    </AppProvider>
+    <ConfigProvider>          {/* 最外层：无依赖，低频变化 */}
+      <KeypressProvider>      {/* 依赖 stdin，无 Context 依赖 */}
+        <MouseProvider>       {/* 依赖 stdin，与 Keypress 同层 */}
+          <AppStateProvider>  {/* 依赖 Keypress/Mouse（用于快捷键检测） */}
+            <SessionProvider> {/* 依赖 AppState（需要 sessionId） */}
+              <AppActionsProvider> {/* 最内层：需要读 AppState + Session */}
+                <DefaultLayout>
+                  <Router />        {/* 根据视图状态渲染 View */}
+                </DefaultLayout>
+                {/* DialogManager 在 DefaultLayout 内部渲染，位于 Prompt 上方 */}
+              </AppActionsProvider>
+            </SessionProvider>
+          </AppStateProvider>
+        </MouseProvider>
+      </KeypressProvider>
+    </ConfigProvider>
   );
 }
 ```
@@ -357,6 +381,8 @@ export function DefaultLayout({ children }) {
       <Box flexGrow={1}>
         {children}              {/* MainContent 区域 */}
       </Box>
+      <DialogManager />         {/* 弹窗队列管理（与 LoadingIndicator 互斥显示） */}
+      <LoadingIndicator />      {/* 加载指示器（条件渲染） */}
       <Prompt />                {/* 固定输入框 */}
       <StatusBar />             {/* 固定状态栏 */}
     </Box>
@@ -518,15 +544,21 @@ MVP 阶段不支持主题切换，但通过 ThemeManager 预留扩展接口。
 
 **理由**：参考 gemini-cli 的 DefaultAppLayout 设计
 
-#### 权衡 4: Context 数量
+#### 权衡 4: Context 数量与分工
 
-**选择**：使用 4 个独立 Context 而非 1 个大 Context
+**选择**：使用 6 个独立 Context 而非 1 个大 Context
 
 **代价**：Provider 嵌套层级增加
 
-**收益**：状态更新粒度更细，避免不必要的重渲染
+**收益**：
+- 状态更新粒度更细，避免不必要的重渲染
+- 读写分离：AppStateContext（只读）+ AppActionsContext（动作），actions 引用永不变化
+- 输入层与业务层解耦：KeypressContext / MouseContext 仅提供事件流
 
-**理由**：Config 变化频率低，Session 变化频率高，分开管理可优化性能
+**理由**：
+- Config 变化频率极低，Session 消息频繁更新，分开管理可优化性能
+- State/Actions 分离参考 gemini-cli 的 UIStateContext + UIActionsContext 设计
+- Keypress/Mouse 使用 Pub/Sub 订阅模式，不会因每次按键触发全局重渲染
 
 ---
 
@@ -541,3 +573,6 @@ MVP 阶段不支持主题切换，但通过 ThemeManager 预留扩展接口。
 - [x] 新增：类型路由模式已说明
 - [x] 新增：弹窗队列模式已说明
 - [x] 新增：虚拟化模式已说明
+- [x] 更新：AppContext 已拆分为 AppStateContext + AppActionsContext（6 个 Context）
+- [x] 更新：hooks 目录已包含全部 8 个 Hook（含 useKeypress、useMouse）
+- [x] 更新：Provider 嵌套顺序已按依赖关系调整
