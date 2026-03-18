@@ -100,7 +100,137 @@ ToolScheduler (内部)
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 2.3 获取可用工具流程
+### 2.3 Wave-Based 批量执行流程
+
+`executeBatch()` 接收一个 batch（来自 LLM 单次响应的全部工具调用），按 wave 策略分组并行执行。
+
+**Wave 分组规则**：
+- **可并行类别**（`readonly` / `network`）：归入同一 wave，内部受读写互斥锁约束（并行上限 5）
+- **串行类别**（`write` / `dangerous`）：每个独占一个 wave，必须等前一个 wave 完全结束
+- **不参与 wave 分组的类别**（policy 通过后立即执行，不阻塞 wave）：
+  - `memory`：始终可并行，不受读写锁限制
+  - `subagent`：受独立计数器约束（≤ 3），但不阻塞其他 wave 的执行
+
+> **subagent 不参与 wave 的设计理由**：subagent 是长时间运行的独立任务（可能数分钟），与 readonly 工具（通常毫秒到秒级）混在同一 wave 会导致后续 write wave 被不必要地阻塞。且同一 batch 内 write 工具不可能依赖 subagent 的结果（因为 LLM 此时还未看到 subagent 的返回值），类似 deepagentsjs 的独立 agent 设计。
+
+**Wave 保持原始顺序，不重排序**：wave 按 calls 数组的原始顺序遍历分组。虽然重排序可能提高并发度（将分散的 readonly 工具合并），但 LLM 返回的顺序可能蕾含隐式的执行依赖，保持顺序是更安全的选择。
+
+```
+executeBatch([call_A, call_B, call_C, call_D, call_E, call_F])
+  │
+  ▼
+┌──────────────────────────────────────────────────────────┐
+│  Step 1: 对 batch 中每个 call 并行执行 policy 检查        │
+│                                                          │
+│  规则：                                                    │
+│  - 并行发出所有 policy check，等待全部完成后再分组     │
+│  - 包含用户确认（ASK 决策）的等待：                      │
+│    · 多个 ASK 请求通过 Permission 串行确认（一次一个）   │
+│    · 用户拒绝的 call 状态设为 rejected，不影响其他   │
+│    · 超时未响应的 call 状态设为 cancelled            │
+│  - 被 reject/cancel 的 calls 不参与 wave 分组          │
+└──────────────────────────────────────────────────────────┘
+  │
+  ▼
+┌──────────────────────────────────────────────────────────┐
+│  Step 1.5: 分离不参与 wave 的类别                     │
+│                                                          │
+│  从已通过 policy 的 calls 中分离：                        │
+│  - memory 类别 → 立即执行（不等 wave）                   │
+│  - subagent 类别 → 立即启动（受独立计数器 ≤3 约束）    │
+│  - 其余 calls 进入 wave 分组                             │
+└──────────────────────────────────────────────────────────┘
+  │
+  ▼
+┌──────────────────────────────────────────────────────────┐
+│  Step 2: 按 category 分 wave                             │
+│                                                          │
+│  输入示例：                                               │
+│    call_A: readonly   ┐                                  │
+│    call_B: readonly   ├─→ Wave 1（可并行，Promise.all）  │
+│    call_C: network    ┘                                  │
+│    call_D: write      ──→ Wave 2（串行，独占）            │
+│    call_E: readonly   ──→ Wave 3（可并行，恢复并行）      │
+│                                                          │
+│  已分离：                                                  │
+│    call_F: subagent   ──→ 立即启动（不参与 wave）          │
+└──────────────────────────────────────────────────────────┘
+  │
+  ▼
+┌──────────────────────────────────────────────────────────┐
+│  Step 3: 逐 wave 执行 + 并行收集 memory/subagent 结果   │
+│                                                          │
+│  Wave 1 → Promise.all([call_A, call_B, call_C])         │
+│    ├─ call_A(readonly): acquire readingCount++           │
+│    ├─ call_B(readonly): acquire readingCount++           │
+│    └─ call_C(network):  acquire readingCount++           │
+│    → 等待全部完成后进入 Wave 2                            │
+│                                                          │
+│  Wave 2 → 串行执行 call_D(write)                        │
+│    → 等待完成后进入 Wave 3                               │
+│                                                          │
+│  Wave 3 → Promise.all([call_E])                         │
+│    → 全部完成                                              │
+│                                                          │
+│  → 等待 memory/subagent 完成（如尚未完成）               │
+│  → 收集所有结果，按原始 calls 顺序返回                    │
+└──────────────────────────────────────────────────────────┘
+  │
+  ▼
+返回 ToolCallResult[]（顺序与输入 calls 一致）
+```
+
+**memory 和 subagent 工具的特殊处理**：
+
+```
+memory 和 subagent 不参与 wave 分组，在 policy 检查通过后立即执行：
+  executeBatch([memory_add, task_research, write_file, read_file])
+    │
+    ├─ memory_add    → 立即执行，不等 wave 分组
+    ├─ task_research → 立即启动，受独立计数器约束
+    ├─ read_file     → Wave 1
+    └─ write_file    → Wave 2（等 Wave 1 完成）
+```
+
+**wave 拆分算法**（伪代码）：
+
+```typescript
+function splitIntoWaves(calls: ToolCall[]): ToolCall[][] {
+  const waves: ToolCall[][] = []
+  let currentWave: ToolCall[] = []
+
+  for (const call of calls) {
+    if (call.category === 'memory' || call.category === 'subagent') {
+      continue  // memory 和 subagent 单独处理，不入 wave
+    }
+
+    const isParallelizable =
+      call.category === 'readonly' ||
+      call.category === 'network'
+
+    if (isParallelizable) {
+      // 如果当前 wave 是串行类别，先结束它
+      if (currentWave.length > 0 && !isParallelizableCategory(currentWave[0].category)) {
+        waves.push(currentWave)
+        currentWave = []
+      }
+      currentWave.push(call)
+    } else {
+      // write/dangerous：每个独占一个 wave
+      if (currentWave.length > 0) {
+        waves.push(currentWave)
+      }
+      waves.push([call])
+      currentWave = []
+    }
+  }
+
+  if (currentWave.length > 0) waves.push(currentWave)
+  return waves
+}
+```
+
+### 2.4 获取可用工具流程
 
 ```
 Lifecycle                ToolScheduler              Policy         AgentManager
@@ -193,7 +323,7 @@ ToolScheduler                     Bus                        UI
 
 #### ToolScheduler.executeBatch()
 
-**语义**：批量执行工具调用
+**语义**：批量执行工具调用（来自 LLM 单次响应的所有工具调用）
 
 **输入**：
 ```typescript
@@ -202,13 +332,56 @@ ToolScheduler                     Bus                        UI
 }
 ```
 
-**输出**：Promise<ToolCallResult[]>
+**输出**：Promise<ToolCallResult[]>（顺序与输入 calls 一致）
 
 **异步特性**：异步，所有工具执行完成后 resolve
 
-**并发行为**：
-- 读操作可并行执行（最多5个）
-- 写操作串行执行
+**Wave-based 并发行为**：
+
+1. **Policy 检查**：对 batch 中所有 calls 并行发出 policy check，等待全部完成（含用户确认）后再分组
+   - 需要用户确认的工具（Policy 返回 ASK）通过 Permission 模块串行确认（一次一个确认框）
+   - 用户拒绝的 call 状态设为 `rejected`，不参与 wave 分组
+   - 超时未响应的 call 状态设为 `cancelled`，不参与 wave 分组
+   - 设计理由：LLM 同一次响应中的 tool calls 可能存在依赖关系，全阻塞等待保证语义正确性（与 gemini-cli 一致）
+
+2. **分离不参与 wave 的类别**：
+   - `memory`：policy 通过后立即执行，不受读写锁限制
+   - `subagent`：policy 通过后立即启动，受独立计数器约束（≤3）
+
+3. **分组**：将剩余 calls 按 category 拆分为多个 wave
+   - `readonly`/`network`：归入同一 wave，内部 `Promise.all` 并行执行
+   - `write`/`dangerous`：每个独占一个 wave，等上一 wave 全部完成后才执行
+
+4. **执行**：逐 wave 顺序执行，wave 内并行
+   - wave 内每个工具的执行仍经过 ConcurrencyController 的 `acquire/release`（见下文两层机制说明）
+   - `readonly`/`network` 受读写互斥锁约束，并行上限 5
+
+5. **结果聚合**：等待所有 wave + memory + subagent 全部完成，按原始 calls 顺序返回结果
+
+**调用方**：lifecycle 模块（TurnProcessor），将 LLM 返回的一批 tool calls 整体传入
+
+**`executeBatch()` 与 `ConcurrencyController` 的两层关系**：
+
+```
+executeBatch()  [编排层/Wave层]
+  │  将 calls 拆分为 wave[]
+  │  逐 wave 顺序执行，wave 内 Promise.all
+  │  保证：写操作不与其他操作同 wave
+  │
+  │  wave 内每个 call
+  ▼
+ConcurrencyController  [资源层/锁层]
+  │  acquire(category) → 拿锁
+  │  执行工具
+  │  release(category) → 释放锁 → processQueue()
+  │  保证：readonly ≤5, subagent ≤3, 读写互斥
+```
+
+- **为什么两层都需要？**
+  - wave 层解决：同一 batch 内读写的整体排序（宏观层面）
+  - CC 层解决：跨 batch 的并发资源控制（微观层面）——wave 内若有 6 个 readonly 工具，CC 会限制只有 5 个并行
+  - 单独用 CC 也能保证安全性，但会导致写操作饥饿——不断有 readonly batch 提交时，写操作可能长时间排不上
+- **单工具 `execute()`**：跳过 wave 层，直接走 ConcurrencyController
 
 ---
 

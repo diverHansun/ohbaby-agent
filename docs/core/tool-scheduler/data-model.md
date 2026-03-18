@@ -8,15 +8,18 @@
 
 ### 1.1 ToolCategory（工具类别）
 
-工具根据其操作特性分为五类：
+工具根据其操作特性分为六类：
 
 | 类别 | 说明 | 并发特性 | 示例工具 |
 |------|------|----------|----------|
-| readonly | 只读操作 | 可并行（最多5个） | read, glob, grep, list |
-| write | 写入操作 | 串行执行 | write, edit |
+| readonly | 只读操作 | 可并行（最多5个） | read, glob, grep, list；MCP工具（readOnlyHint=true） |
+| write | 写入操作 | 串行执行 | write, edit；MCP工具（readOnlyHint=false/未设置） |
 | dangerous | 危险操作 | 串行执行 | bash |
 | network | 网络操作 | 可并行（最多5个） | web_fetch, web_search（来自 Extension） |
 | memory | 记忆操作 | 可并行（不受读写锁限制） | memory_list, memory_add, memory_update, memory_remove |
+| subagent | 子代理操作 | 可并行（最多3个，独立计数器） | task |
+
+**MCP工具分类规则**：通过 `annotations.readOnlyHint` 在工具注册时推断，`true` → `readonly`，其余 → `write`。
 
 ### 1.2 ToolSource（工具来源）
 
@@ -65,7 +68,7 @@
 
 ```typescript
 // 工具类别
-type ToolCategory = 'readonly' | 'write' | 'dangerous' | 'network' | 'memory'
+type ToolCategory = 'readonly' | 'write' | 'dangerous' | 'network' | 'memory' | 'subagent'
 
 // 工具来源
 type ToolSource = 'core' | 'module' | 'extension' | 'mcp'
@@ -122,8 +125,17 @@ interface ToolCall {
 
   // 时间信息
   createdAt: number
-  startedAt?: number
-  completedAt?: number
+  startedAt?: number              // 进入 executing 状态的时间
+  completedAt?: number            // 进入终态的时间
+  durationMs?: number             // completedAt - startedAt，执行耗时
+
+  // 进度信息（executing 状态下由工具回报）
+  progress?: {
+    message?: string              // 人类可读进度描述（如 "Reading file..."）
+    percent?: number              // 0-100 完成百分比
+    current?: number              // 当前项数
+    total?: number                // 总项数
+  }
 
   // 结果信息（执行完成后）
   result?: ToolCallResult
@@ -203,12 +215,13 @@ interface ExecutionCompletedEvent {
 ```typescript
 // 并发配置
 interface ConcurrencyConfig {
-  maxReadConcurrency: number    // 默认 5
+  maxReadConcurrency: number       // 默认 5（readonly/network 类别上限）
+  maxSubagentConcurrency: number   // 默认 3（subagent 类别独立上限）
 }
 
 // 超时配置
 interface TimeoutConfig {
-  defaultTimeout: number        // 默认 120000 (2分钟)
+  defaultTimeout: number           // 默认 120000 (2分钟)
 }
 
 // ToolScheduler 配置
@@ -357,8 +370,9 @@ function transition(
 
 ```typescript
 interface ConcurrencyState {
-  readingCount: number      // 当前读操作数量
-  writeInProgress: boolean  // 是否有写操作进行中
+  readingCount: number       // 当前 readonly/network 操作数量
+  writeInProgress: boolean   // 是否有 write/dangerous 操作进行中
+  subagentCount: number      // 当前 subagent 操作数量（独立计数器）
   pendingQueue: QueuedCall[] // 等待队列
 }
 ```
@@ -366,22 +380,55 @@ interface ConcurrencyState {
 ### 5.2 并发决策逻辑
 
 ```typescript
-function canExecute(category: ToolCategory, state: ConcurrencyState): boolean {
+function canExecute(
+  category: ToolCategory,
+  state: ConcurrencyState,
+  config: ConcurrencyConfig
+): boolean {
   // memory 类别：始终可并行执行，不受读写锁限制
   if (category === 'memory') {
     return true
+  }
+
+  // subagent 类别：独立上限计数器，不参与读写锁，但受自身上限约束
+  // 不参与 wave 分组，在 executeBatch() 中被提前分离并立即启动
+  if (category === 'subagent') {
+    return state.subagentCount < config.maxSubagentConcurrency
   }
 
   const isReadLike = category === 'readonly' || category === 'network'
 
   if (isReadLike) {
     // 读操作：无写操作且未达并发上限
-    return !state.writeInProgress && state.readingCount < 5
+    return !state.writeInProgress && state.readingCount < config.maxReadConcurrency
   } else {
-    // 写操作：无任何操作进行中
+    // write/dangerous：无任何读写操作进行中
     return !state.writeInProgress && state.readingCount === 0
   }
 }
+```
+
+**subagent/memory 与 wave 调度的关系**：
+
+`subagent` 和 `memory` 类别不参与 wave 分组。在 `executeBatch()` 中它们被提前分离，直接启动执行（与 wave 并行），不阻塞也不被 wave 阻塞。
+
+- **memory**：无副作用，始终可执行，不经过 CC 层准入
+- **subagent**：可能长时间运行，放入 wave 会阻塞后续 wave 。但仍经过 CC 层准入检查（`canExecute`），保持 maxSubagent = 3 的硬上限
+
+```
+executeBatch 示例（LLM 返回 6 个工具调用）：
+
+  分离步骤：
+    [task_agent_1]  → subagent, 立即启动（CC 检查 subagentCount<3）
+    [memory_list]   → memory,   立即启动（无需 CC 检查）
+
+  剩余进入 wave 分组：
+    Wave1: [read_file_A, read_file_B, web_search_C]  → 可并行
+    Wave2: [write_D]                                  → 串行
+
+  Wave1 和分离出的 subagent/memory 并发执行
+  Wave1 完成后执行 Wave2
+  最终收集所有结果（包括分离出的调用）
 ```
 
 ---
@@ -393,10 +440,11 @@ function canExecute(category: ToolCategory, state: ConcurrencyState): boolean {
 ```typescript
 const DEFAULT_CONFIG: ToolSchedulerConfig = {
   concurrency: {
-    maxReadConcurrency: 5,
+    maxReadConcurrency: 5,      // readonly/network 类别并发上限
+    maxSubagentConcurrency: 3,  // subagent 类别独立并发上限
   },
   timeout: {
-    defaultTimeout: 120000,  // 2 分钟
+    defaultTimeout: 120000,     // 2 分钟
   },
 }
 ```

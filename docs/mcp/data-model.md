@@ -60,6 +60,7 @@ interface McpToolMetadata {
   serverName: string           // 所属MCP服务器名称
   toolName: string             // MCP工具原始名称
   isTrusted: boolean           // 是否信任（来自配置）
+  readOnlyHint?: boolean       // 来自 annotations.readOnlyHint，用于并发分类
 }
 ```
 
@@ -71,8 +72,28 @@ interface McpToolDef {
   name: string
   description?: string
   inputSchema: JSONSchema      // 工具参数Schema
+  annotations?: ToolAnnotations  // MCP 协议 2024-11 版本引入
+}
+
+// MCP 官方协议定义的工具行为注解（Tool Annotations）
+// 参考：https://modelcontextprotocol.io/specification/2025-06-18/server/tools
+interface ToolAnnotations {
+  readOnlyHint?: boolean    // true = 工具不修改环境，可安全并行执行
+  destructiveHint?: boolean // true = 工具可能执行破坏性更新（如删除数据）
+  idempotentHint?: boolean  // true = 相同参数重复调用无额外副作用
+  openWorldHint?: boolean   // true = 工具可能与外部实体交互（如互联网）
 }
 ```
+
+**并发分类规则**：
+
+| `readOnlyHint` 值 | 映射到 ToolCategory | 并发行为 |
+|-------------------|--------------------|---------
+| `true` | `readonly` | 可并行（最多5个） |
+| `false` 或未提供 | `write` | 串行执行（安全默认） |
+
+> **安全默认原则**：MCP 服务器不提供 `annotations` 时，无法判断工具是否安全并行，故默认串行。  
+> 只有服务器明确声明 `readOnlyHint: true` 时才允许并行，符合"保守优于激进"的并发原则。
 
 ### 2.4 转换后的Tool（iris-code格式）
 
@@ -81,12 +102,13 @@ interface Tool {
   name: string                 // {serverName}_{toolName}
   description: string
   source: 'builtin' | 'extension' | 'mcp'
-  category?: ToolCategory      // MCP工具此字段为undefined
+  category: ToolCategory       // MCP工具通过 readOnlyHint 推断：true→readonly，其余→write
   parameters: ZodSchema | JSONSchema
 
   // MCP工具特有字段
   mcpServer?: string           // MCP服务器名称
   isTrusted?: boolean          // 是否信任
+  annotations?: ToolAnnotations // MCP 原始注解（保留完整信息供 Policy 等模块使用）
 
   execute: (
     params: any,

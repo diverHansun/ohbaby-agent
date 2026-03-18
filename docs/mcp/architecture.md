@@ -190,7 +190,7 @@ iris-code 采用主流的分离式命令格式，与以下工具保持一致：
 
 ### 2.4 适配器模式（Adapter）
 
-MCP工具定义转换为iris-code Tool接口。
+MCP工具定义转换为iris-code Tool接口，并通过 `annotations.readOnlyHint` 推断并发类别。
 
 ```typescript
 function adaptMcpTool(
@@ -198,13 +198,18 @@ function adaptMcpTool(
   client: McpClient,
   serverName: string
 ): Tool {
+  // 通过 readOnlyHint 推断类别：true→readonly（可并行），其余→write（串行，安全默认）
+  const category: ToolCategory =
+    mcpTool.annotations?.readOnlyHint === true ? 'readonly' : 'write'
+
   return {
     name: `${serverName}_${mcpTool.name}`,
     description: mcpTool.description ?? '',
     source: 'mcp',
-    category: undefined,  // MCP工具不参与分类
+    category,
     mcpServer: serverName,
     isTrusted: client.config.trust ?? false,
+    annotations: mcpTool.annotations,  // 保留完整注解供 Policy 等模块使用
     parameters: mcpTool.inputSchema,
     execute: async (params, context) => {
       const result = await client.callTool({
@@ -222,8 +227,10 @@ function adaptMcpTool(
 
 理由：
 - 屏蔽MCP协议细节
-- 统一工具接口
+- 统一工具接口，MCP工具与内置工具走相同并发路径
 - 保留MCP特有信息（mcpServer、isTrusted）
+- `readOnlyHint` 是 MCP 官方协议字段，使用它符合"遵守协议"原则
+- 保留完整 `annotations` 对象：未来 Policy 可利用 `destructiveHint`（需额外确认）、`idempotentHint`（可安全重试）等字段做更精细决策
 
 ---
 
@@ -295,24 +302,22 @@ export type { McpClientStatus } from './types.js'
 
 ## 四、Architectural Constraints & Trade-offs（约束与权衡）
 
-### 4.1 MCP工具不参与并发控制
+### 4.1 MCP工具通过 readOnlyHint 参与统一并发控制
 
-当前方案：MCP工具有独立的执行路径，不走ConcurrencyController
+当前方案：读取 MCP 工具定义中的 `annotations.readOnlyHint` 字段，推断工具类别后统一走 tool-scheduler 的 ConcurrencyController（wave-based 调度）。
+
+映射规则：
+- `readOnlyHint === true` → `ToolCategory = 'readonly'`（可并行，最多5个）
+- `readOnlyHint` 未提供或 `false` → `ToolCategory = 'write'`（串行，安全默认）
+
+遵循原则：
+- **遵守协议**：`readOnlyHint` 是 MCP 官方协议（Tool Annotations）的标准字段，Anthropic 设计该字段的目的之一就是供客户端做并发决策
+- **保守默认**：未声明时默认串行，避免因误判造成副作用
+- **统一路径**：MCP 工具和内置工具走相同的 wave 调度路径，降低 tool-scheduler 的复杂度
 
 代价：
-- tool-scheduler需要增加source判断分支
-- MCP工具和内置工具的执行逻辑不完全一致
-
-收益：
-- 避免误判MCP工具的类别（readonly/write/dangerous）
-- MCP工具的并发由MCP服务器自己管理
-- 简化类别推断逻辑
-- 符合MCP协议的设计哲学
-
-理由：
-- MCP工具的语义不一定符合iris-code的类别划分
-- MCP服务器可能本身就支持并发
-- 强制串行可能导致不必要的性能损失
+- MCP 服务器需要正确设置 `readOnlyHint` 才能享受并行调度（但这是服务器的责任）
+- 若服务器未设置 `readOnlyHint`，所有 MCP 工具默认串行，可能低于理想性能
 
 ### 4.2 懒加载而非启动时加载
 
@@ -499,45 +504,32 @@ for (const tool of mcpTools) {
 }
 ```
 
-### 7.2 执行路径分离
+### 7.2 统一执行路径
+
+MCP工具与内置工具走相同的 wave 调度路径，category 决定并发行为：
 
 ```typescript
-// tool-scheduler的execute方法
+// tool-scheduler的executeBatch方法（wave-based调度）
 
 class ToolScheduler {
-  async execute(request: ToolCallRequest): Promise<ToolCallResult> {
-    const tool = this.registry.get(request.toolName)
-
-    if (tool.source === 'mcp') {
-      // MCP工具独立路径
-      return await this.executeMcpTool(tool, request)
-    } else {
-      // 内置工具正常路径
-      return await this.executeBuiltinTool(tool, request)
-    }
+  async executeBatch(requests: ToolCallRequest[]): Promise<ToolCallResult[]> {
+    // wave 调度器根据 tool.category 决定是否并行
+    // MCP readonly 工具（readOnlyHint=true）→ 并入当前 wave 并行执行
+    // MCP write 工具（readOnlyHint=false/未设置）→ 独立 wave 串行执行
+    return await this.waveScheduler.run(requests)
   }
+}
+```
 
-  private async executeMcpTool(
-    tool: Tool,
-    request: ToolCallRequest
-  ): Promise<ToolCallResult> {
-    // 1. 检查trust（可能触发Permission.ask）
-    if (!tool.isTrusted) {
-      await Permission.ask({
-        type: 'mcp-tool',
-        serverName: tool.mcpServer,
-        toolName: tool.name
-      })
-    }
+**MCP工具的 trust 检查**：`isTrusted` 检查发生在 policy 阶段（`checking_policy` 状态），不影响并发路径选择：
 
-    // 2. 直接执行（不走并发控制）
-    return await tool.execute(request.params, {
-      sessionId: request.sessionId,
-      messageId: request.messageId,
-      callId: request.callId,
-      signal: createAbortSignal()
-    })
+```typescript
+// policy 检查阶段（在 wave 调度之前）
+async checkPolicy(tool: Tool, request: ToolCallRequest): Promise<PolicyResult> {
+  if (tool.source === 'mcp' && !tool.isTrusted) {
+    return { action: 'ask', reason: 'untrusted-mcp-tool' }
   }
+  return { action: 'allow' }
 }
 ```
 

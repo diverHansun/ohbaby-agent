@@ -117,8 +117,8 @@ type ToolSource = 'core' | 'module' | 'extension' | 'mcp'
 实现并发控制策略：
 - 读操作（readonly/network/skill）：最多 5 个并行
 - 写操作（write/dangerous）：必须串行，且无其他操作时才能执行
-- 记忆操作（memory）：始终可并行，不受读写锁限制
-- 子代理操作（subagent）：最多 3 个并行（由 SubagentExecutor 控制）
+- 记忆操作（memory）：始终可并行，不受读写锁限制，不参与 wave 分组
+- 子代理操作（subagent）：最多 3 个并行（独立计数器），不参与 wave 分组（避免长时间运行阻塞后续 wave）
 
 ### D6: 管理执行状态
 

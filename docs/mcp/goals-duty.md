@@ -18,9 +18,9 @@
 
 将MCP工具转换为iris-code的Tool接口，注册到ToolScheduler，使MCP工具与内置工具在调用层面保持一致。
 
-### 4. 保持独立的执行路径
+### 4. 参与统一的并发调度
 
-MCP工具不参与tool-scheduler的并发控制体系，由MCP服务器自己负责并发管理，iris-code仅负责工具调用的转发。
+MCP 工具在适配时通过 `annotations.readOnlyHint` 推断 ToolCategory（`true` → `readonly`，其余 → `write`），注册到 ToolScheduler 后与内置工具走相同的并发控制路径。iris-code 负责工具调用的转发和并发协调，MCP 服务器负责工具的实际执行。
 
 ### 5. 支持多工作区隔离
 
@@ -67,7 +67,7 @@ MCP工具不参与tool-scheduler的并发控制体系，由MCP服务器自己负
 负责：
 - 根据配置的trust字段决定是否需要额外确认
 - 在所有模式（Ask/Plan/Agent）下开放MCP工具
-- 不参与Policy的类别检查（MCP工具无ToolCategory）
+- MCP 工具通过 `readOnlyHint` 分配了 ToolCategory，参与 Policy 的类别检查
 
 ---
 
@@ -77,9 +77,9 @@ MCP工具不参与tool-scheduler的并发控制体系，由MCP服务器自己负
 
 MCP服务器配置的加载、验证由config/mcp模块负责，mcp模块只使用已验证的配置对象。
 
-### 2. 不负责工具分类和并发控制
+### 2. 不负责并发控制的执行
 
-MCP工具不分配ToolCategory，不参与tool-scheduler的ConcurrencyController，由MCP服务器自己管理并发。
+MCP 工具虽在适配时通过 `readOnlyHint` 分配了 ToolCategory（`readonly` 或 `write`），但并发控制的调度执行由 tool-scheduler 模块负责。mcp 模块只负责适配转换和工具调用转发。
 
 ### 3. 不负责OAuth认证流程
 
