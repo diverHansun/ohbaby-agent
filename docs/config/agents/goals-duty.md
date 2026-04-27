@@ -6,7 +6,7 @@
 
 ## 一、模块定位
 
-**一句话说明**：config/agents 是 ohbaby-code 配置系统的一部分，专门负责 Agent 配置文件的加载、验证和合并，为 agents 模块提供类型安全的配置数据。
+**一句话说明**：config/agents 是 ohbaby-agent 配置系统的一部分，专门负责 Agent 配置文件的加载、验证和合并，为 agents 模块提供类型安全的配置数据。
 
 **如果没有这个模块**：
 - agents 模块需要自行处理文件读取和 JSON 解析
@@ -47,8 +47,8 @@
 ### D1: 加载配置文件
 
 从指定路径加载 Agent 配置文件：
-- 全局配置：`~/.ohbaby-code/agents/settings.json`
-- 项目配置：`{project}/.ohbaby-code/agents/settings.json`
+- 全局配置：`~/.ohbaby-agent/agents/settings.json`
+- 项目配置：`{project}/.ohbaby-agent/agents/settings.json`
 
 ### D2: 验证配置格式
 

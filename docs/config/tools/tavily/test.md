@@ -75,7 +75,7 @@ describe('TavilyConfigLoader', () => {
     it('应该正确加载项目级配置', async () => {
       // Given
       mockFs.exists.mockImplementation(path =>
-        Promise.resolve(path.includes('.ohbaby-code'))
+        Promise.resolve(path.includes('.ohbaby-agent'))
       )
       mockFs.read.mockResolvedValue({
         tavily: {
@@ -201,8 +201,8 @@ describe('TavilyConfigLoader', () => {
       const pathInfo = loader.getPathInfo()
 
       // Then
-      expect(pathInfo.projectPath).toContain('.ohbaby-code/tools/tavily.yaml')
-      expect(pathInfo.userPath).toContain('ohbaby-code/tools/tavily.yaml')
+      expect(pathInfo.projectPath).toContain('.ohbaby-agent/tools/tavily.yaml')
+      expect(pathInfo.userPath).toContain('ohbaby-agent/tools/tavily.yaml')
     })
   })
 })
@@ -395,7 +395,7 @@ describe('Path Resolution', () => {
 
       // Then
       expect(result).toContain('AppData')
-      expect(result).toContain('ohbaby-code')
+      expect(result).toContain('ohbaby-agent')
     })
 
     it('在 Linux 上应该使用 XDG_CONFIG_HOME', () => {
@@ -407,7 +407,7 @@ describe('Path Resolution', () => {
       const result = resolveUserConfigDir()
 
       // Then
-      expect(result).toBe('/custom/config/ohbaby-code/tools')
+      expect(result).toBe('/custom/config/ohbaby-agent/tools')
     })
 
     it('当 XDG_CONFIG_HOME 未设置时应该使用 ~/.config', () => {
@@ -420,7 +420,7 @@ describe('Path Resolution', () => {
       const result = resolveUserConfigDir()
 
       // Then
-      expect(result).toBe('/home/user/.config/ohbaby-code/tools')
+      expect(result).toBe('/home/user/.config/ohbaby-agent/tools')
     })
   })
 
@@ -430,7 +430,7 @@ describe('Path Resolution', () => {
       const result = resolveProjectConfigPath('/my/project')
 
       // Then
-      expect(result).toBe('/my/project/.ohbaby-code/tools/tavily.yaml')
+      expect(result).toBe('/my/project/.ohbaby-agent/tools/tavily.yaml')
     })
   })
 })
@@ -458,7 +458,7 @@ describe('TavilyConfigLoader Integration', () => {
 
   it('应该从真实文件加载配置', async () => {
     // Given
-    const configDir = path.join(tempDir, '.ohbaby-code', 'tools')
+    const configDir = path.join(tempDir, '.ohbaby-agent', 'tools')
     await fs.mkdir(configDir, { recursive: true })
     await fs.writeFile(
       path.join(configDir, 'tavily.yaml'),
@@ -477,7 +477,7 @@ describe('TavilyConfigLoader Integration', () => {
 
   it('应该正确合并多级配置', async () => {
     // Given - 创建项目级配置
-    const projectConfigDir = path.join(tempDir, '.ohbaby-code', 'tools')
+    const projectConfigDir = path.join(tempDir, '.ohbaby-agent', 'tools')
     await fs.mkdir(projectConfigDir, { recursive: true })
     await fs.writeFile(
       path.join(projectConfigDir, 'tavily.yaml'),

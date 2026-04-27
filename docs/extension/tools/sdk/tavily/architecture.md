@@ -8,7 +8,7 @@
 
 ### 模块定位
 
-Tavily 工具模块是 ohbaby-code 的扩展工具之一，属于 Extension Tools 类别，通过 tool-scheduler 注册和调度。模块封装 @tavily/core SDK，为 Agent 提供 Web 搜索、内容提取、网站爬取和结构映射能力。
+Tavily 工具模块是 ohbaby-agent 的扩展工具之一，属于 Extension Tools 类别，通过 tool-scheduler 注册和调度。模块封装 @tavily/core SDK，为 Agent 提供 Web 搜索、内容提取、网站爬取和结构映射能力。
 
 ### 核心架构
 

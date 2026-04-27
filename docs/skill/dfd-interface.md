@@ -59,8 +59,8 @@
 
 ```
 1. [外部] Config 模块提供配置目录列表（按优先级）
-   ├── 项目目录: .ohbaby-code/skill/
-   └── 全局目录: ~/.config/ohbaby-code/skill/
+   ├── 项目目录: .ohbaby-agent/skill/
+   └── 全局目录: ~/.config/ohbaby-agent/skill/
 
 2. [内部] SkillLoader 扫描目录
    └── Glob 模式: **/SKILL.md
@@ -155,7 +155,7 @@
 
 ```
 1. [外部] 用户执行 CLI 命令
-   └── ohbaby-code skill reload
+   └── ohbaby-agent skill reload
 
 2. [外部] Commands 模块调用 Skill.reload()
 
@@ -313,8 +313,8 @@ const SkillTool: Tool = {
 
 ```typescript
 function getGlobalConfigDir(): string
-// Linux/macOS: ~/.config/ohbaby-code/
-// Windows: %APPDATA%/ohbaby-code/
+// Linux/macOS: ~/.config/ohbaby-agent/
+// Windows: %APPDATA%/ohbaby-agent/
 ```
 
 #### Config.getProjectConfigDir()
@@ -323,7 +323,7 @@ function getGlobalConfigDir(): string
 
 ```typescript
 function getProjectConfigDir(): string | undefined
-// 返回: {projectRoot}/.ohbaby-code/ 或 undefined
+// 返回: {projectRoot}/.ohbaby-agent/ 或 undefined
 ```
 
 ---

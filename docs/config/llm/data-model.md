@@ -4,7 +4,7 @@
 
 ### ModelJsonConfig
 
-用户在 `~/.ohbaby-code/model.json` 中定义的配置对象，包含模型和 API 配置信息。
+用户在 `~/.ohbaby-agent/model.json` 中定义的配置对象，包含模型和 API 配置信息。
 
 字段：
 - provider：LLM 提供商标识（如 'openai'、'zhipu'）

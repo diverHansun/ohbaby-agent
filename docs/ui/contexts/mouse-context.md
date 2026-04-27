@@ -51,7 +51,7 @@ interface MouseEvent {
 
 ### 4.1 SGR 扩展模式
 
-ohbaby-code 使用 SGR 扩展模式报告鼠标事件，相比基础模式支持更大的坐标范围。
+ohbaby-agent 使用 SGR 扩展模式报告鼠标事件，相比基础模式支持更大的坐标范围。
 
 **启用**：写入 `\x1b[?1000h\x1b[?1006h` 到 stdout
 **禁用**：写入 `\x1b[?1000l\x1b[?1006l` 到 stdout

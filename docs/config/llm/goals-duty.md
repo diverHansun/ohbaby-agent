@@ -15,8 +15,8 @@
 ## 职责
 
 1. 从配置文件加载 LLM 配置
-   - 从 `~/.ohbaby-code/model.json` 读取模型和API配置
-   - 支持本地调试覆盖：如存在 `.ohbaby-code.local/model.json` 则优先使用
+   - 从 `~/.ohbaby-agent/model.json` 读取模型和API配置
+   - 支持本地调试覆盖：如存在 `.ohbaby-agent.local/model.json` 则优先使用
 
 2. 从环境变量加载 API Key
    - 根据 model.json 中指定的环境变量名读取 API Key

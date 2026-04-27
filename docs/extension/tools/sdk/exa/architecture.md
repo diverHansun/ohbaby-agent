@@ -8,7 +8,7 @@
 
 ### 模块定位
 
-Exa 工具模块是 ohbaby-code 的扩展工具层，封装 exa-js SDK 提供 Web 搜索和内容获取能力。作为 network 类别工具，为 Agent 提供互联网信息检索功能。
+Exa 工具模块是 ohbaby-agent 的扩展工具层，封装 exa-js SDK 提供 Web 搜索和内容获取能力。作为 network 类别工具，为 Agent 提供互联网信息检索功能。
 
 ### 模块结构
 
@@ -133,8 +133,8 @@ class ExaClient {
 **职责**：管理 Exa 工具配置
 
 **配置来源优先级**：
-1. 项目级别：`{project}/.ohbaby-code/tools/exa.yaml`
-2. 用户级别：`~/.config/ohbaby-code/tools/exa.yaml`
+1. 项目级别：`{project}/.ohbaby-agent/tools/exa.yaml`
+2. 用户级别：`~/.config/ohbaby-agent/tools/exa.yaml`
 
 **配置项**：
 
@@ -206,7 +206,7 @@ class ExaClient {
 
 ### 3.3 适配器模式（Adapter）
 
-将 exa-js SDK 的 camelCase 接口适配为 ohbaby-code 的 snake_case 参数风格。
+将 exa-js SDK 的 camelCase 接口适配为 ohbaby-agent 的 snake_case 参数风格。
 
 ```typescript
 // SDK 接口 (camelCase)

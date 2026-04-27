@@ -1,21 +1,21 @@
-# ohbaby-code Architecture Analysis & Design Direction
+# ohbaby-agent Architecture Analysis & Design Direction
 
 ## Executive Summary
 
-Based on detailed analysis of `gemini-cli` and `mini-kode` core architectures, combined with ohbaby-code's existing tutorial documents, this document provides:
+Based on detailed analysis of `gemini-cli` and `mini-kode` core architectures, combined with ohbaby-agent's existing tutorial documents, this document provides:
 
 1. **Gap Analysis**: What components are currently missing from `src/core`
 2. **Main-Scheduler Design**: From simple-to-complex approach
 3. **Complete Request-to-Completion Cycle**: How user input flows to completion
-4. **Architecture Direction**: Recommended design strategy for ohbaby-code
+4. **Architecture Direction**: Recommended design strategy for ohbaby-agent
 
-**Key Insight**: ohbaby-code is positioned between gemini-cli (feature-rich) and mini-kode (minimal) - it should adopt gemini-cli's architectural sophistication with mini-kode's clarity and separation of concerns.
+**Key Insight**: ohbaby-agent is positioned between gemini-cli (feature-rich) and mini-kode (minimal) - it should adopt gemini-cli's architectural sophistication with mini-kode's clarity and separation of concerns.
 
 ---
 
 ## Part 1: Gap Analysis - What's Missing from src/core
 
-### Current State of ohbaby-code/src/core
+### Current State of ohbaby-agent/src/core
 
 ```
 src/core/
@@ -49,7 +49,7 @@ src/core/
 - Expose system message and initial context
 - Track conversation metadata
 
-**Design Pattern**: Based on ohbaby-code tutorial `conversation-design.md`
+**Design Pattern**: Based on ohbaby-agent tutorial `conversation-design.md`
 - Separate concerns: Message memory vs. Persistence
 - SessionService handles database persistence
 - Conversation class handles in-memory state
@@ -81,7 +81,7 @@ interface Conversation {
 - Emit turn events (start, update, complete, error)
 - Support cancellation via AbortSignal
 
-**Design Pattern**: Based on ohbaby-code tutorial `turn-hook.md`
+**Design Pattern**: Based on ohbaby-agent tutorial `turn-hook.md`
 - AsyncGenerator for streaming
 - Hook system for extensibility
 - Message bus integration for events
@@ -785,18 +785,18 @@ export async function* productionExecute(
 
 ---
 
-## Part 4: Architecture Direction for ohbaby-code
+## Part 4: Architecture Direction for ohbaby-agent
 
 ### Strategic Positioning
 
-ohbaby-code should position itself as:
+ohbaby-agent should position itself as:
 - **More sophisticated than mini-kode**: Full feature support with hooks, MCP, permissions
 - **More maintainable than gemini-cli**: Clear separation, readable code, educational value
 - **Tailored for code assistance**: Focus on file operations, shell execution, code editing
 
 ### Design Principles
 
-Based on gemini-cli and mini-kode analysis, ohbaby-code should follow:
+Based on gemini-cli and mini-kode analysis, ohbaby-agent should follow:
 
 #### 1. **Layered Architecture with Clear Boundaries**
 
@@ -1011,9 +1011,9 @@ Mixed:                                      Sequential (safe default)
 
 ## Part 5: Comparison Matrix
 
-### ohbaby-code vs gemini-cli vs mini-kode
+### ohbaby-agent vs gemini-cli vs mini-kode
 
-| Aspect | gemini-cli | mini-kode | ohbaby-code (Target) |
+| Aspect | gemini-cli | mini-kode | ohbaby-agent (Target) |
 |--------|-----------|----------|-------------------|
 | **Scale** | Very large | Minimal | Medium |
 | **Complexity** | High | Low | Medium |
@@ -1062,12 +1062,12 @@ Mixed:                                      Sequential (safe default)
 
 ## Conclusion
 
-ohbaby-code is positioned to be a **modern, maintainable, and extensible AI coding assistant** that combines:
+ohbaby-agent is positioned to be a **modern, maintainable, and extensible AI coding assistant** that combines:
 - **gemini-cli's sophistication** (hooks, routing, error recovery)
 - **mini-kode's clarity** (simple loop, callback-driven, readable)
-- **ohbaby-code's tailoring** (code-focused tools, IDE integration)
+- **ohbaby-agent's tailoring** (code-focused tools, IDE integration)
 
 The key to success is **progressive implementation** - start simple (Phase 1), add complexity gradually (Phases 2-3), and maintain code clarity throughout.
 
-By following the layered architecture and callback-driven patterns outlined above, ohbaby-code will achieve high maintainability while providing the extensibility needed for enterprise use.
+By following the layered architecture and callback-driven patterns outlined above, ohbaby-agent will achieve high maintainability while providing the extensibility needed for enterprise use.
 

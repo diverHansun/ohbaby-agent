@@ -154,7 +154,7 @@ themeManager.setTheme(lightTokens)
 
 ## 七、与 gemini-cli 的对比
 
-| 维度 | gemini-cli | ohbaby-code (MVP) |
+| 维度 | gemini-cli | ohbaby-agent (MVP) |
 |------|-----------|-----------------|
 | 架构层数 | 3 层（ColorsTheme → SemanticColors → getter） | 3 层（palette → tokens → getter） |
 | 内置主题 | 16 个 | 1 个（darkTokens） |
@@ -163,7 +163,7 @@ themeManager.setTheme(lightTokens)
 | 语法高亮色 | 集成 highlight.js 映射 | 不涉及（Markdown 渲染由 TextPart 处理） |
 | 核心代码量 | ~1500 行 | ~50 行（预估） |
 
-ohbaby-code 借鉴了 gemini-cli 的分层思路和 getter 代理模式，但去掉了所有 MVP 不需要的复杂度。
+ohbaby-agent 借鉴了 gemini-cli 的分层思路和 getter 代理模式，但去掉了所有 MVP 不需要的复杂度。
 
 ---
 

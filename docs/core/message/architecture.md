@@ -215,7 +215,7 @@ src/core/message/
 
 **示例**：
 ```
-~/.ohbaby-code/storage/
+~/.ohbaby-agent/storage/
 ├── message/
 │   └── session_xxx/
 │       ├── message_001.json    # UserMessage

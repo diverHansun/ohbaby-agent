@@ -44,7 +44,7 @@ describe('IdentityLayer', () => {
     it('should include core sections', () => {
       const result = IdentityLayer.generate()
 
-      expect(result).toContain('ohbaby-code')
+      expect(result).toContain('ohbaby-agent')
       expect(result).toContain('AI')
     })
 
@@ -170,7 +170,7 @@ describe('EnvironmentLayer', () => {
 describe('CustomLayer', () => {
   describe('load', () => {
     it('should load project OHBABY.md', async () => {
-      mockFs.write('.ohbaby-code/OHBABY.md', '# Project Instructions')
+      mockFs.write('.ohbaby-agent/OHBABY.md', '# Project Instructions')
 
       const result = await CustomLayer.load()
 
@@ -178,7 +178,7 @@ describe('CustomLayer', () => {
     })
 
     it('should load global OHBABY.md', async () => {
-      mockFs.write('~/.ohbaby-code/OHBABY.md', '# Global Instructions')
+      mockFs.write('~/.ohbaby-agent/OHBABY.md', '# Global Instructions')
 
       const result = await CustomLayer.load()
 
@@ -186,8 +186,8 @@ describe('CustomLayer', () => {
     })
 
     it('should merge project and global instructions', async () => {
-      mockFs.write('.ohbaby-code/OHBABY.md', '# Project')
-      mockFs.write('~/.ohbaby-code/OHBABY.md', '# Global')
+      mockFs.write('.ohbaby-agent/OHBABY.md', '# Project')
+      mockFs.write('~/.ohbaby-agent/OHBABY.md', '# Global')
 
       const result = await CustomLayer.load()
 
@@ -205,7 +205,7 @@ describe('CustomLayer', () => {
     })
 
     it('should handle file read errors gracefully', async () => {
-      mockFs.setReadError('.ohbaby-code/OHBABY.md', new Error('Permission denied'))
+      mockFs.setReadError('.ohbaby-agent/OHBABY.md', new Error('Permission denied'))
 
       const result = await CustomLayer.load()
 
@@ -254,7 +254,7 @@ describe('SystemPrompt.assemble for primary agent', () => {
     })
 
     expect(result.length).toBeGreaterThan(0)
-    expect(result.join('\n')).toContain('ohbaby-code')
+    expect(result.join('\n')).toContain('ohbaby-agent')
   })
 
   it('should include environment info', () => {
@@ -351,7 +351,7 @@ describe('Custom Instructions Integration', () => {
   })
 
   it('should load and include in primary agent prompt', async () => {
-    mockFs.write('.ohbaby-code/OHBABY.md', '# Custom Instructions\nUse Jest')
+    mockFs.write('.ohbaby-agent/OHBABY.md', '# Custom Instructions\nUse Jest')
 
     const customInstructions = await SystemPrompt.loadCustomInstructions()
     const result = SystemPrompt.assemble({
@@ -365,8 +365,8 @@ describe('Custom Instructions Integration', () => {
   })
 
   it('should prioritize project over global instructions', async () => {
-    mockFs.write('.ohbaby-code/OHBABY.md', '# Project: Use Vitest')
-    mockFs.write('~/.ohbaby-code/OHBABY.md', '# Global: Use Jest')
+    mockFs.write('.ohbaby-agent/OHBABY.md', '# Project: Use Vitest')
+    mockFs.write('~/.ohbaby-agent/OHBABY.md', '# Global: Use Jest')
 
     const customInstructions = await SystemPrompt.loadCustomInstructions()
 
@@ -426,7 +426,7 @@ describe('Edge Cases - Empty Values', () => {
 describe('Edge Cases - Large Files', () => {
   it('should truncate oversized custom instructions', async () => {
     const largeContent = 'x'.repeat(60 * 1024) // 60KB
-    mockFs.write('.ohbaby-code/OHBABY.md', largeContent)
+    mockFs.write('.ohbaby-agent/OHBABY.md', largeContent)
 
     const result = await SystemPrompt.loadCustomInstructions()
 
@@ -436,7 +436,7 @@ describe('Edge Cases - Large Files', () => {
 
   it('should warn about truncation', async () => {
     const largeContent = 'x'.repeat(60 * 1024)
-    mockFs.write('.ohbaby-code/OHBABY.md', largeContent)
+    mockFs.write('.ohbaby-agent/OHBABY.md', largeContent)
 
     await SystemPrompt.loadCustomInstructions()
 
@@ -452,7 +452,7 @@ describe('Edge Cases - Large Files', () => {
 ```typescript
 describe('Edge Cases - Special Characters', () => {
   it('should handle unicode in custom instructions', async () => {
-    mockFs.write('.ohbaby-code/OHBABY.md', '# Instructions\n使用中文注释')
+    mockFs.write('.ohbaby-agent/OHBABY.md', '# Instructions\n使用中文注释')
 
     const result = await SystemPrompt.loadCustomInstructions()
 
@@ -460,7 +460,7 @@ describe('Edge Cases - Special Characters', () => {
   })
 
   it('should handle special markdown characters', async () => {
-    mockFs.write('.ohbaby-code/OHBABY.md', '# Title\n- Item `code` **bold**')
+    mockFs.write('.ohbaby-agent/OHBABY.md', '# Title\n- Item `code` **bold**')
 
     const result = await SystemPrompt.loadCustomInstructions()
 
@@ -507,7 +507,7 @@ describe('Error Handling', () => {
 
   describe('file system errors', () => {
     it('should handle permission denied gracefully', async () => {
-      mockFs.setReadError('.ohbaby-code/OHBABY.md', new Error('EACCES'))
+      mockFs.setReadError('.ohbaby-agent/OHBABY.md', new Error('EACCES'))
 
       const result = await SystemPrompt.loadCustomInstructions()
 
@@ -559,8 +559,8 @@ const mockFs = {
 
 // Config Mock
 const mockConfig = {
-  getProjectPath: vi.fn().mockReturnValue('/project/.ohbaby-code'),
-  getGlobalPath: vi.fn().mockReturnValue('/home/user/.ohbaby-code')
+  getProjectPath: vi.fn().mockReturnValue('/project/.ohbaby-agent'),
+  getGlobalPath: vi.fn().mockReturnValue('/home/user/.ohbaby-agent')
 }
 
 // Logger Spy

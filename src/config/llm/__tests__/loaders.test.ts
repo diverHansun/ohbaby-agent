@@ -16,7 +16,7 @@ describe('getModelJsonPath', () => {
   it('should return path under home directory', () => {
     const result = getModelJsonPath();
     const homeDir = os.homedir();
-    expect(result).toBe(path.join(homeDir, '.ohbaby-code', 'model.json'));
+    expect(result).toBe(path.join(homeDir, '.ohbaby-agent', 'model.json'));
   });
 });
 

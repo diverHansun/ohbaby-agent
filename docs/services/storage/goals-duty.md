@@ -6,7 +6,7 @@
 
 ## 一、模块定位
 
-**一句话说明**：storage 模块提供统一的文件存储抽象层，将 Key 数组映射到文件系统路径，支持并发安全的读写操作，是 ohbaby-code 中所有持久化数据的底层基础设施。
+**一句话说明**：storage 模块提供统一的文件存储抽象层，将 Key 数组映射到文件系统路径，支持并发安全的读写操作，是 ohbaby-agent 中所有持久化数据的底层基础设施。
 
 **如果没有这个模块**：
 - session 和 message 模块需要各自实现文件 I/O 逻辑
@@ -36,9 +36,9 @@
 ### G4: 跨平台兼容
 
 遵循 XDG Base Directory 规范，在不同操作系统上自动选择合适的存储路径：
-- Linux: `~/.local/share/ohbaby-code/`
-- macOS: `~/Library/Application Support/ohbaby-code/`
-- Windows: `%APPDATA%/ohbaby-code/`
+- Linux: `~/.local/share/ohbaby-agent/`
+- macOS: `~/Library/Application Support/ohbaby-agent/`
+- Windows: `%APPDATA%/ohbaby-agent/`
 
 ### G5: 简单可靠
 

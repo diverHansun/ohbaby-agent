@@ -42,7 +42,7 @@
 - 生成的 sessionId 格式正确（session_<timestamp>_<random>）
 - projectId 正确识别（git 或 path hash）
 - 所有必需字段都已初始化
-- 会话文件正确写入 ~/.ohbaby-code/storage/session/<projectId>/<sessionId>.json
+- 会话文件正确写入 ~/.ohbaby-agent/storage/session/<projectId>/<sessionId>.json
 - 文件内容可反序列化为 Session 对象
 
 ### 场景 2: 项目 ID 生成的稳定性

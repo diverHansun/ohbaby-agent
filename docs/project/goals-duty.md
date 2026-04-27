@@ -92,7 +92,7 @@ Project 模块只负责识别，不负责管理：
 
 ### N2: 不负责项目配置管理
 
-项目级配置文件（如 `.ohbaby-code/settings.json`）由 Config 模块负责加载和管理。
+项目级配置文件（如 `.ohbaby-agent/settings.json`）由 Config 模块负责加载和管理。
 
 ### N3: 不维护项目下的会话列表
 
@@ -108,7 +108,7 @@ Project 模块不知道项目下有哪些会话。如需查询，调用者应直
 
 ### N6: 不负责项目初始化
 
-创建 `.ohbaby-code/` 目录、初始化项目配置等操作不是 Project 模块的职责。
+创建 `.ohbaby-agent/` 目录、初始化项目配置等操作不是 Project 模块的职责。
 
 ---
 

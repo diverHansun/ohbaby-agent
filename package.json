@@ -1,7 +1,7 @@
 {
-  "name": "ohbaby-code",
+  "name": "ohbaby-agent",
   "version": "0.1.0",
-  "description": "An AI coding assistant CLI tool",
+  "description": "An AI assistant designed by myself like raising a baby, interacting with him through CLI",
   "type": "module",
   "packageManager": "pnpm@9.15.0",
   "engines": {
@@ -45,16 +45,16 @@
     "gemini",
     "agent"
   ],
-  "author": "ohbaby-code contributors",
+  "author": "ohbaby-agent contributors",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/diverHansun/ohbaby-code.git"
+    "url": "https://github.com/diverHansun/ohbaby-agent.git"
   },
   "bugs": {
-    "url": "https://github.com/diverHansun/ohbaby-code/issues"
+    "url": "https://github.com/diverHansun/ohbaby-agent/issues"
   },
-  "homepage": "https://github.com/diverHansun/ohbaby-code#readme",
+  "homepage": "https://github.com/diverHansun/ohbaby-agent#readme",
   "dependencies": {
     "@tavily/core": "^0.6.4",
     "chalk": "^5.4.1",

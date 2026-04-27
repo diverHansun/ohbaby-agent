@@ -8,15 +8,15 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { ConfigError } from './types.js';
 
-/** Directory name for ohbaby-code configuration */
-const CONFIG_DIR_NAME = '.ohbaby-code';
+/** Directory name for ohbaby-agent configuration */
+const CONFIG_DIR_NAME = '.ohbaby-agent';
 
 /** Configuration file name */
 const MODEL_JSON_NAME = 'model.json';
 
 /**
  * Get the path to the global model.json configuration file.
- * Location: ~/.ohbaby-code/model.json
+ * Location: ~/.ohbaby-agent/model.json
  */
 export function getModelJsonPath(): string {
   const homeDir = os.homedir();

@@ -395,7 +395,7 @@ type ExaToolResult<T> =
 ### 6.1 exa.yaml 结构
 
 ```yaml
-# .ohbaby-code/tools/exa.yaml
+# .ohbaby-agent/tools/exa.yaml
 
 exa:
   # API 配置

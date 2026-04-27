@@ -13,7 +13,7 @@ npm run test -- src/core/llm-client/llm-client.test.ts
 或者使用完整路径：
 
 ```bash
-npm run test -- ohbaby-code/src/core/llm-client/llm-client.test.ts
+npm run test -- ohbaby-agent/src/core/llm-client/llm-client.test.ts
 ```
 
 ### 方法 2: 直接使用 vitest 命令

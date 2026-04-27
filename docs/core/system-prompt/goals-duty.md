@@ -43,8 +43,8 @@
 ### G4: 支持自定义指令加载
 
 支持从文件系统加载用户自定义指令：
-- 项目级：`.ohbaby-code/OHBABY.md`
-- 全局级：`~/.ohbaby-code/OHBABY.md`
+- 项目级：`.ohbaby-agent/OHBABY.md`
+- 全局级：`~/.ohbaby-agent/OHBABY.md`
 
 ---
 

@@ -328,12 +328,12 @@ describe('paths', () => {
 
   describe('ProjectPaths', () => {
     it('应该返回正确的配置目录名', () => {
-      expect(ProjectPaths.CONFIG_DIR).toBe('.ohbaby-code')
+      expect(ProjectPaths.CONFIG_DIR).toBe('.ohbaby-agent')
     })
 
     it('应该生成正确的全局配置路径', () => {
       const globalPath = ProjectPaths.getGlobalConfigPath()
-      expect(globalPath).toContain('.ohbaby-code')
+      expect(globalPath).toContain('.ohbaby-agent')
       expect(globalPath).toContain('config.json')
     })
   })

@@ -293,12 +293,12 @@ describe('Config Loading Integration', () => {
   beforeEach(() => {
     // 准备测试文件系统
     setupTestFs({
-      '~/.ohbaby-code/agents/custom-global.json': {
+      '~/.ohbaby-agent/agents/custom-global.json': {
         name: 'custom-global',
         mode: 'subagent',
         description: 'Global custom agent'
       },
-      '.ohbaby-code/agents/custom-project.json': {
+      '.ohbaby-agent/agents/custom-project.json': {
         name: 'custom-project',
         mode: 'subagent',
         description: 'Project custom agent'
@@ -412,7 +412,7 @@ describe('Edge Cases', () => {
 ```typescript
 describe('Config File Errors', () => {
   it('should skip invalid JSON files', async () => {
-    mockFs.write('.ohbaby-code/agents/invalid.json', 'not json')
+    mockFs.write('.ohbaby-agent/agents/invalid.json', 'not json')
 
     await AgentManager.initialize()
 
@@ -422,7 +422,7 @@ describe('Config File Errors', () => {
   })
 
   it('should log warning for invalid config', async () => {
-    mockFs.write('.ohbaby-code/agents/bad.json', '{"mode": "invalid"}')
+    mockFs.write('.ohbaby-agent/agents/bad.json', '{"mode": "invalid"}')
 
     await AgentManager.initialize()
 
@@ -477,7 +477,7 @@ describe('Performance', () => {
   it('should load 100 config files within 1 second', async () => {
     // 创建 100 个配置文件
     for (let i = 0; i < 100; i++) {
-      mockFs.write(`.ohbaby-code/agents/agent-${i}.json`, {
+      mockFs.write(`.ohbaby-agent/agents/agent-${i}.json`, {
         name: `agent-${i}`,
         mode: 'subagent',
         description: `Agent ${i}`

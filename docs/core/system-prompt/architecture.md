@@ -101,7 +101,7 @@ SystemPrompt (Facade)
 ### 3.1 目录结构
 
 ```
-ohbaby-code/src/core/system-prompt/
+ohbaby-agent/src/core/system-prompt/
 |-- index.ts                 # 公共 API 导出
 |-- assembler.ts             # SystemPrompt 组装器实现
 |-- types.ts                 # 类型定义
@@ -160,7 +160,7 @@ export type {
 ```
 +---------------------------------------------------------------+
 | Layer 1: Identity (身份层)                                     |
-| - 基础身份描述（你是 ohbaby-code，一个 AI 编程助手...）           |
+| - 基础身份描述（你是 ohbaby-agent，一个 AI 编程助手...）           |
 | - 核心能力说明                                                 |
 | - 基础行为准则                                                 |
 | - 工具使用指南                                                 |
@@ -296,7 +296,7 @@ assemble(options) 调用
 ```typescript
 // prompts/identity.ts
 export const IDENTITY_PROMPT = `
-You are ohbaby-code, an AI coding assistant...
+You are ohbaby-agent, an AI coding assistant...
 
 # Core Capabilities
 - Code generation and modification

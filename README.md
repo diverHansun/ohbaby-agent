@@ -1,4 +1,4 @@
-# ohbaby-code
+# ohbaby-agent
 
 An AI coding assistant CLI tool inspired by opencode and gemini-cli.
 
@@ -20,8 +20,8 @@ An AI coding assistant CLI tool inspired by opencode and gemini-cli.
 
 ```bash
 # Clone the repository
-git clone https://github.com/diverHansun/ohbaby-code.git
-cd ohbaby-code
+git clone https://github.com/diverHansun/ohbaby-agent.git
+cd ohbaby-agent
 
 # Install dependencies
 pnpm install
@@ -62,7 +62,7 @@ pnpm build
 ## Project Structure
 
 ```
-ohbaby-code/
+ohbaby-agent/
 ├── src/
 │   ├── index.ts              # Entry point
 │   ├── cli/                   # CLI layer (Ink components)

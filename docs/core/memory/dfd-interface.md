@@ -12,7 +12,7 @@
 
 ### 模块位置
 
-memory 模块位于 ohbaby-code 的核心层，作为长期记忆管理的中心：
+memory 模块位于 ohbaby-agent 的核心层，作为长期记忆管理的中心：
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -60,8 +60,8 @@ memory 模块位于 ohbaby-code 的核心层，作为长期记忆管理的中心
    │
    ├──> 2.2 [Memory] 加载全局记忆
    │    ├── 获取路径：getGlobalMemoryPath()
-   │    │   └── ~/.config/ohbaby-code/OHBABY.md (Linux/macOS)
-   │    │   └── %APPDATA%/ohbaby-code/OHBABY.md (Windows)
+   │    │   └── ~/.config/ohbaby-agent/OHBABY.md (Linux/macOS)
+   │    │   └── %APPDATA%/ohbaby-agent/OHBABY.md (Windows)
    │    ├── 读取文件（不存在返回 ''）
    │    └── globalContent = 文件内容
    │
@@ -271,7 +271,7 @@ interface MergedMemory {
 
 **行为说明**：
 1. 调用 `Project.fromDirectory()` 获取项目根路径
-2. 读取全局 OHBABY.md（`~/.config/ohbaby-code/OHBABY.md`）
+2. 读取全局 OHBABY.md（`~/.config/ohbaby-agent/OHBABY.md`）
 3. 从 `directory` 向上查找项目 OHBABY.md，找到第一个即停止
 4. 合并两个文件内容，添加 HTML 注释标记来源
 5. 文件不存在时返回空字符串，不报错

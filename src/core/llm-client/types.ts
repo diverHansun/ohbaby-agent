@@ -2,7 +2,7 @@
  * Type definitions for the LLM Client module.
  *
  * This module provides type exports from OpenAI SDK and custom interfaces
- * for the ohbaby-code LLM client system.
+ * for the ohbaby-agent LLM client system.
  *
  * Design Principles:
  * - DRY: Re-export OpenAI types instead of duplicating them

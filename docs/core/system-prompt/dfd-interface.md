@@ -8,7 +8,7 @@
 
 ### 1.1 模块位置
 
-system-prompt 模块在 ohbaby-code 系统中的位置：
+system-prompt 模块在 ohbaby-agent 系统中的位置：
 
 ```
                   +-------------+
@@ -130,14 +130,14 @@ system-prompt 模块在 ohbaby-code 系统中的位置：
    +---> Config.getProjectPath()
    |     --> 返回项目配置目录路径
    |
-   +---> 读取 {projectPath}/.ohbaby-code/OHBABY.md
+   +---> 读取 {projectPath}/.ohbaby-agent/OHBABY.md
    |     --> 文件存在则读取内容
    |     --> 文件不存在则跳过
    |
    +---> Config.getGlobalPath()
    |     --> 返回全局配置目录路径
    |
-   +---> 读取 {globalPath}/.ohbaby-code/OHBABY.md
+   +---> 读取 {globalPath}/.ohbaby-agent/OHBABY.md
    |     --> 文件存在则读取内容
    |     --> 文件不存在则跳过
    |
@@ -273,8 +273,8 @@ interface EnvironmentInfo {
 
 | 文件类型 | 路径 | 说明 |
 |----------|------|------|
-| 项目级指令 | `.ohbaby-code/OHBABY.md` | 项目根目录 |
-| 全局级指令 | `~/.ohbaby-code/OHBABY.md` | 用户主目录 |
+| 项目级指令 | `.ohbaby-agent/OHBABY.md` | 项目根目录 |
+| 全局级指令 | `~/.ohbaby-agent/OHBABY.md` | 用户主目录 |
 
 ---
 

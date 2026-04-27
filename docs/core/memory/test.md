@@ -55,7 +55,7 @@ describe('Memory.load', () => {
   it('应正确加载并合并全局和项目记忆', async () => {
     // Given: 全局和项目 OHBABY.md 都存在
     mockFs({
-      '~/.config/ohbaby-code/OHBABY.md': '# Global Rules\n\n## Ohbaby Added Memories\n- 2026-01-01 20:00:00: 全局记忆',
+      '~/.config/ohbaby-agent/OHBABY.md': '# Global Rules\n\n## Ohbaby Added Memories\n- 2026-01-01 20:00:00: 全局记忆',
       '/project/OHBABY.md': '# Project Context\n\n## Ohbaby Added Memories\n- 2026-01-01 21:00:00: 项目记忆'
     })
     mockProject({ rootPath: '/project' })
@@ -73,7 +73,7 @@ describe('Memory.load', () => {
   
   it('只有全局记忆时应正确返回', async () => {
     mockFs({
-      '~/.config/ohbaby-code/OHBABY.md': 'Global content'
+      '~/.config/ohbaby-agent/OHBABY.md': 'Global content'
       // 项目记忆不存在
     })
     mockProject({ rootPath: '/project' })
@@ -146,7 +146,7 @@ describe('Memory.load - 向上查找', () => {
 describe('Memory.add', () => {
   it('应添加记忆到全局文件', async () => {
     mockFs({
-      '~/.config/ohbaby-code/OHBABY.md': 'Old content\n\n## Ohbaby Added Memories\n- 2026-01-01 20:00:00: Old fact'
+      '~/.config/ohbaby-agent/OHBABY.md': 'Old content\n\n## Ohbaby Added Memories\n- 2026-01-01 20:00:00: Old fact'
     })
     mockTimestamp('2026-01-01 22:00:00')
     
@@ -155,7 +155,7 @@ describe('Memory.add', () => {
       fact: 'New fact'
     })
     
-    const written = getWrittenContent('~/.config/ohbaby-code/OHBABY.md')
+    const written = getWrittenContent('~/.config/ohbaby-agent/OHBABY.md')
     expect(written).toContain('Old fact')
     expect(written).toContain('- 2026-01-01 22:00:00: New fact')
   })
@@ -169,7 +169,7 @@ describe('Memory.add', () => {
       fact: 'First fact'
     })
     
-    const written = getWrittenContent('~/.config/ohbaby-code/OHBABY.md')
+    const written = getWrittenContent('~/.config/ohbaby-agent/OHBABY.md')
     expect(written).toContain('## Ohbaby Added Memories')
     expect(written).toContain('- 2026-01-01 22:00:00: First fact')
   })
@@ -198,7 +198,7 @@ describe('Memory.add', () => {
 describe('Memory.listEntries', () => {
   it('应正确解析 AI 添加区域的条目', async () => {
     mockFs({
-      '~/.config/ohbaby-code/OHBABY.md': `
+      '~/.config/ohbaby-agent/OHBABY.md': `
 用户手写内容
 
 ## Ohbaby Added Memories
@@ -226,7 +226,7 @@ describe('Memory.listEntries', () => {
   
   it('应忽略非列表格式的内容', async () => {
     mockFs({
-      '~/.config/ohbaby-code/OHBABY.md': `
+      '~/.config/ohbaby-agent/OHBABY.md': `
 ## Ohbaby Added Memories
 
 这是一些说明文字（不是列表）
@@ -245,7 +245,7 @@ describe('Memory.listEntries', () => {
   
   it('Header 不存在时应返回空数组', async () => {
     mockFs({
-      '~/.config/ohbaby-code/OHBABY.md': '用户手写内容，没有 Header'
+      '~/.config/ohbaby-agent/OHBABY.md': '用户手写内容，没有 Header'
     })
     
     const entries = await Memory.listEntries('global')
@@ -265,7 +265,7 @@ describe('Memory.listEntries', () => {
 describe('Memory.update', () => {
   it('应更新指定索引的条目', async () => {
     mockFs({
-      '~/.config/ohbaby-code/OHBABY.md': `
+      '~/.config/ohbaby-agent/OHBABY.md': `
 用户手写内容
 
 ## Ohbaby Added Memories
@@ -282,7 +282,7 @@ describe('Memory.update', () => {
       newText: 'Updated text 2'
     })
     
-    const written = getWrittenContent('~/.config/ohbaby-code/OHBABY.md')
+    const written = getWrittenContent('~/.config/ohbaby-agent/OHBABY.md')
     expect(written).toContain('Old text 1')
     expect(written).toContain('Updated text 2')
     expect(written).toContain('Old text 3')
@@ -293,7 +293,7 @@ describe('Memory.update', () => {
   
   it('索引越界时应抛出异常', async () => {
     mockFs({
-      '~/.config/ohbaby-code/OHBABY.md': '## Ohbaby Added Memories\n- 2026-01-01 20:00:00: Only one'
+      '~/.config/ohbaby-agent/OHBABY.md': '## Ohbaby Added Memories\n- 2026-01-01 20:00:00: Only one'
     })
     
     await expect(
@@ -317,7 +317,7 @@ describe('Memory.update', () => {
 describe('Memory.remove', () => {
   it('应删除指定索引的条目', async () => {
     mockFs({
-      '~/.config/ohbaby-code/OHBABY.md': `
+      '~/.config/ohbaby-agent/OHBABY.md': `
 ## Ohbaby Added Memories
 
 - 2026-01-01 20:00:00: Fact 1
@@ -331,7 +331,7 @@ describe('Memory.remove', () => {
       index: 1  // 删除 Fact 2
     })
     
-    const written = getWrittenContent('~/.config/ohbaby-code/OHBABY.md')
+    const written = getWrittenContent('~/.config/ohbaby-agent/OHBABY.md')
     expect(written).toContain('Fact 1')
     expect(written).toContain('Fact 3')
     expect(written).not.toContain('Fact 2')
@@ -355,7 +355,7 @@ describe('Memory.remove', () => {
 describe('Memory - 错误处理', () => {
   it('文件不可读时应返回空字符串并记录警告', async () => {
     mockFs({
-      '~/.config/ohbaby-code/OHBABY.md': { readable: false }
+      '~/.config/ohbaby-agent/OHBABY.md': { readable: false }
     })
     const warnLog = vi.spyOn(console, 'warn')
     
@@ -367,7 +367,7 @@ describe('Memory - 错误处理', () => {
   
   it('写入失败时应抛出异常', async () => {
     mockFs({
-      '~/.config/ohbaby-code': { writable: false }
+      '~/.config/ohbaby-agent': { writable: false }
     })
     
     await expect(
@@ -378,7 +378,7 @@ describe('Memory - 错误处理', () => {
   it('文件过大时应记录警告但仍读取', async () => {
     const largContent = 'a'.repeat(2 * 1024 * 1024)  // 2MB
     mockFs({
-      '~/.config/ohbaby-code/OHBABY.md': largeContent
+      '~/.config/ohbaby-agent/OHBABY.md': largeContent
     })
     const warnLog = vi.spyOn(console, 'warn')
     
@@ -515,7 +515,7 @@ describe('Integration: Real Filesystem', () => {
   
   it('应正确读写真实 OHBABY.md 文件', async () => {
     // 创建全局配置目录
-    const globalDir = path.join(tempDir, '.config', 'ohbaby-code')
+    const globalDir = path.join(tempDir, '.config', 'ohbaby-agent')
     await fs.mkdir(globalDir, { recursive: true })
     const globalPath = path.join(globalDir, 'OHBABY.md')
     

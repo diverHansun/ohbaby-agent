@@ -20,7 +20,7 @@
 
 ### 1.3 McpTool（MCP工具）
 
-从MCP服务器发现的工具，经过适配后转换为ohbaby-code Tool接口。
+从MCP服务器发现的工具，经过适配后转换为ohbaby-agent Tool接口。
 
 本质：Value Object（值对象），工具定义不可变。
 
@@ -95,7 +95,7 @@ interface ToolAnnotations {
 > **安全默认原则**：MCP 服务器不提供 `annotations` 时，无法判断工具是否安全并行，故默认串行。  
 > 只有服务器明确声明 `readOnlyHint: true` 时才允许并行，符合"保守优于激进"的并发原则。
 
-### 2.4 转换后的Tool（ohbaby-code格式）
+### 2.4 转换后的Tool（ohbaby-agent格式）
 
 ```typescript
 interface Tool {
@@ -348,7 +348,7 @@ class McpClient {
   async connect(): Promise<void> {
     try {
       this.transport = createTransport(this.config)
-      this.client = new Client({ name: 'ohbaby-code', version: '1.0.0' })
+      this.client = new Client({ name: 'ohbaby-agent', version: '1.0.0' })
       await this.client.connect(this.transport)
 
       const tools = await this.listTools()
@@ -552,7 +552,7 @@ McpSseConfig → {
 ## 十一、文档自检
 
 - 核心概念定义清晰，区分Entity和Value Object
-- 数据类型完整覆盖MCP协议和ohbaby-code集成
+- 数据类型完整覆盖MCP协议和ohbaby-agent集成
 - 类定义完整，包含生命周期
 - 内容转换逻辑清晰
 - 错误类型定义明确

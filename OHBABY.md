@@ -1,6 +1,6 @@
 # OHBABY.md
 
-This is the canonical long-term project memory file for `ohbaby-code`.
+This is the canonical long-term project memory file for `ohbaby-agent`.
 
 ## Compatibility
 
@@ -10,9 +10,9 @@ This is the canonical long-term project memory file for `ohbaby-code`.
 
 ## Project Identity
 
-- Project name: `ohbaby-code`
+- Project name: `ohbaby-agent`
 - CLI command target: `ohbaby`
-- Repository: `https://github.com/diverHansun/ohbaby-code`
+- Repository: `https://github.com/diverHansun/ohbaby-agent`
 
 ## Current Status
 

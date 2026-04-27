@@ -796,7 +796,7 @@ async function createTestConfig(
   config: McpServersConfig,
   workspacePath: string = testWorkspaceId
 ): Promise<void> {
-  const configPath = path.join(workspacePath, '.ohbaby-code', 'mcp', 'settings.json')
+  const configPath = path.join(workspacePath, '.ohbaby-agent', 'mcp', 'settings.json')
   await fs.mkdir(path.dirname(configPath), { recursive: true })
   await fs.writeFile(configPath, JSON.stringify(config, null, 2))
 }

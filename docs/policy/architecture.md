@@ -8,7 +8,7 @@
 
 ### 模块定位
 
-Policy 模块是 ohbaby-code 的策略决策中心，位于 Commands/ToolScheduler 与 Permission 之间，负责根据当前工作模式判断工具调用是否需要用户确认。
+Policy 模块是 ohbaby-agent 的策略决策中心，位于 Commands/ToolScheduler 与 Permission 之间，负责根据当前工作模式判断工具调用是否需要用户确认。
 
 ### 核心架构
 

@@ -77,7 +77,7 @@ interface ConversationRecord {
 - `thoughts`: 思考过程（如果是 gemini 消息）
 - `tokens`: Token 统计
 
-### 2.3 ohbaby-code 建议的存储结构
+### 2.3 ohbaby-agent 建议的存储结构
 
 ```
 src/core/conversation/
@@ -93,7 +93,7 @@ src/services/session/
 **存储位置：**
 
 ```
-~/.ohbaby-code/
+~/.ohbaby-agent/
 ├── sessions/
 │   └── session-<projectHash>-<sessionId>.json
 ```
@@ -290,7 +290,7 @@ async startChat(
 - 保留完整的消息历史（包括 thoughts、tokens）
 - 验证消息有效性
 
-## 六、ohbaby-code Conversation 设计建议
+## 六、ohbaby-agent Conversation 设计建议
 
 ### 6.1 模块结构
 
@@ -372,7 +372,7 @@ OpenAI API 对消息顺序有严格要求：
 
 ## 七、总结对比
 
-| 方面 | gemini-cli | ohbaby-code 建议 |
+| 方面 | gemini-cli | ohbaby-agent 建议 |
 |------|-----------|---------------|
 | **消息存储** | `GeminiChat.history: Content[]` | `Conversation.messages: ChatCompletionMessage[]` |
 | **系统消息** | `systemInstruction` 参数（独立） | `getSystemMessage()` 方法 |

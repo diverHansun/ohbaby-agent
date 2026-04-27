@@ -8,7 +8,7 @@
 
 ### 模块位置
 
-Storage 模块位于 ohbaby-code 架构的底层，是 Session 和 Message 模块的基础设施依赖。
+Storage 模块位于 ohbaby-agent 架构的底层，是 Session 和 Message 模块的基础设施依赖。
 
 ### 交互模块
 

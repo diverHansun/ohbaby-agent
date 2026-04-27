@@ -1,6 +1,6 @@
 # MCP 配置格式决策文档
 
-本文档记录 ohbaby-code MCP 模块采用的配置格式及其理由。
+本文档记录 ohbaby-agent MCP 模块采用的配置格式及其理由。
 
 ---
 
@@ -54,7 +54,7 @@
 
 ## 二、关键差异对比
 
-| 特性 | ohbaby-code（主流格式） | opencode格式 |
+| 特性 | ohbaby-agent（主流格式） | opencode格式 |
 |------|---------------------|-------------|
 | **顶层字段** | `mcpServers` | `mcp` |
 | **类型标识** | `stdio` / `http` / `sse` | `local` / `remote` |
@@ -347,7 +347,7 @@ function normalizeConfig(raw: any): McpServerConfig {
 ## 八、文档自检
 
 - [x] 清楚说明了采用主流格式的理由
-- [x] 对比了 ohbaby-code 与 opencode 格式的差异
+- [x] 对比了 ohbaby-agent 与 opencode 格式的差异
 - [x] 提供了充分的官方文档和社区资源引用
 - [x] 给出了完整的配置示例集合
 - [x] 说明了实现映射细节

@@ -55,7 +55,7 @@ interface McpStdioConfig {
 
 **说明**：
 
-ohbaby-code 采用**主流格式**（分离的 `command` 和 `args`），与以下工具保持一致：
+ohbaby-agent 采用**主流格式**（分离的 `command` 和 `args`），与以下工具保持一致：
 - Claude Desktop
 - Cursor
 - VS Code Copilot
@@ -402,10 +402,10 @@ export const DEFAULT_MCP_TRUST = false
 ### 8.2 配置文件路径
 
 ```typescript
-export const GLOBAL_MCP_CONFIG_DIR = '~/.ohbaby-code/mcp'
+export const GLOBAL_MCP_CONFIG_DIR = '~/.ohbaby-agent/mcp'
 export const GLOBAL_MCP_CONFIG_FILE = 'settings.json'
 
-export const PROJECT_MCP_CONFIG_DIR = '.ohbaby-code/mcp'
+export const PROJECT_MCP_CONFIG_DIR = '.ohbaby-agent/mcp'
 export const PROJECT_MCP_CONFIG_FILE = 'settings.json'
 ```
 

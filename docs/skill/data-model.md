@@ -27,7 +27,7 @@ interface SkillInfo {
   /** 是否允许用户通过 /<name> 直接调用，默认 true */
   userInvocable: boolean
 
-  /** 是否禁止 Agent 主动调用，默认 true（ohbaby-code 设计：Skill 默认不暴露给 Agent） */
+  /** 是否禁止 Agent 主动调用，默认 true（ohbaby-agent 设计：Skill 默认不暴露给 Agent） */
   disableModelInvocation: boolean
 
   /** Skill 来源：user（用户级）或 project（项目级） */
@@ -127,7 +127,7 @@ Detailed instructions and guidelines...
 | `compatibility` | string | 否 | - | 兼容性说明 |
 | `metadata` | object | 否 | - | 自定义元数据 |
 
-**ohbaby-code 设计理念**：
+**ohbaby-agent 设计理念**：
 - `disable-model-invocation` 默认为 `true`，即 **Skill 默认不暴露给 Agent**
 - 用户通过 `/<skill-name>` 手动触发，按需注入到对话上下文
 - 这与 Claude Code 不同（Claude Code 默认暴露给 Agent 自动发现）
@@ -270,7 +270,7 @@ interface SkillToolResult {
 ```
 ## Skill: code-review
 
-**Base directory**: /path/to/.ohbaby-code/skill/code-review
+**Base directory**: /path/to/.ohbaby-agent/skill/code-review
 
 # Code Review Guidelines
 
@@ -281,7 +281,7 @@ interface SkillToolResult {
 ```
 ## Skill: xlsx
 
-**Base directory**: /path/to/.ohbaby-code/skill/xlsx
+**Base directory**: /path/to/.ohbaby-agent/skill/xlsx
 
 **Available files**:
 - read-xlsx.ts
@@ -368,16 +368,16 @@ interface ConfigDirectory {
 
 ### 7.1 类型对照
 
-| OpenCode | Claude Code | ohbaby-code | 说明 |
+| OpenCode | Claude Code | ohbaby-agent | 说明 |
 |----------|-------------|-----------|------|
-| `Skill.Info` | - | `SkillInfo` | 兼容，ohbaby-code 增加 scope、userInvocable 等字段 |
+| `Skill.Info` | - | `SkillInfo` | 兼容，ohbaby-agent 增加 scope、userInvocable 等字段 |
 | `Skill.InvalidError` | - | `SkillInvalidError` | 结构相同 |
 | - | `user-invocable` | `userInvocable` | 兼容 Claude Code 字段 |
 | - | `disable-model-invocation` | `disableModelInvocation` | 兼容 Claude Code 字段 |
 
 ### 7.2 文件格式兼容性
 
-ohbaby-code 的 SKILL.md 格式与 OpenCode/Claude Code 兼容：
+ohbaby-agent 的 SKILL.md 格式与 OpenCode/Claude Code 兼容：
 - YAML frontmatter 格式相同
 - 必填字段相同（name, description）
 - 可选字段兼容 Claude Code（user-invocable, disable-model-invocation）
@@ -385,31 +385,31 @@ ohbaby-code 的 SKILL.md 格式与 OpenCode/Claude Code 兼容：
 
 ### 7.3 目录结构兼容性
 
-ohbaby-code 完全支持 OpenCode/Claude Code 的 Skill 目录结构：
+ohbaby-agent 完全支持 OpenCode/Claude Code 的 Skill 目录结构：
 - Skill 是一个目录，包含 SKILL.md 和可选的辅助文件
 - 辅助文件可以是脚本、模板、资源等
 - opencode 提供 `baseDir`（通过 `dir` 字段）让 Agent 自行探索
-- ohbaby-code 额外提供 `files` 列表，方便 Agent 了解可用资源
+- ohbaby-agent 额外提供 `files` 列表，方便 Agent 了解可用资源
 
 ### 7.4 设计差异
 
-ohbaby-code 与 Claude Code/opencode 的主要差异：
+ohbaby-agent 与 Claude Code/opencode 的主要差异：
 
-| 特性 | Claude Code | opencode | ohbaby-code |
+| 特性 | Claude Code | opencode | ohbaby-agent |
 |------|-------------|----------|-----------|
 | Agent 自动发现 Skill | ✅ 默认启用 | ✅ 默认启用 | ❌ 默认禁用 |
 | `disable-model-invocation` 默认值 | `false` | - | `true` |
 | Skill 触发方式 | Agent 自动 + 用户手动 | Agent 自动 + 用户手动 | **仅用户手动** |
 | Skill 元数据加载时机 | 启动时 | 启动时 | 按需（用户触发时） |
 
-**ohbaby-code 设计理念**：
+**ohbaby-agent 设计理念**：
 - Skill 是用户的专属工具，用户明确知道何时需要使用
 - 避免 Skill 元数据占用系统提示 Token
 - 通过 `/<skill-name>` 按需注入，保持上下文简洁
 
 ### 7.5 增强功能
 
-ohbaby-code 在兼容基础上增加：
+ohbaby-agent 在兼容基础上增加：
 - `SkillInfo.baseDir`：在元数据中直接提供目录路径
 - `SkillInfo.scope`：标识 Skill 来源（user/project）
 - `SkillContent.files`：列出目录中的辅助文件
@@ -427,5 +427,5 @@ ohbaby-code 在兼容基础上增加：
 - [x] Skill 目录结构和辅助文件支持已说明
 - [x] files 字段的用途和格式已明确
 - [x] 新增字段（userInvocable, disableModelInvocation, scope）已定义
-- [x] ohbaby-code 与 Claude Code 的设计差异已明确说明
+- [x] ohbaby-agent 与 Claude Code 的设计差异已明确说明
 - [x] 字段验证规则（name 64字符限制、description 1024字符限制）已定义

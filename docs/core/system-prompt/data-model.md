@@ -184,7 +184,7 @@ Identity 层提示词包含以下部分（约 800 行）：
 interface IdentityPromptStructure {
   /** 身份声明 */
   identity: string
-  // "You are ohbaby-code, an AI coding assistant..."
+  // "You are ohbaby-agent, an AI coding assistant..."
 
   /** 核心能力 */
   capabilities: string
@@ -266,10 +266,10 @@ const SUBAGENT_LAYER_ORDER: LayerType[] = [
 const PROJECT_INSTRUCTIONS_FILE = 'OHBABY.md'
 
 /** 项目级配置目录 */
-const PROJECT_CONFIG_DIR = '.ohbaby-code'
+const PROJECT_CONFIG_DIR = '.ohbaby-agent'
 
 /** 全局配置目录名 */
-const GLOBAL_CONFIG_DIR = '.ohbaby-code'
+const GLOBAL_CONFIG_DIR = '.ohbaby-agent'
 ```
 
 ### 4.3 限制常量

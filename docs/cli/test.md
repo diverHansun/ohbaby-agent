@@ -32,11 +32,11 @@ cli 模块测试覆盖以下职责：
 
 | 场景 | 输入 | 预期结果 |
 |------|------|----------|
-| 无参数启动 | `ohbaby-code` | `{ help: false, version: false, prompt: undefined }` |
-| 帮助参数 | `ohbaby-code -h` | `{ help: true }` |
-| 版本参数 | `ohbaby-code -v` | `{ version: true }` |
-| prompt 参数 | `ohbaby-code -p "测试"` | `{ prompt: "测试" }` |
-| 未知参数 | `ohbaby-code --unknown` | 抛出 CliArgumentError |
+| 无参数启动 | `ohbaby-agent` | `{ help: false, version: false, prompt: undefined }` |
+| 帮助参数 | `ohbaby-agent -h` | `{ help: true }` |
+| 版本参数 | `ohbaby-agent -v` | `{ version: true }` |
+| prompt 参数 | `ohbaby-agent -p "测试"` | `{ prompt: "测试" }` |
+| 未知参数 | `ohbaby-agent --unknown` | 抛出 CliArgumentError |
 
 ### 2.2 模式判断场景
 
@@ -137,17 +137,17 @@ cli 模块测试覆盖以下职责：
 // args.test.ts
 describe('parseArgs', () => {
   it('should parse help flag', () => {
-    const args = parseArgs(['node', 'ohbaby-code', '-h'])
+    const args = parseArgs(['node', 'ohbaby-agent', '-h'])
     expect(args.help).toBe(true)
   })
 
   it('should parse prompt option', () => {
-    const args = parseArgs(['node', 'ohbaby-code', '-p', '测试'])
+    const args = parseArgs(['node', 'ohbaby-agent', '-p', '测试'])
     expect(args.prompt).toBe('测试')
   })
 
   it('should throw on invalid option', () => {
-    expect(() => parseArgs(['node', 'ohbaby-code', '--invalid']))
+    expect(() => parseArgs(['node', 'ohbaby-agent', '--invalid']))
       .toThrow(CliArgumentError)
   })
 })
@@ -169,7 +169,7 @@ describe('bootstrap', () => {
     const logInit = vi.spyOn(Log, 'init')
     const loadConfig = vi.spyOn(config, 'loadConfig')
 
-    await bootstrap(['node', 'ohbaby-code', '-p', 'test'])
+    await bootstrap(['node', 'ohbaby-agent', '-p', 'test'])
 
     expect(logInit).toHaveBeenCalledBefore(loadConfig)
   })
@@ -178,7 +178,7 @@ describe('bootstrap', () => {
     vi.spyOn(process.stdin, 'isTTY', 'get').mockReturnValue(true)
     const renderSpy = vi.spyOn(UI, 'render')
 
-    await bootstrap(['node', 'ohbaby-code'])
+    await bootstrap(['node', 'ohbaby-agent'])
 
     expect(renderSpy).toHaveBeenCalled()
   })
@@ -201,7 +201,7 @@ describe('exception handlers', () => {
     })
 
     try {
-      await bootstrap(['node', 'ohbaby-code', '--invalid'])
+      await bootstrap(['node', 'ohbaby-agent', '--invalid'])
     } catch {}
 
     expect(exitSpy).toHaveBeenCalledWith(2)

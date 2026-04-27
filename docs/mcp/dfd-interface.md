@@ -9,7 +9,7 @@
 ### 1.1 完整工作流程
 
 ```
-ohbaby-code启动
+ohbaby-agent启动
    │
    ▼
 [不初始化MCP]  ← 懒加载策略
@@ -410,8 +410,8 @@ executeTool(serverName, toolName, params)
    │
    ├─→ McpManager.getInstance('/path/to/project-a')
    │     │
-   │     ├─→ 加载全局配置: ~/.ohbaby-code/mcp/settings.json
-   │     ├─→ 加载项目配置: /path/to/project-a/.ohbaby-code/mcp/settings.json
+   │     ├─→ 加载全局配置: ~/.ohbaby-agent/mcp/settings.json
+   │     ├─→ 加载项目配置: /path/to/project-a/.ohbaby-agent/mcp/settings.json
    │     ├─→ 合并配置
    │     └─→ 创建独立的clients Map
    │
@@ -421,8 +421,8 @@ executeTool(serverName, toolName, params)
    │
    ├─→ McpManager.getInstance('/path/to/project-b')
    │     │
-   │     ├─→ 加载全局配置: ~/.ohbaby-code/mcp/settings.json
-   │     ├─→ 加载项目配置: /path/to/project-b/.ohbaby-code/mcp/settings.json
+   │     ├─→ 加载全局配置: ~/.ohbaby-agent/mcp/settings.json
+   │     ├─→ 加载项目配置: /path/to/project-b/.ohbaby-agent/mcp/settings.json
    │     ├─→ 合并配置
    │     └─→ 创建独立的clients Map
    │
@@ -497,14 +497,14 @@ T3: dispose()
    ▼
 loadMcpConfig()
    │
-   ├─→ 全局: ~/.ohbaby-code/mcp/settings.json
+   ├─→ 全局: ~/.ohbaby-agent/mcp/settings.json
    │     {
    │       "mcpServers": {
    │         "github": { "url": "...", "trust": false }
    │       }
    │     }
    │
-   ├─→ 项目: {workspace}/.ohbaby-code/mcp/settings.json
+   ├─→ 项目: {workspace}/.ohbaby-agent/mcp/settings.json
    │     {
    │       "mcpServers": {
    │         "github": { "url": "...", "trust": true },

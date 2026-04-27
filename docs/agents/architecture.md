@@ -124,7 +124,7 @@ SubagentExecutor
 ### 3.1 目录结构
 
 ```
-ohbaby-code/src/core/agents/
+ohbaby-agent/src/core/agents/
 ├── index.ts                 # 公共 API 导出
 ├── manager.ts               # AgentManager 实现
 ├── registry.ts              # AgentRegistry 实现

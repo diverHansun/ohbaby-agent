@@ -6,7 +6,7 @@
 
 ## 一、模块定位
 
-**一句话说明**：agent 模块是 ohbaby-code 的代理配置管理中心，负责管理主代理和子代理的配置、提供查询接口，并通过 SubagentExecutor 支持子代理的受控执行。
+**一句话说明**：agent 模块是 ohbaby-agent 的代理配置管理中心，负责管理主代理和子代理的配置、提供查询接口，并通过 SubagentExecutor 支持子代理的受控执行。
 
 **如果没有这个模块**：
 - Lifecycle 将缺乏切换不同代理行为的能力
@@ -27,8 +27,8 @@
 
 支持从多个来源加载代理配置：
 - 内置代理：代码定义的默认代理（build、plan、explore、research）
-- 全局配置：用户级配置文件（`~/.ohbaby-code/agents/`）
-- 项目配置：项目级配置文件（`.ohbaby-code/agents/`）
+- 全局配置：用户级配置文件（`~/.ohbaby-agent/agents/`）
+- 项目配置：项目级配置文件（`.ohbaby-agent/agents/`）
 
 配置采用合并策略，项目级可覆盖全局级，全局级可覆盖内置配置。
 

@@ -19,7 +19,7 @@
 ```
 一个 AI 系统
 ├── Global Memory（全局记忆）
-│   ├── 存储位置：~/.config/ohbaby-code/OHBABY.md
+│   ├── 存储位置：~/.config/ohbaby-agent/OHBABY.md
 │   ├── 作用范围：所有项目
 │   └── 内容：用户通用偏好、习惯
 │
@@ -41,7 +41,7 @@
 
 | 维度 | Global | Project |
 |------|--------|---------|
-| 存储路径 | `~/.config/ohbaby-code/OHBABY.md` | `{projectRoot}/OHBABY.md` |
+| 存储路径 | `~/.config/ohbaby-agent/OHBABY.md` | `{projectRoot}/OHBABY.md` |
 | 作用范围 | 所有项目 | 特定项目 |
 | 内容示例 | "用户偏好使用 TypeScript" | "本项目使用 Vitest 测试框架" |
 | 版本控制 | 不提交（个人配置） | 可提交（团队共享） |
@@ -93,7 +93,7 @@
 interface MergedMemory {
   // ======== 全局记忆 ========
   global: string                // 全局 OHBABY.md 的原始内容
-                                // 来源：~/.config/ohbaby-code/OHBABY.md
+                                // 来源：~/.config/ohbaby-agent/OHBABY.md
   
   // ======== 项目记忆 ========
   project: string               // 项目 OHBABY.md 的原始内容
@@ -220,7 +220,7 @@ interface RemoveMemoryInput {
 ### 合并后的格式
 
 ```markdown
-<!-- Global Memory from ~/.config/ohbaby-code/OHBABY.md -->
+<!-- Global Memory from ~/.config/ohbaby-agent/OHBABY.md -->
 用户全局偏好内容...
 
 ## Ohbaby Added Memories
@@ -315,7 +315,7 @@ export const TIMESTAMP_FORMAT = 'YYYY-MM-DD HH:MM:SS'
 /**
  * 全局配置目录名
  */
-export const CONFIG_DIR_NAME = 'ohbaby-code'
+export const CONFIG_DIR_NAME = 'ohbaby-agent'
 
 /**
  * 记忆文件名
