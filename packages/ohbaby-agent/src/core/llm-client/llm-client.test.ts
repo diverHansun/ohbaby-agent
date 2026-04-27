@@ -6,8 +6,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createLLMClient, streamChatCompletion } from './index';
-import type { LLMClientInstance } from './types';
+import { createLLMClient, streamChatCompletion } from './index.js';
+import type { LLMClientInstance } from './types.js';
 
 // Mock the config module
 vi.mock('../../config/index.js', () => ({

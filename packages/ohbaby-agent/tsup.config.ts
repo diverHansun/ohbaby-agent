@@ -1,0 +1,33 @@
+import { defineConfig } from 'tsup';
+
+export default defineConfig({
+  entry: ['src/index.ts'],
+  format: ['esm'],
+  dts: false,
+  splitting: false,
+  sourcemap: true,
+  clean: true,
+  target: 'node20',
+  outDir: 'dist',
+  treeshake: true,
+  minify: false,
+  shims: true,
+  external: [
+    'fs',
+    'path',
+    'os',
+    'child_process',
+    'readline',
+    'stream',
+    'util',
+    'events',
+    'crypto',
+    'http',
+    'https',
+    'url',
+    'net',
+    'tls',
+    'zlib',
+    'ohbaby-sdk',
+  ],
+});

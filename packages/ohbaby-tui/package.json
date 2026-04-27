@@ -1,0 +1,30 @@
+{
+  "name": "ohbaby-tui",
+  "version": "0.1.0",
+  "description": "Terminal UI package for ohbaby-agent",
+  "type": "module",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup && tsc -b --force",
+    "typecheck": "tsc -b",
+    "clean": "rimraf dist coverage"
+  },
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "ink": "^6.0.0",
+    "ohbaby-sdk": "workspace:*",
+    "react": "^19.0.0"
+  }
+}

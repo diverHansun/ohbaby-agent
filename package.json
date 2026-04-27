@@ -1,38 +1,29 @@
 {
-  "name": "ohbaby-agent",
+  "name": "ohbaby-agent-workspace",
   "version": "0.1.0",
-  "description": "An AI assistant designed by myself like raising a baby, interacting with him through CLI",
+  "description": "Workspace for ohbaby-agent, ohbaby-sdk, and ohbaby-tui",
+  "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.0",
   "engines": {
     "node": ">=20.0.0"
   },
-  "bin": {
-    "ohbaby": "./dist/index.js"
-  },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "dev:inspect": "tsx watch --inspect src/index.ts",
-    "start": "node dist/index.js",
-    "build": "tsup",
-    "build:check": "tsc --noEmit",
-    "test": "vitest run",
+    "dev": "pnpm --filter ohbaby-agent dev",
+    "dev:inspect": "pnpm --filter ohbaby-agent dev:inspect",
+    "start": "pnpm --filter ohbaby-agent start",
+    "build": "pnpm -r --filter \"./packages/**\" --sort build",
+    "build:check": "pnpm run typecheck",
+    "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint src --ext .ts,.tsx",
-    "lint:fix": "eslint src --ext .ts,.tsx --fix",
-    "format": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx}\"",
+    "test:coverage": "vitest run --coverage --passWithNoTests",
+    "typecheck": "tsc -b",
+    "lint": "eslint \"packages/*/src/**/*.{ts,tsx}\"",
+    "lint:fix": "eslint \"packages/*/src/**/*.{ts,tsx}\" --fix",
+    "format": "prettier --write \"packages/**/*.{ts,tsx,json,md}\" \"*.{json,js,ts,md,yaml}\"",
+    "format:check": "prettier --check \"packages/**/*.{ts,tsx,json,md}\" \"*.{json,js,ts,md,yaml}\"",
     "preflight": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build",
-    "clean": "rimraf dist coverage",
+    "clean": "pnpm -r --filter \"./packages/**\" --if-present clean && rimraf coverage dist",
     "prepare": "husky"
   },
   "keywords": [
@@ -55,17 +46,6 @@
     "url": "https://github.com/diverHansun/ohbaby-agent/issues"
   },
   "homepage": "https://github.com/diverHansun/ohbaby-agent#readme",
-  "dependencies": {
-    "@tavily/core": "^0.6.4",
-    "chalk": "^5.4.1",
-    "commander": "^13.1.0",
-    "dotenv": "^16.4.7",
-    "exa-js": "^2.0.12",
-    "ink": "^6.0.0",
-    "openai": "^4.77.0",
-    "react": "^19.0.0",
-    "zod": "^3.24.1"
-  },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
@@ -81,6 +61,7 @@
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.2",
     "vitest": "^2.1.8"
   }
 }
