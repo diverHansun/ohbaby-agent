@@ -184,7 +184,7 @@ Identity 层提示词包含以下部分（约 800 行）：
 interface IdentityPromptStructure {
   /** 身份声明 */
   identity: string
-  // "You are iris-code, an AI coding assistant..."
+  // "You are ohbaby-code, an AI coding assistant..."
 
   /** 核心能力 */
   capabilities: string
@@ -263,13 +263,13 @@ const SUBAGENT_LAYER_ORDER: LayerType[] = [
 
 ```typescript
 /** 项目级自定义指令文件名 */
-const PROJECT_INSTRUCTIONS_FILE = 'IRIS.md'
+const PROJECT_INSTRUCTIONS_FILE = 'OHBABY.md'
 
 /** 项目级配置目录 */
-const PROJECT_CONFIG_DIR = '.iris-code'
+const PROJECT_CONFIG_DIR = '.ohbaby-code'
 
 /** 全局配置目录名 */
-const GLOBAL_CONFIG_DIR = '.iris-code'
+const GLOBAL_CONFIG_DIR = '.ohbaby-code'
 ```
 
 ### 4.3 限制常量

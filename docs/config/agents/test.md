@@ -11,8 +11,8 @@
 本模块测试关注以下职责的验证：
 
 1. **配置文件加载**
-   - 从全局路径（`~/.iris-code/agents/settings.json`）读取配置
-   - 从项目路径（`.iris-code/agents/settings.json`）读取配置
+   - 从全局路径（`~/.ohbaby-code/agents/settings.json`）读取配置
+   - 从项目路径（`.ohbaby-code/agents/settings.json`）读取配置
    - 文件不存在时返回空配置
 
 2. **配置合并**

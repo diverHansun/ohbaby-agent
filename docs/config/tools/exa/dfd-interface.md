@@ -21,11 +21,11 @@
 │                         Path Resolution                                  │
 │                                                                          │
 │  1. 解析项目配置路径                                                      │
-│     projectPath = {projectRoot}/.iris-code/tools/exa.yaml               │
+│     projectPath = {projectRoot}/.ohbaby-code/tools/exa.yaml               │
 │                                                                          │
 │  2. 解析用户配置路径                                                      │
-│     Windows: %APPDATA%/iris-code/tools/exa.yaml                         │
-│     Linux/Mac: ~/.config/iris-code/tools/exa.yaml                       │
+│     Windows: %APPDATA%/ohbaby-code/tools/exa.yaml                         │
+│     Linux/Mac: ~/.config/ohbaby-code/tools/exa.yaml                       │
 │                                                                          │
 └─────────────────────────────────────┬────────────────────────────────────┘
                                       │
@@ -46,7 +46,7 @@
 │             │ merge                                                      │
 │             ▼                                                            │
 │  ┌─────────────────────┐      ┌─────────────────────┐                   │
-│  │  项目级配置          │ ◄──  │  .iris-code/tools/  │                   │
+│  │  项目级配置          │ ◄──  │  .ohbaby-code/tools/  │                   │
 │  │  (如果存在)          │      │  exa.yaml           │                   │
 │  └──────────┬──────────┘      └─────────────────────┘                   │
 │             │ merge                                                      │

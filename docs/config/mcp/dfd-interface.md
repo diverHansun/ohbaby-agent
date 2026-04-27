@@ -16,7 +16,7 @@ loadMcpConfig()
    │
    ├─→ loadFromPath(globalPath)
    │     │
-   │     ├─→ fs.readFile()              读取 ~/.iris-code/mcp/settings.json
+   │     ├─→ fs.readFile()              读取 ~/.ohbaby-code/mcp/settings.json
    │     ├─→ JSON.parse()               解析JSON
    │     └─→ McpServersConfigSchema.parse()  Zod验证
    │          ↓
@@ -24,7 +24,7 @@ loadMcpConfig()
    │
    ├─→ loadFromPath(projectPath)
    │     │
-   │     ├─→ fs.readFile()              读取 {project}/.iris-code/mcp/settings.json
+   │     ├─→ fs.readFile()              读取 {project}/.ohbaby-code/mcp/settings.json
    │     ├─→ JSON.parse()               解析JSON
    │     └─→ McpServersConfigSchema.parse()  Zod验证
    │          ↓
@@ -285,7 +285,7 @@ mcp 模块
 
 ### 5.1 全局配置
 
-路径：`~/.iris-code/mcp/settings.json`
+路径：`~/.ohbaby-code/mcp/settings.json`
 
 用途：
 - 用户级别的默认MCP服务器配置
@@ -308,7 +308,7 @@ mcp 模块
 
 ### 5.2 项目配置
 
-路径：`{project}/.iris-code/mcp/settings.json`
+路径：`{project}/.ohbaby-code/mcp/settings.json`
 
 用途：
 - 项目特定的MCP服务器配置

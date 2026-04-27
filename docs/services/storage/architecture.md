@@ -8,7 +8,7 @@
 
 ### 模块定位
 
-Storage 模块是 iris-code 的底层基础设施，为上层模块（Session、Message）提供统一的持久化能力。
+Storage 模块是 ohbaby-code 的底层基础设施，为上层模块（Session、Message）提供统一的持久化能力。
 
 ### 核心架构
 
@@ -81,9 +81,9 @@ Path: {baseDir}/storage/session/projectId/sessionId.json
 ```
 Platform    | Base Directory
 ------------|----------------------------------------
-Linux       | $XDG_DATA_HOME/iris-code 或 ~/.local/share/iris-code
-macOS       | ~/Library/Application Support/iris-code
-Windows     | %APPDATA%/iris-code
+Linux       | $XDG_DATA_HOME/ohbaby-code 或 ~/.local/share/ohbaby-code
+macOS       | ~/Library/Application Support/ohbaby-code
+Windows     | %APPDATA%/ohbaby-code
 ```
 
 ### 2.2 LockManager
@@ -244,7 +244,7 @@ packages/core/src/services/storage/
 - 获得：可调试性、人类可读性
 
 **理由**：
-- iris-code 的数据量不大（会话、消息），JSON 性能足够
+- ohbaby-code 的数据量不大（会话、消息），JSON 性能足够
 - 便于开发调试和问题排查
 
 ### 5.2 选择文件级锁而非更细粒度锁
@@ -265,7 +265,7 @@ packages/core/src/services/storage/
 
 **理由**：
 - 避免缓存一致性问题
-- iris-code 的读取频率不高，直接读取文件可接受
+- ohbaby-code 的读取频率不高，直接读取文件可接受
 - 上层模块可根据需要自行缓存
 
 ### 5.4 写者优先的锁策略
@@ -285,7 +285,7 @@ packages/core/src/services/storage/
 - 获得：实现简单，无需引入进程间锁
 
 **理由**：
-- iris-code 是单进程 CLI/VSCode 扩展
+- ohbaby-code 是单进程 CLI/VSCode 扩展
 - 多进程场景可通过进程协调或数据库解决
 
 ---

@@ -8,19 +8,19 @@
 
 ### 1. 提供MCP协议的客户端实现
 
-实现Model Context Protocol客户端，支持Stdio和HTTP/SSE两种传输方式，让iris-code能够连接和使用符合MCP协议的工具服务器。
+实现Model Context Protocol客户端，支持Stdio和HTTP/SSE两种传输方式，让ohbaby-code能够连接和使用符合MCP协议的工具服务器。
 
 ### 2. 动态扩展工具能力
 
-允许用户通过配置文件添加MCP服务器，动态扩展LLM可用的工具集，而无需修改iris-code代码。
+允许用户通过配置文件添加MCP服务器，动态扩展LLM可用的工具集，而无需修改ohbaby-code代码。
 
 ### 3. 与tool-scheduler无缝集成
 
-将MCP工具转换为iris-code的Tool接口，注册到ToolScheduler，使MCP工具与内置工具在调用层面保持一致。
+将MCP工具转换为ohbaby-code的Tool接口，注册到ToolScheduler，使MCP工具与内置工具在调用层面保持一致。
 
 ### 4. 参与统一的并发调度
 
-MCP 工具在适配时通过 `annotations.readOnlyHint` 推断 ToolCategory（`true` → `readonly`，其余 → `write`），注册到 ToolScheduler 后与内置工具走相同的并发控制路径。iris-code 负责工具调用的转发和并发协调，MCP 服务器负责工具的实际执行。
+MCP 工具在适配时通过 `annotations.readOnlyHint` 推断 ToolCategory（`true` → `readonly`，其余 → `write`），注册到 ToolScheduler 后与内置工具走相同的并发控制路径。ohbaby-code 负责工具调用的转发和并发协调，MCP 服务器负责工具的实际执行。
 
 ### 5. 支持多工作区隔离
 
@@ -43,7 +43,7 @@ MCP 工具在适配时通过 `annotations.readOnlyHint` 推断 ToolCategory（`t
 
 负责：
 - 调用MCP协议的listTools接口发现工具
-- 将MCP工具定义转换为iris-code的Tool接口
+- 将MCP工具定义转换为ohbaby-code的Tool接口
 - 根据配置过滤工具（includeTools、excludeTools）
 - 为每个MCP工具生成唯一的名称（serverName_toolName格式）
 
@@ -59,7 +59,7 @@ MCP 工具在适配时通过 `annotations.readOnlyHint` 推断 ToolCategory（`t
 
 负责：
 - 首次调用MCP工具时才初始化MCP客户端
-- 避免MCP加载失败影响iris-code启动
+- 避免MCP加载失败影响ohbaby-code启动
 - 单个MCP服务器失败不影响其他服务器和内置工具
 
 ### 5. 配置驱动的信任机制
@@ -158,6 +158,6 @@ const config = await loadMcpConfig()
 
 ## 六、文档自检
 
-- 可以用一句话说明该模块的存在意义：mcp模块实现MCP协议客户端，让iris-code能够动态连接和使用第三方MCP工具服务器
+- 可以用一句话说明该模块的存在意义：mcp模块实现MCP协议客户端，让ohbaby-code能够动态连接和使用第三方MCP工具服务器
 - 能清楚回答"这个模块不该做什么"：不做配置加载、不做工具分类、不做并发控制、不做权限检查、不做OAuth认证
 - 职责与其他模块无明显重叠：与config/mcp（配置管理）、tool-scheduler（调度和权限）、MCP SDK（协议实现）边界清晰

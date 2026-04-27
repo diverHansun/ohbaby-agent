@@ -8,7 +8,7 @@
 
 ### 1.1 模块位置
 
-system-prompt 模块在 iris-code 系统中的位置：
+system-prompt 模块在 ohbaby-code 系统中的位置：
 
 ```
                   +-------------+
@@ -40,7 +40,7 @@ system-prompt 模块在 iris-code 系统中的位置：
 | 模块 | 交互方式 | 说明 |
 |------|----------|------|
 | **Agent** | 被调用 | Agent 调用 assemble() 获取系统提示词 |
-| **Config** | 调用 | 获取 IRIS.md 文件路径 |
+| **Config** | 调用 | 获取 OHBABY.md 文件路径 |
 | **Tool** | 调用 | 获取可用工具列表（用于环境信息） |
 | **Lifecycle** | 间接 | 通过 Agent 模块间接使用 |
 
@@ -130,14 +130,14 @@ system-prompt 模块在 iris-code 系统中的位置：
    +---> Config.getProjectPath()
    |     --> 返回项目配置目录路径
    |
-   +---> 读取 {projectPath}/.iris-code/IRIS.md
+   +---> 读取 {projectPath}/.ohbaby-code/OHBABY.md
    |     --> 文件存在则读取内容
    |     --> 文件不存在则跳过
    |
    +---> Config.getGlobalPath()
    |     --> 返回全局配置目录路径
    |
-   +---> 读取 {globalPath}/.iris-code/IRIS.md
+   +---> 读取 {globalPath}/.ohbaby-code/OHBABY.md
    |     --> 文件存在则读取内容
    |     --> 文件不存在则跳过
    |
@@ -263,7 +263,7 @@ interface EnvironmentInfo {
 | 存储提示词模板 | SystemPrompt |
 | 组装系统提示词 | SystemPrompt |
 | 生成环境信息 | SystemPrompt |
-| 读取 IRIS.md | SystemPrompt |
+| 读取 OHBABY.md | SystemPrompt |
 | 提供文件路径 | Config |
 | 提供工具列表 | Tool |
 | 决定调用时机 | Agent |
@@ -273,8 +273,8 @@ interface EnvironmentInfo {
 
 | 文件类型 | 路径 | 说明 |
 |----------|------|------|
-| 项目级指令 | `.iris-code/IRIS.md` | 项目根目录 |
-| 全局级指令 | `~/.iris-code/IRIS.md` | 用户主目录 |
+| 项目级指令 | `.ohbaby-code/OHBABY.md` | 项目根目录 |
+| 全局级指令 | `~/.ohbaby-code/OHBABY.md` | 用户主目录 |
 
 ---
 
@@ -301,7 +301,7 @@ Tool.list(): string[]  // 获取可用工具列表
 // SystemPrompt 使用文件系统
 import { readFile, access } from 'fs/promises'
 
-// 读取 IRIS.md 文件
+// 读取 OHBABY.md 文件
 await readFile(path, 'utf-8')
 
 // 检查文件是否存在
@@ -316,9 +316,9 @@ await access(path)
 
 | 错误场景 | 处理方式 |
 |----------|----------|
-| IRIS.md 不存在 | 静默忽略，返回空数组 |
-| IRIS.md 读取失败 | 记录警告，返回空数组 |
-| IRIS.md 内容过大 | 截断并记录警告 |
+| OHBABY.md 不存在 | 静默忽略，返回空数组 |
+| OHBABY.md 读取失败 | 记录警告，返回空数组 |
+| OHBABY.md 内容过大 | 截断并记录警告 |
 
 ### 6.2 组装错误
 

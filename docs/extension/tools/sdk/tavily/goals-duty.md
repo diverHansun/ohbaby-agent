@@ -12,7 +12,7 @@
 
 ### 1.1 核心目标
 
-为 iris-code Agent 提供基于 Tavily AI 的 Web 搜索、内容提取、网站爬取和结构映射能力。
+为 ohbaby-code Agent 提供基于 Tavily AI 的 Web 搜索、内容提取、网站爬取和结构映射能力。
 
 ### 1.2 具体目标
 

@@ -6,7 +6,7 @@
 
 ## 一、设计概述
 
-iris-code 采用**逻辑隔离**策略，在同一进程内通过 Session 分离实现主代理与子代理的上下文隔离。子代理不继承父代理的 Memory 和历史消息，消息流完全隔离，仅通过 `SubtaskPart` 传递任务结果。
+ohbaby-code 采用**逻辑隔离**策略，在同一进程内通过 Session 分离实现主代理与子代理的上下文隔离。子代理不继承父代理的 Memory 和历史消息，消息流完全隔离，仅通过 `SubtaskPart` 传递任务结果。
 
 ### 核心设计决策
 
@@ -37,8 +37,8 @@ iris-code 采用**逻辑隔离**策略，在同一进程内通过 Session 分离
 │ └── CustomInstructions（用户自定义指令）                         │
 │                                                                  │
 │ Memory                                                           │
-│ ├── 全局 IRIS.md                                                 │
-│ └── 项目级 IRIS.md                                               │
+│ ├── 全局 OHBABY.md                                                 │
+│ └── 项目级 OHBABY.md                                               │
 │                                                                  │
 │ 历史消息                                                         │
 │ ├── 压缩后的 Summary（如有）                                     │

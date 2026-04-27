@@ -116,7 +116,7 @@ User.startSession(directory)
                      })
 ```
 
-#### 场景 2：Memory 模块定位项目级 IRIS.md
+#### 场景 2：Memory 模块定位项目级 OHBABY.md
 
 ```
 Memory.load(directory)
@@ -125,7 +125,7 @@ Memory.load(directory)
     │        │
     │        └──► return { id: 'abc123...', rootPath: '/path/to/project', vcs: 'git' }
     │
-    └──► 读取 '/path/to/project/.iris-code/IRIS.md'
+    └──► 读取 '/path/to/project/.ohbaby-code/OHBABY.md'
 ```
 
 ---
@@ -333,7 +333,7 @@ async function createSession(
   // 创建会话，关联到项目
   // 6. [Memory 模块] 调用
   //    ├── Memory.load() 调用 fromDirectory()
-  //    └── 此时需要 rootPath 定位 IRIS.md
+  //    └── 此时需要 rootPath 定位 OHBABY.md
   //
   // 7. [Session 模块] 调用
   //    ├── Session.create() 调用 fromDirectory()
@@ -362,8 +362,8 @@ import { Project } from '@/project'
 async function loadProjectMemory(directory: string): Promise<string | null> {
   const project = await Project.fromDirectory(directory)
   
-  // 构建 IRIS.md 路径
-  const memoryPath = path.join(project.rootPath, '.iris-code', 'IRIS.md')
+  // 构建 OHBABY.md 路径
+  const memoryPath = path.join(project.rootPath, '.ohbaby-code', 'OHBABY.md')
   
   try {
     return await fs.readFile(memoryPath, 'utf-8')

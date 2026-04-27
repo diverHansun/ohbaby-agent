@@ -1,4 +1,4 @@
-﻿# lifecycle 模块 goals-duty.md
+# lifecycle 模块 goals-duty.md
 
 本文档定义 `lifecycle` 模块的设计目标与职责边界。
 
@@ -6,7 +6,7 @@
 
 ## 一、模块定位
 
-**一句话说明**：lifecycle 是 iris-code 的核心执行引擎，负责管理用户请求从输入到完成的完整生命周期，协调 LLM 调用与工具执行的循环。
+**一句话说明**：lifecycle 是 ohbaby-code 的核心执行引擎，负责管理用户请求从输入到完成的完整生命周期，协调 LLM 调用与工具执行的循环。
 
 **如果没有这个模块**：
 - LLM Client 只能完成单次调用，无法处理多轮工具调用

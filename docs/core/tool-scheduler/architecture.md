@@ -8,7 +8,7 @@
 
 ### 模块定位
 
-ToolScheduler 是 iris-code 的工具调度中心，位于 Agent 与 tools 模块之间，协调权限检查、并发控制和工具执行。
+ToolScheduler 是 ohbaby-code 的工具调度中心，位于 Agent 与 tools 模块之间，协调权限检查、并发控制和工具执行。
 
 ### 核心架构
 

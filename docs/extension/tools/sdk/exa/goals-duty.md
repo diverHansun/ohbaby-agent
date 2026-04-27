@@ -8,7 +8,7 @@
 
 ### 1.1 核心目标
 
-为 iris-code Agent 提供基于 Exa AI 的 Web 搜索和内容获取能力。
+为 ohbaby-code Agent 提供基于 Exa AI 的 Web 搜索和内容获取能力。
 
 ### 1.2 具体目标
 
@@ -163,7 +163,7 @@
 | 非目标 | 理由 |
 |--------|------|
 | Exa Answer API | 不使用 Exa 的 AI 问答功能，Agent 自行处理 |
-| Exa Research API | 不使用 Exa 的研究代理，避免与 iris-code Agent 混淆 |
+| Exa Research API | 不使用 Exa 的研究代理，避免与 ohbaby-code Agent 混淆 |
 | Exa Websets API | 数据管理功能，不属于 Web 工具范畴 |
 | URL 自动切换 | 不自动检测 URL 切换搜索模式，由用户配置 |
 | 结果缓存 | 不缓存搜索结果 |

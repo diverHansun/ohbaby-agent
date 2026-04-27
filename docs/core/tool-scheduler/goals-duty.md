@@ -221,8 +221,8 @@ Extension Tools 需要用户配置才能使用：
    ```
 
 2. **Provider 选择**：存放在配置文件中
-   - 全局配置：XDG 标准目录 (`~/.config/iris-code/config.yaml`)
-   - 调试配置：`.iris-code/extension/tools/` 目录
+   - 全局配置：XDG 标准目录 (`~/.config/ohbaby-code/config.yaml`)
+   - 调试配置：`.ohbaby-code/extension/tools/` 目录
 
 ### 配置示例
 

@@ -115,7 +115,7 @@ interface PathConfig {
 function resolve(key: StorageKey): string;
 
 // 映射规则：
-// baseDir = ~/.local/share/iris-code (Linux)
+// baseDir = ~/.local/share/ohbaby-code (Linux)
 // key = ["type", "id1", "id2"]
 // result = baseDir/storage/type/id1/id2.json
 ```
@@ -186,7 +186,7 @@ const JSON_INDENT = 2;
 const STORAGE_SUBDIR = 'storage';
 
 // 应用名称（用于 XDG 路径）
-const APP_NAME = 'iris-code';
+const APP_NAME = 'ohbaby-code';
 ```
 
 ---

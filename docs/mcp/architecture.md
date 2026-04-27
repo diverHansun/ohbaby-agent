@@ -8,7 +8,7 @@
 
 ### 模块定位
 
-mcp模块是iris-code的MCP协议客户端实现层，位于config/mcp和tool-scheduler之间，负责MCP服务器的连接管理和工具适配。
+mcp模块是ohbaby-code的MCP协议客户端实现层，位于config/mcp和tool-scheduler之间，负责MCP服务器的连接管理和工具适配。
 
 ### 核心架构
 
@@ -128,7 +128,7 @@ async ensureInitialized(): Promise<void> {
 ```
 
 理由：
-- 避免MCP加载失败影响iris-code启动
+- 避免MCP加载失败影响ohbaby-code启动
 - 减少不必要的资源消耗（用户可能不使用MCP）
 - 遵循YAGNI原则
 - 符合opencode的设计模式
@@ -162,7 +162,7 @@ function createTransport(config: McpServerConfig): Transport {
 
 **配置格式说明**：
 
-iris-code 采用主流的分离式命令格式，与以下工具保持一致：
+ohbaby-code 采用主流的分离式命令格式，与以下工具保持一致：
 - Claude Desktop
 - Cursor
 - VS Code Copilot
@@ -190,7 +190,7 @@ iris-code 采用主流的分离式命令格式，与以下工具保持一致：
 
 ### 2.4 适配器模式（Adapter）
 
-MCP工具定义转换为iris-code Tool接口，并通过 `annotations.readOnlyHint` 推断并发类别。
+MCP工具定义转换为ohbaby-code Tool接口，并通过 `annotations.readOnlyHint` 推断并发类别。
 
 ```typescript
 function adaptMcpTool(
@@ -272,7 +272,7 @@ function adaptMcpTool(
 
 #### integration/tool-adapter.ts
 
-职责：MCP工具与iris-code Tool接口的适配
+职责：MCP工具与ohbaby-code Tool接口的适配
 
 内容：
 - `adaptMcpTool()`: 转换单个工具
@@ -323,7 +323,7 @@ export type { McpClientStatus } from './types.js'
 
 当前方案：首次调用MCP工具时才初始化
 
-未采用方案：iris-code启动时预加载所有MCP
+未采用方案：ohbaby-code启动时预加载所有MCP
 
 理由：
 - 避免MCP加载失败阻塞启动
@@ -492,7 +492,7 @@ const toolKey = `${sanitizeName(serverName)}_${sanitizeName(toolName)}`
 ### 7.1 工具注册流程
 
 ```typescript
-// iris-code初始化或首次使用MCP工具时
+// ohbaby-code初始化或首次使用MCP工具时
 
 // 1. 获取MCP工具列表
 const mcpManager = McpManager.getInstance(workspaceId)
@@ -542,11 +542,11 @@ async checkPolicy(tool: Tool, request: ToolCallRequest): Promise<PolicyResult> {
 ```typescript
 // 工作区A
 const managerA = McpManager.getInstance('workspace-a')
-// 加载 workspace-a/.iris-code/mcp/settings.json
+// 加载 workspace-a/.ohbaby-code/mcp/settings.json
 
 // 工作区B
 const managerB = McpManager.getInstance('workspace-b')
-// 加载 workspace-b/.iris-code/mcp/settings.json
+// 加载 workspace-b/.ohbaby-code/mcp/settings.json
 
 // 两者完全独立
 ```
@@ -554,12 +554,12 @@ const managerB = McpManager.getInstance('workspace-b')
 ### 8.2 全局配置共享
 
 ```
-全局配置: ~/.iris-code/mcp/settings.json
+全局配置: ~/.ohbaby-code/mcp/settings.json
    │
-   ├─→ 工作区A项目配置: workspace-a/.iris-code/mcp/settings.json
+   ├─→ 工作区A项目配置: workspace-a/.ohbaby-code/mcp/settings.json
    │     └─ 合并后用于工作区A的McpManager
    │
-   └─→ 工作区B项目配置: workspace-b/.iris-code/mcp/settings.json
+   └─→ 工作区B项目配置: workspace-b/.ohbaby-code/mcp/settings.json
          └─ 合并后用于工作区B的McpManager
 ```
 

@@ -8,15 +8,15 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { ConfigError } from './types.js';
 
-/** Directory name for iris-code configuration */
-const CONFIG_DIR_NAME = '.iris-code';
+/** Directory name for ohbaby-code configuration */
+const CONFIG_DIR_NAME = '.ohbaby-code';
 
 /** Configuration file name */
 const MODEL_JSON_NAME = 'model.json';
 
 /**
  * Get the path to the global model.json configuration file.
- * Location: ~/.iris-code/model.json
+ * Location: ~/.ohbaby-code/model.json
  */
 export function getModelJsonPath(): string {
   const homeDir = os.homedir();

@@ -15,7 +15,7 @@
 ### 模块职责
 
 LLM 配置模块负责：
-1. 从 `~/.iris-code/model.json` 加载 LLM 配置
+1. 从 `~/.ohbaby-code/model.json` 加载 LLM 配置
 2. 从 `.env` 读取 API Key
 3. 验证配置的完整性和有效性
 4. 支持配置缓存和热重载
@@ -37,7 +37,7 @@ const newConfig = await reloadLLMConfig();
 ### 数据流
 
 ```
-用户编辑 ~/.iris-code/model.json
+用户编辑 ~/.ohbaby-code/model.json
             ↓
 调用 getLLMConfig()
             ↓
@@ -50,8 +50,8 @@ llm-client 消费配置
 
 ### 配置文件位置
 
-- **用户全局配置**：`~/.iris-code/model.json`（由用户创建和维护）
-- **本地调试覆盖**：`.iris-code.local/model.json`（可选，.gitignore 排除）
+- **用户全局配置**：`~/.ohbaby-code/model.json`（由用户创建和维护）
+- **本地调试覆盖**：`.ohbaby-code.local/model.json`（可选，.gitignore 排除）
 - **API Keys**：`.env`（项目级，.gitignore 排除）
 
 ### 错误处理

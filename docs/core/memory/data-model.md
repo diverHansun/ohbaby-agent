@@ -8,7 +8,7 @@
 
 ### 概念 1: Memory（记忆）
 
-**定义**：Memory 是存储在 IRIS.md 文件中的长期信息，用于在多次会话间保持上下文。
+**定义**：Memory 是存储在 OHBABY.md 文件中的长期信息，用于在多次会话间保持上下文。
 
 **边界**：
 - 开始：用户或 AI 添加记忆条目
@@ -19,12 +19,12 @@
 ```
 一个 AI 系统
 ├── Global Memory（全局记忆）
-│   ├── 存储位置：~/.config/iris-code/IRIS.md
+│   ├── 存储位置：~/.config/ohbaby-code/OHBABY.md
 │   ├── 作用范围：所有项目
 │   └── 内容：用户通用偏好、习惯
 │
 └── Project Memory（项目记忆）
-    ├── 存储位置：{projectRoot}/IRIS.md
+    ├── 存储位置：{projectRoot}/OHBABY.md
     ├── 作用范围：特定项目
     └── 内容：项目规则、约定、上下文
 
@@ -41,14 +41,14 @@
 
 | 维度 | Global | Project |
 |------|--------|---------|
-| 存储路径 | `~/.config/iris-code/IRIS.md` | `{projectRoot}/IRIS.md` |
+| 存储路径 | `~/.config/ohbaby-code/OHBABY.md` | `{projectRoot}/OHBABY.md` |
 | 作用范围 | 所有项目 | 特定项目 |
 | 内容示例 | "用户偏好使用 TypeScript" | "本项目使用 Vitest 测试框架" |
 | 版本控制 | 不提交（个人配置） | 可提交（团队共享） |
 
 ### 概念 3: Memory Entry（记忆条目）
 
-**定义**：IRIS.md 文件中 `## Iris Added Memories` Header 下方的单条记忆。
+**定义**：OHBABY.md 文件中 `## Ohbaby Added Memories` Header 下方的单条记忆。
 
 **格式**：
 ```markdown
@@ -63,7 +63,7 @@
 
 ### 概念 4: User-Written Content（用户手写内容）
 
-**定义**：IRIS.md 文件中 `## Iris Added Memories` Header 上方的用户自定义内容。
+**定义**：OHBABY.md 文件中 `## Ohbaby Added Memories` Header 上方的用户自定义内容。
 
 **特点**：
 - 用户完全控制
@@ -79,7 +79,7 @@
 |------|------|------|
 | MergedMemory | Value Object（值对象） | 临时组装的数据，无独立生命周期 |
 | MemoryEntry | Value Object（值对象） | 从文件解析出的临时对象 |
-| IRIS.md 文件 | 持久化存储 | 真正的 Entity，但不在内存中表示 |
+| OHBABY.md 文件 | 持久化存储 | 真正的 Entity，但不在内存中表示 |
 
 **说明**：Memory 模块不包含内存中的 Entity，所有数据都是文件内容的临时表示。
 
@@ -92,12 +92,12 @@
 ```typescript
 interface MergedMemory {
   // ======== 全局记忆 ========
-  global: string                // 全局 IRIS.md 的原始内容
-                                // 来源：~/.config/iris-code/IRIS.md
+  global: string                // 全局 OHBABY.md 的原始内容
+                                // 来源：~/.config/ohbaby-code/OHBABY.md
   
   // ======== 项目记忆 ========
-  project: string               // 项目 IRIS.md 的原始内容
-                                // 来源：{projectRoot}/IRIS.md（向上查找）
+  project: string               // 项目 OHBABY.md 的原始内容
+                                // 来源：{projectRoot}/OHBABY.md（向上查找）
   
   // ======== 合并内容 ========
   merged: string                // 合并后的内容（添加来源标记）
@@ -149,7 +149,7 @@ interface RemoveMemoryInput {
 
 ## 四、Lifecycle & Ownership（生命周期与归属）
 
-### IRIS.md 文件生命周期
+### OHBABY.md 文件生命周期
 
 ```
 [不存在] ────────────────────────────────────┐
@@ -158,7 +158,7 @@ interface RemoveMemoryInput {
     ▼                                        │
 [创建文件]                                    │
     │                                        │
-    ├── 写入 Header: ## Iris Added Memories  │
+    ├── 写入 Header: ## Ohbaby Added Memories  │
     └── 添加第一条记忆                        │
     │                                        │
     ▼                                        │
@@ -179,8 +179,8 @@ interface RemoveMemoryInput {
 
 | 数据 | 创建者 | 管理者 | 说明 |
 |------|--------|--------|------|
-| Global IRIS.md | 用户或系统 | Memory 模块 | 第一次 add 时自动创建 |
-| Project IRIS.md | 用户或系统 | Memory 模块 | 第一次 add 时自动创建 |
+| Global OHBABY.md | 用户或系统 | Memory 模块 | 第一次 add 时自动创建 |
+| Project OHBABY.md | 用户或系统 | Memory 模块 | 第一次 add 时自动创建 |
 | User-Written Content | 用户 | 用户 | AI 不可修改 |
 | AI Added Entries | AI（通过 Tools） | Memory 模块 | AI 可 add/update/remove |
 
@@ -188,7 +188,7 @@ interface RemoveMemoryInput {
 
 ## 五、File Format（文件格式）
 
-### IRIS.md 完整结构示例
+### OHBABY.md 完整结构示例
 
 ```markdown
 # 项目指南
@@ -200,7 +200,7 @@ interface RemoveMemoryInput {
 - 使用 TypeScript strict 模式
 - 优先使用函数式编程
 
-## Iris Added Memories
+## Ohbaby Added Memories
 
 - 2026-01-01 21:00:00: 用户偏好使用 Prettier 格式化代码
 - 2026-01-01 21:05:00: 本项目使用 Vitest 作为测试框架
@@ -220,19 +220,19 @@ interface RemoveMemoryInput {
 ### 合并后的格式
 
 ```markdown
-<!-- Global Memory from ~/.config/iris-code/IRIS.md -->
+<!-- Global Memory from ~/.config/ohbaby-code/OHBABY.md -->
 用户全局偏好内容...
 
-## Iris Added Memories
+## Ohbaby Added Memories
 - 2026-01-01 20:00:00: 全局记忆条目1
 - 2026-01-01 20:05:00: 全局记忆条目2
 
 ---
 
-<!-- Project Memory from /path/to/project/IRIS.md -->
+<!-- Project Memory from /path/to/project/OHBABY.md -->
 项目级规则和约定...
 
-## Iris Added Memories
+## Ohbaby Added Memories
 - 2026-01-01 21:00:00: 项目记忆条目1
 - 2026-01-01 21:05:00: 项目记忆条目2
 ```
@@ -262,7 +262,7 @@ interface RemoveMemoryInput {
 ### 与 Project 模块
 
 ```typescript
-// 获取项目根路径用于定位 IRIS.md
+// 获取项目根路径用于定位 OHBABY.md
 const project = await Project.fromDirectory(directory)
 const projectMemoryPath = await findProjectMemoryPath(directory, project.rootPath)
 ```
@@ -305,7 +305,7 @@ const entries = await Memory.listEntries('project', currentDirectory)
 /**
  * AI 添加区域的 Header
  */
-export const MEMORY_HEADER = '## Iris Added Memories'
+export const MEMORY_HEADER = '## Ohbaby Added Memories'
 
 /**
  * 时间戳格式
@@ -315,12 +315,12 @@ export const TIMESTAMP_FORMAT = 'YYYY-MM-DD HH:MM:SS'
 /**
  * 全局配置目录名
  */
-export const CONFIG_DIR_NAME = 'iris-code'
+export const CONFIG_DIR_NAME = 'ohbaby-code'
 
 /**
  * 记忆文件名
  */
-export const MEMORY_FILENAME = 'IRIS.md'
+export const MEMORY_FILENAME = 'OHBABY.md'
 ```
 
 ---

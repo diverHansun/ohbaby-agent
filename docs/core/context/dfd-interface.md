@@ -218,7 +218,7 @@ Context 模块是**上下文管理的中枢**，位于数据源（Memory、Messa
  * 
  * 主代理模式（isSubagent = false）：
  * - 加载完整 SystemPrompt（Identity + Environment + CustomInstructions）
- * - 加载 Memory（全局 + 项目级 IRIS.md）
+ * - 加载 Memory（全局 + 项目级 OHBABY.md）
  * - 加载完整历史消息（包含压缩后的 Summary）
  * 
  * 子代理模式（isSubagent = true）：

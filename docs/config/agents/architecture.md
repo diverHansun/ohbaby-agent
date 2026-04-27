@@ -8,7 +8,7 @@
 
 ### 模块定位
 
-config/agents 是 iris-code 配置系统的一部分，专门负责 Agent 配置的加载和验证。它遵循与 config/mcp 相同的设计模式，保持配置加载逻辑的独立性和纯净性。
+config/agents 是 ohbaby-code 配置系统的一部分，专门负责 Agent 配置的加载和验证。它遵循与 config/mcp 相同的设计模式，保持配置加载逻辑的独立性和纯净性。
 
 ### 核心架构
 
@@ -28,10 +28,10 @@ config/agents/
 1. loadAgentConfig() 被调用
    |
    v
-2. 加载全局配置文件 (~/.iris-code/agents/settings.json)
+2. 加载全局配置文件 (~/.ohbaby-code/agents/settings.json)
    |
    v
-3. 加载项目配置文件 ({project}/.iris-code/agents/settings.json)
+3. 加载项目配置文件 ({project}/.ohbaby-code/agents/settings.json)
    |
    v
 4. 合并配置（项目覆盖全局）
@@ -171,7 +171,7 @@ return mergeConfigs(globalConfig, projectConfig)
 
 **理由**：
 - JSON 是 TypeScript 原生支持的格式
-- 与 iris-code 其他配置保持一致（mcp/settings.json）
+- 与 ohbaby-code 其他配置保持一致（mcp/settings.json）
 - 额外格式需要引入解析依赖
 - 可在未来根据需求扩展其他格式支持
 
@@ -243,7 +243,7 @@ ConfigValidationError: Invalid agent configuration
   Path: agents.build.maxSteps
   Expected: number
   Received: string ("fifty")
-  File: /Users/xxx/.iris-code/agents/settings.json
+  File: /Users/xxx/.ohbaby-code/agents/settings.json
 ```
 
 ---

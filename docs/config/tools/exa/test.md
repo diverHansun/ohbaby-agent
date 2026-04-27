@@ -184,7 +184,7 @@ describe('Path Resolution', () => {
       process.env.APPDATA = 'C:\\Users\\Test\\AppData\\Roaming'
 
       const path = resolveUserConfigDir()
-      expect(path).toContain('iris-code')
+      expect(path).toContain('ohbaby-code')
       expect(path).toContain('tools')
     })
 
@@ -193,7 +193,7 @@ describe('Path Resolution', () => {
       process.env.XDG_CONFIG_HOME = '/home/test/.config'
 
       const path = resolveUserConfigDir()
-      expect(path).toBe('/home/test/.config/iris-code/tools')
+      expect(path).toBe('/home/test/.config/ohbaby-code/tools')
     })
 
     it('should fallback to ~/.config on Linux', () => {
@@ -202,14 +202,14 @@ describe('Path Resolution', () => {
       process.env.HOME = '/home/test'
 
       const path = resolveUserConfigDir()
-      expect(path).toContain('.config/iris-code/tools')
+      expect(path).toContain('.config/ohbaby-code/tools')
     })
   })
 
   describe('resolveProjectConfigPath', () => {
     it('should return correct project config path', () => {
       const path = resolveProjectConfigPath('/project/root')
-      expect(path).toBe('/project/root/.iris-code/tools/exa.yaml')
+      expect(path).toBe('/project/root/.ohbaby-code/tools/exa.yaml')
     })
   })
 })
@@ -261,7 +261,7 @@ exa:
     default_num_results: 5
 `
       vi.mocked(fs.access).mockImplementation(async (p) => {
-        if (String(p).includes('.iris-code')) return
+        if (String(p).includes('.ohbaby-code')) return
         throw new Error('ENOENT')
       })
       vi.mocked(fs.readFile).mockResolvedValue(projectConfig)
@@ -286,7 +286,7 @@ exa:
 `
       vi.mocked(fs.access).mockResolvedValue(undefined)
       vi.mocked(fs.readFile).mockImplementation(async (p) => {
-        if (String(p).includes('.iris-code')) return projectConfig
+        if (String(p).includes('.ohbaby-code')) return projectConfig
         return userConfig
       })
       process.env.EXA_API_KEY = 'test-key'
@@ -375,13 +375,13 @@ exa:
   describe('getPathInfo', () => {
     it('should return correct path info', async () => {
       vi.mocked(fs.access).mockImplementation(async (p) => {
-        if (String(p).includes('.iris-code')) return
+        if (String(p).includes('.ohbaby-code')) return
         throw new Error('ENOENT')
       })
 
       const info = await loader.getPathInfo()
 
-      expect(info.projectPath).toContain('.iris-code/tools/exa.yaml')
+      expect(info.projectPath).toContain('.ohbaby-code/tools/exa.yaml')
       expect(info.projectExists).toBe(true)
       expect(info.userExists).toBe(false)
     })

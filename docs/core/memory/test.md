@@ -8,8 +8,8 @@
 
 ### 1.1 核心测试目标
 
-1. **文件操作准确性**：确保 IRIS.md 文件的读写操作正确无误
-2. **向上查找逻辑**：验证从子目录向上查找 IRIS.md 的行为
+1. **文件操作准确性**：确保 OHBABY.md 文件的读写操作正确无误
+2. **向上查找逻辑**：验证从子目录向上查找 OHBABY.md 的行为
 3. **记忆合并正确性**：确保全局和项目记忆正确合并并添加来源标记
 4. **条目解析准确性**：验证 AI 添加区域的条目解析逻辑
 5. **错误处理健壮性**：确保各种异常情况都能优雅处理
@@ -53,10 +53,10 @@
 ```typescript
 describe('Memory.load', () => {
   it('应正确加载并合并全局和项目记忆', async () => {
-    // Given: 全局和项目 IRIS.md 都存在
+    // Given: 全局和项目 OHBABY.md 都存在
     mockFs({
-      '~/.config/iris-code/IRIS.md': '# Global Rules\n\n## Iris Added Memories\n- 2026-01-01 20:00:00: 全局记忆',
-      '/project/IRIS.md': '# Project Context\n\n## Iris Added Memories\n- 2026-01-01 21:00:00: 项目记忆'
+      '~/.config/ohbaby-code/OHBABY.md': '# Global Rules\n\n## Ohbaby Added Memories\n- 2026-01-01 20:00:00: 全局记忆',
+      '/project/OHBABY.md': '# Project Context\n\n## Ohbaby Added Memories\n- 2026-01-01 21:00:00: 项目记忆'
     })
     mockProject({ rootPath: '/project' })
     
@@ -73,7 +73,7 @@ describe('Memory.load', () => {
   
   it('只有全局记忆时应正确返回', async () => {
     mockFs({
-      '~/.config/iris-code/IRIS.md': 'Global content'
+      '~/.config/ohbaby-code/OHBABY.md': 'Global content'
       // 项目记忆不存在
     })
     mockProject({ rootPath: '/project' })
@@ -103,10 +103,10 @@ describe('Memory.load', () => {
 
 ```typescript
 describe('Memory.load - 向上查找', () => {
-  it('应从子目录向上查找 IRIS.md', async () => {
-    // Given: 项目根目录有 IRIS.md，当前在子目录
+  it('应从子目录向上查找 OHBABY.md', async () => {
+    // Given: 项目根目录有 OHBABY.md，当前在子目录
     mockFs({
-      '/project/IRIS.md': 'Project memory',
+      '/project/OHBABY.md': 'Project memory',
       '/project/src/components': {}  // 当前目录
     })
     mockProject({ rootPath: '/project' })
@@ -114,15 +114,15 @@ describe('Memory.load - 向上查找', () => {
     // When: 从 components 目录加载
     const result = await Memory.load('/project/src/components')
     
-    // Then: 应找到项目根的 IRIS.md
+    // Then: 应找到项目根的 OHBABY.md
     expect(result.project).toBe('Project memory')
   })
   
-  it('应找到第一个 IRIS.md 即停止', async () => {
-    // Given: 多个目录都有 IRIS.md
+  it('应找到第一个 OHBABY.md 即停止', async () => {
+    // Given: 多个目录都有 OHBABY.md
     mockFs({
-      '/project/IRIS.md': 'Root memory',
-      '/project/src/IRIS.md': 'Src memory',
+      '/project/OHBABY.md': 'Root memory',
+      '/project/src/OHBABY.md': 'Src memory',
       '/project/src/components': {}
     })
     mockProject({ rootPath: '/project' })
@@ -130,7 +130,7 @@ describe('Memory.load - 向上查找', () => {
     // When: 从 components 向上查找
     const result = await Memory.load('/project/src/components')
     
-    // Then: 应返回 src/IRIS.md（第一个找到的）
+    // Then: 应返回 src/OHBABY.md（第一个找到的）
     expect(result.project).toBe('Src memory')
   })
 })
@@ -146,7 +146,7 @@ describe('Memory.load - 向上查找', () => {
 describe('Memory.add', () => {
   it('应添加记忆到全局文件', async () => {
     mockFs({
-      '~/.config/iris-code/IRIS.md': 'Old content\n\n## Iris Added Memories\n- 2026-01-01 20:00:00: Old fact'
+      '~/.config/ohbaby-code/OHBABY.md': 'Old content\n\n## Ohbaby Added Memories\n- 2026-01-01 20:00:00: Old fact'
     })
     mockTimestamp('2026-01-01 22:00:00')
     
@@ -155,7 +155,7 @@ describe('Memory.add', () => {
       fact: 'New fact'
     })
     
-    const written = getWrittenContent('~/.config/iris-code/IRIS.md')
+    const written = getWrittenContent('~/.config/ohbaby-code/OHBABY.md')
     expect(written).toContain('Old fact')
     expect(written).toContain('- 2026-01-01 22:00:00: New fact')
   })
@@ -169,8 +169,8 @@ describe('Memory.add', () => {
       fact: 'First fact'
     })
     
-    const written = getWrittenContent('~/.config/iris-code/IRIS.md')
-    expect(written).toContain('## Iris Added Memories')
+    const written = getWrittenContent('~/.config/ohbaby-code/OHBABY.md')
+    expect(written).toContain('## Ohbaby Added Memories')
     expect(written).toContain('- 2026-01-01 22:00:00: First fact')
   })
   
@@ -198,10 +198,10 @@ describe('Memory.add', () => {
 describe('Memory.listEntries', () => {
   it('应正确解析 AI 添加区域的条目', async () => {
     mockFs({
-      '~/.config/iris-code/IRIS.md': `
+      '~/.config/ohbaby-code/OHBABY.md': `
 用户手写内容
 
-## Iris Added Memories
+## Ohbaby Added Memories
 
 - 2026-01-01 20:00:00: First fact
 - 2026-01-01 20:05:00: Second fact
@@ -226,8 +226,8 @@ describe('Memory.listEntries', () => {
   
   it('应忽略非列表格式的内容', async () => {
     mockFs({
-      '~/.config/iris-code/IRIS.md': `
-## Iris Added Memories
+      '~/.config/ohbaby-code/OHBABY.md': `
+## Ohbaby Added Memories
 
 这是一些说明文字（不是列表）
 
@@ -245,7 +245,7 @@ describe('Memory.listEntries', () => {
   
   it('Header 不存在时应返回空数组', async () => {
     mockFs({
-      '~/.config/iris-code/IRIS.md': '用户手写内容，没有 Header'
+      '~/.config/ohbaby-code/OHBABY.md': '用户手写内容，没有 Header'
     })
     
     const entries = await Memory.listEntries('global')
@@ -265,10 +265,10 @@ describe('Memory.listEntries', () => {
 describe('Memory.update', () => {
   it('应更新指定索引的条目', async () => {
     mockFs({
-      '~/.config/iris-code/IRIS.md': `
+      '~/.config/ohbaby-code/OHBABY.md': `
 用户手写内容
 
-## Iris Added Memories
+## Ohbaby Added Memories
 
 - 2026-01-01 20:00:00: Old text 1
 - 2026-01-01 20:05:00: Old text 2
@@ -282,7 +282,7 @@ describe('Memory.update', () => {
       newText: 'Updated text 2'
     })
     
-    const written = getWrittenContent('~/.config/iris-code/IRIS.md')
+    const written = getWrittenContent('~/.config/ohbaby-code/OHBABY.md')
     expect(written).toContain('Old text 1')
     expect(written).toContain('Updated text 2')
     expect(written).toContain('Old text 3')
@@ -293,7 +293,7 @@ describe('Memory.update', () => {
   
   it('索引越界时应抛出异常', async () => {
     mockFs({
-      '~/.config/iris-code/IRIS.md': '## Iris Added Memories\n- 2026-01-01 20:00:00: Only one'
+      '~/.config/ohbaby-code/OHBABY.md': '## Ohbaby Added Memories\n- 2026-01-01 20:00:00: Only one'
     })
     
     await expect(
@@ -317,8 +317,8 @@ describe('Memory.update', () => {
 describe('Memory.remove', () => {
   it('应删除指定索引的条目', async () => {
     mockFs({
-      '~/.config/iris-code/IRIS.md': `
-## Iris Added Memories
+      '~/.config/ohbaby-code/OHBABY.md': `
+## Ohbaby Added Memories
 
 - 2026-01-01 20:00:00: Fact 1
 - 2026-01-01 20:05:00: Fact 2
@@ -331,7 +331,7 @@ describe('Memory.remove', () => {
       index: 1  // 删除 Fact 2
     })
     
-    const written = getWrittenContent('~/.config/iris-code/IRIS.md')
+    const written = getWrittenContent('~/.config/ohbaby-code/OHBABY.md')
     expect(written).toContain('Fact 1')
     expect(written).toContain('Fact 3')
     expect(written).not.toContain('Fact 2')
@@ -355,7 +355,7 @@ describe('Memory.remove', () => {
 describe('Memory - 错误处理', () => {
   it('文件不可读时应返回空字符串并记录警告', async () => {
     mockFs({
-      '~/.config/iris-code/IRIS.md': { readable: false }
+      '~/.config/ohbaby-code/OHBABY.md': { readable: false }
     })
     const warnLog = vi.spyOn(console, 'warn')
     
@@ -367,7 +367,7 @@ describe('Memory - 错误处理', () => {
   
   it('写入失败时应抛出异常', async () => {
     mockFs({
-      '~/.config/iris-code': { writable: false }
+      '~/.config/ohbaby-code': { writable: false }
     })
     
     await expect(
@@ -378,7 +378,7 @@ describe('Memory - 错误处理', () => {
   it('文件过大时应记录警告但仍读取', async () => {
     const largContent = 'a'.repeat(2 * 1024 * 1024)  // 2MB
     mockFs({
-      '~/.config/iris-code/IRIS.md': largeContent
+      '~/.config/ohbaby-code/OHBABY.md': largeContent
     })
     const warnLog = vi.spyOn(console, 'warn')
     
@@ -477,7 +477,7 @@ export const SAMPLE_GLOBAL_MEMORY = `
 
 User prefers TypeScript over JavaScript.
 
-## Iris Added Memories
+## Ohbaby Added Memories
 
 - 2026-01-01 20:00:00: User prefers strict mode
 - 2026-01-01 20:05:00: User likes detailed comments
@@ -488,7 +488,7 @@ export const SAMPLE_PROJECT_MEMORY = `
 
 This project uses Vitest for testing.
 
-## Iris Added Memories
+## Ohbaby Added Memories
 
 - 2026-01-01 21:00:00: Project uses shadcn/ui
 - 2026-01-01 21:05:00: Project follows atomic design
@@ -513,11 +513,11 @@ describe('Integration: Real Filesystem', () => {
     await fs.rm(tempDir, { recursive: true, force: true })
   })
   
-  it('应正确读写真实 IRIS.md 文件', async () => {
+  it('应正确读写真实 OHBABY.md 文件', async () => {
     // 创建全局配置目录
-    const globalDir = path.join(tempDir, '.config', 'iris-code')
+    const globalDir = path.join(tempDir, '.config', 'ohbaby-code')
     await fs.mkdir(globalDir, { recursive: true })
-    const globalPath = path.join(globalDir, 'IRIS.md')
+    const globalPath = path.join(globalDir, 'OHBABY.md')
     
     // 添加记忆
     await Memory.add({
@@ -528,7 +528,7 @@ describe('Integration: Real Filesystem', () => {
     // 验证文件存在
     const content = await fs.readFile(globalPath, 'utf-8')
     expect(content).toContain('Integration test fact')
-    expect(content).toContain('## Iris Added Memories')
+    expect(content).toContain('## Ohbaby Added Memories')
   })
 })
 ```

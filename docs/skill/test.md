@@ -40,7 +40,7 @@
 
 **前置条件**：
 ```
-.iris-code/skill/code-review/SKILL.md
+.ohbaby-code/skill/code-review/SKILL.md
 ---
 name: code-review
 description: Code review guidelines
@@ -56,7 +56,7 @@ description: Code review guidelines
 
 **前置条件**：
 ```
-.iris-code/skill/
+.ohbaby-code/skill/
 ├── code-review/SKILL.md
 ├── commit/SKILL.md
 └── nested/deep/SKILL.md
@@ -180,11 +180,11 @@ name: missing-desc
 
 **前置条件**：
 ```
-~/.config/iris-code/skill/code-review/SKILL.md
+~/.config/ohbaby-code/skill/code-review/SKILL.md
   name: code-review
   description: Global version
 
-.iris-code/skill/code-review/SKILL.md
+.ohbaby-code/skill/code-review/SKILL.md
   name: code-review
   description: Project version
 ```
@@ -201,7 +201,7 @@ name: missing-desc
 
 **前置条件**：
 ```
-.iris-code/skill/code-review/
+.ohbaby-code/skill/code-review/
 └── SKILL.md
 ```
 
@@ -227,7 +227,7 @@ name: missing-desc
 
 **前置条件**：
 ```
-.iris-code/skill/xlsx/
+.ohbaby-code/skill/xlsx/
 ├── SKILL.md
 ├── read-xlsx.ts
 └── write-xlsx.ts
@@ -247,7 +247,7 @@ name: missing-desc
 
 **前置条件**：
 ```
-.iris-code/skill/project-generator/
+.ohbaby-code/skill/project-generator/
 ├── SKILL.md
 ├── generate.ts
 └── templates/
@@ -268,7 +268,7 @@ name: missing-desc
 
 **前置条件**：
 ```
-.iris-code/skill/test-skill/
+.ohbaby-code/skill/test-skill/
 ├── SKILL.md
 ├── script.ts
 └── .hidden-file
@@ -282,7 +282,7 @@ name: missing-desc
 
 **前置条件**：
 ```
-.iris-code/skill/test-skill/
+.ohbaby-code/skill/test-skill/
 ├── SKILL.md
 ├── script.ts
 └── empty-dir/
@@ -304,7 +304,7 @@ description: Full-featured skill
 user-invocable: true
 disable-model-invocation: false
 license: MIT
-compatibility: "iris-code >= 1.0.0"
+compatibility: "ohbaby-code >= 1.0.0"
 ---
 # Content
 ```
@@ -335,8 +335,8 @@ description: Minimal skill without optional fields
 
 **前置条件**：
 ```
-~/.config/iris-code/skill/global-skill/SKILL.md
-.iris-code/skill/project-skill/SKILL.md
+~/.config/ohbaby-code/skill/global-skill/SKILL.md
+.ohbaby-code/skill/project-skill/SKILL.md
 ```
 
 **预期结果**：
@@ -462,7 +462,7 @@ Skill C: userInvocable: true, disableModelInvocation: false
 | 测试点 | 验证内容 |
 |--------|----------|
 | 获取全局配置目录 | 正确获取 XDG 标准目录 |
-| 获取项目配置目录 | 正确识别 .iris-code 目录 |
+| 获取项目配置目录 | 正确识别 .ohbaby-code 目录 |
 | 目录不存在时 | 不抛出异常，返回空列表 |
 
 ### 3.2 与 Commands 模块集成（主要）
@@ -472,7 +472,7 @@ Skill C: userInvocable: true, disableModelInvocation: false
 | Skill 命令注册 | 所有 user-invocable skills 注册为斜杠命令 |
 | 命令触发 | 用户输入 `/<skill-name>` 正确触发 Skill 加载 |
 | 内容注入 | Skill 内容正确注入到对话上下文 |
-| reload 命令 | `iris-code skill reload` 正确触发重载 |
+| reload 命令 | `ohbaby-code skill reload` 正确触发重载 |
 | 动态更新 | reload 后，Commands 模块获取最新的 user-invocable skills |
 
 #### 场景 31: Commands 模块注册 user-invocable skills
@@ -621,7 +621,7 @@ description: A skill with all optional fields
 user-invocable: true
 disable-model-invocation: false
 license: MIT
-compatibility: "iris-code >= 1.0.0"
+compatibility: "ohbaby-code >= 1.0.0"
 ---
 
 # Full Skill

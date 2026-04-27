@@ -33,7 +33,7 @@ Memory 模块采用**简单文件管理架构**，无持久化中间层，直接
                                ▼
                         ┌─────────────────┐
                         │   文件系统 (fs)  │
-                        │  IRIS.md 文件    │
+                        │  OHBABY.md 文件    │
                         └─────────────────┘
 ```
 
@@ -44,17 +44,17 @@ Memory 模块采用**简单文件管理架构**，无持久化中间层，直接
 - **直接 IO**：不使用 Storage 模块，直接操作文件系统
 - **向上查找**：项目记忆支持从当前目录向上查找到项目根
 
-### 1.3 IRIS.md 文件位置
+### 1.3 OHBABY.md 文件位置
 
 | 类型 | 路径 | 说明 |
 |------|------|------|
-| 全局记忆 | `~/.iris-code/IRIS.md` (Linux/macOS) | XDG 配置目录 |
-| 全局记忆 | `%APPDATA%/iris-code/IRIS.md` (Windows) | Windows 应用数据目录 |
-| 项目记忆 | `{projectRoot}/IRIS.md` | 项目根目录，与 `.gitignore` 同级 |
+| 全局记忆 | `~/.ohbaby-code/OHBABY.md` (Linux/macOS) | XDG 配置目录 |
+| 全局记忆 | `%APPDATA%/ohbaby-code/OHBABY.md` (Windows) | Windows 应用数据目录 |
+| 项目记忆 | `{projectRoot}/OHBABY.md` | 项目根目录，与 `.gitignore` 同级 |
 
 **设计说明**：
-- 项目级 IRIS.md 放在项目根目录（而非 `.iris-code/` 内）
-- 这样设计使 IRIS.md 更易被用户发现和编辑
+- 项目级 OHBABY.md 放在项目根目录（而非 `.ohbaby-code/` 内）
+- 这样设计使 OHBABY.md 更易被用户发现和编辑
 - 便于加入版本控制与团队共享
 
 ---
@@ -67,7 +67,7 @@ src/core/memory/
 ├── types.ts              # 类型定义
 ├── constants.ts          # 常量定义
 ├── memory-manager.ts     # 核心逻辑：load, add, update, remove, listEntries
-├── memory-discovery.ts   # 文件发现：查找 IRIS.md
+├── memory-discovery.ts   # 文件发现：查找 OHBABY.md
 ├── memory-parser.ts      # 内容解析：解析条目、计算新内容
 └── memory-tools.ts       # Tool 定义：memory_add, memory_update, memory_remove, memory_list
 ```
@@ -187,12 +187,12 @@ async function load(directory: string): Promise<MergedMemory>
 
 2. 加载全局记忆
    ├─> 获取全局路径：getGlobalMemoryPath()
-   │   └─> XDG 配置目录 + IRIS.md
+   │   └─> XDG 配置目录 + OHBABY.md
    └─> 读取文件内容（不存在则返回空字符串）
 
 3. 加载项目记忆
    ├─> 调用 findProjectMemoryPath(directory, rootPath)
-   │   ├─> 从 directory 向上查找 IRIS.md
+   │   ├─> 从 directory 向上查找 OHBABY.md
    │   └─> 找到第一个即停止，未找到返回 null
    └─> 读取文件内容（不存在则返回空字符串）
 
@@ -314,14 +314,14 @@ async function listEntries(
 function getGlobalMemoryPath(): string {
   // XDG 标准目录
   const configDir = process.platform === 'win32'
-    ? path.join(process.env.APPDATA || '', 'iris-code')
-    : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'iris-code')
+    ? path.join(process.env.APPDATA || '', 'ohbaby-code')
+    : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'ohbaby-code')
   
-  return path.join(configDir, 'IRIS.md')
+  return path.join(configDir, 'OHBABY.md')
 }
 
-// Linux/macOS: ~/.config/iris-code/IRIS.md
-// Windows: %APPDATA%/iris-code/IRIS.md
+// Linux/macOS: ~/.config/ohbaby-code/OHBABY.md
+// Windows: %APPDATA%/ohbaby-code/OHBABY.md
 ```
 
 ### 5.2 项目路径查找（向上查找）
@@ -335,7 +335,7 @@ async function findProjectMemoryPath(
   const root = path.resolve(projectRoot)
   
   while (true) {
-    const irisPath = path.join(currentDir, 'IRIS.md')
+    const irisPath = path.join(currentDir, 'OHBABY.md')
     
     // 检查文件是否存在
     try {
@@ -439,7 +439,7 @@ function mergeMemory(globalContent: string, projectContent: string): string {
   
   if (projectContent.trim()) {
     parts.push(
-      `<!-- Project Memory from <project-root>/IRIS.md -->\n${projectContent.trim()}`
+      `<!-- Project Memory from <project-root>/OHBABY.md -->\n${projectContent.trim()}`
     )
   }
   
@@ -577,7 +577,7 @@ export const MemoryTools = {
 
 | 操作 | 预期耗时 | 优化策略 |
 |------|----------|----------|
-| 读取 IRIS.md (< 100KB) | < 10ms | 无需优化 |
+| 读取 OHBABY.md (< 100KB) | < 10ms | 无需优化 |
 | 向上查找 | < 5ms | 找到第一个即停止 |
 | 解析条目 | < 1ms | 简单正则匹配 |
 

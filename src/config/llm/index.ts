@@ -15,7 +15,7 @@ export { ConfigError } from './types.js';
 /**
  * Get LLM configuration.
  *
- * On first call, loads configuration from ~/.iris-code/model.json
+ * On first call, loads configuration from ~/.ohbaby-code/model.json
  * and reads API key from environment variable specified in the config.
  * Subsequent calls return cached configuration.
  *

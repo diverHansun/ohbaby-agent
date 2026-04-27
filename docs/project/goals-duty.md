@@ -14,7 +14,7 @@
 
 **如果没有这个模块**：
 - Session 模块需要自己实现项目识别逻辑，职责不清
-- Memory 模块无法确定项目级 IRIS.md 文件的位置
+- Memory 模块无法确定项目级 OHBABY.md 文件的位置
 - 项目 ID 生成逻辑分散在多处，难以保持一致性
 - 非 Git 目录的处理缺乏统一策略
 
@@ -92,7 +92,7 @@ Project 模块只负责识别，不负责管理：
 
 ### N2: 不负责项目配置管理
 
-项目级配置文件（如 `.iris-code/settings.json`）由 Config 模块负责加载和管理。
+项目级配置文件（如 `.ohbaby-code/settings.json`）由 Config 模块负责加载和管理。
 
 ### N3: 不维护项目下的会话列表
 
@@ -108,7 +108,7 @@ Project 模块不知道项目下有哪些会话。如需查询，调用者应直
 
 ### N6: 不负责项目初始化
 
-创建 `.iris-code/` 目录、初始化项目配置等操作不是 Project 模块的职责。
+创建 `.ohbaby-code/` 目录、初始化项目配置等操作不是 Project 模块的职责。
 
 ---
 
@@ -133,7 +133,7 @@ Project 模块不知道项目下有哪些会话。如需查询，调用者应直
 | 模块 | 关系 | 说明 |
 |------|------|------|
 | Session | 被依赖 | Session.create 调用 Project.fromDirectory 获取 projectId |
-| Memory | 被依赖 | Memory 使用 projectRoot 定位项目级 IRIS.md |
+| Memory | 被依赖 | Memory 使用 projectRoot 定位项目级 OHBABY.md |
 | Config | 并行 | Config 使用 projectRoot 定位项目级配置文件 |
 | Storage | 无依赖 | Project 模块不持久化数据 |
 | lifecycle | 间接 | lifecycle 通过 Session 间接使用 projectId |

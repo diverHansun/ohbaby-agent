@@ -19,7 +19,7 @@ import type { LLMClientInstance } from './types.js';
 /**
  * Create and initialize an LLM client instance.
  *
- * Loads configuration from the config module (which reads from ~/.iris-code/model.json
+ * Loads configuration from the config module (which reads from ~/.ohbaby-code/model.json
  * and environment variables). Configuration validation is handled by the config module.
  *
  * @returns Promise resolving to client instance with OpenAI SDK and configuration

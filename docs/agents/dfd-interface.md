@@ -8,7 +8,7 @@
 
 ### 1.1 模块位置
 
-agent 模块在 iris-code 系统中的位置：
+agent 模块在 ohbaby-code 系统中的位置：
 
 ```
                   ┌─────────┐
@@ -64,10 +64,10 @@ agent 模块在 iris-code 系统中的位置：
    │    └── build, plan, explore, research
    │
    ├──▶ 加载全局配置文件
-   │    └── Config.getGlobalPath() → ~/.iris-code/agents/*.json
+   │    └── Config.getGlobalPath() → ~/.ohbaby-code/agents/*.json
    │
    ├──▶ 加载项目配置文件
-   │    └── Config.getProjectPath() → .iris-code/agents/*.json
+   │    └── Config.getProjectPath() → .ohbaby-code/agents/*.json
    │
    └──▶ 合并配置（后者覆盖前者）
         └── 存储到内部 Map
@@ -106,7 +106,7 @@ agent 模块在 iris-code 系统中的位置：
    │    └── workingDirectory, platform, isGitRepo, date
    │
    ├──▶ 加载自定义指令（仅主代理）
-   │    └── IRIS.md 文件内容
+   │    └── OHBABY.md 文件内容
    │
    ├──▶ SystemPrompt.assemble({
    │      agentName,
@@ -331,12 +331,12 @@ namespace Agent {
 
 | 类型 | 路径 | 说明 |
 |------|------|------|
-| 全局配置 | `~/.iris-code/agents/*.json` | 用户级配置 |
-| 项目配置 | `.iris-code/agents/*.json` | 项目级配置 |
-| 项目级记忆 | `{projectRoot}/IRIS.md` | 项目根目录，与 .gitignore 同级 |
-| 全局级记忆 | `~/.iris-code/IRIS.md` | XDG 配置目录 |
+| 全局配置 | `~/.ohbaby-code/agents/*.json` | 用户级配置 |
+| 项目配置 | `.ohbaby-code/agents/*.json` | 项目级配置 |
+| 项目级记忆 | `{projectRoot}/OHBABY.md` | 项目根目录，与 .gitignore 同级 |
+| 全局级记忆 | `~/.ohbaby-code/OHBABY.md` | XDG 配置目录 |
 
-**说明**：项目级 IRIS.md 放在项目根目录（而非 `.iris-code/` 内），便于用户发现、编辑和版本控制。
+**说明**：项目级 OHBABY.md 放在项目根目录（而非 `.ohbaby-code/` 内），便于用户发现、编辑和版本控制。
 
 ---
 

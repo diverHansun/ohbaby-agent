@@ -1,4 +1,4 @@
-﻿# lifecycle 模块 dfd-interface.md
+# lifecycle 模块 dfd-interface.md
 
 本文档描述 `lifecycle` 模块的数据流与对外接口。数据流优先，接口从属于数据流。
 
@@ -8,7 +8,7 @@
 
 ### 模块位置
 
-lifecycle 位于 iris-code 架构的核心层，作为执行引擎协调多个模块：
+lifecycle 位于 ohbaby-code 架构的核心层，作为执行引擎协调多个模块：
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐

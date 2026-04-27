@@ -8,7 +8,7 @@
 
 ### 模块位置
 
-Shell 模块位于 iris-code 架构的底层，是 Tools 模块（特别是 Bash Tool）的基础设施依赖。
+Shell 模块位于 ohbaby-code 架构的底层，是 Tools 模块（特别是 Bash Tool）的基础设施依赖。
 
 ### 交互模块
 

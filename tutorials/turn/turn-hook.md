@@ -50,7 +50,7 @@ export class Turn {
 - 通过事件流传递状态变化
 - `pendingToolCalls` 只包含待处理的工具调用请求
 
-### 1.3 iris-code 的建议结构
+### 1.3 ohbaby-code 的建议结构
 
 **文件位置：**
 
@@ -189,7 +189,7 @@ export async function fireBeforeToolHook(
 - `shouldStopExecution()`: 检查是否停止整个 Agent 执行
 - `getAdditionalContext()`: 获取要添加到结果的额外上下文
 
-### 3.4 iris-code 建议的架构
+### 3.4 ohbaby-code 建议的架构
 
 ```
 src/core/

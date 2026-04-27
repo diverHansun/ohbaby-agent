@@ -118,7 +118,7 @@
 
 ### N1: 不负责 Memory 文件的 CRUD
 
-Memory 文件（IRIS.md）的读写由 Memory 模块负责。Context 只调用 `Memory.load()` 获取内容。
+Memory 文件（OHBABY.md）的读写由 Memory 模块负责。Context 只调用 `Memory.load()` 获取内容。
 
 ### N2: 不负责 SystemPrompt 构建
 

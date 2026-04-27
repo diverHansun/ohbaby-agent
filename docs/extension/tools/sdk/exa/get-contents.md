@@ -270,8 +270,8 @@ networks that constitute animal brains...
 ### 配置文件位置
 
 ```
-项目级：{project}/.iris-code/tools/exa.yaml
-用户级：~/.config/iris-code/tools/exa.yaml
+项目级：{project}/.ohbaby-code/tools/exa.yaml
+用户级：~/.config/ohbaby-code/tools/exa.yaml
 ```
 
 ### 相关配置项

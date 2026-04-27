@@ -58,7 +58,7 @@
 
 ### D2: Init 命令
 
-生成项目初始化的 Prompt 模板，用于创建 IRIS.md 文件。模板存放于 `src/commands/template/` 目录。
+生成项目初始化的 Prompt 模板，用于创建 OHBABY.md 文件。模板存放于 `src/commands/template/` 目录。
 
 调用模块：`Template`（内部子模块）
 
@@ -133,11 +133,11 @@
 
 ### D10: Memory 命令
 
-管理 IRIS.md 记忆文件：
+管理 OHBABY.md 记忆文件：
 - `add`: 手动添加新记忆（支持项目级/全局级）
 - `refresh`: 强制重新加载记忆文件（在手动编辑文件后使用）
 
-注意：Memory 模块不提供 remove/update 的 CLI 命令，鼓励用户直接编辑 IRIS.md 文件或通过 AI 完成这些操作。
+注意：Memory 模块不提供 remove/update 的 CLI 命令，鼓励用户直接编辑 OHBABY.md 文件或通过 AI 完成这些操作。
 
 调用模块：`Memory`（代码: `src/core/memory/`）
 

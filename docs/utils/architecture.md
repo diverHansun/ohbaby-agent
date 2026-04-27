@@ -8,7 +8,7 @@
 
 ### 模块定位
 
-utils 模块是 iris-code 的底层基础设施层，位于所有业务模块之下，提供通用工具函数和统一的基础设施。
+utils 模块是 ohbaby-code 的底层基础设施层，位于所有业务模块之下，提供通用工具函数和统一的基础设施。
 
 ### 核心架构
 
@@ -317,7 +317,7 @@ export async function runExitCleanup(): Promise<void>
 关键设计：
 ```typescript
 export class ProjectPaths {
-  static readonly CONFIG_DIR = '.iris-code'
+  static readonly CONFIG_DIR = '.ohbaby-code'
   static getGlobalConfigPath(): string
   static getPermissionsPath(cwd?: string): string
   static getMCPConfigPath(cwd?: string): string
@@ -662,7 +662,7 @@ await Log.init({
 })
 
 // 日志文件路径
-// ~/.iris-code/logs/2024-01-15T103000.log
+// ~/.ohbaby-code/logs/2024-01-15T103000.log
 ```
 
 ### 5.3 日志清理策略

@@ -110,7 +110,7 @@ cli/commands 模块是 commands 模块在终端环境下的薄封装层：
 2. Parser 解析: { path: "init", args: "" }
 3. 调用 CommandService.execute("init", "", commandContext)
 4. action 读取模板文件，返回: { success: true, type: 'prompt', prompt: "请分析项目..." }
-5. Renderer 显示提示消息（表示正在生成 IRIS.md）
+5. Renderer 显示提示消息（表示正在生成 OHBABY.md）
 6. executeSlashCommand 返回 { handled: true, action: { type: 'prompt', payload: "..." } }
 7. UI Layer 将 prompt 提交给 LLM 处理
 ```

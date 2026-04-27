@@ -34,7 +34,7 @@ Turn #2:
 
 ### 1.2 与 OpenAI 格式的对比
 
-**OpenAI 格式（iris-code 使用）：**
+**OpenAI 格式（ohbaby-code 使用）：**
 
 ```typescript
 type ChatCompletionMessage = 
@@ -334,7 +334,7 @@ async publish(message: Message): Promise<void> {
 }
 ```
 
-## 五、iris-code 设计建议
+## 五、ohbaby-code 设计建议
 
 ### 5.1 Turn 分层设计
 
@@ -388,7 +388,7 @@ interface AgentTurn {
 
 ### 5.2 ApprovalMode 简化设计
 
-相比 gemini-cli 的 TOML 配置，iris-code 可以简化为：
+相比 gemini-cli 的 TOML 配置，ohbaby-code 可以简化为：
 
 ```typescript
 enum ApprovalMode {
@@ -458,7 +458,7 @@ async function checkToolPermission(
 
 ## 六、关键设计决策总结
 
-| 方面 | gemini-cli | iris-code 建议 |
+| 方面 | gemini-cli | ohbaby-code 建议 |
 |------|-----------|---------------|
 | **消息格式** | Google Content (user/model/tool) | OpenAI ChatMessage (user/assistant/tool) |
 | **Turn 分层** | 隐式（在 executor 中） | 显式（MainTurn vs AgentTurn） |

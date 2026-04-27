@@ -231,7 +231,7 @@ process.on('SIGINT', async () => {
 
 | 命令 | 说明 | 参数 |
 |------|------|------|
-| `/init` | 生成 IRIS.md | 无 |
+| `/init` | 生成 OHBABY.md | 无 |
 | `/status` | 系统状态（模型、API、模式、MCP、会话、Context 使用率） | 无 |
 | `/compact` | 压缩会话上下文 | 无 |
 | `/help [command]` | 帮助信息（按 category 分组） | command: 命令名（可选） |

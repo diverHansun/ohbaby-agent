@@ -8,7 +8,7 @@
 
 ### 模块定位
 
-config/mcp 是 iris-code 配置系统的一部分，专门负责MCP服务器配置的加载和验证。它遵循与config/llm相同的设计模式，保持配置加载逻辑的独立性和纯净性。
+config/mcp 是 ohbaby-code 配置系统的一部分，专门负责MCP服务器配置的加载和验证。它遵循与config/llm相同的设计模式，保持配置加载逻辑的独立性和纯净性。
 
 ### 核心架构
 
@@ -27,9 +27,9 @@ config/mcp/
 ```
 1. loadMcpConfig() 被调用
    ↓
-2. 加载全局配置文件 (~/.iris-code/mcp/settings.json)
+2. 加载全局配置文件 (~/.ohbaby-code/mcp/settings.json)
    ↓
-3. 加载项目配置文件 ({project}/.iris-code/mcp/settings.json)
+3. 加载项目配置文件 ({project}/.ohbaby-code/mcp/settings.json)
    ↓
 4. 合并配置（项目覆盖全局）
    ↓
@@ -154,7 +154,7 @@ return mergeConfigs(globalConfig, projectConfig)
 
 理由：
 - JSON是TypeScript原生支持的格式
-- 与iris-code其他配置保持一致（model.json）
+- 与ohbaby-code其他配置保持一致（model.json）
 - TOML需要额外依赖和解析逻辑
 - 可在未来根据需求扩展TOML支持
 
@@ -163,7 +163,7 @@ return mergeConfigs(globalConfig, projectConfig)
 采用市面上主流的分离式命令格式：
 
 ```typescript
-// 主流格式（iris-code采用）
+// 主流格式（ohbaby-code采用）
 {
   "type": "stdio",
   "command": "npx",
@@ -285,10 +285,10 @@ throw new ConfigError(
 
 ```typescript
 // 工作区A的项目配置
-{project-a}/.iris-code/mcp/settings.json
+{project-a}/.ohbaby-code/mcp/settings.json
 
 // 工作区B的项目配置
-{project-b}/.iris-code/mcp/settings.json
+{project-b}/.ohbaby-code/mcp/settings.json
 
 // 两者互不影响
 ```
@@ -311,7 +311,7 @@ throw new ConfigError(
 ### 7.2 导出到config模块
 
 ```typescript
-// iris-code/src/config/index.ts
+// ohbaby-code/src/config/index.ts
 export { loadMcpConfig } from './mcp/index.js'
 export type { McpServerConfig, McpServersConfig } from './mcp/index.js'
 ```

@@ -8,7 +8,7 @@
 
 ### 模块定位
 
-Shell 模块是 iris-code 的底层基础设施，为 Bash Tool 提供跨平台的 shell 检测和进程管理能力。
+Shell 模块是 ohbaby-code 的底层基础设施，为 Bash Tool 提供跨平台的 shell 检测和进程管理能力。
 
 ### 核心架构
 

@@ -1,4 +1,4 @@
-# OpenCode vs Gemini-CLI vs Iris-Code 架构对比分析
+# OpenCode vs Gemini-CLI vs Ohbaby-Code 架构对比分析
 
 ## 一、核心生命周期状态机对比
 
@@ -78,7 +78,7 @@ SessionProcessor.process()
 - **递归调用**：Subagent 实际上是递归调用主 Agent，创建新的会话
 - **单层循环**：每个 Turn 内部自我循环直到完成或达到最大步数
 
-### 3. Iris-Code 当前架构（你的设计）
+### 3. Ohbaby-Code 当前架构（你的设计）
 
 ```
 Main-Scheduler
@@ -238,9 +238,9 @@ export class DelegateToAgentTool extends BaseDeclarativeTool {
 - LLM 自主决定何时委派给哪个 agent
 - 更透明，但可能导致 LLM 过度使用
 
-### Iris-Code 应该怎么做？
+### Ohbaby-Code 应该怎么做？
 
-## 三、Iris-Code 架构建议
+## 三、Ohbaby-Code 架构建议
 
 ### 推荐架构：**融合模式**
 
@@ -409,7 +409,7 @@ export class TaskTool implements Tool {
 
 ### 关键决策总结
 
-| 方面 | OpenCode | Gemini-CLI | Iris-Code 建议 |
+| 方面 | OpenCode | Gemini-CLI | Ohbaby-Code 建议 |
 |------|----------|------------|----------------|
 | **状态机位置** | `SessionPrompt.loop()` | `Turn.execute()` | `SessionLoop.run()` |
 | **Agent 定位** | 配置模板 | 工具 | **配置模板** ✅ |

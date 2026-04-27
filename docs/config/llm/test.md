@@ -20,7 +20,7 @@
 
 1. **配置成功加载**：model.json 和 API Key 都有效，getLLMConfig() 返回完整的 LLMConfig
 2. **缓存生效**：第一次调用加载，第二次调用返回缓存结果，不重复加载文件
-3. **本地调试覆盖**：.iris-code.local/model.json 存在时优先使用，不存在时使用 ~/.iris-code/model.json
+3. **本地调试覆盖**：.ohbaby-code.local/model.json 存在时优先使用，不存在时使用 ~/.ohbaby-code/model.json
 4. **热重载工作**：reloadLLMConfig() 清除缓存，下一次调用重新加载文件
 
 ### 错误路径
@@ -46,7 +46,7 @@
 
 ### 与文件系统集成
 
-- 能否正确读取不同位置的 model.json（~/.iris-code 和 .iris-code.local）
+- 能否正确读取不同位置的 model.json（~/.ohbaby-code 和 .ohbaby-code.local）
 - 文件不存在时的错误处理
 - 文件权限问题时的错误处理（如无读权限）
 

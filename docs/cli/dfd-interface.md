@@ -10,7 +10,7 @@
 
 ## 一、Context and Scope（上下文与范围）
 
-cli 模块是 iris-code 的入口层，处于系统最外层：
+cli 模块是 ohbaby-code 的入口层，处于系统最外层：
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -53,7 +53,7 @@ cli 模块是 iris-code 的入口层，处于系统最外层：
 ### 2.1 典型数据流：交互模式启动
 
 ```
-1. 用户在终端输入 "iris-code"（无参数）
+1. 用户在终端输入 "ohbaby-code"（无参数）
 2. Node.js 调用 main() 入口函数
 3. bootstrap 解析 argv:
    - 调用 args.parseArgs(process.argv)
@@ -78,7 +78,7 @@ cli 模块是 iris-code 的入口层，处于系统最外层：
 ### 2.2 数据流：非交互模式执行
 
 ```
-1. 用户输入 "iris-code -p '帮我写一个函数'"
+1. 用户输入 "ohbaby-code -p '帮我写一个函数'"
 2. bootstrap 解析 argv:
    - 返回 { prompt: '帮我写一个函数' }
 3. 初始化流程同上（日志、异常处理、配置、核心模块）
@@ -98,7 +98,7 @@ cli 模块是 iris-code 的入口层，处于系统最外层：
 ### 2.3 数据流：stdin 管道输入
 
 ```
-1. 用户输入 "echo '问题' | iris-code"
+1. 用户输入 "echo '问题' | ohbaby-code"
 2. bootstrap.ts 解析 argv:
    - 返回 { prompt: undefined }
 3. bootstrap.ts 检测 stdin:
@@ -112,7 +112,7 @@ cli 模块是 iris-code 的入口层，处于系统最外层：
 ### 2.4 数据流：参数错误
 
 ```
-1. 用户输入 "iris-code --invalid-option"
+1. 用户输入 "ohbaby-code --invalid-option"
 2. args.parseArgs 抛出 CliArgumentError
 3. 异常处理器捕获错误:
    - log.error('Argument error', { error })

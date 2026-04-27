@@ -1,5 +1,5 @@
 {
-  "name": "iris-code",
+  "name": "ohbaby-code",
   "version": "0.1.0",
   "description": "An AI coding assistant CLI tool",
   "type": "module",
@@ -8,7 +8,7 @@
     "node": ">=20.0.0"
   },
   "bin": {
-    "iris": "./dist/index.js"
+    "ohbaby": "./dist/index.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -45,16 +45,16 @@
     "gemini",
     "agent"
   ],
-  "author": "iris-code contributors",
+  "author": "ohbaby-code contributors",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/iris-code/iris-code.git"
+    "url": "https://github.com/diverHansun/ohbaby-code.git"
   },
   "bugs": {
-    "url": "https://github.com/iris-code/iris-code/issues"
+    "url": "https://github.com/diverHansun/ohbaby-code/issues"
   },
-  "homepage": "https://github.com/iris-code/iris-code#readme",
+  "homepage": "https://github.com/diverHansun/ohbaby-code#readme",
   "dependencies": {
     "@tavily/core": "^0.6.4",
     "chalk": "^5.4.1",

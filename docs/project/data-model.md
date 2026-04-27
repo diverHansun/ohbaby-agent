@@ -26,8 +26,8 @@
 │   ├── Session 2
 │   └── ...
 │
-└── 关联一个 IRIS.md（由 Memory 模块管理）
-    └── {rootPath}/.iris-code/IRIS.md
+└── 关联一个 OHBABY.md（由 Memory 模块管理）
+    └── {rootPath}/.ohbaby-code/OHBABY.md
 ```
 
 ### 概念 2: Global Project（全局项目）
@@ -266,8 +266,8 @@ const session = await SessionManager.create({
 async function loadProjectMemory(directory: string): Promise<string | null> {
   const project = await Project.fromDirectory(directory)
   
-  // 构建 IRIS.md 路径
-  const memoryPath = path.join(project.rootPath, '.iris-code', 'IRIS.md')
+  // 构建 OHBABY.md 路径
+  const memoryPath = path.join(project.rootPath, '.ohbaby-code', 'OHBABY.md')
   
   // 读取文件
   return await fs.readFile(memoryPath, 'utf-8').catch(() => null)
@@ -282,7 +282,7 @@ async function loadProjectConfig(directory: string): Promise<Config | null> {
   const project = await Project.fromDirectory(directory)
   
   // 构建配置文件路径
-  const configPath = path.join(project.rootPath, '.iris-code', 'settings.json')
+  const configPath = path.join(project.rootPath, '.ohbaby-code', 'settings.json')
   
   // 读取配置
   return await fs.readFile(configPath, 'utf-8')

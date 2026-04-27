@@ -50,8 +50,8 @@ agents 模块（业务层）
    |
    v
 2. config/agents 模块确定配置文件路径
-   - 全局：~/.iris-code/agents/settings.json
-   - 项目：{project}/.iris-code/agents/settings.json
+   - 全局：~/.ohbaby-code/agents/settings.json
+   - 项目：{project}/.ohbaby-code/agents/settings.json
    |
    v
 3. 从文件系统读取全局配置文件
@@ -158,8 +158,8 @@ export const DEFAULT_PRIMARY_TIMEOUT = 300000  // 5 分钟
 export const DEFAULT_SUBAGENT_TIMEOUT = 180000 // 3 分钟
 
 // 配置路径常量
-export const GLOBAL_CONFIG_DIR = '~/.iris-code/agents'
-export const PROJECT_CONFIG_DIR = '.iris-code/agents'
+export const GLOBAL_CONFIG_DIR = '~/.ohbaby-code/agents'
+export const PROJECT_CONFIG_DIR = '.ohbaby-code/agents'
 export const CONFIG_FILE_NAME = 'settings.json'
 ```
 
@@ -336,7 +336,7 @@ agents 模块
 
 ### 6.1 全局配置
 
-路径：`~/.iris-code/agents/settings.json`
+路径：`~/.ohbaby-code/agents/settings.json`
 
 用途：
 - 用户级别的默认 Agent 配置
@@ -361,7 +361,7 @@ agents 模块
 
 ### 6.2 项目配置
 
-路径：`{project}/.iris-code/agents/settings.json`
+路径：`{project}/.ohbaby-code/agents/settings.json`
 
 用途：
 - 项目特定的 Agent 配置

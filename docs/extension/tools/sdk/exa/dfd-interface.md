@@ -86,8 +86,8 @@
 ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
 │      .env        │     │ Project Config   │     │  User Config     │
 │                  │     │                  │     │                  │
-│  EXA_API_KEY=xxx │     │ .iris-code/      │     │ ~/.config/       │
-│                  │     │   tools/exa.yaml │     │   iris-code/     │
+│  EXA_API_KEY=xxx │     │ .ohbaby-code/      │     │ ~/.config/       │
+│                  │     │   tools/exa.yaml │     │   ohbaby-code/     │
 │                  │     │                  │     │   tools/exa.yaml │
 └────────┬─────────┘     └────────┬─────────┘     └────────┬─────────┘
          │                        │                        │

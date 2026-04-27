@@ -1,4 +1,4 @@
-# iris-code
+# ohbaby-code
 
 An AI coding assistant CLI tool inspired by opencode and gemini-cli.
 
@@ -8,7 +8,7 @@ An AI coding assistant CLI tool inspired by opencode and gemini-cli.
 - Interactive CLI with Ink (React-based terminal UI)
 - Tool execution system for file operations, shell commands, and more
 - Session management with conversation history
-- Memory system (IRIS.md) for project context
+- Memory system (OHBABY.md, compatible with CLAUDE.md and AGENTS.md) for project context
 - MCP (Model Context Protocol) support
 
 ## Prerequisites
@@ -20,8 +20,8 @@ An AI coding assistant CLI tool inspired by opencode and gemini-cli.
 
 ```bash
 # Clone the repository
-git clone https://github.com/iris-code/iris-code.git
-cd iris-code
+git clone https://github.com/diverHansun/ohbaby-code.git
+cd ohbaby-code
 
 # Install dependencies
 pnpm install
@@ -62,7 +62,7 @@ pnpm build
 ## Project Structure
 
 ```
-iris-code/
+ohbaby-code/
 ├── src/
 │   ├── index.ts              # Entry point
 │   ├── cli/                   # CLI layer (Ink components)
@@ -72,7 +72,7 @@ iris-code/
 │   ├── core/                  # Core modules
 │   │   ├── lifecycle/         # Execution loop
 │   │   ├── message/           # Message management
-│   │   ├── memory/            # IRIS.md memory
+│   │   ├── memory/            # OHBABY.md memory
 │   │   └── tool-scheduler/    # Tool orchestration
 │   ├── services/              # Service modules
 │   │   └── session/           # Session management
@@ -93,6 +93,11 @@ See the `docs/` directory for detailed design documentation:
 
 - [Coding Guide](./coding_guide.md) - Development guidelines
 - [Module Documentation](./docs/) - Individual module designs
+
+Agent-recognized memory entry files:
+- `OHBABY.md` (canonical)
+- `CLAUDE.md` (Anthropic Claude-compatible entry)
+- `AGENTS.md` (OpenAI Agents/Codex-compatible entry)
 
 ## License
 
