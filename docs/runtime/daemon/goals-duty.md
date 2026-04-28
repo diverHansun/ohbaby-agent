@@ -40,9 +40,11 @@ daemon 在收到退出信号（SIGTERM / SIGINT）时协调各子系统有序关
   - `runtime/heartbeat`（HeartbeatMachine）
   - `runtime/tasks`（TaskManager）
   - `runtime/hooks`（HookExecutor）
-  - app-event adapter（将 app 级 Bus 事件翻译为 StreamBridge 的 `app.*` 事件）
+  - app-events adapter（`daemon/app-events.ts`，内部文件，将 app 级 Bus 事件接线到 StreamBridge `app.*`）
 - 将实例注入到各子系统中（依赖注入，不使用全局单例）
 - 负责把 SandboxManager 注入 run-manager、tasks 等需要执行上下文的子系统
+
+> **app-events adapter 说明**：`daemon/app-events.ts` 是 daemon 内部文件，不作为独立 runtime 子模块。它只做 app 级 Bus 事件 → StreamBridge `app.*` 的接线，返回 `dispose()` 供优雅退出调用。升级条件：当翻译逻辑超过约 100 行、需要独立测试矩阵、或被 server/SDK 复用时，再提升为 `runtime/app-event-bridge` 独立模块。
 
 ### 3. 优雅退出
 
@@ -57,7 +59,7 @@ daemon 在收到退出信号（SIGTERM / SIGINT）时协调各子系统有序关
 负责：
 - 记录 daemon 的运行状态（running / stopping / crashed）到 state 文件
 - 进程正常退出时更新 state 为 `stopped`
-- state 文件由 `runtime/run-manager` 的崩溃恢复逻辑在启动时读取
+- 进程重启时，`run-manager.init()` 通过 `run-ledger.markInterrupted()` 完成崩溃恢复；daemon 的 state 文件作为进程级可见性辅助，不作为 Run 恢复的权威数据源
 
 ### 5. 日志基础设施
 
@@ -106,7 +108,7 @@ daemon 只负责装配 SandboxManager 与 adapter registry，不决定某个 ses
 | `runtime/heartbeat` | 持有并初始化 | daemon 创建 HeartbeatMachine 实例并在退出时停止 |
 | `runtime/tasks` | 持有并初始化 | daemon 创建 TaskManager 实例并在退出时停止后台任务 |
 | `runtime/hooks` | 持有并初始化 | daemon 创建 HookExecutor 并注册内置 runtime hook |
-| app-event adapter | 持有并初始化 | daemon 负责 app 级事件的 Bus → StreamBridge 翻译，不让 scheduler 直接接触 bridge |
+| `daemon/app-events.ts` | 内部文件 | daemon 调用 `startAppEventAdapter({ bus, bridge })` 完成 app 级事件接线；是 daemon 内部实现，不作为独立模块 |
 | `config` | 依赖 | 读取已加载的配置对象（工作目录、pid 文件路径等） |
 | `interfaces/server` | 无直接依赖 | server 是独立进程或 daemon 的一个子服务，不由 daemon 内部管理 |
 
@@ -123,10 +125,12 @@ const sandboxManager = new SandboxManager({ adapterRegistry, projectService })
 const bridge = new InMemoryStreamBridge()
 const hookExecutor = new HookExecutor()
 const taskManager = new TaskManager({ sandboxManager })
-const runManager = new RunManager({ bridge, sessionStorage, hookExecutor, sandboxManager })
-const scheduler = new Scheduler({ bus })
+const runLedger = new RunLedger({ db })
+const runManager = new RunManager({ bridge, runLedger, hookExecutor, sandboxManager })
+const scheduler = new Scheduler({ db, bus })
 const heartbeat = new HeartbeatMachine({ runManager, scheduler })
-const appEvents = new AppEventAdapter({ bus, bridge })
+// app-events.ts 是 daemon 内部文件，不是独立模块
+const disposeAppEvents = startAppEventAdapter({ bus, bridge })
 ```
 
 正确：daemon 处理退出信号
