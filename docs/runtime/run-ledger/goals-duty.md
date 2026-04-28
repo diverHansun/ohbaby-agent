@@ -18,7 +18,10 @@
 - `runtime/run-manager` 负责 Run 的调度、内存状态、async worker、AbortController、多任务策略等复杂逻辑
 - `runtime/run-ledger` 是 run-manager 的持久化子系统，只负责状态账本的读写
 - RunRecord 主体（Worker 句柄、内存中间状态）仍由 run-manager 在内存中维护
-- 两者不冗余：run-manager 是"正在怎么跑"的控制面，run-ledger 是"曾经发生过什么"的持久化账本
+- **两层权威来源明确区分**：
+  - `run-manager 内存索引` = 当前进程的调度控制权威（热路径并发仲裁读此处）
+  - `run-ledger DB` = 持久化审计与崩溃恢复权威（跨进程重启后读此处）
+- **run-ledger 不参与热路径调度仲裁**：run-manager 在运行期的并发检测、策略决策、队列管理只读内存索引，不查询 DB。run-ledger 是写目标和恢复来源，不是运行期锁或调度队列。
 
 ---
 
@@ -79,11 +82,11 @@ run-ledger 不知道 async worker、MultitaskStrategy、PermissionProfile、Abor
 - 这是唯一一种批量写入场景
 - 不删除 `interrupted` 记录，保留审计历史
 
-### D5: 活跃 Run 查询
+### D5: 账本查询接口
 
-提供查询接口供 run-manager 使用：
-- `getActiveRuns(sessionId?)`: 查询所有 `status IN ('pending', 'running')` 的 Run（可按 session 过滤）
-- `getRunHistory(sessionId, limit)`: 查询某 session 最近 N 条 Run 历史
+提供以下查询接口，**仅用于启动诊断、管理命令、debug UI、崩溃恢复前检查，不用于热路径调度仲裁**：
+- `getActiveRuns(sessionId?)`: 查询所有 `status IN ('pending', 'running')` 的 Run——崩溃恢复前使用，运行期并发检测不调用此接口
+- `getRunHistory(sessionId, limit)`: 查询某 session 最近 N 条 Run 历史（供 UI/debug 用）
 - `getRun(runId)`: 获取单条 Run 账本记录
 
 ### D6: 账本清理
@@ -97,9 +100,9 @@ run-ledger 不知道 async worker、MultitaskStrategy、PermissionProfile、Abor
 
 ## 四、Non-Duties（非职责）
 
-### N1: 不负责 Run 的调度决策
+### N1: 不负责 Run 的调度决策，不参与热路径并发仲裁
 
-是否允许新 Run、多 Run 策略（queue/reject/interrupt）、权限画像应用，这些由 run-manager 决定。run-ledger 只被动记录 run-manager 的决策结果。
+是否允许新 Run、多 Run 策略（queue/reject/interrupt）、权限画像应用，这些由 run-manager 决定。run-ledger 只被动记录 run-manager 的决策结果。run-manager 在运行期的并发检测读取内存索引，不查询 run-ledger；run-ledger 不是运行期锁、不是调度队列、不是并发仲裁器。
 
 ### N2: 不持有 Worker 句柄或内存状态
 

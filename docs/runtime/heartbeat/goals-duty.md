@@ -40,12 +40,25 @@ agent loop 在某些情况下会主动挂起（如等待用户确认、等待外
   - `sleeping`：根据触发源决定是否提前唤醒
   - `blocked`：忽略触发（等待 blocked 条件解除）
 
-### 3. 管理 deferred 队列
+### 3. 管理 deferred 队列（优先级 + Ack 协议）
 
 负责：
 - 在 `paused` 状态下接收到的触发信号进入 deferred 队列
-- 状态恢复为 `active` 时，按序处理 deferred 队列中的触发
-- deferred 队列有上限（默认最多 10 条），超出时丢弃最旧的
+- 状态恢复为 `active` 时，按优先级顺序处理 deferred 队列中的触发
+- **优先级定义**（高到低）：
+  1. **Reminder**：用户可感知的"到点提醒"承诺，at-least-once 语义，不可静默丢弃
+  2. **ScheduledJob**：周期性后台任务，可合并重复触发
+  3. **FollowUp**：agent 续跑等待，优先级最低，可丢弃
+- **队列满时的驱逐策略**：
+  - 新信号到达且队列满时，按优先级从低到高驱逐现有条目（先驱逐 FollowUp，再驱逐 ScheduledJob）
+  - 如果队列中全为 Reminder 且新信号也是 Reminder，拒绝新信号并记录警告日志
+  - Reminder 绝不会因为队列满而被静默丢弃
+- **Ack/Disposition 协议**：heartbeat 向 scheduler 回报每条信号的处置结果：
+  - `accepted`：`run-manager.create()` 已成功接收信号，并至少创建了 pending RunRecord / run-ledger 记录
+  - `deferred`：信号进入 deferred 队列等待
+  - `rejected`：信号被拒绝（队列满且无法驱逐）
+  - `started`：run-manager 已确认 Run 启动（由 run-manager 回调通知）
+- Reminder 的 `scheduler_job.status = completed` 仅在 scheduler 收到 `started` 或 `accepted` disposition 后才写入；`deferred` 和 `rejected` 不触发 completed
 
 ### 4. 主动挂起与恢复的协调
 
@@ -58,7 +71,7 @@ agent loop 在某些情况下会主动挂起（如等待用户确认、等待外
 ### 5. 状态的外部可见性
 
 负责：
-- 通过 Bus 发布状态变更事件，供 UI store 或 runtime app-event adapter 消费
+- 通过 Bus 发布状态变更事件，供 UI store 或 `daemon/app-events.ts` 消费
 - 提供同步 `getState()` 接口，供 daemon 在优雅退出时判断是否有待处理信号
 
 ---
@@ -104,14 +117,18 @@ heartbeat 调用 `run-manager.create()` 这一行为是它的职责边界。Run 
 
 ### 5.1 职责内的示例
 
-正确：heartbeat 收到触发信号后根据状态决策
+正确：heartbeat 收到触发信号后根据状态决策，并回报 disposition
 ```typescript
 // heartbeat/machine.ts 负责
-bus.on(Scheduler.Event.JobFired, async ({ jobId, trigger }) => {
+bus.on(Scheduler.Event.JobFired, async ({ jobId, kind, trigger }) => {
   if (this.state === 'active') {
     await runManager.create({ trigger: 'scheduler', sessionId: job.sessionId, ... })
+    // create 成功表示信号已被 run-manager 接收；started 可作为后续幂等确认
+    return bus.emit(Heartbeat.Event.SignalDisposition, { jobId, disposition: 'accepted' })
   } else if (this.state === 'paused') {
-    this.deferredQueue.push({ jobId, trigger })
+    const enqueued = this.deferredQueue.enqueue({ jobId, kind, trigger })
+    const disposition = enqueued ? 'deferred' : 'rejected'
+    bus.emit(Heartbeat.Event.SignalDisposition, { jobId, disposition })
   }
 })
 ```
@@ -144,3 +161,4 @@ await runManager.create({ trigger: 'scheduler', sessionId, ... })
 - 可以用一句话说明该模块的存在意义：heartbeat 是 agent 的运行状态机，在 scheduler / channel 的触发信号到达时决定是否创建 Run，防止不合时宜的自动执行
 - 能清楚回答"这个模块不该做什么"：不做时间计算、不做 Run 管理、不做 channel 消息解析、不做权限画像选择、不处理用户主动请求
 - 职责与其他模块无明显重叠：scheduler（时间触发）、run-manager（Run 创建）、permission-profiles（权限映射）、interfaces/channels（消息处理）边界清晰
+- deferred 队列使用优先级策略，Reminder 不可静默丢弃，completed 语义由 ack/disposition 协议驱动
