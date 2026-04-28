@@ -234,11 +234,15 @@ CREATE TABLE snapshot_checkpoint (
   checkpoint_id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
   run_id TEXT,
-  turn_id TEXT,
+  turn_id TEXT NOT NULL,
   workdir TEXT NOT NULL,
+  workspace_source TEXT,
+  message_cursor_before TEXT, -- JSON，Turn 开始时的 message cursor
+  message_cursor_after TEXT,  -- JSON，Turn 结束时的 message cursor
   created_at INTEGER NOT NULL
 );
 CREATE INDEX idx_snapshot_session ON snapshot_checkpoint(session_id, created_at);
+CREATE INDEX idx_snapshot_run_turn ON snapshot_checkpoint(session_id, run_id, turn_id);
 
 -- snapshot_patch 表
 CREATE TABLE snapshot_patch (
