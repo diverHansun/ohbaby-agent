@@ -152,7 +152,7 @@ process.on('SIGTERM', async () => {
 ```typescript
 // 错误：不应该在 daemon 中
 if (scheduler.hasDueJobs()) {
-  runManager.create({ trigger: 'scheduler', ... })
+  runManager.create({ triggerSource: 'scheduler', ... })
 }
 
 // 正确：由 scheduler 或 heartbeat 自行决定触发

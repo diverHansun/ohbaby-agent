@@ -88,15 +88,15 @@ heartbeat 调用 `run-manager.create()` 这一行为是它的职责边界。Run 
 
 ### 3. 不负责 channel 消息的解析
 
-来自 Telegram / Slack 的消息标准化由 `interfaces/channels` 负责；消息归属哪个 session、是否需要创建新 session，由 ChannelDispatcher 负责。heartbeat 接收的是已经带有 sessionId 和 trigger 的 WakeSignal，不解析原始消息格式，也不找/建 session。
+来自 Telegram / Slack 的消息标准化由 `interfaces/channels` 负责；消息归属哪个 session、是否需要创建新 session，由 ChannelDispatcher 负责。heartbeat 接收的是已经带有 sessionId 和 triggerSource 的 WakeSignal，不解析原始消息格式，也不找/建 session。
 
 ### 4. 不负责权限画像的选择
 
-触发源与权限画像的默认映射由 `runtime/permission-profiles` 定义。heartbeat 在调用 `run-manager.create()` 时传入 trigger 类型，由 run-manager 查表选择权限画像，heartbeat 不内嵌这个映射逻辑。
+触发源与权限画像的默认映射由装配层的 `RunDefaultsPolicy` 定义。heartbeat 在调用 `run-manager.create()` 时传入 `triggerSource`，由 run-manager 查表选择权限画像，heartbeat 不内嵌这个映射逻辑。
 
 ### 5. 不负责用户交互式请求的处理
 
-用户在 CLI 主动发起的请求不经过 heartbeat。heartbeat 只处理自动化触发（scheduler / channel / follow-up）。CLI 交互由 `interfaces/cli` 直接调用 `run-manager.create({ trigger: 'user', ... })`。
+用户在 CLI 主动发起的请求不经过 heartbeat。heartbeat 只处理自动化触发（scheduler / channel / follow-up）。CLI 交互由 `interfaces/cli` 直接调用 `run-manager.create({ triggerSource: 'user', ... })`。
 
 ---
 
@@ -109,7 +109,7 @@ heartbeat 调用 `run-manager.create()` 这一行为是它的职责边界。Run 
 | `runtime/daemon` | 被持有 | daemon 创建 heartbeat 实例，负责启动与停止 |
 | `interfaces/channels` / ChannelDispatcher | 接收信号 | 接收已完成 session 归属的 WakeSignal 作为触发输入 |
 | `bus` | 订阅 + 发布 | 订阅触发信号，发布状态变更事件 |
-| `runtime/permission-profiles` | 间接依赖 | 通过 run-manager.create() 的 trigger 参数触发权限画像选择 |
+| `runtime/permission-profiles` | 间接依赖 | 通过 run-manager.create() 的 triggerSource 参数触发权限画像选择 |
 
 ---
 
@@ -120,13 +120,13 @@ heartbeat 调用 `run-manager.create()` 这一行为是它的职责边界。Run 
 正确：heartbeat 收到触发信号后根据状态决策，并回报 disposition
 ```typescript
 // heartbeat/machine.ts 负责
-bus.on(Scheduler.Event.JobFired, async ({ jobId, kind, trigger }) => {
+bus.on(Scheduler.Event.JobFired, async ({ jobId, kind, sessionId }) => {
   if (this.state === 'active') {
-    await runManager.create({ trigger: 'scheduler', sessionId: job.sessionId, ... })
+    await runManager.create({ triggerSource: 'scheduler', sessionId, ... })
     // create 成功表示信号已被 run-manager 接收；started 可作为后续幂等确认
     return bus.emit(Heartbeat.Event.SignalDisposition, { jobId, disposition: 'accepted' })
   } else if (this.state === 'paused') {
-    const enqueued = this.deferredQueue.enqueue({ jobId, kind, trigger })
+    const enqueued = this.deferredQueue.enqueue({ jobId, kind, sessionId })
     const disposition = enqueued ? 'deferred' : 'rejected'
     bus.emit(Heartbeat.Event.SignalDisposition, { jobId, disposition })
   }
@@ -147,11 +147,11 @@ onAgentSleepRequest(parentRunId: string, durationMs: number) {
 错误：heartbeat 不应内嵌权限画像映射
 ```typescript
 // 错误：不应该在 heartbeat 中
-const profile = trigger === 'scheduler' ? 'notify-only' : 'interactive'
-await runManager.create({ trigger, permissionProfile: profile, ... })
+const profile = triggerSource === 'scheduler' ? 'notify-only' : 'interactive'
+await runManager.create({ triggerSource, permissionProfile: profile, ... })
 
-// 正确：只传 trigger，由 run-manager 查联动表
-await runManager.create({ trigger: 'scheduler', sessionId, ... })
+// 正确：只传 triggerSource，由 run-manager 查联动表
+await runManager.create({ triggerSource: 'scheduler', sessionId, ... })
 ```
 
 ---

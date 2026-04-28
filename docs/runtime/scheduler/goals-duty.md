@@ -129,9 +129,11 @@ scheduler 不直接调用 StreamBridge。对外的 `app.*` 事件由 daemon 层�
 // scheduler.ts 负责
 onJobFired(job: ScheduledJob) {
   bus.emit(Scheduler.Event.JobFired, {
+    event: 'JobFired',
     jobId: job.id,
+    kind: 'scheduled',
+    priority: 2,
     firedAt: Date.now(),
-    trigger: 'scheduler',
   })
   // 不调用 runManager.create()
 }

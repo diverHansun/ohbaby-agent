@@ -59,7 +59,7 @@ run-ledger 不知道 async worker、MultitaskStrategy、PermissionProfile、Abor
 当 run-manager 创建新 Run 时，立即写入账本：
 - `runId`（主键）
 - `sessionId`
-- `trigger`（触发源：user / scheduler / heartbeat / channel / follow-up）
+- `triggerSource`（触发源：user / scheduler / heartbeat / channel / follow-up）
 - `status = 'pending'`
 - `createdAt`（时间戳）
 
@@ -160,7 +160,7 @@ type TriggerSource = 'user' | 'scheduler' | 'heartbeat' | 'channel' | 'follow-up
 interface RunLedgerRecord {
   runId: string
   sessionId: string
-  trigger: TriggerSource
+  triggerSource: TriggerSource
   status: RunStatus
   createdAt: number       // Unix timestamp ms
   startedAt?: number      // Unix timestamp ms

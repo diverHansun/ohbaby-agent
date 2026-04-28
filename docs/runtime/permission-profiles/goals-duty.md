@@ -105,7 +105,7 @@ permission-profiles 的作用域是 Run 创建时。Run 内部的单次工具调
 | `core/permission` | 间接依赖 | interactive 画像允许触发 permission 弹窗；notify-only 画像阻止弹窗 |
 | `sandbox` | 无直接依赖 | approval profile 与 execution profile 正交，不互相调用 |
 | `daemon/bootstrap` | 被调用 | 装配层调用 validateProfileId() 校验 RunDefaultsPolicy，不依赖 trigger 语义 |
-| `runtime/heartbeat` | 无直接依赖 | heartbeat 只传 trigger 给 run-manager，profiles 不被 heartbeat 直接调用 |
+| `runtime/heartbeat` | 无直接依赖 | heartbeat 只传 triggerSource 给 run-manager，profiles 不被 heartbeat 直接调用 |
 | `ohbaby-sdk` | 类型依赖 | 只暴露 PermissionProfileId 等窄类型；具体 PermissionProfile 实现留在 runtime 内部 |
 
 ---
@@ -124,9 +124,9 @@ const profile = profileRegistry.getProfile(resolvedProfileId)
 正确：装配层在启动时校验 RunDefaultsPolicy 中的 profile id
 ```typescript
 // daemon/bootstrap.ts 负责
-for (const [trigger, defaults] of Object.entries(runDefaultsPolicy)) {
+for (const [triggerSource, defaults] of Object.entries(runDefaultsPolicy)) {
   if (!profileRegistry.validateProfileId(defaults.permissionProfileId)) {
-    throw new ConfigError(`Unknown profile id: ${defaults.permissionProfileId} for trigger: ${trigger}`)
+    throw new ConfigError(`Unknown profile id: ${defaults.permissionProfileId} for triggerSource: ${triggerSource}`)
   }
 }
 ```
@@ -157,4 +157,4 @@ if (profile.canAskUser) {
 - 可以用一句话说明该模块的存在意义：permission-profiles 为无人值守的自动化 Run 提供预定义审批画像，维护 profile registry 与 id 校验接口，不感知触发源语义
 - 能清楚回答"这个模块不该做什么"：不维护触发源联动表、不做弹窗 UI、不做关键操作检测、不做 channel 身份认证、不做 cost 预算、不做 Run 内部工具调用的权限判断、不维护多任务策略或断连策略、不决定执行环境
 - 职责与其他模块无明显重叠：core/policy（决策矩阵）、core/permission（弹窗交互）、sandbox（执行环境）、run-manager（Run 执行）、daemon/bootstrap（策略装配）边界清晰
-- RunDefaultsPolicy 的 trigger→profileId 映射属于装配层关切，permission-profiles 不拥有也不感知该映射
+- RunDefaultsPolicy 的 triggerSource→profileId 映射属于装配层关切，permission-profiles 不拥有也不感知该映射
