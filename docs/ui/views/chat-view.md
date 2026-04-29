@@ -39,60 +39,60 @@ ChatView 仅负责消息列表区域。Prompt、StatusBar、LoadingIndicator 由
 
 ChatView 的主体是 MessageList 组件，负责渲染所有对话消息。MessageList 采用虚拟化技术，只渲染可见区域的消息，确保长对话场景下的性能。
 
-MessageList 组件属于 `components/message/` 目录，不在 ChatView 内实现。ChatView 负责将 SessionContext 中的消息数据传递给 MessageList。
+MessageList 组件属于 `components/message/` 目录，不在 ChatView 内实现。ChatView 通过 TuiStore selector 读取消息列表，并将消息数量/空态信息传递给 MessageList。
 
 ### 3.2 空消息态（EmptyState）
 
 当消息数量为零时（从 HomeView 刚跳转过来、消息尚未生成的极短暂过渡期），显示简单的占位提示文字。
 
-EmptyState 是轻量的内联展示元素，不读取 Context。在实际使用中几乎不可见，因为 useInput 在 `navigateTo('chat')` 之后立即调用 `lifecycle.execute()`，消息会迅速出现。
+EmptyState 是轻量的内联展示元素，不读取 backend。它在当前会话没有消息时显示；useInput 提交普通 prompt 后会调用 `client.submitPrompt()`，消息通过 SDK event 回流到 TuiStore 后自动消失。
 
 ## 四、数据驱动
 
-### 4.1 messageVersion 机制
+### 4.1 TuiStore messages selector
 
-ChatView 通过 `SessionContext.messageVersion` 感知消息数量变化，而非直接监听消息数组引用。
+ChatView 通过 `useMessages()` 获取当前会话消息列表：
 
-- `messageVersion` 是整数计数器，每次消息数量变化时递增
-- ChatView 读取 `messageVersion` 用于判断是否有消息（`=== 0` 则空态）
-- MessageList 读取 `messageVersion` 触发列表刷新
-- 实际消息数据从 `SessionContext.messagesRef.current` 读取，这是一个 Ref，读取不触发重渲染
+- `message.appended` 到达时，TuiStore 更新 messages 引用，ChatView/MessageList 重渲染。
+- ChatView 用 `messages.length` 判断是否显示 EmptyState。
+- MessageList 接收 messages 或从 selector 读取 messages，并交给虚拟化列表渲染。
+- 高频 `message.part.delta` 不通过 ChatView 重渲染路径。
 
 ### 4.2 流式消息更新
 
-流式响应的增量更新不通过 ChatView 组件链传递。MessageList 内部的 Part 组件通过 Bus 事件（`Message.Event.PartUpdated`）直接接收流式增量，避免中间组件不必要的重渲染。
+流式响应的增量更新不通过 ChatView 组件链传递。MessageList 内部的 Part 组件通过 TuiStore 的 part-delta emitter 订阅 `message.part.delta`，避免中间组件不必要的重渲染。
 
-详见 hooks/use-stream.md 中的"三层消息更新"机制。
+详见 [../contexts/tui-store.md](../contexts/tui-store.md) 和 [../hooks/use-stream.md](../hooks/use-stream.md) 中的 part-delta 高频路径。
 
 ## 五、组件组合
 
 | 组件 | 来源 | 数据依赖 |
 |------|------|---------|
-| MessageList | `components/message/MessageList` | messagesRef, messageVersion |
+| MessageList | `components/message/MessageList` | TuiStore messages + part-delta emitter |
 | EmptyState | ChatView 内联 | 无 |
 
-ChatView 的组件组合极其简单：根据 messageVersion 二选一渲染。
+ChatView 的组件组合极其简单：根据 `messages.length` 二选一渲染。
 
 ## 六、Context 依赖
 
 | Context | 读取字段 | 用途 |
 |---------|---------|------|
-| SessionContext | `messagesRef`, `messageVersion` | 消息数据传递和空态判断 |
+| TuiStore selector | `useMessages()` | 消息数据传递和空态判断 |
 
-ChatView 不读取 AppStateContext、ConfigContext、AppActionsContext。不直接订阅 Bus 事件（事件订阅由 useStream hook 和 MessageList 内部组件处理）。
+ChatView 不读取 AppStateContext、AppActionsContext，也不直接订阅 SDK events。事件订阅由 useStream hook 处理，Part 级高频更新由 TuiStore emitter 处理。
 
 ## 七、设计约束
 
 1. **不包含输入逻辑**：输入由 DefaultLayout 中的 Prompt 和 useInput hook 处理
 2. **不管理滚动**：自动滚动由 useAutoScroll hook 在 MessageList 层处理
-3. **不处理流式更新**：流式增量通过 Bus 事件直达 Part 组件，不经过 ChatView
+3. **不处理流式更新**：流式增量通过 TuiStore part-delta emitter 直达 Part 组件，不经过 ChatView
 4. **不负责加载状态**：加载指示器由 DefaultLayout 渲染
 
 ## 八、文档自检
 
 - [x] ChatView 的职责可以用一句话说明（渲染消息列表）
 - [x] 与 DefaultLayout 的职责边界清晰（不管输入、加载、状态栏）
-- [x] messageVersion 驱动机制已说明，避免高频重渲染
-- [x] 流式更新路径已说明（Bus 事件直达 Part 组件）
+- [x] TuiStore messages selector 驱动机制已说明，避免高频重渲染
+- [x] 流式更新路径已说明（part-delta emitter 直达 Part 组件）
 - [x] 组件组合极简，符合单一职责
 - [x] Context 依赖最小化
