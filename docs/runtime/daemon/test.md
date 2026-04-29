@@ -14,6 +14,8 @@ daemon 是 bootstrap 装配根，没有独立的业务逻辑。test.md 不验证
 - 启动顺序：各模块的 start() 按正确依赖顺序被调用
 - 关闭顺序：各模块的 stop() 按正确顺序被调用（与启动顺序相反）
 - 关键依赖注入：各模块在 bootstrap 时收到正确的依赖（如 runManager 注册到 heartbeat）
+- `interactionBroker` 被创建，并在关闭时 abort pending interactions
+- `app-events.ts` 与 `command-events.ts` 都被启动，并在关闭时 dispose
 - daemon 关闭时 taskManager.stopAll() 和 scheduler.stop() 被调用
 
 **不覆盖**：
@@ -27,7 +29,7 @@ daemon 是 bootstrap 装配根，没有独立的业务逻辑。test.md 不验证
 | 场景 | 预期结果 |
 |------|---------|
 | daemon.start() | 依次完成：DB 初始化 → run-manager.initialize() → scheduler.start() → heartbeat.start()（顺序不可颠倒）|
-| daemon.stop() | 依次完成：heartbeat.stop() → scheduler.stop() → taskManager.stopAll() → DB 连接关闭 |
+| daemon.stop() | 依次完成：heartbeat.stop() → scheduler.stop() → runManager.cancelAll() → interactionBroker.abortAll() → taskManager.stopAll() → commandEvents.dispose() → appEvents.dispose() → DB 连接关闭 |
 | 某个模块 start() 抛出异常 | daemon 进入关闭流程，不留下部分初始化的状态 |
 
 ---
@@ -53,6 +55,6 @@ daemon 的测试本质上是集成/冒烟测试：验证各模块在被装配后
 **测试数量**：2~3 个测试足够：
 1. 正常 start → stop，无异常
 2. start 失败（如 DB 初始化失败），不残留 timer 或打开的连接
-3. stop 时 taskManager.stopAll() 确实被调用（若有 running tasks）
+3. stop 时 interactionBroker.abortAll()、taskManager.stopAll() 和 event adapter dispose 确实被调用（若有 running tasks/pending interactions）
 
 daemon 的 test.md 是最轻量的一份——它的价值不在于覆盖业务，而在于确认"接线是否接对了"。

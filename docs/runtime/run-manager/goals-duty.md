@@ -137,9 +137,9 @@ StreamBridge 的 SSE / WebSocket / 内存缓冲实现由 `runtime/stream-bridge`
 
 run-manager 不扫描 session storage、不检索 message/part 历史来推断"上次哪些 Run 没有正常关闭"。崩溃状态的唯一权威来源是 `runtime/run-ledger`（`run_ledger` 表），DRY 原则：一个事实只有一个来源。
 
-### 9. 不负责 app.* 事件翻译
+### 9. 不负责 app scope 事件翻译
 
-`app.*` 事件（如 `app.scheduler.job-fired`、`app.heartbeat.state-changed`）是 daemon 级系统事件，由 `daemon/app-events.ts` 负责翻译到 StreamBridge。run-manager/worker 只处理当前 Run 作用域内的 `run.*` 事件，不订阅或发布 `app.*` 命名空间的事件。
+app scope 事件（如 scheduler fired、heartbeat state changed、command/interaction event）是 daemon 级全局事件，由 `daemon/app-events.ts` 或 `daemon/command-events.ts` 负责翻译到 StreamBridge。run-manager/worker 只处理当前 Run 作用域内的 run scope 事件，不订阅或发布 app scope 事件。
 
 ---
 
@@ -230,5 +230,5 @@ const workdir = await gitWorktree.create(sessionId)
 
 - 可以用一句话说明该模块的存在意义：run-manager 将每次 lifecycle.run() 封装为可查询、可取消、可追溯的运行台账，并在启动前绑定本次 Run 使用的执行上下文
 - 模块内包含两个层次：RunManager（控制面：台账、调度、取消）和 RunWorker（执行面：lifecycle 调用 + run.* 事件翻译），RunWorker 是 run-manager 的私有实现细节
-- 能清楚回答"这个模块不该做什么"：不做 agent loop 执行、不做 session 管理、不做权限画像实现、不做 task 管理、不做 sandbox 实现、不做定时触发、不做传输层实现、不从 session/message/storage 推断崩溃状态、不发布 app.* 事件
-- 职责与其他模块无明显重叠：lifecycle（执行）、sandbox（执行环境）、run-ledger（崩溃恢复账本）、permission-profiles（权限）、stream-bridge（传输）、daemon/app-events.ts（app.* 事件翻译）边界清晰
+- 能清楚回答"这个模块不该做什么"：不做 agent loop 执行、不做 session 管理、不做权限画像实现、不做 task 管理、不做 sandbox 实现、不做定时触发、不做传输层实现、不从 session/message/storage 推断崩溃状态、不发布 app scope 事件
+- 职责与其他模块无明显重叠：lifecycle（执行）、sandbox（执行环境）、run-ledger（崩溃恢复账本）、permission-profiles（权限）、stream-bridge（传输）、daemon event adapters（app scope 事件翻译）边界清晰

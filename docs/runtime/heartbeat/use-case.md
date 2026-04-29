@@ -53,7 +53,7 @@ heartbeat 的核心职责。所有信号（scheduler 触发或 channel 触发）
 3. 输出：一次 runManager.create() 调用，或一条 SignalDisposition 事件（两者之一或同时）
 ```
 
-**注意**：channel 信号（WakeRequested）不进入 scheduler Reminder 的 disposition 协议，无需发布 SignalDisposition；其结果可通过 app.* 事件或日志表达。
+**注意**：channel 信号（WakeRequested）不进入 scheduler Reminder 的 disposition 协议，无需发布 SignalDisposition；其结果可通过 app scope 事件或日志表达。
 
 ---
 

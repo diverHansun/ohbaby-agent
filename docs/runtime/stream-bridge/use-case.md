@@ -26,7 +26,7 @@ client 首次建立连接，接收实时事件流。
   ↓
 2. 从当前 latestId + 1 开始监听新事件（不回放历史）
   ↓
-3. 发布方（RunWorker / app-events.ts）每次 publish(scope, event, data)：
+3. 发布方（RunWorker / app-events.ts / command-events.ts）每次 publish(scope, event, data)：
    → stream-bridge 分配单调递增 eventId
    → 写入 RingBuffer
    → 通知所有正在 subscribe 的 AsyncIterable 消费者

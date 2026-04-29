@@ -40,11 +40,13 @@ daemon 在收到退出信号（SIGTERM / SIGINT）时协调各子系统有序关
   - `runtime/heartbeat`（HeartbeatMachine）
   - `runtime/tasks`（TaskManager）
   - `runtime/hooks`（HookExecutor）
-  - app-events adapter（`daemon/app-events.ts`，内部文件，将 app 级 Bus 事件接线到 StreamBridge `app.*`）
+      - `runtime/interaction-broker`（InteractionBroker）
+      - app-events adapter（`daemon/app-events.ts`，内部文件，将 app 级 Bus 事件接线到 StreamBridge app scope）
+      - command-events adapter（`daemon/command-events.ts`，内部文件，将 Commands/Interaction 事件接线到 StreamBridge app scope）
 - 将实例注入到各子系统中（依赖注入，不使用全局单例）
 - 负责把 SandboxManager 注入 run-manager、tasks 等需要执行上下文的子系统
 
-> **app-events adapter 说明**：`daemon/app-events.ts` 是 daemon 内部文件，不作为独立 runtime 子模块。它只做 app 级 Bus 事件 → StreamBridge `app.*` 的接线，返回 `dispose()` 供优雅退出调用。升级条件：当翻译逻辑超过约 100 行、需要独立测试矩阵、或被 server/SDK 复用时，再提升为 `runtime/app-event-bridge` 独立模块。
+> **事件 adapter 说明**：`daemon/app-events.ts` 与 `daemon/command-events.ts` 都是 daemon 内部文件，不作为独立 runtime 子模块。前者处理通用 app 级事件，后者处理 `Commands.Event.*` 和 `Interaction.Event.*`。两者都只做内部事件 → StreamBridge app scope 的接线，并返回 `dispose()` 供优雅退出调用。升级条件：当任一翻译逻辑超过约 100 行、需要独立测试矩阵、或被 server/SDK 复用时，再提升为独立 runtime 子模块。
 
 ### 3. 优雅退出
 
@@ -103,12 +105,14 @@ daemon 只负责装配 SandboxManager 与 adapter registry，不决定某个 ses
 |------|------|------|
 | `runtime/run-manager` | 持有并初始化 | daemon 创建 RunManager 实例并在关闭时协调取消所有 run |
 | `sandbox` | 持有并初始化 | daemon 创建 SandboxManager 并注入到 run-manager、tasks 等子系统 |
-| `runtime/stream-bridge` | 持有并初始化 | daemon 创建 StreamBridge 实例，注入到 run-manager |
+| `runtime/stream-bridge` | 持有并初始化 | daemon 创建 StreamBridge 实例，注入到 run-manager 和事件 adapter |
+| `runtime/interaction-broker` | 持有并初始化 | daemon 创建 InteractionBroker，注入到 commands adapter/CommandRunContext，并在退出时 abort pending interactions |
 | `runtime/scheduler` | 持有并初始化 | daemon 创建 Scheduler 实例并在退出时停止 |
 | `runtime/heartbeat` | 持有并初始化 | daemon 创建 HeartbeatMachine 实例并在退出时停止 |
 | `runtime/tasks` | 持有并初始化 | daemon 创建 TaskManager 实例并在退出时停止后台任务 |
 | `runtime/hooks` | 持有并初始化 | daemon 创建 HookExecutor 并注册内置 runtime hook |
-| `daemon/app-events.ts` | 内部文件 | daemon 调用 `startAppEventAdapter({ bus, bridge })` 完成 app 级事件接线；是 daemon 内部实现，不作为独立模块 |
+| `daemon/app-events.ts` | 内部文件 | daemon 调用 `startAppEventAdapter({ bus, bridge })` 完成通用 app 级事件接线；是 daemon 内部实现，不作为独立模块 |
+| `daemon/command-events.ts` | 内部文件 | daemon 调用 `startCommandEventAdapter({ bus, bridge })` 完成 command/interaction 事件接线；是 daemon 内部实现，不作为独立模块 |
 | `config` | 依赖 | 读取已加载的配置对象（工作目录、pid 文件路径等） |
 | `interfaces/server` | 无直接依赖 | server 是独立进程或 daemon 的一个子服务，不由 daemon 内部管理 |
 
@@ -129,8 +133,10 @@ const runLedger = new RunLedger({ db })
 const runManager = new RunManager({ bridge, runLedger, hookExecutor, sandboxManager })
 const scheduler = new Scheduler({ db, bus })
 const heartbeat = new HeartbeatMachine({ runManager, scheduler })
-// app-events.ts 是 daemon 内部文件，不是独立模块
+const interactionBroker = new InteractionBroker({ bus })
+// app-events.ts / command-events.ts 是 daemon 内部文件，不是独立模块
 const disposeAppEvents = startAppEventAdapter({ bus, bridge })
+const disposeCommandEvents = startCommandEventAdapter({ bus, bridge })
 ```
 
 正确：daemon 处理退出信号
@@ -140,6 +146,7 @@ process.on('SIGTERM', async () => {
   await heartbeat.stop()
   await scheduler.stop()
   await runManager.cancelAll()
+  await interactionBroker.abortAll('daemon-stopping')
   await bridge.close()
   pidFile.release()
   process.exit(0)

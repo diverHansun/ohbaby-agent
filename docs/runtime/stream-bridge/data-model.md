@@ -11,8 +11,10 @@
 事件流的隔离单元。每个 scope 拥有独立的 RingBuffer、独立的 eventId 计数器、独立的订阅者集合。不同 scope 的 eventId 不可比较。
 
 两种 scope：
-- `'app'`：全局 daemon 级事件（session 创建、daemon 状态变化等）
-- `'run/<runId>'`：单次 Run 的流式输出（run.start、run.output、run.end 等）
+- `'app'`：全局 daemon 级事件流，承载 runtime、permission、command、interaction、catalog 等 SDK 协议事件。
+- `'run/<runId>'`：单次 Run 的流式输出和高频 delta。
+
+`command.*`、`interaction.*`、`permission.*` 是事件名，不是 scope。bridge 不因为业务域增加新的 scope。
 
 ### 概念 2：StreamEvent（流事件）
 
@@ -63,7 +65,7 @@ ReplayPlan 是一次性计算结果，不对外暴露，仅在 `subscribe()` 内
 | 字段 | 含义 |
 |---|---|
 | `id` | scope 内的单调递增 eventId，订阅方用于断线重连游标；普通事件由 publish 分配 |
-| `event` | 业务事件名称，如 `'run.start'`、`'run.output'`、`'app.session.created'` |
+| `event` | 业务事件名称，如 `'run.updated'`、`'message.part.delta'`、`'runtime.updated'`、`'command.started'` |
 | `data` | 业务数据，发布时已 JSON 序列化；订阅方接收的是已解析的 JsonValue |
 | `runId` | scope 为 `run/<runId>` 时填充，方便订阅方关联 |
 
@@ -111,7 +113,7 @@ end(scope) 调用
 ```
 
 **Scope 的归属控制**：
-- `'app'` scope：daemon/app-events.ts 发布，daemon 退出时 `end('app')`
+- `'app'` scope：daemon/app-events.ts 和 daemon/command-events.ts 发布，daemon 退出时 `end('app')`
 - `'run/<runId>'` scope：RunWorker 发布，run 结束时 run-manager 调用 `end(scope)`
 
 ### eventId 的生命周期

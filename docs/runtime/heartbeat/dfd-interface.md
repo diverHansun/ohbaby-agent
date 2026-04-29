@@ -63,7 +63,7 @@ HeartbeatMachine 按当前状态决策：
 - 输入来源为 `ChannelDispatcher.Event.WakeRequested`
 - WakeSignal 已携带 `sessionId`（ChannelDispatcher 已完成 session 归属）
 - heartbeat 直接消费，不再做 session 查找
-- channel 信号没有 `scheduler_job.status`，因此不需要 scheduler 消费的 `SignalDisposition`；如需观测处理结果，应通过 app.* 事件或日志表达，不复用 Reminder 的完成协议
+- channel 信号没有 `scheduler_job.status`，因此不需要 scheduler 消费的 `SignalDisposition`；如需观测处理结果，应通过 app scope 事件或日志表达，不复用 Reminder 的完成协议
 
 ### 流程 3：paused → active 恢复（DeferredQueue drain）
 

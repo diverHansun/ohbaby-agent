@@ -16,6 +16,7 @@
 - stream.gap 事件字段正确性（不写入 RingBuffer，不推进 eventId）
 - end(scope) 发送 END_SENTINEL，AsyncIterable 正确完成
 - publish() 对不可序列化 data 的 Fail Fast
+- command/interaction 事件可作为普通 app scope 事件发布，不需要独立 command scope
 
 **不覆盖**：
 - 客户端如何处理 stream.gap（client / interfaces/server 侧）
@@ -34,6 +35,7 @@
 | publish 不可序列化 data | 立即抛出异常；不写入 buffer；eventId 不推进 |
 | RingBuffer 满时 publish | 覆写最旧条目；oldestId 推进；latestId 推进 |
 | 不同 scope 的 eventId 独立 | scope A 和 scope B 各自从 0 开始，互不干扰 |
+| publish('app', 'command.started', data) | 作为 app scope 事件写入 app RingBuffer，不创建 command scope |
 
 ### 场景组 2：subscribe — 全新订阅
 

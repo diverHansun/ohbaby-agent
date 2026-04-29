@@ -11,7 +11,8 @@ stream-bridge 是 runtime 的事件传输层，连接"事件发布方"（runtime
 | 方向 | 外部模块 | 交互方式 |
 |---|---|---|
 | 接收发布 | `runtime/run-manager` RunWorker | 调用 `publish(scope, event, data)` 发布 run.* 事件 |
-| 接收发布 | `runtime/daemon` app-events.ts | 调用 `publish(scope, event, data)` 发布 app.* 事件 |
+| 接收发布 | `runtime/daemon` app-events.ts | 调用 `publish('app', event, data)` 发布通用 app scope 事件 |
+| 接收发布 | `runtime/daemon` command-events.ts | 调用 `publish('app', event, data)` 发布 command.* / interaction.* 事件 |
 | 提供订阅 | SDK clients / TUI / Web | 调用 `subscribe(scope, lastEventId?)` 获取 AsyncIterable |
 | 控制关闭 | `runtime/run-manager`（run 结束时）| 调用 `end(scope)` 关闭指定 scope |
 | 控制关闭 | `runtime/daemon`（daemon 退出时）| 调用 `end('app')` |
@@ -104,9 +105,9 @@ stream-bridge 发送 END_SENTINEL 给所有该 scope 的订阅者
 
 ### 接口 1：publish(scope, event, data)
 
-**语义**：向指定 scope 发布一个业务事件。
+**语义**：向指定 scope 发布一个业务事件。scope 表达传输路由，event 表达协议语义。
 
-- **输入**：`scope`（`'app'` 或 `'run/<runId>'`）、`event`（事件名称字符串）、`data`（必须可 JSON 序列化）
+- **输入**：`scope`（`'app'` 或 `'run/<runId>'`）、`event`（事件名称字符串，如 `runtime.updated`、`command.started`、`interaction.requested`）、`data`（必须可 JSON 序列化）
 - **输出**：分配的 `eventId`（number）
 - **同步/异步**：同步（写入 buffer + 通知订阅者是内存操作）
 - **约束**：`data` 必须可序列化，否则抛出异常（不静默降级）
@@ -155,3 +156,8 @@ stream-bridge 发送 END_SENTINEL 给所有该 scope 的订阅者
 **scope 生命周期归属**：
 - `'app'` scope：随 daemon 生命周期，daemon 退出时调用 `end('app')`
 - `'run/<runId>'` scope：随 Run 生命周期，run 结束时调用 `end(scope)`；由 run-manager 负责调用
+
+**scope 与事件命名约束**：
+- 不新增 `command` scope；command/interaction 事件发布到 `'app'` scope。
+- 不新增 `permission` 或 `runtime` scope；这些都是 app scope 的协议事件。
+- run 相关高频 delta 可以发布到 `run/<runId>` scope；是否同时投影到 app scope 由 SDK adapter/server 策略决定。
