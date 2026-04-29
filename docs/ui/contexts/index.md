@@ -1,155 +1,125 @@
-# Contexts 状态管理
+# Contexts & Store — 状态管理架构
 
-本文档描述 ui 模块的 Context 架构设计，定义全局状态的管理策略和 Provider 组织方式。
+本文档描述 `ohbaby-tui` 的状态管理分层设计。
 
 ---
 
 ## 一、概述
 
-ui 模块使用 React Context 进行全局状态管理。通过将状态拆分为多个独立 Context，实现细粒度的渲染控制，避免无关组件因不相关的状态变化而重渲染。
+状态管理分为两层：
 
-共 6 个 Context，分为三类：
+| 层 | 职责 | 技术方案 |
+|---|---|---|
+| **TuiStore** | SDK 数据的唯一本地投影 | `useSyncExternalStore` + reducer + selector hooks |
+| **UI Context** | 纯 UI 控制状态和输入设施 | React Context（4 个） |
 
-| 类别 | Context | 模式 |
-|------|---------|------|
-| 应用状态 | AppStateContext, AppActionsContext | State/Action 分离 |
-| 业务数据 | ConfigContext, SessionContext | 只读 / useRef+版本号 |
-| 输入设施 | KeypressContext, MouseContext | Pub/Sub |
-
----
-
-## 二、设计原则
-
-### 2.1 State/Action 分离
-
-AppContext 拆分为 AppStateContext（只读状态）和 AppActionsContext（行为动作）。
-
-**问题**：如果状态和动作放在同一个 Context 中，action 函数引用变化会导致所有只读消费者不必要地重渲染。例如 LoadingState 在流式响应时频繁更新，会导致 DialogManager 和 View 路由器无意义重渲染。
-
-**方案**：分离后，只读消费者只订阅 AppStateContext，不受 action 引用变化影响。AppActionsContext 中的 action 引用通过 useMemo 稳定化。
-
-**参考**：gemini-cli 的 UIStateContext + UIActionsContext 分离模式。
-
-### 2.2 Pub/Sub 输入模型
-
-键盘输入（KeypressContext）和鼠标输入（MouseContext）采用 Pub/Sub 模式：
-
-- Provider 负责读取 stdin、解析事件、广播给所有订阅者
-- 消费者通过 `subscribe` / `unsubscribe` 注册回调
-- 消费侧 hook（useKeypress / useMouse）支持 `isActive` 参数控制条件激活
-
-**为什么不直接用 Ink 的 useInput**：
-- Ink 的 useInput 不支持多组件同时监听同一按键
-- 无法处理复杂序列解析（如鼠标 SGR 协议）
-- 缺少焦点/弹窗遮挡时的条件激活机制
-
-**参考**：gemini-cli 的 KeypressProvider Pub/Sub 设计。
-
-### 2.3 useRef + 版本号消息缓存
-
-SessionContext 中的消息列表使用 `useRef` 存储（不触发重渲染），配合 `messageVersion` 递增计数器通知消费者刷新。
-
-**问题**：流式响应期间 `Message.Event.PartUpdated` 事件每秒可达数十次。若使用 React 不可变更新模式（`setMessages(prev => [...])`) ，每次都创建新数组引用，导致 MessageList 及所有子组件全量重渲染。
-
-**方案**：
-- `messagesRef.current` 始终持有最新消息，读取不触发重渲染
-- `messageVersion` 只在消息数量变化等关键节点递增
-- 流式 Part 增量更新通过 Bus 事件直接传给对应 Part 组件，绕过 Context
-
-### 2.4 按变化频率分层
-
-| Context | 变化频率 | 典型触发场景 |
-|---------|---------|------------|
-| ConfigContext | 极低 | 用户手动切换模型或模式 |
-| AppStateContext | 中等 | 视图切换、弹窗开关、加载状态变更 |
-| SessionContext | 高 | 流式响应、消息增删 |
-| KeypressContext | 极高 | 每次按键 |
-| MouseContext | 极高 | 每次鼠标操作 |
-
-频率越低的 Context 放越外层，状态变化时影响范围越小。
+组件通过 selector hooks 读取 SDK 数据，通过 Context 读取 UI 控制状态。两层之间不互相写入。
 
 ---
 
-## 三、Context 列表
+## 二、架构图
 
-| Context | 文档 | 职责 |
-|---------|------|------|
-| AppStateContext | [app-state-context.md](./app-state-context.md) | 应用只读状态：视图、弹窗队列、加载阶段 |
-| AppActionsContext | [app-actions-context.md](./app-actions-context.md) | 应用状态变更：导航、弹窗操作、加载控制 |
-| ConfigContext | [config-context.md](./config-context.md) | 配置只读状态：模型、模式、Agent 状态 |
-| SessionContext | [session-context.md](./session-context.md) | 会话状态：消息缓存、token 用量 |
-| KeypressContext | [keypress-context.md](./keypress-context.md) | 键盘输入 Pub/Sub 分发 |
-| MouseContext | [mouse-context.md](./mouse-context.md) | 鼠标输入 Pub/Sub 分发 |
+```
+UiBackendClient
+   │
+   │ getSnapshot / listCommands / subscribeEvents
+   ▼
+┌─────────────────────────────────────────────────────┐
+│ TuiStore（SDK 数据投影）                              │
+│  runtime · sessions · messages · catalog · pending   │
+│  permissions · runs                                  │
+└──────────────────────────┬──────────────────────────┘
+                           │ selector hooks
+                           │ useRuntime / useMessages / useCatalog / ...
+                           ▼
+┌─────────────────────────────────────────────────────┐
+│ 4 个 UI Context                                      │
+│  AppStateContext: view / dialog queue / loading       │
+│  AppActionsContext: navigateTo / enqueueDialog / ...  │
+│  KeypressContext: 键盘 Pub/Sub                       │
+│  MouseContext: 鼠标 Pub/Sub                          │
+└──────────────────────────┬──────────────────────────┘
+                           │
+                           ▼
+                      组件树（Ink）
+```
 
 ---
 
-## 四、Provider 嵌套顺序
+## 三、文档索引
+
+| 文档 | 职责 |
+|------|------|
+| [tui-store.md](./tui-store.md) | Store 形状、reducer 映射、part-delta emitter、gap reconcile |
+| [selectors.md](./selectors.md) | 对外 selector hooks 签名与消费者 |
+| [app-state-context.md](./app-state-context.md) | 视图状态、dialog 队列、loading phase（只读） |
+| [app-actions-context.md](./app-actions-context.md) | UI 控制动作（写入 AppState） |
+| [keypress-context.md](./keypress-context.md) | 键盘输入 Pub/Sub |
+| [mouse-context.md](./mouse-context.md) | 鼠标输入 Pub/Sub |
+
+---
+
+## 四、设计原则
+
+### 4.1 SDK 数据走 Store，UI 状态走 Context
+
+SDK 投影数据（runtime/messages/catalog/permissions/pending）变化频率高且来源单一（SDK 事件），适合 external store + selector 模式。
+
+UI 控制状态（view/dialog/loading）由多个 hooks 协作写入，且与 React 渲染周期紧密耦合，适合 Context + setState。
+
+### 4.2 不再保留 ConfigContext、SessionContext 和 AppContext
+
+原 ConfigContext（model/mode/cwd）和 SessionContext（messages/tokenUsage）的数据来源都是 SDK 事件。它们已收编到 TuiStore，组件通过 `useRuntime()` 和 `useMessages()` 访问。
+
+原 AppContext 已拆分为 AppStateContext 与 AppActionsContext。退役文档不再保留，避免后续读者误把它们当成可用模块。
+
+### 4.3 按变化频率分层
+
+| 层 | 变化频率 |
+|---|---|
+| KeypressContext / MouseContext | 极高（每次按键/鼠标） |
+| TuiStore messages/runs | 高（流式响应期间） |
+| AppStateContext loading | 中（run 开始/结束） |
+| TuiStore runtime/catalog | 低（用户切换模型/模式） |
+| AppStateContext view | 极低（视图切换） |
+
+高频数据使用 selector 精确订阅，避免波及无关组件。
+
+### 4.4 Provider 嵌套顺序
 
 ```tsx
-<ConfigProvider config={config}>
-  <KeypressProvider>
-    <MouseProvider>
-      <AppStateProvider>
-        <SessionProvider>
-          <AppActionsProvider>
-            {children}
-          </AppActionsProvider>
-        </SessionProvider>
-      </AppStateProvider>
-    </MouseProvider>
-  </KeypressProvider>
-</ConfigProvider>
+<KeypressProvider>
+  <MouseProvider>
+    <AppStateProvider>
+      <AppActionsProvider>
+        {children}
+      </AppActionsProvider>
+    </AppStateProvider>
+  </MouseProvider>
+</KeypressProvider>
 ```
 
-### 嵌套原则
-
-**被依赖者在外，依赖者在内。**
-
-| Provider | 层级 | 依赖 | 被依赖 |
-|----------|------|------|--------|
-| ConfigProvider | 1（最外） | 无 | SessionProvider, AppActionsProvider |
-| KeypressProvider | 2 | 无 | useKeyboard, useInput |
-| MouseProvider | 3 | 无 | useMouse（ScrollableList, Dialog, Prompt） |
-| AppStateProvider | 4 | 无 | AppActionsProvider, Router, StatusBar |
-| SessionProvider | 5 | ConfigContext | useStream, MessageList, StatusBar |
-| AppActionsProvider | 6（最内） | AppStateContext, SessionContext | useInput, useKeyboard, usePermission |
-
-### 依赖关系图
-
-```
-ConfigProvider        KeypressProvider     MouseProvider
-     |                      |                    |
-     v                      v                    v
-SessionProvider       AppStateProvider       (无依赖)
-     |                      |
-     +----------+-----------+
-                |
-                v
-         AppActionsProvider
-                |
-                v
-          DefaultLayout
-```
+TuiStore 不是 Provider，不参与嵌套。它在 App 初始化时创建，通过模块级引用供 selector hooks 访问。
 
 ---
 
-## 五、与其他模块的关系
+## 五、迁移说明
 
-| 外部模块 | 交互方式 | 说明 |
-|----------|---------|------|
-| Bus | 事件订阅 | useStream 订阅 Bus 事件，同步到 SessionContext 和 AppStateContext |
-| config | 数据注入 | cli 层初始化时将配置传入 ConfigProvider |
-| message | 类型引用 | SessionContext 引用 message 模块的 Message、Part 等类型 |
-| permission | 事件订阅 | usePermission 订阅权限事件，通过 AppActionsContext 入队弹窗 |
-| lifecycle | 间接依赖 | useInput 调用 lifecycle.execute()，通过 Bus 事件间接更新 Context |
+| 旧 Context | 迁移去向 |
+|---|---|
+| 旧模块 | 迁移去向 |
+|---|---|
+| AppContext | AppStateContext + AppActionsContext |
+| ConfigContext | `useRuntime()` selector |
+| SessionContext | `useMessages()` + `useRuntime().activeSession` + `useRuntime().context` |
+
+旧文档 `app-context.md`、`config-context.md`、`session-context.md` 已删除，不再作为活跃设计参考。
 
 ---
 
 ## 六、文档自检
 
-- [x] 每个 Context 的存在都有明确理由
-- [x] State/Action 分离原则已说明并有参考来源
-- [x] Provider 嵌套顺序有依赖分析支撑
-- [x] 输入 Context 的 Pub/Sub 模式已说明
-- [x] 消息缓存策略（useRef + 版本号）已说明
-- [x] 各 Context 变化频率已分析
+- [x] 两层分工清晰：Store = SDK 投影，Context = UI 控制。
+- [x] 不存在 SDK 数据绕过 Store 直接进 Context 的路径。
+- [x] AppContext/ConfigContext/SessionContext 已明确标注为退役或收编。
+- [x] Provider 嵌套顺序有依赖分析支撑。
