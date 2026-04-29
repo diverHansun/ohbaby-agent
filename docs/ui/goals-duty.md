@@ -2,322 +2,151 @@
 
 本文档定义 `ui` 模块的设计目标与职责边界。
 
----
-
-## 术语说明
-
-| 英文术语 | 中文翻译 | 说明 |
-|----------|----------|------|
-| Dialog | 弹窗 | 模态弹出窗口（如权限确认、模型选择等），非用户输入对话 |
-| Prompt | 输入框 | 用户输入对话/命令的区域 |
-| Confirmation | 确认框 | 需要用户确认的弹窗（如 PermissionDialog） |
-| Selector | 选择框 | 供用户选择的弹窗（如 ModelDialog、SessionDialog） |
+**模块位置**：
+- 代码：`packages/ohbaby-tui/`
+- 文档：`docs/ui/`
 
 ---
 
 ## 一、模块定位
 
-**一句话说明**：ui 模块负责在终端中渲染交互界面，提供用户与 Agent 交互的可视化层。
+**一句话说明**：ui 模块是基于 Ink 的终端前端 surface，负责渲染 SDK snapshot/events、处理用户输入、展示补全和 dialog，并通过 `UiBackendClient` 与 backend 通信。
 
 **如果没有这个模块**：
-- 用户无法在终端中看到对话内容和工具执行结果
-- 无法进行交互式输入和命令操作
-- 无法直观了解系统状态（模型、模式、token 使用量等）
-- 权限确认等交互流程无法完成
+- 用户无法在终端中进行交互式对话。
+- 模型/会话选择、permission 和 interaction 无法通过 TUI 完成。
+- SDK events 缺少可视化呈现。
 
 ---
 
 ## 二、Design Goals（设计目标）
 
-### G1: 简洁可用
+### G1: 前后端分离
 
-提供简洁、直观的终端交互界面。遵循 MVP 原则，只实现必要的 UI 功能，避免过度设计。单一主题，减少配置复杂度。
+UI 只依赖 `ohbaby-sdk`，不 import `ohbaby-agent`、Bus、lifecycle、commands、permission、session 或 message 内部模块。
 
-### G2: 响应式渲染
+### G2: Event-Driven Rendering
 
-实时响应数据变化，通过订阅 Bus 事件实现 UI 更新。支持流式响应的增量渲染，用户能看到 AI 逐字输出的效果。
+UI 通过 `getSnapshot()` 建立初始状态，通过 `subscribeEvents()` 消费增量事件并更新本地 store。
 
-### G3: 清晰的视觉层次
+### G3: Command UX 友好
 
-通过颜色区分不同类型的内容：
-- 用户输入与 AI 响应使用不同颜色
-- 工具调用的不同状态使用不同颜色
-- 错误信息使用醒目颜色
+UI 使用 SDK parser/resolver 和 backend catalog 提供 slash command hints、Tab 补全和 exact execution。
 
-### G4: 职责分离
+### G4: Semantic Interaction
 
-UI 层只负责渲染和交互，不包含业务逻辑。业务逻辑由 `commands` 和 `lifecycle` 模块负责，UI 通过 hooks 调用它们。
+UI 根据 `interaction.requested` 的 `kind` 和 `subject` 渲染自己的 dialog/picker，例如 model selector、session selector、confirm dialog。
 
-### G5: 组件化与性能
+### G5: Surface-Owned Rendering
 
-采用 React + Ink 构建终端 UI，组件化设计便于维护和测试：
-- 消息组件采用**类型路由模式**，每种消息类型独立组件
-- 消息列表使用**虚拟化渲染**，只渲染可见区域，确保长对话性能
-- 弹窗组件采用**队列管理**，按顺序显示，不叠加
-
-### G6: 布局与内容分离
-
-引入 Layout 层，将屏幕区域划分与具体内容渲染分离：
-- Layout 负责"在哪里显示"（屏幕结构）
-- View 负责"显示什么"（具体内容）
+消息、命令结果、错误、状态栏、表格和列表的视觉呈现属于 UI。Backend 只提供结构化事件。
 
 ---
 
 ## 三、Duties（职责）
 
-### D1: 布局管理
+### D1: Layout 与视图
 
-管理屏幕整体布局结构：
+管理终端布局：
+- Main content。
+- Prompt 输入区。
+- StatusBar。
+- Dialog overlay。
 
-```
-┌─────────────────────────────────────┐
-│           Main Content              │
-│         (可变内容区域)               │
-├─────────────────────────────────────┤
-│            Prompt 输入框             │
-├─────────────────────────────────────┤
-│            StatusBar                │
-└─────────────────────────────────────┘
-```
+### D2: 本地 UI store
 
-- Layout 决定各区域的位置和大小
-- Prompt 和 StatusBar 固定在底部
-- MainContent 区域根据当前 View 渲染不同内容
+维护 UI 本地状态：
+- sessions 概览。
+- active session。
+- visible messages。
+- runtime state。
+- command catalog。
+- pending permissions/interactions。
+- prompt input state。
 
-### D2: 视图管理
+这些状态来自 SDK snapshot/RPC/events。
 
-管理不同视图的渲染和切换：
-- `HomeView`：首页视图（欢迎界面、初始输入）
-- `ChatView`：对话视图（消息列表）
-- `HelpView`：帮助视图（快捷键、命令列表）
+### D3: SDK event 消费
 
-### D3: 消息渲染
+订阅并处理：
+- `snapshot.replaced`
+- `runtime.updated`
+- `message.appended`
+- `message.part.delta`
+- `run.updated`
+- `permission.requested`
+- `command.result.delivered`
+- `command.failed`
+- `command.catalog.updated`
+- `interaction.requested`
 
-采用**类型路由模式**渲染对话消息：
+### D4: Slash 输入体验
 
-```
-MessageList (容器 + 虚拟化)
-├── HistoryItemDisplay (类型路由器)
-│   ├── UserMessage      # 用户消息
-│   ├── AssistantMessage # AI 响应
-│   └── SystemMessage    # 系统消息（内部按 kind 分发）
-│       ├── kind: 'abort'  → 中断提示
-│       ├── kind: 'error'  → 错误提示
-│       └── kind: 'info'   → 信息提示
-```
+负责：
+- 输入时调用 SDK parser/resolver。
+- 停留在 `/model` 时展示子命令/参数 hints。
+- Tab 补全下一 segment。
+- Enter 时只提交 exact resolved command。
+- `/model` Enter 打开模型选择器。
+- `/session` Enter 打开会话选择器。
 
-消息内容（Part）的渲染：
-- `TextPart`：文本内容，支持 Markdown 渲染
-- `ReasoningPart`：推理内容，默认折叠，点击展开
-- `ToolPart`：工具调用，显示名称、参数、状态、结果
-- `FilePart`：文件附件链接
-- `StepStartPart` / `StepFinishPart`：Step 边界标记
+### D5: DialogManager
 
-### D4: 虚拟化列表
+管理 permission 和 interaction dialog 队列：
+- 权限确认。
+- 模型选择。
+- 会话选择。
+- 通用确认。
 
-消息列表使用虚拟化技术优化性能：
-- 只渲染可见区域的消息，不可见消息只占位
-- 使用动态高度估算（estimatedItemHeight）
-- 滚动时动态替换渲染内容
-- 支持平滑滚动和自动滚动到底部
+Dialog 完成后调用 `respondPermission()` 或 `respondInteraction()`。
 
-### D5: 状态栏显示
+### D6: 消息与结果渲染
 
-在底部固定显示状态栏，始终可见，包含：
-- 当前工作目录
-- 当前模型名称
-- 当前模式（Ask/Plan/Agent）
-- Agent 状态（ask-before-edit / edit-automatically）
-- Token 使用量（格式："1.2k (10%)"）
-- 当前会话名称
-
-**说明**：
-- 状态栏不显示警告信息，context 模块会在 85% 阈值时自动触发压缩
-- `/status` 命令可查看更详细的系统状态信息
-
-### D6: 输入处理
-
-提供输入框组件，支持：
-- 多行文本输入
-- 历史记录导航（↑/↓ 键）
-- 输入提交（Enter 键）
-- Slash 命令识别和分流
-- **Tab 命令自动补全**（Inline 内联模式，光标后显示灰色建议）
-
-### D7: 弹窗管理
-
-采用**队列模式**管理模态弹窗（Dialog）：
-
-```
-队列工作流程：
-1. enqueue(dialog) → 加入队列
-2. 如果 current 为空 → 立即显示
-3. 用户响应 → 关闭当前 → 显示下一个
-4. 高优先级弹窗可插队到队列前面（但不打断当前显示）
-```
-
-弹窗类型：
-- `PermissionDialog`：权限确认（高优先级）
-- `ModelDialog`：模型选择（普通优先级）
-- `SessionDialog`：会话选择（普通优先级）
-- `ConfirmDialog`：通用确认（普通优先级）
-
-### D8: 键盘快捷键与鼠标交互
-
-统一处理全局键盘快捷键：
-- `Ctrl+C`（双击）：中断当前执行
-- `Shift+Tab`：切换模式
-- `↑/↓`：输入历史导航
-- `Tab`：命令自动补全
-- `Esc`：关闭弹窗 / 返回上一视图
-
-通过 MouseContext 启用终端鼠标报告（SGR 鼠标协议）：
-- 鼠标滚轮：在消息列表中上下滚动
-- 鼠标点击：可与弹窗或交互元素交互
-
-键盘事件和鼠标事件均采用 Pub/Sub 订阅模式，不触发全局重渲染。
-
-### D9: 加载状态
-
-在 Prompt 上方显示加载指示器，使用剑图标作为品牌标识：
-
-```
-lifecycle 执行中，等待 LLM 响应：
-[spinner] [sword] Thinking...
-
-工具执行中：
-[spinner] [sword] Executing: read_file
-
-流式响应时：
-直接显示流式内容，加载指示器保持 Thinking 状态
-
-lifecycle 结束后：
-加载指示器隐藏
-```
-
-加载状态由 Bus 事件驱动（Lifecycle.Event.Started/Completed、ToolScheduler.Event.ExecutionStarted/Completed），不需要人工状态机。
-
-### D10: 事件订阅
-
-订阅 Bus 事件并更新 UI：
-- `Message.Event.Updated`：消息更新
-- `Message.Event.PartUpdated`：Part 更新（含流式增量）
-- `Permission.Event.Updated`：显示权限确认弹窗
-- `Policy.Event.ModeChanged`：更新模式显示
-- `Lifecycle.Event.Aborted`：显示中断完成
-- `Context.Event.UsageUpdated`：更新状态栏 token 显示
-- `Context.Event.Compressed`：显示自动压缩完成通知
+渲染：
+- 用户消息。
+- assistant 流式文本。
+- reasoning/tool call/tool result。
+- command result。
+- command error。
+- runtime/status 信息。
 
 ---
 
 ## 四、Non-Duties（非职责）
 
-### N1: 不负责业务逻辑
+### N1: 不执行业务逻辑
 
-命令的具体执行逻辑由 `commands` 模块负责。UI 只负责：
-- 捕获用户输入
-- 调用 `commands` 或 `lifecycle` 接口
-- 渲染执行结果
+UI 不调用 lifecycle、session、message、commands、model provider 或 MCP。
 
-### N2: 不负责消息存储
+### N2: 不维护 command catalog 真相
 
-消息的存储和管理由 `message` 和 `session` 模块负责。UI 从 `SessionContext` 获取消息数据进行渲染。
+Catalog 由 backend 提供。UI 只缓存和展示。
 
-### N3: 不负责 LLM 通信
+### N3: 不做业务参数校验
 
-LLM API 调用由 `llm-client` 模块负责，执行循环由 `lifecycle` 模块协调。UI 通过订阅 Bus 事件获取响应内容。
+UI 可以展示 `argsHint` 和补全，但参数合法性由 backend command 校验。
 
-### N4: 不负责权限决策
+### N4: 不直接订阅 Bus
 
-权限的判断和决策由 `policy` 和 `permission` 模块负责。UI 只负责：
-- 显示确认弹窗
-- 收集用户响应
-- 调用 `Permission.respond()` 返回结果
+UI 只订阅 SDK events，不订阅 backend 内部 Bus。
 
-### N5: 不负责配置管理
+### N5: 不规定非交互 stdout 输出
 
-配置的加载、解析、持久化由 `config` 模块负责。UI 从 `ConfigContext` 读取配置用于显示。
-
-### N6: 不实现多主题
-
-MVP 阶段只使用单一主题，不提供主题切换功能。但通过 ThemeManager 为未来扩展预留接口。
+stdout renderer 属于 CLI 非交互 surface，不属于 TUI。
 
 ---
 
-## 五、设计约束与假设
+## 五、依赖规则
 
-### 约束
-
-1. **依赖 Ink 框架**：使用 React + Ink 构建终端 UI
-2. **依赖 Bus 模块**：通过 Bus 订阅事件实现响应式更新
-3. **依赖 Context 机制**：使用 React Context 管理全局状态（6 个 Context：AppState、AppActions、Config、Session、Keypress、Mouse）
-4. **单一主题**：不支持主题切换，但预留扩展接口
-5. **虚拟化列表**：消息列表必须使用虚拟化，确保性能
-
-### 假设
-
-1. 终端支持 ANSI 颜色和基本的终端控制序列
-2. 终端宽度足够显示状态栏内容（至少 80 列）
-3. Bus 事件发布是同步的，UI 能及时响应
-4. 终端支持 SGR 鼠标协议（`\x1b[?1000h\x1b[?1006h`），用于启用鼠标报告
+1. `packages/ohbaby-tui` 只能 import `ohbaby-sdk` 作为 backend 协议依赖。
+2. TUI 不得 import `ohbaby-agent`。
+3. TUI 不得使用 backend 内部事件名作为 UI 状态来源。
+4. TUI 渲染 interaction 时只读取语义字段，不依赖 backend dialog 名称。
 
 ---
 
-## 六、与其他模块的关系
+## 六、文档自检
 
-| 模块 | 关系 | 说明 |
-|------|------|------|
-| Bus | 依赖 | 订阅事件实现响应式更新 |
-| cli/commands | 依赖 | 调用 slash 命令解析和执行，获取补全建议 |
-| commands | 依赖 | 通过 hooks 调用业务逻辑 |
-| lifecycle | 依赖 | 普通对话直接调用 lifecycle |
-| permission | 依赖 | 调用 Permission.respond() 返回确认结果 |
-| policy | 依赖 | 读取当前模式状态 |
-| message | 依赖 | 通过 SessionContext 获取消息数据 |
-| session | 依赖 | 通过 SessionContext 获取会话数据 |
-| config | 依赖 | 通过 ConfigContext 获取配置数据 |
-
-### 依赖方向图
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                      ui 模块                            │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐    │
-│  │ layouts │  │  views  │  │components│  │  hooks  │    │
-│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘    │
-└───────┼────────────┼────────────┼────────────┼──────────┘
-        │            │            │            │
-        ▼            ▼            ▼            ▼
-┌─────────────────────────────────────────────────────────┐
-│                      Bus (事件订阅)                      │
-└─────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌───────────────┬───────────────┬───────────────┐
-│  cli/commands │   lifecycle   │  permission   │
-│  (slash命令)   │   (对话执行)   │   (权限确认)   │
-└───────────────┴───────────────┴───────────────┘
-        │
-        ▼
-┌───────────────┬───────────────┬───────────────┐
-│   commands    │    message    │    session    │
-│   (业务逻辑)   │   (消息存储)   │   (会话管理)   │
-└───────────────┴───────────────┴───────────────┘
-```
-
----
-
-## 七、文档自检
-
-- [x] 可以用一句话说明模块存在的意义
-- [x] 可以清楚回答"这个模块不该做什么"
-- [x] 不存在职责与其他模块明显重叠的风险
-- [x] 所有职责可被测试或验证
-- [x] 设计目标服务于 KISS 和 YAGNI 原则
-- [x] 与 Bus、commands、lifecycle 等模块的交互关系明确
-- [x] 新增：类型路由模式、虚拟化列表、弹窗队列管理已明确
-- [x] 新增：Layout 层职责已明确
-- [x] 新增：Tab 自动补全已加入
-- [x] 新增：术语说明已添加
-- [x] 更新：D8 扩展为键盘快捷键与鼠标交互（SGR 鼠标协议）
-- [x] 更新：约束第 3 条明确 6 个 Context；假设第 4 条新增 SGR 鼠标支持假设
+- [x] UI 只作为 SDK surface 存在。
+- [x] 明确排除 backend 业务依赖。
+- [x] command UX 与 backend execution 边界清楚。
