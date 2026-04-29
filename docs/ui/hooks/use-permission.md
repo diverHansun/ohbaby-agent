@@ -1,26 +1,33 @@
-# usePermission 权限弹窗 Hook
+# usePermission — 权限弹窗桥接 Hook
 
-本文档定义 usePermission 的职责、接口和与 DialogManager 的协作方式。
+本文档定义 usePermission 的职责和与 DialogManager 的协作方式。
 
-usePermission 订阅权限请求事件，将权限确认弹窗加入 AppStateContext 的弹窗队列，并处理用户的确认/拒绝响应。
+usePermission 监听 TuiStore 中的 permission 切片变化，将新的权限请求转换为弹窗入队，并在用户响应后调用 SDK `respondPermission()`。
 
 ---
 
 ## 一、职责
 
-- 订阅 `Permission.Event.Updated` Bus 事件
-- 将权限请求转换为弹窗请求，加入弹窗队列
-- 提供响应方法，将用户的确认/拒绝回传给 permission 模块
+- 监听 TuiStore `permissions` 切片的变化。
+- 将新增的 `UiPermissionRequest` 转换为 `DialogRequest`，入队 AppStateContext 弹窗队列。
+- 提供 `onRespond` 回调，调用 `client.respondPermission(requestId, response)`。
+- 提供 `onCancel` 回调，调用 `client.respondPermission(requestId, { choiceId: deny })`。
+- 监听 `permission.resolved` 事件，关闭非通过 UI 响应的请求（如 backend timeout 自动 deny）。
+
+**不做的事**：
+- 不直接订阅 backend Bus。
+- 不直接调用 backend `Permission.respond()`。
+- 不维护独立的 permission 状态（状态在 TuiStore）。
 
 ---
 
 ## 二、签名
 
 ```typescript
-function usePermission(): void
+function usePermission(client: UiBackendClient): void
 ```
 
-无参数，无返回值。纯副作用 Hook。
+无返回值。纯副作用 Hook。
 
 权限响应通过弹窗的 `onRespond` 回调传递，不需要从 Hook 返回。
 
@@ -28,25 +35,16 @@ function usePermission(): void
 
 ## 三、调用位置
 
-**DialogManager 组件**（唯一调用位置）
+**App.tsx**（全局唯一，与 useStream 同级）
 
 ```tsx
-function DialogManager() {
-  usePermission()   // 订阅权限事件，入队弹窗
-
-  const appState = useContext(AppStateContext)
-  const { closeCurrentDialog } = useContext(AppActionsContext)
-
-  if (!appState.dialog.current) return null
-
-  switch (appState.dialog.current.type) {
-    case 'permission':
-      return <PermissionDialog
-        data={appState.dialog.current.data}
-        onClose={closeCurrentDialog}
-      />
-    // ...其他弹窗类型
-  }
+function App({ client }: { client: UiBackendClient }) {
+  useStream(client)
+  useCatalog(client)
+  usePermission(client)
+  useInteraction(client)
+  useKeyboard()
+  // ...
 }
 ```
 
@@ -55,56 +53,41 @@ function DialogManager() {
 ## 四、事件处理流程
 
 ```
-permission 模块检测到工具需要授权
-    |
-    v
-Bus.publish(Permission.Event.Updated, {
-  permissionId: string,
-  sessionId: string,
-  toolName: string,
-  title: string,
-  description: string,
-  metadata?: Record<string, unknown>
-})
-    |
-    v
-usePermission 接收事件
-    |
-    v
+SDK event: permission.requested
+    │
+    ▼
+useStream dispatch → TuiStore.permissions append
+    │
+    ▼
+usePermission 检测到 permissions 切片新增条目
+    │
+    ▼
 enqueueDialog({
-  type: 'permission',
-  data: {
-    type: 'permission',
-    permissionId: payload.permissionId,
-    sessionId: payload.sessionId,
-    title: payload.title,
-    description: payload.description,
-    toolName: payload.toolName,
-    metadata: payload.metadata,
-  },
-  priority: 'high',                    // 权限弹窗高优先级
+  source: 'permission',
+  request: permissionRequest,
+  priority: 'high',
   onRespond: (result) => {
-    Permission.respond(payload.permissionId, result)
+    client.respondPermission(request.id, result)
   },
   onCancel: () => {
-    Permission.respond(payload.permissionId, { allowed: false })
+    client.respondPermission(request.id, { choiceId: denyChoice.id })
   },
 })
-    |
-    v
+    │
+    ▼
 DialogManager 显示 PermissionDialog
-    |
-    v
-用户点击 Allow 或 Deny
-    |
-    v
-onRespond({ allowed: true/false }) 被调用
-    |
-    v
-Permission.respond() 将结果回传给 permission 模块
-    |
-    v
-closeCurrentDialog() -> 显示队列中下一个弹窗
+    │
+    ▼
+用户选择 → onRespond 被调用
+    │
+    ▼
+client.respondPermission() → backend 继续执行
+    │
+    ▼
+SDK event: permission.resolved
+    │
+    ▼
+useStream dispatch → TuiStore.permissions 移除
 ```
 
 ---
@@ -112,71 +95,67 @@ closeCurrentDialog() -> 显示队列中下一个弹窗
 ## 五、实现要点
 
 ```typescript
-function usePermission(): void {
+function usePermission(client: UiBackendClient): void {
   const { enqueueDialog } = useContext(AppActionsContext)
+  const permissions = usePermissions()
+  const enqueuedRef = useRef(new Set<string>())
 
   useEffect(() => {
-    const unsub = Bus.subscribe(Permission.Event.Updated, (payload) => {
+    for (const req of permissions) {
+      if (enqueuedRef.current.has(req.id)) continue
+      enqueuedRef.current.add(req.id)
+
       enqueueDialog({
-        type: 'permission',
-        data: {
-          type: 'permission',
-          permissionId: payload.permissionId,
-          sessionId: payload.sessionId,
-          title: payload.title,
-          description: payload.description,
-          toolName: payload.toolName,
-          metadata: payload.metadata,
-        },
+        source: 'permission',
+        request: req,
         priority: 'high',
         onRespond: (result) => {
-          Permission.respond(payload.permissionId, result as PermissionResponse)
+          client.respondPermission(req.id, result as UiPermissionResponse)
         },
         onCancel: () => {
-          Permission.respond(payload.permissionId, { allowed: false })
+          const denyChoice = req.choices.find(c => c.intent === 'deny')
+          if (denyChoice) {
+            client.respondPermission(req.id, { choiceId: denyChoice.id })
+          }
         },
       })
-    })
+    }
 
-    return unsub
-  }, [enqueueDialog])
+    for (const id of enqueuedRef.current) {
+      if (!permissions.some(p => p.id === id)) {
+        enqueuedRef.current.delete(id)
+      }
+    }
+  }, [permissions, enqueueDialog, client])
 }
 ```
 
-**关键**：
-- 权限弹窗使用 `priority: 'high'`，插入队列头部
-- `onCancel` 默认拒绝，确保取消操作也有明确响应
-- `enqueueDialog` 通过 useMemo 稳定化，不会导致 useEffect 重新执行
+- 使用 `enqueuedRef` 防止同一 permission 重复入队。
+- `permissions` 来自 TuiStore selector，变化时触发 effect。
+- `permission.resolved` 由 useStream 处理（从 TuiStore 移除），本 hook 通过 selector 感知移除。
 
 ---
 
 ## 六、为什么 usePermission 不返回 currentRequest？
 
-在早期设计中，usePermission 返回 `{ currentRequest, respond }`。但在弹窗队列模式下：
-- 权限请求通过 `enqueueDialog` 进入统一的弹窗队列
-- 当前弹窗状态由 `AppStateContext.dialog.current` 管理
-- DialogManager 根据 `dialog.current.type` 渲染对应弹窗组件
-
-usePermission 只需要做"事件 -> 入队"的转换，不需要维护独立的状态。弹窗的生命周期由 AppStateContext 统一管理。
+权限请求通过 `enqueueDialog` 进入统一的弹窗队列。当前弹窗状态由 `AppStateContext.dialog.current` 管理。DialogManager 根据 `dialog.current.source` 渲染对应弹窗组件。usePermission 只做"TuiStore → dialog 队列"的桥接。
 
 ---
 
-## 七、依赖关系
+## 七、依赖
 
 | 依赖 | 类型 | 用途 |
-|------|------|------|
-| Bus | 事件订阅 | 订阅 Permission.Event.Updated |
-| AppActionsContext | 写 | 调用 enqueueDialog 入队弹窗 |
-| permission 模块 | 调用 | Permission.respond() 回传响应 |
+|---|---|---|
+| `UiBackendClient` | 参数 | `respondPermission()` |
+| `usePermissions` | TuiStore selector | 读取当前 permission 列表 |
+| AppActionsContext | 写 | `enqueueDialog()` |
 
 ---
 
 ## 八、文档自检
 
-- [x] 签名完整
-- [x] 调用位置已明确（DialogManager，唯一）
-- [x] 事件处理流程有完整的数据流图
-- [x] 弹窗入队参数已详细定义
-- [x] 高优先级和取消处理已说明
-- [x] 不返回状态的设计理由已解释
-- [x] 与弹窗队列模式的协作已说明
+- [x] 不直接订阅 backend Bus。
+- [x] 通过 TuiStore selector 感知 permission 变化。
+- [x] 响应通过 `client.respondPermission()` 回传。
+- [x] 防重复入队机制已说明。
+- [x] 与 DialogManager 的协作流程完整。

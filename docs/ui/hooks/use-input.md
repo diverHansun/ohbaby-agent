@@ -1,33 +1,41 @@
-# useInput 输入处理 Hook
+# useInput — 输入处理 Hook
 
 本文档定义 useInput 的职责、接口和命令分流逻辑。
 
-useInput 处理用户在 Prompt 组件中提交的输入，根据输入内容分流到不同的执行路径。
+useInput 处理用户在 Prompt 组件中提交的输入，通过 SDK parser/resolver 分流到 slash command 或普通 prompt 路径。
 
 ---
 
 ## 一、职责
 
-- 接收用户提交的文本输入
-- 判断输入类型并分流（slash 命令 vs 普通对话）
-- 调用 lifecycle 或 cli/commands 执行业务逻辑
-- 更新应用状态（视图切换、加载状态）
-- 提供 Tab 自动补全建议
+- 接收用户提交的文本输入。
+- 使用 SDK `parseSlashInput()` 判断是否为 slash command。
+- 使用 SDK `resolveCommand()` 基于 TuiStore catalog 做 exact match。
+- 匹配成功时调用 `client.executeCommand(invocation)`。
+- 普通文本时调用 `client.submitPrompt(text, { sessionId })`。
+- 提供 Tab 自动补全建议（基于 SDK `filterCommandCatalog()`）。
+
+**不做的事**：
+- 不主动设置 loading 状态（由 useStream 根据 SDK 事件派生）。
+- 不直接调用 lifecycle、commands 或 cli/commands 模块。
+- 不维护 command catalog（由 useCatalog 负责）。
 
 ---
 
 ## 二、签名
 
 ```typescript
-function useInput(): {
+function useInput(client: UiBackendClient): {
   handleSubmit: (text: string) => Promise<void>
-  getCompletions: (prefix: string) => InlineCompletion | null
+  getCompletions: (prefix: string) => CompletionResult | null
+  getHints: (prefix: string) => HintResult | null
 }
 ```
 
 **返回值**：
-- `handleSubmit`：处理用户提交的输入
-- `getCompletions`：获取 Tab 自动补全建议（Inline 模式，单个建议）
+- `handleSubmit`：处理用户提交的输入。
+- `getCompletions`：获取 Tab 自动补全建议（Inline 模式）。
+- `getHints`：获取当前输入的子命令/参数提示。
 
 ---
 
@@ -35,116 +43,174 @@ function useInput(): {
 
 **Prompt 组件**（唯一调用位置）
 
-```tsx
-function Prompt() {
-  const { handleSubmit, getCompletions } = useInput()
-
-  // Prompt 组件使用 handleSubmit 处理 Enter 提交
-  // 使用 getCompletions 显示 Tab 补全建议
-}
-```
-
 ---
 
 ## 四、命令分流逻辑
 
 ```typescript
+const catalog = useCommandCatalog()
+const runtime = useRuntime()
+
 async function handleSubmit(text: string): Promise<void> {
   const trimmed = text.trim()
-  if (!trimmed) return                    // 空输入，忽略
+  if (!trimmed) return
 
-  if (trimmed.startsWith('/')) {
-    // Slash 命令 -> cli/commands 模块
-    await executeSlashCommand(trimmed)
+  const parsed = parseSlashInput(trimmed)
+
+  if (parsed) {
+    if (!catalog) {
+      showLocalError('命令目录尚未加载')
+      return
+    }
+
+    const outcome = resolveCommand(parsed, catalog.commands, {
+      surface: 'tui',
+      mode: 'strict',
+    })
+
+    switch (outcome.kind) {
+      case 'resolved':
+        client.executeCommand(outcome.invocation)
+        addToHistory(trimmed)
+        break
+      case 'not-found':
+        showLocalError(
+          `未知命令: /${parsed.rawPath}`,
+          outcome.suggestion ? `是否想输入: /${outcome.suggestion}` : undefined
+        )
+        break
+      case 'ambiguous':
+        showLocalError(`命令不明确: ${outcome.candidates.join(', ')}`)
+        break
+    }
   } else {
-    // 普通对话 -> lifecycle 模块
-    navigateTo('chat')                    // 如果在 HomeView，切换到 ChatView
-    setLoading({ phase: 'thinking' })     // 设置加载状态
-    await lifecycle.execute(trimmed)       // 执行对话（异步，结果通过 Bus 事件回传）
+    if (viewState.current === 'home') navigateTo('chat')
+    client.submitPrompt(trimmed, { sessionId: runtime?.activeSession?.id })
+    addToHistory(trimmed)
   }
 }
 ```
 
 ### 分流规则
 
-| 输入格式 | 目标 | 示例 |
-|---------|------|------|
-| 以 `/` 开头 | cli/commands.executeSlashCommand() | `/help`, `/model gpt-4` |
-| 其他非空文本 | lifecycle.execute() | `"explain this code"` |
-| 空或纯空白 | 忽略，不执行 | `""`, `"   "` |
+| 输入格式 | 处理路径 |
+|---|---|
+| 以 `/` 开头且 resolve 成功 | `client.executeCommand(invocation)` |
+| 以 `/` 开头但 resolve 失败 | 本地显示错误 + suggestion |
+| 其他非空文本 | `client.submitPrompt(text)` |
+| 空或纯空白 | 忽略 |
+
+### Loading 状态说明
+
+useInput 提交 prompt/command 后**不主动调用 setLoading**。Loading 状态由 useStream 在收到 `run.updated` 或 `command.started` 事件后派生。这避免了"提交后立刻显示 loading，但 backend 还没开始执行"的闪烁问题。
 
 ---
 
 ## 五、Tab 自动补全
 
-采用 **Inline 内联模式**：在光标后显示单个灰色建议，按 Tab 接受。
+采用 Inline 内联模式：在光标后显示单个灰色建议，按 Tab 接受。
 
 ```typescript
-function getCompletions(prefix: string): InlineCompletion | null {
-  if (!prefix.startsWith('/')) return null   // 只补全 slash 命令
+function getCompletions(prefix: string): CompletionResult | null {
+  if (!prefix.startsWith('/')) return null
 
-  const commands = cli.commands.getAvailableCommands()
-  const match = commands.find(cmd => cmd.name.startsWith(prefix.slice(1)))
+  if (!catalog) return null
 
-  if (!match) return null
+  const candidates = filterCommandCatalog(catalog.commands, {
+    prefix: prefix.slice(1),
+    surface: 'tui',
+    includeHidden: false,
+  })
+
+  if (candidates.length === 0) return null
+
+  const best = candidates[0]
+  const fullText = '/' + best.path.join(' ')
+  const remaining = fullText.slice(prefix.length)
+
+  if (!remaining) return null
 
   return {
-    text: '/' + match.name,                  // 完整命令文本
-    displayText: match.name.slice(prefix.length - 1),  // 光标后补全部分（灰色显示）
+    text: fullText,
+    displayText: remaining,
   }
 }
 ```
 
-**类型定义**：
+**交互流程**：
+1. 用户输入 `/mod`。
+2. `getCompletions` 返回 `{ text: '/model', displayText: 'el' }`。
+3. Prompt 在光标后显示灰色的 `el`。
+4. 用户按 Tab → 输入框内容变为 `/model`。
+5. 用户继续输入其他字符 → 灰色建议消失。
+
+---
+
+## 六、输入 Hints
+
+当用户输入 `/model` 但尚未 Enter 时，显示子命令和参数提示：
 
 ```typescript
-interface InlineCompletion {
-  text: string            // 接受补全后的完整文本
-  displayText: string     // 显示在光标后的灰色文本
+function getHints(prefix: string): HintResult | null {
+  if (!prefix.startsWith('/')) return null
+
+  if (!catalog) return null
+
+  const parsed = parseSlashInput(prefix)
+  if (!parsed) return null
+
+  const candidates = filterCommandCatalog(catalog.commands, {
+    prefix: parsed.rawPath,
+    surface: 'tui',
+  })
+
+  if (candidates.length === 0) return null
+
+  return {
+    subCommands: candidates.map(c => ({
+      name: c.path.join(' '),
+      description: c.description,
+      argsHint: c.argsHint,
+    })),
+  }
 }
 ```
 
-**交互流程**：
-1. 用户输入 `/he`
-2. getCompletions 返回 `{ text: '/help', displayText: 'lp' }`
-3. Prompt 在光标后显示灰色的 `lp`
-4. 用户按 Tab -> 输入框内容变为 `/help`
-5. 用户继续输入其他字符 -> 灰色建议消失
+Hints 不调用 backend，纯本地 catalog 查询。
 
 ---
 
-## 六、依赖的 Context
+## 七、依赖
 
-| Context | 读/写 | 用途 |
-|---------|------|------|
-| AppStateContext | 读 | 检查当前视图（决定是否需要 navigateTo） |
-| AppActionsContext | 写 | navigateTo('chat'), setLoading() |
-| ConfigContext | 读 | 可能需要模式信息 |
-
----
-
-## 七、与其他 Hook 的关系
-
-| 相关 Hook | 关系 | 说明 |
-|-----------|------|------|
-| useHistory | 同级，同在 Prompt 中 | useHistory 管理历史记录，useInput 在提交时调用 addToHistory |
-| useKeyboard | 互不调用 | useKeyboard 处理全局快捷键，useInput 处理 Prompt 输入 |
-| useStream | 间接关系 | useInput 触发 lifecycle.execute()，useStream 接收执行结果 |
-
-**注意**：useInput 和 useHistory 虽然都在 Prompt 中调用，但职责不同：
-- useInput：处理提交逻辑和补全
-- useHistory：管理历史导航
-
-Prompt 组件负责协调两者：提交时调用 `handleSubmit` 并 `addToHistory`。
+| 依赖 | 类型 | 用途 |
+|---|---|---|
+| `UiBackendClient` | 参数 | `submitPrompt()`, `executeCommand()` |
+| `parseSlashInput` | SDK 函数 | 词法解析 |
+| `resolveCommand` | SDK 函数 | catalog exact match |
+| `filterCommandCatalog` | SDK 函数 | 补全和 hints |
+| `useCommandCatalog` selector | TuiStore | 读取当前 catalog |
+| `useRuntime` selector | TuiStore | 读取 activeSessionId |
+| AppStateContext | 读 | 检查当前视图 |
+| AppActionsContext | 写 | `navigateTo('chat')` |
+| useHistory | 同级 | 提交时调用 `addToHistory` |
 
 ---
 
-## 八、文档自检
+## 八、与其他 Hook 的关系
 
-- [x] 签名完整（参数 + 返回值）
-- [x] 调用位置已明确（Prompt，唯一）
-- [x] 命令分流规则已说明
-- [x] Tab 自动补全的 Inline 模式已说明
-- [x] 补全类型定义和交互流程已描述
-- [x] 依赖的 Context 已列举
-- [x] 与其他 Hook 的关系已说明
+| Hook | 关系 |
+|---|---|
+| useHistory | 同级，同在 Prompt 中。useInput 提交时调用 addToHistory |
+| useStream | 间接。useInput 触发 submitPrompt/executeCommand，结果通过 SDK 事件回流到 useStream |
+| useCatalog | useInput 读取 catalog，useCatalog 负责加载和刷新 |
+| useKeyboard | 互不调用。useKeyboard 处理全局快捷键，useInput 处理 Prompt 输入 |
+
+---
+
+## 九、文档自检
+
+- [x] 不直接调用 lifecycle、commands 或 cli/commands 模块。
+- [x] slash 流程使用 SDK parser/resolver。
+- [x] loading 状态不由本 hook 主动设置。
+- [x] 补全和 hints 基于 SDK `filterCommandCatalog`。
+- [x] 依赖清单完整，无 backend 内部 import。

@@ -1,31 +1,33 @@
-# useStream 事件桥梁 Hook
+# useStream — SDK 事件聚合订阅器
 
-本文档定义 useStream 的职责、订阅事件和 Context 更新规则。
+本文档定义 useStream 的职责、订阅事件和 TuiStore 更新规则。
 
-useStream 是纯事件桥梁，订阅 Bus 事件并将数据同步到对应的 Context。不包含任何业务逻辑，不返回任何值。
+useStream 是 SDK 事件到 TuiStore 的唯一管道。它订阅 `client.subscribeEvents()`，将每个 SDK 事件 dispatch 到 TuiStore reducer，并在必要时调用 AppActions 更新 UI 控制状态。
 
 ---
 
 ## 一、职责
 
-- 订阅所有 UI 层需要响应的 Bus 事件
-- 将事件数据同步到 SessionContext 和 AppStateContext
-- 管理订阅生命周期（挂载时订阅，卸载时取消）
+- 订阅 `UiBackendClient.subscribeEvents()` 的事件流。
+- 将 SDK 事件 dispatch 到 TuiStore reducer 更新对应切片。
+- 将 `message.part.delta` 路由到 TuiStore 的 part-delta emitter（不走 reducer）。
+- 根据 `run.updated` 事件派生 LoadingState，调用 `AppActions.setLoading()`。
+- 处理 `stream.gap` 事件，执行 reconcile 协议。
 
 **不做的事**：
-- 不处理 LLM 调用、工具执行等业务逻辑（由 lifecycle 模块负责）
-- 不返回任何状态（状态在 Context 中）
-- 不做数据转换或过滤（原样搬运）
+- 不调用 `UiBackendClient` 的写方法（submitPrompt/executeCommand/respond* 由其他 hooks 负责）。
+- 不处理 dialog 入队（permission/interaction 入队由 usePermission/useInteraction 负责）。
+- 不处理 catalog 刷新（由 useCatalog 负责）。
 
 ---
 
 ## 二、签名
 
 ```typescript
-function useStream(): void
+function useStream(client: UiBackendClient): void
 ```
 
-无参数，无返回值。在 App.tsx 中调用一次即可。
+无返回值。在 App.tsx 中调用一次。
 
 ---
 
@@ -34,9 +36,10 @@ function useStream(): void
 **App.tsx**（全局唯一）
 
 ```tsx
-function App() {
-  useStream()    // 全局事件桥梁
-  useKeyboard()  // 全局快捷键
+function App({ client }: { client: UiBackendClient }) {
+  useStream(client)
+  useCatalog(client)
+  useKeyboard()
 
   return (
     <DefaultLayout>
@@ -48,162 +51,144 @@ function App() {
 
 ---
 
-## 四、订阅的 Bus 事件
+## 四、SDK 事件 → TuiStore 映射
 
-### 4.1 事件 -> Context 映射表
+### 4.1 正常事件 dispatch
 
-| Bus 事件 | 更新的 Context | 更新内容 |
-|----------|---------------|---------|
-| `Message.Event.Updated` | SessionContext | 消息新增/删除 -> messagesRef + messageVersion++ |
-| `Message.Event.PartUpdated` | SessionContext | Part 增量更新 -> messagesRef（不递增 version） |
-| `Lifecycle.Event.Started` | AppStateContext | setLoading({ isActive: true }) |
-| `Lifecycle.Event.Completed` | AppStateContext | setLoading({ isActive: false, activeToolName: null }) |
-| `Lifecycle.Event.Aborted` | AppStateContext | setLoading({ isActive: false, activeToolName: null }) |
-| `ToolScheduler.Event.ExecutionStarted` | AppStateContext | setLoading({ activeToolName: toolName }) |
-| `ToolScheduler.Event.ExecutionCompleted` | AppStateContext | setLoading({ activeToolName: null }) |
-| `Context.Event.UsageUpdated` | SessionContext | 更新 tokenUsage |
-| `Session.Event.Created` | SessionContext | 更新 sessionId, sessionName |
-| `Session.Event.Switched` | SessionContext | 更新 sessionId, sessionName, 刷新消息 |
+| SDK 事件 | TuiStore 操作 | 附带 UI 副作用 |
+|---|---|---|
+| `snapshot.replaced` | 硬重置全部切片 | `setLoading({ phase: 'idle' })` |
+| `runtime.updated` | 替换 `runtime` 切片 | — |
+| `session.updated` | upsert `sessions` 切片 | — |
+| `message.appended` | append 到 `messages` | — |
+| `message.part.delta` | 不走 reducer，走 part-delta emitter | — |
+| `run.updated` | upsert `runs` 切片 | 派生 loading（见 4.2） |
+| `permission.requested` | append 到 `permissions` | — |
+| `permission.resolved` | 从 `permissions` 移除 | — |
+| `command.started` | `pending.invocations` 状态 → `started` | — |
+| `command.result.delivered` | `pending.invocations` 状态 → `completed` | — |
+| `command.failed` | `pending.invocations` 状态 → `failed` | — |
+| `command.catalog.updated` | `catalogInvalidation` | 标记 catalog 失效；不调用 `listCommands` |
+| `interaction.requested` | 写入 `pending.interactions` | — |
+| `interaction.resolved` | 从 `pending.interactions` 移除 | — |
 
-### 4.2 消息更新的三层机制
+### 4.2 Loading 状态派生
 
-```
-Message.Event.PartUpdated（高频，流式响应期间）
-    |
-    v
-  第一层：更新 messagesRef.current 中对应 Part（无重渲染）
-    |
-  第三层：Part 组件自行订阅 Bus 事件刷新显示
-    |
-  不递增 messageVersion（避免 MessageList 全量重渲染）
-
-
-Message.Event.Updated（低频，消息新增/删除/完成）
-    |
-    v
-  第一层：更新 messagesRef.current
-    |
-  第二层：messageVersion++（触发 MessageList 从 ref 重新读取）
-```
-
-### 4.3 加载状态转换
-
-加载状态由两个独立信号组成（`isActive` + `activeToolName`），由 Bus 事件直接驱动，无需人工状态机：
+useStream 根据 `run.updated` 事件派生 LoadingState，调用 `AppActions.setLoading()`：
 
 ```
-Lifecycle.Event.Started
-    → isActive = true
+run.updated(status.kind === 'running')
+  → setLoading({ phase: 'thinking' })
 
-ToolScheduler.Event.ExecutionStarted
-    → activeToolName = toolName
+run.updated(status.kind === 'running' 且含 tool execution 信息)
+  → setLoading({ phase: 'executing', toolName })
 
-ToolScheduler.Event.ExecutionCompleted
-    → activeToolName = null（自然回落到 "Thinking..."）
+message.part.delta 到达（隐含 streaming）
+  → setLoading({ phase: 'streaming' })
 
-Lifecycle.Event.Completed / Aborted
-    → isActive = false, activeToolName = null
+run.updated(status.kind === 'idle' | 'error')
+  → setLoading({ phase: 'idle' })
 ```
 
-注意：LLM 流式输出期间不产生独立的 Bus 事件，此时 `isActive` 保持 true、`activeToolName` 为 null，加载指示器显示 "Thinking..."。流式文本内容通过 `Message.Event.PartUpdated` 直达 Part 组件渲染。
+Loading 状态不由 useInput 主动设置。useInput 提交 prompt/command 后，等待 SDK 事件回流再更新 loading。
+
+### 4.3 Part-Delta 高频路径
+
+`message.part.delta` 不走 reducer，而是：
+
+1. 原地更新 TuiStore `messages` 数组中对应 part 的内容。
+2. 通过 TuiStore 内部 part-delta emitter 广播 `{ messageId, partIndex, delta }`。
+3. 对应 Part 组件通过 `usePartDelta(messageId, partIndex)` 订阅，仅自身重渲染。
+
+这延续了原设计的三层优化思路，避免流式响应期间 MessageList 全量重渲染。
 
 ---
 
-## 五、实现要点
+## 五、Stream Gap Reconcile
+
+当收到 `stream.gap` 事件时，useStream 执行以下协议：
+
+```
+1. 暂停：停止向 TuiStore dispatch 后续普通事件。
+2. 重建：
+   - await client.getSnapshot()     → 写入 runtime/sessions/runs/permissions
+   - await client.listCommands()    → 写入 catalog
+   - await client.getMessages(sid)  → 写入 messages
+3. 清理：清空 pending.invocations 和 pending.interactions。
+4. 保留：用户正在编辑的 Prompt 文本不受影响。
+5. 恢复：继续消费后续事件。
+```
+
+Gap reconcile 是 TuiStore 的"硬重置入口"，与 `snapshot.replaced` 类似但额外拉取 catalog 和 messages。
+
+---
+
+## 六、实现要点
 
 ```typescript
-function useStream(): void {
-  const { messagesRef } = useContext(SessionContext)
+function useStream(client: UiBackendClient): void {
   const { setLoading } = useContext(AppActionsContext)
-  // SessionContext 的 messageVersion setter 通过内部机制获取
 
   useEffect(() => {
-    const subscriptions: Array<() => void> = []
+    const unsub = client.subscribeEvents(async (event) => {
+      if (event.type === 'stream.gap') {
+        await reconcile(client)
+        return
+      }
 
-    // 消息更新（低频）
-    subscriptions.push(
-      Bus.subscribe(Message.Event.Updated, (payload) => {
-        // 更新 ref + 递增版本号
-        updateMessagesRef(messagesRef, payload)
-        incrementMessageVersion()
-      })
-    )
+      if (event.type === 'message.part.delta') {
+        tuiStore.applyPartDelta(event)
+        return
+      }
 
-    // Part 增量更新（高频）
-    subscriptions.push(
-      Bus.subscribe(Message.Event.PartUpdated, (payload) => {
-        // 只更新 ref，不递增版本号
-        updatePartInRef(messagesRef, payload)
-        // 加载状态不在此处更新，由 ToolScheduler 事件独立驱动
-      })
-    )
+      tuiStore.dispatch(event)
 
-    // 生命周期事件
-    subscriptions.push(
-      Bus.subscribe(Lifecycle.Event.Started, () => {
-        setLoading({ isActive: true })
-      })
-    )
+      if (event.type === 'run.updated') {
+        deriveLoading(event, setLoading)
+      }
+    })
 
-    subscriptions.push(
-      Bus.subscribe(Lifecycle.Event.Completed, () => {
-        setLoading({ isActive: false, activeToolName: null })
-      })
-    )
-
-    // 工具执行事件
-    subscriptions.push(
-      Bus.subscribe(ToolScheduler.Event.ExecutionStarted, ({ toolName }) => {
-        setLoading({ activeToolName: toolName })
-      })
-    )
-
-    subscriptions.push(
-      Bus.subscribe(ToolScheduler.Event.ExecutionCompleted, () => {
-        setLoading({ activeToolName: null })
-      })
-    )
-
-    // ... 其他事件订阅
-
-    return () => {
-      subscriptions.forEach(unsub => unsub())
-    }
-  }, [])
+    return unsub
+  }, [client, setLoading])
 }
 ```
 
-**关键**：
-- useEffect 空依赖，挂载时订阅一次，卸载时全部取消
-- 消息更新通过 ref 直接修改，避免 React 状态更新
-- 加载状态通过 AppActionsContext 的 setLoading 更新
+- `useEffect` 依赖 `client` 和 `setLoading`（两者引用稳定）。
+- `tuiStore.dispatch` 是同步的 reducer 调用。
+- `reconcile` 是异步的，期间暂停普通 dispatch。
 
 ---
 
-## 六、设计理由
+## 七、与其他 Hook 的关系
 
-### 为什么是纯副作用（无返回值）？
-
-useStream 的消费者不是调用它的组件（App.tsx），而是各个读取 Context 的下游组件。如果 useStream 返回状态，这些状态要么重复 Context 中的数据（冗余），要么需要通过 props 层层传递（prop drilling）。
-
-### 为什么不拆分为多个 hook（useMessageSync, useLoadingSync 等）？
-
-聚合订阅有两个优势：
-1. 单一位置管理所有 Bus 订阅的生命周期，不会遗漏取消订阅
-2. 某些事件需要同时更新多个 Context（如 PartUpdated 同时更新消息和加载状态），拆分后需要协调
-
-### 为什么 ConfigContext 的更新不在 useStream 中？
-
-ConfigContext 的更新由 Config.Event.Updated 驱动，但这个事件来自 commands 模块（用户执行 slash 命令），不是来自 lifecycle 流程。ConfigProvider 自身订阅这个事件更合理（见 [config-context.md](../contexts/config-context.md)）。
+| Hook | 关系 |
+|---|---|
+| useCatalog | useStream 标记 `catalogInvalidation`，useCatalog 观察后调用 `listCommands` |
+| usePermission | useStream 把 `permission.requested` 写入 TuiStore；usePermission 从 TuiStore 读取并入队 dialog |
+| useInteraction | 同上，处理 `interaction.requested` |
+| useInput | useStream 不被 useInput 调用；useInput 触发的 submitPrompt/executeCommand 的结果通过 SDK 事件回流到 useStream |
 
 ---
 
-## 七、文档自检
+## 八、设计理由
 
-- [x] 签名完整（无参数，无返回值）
-- [x] 调用位置已明确（App.tsx，全局唯一）
-- [x] 订阅的所有 Bus 事件已列举
-- [x] 事件到 Context 的映射关系已说明
-- [x] 消息三层更新机制已说明
-- [x] 加载状态转换已说明
-- [x] 实现要点有代码示例
-- [x] 纯副作用设计的理由已解释
+### 为什么是单一聚合订阅器？
+
+1. 单一位置管理 SDK 事件订阅的生命周期，不会遗漏取消订阅。
+2. 某些事件需要同时更新 TuiStore 和 UI 控制状态（如 `run.updated` → store + loading），聚合处理避免协调问题。
+3. 与原设计的 useStream 角色一致，降低迁移认知成本。
+
+### 为什么 useStream 不直接刷新 catalog？
+
+Catalog 刷新需要调用 `client.listCommands()`（异步 RPC），不适合在 reducer dispatch 路径中执行。useStream 只负责把 `command.catalog.updated` 投影成 TuiStore 的 `catalogInvalidation` 信号；useCatalog 独立管理 catalog 的初始化和刷新生命周期。
+
+---
+
+## 九、文档自检
+
+- [x] 订阅来源是单一的 `client.subscribeEvents()`，不订阅 backend Bus。
+- [x] 每个 SDK 事件都有明确的 dispatch 目标。
+- [x] part-delta 高频路径有独立优化方案。
+- [x] stream.gap reconcile 协议完整。
+- [x] loading 状态由 SDK 事件派生，不由 useInput 主动设置。
+- [x] 与 useCatalog/usePermission/useInteraction 的分工清晰。
