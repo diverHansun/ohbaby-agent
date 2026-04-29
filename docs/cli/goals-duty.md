@@ -3,125 +3,96 @@
 本文档定义 `cli` 模块的设计目标与职责边界。
 
 **模块位置**：
-- 代码：`src/cli/`
+- 代码：`packages/ohbaby-agent/src/bin.ts` 及 CLI 入口相关文件
 - 文档：`docs/cli/`
 
 ---
 
 ## 一、模块定位
 
-**一句话说明**：cli 模块是 ohbaby-agent 的程序入口，负责命令行参数解析、程序初始化、全局错误处理和运行模式控制。
+**一句话说明**：cli 模块是 `ohbaby` 进程的组合根，负责解析 argv、创建 `UiBackendClient`、选择交互或非交互 surface，并统一退出码与进程清理。
 
 **如果没有这个模块**：
-- 程序没有统一的入口点，启动流程混乱
-- 命令行参数无法被解析和验证
-- 全局异常和信号无法被统一处理
-- 交互模式和非交互模式的切换缺乏统一管理
+- `ohbaby-agent` 和 `ohbaby-tui` 缺少唯一合法的组合入口。
+- 交互 TUI 与非交互 stdout 输出会各自绕过 SDK 协议。
+- 进程级错误处理、stdin、退出码和清理流程会分散在多个模块中。
 
 ---
 
 ## 二、Design Goals（设计目标）
 
-### G1: 简洁入口
+### G1: Composition Root 清晰
 
-入口点代码保持简洁，单文件不超过 100 行。采用中间件模式组织初始化步骤，职责清晰可追踪。
+CLI 是唯一允许同时依赖 `ohbaby-agent` backend adapter 和 `ohbaby-tui` frontend package 的位置。除入口文件外，任何 backend core/service/adapter 不得 import TUI。
 
-### G2: 分类错误处理
+### G2: 统一 SDK 通道
 
-全局异常按类型分类处理，使用语义化退出码。各子模块继承 `utils/error.ts` 中的 `IrisError` 基类定义自己的错误类型。
+交互模式和非交互模式都通过 `UiBackendClient` 与 backend 通信。CLI 不绕过 SDK 直接调用 lifecycle、message、session 或 commands。
 
-### G3: 模式分离
+### G3: 进程职责克制
 
-清晰区分交互模式和非交互模式的启动流程，两种模式共享初始化逻辑，仅在最终执行环节分流。
+CLI 只处理进程入口相关职责：argv、stdin、stdout/stderr、信号、退出码、清理。业务执行交给 backend，界面渲染交给对应 surface。
 
-### G4: 最小启动参数
+### G4: Surface 分离
 
-MVP 阶段仅支持必要的命令行参数，避免参数膨胀。复杂配置通过配置文件管理，不通过命令行参数暴露。
+交互模式启动 Ink TUI；非交互模式使用最小 stdout renderer 订阅 SDK events 并输出文本。两种 surface 共享 backend client。
 
 ### G5: 可测试
 
-各子模块职责单一，便于独立测试。启动流程可通过 mock 外部依赖进行验证。
+argv 解析、run mode 判断、exit code 映射和 stdout event sink 都可独立测试，不需要启动完整 TUI。
 
 ---
 
 ## 三、Duties（职责）
 
-### D1: 程序入口
+### D1: Bin 入口
 
-提供 ohbaby-agent 的主入口函数 `main()`，是程序启动的唯一入口点。
+提供 `ohbaby` 可执行入口，接收 Node 进程传入的 argv/stdin/signal。
 
 ### D2: 命令行参数解析
 
-解析启动时的命令行参数，MVP 阶段支持以下参数：
+MVP 参数：
 
 | 参数 | 短选项 | 类型 | 说明 |
 |------|--------|------|------|
-| `--help` | `-h` | boolean | 显示帮助信息 |
+| `--help` | `-h` | boolean | 显示 CLI 启动参数帮助 |
 | `--version` | `-v` | boolean | 显示版本号 |
-| `--prompt <text>` | `-p` | string | 非交互模式，执行指定 prompt |
+| `--prompt <text>` | `-p` | string | 非交互模式，提交一次 prompt |
 
-### D3: 初始化顺序管理
+Slash command 不属于 argv 参数，由 TUI 或 stdout surface 通过 SDK command grammar 处理。
 
-按以下顺序初始化各模块：
-1. 解析命令行参数
-2. 初始化日志系统（调用 `Log.init()`）
-3. 注册全局异常处理器
-4. 加载配置（调用 config 模块）
-5. 初始化核心模块（MCP、Agent 等）
-6. 根据模式启动 REPL 或执行 prompt
+### D3: Backend client 创建
 
-### D4: 运行模式判断
+创建 in-process backend adapter，获得 `UiBackendClient`。
 
-根据参数和环境判断运行模式：
+### D4: 运行模式分流
 
 | 条件 | 模式 | 行为 |
 |------|------|------|
-| 有 `-p` 参数 | 非交互 | 执行一次 prompt 后退出 |
-| stdin 有管道输入 | 非交互 | 读取 stdin 作为 prompt |
-| stdin 是 TTY 且无参数 | 交互 | 启动 REPL |
+| 有 `-p` 参数 | 非交互 | 创建 stdout renderer，订阅 events，调用 `submitPrompt()` |
+| stdin 有管道输入 | 非交互 | 读取 stdin 后同上 |
+| stdin 是 TTY 且无参数 | 交互 | 调用 `renderTerminalUi({ client })` |
 
-**stdin 读取**：由 `bootstrap.ts` 负责检测 `!process.stdin.isTTY` 并读取管道输入。
+### D5: 非交互 stdout renderer
 
-### D5: 全局异常处理
+非交互模式下，CLI 提供最小 event sink：
+- 输出 assistant text delta。
+- 输出 command/result/error 的简洁文本。
+- 将 fatal error 映射为 stderr 和退出码。
 
-统一处理未捕获的异常和信号：
-- `unhandledRejection`：Promise 拒绝
-- `uncaughtException`：同步异常
-- `SIGINT`：用户中断信号
-- `SIGTERM`：终止信号
+该 renderer 不依赖 Ink，不实现 TUI 组件。
 
-### D6: 退出码管理
+### D6: 进程级错误与退出码
 
-定义语义化退出码常量 `EXIT_CODES` 和映射函数 `getExitCodeForError()`：
+统一处理：
+- argv 参数错误。
+- 配置/认证/网络等启动错误。
+- backend event 中的 fatal error。
+- SIGINT / SIGTERM。
 
-| 退出码 | 含义 | 场景 |
-|--------|------|------|
-| 0 | 成功 | 正常执行完成 |
-| 1 | 一般错误 | 未分类错误 |
-| 2 | 参数错误 | 参数解析失败 |
-| 3 | 配置错误 | 配置文件错误 |
-| 4 | 认证错误 | API Key 无效 |
-| 5 | 网络错误 | API 调用失败 |
-| 130 | 用户中断 | Ctrl+C (128 + SIGINT) |
+### D7: 清理流程
 
-### D7: 生命周期清理
-
-程序退出前执行清理：
-- 调用 `runSyncCleanup()` 执行同步清理
-- 调用 `runExitCleanup()` 执行异步清理
-- 确保 MCP 连接、临时文件等资源被正确释放
-
-### D8: 错误类型定义
-
-定义 CLI 层错误类型，继承 `utils/error.ts` 中的 `IrisError` 基类：
-
-```typescript
-// CLI 参数错误
-class CliArgumentError extends IrisError
-
-// CLI 配置错误
-class CliConfigError extends IrisError
-```
+进程退出前调用 backend adapter 的清理能力，并执行本进程注册的同步/异步 cleanup。
 
 ---
 
@@ -129,154 +100,37 @@ class CliConfigError extends IrisError
 
 ### N1: 不负责业务逻辑
 
-具体的业务逻辑由 `commands` 和 `lifecycle` 模块负责。cli 模块只负责启动和协调。
+CLI 不执行 lifecycle、commands、session、message、MCP、permission 等业务逻辑。
 
-### N2: 不负责 UI 渲染
+### N2: 不负责 slash command parser/resolver
 
-终端 UI 渲染由独立的 `ui` 模块负责。cli 模块只负责启动 UI 或执行非交互逻辑。
+Slash command 的纯解析和 resolver 属于 `ohbaby-sdk`。CLI 不维护 `parser.ts`、`renderer.ts` 或 command formatter。
 
-### N3: 不负责配置管理
+### N3: 不负责 TUI 渲染
 
-配置的加载、验证、持久化由 `config` 模块负责。cli 模块只调用 config 接口获取配置。
+Ink 组件树、DialogManager、补全 UI 和 prompt 交互属于 `ohbaby-tui`。
 
-### N4: 不实现复杂参数
+### N4: 不负责 command catalog
 
-以下参数在 MVP 阶段不实现：
-- `--verbose`、`--debug`：调试选项
-- `--json`：输出格式控制
-- `--model`：模型选择
-- `--resume`：会话恢复
+Command catalog 的创建、分类、可见性和执行属于 backend `commands` 模块。
 
-如需这些功能，使用配置文件或 Slash 命令。
+### N5: 不作为常规依赖层
 
-### N5: 不负责 Slash 命令业务逻辑
-
-Slash 命令的解析和渲染由 `cli/commands` 子模块负责，业务逻辑由 `commands` 模块负责。
+CLI 是进程组合根，不应被 backend service 或 TUI component import。
 
 ---
 
-## 五、文件结构
+## 五、硬性依赖规则
 
-cli 模块采用扁平化结构，仅 commands 保留子目录：
-
-```
-src/cli/
-├── index.ts          # 模块入口，导出 main()
-├── bootstrap.ts      # 初始化流程编排
-├── handlers.ts       # 全局异常/信号处理
-├── args.ts           # 参数解析 + isInteractive()
-├── error.ts          # CliArgumentError, CliConfigError
-├── exit-codes.ts     # EXIT_CODES + getExitCodeForError()
-└── commands/         # Slash 命令（复杂度高，保留子目录）
-    ├── index.ts
-    ├── parser.ts
-    ├── renderer.ts
-    └── formatters/
-```
-
-**设计理由**：
-- cli 模块代码量小（约 300 行），不需要过多子目录
-- 扁平结构 import 路径更短，更直观
-- commands 有多个组件和格式化器，复杂度高，保留子目录
+1. `ohbaby-tui` 不得 import `ohbaby-agent` 的任何模块。
+2. `ohbaby-agent` core/services/adapters 不得 import `ohbaby-tui`。
+3. `packages/ohbaby-agent/src/bin.ts` 是 V1 唯一允许同时 import `ohbaby-agent` backend adapter 与 `ohbaby-tui` 的文件。
+4. 若未来引入顶层 orchestrator 包，该例外从 `bin.ts` 迁移到 orchestrator，其他规则不变。
 
 ---
 
-## 六、设计约束与假设
+## 六、文档自检
 
-### 约束
-
-1. **依赖 utils 基础设施**：使用 `Log`、`IrisError`、`registerCleanup` 等
-2. **单文件行数限制**：各文件不超过 100 行，保持简洁
-3. **最小外部依赖**：仅依赖 yargs 进行参数解析
-
-### 假设
-
-1. Node.js 运行环境支持 ES Modules
-2. 终端支持 TTY 检测（`process.stdin.isTTY`）
-3. 配置文件已由 config 模块正确加载
-
----
-
-## 七、与其他模块的关系
-
-| 模块 | 关系 | 说明 |
-|------|------|------|
-| utils | 依赖 | 使用 Log、IrisError、cleanup 等基础设施 |
-| config | 依赖 | 调用加载配置 |
-| ui | 依赖 | 交互模式下启动 UI |
-| lifecycle | 依赖 | 非交互模式下调用执行 prompt |
-| commands | 间接 | 通过 cli/commands 子模块调用 |
-| bus | 依赖 | 订阅事件进行响应 |
-
-### 依赖方向图
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         cli 模块                             │
-│  ┌────────────┐ ┌────────┐ ┌────────┐ ┌───────────────────┐ │
-│  │bootstrap.ts│ │args.ts │ │error.ts│ │    commands/      │ │
-│  │handlers.ts │ │        │ │exit-   │ │ (Slash 命令处理)  │ │
-│  │            │ │        │ │codes.ts│ │                   │ │
-│  └─────┬──────┘ └───┬────┘ └───┬────┘ └────────┬──────────┘ │
-└────────┼────────────┼──────────┼───────────────┼────────────┘
-         │            │          │               │
-         ▼            ▼          ▼               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     utils (基础设施)                         │
-│         Log  /  IrisError  /  cleanup  /  paths             │
-└─────────────────────────────────────────────────────────────┘
-         │
-         ▼
-┌────────────────┬────────────────┬────────────────────────────┐
-│     config     │       ui       │         lifecycle          │
-│    (配置加载)   │   (交互模式)    │       (非交互执行)          │
-└────────────────┴────────────────┴────────────────────────────┘
-```
-
----
-
-## 八、交互模式 vs 非交互模式
-
-### 模式边界
-
-| 判断条件 | 模式 | 启动行为 | 退出行为 |
-|----------|------|----------|----------|
-| `stdin.isTTY && !args.prompt` | 交互 | 启动 UI REPL | 用户输入 `/exit` 或 Ctrl+C |
-| `args.prompt` 存在 | 非交互 | 执行 prompt | prompt 完成后退出 |
-| `!stdin.isTTY` | 非交互 | 读取 stdin 执行 | 执行完成后退出 |
-
-### 共享逻辑
-
-两种模式共享以下初始化逻辑：
-1. 参数解析
-2. 日志初始化
-3. 异常处理器注册
-4. 配置加载
-5. 核心模块初始化
-
-### 分流点
-
-在初始化完成后，根据 `isInteractive` 标志分流：
-
-```
-初始化流程（共享）
-    │
-    ├── isInteractive = true
-    │       │
-    │       └── startInteractive() → UI.render()
-    │
-    └── isInteractive = false
-            │
-            └── executePrompt() → Lifecycle.run()
-```
-
----
-
-## 九、文档自检
-
-- [x] 可以用一句话说明模块存在的意义
-- [x] 可以清楚回答"这个模块不该做什么"
-- [x] 不存在职责与其他模块明显重叠的风险
-- [x] 所有职责可被测试或验证
-- [x] 设计目标服务于 KISS 和 YAGNI 原则
-- [x] 子模块结构清晰，文档位置明确
+- [x] CLI 的存在意义限定为进程组合根。
+- [x] 明确排除了 slash command 和业务执行。
+- [x] 交互与非交互都通过 SDK 通道。

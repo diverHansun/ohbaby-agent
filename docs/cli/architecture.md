@@ -1,374 +1,128 @@
 # cli 模块 architecture.md
 
-本文档描述 `cli` 模块的内部结构与设计决策。所有内容均服务于 `goals-duty.md` 中定义的设计目标与职责。
+本文档描述 `cli` 模块的内部结构与设计决策。所有内容均服务于 `goals-duty.md` 中定义的职责边界。
 
 ---
 
 ## 一、Architecture Overview（总体架构）
 
-cli 模块采用**扁平化结构 + 中间件模式**，代码简洁直观：
+CLI 采用 composition root 结构：
 
 ```
-命令行输入: ohbaby-agent -p "帮我写一个函数"
-                │
-                ▼
-        ┌───────────────────────────────────────────┐
-        │              args.ts                       │
-        │         解析命令行参数                      │
-        │    { prompt: "帮我写一个函数" }             │
-        └───────────────────┬───────────────────────┘
-                            │
-                            ▼
-        ┌───────────────────────────────────────────┐
-        │            bootstrap.ts                    │
-        │         按顺序初始化各模块                   │
-        │    Log → Handlers → Config → Core         │
-        └───────────────────┬───────────────────────┘
-                            │
-            ┌───────────────┴───────────────┐
-            ▼                               ▼
-    ┌───────────────┐               ┌───────────────┐
-    │  交互模式      │               │  非交互模式    │
-    │startInteractive│              │ executePrompt │
-    │    ↓          │               │      ↓        │
-    │  UI.render()  │               │Lifecycle.run()│
-    └───────────────┘               └───────────────┘
+用户进程: ohbaby [-p "..."]
+        │
+        ▼
+┌─────────────────────────────────────────────────────────┐
+│ packages/ohbaby-agent/src/bin.ts                         │
+│ 1. parse argv / stdin                                    │
+│ 2. create InProcessBackendAdapter → UiBackendClient      │
+│ 3a. interactive → renderTerminalUi({ client })           │
+│ 3b. non-interactive → subscribeEvents + stdout sink      │
+│                      + submitPrompt(...)                 │
+└─────────────────────────────────────────────────────────┘
+        │                                 │
+        ▼                                 ▼
+┌─────────────────────┐        ┌─────────────────────┐
+│ ohbaby-agent backend │        │ ohbaby-tui / stdout  │
+│ CommandService       │        │ frontend surfaces    │
+│ lifecycle/session    │        │ render events        │
+└─────────────────────┘        └─────────────────────┘
 ```
 
-### 文件结构
+CLI 不再包含 `cli/commands` 子模块。旧职责迁移如下：
 
-```
-src/cli/
-├── index.ts          # 模块入口，导出 main()
-├── bootstrap.ts      # 初始化流程编排、stdin 读取
-├── handlers.ts       # 全局异常/信号处理
-├── args.ts           # 参数解析 + isInteractive()
-├── error.ts          # CliArgumentError, CliConfigError
-├── exit-codes.ts     # EXIT_CODES + getExitCodeForError()
-└── commands/         # Slash 命令（复杂度高，保留子目录）
-    ├── index.ts
-    ├── parser.ts
-    ├── renderer.ts
-    └── formatters/
-```
-
-### 主要文件及职责
-
-| 文件 | 职责 |
-|------|------|
-| **index.ts** | 模块入口，导出 main() 函数 |
-| **bootstrap.ts** | 初始化流程编排、模式分流、stdin 读取 |
-| **handlers.ts** | 全局异常处理、信号处理、退出清理 |
-| **args.ts** | 命令行参数解析、模式判断 |
-| **error.ts** | CLI 错误类型定义（继承 IrisError） |
-| **exit-codes.ts** | 退出码常量和 getExitCodeForError() 映射 |
-| **commands/** | Slash 命令解析与渲染（见独立文档） |
+| 原职责 | 新归属 |
+|--------|--------|
+| slash parser | `ohbaby-sdk` 的 `parseSlashInput()` |
+| command resolver | `ohbaby-sdk` 的 `resolveCommand()` |
+| CommandResult 终端渲染 | TUI command runtime 或 stdout renderer |
+| interactive selector | `ohbaby-tui` DialogManager |
+| table/list formatter | surface 私有渲染工具 |
 
 ---
 
-## 二、Design Pattern and Rationale（设计模式与理由）
+## 二、Design Pattern & Rationale（设计模式与理由）
 
-### 1. 中间件模式（Middleware Pattern）
+### 1. Composition Root
 
-**使用理由**：
-- 初始化步骤有明确的顺序依赖
-- 便于在步骤间插入日志或调试信息
-- 单个步骤失败时可清晰定位
+CLI 是唯一组装 backend 与 frontend 的位置。
 
-**实现方式**：
-```typescript
-// bootstrap.ts
-export async function bootstrap(argv: string[]): Promise<void> {
-  // 1. 解析参数
-  const args = parseArgs(argv)
+**理由**：
+- 让 `ohbaby-agent` core 和 `ohbaby-tui` 保持单向依赖 SDK。
+- 方便未来把 in-process adapter 替换为 HTTP/WebSocket adapter。
+- 保持包依赖图清晰，避免 UI/backend 互相 import。
 
-  // 2. 初始化日志
-  await Log.init({ level: 'INFO' })
+### 2. Event Sink
 
-  // 3. 注册异常处理
-  setupExceptionHandlers()
+非交互模式使用 stdout event sink，而不是直接调用 lifecycle。
 
-  // 4. 加载配置
-  const config = await loadConfig()
-
-  // 5. 初始化核心模块
-  await initializeCore(config)
-
-  // 6. 启动模式分流
-  if (isInteractive(args)) {
-    await startInteractive()
-  } else {
-    const prompt = args.prompt ?? await readStdin()
-    await executePrompt(prompt)
-    await runExitCleanup()
-    process.exit(0)
-  }
-}
-```
-
-### 2. 继承模式（Inheritance Pattern）- 错误类
-
-**使用理由**：
-- 复用 `utils/error.ts` 中的 `IrisError` 基类
-- CLI 模块定义自己的错误类型
-- 支持 instanceof 类型检查
-
-**实现方式**：
-```typescript
-// error.ts
-import { IrisError } from '@/utils'
-
-export class CliArgumentError extends IrisError {
-  constructor(message: string, data?: Record<string, unknown>) {
-    super('CLI_ARGUMENT_ERROR', message, data)
-  }
-}
-
-export class CliConfigError extends IrisError {
-  constructor(message: string, data?: Record<string, unknown>) {
-    super('CLI_CONFIG_ERROR', message, data)
-  }
-}
-```
+**理由**：
+- 非交互 CLI 也是一个 UI surface。
+- prompt、command、permission、runtime 事件使用同一协议。
+- 避免出现 TUI 走 SDK、CLI 绕过 SDK 的双轨行为。
 
 ### 3. 未使用的模式
 
-**未使用依赖注入容器**：
-- 依赖关系简单，通过参数传递即可
-- 避免引入额外复杂度
-- KISS 原则
+**未引入顶层 orchestrator 包**：V1 中 `bin.ts` 作为组合根即可。未来如果需要独立发布多个入口，再抽出 thin orchestrator。
 
-**未使用单例模式**：
-- 各模块通过参数接收依赖
-- 便于测试时 mock
+**未保留 cli/commands 子模块**：parser/resolver 已上移 SDK，renderer 属于 surface，继续保留会制造错误依赖。
 
 ---
 
-## 三、各文件详细设计
+## 三、Module Structure & File Layout（模块结构与文件组织）
 
-### bootstrap.ts
+建议结构：
 
-职责：初始化流程编排、模式分流、stdin 读取
-
-```typescript
-// bootstrap.ts (< 100 行)
-export async function bootstrap(argv: string[]): Promise<void>
-async function startInteractive(): Promise<void>
-async function executePrompt(prompt: string): Promise<void>
-async function readStdin(): Promise<string>
 ```
-
-### handlers.ts
-
-职责：全局异常处理、信号处理
-
-```typescript
-// handlers.ts (< 80 行)
-export function setupExceptionHandlers(): void
-export function handleFatalError(error: Error): never
-```
-
-### args.ts
-
-职责：命令行参数解析、模式判断
-
-```typescript
-// args.ts (< 60 行)
-export function parseArgs(argv: string[]): CliArgs
-export function isInteractive(args: CliArgs): boolean
-
-const CLI_OPTIONS = {
-  help: { alias: 'h', type: 'boolean', description: '显示帮助信息' },
-  version: { alias: 'v', type: 'boolean', description: '显示版本号' },
-  prompt: { alias: 'p', type: 'string', description: '非交互模式执行 prompt' },
-}
-```
-
-### error.ts 和 exit-codes.ts
-
-职责：错误类型和退出码管理
-
-```typescript
-// error.ts (< 30 行)
-export class CliArgumentError extends IrisError { ... }
-export class CliConfigError extends IrisError { ... }
-
-// exit-codes.ts (< 40 行)
-export const EXIT_CODES = {
-  SUCCESS: 0,
-  GENERAL_ERROR: 1,
-  ARGUMENT_ERROR: 2,
-  CONFIG_ERROR: 3,
-  AUTH_ERROR: 4,
-  NETWORK_ERROR: 5,
-  USER_INTERRUPT: 130,
-}
-
-export function getExitCodeForError(error: Error): number
+packages/ohbaby-agent/src/
+├── bin.ts                     # 唯一组合根
+├── cli/
+│   ├── args.ts                # argv 解析
+│   ├── stdin.ts               # stdin 读取
+│   ├── exit-codes.ts          # 退出码
+│   ├── errors.ts              # CLI 错误
+│   └── stdout-renderer.ts     # 非交互 event sink
+└── adapters/
+    └── ui-inprocess.ts        # UiBackendClient 实现，连接 CommandService/InteractionBroker/StreamBridge
 ```
 
 ### 对外稳定接口
 
-以下内容构成模块的公共 API：
-- `main()` - 程序主入口
-- `parseArgs()` - 参数解析（供测试使用）
-- `CliArgumentError`、`CliConfigError` - 错误类型
-- `EXIT_CODES` - 退出码常量
+- `bin.ts` 暴露的可执行入口。
+- `parseArgs()` 可作为测试辅助。
+- `EXIT_CODES`。
 
 ### 内部实现
 
-以下内容为内部实现，可自由重构：
-- 初始化步骤的具体顺序
-- 异常处理器的实现细节
-- yargs 配置细节
-- stdin 读取的具体方式
+- stdout renderer 的具体文本格式。
+- stdin 读取方式。
+- signal 处理细节。
+- in-process adapter 如何把 SDK client 方法映射到 backend 内部模块。
 
 ---
 
-## 四、Architectural Constraints and Trade-offs（约束与权衡）
+## 四、Architectural Constraints & Trade-offs（约束与权衡）
 
-### 约束 1: 入口代码行数限制
+### 约束 1: 只有 bin.ts 可跨包组合
 
-**当前选择**：每个文件不超过 100 行
+**当前选择**：允许 `bin.ts` 同时 import backend adapter 和 `ohbaby-tui`。
 
-**代价**：
-- 需要拆分为多个小文件
-- 文件数量增加
+**代价**：`ohbaby-agent` package 的入口层知道 TUI package 的存在。
 
-**理由**：
-- 符合 G1 设计目标（简洁入口）
-- 便于阅读和维护
-- 便于定位问题
+**理由**：这是 composition root 的合理例外，换来 V1 的简单发布模型。
 
-### 约束 2: 最小启动参数
+### 约束 2: 非交互也走 SDK
 
-**当前选择**：MVP 仅支持 `-h`、`-v`、`-p` 三个参数
+**当前选择**：`ohbaby -p` 调用 `client.submitPrompt()` 并消费 events。
 
-**代价**：
-- 部分功能需要通过配置文件或 Slash 命令实现
+**代价**：需要维护一个 stdout event sink。
 
-**理由**：
-- 避免参数膨胀
-- 遵循 YAGNI 原则
-- 未来可按需扩展
+**理由**：所有 surface 共享同一协议，避免业务路径分叉。
 
-### 约束 3: 同步异常处理
+### 约束 3: CLI 不拥有 command grammar
 
-**当前选择**：全局异常处理器立即执行清理并退出
+**当前选择**：删除 `cli/commands` 作为活动设计。
 
-**代价**：
-- 异步清理可能被跳过
+**代价**：旧文档和测试需要迁移。
 
-**理由**：
-- 确保程序能正常退出
-- 避免异常后程序挂起
-
----
-
-## 五、初始化流程详细设计
-
-### 步骤依赖关系
-
-```
-parseArgs ──┬── Log.init ──┬── setupHandlers ──┬── loadConfig ──┬── initCore
-            │              │                   │                │
-            │              │ 需要日志记录      │ 需要日志+异常   │ 需要配置
-            │ 最先执行      │ 异常处理         │ 处理才能安全    │
-            │              │                   │ 加载配置       │
-```
-
-### 异常处理策略
-
-```typescript
-// handlers.ts
-
-export function setupExceptionHandlers(): void {
-  const log = Log.create({ service: 'cli' })
-
-  process.on('unhandledRejection', (reason) => {
-    log.error('Unhandled rejection', { reason })
-    handleFatalError(normalizeError(reason))
-  })
-
-  process.on('uncaughtException', (error) => {
-    log.error('Uncaught exception', { error })
-    handleFatalError(error)
-  })
-
-  process.on('SIGINT', () => {
-    log.info('Received SIGINT')
-    runSyncCleanup()
-    process.exit(EXIT_CODES.USER_INTERRUPT)
-  })
-
-  process.on('SIGTERM', () => {
-    log.info('Received SIGTERM')
-    runSyncCleanup()
-    process.exit(EXIT_CODES.SUCCESS)
-  })
-}
-```
-
----
-
-## 六、模式判断逻辑
-
-```typescript
-// args.ts
-
-export function isInteractive(args: CliArgs): boolean {
-  // 有 prompt 参数 → 非交互
-  if (args.prompt) {
-    return false
-  }
-
-  // stdin 不是 TTY → 非交互（管道输入）
-  if (!process.stdin.isTTY) {
-    return false
-  }
-
-  // 默认交互模式
-  return true
-}
-```
-
----
-
-## 七、与 cli/commands 的关系
-
-`cli/commands` 是 cli 模块的子模块，负责 Slash 命令的解析和渲染。
-
-**调用关系**：
-```
-┌─────────────────────────────────────────────────────────┐
-│                      ui 模块                            │
-│              接收用户输入 "/model list"                  │
-└───────────────────────────┬─────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────┐
-│                   cli/commands 子模块                    │
-│   1. parser 解析: { path: "model list", args: "" }      │
-│   2. 调用 CommandService.execute()                       │
-│   3. renderer 渲染 CommandResult                         │
-└───────────────────────────┬─────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────┐
-│                   commands 模块                          │
-│              执行业务逻辑，返回结果                       │
-└─────────────────────────────────────────────────────────┘
-```
-
-**说明**：cli/commands 的详细设计见 `docs/cli/commands/` 目录下的文档。
-
----
-
-## 八、文档自检
-
-- [x] 每个组件存在的理由可以清楚说明
-- [x] 所有结构可追溯到 goals-duty.md 中的职责
-- [x] 没有为了"优雅"而增加的复杂度
-- [x] 明确说明了被放弃的方案及其代价
-- [x] 架构足够简单，各文件职责清晰
-- [x] 文件行数限制明确
+**理由**：命令语法是跨 surface 契约，应位于 SDK。
