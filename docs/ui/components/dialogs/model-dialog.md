@@ -1,71 +1,81 @@
-# ModelDialog 模型选择弹窗
+# ModelDialog — interaction subject='model' 的选择 renderer
 
 ## 一、职责
 
-ModelDialog 显示可用的 LLM 模型列表，供用户切换当前使用的模型。通过 `/model` 命令触发。
+ModelDialog 渲染 `UiInteractionRequest` 中 `kind='select-one'` 且 `subject='model'` 的请求，供用户选择目标模型。
 
-## 二、视觉结构
+它不是顶层 dialog type，而是 **interaction source 下的 subject renderer**。
 
-```
-+-- Select Model -----------------------+
-|                                       |
-|    gpt-4                              |
-|  > claude-sonnet  (current)           |    ← 焦点项 + 当前使用标记
-|    claude-haiku                       |
-|    gemini-pro                         |
-|                                       |
-+---------------------------------------+
-```
+---
 
-### 列表项显示
-
-每个列表项显示模型名称。当前正在使用的模型显示 `(current)` 后缀标记。焦点项使用 `>` 前缀和高亮样式。
-
-## 三、交互设计
-
-| 按键 | 行为 |
-|------|------|
-| Up / Down | 在模型列表间移动焦点 |
-| Enter | 选中当前焦点模型，调用 `onRespond` |
-| Esc | 取消选择，调用 `onCancel` |
-
-列表使用 shared/ScrollableList 组件，当模型数量超过可见区域时支持滚动。
-
-## 四、数据输入
+## 二、输入数据
 
 ```typescript
-interface ModelDialogData {
-  type: 'model'
-  models: ModelInfo[]            // 可用模型列表
-  currentModel: string           // 当前使用的模型名
+interface ModelDialogProps {
+  request: UiInteractionRequest
+  onRespond: (response: UiInteractionResponse) => void
+  onCancel: () => void
 }
 ```
 
-数据来源：
-- `models` 列表来自 provider 模块提供的可用模型列表
-- `currentModel` 来自 ConfigContext.modelName
+要求：
+- `request.kind === 'select-one'`
+- `request.subject === 'model'`
+- `request.options` 包含可选模型项
+
+---
+
+## 三、视觉结构
+
+- 标题：优先使用 `request.prompt`；没有时回退为 `Select Model`。
+- 列表项：来自 `request.options`。
+- 当前模型标记：若 options 文本中包含当前状态说明可直接显示；若后续 SDK 为 option 增加 `current` 元数据，可用 `(current)` 标记。
+
+ModelDialog 不从 runtime 直接拉取模型列表或当前模型信息；这些都应由 backend 在 `interaction.requested` 的 options 中准备好。
+
+---
+
+## 四、交互设计
+
+| 按键 | 行为 |
+|---|---|
+| Up / Down | 在模型列表间移动焦点 |
+| Enter | 选中当前焦点模型，调用 `onRespond({ kind: 'accepted', choiceId })` |
+| Esc | 取消选择，调用 `onCancel()` |
+
+列表可以使用 shared/ScrollableList 组件，当选项过多时支持滚动。
+
+---
 
 ## 五、响应值
 
 ```typescript
-// onRespond 的参数
-interface ModelDialogResult {
-  selectedModel: string          // 用户选择的模型名
-}
+onRespond({ kind: 'accepted', choiceId: selectedOptionId })
 ```
 
-请求方（/model 命令处理逻辑）接收到响应后，调用 config/llm 模块的接口切换模型。
+具体 option id 到 provider/model 的映射由 backend 解释，UI 只回传 choiceId。
 
-## 六、设计约束
+---
 
-1. **不直接切换模型**：只返回用户选择，由命令处理逻辑执行切换
-2. **列表数据外部提供**：ModelDialog 不查询模型列表，通过 Props 接收
-3. **打开时焦点定位到当前模型**：初始 selectedIndex 指向 currentModel 对应项
+## 六、触发方式说明
 
-## 七、文档自检
+ModelDialog 的打开时机由 backend 决定：当用户执行 `/model` 或其他需要模型选择的命令时，backend 发布 `interaction.requested { kind: 'select-one', subject: 'model' }`，TUI 才渲染本组件。
 
-- [x] 视觉结构已定义（标题 + 列表 + current 标记）
-- [x] 交互规则符合统一规范（Up/Down + Enter + Esc）
-- [x] 数据来源已说明
-- [x] 响应值类型已定义
-- [x] 使用 ScrollableList 组件
+TUI 不本地决定 `/model` Enter 是否打开 selector。
+
+---
+
+## 七、设计约束
+
+1. **不直接切换模型**：只返回 `choiceId`，由 backend 恢复命令后执行切换。
+2. **列表数据完全来自 `request.options`**：不查询 provider/runtime。
+3. **属于 interaction renderer**：不作为顶层 dialog source 出现。
+
+---
+
+## 八、文档自检
+
+- [x] 已重定位为 interaction subject renderer。
+- [x] 数据来源从 backend 列表查询改为 `request.options`。
+- [x] 响应值改为 SDK `UiInteractionResponse`。
+- [x] 已明确 TUI 不本地决定打开时机。

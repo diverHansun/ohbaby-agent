@@ -57,10 +57,10 @@ components/
 ## 四、组件间依赖关系
 
 ```
-StatusBar ← ConfigContext, SessionContext
+StatusBar ← TuiStore.useRuntime()
 Prompt ← useInput, useHistory, useKeypress
 DialogManager ← AppStateContext, AppActionsContext
-MessageList ← SessionContext, shared/VirtualizedList
+MessageList ← TuiStore.useMessages(), shared/VirtualizedList
 LoadingIndicator ← AppStateContext, shared/Spinner
 ```
 
@@ -79,8 +79,8 @@ LoadingIndicator ← AppStateContext, shared/Spinner
 ## 六、设计原则
 
 1. **渲染与逻辑分离**：组件只负责数据渲染和用户交互收集，业务逻辑封装在 hooks 中
-2. **单向数据流**：数据从 Context 流向组件，事件通过回调向上传递
-3. **最小化 Context 依赖**：每个组件只读取自身需要的 Context 字段
+2. **单向数据流**：SDK 投影数据从 TuiStore selector 流向组件，UI 控制状态从 Context 流向组件，事件通过回调向上传递
+3. **最小化依赖**：每个组件只读取自身需要的 selector 或 Context 字段
 4. **shared 组件零 Context**：通用基础组件不依赖任何业务 Context，通过 Props 接收数据
 
 ## 七、文档自检

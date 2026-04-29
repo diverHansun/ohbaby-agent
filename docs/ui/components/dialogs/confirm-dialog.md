@@ -1,79 +1,68 @@
-# ConfirmDialog 通用确认弹窗
+# ConfirmDialog — interaction kind='confirm' 的通用 renderer
 
 ## 一、职责
 
-ConfirmDialog 用于需要用户确认的通用操作场景，提供简单的二选一（确认/取消）交互。它是最简单的弹窗类型，优先级为 normal。
+ConfirmDialog 渲染 `UiInteractionRequest` 中 `kind='confirm'` 的通用确认请求，提供简单的二选一（确认/取消）交互。
 
-## 二、视觉结构
+它不是顶层 dialog type，而是 **interaction source 下的 kind renderer**。
 
+---
+
+## 二、输入数据
+
+```typescript
+interface ConfirmDialogProps {
+  request: UiInteractionRequest
+  onRespond: (response: UiInteractionResponse) => void
+  onCancel: () => void
+}
 ```
-+-- Clear Session? ---------------------+
-|                                       |
-|  This will clear all messages in      |
-|  the current session.                 |
-|                                       |
-+---------------------------------------+
-|  > Confirm                            |    ← 焦点项
-|    Cancel                             |
-+---------------------------------------+
-```
 
-### 信息展示
+要求：
+- `request.kind === 'confirm'`
+- `request.prompt` 作为标题或主体说明
 
-- **标题**：由 `data.title` 提供
-- **消息**：由 `data.message` 提供，支持多行文本
-- **选项**：两个固定选项，文本可自定义
+如果 backend 未来为 confirm 提供标准化的确认/取消按钮文案，可通过 `request.options` 承载；否则本组件使用默认文本 `Confirm` / `Cancel`。
 
-## 三、交互设计
+---
+
+## 三、视觉结构
+
+- 标题：若 `request.subject` 存在，可作为语义标题；否则回退为 `Confirm`。
+- 消息：使用 `request.prompt`。
+- 选项：两个固定选项（Confirm / Cancel），除非 `request.options` 明确提供替代文本。
+
+---
+
+## 四、交互设计
 
 | 按键 | 行为 |
-|------|------|
+|---|---|
 | Up / Down | 在确认和取消之间切换焦点 |
-| Enter | 确认当前焦点选项 |
-| Esc | 等同于选择取消 |
+| Enter | 选择当前焦点项 |
+| Esc | 调用 `onCancel()` |
 
-## 四、数据输入
-
-```typescript
-interface ConfirmDialogData {
-  type: 'confirm'
-  title: string                  // 弹窗标题
-  message: string                // 描述信息
-  confirmText?: string           // 确认按钮文本，默认 "Confirm"
-  cancelText?: string            // 取消按钮文本，默认 "Cancel"
-}
-```
-
-## 五、响应值
+确认时调用：
 
 ```typescript
-// onRespond 的参数
-interface ConfirmDialogResult {
-  confirmed: boolean             // true = 确认, false = 取消
-}
+onRespond({ kind: 'accepted', choiceId: 'confirm' })
 ```
 
-选择确认选项或按 Enter 时：`onRespond({ confirmed: true })`
-选择取消选项或按 Esc 时：`onRespond({ confirmed: false })`
+如果 backend 提供了显式 option id，则使用该 option id。
 
-## 六、使用场景
+---
 
-| 场景 | title | message |
-|------|-------|---------|
-| 清空会话 | "Clear Session?" | "This will clear all messages..." |
-| 退出确认 | "Exit?" | "Are you sure you want to exit?" |
+## 五、设计约束
 
-## 七、设计约束
+1. **不直接执行操作**：只回传确认结果，由 backend 恢复命令后决定后续动作。
+2. **属于 interaction renderer**：不作为顶层 dialog source 出现。
+3. **默认文本可回退**：当 request 未提供细化选项时，使用内置 Confirm/Cancel 文本。
 
-1. **固定两个选项**：不支持自定义选项数量
-2. **默认焦点在确认**：打开时focusIndex = 0（Confirm）
-3. **文本可自定义**：确认/取消按钮文本可通过 Props 自定义
-4. **无 ScrollableList**：只有两个选项，不需要滚动
+---
 
-## 八、文档自检
+## 六、文档自检
 
-- [x] 视觉结构已定义
-- [x] 交互规则符合统一规范（Up/Down + Enter + Esc）
-- [x] 数据类型和响应值已定义
-- [x] 使用场景已列举
-- [x] 与 data-model.md 中的 ConfirmDialogData 类型一致
+- [x] 已重定位为 interaction kind renderer。
+- [x] 输入数据改为 SDK `UiInteractionRequest`。
+- [x] 响应值改为 SDK `UiInteractionResponse`。
+- [x] 不再直接引用旧 `ConfirmDialogData` 类型。
