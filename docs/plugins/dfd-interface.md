@@ -9,7 +9,7 @@
 ### 1.1 模块位置
 
 ```
-   CLI / TUI / SDK
+   commands / TUI / SDK
         │  (inspect / install / enable / disable / uninstall / reload)
         ▼
 ┌───────────────────────────────────────────────────────────────────┐
@@ -27,9 +27,9 @@
 
 | 模块 | 交互方向 | 接口形式 | 说明 |
 |------|----------|----------|------|
-| **cli/commands** | 调用 plugins | PluginManager public API | `/plugin install` 等命令的控制器 |
-| **ohbaby-tui** | 调用 plugins | PluginManager public API | 插件管理 UI 面板 |
-| **SDK** | 调用 plugins | PluginManager public API | 程序化插件管理 |
+| **commands** | 调用 plugins | PluginManager public API | `/plugin install` 等命令的 backend 控制器 |
+| **ohbaby-tui** | 间接触发 | SDK command invocation | 插件管理 UI 面板和交互 |
+| **SDK** | 间接承载 | DTO / command invocation | 程序化插件管理的协议承载 |
 | **config/plugins** | plugins 调用 | loadPluginSettings / savePluginSettings | 持久化 PluginInstallRecord |
 | **skill** | plugins 调用（Dispatcher） | PluginSkillTarget 窄接口 | 注册 / 注销 plugin skills |
 | **agents** | plugins 调用（Dispatcher） | PluginAgentTarget 窄接口 | 注册 / 注销 plugin agents |
