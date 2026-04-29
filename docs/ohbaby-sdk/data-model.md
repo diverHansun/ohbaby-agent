@@ -67,7 +67,7 @@ SDK 本身不管理这些对象的生命周期。生命周期归 backend 或 UI 
 |------|------|
 | `interactionId` | backend 生成的交互 ID |
 | `clientInvocationId` | 对应的命令提交 ID，可选 |
-| `kind` | `select` / `confirm` / `input` |
+| `kind` | `select-one` / `select-many` / `confirm` / `text-input` |
 | `subject` | `model` / `session` / `permission-policy` 等语义主题 |
 | `options` | 可选项数据，由 UI 自行渲染 |
 
