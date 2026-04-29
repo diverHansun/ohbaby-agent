@@ -37,7 +37,7 @@
 **详细说明**：见 `docs/project/goals-duty.md`
 
 **特点**：
-- 项目 ID 由 Project 模块动态生成，不持久化
+- 项目 ID 由 Project 模块动态生成；session 模块会把结果固化到 `session.project_id`，但不维护独立 Project 记录
 - 同一个 Git 仓库在任意位置产生相同的项目 ID
 - Session 模块通过调用 `Project.fromDirectory()` 获取 projectId
 
@@ -92,7 +92,7 @@ interface Session {
 
 interface SessionStats {
   messageCount: number          // 消息总数
-  lastMessageAt: number         // 最后一条消息的时间戳
+  lastMessageAt?: number        // 最后一条消息的时间戳；尚无消息时为空
 }
 
 type SessionStatus = 'active' | 'archived'
@@ -103,16 +103,38 @@ type SessionStatus = 'active' | 'archived'
 | 字段 | 含义 | 备注 |
 |------|------|------|
 | id | 会话唯一标识 | 全局唯一，包含时间戳便于排序 |
-| projectId | 所属项目 | 用于按项目分目录存储 |
+| projectId | 所属项目 | 用于 database 查询、过滤和排序 |
 | title | 会话标题 | 默认"New session - 日期"，用户可编辑 |
 | agentName | Agent 名称 | 记录使用哪个 Agent 进行对话 |
 | createdAt | 创建时间 | 不可变 |
 | updatedAt | 更新时间 | 每次 touch() 或修改时更新 |
 | status | 会话状态 | active 表示活跃，archived 表示归档 |
-| stats | 统计信息 | 由 Conversation 模块触发更新 |
+| stats | 统计信息 | 由 lifecycle/message 写入路径触发更新 |
 | parentId | 父会话（可选） | 子代理会话必填，指向主会话 |
 | childrenIds | 子会话列表（可选） | 主会话的子代理会话 ID 列表 |
-| isSubagent | 是否为子代理会话 | 显式标记，便于查询和识别 |
+| isSubagent | 是否为子代理会话 | 显式标记，便于展示和识别 |
+
+### 关系型列 vs data JSON 列
+
+Session 在 TypeScript 中是一个完整领域对象，但落库时会按查询需求拆分为关系型列和 `data` JSON 列。规则与 `docs/services/database/data-model.md` 中的“关系型列 vs JSON 列”原则一致：需要 `WHERE`、`ORDER BY`、索引或外键的字段进入独立列；不参与 SQL 查询、主要用于扩展的字段进入 `data` JSON。
+
+| Session 字段 | database 存储位置 | 理由 |
+|--------------|-------------------|------|
+| `id` | `session.id` | 主键，按 sessionId 直接查询 |
+| `projectId` | `session.project_id` | 按项目过滤会话列表 |
+| `agentName` | `session.agent` | 可按 agent 过滤或展示 |
+| `parentId` | `session.parent_id` | 支持子会话查询和父子关系 |
+| `title` | `session.title` | 列表展示和标题编辑 |
+| `status` | `session.status` | active / archived 过滤 |
+| `createdAt` | `session.created_at` | 创建时间排序和审计 |
+| `updatedAt` | `session.updated_at` | 最近会话排序 |
+| `stats.messageCount` | `session.message_count` | 列表快速展示和统计 |
+| `stats.lastMessageAt` | `session.last_message_at` | 最近活动排序和展示 |
+| `childrenIds` | `session.data.childrenIds` | 不作为主查询条件，保留结构弹性 |
+| `isSubagent` | `session.data.isSubagent` | 派生/展示字段，暂不建立索引 |
+| 未来扩展字段 | `session.data.*` | 避免为低频字段频繁迁移 schema |
+
+**设计约束**：如果未来某个 `data` 字段开始参与高频查询或排序，应通过 database migration 提升为关系型列，而不是在 JSON 中做全表扫描。
 
 ---
 
@@ -132,8 +154,8 @@ type SessionStatus = 'active' | 'archived'
 使用中（active）
     │
     ├── lifecycle 模块根据 sessionId 执行对话
-    ├── Conversation 模块写入消息
-    ├── Conversation 调用 incrementStats() 更新统计
+    ├── message 模块写入消息
+    ├── lifecycle/session 协作调用 incrementStats() 更新统计
     ├── 调用 touch() 更新 updatedAt
     │
     ▼
@@ -147,7 +169,7 @@ type SessionStatus = 'active' | 'archived'
 | 数据 | 创建者 | 管理者 | 说明 |
 |------|--------|--------|------|
 | Session 元数据 | SessionManager | SessionManager | 完全由 session 模块管理 |
-| projectId | ProjectIdentifier | SessionManager | 创建时计算并固化 |
+| projectId | Project 模块 | SessionManager | 创建时通过 `Project.fromDirectory()` 获取并固化 |
 | stats | SessionManager | lifecycle 触发更新 | 初始化由 session，更新由外部触发 |
 | 消息内容 | Message 模块 | Message 模块 | session 模块不涉及 |
 
@@ -203,7 +225,7 @@ async function getProjectId(directory: string): Promise<string> {
 | agentName | 可变 | 理论上可切换 Agent |
 | updatedAt | 自动更新 | 任何修改都会更新此字段 |
 | status | 可变 | active ↔ archived |
-| stats | 自动更新 | 由 Conversation 触发更新 |
+| stats | 自动更新 | 由 lifecycle/message 写入路径触发更新 |
 
 ---
 
