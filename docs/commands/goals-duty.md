@@ -3,294 +3,151 @@
 本文档定义 `commands` 模块的设计目标与职责边界。
 
 **模块位置**：
-- 代码：`src/commands/`
+- 代码：`packages/ohbaby-agent/src/commands/`
 - 文档：`docs/commands/`
 
 ---
 
 ## 一、模块定位
 
-**一句话说明**：commands 模块负责命令发现、管理和执行，通过 CommandService + Loader 模式组织命令，是各功能模块的协调者和统一入口。
+**一句话说明**：commands 模块是 backend 内部的命令目录与执行服务，负责组装 command catalog、分类、可见性、业务校验和执行，并通过后端命令事件回流语义化结果。
 
 **如果没有这个模块**：
-- CLI 层需要直接调用多个功能模块，耦合严重
-- 命令逻辑散落在各处，难以复用
-- 未来 UI 层（Web/Extension）无法复用命令逻辑
-- 命令执行结果缺乏统一的事件通知机制
-- 无法统一管理内置命令和扩展命令
+- 内置命令、用户命令、MCP prompt、skill/plugin 命令会散落在各处。
+- UI surface 无法获得统一的 command catalog 和补全元数据。
+- 命令执行无法复用 backend 的 session、model、permission、lifecycle 等能力。
+- 命令结果和 interaction 无法经由统一事件协议回流到 SDK surface。
 
 ---
 
 ## 二、Design Goals（设计目标）
 
-### G1: 业务聚合
+### G1: Backend Command Source of Truth
 
-作为各功能模块的协调者，聚合调用并编排业务流程。每个命令的实现应聚焦于"协调哪些模块、按什么顺序"，而非"如何实现具体功能"。
+Backend 是 command catalog 的唯一真源，负责命令注册、分类、可见性、alias 唯一性和执行入口。
 
-### G2: 接口无关
+### G2: Surface Agnostic
 
-不依赖 CLI/UI 的具体实现，可被 CLI、Web、VS Code Extension 等多端复用。命令逻辑不应包含任何终端输出、颜色渲染或交互式 UI 代码。
+命令逻辑不依赖 TUI、stdout、remote 或 IM channel。它只返回或发布语义化结果，不输出终端文本，不指定 UI 组件名。
 
-### G3: 事件驱动
+### G3: Event-Driven Result Flow
 
-命令执行完成后通过 Bus 发布事件，支持 UI 层和其他模块响应命令执行结果。遵循现有 Bus 模块的设计模式（见 `docs/bus`）。
+命令提交后，handler 不同步返回业务结果，而是通过 `CommandRunContext` 发布后端内部事件：`Commands.Event.Started`、`Commands.Event.ResultDelivered`、`Commands.Event.Failed`。`daemon/command-events.ts` 再把这些事件投递到 stream-bridge 的 app scope，并在 SDK 侧呈现为 `command.started`、`command.result.delivered`、`command.failed`。
 
-### G4: 结构化返回
+需要用户选择、确认或输入时，handler 调用 `runtime/interaction-broker`，broker 发布 `Interaction.Event.Requested`，最终在 SDK 侧呈现为 `interaction.requested`。
 
-返回结构化的命令执行结果，由调用层（CLI/UI）决定如何渲染。不直接输出字符串，而是返回可被解析的数据对象。
+### G4: Clear Parameter Boundary
 
-### G5: 简单直接
+SDK 负责词法解析并提供 `rawArgs`/`argv`；commands 负责领域参数校验和业务错误。V1 不要求 SDK 执行 schema 校验。
 
-每个命令实现简单直接，遵循 KISS 原则。避免过度抽象，不引入不必要的中间层或设计模式。
+### G5: Conservative Execution
+
+命令执行必须 exact catalog match。补全可以智能，执行不做 `/model xxx -> /model switch xxx` 这类推断。
 
 ---
 
 ## 三、Duties（职责）
 
-### D1: Model 命令
+### D1: Command catalog 组装
 
-提供模型相关操作：
-- 获取当前模型信息
-- 列出所有可用模型
-- 切换当前使用的模型
+从内置命令、用户命令、MCP prompt、skill/plugin 等来源加载命令，生成 `UiCommandSpec[]`。
 
-调用模块：`Provider` (config)
+V1 至少包含内置命令；其他 loader 可预留但不强制实现。
 
-### D2: Init 命令
+### D2: 命令分类与可见性
 
-生成项目初始化的 Prompt 模板，用于创建 OHBABY.md 文件。模板存放于 `src/commands/template/` 目录。
+为每个命令声明：
+- canonical `id` 和 `path`。
+- `category`。
+- `description` 和 `argsHint`。
+- `source`。
+- `surfaces`。
+- `aliases`。
+- parent command 默认行为。
 
-调用模块：`Template`（内部子模块）
+### D3: Alias 管理
 
-### D3: MCP 命令
+支持 alias，但 alias 只能来自 catalog。commands 模块必须保证 alias 全局唯一，不允许一个 alias 指向多个命令。
 
-提供 MCP 服务器管理操作：
-- 列出已配置的 MCP 服务器及状态
-- 执行 OAuth 认证流程
-- 刷新（重启）所有 MCP 服务器
+### D4: 命令执行
 
-调用模块：`MCP`
+接收已 resolved 的 `UiCommandInvocation`，执行对应 backend command handler。
 
-### D4: Agents 命令
+命令执行期间可以调用 session、message、model provider、permission、MCP、memory、context、lifecycle 等 backend 服务。
 
-提供代理和策略管理操作：
-- 列出所有主代理和子代理
-- 切换 Policy 模式（Ask/Plan/Agent）
+### D5: 语义化 interaction
 
-调用模块：`Agent`、`Policy`
+当命令需要用户输入时，通过 `runtime/interaction-broker` 请求语义化 interaction：
+- `/model` 和 `/model switch` 无参数时可请求 `select-one:model`。
+- `/session` 和 `/session choose` 无参数时可请求 `select-one:session`。
+- backend 不指定 `ModelDialog` 或 `SessionDialog` 这类 UI 组件名。
 
-### D5: Session 命令
+### D6: 参数校验
 
-提供会话管理操作：
-- 列出当前项目的会话列表
-- 选择并切换到指定会话
-- 创建新会话（清除当前上下文）
+根据命令语义校验 `argv` 或 `rawArgs`，并在失败时发布 `command.failed`，错误码如 `INVALID_ARGS`。
 
-调用模块：`Session`、`Message`
+### D7: 后端事件发布
 
-### D6: Status 命令
+命令执行必须通过 `CommandRunContext` 发布后端内部事件。commands 不直接调用 stream-bridge，不直接构造 TUI 输出，也不直接面向 SDK client 写入事件流。
 
-聚合系统状态信息，供用户主动查询详细状态：
-- 当前模型名称和提供商
-- API 连通性状态（包含延迟）
-- 当前模式和 Agent 状态
-- MCP 服务器状态
-- 会话信息（名称、消息数）
-- Context 使用情况（当前 tokens / context limit，百分比，剩余可用）
+事件翻译职责位于 `runtime/daemon/command-events.ts`：它订阅 `Commands.Event.*` 和 `Interaction.Event.*`，发布到 stream-bridge 的 app scope。Bus 事件不得直接暴露给 UI。
 
-调用模块：`Provider`、`MCP`、`Policy`、`Session`、`Context`
+### D8: 内置命令族
 
-**说明**：
-- `/status` 命令返回详细的结构化数据，由 CLI 层渲染输出
-- 与 StatusBar（状态栏）不同，StatusBar 始终显示简化信息于界面底部
-- Context 显示格式：`"12.5k / 128k (10%)"` 表示当前用量、限制和使用百分比
+V1 内置命令族：
 
-### D7: Help 命令
-
-获取所有可用命令的帮助信息：
-- 命令名称
-- 命令描述
-- 子命令列表
-- 按 category 分组展示
-
-调用模块：CommandService（命令注册表）
-
-### D8: Tools 命令
-
-列出所有可用工具：
-- 内置工具（定义于 `tools` 模块）
-- MCP 工具（来自 MCP 服务器）
-
-调用模块：`Tools`、`MCP`
-
-### D9: Approval-Mode 命令
-
-查看和设置审批模式：
-- 获取当前审批模式
-- 切换审批模式
-
-调用模块：`Permission`、`Policy`
-
-### D10: Memory 命令
-
-管理 OHBABY.md 记忆文件：
-- `add`: 手动添加新记忆（支持项目级/全局级）
-- `refresh`: 强制重新加载记忆文件（在手动编辑文件后使用）
-
-注意：Memory 模块不提供 remove/update 的 CLI 命令，鼓励用户直接编辑 OHBABY.md 文件或通过 AI 完成这些操作。
-
-调用模块：`Memory`（代码: `src/core/memory/`）
-
-### D11: Stats 命令
-
-聚合 Token 使用和会话统计：
-- 会话数量
-- 消息数量
-- Token 使用量（input/output/cache）
-- 工具使用统计
-
-调用模块：`Session`、`Message`
-
-### D12: Exit 命令
-
-执行清理并退出：
-- 通知相关模块进行清理
-- 返回退出信号
-
-调用模块：无特定模块
-
-### D13: 事件发布
-
-命令执行完成后，通过 Bus 发布 `Command.Event.Executed` 事件，包含：
-- 命令名称
-- 执行参数
-- 执行结果
-- 会话 ID
-
-调用模块：`Bus`
-
-### D14: Abort 命令
-
-中断当前正在执行的循环：
-- 检查指定 sessionId 是否正在执行
-- 调用 `Lifecycle.cancel(sessionId)` 触发中断
-- 返回中断结果（成功/无循环在运行）
-
-调用模块：`Lifecycle`
-
-**注意**：这是一个"命令"而非"快捷键"。CLI 层在检测到双击 Ctrl+C 后调用此命令。
-
-### D15: CommandService 管理
-
-提供命令发现、注册和执行的核心服务：
-
-**命令发现**：
-- 通过 ICommandLoader 接口加载命令
-- V1 只实现 BuiltinLoader（内置命令）
-- 架构预留 FileLoader、McpPromptLoader 扩展点（V2）
-
-**命令执行**：
-- 解析子命令路径（如 "model switch" → 在 model 下找 switch）
-- 执行叶子命令的 action 函数
-- 无参数且有子命令时，返回子命令帮助信息
-
-**命令建议**：
-- 使用 Levenshtein 距离匹配相似命令
-- 未知命令时提供建议（如 "mdoel" → 建议 "/model"）
-
-调用模块：`loaders/*`（内部子模块）
-
-### D16: 延后实现的功能（V2）
-
-以下功能在 V1 版本中不实现，但架构已预留扩展点：
-- FileLoader：用户自定义命令（TOML 格式）
-- McpPromptLoader：MCP Prompt 命令
-- Tab 补全：子命令树结构支持，UI 层实现
-
-### D17: Compact 命令
-
-压缩当前会话上下文：
-- 调用 `Context.compress(sessionId, true)` 执行压缩
-- 返回压缩结果（成功/跳过/失败）
-- 显示压缩前后的 token 统计（压缩了多少、节省了多少）
-
-调用模块：`Context`
+| 分类 | 命令 |
+|------|------|
+| model | `/model`, `/model list`, `/model current`, `/model switch <provider> <model-id>` |
+| session | `/session`, `/session list`, `/session choose [id]`, `/session clear` |
+| mcp | `/mcp list`, `/mcp auth [name]`, `/mcp refresh` |
+| agents | `/agents list`, `/agents mode [mode]` |
+| memory | `/memory show`, `/memory add [--project|--global] <content>`, `/memory refresh` |
+| system | `/init`, `/status`, `/compact`, `/tools`, `/approval-mode [mode]`, `/stats`, `/exit`, `/abort` |
 
 ---
 
 ## 四、Non-Duties（非职责）
 
-### N1: 不负责参数解析
+### N1: 不负责 slash 词法解析
 
-命令行参数的解析由 CLI Commands 模块负责。commands 模块接收已解析的结构化参数对象。
+`parseSlashInput()` 和 `resolveCommand()` 属于 `ohbaby-sdk`。commands 不解析原始输入框文本。
 
-### N2: 不负责输出渲染
+### N2: 不负责 UI 渲染
 
-终端输出的格式化、颜色、表格渲染由 CLI Commands 模块负责。commands 模块只返回结构化数据。
+commands 不输出表格、颜色、列表、dialog 或 picker。UI surface 决定如何渲染 SDK 事件。
 
-### N3: 不负责交互式 UI
+### N3: 不负责 provider alias
 
-确认框、选择列表、进度条等交互式 UI 由 CLI Commands 模块或 Permission 模块负责。
+模型切换中，`provider` 不允许 alias。commands 只接受 canonical provider，输入大小写不敏感，canonical 输出全小写。
 
-### N4: 不负责具体功能实现
+### N4: 不负责模型选择 UI
 
-具体的功能实现由各功能模块负责。commands 模块只做协调调用，不实现业务细节。
+commands 只请求 `interaction.requested { kind: "select-one", subject: "model" }`。模型选择器由 TUI 实现。
 
-### N5: 不维护命令历史
+### N5: 不维护输入历史
 
-用户的命令输入历史由调用层（CLI/UI）维护，commands 模块不持有状态。
+命令历史、输入框状态、Tab 补全 UI 属于 frontend surface。
 
-### N6: 不负责持久化
+### N6: 不直接暴露内部 Bus
 
-命令执行过程中的数据持久化由各功能模块负责（如 Session、Message）。
-
----
-
-## 五、设计约束与假设
-
-### 约束
-
-1. **依赖 Bus 模块**：事件发布通过 Bus 模块实现
-2. **无状态设计**：commands 模块不持有任何状态，每次调用独立执行
-3. **同步返回**：命令执行完成后同步返回结果，不使用回调或事件返回结果
-
-### 假设
-
-1. 各功能模块已正确实现并可被调用
-2. Bus 模块已正确实现事件发布订阅机制
-3. 调用方（CLI/UI）会正确处理返回的结果对象
+commands 可以使用 backend 内部 Bus，但 UI 只能看到 SDK 事件。
 
 ---
 
-## 六、与其他模块的关系
+## 五、硬性依赖规则
 
-| 模块 | 代码位置 | 关系 | 调用接口 | 用途 |
-|------|----------|------|----------|------|
-| CLI Commands | `src/cli/commands/` | 被依赖 | `CommandService.execute()` | 调用命令执行 |
-| CLI Commands | `src/cli/commands/` | 被依赖 | `CommandService.getCommands()` | 获取命令列表 |
-| CLI Commands | `src/cli/commands/` | 被依赖 | `CommandService.findCommand()` | 查找命令（含建议） |
-| Bus | `src/bus/` | 依赖 | `Bus.publish()` | 发布 `Commands.Event.Executed` |
-| Session | `src/services/session/` | 依赖 | `SessionManager.get/create/getByProject` | Session 命令 |
-| Message | `src/services/message/` | 依赖 | `MessageManager.getMessages` | session.choose |
-| Context | `src/core/context/` | 依赖 | `Context.compress()` | Compact 命令 |
-| MCP | `src/mcp/` | 依赖 | `McpManager.getStatus/getAllTools` | MCP/Tools 命令 |
-| Policy | `src/policy/` | 依赖 | `Policy.getMode/setMode` | agents.mode |
-| Agent | `src/agents/` | 依赖 | `AgentManager.list/get` | agents.list |
-| Provider | `src/config/` | 依赖 | `Provider.listModels/switchModel` | Model 命令 |
-| Permission | `src/permission/` | 依赖 | `Permission.getApprovalMode` | approval-mode |
-| Tools | `src/tools/` | 依赖 | `ToolRegistry.getAll` | tools |
-| Memory | `src/core/memory/` | 依赖 | `Memory.add/refresh` | Memory 命令 |
-| Lifecycle | `src/core/lifecycle/` | 依赖 | `Lifecycle.cancel/isRunning` | Abort 命令 |
-
-**详细接口定义见** `docs/commands/dfd-interface.md`
+1. commands 不得 import `ohbaby-tui`。
+2. commands 不得依赖 TUI dialog 名称。
+3. commands 输出必须能被 TUI、stdout、remote/headless surface 消费。
+4. command catalog 中的 `provider` 参数不支持 alias。
+5. model-id 可以支持 provider 内 alias，但执行结果和状态存储必须使用 canonical model id。
+6. commands 不得 import `runtime/stream-bridge`；事件只能通过内部 event sink/Bus 进入 daemon 翻译层。
 
 ---
 
-## 七、文档自检
+## 六、文档自检
 
-- [x] 可以用一句话说明模块存在的意义
-- [x] 可以清楚回答"这个模块不该做什么"
-- [x] 不存在职责与其他模块明显重叠的风险
-- [x] 所有职责可被测试或验证
-- [x] 设计目标服务于 KISS 和 YAGNI 原则
-- [x] 延后实现的功能已明确标注
+- [x] commands 的职责限定为 backend catalog 和执行。
+- [x] SDK parser 与 UI renderer 均排除在外。
+- [x] interaction 使用语义而非 UI 组件名。
