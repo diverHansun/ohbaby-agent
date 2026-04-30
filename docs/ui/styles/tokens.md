@@ -52,6 +52,19 @@ export interface SemanticTokens {
     assistant: string    // AI 响应标识
     system:    string    // 系统消息标识
   }
+
+  dialog: {
+    // SelectableList 行级 tone 映射（对应 SelectableListOption.tone）
+    toneDefault:  string  // tone='default' — 普通行文本
+    toneMuted:    string  // tone='muted'   — 弱化行（不可用、过时但可见）
+    toneAccent:   string  // tone='accent'  — 强调行（推荐项）
+    toneWarning:  string  // tone='warning' — 警告行（弃用提示等）
+    toneDanger:   string  // tone='danger'  — 危险行（删除二次确认整行变色）
+
+    // SelectableList 交互状态
+    focusBg:      string  // 焦点行背景色（整行 inverse 高亮）
+    currentMark:  string  // current 标记（● / ✓）的颜色
+  }
 }
 ```
 
@@ -105,6 +118,17 @@ export const darkTokens: SemanticTokens = {
     assistant: palette.blue,
     system:    palette.yellow,
   },
+
+  dialog: {
+    toneDefault:  palette.white,
+    toneMuted:    palette.gray500,
+    toneAccent:   palette.blue,
+    toneWarning:  palette.yellow,
+    toneDanger:   palette.red,
+
+    focusBg:      palette.gray700,   // 整行高亮背景（足够深但不刺眼）
+    currentMark:  palette.green,     // ● 与 text.primary 区分，用绿色突出
+  },
 }
 ```
 
@@ -112,7 +136,7 @@ export const darkTokens: SemanticTokens = {
 
 ## 四、语义分组设计理由
 
-### 为什么 6 个分组？
+### 为什么 7 个分组？
 
 每个分组对应一类 UI 关注点，按组件文档中出现的颜色引用归纳得出：
 
@@ -124,6 +148,7 @@ export const darkTokens: SemanticTokens = {
 | ui | StatusBar, Collapsible 等 | 通用 UI 元素颜色（边框/高亮/弱化） |
 | status | MessageList, StatusBar | 通用状态颜色，用于 info 类消息和状态指示 |
 | message | MessageList | 消息来源角色的颜色标识 |
+| dialog | SelectableList, ModelDialog, SessionDialog | tone 五值 + 焦点背景 + current 标记颜色 |
 
 ### 为什么允许重复映射？
 
@@ -161,13 +186,21 @@ diff 视图中添加/删除行密集出现，使用饱和度较低的 greenSoft 
 | Collapsible：标题 dimColor | `text.secondary` |
 | Spinner：默认蓝色 | `status.info` |
 | MessageList：info.kind 不同颜色 | `status.*` |
+| SelectableList：普通行文本 | `dialog.toneDefault` |
+| SelectableList：弱化行 | `dialog.toneMuted` |
+| SelectableList：强调行 | `dialog.toneAccent` |
+| SelectableList：警告行 | `dialog.toneWarning` |
+| SelectableList：危险行（删除确认） | `dialog.toneDanger` |
+| SelectableList：焦点行背景 | `dialog.focusBg` |
+| SelectableList：● current 标记 | `dialog.currentMark` |
 
 ---
 
 ## 六、文档自检
 
-- [x] SemanticTokens 类型定义完整（6 分组，25 个 token）
+- [x] SemanticTokens 类型定义完整（7 分组，包含新增 dialog 分组）
 - [x] darkTokens 映射完整，每个 token 都指向明确的 palette 色值
+- [x] dialog 分组：tone 五值 + focusBg + currentMark，覆盖 SelectableList 所有颜色需求
 - [x] 分组设计理由已说明
 - [x] 重复映射的合理性已解释
 - [x] diff 使用柔和色的理由已说明

@@ -13,7 +13,8 @@ shared/ 提供可复用的基础 UI 构建块，被 message/、dialogs/、prompt
 | 组件 | 文档 | 职责 | 使用者 |
 |------|------|------|--------|
 | VirtualizedList | [virtualized-list.md](./virtualized-list.md) | 虚拟化渲染，只渲染可见区域 | MessageList |
-| ScrollableList | [scrollable-list.md](./scrollable-list.md) | 固定高度可滚动选择列表 | ModelDialog, SessionDialog |
+| ScrollableList | [scrollable-list.md](./scrollable-list.md) | 固定高度可滚动列表的"焦点 + 滚动窗口"低层 primitive | SelectableList 内部使用 |
+| SelectableList | [selectable-list.md](./selectable-list.md) | "select-one"场景的呈现 primitive：搜索 / 分组 / current 标记 / tone 着色 | ModelDialog, SessionDialog 等 select-one renderer |
 
 ### 容器组件
 
@@ -56,3 +57,4 @@ shared/ 提供可复用的基础 UI 构建块，被 message/、dialogs/、prompt
 - [x] 零 Context 原则已声明
 - [x] 无独立文档的组件已说明原因和参考位置
 - [x] 组件分类清晰（列表、容器、动效、内容渲染）
+- [x] SelectableList 与 ScrollableList 的职责边界已在索引中标注

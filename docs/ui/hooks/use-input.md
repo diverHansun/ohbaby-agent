@@ -49,7 +49,7 @@ function useInput(client: UiBackendClient): {
 
 ```typescript
 const catalog = useCommandCatalog()
-const runtime = useRuntime()
+const activeSessionId = useActiveSessionId()
 
 async function handleSubmit(text: string): Promise<void> {
   const trimmed = text.trim()
@@ -85,7 +85,7 @@ async function handleSubmit(text: string): Promise<void> {
     }
   } else {
     if (viewState.current === 'home') navigateTo('chat')
-    client.submitPrompt(trimmed, { sessionId: runtime?.activeSession?.id })
+    client.submitPrompt(trimmed, { sessionId: activeSessionId })
     addToHistory(trimmed)
   }
 }
@@ -189,7 +189,7 @@ Hints 不调用 backend，纯本地 catalog 查询。
 | `resolveCommand` | SDK 函数 | catalog exact match |
 | `filterCommandCatalog` | SDK 函数 | 补全和 hints |
 | `useCommandCatalog` selector | TuiStore | 读取当前 catalog |
-| `useRuntime` selector | TuiStore | 读取 activeSessionId |
+| `useActiveSessionId` selector | TuiStore | 读取 activeSessionId |
 | AppStateContext | 读 | 检查当前视图 |
 | AppActionsContext | 写 | `navigateTo('chat')` |
 | useHistory | 同级 | 提交时调用 `addToHistory` |

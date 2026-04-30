@@ -44,12 +44,12 @@ DialogManager 是弹窗系统的中枢组件，负责管理弹窗队列、调度
 
 当 `current.source === 'interaction'` 时：
 
-| kind | subject | renderer |
-|---|---|---|
-| `select-one` | `model` | ModelDialog |
-| `select-one` | `session` | SessionDialog |
-| `confirm` | 任意 | ConfirmDialog |
-| 其他 | 任意 | Generic fallback（未来补充） |
+| kind | subject | renderer | primitive |
+|---|---|---|---|
+| `select-one` | `model` | ModelDialog | SelectableList |
+| `select-one` | `session` | SessionDialog | SelectableList |
+| `confirm` | 任意 | ConfirmDialog | 独立小组件 |
+| 其他 | 任意 | Generic fallback（未来补充） | — |
 
 示例：
 
@@ -122,6 +122,7 @@ return null
 3. **不打断当前弹窗**：高优先级弹窗插队到队列前面，但不打断当前显示。
 4. **弹窗组件无队列感知**：具体 renderer 不知道队列的存在。
 5. **renderer 不等于来源**：ModelDialog/SessionDialog 是 interaction renderer，不是顶层来源。
+6. **B' 原则由 renderer 执行，不由 DialogManager 执行**：DialogManager 不关心 request.options 与本地数据的组合，这是各 renderer 自己的职责，参见 [dialogs/index.md §一·五](./index.md)。
 
 ---
 

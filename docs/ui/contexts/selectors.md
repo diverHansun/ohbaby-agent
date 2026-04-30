@@ -16,7 +16,7 @@ function useRuntime(): UiRuntimeState | null
 
 返回 `TuiStore.runtime` 切片。包含 model、mode、agentState、workingDirectory、context token 用量、activeSession 信息。
 
-**典型消费者**：StatusBar、HomeView。
+**典型消费者**：StatusBar、ModelDialog（只做 current 标记）。
 
 ---
 
@@ -29,6 +29,18 @@ function useSessionSummaries(): readonly UiSessionSummary[]
 返回 `TuiStore.sessions` 切片。用于会话列表展示。
 
 **典型消费者**：SessionDialog（interaction subject='session' 的 renderer）。
+
+---
+
+### useActiveSessionId
+
+```typescript
+function useActiveSessionId(): string | null
+```
+
+返回 `TuiStore.activeSessionId` 切片。用于标记当前会话、切换会话 selector 的 current 项，以及需要知道当前会话身份但不需要读取完整 runtime 的组件。
+
+**典型消费者**：SessionDialog、useInput。
 
 ---
 
@@ -145,5 +157,5 @@ function useRuns(): readonly UiRun[]
 
 - [x] 每个 selector 有签名、返回值说明和典型消费者。
 - [x] part-delta 有独立的订阅 hook，不走 selector。
-- [x] 不提供跨切片组合 selector，理由已说明。
+- [x] 不提供跨切片组合 selector；`useActiveSessionId` 是顶层切片读取，不组合其他数据。
 - [x] 与 UI Context 的分工表清晰。

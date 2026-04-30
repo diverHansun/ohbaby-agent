@@ -43,8 +43,8 @@ interface ViewState {
 
 转换规则：
 - `home → chat`：用户提交第一条消息。
-- `chat → help`：用户通过全局帮助入口或 HelpView 导航。
-- `help → chat`：用户按 Esc 返回。
+- `chat/home → help`：`/help` 命令返回 `command.result.delivered { action.kind='show-help' }` 后，由 TUI command result handler 触发。
+- `help → previous`：用户按 Esc 返回到打开 HelpView 前的视图（chat 或 home）。
 - `* → home`：用户执行 `/session clear` 或 catalog 声明的 `/clear` alias 清空会话。
 
 ### 2.2 DialogState
