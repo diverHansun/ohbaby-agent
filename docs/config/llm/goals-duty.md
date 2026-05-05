@@ -58,3 +58,21 @@
 
 5. 不进行 Token 使用统计或成本计算
    - Token 相关逻辑由 tokenCounting 模块负责
+
+6. 不创建 LLM SDK 实例
+   - 不直接 import openai 或其他厂商 SDK
+   - 当前由 `core/llm-client.createLLMClient()` 根据 `LLMConfig` 创建 OpenAI-compatible client
+   - 本模块仅提供 `LLMConfig` 数据，不感知调用方如何使用这些配置
+
+7. 不感知 provider 的协议差异
+   - 配置中的 `provider` 字段当前只是字符串标识（如 `openai`、`zhipu`）
+   - 本模块不会根据 provider 推断消息协议、工具调用协议或 SDK 类型
+   - 当前校验只保证 `provider` 是非空字符串，不校验它是否已经在某个运行时注册表中实现
+
+## 与其他模块的关系
+
+| 模块 | 关系 | 说明 |
+|------|------|------|
+| core/llm-client | 被依赖 | `createLLMClient()` 直接调用 `getLLMConfig()` 创建当前的 OpenAI-compatible client |
+| services/providers | 已实现 | `core/llm-client` 当前会把本模块输出拆分为连接级配置并传给 `createProvider()` |
+| config/mcp、config/agents | 并列 | 同为 config/ 下的子模块，schema-loading-validation 模式一致
