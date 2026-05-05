@@ -29,6 +29,7 @@
     "clean": "rimraf dist coverage"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.93.0",
     "@tavily/core": "^0.6.4",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
