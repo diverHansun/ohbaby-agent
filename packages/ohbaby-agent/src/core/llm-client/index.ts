@@ -2,7 +2,7 @@
  * Public API for the LLM Client module.
  *
  * This module exports the core functions and types needed to interact
- * with the OpenAI API for chat completions.
+ * with the configured LLM provider through the shared streaming interface.
  *
  * Design Principle: Interface Segregation
  * Consumers import only what they need. The module provides three categories:

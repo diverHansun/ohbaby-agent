@@ -5,9 +5,75 @@
  * with mocked config module and OpenAI API responses.
  */
 
+import type { ChatCompletionCreateParams } from 'openai/resources/chat/completions/completions';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type {
+  ProviderRequest,
+  ProviderStreamEvent,
+} from '../../services/providers/index.js';
 import { createLLMClient, streamChatCompletion } from './index.js';
-import type { LLMClientInstance } from './types.js';
+import type {
+  ChatCompletionMessage,
+  LLMClientInstance,
+  StreamingResponse,
+} from './types.js';
+
+type AssistantMessage = Extract<ChatCompletionMessage, { role: 'assistant' }>;
+type ConfigErrorWithCode = Error & { code: string };
+
+interface MockSdkClient {
+  chat: {
+    completions: {
+      create: () => void;
+    };
+  };
+}
+
+interface OpenAIClientLike {
+  chat: {
+    completions: {
+      create: unknown;
+    };
+  };
+}
+
+function createProviderStream(
+  events: readonly ProviderStreamEvent[]
+): AsyncGenerator<ProviderStreamEvent, void, unknown> {
+  return (async function* (): AsyncGenerator<ProviderStreamEvent, void, unknown> {
+    for (const event of events) {
+      yield await Promise.resolve(event);
+    }
+  })();
+}
+
+function createAbortingProviderStream(
+  events: readonly ProviderStreamEvent[],
+  error: Error
+): AsyncGenerator<ProviderStreamEvent, void, unknown> {
+  return (async function* (): AsyncGenerator<ProviderStreamEvent, void, unknown> {
+    for (const event of events) {
+      yield await Promise.resolve(event);
+    }
+
+    throw error;
+  })();
+}
+
+let streamChatCompletionMock: ReturnType<
+  typeof vi.fn<(request: ProviderRequest) => Promise<AsyncIterable<ProviderStreamEvent>>>
+>;
+let isAbortErrorMock: ReturnType<typeof vi.fn<(error: unknown) => boolean>>;
+
+function getProviderRequest(): ProviderRequest {
+  const request = streamChatCompletionMock.mock.calls[0][0];
+  return request;
+}
+
+function getAssistantMessage(response: StreamingResponse): AssistantMessage {
+  expect(response.completeMessage.role).toBe('assistant');
+  return response.completeMessage as AssistantMessage;
+}
 
 // Mock the config module
 vi.mock('../../config/index.js', () => ({
@@ -37,13 +103,15 @@ describe('LLM Client Integration Tests', () => {
       const client = await createLLMClient();
 
       expect(client).toBeDefined();
-      expect(client.client).toBeDefined();
+      expect(client.provider).toBeDefined();
+      expect(client.provider.client).toBeDefined();
       expect(client.config).toBeDefined();
       expect(client.config.provider).toBe('openai');
       expect(client.config.model).toBe('gpt-4');
       expect(client.config.baseUrl).toBe('https://api.openai.com/v1');
       expect(client.config.temperature).toBe(0.7);
       expect(client.config.maxTokens).toBe(4096);
+      expect('client' in client).toBe(false);
     });
 
     it('should not expose apiKey in returned config', async () => {
@@ -52,7 +120,7 @@ describe('LLM Client Integration Tests', () => {
       const client = await createLLMClient();
 
       // apiKey should not be in the config object
-      expect((client.config as any).apiKey).toBeUndefined();
+      expect('apiKey' in client.config).toBe(false);
     });
 
     it('should use different provider config', async () => {
@@ -76,36 +144,49 @@ describe('LLM Client Integration Tests', () => {
     });
 
     it('should propagate ConfigError from config module', async () => {
-      const configError = new Error('Configuration file not found');
-      (configError as any).code = 'FILE_NOT_FOUND';
+      const configError = new Error('Configuration file not found') as ConfigErrorWithCode;
+      configError.code = 'FILE_NOT_FOUND';
       vi.mocked(getLLMConfig).mockRejectedValue(configError);
 
       await expect(createLLMClient()).rejects.toThrow('Configuration file not found');
     });
 
-    it('should have OpenAI SDK chat completions method', async () => {
+    it('should expose the provider SDK client through provider.client', async () => {
       vi.mocked(getLLMConfig).mockResolvedValue(mockConfig);
 
       const client = await createLLMClient();
+      const providerClient = client.provider.client as OpenAIClientLike;
 
-      expect(client.client.chat).toBeDefined();
-      expect(client.client.chat.completions).toBeDefined();
-      expect(typeof client.client.chat.completions.create).toBe('function');
+      expect(providerClient.chat).toBeDefined();
+      expect(providerClient.chat.completions).toBeDefined();
+      expect(typeof providerClient.chat.completions.create).toBe('function');
     });
   });
 
   describe('streamChatCompletion', () => {
-    let mockClient: LLMClientInstance;
+    let mockClient: LLMClientInstance<MockSdkClient>;
 
     beforeEach(() => {
-      mockClient = {
-        client: {
-          chat: {
-            completions: {
-              create: vi.fn(),
-            },
+      const sdkClient: MockSdkClient = {
+        chat: {
+          completions: {
+            create: () => undefined,
           },
-        } as any,
+        },
+      };
+      streamChatCompletionMock = vi.fn<
+        (request: ProviderRequest) => Promise<AsyncIterable<ProviderStreamEvent>>
+      >();
+      isAbortErrorMock = vi.fn<(error: unknown) => boolean>().mockReturnValue(false);
+
+      mockClient = {
+        provider: {
+          id: 'openai',
+          kind: 'openai-compatible',
+          client: sdkClient,
+          streamChatCompletion: streamChatCompletionMock,
+          isAbortError: isAbortErrorMock,
+        },
         config: {
           provider: 'openai',
           model: 'gpt-4',
@@ -117,25 +198,14 @@ describe('LLM Client Integration Tests', () => {
     });
 
     it('should accumulate text content from streaming chunks', async () => {
-      const chunks = [
+      const events: ProviderStreamEvent[] = [
         {
-          choices: [
-            {
-              delta: { content: 'Hello' },
-              finish_reason: null,
-              index: 0,
-            },
-          ],
+          textDelta: 'Hello',
         },
         {
-          choices: [
-            {
-              delta: { content: ' world' },
-              finish_reason: 'stop',
-              index: 0,
-            },
-          ],
-          usage: {
+          textDelta: ' world',
+          finishReason: 'stop',
+          tokenUsage: {
             prompt_tokens: 10,
             completion_tokens: 5,
             total_tokens: 15,
@@ -143,16 +213,10 @@ describe('LLM Client Integration Tests', () => {
         },
       ];
 
-      mockClient.client.chat.completions.create = vi.fn().mockResolvedValue(
-        (async function* () {
-          for (const chunk of chunks) {
-            yield chunk;
-          }
-        })()
-      );
+      streamChatCompletionMock.mockResolvedValue(createProviderStream(events));
 
       const messages = [{ role: 'user' as const, content: 'Say hello' }];
-      const responses: any[] = [];
+      const responses: StreamingResponse[] = [];
 
       for await (const response of streamChatCompletion(mockClient, messages)) {
         responses.push(response);
@@ -168,49 +232,31 @@ describe('LLM Client Integration Tests', () => {
       expect(responses[1].completeMessage.content).toBe('Hello world');
       expect(responses[1].isComplete).toBe(true);
       expect(responses[1].finishReason).toBe('stop');
+      expect(responses[1].rawFinishReason).toBeUndefined();
       expect(responses[1].tokenUsage?.total_tokens).toBe(15);
     });
 
     it('should accumulate and parse tool calls', async () => {
-      const chunks = [
+      const events: ProviderStreamEvent[] = [
         {
-          choices: [
+          toolCallDeltas: [
             {
-              delta: {
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: 'call_123',
-                    function: {
-                      name: 'get_weather',
-                      arguments: '{"location":"',
-                    },
-                  },
-                ],
-              },
-              finish_reason: null,
               index: 0,
+              id: 'call_123',
+              name: 'get_weather',
+              argumentsDelta: '{"location":"',
             },
           ],
         },
         {
-          choices: [
+          toolCallDeltas: [
             {
-              delta: {
-                tool_calls: [
-                  {
-                    index: 0,
-                    function: {
-                      arguments: 'NYC"}',
-                    },
-                  },
-                ],
-              },
-              finish_reason: 'tool_calls',
               index: 0,
+              argumentsDelta: 'NYC"}',
             },
           ],
-          usage: {
+          finishReason: 'tool_calls',
+          tokenUsage: {
             prompt_tokens: 20,
             completion_tokens: 10,
             total_tokens: 30,
@@ -218,28 +264,27 @@ describe('LLM Client Integration Tests', () => {
         },
       ];
 
-      mockClient.client.chat.completions.create = vi.fn().mockResolvedValue(
-        (async function* () {
-          for (const chunk of chunks) {
-            yield chunk;
-          }
-        })()
-      );
+      streamChatCompletionMock.mockResolvedValue(createProviderStream(events));
 
       const messages = [{ role: 'user' as const, content: 'Get weather for NYC' }];
-      const responses: any[] = [];
+      const responses: StreamingResponse[] = [];
 
       for await (const response of streamChatCompletion(mockClient, messages)) {
         responses.push(response);
       }
 
       const lastResponse = responses[responses.length - 1];
+      const assistantMessage = getAssistantMessage(lastResponse);
+
+      if (!('tool_calls' in assistantMessage) || !assistantMessage.tool_calls) {
+        throw new Error('Expected tool calls on assistant message.');
+      }
 
       // Verify raw tool call accumulation
-      const toolCall = lastResponse.completeMessage.tool_calls?.[0];
-      expect(toolCall?.id).toBe('call_123');
-      expect(toolCall?.function.name).toBe('get_weather');
-      expect(toolCall?.function.arguments).toBe('{"location":"NYC"}');
+      const toolCall = assistantMessage.tool_calls[0];
+      expect(toolCall.id).toBe('call_123');
+      expect(toolCall.function.name).toBe('get_weather');
+      expect(toolCall.function.arguments).toBe('{"location":"NYC"}');
 
       // Verify parsed tool call
       const parsedCall = lastResponse.parsedToolCalls?.[0];
@@ -248,16 +293,10 @@ describe('LLM Client Integration Tests', () => {
     });
 
     it('should handle empty responses with default content', async () => {
-      const chunks = [
+      const events: ProviderStreamEvent[] = [
         {
-          choices: [
-            {
-              delta: {},
-              finish_reason: 'stop',
-              index: 0,
-            },
-          ],
-          usage: {
+          finishReason: 'stop',
+          tokenUsage: {
             prompt_tokens: 10,
             completion_tokens: 0,
             total_tokens: 10,
@@ -265,16 +304,10 @@ describe('LLM Client Integration Tests', () => {
         },
       ];
 
-      mockClient.client.chat.completions.create = vi.fn().mockResolvedValue(
-        (async function* () {
-          for (const chunk of chunks) {
-            yield chunk;
-          }
-        })()
-      );
+      streamChatCompletionMock.mockResolvedValue(createProviderStream(events));
 
       const messages = [{ role: 'user' as const, content: 'test' }];
-      const responses: any[] = [];
+      const responses: StreamingResponse[] = [];
 
       for await (const response of streamChatCompletion(mockClient, messages)) {
         responses.push(response);
@@ -289,18 +322,8 @@ describe('LLM Client Integration Tests', () => {
       mockClient.config.temperature = 1.0;
       mockClient.config.maxTokens = 128000;
 
-      mockClient.client.chat.completions.create = vi.fn().mockResolvedValue(
-        (async function* () {
-          yield {
-            choices: [
-              {
-                delta: { content: 'test' },
-                finish_reason: 'stop',
-                index: 0,
-              },
-            ],
-          };
-        })()
+      streamChatCompletionMock.mockResolvedValue(
+        createProviderStream([{ textDelta: 'test', finishReason: 'stop' }])
       );
 
       const messages = [{ role: 'user' as const, content: 'test' }];
@@ -308,31 +331,20 @@ describe('LLM Client Integration Tests', () => {
       const iterator = streamChatCompletion(mockClient, messages);
       await iterator.next();
 
-      const createCall = mockClient.client.chat.completions.create as any;
-      const callArgs = createCall.mock.calls[0][0];
+      const callArgs = getProviderRequest();
 
       expect(callArgs.model).toBe('gpt-4-turbo');
       expect(callArgs.temperature).toBe(1.0);
-      expect(callArgs.max_tokens).toBe(128000);
+      expect(callArgs.maxTokens).toBe(128000);
     });
 
     it('should pass tools parameter to API', async () => {
-      mockClient.client.chat.completions.create = vi.fn().mockResolvedValue(
-        (async function* () {
-          yield {
-            choices: [
-              {
-                delta: { content: 'test' },
-                finish_reason: 'stop',
-                index: 0,
-              },
-            ],
-          };
-        })()
+      streamChatCompletionMock.mockResolvedValue(
+        createProviderStream([{ textDelta: 'test', finishReason: 'stop' }])
       );
 
       const messages = [{ role: 'user' as const, content: 'use tool' }];
-      const tools = [
+      const tools: ChatCompletionCreateParams['tools'] = [
         {
           type: 'function' as const,
           function: {
@@ -349,36 +361,71 @@ describe('LLM Client Integration Tests', () => {
       const iterator = streamChatCompletion(mockClient, messages, { tools });
       await iterator.next();
 
-      const createCall = mockClient.client.chat.completions.create as any;
-      const callArgs = createCall.mock.calls[0][0];
+      const callArgs = getProviderRequest();
 
       expect(callArgs.tools).toEqual(tools);
     });
 
-    it('should include stream_options in request', async () => {
-      mockClient.client.chat.completions.create = vi.fn().mockResolvedValue(
-        (async function* () {
-          yield {
-            choices: [
-              {
-                delta: { content: 'test' },
-                finish_reason: 'stop',
-                index: 0,
-              },
-            ],
-          };
-        })()
+    it('should pass abort signal to provider request', async () => {
+      streamChatCompletionMock.mockResolvedValue(
+        createProviderStream([{ textDelta: 'test', finishReason: 'stop' }])
       );
 
       const messages = [{ role: 'user' as const, content: 'test' }];
-      const iterator = streamChatCompletion(mockClient, messages);
+      const controller = new AbortController();
+      const iterator = streamChatCompletion(mockClient, messages, {
+        signal: controller.signal,
+      });
       await iterator.next();
 
-      const createCall = mockClient.client.chat.completions.create as any;
-      const callArgs = createCall.mock.calls[0][0];
+      const callArgs = getProviderRequest();
 
-      expect(callArgs.stream).toBe(true);
-      expect(callArgs.stream_options).toEqual({ include_usage: true });
+      expect(callArgs.signal).toBe(controller.signal);
+    });
+
+    it('should return partial content when provider aborts mid-stream', async () => {
+      const abortError = new Error('aborted');
+      isAbortErrorMock.mockImplementation((error: unknown) => error === abortError);
+      streamChatCompletionMock.mockResolvedValue(
+        createAbortingProviderStream([{ textDelta: 'Partial' }], abortError)
+      );
+
+      const responses: StreamingResponse[] = [];
+      for await (const response of streamChatCompletion(mockClient, [
+        { role: 'user' as const, content: 'test' },
+      ])) {
+        responses.push(response);
+      }
+
+      expect(responses).toHaveLength(2);
+      expect(responses[0].isComplete).toBe(false);
+      expect(responses[1]).toMatchObject({
+        isComplete: true,
+        finishReason: 'length',
+      });
+      expect(responses[1].completeMessage.content).toBe('Partial');
+    });
+
+    it('should surface raw finish reason from provider events', async () => {
+      streamChatCompletionMock.mockResolvedValue(
+        createProviderStream([
+          {
+            textDelta: 'Paused',
+            finishReason: 'stop',
+            rawFinishReason: 'pause_turn',
+          },
+        ])
+      );
+
+      const responses: StreamingResponse[] = [];
+      for await (const response of streamChatCompletion(mockClient, [
+        { role: 'user' as const, content: 'test' },
+      ])) {
+        responses.push(response);
+      }
+
+      expect(responses[0].finishReason).toBe('stop');
+      expect(responses[0].rawFinishReason).toBe('pause_turn');
     });
   });
 

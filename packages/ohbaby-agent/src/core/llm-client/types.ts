@@ -1,8 +1,7 @@
 /**
  * Type definitions for the LLM Client module.
  *
- * This module provides type exports from OpenAI SDK and custom interfaces
- * for the ohbaby-agent LLM client system.
+ * This module provides the public types for the ohbaby-agent LLM client system.
  *
  * Design Principles:
  * - DRY: Re-export OpenAI types instead of duplicating them
@@ -13,8 +12,10 @@
 import type {
   ChatCompletionMessageParam,
 } from 'openai/resources/chat/completions/completions';
-import type { CompletionUsage } from 'openai/resources/completions';
-import type { OpenAI } from 'openai';
+import type {
+  ProviderInstance,
+  ProviderTokenUsage,
+} from '../../services/providers/index.js';
 
 /**
  * Re-export OpenAI message type for convenience.
@@ -28,14 +29,14 @@ import type { OpenAI } from 'openai';
 export type ChatCompletionMessage = ChatCompletionMessageParam;
 
 /**
- * Re-export token usage statistics type from OpenAI SDK.
+ * Re-export normalized token usage statistics from the provider layer.
  *
  * Contains:
  * - prompt_tokens: Number of tokens in the prompt
  * - completion_tokens: Number of tokens generated
  * - total_tokens: Sum of prompt and completion tokens
  */
-export type TokenUsage = CompletionUsage;
+export type TokenUsage = ProviderTokenUsage;
 
 /**
  * Finish reason for chat completion.
@@ -71,7 +72,7 @@ export interface ParsedToolCall {
 /**
  * LLM Client instance.
  *
- * Single Responsibility: Encapsulates the OpenAI SDK client and configuration.
+ * Single Responsibility: Encapsulates the provider instance and configuration.
  * Configuration is immutable after creation to ensure consistency.
  *
  * Design decision: Configuration is owned by the client instance,
@@ -79,11 +80,11 @@ export interface ParsedToolCall {
  * cohesion - related data stays together.
  *
  * Note: apiKey is intentionally excluded from config for security reasons.
- * It is only used internally by the OpenAI client.
+ * It is only used internally by the provider client.
  */
-export interface LLMClientInstance {
-  /** OpenAI SDK client instance */
-  client: OpenAI;
+export interface LLMClientInstance<TClient = unknown> {
+  /** Provider adapter used by the streaming core */
+  provider: ProviderInstance<TClient>;
 
   /** Immutable configuration for this LLM client */
   config: {
@@ -161,6 +162,14 @@ export interface StreamingResponse {
    * Guides consumer logic for what to do with the response.
    */
   finishReason?: ChatFinishReason;
+
+  /**
+   * Provider-specific raw finish reason before normalization.
+   *
+   * Example: Anthropic may emit `pause_turn`, which is normalized to `stop`
+   * for the shared finish-reason enum while still being exposed here.
+   */
+  rawFinishReason?: string;
 
   /**
    * Token usage statistics for the complete request.

@@ -12,13 +12,54 @@
  */
 
 import type { ChatCompletionCreateParams, ChatCompletionMessageParam } from 'openai/resources';
-import { APIUserAbortError } from 'openai';
 import type {
   LLMClientInstance,
   StreamingResponse,
   ParsedToolCall,
   ChatFinishReason,
+  TokenUsage,
 } from './types.js';
+
+interface AccumulatedToolCall {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+function buildCompleteMessage(
+  accumulatedContent: string,
+  accumulatedToolCalls: Map<number, AccumulatedToolCall>
+): ChatCompletionMessageParam {
+  if (accumulatedToolCalls.size > 0) {
+    const toolCalls = Array.from(accumulatedToolCalls.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([, call]) => call);
+
+    return {
+      role: 'assistant',
+      content: accumulatedContent === '' ? null : accumulatedContent,
+      tool_calls: toolCalls,
+    };
+  }
+
+  return {
+    role: 'assistant',
+    content: accumulatedContent === '' ? '(Empty response)' : accumulatedContent,
+  };
+}
+
+function parseToolCalls(
+  accumulatedToolCalls: Map<number, AccumulatedToolCall>
+): ParsedToolCall[] {
+  return Array.from(accumulatedToolCalls.values()).map((call) => ({
+    id: call.id,
+    name: call.function.name,
+    arguments: JSON.parse(call.function.arguments) as Record<string, unknown>,
+  }));
+}
 
 /**
  * Stream chat completion and accumulate complete messages in real-time.
@@ -58,7 +99,7 @@ import type {
  *
  * @returns {AsyncGenerator<StreamingResponse>} Yields responses as they stream
  *
- * @throws {APIUserAbortError} - Only if signal is aborted before first chunk
+ * @throws {Error} - Provider-specific abort errors are converted into partial results
  * @throws {APIError} - Network, authentication, or API errors
  * @throws {Error} - Other unexpected errors during streaming
  *
@@ -87,72 +128,60 @@ export async function* streamChatCompletion(
     tools?: ChatCompletionCreateParams['tools'];
   }
 ): AsyncGenerator<StreamingResponse, void, unknown> {
-  const { client, config } = llmClient;
+  const { provider, config } = llmClient;
   const { signal, tools } = options ?? {};
-
-  // Build request parameters
-  const params: ChatCompletionCreateParams = {
-    model: config.model,
-    messages,
-    temperature: config.temperature,
-    max_tokens: config.maxTokens,
-    stream: true,
-    // Request token usage in the stream
-    // Note: Requires OpenAI API to support stream_options parameter
-    stream_options: { include_usage: true },
-  };
-
-  // Add tools if provided
-  if (tools && tools.length > 0) {
-    params.tools = tools;
-  }
-
-  // Initiate streaming request
-  const stream = await client.chat.completions.create(params, { signal });
 
   // Accumulation state - maintained across iterations
   let accumulatedContent = '';
-  const accumulatedToolCalls = new Map<number, any>();
+  const accumulatedToolCalls = new Map<number, AccumulatedToolCall>();
   let finishReason: ChatFinishReason | null = null;
-  let tokenUsage: any = null;
+  let rawFinishReason: string | undefined;
+  let tokenUsage: TokenUsage | null = null;
 
   try {
-    // Stream each chunk from the API
-    for await (const chunk of stream) {
-      const delta = chunk.choices?.[0]?.delta;
-      const finish = chunk.choices?.[0]?.finish_reason;
+    const stream = await provider.streamChatCompletion({
+      model: config.model,
+      messages,
+      temperature: config.temperature,
+      maxTokens: config.maxTokens,
+      tools,
+      signal,
+    });
+
+    // Stream each normalized event from the provider
+    for await (const event of stream) {
+      const finish = event.finishReason;
 
       // Update finish reason when stream ends
       if (finish) {
-        finishReason = finish as ChatFinishReason;
+        finishReason = finish;
+      }
+      if (event.rawFinishReason) {
+        rawFinishReason = event.rawFinishReason;
       }
 
       // Capture token usage (typically only in last chunk)
-      if (chunk.usage) {
-        tokenUsage = {
-          prompt_tokens: chunk.usage.prompt_tokens || 0,
-          completion_tokens: chunk.usage.completion_tokens || 0,
-          total_tokens: chunk.usage.total_tokens || 0,
-        };
+      if (event.tokenUsage) {
+        tokenUsage = event.tokenUsage;
       }
 
       // Accumulate text content
-      if (delta?.content) {
-        accumulatedContent += delta.content;
+      if (event.textDelta) {
+        accumulatedContent += event.textDelta;
       }
 
       // Accumulate tool call fragments
-      if (delta?.tool_calls) {
-        for (const toolCall of delta.tool_calls) {
+      if (event.toolCallDeltas) {
+        for (const toolCall of event.toolCallDeltas) {
           const index = toolCall.index;
 
           // Create new tool call entry if first fragment
           if (!accumulatedToolCalls.has(index)) {
             accumulatedToolCalls.set(index, {
-              id: toolCall.id || '',
+              id: toolCall.id ?? '',
               type: 'function',
               function: {
-                name: toolCall.function?.name || '',
+                name: toolCall.name ?? '',
                 arguments: '',
               },
             });
@@ -160,56 +189,29 @@ export async function* streamChatCompletion(
 
           // Accumulate fragments into the tool call
           const accumulated = accumulatedToolCalls.get(index);
+          if (!accumulated) {
+            continue;
+          }
+
           if (toolCall.id) {
             accumulated.id = toolCall.id;
           }
-          if (toolCall.function?.name) {
-            accumulated.function.name = toolCall.function.name;
+          if (toolCall.name) {
+            accumulated.function.name = toolCall.name;
           }
-          if (toolCall.function?.arguments) {
-            accumulated.function.arguments += toolCall.function.arguments;
+          if (toolCall.argumentsDelta) {
+            accumulated.function.arguments += toolCall.argumentsDelta;
           }
         }
       }
 
       // Build complete message from accumulated state
-      let completeMessage: ChatCompletionMessageParam;
-
-      if (accumulatedToolCalls.size > 0) {
-        // Tool call response
-        const toolCalls = Array.from(accumulatedToolCalls.entries())
-          .sort((a, b) => a[0] - b[0])
-          .map(([, call]) => call);
-
-        completeMessage = {
-          role: 'assistant',
-          content: accumulatedContent || null,
-          tool_calls: toolCalls,
-        };
-      } else {
-        // Text-only response
-        // Handle empty responses from some LLM providers
-        let content = accumulatedContent;
-        if (!content) {
-          content = '(Empty response)';
-        }
-
-        completeMessage = {
-          role: 'assistant',
-          content,
-        };
-      }
+      const completeMessage = buildCompleteMessage(accumulatedContent, accumulatedToolCalls);
 
       // Parse tool calls only when stream is complete
       let parsedToolCalls: ParsedToolCall[] | undefined;
       if (finishReason && accumulatedToolCalls.size > 0) {
-        parsedToolCalls = Array.from(accumulatedToolCalls.values()).map((call) => {
-          return {
-            id: call.id,
-            name: call.function.name,
-            arguments: JSON.parse(call.function.arguments),
-          };
-        });
+        parsedToolCalls = parseToolCalls(accumulatedToolCalls);
       }
 
       // Yield response with accumulated data
@@ -217,24 +219,25 @@ export async function* streamChatCompletion(
         completeMessage,
         parsedToolCalls,
         isComplete: finishReason !== null,
-        finishReason: finishReason || undefined,
-        tokenUsage: tokenUsage || undefined,
+        finishReason: finishReason ?? undefined,
+        rawFinishReason,
+        tokenUsage: tokenUsage ?? undefined,
       };
     }
   } catch (error) {
     // Handle user-initiated interruption
-    if (error instanceof APIUserAbortError) {
+    if (provider.isAbortError(error)) {
       // Build final message with accumulated content
       const completeMessage: ChatCompletionMessageParam =
         accumulatedToolCalls.size > 0
           ? {
               role: 'assistant',
-              content: accumulatedContent || null,
+              content: accumulatedContent === '' ? null : accumulatedContent,
               tool_calls: Array.from(accumulatedToolCalls.values()),
             }
           : {
               role: 'assistant',
-              content: accumulatedContent || '(Interrupted)',
+              content: accumulatedContent === '' ? '(Interrupted)' : accumulatedContent,
             };
 
       // Return partial results instead of throwing
@@ -243,7 +246,8 @@ export async function* streamChatCompletion(
         completeMessage,
         isComplete: true,
         finishReason: 'length', // Use 'length' as marker for interruption
-        tokenUsage,
+        rawFinishReason,
+        tokenUsage: tokenUsage ?? undefined,
       };
 
       return;
