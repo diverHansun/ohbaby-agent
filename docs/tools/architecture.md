@@ -29,8 +29,12 @@ tools/
 ├── list.ts              # 目录列表
 ├── bash.ts              # 命令执行
 ├── task.ts              # 子代理调用
-└── todo.ts              # 待办事项
+├── todo.ts              # 待办事项
+├── web-search.ts        # 语义 Web 搜索（→ search-providers）
+└── web-fetch.ts         # 抓取 URL 内容（→ search-providers）
 ```
+
+`tools/search-providers/` 子模块文档参见 `docs/tools/search-providers/`，源码挂在 `src/services/search-providers/`。
 
 ---
 
@@ -245,7 +249,54 @@ const ReadTool = Tool.define({
    └── summary (工具调用记录)
 ```
 
-### 4.5 任务管理工具
+### 4.5 网络工具
+
+#### web_search（语义 Web 搜索）
+
+```
+输入: query, num_results?, time_range?, include_domains?, exclude_domains?
+输出: 归一化的搜索结果列表（Markdown）
+后端: tools/search-providers（当前激活 Tavily）
+特殊: 厂商无关；切换 provider 不需要改工具代码
+```
+
+**执行流程**：
+
+```
+1. 参数验证（Zod）
+   |
+   v
+2. 通过 search-providers/registry 获取已激活的 SearchProvider
+   |
+   v
+3. provider.search(query, options) → SearchResult[]
+   |
+   v
+4. 把 SearchResult[] 渲染为 Markdown
+   |
+   v
+5. 返回 ToolOutput
+```
+
+#### web_fetch（抓取 URL 内容）
+
+```
+输入: urls (单个或数组), format?, max_characters_per_url?, include_images?
+输出: 归一化的抓取结果列表（Markdown）
+后端: tools/search-providers（当前激活 Tavily）
+特殊: 部分 URL 失败不会中断，结果中明确标记成功/失败
+```
+
+**与 search-providers 的分工**：
+
+| 职责 | 负责方 |
+|------|--------|
+| Zod 参数验证、签名稳定 | `web-search.ts` / `web-fetch.ts` |
+| 调用 SDK、参数映射、响应归一化 | `search-providers/{provider}.ts` |
+| Markdown 渲染、tool_calls 输出 | `web-search.ts` / `web-fetch.ts` |
+| 配置加载、provider 切换 | `config/tools/{provider}` + `search-providers/registry` |
+
+### 4.6 任务管理工具
 
 #### todo_write / todo_read
 
@@ -385,15 +436,13 @@ task 工具需要依赖 agents 模块：
 
 ## 九、Extension Points（扩展点）
 
-### 9.1 扩展工具支持
+### 9.1 网络工具的 provider 扩展
 
-本模块只包含内置工具。扩展工具（Extension Tools）和 MCP 工具由其他模块管理，但需遵循相同的 Tool 接口定义。
+`web_search` / `web_fetch` 的后端通过 `tools/search-providers/` 子模块扩展。新增一个 provider 不需要改 `web-search.ts` / `web-fetch.ts`，只需在 search-providers 注册新 adapter 即可。详见 `docs/tools/search-providers/architecture.md`。
 
-### 9.2 工具接口兼容性
+### 9.2 模块自带工具与 MCP 工具
 
-扩展工具需要实现 Tool 接口，并额外声明：
-- category: 工具类别
-- requiredConfig: 所需配置项
+模块自带工具（如 memory_*）和 MCP 工具不在本模块下，但需遵循相同的 Tool 接口定义。统一的接口由 `tools/types.ts` 维护。
 
 ---
 

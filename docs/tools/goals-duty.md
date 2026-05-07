@@ -6,50 +6,25 @@
 - 代码：`src/tools/`
 - 文档：`docs/tools/`
 
-**模块定位**：本模块仅包含 **Core Tools（核心工具）**，即稳定、无外部依赖的本地工具。
+**模块定位**：本模块包含所有 **内置工具（Built-in Tools）**：包括文件、shell、agent、网络在内的全部默认工具，由本仓库直接维护。网络类（`web_search` / `web_fetch`）通过 `tools/search-providers/` 子模块对接 Tavily / Exa 等具体后端，不另设 `extension` 层。
 
 ---
 
-## 一、工具分层架构
+## 一、工具来源（Tool Sources）
 
-ohbaby-agent 的工具分为四个层级，本模块（`tools`）只负责 **Layer 1: Core Tools**：
+ohbaby-agent 的工具按"来源"分三类，本模块（`tools`）覆盖前者，并向 ToolScheduler 提供统一的 Tool 接口：
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│ Layer 1: Core Tools（核心工具）                                   │
-│ 位置：src/tools/                                                 │
-│ 特点：稳定、无外部依赖、本地执行                                   │
-│ 示例：read, write, edit, glob, grep, list, bash, todo_*          │
-├──────────────────────────────────────────────────────────────────┤
-│ Layer 2: Module-Owned Tools（模块内置工具）                        │
-│ 位置：各模块内部，如 src/core/memory/memory-tools.ts             │
-│ 特点：与模块紧密耦合，是模块职责的延伸                             │
-│ 示例：memory_list, memory_add, memory_update, memory_remove       │
-├──────────────────────────────────────────────────────────────────┤
-│ Layer 2.5: Skill Tools（技能工具）                                │
-│ 位置：src/skill/                                                 │
-│ 特点：加载用户定义的 Markdown 指令文件，只读级别权限               │
-│ 示例：skill                                                      │
-│ 详见：docs/skill/                                                │
-├──────────────────────────────────────────────────────────────────┤
-│ Layer 3: Extension Tools（扩展工具）                              │
-│ 位置：src/extension/tools/                                       │
-│ 特点：依赖外部服务、多实现可选、需要配置                           │
-│ 子分类：                                                         │
-│   - sdk/: 使用官方 SDK 实现（如 Exa, Tavily, 智谱）               │
-│   - connector/: 连接 Docker 服务（如 SearXNG, Firecrawl）         │
-│ 示例：web_search, web_fetch                                      │
-├──────────────────────────────────────────────────────────────────┤
-│ Layer 4: MCP Tools（MCP 工具）                                    │
-│ 位置：运行时动态注册                                              │
-│ 特点：完全由用户配置，通过 MCP 协议发现                           │
-│ 示例：用户配置的任意 MCP 服务器提供的工具                         │
-└──────────────────────────────────────────────────────────────────┘
-```
+| 来源 | 位置 | 说明 |
+|---|---|---|
+| **内置工具（built-in）** | `src/tools/` | 本模块负责。包括文件、shell、agent、网络等 |
+| **模块自带工具（module-owned）** | 各模块内部，如 `src/core/memory/memory-tools.ts` | 与模块紧耦合，由对应模块声明并向调度器注册 |
+| **MCP 工具（mcp）** | 运行时动态注册 | 通过 MCP 协议发现，由用户配置 |
+
+`docs/skill/` 描述的 Skill 工具属于"模块自带工具"中的一种，由 skill 模块负责。
 
 **ToolSource 类型**：
 ```typescript
-type ToolSource = 'core' | 'module' | 'extension' | 'mcp'
+type ToolSource = 'builtin' | 'module' | 'mcp'
 ```
 
 ---
@@ -68,9 +43,9 @@ type ToolSource = 'core' | 'module' | 'extension' | 'mcp'
 
 每个工具只负责自身的执行逻辑，不包含权限检查、确认流程等业务逻辑，这些由 ToolScheduler 和 Permission 模块处理。
 
-### G4: 无外部依赖
+### G4: 网络工具收敛到统一接口
 
-Core Tools 不依赖任何外部服务或 API，只使用本地文件系统和 Shell 能力。
+`web_search` / `web_fetch` 是内置工具，但其后端可切换。LLM 看到的是 `web_search` / `web_fetch`，背后的 Tavily / Exa 等具体厂商由 `tools/search-providers/` 子模块封装，配置驱动切换。详见 `docs/tools/search-providers/`。
 
 ---
 
@@ -86,23 +61,25 @@ Core Tools 不依赖任何外部服务或 API，只使用本地文件系统和 S
 
 ### D2: 实现核心工具集
 
-实现以下核心工具（**仅本地操作，无需外部服务**）：
+实现以下内置工具：
 
-| 工具 | 类别 | 功能 |
-|------|------|------|
-| read | readonly | 读取文件内容（支持文本、图片、PDF） |
-| write | write | 创建或覆盖文件 |
-| edit | write | 替换文件中的文本内容 |
-| glob | readonly | 使用模式匹配搜索文件 |
-| grep | readonly | 在文件内容中搜索正则表达式 |
-| list | readonly | 列出目录结构 |
-| bash | dangerous | 执行 Shell 命令 |
-| todo_write | write | 写入待办事项列表 |
-| todo_read | readonly | 读取待办事项列表 |
-| task | subagent | 调用子代理执行任务 |
+| 工具 | 类别 | 功能 | 实现位置 |
+|------|------|------|----------|
+| read | readonly | 读取文件内容（支持文本、图片、PDF） | `tools/read.ts` |
+| write | write | 创建或覆盖文件 | `tools/write.ts` |
+| edit | write | 替换文件中的文本内容 | `tools/edit.ts` |
+| glob | readonly | 使用模式匹配搜索文件 | `tools/glob.ts` |
+| grep | readonly | 在文件内容中搜索正则表达式 | `tools/grep.ts` |
+| list | readonly | 列出目录结构 | `tools/list.ts` |
+| bash | dangerous | 执行 Shell 命令 | `tools/bash.ts` |
+| todo_write | write | 写入待办事项列表 | `tools/todo.ts` |
+| todo_read | readonly | 读取待办事项列表 | `tools/todo.ts` |
+| task | subagent | 调用子代理执行任务 | `tools/task.ts` |
+| **web_search** | **network** | **语义 Web 搜索** | **`tools/web-search.ts` → `tools/search-providers/`** |
+| **web_fetch** | **network** | **抓取 URL 内容并提取** | **`tools/web-fetch.ts` → `tools/search-providers/`** |
 
 **注意**：
-- `web_search` 和 `web_fetch` 已移至 **Extension Tools**（`src/extension/tools/`），因为它们依赖外部服务
+- `web_search` / `web_fetch` 是内置工具，但执行通过 `tools/search-providers/` 子模块调用具体厂商（当前激活 Tavily）
 - `task` 工具是子代理的调用入口，子代理硬编码禁用此工具以防止递归
 
 ### D3: 处理输出限制和截断
@@ -184,9 +161,9 @@ bash 工具是唯一需要在内部进行权限相关操作的工具，原因是
 
 工具只是纯函数/对象定义，注册到 ToolScheduler 的逻辑不在本模块。
 
-### N5: 不负责网络工具
+### N5: 不直接对接 LLM 厂商搜索 SDK
 
-网络相关工具（web_search, web_fetch）由 `extension/tools` 模块负责，本模块不包含依赖外部服务的工具。
+`web_search` / `web_fetch` 工具本身不直接调用 Tavily / Exa SDK；具体厂商封装在 `tools/search-providers/` 子模块中，工具层只调用 `SearchProvider.search()` / `fetch()`。
 
 ### N6: 不负责执行状态管理
 
@@ -199,7 +176,7 @@ bash 工具是唯一需要在内部进行权限相关操作的工具，原因是
 | 模块 | 代码位置 | 关系 | 说明 |
 |------|----------|------|------|
 | ToolScheduler | `src/core/tool-scheduler/` | 被依赖 | ToolScheduler 调用工具执行函数 |
-| extension/tools | `src/extension/tools/` | 独立 | 网络工具（web_search, web_fetch）由 Extension 模块提供 |
+| search-providers | `src/services/search-providers/` | 依赖 | `web_search` / `web_fetch` 通过该模块调用 Tavily / Exa 等厂商 |
 | utils | `src/utils/` | 依赖 | bash 工具依赖 `command-parser`（命令解析）、`paths`（路径检查） |
 | Shell | `src/shell/` | 依赖 | bash 工具依赖 Shell 模块 |
 | agents | `src/agents/` | 依赖 | task 工具依赖 SubagentExecutor |
@@ -228,8 +205,8 @@ task 工具是子代理的调用入口，依赖 agents 模块的以下能力：
 
 ## 六、文档自检
 
-- [x] 可以用一句话说明模块存在的意义：tools 模块提供标准化的核心工具集，供 ToolScheduler 调度执行
-- [x] 可以清楚回答"这个模块不该做什么"：不做权限检查、不做分类管理、不做并发控制、不负责网络工具
+- [x] 可以用一句话说明模块存在的意义：tools 模块提供标准化的内置工具集（含网络工具），供 ToolScheduler 调度执行
+- [x] 可以清楚回答"这个模块不该做什么"：不做权限检查、不做分类管理、不做并发控制、不直接对接厂商 SDK
 - [x] 不存在职责与其他模块明显重叠的风险
-- [x] 工具分层架构清晰，Core Tools 职责明确
-- [x] web_search 和 web_fetch 已明确移至 Extension Tools
+- [x] 工具来源清晰：内置 / 模块自带 / MCP
+- [x] web_search 和 web_fetch 已纳入内置工具，背后由 `tools/search-providers/` 子模块封装具体厂商
