@@ -1,5 +1,19 @@
 # Exa Tools Module - goals-duty.md
 
+> ⚠️ **当前状态：暂未启用，仅作历史/参考保留**
+>
+> Exa provider 当前不在激活的 search-providers 列表中。本目录（goals-duty / architecture / dfd-interface / data-model / test / exa-search / get-contents）保留原 `docs/extension/tools/sdk/exa/` 的设计内容，不重写。
+>
+> 如未来启用 Exa：
+> - 按 `docs/tools/search-providers/data-model.md` 定义的 `SearchProvider` 接口（`search` / `fetch`）落地实现
+> - 不再单独暴露 `exa_search` / `exa_get_contents` 两个工具，而是作为 `web_search` / `web_fetch` 的后端
+> - `findSimilar` / `Answer API` / `Research API` 等厂商独有能力默认不暴露
+> - 参照 `docs/tools/search-providers/tavily/` 的写法整理为 provider 实现文档
+>
+> 以下内容为原文保留，可能与当前架构有出入（特别是"独立工具"的描述）。
+
+---
+
 本文档定义 `exa` 工具模块的目标与职责边界。
 
 ---
