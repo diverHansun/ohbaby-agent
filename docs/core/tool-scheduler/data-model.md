@@ -15,7 +15,7 @@
 | readonly | 只读操作 | 可并行（最多5个） | read, glob, grep, list；MCP工具（readOnlyHint=true） |
 | write | 写入操作 | 串行执行 | write, edit；MCP工具（readOnlyHint=false/未设置） |
 | dangerous | 危险操作 | 串行执行 | bash |
-| network | 网络操作 | 可并行（最多5个） | web_fetch, web_search（来自 Extension） |
+| network | 网络操作 | 可并行（最多5个） | web_fetch, web_search（内置工具，背后走 search-providers） |
 | memory | 记忆操作 | 可并行（不受读写锁限制） | memory_list, memory_add, memory_update, memory_remove |
 | subagent | 子代理操作 | 可并行（最多3个，独立计数器） | task |
 
@@ -23,14 +23,15 @@
 
 ### 1.2 ToolSource（工具来源）
 
-工具根据其来源分为四类：
+工具根据其来源分为三类：
 
 | 来源 | 代码位置 | 说明 | 注册时机 |
 |------|----------|------|----------|
-| core | `src/tools/` | 核心工具，稳定、无外部依赖 | 启动时静态注册 |
-| module | 各模块内部 | 模块内置工具，如 Memory Tools | 模块初始化时注册 |
-| extension | `src/extension/tools/` | 扩展工具，依赖外部服务 | 根据配置动态加载 |
+| builtin | `src/tools/` | 内置工具（含 web_search / web_fetch） | 启动时静态注册 |
+| module | 各模块内部 | 模块自带工具（如 Memory Tools、Skill） | 模块初始化时注册 |
 | mcp | 运行时动态 | MCP 服务器提供的工具 | 运行时发现注册 |
+
+> `web_search` / `web_fetch` 属于 `builtin`；它们内部通过 `tools/search-providers/` 路由到具体厂商（Tavily / Exa），但对调度器仍是普通的 builtin 工具，不另立来源类型。
 
 ### 1.3 ToolCallStatus（调用状态）
 
@@ -71,7 +72,7 @@
 type ToolCategory = 'readonly' | 'write' | 'dangerous' | 'network' | 'memory' | 'subagent'
 
 // 工具来源
-type ToolSource = 'core' | 'module' | 'extension' | 'mcp'
+type ToolSource = 'builtin' | 'module' | 'mcp'
 
 // 调用状态
 type ToolCallStatus =
@@ -272,19 +273,19 @@ const MEMORY_TOOL_CATEGORIES: Record<string, ToolCategory> = {
 }
 ```
 
-### 3.3 Extension Tools 类别映射
+### 3.3 Network Tools 类别映射（内置工具的子集）
 
-Extension Tools 来自 `src/extension/tools/`，根据配置动态加载：
+`web_search` / `web_fetch` 属于内置工具，类别为 `network`。它们在 `BUILTIN_CATEGORIES` 中已经包含；本节单独列出仅为强调它们的运行时依赖：
 
 ```typescript
-// Extension 模块注册的工具
-const EXTENSION_TOOL_CATEGORIES: Record<string, ToolCategory> = {
+// 网络工具类别（已在 BUILTIN_CATEGORIES 中）
+const NETWORK_TOOL_CATEGORIES: Record<string, ToolCategory> = {
   'web_fetch': 'network',
   'web_search': 'network',
 }
 ```
 
-**注意**：Extension Tools 需要用户配置 Provider 和 API Key 才能使用。
+**注意**：`web_search` / `web_fetch` 工具需要 `tools/search-providers/` 后端配置（如 `TAVILY_API_KEY`）才能正常执行。配置由 `config/tools/{provider}` 负责，调度器对此透明。
 
 ### 3.4 模式与类别的映射
 
