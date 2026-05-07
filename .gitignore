@@ -10,3 +10,7 @@ coverage/
 .vscode/
 *.swp
 *.swo
+
+.claude/
+.codex/
+.agent/
