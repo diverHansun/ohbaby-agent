@@ -15,11 +15,12 @@
 | D3: 管理 Skill 缓存 | 验证懒加载和缓存失效机制 |
 | D4: 提供查询接口 | 验证 all()、get()、load()、listUserInvocable()、listModelInvocable() |
 | D5: 检测重复名称 | 验证同名 Skill 正确覆盖（项目级优先） |
-| D6: SkillTool 实现 | 验证工具执行返回正确格式（含辅助文件列表） |
+| D6: SkillTool 实现 | 验证工具执行返回正确格式（含辅助文件列表）、description 动态构建、空列表退化行为 |
 | D7: 处理无效文件 | 验证无效文件被跳过且不影响其他文件 |
 | D8: 字段验证 | 验证 name 和 description 的基础验证规则 |
 | 辅助文件扫描 | 验证 Skill 目录中的辅助文件被正确列出 |
-| 条件注册 SkillTool | 验证仅当存在 model-invocable skills 时注册 SkillTool |
+| SkillTool 始终注册 | 验证 SkillTool 无条件注册为 module 工具，无 skill 时 description 提示 "No skills are currently available." |
+| description 预算策略 | 验证全量 / 截断 / 仅列名字三档行为，1% 上下文预算计算正确 |
 
 ### 1.2 不在测试范围内
 
@@ -328,7 +329,7 @@ description: Minimal skill without optional fields
 
 **预期结果**：
 - `userInvocable: true`（默认值）
-- `disableModelInvocation: true`（默认值）
+- `disableModelInvocation: false`（默认值，对齐 claude-code）
 - license 和 compatibility 为 undefined
 
 #### 场景 21: scope 字段自动识别
@@ -436,12 +437,14 @@ Skill C: userInvocable: true, disableModelInvocation: false
 **预期结果**：
 - `listUserInvocable()` 返回空数组
 
-#### 场景 29: 无 model-invocable skills（默认情况）
+#### 场景 29: 无 model-invocable skills
 
-**前置条件**：所有 Skills 都是 `disableModelInvocation: true`（默认）
+**前置条件**：所有 Skills 都显式设置 `disableModelInvocation: true`
 
 **预期结果**：
 - `listModelInvocable()` 返回空数组
+- SkillTool 仍正常注册（始终注册原则）
+- SkillTool description 提示 "No skills are currently available."
 
 ### 2.10 错误处理场景
 
@@ -465,7 +468,7 @@ Skill C: userInvocable: true, disableModelInvocation: false
 | 获取项目配置目录 | 正确识别 .ohbaby-agent 目录 |
 | 目录不存在时 | 不抛出异常，返回空列表 |
 
-### 3.2 与 Commands 模块集成（主要）
+### 3.2 与 Commands 模块集成（用户路径）
 
 | 测试点 | 验证内容 |
 |--------|----------|
@@ -501,51 +504,81 @@ Skill C: name: "internal", userInvocable: false
 - Agent 接收包含 Skill 指令的上下文
 - 用户的 prompt "check this function" 附加到上下文
 
-### 3.3 与 ToolScheduler 集成（可选）
+### 3.3 与 ToolScheduler 集成（Agent 路径）
 
 | 测试点 | 验证内容 |
 |--------|----------|
-| 条件注册 | 仅当存在 model-invocable skills 时注册 SkillTool |
+| 始终注册 | SkillTool 在 ToolScheduler 启动时无条件注册为 module 工具 |
+| 工具来源 | source 为 'module'，与 builtin/mcp 区分 |
 | 工具描述生成 | 描述中仅包含 model-invocable Skill 列表 |
-| 工具类别 | 类别为 'skill' |
-| 并发行为 | 遵循 readonly 级别并发策略 |
+| 工具类别 | 并发类别为 'readonly'（与 web_search / web_fetch 同档） |
 | 返回值结构 | metadata 包含 name、dir、files 字段 |
+| 1% 上下文预算 | 总长度受 contextWindow × 4 × 0.01 约束，超出按剩余预算均摊截断 |
+| 250 字符单条上限 | 任一 skill 的描述行不超过 250 字符 |
+| 仅列名字降级 | 当剩余预算 / skill 数 < 20 字符时，退化为仅列名字 |
 
-#### 场景 33: 无 model-invocable skills 时不注册 SkillTool
+#### 场景 33: 无 model-invocable skills 时 SkillTool 仍注册
 
 **前置条件**：
 ```
-所有 Skills 都是 disableModelInvocation: true（默认）
+所有 Skills 都显式设置 disableModelInvocation: true
 ```
 
 **预期结果**：
 - `Skill.listModelInvocable()` 返回空数组
-- SkillTool 不注册到 ToolScheduler
-- Agent 无法通过工具调用访问 Skills
+- SkillTool **仍注册**到 ToolScheduler（始终注册原则）
+- SkillTool.description 为 "No skills are currently available."
+- Agent 可以看到 skill 工具，但 description 提示后不会调用
 
-#### 场景 34: 存在 model-invocable skills 时注册 SkillTool
+#### 场景 34: 存在 model-invocable skills 时 description 列出
 
 **前置条件**：
 ```
-Skill A: disableModelInvocation: false
-Skill B: disableModelInvocation: true
+Skill A: disableModelInvocation: false, description: "Code review"
+Skill B: disableModelInvocation: true,  description: "Internal helper"
+Skill C: disableModelInvocation: false, description: "Commit message"
 ```
 
 **预期结果**：
-- `Skill.listModelInvocable()` 返回 [Skill A]
-- SkillTool 注册到 ToolScheduler
-- SkillTool.description 仅包含 Skill A
-- Agent 可以调用 SkillTool 加载 Skill A
+- `Skill.listModelInvocable()` 返回 [Skill A, Skill C]（按名排序）
+- SkillTool.description 包含 `<available_skills>` 块
+- 块中仅包含 Skill A、Skill C
+- Agent 调用 `skill({name: "code-review"})` 可正常加载
 
-### 3.4 与 Permission 集成（通过 ToolScheduler）
+#### 场景 35: description 超预算时按剩余预算均摊截断
 
-**注意**：仅适用于 model-invocable skills（通过 SkillTool）。user-invocable skills 不经过权限检查。
+**前置条件**：
+- 100 个 skill，每个 description 200 字符
+- 上下文窗口 200k tokens（预算 = 200000 × 4 × 0.01 = 8000 字符）
+
+**预期结果**：
+- 全量 ≈ 100 × 220 = 22000 字符 > 8000，触发截断
+- 计算每条平均可用字符数 = (8000 - 名字开销) / 100
+- 每条 description 截到该长度，末尾附 `…`
+- bundled skill（如有）不参与截断，全量保留
+
+#### 场景 36: description 极端预算下退化为仅列名字
+
+**前置条件**：
+- 1000 个 skill（极端情况）
+- 上下文窗口 200k tokens（预算 8000 字符）
+
+**预期结果**：
+- 剩余预算 / 1000 < MIN_DESC_LENGTH(20)
+- 退化为 `- name1\n- name2\n...` 仅列名字
+- 记录 `tengu_skill_descriptions_truncated` 类似的指标日志
+
+### 3.4 与 Permission 集成（仅 Agent 路径）
+
+**注意**：权限检查仅适用于 Agent 路径（通过 SkillTool）。用户路径（`/<name>`）下用户已显式触发，不经过 Permission 评估。
 
 | 测试点 | 验证内容 |
 |--------|----------|
+| 权限 pattern | 评估时使用 `skill:<name>` pattern |
 | 权限模式 'allow' | 直接执行，不询问用户 |
 | 权限模式 'ask' | 触发 Permission.ask() |
 | 权限模式 'deny' | 拒绝执行，返回错误 |
+| 通配符匹配 | `skill:*` / `skill:code-*` 等模式正确匹配 |
 
 ---
 
@@ -659,8 +692,8 @@ xlsx-skill/
 - [x] 新字段（userInvocable, disableModelInvocation, scope）解析场景已覆盖
 - [x] 字段验证（name, description 长度和格式）场景已覆盖
 - [x] 新接口（listUserInvocable, listModelInvocable）测试场景已覆盖
-- [x] Commands 模块集成场景已完整覆盖（主要路径）
-- [x] SkillTool 条件注册场景已覆盖（可选路径）
+- [x] Commands 模块集成场景已完整覆盖（用户路径）
+- [x] ToolScheduler 集成场景已覆盖（Agent 路径，含 SkillTool 始终注册、description 预算策略三档行为）
 - [x] 默认值处理测试已覆盖
 - [x] scope 自动识别测试已覆盖
 - [x] 项目级覆盖全局级的优先级测试已明确

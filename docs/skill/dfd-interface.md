@@ -10,34 +10,40 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                         用户                                     │
-│                          │                                       │
-│            ┌─────────────┴──────────────┐                        │
-│            │                            │                        │
-│            ▼                            ▼                        │
-│   ┌─────────────────┐       ┌─────────────────────┐            │
-│   │ 文件系统         │       │ CLI / Commands      │            │
-│   │ (SKILL.md 文件)  │       │ (/<skill-name>)     │            │
-│   └────────┬────────┘       └────────┬────────────┘            │
-│            │                         │                          │
-│            │                         │ (主要消费者)              │
-│            ▼                         ▼                          │
-│   ┌────────────────────────────────────────────────┐           │
-│   │                 Skill 模块                      │           │
-│   │                                                 │           │
-│   │  SkillLoader ──→ SkillRegistry                 │           │
-│   │                      │                          │           │
-│   │                      │ (可选)                   │           │
-│   │                      └──→ SkillTool             │           │
-│   └──────────────────────┬──────────────────────────┘           │
-│                          │                                      │
-│                          ▼ (仅当存在 model-invocable skills)     │
-│   ┌────────────────────────────────────────────────┐           │
-│   │              ToolScheduler                      │           │
-│   │                    │                            │           │
-│   │                    ▼                            │           │
-│   │  Permission ←── Policy ←── Agent/Lifecycle     │           │
-│   └────────────────────────────────────────────────┘           │
+│                              用户                                 │
+│                               │                                   │
+│         ┌─────────────────────┼─────────────────────┐             │
+│         │                     │                     │             │
+│         ▼                     ▼                     ▼             │
+│  ┌───────────┐      ┌──────────────────┐   ┌──────────────┐      │
+│  │ 文件系统  │      │ CLI / Commands   │   │  Agent       │      │
+│  │ SKILL.md  │      │ (/<skill-name>)  │   │ (LLM 决策)   │      │
+│  └─────┬─────┘      └────────┬─────────┘   └──────┬───────┘      │
+│        │                     │ 用户路径           │ Agent 路径    │
+│        │                     │                    ▼               │
+│        │                     │           ┌────────────────┐       │
+│        │                     │           │ ToolScheduler  │       │
+│        │                     │           │ • 注册SkillTool│       │
+│        │                     │           │ • 权限评估     │       │
+│        │                     │           │ • 调度执行     │       │
+│        │                     │           └───────┬────────┘       │
+│        │                     │                   │                │
+│        ▼                     ▼                   ▼                │
+│  ┌────────────────────────────────────────────────────────┐      │
+│  │                    Skill 模块                            │      │
+│  │                                                          │      │
+│  │  SkillLoader ──扫描──→ SkillRegistry ──导出──→ SkillTool│      │
+│  │                            │                              │      │
+│  │              listUserInvocable()  listModelInvocable()   │      │
+│  │              (供 Commands)         (供 SkillTool desc)   │      │
+│  │              load()  ──── load()                          │      │
+│  └──────────────────────────────────────────────────────────┘      │
+│                              │                                     │
+│                              ▼                                     │
+│                    ┌───────────────────┐                          │
+│                    │  Permission        │                          │
+│                    │ (skill:<name>)     │ ← 仅 Agent 路径          │
+│                    └───────────────────┘                          │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -47,9 +53,9 @@
 |------|----------|------|
 | 文件系统 | 输入 | 读取 SKILL.md 文件和目录中的辅助文件列表 |
 | Config | 输入 | 获取配置目录路径 |
-| **Commands** | **双向（主要）** | **注册 user-invocable skills 为斜杠命令；接收 reload 命令** |
-| ToolScheduler | 输出（可选） | 仅当存在 model-invocable skills 时注册 SkillTool |
-| Permission | 间接 | 通过 ToolScheduler 进行权限检查（仅 model-invocable） |
+| **Commands** | **双向（用户路径）** | 启动时拉 `listUserInvocable()` 注册斜杠命令；用户触发时调 `load()`；接收 reload 命令 |
+| **ToolScheduler** | **双向（Agent 路径）** | 启动时无条件注册 SkillTool 为 module 工具；构建 description 时调 `listModelInvocable()`；Agent 调用时调 `load()` |
+| Permission | 间接（通过 SkillTool） | SkillTool 执行时评估 `skill:<name>` 权限规则 |
 
 ---
 
@@ -116,38 +122,48 @@
    └── Agent 按照 Skill 指令执行任务
 ```
 
-### 2.3 Skill 加载流程（Agent 调用 - 可选路径）
+### 2.3 Skill 加载流程（Agent 调用 - Agent 路径）
 
-**注意**：此流程仅在 Skill 配置 `disable-model-invocation: false` 时才可用。默认情况下，Agent 不知道 Skill 的存在。
+**前置条件**：SkillTool 已由 ToolScheduler 在启动时无条件注册。Agent 在工具列表中看到 `skill` 工具及其 description（含所有 `disableModelInvocation: false` 的 skill 名+描述）。
 
 ```
-1. [外部] Agent 通过 ToolScheduler 调用 skill 工具
-   └── 参数: { name: "code-review" }
-   └── 前提: SkillTool 已注册（存在 model-invocable skills）
+1. [启动时] ToolScheduler 注册 SkillTool
+   └── this.registry.register(SkillTool, 'module')
 
-2. [外部] ToolScheduler 执行权限检查
+2. [构建工具列表时] SkillTool description 动态构建
+   ├── 调用 SkillRegistry.listModelInvocable()
+   ├── 应用 1% 上下文预算策略（详见 architecture.md §2.4）
+   ├── 列表为空 → "No skills are currently available."
+   └── 列表非空 → "<available_skills>...<skill>...</skill>...</available_skills>"
+
+3. [外部] Agent 决策调用 skill 工具
+   └── 参数: { name: "code-review" }
+
+4. [外部] ToolScheduler 执行权限评估
+   ├── pattern: skill:code-review
    ├── 查询 Policy 获取决策
    ├── 决策为 'ask' → 调用 Permission.ask()
-   └── 决策为 'deny' → 拒绝执行
+   ├── 决策为 'deny' → 拒绝执行，返回错误
+   └── 决策为 'allow' → 继续
 
-3. [内部] SkillTool.execute() 被调用
+5. [内部] SkillTool.execute() 被调用
    └── 调用 SkillRegistry.load(name)
 
-4. [内部] SkillRegistry 查找 Skill
+6. [内部] SkillRegistry 查找 Skill
    ├── 缓存命中 → 返回 SkillInfo
    └── 缓存未命中 → 触发扫描
 
-5. [内部] SkillLoader 读取 Skill 目录内容
+7. [内部] SkillLoader 读取 Skill 目录内容
    ├── 解析 SKILL.md，提取 content
    ├── 扫描目录，列出辅助文件
    └── 返回 SkillContent（含 files 列表）
 
-6. [内部] SkillTool 格式化输出
+8. [内部] SkillTool 格式化输出
    ├── 包含 baseDir
    ├── 包含 files 列表（如有辅助文件）
    └── 返回 { title, output, metadata }
 
-7. [外部] ToolScheduler 返回结果给 Agent
+9. [外部] ToolScheduler 返回 tool result 给 Agent
    └── Agent 可通过 baseDir 访问辅助文件
 ```
 
@@ -274,36 +290,48 @@ async function listModelInvocable(): Promise<SkillInfo[]>
 
 | 项 | 说明 |
 |----|------|
-| 调用方 | ToolScheduler（用于决定是否注册 SkillTool） |
+| 调用方 | SkillTool（用于动态构建 description） |
 | 输入 | 无 |
-| 输出 | disableModelInvocation 为 false 的 SkillInfo 数组 |
+| 输出 | disableModelInvocation 为 false 的 SkillInfo 数组（按名排序） |
 | 副作用 | 首次调用触发目录扫描 |
 
-### 3.2 SkillTool 接口（可选）
+### 3.2 SkillTool 接口
 
-**注意**：SkillTool 仅在存在 `disableModelInvocation: false` 的 Skill 时才注册到 ToolScheduler。默认情况下，所有 Skills 都是 `disableModelInvocation: true`，因此 SkillTool 通常不会注册。
+**注册方式**：SkillTool 由 ToolScheduler 在启动时**无条件注册**为 module 工具，不依赖 Skill 列表是否为空。
 
 ```typescript
 const SkillTool: Tool = {
   name: 'skill',
-  description: string,  // 动态生成，仅包含 model-invocable Skill 列表
+  description: await buildDescription(),  // 动态构建，列出 model-invocable Skill
   parameters: z.object({
-    name: z.string()
+    name: z.string().describe('The skill name to load')
   }),
-  category: 'skill',
+  category: 'readonly',
   source: 'module',
   execute: async (params, context) => SkillToolResult
+}
+
+// description 构建逻辑
+async function buildDescription(): Promise<string> {
+  const skills = await Skill.listModelInvocable()
+  if (skills.length === 0) {
+    return 'No skills are currently available.'
+  }
+  // 应用 1% 上下文预算策略，详见 architecture.md §2.4
+  return formatCommandsWithinBudget(skills, contextWindowTokens)
 }
 ```
 
 | 项 | 说明 |
 |----|------|
-| 注册条件 | 存在至少一个 `disableModelInvocation: false` 的 Skill |
-| 注册方 | ToolScheduler |
+| 注册条件 | **无条件**（始终注册） |
+| 注册方 | ToolScheduler（启动时） |
 | 参数 | `{ name: string }` |
 | 返回值 | `{ title, output, metadata }` |
-| 权限类别 | skill（readonly 级别） |
-| description 内容 | 仅包含 model-invocable 的 Skill（不包含 user-only skills） |
+| 并发类别 | `readonly`（与 web_search / web_fetch 同档） |
+| description 内容 | 仅列出 model-invocable Skill（不包含 user-only skills），按 1% 上下文预算 |
+| description 刷新 | 每次 ToolScheduler 取 description 时调 `listModelInvocable()` 现算 |
+| 空列表行为 | description 提示 "No skills are currently available."，工具仍存在 |
 
 ### 3.3 依赖的外部接口
 
@@ -370,10 +398,12 @@ function getProjectConfigDir(): string | undefined
 
 当前版本不发布事件。未来可扩展：
 
-| 事件 | 触发时机 | 携带数据 |
-|------|----------|----------|
-| `Skill.Event.Reloaded` | 重载完成 | 新的 Skill 列表 |
-| `Skill.Event.LoadFailed` | 加载失败 | 错误信息 |
+| 事件 | 触发时机 | 携带数据 | 用途 |
+|------|----------|----------|------|
+| `Skill.Event.Reloaded` | 重载完成 | 新的 Skill 列表 | 让 SkillTool 缓存的 description 失效；让 Commands 重新注册斜杠命令 |
+| `Skill.Event.LoadFailed` | 加载失败 | 错误信息 | UI 通知 |
+
+> 当前 description 采用"取时现算"策略（见 [architecture.md §9.3](architecture.md#L580)），不缓存，因此事件刷新机制属于性能优化而非必需。
 
 ---
 
@@ -458,11 +488,12 @@ Agent 接收包含 Skill 指令的上下文
 Agent 执行任务
 ```
 
-这种设计的优势：
-- **按需加载**：只在用户触发时加载 Skill，避免 Token 浪费
-- **用户主导**：用户明确知道何时使用哪个 Skill
-- **简洁上下文**：Agent 的系统 prompt 不被 Skill 列表干扰
-- **明确控制**：Skill 默认对 Agent 不可见（disable-model-invocation: true）
+用户路径的设计要点：
+- **完整内容注入**：用户显式触发表示明确意图，注入完整 SKILL.md 内容到对话上下文
+- **不经过 SkillTool**：用户路径与 Agent 路径解耦，Commands 直接调 `Skill.load()`，不走工具调度
+- **不消耗 Agent 决策成本**：用户已替 Agent 做出"使用哪个 skill"的决定
+
+> Agent 路径（SkillTool）的数据流见 §2.3。两条路径基于同一份 SkillRegistry 缓存，保证视图一致。
 
 ---
 
@@ -490,7 +521,7 @@ Agent 执行任务
   │             │               │                  │            │  instructions
 ```
 
-### 8.2 Agent 调用 Skill 序列（可选路径 - 仅当 disable-model-invocation: false）
+### 8.2 Agent 调用 Skill 序列（Agent 路径 - SkillTool 始终注册）
 
 ```
 Agent          ToolScheduler      Policy      Permission      SkillTool      SkillRegistry      SkillLoader
@@ -531,9 +562,10 @@ Agent          ToolScheduler      Policy      Permission      SkillTool      Ski
 - [x] 缓存一致性策略明确
 - [x] Skill 目录和辅助文件的数据流已说明
 - [x] Agent 访问辅助文件的责任边界已明确
-- [x] 用户调用流程（主要路径）已清晰说明
-- [x] Agent 调用流程（可选路径）已标注条件
-- [x] Commands 模块集成已详细说明
+- [x] 用户调用流程（用户路径）已清晰说明
+- [x] Agent 调用流程（Agent 路径）已清晰说明，含 SkillTool 始终注册的语义
+- [x] Commands 模块集成（用户路径）和 ToolScheduler 集成（Agent 路径）均已详细说明
 - [x] 新增字段（userInvocable, disableModelInvocation, scope）已体现在数据流中
 - [x] 新增接口（listUserInvocable, listModelInvocable）已完整定义
-- [x] SkillTool 作为可选组件的条件已明确
+- [x] SkillTool 始终注册的语义已明确（包括空列表退化行为）
+- [x] 两条路径基于同一份缓存的视图一致性已说明

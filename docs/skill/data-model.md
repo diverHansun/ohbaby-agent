@@ -27,7 +27,7 @@ interface SkillInfo {
   /** 是否允许用户通过 /<name> 直接调用，默认 true */
   userInvocable: boolean
 
-  /** 是否禁止 Agent 主动调用，默认 true（ohbaby-agent 设计：Skill 默认不暴露给 Agent） */
+  /** 是否禁止 Agent 主动调用，默认 false（Skill 默认对 Agent 可见，与 claude-code/opencode 一致） */
   disableModelInvocation: boolean
 
   /** Skill 来源：user（用户级）或 project（项目级） */
@@ -106,8 +106,6 @@ interface SkillFile {
 ---
 name: skill-name
 description: Brief description of the skill
-user-invocable: true
-disable-model-invocation: true
 ---
 
 # Skill Title
@@ -115,22 +113,27 @@ disable-model-invocation: true
 Detailed instructions and guidelines...
 ```
 
+> 默认值即推荐值（`user-invocable: true`、`disable-model-invocation: false`），无需写出。仅当需要偏离默认（例如把 skill 隐藏给 Agent）时才显式声明。
+
 ### 2.2 Frontmatter 字段
 
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `name` | string | **是** | - | Skill 唯一标识，用于 `/<name>` 命令调用 |
-| `description` | string | **是** | - | 简短描述，显示在命令列表中 |
+| `description` | string | **是** | - | 简短描述，显示在命令列表 / SkillTool description 中 |
 | `user-invocable` | boolean | 否 | `true` | 是否允许用户通过 `/<name>` 直接调用 |
-| `disable-model-invocation` | boolean | 否 | `true` | 是否禁止 Agent 主动调用 |
+| `disable-model-invocation` | boolean | 否 | `false` | 是否禁止 Agent 主动调用（默认允许） |
 | `license` | string | 否 | - | 许可证信息 |
 | `compatibility` | string | 否 | - | 兼容性说明 |
 | `metadata` | object | 否 | - | 自定义元数据 |
 
-**ohbaby-agent 设计理念**：
-- `disable-model-invocation` 默认为 `true`，即 **Skill 默认不暴露给 Agent**
-- 用户通过 `/<skill-name>` 手动触发，按需注入到对话上下文
-- 这与 Claude Code 不同（Claude Code 默认暴露给 Agent 自动发现）
+**设计理念**（对齐 claude-code 的二维属性正交模型）：
+- `user-invocable` 与 `disable-model-invocation` **正交**，分别控制两条触发路径
+  - `user-invocable: true` → Commands 模块注册 `/<name>` 斜杠命令，用户可直接触发
+  - `disable-model-invocation: false` → SkillTool 在 description 中列出该 skill，Agent 可通过 `skill({name})` 加载
+- 一个 skill 默认对**两条路径都开放**（用户和 Agent 都能用）
+- 用户想"只给自己用、不暴露 Agent"时，显式写 `disable-model-invocation: true`
+- 用户想"只给 Agent 用、不出现在斜杠命令补全里"时，显式写 `user-invocable: false`
 
 **验证 Schema**：
 ```typescript
@@ -162,7 +165,7 @@ const SkillFrontmatterSchema = z.object({
 
   // 可选字段
   'user-invocable': z.boolean().optional().default(true),
-  'disable-model-invocation': z.boolean().optional().default(true),
+  'disable-model-invocation': z.boolean().optional().default(false),
   license: z.string().optional(),
   compatibility: z.string().max(500).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
@@ -391,21 +394,24 @@ ohbaby-agent 完全支持 OpenCode/Claude Code 的 Skill 目录结构：
 - opencode 提供 `baseDir`（通过 `dir` 字段）让 Agent 自行探索
 - ohbaby-agent 额外提供 `files` 列表，方便 Agent 了解可用资源
 
-### 7.4 设计差异
+### 7.4 设计对齐
 
-ohbaby-agent 与 Claude Code/opencode 的主要差异：
+ohbaby-agent 与 Claude Code/opencode 在 Skill 触发模型上**全面对齐**：
 
 | 特性 | Claude Code | opencode | ohbaby-agent |
 |------|-------------|----------|-----------|
-| Agent 自动发现 Skill | ✅ 默认启用 | ✅ 默认启用 | ❌ 默认禁用 |
-| `disable-model-invocation` 默认值 | `false` | - | `true` |
-| Skill 触发方式 | Agent 自动 + 用户手动 | Agent 自动 + 用户手动 | **仅用户手动** |
-| Skill 元数据加载时机 | 启动时 | 启动时 | 按需（用户触发时） |
+| Agent 自动发现 Skill | ✅ 默认启用 | ✅ 默认启用 | ✅ 默认启用 |
+| `disable-model-invocation` 默认值 | `false` | 不区分 | `false` |
+| Skill 元数据加载时机 | 启动时扫描 | 启动时扫描 | 启动时扫描（懒加载至首次访问） |
+| Agent 看到 Skill 列表的渠道 | SkillTool description | system prompt `<available_skills>` | SkillTool description |
+| 用户 `/<name>` 触发 | ✅ | ❌（无斜杠命令系统） | ✅ |
+| 二维属性 `user-invocable` × `disable-model-invocation` | ✅ 正交 | 不区分 | ✅ 正交 |
 
 **ohbaby-agent 设计理念**：
-- Skill 是用户的专属工具，用户明确知道何时需要使用
-- 避免 Skill 元数据占用系统提示 Token
-- 通过 `/<skill-name>` 按需注入，保持上下文简洁
+- 对齐 claude-code 的二维属性模型：用户路径（斜杠命令）与 Agent 路径（SkillTool）正交、互不干扰
+- Skill 默认对两条路径都开放，与参考实现的"开箱即可被发现"行为一致
+- SkillTool 始终注册为 module 工具（与 ToolScheduler 现有的 builtin/module/mcp 来源模型一致），避免"工具集合随配置变化"的不确定性
+- description 采用 1% 上下文预算策略，避免 skill 数量增长把 prompt 撑爆
 
 ### 7.5 增强功能
 
