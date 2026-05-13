@@ -188,10 +188,82 @@ describe("MessageManager", () => {
       type: "text",
       text: "Hello",
     });
+    await manager.appendPart(assistant.id, {
+      type: "tool",
+      callId: "call_1",
+      tool: "read_file",
+      state: {
+        status: "completed",
+        input: {},
+        output: "file contents",
+      },
+    });
+    const compacted = await manager.appendPart(assistant.id, {
+      type: "tool",
+      callId: "call_2",
+      tool: "read_file",
+      state: {
+        status: "completed",
+        input: {},
+        output: "old file contents",
+      },
+    });
+    await manager.updatePart(compacted.id, {
+      time: { compacted: 1_700_000_000_001 },
+    });
 
     await expect(manager.toModelMessages("session_1")).resolves.toEqual([
       { role: "user", content: "Say hello" },
-      { role: "assistant", content: "brieflyHello" },
+      { role: "assistant", content: "brieflyHellofile contents" },
+    ]);
+  });
+
+  it("orders context summaries before remaining active history", async () => {
+    const manager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const old = await manager.createMessage({
+      sessionId: "session_1",
+      role: "user",
+      agent: "default",
+    });
+    const recent = await manager.createMessage({
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+    });
+    const summary = await manager.createMessage({
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "context",
+    });
+    const oldPart = await manager.appendPart(old.id, {
+      type: "text",
+      text: "old history",
+    });
+    await manager.updatePart(oldPart.id, {
+      time: { compacted: 1_700_000_000_001 },
+    });
+    await manager.appendPart(recent.id, {
+      type: "text",
+      text: "recent history",
+    });
+    await manager.appendPart(summary.id, {
+      type: "text",
+      text: "<state_snapshot>summary</state_snapshot>",
+      synthetic: true,
+      metadata: { kind: "context-summary" },
+    });
+
+    await expect(manager.toModelMessages("session_1")).resolves.toEqual([
+      {
+        role: "assistant",
+        content: "<state_snapshot>summary</state_snapshot>",
+      },
+      { role: "assistant", content: "recent history" },
     ]);
   });
 });

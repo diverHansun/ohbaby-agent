@@ -74,6 +74,11 @@ const PartBaseSchema = {
   messageId: z.string(),
   sessionId: z.string(),
   orderIndex: z.number(),
+  time: z
+    .object({
+      compacted: z.number().optional(),
+    })
+    .optional(),
 } as const;
 
 const ToolStateSchema = z.discriminatedUnion("status", [

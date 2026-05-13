@@ -8,6 +8,10 @@ export interface MessageTime {
   readonly completed?: number;
 }
 
+export interface PartTime {
+  readonly compacted?: number;
+}
+
 interface MessageBase {
   readonly id: string;
   readonly sessionId: string;
@@ -65,6 +69,7 @@ export interface PartBase {
   readonly messageId: string;
   readonly sessionId: string;
   readonly orderIndex: number;
+  readonly time?: PartTime;
 }
 
 export interface TextPart extends PartBase {
@@ -162,6 +167,7 @@ export interface UpdatePartPatch {
   readonly text?: string;
   readonly delta?: string;
   readonly state?: ToolState;
+  readonly time?: PartTime;
   readonly metadata?: Record<string, unknown>;
 }
 
