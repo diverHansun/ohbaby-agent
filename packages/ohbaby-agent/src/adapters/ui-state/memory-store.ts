@@ -6,7 +6,7 @@ import type {
   UiSnapshot,
   UiSession,
 } from "ohbaby-sdk";
-import type { CoreStateStore } from "./types.js";
+import type { UiStateStore } from "./types.js";
 
 interface MutableUiSnapshot {
   sessions: UiSession[];
@@ -65,9 +65,9 @@ function toMutableSnapshot(snapshot: UiSnapshot): MutableUiSnapshot {
   };
 }
 
-export function createInMemoryCoreStateStore(
+export function createInMemoryUiStateStore(
   initialSnapshot: UiSnapshot,
-): CoreStateStore {
+): UiStateStore {
   const snapshot = toMutableSnapshot(initialSnapshot);
 
   return {

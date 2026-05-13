@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UiSnapshot } from "ohbaby-sdk";
-import { createInMemoryCoreStateStore } from "./memory-store.js";
+import { createInMemoryUiStateStore } from "./memory-store.js";
 
 const BASE_SNAPSHOT: UiSnapshot = {
   activeSessionId: null,
@@ -10,9 +10,9 @@ const BASE_SNAPSHOT: UiSnapshot = {
   status: { kind: "idle" },
 };
 
-describe("createInMemoryCoreStateStore", () => {
+describe("createInMemoryUiStateStore", () => {
   it("returns cloned snapshots instead of exposing mutable state", async () => {
-    const store = createInMemoryCoreStateStore(BASE_SNAPSHOT);
+    const store = createInMemoryUiStateStore(BASE_SNAPSHOT);
 
     await store.upsertSession({
       id: "session_1",
@@ -34,7 +34,7 @@ describe("createInMemoryCoreStateStore", () => {
   });
 
   it("stores session, run, active session, and status through async methods", async () => {
-    const store = createInMemoryCoreStateStore(BASE_SNAPSHOT);
+    const store = createInMemoryUiStateStore(BASE_SNAPSHOT);
 
     await store.upsertSession({
       id: "session_1",

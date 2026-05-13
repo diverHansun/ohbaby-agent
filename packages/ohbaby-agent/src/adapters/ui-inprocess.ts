@@ -25,8 +25,8 @@ import {
   cloneMessage,
   cloneRun,
   cloneSession,
-  createInMemoryCoreStateStore,
-} from "../core/state/index.js";
+  createInMemoryUiStateStore,
+} from "./ui-state/index.js";
 
 const EMPTY_SNAPSHOT: UiSnapshot = {
   sessions: [],
@@ -162,7 +162,7 @@ export function createInProcessUiBackendClient(
     ? { initialSnapshot: optionsOrSnapshot }
     : optionsOrSnapshot;
   const initialSnapshot = options.initialSnapshot ?? EMPTY_SNAPSHOT;
-  const stateStore = createInMemoryCoreStateStore(initialSnapshot);
+  const stateStore = createInMemoryUiStateStore(initialSnapshot);
   const messageManager =
     options.messageManager ??
     createMessageManager({

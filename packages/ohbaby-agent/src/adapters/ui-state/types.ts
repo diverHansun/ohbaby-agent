@@ -1,6 +1,6 @@
 import type { UiRun, UiRunStatus, UiSession, UiSnapshot } from "ohbaby-sdk";
 
-export interface CoreStateStore {
+export interface UiStateStore {
   readSnapshot(): Promise<UiSnapshot>;
   getSession(sessionId: string): Promise<UiSession | undefined>;
   upsertSession(session: UiSession): Promise<void>;

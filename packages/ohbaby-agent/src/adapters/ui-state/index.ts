@@ -1,8 +1,8 @@
-export type { CoreStateStore } from "./types.js";
+export type { UiStateStore } from "./types.js";
 export {
   cloneMessage,
   cloneRun,
   cloneSession,
   cloneSnapshot,
-  createInMemoryCoreStateStore,
+  createInMemoryUiStateStore,
 } from "./memory-store.js";
