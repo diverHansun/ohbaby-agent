@@ -21,7 +21,7 @@ export interface StreamGapData {
   readonly requestedLastEventId: number;
   readonly oldestRetainedEventId: number;
   readonly latestEventId: number;
-  readonly reason: "buffer-overflow";
+  readonly reason: "buffer-overflow" | "bridge-restarted";
 }
 
 export type StreamGapEvent = StreamEvent<StreamGapData> & {
@@ -33,7 +33,10 @@ export type StreamBridgeEvent = StreamEvent | StreamGapEvent;
 export const HEARTBEAT_SENTINEL = Symbol("stream.heartbeat");
 export const END_SENTINEL = Symbol("stream.end");
 
-export type StreamBridgeYield = StreamBridgeEvent | typeof HEARTBEAT_SENTINEL;
+export type StreamBridgeYield =
+  | StreamBridgeEvent
+  | typeof HEARTBEAT_SENTINEL
+  | typeof END_SENTINEL;
 
 export interface StreamBridge {
   publish(scope: StreamScope, event: string, data: unknown): number;

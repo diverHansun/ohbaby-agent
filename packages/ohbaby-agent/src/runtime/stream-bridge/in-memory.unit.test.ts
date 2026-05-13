@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createInMemoryStreamBridge, HEARTBEAT_SENTINEL } from "./index.js";
+import {
+  createInMemoryStreamBridge,
+  END_SENTINEL,
+  HEARTBEAT_SENTINEL,
+} from "./index.js";
 
 async function nextEvent(
   iterable: AsyncIterable<unknown>,
@@ -155,10 +159,9 @@ describe("InMemoryStreamBridge", () => {
 
     expect(() => bridge.subscribe("app", -1)).toThrow(/lastEventId/);
     expect(() => bridge.subscribe("app", 1.5)).toThrow(/lastEventId/);
-    expect(() => bridge.subscribe("app", 999)).toThrow(/lastEventId/);
   });
 
-  it("drops queued replay events after end", async () => {
+  it("drains queued events before yielding end after scope end", async () => {
     const bridge = createInMemoryStreamBridge();
     bridge.publish("app", "one", { value: 1 });
     bridge.publish("app", "two", { value: 2 });
@@ -166,8 +169,22 @@ describe("InMemoryStreamBridge", () => {
     const iterator = bridge.subscribe("app", 0)[Symbol.asyncIterator]();
     bridge.end("app");
 
-    const result = await iterator.next();
-    expect(result.done).toBe(true);
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { id: 1, event: "one" },
+    });
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { id: 2, event: "two" },
+    });
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: END_SENTINEL,
+    });
+    await expect(iterator.next()).resolves.toEqual({
+      done: true,
+      value: undefined,
+    });
   });
 
   it("completes active subscriptions when a scope ends", async () => {
@@ -176,8 +193,51 @@ describe("InMemoryStreamBridge", () => {
 
     bridge.end("run/run_1");
 
-    const result = await iterator.next();
-    expect(result.done).toBe(true);
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: END_SENTINEL,
+    });
+    await expect(iterator.next()).resolves.toEqual({
+      done: true,
+      value: undefined,
+    });
+  });
+
+  it("immediately ends subscriptions for already closed run scopes", async () => {
+    const bridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 1 });
+    bridge.end("run/run_1");
+
+    const iterator = bridge.subscribe("run/run_1")[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: END_SENTINEL,
+    });
+    await expect(iterator.next()).resolves.toEqual({
+      done: true,
+      value: undefined,
+    });
+  });
+
+  it("emits bridge-restarted gap when reconnect cursor is ahead of retained events", async () => {
+    const bridge = createInMemoryStreamBridge();
+
+    const iterator = bridge.subscribe("app", 10)[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: {
+        id: 0,
+        event: "stream.gap",
+        data: {
+          scope: "app",
+          requestedLastEventId: 10,
+          oldestRetainedEventId: 1,
+          latestEventId: 0,
+          reason: "bridge-restarted",
+        },
+      },
+    });
   });
 
   it("stops queued events after the consumer returns early", async () => {

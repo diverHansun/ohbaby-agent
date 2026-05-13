@@ -180,6 +180,24 @@ describe("InMemoryRunLedger", () => {
     });
   });
 
+  it("rejects interrupted transitions from terminal statuses", async () => {
+    const ledger = createLedger();
+    await ledger.createPending({
+      runId: "done_run",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+    await ledger.markRunning("done_run");
+    await ledger.markSucceeded("done_run");
+
+    await expect(
+      ledger.markInterrupted({ statuses: ["succeeded"] }),
+    ).rejects.toBeInstanceOf(InvalidRunTransitionError);
+    await expect(ledger.get("done_run")).resolves.toMatchObject({
+      status: "succeeded",
+    });
+  });
+
   it("filters active runs and lists session history newest first", async () => {
     const ledger = createLedger();
     await ledger.createPending({

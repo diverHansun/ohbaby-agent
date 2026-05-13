@@ -10,7 +10,7 @@ import type {
   StreamGapEvent,
   StreamScope,
 } from "./types.js";
-import { HEARTBEAT_SENTINEL } from "./types.js";
+import { END_SENTINEL, HEARTBEAT_SENTINEL } from "./types.js";
 
 interface BufferedEvent {
   readonly scope: StreamScope;
@@ -24,7 +24,11 @@ interface ScopeState {
 }
 
 type ReplayPlan =
-  | { readonly kind: "gap"; readonly requestedLastEventId: number }
+  | {
+      readonly kind: "gap";
+      readonly requestedLastEventId: number;
+      readonly reason: StreamGapData["reason"];
+    }
   | {
       readonly kind: "replay";
       readonly fromId: number;
@@ -110,12 +114,8 @@ function cloneJsonSerializable(data: unknown): JsonValue {
   }
 }
 
-function validateLastEventId(lastEventId: number, latestEventId: number): void {
-  if (
-    !Number.isInteger(lastEventId) ||
-    lastEventId < 0 ||
-    lastEventId > latestEventId
-  ) {
+function validateLastEventId(lastEventId: number): void {
+  if (!Number.isInteger(lastEventId) || lastEventId < 0) {
     throw new RangeError("lastEventId must be a retained non-negative integer");
   }
 }
@@ -126,6 +126,7 @@ class StreamSubscription implements AsyncIterableIterator<StreamBridgeYield> {
     result: IteratorResult<StreamBridgeYield>,
   ) => void)[] = [];
   private closed = false;
+  private ending = false;
   private readonly heartbeatTimer?: ReturnType<typeof setInterval>;
 
   constructor(
@@ -155,8 +156,7 @@ class StreamSubscription implements AsyncIterableIterator<StreamBridgeYield> {
 
     const queued = this.queue.shift();
     if (queued) {
-      this.markDelivered(queued);
-      return Promise.resolve({ done: false, value: queued });
+      return Promise.resolve(this.deliver(queued));
     }
 
     return new Promise((resolve) => {
@@ -170,14 +170,13 @@ class StreamSubscription implements AsyncIterableIterator<StreamBridgeYield> {
   }
 
   push(event: StreamBridgeEvent): void {
-    if (this.closed) {
+    if (this.closed || this.ending) {
       return;
     }
 
     const waiter = this.waiting.shift();
     if (waiter) {
-      this.markDelivered(event);
-      waiter({ done: false, value: event });
+      waiter(this.deliver(event));
       return;
     }
 
@@ -191,7 +190,7 @@ class StreamSubscription implements AsyncIterableIterator<StreamBridgeYield> {
   }
 
   pushHeartbeat(): void {
-    if (this.closed || this.queue.length > 0) {
+    if (this.closed || this.ending || this.queue.length > 0) {
       return;
     }
 
@@ -201,7 +200,45 @@ class StreamSubscription implements AsyncIterableIterator<StreamBridgeYield> {
     }
   }
 
+  pushEnd(): void {
+    if (this.closed || this.ending) {
+      return;
+    }
+
+    this.ending = true;
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+    }
+
+    const waiter = this.waiting.shift();
+    if (waiter && this.queue.length === 0) {
+      waiter(this.deliver(END_SENTINEL));
+      return;
+    }
+
+    this.queue.push(END_SENTINEL);
+  }
+
   close(): void {
+    if (this.closed) {
+      return;
+    }
+
+    this.queue.splice(0);
+    this.finish();
+  }
+
+  private deliver(event: StreamBridgeYield): IteratorResult<StreamBridgeYield> {
+    if (event === END_SENTINEL) {
+      this.finish();
+      return { done: false, value: event };
+    }
+
+    this.markDelivered(event);
+    return { done: false, value: event };
+  }
+
+  private finish(): void {
     if (this.closed) {
       return;
     }
@@ -210,7 +247,6 @@ class StreamSubscription implements AsyncIterableIterator<StreamBridgeYield> {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
     }
-    this.queue.splice(0);
     this.onClose();
 
     for (const waiter of this.waiting.splice(0)) {
@@ -219,9 +255,31 @@ class StreamSubscription implements AsyncIterableIterator<StreamBridgeYield> {
   }
 
   private markDelivered(event: StreamBridgeYield): void {
-    if (event !== HEARTBEAT_SENTINEL) {
+    if (event !== HEARTBEAT_SENTINEL && event !== END_SENTINEL) {
       this.lastDeliveredEventId = event.id;
     }
+  }
+}
+
+class ClosedStreamSubscription implements AsyncIterableIterator<StreamBridgeYield> {
+  private delivered = false;
+
+  [Symbol.asyncIterator](): AsyncIterableIterator<StreamBridgeYield> {
+    return this;
+  }
+
+  next(): Promise<IteratorResult<StreamBridgeYield>> {
+    if (this.delivered) {
+      return Promise.resolve({ done: true, value: undefined });
+    }
+
+    this.delivered = true;
+    return Promise.resolve({ done: false, value: END_SENTINEL });
+  }
+
+  return(): Promise<IteratorResult<StreamBridgeYield>> {
+    this.delivered = true;
+    return Promise.resolve({ done: true, value: undefined });
   }
 }
 
@@ -229,6 +287,7 @@ export class InMemoryStreamBridge implements StreamBridge {
   private readonly capacity: number;
   private readonly heartbeatIntervalMs: number;
   private readonly scopes = new Map<StreamScope, ScopeState>();
+  private readonly endedScopes = new Set<StreamScope>();
 
   constructor(options: InMemoryStreamBridgeOptions = {}) {
     this.capacity = options.capacity ?? 100;
@@ -238,6 +297,7 @@ export class InMemoryStreamBridge implements StreamBridge {
   publish(scope: StreamScope, event: string, data: unknown): number {
     const jsonData = cloneJsonSerializable(data);
 
+    this.endedScopes.delete(scope);
     const state = this.getScopeState(scope);
     const entry = state.buffer.append({ scope, event, data: jsonData });
     const streamEvent = toStreamEvent(entry);
@@ -253,9 +313,20 @@ export class InMemoryStreamBridge implements StreamBridge {
     scope: StreamScope,
     lastEventId?: number,
   ): AsyncIterable<StreamBridgeYield> {
+    if (this.endedScopes.has(scope)) {
+      return new ClosedStreamSubscription();
+    }
+    if (
+      lastEventId === undefined &&
+      scope.startsWith("run/") &&
+      !this.scopes.has(scope)
+    ) {
+      return new ClosedStreamSubscription();
+    }
+
     const state = this.getScopeState(scope);
     if (lastEventId !== undefined) {
-      validateLastEventId(lastEventId, state.buffer.latestId);
+      validateLastEventId(lastEventId);
     }
 
     const initialLastDeliveredEventId = lastEventId ?? state.buffer.latestId;
@@ -279,13 +350,14 @@ export class InMemoryStreamBridge implements StreamBridge {
   }
 
   end(scope: StreamScope): void {
+    this.endedScopes.add(scope);
     const state = this.scopes.get(scope);
     if (!state) {
       return;
     }
 
     for (const subscriber of Array.from(state.subscribers)) {
-      subscriber.close();
+      subscriber.pushEnd();
     }
     this.scopes.delete(scope);
   }
@@ -313,7 +385,12 @@ export class InMemoryStreamBridge implements StreamBridge {
     const plan = this.getReplayPlan(state, lastEventId);
     if (plan.kind === "gap") {
       subscription.push(
-        this.createGapEvent(scope, state, plan.requestedLastEventId),
+        this.createGapEvent(
+          scope,
+          state,
+          plan.requestedLastEventId,
+          plan.reason,
+        ),
       );
       return;
     }
@@ -324,10 +401,19 @@ export class InMemoryStreamBridge implements StreamBridge {
   }
 
   private getReplayPlan(state: ScopeState, lastEventId: number): ReplayPlan {
+    if (lastEventId > state.buffer.latestId) {
+      return {
+        kind: "gap",
+        requestedLastEventId: lastEventId,
+        reason: "bridge-restarted",
+      };
+    }
+
     if (!state.buffer.isContinuous(lastEventId)) {
       return {
         kind: "gap",
         requestedLastEventId: lastEventId,
+        reason: "buffer-overflow",
       };
     }
 
@@ -342,13 +428,14 @@ export class InMemoryStreamBridge implements StreamBridge {
     scope: StreamScope,
     state: ScopeState,
     lastEventId: number,
+    reason: StreamGapData["reason"] = "buffer-overflow",
   ): StreamGapEvent {
     const data: StreamGapData = {
       scope,
       requestedLastEventId: lastEventId,
       oldestRetainedEventId: state.buffer.oldestId,
       latestEventId: state.buffer.latestId,
-      reason: "buffer-overflow",
+      reason,
     };
     const runId = runIdFromScope(scope);
 

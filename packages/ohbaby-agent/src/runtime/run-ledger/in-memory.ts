@@ -42,6 +42,14 @@ function normalizeLimit(options?: ListRunLedgerOptions): number | undefined {
   return options.limit;
 }
 
+function validateInterruptibleStatuses(statuses: Iterable<RunStatus>): void {
+  for (const status of statuses) {
+    if (!INTERRUPTABLE_STATUSES.has(status)) {
+      throw new InvalidRunTransitionError("bulk", status, "interrupted");
+    }
+  }
+}
+
 export class InMemoryRunLedger implements RunLedger {
   private readonly records = new Map<string, RunLedgerRecord>();
   private readonly now: () => number;
@@ -133,6 +141,7 @@ export class InMemoryRunLedger implements RunLedger {
   ): Promise<MarkInterruptedResult> {
     return this.withAsyncBoundary(() => {
       const statuses = new Set(options.statuses ?? INTERRUPTABLE_STATUSES);
+      validateInterruptibleStatuses(statuses);
       const endedAt = this.now();
       let updatedCount = 0;
 
