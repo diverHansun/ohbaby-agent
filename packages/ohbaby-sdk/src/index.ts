@@ -1,8 +1,8 @@
 export type UiRunStatus =
-  | { kind: 'idle' }
-  | { kind: 'running'; runId: string; title?: string }
-  | { kind: 'waiting-for-permission'; requestId: string }
-  | { kind: 'error'; message: string; recoverable: boolean };
+  | { kind: "idle" }
+  | { kind: "running"; runId: string; title?: string }
+  | { kind: "waiting-for-permission"; requestId: string }
+  | { kind: "error"; message: string; recoverable: boolean };
 
 export interface UiSnapshot {
   readonly sessions: readonly UiSession[];
@@ -30,22 +30,22 @@ export interface UiRun {
 
 export interface UiMessage {
   readonly id: string;
-  readonly role: 'user' | 'assistant' | 'system' | 'tool';
+  readonly role: "user" | "assistant" | "system" | "tool";
   readonly parts: readonly UiMessagePart[];
   readonly createdAt: string;
 }
 
 export type UiMessagePart =
-  | { readonly type: 'text'; readonly text: string }
-  | { readonly type: 'reasoning'; readonly text: string }
-  | { readonly type: 'tool-call'; readonly call: UiToolCall }
-  | { readonly type: 'tool-result'; readonly result: UiToolResult };
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "reasoning"; readonly text: string }
+  | { readonly type: "tool-call"; readonly call: UiToolCall }
+  | { readonly type: "tool-result"; readonly result: UiToolResult };
 
 export interface UiToolCall {
   readonly id: string;
   readonly name: string;
   readonly input: Record<string, unknown>;
-  readonly status: 'pending' | 'running' | 'completed' | 'failed';
+  readonly status: "pending" | "running" | "completed" | "failed";
 }
 
 export interface UiToolResult {
@@ -65,7 +65,7 @@ export interface UiPermissionRequest {
 export interface UiPermissionChoice {
   readonly id: string;
   readonly label: string;
-  readonly intent: 'allow' | 'deny' | 'abort';
+  readonly intent: "allow" | "deny" | "abort";
 }
 
 export interface UiPermissionResponse {
@@ -74,13 +74,25 @@ export interface UiPermissionResponse {
 }
 
 export type UiEvent =
-  | { readonly type: 'snapshot'; readonly snapshot: UiSnapshot }
-  | { readonly type: 'session.updated'; readonly session: UiSession }
-  | { readonly type: 'message.appended'; readonly sessionId: string; readonly message: UiMessage }
-  | { readonly type: 'run.updated'; readonly run: UiRun }
-  | { readonly type: 'permission.requested'; readonly request: UiPermissionRequest }
-  | { readonly type: 'permission.resolved'; readonly requestId: string }
-  | { readonly type: 'status.updated'; readonly status: UiRunStatus };
+  | { readonly type: "snapshot"; readonly snapshot: UiSnapshot }
+  | { readonly type: "session.updated"; readonly session: UiSession }
+  | {
+      readonly type: "message.appended";
+      readonly sessionId: string;
+      readonly message: UiMessage;
+    }
+  | {
+      readonly type: "message.updated";
+      readonly sessionId: string;
+      readonly message: UiMessage;
+    }
+  | { readonly type: "run.updated"; readonly run: UiRun }
+  | {
+      readonly type: "permission.requested";
+      readonly request: UiPermissionRequest;
+    }
+  | { readonly type: "permission.resolved"; readonly requestId: string }
+  | { readonly type: "status.updated"; readonly status: UiRunStatus };
 
 export interface SubmitPromptOptions {
   readonly sessionId?: string;
@@ -99,7 +111,9 @@ export interface UiBackendClient {
   subscribeEvents(handler: UiEventHandler): UiUnsubscribe;
   submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void>;
   executeCommand(command: UiCommand): Promise<void>;
-  respondPermission(requestId: string, response: UiPermissionResponse): Promise<void>;
+  respondPermission(
+    requestId: string,
+    response: UiPermissionResponse,
+  ): Promise<void>;
   abortRun(runId?: string): Promise<void>;
 }
-
