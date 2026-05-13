@@ -2,159 +2,149 @@
 
 **测试分类标准**
 
-本文档定义 newbee-notebook 项目中的测试分类体系。所有测试文件必须归属于以下四种类型之一。
+本文档定义 ohbaby-agent 的测试分类体系。每个测试文件必须归属于以下四类之一，并在文件名中体现类型：`*.unit.test.ts`、`*.contract.test.ts`、`*.integration.test.ts`、`*.smoke.test.ts`。
 
 ---
 
 ## 一、分类总览
 
-| 类型 | 关键词 | 回答的质量问题 | pytest marker |
-|------|--------|-------------|---------------|
-| unit | 隔离、纯逻辑、mock 一切外部 | 这个函数/类的逻辑正确吗？ | `@pytest.mark.unit` |
-| contract | 接口边界、格式约定、协议 | 对外暴露的接口契约稳定吗？ | `@pytest.mark.contract` |
-| integration | 真实协作、组件串联 | 组件之间的协作正确吗？ | `@pytest.mark.integration` |
-| smoke | 基础设施、部署验证 | 系统的运行环境正常吗？ | `@pytest.mark.smoke` |
+| 类型 | 关键词 | 回答的质量问题 | 文件名后缀 |
+|------|--------|----------------|------------|
+| unit | 隔离、纯逻辑、mock 直接依赖 | 这个函数、类或模块的局部逻辑正确吗？ | `.unit.test.ts` |
+| contract | 接口边界、格式约定、协议稳定 | 消费者看到的接口契约稳定吗？ | `.contract.test.ts` |
+| integration | 真实协作、组件串联 | 多个真实组件一起工作时行为正确吗？ | `.integration.test.ts` |
+| smoke | 基础设施、启动、构建、环境 | 项目能在目标环境中启动或构建吗？ | `.smoke.test.ts` |
 
 ---
 
-## 二、各类型的详细定义
+## 二、各类型定义
 
 ### 1. unit -- 单元测试
 
-**定义**：在完全隔离的环境中，验证单个函数、类或模块的内部逻辑正确性。
+**定义**：在隔离环境中验证单个函数、类或模块的内部逻辑。
 
 **特征**：
-- 所有外部依赖（数据库、文件系统、网络、其他模块）均通过 mock/stub 隔离
-- 不启动任何服务或进程
-- 执行速度极快（单个测试文件应在秒级完成）
-- 失败时能精确定位到具体的逻辑错误
 
-**典型被测对象**：
-- 纯计算函数（compressor、token_counter、context_builder）
-- 业务逻辑类（service 层的编排逻辑、领域对象的行为）
-- 配置解析（config 对象的默认值和校验逻辑）
-- 工具函数（filename_decode、mode 归一化）
+- 不访问真实网络、真实 LLM API、真实外部进程。
+- 直接依赖使用 mock、stub 或 fake。
+- 执行速度应很快，适合频繁运行。
+- 失败时应能定位到具体逻辑错误。
 
-**判定标准**：如果测试中没有任何真实的 I/O 操作（网络请求、文件读写、数据库查询），且所有外部依赖都被 mock，则它是 unit 测试。
+**典型对象**：
 
----
+- `core/message` 的 factory、converter、id-generator。
+- `core/lifecycle` 的退出条件、并发状态管理。
+- `runtime/stream-bridge` 的 RingBuffer、ReplayPlan。
+- `runtime/scheduler` 的 heap 和 next fire time 计算。
+- `config/llm` 的配置校验。
+
+**判定标准**：如果只验证一个被测单元，且所有外部依赖都被替换，则它是 unit。
 
 ### 2. contract -- 契约测试
 
-**定义**：验证模块对外暴露的接口（HTTP API、协议端点、适配器接口）在格式、状态码、响应结构上符合约定。
+**定义**：验证模块对外暴露的接口、事件、DTO、adapter 协议在格式和语义上符合约定。
 
 **特征**：
-- 关注的是**接口格式**，而不是业务逻辑
-- 被测接口之下的业务层通常被 mock（只保留接口层本身是真实的）
-- 使用 TestClient 或协议级客户端发起真实的请求
-- 验证的是「消费者看到的契约」——请求格式、响应结构、状态码、错误格式
 
-**典型被测对象**：
-- FastAPI Router（HTTP 端点的请求/响应契约）
-- MCP 协议端点（协议消息格式）
-- SSE 流格式（事件类型、数据格式）
-- 外部依赖封装的对内接口（LLMClient 的返回类型承诺）
+- 关注输入/输出结构、事件顺序、错误形态，而不是内部计算过程。
+- 被测接口之下的业务层通常被 mock 或 fake。
+- 保留接口层本身真实执行。
 
-**判定标准**：如果测试的核心断言是「请求 X 格式的输入，得到 Y 格式的输出，状态码是 Z」，而不关心 Y 是怎么计算出来的，则它是 contract 测试。
+**典型对象**：
 
-**与 unit 测试的区别**：
-- unit 测试验证 service 内部的 if/else 逻辑是否正确
-- contract 测试验证 router 暴露给前端的 HTTP 接口格式是否稳定
-- 一个 router 的 contract 测试会 mock 整个 service 层；一个 service 的 unit 测试会 mock repository 层
+- `ohbaby-sdk` 的 `UiBackendClient`、`UiEvent`、command parser。
+- `adapters/ui-inprocess` 对 SDK 方法的事件承诺。
+- `runtime/stream-bridge` 的 `StreamEvent` 与 `stream.gap` 协议。
+- CLI stdout event sink 的输出格式。
 
----
+**判定标准**：如果测试主要断言“消费者传入 X，会看到 Y 结构/事件/错误”，它是 contract。
 
 ### 3. integration -- 集成测试
 
-**定义**：验证多个真实组件协作时的行为正确性。
+**定义**：验证两个或以上真实组件协作时的行为。
 
 **特征**：
-- 至少两个组件使用真实实现（而非 mock）
-- 可能涉及真实数据库（通过 testcontainers 或测试专用实例）、真实文件系统、真实消息队列
-- 执行速度较慢（秒级到分钟级）
-- 失败时通常指向组件间的集成问题（数据格式不匹配、调用顺序错误、事务边界问题）
 
-**典型被测对象**：
-- Service + Repository + Database 的完整链路
-- Engine + MCP Client 的真实协议交互
-- Storage Backend 与真实文件系统或 MinIO 的交互
+- 至少两个组件使用真实实现。
+- 可使用真实文件系统临时目录、真实内存 store、真实 SQLite 测试库。
+- 只 mock 不可控外部依赖，如 LLM API、外部网络、计费服务。
+- 文件名或目录名应清楚说明集成了哪些模块。
 
-**判定标准**：如果测试中有两个或以上的组件使用了真实实现（而非 mock），且测试的目的是验证它们之间的协作，则它是 integration 测试。
+**典型对象**：
 
-**与 unit 测试的区别**：
-- unit 测试中 service 的 repository 依赖是 mock 的
-- integration 测试中 service 使用真实的 repository，repository 连接真实的数据库
+- Core Walking Skeleton：`UiBackendClient.submitPrompt -> Lifecycle -> llm-client fake provider -> UiEvent`。
+- `MessageManager + SQLite store`。
+- `RunManager + RunLedger + StreamBridge`。
+- CLI 非交互路径：argv/stdin -> backend adapter -> stdout renderer。
 
----
+**判定标准**：如果测试验证真实组件之间的数据流、调用顺序或状态协作，它是 integration。
 
 ### 4. smoke -- 冒烟测试
 
-**定义**：验证项目的基础设施配置和部署环境是否正常工作。
+**定义**：验证环境、构建、启动和基础设施是否可用，不深入验证业务逻辑。
 
 **特征**：
-- 不测试业务逻辑
-- 验证的是「环境能否正常运行」而非「功能是否正确」
-- 可能依赖 Docker、数据库实例、特定文件系统结构
-- 通常在部署后或环境变更后执行
 
-**典型被测对象**：
-- Docker Compose 编排（所有服务能否正常启动）
-- 数据库初始化脚本（DDL 是否正确、是否幂等）
-- 依赖声明一致性（pyproject.toml 与 requirements.txt 不冲突）
-- 迁移脚本（数据迁移是否可执行）
+- 关注“能否启动/构建/加载”，不是“功能是否完全正确”。
+- 可运行 CLI `--help`、package build、数据库迁移可执行性。
+- 通常集中放 `tests/smoke/`。
 
-**判定标准**：如果测试验证的不是业务功能，而是「运行环境的某个方面是否正常」，则它是 smoke 测试。
+**典型对象**：
+
+- `pnpm build` 能生成包。
+- `ohbaby --help` 正常退出。
+- 数据库初始化脚本可执行且幂等。
+- package exports 可被 Node 解析。
 
 ---
 
 ## 三、分类决策流程
 
-遇到一个测试文件时，按以下顺序判断其归属：
-
-```
-该测试是否验证基础设施/部署环境（非业务逻辑）？
-  |
-  +-- 是 --> smoke
-  |
-  +-- 否 --> 该测试是否验证对外接口的格式/协议契约？
-               |
-               +-- 是 --> contract
-               |
-               +-- 否 --> 该测试是否使用了两个或以上的真实组件？
-                            |
-                            +-- 是 --> integration
-                            |
-                            +-- 否 --> unit
+```text
+是否验证启动、构建、迁移、环境可用性？
+  ├─ 是 → smoke
+  └─ 否
+     是否验证消费者可见的协议/DTO/事件/输出格式？
+       ├─ 是 → contract
+       └─ 否
+          是否有两个或以上真实组件协作？
+            ├─ 是 → integration
+            └─ 否 → unit
 ```
 
 ---
 
-## 四、边界情况处理
+## 四、边界情况
 
-### 混合特征的测试
+### 混合特征测试
 
-如果一个测试文件中同时包含 unit 和 contract 性质的测试用例，应将其拆分为两个文件，分别归入对应目录。一个文件只属于一种测试类型。
+一个文件只属于一种基础类型。若同一场景既需要 unit 又需要 contract，拆成两个文件，例如：
 
-### 需要外部 API 的测试
+- `ui-inprocess.contract.test.ts`
+- `ui-inprocess.unit.test.ts`
 
-如果测试需要真实的外部 API（如 LLM API、embedding API），无论其属于哪种类型，都应额外标记 `@pytest.mark.requires_api`，以便在无 API 环境中跳过。
+### 需要真实外部 API
 
-### 执行时间长的测试
+默认禁止在常规测试中调用真实 LLM API。确需真实 API 的验证应：
 
-如果测试执行时间超过 10 秒，无论其属于哪种类型，都应额外标记 `@pytest.mark.slow`。
+- 文件名保留基础类型，如 `.integration.test.ts`。
+- 使用 `describe.skipIf(!process.env.XYZ_API_KEY)` 或等价条件跳过。
+- 在文件顶部注释说明需要的环境变量。
+
+### 慢测试
+
+超过 10 秒的测试应单独隔离，优先放到 `tests/integration/` 或 `tests/smoke/`，并在文件名或 `describe` 中说明慢的原因。日常 preflight 不应依赖不可控慢测试。
 
 ---
 
-## 五、与模块原型的映射
-
-`docs-plan/test-guide.md` 定义了五种模块原型。各原型的测试通常归入以下类型：
+## 五、模块原型映射
 
 | 模块原型 | 主要测试类型 | 次要测试类型 |
-|----------|------------|------------|
-| 纯逻辑模块 | unit | -- |
+|----------|--------------|--------------|
+| 纯逻辑模块 | unit | - |
 | 服务编排模块 | unit | integration |
 | 桥接/适配模块 | contract | unit |
-| 基础设施模块 | smoke | -- |
+| 基础设施模块 | smoke | integration |
 | 外部依赖封装模块 | unit | contract |
 
-此映射是默认指导，不是强制约束。具体模块的测试类型应以其 `test.md` 中 Module Test Profile 的声明为准。
+具体模块仍以该模块 `docs/**/test.md` 的测试策略为准。

@@ -1,82 +1,92 @@
 # docs-test
 
-**项目级测试方法论**
+**ohbaby-agent 项目级测试方法论**
 
-本目录是 newbee-notebook 项目的测试决策指南，与 `docs-plan/`（设计方法论）和 `docs-implement/`（执行方法论）平级，共同构成项目的工程方法论体系。
+本目录定义 ohbaby-agent 的测试决策规则。项目是 TypeScript / pnpm / Vitest monorepo，主要代码位于 `packages/`，因此测试规范采用**混合组织**：
+
+- 模块局部的 unit / contract 测试可以与源码 co-located。
+- 跨模块、跨 package、端到端骨架类测试集中放在仓库根目录 `tests/`。
+- 无论放在哪里，测试文件都必须通过命名和目录表达测试类型与所属模块，避免堆成一个“大杂烩”目录。
 
 ---
 
 ## 一、定位与职责
 
-`docs-test/` 回答的核心问题是：**在这个项目中，测试决策怎么做？**
+`docs-test/` 回答四个问题：
 
-它不教测试技术（等价类、边界值、pytest 用法），也不替代模块级的 `test.md`。它提供的是一套**项目级的测试决策框架**，确保所有参与者（人类和 AI）在以下问题上有统一认知：
+- 写了一个测试，它属于 unit / contract / integration / smoke 中的哪一种？
+- 新增测试文件时，应放在源码旁边，还是放在根目录 `tests/`？
+- 一个依赖应该 mock、fake、stub，还是使用真实实现？
+- 本地开发和 CI 分别应该跑哪些测试？
 
-- 写了一个测试，它属于什么类型？
-- 新增一个测试文件，它应该放在哪里？
-- 一个依赖应该 mock 还是用真实的？
-- CI 的不同阶段应该跑哪些测试？
+模块自己的 `docs/**/test.md` 描述“该模块应该测什么”；本目录描述“项目里测试怎么分类、怎么命名、怎么摆放、怎么执行”。
 
 ---
 
 ## 二、核心原则
 
-### 1. 测试的目标是建立信心，不是追求覆盖率
+### 1. 测试目标是建立信心，不是追求覆盖率
 
-覆盖率是手段，不是目的。一个 95% 覆盖率但全是浅层断言的测试套件，不如一个 70% 覆盖率但精准验证了关键路径的套件。测试资源应优先投入在**失败代价最高的路径**上。
+优先测试失败代价最高的路径：LLM 流式事件累积、Lifecycle 循环退出条件、Message/Part 顺序、ToolScheduler 状态机、SDK/TUI 协议契约、Runtime 的 Run/Stream 控制面。
 
 ### 2. 测试类型服从模块性质
 
-不同模块有不同的测试重心。纯逻辑模块用单元测试验证计算正确性，桥接模块用契约测试验证接口稳定性，基础设施模块用冒烟测试验证环境可用性。一刀切的测试策略是浪费。
+纯逻辑模块以 unit 为主；SDK/adapter/stream 协议以 contract 为主；core walking skeleton、message + lifecycle + adapter 这类真实协作以 integration 为主；CLI 启动、构建产物、数据库迁移可用性属于 smoke。
 
-模块原型与测试重心的映射规则，参见 `docs-plan/test-guide.md` 第三节。
+### 3. Mock 边界由测试类型决定
 
-### 3. Mock 边界由测试类型决定，不由方便程度决定
+“mock 更方便”不是理由。unit 测试 mock 直接依赖；contract 测试 mock 接口之下的业务层；integration 尽量使用真实组件，只 mock LLM API、外部网络、计费服务等不可控依赖。
 
-「用 mock 更方便」不是使用 mock 的理由。mock 的边界应该由测试类型的定义决定：单元测试 mock 直接依赖，契约测试 mock 被测接口之下的一切，集成测试尽量不 mock。
+### 4. 测试位置必须显式维护
 
-具体的 mock 边界规则，参见 `writing-guide.md`。
+ohbaby-agent 允许 co-located 与集中式测试并存，但不允许模糊命名。测试文件名必须包含测试类型：
 
-### 4. 测试目录结构必须显式维护
+- `*.unit.test.ts`
+- `*.contract.test.ts`
+- `*.integration.test.ts`
+- `*.smoke.test.ts`
 
-测试文件的归类不是「随便放一个能跑就行」。目录结构承载的是测试类型的语义——放在 `unit/` 还是 `contract/` 下，意味着这个测试的运行时机、速度预期、依赖范围都不同。
+历史文件 `*.test.ts` 可以暂时保留，但新增测试应使用类型后缀。
 
-目录组织的具体规范，参见 `directory-convention.md`。
+### 5. 测试是设计的延伸
 
-### 5. 测试是设计的延伸，不是实现的附属
-
-测试在 Plan 阶段就应该被考虑（通过模块的 `test.md`），在 Implement 阶段作为代码的一部分产出，在 CI 中作为质量门禁执行。测试不是「写完代码后补上去的东西」。
+模块文档的 `test.md` 在实现前就应该指导测试设计。实现阶段先写能失败的测试，再写最小实现；文档、测试、代码共同定义模块契约。
 
 ---
 
-## 三、与其他文档的关系
+## 三、推荐目录
 
+```text
+packages/
+  ohbaby-agent/src/
+    core/lifecycle/lifecycle.unit.test.ts
+    adapters/ui-inprocess.contract.test.ts
+  ohbaby-sdk/src/
+    commands/parse-slash-input.unit.test.ts
+  ohbaby-tui/src/
+    components/message-list.contract.test.tsx
+
+tests/
+  contract/
+    sdk/
+    adapters/
+    stream/
+  integration/
+    core/
+    runtime/
+    cli/
+  smoke/
+    build.smoke.test.ts
+    cli-startup.smoke.test.ts
 ```
-docs-plan/
-  └── test-guide.md       教 AI 如何为单个模块撰写 test.md
-                           （Plan 阶段产物：描述"应该怎么测"）
-                                  |
-                                  v
-docs-test/                本目录
-  ├── classification.md   定义测试分类体系
-  ├── directory-convention.md   定义测试目录组织规范
-  ├── writing-guide.md    定义测试代码编写规范
-  └── ci-strategy.md      定义 CI 中的测试执行策略
-                                  |
-                                  v
-newbee_notebook/tests/    实际测试代码
-  ├── unit/               按 classification.md 的分类组织
-  ├── contract/
-  ├── integration/
-  └── smoke/
-```
 
-**信息流向**：
+放置原则：
 
-1. `docs-plan/test-guide.md` 中的模块原型分类 → 决定 `classification.md` 中测试类型的选择
-2. `classification.md` 中的类型定义 → 决定 `directory-convention.md` 中的目录归属
-3. `directory-convention.md` 中的目录规则 → 决定实际测试文件的存放位置
-4. `ci-strategy.md` 中的执行策略 → 决定各类型测试在 CI 中的运行时机
+- 单个源码文件或模块的 unit/contract 测试，优先 co-located。
+- 根 `tests/unit/` 只用于无法自然 co-locate 的跨 package 纯逻辑测试。
+- 跨两个以上模块或 package 的测试，放 `tests/integration/<domain>/`。
+- 面向外部消费者的协议契约测试，若只测单个 adapter 可 co-located；若涉及 SDK + adapter + stream，放 `tests/contract/<domain>/`。
+- smoke 测试集中放 `tests/smoke/`。
 
 ---
 
@@ -84,13 +94,20 @@ newbee_notebook/tests/    实际测试代码
 
 | 文档 | 回答的问题 |
 |------|----------|
-| `classification.md` | 测试有哪几种类型？我写的测试属于哪一种？ |
-| `directory-convention.md` | 测试文件放在哪里？conftest 怎么分层？ |
-| `writing-guide.md` | mock 边界怎么划？fixture 怎么用？断言怎么写？ |
-| `ci-strategy.md` | CI 的哪个阶段跑哪些测试？marker 怎么用？ |
+| `classification.md` | 测试有哪几种类型？如何判定归属？ |
+| `directory-convention.md` | 测试文件放在哪里？命名和目录怎么组织？ |
+| `writing-guide.md` | mock/fake 边界、fixture/工厂、断言怎么写？ |
+| `ci-strategy.md` | 本地与 CI 跑哪些 Vitest 命令？ |
 
 ---
 
 ## 五、适用范围
 
-本方法论适用于 `newbee_notebook/tests/` 下的所有后端测试代码。前端测试（`frontend/` 下）有独立的测试体系，不在本文档覆盖范围内。
+本方法论适用于 ohbaby-agent 仓库内所有 TypeScript 测试代码，包括：
+
+- `packages/ohbaby-agent`
+- `packages/ohbaby-sdk`
+- `packages/ohbaby-tui`
+- 仓库根目录 `tests/`
+
+非 TypeScript 辅助脚本如未来出现，应遵循相同分类原则，但可按对应语言生态调整执行方式。

@@ -1,174 +1,124 @@
 # ci-strategy.md
 
-**CI 测试执行策略**
+**Vitest 执行策略**
 
-本文档定义测试在 CI/CD 流水线中的执行时机和 pytest marker 的使用规范。
-
----
-
-## 一、Marker 定义
-
-所有可用的 pytest marker 定义在 `pytest.ini` 中：
-
-| marker | 含义 | 执行速度预期 |
-|--------|------|------------|
-| `unit` | 单元测试 | 极快（整个 suite 秒级） |
-| `contract` | 契约测试 | 快（单文件秒级） |
-| `integration` | 集成测试 | 较慢（可能需要秒级到分钟级） |
-| `smoke` | 冒烟测试 | 取决于环境（可能需要 Docker） |
-| `slow` | 执行时间长的测试（叠加标记） | 超过 10 秒 |
-| `requires_api` | 需要外部 API 的测试（叠加标记） | 取决于 API 响应 |
-
-### 基础 marker 与叠加 marker
-
-- `unit`、`contract`、`integration`、`smoke` 是**基础 marker**，每个测试必须且只能有一个
-- `slow`、`requires_api` 是**叠加 marker**，可以与任何基础 marker 组合使用
-
-```python
-@pytest.mark.integration
-@pytest.mark.slow
-def test_full_document_pipeline():
-    """集成测试且执行时间长"""
-    ...
-
-@pytest.mark.unit
-@pytest.mark.requires_api
-def test_llm_client_response_parsing():
-    """单元测试但需要真实 API"""
-    ...
-```
+本文档定义 ohbaby-agent 在本地开发和 CI 中如何执行测试。项目使用 pnpm + Vitest + TypeScript。
 
 ---
 
-## 二、Marker 标注方式
+## 一、测试发现范围
 
-### 方式一：逐文件标注（推荐用于混合文件）
+Vitest 应发现以下测试：
 
-在文件顶部使用 `pytestmark` 变量为整个文件标注：
-
-```python
-import pytest
-
-pytestmark = pytest.mark.unit
+```text
+packages/*/src/**/*.test.ts
+packages/*/src/**/*.test.tsx
+tests/**/*.test.ts
+tests/**/*.test.tsx
 ```
 
-### 方式二：逐函数标注
+文件名后缀用于表达测试类型：
 
-当同一文件中需要不同的叠加 marker 时，在函数级别标注：
+| 后缀 | 含义 |
+|------|------|
+| `.unit.test.ts(x)` | 单元测试 |
+| `.contract.test.ts(x)` | 契约测试 |
+| `.integration.test.ts(x)` | 集成测试 |
+| `.smoke.test.ts(x)` | 冒烟测试 |
 
-```python
-pytestmark = pytest.mark.unit
-
-def test_basic_parsing():
-    ...
-
-@pytest.mark.requires_api
-def test_api_response_parsing():
-    ...
-```
-
-### 方式三：基于目录的自动标注（可选）
-
-可以在各层级 conftest.py 中使用 `pytest_collection_modifyitems` 钩子，根据文件路径自动添加基础 marker。此方式能避免每个文件都手动声明 `pytestmark`：
-
-```python
-# tests/unit/conftest.py
-import pytest
-
-def pytest_collection_modifyitems(items):
-    for item in items:
-        item.add_marker(pytest.mark.unit)
-```
-
-如果使用此方式，应在所有四个顶层测试目录的 conftest.py 中一致配置。
+历史 `*.test.ts` 文件可被发现，但新增测试必须使用类型后缀。迁移完成前，CI 仍应保留 `pnpm test` 作为兜底，避免旧测试被类型化脚本漏跑。
 
 ---
 
-## 三、CI 各阶段的执行策略
-
-### 阶段总览
-
-| 触发时机 | 执行范围 | 命令 | 目标 |
-|---------|---------|------|------|
-| 本地开发（保存后） | 当前修改相关的 unit 测试 | `pytest tests/unit/core/context/ -x` | 即时反馈 |
-| 提交前 | 全部 unit | `pytest -m unit` | 确保基本逻辑不破坏 |
-| PR 检查 | unit + contract | `pytest -m "unit or contract"` | 确保逻辑和接口契约完整 |
-| 合并到主分支 | unit + contract + integration | `pytest -m "unit or contract or integration"` | 确保组件协作正确 |
-| 部署后 | smoke | `pytest -m smoke` | 确保环境正常 |
-
-### 排除慢测试
-
-日常开发中，可以排除标记为 `slow` 的测试以加快反馈速度：
+## 二、本地开发命令
 
 ```bash
-pytest -m "unit and not slow"
+# 运行全部测试
+pnpm test
+
+# 运行单个测试文件
+pnpm exec vitest run packages/ohbaby-agent/src/core/lifecycle/lifecycle.unit.test.ts
+
+# 运行当前 in-process adapter 契约测试
+pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts
+
+# 运行所有 unit 测试（真实枚举文件后运行）
+pnpm test:unit
+
+# 运行所有 contract 测试
+pnpm test:contract
+
+# 运行所有 integration 测试
+pnpm test:integration
 ```
 
-### 排除需要 API 的测试
-
-在没有 API 密钥的环境中：
-
-```bash
-pytest -m "not requires_api"
-```
+Vitest 2.1.x 不支持 `--include` CLI 参数，且 glob positional 参数会被当成 filter。根脚本通过 `scripts/run-vitest-by-type.mjs` 先枚举真实文件，再把精确路径传给 Vitest。
 
 ---
 
-## 四、执行速度预算
+## 三、当前 package scripts
 
-各类型测试应遵守的执行时间预算：
+根 `package.json` 已提供：
 
-| 类型 | 单文件上限 | 整个 suite 上限 |
-|------|----------|---------------|
-| unit | 3 秒 | 30 秒 |
-| contract | 5 秒 | 60 秒 |
-| integration | 30 秒 | 5 分钟 |
+```json
+{
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "test:unit": "node scripts/run-vitest-by-type.mjs unit",
+    "test:contract": "node scripts/run-vitest-by-type.mjs contract",
+    "test:integration": "node scripts/run-vitest-by-type.mjs integration",
+    "test:smoke": "node scripts/run-vitest-by-type.mjs smoke"
+  }
+}
+```
+
+当某类测试暂时没有文件时，分类脚本输出 `No <type> test files found.` 并成功退出；一旦该类型已有文件，脚本会运行真实文件路径，不会被 Vitest filter 语义静默跳过。
+
+---
+
+## 四、CI 阶段
+
+| 阶段 | 执行范围 | 目标 |
+|------|----------|------|
+| 本地开发 | 当前修改相关测试文件 | 快速反馈 |
+| 提交前 | format:check + lint + typecheck + test + unit + contract | 防止旧测试、局部逻辑和协议破坏 |
+| PR 检查 | preflight + integration | 验证跨模块协作 |
+| 合并前 | unit + contract + integration + build | 保证主分支可工作 |
+| 发布/部署前 | smoke | 验证启动、构建、迁移等环境能力 |
+
+当前根脚本 `pnpm preflight` 已包含 format、lint、typecheck、test、build。随着测试规模增长，可以将 `test` 拆分为更细粒度脚本。
+
+---
+
+## 五、执行速度预算
+
+| 类型 | 单文件目标 | suite 目标 |
+|------|------------|------------|
+| unit | 3 秒内 | 30 秒内 |
+| contract | 5 秒内 | 60 秒内 |
+| integration | 30 秒内 | 5 分钟内 |
 | smoke | 视环境而定 | 视环境而定 |
 
-如果某类测试的执行时间超过预算，应排查原因：
-- unit 测试超时通常意味着它不应该是 unit 测试（可能有未 mock 的 I/O）
-- contract 测试超时通常意味着 service mock 不够彻底
-- integration 测试超时通常意味着需要标记 `@pytest.mark.slow`
+如果 unit 测试变慢，通常说明它引入了真实 I/O 或过多装配，应重新分类或拆分。
 
 ---
 
-## 五、失败处理
+## 六、外部 API 与慢测试
 
-### unit 或 contract 测试失败
+常规 CI 不应调用真实 LLM API。需要真实 API 的测试必须：
 
-**阻断等级：阻断提交和合并。**
+- 通过环境变量显式启用。
+- 在没有密钥时自动 skip。
+- 在文件顶部注释说明依赖。
 
-这两类测试的失败意味着核心逻辑或接口契约被破坏，必须在提交前修复。
-
-### integration 测试失败
-
-**阻断等级：阻断合并到主分支。**
-
-集成测试失败可能由组件间的交互问题导致。允许在开发分支上暂时存在，但必须在合并前修复。
-
-### smoke 测试失败
-
-**阻断等级：阻断部署发布。**
-
-冒烟测试失败意味着环境配置有问题，不影响开发但阻止部署。
+慢测试应集中放在 integration 或 smoke 下，并避免成为日常开发的默认阻塞项，除非它覆盖的是核心高风险路径。
 
 ---
 
-## 六、本地开发的常用命令
+## 七、失败处理
 
-```bash
-# 运行所有 unit 测试
-pytest -m unit
+- unit / contract 失败：阻断提交。
+- integration 失败：阻断合并。
+- smoke 失败：阻断发布或环境变更。
 
-# 运行特定模块的 unit 测试
-pytest tests/unit/core/context/
-
-# 运行所有 unit 和 contract 测试（模拟 PR 检查）
-pytest -m "unit or contract"
-
-# 运行除了需要 API 和慢测试之外的所有测试
-pytest -m "not requires_api and not slow"
-
-# 运行并显示覆盖率（需安装 pytest-cov）
-pytest -m unit --cov=newbee_notebook --cov-report=term-missing
-```
+任何失败都应优先判断是测试分类错误、mock 边界错误，还是实现确实破坏了契约。
