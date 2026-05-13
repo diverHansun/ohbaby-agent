@@ -1,0 +1,11 @@
+import type { UiRun, UiRunStatus, UiSession, UiSnapshot } from "ohbaby-sdk";
+
+export interface CoreStateStore {
+  readSnapshot(): Promise<UiSnapshot>;
+  getSession(sessionId: string): Promise<UiSession | undefined>;
+  upsertSession(session: UiSession): Promise<void>;
+  setActiveSessionId(sessionId: string | null): Promise<void>;
+  addRun(run: UiRun): Promise<void>;
+  updateRun(run: UiRun): Promise<void>;
+  setStatus(status: UiRunStatus): Promise<void>;
+}
