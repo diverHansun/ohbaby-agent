@@ -5,6 +5,10 @@ import { Command } from 'commander';
 export { createInProcessUiBackendClient } from './adapters/ui-inprocess.js';
 export * from './config/index.js';
 export * from './core/llm-client/index.js';
+export * from './project/index.js';
+export * from './sandbox/index.js';
+export * from './shell/index.js';
+export * from './utils/index.js';
 
 export function createOhbabyCommand(): Command {
   const program = new Command();
