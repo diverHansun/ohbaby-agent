@@ -1,9 +1,11 @@
 import type {
   SubmitPromptOptions,
   UiBackendClient,
-  UiCommand,
+  UiCommandCatalog,
+  UiCommandInvocation,
   UiEvent,
   UiEventHandler,
+  UiInteractionResponse,
   UiMessage,
   UiPermissionResponse,
   UiRun,
@@ -16,11 +18,21 @@ import { createLLMClient } from "../core/llm-client/index.js";
 import type { LLMClientInstance } from "../core/llm-client/index.js";
 import { Lifecycle } from "../core/lifecycle/index.js";
 import { createBus } from "../bus/index.js";
+import type {
+  CommandModelSummary,
+  CommandSessionSummary,
+} from "../commands/index.js";
+import { CommandsEvent, createCommandService } from "../commands/index.js";
+import {
+  createInteractionBroker,
+  InteractionEvent,
+} from "../runtime/interaction-broker/index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,
 } from "../core/message/index.js";
 import type { MessageManager } from "../core/message/index.js";
+import { BUILTIN_TOOLS } from "../tools/index.js";
 import {
   cloneMessage,
   cloneRun,
@@ -163,12 +175,14 @@ export function createInProcessUiBackendClient(
     : optionsOrSnapshot;
   const initialSnapshot = options.initialSnapshot ?? EMPTY_SNAPSHOT;
   const stateStore = createInMemoryUiStateStore(initialSnapshot);
+  const bus = createBus();
   const messageManager =
     options.messageManager ??
     createMessageManager({
-      bus: createBus(),
+      bus,
       store: createInMemoryMessageStore(),
     });
+  const interactionBroker = createInteractionBroker({ bus });
   const handlers = new Set<UiEventHandler>();
   const sessionIds = createIdFactory(
     "session",
@@ -185,6 +199,8 @@ export function createInProcessUiBackendClient(
     initialSnapshot.runs.map((run) => run.id),
   );
   let promptInFlight = false;
+  let activeAbortController: AbortController | undefined;
+  let activeRunId: string | undefined;
 
   function now(): Date {
     return options.now?.() ?? new Date();
@@ -214,7 +230,7 @@ export function createInProcessUiBackendClient(
 
   async function updateStatus(status: UiRunStatus): Promise<void> {
     await stateStore.setStatus(status);
-    publish({ type: "status.updated", status });
+    publish({ type: "runtime.updated", status, timestamp: Date.now() });
   }
 
   async function resolveLLMClient(): Promise<LLMClientInstance> {
@@ -226,6 +242,164 @@ export function createInProcessUiBackendClient(
     }
     return createLLMClient();
   }
+
+  function currentModelFromOptions(): CommandModelSummary | null {
+    const client = options.llmClient;
+    if (!client) {
+      return null;
+    }
+    return {
+      id: `${client.config.provider}:${client.config.model}`,
+      label: client.config.model,
+      provider: client.config.provider,
+    };
+  }
+
+  function listModelsFromOptions(): readonly CommandModelSummary[] {
+    const current = currentModelFromOptions();
+    return current ? [current] : [];
+  }
+
+  async function listSessionsFromState(): Promise<readonly CommandSessionSummary[]> {
+    const snapshot = await stateStore.readSnapshot();
+    return snapshot.sessions.map((session) => ({
+      id: session.id,
+      title: session.title,
+    }));
+  }
+
+  function appendToolCallPart(input: {
+    readonly message: UiMessage;
+    readonly callId: string;
+    readonly name: string;
+    readonly params: Record<string, unknown>;
+  }): UiMessage {
+    return {
+      ...input.message,
+      parts: [
+        ...input.message.parts,
+        {
+          type: "tool-call",
+          call: {
+            id: input.callId,
+            input: input.params,
+            name: input.name,
+            status: "running",
+          },
+        },
+      ],
+    };
+  }
+
+  function appendToolResultPart(input: {
+    readonly message: UiMessage;
+    readonly callId: string;
+    readonly output?: string;
+    readonly error?: string;
+  }): UiMessage {
+    return {
+      ...input.message,
+      parts: [
+        ...input.message.parts,
+        {
+          type: "tool-result",
+          result: {
+            callId: input.callId,
+            output: input.output ?? "",
+            error: input.error,
+          },
+        },
+      ],
+    };
+  }
+
+  const commandService = createCommandService({
+    bus,
+    interactionBroker,
+    tools: {
+      listTools() {
+        return BUILTIN_TOOLS.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          category: tool.category,
+          source: tool.source,
+        }));
+      },
+    },
+    models: {
+      currentModel: currentModelFromOptions,
+      listModels: listModelsFromOptions,
+    },
+    sessions: {
+      listSessions: listSessionsFromState,
+    },
+    abortRun(runId?: string): void {
+      if (!runId) {
+        activeAbortController?.abort("run aborted");
+        interactionBroker.abortAll("aborted");
+        return;
+      }
+      if (runId === activeRunId) {
+        activeAbortController?.abort("run aborted");
+        return;
+      }
+      commandService.abortCommandRun(runId, "aborted");
+    },
+    getStatus(): string {
+      return promptInFlight ? "running" : "idle";
+    },
+  });
+
+  bus.subscribe(CommandsEvent.Started, (payload) => {
+    publish({
+      type: "command.started",
+      command: {
+        commandRunId: payload.commandRunId,
+        clientInvocationId: payload.clientInvocationId,
+        commandId: payload.commandId,
+        path: payload.path,
+        surface: payload.surface,
+        sessionId: payload.sessionId,
+      },
+      timestamp: payload.timestamp,
+    });
+  });
+  bus.subscribe(CommandsEvent.ResultDelivered, (payload) => {
+    publish({
+      type: "command.result.delivered",
+      commandRunId: payload.commandRunId,
+      clientInvocationId: payload.clientInvocationId,
+      output: payload.output,
+      action: payload.action,
+      timestamp: payload.timestamp,
+    });
+  });
+  bus.subscribe(CommandsEvent.Failed, (payload) => {
+    publish({
+      type: "command.failed",
+      commandRunId: payload.commandRunId,
+      clientInvocationId: payload.clientInvocationId,
+      error: payload.error,
+      timestamp: payload.timestamp,
+    });
+  });
+  bus.subscribe(InteractionEvent.Requested, (payload) => {
+    publish({
+      type: "interaction.requested",
+      request: payload.request,
+      timestamp: payload.timestamp,
+    });
+  });
+  bus.subscribe(InteractionEvent.Resolved, (payload) => {
+    publish({
+      type: "interaction.resolved",
+      interactionId: payload.interactionId,
+      commandRunId: payload.commandRunId,
+      clientInvocationId: payload.clientInvocationId,
+      status: payload.response.kind,
+      timestamp: payload.timestamp,
+    });
+  });
 
   return {
     getSnapshot(): Promise<UiSnapshot> {
@@ -240,6 +414,10 @@ export function createInProcessUiBackendClient(
       };
     },
 
+    listCommands(query): Promise<UiCommandCatalog> {
+      return Promise.resolve(commandService.listCommands(query));
+    },
+
     async submitPrompt(
       text: string,
       submitOptions?: SubmitPromptOptions,
@@ -249,6 +427,7 @@ export function createInProcessUiBackendClient(
       }
 
       promptInFlight = true;
+      activeAbortController = new AbortController();
       const createdAt = timestamp();
 
       try {
@@ -304,6 +483,7 @@ export function createInProcessUiBackendClient(
         });
 
         const runId = runIds.next();
+        activeRunId = runId;
         let run: UiRun = {
           id: runId,
           sessionId: session.id,
@@ -347,6 +527,7 @@ export function createInProcessUiBackendClient(
                 (message) => message.id !== assistantMessage.id,
               ),
             ),
+            signal: activeAbortController.signal,
           });
 
           let next = await loop.next();
@@ -356,6 +537,68 @@ export function createInProcessUiBackendClient(
                 ...assistantMessage,
                 parts: [{ type: "text", text: next.value.content }],
               };
+              const updatedMessages: UiMessage[] = session.messages.map(
+                (message) =>
+                  message.id === updatedAssistant.id
+                    ? updatedAssistant
+                    : message,
+              );
+              session = {
+                ...session,
+                messages: updatedMessages,
+                updatedAt: timestamp(),
+              };
+              assistantMessage = updatedAssistant;
+              await upsertSession(session);
+              publish({
+                type: "message.updated",
+                sessionId: session.id,
+                message: cloneMessage(updatedAssistant),
+              });
+              publish({
+                type: "message.part.delta",
+                sessionId: session.id,
+                messageId: updatedAssistant.id,
+                delta: next.value.delta,
+                content: next.value.content,
+                timestamp: next.value.timestamp,
+              });
+            }
+
+            if (next.value.type === "tool:start") {
+              const updatedAssistant = appendToolCallPart({
+                message: assistantMessage,
+                callId: next.value.callId,
+                name: next.value.toolName,
+                params: next.value.params,
+              });
+              const updatedMessages: UiMessage[] = session.messages.map(
+                (message) =>
+                  message.id === updatedAssistant.id
+                    ? updatedAssistant
+                    : message,
+              );
+              session = {
+                ...session,
+                messages: updatedMessages,
+                updatedAt: timestamp(),
+              };
+              assistantMessage = updatedAssistant;
+              await upsertSession(session);
+              publish({
+                type: "message.updated",
+                sessionId: session.id,
+                message: cloneMessage(updatedAssistant),
+              });
+            }
+
+            if (next.value.type === "tool:result") {
+              const updatedAssistant = appendToolResultPart({
+                message: assistantMessage,
+                callId: next.value.callId,
+                output: next.value.result.output,
+                error: next.value.result.error?.message,
+              });
               const updatedMessages: UiMessage[] = session.messages.map(
                 (message) =>
                   message.id === updatedAssistant.id
@@ -409,11 +652,13 @@ export function createInProcessUiBackendClient(
         }
       } finally {
         promptInFlight = false;
+        activeAbortController = undefined;
+        activeRunId = undefined;
       }
     },
 
-    executeCommand(_command: UiCommand): Promise<void> {
-      return Promise.resolve();
+    executeCommand(invocation: UiCommandInvocation): Promise<void> {
+      return commandService.executeCommand(invocation);
     },
 
     respondPermission(
@@ -423,7 +668,22 @@ export function createInProcessUiBackendClient(
       return Promise.resolve();
     },
 
-    abortRun(_runId?: string): Promise<void> {
+    respondInteraction(
+      interactionId: string,
+      response: UiInteractionResponse,
+    ): Promise<void> {
+      return interactionBroker.respond(interactionId, response);
+    },
+
+    abortRun(runId?: string): Promise<void> {
+      if (!runId) {
+        activeAbortController?.abort("run aborted");
+        interactionBroker.abortAll("aborted");
+      } else if (runId === activeRunId) {
+        activeAbortController?.abort("run aborted");
+      } else {
+        commandService.abortCommandRun(runId, "aborted");
+      }
       return Promise.resolve();
     },
   };

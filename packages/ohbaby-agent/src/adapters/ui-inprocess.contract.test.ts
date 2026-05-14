@@ -131,13 +131,15 @@ describe("createInProcessUiBackendClient", () => {
     expect(events.map((event) => event.type)).toEqual([
       "session.updated",
       "message.appended",
-      "status.updated",
+      "runtime.updated",
       "run.updated",
       "message.appended",
       "message.updated",
+      "message.part.delta",
       "message.updated",
+      "message.part.delta",
       "run.updated",
-      "status.updated",
+      "runtime.updated",
     ]);
 
     const assistantUpdates = events.filter(
@@ -148,6 +150,20 @@ describe("createInProcessUiBackendClient", () => {
     expect(assistantUpdates.map((event) => event.message.parts)).toEqual([
       [{ type: "text", text: "Hello" }],
       [{ type: "text", text: "Hello world" }],
+    ]);
+    const assistantDeltas = events.filter(
+      (event): event is Extract<UiEvent, { type: "message.part.delta" }> =>
+        event.type === "message.part.delta",
+    );
+
+    expect(
+      assistantDeltas.map((event) => ({
+        content: event.content,
+        delta: event.delta,
+      })),
+    ).toEqual([
+      { content: "Hello", delta: "Hello" },
+      { content: "Hello world", delta: " world" },
     ]);
 
     const snapshot = await client.getSnapshot();
@@ -382,6 +398,158 @@ describe("createInProcessUiBackendClient", () => {
 
     releaseStream?.();
     await first;
+  });
+
+  it("lists command catalog entries for the requested surface", async () => {
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+    });
+
+    const catalog = await client.listCommands({ surface: "tui" });
+
+    expect(catalog.commands.map((command) => command.id)).toEqual(
+      expect.arrayContaining([
+        "status",
+        "tools",
+        "abort",
+        "exit",
+        "model",
+        "model.list",
+        "model.current",
+        "session",
+        "session.list",
+      ]),
+    );
+  });
+
+  it("executes commands and publishes SDK command events", async () => {
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_status",
+      commandId: "status",
+      path: ["status"],
+      raw: "/status",
+      rawArgs: "",
+      sessionId: "session_1",
+      surface: "tui",
+    });
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      command: {
+        clientInvocationId: "inv_status",
+        commandId: "status",
+      },
+      type: "command.started",
+    });
+    expect(events[1]).toMatchObject({
+      clientInvocationId: "inv_status",
+      output: { kind: "data", subject: "status", data: { status: "idle" } },
+      type: "command.result.delivered",
+    });
+  });
+
+  it("round-trips command interactions through respondInteraction", async () => {
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    const execution = client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_model",
+      commandId: "model",
+      path: ["model"],
+      raw: "/model",
+      rawArgs: "",
+      sessionId: "session_1",
+      surface: "tui",
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ type: "command.started" });
+    expect(events[1]).toMatchObject({
+      request: {
+        clientInvocationId: "inv_model",
+        interactionId: "interaction_1",
+        kind: "select-one",
+        subject: "model",
+      },
+      type: "interaction.requested",
+    });
+
+    await client.respondInteraction("interaction_1", {
+      choiceId: "fake:fake-model",
+      kind: "accepted",
+    });
+    await execution;
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          interactionId: "interaction_1",
+          status: "accepted",
+          type: "interaction.resolved",
+        }),
+        expect.objectContaining({
+          action: {
+            data: { choiceId: "fake:fake-model" },
+            kind: "model.selected",
+          },
+          type: "command.result.delivered",
+        }),
+      ]),
+    );
+  });
+
+  it("aborts pending command interactions by command run id", async () => {
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    const execution = client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_model",
+      commandId: "model",
+      path: ["model"],
+      raw: "/model",
+      rawArgs: "",
+      sessionId: "session_1",
+      surface: "tui",
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    await client.abortRun("command_1");
+    await execution;
+
+    expect(events.at(-1)).toMatchObject({
+      clientInvocationId: "inv_model",
+      commandRunId: "command_1",
+      error: {
+        code: "INTERACTION_CANCELLED",
+      },
+      type: "command.failed",
+    });
   });
 });
 
