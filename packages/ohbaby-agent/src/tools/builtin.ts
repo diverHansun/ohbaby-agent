@@ -1,4 +1,9 @@
 import type { Tool } from "../core/tool-scheduler/index.js";
+import {
+  createBashTool,
+  type BashShell,
+  type SpawnCommand,
+} from "./bash-tool.js";
 import { createFileTools } from "./file-tools.js";
 import {
   createTodoTools,
@@ -7,12 +12,18 @@ import {
 } from "./todo-tools.js";
 
 export interface BuiltinToolsOptions {
+  readonly shell?: BashShell;
+  readonly spawn?: SpawnCommand;
   readonly todoStore?: TodoStore;
 }
 
 export function createBuiltinTools(options: BuiltinToolsOptions = {}): Tool[] {
   const todoStore = options.todoStore ?? new InMemoryTodoStore();
-  return [...createFileTools(), ...createTodoTools(todoStore)];
+  return [
+    ...createFileTools(),
+    ...createTodoTools(todoStore),
+    createBashTool({ shell: options.shell, spawn: options.spawn }),
+  ];
 }
 
 export const BUILTIN_TOOLS: readonly Tool[] = createBuiltinTools();
