@@ -6,7 +6,7 @@ export type PermissionType =
 
 export type PermissionResponse =
   | { readonly type: "once" }
-  | { readonly type: "always" }
+  | { readonly type: "always"; readonly pattern?: string }
   | { readonly type: "reject" }
   | { readonly type: "suggest"; readonly suggestion: string }
   | { readonly type: "cancel" };

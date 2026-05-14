@@ -3,6 +3,7 @@ import { PermissionEvent } from "./events.js";
 import {
   generatePermissionPattern,
   inferPermissionType,
+  isRememberablePermissionPattern,
   matchPermissionPattern,
 } from "./matcher.js";
 import {
@@ -13,6 +14,7 @@ import type {
   PermissionAskInput,
   PermissionInfo,
   PermissionManager,
+  PermissionEventResponse,
   PermissionResponse,
   SchedulerPermissionResponse,
 } from "./types.js";
@@ -98,6 +100,18 @@ export function createPermissionManager(
     }
   }
 
+  function publishReply(
+    request: PendingRequest,
+    response: PermissionEventResponse,
+  ): void {
+    bus.publish(PermissionEvent.Replied, {
+      ...(request.info.callId ? { callId: request.info.callId } : {}),
+      sessionId: request.info.sessionId,
+      permissionId: request.info.id,
+      response,
+    });
+  }
+
   function advanceQueue(): void {
     if (current) {
       return;
@@ -134,11 +148,7 @@ export function createPermissionManager(
         continue;
       }
       queue.splice(index, 1);
-      bus.publish(PermissionEvent.Replied, {
-        sessionId,
-        permissionId: request.info.id,
-        response: { type: "auto_approved", pattern },
-      });
+      publishReply(request, { type: "auto_approved", pattern });
       request.resolve("always");
     }
   }
@@ -171,20 +181,25 @@ export function createPermissionManager(
         return;
       }
 
-      bus.publish(PermissionEvent.Replied, {
-        sessionId,
-        permissionId,
-        response,
-      });
-
       if (response.type === "once") {
+        publishReply(request, response);
         request.resolve("once");
         completeCurrent();
         return;
       }
 
       if (response.type === "always") {
+        if (!isRememberablePermissionPattern(request.info.pattern)) {
+          publishReply(request, { type: "once" });
+          request.resolve("once");
+          completeCurrent();
+          return;
+        }
         approvedFor(sessionId).add(request.info.pattern);
+        publishReply(request, {
+          type: "always",
+          pattern: request.info.pattern,
+        });
         request.resolve("always");
         autoApproveMatching(sessionId, request.info.pattern);
         bus.publish(PermissionEvent.SwitchModeRequested, {
@@ -200,12 +215,14 @@ export function createPermissionManager(
       }
 
       if (response.type === "cancel") {
+        publishReply(request, response);
         request.resolve("cancel");
         completeCurrent();
         return;
       }
 
       if (response.type === "suggest") {
+        publishReply(request, response);
         request.reject(
           new PermissionRejectedWithSuggestionError(
             permissionId,
@@ -216,6 +233,7 @@ export function createPermissionManager(
         return;
       }
 
+      publishReply(request, response);
       request.reject(new PermissionRejectedError(permissionId));
       completeCurrent();
     },
@@ -223,16 +241,21 @@ export function createPermissionManager(
     clearSession(sessionId: string): void {
       approvals.delete(sessionId);
       if (current?.info.sessionId === sessionId) {
+        publishReply(current, { type: "cancel" });
         current.resolve("cancel");
         current = undefined;
       }
-      for (let index = queue.length - 1; index >= 0; index -= 1) {
-        const request = queue[index];
-        if (request.info.sessionId === sessionId) {
-          queue.splice(index, 1);
+      const remainingQueue: PendingRequest[] = [];
+      for (const request of queue) {
+        if (request.info.sessionId !== sessionId) {
+          remainingQueue.push(request);
+        } else {
+          publishReply(request, { type: "cancel" });
           request.resolve("cancel");
         }
       }
+      queue.length = 0;
+      queue.push(...remainingQueue);
       advanceQueue();
     },
   };

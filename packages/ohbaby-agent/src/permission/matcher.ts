@@ -30,12 +30,22 @@ function directoryOf(path: string): string | undefined {
   return normalized.slice(0, index);
 }
 
-function commandParts(command: string): readonly [string | undefined, string | undefined] {
+function commandParts(
+  command: string,
+): readonly [string | undefined, string | undefined] {
   const [head, subcommand] = command
     .trim()
     .split(/\s+/)
     .filter((part) => part.length > 0);
   return [head, subcommand];
+}
+
+function normalizeCommand(command: string): string {
+  return command.trim().replace(/\s+/g, " ");
+}
+
+function encodePatternSegment(value: string): string {
+  return Buffer.from(value, "utf8").toString("base64url");
 }
 
 function escapeRegex(value: string): string {
@@ -80,11 +90,9 @@ export function generatePermissionPattern(
 
   if (input.type === "bash") {
     const command = getStringParam(input.params, ["command"]) ?? input.name;
-    const [head, subcommand] = commandParts(command);
-    if (head && subcommand) {
-      return `bash:${head}:${subcommand}`;
-    }
-    return `bash:${head ?? input.name}`;
+    const normalizedCommand = normalizeCommand(command);
+    const [head] = commandParts(normalizedCommand);
+    return `bash:${head ?? input.name}:${encodePatternSegment(normalizedCommand)}`;
   }
 
   if (input.type === "skill") {
@@ -92,6 +100,10 @@ export function generatePermissionPattern(
   }
 
   return `${input.type}:${input.name}`;
+}
+
+export function isRememberablePermissionPattern(pattern: string): boolean {
+  return pattern !== "tool:edit" && pattern !== "tool:write";
 }
 
 export function inferPermissionType(

@@ -25,7 +25,7 @@ const PermissionInfoSchema = z.object({
 
 const PermissionResponseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("once") }),
-  z.object({ type: z.literal("always") }),
+  z.object({ type: z.literal("always"), pattern: z.string().optional() }),
   z.object({ type: z.literal("reject") }),
   z.object({ type: z.literal("suggest"), suggestion: z.string() }),
   z.object({ type: z.literal("cancel") }),
@@ -44,6 +44,7 @@ export const PermissionEvent = {
     z.object({
       sessionId: z.string(),
       permissionId: z.string(),
+      callId: z.string().optional(),
       response: PermissionResponseSchema,
     }),
   ),

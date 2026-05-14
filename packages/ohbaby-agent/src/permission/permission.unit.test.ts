@@ -73,6 +73,39 @@ describe("PermissionManager", () => {
     ]);
   });
 
+  it("preserves callId in permission updates and replies", async () => {
+    const bus = createBus();
+    const permission = createPermissionManager({
+      bus,
+      generateId: () => "permission_1",
+    });
+    const updated: PermissionInfo[] = [];
+    const replied: unknown[] = [];
+
+    bus.subscribe(PermissionEvent.Updated, (event) => {
+      updated.push(event.info);
+    });
+    bus.subscribe(PermissionEvent.Replied, (event) => {
+      replied.push(event);
+    });
+
+    const askPromise = permission.ask(baseAskInput({ callId: "call_1" }));
+
+    expect(updated.at(-1)?.callId).toBe("call_1");
+
+    permission.respond("session_1", "permission_1", { type: "once" });
+
+    await expect(askPromise).resolves.toBe("once");
+    expect(replied).toEqual([
+      {
+        callId: "call_1",
+        permissionId: "permission_1",
+        response: { type: "once" },
+        sessionId: "session_1",
+      },
+    ]);
+  });
+
   it("serializes asks and publishes the next request only after the first resolves", async () => {
     const bus = createBus();
     let nextId = 1;
@@ -167,7 +200,10 @@ describe("PermissionManager", () => {
     expect(replied).toEqual([
       {
         permissionId: "permission_1",
-        response: { type: "always" },
+        response: {
+          pattern: "tool:edit:src/components/**",
+          type: "always",
+        },
         sessionId: "session_1",
       },
       {
@@ -231,6 +267,86 @@ describe("PermissionManager", () => {
     permission.respond("session_a", "permission_3", { type: "once" });
     await expect(afterClear).resolves.toBe("once");
   });
+
+  it("downgrades always responses for write tools without a scoped path", async () => {
+    const bus = createBus();
+    let nextId = 1;
+    const permission = createPermissionManager({
+      bus,
+      generateId: () => `permission_${String(nextId++)}`,
+    });
+    const updated: PermissionInfo[] = [];
+    const replied: unknown[] = [];
+
+    bus.subscribe(PermissionEvent.Updated, (event) => {
+      updated.push(event.info);
+    });
+    bus.subscribe(PermissionEvent.Replied, (event) => {
+      replied.push(event);
+    });
+
+    const first = permission.ask(baseAskInput({ params: {} }));
+    permission.respond("session_1", "permission_1", { type: "always" });
+
+    await expect(first).resolves.toBe("once");
+    expect(replied).toEqual([
+      {
+        permissionId: "permission_1",
+        response: { type: "once" },
+        sessionId: "session_1",
+      },
+    ]);
+
+    const second = permission.ask(
+      baseAskInput({ messageId: "message_2", params: {} }),
+    );
+
+    expect(updated.map((info) => info.id)).toEqual([
+      "permission_1",
+      "permission_2",
+    ]);
+
+    permission.respond("session_1", "permission_2", { type: "once" });
+    await expect(second).resolves.toBe("once");
+  });
+
+  it("publishes cancel replies when clearing a session", async () => {
+    const bus = createBus();
+    let nextId = 1;
+    const permission = createPermissionManager({
+      bus,
+      generateId: () => `permission_${String(nextId++)}`,
+    });
+    const replied: unknown[] = [];
+
+    bus.subscribe(PermissionEvent.Replied, (event) => {
+      replied.push(event);
+    });
+
+    const current = permission.ask(baseAskInput({ callId: "call_1" }));
+    const queued = permission.ask(
+      baseAskInput({ callId: "call_2", messageId: "message_2" }),
+    );
+
+    permission.clearSession("session_1");
+
+    await expect(current).resolves.toBe("cancel");
+    await expect(queued).resolves.toBe("cancel");
+    expect(replied).toEqual([
+      {
+        callId: "call_1",
+        permissionId: "permission_1",
+        response: { type: "cancel" },
+        sessionId: "session_1",
+      },
+      {
+        callId: "call_2",
+        permissionId: "permission_2",
+        response: { type: "cancel" },
+        sessionId: "session_1",
+      },
+    ]);
+  });
 });
 
 describe("permission patterns", () => {
@@ -248,7 +364,7 @@ describe("permission patterns", () => {
         params: { command: "git push origin main" },
         type: "bash",
       }),
-    ).toBe("bash:git:push");
+    ).toBe("bash:git:Z2l0IHB1c2ggb3JpZ2luIG1haW4");
     expect(
       generatePermissionPattern({
         name: "code-review",
@@ -285,6 +401,22 @@ describe("permission patterns", () => {
       matchPermissionPattern(
         "tool:edit:tests/Button.tsx",
         new Set(["tool:edit:src/**"]),
+      ),
+    ).toBe(false);
+    expect(
+      matchPermissionPattern(
+        generatePermissionPattern({
+          name: "rm",
+          params: { command: "rm -rf /" },
+          type: "bash",
+        }),
+        new Set([
+          generatePermissionPattern({
+            name: "rm",
+            params: { command: "rm -rf ./tmp" },
+            type: "bash",
+          }),
+        ]),
       ),
     ).toBe(false);
   });
