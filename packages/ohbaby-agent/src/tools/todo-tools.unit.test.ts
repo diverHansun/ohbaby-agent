@@ -70,4 +70,29 @@ describe("todo builtin tools", () => {
       }),
     ).rejects.toThrow("Invalid todo status");
   });
+
+  it("does not expose mutable session state through metadata", async () => {
+    const runTool = createToolRunner();
+    await runTool("todo_write", {
+      todos: [
+        {
+          content: "Original",
+          id: "todo_1",
+          status: "pending",
+        },
+      ],
+    });
+
+    const read = await runTool("todo_read", {});
+    const exposedTodos = read.metadata?.todos as {
+      content: string;
+      id: string;
+      status: string;
+    }[];
+    exposedTodos[0] = { content: "Mutated", id: "todo_1", status: "completed" };
+    const reread = await runTool("todo_read", {});
+
+    expect(reread.output).toContain("Original");
+    expect(reread.output).not.toContain("Mutated");
+  });
 });

@@ -10,8 +10,8 @@ import {
   createGlobMatcher,
   ensureWritableParent,
   isProbablyBinary,
+  scanFiles,
   splitTextLines,
-  walkFiles,
 } from "./utils/files.js";
 import {
   getBooleanParam,
@@ -29,6 +29,9 @@ import {
 
 const DEFAULT_READ_LIMIT = 2_000;
 const DEFAULT_SEARCH_LIMIT = 100;
+const MAX_READ_LIMIT = 20_000;
+const MAX_TEXT_FILE_BYTES = 1_000_000;
+const MAX_SEARCH_VISITED_FILES = 10_000;
 
 const FILE_PATH_SCHEMA = {
   type: "string",
@@ -42,6 +45,14 @@ async function readTextFile(filePath: string): Promise<string> {
   }
 
   return buffer.toString("utf8");
+}
+
+function assertTextFileSize(stats: { readonly size: number }, inputPath: string): void {
+  if (stats.size > MAX_TEXT_FILE_BYTES) {
+    throw new Error(
+      `File is too large to read: ${inputPath} (${String(stats.size)} bytes).`,
+    );
+  }
 }
 
 async function resolveWritableFile(
@@ -93,6 +104,7 @@ function createReadTool(): Tool {
       const limit = getNumberParam(params, "limit", {
         defaultValue: DEFAULT_READ_LIMIT,
         integer: true,
+        max: MAX_READ_LIMIT,
         min: 1,
       });
       const resolvedPath = await resolvePathForExisting(context, inputPath);
@@ -100,6 +112,7 @@ function createReadTool(): Tool {
       if (!stats.isFile()) {
         throw new Error(`Path is not a file: ${inputPath}`);
       }
+      assertTextFileSize(stats, inputPath);
       const content = await readTextFile(resolvedPath);
       const lines = splitTextLines(content);
       const selected = lines.slice(offset - 1, offset - 1 + limit);
@@ -190,16 +203,27 @@ function createGlobTool(): Tool {
       });
       const matcher = createGlobMatcher(pattern);
       const resolvedPath = await resolvePathForExisting(context, inputPath);
-      const walked = await walkFiles({ basePath: resolvedPath, limit: limit * 5 });
-      const matches = walked.files
-        .filter((file) => matcher(file.relativePath))
-        .slice(0, limit)
-        .map((file) => file.relativePath);
-      const truncated = walked.truncated || matches.length >= limit;
+      const matches: string[] = [];
+      const scan = await scanFiles({
+        basePath: resolvedPath,
+        maxVisitedFiles: MAX_SEARCH_VISITED_FILES,
+        visit(file) {
+          if (matcher(file.relativePath)) {
+            matches.push(file.relativePath);
+          }
+
+          return matches.length < limit;
+        },
+      });
+      const truncated = scan.truncated || matches.length >= limit;
 
       return {
         output: renderList(matches, "No files matched."),
-        metadata: { count: matches.length, truncated },
+        metadata: {
+          count: matches.length,
+          truncated,
+          visitedFileCount: scan.visitedFileCount,
+        },
       };
     },
   };
@@ -235,35 +259,45 @@ function createGrepTool(): Tool {
       const regex = new RegExp(pattern, "u");
       const includeMatcher = createGlobMatcher(include);
       const resolvedPath = await resolvePathForExisting(context, inputPath);
-      const walked = await walkFiles({ basePath: resolvedPath, limit: limit * 20 });
       const matches: string[] = [];
-      for (const file of walked.files) {
-        if (!includeMatcher(file.relativePath)) {
-          continue;
-        }
-        const buffer = await fs.readFile(file.absolutePath);
-        if (isProbablyBinary(buffer)) {
-          continue;
-        }
-        const lines = splitTextLines(buffer.toString("utf8"));
-        for (const [index, line] of lines.entries()) {
-          if (regex.test(line)) {
-            matches.push(`${file.relativePath}:${String(index + 1)}: ${line}`);
-            if (matches.length >= limit) {
-              break;
+      let skippedLargeFiles = 0;
+      const scan = await scanFiles({
+        basePath: resolvedPath,
+        maxVisitedFiles: MAX_SEARCH_VISITED_FILES,
+        async visit(file) {
+          if (!includeMatcher(file.relativePath)) {
+            return true;
+          }
+          const stats = await fs.stat(file.absolutePath);
+          if (stats.size > MAX_TEXT_FILE_BYTES) {
+            skippedLargeFiles += 1;
+            return true;
+          }
+          const buffer = await fs.readFile(file.absolutePath);
+          if (isProbablyBinary(buffer)) {
+            return true;
+          }
+          const lines = splitTextLines(buffer.toString("utf8"));
+          for (const [index, line] of lines.entries()) {
+            if (regex.test(line)) {
+              matches.push(`${file.relativePath}:${String(index + 1)}: ${line}`);
+              if (matches.length >= limit) {
+                return false;
+              }
             }
           }
-        }
-        if (matches.length >= limit) {
-          break;
-        }
-      }
+
+          return true;
+        },
+      });
 
       return {
         output: renderList(matches, "No matches found."),
         metadata: {
           count: matches.length,
-          truncated: walked.truncated || matches.length >= limit,
+          skippedLargeFiles,
+          truncated: scan.truncated || matches.length >= limit,
+          visitedFileCount: scan.visitedFileCount,
         },
       };
     },
@@ -324,6 +358,7 @@ function createEditTool(): Tool {
       const replaceAll = getBooleanParam(params, "replace_all", false);
       const existingPath = await resolvePathForExisting(context, inputPath);
       const writePath = await resolveWritableFile(context, inputPath);
+      assertTextFileSize(await fs.stat(existingPath), inputPath);
       const content = await readTextFile(existingPath);
       const occurrences = content.split(oldString).length - 1;
       if (occurrences === 0) {
@@ -340,11 +375,13 @@ function createEditTool(): Tool {
       await fs.writeFile(writePath, updated, "utf8");
 
       return {
-        output: renderReplacementDiff({
-          newString,
-          oldString,
-          replacementCount: replaceAll ? occurrences : 1,
-        }),
+        output: truncateOutput(
+          renderReplacementDiff({
+            newString,
+            oldString,
+            replacementCount: replaceAll ? occurrences : 1,
+          }),
+        ),
         metadata: {
           path: writePath,
           replacementCount: replaceAll ? occurrences : 1,

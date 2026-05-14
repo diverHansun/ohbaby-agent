@@ -16,6 +16,15 @@ export interface WalkFile {
   readonly relativePath: string;
 }
 
+export interface ScanFilesResult {
+  readonly truncated: boolean;
+  readonly visitedFileCount: number;
+}
+
+export type WalkFileVisitor = (
+  file: WalkFile,
+) => Promise<boolean | undefined> | boolean | undefined;
+
 function normalizeRelativePath(value: string): string {
   return value.split(path.sep).join("/");
 }
@@ -139,4 +148,58 @@ export async function walkFiles(input: {
   await visit(input.basePath);
 
   return { files, truncated };
+}
+
+export async function scanFiles(input: {
+  readonly basePath: string;
+  readonly ignoreNames?: readonly string[];
+  readonly maxVisitedFiles?: number;
+  readonly visit: WalkFileVisitor;
+}): Promise<ScanFilesResult> {
+  const ignored = new Set([...DEFAULT_IGNORES, ...(input.ignoreNames ?? [])]);
+  const maxVisitedFiles = input.maxVisitedFiles ?? Number.POSITIVE_INFINITY;
+  let truncated = false;
+  let visitedFileCount = 0;
+
+  async function visitDirectory(directory: string): Promise<boolean> {
+    if (truncated) {
+      return false;
+    }
+    const entries = await fs.readdir(directory, { withFileTypes: true });
+    entries.sort((first, second) => first.name.localeCompare(second.name));
+    for (const entry of entries) {
+      if (ignored.has(entry.name)) {
+        continue;
+      }
+      const absolutePath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        const keepGoing = await visitDirectory(absolutePath);
+        if (!keepGoing) {
+          return false;
+        }
+        continue;
+      }
+      if (!entry.isFile()) {
+        continue;
+      }
+      if (visitedFileCount >= maxVisitedFiles) {
+        truncated = true;
+        return false;
+      }
+      visitedFileCount += 1;
+      const keepGoing = await input.visit({
+        absolutePath,
+        relativePath: normalizeRelativePath(path.relative(input.basePath, absolutePath)),
+      });
+      if (keepGoing === false) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  await visitDirectory(input.basePath);
+
+  return { truncated, visitedFileCount };
 }

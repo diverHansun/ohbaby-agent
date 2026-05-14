@@ -132,6 +132,45 @@ describe("file builtin tools", () => {
     expect(context.existingCalls).toBeGreaterThanOrEqual(3);
   });
 
+  it("continues glob scanning until it reaches matching results", async () => {
+    for (let index = 0; index < 10; index += 1) {
+      await writeFile(tempRoot, `src/${String(index).padStart(2, "0")}.js`, "noop\n");
+    }
+    await writeFile(tempRoot, "src/z-target.ts", "export const target = true;\n");
+    const context = createTestContext(tempRoot);
+
+    const result = await tool("glob").execute(
+      { limit: 1, pattern: "**/*.ts" },
+      context,
+    );
+
+    expect(result.output).toContain("src/z-target.ts");
+    expect(result.metadata).toMatchObject({ count: 1 });
+  });
+
+  it("refuses oversized reads before loading content", async () => {
+    await writeFile(tempRoot, "large.txt", "x".repeat(1_000_001));
+    const context = createTestContext(tempRoot);
+
+    await expect(
+      tool("read").execute({ file_path: "large.txt" }, context),
+    ).rejects.toThrow("File is too large to read");
+  });
+
+  it("skips oversized files while grepping", async () => {
+    await writeFile(tempRoot, "large.txt", `${"x".repeat(1_000_001)}needle\n`);
+    await writeFile(tempRoot, "small.txt", "nothing here\n");
+    const context = createTestContext(tempRoot);
+
+    const result = await tool("grep").execute(
+      { pattern: "needle" },
+      context,
+    );
+
+    expect(result.output).toBe("No matches found.");
+    expect(result.metadata).toMatchObject({ skippedLargeFiles: 1 });
+  });
+
   it("writes and edits files through write path resolution", async () => {
     const context = createTestContext(tempRoot);
 
@@ -156,6 +195,24 @@ describe("file builtin tools", () => {
     expect(edit.output).toContain("-hello world");
     expect(edit.output).toContain("+hello tools");
     expect(context.writeCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  it("truncates large edit diffs", async () => {
+    const oldString = "old".repeat(12_000);
+    const newString = "new".repeat(12_000);
+    await writeFile(tempRoot, "large-edit.txt", `${oldString}\n`);
+    const context = createTestContext(tempRoot);
+
+    const result = await tool("edit").execute(
+      {
+        file_path: "large-edit.txt",
+        new_string: newString,
+        old_string: oldString,
+      },
+      context,
+    );
+
+    expect(result.output).toContain("[results truncated]");
   });
 
   it("fails invalid edits without modifying the file", async () => {

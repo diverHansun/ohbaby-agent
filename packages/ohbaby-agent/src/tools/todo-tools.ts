@@ -31,12 +31,16 @@ export class InMemoryTodoStore implements TodoStore {
   private readonly bySession = new Map<string, readonly TodoItem[]>();
 
   read(sessionId: string): readonly TodoItem[] {
-    return this.bySession.get(sessionId) ?? [];
+    return cloneTodos(this.bySession.get(sessionId) ?? []);
   }
 
   write(sessionId: string, todos: readonly TodoItem[]): void {
-    this.bySession.set(sessionId, todos.map((todo) => ({ ...todo })));
+    this.bySession.set(sessionId, cloneTodos(todos));
   }
+}
+
+function cloneTodos(todos: readonly TodoItem[]): readonly TodoItem[] {
+  return todos.map((todo) => ({ ...todo }));
 }
 
 function assertTodoStatus(value: unknown): asserts value is TodoStatus {
@@ -109,7 +113,7 @@ function createTodoReadTool(store: TodoStore): Tool {
       const todos = store.read(context.sessionId);
       return {
         output: renderTodos(todos),
-        metadata: { count: todos.length, todos },
+        metadata: { count: todos.length, todos: cloneTodos(todos) },
       };
     },
   };
@@ -150,7 +154,7 @@ function createTodoWriteTool(store: TodoStore): Tool {
       store.write(context.sessionId, todos);
       return {
         output: renderTodos(todos),
-        metadata: { count: todos.length, todos },
+        metadata: { count: todos.length, todos: cloneTodos(todos) },
       };
     },
   };
