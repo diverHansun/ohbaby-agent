@@ -8,6 +8,7 @@ import type {
   Tool,
   ToolCallStatus,
   ToolExecutionContext,
+  ToolExecutionEnvironment,
   ToolExecutionResult,
   ToolScheduler,
   ToolSchedulerOptions,
@@ -504,6 +505,89 @@ describe("ToolScheduler", () => {
     ]);
     expect(started).toContain("memory_1");
     expect(started.indexOf("read_1")).toBeLessThan(started.indexOf("write_1"));
+  });
+
+  it("passes each batch call environment through waves and detached tools", async () => {
+    const { scheduler } = createScheduler({
+      config: { concurrency: { maxSubagentConcurrency: 1 } },
+    });
+    for (const tool of [
+      { name: "read", category: "readonly" },
+      { name: "edit", category: "write" },
+      { name: "memory_add", category: "memory" },
+      { name: "task", category: "subagent" },
+    ] as const) {
+      scheduler.register(
+        createTool({
+          category: tool.category,
+          execute: (_params, context): Promise<ToolExecutionResult> =>
+            Promise.resolve({
+              output: `${context.callId}:${context.environment?.workdir ?? "missing"}`,
+            }),
+          name: tool.name,
+        }),
+      );
+    }
+
+    const makeEnvironment = (workdir: string): ToolExecutionEnvironment => ({
+      workdir,
+      resolvePath(inputPath: string): string {
+        return `${workdir}/${inputPath}`;
+      },
+      resolvePathForExisting(inputPath: string): Promise<string> {
+        return Promise.resolve(`${workdir}/${inputPath}`);
+      },
+      resolvePathForWrite(inputPath: string): Promise<string> {
+        return Promise.resolve(`${workdir}/${inputPath}`);
+      },
+      resolveCommandContext(): { readonly cwd: string; readonly kind: string } {
+        return { cwd: workdir, kind: "host-local" };
+      },
+    });
+
+    await expect(
+      scheduler.executeBatch({
+        calls: [
+          {
+            callId: "read_1",
+            environment: makeEnvironment("D:/workspace/read"),
+            messageId: "message_1",
+            params: {},
+            sessionId: "session_1",
+            toolName: "read",
+          },
+          {
+            callId: "write_1",
+            environment: makeEnvironment("D:/workspace/write"),
+            messageId: "message_1",
+            params: {},
+            sessionId: "session_1",
+            toolName: "edit",
+          },
+          {
+            callId: "memory_1",
+            environment: makeEnvironment("D:/workspace/memory"),
+            messageId: "message_1",
+            params: {},
+            sessionId: "session_1",
+            toolName: "memory_add",
+          },
+          {
+            callId: "task_1",
+            environment: makeEnvironment("D:/workspace/task"),
+            messageId: "message_1",
+            params: {},
+            sessionId: "session_1",
+            toolName: "task",
+          },
+        ],
+      }),
+    ).resolves.toMatchObject([
+      { output: "read_1:D:/workspace/read", status: "success" },
+      { output: "write_1:D:/workspace/write", status: "success" },
+      { output: "memory_1:D:/workspace/memory", status: "success" },
+      { output: "task_1:D:/workspace/task", status: "success" },
+    ]);
   });
 
   it("preflights every batch call before starting tools and confirms asks serially", async () => {
