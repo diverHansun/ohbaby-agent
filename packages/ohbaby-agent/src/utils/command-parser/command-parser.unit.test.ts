@@ -13,6 +13,11 @@ describe("command-parser", () => {
     ).toEqual(["git", "npm", "rg", "echo"]);
     expect(getCommandRoots("echo ok\nrm -rf /tmp")).toEqual(["echo", "rm"]);
     expect(getCommandRoots("sleep 1 & rm -rf /tmp")).toEqual(["sleep", "rm"]);
+    expect(getCommandRoots("npm test 2>&1 | tee test.log")).toEqual([
+      "npm",
+      "tee",
+    ]);
+    expect(getCommandRoots("npm test &> test.log")).toEqual(["npm"]);
   });
 
   it("unwraps common command wrappers", () => {

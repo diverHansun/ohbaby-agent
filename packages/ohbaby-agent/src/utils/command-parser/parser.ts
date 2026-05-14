@@ -83,6 +83,15 @@ function tokenize(command: string): TokenizedCommand {
       continue;
     }
     if (quote === null && (char === ";" || char === "|" || char === "&")) {
+      const previousChar = chars[index - 1];
+      const nextChar = chars[index + 1];
+      if (
+        char === "&" &&
+        (previousChar === ">" || nextChar === ">" || nextChar === "<")
+      ) {
+        current += char;
+        continue;
+      }
       if (current) {
         tokens.push(current);
         current = "";
