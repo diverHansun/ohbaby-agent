@@ -136,6 +136,7 @@ describe("lazy helpers", () => {
 
     expect(first).toBe(second);
     await expect(first).rejects.toBe(error);
+    await expect(getter()).rejects.toBe(error);
     expect(init).toHaveBeenCalledTimes(1);
   });
 });
