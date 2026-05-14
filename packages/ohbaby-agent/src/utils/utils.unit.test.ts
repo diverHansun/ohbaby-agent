@@ -1,5 +1,7 @@
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   IrisError,
   checkEmptyContent,
@@ -51,6 +53,16 @@ describe("IrisError", () => {
 });
 
 describe("path helpers", () => {
+  let tempRoot: string;
+
+  beforeEach(async () => {
+    tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-utils-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tempRoot, { force: true, recursive: true });
+  });
+
   it("normalizes paths and checks containment without treating equality as containment", () => {
     const root = path.resolve("workspace");
     const child = path.join(root, "src", "file.ts");
@@ -75,6 +87,19 @@ describe("path helpers", () => {
     expect(overlaps(root, root)).toBe(true);
     expect(overlaps(root, other)).toBe(false);
   });
+
+  it("resolves existing symlink ancestors before checking missing descendants", async () => {
+    const root = path.join(tempRoot, "root");
+    const outside = path.join(tempRoot, "outside");
+    const link = path.join(root, "linked-outside");
+    const missingDescendant = path.join(link, "new-file.txt");
+    await fs.mkdir(root, { recursive: true });
+    await fs.mkdir(outside, { recursive: true });
+    await fs.symlink(outside, link, "junction");
+
+    expect(contains(root, missingDescendant)).toBe(false);
+    expect(containsOrEqual(root, missingDescendant)).toBe(false);
+  });
 });
 
 describe("lazy helpers", () => {
@@ -98,6 +123,19 @@ describe("lazy helpers", () => {
 
     expect(first).toBe(second);
     await expect(first).resolves.toBe("ready");
+    expect(init).toHaveBeenCalledTimes(1);
+  });
+
+  it("caches async initialization failures", async () => {
+    const error = new Error("not ready");
+    const init = vi.fn(() => Promise.reject(error));
+    const getter = lazyAsync(init);
+
+    const first = getter();
+    const second = getter();
+
+    expect(first).toBe(second);
+    await expect(first).rejects.toBe(error);
     expect(init).toHaveBeenCalledTimes(1);
   });
 });

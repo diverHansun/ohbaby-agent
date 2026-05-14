@@ -15,10 +15,20 @@ function normalizeForComparison(value: string): string {
 
 export function normalizePath(value: string): string {
   const resolved = path.resolve(value);
-  try {
-    return fs.realpathSync.native(resolved);
-  } catch {
-    return path.normalize(resolved);
+  let current = resolved;
+
+  for (;;) {
+    try {
+      const realCurrent = fs.realpathSync.native(current);
+      const suffix = path.relative(current, resolved);
+      return suffix === "" ? realCurrent : path.join(realCurrent, suffix);
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) {
+        return path.normalize(resolved);
+      }
+      current = parent;
+    }
   }
 }
 
