@@ -1,7 +1,7 @@
 import { Box, Text } from "ink";
 import { useEffect, useRef } from "react";
 import type { ReactElement } from "react";
-import type { UiSnapshot } from "ohbaby-sdk";
+import type { UiCommandCatalog, UiSnapshot } from "ohbaby-sdk";
 import { DialogManager } from "./dialogs/manager.js";
 import { MessageList } from "./components/message/message-list.js";
 import { Prompt } from "./components/prompt/index.js";
@@ -31,10 +31,6 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
     let catalogRequestSequence = 0;
 
     const loadCatalog = async (): Promise<void> => {
-      if (client.listCommands === undefined) {
-        return;
-      }
-
       const requestSequence = catalogRequestSequence + 1;
       catalogRequestSequence = requestSequence;
 
@@ -49,7 +45,7 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
       } catch (caught) {
         if (!disposed) {
           store.dispatch({
-            runtime: {
+            status: {
               kind: "error",
               message: formatError(caught),
               recoverable: true,
@@ -78,7 +74,7 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
       .catch((caught: unknown) => {
         if (!disposed) {
           store.dispatch({
-            runtime: {
+            status: {
               kind: "error",
               message: formatError(caught),
               recoverable: true,
@@ -130,9 +126,9 @@ function createEmptySnapshot(): UiSnapshot {
 }
 
 function normalizeCommandCatalog(
-  value: TuiCommandCatalog | readonly TuiCommandSpec[],
+  value: UiCommandCatalog | TuiCommandCatalog | readonly TuiCommandSpec[],
 ): TuiCommandCatalog {
-  if (Array.isArray(value)) {
+  if (isCommandArray(value)) {
     return {
       commands: value,
       loadedAt: Date.now(),
@@ -141,7 +137,18 @@ function normalizeCommandCatalog(
     };
   }
 
-  return value as TuiCommandCatalog;
+  return {
+    commands: value.commands,
+    loadedAt: "loadedAt" in value ? value.loadedAt : Date.now(),
+    surface: "surface" in value ? value.surface : "tui",
+    version: value.version,
+  };
+}
+
+function isCommandArray(
+  value: UiCommandCatalog | TuiCommandCatalog | readonly TuiCommandSpec[],
+): value is readonly TuiCommandSpec[] {
+  return Array.isArray(value);
 }
 
 function formatError(error: unknown): string {

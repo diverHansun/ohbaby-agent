@@ -1,4 +1,6 @@
 import type {
+  UiCommandOutput,
+  UiInteractionRequest,
   UiMessage,
   UiMessagePart,
   UiPermissionRequest,
@@ -42,7 +44,6 @@ export function applyTuiEvent(
   event: TuiEvent,
 ): TuiStoreState {
   switch (event.type) {
-    case "snapshot":
     case "snapshot.replaced":
       return preserveLocalQueues(state, createStateFromSnapshot(event.snapshot));
 
@@ -81,7 +82,7 @@ export function applyTuiEvent(
               message.id === event.messageId
                 ? applyPartDelta(
                     message,
-                    event.partIndex,
+                    "partIndex" in event ? event.partIndex : undefined,
                     event.partId,
                     event.delta,
                   )
@@ -96,14 +97,9 @@ export function applyTuiEvent(
         runtime: event.run.status,
       });
 
-    case "status.updated":
-      return rebuildFromCollections(state, {
-        runtime: event.status,
-      });
-
     case "runtime.updated":
       return rebuildFromCollections(state, {
-        runtime: event.runtime,
+        runtime: event.status,
       });
 
     case "permission.requested":
@@ -130,21 +126,17 @@ export function applyTuiEvent(
     case "command.result.delivered":
       return appendCommandNotice(state, {
         clientInvocationId: event.clientInvocationId,
-        commandId: event.commandId,
+        commandId: event.commandRunId,
         kind: "result",
-        text: event.output,
+        text: formatCommandOutput(event.output),
       });
 
     case "command.failed":
-    case "command.result.failed":
       return appendCommandNotice(state, {
         clientInvocationId: event.clientInvocationId,
-        commandId: event.commandId,
+        commandId: event.commandRunId,
         kind: "error",
-        text:
-          typeof event.error === "string"
-            ? event.error
-            : event.error.message,
+        text: event.error.message,
       });
 
     case "command.catalog.updated":
@@ -159,7 +151,10 @@ export function applyTuiEvent(
     case "interaction.requested":
       return {
         ...state,
-        interactions: upsertInteraction(state.interactions, event.interaction),
+        interactions: upsertInteraction(
+          state.interactions,
+          toTuiInteraction(event.request),
+        ),
       };
 
     case "interaction.resolved":
@@ -170,6 +165,8 @@ export function applyTuiEvent(
         ),
       };
   }
+
+  return state;
 }
 
 export function setCommandCatalog(
@@ -349,6 +346,35 @@ function appendTextToPart(part: UiMessagePart, delta: string): UiMessagePart {
   }
 
   return part;
+}
+
+function formatCommandOutput(output: UiCommandOutput | undefined): string {
+  if (!output) {
+    return "";
+  }
+
+  if (output.kind === "text") {
+    return output.text;
+  }
+
+  if (output.kind === "markdown") {
+    return output.markdown;
+  }
+
+  return JSON.stringify(output.data);
+}
+
+function toTuiInteraction(
+  interaction: UiInteractionRequest,
+): TuiInteractionRequest {
+  return {
+    interactionId: interaction.interactionId,
+    kind: interaction.kind,
+    message: interaction.prompt,
+    options: interaction.options,
+    subject: interaction.subject,
+    title: interaction.prompt,
+  };
 }
 
 function upsertById<TItem extends { readonly id: string }>(

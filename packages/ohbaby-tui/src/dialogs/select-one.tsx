@@ -64,6 +64,7 @@ export function SelectOneDialog({
       setPending(true);
       void client.respondInteraction(interaction.interactionId, {
         kind: "cancelled",
+        reason: "user-cancelled",
       }).catch((caught: unknown) => {
         setError(formatError(caught));
         setPending(false);

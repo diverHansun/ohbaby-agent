@@ -128,6 +128,7 @@ describe("OhbabyTerminalApp", () => {
 
     client.emit({
       reason: "commands changed",
+      timestamp: 1,
       type: "command.catalog.updated",
       version: "v2",
     });
@@ -142,12 +143,14 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
     client.emit({
-      interaction: {
+      request: {
+        commandRunId: "command_1",
         interactionId: "model_1",
         kind: "select-one",
         options: [{ id: "gpt-5.5", label: "GPT-5.5" }],
         subject: "model",
       },
+      timestamp: 1,
       type: "interaction.requested",
     });
     await flush();
@@ -161,16 +164,21 @@ describe("OhbabyTerminalApp", () => {
     });
 
     client.emit({
+      commandRunId: "command_1",
       interactionId: "model_1",
+      status: "accepted",
+      timestamp: 2,
       type: "interaction.resolved",
     });
     client.emit({
-      interaction: {
+      request: {
+        commandRunId: "command_2",
         interactionId: "session_chooser",
         kind: "select-one",
         options: [{ id: "session_1", label: "Main" }],
         subject: "session",
       },
+      timestamp: 3,
       type: "interaction.requested",
     });
     await flush();
@@ -183,16 +191,18 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
     client.emit({
-      interaction: {
+      request: {
+        commandRunId: "command_1",
         interactionId: "generic_1",
         kind: "select-one",
         options: [
           { id: "first", label: "First" },
           { id: "second", label: "Second" },
         ],
+        prompt: "Provider",
         subject: "provider",
-        title: "Provider",
       },
+      timestamp: 1,
       type: "interaction.requested",
     });
     await flush();
@@ -215,12 +225,14 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
     client.emit({
-      interaction: {
+      request: {
+        commandRunId: "command_1",
         interactionId: "confirm_1",
         kind: "confirm",
-        message: "Continue?",
+        prompt: "Continue?",
         subject: "command",
       },
+      timestamp: 1,
       type: "interaction.requested",
     });
     await flush();
@@ -229,7 +241,8 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("\r");
     await flush();
     expect(client.respondInteraction).toHaveBeenCalledWith("confirm_1", {
-      kind: "confirmed",
+      kind: "accepted",
+      value: true,
     });
   });
 
@@ -239,12 +252,14 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
     client.emit({
-      interaction: {
+      request: {
+        commandRunId: "command_1",
         interactionId: "model_1",
         kind: "select-one",
         options: [{ id: "gpt-5.5", label: "GPT-5.5" }],
         subject: "model",
       },
+      timestamp: 1,
       type: "interaction.requested",
     });
     client.emit({
@@ -324,11 +339,9 @@ function createFakeClient(
     respondPermission: vi.fn(() => Promise.resolve()),
     submitPrompt: vi.fn(() => Promise.resolve()),
     subscribeEvents(handler: TuiEventHandler | UiEventHandler): () => void {
-      const tuiHandler = handler as TuiEventHandler;
-
-      handlers.add(tuiHandler);
+      handlers.add(handler);
       return () => {
-        handlers.delete(tuiHandler);
+        handlers.delete(handler);
       };
     },
   };

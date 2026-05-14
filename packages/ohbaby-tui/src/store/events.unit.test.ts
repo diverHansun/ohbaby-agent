@@ -8,7 +8,6 @@ import {
 } from "./events.js";
 import type {
   TuiCommandCatalog,
-  TuiInteractionRequest,
 } from "./snapshot.js";
 
 function snapshot(): UiSnapshot {
@@ -120,12 +119,13 @@ describe("TUI store event reducer", () => {
   });
 
   it("tracks permission, interaction, and command event queues", () => {
-    const interaction: TuiInteractionRequest = {
+    const interaction = {
+      commandRunId: "command_1",
       interactionId: "interaction_1",
       kind: "select-one",
       options: [{ id: "gpt-5.5", label: "GPT-5.5" }],
       subject: "model",
-    };
+    } as const;
     let state = createStateFromSnapshot(snapshot());
 
     state = applyTuiEvent(state, {
@@ -139,19 +139,22 @@ describe("TUI store event reducer", () => {
       type: "permission.requested",
     });
     state = applyTuiEvent(state, {
-      interaction,
+      request: interaction,
+      timestamp: 1,
       type: "interaction.requested",
     });
     state = applyTuiEvent(state, {
       clientInvocationId: "invoke_1",
-      commandId: "model",
-      output: "Model changed",
+      commandRunId: "command_1",
+      output: { kind: "text", text: "Model changed" },
+      timestamp: 1,
       type: "command.result.delivered",
     });
     state = applyTuiEvent(state, {
       clientInvocationId: "invoke_2",
-      commandId: "bad",
-      error: { message: "Unknown command" },
+      commandRunId: "command_2",
+      error: { code: "BAD", message: "Unknown command" },
+      timestamp: 2,
       type: "command.failed",
     });
 
@@ -167,7 +170,10 @@ describe("TUI store event reducer", () => {
       type: "permission.resolved",
     });
     state = applyTuiEvent(state, {
+      commandRunId: "command_1",
       interactionId: "interaction_1",
+      status: "accepted",
+      timestamp: 3,
       type: "interaction.resolved",
     });
 
@@ -180,6 +186,7 @@ describe("TUI store event reducer", () => {
 
     const next = applyTuiEvent(state, {
       reason: "plugin changed",
+      timestamp: 1,
       type: "command.catalog.updated",
       version: "v2",
     });
@@ -192,13 +199,15 @@ describe("TUI store event reducer", () => {
   });
 
   it("clears pending interactions when replacing the snapshot", () => {
-    const interaction: TuiInteractionRequest = {
+    const interaction = {
+      commandRunId: "command_1",
       interactionId: "interaction_1",
       kind: "confirm",
       subject: "command",
-    };
+    } as const;
     const state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
-      interaction,
+      request: interaction,
+      timestamp: 1,
       type: "interaction.requested",
     });
 
@@ -215,8 +224,10 @@ describe("TUI store event reducer", () => {
 
     for (let index = 0; index < 25; index += 1) {
       state = applyTuiEvent(state, {
-        commandId: "model",
-        output: `ok ${String(index)}`,
+        clientInvocationId: `invoke_${String(index)}`,
+        commandRunId: `command_${String(index)}`,
+        output: { kind: "text", text: `ok ${String(index)}` },
+        timestamp: index,
         type: "command.result.delivered",
       });
     }
@@ -235,12 +246,14 @@ describe("TUI store event reducer", () => {
     });
 
     store.dispatch({
-      runtime: { kind: "running", runId: "run_1" },
+      status: { kind: "running", runId: "run_1" },
+      timestamp: 1,
       type: "runtime.updated",
     });
     unsubscribe();
     store.dispatch({
-      runtime: { kind: "idle" },
+      status: { kind: "idle" },
+      timestamp: 2,
       type: "runtime.updated",
     });
 

@@ -26,7 +26,8 @@ export function ConfirmDialog({
     if (key.return) {
       setPending(true);
       void client.respondInteraction(interaction.interactionId, {
-        kind: "confirmed",
+        kind: "accepted",
+        value: true,
       }).catch((caught: unknown) => {
         setError(formatError(caught));
         setPending(false);
@@ -37,6 +38,7 @@ export function ConfirmDialog({
       setPending(true);
       void client.respondInteraction(interaction.interactionId, {
         kind: "cancelled",
+        reason: "user-cancelled",
       }).catch((caught: unknown) => {
         setError(formatError(caught));
         setPending(false);
