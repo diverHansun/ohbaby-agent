@@ -20,6 +20,12 @@ export interface InternalSandboxContext {
   status: SandboxContextStatus;
 }
 
+export function freezeCapabilities(
+  capabilities: SandboxCapabilities,
+): SandboxCapabilities {
+  return Object.freeze({ ...capabilities });
+}
+
 export function snapshotContext(
   context: InternalSandboxContext,
 ): SandboxContext {

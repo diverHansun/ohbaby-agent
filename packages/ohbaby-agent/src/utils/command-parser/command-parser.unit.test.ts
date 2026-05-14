@@ -32,6 +32,10 @@ describe("command-parser", () => {
     expect(
       detectPaths("rm -rf /tmp/build ./dist ../outside ~/notes \"src/app.ts\""),
     ).toEqual(["/tmp/build", "./dist", "../outside", "~/notes", "src/app.ts"]);
+    expect(detectPaths("cat </etc/passwd")).toEqual(["/etc/passwd"]);
+    expect(detectPaths("echo hi >../outside.txt")).toEqual([
+      "../outside.txt",
+    ]);
     expect(
       detectPaths("type C:\\Users\\me\\file.txt \"C:\\Program Files\\app\\config.json\""),
     ).toEqual([

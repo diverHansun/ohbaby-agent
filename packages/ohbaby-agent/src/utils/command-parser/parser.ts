@@ -198,10 +198,15 @@ function skipWrapperOptions(
 }
 
 function tokenLooksLikePath(token: string): boolean {
-  if (token.startsWith("-")) {
+  const normalized = stripRedirectionPrefix(token);
+  if (normalized.startsWith("-")) {
     return false;
   }
-  return PATH_PREFIX_PATTERN.test(token) || PATH_SUFFIX_PATTERN.test(token);
+  return PATH_PREFIX_PATTERN.test(normalized) || PATH_SUFFIX_PATTERN.test(normalized);
+}
+
+function stripRedirectionPrefix(token: string): string {
+  return token.replace(/^(?:\d*)[<>]+/u, "");
 }
 
 export function detectPaths(command: string): string[] {
@@ -218,7 +223,7 @@ export function parseCommand(command: string): ParsedCommand {
       continue;
     }
     details.push({
-      paths: tokens.filter(tokenLooksLikePath),
+      paths: tokens.map(stripRedirectionPrefix).filter(tokenLooksLikePath),
       root,
       text: tokens.join(" "),
     });

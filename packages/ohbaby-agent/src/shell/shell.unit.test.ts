@@ -165,6 +165,32 @@ describe("killTree", () => {
     expect(signals).toEqual(["-123:SIGTERM", "-123:SIGKILL"]);
   });
 
+  it("does not SIGKILL a fallback positive pid after it exits", async () => {
+    const signals: string[] = [];
+    let exited = false;
+
+    await killTreeWithPlatform(
+      { pid: 123 },
+      {
+        delay: () => {
+          exited = true;
+          return Promise.resolve();
+        },
+        exited: () => exited,
+        killProcess(pid, signal): void {
+          signals.push(`${String(pid)}:${signal}`);
+          if (pid < 0) {
+            throw new Error("process group unavailable");
+          }
+        },
+        platform: "linux",
+        spawnTaskkill: vi.fn(),
+      },
+    );
+
+    expect(signals).toEqual(["-123:SIGTERM", "123:SIGTERM"]);
+  });
+
   it("ignores kill errors from stale processes", async () => {
     const child = new EventEmitter() as unknown as ChildProcess;
     Object.defineProperty(child, "pid", { value: 123 });

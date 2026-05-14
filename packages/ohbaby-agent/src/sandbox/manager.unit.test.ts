@@ -192,6 +192,36 @@ describe("SandboxManager", () => {
     expect(manager.getContext("session_1")?.leaseCount).toBe(0);
   });
 
+  it("returns immutable capability snapshots for contexts and leases", async () => {
+    const { manager } = createManager();
+    const context = await manager.createContext("session_1", {
+      adapterId: "fake",
+      workdir: "D:/repo",
+    });
+    const lease = await manager.acquire("session_1");
+
+    expect(Object.isFrozen(context.capabilities)).toBe(true);
+    expect(Object.isFrozen(lease.capabilities)).toBe(true);
+
+    expect(
+      () => {
+        (context.capabilities as { canExecCommands: boolean }).canExecCommands =
+          false;
+      },
+    ).toThrow(TypeError);
+    expect(
+      () => {
+        (lease.capabilities as { readOnly: boolean }).readOnly = true;
+      },
+    ).toThrow(TypeError);
+
+    expect(manager.getContext("session_1")?.capabilities).toMatchObject({
+      canExecCommands: true,
+      readOnly: false,
+    });
+    await lease.release();
+  });
+
   it("waits for active leases before destroying adapter state", async () => {
     const { adapter, manager } = createManager({ drainTimeoutMs: 1_000 });
     await manager.createContext("session_1", {

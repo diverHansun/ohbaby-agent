@@ -60,16 +60,21 @@ export async function killTreeWithPlatform(
   }
 
   const killProcess = options.killProcess ?? defaultKillProcess;
+  let usedPositiveFallback = false;
   try {
     killProcess(-pid, "SIGTERM");
   } catch {
     try {
       killProcess(pid, "SIGTERM");
+      usedPositiveFallback = true;
     } catch {
       return;
     }
   }
   await (options.delay ?? defaultDelay)(SIGKILL_TIMEOUT_MS);
+  if (usedPositiveFallback && isExited(options)) {
+    return;
+  }
   try {
     killProcess(-pid, "SIGKILL");
   } catch {

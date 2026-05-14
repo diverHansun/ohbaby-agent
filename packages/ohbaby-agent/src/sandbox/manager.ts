@@ -5,6 +5,7 @@ import {
   SandboxContextNotFoundError,
 } from "./errors.js";
 import {
+  freezeCapabilities,
   type InternalSandboxContext,
   snapshotContext,
 } from "./context.js";
@@ -73,7 +74,7 @@ export class SandboxManager {
         sessionId,
         workdir: path.resolve(options.workdir),
       });
-      const capabilities = adapter.getCapabilities(handle);
+      const capabilities = freezeCapabilities(adapter.getCapabilities(handle));
       const context: InternalSandboxContext = {
         adapter,
         adapterId,
