@@ -100,13 +100,16 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
       }
 
       const commandContext = resolveCommandContext(context);
+      if ((commandContext.commandPrefix?.length ?? 0) > 0) {
+        throw new Error(
+          "ToolExecutionContext commandPrefix is not supported by builtin bash yet; wire a command context bridge with final cwd/env before running bash.",
+        );
+      }
       const shellPath = shell.acceptable();
       const args = shellArgs(shellPath, command);
-      const prefix = commandContext.commandPrefix ?? [];
-      const spawnFile = prefix[0] ?? shellPath;
-      const spawnArgs = prefix.length > 0 ? [...prefix.slice(1), shellPath, ...args] : args;
-      const child = spawn(spawnFile, spawnArgs, {
+      const child = spawn(shellPath, args, {
         cwd: commandContext.cwd,
+        detached: true,
         env: { ...process.env, ...commandContext.env },
         windowsHide: true,
       });
@@ -130,9 +133,12 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
           }
           settled = true;
           cleanup();
-          void Promise.resolve(shell.killTree(child)).finally(() => {
-            reject(error);
-          });
+          void Promise.resolve()
+            .then(() => shell.killTree(child))
+            .catch(() => undefined)
+            .then(() => {
+              reject(error);
+            });
         }
 
         function abortHandler(): void {

@@ -15,6 +15,11 @@ class FakeChildProcess extends EventEmitter {
 
 function createContext(
   overrides: Partial<ToolExecutionContext> = {},
+  commandContext: CommandContext = {
+    cwd: "D:/workspace",
+    env: { FOO: "bar" },
+    kind: "host-local",
+  },
 ): ToolExecutionContext & {
   resolveCommandContext(): CommandContext;
 } {
@@ -25,11 +30,7 @@ function createContext(
     signal: new AbortController().signal,
     ...overrides,
     resolveCommandContext(): CommandContext {
-      return {
-        cwd: "D:/workspace",
-        env: { FOO: "bar" },
-        kind: "host-local",
-      };
+      return commandContext;
     },
   };
 }
@@ -72,6 +73,7 @@ describe("bash builtin tool", () => {
     expect(spawn.mock.calls[0]?.[0]).toBe("/bin/bash");
     expect(spawn.mock.calls[0]?.[1]).toEqual(["-lc", "echo hello"]);
     expect(spawn.mock.calls[0]?.[2].cwd).toBe("D:/workspace");
+    expect(spawn.mock.calls[0]?.[2].detached).toBe(true);
     expect(spawn.mock.calls[0]?.[2].env?.FOO).toBe("bar");
     expect(result.output).toContain("hello");
     expect(result.metadata).toMatchObject({ exitCode: 0, signal: null });
@@ -93,6 +95,56 @@ describe("bash builtin tool", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  it("rejects command prefixes until the bridge defines their execution contract", async () => {
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(() => {
+      queueMicrotask(() => {
+        child.emit("exit", 0, null);
+      });
+      return child as unknown as ChildProcess;
+    });
+    const bash = getBashTool({
+      shell: {
+        acceptable: () => "/bin/bash",
+        killTree: vi.fn(),
+      },
+      spawn,
+    });
+
+    await expect(
+      bash.execute(
+        { command: "echo hello" },
+        createContext(
+          {},
+          {
+            commandPrefix: ["docker", "exec", "container"],
+            cwd: "/workspace",
+            kind: "container",
+          },
+        ),
+      ),
+    ).rejects.toThrow("commandPrefix");
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("uses cmd arguments for Windows command shells", async () => {
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
+    const bash = getBashTool({
+      shell: {
+        acceptable: () => "C:\\Windows\\System32\\cmd.exe",
+        killTree: vi.fn(),
+      },
+      spawn,
+    });
+
+    const resultPromise = bash.execute({ command: "echo hello" }, createContext());
+    child.emit("exit", 0, null);
+    await resultPromise;
+
+    expect(spawn.mock.calls[0]?.[1]).toEqual(["/d", "/s", "/c", "echo hello"]);
+  });
+
   it("kills the process tree on timeout", async () => {
     const child = new FakeChildProcess();
     const killTree = vi.fn(() => Promise.resolve());
@@ -107,6 +159,45 @@ describe("bash builtin tool", () => {
     await expect(
       bash.execute({ command: "sleep 10", timeout: 1 }, createContext()),
     ).rejects.toThrow("timed out");
+    expect(killTree).toHaveBeenCalledWith(child);
+  });
+
+  it("rejects with the command error even if process cleanup fails", async () => {
+    const child = new FakeChildProcess();
+    const killTree = vi.fn(() => Promise.reject(new Error("cleanup failed")));
+    const bash = getBashTool({
+      shell: {
+        acceptable: () => "/bin/bash",
+        killTree,
+      },
+      spawn: vi.fn(() => child as unknown as ChildProcess),
+    });
+
+    await expect(
+      bash.execute({ command: "sleep 10", timeout: 1 }, createContext()),
+    ).rejects.toThrow("timed out");
+    expect(killTree).toHaveBeenCalledWith(child);
+  });
+
+  it("kills the process tree on abort", async () => {
+    const child = new FakeChildProcess();
+    const abort = new AbortController();
+    const killTree = vi.fn(() => Promise.resolve());
+    const bash = getBashTool({
+      shell: {
+        acceptable: () => "/bin/bash",
+        killTree,
+      },
+      spawn: vi.fn(() => child as unknown as ChildProcess),
+    });
+
+    const resultPromise = bash.execute(
+      { command: "sleep 10" },
+      createContext({ signal: abort.signal }),
+    );
+    abort.abort();
+
+    await expect(resultPromise).rejects.toThrow("cancelled");
     expect(killTree).toHaveBeenCalledWith(child);
   });
 });
