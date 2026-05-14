@@ -8,18 +8,18 @@ import {
 
 describe("command-parser", () => {
   it("extracts command roots from sequenced shell commands", () => {
-    expect(getCommandRoots("git status && npm test | rg fail; echo done")).toEqual([
-      "git",
-      "npm",
-      "rg",
-      "echo",
-    ]);
+    expect(
+      getCommandRoots("git status && npm test | rg fail; echo done"),
+    ).toEqual(["git", "npm", "rg", "echo"]);
+    expect(getCommandRoots("echo ok\nrm -rf /tmp")).toEqual(["echo", "rm"]);
+    expect(getCommandRoots("sleep 1 & rm -rf /tmp")).toEqual(["sleep", "rm"]);
   });
 
   it("unwraps common command wrappers", () => {
     expect(getCommandRoots("sudo -E env FOO=bar git push origin main")).toEqual(
       ["git"],
     );
+    expect(getCommandRoots("sudo -u root rm -rf /tmp/build")).toEqual(["rm"]);
     expect(getCommandRoots("command npm install")).toEqual(["npm"]);
   });
 
@@ -27,14 +27,23 @@ describe("command-parser", () => {
     expect(
       detectPaths("rm -rf /tmp/build ./dist ../outside ~/notes \"src/app.ts\""),
     ).toEqual(["/tmp/build", "./dist", "../outside", "~/notes", "src/app.ts"]);
+    expect(
+      detectPaths("type C:\\Users\\me\\file.txt \"C:\\Program Files\\app\\config.json\""),
+    ).toEqual([
+      "C:\\Users\\me\\file.txt",
+      "C:\\Program Files\\app\\config.json",
+    ]);
   });
 
-  it("marks unterminated quotes as parse errors while preserving tokens", () => {
+  it("marks unsupported or incomplete syntax as parse errors", () => {
     const parsed = parseCommand('echo "unterminated');
 
     expect(parsed.hasError).toBe(true);
     expect(parsed.roots).toEqual(["echo"]);
     expect(parsed.details[0]?.text).toBe("echo unterminated");
+    expect(parseCommand("echo ok $(rm -rf /tmp)").hasError).toBe(true);
+    expect(parseCommand("echo `rm -rf /tmp`").hasError).toBe(true);
+    expect(parseCommand("cat <(echo secret)").hasError).toBe(true);
   });
 
   it("matches command patterns with wildcards", () => {

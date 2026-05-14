@@ -47,11 +47,14 @@ export async function killTreeWithPlatform(
   options: KillTreePlatformOptions = {},
 ): Promise<void> {
   const pid = proc.pid;
-  if (!pid || isExited(options)) {
+  if (!pid) {
     return;
   }
   const platform = options.platform ?? process.platform;
   if (platform === "win32") {
+    if (isExited(options)) {
+      return;
+    }
     await (options.spawnTaskkill ?? defaultSpawnTaskkill)(pid);
     return;
   }
@@ -67,9 +70,6 @@ export async function killTreeWithPlatform(
     }
   }
   await (options.delay ?? defaultDelay)(SIGKILL_TIMEOUT_MS);
-  if (isExited(options)) {
-    return;
-  }
   try {
     killProcess(-pid, "SIGKILL");
   } catch {

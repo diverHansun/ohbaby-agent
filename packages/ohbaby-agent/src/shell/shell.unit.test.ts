@@ -40,7 +40,7 @@ describe("shell detection", () => {
     expect(deriveGitBashPath(git)).toBe(bash);
     expect(
       resolveAcceptableShell({
-        env: { COMSPEC: "C:\\Windows\\System32\\cmd.exe" },
+        env: { COMSPEC: "C:\\Windows\\System32\\cmd.exe", SHELL: "/usr/bin/bash" },
         existsSync: (candidate) => candidate === bash,
         platform: "win32",
         which: (command) => (command === "git" ? git : undefined),
@@ -77,7 +77,7 @@ describe("shell detection", () => {
 });
 
 describe("killTree", () => {
-  it("does nothing for exited or pid-less processes", async () => {
+  it("does nothing for pid-less processes", async () => {
     const spawnTaskkill = vi.fn();
     const killProcess = vi.fn();
 
@@ -85,15 +85,6 @@ describe("killTree", () => {
       { pid: undefined },
       {
         exited: () => false,
-        killProcess,
-        platform: "linux",
-        spawnTaskkill,
-      },
-    );
-    await killTreeWithPlatform(
-      { pid: 123 },
-      {
-        exited: () => true,
         killProcess,
         platform: "linux",
         spawnTaskkill,
@@ -120,6 +111,22 @@ describe("killTree", () => {
     expect(spawnTaskkill).toHaveBeenCalledWith(123);
   });
 
+  it("skips taskkill for exited Windows process trees", async () => {
+    const spawnTaskkill = vi.fn();
+
+    await killTreeWithPlatform(
+      { pid: 123 },
+      {
+        exited: () => true,
+        killProcess: vi.fn(),
+        platform: "win32",
+        spawnTaskkill,
+      },
+    );
+
+    expect(spawnTaskkill).not.toHaveBeenCalled();
+  });
+
   it("sends SIGTERM then SIGKILL to Unix process groups when still running", async () => {
     const signals: string[] = [];
 
@@ -128,6 +135,25 @@ describe("killTree", () => {
       {
         delay: () => Promise.resolve(),
         exited: () => false,
+        killProcess(pid, signal): void {
+          signals.push(`${String(pid)}:${signal}`);
+        },
+        platform: "linux",
+        spawnTaskkill: vi.fn(),
+      },
+    );
+
+    expect(signals).toEqual(["-123:SIGTERM", "-123:SIGKILL"]);
+  });
+
+  it("still best-effort kills Unix process groups after the parent exits", async () => {
+    const signals: string[] = [];
+
+    await killTreeWithPlatform(
+      { pid: 123 },
+      {
+        delay: () => Promise.resolve(),
+        exited: () => true,
         killProcess(pid, signal): void {
           signals.push(`${String(pid)}:${signal}`);
         },

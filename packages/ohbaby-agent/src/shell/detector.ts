@@ -75,10 +75,6 @@ export function resolvePreferredShell(input: ShellDetectionInput = {}): string {
 export function resolveAcceptableShell(input: ShellDetectionInput = {}): string {
   const platform = input.platform ?? process.platform;
   const env = input.env ?? process.env;
-  const shell = env.SHELL;
-  if (shell && !isBlacklistedShell(shell, platform)) {
-    return shell;
-  }
   const existsSync = input.existsSync ?? fs.existsSync;
   const which = input.which ?? defaultWhich;
   if (platform === "win32") {
@@ -89,6 +85,13 @@ export function resolveAcceptableShell(input: ShellDetectionInput = {}): string 
         return bashPath;
       }
     }
+
+    return defaultShell(platform, env);
+  }
+
+  const shell = env.SHELL;
+  if (shell && !isBlacklistedShell(shell, platform)) {
+    return shell;
   }
 
   return defaultShell(platform, env);
