@@ -25,7 +25,7 @@
 
 **分类**：
 - `once`：本次允许，不记录批准
-- `always`：永久允许（会话级），记录批准并通知模式切换
+- `always`：永久允许（会话级、Pattern 级），记录批准并启用 auto-approval
 - `reject`：拒绝操作
 - `suggest`：拒绝并提供替代建议
 
@@ -74,7 +74,7 @@ interface PermissionInfo {
   id: string                    // 格式: permission_<timestamp>_<random>
   sessionId: string             // 所属会话 ID
   messageId: string             // 关联的消息 ID
-  callId?: string               // 工具调用 ID（如有）
+  callId: string                // 工具调用 ID
 
   // ======== 请求类型 ========
   type: PermissionType          // 'tool' | 'bash' | 'skill' | 'external_directory'
@@ -161,15 +161,17 @@ namespace Permission.Event {
     type: 'permission.replied'
     sessionId: string
     permissionId: string
+    callId: string
     response: PermissionResponse
   }
 
-  // 请求模式切换事件
+  // always 授权审计/协调事件
   interface SwitchModeRequested {
-    type: 'permission.switch_mode_requested'
+    type: 'permission.switch-mode-requested'
     sessionId: string
-    targetMode: string          // 'edit-automatically'
+    targetMode: string          // 'edit-automatically'，供上层协调参考
     trigger: {
+      callId: string
       permissionId: string
       pattern: string
     }
@@ -258,7 +260,7 @@ function generatePermissionId(): string {
 完成（respond()）
     |
     +-- 发布 Event.Replied
-    +-- 如果 always: 添加到批准列表 + 发布 SwitchModeRequested
+    +-- 如果 always: 添加到批准列表 + 发布 SwitchModeRequested（审计/协调）
     +-- 如果 reject/suggest: 抛出错误
     +-- 从队列移除
     +-- 处理下一个请求

@@ -96,7 +96,7 @@ Policy 只负责决策和状态管理，不负责确认流程的执行（由 Per
 
 ### 7. 不负责批准记录管理
 
-"don't ask again" 产生的批准记录由 Permission 模块管理。Policy 只负责 Agent 状态的切换。
+"don't ask again" 产生的批准记录和后续 Pattern 匹配自动批准由 Permission 模块管理。Policy 只负责显式模式/状态管理与工具决策，不直接消费 permission 的 always 授权事件。
 
 ---
 
@@ -106,7 +106,7 @@ Policy 只负责决策和状态管理，不负责确认流程的执行（由 Per
 |------|------|------|
 | ToolScheduler | 被依赖 | ToolScheduler 查询决策和模式 |
 | AgentManager | 双向 | 模式切换时触发 Agent 切换；订阅 Agent 变化读取 permission |
-| Permission | 被依赖 | Permission 请求 Agent 状态切换 |
+| Permission | 上游协作 | ToolScheduler 在 Policy 返回 ask 后调用 Permission；Policy 不直接订阅 Permission 事件 |
 | Commands | 被依赖 | Commands 调用模式切换接口 |
 | Bus | 依赖 | 发布状态变化事件，订阅 Agent 变化事件 |
 | UI | 被依赖（间接） | 通过 Bus 事件通知状态变化 |

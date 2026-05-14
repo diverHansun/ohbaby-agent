@@ -223,9 +223,7 @@ isCriticalBashCommand(command, agentConfig)
 
 ### 4.2 订阅的事件
 
-| 事件名称 | 来源 | 处理逻辑 |
-|----------|------|----------|
-| Permission.Event.AgentStateChangeRequested | Permission | 切换 Agent 状态到 edit-automatically |
+当前 MVP 中 Policy 不直接订阅 Permission 事件。Permission 的 always 授权只写入 permission 自己的会话级批准表；后续匹配请求由 Permission 自动批准。若后续产品需要全局或会话级自动编辑模式，应由 Commands 或 runtime composition 显式调用 Policy 接口。
 
 ---
 

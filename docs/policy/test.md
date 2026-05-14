@@ -149,15 +149,15 @@
 - 操作：调用 check('unknown' as any)
 - 预期结果：返回 'deny'（保守策略）
 
-### 2.4 事件订阅处理
+### 2.4 Permission 协作边界
 
-**场景 15：响应 AgentStateChangeRequested 事件**
+**场景 15：Permission always 不直接切换 Policy 状态**
 
 - 前置条件：当前 Agent 状态为 'ask-before-edit'
-- 操作：Bus 发布 Permission.Event.AgentStateChangeRequested 事件
+- 操作：Bus 发布 Permission.Event.SwitchModeRequested 事件
 - 预期结果：
-  - Agent 状态变为 'edit-automatically'
-  - 发布 AgentStateChanged 事件
+  - Agent 状态保持 'ask-before-edit'
+  - 不发布 AgentStateChanged 事件
 
 ---
 
@@ -169,7 +169,7 @@
 
 - ModeChanged 事件在模式变化时正确发布
 - AgentStateChanged 事件在状态变化时正确发布
-- AgentStateChangeRequested 事件被正确订阅和处理
+- Permission 的 always 授权事件不会隐式改变 Policy 状态
 
 **失败处理预期**：
 
@@ -223,7 +223,7 @@
 **适用场景**：
 
 - 事件发布验证
-- 事件订阅处理验证
+- Permission 协作边界验证
 - 状态变化与事件的一致性
 
 **策略**：
@@ -242,8 +242,8 @@
 **策略**：
 
 - 在测试环境中使用真实 Bus 实例
-- 模拟 Permission 发布 AgentStateChangeRequested
-- 验证 Policy 正确响应
+- 模拟 Permission 发布 SwitchModeRequested
+- 验证 Policy 不隐式切换状态，后续匹配授权由 Permission 处理
 
 ### 4.4 决策矩阵完整性测试
 

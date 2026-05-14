@@ -149,7 +149,7 @@ class RequestQueue {
 用户选择 "always"（Yes and don't ask again）后，系统需要：
 1. 将当前请求的 Pattern 添加到批准列表
 2. 自动批准队列中所有匹配该 Pattern 的待处理请求
-3. 通知 Policy 模块切换到 edit-automatically 模式
+3. 发布审计/协调事件，说明本次 always 授权已产生
 
 **实现方式**：
 ```typescript
@@ -171,11 +171,11 @@ function handleAlwaysResponse(sessionId: string, pattern: string): void {
     })
   }
 
-  // 4. 通知 Policy 切换模式
+  // 4. 发布审计/协调事件；permission 不直接切换 Policy 状态
   Bus.publish(Event.SwitchModeRequested, {
     sessionId,
     targetMode: 'edit-automatically',
-    trigger: { permissionId: current.info.id, pattern }
+    trigger: { callId: current.info.callId, permissionId: current.info.id, pattern }
   })
 }
 ```

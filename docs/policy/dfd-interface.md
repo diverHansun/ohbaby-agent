@@ -105,23 +105,22 @@ ToolScheduler                   Policy 模块
  │<------------------|                    │                    │                  │
 ```
 
-### 2.4 Agent 状态切换流程（Permission 触发）
+### 2.4 Permission always 授权流程
 
 ```
-Permission 模块                   Bus                    Policy 模块
+Permission 模块                   Bus                  Audit/UI/Runtime
      │                             │                          │
      │  1. 用户选择 "don't ask again"                         │
      │                             │                          │
-     │  2. 发布 AgentStateChangeRequested                     │
+     │  2. 记录 session+pattern 批准                          │
+     │                             │                          │
+     │  3. 发布 SwitchModeRequested（审计/协调）               │
      │---------------------------->│                          │
      │                             │                          │
-     │                             │  3. 事件分发              │
+     │                             │  4. 事件分发              │
      │                             │------------------------->│
      │                             │                          │
-     │                             │         4. 切换到 edit-automatically
-     │                             │         5. 发布 AgentStateChanged
-     │                             │                          │
-     │                             │<-------------------------|
+     │                             │         5. 记录审计或更新 UI
      │                             │                          │
      │                             │  6. 通知 UI 更新         │
 ```
@@ -335,15 +334,15 @@ AgentManager                    Bus                    Policy 模块
 
 ### 3.3 订阅的事件
 
-#### Permission.Event.AgentStateChangeRequested
+#### Permission.Event.SwitchModeRequested
 
-**语义**：Permission 请求切换 Agent 状态
+**语义**：permission 通知一次 always 授权已产生
 
 **来源**：Permission 模块
 
 **触发场景**：用户在确认框中选择 "don't ask again"
 
-**处理逻辑**：调用 setAgentState('edit-automatically')
+**处理逻辑**：Policy 不直接订阅或处理该事件；后续匹配请求由 Permission 按 Pattern 自动批准。若产品需要全局/会话级自动编辑模式，应由 Commands 或 runtime composition 显式调用 Policy.setAgentState()。
 
 ---
 
@@ -374,7 +373,6 @@ AgentManager                    Bus                    Policy 模块
 **语义**：订阅事件
 
 **使用场景**：
-- 订阅 Permission.Event.AgentStateChangeRequested
 - 订阅 Agent.Event.Changed
 
 ---
@@ -419,7 +417,7 @@ AgentManager                    Bus                    Policy 模块
 | 数据 | 更新者 | 更新时机 |
 |------|--------|----------|
 | Mode | Policy | 响应 Commands 的切换请求 |
-| AgentState | Policy | 响应 Commands 或 Permission 的切换请求 |
+| AgentState | Policy | 响应 Commands 或 runtime composition 的显式切换请求 |
 
 ### 4.3 责任边界
 
