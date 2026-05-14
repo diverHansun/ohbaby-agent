@@ -41,6 +41,10 @@ function deny(reason?: string): PolicyDecision {
   return reason ? { reason, type: "deny" } : { type: "deny" };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function isAlwaysAllowed(category: ToolCategory): boolean {
   return (
     category === "readonly" ||
@@ -62,6 +66,17 @@ function isAgentState(value: string): value is AgentState {
   return AGENT_STATES.has(value);
 }
 
+function isPolicyCheckInput(value: unknown): value is PolicyCheckInput {
+  return (
+    isRecord(value) &&
+    typeof value.toolName === "string" &&
+    typeof value.category === "string" &&
+    isRecord(value.params) &&
+    typeof value.sessionId === "string" &&
+    typeof value.messageId === "string"
+  );
+}
+
 export function createPolicyManager(
   options: PolicyManagerOptions = {},
 ): PolicyManager {
@@ -71,6 +86,9 @@ export function createPolicyManager(
 
   function setAgentState(nextState: AgentState): void {
     if (!isAgentState(nextState) || agentState === nextState) {
+      return;
+    }
+    if (nextState === "edit-automatically" && mode !== "agent") {
       return;
     }
     const previousState = agentState;
@@ -127,6 +145,9 @@ export function createPolicyManager(
   }
 
   function check(input: PolicyCheckInput): PolicyDecision {
+    if (!isPolicyCheckInput(input)) {
+      return deny("Malformed policy input");
+    }
     const { category } = input;
     if (!isKnownCategory(category)) {
       return deny(`Unknown tool category: ${category}`);

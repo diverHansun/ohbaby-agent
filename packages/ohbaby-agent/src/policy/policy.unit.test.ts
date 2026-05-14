@@ -54,10 +54,10 @@ describe("PolicyManager", () => {
       agentEvents.push(event);
     });
 
-    policy.setMode("ask");
-    policy.setMode("ask");
     policy.setAgentState("edit-automatically");
     policy.setAgentState("edit-automatically");
+    policy.setMode("ask");
+    policy.setMode("ask");
 
     expect(modeEvents).toEqual([
       { currentMode: "ask", previousMode: "agent" },
@@ -66,6 +66,10 @@ describe("PolicyManager", () => {
       {
         currentState: "edit-automatically",
         previousState: "ask-before-edit",
+      },
+      {
+        currentState: "ask-before-edit",
+        previousState: "edit-automatically",
       },
     ]);
   });
@@ -131,8 +135,34 @@ describe("PolicyManager", () => {
     const cycleMode = policy.cycleMode;
     const toggleAgentState = policy.toggleAgentState;
 
-    expect(cycleMode()).toBe("ask");
     expect(toggleAgentState()).toBe("edit-automatically");
+    expect(cycleMode()).toBe("ask");
+  });
+
+  it("keeps ask and plan modes out of automatic edit state", () => {
+    const bus = createBus();
+    const policy = createPolicyManager({ bus });
+    const agentEvents: unknown[] = [];
+
+    policy.setMode("ask");
+    bus.subscribe(PolicyEvent.AgentStateChanged, (event) => {
+      agentEvents.push(event);
+    });
+
+    policy.setAgentState("edit-automatically");
+    expect(policy.getState()).toEqual({
+      agentState: "ask-before-edit",
+      mode: "ask",
+    });
+    expect(policy.toggleAgentState()).toBe("ask-before-edit");
+
+    policy.setMode("plan");
+    policy.setAgentState("edit-automatically");
+    expect(policy.getState()).toEqual({
+      agentState: "ask-before-edit",
+      mode: "plan",
+    });
+    expect(agentEvents).toEqual([]);
   });
 
   it("applies the ask and plan readonly-only decision matrix", () => {
@@ -175,5 +205,14 @@ describe("PolicyManager", () => {
         policy.check(checkInput("unknown" as unknown as ToolCategory)),
       ),
     ).toBe("deny");
+  });
+
+  it("denies malformed runtime check input without throwing", () => {
+    const policy = createPolicyManager({ bus: createBus() });
+    const runtimeCheck = policy.check as (input: unknown) => PolicyDecision;
+
+    expect(runtimeCheck(null).type).toBe("deny");
+    expect(runtimeCheck(undefined).type).toBe("deny");
+    expect(runtimeCheck({ category: "write" }).type).toBe("deny");
   });
 });
