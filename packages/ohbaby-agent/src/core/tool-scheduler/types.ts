@@ -1,0 +1,212 @@
+import type { BusInstance } from "../../bus/index.js";
+
+export type ToolCategory =
+  | "readonly"
+  | "write"
+  | "dangerous"
+  | "network"
+  | "memory"
+  | "skill"
+  | "subagent";
+
+export type ToolSource = "builtin" | "module" | "mcp";
+
+export type ToolMode = "ask" | "plan" | "agent";
+
+export type ToolCallStatus =
+  | "pending"
+  | "checking_policy"
+  | "awaiting_approval"
+  | "queued"
+  | "executing"
+  | "success"
+  | "error"
+  | "rejected"
+  | "cancelled";
+
+export type FinalToolCallStatus =
+  | "success"
+  | "error"
+  | "rejected"
+  | "cancelled";
+
+export type ToolCallErrorType =
+  | "ToolNotFoundError"
+  | "PolicyDeniedError"
+  | "PermissionRejectedError"
+  | "ExecutionError"
+  | "TimeoutError"
+  | "CancelledError"
+  | "ValidationError";
+
+export interface ToolCallError {
+  readonly type: ToolCallErrorType;
+  readonly message: string;
+  readonly details?: unknown;
+}
+
+export interface ToolExecutionContext {
+  readonly signal: AbortSignal;
+  readonly sessionId: string;
+  readonly messageId: string;
+  readonly callId: string;
+}
+
+export interface ToolExecutionResult {
+  readonly output?: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface Tool {
+  readonly name: string;
+  readonly description: string;
+  readonly parametersJsonSchema: Record<string, unknown>;
+  readonly source: ToolSource;
+  readonly category?: ToolCategory;
+  readonly annotations?: {
+    readonly readOnlyHint?: boolean;
+  };
+  execute(
+    params: Record<string, unknown>,
+    context: ToolExecutionContext,
+  ): Promise<ToolExecutionResult> | ToolExecutionResult;
+}
+
+export interface ToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly parameters: Record<string, unknown>;
+  readonly category: ToolCategory;
+  readonly source: ToolSource;
+}
+
+export interface ToolCallRequest {
+  readonly callId: string;
+  readonly toolName: string;
+  readonly params: Record<string, unknown>;
+  readonly sessionId: string;
+  readonly messageId: string;
+  readonly signal?: AbortSignal;
+}
+
+export interface BatchToolCallRequest {
+  readonly calls: readonly ToolCallRequest[];
+}
+
+export interface ToolCallResult {
+  readonly callId: string;
+  readonly status: FinalToolCallStatus;
+  readonly output?: string;
+  readonly metadata?: Record<string, unknown>;
+  readonly error?: ToolCallError;
+  readonly duration?: number;
+}
+
+export interface ToolCall {
+  readonly callId: string;
+  readonly toolName: string;
+  readonly params: Record<string, unknown>;
+  readonly sessionId: string;
+  readonly messageId: string;
+  readonly category: ToolCategory;
+  status: ToolCallStatus;
+  readonly createdAt: number;
+  startedAt?: number;
+  completedAt?: number;
+  durationMs?: number;
+  result?: ToolCallResult;
+  error?: ToolCallError;
+}
+
+export type PolicyDecision =
+  | { readonly type: "allow" }
+  | { readonly type: "deny"; readonly reason?: string }
+  | { readonly type: "ask"; readonly reason?: string };
+
+export interface PolicyPort {
+  getMode(): ToolMode | Promise<ToolMode>;
+  check(input: {
+    readonly toolName: string;
+    readonly category: ToolCategory;
+    readonly params: Record<string, unknown>;
+    readonly sessionId: string;
+    readonly messageId: string;
+  }): PolicyDecision | Promise<PolicyDecision>;
+}
+
+export type PermissionResponse = "once" | "always" | "reject" | "cancel";
+
+export interface PermissionPort {
+  ask(input: {
+    readonly sessionId: string;
+    readonly messageId: string;
+    readonly toolName: string;
+    readonly category: ToolCategory;
+    readonly params: Record<string, unknown>;
+    readonly reason?: string;
+  }): PermissionResponse | Promise<PermissionResponse>;
+}
+
+export interface AgentToolConfigProvider {
+  getAgentConfig(
+    agentName?: string,
+  ):
+    | { readonly tools?: Record<string, boolean> }
+    | Promise<{ readonly tools?: Record<string, boolean> }>;
+}
+
+export interface ConcurrencyConfig {
+  readonly maxReadConcurrency: number;
+  readonly maxSubagentConcurrency: number;
+}
+
+export interface TimeoutConfig {
+  readonly defaultTimeout: number;
+}
+
+export interface ToolSchedulerConfig {
+  readonly concurrency: ConcurrencyConfig;
+  readonly timeout: TimeoutConfig;
+}
+
+export interface ToolRegistry {
+  register(tool: Tool): void;
+  registerCategory(toolName: string, category: ToolCategory): void;
+  get(toolName: string): Tool | undefined;
+  getCategory(toolName: string): ToolCategory | undefined;
+  getAvailableTools(input: {
+    readonly mode: ToolMode;
+    readonly tools?: Record<string, boolean>;
+    readonly isSubagent?: boolean;
+  }): ToolDefinition[];
+  list(): ToolDefinition[];
+}
+
+export interface ToolScheduler {
+  register(tool: Tool): void;
+  registerCategory(toolName: string, category: ToolCategory): void;
+  get(toolName: string): Tool | undefined;
+  getCategory(toolName: string): ToolCategory | undefined;
+  getAvailableTools(input?: {
+    readonly agentName?: string;
+    readonly isSubagent?: boolean;
+  }): Promise<ToolDefinition[]>;
+  execute(request: ToolCallRequest): Promise<ToolCallResult>;
+  executeBatch(request: BatchToolCallRequest): Promise<ToolCallResult[]>;
+  cancel(callId: string): boolean;
+  cancelAll(): void;
+  getStatus(callId: string): ToolCallStatus | null;
+  getPendingCalls(): ToolCall[];
+}
+
+export interface ToolSchedulerOptions {
+  readonly bus: BusInstance;
+  readonly policy: PolicyPort;
+  readonly permission?: PermissionPort;
+  readonly agentTools?: AgentToolConfigProvider;
+  readonly config?: Partial<{
+    readonly concurrency: Partial<ConcurrencyConfig>;
+    readonly timeout: Partial<TimeoutConfig>;
+  }>;
+  readonly now?: () => number;
+}

@@ -1,0 +1,873 @@
+import { createBus } from "../../bus/index.js";
+import { DEFAULT_TOOL_SCHEDULER_CONFIG } from "./constants.js";
+import { ConcurrencyController } from "./concurrency.js";
+import { ToolSchedulerEvent } from "./events.js";
+import { createToolRegistry } from "./registry.js";
+import type {
+  BatchToolCallRequest,
+  FinalToolCallStatus,
+  PolicyDecision,
+  PermissionResponse,
+  Tool,
+  ToolCall,
+  ToolCallError,
+  ToolCallRequest,
+  ToolCallResult,
+  ToolCallStatus,
+  ToolCategory,
+  ToolDefinition,
+  ToolExecutionResult,
+  ToolRegistry,
+  ToolScheduler,
+  ToolSchedulerConfig,
+  ToolSchedulerOptions,
+} from "./types.js";
+
+interface ScheduledCall {
+  readonly index: number;
+  readonly request: ToolCallRequest;
+  readonly category: ToolCategory;
+}
+
+interface PreparedCall extends ScheduledCall {
+  readonly call: ToolCall;
+  readonly tool: Tool;
+  readonly controller: AbortController;
+  readonly cleanup: () => void;
+}
+
+class SchedulerAbortError extends Error {
+  constructor(readonly kind: "cancelled" | "timeout") {
+    super(kind === "timeout" ? "Tool call timed out" : "Tool call cancelled");
+  }
+}
+
+function mergeConfig(
+  input: ToolSchedulerOptions["config"],
+): ToolSchedulerConfig {
+  return {
+    concurrency: {
+      ...DEFAULT_TOOL_SCHEDULER_CONFIG.concurrency,
+      ...input?.concurrency,
+    },
+    timeout: {
+      ...DEFAULT_TOOL_SCHEDULER_CONFIG.timeout,
+      ...input?.timeout,
+    },
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getSchemaType(schema: unknown): string | undefined {
+  return isRecord(schema) && typeof schema.type === "string"
+    ? schema.type
+    : undefined;
+}
+
+function matchesJsonSchemaType(value: unknown, type: string): boolean {
+  switch (type) {
+    case "array":
+      return Array.isArray(value);
+    case "boolean":
+      return typeof value === "boolean";
+    case "integer":
+      return typeof value === "number" && Number.isInteger(value);
+    case "null":
+      return value === null;
+    case "number":
+      return typeof value === "number" && Number.isFinite(value);
+    case "object":
+      return isRecord(value);
+    case "string":
+      return typeof value === "string";
+    default:
+      return true;
+  }
+}
+
+function validateParameters(
+  params: Record<string, unknown>,
+  schema: Record<string, unknown>,
+): string | null {
+  const rootType = getSchemaType(schema);
+  if (rootType && rootType !== "object") {
+    return `Tool parameters schema must describe an object, got ${rootType}`;
+  }
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((item): item is string => typeof item === "string")
+    : [];
+  for (const key of required) {
+    if (!(key in params)) {
+      return `Missing required tool parameter: ${key}`;
+    }
+  }
+  const properties = isRecord(schema.properties) ? schema.properties : {};
+  for (const [key, propertySchema] of Object.entries(properties)) {
+    if (!(key in params)) {
+      continue;
+    }
+    const type = getSchemaType(propertySchema);
+    if (type && !matchesJsonSchemaType(params[key], type)) {
+      return `Invalid type for tool parameter ${key}: expected ${type}`;
+    }
+  }
+
+  return null;
+}
+
+function isPermissionRejectedError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name.includes("Rejected") ||
+      error.constructor.name.includes("Rejected"))
+  );
+}
+
+function isPermissionCancelledError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name.includes("Cancelled") ||
+      error.constructor.name.includes("Cancelled") ||
+      error.name.includes("Canceled") ||
+      error.constructor.name.includes("Canceled"))
+  );
+}
+
+function createError(
+  type: ToolCallError["type"],
+  message: string,
+  details?: unknown,
+): ToolCallError {
+  return { type, message, details };
+}
+
+function isFinal(status: ToolCallStatus): status is FinalToolCallStatus {
+  return (
+    status === "success" ||
+    status === "error" ||
+    status === "rejected" ||
+    status === "cancelled"
+  );
+}
+
+function isCancelled(call: ToolCall): boolean {
+  return call.status === "cancelled";
+}
+
+function isStopped(call: ToolCall, controller: AbortController): boolean {
+  return isCancelled(call) || controller.signal.aborted;
+}
+
+function isSchedulerAbortError(error: unknown): error is SchedulerAbortError {
+  return error instanceof SchedulerAbortError;
+}
+
+function isParallelWaveCategory(category: ToolCategory): boolean {
+  return (
+    category === "readonly" || category === "network" || category === "skill"
+  );
+}
+
+function splitIntoWaves<T extends ScheduledCall>(calls: readonly T[]): T[][] {
+  const waves: T[][] = [];
+  let currentWave: T[] = [];
+
+  for (const call of calls) {
+    if (call.category === "memory" || call.category === "subagent") {
+      continue;
+    }
+    if (isParallelWaveCategory(call.category)) {
+      if (
+        currentWave.length > 0 &&
+        !isParallelWaveCategory(currentWave[0].category)
+      ) {
+        waves.push(currentWave);
+        currentWave = [];
+      }
+      currentWave.push(call);
+    } else {
+      if (currentWave.length > 0) {
+        waves.push(currentWave);
+        currentWave = [];
+      }
+      waves.push([call]);
+    }
+  }
+
+  if (currentWave.length > 0) {
+    waves.push(currentWave);
+  }
+
+  return waves;
+}
+
+export function createToolScheduler(
+  options: Partial<ToolSchedulerOptions> & Pick<ToolSchedulerOptions, "policy">,
+): ToolScheduler {
+  const bus = options.bus ?? createBus();
+  const config = mergeConfig(options.config);
+  const concurrency = new ConcurrencyController(config.concurrency);
+  const registry: ToolRegistry = createToolRegistry();
+  const now = options.now ?? Date.now;
+  const calls = new Map<string, ToolCall>();
+  const controllers = new Map<string, AbortController>();
+
+  function transition(call: ToolCall, status: ToolCallStatus): void {
+    if (call.status === status) {
+      return;
+    }
+    if (isFinal(call.status)) {
+      return;
+    }
+    const previousStatus = call.status;
+    call.status = status;
+    if (status === "executing") {
+      call.startedAt = now();
+    }
+    if (isFinal(status)) {
+      call.completedAt = now();
+      if (call.startedAt !== undefined) {
+        call.durationMs = call.completedAt - call.startedAt;
+      }
+    }
+    bus.publish(ToolSchedulerEvent.StatusChanged, {
+      callId: call.callId,
+      toolName: call.toolName,
+      previousStatus,
+      currentStatus: status,
+      timestamp: now(),
+    });
+  }
+
+  function makeResult(
+    call: ToolCall,
+    status: FinalToolCallStatus,
+    input: {
+      readonly output?: string;
+      readonly metadata?: Record<string, unknown>;
+      readonly error?: ToolCallError;
+    } = {},
+  ): ToolCallResult {
+    const result = {
+      callId: call.callId,
+      status,
+      output: input.output,
+      metadata: input.metadata,
+      error: input.error,
+      duration: call.durationMs,
+    };
+    call.result = result;
+    call.error = input.error;
+    return result;
+  }
+
+  function createCall(
+    request: ToolCallRequest,
+    category: ToolCategory,
+  ): ToolCall {
+    const call = {
+      callId: request.callId,
+      toolName: request.toolName,
+      params: request.params,
+      sessionId: request.sessionId,
+      messageId: request.messageId,
+      category,
+      status: "pending",
+      createdAt: now(),
+    } satisfies ToolCall;
+    calls.set(call.callId, call);
+    return call;
+  }
+
+  function makeCancelledResult(
+    call: ToolCall,
+    message = "Tool call was cancelled",
+  ): ToolCallResult {
+    transition(call, "cancelled");
+    return makeResult(call, "cancelled", {
+      error: createError("CancelledError", message),
+    });
+  }
+
+  function cancelCall(call: ToolCall): boolean {
+    if (isFinal(call.status)) {
+      return false;
+    }
+    concurrency.cancel(call.callId);
+    controllers.get(call.callId)?.abort();
+    transition(call, "cancelled");
+    return true;
+  }
+
+  function bindRequestSignal(
+    call: ToolCall,
+    signal: AbortSignal | undefined,
+  ): () => void {
+    if (!signal) {
+      return () => undefined;
+    }
+    const onAbort = (): void => {
+      cancelCall(call);
+    };
+    if (signal.aborted) {
+      onAbort();
+      return () => undefined;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+    return () => {
+      signal.removeEventListener("abort", onAbort);
+    };
+  }
+
+  async function waitForAbortable<T>(
+    work: () => Promise<T> | T,
+    signal: AbortSignal,
+  ): Promise<T> {
+    if (signal.aborted) {
+      throw new SchedulerAbortError("cancelled");
+    }
+    const workPromise = Promise.resolve().then(work);
+    void workPromise.catch(() => undefined);
+    let removeAbortListener = (): void => undefined;
+    const abortPromise = new Promise<never>((_resolve, reject) => {
+      const onAbort = (): void => {
+        reject(new SchedulerAbortError("cancelled"));
+      };
+      removeAbortListener = (): void => {
+        signal.removeEventListener("abort", onAbort);
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+
+    try {
+      return await Promise.race([workPromise, abortPromise]);
+    } finally {
+      removeAbortListener();
+    }
+  }
+
+  async function executeToolWithTimeout(
+    call: ToolCall,
+    tool: Tool,
+    controller: AbortController,
+  ): Promise<ToolExecutionResult> {
+    if (controller.signal.aborted) {
+      throw new SchedulerAbortError("cancelled");
+    }
+    let timedOut = false;
+    let timeout: NodeJS.Timeout | undefined;
+    let removeAbortListener = (): void => undefined;
+    const toolPromise = Promise.resolve(
+      tool.execute(call.params, {
+        callId: call.callId,
+        messageId: call.messageId,
+        sessionId: call.sessionId,
+        signal: controller.signal,
+      }),
+    );
+    void toolPromise.catch(() => undefined);
+    const abortPromise = new Promise<never>((_resolve, reject) => {
+      const onAbort = (): void => {
+        reject(new SchedulerAbortError(timedOut ? "timeout" : "cancelled"));
+      };
+      removeAbortListener = (): void => {
+        controller.signal.removeEventListener("abort", onAbort);
+      };
+      controller.signal.addEventListener("abort", onAbort, { once: true });
+      timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, config.timeout.defaultTimeout);
+    });
+
+    try {
+      return await Promise.race([toolPromise, abortPromise]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      removeAbortListener();
+    }
+  }
+
+  async function askPermission(
+    call: ToolCall,
+    reason: string | undefined,
+  ): Promise<PermissionResponse> {
+    if (!options.permission) {
+      return "reject";
+    }
+    return options.permission.ask({
+      sessionId: call.sessionId,
+      messageId: call.messageId,
+      toolName: call.toolName,
+      category: call.category,
+      params: call.params,
+      reason,
+    });
+  }
+
+  async function checkPolicyOnly(
+    call: ToolCall,
+  ): Promise<PolicyDecision | ToolCallResult> {
+    transition(call, "checking_policy");
+    const controller = controllers.get(call.callId);
+    if (!controller) {
+      return makeCancelledResult(call);
+    }
+    if (isCancelled(call) || controller.signal.aborted) {
+      return makeCancelledResult(call);
+    }
+    let decision: PolicyDecision;
+    try {
+      decision = await waitForAbortable(
+        () =>
+          options.policy.check({
+            toolName: call.toolName,
+            category: call.category,
+            params: call.params,
+            sessionId: call.sessionId,
+            messageId: call.messageId,
+          }),
+        controller.signal,
+      );
+    } catch (error) {
+      if (isSchedulerAbortError(error)) {
+        return makeCancelledResult(call);
+      }
+      transition(call, "error");
+      return makeResult(call, "error", {
+        error: createError("ExecutionError", errorMessage(error), error),
+      });
+    }
+    if (isCancelled(call)) {
+      return makeCancelledResult(call);
+    }
+    if (decision.type === "deny") {
+      transition(call, "rejected");
+      return makeResult(call, "rejected", {
+        error: createError(
+          "PolicyDeniedError",
+          decision.reason ?? `Tool denied by policy: ${call.toolName}`,
+        ),
+      });
+    }
+
+    return decision;
+  }
+
+  async function confirmPermission(
+    call: ToolCall,
+    decision: Extract<PolicyDecision, { readonly type: "ask" }>,
+  ): Promise<ToolCallResult | null> {
+    const controller = controllers.get(call.callId);
+    if (!controller) {
+      return makeCancelledResult(call);
+    }
+    if (isCancelled(call) || controller.signal.aborted) {
+      return makeCancelledResult(call);
+    }
+    transition(call, "awaiting_approval");
+    let response: PermissionResponse;
+    try {
+      response = await waitForAbortable(
+        () => askPermission(call, decision.reason),
+        controller.signal,
+      );
+    } catch (error) {
+      if (isSchedulerAbortError(error)) {
+        return makeCancelledResult(call);
+      }
+      if (isPermissionRejectedError(error)) {
+        transition(call, "rejected");
+        return makeResult(call, "rejected", {
+          error: createError(
+            "PermissionRejectedError",
+            `Tool rejected by user: ${call.toolName}`,
+            error,
+          ),
+        });
+      }
+      if (isPermissionCancelledError(error)) {
+        return makeCancelledResult(call, "Tool permission was cancelled");
+      }
+      transition(call, "error");
+      return makeResult(call, "error", {
+        error: createError("ExecutionError", errorMessage(error), error),
+      });
+    }
+    if (isCancelled(call)) {
+      return makeCancelledResult(call);
+    }
+    if (response === "cancel") {
+      return makeCancelledResult(call, "Tool permission was cancelled");
+    }
+    if (response === "reject") {
+      transition(call, "rejected");
+      return makeResult(call, "rejected", {
+        error: createError(
+          "PermissionRejectedError",
+          `Tool rejected by user: ${call.toolName}`,
+        ),
+      });
+    }
+
+    return null;
+  }
+
+  async function runTool(
+    call: ToolCall,
+    tool: Tool,
+    controller: AbortController,
+  ): Promise<ToolCallResult> {
+    transition(call, "queued");
+    const acquired = await concurrency.waitForSlot(call.callId, call.category);
+    if (!acquired) {
+      return makeCancelledResult(call);
+    }
+
+    try {
+      if (isStopped(call, controller)) {
+        return makeCancelledResult(call);
+      }
+      transition(call, "executing");
+      if (isStopped(call, controller)) {
+        return makeCancelledResult(call);
+      }
+      bus.publish(ToolSchedulerEvent.ExecutionStarted, {
+        callId: call.callId,
+        toolName: call.toolName,
+        params: call.params,
+        timestamp: now(),
+      });
+      if (isStopped(call, controller)) {
+        return makeCancelledResult(call);
+      }
+      const output = await executeToolWithTimeout(call, tool, controller);
+      if (isStopped(call, controller)) {
+        return makeCancelledResult(call);
+      }
+      transition(call, "success");
+      return makeResult(call, "success", output);
+    } catch (error) {
+      if (isSchedulerAbortError(error) && error.kind === "timeout") {
+        transition(call, "error");
+        return makeResult(call, "error", {
+          error: createError(
+            "TimeoutError",
+            `Tool call timed out: ${call.toolName}`,
+          ),
+        });
+      }
+      if (
+        isSchedulerAbortError(error) ||
+        isCancelled(call) ||
+        controller.signal.aborted
+      ) {
+        return makeCancelledResult(call);
+      }
+      transition(call, "error");
+      return makeResult(call, "error", {
+        error: createError("ExecutionError", errorMessage(error), error),
+      });
+    } finally {
+      concurrency.release(call.category);
+      if (call.result) {
+        bus.publish(ToolSchedulerEvent.ExecutionCompleted, {
+          callId: call.callId,
+          toolName: call.toolName,
+          result: call.result,
+          timestamp: now(),
+        });
+      }
+    }
+  }
+
+  function makeImmediateErrorResult(
+    request: ToolCallRequest,
+    error: ToolCallError,
+  ): ToolCallResult {
+    return {
+      callId: request.callId,
+      error,
+      status: "error",
+    };
+  }
+
+  function validateBasicRequest(
+    request: ToolCallRequest,
+  ): ToolCallError | null {
+    if (!request.callId.trim()) {
+      return createError("ValidationError", "Tool callId must be non-empty");
+    }
+    if (calls.has(request.callId)) {
+      return createError(
+        "ValidationError",
+        `Tool callId already exists: ${request.callId}`,
+      );
+    }
+    if (!request.toolName.trim()) {
+      return createError("ValidationError", "Tool name must be non-empty");
+    }
+    if (!request.sessionId.trim()) {
+      return createError("ValidationError", "Tool sessionId must be non-empty");
+    }
+    if (!request.messageId.trim()) {
+      return createError("ValidationError", "Tool messageId must be non-empty");
+    }
+
+    return null;
+  }
+
+  function prepareCall(
+    request: ToolCallRequest,
+    index: number,
+  ): { readonly prepared: PreparedCall } | { readonly result: ToolCallResult } {
+    const basicError = validateBasicRequest(request);
+    if (basicError) {
+      return { result: makeImmediateErrorResult(request, basicError) };
+    }
+    const tool = registry.get(request.toolName);
+    const category = registry.getCategory(request.toolName);
+    if (!tool || !category) {
+      const call = createCall(request, "write");
+      transition(call, "error");
+      return {
+        result: makeResult(call, "error", {
+          error: createError(
+            "ToolNotFoundError",
+            `Tool not found: ${request.toolName}`,
+          ),
+        }),
+      };
+    }
+    const paramsError = validateParameters(
+      request.params,
+      tool.parametersJsonSchema,
+    );
+    if (paramsError) {
+      const call = createCall(request, category);
+      transition(call, "error");
+      return {
+        result: makeResult(call, "error", {
+          error: createError("ValidationError", paramsError),
+        }),
+      };
+    }
+    const call = createCall(request, category);
+    const controller = new AbortController();
+    controllers.set(call.callId, controller);
+    const unbindRequestSignal = bindRequestSignal(call, request.signal);
+    return {
+      prepared: {
+        call,
+        category,
+        cleanup: (): void => {
+          unbindRequestSignal();
+          controllers.delete(call.callId);
+        },
+        controller,
+        index,
+        request,
+        tool,
+      },
+    };
+  }
+
+  async function preflightCall(
+    prepared: PreparedCall,
+  ): Promise<ToolCallResult | null> {
+    if (isCancelled(prepared.call)) {
+      return makeCancelledResult(prepared.call);
+    }
+    const policyDecision = await checkPolicyOnly(prepared.call);
+    if ("status" in policyDecision) {
+      return policyDecision;
+    }
+    if (policyDecision.type === "ask") {
+      return confirmPermission(prepared.call, policyDecision);
+    }
+
+    return null;
+  }
+
+  async function execute(request: ToolCallRequest): Promise<ToolCallResult> {
+    const preparedResult = prepareCall(request, 0);
+    if ("result" in preparedResult) {
+      return preparedResult.result;
+    }
+    const { prepared } = preparedResult;
+    try {
+      const preflightResult = await preflightCall(prepared);
+      if (preflightResult) {
+        return preflightResult;
+      }
+
+      return await runTool(prepared.call, prepared.tool, prepared.controller);
+    } finally {
+      prepared.cleanup();
+    }
+  }
+
+  async function executeBatch(
+    request: BatchToolCallRequest,
+  ): Promise<ToolCallResult[]> {
+    const results: (ToolCallResult | undefined)[] = [];
+    const prepared: PreparedCall[] = [];
+    for (const [index, call] of request.calls.entries()) {
+      const preparedResult = prepareCall(call, index);
+      if ("result" in preparedResult) {
+        results[index] = preparedResult.result;
+      } else {
+        prepared.push(preparedResult.prepared);
+      }
+    }
+
+    try {
+      const policyResults = await Promise.all(
+        prepared.map(async (item) => ({
+          item,
+          result: await checkPolicyOnly(item.call),
+        })),
+      );
+      const runnable: PreparedCall[] = [];
+      const asks: {
+        readonly item: PreparedCall;
+        readonly decision: Extract<PolicyDecision, { readonly type: "ask" }>;
+      }[] = [];
+
+      for (const { item, result } of policyResults) {
+        if ("status" in result) {
+          results[item.index] = result;
+        } else if (result.type === "ask") {
+          asks.push({ decision: result, item });
+        } else {
+          runnable.push(item);
+        }
+      }
+
+      for (const ask of asks) {
+        const result = await confirmPermission(ask.item.call, ask.decision);
+        if (result) {
+          results[ask.item.index] = result;
+        } else {
+          runnable.push(ask.item);
+        }
+      }
+
+      const detached = runnable.filter(
+        (call) => call.category === "memory" || call.category === "subagent",
+      );
+      const waves = splitIntoWaves(runnable);
+      const detachedPromise = Promise.all(
+        detached.map(async (call) => ({
+          index: call.index,
+          result: await runTool(call.call, call.tool, call.controller),
+        })),
+      ).then(
+        (items) => ({ items, status: "fulfilled" as const }),
+        (error: unknown) => ({ error, status: "rejected" as const }),
+      );
+
+      for (const wave of waves) {
+        const waveResults = await Promise.all(
+          wave.map(async (call) => ({
+            index: call.index,
+            result: await runTool(call.call, call.tool, call.controller),
+          })),
+        );
+        for (const item of waveResults) {
+          results[item.index] = item.result;
+        }
+      }
+
+      const detachedOutcome = await detachedPromise;
+      if (detachedOutcome.status === "rejected") {
+        throw detachedOutcome.error;
+      }
+      for (const item of detachedOutcome.items) {
+        results[item.index] = item.result;
+      }
+
+      return results.map((result, index) => {
+        if (result) {
+          return result;
+        }
+        return makeImmediateErrorResult(request.calls[index], {
+          message: "Tool call did not produce a result",
+          type: "ExecutionError",
+        });
+      });
+    } finally {
+      for (const item of prepared) {
+        item.cleanup();
+      }
+    }
+  }
+
+  return {
+    register(tool: Tool): void {
+      registry.register(tool);
+    },
+
+    registerCategory(toolName: string, category: ToolCategory): void {
+      registry.registerCategory(toolName, category);
+    },
+
+    get(toolName: string): Tool | undefined {
+      return registry.get(toolName);
+    },
+
+    getCategory(toolName: string): ToolCategory | undefined {
+      return registry.getCategory(toolName);
+    },
+
+    async getAvailableTools(input = {}): Promise<ToolDefinition[]> {
+      const mode = await options.policy.getMode();
+      const agentConfig = await options.agentTools?.getAgentConfig(
+        input.agentName,
+      );
+      return registry.getAvailableTools({
+        mode,
+        tools: agentConfig?.tools,
+        isSubagent: input.isSubagent,
+      });
+    },
+
+    execute,
+    executeBatch,
+
+    cancel(callId: string): boolean {
+      const call = calls.get(callId);
+      if (!call) {
+        return false;
+      }
+      return cancelCall(call);
+    },
+
+    cancelAll(): void {
+      concurrency.cancelAll();
+      for (const call of calls.values()) {
+        if (!isFinal(call.status)) {
+          controllers.get(call.callId)?.abort();
+          transition(call, "cancelled");
+        }
+      }
+    },
+
+    getStatus(callId: string): ToolCallStatus | null {
+      return calls.get(callId)?.status ?? null;
+    },
+
+    getPendingCalls(): ToolCall[] {
+      return Array.from(calls.values()).filter((call) => !isFinal(call.status));
+    },
+  };
+}
