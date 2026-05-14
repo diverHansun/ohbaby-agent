@@ -1,0 +1,59 @@
+import { Box, Text, useInput } from "ink";
+import { useState } from "react";
+import type { ReactElement } from "react";
+import type {
+  TuiBackendClient,
+  TuiInteractionRequest,
+} from "../store/snapshot.js";
+
+export interface ConfirmDialogProps {
+  readonly client: TuiBackendClient;
+  readonly interaction: TuiInteractionRequest;
+}
+
+export function ConfirmDialog({
+  client,
+  interaction,
+}: ConfirmDialogProps): ReactElement {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useInput((_, key) => {
+    if (client.respondInteraction === undefined || pending) {
+      return;
+    }
+
+    if (key.return) {
+      setPending(true);
+      void client.respondInteraction(interaction.interactionId, {
+        kind: "confirmed",
+      }).catch((caught: unknown) => {
+        setError(formatError(caught));
+        setPending(false);
+      });
+    }
+
+    if (key.escape) {
+      setPending(true);
+      void client.respondInteraction(interaction.interactionId, {
+        kind: "cancelled",
+      }).catch((caught: unknown) => {
+        setError(formatError(caught));
+        setPending(false);
+      });
+    }
+  });
+
+  return (
+    <Box flexDirection="column">
+      <Text color="yellow">Confirm: {interaction.title ?? "Confirm"}</Text>
+      {interaction.message === undefined ? null : <Text>{interaction.message}</Text>}
+      {pending ? <Text dimColor>sending...</Text> : null}
+      {error === null ? null : <Text color="red">{error}</Text>}
+    </Box>
+  );
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : "Interaction failed";
+}

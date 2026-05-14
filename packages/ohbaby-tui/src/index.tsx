@@ -1,18 +1,9 @@
-import { render, Text, type Instance } from 'ink';
-import type { ReactElement } from 'react';
-import type { UiBackendClient } from 'ohbaby-sdk';
+import { render, type Instance } from "ink";
+import { OhbabyTerminalApp, type TerminalUiOptions } from "./app.js";
 
-export interface TerminalUiOptions {
-  readonly client: UiBackendClient;
-}
-
-export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
-  void client;
-
-  return <Text>ohbaby terminal UI skeleton</Text>;
-}
+export { OhbabyTerminalApp };
+export type { TerminalUiOptions };
 
 export function renderTerminalUi(options: TerminalUiOptions): Instance {
   return render(<OhbabyTerminalApp client={options.client} />);
 }
-
