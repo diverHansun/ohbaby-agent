@@ -133,6 +133,60 @@ describe("ToolScheduler", () => {
     expect(scheduler.getStatus("call_1")).toBe("success");
   });
 
+  it("passes the runtime environment to tool execution", async () => {
+    const { scheduler } = createScheduler();
+    const environment = {
+      workdir: "D:/workspace/session_1",
+      resolvePath(inputPath: string): string {
+        return `${this.workdir}/${inputPath}`;
+      },
+      resolvePathForExisting(inputPath: string): Promise<string> {
+        return Promise.resolve(`${this.workdir}/${inputPath}`);
+      },
+      resolvePathForWrite(inputPath: string): Promise<string> {
+        return Promise.resolve(`${this.workdir}/${inputPath}`);
+      },
+      resolveCommandContext(): { readonly cwd: string; readonly kind: string } {
+        return { cwd: this.workdir, kind: "host-local" };
+      },
+    };
+    scheduler.register(
+      createTool({
+        execute: (_params, context) => {
+          const runtime = (
+            context as {
+              readonly environment?: {
+                readonly workdir: string;
+                resolveCommandContext(): { readonly cwd: string };
+              };
+            }
+          ).environment;
+
+          return {
+            output: `${runtime?.workdir ?? "missing"}|${
+              runtime?.resolveCommandContext().cwd ?? "missing"
+            }`,
+          };
+        },
+        name: "read",
+      }),
+    );
+
+    await expect(
+      scheduler.execute({
+        callId: "call_1",
+        environment,
+        messageId: "message_1",
+        params: {},
+        sessionId: "session_1",
+        toolName: "read",
+      }),
+    ).resolves.toMatchObject({
+      output: "D:/workspace/session_1|D:/workspace/session_1",
+      status: "success",
+    });
+  });
+
   it("handles tool-not-found, policy deny, and permission rejection without executing", async () => {
     const deny = createScheduler({
       policy: createPolicy(() => Promise.resolve({ type: "deny" })),

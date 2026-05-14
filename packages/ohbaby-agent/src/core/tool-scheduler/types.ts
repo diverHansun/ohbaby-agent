@@ -45,11 +45,33 @@ export interface ToolCallError {
   readonly details?: unknown;
 }
 
+export interface ToolCommandContext {
+  readonly kind: string;
+  readonly cwd: string;
+  readonly env?: Record<string, string>;
+  readonly commandPrefix?: readonly string[];
+}
+
+export interface ToolCommandContextOptions {
+  readonly fileAccess?: "none" | "workspace-ro" | "workspace-rw";
+}
+
+export interface ToolExecutionEnvironment {
+  readonly workdir: string;
+  resolvePath(inputPath: string): string;
+  resolvePathForExisting(inputPath: string): Promise<string>;
+  resolvePathForWrite(inputPath: string): Promise<string>;
+  resolveCommandContext(
+    options?: ToolCommandContextOptions,
+  ): ToolCommandContext;
+}
+
 export interface ToolExecutionContext {
   readonly signal: AbortSignal;
   readonly sessionId: string;
   readonly messageId: string;
   readonly callId: string;
+  readonly environment?: ToolExecutionEnvironment;
 }
 
 export interface ToolExecutionResult {
@@ -86,6 +108,7 @@ export interface ToolCallRequest {
   readonly params: Record<string, unknown>;
   readonly sessionId: string;
   readonly messageId: string;
+  readonly environment?: ToolExecutionEnvironment;
   readonly signal?: AbortSignal;
 }
 

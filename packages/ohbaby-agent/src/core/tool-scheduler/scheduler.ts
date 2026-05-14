@@ -16,6 +16,7 @@ import type {
   ToolCallStatus,
   ToolCategory,
   ToolDefinition,
+  ToolExecutionEnvironment,
   ToolExecutionResult,
   ToolRegistry,
   ToolScheduler,
@@ -357,6 +358,7 @@ export function createToolScheduler(
     call: ToolCall,
     tool: Tool,
     controller: AbortController,
+    environment: ToolExecutionEnvironment | undefined,
   ): Promise<ToolExecutionResult> {
     if (controller.signal.aborted) {
       throw new SchedulerAbortError("cancelled");
@@ -367,6 +369,7 @@ export function createToolScheduler(
     const toolPromise = Promise.resolve(
       tool.execute(call.params, {
         callId: call.callId,
+        environment,
         messageId: call.messageId,
         sessionId: call.sessionId,
         signal: controller.signal,
@@ -528,6 +531,7 @@ export function createToolScheduler(
     call: ToolCall,
     tool: Tool,
     controller: AbortController,
+    environment: ToolExecutionEnvironment | undefined,
   ): Promise<ToolCallResult> {
     transition(call, "queued");
     const acquired = await concurrency.waitForSlot(call.callId, call.category);
@@ -552,7 +556,12 @@ export function createToolScheduler(
       if (isStopped(call, controller)) {
         return makeCancelledResult(call);
       }
-      const output = await executeToolWithTimeout(call, tool, controller);
+      const output = await executeToolWithTimeout(
+        call,
+        tool,
+        controller,
+        environment,
+      );
       if (isStopped(call, controller)) {
         return makeCancelledResult(call);
       }
@@ -712,7 +721,12 @@ export function createToolScheduler(
         return preflightResult;
       }
 
-      return await runTool(prepared.call, prepared.tool, prepared.controller);
+      return await runTool(
+        prepared.call,
+        prepared.tool,
+        prepared.controller,
+        prepared.request.environment,
+      );
     } finally {
       prepared.cleanup();
     }
@@ -771,7 +785,12 @@ export function createToolScheduler(
       const detachedPromise = Promise.all(
         detached.map(async (call) => ({
           index: call.index,
-          result: await runTool(call.call, call.tool, call.controller),
+          result: await runTool(
+            call.call,
+            call.tool,
+            call.controller,
+            call.request.environment,
+          ),
         })),
       ).then(
         (items) => ({ items, status: "fulfilled" as const }),
@@ -782,7 +801,12 @@ export function createToolScheduler(
         const waveResults = await Promise.all(
           wave.map(async (call) => ({
             index: call.index,
-            result: await runTool(call.call, call.tool, call.controller),
+            result: await runTool(
+              call.call,
+              call.tool,
+              call.controller,
+              call.request.environment,
+            ),
           })),
         );
         for (const item of waveResults) {
