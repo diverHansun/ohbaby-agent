@@ -126,6 +126,7 @@ export type PolicyDecision =
 export interface PolicyPort {
   getMode(): ToolMode | Promise<ToolMode>;
   check(input: {
+    readonly callId: string;
     readonly toolName: string;
     readonly category: ToolCategory;
     readonly params: Record<string, unknown>;
@@ -140,6 +141,7 @@ export interface PermissionPort {
   ask(input: {
     readonly sessionId: string;
     readonly messageId: string;
+    readonly callId: string;
     readonly toolName: string;
     readonly category: ToolCategory;
     readonly params: Record<string, unknown>;

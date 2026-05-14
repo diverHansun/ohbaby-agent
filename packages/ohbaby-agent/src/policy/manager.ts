@@ -1,4 +1,5 @@
 import { Bus, type BusInstance } from "../bus/index.js";
+import { PermissionEvent } from "../permission/events.js";
 import type {
   AgentState,
   Mode,
@@ -172,6 +173,10 @@ export function createPolicyManager(
 
     return deny(`Tool category ${category} is not allowed`);
   }
+
+  bus.subscribe(PermissionEvent.SwitchModeRequested, () => {
+    setAgentState("edit-automatically");
+  });
 
   return {
     check,

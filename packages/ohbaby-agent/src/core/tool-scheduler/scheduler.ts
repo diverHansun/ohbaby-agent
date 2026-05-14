@@ -407,6 +407,7 @@ export function createToolScheduler(
     return options.permission.ask({
       sessionId: call.sessionId,
       messageId: call.messageId,
+      callId: call.callId,
       toolName: call.toolName,
       category: call.category,
       params: call.params,
@@ -430,6 +431,7 @@ export function createToolScheduler(
       decision = await waitForAbortable(
         () =>
           options.policy.check({
+            callId: call.callId,
             toolName: call.toolName,
             category: call.category,
             params: call.params,
