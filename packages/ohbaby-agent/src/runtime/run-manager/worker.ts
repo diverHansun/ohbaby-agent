@@ -148,15 +148,19 @@ export class RunWorker {
   }
 
   private lifecycleParams(): LifecycleRunParams {
-    return withDefined({
+    const environment = toToolExecutionEnvironment(this.context.sandboxLease);
+
+    return {
       sessionId: this.context.sessionId,
-      agent: this.context.agent,
-      parentMessageId: this.context.parentMessageId,
       messages: this.context.messages,
-      environment: toToolExecutionEnvironment(this.context.sandboxLease),
       signal: this.context.abortSignal,
-      tools: this.context.tools,
-    }) as unknown as LifecycleRunParams;
+      ...(this.context.agent === undefined ? {} : { agent: this.context.agent }),
+      ...(this.context.parentMessageId === undefined
+        ? {}
+        : { parentMessageId: this.context.parentMessageId }),
+      ...(environment === undefined ? {} : { environment }),
+      ...(this.context.tools === undefined ? {} : { tools: this.context.tools }),
+    };
   }
 
   private publishLifecycleEvent(event: LifecycleEvent): void {

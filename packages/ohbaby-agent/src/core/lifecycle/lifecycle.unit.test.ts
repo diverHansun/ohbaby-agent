@@ -124,6 +124,43 @@ function createRejectingLLMClient(
   };
 }
 
+function createAbortingLLMClient(input: {
+  readonly abort: () => void;
+  readonly error: Error;
+}): LLMClientInstance<FakeSdkClient> {
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(): Promise<AsyncIterable<ProviderStreamEvent>> {
+        return Promise.resolve(
+          (async function* (): AsyncGenerator<
+            ProviderStreamEvent,
+            void,
+            unknown
+          > {
+            await Promise.resolve();
+            yield { textDelta: "Partial" };
+            input.abort();
+            throw input.error;
+          })(),
+        );
+      },
+      isAbortError(error: unknown): boolean {
+        return error === input.error;
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      baseUrl: "https://example.invalid/v1",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
 describe("Lifecycle.run", () => {
   it("yields streaming deltas and returns the final assistant response", async () => {
     const lifecycle = new Lifecycle({
@@ -712,6 +749,61 @@ describe("Lifecycle.run", () => {
           finish: "error",
           error: { name: "Unknown", message: "stream failed" },
         },
+      },
+    ]);
+  });
+
+  it("returns an error result when provider abort yields partial completion", async () => {
+    const controller = new AbortController();
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const user = await messageManager.createMessage({
+      sessionId: "session_test",
+      role: "user",
+      agent: "default",
+    });
+    const lifecycle = new Lifecycle({
+      llmClient: createAbortingLLMClient({
+        abort: () => {
+          controller.abort();
+        },
+        error: new Error("aborted"),
+      }),
+      messageManager,
+    });
+
+    const result = await consumeLifecycle(
+      lifecycle.run({
+        sessionId: "session_test",
+        agent: "default",
+        parentMessageId: user.id,
+        messages: [{ role: "user", content: "Say hello" }],
+        signal: controller.signal,
+      }),
+    );
+
+    expect(result).toMatchObject({
+      finalResponse: "Partial",
+      finishReason: "error",
+      success: false,
+    });
+    await expect(
+      messageManager.listBySession("session_test"),
+    ).resolves.toMatchObject([
+      { info: { id: "message_1", role: "user" } },
+      {
+        info: {
+          id: "message_2",
+          role: "assistant",
+          parentId: "message_1",
+          finish: "error",
+          error: { name: "Unknown", message: "Lifecycle aborted" },
+        },
+        parts: [{ id: "part_1", text: "Partial", type: "text" }],
       },
     ]);
   });

@@ -317,6 +317,21 @@ export class Lifecycle {
       }
 
       usage = addUsage(usage, toUsage(finalEvent.tokenUsage));
+      if (params.signal?.aborted) {
+        await markAssistantMessageError(
+          this.deps.messageManager,
+          assistantMessage,
+          new Error("Lifecycle aborted"),
+        );
+        return {
+          success: false,
+          finishReason: "error",
+          finalResponse,
+          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+          usage,
+        };
+      }
+
       const parsedToolCalls = finalEvent.parsedToolCalls ?? [];
       const shouldExecuteTools =
         finalEvent.finishReason === "tool_calls" || parsedToolCalls.length > 0;
