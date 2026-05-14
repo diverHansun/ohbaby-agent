@@ -73,6 +73,7 @@ export type LifecycleEvent =
       readonly timestamp: number;
       readonly callId: string;
       readonly toolName: string;
+      readonly params: Record<string, unknown>;
       readonly result: ToolCallResult;
     }
   | {

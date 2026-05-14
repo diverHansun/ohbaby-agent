@@ -40,10 +40,10 @@ function toToolExecutionEnvironment(
 ): ToolExecutionEnvironment | undefined {
   if (
     !lease.workdir ||
-    !lease.resolvePath ||
-    !lease.resolvePathForExisting ||
-    !lease.resolvePathForWrite ||
-    !lease.resolveCommandContext
+    typeof lease.resolvePath !== "function" ||
+    typeof lease.resolvePathForExisting !== "function" ||
+    typeof lease.resolvePathForWrite !== "function" ||
+    typeof lease.resolveCommandContext !== "function"
   ) {
     return undefined;
   }
@@ -195,6 +195,7 @@ export class RunWorker {
         step: event.step,
         callId: event.callId,
         toolName: event.toolName,
+        status: "executing",
         params: event.params,
       });
       return;
@@ -208,6 +209,8 @@ export class RunWorker {
         step: event.step,
         callId: event.callId,
         toolName: event.toolName,
+        status: event.result.status,
+        params: event.params,
         result: event.result,
       });
     }

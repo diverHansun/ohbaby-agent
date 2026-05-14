@@ -397,6 +397,189 @@ describe("Lifecycle.run", () => {
     });
   });
 
+  it("uses generated tool call ids consistently in execution, messages, and result", async () => {
+    const requests: ProviderRequest[] = [];
+    const executeBatch = vi
+      .fn<ToolSchedulerInstance["executeBatch"]>()
+      .mockResolvedValue([
+        {
+          callId: "generated_call",
+          output: "generated result",
+          status: "success",
+        },
+      ]);
+    const lifecycle = new Lifecycle({
+      generateToolCallId: (): string => "generated_call",
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"value":1}',
+                  id: "",
+                  index: 0,
+                  name: "compute",
+                },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+          [{ textDelta: "Done.", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+      toolScheduler: {
+        executeBatch,
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const result = await consumeLifecycle(
+      lifecycle.run({
+        sessionId: "session_test",
+        messages: [{ role: "user", content: "Compute" }],
+      }),
+    );
+
+    expect(executeBatch).toHaveBeenCalledWith({
+      calls: [
+        expect.objectContaining({
+          callId: "generated_call",
+          toolName: "compute",
+        }),
+      ],
+    });
+    expect(requests[1]?.messages[1]).toMatchObject({
+      role: "assistant",
+      tool_calls: [
+        {
+          id: "generated_call",
+          function: { name: "compute" },
+          type: "function",
+        },
+      ],
+    });
+    expect(result).toMatchObject({
+      toolCalls: [{ id: "generated_call", name: "compute" }],
+    });
+  });
+
+  it("turns scheduler batch rejections into tool results and finalizes ToolPart state", async () => {
+    const requests: ProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const user = await messageManager.createMessage({
+      sessionId: "session_test",
+      role: "user",
+      agent: "default",
+    });
+    const lifecycle = new Lifecycle({
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"path":"README.md"}',
+                  id: "call_read",
+                  index: 0,
+                  name: "read",
+                },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+          [{ textDelta: "Recovered.", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi
+          .fn<ToolSchedulerInstance["executeBatch"]>()
+          .mockRejectedValue(new Error("batch exploded")),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const result = await consumeLifecycle(
+      lifecycle.run({
+        sessionId: "session_test",
+        agent: "default",
+        parentMessageId: user.id,
+        messages: [{ role: "user", content: "Read README" }],
+      }),
+    );
+
+    expect(requests[1]?.messages[2]).toEqual({
+      role: "tool",
+      content:
+        '{"status":"error","error":{"type":"ExecutionError","message":"Tool scheduler failed: batch exploded"}}',
+      tool_call_id: "call_read",
+    });
+    await expect(
+      messageManager.listBySession("session_test"),
+    ).resolves.toMatchObject([
+      { info: { id: "message_1", role: "user" } },
+      {
+        info: { id: "message_2", finish: "tool_calls", role: "assistant" },
+        parts: [
+          {
+            callId: "call_read",
+            state: {
+              error:
+                '{"status":"error","error":{"type":"ExecutionError","message":"Tool scheduler failed: batch exploded"}}',
+              input: { path: "README.md" },
+              status: "error",
+            },
+            type: "tool",
+          },
+        ],
+      },
+      {
+        info: { id: "message_3", finish: "stop", role: "assistant" },
+        parts: [{ text: "Recovered.", type: "text" }],
+      },
+    ]);
+    expect(result).toMatchObject({
+      finalResponse: "Recovered.",
+      finishReason: "stop",
+      success: true,
+    });
+  });
+
+  it("fails conservatively when the model finishes with tool calls but none parse", async () => {
+    const requests: ProviderRequest[] = [];
+    const executeBatch = vi.fn<ToolSchedulerInstance["executeBatch"]>();
+    const lifecycle = new Lifecycle({
+      llmClient: createSequentialFakeLLMClient(
+        [[{ finishReason: "tool_calls" }]],
+        requests,
+      ),
+      toolScheduler: {
+        executeBatch,
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const result = await consumeLifecycle(
+      lifecycle.run({
+        sessionId: "session_test",
+        messages: [{ role: "user", content: "Use a tool" }],
+      }),
+    );
+
+    expect(executeBatch).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(1);
+    expect(result).toMatchObject({
+      finalResponse: "Model requested tool calls but none were parsed",
+      finishReason: "error",
+      success: false,
+    });
+  });
+
   it("persists tool call parts and tool results when a MessageManager is provided", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),

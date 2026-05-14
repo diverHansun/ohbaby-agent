@@ -126,6 +126,14 @@ function normalizeToolCalls(
   });
 }
 
+function toParsedToolCall(toolCall: ResolvedToolCall): ParsedToolCall {
+  return {
+    arguments: toolCall.arguments,
+    id: toolCall.id,
+    name: toolCall.name,
+  };
+}
+
 function toAssistantToolMessage(input: {
   readonly completeMessage: ChatCompletionMessage;
   readonly toolCalls: readonly ResolvedToolCall[];
@@ -314,6 +322,21 @@ export class Lifecycle {
         finalEvent.finishReason === "tool_calls" || parsedToolCalls.length > 0;
 
       if (!shouldExecuteTools || parsedToolCalls.length === 0) {
+        if (shouldExecuteTools && parsedToolCalls.length === 0) {
+          await markAssistantMessageError(
+            this.deps.messageManager,
+            assistantMessage,
+            new Error("Model requested tool calls but none were parsed"),
+          );
+          return {
+            success: false,
+            finishReason: "error",
+            finalResponse: "Model requested tool calls but none were parsed",
+            toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+            usage,
+          };
+        }
+
         return {
           success: true,
           finishReason: finalEvent.finishReason ?? "stop",
@@ -326,8 +349,8 @@ export class Lifecycle {
         };
       }
 
-      allToolCalls.push(...parsedToolCalls);
       const toolCalls = normalizeToolCalls(parsedToolCalls, generateToolCallId);
+      allToolCalls.push(...toolCalls.map(toParsedToolCall));
       const toolParts = await this.appendToolParts(assistantMessage, toolCalls);
 
       for (const toolCall of toolCalls) {
@@ -368,6 +391,7 @@ export class Lifecycle {
         yield {
           type: "tool:result",
           callId: result.callId,
+          params: toolCall.arguments,
           result,
           sessionId: params.sessionId,
           step,
@@ -616,6 +640,17 @@ export class Lifecycle {
       );
     }
 
-    return this.deps.toolScheduler.executeBatch({ calls: requests });
+    return this.deps.toolScheduler
+      .executeBatch({ calls: requests })
+      .catch((error: unknown) =>
+        input.toolCalls.map((toolCall) => ({
+          callId: toolCall.id,
+          error: {
+            message: `Tool scheduler failed: ${getErrorMessage(error)}`,
+            type: "ExecutionError" as const,
+          },
+          status: "error" as const,
+        })),
+      );
   }
 }

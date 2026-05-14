@@ -425,6 +425,7 @@ class ToolEventLifecycle implements RunLifecycle {
       step: 1,
       timestamp: 30,
       toolName: "get_weather",
+      params: { location: "NYC" },
     };
 
     return {
@@ -578,6 +579,7 @@ describe("RunManager", () => {
         params: { location: "NYC" },
         runId: "run_1",
         sessionId: "session_1",
+        status: "executing",
         step: 1,
         toolName: "get_weather",
       },
@@ -592,8 +594,10 @@ describe("RunManager", () => {
           output: "weather: sunny",
           status: "success",
         },
+        params: { location: "NYC" },
         runId: "run_1",
         sessionId: "session_1",
+        status: "success",
         step: 1,
         toolName: "get_weather",
       },
