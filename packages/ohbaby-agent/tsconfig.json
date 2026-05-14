@@ -12,6 +12,9 @@
   "references": [
     {
       "path": "../ohbaby-sdk"
+    },
+    {
+      "path": "../ohbaby-tui"
     }
   ]
 }
