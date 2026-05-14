@@ -3,7 +3,7 @@
  * Coordinates loading, validation, caching, and hot-reload.
  */
 
-import type { LLMConfig, ModelJsonConfig } from './types.js';
+import type { LLMConfig } from './types.js';
 import { ConfigError } from './types.js';
 import { loadModelJson, loadApiKey } from './loaders.js';
 import { validateModelJson, validateApiKey } from './validation.js';
@@ -17,15 +17,15 @@ class LLMConfigManager {
   private cachedConfig: LLMConfig | null = null;
   private lastError: ConfigError | null = null;
 
-  private constructor() {}
+  private constructor() {
+    // Use getInstance() to preserve singleton semantics.
+  }
 
   /**
    * Get the singleton instance.
    */
   static getInstance(): LLMConfigManager {
-    if (!LLMConfigManager.instance) {
-      LLMConfigManager.instance = new LLMConfigManager();
-    }
+    LLMConfigManager.instance ??= new LLMConfigManager();
     return LLMConfigManager.instance;
   }
 
@@ -88,7 +88,7 @@ class LLMConfigManager {
 
       // Validate structure and values
       validateModelJson(rawConfig);
-      const modelJson = rawConfig as ModelJsonConfig;
+      const modelJson = rawConfig;
 
       // Load API key from environment
       const apiKeyEnvName = modelJson.apiConfig.apiKeyEnv;

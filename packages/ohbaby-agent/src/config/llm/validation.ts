@@ -55,7 +55,7 @@ export function validateModelJson(config: unknown): asserts config is ModelJsonC
       errors.push('llmParams.temperature (number) is required');
     } else if (llmParams.temperature < 0 || llmParams.temperature > 2) {
       throw new ConfigError(
-        `Invalid temperature: ${llmParams.temperature}. Must be between 0 and 2`,
+        `Invalid temperature: ${String(llmParams.temperature)}. Must be between 0 and 2`,
         'INVALID_TEMPERATURE',
         { value: llmParams.temperature }
       );
@@ -65,7 +65,7 @@ export function validateModelJson(config: unknown): asserts config is ModelJsonC
       errors.push('llmParams.maxTokens (number) is required');
     } else if (llmParams.maxTokens <= 0 || !Number.isInteger(llmParams.maxTokens)) {
       throw new ConfigError(
-        `Invalid maxTokens: ${llmParams.maxTokens}. Must be a positive integer`,
+        `Invalid maxTokens: ${String(llmParams.maxTokens)}. Must be a positive integer`,
         'INVALID_MAX_TOKENS',
         { value: llmParams.maxTokens }
       );

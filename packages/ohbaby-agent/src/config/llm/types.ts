@@ -88,8 +88,6 @@ export class ConfigError extends Error {
     this.context = context;
 
     // Maintain proper stack trace in V8 environments
-    if (Error.captureStackTrace) {
-      Error.captureStackTrace(this, ConfigError);
-    }
+    Error.captureStackTrace(this, ConfigError);
   }
 }
