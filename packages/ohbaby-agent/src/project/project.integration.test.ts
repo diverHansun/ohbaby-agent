@@ -40,6 +40,11 @@ async function getRootCommit(repo: string): Promise<string> {
   return roots.split(/\r?\n/u).filter(Boolean).sort()[0];
 }
 
+async function getRootCommits(repo: string): Promise<string[]> {
+  const roots = await runGit(repo, ["rev-list", "--max-parents=0", "--all"]);
+  return roots.split(/\r?\n/u).filter(Boolean).sort();
+}
+
 describe("Project", () => {
   beforeEach(async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-project-"));
@@ -78,6 +83,30 @@ describe("Project", () => {
     await expect(Project.isGitProject(child)).resolves.toBe(true);
   });
 
+  it("uses the sorted first root commit when a repository has unrelated roots", async () => {
+    const repo = await createGitRepo("multi-root-repo");
+    await runGit(repo, ["checkout", "--orphan", "unrelated"]);
+    await fs.writeFile(path.join(repo, "unrelated.txt"), "unrelated\n", "utf8");
+    await runGit(repo, ["add", "unrelated.txt"]);
+    await runGit(repo, [
+      "-c",
+      "user.name=Ohbaby Test",
+      "-c",
+      "user.email=ohbaby@example.test",
+      "commit",
+      "-m",
+      "unrelated root",
+    ]);
+    const rootCommits = await getRootCommits(repo);
+
+    expect(rootCommits).toHaveLength(2);
+    await expect(Project.fromDirectory(repo)).resolves.toMatchObject({
+      id: rootCommits[0],
+      rootPath: path.resolve(repo),
+      vcs: "git",
+    });
+  });
+
   it("falls back to global when a git repository has no commits", async () => {
     const repo = path.join(tempRoot, "empty-repo");
     await fs.mkdir(repo);
@@ -100,18 +129,21 @@ describe("Project", () => {
   });
 
   it("treats a .git file as a git project boundary", async () => {
-    const worktreeLike = path.join(tempRoot, "worktree-like");
-    const child = path.join(worktreeLike, "src");
+    const repo = await createGitRepo("main-worktree");
+    const linkedWorktree = path.join(tempRoot, "linked-worktree");
+    await runGit(repo, ["worktree", "add", linkedWorktree]);
+    const child = path.join(linkedWorktree, "src");
     await fs.mkdir(child, { recursive: true });
-    await fs.writeFile(
-      path.join(worktreeLike, ".git"),
-      "gitdir: ../repo/.git/worktrees/worktree-like\n",
-      "utf8",
-    );
+    const rootCommit = await getRootCommit(repo);
 
     await expect(Project.getProjectRoot(child)).resolves.toBe(
-      path.resolve(worktreeLike),
+      path.resolve(linkedWorktree),
     );
     await expect(Project.isGitProject(child)).resolves.toBe(true);
+    await expect(Project.fromDirectory(child)).resolves.toEqual({
+      id: rootCommit,
+      rootPath: path.resolve(linkedWorktree),
+      vcs: "git",
+    });
   });
 });
