@@ -5,6 +5,10 @@ import type {
 } from "../../core/lifecycle/index.js";
 import type { ChatCompletionMessage } from "../../core/llm-client/index.js";
 import type {
+  ToolCommandContext,
+  ToolCommandContextOptions,
+} from "../../core/tool-scheduler/index.js";
+import type {
   RunLedger,
   RunStatus,
   TriggerSource,
@@ -69,6 +73,12 @@ export interface ProfileRegistry {
 export interface SandboxLease {
   readonly id?: string;
   readonly workdir?: string;
+  resolvePath?(inputPath: string): string;
+  resolvePathForExisting?(inputPath: string): Promise<string>;
+  resolvePathForWrite?(inputPath: string): Promise<string>;
+  resolveCommandContext?(
+    options?: ToolCommandContextOptions,
+  ): ToolCommandContext;
 }
 
 export interface SandboxManager {

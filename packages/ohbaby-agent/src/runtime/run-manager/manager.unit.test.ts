@@ -4,6 +4,7 @@ import type {
   LifecycleResult,
   LifecycleRunParams,
 } from "../../core/lifecycle/index.js";
+import type { ToolCallResult } from "../../core/tool-scheduler/index.js";
 import {
   createInMemoryRunLedger,
   type MarkInterruptedOptions,
@@ -191,9 +192,17 @@ class RecordingSandboxManager implements SandboxManager {
   readonly released: string[] = [];
 
   acquire(sessionId: string): Promise<SandboxLease> {
+    const workdir = `workspace/${sessionId}`;
+
     return Promise.resolve({
       id: `lease_${sessionId}`,
-      workdir: `workspace/${sessionId}`,
+      resolveCommandContext: () => ({ cwd: workdir, kind: "host-local" }),
+      resolvePath: (inputPath: string) => `${workdir}/${inputPath}`,
+      resolvePathForExisting: (inputPath: string) =>
+        Promise.resolve(`${workdir}/${inputPath}`),
+      resolvePathForWrite: (inputPath: string) =>
+        Promise.resolve(`${workdir}/${inputPath}`),
+      workdir,
     });
   }
 
@@ -221,11 +230,13 @@ class CompletingLifecycle implements RunLifecycle {
     yield {
       type: "llm:start",
       sessionId: params.sessionId,
+      step: 1,
       timestamp: 10,
     };
     yield {
       type: "llm:delta",
       sessionId: params.sessionId,
+      step: 1,
       timestamp: 20,
       delta: "Hello",
       content: "Hello",
@@ -234,6 +245,7 @@ class CompletingLifecycle implements RunLifecycle {
     yield {
       type: "llm:complete",
       sessionId: params.sessionId,
+      step: 1,
       timestamp: 30,
       finishReason: "stop",
       completeMessage: { role: "assistant", content: "Hello" },
@@ -258,6 +270,7 @@ class BlockingLifecycle implements RunLifecycle {
     yield {
       type: "llm:start",
       sessionId: params.sessionId,
+      step: 1,
       timestamp: 10,
     };
     await this.finish.promise;
@@ -280,6 +293,7 @@ class AbortAwareLifecycle implements RunLifecycle {
     yield {
       type: "llm:start",
       sessionId: params.sessionId,
+      step: 1,
       timestamp: 10,
     };
     if (params.signal?.aborted) {
@@ -320,6 +334,7 @@ class InterruptThenCompleteLifecycle implements RunLifecycle {
     yield {
       type: "llm:start",
       sessionId: params.sessionId,
+      step: 1,
       timestamp: 10,
     };
 
@@ -347,6 +362,7 @@ class InterruptThenCompleteLifecycle implements RunLifecycle {
     yield {
       type: "llm:complete",
       sessionId: params.sessionId,
+      step: 1,
       timestamp: 20,
       finishReason: "stop",
       completeMessage: { role: "assistant", content: "replacement" },
@@ -368,9 +384,54 @@ class ThrowingLifecycle implements RunLifecycle {
     yield {
       type: "llm:start",
       sessionId: params.sessionId,
+      step: 1,
       timestamp: 10,
     };
     throw new Error("lifecycle exploded");
+  }
+}
+
+class ToolEventLifecycle implements RunLifecycle {
+  async *run(
+    params: LifecycleRunParams,
+  ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
+    await Promise.resolve();
+    const result: ToolCallResult = {
+      callId: "call_1",
+      output: "weather: sunny",
+      status: "success",
+    };
+
+    yield {
+      type: "llm:start",
+      sessionId: params.sessionId,
+      step: 1,
+      timestamp: 10,
+    };
+    yield {
+      type: "tool:start",
+      callId: "call_1",
+      params: { location: "NYC" },
+      sessionId: params.sessionId,
+      step: 1,
+      timestamp: 20,
+      toolName: "get_weather",
+    };
+    yield {
+      type: "tool:result",
+      callId: "call_1",
+      result,
+      sessionId: params.sessionId,
+      step: 1,
+      timestamp: 30,
+      toolName: "get_weather",
+    };
+
+    return {
+      finalResponse: "done",
+      finishReason: "stop",
+      success: true,
+    };
   }
 }
 
@@ -475,6 +536,9 @@ describe("RunManager", () => {
     expect(lifecycle.calls[0]).toMatchObject({
       sessionId: "session_1",
       messages: [{ role: "user", content: "Say hello" }],
+      environment: {
+        workdir: "workspace/session_1",
+      },
     });
     expect(bridge.events.map((event) => event.event)).toEqual([
       "run.updated",
@@ -486,6 +550,54 @@ describe("RunManager", () => {
     expect(bridge.endedScopes).toEqual(["run/run_1"]);
     expect(sandboxManager.released).toEqual(["lease_session_1"]);
     expect(manager.list("session_1")).toEqual([]);
+  });
+
+  it("publishes lifecycle tool events to the run stream", async () => {
+    const { manager, bridge } = createManager(new ToolEventLifecycle());
+
+    const record = await manager.create({
+      sessionId: "session_1",
+      triggerSource: "user",
+      messages: [{ role: "user", content: "Use a tool" }],
+    });
+    await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
+      status: "succeeded",
+    });
+
+    const toolStart = bridge.events.find(
+      (event) => event.event === "run.tool.start",
+    );
+    const toolResult = bridge.events.find(
+      (event) => event.event === "run.tool.result",
+    );
+    expect(toolStart).toMatchObject({
+      event: "run.tool.start",
+      scope: "run/run_1",
+      data: {
+        callId: "call_1",
+        params: { location: "NYC" },
+        runId: "run_1",
+        sessionId: "session_1",
+        step: 1,
+        toolName: "get_weather",
+      },
+    });
+    expect(toolResult).toMatchObject({
+      event: "run.tool.result",
+      scope: "run/run_1",
+      data: {
+        callId: "call_1",
+        result: {
+          callId: "call_1",
+          output: "weather: sunny",
+          status: "success",
+        },
+        runId: "run_1",
+        sessionId: "session_1",
+        step: 1,
+        toolName: "get_weather",
+      },
+    });
   });
 
   it("rejects concurrent creates for the same session without blocking other sessions", async () => {

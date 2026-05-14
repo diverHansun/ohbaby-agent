@@ -3,10 +3,12 @@ import type {
   LifecycleResult,
   LifecycleRunParams,
 } from "../../core/lifecycle/index.js";
+import type { ToolExecutionEnvironment } from "../../core/tool-scheduler/index.js";
 import type {
   RunContext,
   RunHookContext,
   RunRecord,
+  SandboxLease,
   RunStatus,
   RunWorkerDeps,
   RunWorkerResult,
@@ -31,6 +33,28 @@ function withDefined(input: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(input).filter(([, value]) => value !== undefined),
   );
+}
+
+function toToolExecutionEnvironment(
+  lease: SandboxLease,
+): ToolExecutionEnvironment | undefined {
+  if (
+    !lease.workdir ||
+    !lease.resolvePath ||
+    !lease.resolvePathForExisting ||
+    !lease.resolvePathForWrite ||
+    !lease.resolveCommandContext
+  ) {
+    return undefined;
+  }
+
+  return {
+    workdir: lease.workdir,
+    resolveCommandContext: lease.resolveCommandContext.bind(lease),
+    resolvePath: lease.resolvePath.bind(lease),
+    resolvePathForExisting: lease.resolvePathForExisting.bind(lease),
+    resolvePathForWrite: lease.resolvePathForWrite.bind(lease),
+  };
 }
 
 function hookContext(
@@ -129,6 +153,7 @@ export class RunWorker {
       agent: this.context.agent,
       parentMessageId: this.context.parentMessageId,
       messages: this.context.messages,
+      environment: toToolExecutionEnvironment(this.context.sandboxLease),
       signal: this.context.abortSignal,
       tools: this.context.tools,
     }) as unknown as LifecycleRunParams;
@@ -159,6 +184,32 @@ export class RunWorker {
           finishReason: event.finishReason,
         }),
       );
+      return;
+    }
+
+    if (event.type === "tool:start") {
+      this.publish(scope, "run.tool.start", {
+        runId: this.context.runId,
+        sessionId: this.context.sessionId,
+        timestamp: event.timestamp,
+        step: event.step,
+        callId: event.callId,
+        toolName: event.toolName,
+        params: event.params,
+      });
+      return;
+    }
+
+    if (event.type === "tool:result") {
+      this.publish(scope, "run.tool.result", {
+        runId: this.context.runId,
+        sessionId: this.context.sessionId,
+        timestamp: event.timestamp,
+        step: event.step,
+        callId: event.callId,
+        toolName: event.toolName,
+        result: event.result,
+      });
     }
   }
 
