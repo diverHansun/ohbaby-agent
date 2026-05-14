@@ -36,6 +36,12 @@ describe("command-parser", () => {
     expect(detectPaths("echo hi >../outside.txt")).toEqual([
       "../outside.txt",
     ]);
+    expect(detectPaths("echo hi &>../outside.txt")).toEqual([
+      "../outside.txt",
+    ]);
+    expect(detectPaths("echo hi &>>../outside.log")).toEqual([
+      "../outside.log",
+    ]);
     expect(
       detectPaths("type C:\\Users\\me\\file.txt \"C:\\Program Files\\app\\config.json\""),
     ).toEqual([

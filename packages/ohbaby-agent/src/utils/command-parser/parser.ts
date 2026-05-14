@@ -206,7 +206,7 @@ function tokenLooksLikePath(token: string): boolean {
 }
 
 function stripRedirectionPrefix(token: string): string {
-  return token.replace(/^(?:\d*)[<>]+/u, "");
+  return token.replace(/^(?:\d+|&)?[<>]+/u, "");
 }
 
 export function detectPaths(command: string): string[] {
