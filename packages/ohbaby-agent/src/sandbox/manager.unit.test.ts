@@ -9,6 +9,23 @@ import {
   type SandboxCreateOptions,
 } from "./index.js";
 
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+
+  return { promise, reject, resolve };
+}
+
 const CAPABILITIES = {
   canExecCommands: true,
   isolation: "none",
@@ -36,6 +53,15 @@ class FakeAdapter implements SandboxAdapter {
   destroy(handle: SandboxAdapterHandle): Promise<void> {
     this.destroyed.push(handle);
     return Promise.resolve();
+  }
+}
+
+class BlockingCreateAdapter extends FakeAdapter {
+  readonly createGate = createDeferred<SandboxAdapterHandle>();
+
+  override create(options: SandboxCreateOptions): Promise<SandboxAdapterHandle> {
+    this.created.push(options);
+    return this.createGate.promise;
   }
 }
 
@@ -80,6 +106,48 @@ describe("SandboxManager", () => {
         workdir: "D:/repo",
       }),
     ).rejects.toBeInstanceOf(SandboxContextAlreadyExistsError);
+  });
+
+  it("rejects duplicate createContext calls while adapter creation is in flight", async () => {
+    const registry = new AdapterRegistry();
+    const adapter = new BlockingCreateAdapter();
+    registry.register(adapter);
+    const manager = new SandboxManager({ adapterRegistry: registry });
+
+    const firstCreate = manager.createContext("session_1", {
+      adapterId: "fake",
+      workdir: "D:/repo",
+    });
+    const secondCreate = manager.createContext("session_1", {
+      adapterId: "fake",
+      workdir: "D:/repo",
+    });
+
+    try {
+      const secondOutcome = await Promise.race([
+        secondCreate.then(
+          () => "resolved" as const,
+          (error: unknown) =>
+            error instanceof SandboxContextAlreadyExistsError
+              ? ("duplicate-rejected" as const)
+              : ("other-rejected" as const),
+        ),
+        new Promise<"pending">((resolve) => {
+          setTimeout(() => {
+            resolve("pending");
+          }, 20);
+        }),
+      ]);
+
+      expect(secondOutcome).toBe("duplicate-rejected");
+      expect(adapter.created).toHaveLength(1);
+    } finally {
+      adapter.createGate.resolve({
+        metadata: { sessionId: "session_1" },
+        workdir: "D:/repo",
+      });
+      await Promise.allSettled([firstCreate, secondCreate]);
+    }
   });
 
   it("ensureContext returns an existing context without creating another adapter handle", async () => {

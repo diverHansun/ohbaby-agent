@@ -33,6 +33,7 @@ function delay(ms: number): Promise<void> {
 export class SandboxManager {
   private readonly contexts = new Map<string, InternalSandboxContext>();
   private readonly leases = new Map<string, InternalSandboxContext>();
+  private readonly pendingCreates = new Set<string>();
   private readonly drainTimeoutMs: number;
   private readonly now: () => number;
   private readonly createContextId: () => string;
@@ -52,38 +53,46 @@ export class SandboxManager {
     sessionId: string,
     options: CreateContextOptions,
   ): Promise<SandboxContext> {
-    if (this.contexts.has(sessionId)) {
+    if (this.contexts.has(sessionId) || this.pendingCreates.has(sessionId)) {
       throw new SandboxContextAlreadyExistsError(sessionId);
     }
 
+    this.pendingCreates.add(sessionId);
     const adapterId = options.adapterId ?? DEFAULT_ADAPTER_ID;
-    const adapter = this.options.adapterRegistry.get(adapterId);
-    if (!adapter) {
-      throw new SandboxAdapterError(`Sandbox adapter not found: ${adapterId}`, {
-        adapterId,
+    try {
+      const adapter = this.options.adapterRegistry.get(adapterId);
+      if (!adapter) {
+        throw new SandboxAdapterError(
+          `Sandbox adapter not found: ${adapterId}`,
+          {
+            adapterId,
+          },
+        );
+      }
+      const handle = await adapter.create({
+        sessionId,
+        workdir: path.resolve(options.workdir),
       });
-    }
-    const handle = await adapter.create({
-      sessionId,
-      workdir: path.resolve(options.workdir),
-    });
-    const capabilities = adapter.getCapabilities(handle);
-    const context: InternalSandboxContext = {
-      adapter,
-      adapterId,
-      capabilities,
-      contextId: this.createContextId(),
-      createdAt: this.now(),
-      handle,
-      leaseCount: 0,
-      sessionId,
-      status: "active",
-      waiters: [],
-      workdir: path.resolve(handle.workdir),
-    };
-    this.contexts.set(sessionId, context);
+      const capabilities = adapter.getCapabilities(handle);
+      const context: InternalSandboxContext = {
+        adapter,
+        adapterId,
+        capabilities,
+        contextId: this.createContextId(),
+        createdAt: this.now(),
+        handle,
+        leaseCount: 0,
+        sessionId,
+        status: "active",
+        waiters: [],
+        workdir: path.resolve(handle.workdir),
+      };
+      this.contexts.set(sessionId, context);
 
-    return snapshotContext(context);
+      return snapshotContext(context);
+    } finally {
+      this.pendingCreates.delete(sessionId);
+    }
   }
 
   async ensureContext(

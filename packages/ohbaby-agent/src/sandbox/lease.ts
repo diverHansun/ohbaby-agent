@@ -15,12 +15,51 @@ function resolveInputPath(workdir: string, inputPath: string): string {
     : path.resolve(workdir, inputPath);
 }
 
+function normalizeLexicalForComparison(inputPath: string): string {
+  const normalized = path.normalize(path.resolve(inputPath));
+  const root = path.parse(normalized).root;
+  const withoutTrailingSeparator =
+    normalized.length > root.length
+      ? normalized.replace(/[\\/]+$/u, "")
+      : normalized;
+
+  return process.platform === "win32"
+    ? withoutTrailingSeparator.toLowerCase()
+    : withoutTrailingSeparator;
+}
+
+function containsOrEqualLexical(parent: string, child: string): boolean {
+  const normalizedParent = normalizeLexicalForComparison(parent);
+  const normalizedChild = normalizeLexicalForComparison(child);
+  if (normalizedParent === normalizedChild) {
+    return true;
+  }
+  const relative = path.relative(normalizedParent, normalizedChild);
+
+  return (
+    relative !== "" &&
+    !relative.startsWith("..") &&
+    !path.isAbsolute(relative)
+  );
+}
+
 function assertInside(
   workdir: string,
   inputPath: string,
   resolvedPath: string,
 ): string {
   if (!containsOrEqual(workdir, resolvedPath)) {
+    throw new SandboxBoundaryError(inputPath, workdir, resolvedPath);
+  }
+  return resolvedPath;
+}
+
+function assertInsideLexical(
+  workdir: string,
+  inputPath: string,
+  resolvedPath: string,
+): string {
+  if (!containsOrEqualLexical(workdir, resolvedPath)) {
     throw new SandboxBoundaryError(inputPath, workdir, resolvedPath);
   }
   return resolvedPath;
@@ -44,7 +83,7 @@ export function createSandboxLease(input: {
 
     resolvePath(inputPath: string): string {
       const resolvedPath = resolveInputPath(context.workdir, inputPath);
-      return assertInside(context.workdir, inputPath, resolvedPath);
+      return assertInsideLexical(context.workdir, inputPath, resolvedPath);
     },
 
     async resolvePathForExisting(inputPath: string): Promise<string> {
