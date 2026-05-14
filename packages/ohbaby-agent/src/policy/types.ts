@@ -22,7 +22,7 @@ export interface PolicyState {
 }
 
 export interface PolicyCheckInput {
-  readonly callId?: string;
+  readonly callId: string;
   readonly toolName: string;
   readonly category: ToolCategory;
   readonly params: Record<string, unknown>;

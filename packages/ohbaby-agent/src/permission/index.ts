@@ -4,6 +4,7 @@ import { createPermissionManager } from "./manager.js";
 
 export { PermissionEvent } from "./events.js";
 export {
+  findMatchingPermissionPattern,
   generatePermissionPattern,
   inferPermissionType,
   matchPermissionPattern,

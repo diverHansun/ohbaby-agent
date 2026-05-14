@@ -5,6 +5,7 @@ import type { PolicyCheckInput, PolicyDecision, ToolCategory } from "./index.js"
 
 function checkInput(category: ToolCategory): PolicyCheckInput {
   return {
+    callId: "call_1",
     category,
     messageId: "message_1",
     params: {},

@@ -39,7 +39,7 @@ export interface PermissionInfo {
   readonly id: string;
   readonly sessionId: string;
   readonly messageId: string;
-  readonly callId?: string;
+  readonly callId: string;
   readonly type: PermissionType;
   readonly name: string;
   readonly title: string;
@@ -53,7 +53,7 @@ export interface PermissionInfo {
 export interface PermissionAskInput {
   readonly sessionId: string;
   readonly messageId: string;
-  readonly callId?: string;
+  readonly callId: string;
   readonly toolName: string;
   readonly category: PermissionToolCategory;
   readonly params: Record<string, unknown>;

@@ -119,17 +119,24 @@ export function inferPermissionType(
   return "tool";
 }
 
+export function findMatchingPermissionPattern(
+  pattern: string,
+  approved: ReadonlySet<string>,
+): string | undefined {
+  if (approved.has(pattern)) {
+    return pattern;
+  }
+  for (const approvedPattern of approved) {
+    if (wildcardToRegex(approvedPattern).test(pattern)) {
+      return approvedPattern;
+    }
+  }
+  return undefined;
+}
+
 export function matchPermissionPattern(
   pattern: string,
   approved: ReadonlySet<string>,
 ): boolean {
-  if (approved.has(pattern)) {
-    return true;
-  }
-  for (const approvedPattern of approved) {
-    if (wildcardToRegex(approvedPattern).test(pattern)) {
-      return true;
-    }
-  }
-  return false;
+  return findMatchingPermissionPattern(pattern, approved) !== undefined;
 }

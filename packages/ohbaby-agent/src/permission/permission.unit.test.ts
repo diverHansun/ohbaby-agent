@@ -14,6 +14,7 @@ function baseAskInput(
   overrides: Partial<PermissionAskInput> = {},
 ): PermissionAskInput {
   return {
+    callId: "call_1",
     category: "write",
     messageId: "message_1",
     params: { file_path: "src/components/Button.tsx" },
@@ -52,6 +53,7 @@ describe("PermissionManager", () => {
     expect(settled).toBe(false);
     expect(updated).toEqual([
       expect.objectContaining({
+        callId: "call_1",
         id: "permission_1",
         messageId: "message_1",
         name: "edit",
@@ -66,6 +68,7 @@ describe("PermissionManager", () => {
     await expect(askPromise).resolves.toBe("once");
     expect(replied).toEqual([
       {
+        callId: "call_1",
         permissionId: "permission_1",
         response: { type: "once" },
         sessionId: "session_1",
@@ -122,6 +125,7 @@ describe("PermissionManager", () => {
     const first = permission.ask(baseAskInput());
     const second = permission.ask(
       baseAskInput({
+        callId: "call_2",
         messageId: "message_2",
         params: { file_path: "src/components/Card.tsx" },
       }),
@@ -188,6 +192,7 @@ describe("PermissionManager", () => {
     const first = permission.ask(baseAskInput());
     const second = permission.ask(
       baseAskInput({
+        callId: "call_2",
         messageId: "message_2",
         params: { file_path: "src/components/Card.tsx" },
       }),
@@ -199,6 +204,7 @@ describe("PermissionManager", () => {
     await expect(second).resolves.toBe("always");
     expect(replied).toEqual([
       {
+        callId: "call_1",
         permissionId: "permission_1",
         response: {
           pattern: "tool:edit:src/components/**",
@@ -207,6 +213,7 @@ describe("PermissionManager", () => {
         sessionId: "session_1",
       },
       {
+        callId: "call_2",
         permissionId: "permission_2",
         response: {
           pattern: "tool:edit:src/components/**",
@@ -220,6 +227,7 @@ describe("PermissionManager", () => {
         sessionId: "session_1",
         targetMode: "edit-automatically",
         trigger: {
+          callId: "call_1",
           pattern: "tool:edit:src/components/**",
           permissionId: "permission_1",
         },
@@ -229,6 +237,7 @@ describe("PermissionManager", () => {
     await expect(
       permission.ask(
         baseAskInput({
+          callId: "call_3",
           messageId: "message_3",
           params: { file_path: "src/components/Input.tsx" },
         }),
@@ -253,7 +262,9 @@ describe("PermissionManager", () => {
     permission.respond("session_a", "permission_1", { type: "always" });
     await expect(sessionA).resolves.toBe("always");
 
-    const sessionB = permission.ask(baseAskInput({ sessionId: "session_b" }));
+    const sessionB = permission.ask(
+      baseAskInput({ callId: "call_2", sessionId: "session_b" }),
+    );
     await Promise.resolve();
     expect(updated.at(-1)?.sessionId).toBe("session_b");
     permission.respond("session_b", "permission_2", { type: "once" });
@@ -261,7 +272,9 @@ describe("PermissionManager", () => {
 
     permission.clearSession("session_a");
 
-    const afterClear = permission.ask(baseAskInput({ sessionId: "session_a" }));
+    const afterClear = permission.ask(
+      baseAskInput({ callId: "call_3", sessionId: "session_a" }),
+    );
     await Promise.resolve();
     expect(updated.at(-1)?.sessionId).toBe("session_a");
     permission.respond("session_a", "permission_3", { type: "once" });
@@ -291,6 +304,7 @@ describe("PermissionManager", () => {
     await expect(first).resolves.toBe("once");
     expect(replied).toEqual([
       {
+        callId: "call_1",
         permissionId: "permission_1",
         response: { type: "once" },
         sessionId: "session_1",

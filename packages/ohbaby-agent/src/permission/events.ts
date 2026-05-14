@@ -12,7 +12,7 @@ const PermissionInfoSchema = z.object({
   id: z.string(),
   sessionId: z.string(),
   messageId: z.string(),
-  callId: z.string().optional(),
+  callId: z.string(),
   type: PermissionTypeSchema,
   name: z.string(),
   title: z.string(),
@@ -44,7 +44,7 @@ export const PermissionEvent = {
     z.object({
       sessionId: z.string(),
       permissionId: z.string(),
-      callId: z.string().optional(),
+      callId: z.string(),
       response: PermissionResponseSchema,
     }),
   ),
@@ -54,6 +54,7 @@ export const PermissionEvent = {
       sessionId: z.string(),
       targetMode: z.literal("edit-automatically"),
       trigger: z.object({
+        callId: z.string(),
         permissionId: z.string(),
         pattern: z.string(),
       }),

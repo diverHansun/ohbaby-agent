@@ -1,5 +1,4 @@
 import { Bus, type BusInstance } from "../bus/index.js";
-import { PermissionEvent } from "../permission/events.js";
 import type {
   AgentState,
   Mode,
@@ -71,6 +70,7 @@ function isPolicyCheckInput(value: unknown): value is PolicyCheckInput {
   return (
     isRecord(value) &&
     typeof value.toolName === "string" &&
+    typeof value.callId === "string" &&
     typeof value.category === "string" &&
     isRecord(value.params) &&
     typeof value.sessionId === "string" &&
@@ -173,10 +173,6 @@ export function createPolicyManager(
 
     return deny(`Tool category ${category} is not allowed`);
   }
-
-  bus.subscribe(PermissionEvent.SwitchModeRequested, () => {
-    setAgentState("edit-automatically");
-  });
 
   return {
     check,

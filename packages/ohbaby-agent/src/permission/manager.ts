@@ -1,6 +1,7 @@
 import { Bus, type BusInstance } from "../bus/index.js";
 import { PermissionEvent } from "./events.js";
 import {
+  findMatchingPermissionPattern,
   generatePermissionPattern,
   inferPermissionType,
   isRememberablePermissionPattern,
@@ -105,7 +106,7 @@ export function createPermissionManager(
     response: PermissionEventResponse,
   ): void {
     bus.publish(PermissionEvent.Replied, {
-      ...(request.info.callId ? { callId: request.info.callId } : {}),
+      callId: request.info.callId,
       sessionId: request.info.sessionId,
       permissionId: request.info.id,
       response,
@@ -156,7 +157,19 @@ export function createPermissionManager(
   return {
     ask(input: PermissionAskInput): Promise<SchedulerPermissionResponse> {
       const info = createInfo(input, generateId(), now);
-      if (matchPermissionPattern(info.pattern, approvedFor(info.sessionId))) {
+      const approvedPattern = findMatchingPermissionPattern(
+        info.pattern,
+        approvedFor(info.sessionId),
+      );
+      if (approvedPattern) {
+        publishReply(
+          {
+            info,
+            reject: () => undefined,
+            resolve: () => undefined,
+          },
+          { type: "auto_approved", pattern: approvedPattern },
+        );
         return Promise.resolve("always");
       }
 
@@ -206,6 +219,7 @@ export function createPermissionManager(
           sessionId,
           targetMode: "edit-automatically",
           trigger: {
+            callId: request.info.callId,
             permissionId,
             pattern: request.info.pattern,
           },
