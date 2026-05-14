@@ -70,6 +70,71 @@ describe("PolicyManager", () => {
     ]);
   });
 
+  it("publishes an agent-state event when mode changes reset auto-edit state", () => {
+    const bus = createBus();
+    const policy = createPolicyManager({ bus });
+    const agentEvents: unknown[] = [];
+
+    bus.subscribe(PolicyEvent.AgentStateChanged, (event) => {
+      agentEvents.push(event);
+    });
+
+    policy.setAgentState("edit-automatically");
+    policy.setMode("ask");
+
+    expect(policy.getState()).toEqual({
+      agentState: "ask-before-edit",
+      mode: "ask",
+    });
+    expect(agentEvents).toEqual([
+      {
+        currentState: "edit-automatically",
+        previousState: "ask-before-edit",
+      },
+      {
+        currentState: "ask-before-edit",
+        previousState: "edit-automatically",
+      },
+    ]);
+  });
+
+  it("ignores invalid runtime mode and agent-state values", () => {
+    const bus = createBus();
+    const policy = createPolicyManager({ bus });
+    const setRuntimeMode = policy.setMode as (mode: string) => void;
+    const setRuntimeAgentState = policy.setAgentState as (state: string) => void;
+    const modeEvents: unknown[] = [];
+    const agentEvents: unknown[] = [];
+
+    bus.subscribe(PolicyEvent.ModeChanged, (event) => {
+      modeEvents.push(event);
+    });
+    bus.subscribe(PolicyEvent.AgentStateChanged, (event) => {
+      agentEvents.push(event);
+    });
+
+    expect(() => {
+      setRuntimeMode("invalid");
+      setRuntimeAgentState("invalid");
+    }).not.toThrow();
+
+    expect(policy.getState()).toEqual({
+      agentState: "ask-before-edit",
+      mode: "agent",
+    });
+    expect(modeEvents).toEqual([]);
+    expect(agentEvents).toEqual([]);
+  });
+
+  it("keeps command-facing methods usable when passed as callbacks", () => {
+    const policy = createPolicyManager({ bus: createBus() });
+    const cycleMode = policy.cycleMode;
+    const toggleAgentState = policy.toggleAgentState;
+
+    expect(cycleMode()).toBe("ask");
+    expect(toggleAgentState()).toBe("edit-automatically");
+  });
+
   it("applies the ask and plan readonly-only decision matrix", () => {
     const policy = createPolicyManager({ bus: createBus() });
 

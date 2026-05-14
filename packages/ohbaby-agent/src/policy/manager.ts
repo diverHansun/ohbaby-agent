@@ -11,6 +11,10 @@ import type {
 import { PolicyEvent } from "./events.js";
 
 const MODE_CYCLE: readonly Mode[] = ["agent", "ask", "plan"];
+const AGENT_STATES = new Set<string>([
+  "ask-before-edit",
+  "edit-automatically",
+]);
 const VALID_CATEGORIES = new Set<ToolCategory>([
   "readonly",
   "write",
@@ -50,6 +54,14 @@ function isKnownCategory(category: ToolCategory): boolean {
   return VALID_CATEGORIES.has(category);
 }
 
+function isMode(value: string): value is Mode {
+  return MODE_CYCLE.includes(value as Mode);
+}
+
+function isAgentState(value: string): value is AgentState {
+  return AGENT_STATES.has(value);
+}
+
 export function createPolicyManager(
   options: PolicyManagerOptions = {},
 ): PolicyManager {
@@ -57,88 +69,97 @@ export function createPolicyManager(
   let mode: Mode = "agent";
   let agentState: AgentState = "ask-before-edit";
 
+  function setAgentState(nextState: AgentState): void {
+    if (!isAgentState(nextState) || agentState === nextState) {
+      return;
+    }
+    const previousState = agentState;
+    agentState = nextState;
+    bus.publish(PolicyEvent.AgentStateChanged, {
+      previousState,
+      currentState: agentState,
+    });
+  }
+
   function resetAgentState(): void {
-    agentState = "ask-before-edit";
+    setAgentState("ask-before-edit");
+  }
+
+  function getMode(): Mode {
+    return mode;
+  }
+
+  function setMode(nextMode: Mode): void {
+    if (!isMode(nextMode) || mode === nextMode) {
+      return;
+    }
+    const previousMode = mode;
+    mode = nextMode;
+    resetAgentState();
+    bus.publish(PolicyEvent.ModeChanged, {
+      previousMode,
+      currentMode: mode,
+    });
+  }
+
+  function cycleMode(): Mode {
+    const currentIndex = MODE_CYCLE.indexOf(mode);
+    const nextMode = MODE_CYCLE[(currentIndex + 1) % MODE_CYCLE.length];
+    setMode(nextMode);
+    return mode;
+  }
+
+  function getAgentState(): AgentState {
+    return agentState;
+  }
+
+  function toggleAgentState(): AgentState {
+    setAgentState(
+      agentState === "ask-before-edit"
+        ? "edit-automatically"
+        : "ask-before-edit",
+    );
+    return agentState;
+  }
+
+  function getState(): PolicyState {
+    return { agentState, mode };
+  }
+
+  function check(input: PolicyCheckInput): PolicyDecision {
+    const { category } = input;
+    if (!isKnownCategory(category)) {
+      return deny(`Unknown tool category: ${category}`);
+    }
+    if (isAlwaysAllowed(category)) {
+      return allow();
+    }
+    if (mode === "ask" || mode === "plan") {
+      return deny(`Tool category ${category} is not allowed in ${mode} mode`);
+    }
+    if (category === "subagent") {
+      return allow();
+    }
+    if (category === "dangerous") {
+      return ask(`Dangerous tool requires confirmation: ${input.toolName}`);
+    }
+    if (category === "write") {
+      return agentState === "edit-automatically"
+        ? allow()
+        : ask(`Write tool requires confirmation: ${input.toolName}`);
+    }
+
+    return deny(`Tool category ${category} is not allowed`);
   }
 
   return {
-    getMode(): Mode {
-      return mode;
-    },
-
-    setMode(nextMode: Mode): void {
-      if (mode === nextMode) {
-        return;
-      }
-      const previousMode = mode;
-      mode = nextMode;
-      resetAgentState();
-      bus.publish(PolicyEvent.ModeChanged, {
-        previousMode,
-        currentMode: mode,
-      });
-    },
-
-    cycleMode(): Mode {
-      const currentIndex = MODE_CYCLE.indexOf(mode);
-      const nextMode = MODE_CYCLE[(currentIndex + 1) % MODE_CYCLE.length];
-      this.setMode(nextMode);
-      return mode;
-    },
-
-    getAgentState(): AgentState {
-      return agentState;
-    },
-
-    setAgentState(nextState: AgentState): void {
-      if (agentState === nextState) {
-        return;
-      }
-      const previousState = agentState;
-      agentState = nextState;
-      bus.publish(PolicyEvent.AgentStateChanged, {
-        previousState,
-        currentState: agentState,
-      });
-    },
-
-    toggleAgentState(): AgentState {
-      this.setAgentState(
-        agentState === "ask-before-edit"
-          ? "edit-automatically"
-          : "ask-before-edit",
-      );
-      return agentState;
-    },
-
-    getState(): PolicyState {
-      return { agentState, mode };
-    },
-
-    check(input: PolicyCheckInput): PolicyDecision {
-      const { category } = input;
-      if (!isKnownCategory(category)) {
-        return deny(`Unknown tool category: ${category}`);
-      }
-      if (isAlwaysAllowed(category)) {
-        return allow();
-      }
-      if (mode === "ask" || mode === "plan") {
-        return deny(`Tool category ${category} is not allowed in ${mode} mode`);
-      }
-      if (category === "subagent") {
-        return allow();
-      }
-      if (category === "dangerous") {
-        return ask(`Dangerous tool requires confirmation: ${input.toolName}`);
-      }
-      if (category === "write") {
-        return agentState === "edit-automatically"
-          ? allow()
-          : ask(`Write tool requires confirmation: ${input.toolName}`);
-      }
-
-      return deny(`Tool category ${category} is not allowed`);
-    },
+    check,
+    cycleMode,
+    getAgentState,
+    getMode,
+    getState,
+    setAgentState,
+    setMode,
+    toggleAgentState,
   };
 }

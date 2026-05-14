@@ -30,12 +30,12 @@ export interface PolicyCheckInput {
 }
 
 export interface PolicyManager {
-  getMode(): Mode;
-  setMode(mode: Mode): void;
-  cycleMode(): Mode;
-  getAgentState(): AgentState;
-  setAgentState(state: AgentState): void;
-  toggleAgentState(): AgentState;
-  getState(): PolicyState;
-  check(input: PolicyCheckInput): PolicyDecision;
+  readonly getMode: () => Mode;
+  readonly setMode: (mode: Mode) => void;
+  readonly cycleMode: () => Mode;
+  readonly getAgentState: () => AgentState;
+  readonly setAgentState: (state: AgentState) => void;
+  readonly toggleAgentState: () => AgentState;
+  readonly getState: () => PolicyState;
+  readonly check: (input: PolicyCheckInput) => PolicyDecision;
 }
