@@ -1,4 +1,5 @@
 export { InvalidRunTransitionError, RunLedgerNotFoundError } from "./errors.js";
+export { createDatabaseRunLedger } from "./database.js";
 export { createInMemoryRunLedger, InMemoryRunLedger } from "./in-memory.js";
 export type {
   CreatePendingRunLedgerInput,

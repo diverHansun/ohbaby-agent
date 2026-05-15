@@ -6,7 +6,7 @@
   "type": "module",
   "packageManager": "pnpm@9.15.0",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=24.0.0"
   },
   "scripts": {
     "dev": "pnpm --filter ohbaby-agent dev",
@@ -51,7 +51,7 @@
   },
   "homepage": "https://github.com/diverHansun/ohbaby-agent#readme",
   "devDependencies": {
-    "@types/node": "^22.10.2",
+    "@types/node": "^24.12.4",
     "@types/react": "^19.0.2",
     "@typescript-eslint/eslint-plugin": "^8.18.2",
     "@typescript-eslint/parser": "^8.18.2",
