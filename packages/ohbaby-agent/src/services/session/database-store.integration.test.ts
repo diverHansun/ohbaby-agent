@@ -2,6 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createDatabaseMessageStore } from "../../core/message/index.js";
+import type { CoreMessage } from "../../core/message/index.js";
 import { closeDatabase, initDatabase } from "../database/index.js";
 import { DuplicateSessionError, SessionNotFoundError } from "./errors.js";
 import { createDatabaseSessionStore } from "./database-store.js";
@@ -24,6 +26,17 @@ function createSession(overrides: Partial<Session> = {}): Session {
     isSubagent: false,
     ...overrides,
   };
+}
+
+function userMessage(overrides: Partial<CoreMessage> = {}): CoreMessage {
+  return {
+    id: "message_1",
+    sessionId: "session_1",
+    role: "user",
+    agent: "default",
+    time: { created: 1_000 },
+    ...overrides,
+  } as CoreMessage;
 }
 
 beforeEach(async () => {
@@ -166,5 +179,25 @@ describe("createDatabaseSessionStore", () => {
       leakedStore?.insert(createSession({ id: "too_late" })),
     ).rejects.toThrow(/transaction/i);
     await expect(store.get("too_late")).resolves.toBeNull();
+  });
+
+  it("does not roll back other database stores sharing the same connection", async () => {
+    const store = createDatabaseSessionStore();
+    const messageStore = createDatabaseMessageStore();
+    await store.insert(createSession());
+
+    await expect(
+      store.withTransaction(async (transaction) => {
+        await transaction.insert(createSession({ id: "rolled_back" }));
+        await messageStore.insertMessage(userMessage());
+        await transaction.update("missing", { title: "Nope" });
+      }),
+    ).rejects.toBeInstanceOf(SessionNotFoundError);
+
+    await expect(store.get("rolled_back")).resolves.toBeNull();
+    await expect(messageStore.getMessage("message_1")).resolves.toMatchObject({
+      id: "message_1",
+      sessionId: "session_1",
+    });
   });
 });

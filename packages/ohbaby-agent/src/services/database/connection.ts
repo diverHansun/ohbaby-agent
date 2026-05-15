@@ -8,7 +8,10 @@ import type {
 } from "./types.js";
 
 const require = createRequire(import.meta.url);
-const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+
+function loadNodeSqlite(): typeof import("node:sqlite") {
+  return require("node:sqlite") as typeof import("node:sqlite");
+}
 
 class NodeSqliteStatement<Row> implements DatabaseStatement<Row> {
   constructor(private readonly statement: StatementSync) {}
@@ -34,6 +37,7 @@ export class NodeSqliteConnection implements DatabaseConnection {
   private readonly database: DatabaseSyncType;
 
   constructor(readonly path: string) {
+    const { DatabaseSync } = loadNodeSqlite();
     this.database = new DatabaseSync(path);
   }
 

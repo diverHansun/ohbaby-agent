@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -179,5 +179,50 @@ describe("services/storage", () => {
     );
 
     await expect(storage.readJson(key)).resolves.toEqual({ count: 10 });
+  });
+
+  it("serializes updateJson calls across storage instances for the same root", async () => {
+    const rootDir = await tempRoot();
+    const key = ["debug", "counter"];
+    let releaseSlowWrite!: () => void;
+    let slowWriteStarted!: () => void;
+    const slowWriteStartedPromise = new Promise<void>((resolve) => {
+      slowWriteStarted = resolve;
+    });
+    const releaseSlowWritePromise = new Promise<void>((resolve) => {
+      releaseSlowWrite = resolve;
+    });
+    let shouldDelay = true;
+    const slowStorage = createStorage({
+      rootDir,
+      writeFile: async (path, data) => {
+        if (shouldDelay && path.includes(".tmp-")) {
+          shouldDelay = false;
+          slowWriteStarted();
+          await releaseSlowWritePromise;
+        }
+        await writeFile(path, data);
+      },
+    });
+    const fastStorage = createStorage({ rootDir });
+
+    await fastStorage.writeJson(key, { count: 0 });
+    const slowUpdate = slowStorage.updateJson<{ count: number }>(
+      key,
+      (draft) => {
+        draft.count += 1;
+      },
+    );
+    await slowWriteStartedPromise;
+    const fastUpdate = fastStorage.updateJson<{ count: number }>(
+      key,
+      (draft) => {
+        draft.count += 1;
+      },
+    );
+    releaseSlowWrite();
+
+    await Promise.all([slowUpdate, fastUpdate]);
+    await expect(fastStorage.readJson(key)).resolves.toEqual({ count: 2 });
   });
 });

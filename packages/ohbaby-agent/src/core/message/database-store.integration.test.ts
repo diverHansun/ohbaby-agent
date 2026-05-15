@@ -7,6 +7,10 @@ import {
   getDatabase,
   initDatabase,
   schema,
+  type DatabaseConnection,
+  type DatabaseStatement,
+  type SqliteValue,
+  type StatementRunResult,
 } from "../../services/database/index.js";
 import { createDatabaseMessageStore } from "./database-store.js";
 import type { Message, MessageStore } from "./types.js";
@@ -187,6 +191,31 @@ describe("createDatabaseMessageStore", () => {
     await expect(store.listBySession("session_1")).resolves.toEqual([]);
   });
 
+  it("rolls back part updates when touching the parent message fails", async () => {
+    const store = createDatabaseMessageStore();
+    await store.insertMessage(userMessage());
+    await store.appendPart({
+      message: userMessage(),
+      partId: "part_1",
+      data: { type: "text", text: "A" },
+      updatedAt: 2_000,
+    });
+
+    const failingStore = createDatabaseMessageStore({
+      db: createFailingMessageTouchConnection(),
+    });
+
+    await expect(
+      failingStore.updatePart("part_1", { text: "B" }, 3_000),
+    ).rejects.toThrow(/touch failed/);
+    await expect(store.listBySession("session_1")).resolves.toMatchObject([
+      {
+        info: { time: { updated: 2_000 } },
+        parts: [{ id: "part_1", text: "A" }],
+      },
+    ]);
+  });
+
   it("rejects writes for missing messages", async () => {
     const store: MessageStore = createDatabaseMessageStore();
 
@@ -200,3 +229,36 @@ describe("createDatabaseMessageStore", () => {
     ).rejects.toThrow(/Message not found/);
   });
 });
+
+function createFailingMessageTouchConnection(): DatabaseConnection {
+  const db = getDatabase();
+  return {
+    path: db.path,
+    exec(sql: string): void {
+      db.exec(sql);
+    },
+    prepare<Row = Record<string, unknown>>(sql: string): DatabaseStatement<Row> {
+      const statement = db.prepare<Row>(sql);
+      if (!sql.includes(`UPDATE ${schema.message.tableName}`)) {
+        return statement;
+      }
+      return {
+        get(...params: SqliteValue[]): Row | undefined {
+          return statement.get(...params);
+        },
+        all(...params: SqliteValue[]): Row[] {
+          return statement.all(...params);
+        },
+        run(..._params: SqliteValue[]): StatementRunResult {
+          throw new Error("touch failed");
+        },
+      };
+    },
+    pragma<Row = Record<string, unknown>>(name: string): Row[] {
+      return db.pragma<Row>(name);
+    },
+    close(): void {
+      throw new Error("Test connection wrapper must not close the database");
+    },
+  };
+}

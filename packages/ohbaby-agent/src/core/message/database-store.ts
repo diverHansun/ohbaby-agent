@@ -238,30 +238,32 @@ export function createDatabaseMessageStore(
       patch: Omit<UpdatePartPatch, "delta">,
       updatedAt: number,
     ): Promise<Part> {
-      return withAsyncBoundary(() => {
-        const row = db
-          .prepare<PartRow>(
-            `SELECT * FROM ${schema.part.tableName} WHERE id = ?`,
-          )
-          .get(partId);
-        if (!row) {
-          throw new Error(`Part not found: ${partId}`);
-        }
-        const updated = { ...rowToPart(row), ...patch } as Part;
-        db.prepare(
-          `UPDATE ${schema.part.tableName}
+      return withAsyncBoundary(() =>
+        withImmediateTransaction(() => {
+          const row = db
+            .prepare<PartRow>(
+              `SELECT * FROM ${schema.part.tableName} WHERE id = ?`,
+            )
+            .get(partId);
+          if (!row) {
+            throw new Error(`Part not found: ${partId}`);
+          }
+          const updated = { ...rowToPart(row), ...patch } as Part;
+          db.prepare(
+            `UPDATE ${schema.part.tableName}
            SET type = ?, order_index = ?, updated_at = ?, data = ?
            WHERE id = ?`,
-        ).run(
-          updated.type,
-          updated.orderIndex,
-          updatedAt,
-          partToRowData(updated),
-          partId,
-        );
-        touchMessage(updated.messageId, updatedAt);
-        return clone(updated);
-      });
+          ).run(
+            updated.type,
+            updated.orderIndex,
+            updatedAt,
+            partToRowData(updated),
+            partId,
+          );
+          touchMessage(updated.messageId, updatedAt);
+          return clone(updated);
+        }),
+      );
     },
 
     listBySession(sessionId: string): Promise<MessageWithParts[]> {

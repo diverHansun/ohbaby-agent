@@ -21,9 +21,11 @@ function sortKeys(left: StorageKey, right: StorageKey): number {
   return left.join("\0").localeCompare(right.join("\0"));
 }
 
+const GLOBAL_LOCK_MANAGER = new KeyLockManager();
+
 export function createStorage(options: StorageOptions = {}): Storage {
   const resolver = new PathResolver(options.rootDir);
-  const lockManager = new KeyLockManager();
+  const lockManager = GLOBAL_LOCK_MANAGER;
   const writeFile = options.writeFile ?? defaultWriteFile;
 
   function lockKey(path: string): string {

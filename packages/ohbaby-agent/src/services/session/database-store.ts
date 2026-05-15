@@ -35,6 +35,12 @@ interface DatabaseSessionStoreOptions {
   readonly db?: DatabaseConnection;
 }
 
+interface SessionTransactionState {
+  active: boolean;
+  readonly upserts: Map<string, Session>;
+  readonly removals: Set<string>;
+}
+
 function normalizeLimit(limit: number | undefined): number | undefined {
   if (limit === undefined) {
     return undefined;
@@ -80,6 +86,13 @@ function rowToSession(row: SessionRow): Session {
 
 function cloneSession(session: Session): Session {
   return structuredClone(session);
+}
+
+function sortByUpdatedAtDesc(left: Session, right: Session): number {
+  if (right.updatedAt !== left.updatedAt) {
+    return right.updatedAt - left.updatedAt;
+  }
+  return right.createdAt - left.createdAt;
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
@@ -146,6 +159,39 @@ export function createDatabaseSessionStore(
     );
   }
 
+  function upsertRow(session: Session): void {
+    db.prepare(
+      `INSERT INTO ${schema.session.tableName}
+        (id, project_id, project_root, agent, parent_id, title, status, created_at, updated_at, message_count, last_message_at, data)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+        project_id = excluded.project_id,
+        project_root = excluded.project_root,
+        agent = excluded.agent,
+        parent_id = excluded.parent_id,
+        title = excluded.title,
+        status = excluded.status,
+        created_at = excluded.created_at,
+        updated_at = excluded.updated_at,
+        message_count = excluded.message_count,
+        last_message_at = excluded.last_message_at,
+        data = excluded.data`,
+    ).run(
+      session.id,
+      session.projectId,
+      session.projectRoot,
+      session.agentName,
+      session.parentId ?? null,
+      session.title,
+      session.status,
+      session.createdAt,
+      session.updatedAt,
+      session.stats.messageCount,
+      session.stats.lastMessageAt ?? null,
+      encodeData(session),
+    );
+  }
+
   function getRow(sessionId: string): Session | null {
     const row = db
       .prepare<SessionRow>(
@@ -160,30 +206,101 @@ export function createDatabaseSessionStore(
     return operation();
   }
 
-  function assertStoreAvailable(transactional: boolean): void {
-    if (transactional && !activeTransaction) {
+  function assertStoreAvailable(transaction?: SessionTransactionState): void {
+    if (transaction && !transaction.active) {
       throw new Error("Session transaction is no longer active");
     }
-    if (!transactional && activeTransaction) {
+    if (!transaction && activeTransaction) {
       throw new Error(
         "Session transaction is active; use the provided transaction store",
       );
     }
   }
 
-  function createStore(transactional: boolean): SessionStore {
+  function getTransactionSession(
+    transaction: SessionTransactionState,
+    sessionId: string,
+  ): Session | null {
+    if (transaction.removals.has(sessionId)) {
+      return null;
+    }
+    const staged = transaction.upserts.get(sessionId);
+    if (staged) {
+      return cloneSession(staged);
+    }
+    const session = getRow(sessionId);
+    return session ? cloneSession(session) : null;
+  }
+
+  function listTransactionSessions(
+    transaction: SessionTransactionState,
+  ): Session[] {
+    const rows = db
+      .prepare<SessionRow>(`SELECT * FROM ${schema.session.tableName}`)
+      .all();
+    const sessions = new Map<string, Session>();
+    for (const row of rows) {
+      sessions.set(row.id, rowToSession(row));
+    }
+    for (const sessionId of transaction.removals) {
+      sessions.delete(sessionId);
+    }
+    for (const [sessionId, session] of transaction.upserts) {
+      sessions.set(sessionId, cloneSession(session));
+    }
+    return Array.from(sessions.values());
+  }
+
+  function commitTransaction(transaction: SessionTransactionState): void {
+    if (transaction.upserts.size === 0 && transaction.removals.size === 0) {
+      return;
+    }
+    runWithBusyRetry(() => {
+      db.exec("BEGIN IMMEDIATE");
+    });
+    try {
+      for (const sessionId of transaction.removals) {
+        db.prepare(`DELETE FROM ${schema.session.tableName} WHERE id = ?`).run(
+          sessionId,
+        );
+      }
+      for (const session of transaction.upserts.values()) {
+        upsertRow(session);
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        // Preserve the original store error.
+      }
+      throw error;
+    }
+  }
+
+  function createStore(transaction?: SessionTransactionState): SessionStore {
     const store: SessionStore = {
       insert(session: Session): Promise<void> {
         return withAsyncBoundary(() => {
-          assertStoreAvailable(transactional);
+          assertStoreAvailable(transaction);
+          if (transaction) {
+            if (getTransactionSession(transaction, session.id)) {
+              throw new DuplicateSessionError(session.id);
+            }
+            transaction.removals.delete(session.id);
+            transaction.upserts.set(session.id, cloneSession(session));
+            return;
+          }
           insertRow(session);
         });
       },
 
       get(sessionId: string): Promise<Session | null> {
         return withAsyncBoundary(() => {
-          assertStoreAvailable(transactional);
-          const session = getRow(sessionId);
+          assertStoreAvailable(transaction);
+          const session = transaction
+            ? getTransactionSession(transaction, sessionId)
+            : getRow(sessionId);
           return session ? cloneSession(session) : null;
         });
       },
@@ -193,8 +310,20 @@ export function createDatabaseSessionStore(
         options: ListSessionOptions = {},
       ): Promise<Session[]> {
         return withAsyncBoundary(() => {
-          assertStoreAvailable(transactional);
+          assertStoreAvailable(transaction);
           const limit = normalizeLimit(options.limit);
+          if (transaction) {
+            return listTransactionSessions(transaction)
+              .filter((session) => session.projectId === projectId)
+              .filter(
+                (session) =>
+                  options.status === undefined ||
+                  session.status === options.status,
+              )
+              .sort(sortByUpdatedAtDesc)
+              .slice(0, limit)
+              .map(cloneSession);
+          }
           const clauses = ["project_id = ?"];
           const params: (string | number)[] = [projectId];
           if (options.status !== undefined) {
@@ -220,8 +349,20 @@ export function createDatabaseSessionStore(
         options: ListSessionOptions = {},
       ): Promise<Session[]> {
         return withAsyncBoundary(() => {
-          assertStoreAvailable(transactional);
+          assertStoreAvailable(transaction);
           const limit = normalizeLimit(options.limit);
+          if (transaction) {
+            return listTransactionSessions(transaction)
+              .filter((session) => session.parentId === parentId)
+              .filter(
+                (session) =>
+                  options.status === undefined ||
+                  session.status === options.status,
+              )
+              .sort(sortByUpdatedAtDesc)
+              .slice(0, limit)
+              .map(cloneSession);
+          }
           const clauses = ["parent_id = ?"];
           const params: (string | number)[] = [parentId];
           if (options.status !== undefined) {
@@ -244,8 +385,14 @@ export function createDatabaseSessionStore(
 
       getRecent(limit: number): Promise<Session[]> {
         return withAsyncBoundary(() => {
-          assertStoreAvailable(transactional);
+          assertStoreAvailable(transaction);
           const normalizedLimit = normalizeLimit(limit) ?? 0;
+          if (transaction) {
+            return listTransactionSessions(transaction)
+              .sort(sortByUpdatedAtDesc)
+              .slice(0, normalizedLimit)
+              .map(cloneSession);
+          }
           const rows = db
             .prepare<SessionRow>(
               `SELECT * FROM ${schema.session.tableName}
@@ -259,8 +406,10 @@ export function createDatabaseSessionStore(
 
       update(sessionId: string, patch: Partial<Session>): Promise<Session> {
         return withAsyncBoundary(() => {
-          assertStoreAvailable(transactional);
-          const existing = getRow(sessionId);
+          assertStoreAvailable(transaction);
+          const existing = transaction
+            ? getTransactionSession(transaction, sessionId)
+            : getRow(sessionId);
           if (!existing) {
             throw new SessionNotFoundError(sessionId);
           }
@@ -273,14 +422,24 @@ export function createDatabaseSessionStore(
               ? [...patch.childrenIds]
               : existing.childrenIds,
           };
-          writeRow(updated);
+          if (transaction) {
+            transaction.removals.delete(sessionId);
+            transaction.upserts.set(sessionId, cloneSession(updated));
+          } else {
+            writeRow(updated);
+          }
           return cloneSession(updated);
         });
       },
 
       remove(sessionId: string): Promise<void> {
         return withAsyncBoundary(() => {
-          assertStoreAvailable(transactional);
+          assertStoreAvailable(transaction);
+          if (transaction) {
+            transaction.upserts.delete(sessionId);
+            transaction.removals.add(sessionId);
+            return;
+          }
           db.prepare(
             `DELETE FROM ${schema.session.tableName} WHERE id = ?`,
           ).run(sessionId);
@@ -290,26 +449,22 @@ export function createDatabaseSessionStore(
       async withTransaction<T>(
         operation: (store: SessionStore) => Promise<T>,
       ): Promise<T> {
-        assertStoreAvailable(transactional);
+        assertStoreAvailable(transaction);
         if (activeTransaction) {
           throw new Error("Nested session transactions are not supported");
         }
-        runWithBusyRetry(() => {
-          db.exec("BEGIN IMMEDIATE");
-        });
         activeTransaction = true;
+        const state: SessionTransactionState = {
+          active: true,
+          upserts: new Map(),
+          removals: new Set(),
+        };
         try {
-          const result = await operation(createStore(true));
-          db.exec("COMMIT");
+          const result = await operation(createStore(state));
+          commitTransaction(state);
           return result;
-        } catch (error) {
-          try {
-            db.exec("ROLLBACK");
-          } catch {
-            // Preserve the original store error.
-          }
-          throw error;
         } finally {
+          state.active = false;
           activeTransaction = false;
         }
       },
@@ -318,5 +473,5 @@ export function createDatabaseSessionStore(
     return store;
   }
 
-  return createStore(false);
+  return createStore();
 }
