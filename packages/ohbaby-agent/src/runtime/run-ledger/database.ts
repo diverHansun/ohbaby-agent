@@ -1,0 +1,309 @@
+import {
+  getDatabase,
+  schema,
+  type DatabaseConnection,
+} from "../../services/database/index.js";
+import { InvalidRunTransitionError, RunLedgerNotFoundError } from "./errors.js";
+import type {
+  CreatePendingRunLedgerInput,
+  InMemoryRunLedgerOptions,
+  ListRunLedgerOptions,
+  MarkInterruptedOptions,
+  MarkInterruptedResult,
+  RunLedger,
+  RunLedgerRecord,
+  RunStatus,
+  TriggerSource,
+} from "./types.js";
+
+const ACTIVE_STATUSES = new Set<RunStatus>(["pending", "running"]);
+const INTERRUPTABLE_STATUSES = new Set<RunStatus>(["pending", "running"]);
+const INTERRUPTED_REASON = "process interrupted before run completed";
+
+interface RunLedgerRow {
+  readonly run_id: string;
+  readonly session_id: string;
+  readonly trigger: TriggerSource;
+  readonly status: RunStatus;
+  readonly created_at: number;
+  readonly started_at: number | null;
+  readonly ended_at: number | null;
+  readonly error: string | null;
+}
+
+interface DatabaseRunLedgerOptions extends InMemoryRunLedgerOptions {
+  readonly db?: DatabaseConnection;
+}
+
+function rowToRecord(row: RunLedgerRow): RunLedgerRecord {
+  return {
+    runId: row.run_id,
+    sessionId: row.session_id,
+    triggerSource: row.trigger,
+    status: row.status,
+    createdAt: row.created_at,
+    startedAt: row.started_at ?? undefined,
+    endedAt: row.ended_at ?? undefined,
+    error: row.error ?? undefined,
+  };
+}
+
+function cloneRecord(record: RunLedgerRecord): RunLedgerRecord {
+  return { ...record };
+}
+
+function errorToMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  return String(error);
+}
+
+function normalizeLimit(options?: ListRunLedgerOptions): number | undefined {
+  if (options?.limit === undefined) {
+    return undefined;
+  }
+  if (!Number.isInteger(options.limit) || options.limit < 0) {
+    throw new RangeError(
+      "Run ledger list limit must be a non-negative integer",
+    );
+  }
+  return options.limit;
+}
+
+function validateInterruptibleStatuses(statuses: Iterable<RunStatus>): void {
+  for (const status of statuses) {
+    if (!INTERRUPTABLE_STATUSES.has(status)) {
+      throw new InvalidRunTransitionError("bulk", status, "interrupted");
+    }
+  }
+}
+
+export function createDatabaseRunLedger(
+  options: DatabaseRunLedgerOptions = {},
+): RunLedger {
+  const db = options.db ?? getDatabase();
+  const now = options.now ?? Date.now;
+
+  async function withAsyncBoundary<T>(operation: () => T): Promise<T> {
+    await Promise.resolve();
+    return operation();
+  }
+
+  function getRow(runId: string): RunLedgerRow | undefined {
+    return db
+      .prepare<RunLedgerRow>(
+        `SELECT * FROM ${schema.runLedger.tableName} WHERE run_id = ?`,
+      )
+      .get(runId);
+  }
+
+  function transition(
+    runId: string,
+    toStatus: RunStatus,
+    allowedFrom: readonly RunStatus[],
+    update: (record: RunLedgerRecord) => RunLedgerRecord,
+  ): RunLedgerRecord {
+    const row = getRow(runId);
+    if (!row) {
+      throw new RunLedgerNotFoundError(runId);
+    }
+    const current = rowToRecord(row);
+    if (!allowedFrom.includes(current.status)) {
+      throw new InvalidRunTransitionError(runId, current.status, toStatus);
+    }
+    const next = update(current);
+    const allowedPlaceholders = allowedFrom.map(() => "?").join(", ");
+    const result = db
+      .prepare(
+        `UPDATE ${schema.runLedger.tableName}
+       SET status = ?, started_at = ?, ended_at = ?, error = ?
+       WHERE run_id = ? AND status IN (${allowedPlaceholders})`,
+      )
+      .run(
+        next.status,
+        next.startedAt ?? null,
+        next.endedAt ?? null,
+        next.error ?? null,
+        runId,
+        ...allowedFrom,
+      );
+    if (result.changes === 0) {
+      const latest = getRow(runId);
+      if (!latest) {
+        throw new RunLedgerNotFoundError(runId);
+      }
+      throw new InvalidRunTransitionError(runId, latest.status, toStatus);
+    }
+    return next;
+  }
+
+  return {
+    createPending(
+      input: CreatePendingRunLedgerInput,
+    ): Promise<RunLedgerRecord> {
+      return withAsyncBoundary(() => {
+        if (getRow(input.runId)) {
+          throw new InvalidRunTransitionError(
+            input.runId,
+            undefined,
+            "pending",
+          );
+        }
+        const record: RunLedgerRecord = {
+          runId: input.runId,
+          sessionId: input.sessionId,
+          triggerSource: input.triggerSource,
+          status: "pending",
+          createdAt: now(),
+        };
+        db.prepare(
+          `INSERT INTO ${schema.runLedger.tableName}
+            (run_id, session_id, trigger, status, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        ).run(
+          record.runId,
+          record.sessionId,
+          record.triggerSource,
+          record.status,
+          record.createdAt,
+        );
+        return cloneRecord(record);
+      });
+    },
+
+    markRunning(runId: string): Promise<RunLedgerRecord> {
+      return withAsyncBoundary(() =>
+        cloneRecord(
+          transition(runId, "running", ["pending"], (record) => ({
+            ...record,
+            status: "running",
+            startedAt: now(),
+            endedAt: undefined,
+            error: undefined,
+          })),
+        ),
+      );
+    },
+
+    markSucceeded(runId: string): Promise<RunLedgerRecord> {
+      return withAsyncBoundary(() =>
+        cloneRecord(
+          transition(runId, "succeeded", ["running"], (record) => ({
+            ...record,
+            status: "succeeded",
+            endedAt: now(),
+            error: undefined,
+          })),
+        ),
+      );
+    },
+
+    markFailed(runId: string, error: unknown): Promise<RunLedgerRecord> {
+      return withAsyncBoundary(() =>
+        cloneRecord(
+          transition(runId, "failed", ["pending", "running"], (record) => ({
+            ...record,
+            status: "failed",
+            endedAt: now(),
+            error: errorToMessage(error),
+          })),
+        ),
+      );
+    },
+
+    markCancelled(runId: string, reason?: string): Promise<RunLedgerRecord> {
+      return withAsyncBoundary(() =>
+        cloneRecord(
+          transition(runId, "cancelled", ["pending", "running"], (record) => ({
+            ...record,
+            status: "cancelled",
+            endedAt: now(),
+            error: reason,
+          })),
+        ),
+      );
+    },
+
+    markInterrupted(
+      options: MarkInterruptedOptions = {},
+    ): Promise<MarkInterruptedResult> {
+      return withAsyncBoundary(() => {
+        const statuses = Array.from(
+          new Set(options.statuses ?? INTERRUPTABLE_STATUSES),
+        );
+        validateInterruptibleStatuses(statuses);
+        if (statuses.length === 0) {
+          return { updatedCount: 0 };
+        }
+        const endedAt = now();
+        const placeholders = statuses.map(() => "?").join(", ");
+        const result = db
+          .prepare(
+            `UPDATE ${schema.runLedger.tableName}
+             SET status = ?, ended_at = ?, error = ?
+             WHERE status IN (${placeholders})`,
+          )
+          .run(
+            "interrupted",
+            endedAt,
+            options.reason ?? INTERRUPTED_REASON,
+            ...statuses,
+          );
+        return { updatedCount: result.changes };
+      });
+    },
+
+    get(runId: string): Promise<RunLedgerRecord | undefined> {
+      return withAsyncBoundary(() => {
+        const row = getRow(runId);
+        return row ? cloneRecord(rowToRecord(row)) : undefined;
+      });
+    },
+
+    listBySession(
+      sessionId: string,
+      options?: ListRunLedgerOptions,
+    ): Promise<RunLedgerRecord[]> {
+      return withAsyncBoundary(() => {
+        const limit = normalizeLimit(options);
+        const sql = `SELECT * FROM ${schema.runLedger.tableName}
+           WHERE session_id = ?
+           ORDER BY created_at DESC${limit === undefined ? "" : " LIMIT ?"}`;
+        const params = limit === undefined ? [sessionId] : [sessionId, limit];
+        return db
+          .prepare<RunLedgerRow>(sql)
+          .all(...params)
+          .map(rowToRecord)
+          .map(cloneRecord);
+      });
+    },
+
+    getActiveRuns(sessionId?: string): Promise<RunLedgerRecord[]> {
+      return withAsyncBoundary(() => {
+        const statuses = Array.from(ACTIVE_STATUSES);
+        const statusPlaceholders = statuses.map(() => "?").join(", ");
+        const rows =
+          sessionId === undefined
+            ? db
+                .prepare<RunLedgerRow>(
+                  `SELECT * FROM ${schema.runLedger.tableName}
+                   WHERE status IN (${statusPlaceholders})
+                   ORDER BY created_at ASC`,
+                )
+                .all(...statuses)
+            : db
+                .prepare<RunLedgerRow>(
+                  `SELECT * FROM ${schema.runLedger.tableName}
+                   WHERE status IN (${statusPlaceholders}) AND session_id = ?
+                   ORDER BY created_at ASC`,
+                )
+                .all(...statuses, sessionId);
+        return rows.map(rowToRecord).map(cloneRecord);
+      });
+    },
+  };
+}

@@ -71,7 +71,10 @@ describe("services/database", () => {
         `SELECT version FROM ${schema.migration.tableName} ORDER BY version`,
       )
       .all();
-    expect(rows).toEqual([{ version: "001_initial" }]);
+    expect(rows).toEqual([
+      { version: "001_initial" },
+      { version: "002_part_order_unique" },
+    ]);
   });
 
   it("rolls back a failed migration and exposes the failed version", async () => {

@@ -103,4 +103,11 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
       CREATE INDEX IF NOT EXISTS idx_scheduler_kind_status ON scheduler_job(kind, status);
     `,
   },
+  {
+    version: "002_part_order_unique",
+    sql: `
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_part_message_order_unique
+        ON part(message_id, order_index);
+    `,
+  },
 ];
