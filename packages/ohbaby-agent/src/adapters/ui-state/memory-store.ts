@@ -113,6 +113,31 @@ export function createInMemoryUiStateStore(
       return Promise.resolve();
     },
 
+    upsertPermission(request: UiPermissionRequest): Promise<void> {
+      const clonedRequest = {
+        ...request,
+        choices: request.choices.map((choice) => ({ ...choice })),
+      };
+      const existingIndex = snapshot.permissions.findIndex(
+        (item) => item.id === clonedRequest.id,
+      );
+      if (existingIndex === -1) {
+        snapshot.permissions = [...snapshot.permissions, clonedRequest];
+      } else {
+        snapshot.permissions = snapshot.permissions.map((item, index) =>
+          index === existingIndex ? clonedRequest : item,
+        );
+      }
+      return Promise.resolve();
+    },
+
+    removePermission(requestId: string): Promise<void> {
+      snapshot.permissions = snapshot.permissions.filter(
+        (request) => request.id !== requestId,
+      );
+      return Promise.resolve();
+    },
+
     setStatus(status: UiRunStatus): Promise<void> {
       snapshot.status = { ...status };
       return Promise.resolve();

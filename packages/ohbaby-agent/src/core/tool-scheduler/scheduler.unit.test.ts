@@ -1,5 +1,15 @@
+import type {
+  ChildProcess,
+  SpawnOptionsWithoutStdio,
+} from "node:child_process";
+import { EventEmitter } from "node:events";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createBus, type BusInstance } from "../../bus/index.js";
+import type { SpawnCommand } from "../../tools/bash-tool.js";
+import { createBuiltinTools } from "../../tools/index.js";
 import { createToolScheduler, ToolSchedulerEvent } from "./index.js";
 import type {
   PermissionPort,
@@ -14,6 +24,12 @@ import type {
   ToolSchedulerOptions,
 } from "./types.js";
 
+class FakeChildProcess extends EventEmitter {
+  readonly pid = 123;
+  readonly stdout = new EventEmitter();
+  readonly stderr = new EventEmitter();
+}
+
 function deferred<T>(): {
   readonly promise: Promise<T>;
   readonly resolve: (value: T) => void;
@@ -27,6 +43,47 @@ function deferred<T>(): {
   });
 
   return { promise, resolve, reject };
+}
+
+function assertInside(root: string, candidate: string): void {
+  const relative = path.relative(root, candidate);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Path escapes workspace: ${candidate}`);
+  }
+}
+
+function createFakeEnvironment(root: string): ToolExecutionEnvironment {
+  return {
+    workdir: root,
+    resolvePath(inputPath: string): string {
+      const resolved = path.resolve(root, inputPath);
+      assertInside(root, resolved);
+      return resolved;
+    },
+    async resolvePathForExisting(inputPath: string): Promise<string> {
+      const resolved = await fs.realpath(path.resolve(root, inputPath));
+      assertInside(root, resolved);
+      return resolved;
+    },
+    async resolvePathForWrite(inputPath: string): Promise<string> {
+      const target = path.resolve(root, inputPath);
+      const realParent = await fs.realpath(path.dirname(target));
+      const resolved = path.join(realParent, path.basename(target));
+      assertInside(root, resolved);
+      return resolved;
+    },
+    resolveCommandContext(): {
+      readonly cwd: string;
+      readonly env: Record<string, string>;
+      readonly kind: string;
+    } {
+      return {
+        cwd: root,
+        env: { OHBABY_ENV_BRIDGE: "present" },
+        kind: "host-local",
+      };
+    },
+  };
 }
 
 function createPolicy(decision: PolicyPort["check"]): PolicyPort {
@@ -65,6 +122,7 @@ function createTool(input: {
 
 function createScheduler(
   options: {
+    readonly agentTools?: ToolSchedulerOptions["agentTools"];
     readonly policy?: PolicyPort;
     readonly permission?: PermissionPort;
     readonly config?: ToolSchedulerOptions["config"];
@@ -76,6 +134,7 @@ function createScheduler(
   const started: string[] = [];
   const completed: string[] = [];
   const scheduler = createToolScheduler({
+    agentTools: options.agentTools,
     bus,
     config: options.config,
     now: options.now ?? Date.now,
@@ -105,6 +164,39 @@ function createScheduler(
 }
 
 describe("ToolScheduler", () => {
+  it("applies agent tool config before listing available tools", async () => {
+    const { scheduler } = createScheduler({
+      agentTools: {
+        getAgentConfig: (agentName?: string) => ({
+          tools:
+            agentName === "explore"
+              ? {
+                  edit: true,
+                  read: true,
+                  task: true,
+                  todo_read: true,
+                }
+              : undefined,
+        }),
+      },
+    });
+    for (const tool of [
+      { name: "read", category: "readonly" },
+      { name: "edit", category: "write" },
+      { name: "task", category: "subagent" },
+      { name: "todo_read", category: "memory" },
+    ] as const) {
+      scheduler.register(createTool(tool));
+    }
+
+    await expect(
+      scheduler.getAvailableTools({ agentName: "explore", isSubagent: true }),
+    ).resolves.toMatchObject([
+      expect.objectContaining({ name: "read" }),
+      expect.objectContaining({ name: "edit" }),
+    ]);
+  });
+
   it("executes allowed tools and publishes state events", async () => {
     const { completed, scheduler, started, statuses } = createScheduler();
     scheduler.register(createTool({ name: "read" }));
@@ -588,6 +680,86 @@ describe("ToolScheduler", () => {
       { output: "memory_1:D:/workspace/memory", status: "success" },
       { output: "task_1:D:/workspace/task", status: "success" },
     ]);
+  });
+
+  it("executes builtin file and bash tools with a scheduler environment", async () => {
+    const tempRoot = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-scheduler-tools-")),
+    );
+    try {
+      await fs.writeFile(
+        path.join(tempRoot, "notes.txt"),
+        "alpha\nbeta\n",
+        "utf8",
+      );
+      const child = new FakeChildProcess();
+      const spawn = vi.fn<SpawnCommand>(
+        (
+          _file: string,
+          _args: readonly string[],
+          _options: SpawnOptionsWithoutStdio,
+        ) => {
+          queueMicrotask(() => {
+            child.stdout.emit("data", Buffer.from("ran\n"));
+            child.emit("exit", 0, null);
+          });
+          return child as unknown as ChildProcess;
+        },
+      );
+      const { scheduler } = createScheduler();
+      for (const tool of createBuiltinTools({
+        shell: {
+          acceptable: () => "/bin/bash",
+          killTree: vi.fn(),
+        },
+        spawn,
+      })) {
+        scheduler.register(tool);
+      }
+      const environment = createFakeEnvironment(tempRoot);
+
+      const results = await scheduler.executeBatch({
+        calls: [
+          {
+            callId: "read_notes",
+            environment,
+            messageId: "message_1",
+            params: { file_path: "notes.txt", limit: 1 },
+            sessionId: "session_1",
+            toolName: "read",
+          },
+          {
+            callId: "list_root",
+            environment,
+            messageId: "message_1",
+            params: { path: "." },
+            sessionId: "session_1",
+            toolName: "list",
+          },
+          {
+            callId: "run_bash",
+            environment,
+            messageId: "message_1",
+            params: { command: "echo ran" },
+            sessionId: "session_1",
+            toolName: "bash",
+          },
+        ],
+      });
+
+      expect(results).toMatchObject([
+        { callId: "read_notes", status: "success" },
+        { callId: "list_root", status: "success" },
+        { callId: "run_bash", status: "success" },
+      ]);
+      expect(results[0]?.output).toContain("1: alpha");
+      expect(results[1]?.output).toContain("notes.txt");
+      expect(results[2]?.output).toContain("ran");
+      expect(spawn.mock.calls[0]?.[2].cwd).toBe(tempRoot);
+      expect(spawn.mock.calls[0]?.[2].env?.OHBABY_ENV_BRIDGE).toBe("present");
+    } finally {
+      await fs.rm(tempRoot, { force: true, recursive: true });
+    }
   });
 
   it("preflights every batch call before starting tools and confirms asks serially", async () => {
