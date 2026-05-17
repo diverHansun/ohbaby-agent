@@ -37,7 +37,7 @@ function createWebSearchTool(options: WebToolsOptions): Tool {
     annotations: { readOnlyHint: true },
     category: "network",
     description: "Search the web and return concise results with URLs.",
-    execute: async (params, context) => {
+    execute: async (params, context): Promise<ToolExecutionResult> => {
       assertNotAborted(context);
       const query = getStringParam(params, "query");
       const searchOptions = parseSearchOptions(params);
@@ -106,7 +106,7 @@ function createWebFetchTool(options: WebToolsOptions): Tool {
     annotations: { readOnlyHint: true },
     category: "network",
     description: "Fetch web page content for one or more URLs.",
-    execute: async (params, context) => {
+    execute: async (params, context): Promise<ToolExecutionResult> => {
       assertNotAborted(context);
       const urls = parseFetchUrls(params);
       const fetchOptions = parseFetchOptions(params);

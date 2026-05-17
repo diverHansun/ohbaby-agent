@@ -1,5 +1,9 @@
 import { SUBAGENT_DISABLED_TOOLS } from "../core/tool-scheduler/index.js";
 import type { AgentToolConfigProvider } from "../core/tool-scheduler/index.js";
+import {
+  GENERIC_SUBAGENT_PROMPT,
+  SystemPrompt,
+} from "../core/system-prompt/index.js";
 import { AgentRegistry } from "./registry.js";
 import type {
   AgentConfig,
@@ -15,8 +19,28 @@ export interface AgentManagerOptions {
 }
 
 const FALLBACK_SYSTEM_PROMPT_PROVIDER: SystemPromptProvider = {
-  build({ agent }) {
-    return agent.prompt ?? "";
+  build({ agent, isSubagent }) {
+    if (agent.prompt?.trim()) {
+      return agent.prompt;
+    }
+    const builtinPrompt = SystemPrompt.getAgentPrompt(agent.name);
+    if (builtinPrompt) {
+      return builtinPrompt;
+    }
+    if (!isSubagent) {
+      return "";
+    }
+
+    const description = agent.description?.trim()
+      ? `Role: ${agent.description.trim()}`
+      : undefined;
+    return [
+      `You are the ${agent.name} subagent.`,
+      description,
+      GENERIC_SUBAGENT_PROMPT,
+    ]
+      .filter((part): part is string => part !== undefined)
+      .join("\n\n");
   },
 };
 

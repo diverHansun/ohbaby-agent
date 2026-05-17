@@ -1,4 +1,5 @@
 import { SUBAGENT_DISABLED_TOOLS } from "../core/tool-scheduler/index.js";
+import { loadAgentConfig } from "../config/agents/index.js";
 import { BUILTIN_AGENTS } from "./builtin/index.js";
 import type { AgentConfig, AgentMode, AgentsConfig } from "./types.js";
 
@@ -8,6 +9,10 @@ const MAX_AGENT_NAME_LENGTH = 50;
 export interface AgentRegistryOptions {
   readonly builtinAgents?: readonly AgentConfig[];
   readonly configLoader?: () => AgentsConfig | Promise<AgentsConfig>;
+}
+
+async function loadDefaultAgentConfig(): Promise<AgentsConfig> {
+  return loadAgentConfig();
 }
 
 function cloneAgent(agent: AgentConfig): AgentConfig {
@@ -77,8 +82,9 @@ export class AgentRegistry {
       merged.set(agent.name, cloneAgent(agent));
     }
 
-    const userConfig = await this.options.configLoader?.();
-    for (const agent of Object.values(userConfig?.agents ?? {})) {
+    const configLoader = this.options.configLoader ?? loadDefaultAgentConfig;
+    const userConfig = await configLoader();
+    for (const agent of Object.values(userConfig.agents)) {
       validateAgent(agent);
       merged.set(agent.name, cloneAgent(agent));
     }

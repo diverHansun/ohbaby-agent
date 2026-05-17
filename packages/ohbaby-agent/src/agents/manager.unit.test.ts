@@ -73,7 +73,9 @@ describe("AgentManager", () => {
     const provider: SystemPromptProvider = {
       build,
     };
-    const registry = new AgentRegistry();
+    const registry = new AgentRegistry({
+      configLoader: (): AgentsConfig => ({ agents: {} }),
+    });
     await registry.initialize();
     const manager = new AgentManager({
       registry,
@@ -89,5 +91,39 @@ describe("AgentManager", () => {
     const buildInput = build.mock.calls[0][0];
     expect(buildInput.agent.name).toBe("explore");
     expect(buildInput.isSubagent).toBe(true);
+  });
+
+  it("uses default system prompts for builtin subagents", async () => {
+    const registry = new AgentRegistry({
+      configLoader: (): AgentsConfig => ({ agents: {} }),
+    });
+    await registry.initialize();
+    const manager = new AgentManager({ registry });
+
+    const runtimeAgent = await manager.getRuntimeAgent("explore");
+
+    expect(runtimeAgent.systemPrompt).toContain(
+      "focused code exploration subagent",
+    );
+  });
+
+  it("uses custom subagent descriptions when no explicit prompt exists", async () => {
+    const registry = new AgentRegistry({
+      configLoader: (): AgentsConfig => ({
+        agents: {
+          audit: {
+            description: "Audit code for release risks.",
+            mode: "subagent",
+            name: "audit",
+          },
+        },
+      }),
+    });
+    await registry.initialize();
+    const manager = new AgentManager({ registry });
+
+    const runtimeAgent = await manager.getRuntimeAgent("audit");
+
+    expect(runtimeAgent.systemPrompt).toContain("Audit code for release risks.");
   });
 });

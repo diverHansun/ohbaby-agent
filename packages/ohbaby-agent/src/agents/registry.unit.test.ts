@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { AgentRegistry } from "./registry.js";
+import type { AgentsConfig } from "./types.js";
 
 describe("AgentRegistry", () => {
   it("loads enabled builtin agents by default", async () => {
-    const registry = new AgentRegistry();
+    const registry = new AgentRegistry({
+      configLoader: (): AgentsConfig => ({ agents: {} }),
+    });
 
     await registry.initialize();
 
@@ -28,7 +31,7 @@ describe("AgentRegistry", () => {
 
   it("fully replaces same-name builtin agents and merges different names", async () => {
     const registry = new AgentRegistry({
-      configLoader: () => ({
+      configLoader: (): AgentsConfig => ({
         agents: {
           build: {
             description: "Replacement build agent",
@@ -63,7 +66,7 @@ describe("AgentRegistry", () => {
 
   it("does not list disabled agents", async () => {
     const registry = new AgentRegistry({
-      configLoader: () => ({
+      configLoader: (): AgentsConfig => ({
         agents: {
           research: {
             description: "Disabled research",
@@ -85,7 +88,7 @@ describe("AgentRegistry", () => {
 
   it("rejects subagents without a description", async () => {
     const registry = new AgentRegistry({
-      configLoader: () => ({
+      configLoader: (): AgentsConfig => ({
         agents: {
           broken: {
             mode: "subagent",
@@ -102,7 +105,7 @@ describe("AgentRegistry", () => {
 
   it("rejects config-loaded agents with invalid modes", async () => {
     const registry = new AgentRegistry({
-      configLoader: () => ({
+      configLoader: (): AgentsConfig => ({
         agents: {
           broken: {
             description: "Invalid mode",
@@ -118,7 +121,7 @@ describe("AgentRegistry", () => {
 
   it("rejects subagents that explicitly include recursive tools", async () => {
     const registry = new AgentRegistry({
-      configLoader: () => ({
+      configLoader: (): AgentsConfig => ({
         agents: {
           recursive: {
             description: "Bad recursive subagent",

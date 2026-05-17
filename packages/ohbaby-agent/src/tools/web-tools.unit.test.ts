@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ToolExecutionContext } from "../core/tool-scheduler/index.js";
+import type { Tool, ToolExecutionContext } from "../core/tool-scheduler/index.js";
 import { createBuiltinTools } from "./index.js";
 import { createWebTools } from "./web-tools.js";
 import type {
@@ -24,7 +24,7 @@ function createProvider(): SearchProvider {
   };
 }
 
-function findTool(name: string, provider: SearchProvider) {
+function findTool(name: string, provider: SearchProvider): Tool {
   const tools = createWebTools({
     createProvider: () => provider,
     loadConfig: () =>

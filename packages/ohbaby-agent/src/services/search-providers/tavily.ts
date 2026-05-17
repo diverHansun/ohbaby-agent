@@ -59,7 +59,7 @@ export function createTavilyProvider(
 
   return {
     id: "tavily",
-    fetch: async (urls, options) => {
+    fetch: async (urls, options): Promise<FetchResult[]> => {
       const normalizedUrls = normalizeUrls(urls);
       const extractOptions = buildExtractOptions(defaults.extract, options);
       try {
@@ -72,7 +72,7 @@ export function createTavilyProvider(
         throw mapTavilyError(error);
       }
     },
-    search: async (query, options) => {
+    search: async (query, options): Promise<SearchResult[]> => {
       const normalizedQuery = normalizeQuery(query);
       const searchOptions = buildSearchOptions(defaults.search, options);
       try {
