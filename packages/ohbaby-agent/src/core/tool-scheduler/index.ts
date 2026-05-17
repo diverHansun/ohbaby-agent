@@ -1,11 +1,15 @@
 import { ToolSchedulerEvent } from "./events.js";
 
-export { DEFAULT_TOOL_SCHEDULER_CONFIG } from "./constants.js";
+export {
+  DEFAULT_TOOL_SCHEDULER_CONFIG,
+  SUBAGENT_DISABLED_TOOLS,
+} from "./constants.js";
 export { ConcurrencyController } from "./concurrency.js";
 export { ToolSchedulerEvent } from "./events.js";
 export { createToolRegistry } from "./registry.js";
 export { createToolScheduler } from "./scheduler.js";
 export type {
+  AgentToolConfig,
   AgentToolConfigProvider,
   BatchToolCallRequest,
   ConcurrencyConfig,

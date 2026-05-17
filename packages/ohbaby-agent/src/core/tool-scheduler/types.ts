@@ -172,12 +172,19 @@ export interface PermissionPort {
   }): PermissionResponse | Promise<PermissionResponse>;
 }
 
+export type AgentToolConfig =
+  | Record<string, boolean>
+  | {
+      readonly include?: readonly string[];
+      readonly exclude?: readonly string[];
+    };
+
 export interface AgentToolConfigProvider {
   getAgentConfig(
     agentName?: string,
   ):
-    | { readonly tools?: Record<string, boolean> }
-    | Promise<{ readonly tools?: Record<string, boolean> }>;
+    | { readonly tools?: AgentToolConfig }
+    | Promise<{ readonly tools?: AgentToolConfig }>;
 }
 
 export interface ConcurrencyConfig {

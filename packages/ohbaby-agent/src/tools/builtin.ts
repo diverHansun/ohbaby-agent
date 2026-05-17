@@ -10,20 +10,27 @@ import {
   InMemoryTodoStore,
   type TodoStore,
 } from "./todo-tools.js";
+import { createTaskTool } from "./task-tool.js";
+import type { TaskExecutor } from "../core/agents/index.js";
 
 export interface BuiltinToolsOptions {
   readonly shell?: BashShell;
   readonly spawn?: SpawnCommand;
   readonly todoStore?: TodoStore;
+  readonly taskExecutor?: TaskExecutor;
 }
 
 export function createBuiltinTools(options: BuiltinToolsOptions = {}): Tool[] {
   const todoStore = options.todoStore ?? new InMemoryTodoStore();
-  return [
+  const tools = [
     ...createFileTools(),
     ...createTodoTools(todoStore),
     createBashTool({ shell: options.shell, spawn: options.spawn }),
   ];
+  if (options.taskExecutor) {
+    tools.push(createTaskTool(options.taskExecutor));
+  }
+  return tools;
 }
 
 export const BUILTIN_TOOLS: readonly Tool[] = createBuiltinTools();

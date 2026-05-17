@@ -4,6 +4,7 @@ import { ConcurrencyController } from "./concurrency.js";
 import { ToolSchedulerEvent } from "./events.js";
 import { createToolRegistry } from "./registry.js";
 import type {
+  AgentToolConfig,
   BatchToolCallRequest,
   FinalToolCallStatus,
   PolicyDecision,
@@ -207,6 +208,41 @@ function splitIntoWaves<T extends ScheduledCall>(calls: readonly T[]): T[][] {
   }
 
   return waves;
+}
+
+function isStructuredAgentToolsConfig(
+  tools: AgentToolConfig | undefined,
+): tools is {
+  readonly include?: readonly string[];
+  readonly exclude?: readonly string[];
+} {
+  return (
+    tools !== undefined &&
+    (Array.isArray((tools as { readonly include?: unknown }).include) ||
+      Array.isArray((tools as { readonly exclude?: unknown }).exclude))
+  );
+}
+
+function normalizeAgentToolsConfig(
+  tools: AgentToolConfig | undefined,
+): Record<string, boolean> | undefined {
+  if (!tools) {
+    return undefined;
+  }
+  if (!isStructuredAgentToolsConfig(tools)) {
+    return tools;
+  }
+  const result: Record<string, boolean> = {};
+  if (tools.include) {
+    result["*"] = false;
+    for (const toolName of tools.include) {
+      result[toolName] = true;
+    }
+  }
+  for (const toolName of tools.exclude ?? []) {
+    result[toolName] = false;
+  }
+  return result;
 }
 
 export function createToolScheduler(
@@ -862,7 +898,7 @@ export function createToolScheduler(
       );
       return registry.getAvailableTools({
         mode,
-        tools: agentConfig?.tools,
+        tools: normalizeAgentToolsConfig(agentConfig?.tools),
         isSubagent: input.isSubagent,
       });
     },

@@ -49,6 +49,8 @@ describe("ToolRegistry", () => {
       "web_search",
       "memory_add",
       "task",
+      "todo_read",
+      "todo_write",
     ]) {
       registry.register(
         createTool({
@@ -65,7 +67,7 @@ describe("ToolRegistry", () => {
           tools: { web_search: false },
         })
         .map((tool) => tool.name),
-    ).toEqual(["read", "memory_add"]);
+    ).toEqual(["read", "memory_add", "todo_read"]);
     expect(
       registry
         .getAvailableTools({
