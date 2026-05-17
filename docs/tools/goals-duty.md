@@ -6,7 +6,7 @@
 - 代码：`src/tools/`
 - 文档：`docs/tools/`
 
-**模块定位**：本模块包含所有 **内置工具（Built-in Tools）**：包括文件、shell、agent、网络在内的全部默认工具，由本仓库直接维护。网络类（`web_search` / `web_fetch`）通过 `tools/search-providers/` 子模块对接 Tavily / Exa 等具体后端，不另设 `extension` 层。
+**模块定位**：本模块包含所有 **内置工具（Built-in Tools）**：包括文件、shell、agent、网络在内的全部默认工具，由本仓库直接维护。`web_search` / `web_fetch` 是 `tools` 入口，后端走 `services/search-providers/` 对接 Tavily / Exa 等具体后端，不另设 `extension` 层。
 
 ---
 
@@ -45,7 +45,7 @@ type ToolSource = 'builtin' | 'module' | 'mcp'
 
 ### G4: 网络工具收敛到统一接口
 
-`web_search` / `web_fetch` 是内置工具，但其后端可切换。LLM 看到的是 `web_search` / `web_fetch`，背后的 Tavily / Exa 等具体厂商由 `tools/search-providers/` 子模块封装，配置驱动切换。详见 `docs/tools/search-providers/`。
+`web_search` / `web_fetch` 是内置工具入口，但其后端可切换。LLM 看到的是 `web_search` / `web_fetch`，背后的 Tavily / Exa 等具体厂商由 `services/search-providers/` 封装，配置驱动切换。详见 `docs/tools/search-providers/`。
 
 ---
 
@@ -75,11 +75,11 @@ type ToolSource = 'builtin' | 'module' | 'mcp'
 | todo_write | write | 写入待办事项列表 | `tools/todo.ts` |
 | todo_read | readonly | 读取待办事项列表 | `tools/todo.ts` |
 | task | subagent | 调用子代理执行任务 | `tools/task.ts` |
-| **web_search** | **network** | **语义 Web 搜索** | **`tools/web-search.ts` → `tools/search-providers/`** |
-| **web_fetch** | **network** | **抓取 URL 内容并提取** | **`tools/web-fetch.ts` → `tools/search-providers/`** |
+| **web_search** | **network** | **语义 Web 搜索** | **`tools/web-search.ts` → `services/search-providers/`** |
+| **web_fetch** | **network** | **抓取 URL 内容并提取** | **`tools/web-fetch.ts` → `services/search-providers/`** |
 
 **注意**：
-- `web_search` / `web_fetch` 是内置工具，但执行通过 `tools/search-providers/` 子模块调用具体厂商（当前激活 Tavily）
+- `web_search` / `web_fetch` 是内置工具入口，但执行通过 `services/search-providers/` 调用具体厂商（当前激活 Tavily）
 - `task` 工具是子代理的调用入口，子代理硬编码禁用此工具以防止递归
 
 ### D3: 处理输出限制和截断
@@ -163,7 +163,7 @@ bash 工具是唯一需要在内部进行权限相关操作的工具，原因是
 
 ### N5: 不直接对接 LLM 厂商搜索 SDK
 
-`web_search` / `web_fetch` 工具本身不直接调用 Tavily / Exa SDK；具体厂商封装在 `tools/search-providers/` 子模块中，工具层只调用 `SearchProvider.search()` / `fetch()`。
+`web_search` / `web_fetch` 工具本身不直接调用 Tavily / Exa SDK；具体厂商封装在 `services/search-providers/` 中，工具层只调用 `SearchProvider.search()` / `fetch()`。
 
 ### N6: 不负责执行状态管理
 
@@ -209,4 +209,4 @@ task 工具是子代理的调用入口，依赖 agents 模块的以下能力：
 - [x] 可以清楚回答"这个模块不该做什么"：不做权限检查、不做分类管理、不做并发控制、不直接对接厂商 SDK
 - [x] 不存在职责与其他模块明显重叠的风险
 - [x] 工具来源清晰：内置 / 模块自带 / MCP
-- [x] web_search 和 web_fetch 已纳入内置工具，背后由 `tools/search-providers/` 子模块封装具体厂商
+- [x] web_search 和 web_fetch 已纳入内置工具，背后由 `services/search-providers/` 封装具体厂商

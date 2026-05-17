@@ -33,7 +33,7 @@
 - Module-Owned Tools（模块内置工具）
 - MCP Tools（MCP 工具）
 
-> 内置工具中的 `web_search` / `web_fetch` 通过 `tools/search-providers/` 子模块对接 Tavily/Exa 等具体后端，但它们对调度器而言仍是普通的 builtin 工具。
+> `web_search` / `web_fetch` 是 `tools` 下的内置工具入口，后端走 `services/search-providers/` 对接 Tavily/Exa 等具体后端；它们对调度器而言仍是普通的 builtin 工具。
 
 ---
 
@@ -86,7 +86,7 @@ type ToolSource = 'builtin' | 'module' | 'mcp'
 - readonly：只读操作（read, glob, grep, list, todo_read）
 - write：写入操作（write, edit, todo_write）
 - dangerous：危险操作（bash）
-- network：网络操作（web_search, web_fetch）—— 内置工具，背后通过 `tools/search-providers/` 子模块路由到具体厂商
+- network：网络操作（web_search, web_fetch）—— 内置工具入口，后端走 `services/search-providers/` 路由到具体厂商
 - memory：记忆操作（memory_*，默认 ALLOW）
 - skill：技能加载操作（skill，只读级别权限）
 - subagent：子代理调用（task，子代理禁用）
@@ -138,7 +138,7 @@ type ToolSource = 'builtin' | 'module' | 'mcp'
 - 选项 A：从工具列表中过滤掉 `web_search` / `web_fetch`，不暴露给 LLM
 - 选项 B：保留工具注册，但 `execute()` 时返回友好错误，引导用户配置
 
-调度器本身不做配置的解析或验证；具体策略由 `tools/web-search.ts` / `tools/web-fetch.ts` 与 `tools/search-providers/registry` 协作决定。
+调度器本身不做配置的解析或验证；具体策略由 `tools/web-search.ts` / `tools/web-fetch.ts` 与 `services/search-providers/registry` 协作决定。
 
 ### D10: 传递 AbortSignal 给工具
 
@@ -180,7 +180,7 @@ interface ToolExecutionContext {
 
 ### N5: 不负责网络工具的后端配置管理
 
-`web_search` / `web_fetch` 的后端选择（Tavily / Exa / 未来其它 provider）由 `config/tools/{provider}` 与 `tools/search-providers/registry` 负责，ToolScheduler 只调度统一的 Tool 接口，不感知背后是哪家厂商。
+`web_search` / `web_fetch` 的后端选择（Tavily / Exa / 未来其它 provider）由 `config/tools/{provider}` 与 `services/search-providers/registry` 负责，ToolScheduler 只调度统一的 Tool 接口，不感知背后是哪家厂商。
 
 ### N6: 不负责 LLM 交互
 
@@ -208,7 +208,7 @@ interface ToolExecutionContext {
 
 ## 六、网络工具的后端配置（与 ToolScheduler 的关系）
 
-`web_search` / `web_fetch` 是内置工具，但其执行需要 `tools/search-providers/` 的 provider 后端。配置由 `config/tools/{provider}` 模块负责，ToolScheduler 不直接读取。
+`web_search` / `web_fetch` 是 `tools` 入口，但其执行后端走 `services/search-providers/`。配置由 `config/tools/{provider}` 模块负责，ToolScheduler 不直接读取。
 
 ### 配置位置（参考）
 

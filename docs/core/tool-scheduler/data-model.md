@@ -31,7 +31,7 @@
 | module | 各模块内部 | 模块自带工具（如 Memory Tools、Skill） | 模块初始化时注册 |
 | mcp | 运行时动态 | MCP 服务器提供的工具 | 运行时发现注册 |
 
-> `web_search` / `web_fetch` 属于 `builtin`；它们内部通过 `tools/search-providers/` 路由到具体厂商（Tavily / Exa），但对调度器仍是普通的 builtin 工具，不另立来源类型。
+> `web_search` / `web_fetch` 属于 `builtin`；它们是 `tools` 入口，后端走 `services/search-providers/` 路由到具体厂商（Tavily / Exa），但对调度器仍是普通的 builtin 工具，不另立来源类型。
 
 ### 1.3 ToolCallStatus（调用状态）
 
@@ -285,7 +285,7 @@ const NETWORK_TOOL_CATEGORIES: Record<string, ToolCategory> = {
 }
 ```
 
-**注意**：`web_search` / `web_fetch` 工具需要 `tools/search-providers/` 后端配置（如 `TAVILY_API_KEY`）才能正常执行。配置由 `config/tools/{provider}` 负责，调度器对此透明。
+**注意**：`web_search` / `web_fetch` 工具需要 `services/search-providers/` 后端配置（如 `TAVILY_API_KEY`）才能正常执行。配置由 `config/tools/{provider}` 负责，调度器对此透明。
 
 ### 3.4 模式与类别的映射
 

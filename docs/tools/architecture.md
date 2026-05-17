@@ -34,7 +34,7 @@ tools/
 └── web-fetch.ts         # 抓取 URL 内容（→ search-providers）
 ```
 
-`tools/search-providers/` 子模块文档参见 `docs/tools/search-providers/`，源码挂在 `src/services/search-providers/`。
+`web_search` / `web_fetch` 是 `tools` 入口，后端走 `services/search-providers/`；模块文档参见 `docs/tools/search-providers/`，源码挂在 `src/services/search-providers/`。
 
 ---
 
@@ -256,7 +256,7 @@ const ReadTool = Tool.define({
 ```
 输入: query, num_results?, time_range?, include_domains?, exclude_domains?
 输出: 归一化的搜索结果列表（Markdown）
-后端: tools/search-providers（当前激活 Tavily）
+后端: services/search-providers（当前激活 Tavily）
 特殊: 厂商无关；切换 provider 不需要改工具代码
 ```
 
@@ -283,7 +283,7 @@ const ReadTool = Tool.define({
 ```
 输入: urls (单个或数组), format?, max_characters_per_url?, include_images?
 输出: 归一化的抓取结果列表（Markdown）
-后端: tools/search-providers（当前激活 Tavily）
+后端: services/search-providers（当前激活 Tavily）
 特殊: 部分 URL 失败不会中断，结果中明确标记成功/失败
 ```
 
@@ -438,7 +438,7 @@ task 工具需要依赖 agents 模块：
 
 ### 9.1 网络工具的 provider 扩展
 
-`web_search` / `web_fetch` 的后端通过 `tools/search-providers/` 子模块扩展。新增一个 provider 不需要改 `web-search.ts` / `web-fetch.ts`，只需在 search-providers 注册新 adapter 即可。详见 `docs/tools/search-providers/architecture.md`。
+`web_search` / `web_fetch` 是 `tools` 入口，后端通过 `services/search-providers/` 扩展。新增一个 provider 不需要改 `web-search.ts` / `web-fetch.ts`，只需在 search-providers 注册新 adapter 即可。详见 `docs/tools/search-providers/architecture.md`。
 
 ### 9.2 模块自带工具与 MCP 工具
 

@@ -59,11 +59,11 @@ src/services/search-providers/
 ├── exa.ts                ExaAdapter（保留，暂未启用）
 ├── index.ts              公开接口导出
 └── __tests__/
-    ├── tavily.test.ts
-    └── registry.test.ts
+    ├── tavily.unit.test.ts
+    └── registry.unit.test.ts
 ```
 
-> **注**：search-providers 是工具实现层的依赖，源码挂在 `services/` 下与 LLM provider 平行；上层 `tools/web-*.ts` 通过 registry 拿到 SearchProvider，不直接 import 具体 adapter。
+> **注**：`web_search` / `web_fetch` 是 `tools` 入口，search-providers 是其后端服务适配层，源码挂在 `services/` 下与 LLM provider 平行；上层 `tools/web-*.ts` 通过 registry 拿到 SearchProvider，不直接 import 具体 adapter。
 
 ## 架构权衡
 

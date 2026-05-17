@@ -26,7 +26,7 @@
 
 ### 2. TavilyAdapter（当前激活）
 
-测试文件：`packages/ohbaby-agent/src/services/search-providers/__tests__/tavily.test.ts`
+测试文件：`packages/ohbaby-agent/src/services/search-providers/__tests__/tavily.unit.test.ts`
 
 #### 2.1 search()
 

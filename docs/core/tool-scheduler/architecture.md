@@ -76,7 +76,7 @@ class ToolRegistry {
 }
 ```
 
-> 网络工具（`web_search` / `web_fetch`）在 `builtinTools` 中注册；它们内部通过 `tools/search-providers/registry` 调用具体厂商，对调度器是透明的。
+> 网络工具（`web_search` / `web_fetch`）在 `builtinTools` 中注册；它们是 `tools` 入口，后端通过 `services/search-providers/registry` 调用具体厂商，对调度器是透明的。
 
 **主要方法**：
 - `register(tool)`: 注册工具
