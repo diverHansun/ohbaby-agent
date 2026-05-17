@@ -100,6 +100,22 @@ describe("AgentRegistry", () => {
     );
   });
 
+  it("rejects config-loaded agents with invalid modes", async () => {
+    const registry = new AgentRegistry({
+      configLoader: () => ({
+        agents: {
+          broken: {
+            description: "Invalid mode",
+            mode: "bogus" as never,
+            name: "broken",
+          },
+        },
+      }),
+    });
+
+    await expect(registry.initialize()).rejects.toThrow("Invalid agent mode");
+  });
+
   it("rejects subagents that explicitly include recursive tools", async () => {
     const registry = new AgentRegistry({
       configLoader: () => ({

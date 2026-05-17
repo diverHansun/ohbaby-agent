@@ -38,7 +38,7 @@ export {
   planAgent,
   researchAgent,
   toolsConfigToRecord,
-} from "./core/agents/index.js";
+} from "./agents/index.js";
 export type {
   RuntimeAgent,
   SubagentExecuteParams,
@@ -51,7 +51,7 @@ export type {
   SubagentToolCallSummary,
   SystemPromptProvider,
   TaskExecutor,
-} from "./core/agents/index.js";
+} from "./agents/index.js";
 export * from "./core/system-prompt/index.js";
 export * from "./core/llm-client/index.js";
 export * from "./project/index.js";

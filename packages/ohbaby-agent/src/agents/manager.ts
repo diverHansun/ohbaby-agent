@@ -1,5 +1,5 @@
-import { SUBAGENT_DISABLED_TOOLS } from "../tool-scheduler/index.js";
-import type { AgentToolConfigProvider } from "../tool-scheduler/index.js";
+import { SUBAGENT_DISABLED_TOOLS } from "../core/tool-scheduler/index.js";
+import type { AgentToolConfigProvider } from "../core/tool-scheduler/index.js";
 import { AgentRegistry } from "./registry.js";
 import type {
   AgentConfig,

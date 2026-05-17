@@ -7,9 +7,14 @@ import type {
   SubagentRunner,
   SubagentSession,
   SubagentSessionManager,
+  AgentsConfig,
 } from "./types.js";
 
-function deferred<T>() {
+function deferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly reject: (error: unknown) => void;
+  readonly resolve: (value: T) => void;
+} {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
   const promise = new Promise<T>((res, rej) => {
@@ -21,7 +26,7 @@ function deferred<T>() {
 
 async function createAgentManager(): Promise<AgentManager> {
   const registry = new AgentRegistry({
-    configLoader: () => ({
+    configLoader: (): AgentsConfig => ({
       agents: {
         universal: {
           description: "Primary or subagent",
@@ -36,7 +41,7 @@ async function createAgentManager(): Promise<AgentManager> {
   return new AgentManager({
     registry,
     systemPromptProvider: {
-      build: async ({ agent }) => `system:${agent.name}`,
+      build: ({ agent }) => `system:${agent.name}`,
     },
   });
 }
@@ -53,7 +58,7 @@ function createSessionManager(): SubagentSessionManager {
   let nextChild = 1;
 
   return {
-    async create(_projectDirectory, options) {
+    create(_projectDirectory, options): Promise<SubagentSession> {
       const session: SubagentSession = {
         agentName: options?.agentName ?? "default",
         childrenIds: [],
@@ -63,10 +68,10 @@ function createSessionManager(): SubagentSessionManager {
         projectRoot: "D:/repo",
       };
       sessions.set(session.id, session);
-      return session;
+      return Promise.resolve(session);
     },
-    async get(sessionId) {
-      return sessions.get(sessionId) ?? null;
+    get(sessionId): Promise<SubagentSession | null> {
+      return Promise.resolve(sessions.get(sessionId) ?? null);
     },
   };
 }
@@ -74,18 +79,24 @@ function createSessionManager(): SubagentSessionManager {
 describe("SubagentExecutor", () => {
   it("creates an isolated child session, writes the prompt, and runs the subagent", async () => {
     const agentManager = await createAgentManager();
-    const runner: SubagentRunner = {
-      run: vi.fn(async () => ({
+    const runnerRun = vi.fn<SubagentRunner["run"]>(() =>
+      Promise.resolve({
         output: "exploration complete",
         steps: 2,
         success: true,
         toolCalls: [
           { id: "call_1", status: "completed" as const, tool: "read" },
         ],
-      })),
+      }),
+    );
+    const runner: SubagentRunner = {
+      run: runnerRun,
     };
+    const writeUserMessage = vi.fn<SubagentMessageWriter["writeUserMessage"]>(
+      () => Promise.resolve({ messageId: "message_child" }),
+    );
     const messageWriter: SubagentMessageWriter = {
-      writeUserMessage: vi.fn(async () => ({ messageId: "message_child" })),
+      writeUserMessage,
     };
     const executor = new SubagentExecutor({
       agentManager,
@@ -94,7 +105,7 @@ describe("SubagentExecutor", () => {
       sessionManager: createSessionManager(),
       now: (() => {
         let value = 1_000;
-        return () => (value += 100);
+        return (): number => (value += 100);
       })(),
     });
 
@@ -115,13 +126,13 @@ describe("SubagentExecutor", () => {
         toolCalls: [{ id: "call_1", status: "completed", tool: "read" }],
       },
     });
-    expect(messageWriter.writeUserMessage).toHaveBeenCalledWith({
+    expect(writeUserMessage).toHaveBeenCalledWith({
       agentName: "explore",
       parentSessionId: "parent",
       prompt: "Find auth code",
       sessionId: "child_1",
     });
-    expect(runner.run).toHaveBeenCalledWith(
+    expect(runnerRun).toHaveBeenCalledWith(
       expect.objectContaining({
         agentName: "explore",
         parentSessionId: "parent",
@@ -129,6 +140,30 @@ describe("SubagentExecutor", () => {
         sessionId: "child_1",
       }),
     );
+  });
+
+  it("accepts a message writer that resolves without metadata", async () => {
+    const messageWriter: SubagentMessageWriter = {
+      writeUserMessage: () => Promise.resolve(),
+    };
+    const executor = new SubagentExecutor({
+      agentManager: await createAgentManager(),
+      messageWriter,
+      runner: {
+        run: vi.fn<SubagentRunner["run"]>(() =>
+          Promise.resolve({ output: "done", success: true }),
+        ),
+      },
+      sessionManager: createSessionManager(),
+    });
+
+    await expect(
+      executor.execute({
+        agentName: "explore",
+        parentSessionId: "parent",
+        prompt: "run",
+      }),
+    ).resolves.toMatchObject({ output: "done", success: true });
   });
 
   it("rejects primary agents as subagents", async () => {
@@ -156,7 +191,7 @@ describe("SubagentExecutor", () => {
     const executor = new SubagentExecutor({
       agentManager: await createAgentManager(),
       maxConcurrency: 1,
-      runner: { run: vi.fn(() => blocker.promise) },
+      runner: { run: vi.fn<SubagentRunner["run"]>(() => blocker.promise) },
       sessionManager: createSessionManager(),
     });
 
@@ -196,11 +231,13 @@ describe("SubagentExecutor", () => {
     const executor = new SubagentExecutor({
       agentManager: await createAgentManager(),
       runner: {
-        run: vi.fn(async () => ({
-          output: "resumed",
-          steps: 1,
-          success: true,
-        })),
+        run: vi.fn<SubagentRunner["run"]>(() =>
+          Promise.resolve({
+            output: "resumed",
+            steps: 1,
+            success: true,
+          }),
+        ),
       },
       sessionManager,
     });
@@ -227,11 +264,13 @@ describe("SubagentExecutor", () => {
     const executor = new SubagentExecutor({
       agentManager: await createAgentManager(),
       runner: {
-        run: vi.fn(async () => ({
-          output: "resumed",
-          steps: 1,
-          success: true,
-        })),
+        run: vi.fn<SubagentRunner["run"]>(() =>
+          Promise.resolve({
+            output: "resumed",
+            steps: 1,
+            success: true,
+          }),
+        ),
       },
       sessionManager,
     });
@@ -249,8 +288,11 @@ describe("SubagentExecutor", () => {
   });
 
   it("forces recursive tools off when an all-mode agent runs as a subagent", async () => {
+    const runnerRun = vi.fn<SubagentRunner["run"]>(() =>
+      Promise.resolve({ output: "done", steps: 1, success: true }),
+    );
     const runner: SubagentRunner = {
-      run: vi.fn(async () => ({ output: "done", steps: 1, success: true })),
+      run: runnerRun,
     };
     const executor = new SubagentExecutor({
       agentManager: await createAgentManager(),
@@ -264,17 +306,13 @@ describe("SubagentExecutor", () => {
       prompt: "run as child",
     });
 
-    expect(runner.run).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runtimeAgent: expect.objectContaining({
-          isSubagent: true,
-          tools: expect.objectContaining({
-            task: false,
-            todo_read: false,
-            todo_write: false,
-          }),
-        }),
-      }),
-    );
+    expect(runnerRun).toHaveBeenCalledOnce();
+    const runInput = runnerRun.mock.calls[0][0];
+    expect(runInput.runtimeAgent.isSubagent).toBe(true);
+    expect(runInput.runtimeAgent.tools).toMatchObject({
+      task: false,
+      todo_read: false,
+      todo_write: false,
+    });
   });
 });

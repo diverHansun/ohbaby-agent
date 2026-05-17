@@ -124,7 +124,7 @@ SubagentExecutor
 ### 3.1 目录结构
 
 ```
-ohbaby-agent/src/core/agents/
+ohbaby-agent/src/agents/
 ├── index.ts                 # 公共 API 导出
 ├── manager.ts               # AgentManager 实现
 ├── registry.ts              # AgentRegistry 实现
@@ -136,10 +136,9 @@ ohbaby-agent/src/core/agents/
 │   ├── plan.ts              # plan 代理配置
 │   ├── explore.ts           # explore 代理配置
 │   └── research.ts          # research 代理配置
-└── __tests__/               # 测试文件
-    ├── manager.test.ts
-    ├── registry.test.ts
-    └── executor.test.ts
+├── manager.unit.test.ts      # AgentManager 单元测试
+├── registry.unit.test.ts     # AgentRegistry 单元测试
+└── executor.unit.test.ts     # SubagentExecutor 单元测试
 ```
 
 ### 3.2 文件职责

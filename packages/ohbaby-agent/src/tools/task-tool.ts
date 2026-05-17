@@ -2,7 +2,7 @@ import type {
   Tool,
   ToolExecutionResult,
 } from "../core/tool-scheduler/index.js";
-import type { TaskExecutor } from "../core/agents/index.js";
+import type { TaskExecutor } from "../agents/index.js";
 import { ToolParameterError } from "./utils/params.js";
 
 function requiredString(params: Record<string, unknown>, name: string): string {

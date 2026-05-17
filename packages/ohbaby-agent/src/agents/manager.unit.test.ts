@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { AgentManager } from "./manager.js";
 import { AgentRegistry } from "./registry.js";
-import type { SystemPromptProvider } from "./types.js";
+import type { AgentsConfig, SystemPromptProvider } from "./types.js";
 
 async function createManager(): Promise<AgentManager> {
   const registry = new AgentRegistry({
-    configLoader: () => ({
+    configLoader: (): AgentsConfig => ({
       agents: {
         audit: {
           description: "Audit files",
@@ -23,11 +23,11 @@ async function createManager(): Promise<AgentManager> {
     }),
   });
   await registry.initialize();
+  const build: SystemPromptProvider["build"] = ({ agent }) =>
+    `system:${agent.name}`;
   return new AgentManager({
     registry,
-    systemPromptProvider: {
-      build: vi.fn(async ({ agent }) => `system:${agent.name}`),
-    },
+    systemPromptProvider: { build },
   });
 }
 
@@ -67,10 +67,11 @@ describe("AgentManager", () => {
   });
 
   it("builds a runtime agent using the injected system prompt provider", async () => {
+    const build = vi.fn<SystemPromptProvider["build"]>(
+      ({ agent, isSubagent }) => `${agent.name}:${String(isSubagent)}`,
+    );
     const provider: SystemPromptProvider = {
-      build: vi.fn(
-        async ({ agent, isSubagent }) => `${agent.name}:${String(isSubagent)}`,
-      ),
+      build,
     };
     const registry = new AgentRegistry();
     await registry.initialize();
@@ -84,9 +85,9 @@ describe("AgentManager", () => {
       isSubagent: true,
       systemPrompt: "explore:true",
     });
-    expect(provider.build).toHaveBeenCalledWith({
-      agent: expect.objectContaining({ name: "explore" }),
-      isSubagent: true,
-    });
+    expect(build).toHaveBeenCalledOnce();
+    const buildInput = build.mock.calls[0][0];
+    expect(buildInput.agent.name).toBe("explore");
+    expect(buildInput.isSubagent).toBe(true);
   });
 });

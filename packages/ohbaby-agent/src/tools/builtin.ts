@@ -12,7 +12,7 @@ import {
 } from "./todo-tools.js";
 import { createTaskTool } from "./task-tool.js";
 import { createWebTools, type WebToolsOptions } from "./web-tools.js";
-import type { TaskExecutor } from "../core/agents/index.js";
+import type { TaskExecutor } from "../agents/index.js";
 
 export interface BuiltinToolsOptions {
   readonly shell?: BashShell;

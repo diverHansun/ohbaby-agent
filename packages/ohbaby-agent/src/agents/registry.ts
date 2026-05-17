@@ -1,4 +1,4 @@
-import { SUBAGENT_DISABLED_TOOLS } from "../tool-scheduler/index.js";
+import { SUBAGENT_DISABLED_TOOLS } from "../core/tool-scheduler/index.js";
 import { BUILTIN_AGENTS } from "./builtin/index.js";
 import type { AgentConfig, AgentMode, AgentsConfig } from "./types.js";
 
@@ -36,7 +36,7 @@ function assertAgentName(name: string): void {
   }
 }
 
-function assertMode(mode: AgentMode): void {
+function assertMode(mode: unknown): asserts mode is AgentMode {
   if (mode !== "primary" && mode !== "subagent" && mode !== "all") {
     throw new Error(`Invalid agent mode: ${String(mode)}`);
   }

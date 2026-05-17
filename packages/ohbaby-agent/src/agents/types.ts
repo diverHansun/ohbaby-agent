@@ -1,4 +1,4 @@
-import type { ToolExecutionEnvironment } from "../tool-scheduler/index.js";
+import type { ToolExecutionEnvironment } from "../core/tool-scheduler/index.js";
 
 export type AgentMode = "primary" | "subagent" | "all";
 export type PermissionValue = "allow" | "deny" | "ask";
@@ -115,7 +115,7 @@ export interface SubagentMessageWriter {
     readonly parentSessionId: string;
     readonly agentName: string;
     readonly prompt: string;
-  }): Promise<{ readonly messageId?: string } | void>;
+  }): Promise<{ readonly messageId?: string } | undefined> | Promise<void>;
 }
 
 export interface SubagentRunnerResult {
