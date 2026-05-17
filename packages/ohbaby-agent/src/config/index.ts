@@ -18,3 +18,25 @@ export type {
   ModelJsonConfig,
   ConfigErrorCode,
 } from './llm/index.js';
+
+export {
+  AgentConfigAccessError,
+  AgentConfigError,
+  AgentConfigParseError,
+  AgentConfigSchema,
+  AgentConfigValidationError,
+  AgentsConfigSchema,
+  getGlobalAgentsConfigPath,
+  getProjectAgentsConfigPath,
+  loadAgentConfig,
+} from './agents/index.js';
+
+export type {
+  AgentConfig,
+  AgentConfigErrorCode,
+  AgentMode,
+  AgentsConfig,
+  PermissionConfig,
+  PermissionValue,
+  ToolsConfig,
+} from './agents/index.js';
