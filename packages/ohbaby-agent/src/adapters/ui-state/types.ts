@@ -1,4 +1,10 @@
-import type { UiRun, UiRunStatus, UiSession, UiSnapshot } from "ohbaby-sdk";
+import type {
+  UiPermissionRequest,
+  UiRun,
+  UiRunStatus,
+  UiSession,
+  UiSnapshot,
+} from "ohbaby-sdk";
 
 export interface UiStateStore {
   readSnapshot(): Promise<UiSnapshot>;
@@ -7,5 +13,7 @@ export interface UiStateStore {
   setActiveSessionId(sessionId: string | null): Promise<void>;
   addRun(run: UiRun): Promise<void>;
   updateRun(run: UiRun): Promise<void>;
+  upsertPermission(request: UiPermissionRequest): Promise<void>;
+  removePermission(requestId: string): Promise<void>;
   setStatus(status: UiRunStatus): Promise<void>;
 }

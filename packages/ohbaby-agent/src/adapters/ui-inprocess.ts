@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import type { ChatCompletionCreateParams } from "openai/resources/chat/completions/completions";
 import type {
   SubmitPromptOptions,
   UiBackendClient,
@@ -7,10 +10,13 @@ import type {
   UiEventHandler,
   UiInteractionResponse,
   UiMessage,
+  UiMessagePart,
+  UiPermissionRequest,
   UiPermissionResponse,
   UiRun,
   UiRunStatus,
   UiSnapshot,
+  UiToolCall,
   UiSession,
 } from "ohbaby-sdk";
 import type { ChatCompletionMessage } from "../core/llm-client/index.js";
@@ -18,6 +24,11 @@ import { createLLMClient } from "../core/llm-client/index.js";
 import type { LLMClientInstance } from "../core/llm-client/index.js";
 import { Lifecycle } from "../core/lifecycle/index.js";
 import { createBus } from "../bus/index.js";
+import {
+  createToolScheduler,
+  type ToolDefinition,
+  type ToolExecutionEnvironment,
+} from "../core/tool-scheduler/index.js";
 import type {
   CommandModelSummary,
   CommandSessionSummary,
@@ -32,6 +43,15 @@ import {
   createMessageManager,
 } from "../core/message/index.js";
 import type { MessageManager } from "../core/message/index.js";
+import {
+  createPermissionManager,
+  PermissionEvent,
+} from "../permission/index.js";
+import type {
+  PermissionInfo,
+  PermissionResponse as CorePermissionResponse,
+} from "../permission/index.js";
+import { createPolicyManager } from "../policy/index.js";
 import { BUILTIN_TOOLS } from "../tools/index.js";
 import {
   cloneMessage,
@@ -167,6 +187,145 @@ function createTextMessage(input: {
   };
 }
 
+function normalizeForBoundary(inputPath: string): string {
+  const resolved = path.resolve(inputPath);
+  const root = path.parse(resolved).root;
+  const withoutTrailingSeparator =
+    resolved.length > root.length ? resolved.replace(/[\\/]+$/u, "") : resolved;
+  return process.platform === "win32"
+    ? withoutTrailingSeparator.toLowerCase()
+    : withoutTrailingSeparator;
+}
+
+function assertInsideWorkdir(
+  workdir: string,
+  inputPath: string,
+  resolved: string,
+): string {
+  const normalizedRoot = normalizeForBoundary(workdir);
+  const normalizedCandidate = normalizeForBoundary(resolved);
+  if (normalizedRoot === normalizedCandidate) {
+    return resolved;
+  }
+  const relative = path.relative(normalizedRoot, normalizedCandidate);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Path escapes workspace: ${inputPath}`);
+  }
+  return resolved;
+}
+
+function resolveHostPath(workdir: string, inputPath: string): string {
+  return path.isAbsolute(inputPath)
+    ? path.resolve(inputPath)
+    : path.resolve(workdir, inputPath);
+}
+
+function createHostLocalEnvironment(
+  workdir = process.cwd(),
+): ToolExecutionEnvironment {
+  const root = path.resolve(workdir);
+
+  return {
+    workdir: root,
+    resolvePath(inputPath: string): string {
+      return assertInsideWorkdir(
+        root,
+        inputPath,
+        resolveHostPath(root, inputPath),
+      );
+    },
+    async resolvePathForExisting(inputPath: string): Promise<string> {
+      const resolved = await fs.realpath(resolveHostPath(root, inputPath));
+      return assertInsideWorkdir(root, inputPath, resolved);
+    },
+    async resolvePathForWrite(inputPath: string): Promise<string> {
+      const target = resolveHostPath(root, inputPath);
+      const realParent = await fs.realpath(path.dirname(target));
+      const resolved = path.join(realParent, path.basename(target));
+      return assertInsideWorkdir(root, inputPath, resolved);
+    },
+    resolveCommandContext(): { readonly cwd: string; readonly kind: string } {
+      return {
+        cwd: root,
+        kind: "host-local",
+      };
+    },
+  };
+}
+
+function toOpenAiTools(
+  definitions: readonly ToolDefinition[],
+): ChatCompletionCreateParams["tools"] {
+  return definitions.map((definition) => ({
+    type: "function",
+    function: {
+      name: definition.name,
+      description: definition.description,
+      parameters: definition.parameters,
+    },
+  }));
+}
+
+function upsertAssistantTextPart(input: {
+  readonly append: boolean;
+  readonly message: UiMessage;
+  readonly text: string;
+}): UiMessage {
+  const textPartIndex = input.message.parts.findLastIndex(
+    (part) => part.type === "text",
+  );
+  if (!input.append && textPartIndex >= 0) {
+    const text = input.text;
+
+    return {
+      ...input.message,
+      parts: input.message.parts.map(
+        (part, index): UiMessagePart =>
+          index === textPartIndex ? { type: "text", text } : part,
+      ),
+    };
+  }
+
+  return {
+    ...input.message,
+    parts: [...input.message.parts, { type: "text", text: input.text }],
+  };
+}
+
+function toUiPermissionRequest(input: {
+  readonly info: PermissionInfo;
+  readonly runId: string;
+}): UiPermissionRequest {
+  return {
+    id: input.info.id,
+    runId: input.runId,
+    title: input.info.title,
+    description: input.info.pattern,
+    choices: [
+      { id: "allow_once", label: "Allow once", intent: "allow" },
+      { id: "allow_always", label: "Always allow", intent: "allow" },
+      { id: "reject", label: "Reject", intent: "deny" },
+      { id: "cancel", label: "Cancel run", intent: "abort" },
+    ],
+  };
+}
+
+function toCorePermissionResponse(
+  response: UiPermissionResponse,
+): CorePermissionResponse {
+  if (response.choiceId === "allow_once") {
+    return { type: "once" };
+  }
+  if (response.choiceId === "allow_always" || response.remember === true) {
+    return { type: "always" };
+  }
+  if (response.choiceId === "cancel") {
+    return { type: "cancel" };
+  }
+
+  return { type: "reject" };
+}
+
 export function createInProcessUiBackendClient(
   optionsOrSnapshot: UiSnapshot | InProcessUiBackendOptions = EMPTY_SNAPSHOT,
 ): UiBackendClient {
@@ -176,6 +335,12 @@ export function createInProcessUiBackendClient(
   const initialSnapshot = options.initialSnapshot ?? EMPTY_SNAPSHOT;
   const stateStore = createInMemoryUiStateStore(initialSnapshot);
   const bus = createBus();
+  const policy = createPolicyManager({ bus });
+  const permission = createPermissionManager({ bus });
+  const toolScheduler = createToolScheduler({ bus, permission, policy });
+  for (const tool of BUILTIN_TOOLS) {
+    toolScheduler.register(tool);
+  }
   const messageManager =
     options.messageManager ??
     createMessageManager({
@@ -201,6 +366,7 @@ export function createInProcessUiBackendClient(
   let promptInFlight = false;
   let activeAbortController: AbortController | undefined;
   let activeRunId: string | undefined;
+  const pendingPermissionSessions = new Map<string, string>();
 
   function now(): Date {
     return options.now?.() ?? new Date();
@@ -233,6 +399,25 @@ export function createInProcessUiBackendClient(
     publish({ type: "runtime.updated", status, timestamp: Date.now() });
   }
 
+  async function updateActiveRunStatus(status: UiRunStatus): Promise<void> {
+    const runId = activeRunId;
+    if (!runId) {
+      return;
+    }
+    const snapshot = await stateStore.readSnapshot();
+    const run = snapshot.runs.find((candidate) => candidate.id === runId);
+    if (!run) {
+      return;
+    }
+    const updatedRun = {
+      ...run,
+      status,
+      updatedAt: timestamp(),
+    };
+    await updateRun(updatedRun);
+    publish({ type: "run.updated", run: cloneRun(updatedRun) });
+  }
+
   async function resolveLLMClient(): Promise<LLMClientInstance> {
     if (options.llmClient) {
       return options.llmClient;
@@ -260,7 +445,9 @@ export function createInProcessUiBackendClient(
     return current ? [current] : [];
   }
 
-  async function listSessionsFromState(): Promise<readonly CommandSessionSummary[]> {
+  async function listSessionsFromState(): Promise<
+    readonly CommandSessionSummary[]
+  > {
     const snapshot = await stateStore.readSnapshot();
     return snapshot.sessions.map((session) => ({
       id: session.id,
@@ -297,10 +484,21 @@ export function createInProcessUiBackendClient(
     readonly output?: string;
     readonly error?: string;
   }): UiMessage {
+    const status: UiToolCall["status"] = input.error ? "failed" : "completed";
     return {
       ...input.message,
       parts: [
-        ...input.message.parts,
+        ...input.message.parts.map((part) =>
+          part.type === "tool-call" && part.call.id === input.callId
+            ? {
+                ...part,
+                call: {
+                  ...part.call,
+                  status,
+                },
+              }
+            : part,
+        ),
         {
           type: "tool-result",
           result: {
@@ -399,6 +597,49 @@ export function createInProcessUiBackendClient(
       status: payload.response.kind,
       timestamp: payload.timestamp,
     });
+  });
+  bus.subscribe(PermissionEvent.Updated, (payload) => {
+    void (async (): Promise<void> => {
+      const request = toUiPermissionRequest({
+        info: payload.info,
+        runId: activeRunId ?? payload.info.callId,
+      });
+      pendingPermissionSessions.set(payload.info.id, payload.info.sessionId);
+      await stateStore.upsertPermission(request);
+      const waitingStatus: UiRunStatus = {
+        kind: "waiting-for-permission",
+        requestId: request.id,
+      };
+      await updateActiveRunStatus(waitingStatus);
+      await updateStatus(waitingStatus);
+      publish({
+        type: "permission.requested",
+        request,
+        timestamp: Date.now(),
+      });
+    })();
+  });
+  bus.subscribe(PermissionEvent.Replied, (payload) => {
+    void (async (): Promise<void> => {
+      pendingPermissionSessions.delete(payload.permissionId);
+      await stateStore.removePermission(payload.permissionId);
+      publish({
+        type: "permission.resolved",
+        requestId: payload.permissionId,
+        timestamp: Date.now(),
+      });
+      if (promptInFlight && activeRunId) {
+        const runningStatus: UiRunStatus = {
+          kind: "running",
+          runId: activeRunId,
+        };
+        await updateActiveRunStatus(runningStatus);
+        await updateStatus(runningStatus);
+      }
+    })();
+  });
+  bus.subscribe(PermissionEvent.SwitchModeRequested, () => {
+    policy.setAgentState("edit-automatically");
   });
 
   return {
@@ -514,13 +755,19 @@ export function createInProcessUiBackendClient(
         });
 
         try {
+          const availableTools = await toolScheduler.getAvailableTools({
+            agentName: "default",
+          });
+          const executionEnvironment = createHostLocalEnvironment();
           const lifecycle = new Lifecycle({
             llmClient: await resolveLLMClient(),
             messageManager,
+            toolScheduler,
           });
           const loop = lifecycle.run({
             sessionId: session.id,
             agent: "default",
+            environment: executionEnvironment,
             parentMessageId: coreUserMessage.id,
             messages: toModelMessages(
               session.messages.filter(
@@ -528,15 +775,19 @@ export function createInProcessUiBackendClient(
               ),
             ),
             signal: activeAbortController.signal,
+            tools: toOpenAiTools(availableTools),
           });
 
+          let assistantTextStep: number | undefined;
           let next = await loop.next();
           while (!next.done) {
             if (next.value.type === "llm:delta") {
-              const updatedAssistant: UiMessage = {
-                ...assistantMessage,
-                parts: [{ type: "text", text: next.value.content }],
-              };
+              const updatedAssistant = upsertAssistantTextPart({
+                append: assistantTextStep !== next.value.step,
+                message: assistantMessage,
+                text: next.value.content,
+              });
+              assistantTextStep = next.value.step;
               const updatedMessages: UiMessage[] = session.messages.map(
                 (message) =>
                   message.id === updatedAssistant.id
@@ -662,9 +913,18 @@ export function createInProcessUiBackendClient(
     },
 
     respondPermission(
-      _requestId: string,
-      _response: UiPermissionResponse,
+      requestId: string,
+      response: UiPermissionResponse,
     ): Promise<void> {
+      const sessionId = pendingPermissionSessions.get(requestId);
+      if (!sessionId) {
+        return Promise.resolve();
+      }
+      permission.respond(
+        sessionId,
+        requestId,
+        toCorePermissionResponse(response),
+      );
       return Promise.resolve();
     },
 

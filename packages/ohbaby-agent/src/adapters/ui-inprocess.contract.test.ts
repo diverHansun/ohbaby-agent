@@ -62,6 +62,42 @@ function createFakeLLMClient(
   };
 }
 
+function createSequentialFakeLLMClient(
+  eventBatches: readonly (readonly ProviderStreamEvent[])[],
+  requests: ProviderRequest[],
+): LLMClientInstance<FakeSdkClient> {
+  let nextBatch = 0;
+
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: ProviderRequest,
+      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        if (nextBatch >= eventBatches.length) {
+          return Promise.reject(new Error("No fake LLM response configured"));
+        }
+        requests.push(request);
+        const events = eventBatches[nextBatch];
+        nextBatch += 1;
+        return Promise.resolve(createProviderStream(events));
+      },
+      isAbortError(): boolean {
+        return false;
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      baseUrl: "https://example.invalid/v1",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
 function createRejectingLLMClient(
   error: Error,
 ): LLMClientInstance<FakeSdkClient> {
@@ -175,6 +211,68 @@ describe("createInProcessUiBackendClient", () => {
     expect(snapshot.sessions[0].messages[1].parts).toEqual([
       { type: "text", text: "Hello world" },
     ]);
+  });
+
+  it("executes builtin tool calls through the in-process lifecycle scheduler", async () => {
+    const requests: ProviderRequest[] = [];
+    const client = createInProcessUiBackendClient({
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"path":"packages/ohbaby-agent/src/tools"}',
+                  id: "call_list",
+                  index: 0,
+                  name: "list",
+                },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+          [{ textDelta: "Listed.", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+
+    await client.submitPrompt("List the tools folder");
+
+    expect(
+      requests[0]?.tools?.some((tool) => tool.function.name === "list"),
+    ).toBe(true);
+    const toolResultMessage = requests[1]?.messages.at(-1);
+    expect(toolResultMessage).toMatchObject({
+      role: "tool",
+      tool_call_id: "call_list",
+    });
+    expect(
+      typeof toolResultMessage?.content === "string"
+        ? toolResultMessage.content
+        : "",
+    ).toContain("builtin.ts");
+
+    const snapshot = await client.getSnapshot();
+    expect(snapshot.status).toEqual({ kind: "idle" });
+    const parts = snapshot.sessions[0].messages[1].parts;
+    expect(parts[0]).toEqual({
+      type: "tool-call",
+      call: {
+        id: "call_list",
+        input: { path: "packages/ohbaby-agent/src/tools" },
+        name: "list",
+        status: "completed",
+      },
+    });
+    expect(parts[1]).toMatchObject({
+      type: "tool-result",
+      result: { callId: "call_list" },
+    });
+    expect(
+      parts[1]?.type === "tool-result" ? parts[1].result.output : "",
+    ).toContain("builtin.ts");
+    expect(parts[2]).toEqual({ type: "text", text: "Listed." });
   });
 
   it("marks the run and app status as error when streaming fails", async () => {

@@ -1,7 +1,13 @@
 import { EventEmitter } from "node:events";
-import type { ChildProcess, SpawnOptionsWithoutStdio } from "node:child_process";
+import type {
+  ChildProcess,
+  SpawnOptionsWithoutStdio,
+} from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
-import type { ToolExecutionContext } from "../core/tool-scheduler/index.js";
+import type {
+  ToolExecutionContext,
+  ToolExecutionEnvironment,
+} from "../core/tool-scheduler/index.js";
 import type { CommandContext } from "../sandbox/index.js";
 import type { Tool } from "../core/tool-scheduler/index.js";
 import type { SpawnCommand } from "./bash-tool.js";
@@ -35,8 +41,44 @@ function createContext(
   };
 }
 
+function createEnvironmentContext(
+  overrides: Partial<ToolExecutionContext> = {},
+  commandContext: CommandContext = {
+    cwd: "D:/workspace/env",
+    env: { FROM_ENVIRONMENT: "yes" },
+    kind: "host-local",
+  },
+): ToolExecutionContext {
+  const environment: ToolExecutionEnvironment = {
+    workdir: commandContext.cwd,
+    resolvePath(inputPath: string): string {
+      return `${this.workdir}/${inputPath}`;
+    },
+    resolvePathForExisting(inputPath: string): Promise<string> {
+      return Promise.resolve(`${this.workdir}/${inputPath}`);
+    },
+    resolvePathForWrite(inputPath: string): Promise<string> {
+      return Promise.resolve(`${this.workdir}/${inputPath}`);
+    },
+    resolveCommandContext(): CommandContext {
+      return commandContext;
+    },
+  };
+
+  return {
+    callId: "call_1",
+    environment,
+    messageId: "message_1",
+    sessionId: "session_1",
+    signal: new AbortController().signal,
+    ...overrides,
+  };
+}
+
 function getBashTool(options: Parameters<typeof createBuiltinTools>[0]): Tool {
-  const tool = createBuiltinTools(options).find((candidate) => candidate.name === "bash");
+  const tool = createBuiltinTools(options).find(
+    (candidate) => candidate.name === "bash",
+  );
   if (!tool) {
     throw new Error("bash tool missing");
   }
@@ -77,6 +119,36 @@ describe("bash builtin tool", () => {
     expect(spawn.mock.calls[0]?.[2].env?.FOO).toBe("bar");
     expect(result.output).toContain("hello");
     expect(result.metadata).toMatchObject({ exitCode: 0, signal: null });
+  });
+
+  it("executes commands with environment command context cwd/env", async () => {
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(
+      (
+        _file: string,
+        _args: readonly string[],
+        _options: SpawnOptionsWithoutStdio,
+      ) => child as unknown as ChildProcess,
+    );
+    const bash = getBashTool({
+      shell: {
+        acceptable: () => "/bin/bash",
+        killTree: vi.fn(),
+      },
+      spawn,
+    });
+
+    const resultPromise = bash.execute(
+      { command: "echo hello", timeout: 1_000 },
+      createEnvironmentContext(),
+    );
+    child.stdout.emit("data", Buffer.from("hello\n"));
+    child.emit("exit", 0, null);
+    const result = await resultPromise;
+
+    expect(spawn.mock.calls[0]?.[2].cwd).toBe("D:/workspace/env");
+    expect(spawn.mock.calls[0]?.[2].env?.FROM_ENVIRONMENT).toBe("yes");
+    expect(result.output).toContain("hello");
   });
 
   it("rejects unsupported shell syntax before spawning", async () => {
@@ -138,7 +210,10 @@ describe("bash builtin tool", () => {
       spawn,
     });
 
-    const resultPromise = bash.execute({ command: "echo hello" }, createContext());
+    const resultPromise = bash.execute(
+      { command: "echo hello" },
+      createContext(),
+    );
     child.emit("exit", 0, null);
     await resultPromise;
 
