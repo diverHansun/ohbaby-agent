@@ -197,6 +197,33 @@ describe("ToolScheduler", () => {
     ]);
   });
 
+  it("normalizes agent include and exclude tool config before listing tools", async () => {
+    const { scheduler } = createScheduler({
+      agentTools: {
+        getAgentConfig: () => ({
+          tools: {
+            exclude: ["edit"],
+            include: ["read", "edit", "web_search"],
+          },
+        }),
+      },
+    });
+    for (const tool of [
+      { name: "read", category: "readonly" },
+      { name: "edit", category: "write" },
+      { name: "web_search", category: "network" },
+      { name: "memory_add", category: "memory" },
+    ] as const) {
+      scheduler.register(createTool(tool));
+    }
+
+    await expect(
+      scheduler
+        .getAvailableTools()
+        .then((tools) => tools.map((tool) => tool.name)),
+    ).resolves.toEqual(["read", "web_search"]);
+  });
+
   it("executes allowed tools and publishes state events", async () => {
     const { completed, scheduler, started, statuses } = createScheduler();
     scheduler.register(createTool({ name: "read" }));
