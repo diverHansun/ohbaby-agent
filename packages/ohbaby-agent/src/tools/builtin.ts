@@ -10,10 +10,12 @@ import {
   InMemoryTodoStore,
   type TodoStore,
 } from "./todo-tools.js";
+import { createWebTools, type WebToolsOptions } from "./web-tools.js";
 
 export interface BuiltinToolsOptions {
   readonly shell?: BashShell;
   readonly spawn?: SpawnCommand;
+  readonly searchProvider?: WebToolsOptions;
   readonly todoStore?: TodoStore;
 }
 
@@ -22,6 +24,7 @@ export function createBuiltinTools(options: BuiltinToolsOptions = {}): Tool[] {
   return [
     ...createFileTools(),
     ...createTodoTools(todoStore),
+    ...createWebTools(options.searchProvider),
     createBashTool({ shell: options.shell, spawn: options.spawn }),
   ];
 }
