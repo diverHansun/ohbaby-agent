@@ -7,7 +7,9 @@ export {
 } from "./diff-engine.js";
 export type { DiffEngine } from "./diff-engine.js";
 export { createSnapshotRunWorkerHook, SnapshotService } from "./service.js";
+export { createSnapshotHookExecutor } from "./run-hook-adapter.js";
 export { SnapshotStore } from "./store.js";
+export type { SnapshotHookExecutorOptions } from "./run-hook-adapter.js";
 export {
   ArtifactNotAvailableError,
   InvalidSnapshotArtifactError,
