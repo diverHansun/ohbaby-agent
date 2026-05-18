@@ -73,7 +73,7 @@ describe("TUI store event reducer", () => {
     expect(state.messages[0]?.parts[0]).toMatchObject({ text: "Hello world" });
   });
 
-  it("ignores message deltas that do not identify a part", () => {
+  it("applies generic message deltas to the last text part", () => {
     const state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
       delta: " world",
       messageId: "message_1",
@@ -81,7 +81,19 @@ describe("TUI store event reducer", () => {
       type: "message.part.delta",
     });
 
-    expect(state.messages[0]?.parts[0]).toMatchObject({ text: "Hello" });
+    expect(state.messages[0]?.parts[0]).toMatchObject({ text: "Hello world" });
+  });
+
+  it("uses delta content as the authoritative text snapshot when available", () => {
+    const state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      content: "Hello world",
+      delta: " world",
+      messageId: "message_1",
+      sessionId: "session_1",
+      type: "message.part.delta",
+    });
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({ text: "Hello world" });
   });
 
   it("projects the first backend session update when no session is active", () => {

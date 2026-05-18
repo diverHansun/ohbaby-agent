@@ -7,8 +7,9 @@ import {
   estimateTokensForText,
   getTokenLimit,
   isApproachingTokenLimit,
-  type ChatCompletionMessage,
+  type TokenCountMessage,
 } from "./tokenCounting.js";
+import type { TokenCounter } from "../../core/context/index.js";
 
 describe("tokenCounting", () => {
   describe("estimateTokensForText", () => {
@@ -49,7 +50,7 @@ describe("tokenCounting", () => {
     });
 
     it("counts tool_call_id and assistant tool_calls", () => {
-      const toolMessage: ChatCompletionMessage = {
+      const toolMessage: TokenCountMessage = {
         role: "tool",
         content: "done",
         tool_call_id: "call_123",
@@ -80,7 +81,7 @@ describe("tokenCounting", () => {
 
   describe("estimateTokensForMessages", () => {
     it("adds conversation overhead and supports empty arrays", () => {
-      const messages: readonly ChatCompletionMessage[] = [
+      const messages: readonly TokenCountMessage[] = [
         { role: "system", content: "rules" },
         { role: "user", content: "hello" },
       ];
@@ -123,7 +124,7 @@ describe("tokenCounting", () => {
 
   describe("calculateContextTokens", () => {
     it("calculates remaining tokens, percent used, and warning state", () => {
-      const messages: readonly ChatCompletionMessage[] = [
+      const messages: readonly TokenCountMessage[] = [
         { role: "user", content: "hello" },
       ];
       const messagesTokens = estimateTokensForMessages(messages);
@@ -201,7 +202,7 @@ describe("tokenCounting", () => {
 
   describe("createHeuristicTokenCounter", () => {
     it("returns a shape compatible with context TokenCounter", () => {
-      const counter = createHeuristicTokenCounter();
+      const counter: TokenCounter = createHeuristicTokenCounter();
 
       expect(counter.estimateTokens("abcd")).toBe(1);
       expect(counter.getLimit("gpt-4")).toBe(8_192);

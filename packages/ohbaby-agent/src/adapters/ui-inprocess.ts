@@ -14,6 +14,7 @@ import type {
   UiSnapshot,
   UiSession,
 } from "ohbaby-sdk";
+import type { BusInstance } from "../bus/index.js";
 import type { ChatCompletionMessage } from "../core/llm-client/index.js";
 import { createLLMClient } from "../core/llm-client/index.js";
 import type { LLMClientInstance } from "../core/llm-client/index.js";
@@ -46,6 +47,7 @@ import type {
 } from "../permission/index.js";
 import { createPolicyManager } from "../policy/index.js";
 import type { AgentManager } from "../agents/index.js";
+import type { HookExecutor } from "../runtime/run-manager/index.js";
 import type { RunLedger } from "../runtime/run-ledger/index.js";
 import type { StreamBridge } from "../runtime/stream-bridge/index.js";
 import {
@@ -71,7 +73,9 @@ const EMPTY_SNAPSHOT: UiSnapshot = {
 
 export interface InProcessUiBackendOptions {
   readonly agentManager?: AgentManager;
+  readonly bus?: BusInstance;
   readonly createRunId?: () => string;
+  readonly hookExecutor?: HookExecutor;
   readonly initialSnapshot?: UiSnapshot;
   readonly llmClient?: LLMClientInstance;
   readonly createLLMClient?: () => Promise<LLMClientInstance>;
@@ -249,7 +253,7 @@ export function createInProcessUiBackendClient(
     : optionsOrSnapshot;
   const initialSnapshot = options.initialSnapshot ?? EMPTY_SNAPSHOT;
   const stateStore = options.stateStore ?? createInMemoryUiStateStore(initialSnapshot);
-  const bus = createBus();
+  const bus = options.bus ?? createBus();
   const policy = createPolicyManager({ bus });
   const permission = createPermissionManager({ bus });
   const messageManager =
@@ -380,6 +384,7 @@ export function createInProcessUiBackendClient(
           createRunId: options.createRunId ?? ((): string => runIds.next()),
           llmClient,
           messageManager,
+          hookExecutor: options.hookExecutor,
           now: () => now().getTime(),
           permission,
           policy,

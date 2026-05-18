@@ -2,104 +2,97 @@
 
 ## 核心概念
 
-### Token（令牌）
-LLM 的基本计费单位。一个 Token 通常代表约 4 个英文字符或 1-2 个 CJK 字符。
+### Token
 
-**估算权重：**
-- ASCII 字符（0-127）：0.25 Token/字符（即 4 字符 = 1 Token）
-- 非 ASCII 字符：1.3 Token/字符（保守估计，用于 CJK 等）
+LLM 的基本上下文计量单位。当前实现使用保守启发式估算：
 
-### Token 限额（Token Limit）
-LLM 模型允许的最大 Token 数，由模型能力和 API 定价决定。
+- ASCII 字符按 `0.25` token/字符估算。
+- 非 ASCII 字符按 `1.3` token/字符估算。
+- 最终结果向上取整。
 
-**例子：**
-- gpt-4：8,192 tokens
-- gpt-4-turbo：128,000 tokens
-- gpt-4o：128,000 tokens
-- gpt-3.5-turbo：4,096 tokens
+### Token Limit
 
-### Token 消耗分解
+模型允许的最大上下文窗口。当前已内置常见 OpenAI 系列模型的保守限制，未知模型返回默认 `4_096`。
 
-当发送请求到 LLM 时，Token 消耗包括：
+### TokenCountMessage
 
-```
-总消耗 Token = 输入 Token + 输出 Token
-           = 消息历史 Token + 响应 Token
-```
+`services/llm-model` 暴露的消息估算输入类型。它只表示 token 估算需要读取的结构，不等同于 provider/lifecycle 的消息边界。
 
-其中：
-- **消息历史 Token** = 所有历史消息的 Token 之和 + 消息结构开销
-- **响应 Token** = 预期最大响应 Token（默认 2,048）或实际响应 Token
-
-## 核心类型
-
-### TokenEstimation（Token 估算值）
-```
-value: number       // 估算的 Token 数量
-accuracy: number    // 估算精度（±百分比）
+```typescript
+type TokenCountMessage =
+  | { role: "system"; content: string }
+  | { role: "user"; content: string }
+  | {
+      role: "assistant";
+      content: string | null;
+      tool_calls?: readonly unknown[];
+    }
+  | {
+      role: "tool";
+      content: string;
+      tool_call_id: string;
+    };
 ```
 
-### ContextTokens（会话 Token 信息）
-```
-messagesTokens: number            // 消息历史的 Token 数
-estimatedResponseTokens: number   // 预期响应的 Token 数
-totalUsedTokens: number          // 总消耗 Token 数
-remainingTokens: number          // 剩余可用 Token 数
-usage: {
-  hasWarning: boolean            // 是否达到警告阈值（80%）
-  percentUsed: number            // 已使用的百分比（0-100）
+不同角色的估算开销：
+
+- system: 文本 token + `100`
+- user: 文本 token + `3`
+- assistant: 文本 token + tool calls 序列化 token + `3`
+- tool: 文本 token + `tool_call_id` token + `5`
+
+### ContextTokens
+
+```typescript
+interface ContextTokens {
+  messagesTokens: number;
+  estimatedResponseTokens: number;
+  totalUsedTokens: number;
+  remainingTokens: number;
+  usage: {
+    hasWarning: boolean;
+    percentUsed: number;
+  };
 }
 ```
 
-### TokenWarning（Token 警告信息）
-```
-isApproaching: boolean                              // 是否接近限制
-severity: 'none' | 'warning' | 'critical'         // 严重程度
-percentUsed: number                                 // 已使用百分比
-tokensRemaining: number                            // 剩余 Token 数
-```
+### TokenWarning
 
-**严重程度定义：**
-- `none`：< 80% 的限额
-- `warning`：80% - 95% 的限额
-- `critical`：> 95% 的限额
+```typescript
+type TokenWarningSeverity = "none" | "warning" | "critical";
 
-### ChatCompletionMessage（聊天消息）
-来自 OpenAI SDK，用于表示对话中的消息。
-
-```
-type ChatCompletionMessage =
-  | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string | null; tool_calls?: any[] }
-  | { role: 'system'; content: string }
-  | { role: 'tool'; content: string; tool_call_id: string }
+interface TokenWarning {
+  isApproaching: boolean;
+  severity: TokenWarningSeverity;
+  percentUsed: number;
+  tokensRemaining: number;
+}
 ```
 
-**不同角色的 Token 开销：**
-- System 消息：~100 Token 开销
-- User/Assistant 消息：~3 Token 开销（角色、格式标记等）
-- Tool 消息：~5 Token 开销（包含 tool_call_id）
+阈值：
 
-### TokenUsage（API 响应中的真实 Token 统计）
-来自 LLM API 的精确 Token 消耗数据。
+- `< 80%`: `none`
+- `>= 80%` 且 `< 95%`: `warning`
+- `>= 95%`: `critical`
 
+### HeuristicTokenCounter
+
+```typescript
+interface HeuristicTokenCounter {
+  estimateTokens(content: string): number;
+  getLimit(modelId: string): number;
+}
 ```
-prompt_tokens: number        // 输入 Token 数
-completion_tokens: number    // 输出 Token 数
-total_tokens: number         // 总计 Token 数
-```
+
+`createHeuristicTokenCounter()` 返回的对象与 `core/context` 的 `TokenCounter` 结构兼容，可作为 context manager 的默认估算器注入。
+
+### TokenUsage
+
+`TokenUsage` 表示 provider 返回的真实 usage，来源在 `services/providers` 和 `core/llm-client` 的流式响应中。它不是本模块的估算结果，不应和 `ContextTokens` 或 `TokenWarning` 混用。
 
 ## 设计约束
 
-1. **估算保守性**
-   - 所有估算都向上取整（使用 Math.floor 后不再向下舍入）
-   - 宁可高估也不低估，以避免意外超限
-
-2. **启发式算法的局限性**
-   - 估算值通常与实际值偏差 ±5-15%
-   - 不同模型、不同内容类型的偏差可能更大
-   - 永远不应将估算值作为成本计费的依据
-
-3. **模型限额的固定性**
-   - Token 限额由配置表定义，不支持运行时修改
-   - 未知模型使用默认限额 4,096（保守值）
+1. tokenCounting 是纯计算模块，不持有 session/message/run 状态。
+2. tokenCounting 不发网络请求，不依赖 provider SDK。
+3. 估算结果只能用于规划、预警、压缩决策输入，不能用于费用结算。
+4. provider 返回的真实 usage 由 llm-client 透传给上层消费者。

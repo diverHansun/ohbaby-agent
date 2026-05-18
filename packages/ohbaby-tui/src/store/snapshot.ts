@@ -87,6 +87,7 @@ export type TuiEvent =
       readonly partIndex?: number;
       readonly partId?: string;
       readonly delta: string;
+      readonly content?: string;
     }
   | { readonly type: "snapshot.replaced"; readonly snapshot: UiSnapshot };
 

@@ -24,6 +24,7 @@ import {
 } from "../../runtime/run-ledger/index.js";
 import {
   RunManager,
+  type HookExecutor,
   type ProfileRegistry,
   type RunDefaultsPolicy,
 } from "../../runtime/run-manager/index.js";
@@ -77,6 +78,7 @@ export interface UiRuntimeCompositionOptions {
   readonly llmClient: LLMClientInstance;
   readonly messageManager: MessageManager;
   readonly now?: () => number;
+  readonly hookExecutor?: HookExecutor;
   readonly permission?: PermissionPort;
   readonly policy: PolicyPort;
   readonly runLedger?: RunLedger;
@@ -321,6 +323,7 @@ export async function createUiRuntimeComposition(
       return reservedRunIds.shift() ?? nextRunId();
     },
     lifecycle,
+    hookExecutor: options.hookExecutor,
     now: options.now,
     policy: DEFAULT_RUN_POLICY,
     profileRegistry: DEFAULT_PROFILE_REGISTRY,

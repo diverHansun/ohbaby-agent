@@ -20,11 +20,13 @@ export function selectRuntimeLabel(state: TuiStoreState): string {
     case "idle":
       return "idle";
     case "running":
-      return state.runtime.title ?? "running";
+      return state.runtime.title
+        ? `${state.runtime.title} (${state.runtime.runId})`
+        : `running: ${state.runtime.runId}`;
     case "waiting-for-permission":
-      return "waiting-for-permission";
+      return `waiting: ${state.runtime.requestId}`;
     case "error":
-      return "error";
+      return `error: ${state.runtime.message}`;
   }
 }
 

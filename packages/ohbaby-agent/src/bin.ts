@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
-import { createInProcessUiBackendClient } from "./adapters/ui-inprocess.js";
+import { createPersistentUiBackendClient } from "./adapters/ui-persistent.js";
 import { CliArgumentError, parseCliArgs, renderHelp } from "./cli/args.js";
 import { EXIT_CODES } from "./cli/exit-codes.js";
 import { readStdin } from "./cli/stdin.js";
@@ -32,7 +32,7 @@ export async function runOhbabyCli(
     return EXIT_CODES.ok;
   }
 
-  const client = createInProcessUiBackendClient();
+  const client = createPersistentUiBackendClient();
   if (args.mode === "prompt" || !process.stdin.isTTY) {
     const renderer = createStdoutRenderer();
     client.subscribeEvents((event) => {

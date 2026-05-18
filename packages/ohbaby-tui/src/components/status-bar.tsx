@@ -9,9 +9,22 @@ export interface StatusBarProps {
 
 export function StatusBar({ state }: StatusBarProps): ReactElement {
   return (
-    <Text dimColor>
+    <Text color={statusColor(state)} dimColor={state.runtime.kind === "idle"}>
       status: {selectRuntimeLabel(state)}
       {state.activeSessionId === null ? "" : ` | session: ${state.activeSessionId}`}
     </Text>
   );
+}
+
+function statusColor(state: TuiStoreState): string | undefined {
+  switch (state.runtime.kind) {
+    case "error":
+      return "red";
+    case "running":
+      return "green";
+    case "waiting-for-permission":
+      return "yellow";
+    case "idle":
+      return undefined;
+  }
 }
