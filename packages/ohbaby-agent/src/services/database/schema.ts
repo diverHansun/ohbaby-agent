@@ -49,6 +49,12 @@ export const schema = {
     endedAt: "ended_at",
     error: "error",
   }),
+  appState: table("app_state", {
+    scope: "scope",
+    key: "key",
+    value: "value",
+    updatedAt: "updated_at",
+  }),
   snapshotCheckpoint: table("snapshot_checkpoint", {
     checkpointId: "checkpoint_id",
     sessionId: "session_id",
