@@ -2,12 +2,14 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { UiRun } from "ohbaby-sdk";
 import type {
   ProviderRequest,
   ProviderStreamEvent,
 } from "../services/providers/index.js";
 import type { LLMClientInstance } from "../core/llm-client/index.js";
-import { closeDatabase } from "../services/database/index.js";
+import { closeDatabase, getDatabase, schema } from "../services/database/index.js";
+import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
 import type { SnapshotService } from "../snapshot/index.js";
 import { createPersistentUiBackendClient } from "./ui-persistent.js";
 
@@ -54,6 +56,33 @@ function createFakeLLMClient(
       maxTokens: 128,
     },
   };
+}
+
+function requireRun(runs: readonly UiRun[], id: string): UiRun {
+  const run = runs.find((candidate) => candidate.id === id);
+  if (!run) {
+    throw new Error(`expected run ${id}`);
+  }
+  return run;
+}
+
+function markBackendLeaseDead(): void {
+  getDatabase()
+    .prepare(
+      `UPDATE ${schema.appState.tableName}
+       SET value = ?, updated_at = ?
+       WHERE scope = ? AND key = ?`,
+    )
+    .run(
+      JSON.stringify({
+        ownerId: "dead_backend",
+        pid: -1,
+        updatedAt: 42_000,
+      }),
+      42_000,
+      "global",
+      "persistentUiBackendLease",
+    );
 }
 
 async function tempDir(prefix: string): Promise<string> {
@@ -103,6 +132,112 @@ describe("createPersistentUiBackendClient", () => {
       ]);
       expect(snapshot.runs).toHaveLength(1);
       expect(snapshot.runs[0].status).toEqual({ kind: "idle" });
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("marks stale pending and running runs interrupted before restoring the first snapshot", async () => {
+    const directory = await tempDir("ohbaby-persistent-recovery-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      const client = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Seeded", finishReason: "stop" },
+        ]),
+        workdir,
+      });
+
+      await client.submitPrompt("Seed session");
+      const seededSnapshot = await client.getSnapshot();
+      const sessionId = seededSnapshot.activeSessionId;
+      if (!sessionId) {
+        throw new Error("expected seeded prompt to create an active session");
+      }
+
+      const runLedger = createDatabaseRunLedger({ now: () => 42_000 });
+      await runLedger.createPending({
+        runId: "run_stale_pending",
+        sessionId,
+        triggerSource: "user",
+      });
+      await runLedger.createPending({
+        runId: "run_stale_running",
+        sessionId,
+        triggerSource: "user",
+      });
+      await runLedger.markRunning("run_stale_running");
+      markBackendLeaseDead();
+
+      const restored = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        workdir,
+      });
+      const snapshot = await restored.getSnapshot();
+      const stalePending = requireRun(snapshot.runs, "run_stale_pending");
+      const staleRunning = requireRun(snapshot.runs, "run_stale_running");
+
+      expect(snapshot.status).toEqual({ kind: "idle" });
+      expect(stalePending.status.kind).toBe("error");
+      expect(stalePending.status.kind === "error" ? stalePending.status.message : "")
+        .toContain("interrupted");
+      expect(staleRunning.status.kind).toBe("error");
+      expect(staleRunning.status.kind === "error" ? staleRunning.status.message : "")
+        .toContain("interrupted");
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("does not interrupt active runs when another live backend owns the database", async () => {
+    const directory = await tempDir("ohbaby-persistent-live-owner-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      const client = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Seeded", finishReason: "stop" },
+        ]),
+        workdir,
+      });
+
+      await client.submitPrompt("Seed session");
+      const seededSnapshot = await client.getSnapshot();
+      const sessionId = seededSnapshot.activeSessionId;
+      if (!sessionId) {
+        throw new Error("expected seeded prompt to create an active session");
+      }
+
+      const runLedger = createDatabaseRunLedger({ now: () => 42_000 });
+      await runLedger.createPending({
+        runId: "run_live_pending",
+        sessionId,
+        triggerSource: "user",
+      });
+      await runLedger.markRunning("run_live_pending");
+
+      const restored = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        workdir,
+      });
+      const snapshot = await restored.getSnapshot();
+      const liveRun = requireRun(snapshot.runs, "run_live_pending");
+
+      expect(liveRun.status).toEqual({
+        kind: "running",
+        runId: "run_live_pending",
+      });
+      expect(snapshot.status).toEqual({
+        kind: "running",
+        runId: "run_live_pending",
+      });
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

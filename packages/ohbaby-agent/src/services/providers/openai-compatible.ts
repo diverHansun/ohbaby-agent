@@ -63,6 +63,11 @@ function buildRequestParams(request: ProviderRequest): ChatCompletionCreateParam
 }
 
 function buildStreamEvent(chunk: ChatCompletionChunk): ProviderStreamEvent | null {
+  if (chunk.choices.length === 0) {
+    const tokenUsage = normalizeTokenUsage(chunk.usage);
+    return tokenUsage ? { tokenUsage } : null;
+  }
+
   const choice = chunk.choices[0];
   const mappedToolCallDeltas = choice.delta.tool_calls?.map((toolCall) => ({
     index: toolCall.index,
@@ -94,6 +99,16 @@ function buildStreamEvent(chunk: ChatCompletionChunk): ProviderStreamEvent | nul
   return event;
 }
 
+function isUsageOnlyEvent(event: ProviderStreamEvent): boolean {
+  return (
+    event.tokenUsage !== undefined &&
+    event.textDelta === undefined &&
+    event.finishReason === undefined &&
+    event.rawFinishReason === undefined &&
+    (event.toolCallDeltas === undefined || event.toolCallDeltas.length === 0)
+  );
+}
+
 export function createOpenAICompatibleProvider(
   options: CreateProviderOptions
 ): ProviderInstance<OpenAI> {
@@ -112,11 +127,38 @@ export function createOpenAICompatibleProvider(
       });
 
       return (async function* (): AsyncGenerator<ProviderStreamEvent, void, unknown> {
+        let pendingTerminalEvent: ProviderStreamEvent | null = null;
+
         for await (const chunk of stream) {
           const event = buildStreamEvent(chunk);
           if (event) {
+            if (pendingTerminalEvent) {
+              if (
+                isUsageOnlyEvent(event) &&
+                pendingTerminalEvent.tokenUsage === undefined
+              ) {
+                const terminalEvent: ProviderStreamEvent = pendingTerminalEvent;
+                pendingTerminalEvent = {
+                  ...terminalEvent,
+                  tokenUsage: event.tokenUsage,
+                };
+                continue;
+              }
+              yield pendingTerminalEvent;
+              pendingTerminalEvent = null;
+            }
+
+            if (event.finishReason !== undefined) {
+              pendingTerminalEvent = event;
+              continue;
+            }
+
             yield event;
           }
+        }
+
+        if (pendingTerminalEvent) {
+          yield pendingTerminalEvent;
         }
       })();
     },

@@ -189,4 +189,58 @@ describe('openai-compatible provider', () => {
       },
     ]);
   });
+
+  it('should yield token usage from the final usage-only chunk', async () => {
+    const provider = createOpenAICompatibleProvider({
+      provider: 'openai',
+      apiKey: 'test-key',
+      baseUrl: 'https://api.openai.com/v1',
+    });
+    vi.spyOn(provider.client.chat.completions, 'create').mockResolvedValue(
+      createChunkStream([
+        createChunk({
+          choices: [
+            {
+              delta: { content: 'ok' },
+              finish_reason: 'stop',
+              index: 0,
+            },
+          ],
+        }),
+        createChunk({
+          choices: [],
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 2,
+            total_tokens: 12,
+          },
+        }),
+      ]) as unknown as Awaited<ReturnType<typeof provider.client.chat.completions.create>>
+    );
+
+    const stream = await provider.streamChatCompletion({
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: 'Hello' }],
+      temperature: 0.7,
+      maxTokens: 128,
+    });
+    const events: ProviderStreamEvent[] = [];
+
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      {
+        textDelta: 'ok',
+        finishReason: 'stop',
+        rawFinishReason: 'stop',
+        tokenUsage: {
+          prompt_tokens: 10,
+          completion_tokens: 2,
+          total_tokens: 12,
+        },
+      },
+    ]);
+  });
 });

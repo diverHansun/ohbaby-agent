@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { UiBackendClient } from "ohbaby-sdk";
 import { createBus, type BusInstance } from "../bus/index.js";
 import {
@@ -9,6 +10,7 @@ import {
   closeDatabase,
   getDatabase,
   initDatabase,
+  schema,
   type DatabaseConnection,
 } from "../services/database/index.js";
 import { createStorage } from "../services/storage/index.js";
@@ -47,6 +49,139 @@ export interface PersistentUiBackendOptions
 
 function numericNow(now?: () => Date): () => number {
   return () => (now?.() ?? new Date()).getTime();
+}
+
+const BACKEND_LEASE_SCOPE = "global";
+const BACKEND_LEASE_KEY = "persistentUiBackendLease";
+
+interface BackendLease {
+  readonly ownerId: string;
+  readonly pid: number;
+  readonly updatedAt: number;
+}
+
+interface BackendLeaseRow {
+  readonly value: string;
+}
+
+interface ActiveRunCountRow {
+  readonly count: number;
+}
+
+function createBackendOwnerId(): string {
+  return `backend_${String(process.pid)}_${randomUUID()}`;
+}
+
+function isBackendLease(value: unknown): value is BackendLease {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "ownerId" in value &&
+    typeof value.ownerId === "string" &&
+    "pid" in value &&
+    typeof value.pid === "number" &&
+    "updatedAt" in value &&
+    typeof value.updatedAt === "number"
+  );
+}
+
+function parseBackendLease(value: string): BackendLease | undefined {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isBackendLease(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "EPERM"
+    );
+  }
+}
+
+function readBackendLease(db: DatabaseConnection): BackendLease | undefined {
+  const row = db
+    .prepare<BackendLeaseRow>(
+      `SELECT value FROM ${schema.appState.tableName}
+       WHERE scope = ? AND key = ?`,
+    )
+    .get(BACKEND_LEASE_SCOPE, BACKEND_LEASE_KEY);
+  return row ? parseBackendLease(row.value) : undefined;
+}
+
+function writeBackendLease(input: {
+  readonly db: DatabaseConnection;
+  readonly now: () => number;
+  readonly ownerId: string;
+}): void {
+  const updatedAt = input.now();
+  const lease: BackendLease = {
+    ownerId: input.ownerId,
+    pid: process.pid,
+    updatedAt,
+  };
+  input.db
+    .prepare(
+      `INSERT INTO ${schema.appState.tableName} (scope, key, value, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(scope, key) DO UPDATE SET
+         value = excluded.value,
+         updated_at = excluded.updated_at`,
+    )
+    .run(
+      BACKEND_LEASE_SCOPE,
+      BACKEND_LEASE_KEY,
+      JSON.stringify(lease),
+      updatedAt,
+    );
+}
+
+function countActiveRuns(db: DatabaseConnection): number {
+  return (
+    db
+      .prepare<ActiveRunCountRow>(
+        `SELECT COUNT(*) as count FROM ${schema.runLedger.tableName}
+         WHERE status IN ('pending', 'running')`,
+      )
+      .get()?.count ?? 0
+  );
+}
+
+function shouldRecoverStartupRuns(input: {
+  readonly db: DatabaseConnection;
+  readonly now: () => number;
+  readonly ownerId: string;
+}): boolean {
+  input.db.exec("BEGIN IMMEDIATE");
+  try {
+    const activeRunCount = countActiveRuns(input.db);
+    const liveOwner = isProcessAlive(readBackendLease(input.db)?.pid ?? -1);
+    if (!liveOwner || activeRunCount === 0) {
+      writeBackendLease(input);
+    }
+    input.db.exec("COMMIT");
+    return activeRunCount > 0 && !liveOwner;
+  } catch (error) {
+    try {
+      input.db.exec("ROLLBACK");
+    } catch {
+      // Keep the original startup recovery failure.
+    }
+    throw error;
+  }
 }
 
 function composeHookExecutors(
@@ -120,6 +255,64 @@ function createSnapshotExecutor(input: {
   return createSnapshotHookExecutor(options);
 }
 
+function withStartupRecovery(
+  client: UiBackendClient,
+  recovery: Promise<unknown>,
+): UiBackendClient {
+  async function ready(): Promise<void> {
+    await recovery;
+  }
+
+  return {
+    async getSnapshot(): ReturnType<UiBackendClient["getSnapshot"]> {
+      await ready();
+      return client.getSnapshot();
+    },
+    subscribeEvents(
+      handler,
+    ): ReturnType<UiBackendClient["subscribeEvents"]> {
+      return client.subscribeEvents(handler);
+    },
+    async listCommands(
+      query,
+    ): ReturnType<UiBackendClient["listCommands"]> {
+      await ready();
+      return client.listCommands(query);
+    },
+    async submitPrompt(
+      text,
+      submitOptions,
+    ): ReturnType<UiBackendClient["submitPrompt"]> {
+      await ready();
+      return client.submitPrompt(text, submitOptions);
+    },
+    async executeCommand(
+      invocation,
+    ): ReturnType<UiBackendClient["executeCommand"]> {
+      await ready();
+      return client.executeCommand(invocation);
+    },
+    async respondPermission(
+      requestId,
+      response,
+    ): ReturnType<UiBackendClient["respondPermission"]> {
+      await ready();
+      return client.respondPermission(requestId, response);
+    },
+    async respondInteraction(
+      interactionId,
+      response,
+    ): ReturnType<UiBackendClient["respondInteraction"]> {
+      await ready();
+      return client.respondInteraction(interactionId, response);
+    },
+    async abortRun(runId): ReturnType<UiBackendClient["abortRun"]> {
+      await ready();
+      return client.abortRun(runId);
+    },
+  };
+}
+
 export function createPersistentUiBackendClient(
   options: PersistentUiBackendOptions = {},
 ): UiBackendClient {
@@ -161,8 +354,18 @@ export function createPersistentUiBackendClient(
       storageRoot: options.storageRoot,
     }),
   ]);
+  const backendOwnerId = createBackendOwnerId();
+  const startupRecovery = shouldRecoverStartupRuns({
+    db,
+    now,
+    ownerId: backendOwnerId,
+  })
+    ? runLedger.markInterrupted({
+        statuses: ["pending", "running"],
+      })
+    : Promise.resolve({ updatedCount: 0 });
 
-  return createInProcessUiBackendClient({
+  return withStartupRecovery(createInProcessUiBackendClient({
     agentManager: options.agentManager,
     bus,
     createLLMClient: options.createLLMClient,
@@ -177,7 +380,7 @@ export function createPersistentUiBackendClient(
     stateStore,
     streamBridge: options.streamBridge,
     workdir: options.workdir,
-  });
+  }), startupRecovery);
 }
 
 export { closeDatabase as closePersistentUiBackendDatabase };
