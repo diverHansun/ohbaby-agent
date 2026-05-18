@@ -207,6 +207,7 @@ export class RunManager {
         sandboxLease,
         abortSignal: record.abortController.signal,
         agent: record.options.agent,
+        isSubagent: record.options.isSubagent,
         parentMessageId: record.options.parentMessageId,
         messages: record.options.messages,
         tools: record.options.tools,

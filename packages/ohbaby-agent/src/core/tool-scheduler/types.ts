@@ -108,6 +108,8 @@ export interface ToolCallRequest {
   readonly params: Record<string, unknown>;
   readonly sessionId: string;
   readonly messageId: string;
+  readonly agentName?: string;
+  readonly isSubagent?: boolean;
   readonly environment?: ToolExecutionEnvironment;
   readonly signal?: AbortSignal;
 }

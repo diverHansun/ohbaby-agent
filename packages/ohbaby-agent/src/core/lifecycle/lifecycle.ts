@@ -635,6 +635,8 @@ export class Lifecycle {
     const requests: ToolCallRequest[] = input.toolCalls.map((toolCall) => ({
       callId: toolCall.id,
       environment: input.params.environment,
+      agentName: input.params.agent,
+      isSubagent: input.params.isSubagent,
       messageId,
       params: toolCall.arguments,
       sessionId: input.params.sessionId,

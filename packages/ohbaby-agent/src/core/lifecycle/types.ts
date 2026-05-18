@@ -28,6 +28,7 @@ export interface LifecycleRunParams {
   readonly signal?: AbortSignal;
   readonly tools?: ChatCompletionCreateParams["tools"];
   readonly environment?: ToolExecutionEnvironment;
+  readonly isSubagent?: boolean;
   readonly maxSteps?: number;
 }
 

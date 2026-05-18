@@ -27,7 +27,16 @@ import {
   createDatabaseSessionStore,
   createSessionManager,
 } from "../services/session/index.js";
-import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
+import { AgentManager, AgentRegistry } from "../agents/index.js";
+import type { AgentsConfig } from "../agents/index.js";
+import {
+  createDatabaseRunLedger,
+  createInMemoryRunLedger,
+  type MarkInterruptedOptions,
+  type MarkInterruptedResult,
+  type RunLedger,
+  type RunLedgerRecord,
+} from "../runtime/run-ledger/index.js";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
 import {
   createDatabaseUiAppStateStore,
@@ -165,6 +174,64 @@ function createInitialSnapshotWithTwoSessions(): UiSnapshot {
   };
 }
 
+class RecordingRunLedger implements RunLedger {
+  readonly calls: string[] = [];
+  private readonly inner: RunLedger;
+
+  constructor(now: () => number = Date.now) {
+    this.inner = createInMemoryRunLedger({ now });
+  }
+
+  createPending(
+    input: Parameters<RunLedger["createPending"]>[0],
+  ): Promise<RunLedgerRecord> {
+    this.calls.push("createPending");
+    return this.inner.createPending(input);
+  }
+
+  markRunning(runId: string): Promise<RunLedgerRecord> {
+    this.calls.push("markRunning");
+    return this.inner.markRunning(runId);
+  }
+
+  markSucceeded(runId: string): Promise<RunLedgerRecord> {
+    this.calls.push("markSucceeded");
+    return this.inner.markSucceeded(runId);
+  }
+
+  markFailed(runId: string, error: unknown): Promise<RunLedgerRecord> {
+    this.calls.push("markFailed");
+    return this.inner.markFailed(runId, error);
+  }
+
+  markCancelled(runId: string, reason?: string): Promise<RunLedgerRecord> {
+    this.calls.push("markCancelled");
+    return this.inner.markCancelled(runId, reason);
+  }
+
+  markInterrupted(
+    options?: MarkInterruptedOptions,
+  ): Promise<MarkInterruptedResult> {
+    this.calls.push("markInterrupted");
+    return this.inner.markInterrupted(options);
+  }
+
+  get(runId: string): Promise<RunLedgerRecord | undefined> {
+    return this.inner.get(runId);
+  }
+
+  listBySession(
+    sessionId: string,
+    options?: Parameters<RunLedger["listBySession"]>[1],
+  ): Promise<RunLedgerRecord[]> {
+    return this.inner.listBySession(sessionId, options);
+  }
+
+  getActiveRuns(sessionId?: string): Promise<RunLedgerRecord[]> {
+    return this.inner.getActiveRuns(sessionId);
+  }
+}
+
 describe("createInProcessUiBackendClient", () => {
   it("submits a prompt and publishes streaming message updates", async () => {
     const client = createInProcessUiBackendClient({
@@ -290,6 +357,144 @@ describe("createInProcessUiBackendClient", () => {
       parts[1]?.type === "tool-result" ? parts[1].result.output : "",
     ).toContain("builtin.ts");
     expect(parts[2]).toEqual({ type: "text", text: "Listed." });
+  });
+
+  it("uses RunManager ledger and stream status for prompt runs", async () => {
+    const runLedger = new RecordingRunLedger(() => 1_700_000_000_000);
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([
+        { textDelta: "Done", finishReason: "stop" },
+      ]),
+      runLedger,
+    });
+    const events: UiEvent[] = [];
+
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    await client.submitPrompt("Use the runtime manager");
+
+    expect(runLedger.calls).toEqual([
+      "createPending",
+      "markRunning",
+      "markSucceeded",
+    ]);
+    const runUpdates = events.filter(
+      (event): event is Extract<UiEvent, { type: "run.updated" }> =>
+        event.type === "run.updated",
+    );
+    expect(
+      runUpdates.map((event) => ({
+        id: event.run.id,
+        status: event.run.status,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          id: "run_1",
+          status: { kind: "running", runId: "run_1" },
+        },
+        {
+          id: "run_1",
+          status: { kind: "idle" },
+        },
+      ]),
+    );
+  });
+
+  it("filters available tools through AgentManager", async () => {
+    const requests: ProviderRequest[] = [];
+    const registry = new AgentRegistry({
+      builtinAgents: [
+        {
+          default: true,
+          description: "Narrow test agent",
+          mode: "primary",
+          name: "narrow",
+          tools: { include: ["read"] },
+        },
+      ],
+      configLoader: (): AgentsConfig => ({ agents: {} }),
+    });
+    const agentManager = new AgentManager({ registry });
+    const client = createInProcessUiBackendClient({
+      agentManager,
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"command":"echo hidden"}',
+                  id: "call_bash",
+                  index: 0,
+                  name: "bash",
+                },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+          [{ textDelta: "Filtered", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+
+    await client.submitPrompt("Which tools are available?");
+
+    expect(requests[0]?.tools?.map((tool) => tool.function.name)).toEqual([
+      "read",
+    ]);
+    const rejectedToolMessage = requests[1]?.messages.at(-1);
+    expect(rejectedToolMessage).toMatchObject({
+      role: "tool",
+      tool_call_id: "call_bash",
+    });
+    expect(
+      typeof rejectedToolMessage?.content === "string"
+        ? rejectedToolMessage.content
+        : "",
+    ).toContain("Tool not available for agent: bash");
+    const snapshot = await client.getSnapshot();
+    const parts = snapshot.sessions[0].messages[1].parts;
+    expect(parts[0]).toMatchObject({
+      call: {
+        id: "call_bash",
+        name: "bash",
+        status: "failed",
+      },
+      type: "tool-call",
+    });
+  });
+
+  it("appends a fresh assistant message when continuing a session", async () => {
+    const requests: ProviderRequest[] = [];
+    const client = createInProcessUiBackendClient({
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [{ textDelta: "First answer", finishReason: "stop" }],
+          [{ textDelta: "Second answer", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+
+    await client.submitPrompt("First", { sessionId: "session_1" });
+    await client.submitPrompt("Second", { sessionId: "session_1" });
+
+    const snapshot = await client.getSnapshot();
+    expect(snapshot.sessions[0].messages.map((message) => message.role)).toEqual(
+      ["user", "assistant", "user", "assistant"],
+    );
+    expect(snapshot.sessions[0].messages.map((message) => message.parts)).toEqual(
+      [
+        [{ type: "text", text: "First" }],
+        [{ type: "text", text: "First answer" }],
+        [{ type: "text", text: "Second" }],
+        [{ type: "text", text: "Second answer" }],
+      ],
+    );
   });
 
   it("marks the run and app status as error when streaming fails", async () => {
