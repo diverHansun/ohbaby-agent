@@ -110,4 +110,16 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
         ON part(message_id, order_index);
     `,
   },
+  {
+    version: "003_app_state",
+    sql: `
+      CREATE TABLE IF NOT EXISTS app_state (
+        scope TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (scope, key)
+      );
+    `,
+  },
 ];

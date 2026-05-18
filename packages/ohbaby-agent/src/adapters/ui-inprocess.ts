@@ -43,6 +43,10 @@ import {
   createMessageManager,
 } from "../core/message/index.js";
 import type { MessageManager } from "../core/message/index.js";
+import type {
+  Session as CoreSession,
+  SessionManager,
+} from "../services/session/index.js";
 import {
   createPermissionManager,
   PermissionEvent,
@@ -59,6 +63,7 @@ import {
   cloneSession,
   createInMemoryUiStateStore,
 } from "./ui-state/index.js";
+import type { UiStateStore } from "./ui-state/index.js";
 
 const EMPTY_SNAPSHOT: UiSnapshot = {
   sessions: [],
@@ -75,6 +80,12 @@ export interface InProcessUiBackendOptions {
   readonly llmClient?: LLMClientInstance;
   readonly createLLMClient?: () => Promise<LLMClientInstance>;
   readonly messageManager?: MessageManager;
+  readonly sessionManager?: Pick<
+    SessionManager,
+    "create" | "get" | "getRecent"
+  >;
+  readonly stateStore?: UiStateStore;
+  readonly projectDirectory?: string;
   readonly now?: () => Date;
 }
 
@@ -184,6 +195,16 @@ function createTextMessage(input: {
     role: input.role,
     createdAt: input.createdAt,
     parts: input.text === "" ? [] : [{ type: "text", text: input.text }],
+  };
+}
+
+function sessionMetadataToUiSession(session: CoreSession): UiSession {
+  return {
+    createdAt: new Date(session.createdAt).toISOString(),
+    id: session.id,
+    messages: [],
+    title: session.title,
+    updatedAt: new Date(session.updatedAt).toISOString(),
   };
 }
 
@@ -333,7 +354,7 @@ export function createInProcessUiBackendClient(
     ? { initialSnapshot: optionsOrSnapshot }
     : optionsOrSnapshot;
   const initialSnapshot = options.initialSnapshot ?? EMPTY_SNAPSHOT;
-  const stateStore = createInMemoryUiStateStore(initialSnapshot);
+  const stateStore = options.stateStore ?? createInMemoryUiStateStore(initialSnapshot);
   const bus = createBus();
   const policy = createPolicyManager({ bus });
   const permission = createPermissionManager({ bus });
@@ -367,6 +388,38 @@ export function createInProcessUiBackendClient(
   let activeAbortController: AbortController | undefined;
   let activeRunId: string | undefined;
   const pendingPermissionSessions = new Map<string, string>();
+
+  function assertStateStoreWritable(): void {
+    if (
+      stateStore.requiresServiceManagersForWrites === true &&
+      (!options.sessionManager || !options.messageManager)
+    ) {
+      throw new Error(
+        "Persistent UI state store requires injected sessionManager and messageManager for prompt submission",
+      );
+    }
+  }
+
+  async function reserveIdsFromState(): Promise<void> {
+    const snapshot = await stateStore.readSnapshot();
+    for (const session of snapshot.sessions) {
+      sessionIds.reserve(session.id);
+      for (const message of session.messages) {
+        messageIds.reserve(message.id);
+      }
+    }
+    for (const run of snapshot.runs) {
+      runIds.reserve(run.id);
+    }
+  }
+
+  async function nextRunId(): Promise<string> {
+    let runId = runIds.next();
+    while ((await stateStore.hasRun?.(runId)) === true) {
+      runId = runIds.next();
+    }
+    return runId;
+  }
 
   function now(): Date {
     return options.now?.() ?? new Date();
@@ -448,6 +501,13 @@ export function createInProcessUiBackendClient(
   async function listSessionsFromState(): Promise<
     readonly CommandSessionSummary[]
   > {
+    if (options.sessionManager) {
+      const sessions = await options.sessionManager.getRecent();
+      return sessions.map((session) => ({
+        id: session.id,
+        title: session.title,
+      }));
+    }
     const snapshot = await stateStore.readSnapshot();
     return snapshot.sessions.map((session) => ({
       id: session.id,
@@ -666,25 +726,48 @@ export function createInProcessUiBackendClient(
       if (promptInFlight) {
         throw new Error("A prompt is already running");
       }
+      assertStateStoreWritable();
 
       promptInFlight = true;
       activeAbortController = new AbortController();
       const createdAt = timestamp();
 
       try {
+        await reserveIdsFromState();
         let session = submitOptions?.sessionId
           ? await stateStore.getSession(submitOptions.sessionId)
           : undefined;
+        if (!session && submitOptions?.sessionId && options.sessionManager) {
+          const existingSession = await options.sessionManager.get(
+            submitOptions.sessionId,
+          );
+          session = existingSession
+            ? sessionMetadataToUiSession(existingSession)
+            : undefined;
+        }
 
         const isNewSession = !session;
         if (!session) {
-          session = {
-            id: submitOptions?.sessionId ?? sessionIds.next(),
-            title: text.trim().slice(0, 48) || "Untitled session",
-            messages: [],
-            createdAt,
-            updatedAt: createdAt,
-          };
+          const title = text.trim().slice(0, 48) || "Untitled session";
+          if (options.sessionManager) {
+            const created = await options.sessionManager.create(
+              options.projectDirectory ?? process.cwd(),
+              {
+                agentName: "default",
+                id: submitOptions?.sessionId,
+                title,
+              },
+            );
+            session = sessionMetadataToUiSession(created);
+          } else {
+            session = {
+              id: submitOptions?.sessionId ?? sessionIds.next(),
+              title,
+              messages: [],
+              createdAt,
+              updatedAt: createdAt,
+            };
+          }
           sessionIds.reserve(session.id);
         }
 
@@ -723,7 +806,7 @@ export function createInProcessUiBackendClient(
           message: cloneMessage(userMessage),
         });
 
-        const runId = runIds.next();
+        const runId = await nextRunId();
         activeRunId = runId;
         let run: UiRun = {
           id: runId,

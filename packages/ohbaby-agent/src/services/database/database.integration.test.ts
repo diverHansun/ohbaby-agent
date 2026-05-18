@@ -74,6 +74,7 @@ describe("services/database", () => {
     expect(rows).toEqual([
       { version: "001_initial" },
       { version: "002_part_order_unique" },
+      { version: "003_app_state" },
     ]);
   });
 

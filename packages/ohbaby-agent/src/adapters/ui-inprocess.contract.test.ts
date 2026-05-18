@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import type { UiEvent, UiSnapshot } from "ohbaby-sdk";
 import type {
@@ -8,6 +11,7 @@ import type { LLMClientInstance } from "../core/llm-client/index.js";
 import { createBus } from "../bus/index.js";
 import {
   createInMemoryMessageStore,
+  createDatabaseMessageStore,
   createMessageManager,
 } from "../core/message/index.js";
 import type {
@@ -15,7 +19,20 @@ import type {
   MessageManager,
   MessageStore,
 } from "../core/message/index.js";
+import {
+  closeDatabase,
+  initDatabase,
+} from "../services/database/index.js";
+import {
+  createDatabaseSessionStore,
+  createSessionManager,
+} from "../services/session/index.js";
+import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
+import {
+  createDatabaseUiAppStateStore,
+  createPersistentUiStateStore,
+} from "./ui-state/index.js";
 
 interface FakeSdkClient {
   readonly kind: "fake";
@@ -555,6 +572,207 @@ describe("createInProcessUiBackendClient", () => {
     });
   });
 
+  it("lists sessions from an injected persistent session manager", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-client-db-"));
+    try {
+      initDatabase({ dbPath: join(directory, "agent.db") });
+      const messageManager = createMessageManager({
+        bus: createBus(),
+        store: createDatabaseMessageStore(),
+      });
+      const sessionManager = createSessionManager({
+        bus: createBus(),
+        createSessionId: () => "session_from_db",
+        messageCleaner: {
+          removeMessages(sessionId: string) {
+            return messageManager.removeMessages(sessionId);
+          },
+        },
+        now: () => 1_000,
+        projectResolver: {
+          fromDirectory(projectDirectory: string) {
+            return {
+              id: "project:db",
+              rootPath: projectDirectory,
+            };
+          },
+        },
+        store: createDatabaseSessionStore(),
+      });
+      await sessionManager.create("D:/repo", {
+        title: "Stored session",
+      });
+
+      const client = createInProcessUiBackendClient({
+        llmClient: createFakeLLMClient([]),
+        messageManager,
+        sessionManager,
+        stateStore: createPersistentUiStateStore({
+          appState: createDatabaseUiAppStateStore(),
+          messageManager,
+          runLedger: createDatabaseRunLedger(),
+          sessionManager,
+        }),
+      });
+      const events: UiEvent[] = [];
+      client.subscribeEvents((event) => {
+        events.push(event);
+      });
+
+      await client.executeCommand({
+        argv: [],
+        clientInvocationId: "inv_session_list",
+        commandId: "session.list",
+        path: ["session", "list"],
+        raw: "/session list",
+        rawArgs: "",
+        surface: "tui",
+      });
+
+      expect(events.at(-1)).toMatchObject({
+        output: {
+          data: {
+            sessions: [{ id: "session_from_db", title: "Stored session" }],
+          },
+          kind: "data",
+          subject: "session.list",
+        },
+        type: "command.result.delivered",
+      });
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("reserves run ids from an injected persistent state store before submitting", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-run-id-db-"));
+    try {
+      initDatabase({ dbPath: join(directory, "agent.db") });
+      let nextSession = 1;
+      const messageManager = createMessageManager({
+        bus: createBus(),
+        store: createDatabaseMessageStore(),
+      });
+      const sessionManager = createSessionManager({
+        bus: createBus(),
+        createSessionId: () => {
+          const id = `session_${String(nextSession)}`;
+          nextSession += 1;
+          return id;
+        },
+        messageCleaner: {
+          removeMessages(sessionId: string) {
+            return messageManager.removeMessages(sessionId);
+          },
+        },
+        now: createNumericClock(1_000),
+        projectResolver: {
+          fromDirectory(projectDirectory: string) {
+            return {
+              id: "project:db",
+              rootPath: projectDirectory,
+            };
+          },
+        },
+        store: createDatabaseSessionStore(),
+      });
+      const existingSession = await sessionManager.create("D:/repo", {
+        title: "Existing",
+      });
+      for (let index = 2; index <= 51; index += 1) {
+        await sessionManager.create("D:/repo", {
+          title: `Recent ${String(index)}`,
+        });
+      }
+      const runLedger = createDatabaseRunLedger({
+        now: createNumericClock(10_000),
+      });
+      await runLedger.createPending({
+        runId: "run_1",
+        sessionId: existingSession.id,
+        triggerSource: "user",
+      });
+      await runLedger.markRunning("run_1");
+      await runLedger.markSucceeded("run_1");
+
+      const client = createInProcessUiBackendClient({
+        llmClient: createFakeLLMClient([
+          { textDelta: "Persisted", finishReason: "stop" },
+        ]),
+        messageManager,
+        sessionManager,
+        stateStore: createPersistentUiStateStore({
+          appState: createDatabaseUiAppStateStore(),
+          messageManager,
+          runLedger,
+          sessionManager,
+        }),
+      });
+
+      await client.submitPrompt("Create another run");
+
+      await expect(runLedger.get("run_1")).resolves.toMatchObject({
+        runId: "run_1",
+        sessionId: "session_1",
+      });
+      await expect(runLedger.get("run_2")).resolves.toMatchObject({
+        runId: "run_2",
+        sessionId: "session_52",
+      });
+      await expect(client.getSnapshot()).resolves.toMatchObject({
+        runs: [{ id: "run_2", sessionId: "session_52" }],
+      });
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects prompt submission when persistent state is injected without matching service managers", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-missing-services-"));
+    try {
+      initDatabase({ dbPath: join(directory, "agent.db") });
+      const client = createInProcessUiBackendClient({
+        llmClient: createFakeLLMClient([
+          { textDelta: "Never reached", finishReason: "stop" },
+        ]),
+        stateStore: createPersistentUiStateStore({
+          appState: createDatabaseUiAppStateStore(),
+          messageManager: createMessageManager({
+            bus: createBus(),
+            store: createDatabaseMessageStore(),
+          }),
+          runLedger: createDatabaseRunLedger(),
+          sessionManager: createSessionManager({
+            bus: createBus(),
+            messageCleaner: {
+              removeMessages(): Promise<void> {
+                return Promise.resolve();
+              },
+            },
+            projectResolver: {
+              fromDirectory(projectDirectory: string) {
+                return {
+                  id: "project:db",
+                  rootPath: projectDirectory,
+                };
+              },
+            },
+            store: createDatabaseSessionStore(),
+          }),
+        }),
+      });
+
+      await expect(client.submitPrompt("Should fail clearly")).rejects.toThrow(
+        /requires injected sessionManager and messageManager/i,
+      );
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("round-trips command interactions through respondInteraction", async () => {
     const client = createInProcessUiBackendClient({
       llmClient: createFakeLLMClient([]),
@@ -666,6 +884,15 @@ function createDeterministicMessageIds(): MessageIdGenerator {
       nextPartId += 1;
       return id;
     },
+  };
+}
+
+function createNumericClock(startAt: number): () => number {
+  let current = startAt;
+  return () => {
+    const value = current;
+    current += 1_000;
+    return value;
   };
 }
 

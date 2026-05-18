@@ -71,6 +71,10 @@ export function createInMemoryUiStateStore(
   const snapshot = toMutableSnapshot(initialSnapshot);
 
   return {
+    hasRun(runId: string): Promise<boolean> {
+      return Promise.resolve(snapshot.runs.some((run) => run.id === runId));
+    },
+
     readSnapshot(): Promise<UiSnapshot> {
       return Promise.resolve(cloneSnapshot(snapshot));
     },
