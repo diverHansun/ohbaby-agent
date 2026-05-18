@@ -63,7 +63,7 @@ function useMessages(): readonly UiMessage[]
 ```typescript
 function usePartDelta(
   messageId: string,
-  partIndex: number,
+  partId?: string,
   handler: (delta: string) => void
 ): void
 ```

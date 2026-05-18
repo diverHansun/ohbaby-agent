@@ -29,6 +29,7 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
     catalogInvalidation: null,
     commandNotices: [],
     commandNoticeSequence: 0,
+    resolvedPermissionIds: [],
     interactions: [],
     messages: activeSession?.messages ?? [],
     permissions: snapshot.permissions,
@@ -82,7 +83,6 @@ export function applyTuiEvent(
               event.messageId !== undefined && message.id === event.messageId
                 ? applyPartDelta(
                     message,
-                    "partIndex" in event ? event.partIndex : undefined,
                     event.partId,
                     event.delta,
                     event.content,
@@ -104,7 +104,10 @@ export function applyTuiEvent(
       });
 
     case "permission.requested":
-      return rebuildFromCollections(state, {
+      if (state.resolvedPermissionIds.includes(event.request.id)) {
+        return state;
+      }
+      return rebuildWithPermissions(state, {
         permissions: upsertById(state.permissions, event.request),
         runtime: {
           kind: "waiting-for-permission",
@@ -113,16 +116,20 @@ export function applyTuiEvent(
       });
 
     case "permission.resolved":
-      return rebuildFromCollections(state, {
-        permissions: state.permissions.filter(
-          (request) => request.id !== event.requestId,
-        ),
-        runtime:
-          state.runtime.kind === "waiting-for-permission" &&
-          state.runtime.requestId === event.requestId
-            ? { kind: "idle" }
-            : state.runtime,
-      });
+      return rebuildWithPermissions(
+        {
+          ...state,
+          resolvedPermissionIds: rememberResolvedPermission(
+            state.resolvedPermissionIds,
+            event.requestId,
+          ),
+        },
+        {
+          permissions: state.permissions.filter(
+            (request) => request.id !== event.requestId,
+          ),
+        },
+      );
 
     case "command.result.delivered":
       return appendCommandNotice(state, {
@@ -229,13 +236,24 @@ function preserveLocalQueues(
   previous: TuiStoreState,
   next: TuiStoreState,
 ): TuiStoreState {
+  const permissions = mergePermissions(
+    previous.permissions,
+    next.permissions,
+    previous.resolvedPermissionIds,
+  );
   return {
     ...next,
     catalog: previous.catalog,
-    catalogInvalidation: null,
-    commandNotices: [],
+    catalogInvalidation: previous.catalogInvalidation,
+    commandNotices: previous.commandNotices,
     commandNoticeSequence: previous.commandNoticeSequence,
-    interactions: [],
+    interactions: previous.interactions,
+    permissions,
+    resolvedPermissionIds: previous.resolvedPermissionIds,
+    runtime:
+      permissions.length > 0
+        ? { kind: "waiting-for-permission", requestId: permissions[0].id }
+        : next.runtime,
   };
 }
 
@@ -279,6 +297,59 @@ function rebuildFromCollections(
   };
 }
 
+function rebuildWithPermissions(
+  state: TuiStoreState,
+  patch: {
+    readonly permissions: readonly UiPermissionRequest[];
+    readonly runtime?: TuiRuntimeStatus;
+  },
+): TuiStoreState {
+  const runtime =
+    patch.permissions.length > 0
+      ? {
+          kind: "waiting-for-permission" as const,
+          requestId: patch.permissions[0].id,
+        }
+      : (patch.runtime ?? (state.runtime.kind === "waiting-for-permission"
+          ? { kind: "idle" as const }
+          : state.runtime));
+
+  return rebuildFromCollections(state, {
+    permissions: patch.permissions,
+    runtime,
+  });
+}
+
+function mergePermissions(
+  previous: readonly UiPermissionRequest[],
+  next: readonly UiPermissionRequest[],
+  resolvedPermissionIds: readonly string[],
+): readonly UiPermissionRequest[] {
+  const resolved = new Set(resolvedPermissionIds);
+  const merged = new Map<string, UiPermissionRequest>();
+
+  for (const request of next) {
+    if (!resolved.has(request.id)) {
+      merged.set(request.id, request);
+    }
+  }
+  for (const request of previous) {
+    if (!resolved.has(request.id) && !merged.has(request.id)) {
+      merged.set(request.id, request);
+    }
+  }
+
+  return Array.from(merged.values());
+}
+
+function rememberResolvedPermission(
+  resolvedPermissionIds: readonly string[],
+  requestId: string,
+): readonly string[] {
+  return [...resolvedPermissionIds.filter((id) => id !== requestId), requestId]
+    .slice(-100);
+}
+
 function updateSessionMessages(
   sessions: readonly UiSession[],
   sessionId: string,
@@ -296,12 +367,11 @@ function updateSessionMessages(
 
 function applyPartDelta(
   message: UiMessage,
-  partIndex: number | undefined,
   partId: string | undefined,
   delta: string,
   content: string | undefined,
 ): UiMessage {
-  const resolvedIndex = resolvePartIndex(message, partIndex, partId);
+  const resolvedIndex = resolvePartIndex(message, partId);
 
   if (resolvedIndex === null) {
     return content === undefined
@@ -319,15 +389,8 @@ function applyPartDelta(
 
 function resolvePartIndex(
   message: UiMessage,
-  partIndex: number | undefined,
   partId: string | undefined,
 ): number | null {
-  if (partIndex !== undefined) {
-    return partIndex >= 0 && partIndex < message.parts.length
-      ? partIndex
-      : null;
-  }
-
   if (partId === undefined) {
     return null;
   }

@@ -67,7 +67,7 @@ SDK UiEvent
 
 ### 2.4 Interaction 命令执行
 
-1. `/model` 或 `/model switch` 无参数时进入 model selection flow。
+1. MVP 中 `/session` 无参数时进入 session selection flow；`/model` 只展示当前单模型配置。
 2. Handler 调用 `ctx.requestInteraction()`。
 3. `runtime/interaction-broker` 创建 pending interaction，并发布 `Interaction.Event.Requested`。
 4. `daemon/command-events.ts` 投递：
@@ -75,24 +75,24 @@ SDK UiEvent
 ```text
 interaction.requested {
   kind: "select-one",
-  subject: "model",
+  subject: "session",
   options: [...]
 }
 ```
 
-5. TUI 渲染 provider + model 选择器。
+5. TUI 渲染 session 选择器。
 6. UI 调用 `respondInteraction(interactionId, response)`。
-7. InteractionBroker resolve pending promise，handler 恢复并完成模型切换。
+7. InteractionBroker resolve pending promise，handler 恢复并切换 active session。
 8. Backend 发布最终 command result。
 
 ### 2.5 参数错误
 
 1. Handler 根据命令规则校验 `argv`/`rawArgs`。
 2. 参数不合法时发布 `command.failed`。
-3. 例如非交互调用 `/model switch` 无参数，返回：
+3. 例如未来扩展命令缺参数时返回：
 
 ```text
-INVALID_ARGS: /model switch <provider> <model-id>
+INVALID_ARGS: missing required argument
 ```
 
 ---

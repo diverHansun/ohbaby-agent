@@ -61,13 +61,8 @@ describe("CommandService", () => {
     });
   });
 
-  it("opens model selection for the model parent command on TUI surface", async () => {
-    const request = vi.fn<() => Promise<UiInteractionResponse>>().mockResolvedValue({
-      choiceId: "openai:gpt-5.5",
-      kind: "accepted",
-    });
+  it("reports the configured model for the model parent command", async () => {
     const { events, service } = createServiceHarness({
-      interactionBroker: { request },
       models: {
         currentModel() {
           return { id: "openai:gpt-5.5", label: "GPT-5.5", provider: "openai" };
@@ -82,28 +77,24 @@ describe("CommandService", () => {
 
     await service.executeCommand(makeInvocation("model", ["model"]));
 
-    expect(request).toHaveBeenCalledWith(
-      {
-        kind: "select-one",
-        options: [
-          {
+    expect(events.at(-1)).toMatchObject({
+      output: {
+        data: {
+          model: {
             id: "openai:gpt-5.5",
             label: "GPT-5.5",
-            metadata: { provider: "openai" },
+            provider: "openai",
           },
-        ],
-        prompt: "Select model",
-        subject: "model",
-      },
-      expect.objectContaining({
-        clientInvocationId: "inv_1",
-        commandRunId: "command_1",
-      }),
-    );
-    expect(events.at(-1)).toMatchObject({
-      action: {
-        data: { choiceId: "openai:gpt-5.5" },
-        kind: "model.selected",
+          models: [
+            {
+              id: "openai:gpt-5.5",
+              label: "GPT-5.5",
+              provider: "openai",
+            },
+          ],
+        },
+        kind: "data",
+        subject: "model.current",
       },
       type: "result",
     });
@@ -167,12 +158,14 @@ describe("CommandService", () => {
       choiceId: "session_1",
       kind: "accepted",
     });
+    const selectSession = vi.fn<() => Promise<void>>().mockResolvedValue();
     const { events, service } = createServiceHarness({
       interactionBroker: { request },
       sessions: {
         listSessions() {
           return [{ id: "session_1", title: "First" }];
         },
+        selectSession,
       },
     });
 
@@ -189,6 +182,18 @@ describe("CommandService", () => {
         subject: "session",
       },
       expect.objectContaining({ commandRunId: "command_1" }),
+    );
+    expect(selectSession).toHaveBeenCalledWith("session_1");
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: {
+            data: { choiceId: "session_1" },
+            kind: "session.selected",
+          },
+          type: "result",
+        }),
+      ]),
     );
     expect(events.at(-1)).toMatchObject({
       output: {
@@ -255,19 +260,14 @@ describe("CommandService", () => {
       bus,
       createCommandRunId: createSequence("command"),
       interactionBroker: broker,
-      models: {
-        currentModel() {
-          return { id: "openai:gpt-5.5", label: "GPT-5.5", provider: "openai" };
-        },
-        listModels() {
-          return [
-            { id: "openai:gpt-5.5", label: "GPT-5.5", provider: "openai" },
-          ];
+      sessions: {
+        listSessions() {
+          return [{ id: "session_1", title: "First" }];
         },
       },
     });
 
-    const execution = service.executeCommand(makeInvocation("model", ["model"]));
+    const execution = service.executeCommand(makeInvocation("session", ["session"]));
     await new Promise((resolve) => {
       setTimeout(resolve, 0);
     });
@@ -285,7 +285,7 @@ describe("CommandService", () => {
       commandRunId: "command_1",
       error: {
         code: "INTERACTION_CANCELLED",
-        message: "Model selection cancelled: aborted",
+        message: "Session selection cancelled: aborted",
       },
       type: "failed",
     });

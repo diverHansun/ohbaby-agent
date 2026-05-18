@@ -65,7 +65,6 @@ describe("TUI store event reducer", () => {
     const state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
       delta: " world",
       messageId: "message_1",
-      partIndex: 0,
       sessionId: "session_1",
       type: "message.part.delta",
     });
@@ -210,17 +209,24 @@ describe("TUI store event reducer", () => {
     });
   });
 
-  it("clears pending interactions when replacing the snapshot", () => {
+  it("preserves local interactions and command notices when replacing the snapshot", () => {
     const interaction = {
       commandRunId: "command_1",
       interactionId: "interaction_1",
       kind: "confirm",
       subject: "command",
     } as const;
-    const state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
       request: interaction,
       timestamp: 1,
       type: "interaction.requested",
+    });
+    state = applyTuiEvent(state, {
+      clientInvocationId: "invoke_1",
+      commandRunId: "command_1",
+      output: { kind: "text", text: "ok" },
+      timestamp: 2,
+      type: "command.result.delivered",
     });
 
     const next = applyTuiEvent(state, {
@@ -228,7 +234,44 @@ describe("TUI store event reducer", () => {
       type: "snapshot.replaced",
     });
 
-    expect(next.interactions).toHaveLength(0);
+    expect(next.interactions).toHaveLength(1);
+    expect(next.commandNotices).toHaveLength(1);
+  });
+
+  it("keeps live permissions across an old snapshot and does not revive resolved permissions", () => {
+    const request = {
+      choices: [{ id: "allow", intent: "allow", label: "Allow" }],
+      description: "Run bash",
+      id: "permission_1",
+      runId: "run_1",
+      title: "Permission",
+    } as const;
+    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      request,
+      type: "permission.requested",
+    });
+
+    state = applyTuiEvent(state, {
+      snapshot: snapshot(),
+      type: "snapshot.replaced",
+    });
+    expect(state.permissions.map((permission) => permission.id)).toEqual([
+      "permission_1",
+    ]);
+
+    state = applyTuiEvent(state, {
+      requestId: "permission_1",
+      type: "permission.resolved",
+    });
+    state = applyTuiEvent(state, {
+      snapshot: {
+        ...snapshot(),
+        permissions: [request],
+      },
+      type: "snapshot.replaced",
+    });
+
+    expect(state.permissions).toHaveLength(0);
   });
 
   it("keeps command notice ids unique after truncation", () => {

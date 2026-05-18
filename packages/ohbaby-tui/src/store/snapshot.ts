@@ -84,7 +84,6 @@ export type TuiEvent =
       readonly type: "message.part.delta";
       readonly sessionId: string;
       readonly messageId: string;
-      readonly partIndex?: number;
       readonly partId?: string;
       readonly delta: string;
       readonly content?: string;
@@ -132,6 +131,7 @@ export interface TuiStoreState {
   readonly interactions: readonly TuiInteractionRequest[];
   readonly commandNotices: readonly TuiCommandNotice[];
   readonly commandNoticeSequence: number;
+  readonly resolvedPermissionIds: readonly string[];
   readonly catalog: TuiCommandCatalog | null;
   readonly catalogInvalidation: TuiCommandCatalogInvalidation | null;
 }

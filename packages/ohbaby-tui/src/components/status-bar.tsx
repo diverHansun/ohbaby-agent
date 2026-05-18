@@ -1,6 +1,9 @@
 import { Text } from "ink";
 import type { ReactElement } from "react";
-import { selectRuntimeLabel } from "../store/selectors.js";
+import {
+  selectEffectiveRuntime,
+  selectRuntimeLabel,
+} from "../store/selectors.js";
 import type { TuiStoreState } from "../store/snapshot.js";
 
 export interface StatusBarProps {
@@ -8,8 +11,10 @@ export interface StatusBarProps {
 }
 
 export function StatusBar({ state }: StatusBarProps): ReactElement {
+  const runtime = selectEffectiveRuntime(state);
+
   return (
-    <Text color={statusColor(state)} dimColor={state.runtime.kind === "idle"}>
+    <Text color={statusColor(state)} dimColor={runtime.kind === "idle"}>
       status: {selectRuntimeLabel(state)}
       {state.activeSessionId === null ? "" : ` | session: ${state.activeSessionId}`}
     </Text>
@@ -17,7 +22,7 @@ export function StatusBar({ state }: StatusBarProps): ReactElement {
 }
 
 function statusColor(state: TuiStoreState): string | undefined {
-  switch (state.runtime.kind) {
+  switch (selectEffectiveRuntime(state).kind) {
     case "error":
       return "red";
     case "running":

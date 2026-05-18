@@ -71,7 +71,6 @@ describe("OhbabyTerminalApp", () => {
     client.emit({
       delta: "lo",
       messageId: "message_1",
-      partIndex: 0,
       sessionId: "session_1",
       type: "message.part.delta",
     });

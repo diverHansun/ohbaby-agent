@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, Text, useApp } from "ink";
 import { useEffect, useRef } from "react";
 import type { ReactElement } from "react";
 import type { UiCommandCatalog, UiSnapshot } from "ohbaby-sdk";
@@ -23,6 +23,7 @@ export interface TerminalUiOptions {
 export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
   const storeRef = useRef<TuiStore>(createTuiStore(createEmptySnapshot()));
   const store = storeRef.current;
+  const { exit } = useApp();
   const state = useTuiStoreSelector(store, (current) => current);
   const hasDialog = state.permissions.length > 0 || state.interactions.length > 0;
 
@@ -59,6 +60,13 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
     const unsubscribe = client.subscribeEvents((tuiEvent: TuiEvent) => {
       store.dispatch(tuiEvent);
 
+      if (
+        tuiEvent.type === "command.result.delivered" &&
+        tuiEvent.action?.kind === "app.exit"
+      ) {
+        exit();
+      }
+
       if (tuiEvent.type === "command.catalog.updated") {
         void loadCatalog();
       }
@@ -89,7 +97,7 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
       disposed = true;
       unsubscribe();
     };
-  }, [client, store]);
+  }, [client, exit, store]);
 
   return (
     <Box flexDirection="column">

@@ -85,8 +85,8 @@ TuiStore 使用单一 reducer 入口。每个 SDK 事件映射到一个或多个
 `message.part.delta` 是高频事件（流式响应期间每秒数十次）。为避免 reducer 全量 dispatch 导致不必要的组件重渲染，TuiStore 内部维护一个 part-delta emitter：
 
 1. `useStream` 收到 `message.part.delta` 时，直接更新 `messages` 数组中对应 part 的内容（原地修改，不触发 selector 通知）。
-2. 同时通过 emitter 广播 `{ messageId, partIndex, delta }`。
-3. 对应的 Part 组件（TextPart、ToolPart 等）通过 `usePartDelta(messageId, partIndex)` 订阅 emitter，仅自身重渲染。
+2. 同时通过 SDK 事件广播 `{ messageId, partId?, delta, content? }`。
+3. Text part 优先使用 `content` 作为权威快照；`partId` 仅用于未来稳定定位具体 part。
 4. 当 `message.appended` 到达时（消息数量变化），走正常 reducer，触发 MessageList 级别的重渲染。
 
 这延续了原设计中"useRef + 版本号 + Bus 直通"的三层优化思路，只是数据来源从 backend Bus 改为 SDK 事件。

@@ -45,31 +45,12 @@ async function handleModelParent(
   context: CommandRunContext,
 ): Promise<void> {
   const models = await listModels(options);
-  if (context.surface !== "tui") {
-    context.emitOutput(dataOutput("model.list", { models }));
-    return;
-  }
-
-  const response = await context.requestInteraction({
-    kind: "select-one",
-    options: models.map((model) => ({
-      id: model.id,
-      label: model.label,
-      metadata: { provider: model.provider },
-    })),
-    prompt: "Select model",
-    subject: "model",
-  });
-  if (response.kind === "cancelled") {
-    context.fail({
-      code: "INTERACTION_CANCELLED",
-      message: `Model selection cancelled: ${response.reason}`,
-      recoverable: true,
-    });
-    return;
-  }
-
-  context.emitAction(action("model.selected", { choiceId: response.choiceId }));
+  context.emitOutput(
+    dataOutput("model.current", {
+      model: await currentModel(options),
+      models,
+    }),
+  );
 }
 
 async function handleSessionParent(
@@ -99,7 +80,16 @@ async function handleSessionParent(
     });
     return;
   }
+  if (!response.choiceId) {
+    context.fail({
+      code: "INVALID_INTERACTION_RESPONSE",
+      message: "Session selection did not include a choice",
+      recoverable: true,
+    });
+    return;
+  }
 
+  await options.sessions?.selectSession?.(response.choiceId);
   context.emitAction(action("session.selected", { choiceId: response.choiceId }));
 }
 

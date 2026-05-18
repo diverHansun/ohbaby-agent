@@ -30,7 +30,7 @@ describe("command catalog", () => {
         }),
         expect.objectContaining({
           id: "model",
-          parentBehavior: "interaction",
+          parentBehavior: "none",
           path: ["model"],
         }),
         expect.objectContaining({
