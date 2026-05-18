@@ -114,6 +114,16 @@ describe('LLM Client Integration Tests', () => {
       expect('client' in client).toBe(false);
     });
 
+    it('should pass project directory to config loading', async () => {
+      vi.mocked(getLLMConfig).mockResolvedValue(mockConfig);
+
+      await createLLMClient({ projectDirectory: 'D:/repo' });
+
+      expect(getLLMConfig).toHaveBeenCalledWith({
+        projectDirectory: 'D:/repo',
+      });
+    });
+
     it('should not expose apiKey in returned config', async () => {
       vi.mocked(getLLMConfig).mockResolvedValue(mockConfig);
 

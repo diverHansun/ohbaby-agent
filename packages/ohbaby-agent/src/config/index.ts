@@ -15,6 +15,7 @@ export {
 
 export type {
   LLMConfig,
+  LLMConfigLoadOptions,
   ModelJsonConfig,
   ConfigErrorCode,
 } from './llm/index.js';

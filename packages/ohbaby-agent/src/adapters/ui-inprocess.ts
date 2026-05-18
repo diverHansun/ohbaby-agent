@@ -17,7 +17,10 @@ import type {
 import type { BusInstance } from "../bus/index.js";
 import type { ChatCompletionMessage } from "../core/llm-client/index.js";
 import { createLLMClient } from "../core/llm-client/index.js";
-import type { LLMClientInstance } from "../core/llm-client/index.js";
+import type {
+  CreateLLMClientOptions,
+  LLMClientInstance,
+} from "../core/llm-client/index.js";
 import { createBus } from "../bus/index.js";
 import type {
   CommandModelSummary,
@@ -78,7 +81,9 @@ export interface InProcessUiBackendOptions {
   readonly hookExecutor?: HookExecutor;
   readonly initialSnapshot?: UiSnapshot;
   readonly llmClient?: LLMClientInstance;
-  readonly createLLMClient?: () => Promise<LLMClientInstance>;
+  readonly createLLMClient?: (
+    options?: CreateLLMClientOptions,
+  ) => Promise<LLMClientInstance>;
   readonly messageManager?: MessageManager;
   readonly sessionManager?: Pick<
     SessionManager,
@@ -365,14 +370,42 @@ export function createInProcessUiBackendClient(
     publish({ type: "run.updated", run: cloneRun(updatedRun) });
   }
 
+  async function reconcileRuntimeStatus(): Promise<UiRunStatus> {
+    const snapshot = await stateStore.readSnapshot();
+    let status: UiRunStatus;
+    if (snapshot.permissions.length > 0) {
+      status = {
+        kind: "waiting-for-permission",
+        requestId: snapshot.permissions[0].id,
+      };
+    } else if (promptInFlight && activeRunId) {
+      status = {
+        kind: "running",
+        runId: activeRunId,
+      };
+    } else {
+      status = { kind: "idle" };
+    }
+
+    if (activeRunId) {
+      await updateActiveRunStatus(status);
+    }
+    await updateStatus(status);
+    return status;
+  }
+
+  function projectRoot(): string {
+    return options.workdir ?? options.projectDirectory ?? process.cwd();
+  }
+
   async function resolveLLMClient(): Promise<LLMClientInstance> {
     if (options.llmClient) {
       return options.llmClient;
     }
     if (options.createLLMClient) {
-      return options.createLLMClient();
+      return options.createLLMClient({ projectDirectory: projectRoot() });
     }
-    return createLLMClient();
+    return createLLMClient({ projectDirectory: projectRoot() });
   }
 
   function getRuntime(): Promise<UiRuntimeComposition> {
@@ -390,7 +423,7 @@ export function createInProcessUiBackendClient(
           policy,
           runLedger: options.runLedger,
           streamBridge: options.streamBridge,
-          workdir: options.workdir ?? options.projectDirectory,
+          workdir: projectRoot(),
         }),
       )
       .catch((error: unknown) => {
@@ -401,11 +434,8 @@ export function createInProcessUiBackendClient(
     return runtimePromise;
   }
 
-  function currentModelFromOptions(): CommandModelSummary | null {
-    const client = options.llmClient;
-    if (!client) {
-      return null;
-    }
+  async function currentModelFromOptions(): Promise<CommandModelSummary | null> {
+    const client = options.llmClient ?? (await resolveLLMClient());
     return {
       id: `${client.config.provider}:${client.config.model}`,
       label: client.config.model,
@@ -413,8 +443,8 @@ export function createInProcessUiBackendClient(
     };
   }
 
-  function listModelsFromOptions(): readonly CommandModelSummary[] {
-    const current = currentModelFromOptions();
+  async function listModelsFromOptions(): Promise<readonly CommandModelSummary[]> {
+    const current = await currentModelFromOptions();
     return current ? [current] : [];
   }
 
@@ -452,6 +482,14 @@ export function createInProcessUiBackendClient(
     },
     sessions: {
       listSessions: listSessionsFromState,
+      async selectSession(sessionId: string): Promise<void> {
+        await stateStore.setActiveSessionId(sessionId);
+        publish({
+          snapshot: await stateStore.readSnapshot(),
+          timestamp: Date.now(),
+          type: "snapshot.replaced",
+        });
+      },
     },
     abortRun(runId?: string): void {
       if (!runId) {
@@ -538,12 +576,7 @@ export function createInProcessUiBackendClient(
       });
       pendingPermissionSessions.set(payload.info.id, payload.info.sessionId);
       await stateStore.upsertPermission(request);
-      const waitingStatus: UiRunStatus = {
-        kind: "waiting-for-permission",
-        requestId: request.id,
-      };
-      await updateActiveRunStatus(waitingStatus);
-      await updateStatus(waitingStatus);
+      await reconcileRuntimeStatus();
       publish({
         type: "permission.requested",
         request,
@@ -560,14 +593,7 @@ export function createInProcessUiBackendClient(
         requestId: payload.permissionId,
         timestamp: Date.now(),
       });
-      if (promptInFlight && activeRunId) {
-        const runningStatus: UiRunStatus = {
-          kind: "running",
-          runId: activeRunId,
-        };
-        await updateActiveRunStatus(runningStatus);
-        await updateStatus(runningStatus);
-      }
+      await reconcileRuntimeStatus();
     })();
   });
   bus.subscribe(PermissionEvent.SwitchModeRequested, () => {
@@ -611,8 +637,7 @@ export function createInProcessUiBackendClient(
         await reserveIdsFromState();
         const runtime = await getRuntime();
         const agentName = runtime.agentManager.getDefault();
-        const projectRoot =
-          options.workdir ?? options.projectDirectory ?? process.cwd();
+        const resolvedProjectRoot = projectRoot();
         let session = submitOptions?.sessionId
           ? await stateStore.getSession(submitOptions.sessionId)
           : undefined;
@@ -630,7 +655,7 @@ export function createInProcessUiBackendClient(
           const title = text.trim().slice(0, 48) || "Untitled session";
           if (options.sessionManager) {
             const created = await options.sessionManager.create(
-              projectRoot,
+              resolvedProjectRoot,
               {
                 agentName,
                 id: submitOptions?.sessionId,
@@ -688,7 +713,7 @@ export function createInProcessUiBackendClient(
         await runtime.ensureSessionRecord({
           agentName,
           id: session.id,
-          projectRoot,
+          projectRoot: resolvedProjectRoot,
           title: session.title,
         });
 
@@ -710,9 +735,15 @@ export function createInProcessUiBackendClient(
           const tools = await runtime.getOpenAiTools({
             agentName,
           });
+          const messages = await runtime.buildPromptMessages({
+            agentName,
+            messages: toModelMessages(session.messages),
+            projectRoot: resolvedProjectRoot,
+            sessionId: session.id,
+          });
           const record = await runtime.runManager.create({
             agent: agentName,
-            messages: toModelMessages(session.messages),
+            messages,
             parentMessageId: coreUserMessage.id,
             sessionId: session.id,
             tools,

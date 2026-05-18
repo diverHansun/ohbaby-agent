@@ -3,6 +3,11 @@ import os from "node:os";
 import path from "node:path";
 
 export const CUSTOM_INSTRUCTIONS_FILE_NAME = "OHBABY.md";
+export const CUSTOM_INSTRUCTIONS_FALLBACK_FILE_NAMES = [
+  "OHBABY.md",
+  "AGENTS.md",
+  "CLAUDE.md",
+] as const;
 export const PROJECT_CUSTOM_CONFIG_DIR = ".ohbaby-agent";
 export const GLOBAL_CUSTOM_CONFIG_DIR = ".ohbaby-agent";
 export const MAX_CUSTOM_INSTRUCTION_CHARS = 50 * 1024;
@@ -41,6 +46,12 @@ export function getGlobalCustomInstructionsPath(
   );
 }
 
+function getCandidatePaths(directory: string): string[] {
+  return CUSTOM_INSTRUCTIONS_FALLBACK_FILE_NAMES.map((fileName) =>
+    path.join(directory, fileName),
+  );
+}
+
 async function readInstructionFile(
   filePath: string,
   onWarning?: (message: string, error?: unknown) => void,
@@ -68,6 +79,19 @@ async function readInstructionFile(
   return trimmed;
 }
 
+async function readFirstInstructionFile(
+  filePaths: readonly string[],
+  onWarning?: (message: string, error?: unknown) => void,
+): Promise<string | undefined> {
+  for (const filePath of filePaths) {
+    const instruction = await readInstructionFile(filePath, onWarning);
+    if (instruction !== undefined) {
+      return instruction;
+    }
+  }
+  return undefined;
+}
+
 async function loadProjectInstructions(
   options: CustomInstructionLoadOptions,
 ): Promise<string | undefined> {
@@ -76,16 +100,16 @@ async function loadProjectInstructions(
   }
 
   const projectDirectory = options.projectDirectory ?? process.cwd();
-  const rootInstructions = await readInstructionFile(
-    getProjectCustomInstructionsPath(projectDirectory),
+  const rootInstructions = await readFirstInstructionFile(
+    getCandidatePaths(projectDirectory),
     options.onWarning,
   );
   if (rootInstructions !== undefined) {
     return rootInstructions;
   }
 
-  return readInstructionFile(
-    getProjectConfigCustomInstructionsPath(projectDirectory),
+  return readFirstInstructionFile(
+    getCandidatePaths(path.join(projectDirectory, PROJECT_CUSTOM_CONFIG_DIR)),
     options.onWarning,
   );
 }
@@ -96,9 +120,15 @@ export async function loadCustomInstructions(
   const globalPath =
     options.globalPath ??
     getGlobalCustomInstructionsPath(options.homeDirectory);
+  const globalPaths =
+    options.globalPath !== undefined
+      ? [globalPath]
+      : getCandidatePaths(
+          path.dirname(getGlobalCustomInstructionsPath(options.homeDirectory)),
+        );
   const instructions = await Promise.all([
     loadProjectInstructions(options),
-    readInstructionFile(globalPath, options.onWarning),
+    readFirstInstructionFile(globalPaths, options.onWarning),
   ]);
 
   return instructions.filter(

@@ -5,8 +5,17 @@
 
 import type { LLMConfig } from './types.js';
 import { ConfigError } from './types.js';
-import { loadModelJson, loadApiKey } from './loaders.js';
+import { loadModelJson, loadApiKey, loadProjectEnv } from './loaders.js';
 import { validateModelJson, validateApiKey } from './validation.js';
+
+export interface LLMConfigLoadOptions {
+  readonly projectDirectory?: string;
+}
+
+interface CachedLLMConfig {
+  readonly config: LLMConfig;
+  readonly projectDirectory: string;
+}
 
 /**
  * Singleton manager for LLM configuration.
@@ -14,7 +23,7 @@ import { validateModelJson, validateApiKey } from './validation.js';
  */
 class LLMConfigManager {
   private static instance: LLMConfigManager | null = null;
-  private cachedConfig: LLMConfig | null = null;
+  private cachedConfig: CachedLLMConfig | null = null;
   private lastError: ConfigError | null = null;
 
   private constructor() {
@@ -43,12 +52,13 @@ class LLMConfigManager {
    *
    * @throws {ConfigError} If configuration is invalid or missing
    */
-  async load(): Promise<LLMConfig> {
-    if (this.cachedConfig) {
-      return this.cachedConfig;
+  async load(options: LLMConfigLoadOptions = {}): Promise<LLMConfig> {
+    const projectDirectory = options.projectDirectory ?? process.cwd();
+    if (this.cachedConfig?.projectDirectory === projectDirectory) {
+      return this.cachedConfig.config;
     }
 
-    return this.performLoad();
+    return this.performLoad(projectDirectory);
   }
 
   /**
@@ -57,10 +67,10 @@ class LLMConfigManager {
    *
    * @throws {ConfigError} If configuration is invalid or missing
    */
-  async reload(): Promise<LLMConfig> {
+  async reload(options: LLMConfigLoadOptions = {}): Promise<LLMConfig> {
     this.cachedConfig = null;
     this.lastError = null;
-    return this.performLoad();
+    return this.performLoad(options.projectDirectory ?? process.cwd());
   }
 
   /**
@@ -81,7 +91,7 @@ class LLMConfigManager {
   /**
    * Perform the actual configuration loading.
    */
-  private async performLoad(): Promise<LLMConfig> {
+  private async performLoad(projectDirectory: string): Promise<LLMConfig> {
     try {
       // Load raw configuration from file
       const rawConfig = await loadModelJson();
@@ -92,7 +102,12 @@ class LLMConfigManager {
 
       // Load API key from environment
       const apiKeyEnvName = modelJson.apiConfig.apiKeyEnv;
-      const apiKey = loadApiKey(apiKeyEnvName);
+      const apiKeyFromShell = loadApiKey(apiKeyEnvName);
+      const projectEnv =
+        apiKeyFromShell === undefined
+          ? await loadProjectEnv(projectDirectory)
+          : {};
+      const apiKey = apiKeyFromShell ?? loadApiKey(apiKeyEnvName, projectEnv);
 
       // Validate API key
       validateApiKey(apiKey, apiKeyEnvName);
@@ -108,7 +123,7 @@ class LLMConfigManager {
       };
 
       // Cache and return
-      this.cachedConfig = config;
+      this.cachedConfig = { config, projectDirectory };
       this.lastError = null;
       return config;
     } catch (error) {

@@ -16,7 +16,7 @@
 
 LLM 配置模块负责：
 1. 从 `~/.ohbaby-agent/model.json` 加载 LLM 配置
-2. 从 `.env` 读取 API Key
+2. 从父进程环境变量读取 API Key；如果缺失，再按项目目录解析 `.env`
 3. 验证配置的完整性和有效性
 4. 支持配置缓存和热重载
 
@@ -51,8 +51,8 @@ llm-client 消费配置
 ### 配置文件位置
 
 - **用户全局配置**：`~/.ohbaby-agent/model.json`（由用户创建和维护）
-- **本地调试覆盖**：`.ohbaby-agent.local/model.json`（可选，.gitignore 排除）
-- **API Keys**：`.env`（项目级，.gitignore 排除）
+- **API Keys**：父进程环境变量优先，项目 `.env` 作为补充；解析 `.env` 不会修改 `process.env`
+- **本地调试覆盖**：MVP 暂不实现 `.ohbaby-agent.local/model.json`
 
 ### 错误处理
 

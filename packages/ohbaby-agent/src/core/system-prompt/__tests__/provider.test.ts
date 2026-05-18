@@ -30,6 +30,25 @@ describe("createSystemPromptProvider", () => {
     expect(prompt).toContain("Available tools: read, bash");
   });
 
+  it("adds primary agent prompts without switching to subagent assembly", async () => {
+    const provider = createSystemPromptProvider({
+      agentNameResolver: vi.fn().mockResolvedValue("build"),
+      agentPromptResolver: vi.fn().mockResolvedValue("Primary runtime prompt"),
+      customInstructionLoader: vi.fn().mockResolvedValue(["Project rule"]),
+      environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
+    });
+
+    const prompt = await provider.build({
+      sessionId: "session_1",
+      directory: "D:/repo",
+      isSubagent: false,
+    });
+
+    expect(prompt).toContain("ohbaby-agent");
+    expect(prompt).toContain("Primary runtime prompt");
+    expect(prompt).toContain("Project rule");
+  });
+
   it("does not load custom instructions for subagents", async () => {
     const customInstructionLoader = vi
       .fn()

@@ -57,6 +57,42 @@ describe("custom instruction layer", () => {
     expect(instructions).toEqual(["# Project Config"]);
   });
 
+  it("uses AGENTS.md and CLAUDE.md as lower priority fallbacks", async () => {
+    const projectDirectory = path.join(tempDir, "repo");
+    const projectAgentsPath = path.join(projectDirectory, "AGENTS.md");
+    const globalClaudePath = path.join(
+      tempDir,
+      "home",
+      ".ohbaby-agent",
+      "CLAUDE.md",
+    );
+    await fs.mkdir(projectDirectory, { recursive: true });
+    await fs.mkdir(path.dirname(globalClaudePath), { recursive: true });
+    await fs.writeFile(projectAgentsPath, "# Agents", "utf8");
+    await fs.writeFile(globalClaudePath, "# Claude", "utf8");
+
+    const instructions = await loadCustomInstructions({
+      homeDirectory: path.join(tempDir, "home"),
+      projectDirectory,
+    });
+
+    expect(instructions).toEqual(["# Agents", "# Claude"]);
+  });
+
+  it("keeps OHBABY.md ahead of compatibility instruction files", async () => {
+    const projectDirectory = path.join(tempDir, "repo");
+    await fs.mkdir(projectDirectory, { recursive: true });
+    await fs.writeFile(path.join(projectDirectory, "OHBABY.md"), "# Ohbaby", "utf8");
+    await fs.writeFile(path.join(projectDirectory, "AGENTS.md"), "# Agents", "utf8");
+
+    const instructions = await loadCustomInstructions({
+      globalPath,
+      projectDirectory,
+    });
+
+    expect(instructions).toEqual(["# Ohbaby"]);
+  });
+
   it("skips missing files without warning", async () => {
     const onWarning = vi.fn();
 

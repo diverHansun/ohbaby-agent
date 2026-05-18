@@ -4,7 +4,7 @@
 
 **覆盖的职责**：
 - 从 model.json 加载配置
-- 从环境变量读取 API Key
+- 父进程环境变量优先，缺失时从项目 `.env` 解析 API Key
 - 验证配置的完整性和有效性
 - 缓存和热重载机制
 - 错误情况的处理和报告
@@ -20,7 +20,7 @@
 
 1. **配置成功加载**：model.json 和 API Key 都有效，getLLMConfig() 返回完整的 LLMConfig
 2. **缓存生效**：第一次调用加载，第二次调用返回缓存结果，不重复加载文件
-3. **本地调试覆盖**：.ohbaby-agent.local/model.json 存在时优先使用，不存在时使用 ~/.ohbaby-agent/model.json
+3. **项目 .env 生效**：`.env` 可补充 API Key，不修改 `process.env`，且不覆盖父进程已有环境变量
 4. **热重载工作**：reloadLLMConfig() 清除缓存，下一次调用重新加载文件
 
 ### 错误路径
@@ -46,7 +46,7 @@
 
 ### 与文件系统集成
 
-- 能否正确读取不同位置的 model.json（~/.ohbaby-agent 和 .ohbaby-agent.local）
+- 能否正确读取 `~/.ohbaby-agent/model.json`
 - 文件不存在时的错误处理
 - 文件权限问题时的错误处理（如无读权限）
 

@@ -15,6 +15,7 @@ describe("SystemPrompt", () => {
       agentName: "build",
       environment: ENVIRONMENT,
       customInstructions: ["Prefer Vitest for tests."],
+      isSubagent: false,
       tools: ["read", "bash"],
     });
     const fullPrompt = prompts.join("\n\n");
@@ -27,12 +28,30 @@ describe("SystemPrompt", () => {
     expect(fullPrompt).toContain("Prefer Vitest for tests.");
   });
 
+  it("includes primary agent runtime prompts before custom instructions", () => {
+    const prompts = SystemPrompt.assemble({
+      agentName: "build",
+      agentPrompt: "Primary agent runtime prompt.",
+      customInstructions: ["Project custom instruction."],
+      environment: ENVIRONMENT,
+      isSubagent: false,
+    });
+    const fullPrompt = prompts.join("\n\n");
+
+    expect(fullPrompt).toContain("Primary agent runtime prompt.");
+    expect(fullPrompt.indexOf("Primary agent runtime prompt.")).toBeLessThan(
+      fullPrompt.indexOf("Project custom instruction."),
+    );
+    expect(fullPrompt).toContain("Core Capabilities");
+  });
+
   it("assembles subagent prompts without identity or custom instructions", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "explore",
       agentPrompt: "You are a focused exploration agent.",
       environment: ENVIRONMENT,
       customInstructions: ["This must not leak to subagents."],
+      isSubagent: true,
       tools: ["read"],
     });
     const fullPrompt = prompts.join("\n\n");
@@ -56,7 +75,18 @@ describe("SystemPrompt", () => {
       SystemPrompt.assemble({
         agentName: "",
         environment: ENVIRONMENT,
+        isSubagent: false,
       }),
     ).toThrow(/agentName/);
+  });
+
+  it("requires callers to declare the primary/subagent boundary", () => {
+    expect(() =>
+      SystemPrompt.assemble({
+        agentName: "build",
+        agentPrompt: "Primary agent runtime prompt.",
+        environment: ENVIRONMENT,
+      } as never),
+    ).toThrow(/isSubagent/);
   });
 });

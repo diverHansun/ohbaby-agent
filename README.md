@@ -9,11 +9,11 @@ An AI coding assistant CLI tool inspired by opencode and gemini-cli.
 - Tool execution system for file operations, shell commands, and more
 - Session management with conversation history
 - Memory system (OHBABY.md, compatible with CLAUDE.md and AGENTS.md) for project context
-- MCP (Model Context Protocol) support
+- MCP (Model Context Protocol) support (post-MVP extension)
 
 ## Prerequisites
 
-- Node.js >= 20.0.0
+- Node.js >= 24.0.0
 - pnpm >= 9.0.0
 
 ## Installation
@@ -26,10 +26,31 @@ cd ohbaby-agent
 # Install dependencies
 pnpm install
 
-# Copy environment file and configure
+# Copy environment file and configure secrets
 cp .env.example .env
 # Edit .env with your API keys
+
+# Create ~/.ohbaby-agent/model.json for non-secret model settings
+mkdir -p ~/.ohbaby-agent
+cat > ~/.ohbaby-agent/model.json <<'JSON'
+{
+  "provider": "openai",
+  "defaultModel": "gpt-4.1",
+  "apiConfig": {
+    "baseUrl": "https://api.openai.com/v1",
+    "apiKeyEnv": "OPENAI_API_KEY"
+  },
+  "llmParams": {
+    "temperature": 0.2,
+    "maxTokens": 4096
+  }
+}
+JSON
 ```
+
+`model.json` stores provider/model/base URL/parameter settings. API keys stay in
+environment variables. Put `OPENAI_API_KEY=...` in your shell or project `.env`;
+shell variables take priority over `.env`.
 
 ## Development
 
@@ -95,9 +116,9 @@ See the `docs/` directory for detailed design documentation:
 - [Module Documentation](./docs/) - Individual module designs
 
 Agent-recognized memory entry files:
-- `OHBABY.md` (canonical)
-- `CLAUDE.md` (Anthropic Claude-compatible entry)
-- `AGENTS.md` (OpenAI Agents/Codex-compatible entry)
+- `OHBABY.md` (canonical, highest priority)
+- `AGENTS.md` (OpenAI Agents/Codex-compatible fallback)
+- `CLAUDE.md` (Anthropic Claude-compatible fallback)
 
 ## License
 

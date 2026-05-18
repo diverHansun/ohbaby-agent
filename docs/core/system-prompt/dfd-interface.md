@@ -56,13 +56,14 @@ system-prompt 模块在 ohbaby-agent 系统中的位置：
    v
 2. SystemPrompt.assemble({
      agentName: 'build',
-     agentPrompt: undefined,  // 主代理不设置
+     agentPrompt: '...',      // 可选：主代理 runtime prompt
+     isSubagent: false,
      environment: {...},
      customInstructions: [...],
      tools: [...]
    })
    |
-   +---> 判断 agentPrompt === undefined
+   +---> 判断 isSubagent === false
    |     --> 确认是主代理
    |
    +---> IdentityLayer.generate()
@@ -74,6 +75,9 @@ system-prompt 模块在 ohbaby-agent 系统中的位置：
    |       tools: [...]
    |     })
    |     --> 返回完整环境信息
+   |
+   +---> AgentLayer.generate(agentPrompt) [optional]
+   |     --> 返回主代理 runtime prompt
    |
    +---> CustomLayer.generate(customInstructions)
    |     --> 返回自定义指令内容
@@ -93,12 +97,13 @@ system-prompt 模块在 ohbaby-agent 系统中的位置：
 2. SystemPrompt.assemble({
      agentName: 'explore',
      agentPrompt: '...',  // 子代理专属提示
+     isSubagent: true,
      environment: {...},
      customInstructions: undefined,  // 子代理不使用
      tools: ['glob', 'grep', 'read']
    })
    |
-   +---> 判断 agentPrompt !== undefined
+   +---> 判断 isSubagent === true
    |     --> 确认是子代理
    |
    +---> AgentLayer.generate(agentPrompt)
@@ -209,6 +214,9 @@ interface AssembleOptions {
    * - string: 子代理
    */
   agentPrompt?: string
+
+  /** Explicit primary/subagent boundary; do not infer from agentPrompt */
+  isSubagent: boolean
 
   /** 运行时环境信息 */
   environment: EnvironmentInfo

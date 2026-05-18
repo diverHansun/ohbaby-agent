@@ -51,6 +51,9 @@ interface AssembleOptions {
    */
   agentPrompt?: string
 
+  /** Explicit primary/subagent boundary; do not infer from agentPrompt */
+  isSubagent: boolean
+
   /** 运行时环境信息 */
   environment: EnvironmentInfo
 
@@ -292,6 +295,7 @@ const MAX_CUSTOM_INSTRUCTIONS_LENGTH = 50 * 1024  // 50KB
 |------|----------|
 | `agentName` | 必填，非空字符串 |
 | `agentPrompt` | 可选，如提供则非空 |
+| `isSubagent` | 必填，显式声明主代理/子代理边界 |
 | `environment` | 必填，符合 EnvironmentInfo 结构 |
 | `environment.workingDirectory` | 必填，有效路径 |
 | `environment.platform` | 必填，有效平台标识 |

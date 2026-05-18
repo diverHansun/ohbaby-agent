@@ -16,6 +16,10 @@ import { getLLMConfig } from '../../config/index.js';
 import { createProvider } from '../../services/providers/index.js';
 import type { LLMClientInstance } from './types.js';
 
+export interface CreateLLMClientOptions {
+  readonly projectDirectory?: string;
+}
+
 /**
  * Create and initialize an LLM client instance.
  *
@@ -32,9 +36,11 @@ import type { LLMClientInstance } from './types.js';
  * // Use llmClient.config for configuration values
  * ```
  */
-export async function createLLMClient(): Promise<LLMClientInstance> {
+export async function createLLMClient(
+  options: CreateLLMClientOptions = {},
+): Promise<LLMClientInstance> {
   // Load validated configuration from config module
-  const config = await getLLMConfig();
+  const config = await getLLMConfig(options);
 
   // Create provider-specific SDK instance
   const provider = createProvider({

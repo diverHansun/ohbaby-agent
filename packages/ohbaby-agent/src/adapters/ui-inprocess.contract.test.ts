@@ -297,6 +297,43 @@ describe("createInProcessUiBackendClient", () => {
     ]);
   });
 
+  it("prepends a runtime system prompt to model requests without storing it in UI history", async () => {
+    const requests: ProviderRequest[] = [];
+    const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-prompt-"));
+    try {
+      const client = createInProcessUiBackendClient({
+        llmClient: createSequentialFakeLLMClient(
+          [[{ textDelta: "Done", finishReason: "stop" }]],
+          requests,
+        ),
+        workdir: directory,
+      });
+
+      await client.submitPrompt("Use the prompt stack");
+
+      expect(requests[0]?.messages[0]).toMatchObject({
+        role: "system",
+      });
+      expect(
+        typeof requests[0]?.messages[0]?.content === "string"
+          ? requests[0].messages[0].content
+          : "",
+      ).toContain("ohbaby-agent");
+      expect(requests[0]?.messages.map((message) => message.role)).toEqual([
+        "system",
+        "user",
+      ]);
+
+      const snapshot = await client.getSnapshot();
+      expect(snapshot.sessions[0].messages.map((message) => message.role)).toEqual([
+        "user",
+        "assistant",
+      ]);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("executes builtin tool calls through the in-process lifecycle scheduler", async () => {
     const requests: ProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
@@ -980,6 +1017,7 @@ describe("createInProcessUiBackendClient", () => {
 
   it("round-trips command interactions through respondInteraction", async () => {
     const client = createInProcessUiBackendClient({
+      initialSnapshot: createInitialSnapshotWithTwoSessions(),
       llmClient: createFakeLLMClient([]),
     });
     const events: UiEvent[] = [];
@@ -989,10 +1027,10 @@ describe("createInProcessUiBackendClient", () => {
 
     const execution = client.executeCommand({
       argv: [],
-      clientInvocationId: "inv_model",
-      commandId: "model",
-      path: ["model"],
-      raw: "/model",
+      clientInvocationId: "inv_session",
+      commandId: "session",
+      path: ["session"],
+      raw: "/session",
       rawArgs: "",
       sessionId: "session_1",
       surface: "tui",
@@ -1005,16 +1043,16 @@ describe("createInProcessUiBackendClient", () => {
     expect(events[0]).toMatchObject({ type: "command.started" });
     expect(events[1]).toMatchObject({
       request: {
-        clientInvocationId: "inv_model",
+        clientInvocationId: "inv_session",
         interactionId: "interaction_1",
         kind: "select-one",
-        subject: "model",
+        subject: "session",
       },
       type: "interaction.requested",
     });
 
     await client.respondInteraction("interaction_1", {
-      choiceId: "fake:fake-model",
+      choiceId: "session_2",
       kind: "accepted",
     });
     await execution;
@@ -1028,17 +1066,23 @@ describe("createInProcessUiBackendClient", () => {
         }),
         expect.objectContaining({
           action: {
-            data: { choiceId: "fake:fake-model" },
-            kind: "model.selected",
+            data: { choiceId: "session_2" },
+            kind: "session.selected",
           },
           type: "command.result.delivered",
         }),
       ]),
     );
+    const snapshotEvent = events.find(
+      (event): event is Extract<UiEvent, { type: "snapshot.replaced" }> =>
+        event.type === "snapshot.replaced",
+    );
+    expect(snapshotEvent?.snapshot.activeSessionId).toBe("session_2");
   });
 
   it("aborts pending command interactions by command run id", async () => {
     const client = createInProcessUiBackendClient({
+      initialSnapshot: createInitialSnapshotWithTwoSessions(),
       llmClient: createFakeLLMClient([]),
     });
     const events: UiEvent[] = [];
@@ -1048,10 +1092,10 @@ describe("createInProcessUiBackendClient", () => {
 
     const execution = client.executeCommand({
       argv: [],
-      clientInvocationId: "inv_model",
-      commandId: "model",
-      path: ["model"],
-      raw: "/model",
+      clientInvocationId: "inv_session",
+      commandId: "session",
+      path: ["session"],
+      raw: "/session",
       rawArgs: "",
       sessionId: "session_1",
       surface: "tui",
@@ -1064,7 +1108,7 @@ describe("createInProcessUiBackendClient", () => {
     await execution;
 
     expect(events.at(-1)).toMatchObject({
-      clientInvocationId: "inv_model",
+      clientInvocationId: "inv_session",
       commandRunId: "command_1",
       error: {
         code: "INTERACTION_CANCELLED",

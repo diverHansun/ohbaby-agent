@@ -88,7 +88,7 @@ export function validateModelJson(config: unknown): asserts config is ModelJsonC
 export function validateApiKey(apiKey: string | undefined, envVarName: string): asserts apiKey is string {
   if (apiKey === undefined) {
     throw new ConfigError(
-      `API key not found: environment variable '${envVarName}' is not set`,
+      `API key not found: environment variable '${envVarName}' is not set. Set it in your shell or project .env file.`,
       'MISSING_API_KEY',
       { envVarName }
     );
@@ -96,7 +96,7 @@ export function validateApiKey(apiKey: string | undefined, envVarName: string): 
 
   if (apiKey.trim() === '') {
     throw new ConfigError(
-      `API key is empty: environment variable '${envVarName}' is set but empty`,
+      `API key is empty: environment variable '${envVarName}' is set but empty. Remove the empty value or set a valid key in your shell or project .env file.`,
       'EMPTY_API_KEY',
       { envVarName }
     );

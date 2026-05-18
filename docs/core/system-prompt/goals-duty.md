@@ -23,14 +23,14 @@
 
 支持分层的提示词结构，每层有明确的职责：
 - **Identity 层**：定义 AI 助手的基础身份和核心能力
-- **Agent 层**：子代理的专属提示词（主代理不使用此层）
+- **Agent 层**：子代理专属提示词；主代理可注入配置中的 runtime prompt
 - **Environment 层**：运行时环境信息
 - **Custom 层**：用户自定义指令（仅主代理使用）
 
 ### G2: 按代理类型组装提示词
 
 根据代理类型（主代理/子代理）组装不同的系统提示词：
-- 主代理：Identity + Environment + Custom
+- 主代理：Identity + Environment + 可选主代理 Runtime Prompt + Custom
 - 子代理：Agent Prompt + Environment（精简版）
 
 ### G3: 集中的提示词存储
@@ -78,6 +78,7 @@
 从文件系统加载用户自定义指令：
 - 读取项目级 OHBABY.md
 - 读取全局级 OHBABY.md
+- 兼容 `AGENTS.md`、`CLAUDE.md` fallback，优先级低于 `OHBABY.md`
 - 合并多个指令文件
 - 处理文件不存在的情况
 

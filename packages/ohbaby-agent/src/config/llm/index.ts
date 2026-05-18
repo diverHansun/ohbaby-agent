@@ -6,6 +6,7 @@
  */
 
 import { LLMConfigManager } from './manager.js';
+import type { LLMConfigLoadOptions } from './manager.js';
 import type { LLMConfig } from './types.js';
 
 // Re-export types for consumers
@@ -30,8 +31,10 @@ export { ConfigError } from './types.js';
  * console.log(config.model);  // 'gpt-4'
  * ```
  */
-export async function getLLMConfig(): Promise<LLMConfig> {
-  return LLMConfigManager.getInstance().load();
+export async function getLLMConfig(
+  options: LLMConfigLoadOptions = {},
+): Promise<LLMConfig> {
+  return LLMConfigManager.getInstance().load(options);
 }
 
 /**
@@ -51,8 +54,10 @@ export async function getLLMConfig(): Promise<LLMConfig> {
  * const newConfig = await reloadLLMConfig();
  * ```
  */
-export async function reloadLLMConfig(): Promise<LLMConfig> {
-  return LLMConfigManager.getInstance().reload();
+export async function reloadLLMConfig(
+  options: LLMConfigLoadOptions = {},
+): Promise<LLMConfig> {
+  return LLMConfigManager.getInstance().reload(options);
 }
 
 /**
@@ -66,3 +71,4 @@ export function isLLMConfigCached(): boolean {
 
 // Export for testing purposes only
 export { LLMConfigManager as _LLMConfigManager } from './manager.js';
+export type { LLMConfigLoadOptions } from './manager.js';

@@ -2,7 +2,10 @@ import type { ChatCompletionCreateParams } from "openai/resources/chat/completio
 import type { BusInstance } from "../../bus/index.js";
 import type { CommandToolSummary } from "../../commands/index.js";
 import { Lifecycle } from "../../core/lifecycle/index.js";
-import type { LLMClientInstance } from "../../core/llm-client/index.js";
+import type {
+  ChatCompletionMessage,
+  LLMClientInstance,
+} from "../../core/llm-client/index.js";
 import type { MessageManager, MessageWithParts } from "../../core/message/index.js";
 import {
   createToolScheduler,
@@ -22,6 +25,7 @@ import {
   createInMemoryRunLedger,
   type RunLedger,
 } from "../../runtime/run-ledger/index.js";
+import { createSystemPromptProvider } from "../../core/system-prompt/index.js";
 import {
   RunManager,
   type HookExecutor,
@@ -173,6 +177,12 @@ function lastAssistantText(messages: readonly MessageWithParts[]): string {
     .reverse()
     .find((message) => message.info.role === "assistant");
   return assistant ? textFromMessage(assistant) : "";
+}
+
+function withoutSystemMessages(
+  messages: readonly ChatCompletionMessage[],
+): ChatCompletionMessage[] {
+  return messages.filter((message) => message.role !== "system");
 }
 
 export async function createUiRuntimeComposition(
@@ -357,6 +367,34 @@ export async function createUiRuntimeComposition(
           isSubagent: input.isSubagent,
         }),
       );
+    },
+
+    async buildPromptMessages(input): Promise<ChatCompletionMessage[]> {
+      const systemPromptProvider = createSystemPromptProvider({
+        agentNameResolver() {
+          return input.agentName;
+        },
+        agentPromptResolver(agentName) {
+          return agentManager.get(agentName)?.prompt;
+        },
+        async toolsProvider() {
+          const tools = await toolScheduler.getAvailableTools({
+            agentName: input.agentName,
+            isSubagent: false,
+          });
+          return tools.map((tool) => tool.name);
+        },
+      });
+      const systemPrompt = await systemPromptProvider.build({
+        directory: input.projectRoot,
+        isSubagent: false,
+        sessionId: input.sessionId,
+      });
+      const history = withoutSystemMessages(input.messages);
+      if (systemPrompt.trim() === "") {
+        return history;
+      }
+      return [{ role: "system", content: systemPrompt }, ...history];
     },
 
     async listToolSummaries(input = {}): Promise<readonly CommandToolSummary[]> {

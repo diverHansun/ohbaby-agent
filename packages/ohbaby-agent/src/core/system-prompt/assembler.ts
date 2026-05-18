@@ -44,6 +44,9 @@ function assertAssembleOptions(options: AssembleOptions): void {
   if (options.agentName.trim() === "") {
     throw new Error("agentName is required");
   }
+  if (typeof options.isSubagent !== "boolean") {
+    throw new Error("isSubagent is required");
+  }
 }
 
 function compactPrompts(prompts: readonly string[]): string[] {
@@ -53,7 +56,7 @@ function compactPrompts(prompts: readonly string[]): string[] {
 export const SystemPrompt = {
   assemble(options: AssembleOptions): string[] {
     assertAssembleOptions(options);
-    const isSubagent = options.agentPrompt !== undefined;
+    const isSubagent = options.isSubagent;
 
     if (isSubagent) {
       return compactPrompts([
@@ -73,6 +76,7 @@ export const SystemPrompt = {
         minimal: false,
         tools: options.tools,
       }),
+      options.agentPrompt ? generateAgentPrompt(options.agentPrompt) : "",
       generateCustomInstructionsPrompt(options.customInstructions ?? []),
     ]);
   },
@@ -139,10 +143,15 @@ export function createSystemPromptProvider(
           agentName,
           agentPrompt,
           environment,
+          isSubagent: true,
           tools,
         }).join("\n\n");
       }
 
+      const agentPrompt = await options.agentPromptResolver?.(
+        agentName,
+        input,
+      );
       const customInstructions = await (options.customInstructionLoader
         ? options.customInstructionLoader(input)
         : loadCustomInstructions({
@@ -152,8 +161,10 @@ export function createSystemPromptProvider(
 
       return SystemPrompt.assemble({
         agentName,
+        agentPrompt,
         customInstructions,
         environment,
+        isSubagent: false,
         tools,
       }).join("\n\n");
     },

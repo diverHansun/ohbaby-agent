@@ -11,6 +11,7 @@ export interface EnvironmentInfo {
 export interface AssembleOptions {
   readonly agentName: string;
   readonly agentPrompt?: string;
+  readonly isSubagent: boolean;
   readonly environment: EnvironmentInfo;
   readonly customInstructions?: readonly string[];
   readonly tools?: readonly string[];
