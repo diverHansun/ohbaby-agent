@@ -3,7 +3,10 @@ import type {
   LifecycleResult,
   LifecycleRunParams,
 } from "../../core/lifecycle/index.js";
-import type { ToolExecutionEnvironment } from "../../core/tool-scheduler/index.js";
+import type {
+  ToolCallResult,
+  ToolExecutionEnvironment,
+} from "../../core/tool-scheduler/index.js";
 import type {
   RunContext,
   RunHookContext,
@@ -33,6 +36,59 @@ function withDefined(input: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(input).filter(([, value]) => value !== undefined),
   );
+}
+
+function safeJsonValue(value: unknown): unknown {
+  if (value instanceof Error) {
+    return withDefined({
+      message: value.message,
+      name: value.name,
+    });
+  }
+  if (typeof value === "function" || typeof value === "symbol") {
+    return String(value);
+  }
+
+  try {
+    const encoded = JSON.stringify(value);
+    return JSON.parse(encoded) as unknown;
+  } catch {
+    return String(value);
+  }
+}
+
+function safeJsonRecord(
+  value: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const safe = safeJsonValue(value);
+  return typeof safe === "object" && safe !== null && !Array.isArray(safe)
+    ? (safe as Record<string, unknown>)
+    : { value: safe };
+}
+
+function serializableToolResult(
+  result: ToolCallResult,
+): Record<string, unknown> {
+  return withDefined({
+    callId: result.callId,
+    duration: result.duration,
+    error: result.error
+      ? withDefined({
+          details:
+            result.error.details === undefined
+              ? undefined
+              : safeJsonValue(result.error.details),
+          message: result.error.message,
+          type: result.error.type,
+        })
+      : undefined,
+    metadata: safeJsonRecord(result.metadata),
+    output: result.output,
+    status: result.status,
+  });
 }
 
 function toToolExecutionEnvironment(
@@ -155,6 +211,9 @@ export class RunWorker {
       messages: this.context.messages,
       signal: this.context.abortSignal,
       ...(this.context.agent === undefined ? {} : { agent: this.context.agent }),
+      ...(this.context.isSubagent === undefined
+        ? {}
+        : { isSubagent: this.context.isSubagent }),
       ...(this.context.parentMessageId === undefined
         ? {}
         : { parentMessageId: this.context.parentMessageId }),
@@ -215,7 +274,7 @@ export class RunWorker {
         toolName: event.toolName,
         status: event.result.status,
         params: event.params,
-        result: event.result,
+        result: serializableToolResult(event.result),
       });
     }
   }

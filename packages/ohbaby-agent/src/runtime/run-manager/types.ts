@@ -34,6 +34,7 @@ export interface CreateRunOptions {
   readonly triggerSource: TriggerSource;
   readonly explicit?: Partial<RunDefaults>;
   readonly agent?: string;
+  readonly isSubagent?: boolean;
   readonly parentMessageId?: string;
   readonly messages: readonly ChatCompletionMessage[];
   readonly tools?: LifecycleRunParams["tools"];
@@ -94,6 +95,7 @@ export interface RunContext {
   readonly sandboxLease: SandboxLease;
   readonly abortSignal: AbortSignal;
   readonly agent?: string;
+  readonly isSubagent?: boolean;
   readonly parentMessageId?: string;
   readonly messages: readonly ChatCompletionMessage[];
   readonly tools?: LifecycleRunParams["tools"];

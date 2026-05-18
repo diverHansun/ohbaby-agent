@@ -1,5 +1,8 @@
 import { createBus } from "../../bus/index.js";
-import { DEFAULT_TOOL_SCHEDULER_CONFIG } from "./constants.js";
+import {
+  DEFAULT_TOOL_SCHEDULER_CONFIG,
+  SUBAGENT_DISABLED_TOOLS,
+} from "./constants.js";
 import { ConcurrencyController } from "./concurrency.js";
 import { ToolSchedulerEvent } from "./events.js";
 import { createToolRegistry } from "./registry.js";
@@ -243,6 +246,23 @@ function normalizeAgentToolsConfig(
     result[toolName] = false;
   }
   return result;
+}
+
+function isEnabledByAgentConfig(
+  toolName: string,
+  tools: Record<string, boolean> | undefined,
+): boolean {
+  if (!tools) {
+    return true;
+  }
+  if (Object.prototype.hasOwnProperty.call(tools, toolName)) {
+    return tools[toolName];
+  }
+  if (Object.prototype.hasOwnProperty.call(tools, "*")) {
+    return tools["*"];
+  }
+
+  return true;
 }
 
 export function createToolScheduler(
@@ -673,10 +693,28 @@ export function createToolScheduler(
     return null;
   }
 
-  function prepareCall(
+  async function isToolAvailableForRequest(
+    request: ToolCallRequest,
+  ): Promise<boolean> {
+    const agentConfig = await options.agentTools?.getAgentConfig(
+      request.agentName,
+    );
+    const tools = normalizeAgentToolsConfig(agentConfig?.tools);
+    if (!isEnabledByAgentConfig(request.toolName, tools)) {
+      return false;
+    }
+    return (
+      request.isSubagent !== true ||
+      !SUBAGENT_DISABLED_TOOLS.has(request.toolName)
+    );
+  }
+
+  async function prepareCall(
     request: ToolCallRequest,
     index: number,
-  ): { readonly prepared: PreparedCall } | { readonly result: ToolCallResult } {
+  ): Promise<
+    { readonly prepared: PreparedCall } | { readonly result: ToolCallResult }
+  > {
     const basicError = validateBasicRequest(request);
     if (basicError) {
       return { result: makeImmediateErrorResult(request, basicError) };
@@ -691,6 +729,18 @@ export function createToolScheduler(
           error: createError(
             "ToolNotFoundError",
             `Tool not found: ${request.toolName}`,
+          ),
+        }),
+      };
+    }
+    if (!(await isToolAvailableForRequest(request))) {
+      const call = createCall(request, category);
+      transition(call, "rejected");
+      return {
+        result: makeResult(call, "rejected", {
+          error: createError(
+            "PolicyDeniedError",
+            `Tool not available for agent: ${request.toolName}`,
           ),
         }),
       };
@@ -746,7 +796,7 @@ export function createToolScheduler(
   }
 
   async function execute(request: ToolCallRequest): Promise<ToolCallResult> {
-    const preparedResult = prepareCall(request, 0);
+    const preparedResult = await prepareCall(request, 0);
     if ("result" in preparedResult) {
       return preparedResult.result;
     }
@@ -774,7 +824,7 @@ export function createToolScheduler(
     const results: (ToolCallResult | undefined)[] = [];
     const prepared: PreparedCall[] = [];
     for (const [index, call] of request.calls.entries()) {
-      const preparedResult = prepareCall(call, index);
+      const preparedResult = await prepareCall(call, index);
       if ("result" in preparedResult) {
         results[index] = preparedResult.result;
       } else {

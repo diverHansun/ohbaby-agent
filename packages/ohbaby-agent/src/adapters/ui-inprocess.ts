@@ -1,6 +1,3 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-import type { ChatCompletionCreateParams } from "openai/resources/chat/completions/completions";
 import type {
   SubmitPromptOptions,
   UiBackendClient,
@@ -10,25 +7,17 @@ import type {
   UiEventHandler,
   UiInteractionResponse,
   UiMessage,
-  UiMessagePart,
   UiPermissionRequest,
   UiPermissionResponse,
   UiRun,
   UiRunStatus,
   UiSnapshot,
-  UiToolCall,
   UiSession,
 } from "ohbaby-sdk";
 import type { ChatCompletionMessage } from "../core/llm-client/index.js";
 import { createLLMClient } from "../core/llm-client/index.js";
 import type { LLMClientInstance } from "../core/llm-client/index.js";
-import { Lifecycle } from "../core/lifecycle/index.js";
 import { createBus } from "../bus/index.js";
-import {
-  createToolScheduler,
-  type ToolDefinition,
-  type ToolExecutionEnvironment,
-} from "../core/tool-scheduler/index.js";
 import type {
   CommandModelSummary,
   CommandSessionSummary,
@@ -52,13 +41,18 @@ import type {
   PermissionResponse as CorePermissionResponse,
 } from "../permission/index.js";
 import { createPolicyManager } from "../policy/index.js";
-import { BUILTIN_TOOLS } from "../tools/index.js";
+import type { AgentManager } from "../agents/index.js";
+import type { RunLedger } from "../runtime/run-ledger/index.js";
+import type { StreamBridge } from "../runtime/stream-bridge/index.js";
 import {
   cloneMessage,
   cloneRun,
   cloneSession,
   createInMemoryUiStateStore,
 } from "./ui-state/index.js";
+import { createUiRuntimeComposition } from "./ui-runtime/composition.js";
+import { startRunStreamProjection } from "./ui-runtime/run-stream-adapter.js";
+import type { UiRuntimeComposition } from "./ui-runtime/types.js";
 
 const EMPTY_SNAPSHOT: UiSnapshot = {
   sessions: [],
@@ -71,11 +65,16 @@ const EMPTY_SNAPSHOT: UiSnapshot = {
 };
 
 export interface InProcessUiBackendOptions {
+  readonly agentManager?: AgentManager;
+  readonly createRunId?: () => string;
   readonly initialSnapshot?: UiSnapshot;
   readonly llmClient?: LLMClientInstance;
   readonly createLLMClient?: () => Promise<LLMClientInstance>;
   readonly messageManager?: MessageManager;
   readonly now?: () => Date;
+  readonly runLedger?: RunLedger;
+  readonly streamBridge?: StreamBridge;
+  readonly workdir?: string;
 }
 
 function isSnapshot(
@@ -187,111 +186,6 @@ function createTextMessage(input: {
   };
 }
 
-function normalizeForBoundary(inputPath: string): string {
-  const resolved = path.resolve(inputPath);
-  const root = path.parse(resolved).root;
-  const withoutTrailingSeparator =
-    resolved.length > root.length ? resolved.replace(/[\\/]+$/u, "") : resolved;
-  return process.platform === "win32"
-    ? withoutTrailingSeparator.toLowerCase()
-    : withoutTrailingSeparator;
-}
-
-function assertInsideWorkdir(
-  workdir: string,
-  inputPath: string,
-  resolved: string,
-): string {
-  const normalizedRoot = normalizeForBoundary(workdir);
-  const normalizedCandidate = normalizeForBoundary(resolved);
-  if (normalizedRoot === normalizedCandidate) {
-    return resolved;
-  }
-  const relative = path.relative(normalizedRoot, normalizedCandidate);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error(`Path escapes workspace: ${inputPath}`);
-  }
-  return resolved;
-}
-
-function resolveHostPath(workdir: string, inputPath: string): string {
-  return path.isAbsolute(inputPath)
-    ? path.resolve(inputPath)
-    : path.resolve(workdir, inputPath);
-}
-
-function createHostLocalEnvironment(
-  workdir = process.cwd(),
-): ToolExecutionEnvironment {
-  const root = path.resolve(workdir);
-
-  return {
-    workdir: root,
-    resolvePath(inputPath: string): string {
-      return assertInsideWorkdir(
-        root,
-        inputPath,
-        resolveHostPath(root, inputPath),
-      );
-    },
-    async resolvePathForExisting(inputPath: string): Promise<string> {
-      const resolved = await fs.realpath(resolveHostPath(root, inputPath));
-      return assertInsideWorkdir(root, inputPath, resolved);
-    },
-    async resolvePathForWrite(inputPath: string): Promise<string> {
-      const target = resolveHostPath(root, inputPath);
-      const realParent = await fs.realpath(path.dirname(target));
-      const resolved = path.join(realParent, path.basename(target));
-      return assertInsideWorkdir(root, inputPath, resolved);
-    },
-    resolveCommandContext(): { readonly cwd: string; readonly kind: string } {
-      return {
-        cwd: root,
-        kind: "host-local",
-      };
-    },
-  };
-}
-
-function toOpenAiTools(
-  definitions: readonly ToolDefinition[],
-): ChatCompletionCreateParams["tools"] {
-  return definitions.map((definition) => ({
-    type: "function",
-    function: {
-      name: definition.name,
-      description: definition.description,
-      parameters: definition.parameters,
-    },
-  }));
-}
-
-function upsertAssistantTextPart(input: {
-  readonly append: boolean;
-  readonly message: UiMessage;
-  readonly text: string;
-}): UiMessage {
-  const textPartIndex = input.message.parts.findLastIndex(
-    (part) => part.type === "text",
-  );
-  if (!input.append && textPartIndex >= 0) {
-    const text = input.text;
-
-    return {
-      ...input.message,
-      parts: input.message.parts.map(
-        (part, index): UiMessagePart =>
-          index === textPartIndex ? { type: "text", text } : part,
-      ),
-    };
-  }
-
-  return {
-    ...input.message,
-    parts: [...input.message.parts, { type: "text", text: input.text }],
-  };
-}
-
 function toUiPermissionRequest(input: {
   readonly info: PermissionInfo;
   readonly runId: string;
@@ -337,10 +231,6 @@ export function createInProcessUiBackendClient(
   const bus = createBus();
   const policy = createPolicyManager({ bus });
   const permission = createPermissionManager({ bus });
-  const toolScheduler = createToolScheduler({ bus, permission, policy });
-  for (const tool of BUILTIN_TOOLS) {
-    toolScheduler.register(tool);
-  }
   const messageManager =
     options.messageManager ??
     createMessageManager({
@@ -364,8 +254,8 @@ export function createInProcessUiBackendClient(
     initialSnapshot.runs.map((run) => run.id),
   );
   let promptInFlight = false;
-  let activeAbortController: AbortController | undefined;
   let activeRunId: string | undefined;
+  let runtimePromise: Promise<UiRuntimeComposition> | undefined;
   const pendingPermissionSessions = new Map<string, string>();
 
   function now(): Date {
@@ -428,6 +318,31 @@ export function createInProcessUiBackendClient(
     return createLLMClient();
   }
 
+  function getRuntime(): Promise<UiRuntimeComposition> {
+    runtimePromise ??= resolveLLMClient()
+      .then((llmClient) =>
+        createUiRuntimeComposition({
+          agentManager: options.agentManager,
+          bus,
+          createRunId: options.createRunId ?? ((): string => runIds.next()),
+          llmClient,
+          messageManager,
+          now: () => now().getTime(),
+          permission,
+          policy,
+          runLedger: options.runLedger,
+          streamBridge: options.streamBridge,
+          workdir: options.workdir,
+        }),
+      )
+      .catch((error: unknown) => {
+        runtimePromise = undefined;
+        throw error;
+      });
+
+    return runtimePromise;
+  }
+
   function currentModelFromOptions(): CommandModelSummary | null {
     const client = options.llmClient;
     if (!client) {
@@ -455,73 +370,15 @@ export function createInProcessUiBackendClient(
     }));
   }
 
-  function appendToolCallPart(input: {
-    readonly message: UiMessage;
-    readonly callId: string;
-    readonly name: string;
-    readonly params: Record<string, unknown>;
-  }): UiMessage {
-    return {
-      ...input.message,
-      parts: [
-        ...input.message.parts,
-        {
-          type: "tool-call",
-          call: {
-            id: input.callId,
-            input: input.params,
-            name: input.name,
-            status: "running",
-          },
-        },
-      ],
-    };
-  }
-
-  function appendToolResultPart(input: {
-    readonly message: UiMessage;
-    readonly callId: string;
-    readonly output?: string;
-    readonly error?: string;
-  }): UiMessage {
-    const status: UiToolCall["status"] = input.error ? "failed" : "completed";
-    return {
-      ...input.message,
-      parts: [
-        ...input.message.parts.map((part) =>
-          part.type === "tool-call" && part.call.id === input.callId
-            ? {
-                ...part,
-                call: {
-                  ...part.call,
-                  status,
-                },
-              }
-            : part,
-        ),
-        {
-          type: "tool-result",
-          result: {
-            callId: input.callId,
-            output: input.output ?? "",
-            error: input.error,
-          },
-        },
-      ],
-    };
-  }
-
   const commandService = createCommandService({
     bus,
     interactionBroker,
     tools: {
-      listTools() {
-        return BUILTIN_TOOLS.map((tool) => ({
-          name: tool.name,
-          description: tool.description,
-          category: tool.category,
-          source: tool.source,
-        }));
+      async listTools() {
+        const runtime = await getRuntime();
+        return runtime.listToolSummaries({
+          agentName: runtime.agentManager.getDefault(),
+        });
       },
     },
     models: {
@@ -533,12 +390,22 @@ export function createInProcessUiBackendClient(
     },
     abortRun(runId?: string): void {
       if (!runId) {
-        activeAbortController?.abort("run aborted");
+        if (activeRunId) {
+          void getRuntime()
+            .then((runtime) => {
+              runtime.cancel(activeRunId ?? "", "run aborted");
+            })
+            .catch(() => undefined);
+        }
         interactionBroker.abortAll("aborted");
         return;
       }
       if (runId === activeRunId) {
-        activeAbortController?.abort("run aborted");
+        void getRuntime()
+          .then((runtime) => {
+            runtime.cancel(runId, "run aborted");
+          })
+          .catch(() => undefined);
         return;
       }
       commandService.abortCommandRun(runId, "aborted");
@@ -668,10 +535,15 @@ export function createInProcessUiBackendClient(
       }
 
       promptInFlight = true;
-      activeAbortController = new AbortController();
       const createdAt = timestamp();
+      let projection:
+        | ReturnType<typeof startRunStreamProjection>
+        | undefined;
+      let runStarted = false;
 
       try {
+        const runtime = await getRuntime();
+        const agentName = runtime.agentManager.getDefault();
         let session = submitOptions?.sessionId
           ? await stateStore.getSession(submitOptions.sessionId)
           : undefined;
@@ -697,7 +569,7 @@ export function createInProcessUiBackendClient(
         const coreUserMessage = await messageManager.createMessage({
           sessionId: session.id,
           role: "user",
-          agent: "default",
+          agent: agentName,
         });
         await messageManager.appendPart(coreUserMessage.id, {
           type: "text",
@@ -723,187 +595,69 @@ export function createInProcessUiBackendClient(
           message: cloneMessage(userMessage),
         });
 
-        const runId = runIds.next();
-        activeRunId = runId;
-        let run: UiRun = {
-          id: runId,
-          sessionId: session.id,
-          status: { kind: "running", runId },
-          startedAt: createdAt,
-          updatedAt: createdAt,
-        };
-        await stateStore.addRun(run);
-        await updateStatus(run.status);
-        publish({ type: "run.updated", run: cloneRun(run) });
-
-        let assistantMessage = createTextMessage({
-          id: messageIds.next(),
-          role: "assistant",
-          text: "",
-          createdAt: timestamp(),
+        await runtime.ensureSessionRecord({
+          agentName,
+          id: session.id,
+          projectRoot: options.workdir ?? process.cwd(),
+          title: session.title,
         });
-        session = {
-          ...session,
-          messages: [...session.messages, assistantMessage],
-          updatedAt: timestamp(),
-        };
-        await upsertSession(session);
-        publish({
-          type: "message.appended",
+
+        const runId = runtime.reserveRunId();
+        const assistantMessageId = messageIds.next();
+        activeRunId = runId;
+        projection = startRunStreamProjection({
+          assistantMessageId,
+          nextMessageId: () => messageIds.next(),
+          publish,
+          runId,
           sessionId: session.id,
-          message: cloneMessage(assistantMessage),
+          stateStore,
+          streamBridge: runtime.streamBridge,
+          timestamp,
         });
 
         try {
-          const availableTools = await toolScheduler.getAvailableTools({
-            agentName: "default",
+          const tools = await runtime.getOpenAiTools({
+            agentName,
           });
-          const executionEnvironment = createHostLocalEnvironment();
-          const lifecycle = new Lifecycle({
-            llmClient: await resolveLLMClient(),
-            messageManager,
-            toolScheduler,
-          });
-          const loop = lifecycle.run({
-            sessionId: session.id,
-            agent: "default",
-            environment: executionEnvironment,
+          const record = await runtime.runManager.create({
+            agent: agentName,
+            messages: toModelMessages(session.messages),
             parentMessageId: coreUserMessage.id,
-            messages: toModelMessages(
-              session.messages.filter(
-                (message) => message.id !== assistantMessage.id,
-              ),
-            ),
-            signal: activeAbortController.signal,
-            tools: toOpenAiTools(availableTools),
+            sessionId: session.id,
+            tools,
+            triggerSource: "user",
           });
-
-          let assistantTextStep: number | undefined;
-          let next = await loop.next();
-          while (!next.done) {
-            if (next.value.type === "llm:delta") {
-              const updatedAssistant = upsertAssistantTextPart({
-                append: assistantTextStep !== next.value.step,
-                message: assistantMessage,
-                text: next.value.content,
-              });
-              assistantTextStep = next.value.step;
-              const updatedMessages: UiMessage[] = session.messages.map(
-                (message) =>
-                  message.id === updatedAssistant.id
-                    ? updatedAssistant
-                    : message,
-              );
-              session = {
-                ...session,
-                messages: updatedMessages,
-                updatedAt: timestamp(),
-              };
-              assistantMessage = updatedAssistant;
-              await upsertSession(session);
-              publish({
-                type: "message.updated",
-                sessionId: session.id,
-                message: cloneMessage(updatedAssistant),
-              });
-              publish({
-                type: "message.part.delta",
-                sessionId: session.id,
-                messageId: updatedAssistant.id,
-                delta: next.value.delta,
-                content: next.value.content,
-                timestamp: next.value.timestamp,
-              });
-            }
-
-            if (next.value.type === "tool:start") {
-              const updatedAssistant = appendToolCallPart({
-                message: assistantMessage,
-                callId: next.value.callId,
-                name: next.value.toolName,
-                params: next.value.params,
-              });
-              const updatedMessages: UiMessage[] = session.messages.map(
-                (message) =>
-                  message.id === updatedAssistant.id
-                    ? updatedAssistant
-                    : message,
-              );
-              session = {
-                ...session,
-                messages: updatedMessages,
-                updatedAt: timestamp(),
-              };
-              assistantMessage = updatedAssistant;
-              await upsertSession(session);
-              publish({
-                type: "message.updated",
-                sessionId: session.id,
-                message: cloneMessage(updatedAssistant),
-              });
-            }
-
-            if (next.value.type === "tool:result") {
-              const updatedAssistant = appendToolResultPart({
-                message: assistantMessage,
-                callId: next.value.callId,
-                output: next.value.result.output,
-                error: next.value.result.error?.message,
-              });
-              const updatedMessages: UiMessage[] = session.messages.map(
-                (message) =>
-                  message.id === updatedAssistant.id
-                    ? updatedAssistant
-                    : message,
-              );
-              session = {
-                ...session,
-                messages: updatedMessages,
-                updatedAt: timestamp(),
-              };
-              assistantMessage = updatedAssistant;
-              await upsertSession(session);
-              publish({
-                type: "message.updated",
-                sessionId: session.id,
-                message: cloneMessage(updatedAssistant),
-              });
-            }
-
-            next = await loop.next();
+          runStarted = true;
+          if (record.runId !== runId) {
+            throw new Error(
+              `Run manager created unexpected run id: ${record.runId}`,
+            );
           }
 
-          if (!next.value.success) {
-            throw new Error("Lifecycle did not complete successfully");
+          const completion = await runtime.runManager.waitForCompletion(runId);
+          await projection.done;
+          if (completion.status !== "succeeded") {
+            throw new Error(completion.error ?? `Run ${completion.status}`);
           }
-
-          run = {
-            ...run,
-            status: { kind: "idle" },
-            updatedAt: timestamp(),
-          };
-          await updateRun(run);
-          publish({ type: "run.updated", run: cloneRun(run) });
-          await updateStatus({ kind: "idle" });
         } catch (error) {
-          const status: UiRunStatus = {
-            kind: "error",
-            message: getErrorMessage(error),
-            recoverable: true,
-          };
-          run = {
-            ...run,
-            status,
-            updatedAt: timestamp(),
-          };
-          await updateRun(run);
-          publish({ type: "run.updated", run: cloneRun(run) });
-          await updateStatus(status);
+          if (runStarted) {
+            await projection.done.catch(() => undefined);
+          } else {
+            await projection.stop();
+          }
+          const snapshot = await stateStore.readSnapshot();
+          if (snapshot.status.kind !== "error") {
+            await updateStatus({
+              kind: "error",
+              message: getErrorMessage(error),
+              recoverable: true,
+            });
+          }
           throw error;
         }
       } finally {
         promptInFlight = false;
-        activeAbortController = undefined;
         activeRunId = undefined;
       }
     },
@@ -935,16 +689,27 @@ export function createInProcessUiBackendClient(
       return interactionBroker.respond(interactionId, response);
     },
 
-    abortRun(runId?: string): Promise<void> {
+    async abortRun(runId?: string): Promise<void> {
       if (!runId) {
-        activeAbortController?.abort("run aborted");
+        if (activeRunId) {
+          try {
+            const runtime = await getRuntime();
+            runtime.cancel(activeRunId, "run aborted");
+          } catch {
+            // Abort is best-effort; the run may already have completed.
+          }
+        }
         interactionBroker.abortAll("aborted");
       } else if (runId === activeRunId) {
-        activeAbortController?.abort("run aborted");
+        try {
+          const runtime = await getRuntime();
+          runtime.cancel(runId, "run aborted");
+        } catch {
+          // Abort is best-effort; the run may already have completed.
+        }
       } else {
         commandService.abortCommandRun(runId, "aborted");
       }
-      return Promise.resolve();
     },
   };
 }
