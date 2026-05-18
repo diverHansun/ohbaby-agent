@@ -79,12 +79,13 @@ export function applyTuiEvent(
           event.sessionId,
           (messages) =>
             messages.map((message) =>
-              message.id === event.messageId
+              event.messageId !== undefined && message.id === event.messageId
                 ? applyPartDelta(
                     message,
                     "partIndex" in event ? event.partIndex : undefined,
                     event.partId,
                     event.delta,
+                    event.content,
                   )
                 : message,
             ),
@@ -298,11 +299,14 @@ function applyPartDelta(
   partIndex: number | undefined,
   partId: string | undefined,
   delta: string,
+  content: string | undefined,
 ): UiMessage {
   const resolvedIndex = resolvePartIndex(message, partIndex, partId);
 
   if (resolvedIndex === null) {
-    return message;
+    return content === undefined
+      ? appendDeltaToLastTextPart(message, delta)
+      : upsertLastTextPart(message, content);
   }
 
   return {
@@ -346,6 +350,54 @@ function appendTextToPart(part: UiMessagePart, delta: string): UiMessagePart {
   }
 
   return part;
+}
+
+function appendDeltaToLastTextPart(
+  message: UiMessage,
+  delta: string,
+): UiMessage {
+  const textIndex = findLastTextPartIndex(message);
+
+  if (textIndex === -1) {
+    return {
+      ...message,
+      parts: [...message.parts, { text: delta, type: "text" }],
+    };
+  }
+
+  return {
+    ...message,
+    parts: message.parts.map((part, index) =>
+      index === textIndex ? appendTextToPart(part, delta) : part,
+    ),
+  };
+}
+
+function upsertLastTextPart(message: UiMessage, content: string): UiMessage {
+  const textIndex = findLastTextPartIndex(message);
+
+  if (textIndex === -1) {
+    return {
+      ...message,
+      parts: [...message.parts, { text: content, type: "text" }],
+    };
+  }
+
+  return {
+    ...message,
+    parts: message.parts.map((part, index): UiMessagePart =>
+      index === textIndex &&
+      (part.type === "text" || part.type === "reasoning")
+        ? { ...part, text: content }
+        : part,
+    ),
+  };
+}
+
+function findLastTextPartIndex(message: UiMessage): number {
+  return message.parts.findLastIndex(
+    (part) => part.type === "text" || part.type === "reasoning",
+  );
 }
 
 function formatCommandOutput(output: UiCommandOutput | undefined): string {

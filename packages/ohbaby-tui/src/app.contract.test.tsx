@@ -80,6 +80,153 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("Hello");
   });
 
+  it("handles the backend streaming event sequence without duplicating text", async () => {
+    const client = createFakeClient({
+      activeSessionId: null,
+      permissions: [],
+      runs: [],
+      sessions: [],
+      status: { kind: "idle" },
+    });
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+    client.emit({
+      session: {
+        createdAt: "2026-05-14T00:00:00.000Z",
+        id: "session_stream",
+        messages: [],
+        title: "Streaming",
+        updatedAt: "2026-05-14T00:00:00.000Z",
+      },
+      type: "session.updated",
+    });
+    client.emit({
+      message: {
+        createdAt: "2026-05-14T00:00:01.000Z",
+        id: "message_user",
+        parts: [{ text: "start", type: "text" }],
+        role: "user",
+      },
+      sessionId: "session_stream",
+      type: "message.appended",
+    });
+    client.emit({
+      run: {
+        id: "run_stream",
+        sessionId: "session_stream",
+        startedAt: "2026-05-14T00:00:02.000Z",
+        status: { kind: "running", runId: "run_stream" },
+        updatedAt: "2026-05-14T00:00:02.000Z",
+      },
+      type: "run.updated",
+    });
+    client.emit({
+      message: {
+        createdAt: "2026-05-14T00:00:03.000Z",
+        id: "message_assistant",
+        parts: [],
+        role: "assistant",
+      },
+      sessionId: "session_stream",
+      type: "message.appended",
+    });
+    client.emit({
+      message: {
+        createdAt: "2026-05-14T00:00:03.000Z",
+        id: "message_assistant",
+        parts: [{ text: "Hel", type: "text" }],
+        role: "assistant",
+      },
+      sessionId: "session_stream",
+      type: "message.updated",
+    });
+    client.emit({
+      content: "Hel",
+      delta: "Hel",
+      messageId: "message_assistant",
+      sessionId: "session_stream",
+      type: "message.part.delta",
+    });
+    client.emit({
+      message: {
+        createdAt: "2026-05-14T00:00:03.000Z",
+        id: "message_assistant",
+        parts: [{ text: "Hello", type: "text" }],
+        role: "assistant",
+      },
+      sessionId: "session_stream",
+      type: "message.updated",
+    });
+    client.emit({
+      content: "Hello",
+      delta: "lo",
+      messageId: "message_assistant",
+      sessionId: "session_stream",
+      type: "message.part.delta",
+    });
+    client.emit({
+      run: {
+        id: "run_stream",
+        sessionId: "session_stream",
+        startedAt: "2026-05-14T00:00:02.000Z",
+        status: { kind: "idle" },
+        updatedAt: "2026-05-14T00:00:04.000Z",
+      },
+      type: "run.updated",
+    });
+    await flush();
+
+    expect(app.lastFrame()).toContain("assistant");
+    expect(app.lastFrame()).toContain("Hello");
+    expect(app.lastFrame()).not.toContain("Hellolo");
+    expect(app.lastFrame()).toContain("status: idle | session: session_stream");
+  });
+
+  it("renders tool calls and tool results as separate readable parts", async () => {
+    const toolSnapshot = snapshot();
+    const baseSession = toolSnapshot.sessions[0];
+    const client = createFakeClient({
+      ...toolSnapshot,
+      sessions: [
+        {
+          ...baseSession,
+          messages: [
+            {
+              createdAt: "2026-05-14T00:00:01.000Z",
+              id: "message_tool",
+              parts: [
+                {
+                  call: {
+                    id: "call_1",
+                    input: { command: "pwd" },
+                    name: "bash",
+                    status: "completed",
+                  },
+                  type: "tool-call",
+                },
+                {
+                  result: {
+                    callId: "call_1",
+                    output: "D:/Projects",
+                  },
+                  type: "tool-result",
+                },
+              ],
+              role: "assistant",
+            },
+          ],
+        },
+      ],
+    });
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+
+    expect(app.lastFrame()).toContain("tool bash (completed)");
+    expect(app.lastFrame()).toContain("tool result call_1: D:/Projects");
+  });
+
   it("submits normal prompts with the active session id", async () => {
     const client = createFakeClient(snapshot());
     const app = render(<OhbabyTerminalApp client={client} />);
