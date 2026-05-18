@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-providers 已从规划落地为当前实现，源码位于：
+`services/providers` 是 LLM 厂商适配层，源码位于：
 
 ```text
 packages/ohbaby-agent/src/services/providers/
@@ -12,96 +12,63 @@ packages/ohbaby-agent/src/services/providers/
 └── index.ts
 ```
 
-模块不再采用文档早期版本里的 `ProviderAdapter.buildRequest()` / `normalizeChunk()` / `normalizeResponse()` 三件套。当前公开边界更小：
+当前已实现 OpenAI-compatible 与 Anthropic 两类 provider。registry 保持静态分发：Anthropic provider id 进入 Anthropic adapter，其余 provider id 走 OpenAI-compatible adapter。
+
+## 公共边界
 
 ```typescript
-interface ProviderInstance<TClient = any> {
+interface ProviderInstance<TClient = unknown> {
   id: string;
-  kind: 'openai-compatible' | 'anthropic';
+  kind: "openai-compatible" | "anthropic";
   client: TClient;
-  streamChatCompletion(request: ProviderRequest): Promise<AsyncIterable<ProviderStreamEvent>>;
+  streamChatCompletion(
+    request: ProviderRequest,
+  ): Promise<AsyncIterable<ProviderStreamEvent>>;
   isAbortError(error: unknown): boolean;
 }
 ```
 
-## 架构概览
+provider 层负责把不同厂商协议归一化到 `ProviderStreamEvent`，让 `core/llm-client` 不直接接触 OpenAI chunk、Anthropic SSE 或 SDK 特定错误类型。
+
+## 职责边界
+
+providers 负责：
+
+- 创建并持有厂商 SDK/API client。
+- 将统一 `ProviderRequest` 转换为厂商原生请求。
+- 调用厂商流式接口。
+- 将原生 chunk/SSE 归一化成 `ProviderStreamEvent`。
+- 暴露 `isAbortError()`，让 llm-client 统一处理中断。
+
+providers 不负责：
+
+- 不累积完整 assistant message。
+- 不解析最终 `parsedToolCalls`。
+- 不执行工具。
+- 不读取 session/message/run 状态。
+- 不做 retry/fallback 策略。
+- 不做 token 估算或上下文压缩。
+
+## 与 llm-client 的关系
 
 ```text
-config/llm
-    ↓ 提供 provider/apiKey/baseUrl
-core/llm-client.createLLMClient()
-    ↓ 调用 createProvider()
-services/providers
-    ├─ 选择具体 provider
-    ├─ 创建 SDK client
-    └─ 返回 ProviderInstance
-
-core/llm-client.streamChatCompletion()
-    ↓ 构造 ProviderRequest
-ProviderInstance.streamChatCompletion(request)
-    ↓
-具体 provider 内部
-    ├─ 转换原生请求
-    ├─ 调用 SDK 流接口
-    └─ 归一化为 ProviderStreamEvent
+core/llm-client
+  -> ProviderRequest
+  -> ProviderInstance.streamChatCompletion()
+  -> ProviderStreamEvent
+  -> core/llm-client 聚合完成态
 ```
 
-## 设计要点
+`completeMessage`、`parsedToolCalls`、partial response 都由 `core/llm-client` 生成。provider 只翻译厂商事件。
 
-### 1. provider 内聚协议细节
+## 与 llm-model 的关系
 
-与早期规划相比，当前实现把“请求构造、SDK 调用、流事件归一化”都封进 provider 内部。收益是：
+`services/llm-model` 是平行的本地模型辅助模块，只处理模型元数据和 token 估算。providers 不依赖 llm-model，也不根据 token 估算改变请求。
 
-- `core/llm-client` 不需要知道 OpenAI chunk 或 Anthropic SSE 的形状
-- 每个 provider 的差异只在本文件内部扩散
-- 对上层暴露的抽象面更小，测试边界更清晰
+provider 返回的真实 usage 通过归一化事件进入 llm-client；它属于真实 provider usage，不属于 `services/llm-model` 的估算 token。
 
-### 2. registry 保持静态而简单
+## 设计取舍
 
-`index.ts` 当前只做静态分发：
-
-- `anthropic` / `claude` → Anthropic provider
-- 其他 provider id → OpenAI-compatible provider
-
-这比可动态注册的插件式 registry 更简单，也更符合当前项目阶段。
-
-### 3. provider 实例只绑定连接级配置
-
-`createProvider()` 不接收完整 `LLMConfig`，而只接收：
-
-```typescript
-interface CreateProviderOptions {
-  provider: string;
-  apiKey: string;
-  baseUrl: string;
-}
-```
-
-`model`、`temperature`、`maxTokens` 留在 `ProviderRequest` 里按调用传入，避免为模型切换重建 provider。
-
-### 4. 共享 finish reason 保持收敛
-
-当前共享枚举仍然只有：
-
-```typescript
-type ProviderFinishReason = 'stop' | 'tool_calls' | 'length' | 'content_filter';
-```
-
-当厂商存在额外语义时，例如 Anthropic 的 `pause_turn`，当前实现会：
-
-- 归一化到共享值 `stop`
-- 同时通过 `rawFinishReason` 保留原始值
-
-## 当前权衡
-
-1. **输入消息类型仍复用 OpenAI ChatCompletionMessageParam**
-   - 这是当前 provider 层的统一消息输入格式
-   - 尚未引入完全独立的 provider-neutral message schema
-
-2. **OpenAI-compatible 是默认回退路径**
-   - 当前没有显式的“未知 provider id”错误分支
-   - 这符合现有配置系统“provider 只是字符串标识”的现实
-
-3. **Anthropic 默认不启用 eager input streaming**
-   - 当前实现优先避免默认依赖 beta 行为
-   - 如未来需要更细粒度工具参数流，可再引入显式开关
+1. OpenAI-compatible 是默认回退路径，符合当前配置系统中 provider 是字符串标识的现实。
+2. Anthropic 默认不启用 eager input streaming，避免 MVP 依赖 beta 行为。
+3. `model`、`temperature`、`maxTokens` 保留在 `ProviderRequest`，provider 实例只绑定连接级配置。

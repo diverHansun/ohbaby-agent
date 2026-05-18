@@ -2,83 +2,76 @@
 
 ## 当前状态
 
-当前 llm-client 已从“直接调用 OpenAI SDK”的实现收缩为“配置绑定的 provider-aware 流式执行层”。它仍然只有两个公开入口，但职责边界已经变化：
+`core/llm-client` 是配置绑定的 provider-aware 流式执行层。它位于 `config/llm`、`services/providers` 与上层 lifecycle/message/runtime 之间。
 
-- `createLLMClient()`：从 `config/llm` 读取配置，并调用 `services/providers.createProvider()` 创建 provider 实例
-- `streamChatCompletion()`：面向统一的 `ProviderStreamEvent` 做消息累积、工具参数拼接、完成态输出和中断处理
+公开职责：
 
-```text
-llm-client Module
-├── Client Creation
-│   └── createLLMClient()
-│       ├─ getLLMConfig()
-│       ├─ createProvider({ provider, apiKey, baseUrl })
-│       └─ 返回 LLMClientInstance { provider, config }
-│
-└── Streaming Processing
-    └── streamChatCompletion(llmClient, messages, options)
-        ├─ 构造 ProviderRequest
-        ├─ provider.streamChatCompletion(...)
-        ├─ 累积 textDelta / toolCallDeltas
-        ├─ 流结束时解析 tool_calls.arguments
-        └─ 中断时返回部分结果
-```
-
-厂商协议差异现在下沉到 `docs/services/providers/` 对应的源码模块中。
-
-## 设计模式与理由
-
-### 1. AsyncGenerator 持续输出完整状态
-
-- 与 `for await...of` 自然兼容
-- 每次 yield 都携带“当前完整消息”，而不是只输出 delta
-
-### 2. provider 边界隔离协议差异
-
-- llm-client 不再直接依赖 OpenAI chunk 或 Anthropic SSE 事件结构
-- 上层统一通过 `streamChatCompletion()` 使用 provider-agnostic 行为
-
-### 3. 延迟解析工具调用参数
-
-- `tool_calls.arguments` 仍然按字符串片段累积
-- 只有在完成态出现后才 `JSON.parse`
-
-### 4. 中断优先返回部分结果
-
-- 通过 `provider.isAbortError()` 判断中断
-- 中断时保留已生成内容，输出最终一条 `StreamingResponse`
-
-### 5. 共享 finish reason + 原始 finish reason 双轨保留
-
-- `finishReason` 维持共享枚举
-- `rawFinishReason` 暴露厂商原始值，用于保留 `pause_turn` 这类额外语义
-
-## 模块结构
+- `createLLMClient()`：读取 `config/llm`，调用 `services/providers.createProvider()` 创建 provider 实例，并保留当前模型配置。
+- `streamChatCompletion()`：构造 `ProviderRequest`，调用 provider，消费归一化的 `ProviderStreamEvent`，累积流式文本与 tool call 参数，生成 `StreamingResponse`。
 
 ```text
-src/core/llm-client/
-├── types.ts
-├── client.ts
-├── streaming.ts
-├── index.ts
-└── llm-client.test.ts
+config/llm
+  -> core/llm-client.createLLMClient()
+  -> services/providers.createProvider()
+
+upper runtime/lifecycle
+  -> core/llm-client.streamChatCompletion()
+  -> provider.streamChatCompletion()
+  -> normalized ProviderStreamEvent
+  -> accumulated StreamingResponse
 ```
 
-## 当前权衡
+## 职责边界
 
-1. **消息输入边界仍复用 OpenAI-compatible message 类型**
-   - `messages` 仍使用 `ChatCompletionMessageParam[]`
-   - 这让 provider 层可以兼容现有调用方，不必同时重写消息模型
+`core/llm-client` 负责：
 
-2. **provider 创建只绑定连接级配置**
-   - `model`、`temperature`、`maxTokens` 在请求时传入
-   - 这允许未来在不重建 provider 的前提下切换模型
+- 绑定已加载的 LLM 配置。
+- 持有 provider 实例。
+- 为单次请求填充 model、temperature、maxTokens、messages、tools。
+- 将 provider stream 聚合成当前完整消息。
+- 在完成态解析 tool call arguments。
+- 在 abort 分支返回可用的 partial result。
 
-3. **llm-client 仍承担完成态构造责任**
-   - provider 负责归一化单个流事件
-   - `completeMessage`、`parsedToolCalls` 仍由 llm-client 聚合生成
+`core/llm-client` 不负责：
 
-## 演进方向
+- 不直接处理 OpenAI chunk、Anthropic SSE 等厂商原生事件。
+- 不创建或管理 session/message/run 持久化。
+- 不执行工具。
+- 不做 token 估算或上下文压缩。
+- 不维护模型元数据表。
 
-- 如果未来引入更独立的消息模型，llm-client 可以继续摆脱 `ChatCompletionMessageParam`
-- 如果未来需要多 provider 并发或更复杂的 registry，再扩展 `services/providers`
+## 与 Providers 的关系
+
+provider 层只暴露稳定的小接口：
+
+```typescript
+interface ProviderInstance<TClient = unknown> {
+  id: string;
+  kind: "openai-compatible" | "anthropic";
+  client: TClient;
+  streamChatCompletion(
+    request: ProviderRequest,
+  ): Promise<AsyncIterable<ProviderStreamEvent>>;
+  isAbortError(error: unknown): boolean;
+}
+```
+
+llm-client 不知道 provider 内部如何调用 SDK，只消费归一化事件。
+
+## 与 llm-model 的关系
+
+`services/llm-model` 只提供模型元数据、token 估算和上下文限制。llm-client 不调用其 token 估算逻辑，也不把 provider 返回的真实 `TokenUsage` 和估算值混用。
+
+命名边界：
+
+- `core/llm-client.ChatCompletionMessage`：provider/lifecycle 输入消息边界。
+- `services/llm-model.TokenCountMessage`：token 估算输入结构。
+
+两个类型不应混名，也不应互相承担对方职责。
+
+## 设计取舍
+
+1. 当前消息输入继续沿用 OpenAI-compatible 的 `ChatCompletionMessageParam` 形状，降低 provider 适配成本。
+2. provider 创建只绑定连接级配置，model/temperature/maxTokens 在请求时传入。
+3. tool call 参数只在完成态解析，避免流式片段中间态误解析。
+4. abort 判断委托给 provider，partial response 构造保留在 llm-client。

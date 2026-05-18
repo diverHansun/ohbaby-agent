@@ -4,7 +4,7 @@ const CONVERSATION_OVERHEAD_TOKENS = 4;
 const DEFAULT_MODEL_LIMIT = 4_096;
 const DEFAULT_MAX_RESPONSE_TOKENS = 2_048;
 
-export type ChatCompletionMessage =
+export type TokenCountMessage =
   | {
       readonly role: "system";
       readonly content: string;
@@ -70,7 +70,7 @@ export function estimateTokensForText(text: string): number {
 }
 
 export function estimateTokensForMessage(
-  message: ChatCompletionMessage,
+  message: TokenCountMessage,
 ): number {
   switch (message.role) {
     case "system":
@@ -93,7 +93,7 @@ export function estimateTokensForMessage(
 }
 
 export function estimateTokensForMessages(
-  messages: readonly ChatCompletionMessage[],
+  messages: readonly TokenCountMessage[],
 ): number {
   assertArray(messages, "messages");
 
@@ -146,7 +146,7 @@ export function getTokenLimit(model: string): number {
 }
 
 export function calculateContextTokens(
-  messages: readonly ChatCompletionMessage[],
+  messages: readonly TokenCountMessage[],
   model: string,
   maxResponseTokens = DEFAULT_MAX_RESPONSE_TOKENS,
 ): ContextTokens {
@@ -171,7 +171,7 @@ export function calculateContextTokens(
 }
 
 export function isApproachingTokenLimit(
-  messages: readonly ChatCompletionMessage[],
+  messages: readonly TokenCountMessage[],
   model: string,
 ): TokenWarning {
   const context = calculateContextTokens(messages, model);
