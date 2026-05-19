@@ -95,6 +95,33 @@ describe("TUI store event reducer", () => {
     expect(state.messages[0]?.parts[0]).toMatchObject({ text: "Hello world" });
   });
 
+  it("uses delta content as authoritative text even when a part id resolves", () => {
+    const initial = {
+      ...snapshot(),
+      sessions: [
+        {
+          ...snapshot().sessions[0],
+          messages: [
+            {
+              ...snapshot().sessions[0].messages[0],
+              parts: [{ id: "part_1", text: "Hello", type: "text" }],
+            },
+          ],
+        },
+      ],
+    } as unknown as UiSnapshot;
+    const state = applyTuiEvent(createStateFromSnapshot(initial), {
+      content: "Hello world",
+      delta: "Hello world",
+      messageId: "message_1",
+      partId: "part_1",
+      sessionId: "session_1",
+      type: "message.part.delta",
+    });
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({ text: "Hello world" });
+  });
+
   it("projects the first backend session update when no session is active", () => {
     let state = createStateFromSnapshot({
       activeSessionId: null,

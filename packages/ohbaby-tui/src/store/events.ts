@@ -382,7 +382,9 @@ function applyPartDelta(
   return {
     ...message,
     parts: message.parts.map((part, index) =>
-      index === resolvedIndex ? appendTextToPart(part, delta) : part,
+      index === resolvedIndex
+        ? appendTextToPart(part, content ?? delta, content !== undefined)
+        : part,
     ),
   };
 }
@@ -404,11 +406,15 @@ function resolvePartIndex(
   return resolvedIndex >= 0 ? resolvedIndex : null;
 }
 
-function appendTextToPart(part: UiMessagePart, delta: string): UiMessagePart {
+function appendTextToPart(
+  part: UiMessagePart,
+  text: string,
+  replace = false,
+): UiMessagePart {
   if (part.type === "text" || part.type === "reasoning") {
     return {
       ...part,
-      text: `${part.text}${delta}`,
+      text: replace ? text : `${part.text}${text}`,
     };
   }
 

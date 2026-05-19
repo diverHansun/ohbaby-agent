@@ -88,6 +88,14 @@ async function handleSessionParent(
     });
     return;
   }
+  if (!sessions.some((session) => session.id === response.choiceId)) {
+    context.fail({
+      code: "INVALID_INTERACTION_RESPONSE",
+      message: `Unknown session selection: ${response.choiceId}`,
+      recoverable: true,
+    });
+    return;
+  }
 
   await options.sessions?.selectSession?.(response.choiceId);
   context.emitAction(action("session.selected", { choiceId: response.choiceId }));

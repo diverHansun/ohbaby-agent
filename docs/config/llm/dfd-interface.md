@@ -78,12 +78,12 @@ config/llm 清除内存缓存
 ### 接口1：getLLMConfig()
 
 ```typescript
-async function getLLMConfig(): Promise<LLMConfig>
+async function getLLMConfig(options?: { projectDirectory?: string }): Promise<LLMConfig>
 ```
 
 **语义**：获取当前有效的 LLM 配置
 
-**输入**：无
+**输入**：可选 `projectDirectory`，用于解析项目 `.env`；未提供时使用 `process.cwd()`
 
 **输出**：LLMConfig 对象，包含 provider、model、apiKey、baseUrl、temperature、maxTokens
 
@@ -97,12 +97,12 @@ async function getLLMConfig(): Promise<LLMConfig>
 ### 接口2：reloadLLMConfig()
 
 ```typescript
-async function reloadLLMConfig(): Promise<LLMConfig>
+async function reloadLLMConfig(options?: { projectDirectory?: string }): Promise<LLMConfig>
 ```
 
 **语义**：清除缓存并重新加载配置
 
-**输入**：无
+**输入**：可选 `projectDirectory`，用于重新解析项目 `.env`；未提供时使用 `process.cwd()`
 
 **输出**：新加载的 LLMConfig 对象
 

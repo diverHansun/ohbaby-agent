@@ -205,6 +205,34 @@ describe("CommandService", () => {
     });
   });
 
+  it("rejects session selections that were not offered", async () => {
+    const request = vi.fn<() => Promise<UiInteractionResponse>>().mockResolvedValue({
+      choiceId: "session_missing",
+      kind: "accepted",
+    });
+    const selectSession = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const { events, service } = createServiceHarness({
+      interactionBroker: { request },
+      sessions: {
+        listSessions() {
+          return [{ id: "session_1", title: "First" }];
+        },
+        selectSession,
+      },
+    });
+
+    await service.executeCommand(makeInvocation("session", ["session"]));
+
+    expect(selectSession).not.toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({
+      error: {
+        code: "INVALID_INTERACTION_RESPONSE",
+        message: "Unknown session selection: session_missing",
+      },
+      type: "failed",
+    });
+  });
+
   it("executes abort and exit actions", async () => {
     const abortRun = vi.fn<() => Promise<void>>().mockResolvedValue();
     const exit = vi.fn<() => Promise<void>>().mockResolvedValue();

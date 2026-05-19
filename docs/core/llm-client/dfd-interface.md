@@ -83,8 +83,12 @@ yield 最后一条 StreamingResponse
 ### createLLMClient()
 
 ```typescript
-async function createLLMClient(): Promise<LLMClientInstance>
+async function createLLMClient(options?: {
+  projectDirectory?: string
+}): Promise<LLMClientInstance>
 ```
+
+`projectDirectory` is passed through to `config/llm` so project `.env` lookup matches the active backend workdir.
 
 ### streamChatCompletion()
 

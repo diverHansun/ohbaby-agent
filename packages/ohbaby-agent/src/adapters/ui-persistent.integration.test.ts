@@ -85,6 +85,15 @@ function markBackendLeaseDead(): void {
     );
 }
 
+function readBackendLeaseValue(): string | undefined {
+  return getDatabase()
+    .prepare<{ readonly value: string }>(
+      `SELECT value FROM ${schema.appState.tableName}
+       WHERE scope = ? AND key = ?`,
+    )
+    .get("global", "persistentUiBackendLease")?.value;
+}
+
 async function tempDir(prefix: string): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix));
 }
@@ -238,6 +247,36 @@ describe("createPersistentUiBackendClient", () => {
         kind: "running",
         runId: "run_live_pending",
       });
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("does not steal a live backend lease while the owner is idle", async () => {
+    const directory = await tempDir("ohbaby-persistent-live-lease-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      const client = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Seeded", finishReason: "stop" },
+        ]),
+        workdir,
+      });
+
+      await client.submitPrompt("Seed session");
+      const firstLease = readBackendLeaseValue();
+      expect(firstLease).toBeDefined();
+
+      createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        workdir,
+      });
+
+      expect(readBackendLeaseValue()).toBe(firstLease);
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

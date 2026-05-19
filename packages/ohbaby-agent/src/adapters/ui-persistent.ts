@@ -169,7 +169,7 @@ function shouldRecoverStartupRuns(input: {
   try {
     const activeRunCount = countActiveRuns(input.db);
     const liveOwner = isProcessAlive(readBackendLease(input.db)?.pid ?? -1);
-    if (!liveOwner || activeRunCount === 0) {
+    if (!liveOwner) {
       writeBackendLease(input);
     }
     input.db.exec("COMMIT");

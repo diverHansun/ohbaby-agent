@@ -63,7 +63,7 @@ TuiStore 使用单一 reducer 入口。每个 SDK 事件映射到一个或多个
 
 | SDK 事件 | 目标切片 | 更新规则 |
 |---|---|---|
-| `snapshot.replaced` | 全部 | 硬重置 runtime/sessions/runs/permissions；清空 pending |
+| `snapshot.replaced` | runtime/sessions/runs/messages/permissions | 用 backend snapshot 重建持久状态；保留本地 catalog、command notices、interactions、live permissions 与 resolved-permission tombstones |
 | `runtime.updated` | `runtime` | 整体替换 |
 | `session.updated` | `sessions` | 按 id upsert |
 | `message.appended` | `messages` | append 到列表尾部 |
@@ -102,7 +102,7 @@ TuiStore 使用单一 reducer 入口。每个 SDK 事件映射到一个或多个
    - 调用 `client.getSnapshot()` → 写入 runtime/sessions/runs/permissions。
    - 调用 `client.listCommands({ surface: 'tui' })` → 写入 catalog。
    - 调用 `client.getMessages(activeSessionId)` → 写入 messages。
-3. **清理**：清空 `pending.invocations` 和 `pending.interactions`（如果 backend 仍有活跃状态，会通过后续事件重新出现）。
+3. **合并本地队列**：保留本地 command notices、pending interactions、live permissions 与 resolved-permission tombstones，避免旧 snapshot 复活已处理的权限请求。
 4. **保留**：用户正在编辑的 Prompt 文本不受影响（PromptState 归 AppStateContext）。
 5. **恢复**：恢复消费后续事件。
 

@@ -351,6 +351,7 @@ async function getPrimaryAgentPrompt(): Promise<string[]> {
   return SystemPrompt.assemble({
     agentName: 'build',
     agentPrompt: undefined,
+    isSubagent: false,
     environment: {
       workingDirectory: process.cwd(),
       platform: process.platform,
@@ -371,6 +372,7 @@ function getSubagentPrompt(
   return SystemPrompt.assemble({
     agentName,
     agentPrompt,
+    isSubagent: true,
     environment: {
       workingDirectory: process.cwd(),
       platform: process.platform,
