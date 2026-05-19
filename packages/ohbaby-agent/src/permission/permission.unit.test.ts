@@ -361,6 +361,39 @@ describe("PermissionManager", () => {
       },
     ]);
   });
+
+  it("can cancel only pending asks while preserving session approvals", async () => {
+    const bus = createBus();
+    let nextId = 1;
+    const permission = createPermissionManager({
+      bus,
+      generateId: () => `permission_${String(nextId++)}`,
+    });
+
+    const approved = permission.ask(baseAskInput());
+    permission.respond("session_1", "permission_1", { type: "always" });
+    await expect(approved).resolves.toBe("always");
+
+    const pending = permission.ask(
+      baseAskInput({
+        callId: "call_2",
+        messageId: "message_2",
+        params: { file_path: "docs/blocked.txt" },
+      }),
+    );
+    permission.cancelPending("session_1");
+    await expect(pending).resolves.toBe("cancel");
+
+    await expect(
+      permission.ask(
+        baseAskInput({
+          callId: "call_3",
+          messageId: "message_3",
+          params: { file_path: "src/components/Input.tsx" },
+        }),
+      ),
+    ).resolves.toBe("always");
+  });
 });
 
 describe("permission patterns", () => {

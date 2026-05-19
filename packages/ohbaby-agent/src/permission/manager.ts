@@ -154,6 +154,26 @@ export function createPermissionManager(
     }
   }
 
+  function cancelPending(sessionId: string): void {
+    if (current?.info.sessionId === sessionId) {
+      publishReply(current, { type: "cancel" });
+      current.resolve("cancel");
+      current = undefined;
+    }
+    const remainingQueue: PendingRequest[] = [];
+    for (const request of queue) {
+      if (request.info.sessionId !== sessionId) {
+        remainingQueue.push(request);
+      } else {
+        publishReply(request, { type: "cancel" });
+        request.resolve("cancel");
+      }
+    }
+    queue.length = 0;
+    queue.push(...remainingQueue);
+    advanceQueue();
+  }
+
   return {
     ask(input: PermissionAskInput): Promise<SchedulerPermissionResponse> {
       const info = createInfo(input, generateId(), now);
@@ -252,25 +272,13 @@ export function createPermissionManager(
       completeCurrent();
     },
 
+    cancelPending(sessionId: string): void {
+      cancelPending(sessionId);
+    },
+
     clearSession(sessionId: string): void {
       approvals.delete(sessionId);
-      if (current?.info.sessionId === sessionId) {
-        publishReply(current, { type: "cancel" });
-        current.resolve("cancel");
-        current = undefined;
-      }
-      const remainingQueue: PendingRequest[] = [];
-      for (const request of queue) {
-        if (request.info.sessionId !== sessionId) {
-          remainingQueue.push(request);
-        } else {
-          publishReply(request, { type: "cancel" });
-          request.resolve("cancel");
-        }
-      }
-      queue.length = 0;
-      queue.push(...remainingQueue);
-      advanceQueue();
+      cancelPending(sessionId);
     },
   };
 }

@@ -33,6 +33,22 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
         return;
       }
 
+      if (state.permissions.length > 0) {
+        void client.abortRun(state.permissions[0].runId).catch(
+          (caught: unknown) => {
+            store.dispatch({
+              status: {
+                kind: "error",
+                message: formatError(caught),
+                recoverable: true,
+              },
+              type: "runtime.updated",
+            });
+          },
+        );
+        return;
+      }
+
       if (state.runtime.kind === "running") {
         void client.abortRun(state.runtime.runId).catch((caught: unknown) => {
           store.dispatch({
@@ -49,7 +65,7 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
 
       exit();
     },
-    { isActive: !hasDialog },
+    { isActive: state.interactions.length === 0 },
   );
 
   useEffect(() => {

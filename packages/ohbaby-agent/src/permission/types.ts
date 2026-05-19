@@ -67,6 +67,7 @@ export interface PermissionManager {
     permissionId: string,
     response: PermissionResponse,
   ): void;
+  cancelPending(sessionId: string): void;
   clearSession(sessionId: string): void;
 }
 

@@ -1,8 +1,8 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import type { UiEvent, UiSnapshot } from "ohbaby-sdk";
+import type { UiBackendClient, UiEvent, UiSnapshot } from "ohbaby-sdk";
 import type {
   ProviderRequest,
   ProviderStreamEvent,
@@ -122,6 +122,72 @@ function createSequentialFakeLLMClient(
       maxTokens: 128,
     },
   };
+}
+
+function writeToolCallEvent(input: {
+  readonly callId: string;
+  readonly content: string;
+  readonly filePath: string;
+}): ProviderStreamEvent {
+  return {
+    toolCallDeltas: [
+      {
+        argumentsDelta: JSON.stringify({
+          content: input.content,
+          file_path: input.filePath,
+        }),
+        id: input.callId,
+        index: 0,
+        name: "write",
+      },
+    ],
+    finishReason: "tool_calls",
+  };
+}
+
+function waitForUiEvent<T extends UiEvent>(
+  client: UiBackendClient,
+  predicate: (event: UiEvent) => event is T,
+  timeoutMs = 1_000,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const unsubscribeRef: { current?: () => void } = {};
+    const timeout = setTimeout(() => {
+      unsubscribeRef.current?.();
+      reject(new Error("Timed out waiting for UI event"));
+    }, timeoutMs);
+
+    unsubscribeRef.current = client.subscribeEvents((event) => {
+      if (!predicate(event)) {
+        return;
+      }
+      clearTimeout(timeout);
+      unsubscribeRef.current?.();
+      resolve(event);
+    });
+  });
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
 }
 
 function createRejectingLLMClient(
@@ -437,6 +503,380 @@ describe("createInProcessUiBackendClient", () => {
       parts[1]?.type === "tool-result" ? parts[1].result.output : "",
     ).toContain("builtin.ts");
     expect(parts[2]).toEqual({ type: "text", text: "Listed." });
+  });
+
+  it("continues the LLM loop after allow_once tool permission", async () => {
+    const requests: ProviderRequest[] = [];
+    const directory = await mkdtemp(
+      join(process.cwd(), ".tmp-ohbaby-ui-allow-once-"),
+    );
+    try {
+      const client = createInProcessUiBackendClient({
+        llmClient: createSequentialFakeLLMClient(
+          [
+            [
+              writeToolCallEvent({
+                callId: "call_write_once",
+                content: "approved",
+                filePath: "approved.txt",
+              }),
+            ],
+            [{ textDelta: "Write complete.", finishReason: "stop" }],
+          ],
+          requests,
+        ),
+        workdir: directory,
+      });
+      const events: UiEvent[] = [];
+      client.subscribeEvents((event) => {
+        events.push(event);
+      });
+
+      const permission = waitForUiEvent(
+        client,
+        (
+          event,
+        ): event is Extract<UiEvent, { type: "permission.requested" }> =>
+          event.type === "permission.requested",
+      );
+      const run = client.submitPrompt("Write a note");
+      const permissionEvent = await permission;
+
+      expect(permissionEvent.request).toMatchObject({
+        runId: "run_1",
+        title: "Write tool requires confirmation: write",
+      });
+
+      await client.respondPermission(permissionEvent.request.id, {
+        choiceId: "allow_once",
+      });
+      await run;
+
+      expect(
+        events.some((event) => event.type === "permission.resolved"),
+      ).toBe(true);
+      expect(requests).toHaveLength(2);
+      const toolResultMessage = requests[1]?.messages.at(-1);
+      expect(toolResultMessage).toMatchObject({
+        role: "tool",
+        tool_call_id: "call_write_once",
+      });
+      expect(
+        typeof toolResultMessage?.content === "string"
+          ? toolResultMessage.content
+          : "",
+      ).toContain('"status":"success"');
+
+      const snapshot = await client.getSnapshot();
+      expect(snapshot.status).toEqual({ kind: "idle" });
+      expect(snapshot.permissions).toEqual([]);
+      const parts = snapshot.sessions[0].messages[1].parts;
+      expect(parts[0]).toEqual(
+        {
+          type: "tool-call",
+          call: {
+            id: "call_write_once",
+            input: {
+              content: "approved",
+              file_path: "approved.txt",
+            },
+            name: "write",
+            status: "completed",
+          },
+        },
+      );
+      expect(parts[1]?.type).toBe("tool-result");
+      if (parts[1]?.type !== "tool-result") {
+        throw new Error("expected tool result part");
+      }
+      expect(parts[1].result.callId).toBe("call_write_once");
+      expect(parts[1].result.output).toContain("Wrote");
+      expect(parts[2]).toEqual({ type: "text", text: "Write complete." });
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("surfaces rejected tool permission as a failed tool result and continues", async () => {
+    const requests: ProviderRequest[] = [];
+    const directory = await mkdtemp(
+      join(process.cwd(), ".tmp-ohbaby-ui-reject-tool-"),
+    );
+    try {
+      const client = createInProcessUiBackendClient({
+        llmClient: createSequentialFakeLLMClient(
+          [
+            [
+              writeToolCallEvent({
+                callId: "call_write_reject",
+                content: "blocked",
+                filePath: "rejected.txt",
+              }),
+            ],
+            [{ textDelta: "I could not write it.", finishReason: "stop" }],
+          ],
+          requests,
+        ),
+        workdir: directory,
+      });
+
+      const permission = waitForUiEvent(
+        client,
+        (
+          event,
+        ): event is Extract<UiEvent, { type: "permission.requested" }> =>
+          event.type === "permission.requested",
+      );
+      const run = client.submitPrompt("Try a rejected write");
+      const permissionEvent = await permission;
+
+      await client.respondPermission(permissionEvent.request.id, {
+        choiceId: "reject",
+      });
+      await run;
+
+      const rejectedToolMessage = requests[1]?.messages.at(-1);
+      expect(rejectedToolMessage).toMatchObject({
+        role: "tool",
+        tool_call_id: "call_write_reject",
+      });
+      expect(
+        typeof rejectedToolMessage?.content === "string"
+          ? rejectedToolMessage.content
+          : "",
+      ).toContain('"status":"rejected"');
+
+      const snapshot = await client.getSnapshot();
+      expect(snapshot.status).toEqual({ kind: "idle" });
+      expect(snapshot.permissions).toEqual([]);
+      const parts = snapshot.sessions[0].messages[1].parts;
+      expect(parts[0]).toMatchObject({
+        call: {
+          id: "call_write_reject",
+          name: "write",
+          status: "failed",
+        },
+        type: "tool-call",
+      });
+      expect(parts[1]?.type).toBe("tool-result");
+      if (parts[1]?.type !== "tool-result") {
+        throw new Error("expected tool result part");
+      }
+      expect(parts[1].result.callId).toBe("call_write_reject");
+      expect(parts[1].result.error).toContain("Tool rejected by user");
+      expect(parts[2]).toEqual({
+        type: "text",
+        text: "I could not write it.",
+      });
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("reuses allow_always approval for later matching tool calls in the run", async () => {
+    const requests: ProviderRequest[] = [];
+    const directory = await mkdtemp(
+      join(process.cwd(), ".tmp-ohbaby-ui-allow-always-"),
+    );
+    try {
+      await mkdir(join(directory, "src"));
+      const client = createInProcessUiBackendClient({
+        llmClient: createSequentialFakeLLMClient(
+          [
+            [
+              writeToolCallEvent({
+                callId: "call_write_first",
+                content: "first",
+                filePath: "src/first.txt",
+              }),
+            ],
+            [
+              writeToolCallEvent({
+                callId: "call_write_second",
+                content: "second",
+                filePath: "src/second.txt",
+              }),
+            ],
+            [{ textDelta: "Both writes complete.", finishReason: "stop" }],
+          ],
+          requests,
+        ),
+        workdir: directory,
+      });
+      const events: UiEvent[] = [];
+      client.subscribeEvents((event) => {
+        events.push(event);
+      });
+
+      const permission = waitForUiEvent(
+        client,
+        (
+          event,
+        ): event is Extract<UiEvent, { type: "permission.requested" }> =>
+          event.type === "permission.requested",
+      );
+      const run = client.submitPrompt("Write two files");
+      const permissionEvent = await permission;
+
+      await client.respondPermission(permissionEvent.request.id, {
+        choiceId: "allow_always",
+      });
+      await run;
+
+      expect(
+        events.filter((event) => event.type === "permission.requested"),
+      ).toHaveLength(1);
+      expect(requests).toHaveLength(3);
+      const snapshot = await client.getSnapshot();
+      const parts = snapshot.sessions[0].messages[1].parts;
+      expect(
+        parts.filter(
+          (part) =>
+            part.type === "tool-call" && part.call.status === "completed",
+        ),
+      ).toHaveLength(2);
+      expect(parts.at(-1)).toEqual({
+        type: "text",
+        text: "Both writes complete.",
+      });
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("treats permission cancel as aborting the whole run and clearing pending permission", async () => {
+    const requests: ProviderRequest[] = [];
+    const directory = await mkdtemp(
+      join(process.cwd(), ".tmp-ohbaby-ui-permission-cancel-"),
+    );
+    try {
+      const client = createInProcessUiBackendClient({
+        llmClient: createSequentialFakeLLMClient(
+          [
+            [
+              writeToolCallEvent({
+                callId: "call_write_cancel",
+                content: "cancelled",
+                filePath: "src/cancelled.txt",
+              }),
+            ],
+            [{ textDelta: "Next answer.", finishReason: "stop" }],
+          ],
+          requests,
+        ),
+        workdir: directory,
+      });
+
+      const permission = waitForUiEvent(
+        client,
+        (
+          event,
+        ): event is Extract<UiEvent, { type: "permission.requested" }> =>
+          event.type === "permission.requested",
+      );
+      const run = client.submitPrompt("Cancel this write");
+      const permissionEvent = await permission;
+
+      await client.respondPermission(permissionEvent.request.id, {
+        choiceId: "cancel",
+      });
+      await expect(withTimeout(run, 1_000, "run did not abort")).rejects.toThrow(
+        "run aborted",
+      );
+
+      let snapshot = await client.getSnapshot();
+      expect(snapshot.permissions).toEqual([]);
+      expect(snapshot.status).toEqual({
+        kind: "error",
+        message: "run aborted",
+        recoverable: true,
+      });
+      expect(requests).toHaveLength(1);
+
+      await client.submitPrompt("Can I continue?", { sessionId: "session_1" });
+
+      snapshot = await client.getSnapshot();
+      expect(snapshot.status).toEqual({ kind: "idle" });
+      expect(snapshot.sessions[0].messages.at(-1)?.parts).toEqual([
+        { type: "text", text: "Next answer." },
+      ]);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("clears pending permission when abortRun cancels a running prompt", async () => {
+    const requests: ProviderRequest[] = [];
+    const directory = await mkdtemp(
+      join(process.cwd(), ".tmp-ohbaby-ui-abort-permission-"),
+    );
+    try {
+      const client = createInProcessUiBackendClient({
+        llmClient: createSequentialFakeLLMClient(
+          [
+            [
+              writeToolCallEvent({
+                callId: "call_write_abort",
+                content: "aborted",
+                filePath: "src/aborted.txt",
+              }),
+            ],
+            [{ textDelta: "After abort.", finishReason: "stop" }],
+          ],
+          requests,
+        ),
+        workdir: directory,
+      });
+      const events: UiEvent[] = [];
+      client.subscribeEvents((event) => {
+        events.push(event);
+      });
+
+      const permission = waitForUiEvent(
+        client,
+        (
+          event,
+        ): event is Extract<UiEvent, { type: "permission.requested" }> =>
+          event.type === "permission.requested",
+      );
+      const run = client.submitPrompt("Abort this write");
+      const permissionEvent = await permission;
+
+      await client.abortRun(permissionEvent.request.runId);
+      await expect(withTimeout(run, 1_000, "run did not abort")).rejects.toThrow(
+        "run aborted",
+      );
+
+      let snapshot = await client.getSnapshot();
+      expect(snapshot.permissions).toEqual([]);
+      expect(snapshot.status).toEqual({
+        kind: "error",
+        message: "run aborted",
+        recoverable: true,
+      });
+      expect(
+        events.some(
+          (event) =>
+            event.type === "permission.resolved" &&
+            event.requestId === permissionEvent.request.id,
+        ),
+      ).toBe(true);
+
+      await client.respondPermission(permissionEvent.request.id, {
+        choiceId: "allow_once",
+      });
+      await client.submitPrompt("Continue after abort", {
+        sessionId: "session_1",
+      });
+
+      snapshot = await client.getSnapshot();
+      expect(snapshot.status).toEqual({ kind: "idle" });
+      expect(snapshot.sessions[0].messages.at(-1)?.parts).toEqual([
+        { type: "text", text: "After abort." },
+      ]);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
   });
 
   it("uses RunManager ledger and stream status for prompt runs", async () => {

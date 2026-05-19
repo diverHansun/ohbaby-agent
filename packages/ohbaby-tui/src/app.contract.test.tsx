@@ -102,6 +102,34 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("OPENAI_API_KEY is not configured");
   });
 
+  it("shows a readable status error when the initial snapshot fails", async () => {
+    const client = {
+      ...createFakeClient(snapshot()),
+      getSnapshot: vi.fn(() => Promise.reject(new Error("snapshot unavailable"))),
+    };
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+
+    expect(app.lastFrame()).toContain("status: error: snapshot unavailable");
+  });
+
+  it("shows a readable status error when command catalog loading fails", async () => {
+    const client = {
+      ...createFakeClient(snapshot()),
+      listCommands: vi.fn(() =>
+        Promise.reject(new Error("command catalog unavailable")),
+      ),
+    };
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+
+    expect(app.lastFrame()).toContain(
+      "status: error: command catalog unavailable",
+    );
+  });
+
   it("handles the backend streaming event sequence without duplicating text", async () => {
     const client = createFakeClient({
       activeSessionId: null,
@@ -308,6 +336,32 @@ describe("OhbabyTerminalApp", () => {
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await flush();
+    app.stdin.write("\u0003");
+    await flush();
+
+    expect(client.abortRun).toHaveBeenCalledWith("run_1");
+  });
+
+  it("aborts the permission run on Ctrl+C while a permission dialog is open", async () => {
+    const client = createFakeClient(snapshot());
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+    client.emit({
+      request: {
+        choices: [
+          { id: "allow_once", intent: "allow", label: "Allow once" },
+          { id: "reject", intent: "deny", label: "Reject" },
+        ],
+        description: "tool:write",
+        id: "permission_1",
+        runId: "run_1",
+        title: "Write file",
+      },
+      type: "permission.requested",
+    });
+    await flush();
+
     app.stdin.write("\u0003");
     await flush();
 

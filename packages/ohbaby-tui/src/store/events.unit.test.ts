@@ -122,6 +122,16 @@ describe("TUI store event reducer", () => {
     expect(state.messages[0]?.parts[0]).toMatchObject({ text: "Hello world" });
   });
 
+  it("ignores message deltas that do not identify a message", () => {
+    const state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      delta: " world",
+      sessionId: "session_1",
+      type: "message.part.delta",
+    });
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({ text: "Hello" });
+  });
+
   it("projects the first backend session update when no session is active", () => {
     let state = createStateFromSnapshot({
       activeSessionId: null,
@@ -322,6 +332,33 @@ describe("TUI store event reducer", () => {
 
     expect(next.interactions).toHaveLength(1);
     expect(next.commandNotices).toHaveLength(1);
+  });
+
+  it("preserves local UI notices when replacing the snapshot", () => {
+    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      notice: {
+        createdAt: "2026-05-19T00:00:00.000Z",
+        id: "notice_1",
+        key: "runtime:missing-key",
+        level: "error",
+        message: "OPENAI_API_KEY is not configured",
+        title: "Runtime error",
+      },
+      timestamp: 1,
+      type: "notice.emitted",
+    });
+
+    state = applyTuiEvent(state, {
+      snapshot: snapshot(),
+      type: "snapshot.replaced",
+    });
+
+    expect(state.notices).toEqual([
+      expect.objectContaining({
+        key: "runtime:missing-key",
+        message: "OPENAI_API_KEY is not configured",
+      }),
+    ]);
   });
 
   it("keeps live permissions across an old snapshot and does not revive resolved permissions", () => {

@@ -412,6 +412,55 @@ export function createInProcessUiBackendClient(
     return status;
   }
 
+  async function clearPendingPermissionsForRun(
+    runId: string | undefined,
+  ): Promise<void> {
+    const snapshot = await stateStore.readSnapshot();
+    const requests = snapshot.permissions.filter(
+      (request) => runId === undefined || request.runId === runId,
+    );
+    if (requests.length === 0) {
+      return;
+    }
+
+    const sessionIds = new Set<string>();
+    for (const request of requests) {
+      const sessionId = pendingPermissionSessions.get(request.id);
+      if (sessionId) {
+        sessionIds.add(sessionId);
+      }
+    }
+
+    for (const sessionId of sessionIds) {
+      permission.cancelPending(sessionId);
+    }
+    for (const request of requests) {
+      pendingPermissionSessions.delete(request.id);
+      await stateStore.removePermission(request.id);
+    }
+    await reconcileRuntimeStatus();
+  }
+
+  async function cancelPromptRun(runId: string): Promise<void> {
+    try {
+      const runtime = await getRuntime();
+      runtime.cancel(runId, "run aborted");
+    } catch {
+      // Abort is best-effort; the run may already have completed.
+    } finally {
+      await clearPendingPermissionsForRun(runId);
+    }
+  }
+
+  async function abortPromptRun(runId?: string): Promise<boolean> {
+    const targetRunId = runId ?? activeRunId;
+    if (!targetRunId || targetRunId !== activeRunId) {
+      return false;
+    }
+    await cancelPromptRun(targetRunId);
+    return true;
+  }
+
   function projectRoot(): string {
     return options.workdir ?? options.projectDirectory ?? process.cwd();
   }
@@ -532,22 +581,12 @@ export function createInProcessUiBackendClient(
     },
     abortRun(runId?: string): void {
       if (!runId) {
-        if (activeRunId) {
-          void getRuntime()
-            .then((runtime) => {
-              runtime.cancel(activeRunId ?? "", "run aborted");
-            })
-            .catch(() => undefined);
-        }
+        void abortPromptRun();
         interactionBroker.abortAll("aborted");
         return;
       }
       if (runId === activeRunId) {
-        void getRuntime()
-          .then((runtime) => {
-            runtime.cancel(runId, "run aborted");
-          })
-          .catch(() => undefined);
+        void abortPromptRun(runId);
         return;
       }
       commandService.abortCommandRun(runId, "aborted");
@@ -834,6 +873,19 @@ export function createInProcessUiBackendClient(
       if (!sessionId) {
         return Promise.resolve();
       }
+      if (response.choiceId === "cancel") {
+        return (async (): Promise<void> => {
+          const snapshot = await stateStore.readSnapshot();
+          const runId =
+            snapshot.permissions.find((request) => request.id === requestId)
+              ?.runId ?? activeRunId;
+          if (runId) {
+            await cancelPromptRun(runId);
+            return;
+          }
+          permission.cancelPending(sessionId);
+        })();
+      }
       permission.respond(
         sessionId,
         requestId,
@@ -851,22 +903,10 @@ export function createInProcessUiBackendClient(
 
     async abortRun(runId?: string): Promise<void> {
       if (!runId) {
-        if (activeRunId) {
-          try {
-            const runtime = await getRuntime();
-            runtime.cancel(activeRunId, "run aborted");
-          } catch {
-            // Abort is best-effort; the run may already have completed.
-          }
-        }
+        await abortPromptRun();
         interactionBroker.abortAll("aborted");
       } else if (runId === activeRunId) {
-        try {
-          const runtime = await getRuntime();
-          runtime.cancel(runId, "run aborted");
-        } catch {
-          // Abort is best-effort; the run may already have completed.
-        }
+        await abortPromptRun(runId);
       } else {
         commandService.abortCommandRun(runId, "aborted");
       }

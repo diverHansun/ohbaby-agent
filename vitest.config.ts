@@ -29,13 +29,43 @@ export default defineConfig({
     testTimeout: 10000,
   },
   resolve: {
-    alias: {
-      "ohbaby-agent": resolve(
-        __dirname,
-        "./packages/ohbaby-agent/src/index.ts",
-      ),
-      "ohbaby-sdk": resolve(__dirname, "./packages/ohbaby-sdk/src/index.ts"),
-      "ohbaby-tui": resolve(__dirname, "./packages/ohbaby-tui/src/index.tsx"),
-    },
+    alias: [
+      {
+        find: "react/jsx-dev-runtime",
+        replacement: resolve(
+          __dirname,
+          "./packages/ohbaby-tui/node_modules/react/jsx-dev-runtime.js",
+        ),
+      },
+      {
+        find: "react/jsx-runtime",
+        replacement: resolve(
+          __dirname,
+          "./packages/ohbaby-tui/node_modules/react/jsx-runtime.js",
+        ),
+      },
+      {
+        find: "react",
+        replacement: resolve(
+          __dirname,
+          "./packages/ohbaby-tui/node_modules/react/index.js",
+        ),
+      },
+      {
+        find: "ohbaby-agent",
+        replacement: resolve(
+          __dirname,
+          "./packages/ohbaby-agent/src/index.ts",
+        ),
+      },
+      {
+        find: "ohbaby-sdk",
+        replacement: resolve(__dirname, "./packages/ohbaby-sdk/src/index.ts"),
+      },
+      {
+        find: "ohbaby-tui",
+        replacement: resolve(__dirname, "./packages/ohbaby-tui/src/index.tsx"),
+      },
+    ],
   },
 });
