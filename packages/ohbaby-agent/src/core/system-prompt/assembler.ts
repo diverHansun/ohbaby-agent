@@ -12,6 +12,7 @@ import {
   getBuiltinAgentPrompt,
 } from "./prompts/agents/index.js";
 import type { AssembleOptions, EnvironmentInfo } from "./types.js";
+import type { PromptSecurityFinding } from "./security/index.js";
 
 export interface SystemPromptProviderInput {
   readonly sessionId: string;
@@ -35,6 +36,7 @@ export interface SystemPromptProviderOptions {
     input: SystemPromptProviderInput,
   ) => Promise<EnvironmentInfo> | EnvironmentInfo;
   readonly onWarning?: (message: string, error?: unknown) => void;
+  readonly onSecurityFinding?: (finding: PromptSecurityFinding) => void;
   readonly toolsProvider?: (
     input: SystemPromptProviderInput,
   ) => Promise<readonly string[]> | readonly string[];
@@ -155,6 +157,7 @@ export function createSystemPromptProvider(
       const customInstructions = await (options.customInstructionLoader
         ? options.customInstructionLoader(input)
         : loadCustomInstructions({
+            onSecurityFinding: options.onSecurityFinding,
             onWarning: options.onWarning,
             projectDirectory: input.directory,
           }));

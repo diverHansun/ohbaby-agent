@@ -1,6 +1,15 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import {
+  scanPromptLikeContent,
+  shouldLoadPromptLikeContent,
+} from "../security/index.js";
+import type {
+  PromptSecurityFinding,
+  PromptSecurityScanResult,
+  PromptSecuritySource,
+} from "../security/index.js";
 
 export const CUSTOM_INSTRUCTIONS_FILE_NAME = "OHBABY.md";
 export const CUSTOM_INSTRUCTIONS_FALLBACK_FILE_NAMES = [
@@ -15,9 +24,23 @@ export const MAX_CUSTOM_INSTRUCTION_CHARS = 50 * 1024;
 export interface CustomInstructionLoadOptions {
   readonly globalPath?: string;
   readonly homeDirectory?: string;
+  readonly onSecurityFinding?: (finding: PromptSecurityFinding) => void;
   readonly onWarning?: (message: string, error?: unknown) => void;
   readonly projectDirectory?: string;
   readonly projectPath?: string;
+  readonly securityScanner?: (
+    content: string,
+    source: PromptSecuritySource,
+  ) => PromptSecurityScanResult;
+}
+
+interface ReadInstructionFileOptions {
+  readonly onSecurityFinding?: (finding: PromptSecurityFinding) => void;
+  readonly onWarning?: (message: string, error?: unknown) => void;
+  readonly securityScanner?: (
+    content: string,
+    source: PromptSecuritySource,
+  ) => PromptSecurityScanResult;
 }
 
 export function getProjectCustomInstructionsPath(
@@ -54,37 +77,57 @@ function getCandidatePaths(directory: string): string[] {
 
 async function readInstructionFile(
   filePath: string,
-  onWarning?: (message: string, error?: unknown) => void,
+  options: ReadInstructionFileOptions = {},
 ): Promise<string | undefined> {
   let content: string;
   try {
     content = await fs.readFile(filePath, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      onWarning?.(`Unable to read custom instructions: ${filePath}`, error);
+      options.onWarning?.(
+        `Unable to read custom instructions: ${filePath}`,
+        error,
+      );
     }
     return undefined;
   }
 
-  const trimmed = content.trim();
-  if (trimmed.length === 0) {
+  let instruction = content.trim();
+  if (instruction.length === 0) {
     return undefined;
   }
 
-  if (trimmed.length > MAX_CUSTOM_INSTRUCTION_CHARS) {
-    onWarning?.(`Custom instructions truncated: ${filePath}`);
-    return trimmed.slice(0, MAX_CUSTOM_INSTRUCTION_CHARS);
+  if (instruction.length > MAX_CUSTOM_INSTRUCTION_CHARS) {
+    options.onWarning?.(`Custom instructions truncated: ${filePath}`);
+    instruction = instruction.slice(0, MAX_CUSTOM_INSTRUCTION_CHARS);
   }
 
-  return trimmed;
+  const scan = options.securityScanner ?? scanPromptLikeContent;
+  const scanResult = scan(instruction, {
+    kind: "custom-instructions",
+    label: path.basename(filePath),
+    path: filePath,
+  });
+  for (const finding of scanResult.findings) {
+    options.onSecurityFinding?.(finding);
+  }
+
+  if (!shouldLoadPromptLikeContent(scanResult)) {
+    options.onWarning?.(
+      `Custom instructions omitted by security guard: ${filePath}`,
+    );
+    return undefined;
+  }
+
+  return instruction;
 }
 
 async function readFirstInstructionFile(
   filePaths: readonly string[],
-  onWarning?: (message: string, error?: unknown) => void,
+  options: ReadInstructionFileOptions = {},
 ): Promise<string | undefined> {
   for (const filePath of filePaths) {
-    const instruction = await readInstructionFile(filePath, onWarning);
+    const instruction = await readInstructionFile(filePath, options);
     if (instruction !== undefined) {
       return instruction;
     }
@@ -96,13 +139,13 @@ async function loadProjectInstructions(
   options: CustomInstructionLoadOptions,
 ): Promise<string | undefined> {
   if (options.projectPath) {
-    return readInstructionFile(options.projectPath, options.onWarning);
+    return readInstructionFile(options.projectPath, options);
   }
 
   const projectDirectory = options.projectDirectory ?? process.cwd();
   const rootInstructions = await readFirstInstructionFile(
     getCandidatePaths(projectDirectory),
-    options.onWarning,
+    options,
   );
   if (rootInstructions !== undefined) {
     return rootInstructions;
@@ -110,7 +153,7 @@ async function loadProjectInstructions(
 
   return readFirstInstructionFile(
     getCandidatePaths(path.join(projectDirectory, PROJECT_CUSTOM_CONFIG_DIR)),
-    options.onWarning,
+    options,
   );
 }
 
@@ -128,7 +171,7 @@ export async function loadCustomInstructions(
         );
   const instructions = await Promise.all([
     loadProjectInstructions(options),
-    readFirstInstructionFile(globalPaths, options.onWarning),
+    readFirstInstructionFile(globalPaths, options),
   ]);
 
   return instructions.filter(
