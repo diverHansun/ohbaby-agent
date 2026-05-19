@@ -10,6 +10,8 @@ export type {
   UiMessageAppendedEvent,
   UiMessagePartDeltaEvent,
   UiMessageUpdatedEvent,
+  UiNotice,
+  UiNoticeEmittedEvent,
   UiPermissionRequestedEvent,
   UiPermissionResolvedEvent,
   UiRunUpdatedEvent,

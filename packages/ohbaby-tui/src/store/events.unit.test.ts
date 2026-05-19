@@ -219,6 +219,65 @@ describe("TUI store event reducer", () => {
     expect(state.interactions).toHaveLength(0);
   });
 
+  it("deduplicates UI notices by key and keeps the most recent ten", () => {
+    let state = createStateFromSnapshot(snapshot());
+
+    state = applyTuiEvent(state, {
+      notice: {
+        createdAt: "2026-05-19T00:00:00.000Z",
+        id: "notice_1",
+        key: "prompt-security:OHBABY.md:ignore_previous_instructions",
+        level: "warning",
+        message: "OHBABY.md was skipped.",
+        source: "OHBABY.md",
+        title: "Custom instructions skipped",
+      },
+      timestamp: 1,
+      type: "notice.emitted",
+    });
+    state = applyTuiEvent(state, {
+      notice: {
+        createdAt: "2026-05-19T00:00:01.000Z",
+        id: "notice_2",
+        key: "prompt-security:OHBABY.md:ignore_previous_instructions",
+        level: "warning",
+        message: "Duplicate warning.",
+        source: "OHBABY.md",
+        title: "Custom instructions skipped",
+      },
+      timestamp: 2,
+      type: "notice.emitted",
+    });
+    expect(state.notices).toHaveLength(1);
+    expect(state.notices[0]?.message).toBe("Duplicate warning.");
+
+    for (let index = 0; index < 12; index += 1) {
+      state = applyTuiEvent(state, {
+        notice: {
+          createdAt: "2026-05-19T00:00:02.000Z",
+          id: `notice_extra_${String(index)}`,
+          key: `provider:${String(index)}`,
+          level: "error",
+          message: `Provider error ${String(index)}`,
+          title: "Provider error",
+        },
+        timestamp: 3 + index,
+        type: "notice.emitted",
+      });
+    }
+
+    expect(state.notices).toHaveLength(10);
+    expect(
+      state.notices.some(
+        (notice) =>
+          notice.key ===
+          "prompt-security:OHBABY.md:ignore_previous_instructions",
+      ),
+    ).toBe(false);
+    expect(new Set(state.notices.map((notice) => notice.id)).size).toBe(10);
+    expect(state.notices.at(-1)?.message).toBe("Provider error 11");
+  });
+
   it("marks catalog invalidation without mutating the loaded catalog", () => {
     const state = setCommandCatalog(createStateFromSnapshot(snapshot()), catalog());
 

@@ -47,6 +47,23 @@ export function createStdoutRenderer(
 
       if (event.type === "command.failed") {
         writeError(`${event.error.code}: ${event.error.message}\n`);
+        return;
+      }
+
+      if (event.type === "runtime.updated" && event.status.kind === "error") {
+        writeError(`error: ${event.status.message}\n`);
+        return;
+      }
+
+      if (
+        event.type === "notice.emitted" &&
+        (event.notice.level === "warning" || event.notice.level === "error")
+      ) {
+        const source =
+          event.notice.source === undefined ? "" : ` (${event.notice.source})`;
+        writeError(
+          `${event.notice.level}: ${event.notice.title}: ${event.notice.message}${source}\n`,
+        );
       }
     },
   };

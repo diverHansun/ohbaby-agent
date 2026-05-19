@@ -79,6 +79,29 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("Hello");
   });
 
+  it("renders UI notices from the backend", async () => {
+    const client = createFakeClient(snapshot());
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+    client.emit({
+      notice: {
+        createdAt: "2026-05-19T00:00:00.000Z",
+        id: "notice_1",
+        key: "provider:missing-key",
+        level: "error",
+        message: "OPENAI_API_KEY is not configured",
+        title: "Provider configuration failed",
+      },
+      timestamp: 1,
+      type: "notice.emitted",
+    });
+    await flush();
+
+    expect(app.lastFrame()).toContain("Provider configuration failed");
+    expect(app.lastFrame()).toContain("OPENAI_API_KEY is not configured");
+  });
+
   it("handles the backend streaming event sequence without duplicating text", async () => {
     const client = createFakeClient({
       activeSessionId: null,
@@ -238,6 +261,57 @@ describe("OhbabyTerminalApp", () => {
     expect(client.submitPrompt).toHaveBeenCalledWith("hello", {
       sessionId: "session_1",
     });
+  });
+
+  it("clears submitted prompts immediately and surfaces concurrent submit errors", async () => {
+    const client = createFakeClient(snapshot());
+    client.submitPrompt
+      .mockImplementationOnce(() => new Promise<void>(() => undefined))
+      .mockRejectedValueOnce(new Error("A prompt is already running"));
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+    app.stdin.write("first");
+    app.stdin.write("\r");
+    await flush();
+
+    expect(client.submitPrompt).toHaveBeenCalledWith("first", {
+      sessionId: "session_1",
+    });
+    expect(app.lastFrame()).not.toContain("first");
+
+    app.stdin.write("second");
+    app.stdin.write("\r");
+    await flush();
+    await flush();
+
+    expect(client.submitPrompt).toHaveBeenCalledWith("second", {
+      sessionId: "session_1",
+    });
+    expect(app.lastFrame()).toContain("A prompt is already running");
+  });
+
+  it("aborts the active run on Ctrl+C when no dialog is open", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      runs: [
+        {
+          id: "run_1",
+          sessionId: "session_1",
+          startedAt: "2026-05-14T00:00:03.000Z",
+          status: { kind: "running", runId: "run_1" },
+          updatedAt: "2026-05-14T00:00:03.000Z",
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
+    });
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+    app.stdin.write("\u0003");
+    await flush();
+
+    expect(client.abortRun).toHaveBeenCalledWith("run_1");
   });
 
   it("executes exact slash commands but only completes on tab", async () => {
@@ -463,6 +537,7 @@ function createFakeClient(
   commandCatalog: TuiCommandCatalog = catalog,
 ): TuiBackendClient & {
   readonly emit: (event: TuiEvent) => void;
+  readonly abortRun: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
   readonly listCommands: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;

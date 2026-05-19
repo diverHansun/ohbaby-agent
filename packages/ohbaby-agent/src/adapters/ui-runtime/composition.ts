@@ -1,4 +1,5 @@
 import type { ChatCompletionCreateParams } from "openai/resources/chat/completions/completions";
+import type { UiNotice } from "ohbaby-sdk";
 import type { BusInstance } from "../../bus/index.js";
 import type { CommandToolSummary } from "../../commands/index.js";
 import { Lifecycle } from "../../core/lifecycle/index.js";
@@ -26,6 +27,7 @@ import {
   type RunLedger,
 } from "../../runtime/run-ledger/index.js";
 import { createSystemPromptProvider } from "../../core/system-prompt/index.js";
+import type { PromptSecurityFinding } from "../../core/system-prompt/security/index.js";
 import {
   RunManager,
   type HookExecutor,
@@ -82,12 +84,35 @@ export interface UiRuntimeCompositionOptions {
   readonly llmClient: LLMClientInstance;
   readonly messageManager: MessageManager;
   readonly now?: () => number;
+  readonly onNotice?: (
+    notice: Omit<UiNotice, "id" | "createdAt"> & {
+      readonly createdAt?: string;
+    },
+  ) => void;
   readonly hookExecutor?: HookExecutor;
   readonly permission?: PermissionPort;
   readonly policy: PolicyPort;
   readonly runLedger?: RunLedger;
   readonly streamBridge?: StreamBridge;
   readonly workdir?: string;
+}
+
+function noticeFromPromptSecurityFinding(
+  finding: PromptSecurityFinding,
+): Omit<UiNotice, "id" | "createdAt"> {
+  const source = finding.sourcePath ?? finding.sourceLabel;
+  return {
+    key: `prompt-security:${source}:${finding.patternId}`,
+    level: "warning",
+    message: `${finding.sourceLabel} line ${String(finding.line)}: ${
+      finding.message
+    }`,
+    source,
+    title:
+      finding.action === "omit"
+        ? "Custom instructions skipped"
+        : "Custom instructions warning",
+  };
 }
 
 class InMemorySubagentSessionManager implements SubagentSessionManager {
@@ -383,6 +408,9 @@ export async function createUiRuntimeComposition(
             isSubagent: false,
           });
           return tools.map((tool) => tool.name);
+        },
+        onSecurityFinding(finding) {
+          options.onNotice?.(noticeFromPromptSecurityFinding(finding));
         },
       });
       const systemPrompt = await systemPromptProvider.build({

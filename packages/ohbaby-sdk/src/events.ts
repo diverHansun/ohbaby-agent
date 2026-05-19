@@ -73,6 +73,22 @@ export interface UiPermissionResolvedEvent {
   readonly timestamp?: number;
 }
 
+export interface UiNotice {
+  readonly id: string;
+  readonly key?: string;
+  readonly level: "info" | "warning" | "error";
+  readonly title: string;
+  readonly message: string;
+  readonly source?: string;
+  readonly createdAt: string;
+}
+
+export interface UiNoticeEmittedEvent {
+  readonly type: "notice.emitted";
+  readonly notice: UiNotice;
+  readonly timestamp?: number;
+}
+
 export interface UiCommandStartedEvent {
   readonly type: "command.started";
   readonly command: {
@@ -135,6 +151,7 @@ export type UiEvent =
   | UiRunUpdatedEvent
   | UiPermissionRequestedEvent
   | UiPermissionResolvedEvent
+  | UiNoticeEmittedEvent
   | UiCommandStartedEvent
   | UiCommandResultDeliveredEvent
   | UiCommandFailedEvent

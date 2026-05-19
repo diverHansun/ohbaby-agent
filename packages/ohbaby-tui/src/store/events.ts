@@ -3,6 +3,7 @@ import type {
   UiInteractionRequest,
   UiMessage,
   UiMessagePart,
+  UiNotice,
   UiPermissionRequest,
   UiRun,
   UiSession,
@@ -19,6 +20,7 @@ import type {
 } from "./snapshot.js";
 
 const COMMAND_NOTICE_LIMIT = 20;
+const UI_NOTICE_LIMIT = 10;
 
 export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
   const activeSession = findActiveSession(snapshot);
@@ -32,6 +34,7 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
     resolvedPermissionIds: [],
     interactions: [],
     messages: activeSession?.messages ?? [],
+    notices: [],
     permissions: snapshot.permissions,
     runs: snapshot.runs,
     runtime: snapshot.status,
@@ -130,6 +133,9 @@ export function applyTuiEvent(
           ),
         },
       );
+
+    case "notice.emitted":
+      return appendUiNotice(state, event.notice);
 
     case "command.result.delivered":
       return appendCommandNotice(state, {
@@ -248,6 +254,7 @@ function preserveLocalQueues(
     commandNotices: previous.commandNotices,
     commandNoticeSequence: previous.commandNoticeSequence,
     interactions: previous.interactions,
+    notices: previous.notices,
     permissions,
     resolvedPermissionIds: previous.resolvedPermissionIds,
     runtime:
@@ -548,5 +555,23 @@ function appendCommandNotice(
       },
     ].slice(-COMMAND_NOTICE_LIMIT),
     commandNoticeSequence,
+  };
+}
+
+function appendUiNotice(
+  state: TuiStoreState,
+  notice: UiNotice,
+): TuiStoreState {
+  const dedupeId = notice.key ?? notice.id;
+  const notices = [
+    ...state.notices.filter(
+      (candidate) => (candidate.key ?? candidate.id) !== dedupeId,
+    ),
+    notice,
+  ].slice(-UI_NOTICE_LIMIT);
+
+  return {
+    ...state,
+    notices,
   };
 }

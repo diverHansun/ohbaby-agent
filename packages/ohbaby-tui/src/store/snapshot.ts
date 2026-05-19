@@ -12,6 +12,7 @@ import type {
   UiInteractionKind,
   UiInteractionResponse,
   UiMessage,
+  UiNotice,
   UiPermissionRequest,
   UiPermissionResponse,
   UiRun,
@@ -129,6 +130,7 @@ export interface TuiStoreState {
   readonly permissions: readonly UiPermissionRequest[];
   readonly runtime: TuiRuntimeStatus;
   readonly interactions: readonly TuiInteractionRequest[];
+  readonly notices: readonly UiNotice[];
   readonly commandNotices: readonly TuiCommandNotice[];
   readonly commandNoticeSequence: number;
   readonly resolvedPermissionIds: readonly string[];

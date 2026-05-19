@@ -24,9 +24,7 @@ export function Prompt({
 }: PromptProps): ReactElement {
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
   const inputRef = useRef("");
-  const pendingRef = useRef(false);
 
   const replaceInput = (nextInput: string): void => {
     inputRef.current = nextInput;
@@ -38,32 +36,14 @@ export function Prompt({
       const currentInput = inputRef.current;
 
       if (key.return) {
-        if (pendingRef.current) {
-          return;
-        }
-
-        pendingRef.current = true;
-        setPending(true);
-
-        void submitInput(
+        submitInput(
           currentInput,
           activeSessionId,
           catalog,
           client,
+          replaceInput,
           setError,
-        )
-          .then((submitted) => {
-            if (submitted && inputRef.current === currentInput) {
-              replaceInput("");
-            }
-          })
-          .catch((caught: unknown) => {
-            setError(formatError(caught));
-          })
-          .finally(() => {
-            pendingRef.current = false;
-            setPending(false);
-          });
+        );
         return;
       }
 
@@ -94,7 +74,7 @@ export function Prompt({
   return (
     <Box flexDirection="column">
       <Text>
-        {pending ? "..." : ">"} {input}
+        {">"} {input}
       </Text>
       {error === null ? null : <Text color="red">{error}</Text>}
       <Completion catalog={catalog} input={input} />
@@ -106,29 +86,36 @@ function formatError(error: unknown): string {
   return error instanceof Error ? error.message : "Command failed";
 }
 
-async function submitInput(
+function submitInput(
   input: string,
   activeSessionId: string | null,
   catalog: TuiCommandCatalog | null,
   client: TuiBackendClient,
+  replaceInput: (nextInput: string) => void,
   setError: (message: string | null) => void,
-): Promise<boolean> {
+): void {
   const text = input.trim();
 
   if (text === "") {
-    return false;
+    return;
   }
 
   if (!text.startsWith("/")) {
-    await client.submitPrompt(text, {
-      sessionId: activeSessionId ?? undefined,
-    });
-    return true;
+    setError(null);
+    replaceInput("");
+    void client
+      .submitPrompt(text, {
+        sessionId: activeSessionId ?? undefined,
+      })
+      .catch((caught: unknown) => {
+        setError(formatError(caught));
+      });
+    return;
   }
 
   if (catalog === null) {
     setError("Command catalog is not loaded");
-    return false;
+    return;
   }
 
   const result = resolveCommand(parseSlashInput(text), catalog, {
@@ -138,9 +125,12 @@ async function submitInput(
 
   if (result.kind !== "resolved") {
     setError(result.reason);
-    return false;
+    return;
   }
 
-  await client.executeCommand(result.invocation);
-  return true;
+  setError(null);
+  replaceInput("");
+  void client.executeCommand(result.invocation).catch((caught: unknown) => {
+    setError(formatError(caught));
+  });
 }

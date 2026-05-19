@@ -1,4 +1,4 @@
-import { Box, Text, useApp } from "ink";
+import { Box, Text, useApp, useInput } from "ink";
 import { useEffect, useRef } from "react";
 import type { ReactElement } from "react";
 import type { UiCommandCatalog, UiSnapshot } from "ohbaby-sdk";
@@ -26,6 +26,31 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
   const { exit } = useApp();
   const state = useTuiStoreSelector(store, (current) => current);
   const hasDialog = state.permissions.length > 0 || state.interactions.length > 0;
+
+  useInput(
+    (value, key) => {
+      if (value !== "\u0003" && !(key.ctrl && value === "c")) {
+        return;
+      }
+
+      if (state.runtime.kind === "running") {
+        void client.abortRun(state.runtime.runId).catch((caught: unknown) => {
+          store.dispatch({
+            status: {
+              kind: "error",
+              message: formatError(caught),
+              recoverable: true,
+            },
+            type: "runtime.updated",
+          });
+        });
+        return;
+      }
+
+      exit();
+    },
+    { isActive: !hasDialog },
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -101,7 +126,11 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
 
   return (
     <Box flexDirection="column">
-      <MessageList messages={state.messages} notices={state.commandNotices} />
+      <MessageList
+        commandNotices={state.commandNotices}
+        messages={state.messages}
+        notices={state.notices}
+      />
       <DialogManager
         client={client}
         interactions={state.interactions}

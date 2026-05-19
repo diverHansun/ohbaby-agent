@@ -35,12 +35,25 @@ describe("UiEvent protocol", () => {
         },
         timestamp: 3,
       },
+      {
+        type: "notice.emitted",
+        notice: {
+          createdAt: "2026-05-19T00:00:00.000Z",
+          id: "notice_1",
+          key: "provider:missing-key",
+          level: "error",
+          message: "OPENAI_API_KEY is not configured",
+          title: "Provider configuration failed",
+        },
+        timestamp: 4,
+      },
     ];
 
     expect(events.map((event) => event.type)).toEqual([
       "command.started",
       "command.result.delivered",
       "interaction.requested",
+      "notice.emitted",
     ]);
   });
 });

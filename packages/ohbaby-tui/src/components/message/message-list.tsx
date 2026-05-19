@@ -1,15 +1,17 @@
 import { Box, Text } from "ink";
-import type { UiMessage, UiMessagePart } from "ohbaby-sdk";
+import type { UiMessage, UiMessagePart, UiNotice } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import type { TuiCommandNotice } from "../../store/snapshot.js";
 import { renderToolPart } from "./parts/tool-part.js";
 
 export interface MessageListProps {
   readonly messages: readonly UiMessage[];
-  readonly notices: readonly TuiCommandNotice[];
+  readonly commandNotices: readonly TuiCommandNotice[];
+  readonly notices: readonly UiNotice[];
 }
 
 export function MessageList({
+  commandNotices,
   messages,
   notices,
 }: MessageListProps): ReactElement {
@@ -33,6 +35,16 @@ export function MessageList({
         </Box>
       ))}
       {notices.map((notice) => (
+        <Box flexDirection="row" key={notice.id} marginBottom={1}>
+          <Text color={noticeColor(notice.level)}>notice</Text>
+          <Text dimColor> {notice.title}: </Text>
+          <Text>{notice.message}</Text>
+          {notice.source === undefined ? null : (
+            <Text dimColor> ({notice.source})</Text>
+          )}
+        </Box>
+      ))}
+      {commandNotices.map((notice) => (
         <Box
           flexDirection="row"
           key={notice.id}
@@ -47,6 +59,17 @@ export function MessageList({
       ))}
     </Box>
   );
+}
+
+function noticeColor(level: UiNotice["level"]): string | undefined {
+  switch (level) {
+    case "error":
+      return "red";
+    case "warning":
+      return "yellow";
+    case "info":
+      return "cyan";
+  }
 }
 
 function renderMessagePart(part: UiMessagePart): string {

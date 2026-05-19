@@ -7,6 +7,7 @@ import type {
   UiEventHandler,
   UiInteractionResponse,
   UiMessage,
+  UiNotice,
   UiPermissionRequest,
   UiPermissionResponse,
   UiRun,
@@ -72,6 +73,10 @@ const EMPTY_SNAPSHOT: UiSnapshot = {
   status: {
     kind: "idle",
   },
+};
+
+type NoticeDraft = Omit<UiNotice, "id" | "createdAt"> & {
+  readonly createdAt?: string;
 };
 
 export interface InProcessUiBackendOptions {
@@ -283,6 +288,7 @@ export function createInProcessUiBackendClient(
     "run",
     initialSnapshot.runs.map((run) => run.id),
   );
+  const noticeIds = createIdFactory("notice", []);
   let promptInFlight = false;
   let activeRunId: string | undefined;
   let runtimePromise: Promise<UiRuntimeComposition> | undefined;
@@ -336,6 +342,18 @@ export function createInProcessUiBackendClient(
         // UI event handlers are observers; they must not break backend state.
       }
     }
+  }
+
+  function publishNotice(notice: NoticeDraft): void {
+    publish({
+      notice: {
+        ...notice,
+        createdAt: notice.createdAt ?? timestamp(),
+        id: noticeIds.next(),
+      },
+      timestamp: Date.now(),
+      type: "notice.emitted",
+    });
   }
 
   function upsertSession(session: UiSession): Promise<void> {
@@ -419,6 +437,7 @@ export function createInProcessUiBackendClient(
           messageManager,
           hookExecutor: options.hookExecutor,
           now: () => now().getTime(),
+          onNotice: publishNotice,
           permission,
           policy,
           runLedger: options.runLedger,
@@ -432,6 +451,26 @@ export function createInProcessUiBackendClient(
       });
 
     return runtimePromise;
+  }
+
+  async function getRuntimeForPrompt(): Promise<UiRuntimeComposition> {
+    try {
+      return await getRuntime();
+    } catch (error) {
+      const message = getErrorMessage(error);
+      await updateStatus({
+        kind: "error",
+        message,
+        recoverable: true,
+      });
+      publishNotice({
+        key: `runtime:${message}`,
+        level: "error",
+        message,
+        title: "Runtime error",
+      });
+      throw error;
+    }
   }
 
   async function currentModelFromOptions(): Promise<CommandModelSummary | null> {
@@ -635,7 +674,7 @@ export function createInProcessUiBackendClient(
 
       try {
         await reserveIdsFromState();
-        const runtime = await getRuntime();
+        const runtime = await getRuntimeForPrompt();
         const agentName = runtime.agentManager.getDefault();
         const resolvedProjectRoot = projectRoot();
         let session = submitOptions?.sessionId

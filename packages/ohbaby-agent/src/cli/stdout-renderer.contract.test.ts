@@ -31,6 +31,19 @@ describe("createStdoutRenderer", () => {
         error: { code: "INVALID_ARGS", message: "Bad args" },
         timestamp: 2,
       },
+      {
+        type: "notice.emitted",
+        notice: {
+          createdAt: "2026-05-19T00:00:00.000Z",
+          id: "notice_1",
+          key: "prompt-security:/repo/OHBABY.md",
+          level: "warning",
+          message: "OHBABY.md was skipped because it tried to override instructions.",
+          source: "/repo/OHBABY.md",
+          title: "Custom instructions skipped",
+        },
+        timestamp: 3,
+      },
     ];
 
     for (const event of events) {
@@ -38,7 +51,10 @@ describe("createStdoutRenderer", () => {
     }
 
     expect(stdout).toEqual(["Hello", "OK\n"]);
-    expect(stderr).toEqual(["INVALID_ARGS: Bad args\n"]);
+    expect(stderr).toEqual([
+      "INVALID_ARGS: Bad args\n",
+      "warning: Custom instructions skipped: OHBABY.md was skipped because it tried to override instructions. (/repo/OHBABY.md)\n",
+    ]);
   });
 });
 
