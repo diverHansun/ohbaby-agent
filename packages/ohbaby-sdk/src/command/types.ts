@@ -18,6 +18,7 @@ export interface UiCommandSpec {
   readonly category: string;
   readonly description: string;
   readonly argsHint?: string;
+  readonly acceptsArguments?: boolean;
   readonly argumentMode: UiCommandArgumentMode;
   readonly source: UiCommandSource;
   readonly surfaces: readonly UiCommandSurface[];

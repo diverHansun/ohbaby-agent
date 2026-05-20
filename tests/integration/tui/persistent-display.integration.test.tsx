@@ -10,7 +10,12 @@ import {
   schema,
 } from "../../../packages/ohbaby-agent/src/services/database/index.js";
 import { createDatabaseRunLedger } from "../../../packages/ohbaby-agent/src/runtime/run-ledger/index.js";
-import { createFakeLLMClient, promptIsReady, waitForFrame } from "./helpers.js";
+import {
+  createFakeLLMClient,
+  createSequentialFakeLLMClient,
+  promptIsReady,
+  waitForFrame,
+} from "./helpers.js";
 
 const cleanupDirectories: string[] = [];
 
@@ -144,6 +149,65 @@ describe("TUI persistent backend display", () => {
     expect(promptIsReady(frame)).toBe(true);
     expect(frame).not.toContain("Permission:");
     expect(frame).toContain("status: idle | session:");
+    app.unmount();
+  });
+
+  it("resumes a stored session by slash command and continues with restored context", async () => {
+    const directory = await tempWorkspace("ohbaby-tui-resume");
+    const dbPath = join(directory, "agent.db");
+    const workdir = join(directory, "workspace");
+    const setupClient = createPersistentUiBackendClient({
+      dbPath,
+      llmClient: createSequentialFakeLLMClient([
+        [{ textDelta: "Alpha reply.", finishReason: "stop" }],
+        [{ textDelta: "Beta reply.", finishReason: "stop" }],
+      ]),
+      workdir,
+    });
+
+    await setupClient.submitPrompt("Alpha prompt", {
+      sessionId: "session_alpha",
+    });
+    await setupClient.submitPrompt("Beta prompt", {
+      sessionId: "session_beta",
+    });
+    closeDatabase();
+
+    const requests: Parameters<typeof createSequentialFakeLLMClient>[1] = [];
+    const restored = createPersistentUiBackendClient({
+      dbPath,
+      llmClient: createSequentialFakeLLMClient(
+        [[{ textDelta: "Alpha continued.", finishReason: "stop" }]],
+        requests,
+      ),
+      workdir,
+    });
+    const app = render(<OhbabyTerminalApp client={restored} />);
+
+    await waitForFrame(app, (frame) => frame.includes("Beta reply."));
+    app.stdin.write("/resume --session_id session_alpha");
+    app.stdin.write("\r");
+    await waitForFrame(
+      app,
+      (frame) =>
+        frame.includes("Alpha prompt") &&
+        frame.includes("Alpha reply.") &&
+        !frame.includes("Beta reply."),
+    );
+
+    app.stdin.write("Continue alpha");
+    app.stdin.write("\r");
+    const frame = await waitForFrame(app, (nextFrame) =>
+      nextFrame.includes("Alpha continued."),
+    );
+    const lastRequest = requests.at(-1);
+    const serializedMessages = JSON.stringify(lastRequest?.messages ?? []);
+
+    expect(frame).toContain("status: idle | session: session_alpha");
+    expect(serializedMessages).toContain("Alpha prompt");
+    expect(serializedMessages).toContain("Alpha reply.");
+    expect(serializedMessages).toContain("Continue alpha");
+    expect(serializedMessages).not.toContain("Beta prompt");
     app.unmount();
   });
 });

@@ -526,8 +526,7 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     app.stdin.write("/ses");
     app.stdin.write("\t");
-    await flush();
-    expect(app.lastFrame()).toContain("/session resume ");
+    await waitForFrame(app, (frame) => frame.includes("/session resume "));
     expect(client.executeCommand).not.toHaveBeenCalled();
 
     app.stdin.write("\u0015");
@@ -550,10 +549,15 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
     app.stdin.write("/");
-    await flush();
+    const frame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("/model switch - Open model switcher") &&
+        nextFrame.includes("/session resume - Resume a session"),
+    );
 
-    expect(app.lastFrame()).toContain("/model switch - Open model switcher");
-    expect(app.lastFrame()).toContain("/session resume - Resume a session");
+    expect(frame).toContain("/model switch - Open model switcher");
+    expect(frame).toContain("/session resume - Resume a session");
 
     app.stdin.write("\u001B[B");
     await flush();
@@ -587,9 +591,9 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
     app.stdin.write("/");
-    await flush();
-
-    const frame = app.lastFrame() ?? "";
+    const frame = await waitForFrame(app, (nextFrame) =>
+      nextFrame.includes("/cmd0"),
+    );
     const hintLines = frame
       .split(/\r?\n/u)
       .filter((line) => line.includes("/cmd"));
@@ -854,4 +858,21 @@ async function flush(): Promise<void> {
   await new Promise((resolve) => {
     setTimeout(resolve, 0);
   });
+}
+
+async function waitForFrame(
+  app: { readonly lastFrame: () => string | undefined },
+  predicate: (frame: string) => boolean,
+  timeoutMs = 1_000,
+): Promise<string> {
+  const startedAt = Date.now();
+  let frame = "";
+  while (Date.now() - startedAt < timeoutMs) {
+    await flush();
+    frame = app.lastFrame() ?? "";
+    if (predicate(frame)) {
+      return frame;
+    }
+  }
+  throw new Error(`Timed out waiting for frame. Last frame:\n${frame}`);
 }

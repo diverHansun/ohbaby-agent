@@ -1375,6 +1375,7 @@ describe("createInProcessUiBackendClient", () => {
         "model.current",
         "session",
         "session.list",
+        "session.resume",
         "mode",
         "mode.agent",
         "mode.ask",
@@ -1483,6 +1484,86 @@ describe("createInProcessUiBackendClient", () => {
       clientInvocationId: "inv_status",
       output: { kind: "data", subject: "status", data: { status: "idle" } },
       type: "command.result.delivered",
+    });
+  });
+
+  it("resumes an existing session through the command catalog", async () => {
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "session_1",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_1",
+            messages: [],
+            title: "First",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+          {
+            createdAt: "2026-05-20T00:01:00.000Z",
+            id: "session_2",
+            messages: [
+              {
+                createdAt: "2026-05-20T00:01:01.000Z",
+                id: "message_2",
+                parts: [{ text: "Second history", type: "text" }],
+                role: "assistant",
+              },
+            ],
+            title: "Second",
+            updatedAt: "2026-05-20T00:01:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([]),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    await client.executeCommand({
+      argv: ["--session_id", "session_2"],
+      clientInvocationId: "inv_resume",
+      commandId: "session.resume",
+      path: ["session", "resume"],
+      raw: "/resume --session_id session_2",
+      rawArgs: "--session_id session_2",
+      surface: "tui",
+    });
+
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      activeSessionId: "session_2",
+      sessions: [
+        { id: "session_1" },
+        {
+          id: "session_2",
+          messages: [
+            {
+              parts: [{ text: "Second history", type: "text" }],
+            },
+          ],
+        },
+      ],
+    });
+    const snapshotEvent = events.find(
+      (event): event is Extract<UiEvent, { type: "snapshot.replaced" }> =>
+        event.type === "snapshot.replaced",
+    );
+    const selectedEvent = events.find(
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "command.result.delivered" }> =>
+        event.type === "command.result.delivered" &&
+        event.action?.kind === "session.selected",
+    );
+    expect(snapshotEvent?.snapshot.activeSessionId).toBe("session_2");
+    expect(selectedEvent?.action).toEqual({
+      data: { choiceId: "session_2" },
+      kind: "session.selected",
     });
   });
 

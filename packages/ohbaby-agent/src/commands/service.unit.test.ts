@@ -235,6 +235,70 @@ describe("CommandService", () => {
     });
   });
 
+  it("resumes a session by --session_id or positional id", async () => {
+    const selectSession = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const { events, service } = createServiceHarness({
+      sessions: {
+        listSessions() {
+          return [
+            { id: "session_1", title: "First" },
+            { id: "session_2", title: "Second" },
+          ];
+        },
+        selectSession,
+      },
+    });
+
+    await service.executeCommand(
+      makeInvocation("session.resume", ["session", "resume"], [
+        "--session_id",
+        "session_2",
+      ]),
+    );
+    await service.executeCommand(
+      makeInvocation("session.resume", ["resume"], ["session_1"]),
+    );
+
+    expect(selectSession).toHaveBeenNthCalledWith(1, "session_2");
+    expect(selectSession).toHaveBeenNthCalledWith(2, "session_1");
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          output: {
+            data: { sessionId: "session_2" },
+            kind: "data",
+            subject: "session.current",
+          },
+          type: "result",
+        }),
+        expect.objectContaining({
+          action: {
+            data: { choiceId: "session_1" },
+            kind: "session.selected",
+          },
+          type: "result",
+        }),
+      ]),
+    );
+  });
+
+  it("fails session resume without an id on non-interactive surfaces", async () => {
+    const { events, service } = createServiceHarness();
+
+    await service.executeCommand({
+      ...makeInvocation("session.resume", ["session", "resume"]),
+      surface: "headless",
+    });
+
+    expect(events.at(-1)).toMatchObject({
+      error: {
+        code: "SESSION_ID_REQUIRED",
+        message: "Use /resume --session_id <id> to resume a session",
+      },
+      type: "failed",
+    });
+  });
+
   it("rejects session selections that were not offered", async () => {
     const request = vi
       .fn<() => Promise<UiInteractionResponse>>()
@@ -469,14 +533,15 @@ function createServiceHarness(
 function makeInvocation(
   commandId: string,
   path: readonly string[],
+  argv: readonly string[] = [],
 ): UiCommandInvocation {
   return {
-    argv: [],
+    argv,
     clientInvocationId: "inv_1",
     commandId,
     path,
-    raw: `/${path.join(" ")}`,
-    rawArgs: "",
+    raw: `/${path.join(" ")}${argv.length > 0 ? ` ${argv.join(" ")}` : ""}`,
+    rawArgs: argv.join(" "),
     sessionId: "session_1",
     surface: "tui",
   };

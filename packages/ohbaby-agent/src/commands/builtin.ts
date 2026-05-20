@@ -135,6 +135,59 @@ async function handleSessionParent(
   );
 }
 
+function parseSessionIdArg(argv: readonly string[]): string | undefined {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--session_id" || arg === "--session-id") {
+      return argv[index + 1];
+    }
+    if (arg.startsWith("--session_id=")) {
+      return arg.slice("--session_id=".length);
+    }
+    if (arg.startsWith("--session-id=")) {
+      return arg.slice("--session-id=".length);
+    }
+    if (!arg.startsWith("-")) {
+      return arg;
+    }
+  }
+
+  return undefined;
+}
+
+async function handleSessionResume(
+  options: CommandServiceOptions,
+  invocation: Parameters<CommandHandler["execute"]>[0],
+  context: CommandRunContext,
+): Promise<void> {
+  const sessionId = parseSessionIdArg(invocation.argv);
+  if (!sessionId) {
+    if (context.surface === "tui") {
+      await handleSessionParent(options, context);
+      return;
+    }
+    context.fail({
+      code: "SESSION_ID_REQUIRED",
+      message: "Use /resume --session_id <id> to resume a session",
+      recoverable: true,
+    });
+    return;
+  }
+
+  if (!options.sessions?.selectSession) {
+    context.fail({
+      code: "SESSION_RESUME_UNAVAILABLE",
+      message: "Session resume is not available in this backend",
+      recoverable: true,
+    });
+    return;
+  }
+
+  await options.sessions.selectSession(sessionId);
+  context.emitOutput(dataOutput("session.current", { sessionId }));
+  context.emitAction(action("session.selected", { choiceId: sessionId }));
+}
+
 async function handleModeChange(
   options: CommandServiceOptions,
   context: CommandRunContext,
@@ -223,6 +276,12 @@ export function createBuiltinHandlers(
         context.emitOutput(
           dataOutput("session.list", { sessions: await listSessions(options) }),
         );
+      },
+    },
+    {
+      id: "session.resume",
+      execute(invocation, context): Promise<void> {
+        return handleSessionResume(options, invocation, context);
       },
     },
     {

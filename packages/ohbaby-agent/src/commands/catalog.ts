@@ -102,6 +102,18 @@ const BUILTIN_COMMANDS: readonly UiCommandSpec[] = [
     surfaces: COMMON_SURFACES,
   },
   {
+    id: "session.resume",
+    path: ["session", "resume"],
+    aliases: [["resume"]],
+    acceptsArguments: true,
+    argsHint: "--session_id <id>",
+    argumentMode: "argv",
+    category: "session",
+    description: "Resume a session",
+    source: "builtin",
+    surfaces: COMMON_SURFACES,
+  },
+  {
     id: "mode",
     path: ["mode"],
     aliases: [],
