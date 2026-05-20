@@ -237,6 +237,25 @@ function createInitialSnapshotWithTwoSessions(): UiSnapshot {
   };
 }
 
+async function addCoreTextMessage(
+  messageManager: MessageManager,
+  input: {
+    readonly sessionId: string;
+    readonly role: "assistant" | "user";
+    readonly text: string;
+  },
+): Promise<void> {
+  const message = await messageManager.createMessage({
+    agent: "test",
+    role: input.role,
+    sessionId: input.sessionId,
+  });
+  await messageManager.appendPart(message.id, {
+    text: input.text,
+    type: "text",
+  });
+}
+
 class RecordingRunLedger implements RunLedger {
   readonly calls: string[] = [];
   private readonly inner: RunLedger;
@@ -437,6 +456,85 @@ describe("createInProcessUiBackendClient", () => {
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
+  });
+
+  it("compacts core history before a TUI prompt and sends the compact summary in the model context", async () => {
+    const requests: ProviderRequest[] = [];
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const oldUserText = `old-user-${"u".repeat(12_000)}`;
+    const oldAssistantText = `old-assistant-${"a".repeat(12_000)}`;
+    await addCoreTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: oldUserText,
+    });
+    await addCoreTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "assistant",
+      text: oldAssistantText,
+    });
+    await addCoreTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "recent context that should remain",
+    });
+    const client = createInProcessUiBackendClient({
+      bus,
+      initialSnapshot: {
+        activeSessionId: "session_1",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_1",
+            messages: [],
+            title: "Existing",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              textDelta: "<state_snapshot>older summary</state_snapshot>",
+              finishReason: "stop",
+            },
+          ],
+          [{ textDelta: "Fresh answer", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+      messageManager,
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    await client.submitPrompt("fresh prompt", { sessionId: "session_1" });
+
+    expect(requests).toHaveLength(2);
+    const mainRequestText = JSON.stringify(requests[1]?.messages);
+    expect(mainRequestText).toContain(
+      "<state_snapshot>older summary</state_snapshot>",
+    );
+    expect(mainRequestText).toContain("fresh prompt");
+    expect(mainRequestText).not.toContain(oldUserText);
+    expect(mainRequestText).not.toContain(oldAssistantText);
+    expect(
+      events.some(
+        (event) =>
+          event.type === "notice.emitted" &&
+          event.notice.key === "context:compact:session_1",
+      ),
+    ).toBe(true);
   });
 
   it("executes builtin tool calls through the in-process lifecycle scheduler", async () => {

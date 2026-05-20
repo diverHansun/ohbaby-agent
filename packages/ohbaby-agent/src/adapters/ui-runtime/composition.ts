@@ -2,18 +2,27 @@ import type { ChatCompletionCreateParams } from "openai/resources/chat/completio
 import type { UiNotice } from "ohbaby-sdk";
 import type { BusInstance } from "../../bus/index.js";
 import type { CommandToolSummary } from "../../commands/index.js";
+import {
+  createContextManager,
+  type ContextManager,
+} from "../../core/context/index.js";
 import { Lifecycle } from "../../core/lifecycle/index.js";
 import type {
   ChatCompletionMessage,
   LLMClientInstance,
 } from "../../core/llm-client/index.js";
-import type { MessageManager, MessageWithParts } from "../../core/message/index.js";
+import type {
+  MessageManager,
+  MessageWithParts,
+} from "../../core/message/index.js";
+import { createMemoryManager } from "../../core/memory/index.js";
 import {
   createToolScheduler,
   type PermissionPort,
   type PolicyPort,
   type ToolDefinition,
 } from "../../core/tool-scheduler/index.js";
+import { createHeuristicTokenCounter } from "../../services/llm-model/index.js";
 import {
   AgentManager,
   SubagentExecutor,
@@ -27,7 +36,6 @@ import {
   type RunLedger,
 } from "../../runtime/run-ledger/index.js";
 import { createSystemPromptProvider } from "../../core/system-prompt/index.js";
-import type { PromptSecurityFinding } from "../../core/system-prompt/security/index.js";
 import {
   RunManager,
   type HookExecutor,
@@ -39,6 +47,13 @@ import {
   type StreamBridge,
 } from "../../runtime/stream-bridge/index.js";
 import { createHostLocalSandboxManager } from "./host-local-environment.js";
+import {
+  appendMemoryToSystemPrompt,
+  createContextSummaryClient,
+  loadMemoryForPrompt,
+  noticeFromCompactResult,
+  noticeFromPromptSecurityFinding,
+} from "./prompt-context.js";
 import type { UiRuntimeComposition } from "./types.js";
 
 const DEFAULT_RUN_POLICY: RunDefaultsPolicy = {
@@ -80,6 +95,7 @@ const DEFAULT_PROFILE_REGISTRY: ProfileRegistry = {
 export interface UiRuntimeCompositionOptions {
   readonly agentManager?: AgentManager;
   readonly bus: BusInstance;
+  readonly contextManager?: ContextManager;
   readonly createRunId?: () => string;
   readonly llmClient: LLMClientInstance;
   readonly messageManager: MessageManager;
@@ -95,24 +111,6 @@ export interface UiRuntimeCompositionOptions {
   readonly runLedger?: RunLedger;
   readonly streamBridge?: StreamBridge;
   readonly workdir?: string;
-}
-
-function noticeFromPromptSecurityFinding(
-  finding: PromptSecurityFinding,
-): Omit<UiNotice, "id" | "createdAt"> {
-  const source = finding.sourcePath ?? finding.sourceLabel;
-  return {
-    key: `prompt-security:${source}:${finding.patternId}`,
-    level: "warning",
-    message: `${finding.sourceLabel} line ${String(finding.line)}: ${
-      finding.message
-    }`,
-    source,
-    title:
-      finding.action === "omit"
-        ? "Custom instructions skipped"
-        : "Custom instructions warning",
-  };
 }
 
 class InMemorySubagentSessionManager implements SubagentSessionManager {
@@ -216,9 +214,11 @@ export async function createUiRuntimeComposition(
   const agentManager = options.agentManager ?? new AgentManager();
   await agentManager.initialize();
 
-  const runLedger = options.runLedger ?? createInMemoryRunLedger({
-    now: options.now,
-  });
+  const runLedger =
+    options.runLedger ??
+    createInMemoryRunLedger({
+      now: options.now,
+    });
   const streamBridge =
     options.streamBridge ??
     createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
@@ -283,10 +283,7 @@ export async function createUiRuntimeComposition(
         agentName: input.agentName,
         isSubagent: true,
       });
-      sandboxManager.setSessionEnvironment(
-        input.sessionId,
-        input.environment,
-      );
+      sandboxManager.setSessionEnvironment(input.sessionId, input.environment);
       try {
         const record = await runManager.create({
           agent: input.agentName,
@@ -347,6 +344,47 @@ export async function createUiRuntimeComposition(
     toolScheduler.register(tool);
   }
 
+  let activePrimaryAgentName = agentManager.getDefault();
+  const systemPromptProvider = createSystemPromptProvider({
+    agentNameResolver(input) {
+      return input.isSubagent ? "subagent" : activePrimaryAgentName;
+    },
+    agentPromptResolver(agentName) {
+      return agentManager.get(agentName)?.prompt;
+    },
+    async toolsProvider(input) {
+      const tools = await toolScheduler.getAvailableTools({
+        agentName: input.isSubagent ? undefined : activePrimaryAgentName,
+        isSubagent: input.isSubagent,
+      });
+      return tools.map((tool) => tool.name);
+    },
+    onSecurityFinding(finding) {
+      options.onNotice?.(noticeFromPromptSecurityFinding(finding));
+    },
+  });
+  const contextManager =
+    options.contextManager ??
+    createContextManager({
+      bus: options.bus,
+      llmClient: createContextSummaryClient(options.llmClient),
+      memory: createMemoryManager({ bus: options.bus }),
+      messageManager: options.messageManager,
+      now: options.now,
+      onWarning(message, error) {
+        const detail =
+          error instanceof Error ? `${message}: ${error.message}` : message;
+        options.onNotice?.({
+          key: `context:warning:${detail}`,
+          level: "warning",
+          message: detail,
+          title: "Context warning",
+        });
+      },
+      systemPromptProvider,
+      tokenCounter: createHeuristicTokenCounter(),
+    });
+
   const lifecycle = new Lifecycle({
     llmClient: options.llmClient,
     messageManager: options.messageManager,
@@ -395,37 +433,39 @@ export async function createUiRuntimeComposition(
     },
 
     async buildPromptMessages(input): Promise<ChatCompletionMessage[]> {
-      const systemPromptProvider = createSystemPromptProvider({
-        agentNameResolver() {
-          return input.agentName;
-        },
-        agentPromptResolver(agentName) {
-          return agentManager.get(agentName)?.prompt;
-        },
-        async toolsProvider() {
-          const tools = await toolScheduler.getAvailableTools({
-            agentName: input.agentName,
-            isSubagent: false,
-          });
-          return tools.map((tool) => tool.name);
-        },
-        onSecurityFinding(finding) {
-          options.onNotice?.(noticeFromPromptSecurityFinding(finding));
-        },
-      });
-      const systemPrompt = await systemPromptProvider.build({
+      activePrimaryAgentName = input.agentName;
+      const compactResult = await contextManager.compact(input.sessionId, {
         directory: input.projectRoot,
-        isSubagent: false,
-        sessionId: input.sessionId,
+        modelId: options.llmClient.config.model,
       });
-      const history = withoutSystemMessages(input.messages);
+      const notice = noticeFromCompactResult(input.sessionId, compactResult);
+      if (notice) {
+        options.onNotice?.(notice);
+      }
+
+      const context = await contextManager.assemble(
+        input.sessionId,
+        input.projectRoot,
+        false,
+      );
+      const systemPrompt = appendMemoryToSystemPrompt(
+        context.systemPrompt,
+        loadMemoryForPrompt(context.memory.merged, (finding) => {
+          options.onNotice?.(noticeFromPromptSecurityFinding(finding));
+        }),
+      );
+      const history = withoutSystemMessages(
+        await options.messageManager.toModelMessages(input.sessionId),
+      );
       if (systemPrompt.trim() === "") {
         return history;
       }
       return [{ role: "system", content: systemPrompt }, ...history];
     },
 
-    async listToolSummaries(input = {}): Promise<readonly CommandToolSummary[]> {
+    async listToolSummaries(
+      input = {},
+    ): Promise<readonly CommandToolSummary[]> {
       return (
         await toolScheduler.getAvailableTools({ agentName: input.agentName })
       ).map((tool) => ({

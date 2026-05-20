@@ -16,7 +16,6 @@ import type {
   UiSession,
 } from "ohbaby-sdk";
 import type { BusInstance } from "../bus/index.js";
-import type { ChatCompletionMessage } from "../core/llm-client/index.js";
 import { createLLMClient } from "../core/llm-client/index.js";
 import type {
   CreateLLMClientOptions,
@@ -171,36 +170,6 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
-}
-
-function textFromMessage(message: UiMessage): string {
-  return message.parts
-    .map((part) => {
-      if (part.type === "text") {
-        return part.text;
-      }
-      if (part.type === "reasoning") {
-        return part.text;
-      }
-      return "";
-    })
-    .join("");
-}
-
-function toModelMessages(
-  messages: readonly UiMessage[],
-): ChatCompletionMessage[] {
-  return messages
-    .filter(
-      (message) =>
-        message.role === "user" ||
-        message.role === "assistant" ||
-        message.role === "system",
-    )
-    .map((message) => ({
-      role: message.role as "user" | "assistant" | "system",
-      content: textFromMessage(message),
-    }));
 }
 
 function createTextMessage(input: {
@@ -864,7 +833,6 @@ export function createInProcessUiBackendClient(
           });
           const messages = await runtime.buildPromptMessages({
             agentName,
-            messages: toModelMessages(session.messages),
             projectRoot: resolvedProjectRoot,
             sessionId: session.id,
           });

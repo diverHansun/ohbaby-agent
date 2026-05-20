@@ -29,7 +29,6 @@ export interface UiRuntimeComposition {
   }): Promise<ChatCompletionCreateParams["tools"]>;
   buildPromptMessages(input: {
     readonly agentName: string;
-    readonly messages: readonly ChatCompletionMessage[];
     readonly projectRoot: string;
     readonly sessionId: string;
   }): Promise<ChatCompletionMessage[]>;
