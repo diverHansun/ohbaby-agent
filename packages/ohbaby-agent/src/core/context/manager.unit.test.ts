@@ -301,6 +301,93 @@ describe("ContextManager", () => {
     expect(compressed).toHaveLength(1);
   });
 
+  it("compacts by pruning only when pruned context fits the model window", async () => {
+    const messageManager = createMessageManagerFixture();
+    const memory: MemoryReader = {
+      load: vi.fn().mockResolvedValue({ global: "", project: "", merged: "" }),
+    };
+    const oldMessage = await messageManager.createMessage({
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "test",
+    });
+    await messageManager.appendPart(oldMessage.id, {
+      type: "tool",
+      callId: "old_call",
+      tool: "read",
+      state: { status: "completed", input: {}, output: "x".repeat(80) },
+    });
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "small",
+    });
+    const { manager } = createManager({
+      compressionThreshold: 0.5,
+      memory,
+      messageManager,
+      pruneMinimumTokens: 1,
+      pruneProtectTokens: 0,
+    });
+
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      modelId: "model-a",
+    });
+
+    expect(result.status).toBe("pruned");
+    expect(result.prune).toMatchObject({ prunedCount: 1 });
+    expect(result.usageAfter.currentTokens).toBeLessThan(
+      result.usageBefore.currentTokens,
+    );
+    const context = await manager.assemble("session_1", "D:/repo");
+    expect(context.history).toHaveLength(1);
+    expect(context.history[0]?.info.role).toBe("user");
+  });
+
+  it("compacts by summarizing older history and re-injecting the summary into assembled context", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "first long text",
+    });
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "assistant",
+      text: "second long text",
+    });
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "third long text",
+    });
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "assistant",
+      text: "fourth long text",
+    });
+    const { manager } = createManager({ messageManager });
+
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
+
+    expect(result.status).toBe("compacted");
+    expect(result.compression?.summaryMessageId).toBe("message_5");
+    const context = await manager.assemble("session_1", "D:/repo");
+    expect(context.hasSummary).toBe(true);
+    expect(context.history).toMatchObject([
+      {
+        info: { id: "message_5", role: "assistant" },
+        parts: [{ text: "<state_snapshot>short</state_snapshot>" }],
+      },
+      { info: { id: "message_4", role: "assistant" } },
+    ]);
+  });
+
   it("skips compression below threshold unless forced", async () => {
     const messageManager = createMessageManagerFixture();
     const generateSummary = vi

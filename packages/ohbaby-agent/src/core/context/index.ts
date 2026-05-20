@@ -12,6 +12,9 @@ export { ContextEvent } from "./events.js";
 export { createContextManager, getContextUsage } from "./context-manager.js";
 export type {
   AssembledContext,
+  CompactOptions,
+  CompactResult,
+  CompactStatus,
   CompressionResult,
   CompressionStatus,
   ContextLLMClient,

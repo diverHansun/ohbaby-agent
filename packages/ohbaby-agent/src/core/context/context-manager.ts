@@ -15,6 +15,9 @@ import {
 } from "./serialization.js";
 import type {
   AssembledContext,
+  CompactOptions,
+  CompactResult,
+  CompactStatus,
   CompressionResult,
   ContextManager,
   ContextManagerOptions,
@@ -226,48 +229,27 @@ export function createContextManager(
     return result;
   }
 
-  async function compress(
+  async function summarizeActiveHistory(
     sessionId: string,
-    force = false,
-    modelId = "default",
   ): Promise<CompressionResult> {
-    const historyBeforePrune =
-      await options.messageManager.listBySession(sessionId);
-    const fullTokens = tokenCount(
-      options.tokenCounter,
-      serializeHistory(historyBeforePrune),
-    );
-    const usage = getContextUsage(
-      { estimatedTokens: fullTokens },
-      modelId,
-      options.tokenCounter,
-      compressionThreshold,
-    );
-
-    if (!force && !usage.shouldCompress) {
-      return {
-        status: "skipped",
-        originalTokens: fullTokens,
-        newTokens: fullTokens,
-        savedTokens: 0,
-      };
-    }
-
-    await prune(sessionId);
-    const history = (
+    const activeHistory = (
       await options.messageManager.listBySession(sessionId)
     ).filter((message) => !isContextSummary(message));
-    if (history.length <= 2) {
+    const activeTokens = tokenCount(
+      options.tokenCounter,
+      serializeHistory(activeHistory),
+    );
+    if (activeHistory.length <= 2) {
       return {
         status: "skipped",
-        originalTokens: fullTokens,
-        newTokens: fullTokens,
+        originalTokens: activeTokens,
+        newTokens: activeTokens,
         savedTokens: 0,
       };
     }
 
     const historyToCompress = getHistoryToCompress({
-      history,
+      history: activeHistory,
       preserveRatio: compressionPreserveRatio,
       tokenCounter: options.tokenCounter,
     });
@@ -344,6 +326,119 @@ export function createContextManager(
     return result;
   }
 
+  async function compress(
+    sessionId: string,
+    force = false,
+    modelId = "default",
+  ): Promise<CompressionResult> {
+    const historyBeforePrune =
+      await options.messageManager.listBySession(sessionId);
+    const fullTokens = tokenCount(
+      options.tokenCounter,
+      serializeHistory(historyBeforePrune),
+    );
+    const usage = getContextUsage(
+      { estimatedTokens: fullTokens },
+      modelId,
+      options.tokenCounter,
+      compressionThreshold,
+    );
+
+    if (!force && !usage.shouldCompress) {
+      return {
+        status: "skipped",
+        originalTokens: fullTokens,
+        newTokens: fullTokens,
+        savedTokens: 0,
+      };
+    }
+
+    await prune(sessionId);
+    return summarizeActiveHistory(sessionId);
+  }
+
+  function compactStatusFromCompression(
+    compression: CompressionResult,
+    pruneResult: PruneResult,
+  ): CompactStatus {
+    if (compression.status === "compressed") {
+      return "compacted";
+    }
+    if (compression.status === "failed" || compression.status === "inflated") {
+      return compression.status;
+    }
+    return pruneResult.prunedCount > 0 ? "pruned" : "not-needed";
+  }
+
+  async function compact(
+    sessionId: string,
+    input: CompactOptions,
+  ): Promise<CompactResult> {
+    const before = await assemble(
+      sessionId,
+      input.directory,
+      input.isSubagent ?? false,
+    );
+    const usageBefore = getContextUsage(
+      before,
+      input.modelId,
+      options.tokenCounter,
+      compressionThreshold,
+    );
+
+    if (input.force !== true && !usageBefore.shouldCompress) {
+      return {
+        status: "not-needed",
+        usageBefore,
+        usageAfter: usageBefore,
+      };
+    }
+
+    const pruneResult = await prune(sessionId);
+    const afterPrune = await assemble(
+      sessionId,
+      input.directory,
+      input.isSubagent ?? false,
+    );
+    const usageAfterPrune = getContextUsage(
+      afterPrune,
+      input.modelId,
+      options.tokenCounter,
+      compressionThreshold,
+    );
+
+    if (input.force !== true && !usageAfterPrune.shouldCompress) {
+      return {
+        status: pruneResult.prunedCount > 0 ? "pruned" : "not-needed",
+        usageBefore,
+        usageAfter: usageAfterPrune,
+        prune: pruneResult,
+      };
+    }
+
+    const compression = await summarizeActiveHistory(sessionId);
+    const afterCompression = await assemble(
+      sessionId,
+      input.directory,
+      input.isSubagent ?? false,
+    );
+    const usageAfter = getContextUsage(
+      afterCompression,
+      input.modelId,
+      options.tokenCounter,
+      compressionThreshold,
+    );
+
+    return {
+      status: compactStatusFromCompression(compression, pruneResult),
+      usageBefore,
+      usageAfter,
+      prune: pruneResult,
+      compression,
+      error: compression.error,
+    };
+  }
+
   return {
     assemble,
     getUsage(context: AssembledContext, modelId: string): ContextUsage {
@@ -358,6 +453,7 @@ export function createContextManager(
       return usage.usageRatio >= compressionThreshold;
     },
     compress,
+    compact,
     prune,
   };
 }

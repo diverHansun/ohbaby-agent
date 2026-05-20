@@ -68,6 +68,29 @@ export interface PruneResult {
   readonly totalScanned: number;
 }
 
+export type CompactStatus =
+  | "not-needed"
+  | "pruned"
+  | "compacted"
+  | "failed"
+  | "inflated";
+
+export interface CompactOptions {
+  readonly directory: string;
+  readonly force?: boolean;
+  readonly isSubagent?: boolean;
+  readonly modelId: string;
+}
+
+export interface CompactResult {
+  readonly status: CompactStatus;
+  readonly usageBefore: ContextUsage;
+  readonly usageAfter: ContextUsage;
+  readonly prune?: PruneResult;
+  readonly compression?: CompressionResult;
+  readonly error?: string;
+}
+
 export interface ContextManager {
   assemble(
     sessionId: string,
@@ -81,6 +104,7 @@ export interface ContextManager {
     force?: boolean,
     modelId?: string,
   ): Promise<CompressionResult>;
+  compact(sessionId: string, options: CompactOptions): Promise<CompactResult>;
   prune(sessionId: string): Promise<PruneResult>;
 }
 
