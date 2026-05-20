@@ -68,6 +68,24 @@ describe('validateModelJson', () => {
     expect(() => { validateModelJson(config); }).toThrow(/apiKeyEnv/);
   });
 
+  it('should reject full endpoint URLs in apiConfig.baseUrl', () => {
+    const config = {
+      ...validConfig,
+      apiConfig: {
+        ...validConfig.apiConfig,
+        baseUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+      },
+    };
+
+    expect(() => { validateModelJson(config); }).toThrow(ConfigError);
+    expect(() => { validateModelJson(config); }).toThrow(/SDK base URL/);
+    try {
+      validateModelJson(config);
+    } catch (error) {
+      expect((error as ConfigError).code).toBe('INVALID_FIELD');
+    }
+  });
+
   it('should throw for missing llmParams', () => {
     const config = { ...validConfig, llmParams: undefined };
     expect(() => { validateModelJson(config); }).toThrow(ConfigError);

@@ -52,6 +52,35 @@ JSON
 environment variables. Put `OPENAI_API_KEY=...` in your shell or project `.env`;
 shell variables take priority over `.env`.
 
+### Provider base URLs
+
+`apiConfig.baseUrl` is the SDK base URL, not the final REST endpoint. Do not
+include paths such as `/chat/completions`, `/messages`, or `/responses`; the
+provider SDK appends the operation path.
+
+OpenAI-compatible providers share the same Chat Completions adapter. For
+example:
+
+```json
+{
+  "provider": "zhipu",
+  "defaultModel": "glm-5.1",
+  "apiConfig": {
+    "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+    "apiKeyEnv": "ZAI_API_KEY"
+  },
+  "llmParams": {
+    "temperature": 0.7,
+    "maxTokens": 128000
+  }
+}
+```
+
+Other OpenAI-compatible vendors follow the same rule, such as Qwen/DashScope
+with `https://dashscope.aliyuncs.com/compatible-mode/v1`. Anthropic is the one
+separate provider path: use `provider: "anthropic"` or `provider: "claude"` and
+an Anthropic API base URL such as `https://api.anthropic.com`.
+
 ## Development
 
 ```bash

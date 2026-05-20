@@ -6,6 +6,26 @@
 import { ConfigError } from './types.js';
 import type { ModelJsonConfig } from './types.js';
 
+const ENDPOINT_PATHS = ['/chat/completions', '/messages', '/responses'];
+
+function trimTrailingSlashes(value: string): string {
+  return value.replace(/\/+$/u, '');
+}
+
+function validateBaseUrlValue(baseUrl: string): void {
+  const normalized = trimTrailingSlashes(baseUrl.trim()).toLowerCase();
+
+  for (const endpointPath of ENDPOINT_PATHS) {
+    if (normalized.endsWith(endpointPath)) {
+      throw new ConfigError(
+        `Invalid apiConfig.baseUrl: use the SDK base URL without '${endpointPath}'. For OpenAI-compatible providers, the SDK appends the chat completions path automatically.`,
+        'INVALID_FIELD',
+        { baseUrl, endpointPath }
+      );
+    }
+  }
+}
+
 /**
  * Validate the structure and values of ModelJsonConfig.
  * Throws ConfigError if validation fails.
@@ -38,6 +58,8 @@ export function validateModelJson(config: unknown): asserts config is ModelJsonC
 
     if (!apiConfig.baseUrl || typeof apiConfig.baseUrl !== 'string') {
       errors.push('apiConfig.baseUrl (string) is required');
+    } else {
+      validateBaseUrlValue(apiConfig.baseUrl);
     }
 
     if (!apiConfig.apiKeyEnv || typeof apiConfig.apiKeyEnv !== 'string') {
