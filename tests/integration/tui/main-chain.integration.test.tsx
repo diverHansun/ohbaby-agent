@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -187,6 +187,122 @@ describe("TUI main chain with real in-process backend", () => {
     );
 
     expect(frame).toContain("status: idle");
+    app.unmount();
+  });
+
+  it("lists only policy-available tools from the TUI slash command", async () => {
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+    });
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await waitForFrame(
+      app,
+      (frame) => promptLine(frame).trimEnd() === "ohbaby >",
+    );
+    app.stdin.write("/mode ask");
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) =>
+      frame.includes("mode: ask/ask-before-edit"),
+    );
+
+    app.stdin.write("/tools");
+    app.stdin.write("\r");
+    const frame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes('"name":"web_search"') &&
+        nextFrame.includes('"name":"web_fetch"'),
+    );
+
+    expect(frame).toContain('"category":"network"');
+    expect(frame).not.toContain('"name":"write"');
+    expect(frame).not.toContain('"name":"bash"');
+    expect(frame).not.toContain('"name":"task"');
+    app.unmount();
+  });
+
+  it("rejects write tool calls in ask mode before showing permission", async () => {
+    const workdir = await tempWorkspace("ohbaby-tui-ask-policy");
+    const requests = [];
+    const client = createInProcessUiBackendClient({
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            writeToolCallEvent({
+              callId: "call_write_denied",
+              content: "denied",
+              filePath: "denied.txt",
+            }),
+          ],
+          [{ textDelta: "Write blocked by policy.", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+      workdir,
+    });
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await waitForFrame(app, (frame) =>
+      frame.includes("mode: agent/ask-before-edit"),
+    );
+    app.stdin.write("/mode ask");
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) =>
+      frame.includes("mode: ask/ask-before-edit"),
+    );
+
+    app.stdin.write("try to write");
+    app.stdin.write("\r");
+    const frame = await waitForFrame(app, (nextFrame) =>
+      nextFrame.includes("Write blocked by policy."),
+    );
+
+    expect(frame).toContain("tool write (failed)");
+    expect(frame).toContain("not allowed in ask mode");
+    expect(frame).not.toContain("Permission:");
+    expect(requests).toHaveLength(2);
+    app.unmount();
+  });
+
+  it("runs write tool calls without permission after /mode auto-edit", async () => {
+    const workdir = await tempWorkspace("ohbaby-tui-auto-edit");
+    const client = createInProcessUiBackendClient({
+      llmClient: createSequentialFakeLLMClient([
+        [
+          writeToolCallEvent({
+            callId: "call_write_auto",
+            content: "auto edit ok",
+            filePath: "auto.txt",
+          }),
+        ],
+        [{ textDelta: "Auto edit wrote the file.", finishReason: "stop" }],
+      ]),
+      workdir,
+    });
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await waitForFrame(
+      app,
+      (frame) => promptLine(frame).trimEnd() === "ohbaby >",
+    );
+    app.stdin.write("/mode auto-edit");
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) =>
+      frame.includes("mode: agent/edit-automatically"),
+    );
+
+    app.stdin.write("write automatically");
+    app.stdin.write("\r");
+    const frame = await waitForFrame(app, (nextFrame) =>
+      nextFrame.includes("Auto edit wrote the file."),
+    );
+
+    expect(frame).toContain("tool write (completed)");
+    expect(frame).not.toContain("Permission:");
+    await expect(readFile(join(workdir, "auto.txt"), "utf8")).resolves.toBe(
+      "auto edit ok",
+    );
     app.unmount();
   });
 });
