@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ToolExecutionEnvironment } from "../../core/tool-scheduler/index.js";
@@ -43,6 +44,33 @@ function resolveHostPath(workdir: string, inputPath: string): string {
     : path.resolve(workdir, inputPath);
 }
 
+function realpathExistingDirectory(directory: string): string {
+  try {
+    return realpathSync.native(directory);
+  } catch (nativeError) {
+    if (isNotFound(nativeError)) {
+      return path.resolve(directory);
+    }
+    try {
+      return realpathSync(directory);
+    } catch (error) {
+      if (isNotFound(error)) {
+        return path.resolve(directory);
+      }
+      throw error;
+    }
+  }
+}
+
+function isNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
+
 function toSandboxLease(
   environment: ToolExecutionEnvironment,
   sessionId: string,
@@ -61,7 +89,7 @@ function toSandboxLease(
 export function createHostLocalEnvironment(
   workdir = process.cwd(),
 ): ToolExecutionEnvironment {
-  const root = path.resolve(workdir);
+  const root = realpathExistingDirectory(path.resolve(workdir));
 
   return {
     workdir: root,
