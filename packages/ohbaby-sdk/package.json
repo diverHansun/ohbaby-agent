@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "Stable DTO and client contracts shared by ohbaby-agent frontends and runtime adapters",
   "type": "module",
-  "private": true,
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -13,11 +15,23 @@
     }
   },
   "files": [
-    "dist"
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.test.d.ts.map",
+    "!dist/**/*.unit.test.d.ts",
+    "!dist/**/*.unit.test.d.ts.map",
+    "!dist/**/*.contract.test.d.ts",
+    "!dist/**/*.contract.test.d.ts.map",
+    "!dist/**/*.integration.test.d.ts",
+    "!dist/**/*.integration.test.d.ts.map",
+    "README.md"
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsup && tsc -b --force",
+    "build": "rimraf dist && tsup && tsc -b --force",
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist coverage"
   }
