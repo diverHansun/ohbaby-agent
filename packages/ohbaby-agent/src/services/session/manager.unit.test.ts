@@ -15,6 +15,8 @@ import type {
 interface ManagerFixture {
   readonly manager: SessionManager;
   readonly createdEvents: readonly Session[];
+  readonly removedEvents: readonly string[];
+  readonly updatedEvents: readonly Session[];
 }
 
 function createClock(startAt = 1_000): () => number {
@@ -64,8 +66,16 @@ function createManager(
 ): ManagerFixture {
   const bus = createBus();
   const createdEvents: Session[] = [];
+  const removedEvents: string[] = [];
+  const updatedEvents: Session[] = [];
   bus.subscribe(SessionEvent.Created, (payload) => {
     createdEvents.push(payload.session);
+  });
+  bus.subscribe(SessionEvent.Updated, (payload) => {
+    updatedEvents.push(payload.session);
+  });
+  bus.subscribe(SessionEvent.Removed, (payload) => {
+    removedEvents.push(payload.sessionId);
   });
   const manager = createSessionManager({
     bus,
@@ -76,7 +86,7 @@ function createManager(
     now: options.now ?? createClock(),
   });
 
-  return { manager, createdEvents };
+  return { manager, createdEvents, removedEvents, updatedEvents };
 }
 
 class RejectingInsertStore implements SessionStore {
@@ -163,7 +173,7 @@ describe("SessionManager", () => {
   });
 
   it("creates child sessions under the parent project and records children on the parent", async () => {
-    const { manager } = createManager();
+    const { manager, removedEvents, updatedEvents } = createManager();
     const parent = await manager.create("D:/parent", {
       title: "Parent",
     });
@@ -195,10 +205,15 @@ describe("SessionManager", () => {
       childrenIds: [],
       updatedAt: 4_000,
     });
+    expect(updatedEvents.map((event) => event.id)).toEqual([
+      parent.id,
+      parent.id,
+    ]);
+    expect(removedEvents).toEqual([child.id]);
   });
 
   it("updates metadata and increments stats without touching immutable fields", async () => {
-    const { manager } = createManager();
+    const { manager, updatedEvents } = createManager();
     const session = await manager.create("D:/repo");
 
     await expect(
@@ -221,11 +236,15 @@ describe("SessionManager", () => {
       updatedAt: 3_000,
       createdAt: 1_000,
     });
+    expect(updatedEvents.map((event) => event.updatedAt)).toEqual([
+      2_000,
+      3_000,
+    ]);
   });
 
   it("removes messages before deleting the session and keeps metadata when cleanup fails", async () => {
     const cleaned: string[] = [];
-    const { manager } = createManager({
+    const { manager, removedEvents } = createManager({
       messageCleaner: {
         removeMessages(sessionId: string): Promise<void> {
           cleaned.push(sessionId);
@@ -241,6 +260,7 @@ describe("SessionManager", () => {
 
     await manager.remove(removable.id);
     await expect(manager.get(removable.id)).resolves.toBeNull();
+    expect(removedEvents).toEqual([removable.id]);
 
     await expect(manager.remove(retained.id)).rejects.toThrow(
       "message cleanup failed",

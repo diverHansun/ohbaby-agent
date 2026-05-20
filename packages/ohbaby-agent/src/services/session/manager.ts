@@ -123,16 +123,22 @@ export function createSessionManager(
         parentId: parent?.id,
       });
 
+      let updatedParent: Session | undefined;
       await options.store.withTransaction(async (store) => {
         await store.insert(session);
         if (parent) {
-          await store.update(parent.id, {
+          updatedParent = await store.update(parent.id, {
             childrenIds: toChildIds(parent, session.id),
             updatedAt: now(),
           });
         }
       });
       options.bus.publish(SessionEvent.Created, { session });
+      if (updatedParent) {
+        options.bus.publish(SessionEvent.Updated, {
+          session: updatedParent,
+        });
+      }
 
       return session;
     },
@@ -164,10 +170,12 @@ export function createSessionManager(
       patch: UpdateSessionPatch,
     ): Promise<Session> {
       await getExistingSession(sessionId, options);
-      return options.store.update(sessionId, {
+      const session = await options.store.update(sessionId, {
         ...patch,
         updatedAt: now(),
       });
+      options.bus.publish(SessionEvent.Updated, { session });
+      return session;
     },
 
     async incrementStats(
@@ -182,13 +190,15 @@ export function createSessionManager(
       }
       const updatedAt = now();
 
-      return options.store.update(sessionId, {
+      const updated = await options.store.update(sessionId, {
         stats: {
           messageCount,
           lastMessageAt: delta.lastMessageAt ?? updatedAt,
         },
         updatedAt,
       });
+      options.bus.publish(SessionEvent.Updated, { session: updated });
+      return updated;
     },
 
     async remove(
@@ -203,6 +213,7 @@ export function createSessionManager(
         removeOptions.cascadeChildren === true
           ? [session.id, ...session.childrenIds]
           : [session.id];
+      const updatedParents: Session[] = [];
 
       await options.store.withTransaction(async (store) => {
         for (const id of sessionIds) {
@@ -224,16 +235,26 @@ export function createSessionManager(
           }
           const childrenIds = withoutChildId(parent, removedSession.id);
           if (childrenIds) {
-            await store.update(parent.id, {
-              childrenIds,
-              updatedAt: now(),
-            });
+            updatedParents.push(
+              await store.update(parent.id, {
+                childrenIds,
+                updatedAt: now(),
+              }),
+            );
           }
         }
         for (const id of sessionIds) {
           await store.remove(id);
         }
       });
+      for (const updatedParent of updatedParents) {
+        options.bus.publish(SessionEvent.Updated, {
+          session: updatedParent,
+        });
+      }
+      for (const id of sessionIds) {
+        options.bus.publish(SessionEvent.Removed, { sessionId: id });
+      }
     },
   };
 }

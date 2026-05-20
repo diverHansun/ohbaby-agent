@@ -35,7 +35,10 @@ import {
   createInMemoryMessageStore,
   createMessageManager,
 } from "../core/message/index.js";
-import type { MessageManager } from "../core/message/index.js";
+import type {
+  MessageManager,
+  MessageWithParts,
+} from "../core/message/index.js";
 import type {
   Session as CoreSession,
   SessionManager,
@@ -98,7 +101,8 @@ export interface InProcessUiBackendOptions {
   readonly sessionManager?: Pick<
     SessionManager,
     "create" | "get" | "getRecent"
-  >;
+  > &
+    Partial<Pick<SessionManager, "incrementStats">>;
   readonly stateStore?: UiStateStore;
   readonly projectDirectory?: string;
   readonly now?: () => Date;
@@ -194,6 +198,23 @@ function sessionMetadataToUiSession(session: CoreSession): UiSession {
     title: session.title,
     updatedAt: new Date(session.updatedAt).toISOString(),
   };
+}
+
+function maxMessageTimestamp(
+  messages: readonly MessageWithParts[],
+): number | undefined {
+  let latest: number | undefined;
+  for (const message of messages) {
+    const candidates = [
+      message.info.time.created,
+      message.info.time.updated,
+      message.info.time.completed,
+    ].filter((value): value is number => value !== undefined);
+    for (const value of candidates) {
+      latest = latest === undefined ? value : Math.max(latest, value);
+    }
+  }
+  return latest;
 }
 
 function toUiPermissionRequest(input: {
@@ -558,6 +579,42 @@ export function createInProcessUiBackendClient(
     }));
   }
 
+  async function syncSessionStatsBestEffort(sessionId: string): Promise<void> {
+    if (!options.sessionManager?.incrementStats) {
+      return;
+    }
+
+    try {
+      const [session, messages] = await Promise.all([
+        options.sessionManager.get(sessionId),
+        messageManager.listBySession(sessionId),
+      ]);
+      if (!session) {
+        return;
+      }
+      const messageCountDelta = messages.length - session.stats.messageCount;
+      const lastMessageAt = maxMessageTimestamp(messages);
+      if (
+        messageCountDelta === 0 &&
+        lastMessageAt === session.stats.lastMessageAt
+      ) {
+        return;
+      }
+      await options.sessionManager.incrementStats(sessionId, {
+        lastMessageAt,
+        messageCountDelta,
+      });
+    } catch (error) {
+      const message = getErrorMessage(error);
+      publishNotice({
+        key: `session:stats:${sessionId}:${message}`,
+        level: "warning",
+        message: `Session metadata could not be updated: ${message}`,
+        title: "Session warning",
+      });
+    }
+  }
+
   const commandService = createCommandService({
     bus,
     interactionBroker,
@@ -576,6 +633,10 @@ export function createInProcessUiBackendClient(
     sessions: {
       listSessions: listSessionsFromState,
       async selectSession(sessionId: string): Promise<void> {
+        const session = await stateStore.getSession(sessionId);
+        if (!session) {
+          throw new Error(`Session not found: ${sessionId}`);
+        }
         await stateStore.setActiveSessionId(sessionId);
         publish({
           snapshot: await readSnapshotWithPolicy(),
@@ -728,6 +789,7 @@ export function createInProcessUiBackendClient(
       const createdAt = timestamp();
       let projection: ReturnType<typeof startRunStreamProjection> | undefined;
       let runStarted = false;
+      let submittedSessionId: string | undefined;
 
       try {
         await reserveIdsFromState();
@@ -770,6 +832,7 @@ export function createInProcessUiBackendClient(
           }
           sessionIds.reserve(session.id);
         }
+        submittedSessionId = session.id;
 
         const userMessage = createTextMessage({
           id: messageIds.next(),
@@ -873,6 +936,9 @@ export function createInProcessUiBackendClient(
           throw error;
         }
       } finally {
+        if (submittedSessionId) {
+          await syncSessionStatsBestEffort(submittedSessionId);
+        }
         promptInFlight = false;
         activeRunId = undefined;
       }

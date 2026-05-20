@@ -29,4 +29,16 @@ export const SessionEvent = {
       session: SessionSchema,
     }),
   ),
+  Updated: BusEvent.define(
+    "session.updated",
+    z.object({
+      session: SessionSchema,
+    }),
+  ),
+  Removed: BusEvent.define(
+    "session.removed",
+    z.object({
+      sessionId: z.string(),
+    }),
+  ),
 } as const;

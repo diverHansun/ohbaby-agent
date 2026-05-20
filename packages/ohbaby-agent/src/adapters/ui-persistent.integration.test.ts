@@ -119,6 +119,21 @@ describe("createPersistentUiBackendClient", () => {
       });
 
       await client.submitPrompt("Remember this");
+      const sessionId = (await client.getSnapshot()).activeSessionId;
+      const sessionStats = getDatabase()
+        .prepare<{
+          readonly last_message_at: number | null;
+          readonly message_count: number;
+        }>(
+          `SELECT message_count, last_message_at
+           FROM ${schema.session.tableName}
+           WHERE id = ?`,
+        )
+        .get(sessionId ?? "");
+      expect(sessionStats).toMatchObject({
+        message_count: 2,
+      });
+      expect(sessionStats?.last_message_at).toEqual(expect.any(Number));
 
       const restored = createPersistentUiBackendClient({
         dbPath,
