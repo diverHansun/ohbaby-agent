@@ -101,13 +101,66 @@ const BUILTIN_COMMANDS: readonly UiCommandSpec[] = [
     source: "builtin",
     surfaces: COMMON_SURFACES,
   },
+  {
+    id: "mode",
+    path: ["mode"],
+    aliases: [],
+    argumentMode: "argv",
+    category: "policy",
+    description: "Show the current policy mode",
+    parentBehavior: "none",
+    source: "builtin",
+    surfaces: COMMON_SURFACES,
+  },
+  {
+    id: "mode.agent",
+    path: ["mode", "agent"],
+    aliases: [],
+    argumentMode: "argv",
+    category: "policy",
+    description: "Switch to agent mode",
+    source: "builtin",
+    surfaces: COMMON_SURFACES,
+  },
+  {
+    id: "mode.ask",
+    path: ["mode", "ask"],
+    aliases: [],
+    argumentMode: "argv",
+    category: "policy",
+    description: "Switch to ask mode",
+    source: "builtin",
+    surfaces: COMMON_SURFACES,
+  },
+  {
+    id: "mode.plan",
+    path: ["mode", "plan"],
+    aliases: [],
+    argumentMode: "argv",
+    category: "policy",
+    description: "Switch to plan mode",
+    source: "builtin",
+    surfaces: COMMON_SURFACES,
+  },
+  {
+    id: "mode.auto-edit",
+    path: ["mode", "auto-edit"],
+    aliases: [],
+    argumentMode: "argv",
+    category: "policy",
+    description: "Toggle automatic edits in agent mode",
+    source: "builtin",
+    surfaces: COMMON_SURFACES,
+  },
 ];
 
 function keyForPath(path: readonly string[]): string {
   return path.join("/").toLowerCase();
 }
 
-export function validateUniqueAliases(commands: readonly UiCommandSpec[]): void {
+export function validateUniqueAliases(
+  commands: readonly UiCommandSpec[],
+): void {
   const owners = new Map<string, string>();
   for (const command of commands) {
     for (const path of [command.path, ...(command.aliases ?? [])]) {
@@ -121,9 +174,11 @@ export function validateUniqueAliases(commands: readonly UiCommandSpec[]): void 
   }
 }
 
-export function buildCommandCatalog(options: {
-  readonly extraCommands?: readonly UiCommandSpec[];
-} = {}): UiCommandCatalog {
+export function buildCommandCatalog(
+  options: {
+    readonly extraCommands?: readonly UiCommandSpec[];
+  } = {},
+): UiCommandCatalog {
   const commands = [...BUILTIN_COMMANDS, ...(options.extraCommands ?? [])];
   validateUniqueAliases(commands);
   return {
@@ -147,4 +202,3 @@ export function filterCommandCatalogBySurface(
     ),
   };
 }
-

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { UiEvent } from "./index.js";
+import type { UiEvent, UiSnapshot } from "./index.js";
+
+type UiPolicyState = NonNullable<UiSnapshot["policy"]>;
 
 describe("UiEvent protocol", () => {
   it("represents command and interaction protocol events with correlation ids", () => {
@@ -56,5 +58,25 @@ describe("UiEvent protocol", () => {
       "notice.emitted",
     ]);
   });
-});
 
+  it("represents policy state updates", () => {
+    const policy: UiPolicyState = {
+      agentState: "ask-before-edit",
+      mode: "agent",
+    };
+    const event: UiEvent = {
+      policy,
+      timestamp: 5,
+      type: "policy.updated",
+    };
+
+    expect(event).toEqual({
+      policy: {
+        agentState: "ask-before-edit",
+        mode: "agent",
+      },
+      timestamp: 5,
+      type: "policy.updated",
+    });
+  });
+});

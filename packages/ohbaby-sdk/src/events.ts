@@ -6,6 +6,7 @@ import type {
 import type { UiInteractionRequest } from "./interaction.js";
 import type {
   UiMessage,
+  UiPolicyState,
   UiPermissionRequest,
   UiRun,
   UiRunStatus,
@@ -22,6 +23,13 @@ export interface UiSnapshotReplacedEvent {
 export interface UiRuntimeUpdatedEvent {
   readonly type: "runtime.updated";
   readonly status: UiRunStatus;
+  readonly timestamp?: number;
+}
+
+export interface UiPolicyUpdatedEvent {
+  readonly type: "policy.updated";
+  readonly policy: UiPolicyState;
+  readonly previousPolicy?: UiPolicyState;
   readonly timestamp?: number;
 }
 
@@ -144,6 +152,7 @@ export interface UiInteractionResolvedEvent {
 export type UiEvent =
   | UiSnapshotReplacedEvent
   | UiRuntimeUpdatedEvent
+  | UiPolicyUpdatedEvent
   | UiSessionUpdatedEvent
   | UiMessageAppendedEvent
   | UiMessageUpdatedEvent

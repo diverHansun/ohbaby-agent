@@ -7,17 +7,24 @@ import {
 
 describe("command catalog", () => {
   it("registers only MVP commands with real handlers", () => {
-    expect(buildCommandCatalog().commands.map((command) => command.id)).toEqual([
-      "status",
-      "tools",
-      "abort",
-      "exit",
-      "model",
-      "model.list",
-      "model.current",
-      "session",
-      "session.list",
-    ]);
+    expect(buildCommandCatalog().commands.map((command) => command.id)).toEqual(
+      [
+        "status",
+        "tools",
+        "abort",
+        "exit",
+        "model",
+        "model.list",
+        "model.current",
+        "session",
+        "session.list",
+        "mode",
+        "mode.agent",
+        "mode.ask",
+        "mode.plan",
+        "mode.auto-edit",
+      ],
+    );
   });
 
   it("declares canonical paths and aliases", () => {
@@ -37,6 +44,15 @@ describe("command catalog", () => {
           id: "session",
           parentBehavior: "interaction",
           path: ["session"],
+        }),
+        expect.objectContaining({
+          id: "mode",
+          parentBehavior: "none",
+          path: ["mode"],
+        }),
+        expect.objectContaining({
+          id: "mode.auto-edit",
+          path: ["mode", "auto-edit"],
         }),
       ]),
     );

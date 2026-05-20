@@ -19,10 +19,7 @@ import type {
   MessageManager,
   MessageStore,
 } from "../core/message/index.js";
-import {
-  closeDatabase,
-  initDatabase,
-} from "../services/database/index.js";
+import { closeDatabase, initDatabase } from "../services/database/index.js";
 import {
   createDatabaseSessionStore,
   createSessionManager,
@@ -391,10 +388,9 @@ describe("createInProcessUiBackendClient", () => {
       ]);
 
       const snapshot = await client.getSnapshot();
-      expect(snapshot.sessions[0].messages.map((message) => message.role)).toEqual([
-        "user",
-        "assistant",
-      ]);
+      expect(
+        snapshot.sessions[0].messages.map((message) => message.role),
+      ).toEqual(["user", "assistant"]);
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
@@ -534,9 +530,7 @@ describe("createInProcessUiBackendClient", () => {
 
       const permission = waitForUiEvent(
         client,
-        (
-          event,
-        ): event is Extract<UiEvent, { type: "permission.requested" }> =>
+        (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
           event.type === "permission.requested",
       );
       const run = client.submitPrompt("Write a note");
@@ -552,9 +546,9 @@ describe("createInProcessUiBackendClient", () => {
       });
       await run;
 
-      expect(
-        events.some((event) => event.type === "permission.resolved"),
-      ).toBe(true);
+      expect(events.some((event) => event.type === "permission.resolved")).toBe(
+        true,
+      );
       expect(requests).toHaveLength(2);
       const toolResultMessage = requests[1]?.messages.at(-1);
       expect(toolResultMessage).toMatchObject({
@@ -571,20 +565,18 @@ describe("createInProcessUiBackendClient", () => {
       expect(snapshot.status).toEqual({ kind: "idle" });
       expect(snapshot.permissions).toEqual([]);
       const parts = snapshot.sessions[0].messages[1].parts;
-      expect(parts[0]).toEqual(
-        {
-          type: "tool-call",
-          call: {
-            id: "call_write_once",
-            input: {
-              content: "approved",
-              file_path: "approved.txt",
-            },
-            name: "write",
-            status: "completed",
+      expect(parts[0]).toEqual({
+        type: "tool-call",
+        call: {
+          id: "call_write_once",
+          input: {
+            content: "approved",
+            file_path: "approved.txt",
           },
+          name: "write",
+          status: "completed",
         },
-      );
+      });
       expect(parts[1]?.type).toBe("tool-result");
       if (parts[1]?.type !== "tool-result") {
         throw new Error("expected tool result part");
@@ -622,9 +614,7 @@ describe("createInProcessUiBackendClient", () => {
 
       const permission = waitForUiEvent(
         client,
-        (
-          event,
-        ): event is Extract<UiEvent, { type: "permission.requested" }> =>
+        (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
           event.type === "permission.requested",
       );
       const run = client.submitPrompt("Try a rejected write");
@@ -710,9 +700,7 @@ describe("createInProcessUiBackendClient", () => {
 
       const permission = waitForUiEvent(
         client,
-        (
-          event,
-        ): event is Extract<UiEvent, { type: "permission.requested" }> =>
+        (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
           event.type === "permission.requested",
       );
       const run = client.submitPrompt("Write two files");
@@ -769,9 +757,7 @@ describe("createInProcessUiBackendClient", () => {
 
       const permission = waitForUiEvent(
         client,
-        (
-          event,
-        ): event is Extract<UiEvent, { type: "permission.requested" }> =>
+        (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
           event.type === "permission.requested",
       );
       const run = client.submitPrompt("Cancel this write");
@@ -780,9 +766,9 @@ describe("createInProcessUiBackendClient", () => {
       await client.respondPermission(permissionEvent.request.id, {
         choiceId: "cancel",
       });
-      await expect(withTimeout(run, 1_000, "run did not abort")).rejects.toThrow(
-        "run aborted",
-      );
+      await expect(
+        withTimeout(run, 1_000, "run did not abort"),
+      ).rejects.toThrow("run aborted");
 
       let snapshot = await client.getSnapshot();
       expect(snapshot.permissions).toEqual([]);
@@ -834,18 +820,16 @@ describe("createInProcessUiBackendClient", () => {
 
       const permission = waitForUiEvent(
         client,
-        (
-          event,
-        ): event is Extract<UiEvent, { type: "permission.requested" }> =>
+        (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
           event.type === "permission.requested",
       );
       const run = client.submitPrompt("Abort this write");
       const permissionEvent = await permission;
 
       await client.abortRun(permissionEvent.request.runId);
-      await expect(withTimeout(run, 1_000, "run did not abort")).rejects.toThrow(
-        "run aborted",
-      );
+      await expect(
+        withTimeout(run, 1_000, "run did not abort"),
+      ).rejects.toThrow("run aborted");
 
       let snapshot = await client.getSnapshot();
       expect(snapshot.permissions).toEqual([]);
@@ -1004,17 +988,17 @@ describe("createInProcessUiBackendClient", () => {
     await client.submitPrompt("Second", { sessionId: "session_1" });
 
     const snapshot = await client.getSnapshot();
-    expect(snapshot.sessions[0].messages.map((message) => message.role)).toEqual(
-      ["user", "assistant", "user", "assistant"],
-    );
-    expect(snapshot.sessions[0].messages.map((message) => message.parts)).toEqual(
-      [
-        [{ type: "text", text: "First" }],
-        [{ type: "text", text: "First answer" }],
-        [{ type: "text", text: "Second" }],
-        [{ type: "text", text: "Second answer" }],
-      ],
-    );
+    expect(
+      snapshot.sessions[0].messages.map((message) => message.role),
+    ).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(
+      snapshot.sessions[0].messages.map((message) => message.parts),
+    ).toEqual([
+      [{ type: "text", text: "First" }],
+      [{ type: "text", text: "First answer" }],
+      [{ type: "text", text: "Second" }],
+      [{ type: "text", text: "Second answer" }],
+    ]);
   });
 
   it("marks the run and app status as error when streaming fails", async () => {
@@ -1211,6 +1195,10 @@ describe("createInProcessUiBackendClient", () => {
       sessions: [],
       runs: [],
       permissions: [],
+      policy: {
+        agentState: "ask-before-edit",
+        mode: "agent",
+      },
       status: { kind: "idle" },
     });
   });
@@ -1289,8 +1277,80 @@ describe("createInProcessUiBackendClient", () => {
         "model.current",
         "session",
         "session.list",
+        "mode",
+        "mode.agent",
+        "mode.ask",
+        "mode.plan",
+        "mode.auto-edit",
       ]),
     );
+  });
+
+  it("exposes policy state in SDK snapshots", async () => {
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+    });
+
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      policy: {
+        agentState: "ask-before-edit",
+        mode: "agent",
+      },
+    });
+  });
+
+  it("publishes policy.updated when mode commands change backend policy", async () => {
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_mode_ask",
+      commandId: "mode.ask",
+      path: ["mode", "ask"],
+      raw: "/mode ask",
+      rawArgs: "",
+      surface: "tui",
+    });
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_mode_auto",
+      commandId: "mode.auto-edit",
+      path: ["mode", "auto-edit"],
+      raw: "/mode auto-edit",
+      rawArgs: "",
+      surface: "tui",
+    });
+
+    const policyEvents = events.filter(
+      (event): event is Extract<UiEvent, { type: "policy.updated" }> =>
+        event.type === "policy.updated",
+    );
+    expect(policyEvents.map((event) => event.policy)).toEqual([
+      {
+        agentState: "ask-before-edit",
+        mode: "ask",
+      },
+      {
+        agentState: "ask-before-edit",
+        mode: "agent",
+      },
+      {
+        agentState: "edit-automatically",
+        mode: "agent",
+      },
+    ]);
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      policy: {
+        agentState: "edit-automatically",
+        mode: "agent",
+      },
+    });
   });
 
   it("executes commands and publishes SDK command events", async () => {
@@ -1486,7 +1546,9 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("rejects prompt submission when persistent state is injected without matching service managers", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-missing-services-"));
+    const directory = await mkdtemp(
+      join(tmpdir(), "ohbaby-ui-missing-services-"),
+    );
     try {
       initDatabase({ dbPath: join(directory, "agent.db") });
       const client = createInProcessUiBackendClient({

@@ -1,10 +1,32 @@
 import { describe, expect, it, vi } from "vitest";
-import type { UiCommandInvocation, UiInteractionResponse } from "ohbaby-sdk";
+import type {
+  UiCommandInvocation,
+  UiInteractionResponse,
+  UiSnapshot,
+} from "ohbaby-sdk";
 import { createBus } from "../bus/index.js";
 import { CommandsEvent, createCommandService } from "./index.js";
 import { createInteractionBroker } from "../runtime/interaction-broker/index.js";
 
+type UiPolicyState = NonNullable<UiSnapshot["policy"]>;
+
 describe("CommandService", () => {
+  it("lists mode commands in the builtin catalog", () => {
+    const { service } = createServiceHarness();
+
+    const catalog = service.listCommands({ surface: "tui" });
+
+    expect(catalog.commands.map((command) => command.id)).toEqual(
+      expect.arrayContaining([
+        "mode",
+        "mode.agent",
+        "mode.ask",
+        "mode.plan",
+        "mode.auto-edit",
+      ]),
+    );
+  });
+
   it("executes status and publishes command events", async () => {
     const { events, service } = createServiceHarness();
 
@@ -104,7 +126,11 @@ describe("CommandService", () => {
     const { events, service } = createServiceHarness({
       models: {
         currentModel() {
-          return { id: "anthropic:claude", label: "Claude", provider: "anthropic" };
+          return {
+            id: "anthropic:claude",
+            label: "Claude",
+            provider: "anthropic",
+          };
         },
         listModels() {
           return [
@@ -114,7 +140,9 @@ describe("CommandService", () => {
       },
     });
 
-    await service.executeCommand(makeInvocation("model.list", ["model", "list"]));
+    await service.executeCommand(
+      makeInvocation("model.list", ["model", "list"]),
+    );
     await service.executeCommand(
       makeInvocation("model.current", ["model", "current"]),
     );
@@ -154,10 +182,12 @@ describe("CommandService", () => {
   });
 
   it("opens session selection and lists sessions", async () => {
-    const request = vi.fn<() => Promise<UiInteractionResponse>>().mockResolvedValue({
-      choiceId: "session_1",
-      kind: "accepted",
-    });
+    const request = vi
+      .fn<() => Promise<UiInteractionResponse>>()
+      .mockResolvedValue({
+        choiceId: "session_1",
+        kind: "accepted",
+      });
     const selectSession = vi.fn<() => Promise<void>>().mockResolvedValue();
     const { events, service } = createServiceHarness({
       interactionBroker: { request },
@@ -206,10 +236,12 @@ describe("CommandService", () => {
   });
 
   it("rejects session selections that were not offered", async () => {
-    const request = vi.fn<() => Promise<UiInteractionResponse>>().mockResolvedValue({
-      choiceId: "session_missing",
-      kind: "accepted",
-    });
+    const request = vi
+      .fn<() => Promise<UiInteractionResponse>>()
+      .mockResolvedValue({
+        choiceId: "session_missing",
+        kind: "accepted",
+      });
     const selectSession = vi.fn<() => Promise<void>>().mockResolvedValue();
     const { events, service } = createServiceHarness({
       interactionBroker: { request },
@@ -257,6 +289,89 @@ describe("CommandService", () => {
     );
   });
 
+  it("reports and updates policy mode", async () => {
+    let policyState: UiPolicyState = {
+      agentState: "ask-before-edit",
+      mode: "agent",
+    };
+    const setMode = vi.fn<(mode: UiPolicyState["mode"]) => void>((mode) => {
+      policyState = {
+        agentState: "ask-before-edit",
+        mode,
+      };
+    });
+    const toggleAgentState = vi.fn<() => UiPolicyState["agentState"]>(() => {
+      policyState = {
+        agentState:
+          policyState.agentState === "ask-before-edit"
+            ? "edit-automatically"
+            : "ask-before-edit",
+        mode: "agent",
+      };
+      return policyState.agentState;
+    });
+    const { events, service } = createServiceHarness({
+      policy: {
+        getState() {
+          return policyState;
+        },
+        setMode,
+        toggleAgentState,
+      },
+    });
+
+    await service.executeCommand(makeInvocation("mode", ["mode"]));
+    await service.executeCommand(makeInvocation("mode.ask", ["mode", "ask"]));
+    await service.executeCommand(
+      makeInvocation("mode.auto-edit", ["mode", "auto-edit"]),
+    );
+
+    expect(setMode).toHaveBeenCalledWith("ask");
+    expect(setMode).toHaveBeenCalledWith("agent");
+    expect(toggleAgentState).toHaveBeenCalledOnce();
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          output: {
+            data: {
+              policy: {
+                agentState: "ask-before-edit",
+                mode: "agent",
+              },
+            },
+            kind: "data",
+            subject: "policy.mode",
+          },
+          type: "result",
+        }),
+        expect.objectContaining({
+          action: {
+            data: {
+              policy: {
+                agentState: "ask-before-edit",
+                mode: "ask",
+              },
+            },
+            kind: "policy.mode.updated",
+          },
+          type: "result",
+        }),
+        expect.objectContaining({
+          action: {
+            data: {
+              policy: {
+                agentState: "edit-automatically",
+                mode: "agent",
+              },
+            },
+            kind: "policy.mode.updated",
+          },
+          type: "result",
+        }),
+      ]),
+    );
+  });
+
   it("publishes command.failed for unknown command ids", async () => {
     const { events, service } = createServiceHarness();
 
@@ -295,7 +410,9 @@ describe("CommandService", () => {
       },
     });
 
-    const execution = service.executeCommand(makeInvocation("session", ["session"]));
+    const execution = service.executeCommand(
+      makeInvocation("session", ["session"]),
+    );
     await new Promise((resolve) => {
       setTimeout(resolve, 0);
     });

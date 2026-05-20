@@ -45,6 +45,9 @@ export type {
 export type {
   UiMessage,
   UiMessagePart,
+  UiPolicyAgentState,
+  UiPolicyMode,
+  UiPolicyState,
   UiPermissionChoice,
   UiPermissionRequest,
   UiPermissionResponse,
@@ -57,4 +60,3 @@ export type {
 } from "./snapshot.js";
 export { parseSlashInput } from "./command/parse.js";
 export { filterCommandCatalog, resolveCommand } from "./command/resolve.js";
-

@@ -7,6 +7,7 @@ import type {
   UiCommandSpec,
   UiCommandSurface,
   UiInteractionResponse,
+  UiSnapshot,
 } from "ohbaby-sdk";
 import type { BusInstance } from "../bus/index.js";
 import type {
@@ -34,12 +35,19 @@ export interface CommandSessionSummary {
 }
 
 export interface CommandToolProvider {
-  listTools(): Promise<readonly CommandToolSummary[]> | readonly CommandToolSummary[];
+  listTools():
+    | Promise<readonly CommandToolSummary[]>
+    | readonly CommandToolSummary[];
 }
 
 export interface CommandModelProvider {
-  listModels(): Promise<readonly CommandModelSummary[]> | readonly CommandModelSummary[];
-  currentModel(): Promise<CommandModelSummary | null> | CommandModelSummary | null;
+  listModels():
+    | Promise<readonly CommandModelSummary[]>
+    | readonly CommandModelSummary[];
+  currentModel():
+    | Promise<CommandModelSummary | null>
+    | CommandModelSummary
+    | null;
 }
 
 export interface CommandSessionProvider {
@@ -47,6 +55,16 @@ export interface CommandSessionProvider {
     | Promise<readonly CommandSessionSummary[]>
     | readonly CommandSessionSummary[];
   selectSession?(sessionId: string): Promise<void> | void;
+}
+
+export type CommandPolicyState = NonNullable<UiSnapshot["policy"]>;
+
+export interface CommandPolicyProvider {
+  getState(): CommandPolicyState;
+  setMode(mode: CommandPolicyState["mode"]): Promise<void> | void;
+  toggleAgentState():
+    | Promise<CommandPolicyState["agentState"]>
+    | CommandPolicyState["agentState"];
 }
 
 export interface CommandRunContext {
@@ -77,6 +95,7 @@ export interface CommandServiceOptions {
   readonly tools?: CommandToolProvider;
   readonly models?: CommandModelProvider;
   readonly sessions?: CommandSessionProvider;
+  readonly policy?: CommandPolicyProvider;
   readonly abortRun?: (runId?: string) => Promise<void> | void;
   readonly exit?: () => Promise<void> | void;
   readonly getStatus?: () => string;
@@ -86,7 +105,9 @@ export interface CommandServiceOptions {
 }
 
 export interface CommandService {
-  listCommands(query: { readonly surface?: UiCommandSurface }): UiCommandCatalog;
+  listCommands(query: {
+    readonly surface?: UiCommandSurface;
+  }): UiCommandCatalog;
   executeCommand(invocation: UiCommandInvocation): Promise<void>;
   abortCommandRun(commandRunId: string, reason?: string): number;
 }

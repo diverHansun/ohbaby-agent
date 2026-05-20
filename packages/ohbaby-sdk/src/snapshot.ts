@@ -1,8 +1,25 @@
 export type UiRunStatus =
   | { readonly kind: "idle" }
-  | { readonly kind: "running"; readonly runId: string; readonly title?: string }
+  | {
+      readonly kind: "running";
+      readonly runId: string;
+      readonly title?: string;
+    }
   | { readonly kind: "waiting-for-permission"; readonly requestId: string }
-  | { readonly kind: "error"; readonly message: string; readonly recoverable: boolean };
+  | {
+      readonly kind: "error";
+      readonly message: string;
+      readonly recoverable: boolean;
+    };
+
+export type UiPolicyMode = "agent" | "ask" | "plan";
+
+export type UiPolicyAgentState = "ask-before-edit" | "edit-automatically";
+
+export interface UiPolicyState {
+  readonly mode: UiPolicyMode;
+  readonly agentState: UiPolicyAgentState;
+}
 
 export interface UiSnapshot {
   readonly sessions: readonly UiSession[];
@@ -10,6 +27,7 @@ export interface UiSnapshot {
   readonly runs: readonly UiRun[];
   readonly permissions: readonly UiPermissionRequest[];
   readonly status: UiRunStatus;
+  readonly policy?: UiPolicyState;
 }
 
 export interface UiSession {
@@ -72,4 +90,3 @@ export interface UiPermissionResponse {
   readonly choiceId: string;
   readonly remember?: boolean;
 }
-

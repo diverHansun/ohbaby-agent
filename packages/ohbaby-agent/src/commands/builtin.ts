@@ -2,6 +2,7 @@ import type { UiCommandAction, UiCommandOutput } from "ohbaby-sdk";
 import type {
   CommandHandler,
   CommandModelSummary,
+  CommandPolicyState,
   CommandRunContext,
   CommandServiceOptions,
   CommandSessionSummary,
@@ -32,12 +33,43 @@ async function listSessions(
   return options.sessions?.listSessions() ?? [];
 }
 
-function dataOutput(subject: string, data: Record<string, unknown>): UiCommandOutput {
+const DEFAULT_POLICY_STATE: CommandPolicyState = {
+  agentState: "ask-before-edit",
+  mode: "agent",
+};
+
+function dataOutput(
+  subject: string,
+  data: Record<string, unknown>,
+): UiCommandOutput {
   return { kind: "data", subject, data };
 }
 
 function action(kind: string, data?: Record<string, unknown>): UiCommandAction {
   return data ? { kind, data } : { kind };
+}
+
+function currentPolicyState(
+  options: CommandServiceOptions,
+): CommandPolicyState {
+  return options.policy?.getState() ?? DEFAULT_POLICY_STATE;
+}
+
+function emitPolicyState(
+  options: CommandServiceOptions,
+  context: CommandRunContext,
+): CommandPolicyState {
+  const policy = currentPolicyState(options);
+  context.emitOutput(dataOutput("policy.mode", { policy }));
+  return policy;
+}
+
+function emitPolicyUpdated(
+  options: CommandServiceOptions,
+  context: CommandRunContext,
+): void {
+  const policy = emitPolicyState(options, context);
+  context.emitAction(action("policy.mode.updated", { policy }));
 }
 
 async function handleModelParent(
@@ -98,7 +130,29 @@ async function handleSessionParent(
   }
 
   await options.sessions?.selectSession?.(response.choiceId);
-  context.emitAction(action("session.selected", { choiceId: response.choiceId }));
+  context.emitAction(
+    action("session.selected", { choiceId: response.choiceId }),
+  );
+}
+
+async function handleModeChange(
+  options: CommandServiceOptions,
+  context: CommandRunContext,
+  mode: CommandPolicyState["mode"],
+): Promise<void> {
+  await options.policy?.setMode(mode);
+  emitPolicyUpdated(options, context);
+}
+
+async function handleModeAutoEdit(
+  options: CommandServiceOptions,
+  context: CommandRunContext,
+): Promise<void> {
+  if (currentPolicyState(options).mode !== "agent") {
+    await options.policy?.setMode("agent");
+  }
+  await options.policy?.toggleAgentState();
+  emitPolicyUpdated(options, context);
 }
 
 export function createBuiltinHandlers(
@@ -116,7 +170,9 @@ export function createBuiltinHandlers(
     {
       id: "tools",
       async execute(_invocation, context): Promise<void> {
-        context.emitOutput(dataOutput("tools", { tools: await listTools(options) }));
+        context.emitOutput(
+          dataOutput("tools", { tools: await listTools(options) }),
+        );
       },
     },
     {
@@ -142,7 +198,9 @@ export function createBuiltinHandlers(
     {
       id: "model.list",
       async execute(_invocation, context): Promise<void> {
-        context.emitOutput(dataOutput("model.list", { models: await listModels(options) }));
+        context.emitOutput(
+          dataOutput("model.list", { models: await listModels(options) }),
+        );
       },
     },
     {
@@ -165,6 +223,36 @@ export function createBuiltinHandlers(
         context.emitOutput(
           dataOutput("session.list", { sessions: await listSessions(options) }),
         );
+      },
+    },
+    {
+      id: "mode",
+      execute(_invocation, context): void {
+        emitPolicyState(options, context);
+      },
+    },
+    {
+      id: "mode.agent",
+      execute(_invocation, context): Promise<void> {
+        return handleModeChange(options, context, "agent");
+      },
+    },
+    {
+      id: "mode.ask",
+      execute(_invocation, context): Promise<void> {
+        return handleModeChange(options, context, "ask");
+      },
+    },
+    {
+      id: "mode.plan",
+      execute(_invocation, context): Promise<void> {
+        return handleModeChange(options, context, "plan");
+      },
+    },
+    {
+      id: "mode.auto-edit",
+      execute(_invocation, context): Promise<void> {
+        return handleModeAutoEdit(options, context);
       },
     },
   ];

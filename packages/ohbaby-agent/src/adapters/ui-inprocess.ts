@@ -49,7 +49,7 @@ import type {
   PermissionInfo,
   PermissionResponse as CorePermissionResponse,
 } from "../permission/index.js";
-import { createPolicyManager } from "../policy/index.js";
+import { createPolicyManager, PolicyEvent } from "../policy/index.js";
 import type { AgentManager } from "../agents/index.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
 import type { RunLedger } from "../runtime/run-ledger/index.js";
@@ -70,6 +70,10 @@ const EMPTY_SNAPSHOT: UiSnapshot = {
   activeSessionId: null,
   runs: [],
   permissions: [],
+  policy: {
+    agentState: "ask-before-edit",
+    mode: "agent",
+  },
   status: {
     kind: "idle",
   },
@@ -78,6 +82,8 @@ const EMPTY_SNAPSHOT: UiSnapshot = {
 type NoticeDraft = Omit<UiNotice, "id" | "createdAt"> & {
   readonly createdAt?: string;
 };
+
+type UiPolicyState = NonNullable<UiSnapshot["policy"]>;
 
 export interface InProcessUiBackendOptions {
   readonly agentManager?: AgentManager;
@@ -262,9 +268,14 @@ export function createInProcessUiBackendClient(
     ? { initialSnapshot: optionsOrSnapshot }
     : optionsOrSnapshot;
   const initialSnapshot = options.initialSnapshot ?? EMPTY_SNAPSHOT;
-  const stateStore = options.stateStore ?? createInMemoryUiStateStore(initialSnapshot);
+  const stateStore =
+    options.stateStore ?? createInMemoryUiStateStore(initialSnapshot);
   const bus = options.bus ?? createBus();
   const policy = createPolicyManager({ bus });
+  if (initialSnapshot.policy) {
+    policy.setMode(initialSnapshot.policy.mode);
+    policy.setAgentState(initialSnapshot.policy.agentState);
+  }
   const permission = createPermissionManager({ bus });
   const messageManager =
     options.messageManager ??
@@ -452,6 +463,29 @@ export function createInProcessUiBackendClient(
     }
   }
 
+  function currentPolicyState(): UiPolicyState {
+    const state = policy.getState();
+    return {
+      agentState: state.agentState,
+      mode: state.mode,
+    };
+  }
+
+  async function readSnapshotWithPolicy(): Promise<UiSnapshot> {
+    return {
+      ...(await stateStore.readSnapshot()),
+      policy: currentPolicyState(),
+    };
+  }
+
+  function publishPolicyUpdated(): void {
+    publish({
+      type: "policy.updated",
+      policy: currentPolicyState(),
+      timestamp: Date.now(),
+    });
+  }
+
   async function abortPromptRun(runId?: string): Promise<boolean> {
     const targetRunId = runId ?? activeRunId;
     if (!targetRunId || targetRunId !== activeRunId) {
@@ -531,7 +565,9 @@ export function createInProcessUiBackendClient(
     };
   }
 
-  async function listModelsFromOptions(): Promise<readonly CommandModelSummary[]> {
+  async function listModelsFromOptions(): Promise<
+    readonly CommandModelSummary[]
+  > {
     const current = await currentModelFromOptions();
     return current ? [current] : [];
   }
@@ -573,10 +609,19 @@ export function createInProcessUiBackendClient(
       async selectSession(sessionId: string): Promise<void> {
         await stateStore.setActiveSessionId(sessionId);
         publish({
-          snapshot: await stateStore.readSnapshot(),
+          snapshot: await readSnapshotWithPolicy(),
           timestamp: Date.now(),
           type: "snapshot.replaced",
         });
+      },
+    },
+    policy: {
+      getState: currentPolicyState,
+      setMode(mode): void {
+        policy.setMode(mode);
+      },
+      toggleAgentState(): UiPolicyState["agentState"] {
+        return policy.toggleAgentState();
       },
     },
     abortRun(runId?: string): void {
@@ -646,6 +691,12 @@ export function createInProcessUiBackendClient(
       timestamp: payload.timestamp,
     });
   });
+  bus.subscribe(PolicyEvent.ModeChanged, () => {
+    publishPolicyUpdated();
+  });
+  bus.subscribe(PolicyEvent.AgentStateChanged, () => {
+    publishPolicyUpdated();
+  });
   bus.subscribe(PermissionEvent.Updated, (payload) => {
     void (async (): Promise<void> => {
       const request = toUiPermissionRequest({
@@ -680,7 +731,7 @@ export function createInProcessUiBackendClient(
 
   return {
     getSnapshot(): Promise<UiSnapshot> {
-      return stateStore.readSnapshot();
+      return readSnapshotWithPolicy();
     },
 
     subscribeEvents(handler: UiEventHandler) {
@@ -706,9 +757,7 @@ export function createInProcessUiBackendClient(
 
       promptInFlight = true;
       const createdAt = timestamp();
-      let projection:
-        | ReturnType<typeof startRunStreamProjection>
-        | undefined;
+      let projection: ReturnType<typeof startRunStreamProjection> | undefined;
       let runStarted = false;
 
       try {
