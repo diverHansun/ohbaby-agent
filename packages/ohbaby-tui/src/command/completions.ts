@@ -1,12 +1,10 @@
-import type {
-  TuiCommandCatalog,
-  TuiCommandSpec,
-} from "../store/snapshot.js";
+import type { TuiCommandCatalog, TuiCommandSpec } from "../store/snapshot.js";
 import {
   applySlashCompletion,
   filterCommandCatalog,
   parseSlashInput,
 } from "./runtime.js";
+import { COMMAND_HINT_LIMIT } from "./hints.js";
 
 export function getSlashCompletion(
   input: string,
@@ -29,5 +27,5 @@ export function getSlashCompletionCandidates(
 
   return filterCommandCatalog(parseSlashInput(input), catalog, {
     surface: "tui",
-  });
+  }).slice(0, COMMAND_HINT_LIMIT);
 }

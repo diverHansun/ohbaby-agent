@@ -45,14 +45,8 @@ export function MessageList({
         </Box>
       ))}
       {commandNotices.map((notice) => (
-        <Box
-          flexDirection="row"
-          key={notice.id}
-          marginBottom={1}
-        >
-          <Text color={notice.kind === "error" ? "red" : "green"}>
-            command
-          </Text>
+        <Box flexDirection="row" key={notice.id} marginBottom={1}>
+          <Text color={notice.kind === "error" ? "red" : "green"}>command</Text>
           <Text dimColor> {notice.commandId}: </Text>
           <Text>{notice.text}</Text>
         </Box>
@@ -86,7 +80,7 @@ function renderMessagePart(part: UiMessagePart): string {
 function roleLabel(role: UiMessage["role"]): string {
   switch (role) {
     case "assistant":
-      return "assistant";
+      return "ohbaby";
     case "system":
       return "system";
     case "tool":

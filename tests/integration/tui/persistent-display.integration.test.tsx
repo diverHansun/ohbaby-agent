@@ -10,11 +10,7 @@ import {
   schema,
 } from "../../../packages/ohbaby-agent/src/services/database/index.js";
 import { createDatabaseRunLedger } from "../../../packages/ohbaby-agent/src/runtime/run-ledger/index.js";
-import {
-  createFakeLLMClient,
-  promptLine,
-  waitForFrame,
-} from "./helpers.js";
+import { createFakeLLMClient, promptLine, waitForFrame } from "./helpers.js";
 
 const cleanupDirectories: string[] = [];
 
@@ -73,14 +69,16 @@ describe("TUI persistent backend display", () => {
     });
     const app = render(<OhbabyTerminalApp client={restored} />);
 
-    const frame = await waitForFrame(app, (nextFrame) =>
-      nextFrame.includes("Remember this") &&
-      nextFrame.includes("Persisted") &&
-      nextFrame.includes("status: idle | session:"),
+    const frame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("Remember this") &&
+        nextFrame.includes("Persisted") &&
+        nextFrame.includes("status: idle | session:"),
     );
 
     expect(frame).toContain("you");
-    expect(frame).toContain("assistant");
+    expect(frame).toContain("ohbaby");
     app.unmount();
   });
 
@@ -129,10 +127,12 @@ describe("TUI persistent backend display", () => {
     ).toContain("interrupted");
 
     const app = render(<OhbabyTerminalApp client={restored} />);
-    await waitForFrame(app, (frame) =>
-      frame.includes("Seeded") &&
-      frame.includes("status: idle | session:") &&
-      !frame.includes("Permission:"),
+    await waitForFrame(
+      app,
+      (frame) =>
+        frame.includes("Seeded") &&
+        frame.includes("status: idle | session:") &&
+        !frame.includes("Permission:"),
     );
 
     app.stdin.write("next prompt");
@@ -141,7 +141,7 @@ describe("TUI persistent backend display", () => {
       nextFrame.includes("Recovered prompt."),
     );
 
-    expect(promptLine(frame).trimEnd()).toBe(">");
+    expect(promptLine(frame).trimEnd()).toBe("ohbaby >");
     expect(frame).not.toContain("Permission:");
     expect(frame).toContain("status: idle | session:");
     app.unmount();

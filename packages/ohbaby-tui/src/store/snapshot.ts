@@ -13,6 +13,7 @@ import type {
   UiInteractionResponse,
   UiMessage,
   UiNotice,
+  UiPolicyState,
   UiPermissionRequest,
   UiPermissionResponse,
   UiRun,
@@ -105,16 +106,16 @@ export type TuiBackendClient = Omit<
     text: string,
     options?: SubmitPromptOptions,
   ) => Promise<void>;
-  readonly executeCommand: (
-    command: UiCommandInvocation,
-  ) => Promise<void>;
+  readonly executeCommand: (command: UiCommandInvocation) => Promise<void>;
   readonly respondPermission: (
     requestId: string,
     response: UiPermissionResponse,
   ) => Promise<void>;
   readonly listCommands: (query: {
     readonly surface: UiCommandSurface;
-  }) => Promise<UiCommandCatalog | TuiCommandCatalog | readonly TuiCommandSpec[]>;
+  }) => Promise<
+    UiCommandCatalog | TuiCommandCatalog | readonly TuiCommandSpec[]
+  >;
   readonly respondInteraction?: (
     interactionId: string,
     response: UiInteractionResponse,
@@ -128,6 +129,7 @@ export interface TuiStoreState {
   readonly messages: readonly UiMessage[];
   readonly runs: readonly UiRun[];
   readonly permissions: readonly UiPermissionRequest[];
+  readonly policy: UiPolicyState | undefined;
   readonly runtime: TuiRuntimeStatus;
   readonly interactions: readonly TuiInteractionRequest[];
   readonly notices: readonly UiNotice[];

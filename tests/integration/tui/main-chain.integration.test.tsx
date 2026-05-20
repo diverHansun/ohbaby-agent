@@ -39,17 +39,23 @@ describe("TUI main chain with real in-process backend", () => {
     });
     const app = render(<OhbabyTerminalApp client={client} />);
 
-    await waitForFrame(app, (frame) => promptLine(frame).trimEnd() === ">");
+    await waitForFrame(
+      app,
+      (frame) => promptLine(frame).trimEnd() === "ohbaby >",
+    );
     app.stdin.write("hello");
     await waitForFrame(app, (frame) => promptLine(frame).includes("hello"));
     app.stdin.write("\r");
 
-    await waitForFrame(app, (frame) => promptLine(frame).trimEnd() === ">");
-    const frame = await waitForFrame((app), (nextFrame) =>
+    await waitForFrame(
+      app,
+      (frame) => promptLine(frame).trimEnd() === "ohbaby >",
+    );
+    const frame = await waitForFrame(app, (nextFrame) =>
       nextFrame.includes("Hello world"),
     );
 
-    expect(frame).toContain("assistant");
+    expect(frame).toContain("ohbaby");
     expect(frame).not.toContain("Hellolo");
     expect(frame).toContain("status: idle | session: session_1");
     app.unmount();
@@ -81,10 +87,13 @@ describe("TUI main chain with real in-process backend", () => {
     };
     const app = render(<OhbabyTerminalApp client={client} />);
 
-    await waitForFrame(app, (frame) => promptLine(frame).trimEnd() === ">");
+    await waitForFrame(
+      app,
+      (frame) => promptLine(frame).trimEnd() === "ohbaby >",
+    );
     app.stdin.write("write file");
     app.stdin.write("\r");
-    await waitForFrame((app), (frame) => frame.includes("Permission:"));
+    await waitForFrame(app, (frame) => frame.includes("Permission:"));
 
     app.stdin.write("busy submit");
     await flush();
@@ -94,7 +103,7 @@ describe("TUI main chain with real in-process backend", () => {
     app.stdin.write("\t");
     app.stdin.write("\r");
 
-    const completedFrame = await waitForFrame((app), (frame) =>
+    const completedFrame = await waitForFrame(app, (frame) =>
       frame.includes("Permission complete."),
     );
     expect(completedFrame).toContain("tool write (completed)");
@@ -103,7 +112,7 @@ describe("TUI main chain with real in-process backend", () => {
 
     app.stdin.write("again");
     app.stdin.write("\r");
-    const secondFrame = await waitForFrame((app), (frame) =>
+    const secondFrame = await waitForFrame(app, (frame) =>
       frame.includes("Second prompt works."),
     );
 
@@ -130,14 +139,19 @@ describe("TUI main chain with real in-process backend", () => {
     });
     const app = render(<OhbabyTerminalApp client={realClient} />);
 
-    await waitForFrame(app, (frame) => promptLine(frame).trimEnd() === ">");
+    await waitForFrame(
+      app,
+      (frame) => promptLine(frame).trimEnd() === "ohbaby >",
+    );
     app.stdin.write("abort this");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) => frame.includes("Permission:"));
 
     app.stdin.write("\u0003");
-    const abortedFrame = await waitForFrame(app, (frame) =>
-      frame.includes("run aborted") && !frame.includes("Permission:"),
+    const abortedFrame = await waitForFrame(
+      app,
+      (frame) =>
+        frame.includes("run aborted") && !frame.includes("Permission:"),
     );
     expect(abortedFrame).toContain("status: error: run aborted");
 
@@ -149,6 +163,30 @@ describe("TUI main chain with real in-process backend", () => {
 
     expect(recoveredFrame).toContain("status: idle | session: session_1");
     expect(recoveredFrame).not.toContain("Permission:");
+    app.unmount();
+  });
+
+  it("switches policy mode through slash commands and Shift+Tab", async () => {
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+    });
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await waitForFrame(app, (frame) =>
+      frame.includes("mode: agent/ask-before-edit"),
+    );
+    app.stdin.write("/mode ask");
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) =>
+      frame.includes("mode: ask/ask-before-edit"),
+    );
+
+    app.stdin.write("\u001B[Z");
+    const frame = await waitForFrame(app, (nextFrame) =>
+      nextFrame.includes("mode: plan/ask-before-edit"),
+    );
+
+    expect(frame).toContain("status: idle");
     app.unmount();
   });
 });

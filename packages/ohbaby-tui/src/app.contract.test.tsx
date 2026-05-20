@@ -55,17 +55,58 @@ const catalog: TuiCommandCatalog = {
   version: "v1",
 };
 
+const modeCatalog: TuiCommandCatalog = {
+  ...catalog,
+  commands: [
+    ...catalog.commands,
+    {
+      description: "Show policy mode",
+      id: "mode",
+      path: ["mode"],
+      surfaces: ["tui"],
+    },
+    {
+      description: "Switch to agent mode",
+      id: "mode.agent",
+      path: ["mode", "agent"],
+      surfaces: ["tui"],
+    },
+    {
+      description: "Switch to ask mode",
+      id: "mode.ask",
+      path: ["mode", "ask"],
+      surfaces: ["tui"],
+    },
+  ],
+};
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("OhbabyTerminalApp", () => {
+  it("renders an empty-state logo and branded prompt", async () => {
+    const client = createFakeClient({
+      activeSessionId: null,
+      permissions: [],
+      runs: [],
+      sessions: [],
+      status: { kind: "idle" },
+    });
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+
+    expect(app.lastFrame()).toContain("OHBABY");
+    expect(app.lastFrame()).toContain("ohbaby >");
+  });
+
   it("renders snapshot messages and applies assistant deltas", async () => {
     const client = createFakeClient(snapshot());
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await flush();
-    expect(app.lastFrame()).toContain("assistant");
+    expect(app.lastFrame()).toContain("ohbaby");
     expect(app.lastFrame()).toContain("Hel");
 
     client.emit({
@@ -105,7 +146,9 @@ describe("OhbabyTerminalApp", () => {
   it("shows a readable status error when the initial snapshot fails", async () => {
     const client = {
       ...createFakeClient(snapshot()),
-      getSnapshot: vi.fn(() => Promise.reject(new Error("snapshot unavailable"))),
+      getSnapshot: vi.fn(() =>
+        Promise.reject(new Error("snapshot unavailable")),
+      ),
     };
     const app = render(<OhbabyTerminalApp client={client} />);
 
@@ -127,6 +170,62 @@ describe("OhbabyTerminalApp", () => {
 
     expect(app.lastFrame()).toContain(
       "status: error: command catalog unavailable",
+    );
+  });
+
+  it("renders policy mode and updates it from backend events", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      policy: {
+        agentState: "ask-before-edit",
+        mode: "agent",
+      },
+    });
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+    expect(app.lastFrame()).toContain("mode: agent/ask-before-edit");
+
+    client.emit({
+      policy: {
+        agentState: "edit-automatically",
+        mode: "agent",
+      },
+      previousPolicy: {
+        agentState: "ask-before-edit",
+        mode: "agent",
+      },
+      timestamp: 1,
+      type: "policy.updated",
+    });
+    await flush();
+
+    expect(app.lastFrame()).toContain("mode: agent/edit-automatically");
+  });
+
+  it("cycles policy mode with Shift+Tab", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      policy: {
+        agentState: "ask-before-edit",
+        mode: "agent",
+      },
+    });
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+    app.stdin.write("\u001B[Z");
+    await flush();
+
+    expect(client.executeCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        argv: [],
+        commandId: "mode.ask",
+        path: ["mode", "ask"],
+        raw: "/mode ask",
+        sessionId: "session_1",
+        surface: "tui",
+      }),
     );
   });
 
@@ -227,7 +326,7 @@ describe("OhbabyTerminalApp", () => {
     });
     await flush();
 
-    expect(app.lastFrame()).toContain("assistant");
+    expect(app.lastFrame()).toContain("ohbaby");
     expect(app.lastFrame()).toContain("Hello");
     expect(app.lastFrame()).not.toContain("Hellolo");
     expect(app.lastFrame()).toContain("status: idle | session: session_stream");
@@ -388,6 +487,51 @@ describe("OhbabyTerminalApp", () => {
       expect.objectContaining({
         argv: ["gpt-5.5"],
         commandId: "model.switch",
+        sessionId: "session_1",
+      }),
+    );
+  });
+
+  it("shows slash candidates and executes the selected partial command", async () => {
+    const client = createFakeClient(snapshot(), catalog);
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+    app.stdin.write("/");
+    await flush();
+
+    expect(app.lastFrame()).toContain("/model switch - Open model switcher");
+    expect(app.lastFrame()).toContain("/session resume - Resume a session");
+
+    app.stdin.write("\u001B[B");
+    await flush();
+    app.stdin.write("\r");
+    await flush();
+
+    expect(client.executeCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commandId: "session.resume",
+        sessionId: "session_1",
+      }),
+    );
+  });
+
+  it("executes a selected slash candidate even when the typed parent is exact", async () => {
+    const client = createFakeClient(snapshot(), modeCatalog);
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+    app.stdin.write("/mode");
+    await flush();
+    app.stdin.write("\u001B[B");
+    await flush();
+    app.stdin.write("\r");
+    await flush();
+
+    expect(client.executeCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commandId: "mode.agent",
+        path: ["mode", "agent"],
         sessionId: "session_1",
       }),
     );

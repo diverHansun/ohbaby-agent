@@ -135,6 +135,9 @@ export async function waitForFrame(
 
 export function promptLine(frame: string): string {
   const lines = frame.split(/\r?\n/u);
-  return [...lines].reverse().find((line) => line.trimStart().startsWith(">")) ??
-    "";
+  return (
+    [...lines]
+      .reverse()
+      .find((line) => line.trimStart().startsWith("ohbaby >")) ?? ""
+  );
 }

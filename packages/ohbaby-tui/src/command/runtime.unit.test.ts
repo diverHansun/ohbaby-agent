@@ -30,6 +30,18 @@ const catalog: TuiCommandCatalog = {
       path: ["session", "resume"],
       surfaces: ["tui"],
     },
+    {
+      description: "Show policy mode",
+      id: "mode",
+      path: ["mode"],
+      surfaces: ["tui"],
+    },
+    {
+      description: "Switch to ask mode",
+      id: "mode.ask",
+      path: ["mode", "ask"],
+      surfaces: ["tui"],
+    },
   ],
   loadedAt: 1_771_000_000_000,
   surface: "tui",
@@ -105,6 +117,17 @@ describe("slash command runtime", () => {
     const matches = filterCommandCatalog(parsed, catalog, { surface: "tui" });
 
     expect(matches.map((command) => command.id)).toEqual(["session.resume"]);
+  });
+
+  it("orders exact slash command hints before shared-prefix commands", () => {
+    const parsed = parseSlashInput("/mode");
+    const matches = filterCommandCatalog(parsed, catalog, { surface: "tui" });
+
+    expect(matches.map((command) => command.id).slice(0, 3)).toEqual([
+      "mode",
+      "mode.ask",
+      "model",
+    ]);
   });
 
   it("applies tab completion without resolving or executing", () => {

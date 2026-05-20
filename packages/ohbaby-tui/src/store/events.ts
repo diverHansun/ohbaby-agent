@@ -4,6 +4,7 @@ import type {
   UiMessage,
   UiMessagePart,
   UiNotice,
+  UiPolicyState,
   UiPermissionRequest,
   UiRun,
   UiSession,
@@ -36,6 +37,7 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
     messages: activeSession?.messages ?? [],
     notices: [],
     permissions: snapshot.permissions,
+    policy: snapshot.policy,
     runs: snapshot.runs,
     runtime: snapshot.status,
     sessions: snapshot.sessions,
@@ -49,7 +51,10 @@ export function applyTuiEvent(
 ): TuiStoreState {
   switch (event.type) {
     case "snapshot.replaced":
-      return preserveLocalQueues(state, createStateFromSnapshot(event.snapshot));
+      return preserveLocalQueues(
+        state,
+        createStateFromSnapshot(event.snapshot),
+      );
 
     case "session.updated":
       return rebuildFromCollections(state, {
@@ -133,6 +138,11 @@ export function applyTuiEvent(
           ),
         },
       );
+
+    case "policy.updated":
+      return rebuildFromCollections(state, {
+        policy: event.policy,
+      });
 
     case "notice.emitted":
       return appendUiNotice(state, event.notice);
@@ -271,6 +281,7 @@ function rebuildFromCollections(
     readonly sessions?: readonly UiSession[];
     readonly runs?: readonly UiRun[];
     readonly permissions?: readonly UiPermissionRequest[];
+    readonly policy?: UiPolicyState;
     readonly runtime?: TuiRuntimeStatus;
   },
 ): TuiStoreState {
@@ -281,6 +292,7 @@ function rebuildFromCollections(
   const sessions = patch.sessions ?? state.sessions;
   const runs = patch.runs ?? state.runs;
   const permissions = patch.permissions ?? state.permissions;
+  const policy = patch.policy ?? state.policy;
   const runtime = patch.runtime ?? state.runtime;
   const snapshot: UiSnapshot = {
     activeSessionId,
@@ -288,6 +300,7 @@ function rebuildFromCollections(
     runs,
     sessions,
     status: runtime,
+    ...(policy === undefined ? {} : { policy }),
   };
 
   return {
@@ -297,6 +310,7 @@ function rebuildFromCollections(
       sessions.find((session) => session.id === activeSessionId)?.messages ??
       [],
     permissions,
+    policy,
     runs,
     runtime,
     sessions,
@@ -317,7 +331,8 @@ function rebuildWithPermissions(
           kind: "waiting-for-permission" as const,
           requestId: patch.permissions[0].id,
         }
-      : (patch.runtime ?? (state.runtime.kind === "waiting-for-permission"
+      : (patch.runtime ??
+        (state.runtime.kind === "waiting-for-permission"
           ? { kind: "idle" as const }
           : state.runtime));
 
@@ -353,8 +368,10 @@ function rememberResolvedPermission(
   resolvedPermissionIds: readonly string[],
   requestId: string,
 ): readonly string[] {
-  return [...resolvedPermissionIds.filter((id) => id !== requestId), requestId]
-    .slice(-100);
+  return [
+    ...resolvedPermissionIds.filter((id) => id !== requestId),
+    requestId,
+  ].slice(-100);
 }
 
 function updateSessionMessages(
@@ -461,11 +478,12 @@ function upsertLastTextPart(message: UiMessage, content: string): UiMessage {
 
   return {
     ...message,
-    parts: message.parts.map((part, index): UiMessagePart =>
-      index === textIndex &&
-      (part.type === "text" || part.type === "reasoning")
-        ? { ...part, text: content }
-        : part,
+    parts: message.parts.map(
+      (part, index): UiMessagePart =>
+        index === textIndex &&
+        (part.type === "text" || part.type === "reasoning")
+          ? { ...part, text: content }
+          : part,
     ),
   };
 }
@@ -558,10 +576,7 @@ function appendCommandNotice(
   };
 }
 
-function appendUiNotice(
-  state: TuiStoreState,
-  notice: UiNotice,
-): TuiStoreState {
+function appendUiNotice(state: TuiStoreState, notice: UiNotice): TuiStoreState {
   const dedupeId = notice.key ?? notice.id;
   const notices = [
     ...state.notices.filter(

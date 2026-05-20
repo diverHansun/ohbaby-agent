@@ -16,7 +16,12 @@ export function StatusBar({ state }: StatusBarProps): ReactElement {
   return (
     <Text color={statusColor(state)} dimColor={runtime.kind === "idle"}>
       status: {selectRuntimeLabel(state)}
-      {state.activeSessionId === null ? "" : ` | session: ${state.activeSessionId}`}
+      {state.activeSessionId === null
+        ? ""
+        : ` | session: ${state.activeSessionId}`}
+      {state.policy === undefined
+        ? ""
+        : ` | mode: ${state.policy.mode}/${state.policy.agentState}`}
     </Text>
   );
 }

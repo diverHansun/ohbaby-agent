@@ -1,11 +1,16 @@
 import { Box, Text, useApp, useInput } from "ink";
 import { useEffect, useRef } from "react";
 import type { ReactElement } from "react";
-import type { UiCommandCatalog, UiSnapshot } from "ohbaby-sdk";
+import type {
+  UiCommandCatalog,
+  UiCommandInvocation,
+  UiSnapshot,
+} from "ohbaby-sdk";
 import { DialogManager } from "./dialogs/manager.js";
+import { Footer } from "./components/footer.js";
+import { Header } from "./components/header.js";
 import { MessageList } from "./components/message/message-list.js";
 import { Prompt } from "./components/prompt/index.js";
-import { StatusBar } from "./components/status-bar.js";
 import { createTuiStore } from "./store/events.js";
 import { useTuiStoreSelector } from "./store/selectors.js";
 import type {
@@ -22,20 +27,27 @@ export interface TerminalUiOptions {
 
 export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
   const storeRef = useRef<TuiStore>(createTuiStore(createEmptySnapshot()));
+  const keyboardCommandSequenceRef = useRef(0);
   const store = storeRef.current;
   const { exit } = useApp();
   const state = useTuiStoreSelector(store, (current) => current);
-  const hasDialog = state.permissions.length > 0 || state.interactions.length > 0;
+  const hasDialog =
+    state.permissions.length > 0 || state.interactions.length > 0;
 
   useInput(
     (value, key) => {
-      if (value !== "\u0003" && !(key.ctrl && value === "c")) {
-        return;
-      }
+      if (key.tab && key.shift && state.permissions.length === 0) {
+        const command = nextPolicyModeCommand(
+          state.policy,
+          state.activeSessionId ?? undefined,
+          () => {
+            keyboardCommandSequenceRef.current += 1;
+            return `tui_key_${String(keyboardCommandSequenceRef.current)}`;
+          },
+        );
 
-      if (state.permissions.length > 0) {
-        void client.abortRun(state.permissions[0].runId).catch(
-          (caught: unknown) => {
+        if (command !== null) {
+          void client.executeCommand(command).catch((caught: unknown) => {
             store.dispatch({
               status: {
                 kind: "error",
@@ -44,8 +56,28 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
               },
               type: "runtime.updated",
             });
-          },
-        );
+          });
+        }
+        return;
+      }
+
+      if (value !== "\u0003" && !(key.ctrl && value === "c")) {
+        return;
+      }
+
+      if (state.permissions.length > 0) {
+        void client
+          .abortRun(state.permissions[0].runId)
+          .catch((caught: unknown) => {
+            store.dispatch({
+              status: {
+                kind: "error",
+                message: formatError(caught),
+                recoverable: true,
+              },
+              type: "runtime.updated",
+            });
+          });
         return;
       }
 
@@ -142,6 +174,7 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
 
   return (
     <Box flexDirection="column">
+      <Header state={state} />
       <MessageList
         commandNotices={state.commandNotices}
         messages={state.messages}
@@ -158,7 +191,7 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
         client={client}
         disabled={hasDialog}
       />
-      <StatusBar state={state} />
+      <Footer state={state} />
       {state.catalogInvalidation === null ? null : (
         <Text dimColor>
           command catalog refresh: {state.catalogInvalidation.version ?? "new"}
@@ -175,6 +208,31 @@ function createEmptySnapshot(): UiSnapshot {
     runs: [],
     sessions: [],
     status: { kind: "idle" },
+  };
+}
+
+function nextPolicyModeCommand(
+  policy: UiSnapshot["policy"],
+  sessionId: string | undefined,
+  createInvocationId: () => string,
+): UiCommandInvocation | null {
+  if (policy === undefined) {
+    return null;
+  }
+
+  const nextMode =
+    policy.mode === "agent" ? "ask" : policy.mode === "ask" ? "plan" : "agent";
+  const path = ["mode", nextMode] as const;
+
+  return {
+    argv: [],
+    clientInvocationId: createInvocationId(),
+    commandId: `mode.${nextMode}`,
+    path,
+    raw: `/${path.join(" ")}`,
+    rawArgs: "",
+    sessionId,
+    surface: "tui",
   };
 }
 

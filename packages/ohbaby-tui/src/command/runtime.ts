@@ -138,6 +138,9 @@ export function filterCommandCatalog(
       }
 
       return path.startsWith(query) || pathIncludesAlias(command, query);
+    })
+    .sort((left, right) => {
+      return candidateRank(parsed, left) - candidateRank(parsed, right);
     });
 }
 
@@ -237,6 +240,42 @@ function pathIncludesAlias(command: TuiCommandSpec, query: string): boolean {
   );
 }
 
+function candidateRank(
+  parsed: ParsedSlashInput,
+  command: TuiCommandSpec,
+): number {
+  const query = parsed.body.trim().toLowerCase();
+
+  if (query === "") {
+    return 0;
+  }
+
+  const path = command.path.join(" ").toLowerCase();
+  if (path === query) {
+    return 0;
+  }
+
+  if (command.path[0]?.toLowerCase() === parsed.tokens[0]?.toLowerCase()) {
+    return 1;
+  }
+
+  if (
+    command.aliases?.some((alias) => alias.join(" ").toLowerCase() === query)
+  ) {
+    return 0;
+  }
+
+  if (
+    command.aliases?.some(
+      (alias) => alias[0]?.toLowerCase() === parsed.tokens[0]?.toLowerCase(),
+    )
+  ) {
+    return 1;
+  }
+
+  return 2;
+}
+
 function inferDisplayPathLength(tokens: readonly string[]): number {
   if (tokens.length === 0) {
     return 0;
@@ -276,7 +315,7 @@ function extractRawArgs(
 function tokenizeCommandLine(input: string): readonly TokenSpan[] {
   const tokens: TokenSpan[] = [];
   let current = "";
-  let quote: "\"" | "'" | null = null;
+  let quote: '"' | "'" | null = null;
   let tokenStart: number | null = null;
 
   for (let index = 0; index < input.length; index += 1) {
@@ -293,7 +332,7 @@ function tokenizeCommandLine(input: string): readonly TokenSpan[] {
       continue;
     }
 
-    if (char === "\"" || char === "'") {
+    if (char === '"' || char === "'") {
       tokenStart ??= index;
       quote = char;
       continue;

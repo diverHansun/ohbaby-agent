@@ -6,9 +6,7 @@ import {
   createTuiStore,
   setCommandCatalog,
 } from "./events.js";
-import type {
-  TuiCommandCatalog,
-} from "./snapshot.js";
+import type { TuiCommandCatalog } from "./snapshot.js";
 
 function snapshot(): UiSnapshot {
   return {
@@ -53,12 +51,22 @@ function catalog(version = "v1"): TuiCommandCatalog {
 
 describe("TUI store event reducer", () => {
   it("projects the active session messages from the initial snapshot", () => {
-    const state = createStateFromSnapshot(snapshot());
+    const state = createStateFromSnapshot({
+      ...snapshot(),
+      policy: {
+        agentState: "ask-before-edit",
+        mode: "agent",
+      },
+    });
 
     expect(state.activeSessionId).toBe("session_1");
     expect(state.messages).toHaveLength(1);
     expect(state.messages[0]?.parts[0]).toMatchObject({ text: "Hello" });
     expect(state.runtime).toEqual({ kind: "idle" });
+    expect(state.policy).toEqual({
+      agentState: "ask-before-edit",
+      mode: "agent",
+    });
   });
 
   it("applies message deltas to an existing assistant message part", () => {
@@ -288,8 +296,51 @@ describe("TUI store event reducer", () => {
     expect(state.notices.at(-1)?.message).toBe("Provider error 11");
   });
 
+  it("applies policy updates and preserves them across collection rebuilds", () => {
+    let state = createStateFromSnapshot({
+      ...snapshot(),
+      policy: {
+        agentState: "ask-before-edit",
+        mode: "agent",
+      },
+    });
+
+    state = applyTuiEvent(state, {
+      policy: {
+        agentState: "ask-before-edit",
+        mode: "plan",
+      },
+      previousPolicy: {
+        agentState: "ask-before-edit",
+        mode: "agent",
+      },
+      timestamp: 1,
+      type: "policy.updated",
+    });
+    state = applyTuiEvent(state, {
+      run: {
+        id: "run_1",
+        sessionId: "session_1",
+        startedAt: "2026-05-14T00:00:03.000Z",
+        status: { kind: "running", runId: "run_1" },
+        updatedAt: "2026-05-14T00:00:03.000Z",
+      },
+      timestamp: 2,
+      type: "run.updated",
+    });
+
+    expect(state.policy).toEqual({
+      agentState: "ask-before-edit",
+      mode: "plan",
+    });
+    expect(state.snapshot.policy).toEqual(state.policy);
+  });
+
   it("marks catalog invalidation without mutating the loaded catalog", () => {
-    const state = setCommandCatalog(createStateFromSnapshot(snapshot()), catalog());
+    const state = setCommandCatalog(
+      createStateFromSnapshot(snapshot()),
+      catalog(),
+    );
 
     const next = applyTuiEvent(state, {
       reason: "plugin changed",
