@@ -98,7 +98,18 @@ describe("OhbabyTerminalApp", () => {
     await flush();
 
     expect(app.lastFrame()).toContain("OHBABY");
-    expect(app.lastFrame()).toContain("ohbaby >");
+    expect(app.lastFrame()).toContain("ohbaby > message |");
+  });
+
+  it("renders typed prompt text with a visible cursor", async () => {
+    const client = createFakeClient(snapshot());
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+    app.stdin.write("hello");
+    await flush();
+
+    expect(app.lastFrame()).toContain("ohbaby > hello |");
   });
 
   it("renders snapshot messages and applies assistant deltas", async () => {
@@ -373,7 +384,48 @@ describe("OhbabyTerminalApp", () => {
     await flush();
 
     expect(app.lastFrame()).toContain("tool bash (completed)");
-    expect(app.lastFrame()).toContain("tool result call_1: D:/Projects");
+    expect(app.lastFrame()).toContain('input: {"command":"pwd"}');
+    expect(app.lastFrame()).toContain("tool result call_1");
+    expect(app.lastFrame()).toContain("output: D:/Projects");
+  });
+
+  it("uses readable runtime labels without raw run or permission ids", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      runs: [
+        {
+          id: "run_raw_123",
+          sessionId: "session_1",
+          startedAt: "2026-05-14T00:00:03.000Z",
+          status: { kind: "running", runId: "run_raw_123" },
+          updatedAt: "2026-05-14T00:00:03.000Z",
+        },
+      ],
+      status: { kind: "running", runId: "run_raw_123" },
+    });
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+    expect(app.lastFrame()).toContain("status: running");
+    expect(app.lastFrame()).not.toContain("run_raw_123");
+
+    client.emit({
+      request: {
+        choices: [
+          { id: "allow_once", intent: "allow", label: "Allow once" },
+          { id: "reject", intent: "deny", label: "Reject" },
+        ],
+        description: "tool:write",
+        id: "permission_raw_123",
+        runId: "run_raw_123",
+        title: "Write file",
+      },
+      type: "permission.requested",
+    });
+    await flush();
+
+    expect(app.lastFrame()).toContain("status: waiting: Write file");
+    expect(app.lastFrame()).not.toContain("permission_raw_123");
   });
 
   it("submits normal prompts with the active session id", async () => {
@@ -514,6 +566,38 @@ describe("OhbabyTerminalApp", () => {
         sessionId: "session_1",
       }),
     );
+  });
+
+  it("caps slash candidates and truncates long descriptions", async () => {
+    const longDescription =
+      "A very long command description that should not stretch the input area past a readable terminal width during dogfood sessions";
+    const longCatalog: TuiCommandCatalog = {
+      commands: Array.from({ length: 8 }, (_, index) => ({
+        description: longDescription,
+        id: `cmd.${String(index)}`,
+        path: [`cmd${String(index)}`],
+        surfaces: ["tui"],
+      })),
+      loadedAt: 1_771_000_000_000,
+      surface: "tui",
+      version: "long",
+    };
+    const client = createFakeClient(snapshot(), longCatalog);
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+    app.stdin.write("/");
+    await flush();
+
+    const frame = app.lastFrame() ?? "";
+    const hintLines = frame
+      .split(/\r?\n/u)
+      .filter((line) => line.includes("/cmd"));
+
+    expect(hintLines).toHaveLength(6);
+    expect(hintLines[0]?.trimStart()).toMatch(/^> \/cmd0/u);
+    expect(hintLines[0]).toContain("...");
+    expect(frame).not.toContain("/cmd6");
   });
 
   it("executes a selected slash candidate even when the typed parent is exact", async () => {

@@ -10,7 +10,7 @@ import {
   schema,
 } from "../../../packages/ohbaby-agent/src/services/database/index.js";
 import { createDatabaseRunLedger } from "../../../packages/ohbaby-agent/src/runtime/run-ledger/index.js";
-import { createFakeLLMClient, promptLine, waitForFrame } from "./helpers.js";
+import { createFakeLLMClient, promptIsReady, waitForFrame } from "./helpers.js";
 
 const cleanupDirectories: string[] = [];
 
@@ -141,7 +141,7 @@ describe("TUI persistent backend display", () => {
       nextFrame.includes("Recovered prompt."),
     );
 
-    expect(promptLine(frame).trimEnd()).toBe("ohbaby >");
+    expect(promptIsReady(frame)).toBe(true);
     expect(frame).not.toContain("Permission:");
     expect(frame).toContain("status: idle | session:");
     app.unmount();

@@ -35,16 +35,35 @@ export function selectRuntimeLabel(state: TuiStoreState): string {
     case "idle":
       return "idle";
     case "running":
-      return runtime.title
-        ? `${runtime.title} (${runtime.runId})`
-        : `running: ${runtime.runId}`;
+      return runtime.title ? `running: ${trimLabel(runtime.title)}` : "running";
     case "waiting-for-permission":
-      return state.permissions.length > 1
-        ? `waiting: ${runtime.requestId} (+${String(state.permissions.length - 1)})`
-        : `waiting: ${runtime.requestId}`;
+      return formatPermissionWaitLabel(state);
     case "error":
       return `error: ${runtime.message}`;
   }
+}
+
+function formatPermissionWaitLabel(state: TuiStoreState): string {
+  const request = state.permissions.at(0);
+  const title =
+    request?.title === undefined || request.title.trim() === ""
+      ? "permission"
+      : trimLabel(request.title);
+
+  return state.permissions.length > 1
+    ? `waiting: ${title} (+${String(state.permissions.length - 1)})`
+    : `waiting: ${title}`;
+}
+
+function trimLabel(value: string): string {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  const maxLength = 48;
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 3)}...`;
 }
 
 export function useTuiStoreSelector<TSelected>(

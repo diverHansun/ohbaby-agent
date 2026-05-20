@@ -141,3 +141,13 @@ export function promptLine(frame: string): string {
       .find((line) => line.trimStart().startsWith("ohbaby >")) ?? ""
   );
 }
+
+export function promptIsReady(frame: string): boolean {
+  const line = promptLine(frame);
+
+  return (
+    line.includes("ohbaby >") &&
+    line.includes("message") &&
+    line.includes("|")
+  );
+}

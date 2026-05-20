@@ -6,7 +6,7 @@ import { createPersistentUiBackendClient } from "ohbaby-agent";
 import { OhbabyTerminalApp } from "ohbaby-tui";
 import { closeDatabase } from "../../packages/ohbaby-agent/src/services/database/index.js";
 import { _LLMConfigManager as LLMConfigManager } from "../../packages/ohbaby-agent/src/config/llm/index.js";
-import { flush, promptLine, waitForFrame } from "../integration/tui/helpers.js";
+import { flush, promptIsReady, waitForFrame } from "../integration/tui/helpers.js";
 
 const cleanupDirectories: string[] = [];
 
@@ -95,7 +95,7 @@ async function submitPrompt(
 ): Promise<void> {
   await waitForFrame(
     app,
-    (frame) => promptLine(frame).trimEnd() === "ohbaby >",
+    promptIsReady,
     30_000,
   );
   app.stdin.write(prompt);
@@ -174,7 +174,7 @@ describe("real provider TUI smoke", () => {
       try {
         await waitForFrame(
           app,
-          (frame) => promptLine(frame).trimEnd() === "ohbaby >",
+          promptIsReady,
           30_000,
         );
         app.stdin.write("/mode ask");

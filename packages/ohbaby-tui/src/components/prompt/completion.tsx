@@ -26,7 +26,12 @@ export function Completion({
   return (
     <Box flexDirection="column">
       {hints.map((hint, index) => (
-        <Text dimColor key={hint}>
+        <Text
+          bold={index === selectedIndex}
+          color={index === selectedIndex ? "cyan" : undefined}
+          dimColor={index !== selectedIndex}
+          key={hint}
+        >
           {index === selectedIndex ? "> " : "  "}
           {hint}
         </Text>

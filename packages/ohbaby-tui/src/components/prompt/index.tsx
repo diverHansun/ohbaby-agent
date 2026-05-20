@@ -105,7 +105,17 @@ export function Prompt({
   return (
     <Box flexDirection="column">
       <Text>
-        ohbaby {">"} {input}
+        <Text dimColor={disabled}>
+          ohbaby {">"}{" "}
+        </Text>
+        {input.length === 0 ? (
+          <Text dimColor>{disabled ? "paused" : "message"}</Text>
+        ) : (
+          <Text>{input}</Text>
+        )}
+        <Text color={disabled ? undefined : "cyan"} dimColor={disabled}>
+          {" |"}
+        </Text>
       </Text>
       {error === null ? null : <Text color="red">{error}</Text>}
       <Completion

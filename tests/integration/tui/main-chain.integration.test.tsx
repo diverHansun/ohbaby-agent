@@ -9,6 +9,7 @@ import {
   createFakeLLMClient,
   createSequentialFakeLLMClient,
   flush,
+  promptIsReady,
   promptLine,
   waitForFrame,
   writeToolCallEvent,
@@ -39,18 +40,12 @@ describe("TUI main chain with real in-process backend", () => {
     });
     const app = render(<OhbabyTerminalApp client={client} />);
 
-    await waitForFrame(
-      app,
-      (frame) => promptLine(frame).trimEnd() === "ohbaby >",
-    );
+    await waitForFrame(app, promptIsReady);
     app.stdin.write("hello");
     await waitForFrame(app, (frame) => promptLine(frame).includes("hello"));
     app.stdin.write("\r");
 
-    await waitForFrame(
-      app,
-      (frame) => promptLine(frame).trimEnd() === "ohbaby >",
-    );
+    await waitForFrame(app, promptIsReady);
     const frame = await waitForFrame(app, (nextFrame) =>
       nextFrame.includes("Hello world"),
     );
@@ -87,10 +82,7 @@ describe("TUI main chain with real in-process backend", () => {
     };
     const app = render(<OhbabyTerminalApp client={client} />);
 
-    await waitForFrame(
-      app,
-      (frame) => promptLine(frame).trimEnd() === "ohbaby >",
-    );
+    await waitForFrame(app, promptIsReady);
     app.stdin.write("write file");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) => frame.includes("Permission:"));
@@ -107,7 +99,8 @@ describe("TUI main chain with real in-process backend", () => {
       frame.includes("Permission complete."),
     );
     expect(completedFrame).toContain("tool write (completed)");
-    expect(completedFrame).toContain("tool result call_write:");
+    expect(completedFrame).toContain("tool result call_write");
+    expect(completedFrame).toContain("output:");
     expect(completedFrame).toContain("status: idle | session: session_1");
 
     app.stdin.write("again");
@@ -139,10 +132,7 @@ describe("TUI main chain with real in-process backend", () => {
     });
     const app = render(<OhbabyTerminalApp client={realClient} />);
 
-    await waitForFrame(
-      app,
-      (frame) => promptLine(frame).trimEnd() === "ohbaby >",
-    );
+    await waitForFrame(app, promptIsReady);
     app.stdin.write("abort this");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) => frame.includes("Permission:"));
@@ -196,10 +186,7 @@ describe("TUI main chain with real in-process backend", () => {
     });
     const app = render(<OhbabyTerminalApp client={client} />);
 
-    await waitForFrame(
-      app,
-      (frame) => promptLine(frame).trimEnd() === "ohbaby >",
-    );
+    await waitForFrame(app, promptIsReady);
     app.stdin.write("/mode ask");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) =>
@@ -282,10 +269,7 @@ describe("TUI main chain with real in-process backend", () => {
     });
     const app = render(<OhbabyTerminalApp client={client} />);
 
-    await waitForFrame(
-      app,
-      (frame) => promptLine(frame).trimEnd() === "ohbaby >",
-    );
+    await waitForFrame(app, promptIsReady);
     app.stdin.write("/mode auto-edit");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) =>
