@@ -3,6 +3,16 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { BLACKLISTED_SHELLS } from "./constants.js";
 
+const WINDOWS_SUPPORTED_SHELLS = new Set([
+  "bash",
+  "cmd",
+  "command",
+  "powershell",
+  "pwsh",
+  "sh",
+  "zsh",
+]);
+
 export interface ShellDetectionInput {
   readonly env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   readonly existsSync?: (candidate: string) => boolean;
@@ -33,7 +43,10 @@ function defaultWhich(command: string): string | undefined {
   }
 }
 
-function defaultShell(platform: NodeJS.Platform, env: ShellDetectionInput["env"]): string {
+function defaultShell(
+  platform: NodeJS.Platform,
+  env: ShellDetectionInput["env"],
+): string {
   if (platform === "win32") {
     return env?.COMSPEC ?? "cmd.exe";
   }
@@ -42,6 +55,34 @@ function defaultShell(platform: NodeJS.Platform, env: ShellDetectionInput["env"]
   }
 
   return "/bin/bash";
+}
+
+function resolveConfiguredWindowsShell(
+  shell: string | undefined,
+  input: {
+    readonly existsSync: (candidate: string) => boolean;
+    readonly platform: NodeJS.Platform;
+    readonly which: (command: string) => string | undefined;
+  },
+): string | undefined {
+  if (!shell || isBlacklistedShell(shell, input.platform)) {
+    return undefined;
+  }
+  if (!WINDOWS_SUPPORTED_SHELLS.has(shellName(shell, input.platform))) {
+    return undefined;
+  }
+  if (input.existsSync(shell)) {
+    return shell;
+  }
+  if (
+    !path.win32.isAbsolute(shell) &&
+    !shell.includes("/") &&
+    !shell.includes("\\")
+  ) {
+    return input.which(shell);
+  }
+
+  return undefined;
 }
 
 export function isBlacklistedShell(
@@ -55,7 +96,12 @@ export function deriveGitBashPath(gitPath: string): string {
   const normalized = path.win32.normalize(gitPath);
   const lower = normalized.toLowerCase();
   if (lower.endsWith("\\cmd\\git.exe")) {
-    return path.win32.join(path.win32.dirname(normalized), "..", "bin", "bash.exe");
+    return path.win32.join(
+      path.win32.dirname(normalized),
+      "..",
+      "bin",
+      "bash.exe",
+    );
   }
 
   return path.win32.join(path.win32.dirname(normalized), "bash.exe");
@@ -72,12 +118,23 @@ export function resolvePreferredShell(input: ShellDetectionInput = {}): string {
   return defaultShell(platform, env);
 }
 
-export function resolveAcceptableShell(input: ShellDetectionInput = {}): string {
+export function resolveAcceptableShell(
+  input: ShellDetectionInput = {},
+): string {
   const platform = input.platform ?? process.platform;
   const env = input.env ?? process.env;
   const existsSync = input.existsSync ?? fs.existsSync;
   const which = input.which ?? defaultWhich;
   if (platform === "win32") {
+    const configuredShell = resolveConfiguredWindowsShell(env.SHELL, {
+      existsSync,
+      platform,
+      which,
+    });
+    if (configuredShell) {
+      return configuredShell;
+    }
+
     const gitPath = which("git");
     if (gitPath) {
       const bashPath = deriveGitBashPath(gitPath);

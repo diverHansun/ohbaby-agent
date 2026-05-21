@@ -27,7 +27,7 @@ interface TokenizedCommand {
 function tokenize(command: string): TokenizedCommand {
   const tokens: string[] = [];
   let current = "";
-  let quote: "\"" | "'" | null = null;
+  let quote: '"' | "'" | null = null;
   let escaped = false;
   let hasUnsupportedSyntax = false;
 
@@ -56,7 +56,7 @@ function tokenize(command: string): TokenizedCommand {
     if (quote !== "'" && isUnsupportedShellSyntax(char, chars[index + 1])) {
       hasUnsupportedSyntax = true;
     }
-    if ((char === "\"" || char === "'") && quote === null) {
+    if ((char === '"' || char === "'") && quote === null) {
       quote = char;
       continue;
     }
@@ -97,10 +97,7 @@ function tokenize(command: string): TokenizedCommand {
         current = "";
       }
       const previous = tokens.at(-1);
-      if (
-        (char === "|" || char === "&") &&
-        previous === char
-      ) {
+      if ((char === "|" || char === "&") && previous === char) {
         tokens[tokens.length - 1] = `${previous}${char}`;
       } else {
         tokens.push(char);
@@ -114,22 +111,28 @@ function tokenize(command: string): TokenizedCommand {
     tokens.push(current);
   }
 
-  return { hasError: quote !== null || escaped || hasUnsupportedSyntax, tokens };
+  return {
+    hasError: quote !== null || escaped || hasUnsupportedSyntax,
+    tokens,
+  };
 }
 
 function shouldEscape(
   _char: string,
   next: string,
-  quote: "\"" | "'" | null,
+  quote: '"' | "'" | null,
 ): boolean {
-  if (quote === "\"") {
-    return next === "\"" || next === "\\" || next === "$" || next === "`";
+  if (quote === '"') {
+    return next === '"' || next === "\\" || next === "$" || next === "`";
   }
 
-  return /\s/u.test(next) || next === "\"" || next === "'" || next === "\\";
+  return /\s/u.test(next) || next === '"' || next === "'" || next === "\\";
 }
 
-function isUnsupportedShellSyntax(char: string, next: string | undefined): boolean {
+function isUnsupportedShellSyntax(
+  char: string,
+  next: string | undefined,
+): boolean {
   return (
     char === "`" ||
     (char === "$" && next === "(") ||
@@ -157,7 +160,9 @@ function segmentTokens(tokens: readonly string[]): string[][] {
   return segments;
 }
 
-function unwrapRoot(tokens: readonly string[]): string | null {
+function unwrapRoot(
+  tokens: readonly string[],
+): { readonly root: string; readonly rootIndex: number } | null {
   let index = 0;
   while (index < tokens.length) {
     const token = tokens[index];
@@ -166,7 +171,7 @@ function unwrapRoot(tokens: readonly string[]): string | null {
       continue;
     }
     if (!WRAPPER_COMMANDS.has(token)) {
-      return token;
+      return { root: token, rootIndex: index };
     }
     index += 1;
     index = skipWrapperOptions(tokens, index, token);
@@ -202,7 +207,9 @@ function tokenLooksLikePath(token: string): boolean {
   if (normalized.startsWith("-")) {
     return false;
   }
-  return PATH_PREFIX_PATTERN.test(normalized) || PATH_SUFFIX_PATTERN.test(normalized);
+  return (
+    PATH_PREFIX_PATTERN.test(normalized) || PATH_SUFFIX_PATTERN.test(normalized)
+  );
 }
 
 function stripRedirectionPrefix(token: string): string {
@@ -218,13 +225,15 @@ export function parseCommand(command: string): ParsedCommand {
   const tokenized = tokenize(command);
   const details: CommandDetail[] = [];
   for (const tokens of segmentTokens(tokenized.tokens)) {
-    const root = unwrapRoot(tokens);
-    if (!root) {
+    const unwrapped = unwrapRoot(tokens);
+    if (!unwrapped) {
       continue;
     }
     details.push({
       paths: tokens.map(stripRedirectionPrefix).filter(tokenLooksLikePath),
-      root,
+      root: unwrapped.root,
+      rootIndex: unwrapped.rootIndex,
+      tokens,
       text: tokens.join(" "),
     });
   }

@@ -20,6 +20,21 @@ describe("command-parser", () => {
     expect(getCommandRoots("npm test &> test.log")).toEqual(["npm"]);
   });
 
+  it("keeps token and root index details for downstream shell policy checks", () => {
+    const parsed = parseCommand('env FOO=bar cd "dir with spaces" && echo ok');
+
+    expect(parsed.details[0]).toMatchObject({
+      root: "cd",
+      rootIndex: 2,
+      tokens: ["env", "FOO=bar", "cd", "dir with spaces"],
+    });
+    expect(parsed.details[1]).toMatchObject({
+      root: "echo",
+      rootIndex: 0,
+      tokens: ["echo", "ok"],
+    });
+  });
+
   it("unwraps common command wrappers", () => {
     expect(getCommandRoots("sudo -E env FOO=bar git push origin main")).toEqual(
       ["git"],
@@ -30,20 +45,18 @@ describe("command-parser", () => {
 
   it("detects path-like command arguments without treating flags as paths", () => {
     expect(
-      detectPaths("rm -rf /tmp/build ./dist ../outside ~/notes \"src/app.ts\""),
+      detectPaths('rm -rf /tmp/build ./dist ../outside ~/notes "src/app.ts"'),
     ).toEqual(["/tmp/build", "./dist", "../outside", "~/notes", "src/app.ts"]);
     expect(detectPaths("cat </etc/passwd")).toEqual(["/etc/passwd"]);
-    expect(detectPaths("echo hi >../outside.txt")).toEqual([
-      "../outside.txt",
-    ]);
-    expect(detectPaths("echo hi &>../outside.txt")).toEqual([
-      "../outside.txt",
-    ]);
+    expect(detectPaths("echo hi >../outside.txt")).toEqual(["../outside.txt"]);
+    expect(detectPaths("echo hi &>../outside.txt")).toEqual(["../outside.txt"]);
     expect(detectPaths("echo hi &>>../outside.log")).toEqual([
       "../outside.log",
     ]);
     expect(
-      detectPaths("type C:\\Users\\me\\file.txt \"C:\\Program Files\\app\\config.json\""),
+      detectPaths(
+        'type C:\\Users\\me\\file.txt "C:\\Program Files\\app\\config.json"',
+      ),
     ).toEqual([
       "C:\\Users\\me\\file.txt",
       "C:\\Program Files\\app\\config.json",

@@ -40,7 +40,10 @@ describe("shell detection", () => {
     expect(deriveGitBashPath(git)).toBe(bash);
     expect(
       resolveAcceptableShell({
-        env: { COMSPEC: "C:\\Windows\\System32\\cmd.exe", SHELL: "/usr/bin/bash" },
+        env: {
+          COMSPEC: "C:\\Windows\\System32\\cmd.exe",
+          SHELL: "/usr/bin/bash",
+        },
         existsSync: (candidate) => candidate === bash,
         platform: "win32",
         which: (command) => (command === "git" ? git : undefined),
@@ -54,6 +57,49 @@ describe("shell detection", () => {
         which: () => undefined,
       }),
     ).toBe("C:\\Windows\\System32\\cmd.exe");
+  });
+
+  it("honors an explicitly configured existing Windows PowerShell shell", () => {
+    const powershell =
+      "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+
+    expect(
+      resolveAcceptableShell({
+        env: { COMSPEC: "C:\\Windows\\System32\\cmd.exe", SHELL: powershell },
+        existsSync: (candidate) => candidate === powershell,
+        platform: "win32",
+        which: () => undefined,
+      }),
+    ).toBe(powershell);
+    expect(
+      resolveAcceptableShell({
+        env: { SHELL: "pwsh.exe" },
+        existsSync: () => false,
+        platform: "win32",
+        which: (command) =>
+          command === "pwsh.exe"
+            ? "C:\\Program Files\\PowerShell\\7\\pwsh.exe"
+            : undefined,
+      }),
+    ).toBe("C:\\Program Files\\PowerShell\\7\\pwsh.exe");
+  });
+
+  it("ignores unsupported Windows SHELL values before fallback selection", () => {
+    const git = "C:\\Program Files\\Git\\cmd\\git.exe";
+    const bash = "C:\\Program Files\\Git\\bin\\bash.exe";
+
+    expect(
+      resolveAcceptableShell({
+        env: {
+          COMSPEC: "C:\\Windows\\System32\\cmd.exe",
+          SHELL: "C:\\Tools\\fish.exe",
+        },
+        existsSync: (candidate) =>
+          candidate === "C:\\Tools\\fish.exe" || candidate === bash,
+        platform: "win32",
+        which: (command) => (command === "git" ? git : undefined),
+      }),
+    ).toBe(bash);
   });
 
   it("falls back to platform defaults when SHELL is empty", () => {
