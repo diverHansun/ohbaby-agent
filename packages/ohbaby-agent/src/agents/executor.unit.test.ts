@@ -135,8 +135,10 @@ describe("SubagentExecutor", () => {
     expect(runnerRun).toHaveBeenCalledWith(
       expect.objectContaining({
         agentName: "explore",
+        parentMessageId: "message_child",
         parentSessionId: "parent",
         prompt: "Find auth code",
+        projectRoot: "D:/repo",
         sessionId: "child_1",
       }),
     );
@@ -164,6 +166,44 @@ describe("SubagentExecutor", () => {
         prompt: "run",
       }),
     ).resolves.toMatchObject({ output: "done", success: true });
+  });
+
+  it("writes an assistant error turn when a child run fails to start", async () => {
+    const writeAssistantMessage = vi.fn<
+      NonNullable<SubagentMessageWriter["writeAssistantMessage"]>
+    >(() => Promise.resolve());
+    const messageWriter: SubagentMessageWriter = {
+      writeAssistantMessage,
+      writeUserMessage: () => Promise.resolve({ messageId: "message_child" }),
+    };
+    const executor = new SubagentExecutor({
+      agentManager: await createAgentManager(),
+      messageWriter,
+      runner: {
+        run: vi.fn<SubagentRunner["run"]>(() =>
+          Promise.reject(new Error("child run rejected")),
+        ),
+      },
+      sessionManager: createSessionManager(),
+    });
+
+    await expect(
+      executor.execute({
+        agentName: "explore",
+        parentSessionId: "parent",
+        prompt: "run",
+      }),
+    ).resolves.toMatchObject({
+      output: "child run rejected",
+      success: false,
+    });
+    expect(writeAssistantMessage).toHaveBeenCalledWith({
+      agentName: "explore",
+      output: "child run rejected",
+      parentMessageId: "message_child",
+      parentSessionId: "parent",
+      sessionId: "child_1",
+    });
   });
 
   it("rejects primary agents as subagents", async () => {
@@ -228,16 +268,17 @@ describe("SubagentExecutor", () => {
       title: "Existing",
     });
     const create = vi.spyOn(sessionManager, "create");
+    const runnerRun = vi.fn<SubagentRunner["run"]>(() =>
+      Promise.resolve({
+        output: "resumed",
+        steps: 1,
+        success: true,
+      }),
+    );
     const executor = new SubagentExecutor({
       agentManager: await createAgentManager(),
       runner: {
-        run: vi.fn<SubagentRunner["run"]>(() =>
-          Promise.resolve({
-            output: "resumed",
-            steps: 1,
-            success: true,
-          }),
-        ),
+        run: runnerRun,
       },
       sessionManager,
     });
@@ -251,6 +292,12 @@ describe("SubagentExecutor", () => {
       }),
     ).resolves.toMatchObject({ sessionId: "child_existing", success: true });
     expect(create).not.toHaveBeenCalled();
+    expect(runnerRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectRoot: "D:/repo",
+        sessionId: "child_existing",
+      }),
+    );
   });
 
   it("rejects resuming a child session owned by a different agent", async () => {

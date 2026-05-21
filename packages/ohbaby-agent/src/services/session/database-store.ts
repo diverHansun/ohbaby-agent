@@ -389,6 +389,7 @@ export function createDatabaseSessionStore(
           const normalizedLimit = normalizeLimit(limit) ?? 0;
           if (transaction) {
             return listTransactionSessions(transaction)
+              .filter((session) => !session.isSubagent)
               .sort(sortByUpdatedAtDesc)
               .slice(0, normalizedLimit)
               .map(cloneSession);
@@ -396,6 +397,7 @@ export function createDatabaseSessionStore(
           const rows = db
             .prepare<SessionRow>(
               `SELECT * FROM ${schema.session.tableName}
+             WHERE parent_id IS NULL
              ORDER BY updated_at DESC, created_at DESC
              LIMIT ?`,
             )

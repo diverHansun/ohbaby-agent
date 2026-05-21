@@ -36,6 +36,7 @@ export interface CreateRunOptions {
   readonly agent?: string;
   readonly isSubagent?: boolean;
   readonly parentMessageId?: string;
+  readonly maxSteps?: number;
   readonly messages: readonly ChatCompletionMessage[];
   readonly tools?: LifecycleRunParams["tools"];
 }
@@ -97,6 +98,7 @@ export interface RunContext {
   readonly agent?: string;
   readonly isSubagent?: boolean;
   readonly parentMessageId?: string;
+  readonly maxSteps?: number;
   readonly messages: readonly ChatCompletionMessage[];
   readonly tools?: LifecycleRunParams["tools"];
 }

@@ -92,6 +92,7 @@ export function createInMemorySessionStore(): SessionStore {
     getRecent(limit: number): Promise<Session[]> {
       const normalizedLimit = normalizeLimit(limit) ?? 0;
       const items = Array.from(sessions.values())
+        .filter((session) => !session.isSubagent)
         .sort(sortByUpdatedAtDesc)
         .slice(0, normalizedLimit)
         .map(cloneSession);

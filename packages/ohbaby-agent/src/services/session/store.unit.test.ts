@@ -76,12 +76,17 @@ describe("createInMemorySessionStore", () => {
       createSession({
         id: "child_1",
         projectId: "project_1",
+        isSubagent: true,
         parentId: "old_active",
         updatedAt: 4_000,
       }),
     );
     await expect(store.listChildren("old_active")).resolves.toMatchObject([
       { id: "child_1" },
+    ]);
+    await expect(store.getRecent(2)).resolves.toMatchObject([
+      { id: "new_archived" },
+      { id: "other_project" },
     ]);
   });
 

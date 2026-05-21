@@ -117,6 +117,7 @@ describe("createDatabaseSessionStore", () => {
     await store.insert(
       createSession({
         id: "child_1",
+        isSubagent: true,
         parentId: "old_active",
         updatedAt: 4_000,
       }),
@@ -134,8 +135,8 @@ describe("createDatabaseSessionStore", () => {
       { id: "child_1" },
     ]);
     await expect(store.getRecent(2)).resolves.toMatchObject([
-      { id: "child_1" },
       { id: "new_archived" },
+      { id: "other_project" },
     ]);
   });
 

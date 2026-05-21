@@ -553,6 +553,24 @@ describe("RunManager", () => {
     expect(manager.list("session_1")).toEqual([]);
   });
 
+  it("forwards maxSteps to the lifecycle", async () => {
+    const lifecycle = new CompletingLifecycle();
+    const { manager } = createManager(lifecycle);
+
+    const record = await manager.create({
+      sessionId: "session_1",
+      triggerSource: "user",
+      messages: [{ role: "user", content: "bounded" }],
+      maxSteps: 3,
+    });
+    await manager.waitForCompletion(record.runId);
+
+    expect(lifecycle.calls[0]).toMatchObject({
+      maxSteps: 3,
+      sessionId: "session_1",
+    });
+  });
+
   it("publishes lifecycle tool events to the run stream", async () => {
     const { manager, bridge } = createManager(new ToolEventLifecycle());
 

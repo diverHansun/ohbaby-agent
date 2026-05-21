@@ -4,7 +4,11 @@ import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPersistentUiBackendClient } from "ohbaby-agent";
 import { OhbabyTerminalApp } from "ohbaby-tui";
-import { closeDatabase } from "../../packages/ohbaby-agent/src/services/database/index.js";
+import {
+  closeDatabase,
+  getDatabase,
+  schema,
+} from "../../packages/ohbaby-agent/src/services/database/index.js";
 import { _LLMConfigManager as LLMConfigManager } from "../../packages/ohbaby-agent/src/config/llm/index.js";
 import {
   flush,
@@ -136,6 +140,8 @@ async function waitForAssistantText(
 const runRealTuiSmoke = process.env.OHBABY_RUN_REAL_TUI_SMOKE === "1";
 const runRealTavilySmoke =
   runRealTuiSmoke && process.env.OHBABY_RUN_REAL_TUI_TAVILY_SMOKE === "1";
+const runRealSubagentSmoke =
+  runRealTuiSmoke && process.env.OHBABY_RUN_REAL_SUBAGENT_SMOKE === "1";
 
 describe("real provider TUI smoke", () => {
   (runRealTuiSmoke ? it : it.skip)(
@@ -259,5 +265,70 @@ describe("real provider TUI smoke", () => {
       }
     },
     300_000,
+  );
+
+  (runRealSubagentSmoke ? it : it.skip)(
+    "lets a real model run and resume an explore subagent child session",
+    async () => {
+      const { client, workdir } = await createRealTuiHarness({});
+      await writeFile(
+        join(workdir, "subagent-target-a.txt"),
+        "alpha subagent smoke marker",
+        "utf8",
+      );
+      await writeFile(
+        join(workdir, "subagent-target-b.txt"),
+        "beta subagent smoke marker",
+        "utf8",
+      );
+
+      await client.submitPrompt(
+        [
+          "Call the task tool exactly once with agent_name explore.",
+          "Ask the child to inspect subagent-target-a.txt and subagent-target-b.txt.",
+          "After the child returns, answer with the exact token OHBABY_REAL_SUBAGENT_FIRST_OK.",
+        ].join(" "),
+      );
+      const firstSnapshot = await client.getSnapshot();
+      const parentSessionId = firstSnapshot.activeSessionId;
+      if (!parentSessionId) {
+        throw new Error("expected parent session id");
+      }
+      const child = getDatabase()
+        .prepare<{ readonly id: string }>(
+          `SELECT id
+           FROM ${schema.session.tableName}
+           WHERE parent_id = ?
+           ORDER BY created_at DESC
+           LIMIT 1`,
+        )
+        .get(parentSessionId);
+      if (!child) {
+        throw new Error("real model did not create a subagent child session");
+      }
+
+      await client.submitPrompt(
+        [
+          "Call the task tool exactly once with agent_name explore.",
+          `Use resume_session_id ${child.id}.`,
+          "Ask the child to reference its prior inspection and return one extra concise finding.",
+          "After the child returns, answer with the exact token OHBABY_REAL_SUBAGENT_RESUME_OK.",
+        ].join(" "),
+        { sessionId: parentSessionId },
+      );
+
+      const childMessages = getDatabase()
+        .prepare<{ readonly count: number }>(
+          `SELECT COUNT(*) AS count
+           FROM ${schema.message.tableName}
+           WHERE session_id = ?`,
+        )
+        .get(child.id);
+      expect(childMessages?.count ?? 0).toBeGreaterThanOrEqual(4);
+      const finalText = JSON.stringify((await client.getSnapshot()).sessions);
+      expect(finalText).toContain("OHBABY_REAL_SUBAGENT_FIRST_OK");
+      expect(finalText).toContain("OHBABY_REAL_SUBAGENT_RESUME_OK");
+    },
+    600_000,
   );
 });

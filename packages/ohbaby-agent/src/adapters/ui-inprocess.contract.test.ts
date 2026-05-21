@@ -44,6 +44,22 @@ interface FakeSdkClient {
   readonly kind: "fake";
 }
 
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function createProviderStream(
   events: readonly ProviderStreamEvent[],
 ): AsyncGenerator<ProviderStreamEvent, void, unknown> {
@@ -121,6 +137,87 @@ function createSequentialFakeLLMClient(
   };
 }
 
+function createAbortError(): Error {
+  const error = new Error("aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+function createAbortableProviderStream(
+  signal: AbortSignal | undefined,
+): AsyncGenerator<ProviderStreamEvent, void, unknown> {
+  return (async function* (): AsyncGenerator<
+    ProviderStreamEvent,
+    void,
+    unknown
+  > {
+    if (!signal) {
+      await new Promise(() => undefined);
+      return;
+    }
+    if (signal.aborted) {
+      throw createAbortError();
+    }
+    await new Promise<void>((_resolve, reject) => {
+      signal.addEventListener(
+        "abort",
+        () => {
+          reject(createAbortError());
+        },
+        { once: true },
+      );
+    });
+    yield { textDelta: "", finishReason: "stop" };
+  })();
+}
+
+function createAbortableSubagentLLMClient(
+  requests: ProviderRequest[],
+  childStarted: Deferred<AbortSignal | undefined>,
+): LLMClientInstance<FakeSdkClient> {
+  let nextRequest = 0;
+
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: ProviderRequest,
+      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        requests.push(request);
+        nextRequest += 1;
+        if (nextRequest === 1) {
+          return Promise.resolve(
+            createProviderStream([
+              taskToolCallEvent({
+                callId: "call_task_long",
+                description: "Long child",
+                prompt: "Run until cancelled",
+              }),
+            ]),
+          );
+        }
+        if (nextRequest === 2) {
+          childStarted.resolve(request.signal);
+          return Promise.resolve(createAbortableProviderStream(request.signal));
+        }
+        return Promise.reject(new Error("No fake LLM response configured"));
+      },
+      isAbortError(error: unknown): boolean {
+        return error instanceof Error && error.name === "AbortError";
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      baseUrl: "https://example.invalid/v1",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
 function writeToolCallEvent(input: {
   readonly callId: string;
   readonly content: string;
@@ -136,6 +233,50 @@ function writeToolCallEvent(input: {
         id: input.callId,
         index: 0,
         name: "write",
+      },
+    ],
+    finishReason: "tool_calls",
+  };
+}
+
+function taskToolCallEvent(input: {
+  readonly agentName?: string;
+  readonly callId: string;
+  readonly description?: string;
+  readonly prompt: string;
+  readonly resumeSessionId?: string;
+}): ProviderStreamEvent {
+  return {
+    toolCallDeltas: [
+      {
+        argumentsDelta: JSON.stringify({
+          agent_name: input.agentName ?? "explore",
+          description: input.description,
+          prompt: input.prompt,
+          resume_session_id: input.resumeSessionId,
+        }),
+        id: input.callId,
+        index: 0,
+        name: "task",
+      },
+    ],
+    finishReason: "tool_calls",
+  };
+}
+
+function listToolCallEvent(input: {
+  readonly callId: string;
+  readonly path: string;
+}): ProviderStreamEvent {
+  return {
+    toolCallDeltas: [
+      {
+        argumentsDelta: JSON.stringify({
+          path: input.path,
+        }),
+        id: input.callId,
+        index: 0,
+        name: "list",
       },
     ],
     finishReason: "tool_calls",
@@ -597,6 +738,163 @@ describe("createInProcessUiBackendClient", () => {
       parts[1]?.type === "tool-result" ? parts[1].result.output : "",
     ).toContain("builtin.ts");
     expect(parts[2]).toEqual({ type: "text", text: "Listed." });
+  });
+
+  it("runs task subagents in isolated resumable child sessions with child history", async () => {
+    const requests: ProviderRequest[] = [];
+    const client = createInProcessUiBackendClient({
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            taskToolCallEvent({
+              callId: "call_task_first",
+              description: "Explore auth",
+              prompt: "Find auth files",
+            }),
+          ],
+          [{ textDelta: "child found auth.ts", finishReason: "stop" }],
+          [{ textDelta: "parent saw child 1", finishReason: "stop" }],
+          [
+            taskToolCallEvent({
+              callId: "call_task_resume",
+              description: "Resume auth",
+              prompt: "Use the same child session",
+              resumeSessionId: "subagent_session_1",
+            }),
+          ],
+          [{ textDelta: "child used prior auth.ts", finishReason: "stop" }],
+          [{ textDelta: "parent saw child 2", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+
+    await client.submitPrompt("Delegate auth exploration");
+    await client.submitPrompt("Continue the same exploration", {
+      sessionId: "session_1",
+    });
+
+    expect(requests).toHaveLength(6);
+    const firstChildText = JSON.stringify(requests[1]?.messages);
+    expect(firstChildText).toContain("focused code exploration subagent");
+    expect(firstChildText).toContain("Find auth files");
+    expect(firstChildText).not.toContain("Delegate auth exploration");
+
+    const resumedChildText = JSON.stringify(requests[4]?.messages);
+    expect(resumedChildText).toContain("focused code exploration subagent");
+    expect(resumedChildText).toContain("Find auth files");
+    expect(resumedChildText).toContain("child found auth.ts");
+    expect(resumedChildText).toContain("Use the same child session");
+    expect(resumedChildText).not.toContain("Delegate auth exploration");
+    expect(resumedChildText).not.toContain("Continue the same exploration");
+    expect(resumedChildText).not.toContain("parent saw child 1");
+
+    const parentToolResultText = JSON.stringify(requests[2]?.messages);
+    expect(parentToolResultText).toContain("subagent_session_1");
+    expect(parentToolResultText).toContain("child found auth.ts");
+  });
+
+  it("applies subagent agent maxSteps through runtime composition", async () => {
+    const requests: ProviderRequest[] = [];
+    const registry = new AgentRegistry({
+      builtinAgents: [
+        {
+          default: true,
+          description: "Primary test agent",
+          mode: "primary",
+          name: "main",
+          tools: { include: ["task"] },
+        },
+        {
+          description: "One-step child test agent",
+          maxSteps: 1,
+          mode: "subagent",
+          name: "shorty",
+          tools: { include: ["list"] },
+        },
+      ],
+      configLoader: (): AgentsConfig => ({ agents: {} }),
+    });
+    const agentManager = new AgentManager({ registry });
+    const client = createInProcessUiBackendClient({
+      agentManager,
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            taskToolCallEvent({
+              agentName: "shorty",
+              callId: "call_task_short",
+              description: "Short max steps",
+              prompt: "List once and stop",
+            }),
+          ],
+          [
+            listToolCallEvent({
+              callId: "call_child_list",
+              path: "packages/ohbaby-agent/src/tools",
+            }),
+          ],
+          [{ textDelta: "parent saw max steps bridge", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+
+    await client.submitPrompt("Delegate to a one step child");
+
+    expect(requests).toHaveLength(3);
+    const parentToolMessage = requests[2]?.messages.at(-1);
+    const parentToolPayload =
+      typeof parentToolMessage?.content === "string"
+        ? (JSON.parse(parentToolMessage.content) as {
+            readonly metadata?: {
+              readonly subagent?: {
+                readonly success?: boolean;
+              };
+            };
+            readonly output?: string;
+          })
+        : undefined;
+    expect(parentToolPayload?.output).toContain(
+      "Lifecycle did not complete successfully",
+    );
+    expect(parentToolPayload?.metadata?.subagent?.success).toBe(false);
+  });
+
+  it("cancels an active task subagent when the parent prompt is aborted", async () => {
+    const requests: ProviderRequest[] = [];
+    const childStarted = createDeferred<AbortSignal | undefined>();
+    const runLedger = createInMemoryRunLedger();
+    const client = createInProcessUiBackendClient({
+      createRunId: (() => {
+        let nextRun = 1;
+        return (): string => {
+          const runId = `run_${String(nextRun)}`;
+          nextRun += 1;
+          return runId;
+        };
+      })(),
+      llmClient: createAbortableSubagentLLMClient(requests, childStarted),
+      runLedger,
+    });
+
+    const run = client.submitPrompt("Delegate long work");
+    const childSignal = await withTimeout(
+      childStarted.promise,
+      1_000,
+      "child subagent did not start",
+    );
+
+    await client.abortRun();
+
+    expect(childSignal?.aborted).toBe(true);
+    await expect(
+      withTimeout(run, 1_000, "parent did not abort"),
+    ).rejects.toThrow("run aborted");
+    await expect(runLedger.get("run_2")).resolves.toMatchObject({
+      sessionId: "subagent_session_1",
+      status: "cancelled",
+    });
   });
 
   it("continues the LLM loop after allow_once tool permission", async () => {

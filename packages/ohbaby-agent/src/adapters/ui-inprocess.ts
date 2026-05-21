@@ -203,6 +203,10 @@ function sessionMetadataToUiSession(session: CoreSession): UiSession {
   };
 }
 
+function isPrimarySession(session: CoreSession): boolean {
+  return !session.isSubagent;
+}
+
 function maxMessageTimestamp(
   messages: readonly MessageWithParts[],
 ): number | undefined {
@@ -323,10 +327,11 @@ export function createInProcessUiBackendClient(
   }
 
   async function nextRunId(): Promise<string> {
-    let runId = runIds.next();
+    let runId = options.createRunId?.() ?? runIds.next();
     while ((await stateStore.hasRun?.(runId)) === true) {
-      runId = runIds.next();
+      runId = options.createRunId?.() ?? runIds.next();
     }
+    runIds.reserve(runId);
     return runId;
   }
 
@@ -531,6 +536,7 @@ export function createInProcessUiBackendClient(
         permission,
         policy,
         runLedger: options.runLedger,
+        sessionManager: options.sessionManager,
         streamBridge: options.streamBridge,
         workdir: baseProjectRoot,
       });
@@ -583,7 +589,7 @@ export function createInProcessUiBackendClient(
   > {
     if (options.sessionManager) {
       const sessions = await options.sessionManager.getRecent();
-      return sessions.map((session) => ({
+      return sessions.filter(isPrimarySession).map((session) => ({
         id: session.id,
         title: session.title,
       }));
@@ -593,6 +599,20 @@ export function createInProcessUiBackendClient(
       id: session.id,
       title: session.title,
     }));
+  }
+
+  async function assertCanUseAsPrimarySession(
+    sessionId: string | undefined,
+  ): Promise<void> {
+    if (!sessionId || !options.sessionManager) {
+      return;
+    }
+    const session = await options.sessionManager.get(sessionId);
+    if (session?.isSubagent === true) {
+      throw new Error(
+        `Cannot submit a primary prompt to subagent session: ${sessionId}`,
+      );
+    }
   }
 
   async function syncSessionStatsBestEffort(sessionId: string): Promise<void> {
@@ -649,6 +669,7 @@ export function createInProcessUiBackendClient(
     sessions: {
       listSessions: listSessionsFromState,
       async selectSession(sessionId: string): Promise<void> {
+        await assertCanUseAsPrimarySession(sessionId);
         const session = await stateStore.getSession(sessionId);
         if (!session) {
           throw new Error(`Session not found: ${sessionId}`);
@@ -800,7 +821,6 @@ export function createInProcessUiBackendClient(
         throw new Error("A prompt is already running");
       }
       assertStateStoreWritable();
-
       promptInFlight = true;
       const createdAt = timestamp();
       let projection: ReturnType<typeof startRunStreamProjection> | undefined;
@@ -808,6 +828,7 @@ export function createInProcessUiBackendClient(
       let submittedSessionId: string | undefined;
 
       try {
+        await assertCanUseAsPrimarySession(submitOptions?.sessionId);
         await reserveIdsFromState();
         const runtime = await getRuntimeForPrompt();
         const agentName = runtime.agentManager.getDefault();

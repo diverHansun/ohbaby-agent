@@ -210,15 +210,22 @@ export class RunWorker {
       sessionId: this.context.sessionId,
       messages: this.context.messages,
       signal: this.context.abortSignal,
-      ...(this.context.agent === undefined ? {} : { agent: this.context.agent }),
+      ...(this.context.agent === undefined
+        ? {}
+        : { agent: this.context.agent }),
       ...(this.context.isSubagent === undefined
         ? {}
         : { isSubagent: this.context.isSubagent }),
       ...(this.context.parentMessageId === undefined
         ? {}
         : { parentMessageId: this.context.parentMessageId }),
+      ...(this.context.maxSteps === undefined
+        ? {}
+        : { maxSteps: this.context.maxSteps }),
       ...(environment === undefined ? {} : { environment }),
-      ...(this.context.tools === undefined ? {} : { tools: this.context.tools }),
+      ...(this.context.tools === undefined
+        ? {}
+        : { tools: this.context.tools }),
     };
   }
 

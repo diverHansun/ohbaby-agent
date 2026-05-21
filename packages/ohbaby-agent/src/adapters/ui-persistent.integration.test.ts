@@ -8,7 +8,11 @@ import type {
   ProviderStreamEvent,
 } from "../services/providers/index.js";
 import type { LLMClientInstance } from "../core/llm-client/index.js";
-import { closeDatabase, getDatabase, schema } from "../services/database/index.js";
+import {
+  closeDatabase,
+  getDatabase,
+  schema,
+} from "../services/database/index.js";
 import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
 import type { SnapshotService } from "../snapshot/index.js";
 import { createPersistentUiBackendClient } from "./ui-persistent.js";
@@ -42,6 +46,63 @@ function createFakeLLMClient(
       streamChatCompletion(
         _request: ProviderRequest,
       ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        return Promise.resolve(createProviderStream(events));
+      },
+      isAbortError(): boolean {
+        return false;
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      baseUrl: "https://example.invalid/v1",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
+function createProviderTaskEvent(input: {
+  readonly callId: string;
+  readonly prompt: string;
+}): ProviderStreamEvent {
+  return {
+    finishReason: "tool_calls",
+    toolCallDeltas: [
+      {
+        argumentsDelta: JSON.stringify({
+          agent_name: "explore",
+          description: "Persistent child",
+          prompt: input.prompt,
+        }),
+        id: input.callId,
+        index: 0,
+        name: "task",
+      },
+    ],
+  };
+}
+
+function createSequentialFakeLLMClient(
+  eventBatches: readonly (readonly ProviderStreamEvent[])[],
+  requests: ProviderRequest[],
+): LLMClientInstance<FakeSdkClient> {
+  let nextBatch = 0;
+
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: ProviderRequest,
+      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        if (nextBatch >= eventBatches.length) {
+          return Promise.reject(new Error("No fake LLM response configured"));
+        }
+        requests.push(request);
+        const events = eventBatches[nextBatch];
+        nextBatch += 1;
         return Promise.resolve(createProviderStream(events));
       },
       isAbortError(): boolean {
@@ -144,10 +205,9 @@ describe("createPersistentUiBackendClient", () => {
 
       expect(snapshot.activeSessionId).toBe(snapshot.sessions[0]?.id);
       expect(snapshot.sessions).toHaveLength(1);
-      expect(snapshot.sessions[0].messages.map((message) => message.role)).toEqual([
-        "user",
-        "assistant",
-      ]);
+      expect(
+        snapshot.sessions[0].messages.map((message) => message.role),
+      ).toEqual(["user", "assistant"]);
       expect(snapshot.sessions[0].messages[0].parts).toEqual([
         { type: "text", text: "Remember this" },
       ]);
@@ -156,6 +216,119 @@ describe("createPersistentUiBackendClient", () => {
       ]);
       expect(snapshot.runs).toHaveLength(1);
       expect(snapshot.runs[0].status).toEqual({ kind: "idle" });
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("persists task subagent child sessions, transcripts, and run ledger entries", async () => {
+    const directory = await tempDir("ohbaby-persistent-subagent-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      const requests: ProviderRequest[] = [];
+      const client = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createSequentialFakeLLMClient(
+          [
+            [
+              createProviderTaskEvent({
+                callId: "call_task",
+                prompt: "Inspect persistent child files",
+              }),
+            ],
+            [{ textDelta: "child transcript persisted", finishReason: "stop" }],
+            [{ textDelta: "parent got child result", finishReason: "stop" }],
+          ],
+          requests,
+        ),
+        workdir,
+      });
+
+      await client.submitPrompt("Delegate persistent child work");
+      const parentSessionId = (await client.getSnapshot()).activeSessionId;
+      if (!parentSessionId) {
+        throw new Error("expected parent session");
+      }
+
+      const childRows = getDatabase()
+        .prepare<{
+          readonly id: string;
+          readonly agent: string | null;
+          readonly data: string;
+          readonly parent_id: string | null;
+        }>(
+          `SELECT id, agent, parent_id, data
+           FROM ${schema.session.tableName}
+           WHERE parent_id = ?`,
+        )
+        .all(parentSessionId);
+      expect(childRows).toHaveLength(1);
+      const childId = childRows[0].id;
+      expect(childRows[0]).toMatchObject({
+        agent: "explore",
+        parent_id: parentSessionId,
+      });
+      expect(JSON.parse(childRows[0].data)).toMatchObject({
+        isSubagent: true,
+      });
+
+      const childRuns = getDatabase()
+        .prepare<{
+          readonly run_id: string;
+          readonly status: string;
+        }>(
+          `SELECT run_id, status
+           FROM ${schema.runLedger.tableName}
+           WHERE session_id = ?`,
+        )
+        .all(childId);
+      expect(childRuns).toEqual([
+        expect.objectContaining({ status: "succeeded" }),
+      ]);
+
+      const restored = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        workdir,
+      });
+      const restoredSnapshot = await restored.getSnapshot();
+      expect(
+        restoredSnapshot.sessions.some((session) => session.id === childId),
+      ).toBe(false);
+      await expect(
+        restored.submitPrompt("Should not run as primary", {
+          sessionId: childId,
+        }),
+      ).rejects.toThrow("Cannot submit a primary prompt to subagent session");
+
+      const childMessages = getDatabase()
+        .prepare<{
+          readonly data: string;
+          readonly role: string;
+        }>(
+          `SELECT role, data
+           FROM ${schema.message.tableName}
+           WHERE session_id = ?
+           ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(childId);
+      expect(childMessages.map((message) => message.role)).toEqual([
+        "user",
+        "assistant",
+      ]);
+      const childParts = getDatabase()
+        .prepare<{ readonly data: string }>(
+          `SELECT data
+           FROM ${schema.part.tableName}
+           WHERE session_id = ?
+           ORDER BY created_at ASC, order_index ASC`,
+        )
+        .all(childId);
+      const childTranscript = JSON.stringify(childParts);
+      expect(childTranscript).toContain("Inspect persistent child files");
+      expect(childTranscript).toContain("child transcript persisted");
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
@@ -207,11 +380,13 @@ describe("createPersistentUiBackendClient", () => {
 
       expect(snapshot.status).toEqual({ kind: "idle" });
       expect(stalePending.status.kind).toBe("error");
-      expect(stalePending.status.kind === "error" ? stalePending.status.message : "")
-        .toContain("interrupted");
+      expect(
+        stalePending.status.kind === "error" ? stalePending.status.message : "",
+      ).toContain("interrupted");
       expect(staleRunning.status.kind).toBe("error");
-      expect(staleRunning.status.kind === "error" ? staleRunning.status.message : "")
-        .toContain("interrupted");
+      expect(
+        staleRunning.status.kind === "error" ? staleRunning.status.message : "",
+      ).toContain("interrupted");
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

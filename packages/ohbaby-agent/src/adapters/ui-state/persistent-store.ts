@@ -33,6 +33,7 @@ const DEFAULT_SESSION_LIMIT = 50;
 const ACTIVE_SESSION_ID_KEY = "activeSessionId";
 const DEFAULT_APP_STATE_SCOPE = "global";
 const ACTIVE_RUN_STATUSES = new Set<RunStatus>(["pending", "running"]);
+const SESSION_TRANSACTION_ACTIVE_MESSAGE = "Session transaction is active";
 
 export interface UiAppStateStore {
   getActiveSessionId(): Promise<string | null>;
@@ -212,6 +213,38 @@ function isActiveRun(record: RunLedgerRecord): boolean {
   return ACTIVE_RUN_STATUSES.has(record.status);
 }
 
+function isPrimarySession(session: Session): boolean {
+  return !session.isSubagent;
+}
+
+function isSessionTransactionActiveError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes(SESSION_TRANSACTION_ACTIVE_MESSAGE)
+  );
+}
+
+async function afterAsyncBoundary(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
+async function withSessionTransactionRetry<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isSessionTransactionActiveError(error) || attempt >= 20) {
+        throw error;
+      }
+      await afterAsyncBoundary();
+    }
+  }
+}
+
 async function applyRunUpdate(runLedger: RunLedger, run: UiRun): Promise<void> {
   const existing = await runLedger.get(run.id);
   if (existing && existing.sessionId !== run.sessionId) {
@@ -331,7 +364,11 @@ export function createPersistentUiStateStore(
     readonly sessions: readonly Session[];
   }> {
     const activeSessionId = await options.appState.getActiveSessionId();
-    const recentSessions = await options.sessionManager.getRecent(sessionLimit);
+    const recentSessions = (
+      await withSessionTransactionRetry(() =>
+        options.sessionManager.getRecent(sessionLimit),
+      )
+    ).filter(isPrimarySession);
     if (
       activeSessionId === null ||
       recentSessions.some((session) => session.id === activeSessionId)
@@ -342,8 +379,10 @@ export function createPersistentUiStateStore(
       };
     }
 
-    const activeSession = await options.sessionManager.get(activeSessionId);
-    if (!activeSession) {
+    const activeSession = await withSessionTransactionRetry(() =>
+      options.sessionManager.get(activeSessionId),
+    );
+    if (!activeSession || !isPrimarySession(activeSession)) {
       return {
         activeSessionId: null,
         sessions: recentSessions,
@@ -387,19 +426,27 @@ export function createPersistentUiStateStore(
     },
 
     async getSession(sessionId: string): Promise<UiSession | undefined> {
-      const session = await options.sessionManager.get(sessionId);
-      return session ? readUiSession(session) : undefined;
+      const session = await withSessionTransactionRetry(() =>
+        options.sessionManager.get(sessionId),
+      );
+      return session && isPrimarySession(session)
+        ? readUiSession(session)
+        : undefined;
     },
 
     async upsertSession(session: UiSession): Promise<void> {
-      const existing = await options.sessionManager.get(session.id);
+      const existing = await withSessionTransactionRetry(() =>
+        options.sessionManager.get(session.id),
+      );
       if (!existing) {
         return;
       }
       if (existing.title !== session.title) {
-        await options.sessionManager.update(session.id, {
-          title: session.title,
-        });
+        await withSessionTransactionRetry(() =>
+          options.sessionManager.update(session.id, {
+            title: session.title,
+          }),
+        );
       }
     },
 

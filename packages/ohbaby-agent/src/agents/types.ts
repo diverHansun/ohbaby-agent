@@ -116,6 +116,13 @@ export interface SubagentMessageWriter {
     readonly agentName: string;
     readonly prompt: string;
   }): Promise<{ readonly messageId?: string } | undefined> | Promise<void>;
+  writeAssistantMessage?(input: {
+    readonly sessionId: string;
+    readonly parentSessionId: string;
+    readonly agentName: string;
+    readonly parentMessageId?: string;
+    readonly output: string;
+  }): Promise<void>;
 }
 
 export interface SubagentRunnerResult {
@@ -129,8 +136,10 @@ export interface SubagentRunner {
   run(input: {
     readonly sessionId: string;
     readonly parentSessionId: string;
+    readonly projectRoot?: string;
     readonly agentName: string;
     readonly prompt: string;
+    readonly parentMessageId?: string;
     readonly runtimeAgent: RuntimeAgent;
     readonly signal?: AbortSignal;
     readonly environment?: ToolExecutionEnvironment;

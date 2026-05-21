@@ -23,6 +23,7 @@ import {
   type ToolDefinition,
 } from "../../core/tool-scheduler/index.js";
 import { createHeuristicTokenCounter } from "../../services/llm-model/index.js";
+import type { SessionManager } from "../../services/session/index.js";
 import {
   AgentManager,
   SubagentExecutor,
@@ -112,11 +113,21 @@ export interface UiRuntimeCompositionOptions {
   readonly permission?: PermissionPort;
   readonly policy: PolicyPort;
   readonly runLedger?: RunLedger;
+  readonly sessionManager?: Pick<SessionManager, "create" | "get">;
   readonly streamBridge?: StreamBridge;
   readonly workdir?: string;
 }
 
-class InMemorySubagentSessionManager implements SubagentSessionManager {
+interface RuntimeSubagentSessionManager extends SubagentSessionManager {
+  ensureRoot(input: {
+    readonly agentName: string;
+    readonly id: string;
+    readonly projectRoot: string;
+    readonly title?: string;
+  }): Promise<void>;
+}
+
+class InMemorySubagentSessionManager implements RuntimeSubagentSessionManager {
   private readonly sessions = new Map<string, SubagentSession>();
   private nextId = 1;
 
@@ -124,7 +135,8 @@ class InMemorySubagentSessionManager implements SubagentSessionManager {
     readonly agentName: string;
     readonly id: string;
     readonly projectRoot: string;
-  }): void {
+    readonly title?: string;
+  }): Promise<void> {
     const existing = this.sessions.get(input.id);
     this.sessions.set(input.id, {
       id: input.id,
@@ -133,6 +145,7 @@ class InMemorySubagentSessionManager implements SubagentSessionManager {
       isSubagent: false,
       projectRoot: input.projectRoot,
     });
+    return Promise.resolve();
   }
 
   create(
@@ -171,6 +184,44 @@ class InMemorySubagentSessionManager implements SubagentSessionManager {
 
   get(sessionId: string): Promise<SubagentSession | null> {
     return Promise.resolve(this.sessions.get(sessionId) ?? null);
+  }
+}
+
+class PersistentSubagentSessionManager implements RuntimeSubagentSessionManager {
+  constructor(
+    private readonly backing: Pick<SessionManager, "create" | "get">,
+  ) {}
+
+  async ensureRoot(input: {
+    readonly agentName: string;
+    readonly id: string;
+    readonly projectRoot: string;
+    readonly title?: string;
+  }): Promise<void> {
+    if (await this.backing.get(input.id)) {
+      return;
+    }
+    await this.backing.create(input.projectRoot, {
+      agentName: input.agentName,
+      id: input.id,
+      title: input.title,
+    });
+  }
+
+  create(
+    projectDirectory: string,
+    options: {
+      readonly id?: string;
+      readonly title?: string;
+      readonly agentName?: string;
+      readonly parentId?: string;
+    } = {},
+  ): Promise<SubagentSession> {
+    return this.backing.create(projectDirectory, options);
+  }
+
+  get(sessionId: string): Promise<SubagentSession | null> {
+    return this.backing.get(sessionId);
   }
 }
 
@@ -232,8 +283,11 @@ export async function createUiRuntimeComposition(
     policy: options.policy,
   });
   const sandboxManager = createHostLocalSandboxManager(options.workdir);
-  const sessionManager = new InMemorySubagentSessionManager();
-  const subagentParentMessages = new Map<string, string>();
+  const sessionManager: RuntimeSubagentSessionManager = options.sessionManager
+    ? new PersistentSubagentSessionManager(options.sessionManager)
+    : new InMemorySubagentSessionManager();
+  const subagentSessionAgents = new Map<string, string>();
+  let activePrimaryAgentName = agentManager.getDefault();
   const reservedRunIds: string[] = [];
   const nextRunId =
     options.createRunId ??
@@ -275,6 +329,69 @@ export async function createUiRuntimeComposition(
     };
   }
 
+  async function resolveSubagentAgentName(
+    sessionId: string,
+  ): Promise<string | undefined> {
+    const cached = subagentSessionAgents.get(sessionId);
+    if (cached) {
+      return cached;
+    }
+    return (await sessionManager.get(sessionId))?.agentName;
+  }
+
+  async function resolvePromptAgentName(input: {
+    readonly isSubagent: boolean;
+    readonly sessionId: string;
+  }): Promise<string> {
+    if (!input.isSubagent) {
+      return activePrimaryAgentName;
+    }
+    return (await resolveSubagentAgentName(input.sessionId)) ?? "subagent";
+  }
+
+  async function buildRunMessages(input: {
+    readonly agentName: string;
+    readonly isSubagent: boolean;
+    readonly projectRoot: string;
+    readonly sessionId: string;
+  }): Promise<ChatCompletionMessage[]> {
+    if (input.isSubagent) {
+      subagentSessionAgents.set(input.sessionId, input.agentName);
+    } else {
+      activePrimaryAgentName = input.agentName;
+    }
+    const compactResult = await contextManager.compact(input.sessionId, {
+      directory: input.projectRoot,
+      isSubagent: input.isSubagent,
+      modelId: options.llmClient.config.model,
+    });
+    const notice = noticeFromCompactResult(input.sessionId, compactResult);
+    if (notice) {
+      options.onNotice?.(notice);
+    }
+
+    const context = await contextManager.assemble(
+      input.sessionId,
+      input.projectRoot,
+      input.isSubagent,
+    );
+    const systemPrompt = input.isSubagent
+      ? context.systemPrompt
+      : appendMemoryToSystemPrompt(
+          context.systemPrompt,
+          loadMemoryForPrompt(context.memory.merged, (finding) => {
+            options.onNotice?.(noticeFromPromptSecurityFinding(finding));
+          }),
+        );
+    const history = withoutSystemMessages(
+      await options.messageManager.toModelMessages(input.sessionId),
+    );
+    if (systemPrompt.trim() === "") {
+      return history;
+    }
+    return [{ role: "system", content: systemPrompt }, ...history];
+  }
+
   const subagentRunner: SubagentRunner = {
     async run(input): Promise<{
       readonly output: string;
@@ -282,20 +399,25 @@ export async function createUiRuntimeComposition(
       readonly success: boolean;
       readonly toolCalls?: readonly [];
     }> {
+      subagentSessionAgents.set(input.sessionId, input.agentName);
       const tools = await toolScheduler.getAvailableTools({
         agentName: input.agentName,
         isSubagent: true,
       });
       sandboxManager.setSessionEnvironment(input.sessionId, input.environment);
       try {
+        const messages = await buildRunMessages({
+          agentName: input.agentName,
+          isSubagent: true,
+          projectRoot: input.projectRoot ?? options.workdir ?? process.cwd(),
+          sessionId: input.sessionId,
+        });
         const record = await runManager.create({
           agent: input.agentName,
           isSubagent: true,
-          messages: [
-            { role: "system", content: input.runtimeAgent.systemPrompt },
-            { role: "user", content: input.prompt },
-          ],
-          parentMessageId: subagentParentMessages.get(input.sessionId),
+          maxSteps: input.runtimeAgent.config.maxSteps,
+          messages,
+          parentMessageId: input.parentMessageId,
           sessionId: input.sessionId,
           tools: toOpenAiTools(tools),
           triggerSource: "user",
@@ -335,8 +457,26 @@ export async function createUiRuntimeComposition(
           text: input.prompt,
           type: "text",
         });
-        subagentParentMessages.set(input.sessionId, message.id);
         return { messageId: message.id };
+      },
+      async writeAssistantMessage(input): Promise<void> {
+        const message = await options.messageManager.createMessage({
+          agent: input.agentName,
+          parentId: input.parentMessageId,
+          role: "assistant",
+          sessionId: input.sessionId,
+        });
+        await options.messageManager.appendPart(message.id, {
+          text: input.output,
+          type: "text",
+        });
+        await options.messageManager.updateMessage(message.id, {
+          error: {
+            message: input.output,
+            name: "Unknown",
+          },
+          finish: "error",
+        });
       },
     },
     runner: subagentRunner,
@@ -347,17 +487,19 @@ export async function createUiRuntimeComposition(
     toolScheduler.register(tool);
   }
 
-  let activePrimaryAgentName = agentManager.getDefault();
   const systemPromptProvider = createSystemPromptProvider({
     agentNameResolver(input) {
-      return input.isSubagent ? "subagent" : activePrimaryAgentName;
+      return resolvePromptAgentName(input);
     },
     agentPromptResolver(agentName) {
       return agentManager.get(agentName)?.prompt;
     },
     async toolsProvider(input) {
+      const agentName = input.isSubagent
+        ? await resolveSubagentAgentName(input.sessionId)
+        : activePrimaryAgentName;
       const tools = await toolScheduler.getAvailableTools({
-        agentName: input.isSubagent ? undefined : activePrimaryAgentName,
+        agentName,
         isSubagent: input.isSubagent,
       });
       return tools.map((tool) => tool.name);
@@ -424,13 +566,13 @@ export async function createUiRuntimeComposition(
       );
     },
 
-    ensureSessionRecord(input): Promise<void> {
-      sessionManager.ensureRoot({
+    async ensureSessionRecord(input): Promise<void> {
+      await sessionManager.ensureRoot({
         agentName: input.agentName,
         id: input.id,
         projectRoot: input.projectRoot,
+        title: input.title,
       });
-      return Promise.resolve();
     },
 
     async getOpenAiTools(input): Promise<ChatCompletionCreateParams["tools"]> {
@@ -443,34 +585,12 @@ export async function createUiRuntimeComposition(
     },
 
     async buildPromptMessages(input): Promise<ChatCompletionMessage[]> {
-      activePrimaryAgentName = input.agentName;
-      const compactResult = await contextManager.compact(input.sessionId, {
-        directory: input.projectRoot,
-        modelId: options.llmClient.config.model,
+      return buildRunMessages({
+        agentName: input.agentName,
+        isSubagent: false,
+        projectRoot: input.projectRoot,
+        sessionId: input.sessionId,
       });
-      const notice = noticeFromCompactResult(input.sessionId, compactResult);
-      if (notice) {
-        options.onNotice?.(notice);
-      }
-
-      const context = await contextManager.assemble(
-        input.sessionId,
-        input.projectRoot,
-        false,
-      );
-      const systemPrompt = appendMemoryToSystemPrompt(
-        context.systemPrompt,
-        loadMemoryForPrompt(context.memory.merged, (finding) => {
-          options.onNotice?.(noticeFromPromptSecurityFinding(finding));
-        }),
-      );
-      const history = withoutSystemMessages(
-        await options.messageManager.toModelMessages(input.sessionId),
-      );
-      if (systemPrompt.trim() === "") {
-        return history;
-      }
-      return [{ role: "system", content: systemPrompt }, ...history];
     },
 
     async listToolSummaries(

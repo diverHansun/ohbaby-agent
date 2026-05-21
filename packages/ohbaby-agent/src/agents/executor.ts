@@ -55,17 +55,20 @@ export class SubagentExecutor implements TaskExecutor {
         );
       }
       const session = await this.resolveSession(params);
-      await this.options.messageWriter?.writeUserMessage({
+      const writeResult = await this.options.messageWriter?.writeUserMessage({
         agentName: params.agentName,
         parentSessionId: params.parentSessionId,
         prompt: params.prompt,
         sessionId: session.id,
       });
+      const parentMessageId = writeResult?.messageId;
       try {
         const result = await this.options.runner.run({
           agentName: params.agentName,
           environment: params.environment,
+          parentMessageId,
           parentSessionId: params.parentSessionId,
+          projectRoot: session.projectRoot,
           prompt: params.prompt,
           runtimeAgent,
           sessionId: session.id,
@@ -82,8 +85,16 @@ export class SubagentExecutor implements TaskExecutor {
           },
         };
       } catch (error) {
+        const output = errorMessage(error);
+        await this.options.messageWriter?.writeAssistantMessage?.({
+          agentName: params.agentName,
+          output,
+          parentMessageId,
+          parentSessionId: params.parentSessionId,
+          sessionId: session.id,
+        });
         return {
-          output: errorMessage(error),
+          output,
           sessionId: session.id,
           success: false,
           summary: {

@@ -209,6 +209,7 @@ export class RunManager {
         agent: record.options.agent,
         isSubagent: record.options.isSubagent,
         parentMessageId: record.options.parentMessageId,
+        maxSteps: record.options.maxSteps,
         messages: record.options.messages,
         tools: record.options.tools,
       };
