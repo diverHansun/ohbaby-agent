@@ -516,7 +516,7 @@ function truncateIfTooLong(
 // 模块初始化时
 import { Log } from '@/utils'
 
-const log = Log.create({ service: 'bash-tool' })
+const log = Log.create({ service: 'bash' })
 
 // 记录信息
 log.info('Command executed', { command: 'ls', exitCode: 0 })

@@ -16,7 +16,7 @@
 |------|------|------|
 | name | string | 工具唯一标识符 |
 | description | string | 工具功能描述（供 LLM 理解） |
-| parameters | ZodSchema | 参数定义和验证 |
+| parametersJsonSchema | JSON Schema | 参数定义和模型侧调用提示 |
 | execute | function | 执行函数 |
 
 ### 1.2 ToolContext（执行上下文）
@@ -36,7 +36,7 @@
 
 | 字段 | 说明 |
 |------|------|
-| content | 主要输出内容（字符串） |
+| output | 主要输出内容（字符串） |
 | metadata | 可选的元数据（用于 UI 显示） |
 | error | 可选的错误信息 |
 
@@ -48,15 +48,20 @@
 
 ```typescript
 // 工具定义接口
-interface Tool<TParams = unknown> {
+interface Tool {
   name: string
   description: string
-  parameters: z.ZodType<TParams>
-  execute: (params: TParams, context: ToolContext) => Promise<ToolOutput>
+  parametersJsonSchema: Record<string, unknown>
+  source: 'builtin'
+  category: 'readonly' | 'write' | 'dangerous'
+  execute: (
+    params: Record<string, unknown>,
+    context: ToolExecutionContext,
+  ) => Promise<ToolExecutionResult>
 }
 
 // 执行上下文
-interface ToolContext {
+interface ToolExecutionContext {
   sessionId: string
   messageId: string
   callId: string
@@ -64,10 +69,9 @@ interface ToolContext {
 }
 
 // 工具输出
-interface ToolOutput {
-  content: string
+interface ToolExecutionResult {
+  output?: string
   metadata?: Record<string, unknown>
-  error?: ToolError
 }
 
 // 工具错误
@@ -91,18 +95,9 @@ type ToolErrorType =
   | 'OutputTruncatedWarning'
 ```
 
-### 2.3 工具定义辅助函数
+### 2.3 工具定义方式
 
-```typescript
-namespace Tool {
-  function define<TParams>(config: {
-    name: string
-    description: string
-    parameters: z.ZodType<TParams>
-    execute: (params: TParams, context: ToolContext) => Promise<ToolOutput>
-  }): Tool<TParams>
-}
-```
+当前内置工具直接返回符合 `Tool` 接口的对象，并使用 `parametersJsonSchema` 声明参数；不在本轮引入 Zod 重写。
 
 ---
 
@@ -124,6 +119,8 @@ const ReadParams = z.object({
 const WriteParams = z.object({
   file_path: z.string().describe('要写入的文件的绝对路径'),
   content: z.string().describe('要写入的内容'),
+  expected_mtime_ms: z.number().optional().describe('覆盖既有文件时必须提供的 mtime 校验值'),
+  dry_run: z.boolean().optional().describe('仅返回 Unified Diff 预览，不写入文件'),
 })
 ```
 
@@ -134,7 +131,9 @@ const EditParams = z.object({
   file_path: z.string().describe('要编辑的文件的绝对路径'),
   old_string: z.string().describe('要替换的原始文本'),
   new_string: z.string().describe('替换后的新文本'),
+  expected_mtime_ms: z.number().describe('编辑前必须匹配的文件 mtime'),
   replace_all: z.boolean().optional().describe('是否替换所有匹配'),
+  dry_run: z.boolean().optional().describe('仅返回 Unified Diff 预览，不写入文件'),
 })
 ```
 
@@ -222,9 +221,29 @@ interface BaseMetadata {
 **read 工具**：
 ```typescript
 interface ReadMetadata extends BaseMetadata {
-  lineCount: number          // 实际读取的行数
-  fileSize: number           // 文件大小
-  fileType: 'text' | 'image' | 'pdf' | 'binary'
+  lineCount: number          // 文件总行数
+  shownLineCount: number     // 本次返回的行数
+  mtimeMs: number            // 读取时的文件 mtime
+  sizeBytes: number          // 文件大小
+  encoding: 'utf8'
+  lineEnding: 'LF' | 'CRLF' | 'mixed' | 'none'
+  hasMore: boolean
+  nextOffset?: number
+}
+```
+
+**write 工具**：
+```typescript
+interface WriteMetadata extends BaseMetadata {
+  bytes: number
+  created: boolean
+  dryRun?: boolean
+  diff?: string
+  mtimeMs: number
+  sizeBytes: number
+  encoding: 'utf8'
+  lineEnding: 'LF' | 'CRLF' | 'mixed' | 'none'
+  wouldCreate?: boolean
 }
 ```
 
@@ -232,8 +251,12 @@ interface ReadMetadata extends BaseMetadata {
 ```typescript
 interface EditMetadata extends BaseMetadata {
   replacementCount: number   // 替换次数
-  diff: string               // diff 内容
-  diagnostics?: Diagnostic[] // LSP 诊断信息
+  dryRun?: boolean
+  diff?: string
+  mtimeMs: number
+  sizeBytes: number
+  encoding: 'utf8'
+  lineEnding: 'LF' | 'CRLF' | 'mixed' | 'none'
 }
 ```
 

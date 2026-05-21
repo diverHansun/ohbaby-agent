@@ -231,7 +231,7 @@ export namespace Log {
 }
 
 // tools/bash.ts 使用
-const log = Log.create({ service: 'bash-tool' })
+const log = Log.create({ service: 'bash' })
 log.info('Command executed', { command, exitCode })
 ```
 

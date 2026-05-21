@@ -14,12 +14,14 @@ tools 模块是 ohbaby-agent 的工具实现层，提供纯净的工具函数，
 
 ```
 tools/
-├── index.ts              # 导出所有工具
-├── types.ts              # 工具类型定义
+├── index.ts              # 导出内置工具集合
+├── builtin.ts            # 内置工具组合入口 createBuiltinTools()
 ├── utils/                # 工具共享的工具函数
-│   ├── file.ts          # 文件处理工具
+│   ├── context.ts       # 执行上下文路径解析
+│   ├── files.ts         # 遍历、glob、基础文件辅助
 │   ├── output.ts        # 输出格式化工具
-│   └── binary.ts        # 二进制检测工具
+│   ├── params.ts        # 参数读取与错误
+│   └── text-files.ts    # UTF-8/BOM、mtime、二进制检测、原子写入
 │
 ├── read.ts              # 文件读取
 ├── write.ts             # 文件写入
@@ -30,11 +32,16 @@ tools/
 ├── bash.ts              # 命令执行
 ├── task.ts              # 子代理调用
 ├── todo.ts              # 待办事项
-├── web-search.ts        # 语义 Web 搜索（→ search-providers）
-└── web-fetch.ts         # 抓取 URL 内容（→ search-providers）
+└── web.ts               # web_search / web_fetch（→ search-providers）
 ```
 
 `web_search` / `web_fetch` 是 `tools` 入口，后端走 `services/search-providers/`；模块文档参见 `docs/tools/search-providers/`，源码挂在 `src/services/search-providers/`。
+
+### v1 文件工具拆分边界
+
+本轮文件工具按 `read.ts`、`write.ts`、`edit.ts`、`list.ts`、`glob.ts`、`grep.ts` 独立实现，由 `builtin.ts` 直接组合注册，不再保留旧的文件工具聚合转发层。共享文本文件内核集中在 `utils/text-files.ts`，统一处理 UTF-8 BOM、CRLF/LF metadata、前 4KB sample + 扩展名二进制检测、mtime 校验、同目录临时文件 + rename 的原子写入。
+
+本轮已加入轻量 read-before-edit 会话状态：`read` 记录同 session 下文件的 `mtimeMs`，`edit` 必须先读过且 mtime 仍匹配才允许修改。仍不引入权限 diff preview、LSP 诊断或 ripgrep/provider 替换；这些能力作为下一轮向 Claude Code / opencode 靠拢的候选大改。
 
 ---
 
@@ -49,14 +56,18 @@ tools/
 const ReadTool = Tool.define({
   name: 'read',
   description: '读取文件内容...',
-  parameters: z.object({
-    file_path: z.string().describe('文件的绝对路径'),
-    offset: z.number().optional().describe('起始行号'),
-    limit: z.number().optional().describe('读取行数'),
-  }),
+  parametersJsonSchema: {
+    type: 'object',
+    required: ['file_path'],
+    properties: {
+      file_path: { type: 'string' },
+      offset: { type: 'integer', minimum: 1 },
+      limit: { type: 'integer', minimum: 1 },
+    },
+  },
   execute: async (params, context) => {
     // 执行逻辑
-    return { content, metadata }
+    return { output, metadata }
   }
 })
 ```
@@ -67,7 +78,7 @@ const ReadTool = Tool.define({
 |------|------|------|
 | name | 工具唯一标识 | ToolScheduler 查找工具 |
 | description | 工具功能描述 | LLM 理解工具用途 |
-| parameters | Zod Schema | 参数验证、LLM 生成参数 |
+| parametersJsonSchema | JSON Schema | 参数声明、LLM 生成参数 |
 | execute | 执行函数 | 实际执行逻辑 |
 
 ---
@@ -79,9 +90,9 @@ const ReadTool = Tool.define({
 定义工具相关的核心类型：
 
 - `Tool`: 工具接口定义
-- `ToolContext`: 执行上下文
-- `ToolOutput`: 返回值格式
-- `Tool.define()`: 工具定义辅助函数
+- `ToolExecutionContext`: 执行上下文
+- `ToolExecutionResult`: 返回值格式（`output + metadata`）
+- `Tool`: 内置工具接口定义
 
 ### 3.2 共享工具函数（utils/）
 
@@ -95,9 +106,11 @@ const ReadTool = Tool.define({
 - 输出截断
 - 截断提示生成
 
-**binary.ts**：二进制检测
-- 检测文件是否为二进制
-- 检测不可打印字符
+**text-files.ts**：文本文件处理
+- UTF-8 BOM 读取/写回处理
+- 扩展名 + 前 4KB sample 二进制检测
+- mtime 乐观校验
+- 同目录临时文件 + rename 原子写入
 
 ---
 
@@ -110,24 +123,28 @@ const ReadTool = Tool.define({
 ```
 输入: file_path, offset?, limit?
 输出: 文件内容（带行号）
-限制: 默认 2000 行，每行 2000 字符
-特殊: 支持图片（base64）、PDF（文本提取）
+限制: 默认 2000 行，最大 20000 行；文本文件最大 1MB
+metadata: mtimeMs, sizeBytes, encoding, lineEnding, hasMore, nextOffset
+特殊: UTF-8 BOM 读取时去除；二进制文件拒绝读取
 ```
 
 #### write（文件写入）
 
 ```
-输入: file_path, content
+输入: file_path, content, expected_mtime_ms?, dry_run?
 输出: 写入确认、诊断信息
-特殊: 创建不存在的目录
+特殊: 新文件不需要 expected_mtime_ms；覆盖既有文件必须匹配 mtime
+预览: dry_run 返回 Unified Diff，不写入文件也不创建目录
+安全: 同目录临时文件 + rename 原子写入，失败时清理临时文件；支持工作区内绝对路径
 ```
 
 #### edit（文件编辑）
 
 ```
-输入: file_path, old_string, new_string, replace_all?
+输入: file_path, old_string, new_string, expected_mtime_ms, replace_all?, dry_run?
 输出: diff 信息、诊断信息
-特殊: 多种替换策略、相似度匹配
+特殊: 必须先 read 再 edit，且 expected_mtime_ms 匹配；保留既有 CRLF/LF 风格与 UTF-8 BOM
+预览: dry_run 返回 Unified Diff，不写入文件
 ```
 
 ### 4.2 搜索工具
@@ -138,7 +155,7 @@ const ReadTool = Tool.define({
 输入: pattern, path?
 输出: 匹配的文件列表
 限制: 100 个文件
-排序: 按修改时间（最新优先）
+排序: 按目录遍历的稳定字母序
 ```
 
 #### grep（内容搜索）
@@ -147,7 +164,7 @@ const ReadTool = Tool.define({
 输入: pattern, path?, include?
 输出: 匹配结果（文件:行号:内容）
 限制: 100 个匹配
-排序: 按修改时间
+特殊: 跳过超大文件和二进制文件
 ```
 
 #### list（目录列表）

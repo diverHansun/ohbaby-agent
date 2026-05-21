@@ -3,15 +3,20 @@ import {
   createBashTool,
   type BashShell,
   type SpawnCommand,
-} from "./bash-tool.js";
-import { createFileTools } from "./file-tools.js";
+} from "./bash.js";
+import { createEditTool } from "./edit.js";
+import { createGlobTool } from "./glob.js";
+import { createGrepTool } from "./grep.js";
+import { createListTool } from "./list.js";
+import { createReadTool } from "./read.js";
+import { createWriteTool } from "./write.js";
 import {
   createTodoTools,
   InMemoryTodoStore,
   type TodoStore,
-} from "./todo-tools.js";
-import { createTaskTool } from "./task-tool.js";
-import { createWebTools, type WebToolsOptions } from "./web-tools.js";
+} from "./todo.js";
+import { createTaskTool } from "./task.js";
+import { createWebTools, type WebToolsOptions } from "./web.js";
 import type { TaskExecutor } from "../agents/index.js";
 
 export interface BuiltinToolsOptions {
@@ -25,7 +30,12 @@ export interface BuiltinToolsOptions {
 export function createBuiltinTools(options: BuiltinToolsOptions = {}): Tool[] {
   const todoStore = options.todoStore ?? new InMemoryTodoStore();
   const tools = [
-    ...createFileTools(),
+    createReadTool(),
+    createListTool(),
+    createGlobTool(),
+    createGrepTool(),
+    createWriteTool(),
+    createEditTool(),
     ...createTodoTools(todoStore),
     ...createWebTools(options.searchProvider),
     createBashTool({ shell: options.shell, spawn: options.spawn }),

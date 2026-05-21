@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createBus, type BusInstance } from "../../bus/index.js";
-import type { SpawnCommand } from "../../tools/bash-tool.js";
+import type { SpawnCommand } from "../../tools/bash.js";
 import { createBuiltinTools } from "../../tools/index.js";
 import { createToolScheduler, ToolSchedulerEvent } from "./index.js";
 import type {

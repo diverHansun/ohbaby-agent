@@ -119,7 +119,7 @@ Logger 实例通过工厂函数创建。
 
 ```typescript
 // 各模块创建自己的 logger 实例
-const log = Log.create({ service: 'bash-tool' })
+const log = Log.create({ service: 'bash' })
 const anotherLog = Log.create({ service: 'mcp-manager' })
 ```
 

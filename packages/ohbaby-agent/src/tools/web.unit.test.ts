@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Tool, ToolExecutionContext } from "../core/tool-scheduler/index.js";
 import { createBuiltinTools } from "./index.js";
-import { createWebTools } from "./web-tools.js";
+import { createWebTools } from "./web.js";
 import type {
   SearchProvider,
   SearchProviderConfig,

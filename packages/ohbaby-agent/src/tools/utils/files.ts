@@ -80,26 +80,45 @@ export async function ensureWritableParent(
   inputPath: string,
 ): Promise<void> {
   const parent = path.dirname(inputPath);
-  if (parent === "." || parent === "") {
+  await ensureWritableDirectory(context, parent);
+}
+
+async function ensureWritableDirectory(
+  context: ToolExecutionContext,
+  inputPath: string,
+): Promise<void> {
+  if (inputPath === "." || inputPath === "" || inputPath === path.dirname(inputPath)) {
     return;
   }
-  const parts = parent.split(/[\\/]+/u).filter(Boolean);
-  let current = path.isAbsolute(parent) ? path.parse(parent).root : "";
-  for (const part of parts) {
-    current = current === "" ? part : path.join(current, part);
-    const resolved = await resolvePathForWrite(context, current);
-    await fs.mkdir(resolved).catch((error: unknown) => {
-      if (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        error.code === "EEXIST"
-      ) {
-        return;
-      }
+
+  let resolved: string;
+  try {
+    resolved = await resolvePathForWrite(context, inputPath);
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      await ensureWritableDirectory(context, path.dirname(inputPath));
+      resolved = await resolvePathForWrite(context, inputPath);
+    } else {
       throw error;
-    });
+    }
   }
+
+  await fs.mkdir(resolved).catch((error: unknown) => {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "EEXIST"
+    ) {
+      return;
+    }
+    throw error;
+  });
 }
 
 export async function walkFiles(input: {

@@ -28,9 +28,38 @@ export function renderReplacementDiff(input: {
 }): string {
   return [
     `Replacements: ${String(input.replacementCount)}`,
-    "--- before",
-    "+++ after",
-    `-${input.oldString}`,
-    `+${input.newString}`,
+    renderUnifiedDiff({
+      after: input.newString,
+      before: input.oldString,
+    }),
+  ].join("\n");
+}
+
+function splitDiffLines(content: string): string[] {
+  const lines = content.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n").split("\n");
+  if (lines.at(-1) === "") {
+    lines.pop();
+  }
+
+  return lines;
+}
+
+export function renderUnifiedDiff(input: {
+  readonly after: string;
+  readonly afterLabel?: string;
+  readonly before: string;
+  readonly beforeLabel?: string;
+}): string {
+  const beforeLines = splitDiffLines(input.before);
+  const afterLines = splitDiffLines(input.after);
+  const beforeStart = beforeLines.length === 0 ? 0 : 1;
+  const afterStart = afterLines.length === 0 ? 0 : 1;
+
+  return [
+    `--- ${input.beforeLabel ?? "before"}`,
+    `+++ ${input.afterLabel ?? "after"}`,
+    `@@ -${String(beforeStart)},${String(beforeLines.length)} +${String(afterStart)},${String(afterLines.length)} @@`,
+    ...beforeLines.map((line) => `-${line}`),
+    ...afterLines.map((line) => `+${line}`),
   ].join("\n");
 }

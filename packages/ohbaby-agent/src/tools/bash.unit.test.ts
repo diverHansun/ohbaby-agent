@@ -10,7 +10,7 @@ import type {
 } from "../core/tool-scheduler/index.js";
 import type { CommandContext } from "../sandbox/index.js";
 import type { Tool } from "../core/tool-scheduler/index.js";
-import type { SpawnCommand } from "./bash-tool.js";
+import type { SpawnCommand } from "./bash.js";
 import { createBuiltinTools } from "./index.js";
 
 class FakeChildProcess extends EventEmitter {

@@ -48,15 +48,15 @@
 - 操作：调用 read({ file_path, offset: 50, limit: 20 })
 - 预期结果：返回第 50-69 行内容
 
-**场景 3：读取图片文件**
-- 前置条件：存在 PNG 图片
-- 操作：调用 read({ file_path: '/path/to/image.png' })
-- 预期结果：返回 base64 编码内容，metadata.fileType = 'image'
+**场景 3：读取 UTF-8 BOM / CRLF 文本**
+- 前置条件：存在带 UTF-8 BOM 与 CRLF 的文本文件
+- 操作：调用 read({ file_path, offset: 1, limit: 2 })
+- 预期结果：输出不包含 BOM，metadata.encoding = 'utf8'，metadata.lineEnding = 'CRLF'
 
-**场景 4：读取 PDF 文件**
-- 前置条件：存在 PDF 文件
-- 操作：调用 read({ file_path: '/path/to/doc.pdf' })
-- 预期结果：返回提取的文本内容
+**场景 4：读取空文件**
+- 前置条件：存在空文本文件
+- 操作：调用 read({ file_path })
+- 预期结果：output 为空字符串，metadata.lineCount = 0，metadata.hasMore = false
 
 **场景 5：读取不存在的文件**
 - 前置条件：文件不存在
@@ -73,10 +73,10 @@
 - 操作：调用 read({ file_path })
 - 预期结果：返回前 2000 行，metadata.truncated = true
 
-**场景 8：读取 .env 文件**
-- 前置条件：存在 .env 文件
-- 操作：调用 read({ file_path: '/path/to/.env' })
-- 预期结果：拒绝读取，返回错误
+**场景 8：读取超大文件**
+- 前置条件：文本文件超过 1MB
+- 操作：调用 read({ file_path })
+- 预期结果：拒绝读取，返回文件过大错误
 
 ### 2.2 write 工具
 
@@ -85,37 +85,72 @@
 - 操作：调用 write({ file_path, content })
 - 预期结果：创建文件，metadata.created = true
 
-**场景 10：覆盖现有文件**
+**场景 10：覆盖现有文件必须携带 mtime**
 - 前置条件：文件已存在
 - 操作：调用 write({ file_path, content })
-- 预期结果：覆盖文件内容
+- 预期结果：缺少 expected_mtime_ms 时拒绝覆盖，文件内容不变
+
+**场景 10.1：mtime 匹配时覆盖现有文件**
+- 前置条件：先通过 read 或 stat 获取文件 mtimeMs
+- 操作：调用 write({ file_path, content, expected_mtime_ms })
+- 预期结果：覆盖文件内容，保留既有 UTF-8 BOM，原子写入成功
+
+**场景 10.2：dry_run 预览写入**
+- 前置条件：文件可存在或不存在
+- 操作：调用 write({ file_path, content, expected_mtime_ms?, dry_run: true })
+- 预期结果：返回 Unified Diff，文件内容与目录结构不变
 
 **场景 11：创建文件到不存在的目录**
 - 前置条件：目录不存在
 - 操作：调用 write({ file_path: '/new/dir/file.txt', content })
 - 预期结果：创建目录并创建文件
 
+**场景 11.1：工作区内绝对路径写入**
+- 前置条件：传入的绝对路径位于 workspace 内
+- 操作：调用 write({ file_path: absolutePath, content })
+- 预期结果：创建父目录并写入成功；workspace 外绝对路径仍拒绝
+
 ### 2.3 edit 工具
 
 **场景 12：精确替换文本**
 - 前置条件：文件包含目标文本
-- 操作：调用 edit({ file_path, old_string, new_string })
+- 操作：先调用 read({ file_path })，再调用 edit({ file_path, old_string, new_string, expected_mtime_ms })
 - 预期结果：替换成功，返回 diff
 
 **场景 13：替换所有匹配**
 - 前置条件：文件包含多处目标文本
-- 操作：调用 edit({ file_path, old_string, new_string, replace_all: true })
+- 操作：先 read，再调用 edit({ file_path, old_string, new_string, expected_mtime_ms, replace_all: true })
 - 预期结果：替换所有匹配，metadata.replacementCount > 1
 
 **场景 14：未找到匹配文本**
 - 前置条件：文件不包含目标文本
-- 操作：调用 edit({ file_path, old_string, new_string })
+- 操作：调用 edit({ file_path, old_string, new_string, expected_mtime_ms })
 - 预期结果：返回 NoMatchFoundError
 
-**场景 15：模糊匹配（空格差异）**
-- 前置条件：文件包含空格不同但内容相似的文本
-- 操作：调用 edit({ file_path, old_string, new_string })
-- 预期结果：通过策略回退成功匹配
+**场景 14.1：mtime 缺失或不匹配**
+- 前置条件：文件存在
+- 操作：调用 edit({ file_path, old_string, new_string }) 或传入过期 expected_mtime_ms
+- 预期结果：拒绝修改，文件内容不变
+
+**场景 14.2：未先 read**
+- 前置条件：文件存在，且调用方只通过 stat 获得 mtime
+- 操作：直接调用 edit({ file_path, old_string, new_string, expected_mtime_ms })
+- 预期结果：拒绝修改，并提示必须先 read
+
+**场景 14.3：dry_run 预览编辑**
+- 前置条件：已先 read，且文件包含唯一目标文本
+- 操作：调用 edit({ file_path, old_string, new_string, expected_mtime_ms, dry_run: true })
+- 预期结果：返回 Unified Diff，文件内容不变
+
+**场景 15：多处匹配但未开启 replace_all**
+- 前置条件：文件包含多处目标文本
+- 操作：调用 edit({ file_path, old_string, new_string, expected_mtime_ms })
+- 预期结果：拒绝修改，并提示开启 replace_all
+
+**场景 15.1：CRLF 保留**
+- 前置条件：文件使用 CRLF 换行
+- 操作：调用 edit({ file_path, old_string, new_string, expected_mtime_ms })
+- 预期结果：替换成功后仍使用 CRLF
 
 ### 2.4 glob 工具
 

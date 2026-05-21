@@ -239,7 +239,7 @@ function toUiRunStatus(record: StreamRunRecord): UiRunStatus {
 
 - [ ] Run adapter/runtime/agents/task tests.
 
-Run: `pnpm exec vitest run packages/ohbaby-agent/src/adapters packages/ohbaby-agent/src/runtime/run-manager packages/ohbaby-agent/src/agents packages/ohbaby-agent/src/tools/task-tool.unit.test.ts`
+Run: `pnpm exec vitest run packages/ohbaby-agent/src/adapters packages/ohbaby-agent/src/runtime/run-manager packages/ohbaby-agent/src/agents packages/ohbaby-agent/src/tools/task.unit.test.ts`
 
 Expected: all selected suites pass.
 

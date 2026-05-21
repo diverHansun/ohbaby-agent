@@ -3,4 +3,4 @@ export {
   createBuiltinTools,
   type BuiltinToolsOptions,
 } from "./builtin.js";
-export { createTaskTool } from "./task-tool.js";
+export { createTaskTool } from "./task.js";
