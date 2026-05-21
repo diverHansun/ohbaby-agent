@@ -6,7 +6,11 @@ import { createPersistentUiBackendClient } from "ohbaby-agent";
 import { OhbabyTerminalApp } from "ohbaby-tui";
 import { closeDatabase } from "../../packages/ohbaby-agent/src/services/database/index.js";
 import { _LLMConfigManager as LLMConfigManager } from "../../packages/ohbaby-agent/src/config/llm/index.js";
-import { flush, promptIsReady, waitForFrame } from "../integration/tui/helpers.js";
+import {
+  flush,
+  promptIsReady,
+  waitForFrame,
+} from "../integration/tui/helpers.js";
 
 const cleanupDirectories: string[] = [];
 
@@ -93,11 +97,7 @@ async function submitPrompt(
   app: ReturnType<typeof render>,
   prompt: string,
 ): Promise<void> {
-  await waitForFrame(
-    app,
-    promptIsReady,
-    30_000,
-  );
+  await waitForFrame(app, promptIsReady, 30_000);
   app.stdin.write(prompt);
   app.stdin.write("\r");
 }
@@ -135,8 +135,7 @@ async function waitForAssistantText(
 
 const runRealTuiSmoke = process.env.OHBABY_RUN_REAL_TUI_SMOKE === "1";
 const runRealTavilySmoke =
-  runRealTuiSmoke &&
-  process.env.OHBABY_RUN_REAL_TUI_TAVILY_SMOKE === "1";
+  runRealTuiSmoke && process.env.OHBABY_RUN_REAL_TUI_TAVILY_SMOKE === "1";
 
 describe("real provider TUI smoke", () => {
   (runRealTuiSmoke ? it : it.skip)(
@@ -166,22 +165,60 @@ describe("real provider TUI smoke", () => {
     300_000,
   );
 
+  (runRealTuiSmoke ? it : it.skip)(
+    "lets a real model call the read tool from the rendered TUI",
+    async () => {
+      const { app, client, workdir } = await createRealTuiHarness({});
+      await writeFile(
+        join(workdir, "marker.txt"),
+        "FILE_ONLY_SECRET_MARKER_73f4b0\n",
+        "utf8",
+      );
+
+      try {
+        await submitPrompt(
+          app,
+          'Use the read tool exactly once to read "marker.txt". If the file has a marker line, reply with only the exact token OHBABY_REAL_TOOL_READ_OK.',
+        );
+        await waitForFrame(
+          app,
+          (frame) => frame.includes("tool read (completed)"),
+          240_000,
+        );
+        const text = await waitForAssistantText(client, (value) =>
+          value.includes("OHBABY_REAL_TOOL_READ_OK"),
+        );
+        const finalFrame = await waitForFrame(
+          app,
+          (frame) =>
+            frame.includes("tool read (completed)") &&
+            frame.includes("status: idle | session:"),
+          240_000,
+        );
+
+        expect(text).toContain("OHBABY_REAL_TOOL_READ_OK");
+        expect(finalFrame).toContain("tool result");
+        expect(finalFrame).toContain("result hidden");
+        expect(finalFrame).not.toContain("FILE_ONLY_SECRET_MARKER_73f4b0");
+      } finally {
+        app.unmount();
+      }
+    },
+    300_000,
+  );
+
   (runRealTavilySmoke ? it : it.skip)(
     "lets a real model call Tavily web_search from the rendered TUI",
     async () => {
       const { app } = await createRealTuiHarness({ requireTavily: true });
 
       try {
-        await waitForFrame(
-          app,
-          promptIsReady,
-          30_000,
-        );
+        await waitForFrame(app, promptIsReady, 30_000);
         app.stdin.write("/mode ask");
         app.stdin.write("\r");
         await waitForFrame(
           app,
-          (frame) => frame.includes("mode: ask/ask-before-edit"),
+          (frame) => frame.includes("mode: ask / ask-before-edit"),
           30_000,
         );
 
@@ -190,9 +227,11 @@ describe("real provider TUI smoke", () => {
         await waitForFrame(
           app,
           (frame) =>
-            frame.includes('"name":"web_search"') &&
-            frame.includes('"name":"web_fetch"') &&
-            !frame.includes('"name":"write"'),
+            frame.includes("tools:") &&
+            frame.includes("web_search") &&
+            frame.includes("web_fetch") &&
+            !frame.includes(", write") &&
+            !frame.includes("tools: write"),
           30_000,
         );
 

@@ -100,7 +100,7 @@ describe("TUI main chain with real in-process backend", () => {
     );
     expect(completedFrame).toContain("tool write (completed)");
     expect(completedFrame).toContain("tool result call_write");
-    expect(completedFrame).toContain("output:");
+    expect(completedFrame).toContain("result hidden");
     expect(completedFrame).toContain("status: idle | session: session_1");
 
     app.stdin.write("again");
@@ -163,17 +163,17 @@ describe("TUI main chain with real in-process backend", () => {
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: agent/ask-before-edit"),
+      frame.includes("mode: agent / ask-before-edit"),
     );
     app.stdin.write("/mode ask");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: ask/ask-before-edit"),
+      frame.includes("mode: ask / ask-before-edit"),
     );
 
     app.stdin.write("\u001B[Z");
     const frame = await waitForFrame(app, (nextFrame) =>
-      nextFrame.includes("mode: plan/ask-before-edit"),
+      nextFrame.includes("mode: plan / ask-before-edit"),
     );
 
     expect(frame).toContain("status: idle");
@@ -190,7 +190,7 @@ describe("TUI main chain with real in-process backend", () => {
     app.stdin.write("/mode ask");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: ask/ask-before-edit"),
+      frame.includes("mode: ask / ask-before-edit"),
     );
 
     app.stdin.write("/tools");
@@ -198,14 +198,16 @@ describe("TUI main chain with real in-process backend", () => {
     const frame = await waitForFrame(
       app,
       (nextFrame) =>
-        nextFrame.includes('"name":"web_search"') &&
-        nextFrame.includes('"name":"web_fetch"'),
+        nextFrame.includes("tools:") &&
+        nextFrame.includes("web_search") &&
+        nextFrame.includes("web_fetch") &&
+        !nextFrame.includes('"description"'),
     );
 
-    expect(frame).toContain('"category":"network"');
-    expect(frame).not.toContain('"name":"write"');
-    expect(frame).not.toContain('"name":"bash"');
-    expect(frame).not.toContain('"name":"task"');
+    expect(frame).not.toContain(", write");
+    expect(frame).not.toContain("tools: write");
+    expect(frame).not.toContain("bash");
+    expect(frame).not.toContain("task");
     app.unmount();
   });
 
@@ -231,12 +233,12 @@ describe("TUI main chain with real in-process backend", () => {
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: agent/ask-before-edit"),
+      frame.includes("mode: agent / ask-before-edit"),
     );
     app.stdin.write("/mode ask");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: ask/ask-before-edit"),
+      frame.includes("mode: ask / ask-before-edit"),
     );
 
     app.stdin.write("try to write");
@@ -273,7 +275,7 @@ describe("TUI main chain with real in-process backend", () => {
     app.stdin.write("/mode auto-edit");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: agent/edit-automatically"),
+      frame.includes("mode: agent / edit-automatically"),
     );
 
     app.stdin.write("write automatically");

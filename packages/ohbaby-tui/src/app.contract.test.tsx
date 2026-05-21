@@ -184,7 +184,7 @@ describe("OhbabyTerminalApp", () => {
     );
   });
 
-  it("renders policy mode and updates it from backend events", async () => {
+  it("renders policy mode below the prompt and updates it from backend events", async () => {
     const client = createFakeClient({
       ...snapshot(),
       policy: {
@@ -195,7 +195,15 @@ describe("OhbabyTerminalApp", () => {
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await flush();
-    expect(app.lastFrame()).toContain("mode: agent/ask-before-edit");
+    expect(app.lastFrame()).toContain("mode: agent / ask-before-edit");
+    expect(app.lastFrame()).not.toContain(
+      "status: idle | session: session_1 | mode:",
+    );
+    expect(
+      lineIndex(app.lastFrame(), "mode: agent / ask-before-edit"),
+    ).toBeLessThan(
+      lineIndex(app.lastFrame(), "status: idle | session: session_1"),
+    );
 
     client.emit({
       policy: {
@@ -211,7 +219,7 @@ describe("OhbabyTerminalApp", () => {
     });
     await flush();
 
-    expect(app.lastFrame()).toContain("mode: agent/edit-automatically");
+    expect(app.lastFrame()).toContain("mode: agent / edit-automatically");
   });
 
   it("cycles policy mode with Shift+Tab", async () => {
@@ -343,7 +351,7 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("status: idle | session: session_stream");
   });
 
-  it("renders tool calls and tool results as separate readable parts", async () => {
+  it("renders tool calls and tool result status without raw result output", async () => {
     const toolSnapshot = snapshot();
     const baseSession = toolSnapshot.sessions[0];
     const client = createFakeClient({
@@ -385,8 +393,57 @@ describe("OhbabyTerminalApp", () => {
 
     expect(app.lastFrame()).toContain("tool bash (completed)");
     expect(app.lastFrame()).toContain('input: {"command":"pwd"}');
-    expect(app.lastFrame()).toContain("tool result call_1");
-    expect(app.lastFrame()).toContain("output: D:/Projects");
+    expect(app.lastFrame()).toContain("tool result call_1 (completed)");
+    expect(app.lastFrame()).toContain("result hidden");
+    expect(app.lastFrame()).not.toContain("output: D:/Projects");
+    expect(app.lastFrame()).not.toContain("D:/Projects");
+  });
+
+  it("hides raw web search result bodies in tool rendering", async () => {
+    const toolSnapshot = snapshot();
+    const baseSession = toolSnapshot.sessions[0];
+    const client = createFakeClient({
+      ...toolSnapshot,
+      sessions: [
+        {
+          ...baseSession,
+          messages: [
+            {
+              createdAt: "2026-05-14T00:00:01.000Z",
+              id: "message_search_tool",
+              parts: [
+                {
+                  call: {
+                    id: "call_search",
+                    input: { query: "secret query" },
+                    name: "web_search",
+                    status: "completed",
+                  },
+                  type: "tool-call",
+                },
+                {
+                  result: {
+                    callId: "call_search",
+                    output:
+                      "Sensitive search body that should stay in model context only.",
+                  },
+                  type: "tool-result",
+                },
+              ],
+              role: "assistant",
+            },
+          ],
+        },
+      ],
+    });
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+
+    expect(app.lastFrame()).toContain("tool web_search (completed)");
+    expect(app.lastFrame()).toContain("tool result call_search (completed)");
+    expect(app.lastFrame()).toContain("result hidden");
+    expect(app.lastFrame()).not.toContain("Sensitive search body");
   });
 
   it("uses readable runtime labels without raw run or permission ids", async () => {
@@ -426,6 +483,10 @@ describe("OhbabyTerminalApp", () => {
 
     expect(app.lastFrame()).toContain("status: waiting: Write file");
     expect(app.lastFrame()).not.toContain("permission_raw_123");
+    expect(app.lastFrame()).toContain("Enter select");
+    expect(app.lastFrame()).toContain("Esc safe default");
+    expect(app.lastFrame()).toContain("> Reject [deny]");
+    expect(app.lastFrame()).toContain("  Allow once [allow]");
   });
 
   it("submits normal prompts with the active session id", async () => {
@@ -875,4 +936,10 @@ async function waitForFrame(
     }
   }
   throw new Error(`Timed out waiting for frame. Last frame:\n${frame}`);
+}
+
+function lineIndex(frame: string | undefined, needle: string): number {
+  return (frame ?? "")
+    .split(/\r?\n/u)
+    .findIndex((line) => line.includes(needle));
 }

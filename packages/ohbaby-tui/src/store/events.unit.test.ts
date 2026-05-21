@@ -237,6 +237,109 @@ describe("TUI store event reducer", () => {
     expect(state.interactions).toHaveLength(0);
   });
 
+  it("keeps the active run visible after a permission is resolved", () => {
+    let state = createStateFromSnapshot(snapshot());
+    state = applyTuiEvent(state, {
+      run: {
+        id: "run_1",
+        sessionId: "session_1",
+        startedAt: "2026-05-14T00:00:03.000Z",
+        status: { kind: "running", runId: "run_1" },
+        updatedAt: "2026-05-14T00:00:03.000Z",
+      },
+      type: "run.updated",
+    });
+    state = applyTuiEvent(state, {
+      request: {
+        choices: [{ id: "allow", intent: "allow", label: "Allow" }],
+        description: "Run bash",
+        id: "permission_1",
+        runId: "run_1",
+        title: "Permission",
+      },
+      type: "permission.requested",
+    });
+
+    state = applyTuiEvent(state, {
+      requestId: "permission_1",
+      type: "permission.resolved",
+    });
+
+    expect(state.permissions).toHaveLength(0);
+    expect(state.runtime).toEqual({ kind: "running", runId: "run_1" });
+  });
+
+  it("keeps the active run visible when the stored run still says waiting for permission", () => {
+    let state = createStateFromSnapshot(snapshot());
+    state = applyTuiEvent(state, {
+      run: {
+        id: "run_1",
+        sessionId: "session_1",
+        startedAt: "2026-05-14T00:00:03.000Z",
+        status: { kind: "waiting-for-permission", requestId: "permission_1" },
+        updatedAt: "2026-05-14T00:00:03.000Z",
+      },
+      type: "run.updated",
+    });
+    state = applyTuiEvent(state, {
+      request: {
+        choices: [{ id: "allow", intent: "allow", label: "Allow" }],
+        description: "Run bash",
+        id: "permission_1",
+        runId: "run_1",
+        title: "Permission",
+      },
+      type: "permission.requested",
+    });
+
+    state = applyTuiEvent(state, {
+      requestId: "permission_1",
+      type: "permission.resolved",
+    });
+
+    expect(state.permissions).toHaveLength(0);
+    expect(state.runtime).toEqual({ kind: "running", runId: "run_1" });
+  });
+
+  it("formats command notices for humans and truncates large outputs", () => {
+    let state = createStateFromSnapshot(snapshot());
+
+    state = applyTuiEvent(state, {
+      clientInvocationId: "invoke_mode",
+      commandRunId: "command_mode",
+      output: {
+        data: {
+          policy: {
+            agentState: "ask-before-edit",
+            mode: "ask",
+          },
+        },
+        kind: "data",
+        subject: "policy.mode",
+      },
+      timestamp: 1,
+      type: "command.result.delivered",
+    });
+
+    expect(state.commandNotices.at(-1)?.text).toBe(
+      "mode: ask / ask-before-edit",
+    );
+
+    const longText = "x".repeat(400);
+    state = applyTuiEvent(state, {
+      clientInvocationId: "invoke_long",
+      commandRunId: "command_long",
+      output: { kind: "text", text: longText },
+      timestamp: 2,
+      type: "command.result.delivered",
+    });
+
+    expect(state.commandNotices.at(-1)?.text.length).toBeLessThan(
+      longText.length,
+    );
+    expect(state.commandNotices.at(-1)?.text.endsWith("...")).toBe(true);
+  });
+
   it("deduplicates UI notices by key and keeps the most recent ten", () => {
     let state = createStateFromSnapshot(snapshot());
 
@@ -383,6 +486,85 @@ describe("TUI store event reducer", () => {
 
     expect(next.interactions).toHaveLength(1);
     expect(next.commandNotices).toHaveLength(1);
+  });
+
+  it("keeps newer local messages when an old snapshot arrives", () => {
+    const appendedMessage = {
+      createdAt: "2026-05-14T00:00:03.000Z",
+      id: "message_local",
+      parts: [{ text: "new local message", type: "text" }],
+      role: "assistant",
+    } as const;
+    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      message: appendedMessage,
+      sessionId: "session_1",
+      type: "message.appended",
+    });
+
+    state = applyTuiEvent(state, {
+      snapshot: snapshot(),
+      type: "snapshot.replaced",
+    });
+
+    expect(state.messages.map((message) => message.id)).toContain(
+      "message_local",
+    );
+    expect(
+      state.sessions
+        .find((session) => session.id === "session_1")
+        ?.messages.map((message) => message.id),
+    ).toContain("message_local");
+  });
+
+  it("lets snapshot messages replace stale local messages with the same id", () => {
+    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      message: {
+        createdAt: "2026-05-14T00:00:01.000Z",
+        id: "message_1",
+        parts: [{ text: "local stale text", type: "text" }],
+        role: "assistant",
+      },
+      sessionId: "session_1",
+      type: "message.updated",
+    });
+
+    state = applyTuiEvent(state, {
+      snapshot: snapshot(),
+      type: "snapshot.replaced",
+    });
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({ text: "Hello" });
+  });
+
+  it("clears command notices when a snapshot switches sessions", () => {
+    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      clientInvocationId: "invoke_1",
+      commandRunId: "command_1",
+      output: { kind: "text", text: "ok" },
+      timestamp: 1,
+      type: "command.result.delivered",
+    });
+
+    state = applyTuiEvent(state, {
+      snapshot: {
+        ...snapshot(),
+        activeSessionId: "session_2",
+        sessions: [
+          ...snapshot().sessions,
+          {
+            createdAt: "2026-05-14T00:00:04.000Z",
+            id: "session_2",
+            messages: [],
+            title: "Second",
+            updatedAt: "2026-05-14T00:00:04.000Z",
+          },
+        ],
+      },
+      type: "snapshot.replaced",
+    });
+
+    expect(state.activeSessionId).toBe("session_2");
+    expect(state.commandNotices).toHaveLength(0);
   });
 
   it("preserves local UI notices when replacing the snapshot", () => {

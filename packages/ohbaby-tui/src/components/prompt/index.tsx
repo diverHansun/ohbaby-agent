@@ -1,4 +1,5 @@
 import { Box, Text, useInput } from "ink";
+import type { UiPolicyState } from "ohbaby-sdk";
 import { useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
@@ -17,6 +18,7 @@ export interface PromptProps {
   readonly catalog: TuiCommandCatalog | null;
   readonly client: TuiBackendClient;
   readonly disabled: boolean;
+  readonly policy?: UiPolicyState;
 }
 
 export function Prompt({
@@ -24,6 +26,7 @@ export function Prompt({
   catalog,
   client,
   disabled,
+  policy,
 }: PromptProps): ReactElement {
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -105,9 +108,7 @@ export function Prompt({
   return (
     <Box flexDirection="column">
       <Text>
-        <Text dimColor={disabled}>
-          ohbaby {">"}{" "}
-        </Text>
+        <Text dimColor={disabled}>ohbaby {">"} </Text>
         {input.length === 0 ? (
           <Text dimColor>{disabled ? "paused" : "message"}</Text>
         ) : (
@@ -117,6 +118,11 @@ export function Prompt({
           {" |"}
         </Text>
       </Text>
+      {policy === undefined ? null : (
+        <Text dimColor>
+          mode: {policy.mode} / {policy.agentState}
+        </Text>
+      )}
       {error === null ? null : <Text color="red">{error}</Text>}
       <Completion
         catalog={catalog}

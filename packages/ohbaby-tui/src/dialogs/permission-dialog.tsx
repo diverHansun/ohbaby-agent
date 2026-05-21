@@ -81,10 +81,13 @@ export function PermissionDialog({
       <Text>{request.description}</Text>
       {request.choices.map((choice, index) => (
         <Text key={choice.id}>
-          {index === selectedIndex ? ">" : " "} {choice.label}
+          {index === selectedIndex ? ">" : " "} {choice.label} [{choice.intent}]
         </Text>
       ))}
       {request.choices.length === 0 ? <Text dimColor>No choices</Text> : null}
+      {request.choices.length === 0 ? null : (
+        <Text dimColor>Enter select | Esc safe default | arrows move</Text>
+      )}
       {pending ? <Text dimColor>sending...</Text> : null}
       {error === null ? null : <Text color="red">{error}</Text>}
     </Box>

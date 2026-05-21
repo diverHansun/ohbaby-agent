@@ -21,6 +21,7 @@ import type {
 } from "./snapshot.js";
 
 const COMMAND_NOTICE_LIMIT = 20;
+const COMMAND_NOTICE_TEXT_LIMIT = 240;
 const UI_NOTICE_LIMIT = 10;
 
 export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
@@ -148,6 +149,9 @@ export function applyTuiEvent(
       return appendUiNotice(state, event.notice);
 
     case "command.result.delivered":
+      if (!event.output) {
+        return state;
+      }
       return appendCommandNotice(state, {
         clientInvocationId: event.clientInvocationId,
         commandId: event.commandRunId,
@@ -252,25 +256,47 @@ function preserveLocalQueues(
   previous: TuiStoreState,
   next: TuiStoreState,
 ): TuiStoreState {
+  const activeSessionChanged =
+    previous.activeSessionId !== next.activeSessionId;
   const permissions = mergePermissions(
     previous.permissions,
     next.permissions,
     previous.resolvedPermissionIds,
   );
+  const sessions = mergeSessions(next.sessions, previous.sessions);
+  const runs = mergeRuns(next.runs, previous.runs);
+  const runtime = resolveRuntimeAfterSnapshot(
+    previous,
+    next,
+    permissions,
+    runs,
+  );
+  const snapshot: UiSnapshot = {
+    ...next.snapshot,
+    permissions,
+    runs,
+    sessions,
+    status: runtime,
+    ...(next.policy === undefined ? {} : { policy: next.policy }),
+  };
+
   return {
     ...next,
     catalog: previous.catalog,
     catalogInvalidation: previous.catalogInvalidation,
-    commandNotices: previous.commandNotices,
+    commandNotices: activeSessionChanged ? [] : previous.commandNotices,
     commandNoticeSequence: previous.commandNoticeSequence,
     interactions: previous.interactions,
+    messages:
+      sessions.find((session) => session.id === next.activeSessionId)
+        ?.messages ?? [],
     notices: previous.notices,
     permissions,
     resolvedPermissionIds: previous.resolvedPermissionIds,
-    runtime:
-      permissions.length > 0
-        ? { kind: "waiting-for-permission", requestId: permissions[0].id }
-        : next.runtime,
+    runs,
+    runtime,
+    sessions,
+    snapshot,
   };
 }
 
@@ -331,10 +357,7 @@ function rebuildWithPermissions(
           kind: "waiting-for-permission" as const,
           requestId: patch.permissions[0].id,
         }
-      : (patch.runtime ??
-        (state.runtime.kind === "waiting-for-permission"
-          ? { kind: "idle" as const }
-          : state.runtime));
+      : (patch.runtime ?? resolveRuntimeAfterPermission(state));
 
   return rebuildFromCollections(state, {
     permissions: patch.permissions,
@@ -362,6 +385,121 @@ function mergePermissions(
   }
 
   return Array.from(merged.values());
+}
+
+function mergeSessions(
+  next: readonly UiSession[],
+  previous: readonly UiSession[],
+): readonly UiSession[] {
+  const merged = new Map<string, UiSession>();
+
+  for (const session of next) {
+    merged.set(session.id, session);
+  }
+  for (const session of previous) {
+    const existing = merged.get(session.id);
+    merged.set(
+      session.id,
+      existing ? mergeSession(existing, session) : session,
+    );
+  }
+
+  return Array.from(merged.values());
+}
+
+function mergeSession(next: UiSession, previous: UiSession): UiSession {
+  const newerShell =
+    compareIso(previous.updatedAt, next.updatedAt) > 0 ? previous : next;
+
+  return {
+    ...newerShell,
+    messages: mergeMessages(next.messages, previous.messages),
+  };
+}
+
+function mergeMessages(
+  next: readonly UiMessage[],
+  previous: readonly UiMessage[],
+): readonly UiMessage[] {
+  const merged = new Map<string, UiMessage>();
+
+  for (const message of next) {
+    merged.set(message.id, message);
+  }
+  for (const message of previous) {
+    if (!merged.has(message.id)) {
+      merged.set(message.id, message);
+    }
+  }
+
+  return Array.from(merged.values()).sort((left, right) =>
+    compareIso(left.createdAt, right.createdAt),
+  );
+}
+
+function mergeRuns(
+  next: readonly UiRun[],
+  previous: readonly UiRun[],
+): readonly UiRun[] {
+  const merged = new Map<string, UiRun>();
+
+  for (const run of next) {
+    merged.set(run.id, run);
+  }
+  for (const run of previous) {
+    const existing = merged.get(run.id);
+    if (!existing || compareIso(run.updatedAt, existing.updatedAt) > 0) {
+      merged.set(run.id, run);
+    }
+  }
+
+  return Array.from(merged.values());
+}
+
+function compareIso(left: string, right: string): number {
+  return Date.parse(left) - Date.parse(right);
+}
+
+function resolveRuntimeAfterSnapshot(
+  previous: TuiStoreState,
+  next: TuiStoreState,
+  permissions: readonly UiPermissionRequest[],
+  runs: readonly UiRun[],
+): TuiRuntimeStatus {
+  if (permissions.length > 0) {
+    return { kind: "waiting-for-permission", requestId: permissions[0].id };
+  }
+
+  if (previous.runtime.kind === "running") {
+    const running = previous.runtime;
+    const run = runs.find((candidate) => candidate.id === running.runId);
+    if (run?.status.kind === "running") {
+      return running;
+    }
+  }
+
+  return next.runtime;
+}
+
+function resolveRuntimeAfterPermission(state: TuiStoreState): TuiRuntimeStatus {
+  if (state.runtime.kind !== "waiting-for-permission") {
+    return state.runtime;
+  }
+
+  const waiting = state.runtime;
+  const request = state.permissions.find(
+    (candidate) => candidate.id === waiting.requestId,
+  );
+  const run = state.runs.find((candidate) => candidate.id === request?.runId);
+
+  if (run?.status.kind === "running") {
+    return run.status;
+  }
+  if (run?.status.kind === "waiting-for-permission") {
+    return { kind: "running", runId: run.id };
+  }
+
+  return { kind: "idle" };
 }
 
 function rememberResolvedPermission(
@@ -500,14 +638,115 @@ function formatCommandOutput(output: UiCommandOutput | undefined): string {
   }
 
   if (output.kind === "text") {
-    return output.text;
+    return truncateCommandOutput(output.text);
   }
 
   if (output.kind === "markdown") {
-    return output.markdown;
+    return truncateCommandOutput(output.markdown);
   }
 
-  return JSON.stringify(output.data);
+  return truncateCommandOutput(formatDataCommandOutput(output));
+}
+
+function formatDataCommandOutput(
+  output: Extract<UiCommandOutput, { readonly kind: "data" }>,
+): string {
+  switch (output.subject) {
+    case "policy.mode": {
+      const policy = getRecord(output.data, "policy");
+      const mode = policy ? getString(policy, "mode") : undefined;
+      const agentState = policy ? getString(policy, "agentState") : undefined;
+
+      return mode && agentState
+        ? `mode: ${mode} / ${agentState}`
+        : JSON.stringify(output.data);
+    }
+    case "status": {
+      const status = getString(output.data, "status");
+      return status ? `status: ${status}` : JSON.stringify(output.data);
+    }
+    case "tools": {
+      const tools = Array.isArray(output.data.tools)
+        ? output.data.tools
+            .map((tool) => (isRecord(tool) ? getString(tool, "name") : null))
+            .filter((name): name is string => Boolean(name))
+        : [];
+      return tools.length > 0
+        ? `tools: ${tools.join(", ")}`
+        : JSON.stringify(output.data);
+    }
+    case "session.current": {
+      const sessionId = getString(output.data, "sessionId");
+      return sessionId ? `session: ${sessionId}` : JSON.stringify(output.data);
+    }
+    case "session.list": {
+      const sessions = Array.isArray(output.data.sessions)
+        ? output.data.sessions
+            .map((session) =>
+              isRecord(session)
+                ? (getString(session, "title") ?? getString(session, "id"))
+                : null,
+            )
+            .filter((session): session is string => Boolean(session))
+        : [];
+      return sessions.length > 0
+        ? `sessions: ${sessions.join(", ")}`
+        : "sessions: none";
+    }
+    case "model.current": {
+      const model = getRecord(output.data, "model");
+      const label = model
+        ? (getString(model, "label") ?? getString(model, "id"))
+        : undefined;
+      return label ? `model: ${label}` : JSON.stringify(output.data);
+    }
+    case "model.list": {
+      const models = Array.isArray(output.data.models)
+        ? output.data.models
+            .map((model) =>
+              isRecord(model)
+                ? (getString(model, "label") ?? getString(model, "id"))
+                : null,
+            )
+            .filter((model): model is string => Boolean(model))
+        : [];
+      return models.length > 0
+        ? `models: ${models.join(", ")}`
+        : "models: none";
+    }
+    default:
+      return JSON.stringify(output.data);
+  }
+}
+
+function truncateCommandOutput(value: string): string {
+  const normalized = value.trim();
+
+  if (normalized.length <= COMMAND_NOTICE_TEXT_LIMIT) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, COMMAND_NOTICE_TEXT_LIMIT - 3)}...`;
+}
+
+function getRecord(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | undefined {
+  const value = record[key];
+  return isRecord(value) ? value : undefined;
+}
+
+function getString(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function toTuiInteraction(

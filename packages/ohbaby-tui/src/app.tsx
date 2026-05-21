@@ -190,6 +190,7 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
         catalog={state.catalog}
         client={client}
         disabled={hasDialog}
+        policy={state.policy}
       />
       <Footer state={state} />
       {state.catalogInvalidation === null ? null : (

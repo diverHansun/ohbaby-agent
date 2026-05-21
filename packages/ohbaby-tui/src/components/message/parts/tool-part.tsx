@@ -12,10 +12,12 @@ export function renderToolPart(part: UiMessagePart): string {
     }
     case "tool-result":
       return formatBlock(
-        `tool result ${part.result.callId}`,
+        `tool result ${part.result.callId} (${
+          part.result.error ? "failed" : "completed"
+        })`,
         part.result.error
           ? `error: ${formatBody(part.result.error)}`
-          : `output: ${formatOutput(part.result.output)}`,
+          : formatOutput(part.result.output),
       );
     case "text":
     case "reasoning":
@@ -42,7 +44,7 @@ function formatInput(input: Record<string, unknown>): string {
 }
 
 function formatOutput(output: string): string {
-  return formatBody(output);
+  return output.trim() === "" ? "result hidden" : "result hidden";
 }
 
 function formatBody(output: string): string {

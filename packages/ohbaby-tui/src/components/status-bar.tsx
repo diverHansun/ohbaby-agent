@@ -19,9 +19,6 @@ export function StatusBar({ state }: StatusBarProps): ReactElement {
       {state.activeSessionId === null
         ? ""
         : ` | session: ${state.activeSessionId}`}
-      {state.policy === undefined
-        ? ""
-        : ` | mode: ${state.policy.mode}/${state.policy.agentState}`}
     </Text>
   );
 }
