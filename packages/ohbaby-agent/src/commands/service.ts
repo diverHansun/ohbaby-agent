@@ -6,10 +6,7 @@ import {
 import { CommandsEvent } from "./events.js";
 import { createCommandRunContext } from "./run-context.js";
 import { createBuiltinHandlers } from "./builtin.js";
-import type {
-  CommandService,
-  CommandServiceOptions,
-} from "./types.js";
+import type { CommandService, CommandServiceOptions } from "./types.js";
 
 function createDefaultCommandRunId(): () => string {
   let next = 1;
@@ -34,6 +31,9 @@ export function createCommandService(
     extraCommands: options.extraCommands,
   });
   const handlers = createBuiltinHandlers(options);
+  for (const handler of options.extraHandlers ?? []) {
+    handlers.set(handler.id, handler);
+  }
   const createCommandRunId =
     options.createCommandRunId ?? createDefaultCommandRunId();
   const now = options.now ?? Date.now;
@@ -85,10 +85,10 @@ export function createCommandService(
     },
 
     abortCommandRun(commandRunId: string, reason = "aborted"): number {
-      return options.interactionBroker?.abortByCommandRun?.(
-        commandRunId,
-        reason,
-      ) ?? 0;
+      return (
+        options.interactionBroker?.abortByCommandRun?.(commandRunId, reason) ??
+        0
+      );
     },
   };
 }

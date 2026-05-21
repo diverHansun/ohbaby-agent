@@ -33,6 +33,7 @@ export interface UiSnapshot {
 export interface UiSession {
   readonly id: string;
   readonly title: string;
+  readonly projectRoot?: string;
   readonly messages: readonly UiMessage[];
   readonly createdAt: string;
   readonly updatedAt: string;

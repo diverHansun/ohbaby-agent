@@ -250,10 +250,11 @@ describe("CommandService", () => {
     });
 
     await service.executeCommand(
-      makeInvocation("session.resume", ["session", "resume"], [
-        "--session_id",
-        "session_2",
-      ]),
+      makeInvocation(
+        "session.resume",
+        ["session", "resume"],
+        ["--session_id", "session_2"],
+      ),
     );
     await service.executeCommand(
       makeInvocation("session.resume", ["resume"], ["session_1"]),
@@ -447,6 +448,56 @@ describe("CommandService", () => {
         message: "Command not found: missing",
       },
       type: "failed",
+    });
+  });
+
+  it("executes handlers registered with extra command specs", async () => {
+    const { events, service } = createServiceHarness({
+      extraCommands: [
+        {
+          argumentMode: "argv",
+          category: "system",
+          description: "Show diagnostics",
+          id: "diagnostics",
+          path: ["diagnostics"],
+          source: "plugin",
+          surfaces: ["tui"],
+        },
+      ],
+      extraHandlers: [
+        {
+          id: "diagnostics",
+          execute(_invocation, context): void {
+            context.emitOutput({
+              kind: "data",
+              subject: "diagnostics",
+              data: { ok: true },
+            });
+          },
+        },
+      ],
+    });
+
+    expect(service.listCommands({ surface: "tui" }).commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "diagnostics",
+          path: ["diagnostics"],
+        }),
+      ]),
+    );
+
+    await service.executeCommand(
+      makeInvocation("diagnostics", ["diagnostics"]),
+    );
+
+    expect(events.at(-1)).toMatchObject({
+      output: {
+        data: { ok: true },
+        kind: "data",
+        subject: "diagnostics",
+      },
+      type: "result",
     });
   });
 

@@ -25,10 +25,7 @@ import {
   schema,
   type DatabaseConnection,
 } from "../../services/database/index.js";
-import type {
-  Session,
-  SessionManager,
-} from "../../services/session/index.js";
+import type { Session, SessionManager } from "../../services/session/index.js";
 import { cloneSnapshot } from "./memory-store.js";
 import type { UiStateStore } from "./types.js";
 
@@ -49,10 +46,7 @@ export interface DatabaseUiAppStateStoreOptions {
 }
 
 export interface PersistentUiStateStoreOptions {
-  readonly sessionManager: Pick<
-    SessionManager,
-    "get" | "getRecent" | "update"
-  >;
+  readonly sessionManager: Pick<SessionManager, "get" | "getRecent" | "update">;
   readonly messageManager: Pick<MessageManager, "listBySession">;
   readonly runLedger: RunLedger;
   readonly appState: UiAppStateStore;
@@ -147,6 +141,7 @@ function sessionToUiSession(input: {
     createdAt: toIsoString(input.session.createdAt),
     id: input.session.id,
     messages: input.messages.map(messageToUiMessage),
+    projectRoot: input.session.projectRoot,
     title: input.session.title,
     updatedAt: toIsoString(input.session.updatedAt),
   };
@@ -172,7 +167,9 @@ function runToUiRun(record: RunLedgerRecord): UiRun {
     sessionId: record.sessionId,
     startedAt: toIsoString(record.startedAt ?? record.createdAt),
     status: runStatusToUiStatus(record),
-    updatedAt: toIsoString(record.endedAt ?? record.startedAt ?? record.createdAt),
+    updatedAt: toIsoString(
+      record.endedAt ?? record.startedAt ?? record.createdAt,
+    ),
   };
 }
 
@@ -215,10 +212,7 @@ function isActiveRun(record: RunLedgerRecord): boolean {
   return ACTIVE_RUN_STATUSES.has(record.status);
 }
 
-async function applyRunUpdate(
-  runLedger: RunLedger,
-  run: UiRun,
-): Promise<void> {
+async function applyRunUpdate(runLedger: RunLedger, run: UiRun): Promise<void> {
   const existing = await runLedger.get(run.id);
   if (existing && existing.sessionId !== run.sessionId) {
     throw new Error(
@@ -367,7 +361,9 @@ export function createPersistentUiStateStore(
       return { ...mutable.status };
     }
     const activeRun = runs.find(isActiveRun);
-    return activeRun ? { kind: "running", runId: activeRun.runId } : { kind: "idle" };
+    return activeRun
+      ? { kind: "running", runId: activeRun.runId }
+      : { kind: "idle" };
   }
 
   return {

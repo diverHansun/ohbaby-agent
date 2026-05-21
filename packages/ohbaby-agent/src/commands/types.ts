@@ -102,6 +102,7 @@ export interface CommandServiceOptions {
   readonly createCommandRunId?: () => string;
   readonly now?: () => number;
   readonly extraCommands?: readonly UiCommandSpec[];
+  readonly extraHandlers?: readonly CommandHandler[];
 }
 
 export interface CommandService {

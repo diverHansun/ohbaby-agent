@@ -1,3 +1,4 @@
+import path from "node:path";
 import type {
   SubmitPromptOptions,
   UiBackendClient,
@@ -52,6 +53,7 @@ import type {
   PermissionResponse as CorePermissionResponse,
 } from "../permission/index.js";
 import { createPolicyManager, PolicyEvent } from "../policy/index.js";
+import { Project } from "../project/index.js";
 import type { AgentManager } from "../agents/index.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
 import type { RunLedger } from "../runtime/run-ledger/index.js";
@@ -195,6 +197,7 @@ function sessionMetadataToUiSession(session: CoreSession): UiSession {
     createdAt: new Date(session.createdAt).toISOString(),
     id: session.id,
     messages: [],
+    projectRoot: session.projectRoot,
     title: session.title,
     updatedAt: new Date(session.updatedAt).toISOString(),
   };
@@ -485,43 +488,56 @@ export function createInProcessUiBackendClient(
     return true;
   }
 
-  function projectRoot(): string {
+  function projectDirectory(): string {
     return options.workdir ?? options.projectDirectory ?? process.cwd();
   }
 
-  async function resolveLLMClient(): Promise<LLMClientInstance> {
+  async function resolveProjectRoot(): Promise<string> {
+    const directory = projectDirectory();
+    const project = await Project.fromDirectory(directory);
+
+    return options.workdir || options.projectDirectory
+      ? path.resolve(directory)
+      : project.rootPath;
+  }
+
+  async function resolveLLMClient(
+    projectRoot?: string,
+  ): Promise<LLMClientInstance> {
+    const projectDirectory = projectRoot ?? (await resolveProjectRoot());
     if (options.llmClient) {
       return options.llmClient;
     }
     if (options.createLLMClient) {
-      return options.createLLMClient({ projectDirectory: projectRoot() });
+      return options.createLLMClient({ projectDirectory });
     }
-    return createLLMClient({ projectDirectory: projectRoot() });
+    return createLLMClient({ projectDirectory });
   }
 
   function getRuntime(): Promise<UiRuntimeComposition> {
-    runtimePromise ??= resolveLLMClient()
-      .then((llmClient) =>
-        createUiRuntimeComposition({
-          agentManager: options.agentManager,
-          bus,
-          createRunId: options.createRunId ?? ((): string => runIds.next()),
-          llmClient,
-          messageManager,
-          hookExecutor: options.hookExecutor,
-          now: () => now().getTime(),
-          onNotice: publishNotice,
-          permission,
-          policy,
-          runLedger: options.runLedger,
-          streamBridge: options.streamBridge,
-          workdir: projectRoot(),
-        }),
-      )
-      .catch((error: unknown) => {
-        runtimePromise = undefined;
-        throw error;
+    runtimePromise ??= (async (): Promise<UiRuntimeComposition> => {
+      const baseProjectRoot = await resolveProjectRoot();
+      const llmClient = await resolveLLMClient(baseProjectRoot);
+
+      return createUiRuntimeComposition({
+        agentManager: options.agentManager,
+        bus,
+        createRunId: options.createRunId ?? ((): string => runIds.next()),
+        llmClient,
+        messageManager,
+        hookExecutor: options.hookExecutor,
+        now: () => now().getTime(),
+        onNotice: publishNotice,
+        permission,
+        policy,
+        runLedger: options.runLedger,
+        streamBridge: options.streamBridge,
+        workdir: baseProjectRoot,
       });
+    })().catch((error: unknown) => {
+      runtimePromise = undefined;
+      throw error;
+    });
 
     return runtimePromise;
   }
@@ -795,17 +811,21 @@ export function createInProcessUiBackendClient(
         await reserveIdsFromState();
         const runtime = await getRuntimeForPrompt();
         const agentName = runtime.agentManager.getDefault();
-        const resolvedProjectRoot = projectRoot();
+        const baseProjectRoot = await resolveProjectRoot();
         let session = submitOptions?.sessionId
           ? await stateStore.getSession(submitOptions.sessionId)
           : undefined;
-        if (!session && submitOptions?.sessionId && options.sessionManager) {
-          const existingSession = await options.sessionManager.get(
-            submitOptions.sessionId,
-          );
-          session = existingSession
-            ? sessionMetadataToUiSession(existingSession)
+        const existingCoreSession =
+          submitOptions?.sessionId && options.sessionManager
+            ? await options.sessionManager.get(submitOptions.sessionId)
             : undefined;
+        if (!session && existingCoreSession) {
+          session = sessionMetadataToUiSession(existingCoreSession);
+        } else if (session && !session.projectRoot && existingCoreSession) {
+          session = {
+            ...session,
+            projectRoot: existingCoreSession.projectRoot,
+          };
         }
 
         const isNewSession = !session;
@@ -813,7 +833,7 @@ export function createInProcessUiBackendClient(
           const title = text.trim().slice(0, 48) || "Untitled session";
           if (options.sessionManager) {
             const created = await options.sessionManager.create(
-              resolvedProjectRoot,
+              baseProjectRoot,
               {
                 agentName,
                 id: submitOptions?.sessionId,
@@ -826,12 +846,15 @@ export function createInProcessUiBackendClient(
               id: submitOptions?.sessionId ?? sessionIds.next(),
               title,
               messages: [],
+              projectRoot: baseProjectRoot,
               createdAt,
               updatedAt: createdAt,
             };
           }
           sessionIds.reserve(session.id);
         }
+        const resolvedProjectRoot = session.projectRoot ?? baseProjectRoot;
+        runtime.setSessionWorkdir(session.id, resolvedProjectRoot);
         submittedSessionId = session.id;
 
         const userMessage = createTextMessage({

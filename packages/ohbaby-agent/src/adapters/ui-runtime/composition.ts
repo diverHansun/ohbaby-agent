@@ -46,7 +46,10 @@ import {
   createInMemoryStreamBridge,
   type StreamBridge,
 } from "../../runtime/stream-bridge/index.js";
-import { createHostLocalSandboxManager } from "./host-local-environment.js";
+import {
+  createHostLocalEnvironment,
+  createHostLocalSandboxManager,
+} from "./host-local-environment.js";
 import {
   appendMemoryToSystemPrompt,
   createContextSummaryClient,
@@ -413,6 +416,13 @@ export async function createUiRuntimeComposition(
     toolScheduler,
 
     reserveRunId,
+
+    setSessionWorkdir(sessionId, workdir): void {
+      sandboxManager.setSessionEnvironment(
+        sessionId,
+        createHostLocalEnvironment(workdir),
+      );
+    },
 
     ensureSessionRecord(input): Promise<void> {
       sessionManager.ensureRoot({

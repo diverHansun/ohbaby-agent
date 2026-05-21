@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
@@ -208,6 +208,61 @@ describe("TUI persistent backend display", () => {
     expect(serializedMessages).toContain("Alpha reply.");
     expect(serializedMessages).toContain("Continue alpha");
     expect(serializedMessages).not.toContain("Beta prompt");
+    app.unmount();
+  });
+
+  it("continues a restored session from its original project root", async () => {
+    const directory = await tempWorkspace("ohbaby-tui-session-root");
+    const dbPath = join(directory, "agent.db");
+    const originalWorkdir = join(directory, "workspace-a");
+    const restoredWorkdir = join(directory, "workspace-b");
+    await mkdir(originalWorkdir, { recursive: true });
+    await mkdir(restoredWorkdir, { recursive: true });
+    const setupClient = createPersistentUiBackendClient({
+      dbPath,
+      llmClient: createSequentialFakeLLMClient([
+        [{ textDelta: "Alpha reply.", finishReason: "stop" }],
+      ]),
+      workdir: originalWorkdir,
+    });
+
+    await setupClient.submitPrompt("Alpha prompt", {
+      sessionId: "session_alpha",
+    });
+    closeDatabase();
+
+    const requests: Parameters<typeof createSequentialFakeLLMClient>[1] = [];
+    const restored = createPersistentUiBackendClient({
+      dbPath,
+      llmClient: createSequentialFakeLLMClient(
+        [[{ textDelta: "Alpha from original root.", finishReason: "stop" }]],
+        requests,
+      ),
+      workdir: restoredWorkdir,
+    });
+    const app = render(<OhbabyTerminalApp client={restored} />);
+
+    await waitForFrame(app, (frame) => frame.includes("Alpha reply."));
+    app.stdin.write("/resume --session_id session_alpha");
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) => frame.includes("Alpha prompt"));
+
+    app.stdin.write("Continue alpha");
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) =>
+      frame.includes("Alpha from original root."),
+    );
+
+    const systemContent =
+      typeof requests[0]?.messages[0]?.content === "string"
+        ? requests[0].messages[0].content
+        : "";
+    expect(systemContent).toContain(
+      `Current working directory: ${originalWorkdir}`,
+    );
+    expect(systemContent).not.toContain(
+      `Current working directory: ${restoredWorkdir}`,
+    );
     app.unmount();
   });
 });

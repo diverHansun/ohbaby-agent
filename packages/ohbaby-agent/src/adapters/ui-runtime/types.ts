@@ -17,6 +17,7 @@ export interface UiRuntimeComposition {
   readonly streamBridge: StreamBridge;
   readonly toolScheduler: ToolSchedulerInstance;
   reserveRunId(runId?: string): string;
+  setSessionWorkdir(sessionId: string, workdir: string): void;
   ensureSessionRecord(input: {
     readonly agentName: string;
     readonly id: string;

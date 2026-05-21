@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import type { UiBackendClient } from "ohbaby-sdk";
 import { createBus, type BusInstance } from "../bus/index.js";
 import {
@@ -34,11 +35,15 @@ import {
   createPersistentUiStateStore,
 } from "./ui-state/index.js";
 
-export interface PersistentUiBackendOptions
-  extends Omit<
-    InProcessUiBackendOptions,
-    "bus" | "hookExecutor" | "messageManager" | "runLedger" | "sessionManager" | "stateStore"
-  > {
+export interface PersistentUiBackendOptions extends Omit<
+  InProcessUiBackendOptions,
+  | "bus"
+  | "hookExecutor"
+  | "messageManager"
+  | "runLedger"
+  | "sessionManager"
+  | "stateStore"
+> {
   readonly bus?: BusInstance;
   readonly dbPath?: string;
   readonly enableSnapshots?: boolean;
@@ -268,14 +273,10 @@ function withStartupRecovery(
       await ready();
       return client.getSnapshot();
     },
-    subscribeEvents(
-      handler,
-    ): ReturnType<UiBackendClient["subscribeEvents"]> {
+    subscribeEvents(handler): ReturnType<UiBackendClient["subscribeEvents"]> {
       return client.subscribeEvents(handler);
     },
-    async listCommands(
-      query,
-    ): ReturnType<UiBackendClient["listCommands"]> {
+    async listCommands(query): ReturnType<UiBackendClient["listCommands"]> {
       await ready();
       return client.listCommands(query);
     },
@@ -313,6 +314,28 @@ function withStartupRecovery(
   };
 }
 
+function createPersistentProjectResolver(
+  explicitDirectory: string | undefined,
+): typeof Project {
+  if (!explicitDirectory) {
+    return Project;
+  }
+  const explicitRoot = path.resolve(explicitDirectory);
+
+  return {
+    ...Project,
+    async fromDirectory(directory: string) {
+      const project = await Project.fromDirectory(directory);
+      return path.resolve(directory) === explicitRoot
+        ? {
+            ...project,
+            rootPath: explicitRoot,
+          }
+        : project;
+    },
+  };
+}
+
 export function createPersistentUiBackendClient(
   options: PersistentUiBackendOptions = {},
 ): UiBackendClient {
@@ -333,7 +356,9 @@ export function createPersistentUiBackendClient(
       },
     },
     now,
-    projectResolver: Project,
+    projectResolver: createPersistentProjectResolver(
+      options.workdir ?? options.projectDirectory,
+    ),
     store: createDatabaseSessionStore({ db }),
   });
   const runLedger = createDatabaseRunLedger({ db, now });
@@ -365,22 +390,25 @@ export function createPersistentUiBackendClient(
       })
     : Promise.resolve({ updatedCount: 0 });
 
-  return withStartupRecovery(createInProcessUiBackendClient({
-    agentManager: options.agentManager,
-    bus,
-    createLLMClient: options.createLLMClient,
-    createRunId: options.createRunId,
-    hookExecutor,
-    llmClient: options.llmClient,
-    messageManager,
-    now: options.now,
-    projectDirectory: options.projectDirectory,
-    runLedger,
-    sessionManager,
-    stateStore,
-    streamBridge: options.streamBridge,
-    workdir: options.workdir,
-  }), startupRecovery);
+  return withStartupRecovery(
+    createInProcessUiBackendClient({
+      agentManager: options.agentManager,
+      bus,
+      createLLMClient: options.createLLMClient,
+      createRunId: options.createRunId,
+      hookExecutor,
+      llmClient: options.llmClient,
+      messageManager,
+      now: options.now,
+      projectDirectory: options.projectDirectory,
+      runLedger,
+      sessionManager,
+      stateStore,
+      streamBridge: options.streamBridge,
+      workdir: options.workdir,
+    }),
+    startupRecovery,
+  );
 }
 
 export { closeDatabase as closePersistentUiBackendDatabase };
