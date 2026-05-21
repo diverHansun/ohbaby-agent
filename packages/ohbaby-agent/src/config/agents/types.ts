@@ -131,6 +131,7 @@ export const AgentConfigSchema = z
     maxTokens: z.number().int().positive().optional(),
     tools: ToolsConfigSchema.optional(),
     permission: PermissionConfigSchema.optional(),
+    prompt: z.string().trim().min(1).optional(),
   })
   .strict()
   .superRefine((config, context) => {

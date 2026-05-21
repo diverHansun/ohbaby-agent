@@ -378,3 +378,30 @@ export const BUILTIN_AGENTS = ['build', 'plan', 'explore', 'research'] as const
 - [x] 约束与权衡已明确记录
 - [x] 与 config/agents 模块的依赖关系清晰
 - [x] 配置与提示词分离的设计理由明确
+
+---
+
+## 2026-05-22 Current Boundary Note
+
+This phase keeps the agents module in the synchronous child-session model:
+`task` invokes a subagent, the subagent runs in an isolated child session, and
+the parent receives only the task tool result plus metadata. Background agents,
+team inboxes, autonomous task claiming, and `agent_open` / `agent_eval` /
+`agent_close` APIs are intentionally future work.
+
+The runtime glue for this synchronous child-session path belongs with the
+agents module:
+
+- `SubagentExecutor` owns the task-level orchestration contract.
+- Runtime session adapters own root/child session creation and resume lookup.
+- The subagent message writer owns child user/error assistant turns.
+- The subagent runner owns child run creation, parent abort binding, sandbox
+  environment cleanup, and child result extraction.
+
+`ui-runtime/composition.ts` should remain a composition root: it creates shared
+managers and passes them into the agents factories. It should not inline
+subagent session adapters, message-writing details, or child run lifecycle glue.
+
+Agent `permission` config is currently loaded and preserved as configuration,
+but it is not yet applied as a runtime policy override. That policy integration
+is a separate future step.

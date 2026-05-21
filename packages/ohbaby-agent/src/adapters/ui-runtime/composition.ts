@@ -11,25 +11,23 @@ import type {
   ChatCompletionMessage,
   LLMClientInstance,
 } from "../../core/llm-client/index.js";
-import type {
-  MessageManager,
-  MessageWithParts,
-} from "../../core/message/index.js";
+import type { MessageManager } from "../../core/message/index.js";
 import { createMemoryManager } from "../../core/memory/index.js";
 import {
   createToolScheduler,
   type PermissionPort,
   type PolicyPort,
-  type ToolDefinition,
 } from "../../core/tool-scheduler/index.js";
 import { createHeuristicTokenCounter } from "../../services/llm-model/index.js";
 import type { SessionManager } from "../../services/session/index.js";
 import {
   AgentManager,
   SubagentExecutor,
-  type SubagentRunner,
-  type SubagentSession,
-  type SubagentSessionManager,
+  createRuntimeSubagentSessionManager,
+  createSubagentMessageWriter,
+  createSubagentRunner,
+  toOpenAiTools,
+  type RuntimeSubagentSessionManager,
 } from "../../agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
 import {
@@ -118,144 +116,6 @@ export interface UiRuntimeCompositionOptions {
   readonly workdir?: string;
 }
 
-interface RuntimeSubagentSessionManager extends SubagentSessionManager {
-  ensureRoot(input: {
-    readonly agentName: string;
-    readonly id: string;
-    readonly projectRoot: string;
-    readonly title?: string;
-  }): Promise<void>;
-}
-
-class InMemorySubagentSessionManager implements RuntimeSubagentSessionManager {
-  private readonly sessions = new Map<string, SubagentSession>();
-  private nextId = 1;
-
-  ensureRoot(input: {
-    readonly agentName: string;
-    readonly id: string;
-    readonly projectRoot: string;
-    readonly title?: string;
-  }): Promise<void> {
-    const existing = this.sessions.get(input.id);
-    this.sessions.set(input.id, {
-      id: input.id,
-      agentName: input.agentName,
-      childrenIds: existing?.childrenIds ?? [],
-      isSubagent: false,
-      projectRoot: input.projectRoot,
-    });
-    return Promise.resolve();
-  }
-
-  create(
-    projectDirectory: string,
-    options: {
-      readonly id?: string;
-      readonly title?: string;
-      readonly agentName?: string;
-      readonly parentId?: string;
-    } = {},
-  ): Promise<SubagentSession> {
-    const id = options.id ?? `subagent_session_${String(this.nextId)}`;
-    this.nextId += 1;
-    const parent = options.parentId
-      ? this.sessions.get(options.parentId)
-      : undefined;
-    const session: SubagentSession = {
-      id,
-      agentName: options.agentName ?? "build",
-      childrenIds: [],
-      isSubagent: options.parentId !== undefined,
-      parentId: options.parentId,
-      projectRoot: parent?.projectRoot ?? projectDirectory,
-    };
-
-    this.sessions.set(id, session);
-    if (parent && !parent.childrenIds.includes(id)) {
-      this.sessions.set(parent.id, {
-        ...parent,
-        childrenIds: [...parent.childrenIds, id],
-      });
-    }
-
-    return Promise.resolve(session);
-  }
-
-  get(sessionId: string): Promise<SubagentSession | null> {
-    return Promise.resolve(this.sessions.get(sessionId) ?? null);
-  }
-}
-
-class PersistentSubagentSessionManager implements RuntimeSubagentSessionManager {
-  constructor(
-    private readonly backing: Pick<SessionManager, "create" | "get">,
-  ) {}
-
-  async ensureRoot(input: {
-    readonly agentName: string;
-    readonly id: string;
-    readonly projectRoot: string;
-    readonly title?: string;
-  }): Promise<void> {
-    if (await this.backing.get(input.id)) {
-      return;
-    }
-    await this.backing.create(input.projectRoot, {
-      agentName: input.agentName,
-      id: input.id,
-      title: input.title,
-    });
-  }
-
-  create(
-    projectDirectory: string,
-    options: {
-      readonly id?: string;
-      readonly title?: string;
-      readonly agentName?: string;
-      readonly parentId?: string;
-    } = {},
-  ): Promise<SubagentSession> {
-    return this.backing.create(projectDirectory, options);
-  }
-
-  get(sessionId: string): Promise<SubagentSession | null> {
-    return this.backing.get(sessionId);
-  }
-}
-
-function toOpenAiTools(
-  definitions: readonly ToolDefinition[],
-): ChatCompletionCreateParams["tools"] {
-  return definitions.map((definition) => ({
-    type: "function",
-    function: {
-      name: definition.name,
-      description: definition.description,
-      parameters: definition.parameters,
-    },
-  }));
-}
-
-function textFromMessage(message: MessageWithParts): string {
-  return message.parts
-    .map((part) => {
-      if (part.type === "text" || part.type === "reasoning") {
-        return part.text;
-      }
-      return "";
-    })
-    .join("");
-}
-
-function lastAssistantText(messages: readonly MessageWithParts[]): string {
-  const assistant = [...messages]
-    .reverse()
-    .find((message) => message.info.role === "assistant");
-  return assistant ? textFromMessage(assistant) : "";
-}
-
 function withoutSystemMessages(
   messages: readonly ChatCompletionMessage[],
 ): ChatCompletionMessage[] {
@@ -283,9 +143,8 @@ export async function createUiRuntimeComposition(
     policy: options.policy,
   });
   const sandboxManager = createHostLocalSandboxManager(options.workdir);
-  const sessionManager: RuntimeSubagentSessionManager = options.sessionManager
-    ? new PersistentSubagentSessionManager(options.sessionManager)
-    : new InMemorySubagentSessionManager();
+  const sessionManager: RuntimeSubagentSessionManager =
+    createRuntimeSubagentSessionManager(options.sessionManager);
   const subagentSessionAgents = new Map<string, string>();
   let activePrimaryAgentName = agentManager.getDefault();
   const reservedRunIds: string[] = [];
@@ -297,36 +156,6 @@ export async function createUiRuntimeComposition(
   function reserveRunId(runId = nextRunId()): string {
     reservedRunIds.push(runId);
     return runId;
-  }
-
-  function abortReason(signal: AbortSignal): string {
-    return typeof signal.reason === "string" && signal.reason.length > 0
-      ? signal.reason
-      : "subagent run aborted";
-  }
-
-  function bindSubagentAbort(
-    runId: string,
-    signal: AbortSignal | undefined,
-  ): () => void {
-    if (!signal) {
-      return () => undefined;
-    }
-    const abort = (): void => {
-      try {
-        runManager.cancel(runId, abortReason(signal));
-      } catch {
-        // The child run may already be terminal.
-      }
-    };
-    if (signal.aborted) {
-      abort();
-      return () => undefined;
-    }
-    signal.addEventListener("abort", abort, { once: true });
-    return () => {
-      signal.removeEventListener("abort", abort);
-    };
   }
 
   async function resolveSubagentAgentName(
@@ -349,7 +178,7 @@ export async function createUiRuntimeComposition(
     return (await resolveSubagentAgentName(input.sessionId)) ?? "subagent";
   }
 
-  async function buildRunMessages(input: {
+  async function buildSessionPromptMessages(input: {
     readonly agentName: string;
     readonly isSubagent: boolean;
     readonly projectRoot: string;
@@ -392,99 +221,27 @@ export async function createUiRuntimeComposition(
     return [{ role: "system", content: systemPrompt }, ...history];
   }
 
-  const subagentRunner: SubagentRunner = {
-    async run(input): Promise<{
-      readonly output: string;
-      readonly steps?: number;
-      readonly success: boolean;
-      readonly toolCalls?: readonly [];
-    }> {
-      subagentSessionAgents.set(input.sessionId, input.agentName);
-      const tools = await toolScheduler.getAvailableTools({
-        agentName: input.agentName,
-        isSubagent: true,
-      });
-      sandboxManager.setSessionEnvironment(input.sessionId, input.environment);
-      try {
-        const messages = await buildRunMessages({
-          agentName: input.agentName,
-          isSubagent: true,
-          projectRoot: input.projectRoot ?? options.workdir ?? process.cwd(),
-          sessionId: input.sessionId,
-        });
-        const record = await runManager.create({
-          agent: input.agentName,
-          isSubagent: true,
-          maxSteps: input.runtimeAgent.config.maxSteps,
-          messages,
-          parentMessageId: input.parentMessageId,
-          sessionId: input.sessionId,
-          tools: toOpenAiTools(tools),
-          triggerSource: "user",
-        });
-        const unbindAbort = bindSubagentAbort(record.runId, input.signal);
-        try {
-          const completion = await runManager.waitForCompletion(record.runId);
-          const messages = await options.messageManager.listBySession(
-            input.sessionId,
-          );
-          const output = lastAssistantText(messages);
-          return {
-            output: output !== "" ? output : (completion.error ?? ""),
-            steps: 0,
-            success: completion.status === "succeeded",
-            toolCalls: [],
-          };
-        } finally {
-          unbindAbort();
-        }
-      } finally {
-        sandboxManager.setSessionEnvironment(input.sessionId, undefined);
-      }
-    },
-  };
+  function buildPrimaryPromptMessages(input: {
+    readonly agentName: string;
+    readonly projectRoot: string;
+    readonly sessionId: string;
+  }): Promise<ChatCompletionMessage[]> {
+    return buildSessionPromptMessages({
+      ...input,
+      isSubagent: false,
+    });
+  }
 
-  const taskExecutor = new SubagentExecutor({
-    agentManager,
-    messageWriter: {
-      async writeUserMessage(input): Promise<{ readonly messageId: string }> {
-        const message = await options.messageManager.createMessage({
-          agent: input.agentName,
-          role: "user",
-          sessionId: input.sessionId,
-        });
-        await options.messageManager.appendPart(message.id, {
-          text: input.prompt,
-          type: "text",
-        });
-        return { messageId: message.id };
-      },
-      async writeAssistantMessage(input): Promise<void> {
-        const message = await options.messageManager.createMessage({
-          agent: input.agentName,
-          parentId: input.parentMessageId,
-          role: "assistant",
-          sessionId: input.sessionId,
-        });
-        await options.messageManager.appendPart(message.id, {
-          text: input.output,
-          type: "text",
-        });
-        await options.messageManager.updateMessage(message.id, {
-          error: {
-            message: input.output,
-            name: "Unknown",
-          },
-          finish: "error",
-        });
-      },
-    },
-    runner: subagentRunner,
-    sessionManager,
-  });
-
-  for (const tool of createBuiltinTools({ taskExecutor })) {
-    toolScheduler.register(tool);
+  function buildSubagentPromptMessages(input: {
+    readonly agentName: string;
+    readonly projectRoot: string;
+    readonly sessionId: string;
+  }): Promise<ChatCompletionMessage[]> {
+    subagentSessionAgents.set(input.sessionId, input.agentName);
+    return buildSessionPromptMessages({
+      ...input,
+      isSubagent: true,
+    });
   }
 
   const systemPromptProvider = createSystemPromptProvider({
@@ -550,6 +307,26 @@ export async function createUiRuntimeComposition(
     streamBridge,
   });
 
+  const subagentRunner = createSubagentRunner({
+    buildSubagentPromptMessages,
+    fallbackProjectRoot: options.workdir,
+    messageManager: options.messageManager,
+    runManager,
+    sandboxManager,
+    toolScheduler,
+  });
+
+  const taskExecutor = new SubagentExecutor({
+    agentManager,
+    messageWriter: createSubagentMessageWriter(options.messageManager),
+    runner: subagentRunner,
+    sessionManager,
+  });
+
+  for (const tool of createBuiltinTools({ taskExecutor })) {
+    toolScheduler.register(tool);
+  }
+
   return {
     agentManager,
     runLedger,
@@ -585,12 +362,7 @@ export async function createUiRuntimeComposition(
     },
 
     async buildPromptMessages(input): Promise<ChatCompletionMessage[]> {
-      return buildRunMessages({
-        agentName: input.agentName,
-        isSubagent: false,
-        projectRoot: input.projectRoot,
-        sessionId: input.sessionId,
-      });
+      return buildPrimaryPromptMessages(input);
     },
 
     async listToolSummaries(

@@ -50,6 +50,24 @@ describe("AgentConfigSchema", () => {
     });
   });
 
+  it("accepts explicit agent prompts in configuration", () => {
+    const parsed = AgentConfigSchema.parse({
+      ...VALID_PRIMARY_AGENT,
+      prompt: "Use this agent-specific system prompt.",
+    });
+
+    expect(parsed.prompt).toBe("Use this agent-specific system prompt.");
+  });
+
+  it("rejects blank explicit agent prompts", () => {
+    expect(() =>
+      AgentConfigSchema.parse({
+        ...VALID_PRIMARY_AGENT,
+        prompt: "   ",
+      }),
+    ).toThrow(/prompt/i);
+  });
+
   it("accepts an active subagent only when description is present", () => {
     expect(() =>
       AgentConfigSchema.parse({

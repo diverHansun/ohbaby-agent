@@ -416,3 +416,24 @@ const DOUBLE_CTRL_C_WINDOW = 500
 - [x] 接口定义完整，各模块职责清晰
 - [x] 常量定义集中，便于维护
 - [x] 执行流程清晰，便于实现参考
+
+---
+
+## 2026-05-22 Current Isolation Contract
+
+The implemented subagent path is an opencode-style synchronous child-session
+contract. A parent run calls the `task` tool, the child prompt is written into a
+real child session, and the child session independently runs context compaction
+and prompt assembly before its model request.
+
+The parent session does not receive the child transcript. It receives the tool
+output and `metadata.subagent`, including the child `sessionId`, success flag,
+and summary fields. A later `resume_session_id` appends a new user prompt to
+the same child session and includes that child history in the next child model
+request.
+
+Cancellation remains parent-bound for synchronous `task`: aborting the parent
+run cancels the active child run through the child run id. This is not the same
+as a future background/team agent. Long-lived agents with live inboxes,
+autonomous polling, or task-board claiming should be introduced through a
+separate API and state model rather than extending `task`.
