@@ -2,7 +2,10 @@ import { realpathSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ToolExecutionEnvironment } from "../../core/tool-scheduler/index.js";
-import type { SandboxLease, SandboxManager } from "../../runtime/run-manager/index.js";
+import type {
+  SandboxLease,
+  SandboxManager,
+} from "../../runtime/run-manager/index.js";
 
 export interface HostLocalSandboxManager extends SandboxManager {
   setSessionEnvironment(
@@ -26,6 +29,10 @@ function assertInsideWorkdir(
   inputPath: string,
   resolved: string,
 ): string {
+  if (path.isAbsolute(inputPath)) {
+    return resolved;
+  }
+
   const normalizedRoot = normalizeForBoundary(workdir);
   const normalizedCandidate = normalizeForBoundary(resolved);
   if (normalizedRoot === normalizedCandidate) {

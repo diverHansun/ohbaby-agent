@@ -9,6 +9,12 @@ import {
   type ToolSchedulerInstance,
 } from "../core/tool-scheduler/index.js";
 import { createHostLocalEnvironment } from "../adapters/ui-runtime/host-local-environment.js";
+import {
+  createPermissionManager,
+  PermissionEvent,
+  type PermissionInfo,
+} from "../permission/index.js";
+import { createPolicyManager } from "../policy/index.js";
 import { createBuiltinTools } from "./index.js";
 
 function createAllowPolicy(): PolicyPort {
@@ -107,7 +113,9 @@ describe("file tools scheduler integration", () => {
     });
 
     expect(missingMtime.status).toBe("error");
-    expect(missingMtime.error?.message).toContain("expected_mtime_ms is required");
+    expect(missingMtime.error?.message).toContain(
+      "expected_mtime_ms is required",
+    );
     await expect(fs.readFile(filePath, "utf8")).resolves.toBe("old\n");
 
     const staleMtime = await scheduler.execute({
@@ -167,17 +175,45 @@ describe("file tools scheduler integration", () => {
     await expect(fs.readdir(tempRoot)).resolves.toEqual([]);
   });
 
-  it("rejects absolute paths outside the workspace for read, write, and edit", async () => {
-    const scheduler = createScheduler();
+  it("allows absolute paths outside the workspace through policy and permission", async () => {
+    const bus = createBus();
+    const policy = createPolicyManager({ bus });
+    const permission = createPermissionManager({
+      bus,
+      generateId: (() => {
+        let next = 1;
+        return () => `permission_${String(next++)}`;
+      })(),
+    });
+    const scheduler = createToolScheduler({ bus, permission, policy });
+    const permissionUpdates: PermissionInfo[] = [];
+    for (const tool of createBuiltinTools()) {
+      scheduler.register(tool);
+    }
+    bus.subscribe(PermissionEvent.Updated, (event) => {
+      permissionUpdates.push(event.info);
+      permission.respond(event.info.sessionId, event.info.id, { type: "once" });
+    });
     const environment = createHostLocalEnvironment(tempRoot);
-    const outsidePath = path.join(outsideRoot, "secret.txt");
-    await fs.writeFile(outsidePath, "secret\n", "utf8");
+    const outsideReadPath = path.join(outsideRoot, "secret.txt");
+    const outsideWritePath = path.join(outsideRoot, "written.txt");
+    const outsideEditPath = path.join(outsideRoot, "editable.txt");
+    await fs.writeFile(outsideReadPath, "secret\n", "utf8");
+    await fs.writeFile(outsideEditPath, "old\n", "utf8");
 
     const read = await scheduler.execute({
       callId: "read_outside",
       environment,
       messageId: "message_1",
-      params: { file_path: outsidePath },
+      params: { file_path: outsideReadPath },
+      sessionId: "session_1",
+      toolName: "read",
+    });
+    const readForEdit = await scheduler.execute({
+      callId: "read_outside_edit_target",
+      environment,
+      messageId: "message_1",
+      params: { file_path: outsideEditPath },
       sessionId: "session_1",
       toolName: "read",
     });
@@ -187,7 +223,7 @@ describe("file tools scheduler integration", () => {
       messageId: "message_1",
       params: {
         content: "changed\n",
-        file_path: outsidePath,
+        file_path: outsideWritePath,
       },
       sessionId: "session_1",
       toolName: "write",
@@ -197,26 +233,200 @@ describe("file tools scheduler integration", () => {
       environment,
       messageId: "message_1",
       params: {
-        expected_mtime_ms: (await fs.stat(outsidePath)).mtimeMs,
-        file_path: outsidePath,
+        expected_mtime_ms: (await fs.stat(outsideEditPath)).mtimeMs,
+        file_path: outsideEditPath,
         new_string: "changed",
-        old_string: "secret",
+        old_string: "old",
       },
       sessionId: "session_1",
       toolName: "edit",
     });
 
-    expect(read.status).toBe("error");
-    expect(write.status).toBe("error");
-    expect(edit.status).toBe("error");
-    expect(read.error?.message).toContain("escapes workspace");
-    expect(write.error?.message).toContain("escapes workspace");
-    expect(edit.error?.message).toContain("escapes workspace");
-    await expect(fs.readFile(outsidePath, "utf8")).resolves.toBe("secret\n");
+    expect(read.status).toBe("success");
+    expect(read.output).toContain("secret");
+    expect(readForEdit.status).toBe("success");
+    expect(write.status).toBe("success");
+    expect(edit.status).toBe("success");
+    expect(permissionUpdates.map((info) => info.callId)).toEqual([
+      "write_outside",
+      "edit_outside",
+    ]);
+    expect(permissionUpdates[0]?.pattern).toContain("tool:write:");
+    expect(permissionUpdates[1]?.pattern).toContain("tool:edit:");
+    await expect(fs.readFile(outsideReadPath, "utf8")).resolves.toBe(
+      "secret\n",
+    );
+    await expect(fs.readFile(outsideWritePath, "utf8")).resolves.toBe(
+      "changed\n",
+    );
+    await expect(fs.readFile(outsideEditPath, "utf8")).resolves.toBe(
+      "changed\n",
+    );
   });
 
-  it("does not create directories through symlinked absolute-path parents before rejecting writes", async () => {
-    const scheduler = createScheduler();
+  it("forces permission for external absolute writes even when agent edits are automatic", async () => {
+    const bus = createBus();
+    const policy = createPolicyManager({ bus });
+    policy.setAgentState("edit-automatically");
+    const permission = createPermissionManager({
+      bus,
+      generateId: () => "permission_external_auto",
+    });
+    const scheduler = createToolScheduler({ bus, permission, policy });
+    const permissionUpdates: PermissionInfo[] = [];
+    for (const tool of createBuiltinTools()) {
+      scheduler.register(tool);
+    }
+    bus.subscribe(PermissionEvent.Updated, (event) => {
+      permissionUpdates.push(event.info);
+      permission.respond(event.info.sessionId, event.info.id, { type: "once" });
+    });
+    const environment = createHostLocalEnvironment(tempRoot);
+    const outsideWritePath = path.join(outsideRoot, "auto-external.txt");
+    const outsideEditPath = path.join(outsideRoot, "auto-editable.txt");
+    await fs.writeFile(outsideEditPath, "old\n", "utf8");
+
+    const internal = await scheduler.execute({
+      callId: "write_internal_auto",
+      environment,
+      messageId: "message_1",
+      params: {
+        content: "internal\n",
+        file_path: "auto-internal.txt",
+      },
+      sessionId: "session_1",
+      toolName: "write",
+    });
+    const external = await scheduler.execute({
+      callId: "write_external_auto",
+      environment,
+      messageId: "message_1",
+      params: {
+        content: "external\n",
+        file_path: outsideWritePath,
+      },
+      sessionId: "session_1",
+      toolName: "write",
+    });
+    const readForEdit = await scheduler.execute({
+      callId: "read_external_auto_edit",
+      environment,
+      messageId: "message_1",
+      params: { file_path: outsideEditPath },
+      sessionId: "session_1",
+      toolName: "read",
+    });
+    const externalEdit = await scheduler.execute({
+      callId: "edit_external_auto",
+      environment,
+      messageId: "message_1",
+      params: {
+        expected_mtime_ms: (await fs.stat(outsideEditPath)).mtimeMs,
+        file_path: outsideEditPath,
+        new_string: "new",
+        old_string: "old",
+      },
+      sessionId: "session_1",
+      toolName: "edit",
+    });
+
+    expect(internal.status).toBe("success");
+    expect(external.status).toBe("success");
+    expect(readForEdit.status).toBe("success");
+    expect(externalEdit.status).toBe("success");
+    expect(permissionUpdates.map((info) => info.callId)).toEqual([
+      "write_external_auto",
+      "edit_external_auto",
+    ]);
+    expect(permissionUpdates[0]?.title).toContain("External path write");
+    expect(permissionUpdates[1]?.title).toContain("External path write");
+    await expect(fs.readFile(outsideWritePath, "utf8")).resolves.toBe(
+      "external\n",
+    );
+    await expect(fs.readFile(outsideEditPath, "utf8")).resolves.toBe("new\n");
+  });
+
+  it("matches remembered absolute-path permissions against canonical paths", async () => {
+    const bus = createBus();
+    const policy = createPolicyManager({ bus });
+    const permission = createPermissionManager({
+      bus,
+      generateId: (() => {
+        let next = 1;
+        return () => `permission_canonical_${String(next++)}`;
+      })(),
+    });
+    const scheduler = createToolScheduler({ bus, permission, policy });
+    const permissionUpdates: PermissionInfo[] = [];
+    for (const tool of createBuiltinTools()) {
+      scheduler.register(tool);
+    }
+    bus.subscribe(PermissionEvent.Updated, (event) => {
+      permissionUpdates.push(event.info);
+      permission.respond(event.info.sessionId, event.info.id, {
+        type: permissionUpdates.length === 1 ? "always" : "once",
+      });
+    });
+    const environment = createHostLocalEnvironment(tempRoot);
+    const safeDir = path.join(outsideRoot, "safe");
+    const otherDir = path.join(outsideRoot, "other");
+    await fs.mkdir(safeDir);
+    await fs.mkdir(otherDir);
+    const safePath = path.join(safeDir, "note.txt");
+    const siblingViaDotDot = `${safeDir}${path.sep}..${path.sep}other${path.sep}note.txt`;
+
+    const safeWrite = await scheduler.execute({
+      callId: "write_safe_absolute",
+      environment,
+      messageId: "message_1",
+      params: {
+        content: "safe\n",
+        file_path: safePath,
+      },
+      sessionId: "session_1",
+      toolName: "write",
+    });
+    const siblingWrite = await scheduler.execute({
+      callId: "write_sibling_dotdot",
+      environment,
+      messageId: "message_1",
+      params: {
+        content: "other\n",
+        file_path: siblingViaDotDot,
+      },
+      sessionId: "session_1",
+      toolName: "write",
+    });
+
+    expect(safeWrite.status).toBe("success");
+    expect(siblingWrite.status).toBe("success");
+    expect(permissionUpdates.map((info) => info.callId)).toEqual([
+      "write_safe_absolute",
+      "write_sibling_dotdot",
+    ]);
+    expect(permissionUpdates[1]?.pattern).not.toContain("..");
+    expect(permissionUpdates[1]?.pattern.replaceAll("\\", "/")).toContain(
+      "/other/**",
+    );
+  });
+
+  it("allows explicit absolute paths through symlinked parents", async () => {
+    const bus = createBus();
+    const permission = createPermissionManager({
+      bus,
+      generateId: () => "permission_symlink_absolute",
+    });
+    const scheduler = createToolScheduler({
+      bus,
+      permission,
+      policy: createAllowPolicy(),
+    });
+    for (const tool of createBuiltinTools()) {
+      scheduler.register(tool);
+    }
+    bus.subscribe(PermissionEvent.Updated, (event) => {
+      permission.respond(event.info.sessionId, event.info.id, { type: "once" });
+    });
     const environment = createHostLocalEnvironment(tempRoot);
     const linkedPath = path.join(tempRoot, "linked-outside");
     await fs.symlink(outsideRoot, linkedPath, "junction");
@@ -235,9 +445,37 @@ describe("file tools scheduler integration", () => {
       toolName: "write",
     });
 
+    expect(result.status).toBe("success");
+    await expect(fs.access(escapedDirectory)).resolves.toBeUndefined();
+    await expect(
+      fs.readFile(path.join(escapedDirectory, "note.txt"), "utf8"),
+    ).resolves.toBe("escape\n");
+  });
+
+  it("still rejects relative symlink escapes", async () => {
+    const scheduler = createScheduler();
+    const environment = createHostLocalEnvironment(tempRoot);
+    await fs.symlink(
+      outsideRoot,
+      path.join(tempRoot, "linked-outside"),
+      "junction",
+    );
+
+    const result = await scheduler.execute({
+      callId: "write_relative_symlink_escape",
+      environment,
+      messageId: "message_1",
+      params: {
+        content: "escape\n",
+        file_path: path.join("linked-outside", "newdir", "note.txt"),
+      },
+      sessionId: "session_1",
+      toolName: "write",
+    });
+
     expect(result.status).toBe("error");
     expect(result.error?.message).toContain("escapes workspace");
-    await expect(fs.access(escapedDirectory)).rejects.toThrow();
+    await expect(fs.access(path.join(outsideRoot, "newdir"))).rejects.toThrow();
   });
 
   it("requires scheduler read before edit and supports edit dry_run", async () => {
@@ -262,7 +500,9 @@ describe("file tools scheduler integration", () => {
     });
 
     expect(editWithoutRead.status).toBe("error");
-    expect(editWithoutRead.error?.message).toContain("must be read before edit");
+    expect(editWithoutRead.error?.message).toContain(
+      "must be read before edit",
+    );
     await expect(fs.readFile(filePath, "utf8")).resolves.toBe("old\n");
 
     const read = await scheduler.execute({
@@ -292,7 +532,9 @@ describe("file tools scheduler integration", () => {
     });
 
     expect(otherSessionEdit.status).toBe("error");
-    expect(otherSessionEdit.error?.message).toContain("must be read before edit");
+    expect(otherSessionEdit.error?.message).toContain(
+      "must be read before edit",
+    );
     await expect(fs.readFile(filePath, "utf8")).resolves.toBe("old\n");
 
     const preview = await scheduler.execute({
@@ -333,7 +575,9 @@ describe("file tools scheduler integration", () => {
     });
 
     expect(staleReadStateEdit.status).toBe("error");
-    expect(staleReadStateEdit.error?.message).toContain("read again before edit");
+    expect(staleReadStateEdit.error?.message).toContain(
+      "read again before edit",
+    );
 
     const readAgain = await scheduler.execute({
       callId: "read_again_before_edit",

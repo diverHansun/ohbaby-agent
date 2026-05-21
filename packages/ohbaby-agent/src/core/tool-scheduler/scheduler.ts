@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { createBus } from "../../bus/index.js";
 import {
   DEFAULT_TOOL_SCHEDULER_CONFIG,
@@ -39,6 +41,12 @@ interface PreparedCall extends ScheduledCall {
   readonly tool: Tool;
   readonly controller: AbortController;
   readonly cleanup: () => void;
+  readonly policyContext: ToolPolicyContext;
+}
+
+interface ToolPolicyContext {
+  readonly externalWrite: boolean;
+  readonly params: Record<string, unknown>;
 }
 
 class SchedulerAbortError extends Error {
@@ -68,6 +76,36 @@ function errorMessage(error: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeForBoundary(inputPath: string): string {
+  const resolved = path.resolve(inputPath);
+  const root = path.parse(resolved).root;
+  const withoutTrailingSeparator =
+    resolved.length > root.length ? resolved.replace(/[\\/]+$/u, "") : resolved;
+  return process.platform === "win32"
+    ? withoutTrailingSeparator.toLowerCase()
+    : withoutTrailingSeparator;
+}
+
+function isOutsideWorkdir(workdir: string, resolvedPath: string): boolean {
+  const normalizedRoot = normalizeForBoundary(workdir);
+  const normalizedCandidate = normalizeForBoundary(resolvedPath);
+  if (normalizedRoot === normalizedCandidate) {
+    return false;
+  }
+  const relative = path.relative(normalizedRoot, normalizedCandidate);
+  return relative.startsWith("..") || path.isAbsolute(relative);
+}
+
+function getFilePathParam(params: Record<string, unknown>): string | undefined {
+  for (const key of ["file_path", "filePath", "path"]) {
+    const value = params[key];
+    if (typeof value === "string" && value.trim() !== "") {
+      return value;
+    }
+  }
+  return undefined;
 }
 
 function getSchemaType(schema: unknown): string | undefined {
@@ -246,6 +284,55 @@ function normalizeAgentToolsConfig(
     result[toolName] = false;
   }
   return result;
+}
+
+async function realpathIfExists(
+  inputPath: string,
+): Promise<string | undefined> {
+  try {
+    return await fs.realpath(inputPath);
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+async function canonicalizeForPermission(
+  environment: ToolExecutionEnvironment,
+  inputPath: string,
+): Promise<string> {
+  const lexical = environment.resolvePath(inputPath);
+  const existing = await realpathIfExists(lexical);
+  if (existing) {
+    return existing;
+  }
+
+  const missingSegments: string[] = [];
+  let current = path.dirname(lexical);
+  for (;;) {
+    const realParent = await realpathIfExists(current);
+    if (realParent) {
+      return path.join(
+        realParent,
+        ...missingSegments.reverse(),
+        path.basename(lexical),
+      );
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return lexical;
+    }
+    missingSegments.push(path.basename(current));
+    current = parent;
+  }
 }
 
 function isEnabledByAgentConfig(
@@ -459,6 +546,7 @@ export function createToolScheduler(
   async function askPermission(
     call: ToolCall,
     reason: string | undefined,
+    params: Record<string, unknown>,
   ): Promise<PermissionResponse> {
     if (!options.permission) {
       return "reject";
@@ -469,13 +557,14 @@ export function createToolScheduler(
       callId: call.callId,
       toolName: call.toolName,
       category: call.category,
-      params: call.params,
+      params,
       reason,
     });
   }
 
   async function checkPolicyOnly(
     call: ToolCall,
+    context: ToolPolicyContext,
   ): Promise<PolicyDecision | ToolCallResult> {
     transition(call, "checking_policy");
     const controller = controllers.get(call.callId);
@@ -493,7 +582,7 @@ export function createToolScheduler(
             callId: call.callId,
             toolName: call.toolName,
             category: call.category,
-            params: call.params,
+            params: context.params,
             sessionId: call.sessionId,
             messageId: call.messageId,
           }),
@@ -520,6 +609,12 @@ export function createToolScheduler(
         ),
       });
     }
+    if (decision.type === "allow" && context.externalWrite) {
+      return {
+        reason: `External path write requires confirmation: ${call.toolName}`,
+        type: "ask",
+      };
+    }
 
     return decision;
   }
@@ -527,6 +622,7 @@ export function createToolScheduler(
   async function confirmPermission(
     call: ToolCall,
     decision: Extract<PolicyDecision, { readonly type: "ask" }>,
+    params: Record<string, unknown>,
   ): Promise<ToolCallResult | null> {
     const controller = controllers.get(call.callId);
     if (!controller) {
@@ -539,7 +635,7 @@ export function createToolScheduler(
     let response: PermissionResponse;
     try {
       response = await waitForAbortable(
-        () => askPermission(call, decision.reason),
+        () => askPermission(call, decision.reason, params),
         controller.signal,
       );
     } catch (error) {
@@ -709,6 +805,45 @@ export function createToolScheduler(
     );
   }
 
+  async function createPolicyContext(
+    request: ToolCallRequest,
+    category: ToolCategory,
+  ): Promise<ToolPolicyContext> {
+    if (category !== "write" || !request.environment) {
+      return {
+        externalWrite: false,
+        params: request.params,
+      };
+    }
+
+    const filePath = getFilePathParam(request.params);
+    if (!filePath || !path.isAbsolute(filePath)) {
+      return {
+        externalWrite: false,
+        params: request.params,
+      };
+    }
+
+    const canonicalPath = await canonicalizeForPermission(
+      request.environment,
+      filePath,
+    );
+    const params = { ...request.params };
+    for (const key of ["file_path", "filePath", "path"]) {
+      if (typeof params[key] === "string") {
+        params[key] = canonicalPath;
+      }
+    }
+
+    return {
+      externalWrite: isOutsideWorkdir(
+        request.environment.workdir,
+        canonicalPath,
+      ),
+      params,
+    };
+  }
+
   async function prepareCall(
     request: ToolCallRequest,
     index: number,
@@ -762,6 +897,7 @@ export function createToolScheduler(
     const controller = new AbortController();
     controllers.set(call.callId, controller);
     const unbindRequestSignal = bindRequestSignal(call, request.signal);
+    const policyContext = await createPolicyContext(request, category);
     return {
       prepared: {
         call,
@@ -772,6 +908,7 @@ export function createToolScheduler(
         },
         controller,
         index,
+        policyContext,
         request,
         tool,
       },
@@ -784,12 +921,19 @@ export function createToolScheduler(
     if (isCancelled(prepared.call)) {
       return makeCancelledResult(prepared.call);
     }
-    const policyDecision = await checkPolicyOnly(prepared.call);
+    const policyDecision = await checkPolicyOnly(
+      prepared.call,
+      prepared.policyContext,
+    );
     if ("status" in policyDecision) {
       return policyDecision;
     }
     if (policyDecision.type === "ask") {
-      return confirmPermission(prepared.call, policyDecision);
+      return confirmPermission(
+        prepared.call,
+        policyDecision,
+        prepared.policyContext.params,
+      );
     }
 
     return null;
@@ -836,7 +980,7 @@ export function createToolScheduler(
       const policyResults = await Promise.all(
         prepared.map(async (item) => ({
           item,
-          result: await checkPolicyOnly(item.call),
+          result: await checkPolicyOnly(item.call, item.policyContext),
         })),
       );
       const runnable: PreparedCall[] = [];
@@ -856,7 +1000,11 @@ export function createToolScheduler(
       }
 
       for (const ask of asks) {
-        const result = await confirmPermission(ask.item.call, ask.decision);
+        const result = await confirmPermission(
+          ask.item.call,
+          ask.decision,
+          ask.item.policyContext.params,
+        );
         if (result) {
           results[ask.item.index] = result;
         } else {
