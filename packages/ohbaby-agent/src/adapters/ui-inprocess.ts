@@ -55,6 +55,12 @@ import type {
 import { createPolicyManager, PolicyEvent } from "../policy/index.js";
 import { Project } from "../project/index.js";
 import type { AgentManager } from "../agents/index.js";
+import {
+  SkillLoader,
+  SkillRegistry,
+  formatSkillToolOutput,
+  type SkillLogger,
+} from "../skill/index.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
 import type { RunLedger } from "../runtime/run-ledger/index.js";
 import type { StreamBridge } from "../runtime/stream-bridge/index.js";
@@ -301,6 +307,7 @@ export function createInProcessUiBackendClient(
   let promptInFlight = false;
   let activeRunId: string | undefined;
   let runtimePromise: Promise<UiRuntimeComposition> | undefined;
+  let skillRegistryPromise: Promise<SkillRegistry> | undefined;
   const pendingPermissionSessions = new Map<string, string>();
 
   function assertStateStoreWritable(): void {
@@ -364,6 +371,30 @@ export function createInProcessUiBackendClient(
       timestamp: Date.now(),
       type: "notice.emitted",
     });
+  }
+
+  function formatSkillWarning(
+    message: string,
+    context?: Record<string, unknown>,
+  ): string {
+    const error = context?.error;
+    return error === undefined
+      ? message
+      : `${message}: ${getErrorMessage(error)}`;
+  }
+
+  function createSkillLogger(): SkillLogger {
+    return {
+      warn(message, context): void {
+        const detail = formatSkillWarning(message, context);
+        publishNotice({
+          key: `skill:warning:${detail}`,
+          level: "warning",
+          message: detail,
+          title: "Skill warning",
+        });
+      },
+    };
   }
 
   function upsertSession(session: UiSession): Promise<void> {
@@ -507,6 +538,19 @@ export function createInProcessUiBackendClient(
       : project.rootPath;
   }
 
+  function getSkillRegistry(): Promise<SkillRegistry> {
+    skillRegistryPromise ??= (async (): Promise<SkillRegistry> => {
+      const projectRoot = await resolveProjectRoot();
+      return new SkillRegistry({
+        loader: new SkillLoader({
+          logger: createSkillLogger(),
+          projectDirectory: projectRoot,
+        }),
+      });
+    })();
+    return skillRegistryPromise;
+  }
+
   async function resolveLLMClient(
     projectRoot?: string,
   ): Promise<LLMClientInstance> {
@@ -524,6 +568,7 @@ export function createInProcessUiBackendClient(
     runtimePromise ??= (async (): Promise<UiRuntimeComposition> => {
       const baseProjectRoot = await resolveProjectRoot();
       const llmClient = await resolveLLMClient(baseProjectRoot);
+      const skillRegistry = await getSkillRegistry();
 
       return createUiRuntimeComposition({
         agentManager: options.agentManager,
@@ -541,6 +586,7 @@ export function createInProcessUiBackendClient(
         policy,
         runLedger: options.runLedger,
         sessionManager: options.sessionManager,
+        skillRegistry,
         streamBridge: options.streamBridge,
         workdir: baseProjectRoot,
       });
@@ -655,6 +701,178 @@ export function createInProcessUiBackendClient(
     }
   }
 
+  async function submitPromptInternal(
+    text: string,
+    submitOptions?: SubmitPromptOptions,
+  ): Promise<void> {
+    if (promptInFlight) {
+      throw new Error("A prompt is already running");
+    }
+    assertStateStoreWritable();
+    promptInFlight = true;
+    const createdAt = timestamp();
+    let projection: ReturnType<typeof startRunStreamProjection> | undefined;
+    let runStarted = false;
+    let submittedSessionId: string | undefined;
+
+    try {
+      await assertCanUseAsPrimarySession(submitOptions?.sessionId);
+      await reserveIdsFromState();
+      const runtime = await getRuntimeForPrompt();
+      const agentName = runtime.agentManager.getDefault();
+      const baseProjectRoot = await resolveProjectRoot();
+      let session = submitOptions?.sessionId
+        ? await stateStore.getSession(submitOptions.sessionId)
+        : undefined;
+      const existingCoreSession =
+        submitOptions?.sessionId && options.sessionManager
+          ? await options.sessionManager.get(submitOptions.sessionId)
+          : undefined;
+      if (!session && existingCoreSession) {
+        session = sessionMetadataToUiSession(existingCoreSession);
+      } else if (session && !session.projectRoot && existingCoreSession) {
+        session = {
+          ...session,
+          projectRoot: existingCoreSession.projectRoot,
+        };
+      }
+
+      const isNewSession = !session;
+      if (!session) {
+        const title = text.trim().slice(0, 48) || "Untitled session";
+        if (options.sessionManager) {
+          const created = await options.sessionManager.create(baseProjectRoot, {
+            agentName,
+            id: submitOptions?.sessionId,
+            title,
+          });
+          session = sessionMetadataToUiSession(created);
+        } else {
+          session = {
+            id: submitOptions?.sessionId ?? sessionIds.next(),
+            title,
+            messages: [],
+            projectRoot: baseProjectRoot,
+            createdAt,
+            updatedAt: createdAt,
+          };
+        }
+        sessionIds.reserve(session.id);
+      }
+      const resolvedProjectRoot = session.projectRoot ?? baseProjectRoot;
+      runtime.setSessionWorkdir(session.id, resolvedProjectRoot);
+      submittedSessionId = session.id;
+
+      const userMessage = createTextMessage({
+        id: messageIds.next(),
+        role: "user",
+        text,
+        createdAt,
+      });
+      const coreUserMessage = await messageManager.createMessage({
+        sessionId: session.id,
+        role: "user",
+        agent: agentName,
+      });
+      await messageManager.appendPart(coreUserMessage.id, {
+        type: "text",
+        text,
+      });
+
+      if (isNewSession) {
+        await upsertSession(session);
+        publish({ type: "session.updated", session: cloneSession(session) });
+      }
+
+      await stateStore.setActiveSessionId(session.id);
+
+      session = {
+        ...session,
+        messages: [...session.messages, userMessage],
+        updatedAt: createdAt,
+      };
+      await upsertSession(session);
+      publish({
+        type: "message.appended",
+        sessionId: session.id,
+        message: cloneMessage(userMessage),
+      });
+
+      await runtime.ensureSessionRecord({
+        agentName,
+        id: session.id,
+        projectRoot: resolvedProjectRoot,
+        title: session.title,
+      });
+
+      const runId = runtime.reserveRunId(await nextRunId());
+      const assistantMessageId = messageIds.next();
+      activeRunId = runId;
+      projection = startRunStreamProjection({
+        assistantMessageId,
+        nextMessageId: () => messageIds.next(),
+        publish,
+        runId,
+        sessionId: session.id,
+        stateStore,
+        streamBridge: runtime.streamBridge,
+        timestamp,
+      });
+
+      try {
+        const tools = await runtime.getOpenAiTools({
+          agentName,
+        });
+        const messages = await runtime.buildPromptMessages({
+          agentName,
+          projectRoot: resolvedProjectRoot,
+          sessionId: session.id,
+        });
+        const record = await runtime.runManager.create({
+          agent: agentName,
+          messages,
+          parentMessageId: coreUserMessage.id,
+          sessionId: session.id,
+          tools,
+          triggerSource: "user",
+        });
+        runStarted = true;
+        if (record.runId !== runId) {
+          throw new Error(
+            `Run manager created unexpected run id: ${record.runId}`,
+          );
+        }
+
+        const completion = await runtime.runManager.waitForCompletion(runId);
+        await projection.done;
+        if (completion.status !== "succeeded") {
+          throw new Error(completion.error ?? `Run ${completion.status}`);
+        }
+      } catch (error) {
+        if (runStarted) {
+          await projection.done.catch(() => undefined);
+        } else {
+          await projection.stop();
+        }
+        const snapshot = await stateStore.readSnapshot();
+        if (snapshot.status.kind !== "error") {
+          await updateStatus({
+            kind: "error",
+            message: getErrorMessage(error),
+            recoverable: true,
+          });
+        }
+        throw error;
+      }
+    } finally {
+      if (submittedSessionId) {
+        await syncSessionStatsBestEffort(submittedSessionId);
+      }
+      promptInFlight = false;
+      activeRunId = undefined;
+    }
+  }
+
   const commandService = createCommandService({
     bus,
     interactionBroker,
@@ -686,6 +904,16 @@ export function createInProcessUiBackendClient(
         });
       },
     },
+    skills: {
+      async listUserInvocable() {
+        return (await getSkillRegistry()).listUserInvocable();
+      },
+      async loadPrompt(name: string): Promise<string> {
+        const registry = await getSkillRegistry();
+        return formatSkillToolOutput(await registry.load(name));
+      },
+    },
+    submitPrompt: submitPromptInternal,
     policy: {
       getState: currentPolicyState,
       setMode(mode): void {
@@ -814,182 +1042,14 @@ export function createInProcessUiBackendClient(
     },
 
     listCommands(query): Promise<UiCommandCatalog> {
-      return Promise.resolve(commandService.listCommands(query));
+      return commandService.listCommands(query);
     },
 
-    async submitPrompt(
+    submitPrompt(
       text: string,
       submitOptions?: SubmitPromptOptions,
     ): Promise<void> {
-      if (promptInFlight) {
-        throw new Error("A prompt is already running");
-      }
-      assertStateStoreWritable();
-      promptInFlight = true;
-      const createdAt = timestamp();
-      let projection: ReturnType<typeof startRunStreamProjection> | undefined;
-      let runStarted = false;
-      let submittedSessionId: string | undefined;
-
-      try {
-        await assertCanUseAsPrimarySession(submitOptions?.sessionId);
-        await reserveIdsFromState();
-        const runtime = await getRuntimeForPrompt();
-        const agentName = runtime.agentManager.getDefault();
-        const baseProjectRoot = await resolveProjectRoot();
-        let session = submitOptions?.sessionId
-          ? await stateStore.getSession(submitOptions.sessionId)
-          : undefined;
-        const existingCoreSession =
-          submitOptions?.sessionId && options.sessionManager
-            ? await options.sessionManager.get(submitOptions.sessionId)
-            : undefined;
-        if (!session && existingCoreSession) {
-          session = sessionMetadataToUiSession(existingCoreSession);
-        } else if (session && !session.projectRoot && existingCoreSession) {
-          session = {
-            ...session,
-            projectRoot: existingCoreSession.projectRoot,
-          };
-        }
-
-        const isNewSession = !session;
-        if (!session) {
-          const title = text.trim().slice(0, 48) || "Untitled session";
-          if (options.sessionManager) {
-            const created = await options.sessionManager.create(
-              baseProjectRoot,
-              {
-                agentName,
-                id: submitOptions?.sessionId,
-                title,
-              },
-            );
-            session = sessionMetadataToUiSession(created);
-          } else {
-            session = {
-              id: submitOptions?.sessionId ?? sessionIds.next(),
-              title,
-              messages: [],
-              projectRoot: baseProjectRoot,
-              createdAt,
-              updatedAt: createdAt,
-            };
-          }
-          sessionIds.reserve(session.id);
-        }
-        const resolvedProjectRoot = session.projectRoot ?? baseProjectRoot;
-        runtime.setSessionWorkdir(session.id, resolvedProjectRoot);
-        submittedSessionId = session.id;
-
-        const userMessage = createTextMessage({
-          id: messageIds.next(),
-          role: "user",
-          text,
-          createdAt,
-        });
-        const coreUserMessage = await messageManager.createMessage({
-          sessionId: session.id,
-          role: "user",
-          agent: agentName,
-        });
-        await messageManager.appendPart(coreUserMessage.id, {
-          type: "text",
-          text,
-        });
-
-        if (isNewSession) {
-          await upsertSession(session);
-          publish({ type: "session.updated", session: cloneSession(session) });
-        }
-
-        await stateStore.setActiveSessionId(session.id);
-
-        session = {
-          ...session,
-          messages: [...session.messages, userMessage],
-          updatedAt: createdAt,
-        };
-        await upsertSession(session);
-        publish({
-          type: "message.appended",
-          sessionId: session.id,
-          message: cloneMessage(userMessage),
-        });
-
-        await runtime.ensureSessionRecord({
-          agentName,
-          id: session.id,
-          projectRoot: resolvedProjectRoot,
-          title: session.title,
-        });
-
-        const runId = runtime.reserveRunId(await nextRunId());
-        const assistantMessageId = messageIds.next();
-        activeRunId = runId;
-        projection = startRunStreamProjection({
-          assistantMessageId,
-          nextMessageId: () => messageIds.next(),
-          publish,
-          runId,
-          sessionId: session.id,
-          stateStore,
-          streamBridge: runtime.streamBridge,
-          timestamp,
-        });
-
-        try {
-          const tools = await runtime.getOpenAiTools({
-            agentName,
-          });
-          const messages = await runtime.buildPromptMessages({
-            agentName,
-            projectRoot: resolvedProjectRoot,
-            sessionId: session.id,
-          });
-          const record = await runtime.runManager.create({
-            agent: agentName,
-            messages,
-            parentMessageId: coreUserMessage.id,
-            sessionId: session.id,
-            tools,
-            triggerSource: "user",
-          });
-          runStarted = true;
-          if (record.runId !== runId) {
-            throw new Error(
-              `Run manager created unexpected run id: ${record.runId}`,
-            );
-          }
-
-          const completion = await runtime.runManager.waitForCompletion(runId);
-          await projection.done;
-          if (completion.status !== "succeeded") {
-            throw new Error(completion.error ?? `Run ${completion.status}`);
-          }
-        } catch (error) {
-          if (runStarted) {
-            await projection.done.catch(() => undefined);
-          } else {
-            await projection.stop();
-          }
-          const snapshot = await stateStore.readSnapshot();
-          if (snapshot.status.kind !== "error") {
-            await updateStatus({
-              kind: "error",
-              message: getErrorMessage(error),
-              recoverable: true,
-            });
-          }
-          throw error;
-        }
-      } finally {
-        if (submittedSessionId) {
-          await syncSessionStatsBestEffort(submittedSessionId);
-        }
-        promptInFlight = false;
-        activeRunId = undefined;
-      }
+      return submitPromptInternal(text, submitOptions);
     },
 
     executeCommand(invocation: UiCommandInvocation): Promise<void> {

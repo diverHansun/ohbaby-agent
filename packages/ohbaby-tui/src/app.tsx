@@ -1,5 +1,5 @@
 import { Box, Text, useApp, useInput } from "ink";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { ReactElement } from "react";
 import type {
   UiCommandCatalog,
@@ -28,6 +28,8 @@ export interface TerminalUiOptions {
 export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
   const storeRef = useRef<TuiStore>(createTuiStore(createEmptySnapshot()));
   const keyboardCommandSequenceRef = useRef(0);
+  const catalogRequestSequenceRef = useRef(0);
+  const disposedRef = useRef(false);
   const store = storeRef.current;
   const { exit } = useApp();
   const state = useTuiStoreSelector(store, (current) => current);
@@ -100,35 +102,39 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
     { isActive: state.interactions.length === 0 },
   );
 
-  useEffect(() => {
-    let disposed = false;
-    let catalogRequestSequence = 0;
+  const loadCatalog = useCallback(async (): Promise<TuiCommandCatalog> => {
+    const requestSequence = catalogRequestSequenceRef.current + 1;
+    catalogRequestSequenceRef.current = requestSequence;
 
-    const loadCatalog = async (): Promise<void> => {
-      const requestSequence = catalogRequestSequence + 1;
-      catalogRequestSequence = requestSequence;
+    try {
+      const catalog = normalizeCommandCatalog(
+        await client.listCommands({ surface: "tui" }),
+      );
 
-      try {
-        const catalog = normalizeCommandCatalog(
-          await client.listCommands({ surface: "tui" }),
-        );
-
-        if (!disposed && requestSequence === catalogRequestSequence) {
-          store.setCatalog(catalog);
-        }
-      } catch (caught) {
-        if (!disposed) {
-          store.dispatch({
-            status: {
-              kind: "error",
-              message: formatError(caught),
-              recoverable: true,
-            },
-            type: "runtime.updated",
-          });
-        }
+      if (
+        !disposedRef.current &&
+        requestSequence === catalogRequestSequenceRef.current
+      ) {
+        store.setCatalog(catalog);
       }
-    };
+      return catalog;
+    } catch (caught) {
+      if (!disposedRef.current) {
+        store.dispatch({
+          status: {
+            kind: "error",
+            message: formatError(caught),
+            recoverable: true,
+          },
+          type: "runtime.updated",
+        });
+      }
+      throw caught;
+    }
+  }, [client, store]);
+
+  useEffect(() => {
+    disposedRef.current = false;
 
     const unsubscribe = client.subscribeEvents((tuiEvent: TuiEvent) => {
       store.dispatch(tuiEvent);
@@ -141,19 +147,19 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
       }
 
       if (tuiEvent.type === "command.catalog.updated") {
-        void loadCatalog();
+        void loadCatalog().catch(() => undefined);
       }
     });
 
     void client
       .getSnapshot()
       .then((snapshot) => {
-        if (!disposed) {
+        if (!disposedRef.current) {
           store.replaceSnapshot(snapshot);
         }
       })
       .catch((caught: unknown) => {
-        if (!disposed) {
+        if (!disposedRef.current) {
           store.dispatch({
             status: {
               kind: "error",
@@ -164,13 +170,13 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
           });
         }
       });
-    void loadCatalog();
+    void loadCatalog().catch(() => undefined);
 
     return (): void => {
-      disposed = true;
+      disposedRef.current = true;
       unsubscribe();
     };
-  }, [client, exit, store]);
+  }, [client, exit, loadCatalog, store]);
 
   return (
     <Box flexDirection="column">
@@ -190,6 +196,7 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
         catalog={state.catalog}
         client={client}
         disabled={hasDialog}
+        loadCatalog={loadCatalog}
         policy={state.policy}
       />
       <Footer state={state} />

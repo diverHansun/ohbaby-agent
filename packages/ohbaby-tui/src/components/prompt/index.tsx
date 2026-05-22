@@ -18,6 +18,7 @@ export interface PromptProps {
   readonly catalog: TuiCommandCatalog | null;
   readonly client: TuiBackendClient;
   readonly disabled: boolean;
+  readonly loadCatalog?: () => Promise<TuiCommandCatalog>;
   readonly policy?: UiPolicyState;
 }
 
@@ -26,6 +27,7 @@ export function Prompt({
   catalog,
   client,
   disabled,
+  loadCatalog,
   policy,
 }: PromptProps): ReactElement {
   const [input, setInput] = useState("");
@@ -50,11 +52,12 @@ export function Prompt({
       const candidates = getSlashCompletionCandidates(currentInput, catalog);
 
       if (key.return) {
-        submitInput(
+        void submitInput(
           currentInput,
           activeSessionId,
           catalog,
           client,
+          loadCatalog,
           replaceInput,
           setError,
           selectedIndexRef.current,
@@ -137,15 +140,16 @@ function formatError(error: unknown): string {
   return error instanceof Error ? error.message : "Command failed";
 }
 
-function submitInput(
+async function submitInput(
   input: string,
   activeSessionId: string | null,
   catalog: TuiCommandCatalog | null,
   client: TuiBackendClient,
+  loadCatalog: (() => Promise<TuiCommandCatalog>) | undefined,
   replaceInput: (nextInput: string) => void,
   setError: (message: string | null) => void,
   selectedIndex: number,
-): void {
+): Promise<void> {
   const text = input.trim();
 
   if (text === "") {
@@ -165,16 +169,27 @@ function submitInput(
     return;
   }
 
-  if (catalog === null) {
-    setError("Command catalog is not loaded");
-    return;
+  let commandCatalog = catalog;
+  if (commandCatalog === null) {
+    if (!loadCatalog) {
+      setError("Command catalog is not loaded");
+      return;
+    }
+    setError(null);
+    replaceInput("");
+    try {
+      commandCatalog = await loadCatalog();
+    } catch (caught) {
+      setError(formatError(caught));
+      return;
+    }
   }
 
-  const result = resolveCommand(parseSlashInput(text), catalog, {
+  const result = resolveCommand(parseSlashInput(text), commandCatalog, {
     sessionId: activeSessionId ?? undefined,
     surface: "tui",
   });
-  const candidates = getSlashCompletionCandidates(text, catalog);
+  const candidates = getSlashCompletionCandidates(text, commandCatalog);
   const selected =
     candidates.length > 0
       ? candidates[selectedIndex % candidates.length]
@@ -188,7 +203,7 @@ function submitInput(
   if ((result.kind !== "resolved" || selectedOverridesExact) && selected) {
     const selectedResult = resolveCommand(
       parseSlashInput(`/${selected.path.join(" ")}`),
-      catalog,
+      commandCatalog,
       {
         sessionId: activeSessionId ?? undefined,
         surface: "tui",
