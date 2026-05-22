@@ -16,8 +16,9 @@ import {
   type TodoStore,
 } from "./todo.js";
 import { createTaskTool } from "./task.js";
+import { createAgentTaskTools } from "./agent-task.js";
 import { createWebTools, type WebToolsOptions } from "./web.js";
-import type { TaskExecutor } from "../agents/index.js";
+import type { AgentTaskController, TaskExecutor } from "../agents/index.js";
 
 export interface BuiltinToolsOptions {
   readonly shell?: BashShell;
@@ -25,6 +26,7 @@ export interface BuiltinToolsOptions {
   readonly searchProvider?: WebToolsOptions;
   readonly todoStore?: TodoStore;
   readonly taskExecutor?: TaskExecutor;
+  readonly agentTaskController?: AgentTaskController;
 }
 
 export function createBuiltinTools(options: BuiltinToolsOptions = {}): Tool[] {
@@ -42,6 +44,9 @@ export function createBuiltinTools(options: BuiltinToolsOptions = {}): Tool[] {
   ];
   if (options.taskExecutor) {
     tools.push(createTaskTool(options.taskExecutor));
+  }
+  if (options.agentTaskController) {
+    tools.push(...createAgentTaskTools(options.agentTaskController));
   }
   return tools;
 }

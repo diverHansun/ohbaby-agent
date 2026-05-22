@@ -137,6 +137,58 @@ async function waitForAssistantText(
   );
 }
 
+async function waitForDatabaseCondition(
+  predicate: () => boolean,
+  timeoutMs = 240_000,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    await flush();
+    if (predicate()) {
+      return;
+    }
+  }
+  throw new Error("Timed out waiting for database condition");
+}
+
+function latestChildSessionId(parentSessionId: string): string | undefined {
+  return getDatabase()
+    .prepare<{ readonly id: string }>(
+      `SELECT id
+       FROM ${schema.session.tableName}
+       WHERE parent_id = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    )
+    .get(parentSessionId)?.id;
+}
+
+function sessionMessageCount(sessionId: string): number {
+  return (
+    getDatabase()
+      .prepare<{ readonly count: number }>(
+        `SELECT COUNT(*) AS count
+         FROM ${schema.message.tableName}
+         WHERE session_id = ?`,
+      )
+      .get(sessionId)?.count ?? 0
+  );
+}
+
+function latestAgentTaskId(parentSessionId: string): string | undefined {
+  const parts = getDatabase()
+    .prepare<{ readonly data: string }>(
+      `SELECT data
+       FROM ${schema.part.tableName}
+       WHERE session_id = ?
+       ORDER BY created_at DESC, order_index DESC
+       LIMIT 50`,
+    )
+    .all(parentSessionId);
+  const match = JSON.stringify(parts).match(/task_id:\s*(agent_task_[a-z0-9_]+)/);
+  return match?.[1];
+}
+
 const runRealTuiSmoke = process.env.OHBABY_RUN_REAL_TUI_SMOKE === "1";
 const runRealTavilySmoke =
   runRealTuiSmoke && process.env.OHBABY_RUN_REAL_TUI_TAVILY_SMOKE === "1";
@@ -328,7 +380,68 @@ describe("real provider TUI smoke", () => {
       const finalText = JSON.stringify((await client.getSnapshot()).sessions);
       expect(finalText).toContain("OHBABY_REAL_SUBAGENT_FIRST_OK");
       expect(finalText).toContain("OHBABY_REAL_SUBAGENT_RESUME_OK");
+
+      await writeFile(
+        join(workdir, "agent-task-target-c.txt"),
+        "gamma background agent task marker",
+        "utf8",
+      );
+      await client.submitPrompt(
+        [
+          "Call the agent_open tool exactly once with agent_name explore.",
+          "Ask the child to inspect agent-task-target-c.txt and remember the gamma marker.",
+          "Do not call the task tool for this step.",
+          "After agent_open returns, answer with the exact token OHBABY_REAL_AGENT_OPEN_OK.",
+        ].join(" "),
+        { sessionId: parentSessionId },
+      );
+      const agentTaskId = latestAgentTaskId(parentSessionId);
+      if (!agentTaskId) {
+        throw new Error("real model did not create an agent task id");
+      }
+      const agentTaskChildId = latestChildSessionId(parentSessionId);
+      if (!agentTaskChildId) {
+        throw new Error("real model did not create an agent task child session");
+      }
+      await waitForDatabaseCondition(
+        () => sessionMessageCount(agentTaskChildId) >= 2,
+      );
+
+      await client.submitPrompt(
+        [
+          `Call the agent_eval tool exactly once with task_id ${agentTaskId}.`,
+          "Ask the child to use its prior child history and restate the gamma marker in one concise finding.",
+          "After agent_eval returns, answer with the exact token OHBABY_REAL_AGENT_EVAL_OK.",
+        ].join(" "),
+        { sessionId: parentSessionId },
+      );
+      await waitForDatabaseCondition(
+        () => sessionMessageCount(agentTaskChildId) >= 4,
+      );
+
+      await client.submitPrompt(
+        [
+          `Call the agent_status tool exactly once with task_id ${agentTaskId}.`,
+          "After agent_status returns, answer with the exact token OHBABY_REAL_AGENT_STATUS_OK.",
+        ].join(" "),
+        { sessionId: parentSessionId },
+      );
+      await client.submitPrompt(
+        [
+          `Call the agent_close tool exactly once with task_id ${agentTaskId}.`,
+          "After agent_close returns, answer with the exact token OHBABY_REAL_AGENT_CLOSE_OK.",
+        ].join(" "),
+        { sessionId: parentSessionId },
+      );
+
+      const agentTaskFinalText = JSON.stringify(
+        (await client.getSnapshot()).sessions,
+      );
+      expect(agentTaskFinalText).toContain("OHBABY_REAL_AGENT_OPEN_OK");
+      expect(agentTaskFinalText).toContain("OHBABY_REAL_AGENT_EVAL_OK");
+      expect(agentTaskFinalText).toContain("OHBABY_REAL_AGENT_STATUS_OK");
+      expect(agentTaskFinalText).toContain("OHBABY_REAL_AGENT_CLOSE_OK");
     },
-    600_000,
+    900_000,
   );
 });

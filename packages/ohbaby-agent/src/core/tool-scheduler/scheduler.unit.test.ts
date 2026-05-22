@@ -173,6 +173,10 @@ describe("ToolScheduler", () => {
               ? {
                   edit: true,
                   read: true,
+                  agent_close: true,
+                  agent_eval: true,
+                  agent_open: true,
+                  agent_status: true,
                   task: true,
                   todo_read: true,
                 }
@@ -184,6 +188,10 @@ describe("ToolScheduler", () => {
       { name: "read", category: "readonly" },
       { name: "edit", category: "write" },
       { name: "task", category: "subagent" },
+      { name: "agent_open", category: "subagent" },
+      { name: "agent_eval", category: "subagent" },
+      { name: "agent_status", category: "subagent" },
+      { name: "agent_close", category: "subagent" },
       { name: "todo_read", category: "memory" },
     ] as const) {
       scheduler.register(createTool(tool));

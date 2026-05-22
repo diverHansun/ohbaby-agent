@@ -137,6 +137,123 @@ function createSequentialFakeLLMClient(
   };
 }
 
+function contentToText(content: unknown): string {
+  if (content === undefined) {
+    return "";
+  }
+  if (typeof content === "string") {
+    return content;
+  }
+  return JSON.stringify(content);
+}
+
+function lastRequestMessageText(request: ProviderRequest): string {
+  const message = request.messages.at(-1);
+  return contentToText(message?.content);
+}
+
+function lastRequestToolCallId(request: ProviderRequest): string | undefined {
+  const message = request.messages.at(-1) as
+    | { readonly tool_call_id?: string }
+    | undefined;
+  return message?.tool_call_id;
+}
+
+function isExploreSubagentRequest(request: ProviderRequest): boolean {
+  return JSON.stringify(request.messages).includes(
+    "focused code exploration subagent",
+  );
+}
+
+function createAgentTaskFakeLLMClient(
+  requests: ProviderRequest[],
+): LLMClientInstance<FakeSdkClient> {
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: ProviderRequest,
+      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        requests.push(request);
+        const requestText = JSON.stringify(request.messages);
+        if (isExploreSubagentRequest(request)) {
+          const output = requestText.includes("Use the prior child finding")
+            ? "child follow-up output"
+            : "child first output";
+          return Promise.resolve(
+            createProviderStream([{ textDelta: output, finishReason: "stop" }]),
+          );
+        }
+
+        const lastText = lastRequestMessageText(request);
+        if (lastText.includes("Open a background explorer")) {
+          return Promise.resolve(
+            createProviderStream([
+              agentTaskToolCallEvent({
+                arguments: {
+                  agent_name: "explore",
+                  description: "Background auth exploration",
+                  prompt: "Background first pass",
+                },
+                callId: "call_agent_open",
+                name: "agent_open",
+              }),
+            ]),
+          );
+        }
+        if (lastText.includes("Follow up with the background explorer")) {
+          return Promise.resolve(
+            createProviderStream([
+              agentTaskToolCallEvent({
+                arguments: {
+                  prompt: "Use the prior child finding",
+                  task_id: "agent_task_1",
+                },
+                callId: "call_agent_eval",
+                name: "agent_eval",
+              }),
+            ]),
+          );
+        }
+        if (lastText.includes("Check the background explorer")) {
+          return Promise.resolve(
+            createProviderStream([
+              agentTaskToolCallEvent({
+                arguments: { task_id: "agent_task_1" },
+                callId: "call_agent_status",
+                name: "agent_status",
+              }),
+            ]),
+          );
+        }
+
+        const toolCallId = lastRequestToolCallId(request);
+        const output =
+          toolCallId === "call_agent_status"
+            ? "parent saw status"
+            : toolCallId === "call_agent_eval"
+              ? "parent queued follow-up"
+              : "parent opened background";
+        return Promise.resolve(
+          createProviderStream([{ textDelta: output, finishReason: "stop" }]),
+        );
+      },
+      isAbortError(): boolean {
+        return false;
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      baseUrl: "https://example.invalid/v1",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
 function createAbortError(): Error {
   const error = new Error("aborted");
   error.name = "AbortError";
@@ -218,6 +335,72 @@ function createAbortableSubagentLLMClient(
   };
 }
 
+function createAbortableAgentTaskLLMClient(
+  requests: ProviderRequest[],
+  childStarted: Deferred<AbortSignal | undefined>,
+): LLMClientInstance<FakeSdkClient> {
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: ProviderRequest,
+      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        requests.push(request);
+        if (isExploreSubagentRequest(request)) {
+          childStarted.resolve(request.signal);
+          return Promise.resolve(createAbortableProviderStream(request.signal));
+        }
+
+        const lastText = lastRequestMessageText(request);
+        if (lastText.includes("Open a cancellable background explorer")) {
+          return Promise.resolve(
+            createProviderStream([
+              agentTaskToolCallEvent({
+                arguments: {
+                  agent_name: "explore",
+                  description: "Cancellable background task",
+                  prompt: "Run until explicitly closed",
+                },
+                callId: "call_agent_open_cancellable",
+                name: "agent_open",
+              }),
+            ]),
+          );
+        }
+        if (lastText.includes("Close the background explorer")) {
+          return Promise.resolve(
+            createProviderStream([
+              agentTaskToolCallEvent({
+                arguments: { task_id: "agent_task_1" },
+                callId: "call_agent_close_cancellable",
+                name: "agent_close",
+              }),
+            ]),
+          );
+        }
+
+        return Promise.resolve(
+          createProviderStream([
+            { textDelta: "parent handled background control", finishReason: "stop" },
+          ]),
+        );
+      },
+      isAbortError(error: unknown): boolean {
+        return error instanceof Error && error.name === "AbortError";
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      baseUrl: "https://example.invalid/v1",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
 function writeToolCallEvent(input: {
   readonly callId: string;
   readonly content: string;
@@ -258,6 +441,24 @@ function taskToolCallEvent(input: {
         id: input.callId,
         index: 0,
         name: "task",
+      },
+    ],
+    finishReason: "tool_calls",
+  };
+}
+
+function agentTaskToolCallEvent(input: {
+  readonly arguments: Record<string, unknown>;
+  readonly callId: string;
+  readonly name: "agent_open" | "agent_eval" | "agent_status" | "agent_close";
+}): ProviderStreamEvent {
+  return {
+    toolCallDeltas: [
+      {
+        argumentsDelta: JSON.stringify(input.arguments),
+        id: input.callId,
+        index: 0,
+        name: input.name,
       },
     ],
     finishReason: "tool_calls",
@@ -792,6 +993,123 @@ describe("createInProcessUiBackendClient", () => {
     const parentToolResultText = JSON.stringify(requests[2]?.messages);
     expect(parentToolResultText).toContain("subagent_session_1");
     expect(parentToolResultText).toContain("child found auth.ts");
+  });
+
+  it("controls background agent tasks without leaking child transcripts into the parent", async () => {
+    const requests: ProviderRequest[] = [];
+    const client = createInProcessUiBackendClient({
+      createAgentTaskId: () => "agent_task_1",
+      llmClient: createAgentTaskFakeLLMClient(requests),
+    });
+
+    await client.submitPrompt("Open a background explorer");
+    await withTimeout(
+      (async (): Promise<void> => {
+        while (requests.filter(isExploreSubagentRequest).length < 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      })(),
+      1_000,
+      "background child did not start",
+    );
+    await client.submitPrompt("Follow up with the background explorer", {
+      sessionId: "session_1",
+    });
+    await withTimeout(
+      (async (): Promise<void> => {
+        while (requests.filter(isExploreSubagentRequest).length < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      })(),
+      1_000,
+      "background child did not resume",
+    );
+    await client.submitPrompt("Check the background explorer", {
+      sessionId: "session_1",
+    });
+
+    expect(requests).toHaveLength(8);
+    const childRequests = requests.filter((request) =>
+      JSON.stringify(request.messages).includes(
+        "focused code exploration subagent",
+      ),
+    );
+    expect(childRequests).toHaveLength(2);
+    for (const request of childRequests) {
+      const toolNames = request.tools?.map((tool) => tool.function.name) ?? [];
+      expect(toolNames).not.toContain("task");
+      expect(toolNames).not.toContain("agent_open");
+      expect(toolNames).not.toContain("agent_eval");
+      expect(toolNames).not.toContain("agent_status");
+      expect(toolNames).not.toContain("agent_close");
+    }
+
+    const firstChildText = JSON.stringify(childRequests[0]?.messages);
+    expect(firstChildText).toContain("Background first pass");
+    expect(firstChildText).not.toContain("Open a background explorer");
+
+    const resumedChildText = JSON.stringify(childRequests[1]?.messages);
+    expect(resumedChildText).toContain("Background first pass");
+    expect(resumedChildText).toContain("child first output");
+    expect(resumedChildText).toContain("Use the prior child finding");
+    expect(resumedChildText).not.toContain(
+      "Follow up with the background explorer",
+    );
+    expect(resumedChildText).not.toContain("parent opened background");
+
+    const parentRequests = requests.filter(
+      (request) => !isExploreSubagentRequest(request),
+    );
+    const openToolResultText = JSON.stringify(parentRequests[1]?.messages);
+    expect(openToolResultText).toContain("agent_task_1");
+    expect(openToolResultText).not.toContain("child first output");
+
+    const statusToolResultText = JSON.stringify(parentRequests.at(-1)?.messages);
+    expect(statusToolResultText).toContain("agent_task_1");
+    expect(statusToolResultText).toContain("child follow-up output");
+  });
+
+  it("closes a running background agent task without aborting the parent run", async () => {
+    const requests: ProviderRequest[] = [];
+    const childStarted = createDeferred<AbortSignal | undefined>();
+    const runLedger = createInMemoryRunLedger();
+    const client = createInProcessUiBackendClient({
+      createAgentTaskId: () => "agent_task_1",
+      createRunId: (() => {
+        let nextRun = 1;
+        return (): string => {
+          const runId = `run_${String(nextRun)}`;
+          nextRun += 1;
+          return runId;
+        };
+      })(),
+      llmClient: createAbortableAgentTaskLLMClient(requests, childStarted),
+      runLedger,
+    });
+
+    await client.submitPrompt("Open a cancellable background explorer");
+    const childSignal = await withTimeout(
+      childStarted.promise,
+      1_000,
+      "background child did not start",
+    );
+    expect(childSignal?.aborted).toBe(false);
+
+    await client.submitPrompt("Close the background explorer", {
+      sessionId: "session_1",
+    });
+
+    expect(childSignal?.aborted).toBe(true);
+    await expect(runLedger.get("run_2")).resolves.toMatchObject({
+      sessionId: "subagent_session_1",
+      status: "cancelled",
+    });
+    const closeToolResultText = JSON.stringify(
+      requests.filter((request) => !isExploreSubagentRequest(request)).at(-1)
+        ?.messages,
+    );
+    expect(closeToolResultText).toContain("previous_status: running");
+    expect(closeToolResultText).toContain("status: cancelled");
   });
 
   it("applies subagent agent maxSteps through runtime composition", async () => {

@@ -22,6 +22,7 @@ import { createHeuristicTokenCounter } from "../../services/llm-model/index.js";
 import type { SessionManager } from "../../services/session/index.js";
 import {
   AgentManager,
+  AgentTaskManager,
   SubagentExecutor,
   createRuntimeSubagentSessionManager,
   createSubagentMessageWriter,
@@ -96,6 +97,7 @@ const DEFAULT_PROFILE_REGISTRY: ProfileRegistry = {
 
 export interface UiRuntimeCompositionOptions {
   readonly agentManager?: AgentManager;
+  readonly createAgentTaskId?: () => string;
   readonly bus: BusInstance;
   readonly contextManager?: ContextManager;
   readonly createRunId?: () => string;
@@ -316,14 +318,25 @@ export async function createUiRuntimeComposition(
     toolScheduler,
   });
 
-  const taskExecutor = new SubagentExecutor({
+  const messageWriter = createSubagentMessageWriter(options.messageManager);
+  const agentTaskController = new AgentTaskManager({
     agentManager,
-    messageWriter: createSubagentMessageWriter(options.messageManager),
+    ...(options.createAgentTaskId
+      ? { createTaskId: options.createAgentTaskId }
+      : {}),
+    messageWriter,
     runner: subagentRunner,
     sessionManager,
   });
 
-  for (const tool of createBuiltinTools({ taskExecutor })) {
+  const taskExecutor = new SubagentExecutor({
+    agentManager,
+    messageWriter,
+    runner: subagentRunner,
+    sessionManager,
+  });
+
+  for (const tool of createBuiltinTools({ agentTaskController, taskExecutor })) {
     toolScheduler.register(tool);
   }
 

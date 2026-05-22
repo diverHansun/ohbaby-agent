@@ -120,21 +120,29 @@ describe("AgentRegistry", () => {
   });
 
   it("rejects subagents that explicitly include recursive tools", async () => {
-    const registry = new AgentRegistry({
-      configLoader: (): AgentsConfig => ({
-        agents: {
-          recursive: {
-            description: "Bad recursive subagent",
-            mode: "subagent",
-            name: "recursive",
-            tools: { include: ["read", "task"] },
+    for (const toolName of [
+      "task",
+      "agent_open",
+      "agent_eval",
+      "agent_status",
+      "agent_close",
+    ]) {
+      const registry = new AgentRegistry({
+        configLoader: (): AgentsConfig => ({
+          agents: {
+            recursive: {
+              description: "Bad recursive subagent",
+              mode: "subagent",
+              name: "recursive",
+              tools: { include: ["read", toolName] },
+            },
           },
-        },
-      }),
-    });
+        }),
+      });
 
-    await expect(registry.initialize()).rejects.toThrow(
-      "Subagent cannot enable disabled tool: task",
-    );
+      await expect(registry.initialize()).rejects.toThrow(
+        `Subagent cannot enable disabled tool: ${toolName}`,
+      );
+    }
   });
 });

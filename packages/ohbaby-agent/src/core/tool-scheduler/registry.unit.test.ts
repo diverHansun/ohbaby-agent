@@ -49,6 +49,10 @@ describe("ToolRegistry", () => {
       "web_search",
       "memory_add",
       "task",
+      "agent_open",
+      "agent_eval",
+      "agent_status",
+      "agent_close",
       "todo_read",
       "todo_write",
     ]) {

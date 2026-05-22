@@ -58,6 +58,10 @@ describe("AgentManager", () => {
 
     expect(manager.getAgentToolsConfig("audit")).toEqual({
       "*": false,
+      agent_close: false,
+      agent_eval: false,
+      agent_open: false,
+      agent_status: false,
       grep: true,
       read: true,
       task: false,

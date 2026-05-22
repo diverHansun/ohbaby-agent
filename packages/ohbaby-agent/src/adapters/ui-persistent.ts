@@ -394,6 +394,9 @@ export function createPersistentUiBackendClient(
     createInProcessUiBackendClient({
       agentManager: options.agentManager,
       bus,
+      ...(options.createAgentTaskId
+        ? { createAgentTaskId: options.createAgentTaskId }
+        : {}),
       createLLMClient: options.createLLMClient,
       createRunId: options.createRunId,
       hookExecutor,

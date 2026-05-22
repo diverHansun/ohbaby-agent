@@ -11,6 +11,19 @@ export { createSubagentMessageWriter } from "./message-writer.js";
 export { AgentManager, toolsConfigToRecord } from "./manager.js";
 export { AgentRegistry } from "./registry.js";
 export {
+  AgentTaskManager,
+  InMemoryAgentTaskStore,
+  type AgentTaskCloseResult,
+  type AgentTaskController,
+  type AgentTaskLookupInput,
+  type AgentTaskOpenInput,
+  type AgentTaskRecord,
+  type AgentTaskSendInput,
+  type AgentTaskStatus,
+  type AgentTaskStore,
+  type AgentTaskStoreUpdate,
+} from "./tasks/index.js";
+export {
   createSubagentRunner,
   toOpenAiTools,
   type CreateSubagentRunnerOptions,

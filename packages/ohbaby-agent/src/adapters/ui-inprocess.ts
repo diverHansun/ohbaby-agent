@@ -92,6 +92,7 @@ type UiPolicyState = NonNullable<UiSnapshot["policy"]>;
 export interface InProcessUiBackendOptions {
   readonly agentManager?: AgentManager;
   readonly bus?: BusInstance;
+  readonly createAgentTaskId?: () => string;
   readonly createRunId?: () => string;
   readonly hookExecutor?: HookExecutor;
   readonly initialSnapshot?: UiSnapshot;
@@ -527,6 +528,9 @@ export function createInProcessUiBackendClient(
       return createUiRuntimeComposition({
         agentManager: options.agentManager,
         bus,
+        ...(options.createAgentTaskId
+          ? { createAgentTaskId: options.createAgentTaskId }
+          : {}),
         createRunId: options.createRunId ?? ((): string => runIds.next()),
         llmClient,
         messageManager,

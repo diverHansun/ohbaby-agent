@@ -28,6 +28,10 @@ export const BUILTIN_TOOL_CATEGORIES: Record<string, ToolCategory> = {
   memory_remove: "memory",
   skill: "skill",
   task: "subagent",
+  agent_open: "subagent",
+  agent_eval: "subagent",
+  agent_status: "subagent",
+  agent_close: "subagent",
 };
 
 export const MODE_ALLOWED_CATEGORIES: Record<
@@ -49,6 +53,10 @@ export const MODE_ALLOWED_CATEGORIES: Record<
 
 export const SUBAGENT_DISABLED_TOOLS = new Set([
   "task",
+  "agent_open",
+  "agent_eval",
+  "agent_status",
+  "agent_close",
   "todo_write",
   "todo_read",
 ]);
