@@ -14,3 +14,11 @@ coverage/
 .claude/
 .codex/
 .agent/
+
+# Local reference repositories used for design comparison only.
+# They are not product source and must not be included in package artifacts.
+DeepSeek-TUI/
+claude-code/
+deer-flow/
+hermes-agent/
+opencode/

@@ -1,15 +1,18 @@
 # ohbaby-agent
 
-User-facing CLI package for Ohbaby Agent. Install globally with:
+User-facing CLI and backend runtime package for Ohbaby Agent.
 
-```bash
-npm install -g ohbaby-agent
-```
+This package owns:
 
-Then run:
+- the `ohbaby` binary entrypoint
+- CLI argument routing for interactive TUI and one-shot prompt modes
+- persistent local backend composition
+- runtime adapters, built-in tools, sessions, policy, permissions, and provider
+  wiring
 
-```bash
-ohbaby
-```
+It depends on `ohbaby-sdk` for frontend/backend contracts and `ohbaby-tui` for
+the default terminal frontend.
 
-Development remains in the pnpm workspace.
+Development remains in the pnpm workspace. The intended public install command
+is `npm install -g ohbaby-agent`, but the project should wait until the MCP phase
+lands before the formal npm release.
