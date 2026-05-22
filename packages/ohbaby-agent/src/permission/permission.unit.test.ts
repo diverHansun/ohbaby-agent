@@ -109,6 +109,111 @@ describe("PermissionManager", () => {
     ]);
   });
 
+  it("uses the requested skill name when asking for skill permissions", async () => {
+    const bus = createBus();
+    const permission = createPermissionManager({
+      bus,
+      generateId: () => "permission_skill",
+      now: () => 100,
+    });
+    const updated: PermissionInfo[] = [];
+
+    bus.subscribe(PermissionEvent.Updated, (event) => {
+      updated.push(event.info);
+    });
+
+    void permission.ask(
+      baseAskInput({
+        category: "skill",
+        params: { name: "code-review" },
+        reason: "Skill requires confirmation: code-review",
+        toolName: "skill",
+      }),
+    );
+    await Promise.resolve();
+
+    expect(updated).toEqual([
+      expect.objectContaining({
+        name: "code-review",
+        pattern: "skill:code-review",
+        title: "Skill requires confirmation: code-review",
+        type: "skill",
+      }),
+    ]);
+  });
+
+  it("uses per-skill permission patterns for skill-category resource tools", async () => {
+    const bus = createBus();
+    const permission = createPermissionManager({
+      bus,
+      generateId: () => "permission_skill_resource",
+      now: () => 100,
+    });
+    const updated: PermissionInfo[] = [];
+
+    bus.subscribe(PermissionEvent.Updated, (event) => {
+      updated.push(event.info);
+    });
+
+    void permission.ask(
+      baseAskInput({
+        category: "skill",
+        params: { name: "docs", path: "references/guide.md" },
+        reason: "Skill requires confirmation: docs",
+        toolName: "skill_resource",
+      }),
+    );
+    await Promise.resolve();
+
+    expect(updated).toEqual([
+      expect.objectContaining({
+        name: "docs",
+        pattern: "skill:docs",
+        title: "Skill requires confirmation: docs",
+        type: "skill",
+      }),
+    ]);
+  });
+
+  it("does not request auto-edit mode after always allowing a skill", async () => {
+    const bus = createBus();
+    const permission = createPermissionManager({
+      bus,
+      generateId: () => "permission_skill",
+    });
+    const switchRequests: unknown[] = [];
+
+    bus.subscribe(PermissionEvent.SwitchModeRequested, (event) => {
+      switchRequests.push(event);
+    });
+
+    const askPromise = permission.ask(
+      baseAskInput({
+        category: "skill",
+        params: { name: "code-review" },
+        reason: "Skill requires confirmation: code-review",
+        toolName: "skill",
+      }),
+    );
+    await Promise.resolve();
+
+    permission.respond("session_1", "permission_skill", { type: "always" });
+
+    await expect(askPromise).resolves.toBe("always");
+    expect(switchRequests).toEqual([]);
+    await expect(
+      permission.ask(
+        baseAskInput({
+          category: "skill",
+          messageId: "message_2",
+          params: { name: "code-review" },
+          reason: "Skill requires confirmation: code-review",
+          toolName: "skill",
+        }),
+      ),
+    ).resolves.toBe("always");
+  });
+
   it("serializes asks and publishes the next request only after the first resolves", async () => {
     const bus = createBus();
     let nextId = 1;

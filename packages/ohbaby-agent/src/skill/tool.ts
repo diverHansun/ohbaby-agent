@@ -2,7 +2,7 @@ import type {
   Tool,
   ToolExecutionResult,
 } from "../core/tool-scheduler/index.js";
-import type { SkillContent, SkillInfo } from "./types.js";
+import type { SkillContent, SkillInfo, SkillResourceContent } from "./types.js";
 
 const DESCRIPTION_HEADER =
   "Load a skill to get detailed instructions for a specific task.";
@@ -14,8 +14,17 @@ const MAX_LISTING_DESC_CHARS = 250;
 const MIN_DESC_LENGTH = 20;
 
 export interface SkillToolRegistry {
+  get(name: string): Promise<SkillInfo | undefined>;
   listModelInvocable(): Promise<readonly SkillInfo[]>;
   load(name: string): Promise<SkillContent>;
+}
+
+export interface SkillResourceToolRegistry {
+  get(name: string): Promise<SkillInfo | undefined>;
+  readResource(
+    name: string,
+    resourcePath: string,
+  ): Promise<SkillResourceContent>;
 }
 
 export interface SkillDescriptionOptions {
@@ -70,6 +79,19 @@ function wrapListing(lines: readonly string[]): string {
 
 function nameOnlyLines(skills: readonly SkillInfo[]): readonly string[] {
   return skills.map((skill) => `- ${skill.name}`);
+}
+
+async function assertModelInvocable(
+  registry: { get(name: string): Promise<SkillInfo | undefined> },
+  name: string,
+): Promise<void> {
+  const skill = await registry.get(name);
+  if (!skill) {
+    throw new Error(`Skill "${name}" not found.`);
+  }
+  if (skill.disableModelInvocation) {
+    throw new Error(`Skill "${name}" is disabled for model invocation.`);
+  }
 }
 
 export async function buildSkillToolDescription(
@@ -136,6 +158,16 @@ export function formatSkillToolOutput(content: SkillContent): string {
   return lines.join("\n").trimEnd();
 }
 
+export function formatSkillResourceToolOutput(
+  content: SkillResourceContent,
+): string {
+  return [
+    `## Skill resource: ${content.info.name}/${content.path}`,
+    "",
+    content.content.trimEnd(),
+  ].join("\n");
+}
+
 export async function createSkillTool(
   registry: SkillToolRegistry,
   options: SkillDescriptionOptions = {},
@@ -158,7 +190,9 @@ export async function createSkillTool(
     },
     source: "module",
     async execute(params): Promise<ToolExecutionResult> {
-      const content = await registry.load(requiredString(params, "name"));
+      const name = requiredString(params, "name");
+      await assertModelInvocable(registry, name);
+      const content = await registry.load(name);
       return {
         metadata: {
           dir: content.baseDir,
@@ -166,6 +200,51 @@ export async function createSkillTool(
           name: content.info.name,
         },
         output: formatSkillToolOutput(content),
+      };
+    },
+  };
+}
+
+export function createSkillResourceTool(
+  registry: SkillResourceToolRegistry,
+): Tool {
+  return {
+    annotations: { readOnlyHint: true },
+    category: "skill",
+    description:
+      "Read a helper or reference file from a loaded skill directory by relative path.",
+    name: "skill_resource",
+    parametersJsonSchema: {
+      additionalProperties: false,
+      properties: {
+        name: {
+          description: 'The skill name, for example "code-review".',
+          type: "string",
+        },
+        path: {
+          description:
+            'Relative helper file path from the skill directory, for example "references/guide.md".',
+          type: "string",
+        },
+      },
+      required: ["name", "path"],
+      type: "object",
+    },
+    source: "module",
+    async execute(params): Promise<ToolExecutionResult> {
+      const name = requiredString(params, "name");
+      await assertModelInvocable(registry, name);
+      const content = await registry.readResource(
+        name,
+        requiredString(params, "path"),
+      );
+      return {
+        metadata: {
+          dir: content.baseDir,
+          name: content.info.name,
+          path: content.path,
+        },
+        output: formatSkillResourceToolOutput(content),
       };
     },
   };

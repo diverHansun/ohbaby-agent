@@ -1,6 +1,7 @@
 export {
   SkillLoadError,
   SkillNotFoundError,
+  SkillResourceError,
   type SkillInvalidError,
 } from "./errors.js";
 export {
@@ -12,7 +13,9 @@ export {
 export { Skill, SkillRegistry } from "./registry.js";
 export {
   buildSkillToolDescription,
+  createSkillResourceTool,
   createSkillTool,
+  formatSkillResourceToolOutput,
   formatSkillToolOutput,
 } from "./tool.js";
 export type {
@@ -20,7 +23,10 @@ export type {
   SkillInfo,
   SkillLoaderPort,
   SkillLogger,
+  SkillRegistryChangeListener,
   SkillRegistryPort,
+  SkillResourceContent,
   SkillScope,
   SkillSearchDirectory,
+  SkillSource,
 } from "./types.js";

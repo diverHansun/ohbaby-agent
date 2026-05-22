@@ -40,16 +40,34 @@ function titleFor(input: PermissionAskInput): string {
   return input.reason ?? `Allow ${input.toolName}?`;
 }
 
+function requestedSkillName(
+  params: Record<string, unknown>,
+): string | undefined {
+  const value = params.name;
+  return typeof value === "string" && value.trim() !== ""
+    ? value.trim()
+    : undefined;
+}
+
+function shouldRequestAutoEditSwitch(info: PermissionInfo): boolean {
+  return info.type !== "skill";
+}
+
 function createInfo(
   input: PermissionAskInput,
   id: string,
   now: () => number,
 ): PermissionInfo {
-  const type = inferPermissionType(input.toolName, input.params);
+  const type =
+    input.category === "skill"
+      ? "skill"
+      : inferPermissionType(input.toolName, input.params);
   const name =
-    type === "bash" && typeof input.params.command === "string"
-      ? (input.params.command.split(/\s+/)[0] ?? input.toolName)
-      : input.toolName;
+    type === "skill"
+      ? (requestedSkillName(input.params) ?? input.toolName)
+      : type === "bash" && typeof input.params.command === "string"
+        ? (input.params.command.split(/\s+/)[0] ?? input.toolName)
+        : input.toolName;
   const pattern = generatePermissionPattern({
     name,
     params: input.params,
@@ -240,15 +258,17 @@ export function createPermissionManager(
         });
         request.resolve("always");
         autoApproveMatching(sessionId, request.info.pattern);
-        bus.publish(PermissionEvent.SwitchModeRequested, {
-          sessionId,
-          targetMode: "edit-automatically",
-          trigger: {
-            callId: request.info.callId,
-            permissionId,
-            pattern: request.info.pattern,
-          },
-        });
+        if (shouldRequestAutoEditSwitch(request.info)) {
+          bus.publish(PermissionEvent.SwitchModeRequested, {
+            sessionId,
+            targetMode: "edit-automatically",
+            trigger: {
+              callId: request.info.callId,
+              permissionId,
+              pattern: request.info.pattern,
+            },
+          });
+        }
         completeCurrent();
         return;
       }

@@ -711,7 +711,11 @@ describe("createInProcessUiBackendClient", () => {
 
     await client.submitPrompt("Say hello");
 
-    expect(events.map((event) => event.type)).toEqual([
+    expect(
+      events
+        .filter((event) => event.type !== "notice.emitted")
+        .map((event) => event.type),
+    ).toEqual([
       "session.updated",
       "message.appended",
       "runtime.updated",
@@ -825,7 +829,8 @@ describe("createInProcessUiBackendClient", () => {
           : "";
       const noticeEvent = events.find(
         (event): event is Extract<UiEvent, { type: "notice.emitted" }> =>
-          event.type === "notice.emitted",
+          event.type === "notice.emitted" &&
+          event.notice.key?.includes("ignore_previous_instructions") === true,
       );
       expect(systemContent).not.toContain("Ignore previous instructions");
       expect(noticeEvent?.notice.key).toContain("ignore_previous_instructions");
@@ -1021,8 +1026,21 @@ describe("createInProcessUiBackendClient", () => {
         ),
         workdir: projectRoot,
       });
+      const permission = waitForUiEvent(
+        client,
+        (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
+          event.type === "permission.requested",
+      );
 
-      await client.submitPrompt("Use the project review skill");
+      const run = client.submitPrompt("Use the project review skill");
+      const permissionEvent = await permission;
+      expect(permissionEvent.request).toMatchObject({
+        title: "Skill requires confirmation: code-review",
+      });
+      await client.respondPermission(permissionEvent.request.id, {
+        choiceId: "allow_once",
+      });
+      await run;
 
       const skillTool = requests[0]?.tools?.find(
         (tool) => tool.function.name === "skill",

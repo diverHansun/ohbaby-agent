@@ -44,10 +44,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isAlwaysAllowed(category: ToolCategory): boolean {
   return (
-    category === "readonly" ||
-    category === "network" ||
-    category === "memory" ||
-    category === "skill"
+    category === "readonly" || category === "network" || category === "memory"
   );
 }
 
@@ -73,6 +70,15 @@ function isPolicyCheckInput(value: unknown): value is PolicyCheckInput {
     typeof value.sessionId === "string" &&
     typeof value.messageId === "string"
   );
+}
+
+function requestedSkillName(
+  params: Record<string, unknown>,
+): string | undefined {
+  const value = params.name;
+  return typeof value === "string" && value.trim() !== ""
+    ? value.trim()
+    : undefined;
 }
 
 export function createPolicyManager(
@@ -152,6 +158,13 @@ export function createPolicyManager(
     }
     if (isAlwaysAllowed(category)) {
       return allow();
+    }
+    if (category === "skill") {
+      return ask(
+        `Skill requires confirmation: ${
+          requestedSkillName(input.params) ?? input.toolName
+        }`,
+      );
     }
     if (mode === "ask" || mode === "plan") {
       return deny(`Tool category ${category} is not allowed in ${mode} mode`);

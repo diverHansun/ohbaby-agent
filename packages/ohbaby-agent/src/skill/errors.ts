@@ -29,6 +29,17 @@ export class SkillLoadError extends Error {
   }
 }
 
+export class SkillResourceError extends Error {
+  constructor(
+    readonly path: string,
+    message: string,
+    cause?: unknown,
+  ) {
+    super(`Invalid skill resource "${path}": ${message}`, { cause });
+    this.name = "SkillResourceError";
+  }
+}
+
 export interface SkillInvalidError {
   readonly path: string;
   readonly message: string;
