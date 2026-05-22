@@ -39,6 +39,7 @@ import { createSystemPromptProvider } from "../../core/system-prompt/index.js";
 import {
   SkillLoader,
   SkillRegistry,
+  createSkillResourceTool,
   createSkillTool,
   type SkillLogger,
   type SkillRegistryPort,
@@ -419,7 +420,22 @@ export async function createUiRuntimeComposition(
         projectDirectory: options.workdir,
       }),
     });
-  toolScheduler.register(await createSkillTool(skillRegistry));
+  async function refreshSkillTools(): Promise<void> {
+    toolScheduler.register(await createSkillTool(skillRegistry));
+    toolScheduler.register(createSkillResourceTool(skillRegistry));
+  }
+
+  await refreshSkillTools();
+  skillRegistry.onChange(() => {
+    void refreshSkillTools().catch((error: unknown) => {
+      options.onNotice?.({
+        key: `skill:tool-refresh:${formatUnknown(error)}`,
+        level: "warning",
+        message: formatUnknown(error),
+        title: "Skill tool refresh failed",
+      });
+    });
+  });
 
   return {
     agentManager,

@@ -7,12 +7,15 @@ import type {
   ToolCategory,
 } from "./index.js";
 
-function checkInput(category: ToolCategory): PolicyCheckInput {
+function checkInput(
+  category: ToolCategory,
+  params: Record<string, unknown> = {},
+): PolicyCheckInput {
   return {
     callId: "call_1",
     category,
     messageId: "message_1",
-    params: {},
+    params,
     sessionId: "session_1",
     toolName: `${category}_tool`,
   };
@@ -177,7 +180,12 @@ describe("PolicyManager", () => {
     expect(decisionType(policy.check(checkInput("readonly")))).toBe("allow");
     expect(decisionType(policy.check(checkInput("network")))).toBe("allow");
     expect(decisionType(policy.check(checkInput("memory")))).toBe("allow");
-    expect(decisionType(policy.check(checkInput("skill")))).toBe("allow");
+    expect(
+      policy.check(checkInput("skill", { name: "code-review" })),
+    ).toMatchObject({
+      reason: "Skill requires confirmation: code-review",
+      type: "ask",
+    });
     expect(decisionType(policy.check(checkInput("write")))).toBe("deny");
     expect(decisionType(policy.check(checkInput("dangerous")))).toBe("deny");
     expect(decisionType(policy.check(checkInput("subagent")))).toBe("deny");
@@ -194,6 +202,12 @@ describe("PolicyManager", () => {
     expect(decisionType(policy.check(checkInput("readonly")))).toBe("allow");
     expect(decisionType(policy.check(checkInput("write")))).toBe("ask");
     expect(decisionType(policy.check(checkInput("dangerous")))).toBe("ask");
+    expect(
+      policy.check(checkInput("skill", { name: "code-review" })),
+    ).toMatchObject({
+      reason: "Skill requires confirmation: code-review",
+      type: "ask",
+    });
     expect(decisionType(policy.check(checkInput("subagent")))).toBe("allow");
 
     policy.setAgentState("edit-automatically");

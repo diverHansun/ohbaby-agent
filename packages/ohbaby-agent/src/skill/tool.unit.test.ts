@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSkillToolDescription,
+  createSkillResourceTool,
   createSkillTool,
   formatSkillToolOutput,
 } from "./tool.js";
-import type { SkillContent, SkillInfo } from "./types.js";
+import type { SkillContent, SkillInfo, SkillResourceContent } from "./types.js";
 
 function skill(input: {
   readonly name: string;
@@ -12,12 +13,19 @@ function skill(input: {
   readonly disableModelInvocation?: boolean;
 }): SkillInfo {
   return {
+    allowedTools: [],
     baseDir: `/skills/${input.name}`,
     description: input.description,
     disableModelInvocation: input.disableModelInvocation ?? false,
+    frontmatter: {
+      description: input.description,
+      name: input.name,
+    },
     location: `/skills/${input.name}/SKILL.md`,
+    metadata: {},
     name: input.name,
     scope: "project",
+    source: "project-native",
     userInvocable: true,
   };
 }
@@ -28,6 +36,15 @@ function content(info: SkillInfo): SkillContent {
     content: "# Instructions\n\nDo the thing.",
     files: ["script.ts"],
     info,
+  };
+}
+
+function resource(info: SkillInfo): SkillResourceContent {
+  return {
+    baseDir: info.baseDir,
+    content: "Reference notes\n",
+    info,
+    path: "references/notes.md",
   };
 }
 
@@ -85,6 +102,10 @@ describe("SkillTool", () => {
       description: "Review code",
     });
     const tool = await createSkillTool({
+      get: (name: string) => {
+        expect(name).toBe("code-review");
+        return Promise.resolve(codeReview);
+      },
       listModelInvocable: () => Promise.resolve([codeReview]),
       load: (name: string) => {
         expect(name).toBe("code-review");
@@ -116,10 +137,101 @@ describe("SkillTool", () => {
     });
   });
 
+  it("blocks direct model loads for model-disabled skills", async () => {
+    const hidden = skill({
+      description: "Hidden",
+      disableModelInvocation: true,
+      name: "hidden",
+    });
+    const tool = await createSkillTool({
+      get: () => Promise.resolve(hidden),
+      listModelInvocable: () => Promise.resolve([]),
+      load: () => {
+        throw new Error("disabled skill should not load");
+      },
+    });
+
+    await expect(
+      tool.execute(
+        { name: "hidden" },
+        {
+          callId: "call_1",
+          messageId: "message_1",
+          sessionId: "session_1",
+          signal: new AbortController().signal,
+        },
+      ),
+    ).rejects.toThrow(/disabled for model invocation/u);
+  });
+
   it("formats content without an empty helper section", () => {
     const info = skill({ name: "plain", description: "Plain" });
     expect(
       formatSkillToolOutput({ ...content(info), files: [] }),
     ).not.toContain("**Available files**");
+  });
+
+  it("reads skill resources through a dedicated read-only tool", async () => {
+    const info = skill({ name: "docs", description: "Docs" });
+    const tool = createSkillResourceTool({
+      get: (name: string) => {
+        expect(name).toBe("docs");
+        return Promise.resolve(info);
+      },
+      readResource: (name: string, resourcePath: string) => {
+        expect(name).toBe("docs");
+        expect(resourcePath).toBe("references/notes.md");
+        return Promise.resolve(resource(info));
+      },
+    });
+
+    const result = await tool.execute(
+      { name: "docs", path: "references/notes.md" },
+      {
+        callId: "call_1",
+        messageId: "message_1",
+        sessionId: "session_1",
+        signal: new AbortController().signal,
+      },
+    );
+
+    expect(tool).toMatchObject({
+      annotations: { readOnlyHint: true },
+      category: "skill",
+      name: "skill_resource",
+      source: "module",
+    });
+    expect(result.output).toContain("Reference notes");
+    expect(result.metadata).toEqual({
+      dir: "/skills/docs",
+      name: "docs",
+      path: "references/notes.md",
+    });
+  });
+
+  it("blocks model resource reads for model-disabled skills", async () => {
+    const info = skill({
+      description: "Hidden docs",
+      disableModelInvocation: true,
+      name: "hidden-docs",
+    });
+    const tool = createSkillResourceTool({
+      get: () => Promise.resolve(info),
+      readResource: () => {
+        throw new Error("disabled skill resource should not load");
+      },
+    });
+
+    await expect(
+      tool.execute(
+        { name: "hidden-docs", path: "references/notes.md" },
+        {
+          callId: "call_1",
+          messageId: "message_1",
+          sessionId: "session_1",
+          signal: new AbortController().signal,
+        },
+      ),
+    ).rejects.toThrow(/disabled for model invocation/u);
   });
 });
