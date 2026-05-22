@@ -1,0 +1,192 @@
+import { describe, expect, it, vi } from "vitest";
+import { McpClient } from "../core/client.js";
+import type { McpCallToolResult, McpSdkClient, McpTransport } from "../types.js";
+
+interface SdkClientFixture {
+  readonly callTool: ReturnType<typeof vi.fn>;
+  readonly client: McpSdkClient;
+  readonly close: ReturnType<typeof vi.fn>;
+  readonly connect: ReturnType<typeof vi.fn>;
+  readonly listTools: ReturnType<typeof vi.fn>;
+}
+
+function createSdkClientFixture(
+  overrides: Partial<McpSdkClient> = {},
+): SdkClientFixture {
+  const callResult: McpCallToolResult = {
+    content: [{ text: "called", type: "text" }],
+  };
+  const callTool = vi.fn(() => Promise.resolve(callResult));
+  const close = vi.fn(() => Promise.resolve());
+  const connect = vi.fn(() => Promise.resolve());
+  const listTools = vi.fn(() =>
+    Promise.resolve({
+      tools: [
+        {
+          inputSchema: { type: "object" },
+          name: "echo",
+        },
+      ],
+    }),
+  );
+  const client: McpSdkClient = {
+    callTool,
+    close,
+    connect,
+    listTools,
+    ...overrides,
+  };
+
+  return { callTool, client, close, connect, listTools };
+}
+
+describe("McpClient", () => {
+  it("connects with injected transport and caches discovered tools", async () => {
+    const sdk = createSdkClientFixture();
+    const transport = {} as McpTransport;
+    const client = new McpClient(
+      "test",
+      {
+        args: [],
+        command: "node",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+      {
+        createSdkClient: (): McpSdkClient => sdk.client,
+        createTransport: (): McpTransport => transport,
+      },
+    );
+
+    await client.connect();
+    const first = await client.listTools();
+    const second = await client.listTools();
+
+    expect(sdk.connect).toHaveBeenCalledWith(transport, { timeout: 5000 });
+    expect(sdk.listTools).toHaveBeenCalledWith(undefined, { timeout: 5000 });
+    expect(sdk.listTools).toHaveBeenCalledTimes(1);
+    expect(first).toEqual(second);
+    expect(client.getStatus()).toEqual({ status: "connected", toolCount: 1 });
+  });
+
+  it("records failed status when connection fails", async () => {
+    const connect = vi.fn(() => Promise.reject(new Error("spawn failed")));
+    const sdk = createSdkClientFixture({ connect });
+    const client = new McpClient(
+      "bad",
+      {
+        args: [],
+        command: "missing",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+      {
+        createSdkClient: (): McpSdkClient => sdk.client,
+        createTransport: (): McpTransport => ({}),
+      },
+    );
+
+    await expect(client.connect()).rejects.toThrow("spawn failed");
+    expect(client.getStatus()).toMatchObject({
+      error: "spawn failed",
+      status: "failed",
+    });
+  });
+
+  it("closes the SDK client when tool discovery fails after connect", async () => {
+    const listTools = vi.fn(() => Promise.reject(new Error("list failed")));
+    const sdk = createSdkClientFixture({ listTools });
+    const client = new McpClient(
+      "bad-tools",
+      {
+        args: [],
+        command: "node",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+      {
+        createSdkClient: (): McpSdkClient => sdk.client,
+        createTransport: (): McpTransport => ({}),
+      },
+    );
+
+    await expect(client.connect()).rejects.toThrow("list failed");
+
+    expect(sdk.close).toHaveBeenCalledTimes(1);
+    expect(client.getStatus()).toMatchObject({
+      error: "list failed",
+      status: "failed",
+    });
+  });
+
+  it("calls tools with timeout and abort signal options", async () => {
+    const sdk = createSdkClientFixture();
+    const client = new McpClient(
+      "test",
+      {
+        args: [],
+        command: "node",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+      {
+        createSdkClient: (): McpSdkClient => sdk.client,
+        createTransport: (): McpTransport => ({}),
+      },
+    );
+    const signal = new AbortController().signal;
+
+    await client.connect();
+    await expect(
+      client.callTool(
+        { arguments: { value: "hello" }, name: "echo" },
+        { signal, timeout: 100 },
+      ),
+    ).resolves.toMatchObject({
+      content: [{ text: "called", type: "text" }],
+    });
+
+    expect(sdk.callTool).toHaveBeenCalledWith(
+      { arguments: { value: "hello" }, name: "echo" },
+      undefined,
+      { signal, timeout: 100 },
+    );
+  });
+
+  it("disconnects the underlying SDK client and updates status", async () => {
+    const sdk = createSdkClientFixture();
+    const transport = {
+      close: vi.fn(() => Promise.resolve()),
+    };
+    const client = new McpClient(
+      "test",
+      {
+        args: [],
+        command: "node",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+      {
+        createSdkClient: (): McpSdkClient => sdk.client,
+        createTransport: (): McpTransport => transport,
+      },
+    );
+
+    await client.connect();
+    await client.disconnect();
+
+    expect(sdk.close).toHaveBeenCalled();
+    expect(transport.close).not.toHaveBeenCalled();
+    expect(client.getStatus()).toEqual({ status: "disconnected" });
+  });
+});

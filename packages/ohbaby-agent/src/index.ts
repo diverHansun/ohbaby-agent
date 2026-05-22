@@ -10,12 +10,30 @@ export {
   AgentConfigValidationError,
   AgentsConfigSchema,
   ConfigError,
+  DEFAULT_MCP_ENABLED,
+  DEFAULT_MCP_TIMEOUT,
+  DEFAULT_MCP_TRUST,
+  McpConfigAccessError,
+  McpConfigError,
+  McpConfigParseError,
+  McpConfigValidationError,
+  McpHttpConfigSchema,
+  McpServerConfigSchema,
+  McpServersConfigSchema,
+  McpSseConfigSchema,
+  McpStdioConfigSchema,
   getGlobalAgentsConfigPath,
+  getGlobalMcpConfigPath,
   getLLMConfig,
   getProjectAgentsConfigPath,
+  getProjectMcpConfigPath,
   isLLMConfigCached,
   loadAgentConfig,
+  loadMcpConfig,
+  loadMcpConfigFromPath,
+  mergeMcpConfigs,
   reloadLLMConfig,
+  validateMcpConfig,
 } from "./config/index.js";
 export type {
   AgentConfig as ConfigAgentConfig,
@@ -24,6 +42,13 @@ export type {
   AgentsConfig as ConfigAgentsConfig,
   ConfigErrorCode,
   LLMConfig,
+  LoadMcpConfigOptions,
+  McpConfigErrorCode,
+  McpHttpConfig,
+  McpServerConfig,
+  McpServersConfig,
+  McpSseConfig,
+  McpStdioConfig,
   ModelJsonConfig,
   PermissionConfig as ConfigPermissionConfig,
   PermissionValue as ConfigPermissionValue,
@@ -56,6 +81,7 @@ export type {
 } from "./agents/index.js";
 export * from "./core/system-prompt/index.js";
 export * from "./core/llm-client/index.js";
+export * from "./mcp/index.js";
 export * from "./project/index.js";
 export * from "./runtime/interaction-broker/index.js";
 export * from "./sandbox/index.js";

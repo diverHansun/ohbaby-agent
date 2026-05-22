@@ -41,3 +41,34 @@ export type {
   PermissionValue,
   ToolsConfig,
 } from "./agents/index.js";
+
+export {
+  DEFAULT_MCP_ENABLED,
+  DEFAULT_MCP_TIMEOUT,
+  DEFAULT_MCP_TRUST,
+  McpConfigAccessError,
+  McpConfigError,
+  McpConfigParseError,
+  McpConfigValidationError,
+  McpHttpConfigSchema,
+  McpServerConfigSchema,
+  McpServersConfigSchema,
+  McpSseConfigSchema,
+  McpStdioConfigSchema,
+  getGlobalMcpConfigPath,
+  getProjectMcpConfigPath,
+  loadMcpConfig,
+  loadMcpConfigFromPath,
+  mergeMcpConfigs,
+  validateMcpConfig,
+} from "./mcp/index.js";
+
+export type {
+  LoadMcpConfigOptions,
+  McpConfigErrorCode,
+  McpHttpConfig,
+  McpServerConfig,
+  McpServersConfig,
+  McpSseConfig,
+  McpStdioConfig,
+} from "./mcp/index.js";
