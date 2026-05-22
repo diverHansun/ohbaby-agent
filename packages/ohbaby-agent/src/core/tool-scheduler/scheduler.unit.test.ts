@@ -105,7 +105,9 @@ function createTool(input: {
   readonly name: string;
   readonly category?: Tool["category"];
   readonly execute?: Tool["execute"];
+  readonly isTrusted?: Tool["isTrusted"];
   readonly parametersJsonSchema?: Tool["parametersJsonSchema"];
+  readonly source?: Tool["source"];
 }): Tool {
   return {
     category: input.category,
@@ -114,9 +116,10 @@ function createTool(input: {
       input.execute ??
       ((): Promise<ToolExecutionResult> =>
         Promise.resolve({ output: `${input.name} output` })),
+    isTrusted: input.isTrusted,
     name: input.name,
     parametersJsonSchema: input.parametersJsonSchema ?? {},
-    source: "builtin",
+    source: input.source ?? "builtin",
   };
 }
 
@@ -363,6 +366,40 @@ describe("ToolScheduler", () => {
       status: "rejected",
     });
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("asks permission for untrusted MCP tools even when policy allows the category", async () => {
+    const permission = {
+      ask: vi.fn(() => Promise.resolve("once" as const)),
+    };
+    const { scheduler } = createScheduler({ permission });
+    const execute = vi.fn(() => ({ output: "mcp result" }));
+    scheduler.register(
+      createTool({
+        category: "readonly",
+        execute,
+        isTrusted: false,
+        name: "remote_read",
+        source: "mcp",
+      }),
+    );
+
+    const result = await scheduler.execute({
+      callId: "untrusted_mcp",
+      messageId: "message_1",
+      params: {},
+      sessionId: "session_1",
+      toolName: "remote_read",
+    });
+
+    expect(result.status).toBe("success");
+    expect(permission.ask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "untrusted-mcp-tool",
+        toolName: "remote_read",
+      }),
+    );
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it("validates request identity and tool parameters before execution", async () => {

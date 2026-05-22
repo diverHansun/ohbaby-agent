@@ -46,6 +46,7 @@ interface PreparedCall extends ScheduledCall {
 
 interface ToolPolicyContext {
   readonly externalWrite: boolean;
+  readonly untrustedMcp: boolean;
   readonly params: Record<string, unknown>;
 }
 
@@ -615,6 +616,12 @@ export function createToolScheduler(
         type: "ask",
       };
     }
+    if (decision.type === "allow" && context.untrustedMcp) {
+      return {
+        reason: "untrusted-mcp-tool",
+        type: "ask",
+      };
+    }
 
     return decision;
   }
@@ -808,10 +815,12 @@ export function createToolScheduler(
   async function createPolicyContext(
     request: ToolCallRequest,
     category: ToolCategory,
+    tool: Tool,
   ): Promise<ToolPolicyContext> {
     if (category !== "write" || !request.environment) {
       return {
         externalWrite: false,
+        untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
         params: request.params,
       };
     }
@@ -820,6 +829,7 @@ export function createToolScheduler(
     if (!filePath || !path.isAbsolute(filePath)) {
       return {
         externalWrite: false,
+        untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
         params: request.params,
       };
     }
@@ -840,6 +850,7 @@ export function createToolScheduler(
         request.environment.workdir,
         canonicalPath,
       ),
+      untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
       params,
     };
   }
@@ -897,7 +908,7 @@ export function createToolScheduler(
     const controller = new AbortController();
     controllers.set(call.callId, controller);
     const unbindRequestSignal = bindRequestSignal(call, request.signal);
-    const policyContext = await createPolicyContext(request, category);
+    const policyContext = await createPolicyContext(request, category, tool);
     return {
       prepared: {
         call,

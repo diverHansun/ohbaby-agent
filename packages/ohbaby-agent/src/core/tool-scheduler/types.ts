@@ -85,6 +85,9 @@ export interface Tool {
   readonly parametersJsonSchema: Record<string, unknown>;
   readonly source: ToolSource;
   readonly category?: ToolCategory;
+  readonly isTrusted?: boolean;
+  readonly mcpServer?: string;
+  readonly mcpToolName?: string;
   readonly annotations?: {
     readonly readOnlyHint?: boolean;
   };
