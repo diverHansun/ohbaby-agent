@@ -37,6 +37,13 @@ import {
 } from "../../runtime/run-ledger/index.js";
 import { createSystemPromptProvider } from "../../core/system-prompt/index.js";
 import {
+  SkillLoader,
+  SkillRegistry,
+  createSkillTool,
+  type SkillLogger,
+  type SkillRegistryPort,
+} from "../../skill/index.js";
+import {
   RunManager,
   type HookExecutor,
   type ProfileRegistry,
@@ -114,6 +121,7 @@ export interface UiRuntimeCompositionOptions {
   readonly policy: PolicyPort;
   readonly runLedger?: RunLedger;
   readonly sessionManager?: Pick<SessionManager, "create" | "get">;
+  readonly skillRegistry?: SkillRegistryPort;
   readonly streamBridge?: StreamBridge;
   readonly workdir?: string;
 }
@@ -122,6 +130,66 @@ function withoutSystemMessages(
   messages: readonly ChatCompletionMessage[],
 ): ChatCompletionMessage[] {
   return messages.filter((message) => message.role !== "system");
+}
+
+function formatUnknown(value: unknown): string {
+  if (value instanceof Error) {
+    return value.message;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint"
+  ) {
+    return String(value);
+  }
+  if (value === null) {
+    return "null";
+  }
+  if (value === undefined) {
+    return "undefined";
+  }
+  if (typeof value === "symbol") {
+    return value.description ?? "symbol";
+  }
+  if (typeof value === "function") {
+    return value.name ? `[function ${value.name}]` : "[function]";
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+}
+
+function formatSkillWarning(
+  message: string,
+  context?: Record<string, unknown>,
+): string {
+  const error = context?.error;
+  return error === undefined ? message : `${message}: ${formatUnknown(error)}`;
+}
+
+function createSkillLogger(
+  onNotice: UiRuntimeCompositionOptions["onNotice"],
+): SkillLogger | undefined {
+  if (!onNotice) {
+    return undefined;
+  }
+  return {
+    warn(message, context): void {
+      const detail = formatSkillWarning(message, context);
+      onNotice({
+        key: `skill:warning:${detail}`,
+        level: "warning",
+        message: detail,
+        title: "Skill warning",
+      });
+    },
+  };
 }
 
 export async function createUiRuntimeComposition(
@@ -342,6 +410,16 @@ export async function createUiRuntimeComposition(
   })) {
     toolScheduler.register(tool);
   }
+  const skillLogger = createSkillLogger(options.onNotice);
+  const skillRegistry =
+    options.skillRegistry ??
+    new SkillRegistry({
+      loader: new SkillLoader({
+        ...(skillLogger ? { logger: skillLogger } : {}),
+        projectDirectory: options.workdir,
+      }),
+    });
+  toolScheduler.register(await createSkillTool(skillRegistry));
 
   return {
     agentManager,

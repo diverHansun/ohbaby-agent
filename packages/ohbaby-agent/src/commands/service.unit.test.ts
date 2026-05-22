@@ -11,10 +11,10 @@ import { createInteractionBroker } from "../runtime/interaction-broker/index.js"
 type UiPolicyState = NonNullable<UiSnapshot["policy"]>;
 
 describe("CommandService", () => {
-  it("lists mode commands in the builtin catalog", () => {
+  it("lists mode commands in the builtin catalog", async () => {
     const { service } = createServiceHarness();
 
-    const catalog = service.listCommands({ surface: "tui" });
+    const catalog = await service.listCommands({ surface: "tui" });
 
     expect(catalog.commands.map((command) => command.id)).toEqual(
       expect.arrayContaining([
@@ -478,7 +478,7 @@ describe("CommandService", () => {
       ],
     });
 
-    expect(service.listCommands({ surface: "tui" }).commands).toEqual(
+    expect((await service.listCommands({ surface: "tui" })).commands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: "diagnostics",

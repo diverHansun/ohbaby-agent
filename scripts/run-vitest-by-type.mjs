@@ -53,14 +53,9 @@ if (testFiles.length === 0) {
   process.exit(0);
 }
 
-const vitestExecutable = path.join(
-  root,
-  "node_modules",
-  ".bin",
-  process.platform === "win32" ? "vitest.cmd" : "vitest",
-);
-const result = spawnSync(vitestExecutable, ["run", ...testFiles], {
-  shell: process.platform === "win32",
+const vitestEntry = path.join(root, "node_modules", "vitest", "vitest.mjs");
+const result = spawnSync(process.execPath, [vitestEntry, "run", ...testFiles], {
+  shell: false,
   stdio: "inherit",
 });
 

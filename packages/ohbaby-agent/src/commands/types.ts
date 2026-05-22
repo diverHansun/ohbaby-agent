@@ -23,6 +23,11 @@ export interface CommandToolSummary {
   readonly source?: string;
 }
 
+export interface CommandSkillSummary {
+  readonly name: string;
+  readonly description: string;
+}
+
 export interface CommandModelSummary {
   readonly id: string;
   readonly label: string;
@@ -55,6 +60,13 @@ export interface CommandSessionProvider {
     | Promise<readonly CommandSessionSummary[]>
     | readonly CommandSessionSummary[];
   selectSession?(sessionId: string): Promise<void> | void;
+}
+
+export interface CommandSkillProvider {
+  listUserInvocable():
+    | Promise<readonly CommandSkillSummary[]>
+    | readonly CommandSkillSummary[];
+  loadPrompt(name: string): Promise<string> | string;
 }
 
 export type CommandPolicyState = NonNullable<UiSnapshot["policy"]>;
@@ -95,8 +107,13 @@ export interface CommandServiceOptions {
   readonly tools?: CommandToolProvider;
   readonly models?: CommandModelProvider;
   readonly sessions?: CommandSessionProvider;
+  readonly skills?: CommandSkillProvider;
   readonly policy?: CommandPolicyProvider;
   readonly abortRun?: (runId?: string) => Promise<void> | void;
+  readonly submitPrompt?: (
+    text: string,
+    options?: { readonly sessionId?: string },
+  ) => Promise<void> | void;
   readonly exit?: () => Promise<void> | void;
   readonly getStatus?: () => string;
   readonly createCommandRunId?: () => string;
@@ -108,7 +125,7 @@ export interface CommandServiceOptions {
 export interface CommandService {
   listCommands(query: {
     readonly surface?: UiCommandSurface;
-  }): UiCommandCatalog;
+  }): Promise<UiCommandCatalog>;
   executeCommand(invocation: UiCommandInvocation): Promise<void>;
   abortCommandRun(commandRunId: string, reason?: string): number;
 }

@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import type { UiBackendClient, UiEvent, UiSnapshot } from "ohbaby-sdk";
 import type {
@@ -50,6 +52,8 @@ interface Deferred<T> {
   reject(error: unknown): void;
 }
 
+const execFileAsync = promisify(execFile);
+
 function createDeferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -58,6 +62,19 @@ function createDeferred<T>(): Deferred<T> {
     reject = innerReject;
   });
   return { promise, resolve, reject };
+}
+
+async function initializeGitRepository(directory: string): Promise<void> {
+  await execFileAsync("git", ["init"], { cwd: directory });
+  await execFileAsync("git", ["config", "user.name", "Test User"], {
+    cwd: directory,
+  });
+  await execFileAsync("git", ["config", "user.email", "test@example.com"], {
+    cwd: directory,
+  });
+  await execFileAsync("git", ["commit", "--allow-empty", "-m", "init"], {
+    cwd: directory,
+  });
 }
 
 function createProviderStream(
@@ -481,6 +498,25 @@ function listToolCallEvent(input: {
         id: input.callId,
         index: 0,
         name: "list",
+      },
+    ],
+    finishReason: "tool_calls",
+  };
+}
+
+function skillToolCallEvent(input: {
+  readonly callId: string;
+  readonly name: string;
+}): ProviderStreamEvent {
+  return {
+    toolCallDeltas: [
+      {
+        argumentsDelta: JSON.stringify({
+          name: input.name,
+        }),
+        id: input.callId,
+        index: 0,
+        name: "skill",
       },
     ],
     finishReason: "tool_calls",
@@ -942,6 +978,69 @@ describe("createInProcessUiBackendClient", () => {
       parts[1]?.type === "tool-result" ? parts[1].result.output : "",
     ).toContain("builtin.ts");
     expect(parts[2]).toEqual({ type: "text", text: "Listed." });
+  });
+
+  it("registers project skills as a module tool and returns loaded skill content", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-skill-project-"));
+    try {
+      const skillDir = join(
+        projectRoot,
+        ".ohbaby-agent",
+        "skill",
+        "code-review",
+      );
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: code-review",
+          "description: Review code with project conventions",
+          "---",
+          "",
+          "# Code Review",
+          "",
+          "Check behavior, tests, and maintainability.",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const requests: ProviderRequest[] = [];
+      const client = createInProcessUiBackendClient({
+        llmClient: createSequentialFakeLLMClient(
+          [
+            [
+              skillToolCallEvent({
+                callId: "call_skill",
+                name: "code-review",
+              }),
+            ],
+            [{ textDelta: "Loaded skill.", finishReason: "stop" }],
+          ],
+          requests,
+        ),
+        workdir: projectRoot,
+      });
+
+      await client.submitPrompt("Use the project review skill");
+
+      const skillTool = requests[0]?.tools?.find(
+        (tool) => tool.function.name === "skill",
+      );
+      expect(skillTool?.function.description).toContain("code-review");
+      const toolResultMessage = requests[1]?.messages.at(-1);
+      expect(toolResultMessage).toMatchObject({
+        role: "tool",
+        tool_call_id: "call_skill",
+      });
+      expect(
+        typeof toolResultMessage?.content === "string"
+          ? toolResultMessage.content
+          : "",
+      ).toContain("## Skill: code-review");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
   });
 
   it("runs task subagents in isolated resumable child sessions with child history", async () => {
@@ -2009,6 +2108,204 @@ describe("createInProcessUiBackendClient", () => {
         "mode.auto-edit",
       ]),
     );
+  });
+
+  it("lists user-invocable project skills as slash commands", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-skill-command-"));
+    try {
+      await mkdir(join(projectRoot, ".ohbaby-agent", "skill", "code-review"), {
+        recursive: true,
+      });
+      await writeFile(
+        join(projectRoot, ".ohbaby-agent", "skill", "code-review", "SKILL.md"),
+        [
+          "---",
+          "name: code-review",
+          "description: Review code with project conventions",
+          "---",
+          "",
+          "# Code Review",
+        ].join("\n"),
+        "utf8",
+      );
+      await mkdir(join(projectRoot, ".ohbaby-agent", "skill", "internal"), {
+        recursive: true,
+      });
+      await writeFile(
+        join(projectRoot, ".ohbaby-agent", "skill", "internal", "SKILL.md"),
+        [
+          "---",
+          "name: internal",
+          "description: Hidden from users",
+          "user-invocable: false",
+          "---",
+          "",
+          "# Internal",
+        ].join("\n"),
+        "utf8",
+      );
+      const client = createInProcessUiBackendClient({
+        llmClient: createFakeLLMClient([]),
+        workdir: projectRoot,
+      });
+
+      const catalog = await client.listCommands({ surface: "tui" });
+
+      expect(catalog.commands).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            acceptsArguments: true,
+            id: "skill.code-review",
+            path: ["code-review"],
+            source: "skill",
+          }),
+        ]),
+      );
+      expect(catalog.commands.map((command) => command.id)).not.toContain(
+        "skill.internal",
+      );
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves skill slash commands from the git project root", async () => {
+    const projectRoot = await mkdtemp(
+      join(tmpdir(), "ohbaby-skill-root-command-"),
+    );
+    const originalCwd = process.cwd();
+    try {
+      await initializeGitRepository(projectRoot);
+      const childDirectory = join(projectRoot, "packages", "app");
+      await mkdir(childDirectory, { recursive: true });
+      const skillDir = join(
+        projectRoot,
+        ".ohbaby-agent",
+        "skill",
+        "root-review",
+      );
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: root-review",
+          "description: Review from project root",
+          "---",
+          "",
+          "# Root Review",
+        ].join("\n"),
+        "utf8",
+      );
+      process.chdir(childDirectory);
+      const client = createInProcessUiBackendClient({
+        llmClient: createFakeLLMClient([]),
+      });
+
+      const catalog = await client.listCommands({ surface: "tui" });
+
+      expect(catalog.commands).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "skill.root-review",
+            path: ["root-review"],
+          }),
+        ]),
+      );
+    } finally {
+      process.chdir(originalCwd);
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("publishes a warning notice when invalid skills are skipped", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-skill-warning-"));
+    try {
+      const skillDir = join(projectRoot, ".ohbaby-agent", "skill", "invalid");
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, "SKILL.md"),
+        ["---", "description: Missing name", "---", "", "# Invalid"].join("\n"),
+        "utf8",
+      );
+      const events: UiEvent[] = [];
+      const client = createInProcessUiBackendClient({
+        llmClient: createFakeLLMClient([]),
+        workdir: projectRoot,
+      });
+      client.subscribeEvents((event) => {
+        events.push(event);
+      });
+
+      await client.listCommands({ surface: "tui" });
+
+      const notices = events.filter(
+        (event): event is Extract<UiEvent, { type: "notice.emitted" }> =>
+          event.type === "notice.emitted",
+      );
+      expect(
+        notices.some(
+          (event) =>
+            event.notice.level === "warning" &&
+            event.notice.title === "Skill warning" &&
+            event.notice.message.includes("Invalid skill skipped"),
+        ),
+      ).toBe(true);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("submits skill command content together with the user request", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-skill-submit-"));
+    try {
+      const skillDir = join(
+        projectRoot,
+        ".ohbaby-agent",
+        "skill",
+        "code-review",
+      );
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: code-review",
+          "description: Review code with project conventions",
+          "---",
+          "",
+          "# Code Review",
+          "",
+          "Check behavior and tests.",
+        ].join("\n"),
+        "utf8",
+      );
+      const requests: ProviderRequest[] = [];
+      const client = createInProcessUiBackendClient({
+        llmClient: createSequentialFakeLLMClient(
+          [[{ textDelta: "Reviewed.", finishReason: "stop" }]],
+          requests,
+        ),
+        workdir: projectRoot,
+      });
+
+      await client.executeCommand({
+        argv: ["check", "src/app.ts"],
+        clientInvocationId: "cmd_skill_1",
+        commandId: "skill.code-review",
+        path: ["code-review"],
+        raw: "/code-review check src/app.ts",
+        rawArgs: "check src/app.ts",
+        surface: "tui",
+      });
+
+      const promptText = JSON.stringify(requests[0]?.messages);
+      expect(promptText).toContain("# Code Review");
+      expect(promptText).toContain("Check behavior and tests.");
+      expect(promptText).toContain("check src/app.ts");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
   });
 
   it("exposes policy state in SDK snapshots", async () => {
