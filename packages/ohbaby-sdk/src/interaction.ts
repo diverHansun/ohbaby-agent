@@ -39,9 +39,5 @@ export type UiInteractionResponse =
     }
   | {
       readonly kind: "cancelled";
-      readonly reason:
-        | "user-cancelled"
-        | "aborted"
-        | "timeout"
-        | (string & {});
+      readonly reason: "user-cancelled" | "aborted" | "timeout" | (string & {});
     };

@@ -42,7 +42,9 @@ export function isProbablyBinary(buffer: Buffer): boolean {
   return buffer.includes(0);
 }
 
-export function createGlobMatcher(pattern: string): (relativePath: string) => boolean {
+export function createGlobMatcher(
+  pattern: string,
+): (relativePath: string) => boolean {
   const normalized = normalizeRelativePath(pattern);
   let source = "^";
   for (let index = 0; index < normalized.length; index += 1) {
@@ -87,7 +89,11 @@ async function ensureWritableDirectory(
   context: ToolExecutionContext,
   inputPath: string,
 ): Promise<void> {
-  if (inputPath === "." || inputPath === "" || inputPath === path.dirname(inputPath)) {
+  if (
+    inputPath === "." ||
+    inputPath === "" ||
+    inputPath === path.dirname(inputPath)
+  ) {
     return;
   }
 
@@ -155,7 +161,9 @@ export async function walkFiles(input: {
       }
       files.push({
         absolutePath,
-        relativePath: normalizeRelativePath(path.relative(input.basePath, absolutePath)),
+        relativePath: normalizeRelativePath(
+          path.relative(input.basePath, absolutePath),
+        ),
       });
       if (files.length >= limit) {
         truncated = true;
@@ -208,7 +216,9 @@ export async function scanFiles(input: {
       visitedFileCount += 1;
       const keepGoing = await input.visit({
         absolutePath,
-        relativePath: normalizeRelativePath(path.relative(input.basePath, absolutePath)),
+        relativePath: normalizeRelativePath(
+          path.relative(input.basePath, absolutePath),
+        ),
       });
       if (keepGoing === false) {
         return false;

@@ -1,5 +1,8 @@
 import { createRequire } from "node:module";
-import type { DatabaseSync as DatabaseSyncType, StatementSync } from "node:sqlite";
+import type {
+  DatabaseSync as DatabaseSyncType,
+  StatementSync,
+} from "node:sqlite";
 import type {
   DatabaseConnection,
   DatabaseStatement,

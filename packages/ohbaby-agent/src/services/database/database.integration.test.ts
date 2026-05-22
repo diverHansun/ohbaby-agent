@@ -28,9 +28,9 @@ async function tempDbPath(): Promise<string> {
 afterEach(async () => {
   closeDatabase();
   await Promise.all(
-    cleanupPaths.splice(0).map((path) =>
-      rm(path, { recursive: true, force: true }),
-    ),
+    cleanupPaths
+      .splice(0)
+      .map((path) => rm(path, { recursive: true, force: true })),
   );
 });
 
@@ -45,17 +45,20 @@ describe("services/database", () => {
     initDatabase({ dbPath });
 
     const db = getDatabase();
-    expect(db.pragma<{ journal_mode: string }>("journal_mode")[0]?.journal_mode)
-      .toBe("wal");
-    expect(db.pragma<{ foreign_keys: number }>("foreign_keys")[0]?.foreign_keys)
-      .toBe(1);
-    expect(db.pragma<{ busy_timeout: number }>("busy_timeout")[0]?.busy_timeout)
-      .toBe(5000);
+    expect(
+      db.pragma<{ journal_mode: string }>("journal_mode")[0]?.journal_mode,
+    ).toBe("wal");
+    expect(
+      db.pragma<{ foreign_keys: number }>("foreign_keys")[0]?.foreign_keys,
+    ).toBe(1);
+    expect(
+      db.pragma<{ busy_timeout: number }>("busy_timeout")[0]?.busy_timeout,
+    ).toBe(5000);
     expect(
       db
-        .prepare<{ name: string }>(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-        )
+        .prepare<{
+          name: string;
+        }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
         .get(schema.session.tableName),
     ).toEqual({ name: "session" });
   });
@@ -67,9 +70,9 @@ describe("services/database", () => {
     initDatabase({ dbPath });
 
     const rows = getDatabase()
-      .prepare<{ version: string }>(
-        `SELECT version FROM ${schema.migration.tableName} ORDER BY version`,
-      )
+      .prepare<{
+        version: string;
+      }>(`SELECT version FROM ${schema.migration.tableName} ORDER BY version`)
       .all();
     expect(rows).toEqual([
       { version: "001_initial" },
@@ -100,9 +103,9 @@ describe("services/database", () => {
     const db = getDatabase();
     expect(
       db
-        .prepare<{ version: string }>(
-          `SELECT version FROM ${schema.migration.tableName}`,
-        )
+        .prepare<{
+          version: string;
+        }>(`SELECT version FROM ${schema.migration.tableName}`)
         .all(),
     ).toEqual([{ version: "001_ok" }]);
     expect(
@@ -161,9 +164,9 @@ describe("services/database", () => {
 
     expect(
       getDatabase()
-        .prepare<{ count: number }>(
-          `SELECT COUNT(*) as count FROM ${schema.session.tableName}`,
-        )
+        .prepare<{
+          count: number;
+        }>(`SELECT COUNT(*) as count FROM ${schema.session.tableName}`)
         .get(),
     ).toEqual({ count: 0 });
   });
@@ -193,9 +196,9 @@ describe("services/database", () => {
 
     expect(
       getDatabase()
-        .prepare<{ count: number }>(
-          `SELECT COUNT(*) as count FROM ${schema.session.tableName}`,
-        )
+        .prepare<{
+          count: number;
+        }>(`SELECT COUNT(*) as count FROM ${schema.session.tableName}`)
         .get(),
     ).toEqual({ count: 1 });
   });
@@ -233,9 +236,9 @@ describe("services/database", () => {
 
     expect(
       getDatabase()
-        .prepare<{ count: number }>(
-          `SELECT COUNT(*) as count FROM ${schema.session.tableName}`,
-        )
+        .prepare<{
+          count: number;
+        }>(`SELECT COUNT(*) as count FROM ${schema.session.tableName}`)
         .get(),
     ).toEqual({ count: 0 });
   });
@@ -273,9 +276,9 @@ describe("services/database", () => {
     await expect(escaped).rejects.toThrow(/transaction is no longer active/);
     expect(
       getDatabase()
-        .prepare<{ count: number }>(
-          `SELECT COUNT(*) as count FROM ${schema.session.tableName}`,
-        )
+        .prepare<{
+          count: number;
+        }>(`SELECT COUNT(*) as count FROM ${schema.session.tableName}`)
         .get(),
     ).toEqual({ count: 0 });
   });
@@ -309,9 +312,9 @@ describe("services/database", () => {
 
     expect(
       getDatabase()
-        .prepare<{ count: number }>(
-          `SELECT COUNT(*) as count FROM ${schema.session.tableName}`,
-        )
+        .prepare<{
+          count: number;
+        }>(`SELECT COUNT(*) as count FROM ${schema.session.tableName}`)
         .get(),
     ).toEqual({ count: 0 });
   });

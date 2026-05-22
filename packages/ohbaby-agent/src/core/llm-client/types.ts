@@ -9,13 +9,11 @@
  * - SRP: Each type has a single, well-defined purpose
  */
 
-import type {
-  ChatCompletionMessageParam,
-} from 'openai/resources/chat/completions/completions';
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions/completions";
 import type {
   ProviderInstance,
   ProviderTokenUsage,
-} from '../../services/providers/index.js';
+} from "../../services/providers/index.js";
 
 /**
  * Re-export OpenAI message type for convenience.
@@ -47,7 +45,11 @@ export type TokenUsage = ProviderTokenUsage;
  * - 'length': Max tokens reached
  * - 'content_filter': Output was filtered by content policy
  */
-export type ChatFinishReason = 'stop' | 'tool_calls' | 'length' | 'content_filter';
+export type ChatFinishReason =
+  | "stop"
+  | "tool_calls"
+  | "length"
+  | "content_filter";
 
 /**
  * Parsed tool call with resolved arguments.
@@ -188,4 +190,3 @@ export interface StreamingResponse {
  * Re-export for convenience when passing tools to streamChatCompletion.
  * Consumers can import from openai or use the types from this module.
  */
-

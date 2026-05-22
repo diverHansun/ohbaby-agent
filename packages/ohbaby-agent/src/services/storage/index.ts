@@ -4,8 +4,4 @@ export {
   NotFoundError,
   StorageWriteError,
 } from "./errors.js";
-export type {
-  Storage,
-  StorageKey,
-  StorageOptions,
-} from "./types.js";
+export type { Storage, StorageKey, StorageOptions } from "./types.js";

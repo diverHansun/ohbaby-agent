@@ -1,9 +1,6 @@
 export { generateAgentPrompt } from "./agent.js";
 export { generateIdentityPrompt } from "./identity.js";
-export {
-  detectEnvironment,
-  generateEnvironmentPrompt,
-} from "./environment.js";
+export { detectEnvironment, generateEnvironmentPrompt } from "./environment.js";
 export {
   CUSTOM_INSTRUCTIONS_FILE_NAME,
   CUSTOM_INSTRUCTIONS_FALLBACK_FILE_NAMES,

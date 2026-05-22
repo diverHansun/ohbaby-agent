@@ -237,7 +237,9 @@ function createFailingMessageTouchConnection(): DatabaseConnection {
     exec(sql: string): void {
       db.exec(sql);
     },
-    prepare<Row = Record<string, unknown>>(sql: string): DatabaseStatement<Row> {
+    prepare<Row = Record<string, unknown>>(
+      sql: string,
+    ): DatabaseStatement<Row> {
       const statement = db.prepare<Row>(sql);
       if (!sql.includes(`UPDATE ${schema.message.tableName}`)) {
         return statement;

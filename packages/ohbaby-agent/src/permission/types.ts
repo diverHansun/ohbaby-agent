@@ -1,8 +1,4 @@
-export type PermissionType =
-  | "tool"
-  | "bash"
-  | "skill"
-  | "external_directory";
+export type PermissionType = "tool" | "bash" | "skill" | "external_directory";
 
 export type PermissionResponse =
   | { readonly type: "once" }

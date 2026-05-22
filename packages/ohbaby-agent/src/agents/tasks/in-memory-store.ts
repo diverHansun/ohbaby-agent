@@ -16,7 +16,10 @@ export class InMemoryAgentTaskStore implements AgentTaskStore {
     return Promise.resolve(this.records.get(taskId) ?? null);
   }
 
-  update(taskId: string, update: AgentTaskStoreUpdate): Promise<AgentTaskRecord> {
+  update(
+    taskId: string,
+    update: AgentTaskStoreUpdate,
+  ): Promise<AgentTaskRecord> {
     const existing = this.records.get(taskId);
     if (!existing) {
       return Promise.reject(new Error(`Agent task not found: ${taskId}`));

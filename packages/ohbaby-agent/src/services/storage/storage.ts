@@ -96,10 +96,7 @@ export function createStorage(options: StorageOptions = {}): Storage {
       return Buffer.from(bytes).toString("utf8");
     },
 
-    async writeText(
-      key: StorageKey,
-      content: string,
-    ): Promise<void> {
+    async writeText(key: StorageKey, content: string): Promise<void> {
       await writeBytesInternal(key, Buffer.from(content, "utf8"));
     },
 
@@ -107,10 +104,7 @@ export function createStorage(options: StorageOptions = {}): Storage {
       return readBytesInternal(key);
     },
 
-    writeBytes(
-      key: StorageKey,
-      content: Uint8Array,
-    ): Promise<void> {
+    writeBytes(key: StorageKey, content: Uint8Array): Promise<void> {
       return writeBytesInternal(key, content);
     },
 
@@ -118,10 +112,7 @@ export function createStorage(options: StorageOptions = {}): Storage {
       return JSON.parse(await this.readText(key)) as T;
     },
 
-    async writeJson(
-      key: StorageKey,
-      value: unknown,
-    ): Promise<void> {
+    async writeJson(key: StorageKey, value: unknown): Promise<void> {
       await this.writeText(key, encodeJson(value));
     },
 

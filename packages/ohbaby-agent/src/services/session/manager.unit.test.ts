@@ -237,8 +237,7 @@ describe("SessionManager", () => {
       createdAt: 1_000,
     });
     expect(updatedEvents.map((event) => event.updatedAt)).toEqual([
-      2_000,
-      3_000,
+      2_000, 3_000,
     ]);
   });
 

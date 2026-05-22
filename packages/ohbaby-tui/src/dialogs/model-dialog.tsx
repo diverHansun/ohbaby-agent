@@ -15,10 +15,6 @@ export function ModelDialog({
   interaction,
 }: ModelDialogProps): ReactElement {
   return (
-    <SelectOneDialog
-      client={client}
-      interaction={interaction}
-      title="Model"
-    />
+    <SelectOneDialog client={client} interaction={interaction} title="Model" />
   );
 }

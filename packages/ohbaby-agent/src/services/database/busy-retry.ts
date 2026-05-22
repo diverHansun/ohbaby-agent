@@ -14,7 +14,10 @@ function sleepBlocking(delayMs: number): void {
 }
 
 function isSqliteBusy(error: unknown): boolean {
-  const maybeError = error as { readonly code?: unknown; readonly message?: unknown };
+  const maybeError = error as {
+    readonly code?: unknown;
+    readonly message?: unknown;
+  };
   return (
     maybeError.code === "SQLITE_BUSY" ||
     (typeof maybeError.message === "string" &&

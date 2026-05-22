@@ -38,7 +38,8 @@ describe("createStdoutRenderer", () => {
           id: "notice_1",
           key: "prompt-security:/repo/OHBABY.md",
           level: "warning",
-          message: "OHBABY.md was skipped because it tried to override instructions.",
+          message:
+            "OHBABY.md was skipped because it tried to override instructions.",
           source: "/repo/OHBABY.md",
           title: "Custom instructions skipped",
         },
@@ -57,4 +58,3 @@ describe("createStdoutRenderer", () => {
     ]);
   });
 });
-

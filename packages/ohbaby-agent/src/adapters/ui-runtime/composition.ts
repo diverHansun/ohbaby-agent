@@ -336,7 +336,10 @@ export async function createUiRuntimeComposition(
     sessionManager,
   });
 
-  for (const tool of createBuiltinTools({ agentTaskController, taskExecutor })) {
+  for (const tool of createBuiltinTools({
+    agentTaskController,
+    taskExecutor,
+  })) {
     toolScheduler.register(tool);
   }
 

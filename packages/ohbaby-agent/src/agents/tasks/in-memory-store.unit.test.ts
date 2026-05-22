@@ -39,8 +39,8 @@ describe("InMemoryAgentTaskStore", () => {
   it("rejects updates for unknown tasks", async () => {
     const store = new InMemoryAgentTaskStore();
 
-    await expect(
-      store.update("missing", { status: "failed" }),
-    ).rejects.toThrow("Agent task not found: missing");
+    await expect(store.update("missing", { status: "failed" })).rejects.toThrow(
+      "Agent task not found: missing",
+    );
   });
 });

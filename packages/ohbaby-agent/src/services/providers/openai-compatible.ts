@@ -1,8 +1,8 @@
-import OpenAI, { APIUserAbortError } from 'openai';
+import OpenAI, { APIUserAbortError } from "openai";
 import type {
   ChatCompletionChunk,
   ChatCompletionCreateParamsStreaming,
-} from 'openai/resources/chat/completions/completions';
+} from "openai/resources/chat/completions/completions";
 import type {
   CreateProviderOptions,
   ProviderFinishReason,
@@ -10,21 +10,21 @@ import type {
   ProviderRequest,
   ProviderStreamEvent,
   ProviderTokenUsage,
-} from './types.js';
+} from "./types.js";
 
 function mapFinishReason(
-  finishReason: ChatCompletionChunk.Choice['finish_reason'] | null | undefined
+  finishReason: ChatCompletionChunk.Choice["finish_reason"] | null | undefined,
 ): ProviderFinishReason | undefined {
   switch (finishReason) {
     case null:
     case undefined:
       return undefined;
-    case 'function_call':
-      return 'tool_calls';
-    case 'stop':
-    case 'tool_calls':
-    case 'length':
-    case 'content_filter':
+    case "function_call":
+      return "tool_calls";
+    case "stop":
+    case "tool_calls":
+    case "length":
+    case "content_filter":
       return finishReason;
     default:
       return undefined;
@@ -32,7 +32,7 @@ function mapFinishReason(
 }
 
 function normalizeTokenUsage(
-  usage: ChatCompletionChunk['usage'] | undefined | null
+  usage: ChatCompletionChunk["usage"] | undefined | null,
 ): ProviderTokenUsage | undefined {
   if (!usage) {
     return undefined;
@@ -45,7 +45,9 @@ function normalizeTokenUsage(
   };
 }
 
-function buildRequestParams(request: ProviderRequest): ChatCompletionCreateParamsStreaming {
+function buildRequestParams(
+  request: ProviderRequest,
+): ChatCompletionCreateParamsStreaming {
   const params: ChatCompletionCreateParamsStreaming = {
     model: request.model,
     messages: request.messages,
@@ -62,7 +64,9 @@ function buildRequestParams(request: ProviderRequest): ChatCompletionCreateParam
   return params;
 }
 
-function buildStreamEvent(chunk: ChatCompletionChunk): ProviderStreamEvent | null {
+function buildStreamEvent(
+  chunk: ChatCompletionChunk,
+): ProviderStreamEvent | null {
   if (chunk.choices.length === 0) {
     const tokenUsage = normalizeTokenUsage(chunk.usage);
     return tokenUsage ? { tokenUsage } : null;
@@ -110,7 +114,7 @@ function isUsageOnlyEvent(event: ProviderStreamEvent): boolean {
 }
 
 export function createOpenAICompatibleProvider(
-  options: CreateProviderOptions
+  options: CreateProviderOptions,
 ): ProviderInstance<OpenAI> {
   const client = new OpenAI({
     apiKey: options.apiKey,
@@ -119,14 +123,23 @@ export function createOpenAICompatibleProvider(
 
   return {
     id: options.provider,
-    kind: 'openai-compatible',
+    kind: "openai-compatible",
     client,
-    async streamChatCompletion(request: ProviderRequest): Promise<AsyncIterable<ProviderStreamEvent>> {
-      const stream = await client.chat.completions.create(buildRequestParams(request), {
-        signal: request.signal,
-      });
+    async streamChatCompletion(
+      request: ProviderRequest,
+    ): Promise<AsyncIterable<ProviderStreamEvent>> {
+      const stream = await client.chat.completions.create(
+        buildRequestParams(request),
+        {
+          signal: request.signal,
+        },
+      );
 
-      return (async function* (): AsyncGenerator<ProviderStreamEvent, void, unknown> {
+      return (async function* (): AsyncGenerator<
+        ProviderStreamEvent,
+        void,
+        unknown
+      > {
         let pendingTerminalEvent: ProviderStreamEvent | null = null;
 
         for await (const chunk of stream) {

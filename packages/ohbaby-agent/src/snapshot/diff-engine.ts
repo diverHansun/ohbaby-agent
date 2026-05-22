@@ -1,10 +1,4 @@
-import {
-  mkdir,
-  readFile,
-  readdir,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import {
   InvalidSnapshotArtifactError,
@@ -41,11 +35,7 @@ function toRelativePath(root: string, path: string): string {
 function resolveRelativePath(root: string, relativePath: string): string {
   const target = resolve(root, ...relativePath.split("/"));
   const relation = relative(root, target);
-  if (
-    relation === "" ||
-    relation === ".." ||
-    relation.startsWith(`..${sep}`)
-  ) {
+  if (relation === "" || relation === ".." || relation.startsWith(`..${sep}`)) {
     throw new InvalidSnapshotArtifactError(
       `file path escapes workdir: ${relativePath}`,
     );
@@ -144,7 +134,9 @@ function parseFilePatch(input: unknown): SnapshotFilePatch {
     value.afterContentBase64 !== undefined &&
     typeof value.afterContentBase64 !== "string"
   ) {
-    throw new InvalidSnapshotArtifactError("afterContentBase64 must be a string");
+    throw new InvalidSnapshotArtifactError(
+      "afterContentBase64 must be a string",
+    );
   }
   return {
     path: value.path,

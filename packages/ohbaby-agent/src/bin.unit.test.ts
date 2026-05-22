@@ -20,9 +20,9 @@ describe("runOhbabyCli", () => {
 
     const { runOhbabyCli } = await import("./bin.js");
 
-    await expect(
-      runOhbabyCli(["node", "ohbaby", "-p", "hello"]),
-    ).resolves.toBe(0);
+    await expect(runOhbabyCli(["node", "ohbaby", "-p", "hello"])).resolves.toBe(
+      0,
+    );
     expect(createPersistentUiBackendClient).toHaveBeenCalledTimes(1);
     expect(submitPrompt).toHaveBeenCalledWith("hello");
   });

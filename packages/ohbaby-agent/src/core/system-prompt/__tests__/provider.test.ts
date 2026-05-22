@@ -13,9 +13,7 @@ describe("createSystemPromptProvider", () => {
   it("adapts system-prompt assembly to ContextManager primary provider input", async () => {
     const provider = createSystemPromptProvider({
       environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
-      customInstructionLoader: vi
-        .fn()
-        .mockResolvedValue(["Project-only rule"]),
+      customInstructionLoader: vi.fn().mockResolvedValue(["Project-only rule"]),
       toolsProvider: vi.fn().mockResolvedValue(["read", "bash"]),
     });
 

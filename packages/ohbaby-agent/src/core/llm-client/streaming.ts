@@ -11,18 +11,21 @@
  * - KISS: Simple interface, transparent behavior
  */
 
-import type { ChatCompletionCreateParams, ChatCompletionMessageParam } from 'openai/resources';
+import type {
+  ChatCompletionCreateParams,
+  ChatCompletionMessageParam,
+} from "openai/resources";
 import type {
   LLMClientInstance,
   StreamingResponse,
   ParsedToolCall,
   ChatFinishReason,
   TokenUsage,
-} from './types.js';
+} from "./types.js";
 
 interface AccumulatedToolCall {
   id: string;
-  type: 'function';
+  type: "function";
   function: {
     name: string;
     arguments: string;
@@ -31,7 +34,7 @@ interface AccumulatedToolCall {
 
 function buildCompleteMessage(
   accumulatedContent: string,
-  accumulatedToolCalls: Map<number, AccumulatedToolCall>
+  accumulatedToolCalls: Map<number, AccumulatedToolCall>,
 ): ChatCompletionMessageParam {
   if (accumulatedToolCalls.size > 0) {
     const toolCalls = Array.from(accumulatedToolCalls.entries())
@@ -39,20 +42,21 @@ function buildCompleteMessage(
       .map(([, call]) => call);
 
     return {
-      role: 'assistant',
-      content: accumulatedContent === '' ? null : accumulatedContent,
+      role: "assistant",
+      content: accumulatedContent === "" ? null : accumulatedContent,
       tool_calls: toolCalls,
     };
   }
 
   return {
-    role: 'assistant',
-    content: accumulatedContent === '' ? '(Empty response)' : accumulatedContent,
+    role: "assistant",
+    content:
+      accumulatedContent === "" ? "(Empty response)" : accumulatedContent,
   };
 }
 
 function parseToolCalls(
-  accumulatedToolCalls: Map<number, AccumulatedToolCall>
+  accumulatedToolCalls: Map<number, AccumulatedToolCall>,
 ): ParsedToolCall[] {
   return Array.from(accumulatedToolCalls.values()).map((call) => ({
     id: call.id,
@@ -125,14 +129,14 @@ export async function* streamChatCompletion(
   messages: ChatCompletionMessageParam[],
   options?: {
     signal?: AbortSignal;
-    tools?: ChatCompletionCreateParams['tools'];
-  }
+    tools?: ChatCompletionCreateParams["tools"];
+  },
 ): AsyncGenerator<StreamingResponse, void, unknown> {
   const { provider, config } = llmClient;
   const { signal, tools } = options ?? {};
 
   // Accumulation state - maintained across iterations
-  let accumulatedContent = '';
+  let accumulatedContent = "";
   const accumulatedToolCalls = new Map<number, AccumulatedToolCall>();
   let finishReason: ChatFinishReason | null = null;
   let rawFinishReason: string | undefined;
@@ -178,11 +182,11 @@ export async function* streamChatCompletion(
           // Create new tool call entry if first fragment
           if (!accumulatedToolCalls.has(index)) {
             accumulatedToolCalls.set(index, {
-              id: toolCall.id ?? '',
-              type: 'function',
+              id: toolCall.id ?? "",
+              type: "function",
               function: {
-                name: toolCall.name ?? '',
-                arguments: '',
+                name: toolCall.name ?? "",
+                arguments: "",
               },
             });
           }
@@ -206,7 +210,10 @@ export async function* streamChatCompletion(
       }
 
       // Build complete message from accumulated state
-      const completeMessage = buildCompleteMessage(accumulatedContent, accumulatedToolCalls);
+      const completeMessage = buildCompleteMessage(
+        accumulatedContent,
+        accumulatedToolCalls,
+      );
 
       // Parse tool calls only when stream is complete
       let parsedToolCalls: ParsedToolCall[] | undefined;
@@ -231,13 +238,16 @@ export async function* streamChatCompletion(
       const completeMessage: ChatCompletionMessageParam =
         accumulatedToolCalls.size > 0
           ? {
-              role: 'assistant',
-              content: accumulatedContent === '' ? null : accumulatedContent,
+              role: "assistant",
+              content: accumulatedContent === "" ? null : accumulatedContent,
               tool_calls: Array.from(accumulatedToolCalls.values()),
             }
           : {
-              role: 'assistant',
-              content: accumulatedContent === '' ? '(Interrupted)' : accumulatedContent,
+              role: "assistant",
+              content:
+                accumulatedContent === ""
+                  ? "(Interrupted)"
+                  : accumulatedContent,
             };
 
       // Return partial results instead of throwing
@@ -245,7 +255,7 @@ export async function* streamChatCompletion(
       yield {
         completeMessage,
         isComplete: true,
-        finishReason: 'length', // Use 'length' as marker for interruption
+        finishReason: "length", // Use 'length' as marker for interruption
         rawFinishReason,
         tokenUsage: tokenUsage ?? undefined,
       };

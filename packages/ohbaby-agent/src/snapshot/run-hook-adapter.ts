@@ -2,7 +2,10 @@ import type {
   HookExecutor,
   RunHookContext,
 } from "../runtime/run-manager/index.js";
-import { createSnapshotRunWorkerHook, type SnapshotService } from "./service.js";
+import {
+  createSnapshotRunWorkerHook,
+  type SnapshotService,
+} from "./service.js";
 import type {
   MessageCursor,
   SnapshotRunWorkerHookContext,
@@ -49,7 +52,9 @@ export function createSnapshotHookExecutor(
   });
   const states = new Map<string, SnapshotRunWorkerHookState>();
 
-  async function workdirFor(context: RunHookContext): Promise<string | undefined> {
+  async function workdirFor(
+    context: RunHookContext,
+  ): Promise<string | undefined> {
     return options.resolveWorkdir?.(context) ?? context.sandboxLease?.workdir;
   }
 

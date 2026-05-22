@@ -1,4 +1,7 @@
-import type { Tool, ToolExecutionResult } from "../core/tool-scheduler/index.js";
+import type {
+  Tool,
+  ToolExecutionResult,
+} from "../core/tool-scheduler/index.js";
 import { getStringParam } from "./utils/params.js";
 import { renderUnifiedDiff, truncateOutput } from "./utils/output.js";
 import {
@@ -38,9 +41,12 @@ export function createWriteTool(): Tool {
       const content = getStringParam(params, "content", { allowEmpty: true });
       const dryRun = getDryRunParam(params);
       const expectedMtimeMs = getExpectedMtimeMs(params);
-      const existingPath = await resolveExistingFileIfPresent(context, inputPath);
+      const existingPath = await resolveExistingFileIfPresent(
+        context,
+        inputPath,
+      );
       const resolvedPath = dryRun
-        ? existingPath ?? resolvePreviewPath(context, inputPath)
+        ? (existingPath ?? resolvePreviewPath(context, inputPath))
         : await resolveWritableFile(context, inputPath);
       const existed = existingPath !== undefined;
       const existing = existed

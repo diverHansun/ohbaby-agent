@@ -60,15 +60,15 @@ export interface LLMConfig {
  * Error codes for configuration-related errors.
  */
 export type ConfigErrorCode =
-  | 'FILE_NOT_FOUND'
-  | 'INVALID_JSON'
-  | 'MISSING_FIELD'
-  | 'INVALID_FIELD'
-  | 'INVALID_TEMPERATURE'
-  | 'INVALID_MAX_TOKENS'
-  | 'MISSING_API_KEY'
-  | 'EMPTY_API_KEY'
-  | 'LOAD_FAILED';
+  | "FILE_NOT_FOUND"
+  | "INVALID_JSON"
+  | "MISSING_FIELD"
+  | "INVALID_FIELD"
+  | "INVALID_TEMPERATURE"
+  | "INVALID_MAX_TOKENS"
+  | "MISSING_API_KEY"
+  | "EMPTY_API_KEY"
+  | "LOAD_FAILED";
 
 /**
  * Configuration error with structured error information.
@@ -80,10 +80,10 @@ export class ConfigError extends Error {
   constructor(
     message: string,
     code: ConfigErrorCode,
-    context?: Record<string, unknown>
+    context?: Record<string, unknown>,
   ) {
     super(message);
-    this.name = 'ConfigError';
+    this.name = "ConfigError";
     this.code = code;
     this.context = context;
 

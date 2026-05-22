@@ -74,4 +74,3 @@ export const CommandsEvent = {
       .strict(),
   ),
 } as const;
-

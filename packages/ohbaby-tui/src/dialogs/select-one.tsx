@@ -55,38 +55,46 @@ export function SelectOneDialog({
 
     if (key.downArrow || key.rightArrow || key.tab) {
       selectIndex(
-        options.length === 0 ? 0 : (selectedIndexRef.current + 1) % options.length,
+        options.length === 0
+          ? 0
+          : (selectedIndexRef.current + 1) % options.length,
       );
       return;
     }
 
     if (key.escape) {
       setPending(true);
-      void client.respondInteraction(interaction.interactionId, {
-        kind: "cancelled",
-        reason: "user-cancelled",
-      }).catch((caught: unknown) => {
-        setError(formatError(caught));
-        setPending(false);
-      });
+      void client
+        .respondInteraction(interaction.interactionId, {
+          kind: "cancelled",
+          reason: "user-cancelled",
+        })
+        .catch((caught: unknown) => {
+          setError(formatError(caught));
+          setPending(false);
+        });
       return;
     }
 
     if (key.return && options.length > 0) {
-      void client.respondInteraction(interaction.interactionId, {
-        choiceId: options[selectedIndexRef.current % options.length].id,
-        kind: "accepted",
-      }).catch((caught: unknown) => {
-        setError(formatError(caught));
-        setPending(false);
-      });
+      void client
+        .respondInteraction(interaction.interactionId, {
+          choiceId: options[selectedIndexRef.current % options.length].id,
+          kind: "accepted",
+        })
+        .catch((caught: unknown) => {
+          setError(formatError(caught));
+          setPending(false);
+        });
       setPending(true);
     }
   });
 
   return (
     <Box flexDirection="column">
-      <Text color="yellow">{title}: {interaction.title ?? "Select one"}</Text>
+      <Text color="yellow">
+        {title}: {interaction.title ?? "Select one"}
+      </Text>
       {options.map((option, index) => (
         <Text key={option.id}>
           {index === selectedIndex ? ">" : " "} {String(index + 1)}.{" "}

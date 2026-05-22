@@ -40,7 +40,13 @@ describe("config/agents loaders", () => {
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-agents-"));
-    globalPath = path.join(tempDir, "home", ".ohbaby-agent", "agents", "settings.json");
+    globalPath = path.join(
+      tempDir,
+      "home",
+      ".ohbaby-agent",
+      "agents",
+      "settings.json",
+    );
     projectPath = path.join(
       tempDir,
       "repo",
@@ -67,9 +73,9 @@ describe("config/agents loaders", () => {
     await expect(loadAgentsConfigFromPath(globalPath)).resolves.toEqual({
       agents: {},
     });
-    await expect(
-      loadAgentConfig({ globalPath, projectPath }),
-    ).resolves.toEqual({ agents: {} });
+    await expect(loadAgentConfig({ globalPath, projectPath })).resolves.toEqual(
+      { agents: {} },
+    );
   });
 
   it("loads only global config when project config is missing", async () => {
@@ -152,7 +158,9 @@ describe("config/agents loaders", () => {
     await expect(loadAgentConfig({ globalPath, projectPath })).rejects.toThrow(
       AgentConfigParseError,
     );
-    await expect(loadAgentConfig({ globalPath, projectPath })).rejects.toMatchObject({
+    await expect(
+      loadAgentConfig({ globalPath, projectPath }),
+    ).rejects.toMatchObject({
       path: globalPath,
     });
   });
@@ -170,7 +178,9 @@ describe("config/agents loaders", () => {
     await expect(loadAgentConfig({ globalPath, projectPath })).rejects.toThrow(
       AgentConfigValidationError,
     );
-    await expect(loadAgentConfig({ globalPath, projectPath })).rejects.toMatchObject({
+    await expect(
+      loadAgentConfig({ globalPath, projectPath }),
+    ).rejects.toMatchObject({
       path: projectPath,
     });
   });

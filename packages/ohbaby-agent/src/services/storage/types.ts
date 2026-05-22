@@ -16,5 +16,8 @@ export interface Storage {
 export interface StorageOptions {
   readonly rootDir?: string;
   readonly caseInsensitivePaths?: boolean;
-  readonly writeFile?: (path: string, data: string | Uint8Array) => Promise<void>;
+  readonly writeFile?: (
+    path: string,
+    data: string | Uint8Array,
+  ) => Promise<void>;
 }

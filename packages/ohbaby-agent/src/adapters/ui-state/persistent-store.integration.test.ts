@@ -199,9 +199,9 @@ describe("createPersistentUiStateStore", () => {
     );
     expect(
       getDatabase()
-        .prepare<{ name: string }>(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-        )
+        .prepare<{
+          name: string;
+        }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
         .get(schema.appState.tableName),
     ).toEqual({ name: schema.appState.tableName });
   });

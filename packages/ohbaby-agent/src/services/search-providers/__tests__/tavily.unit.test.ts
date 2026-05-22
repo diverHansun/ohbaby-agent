@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  createTavilyProvider,
-  InvalidProviderConfigError,
-} from "../index.js";
+import { createTavilyProvider, InvalidProviderConfigError } from "../index.js";
 
 const mocks = vi.hoisted(() => {
   const client = {

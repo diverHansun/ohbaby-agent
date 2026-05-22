@@ -52,10 +52,18 @@ describe("todo builtin tools", () => {
       ],
     });
     const sameSession = await runTool("todo_read", {});
-    const otherSession = await runTool("todo_read", {}, createContext("session_2"));
+    const otherSession = await runTool(
+      "todo_read",
+      {},
+      createContext("session_2"),
+    );
 
-    expect(write.output).toContain("[in_progress] (high) todo_1: Wire file tools");
-    expect(sameSession.output).toContain("[pending] (medium) todo_2: Review bash tool");
+    expect(write.output).toContain(
+      "[in_progress] (high) todo_1: Wire file tools",
+    );
+    expect(sameSession.output).toContain(
+      "[pending] (medium) todo_2: Review bash tool",
+    );
     expect(sameSession.metadata).toMatchObject({ count: 2 });
     expect(otherSession.output).toBe("No todos.");
     expect(otherSession.metadata).toMatchObject({ count: 0 });

@@ -36,7 +36,10 @@ export function renderReplacementDiff(input: {
 }
 
 function splitDiffLines(content: string): string[] {
-  const lines = content.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n").split("\n");
+  const lines = content
+    .replace(/\r\n/gu, "\n")
+    .replace(/\r/gu, "\n")
+    .split("\n");
   if (lines.at(-1) === "") {
     lines.pop();
   }

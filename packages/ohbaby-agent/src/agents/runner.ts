@@ -20,10 +20,10 @@ export interface SubagentSandboxEnvironmentManager {
 }
 
 export type SubagentPromptMessageBuilder = (input: {
-    readonly agentName: string;
-    readonly projectRoot: string;
-    readonly sessionId: string;
-  }) => Promise<ChatCompletionMessage[]>;
+  readonly agentName: string;
+  readonly projectRoot: string;
+  readonly sessionId: string;
+}) => Promise<ChatCompletionMessage[]>;
 
 export interface CreateSubagentRunnerOptions {
   readonly buildSubagentPromptMessages: SubagentPromptMessageBuilder;
@@ -153,7 +153,10 @@ export function createSubagentRunner(
           unbindAbort();
         }
       } finally {
-        options.sandboxManager.setSessionEnvironment(input.sessionId, undefined);
+        options.sandboxManager.setSessionEnvironment(
+          input.sessionId,
+          undefined,
+        );
       }
     },
   };

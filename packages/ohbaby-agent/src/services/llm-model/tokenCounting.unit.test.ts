@@ -38,9 +38,9 @@ describe("tokenCounting", () => {
 
   describe("estimateTokensForMessage", () => {
     it("adds role overhead for user, assistant, and system messages", () => {
-      expect(
-        estimateTokensForMessage({ role: "user", content: "test" }),
-      ).toBe(estimateTokensForText("test") + 3);
+      expect(estimateTokensForMessage({ role: "user", content: "test" })).toBe(
+        estimateTokensForText("test") + 3,
+      );
       expect(
         estimateTokensForMessage({ role: "assistant", content: "response" }),
       ).toBe(estimateTokensForText("response") + 3);
@@ -57,7 +57,7 @@ describe("tokenCounting", () => {
       };
       const toolCalls = [
         {
-          function: { arguments: "{\"path\":\"README.md\"}", name: "read" },
+          function: { arguments: '{"path":"README.md"}', name: "read" },
           id: "call_123",
           type: "function",
         },
@@ -98,9 +98,9 @@ describe("tokenCounting", () => {
       expect(() =>
         estimateTokensForMessages("not array" as unknown as []),
       ).toThrow(TypeError);
-      expect(() =>
-        estimateTokensForMessages(null as unknown as []),
-      ).toThrow(TypeError);
+      expect(() => estimateTokensForMessages(null as unknown as [])).toThrow(
+        TypeError,
+      );
     });
   });
 
@@ -133,9 +133,7 @@ describe("tokenCounting", () => {
       expect(context.messagesTokens).toBe(messagesTokens);
       expect(context.estimatedResponseTokens).toBe(128);
       expect(context.totalUsedTokens).toBe(messagesTokens + 128);
-      expect(context.remainingTokens).toBe(
-        4_096 - context.totalUsedTokens,
-      );
+      expect(context.remainingTokens).toBe(4_096 - context.totalUsedTokens);
       expect(context.usage.percentUsed).toBeCloseTo(
         (context.totalUsedTokens / 4_096) * 100,
         6,

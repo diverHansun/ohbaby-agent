@@ -4,4 +4,3 @@ export const EXIT_CODES = {
   failure: 1,
   interrupted: 130,
 } as const;
-

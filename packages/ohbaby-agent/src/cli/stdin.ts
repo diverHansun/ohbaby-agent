@@ -13,4 +13,3 @@ export function readStdin(stream: Readable = process.stdin): Promise<string> {
     });
   });
 }
-

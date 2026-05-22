@@ -50,7 +50,10 @@ function assertTodoStatus(value: unknown): asserts value is TodoStatus {
 }
 
 function assertTodoPriority(value: unknown): asserts value is TodoPriority {
-  if (typeof value !== "string" || !TODO_PRIORITIES.has(value as TodoPriority)) {
+  if (
+    typeof value !== "string" ||
+    !TODO_PRIORITIES.has(value as TodoPriority)
+  ) {
     throw new ToolParameterError(`Invalid todo priority: ${String(value)}`);
   }
 }
@@ -63,12 +66,16 @@ function parseTodos(params: Record<string, unknown>): readonly TodoItem[] {
 
   return value.map((item, index): TodoItem => {
     if (typeof item !== "object" || item === null) {
-      throw new ToolParameterError(`Expected todo at index ${String(index)} to be an object.`);
+      throw new ToolParameterError(
+        `Expected todo at index ${String(index)} to be an object.`,
+      );
     }
     const record = item as Record<string, unknown>;
     const { content, id, priority, status } = record;
     if (typeof id !== "string" || id.trim() === "") {
-      throw new ToolParameterError(`Expected todo at index ${String(index)} to have an id.`);
+      throw new ToolParameterError(
+        `Expected todo at index ${String(index)} to have an id.`,
+      );
     }
     if (typeof content !== "string" || content.trim() === "") {
       throw new ToolParameterError(
@@ -162,6 +169,8 @@ function createTodoWriteTool(store: TodoStore): Tool {
   };
 }
 
-export function createTodoTools(store: TodoStore = new InMemoryTodoStore()): Tool[] {
+export function createTodoTools(
+  store: TodoStore = new InMemoryTodoStore(),
+): Tool[] {
   return [createTodoReadTool(store), createTodoWriteTool(store)];
 }

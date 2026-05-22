@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ToolExecutionContext } from "../../core/tool-scheduler/index.js";
-import { resolvePath, resolvePathForExisting, resolvePathForWrite } from "./context.js";
+import {
+  resolvePath,
+  resolvePathForExisting,
+  resolvePathForWrite,
+} from "./context.js";
 import { ensureWritableParent } from "./files.js";
 import { ToolParameterError } from "./params.js";
 
@@ -40,7 +44,9 @@ export class BinaryTextFileError extends Error {
 
 export class TextFileTooLargeError extends Error {
   constructor(inputPath: string, sizeBytes: number) {
-    super(`File is too large to read: ${inputPath} (${String(sizeBytes)} bytes).`);
+    super(
+      `File is too large to read: ${inputPath} (${String(sizeBytes)} bytes).`,
+    );
     this.name = "TextFileTooLargeError";
   }
 }
@@ -109,10 +115,18 @@ function normalizeMtimeMs(mtimeMs: number): number {
 }
 
 function hasUtf8Bom(buffer: Buffer): boolean {
-  return buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf;
+  return (
+    buffer.length >= 3 &&
+    buffer[0] === 0xef &&
+    buffer[1] === 0xbb &&
+    buffer[2] === 0xbf
+  );
 }
 
-function stripUtf8Bom(buffer: Buffer): { readonly bom: boolean; readonly textBuffer: Buffer } {
+function stripUtf8Bom(buffer: Buffer): {
+  readonly bom: boolean;
+  readonly textBuffer: Buffer;
+} {
   if (!hasUtf8Bom(buffer)) {
     return { bom: false, textBuffer: buffer };
   }
@@ -120,7 +134,9 @@ function stripUtf8Bom(buffer: Buffer): { readonly bom: boolean; readonly textBuf
   return { bom: true, textBuffer: buffer.subarray(3) };
 }
 
-function readExpectedMtimeMs(params: Record<string, unknown>): number | undefined {
+function readExpectedMtimeMs(
+  params: Record<string, unknown>,
+): number | undefined {
   const value = params.expected_mtime_ms;
   if (value === undefined) {
     return undefined;
@@ -165,7 +181,10 @@ export function detectLineEnding(text: string): LineEnding {
   return crlfCount > 0 ? "CRLF" : "LF";
 }
 
-export function convertToLineEnding(text: string, lineEnding: LineEnding): string {
+export function convertToLineEnding(
+  text: string,
+  lineEnding: LineEnding,
+): string {
   const normalized = text.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n");
   if (lineEnding === "CRLF") {
     return normalized.replace(/\n/gu, "\r\n");
@@ -183,7 +202,10 @@ export function withUtf8Bom(text: string, bom: boolean): string {
   return `\uFEFF${withoutBom}`;
 }
 
-export function isProbablyBinaryTextFile(filePath: string, sample: Buffer): boolean {
+export function isProbablyBinaryTextFile(
+  filePath: string,
+  sample: Buffer,
+): boolean {
   if (BINARY_EXTENSIONS.has(path.extname(filePath).toLowerCase())) {
     return true;
   }
@@ -191,14 +213,18 @@ export function isProbablyBinaryTextFile(filePath: string, sample: Buffer): bool
   return detectBinarySample(sample);
 }
 
-export function getExpectedMtimeMs(params: Record<string, unknown>): number | undefined {
+export function getExpectedMtimeMs(
+  params: Record<string, unknown>,
+): number | undefined {
   return readExpectedMtimeMs(params);
 }
 
 export function getDryRunParam(params: Record<string, unknown>): boolean {
   const value = params.dry_run ?? false;
   if (typeof value !== "boolean") {
-    throw new ToolParameterError('Expected parameter "dry_run" to be a boolean.');
+    throw new ToolParameterError(
+      'Expected parameter "dry_run" to be a boolean.',
+    );
   }
 
   return value;

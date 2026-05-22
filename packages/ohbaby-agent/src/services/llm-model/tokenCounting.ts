@@ -69,9 +69,7 @@ export function estimateTokensForText(text: string): number {
   return Math.ceil(weightedTokens);
 }
 
-export function estimateTokensForMessage(
-  message: TokenCountMessage,
-): number {
+export function estimateTokensForMessage(message: TokenCountMessage): number {
   switch (message.role) {
     case "system":
       return estimateTokensForText(message.content) + 100;
@@ -202,7 +200,9 @@ function estimateOptionalContentTokens(content: string | null): number {
   return estimateTokensForText(content);
 }
 
-function estimateToolCallsTokens(toolCalls: readonly unknown[] | undefined): number {
+function estimateToolCallsTokens(
+  toolCalls: readonly unknown[] | undefined,
+): number {
   if (toolCalls === undefined) {
     return 0;
   }

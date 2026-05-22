@@ -12,9 +12,9 @@
  */
 
 // Export core functions
-export { createLLMClient } from './client.js';
-export type { CreateLLMClientOptions } from './client.js';
-export { streamChatCompletion } from './streaming.js';
+export { createLLMClient } from "./client.js";
+export type { CreateLLMClientOptions } from "./client.js";
+export { streamChatCompletion } from "./streaming.js";
 
 // Export type definitions for consumers
 export type {
@@ -28,8 +28,8 @@ export type {
   ParsedToolCall,
   // Metadata types
   ChatFinishReason,
-} from './types.js';
+} from "./types.js";
 
 // Re-export error class for convenience
 // Allows consumers to: import { APIUserAbortError } from '@/core/llm-client'
-export { APIUserAbortError } from 'openai';
+export { APIUserAbortError } from "openai";

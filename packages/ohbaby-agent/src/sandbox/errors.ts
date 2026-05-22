@@ -21,11 +21,7 @@ export class SandboxContextAlreadyExistsError extends IrisError {
 }
 
 export class SandboxBoundaryError extends IrisError {
-  constructor(
-    inputPath: string,
-    workdir: string,
-    resolvedPath: string,
-  ) {
+  constructor(inputPath: string, workdir: string, resolvedPath: string) {
     super(
       "SANDBOX_BOUNDARY_ERROR",
       `Path escapes sandbox boundary: ${inputPath}`,

@@ -44,7 +44,11 @@ function createTestContext(root: string): TestContext {
   };
 }
 
-async function writeFile(root: string, relativePath: string, content: string): Promise<void> {
+async function writeFile(
+  root: string,
+  relativePath: string,
+  content: string,
+): Promise<void> {
   const target = path.join(root, relativePath);
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(target, content, "utf8");
@@ -81,9 +85,17 @@ describe("glob file tool", () => {
 
   it("continues scanning until it reaches matching results", async () => {
     for (let index = 0; index < 10; index += 1) {
-      await writeFile(tempRoot, `src/${String(index).padStart(2, "0")}.js`, "noop\n");
+      await writeFile(
+        tempRoot,
+        `src/${String(index).padStart(2, "0")}.js`,
+        "noop\n",
+      );
     }
-    await writeFile(tempRoot, "src/z-target.ts", "export const target = true;\n");
+    await writeFile(
+      tempRoot,
+      "src/z-target.ts",
+      "export const target = true;\n",
+    );
     const context = createTestContext(tempRoot);
 
     const result = await createGlobTool().execute(

@@ -1,4 +1,8 @@
-import type { UiCommandCatalog, UiCommandInvocation, UiCommandSurface } from "./command/types.js";
+import type {
+  UiCommandCatalog,
+  UiCommandInvocation,
+  UiCommandSurface,
+} from "./command/types.js";
 import type { UiEvent } from "./events.js";
 import type { UiInteractionResponse } from "./interaction.js";
 import type { UiPermissionResponse, UiSnapshot } from "./snapshot.js";
@@ -30,4 +34,3 @@ export interface UiBackendClient {
   ): Promise<void>;
   abortRun(runId?: string): Promise<void>;
 }
-

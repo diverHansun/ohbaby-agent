@@ -3,10 +3,10 @@
  * Coordinates loading, validation, caching, and hot-reload.
  */
 
-import type { LLMConfig } from './types.js';
-import { ConfigError } from './types.js';
-import { loadModelJson, loadApiKey, loadProjectEnv } from './loaders.js';
-import { validateModelJson, validateApiKey } from './validation.js';
+import type { LLMConfig } from "./types.js";
+import { ConfigError } from "./types.js";
+import { loadModelJson, loadApiKey, loadProjectEnv } from "./loaders.js";
+import { validateModelJson, validateApiKey } from "./validation.js";
 
 export interface LLMConfigLoadOptions {
   readonly projectDirectory?: string;
@@ -133,8 +133,8 @@ class LLMConfigManager {
           ? error
           : new ConfigError(
               `Failed to load LLM configuration: ${(error as Error).message}`,
-              'LOAD_FAILED',
-              { cause: error }
+              "LOAD_FAILED",
+              { cause: error },
             );
 
       this.lastError = configError;

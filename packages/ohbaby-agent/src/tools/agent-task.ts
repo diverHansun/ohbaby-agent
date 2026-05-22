@@ -1,7 +1,4 @@
-import type {
-  AgentTaskController,
-  AgentTaskRecord,
-} from "../agents/index.js";
+import type { AgentTaskController, AgentTaskRecord } from "../agents/index.js";
 import type {
   Tool,
   ToolExecutionContext,

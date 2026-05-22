@@ -11,11 +11,7 @@ import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
 import { createDatabaseSessionStore } from "../services/session/index.js";
 import { createStorage } from "../services/storage/index.js";
 import type { RunHookContext } from "../runtime/run-manager/index.js";
-import {
-  ShadowDiffEngine,
-  SnapshotService,
-  SnapshotStore,
-} from "./index.js";
+import { ShadowDiffEngine, SnapshotService, SnapshotStore } from "./index.js";
 import { createSnapshotHookExecutor } from "./run-hook-adapter.js";
 
 async function tempDir(prefix: string): Promise<string> {

@@ -8,14 +8,21 @@ export class ToolParameterError extends Error {
 export function getStringParam(
   params: Record<string, unknown>,
   name: string,
-  options: { readonly allowEmpty?: boolean; readonly defaultValue?: string } = {},
+  options: {
+    readonly allowEmpty?: boolean;
+    readonly defaultValue?: string;
+  } = {},
 ): string {
   const value = params[name] ?? options.defaultValue;
   if (typeof value !== "string") {
-    throw new ToolParameterError(`Expected parameter "${name}" to be a string.`);
+    throw new ToolParameterError(
+      `Expected parameter "${name}" to be a string.`,
+    );
   }
   if (!options.allowEmpty && value.trim() === "") {
-    throw new ToolParameterError(`Expected parameter "${name}" to be non-empty.`);
+    throw new ToolParameterError(
+      `Expected parameter "${name}" to be non-empty.`,
+    );
   }
 
   return value;
@@ -30,7 +37,9 @@ export function getOptionalStringParam(
     return undefined;
   }
   if (typeof value !== "string") {
-    throw new ToolParameterError(`Expected parameter "${name}" to be a string.`);
+    throw new ToolParameterError(
+      `Expected parameter "${name}" to be a string.`,
+    );
   }
 
   return value;
@@ -48,10 +57,14 @@ export function getNumberParam(
 ): number {
   const value = params[name] ?? options.defaultValue;
   if (typeof value !== "number" || Number.isNaN(value)) {
-    throw new ToolParameterError(`Expected parameter "${name}" to be a number.`);
+    throw new ToolParameterError(
+      `Expected parameter "${name}" to be a number.`,
+    );
   }
   if (options.integer === true && !Number.isInteger(value)) {
-    throw new ToolParameterError(`Expected parameter "${name}" to be an integer.`);
+    throw new ToolParameterError(
+      `Expected parameter "${name}" to be an integer.`,
+    );
   }
   if (options.min !== undefined && value < options.min) {
     throw new ToolParameterError(
@@ -74,7 +87,9 @@ export function getBooleanParam(
 ): boolean {
   const value = params[name] ?? defaultValue;
   if (typeof value !== "boolean") {
-    throw new ToolParameterError(`Expected parameter "${name}" to be a boolean.`);
+    throw new ToolParameterError(
+      `Expected parameter "${name}" to be a boolean.`,
+    );
   }
 
   return value;

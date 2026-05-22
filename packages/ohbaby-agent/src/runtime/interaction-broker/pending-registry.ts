@@ -1,7 +1,4 @@
-import type {
-  PendingInteraction,
-  PendingInteractionSummary,
-} from "./types.js";
+import type { PendingInteraction, PendingInteractionSummary } from "./types.js";
 
 export class PendingInteractionRegistry {
   private readonly pending = new Map<string, PendingInteraction>();
@@ -45,4 +42,3 @@ export class PendingInteractionRegistry {
     }));
   }
 }
-

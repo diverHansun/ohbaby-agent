@@ -25,7 +25,8 @@ function pathMatches(
     return false;
   }
   return candidatePath.every(
-    (segment, index) => segment.toLowerCase() === segments[index]?.toLowerCase(),
+    (segment, index) =>
+      segment.toLowerCase() === segments[index]?.toLowerCase(),
   );
 }
 
@@ -39,7 +40,10 @@ function unknownCommand(parsed: UiParsedSlashInput): UiCommandResolveResult {
   };
 }
 
-function rawArgsFromToken(commandLine: string, token?: UiSlashTokenSpan): string {
+function rawArgsFromToken(
+  commandLine: string,
+  token?: UiSlashTokenSpan,
+): string {
   if (!token) {
     return "";
   }
@@ -103,7 +107,10 @@ export function resolveCommand(
       path: candidate.path,
       usedAlias: candidate.usedAlias,
       raw: parsed.raw,
-      rawArgs: rawArgsFromToken(parsed.commandLine, parsed.tokenSpans[matchedLength]),
+      rawArgs: rawArgsFromToken(
+        parsed.commandLine,
+        parsed.tokenSpans[matchedLength],
+      ),
       argv: parsed.segments.slice(matchedLength),
       body: parsed.body,
     };
@@ -145,4 +152,3 @@ export function filterCommandCatalog(
       return leftPath.localeCompare(rightPath);
     });
 }
-

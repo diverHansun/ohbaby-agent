@@ -55,8 +55,12 @@ function insertRun(sessionId: string, runId: string): void {
     .run(runId, sessionId, "user", "running", 1);
 }
 
-async function createService(options: { readonly storage?: Storage } = {}): Promise<SnapshotService> {
-  initDatabase({ dbPath: join(await tempDir("ohbaby-snapshot-db-"), "agent.db") });
+async function createService(
+  options: { readonly storage?: Storage } = {},
+): Promise<SnapshotService> {
+  initDatabase({
+    dbPath: join(await tempDir("ohbaby-snapshot-db-"), "agent.db"),
+  });
   const storage =
     options.storage ??
     createStorage({ rootDir: await tempDir("ohbaby-snapshot-storage-") });
@@ -81,9 +85,9 @@ beforeEach(() => {
 afterEach(async () => {
   closeDatabase();
   await Promise.all(
-    cleanupPaths.splice(0).map((path) =>
-      rm(path, { recursive: true, force: true }),
-    ),
+    cleanupPaths
+      .splice(0)
+      .map((path) => rm(path, { recursive: true, force: true })),
   );
 });
 
@@ -116,7 +120,9 @@ describe("snapshot MVP", () => {
     expect(patch.fileCount).toBe(3);
     expect(patch.artifactPath).toBeTypeOf("string");
 
-    const diff = await service.diff({ fromCheckpointId: checkpoint.checkpointId });
+    const diff = await service.diff({
+      fromCheckpointId: checkpoint.checkpointId,
+    });
     expect(diff.summary).toEqual({ added: 1, modified: 1, deleted: 1 });
     expect(diff.files.map((file) => [file.path, file.status]).sort()).toEqual([
       ["added.txt", "added"],
@@ -142,7 +148,9 @@ describe("snapshot MVP", () => {
       messageId: "message_before",
     });
 
-    const storedCheckpoint = await service.getCheckpoint(checkpoint.checkpointId);
+    const storedCheckpoint = await service.getCheckpoint(
+      checkpoint.checkpointId,
+    );
     expect(storedCheckpoint?.messageCursorAfter).toEqual({
       sequence: 20,
       messageId: "message_after",
@@ -160,7 +168,9 @@ describe("snapshot MVP", () => {
       workdir,
     });
 
-    const patch = await service.capture({ checkpointId: checkpoint.checkpointId });
+    const patch = await service.capture({
+      checkpointId: checkpoint.checkpointId,
+    });
 
     expect(patch.fileCount).toBe(0);
     expect(patch.artifactPath).toBeNull();
@@ -181,8 +191,12 @@ describe("snapshot MVP", () => {
     });
     await writeFile(join(workdir, "file.txt"), "two\n", "utf8");
 
-    const first = await service.capture({ checkpointId: checkpoint.checkpointId });
-    const second = await service.capture({ checkpointId: checkpoint.checkpointId });
+    const first = await service.capture({
+      checkpointId: checkpoint.checkpointId,
+    });
+    const second = await service.capture({
+      checkpointId: checkpoint.checkpointId,
+    });
 
     expect(second).toEqual(first);
     expect(await service.getPatches(checkpoint.checkpointId)).toHaveLength(1);
@@ -206,10 +220,11 @@ describe("snapshot MVP", () => {
       messageCursorAfter: { sequence: 30, messageId: "message_after" },
     });
 
-    await expect(service.getCheckpoint(checkpoint.checkpointId)).resolves
-      .toMatchObject({
-        messageCursorAfter: { sequence: 30, messageId: "message_after" },
-      });
+    await expect(
+      service.getCheckpoint(checkpoint.checkpointId),
+    ).resolves.toMatchObject({
+      messageCursorAfter: { sequence: 30, messageId: "message_after" },
+    });
   });
 
   it("diffs a checkpoint to the current workdir when changes are not captured yet", async () => {
@@ -224,7 +239,9 @@ describe("snapshot MVP", () => {
     });
     await writeFile(join(workdir, "file.txt"), "two\n", "utf8");
 
-    const diff = await service.diff({ fromCheckpointId: checkpoint.checkpointId });
+    const diff = await service.diff({
+      fromCheckpointId: checkpoint.checkpointId,
+    });
 
     expect(diff.summary).toEqual({ added: 0, modified: 1, deleted: 0 });
     expect(diff.files).toEqual([{ path: "file.txt", status: "modified" }]);
@@ -386,7 +403,9 @@ describe("snapshot MVP", () => {
       workdir,
     });
     await writeFile(join(workdir, "file.txt"), "after\n", "utf8");
-    const patch = await service.capture({ checkpointId: checkpoint.checkpointId });
+    const patch = await service.capture({
+      checkpointId: checkpoint.checkpointId,
+    });
 
     await service.store.deleteArtifact(patch.patchId);
 

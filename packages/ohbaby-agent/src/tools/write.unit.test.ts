@@ -47,7 +47,11 @@ function createTestContext(root: string): TestContext {
   };
 }
 
-async function writeFile(root: string, relativePath: string, content: string): Promise<string> {
+async function writeFile(
+  root: string,
+  relativePath: string,
+  content: string,
+): Promise<string> {
   const target = path.join(root, relativePath);
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(target, content, "utf8");
@@ -80,9 +84,9 @@ describe("write file tool", () => {
       context,
     );
 
-    await expect(fs.readFile(path.join(tempRoot, "drafts", "note.txt"), "utf8")).resolves.toBe(
-      "hello\n",
-    );
+    await expect(
+      fs.readFile(path.join(tempRoot, "drafts", "note.txt"), "utf8"),
+    ).resolves.toBe("hello\n");
     expect(result.output).toContain("Wrote");
     expect(result.metadata).toMatchObject({
       bytes: Buffer.byteLength("hello\n"),
@@ -97,7 +101,11 @@ describe("write file tool", () => {
     const context = createTestContext(tempRoot);
 
     const result = await createWriteTool().execute(
-      { content: "hello\nworld\n", dry_run: true, file_path: "drafts/preview.txt" },
+      {
+        content: "hello\nworld\n",
+        dry_run: true,
+        file_path: "drafts/preview.txt",
+      },
       context,
     );
 
@@ -112,7 +120,9 @@ describe("write file tool", () => {
       dryRun: true,
       wouldCreate: true,
     });
-    expect(result.metadata?.diff).toEqual(expect.stringContaining("@@ -0,0 +1,2 @@"));
+    expect(result.metadata?.diff).toEqual(
+      expect.stringContaining("@@ -0,0 +1,2 @@"),
+    );
   });
 
   it("supports absolute paths inside the workspace and creates missing directories", async () => {
@@ -132,7 +142,10 @@ describe("write file tool", () => {
     const context = createTestContext(tempRoot);
 
     await expect(
-      createWriteTool().execute({ content: "new\n", file_path: "note.txt" }, context),
+      createWriteTool().execute(
+        { content: "new\n", file_path: "note.txt" },
+        context,
+      ),
     ).rejects.toThrow("expected_mtime_ms is required");
 
     await expect(fs.readFile(target, "utf8")).resolves.toBe("old\n");
@@ -166,7 +179,9 @@ describe("write file tool", () => {
       context,
     );
 
-    await expect(fs.readFile(target, "utf8")).resolves.toBe("\uFEFFnew\r\ntext\n");
+    await expect(fs.readFile(target, "utf8")).resolves.toBe(
+      "\uFEFFnew\r\ntext\n",
+    );
     expect(result.metadata).toMatchObject({
       created: false,
       encoding: "utf8",
@@ -205,7 +220,10 @@ describe("write file tool", () => {
     vi.spyOn(fs, "rename").mockRejectedValueOnce(new Error("rename failed"));
 
     await expect(
-      createWriteTool().execute({ content: "hello\n", file_path: "note.txt" }, context),
+      createWriteTool().execute(
+        { content: "hello\n", file_path: "note.txt" },
+        context,
+      ),
     ).rejects.toThrow("rename failed");
 
     await expect(fs.readdir(tempRoot)).resolves.toEqual([]);

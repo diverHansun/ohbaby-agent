@@ -165,7 +165,8 @@ function createWebFetchTool(options: WebToolsOptions): Tool {
 
 function createProvider(options: WebToolsOptions): SearchProvider {
   const loadConfig = options.loadConfig ?? loadDefaultSearchProviderConfig;
-  const createProviderFromConfig = options.createProvider ?? createSearchProvider;
+  const createProviderFromConfig =
+    options.createProvider ?? createSearchProvider;
   return createProviderFromConfig(loadConfig());
 }
 
@@ -275,7 +276,9 @@ function getOptionalTrimmedStringParam(
     return undefined;
   }
   if (typeof value !== "string") {
-    throw new ToolParameterError(`Expected parameter "${name}" to be a string.`);
+    throw new ToolParameterError(
+      `Expected parameter "${name}" to be a string.`,
+    );
   }
 
   const trimmed = value.trim();
@@ -328,7 +331,9 @@ function getOptionalBooleanParam(
     return undefined;
   }
   if (typeof value !== "boolean") {
-    throw new ToolParameterError(`Expected parameter "${name}" to be a boolean.`);
+    throw new ToolParameterError(
+      `Expected parameter "${name}" to be a boolean.`,
+    );
   }
 
   return value;
@@ -348,10 +353,14 @@ function getOptionalNumberParam(
     return undefined;
   }
   if (typeof value !== "number" || Number.isNaN(value)) {
-    throw new ToolParameterError(`Expected parameter "${name}" to be a number.`);
+    throw new ToolParameterError(
+      `Expected parameter "${name}" to be a number.`,
+    );
   }
   if (options.integer === true && !Number.isInteger(value)) {
-    throw new ToolParameterError(`Expected parameter "${name}" to be an integer.`);
+    throw new ToolParameterError(
+      `Expected parameter "${name}" to be an integer.`,
+    );
   }
   if (options.min !== undefined && value < options.min) {
     throw new ToolParameterError(
@@ -377,7 +386,9 @@ function getOptionalEnumParam<T extends string>(
     return undefined;
   }
   if (typeof value !== "string") {
-    throw new ToolParameterError(`Expected parameter "${name}" to be a string.`);
+    throw new ToolParameterError(
+      `Expected parameter "${name}" to be a string.`,
+    );
   }
   if (!allowedValues.includes(value as T)) {
     throw new ToolParameterError(
@@ -400,7 +411,9 @@ function renderSearchResults(
     .map((result, index) => {
       const metadata = [
         result.publishedDate,
-        result.score !== undefined ? `score ${result.score.toFixed(3)}` : undefined,
+        result.score !== undefined
+          ? `score ${result.score.toFixed(3)}`
+          : undefined,
       ].filter((value): value is string => value !== undefined);
 
       return [
@@ -433,8 +446,10 @@ function renderFetchResults(
   return results
     .map((result) => {
       if (!result.success) {
-        return [`## ${result.url}`, `Failed: ${result.error ?? "Unknown error"}`]
-          .join("\n");
+        return [
+          `## ${result.url}`,
+          `Failed: ${result.error ?? "Unknown error"}`,
+        ].join("\n");
       }
 
       const images =

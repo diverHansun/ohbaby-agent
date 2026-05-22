@@ -193,7 +193,9 @@ export class ArtifactNotAvailableError extends SnapshotError {
 
 export class SnapshotConflictError extends SnapshotError {
   constructor(readonly checkpointId: string) {
-    super(`Snapshot restore has an active writer for checkpoint ${checkpointId}`);
+    super(
+      `Snapshot restore has an active writer for checkpoint ${checkpointId}`,
+    );
   }
 }
 

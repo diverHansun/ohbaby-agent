@@ -11,10 +11,7 @@ import type {
 import { PolicyEvent } from "./events.js";
 
 const MODE_CYCLE: readonly Mode[] = ["agent", "ask", "plan"];
-const AGENT_STATES = new Set<string>([
-  "ask-before-edit",
-  "edit-automatically",
-]);
+const AGENT_STATES = new Set<string>(["ask-before-edit", "edit-automatically"]);
 const VALID_CATEGORIES = new Set<ToolCategory>([
   "readonly",
   "write",

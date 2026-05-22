@@ -38,6 +38,5 @@ export interface BusyRetryOptions {
   readonly sleep?: (delayMs: number) => void;
 }
 
-export type SyncTransactionCallback<T> = T extends PromiseLike<unknown>
-  ? never
-  : (db: DatabaseConnection) => T;
+export type SyncTransactionCallback<T> =
+  T extends PromiseLike<unknown> ? never : (db: DatabaseConnection) => T;

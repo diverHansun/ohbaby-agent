@@ -94,7 +94,9 @@ describe("web tools scheduler integration", () => {
         status: "success",
       },
     ]);
-    expect(results[0]?.output).toContain("[Search Result](https://example.com)");
+    expect(results[0]?.output).toContain(
+      "[Search Result](https://example.com)",
+    );
     expect(results[1]?.output).toContain("# fetched");
     expect(provider.search).toHaveBeenCalledWith("agent search", {});
     expect(provider.fetch).toHaveBeenCalledWith(["https://example.com"], {});

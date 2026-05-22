@@ -1,4 +1,7 @@
-import type { Tool, ToolExecutionResult } from "../core/tool-scheduler/index.js";
+import type {
+  Tool,
+  ToolExecutionResult,
+} from "../core/tool-scheduler/index.js";
 import { formatWithLineNumbers } from "../utils/index.js";
 import { splitTextLines } from "./utils/files.js";
 import { getNumberParam, getStringParam } from "./utils/params.js";

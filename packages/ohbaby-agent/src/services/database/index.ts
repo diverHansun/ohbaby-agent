@@ -1,10 +1,7 @@
 import { NodeSqliteConnection } from "./connection.js";
 import { DatabaseNotInitializedError, MigrationError } from "./errors.js";
 import { INITIAL_MIGRATIONS } from "./migrations.js";
-import {
-  ensureDatabaseDirectory,
-  resolveDatabasePath,
-} from "./path.js";
+import { ensureDatabaseDirectory, resolveDatabasePath } from "./path.js";
 import { runWithBusyRetry } from "./busy-retry.js";
 import type {
   DatabaseConnection,
@@ -53,9 +50,7 @@ function isAsyncFunction(operation: unknown): boolean {
   );
 }
 
-function createScopedTransactionConnection(
-  connection: DatabaseConnection,
-): {
+function createScopedTransactionConnection(connection: DatabaseConnection): {
   readonly db: DatabaseConnection;
   deactivate(): void;
 } {
@@ -73,7 +68,9 @@ function createScopedTransactionConnection(
       assertActive();
       connection.exec(sql);
     },
-    prepare<Row = Record<string, unknown>>(sql: string): DatabaseStatement<Row> {
+    prepare<Row = Record<string, unknown>>(
+      sql: string,
+    ): DatabaseStatement<Row> {
       assertActive();
       const statement = connection.prepare<Row>(sql);
       return {
@@ -128,9 +125,9 @@ function hasMigration(
   migration: MigrationDefinition,
 ): boolean {
   const row = connection
-    .prepare<{ version: string }>(
-      "SELECT version FROM migration WHERE version = ?",
-    )
+    .prepare<{
+      version: string;
+    }>("SELECT version FROM migration WHERE version = ?")
     .get(migration.version);
   return row !== undefined;
 }

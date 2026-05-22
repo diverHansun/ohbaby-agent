@@ -38,7 +38,10 @@ interface ResolvedToolCall {
 
 interface StepResult {
   readonly assistantMessage?: CoreMessage;
-  readonly finalEvent?: Extract<LifecycleEvent, { readonly type: "llm:complete" }>;
+  readonly finalEvent?: Extract<
+    LifecycleEvent,
+    { readonly type: "llm:complete" }
+  >;
   readonly finalResponse: string;
 }
 
@@ -577,7 +580,9 @@ export class Lifecycle {
     return {
       assistantMessage,
       finalEvent,
-      finalResponse: finalEvent ? getTextContent(finalEvent.completeMessage) : "",
+      finalResponse: finalEvent
+        ? getTextContent(finalEvent.completeMessage)
+        : "",
     };
   }
 

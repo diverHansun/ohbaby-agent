@@ -1,7 +1,14 @@
 import fs from "node:fs/promises";
-import type { Tool, ToolExecutionResult } from "../core/tool-scheduler/index.js";
+import type {
+  Tool,
+  ToolExecutionResult,
+} from "../core/tool-scheduler/index.js";
 import { createGlobMatcher, scanFiles, splitTextLines } from "./utils/files.js";
-import { getNumberParam, getOptionalStringParam, getStringParam } from "./utils/params.js";
+import {
+  getNumberParam,
+  getOptionalStringParam,
+  getStringParam,
+} from "./utils/params.js";
 import { renderList } from "./utils/output.js";
 import { resolvePathForExisting } from "./utils/context.js";
 import {
@@ -17,7 +24,8 @@ import {
 export function createGrepTool(): Tool {
   return {
     name: "grep",
-    description: "Search text files by regular expression inside the workspace.",
+    description:
+      "Search text files by regular expression inside the workspace.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {
@@ -62,7 +70,9 @@ export function createGrepTool(): Tool {
 
           let content: string;
           try {
-            content = (await readTextFileContent(file.absolutePath, file.relativePath)).text;
+            content = (
+              await readTextFileContent(file.absolutePath, file.relativePath)
+            ).text;
           } catch (error) {
             if (error instanceof BinaryTextFileError) {
               skippedBinaryFiles += 1;
@@ -78,7 +88,9 @@ export function createGrepTool(): Tool {
           const lines = splitTextLines(content);
           for (const [index, line] of lines.entries()) {
             if (regex.test(line)) {
-              matches.push(`${file.relativePath}:${String(index + 1)}: ${line}`);
+              matches.push(
+                `${file.relativePath}:${String(index + 1)}: ${line}`,
+              );
               if (matches.length >= limit) {
                 return false;
               }

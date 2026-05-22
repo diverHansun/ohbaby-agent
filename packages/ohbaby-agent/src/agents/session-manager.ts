@@ -10,9 +10,7 @@ export interface RuntimeSubagentSessionManager extends SubagentSessionManager {
   }): Promise<void>;
 }
 
-export class InMemorySubagentSessionManager
-  implements RuntimeSubagentSessionManager
-{
+export class InMemorySubagentSessionManager implements RuntimeSubagentSessionManager {
   private readonly sessions = new Map<string, SubagentSession>();
   private nextId = 1;
 
@@ -72,9 +70,7 @@ export class InMemorySubagentSessionManager
   }
 }
 
-export class PersistentSubagentSessionManager
-  implements RuntimeSubagentSessionManager
-{
+export class PersistentSubagentSessionManager implements RuntimeSubagentSessionManager {
   constructor(
     private readonly backing: Pick<SessionManager, "create" | "get">,
   ) {}

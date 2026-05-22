@@ -150,10 +150,7 @@ export function createSystemPromptProvider(
         }).join("\n\n");
       }
 
-      const agentPrompt = await options.agentPromptResolver?.(
-        agentName,
-        input,
-      );
+      const agentPrompt = await options.agentPromptResolver?.(agentName, input);
       const customInstructions = await (options.customInstructionLoader
         ? options.customInstructionLoader(input)
         : loadCustomInstructions({

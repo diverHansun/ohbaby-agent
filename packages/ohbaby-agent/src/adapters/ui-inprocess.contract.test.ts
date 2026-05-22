@@ -383,7 +383,10 @@ function createAbortableAgentTaskLLMClient(
 
         return Promise.resolve(
           createProviderStream([
-            { textDelta: "parent handled background control", finishReason: "stop" },
+            {
+              textDelta: "parent handled background control",
+              finishReason: "stop",
+            },
           ]),
         );
       },
@@ -1069,7 +1072,9 @@ describe("createInProcessUiBackendClient", () => {
     expect(openToolResultText).toContain("agent_task_1");
     expect(openToolResultText).not.toContain("child first output");
 
-    const statusToolResultText = JSON.stringify(parentRequests.at(-1)?.messages);
+    const statusToolResultText = JSON.stringify(
+      parentRequests.at(-1)?.messages,
+    );
     expect(statusToolResultText).toContain("agent_task_1");
     expect(statusToolResultText).toContain("child follow-up output");
   });

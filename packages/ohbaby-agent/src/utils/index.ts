@@ -1,10 +1,5 @@
 export { IrisError, formatError, getErrorMessage } from "./error.js";
-export {
-  contains,
-  containsOrEqual,
-  normalizePath,
-  overlaps,
-} from "./paths.js";
+export { contains, containsOrEqual, normalizePath, overlaps } from "./paths.js";
 export { lazy, lazyAsync } from "./lazy.js";
 export {
   checkEmptyContent,

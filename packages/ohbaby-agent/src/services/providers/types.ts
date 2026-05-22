@@ -1,11 +1,15 @@
 import type {
   ChatCompletionCreateParams,
   ChatCompletionMessageParam,
-} from 'openai/resources/chat/completions/completions';
+} from "openai/resources/chat/completions/completions";
 
-export type ProviderKind = 'openai-compatible' | 'anthropic';
+export type ProviderKind = "openai-compatible" | "anthropic";
 
-export type ProviderFinishReason = 'stop' | 'tool_calls' | 'length' | 'content_filter';
+export type ProviderFinishReason =
+  | "stop"
+  | "tool_calls"
+  | "length"
+  | "content_filter";
 
 export interface ProviderTokenUsage {
   prompt_tokens: number;
@@ -33,7 +37,7 @@ export interface ProviderRequest {
   messages: ChatCompletionMessageParam[];
   temperature: number;
   maxTokens: number;
-  tools?: ChatCompletionCreateParams['tools'];
+  tools?: ChatCompletionCreateParams["tools"];
   signal?: AbortSignal;
 }
 
@@ -47,6 +51,8 @@ export interface ProviderInstance<TClient = unknown> {
   id: string;
   kind: ProviderKind;
   client: TClient;
-  streamChatCompletion(request: ProviderRequest): Promise<AsyncIterable<ProviderStreamEvent>>;
+  streamChatCompletion(
+    request: ProviderRequest,
+  ): Promise<AsyncIterable<ProviderStreamEvent>>;
   isAbortError(error: unknown): boolean;
 }

@@ -17,10 +17,6 @@ export function SessionDialog({
   title = "Session",
 }: SessionDialogProps): ReactElement {
   return (
-    <SelectOneDialog
-      client={client}
-      interaction={interaction}
-      title={title}
-    />
+    <SelectOneDialog client={client} interaction={interaction} title={title} />
   );
 }

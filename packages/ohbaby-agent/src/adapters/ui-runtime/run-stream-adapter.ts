@@ -297,7 +297,8 @@ export function startRunStreamProjection(
       delta,
       messageId: updated.id,
       sessionId: options.sessionId,
-      timestamp: typeof data.timestamp === "number" ? data.timestamp : Date.now(),
+      timestamp:
+        typeof data.timestamp === "number" ? data.timestamp : Date.now(),
     });
   }
 

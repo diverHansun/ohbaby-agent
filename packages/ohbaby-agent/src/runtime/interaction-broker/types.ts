@@ -73,4 +73,3 @@ export class InteractionBrokerError extends Error {
     this.code = code;
   }
 }
-

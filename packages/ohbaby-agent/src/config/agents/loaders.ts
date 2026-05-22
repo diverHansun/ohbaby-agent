@@ -96,8 +96,7 @@ export async function loadAgentConfig(
   const globalPath =
     options.globalPath ?? getGlobalAgentsConfigPath(options.homeDirectory);
   const projectPath =
-    options.projectPath ??
-    getProjectAgentsConfigPath(options.projectDirectory);
+    options.projectPath ?? getProjectAgentsConfigPath(options.projectDirectory);
   const [globalConfig, projectConfig] = await Promise.all([
     loadAgentsConfigFromPath(globalPath),
     loadAgentsConfigFromPath(projectPath),

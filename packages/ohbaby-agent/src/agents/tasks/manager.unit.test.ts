@@ -128,7 +128,10 @@ describe("AgentTaskManager", () => {
   });
 
   it("queues follow-up input while running and starts a second turn after completion", async () => {
-    const first = deferred<{ readonly output: string; readonly success: true }>();
+    const first = deferred<{
+      readonly output: string;
+      readonly success: true;
+    }>();
     const second = deferred<{
       readonly output: string;
       readonly success: true;
@@ -188,7 +191,10 @@ describe("AgentTaskManager", () => {
   });
 
   it("interrupts a running task and schedules the replacement input next", async () => {
-    const first = deferred<{ readonly output: string; readonly success: false }>();
+    const first = deferred<{
+      readonly output: string;
+      readonly success: false;
+    }>();
     const second = deferred<{
       readonly output: string;
       readonly success: true;
@@ -197,7 +203,9 @@ describe("AgentTaskManager", () => {
     const run = vi
       .fn<SubagentRunner["run"]>()
       .mockImplementationOnce(
-        ({ signal }): Promise<{
+        ({
+          signal,
+        }): Promise<{
           readonly output: string;
           readonly success: false;
         }> => {
@@ -360,7 +368,9 @@ describe("AgentTaskManager", () => {
       readonly success: false;
     }>();
     const run = vi.fn<SubagentRunner["run"]>(
-      ({ signal }): Promise<{
+      ({
+        signal,
+      }): Promise<{
         readonly output: string;
         readonly success: false;
       }> => {

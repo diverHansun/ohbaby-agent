@@ -41,8 +41,7 @@ export class SandboxManager {
   private readonly createLeaseId: () => string;
 
   constructor(private readonly options: SandboxManagerOptions) {
-    this.drainTimeoutMs =
-      options.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
+    this.drainTimeoutMs = options.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
     this.now = options.now ?? Date.now;
     this.createContextId =
       options.createContextId ?? ((): string => randomId("sandbox_context"));

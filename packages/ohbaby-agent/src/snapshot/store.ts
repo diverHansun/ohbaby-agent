@@ -94,10 +94,7 @@ function artifactPathToKey(path: string): StorageKey {
   return path.split("/");
 }
 
-function stableArtifactKey(
-  checkpointId: string,
-  patchId: string,
-): StorageKey {
+function stableArtifactKey(checkpointId: string, patchId: string): StorageKey {
   return ["snapshot", "patches", checkpointId, patchId];
 }
 

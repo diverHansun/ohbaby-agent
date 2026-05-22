@@ -88,7 +88,10 @@ describe("grep file tool", () => {
     await writeFile(tempRoot, "sample.txt", Buffer.from([0x61, 0x00, 0x62]));
     const context = createTestContext(tempRoot);
 
-    const result = await createGrepTool().execute({ pattern: "needle" }, context);
+    const result = await createGrepTool().execute(
+      { pattern: "needle" },
+      context,
+    );
 
     expect(result.output).toBe("No matches found.");
     expect(result.metadata).toMatchObject({

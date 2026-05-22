@@ -91,14 +91,19 @@ describe("read file tool", () => {
       shownLineCount: 2,
     });
     expect(result.metadata?.mtimeMs).toEqual(expect.any(Number));
-    expect(result.metadata?.sizeBytes).toBe(Buffer.byteLength("\uFEFFalpha\r\nbeta\r\ngamma\r\n"));
+    expect(result.metadata?.sizeBytes).toBe(
+      Buffer.byteLength("\uFEFFalpha\r\nbeta\r\ngamma\r\n"),
+    );
   });
 
   it("reports empty files without a next page", async () => {
     await writeFile(tempRoot, "empty.txt", "");
     const context = createTestContext(tempRoot);
 
-    const result = await createReadTool().execute({ file_path: "empty.txt" }, context);
+    const result = await createReadTool().execute(
+      { file_path: "empty.txt" },
+      context,
+    );
 
     expect(result.output).toBe("");
     expect(result.metadata).toMatchObject({
@@ -115,11 +120,11 @@ describe("read file tool", () => {
     const context = createTestContext(tempRoot);
     const read = createReadTool();
 
-    await expect(read.execute({ file_path: "image.png" }, context)).rejects.toThrow(
-      "Binary files cannot be read as text",
-    );
-    await expect(read.execute({ file_path: "sample.txt" }, context)).rejects.toThrow(
-      "Binary files cannot be read as text",
-    );
+    await expect(
+      read.execute({ file_path: "image.png" }, context),
+    ).rejects.toThrow("Binary files cannot be read as text");
+    await expect(
+      read.execute({ file_path: "sample.txt" }, context),
+    ).rejects.toThrow("Binary files cannot be read as text");
   });
 });

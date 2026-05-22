@@ -43,7 +43,9 @@ export function createTavilyProvider(
 ): SearchProvider {
   const apiKey = config.apiKey.trim();
   if (apiKey === "") {
-    throw new InvalidProviderConfigError("Tavily search provider requires an API key.");
+    throw new InvalidProviderConfigError(
+      "Tavily search provider requires an API key.",
+    );
   }
 
   const defaults = normalizeDefaults(config.defaults);
@@ -104,7 +106,9 @@ function compactObject<T extends Record<string, unknown>>(input: T): T {
 function normalizeQuery(query: string): string {
   const normalized = query.trim();
   if (normalized === "") {
-    throw new InvalidProviderConfigError("Tavily search query must be non-empty.");
+    throw new InvalidProviderConfigError(
+      "Tavily search query must be non-empty.",
+    );
   }
 
   return normalized;
@@ -112,7 +116,9 @@ function normalizeQuery(query: string): string {
 
 function normalizeUrls(urls: readonly string[]): readonly string[] {
   if (urls.length === 0) {
-    throw new InvalidProviderConfigError("Tavily fetch urls must be non-empty.");
+    throw new InvalidProviderConfigError(
+      "Tavily fetch urls must be non-empty.",
+    );
   }
 
   return urls.map((url) => {
@@ -167,7 +173,9 @@ function buildExtractOptions(
   });
 }
 
-function toMutableArray(values: readonly string[] | undefined): string[] | undefined {
+function toMutableArray(
+  values: readonly string[] | undefined,
+): string[] | undefined {
   return values === undefined ? undefined : [...values];
 }
 
@@ -232,7 +240,9 @@ function normalizeFetchResults(
   },
   options: FetchOptions | undefined,
 ): FetchResult[] {
-  const successes = new Map(response.results.map((result) => [result.url, result]));
+  const successes = new Map(
+    response.results.map((result) => [result.url, result]),
+  );
   const failures = new Map(
     response.failedResults.map((result) => [result.url, result]),
   );
@@ -260,7 +270,10 @@ function normalizeFetchResults(
   });
 }
 
-function truncateCharacters(value: string, maxCharacters: number | undefined): string {
+function truncateCharacters(
+  value: string,
+  maxCharacters: number | undefined,
+): string {
   if (maxCharacters === undefined || value.length <= maxCharacters) {
     return value;
   }

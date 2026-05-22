@@ -22,9 +22,7 @@ async function isExistingDirectory(directory: string): Promise<boolean> {
 async function hasGitBoundary(directory: string): Promise<boolean> {
   try {
     const stats = await fs.lstat(path.join(directory, ".git"));
-    return (
-      stats.isDirectory() || stats.isFile() || stats.isSymbolicLink()
-    );
+    return stats.isDirectory() || stats.isFile() || stats.isSymbolicLink();
   } catch {
     return false;
   }

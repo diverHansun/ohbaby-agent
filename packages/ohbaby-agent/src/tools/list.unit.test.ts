@@ -44,7 +44,11 @@ function createTestContext(root: string): TestContext {
   };
 }
 
-async function writeFile(root: string, relativePath: string, content: string): Promise<void> {
+async function writeFile(
+  root: string,
+  relativePath: string,
+  content: string,
+): Promise<void> {
   const target = path.join(root, relativePath);
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(target, content, "utf8");
@@ -83,7 +87,10 @@ describe("list file tool", () => {
     await writeFile(tempRoot, "c.txt", "c\n");
     const context = createTestContext(tempRoot);
 
-    const result = await createListTool().execute({ limit: 2, path: "." }, context);
+    const result = await createListTool().execute(
+      { limit: 2, path: "." },
+      context,
+    );
 
     expect(result.output).toContain("a.txt");
     expect(result.output).toContain("b.txt");

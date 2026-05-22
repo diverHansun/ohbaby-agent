@@ -1,6 +1,13 @@
 import fs from "node:fs/promises";
-import type { Tool, ToolExecutionResult } from "../core/tool-scheduler/index.js";
-import { getNumberParam, getOptionalStringParam, getStringArrayParam } from "./utils/params.js";
+import type {
+  Tool,
+  ToolExecutionResult,
+} from "../core/tool-scheduler/index.js";
+import {
+  getNumberParam,
+  getOptionalStringParam,
+  getStringArrayParam,
+} from "./utils/params.js";
 import { renderList } from "./utils/output.js";
 import { resolvePathForExisting } from "./utils/context.js";
 import { DEFAULT_SEARCH_LIMIT, FILE_PATH_SCHEMA } from "./utils/text-files.js";
@@ -8,7 +15,8 @@ import { DEFAULT_SEARCH_LIMIT, FILE_PATH_SCHEMA } from "./utils/text-files.js";
 export function createListTool(): Tool {
   return {
     name: "list",
-    description: "List immediate files and directories in the execution workspace.",
+    description:
+      "List immediate files and directories in the execution workspace.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {
@@ -33,7 +41,9 @@ export function createListTool(): Tool {
       const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
       const visible = entries
         .filter((entry) => !ignore.has(entry.name))
-        .filter((entry) => ![".git", "node_modules", "dist"].includes(entry.name))
+        .filter(
+          (entry) => ![".git", "node_modules", "dist"].includes(entry.name),
+        )
         .sort((first, second) => first.name.localeCompare(second.name));
       const lines = visible.slice(0, limit).map((entry) => {
         return entry.isDirectory() ? `${entry.name}/` : entry.name;

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Tool, ToolExecutionContext } from "../core/tool-scheduler/index.js";
+import type {
+  Tool,
+  ToolExecutionContext,
+} from "../core/tool-scheduler/index.js";
 import { createBuiltinTools } from "./index.js";
 import { createWebTools } from "./web.js";
 import type {
@@ -75,7 +78,9 @@ describe("web builtin tools", () => {
       numResults: 1,
       timeRange: "week",
     });
-    expect(result.output).toContain("1. [First result](https://example.com/first)");
+    expect(result.output).toContain(
+      "1. [First result](https://example.com/first)",
+    );
     expect(result.output).toContain("Concise summary");
     expect(result.output).toContain("Raw content:");
     expect(result.output).toContain("Raw summary");

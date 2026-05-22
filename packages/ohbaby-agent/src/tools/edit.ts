@@ -1,5 +1,12 @@
-import type { Tool, ToolExecutionResult } from "../core/tool-scheduler/index.js";
-import { getBooleanParam, getStringParam, ToolParameterError } from "./utils/params.js";
+import type {
+  Tool,
+  ToolExecutionResult,
+} from "../core/tool-scheduler/index.js";
+import {
+  getBooleanParam,
+  getStringParam,
+  ToolParameterError,
+} from "./utils/params.js";
 import { renderUnifiedDiff, truncateOutput } from "./utils/output.js";
 import { resolvePathForExisting } from "./utils/context.js";
 import { assertTextFileWasReadBeforeEdit } from "./utils/read-state.js";
@@ -47,7 +54,9 @@ export function createEditTool(): Tool {
     async execute(params, context): Promise<ToolExecutionResult> {
       const inputPath = getStringParam(params, "file_path");
       const oldString = getStringParam(params, "old_string");
-      const newString = getStringParam(params, "new_string", { allowEmpty: true });
+      const newString = getStringParam(params, "new_string", {
+        allowEmpty: true,
+      });
       const replaceAll = getBooleanParam(params, "replace_all", false);
       const dryRun = getDryRunParam(params);
       const expectedMtimeMs = getExpectedMtimeMs(params);
@@ -66,7 +75,9 @@ export function createEditTool(): Tool {
       const newStringForFile = convertToLineEnding(newString, editLineEnding);
       const occurrences = countOccurrences(file.text, oldStringForFile);
       if (occurrences === 0) {
-        throw new Error(`No occurrences found for edit target in ${inputPath}.`);
+        throw new Error(
+          `No occurrences found for edit target in ${inputPath}.`,
+        );
       }
       if (occurrences > 1 && !replaceAll) {
         throw new ToolParameterError(
@@ -98,7 +109,10 @@ export function createEditTool(): Tool {
             mtimeMs: file.mtimeMs,
             path: writePath,
             replacementCount,
-            sizeBytes: Buffer.byteLength(withUtf8Bom(updated, file.bom), "utf8"),
+            sizeBytes: Buffer.byteLength(
+              withUtf8Bom(updated, file.bom),
+              "utf8",
+            ),
           },
         };
       }

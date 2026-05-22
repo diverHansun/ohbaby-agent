@@ -48,7 +48,11 @@ function createTestContext(root: string): TestContext {
   };
 }
 
-async function writeFile(root: string, relativePath: string, content: string): Promise<string> {
+async function writeFile(
+  root: string,
+  relativePath: string,
+  content: string,
+): Promise<string> {
   const target = path.join(root, relativePath);
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(target, content, "utf8");
@@ -63,7 +67,10 @@ async function readBeforeEdit(
   context: ToolExecutionContext,
   filePath: string,
 ): Promise<number> {
-  const result = await createReadTool().execute({ file_path: filePath }, context);
+  const result = await createReadTool().execute(
+    { file_path: filePath },
+    context,
+  );
   const mtimeMs = result.metadata?.mtimeMs;
   if (typeof mtimeMs !== "number") {
     throw new Error("read did not return mtimeMs");
@@ -193,7 +200,10 @@ describe("edit file tool", () => {
   it("rejects missing, multiple, stale, binary, and oversized edits without changing text files", async () => {
     const target = await writeFile(tempRoot, "note.txt", "same\nsame\n");
     await writeFile(tempRoot, "large.txt", "x".repeat(1_000_001));
-    await fs.writeFile(path.join(tempRoot, "binary.bin"), Buffer.from([0x61, 0x00, 0x62]));
+    await fs.writeFile(
+      path.join(tempRoot, "binary.bin"),
+      Buffer.from([0x61, 0x00, 0x62]),
+    );
     const context = createTestContext(tempRoot);
     const mtimeMs = await readBeforeEdit(context, "note.txt");
     const edit = createEditTool();

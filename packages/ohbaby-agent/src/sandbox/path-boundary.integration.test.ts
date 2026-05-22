@@ -42,9 +42,9 @@ describe("Sandbox path boundaries", () => {
     expect(() => lease.resolvePath("../outside.txt")).toThrow(
       SandboxBoundaryError,
     );
-    expect(() =>
-      lease.resolvePath(path.join(tempRoot, "outside.txt")),
-    ).toThrow(SandboxBoundaryError);
+    expect(() => lease.resolvePath(path.join(tempRoot, "outside.txt"))).toThrow(
+      SandboxBoundaryError,
+    );
   });
 
   it("rejects symlink escapes for existing paths", async () => {

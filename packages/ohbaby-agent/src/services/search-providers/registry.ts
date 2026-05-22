@@ -55,7 +55,9 @@ export function loadDefaultSearchProviderConfig(
 function normalizeProviderId(providerId: string): string {
   const normalized = providerId.trim().toLowerCase();
   if (normalized === "") {
-    throw new InvalidProviderConfigError("Search provider id must be non-empty.");
+    throw new InvalidProviderConfigError(
+      "Search provider id must be non-empty.",
+    );
   }
 
   return normalized;

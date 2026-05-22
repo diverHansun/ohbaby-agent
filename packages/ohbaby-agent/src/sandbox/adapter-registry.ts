@@ -1,8 +1,5 @@
 import { SandboxAdapterError } from "./errors.js";
-import type {
-  SandboxAdapter,
-  SandboxAdapterId,
-} from "./types.js";
+import type { SandboxAdapter, SandboxAdapterId } from "./types.js";
 
 export class AdapterRegistry {
   private readonly adapters = new Map<SandboxAdapterId, SandboxAdapter>();

@@ -6,10 +6,7 @@ function characterLimit(tokenLimit = DEFAULT_TOKEN_LIMIT): number {
   return tokenLimit * CHARS_PER_TOKEN;
 }
 
-export function truncateIfTooLong(
-  result: string,
-  tokenLimit?: number,
-): string;
+export function truncateIfTooLong(result: string, tokenLimit?: number): string;
 export function truncateIfTooLong(
   result: readonly string[],
   tokenLimit?: number,

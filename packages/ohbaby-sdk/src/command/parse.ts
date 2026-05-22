@@ -74,7 +74,10 @@ function tokenizeCommandLine(commandLine: string): UiSlashTokenSpan[] {
   return tokens;
 }
 
-function rawArgsFromToken(commandLine: string, token?: UiSlashTokenSpan): string {
+function rawArgsFromToken(
+  commandLine: string,
+  token?: UiSlashTokenSpan,
+): string {
   if (!token) {
     return "";
   }
@@ -104,4 +107,3 @@ export function parseSlashInput(input: string): UiParsedSlashInput | null {
     tokenSpans,
   };
 }
-

@@ -46,9 +46,10 @@ function createInfo(
   now: () => number,
 ): PermissionInfo {
   const type = inferPermissionType(input.toolName, input.params);
-  const name = type === "bash" && typeof input.params.command === "string"
-    ? input.params.command.split(/\s+/)[0] ?? input.toolName
-    : input.toolName;
+  const name =
+    type === "bash" && typeof input.params.command === "string"
+      ? (input.params.command.split(/\s+/)[0] ?? input.toolName)
+      : input.toolName;
   const pattern = generatePermissionPattern({
     name,
     params: input.params,
@@ -130,12 +131,16 @@ export function createPermissionManager(
     sessionId: string,
     permissionId: string,
   ): PendingRequest | undefined {
-    if (current?.info.sessionId === sessionId && current.info.id === permissionId) {
+    if (
+      current?.info.sessionId === sessionId &&
+      current.info.id === permissionId
+    ) {
       return current;
     }
     return queue.find(
       (request) =>
-        request.info.sessionId === sessionId && request.info.id === permissionId,
+        request.info.sessionId === sessionId &&
+        request.info.id === permissionId,
     );
   }
 

@@ -53,10 +53,7 @@ export default defineConfig({
       },
       {
         find: "ohbaby-agent",
-        replacement: resolve(
-          __dirname,
-          "./packages/ohbaby-agent/src/index.ts",
-        ),
+        replacement: resolve(__dirname, "./packages/ohbaby-agent/src/index.ts"),
       },
       {
         find: "ohbaby-sdk",

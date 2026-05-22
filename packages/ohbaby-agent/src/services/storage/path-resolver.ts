@@ -41,7 +41,10 @@ export class PathResolver {
 
   validate(key: StorageKey): void {
     if (key.length === 0) {
-      throw new InvalidStorageKeyError(key, "key must contain at least one segment");
+      throw new InvalidStorageKeyError(
+        key,
+        "key must contain at least one segment",
+      );
     }
     for (const segment of key) {
       if (segment.length === 0) {
@@ -81,7 +84,10 @@ export class PathResolver {
       relation.startsWith(`..${sep}`) ||
       resolve(path) !== path
     ) {
-      throw new InvalidStorageKeyError(key, "resolved path escapes storage root");
+      throw new InvalidStorageKeyError(
+        key,
+        "resolved path escapes storage root",
+      );
     }
     return path;
   }

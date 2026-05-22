@@ -126,6 +126,8 @@ describe("AgentManager", () => {
 
     const runtimeAgent = await manager.getRuntimeAgent("audit");
 
-    expect(runtimeAgent.systemPrompt).toContain("Audit code for release risks.");
+    expect(runtimeAgent.systemPrompt).toContain(
+      "Audit code for release risks.",
+    );
   });
 });

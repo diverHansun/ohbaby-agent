@@ -8,12 +8,12 @@ export async function atomicWrite(input: {
   readonly key: StorageKey;
   readonly targetPath: string;
   readonly data: string | Uint8Array;
-  readonly writeFile: (path: string, data: string | Uint8Array) => Promise<void>;
+  readonly writeFile: (
+    path: string,
+    data: string | Uint8Array,
+  ) => Promise<void>;
 }): Promise<void> {
-  const tempPath = join(
-    dirname(input.targetPath),
-    `.tmp-${randomUUID()}`,
-  );
+  const tempPath = join(dirname(input.targetPath), `.tmp-${randomUUID()}`);
   try {
     await input.writeFile(tempPath, input.data);
     await rename(tempPath, input.targetPath);

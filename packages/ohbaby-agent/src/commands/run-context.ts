@@ -6,10 +6,7 @@ import type {
   UiInteractionResponse,
 } from "ohbaby-sdk";
 import { CommandsEvent } from "./events.js";
-import type {
-  CommandRunContext,
-  CommandServiceOptions,
-} from "./types.js";
+import type { CommandRunContext, CommandServiceOptions } from "./types.js";
 
 export function createCommandRunContext(input: {
   readonly commandRunId: string;

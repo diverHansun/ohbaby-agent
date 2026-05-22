@@ -165,7 +165,10 @@ export class AgentTaskManager implements AgentTaskController {
       return this.mustGet(input.taskId);
     }
     if (state.running) {
-      state.queue.push({ environment: input.environment, prompt: input.prompt });
+      state.queue.push({
+        environment: input.environment,
+        prompt: input.prompt,
+      });
       return this.updatePendingCount(input.taskId, state);
     }
     const pending = await this.store.update(input.taskId, {

@@ -59,7 +59,9 @@ class FakeAdapter implements SandboxAdapter {
 class BlockingCreateAdapter extends FakeAdapter {
   readonly createGate = createDeferred<SandboxAdapterHandle>();
 
-  override create(options: SandboxCreateOptions): Promise<SandboxAdapterHandle> {
+  override create(
+    options: SandboxCreateOptions,
+  ): Promise<SandboxAdapterHandle> {
     this.created.push(options);
     return this.createGate.promise;
   }
@@ -203,17 +205,13 @@ describe("SandboxManager", () => {
     expect(Object.isFrozen(context.capabilities)).toBe(true);
     expect(Object.isFrozen(lease.capabilities)).toBe(true);
 
-    expect(
-      () => {
-        (context.capabilities as { canExecCommands: boolean }).canExecCommands =
-          false;
-      },
-    ).toThrow(TypeError);
-    expect(
-      () => {
-        (lease.capabilities as { readOnly: boolean }).readOnly = true;
-      },
-    ).toThrow(TypeError);
+    expect(() => {
+      (context.capabilities as { canExecCommands: boolean }).canExecCommands =
+        false;
+    }).toThrow(TypeError);
+    expect(() => {
+      (lease.capabilities as { readOnly: boolean }).readOnly = true;
+    }).toThrow(TypeError);
 
     expect(manager.getContext("session_1")?.capabilities).toMatchObject({
       canExecCommands: true,

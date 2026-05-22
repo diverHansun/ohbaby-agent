@@ -19,9 +19,9 @@ async function tempRoot(): Promise<string> {
 
 afterEach(async () => {
   await Promise.all(
-    cleanupPaths.splice(0).map((path) =>
-      rm(path, { recursive: true, force: true }),
-    ),
+    cleanupPaths
+      .splice(0)
+      .map((path) => rm(path, { recursive: true, force: true })),
   );
 });
 
@@ -31,9 +31,9 @@ describe("services/storage", () => {
 
     await storage.writeText(["tasks", "task_1", "stdout"], "hello\n世界");
 
-    await expect(
-      storage.readText(["tasks", "task_1", "stdout"]),
-    ).resolves.toBe("hello\n世界");
+    await expect(storage.readText(["tasks", "task_1", "stdout"])).resolves.toBe(
+      "hello\n世界",
+    );
   });
 
   it("writes and reads bytes without changing content", async () => {
@@ -109,7 +109,10 @@ describe("services/storage", () => {
     const storage = createStorage({ rootDir });
     await storage.writeText(["snapshot", "patches", "a"], "a");
     await import("node:fs/promises").then((fs) =>
-      fs.writeFile(join(rootDir, "snapshot", "patches", ".tmp-leftover"), "tmp"),
+      fs.writeFile(
+        join(rootDir, "snapshot", "patches", ".tmp-leftover"),
+        "tmp",
+      ),
     );
 
     await expect(storage.list(["snapshot"])).resolves.toEqual([
@@ -133,8 +136,9 @@ describe("services/storage", () => {
   it("rejects top-level undefined JSON values", async () => {
     const storage = createStorage({ rootDir: await tempRoot() });
 
-    await expect(storage.writeJson(["debug", "undefined"], undefined)).rejects
-      .toThrow(/JSON/);
+    await expect(
+      storage.writeJson(["debug", "undefined"], undefined),
+    ).rejects.toThrow(/JSON/);
   });
 
   it("keeps old content if an atomic write fails before replace", async () => {
@@ -146,9 +150,7 @@ describe("services/storage", () => {
         if (failWrites && path.includes(".tmp-")) {
           throw new Error("disk full");
         }
-        await import("node:fs/promises").then((fs) =>
-          fs.writeFile(path, data),
-        );
+        await import("node:fs/promises").then((fs) => fs.writeFile(path, data));
       },
     });
     const key = ["snapshot", "patches", "patch_1"];

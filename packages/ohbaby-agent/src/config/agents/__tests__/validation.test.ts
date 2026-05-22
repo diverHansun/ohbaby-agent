@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  AgentConfigSchema,
-  AgentsConfigSchema,
-} from "../types.js";
+import { AgentConfigSchema, AgentsConfigSchema } from "../types.js";
 
 const VALID_PRIMARY_AGENT = {
   name: "build",

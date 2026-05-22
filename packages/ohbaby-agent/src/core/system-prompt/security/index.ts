@@ -104,7 +104,8 @@ const RULES: readonly PromptSecurityRule[] = [
   },
   {
     category: "secret_exfiltration",
-    message: "The file attempts to send secrets or credentials over the network.",
+    message:
+      "The file attempts to send secrets or credentials over the network.",
     pattern:
       /\b(?:curl|wget|Invoke-WebRequest|iwr)\b[^\n]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|API)/i,
     patternId: "exfiltrate_secret",

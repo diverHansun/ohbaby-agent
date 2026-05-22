@@ -70,6 +70,9 @@ export type AgentTaskStoreUpdate = {
 export interface AgentTaskStore {
   create(record: AgentTaskRecord): Promise<AgentTaskRecord>;
   get(taskId: string): Promise<AgentTaskRecord | null>;
-  update(taskId: string, update: AgentTaskStoreUpdate): Promise<AgentTaskRecord>;
+  update(
+    taskId: string,
+    update: AgentTaskStoreUpdate,
+  ): Promise<AgentTaskRecord>;
   list(): Promise<readonly AgentTaskRecord[]>;
 }

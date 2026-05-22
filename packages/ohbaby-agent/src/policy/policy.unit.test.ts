@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createBus } from "../bus/index.js";
 import { createPolicyManager, PolicyEvent } from "./index.js";
-import type { PolicyCheckInput, PolicyDecision, ToolCategory } from "./index.js";
+import type {
+  PolicyCheckInput,
+  PolicyDecision,
+  ToolCategory,
+} from "./index.js";
 
 function checkInput(category: ToolCategory): PolicyCheckInput {
   return {
@@ -60,9 +64,7 @@ describe("PolicyManager", () => {
     policy.setMode("ask");
     policy.setMode("ask");
 
-    expect(modeEvents).toEqual([
-      { currentMode: "ask", previousMode: "agent" },
-    ]);
+    expect(modeEvents).toEqual([{ currentMode: "ask", previousMode: "agent" }]);
     expect(agentEvents).toEqual([
       {
         currentState: "edit-automatically",
@@ -107,7 +109,9 @@ describe("PolicyManager", () => {
     const bus = createBus();
     const policy = createPolicyManager({ bus });
     const setRuntimeMode = policy.setMode as (mode: string) => void;
-    const setRuntimeAgentState = policy.setAgentState as (state: string) => void;
+    const setRuntimeAgentState = policy.setAgentState as (
+      state: string,
+    ) => void;
     const modeEvents: unknown[] = [];
     const agentEvents: unknown[] = [];
 

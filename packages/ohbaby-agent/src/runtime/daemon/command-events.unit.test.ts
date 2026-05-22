@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { createBus } from "../../bus/index.js";
 import { CommandsEvent } from "../../commands/index.js";
 import { InteractionEvent } from "../interaction-broker/index.js";
-import type { StreamBridge, StreamBridgeYield } from "../stream-bridge/index.js";
+import type {
+  StreamBridge,
+  StreamBridgeYield,
+} from "../stream-bridge/index.js";
 import { startCommandEventAdapter } from "./command-events.js";
 
 describe("startCommandEventAdapter", () => {
@@ -131,7 +134,11 @@ class RecordingStreamBridge implements StreamBridge {
     readonly data: unknown;
   }[] = [];
 
-  publish(scope: "app" | `run/${string}`, event: string, data: unknown): number {
+  publish(
+    scope: "app" | `run/${string}`,
+    event: string,
+    data: unknown,
+  ): number {
     this.published.push({ scope, event, data });
     return this.published.length;
   }

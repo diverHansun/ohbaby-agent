@@ -16,9 +16,7 @@ export function selectHasActivePermission(state: TuiStoreState): boolean {
   return state.permissions.length > 0;
 }
 
-export function selectEffectiveRuntime(
-  state: TuiStoreState,
-): TuiRuntimeStatus {
+export function selectEffectiveRuntime(state: TuiStoreState): TuiRuntimeStatus {
   if (state.permissions.length > 0) {
     return {
       kind: "waiting-for-permission" as const,

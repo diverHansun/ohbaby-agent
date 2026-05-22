@@ -3,26 +3,26 @@
  * Tests the complete flow from public API.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as fs from 'node:fs/promises';
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as fs from "node:fs/promises";
 import {
   getLLMConfig,
   reloadLLMConfig,
   isLLMConfigCached,
   ConfigError,
   _LLMConfigManager as LLMConfigManager,
-} from '../index.js';
+} from "../index.js";
 
 // Mock fs module
-vi.mock('node:fs/promises');
+vi.mock("node:fs/promises");
 
-describe('config/llm integration', () => {
+describe("config/llm integration", () => {
   const validModelJson = {
-    provider: 'openai',
-    defaultModel: 'gpt-4',
+    provider: "openai",
+    defaultModel: "gpt-4",
     apiConfig: {
-      baseUrl: 'https://api.openai.com/v1',
-      apiKeyEnv: 'OPENAI_API_KEY',
+      baseUrl: "https://api.openai.com/v1",
+      apiKeyEnv: "OPENAI_API_KEY",
     },
     llmParams: {
       temperature: 0.7,
@@ -36,30 +36,30 @@ describe('config/llm integration', () => {
     LLMConfigManager.resetInstance();
     vi.resetAllMocks();
     process.env = { ...originalEnv };
-    process.env.OPENAI_API_KEY = 'sk-test-integration-key';
+    process.env.OPENAI_API_KEY = "sk-test-integration-key";
   });
 
   afterEach(() => {
     process.env = originalEnv;
   });
 
-  describe('getLLMConfig', () => {
-    it('should load complete configuration', async () => {
+  describe("getLLMConfig", () => {
+    it("should load complete configuration", async () => {
       vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(validModelJson));
 
       const config = await getLLMConfig();
 
       expect(config).toEqual({
-        provider: 'openai',
-        model: 'gpt-4',
-        apiKey: 'sk-test-integration-key',
-        baseUrl: 'https://api.openai.com/v1',
+        provider: "openai",
+        model: "gpt-4",
+        apiKey: "sk-test-integration-key",
+        baseUrl: "https://api.openai.com/v1",
         temperature: 0.7,
         maxTokens: 4096,
       });
     });
 
-    it('should cache after first call', async () => {
+    it("should cache after first call", async () => {
       vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(validModelJson));
 
       expect(isLLMConfigCached()).toBe(false);
@@ -74,60 +74,62 @@ describe('config/llm integration', () => {
       expect(fs.readFile).toHaveBeenCalledTimes(1);
     });
 
-    it('should throw ConfigError for missing file', async () => {
-      const error = new Error('ENOENT') as NodeJS.ErrnoException;
-      error.code = 'ENOENT';
+    it("should throw ConfigError for missing file", async () => {
+      const error = new Error("ENOENT") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
       vi.mocked(fs.readFile).mockRejectedValue(error);
 
       await expect(getLLMConfig()).rejects.toThrow(ConfigError);
       await expect(getLLMConfig()).rejects.toMatchObject({
-        code: 'FILE_NOT_FOUND',
+        code: "FILE_NOT_FOUND",
       });
     });
 
-    it('should throw ConfigError for invalid JSON', async () => {
-      vi.mocked(fs.readFile).mockResolvedValue('{ broken json');
+    it("should throw ConfigError for invalid JSON", async () => {
+      vi.mocked(fs.readFile).mockResolvedValue("{ broken json");
 
       await expect(getLLMConfig()).rejects.toThrow(ConfigError);
       await expect(getLLMConfig()).rejects.toMatchObject({
-        code: 'INVALID_JSON',
+        code: "INVALID_JSON",
       });
     });
 
-    it('should throw ConfigError for missing required fields', async () => {
+    it("should throw ConfigError for missing required fields", async () => {
       const incompleteConfig = {
-        provider: 'openai',
+        provider: "openai",
         // missing other fields
       };
-      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(incompleteConfig));
+      vi.mocked(fs.readFile).mockResolvedValue(
+        JSON.stringify(incompleteConfig),
+      );
 
       await expect(getLLMConfig()).rejects.toThrow(ConfigError);
       await expect(getLLMConfig()).rejects.toMatchObject({
-        code: 'MISSING_FIELD',
+        code: "MISSING_FIELD",
       });
     });
 
-    it('should throw ConfigError for missing API key', async () => {
+    it("should throw ConfigError for missing API key", async () => {
       vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(validModelJson));
       delete process.env.OPENAI_API_KEY;
 
       await expect(getLLMConfig()).rejects.toThrow(ConfigError);
       await expect(getLLMConfig()).rejects.toMatchObject({
-        code: 'MISSING_API_KEY',
+        code: "MISSING_API_KEY",
       });
     });
 
-    it('should throw ConfigError for empty API key', async () => {
+    it("should throw ConfigError for empty API key", async () => {
       vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(validModelJson));
-      process.env.OPENAI_API_KEY = '';
+      process.env.OPENAI_API_KEY = "";
 
       await expect(getLLMConfig()).rejects.toThrow(ConfigError);
       await expect(getLLMConfig()).rejects.toMatchObject({
-        code: 'EMPTY_API_KEY',
+        code: "EMPTY_API_KEY",
       });
     });
 
-    it('should throw ConfigError for invalid temperature', async () => {
+    it("should throw ConfigError for invalid temperature", async () => {
       const invalidConfig = {
         ...validModelJson,
         llmParams: { ...validModelJson.llmParams, temperature: 3.0 },
@@ -136,16 +138,16 @@ describe('config/llm integration', () => {
 
       await expect(getLLMConfig()).rejects.toThrow(ConfigError);
       await expect(getLLMConfig()).rejects.toMatchObject({
-        code: 'INVALID_TEMPERATURE',
+        code: "INVALID_TEMPERATURE",
       });
     });
   });
 
-  describe('reloadLLMConfig', () => {
-    it('should reload configuration from file', async () => {
+  describe("reloadLLMConfig", () => {
+    it("should reload configuration from file", async () => {
       const updatedModelJson = {
         ...validModelJson,
-        defaultModel: 'gpt-4-turbo',
+        defaultModel: "gpt-4-turbo",
         llmParams: { ...validModelJson.llmParams, temperature: 1.0 },
       };
 
@@ -154,18 +156,18 @@ describe('config/llm integration', () => {
         .mockResolvedValueOnce(JSON.stringify(updatedModelJson));
 
       const config1 = await getLLMConfig();
-      expect(config1.model).toBe('gpt-4');
+      expect(config1.model).toBe("gpt-4");
       expect(config1.temperature).toBe(0.7);
 
       const config2 = await reloadLLMConfig();
-      expect(config2.model).toBe('gpt-4-turbo');
+      expect(config2.model).toBe("gpt-4-turbo");
       expect(config2.temperature).toBe(1.0);
     });
 
-    it('should update cache after reload', async () => {
+    it("should update cache after reload", async () => {
       const updatedModelJson = {
         ...validModelJson,
-        defaultModel: 'gpt-4-turbo',
+        defaultModel: "gpt-4-turbo",
       };
 
       vi.mocked(fs.readFile)
@@ -177,19 +179,19 @@ describe('config/llm integration', () => {
 
       // Subsequent getLLMConfig should return updated config
       const config = await getLLMConfig();
-      expect(config.model).toBe('gpt-4-turbo');
+      expect(config.model).toBe("gpt-4-turbo");
       expect(fs.readFile).toHaveBeenCalledTimes(2);
     });
   });
 
-  describe('different providers', () => {
-    it('should support zhipu provider', async () => {
+  describe("different providers", () => {
+    it("should support zhipu provider", async () => {
       const zhipuConfig = {
-        provider: 'zhipu',
-        defaultModel: 'glm-4-plus',
+        provider: "zhipu",
+        defaultModel: "glm-4-plus",
         apiConfig: {
-          baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-          apiKeyEnv: 'ZHIPU_API_KEY',
+          baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+          apiKeyEnv: "ZHIPU_API_KEY",
         },
         llmParams: {
           temperature: 0.2,
@@ -197,23 +199,23 @@ describe('config/llm integration', () => {
         },
       };
       vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(zhipuConfig));
-      process.env.ZHIPU_API_KEY = 'zhipu-test-key';
+      process.env.ZHIPU_API_KEY = "zhipu-test-key";
 
       const config = await getLLMConfig();
 
-      expect(config.provider).toBe('zhipu');
-      expect(config.model).toBe('glm-4-plus');
-      expect(config.apiKey).toBe('zhipu-test-key');
-      expect(config.baseUrl).toBe('https://open.bigmodel.cn/api/paas/v4');
+      expect(config.provider).toBe("zhipu");
+      expect(config.model).toBe("glm-4-plus");
+      expect(config.apiKey).toBe("zhipu-test-key");
+      expect(config.baseUrl).toBe("https://open.bigmodel.cn/api/paas/v4");
     });
 
-    it('should support custom provider', async () => {
+    it("should support custom provider", async () => {
       const customConfig = {
-        provider: 'custom',
-        defaultModel: 'custom-model',
+        provider: "custom",
+        defaultModel: "custom-model",
         apiConfig: {
-          baseUrl: 'http://localhost:8080/v1',
-          apiKeyEnv: 'CUSTOM_API_KEY',
+          baseUrl: "http://localhost:8080/v1",
+          apiKeyEnv: "CUSTOM_API_KEY",
         },
         llmParams: {
           temperature: 0.5,
@@ -221,12 +223,12 @@ describe('config/llm integration', () => {
         },
       };
       vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(customConfig));
-      process.env.CUSTOM_API_KEY = 'custom-key';
+      process.env.CUSTOM_API_KEY = "custom-key";
 
       const config = await getLLMConfig();
 
-      expect(config.provider).toBe('custom');
-      expect(config.model).toBe('custom-model');
+      expect(config.provider).toBe("custom");
+      expect(config.model).toBe("custom-model");
     });
   });
 });

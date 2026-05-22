@@ -106,10 +106,7 @@ describe("agent task builtin tools", () => {
       { interrupt: true, prompt: "continue", task_id: "task_1" },
       context,
     );
-    await getTool(tools, "agent_close").execute(
-      { task_id: "task_1" },
-      context,
-    );
+    await getTool(tools, "agent_close").execute({ task_id: "task_1" }, context);
     await getTool(tools, "agent_status").execute(
       { task_id: "task_1" },
       context,
@@ -134,12 +131,14 @@ describe("agent task builtin tools", () => {
 
   it("rejects invalid parameters", async () => {
     const tool = getTool(
-      createBuiltinTools({ agentTaskController: createController().controller }),
+      createBuiltinTools({
+        agentTaskController: createController().controller,
+      }),
       "agent_eval",
     );
 
-    await expect(
-      tool.execute({ prompt: "continue" }, context),
-    ).rejects.toThrow('Expected parameter "task_id" to be a non-empty string.');
+    await expect(tool.execute({ prompt: "continue" }, context)).rejects.toThrow(
+      'Expected parameter "task_id" to be a non-empty string.',
+    );
   });
 });

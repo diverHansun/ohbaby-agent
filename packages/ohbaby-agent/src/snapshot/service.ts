@@ -131,9 +131,7 @@ export class SnapshotService {
   private readonly activeWriterChecker?: ActiveWriterChecker;
   private readonly captureLocks = new Map<string, Promise<SnapshotPatch>>();
 
-  constructor(
-    readonly options: SnapshotServiceOptions,
-  ) {
+  constructor(readonly options: SnapshotServiceOptions) {
     this.store = options.store;
     this.diffEngine = options.diffEngine;
     this.now = options.now ?? Date.now;
@@ -233,7 +231,9 @@ export class SnapshotService {
   }
 
   async diff(params: DiffSnapshotParams): Promise<SnapshotDiff> {
-    const fromCheckpoint = this.store.requireCheckpoint(params.fromCheckpointId);
+    const fromCheckpoint = this.store.requireCheckpoint(
+      params.fromCheckpointId,
+    );
 
     if (params.toCheckpointId === undefined) {
       const computed = await this.diffEngine.computeDiff(fromCheckpoint);
@@ -272,7 +272,10 @@ export class SnapshotService {
     );
     const artifacts = await this.loadPatchArtifacts(patches);
     for (const item of artifacts) {
-      await this.diffEngine.applyReverse(item.checkpoint.workdir, item.artifact);
+      await this.diffEngine.applyReverse(
+        item.checkpoint.workdir,
+        item.artifact,
+      );
     }
 
     return { messageCursorBefore: checkpoint.messageCursorBefore };
@@ -281,7 +284,10 @@ export class SnapshotService {
   async revert(patches: readonly SnapshotPatch[]): Promise<void> {
     const artifacts = await this.loadPatchArtifacts(patches);
     for (const item of artifacts) {
-      await this.diffEngine.applyReverse(item.checkpoint.workdir, item.artifact);
+      await this.diffEngine.applyReverse(
+        item.checkpoint.workdir,
+        item.artifact,
+      );
     }
   }
 
@@ -294,10 +300,7 @@ export class SnapshotService {
         continue;
       }
       if (patch.fileCount > 0 && patch.artifactPath === null) {
-        throw new ArtifactNotAvailableError(
-          patch.patchId,
-          patch.checkpointId,
-        );
+        throw new ArtifactNotAvailableError(patch.patchId, patch.checkpointId);
       }
       const checkpoint = this.store.requireCheckpoint(patch.checkpointId);
       const artifact = parsePatchArtifact(
@@ -314,7 +317,8 @@ export class SnapshotService {
     filePatches?: readonly SnapshotFilePatch[],
   ): Promise<SnapshotPatch> {
     const patches =
-      filePatches ?? (await this.diffEngine.computeDiff(checkpoint)).filePatches;
+      filePatches ??
+      (await this.diffEngine.computeDiff(checkpoint)).filePatches;
     const artifact = createArtifact(patch, patches);
     try {
       const artifactPath = await this.store.writeArtifact(
@@ -335,9 +339,7 @@ export class SnapshotService {
     return Promise.resolve(this.store.listCheckpoints(sessionId, options));
   }
 
-  getCheckpoint(
-    checkpointId: string,
-  ): Promise<SnapshotCheckpoint | undefined> {
+  getCheckpoint(checkpointId: string): Promise<SnapshotCheckpoint | undefined> {
     return Promise.resolve(this.store.getCheckpoint(checkpointId));
   }
 

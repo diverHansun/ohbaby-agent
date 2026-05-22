@@ -12,9 +12,9 @@
  * - config module: Provides validated LLM configuration
  */
 
-import { getLLMConfig } from '../../config/index.js';
-import { createProvider } from '../../services/providers/index.js';
-import type { LLMClientInstance } from './types.js';
+import { getLLMConfig } from "../../config/index.js";
+import { createProvider } from "../../services/providers/index.js";
+import type { LLMClientInstance } from "./types.js";
 
 export interface CreateLLMClientOptions {
   readonly projectDirectory?: string;

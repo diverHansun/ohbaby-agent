@@ -6,7 +6,10 @@ export class NotFoundError extends Error {
 }
 
 export class InvalidStorageKeyError extends Error {
-  constructor(readonly key: readonly string[], reason: string) {
+  constructor(
+    readonly key: readonly string[],
+    reason: string,
+  ) {
     super(`Invalid storage key ${JSON.stringify(key)}: ${reason}`);
     this.name = "InvalidStorageKeyError";
   }

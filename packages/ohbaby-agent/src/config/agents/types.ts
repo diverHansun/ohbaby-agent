@@ -75,15 +75,16 @@ function formatZodIssues(issues: readonly z.ZodIssue[]): string {
 export const AgentModeSchema = z.enum(["primary", "subagent", "all"]);
 export const PermissionValueSchema = z.enum(["allow", "deny", "ask"]);
 
-export const HexColorSchema = z.string().regex(
-  /^#[0-9a-fA-F]{6}$/u,
-  "Invalid hex color format (expected #RRGGBB)",
-);
+export const HexColorSchema = z
+  .string()
+  .regex(/^#[0-9a-fA-F]{6}$/u, "Invalid hex color format (expected #RRGGBB)");
 
-export const ModelIdSchema = z.string().regex(
-  /^[^\s/]+\/[^\s/]+$/u,
-  "Invalid model ID format (expected providerID/modelID)",
-);
+export const ModelIdSchema = z
+  .string()
+  .regex(
+    /^[^\s/]+\/[^\s/]+$/u,
+    "Invalid model ID format (expected providerID/modelID)",
+  );
 
 export const ToolsConfigSchema = z
   .object({
@@ -103,7 +104,10 @@ export const PermissionConfigSchema = z
   .object({
     edit: PermissionValueSchema.optional(),
     bash: z
-      .union([PermissionValueSchema, z.record(z.string(), PermissionValueSchema)])
+      .union([
+        PermissionValueSchema,
+        z.record(z.string(), PermissionValueSchema),
+      ])
       .optional(),
     web: PermissionValueSchema.optional(),
     mcp: PermissionValueSchema.optional(),
