@@ -173,7 +173,8 @@ interface AgentConfig {
    * 优先级：exclude > include > 默认工具集
    *
    * 特殊规则：
-   * - 子代理自动禁用：task, todowrite, todoread（防止递归）
+   * - 子代理自动禁用：task 和 agent 控制工具（防止递归）
+   * - todo 工具按 agent 配置启用，可用于子代理自己的 session 计划
    * - 主代理自动启用：task（用于调用子代理）
    */
   tools?: ToolsConfig

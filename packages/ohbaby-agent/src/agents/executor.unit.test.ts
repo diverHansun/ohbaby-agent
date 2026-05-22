@@ -358,8 +358,7 @@ describe("SubagentExecutor", () => {
     expect(runInput.runtimeAgent.isSubagent).toBe(true);
     expect(runInput.runtimeAgent.tools).toMatchObject({
       task: false,
-      todo_read: false,
-      todo_write: false,
+      todo_read: true,
     });
   });
 });

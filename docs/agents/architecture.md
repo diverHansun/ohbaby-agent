@@ -219,13 +219,13 @@ export const BUILTIN_AGENTS = ['build', 'plan', 'explore', 'research'] as const
 - 增加 Session 存储开销
 - 需要清理长期未使用的子 Session
 
-### 4.4 子代理禁用特定工具
+### 4.4 子代理禁用递归控制工具
 
-**决策**：子代理硬编码禁用 task、todowrite、todoread 工具。
+**决策**：子代理硬编码禁用 `task`、`agent_open`、`agent_eval`、`agent_status`、`agent_close` 等递归 agent 控制工具；`todo_read` / `todo_write` 按 agent 配置正常启用。
 
 **理由**：
 - 防止递归创建子代理
-- 子代理不需要任务管理能力
+- 子代理需要在自己的 child session 内管理复杂任务计划
 - 简化实现，降低风险
 
 **代价**：
@@ -320,7 +320,7 @@ export const BUILTIN_AGENTS = ['build', 'plan', 'explore', 'research'] as const
    │       AgentManager.getRuntimeAgent(agentName)
    │
    ├── 5. 应用子代理工具限制
-   │       禁用 task, todowrite, todoread
+   │       禁用 task 和 agent_* 递归控制工具；todo 按 agent 配置保留
    │
    ├── 6. 执行 Lifecycle
    │       Lifecycle.run(runtimeAgent, session)

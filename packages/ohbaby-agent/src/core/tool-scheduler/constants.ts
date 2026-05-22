@@ -57,6 +57,4 @@ export const SUBAGENT_DISABLED_TOOLS = new Set([
   "agent_eval",
   "agent_status",
   "agent_close",
-  "todo_write",
-  "todo_read",
 ]);

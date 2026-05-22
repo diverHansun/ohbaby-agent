@@ -270,7 +270,7 @@ Lifecycle                ToolScheduler              Policy         AgentManager
    - `tools['toolName'] = true`：显式启用特定工具
 
 3. 特殊规则（子代理）：
-   - 子代理的 task、todowrite、todoread 工具始终禁用
+   - 子代理的 task 和 agent_* 递归控制工具始终禁用；todo 工具按 agent 配置启用
 
 ### 2.4 状态变化通知流程
 

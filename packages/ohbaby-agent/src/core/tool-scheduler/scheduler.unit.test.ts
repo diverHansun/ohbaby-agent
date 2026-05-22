@@ -198,11 +198,10 @@ describe("ToolScheduler", () => {
     }
 
     await expect(
-      scheduler.getAvailableTools({ agentName: "explore", isSubagent: true }),
-    ).resolves.toMatchObject([
-      expect.objectContaining({ name: "read" }),
-      expect.objectContaining({ name: "edit" }),
-    ]);
+      scheduler
+        .getAvailableTools({ agentName: "explore", isSubagent: true })
+        .then((tools) => tools.map((tool) => tool.name)),
+    ).resolves.toEqual(["read", "edit", "todo_read"]);
   });
 
   it("normalizes agent include and exclude tool config before listing tools", async () => {

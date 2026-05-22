@@ -100,7 +100,8 @@ function renderTodos(todos: readonly TodoItem[]): string {
 function createTodoReadTool(store: TodoStore): Tool {
   return {
     name: "todo_read",
-    description: "Read the current session-scoped todo list.",
+    description:
+      "Read the current session-scoped todo list. Todo lists are isolated per primary or child session.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {},
@@ -122,7 +123,8 @@ function createTodoReadTool(store: TodoStore): Tool {
 function createTodoWriteTool(store: TodoStore): Tool {
   return {
     name: "todo_write",
-    description: "Replace the current session-scoped todo list.",
+    description:
+      "Create or replace the current session-scoped todo list. Use this for complex, multi-step tasks; keep exactly one item in_progress, mark items completed promptly, and skip it for trivial one-step work.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {

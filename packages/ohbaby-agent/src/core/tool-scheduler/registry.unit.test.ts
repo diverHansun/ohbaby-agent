@@ -80,7 +80,14 @@ describe("ToolRegistry", () => {
           tools: { "*": true },
         })
         .map((tool) => tool.name),
-    ).toEqual(["read", "edit", "web_search", "memory_add"]);
+    ).toEqual([
+      "read",
+      "edit",
+      "web_search",
+      "memory_add",
+      "todo_read",
+      "todo_write",
+    ]);
     expect(
       registry
         .getAvailableTools({

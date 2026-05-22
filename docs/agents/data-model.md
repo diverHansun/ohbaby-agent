@@ -32,8 +32,8 @@
 | `maxSteps` | 较大（默认 50） | 较小（默认 20） |
 | `timeout` | 较长（默认 5 分钟） | 较短（默认 3 分钟） |
 | `tools.task` | 自动启用 | **自动禁用**（防止递归） |
-| `tools.todowrite` | 启用 | **禁用** |
-| `tools.todoread` | 启用 | **禁用** |
+| `tools.todowrite` | 启用 | 按 agent 配置启用 |
+| `tools.todoread` | 启用 | 按 agent 配置启用 |
 
 ### 1.3 SubagentResult（子代理执行结果）
 
@@ -517,7 +517,7 @@ const BUILTIN_SUBAGENTS = ['explore', 'research'] as const
 
 ```typescript
 /** 子代理固定禁用的工具（防止递归） */
-const SUBAGENT_DISABLED_TOOLS = ['task', 'todowrite', 'todoread'] as const
+const SUBAGENT_DISABLED_TOOLS = ['task', 'agent_open', 'agent_eval', 'agent_status', 'agent_close'] as const
 ```
 
 ---
@@ -549,7 +549,7 @@ agents 模块在配置加载后执行业务验证：
 | 工具存在性 | tools.include/exclude 中的工具名必须存在 |
 | 模型可用性 | model 指定的模型必须是可用的 |
 | 权限合法性 | bash 通配符格式正确 |
-| 子代理工具限制 | 子代理自动禁用 task/todowrite/todoread |
+| 子代理工具限制 | 子代理自动禁用 task/agent_* 递归控制工具；todo 按配置启用 |
 
 ### 6.3 名称验证
 

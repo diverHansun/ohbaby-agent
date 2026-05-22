@@ -65,8 +65,6 @@ describe("AgentManager", () => {
       grep: true,
       read: true,
       task: false,
-      todo_read: false,
-      todo_write: false,
     });
   });
 
