@@ -1037,6 +1037,11 @@ describe("createInProcessUiBackendClient", () => {
     expect(childRequests).toHaveLength(2);
     for (const request of childRequests) {
       const toolNames = request.tools?.map((tool) => tool.function.name) ?? [];
+      expect(toolNames).toContain("bash");
+      expect(toolNames).toContain("edit");
+      expect(toolNames).toContain("todo_read");
+      expect(toolNames).toContain("todo_write");
+      expect(toolNames).toContain("write");
       expect(toolNames).not.toContain("task");
       expect(toolNames).not.toContain("agent_open");
       expect(toolNames).not.toContain("agent_eval");

@@ -29,6 +29,33 @@ describe("AgentRegistry", () => {
     });
   });
 
+  it("gives builtin subagents planning, shell, and file editing tools", async () => {
+    const registry = new AgentRegistry({
+      configLoader: (): AgentsConfig => ({ agents: {} }),
+    });
+
+    await registry.initialize();
+
+    expect(registry.get("explore")?.tools?.include).toEqual(
+      expect.arrayContaining([
+        "bash",
+        "edit",
+        "todo_read",
+        "todo_write",
+        "write",
+      ]),
+    );
+    expect(registry.get("research")?.tools?.include).toEqual(
+      expect.arrayContaining([
+        "bash",
+        "edit",
+        "todo_read",
+        "todo_write",
+        "write",
+      ]),
+    );
+  });
+
   it("fully replaces same-name builtin agents and merges different names", async () => {
     const registry = new AgentRegistry({
       configLoader: (): AgentsConfig => ({
@@ -144,5 +171,28 @@ describe("AgentRegistry", () => {
         `Subagent cannot enable disabled tool: ${toolName}`,
       );
     }
+  });
+
+  it("allows subagents to include session-scoped todo tools", async () => {
+    const registry = new AgentRegistry({
+      configLoader: (): AgentsConfig => ({
+        agents: {
+          planner: {
+            description: "Plan a bounded child task",
+            mode: "subagent",
+            name: "planner",
+            tools: { include: ["read", "todo_read", "todo_write"] },
+          },
+        },
+      }),
+    });
+
+    await registry.initialize();
+
+    expect(registry.get("planner")?.tools?.include).toEqual([
+      "read",
+      "todo_read",
+      "todo_write",
+    ]);
   });
 });
