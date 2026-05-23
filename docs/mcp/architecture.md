@@ -1,6 +1,6 @@
 # mcp 模块 architecture.md
 
-本文档描述 `mcp` 模块的内部架构与设计模式。所有设计基于 `goals-duty.md` 中定义的职责。
+本文档描述 `mcp` 模块的内部架构。当前实现以 Anthropic / MCP 开放标准为主：ohbaby-agent 作为 MCP Host，在每个 workspace 内维护多个 MCP Client，每个 Client 连接一个 MCP Server。Server 可以暴露 tools、resources、prompts 等上下文能力。
 
 ---
 
@@ -8,589 +8,146 @@
 
 ### 模块定位
 
-mcp模块是ohbaby-agent的MCP协议客户端实现层，位于config/mcp和tool-scheduler之间，负责MCP服务器的连接管理和工具适配。
+`mcp` 模块位于 `config/mcp`、runtime composition、tool-scheduler 和未来 `plugins` 模块之间，负责：
 
-### 核心架构
+- 按 MCP Server 配置创建 Client 连接
+- 执行 MCP 初始化生命周期并记录 server capabilities / info / instructions
+- 发现 MCP tools 并适配为 ohbaby-agent `Tool`
+- 提供 MCP resources / prompts 的只读访问工具
+- 监听 `tools/list_changed`，清理缓存并通知 runtime 刷新
+- 接收未来 plugins 模块分发的 MCP server contribution
+
+### 核心结构
 
 ```
 mcp/
-├── index.ts                      # 公开接口导出
-├── types.ts                      # 类型定义
+├── index.ts
+├── types.ts
 │
-├── core/                         # 核心层
-│   ├── client.ts                # MCP客户端封装
-│   ├── manager.ts               # MCP管理器（生命周期）
-│   └── transport.ts             # 传输层工厂
+├── core/
+│   ├── client.ts       # 单个 MCP Client：连接、metadata、tools/resources/prompts
+│   ├── manager.ts      # workspace 级管理器：多 server、缓存、plugin 注册、change event
+│   └── transport.ts    # stdio / streamable HTTP / legacy SSE transport factory
 │
-├── integration/                  # 集成层
-│   └── tool-adapter.ts          # MCP工具→Tool转换
+├── integration/
+│   ├── tool-adapter.ts             # MCP tool -> Tool
+│   └── resource-prompt-tools.ts    # mcp_resource / mcp_prompt module tools
 │
-└── __tests__/                    # 测试
-    ├── client.test.ts
-    ├── manager.test.ts
-    └── tool-adapter.test.ts
+└── __tests__/
 ```
 
-### 组件协作图
+### Host / Client / Server 映射
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        McpManager                            │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │  clients: Map<string, McpClient>                       │ │
-│  │  initPromise: Promise<void> | null                     │ │
-│  │  workspaceId: string                                   │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                               │
-│  ┌─────────────────────────────────────────┐                │
-│  │  ensureInitialized()                    │ ← 懒加载       │
-│  │  ├─ loadMcpConfig()                     │   入口         │
-│  │  ├─ 并行创建 McpClient                  │                │
-│  │  └─ 错误隔离                             │                │
-│  └─────────────────────────────────────────┘                │
-│                                                               │
-│  ┌─────────────────────────────────────────┐                │
-│  │  getAllTools()                          │ ← 工具发现     │
-│  │  ├─ ensureInitialized()                 │                │
-│  │  ├─ 遍历 clients                        │                │
-│  │  └─ adaptMcpTool()                      │                │
-│  └─────────────────────────────────────────┘                │
-│                                                               │
-│  ┌─────────────────────────────────────────┐                │
-│  │  executeTool()                          │ ← 工具执行     │
-│  │  ├─ ensureInitialized()                 │                │
-│  │  ├─ clients.get(serverName)             │                │
-│  │  └─ client.callTool()                   │                │
-│  └─────────────────────────────────────────┘                │
-└─────────────────────────────────────────────────────────────┘
-                    │
-         ┌──────────┼──────────┐
-         │          │          │
-         ▼          ▼          ▼
-   ┌──────────┐ ┌──────────┐ ┌──────────┐
-   │McpClient1│ │McpClient2│ │McpClient3│
-   └──────────┘ └──────────┘ └──────────┘
-         │          │          │
-         ▼          ▼          ▼
-   MCP Server1  MCP Server2  MCP Server3
-   (Stdio)      (HTTP)       (SSE)
-```
+| MCP 概念 | ohbaby-agent 实现 |
+|----------|-------------------|
+| Host | runtime composition + ToolScheduler |
+| Client | `McpClient`，每个 server 一个实例 |
+| Server | 用户配置或插件贡献的 MCP server |
+| Tools | `adaptMcpTool()` 适配进 ToolScheduler |
+| Resources | `mcp_resource` 只读 module tool 读取 |
+| Prompts | `mcp_prompt` 只读 module tool 获取 |
 
 ---
 
-## 二、Design Pattern & Rationale（设计模式与理由）
+## 二、核心组件
 
-### 2.1 单例模式（Singleton）
+### 2.1 McpClient
 
-McpManager采用按工作区的单例模式。
+`McpClient` 包装官方 SDK Client。连接成功后会：
 
-```typescript
-export class McpManager {
-  private static instances = new Map<string, McpManager>()
+1. 通过 SDK 初始化流程完成 protocol negotiation
+2. 读取 `getServerCapabilities()`、`getServerVersion()`、`getInstructions()`
+3. 调用 `listTools()` 建立工具缓存
+4. 注册 `ToolListChangedNotificationSchema` handler
 
-  static getInstance(workspaceId: string): McpManager {
-    if (!this.instances.has(workspaceId)) {
-      this.instances.set(workspaceId, new McpManager(workspaceId))
-    }
-    return this.instances.get(workspaceId)!
-  }
-}
-```
+主要接口：
 
-理由：
-- 每个工作区只需要一个MCP管理器实例
-- 避免重复初始化和连接
-- 支持多工作区隔离
-- 简化资源管理
+- `connect()`
+- `listTools()`
+- `callTool()`
+- `listResources()` / `readResource(uri)`
+- `listPrompts()` / `getPrompt(name, args)`
+- `getServerMetadata()`
+- `onToolsChanged(listener)`
+- `disconnect()`
 
-### 2.2 懒加载模式（Lazy Initialization）
+如果 server 未声明 resources/prompts capability，列表接口返回空数组；直接读取 unsupported capability 会抛出明确错误。
 
-MCP客户端在首次使用时才初始化。
+### 2.2 McpManager
 
-```typescript
-async ensureInitialized(): Promise<void> {
-  if (this.initPromise) {
-    return this.initPromise  // 正在初始化，等待
-  }
+`McpManager` 是 workspace 级 facade。它保持每个 workspace 一个实例，首次访问时才读取配置和连接 server。
 
-  if (this.clients.size > 0) {
-    return  // 已初始化
-  }
+职责：
 
-  // 开始初始化
-  this.initPromise = this.initialize()
-  try {
-    await this.initPromise
-  } finally {
-    this.initPromise = null
-  }
-}
-```
+- 从 `config/mcp` 读取全局 + 项目配置
+- 合并 `registerPluginServers(pluginId, servers)` 注册的插件 server
+- 手动配置同名时优先于插件配置
+- 并行连接多个 server，单个失败不影响其他 server
+- 缓存适配后的 MCP tools
+- 汇总 resources/prompts，并在返回时附加 `serverName`
+- 对外发布 `onChange()`，让 runtime 刷新 tool registry
 
-理由：
-- 避免MCP加载失败影响ohbaby-agent启动
-- 减少不必要的资源消耗（用户可能不使用MCP）
-- 遵循YAGNI原则
-- 符合opencode的设计模式
+### 2.3 Runtime Integration
 
-### 2.3 工厂模式（Factory）
+`createUiRuntimeComposition()` 创建 ToolScheduler 后会：
 
-传输层通过工厂函数创建。
+1. 注册内置工具
+2. 注册 SkillTool / SkillResourceTool
+3. 通过 `McpManager.getAllTools()` 注册 MCP tools
+4. 注册 `mcp_resource` / `mcp_prompt` module tools
+5. 订阅 `McpManager.onChange()`，在 MCP tools 变化时替换旧 MCP tools
 
-```typescript
-function createTransport(config: McpServerConfig): Transport {
-  if (config.type === 'stdio') {
-    return new StdioClientTransport({
-      command: config.command,           // 可执行文件
-      args: config.args ?? [],           // 参数数组（可选）
-      env: { ...process.env, ...config.env },
-      stderr: 'pipe'
-    })
-  } else if (config.type === 'http') {
-    return new StreamableHTTPClientTransport(
-      new URL(config.url),
-      { headers: config.headers }
-    )
-  } else if (config.type === 'sse') {
-    return new SSEClientTransport(
-      new URL(config.url),
-      { headers: config.headers }
-    )
-  }
-}
-```
-
-**配置格式说明**：
-
-ohbaby-agent 采用主流的分离式命令格式，与以下工具保持一致：
-- Claude Desktop
-- Cursor
-- VS Code Copilot
-- Cline
-- Amazon Q Developer
-
-示例配置：
-```json
-{
-  "firecrawl-mcp": {
-    "type": "stdio",
-    "command": "npx",
-    "args": ["-y", "firecrawl-mcp"],
-    "env": {
-      "FIRECRAWL_API_KEY": "YOUR-API-KEY"
-    }
-  }
-}
-```
-
-理由：
-- 隔离传输层创建逻辑
-- 根据配置动态选择传输方式
-- 易于扩展新的传输类型
-
-### 2.4 适配器模式（Adapter）
-
-MCP工具定义转换为ohbaby-agent Tool接口，并通过 `annotations.readOnlyHint` 推断并发类别。
-
-```typescript
-function adaptMcpTool(
-  mcpTool: McpToolDef,
-  client: McpClient,
-  serverName: string
-): Tool {
-  // 通过 readOnlyHint 推断类别：true→readonly（可并行），其余→write（串行，安全默认）
-  const category: ToolCategory =
-    mcpTool.annotations?.readOnlyHint === true ? 'readonly' : 'write'
-
-  return {
-    name: `${serverName}_${mcpTool.name}`,
-    description: mcpTool.description ?? '',
-    source: 'mcp',
-    category,
-    mcpServer: serverName,
-    isTrusted: client.config.trust ?? false,
-    annotations: mcpTool.annotations,  // 保留完整注解供 Policy 等模块使用
-    parameters: mcpTool.inputSchema,
-    execute: async (params, context) => {
-      const result = await client.callTool({
-        name: mcpTool.name,
-        arguments: params
-      }, undefined, {
-        timeout: client.config.timeout,
-        signal: context.signal
-      })
-      return transformMcpResult(result)
-    }
-  }
-}
-```
-
-理由：
-- 屏蔽MCP协议细节
-- 统一工具接口，MCP工具与内置工具走相同并发路径
-- 保留MCP特有信息（mcpServer、isTrusted）
-- `readOnlyHint` 是 MCP 官方协议字段，使用它符合"遵守协议"原则
-- 保留完整 `annotations` 对象：未来 Policy 可利用 `destructiveHint`（需额外确认）、`idempotentHint`（可安全重试）等字段做更精细决策
+ToolScheduler 对 `source: "mcp"` 的工具保持统一权限检查。`trust: false` 的 MCP tool 即使策略允许，也会进入用户确认流程。
 
 ---
 
-## 三、Module Structure & File Layout（模块结构与文件组织）
+## 三、Transport Strategy
 
-### 3.1 文件职责划分
+当前对齐目标是一主一远两类传输：
 
-#### core/client.ts
+| 配置类型 | SDK transport | 说明 |
+|----------|---------------|------|
+| `stdio` | `StdioClientTransport` | 本地 MCP server 子进程 |
+| `http` / `http_streamable` | `StreamableHTTPClientTransport` | MCP streamable HTTP |
+| `sse` | `SSEClientTransport` | 兼容旧 server，不作为新能力主路径 |
 
-职责：单个MCP服务器的客户端封装
-
-内容：
-- `McpClient` 类
-  - `connect()`: 建立连接
-  - `listTools()`: 发现工具
-  - `callTool()`: 调用工具
-  - `disconnect()`: 断开连接
-  - `getStatus()`: 获取连接状态
-
-#### core/manager.ts
-
-职责：管理多个MCP客户端的生命周期
-
-内容：
-- `McpManager` 类
-  - `getInstance(workspaceId)`: 获取工作区单例
-  - `ensureInitialized()`: 懒加载初始化
-  - `getAllTools()`: 获取所有MCP工具
-  - `executeTool()`: 执行MCP工具
-  - `dispose()`: 清理资源
-
-#### core/transport.ts
-
-职责：创建MCP传输层实例
-
-内容：
-- `createTransport(config)`: 传输层工厂函数
-- 错误处理辅助函数
-
-#### integration/tool-adapter.ts
-
-职责：MCP工具与ohbaby-agent Tool接口的适配
-
-内容：
-- `adaptMcpTool()`: 转换单个工具
-- `transformMcpResult()`: 转换执行结果
-- MCP内容类型处理（text、image、resource）
-
-#### types.ts
-
-职责：定义mcp模块的类型
-
-内容：
-- `McpClientStatus`: 客户端状态类型
-- `McpToolMetadata`: MCP工具元数据
-- 复用config/mcp的配置类型
-
-#### index.ts
-
-职责：导出公开接口
-
-内容：
-```typescript
-export { McpManager } from './core/manager.js'
-export type { McpClientStatus } from './types.js'
-```
+`http` 保留为历史兼容写法；`http_streamable` 是显式的 streamable HTTP 别名。
 
 ---
 
-## 四、Architectural Constraints & Trade-offs（约束与权衡）
+## 四、Tool Adapter
 
-### 4.1 MCP工具通过 readOnlyHint 参与统一并发控制
+MCP tool 名称不会使用简单的 `{server}_{tool}`。当前实现使用长度前缀和字符转义：
 
-当前方案：读取 MCP 工具定义中的 `annotations.readOnlyHint` 字段，推断工具类别后统一走 tool-scheduler 的 ConcurrencyController（wave-based 调度）。
+```
+mcp_s{serverEncodedLength}_{serverEncoded}_t{toolEncodedLength}_{toolEncoded}
+```
 
-映射规则：
-- `readOnlyHint === true` → `ToolCategory = 'readonly'`（可并行，最多5个）
-- `readOnlyHint` 未提供或 `false` → `ToolCategory = 'write'`（串行，安全默认）
+这样可以避免 server/tool 名含 `_`、`.`、空格或其它字符时发生碰撞。
 
-遵循原则：
-- **遵守协议**：`readOnlyHint` 是 MCP 官方协议（Tool Annotations）的标准字段，Anthropic 设计该字段的目的之一就是供客户端做并发决策
-- **保守默认**：未声明时默认串行，避免因误判造成副作用
-- **统一路径**：MCP 工具和内置工具走相同的 wave 调度路径，降低 tool-scheduler 的复杂度
-
-代价：
-- MCP 服务器需要正确设置 `readOnlyHint` 才能享受并行调度（但这是服务器的责任）
-- 若服务器未设置 `readOnlyHint`，所有 MCP 工具默认串行，可能低于理想性能
-
-### 4.2 懒加载而非启动时加载
-
-当前方案：首次调用MCP工具时才初始化
-
-未采用方案：ohbaby-agent启动时预加载所有MCP
-
-理由：
-- 避免MCP加载失败阻塞启动
-- 减少启动时间（用户可能不使用MCP）
-- 单个MCP失败不影响全局
-- 符合错误隔离原则
-
-### 4.3 阶段1-2不支持OAuth
-
-当前方案：仅支持headers手动传递令牌
-
-代价：
-- 用户需要手动管理令牌
-- 无法自动刷新过期令牌
-- 配置文件中包含明文令牌（安全风险）
-
-收益：
-- 实现简单，代码量少
-- 满足大部分本地开发场景
-- 避免OAuth流程的复杂性（浏览器跳转、回调服务器）
-
-理由：
-- 遵循YAGNI原则
-- 阶段1-2重点是Stdio和基础HTTP
-- OAuth可在未来作为独立子模块扩展
-
-### 4.4 工具列表静态化
-
-当前方案：工具列表在初始化时确定，不监听动态更新
-
-未采用方案：监听ToolListChangedNotification
-
-理由：
-- 减少事件监听的复杂性
-- 大部分MCP服务器的工具列表是静态的
-- 动态更新可在未来扩展
+`annotations.readOnlyHint === true` 映射为 `readonly` category，其余默认 `write`。`destructiveHint`、`idempotentHint`、`openWorldHint` 会保留在 `mcpAnnotations` 中，供后续更细粒度 policy 使用。
 
 ---
 
-## 五、Connection Management（连接管理）
+## 五、Plugin Handoff
 
-### 5.1 连接状态机
+未来 `plugins` 模块不直接连接 MCP server，只负责解析插件包并调用：
 
-```
-初始状态
-   │
-   ▼
-[创建McpClient]
-   │
-   ▼
-connecting
-   │
-   ├─→ 成功 → connected
-   │           │
-   │           ├─ listTools成功 → 保持connected
-   │           └─ listTools失败 → failed
-   │
-   └─→ 失败 → failed
+```ts
+McpManager.registerPluginServers(pluginId, servers)
+McpManager.deregisterPlugin(pluginId)
 ```
 
-### 5.2 状态定义
-
-```typescript
-type McpClientStatus =
-  | { status: 'connected'; toolCount: number }
-  | { status: 'failed'; error: string }
-  | { status: 'disconnected' }
-  | { status: 'disabled' }
-```
-
-### 5.3 错误隔离策略
-
-```typescript
-async initialize(): Promise<void> {
-  const config = await loadMcpConfig()
-
-  // 并行初始化，单个失败不影响其他
-  await Promise.allSettled(
-    Object.entries(config.mcpServers).map(async ([name, serverConfig]) => {
-      if (!serverConfig.enabled) return
-
-      try {
-        const client = new McpClient(name, serverConfig)
-        await client.connect()
-        this.clients.set(name, client)
-      } catch (error) {
-        // 仅记录错误，继续初始化其他服务器
-        console.error(`Failed to connect to MCP server "${name}":`, error)
-      }
-    })
-  )
-}
-```
+`mcp` 模块负责最终 schema、连接生命周期、工具适配和权限语义。插件 server 与手动配置同名时，手动配置优先；插件注销会清理旧 client、清空缓存并通知 runtime。
 
 ---
 
-## 六、Tool Discovery & Execution（工具发现和执行）
+## 六、Testing Strategy
 
-### 6.1 工具发现流程
+测试分层：
 
-```
-getAllTools() 被调用
-   │
-   ▼
-ensureInitialized()  ← 懒加载
-   │
-   ▼
-遍历 this.clients
-   │
-   ├─ client1.listTools()
-   │    ├─ 过滤工具（includeTools/excludeTools）
-   │    └─ adaptMcpTool(tool1, client1, 'server1')
-   │         → { name: 'server1_tool1', source: 'mcp', ... }
-   │
-   ├─ client2.listTools()
-   │    └─ ...
-   │
-   └─ 返回所有转换后的Tool[]
-```
-
-### 6.2 工具执行流程
-
-```
-tool-scheduler执行MCP工具
-   │
-   ▼
-McpManager.executeTool(serverName, toolName, params)
-   │
-   ▼
-ensureInitialized()
-   │
-   ▼
-clients.get(serverName)
-   │
-   ▼
-client.callTool({ name: toolName, arguments: params })
-   │
-   ▼
-transformMcpResult(result)
-   │
-   └─→ ToolOutput { content, metadata }
-```
-
-### 6.3 工具命名规范
-
-格式：`{serverName}_{toolName}`
-
-示例：
-- `filesystem_read_file`
-- `github_create_issue`
-- `weather_api_get_forecast`
-
-清理规则：
-```typescript
-function sanitizeName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_-]/g, '_')
-}
-
-const toolKey = `${sanitizeName(serverName)}_${sanitizeName(toolName)}`
-```
-
----
-
-## 七、Integration with tool-scheduler（与tool-scheduler集成）
-
-### 7.1 工具注册流程
-
-```typescript
-// ohbaby-agent初始化或首次使用MCP工具时
-
-// 1. 获取MCP工具列表
-const mcpManager = McpManager.getInstance(workspaceId)
-const mcpTools = await mcpManager.getAllTools()
-
-// 2. 注册到ToolScheduler
-for (const tool of mcpTools) {
-  ToolScheduler.registry.register(tool, 'mcp')
-}
-```
-
-### 7.2 统一执行路径
-
-MCP工具与内置工具走相同的 wave 调度路径，category 决定并发行为：
-
-```typescript
-// tool-scheduler的executeBatch方法（wave-based调度）
-
-class ToolScheduler {
-  async executeBatch(requests: ToolCallRequest[]): Promise<ToolCallResult[]> {
-    // wave 调度器根据 tool.category 决定是否并行
-    // MCP readonly 工具（readOnlyHint=true）→ 并入当前 wave 并行执行
-    // MCP write 工具（readOnlyHint=false/未设置）→ 独立 wave 串行执行
-    return await this.waveScheduler.run(requests)
-  }
-}
-```
-
-**MCP工具的 trust 检查**：`isTrusted` 检查发生在 policy 阶段（`checking_policy` 状态），不影响并发路径选择：
-
-```typescript
-// policy 检查阶段（在 wave 调度之前）
-async checkPolicy(tool: Tool, request: ToolCallRequest): Promise<PolicyResult> {
-  if (tool.source === 'mcp' && !tool.isTrusted) {
-    return { action: 'ask', reason: 'untrusted-mcp-tool' }
-  }
-  return { action: 'allow' }
-}
-```
-
----
-
-## 八、Multi-Workspace Support（多工作区支持）
-
-### 8.1 工作区隔离
-
-```typescript
-// 工作区A
-const managerA = McpManager.getInstance('workspace-a')
-// 加载 workspace-a/.ohbaby-agent/mcp/settings.json
-
-// 工作区B
-const managerB = McpManager.getInstance('workspace-b')
-// 加载 workspace-b/.ohbaby-agent/mcp/settings.json
-
-// 两者完全独立
-```
-
-### 8.2 全局配置共享
-
-```
-全局配置: ~/.ohbaby-agent/mcp/settings.json
-   │
-   ├─→ 工作区A项目配置: workspace-a/.ohbaby-agent/mcp/settings.json
-   │     └─ 合并后用于工作区A的McpManager
-   │
-   └─→ 工作区B项目配置: workspace-b/.ohbaby-agent/mcp/settings.json
-         └─ 合并后用于工作区B的McpManager
-```
-
----
-
-## 九、Error Handling（错误处理）
-
-### 9.1 初始化错误
-
-| 错误场景 | 处理策略 |
-|---------|---------|
-| 配置加载失败 | 使用空配置，不抛出异常 |
-| Stdio进程启动失败 | 记录错误，该服务器状态为failed |
-| HTTP连接超时 | 记录错误，该服务器状态为failed |
-| 工具发现失败 | 记录错误，该服务器状态为failed |
-
-### 9.2 执行错误
-
-| 错误场景 | 处理策略 |
-|---------|---------|
-| 服务器不存在 | 抛出Error: "MCP server not found" |
-| 工具调用失败 | 返回包含错误信息的ToolOutput |
-| 工具调用超时 | 通过AbortSignal中止，返回超时错误 |
-
----
-
-## 十、文档自检
-
-- 架构服务于goals-duty.md中定义的职责
-- 组件职责单一、边界清晰
-- 设计模式选择有明确理由（单例、懒加载、工厂、适配器）
-- 错误处理策略明确（错误隔离、不影响全局）
-- 与tool-scheduler的集成方式清晰
-- 多工作区支持设计合理
+- config validation：传输类型、默认值、tool filters
+- client unit：metadata、tools cache、tools/list_changed、resources/prompts
+- manager unit：懒加载、错误隔离、plugin registration、resources/prompts 聚合
+- integration：使用官方 SDK InMemoryTransport 验证真实 MCP tool call
+- runtime composition：验证 MCP tools 注入 ToolScheduler，并在变更时替换旧工具
