@@ -44,6 +44,13 @@ describe("McpServerConfigSchema", () => {
 
     expect(
       McpServerConfigSchema.parse({
+        type: "http_streamable",
+        url: "https://example.com/mcp",
+      }),
+    ).toMatchObject({ type: "http_streamable" });
+
+    expect(
+      McpServerConfigSchema.parse({
         type: "sse",
         url: "https://example.com/events",
       }),

@@ -7,6 +7,10 @@ export {
   McpToolExecutionError,
 } from "./errors.js";
 export { adaptMcpTool, transformMcpResult } from "./integration/tool-adapter.js";
+export {
+  createMcpPromptTool,
+  createMcpResourceTool,
+} from "./integration/resource-prompt-tools.js";
 
 export type {
   McpAudioContent,
@@ -17,14 +21,28 @@ export type {
   McpClientRequestOptions,
   McpClientStatus,
   McpContentBlock,
+  McpGetPromptResult,
   McpImageContent,
+  McpManagerChangeListener,
   McpManagerOptions,
+  McpPromptArgument,
+  McpPromptDefinition,
+  McpPromptMessage,
+  McpPluginServerContribution,
+  McpReadResourceResult,
   McpResourceContent,
+  McpResourceDefinition,
   McpResourceLinkContent,
   McpSdkClient,
+  McpServerCapabilities,
+  McpServerInfo,
+  McpServerMetadata,
+  McpServerPromptDefinition,
+  McpServerResourceDefinition,
   McpTextContent,
   McpTool,
   McpToolDefinition,
+  McpToolsChangedListener,
   McpTransport,
   ToolAnnotations,
 } from "./types.js";

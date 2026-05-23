@@ -1088,6 +1088,10 @@ export function createToolScheduler(
       registry.register(tool);
     },
 
+    unregister(toolName: string): void {
+      registry.unregister(toolName);
+    },
+
     registerCategory(toolName: string, category: ToolCategory): void {
       registry.registerCategory(toolName, category);
     },

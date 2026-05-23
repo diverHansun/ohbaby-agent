@@ -6,7 +6,13 @@ import type {
   McpCallToolResult,
   McpClientLike,
   McpClientStatus,
+  McpGetPromptResult,
+  McpManagerChangeListener,
   McpManagerOptions,
+  McpPluginServerContribution,
+  McpReadResourceResult,
+  McpServerPromptDefinition,
+  McpServerResourceDefinition,
   McpTool,
   McpToolDefinition,
 } from "../types.js";
@@ -32,8 +38,14 @@ export class McpManager {
   private static readonly instances = new Map<string, McpManager>();
 
   private readonly clients = new Map<string, McpClientLike>();
+  private readonly clientToolUnsubscribers = new Map<string, () => void>();
+  private readonly pluginServerConfigs = new Map<
+    string,
+    McpPluginServerContribution
+  >();
   private readonly serverConfigs = new Map<string, McpServerConfig>();
   private readonly statuses = new Map<string, McpClientStatus>();
+  private readonly listeners = new Set<McpManagerChangeListener>();
   private readonly loadConfig: (
     workspaceId: string,
   ) => Promise<McpServersConfig>;
@@ -43,7 +55,9 @@ export class McpManager {
   ) => McpClientLike;
   private readonly onError: (error: unknown) => void;
   private initPromise: Promise<void> | null = null;
+  private invalidationPromise: Promise<void> | null = null;
   private initialized = false;
+  private generation = 0;
   private tools: readonly McpTool[] | null = null;
 
   constructor(
@@ -85,7 +99,11 @@ export class McpManager {
   }
 
   async getAllTools(): Promise<readonly McpTool[]> {
+    const generation = this.generation;
     await this.ensureInitialized();
+    if (generation !== this.generation) {
+      return this.getAllTools();
+    }
     if (this.tools) {
       return this.tools;
     }
@@ -110,7 +128,9 @@ export class McpManager {
       }
     }
 
-    this.tools = tools;
+    if (generation === this.generation) {
+      this.tools = tools;
+    }
     return tools;
   }
 
@@ -133,15 +153,118 @@ export class McpManager {
     );
   }
 
+  async listResources(): Promise<readonly McpServerResourceDefinition[]> {
+    await this.ensureInitialized();
+    const resources: McpServerResourceDefinition[] = [];
+    for (const [serverName, client] of this.clients) {
+      try {
+        const definitions = await client.listResources?.();
+        for (const resource of definitions ?? []) {
+          resources.push({ ...resource, serverName });
+        }
+        this.statuses.set(serverName, client.getStatus());
+      } catch (error) {
+        this.statuses.set(serverName, {
+          error: errorMessage(error),
+          status: "failed",
+        });
+        this.onError(error);
+      }
+    }
+    return resources;
+  }
+
+  async readResource(
+    serverName: string,
+    uri: string,
+  ): Promise<McpReadResourceResult> {
+    await this.ensureInitialized();
+    const client = this.clients.get(serverName);
+    if (!client?.readResource) {
+      throw new Error(`MCP server "${serverName}" not found`);
+    }
+    return client.readResource(uri);
+  }
+
+  async listPrompts(): Promise<readonly McpServerPromptDefinition[]> {
+    await this.ensureInitialized();
+    const prompts: McpServerPromptDefinition[] = [];
+    for (const [serverName, client] of this.clients) {
+      try {
+        const definitions = await client.listPrompts?.();
+        for (const prompt of definitions ?? []) {
+          prompts.push({ ...prompt, serverName });
+        }
+        this.statuses.set(serverName, client.getStatus());
+      } catch (error) {
+        this.statuses.set(serverName, {
+          error: errorMessage(error),
+          status: "failed",
+        });
+        this.onError(error);
+      }
+    }
+    return prompts;
+  }
+
+  async getPrompt(
+    serverName: string,
+    name: string,
+    args?: Record<string, string>,
+  ): Promise<McpGetPromptResult> {
+    await this.ensureInitialized();
+    const client = this.clients.get(serverName);
+    if (!client?.getPrompt) {
+      throw new Error(`MCP server "${serverName}" not found`);
+    }
+    return client.getPrompt(name, args);
+  }
+
   async getStatus(): Promise<Record<string, McpClientStatus>> {
     await this.ensureInitialized();
     for (const [serverName, client] of this.clients) {
-      this.statuses.set(serverName, client.getStatus());
+      const previous = this.statuses.get(serverName);
+      const current = client.getStatus();
+      if (previous?.status === "failed" && current.status !== "failed") {
+        continue;
+      }
+      this.statuses.set(serverName, current);
     }
     return Object.fromEntries(this.statuses);
   }
 
+  onChange(listener: McpManagerChangeListener): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  async registerPluginServers(
+    pluginId: string,
+    servers: McpPluginServerContribution,
+  ): Promise<void> {
+    this.pluginServerConfigs.set(pluginId, { ...servers });
+    await this.invalidateAfterConfigChange();
+    this.notifyChanged();
+  }
+
+  async deregisterPlugin(pluginId: string): Promise<void> {
+    if (!this.pluginServerConfigs.delete(pluginId)) {
+      return;
+    }
+    await this.invalidateAfterConfigChange();
+    this.notifyChanged();
+  }
+
   async dispose(): Promise<void> {
+    if (this.invalidationPromise) {
+      await this.invalidationPromise;
+    }
+    for (const unsubscribe of this.clientToolUnsubscribers.values()) {
+      unsubscribe();
+    }
+    this.clientToolUnsubscribers.clear();
     await Promise.allSettled(
       Array.from(this.clients.values()).map((client) => client.disconnect()),
     );
@@ -154,6 +277,9 @@ export class McpManager {
   }
 
   private async ensureInitialized(): Promise<void> {
+    if (this.invalidationPromise) {
+      await this.invalidationPromise;
+    }
     if (this.initialized) {
       return;
     }
@@ -179,6 +305,7 @@ export class McpManager {
       this.onError(error);
       return;
     }
+    config = this.mergePluginServers(config);
 
     const tasks = Object.entries(config.mcpServers).map(
       async ([serverName, serverConfig]) => {
@@ -189,11 +316,19 @@ export class McpManager {
         }
 
         const client = this.createClient(serverName, serverConfig);
+        const unsubscribe = client.onToolsChanged?.(() => {
+          this.handleClientToolsChanged(serverName, client);
+        });
+        if (unsubscribe) {
+          this.clientToolUnsubscribers.set(serverName, unsubscribe);
+        }
         try {
           await client.connect();
           this.clients.set(serverName, client);
           this.statuses.set(serverName, client.getStatus());
         } catch (error) {
+          unsubscribe?.();
+          this.clientToolUnsubscribers.delete(serverName);
           this.statuses.set(serverName, {
             error: errorMessage(error),
             status: "failed",
@@ -204,5 +339,77 @@ export class McpManager {
     );
 
     await Promise.all(tasks);
+  }
+
+  private mergePluginServers(config: McpServersConfig): McpServersConfig {
+    const mcpServers = { ...config.mcpServers };
+    for (const servers of this.pluginServerConfigs.values()) {
+      for (const [serverName, serverConfig] of Object.entries(servers)) {
+        if (!(serverName in mcpServers)) {
+          mcpServers[serverName] = serverConfig;
+        }
+      }
+    }
+    return { mcpServers };
+  }
+
+  private async invalidateAfterConfigChange(): Promise<void> {
+    this.generation += 1;
+    const previousInvalidation = this.invalidationPromise;
+    const pendingInitialization = this.initPromise;
+    const invalidationPromise = (async (): Promise<void> => {
+      if (previousInvalidation) {
+        await previousInvalidation;
+      }
+      if (pendingInitialization) {
+        try {
+          await pendingInitialization;
+        } catch (error) {
+          this.onError(error);
+        }
+      }
+      for (const unsubscribe of this.clientToolUnsubscribers.values()) {
+        unsubscribe();
+      }
+      this.clientToolUnsubscribers.clear();
+      const staleClients = Array.from(this.clients.values());
+      this.clients.clear();
+      this.serverConfigs.clear();
+      this.statuses.clear();
+      this.tools = null;
+      this.initialized = false;
+      this.initPromise = null;
+      const results = await Promise.allSettled(
+        staleClients.map((client) => client.disconnect()),
+      );
+      for (const result of results) {
+        if (result.status === "rejected") {
+          this.onError(result.reason);
+        }
+      }
+    })();
+    this.invalidationPromise = invalidationPromise;
+    await invalidationPromise;
+    if (this.invalidationPromise === invalidationPromise) {
+      this.invalidationPromise = null;
+    }
+  }
+
+  private handleClientToolsChanged(
+    serverName: string,
+    client: McpClientLike,
+  ): void {
+    if (this.clients.get(serverName) !== client) {
+      return;
+    }
+    this.tools = null;
+    this.statuses.set(serverName, client.getStatus());
+    this.notifyChanged();
+  }
+
+  private notifyChanged(): void {
+    for (const listener of this.listeners) {
+      void listener();
+    }
   }
 }

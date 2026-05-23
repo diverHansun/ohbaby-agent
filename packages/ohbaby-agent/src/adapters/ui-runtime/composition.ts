@@ -17,6 +17,7 @@ import {
   createToolScheduler,
   type PermissionPort,
   type PolicyPort,
+  type Tool,
 } from "../../core/tool-scheduler/index.js";
 import { createHeuristicTokenCounter } from "../../services/llm-model/index.js";
 import type { SessionManager } from "../../services/session/index.js";
@@ -44,6 +45,13 @@ import {
   type SkillLogger,
   type SkillRegistryPort,
 } from "../../skill/index.js";
+import { McpManager } from "../../mcp/index.js";
+import {
+  createMcpPromptTool,
+  createMcpResourceTool,
+  type McpPromptReader,
+  type McpResourceReader,
+} from "../../mcp/integration/resource-prompt-tools.js";
 import {
   RunManager,
   type HookExecutor,
@@ -118,6 +126,7 @@ export interface UiRuntimeCompositionOptions {
     },
   ) => void;
   readonly hookExecutor?: HookExecutor;
+  readonly mcpManager?: McpManagerPort;
   readonly permission?: PermissionPort;
   readonly policy: PolicyPort;
   readonly runLedger?: RunLedger;
@@ -125,6 +134,22 @@ export interface UiRuntimeCompositionOptions {
   readonly skillRegistry?: SkillRegistryPort;
   readonly streamBridge?: StreamBridge;
   readonly workdir?: string;
+}
+
+export interface McpManagerPort {
+  getAllTools(): Promise<readonly Tool[]>;
+  getPrompt?: McpPromptReader["getPrompt"];
+  onChange?(listener: () => void | Promise<void>): () => void;
+  readResource?: McpResourceReader["readResource"];
+}
+
+function supportsMcpResourceAndPromptTools(
+  manager: McpManagerPort,
+): manager is McpManagerPort & McpPromptReader & McpResourceReader {
+  return (
+    typeof manager.getPrompt === "function" &&
+    typeof manager.readResource === "function"
+  );
 }
 
 function withoutSystemMessages(
@@ -436,6 +461,46 @@ export async function createUiRuntimeComposition(
       });
     });
   });
+
+  const mcpManager: McpManagerPort =
+    options.mcpManager ?? McpManager.getInstance(options.workdir ?? process.cwd());
+  let registeredMcpToolNames = new Set<string>();
+  async function refreshMcpTools(): Promise<void> {
+    const tools = await mcpManager.getAllTools();
+    const nextToolNames = new Set(tools.map((tool) => tool.name));
+    for (const toolName of registeredMcpToolNames) {
+      if (!nextToolNames.has(toolName)) {
+        toolScheduler.unregister(toolName);
+      }
+    }
+    for (const tool of tools) {
+      toolScheduler.register(tool);
+    }
+    registeredMcpToolNames = nextToolNames;
+  }
+
+  await refreshMcpTools().catch((error: unknown) => {
+    options.onNotice?.({
+      key: `mcp:tool-refresh:${formatUnknown(error)}`,
+      level: "warning",
+      message: formatUnknown(error),
+      title: "MCP tool refresh failed",
+    });
+  });
+  mcpManager.onChange?.(() => {
+    void refreshMcpTools().catch((error: unknown) => {
+      options.onNotice?.({
+        key: `mcp:tool-refresh:${formatUnknown(error)}`,
+        level: "warning",
+        message: formatUnknown(error),
+        title: "MCP tool refresh failed",
+      });
+    });
+  });
+  if (supportsMcpResourceAndPromptTools(mcpManager)) {
+    toolScheduler.register(createMcpResourceTool(mcpManager));
+    toolScheduler.register(createMcpPromptTool(mcpManager));
+  }
 
   return {
     agentManager,

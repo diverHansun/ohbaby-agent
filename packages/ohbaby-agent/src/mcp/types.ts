@@ -11,6 +11,42 @@ export type McpClientStatus =
   | { readonly status: "disconnected" }
   | { readonly status: "disabled" };
 
+export interface McpServerCapabilities {
+  readonly tools?: {
+    readonly listChanged?: boolean;
+    readonly [key: string]: unknown;
+  };
+  readonly resources?: {
+    readonly subscribe?: boolean;
+    readonly listChanged?: boolean;
+    readonly [key: string]: unknown;
+  };
+  readonly prompts?: {
+    readonly listChanged?: boolean;
+    readonly [key: string]: unknown;
+  };
+  readonly [key: string]: unknown;
+}
+
+export interface McpServerInfo {
+  readonly name: string;
+  readonly version?: string;
+}
+
+export interface McpServerMetadata {
+  readonly capabilities: McpServerCapabilities;
+  readonly serverInfo?: McpServerInfo;
+  readonly instructions?: string;
+}
+
+export type McpToolsChangedListener = (
+  serverName: string,
+) => void | Promise<void>;
+
+export type McpManagerChangeListener = () => void | Promise<void>;
+
+export type McpPluginServerContribution = Record<string, McpServerConfig>;
+
 export interface ToolAnnotations {
   readonly title?: string;
   readonly readOnlyHint?: boolean;
@@ -80,9 +116,62 @@ export interface McpCallToolResult {
   readonly isError?: boolean;
 }
 
+export interface McpResourceDefinition {
+  readonly uri: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly mimeType?: string;
+}
+
+export interface McpServerResourceDefinition extends McpResourceDefinition {
+  readonly serverName: string;
+}
+
+export interface McpResourceReadContent {
+  readonly uri: string;
+  readonly mimeType?: string;
+  readonly text?: string;
+  readonly blob?: string;
+  readonly type?: string;
+}
+
+export interface McpReadResourceResult {
+  readonly contents: readonly McpResourceReadContent[];
+}
+
+export interface McpPromptArgument {
+  readonly name: string;
+  readonly description?: string;
+  readonly required?: boolean;
+}
+
+export interface McpPromptDefinition {
+  readonly name: string;
+  readonly description?: string;
+  readonly arguments?: readonly McpPromptArgument[];
+}
+
+export interface McpServerPromptDefinition extends McpPromptDefinition {
+  readonly serverName: string;
+}
+
+export interface McpPromptMessage {
+  readonly role: string;
+  readonly content: unknown;
+}
+
+export interface McpGetPromptResult {
+  readonly description?: string;
+  readonly messages: readonly McpPromptMessage[];
+}
+
 export interface McpClientRequestOptions {
   readonly timeout?: number;
   readonly signal?: AbortSignal;
+}
+
+export interface McpListRequest {
+  readonly cursor?: string;
 }
 
 export interface McpTransport {
@@ -96,14 +185,49 @@ export interface McpSdkClient {
     options?: McpClientRequestOptions,
   ): Promise<void>;
   listTools(
-    params?: unknown,
+    params?: McpListRequest,
     options?: McpClientRequestOptions,
-  ): Promise<{ readonly tools: readonly McpToolDefinition[] }>;
+  ): Promise<{
+    readonly tools: readonly McpToolDefinition[];
+    readonly nextCursor?: string;
+  }>;
+  listResources?(
+    params?: McpListRequest,
+    options?: McpClientRequestOptions,
+  ): Promise<{
+    readonly resources: readonly McpResourceDefinition[];
+    readonly nextCursor?: string;
+  }>;
+  readResource?(
+    request: { readonly uri: string },
+    options?: McpClientRequestOptions,
+  ): Promise<McpReadResourceResult>;
+  listPrompts?(
+    params?: McpListRequest,
+    options?: McpClientRequestOptions,
+  ): Promise<{
+    readonly prompts: readonly McpPromptDefinition[];
+    readonly nextCursor?: string;
+  }>;
+  getPrompt?(
+    request: {
+      readonly name: string;
+      readonly arguments?: Record<string, string>;
+    },
+    options?: McpClientRequestOptions,
+  ): Promise<McpGetPromptResult>;
   callTool(
     request: McpCallToolRequest,
     resultSchema?: unknown,
     options?: McpClientRequestOptions,
   ): Promise<McpCallToolResult>;
+  getInstructions?(): string | undefined;
+  getServerCapabilities?(): McpServerCapabilities | undefined;
+  getServerVersion?(): McpServerInfo | undefined;
+  setNotificationHandler?(
+    schema: unknown,
+    handler: (notification: unknown) => void | Promise<void>,
+  ): void;
   close(): Promise<void>;
 }
 
@@ -118,6 +242,15 @@ export interface McpClientLike {
   ): Promise<McpCallToolResult>;
   disconnect(): Promise<void>;
   getStatus(): McpClientStatus;
+  getServerMetadata?(): McpServerMetadata;
+  listResources?(): Promise<readonly McpResourceDefinition[]>;
+  readResource?(uri: string): Promise<McpReadResourceResult>;
+  listPrompts?(): Promise<readonly McpPromptDefinition[]>;
+  getPrompt?(
+    name: string,
+    args?: Record<string, string>,
+  ): Promise<McpGetPromptResult>;
+  onToolsChanged?(listener: McpToolsChangedListener): () => void;
 }
 
 export interface McpClientOptions {

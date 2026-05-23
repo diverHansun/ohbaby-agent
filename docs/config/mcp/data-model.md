@@ -20,10 +20,10 @@
 
 ### 1.3 传输类型（Transport Type）
 
-MCP协议支持的三种传输方式：
+当前配置支持的传输方式：
 - Stdio: 本地进程通信
-- HTTP: 基于HTTP的Streamable传输
-- SSE: Server-Sent Events传输
+- HTTP / HTTP Streamable: 基于 HTTP 的 Streamable 传输，`http_streamable` 为显式写法，`http` 为兼容写法
+- SSE: Server-Sent Events 传输，用于兼容旧 server
 
 ---
 
@@ -35,13 +35,9 @@ MCP协议支持的三种传输方式：
 interface McpStdioConfig {
   type: 'stdio'                      // 显式类型标识
 
-  // 命令格式：支持两种主流格式
-  // 格式1（主流）：分离的 command 和 args
+  // 命令格式：分离的 command 和 args
   command: string                    // 可执行文件（如 "npx", "node", "python"）
   args?: string[]                    // 参数列表（如 ["-y", "firecrawl-mcp"]）
-
-  // 格式2（opencode 兼容）：单数组格式
-  // command: string[]               // 命令+参数（如 ["npx", "-y", "firecrawl-mcp"]）
 
   env?: Record<string, string>       // 环境变量
   cwd?: string                       // 工作目录
@@ -68,7 +64,7 @@ ohbaby-agent 采用**主流格式**（分离的 `command` 和 `args`），与以
 
 ```typescript
 interface McpHttpConfig {
-  type: 'http'                       // 显式类型标识
+  type: 'http' | 'http_streamable'    // Streamable HTTP；http 为兼容写法
   url: string                        // 服务器URL
   headers?: Record<string, string>   // HTTP请求头（如Authorization）
   enabled?: boolean                  // 是否启用（默认true）
@@ -119,7 +115,7 @@ import { z } from 'zod'
 
 // Stdio配置Schema（主流格式：分离的 command 和 args）
 export const McpStdioConfigSchema = z.object({
-  type: z.literal('stdio'),
+  type: z.literal('stdio').optional().default('stdio'),
   command: z.string().min(1).describe('Executable command (e.g., "npx", "node", "python")'),
   args: z.array(z.string()).optional().describe('Command arguments (e.g., ["-y", "firecrawl-mcp"])'),
   env: z.record(z.string(), z.string()).optional().describe('Environment variables'),
@@ -133,7 +129,7 @@ export const McpStdioConfigSchema = z.object({
 
 // HTTP配置Schema
 export const McpHttpConfigSchema = z.object({
-  type: z.literal('http'),
+  type: z.union([z.literal('http'), z.literal('http_streamable')]),
   url: z.string().url().describe('HTTP URL of MCP server'),
   headers: z.record(z.string(), z.string()).optional(),
   enabled: z.boolean().optional().default(true),
@@ -155,8 +151,8 @@ export const McpSseConfigSchema = z.object({
   excludeTools: z.array(z.string()).optional(),
 }).strict()
 
-// 联合Schema（使用discriminatedUnion以提升性能）
-export const McpServerConfigSchema = z.discriminatedUnion('type', [
+// 联合Schema
+export const McpServerConfigSchema = z.union([
   McpStdioConfigSchema,
   McpHttpConfigSchema,
   McpSseConfigSchema,
@@ -186,7 +182,7 @@ export type McpServersConfig = z.infer<typeof McpServersConfigSchema>
 
 | 字段 | 类型 | 必需 | 默认值 | 说明 |
 |------|------|------|--------|------|
-| type | 'stdio' \| 'http' \| 'sse' | 是 | - | 传输类型标识 |
+| type | 'stdio' \| 'http' \| 'http_streamable' \| 'sse' | stdio 可省略 | stdio | 传输类型标识 |
 | enabled | boolean | 否 | true | 是否启用该MCP服务器 |
 | trust | boolean | 否 | false | 是否信任（跳过额外确认） |
 | timeout | number | 否 | 10000 | 连接和工具发现超时（毫秒） |
@@ -262,13 +258,13 @@ export type McpServersConfig = z.infer<typeof McpServersConfigSchema>
 }
 ```
 
-### 5.2 HTTP远程服务器
+### 5.2 Streamable HTTP远程服务器
 
 ```json
 {
   "mcpServers": {
     "github": {
-      "type": "http",
+      "type": "http_streamable",
       "url": "https://api.github.com/mcp",
       "headers": {
         "Authorization": "Bearer ghp_xxxxxxxxxxxx",
@@ -304,10 +300,11 @@ export type McpServersConfig = z.infer<typeof McpServersConfigSchema>
   "mcpServers": {
     "local-fs": {
       "type": "stdio",
-      "command": ["node", "./local-mcp-server.js"]
+      "command": "node",
+      "args": ["./local-mcp-server.js"]
     },
     "remote-api": {
-      "type": "http",
+      "type": "http_streamable",
       "url": "https://api.example.com/mcp",
       "headers": {
         "X-API-Key": "secret"
@@ -323,14 +320,14 @@ export type McpServersConfig = z.infer<typeof McpServersConfigSchema>
 
 ### 6.1 类型验证
 
-- type字段必须是'stdio'、'http'或'sse'之一
+- type字段必须是'stdio'、'http'、'http_streamable'或'sse'之一；stdio可省略
 - 根据type字段验证必需字段：
   - stdio: 必须有command
-  - http/sse: 必须有url
+  - http/http_streamable/sse: 必须有url
 
 ### 6.2 值范围验证
 
-- command数组不能为空
+- command必须是非空字符串
 - url必须是有效的URL格式
 - timeout必须是正整数
 - enabled和trust必须是布尔值
@@ -342,9 +339,9 @@ export type McpServersConfig = z.infer<typeof McpServersConfigSchema>
 
 ---
 
-## 七、Implicit Type Inference（隐式类型推断）
+## 七、Implicit Type Defaults（隐式类型默认值）
 
-为兼容性和便利性，支持省略type字段：
+为兼容性和便利性，stdio配置支持省略type字段：
 
 ### 7.1 推断规则
 
@@ -356,11 +353,9 @@ function normalizeConfig(raw: any): McpServerConfig {
   // 根据字段推断type
   if (raw.command) {
     return { ...raw, type: 'stdio' }
-  } else if (raw.url) {
-    return { ...raw, type: 'http' }  // 默认http，可通过headers降级sse
   }
 
-  throw new Error('Invalid MCP server config: missing type or command/url')
+  throw new Error('Invalid MCP server config: missing type or command')
 }
 ```
 
@@ -371,7 +366,8 @@ function normalizeConfig(raw: any): McpServerConfig {
 {
   "mcpServers": {
     "local": {
-      "command": ["node", "server.js"]
+      "command": "node",
+      "args": ["server.js"]
     }
   }
 }
@@ -381,7 +377,8 @@ function normalizeConfig(raw: any): McpServerConfig {
   "mcpServers": {
     "local": {
       "type": "stdio",
-      "command": ["node", "server.js"]
+      "command": "node",
+      "args": ["server.js"]
     }
   }
 }

@@ -59,6 +59,11 @@ export function createToolRegistry(): ToolRegistry {
       categories.set(tool.name, inferCategory(tool));
     },
 
+    unregister(toolName: string): void {
+      tools.delete(toolName);
+      categories.delete(toolName);
+    },
+
     registerCategory(toolName: string, category: ToolCategory): void {
       categories.set(toolName, category);
     },
