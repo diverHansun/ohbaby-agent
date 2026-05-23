@@ -359,6 +359,85 @@ describe("McpManager", () => {
     });
   });
 
+  it("registers plugin-provided servers without overriding manual config", async () => {
+    const seenConfigs: string[] = [];
+    const manager = new McpManager("workspace-a", {
+      createClient: (name: string, config): McpClientLike => {
+        seenConfigs.push(
+          `${name}:${config.type === "stdio" ? config.command : "remote"}`,
+        );
+        return createFakeClient({ name });
+      },
+      loadConfig: (): Promise<McpServersConfig> => Promise.resolve({
+        mcpServers: {
+          shared: {
+            args: [],
+            command: "manual",
+            enabled: true,
+            timeout: 5000,
+            trust: false,
+            type: "stdio",
+          },
+        },
+      }),
+    });
+
+    manager.registerPluginServers("example-plugin", {
+      pluginOnly: {
+        args: [],
+        command: "plugin-only",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+      shared: {
+        args: [],
+        command: "plugin-shared",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+    });
+
+    await expect(manager.getAllTools()).resolves.toEqual([
+      expect.objectContaining({ name: "mcp_s6_shared_t4_echo" }),
+      expect.objectContaining({ name: "mcp_s10_pluginOnly_t4_echo" }),
+    ]);
+    expect(seenConfigs).toEqual(["shared:manual", "pluginOnly:plugin-only"]);
+  });
+
+  it("deregisters plugin-provided servers and notifies listeners", async () => {
+    const manager = new McpManager("workspace-a", {
+      createClient: (name: string): McpClientLike => createFakeClient({ name }),
+      loadConfig: (): Promise<McpServersConfig> => Promise.resolve({
+        mcpServers: {},
+      }),
+    });
+    const listener = vi.fn();
+    manager.onChange(listener);
+    manager.registerPluginServers("example-plugin", {
+      pluginOnly: {
+        args: [],
+        command: "plugin-only",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+    });
+
+    await expect(manager.getAllTools()).resolves.toEqual([
+      expect.objectContaining({ name: "mcp_s10_pluginOnly_t4_echo" }),
+    ]);
+
+    manager.deregisterPlugin("example-plugin");
+
+    await expect(manager.getAllTools()).resolves.toEqual([]);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
   it("reuses singleton instances by workspace and disposes them for tests", async () => {
     McpManager.resetInstancesForTest();
     const first = McpManager.getInstance("workspace-a");

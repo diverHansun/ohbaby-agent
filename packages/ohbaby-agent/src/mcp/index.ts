@@ -28,6 +28,7 @@ export type {
   McpPromptArgument,
   McpPromptDefinition,
   McpPromptMessage,
+  McpPluginServerContribution,
   McpReadResourceResult,
   McpResourceContent,
   McpResourceDefinition,

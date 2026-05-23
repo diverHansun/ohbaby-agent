@@ -9,6 +9,7 @@ import type {
   McpGetPromptResult,
   McpManagerChangeListener,
   McpManagerOptions,
+  McpPluginServerContribution,
   McpReadResourceResult,
   McpServerPromptDefinition,
   McpServerResourceDefinition,
@@ -38,6 +39,10 @@ export class McpManager {
 
   private readonly clients = new Map<string, McpClientLike>();
   private readonly clientToolUnsubscribers = new Map<string, () => void>();
+  private readonly pluginServerConfigs = new Map<
+    string,
+    McpPluginServerContribution
+  >();
   private readonly serverConfigs = new Map<string, McpServerConfig>();
   private readonly statuses = new Map<string, McpClientStatus>();
   private readonly listeners = new Set<McpManagerChangeListener>();
@@ -204,6 +209,23 @@ export class McpManager {
     };
   }
 
+  registerPluginServers(
+    pluginId: string,
+    servers: McpPluginServerContribution,
+  ): void {
+    this.pluginServerConfigs.set(pluginId, { ...servers });
+    this.invalidateAfterConfigChange();
+    this.notifyChanged();
+  }
+
+  deregisterPlugin(pluginId: string): void {
+    if (!this.pluginServerConfigs.delete(pluginId)) {
+      return;
+    }
+    this.invalidateAfterConfigChange();
+    this.notifyChanged();
+  }
+
   async dispose(): Promise<void> {
     for (const unsubscribe of this.clientToolUnsubscribers.values()) {
       unsubscribe();
@@ -246,6 +268,7 @@ export class McpManager {
       this.onError(error);
       return;
     }
+    config = this.mergePluginServers(config);
 
     const tasks = Object.entries(config.mcpServers).map(
       async ([serverName, serverConfig]) => {
@@ -279,6 +302,34 @@ export class McpManager {
     );
 
     await Promise.all(tasks);
+  }
+
+  private mergePluginServers(config: McpServersConfig): McpServersConfig {
+    const mcpServers = { ...config.mcpServers };
+    for (const servers of this.pluginServerConfigs.values()) {
+      for (const [serverName, serverConfig] of Object.entries(servers)) {
+        if (!(serverName in mcpServers)) {
+          mcpServers[serverName] = serverConfig;
+        }
+      }
+    }
+    return { mcpServers };
+  }
+
+  private invalidateAfterConfigChange(): void {
+    for (const unsubscribe of this.clientToolUnsubscribers.values()) {
+      unsubscribe();
+    }
+    this.clientToolUnsubscribers.clear();
+    for (const client of this.clients.values()) {
+      void client.disconnect();
+    }
+    this.clients.clear();
+    this.serverConfigs.clear();
+    this.statuses.clear();
+    this.tools = null;
+    this.initialized = false;
+    this.initPromise = null;
   }
 
   private handleClientToolsChanged(

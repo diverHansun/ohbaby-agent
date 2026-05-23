@@ -45,6 +45,8 @@ export type McpToolsChangedListener = (
 
 export type McpManagerChangeListener = () => void | Promise<void>;
 
+export type McpPluginServerContribution = Record<string, McpServerConfig>;
+
 export interface ToolAnnotations {
   readonly title?: string;
   readonly readOnlyHint?: boolean;
