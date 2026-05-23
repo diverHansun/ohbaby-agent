@@ -16,7 +16,7 @@ function executionContext(): ToolExecutionContext {
 }
 
 describe("MCP resource and prompt tools", () => {
-  it("reads an MCP resource through a read-only module tool", async () => {
+  it("reads an MCP resource through an untrusted MCP tool", async () => {
     const readResource = vi.fn(
       (_serverName: string, uri: string): Promise<McpReadResourceResult> =>
         Promise.resolve({
@@ -40,10 +40,11 @@ describe("MCP resource and prompt tools", () => {
       output: "content from file:///README.md",
     });
     expect(tool.category).toBe("readonly");
-    expect(tool.source).toBe("module");
+    expect(tool.isTrusted).toBe(false);
+    expect(tool.source).toBe("mcp");
   });
 
-  it("gets an MCP prompt through a read-only module tool", async () => {
+  it("gets an MCP prompt through an untrusted MCP tool", async () => {
     const getPrompt = vi.fn(
       (
         _serverName: string,
@@ -88,6 +89,7 @@ describe("MCP resource and prompt tools", () => {
       topic: "runtime",
     });
     expect(tool.category).toBe("readonly");
-    expect(tool.source).toBe("module");
+    expect(tool.isTrusted).toBe(false);
+    expect(tool.source).toBe("mcp");
   });
 });

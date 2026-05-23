@@ -55,7 +55,9 @@ export class McpManager {
   ) => McpClientLike;
   private readonly onError: (error: unknown) => void;
   private initPromise: Promise<void> | null = null;
+  private invalidationPromise: Promise<void> | null = null;
   private initialized = false;
+  private generation = 0;
   private tools: readonly McpTool[] | null = null;
 
   constructor(
@@ -97,7 +99,11 @@ export class McpManager {
   }
 
   async getAllTools(): Promise<readonly McpTool[]> {
+    const generation = this.generation;
     await this.ensureInitialized();
+    if (generation !== this.generation) {
+      return this.getAllTools();
+    }
     if (this.tools) {
       return this.tools;
     }
@@ -122,7 +128,9 @@ export class McpManager {
       }
     }
 
-    this.tools = tools;
+    if (generation === this.generation) {
+      this.tools = tools;
+    }
     return tools;
   }
 
@@ -149,9 +157,18 @@ export class McpManager {
     await this.ensureInitialized();
     const resources: McpServerResourceDefinition[] = [];
     for (const [serverName, client] of this.clients) {
-      const definitions = await client.listResources?.();
-      for (const resource of definitions ?? []) {
-        resources.push({ ...resource, serverName });
+      try {
+        const definitions = await client.listResources?.();
+        for (const resource of definitions ?? []) {
+          resources.push({ ...resource, serverName });
+        }
+        this.statuses.set(serverName, client.getStatus());
+      } catch (error) {
+        this.statuses.set(serverName, {
+          error: errorMessage(error),
+          status: "failed",
+        });
+        this.onError(error);
       }
     }
     return resources;
@@ -173,9 +190,18 @@ export class McpManager {
     await this.ensureInitialized();
     const prompts: McpServerPromptDefinition[] = [];
     for (const [serverName, client] of this.clients) {
-      const definitions = await client.listPrompts?.();
-      for (const prompt of definitions ?? []) {
-        prompts.push({ ...prompt, serverName });
+      try {
+        const definitions = await client.listPrompts?.();
+        for (const prompt of definitions ?? []) {
+          prompts.push({ ...prompt, serverName });
+        }
+        this.statuses.set(serverName, client.getStatus());
+      } catch (error) {
+        this.statuses.set(serverName, {
+          error: errorMessage(error),
+          status: "failed",
+        });
+        this.onError(error);
       }
     }
     return prompts;
@@ -197,7 +223,12 @@ export class McpManager {
   async getStatus(): Promise<Record<string, McpClientStatus>> {
     await this.ensureInitialized();
     for (const [serverName, client] of this.clients) {
-      this.statuses.set(serverName, client.getStatus());
+      const previous = this.statuses.get(serverName);
+      const current = client.getStatus();
+      if (previous?.status === "failed" && current.status !== "failed") {
+        continue;
+      }
+      this.statuses.set(serverName, current);
     }
     return Object.fromEntries(this.statuses);
   }
@@ -209,24 +240,27 @@ export class McpManager {
     };
   }
 
-  registerPluginServers(
+  async registerPluginServers(
     pluginId: string,
     servers: McpPluginServerContribution,
-  ): void {
+  ): Promise<void> {
     this.pluginServerConfigs.set(pluginId, { ...servers });
-    this.invalidateAfterConfigChange();
+    await this.invalidateAfterConfigChange();
     this.notifyChanged();
   }
 
-  deregisterPlugin(pluginId: string): void {
+  async deregisterPlugin(pluginId: string): Promise<void> {
     if (!this.pluginServerConfigs.delete(pluginId)) {
       return;
     }
-    this.invalidateAfterConfigChange();
+    await this.invalidateAfterConfigChange();
     this.notifyChanged();
   }
 
   async dispose(): Promise<void> {
+    if (this.invalidationPromise) {
+      await this.invalidationPromise;
+    }
     for (const unsubscribe of this.clientToolUnsubscribers.values()) {
       unsubscribe();
     }
@@ -243,6 +277,9 @@ export class McpManager {
   }
 
   private async ensureInitialized(): Promise<void> {
+    if (this.invalidationPromise) {
+      await this.invalidationPromise;
+    }
     if (this.initialized) {
       return;
     }
@@ -316,20 +353,46 @@ export class McpManager {
     return { mcpServers };
   }
 
-  private invalidateAfterConfigChange(): void {
-    for (const unsubscribe of this.clientToolUnsubscribers.values()) {
-      unsubscribe();
+  private async invalidateAfterConfigChange(): Promise<void> {
+    this.generation += 1;
+    const previousInvalidation = this.invalidationPromise;
+    const pendingInitialization = this.initPromise;
+    const invalidationPromise = (async (): Promise<void> => {
+      if (previousInvalidation) {
+        await previousInvalidation;
+      }
+      if (pendingInitialization) {
+        try {
+          await pendingInitialization;
+        } catch (error) {
+          this.onError(error);
+        }
+      }
+      for (const unsubscribe of this.clientToolUnsubscribers.values()) {
+        unsubscribe();
+      }
+      this.clientToolUnsubscribers.clear();
+      const staleClients = Array.from(this.clients.values());
+      this.clients.clear();
+      this.serverConfigs.clear();
+      this.statuses.clear();
+      this.tools = null;
+      this.initialized = false;
+      this.initPromise = null;
+      const results = await Promise.allSettled(
+        staleClients.map((client) => client.disconnect()),
+      );
+      for (const result of results) {
+        if (result.status === "rejected") {
+          this.onError(result.reason);
+        }
+      }
+    })();
+    this.invalidationPromise = invalidationPromise;
+    await invalidationPromise;
+    if (this.invalidationPromise === invalidationPromise) {
+      this.invalidationPromise = null;
     }
-    this.clientToolUnsubscribers.clear();
-    for (const client of this.clients.values()) {
-      void client.disconnect();
-    }
-    this.clients.clear();
-    this.serverConfigs.clear();
-    this.statuses.clear();
-    this.tools = null;
-    this.initialized = false;
-    this.initPromise = null;
   }
 
   private handleClientToolsChanged(

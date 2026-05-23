@@ -21,6 +21,11 @@ import type {
 } from "../types.js";
 import { createTransport } from "./transport.js";
 
+interface McpPage<T> {
+  readonly items: readonly T[];
+  readonly nextCursor?: string;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -30,6 +35,34 @@ function createDefaultSdkClient(): McpSdkClient {
     name: "ohbaby-agent",
     version: "0.1.0",
   });
+}
+
+function listParams(
+  cursor: string | undefined,
+): { readonly cursor: string } | undefined {
+  return cursor ? { cursor } : undefined;
+}
+
+async function collectPaginated<T>(
+  fetchPage: (cursor: string | undefined) => Promise<McpPage<T>>,
+): Promise<readonly T[]> {
+  const items: T[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+
+  for (;;) {
+    const page = await fetchPage(cursor);
+    items.push(...page.items);
+    const nextCursor = page.nextCursor;
+    if (!nextCursor) {
+      return items;
+    }
+    if (seenCursors.has(nextCursor)) {
+      throw new Error(`MCP pagination cursor repeated: ${nextCursor}`);
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
 }
 
 export class McpClient implements McpClientLike {
@@ -109,10 +142,16 @@ export class McpClient implements McpClientLike {
     if (!this.sdkClient.listResources) {
       return [];
     }
-    const result = await this.sdkClient.listResources(undefined, {
-      timeout: this.config.timeout,
+    const sdkClient = this.sdkClient;
+    return collectPaginated(async (cursor) => {
+      const result = await sdkClient.listResources?.(listParams(cursor), {
+        timeout: this.config.timeout,
+      });
+      return {
+        items: result?.resources ?? [],
+        nextCursor: result?.nextCursor,
+      };
     });
-    return result.resources;
   }
 
   async readResource(uri: string): Promise<McpReadResourceResult> {
@@ -141,10 +180,16 @@ export class McpClient implements McpClientLike {
     if (!this.sdkClient.listPrompts) {
       return [];
     }
-    const result = await this.sdkClient.listPrompts(undefined, {
-      timeout: this.config.timeout,
+    const sdkClient = this.sdkClient;
+    return collectPaginated(async (cursor) => {
+      const result = await sdkClient.listPrompts?.(listParams(cursor), {
+        timeout: this.config.timeout,
+      });
+      return {
+        items: result?.prompts ?? [],
+        nextCursor: result?.nextCursor,
+      };
     });
-    return result.prompts;
   }
 
   async getPrompt(
@@ -223,19 +268,28 @@ export class McpClient implements McpClientLike {
       throw new Error(`MCP client "${this.name}" is not connected`);
     }
     try {
-      const result = await this.sdkClient.listTools(undefined, {
-        timeout: this.config.timeout,
+      const sdkClient = this.sdkClient;
+      const tools = await collectPaginated(async (cursor) => {
+        const result = await sdkClient.listTools(listParams(cursor), {
+          timeout: this.config.timeout,
+        });
+        return {
+          items: result.tools,
+          nextCursor: result.nextCursor,
+        };
       });
-      this.tools = result.tools;
-      this.status = { status: "connected", toolCount: result.tools.length };
-      return result.tools;
+      this.tools = tools;
+      this.status = { status: "connected", toolCount: tools.length };
+      return tools;
     } catch (error) {
       this.status = { error: errorMessage(error), status: "failed" };
       throw new McpToolDiscoveryError(this.name, error);
     }
   }
 
-  private async closeAfterFailedConnect(sdkClient: McpSdkClient): Promise<void> {
+  private async closeAfterFailedConnect(
+    sdkClient: McpSdkClient,
+  ): Promise<void> {
     try {
       await sdkClient.close();
     } catch {

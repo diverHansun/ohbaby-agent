@@ -135,7 +135,7 @@ loadMcpConfig({
 
 ## 五、Plugin Interaction
 
-插件提供的 MCP server 不由 `config/mcp` 读取。未来 `plugins` 模块会解析插件 manifest / `.mcp.json`，再调用 `McpManager.registerPluginServers(pluginId, servers)`。
+插件提供的 MCP server 不由 `config/mcp` 读取。未来 `plugins` 模块会解析插件 manifest / `.mcp.json`，再调用 `await McpManager.registerPluginServers(pluginId, servers)`。
 
 最终合并优先级：
 

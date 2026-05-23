@@ -75,7 +75,7 @@ Tool result content supports text, image, audio, embedded resource, resource lin
 
 ### 1.3 Resource / Prompt Flow
 
-Resources and prompts are exposed through stable read-only module tools instead of registering each server item as a separate tool.
+Resources and prompts are exposed through stable read-only MCP access tools instead of registering each server item as a separate tool.
 
 ```
 LLM calls mcp_resource(server, uri)
@@ -171,21 +171,21 @@ class McpManager {
   getStatus(): Promise<Record<string, McpClientStatus>>
   onChange(listener): () => void
 
-  registerPluginServers(pluginId: string, servers: McpPluginServerContribution): void
-  deregisterPlugin(pluginId: string): void
+  registerPluginServers(pluginId: string, servers: McpPluginServerContribution): Promise<void>
+  deregisterPlugin(pluginId: string): Promise<void>
 
   dispose(): Promise<void>
 }
 ```
 
-### 2.3 Module Tools
+### 2.3 MCP Access Tools
 
 | Tool | Category | Purpose |
 |------|----------|---------|
 | `mcp_resource` | `readonly` | Read a specific resource from a connected MCP server |
 | `mcp_prompt` | `readonly` | Get a specific prompt from a connected MCP server |
 
-Both tools use `source: "module"` because they are host-side accessors, while server-provided executable tools use `source: "mcp"`.
+Both tools use `source: "mcp"` and `isTrusted: false`, so the same untrusted MCP confirmation path protects resource and prompt reads. Server-provided executable tools still carry their per-server `trust` setting.
 
 ---
 
@@ -193,6 +193,7 @@ Both tools use `source: "module"` because they are host-side accessors, while se
 
 - Config read/validation errors are surfaced through config errors.
 - Individual server connection failures are isolated and reflected in status.
+- Individual resource/prompt discovery failures are isolated per server and reported through status/onError.
 - Unsupported resource/prompt direct reads throw clear capability errors.
 - Tool execution results with `isError` become `McpToolExecutionError`.
 - Runtime composition reports MCP refresh failures through `onNotice` and does not block startup.

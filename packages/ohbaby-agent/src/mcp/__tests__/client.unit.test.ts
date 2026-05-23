@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { McpClient } from "../core/client.js";
-import type { McpCallToolResult, McpSdkClient, McpTransport } from "../types.js";
+import type {
+  McpCallToolResult,
+  McpSdkClient,
+  McpTransport,
+} from "../types.js";
 
 interface SdkClientFixture {
   readonly callTool: ReturnType<typeof vi.fn>;
@@ -40,7 +44,14 @@ function createSdkClientFixture(
     ...overrides,
   };
 
-  return { callTool, client, close, connect, listTools, setNotificationHandler };
+  return {
+    callTool,
+    client,
+    close,
+    connect,
+    listTools,
+    setNotificationHandler,
+  };
 }
 
 describe("McpClient", () => {
@@ -72,6 +83,61 @@ describe("McpClient", () => {
     expect(sdk.listTools).toHaveBeenCalledTimes(1);
     expect(first).toEqual(second);
     expect(client.getStatus()).toEqual({ status: "connected", toolCount: 1 });
+  });
+
+  it("follows pagination cursors while discovering tools", async () => {
+    const listTools = vi.fn((params?: { readonly cursor?: string }) =>
+      Promise.resolve(
+        params?.cursor === "page-2"
+          ? {
+              tools: [
+                {
+                  inputSchema: { type: "object" },
+                  name: "second",
+                },
+              ],
+            }
+          : {
+              nextCursor: "page-2",
+              tools: [
+                {
+                  inputSchema: { type: "object" },
+                  name: "first",
+                },
+              ],
+            },
+      ),
+    );
+    const sdk = createSdkClientFixture({ listTools });
+    const client = new McpClient(
+      "test",
+      {
+        args: [],
+        command: "node",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+      {
+        createSdkClient: (): McpSdkClient => sdk.client,
+        createTransport: (): McpTransport => ({}),
+      },
+    );
+
+    await client.connect();
+
+    await expect(client.listTools()).resolves.toEqual([
+      { inputSchema: { type: "object" }, name: "first" },
+      { inputSchema: { type: "object" }, name: "second" },
+    ]);
+    expect(listTools).toHaveBeenNthCalledWith(1, undefined, { timeout: 5000 });
+    expect(listTools).toHaveBeenNthCalledWith(
+      2,
+      { cursor: "page-2" },
+      { timeout: 5000 },
+    );
+    expect(client.getStatus()).toEqual({ status: "connected", toolCount: 2 });
   });
 
   it("captures server metadata exposed during initialization", async () => {
@@ -157,7 +223,9 @@ describe("McpClient", () => {
 
     expect(listener).toHaveBeenCalledWith("test");
     expect(listTools).toHaveBeenCalledTimes(2);
-    expect(tools).toEqual([{ inputSchema: { type: "object" }, name: "updated" }]);
+    expect(tools).toEqual([
+      { inputSchema: { type: "object" }, name: "updated" },
+    ]);
   });
 
   it("records failed status when connection fails", async () => {
@@ -251,16 +319,29 @@ describe("McpClient", () => {
   });
 
   it("lists and reads resources when the server supports resources", async () => {
-    const listResources = vi.fn(() =>
-      Promise.resolve({
-        resources: [
-          {
-            mimeType: "text/plain",
-            name: "Readme",
-            uri: "file:///README.md",
-          },
-        ],
-      }),
+    const listResources = vi.fn((params?: { readonly cursor?: string }) =>
+      Promise.resolve(
+        params?.cursor === "page-2"
+          ? {
+              resources: [
+                {
+                  mimeType: "text/markdown",
+                  name: "Guide",
+                  uri: "file:///GUIDE.md",
+                },
+              ],
+            }
+          : {
+              nextCursor: "page-2",
+              resources: [
+                {
+                  mimeType: "text/plain",
+                  name: "Readme",
+                  uri: "file:///README.md",
+                },
+              ],
+            },
+      ),
     );
     const readResource = vi.fn(() =>
       Promise.resolve({
@@ -298,6 +379,7 @@ describe("McpClient", () => {
 
     await expect(client.listResources()).resolves.toEqual([
       { mimeType: "text/plain", name: "Readme", uri: "file:///README.md" },
+      { mimeType: "text/markdown", name: "Guide", uri: "file:///GUIDE.md" },
     ]);
     await expect(client.readResource("file:///README.md")).resolves.toEqual({
       contents: [
@@ -312,18 +394,38 @@ describe("McpClient", () => {
       { uri: "file:///README.md" },
       { timeout: 5000 },
     );
+    expect(listResources).toHaveBeenNthCalledWith(1, undefined, {
+      timeout: 5000,
+    });
+    expect(listResources).toHaveBeenNthCalledWith(
+      2,
+      { cursor: "page-2" },
+      { timeout: 5000 },
+    );
   });
 
   it("lists and gets prompts when the server supports prompts", async () => {
-    const listPrompts = vi.fn(() =>
-      Promise.resolve({
-        prompts: [
-          {
-            description: "Summarize code",
-            name: "summarize",
-          },
-        ],
-      }),
+    const listPrompts = vi.fn((params?: { readonly cursor?: string }) =>
+      Promise.resolve(
+        params?.cursor === "page-2"
+          ? {
+              prompts: [
+                {
+                  description: "Review code",
+                  name: "review",
+                },
+              ],
+            }
+          : {
+              nextCursor: "page-2",
+              prompts: [
+                {
+                  description: "Summarize code",
+                  name: "summarize",
+                },
+              ],
+            },
+      ),
     );
     const getPrompt = vi.fn(() =>
       Promise.resolve({
@@ -360,6 +462,7 @@ describe("McpClient", () => {
 
     await expect(client.listPrompts()).resolves.toEqual([
       { description: "Summarize code", name: "summarize" },
+      { description: "Review code", name: "review" },
     ]);
     await expect(
       client.getPrompt("summarize", { topic: "runtime" }),
@@ -373,6 +476,14 @@ describe("McpClient", () => {
     });
     expect(getPrompt).toHaveBeenCalledWith(
       { arguments: { topic: "runtime" }, name: "summarize" },
+      { timeout: 5000 },
+    );
+    expect(listPrompts).toHaveBeenNthCalledWith(1, undefined, {
+      timeout: 5000,
+    });
+    expect(listPrompts).toHaveBeenNthCalledWith(
+      2,
+      { cursor: "page-2" },
       { timeout: 5000 },
     );
   });

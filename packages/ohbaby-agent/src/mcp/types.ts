@@ -170,6 +170,10 @@ export interface McpClientRequestOptions {
   readonly signal?: AbortSignal;
 }
 
+export interface McpListRequest {
+  readonly cursor?: string;
+}
+
 export interface McpTransport {
   close?(): Promise<void>;
   start?(): Promise<void>;
@@ -181,21 +185,30 @@ export interface McpSdkClient {
     options?: McpClientRequestOptions,
   ): Promise<void>;
   listTools(
-    params?: unknown,
+    params?: McpListRequest,
     options?: McpClientRequestOptions,
-  ): Promise<{ readonly tools: readonly McpToolDefinition[] }>;
+  ): Promise<{
+    readonly tools: readonly McpToolDefinition[];
+    readonly nextCursor?: string;
+  }>;
   listResources?(
-    params?: unknown,
+    params?: McpListRequest,
     options?: McpClientRequestOptions,
-  ): Promise<{ readonly resources: readonly McpResourceDefinition[] }>;
+  ): Promise<{
+    readonly resources: readonly McpResourceDefinition[];
+    readonly nextCursor?: string;
+  }>;
   readResource?(
     request: { readonly uri: string },
     options?: McpClientRequestOptions,
   ): Promise<McpReadResourceResult>;
   listPrompts?(
-    params?: unknown,
+    params?: McpListRequest,
     options?: McpClientRequestOptions,
-  ): Promise<{ readonly prompts: readonly McpPromptDefinition[] }>;
+  ): Promise<{
+    readonly prompts: readonly McpPromptDefinition[];
+    readonly nextCursor?: string;
+  }>;
   getPrompt?(
     request: {
       readonly name: string;

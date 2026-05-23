@@ -115,21 +115,33 @@ function createChangingFakeClient(input: {
   };
 }
 
+function createDeferred(): {
+  readonly promise: Promise<void>;
+  readonly resolve: () => void;
+} {
+  let resolve!: () => void;
+  const promise = new Promise<void>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+  return { promise, resolve };
+}
+
 describe("McpManager", () => {
   it("lazy loads config only on first tool access and reuses the init promise", async () => {
-    const loadConfig = vi.fn((): Promise<McpServersConfig> =>
-      Promise.resolve({
-        mcpServers: {
-          first: {
-            args: [],
-            command: "mock",
-            enabled: true,
-            timeout: 5000,
-            trust: false,
-            type: "stdio" as const,
+    const loadConfig = vi.fn(
+      (): Promise<McpServersConfig> =>
+        Promise.resolve({
+          mcpServers: {
+            first: {
+              args: [],
+              command: "mock",
+              enabled: true,
+              timeout: 5000,
+              trust: false,
+              type: "stdio" as const,
+            },
           },
-        },
-      }),
+        }),
     );
     const manager = new McpManager("workspace-a", {
       createClient: (name: string): McpClientLike => createFakeClient({ name }),
@@ -160,24 +172,28 @@ describe("McpManager", () => {
             { inputSchema: { type: "object" }, name: "delete" },
           ],
         }),
-      loadConfig: (): Promise<McpServersConfig> => Promise.resolve({
-        mcpServers: {
-          fs: {
-            args: [],
-            command: "mock",
-            enabled: true,
-            excludeTools: ["delete"],
-            includeTools: ["read"],
-            timeout: 5000,
-            trust: false,
-            type: "stdio",
+      loadConfig: (): Promise<McpServersConfig> =>
+        Promise.resolve({
+          mcpServers: {
+            fs: {
+              args: [],
+              command: "mock",
+              enabled: true,
+              excludeTools: ["delete"],
+              includeTools: ["read"],
+              timeout: 5000,
+              trust: false,
+              type: "stdio",
+            },
           },
-        },
-      }),
+        }),
     });
 
     await expect(manager.getAllTools()).resolves.toEqual([
-      expect.objectContaining({ mcpToolName: "read", name: "mcp_s2_fs_t4_read" }),
+      expect.objectContaining({
+        mcpToolName: "read",
+        name: "mcp_s2_fs_t4_read",
+      }),
     ]);
   });
 
@@ -188,34 +204,35 @@ describe("McpManager", () => {
           connectError: name === "bad" ? new Error("boom") : undefined,
           name,
         }),
-      loadConfig: (): Promise<McpServersConfig> => Promise.resolve({
-        mcpServers: {
-          bad: {
-            args: [],
-            command: "mock",
-            enabled: true,
-            timeout: 5000,
-            trust: false,
-            type: "stdio",
+      loadConfig: (): Promise<McpServersConfig> =>
+        Promise.resolve({
+          mcpServers: {
+            bad: {
+              args: [],
+              command: "mock",
+              enabled: true,
+              timeout: 5000,
+              trust: false,
+              type: "stdio",
+            },
+            disabled: {
+              args: [],
+              command: "mock",
+              enabled: false,
+              timeout: 5000,
+              trust: false,
+              type: "stdio",
+            },
+            good: {
+              args: [],
+              command: "mock",
+              enabled: true,
+              timeout: 5000,
+              trust: false,
+              type: "stdio",
+            },
           },
-          disabled: {
-            args: [],
-            command: "mock",
-            enabled: false,
-            timeout: 5000,
-            trust: false,
-            type: "stdio",
-          },
-          good: {
-            args: [],
-            command: "mock",
-            enabled: true,
-            timeout: 5000,
-            trust: false,
-            type: "stdio",
-          },
-        },
-      }),
+        }),
     });
 
     await expect(manager.getAllTools()).resolves.toEqual([
@@ -231,18 +248,19 @@ describe("McpManager", () => {
   it("executes tools through the selected server client", async () => {
     const manager = new McpManager("workspace-a", {
       createClient: (name: string): McpClientLike => createFakeClient({ name }),
-      loadConfig: (): Promise<McpServersConfig> => Promise.resolve({
-        mcpServers: {
-          fs: {
-            args: [],
-            command: "mock",
-            enabled: true,
-            timeout: 5000,
-            trust: false,
-            type: "stdio",
+      loadConfig: (): Promise<McpServersConfig> =>
+        Promise.resolve({
+          mcpServers: {
+            fs: {
+              args: [],
+              command: "mock",
+              enabled: true,
+              timeout: 5000,
+              trust: false,
+              type: "stdio",
+            },
           },
-        },
-      }),
+        }),
     });
 
     await expect(
@@ -262,18 +280,19 @@ describe("McpManager", () => {
     });
     const manager = new McpManager("workspace-a", {
       createClient: (): McpClientLike => client,
-      loadConfig: (): Promise<McpServersConfig> => Promise.resolve({
-        mcpServers: {
-          fs: {
-            args: [],
-            command: "mock",
-            enabled: true,
-            timeout: 5000,
-            trust: false,
-            type: "stdio",
+      loadConfig: (): Promise<McpServersConfig> =>
+        Promise.resolve({
+          mcpServers: {
+            fs: {
+              args: [],
+              command: "mock",
+              enabled: true,
+              timeout: 5000,
+              trust: false,
+              type: "stdio",
+            },
           },
-        },
-      }),
+        }),
     });
     const listener = vi.fn();
     manager.onChange(listener);
@@ -309,11 +328,17 @@ describe("McpManager", () => {
           return { capabilities: { prompts: {}, resources: {} } };
         },
         listPrompts(): Promise<readonly McpPromptDefinition[]> {
-          return Promise.resolve([{ description: "Prompt", name: "summarize" }]);
+          return Promise.resolve([
+            { description: "Prompt", name: "summarize" },
+          ]);
         },
         listResources(): Promise<readonly McpResourceDefinition[]> {
           return Promise.resolve([
-            { mimeType: "text/plain", name: "Readme", uri: "file:///README.md" },
+            {
+              mimeType: "text/plain",
+              name: "Readme",
+              uri: "file:///README.md",
+            },
           ]);
         },
         readResource(uri: string): Promise<McpReadResourceResult> {
@@ -322,18 +347,19 @@ describe("McpManager", () => {
           });
         },
       }),
-      loadConfig: (): Promise<McpServersConfig> => Promise.resolve({
-        mcpServers: {
-          fs: {
-            args: [],
-            command: "mock",
-            enabled: true,
-            timeout: 5000,
-            trust: false,
-            type: "stdio",
+      loadConfig: (): Promise<McpServersConfig> =>
+        Promise.resolve({
+          mcpServers: {
+            fs: {
+              args: [],
+              command: "mock",
+              enabled: true,
+              timeout: 5000,
+              trust: false,
+              type: "stdio",
+            },
           },
-        },
-      }),
+        }),
     });
 
     await expect(manager.listResources()).resolves.toEqual([
@@ -347,9 +373,15 @@ describe("McpManager", () => {
     await expect(manager.listPrompts()).resolves.toEqual([
       { description: "Prompt", name: "summarize", serverName: "fs" },
     ]);
-    await expect(manager.readResource("fs", "file:///README.md")).resolves.toEqual({
+    await expect(
+      manager.readResource("fs", "file:///README.md"),
+    ).resolves.toEqual({
       contents: [
-        { text: "resource file:///README.md", type: "text", uri: "file:///README.md" },
+        {
+          text: "resource file:///README.md",
+          type: "text",
+          uri: "file:///README.md",
+        },
       ],
     });
     await expect(manager.getPrompt("fs", "summarize")).resolves.toEqual({
@@ -357,6 +389,61 @@ describe("McpManager", () => {
         { content: { text: "prompt summarize", type: "text" }, role: "user" },
       ],
     });
+  });
+
+  it("isolates resource and prompt discovery failures per server", async () => {
+    const onError = vi.fn();
+    const manager = new McpManager("workspace-a", {
+      createClient: (name: string): McpClientLike => ({
+        ...createFakeClient({ name }),
+        listPrompts(): Promise<readonly McpPromptDefinition[]> {
+          if (name === "bad") {
+            return Promise.reject(new Error("prompt boom"));
+          }
+          return Promise.resolve([{ name: "summarize" }]);
+        },
+        listResources(): Promise<readonly McpResourceDefinition[]> {
+          if (name === "bad") {
+            return Promise.reject(new Error("resource boom"));
+          }
+          return Promise.resolve([{ uri: "file:///README.md" }]);
+        },
+      }),
+      loadConfig: (): Promise<McpServersConfig> =>
+        Promise.resolve({
+          mcpServers: {
+            bad: {
+              args: [],
+              command: "mock",
+              enabled: true,
+              timeout: 5000,
+              trust: false,
+              type: "stdio",
+            },
+            good: {
+              args: [],
+              command: "mock",
+              enabled: true,
+              timeout: 5000,
+              trust: false,
+              type: "stdio",
+            },
+          },
+        }),
+      onError,
+    });
+
+    await expect(manager.listResources()).resolves.toEqual([
+      { serverName: "good", uri: "file:///README.md" },
+    ]);
+    await expect(manager.listPrompts()).resolves.toEqual([
+      { name: "summarize", serverName: "good" },
+    ]);
+    await expect(manager.getStatus()).resolves.toMatchObject({
+      bad: { error: "prompt boom", status: "failed" },
+      good: { status: "connected", toolCount: 1 },
+    });
+    expect(onError).toHaveBeenCalledTimes(2);
   });
 
   it("registers plugin-provided servers without overriding manual config", async () => {
@@ -368,21 +455,22 @@ describe("McpManager", () => {
         );
         return createFakeClient({ name });
       },
-      loadConfig: (): Promise<McpServersConfig> => Promise.resolve({
-        mcpServers: {
-          shared: {
-            args: [],
-            command: "manual",
-            enabled: true,
-            timeout: 5000,
-            trust: false,
-            type: "stdio",
+      loadConfig: (): Promise<McpServersConfig> =>
+        Promise.resolve({
+          mcpServers: {
+            shared: {
+              args: [],
+              command: "manual",
+              enabled: true,
+              timeout: 5000,
+              trust: false,
+              type: "stdio",
+            },
           },
-        },
-      }),
+        }),
     });
 
-    manager.registerPluginServers("example-plugin", {
+    await manager.registerPluginServers("example-plugin", {
       pluginOnly: {
         args: [],
         command: "plugin-only",
@@ -411,13 +499,14 @@ describe("McpManager", () => {
   it("deregisters plugin-provided servers and notifies listeners", async () => {
     const manager = new McpManager("workspace-a", {
       createClient: (name: string): McpClientLike => createFakeClient({ name }),
-      loadConfig: (): Promise<McpServersConfig> => Promise.resolve({
-        mcpServers: {},
-      }),
+      loadConfig: (): Promise<McpServersConfig> =>
+        Promise.resolve({
+          mcpServers: {},
+        }),
     });
     const listener = vi.fn();
     manager.onChange(listener);
-    manager.registerPluginServers("example-plugin", {
+    await manager.registerPluginServers("example-plugin", {
       pluginOnly: {
         args: [],
         command: "plugin-only",
@@ -432,10 +521,141 @@ describe("McpManager", () => {
       expect.objectContaining({ name: "mcp_s10_pluginOnly_t4_echo" }),
     ]);
 
-    manager.deregisterPlugin("example-plugin");
+    await manager.deregisterPlugin("example-plugin");
 
     await expect(manager.getAllTools()).resolves.toEqual([]);
     expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it("waits for stale clients to disconnect before reconnecting plugin config changes", async () => {
+    const disconnectGate = createDeferred();
+    const disconnect = vi.fn(() => disconnectGate.promise);
+    const createdClients: string[] = [];
+    const manager = new McpManager("workspace-a", {
+      createClient: (name: string): McpClientLike => {
+        createdClients.push(name);
+        return {
+          ...createFakeClient({ name }),
+          disconnect,
+        };
+      },
+      loadConfig: (): Promise<McpServersConfig> =>
+        Promise.resolve({
+          mcpServers: {
+            manual: {
+              args: [],
+              command: "manual",
+              enabled: true,
+              timeout: 5000,
+              trust: false,
+              type: "stdio",
+            },
+          },
+        }),
+    });
+
+    await expect(manager.getAllTools()).resolves.toHaveLength(1);
+
+    const registration = manager.registerPluginServers("example-plugin", {
+      pluginOnly: {
+        args: [],
+        command: "plugin-only",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+    });
+    const refreshedTools = manager.getAllTools();
+    await Promise.resolve();
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(createdClients).toEqual(["manual"]);
+
+    disconnectGate.resolve();
+    await registration;
+    await expect(refreshedTools).resolves.toHaveLength(2);
+    expect(createdClients).toEqual(["manual", "manual", "pluginOnly"]);
+  });
+
+  it("waits for in-flight initialization before applying plugin config changes", async () => {
+    const connectGate = createDeferred();
+    const disconnect = vi.fn(() => Promise.resolve());
+    const createdClients: string[] = [];
+    const manager = new McpManager("workspace-a", {
+      createClient: (name: string): McpClientLike => {
+        createdClients.push(name);
+        const creationIndex = createdClients.length;
+        let status: McpClientStatus = { status: "disconnected" };
+        return {
+          name,
+          config: {
+            args: [],
+            command: "mock",
+            enabled: true,
+            timeout: 5000,
+            trust: false,
+            type: "stdio",
+          },
+          callTool(): Promise<McpCallToolResult> {
+            return Promise.resolve({ content: [] });
+          },
+          async connect(): Promise<void> {
+            if (name === "manual" && creationIndex === 1) {
+              await connectGate.promise;
+            }
+            status = { status: "connected", toolCount: 1 };
+          },
+          disconnect,
+          getStatus(): McpClientStatus {
+            return status;
+          },
+          listTools(): Promise<readonly McpToolDefinition[]> {
+            return Promise.resolve([
+              { inputSchema: { type: "object" }, name: "echo" },
+            ]);
+          },
+        };
+      },
+      loadConfig: (): Promise<McpServersConfig> =>
+        Promise.resolve({
+          mcpServers: {
+            manual: {
+              args: [],
+              command: "manual",
+              enabled: true,
+              timeout: 5000,
+              trust: false,
+              type: "stdio",
+            },
+          },
+        }),
+    });
+
+    const initialTools = manager.getAllTools();
+    await Promise.resolve();
+
+    const registration = manager.registerPluginServers("example-plugin", {
+      pluginOnly: {
+        args: [],
+        command: "plugin-only",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+    });
+    const refreshedTools = manager.getAllTools();
+    await Promise.resolve();
+
+    expect(createdClients).toEqual(["manual"]);
+
+    connectGate.resolve();
+    await expect(initialTools).resolves.toEqual(expect.any(Array));
+    await registration;
+    await expect(refreshedTools).resolves.toHaveLength(2);
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(createdClients).toEqual(["manual", "manual", "pluginOnly"]);
   });
 
   it("reuses singleton instances by workspace and disposes them for tests", async () => {

@@ -17,10 +17,7 @@ export interface McpPromptReader {
   ): Promise<McpGetPromptResult>;
 }
 
-function requiredString(
-  params: Record<string, unknown>,
-  key: string,
-): string {
+function requiredString(params: Record<string, unknown>, key: string): string {
   const value = params[key];
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(`MCP ${key} must be a non-empty string`);
@@ -75,7 +72,8 @@ export function createMcpResourceTool(manager: McpResourceReader): Tool {
       required: ["server", "uri"],
       type: "object",
     },
-    source: "module",
+    isTrusted: false,
+    source: "mcp",
     async execute(
       params: Record<string, unknown>,
       _context: ToolExecutionContext,
@@ -114,7 +112,8 @@ export function createMcpPromptTool(manager: McpPromptReader): Tool {
       required: ["server", "name"],
       type: "object",
     },
-    source: "module",
+    isTrusted: false,
+    source: "mcp",
     async execute(
       params: Record<string, unknown>,
       _context: ToolExecutionContext,

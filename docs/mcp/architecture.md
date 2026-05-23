@@ -31,7 +31,7 @@ mcp/
 │
 ├── integration/
 │   ├── tool-adapter.ts             # MCP tool -> Tool
-│   └── resource-prompt-tools.ts    # mcp_resource / mcp_prompt module tools
+│   └── resource-prompt-tools.ts    # mcp_resource / mcp_prompt MCP access tools
 │
 └── __tests__/
 ```
@@ -44,8 +44,8 @@ mcp/
 | Client | `McpClient`，每个 server 一个实例 |
 | Server | 用户配置或插件贡献的 MCP server |
 | Tools | `adaptMcpTool()` 适配进 ToolScheduler |
-| Resources | `mcp_resource` 只读 module tool 读取 |
-| Prompts | `mcp_prompt` 只读 module tool 获取 |
+| Resources | `mcp_resource` 只读 MCP access tool 读取 |
+| Prompts | `mcp_prompt` 只读 MCP access tool 获取 |
 
 ---
 
@@ -71,6 +71,8 @@ mcp/
 - `onToolsChanged(listener)`
 - `disconnect()`
 
+`listTools()` / `listResources()` / `listPrompts()` 会沿 `nextCursor` 翻页，直到 server discovery 完整结束。
+
 如果 server 未声明 resources/prompts capability，列表接口返回空数组；直接读取 unsupported capability 会抛出明确错误。
 
 ### 2.2 McpManager
@@ -94,10 +96,10 @@ mcp/
 1. 注册内置工具
 2. 注册 SkillTool / SkillResourceTool
 3. 通过 `McpManager.getAllTools()` 注册 MCP tools
-4. 注册 `mcp_resource` / `mcp_prompt` module tools
+4. 注册 `mcp_resource` / `mcp_prompt` MCP access tools
 5. 订阅 `McpManager.onChange()`，在 MCP tools 变化时替换旧 MCP tools
 
-ToolScheduler 对 `source: "mcp"` 的工具保持统一权限检查。`trust: false` 的 MCP tool 即使策略允许，也会进入用户确认流程。
+ToolScheduler 对 `source: "mcp"` 的工具保持统一权限检查。`trust: false` 的 MCP tool 即使策略允许，也会进入用户确认流程；`mcp_resource` / `mcp_prompt` 作为跨 server 访问入口固定以未信任 MCP tool 处理，避免绕过确认。
 
 ---
 
@@ -134,8 +136,8 @@ mcp_s{serverEncodedLength}_{serverEncoded}_t{toolEncodedLength}_{toolEncoded}
 未来 `plugins` 模块不直接连接 MCP server，只负责解析插件包并调用：
 
 ```ts
-McpManager.registerPluginServers(pluginId, servers)
-McpManager.deregisterPlugin(pluginId)
+await McpManager.registerPluginServers(pluginId, servers)
+await McpManager.deregisterPlugin(pluginId)
 ```
 
 `mcp` 模块负责最终 schema、连接生命周期、工具适配和权限语义。插件 server 与手动配置同名时，手动配置优先；插件注销会清理旧 client、清空缓存并通知 runtime。
