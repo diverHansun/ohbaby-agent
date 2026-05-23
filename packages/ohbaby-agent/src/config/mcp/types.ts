@@ -125,7 +125,7 @@ export const McpHttpConfigSchema = z
   .object({
     ...CommonMcpServerConfigSchema,
     headers: z.record(z.string()).optional(),
-    type: z.literal("http"),
+    type: z.union([z.literal("http"), z.literal("http_streamable")]),
     url: z.string().url(),
   })
   .strict()

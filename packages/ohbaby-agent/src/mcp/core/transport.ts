@@ -31,7 +31,7 @@ export function createTransport(config: McpServerConfig): McpTransport {
     });
   }
 
-  if (config.type === "http") {
+  if (config.type === "http" || config.type === "http_streamable") {
     return new StreamableHTTPClientTransport(new URL(config.url), {
       requestInit: requestInit(config.headers),
     });
