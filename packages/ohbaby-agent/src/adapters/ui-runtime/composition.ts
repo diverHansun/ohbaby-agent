@@ -17,6 +17,7 @@ import {
   createToolScheduler,
   type PermissionPort,
   type PolicyPort,
+  type Tool,
 } from "../../core/tool-scheduler/index.js";
 import { createHeuristicTokenCounter } from "../../services/llm-model/index.js";
 import type { SessionManager } from "../../services/session/index.js";
@@ -44,6 +45,7 @@ import {
   type SkillLogger,
   type SkillRegistryPort,
 } from "../../skill/index.js";
+import { McpManager } from "../../mcp/index.js";
 import {
   RunManager,
   type HookExecutor,
@@ -118,6 +120,7 @@ export interface UiRuntimeCompositionOptions {
     },
   ) => void;
   readonly hookExecutor?: HookExecutor;
+  readonly mcpManager?: McpManagerPort;
   readonly permission?: PermissionPort;
   readonly policy: PolicyPort;
   readonly runLedger?: RunLedger;
@@ -125,6 +128,11 @@ export interface UiRuntimeCompositionOptions {
   readonly skillRegistry?: SkillRegistryPort;
   readonly streamBridge?: StreamBridge;
   readonly workdir?: string;
+}
+
+export interface McpManagerPort {
+  getAllTools(): Promise<readonly Tool[]>;
+  onChange?(listener: () => void | Promise<void>): () => void;
 }
 
 function withoutSystemMessages(
@@ -433,6 +441,34 @@ export async function createUiRuntimeComposition(
         level: "warning",
         message: formatUnknown(error),
         title: "Skill tool refresh failed",
+      });
+    });
+  });
+
+  const mcpManager: McpManagerPort =
+    options.mcpManager ?? McpManager.getInstance(options.workdir ?? process.cwd());
+  async function refreshMcpTools(): Promise<void> {
+    const tools = await mcpManager.getAllTools();
+    for (const tool of tools) {
+      toolScheduler.register(tool);
+    }
+  }
+
+  await refreshMcpTools().catch((error: unknown) => {
+    options.onNotice?.({
+      key: `mcp:tool-refresh:${formatUnknown(error)}`,
+      level: "warning",
+      message: formatUnknown(error),
+      title: "MCP tool refresh failed",
+    });
+  });
+  mcpManager.onChange?.(() => {
+    void refreshMcpTools().catch((error: unknown) => {
+      options.onNotice?.({
+        key: `mcp:tool-refresh:${formatUnknown(error)}`,
+        level: "warning",
+        message: formatUnknown(error),
+        title: "MCP tool refresh failed",
       });
     });
   });

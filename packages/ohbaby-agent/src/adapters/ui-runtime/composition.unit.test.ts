@@ -4,6 +4,7 @@ import { createBus } from "../../bus/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import type { MessageManager } from "../../core/message/index.js";
 import { createPolicyManager } from "../../policy/index.js";
+import type { Tool } from "../../core/tool-scheduler/index.js";
 import type {
   SkillContent,
   SkillInfo,
@@ -156,6 +157,21 @@ function findToolDescription(
   return tools.find((tool) => tool.name === name)?.description ?? "";
 }
 
+interface FakeMcpManager {
+  getAllTools(): Promise<readonly Tool[]>;
+}
+
+function mcpTool(name: string): Tool {
+  return {
+    category: "readonly",
+    description: "Echo from MCP",
+    execute: () => ({ output: "echo" }),
+    name,
+    parametersJsonSchema: { properties: {}, type: "object" },
+    source: "mcp",
+  };
+}
+
 describe("createUiRuntimeComposition skill tools", () => {
   it("registers the resource tool and refreshes skill descriptions after registry changes", async () => {
     const bus = createBus();
@@ -187,5 +203,28 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(findToolDescription(refreshedTools, "skill")).toContain(
       "plugin-skill",
     );
+  });
+
+  it("registers MCP tools supplied by the MCP manager", async () => {
+    const bus = createBus();
+    const mcpManager: FakeMcpManager = {
+      getAllTools: () => Promise.resolve([mcpTool("mcp_s6_server_t4_echo")]),
+    };
+    const options = {
+      agentManager: new AgentManager(),
+      bus,
+      llmClient: fakeLlmClient(),
+      mcpManager,
+      messageManager: {} as MessageManager,
+      policy: createPolicyManager({ bus }),
+      skillRegistry: createMutableSkillRegistry([]),
+    } satisfies Parameters<typeof createUiRuntimeComposition>[0] & {
+      readonly mcpManager: FakeMcpManager;
+    };
+
+    const composition = await createUiRuntimeComposition(options);
+
+    const tools = await composition.toolScheduler.getAvailableTools();
+    expect(tools.map((tool) => tool.name)).toContain("mcp_s6_server_t4_echo");
   });
 });
