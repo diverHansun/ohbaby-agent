@@ -9,6 +9,10 @@ import type {
   McpClientOptions,
   McpClientRequestOptions,
   McpClientStatus,
+  McpGetPromptResult,
+  McpPromptDefinition,
+  McpReadResourceResult,
+  McpResourceDefinition,
   McpServerMetadata,
   McpSdkClient,
   McpToolsChangedListener,
@@ -93,6 +97,73 @@ export class McpClient implements McpClientLike {
       throw new Error(`MCP client "${this.name}" is not connected`);
     }
     return this.sdkClient.callTool(request, undefined, options);
+  }
+
+  async listResources(): Promise<readonly McpResourceDefinition[]> {
+    if (!this.metadata.capabilities.resources) {
+      return [];
+    }
+    if (!this.sdkClient) {
+      throw new Error(`MCP client "${this.name}" is not connected`);
+    }
+    if (!this.sdkClient.listResources) {
+      return [];
+    }
+    const result = await this.sdkClient.listResources(undefined, {
+      timeout: this.config.timeout,
+    });
+    return result.resources;
+  }
+
+  async readResource(uri: string): Promise<McpReadResourceResult> {
+    if (!this.metadata.capabilities.resources) {
+      throw new Error(`MCP server "${this.name}" does not support resources`);
+    }
+    if (!this.sdkClient) {
+      throw new Error(`MCP client "${this.name}" is not connected`);
+    }
+    if (!this.sdkClient.readResource) {
+      throw new Error(`MCP client "${this.name}" cannot read resources`);
+    }
+    return this.sdkClient.readResource(
+      { uri },
+      { timeout: this.config.timeout },
+    );
+  }
+
+  async listPrompts(): Promise<readonly McpPromptDefinition[]> {
+    if (!this.metadata.capabilities.prompts) {
+      return [];
+    }
+    if (!this.sdkClient) {
+      throw new Error(`MCP client "${this.name}" is not connected`);
+    }
+    if (!this.sdkClient.listPrompts) {
+      return [];
+    }
+    const result = await this.sdkClient.listPrompts(undefined, {
+      timeout: this.config.timeout,
+    });
+    return result.prompts;
+  }
+
+  async getPrompt(
+    name: string,
+    args?: Record<string, string>,
+  ): Promise<McpGetPromptResult> {
+    if (!this.metadata.capabilities.prompts) {
+      throw new Error(`MCP server "${this.name}" does not support prompts`);
+    }
+    if (!this.sdkClient) {
+      throw new Error(`MCP client "${this.name}" is not connected`);
+    }
+    if (!this.sdkClient.getPrompt) {
+      throw new Error(`MCP client "${this.name}" cannot get prompts`);
+    }
+    return this.sdkClient.getPrompt(
+      { arguments: args, name },
+      { timeout: this.config.timeout },
+    );
   }
 
   async disconnect(): Promise<void> {

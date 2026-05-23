@@ -250,6 +250,133 @@ describe("McpClient", () => {
     );
   });
 
+  it("lists and reads resources when the server supports resources", async () => {
+    const listResources = vi.fn(() =>
+      Promise.resolve({
+        resources: [
+          {
+            mimeType: "text/plain",
+            name: "Readme",
+            uri: "file:///README.md",
+          },
+        ],
+      }),
+    );
+    const readResource = vi.fn(() =>
+      Promise.resolve({
+        contents: [
+          {
+            mimeType: "text/plain",
+            text: "hello resource",
+            uri: "file:///README.md",
+          },
+        ],
+      }),
+    );
+    const sdk = createSdkClientFixture({
+      getServerCapabilities: () => ({ resources: {} }),
+      listResources,
+      readResource,
+    });
+    const client = new McpClient(
+      "test",
+      {
+        args: [],
+        command: "node",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+      {
+        createSdkClient: (): McpSdkClient => sdk.client,
+        createTransport: (): McpTransport => ({}),
+      },
+    );
+
+    await client.connect();
+
+    await expect(client.listResources()).resolves.toEqual([
+      { mimeType: "text/plain", name: "Readme", uri: "file:///README.md" },
+    ]);
+    await expect(client.readResource("file:///README.md")).resolves.toEqual({
+      contents: [
+        {
+          mimeType: "text/plain",
+          text: "hello resource",
+          uri: "file:///README.md",
+        },
+      ],
+    });
+    expect(readResource).toHaveBeenCalledWith(
+      { uri: "file:///README.md" },
+      { timeout: 5000 },
+    );
+  });
+
+  it("lists and gets prompts when the server supports prompts", async () => {
+    const listPrompts = vi.fn(() =>
+      Promise.resolve({
+        prompts: [
+          {
+            description: "Summarize code",
+            name: "summarize",
+          },
+        ],
+      }),
+    );
+    const getPrompt = vi.fn(() =>
+      Promise.resolve({
+        messages: [
+          {
+            content: { text: "Summarize this", type: "text" },
+            role: "user",
+          },
+        ],
+      }),
+    );
+    const sdk = createSdkClientFixture({
+      getPrompt,
+      getServerCapabilities: () => ({ prompts: {} }),
+      listPrompts,
+    });
+    const client = new McpClient(
+      "test",
+      {
+        args: [],
+        command: "node",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+      {
+        createSdkClient: (): McpSdkClient => sdk.client,
+        createTransport: (): McpTransport => ({}),
+      },
+    );
+
+    await client.connect();
+
+    await expect(client.listPrompts()).resolves.toEqual([
+      { description: "Summarize code", name: "summarize" },
+    ]);
+    await expect(
+      client.getPrompt("summarize", { topic: "runtime" }),
+    ).resolves.toEqual({
+      messages: [
+        {
+          content: { text: "Summarize this", type: "text" },
+          role: "user",
+        },
+      ],
+    });
+    expect(getPrompt).toHaveBeenCalledWith(
+      { arguments: { topic: "runtime" }, name: "summarize" },
+      { timeout: 5000 },
+    );
+  });
+
   it("disconnects the underlying SDK client and updates status", async () => {
     const sdk = createSdkClientFixture();
     const transport = {

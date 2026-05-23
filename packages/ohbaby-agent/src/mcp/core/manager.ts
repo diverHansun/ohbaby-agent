@@ -6,8 +6,12 @@ import type {
   McpCallToolResult,
   McpClientLike,
   McpClientStatus,
+  McpGetPromptResult,
   McpManagerChangeListener,
   McpManagerOptions,
+  McpReadResourceResult,
+  McpServerPromptDefinition,
+  McpServerResourceDefinition,
   McpTool,
   McpToolDefinition,
 } from "../types.js";
@@ -134,6 +138,55 @@ export class McpManager {
       },
       { timeout: client.config.timeout },
     );
+  }
+
+  async listResources(): Promise<readonly McpServerResourceDefinition[]> {
+    await this.ensureInitialized();
+    const resources: McpServerResourceDefinition[] = [];
+    for (const [serverName, client] of this.clients) {
+      const definitions = await client.listResources?.();
+      for (const resource of definitions ?? []) {
+        resources.push({ ...resource, serverName });
+      }
+    }
+    return resources;
+  }
+
+  async readResource(
+    serverName: string,
+    uri: string,
+  ): Promise<McpReadResourceResult> {
+    await this.ensureInitialized();
+    const client = this.clients.get(serverName);
+    if (!client?.readResource) {
+      throw new Error(`MCP server "${serverName}" not found`);
+    }
+    return client.readResource(uri);
+  }
+
+  async listPrompts(): Promise<readonly McpServerPromptDefinition[]> {
+    await this.ensureInitialized();
+    const prompts: McpServerPromptDefinition[] = [];
+    for (const [serverName, client] of this.clients) {
+      const definitions = await client.listPrompts?.();
+      for (const prompt of definitions ?? []) {
+        prompts.push({ ...prompt, serverName });
+      }
+    }
+    return prompts;
+  }
+
+  async getPrompt(
+    serverName: string,
+    name: string,
+    args?: Record<string, string>,
+  ): Promise<McpGetPromptResult> {
+    await this.ensureInitialized();
+    const client = this.clients.get(serverName);
+    if (!client?.getPrompt) {
+      throw new Error(`MCP server "${serverName}" not found`);
+    }
+    return client.getPrompt(name, args);
   }
 
   async getStatus(): Promise<Record<string, McpClientStatus>> {

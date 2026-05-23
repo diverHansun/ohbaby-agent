@@ -47,6 +47,12 @@ import {
 } from "../../skill/index.js";
 import { McpManager } from "../../mcp/index.js";
 import {
+  createMcpPromptTool,
+  createMcpResourceTool,
+  type McpPromptReader,
+  type McpResourceReader,
+} from "../../mcp/integration/resource-prompt-tools.js";
+import {
   RunManager,
   type HookExecutor,
   type ProfileRegistry,
@@ -132,7 +138,18 @@ export interface UiRuntimeCompositionOptions {
 
 export interface McpManagerPort {
   getAllTools(): Promise<readonly Tool[]>;
+  getPrompt?: McpPromptReader["getPrompt"];
   onChange?(listener: () => void | Promise<void>): () => void;
+  readResource?: McpResourceReader["readResource"];
+}
+
+function supportsMcpResourceAndPromptTools(
+  manager: McpManagerPort,
+): manager is McpManagerPort & McpPromptReader & McpResourceReader {
+  return (
+    typeof manager.getPrompt === "function" &&
+    typeof manager.readResource === "function"
+  );
 }
 
 function withoutSystemMessages(
@@ -480,6 +497,10 @@ export async function createUiRuntimeComposition(
       });
     });
   });
+  if (supportsMcpResourceAndPromptTools(mcpManager)) {
+    toolScheduler.register(createMcpResourceTool(mcpManager));
+    toolScheduler.register(createMcpPromptTool(mcpManager));
+  }
 
   return {
     agentManager,

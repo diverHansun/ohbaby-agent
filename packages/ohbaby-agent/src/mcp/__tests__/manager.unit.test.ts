@@ -5,6 +5,11 @@ import type {
   McpCallToolResult,
   McpClientLike,
   McpClientStatus,
+  McpGetPromptResult,
+  McpPromptDefinition,
+  McpReadResourceResult,
+  McpResourceDefinition,
+  McpServerMetadata,
   McpToolDefinition,
 } from "../types.js";
 
@@ -57,8 +62,23 @@ function createFakeClient(input: {
     getStatus(): McpClientStatus {
       return status;
     },
+    getServerMetadata(): McpServerMetadata {
+      return { capabilities: {} };
+    },
+    getPrompt(): Promise<McpGetPromptResult> {
+      return Promise.reject(new Error("prompts not configured"));
+    },
     listTools(): Promise<readonly McpToolDefinition[]> {
       return Promise.resolve(tools);
+    },
+    listPrompts(): Promise<readonly McpPromptDefinition[]> {
+      return Promise.resolve([]);
+    },
+    listResources(): Promise<readonly McpResourceDefinition[]> {
+      return Promise.resolve([]);
+    },
+    readResource(): Promise<McpReadResourceResult> {
+      return Promise.reject(new Error("resources not configured"));
     },
   };
 }
@@ -269,6 +289,74 @@ describe("McpManager", () => {
     await expect(manager.getAllTools()).resolves.toEqual([
       expect.objectContaining({ name: "mcp_s2_fs_t7_updated" }),
     ]);
+  });
+
+  it("lists resources and prompts with their source server names", async () => {
+    const manager = new McpManager("workspace-a", {
+      createClient: (name: string): McpClientLike => ({
+        ...createFakeClient({ name }),
+        getPrompt(promptName: string): Promise<McpGetPromptResult> {
+          return Promise.resolve({
+            messages: [
+              {
+                content: { text: `prompt ${promptName}`, type: "text" },
+                role: "user",
+              },
+            ],
+          });
+        },
+        getServerMetadata(): McpServerMetadata {
+          return { capabilities: { prompts: {}, resources: {} } };
+        },
+        listPrompts(): Promise<readonly McpPromptDefinition[]> {
+          return Promise.resolve([{ description: "Prompt", name: "summarize" }]);
+        },
+        listResources(): Promise<readonly McpResourceDefinition[]> {
+          return Promise.resolve([
+            { mimeType: "text/plain", name: "Readme", uri: "file:///README.md" },
+          ]);
+        },
+        readResource(uri: string): Promise<McpReadResourceResult> {
+          return Promise.resolve({
+            contents: [{ text: `resource ${uri}`, type: "text", uri }],
+          });
+        },
+      }),
+      loadConfig: (): Promise<McpServersConfig> => Promise.resolve({
+        mcpServers: {
+          fs: {
+            args: [],
+            command: "mock",
+            enabled: true,
+            timeout: 5000,
+            trust: false,
+            type: "stdio",
+          },
+        },
+      }),
+    });
+
+    await expect(manager.listResources()).resolves.toEqual([
+      {
+        mimeType: "text/plain",
+        name: "Readme",
+        serverName: "fs",
+        uri: "file:///README.md",
+      },
+    ]);
+    await expect(manager.listPrompts()).resolves.toEqual([
+      { description: "Prompt", name: "summarize", serverName: "fs" },
+    ]);
+    await expect(manager.readResource("fs", "file:///README.md")).resolves.toEqual({
+      contents: [
+        { text: "resource file:///README.md", type: "text", uri: "file:///README.md" },
+      ],
+    });
+    await expect(manager.getPrompt("fs", "summarize")).resolves.toEqual({
+      messages: [
+        { content: { text: "prompt summarize", type: "text" }, role: "user" },
+      ],
+    });
   });
 
   it("reuses singleton instances by workspace and disposes them for tests", async () => {

@@ -114,6 +114,55 @@ export interface McpCallToolResult {
   readonly isError?: boolean;
 }
 
+export interface McpResourceDefinition {
+  readonly uri: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly mimeType?: string;
+}
+
+export interface McpServerResourceDefinition extends McpResourceDefinition {
+  readonly serverName: string;
+}
+
+export interface McpResourceReadContent {
+  readonly uri: string;
+  readonly mimeType?: string;
+  readonly text?: string;
+  readonly blob?: string;
+  readonly type?: string;
+}
+
+export interface McpReadResourceResult {
+  readonly contents: readonly McpResourceReadContent[];
+}
+
+export interface McpPromptArgument {
+  readonly name: string;
+  readonly description?: string;
+  readonly required?: boolean;
+}
+
+export interface McpPromptDefinition {
+  readonly name: string;
+  readonly description?: string;
+  readonly arguments?: readonly McpPromptArgument[];
+}
+
+export interface McpServerPromptDefinition extends McpPromptDefinition {
+  readonly serverName: string;
+}
+
+export interface McpPromptMessage {
+  readonly role: string;
+  readonly content: unknown;
+}
+
+export interface McpGetPromptResult {
+  readonly description?: string;
+  readonly messages: readonly McpPromptMessage[];
+}
+
 export interface McpClientRequestOptions {
   readonly timeout?: number;
   readonly signal?: AbortSignal;
@@ -133,6 +182,25 @@ export interface McpSdkClient {
     params?: unknown,
     options?: McpClientRequestOptions,
   ): Promise<{ readonly tools: readonly McpToolDefinition[] }>;
+  listResources?(
+    params?: unknown,
+    options?: McpClientRequestOptions,
+  ): Promise<{ readonly resources: readonly McpResourceDefinition[] }>;
+  readResource?(
+    request: { readonly uri: string },
+    options?: McpClientRequestOptions,
+  ): Promise<McpReadResourceResult>;
+  listPrompts?(
+    params?: unknown,
+    options?: McpClientRequestOptions,
+  ): Promise<{ readonly prompts: readonly McpPromptDefinition[] }>;
+  getPrompt?(
+    request: {
+      readonly name: string;
+      readonly arguments?: Record<string, string>;
+    },
+    options?: McpClientRequestOptions,
+  ): Promise<McpGetPromptResult>;
   callTool(
     request: McpCallToolRequest,
     resultSchema?: unknown,
@@ -160,6 +228,13 @@ export interface McpClientLike {
   disconnect(): Promise<void>;
   getStatus(): McpClientStatus;
   getServerMetadata?(): McpServerMetadata;
+  listResources?(): Promise<readonly McpResourceDefinition[]>;
+  readResource?(uri: string): Promise<McpReadResourceResult>;
+  listPrompts?(): Promise<readonly McpPromptDefinition[]>;
+  getPrompt?(
+    name: string,
+    args?: Record<string, string>,
+  ): Promise<McpGetPromptResult>;
   onToolsChanged?(listener: McpToolsChangedListener): () => void;
 }
 
