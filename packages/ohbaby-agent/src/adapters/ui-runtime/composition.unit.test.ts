@@ -159,6 +159,7 @@ function findToolDescription(
 
 interface FakeMcpManager {
   getAllTools(): Promise<readonly Tool[]>;
+  onChange?(listener: () => void | Promise<void>): () => void;
 }
 
 function mcpTool(name: string): Tool {
@@ -226,5 +227,43 @@ describe("createUiRuntimeComposition skill tools", () => {
 
     const tools = await composition.toolScheduler.getAvailableTools();
     expect(tools.map((tool) => tool.name)).toContain("mcp_s6_server_t4_echo");
+  });
+
+  it("replaces stale MCP tools after the MCP manager changes", async () => {
+    const bus = createBus();
+    let tools = [mcpTool("mcp_s6_server_t3_old")];
+    const listeners = new Set<() => void | Promise<void>>();
+    const mcpManager: FakeMcpManager = {
+      getAllTools: () => Promise.resolve(tools),
+      onChange(listener) {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    };
+    const options = {
+      agentManager: new AgentManager(),
+      bus,
+      llmClient: fakeLlmClient(),
+      mcpManager,
+      messageManager: {} as MessageManager,
+      policy: createPolicyManager({ bus }),
+      skillRegistry: createMutableSkillRegistry([]),
+    } satisfies Parameters<typeof createUiRuntimeComposition>[0] & {
+      readonly mcpManager: FakeMcpManager;
+    };
+    const composition = await createUiRuntimeComposition(options);
+
+    tools = [mcpTool("mcp_s6_server_t3_new")];
+    for (const listener of listeners) {
+      void listener();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const refreshedTools = await composition.toolScheduler.getAvailableTools();
+    const names = refreshedTools.map((tool) => tool.name);
+    expect(names).toContain("mcp_s6_server_t3_new");
+    expect(names).not.toContain("mcp_s6_server_t3_old");
   });
 });

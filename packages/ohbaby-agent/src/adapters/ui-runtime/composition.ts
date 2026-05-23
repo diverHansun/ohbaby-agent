@@ -447,11 +447,19 @@ export async function createUiRuntimeComposition(
 
   const mcpManager: McpManagerPort =
     options.mcpManager ?? McpManager.getInstance(options.workdir ?? process.cwd());
+  let registeredMcpToolNames = new Set<string>();
   async function refreshMcpTools(): Promise<void> {
     const tools = await mcpManager.getAllTools();
+    const nextToolNames = new Set(tools.map((tool) => tool.name));
+    for (const toolName of registeredMcpToolNames) {
+      if (!nextToolNames.has(toolName)) {
+        toolScheduler.unregister(toolName);
+      }
+    }
     for (const tool of tools) {
       toolScheduler.register(tool);
     }
+    registeredMcpToolNames = nextToolNames;
   }
 
   await refreshMcpTools().catch((error: unknown) => {

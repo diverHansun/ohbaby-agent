@@ -208,6 +208,7 @@ export interface ToolSchedulerConfig {
 
 export interface ToolRegistry {
   register(tool: Tool): void;
+  unregister(toolName: string): void;
   registerCategory(toolName: string, category: ToolCategory): void;
   get(toolName: string): Tool | undefined;
   getCategory(toolName: string): ToolCategory | undefined;
@@ -221,6 +222,7 @@ export interface ToolRegistry {
 
 export interface ToolScheduler {
   register(tool: Tool): void;
+  unregister(toolName: string): void;
   registerCategory(toolName: string, category: ToolCategory): void;
   get(toolName: string): Tool | undefined;
   getCategory(toolName: string): ToolCategory | undefined;

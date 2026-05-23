@@ -11,6 +11,40 @@ export type McpClientStatus =
   | { readonly status: "disconnected" }
   | { readonly status: "disabled" };
 
+export interface McpServerCapabilities {
+  readonly tools?: {
+    readonly listChanged?: boolean;
+    readonly [key: string]: unknown;
+  };
+  readonly resources?: {
+    readonly subscribe?: boolean;
+    readonly listChanged?: boolean;
+    readonly [key: string]: unknown;
+  };
+  readonly prompts?: {
+    readonly listChanged?: boolean;
+    readonly [key: string]: unknown;
+  };
+  readonly [key: string]: unknown;
+}
+
+export interface McpServerInfo {
+  readonly name: string;
+  readonly version?: string;
+}
+
+export interface McpServerMetadata {
+  readonly capabilities: McpServerCapabilities;
+  readonly serverInfo?: McpServerInfo;
+  readonly instructions?: string;
+}
+
+export type McpToolsChangedListener = (
+  serverName: string,
+) => void | Promise<void>;
+
+export type McpManagerChangeListener = () => void | Promise<void>;
+
 export interface ToolAnnotations {
   readonly title?: string;
   readonly readOnlyHint?: boolean;
@@ -104,6 +138,13 @@ export interface McpSdkClient {
     resultSchema?: unknown,
     options?: McpClientRequestOptions,
   ): Promise<McpCallToolResult>;
+  getInstructions?(): string | undefined;
+  getServerCapabilities?(): McpServerCapabilities | undefined;
+  getServerVersion?(): McpServerInfo | undefined;
+  setNotificationHandler?(
+    schema: unknown,
+    handler: (notification: unknown) => void | Promise<void>,
+  ): void;
   close(): Promise<void>;
 }
 
@@ -118,6 +159,8 @@ export interface McpClientLike {
   ): Promise<McpCallToolResult>;
   disconnect(): Promise<void>;
   getStatus(): McpClientStatus;
+  getServerMetadata?(): McpServerMetadata;
+  onToolsChanged?(listener: McpToolsChangedListener): () => void;
 }
 
 export interface McpClientOptions {

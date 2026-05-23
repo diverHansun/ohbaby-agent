@@ -8,6 +8,7 @@ interface SdkClientFixture {
   readonly close: ReturnType<typeof vi.fn>;
   readonly connect: ReturnType<typeof vi.fn>;
   readonly listTools: ReturnType<typeof vi.fn>;
+  readonly setNotificationHandler: ReturnType<typeof vi.fn>;
 }
 
 function createSdkClientFixture(
@@ -19,6 +20,7 @@ function createSdkClientFixture(
   const callTool = vi.fn(() => Promise.resolve(callResult));
   const close = vi.fn(() => Promise.resolve());
   const connect = vi.fn(() => Promise.resolve());
+  const setNotificationHandler = vi.fn();
   const listTools = vi.fn(() =>
     Promise.resolve({
       tools: [
@@ -34,10 +36,11 @@ function createSdkClientFixture(
     close,
     connect,
     listTools,
+    setNotificationHandler,
     ...overrides,
   };
 
-  return { callTool, client, close, connect, listTools };
+  return { callTool, client, close, connect, listTools, setNotificationHandler };
 }
 
 describe("McpClient", () => {
@@ -69,6 +72,92 @@ describe("McpClient", () => {
     expect(sdk.listTools).toHaveBeenCalledTimes(1);
     expect(first).toEqual(second);
     expect(client.getStatus()).toEqual({ status: "connected", toolCount: 1 });
+  });
+
+  it("captures server metadata exposed during initialization", async () => {
+    const sdk = createSdkClientFixture({
+      getInstructions: () => "Use read-only operations when possible.",
+      getServerCapabilities: () => ({
+        prompts: {},
+        resources: {},
+        tools: { listChanged: true },
+      }),
+      getServerVersion: () => ({ name: "fixture-server", version: "1.2.3" }),
+    });
+    const client = new McpClient(
+      "test",
+      {
+        args: [],
+        command: "node",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+      {
+        createSdkClient: (): McpSdkClient => sdk.client,
+        createTransport: (): McpTransport => ({}),
+      },
+    );
+
+    await client.connect();
+
+    expect(client.getServerMetadata()).toEqual({
+      capabilities: {
+        prompts: {},
+        resources: {},
+        tools: { listChanged: true },
+      },
+      instructions: "Use read-only operations when possible.",
+      serverInfo: { name: "fixture-server", version: "1.2.3" },
+    });
+  });
+
+  it("invalidates cached tools and notifies listeners on tools/list_changed", async () => {
+    let currentToolName = "echo";
+    let listChangedHandler: (() => void | Promise<void>) | undefined;
+    const listTools = vi.fn(() =>
+      Promise.resolve({
+        tools: [
+          {
+            inputSchema: { type: "object" },
+            name: currentToolName,
+          },
+        ],
+      }),
+    );
+    const sdk = createSdkClientFixture({
+      listTools,
+      setNotificationHandler: vi.fn((_schema, handler) => {
+        listChangedHandler = handler as () => void | Promise<void>;
+      }),
+    });
+    const client = new McpClient(
+      "test",
+      {
+        args: [],
+        command: "node",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+      {
+        createSdkClient: (): McpSdkClient => sdk.client,
+        createTransport: (): McpTransport => ({}),
+      },
+    );
+    const listener = vi.fn();
+    client.onToolsChanged(listener);
+
+    await client.connect();
+    currentToolName = "updated";
+    await listChangedHandler?.();
+    const tools = await client.listTools();
+
+    expect(listener).toHaveBeenCalledWith("test");
+    expect(listTools).toHaveBeenCalledTimes(2);
+    expect(tools).toEqual([{ inputSchema: { type: "object" }, name: "updated" }]);
   });
 
   it("records failed status when connection fails", async () => {

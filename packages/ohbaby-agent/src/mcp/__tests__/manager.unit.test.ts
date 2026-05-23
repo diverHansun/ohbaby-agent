@@ -63,6 +63,38 @@ function createFakeClient(input: {
   };
 }
 
+function createChangingFakeClient(input: {
+  readonly name: string;
+  readonly initialTools: readonly McpToolDefinition[];
+}): McpClientLike & {
+  emitToolsChanged(): void;
+  setTools(tools: readonly McpToolDefinition[]): void;
+} {
+  let tools = input.initialTools;
+  const listeners = new Set<(serverName: string) => void | Promise<void>>();
+  const client = createFakeClient({ name: input.name, tools });
+  return {
+    ...client,
+    emitToolsChanged(): void {
+      for (const listener of listeners) {
+        void listener(input.name);
+      }
+    },
+    listTools(): Promise<readonly McpToolDefinition[]> {
+      return Promise.resolve(tools);
+    },
+    onToolsChanged(listener: (serverName: string) => void | Promise<void>) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    setTools(nextTools: readonly McpToolDefinition[]): void {
+      tools = nextTools;
+    },
+  };
+}
+
 describe("McpManager", () => {
   it("lazy loads config only on first tool access and reuses the init promise", async () => {
     const loadConfig = vi.fn((): Promise<McpServersConfig> =>
@@ -201,6 +233,42 @@ describe("McpManager", () => {
     await expect(manager.executeTool("missing", "echo", {})).rejects.toThrow(
       'MCP server "missing" not found',
     );
+  });
+
+  it("invalidates cached tools and notifies listeners when a client changes tools", async () => {
+    const client = createChangingFakeClient({
+      initialTools: [{ inputSchema: { type: "object" }, name: "echo" }],
+      name: "fs",
+    });
+    const manager = new McpManager("workspace-a", {
+      createClient: (): McpClientLike => client,
+      loadConfig: (): Promise<McpServersConfig> => Promise.resolve({
+        mcpServers: {
+          fs: {
+            args: [],
+            command: "mock",
+            enabled: true,
+            timeout: 5000,
+            trust: false,
+            type: "stdio",
+          },
+        },
+      }),
+    });
+    const listener = vi.fn();
+    manager.onChange(listener);
+
+    await expect(manager.getAllTools()).resolves.toEqual([
+      expect.objectContaining({ name: "mcp_s2_fs_t4_echo" }),
+    ]);
+
+    client.setTools([{ inputSchema: { type: "object" }, name: "updated" }]);
+    client.emitToolsChanged();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    await expect(manager.getAllTools()).resolves.toEqual([
+      expect.objectContaining({ name: "mcp_s2_fs_t7_updated" }),
+    ]);
   });
 
   it("reuses singleton instances by workspace and disposes them for tests", async () => {

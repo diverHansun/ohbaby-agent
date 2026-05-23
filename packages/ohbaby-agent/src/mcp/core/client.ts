@@ -1,4 +1,5 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServerConfig } from "../../config/index.js";
 import { McpConnectionError, McpToolDiscoveryError } from "../errors.js";
 import type {
@@ -8,7 +9,9 @@ import type {
   McpClientOptions,
   McpClientRequestOptions,
   McpClientStatus,
+  McpServerMetadata,
   McpSdkClient,
+  McpToolsChangedListener,
   McpToolDefinition,
   McpTransport,
 } from "../types.js";
@@ -29,6 +32,8 @@ export class McpClient implements McpClientLike {
   private sdkClient: McpSdkClient | null = null;
   private status: McpClientStatus = { status: "disconnected" };
   private tools: readonly McpToolDefinition[] | null = null;
+  private metadata: McpServerMetadata = { capabilities: {} };
+  private readonly toolChangeListeners = new Set<McpToolsChangedListener>();
   private readonly createSdkClient: () => McpSdkClient;
   private readonly createTransport: (config: McpServerConfig) => McpTransport;
 
@@ -58,6 +63,8 @@ export class McpClient implements McpClientLike {
     try {
       await sdkClient.connect(transport, { timeout: this.config.timeout });
       this.sdkClient = sdkClient;
+      this.metadata = this.readServerMetadata(sdkClient);
+      this.registerToolChangeHandler(sdkClient);
       const tools = await this.refreshTools();
       this.status = { status: "connected", toolCount: tools.length };
     } catch (error) {
@@ -94,12 +101,50 @@ export class McpClient implements McpClientLike {
     } finally {
       this.sdkClient = null;
       this.tools = null;
+      this.metadata = { capabilities: {} };
       this.status = { status: "disconnected" };
     }
   }
 
   getStatus(): McpClientStatus {
     return this.status;
+  }
+
+  getServerMetadata(): McpServerMetadata {
+    return this.metadata;
+  }
+
+  onToolsChanged(listener: McpToolsChangedListener): () => void {
+    this.toolChangeListeners.add(listener);
+    return () => {
+      this.toolChangeListeners.delete(listener);
+    };
+  }
+
+  private readServerMetadata(sdkClient: McpSdkClient): McpServerMetadata {
+    return {
+      capabilities: sdkClient.getServerCapabilities?.() ?? {},
+      instructions: sdkClient.getInstructions?.(),
+      serverInfo: sdkClient.getServerVersion?.(),
+    };
+  }
+
+  private registerToolChangeHandler(sdkClient: McpSdkClient): void {
+    sdkClient.setNotificationHandler?.(
+      ToolListChangedNotificationSchema,
+      async () => {
+        this.tools = null;
+        await this.notifyToolsChanged();
+      },
+    );
+  }
+
+  private async notifyToolsChanged(): Promise<void> {
+    await Promise.all(
+      Array.from(this.toolChangeListeners).map((listener) =>
+        Promise.resolve(listener(this.name)),
+      ),
+    );
   }
 
   private async refreshTools(): Promise<readonly McpToolDefinition[]> {
