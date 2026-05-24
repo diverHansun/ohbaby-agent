@@ -322,7 +322,28 @@ describe("TUI store event reducer", () => {
     });
 
     expect(state.commandNotices.at(-1)?.text).toBe(
-      "mode: ask / ask-before-edit",
+      "mode: ask | permission: ask-before-edit",
+    );
+
+    state = applyTuiEvent(state, {
+      clientInvocationId: "invoke_permission",
+      commandRunId: "command_permission",
+      output: {
+        data: {
+          policy: {
+            agentState: "edit-automatically",
+            mode: "agent",
+          },
+        },
+        kind: "data",
+        subject: "policy.permission",
+      },
+      timestamp: 2,
+      type: "command.result.delivered",
+    });
+
+    expect(state.commandNotices.at(-1)?.text).toBe(
+      "permission: edit-automatically | mode: agent",
     );
 
     const longText = "x".repeat(400);
@@ -330,7 +351,7 @@ describe("TUI store event reducer", () => {
       clientInvocationId: "invoke_long",
       commandRunId: "command_long",
       output: { kind: "text", text: longText },
-      timestamp: 2,
+      timestamp: 3,
       type: "command.result.delivered",
     });
 

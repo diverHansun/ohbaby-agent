@@ -648,18 +648,34 @@ function formatCommandOutput(output: UiCommandOutput | undefined): string {
   return truncateCommandOutput(formatDataCommandOutput(output));
 }
 
+function formatPolicyOutput(
+  policy: Record<string, unknown> | undefined,
+  focus: "mode" | "permission",
+): string | undefined {
+  const mode = policy ? getString(policy, "mode") : undefined;
+  const agentState = policy ? getString(policy, "agentState") : undefined;
+  if (!mode || !agentState) {
+    return undefined;
+  }
+
+  return focus === "mode"
+    ? `mode: ${mode} | permission: ${agentState}`
+    : `permission: ${agentState} | mode: ${mode}`;
+}
+
 function formatDataCommandOutput(
   output: Extract<UiCommandOutput, { readonly kind: "data" }>,
 ): string {
   switch (output.subject) {
     case "policy.mode": {
       const policy = getRecord(output.data, "policy");
-      const mode = policy ? getString(policy, "mode") : undefined;
-      const agentState = policy ? getString(policy, "agentState") : undefined;
-
-      return mode && agentState
-        ? `mode: ${mode} / ${agentState}`
-        : JSON.stringify(output.data);
+      return formatPolicyOutput(policy, "mode") ?? JSON.stringify(output.data);
+    }
+    case "policy.permission": {
+      const policy = getRecord(output.data, "policy");
+      return (
+        formatPolicyOutput(policy, "permission") ?? JSON.stringify(output.data)
+      );
     }
     case "status": {
       const status = getString(output.data, "status");

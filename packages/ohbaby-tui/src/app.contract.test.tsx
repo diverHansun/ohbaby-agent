@@ -195,12 +195,14 @@ describe("OhbabyTerminalApp", () => {
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await flush();
-    expect(app.lastFrame()).toContain("mode: agent / ask-before-edit");
+    expect(app.lastFrame()).toContain(
+      "mode: agent | permission: ask-before-edit",
+    );
     expect(app.lastFrame()).not.toContain(
       "status: idle | session: session_1 | mode:",
     );
     expect(
-      lineIndex(app.lastFrame(), "mode: agent / ask-before-edit"),
+      lineIndex(app.lastFrame(), "mode: agent | permission: ask-before-edit"),
     ).toBeLessThan(
       lineIndex(app.lastFrame(), "status: idle | session: session_1"),
     );
@@ -219,7 +221,9 @@ describe("OhbabyTerminalApp", () => {
     });
     await flush();
 
-    expect(app.lastFrame()).toContain("mode: agent / edit-automatically");
+    expect(app.lastFrame()).toContain(
+      "mode: agent | permission: edit-automatically",
+    );
   });
 
   it("cycles policy mode with Shift+Tab", async () => {

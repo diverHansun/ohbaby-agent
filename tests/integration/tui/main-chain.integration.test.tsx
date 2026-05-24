@@ -163,17 +163,17 @@ describe("TUI main chain with real in-process backend", () => {
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: agent / ask-before-edit"),
+      frame.includes("mode: agent | permission: ask-before-edit"),
     );
     app.stdin.write("/mode ask");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: ask / ask-before-edit"),
+      frame.includes("mode: ask | permission: ask-before-edit"),
     );
 
     app.stdin.write("\u001B[Z");
     const frame = await waitForFrame(app, (nextFrame) =>
-      nextFrame.includes("mode: plan / ask-before-edit"),
+      nextFrame.includes("mode: plan | permission: ask-before-edit"),
     );
 
     expect(frame).toContain("status: idle");
@@ -190,7 +190,7 @@ describe("TUI main chain with real in-process backend", () => {
     app.stdin.write("/mode ask");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: ask / ask-before-edit"),
+      frame.includes("mode: ask | permission: ask-before-edit"),
     );
 
     app.stdin.write("/tools");
@@ -233,12 +233,12 @@ describe("TUI main chain with real in-process backend", () => {
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: agent / ask-before-edit"),
+      frame.includes("mode: agent | permission: ask-before-edit"),
     );
     app.stdin.write("/mode ask");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: ask / ask-before-edit"),
+      frame.includes("mode: ask | permission: ask-before-edit"),
     );
 
     app.stdin.write("try to write");
@@ -254,7 +254,7 @@ describe("TUI main chain with real in-process backend", () => {
     app.unmount();
   });
 
-  it("runs write tool calls without permission after /mode auto-edit", async () => {
+  it("runs write tool calls without permission after /permission edit-automatically", async () => {
     const workdir = await tempWorkspace("ohbaby-tui-auto-edit");
     const client = createInProcessUiBackendClient({
       llmClient: createSequentialFakeLLMClient([
@@ -272,10 +272,10 @@ describe("TUI main chain with real in-process backend", () => {
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await waitForFrame(app, promptIsReady);
-    app.stdin.write("/mode auto-edit");
+    app.stdin.write("/permission edit-automatically");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: agent / edit-automatically"),
+      frame.includes("mode: agent | permission: edit-automatically"),
     );
 
     app.stdin.write("write automatically");

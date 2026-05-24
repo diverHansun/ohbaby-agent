@@ -123,7 +123,7 @@ export function Prompt({
       </Text>
       {policy === undefined ? null : (
         <Text dimColor>
-          mode: {policy.mode} / {policy.agentState}
+          mode: {policy.mode} | permission: {policy.agentState}
         </Text>
       )}
       {error === null ? null : <Text color="red">{error}</Text>}

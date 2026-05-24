@@ -450,7 +450,8 @@ describe("real provider TUI smoke", () => {
         app.stdin.write("\r");
         await waitForFrame(
           app,
-          (frame) => frame.includes("mode: ask / ask-before-edit"),
+          (frame) =>
+            frame.includes("mode: ask | permission: ask-before-edit"),
           30_000,
         );
 
