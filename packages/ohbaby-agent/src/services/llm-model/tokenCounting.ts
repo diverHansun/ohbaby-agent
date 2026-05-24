@@ -1,8 +1,13 @@
 const ASCII_TOKEN_WEIGHT = 0.25;
 const NON_ASCII_TOKEN_WEIGHT = 1.3;
 const CONVERSATION_OVERHEAD_TOKENS = 4;
-const DEFAULT_MODEL_LIMIT = 4_096;
+const EMPTY_MODEL_LIMIT = 4_096;
+const DEFAULT_MODEL_LIMIT = 128_000;
 const DEFAULT_MAX_RESPONSE_TOKENS = 2_048;
+
+export interface HeuristicTokenCounterOptions {
+  readonly defaultLimit?: number;
+}
 
 export type TokenCountMessage =
   | {
@@ -103,13 +108,16 @@ export function estimateTokensForMessages(
   );
 }
 
-export function getTokenLimit(model: string): number {
+export function getTokenLimit(
+  model: string,
+  defaultLimit = DEFAULT_MODEL_LIMIT,
+): number {
   assertString(model, "model");
 
   const normalized = model.trim().toLowerCase();
 
   if (normalized === "") {
-    return DEFAULT_MODEL_LIMIT;
+    return EMPTY_MODEL_LIMIT;
   }
 
   if (
@@ -117,7 +125,19 @@ export function getTokenLimit(model: string): number {
     normalized.includes("transcribe") ||
     normalized.includes("audio")
   ) {
-    return DEFAULT_MODEL_LIMIT;
+    return EMPTY_MODEL_LIMIT;
+  }
+
+  if (normalized.startsWith("gpt-4.1")) {
+    return 1_000_000;
+  }
+
+  if (normalized.startsWith("gpt-5")) {
+    return 400_000;
+  }
+
+  if (normalized.startsWith("o3") || normalized.startsWith("o4-mini")) {
+    return 200_000;
   }
 
   if (normalized.startsWith("gpt-4-turbo")) {
@@ -140,7 +160,19 @@ export function getTokenLimit(model: string): number {
     return 8_192;
   }
 
-  return DEFAULT_MODEL_LIMIT;
+  if (normalized.startsWith("claude-")) {
+    return 200_000;
+  }
+
+  if (normalized.startsWith("deepseek-")) {
+    return 64_000;
+  }
+
+  if (normalized.startsWith("glm-4")) {
+    return 128_000;
+  }
+
+  return normalizeContextLimit(defaultLimit);
 }
 
 export function calculateContextTokens(
@@ -185,10 +217,18 @@ export function isApproachingTokenLimit(
   };
 }
 
-export function createHeuristicTokenCounter(): HeuristicTokenCounter {
+export function createHeuristicTokenCounter(
+  options: HeuristicTokenCounterOptions = {},
+): HeuristicTokenCounter {
+  const defaultLimit =
+    options.defaultLimit === undefined
+      ? DEFAULT_MODEL_LIMIT
+      : normalizeContextLimit(options.defaultLimit);
   return {
     estimateTokens: estimateTokensForText,
-    getLimit: getTokenLimit,
+    getLimit(modelId: string): number {
+      return getTokenLimit(modelId, defaultLimit);
+    },
   };
 }
 
@@ -228,6 +268,14 @@ function normalizeTokenBudget(tokens: number): number {
   }
 
   return Math.max(0, Math.ceil(tokens));
+}
+
+function normalizeContextLimit(tokens: number): number {
+  if (!Number.isFinite(tokens) || tokens <= 0) {
+    return DEFAULT_MODEL_LIMIT;
+  }
+
+  return Math.ceil(tokens);
 }
 
 function assertString(value: unknown, name: string): asserts value is string {

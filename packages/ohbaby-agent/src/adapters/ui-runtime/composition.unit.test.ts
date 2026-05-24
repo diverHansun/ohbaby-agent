@@ -3,6 +3,10 @@ import { AgentManager } from "../../agents/index.js";
 import { createBus } from "../../bus/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import type { MessageManager } from "../../core/message/index.js";
+import {
+  createInMemoryMessageStore,
+  createMessageManager,
+} from "../../core/message/index.js";
 import { createPolicyManager } from "../../policy/index.js";
 import type { Tool } from "../../core/tool-scheduler/index.js";
 import type {
@@ -19,7 +23,9 @@ interface FakeSdkClient {
   readonly kind: "fake";
 }
 
-function fakeLlmClient(): LLMClientInstance<FakeSdkClient> {
+function fakeLlmClient(
+  config: Partial<LLMClientInstance<FakeSdkClient>["config"]> = {},
+): LLMClientInstance<FakeSdkClient> {
   return {
     config: {
       baseUrl: "https://example.invalid/v1",
@@ -27,6 +33,7 @@ function fakeLlmClient(): LLMClientInstance<FakeSdkClient> {
       model: "fake-model",
       provider: "fake",
       temperature: 0,
+      ...config,
     },
     provider: {
       client: { kind: "fake" },
@@ -174,6 +181,62 @@ function mcpTool(name: string): Tool {
 }
 
 describe("createUiRuntimeComposition skill tools", () => {
+  it("uses configured context window tokens for pre-prompt compaction", async () => {
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    for (const [index, role] of [
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ].entries()) {
+      const message = await messageManager.createMessage({
+        agent: "default",
+        role: role as "assistant" | "user",
+        sessionId: "session_large",
+      });
+      await messageManager.appendPart(message.id, {
+        text: `${String(index)} ${"a".repeat(8_000)}`,
+        type: "text",
+      });
+    }
+    const llmClient = fakeLlmClient({
+      contextWindowTokens: 128_000,
+      model: "custom-large-model",
+    });
+    const notices: { readonly key?: string; readonly title: string }[] = [];
+
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      llmClient,
+      mcpManager: { getAllTools: () => Promise.resolve([]) },
+      messageManager,
+      onNotice: (notice) => {
+        notices.push(notice);
+      },
+      policy: createPolicyManager({ bus }),
+      skillRegistry: createMutableSkillRegistry([]),
+      workdir: "D:/repo",
+    });
+
+    await expect(
+      composition.buildPromptMessages({
+        agentName: "default",
+        projectRoot: "D:/repo",
+        sessionId: "session_large",
+      }),
+    ).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ role: "user" })]),
+    );
+    expect(notices.map((notice) => notice.key)).not.toContain(
+      "context:compact:session_large",
+    );
+  });
+
   it("registers the resource tool and refreshes skill descriptions after registry changes", async () => {
     const bus = createBus();
     const registry = createMutableSkillRegistry([

@@ -26,6 +26,20 @@ describe("validateModelJson", () => {
     }).not.toThrow();
   });
 
+  it("should accept optional context window tokens", () => {
+    const config = {
+      ...validConfig,
+      llmParams: {
+        ...validConfig.llmParams,
+        contextWindowTokens: 128_000,
+      },
+    };
+
+    expect(() => {
+      validateModelJson(config);
+    }).not.toThrow();
+  });
+
   it("should throw for null input", () => {
     expect(() => {
       validateModelJson(null);
@@ -245,6 +259,22 @@ describe("validateModelJson", () => {
     expect(() => {
       validateModelJson(config);
     }).not.toThrow();
+  });
+
+  it("should reject invalid context window tokens", () => {
+    for (const contextWindowTokens of [0, -1, 100.5, "128000"]) {
+      const config = {
+        ...validConfig,
+        llmParams: {
+          ...validConfig.llmParams,
+          contextWindowTokens,
+        },
+      };
+
+      expect(() => {
+        validateModelJson(config);
+      }).toThrow(ConfigError);
+    }
   });
 
   it("should ignore extra fields", () => {

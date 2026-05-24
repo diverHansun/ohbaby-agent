@@ -107,13 +107,17 @@ describe("tokenCounting", () => {
   describe("getTokenLimit", () => {
     it("returns known limits, prefix matches, and conservative defaults", () => {
       expect(getTokenLimit("gpt-4")).toBe(8_192);
+      expect(getTokenLimit("gpt-5")).toBeGreaterThanOrEqual(128_000);
+      expect(getTokenLimit("claude-sonnet-4.5")).toBe(200_000);
+      expect(getTokenLimit("deepseek-chat")).toBeGreaterThanOrEqual(64_000);
+      expect(getTokenLimit("glm-4-plus")).toBe(128_000);
       expect(getTokenLimit("GPT-4-TURBO-preview")).toBe(128_000);
       expect(getTokenLimit("gpt-4o")).toBe(128_000);
       expect(getTokenLimit("gpt-4o-mini")).toBe(128_000);
       expect(getTokenLimit("gpt-3.5-turbo")).toBe(4_096);
       expect(getTokenLimit("gpt-4o-realtime-preview")).toBe(4_096);
       expect(getTokenLimit("gpt-4o-mini-transcribe")).toBe(4_096);
-      expect(getTokenLimit("unknown-model")).toBe(4_096);
+      expect(getTokenLimit("unknown-model")).toBe(128_000);
       expect(getTokenLimit("")).toBe(4_096);
     });
 
@@ -204,6 +208,15 @@ describe("tokenCounting", () => {
 
       expect(counter.estimateTokens("abcd")).toBe(1);
       expect(counter.getLimit("gpt-4")).toBe(8_192);
+    });
+
+    it("uses a configured default context window for unknown model ids", () => {
+      const counter: TokenCounter = createHeuristicTokenCounter({
+        defaultLimit: 256_000,
+      });
+
+      expect(counter.getLimit("custom-large-context-model")).toBe(256_000);
+      expect(counter.getLimit("gpt-4o")).toBe(128_000);
     });
   });
 });

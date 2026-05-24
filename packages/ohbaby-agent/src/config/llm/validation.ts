@@ -12,6 +12,26 @@ function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/u, "");
 }
 
+function formatInvalidValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value === null ||
+    value === undefined
+  ) {
+    return String(value);
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+}
+
 function validateBaseUrlValue(baseUrl: string): void {
   const normalized = trimTrailingSlashes(baseUrl.trim()).toLowerCase();
 
@@ -95,6 +115,21 @@ export function validateModelJson(
         `Invalid maxTokens: ${String(llmParams.maxTokens)}. Must be a positive integer`,
         "INVALID_MAX_TOKENS",
         { value: llmParams.maxTokens },
+      );
+    }
+
+    if (
+      llmParams.contextWindowTokens !== undefined &&
+      (typeof llmParams.contextWindowTokens !== "number" ||
+        llmParams.contextWindowTokens <= 0 ||
+        !Number.isInteger(llmParams.contextWindowTokens))
+    ) {
+      throw new ConfigError(
+        `Invalid contextWindowTokens: ${formatInvalidValue(
+          llmParams.contextWindowTokens,
+        )}. Must be a positive integer`,
+        "INVALID_MAX_TOKENS",
+        { value: llmParams.contextWindowTokens },
       );
     }
   }

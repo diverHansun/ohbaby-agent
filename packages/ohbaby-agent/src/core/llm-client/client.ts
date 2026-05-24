@@ -59,6 +59,9 @@ export async function createLLMClient(
       baseUrl: config.baseUrl,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
+      ...(config.contextWindowTokens === undefined
+        ? {}
+        : { contextWindowTokens: config.contextWindowTokens }),
     },
   };
 }

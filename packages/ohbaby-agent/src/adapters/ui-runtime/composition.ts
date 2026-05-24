@@ -380,7 +380,9 @@ export async function createUiRuntimeComposition(
         });
       },
       systemPromptProvider,
-      tokenCounter: createHeuristicTokenCounter(),
+      tokenCounter: createHeuristicTokenCounter({
+        defaultLimit: options.llmClient.config.contextWindowTokens,
+      }),
     });
 
   const lifecycle = new Lifecycle({
@@ -463,7 +465,8 @@ export async function createUiRuntimeComposition(
   });
 
   const mcpManager: McpManagerPort =
-    options.mcpManager ?? McpManager.getInstance(options.workdir ?? process.cwd());
+    options.mcpManager ??
+    McpManager.getInstance(options.workdir ?? process.cwd());
   let registeredMcpToolNames = new Set<string>();
   async function refreshMcpTools(): Promise<void> {
     const tools = await mcpManager.getAllTools();

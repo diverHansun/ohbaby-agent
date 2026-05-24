@@ -29,6 +29,9 @@ export interface ModelJsonConfig {
 
     /** Maximum tokens to generate */
     maxTokens: number;
+
+    /** Optional full model context window used for local compaction decisions */
+    contextWindowTokens?: number;
   };
 }
 
@@ -54,6 +57,9 @@ export interface LLMConfig {
 
   /** Maximum tokens to generate */
   maxTokens: number;
+
+  /** Optional full model context window used for local compaction decisions */
+  contextWindowTokens?: number;
 }
 
 /**

@@ -104,6 +104,9 @@ export interface LLMClientInstance<TClient = unknown> {
 
     /** Maximum tokens to generate */
     maxTokens: number;
+
+    /** Full model context window used for local compaction decisions */
+    contextWindowTokens?: number;
   };
 }
 

@@ -21,6 +21,7 @@ describe("LLMConfigManager", () => {
     llmParams: {
       temperature: 0.7,
       maxTokens: 4096,
+      contextWindowTokens: 128_000,
     },
   };
 
@@ -70,6 +71,7 @@ describe("LLMConfigManager", () => {
         baseUrl: "https://api.openai.com/v1",
         temperature: 0.7,
         maxTokens: 4096,
+        contextWindowTokens: 128_000,
       });
       expect(loaders.loadProjectEnv).not.toHaveBeenCalled();
     });

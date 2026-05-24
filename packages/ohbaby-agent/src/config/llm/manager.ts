@@ -120,6 +120,11 @@ class LLMConfigManager {
         baseUrl: modelJson.apiConfig.baseUrl,
         temperature: modelJson.llmParams.temperature,
         maxTokens: modelJson.llmParams.maxTokens,
+        ...(modelJson.llmParams.contextWindowTokens === undefined
+          ? {}
+          : {
+              contextWindowTokens: modelJson.llmParams.contextWindowTokens,
+            }),
       };
 
       // Cache and return
