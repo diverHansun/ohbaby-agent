@@ -3,6 +3,10 @@ import type {
   UiCommandInvocation,
   UiCommandSurface,
 } from "./command/types.js";
+import type {
+  UiCompactSessionOptions,
+  UiCompactSessionResult,
+} from "./compact.js";
 import type { UiEvent } from "./events.js";
 import type { UiInteractionResponse } from "./interaction.js";
 import type { UiPermissionResponse, UiSnapshot } from "./snapshot.js";
@@ -23,6 +27,9 @@ export interface UiBackendClient {
   subscribeEvents(handler: UiEventHandler): UiUnsubscribe;
   listCommands(query: UiListCommandsQuery): Promise<UiCommandCatalog>;
   submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void>;
+  compactSession(
+    options?: UiCompactSessionOptions,
+  ): Promise<UiCompactSessionResult>;
   executeCommand(invocation: UiCommandInvocation): Promise<void>;
   respondPermission(
     requestId: string,

@@ -211,6 +211,43 @@ async function handleSessionNew(
   context.emitAction(action("session.selected", { choiceId: session.id }));
 }
 
+function parseForceArg(argv: readonly string[], defaultValue: boolean): boolean {
+  if (argv.includes("--no-force")) {
+    return false;
+  }
+  if (argv.includes("--force")) {
+    return true;
+  }
+  return defaultValue;
+}
+
+async function handleSessionCompact(
+  options: CommandServiceOptions,
+  invocation: Parameters<CommandHandler["execute"]>[0],
+  context: CommandRunContext,
+): Promise<void> {
+  if (!options.compact) {
+    context.fail({
+      code: "SESSION_COMPACT_UNAVAILABLE",
+      message: "Session compact is not available in this backend",
+      recoverable: true,
+    });
+    return;
+  }
+
+  const result = await options.compact.compactSession({
+    force: parseForceArg(invocation.argv, true),
+    sessionId: parseSessionIdArg(invocation.argv) ?? invocation.sessionId,
+  });
+  context.emitOutput(dataOutput("session.compact", { result }));
+  context.emitAction(
+    action("session.compacted", {
+      sessionId: result.sessionId,
+      status: result.status,
+    }),
+  );
+}
+
 async function handleModeChange(
   options: CommandServiceOptions,
   context: CommandRunContext,
@@ -309,6 +346,12 @@ export function createBuiltinHandlers(
       id: "session.new",
       execute(_invocation, context): Promise<void> {
         return handleSessionNew(options, context);
+      },
+    },
+    {
+      id: "session.compact",
+      execute(invocation, context): Promise<void> {
+        return handleSessionCompact(options, invocation, context);
       },
     },
     {

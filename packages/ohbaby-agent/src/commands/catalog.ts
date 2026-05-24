@@ -102,6 +102,18 @@ const BUILTIN_COMMANDS: readonly UiCommandSpec[] = [
     surfaces: COMMON_SURFACES,
   },
   {
+    id: "session.compact",
+    path: ["session", "compact"],
+    aliases: [["compact"]],
+    acceptsArguments: true,
+    argsHint: "[--session_id <id>] [--force]",
+    argumentMode: "argv",
+    category: "session",
+    description: "Compact the current session context",
+    source: "builtin",
+    surfaces: COMMON_SURFACES,
+  },
+  {
     id: "session.list",
     path: ["session", "list"],
     aliases: [],

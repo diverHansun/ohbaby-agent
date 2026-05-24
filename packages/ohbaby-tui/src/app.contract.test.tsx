@@ -916,6 +916,7 @@ function createFakeClient(
 ): TuiBackendClient & {
   readonly emit: (event: TuiEvent) => void;
   readonly abortRun: ReturnType<typeof vi.fn>;
+  readonly compactSession: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
   readonly listCommands: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
@@ -926,6 +927,28 @@ function createFakeClient(
 
   return {
     abortRun: vi.fn(() => Promise.resolve()),
+    compactSession: vi.fn(() =>
+      Promise.resolve({
+        sessionId: initialSnapshot.activeSessionId ?? "session_1",
+        status: "not-needed" as const,
+        usageAfter: {
+          contextLimit: 100,
+          currentTokens: 1,
+          modelId: "fake-model",
+          remainingTokens: 99,
+          shouldCompress: false,
+          usageRatio: 0.01,
+        },
+        usageBefore: {
+          contextLimit: 100,
+          currentTokens: 1,
+          modelId: "fake-model",
+          remainingTokens: 99,
+          shouldCompress: false,
+          usageRatio: 0.01,
+        },
+      }),
+    ),
     emit(event): void {
       for (const handler of handlers) {
         handler(event);

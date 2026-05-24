@@ -18,6 +18,7 @@ describe("command catalog", () => {
         "model.current",
         "session",
         "session.new",
+        "session.compact",
         "session.list",
         "session.resume",
         "mode",
@@ -53,6 +54,13 @@ describe("command catalog", () => {
           id: "session.new",
           aliases: [["new"]],
           path: ["session", "new"],
+        }),
+        expect.objectContaining({
+          acceptsArguments: true,
+          aliases: [["compact"]],
+          argsHint: "[--session_id <id>] [--force]",
+          id: "session.compact",
+          path: ["session", "compact"],
         }),
         expect.objectContaining({
           acceptsArguments: true,

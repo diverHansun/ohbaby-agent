@@ -9,6 +9,7 @@ export { createBuiltinHandlers } from "./builtin.js";
 export { createCommandService } from "./service.js";
 export type {
   CommandHandler,
+  CommandCompactProvider,
   CommandInteractionContext,
   CommandInteractionRequest,
   CommandModelProvider,

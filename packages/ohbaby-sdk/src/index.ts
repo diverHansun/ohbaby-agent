@@ -6,6 +6,14 @@ export type {
   UiUnsubscribe,
 } from "./client.js";
 export type {
+  UiCompactSessionCompressionResult,
+  UiCompactSessionOptions,
+  UiCompactSessionPruneResult,
+  UiCompactSessionResult,
+  UiCompactSessionStatus,
+  UiCompactSessionUsage,
+} from "./compact.js";
+export type {
   UiEvent,
   UiMessageAppendedEvent,
   UiMessagePartDeltaEvent,

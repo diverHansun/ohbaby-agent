@@ -702,6 +702,23 @@ function formatDataCommandOutput(
       const label = title ?? id;
       return label ? `new session: ${label}` : JSON.stringify(output.data);
     }
+    case "session.compact": {
+      const result = getRecord(output.data, "result");
+      const status = result ? getString(result, "status") : undefined;
+      const usageBefore = result ? getRecord(result, "usageBefore") : undefined;
+      const usageAfter = result ? getRecord(result, "usageAfter") : undefined;
+      const before = usageBefore
+        ? getNumber(usageBefore, "currentTokens")
+        : undefined;
+      const after = usageAfter
+        ? getNumber(usageAfter, "currentTokens")
+        : undefined;
+      return status && before !== undefined && after !== undefined
+        ? `compact: ${status} (${formatTokenCount(before)} -> ${formatTokenCount(
+            after,
+          )} tokens)`
+        : JSON.stringify(output.data);
+    }
     case "session.list": {
       const sessions = Array.isArray(output.data.sessions)
         ? output.data.sessions
@@ -766,6 +783,18 @@ function getString(
 ): string | undefined {
   const value = record[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function getNumber(
+  record: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = record[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+function formatTokenCount(value: number): string {
+  return Math.round(value).toLocaleString("en-US");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

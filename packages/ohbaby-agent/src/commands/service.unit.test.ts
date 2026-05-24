@@ -279,6 +279,67 @@ describe("CommandService", () => {
     );
   });
 
+  it("manually compacts the current session", async () => {
+    const compactSession = vi.fn(() =>
+      Promise.resolve({
+        sessionId: "session_1",
+        status: "compacted" as const,
+        usageAfter: {
+          contextLimit: 100,
+          currentTokens: 24,
+          modelId: "fake-model",
+          remainingTokens: 76,
+          shouldCompress: false,
+          usageRatio: 0.24,
+        },
+        usageBefore: {
+          contextLimit: 100,
+          currentTokens: 92,
+          modelId: "fake-model",
+          remainingTokens: 8,
+          shouldCompress: true,
+          usageRatio: 0.92,
+        },
+      }),
+    );
+    const { events, service } = createServiceHarness({
+      compact: {
+        compactSession,
+      },
+    });
+
+    await service.executeCommand(
+      makeInvocation("session.compact", ["compact"], ["--force"]),
+    );
+
+    expect(compactSession).toHaveBeenCalledWith({
+      force: true,
+      sessionId: "session_1",
+    });
+    expect(
+      events.some((event) => {
+        const output = event.output;
+        return (
+          event.type === "result" &&
+          isRecord(output) &&
+          output.kind === "data" &&
+          output.subject === "session.compact"
+        );
+      }),
+    ).toBe(true);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: {
+            data: { sessionId: "session_1", status: "compacted" },
+            kind: "session.compacted",
+          },
+          type: "result",
+        }),
+      ]),
+    );
+  });
+
   it("resumes a session by --session_id or positional id", async () => {
     const selectSession = vi.fn<() => Promise<void>>().mockResolvedValue();
     const { events, service } = createServiceHarness({
@@ -651,6 +712,10 @@ function createServiceHarness(
       ...overrides,
     }),
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function makeInvocation(

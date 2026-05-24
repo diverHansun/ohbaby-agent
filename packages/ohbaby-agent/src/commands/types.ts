@@ -6,6 +6,7 @@ import type {
   UiCommandOutput,
   UiCommandSpec,
   UiCommandSurface,
+  UiCompactSessionResult,
   UiInteractionResponse,
   UiSnapshot,
 } from "ohbaby-sdk";
@@ -63,6 +64,13 @@ export interface CommandSessionProvider {
   selectSession?(sessionId: string): Promise<void> | void;
 }
 
+export interface CommandCompactProvider {
+  compactSession(input: {
+    readonly sessionId?: string;
+    readonly force?: boolean;
+  }): Promise<UiCompactSessionResult> | UiCompactSessionResult;
+}
+
 export interface CommandSkillProvider {
   listUserInvocable():
     | Promise<readonly CommandSkillSummary[]>
@@ -106,6 +114,7 @@ export interface CommandServiceOptions {
   readonly tools?: CommandToolProvider;
   readonly models?: CommandModelProvider;
   readonly sessions?: CommandSessionProvider;
+  readonly compact?: CommandCompactProvider;
   readonly skills?: CommandSkillProvider;
   readonly policy?: CommandPolicyProvider;
   readonly abortRun?: (runId?: string) => Promise<void> | void;

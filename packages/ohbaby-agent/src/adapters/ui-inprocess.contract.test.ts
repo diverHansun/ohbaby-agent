@@ -926,6 +926,169 @@ describe("createInProcessUiBackendClient", () => {
     ).toBe(true);
   });
 
+  it("exposes manual compact through the SDK client", async () => {
+    const requests: ProviderRequest[] = [];
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    await addCoreTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "first long message ".repeat(20),
+    });
+    await addCoreTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "assistant",
+      text: "second long message ".repeat(20),
+    });
+    await addCoreTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "third long message",
+    });
+    const client = createInProcessUiBackendClient({
+      bus,
+      initialSnapshot: {
+        activeSessionId: "session_1",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_1",
+            messages: [],
+            title: "Existing",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              textDelta: "<state_snapshot>manual summary</state_snapshot>",
+              finishReason: "stop",
+            },
+          ],
+        ],
+        requests,
+      ),
+      messageManager,
+    });
+
+    const result = await client.compactSession({ sessionId: "session_1" });
+
+    expect(result.status).toBe("compacted");
+    expect(result.sessionId).toBe("session_1");
+    expect(requests).toHaveLength(1);
+    await expect(messageManager.listBySession("session_1")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          parts: [
+            expect.objectContaining({
+              metadata: { kind: "context-summary" },
+              text: "<state_snapshot>manual summary</state_snapshot>",
+            }),
+          ],
+        }),
+      ]),
+    );
+  });
+
+  it("runs manual compact from the /compact slash command", async () => {
+    const requests: ProviderRequest[] = [];
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    await addCoreTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "first command message ".repeat(20),
+    });
+    await addCoreTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "assistant",
+      text: "second command message ".repeat(20),
+    });
+    await addCoreTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "third command message",
+    });
+    const client = createInProcessUiBackendClient({
+      bus,
+      initialSnapshot: {
+        activeSessionId: "session_1",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_1",
+            messages: [],
+            title: "Existing",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              textDelta: "<state_snapshot>command summary</state_snapshot>",
+              finishReason: "stop",
+            },
+          ],
+        ],
+        requests,
+      ),
+      messageManager,
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_compact",
+      commandId: "session.compact",
+      path: ["compact"],
+      raw: "/compact",
+      rawArgs: "",
+      sessionId: "session_1",
+      surface: "tui",
+    });
+
+    expect(requests).toHaveLength(1);
+    const compactEvent = events.find(
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "command.result.delivered" }> =>
+        event.type === "command.result.delivered" &&
+        event.output?.kind === "data" &&
+        event.output.subject === "session.compact",
+    );
+    expect(compactEvent?.output).toMatchObject({
+      kind: "data",
+      subject: "session.compact",
+    });
+    const compactResult =
+      compactEvent?.output?.kind === "data"
+        ? compactEvent.output.data.result
+        : undefined;
+    expect(compactResult).toMatchObject({
+      sessionId: "session_1",
+      status: "compacted",
+    });
+  });
+
   it("executes builtin tool calls through the in-process lifecycle scheduler", async () => {
     const requests: ProviderRequest[] = [];
     const client = createInProcessUiBackendClient({

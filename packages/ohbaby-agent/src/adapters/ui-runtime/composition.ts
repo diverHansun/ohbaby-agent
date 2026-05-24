@@ -4,6 +4,7 @@ import type { BusInstance } from "../../bus/index.js";
 import type { CommandToolSummary } from "../../commands/index.js";
 import {
   createContextManager,
+  type CompactResult,
   type ContextManager,
 } from "../../core/context/index.js";
 import { Lifecycle } from "../../core/lifecycle/index.js";
@@ -543,6 +544,20 @@ export async function createUiRuntimeComposition(
 
     async buildPromptMessages(input): Promise<ChatCompletionMessage[]> {
       return buildPrimaryPromptMessages(input);
+    },
+
+    async compactSession(input): Promise<CompactResult> {
+      const result = await contextManager.compact(input.sessionId, {
+        directory: input.projectRoot,
+        force: input.force ?? true,
+        isSubagent: input.isSubagent ?? false,
+        modelId: options.llmClient.config.model,
+      });
+      const notice = noticeFromCompactResult(input.sessionId, result);
+      if (notice) {
+        options.onNotice?.(notice);
+      }
+      return result;
     },
 
     async listToolSummaries(

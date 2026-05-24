@@ -4,6 +4,8 @@ import type {
   UiBackendClient,
   UiCommandCatalog,
   UiCommandInvocation,
+  UiCompactSessionOptions,
+  UiCompactSessionResult,
   UiEvent,
   UiEventHandler,
   UiInteractionResponse,
@@ -739,6 +741,54 @@ export function createInProcessUiBackendClient(
     }
   }
 
+  async function resolveCompactTarget(
+    compactOptions: UiCompactSessionOptions = {},
+  ): Promise<{
+    readonly projectRoot: string;
+    readonly sessionId: string;
+  }> {
+    const snapshot = await stateStore.readSnapshot();
+    const sessionId = compactOptions.sessionId ?? snapshot.activeSessionId;
+    if (!sessionId) {
+      throw new Error("No active session to compact");
+    }
+
+    await assertCanUseAsPrimarySession(sessionId);
+    const [uiSession, coreSession] = await Promise.all([
+      stateStore.getSession(sessionId),
+      options.sessionManager?.get(sessionId),
+    ]);
+    if (!uiSession && !coreSession) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    return {
+      projectRoot:
+        uiSession?.projectRoot ??
+        coreSession?.projectRoot ??
+        (await resolveProjectRoot()),
+      sessionId,
+    };
+  }
+
+  async function compactSessionInternal(
+    compactOptions: UiCompactSessionOptions = {},
+  ): Promise<UiCompactSessionResult> {
+    const target = await resolveCompactTarget(compactOptions);
+    const runtime = await getRuntimeForPrompt();
+    runtime.setSessionWorkdir(target.sessionId, target.projectRoot);
+    const result = await runtime.compactSession({
+      force: compactOptions.force ?? true,
+      projectRoot: target.projectRoot,
+      sessionId: target.sessionId,
+    });
+
+    return {
+      ...result,
+      sessionId: target.sessionId,
+    };
+  }
+
   async function submitPromptInternal(
     text: string,
     submitOptions?: SubmitPromptOptions,
@@ -943,6 +993,9 @@ export function createInProcessUiBackendClient(
         });
       },
     },
+    compact: {
+      compactSession: compactSessionInternal,
+    },
     skills: {
       async listUserInvocable() {
         return (await getSkillRegistry()).listUserInvocable();
@@ -1089,6 +1142,12 @@ export function createInProcessUiBackendClient(
       submitOptions?: SubmitPromptOptions,
     ): Promise<void> {
       return submitPromptInternal(text, submitOptions);
+    },
+
+    compactSession(
+      compactOptions?: UiCompactSessionOptions,
+    ): Promise<UiCompactSessionResult> {
+      return compactSessionInternal(compactOptions);
     },
 
     executeCommand(invocation: UiCommandInvocation): Promise<void> {

@@ -346,12 +346,38 @@ describe("TUI store event reducer", () => {
       "permission: edit-automatically | mode: agent",
     );
 
+    state = applyTuiEvent(state, {
+      clientInvocationId: "invoke_compact",
+      commandRunId: "command_compact",
+      output: {
+        data: {
+          result: {
+            status: "compacted",
+            usageAfter: {
+              currentTokens: 24,
+            },
+            usageBefore: {
+              currentTokens: 92,
+            },
+          },
+        },
+        kind: "data",
+        subject: "session.compact",
+      },
+      timestamp: 3,
+      type: "command.result.delivered",
+    });
+
+    expect(state.commandNotices.at(-1)?.text).toBe(
+      "compact: compacted (92 -> 24 tokens)",
+    );
+
     const longText = "x".repeat(400);
     state = applyTuiEvent(state, {
       clientInvocationId: "invoke_long",
       commandRunId: "command_long",
       output: { kind: "text", text: longText },
-      timestamp: 3,
+      timestamp: 4,
       type: "command.result.delivered",
     });
 

@@ -287,6 +287,12 @@ function withStartupRecovery(
       await ready();
       return client.submitPrompt(text, submitOptions);
     },
+    async compactSession(
+      compactOptions,
+    ): ReturnType<UiBackendClient["compactSession"]> {
+      await ready();
+      return client.compactSession(compactOptions);
+    },
     async executeCommand(
       invocation,
     ): ReturnType<UiBackendClient["executeCommand"]> {
