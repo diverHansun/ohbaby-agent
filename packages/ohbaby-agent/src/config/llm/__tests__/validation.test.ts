@@ -40,6 +40,26 @@ describe("validateModelJson", () => {
     }).not.toThrow();
   });
 
+  it("should accept user-registered model profiles", () => {
+    const config = {
+      ...validConfig,
+      models: [
+        {
+          contextWindowTokens: 256_000,
+          id: "openai:gpt-4o-large",
+          label: "GPT-4o Large",
+          maxOutputTokens: 32_000,
+          model: "gpt-4o",
+          provider: "openai",
+        },
+      ],
+    };
+
+    expect(() => {
+      validateModelJson(config);
+    }).not.toThrow();
+  });
+
   it("should throw for null input", () => {
     expect(() => {
       validateModelJson(null);
@@ -269,6 +289,24 @@ describe("validateModelJson", () => {
           ...validConfig.llmParams,
           contextWindowTokens,
         },
+      };
+
+      expect(() => {
+        validateModelJson(config);
+      }).toThrow(ConfigError);
+    }
+  });
+
+  it("should reject invalid user-registered model profiles", () => {
+    for (const modelProfile of [
+      { model: "custom", contextWindowTokens: 0 },
+      { model: "custom", contextWindowTokens: 128_000, maxOutputTokens: -1 },
+      { contextWindowTokens: 128_000 },
+      "custom",
+    ]) {
+      const config = {
+        ...validConfig,
+        models: [modelProfile],
       };
 
       expect(() => {

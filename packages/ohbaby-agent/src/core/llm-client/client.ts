@@ -62,6 +62,9 @@ export async function createLLMClient(
       ...(config.contextWindowTokens === undefined
         ? {}
         : { contextWindowTokens: config.contextWindowTokens }),
+      ...(config.modelProfiles === undefined
+        ? {}
+        : { modelProfiles: config.modelProfiles }),
     },
   };
 }

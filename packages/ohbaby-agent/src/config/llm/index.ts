@@ -10,7 +10,12 @@ import type { LLMConfigLoadOptions } from "./manager.js";
 import type { LLMConfig } from "./types.js";
 
 // Re-export types for consumers
-export type { LLMConfig, ModelJsonConfig, ConfigErrorCode } from "./types.js";
+export type {
+  LLMConfig,
+  ModelJsonConfig,
+  ModelJsonModelProfile,
+  ConfigErrorCode,
+} from "./types.js";
 export { ConfigError } from "./types.js";
 
 /**

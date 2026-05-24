@@ -3,7 +3,7 @@
  * Coordinates loading, validation, caching, and hot-reload.
  */
 
-import type { LLMConfig } from "./types.js";
+import type { LLMConfig, ModelJsonConfig } from "./types.js";
 import { ConfigError } from "./types.js";
 import { loadModelJson, loadApiKey, loadProjectEnv } from "./loaders.js";
 import { validateModelJson, validateApiKey } from "./validation.js";
@@ -15,6 +15,25 @@ export interface LLMConfigLoadOptions {
 interface CachedLLMConfig {
   readonly config: LLMConfig;
   readonly projectDirectory: string;
+}
+
+function resolveModelProfiles(
+  modelJson: ModelJsonConfig,
+): NonNullable<LLMConfig["modelProfiles"]> | undefined {
+  const profiles: NonNullable<LLMConfig["modelProfiles"]>[number][] = [];
+
+  if (modelJson.llmParams.contextWindowTokens !== undefined) {
+    profiles.push({
+      contextWindowTokens: modelJson.llmParams.contextWindowTokens,
+      maxOutputTokens: modelJson.llmParams.maxTokens,
+      model: modelJson.defaultModel,
+      provider: modelJson.provider,
+    });
+  }
+
+  profiles.push(...(modelJson.models ?? []));
+
+  return profiles.length > 0 ? profiles : undefined;
 }
 
 /**
@@ -113,6 +132,7 @@ class LLMConfigManager {
       validateApiKey(apiKey, apiKeyEnvName);
 
       // Build final config
+      const modelProfiles = resolveModelProfiles(modelJson);
       const config: LLMConfig = {
         provider: modelJson.provider,
         model: modelJson.defaultModel,
@@ -125,6 +145,7 @@ class LLMConfigManager {
           : {
               contextWindowTokens: modelJson.llmParams.contextWindowTokens,
             }),
+        ...(modelProfiles === undefined ? {} : { modelProfiles }),
       };
 
       // Cache and return

@@ -14,6 +14,7 @@ import type {
   ProviderInstance,
   ProviderTokenUsage,
 } from "../../services/providers/index.js";
+import type { LLMConfig } from "../../config/index.js";
 
 /**
  * Re-export OpenAI message type for convenience.
@@ -107,6 +108,9 @@ export interface LLMClientInstance<TClient = unknown> {
 
     /** Full model context window used for local compaction decisions */
     contextWindowTokens?: number;
+
+    /** User-registered model profiles used for local token budgeting */
+    modelProfiles?: LLMConfig["modelProfiles"];
   };
 }
 

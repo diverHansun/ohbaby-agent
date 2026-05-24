@@ -23,6 +23,14 @@ describe("LLMConfigManager", () => {
       maxTokens: 4096,
       contextWindowTokens: 128_000,
     },
+    models: [
+      {
+        contextWindowTokens: 256_000,
+        maxOutputTokens: 32_000,
+        model: "gpt-4o",
+        provider: "openai",
+      },
+    ],
   };
 
   const originalEnv = process.env;
@@ -72,6 +80,20 @@ describe("LLMConfigManager", () => {
         temperature: 0.7,
         maxTokens: 4096,
         contextWindowTokens: 128_000,
+        modelProfiles: [
+          {
+            contextWindowTokens: 128_000,
+            maxOutputTokens: 4096,
+            model: "gpt-4",
+            provider: "openai",
+          },
+          {
+            contextWindowTokens: 256_000,
+            maxOutputTokens: 32_000,
+            model: "gpt-4o",
+            provider: "openai",
+          },
+        ],
       });
       expect(loaders.loadProjectEnv).not.toHaveBeenCalled();
     });

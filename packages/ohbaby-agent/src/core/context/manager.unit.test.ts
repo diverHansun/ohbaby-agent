@@ -208,6 +208,42 @@ describe("ContextManager", () => {
     });
   });
 
+  it("uses input token budget rather than the full context window for compression decisions", () => {
+    const usage = getContextUsage(
+      { estimatedTokens: 45 },
+      "model-a",
+      {
+        getBudget(_modelId, options) {
+          const usedInputTokens = options?.usedInputTokens ?? 0;
+          return {
+            contextWindowTokens: 100,
+            inputBudgetTokens: 50,
+            maxOutputTokens: 40,
+            modelId: "model-a",
+            remainingInputTokens: Math.max(0, 50 - usedInputTokens),
+            reservedOutputTokens: 40,
+            safetyMarginTokens: 10,
+            usageRatio: usedInputTokens / 50,
+            usedInputTokens,
+          };
+        },
+        getLimit: () => 100,
+      },
+      0.85,
+    );
+
+    expect(usage).toMatchObject({
+      contextLimit: 100,
+      currentTokens: 45,
+      inputBudgetTokens: 50,
+      remainingTokens: 5,
+      reservedOutputTokens: 40,
+      safetyMarginTokens: 10,
+      shouldCompress: true,
+      usageRatio: 0.9,
+    });
+  });
+
   it("prunes old completed tool output while protecting recent output", async () => {
     const messageManager = createMessageManagerFixture();
     const oldMessage = await messageManager.createMessage({

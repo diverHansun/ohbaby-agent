@@ -382,6 +382,8 @@ export async function createUiRuntimeComposition(
       systemPromptProvider,
       tokenCounter: createHeuristicTokenCounter({
         defaultLimit: options.llmClient.config.contextWindowTokens,
+        profiles: options.llmClient.config.modelProfiles,
+        provider: options.llmClient.config.provider,
       }),
     });
 

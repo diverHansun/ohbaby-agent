@@ -16,6 +16,24 @@ export interface SystemPromptProvider {
 
 export interface TokenCounter {
   estimateTokens(content: string): number;
+  getBudget?(
+    modelId: string,
+    options?: {
+      readonly requestedOutputTokens?: number;
+      readonly safetyMarginTokens?: number;
+      readonly usedInputTokens?: number;
+    },
+  ): {
+    readonly contextWindowTokens: number;
+    readonly inputBudgetTokens: number;
+    readonly maxOutputTokens: number;
+    readonly modelId: string;
+    readonly remainingInputTokens: number;
+    readonly reservedOutputTokens: number;
+    readonly safetyMarginTokens: number;
+    readonly usageRatio: number;
+    readonly usedInputTokens: number;
+  };
   getLimit(modelId: string): number;
 }
 
@@ -40,6 +58,9 @@ export interface AssembledContext {
 export interface ContextUsage {
   readonly currentTokens: number;
   readonly contextLimit: number;
+  readonly inputBudgetTokens?: number;
+  readonly reservedOutputTokens?: number;
+  readonly safetyMarginTokens?: number;
   readonly usageRatio: number;
   readonly remainingTokens: number;
   readonly shouldCompress: boolean;

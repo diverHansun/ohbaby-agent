@@ -1,3 +1,10 @@
+import {
+  createModelProfileRegistry,
+  type ModelProfileRegistration,
+  type TokenBudget,
+  type TokenBudgetOptions,
+} from "./modelProfiles.js";
+
 const ASCII_TOKEN_WEIGHT = 0.25;
 const NON_ASCII_TOKEN_WEIGHT = 1.3;
 const CONVERSATION_OVERHEAD_TOKENS = 4;
@@ -7,6 +14,9 @@ const DEFAULT_MAX_RESPONSE_TOKENS = 2_048;
 
 export interface HeuristicTokenCounterOptions {
   readonly defaultLimit?: number;
+  readonly defaultMaxOutputTokens?: number;
+  readonly profiles?: readonly ModelProfileRegistration[];
+  readonly provider?: string;
 }
 
 export type TokenCountMessage =
@@ -51,6 +61,7 @@ export interface TokenWarning {
 
 export interface HeuristicTokenCounter {
   estimateTokens(content: string): number;
+  getBudget(modelId: string, options?: TokenBudgetOptions): TokenBudget;
   getLimit(modelId: string): number;
 }
 
@@ -128,51 +139,9 @@ export function getTokenLimit(
     return EMPTY_MODEL_LIMIT;
   }
 
-  if (normalized.startsWith("gpt-4.1")) {
-    return 1_000_000;
-  }
-
-  if (normalized.startsWith("gpt-5")) {
-    return 400_000;
-  }
-
-  if (normalized.startsWith("o3") || normalized.startsWith("o4-mini")) {
-    return 200_000;
-  }
-
-  if (normalized.startsWith("gpt-4-turbo")) {
-    return 128_000;
-  }
-
-  if (normalized.startsWith("gpt-4o-mini")) {
-    return 128_000;
-  }
-
-  if (normalized.startsWith("gpt-4o")) {
-    return 128_000;
-  }
-
-  if (normalized.startsWith("gpt-3.5-turbo")) {
-    return 4_096;
-  }
-
-  if (normalized === "gpt-4" || normalized.startsWith("gpt-4-")) {
-    return 8_192;
-  }
-
-  if (normalized.startsWith("claude-")) {
-    return 200_000;
-  }
-
-  if (normalized.startsWith("deepseek-")) {
-    return 64_000;
-  }
-
-  if (normalized.startsWith("glm-4")) {
-    return 128_000;
-  }
-
-  return normalizeContextLimit(defaultLimit);
+  return createModelProfileRegistry({
+    fallbackContextWindowTokens: normalizeContextLimit(defaultLimit),
+  }).resolve(model).contextWindowTokens;
 }
 
 export function calculateContextTokens(
@@ -224,10 +193,19 @@ export function createHeuristicTokenCounter(
     options.defaultLimit === undefined
       ? DEFAULT_MODEL_LIMIT
       : normalizeContextLimit(options.defaultLimit);
+  const registry = createModelProfileRegistry({
+    defaultProvider: options.provider,
+    fallbackContextWindowTokens: defaultLimit,
+    fallbackMaxOutputTokens: options.defaultMaxOutputTokens,
+    userProfiles: options.profiles,
+  });
   return {
     estimateTokens: estimateTokensForText,
+    getBudget(modelId: string, budgetOptions?: TokenBudgetOptions): TokenBudget {
+      return registry.calculateBudget(modelId, budgetOptions);
+    },
     getLimit(modelId: string): number {
-      return getTokenLimit(modelId, defaultLimit);
+      return registry.resolve(modelId).contextWindowTokens;
     },
   };
 }

@@ -33,6 +33,29 @@ export interface ModelJsonConfig {
     /** Optional full model context window used for local compaction decisions */
     contextWindowTokens?: number;
   };
+
+  /** Optional user-registered model profiles for local budgeting decisions */
+  models?: readonly ModelJsonModelProfile[];
+}
+
+export interface ModelJsonModelProfile {
+  /** Stable profile id; defaults to '<provider>:<model>' */
+  id?: string;
+
+  /** Provider for this model; defaults to the top-level provider */
+  provider?: string;
+
+  /** Provider model identifier */
+  model: string;
+
+  /** Display label for UI model lists */
+  label?: string;
+
+  /** Full context window for prompt plus output */
+  contextWindowTokens: number;
+
+  /** Maximum output tokens to reserve in token budgets */
+  maxOutputTokens?: number;
 }
 
 /**
@@ -60,6 +83,9 @@ export interface LLMConfig {
 
   /** Optional full model context window used for local compaction decisions */
   contextWindowTokens?: number;
+
+  /** User-registered model profiles plus the active context-window override */
+  modelProfiles?: readonly ModelJsonModelProfile[];
 }
 
 /**

@@ -237,6 +237,55 @@ describe("createUiRuntimeComposition skill tools", () => {
     );
   });
 
+  it("does not reserve an oversized fallback output budget for unknown models", async () => {
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    for (const [index, role] of ["user", "assistant", "user"].entries()) {
+      const message = await messageManager.createMessage({
+        agent: "default",
+        role: role as "assistant" | "user",
+        sessionId: "session_small",
+      });
+      await messageManager.appendPart(message.id, {
+        text: `small ${String(index)}`,
+        type: "text",
+      });
+    }
+    const llmClient = fakeLlmClient({
+      contextWindowTokens: 128_000,
+      maxTokens: 128_000,
+      model: "unknown-custom-model",
+    });
+    const notices: { readonly key?: string; readonly title: string }[] = [];
+
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      llmClient,
+      mcpManager: { getAllTools: () => Promise.resolve([]) },
+      messageManager,
+      onNotice: (notice) => {
+        notices.push(notice);
+      },
+      policy: createPolicyManager({ bus }),
+      skillRegistry: createMutableSkillRegistry([]),
+      workdir: "D:/repo",
+    });
+
+    await composition.buildPromptMessages({
+      agentName: "default",
+      projectRoot: "D:/repo",
+      sessionId: "session_small",
+    });
+
+    expect(notices.map((notice) => notice.key)).not.toContain(
+      "context:compact:session_small",
+    );
+  });
+
   it("registers the resource tool and refreshes skill descriptions after registry changes", async () => {
     const bus = createBus();
     const registry = createMutableSkillRegistry([

@@ -218,5 +218,34 @@ describe("tokenCounting", () => {
       expect(counter.getLimit("custom-large-context-model")).toBe(256_000);
       expect(counter.getLimit("gpt-4o")).toBe(128_000);
     });
+
+    it("uses registered model profiles for context limits and token budgets", () => {
+      const counter = createHeuristicTokenCounter({
+        profiles: [
+          {
+            contextWindowTokens: 250_000,
+            maxOutputTokens: 16_000,
+            model: "custom-chat",
+            provider: "local",
+          },
+        ],
+      });
+
+      expect(counter.getLimit("custom-chat")).toBe(250_000);
+      expect(
+        counter.getBudget("custom-chat", {
+          requestedOutputTokens: 20_000,
+          safetyMarginTokens: 2_000,
+          usedInputTokens: 20_000,
+        }),
+      ).toMatchObject({
+        contextWindowTokens: 250_000,
+        inputBudgetTokens: 232_000,
+        maxOutputTokens: 16_000,
+        remainingInputTokens: 212_000,
+        reservedOutputTokens: 16_000,
+        safetyMarginTokens: 2_000,
+      });
+    });
   });
 });

@@ -46,6 +46,73 @@ function validateBaseUrlValue(baseUrl: string): void {
   }
 }
 
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && value > 0 && Number.isInteger(value);
+}
+
+function validateModelProfile(profile: unknown, index: number): void {
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) {
+    throw new ConfigError(
+      `Invalid models[${String(index)}]: expected an object`,
+      "INVALID_FIELD",
+      { index, value: profile },
+    );
+  }
+
+  const record = profile as Record<string, unknown>;
+  if (record.id !== undefined && typeof record.id !== "string") {
+    throw new ConfigError(
+      `Invalid models[${String(index)}].id: expected a string`,
+      "INVALID_FIELD",
+      { index, value: record.id },
+    );
+  }
+  if (record.provider !== undefined && typeof record.provider !== "string") {
+    throw new ConfigError(
+      `Invalid models[${String(index)}].provider: expected a string`,
+      "INVALID_FIELD",
+      { index, value: record.provider },
+    );
+  }
+  if (typeof record.model !== "string" || record.model.trim() === "") {
+    throw new ConfigError(
+      `Invalid models[${String(index)}].model: expected a non-empty string`,
+      "INVALID_FIELD",
+      { index, value: record.model },
+    );
+  }
+  if (record.label !== undefined && typeof record.label !== "string") {
+    throw new ConfigError(
+      `Invalid models[${String(index)}].label: expected a string`,
+      "INVALID_FIELD",
+      { index, value: record.label },
+    );
+  }
+  if (!isPositiveInteger(record.contextWindowTokens)) {
+    throw new ConfigError(
+      `Invalid models[${String(
+        index,
+      )}].contextWindowTokens: ${formatInvalidValue(
+        record.contextWindowTokens,
+      )}. Must be a positive integer`,
+      "INVALID_MAX_TOKENS",
+      { index, value: record.contextWindowTokens },
+    );
+  }
+  if (
+    record.maxOutputTokens !== undefined &&
+    !isPositiveInteger(record.maxOutputTokens)
+  ) {
+    throw new ConfigError(
+      `Invalid models[${String(index)}].maxOutputTokens: ${formatInvalidValue(
+        record.maxOutputTokens,
+      )}. Must be a positive integer`,
+      "INVALID_MAX_TOKENS",
+      { index, value: record.maxOutputTokens },
+    );
+  }
+}
+
 /**
  * Validate the structure and values of ModelJsonConfig.
  * Throws ConfigError if validation fails.
@@ -132,6 +199,17 @@ export function validateModelJson(
         { value: llmParams.contextWindowTokens },
       );
     }
+  }
+
+  if (obj.models !== undefined) {
+    if (!Array.isArray(obj.models)) {
+      throw new ConfigError(
+        "Invalid models: expected an array",
+        "INVALID_FIELD",
+        { value: obj.models },
+      );
+    }
+    obj.models.forEach(validateModelProfile);
   }
 
   if (errors.length > 0) {

@@ -44,11 +44,29 @@ function tokenCount(
 export function getContextUsage(
   context: Pick<AssembledContext, "estimatedTokens">,
   modelId: string,
-  tokenCounter: Pick<TokenCounter, "getLimit">,
+  tokenCounter: Pick<TokenCounter, "getLimit" | "getBudget">,
   compressionThreshold = COMPRESSION_THRESHOLD,
 ): ContextUsage {
-  const contextLimit = tokenCounter.getLimit(modelId);
   const currentTokens = context.estimatedTokens;
+  const budget = tokenCounter.getBudget?.(modelId, {
+    usedInputTokens: currentTokens,
+  });
+
+  if (budget) {
+    return {
+      contextLimit: budget.contextWindowTokens,
+      currentTokens,
+      inputBudgetTokens: budget.inputBudgetTokens,
+      modelId,
+      remainingTokens: budget.remainingInputTokens,
+      reservedOutputTokens: budget.reservedOutputTokens,
+      safetyMarginTokens: budget.safetyMarginTokens,
+      shouldCompress: budget.usageRatio >= compressionThreshold,
+      usageRatio: budget.usageRatio,
+    };
+  }
+
+  const contextLimit = tokenCounter.getLimit(modelId);
   const usageRatio = contextLimit === 0 ? 1 : currentTokens / contextLimit;
 
   return {
