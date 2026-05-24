@@ -22,8 +22,13 @@ describe("CommandService", () => {
         "mode.agent",
         "mode.ask",
         "mode.plan",
-        "mode.auto-edit",
+        "permission",
+        "permission.ask-before-edit",
+        "permission.edit-automatically",
       ]),
+    );
+    expect(catalog.commands.map((command) => command.id)).not.toContain(
+      "mode.auto-edit",
     );
   });
 
@@ -365,15 +370,16 @@ describe("CommandService", () => {
         mode,
       };
     });
-    const toggleAgentState = vi.fn<() => UiPolicyState["agentState"]>(() => {
+    const setAgentState = vi.fn<
+      (state: UiPolicyState["agentState"]) => void
+    >((agentState) => {
+      if (agentState === "edit-automatically" && policyState.mode !== "agent") {
+        return;
+      }
       policyState = {
-        agentState:
-          policyState.agentState === "ask-before-edit"
-            ? "edit-automatically"
-            : "ask-before-edit",
-        mode: "agent",
+        agentState,
+        mode: policyState.mode,
       };
-      return policyState.agentState;
     });
     const { events, service } = createServiceHarness({
       policy: {
@@ -381,19 +387,32 @@ describe("CommandService", () => {
           return policyState;
         },
         setMode,
-        toggleAgentState,
+        setAgentState,
       },
     });
 
     await service.executeCommand(makeInvocation("mode", ["mode"]));
     await service.executeCommand(makeInvocation("mode.ask", ["mode", "ask"]));
     await service.executeCommand(
-      makeInvocation("mode.auto-edit", ["mode", "auto-edit"]),
+      makeInvocation("permission", ["permission"]),
+    );
+    await service.executeCommand(
+      makeInvocation("permission.edit-automatically", [
+        "permission",
+        "edit-automatically",
+      ]),
+    );
+    await service.executeCommand(
+      makeInvocation("permission.ask-before-edit", [
+        "permission",
+        "ask-before-edit",
+      ]),
     );
 
     expect(setMode).toHaveBeenCalledWith("ask");
-    expect(setMode).toHaveBeenCalledWith("agent");
-    expect(toggleAgentState).toHaveBeenCalledOnce();
+    expect(setMode).not.toHaveBeenCalledWith("agent");
+    expect(setAgentState).toHaveBeenNthCalledWith(1, "edit-automatically");
+    expect(setAgentState).toHaveBeenNthCalledWith(2, "ask-before-edit");
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -422,14 +441,27 @@ describe("CommandService", () => {
           type: "result",
         }),
         expect.objectContaining({
+          output: {
+            data: {
+              policy: {
+                agentState: "ask-before-edit",
+                mode: "ask",
+              },
+            },
+            kind: "data",
+            subject: "policy.permission",
+          },
+          type: "result",
+        }),
+        expect.objectContaining({
           action: {
             data: {
               policy: {
-                agentState: "edit-automatically",
-                mode: "agent",
+                agentState: "ask-before-edit",
+                mode: "ask",
               },
             },
-            kind: "policy.mode.updated",
+            kind: "policy.permission.updated",
           },
           type: "result",
         }),

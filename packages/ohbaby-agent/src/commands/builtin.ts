@@ -58,18 +58,23 @@ function currentPolicyState(
 function emitPolicyState(
   options: CommandServiceOptions,
   context: CommandRunContext,
+  subject = "policy.mode",
 ): CommandPolicyState {
   const policy = currentPolicyState(options);
-  context.emitOutput(dataOutput("policy.mode", { policy }));
+  context.emitOutput(dataOutput(subject, { policy }));
   return policy;
 }
 
 function emitPolicyUpdated(
   options: CommandServiceOptions,
   context: CommandRunContext,
+  input: {
+    readonly actionKind: string;
+    readonly subject: string;
+  },
 ): void {
-  const policy = emitPolicyState(options, context);
-  context.emitAction(action("policy.mode.updated", { policy }));
+  const policy = emitPolicyState(options, context, input.subject);
+  context.emitAction(action(input.actionKind, { policy }));
 }
 
 async function handleModelParent(
@@ -194,18 +199,22 @@ async function handleModeChange(
   mode: CommandPolicyState["mode"],
 ): Promise<void> {
   await options.policy?.setMode(mode);
-  emitPolicyUpdated(options, context);
+  emitPolicyUpdated(options, context, {
+    actionKind: "policy.mode.updated",
+    subject: "policy.mode",
+  });
 }
 
-async function handleModeAutoEdit(
+async function handlePermissionChange(
   options: CommandServiceOptions,
   context: CommandRunContext,
+  agentState: CommandPolicyState["agentState"],
 ): Promise<void> {
-  if (currentPolicyState(options).mode !== "agent") {
-    await options.policy?.setMode("agent");
-  }
-  await options.policy?.toggleAgentState();
-  emitPolicyUpdated(options, context);
+  await options.policy?.setAgentState(agentState);
+  emitPolicyUpdated(options, context, {
+    actionKind: "policy.permission.updated",
+    subject: "policy.permission",
+  });
 }
 
 export function createBuiltinHandlers(
@@ -309,9 +318,21 @@ export function createBuiltinHandlers(
       },
     },
     {
-      id: "mode.auto-edit",
+      id: "permission",
+      execute(_invocation, context): void {
+        emitPolicyState(options, context, "policy.permission");
+      },
+    },
+    {
+      id: "permission.ask-before-edit",
       execute(_invocation, context): Promise<void> {
-        return handleModeAutoEdit(options, context);
+        return handlePermissionChange(options, context, "ask-before-edit");
+      },
+    },
+    {
+      id: "permission.edit-automatically",
+      execute(_invocation, context): Promise<void> {
+        return handlePermissionChange(options, context, "edit-automatically");
       },
     },
   ];

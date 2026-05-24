@@ -114,7 +114,7 @@ describe("tool-scheduler policy permission integration", () => {
     bus.subscribe(PermissionEvent.Replied, (event) => {
       permissionReplies.push(event);
     });
-    bus.subscribe(PermissionEvent.SwitchModeRequested, (event) => {
+    bus.subscribe(PermissionEvent.AutoEditRequested, (event) => {
       switchRequests.push(event);
     });
 
@@ -184,7 +184,7 @@ describe("tool-scheduler policy permission integration", () => {
     expect(switchRequests).toEqual([
       {
         sessionId: "session_1",
-        targetMode: "edit-automatically",
+        targetPermission: "edit-automatically",
         trigger: {
           callId: "call_1",
           pattern: "tool:edit:src/components/**",

@@ -2123,8 +2123,13 @@ describe("createInProcessUiBackendClient", () => {
         "mode.agent",
         "mode.ask",
         "mode.plan",
-        "mode.auto-edit",
+        "permission",
+        "permission.ask-before-edit",
+        "permission.edit-automatically",
       ]),
+    );
+    expect(catalog.commands.map((command) => command.id)).not.toContain(
+      "mode.auto-edit",
     );
   });
 
@@ -2339,7 +2344,7 @@ describe("createInProcessUiBackendClient", () => {
     });
   });
 
-  it("publishes policy.updated when mode commands change backend policy", async () => {
+  it("publishes policy.updated when mode and permission commands change backend policy", async () => {
     const client = createInProcessUiBackendClient({
       llmClient: createFakeLLMClient([]),
     });
@@ -2359,10 +2364,19 @@ describe("createInProcessUiBackendClient", () => {
     });
     await client.executeCommand({
       argv: [],
+      clientInvocationId: "inv_mode_agent",
+      commandId: "mode.agent",
+      path: ["mode", "agent"],
+      raw: "/mode agent",
+      rawArgs: "",
+      surface: "tui",
+    });
+    await client.executeCommand({
+      argv: [],
       clientInvocationId: "inv_mode_auto",
-      commandId: "mode.auto-edit",
-      path: ["mode", "auto-edit"],
-      raw: "/mode auto-edit",
+      commandId: "permission.edit-automatically",
+      path: ["permission", "edit-automatically"],
+      raw: "/permission edit-automatically",
       rawArgs: "",
       surface: "tui",
     });

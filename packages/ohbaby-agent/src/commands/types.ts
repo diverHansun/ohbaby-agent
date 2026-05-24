@@ -74,9 +74,7 @@ export type CommandPolicyState = NonNullable<UiSnapshot["policy"]>;
 export interface CommandPolicyProvider {
   getState(): CommandPolicyState;
   setMode(mode: CommandPolicyState["mode"]): Promise<void> | void;
-  toggleAgentState():
-    | Promise<CommandPolicyState["agentState"]>
-    | CommandPolicyState["agentState"];
+  setAgentState(state: CommandPolicyState["agentState"]): Promise<void> | void;
 }
 
 export interface CommandRunContext {

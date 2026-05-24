@@ -48,11 +48,11 @@ export const PermissionEvent = {
       response: PermissionResponseSchema,
     }),
   ),
-  SwitchModeRequested: BusEvent.define(
-    "permission.switch-mode-requested",
+  AutoEditRequested: BusEvent.define(
+    "permission.auto-edit-requested",
     z.object({
       sessionId: z.string(),
-      targetMode: z.literal("edit-automatically"),
+      targetPermission: z.literal("edit-automatically"),
       trigger: z.object({
         callId: z.string(),
         permissionId: z.string(),

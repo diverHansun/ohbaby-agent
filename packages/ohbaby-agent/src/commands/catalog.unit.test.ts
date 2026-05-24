@@ -23,7 +23,9 @@ describe("command catalog", () => {
         "mode.agent",
         "mode.ask",
         "mode.plan",
-        "mode.auto-edit",
+        "permission",
+        "permission.ask-before-edit",
+        "permission.edit-automatically",
       ],
     );
   });
@@ -59,8 +61,17 @@ describe("command catalog", () => {
           path: ["mode"],
         }),
         expect.objectContaining({
-          id: "mode.auto-edit",
-          path: ["mode", "auto-edit"],
+          id: "permission",
+          parentBehavior: "none",
+          path: ["permission"],
+        }),
+        expect.objectContaining({
+          id: "permission.ask-before-edit",
+          path: ["permission", "ask-before-edit"],
+        }),
+        expect.objectContaining({
+          id: "permission.edit-automatically",
+          path: ["permission", "edit-automatically"],
         }),
       ]),
     );

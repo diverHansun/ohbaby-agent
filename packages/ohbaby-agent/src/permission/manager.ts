@@ -259,9 +259,9 @@ export function createPermissionManager(
         request.resolve("always");
         autoApproveMatching(sessionId, request.info.pattern);
         if (shouldRequestAutoEditSwitch(request.info)) {
-          bus.publish(PermissionEvent.SwitchModeRequested, {
+          bus.publish(PermissionEvent.AutoEditRequested, {
             sessionId,
-            targetMode: "edit-automatically",
+            targetPermission: "edit-automatically",
             trigger: {
               callId: request.info.callId,
               permissionId,

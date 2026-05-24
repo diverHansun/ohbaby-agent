@@ -919,8 +919,8 @@ export function createInProcessUiBackendClient(
       setMode(mode): void {
         policy.setMode(mode);
       },
-      toggleAgentState(): UiPolicyState["agentState"] {
-        return policy.toggleAgentState();
+      setAgentState(agentState): void {
+        policy.setAgentState(agentState);
       },
     },
     abortRun(runId?: string): void {
@@ -1024,7 +1024,7 @@ export function createInProcessUiBackendClient(
       await reconcileRuntimeStatus();
     })();
   });
-  bus.subscribe(PermissionEvent.SwitchModeRequested, () => {
+  bus.subscribe(PermissionEvent.AutoEditRequested, () => {
     policy.setAgentState("edit-automatically");
   });
 
