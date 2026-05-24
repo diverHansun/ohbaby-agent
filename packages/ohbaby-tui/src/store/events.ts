@@ -695,6 +695,13 @@ function formatDataCommandOutput(
       const sessionId = getString(output.data, "sessionId");
       return sessionId ? `session: ${sessionId}` : JSON.stringify(output.data);
     }
+    case "session.created": {
+      const session = getRecord(output.data, "session");
+      const title = session ? getString(session, "title") : undefined;
+      const id = session ? getString(session, "id") : undefined;
+      const label = title ?? id;
+      return label ? `new session: ${label}` : JSON.stringify(output.data);
+    }
     case "session.list": {
       const sessions = Array.isArray(output.data.sessions)
         ? output.data.sessions

@@ -121,6 +121,7 @@ function createFakeLLMClient(
 function createSequentialFakeLLMClient(
   eventBatches: readonly (readonly ProviderStreamEvent[])[],
   requests: ProviderRequest[],
+  config: Partial<LLMClientInstance<FakeSdkClient>["config"]> = {},
 ): LLMClientInstance<FakeSdkClient> {
   let nextBatch = 0;
 
@@ -150,6 +151,7 @@ function createSequentialFakeLLMClient(
       baseUrl: "https://example.invalid/v1",
       temperature: 0,
       maxTokens: 128,
+      ...config,
     },
   };
 }
@@ -896,6 +898,7 @@ describe("createInProcessUiBackendClient", () => {
           [{ textDelta: "Fresh answer", finishReason: "stop" }],
         ],
         requests,
+        { contextWindowTokens: 4_096 },
       ),
       messageManager,
     });
@@ -2516,6 +2519,87 @@ describe("createInProcessUiBackendClient", () => {
         event.action?.kind === "session.selected",
     );
     expect(snapshotEvent?.snapshot.activeSessionId).toBe("session_2");
+    expect(selectedEvent?.action).toEqual({
+      data: { choiceId: "session_2" },
+      kind: "session.selected",
+    });
+  });
+
+  it("creates a fresh active session through the /new command", async () => {
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "session_1",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_1",
+            messages: [
+              {
+                createdAt: "2026-05-20T00:00:01.000Z",
+                id: "message_1",
+                parts: [{ text: "Old", type: "text" }],
+                role: "user",
+              },
+            ],
+            title: "Existing",
+            updatedAt: "2026-05-20T00:00:01.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([]),
+      now: () => new Date("2026-05-20T00:02:00.000Z"),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_new",
+      commandId: "session.new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "tui",
+    });
+
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      activeSessionId: "session_2",
+      sessions: [
+        { id: "session_1", messages: [{ parts: [{ text: "Old" }] }] },
+        { id: "session_2", messages: [], title: "New session" },
+      ],
+    });
+    expect(
+      events.some(
+        (event) =>
+          event.type === "snapshot.replaced" &&
+          event.snapshot.activeSessionId === "session_2",
+      ),
+    ).toBe(true);
+    const createdEvent = events.find(
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "command.result.delivered" }> =>
+        event.type === "command.result.delivered" &&
+        event.output?.kind === "data" &&
+        event.output.subject === "session.created",
+    );
+    const selectedEvent = events.find(
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "command.result.delivered" }> =>
+        event.type === "command.result.delivered" &&
+        event.action?.kind === "session.selected",
+    );
+    expect(createdEvent?.output).toMatchObject({
+      kind: "data",
+      subject: "session.created",
+    });
     expect(selectedEvent?.action).toEqual({
       data: { choiceId: "session_2" },
       kind: "session.selected",

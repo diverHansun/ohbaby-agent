@@ -59,6 +59,7 @@ export interface CommandSessionProvider {
   listSessions():
     | Promise<readonly CommandSessionSummary[]>
     | readonly CommandSessionSummary[];
+  createSession?(): Promise<CommandSessionSummary> | CommandSessionSummary;
   selectSession?(sessionId: string): Promise<void> | void;
 }
 

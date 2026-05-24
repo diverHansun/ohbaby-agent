@@ -651,6 +651,44 @@ export function createInProcessUiBackendClient(
     }));
   }
 
+  async function createSessionFromCommand(): Promise<CommandSessionSummary> {
+    await reserveIdsFromState();
+    const createdAt = timestamp();
+    const projectRoot = await resolveProjectRoot();
+    const title = "New session";
+    const agentName = options.agentManager?.getDefault() ?? "default";
+    let session: UiSession;
+
+    if (options.sessionManager) {
+      const created = await options.sessionManager.create(projectRoot, {
+        agentName,
+        title,
+      });
+      session = sessionMetadataToUiSession(created);
+    } else {
+      session = {
+        id: sessionIds.next(),
+        title,
+        messages: [],
+        projectRoot,
+        createdAt,
+        updatedAt: createdAt,
+      };
+    }
+
+    sessionIds.reserve(session.id);
+    await upsertSession(session);
+    await stateStore.setActiveSessionId(session.id);
+    publish({ type: "session.updated", session: cloneSession(session) });
+    publish({
+      snapshot: await readSnapshotWithPolicy(),
+      timestamp: Date.now(),
+      type: "snapshot.replaced",
+    });
+
+    return { id: session.id, title: session.title };
+  }
+
   async function assertCanUseAsPrimarySession(
     sessionId: string | undefined,
   ): Promise<void> {
@@ -889,6 +927,7 @@ export function createInProcessUiBackendClient(
       listModels: listModelsFromOptions,
     },
     sessions: {
+      createSession: createSessionFromCommand,
       listSessions: listSessionsFromState,
       async selectSession(sessionId: string): Promise<void> {
         await assertCanUseAsPrimarySession(sessionId);

@@ -49,6 +49,13 @@ const catalog: TuiCommandCatalog = {
       path: ["session", "resume"],
       surfaces: ["tui"],
     },
+    {
+      aliases: [["new"]],
+      description: "Start a new session",
+      id: "session.new",
+      path: ["session", "new"],
+      surfaces: ["tui"],
+    },
   ],
   loadedAt: 1_771_000_000_000,
   surface: "tui",
@@ -603,6 +610,26 @@ describe("OhbabyTerminalApp", () => {
       expect.objectContaining({
         argv: ["gpt-5.5"],
         commandId: "model.switch",
+        sessionId: "session_1",
+      }),
+    );
+  });
+
+  it("executes the /new session alias from the backend catalog", async () => {
+    const client = createFakeClient(snapshot(), catalog);
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+    app.stdin.write("/new");
+    app.stdin.write("\r");
+    await flush();
+
+    expect(client.executeCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        argv: [],
+        commandId: "session.new",
+        path: ["session", "new"],
+        raw: "/new",
         sessionId: "session_1",
       }),
     );

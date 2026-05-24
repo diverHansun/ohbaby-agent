@@ -240,6 +240,45 @@ describe("CommandService", () => {
     });
   });
 
+  it("creates and selects a new session", async () => {
+    const createSession = vi.fn<() => Promise<{ id: string; title: string }>>(
+      () => Promise.resolve({ id: "session_new", title: "New session" }),
+    );
+    const { events, service } = createServiceHarness({
+      sessions: {
+        createSession,
+        listSessions() {
+          return [];
+        },
+      },
+    });
+
+    await service.executeCommand(makeInvocation("session.new", ["new"]));
+
+    expect(createSession).toHaveBeenCalledOnce();
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          output: {
+            data: {
+              session: { id: "session_new", title: "New session" },
+            },
+            kind: "data",
+            subject: "session.created",
+          },
+          type: "result",
+        }),
+        expect.objectContaining({
+          action: {
+            data: { choiceId: "session_new" },
+            kind: "session.selected",
+          },
+          type: "result",
+        }),
+      ]),
+    );
+  });
+
   it("resumes a session by --session_id or positional id", async () => {
     const selectSession = vi.fn<() => Promise<void>>().mockResolvedValue();
     const { events, service } = createServiceHarness({
@@ -370,17 +409,20 @@ describe("CommandService", () => {
         mode,
       };
     });
-    const setAgentState = vi.fn<
-      (state: UiPolicyState["agentState"]) => void
-    >((agentState) => {
-      if (agentState === "edit-automatically" && policyState.mode !== "agent") {
-        return;
-      }
-      policyState = {
-        agentState,
-        mode: policyState.mode,
-      };
-    });
+    const setAgentState = vi.fn<(state: UiPolicyState["agentState"]) => void>(
+      (agentState) => {
+        if (
+          agentState === "edit-automatically" &&
+          policyState.mode !== "agent"
+        ) {
+          return;
+        }
+        policyState = {
+          agentState,
+          mode: policyState.mode,
+        };
+      },
+    );
     const { events, service } = createServiceHarness({
       policy: {
         getState() {
@@ -393,9 +435,7 @@ describe("CommandService", () => {
 
     await service.executeCommand(makeInvocation("mode", ["mode"]));
     await service.executeCommand(makeInvocation("mode.ask", ["mode", "ask"]));
-    await service.executeCommand(
-      makeInvocation("permission", ["permission"]),
-    );
+    await service.executeCommand(makeInvocation("permission", ["permission"]));
     await service.executeCommand(
       makeInvocation("permission.edit-automatically", [
         "permission",

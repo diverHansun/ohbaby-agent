@@ -193,6 +193,24 @@ async function handleSessionResume(
   context.emitAction(action("session.selected", { choiceId: sessionId }));
 }
 
+async function handleSessionNew(
+  options: CommandServiceOptions,
+  context: CommandRunContext,
+): Promise<void> {
+  if (!options.sessions?.createSession) {
+    context.fail({
+      code: "SESSION_CREATE_UNAVAILABLE",
+      message: "Session creation is not available in this backend",
+      recoverable: true,
+    });
+    return;
+  }
+
+  const session = await options.sessions.createSession();
+  context.emitOutput(dataOutput("session.created", { session }));
+  context.emitAction(action("session.selected", { choiceId: session.id }));
+}
+
 async function handleModeChange(
   options: CommandServiceOptions,
   context: CommandRunContext,
@@ -285,6 +303,12 @@ export function createBuiltinHandlers(
         context.emitOutput(
           dataOutput("session.list", { sessions: await listSessions(options) }),
         );
+      },
+    },
+    {
+      id: "session.new",
+      execute(_invocation, context): Promise<void> {
+        return handleSessionNew(options, context);
       },
     },
     {
