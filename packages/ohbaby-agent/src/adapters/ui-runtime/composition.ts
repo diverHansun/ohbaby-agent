@@ -28,8 +28,6 @@ import {
   AgentTaskManager,
   SubagentExecutor,
   createRuntimeSubagentSessionManager,
-  createSubagentMessageWriter,
-  createSubagentRunner,
   toOpenAiTools,
   type RuntimeSubagentSessionManager,
 } from "../../agents/index.js";
@@ -463,24 +461,17 @@ export async function createUiRuntimeComposition(
     streamBridge,
   });
 
-  const subagentRunner = createSubagentRunner({
-    buildSubagentPromptMessages,
-    fallbackProjectRoot: options.workdir,
-    messageManager: options.messageManager,
-    runManager,
-    sandboxManager,
-    toolScheduler,
-  });
-
-  const messageWriter = createSubagentMessageWriter(options.messageManager);
   const agentTaskController = new AgentTaskManager({
     agentManager,
+    buildPromptMessages: buildSubagentPromptMessages,
     ...(options.createAgentTaskId
       ? { createTaskId: options.createAgentTaskId }
       : {}),
-    messageWriter,
-    runner: subagentRunner,
+    messageManager: options.messageManager,
+    runCoordinator: runManager,
+    sandboxManager,
     sessionManager,
+    toolScheduler,
   });
 
   const taskExecutor = new SubagentExecutor({
