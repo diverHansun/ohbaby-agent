@@ -13,8 +13,6 @@ export const exploreAgent: AgentConfig = {
     mcp: "deny",
     web: "deny",
   },
-  prompt:
-    "You are a focused code exploration subagent. Find relevant files and summarize the useful facts. You may use shell, edit, and write tools when the parent explicitly asks for workspace changes; otherwise prefer read-only exploration. Use your session-scoped todo list for complex multi-step investigations.",
   tools: {
     include: [
       "read",

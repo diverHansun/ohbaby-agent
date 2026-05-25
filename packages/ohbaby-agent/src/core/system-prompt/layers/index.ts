@@ -1,6 +1,7 @@
 export { generateAgentPrompt } from "./agent.js";
 export { generateIdentityPrompt } from "./identity.js";
 export { detectEnvironment, generateEnvironmentPrompt } from "./environment.js";
+export { generateToolGuidancePrompt } from "./tools.js";
 export {
   CUSTOM_INSTRUCTIONS_FILE_NAME,
   CUSTOM_INSTRUCTIONS_FALLBACK_FILE_NAMES,
@@ -17,4 +18,5 @@ export type {
   EnvironmentDetectionOptions,
   GenerateEnvironmentPromptOptions,
 } from "./environment.js";
+export type { GenerateToolGuidancePromptOptions } from "./tools.js";
 export type { CustomInstructionLoadOptions } from "./custom.js";

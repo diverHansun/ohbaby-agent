@@ -104,9 +104,22 @@ describe("AgentManager", () => {
 
     const runtimeAgent = await manager.getRuntimeAgent("explore");
 
-    expect(runtimeAgent.systemPrompt).toContain(
-      "focused code exploration subagent",
-    );
+    expect(runtimeAgent.systemPrompt).toContain("Task: explore");
+    expect(runtimeAgent.systemPrompt).toContain("Code exploration task");
+  });
+
+  it("does not apply subagent task prompts to primary agents with matching names", async () => {
+    const registry = new AgentRegistry({
+      configLoader: (): AgentsConfig => ({ agents: {} }),
+    });
+    await registry.initialize();
+    const manager = new AgentManager({ registry });
+
+    const runtimeAgent = await manager.getRuntimeAgent("plan");
+
+    expect(runtimeAgent.isSubagent).toBe(false);
+    expect(runtimeAgent.systemPrompt).not.toContain("<subagent_task>");
+    expect(runtimeAgent.systemPrompt).not.toContain("Task: plan");
   });
 
   it("uses custom subagent descriptions when no explicit prompt exists", async () => {
@@ -129,5 +142,32 @@ describe("AgentManager", () => {
     expect(runtimeAgent.systemPrompt).toContain(
       "Audit code for release risks.",
     );
+  });
+
+  it("treats configured prompts as add-ons for custom subagents", async () => {
+    const registry = new AgentRegistry({
+      configLoader: (): AgentsConfig => ({
+        agents: {
+          audit: {
+            description: "Audit code for release risks.",
+            mode: "subagent",
+            name: "audit",
+            prompt: "Focus on release blockers.",
+          },
+        },
+      }),
+    });
+    await registry.initialize();
+    const manager = new AgentManager({ registry });
+
+    const runtimeAgent = await manager.getRuntimeAgent("audit");
+
+    expect(runtimeAgent.systemPrompt).toContain("<subagent_base>");
+    expect(runtimeAgent.systemPrompt).toContain("Task: generic");
+    expect(runtimeAgent.systemPrompt).toContain(
+      "Role: Audit code for release risks.",
+    );
+    expect(runtimeAgent.systemPrompt).toContain("<agent_prompt_addon>");
+    expect(runtimeAgent.systemPrompt).toContain("Focus on release blockers.");
   });
 });

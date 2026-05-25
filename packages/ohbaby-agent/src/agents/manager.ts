@@ -20,24 +20,22 @@ export interface AgentManagerOptions {
 
 const FALLBACK_SYSTEM_PROMPT_PROVIDER: SystemPromptProvider = {
   build({ agent, isSubagent }) {
-    if (agent.prompt?.trim()) {
-      return agent.prompt;
-    }
-    const builtinPrompt = SystemPrompt.getAgentPrompt(agent.name);
-    if (builtinPrompt) {
-      return builtinPrompt;
-    }
+    const promptAddon = agent.prompt?.trim()
+      ? `<agent_prompt_addon>\n${agent.prompt.trim()}\n</agent_prompt_addon>`
+      : undefined;
     if (!isSubagent) {
-      return "";
+      return promptAddon ?? "";
     }
 
+    const builtinPrompt = SystemPrompt.getAgentPrompt(agent.name);
     const description = agent.description?.trim()
       ? `Role: ${agent.description.trim()}`
       : undefined;
     return [
-      `You are the ${agent.name} subagent.`,
+      SystemPrompt.getSubagentBase(),
       description,
-      GENERIC_SUBAGENT_PROMPT,
+      builtinPrompt ?? GENERIC_SUBAGENT_PROMPT,
+      promptAddon,
     ]
       .filter((part): part is string => part !== undefined)
       .join("\n\n");

@@ -45,6 +45,39 @@ describe("SystemPrompt", () => {
     expect(fullPrompt).toContain("Core Capabilities");
   });
 
+  it("includes the selected primary task contract", () => {
+    const prompts = SystemPrompt.assemble({
+      agentName: "build",
+      environment: ENVIRONMENT,
+      isSubagent: false,
+      taskKind: "plan",
+      tools: ["read", "grep"],
+    });
+
+    const fullPrompt = prompts.join("\n\n");
+    expect(fullPrompt).toContain("<primary_task>");
+    expect(fullPrompt).toContain("Task: plan");
+    expect(fullPrompt).toContain(
+      "Do not write files or execute workspace changes.",
+    );
+  });
+
+  it("treats agentPrompt as an add-on instead of replacing defaults", () => {
+    const prompts = SystemPrompt.assemble({
+      agentName: "build",
+      agentPrompt: "Use extra release-note care.",
+      environment: ENVIRONMENT,
+      isSubagent: false,
+      taskKind: "agent",
+    });
+
+    const fullPrompt = prompts.join("\n\n");
+    expect(fullPrompt).toContain("You are ohbaby-agent");
+    expect(fullPrompt).toContain("Task: agent");
+    expect(fullPrompt).toContain("<agent_prompt_addon>");
+    expect(fullPrompt).toContain("Use extra release-note care.");
+  });
+
   it("assembles subagent prompts without identity or custom instructions", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "explore",
@@ -62,6 +95,36 @@ describe("SystemPrompt", () => {
     expect(fullPrompt).not.toContain("Core Capabilities");
     expect(fullPrompt).not.toContain("This must not leak");
     expect(fullPrompt).not.toContain("Available tools");
+  });
+
+  it("includes the selected subagent task contract", () => {
+    const prompts = SystemPrompt.assemble({
+      agentName: "explore",
+      environment: ENVIRONMENT,
+      isSubagent: true,
+      taskKind: "explore",
+      tools: ["read", "grep"],
+    });
+
+    const fullPrompt = prompts.join("\n\n");
+    expect(fullPrompt).toContain("<subagent_task>");
+    expect(fullPrompt).toContain("Task: explore");
+    expect(fullPrompt).toContain("quickly find, inspect, and summarize");
+  });
+
+  it("does not include primary custom instructions in subagent prompts", () => {
+    const prompts = SystemPrompt.assemble({
+      agentName: "research",
+      customInstructions: ["Project-only rule"],
+      environment: ENVIRONMENT,
+      isSubagent: true,
+      taskKind: "research",
+    });
+
+    const fullPrompt = prompts.join("\n\n");
+    expect(fullPrompt).toContain("Task: research");
+    expect(fullPrompt).not.toContain("Project-only rule");
+    expect(fullPrompt).not.toContain("You are ohbaby-agent");
   });
 
   it("returns builtin agent prompts and undefined for unknown agents", () => {

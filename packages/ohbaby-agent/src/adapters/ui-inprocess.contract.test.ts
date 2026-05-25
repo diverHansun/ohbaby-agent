@@ -179,9 +179,7 @@ function lastRequestToolCallId(request: ProviderRequest): string | undefined {
 }
 
 function isExploreSubagentRequest(request: ProviderRequest): boolean {
-  return JSON.stringify(request.messages).includes(
-    "focused code exploration subagent",
-  );
+  return JSON.stringify(request.messages).includes("Task: explore");
 }
 
 function createAgentTaskFakeLLMClient(
@@ -788,6 +786,16 @@ describe("createInProcessUiBackendClient", () => {
           ? requests[0].messages[0].content
           : "",
       ).toContain("ohbaby-agent");
+      expect(
+        typeof requests[0]?.messages[0]?.content === "string"
+          ? requests[0].messages[0].content
+          : "",
+      ).toContain("Task: agent");
+      expect(
+        typeof requests[0]?.messages[0]?.content === "string"
+          ? requests[0].messages[0].content
+          : "",
+      ).toContain("<tool_guidance>");
       expect(requests[0]?.messages.map((message) => message.role)).toEqual([
         "system",
         "user",
@@ -797,6 +805,85 @@ describe("createInProcessUiBackendClient", () => {
       expect(
         snapshot.sessions[0].messages.map((message) => message.role),
       ).toEqual(["user", "assistant"]);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("passes slash command mode into the next model system prompt", async () => {
+    const requests: ProviderRequest[] = [];
+    const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-mode-prompt-"));
+    try {
+      const client = createInProcessUiBackendClient({
+        llmClient: createSequentialFakeLLMClient(
+          [[{ textDelta: "Planned", finishReason: "stop" }]],
+          requests,
+        ),
+        workdir: directory,
+      });
+
+      await client.executeCommand({
+        argv: [],
+        clientInvocationId: "inv_mode_plan_prompt",
+        commandId: "mode.plan",
+        path: ["mode", "plan"],
+        raw: "/mode plan",
+        rawArgs: "",
+        surface: "tui",
+      });
+      await client.submitPrompt("Plan this task");
+
+      const systemContent =
+        typeof requests[0]?.messages[0]?.content === "string"
+          ? requests[0].messages[0].content
+          : "";
+      expect(systemContent).toContain("Task: plan");
+      expect(systemContent).toContain(
+        "Do not write files or execute workspace changes.",
+      );
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("appends configured primary agent prompts to the default system prompt", async () => {
+    const requests: ProviderRequest[] = [];
+    const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-primary-addon-"));
+    try {
+      const registry = new AgentRegistry({
+        configLoader: (): AgentsConfig => ({
+          agents: {
+            build: {
+              default: true,
+              description: "Configured primary build agent.",
+              mode: "primary",
+              name: "build",
+              prompt: "Prefer the configured project release rubric.",
+              tools: { include: ["read"] },
+            },
+          },
+        }),
+      });
+      const client = createInProcessUiBackendClient({
+        agentManager: new AgentManager({ registry }),
+        llmClient: createSequentialFakeLLMClient(
+          [[{ textDelta: "Done", finishReason: "stop" }]],
+          requests,
+        ),
+        workdir: directory,
+      });
+
+      await client.submitPrompt("Use configured primary prompt");
+
+      const systemContent =
+        typeof requests[0]?.messages[0]?.content === "string"
+          ? requests[0].messages[0].content
+          : "";
+      expect(systemContent).toContain("Task: agent");
+      expect(systemContent).toContain("<agent_prompt_addon>");
+      expect(systemContent).toContain(
+        "Prefer the configured project release rubric.",
+      );
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
@@ -1263,12 +1350,13 @@ describe("createInProcessUiBackendClient", () => {
 
     expect(requests).toHaveLength(6);
     const firstChildText = JSON.stringify(requests[1]?.messages);
-    expect(firstChildText).toContain("focused code exploration subagent");
+    expect(firstChildText).toContain("Task: explore");
+    expect(firstChildText).toContain("<subagent_base>");
     expect(firstChildText).toContain("Find auth files");
     expect(firstChildText).not.toContain("Delegate auth exploration");
 
     const resumedChildText = JSON.stringify(requests[4]?.messages);
-    expect(resumedChildText).toContain("focused code exploration subagent");
+    expect(resumedChildText).toContain("Task: explore");
     expect(resumedChildText).toContain("Find auth files");
     expect(resumedChildText).toContain("child found auth.ts");
     expect(resumedChildText).toContain("Use the same child session");
@@ -1279,6 +1367,47 @@ describe("createInProcessUiBackendClient", () => {
     const parentToolResultText = JSON.stringify(requests[2]?.messages);
     expect(parentToolResultText).toContain("subagent_session_1");
     expect(parentToolResultText).toContain("child found auth.ts");
+  });
+
+  it("appends configured subagent prompts to child model requests", async () => {
+    const requests: ProviderRequest[] = [];
+    const registry = new AgentRegistry({
+      configLoader: (): AgentsConfig => ({
+        agents: {
+          explore: {
+            description: "Configured exploration subagent.",
+            mode: "subagent",
+            name: "explore",
+            prompt: "Use the configured child inspection rubric.",
+            tools: { include: ["read"] },
+          },
+        },
+      }),
+    });
+    const client = createInProcessUiBackendClient({
+      agentManager: new AgentManager({ registry }),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            taskToolCallEvent({
+              callId: "call_task_configured_child",
+              description: "Explore configured prompt",
+              prompt: "Inspect configured child prompt",
+            }),
+          ],
+          [{ textDelta: "configured child done", finishReason: "stop" }],
+          [{ textDelta: "parent saw configured child", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+
+    await client.submitPrompt("Delegate with configured child prompt");
+
+    const childText = JSON.stringify(requests[1]?.messages);
+    expect(childText).toContain("Task: explore");
+    expect(childText).toContain("<agent_prompt_addon>");
+    expect(childText).toContain("Use the configured child inspection rubric.");
   });
 
   it("controls background agent tasks without leaking child transcripts into the parent", async () => {
@@ -1316,9 +1445,7 @@ describe("createInProcessUiBackendClient", () => {
 
     expect(requests).toHaveLength(8);
     const childRequests = requests.filter((request) =>
-      JSON.stringify(request.messages).includes(
-        "focused code exploration subagent",
-      ),
+      JSON.stringify(request.messages).includes("Task: explore"),
     );
     expect(childRequests).toHaveLength(2);
     for (const request of childRequests) {

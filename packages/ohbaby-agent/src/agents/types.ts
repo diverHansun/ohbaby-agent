@@ -34,6 +34,11 @@ export interface AgentConfig {
   readonly maxTokens?: number;
   readonly tools?: ToolsConfig;
   readonly permission?: PermissionConfig;
+  /**
+   * Additive runtime prompt refinement appended after the default base/task
+   * prompt. This must not replace the default core/system-prompt identity or
+   * task contract.
+   */
   readonly prompt?: string;
 }
 

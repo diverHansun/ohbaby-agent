@@ -116,9 +116,7 @@ function lastPersistentRequestMessageText(request: ProviderRequest): string {
 }
 
 function isPersistentExploreSubagentRequest(request: ProviderRequest): boolean {
-  return JSON.stringify(request.messages).includes(
-    "focused code exploration subagent",
-  );
+  return JSON.stringify(request.messages).includes("Task: explore");
 }
 
 function createPersistentAgentTaskLLMClient(
