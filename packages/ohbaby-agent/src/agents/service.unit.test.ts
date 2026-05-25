@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { SubagentExecutor } from "./executor.js";
+import { AgentService } from "./service.js";
 import { AgentManager } from "./manager.js";
 import { AgentRegistry } from "./registry.js";
 import type { AgentsConfig } from "./types.js";
@@ -242,12 +242,12 @@ function createPromptBuilder(): AgentPromptMessageBuilder {
   );
 }
 
-describe("SubagentExecutor", () => {
+describe("AgentService", () => {
   it("creates an isolated child session, writes the prompt, and runs through core runAgent", async () => {
     const messages = createMessageManager();
     const runs = createRunCoordinator();
     const tools = createToolScheduler();
-    const executor = new SubagentExecutor({
+    const service = new AgentService({
       agentManager: await createAgentManager(),
       buildPromptMessages: createPromptBuilder(),
       messageManager: messages.manager,
@@ -261,7 +261,7 @@ describe("SubagentExecutor", () => {
     });
 
     await expect(
-      executor.execute({
+      service.execute({
         agentName: "explore",
         description: "Explore auth",
         parentSessionId: "parent",
@@ -306,7 +306,7 @@ describe("SubagentExecutor", () => {
     runs.create.mockImplementationOnce(() =>
       Promise.reject(new Error("child run rejected")),
     );
-    const executor = new SubagentExecutor({
+    const service = new AgentService({
       agentManager: await createAgentManager(),
       buildPromptMessages: createPromptBuilder(),
       messageManager: createMessageManager().manager,
@@ -316,7 +316,7 @@ describe("SubagentExecutor", () => {
     });
 
     await expect(
-      executor.execute({
+      service.execute({
         agentName: "explore",
         parentSessionId: "parent",
         prompt: "run",
@@ -328,7 +328,7 @@ describe("SubagentExecutor", () => {
   });
 
   it("rejects primary agents as subagents", async () => {
-    const executor = new SubagentExecutor({
+    const service = new AgentService({
       agentManager: await createAgentManager(),
       buildPromptMessages: createPromptBuilder(),
       messageManager: createMessageManager().manager,
@@ -338,7 +338,7 @@ describe("SubagentExecutor", () => {
     });
 
     await expect(
-      executor.execute({
+      service.execute({
         agentName: "build",
         parentSessionId: "parent",
         prompt: "do work",
@@ -350,7 +350,7 @@ describe("SubagentExecutor", () => {
     const blocker = deferred<{ readonly status: "succeeded" }>();
     const runs = createRunCoordinator();
     runs.coordinator.waitForCompletion = vi.fn(() => blocker.promise);
-    const executor = new SubagentExecutor({
+    const service = new AgentService({
       agentManager: await createAgentManager(),
       buildPromptMessages: createPromptBuilder(),
       maxConcurrency: 1,
@@ -360,13 +360,13 @@ describe("SubagentExecutor", () => {
       toolScheduler: createToolScheduler().scheduler,
     });
 
-    const first = executor.execute({
+    const first = service.execute({
       agentName: "explore",
       parentSessionId: "parent",
       prompt: "first",
     });
     await expect(
-      executor.execute({
+      service.execute({
         agentName: "explore",
         parentSessionId: "parent",
         prompt: "second",
@@ -385,7 +385,7 @@ describe("SubagentExecutor", () => {
       parentId: "parent",
       title: "Existing",
     });
-    const executor = new SubagentExecutor({
+    const service = new AgentService({
       agentManager: await createAgentManager(),
       buildPromptMessages: createPromptBuilder(),
       messageManager: createMessageManager().manager,
@@ -395,7 +395,7 @@ describe("SubagentExecutor", () => {
     });
 
     await expect(
-      executor.execute({
+      service.execute({
         agentName: "explore",
         parentSessionId: "parent",
         prompt: "resume",
@@ -413,7 +413,7 @@ describe("SubagentExecutor", () => {
       parentId: "parent",
       title: "Research",
     });
-    const executor = new SubagentExecutor({
+    const service = new AgentService({
       agentManager: await createAgentManager(),
       buildPromptMessages: createPromptBuilder(),
       messageManager: createMessageManager().manager,
@@ -423,7 +423,7 @@ describe("SubagentExecutor", () => {
     });
 
     await expect(
-      executor.execute({
+      service.execute({
         agentName: "explore",
         parentSessionId: "parent",
         prompt: "resume wrong agent",
@@ -436,7 +436,7 @@ describe("SubagentExecutor", () => {
 
   it("forces recursive tools off when an all-mode agent runs as a subagent", async () => {
     const tools = createToolScheduler();
-    const executor = new SubagentExecutor({
+    const service = new AgentService({
       agentManager: await createAgentManager(),
       buildPromptMessages: createPromptBuilder(),
       messageManager: createMessageManager().manager,
@@ -445,7 +445,7 @@ describe("SubagentExecutor", () => {
       toolScheduler: tools.scheduler,
     });
 
-    await executor.execute({
+    await service.execute({
       agentName: "universal",
       parentSessionId: "parent",
       prompt: "run as child",

@@ -6,7 +6,6 @@ export {
   planAgent,
   researchAgent,
 } from "./builtin/index.js";
-export { SubagentExecutor } from "./executor.js";
 export {
   AgentService,
   type AgentServiceOptions,
@@ -28,13 +27,6 @@ export {
   type AgentTaskStore,
   type AgentTaskStoreUpdate,
 } from "./tasks/index.js";
-export {
-  createSubagentRunner,
-  toOpenAiTools,
-  type CreateSubagentRunnerOptions,
-  type SubagentPromptMessageBuilder,
-  type SubagentSandboxEnvironmentManager,
-} from "./runner.js";
 export type {
   AgentConfig,
   AgentMode,
@@ -44,8 +36,6 @@ export type {
   RuntimeAgent,
   SubagentExecuteParams,
   SubagentResult,
-  SubagentRunner,
-  SubagentRunnerResult,
   SubagentToolCallSummary,
   SystemPromptProvider,
   TaskExecutor,

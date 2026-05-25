@@ -91,24 +91,3 @@ export interface SubagentResult {
 export interface TaskExecutor {
   execute(params: SubagentExecuteParams): Promise<SubagentResult>;
 }
-
-export interface SubagentRunnerResult {
-  readonly success: boolean;
-  readonly output: string;
-  readonly steps?: number;
-  readonly toolCalls?: readonly SubagentToolCallSummary[];
-}
-
-export interface SubagentRunner {
-  run(input: {
-    readonly sessionId: string;
-    readonly parentSessionId: string;
-    readonly projectRoot?: string;
-    readonly agentName: string;
-    readonly prompt: string;
-    readonly parentMessageId?: string;
-    readonly runtimeAgent: RuntimeAgent;
-    readonly signal?: AbortSignal;
-    readonly environment?: ToolExecutionEnvironment;
-  }): Promise<SubagentRunnerResult>;
-}

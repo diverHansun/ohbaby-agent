@@ -28,10 +28,10 @@ import {
 } from "../../services/session/index.js";
 import {
   AgentManager,
+  AgentService,
   AgentTaskManager,
-  SubagentExecutor,
-  toOpenAiTools,
 } from "../../agents/index.js";
+import { toOpenAiTools } from "../../core/agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
 import {
   createInMemoryRunLedger,
@@ -501,7 +501,7 @@ export async function createUiRuntimeComposition(
     toolScheduler,
   });
 
-  const taskExecutor = new SubagentExecutor({
+  const taskExecutor = new AgentService({
     agentManager,
     buildPromptMessages: buildSubagentPromptMessages,
     messageManager: options.messageManager,

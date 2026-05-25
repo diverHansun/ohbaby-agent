@@ -60,7 +60,6 @@ export {
   AgentService,
   BUILTIN_AGENTS,
   BUILTIN_AGENT_NAMES,
-  SubagentExecutor,
   buildAgent,
   exploreAgent,
   planAgent,
@@ -74,12 +73,11 @@ export type {
   RuntimeAgent,
   SubagentExecuteParams,
   SubagentResult,
-  SubagentRunner,
-  SubagentRunnerResult,
   SubagentToolCallSummary,
   SystemPromptProvider,
   TaskExecutor,
 } from "./agents/index.js";
+export * from "./core/agents/index.js";
 export * from "./core/system-prompt/index.js";
 export * from "./core/llm-client/index.js";
 export * from "./mcp/index.js";
