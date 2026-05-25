@@ -7,7 +7,7 @@ import type {
   ToolDefinition,
   ToolExecutionEnvironment,
 } from "../core/tool-scheduler/index.js";
-import type { RunRecord } from "../runtime/run-manager/index.js";
+import type { AgentRunRecord } from "../core/agents/index.js";
 
 function deferred<T>(): {
   readonly promise: Promise<T>;
@@ -42,7 +42,7 @@ const readTool: ToolDefinition = {
   source: "builtin",
 };
 
-const runRecord: RunRecord = {
+const runRecord: AgentRunRecord = {
   createdAt: 1,
   disconnectMode: "continue",
   multitaskStrategy: "reject",

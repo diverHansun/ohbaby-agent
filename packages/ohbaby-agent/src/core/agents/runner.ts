@@ -65,6 +65,12 @@ async function writeInitialUserMessage(
   if (!input.initialUserPrompt) {
     return undefined;
   }
+  if (
+    typeof deps.messageManager.createMessage !== "function" ||
+    typeof deps.messageManager.appendPart !== "function"
+  ) {
+    throw new Error("initialUserPrompt requires a writable MessageManager");
+  }
 
   const message = await deps.messageManager.createMessage({
     agent: input.agentName,

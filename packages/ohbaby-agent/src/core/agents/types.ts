@@ -80,7 +80,7 @@ export interface AgentRunRecord {
 }
 
 export interface AgentRunCompletion {
-  readonly status: "succeeded" | "failed" | "cancelled";
+  readonly status: "succeeded" | "failed" | "cancelled" | "interrupted";
   readonly error?: string;
 }
 
@@ -99,10 +99,8 @@ export interface AgentSandboxEnvironmentManager {
 
 export interface AgentRunDeps {
   readonly runCoordinator: AgentRunCoordinator;
-  readonly messageManager: Pick<
-    MessageManager,
-    "appendPart" | "createMessage" | "listBySession"
-  >;
+  readonly messageManager: Pick<MessageManager, "listBySession"> &
+    Partial<Pick<MessageManager, "appendPart" | "createMessage">>;
   readonly toolScheduler: Pick<ToolSchedulerInstance, "getAvailableTools">;
   readonly sandboxManager?: AgentSandboxEnvironmentManager;
 }
