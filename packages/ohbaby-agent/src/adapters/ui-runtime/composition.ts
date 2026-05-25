@@ -18,6 +18,7 @@ import {
   type PermissionPort,
   type PolicyPort,
   type Tool,
+  type ToolDefinition,
 } from "../../core/tool-scheduler/index.js";
 import { createHeuristicTokenCounter } from "../../services/llm-model/index.js";
 import type { SessionManager } from "../../services/session/index.js";
@@ -340,6 +341,50 @@ export async function createUiRuntimeComposition(
     });
   }
 
+  async function resolvePromptTools(input: {
+    readonly isSubagent: boolean;
+    readonly sessionId: string;
+  }): Promise<ToolDefinition[]> {
+    const agentName = input.isSubagent
+      ? await resolveSubagentAgentName(input.sessionId)
+      : activePrimaryAgentName;
+    return await toolScheduler.getAvailableTools({
+      agentName,
+      isSubagent: input.isSubagent,
+    });
+  }
+
+  function resolveSubagentTaskKind(
+    agentName: string,
+  ): "explore" | "research" | "plan" | "generic" {
+    return agentName === "explore" ||
+      agentName === "research" ||
+      agentName === "plan"
+      ? agentName
+      : "generic";
+  }
+
+  function toolPromptGuidelines(toolNames: readonly string[]): string[] {
+    const names = new Set(toolNames);
+    const guidelines: string[] = [];
+    if (
+      names.has("bash") &&
+      (names.has("grep") || names.has("glob") || names.has("list"))
+    ) {
+      guidelines.push(
+        "Prefer read/list/glob/grep tools over bash for file exploration.",
+      );
+    } else if (names.has("bash")) {
+      guidelines.push("Use bash for shell-assisted file and workspace tasks.");
+    }
+    if (names.has("write") || names.has("edit")) {
+      guidelines.push(
+        "Use write/edit only when the current task mode and user request allow workspace changes.",
+      );
+    }
+    return guidelines;
+  }
+
   const systemPromptProvider = createSystemPromptProvider({
     agentNameResolver(input) {
       return resolvePromptAgentName(input);
@@ -347,14 +392,24 @@ export async function createUiRuntimeComposition(
     agentPromptResolver(agentName) {
       return agentManager.get(agentName)?.prompt;
     },
+    async taskKindResolver(input, agentName) {
+      if (!input.isSubagent) {
+        return await options.policy.getMode();
+      }
+      return resolveSubagentTaskKind(agentName);
+    },
+    async toolDetailsProvider(input) {
+      const tools = await resolvePromptTools(input);
+      const toolSnippets = Object.fromEntries(
+        tools.map((tool) => [tool.name, tool.description]),
+      );
+      return {
+        promptGuidelines: toolPromptGuidelines(tools.map((tool) => tool.name)),
+        toolSnippets,
+      };
+    },
     async toolsProvider(input) {
-      const agentName = input.isSubagent
-        ? await resolveSubagentAgentName(input.sessionId)
-        : activePrimaryAgentName;
-      const tools = await toolScheduler.getAvailableTools({
-        agentName,
-        isSubagent: input.isSubagent,
-      });
+      const tools = await resolvePromptTools(input);
       return tools.map((tool) => tool.name);
     },
     onSecurityFinding(finding) {

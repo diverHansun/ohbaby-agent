@@ -1,8 +1,14 @@
 import { spawn } from "node:child_process";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -20,6 +26,15 @@ interface CapturedRequest {
 }
 
 const cleanupDirectories: string[] = [];
+const require = createRequire(import.meta.url);
+const TSX_IMPORT_URL = pathToFileURL(require.resolve("tsx")).href;
+const CLI_BIN_PATH = join(
+  process.cwd(),
+  "packages",
+  "ohbaby-agent",
+  "src",
+  "bin.ts",
+);
 
 afterEach(async () => {
   for (const directory of cleanupDirectories.splice(0)) {
@@ -160,20 +175,15 @@ function writeSse(response: ServerResponse, payload: unknown): void {
 
 async function runCliProcess(input: {
   readonly args: readonly string[];
+  readonly cwd?: string;
   readonly env: NodeJS.ProcessEnv;
   readonly timeoutMs?: number;
 }): Promise<CliResult> {
   const child = spawn(
     process.execPath,
-    [
-      "--no-warnings",
-      "--import",
-      "tsx",
-      "packages/ohbaby-agent/src/bin.ts",
-      ...input.args,
-    ],
+    ["--no-warnings", "--import", TSX_IMPORT_URL, CLI_BIN_PATH, ...input.args],
     {
-      cwd: process.cwd(),
+      cwd: input.cwd ?? process.cwd(),
       env: input.env,
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -237,6 +247,7 @@ describe("CLI prompt process smoke", () => {
 
       const result = await runCliProcess({
         args: ["-p", "hello"],
+        cwd: home,
         env: childEnv({
           dbPath,
           home,
@@ -284,6 +295,7 @@ describe("CLI prompt process smoke", () => {
 
     const result = await runCliProcess({
       args: ["-p", "hello"],
+      cwd: home,
       env,
     });
 

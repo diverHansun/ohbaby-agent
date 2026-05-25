@@ -16,8 +16,7 @@ export function noticeFromPromptSecurityFinding(
   finding: PromptSecurityFinding,
 ): Omit<UiNotice, "id" | "createdAt"> {
   const source = finding.sourcePath ?? finding.sourceLabel;
-  const sourceName =
-    finding.sourceLabel === "Memory" ? "Memory context" : "Custom instructions";
+  const sourceName = sourceNameFromPromptSecurityFinding(finding);
   return {
     key: `prompt-security:${source}:${finding.patternId}`,
     level: "warning",
@@ -30,6 +29,18 @@ export function noticeFromPromptSecurityFinding(
         ? `${sourceName} skipped`
         : `${sourceName} warning`,
   };
+}
+
+function sourceNameFromPromptSecurityFinding(
+  finding: PromptSecurityFinding,
+): string {
+  if (finding.sourceLabel === "Memory") {
+    return "Memory context";
+  }
+  if (finding.sourceLabel.startsWith("Tool ")) {
+    return "Tool description";
+  }
+  return "Custom instructions";
 }
 
 export function noticeFromCompactResult(
