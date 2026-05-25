@@ -1,0 +1,91 @@
+# core/agents 模块 goals-duty.md
+
+本文档定义 `core/agents` 的目标和职责边界。`core/agents` 是 agents improve-1 新增的 agent 运行底层。
+
+---
+
+## 一、模块定位
+
+一句话说明：`core/agents` 提供一份统一的 agent run 原语，让 primary 和 subagent 最终共享同一套底层执行机制。
+
+improve-1 已落地 subagent 同步 envelope；primary stream envelope 留给 improve-2。
+
+---
+
+## 二、Design Goals
+
+### G1: 统一执行原语
+
+提供 `runAgent(deps, input)`，封装以下公共步骤：
+
+- 获取可用工具。
+- 可选写入初始 user message。
+- 构造 prompt messages。
+- 创建 run。
+- 绑定取消信号。
+- 等待完成。
+- 提取最终 assistant 输出。
+- 清理 sandbox 环境。
+
+### G2: 端口化依赖
+
+通过 `AgentRunCoordinator`、`MessageManager`、`ToolScheduler` 等端口协作，不绑定 `runtime/run-manager` 或 adapter 实现。
+
+### G3: envelope 可扩展
+
+`AgentRunInput.waitMode` 支持：
+
+- `waitForCompletion`: improve-1 已实现，用于 Task 同步调用和 agent task 每轮执行。
+- `stream`: improve-2 实现，用于 primary 启动路径。
+
+### G4: 输出收口标准化
+
+`extractFinalOutput()` 负责从 session 消息历史中提取最后可见的 assistant 文本，避免每个调用方重复实现。
+
+---
+
+## 三、Duties
+
+| 编号 | 职责 |
+|------|------|
+| D1 | 定义 `AgentRunInput / AgentRunResult / AgentRunDeps / AgentRunCoordinator` |
+| D2 | 实现 `runAgent` waitForCompletion 模式 |
+| D3 | 统一写入 `initialUserPrompt` |
+| D4 | 将工具定义转换为 OpenAI tools 形态 |
+| D5 | 绑定 `AbortSignal` 到 run cancel |
+| D6 | 从消息历史提取最终 assistant 输出 |
+| D7 | 保证 sandbox environment finally 清理 |
+
+---
+
+## 四、Non-Duties
+
+| 编号 | 非职责 | 所属模块 |
+|------|--------|----------|
+| N1 | agent 配置 catalog | `agents/registry` |
+| N2 | `RuntimeAgent` 解析 | `agents/manager` |
+| N3 | Task 并发控制 | `agents/service` |
+| N4 | 长生命周期 task 状态机 | `agents/tasks` |
+| N5 | run 基础设施持久化和事件桥接 | `runtime` |
+| N6 | 生命周期 step 执行 | `core/lifecycle` |
+| N7 | 上下文压缩与准备 | `core/context` |
+
+---
+
+## 五、依赖约束
+
+`core/agents` 允许依赖同层核心端口和类型，例如 `core/message`、`core/tool-scheduler`、`core/lifecycle` 的事件类型和 `core/llm-client` 的 message 类型。
+
+禁止依赖：
+
+- `packages/ohbaby-agent/src/agents`
+- `packages/ohbaby-agent/src/adapters`
+- `packages/ohbaby-agent/src/runtime` 的具体实现
+
+---
+
+## 六、文档自检
+
+- [x] 能解释 `core/agents` 为什么属于 core。
+- [x] 能解释它和 `agents` 服务层的区别。
+- [x] 能说明 improve-1 与 improve-2 的 envelope 分界。
