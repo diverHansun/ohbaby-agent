@@ -8,6 +8,7 @@ import {
 } from "./errors.js";
 import type {
   CreateSessionOptions,
+  EnsureRootSessionInput,
   ListSessionOptions,
   MessageCleaner,
   ProjectInfo,
@@ -96,51 +97,66 @@ export function createSessionManager(
   const now = options.now ?? Date.now;
   const createSessionId = options.createSessionId ?? createSessionIdGenerator();
 
-  return {
-    async create(
-      projectDirectory: string,
-      createOptions: CreateSessionOptions = {},
-    ): Promise<Session> {
-      const createdAt = now();
-      let parent: Session | undefined;
-      let project: ProjectInfo;
+  async function create(
+    projectDirectory: string,
+    createOptions: CreateSessionOptions = {},
+  ): Promise<Session> {
+    const createdAt = now();
+    let parent: Session | undefined;
+    let project: ProjectInfo;
 
-      if (createOptions.parentId) {
-        parent = await getExistingSession(createOptions.parentId, options);
-        project = {
-          id: parent.projectId,
-          rootPath: parent.projectRoot,
-        };
-      } else {
-        project = await options.projectResolver.fromDirectory(projectDirectory);
-      }
+    if (createOptions.parentId) {
+      parent = await getExistingSession(createOptions.parentId, options);
+      project = {
+        id: parent.projectId,
+        rootPath: parent.projectRoot,
+      };
+    } else {
+      project = await options.projectResolver.fromDirectory(projectDirectory);
+    }
 
-      const session = createSessionRecord({
-        id: createOptions.id ?? createSessionId(),
-        project,
-        options: createOptions,
-        now: createdAt,
-        parentId: parent?.id,
-      });
+    const session = createSessionRecord({
+      id: createOptions.id ?? createSessionId(),
+      project,
+      options: createOptions,
+      now: createdAt,
+      parentId: parent?.id,
+    });
 
-      let updatedParent: Session | undefined;
-      await options.store.withTransaction(async (store) => {
-        await store.insert(session);
-        if (parent) {
-          updatedParent = await store.update(parent.id, {
-            childrenIds: toChildIds(parent, session.id),
-            updatedAt: now(),
-          });
-        }
-      });
-      options.bus.publish(SessionEvent.Created, { session });
-      if (updatedParent) {
-        options.bus.publish(SessionEvent.Updated, {
-          session: updatedParent,
+    let updatedParent: Session | undefined;
+    await options.store.withTransaction(async (store) => {
+      await store.insert(session);
+      if (parent) {
+        updatedParent = await store.update(parent.id, {
+          childrenIds: toChildIds(parent, session.id),
+          updatedAt: now(),
         });
       }
+    });
+    options.bus.publish(SessionEvent.Created, { session });
+    if (updatedParent) {
+      options.bus.publish(SessionEvent.Updated, {
+        session: updatedParent,
+      });
+    }
 
-      return session;
+    return session;
+  }
+
+  return {
+    create,
+
+    async ensureRoot(input: EnsureRootSessionInput): Promise<Session> {
+      const existing = await options.store.get(input.id);
+      if (existing) {
+        return existing;
+      }
+
+      return create(input.projectRoot, {
+        agentName: input.agentName,
+        id: input.id,
+        title: input.title,
+      });
     },
 
     get(sessionId: string): Promise<Session | null> {
