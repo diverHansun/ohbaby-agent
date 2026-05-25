@@ -485,9 +485,12 @@ export async function createUiRuntimeComposition(
 
   const taskExecutor = new SubagentExecutor({
     agentManager,
-    messageWriter,
-    runner: subagentRunner,
+    buildPromptMessages: buildSubagentPromptMessages,
+    messageManager: options.messageManager,
+    runCoordinator: runManager,
+    sandboxManager,
     sessionManager,
+    toolScheduler,
   });
 
   for (const tool of createBuiltinTools({

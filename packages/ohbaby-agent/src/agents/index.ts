@@ -7,6 +7,12 @@ export {
   researchAgent,
 } from "./builtin/index.js";
 export { SubagentExecutor } from "./executor.js";
+export {
+  AgentService,
+  type AgentServiceOptions,
+  type AgentServiceSession,
+  type AgentServiceSessionManager,
+} from "./service.js";
 export { createSubagentMessageWriter } from "./message-writer.js";
 export { AgentManager, toolsConfigToRecord } from "./manager.js";
 export { AgentRegistry } from "./registry.js";
