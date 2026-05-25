@@ -14,20 +14,19 @@
 - 把 **subagent 路径**切到 `core/agents.runAgent`
 - `agents/` 收敛为服务/调度层
 - 删除 `agents/session-manager.ts`、`agents/message-writer.ts`
-- 保留兼容 shim（`agents/runner.ts`、`agents/executor.ts`）
+- 直接删除旧 `agents/runner.ts`、`agents/executor.ts` API
 
 improve-1 验收明确不在范围内的事项（[improve-1 acceptance.md 第十节](../improve-1/acceptance.md#十不在验收范围内)），全部是 improve-2 的工作：
 
 - **primary 路径**切到 `core/agents.runAgent`（`waitMode: "stream"`）
-- 删除兼容期 shim（`agents/runner.ts`、`agents/executor.ts`）
-- 调用方迁移到新 import 路径
-- 运行时契约类型整理（`SubagentRunner` / `SubagentExecuteParams` 等）
+- primary 启动调用方迁移到 `AgentService.startSession`
+- 运行时契约类型整理（例如评估 `SubagentExecuteParams` 是否重命名为 `TaskInvocationParams`）
 
 improve-2 完成后：
 
 - 不再有"primary 走旧路径、subagent 走新路径"的过渡状态。
-- `agents/` 不再有兼容 shim 文件。
-- `agents/types.ts` 只保留描述符类型；运行时契约类型搬到归属模块。
+- `agents/` 继续保持服务/调度层身份，不新增旧式 runner/executor 旁路。
+- `agents/types.ts` 只保留描述符与服务层 envelope 契约；纯运行底层契约归 `core/agents/`。
 
 ---
 
@@ -67,8 +66,8 @@ context improve-2（增量摘要等内部优化）            ──┤
                                                     ▼
                               agents improve-2（本轮）
                                 primary 路径切到 core/agents.runAgent
-                                删除兼容 shim
-                                类型整理
+                                接入 AgentService.startSession
+                                类型命名整理
 ```
 
 **强依赖**：
@@ -92,8 +91,7 @@ context improve-2（增量摘要等内部优化）            ──┤
 
 - primary 路径切到 `core/agents.runAgent`
 - composition.ts / RunWorker 重构为消费 `AgentService.startSession`
-- 删除 `agents/runner.ts`、`agents/executor.ts` 兼容 shim
-- 整理 `agents/types.ts` 中的运行时契约类型（保留描述符；运行时契约移到 `core/agents/`）
+- 整理 `agents/types.ts` 中的运行时契约类型（保留描述符与服务层 envelope；纯运行契约移到 `core/agents/`）
 - 内部调用方完全迁移到新 import 路径
 
 **本轮不包含**（留 improve-3 / improve-N）：

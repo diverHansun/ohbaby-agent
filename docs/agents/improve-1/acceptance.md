@@ -12,7 +12,7 @@
 
 1. **可验证**：每条验收项必须能通过自动化测试、命令输出或代码审阅明确判定。
 2. **可回溯**：每条验收项关联到 problem-analysis 中的具体问题编号（PG-N）。
-3. **零回归**：现有调用方在 improve-1 期间无须修改任何 import；现有测试套件全绿。
+3. **零回归**：运行时行为与现有测试套件保持全绿；旧 `runner/executor` 公共 API 在本轮明确删除并由 `AgentService` / `core/agents.runAgent` 取代。
 4. **阶段独立**：AC-1 / AC-2 / AC-3 / AC-4 / AC-5 可分别独立验收。
 5. **上游前置**：AC-5 的验收依赖 lifecycle improve-1 P2 已完成验收。
 
@@ -169,23 +169,25 @@
 
 **关联**：G2。
 
-### AC-3.2 `agents/executor.ts` 转发壳子
+### AC-3.2 旧 `agents/executor.ts` API 删除
 
 **判定**：
 
-- `agents/executor.ts` 内容为兼容 alias：`export { AgentService as SubagentExecutor }` + `export type { AgentServiceOptions as SubagentExecutorOptions }`。
-- 旧 import `import { SubagentExecutor } from "agents"` 持续可用。
-- 类型测试：`SubagentExecutor === AgentService`。
+- `agents/executor.ts` 不存在。
+- `agents/executor.unit.test.ts` 已迁移为 `agents/service.unit.test.ts`。
+- `agents/index.ts` 与包根 `index.ts` 不再导出 `SubagentExecutor / SubagentExecutorOptions`。
+- 类型/集成测试覆盖旧 export 不存在，新入口 `AgentService` 可用。
 
 **关联**：G6。
 
-### AC-3.3 `agents/runner.ts` 转发并消费 `core/agents`
+### AC-3.3 旧 `agents/runner.ts` API 删除
 
 **判定**：
 
-- `agents/runner.ts` 的 `createSubagentRunner` 内部调用 `runAgent({ waitMode: "waitForCompletion", ... })`。
-- grep 验证 `agents/runner.ts` import `core/agents` 而非 `runtime/run-manager`。
-- 现有 `runner.unit.test.ts` 与原断言**等价通过**（mock 形状可能调整以适配新 deps，但断言输出不变）。
+- `agents/runner.ts` 不存在。
+- `agents/runner.unit.test.ts` 不存在。
+- `createSubagentRunner / SubagentRunner / CreateSubagentRunnerOptions / SubagentPromptMessageBuilder / SubagentSandboxEnvironmentManager` 不再从 `agents/index.ts` 或包根导出。
+- 所有 subagent 启动路径改为 `AgentService.executeTask` 或 `AgentTaskManager` 内部调用 `core/agents.runAgent({ waitMode: "waitForCompletion" })`。
 
 **关联**：G2、G3、G7。
 
@@ -210,13 +212,13 @@
 
 **关联**：G3、PG-2。
 
-### AC-3.6 公共 API 形态稳定
+### AC-3.6 公共 API 形态收敛
 
 **判定**：
 
-- `agents/index.ts` 仍导出 `createSubagentRunner / SubagentExecutor / SubagentExecutorOptions / AgentTaskManager / InMemoryAgentTaskStore` 等原符号。
-- 新增导出：`AgentService / AgentServiceOptions`。
-- 类型测试：旧 import 路径下取到的对象与新 import 路径下取到的对象**引用相等**（同一份实现）。
+- `agents/index.ts` 导出 `AgentService / AgentServiceOptions / AgentTaskManager / InMemoryAgentTaskStore` 等新架构入口。
+- `agents/index.ts` 不再导出旧 `runner/executor` 兼容符号。
+- 类型测试：旧 import `SubagentExecutor / createSubagentRunner / SubagentRunner` 应失败或运行期 export 不存在；新 import `AgentService` 可用。
 
 **关联**：G6。
 
@@ -369,9 +371,6 @@ agents/
 ├── manager.unit.test.ts
 ├── service.ts                  ← 新（GP3）
 ├── service.unit.test.ts        ← 新
-├── runner.ts                   ← shim（GP3 改造，improve-2 删除）
-├── runner.unit.test.ts         ← 可选保留
-├── executor.ts                 ← shim（GP3 改造，improve-2 删除）
 ├── tasks/
 │   ├── manager.ts              ← refactored（GP3）
 │   ├── manager.unit.test.ts
@@ -389,6 +388,10 @@ agents/
 - `session-manager.unit.test.ts`
 - `message-writer.ts`（GP5 删除）
 - `message-writer.unit.test.ts`
+- `runner.ts`（旧 API，本轮直接删除）
+- `runner.unit.test.ts`
+- `executor.ts`（旧 API，本轮直接删除）
+- `executor.unit.test.ts`
 
 **关联**：G1、G2、G4、G5。
 
@@ -430,9 +433,10 @@ core/agents/
 - 导出 `AgentConfig / AgentMode / PermissionConfig / PermissionValue / ToolsConfig / AgentsConfig / RuntimeAgent` 等描述符类型。
 - 导出 `AgentManager / toolsConfigToRecord / AgentRegistry`。
 - 导出 `BUILTIN_AGENTS / BUILTIN_AGENT_NAMES / buildAgent / exploreAgent / planAgent / researchAgent`。
-- 导出 `AgentService / AgentServiceOptions / SubagentExecutor (alias) / SubagentExecutorOptions`。
-- 导出 `createSubagentRunner / SubagentRunner / SubagentRunnerResult / SubagentToolCallSummary / SubagentExecuteParams / SubagentResult / TaskExecutor`（兼容期保留）。
+- 导出 `AgentService / AgentServiceOptions / AgentServiceSession / AgentServiceSessionManager`。
+- 导出 `SubagentToolCallSummary / SubagentExecuteParams / SubagentResult / TaskExecutor`（Task 工具 envelope 契约，名称在 improve-2 再评估）。
 - 导出 `AgentTaskManager / InMemoryAgentTaskStore / AgentTaskRecord` 等。
+- **不**再导出 `SubagentExecutor / SubagentExecutorOptions / createSubagentRunner / SubagentRunner / CreateSubagentRunnerOptions / SubagentPromptMessageBuilder / SubagentSandboxEnvironmentManager`。
 - **不**再导出 `createSubagentMessageWriter / SubagentMessageWriter`。
 - **不**再导出 `createRuntimeSubagentSessionManager / InMemorySubagentSessionManager / PersistentSubagentSessionManager / SubagentSessionManager / RuntimeSubagentSessionManager / SubagentSession`。
 
@@ -464,16 +468,13 @@ core/agents/
 - `core/agents/` 模块（`runAgent / extractFinalOutput / AgentRunInput / AgentRunResult / AgentRunner / AgentRunDeps / AgentToolCallSummary`）。
 - `agents.AgentService / AgentServiceOptions`。
 
-**保留为兼容 alias（improve-2 删除）**：
-
-- `agents.SubagentExecutor` = `AgentService`
-- `agents.createSubagentRunner` 内部消费 `core/agents.runAgent`
-
 **移除（破坏性，本仓库内部消费者均已迁移）**：
 
 - `agents/session-manager.ts` 及其导出（`createRuntimeSubagentSessionManager / InMemorySubagentSessionManager / PersistentSubagentSessionManager / RuntimeSubagentSessionManager`）。
 - `agents/message-writer.ts` 及其导出（`createSubagentMessageWriter`）。
 - `agents/types.ts` 中 `SubagentSessionManager / RuntimeSubagentSessionManager / SubagentSession / SubagentMessageWriter` 类型。
+- `agents/runner.ts` 及其导出（`createSubagentRunner / SubagentRunner / CreateSubagentRunnerOptions` 等）。
+- `agents/executor.ts` 及其导出（`SubagentExecutor / SubagentExecutorOptions`）。
 
 ### AG-5 文档同步
 
@@ -529,7 +530,7 @@ core/agents/
 |------|-------|---------|
 | 1 | 阶段对应 AC 系列条目逐项核对 | 全部"通过" |
 | 2 | 现有测试套件全绿 | `test / typecheck / lint` 三命令零失败 |
-| 3 | 转发壳子是否生效 | 旧 import 路径仍可用（GP3 / GP4 / GP5 完成前） |
+| 3 | 旧 API 是否清理干净 | `SubagentExecutor / createSubagentRunner / SubagentRunner` 等旧 export 命中数为 0 |
 | 4 | grep 反向规则核对 | AG-8 中所有禁止项命中数为 0 |
 | 5 | CHANGELOG 与架构文档同步 | 文档 PR 与代码 PR 同批合并 |
 | 6 | 与 lifecycle / context improve-1 接合面 review | AG-6 通过 |
@@ -541,10 +542,9 @@ core/agents/
 ## 十、不在验收范围内
 
 - primary agent 路径切换到 `core/agents.runAgent`（improve-2）。
-- 删除兼容期 shim（`agents/runner.ts` / `agents/executor.ts`）。
-- 调用方迁移到新 import 路径（如直接 `import from "core/agents"`）。
+- Task 工具 envelope 类型命名整理（如 `SubagentExecuteParams` 是否重命名为 `TaskInvocationParams`，improve-2 决定）。
 - AgentManager / AgentRegistry / builtin 功能演进。
-- runner / executor / tasks 内部进一步切换到 `Lifecycle.runSession` 完整路径（依赖 improve-2 RunManager 改造）。
+- primary 流式 envelope 进一步切换到 `Lifecycle.runSession` 完整路径（依赖 improve-2 RunManager 改造）。
 - 新增 agent 类型或权限模型升级。
 
 ---

@@ -104,7 +104,6 @@ agents/               ← 服务/调度层
 ├── manager.ts        ← AgentManager
 ├── service.ts        ← AgentService（Task 工具执行 + 并发）
 ├── tasks/            ← 长任务状态机（消费 core/agents）
-├── runner.ts         ← 兼容期 shim → core/agents
 ├── builtin/
 └── index.ts
 
@@ -183,7 +182,7 @@ runtime/              ← 严格基础设施（不变）
 ### 5.1 本轮（agents improve-1）落地的承诺
 
 - **建立** `core/agents/` 作为"agent 运行底层"。最小可用形态：`runAgent(input)` + `extractFinalOutput()`，subagent 路径全量切换到此。
-- **agents/** 收敛为服务/调度层：保留 `types / registry / manager / builtin / index`，新增 `service.ts`，`tasks/` 内部消费 `core/agents`，`runner.ts` 作为兼容 shim。
+- **agents/** 收敛为服务/调度层：保留 `types / registry / manager / builtin / index`，新增 `service.ts`，`tasks/` 内部消费 `core/agents`，并直接删除旧 `runner.ts / executor.ts` API。
 - **services/session** 补 `ensureRoot`。
 - **删除** `agents/session-manager.ts` 与 `agents/message-writer.ts`（后者依赖 lifecycle improve-1 P2 完成）。
 - **runtime/** 不动，不接受任何 agent-specific 子目录。
@@ -198,7 +197,7 @@ runtime/              ← 严格基础设施（不变）
 ### 5.3 长期方向（improve-2 及以后）
 
 - improve-2：primary agent 启动路径切换到 `core/agents.runAgent`。届时 composition / RunWorker 只是 "primary envelope 提供者"。
-- improve-3：删除兼容期 shim（`agents/runner.ts` 等），完成 API 表面收敛。
+- improve-2：整理 Task 工具 envelope 类型命名，评估是否把 `SubagentExecuteParams / SubagentResult` 改为更通用的 `TaskInvocation*` 命名。
 - improve-N：评估是否需要第三种 envelope（webhook、batch、cron）；如有，叠加在 `core/agents.runAgent` 之上即可，不动核心。
 
 ---
@@ -216,14 +215,14 @@ runtime/              ← 严格基础设施（不变）
 
 - 短期改造量大于方案 1。需要额外抽出 `core/agents/runner.ts` 与 `core/agents/output.ts`。
 - improve-1 阶段 primary 路径未切换，存在"承诺与现实有差"的过渡期。需在文档与 PR 描述中明确说明。
-- `agents/index.ts` 的 barrel 在过渡期需要 re-export 来自不同位置的符号（`core/agents` 的 runner 原语 + `agents/` 的服务层），调用方迁移可分阶段进行。
+- `agents/index.ts` 的 barrel 不再导出旧 runner/executor API；调用方必须走 `AgentService` 或 `core/agents.runAgent`。
 
 ### 6.3 中性影响
 
 - 类型的归属在两个模块间需要划分（参见 [implementation-plan.md 第二节](./implementation-plan.md#二阶段-gp2-建立-coreagents)）：
   - `agents/types.ts`：`AgentConfig / RuntimeAgent / PermissionConfig / ToolsConfig` 等描述符。
   - `core/agents/types.ts`：`AgentRunInput / AgentRunResult / AgentRunner` 等运行时契约。
-  - 兼容期 `agents/types.ts` 继续 re-export 运行时类型，迁移完成后再删。
+  - `agents/types.ts` 暂保留 Task 工具 envelope 类型，命名是否进一步收敛留给 improve-2。
 
 ---
 

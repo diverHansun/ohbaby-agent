@@ -323,7 +323,7 @@ runtime/        ──无 agents 特定依赖──
 
 对应 PG-1、PG-3、PG-10。
 
-`agents/` 保留 `types / registry / manager / builtin / index`；新增 `service.ts`（`AgentService`）；`tasks/` 内部改为消费 `core/agents`；`runner.ts` 改为兼容 shim。
+`agents/` 保留 `types / registry / manager / builtin / index`；新增 `service.ts`（`AgentService`）；`tasks/` 内部改为消费 `core/agents`；旧 `runner.ts / executor.ts` API 直接删除。
 
 ### G3：依赖方向归正
 
@@ -343,9 +343,9 @@ runtime/        ──无 agents 特定依赖──
 
 `message-writer.ts` 删除。`writeUserMessage` 内联到 `AgentService.executeTask`。
 
-### G6：完整向后兼容
+### G6：行为零回归
 
-所有调用方（CLI、adapter、外部）在本轮改造前后**无行为差异**。通过 `agents/index.ts` 转发壳子实现共存。
+运行时行为在本轮改造前后**无差异**；源码调用方同批迁移到 `AgentService` 或 `core/agents.runAgent`，不再通过旧 `runner/executor` 壳子共存。
 
 ### G7：subagent 切换到 `core/agents.runAgent`；primary 不动
 
@@ -361,7 +361,7 @@ runtime/        ──无 agents 特定依赖──
 
 - primary agent 路径切换到 `core/agents.runAgent`（留 improve-2）
 - composition / RunWorker 改造（留 improve-2）
-- 删除兼容期 shim（留 improve-2）
+- Task 工具 envelope 类型命名整理（如 `SubagentExecuteParams` 是否重命名，留 improve-2）
 - 多 provider 抽象
 - AgentManager / AgentRegistry / builtin 功能演进
 - Task tool 协议升级

@@ -35,16 +35,16 @@ context improve-1 CP1     ──完成验收──┤
 ```
 
 - **GP1 / GP2 技术上完全独立**于 lifecycle / context 改造。
-- **GP3 依赖 GP2**：必须先有 `core/agents.runAgent` 才能改 `agents/runner.ts` 等。
+- **GP3 依赖 GP2**：必须先有 `core/agents.runAgent` 才能删除旧 `agents/runner.ts` 并把 subagent 入口切到 `AgentService`。
 - **GP4 依赖 GP1 + GP3**：`ensureRoot` 必须可用，且 `agents/` 不再消费 `SubagentSessionManager`。
 - **GP5 依赖 lifecycle improve-1 P2 + GP3**：lifecycle.runSession 接管 assistant 持久化之后，`writeAssistantMessage` 才不必要。
 
-### 1.3 向后兼容铁律
+### 1.3 API 收敛铁律
 
-- `agents/index.ts` 在整个改造过程中保持**对外接口稳定**：所有原导出维持可导入，通过 re-export 自新位置实现。
-- 类型导出同步保留转发。
-- 改造完成 + 调用方迁移完成后，在 improve-2 才考虑标记 `@deprecated` 并移除转发。
-- 所有外部调用方在 improve-1 期间无须修改任何 import。
+- `agents/index.ts` 在本轮完成后只保留新架构入口：`AgentService`、`AgentTaskManager`、registry / manager / builtin 等描述符能力。
+- 旧 `SubagentExecutor` / `createSubagentRunner` / `SubagentRunner` 不做兼容 shim，直接删除。
+- 本仓库内部调用方必须同批迁移到 `AgentService` 或 `core/agents.runAgent`。
+- 需要表达 Task 工具 envelope 的类型（如 `SubagentExecuteParams / SubagentResult`）暂时保留，是否重命名留给 improve-2 的类型整理。
 
 ### 1.4 测试先行
 
@@ -309,15 +309,15 @@ export function extractFinalOutput(
 
 ### 4.1 目标
 
-把 `agents/runner.ts / executor.ts / tasks/` 改为内部消费 `core/agents.runAgent`，对外保持公共 API 形态稳定。完成后 `agents/` 真正成为服务/调度层。
+删除旧 `agents/runner.ts / executor.ts`，新增 `agents/service.ts`，并把 `tasks/` 改为内部消费 `core/agents.runAgent`。完成后 `agents/` 真正成为服务/调度层，旧 subagent 专用入口不再存在。
 
 ### 4.2 改动顺序与映射
 
 | 当前对象 | 改造方式 | 对外签名 |
 |---------|---------|---------|
-| `createSubagentRunner` | 内部调用 `core/agents.runAgent({ waitMode: "waitForCompletion" })`，转换返回结果到 `SubagentRunnerResult` | 不变 |
-| `SubagentExecutor` (executor.ts) | 重命名为 `AgentService`（**类同时保留旧名作为兼容 alias**）；内部消费 `services/session.SessionManager` + `core/agents.runAgent` | 不变（旧名继续可用） |
-| `AgentTaskManager` (tasks/manager.ts) | 内部 deps 从 `SubagentRunner + SubagentMessageWriter + SubagentSessionManager` 改为 `SessionManager + core/agents.runAgent`；行为不变 | 对外接口不变（保留 `AgentTaskManagerOptions`，但 deps 类型变化对外可见，因此需要保留旧 deps 形状的兼容构造） |
+| `createSubagentRunner` | 删除；调用方迁移到 `AgentService.executeTask` 或直接消费 `core/agents.runAgent` | 旧签名移除 |
+| `SubagentExecutor` (executor.ts) | 删除；新增 `AgentService`，内部消费 `services/session.SessionManager` + `core/agents.runAgent` | 旧名移除，新名可用 |
+| `AgentTaskManager` (tasks/manager.ts) | 内部 deps 从 `SubagentRunner + SubagentMessageWriter + SubagentSessionManager` 改为 `SessionManager + core/agents.runAgent`；行为不变 | 对外保留 `AgentTaskManager`，但构造 deps 切到新底座 |
 
 ### 4.3 `agents/service.ts` 内容
 
@@ -351,54 +351,16 @@ export interface AgentServiceOptions {
 }
 ```
 
-`executor.ts` 改为 5 行兼容 alias：
+`executor.ts` 与 `runner.ts` 不再保留兼容壳子；旧测试同步删除或迁移到 `service.unit.test.ts` / `core/agents/runner.unit.test.ts`。
 
-```ts
-// agents/executor.ts (compatibility shim)
-export { AgentService as SubagentExecutor } from "./service.js";
-export type { AgentServiceOptions as SubagentExecutorOptions } from "./service.js";
-```
+### 4.4 旧 `agents/runner.ts` 删除
 
-### 4.4 `agents/runner.ts` shim
+`createSubagentRunner` 不再作为公共 API 暴露。需要同步验收：
 
-`createSubagentRunner` 保留为公共 API，但内部消费 `core/agents.runAgent`：
-
-```ts
-// agents/runner.ts (compatibility shim)
-import { runAgent } from "../core/agents/index.js";
-
-export function createSubagentRunner(options: CreateSubagentRunnerOptions): SubagentRunner {
-  return {
-    async run(input): Promise<SubagentRunnerResult> {
-      const result = await runAgent({
-        runCoordinator: options.runCoordinator,
-        messageManager: options.messageManager as MessageManager,
-        toolScheduler: options.toolScheduler as ToolSchedulerInstance,
-        sandboxManager: options.sandboxManager,
-      }, {
-        sessionId: input.sessionId,
-        parentSessionId: input.parentSessionId,
-        agentName: input.agentName,
-        projectRoot: input.projectRoot ?? options.fallbackProjectRoot ?? process.cwd(),
-        parentMessageId: input.parentMessageId,
-        signal: input.signal,
-        environment: input.environment,
-        maxSteps: input.runtimeAgent.config.maxSteps,
-        buildPromptMessages: options.buildSubagentPromptMessages,
-        waitMode: "waitForCompletion",
-        // initialUserPrompt 不在兼容 runner shim 写；legacy caller 可能已提前写入。
-        // 新的 AgentService / AgentTaskManager 应直接调用 runAgent 并传 initialUserPrompt。
-      });
-      return {
-        success: result.success,
-        output: result.finalOutput ?? "",
-        steps: result.steps,
-        toolCalls: result.toolCalls,
-      };
-    },
-  };
-}
-```
+- `agents/runner.ts` 与 `agents/runner.unit.test.ts` 不存在。
+- `agents/index.ts` 不导出 `createSubagentRunner / SubagentRunner / CreateSubagentRunnerOptions`。
+- subagent 的同步 envelope 由 `AgentService.executeTask` 承担。
+- 长生命周期任务由 `AgentTaskManager` 内部调用 `core/agents.runAgent`。
 
 ### 4.5 `agents/tasks/manager.ts` 改造
 
@@ -433,13 +395,15 @@ constructor(private readonly options: {
 | 文件 | 改动 |
 |------|------|
 | `agents/service.ts` | 新建（承载原 executor.ts 内容；deps 切到原生底座） |
-| `agents/executor.ts` | 改为兼容 shim（5 行 re-export） |
-| `agents/runner.ts` | 改为兼容 shim，内部消费 `core/agents.runAgent` |
+| `agents/executor.ts` | 删除 |
+| `agents/executor.unit.test.ts` | 迁移为 `agents/service.unit.test.ts` |
+| `agents/runner.ts` | 删除 |
+| `agents/runner.unit.test.ts` | 删除 |
 | `agents/tasks/manager.ts` | deps 切到原生底座；内部消费 `core/agents.runAgent` |
-| `agents/types.ts` | 不动（运行时契约类型保留至 improve-2 后整理） |
-| `agents/index.ts` | 追加导出 `AgentService`；其余保持 |
+| `agents/types.ts` | 删除纯旧 runner 类型；Task 工具 envelope 类型保留至 improve-2 后整理 |
+| `agents/index.ts` | 导出 `AgentService`，移除旧 runner/executor re-export |
 | 所有现有测试 | 调整 mock 形状以适配新 deps |
-| `adapters/`、CLI 初始化 | 构造 `SubagentExecutor` / `AgentTaskManager` 时传入新 deps（`SessionManager / AgentRunCoordinator / MessageManager / ToolScheduler / buildPromptMessages` 而非 `SubagentSessionManager / SubagentRunner / SubagentMessageWriter`） |
+| `adapters/`、CLI 初始化 | 构造 `AgentService / AgentTaskManager` 时传入新 deps（`SessionManager / AgentRunCoordinator / MessageManager / ToolScheduler / buildPromptMessages` 而非 `SubagentSessionManager / SubagentRunner / SubagentMessageWriter`） |
 
 ### 4.7 验收衔接
 
@@ -452,7 +416,7 @@ constructor(private readonly options: {
 ### 5.1 前置条件
 
 - GP1 完成：`SessionManager.ensureRoot` 可用。
-- GP3 完成：`AgentService / AgentTaskManager / createSubagentRunner` 都消费 `SessionManager`，不再消费 `SubagentSessionManager`。
+- GP3 完成：`AgentService / AgentTaskManager` 都消费 `SessionManager`，不再消费 `SubagentSessionManager`；`createSubagentRunner` 已删除。
 
 ### 5.2 改动顺序
 
@@ -545,13 +509,10 @@ constructor(private readonly options: {
 ```
 agents/
 ├── types.ts            ← AgentConfig / RuntimeAgent / PermissionConfig / ToolsConfig
-│                         + 兼容期保留的 SubagentRunner / SubagentRunnerResult /
-│                           SubagentExecuteParams / SubagentResult / TaskExecutor 等契约类型
+│                         + SubagentExecuteParams / SubagentResult / TaskExecutor 等 Task envelope 契约
 ├── registry.ts         ← AgentRegistry
 ├── manager.ts          ← AgentManager
 ├── service.ts          ← AgentService（核心调度入口）
-├── runner.ts           ← 兼容 shim → core/agents.runAgent
-├── executor.ts         ← 兼容 shim → service.ts (SubagentExecutor 别名)
 ├── tasks/
 │   ├── manager.ts      ← AgentTaskManager（内部消费 core/agents）
 │   ├── in-memory-store.ts
@@ -589,7 +550,7 @@ services/session/       ← + ensureRoot
 |------|---------|
 | GP1 | revert `ensureRoot` 相关 commit。无现有消费者依赖。 |
 | GP2 | revert `core/agents/` 目录。无现有消费者（GP3 才接入）。 |
-| GP3 | revert refactor commit；`agents/runner.ts / executor.ts / tasks/manager.ts` 回到自含编排。 |
+| GP3 | revert refactor commit；恢复旧 `agents/runner.ts / executor.ts` 与旧 tasks 编排。 |
 | GP4 | 恢复 `session-manager.ts` + types；调用方类型回退。 |
 | GP5 | 恢复 `message-writer.ts`；service/tasks 重新注入 messageWriter。 |
 

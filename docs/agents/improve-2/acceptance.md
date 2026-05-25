@@ -14,9 +14,9 @@
 
 1. **可验证**：每条验收项可通过自动化测试、命令输出或代码审阅明确判定。
 2. **零回归**：Phase 1、Phase 2 完成期间，所有现有 e2e 行为保持等价（特别是 primary 路径）。
-3. **阶段独立**：AC-1 / AC-2 / AC-3 / AC-4 分别独立验收。
-4. **改造破坏性显式**：Phase 3、Phase 4 引入破坏性变更，必须在 CHANGELOG.md 显式声明。
-5. **灰度门槛**：Phase 3 启动前必须有 Phase 2 落地稳定运行的证据。
+3. **阶段独立**：AC-1 / AC-2 / AC-3 分别独立验收。
+4. **改造破坏性显式**：如 Phase 3 重命名公开类型，必须在 CHANGELOG.md 显式声明。
+5. **灰度门槛**：公开类型命名调整前必须有 Phase 2 落地稳定运行的证据。
 
 ---
 
@@ -126,29 +126,31 @@
 
 ---
 
-## 四、AC-3：兼容 shim 删除验收
+## 四、AC-3：服务层 envelope 类型整理与旧 API 防回归验收
 
-对应实施阶段 [Phase 3](./implementation-plan.md#四phase-3删除兼容-shim)。
+对应实施阶段 [Phase 3](./implementation-plan.md#四phase-3服务层-envelope-类型整理与旧-api-防回归)。
 
-### AC-3.1 shim 文件删除
+### AC-3.1 旧 runner / executor API 保持删除
 
 **判定**：
 
 - `agents/runner.ts` 不存在。
 - `agents/executor.ts` 不存在。
-- `agents/runner.unit.test.ts` 不存在（若 improve-1 保留则一并删除）。
+- `agents/runner.unit.test.ts` 不存在。
+- `agents/executor.unit.test.ts` 不存在。
 
-### AC-3.2 调用方零遗漏
+### AC-3.2 旧符号零回流
 
-**判定**：在删除 shim 的 PR 中包含 grep 证据：
+**判定**：每阶段 PR 包含 grep 证据：
 
 - `grep -r "SubagentExecutor" packages/ohbaby-agent/src/` 命中数为 0。
 - `grep -r "createSubagentRunner" packages/ohbaby-agent/src/` 命中数为 0。
+- `grep -r "SubagentRunner" packages/ohbaby-agent/src/` 命中数为 0（测试中断言旧 export 不存在的字符串除外）。
 - `grep -r "SubagentExecutorOptions" packages/ohbaby-agent/src/` 命中数为 0。
 - `grep -r "CreateSubagentRunnerOptions" packages/ohbaby-agent/src/` 命中数为 0。
-- `grep -r "SubagentPromptMessageBuilder" packages/ohbaby-agent/src/` 命中数为 0（如 improve-1 仍存在）。
+- `grep -r "SubagentPromptMessageBuilder" packages/ohbaby-agent/src/` 命中数为 0。
 
-### AC-3.3 `agents/index.ts` 不再导出 shim 相关符号
+### AC-3.3 `agents/index.ts` 不再导出旧 runner / executor 符号
 
 **判定**：
 
@@ -156,65 +158,33 @@
 - 类型测试：旧 import `import { SubagentExecutor } from "agents"` **失败**（编译错误）。
 - 当前调用方全部走 `import { AgentService } from "agents"` 或 `import { runAgent } from "core/agents"`。
 
-### AC-3.4 CHANGELOG 记录破坏性变更
+### AC-3.4 Task envelope 类型命名决议
 
-**判定**：`packages/ohbaby-agent/CHANGELOG.md` 在本 release 条目下：
+**判定**：
+
+- 明确决议 `SubagentExecuteParams / SubagentResult / SubagentToolCallSummary / TaskExecutor` 是否保留现名。
+- 如重命名，提供新名、迁移映射与类型测试。
+- 如不重命名，文档说明这些类型属于 Task 工具同步 envelope，而非底层运行机制。
+
+### AC-3.5 CHANGELOG 记录破坏性变更（如有）
+
+**判定**：若 Phase 3 重命名公开类型，`packages/ohbaby-agent/CHANGELOG.md` 在本 release 条目下：
 
 - 标记 `[BREAKING]` 标签。
-- 列出移除的符号清单。
+- 列出移除或重命名的类型清单。
 - 给出迁移指引（旧名 → 新名映射）。
 
-### AC-3.5 测试套件全绿
+### AC-3.6 测试套件全绿
 
 **判定**：`pnpm -F ohbaby-agent test / typecheck / lint` 一次性通过。
 
 ---
 
-## 五、AC-4：运行时契约类型整理验收
-
-对应实施阶段 [Phase 4](./implementation-plan.md#五phase-4运行时契约类型整理)。
-
-### AC-4.1 `core/agents/types.ts` 含运行时契约类型
-
-**判定**：
-
-- `core/agents/types.ts` 包含 `AgentRunInput / AgentRunResult / AgentRunner / AgentRunDeps`（improve-1 已有）。
-- 视 Phase 4 决议：可能包含 `AgentInvocation / TaskInvocationParams / TaskInvocationResult` 等新名（或保留旧名 `SubagentRunner` 等）。
-
-### AC-4.2 `agents/types.ts` 只剩描述符 + 服务层契约
-
-**判定**：
-
-- `agents/types.ts` 不再包含 `SubagentRunner / SubagentRunnerResult / SubagentToolCallSummary` 等纯运行时类型。
-- 保留：`AgentConfig / RuntimeAgent / PermissionConfig / ToolsConfig` 等描述符。
-- 保留：`SubagentExecuteParams / SubagentResult / TaskExecutor / StartSessionParams` 等服务层契约。
-
-### AC-4.3 重命名（如执行）
-
-**判定**：如果 Phase 4 决定重命名：
-
-- 新名（如 `AgentInvocation`）已在 `core/agents/types.ts` 导出。
-- 旧名（如 `SubagentRunner`）作为 `@deprecated` alias 保留，等 improve-3 删除。
-- 单测 / 类型测试覆盖新名与旧名的等价性。
-
-### AC-4.4 import 路径整理
-
-**判定**：
-
-- 内部调用方（`agents/service.ts / tasks/manager.ts` 等）使用 `import { ... } from "../core/agents"` 取得运行时契约。
-- 旧 import 路径（`from "./types"` 取得运行时契约）已切换。
-
-### AC-4.5 测试套件全绿
-
-**判定**：`pnpm -F ohbaby-agent test / typecheck / lint` 一次性通过。
-
----
-
-## 六、AC-5：最终形态核对
+## 五、AC-4：最终形态核对
 
 本节是所有阶段完成后的最终核对。
 
-### AC-5.1 `agents/` 文件清单
+### AC-4.1 `agents/` 文件清单
 
 **判定**：
 
@@ -246,7 +216,7 @@ agents/
 - `session-manager.ts`（improve-1 删除）
 - `message-writer.ts`（improve-1 删除）
 
-### AC-5.2 `core/agents/` 文件清单
+### AC-4.2 `core/agents/` 文件清单
 
 **判定**：
 
@@ -256,11 +226,11 @@ core/agents/
 ├── runner.unit.test.ts
 ├── output.ts
 ├── output.unit.test.ts
-├── types.ts            ← AgentRunInput / AgentRunResult / 运行时契约类型
+├── types.ts            ← AgentRunInput / AgentRunResult / AgentRunDeps 等纯运行底层契约
 └── index.ts
 ```
 
-### AC-5.3 依赖图与反向规则
+### AC-4.3 依赖图与反向规则
 
 **判定**：
 
@@ -270,7 +240,7 @@ core/agents/
 - `runtime/` 不 import `agents/` 或 `core/agents/`。
 - `composition.ts` 不持有 prompt 组装与 RunManager 编排逻辑。
 
-### AC-5.4 命名一致性
+### AC-4.4 命名一致性
 
 **判定**：
 
@@ -279,7 +249,7 @@ core/agents/
 
 ---
 
-## 七、全局验收
+## 六、全局验收
 
 ### AG-1 类型与编译
 
@@ -295,7 +265,7 @@ core/agents/
 
 ### AG-4 CHANGELOG 与文档同步
 
-- `CHANGELOG.md` 记录 Phase 3 / Phase 4 的破坏性变更。
+- `CHANGELOG.md` 记录 Phase 3 中发生的破坏性类型变更（如有）。
 - `docs/agents/architecture.md` 更新最终架构。
 - `docs/agents/goals-duty.md` 更新最终职责声明。
 - `docs/agents/dfd-interface.md` 更新数据流图。
@@ -320,7 +290,7 @@ core/agents/
 
 ---
 
-## 八、验收会议清单
+## 七、验收会议清单
 
 | 序号 | 检查项 | 通过条件 |
 |------|-------|---------|
@@ -334,7 +304,7 @@ core/agents/
 
 ---
 
-## 九、不在验收范围内
+## 八、不在验收范围内
 
 - Session tree / branch / fork 数据模型（improve-3 或专项）
 - 多 provider 抽象层
@@ -345,7 +315,7 @@ core/agents/
 
 ---
 
-## 十、关联文档
+## 九、关联文档
 
 - 改造动机：[problem-analysis.md](./problem-analysis.md)
 - 实施步骤：[implementation-plan.md](./implementation-plan.md)
