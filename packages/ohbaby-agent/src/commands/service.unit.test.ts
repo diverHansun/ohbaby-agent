@@ -186,7 +186,7 @@ describe("CommandService", () => {
     );
   });
 
-  it("opens session selection and lists sessions", async () => {
+  it("opens session selection from /session and lists sessions on non-TUI surfaces", async () => {
     const request = vi
       .fn<() => Promise<UiInteractionResponse>>()
       .mockResolvedValue({
@@ -205,9 +205,10 @@ describe("CommandService", () => {
     });
 
     await service.executeCommand(makeInvocation("session", ["session"]));
-    await service.executeCommand(
-      makeInvocation("session.list", ["session", "list"]),
-    );
+    await service.executeCommand({
+      ...makeInvocation("session", ["session"]),
+      surface: "headless",
+    });
 
     expect(request).toHaveBeenCalledWith(
       {
@@ -340,7 +341,7 @@ describe("CommandService", () => {
     );
   });
 
-  it("resumes a session by --session_id or positional id", async () => {
+  it("resumes a session from the top-level /resume command", async () => {
     const selectSession = vi.fn<() => Promise<void>>().mockResolvedValue();
     const { events, service } = createServiceHarness({
       sessions: {
@@ -357,7 +358,7 @@ describe("CommandService", () => {
     await service.executeCommand(
       makeInvocation(
         "session.resume",
-        ["session", "resume"],
+        ["resume"],
         ["--session_id", "session_2"],
       ),
     );
@@ -388,13 +389,10 @@ describe("CommandService", () => {
     );
   });
 
-  it("fails session resume without an id on non-interactive surfaces", async () => {
+  it("fails /resume without an id instead of opening session selection", async () => {
     const { events, service } = createServiceHarness();
 
-    await service.executeCommand({
-      ...makeInvocation("session.resume", ["session", "resume"]),
-      surface: "headless",
-    });
+    await service.executeCommand(makeInvocation("session.resume", ["resume"]));
 
     expect(events.at(-1)).toMatchObject({
       error: {

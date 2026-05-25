@@ -26,8 +26,14 @@ const catalog: TuiCommandCatalog = {
       acceptsArguments: true,
       description: "Resume a session",
       id: "session.resume",
-      aliases: [["resume"]],
-      path: ["session", "resume"],
+      aliases: [],
+      path: ["resume"],
+      surfaces: ["tui"],
+    },
+    {
+      description: "Choose a session",
+      id: "session",
+      path: ["session"],
       surfaces: ["tui"],
     },
     {
@@ -86,7 +92,7 @@ describe("slash command runtime", () => {
     ]);
   });
 
-  it("uses the actual alias token span when resolving aliases", () => {
+  it("resolves the top-level resume command with its argument span", () => {
     const parsed = parseSlashInput('/resume   "session 1"');
     const result = resolveCommand(parsed, catalog, { surface: "tui" });
 
@@ -116,7 +122,20 @@ describe("slash command runtime", () => {
     const parsed = parseSlashInput("/ses");
     const matches = filterCommandCatalog(parsed, catalog, { surface: "tui" });
 
-    expect(matches.map((command) => command.id)).toEqual(["session.resume"]);
+    expect(matches.map((command) => command.id)).toEqual(["session"]);
+  });
+
+  it("does not resolve removed session subcommands", () => {
+    expect(resolveCommand(parseSlashInput("/session list"), catalog, {
+      surface: "tui",
+    })).toMatchObject({
+      kind: "not-found",
+    });
+    expect(resolveCommand(parseSlashInput("/session resume session_1"), catalog, {
+      surface: "tui",
+    })).toMatchObject({
+      kind: "not-found",
+    });
   });
 
   it("orders exact slash command hints before shared-prefix commands", () => {
@@ -131,8 +150,8 @@ describe("slash command runtime", () => {
   });
 
   it("applies tab completion without resolving or executing", () => {
-    const completed = applySlashCompletion("/ses", catalog, { surface: "tui" });
+    const completed = applySlashCompletion("/res", catalog, { surface: "tui" });
 
-    expect(completed).toEqual("/session resume ");
+    expect(completed).toEqual("/resume ");
   });
 });

@@ -99,7 +99,7 @@ V1 内置命令族：
 | 分类 | 命令 |
 |------|------|
 | model | `/model`, `/model list`, `/model current` |
-| session | `/session`, `/session list` |
+| session | `/session`, `/resume`, `/new` |
 | system | `/status`, `/tools`, `/abort`, `/exit` |
 
 ---

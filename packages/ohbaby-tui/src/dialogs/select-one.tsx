@@ -6,6 +6,8 @@ import type {
   TuiInteractionRequest,
 } from "../store/snapshot.js";
 
+const SELECT_ONE_PAGE_SIZE = 6;
+
 export interface SelectOneDialogProps {
   readonly client: TuiBackendClient;
   readonly interaction: TuiInteractionRequest;
@@ -26,6 +28,19 @@ export function SelectOneDialog({
   const selectIndex = (index: number): void => {
     selectedIndexRef.current = index;
     setSelectedIndex(index);
+  };
+
+  const selectPagedIndex = (delta: number): void => {
+    if (options.length === 0) {
+      selectIndex(0);
+      return;
+    }
+    selectIndex(
+      Math.max(
+        0,
+        Math.min(options.length - 1, selectedIndexRef.current + delta),
+      ),
+    );
   };
 
   useInput((value, key) => {
@@ -59,6 +74,16 @@ export function SelectOneDialog({
           ? 0
           : (selectedIndexRef.current + 1) % options.length,
       );
+      return;
+    }
+
+    if (key.pageUp) {
+      selectPagedIndex(-SELECT_ONE_PAGE_SIZE);
+      return;
+    }
+
+    if (key.pageDown) {
+      selectPagedIndex(SELECT_ONE_PAGE_SIZE);
       return;
     }
 

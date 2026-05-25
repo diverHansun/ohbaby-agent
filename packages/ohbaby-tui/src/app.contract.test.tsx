@@ -46,7 +46,13 @@ const catalog: TuiCommandCatalog = {
     {
       description: "Resume a session",
       id: "session.resume",
-      path: ["session", "resume"],
+      path: ["resume"],
+      surfaces: ["tui"],
+    },
+    {
+      description: "Choose a session",
+      id: "session",
+      path: ["session"],
       surfaces: ["tui"],
     },
     {
@@ -596,9 +602,9 @@ describe("OhbabyTerminalApp", () => {
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await flush();
-    app.stdin.write("/ses");
+    app.stdin.write("/res");
     app.stdin.write("\t");
-    await waitForFrame(app, (frame) => frame.includes("/session resume "));
+    await waitForFrame(app, (frame) => frame.includes("/resume "));
     expect(client.executeCommand).not.toHaveBeenCalled();
 
     app.stdin.write("\u0015");
@@ -645,11 +651,13 @@ describe("OhbabyTerminalApp", () => {
       app,
       (nextFrame) =>
         nextFrame.includes("/model switch - Open model switcher") &&
-        nextFrame.includes("/session resume - Resume a session"),
+        nextFrame.includes("/resume - Resume a session") &&
+        nextFrame.includes("/session - Choose a session"),
     );
 
     expect(frame).toContain("/model switch - Open model switcher");
-    expect(frame).toContain("/session resume - Resume a session");
+    expect(frame).toContain("/resume - Resume a session");
+    expect(frame).toContain("/session - Choose a session");
 
     app.stdin.write("\u001B[B");
     await flush();
@@ -813,6 +821,43 @@ describe("OhbabyTerminalApp", () => {
 
     expect(client.respondInteraction).toHaveBeenCalledWith("generic_1", {
       choiceId: "second",
+      kind: "accepted",
+    });
+  });
+
+  it("pages through session selections with PgUp and PgDn before resuming", async () => {
+    const client = createFakeClient(snapshot());
+    const app = render(<OhbabyTerminalApp client={client} />);
+
+    await flush();
+    client.emit({
+      request: {
+        commandRunId: "command_1",
+        interactionId: "session_chooser",
+        kind: "select-one",
+        options: Array.from({ length: 12 }, (_, index) => ({
+          id: `session_${String(index + 1)}`,
+          label: `Session ${String(index + 1)}`,
+        })),
+        prompt: "Select session",
+        subject: "session",
+      },
+      timestamp: 1,
+      type: "interaction.requested",
+    });
+    await flush();
+
+    app.stdin.write("\u001B[6~");
+    await flush();
+    app.stdin.write("\u001B[5~");
+    await flush();
+    app.stdin.write("\u001B[6~");
+    await flush();
+    app.stdin.write("\r");
+    await flush();
+
+    expect(client.respondInteraction).toHaveBeenCalledWith("session_chooser", {
+      choiceId: "session_7",
       kind: "accepted",
     });
   });

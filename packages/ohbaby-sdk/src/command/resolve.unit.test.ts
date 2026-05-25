@@ -43,6 +43,34 @@ const catalog: UiCommandCatalog = {
   ],
 };
 
+const sessionCatalog: UiCommandCatalog = {
+  version: "session_catalog",
+  commands: [
+    {
+      aliases: [],
+      argumentMode: "argv",
+      category: "session",
+      description: "Choose a session",
+      id: "session",
+      parentBehavior: "interaction",
+      path: ["session"],
+      source: "builtin",
+      surfaces: ["tui", "stdout", "headless"],
+    },
+    {
+      acceptsArguments: true,
+      aliases: [],
+      argumentMode: "argv",
+      category: "session",
+      description: "Resume a session",
+      id: "session.resume",
+      path: ["resume"],
+      source: "builtin",
+      surfaces: ["tui", "stdout", "headless"],
+    },
+  ],
+};
+
 describe("resolveCommand", () => {
   it("resolves longest catalog path with remaining argv", () => {
     const parsed = parseSlashInput("/model current --json");
@@ -89,6 +117,44 @@ describe("resolveCommand", () => {
       },
     });
   });
+
+  it("resolves only the public session and resume command paths", () => {
+    const sessionResult = resolveCommand(
+      sessionCatalog,
+      parseSlashInput("/session"),
+    );
+    expect(sessionResult.ok).toBe(true);
+    if (!sessionResult.ok) {
+      throw new Error("expected /session to resolve");
+    }
+    expect(sessionResult.command.id).toBe("session");
+    expect(sessionResult.path).toEqual(["session"]);
+
+    const resumeResult = resolveCommand(
+      sessionCatalog,
+      parseSlashInput("/resume session_1"),
+    );
+    expect(resumeResult.ok).toBe(true);
+    if (!resumeResult.ok) {
+      throw new Error("expected /resume to resolve");
+    }
+    expect(resumeResult.argv).toEqual(["session_1"]);
+    expect(resumeResult.command.id).toBe("session.resume");
+    expect(resumeResult.path).toEqual(["resume"]);
+    expect(resumeResult.rawArgs).toBe("session_1");
+    expect(
+      resolveCommand(sessionCatalog, parseSlashInput("/session list")),
+    ).toMatchObject({
+      error: { code: "COMMAND_NOT_FOUND" },
+      ok: false,
+    });
+    expect(
+      resolveCommand(sessionCatalog, parseSlashInput("/session resume session_1")),
+    ).toMatchObject({
+      error: { code: "COMMAND_NOT_FOUND" },
+      ok: false,
+    });
+  });
 });
 
 describe("filterCommandCatalog", () => {
@@ -103,5 +169,17 @@ describe("filterCommandCatalog", () => {
     expect(filterCommandCatalog(catalog, "/qu", { surface: "tui" })).toEqual([
       expect.objectContaining({ id: "exit" }),
     ]);
+  });
+
+  it("filters session and resume without exposing removed session subcommands", () => {
+    expect(
+      filterCommandCatalog(sessionCatalog, "/ses", { surface: "tui" }),
+    ).toEqual([expect.objectContaining({ id: "session" })]);
+    expect(
+      filterCommandCatalog(sessionCatalog, "/res", { surface: "tui" }),
+    ).toEqual([expect.objectContaining({ id: "session.resume" })]);
+    expect(
+      filterCommandCatalog(sessionCatalog, "/session r", { surface: "tui" }),
+    ).toEqual([]);
   });
 });

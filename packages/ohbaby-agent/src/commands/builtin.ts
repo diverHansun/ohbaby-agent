@@ -167,10 +167,6 @@ async function handleSessionResume(
 ): Promise<void> {
   const sessionId = parseSessionIdArg(invocation.argv);
   if (!sessionId) {
-    if (context.surface === "tui") {
-      await handleSessionParent(options, context);
-      return;
-    }
     context.fail({
       code: "SESSION_ID_REQUIRED",
       message: "Use /resume --session_id <id> to resume a session",
@@ -332,14 +328,6 @@ export function createBuiltinHandlers(
       id: "session",
       execute(_invocation, context): Promise<void> {
         return handleSessionParent(options, context);
-      },
-    },
-    {
-      id: "session.list",
-      async execute(_invocation, context): Promise<void> {
-        context.emitOutput(
-          dataOutput("session.list", { sessions: await listSessions(options) }),
-        );
       },
     },
     {

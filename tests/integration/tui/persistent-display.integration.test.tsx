@@ -211,6 +211,61 @@ describe("TUI persistent backend display", () => {
     app.unmount();
   });
 
+  it("opens /session and resumes a stored session with PgDn selection", async () => {
+    const directory = await tempWorkspace("ohbaby-tui-session-picker");
+    const dbPath = join(directory, "agent.db");
+    const workdir = join(directory, "workspace");
+    let nowTick = 0;
+    const now = (): Date => {
+      const date = new Date(Date.UTC(2026, 4, 25, 0, 0, nowTick));
+      nowTick += 1;
+      return date;
+    };
+    const setupClient = createPersistentUiBackendClient({
+      dbPath,
+      llmClient: createSequentialFakeLLMClient(
+        Array.from({ length: 8 }, (_, index) => [
+          { textDelta: `Reply ${String(index + 1)}.`, finishReason: "stop" },
+        ]),
+      ),
+      now,
+      workdir,
+    });
+
+    for (let index = 1; index <= 8; index += 1) {
+      await setupClient.submitPrompt(`Prompt ${String(index)}`, {
+        sessionId: `session_${String(index)}`,
+      });
+    }
+    closeDatabase();
+
+    const restored = createPersistentUiBackendClient({
+      dbPath,
+      llmClient: createFakeLLMClient([]),
+      now,
+      workdir,
+    });
+    const app = render(<OhbabyTerminalApp client={restored} />);
+
+    await waitForFrame(app, (frame) => frame.includes("Reply 8."));
+    app.stdin.write("/session");
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) => frame.includes("Session:"));
+
+    app.stdin.write("\u001B[6~");
+    app.stdin.write("\r");
+    const frame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("status: idle | session: session_2") &&
+        nextFrame.includes("Prompt 2") &&
+        nextFrame.includes("Reply 2."),
+    );
+
+    expect(frame).not.toContain("Reply 8.");
+    app.unmount();
+  });
+
   it("continues a restored session from its original project root", async () => {
     const directory = await tempWorkspace("ohbaby-tui-session-root");
     const dbPath = join(directory, "agent.db");

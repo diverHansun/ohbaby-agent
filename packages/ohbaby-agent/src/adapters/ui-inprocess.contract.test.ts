@@ -2410,7 +2410,6 @@ describe("createInProcessUiBackendClient", () => {
         "model.list",
         "model.current",
         "session",
-        "session.list",
         "session.resume",
         "mode",
         "mode.agent",
@@ -2777,7 +2776,7 @@ describe("createInProcessUiBackendClient", () => {
       argv: ["--session_id", "session_2"],
       clientInvocationId: "inv_resume",
       commandId: "session.resume",
-      path: ["session", "resume"],
+      path: ["resume"],
       raw: "/resume --session_id session_2",
       rawArgs: "--session_id session_2",
       surface: "tui",
@@ -2946,11 +2945,11 @@ describe("createInProcessUiBackendClient", () => {
       await client.executeCommand({
         argv: [],
         clientInvocationId: "inv_session_list",
-        commandId: "session.list",
-        path: ["session", "list"],
-        raw: "/session list",
+        commandId: "session",
+        path: ["session"],
+        raw: "/session",
         rawArgs: "",
-        surface: "tui",
+        surface: "headless",
       });
 
       expect(events.at(-1)).toMatchObject({
