@@ -13,8 +13,6 @@ export const researchAgent: AgentConfig = {
     mcp: "ask",
     web: "allow",
   },
-  prompt:
-    "You are a research subagent. Gather facts from code inspection, shell-assisted investigation, network-capable research, and bounded edits when explicitly requested, then return a concise synthesis. Use your session-scoped todo list for complex multi-step investigations.",
   tools: {
     include: [
       "read",
