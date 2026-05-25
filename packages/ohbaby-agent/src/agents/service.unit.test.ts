@@ -405,6 +405,58 @@ describe("AgentService", () => {
     expect(sessionManager.create).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects resuming a missing child session without creating a new child", async () => {
+    const sessionManager = createSessionManager();
+    const service = new AgentService({
+      agentManager: await createAgentManager(),
+      buildPromptMessages: createPromptBuilder(),
+      messageManager: createMessageManager().manager,
+      runCoordinator: createRunCoordinator().coordinator,
+      sessionManager,
+      toolScheduler: createToolScheduler().scheduler,
+    });
+
+    await expect(
+      service.execute({
+        agentName: "explore",
+        parentSessionId: "parent",
+        prompt: "resume missing",
+        resumeSessionId: "child_missing",
+      }),
+    ).rejects.toThrow("Subagent session not found: child_missing");
+    expect(sessionManager.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects resuming a child session owned by another parent", async () => {
+    const sessionManager = createSessionManager();
+    await sessionManager.create("D:/repo", {
+      agentName: "explore",
+      id: "child_other_parent",
+      parentId: "other_parent",
+      title: "Other parent",
+    });
+    const service = new AgentService({
+      agentManager: await createAgentManager(),
+      buildPromptMessages: createPromptBuilder(),
+      messageManager: createMessageManager().manager,
+      runCoordinator: createRunCoordinator().coordinator,
+      sessionManager,
+      toolScheduler: createToolScheduler().scheduler,
+    });
+
+    await expect(
+      service.execute({
+        agentName: "explore",
+        parentSessionId: "parent",
+        prompt: "resume wrong parent",
+        resumeSessionId: "child_other_parent",
+      }),
+    ).rejects.toThrow(
+      "Session child_other_parent is not a child of parent",
+    );
+    expect(sessionManager.create).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects resuming a child session owned by a different agent", async () => {
     const sessionManager = createSessionManager();
     await sessionManager.create("D:/repo", {

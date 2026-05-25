@@ -1467,6 +1467,66 @@ describe("createInProcessUiBackendClient", () => {
     expect(parentToolResultText).toContain("child found auth.ts");
   });
 
+  it("returns invalid task resume errors to the parent without creating a child session", async () => {
+    const requests: ProviderRequest[] = [];
+    const client = createInProcessUiBackendClient({
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            taskToolCallEvent({
+              callId: "call_task_missing_resume",
+              description: "Resume missing child",
+              prompt: "Try to resume a missing child",
+              resumeSessionId: "session_missing_child",
+            }),
+          ],
+          [{ textDelta: "parent saw invalid resume", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+
+    await client.submitPrompt("Try an invalid task resume");
+
+    expect(requests).toHaveLength(2);
+    const toolResultMessage = requests[1]?.messages.at(-1);
+    expect(toolResultMessage).toMatchObject({
+      role: "tool",
+      tool_call_id: "call_task_missing_resume",
+    });
+    expect(
+      typeof toolResultMessage?.content === "string"
+        ? toolResultMessage.content
+        : "",
+    ).toContain("Subagent session not found: session_missing_child");
+
+    const snapshot = await client.getSnapshot();
+    expect(snapshot.sessions).toHaveLength(1);
+    const parts = snapshot.sessions[0].messages.at(-1)?.parts ?? [];
+    expect(parts).toHaveLength(3);
+    expect(parts[0]?.type).toBe("tool-call");
+    if (parts[0]?.type !== "tool-call") {
+      throw new Error("expected task tool call part");
+    }
+    expect(parts[0].call).toMatchObject({
+      id: "call_task_missing_resume",
+      name: "task",
+      status: "failed",
+    });
+    expect(parts[1]?.type).toBe("tool-result");
+    if (parts[1]?.type !== "tool-result") {
+      throw new Error("expected task tool result part");
+    }
+    expect(parts[1].result.callId).toBe("call_task_missing_resume");
+    expect(parts[1].result.error).toContain(
+      "Subagent session not found: session_missing_child",
+    );
+    expect(parts[2]).toEqual({
+      text: "parent saw invalid resume",
+      type: "text",
+    });
+  });
+
   it("appends configured subagent prompts to child model requests", async () => {
     const requests: ProviderRequest[] = [];
     const registry = new AgentRegistry({
