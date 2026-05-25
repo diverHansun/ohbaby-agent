@@ -72,18 +72,29 @@ export interface PartBase {
   readonly time?: PartTime;
 }
 
+export interface TokenUsageMetadata {
+  readonly promptTokens: number;
+  readonly completionTokens: number;
+  readonly totalTokens: number;
+}
+
+export interface PartMetadata {
+  readonly tokenUsage?: TokenUsageMetadata;
+  readonly [key: string]: unknown;
+}
+
 export interface TextPart extends PartBase {
   readonly type: "text";
   readonly text: string;
   readonly synthetic?: boolean;
   readonly ignored?: boolean;
-  readonly metadata?: Record<string, unknown>;
+  readonly metadata?: PartMetadata;
 }
 
 export interface ReasoningPart extends PartBase {
   readonly type: "reasoning";
   readonly text: string;
-  readonly metadata?: Record<string, unknown>;
+  readonly metadata?: PartMetadata;
 }
 
 export interface ToolPart extends PartBase {
@@ -91,7 +102,7 @@ export interface ToolPart extends PartBase {
   readonly callId: string;
   readonly tool: string;
   readonly state: ToolState;
-  readonly metadata?: Record<string, unknown>;
+  readonly metadata?: PartMetadata;
 }
 
 export type ToolState =
@@ -168,7 +179,7 @@ export interface UpdatePartPatch {
   readonly delta?: string;
   readonly state?: ToolState;
   readonly time?: PartTime;
-  readonly metadata?: Record<string, unknown>;
+  readonly metadata?: PartMetadata;
 }
 
 export interface MessageIdGenerator {

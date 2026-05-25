@@ -16,7 +16,16 @@ import type {
   ToolCallResult,
   ToolSchedulerInstance,
 } from "../tool-scheduler/index.js";
-import type { LifecycleEvent, LifecycleResult } from "./index.js";
+import type {
+  ContextManager,
+  ContextUsage,
+  PreparedTurn,
+} from "../context/index.js";
+import type {
+  LifecycleEvent,
+  LifecycleResult,
+  LifecycleSessionParams,
+} from "./index.js";
 
 interface FakeSdkClient {
   readonly kind: "fake";
@@ -161,6 +170,243 @@ function createAbortingLLMClient(input: {
   };
 }
 
+const SESSION_USAGE: ContextUsage = {
+  contextLimit: 100_000,
+  currentTokens: 120,
+  modelId: "fake-model",
+  remainingTokens: 99_880,
+  shouldCompress: false,
+  usageRatio: 0.0012,
+};
+
+function preparedTurn(
+  messages: PreparedTurn["messages"],
+  usage: ContextUsage = SESSION_USAGE,
+): PreparedTurn {
+  return {
+    assembledAt: 1_700_000_000_000,
+    hasSummary: false,
+    messages,
+    usage,
+  };
+}
+
+function createContextManagerMock(
+  prepareTurn: ContextManager["prepareTurn"],
+): ContextManager {
+  return {
+    assemble: vi.fn(),
+    compact: vi.fn(),
+    compress: vi.fn(),
+    getUsage: vi.fn(),
+    prepareTurn,
+    prune: vi.fn(),
+    shouldCompress: vi.fn(),
+  };
+}
+
+describe("Lifecycle.runSession", () => {
+  it("requires persistent message and tool dependencies", async () => {
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValue(preparedTurn([{ role: "user", content: "Hello" }]));
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createFakeLLMClient([
+        { textDelta: "Hello", finishReason: "stop" },
+      ]),
+    });
+
+    await expect(
+      consumeLifecycle(
+        lifecycle.runSession({
+          directory: "D:/repo",
+          modelId: "fake-model",
+          sessionId: "session_test",
+        }),
+      ),
+    ).rejects.toThrow("Lifecycle.runSession requires a MessageManager");
+  });
+
+  it("uses context prepareTurn as the only provider message source each turn", async () => {
+    const requests: ProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const compressedUsage: ContextUsage = {
+      ...SESSION_USAGE,
+      remainingTokens: 8_000,
+      shouldCompress: true,
+      usageRatio: 0.92,
+    };
+    const firstTurnMessages: PreparedTurn["messages"] = [
+      { role: "user", content: "Read README" },
+    ];
+    const secondTurnMessages: PreparedTurn["messages"] = [
+      { role: "system", content: "system prompt" },
+      { role: "user", content: "Read README" },
+      { role: "user", content: "Externally inserted steering" },
+    ];
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValueOnce(preparedTurn(firstTurnMessages, compressedUsage))
+      .mockResolvedValueOnce(preparedTurn(secondTurnMessages));
+    const toolScheduler = {
+      executeBatch: vi
+        .fn<ToolSchedulerInstance["executeBatch"]>()
+        .mockResolvedValue([
+          {
+            callId: "call_read",
+            output: "README contents",
+            status: "success",
+          },
+        ]),
+    } as unknown as ToolSchedulerInstance;
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"path":"README.md"}',
+                  id: "call_read",
+                  index: 0,
+                  name: "read_file",
+                },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+          [{ textDelta: "Done.", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler,
+    });
+
+    const { events, result } = await consumeLifecycleEvents(
+      lifecycle.runSession({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_test",
+      }),
+    );
+
+    expect(prepareTurn).toHaveBeenNthCalledWith(1, {
+      directory: "D:/repo",
+      isSubagent: undefined,
+      modelId: "fake-model",
+      sessionId: "session_test",
+    });
+    expect(prepareTurn).toHaveBeenCalledTimes(2);
+    expect(requests[0]?.messages).toEqual(firstTurnMessages);
+    expect(requests[1]?.messages).toEqual(secondTurnMessages);
+    expect(events).toEqual([
+      "turn:start",
+      "llm:start",
+      "llm:complete",
+      "tool:start",
+      "tool:result",
+      "step:complete",
+      "turn:end",
+      "turn:start",
+      "llm:start",
+      "llm:delta",
+      "llm:complete",
+      "turn:end",
+    ]);
+    expect(result).toMatchObject({
+      finalResponse: "Done.",
+      finishReason: "stop",
+      success: true,
+    });
+  });
+
+  it("stops after a turn through the injected turn policy", async () => {
+    const requests: ProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValue(preparedTurn([{ role: "user", content: "Continue" }]));
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"value":1}',
+                  id: "call_one",
+                  index: 0,
+                  name: "compute",
+                },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+          [
+            {
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"value":2}',
+                  id: "call_two",
+                  index: 0,
+                  name: "compute",
+                },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(
+          ({ calls }) =>
+            Promise.resolve(
+              calls.map((call) => ({
+                callId: call.callId,
+                output: "ok",
+                status: "success" as const,
+              })),
+            ),
+        ),
+      } as unknown as ToolSchedulerInstance,
+    });
+    const params: LifecycleSessionParams = {
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_test",
+    };
+
+    const { events, result } = await consumeLifecycleEvents(
+      lifecycle.runSession(params, {
+        shouldStopAfterTurn: ({ step }) => step >= 2,
+      }),
+    );
+
+    expect(requests).toHaveLength(2);
+    expect(events.filter((event) => event === "turn:end")).toHaveLength(2);
+    expect(result).toMatchObject({
+      finishReason: "tool_calls",
+      success: true,
+    });
+  });
+});
+
 describe("Lifecycle.run", () => {
   it("yields streaming deltas and returns the final assistant response", async () => {
     const lifecycle = new Lifecycle({
@@ -242,7 +488,15 @@ describe("Lifecycle.run", () => {
     const lifecycle = new Lifecycle({
       llmClient: createFakeLLMClient([
         { textDelta: "Hello" },
-        { textDelta: " world", finishReason: "stop" },
+        {
+          textDelta: " world",
+          finishReason: "stop",
+          tokenUsage: {
+            prompt_tokens: 4,
+            completion_tokens: 2,
+            total_tokens: 6,
+          },
+        },
       ]),
       messageManager,
     });
@@ -273,13 +527,38 @@ describe("Lifecycle.run", () => {
           parentId: "message_1",
           finish: "stop",
         },
-        parts: [{ id: "part_2", type: "text", text: "Hello world" }],
+        parts: [
+          {
+            id: "part_2",
+            metadata: {
+              tokenUsage: {
+                promptTokens: 4,
+                completionTokens: 2,
+                totalTokens: 6,
+              },
+            },
+            type: "text",
+            text: "Hello world",
+          },
+        ],
       },
     ]);
     expect(partEvents).toMatchObject([
       { part: { id: "part_1", text: "Say hello" } },
       { part: { id: "part_2", text: "Hello" } },
       { part: { id: "part_2", text: "Hello world" }, delta: " world" },
+      {
+        part: {
+          id: "part_2",
+          metadata: {
+            tokenUsage: {
+              promptTokens: 4,
+              completionTokens: 2,
+              totalTokens: 6,
+            },
+          },
+        },
+      },
     ]);
   });
 
@@ -710,6 +989,89 @@ describe("Lifecycle.run", () => {
         parts: [{ id: "part_3", text: "It is sunny.", type: "text" }],
       },
     ]);
+  });
+
+  it("stores provider token usage on a pure tool-call assistant turn", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const user = await messageManager.createMessage({
+      sessionId: "session_test",
+      role: "user",
+      agent: "default",
+    });
+    const lifecycle = new Lifecycle({
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"path":"README.md"}',
+                  id: "call_read",
+                  index: 0,
+                  name: "read",
+                },
+              ],
+              finishReason: "tool_calls",
+              tokenUsage: {
+                prompt_tokens: 9,
+                completion_tokens: 3,
+                total_tokens: 12,
+              },
+            },
+          ],
+          [{ textDelta: "Done.", finishReason: "stop" }],
+        ],
+        [],
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi
+          .fn<ToolSchedulerInstance["executeBatch"]>()
+          .mockResolvedValue([
+            {
+              callId: "call_read",
+              output: "content",
+              status: "success",
+            },
+          ]),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    await consumeLifecycle(
+      lifecycle.run({
+        sessionId: "session_test",
+        agent: "default",
+        parentMessageId: user.id,
+        messages: [{ role: "user", content: "Read README" }],
+      }),
+    );
+
+    const history = await messageManager.listBySession("session_test");
+    const toolTurn = history.find(
+      (message) => message.info.id === "message_2",
+    );
+
+    expect(toolTurn).toMatchObject({
+      info: { finish: "tool_calls", role: "assistant" },
+      parts: [
+        {
+          callId: "call_read",
+          metadata: {
+            tokenUsage: {
+              promptTokens: 9,
+              completionTokens: 3,
+              totalTokens: 12,
+            },
+          },
+          type: "tool",
+        },
+      ],
+    });
   });
 
   it("marks the assistant message as error when streaming fails", async () => {

@@ -3,14 +3,16 @@ import type {
   CompactResult,
   ContextLLMClient,
 } from "../../core/context/index.js";
+import {
+  appendMemoryToSystemPrompt,
+  loadMemoryForPrompt,
+} from "../../core/context/index.js";
 import { serializeHistory } from "../../core/context/serialization.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import { streamChatCompletion } from "../../core/llm-client/index.js";
-import {
-  scanPromptLikeContent,
-  shouldLoadPromptLikeContent,
-  type PromptSecurityFinding,
-} from "../../core/system-prompt/security/index.js";
+import type { PromptSecurityFinding } from "../../core/system-prompt/security/index.js";
+
+export { appendMemoryToSystemPrompt, loadMemoryForPrompt };
 
 export function noticeFromPromptSecurityFinding(
   finding: PromptSecurityFinding,
@@ -91,7 +93,7 @@ export function createContextSummaryClient(
     async generateSummary(input): Promise<string> {
       let summary = "";
       for await (const response of streamChatCompletion(llmClient, [
-        { role: "system", content: input.prompt },
+        { role: "system", content: input.systemPrompt ?? input.prompt },
         { role: "user", content: serializeHistory(input.history) },
       ])) {
         if (response.isComplete) {
@@ -106,40 +108,6 @@ export function createContextSummaryClient(
       return trimmed;
     },
   };
-}
-
-export function appendMemoryToSystemPrompt(
-  systemPrompt: string,
-  memory: string,
-): string {
-  const trimmedMemory = memory.trim();
-  if (trimmedMemory === "") {
-    return systemPrompt;
-  }
-
-  return [systemPrompt.trim(), `<memory>\n${trimmedMemory}\n</memory>`]
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-export function loadMemoryForPrompt(
-  memory: string,
-  onSecurityFinding?: (finding: PromptSecurityFinding) => void,
-): string {
-  const trimmedMemory = memory.trim();
-  if (trimmedMemory === "") {
-    return "";
-  }
-
-  const scan = scanPromptLikeContent(trimmedMemory, {
-    kind: "memory",
-    label: "Memory",
-  });
-  for (const finding of scan.findings) {
-    onSecurityFinding?.(finding);
-  }
-
-  return shouldLoadPromptLikeContent(scan) ? trimmedMemory : "";
 }
 
 function formatTokenCount(tokens: number): string {

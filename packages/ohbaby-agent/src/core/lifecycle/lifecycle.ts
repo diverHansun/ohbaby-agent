@@ -21,10 +21,13 @@ import type {
   ToolCallResult,
 } from "../tool-scheduler/index.js";
 import type {
+  LifecycleConfig,
   LifecycleDeps,
   LifecycleEvent,
   LifecycleResult,
   LifecycleRunParams,
+  LifecycleSessionParams,
+  TurnContext,
 } from "./types.js";
 
 const DEFAULT_MAX_STEPS = 8;
@@ -75,6 +78,26 @@ function toUsage(tokenUsage: TokenUsage | undefined): LifecycleResult["usage"] {
     inputTokens: tokenUsage.prompt_tokens,
     outputTokens: tokenUsage.completion_tokens,
     totalTokens: tokenUsage.total_tokens,
+  };
+}
+
+function toPartTokenUsageMetadata(
+  tokenUsage: TokenUsage | undefined,
+): { readonly tokenUsage: {
+  readonly promptTokens: number;
+  readonly completionTokens: number;
+  readonly totalTokens: number;
+} } | undefined {
+  if (!tokenUsage) {
+    return undefined;
+  }
+
+  return {
+    tokenUsage: {
+      promptTokens: tokenUsage.prompt_tokens,
+      completionTokens: tokenUsage.completion_tokens,
+      totalTokens: tokenUsage.total_tokens,
+    },
   };
 }
 
@@ -369,7 +392,11 @@ export class Lifecycle {
 
       const toolCalls = normalizeToolCalls(parsedToolCalls, generateToolCallId);
       allToolCalls.push(...toolCalls.map(toParsedToolCall));
-      const toolParts = await this.appendToolParts(assistantMessage, toolCalls);
+      const toolParts = await this.appendToolParts(
+        assistantMessage,
+        toolCalls,
+        finalEvent.tokenUsage,
+      );
 
       for (const toolCall of toolCalls) {
         await this.updateToolPart(toolParts.get(toolCall.id), {
@@ -440,6 +467,298 @@ export class Lifecycle {
         return {
           success: false,
           finishReason: "error",
+          finalResponse,
+          toolCalls: allToolCalls,
+          usage,
+        };
+      }
+
+      if (step === maxSteps) {
+        return {
+          success: false,
+          finishReason: "error",
+          finalResponse: "Maximum lifecycle tool steps reached",
+          toolCalls: allToolCalls,
+          usage,
+        };
+      }
+    }
+
+    return {
+      success: false,
+      finishReason: "error",
+      finalResponse: "Maximum lifecycle tool steps reached",
+      toolCalls: allToolCalls,
+      usage,
+    };
+  }
+
+  async *runSession(
+    params: LifecycleSessionParams,
+    config: LifecycleConfig = {},
+  ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
+    const contextManager = this.deps.contextManager;
+    if (!contextManager) {
+      throw new Error("Lifecycle.runSession requires a ContextManager");
+    }
+    if (!this.deps.messageManager) {
+      throw new Error("Lifecycle.runSession requires a MessageManager");
+    }
+    if (!this.deps.toolScheduler) {
+      throw new Error("Lifecycle.runSession requires a ToolScheduler");
+    }
+
+    const maxSteps = params.maxSteps ?? DEFAULT_MAX_STEPS;
+    const generateToolCallId =
+      this.deps.generateToolCallId ?? createDefaultToolCallId();
+    let parentMessageId = params.parentMessageId;
+    let usage: LifecycleResult["usage"];
+    let finalResponse = "";
+    const allToolCalls: ParsedToolCall[] = [];
+
+    for (let step = 1; step <= maxSteps; step += 1) {
+      if (params.signal?.aborted) {
+        return {
+          success: false,
+          finishReason: "error",
+          finalResponse,
+          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+          usage,
+        };
+      }
+
+      const prepared = await contextManager.prepareTurn({
+        directory: params.directory,
+        isSubagent: params.isSubagent,
+        modelId: params.modelId,
+        sessionId: params.sessionId,
+      });
+      yield {
+        type: "turn:start",
+        compaction: prepared.compaction,
+        hasSummary: prepared.hasSummary,
+        sessionId: params.sessionId,
+        step,
+        timestamp: Date.now(),
+        usage: prepared.usage,
+      };
+
+      const runParams: LifecycleRunParams = {
+        agent: params.agent,
+        environment: params.environment,
+        isSubagent: params.isSubagent,
+        maxSteps: params.maxSteps,
+        messages: prepared.messages,
+        parentMessageId,
+        sessionId: params.sessionId,
+        signal: params.signal,
+        tools: params.tools,
+      };
+      const stepResult = yield* this.runModelStep({
+        conversationMessages: prepared.messages,
+        params: runParams,
+        parentMessageId,
+        step,
+      });
+      const { assistantMessage, finalEvent } = stepResult;
+      finalResponse = stepResult.finalResponse;
+
+      if (!finalEvent) {
+        await markAssistantMessageError(
+          this.deps.messageManager,
+          assistantMessage,
+          new Error("Lifecycle did not complete successfully"),
+        );
+        yield this.createTurnEndEvent({
+          finalResponse: "",
+          finishReason: "error",
+          prepared,
+          sessionId: params.sessionId,
+          step,
+        });
+        return {
+          success: false,
+          finishReason: "error",
+          finalResponse: "",
+          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+          usage,
+        };
+      }
+
+      usage = addUsage(usage, toUsage(finalEvent.tokenUsage));
+      if (params.signal?.aborted) {
+        await markAssistantMessageError(
+          this.deps.messageManager,
+          assistantMessage,
+          new Error("Lifecycle aborted"),
+        );
+        yield this.createTurnEndEvent({
+          finalResponse,
+          finishReason: "error",
+          prepared,
+          sessionId: params.sessionId,
+          step,
+        });
+        return {
+          success: false,
+          finishReason: "error",
+          finalResponse,
+          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+          usage,
+        };
+      }
+
+      const parsedToolCalls = finalEvent.parsedToolCalls ?? [];
+      const shouldExecuteTools =
+        finalEvent.finishReason === "tool_calls" || parsedToolCalls.length > 0;
+
+      if (!shouldExecuteTools || parsedToolCalls.length === 0) {
+        if (shouldExecuteTools && parsedToolCalls.length === 0) {
+          await markAssistantMessageError(
+            this.deps.messageManager,
+            assistantMessage,
+            new Error("Model requested tool calls but none were parsed"),
+          );
+          yield this.createTurnEndEvent({
+            finalResponse: "Model requested tool calls but none were parsed",
+            finishReason: "error",
+            prepared,
+            sessionId: params.sessionId,
+            step,
+          });
+          return {
+            success: false,
+            finishReason: "error",
+            finalResponse: "Model requested tool calls but none were parsed",
+            toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+            usage,
+          };
+        }
+
+        const turn = this.createTurnContext({
+          finalResponse,
+          finishReason: finalEvent.finishReason ?? "stop",
+          prepared,
+          sessionId: params.sessionId,
+          step,
+        });
+        yield this.createTurnEndEvent(turn);
+        return {
+          success: true,
+          finishReason: finalEvent.finishReason ?? "stop",
+          finalResponse,
+          toolCalls:
+            allToolCalls.length > 0 || parsedToolCalls.length > 0
+              ? [...allToolCalls, ...parsedToolCalls]
+              : undefined,
+          usage,
+        };
+      }
+
+      const toolCalls = normalizeToolCalls(parsedToolCalls, generateToolCallId);
+      allToolCalls.push(...toolCalls.map(toParsedToolCall));
+      const toolParts = await this.appendToolParts(
+        assistantMessage,
+        toolCalls,
+        finalEvent.tokenUsage,
+      );
+
+      for (const toolCall of toolCalls) {
+        await config.beforeToolCall?.({
+          callId: toolCall.id,
+          params: toolCall.arguments,
+          sessionId: params.sessionId,
+          step,
+          toolName: toolCall.name,
+        });
+        await this.updateToolPart(toolParts.get(toolCall.id), {
+          input: toolCall.arguments,
+          status: "running",
+        });
+        yield {
+          type: "tool:start",
+          callId: toolCall.id,
+          params: toolCall.arguments,
+          sessionId: params.sessionId,
+          step,
+          timestamp: Date.now(),
+          toolName: toolCall.name,
+        };
+      }
+
+      const toolResults = await this.executeToolCalls({
+        assistantMessage,
+        params: runParams,
+        step,
+        toolCalls,
+      });
+      const resultByCallId = new Map(
+        toolResults.map((result) => [result.callId, result] as const),
+      );
+
+      for (const toolCall of toolCalls) {
+        const result = resultByCallId.get(toolCall.id);
+        if (!result) {
+          continue;
+        }
+        await this.updateToolPart(
+          toolParts.get(toolCall.id),
+          resultToToolState(result, toolCall.arguments),
+        );
+        await config.afterToolCall?.({
+          callId: result.callId,
+          params: toolCall.arguments,
+          result,
+          sessionId: params.sessionId,
+          step,
+          toolName: toolCall.name,
+        });
+        yield {
+          type: "tool:result",
+          callId: result.callId,
+          params: toolCall.arguments,
+          result,
+          sessionId: params.sessionId,
+          step,
+          timestamp: Date.now(),
+          toolName: toolCall.name,
+        };
+      }
+
+      yield {
+        type: "step:complete",
+        finishReason: finalEvent.finishReason,
+        sessionId: params.sessionId,
+        step,
+        timestamp: Date.now(),
+        toolResults,
+      };
+
+      parentMessageId = assistantMessage?.id ?? parentMessageId;
+      const turn = this.createTurnContext({
+        finalResponse,
+        finishReason: finalEvent.finishReason,
+        prepared,
+        sessionId: params.sessionId,
+        step,
+        toolResults,
+      });
+      yield this.createTurnEndEvent(turn);
+
+      if (params.signal?.aborted) {
+        return {
+          success: false,
+          finishReason: "error",
+          finalResponse,
+          toolCalls: allToolCalls,
+          usage,
+        };
+      }
+
+      if (config.shouldStopAfterTurn?.(turn) === true) {
+        return {
+          success: true,
+          finishReason: finalEvent.finishReason ?? "stop",
           finalResponse,
           toolCalls: allToolCalls,
           usage,
@@ -575,6 +894,17 @@ export class Lifecycle {
           completed: Date.now(),
         },
       });
+      if (
+        assistantTextPart?.type === "text" &&
+        finalEvent.tokenUsage !== undefined
+      ) {
+        await this.deps.messageManager.updatePart(assistantTextPart.id, {
+          metadata: {
+            ...assistantTextPart.metadata,
+            ...toPartTokenUsageMetadata(finalEvent.tokenUsage),
+          },
+        });
+      }
     }
 
     return {
@@ -586,21 +916,55 @@ export class Lifecycle {
     };
   }
 
+  private createTurnContext(input: {
+    readonly finalResponse: string;
+    readonly finishReason?: TurnContext["finishReason"];
+    readonly prepared: TurnContext["prepared"];
+    readonly sessionId: string;
+    readonly step: number;
+    readonly toolResults?: readonly ToolCallResult[];
+  }): TurnContext {
+    return {
+      finalResponse: input.finalResponse,
+      finishReason: input.finishReason,
+      prepared: input.prepared,
+      sessionId: input.sessionId,
+      step: input.step,
+      toolResults: input.toolResults,
+    };
+  }
+
+  private createTurnEndEvent(input: TurnContext): LifecycleEvent {
+    return {
+      type: "turn:end",
+      finishReason: input.finishReason,
+      sessionId: input.sessionId,
+      step: input.step,
+      timestamp: Date.now(),
+      toolResults: input.toolResults,
+      usage: input.prepared.usage,
+    };
+  }
+
   private async appendToolParts(
     assistantMessage: CoreMessage | undefined,
     toolCalls: readonly ResolvedToolCall[],
+    tokenUsage?: TokenUsage,
   ): Promise<Map<string, ToolPart>> {
     const toolParts = new Map<string, ToolPart>();
     if (!this.deps.messageManager || assistantMessage?.role !== "assistant") {
       return toolParts;
     }
 
-    for (const toolCall of toolCalls) {
+    for (const [index, toolCall] of toolCalls.entries()) {
+      const metadata =
+        index === 0 ? toPartTokenUsageMetadata(tokenUsage) : undefined;
       const part = await this.deps.messageManager.appendPart(
         assistantMessage.id,
         {
           type: "tool",
           callId: toolCall.id,
+          ...(metadata === undefined ? {} : { metadata }),
           state: {
             input: toolCall.arguments,
             raw: toolCall.rawArguments,

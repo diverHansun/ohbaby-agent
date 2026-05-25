@@ -22,6 +22,18 @@ const PruneResultSchema = z.object({
   totalScanned: z.number(),
 });
 
+const ContextUsageSchema = z.object({
+  currentTokens: z.number(),
+  contextLimit: z.number(),
+  inputBudgetTokens: z.number().optional(),
+  reservedOutputTokens: z.number().optional(),
+  safetyMarginTokens: z.number().optional(),
+  usageRatio: z.number(),
+  remainingTokens: z.number(),
+  shouldCompress: z.boolean(),
+  modelId: z.string(),
+});
+
 export const ContextEvent = {
   Compressed: BusEvent.define(
     "context.compressed",
@@ -35,6 +47,27 @@ export const ContextEvent = {
     z.object({
       sessionId: z.string(),
       result: PruneResultSchema,
+    }),
+  ),
+  TurnPrepared: BusEvent.define(
+    "context.turn-prepared",
+    z.object({
+      sessionId: z.string(),
+      usage: ContextUsageSchema,
+      tookMs: z.number(),
+      triggeredCompaction: z.boolean(),
+    }),
+  ),
+  CompactSkipped: BusEvent.define(
+    "context.compact-skipped",
+    z.object({
+      sessionId: z.string(),
+      reason: z.union([
+        z.literal("not-needed"),
+        z.literal("too-short"),
+        z.literal("inflated"),
+      ]),
+      usage: ContextUsageSchema,
     }),
   ),
 } as const;

@@ -1,15 +1,32 @@
 import { ContextEvent } from "./events.js";
 
 export {
+  COMPACTION_RESERVE_TOKENS,
   COMPRESSION_PRESERVE_RATIO,
   COMPRESSION_THRESHOLD,
+  KEEP_RECENT_TOKENS,
   PRUNE_MINIMUM_TOKENS,
   PRUNE_PROTECT_TOKENS,
   SUMMARY_AGENT_NAME,
 } from "./constants.js";
-export { COMPRESSION_PROMPT } from "./compression-prompt.js";
+export {
+  COMPRESSION_PROMPT,
+  SUMMARIZATION_SYSTEM_PROMPT,
+} from "./compression-prompt.js";
 export { ContextEvent } from "./events.js";
-export { createContextManager, getContextUsage } from "./context-manager.js";
+export {
+  createContextManager,
+  decideCompactAction,
+  findCutPoint,
+  getContextUsage,
+} from "./context-manager.js";
+export type { ContextCutPoint } from "./context-manager.js";
+export {
+  appendMemoryToSystemPrompt,
+  loadMemoryForPrompt,
+  serializeForLlm,
+  serializeHistoryMessages,
+} from "./serializer.js";
 export type {
   AssembledContext,
   CompactOptions,
@@ -22,6 +39,8 @@ export type {
   ContextManagerOptions,
   ContextUsage,
   MemoryReader,
+  PreparedTurn,
+  PrepareTurnInput,
   PruneResult,
   SystemPromptProvider,
   TokenCounter,

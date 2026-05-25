@@ -6,6 +6,12 @@ import type {
   ParsedToolCall,
   TokenUsage,
 } from "../llm-client/index.js";
+import type {
+  CompactResult,
+  ContextManager,
+  ContextUsage,
+  PreparedTurn,
+} from "../context/index.js";
 import type { MessageManager } from "../message/index.js";
 import type {
   ToolCallResult,
@@ -17,6 +23,7 @@ export interface LifecycleDeps {
   readonly llmClient: LLMClientInstance;
   readonly messageManager?: MessageManager;
   readonly toolScheduler?: ToolSchedulerInstance;
+  readonly contextManager?: ContextManager;
   readonly generateToolCallId?: () => string;
 }
 
@@ -32,7 +39,73 @@ export interface LifecycleRunParams {
   readonly maxSteps?: number;
 }
 
+export interface LifecycleSessionParams {
+  readonly sessionId: string;
+  readonly directory: string;
+  readonly modelId: string;
+  readonly agent?: string;
+  readonly parentMessageId?: string;
+  readonly signal?: AbortSignal;
+  readonly tools?: ChatCompletionCreateParams["tools"];
+  readonly environment?: ToolExecutionEnvironment;
+  readonly isSubagent?: boolean;
+  readonly maxSteps?: number;
+}
+
+export interface TurnContext {
+  readonly sessionId: string;
+  readonly step: number;
+  readonly prepared: PreparedTurn;
+  readonly finishReason?: ChatFinishReason | "error";
+  readonly finalResponse: string;
+  readonly toolResults?: readonly ToolCallResult[];
+}
+
+export interface ToolCallContext {
+  readonly sessionId: string;
+  readonly step: number;
+  readonly callId: string;
+  readonly toolName: string;
+  readonly params: Record<string, unknown>;
+}
+
+export interface BeforeToolCallResult {
+  readonly note?: string;
+}
+
+export interface AfterToolCallResult {
+  readonly note?: string;
+}
+
+export interface LifecycleConfig {
+  readonly shouldStopAfterTurn?: (ctx: TurnContext) => boolean;
+  readonly beforeToolCall?: (
+    ctx: ToolCallContext,
+  ) => Promise<BeforeToolCallResult | undefined>;
+  readonly afterToolCall?: (
+    ctx: ToolCallContext & { readonly result: ToolCallResult },
+  ) => Promise<AfterToolCallResult | undefined>;
+}
+
 export type LifecycleEvent =
+  | {
+      readonly type: "turn:start";
+      readonly sessionId: string;
+      readonly step: number;
+      readonly timestamp: number;
+      readonly usage: ContextUsage;
+      readonly compaction?: CompactResult;
+      readonly hasSummary: boolean;
+    }
+  | {
+      readonly type: "turn:end";
+      readonly sessionId: string;
+      readonly step: number;
+      readonly timestamp: number;
+      readonly usage: ContextUsage;
+      readonly finishReason?: ChatFinishReason | "error";
+      readonly toolResults?: readonly ToolCallResult[];
+    }
   | {
       readonly type: "llm:start";
       readonly sessionId: string;
