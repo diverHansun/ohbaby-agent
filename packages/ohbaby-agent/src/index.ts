@@ -57,6 +57,7 @@ export type {
 export {
   AgentManager,
   AgentRegistry,
+  AgentService,
   BUILTIN_AGENTS,
   BUILTIN_AGENT_NAMES,
   SubagentExecutor,
@@ -67,14 +68,14 @@ export {
   toolsConfigToRecord,
 } from "./agents/index.js";
 export type {
+  AgentServiceOptions,
+  AgentServiceSession,
+  AgentServiceSessionManager,
   RuntimeAgent,
   SubagentExecuteParams,
-  SubagentMessageWriter,
   SubagentResult,
   SubagentRunner,
   SubagentRunnerResult,
-  SubagentSession,
-  SubagentSessionManager,
   SubagentToolCallSummary,
   SystemPromptProvider,
   TaskExecutor,

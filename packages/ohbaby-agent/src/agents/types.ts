@@ -92,44 +92,6 @@ export interface TaskExecutor {
   execute(params: SubagentExecuteParams): Promise<SubagentResult>;
 }
 
-export interface SubagentSession {
-  readonly id: string;
-  readonly projectRoot: string;
-  readonly agentName: string;
-  readonly parentId?: string;
-  readonly childrenIds: readonly string[];
-  readonly isSubagent: boolean;
-}
-
-export interface SubagentSessionManager {
-  create(
-    projectDirectory: string,
-    options?: {
-      readonly id?: string;
-      readonly title?: string;
-      readonly agentName?: string;
-      readonly parentId?: string;
-    },
-  ): Promise<SubagentSession>;
-  get(sessionId: string): Promise<SubagentSession | null>;
-}
-
-export interface SubagentMessageWriter {
-  writeUserMessage(input: {
-    readonly sessionId: string;
-    readonly parentSessionId: string;
-    readonly agentName: string;
-    readonly prompt: string;
-  }): Promise<{ readonly messageId?: string } | undefined> | Promise<void>;
-  writeAssistantMessage?(input: {
-    readonly sessionId: string;
-    readonly parentSessionId: string;
-    readonly agentName: string;
-    readonly parentMessageId?: string;
-    readonly output: string;
-  }): Promise<void>;
-}
-
 export interface SubagentRunnerResult {
   readonly success: boolean;
   readonly output: string;

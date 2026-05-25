@@ -13,7 +13,6 @@ export {
   type AgentServiceSession,
   type AgentServiceSessionManager,
 } from "./service.js";
-export { createSubagentMessageWriter } from "./message-writer.js";
 export { AgentManager, toolsConfigToRecord } from "./manager.js";
 export { AgentRegistry } from "./registry.js";
 export {
@@ -36,12 +35,6 @@ export {
   type SubagentPromptMessageBuilder,
   type SubagentSandboxEnvironmentManager,
 } from "./runner.js";
-export {
-  createRuntimeSubagentSessionManager,
-  InMemorySubagentSessionManager,
-  PersistentSubagentSessionManager,
-  type RuntimeSubagentSessionManager,
-} from "./session-manager.js";
 export type {
   AgentConfig,
   AgentMode,
@@ -50,12 +43,9 @@ export type {
   PermissionValue,
   RuntimeAgent,
   SubagentExecuteParams,
-  SubagentMessageWriter,
   SubagentResult,
   SubagentRunner,
   SubagentRunnerResult,
-  SubagentSession,
-  SubagentSessionManager,
   SubagentToolCallSummary,
   SystemPromptProvider,
   TaskExecutor,
