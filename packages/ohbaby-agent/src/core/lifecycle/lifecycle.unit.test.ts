@@ -228,7 +228,7 @@ describe("Lifecycle.runSession", () => {
     ).rejects.toThrow("Lifecycle.runSession requires a MessageManager");
   });
 
-  it("uses context prepareTurn as the only provider message source each turn", async () => {
+  it("uses prepareTurn for the session context and preserves tool protocol within the run", async () => {
     const requests: ProviderRequest[] = [];
     const messageManager = createMessageManager({
       bus: createBus(),
@@ -245,15 +245,9 @@ describe("Lifecycle.runSession", () => {
     const firstTurnMessages: PreparedTurn["messages"] = [
       { role: "user", content: "Read README" },
     ];
-    const secondTurnMessages: PreparedTurn["messages"] = [
-      { role: "system", content: "system prompt" },
-      { role: "user", content: "Read README" },
-      { role: "user", content: "Externally inserted steering" },
-    ];
     const prepareTurn = vi
       .fn<ContextManager["prepareTurn"]>()
-      .mockResolvedValueOnce(preparedTurn(firstTurnMessages, compressedUsage))
-      .mockResolvedValueOnce(preparedTurn(secondTurnMessages));
+      .mockResolvedValueOnce(preparedTurn(firstTurnMessages, compressedUsage));
     const toolScheduler = {
       executeBatch: vi
         .fn<ToolSchedulerInstance["executeBatch"]>()
@@ -304,9 +298,30 @@ describe("Lifecycle.runSession", () => {
       modelId: "fake-model",
       sessionId: "session_test",
     });
-    expect(prepareTurn).toHaveBeenCalledTimes(2);
+    expect(prepareTurn).toHaveBeenCalledTimes(1);
     expect(requests[0]?.messages).toEqual(firstTurnMessages);
-    expect(requests[1]?.messages).toEqual(secondTurnMessages);
+    expect(requests[1]?.messages).toEqual([
+      ...firstTurnMessages,
+      {
+        content: null,
+        role: "assistant",
+        tool_calls: [
+          {
+            function: {
+              arguments: '{"path":"README.md"}',
+              name: "read_file",
+            },
+            id: "call_read",
+            type: "function",
+          },
+        ],
+      },
+      {
+        content: "README contents",
+        role: "tool",
+        tool_call_id: "call_read",
+      },
+    ]);
     expect(events).toEqual([
       "turn:start",
       "llm:start",
@@ -315,7 +330,6 @@ describe("Lifecycle.runSession", () => {
       "tool:result",
       "step:complete",
       "turn:end",
-      "turn:start",
       "llm:start",
       "llm:delta",
       "llm:complete",

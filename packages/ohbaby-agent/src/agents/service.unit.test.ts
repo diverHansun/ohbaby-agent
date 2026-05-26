@@ -4,11 +4,9 @@ import { AgentManager } from "./manager.js";
 import { AgentRegistry } from "./registry.js";
 import type { AgentsConfig } from "./types.js";
 import type {
-  AgentPromptMessageBuilder,
   AgentRunEventSource,
   AgentRunCoordinator,
 } from "../core/agents/index.js";
-import type { ChatCompletionMessage } from "../core/llm-client/index.js";
 import type {
   CoreMessage,
   MessageManager,
@@ -170,7 +168,7 @@ function createMessageManager(
       listBySession: vi.fn((): Promise<MessageWithParts[]> => Promise.resolve([...messages])),
       removeMessage: vi.fn((): Promise<void> => Promise.resolve()),
       removeMessages: vi.fn((): Promise<void> => Promise.resolve()),
-      toModelMessages: vi.fn((): Promise<ChatCompletionMessage[]> => Promise.resolve([])),
+      toModelMessages: vi.fn(() => Promise.resolve([])),
       updateMessage: vi.fn((): Promise<CoreMessage> => Promise.resolve({
         agent: "explore",
         id: "assistant",
@@ -234,13 +232,6 @@ function createToolScheduler(): {
   };
 }
 
-function createPromptBuilder(): AgentPromptMessageBuilder {
-  return vi.fn(
-    (): Promise<readonly ChatCompletionMessage[]> =>
-      Promise.resolve([{ content: "system", role: "system" }]),
-  );
-}
-
 describe("AgentService", () => {
   it("starts a primary session through core runAgent stream mode", async () => {
     const messages = createMessageManager();
@@ -263,8 +254,8 @@ describe("AgentService", () => {
     );
     const service = new AgentService({
       agentManager: await createAgentManager(),
-      buildPromptMessages: createPromptBuilder(),
       messageManager: messages.manager,
+      modelId: "fake-model",
       runCoordinator: runs.coordinator,
       runEventSource: { subscribeRunEvents },
       sessionManager,
@@ -301,8 +292,10 @@ describe("AgentService", () => {
     expect(runs.create).toHaveBeenCalledWith(
       expect.objectContaining({
         agent: "build",
+        directory: "D:/repo",
         isSubagent: false,
         maxSteps: 50,
+        modelId: "fake-model",
         parentMessageId: "message_child",
         sessionId: "primary_1",
       }),
@@ -316,8 +309,8 @@ describe("AgentService", () => {
     const tools = createToolScheduler();
     const service = new AgentService({
       agentManager: await createAgentManager(),
-      buildPromptMessages: createPromptBuilder(),
       messageManager: messages.manager,
+      modelId: "fake-model",
       now: (() => {
         let value = 1_000;
         return (): number => (value += 100);
@@ -356,8 +349,10 @@ describe("AgentService", () => {
     expect(runs.create).toHaveBeenCalledWith(
       expect.objectContaining({
         agent: "explore",
+        directory: "D:/repo",
         isSubagent: true,
         maxSteps: 15,
+        modelId: "fake-model",
         parentMessageId: "message_child",
         sessionId: "child_1",
       }),
@@ -375,8 +370,8 @@ describe("AgentService", () => {
     );
     const service = new AgentService({
       agentManager: await createAgentManager(),
-      buildPromptMessages: createPromptBuilder(),
       messageManager: createMessageManager().manager,
+      modelId: "fake-model",
       runCoordinator: runs.coordinator,
       sessionManager: createSessionManager(),
       toolScheduler: createToolScheduler().scheduler,
@@ -397,8 +392,8 @@ describe("AgentService", () => {
   it("rejects primary agents as subagents", async () => {
     const service = new AgentService({
       agentManager: await createAgentManager(),
-      buildPromptMessages: createPromptBuilder(),
       messageManager: createMessageManager().manager,
+      modelId: "fake-model",
       runCoordinator: createRunCoordinator().coordinator,
       sessionManager: createSessionManager(),
       toolScheduler: createToolScheduler().scheduler,
@@ -419,9 +414,9 @@ describe("AgentService", () => {
     runs.coordinator.waitForCompletion = vi.fn(() => blocker.promise);
     const service = new AgentService({
       agentManager: await createAgentManager(),
-      buildPromptMessages: createPromptBuilder(),
       maxConcurrency: 1,
       messageManager: createMessageManager().manager,
+      modelId: "fake-model",
       runCoordinator: runs.coordinator,
       sessionManager: createSessionManager(),
       toolScheduler: createToolScheduler().scheduler,
@@ -454,8 +449,8 @@ describe("AgentService", () => {
     });
     const service = new AgentService({
       agentManager: await createAgentManager(),
-      buildPromptMessages: createPromptBuilder(),
       messageManager: createMessageManager().manager,
+      modelId: "fake-model",
       runCoordinator: createRunCoordinator().coordinator,
       sessionManager,
       toolScheduler: createToolScheduler().scheduler,
@@ -476,8 +471,8 @@ describe("AgentService", () => {
     const sessionManager = createSessionManager();
     const service = new AgentService({
       agentManager: await createAgentManager(),
-      buildPromptMessages: createPromptBuilder(),
       messageManager: createMessageManager().manager,
+      modelId: "fake-model",
       runCoordinator: createRunCoordinator().coordinator,
       sessionManager,
       toolScheduler: createToolScheduler().scheduler,
@@ -504,8 +499,8 @@ describe("AgentService", () => {
     });
     const service = new AgentService({
       agentManager: await createAgentManager(),
-      buildPromptMessages: createPromptBuilder(),
       messageManager: createMessageManager().manager,
+      modelId: "fake-model",
       runCoordinator: createRunCoordinator().coordinator,
       sessionManager,
       toolScheduler: createToolScheduler().scheduler,
@@ -534,8 +529,8 @@ describe("AgentService", () => {
     });
     const service = new AgentService({
       agentManager: await createAgentManager(),
-      buildPromptMessages: createPromptBuilder(),
       messageManager: createMessageManager().manager,
+      modelId: "fake-model",
       runCoordinator: createRunCoordinator().coordinator,
       sessionManager,
       toolScheduler: createToolScheduler().scheduler,
@@ -557,8 +552,8 @@ describe("AgentService", () => {
     const tools = createToolScheduler();
     const service = new AgentService({
       agentManager: await createAgentManager(),
-      buildPromptMessages: createPromptBuilder(),
       messageManager: createMessageManager().manager,
+      modelId: "fake-model",
       runCoordinator: createRunCoordinator().coordinator,
       sessionManager: createSessionManager(),
       toolScheduler: tools.scheduler,

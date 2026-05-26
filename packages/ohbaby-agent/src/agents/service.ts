@@ -1,6 +1,5 @@
 import {
   runAgent,
-  type AgentPromptMessageBuilder,
   type AgentRunCoordinator,
   type AgentRunEventSource,
   type AgentSandboxEnvironmentManager,
@@ -21,8 +20,8 @@ const DEFAULT_MAX_CONCURRENCY = 3;
 
 export interface AgentServiceOptions {
   readonly agentManager: AgentManager;
-  readonly buildPromptMessages: AgentPromptMessageBuilder;
   readonly messageManager: MessageManager;
+  readonly modelId: string;
   readonly runCoordinator: AgentRunCoordinator;
   readonly runEventSource?: AgentRunEventSource;
   readonly sandboxManager?: AgentSandboxEnvironmentManager;
@@ -77,11 +76,12 @@ export class AgentService implements TaskExecutor {
       },
       {
         agentName: params.agentName,
-        buildPromptMessages: this.options.buildPromptMessages,
         environment: params.environment,
         initialUserPrompt: params.prompt,
         maxSteps: params.maxSteps ?? runtimeAgent.config.maxSteps,
+        modelId: this.options.modelId,
         projectRoot: session.projectRoot,
+        runId: params.runId,
         sessionId: session.id,
         signal: params.signal,
         waitMode: "stream",
@@ -120,10 +120,10 @@ export class AgentService implements TaskExecutor {
           },
           {
             agentName: params.agentName,
-            buildPromptMessages: this.options.buildPromptMessages,
             environment: params.environment,
             initialUserPrompt: params.prompt,
             maxSteps: runtimeAgent.config.maxSteps,
+            modelId: this.options.modelId,
             parentSessionId: params.parentSessionId,
             projectRoot: session.projectRoot,
             sessionId: session.id,
@@ -134,9 +134,7 @@ export class AgentService implements TaskExecutor {
         if (result.mode !== "waitForCompletion") {
           throw new Error("Task execution expected a completed agent run");
         }
-        const output = result.success
-          ? result.finalOutput
-          : result.finalOutput ?? result.error;
+        const output = result.success ? result.finalOutput : result.error;
         return {
           output,
           sessionId: session.id,

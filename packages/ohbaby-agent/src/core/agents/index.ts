@@ -1,7 +1,6 @@
 export { extractFinalOutput } from "./output.js";
 export { runAgent, toOpenAiTools } from "./runner.js";
 export type {
-  AgentPromptMessageBuilder,
   AgentRunCompletion,
   AgentRunCoordinator,
   AgentRunCreateOptions,

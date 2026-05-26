@@ -1,7 +1,6 @@
 import {
   runAgent,
   type AgentRunResult,
-  type AgentPromptMessageBuilder,
   type AgentRunCoordinator,
   type AgentSandboxEnvironmentManager,
 } from "../../core/agents/index.js";
@@ -42,8 +41,8 @@ interface ActiveTaskState {
 
 export interface AgentTaskManagerOptions {
   readonly agentManager: AgentManager;
-  readonly buildPromptMessages: AgentPromptMessageBuilder;
   readonly messageManager: MessageManager;
+  readonly modelId: string;
   readonly runCoordinator: AgentRunCoordinator;
   readonly sandboxManager?: AgentSandboxEnvironmentManager;
   readonly sessionManager: Pick<SessionManager, "create" | "get">;
@@ -340,10 +339,10 @@ export class AgentTaskManager implements AgentTaskController {
         },
         {
           agentName: state.runtimeAgent.config.name,
-          buildPromptMessages: this.options.buildPromptMessages,
           environment,
           initialUserPrompt: prompt,
           maxSteps: state.runtimeAgent.config.maxSteps,
+          modelId: this.options.modelId,
           parentSessionId: task.parentSessionId,
           projectRoot: state.session.projectRoot,
           sessionId: state.session.id,
@@ -354,9 +353,7 @@ export class AgentTaskManager implements AgentTaskController {
       if (result.mode !== "waitForCompletion") {
         throw new Error("Agent task expected a completed agent run");
       }
-      const output = result.success
-        ? result.finalOutput
-        : result.finalOutput ?? result.error;
+      const output = result.success ? result.finalOutput : result.error;
       if (!this.isClosed(taskId)) {
         await this.store.update(taskId, {
           completedAt: this.now(),

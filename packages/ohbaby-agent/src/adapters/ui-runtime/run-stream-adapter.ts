@@ -1,4 +1,5 @@
 import type {
+  UiNotice,
   UiMessage,
   UiMessagePart,
   UiRun,
@@ -6,8 +7,10 @@ import type {
   UiSession,
   UiToolCall,
 } from "ohbaby-sdk";
+import type { CompactResult } from "../../core/context/index.js";
 import type { UiStateStore } from "../ui-state/index.js";
 import { cloneMessage, cloneRun } from "../ui-state/index.js";
+import { noticeFromCompactResult } from "./prompt-context.js";
 import {
   END_SENTINEL,
   HEARTBEAT_SENTINEL,
@@ -36,9 +39,15 @@ interface ToolResultPayload {
   readonly status: string;
 }
 
+type NoticeDraft = Omit<UiNotice, "id" | "createdAt"> & {
+  readonly createdAt?: string;
+};
+
 export interface RunStreamProjectionOptions {
   readonly assistantMessageId?: string;
+  readonly autoStart?: boolean;
   readonly nextMessageId: () => string;
+  readonly onNotice?: (notice: NoticeDraft) => void;
   readonly publish: PublishUiEvent;
   readonly runId: string;
   readonly sessionId: string;
@@ -49,6 +58,7 @@ export interface RunStreamProjectionOptions {
 
 export interface RunStreamProjection {
   readonly done: Promise<void>;
+  start(): void;
   stop(): Promise<void>;
 }
 
@@ -172,7 +182,14 @@ export function startRunStreamProjection(
     .subscribe(`run/${options.runId}`, 0)
     [Symbol.asyncIterator]();
   let assistantMessage: UiMessage | undefined;
+  let resolveDone!: () => void;
+  let rejectDone!: (error: unknown) => void;
+  let started = false;
   let stopped = false;
+  const done = new Promise<void>((resolve, reject) => {
+    resolveDone = resolve;
+    rejectDone = reject;
+  });
 
   async function updateStatus(status: UiRunStatus): Promise<void> {
     await options.stateStore.setStatus(status);
@@ -340,6 +357,20 @@ export function startRunStreamProjection(
     );
   }
 
+  function handleTurnStart(event: StreamBridgeEvent): void {
+    const data = eventData(event);
+    if (!isRecord(data.compaction)) {
+      return;
+    }
+    const notice = noticeFromCompactResult(
+      options.sessionId,
+      data.compaction as unknown as CompactResult,
+    );
+    if (notice) {
+      options.onNotice?.(notice);
+    }
+  }
+
   async function handleEvent(event: StreamBridgeEvent): Promise<void> {
     if (event.event === "run.updated") {
       await handleRunUpdated(event);
@@ -355,6 +386,10 @@ export function startRunStreamProjection(
     }
     if (event.event === "run.tool.result") {
       await handleToolResult(event);
+      return;
+    }
+    if (event.event === "run.turn.start") {
+      handleTurnStart(event);
     }
   }
 
@@ -376,11 +411,27 @@ export function startRunStreamProjection(
     }
   }
 
+  function start(): void {
+    if (started) {
+      return;
+    }
+    started = true;
+    void pump().then(resolveDone, rejectDone);
+  }
+
+  if (options.autoStart !== false) {
+    start();
+  }
+
   return {
-    done: pump(),
+    done,
+    start,
     async stop(): Promise<void> {
       stopped = true;
       await subscription.return?.();
+      if (!started) {
+        resolveDone();
+      }
     },
   };
 }

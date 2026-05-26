@@ -110,7 +110,7 @@ export class RunManager {
         await this.interruptActiveRuns(activeRunIds);
       }
 
-      const runId = this.createRunId();
+      const runId = options.runId ?? this.createRunId();
       await this.deps.runLedger.createPending({
         runId,
         sessionId: options.sessionId,
@@ -211,6 +211,8 @@ export class RunManager {
         parentMessageId: record.options.parentMessageId,
         maxSteps: record.options.maxSteps,
         messages: record.options.messages,
+        directory: record.options.directory,
+        modelId: record.options.modelId,
         tools: record.options.tools,
       };
       const worker = new RunWorker(context, {

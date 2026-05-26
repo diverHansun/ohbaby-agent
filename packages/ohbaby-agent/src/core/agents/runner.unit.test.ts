@@ -7,7 +7,6 @@ import type {
   AgentRunInput,
   AgentRunEventSource,
 } from "./types.js";
-import type { ChatCompletionMessage } from "../llm-client/index.js";
 import type {
   CoreMessage,
   MessageManager,
@@ -98,7 +97,7 @@ function createMessageManager(
     listBySession,
     removeMessage: vi.fn((): Promise<void> => Promise.resolve()),
     removeMessages: vi.fn((): Promise<void> => Promise.resolve()),
-    toModelMessages: vi.fn((): Promise<ChatCompletionMessage[]> => Promise.resolve([])),
+    toModelMessages: vi.fn(() => Promise.resolve([])),
     updateMessage: vi.fn((): Promise<CoreMessage> => Promise.resolve(userMessage("updated"))),
     updatePart: vi.fn((): Promise<Part> => Promise.resolve({
       id: "updated_part",
@@ -195,17 +194,11 @@ function createRunCoordinator(
 function baseInput(
   patch: Partial<AgentRunInput> = {},
 ): AgentRunInput {
-  const modelMessages: readonly ChatCompletionMessage[] = [
-    { role: "user", content: "hello" },
-  ];
   return {
     agentName: "build",
-    buildPromptMessages: vi.fn(
-      (): Promise<readonly ChatCompletionMessage[]> =>
-        Promise.resolve(modelMessages),
-    ),
     initialUserPrompt: "hello",
     maxSteps: 5,
+    modelId: "fake-model",
     parentSessionId: "session_parent",
     projectRoot: "D:/repo",
     sessionId: "session_child",
@@ -231,7 +224,7 @@ function createDeps(input: {
 }
 
 describe("runAgent", () => {
-  it("writes the initial user prompt, builds messages, starts a run, and returns final output", async () => {
+  it("writes the initial user prompt, starts a session run, and returns final output", async () => {
     const messageManager = createMessageManager();
     const runCoordinator = createRunCoordinator();
     const toolScheduler = createToolScheduler();
@@ -260,17 +253,12 @@ describe("runAgent", () => {
       text: "hello",
       type: "text",
     });
-    expect(input.buildPromptMessages).toHaveBeenCalledWith({
-      agentName: "build",
-      isSubagent: true,
-      projectRoot: "D:/repo",
-      sessionId: "session_child",
-    });
     expect(runCoordinator.create).toHaveBeenCalledWith({
       agent: "build",
+      directory: "D:/repo",
       isSubagent: true,
       maxSteps: 5,
-      messages: [{ role: "user", content: "hello" }],
+      modelId: "fake-model",
       parentMessageId: "user_1",
       sessionId: "session_child",
       tools: [
@@ -409,6 +397,48 @@ describe("runAgent", () => {
       2,
       "session_child",
       undefined,
+    );
+  });
+
+  it("subscribes before creating a streaming run when the run id is known", async () => {
+    const callOrder: string[] = [];
+    const runCoordinator = createRunCoordinator();
+    runCoordinator.create.mockImplementation(() => {
+      callOrder.push("create");
+      return Promise.resolve({
+        runId: "run_known",
+        sessionId: "session_child",
+      });
+    });
+    const subscribeRunEvents = vi.fn<AgentRunEventSource["subscribeRunEvents"]>(
+      (): AsyncIterable<never> => {
+        callOrder.push("subscribe");
+        return {
+          [Symbol.asyncIterator](): AsyncIterator<never> {
+            return {
+              next(): Promise<IteratorResult<never>> {
+                return Promise.resolve({
+                  done: true,
+                  value: undefined as never,
+                });
+              },
+            };
+          },
+        };
+      },
+    );
+
+    await runAgent(
+      createDeps({
+        runCoordinator: runCoordinator.coordinator,
+        runEventSource: { subscribeRunEvents },
+      }),
+      baseInput({ runId: "run_known", waitMode: "stream" }),
+    );
+
+    expect(callOrder).toEqual(["subscribe", "create"]);
+    expect(runCoordinator.create).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run_known" }),
     );
   });
 });

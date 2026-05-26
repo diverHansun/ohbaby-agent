@@ -849,27 +849,46 @@ export function createInProcessUiBackendClient(
       const resolvedProjectRoot = session.projectRoot ?? baseProjectRoot;
       submittedSessionId = session.id;
 
-      const runId = runtime.reserveRunId(await nextRunId());
-      activeRunId = runId;
-      const result = await runtime.startSession({
-        agentName,
-        prompt: text,
-        projectRoot: resolvedProjectRoot,
-        sessionId: session.id,
-        title: session.title,
-      });
-      if (result.runId !== runId) {
-        throw new Error(
-          `Agent service created unexpected run id: ${result.runId}`,
-        );
-      }
-
       const userMessage = createTextMessage({
         id: messageIds.next(),
         role: "user",
         text,
         createdAt,
       });
+      const runId = await nextRunId();
+      const assistantMessageId = messageIds.next();
+      activeRunId = runId;
+      projection = startRunStreamProjection({
+        assistantMessageId,
+        autoStart: false,
+        nextMessageId: () => messageIds.next(),
+        onNotice: publishNotice,
+        publish,
+        runId,
+        sessionId: session.id,
+        stateStore,
+        streamBridge: runtime.streamBridge,
+        timestamp,
+      });
+
+      try {
+        const result = await runtime.startSession({
+          agentName,
+          prompt: text,
+          projectRoot: resolvedProjectRoot,
+          runId,
+          sessionId: session.id,
+          title: session.title,
+        });
+        if (result.runId !== runId) {
+          throw new Error(
+            `Agent service created unexpected run id: ${result.runId}`,
+          );
+        }
+      } catch (error) {
+        await projection.stop();
+        throw error;
+      }
 
       if (isNewSession) {
         await upsertSession(session);
@@ -890,17 +909,7 @@ export function createInProcessUiBackendClient(
         message: cloneMessage(userMessage),
       });
 
-      const assistantMessageId = messageIds.next();
-      projection = startRunStreamProjection({
-        assistantMessageId,
-        nextMessageId: () => messageIds.next(),
-        publish,
-        runId,
-        sessionId: session.id,
-        stateStore,
-        streamBridge: runtime.streamBridge,
-        timestamp,
-      });
+      projection.start();
 
       try {
         const completion = await runtime.runManager.waitForCompletion(runId);

@@ -2,6 +2,7 @@ import type {
   LifecycleEvent,
   LifecycleResult,
   LifecycleRunParams,
+  LifecycleSessionParams,
 } from "../../core/lifecycle/index.js";
 import type { ChatCompletionMessage } from "../../core/llm-client/index.js";
 import type {
@@ -30,6 +31,7 @@ export interface RunDefaultsPolicy {
 }
 
 export interface CreateRunOptions {
+  readonly runId?: string;
   readonly sessionId: string;
   readonly triggerSource: TriggerSource;
   readonly explicit?: Partial<RunDefaults>;
@@ -37,7 +39,9 @@ export interface CreateRunOptions {
   readonly isSubagent?: boolean;
   readonly parentMessageId?: string;
   readonly maxSteps?: number;
-  readonly messages: readonly ChatCompletionMessage[];
+  readonly messages?: readonly ChatCompletionMessage[];
+  readonly directory?: string;
+  readonly modelId?: string;
   readonly tools?: LifecycleRunParams["tools"];
 }
 
@@ -99,7 +103,9 @@ export interface RunContext {
   readonly isSubagent?: boolean;
   readonly parentMessageId?: string;
   readonly maxSteps?: number;
-  readonly messages: readonly ChatCompletionMessage[];
+  readonly messages?: readonly ChatCompletionMessage[];
+  readonly directory?: string;
+  readonly modelId?: string;
   readonly tools?: LifecycleRunParams["tools"];
 }
 
@@ -125,6 +131,9 @@ export interface HookExecutor {
 export interface RunLifecycle {
   run(
     params: LifecycleRunParams,
+  ): AsyncGenerator<LifecycleEvent, LifecycleResult, void>;
+  runSession?(
+    params: LifecycleSessionParams,
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void>;
 }
 

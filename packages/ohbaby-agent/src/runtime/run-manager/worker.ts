@@ -2,6 +2,7 @@ import type {
   LifecycleEvent,
   LifecycleResult,
   LifecycleRunParams,
+  LifecycleSessionParams,
 } from "../../core/lifecycle/index.js";
 import type {
   ToolCallResult,
@@ -192,7 +193,7 @@ export class RunWorker {
   }
 
   private async consumeLifecycle(): Promise<LifecycleResult> {
-    const loop = this.deps.lifecycle.run(this.lifecycleParams());
+    const loop = this.createLifecycleLoop();
     let next = await loop.next();
 
     while (!next.done) {
@@ -203,12 +204,59 @@ export class RunWorker {
     return next.value;
   }
 
+  private createLifecycleLoop(): AsyncGenerator<
+    LifecycleEvent,
+    LifecycleResult,
+    void
+  > {
+    if (this.context.messages) {
+      return this.deps.lifecycle.run(this.lifecycleParams());
+    }
+    if (!this.deps.lifecycle.runSession) {
+      throw new Error("Run lifecycle does not support session runs");
+    }
+    return this.deps.lifecycle.runSession(this.lifecycleSessionParams());
+  }
+
   private lifecycleParams(): LifecycleRunParams {
     const environment = toToolExecutionEnvironment(this.context.sandboxLease);
+    if (!this.context.messages) {
+      throw new Error("Message run requires preassembled messages");
+    }
 
     return {
       sessionId: this.context.sessionId,
       messages: this.context.messages,
+      signal: this.context.abortSignal,
+      ...(this.context.agent === undefined
+        ? {}
+        : { agent: this.context.agent }),
+      ...(this.context.isSubagent === undefined
+        ? {}
+        : { isSubagent: this.context.isSubagent }),
+      ...(this.context.parentMessageId === undefined
+        ? {}
+        : { parentMessageId: this.context.parentMessageId }),
+      ...(this.context.maxSteps === undefined
+        ? {}
+        : { maxSteps: this.context.maxSteps }),
+      ...(environment === undefined ? {} : { environment }),
+      ...(this.context.tools === undefined
+        ? {}
+        : { tools: this.context.tools }),
+    };
+  }
+
+  private lifecycleSessionParams(): LifecycleSessionParams {
+    const environment = toToolExecutionEnvironment(this.context.sandboxLease);
+    if (!this.context.directory || !this.context.modelId) {
+      throw new Error("Session run requires directory and model id");
+    }
+
+    return {
+      directory: this.context.directory,
+      modelId: this.context.modelId,
+      sessionId: this.context.sessionId,
       signal: this.context.abortSignal,
       ...(this.context.agent === undefined
         ? {}
@@ -240,6 +288,46 @@ export class RunWorker {
         delta: event.delta,
         content: event.content,
       });
+      return;
+    }
+
+    if (event.type === "turn:start") {
+      this.publish(
+        scope,
+        "run.turn.start",
+        withDefined({
+          runId: this.context.runId,
+          sessionId: this.context.sessionId,
+          timestamp: event.timestamp,
+          step: event.step,
+          usage: safeJsonValue(event.usage),
+          compaction:
+            event.compaction === undefined
+              ? undefined
+              : safeJsonValue(event.compaction),
+          hasSummary: event.hasSummary,
+        }),
+      );
+      return;
+    }
+
+    if (event.type === "turn:end") {
+      this.publish(
+        scope,
+        "run.turn.end",
+        withDefined({
+          runId: this.context.runId,
+          sessionId: this.context.sessionId,
+          timestamp: event.timestamp,
+          step: event.step,
+          usage: safeJsonValue(event.usage),
+          finishReason: event.finishReason,
+          toolResults:
+            event.toolResults === undefined
+              ? undefined
+              : safeJsonValue(event.toolResults),
+        }),
+      );
       return;
     }
 
@@ -283,6 +371,25 @@ export class RunWorker {
         params: event.params,
         result: serializableToolResult(event.result),
       });
+      return;
+    }
+
+    if (event.type === "step:complete") {
+      this.publish(
+        scope,
+        "run.step.complete",
+        withDefined({
+          runId: this.context.runId,
+          sessionId: this.context.sessionId,
+          timestamp: event.timestamp,
+          step: event.step,
+          finishReason: event.finishReason,
+          toolResults:
+            event.toolResults === undefined
+              ? undefined
+              : safeJsonValue(event.toolResults),
+        }),
+      );
     }
   }
 

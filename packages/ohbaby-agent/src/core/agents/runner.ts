@@ -1,8 +1,10 @@
 import type { ChatCompletionCreateParams } from "openai/resources/chat/completions/completions";
+import type { LifecycleEvent } from "../lifecycle/index.js";
 import type { ToolDefinition } from "../tool-scheduler/index.js";
 import { extractFinalOutput } from "./output.js";
 import type {
   AgentRunDeps,
+  AgentRunEventSource,
   AgentRunInput,
   AgentRunResult,
   AgentToolCallSummary,
@@ -82,7 +84,10 @@ function completionError(input: {
   readonly completionError?: string;
   readonly signal?: AbortSignal;
 }): string | undefined {
-  return input.completionError ?? (input.signal?.aborted ? abortReason(input.signal) : undefined);
+  return (
+    input.completionError ??
+    (input.signal?.aborted ? abortReason(input.signal) : undefined)
+  );
 }
 
 function cleanupSessionEnvironment(
@@ -96,6 +101,28 @@ function cleanupSessionEnvironment(
     }
     cleaned = true;
     deps.sandboxManager?.setSessionEnvironment(sessionId, undefined);
+  };
+}
+
+function preSubscribeRunEvents(input: {
+  readonly runEventSource: AgentRunEventSource;
+  readonly runId: string;
+}): {
+  readonly events: AsyncIterable<LifecycleEvent>;
+  close(): Promise<void>;
+} {
+  const iterator = input.runEventSource
+    .subscribeRunEvents(input.runId)
+    [Symbol.asyncIterator]();
+  return {
+    events: {
+      [Symbol.asyncIterator](): AsyncIterator<LifecycleEvent> {
+        return iterator;
+      },
+    },
+    async close(): Promise<void> {
+      await iterator.return?.();
+    },
   };
 }
 
@@ -121,22 +148,28 @@ export async function runAgent(
 
   try {
     const userMessageId = await writeInitialUserMessage(deps, input);
-    const messages = await input.buildPromptMessages({
-      agentName: input.agentName,
-      isSubagent,
-      projectRoot: input.projectRoot,
-      sessionId: input.sessionId,
-    });
-    const record = await deps.runCoordinator.create({
-      agent: input.agentName,
-      isSubagent,
-      maxSteps: input.maxSteps,
-      messages,
-      parentMessageId: userMessageId ?? input.parentMessageId,
-      sessionId: input.sessionId,
-      tools: toOpenAiTools(tools),
-      triggerSource: "user",
-    });
+    const preSubscribed =
+      input.waitMode === "stream" && input.runId && runEventSource
+        ? preSubscribeRunEvents({ runEventSource, runId: input.runId })
+        : undefined;
+    let record: Awaited<ReturnType<AgentRunDeps["runCoordinator"]["create"]>>;
+    try {
+      record = await deps.runCoordinator.create({
+        agent: input.agentName,
+        directory: input.projectRoot,
+        isSubagent,
+        maxSteps: input.maxSteps,
+        modelId: input.modelId,
+        parentMessageId: userMessageId ?? input.parentMessageId,
+        runId: input.runId,
+        sessionId: input.sessionId,
+        tools: toOpenAiTools(tools),
+        triggerSource: "user",
+      });
+    } catch (error) {
+      await preSubscribed?.close();
+      throw error;
+    }
     const unbindAbort = bindAgentAbort({
       cancel: deps.runCoordinator.cancel.bind(deps.runCoordinator),
       runId: record.runId,
@@ -147,7 +180,13 @@ export async function runAgent(
         if (!runEventSource) {
           throw new Error("Agent run event source is required for stream mode");
         }
-        const events = runEventSource.subscribeRunEvents(record.runId);
+        if (input.runId && record.runId !== input.runId) {
+          throw new Error(
+            `Agent run coordinator created unexpected run id: ${record.runId}`,
+          );
+        }
+        const events =
+          preSubscribed?.events ?? runEventSource.subscribeRunEvents(record.runId);
         void deps.runCoordinator
           .waitForCompletion(record.runId)
           .finally(() => {
@@ -162,6 +201,7 @@ export async function runAgent(
           sessionId: record.sessionId,
         };
       } catch (error) {
+        await preSubscribed?.close();
         unbindAbort();
         cleanupEnvironment();
         throw error;
@@ -199,7 +239,6 @@ export async function runAgent(
             completionError: completion.error,
             signal: input.signal,
           }) ?? "agent run failed",
-        finalOutput: output,
         finishReason: "error" as const,
         success: false,
       };

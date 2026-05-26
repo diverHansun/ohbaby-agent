@@ -3,6 +3,7 @@ import type {
   LifecycleEvent,
   LifecycleResult,
   LifecycleRunParams,
+  LifecycleSessionParams,
 } from "../../core/lifecycle/index.js";
 import type { ToolCallResult } from "../../core/tool-scheduler/index.js";
 import {
@@ -259,6 +260,75 @@ class CompletingLifecycle implements RunLifecycle {
   }
 }
 
+class SessionLifecycle implements RunLifecycle {
+  readonly calls: LifecycleSessionParams[] = [];
+
+  async *run(
+    params: LifecycleRunParams,
+  ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
+    await Promise.resolve();
+    yield {
+      sessionId: params.sessionId,
+      timestamp: 1,
+      type: "llm:start",
+    };
+    throw new Error("message run path should not be used");
+  }
+
+  async *runSession(
+    params: LifecycleSessionParams,
+  ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
+    await Promise.resolve();
+    this.calls.push(params);
+    yield {
+      compaction: undefined,
+      hasSummary: false,
+      sessionId: params.sessionId,
+      step: 1,
+      timestamp: 5,
+      type: "turn:start",
+      usage: {
+        contextLimit: 128,
+        currentTokens: 10,
+        modelId: params.modelId,
+        remainingTokens: 118,
+        shouldCompress: false,
+        usageRatio: 0.08,
+      },
+    };
+    yield {
+      completeMessage: { role: "assistant", content: "Hello" },
+      content: "Hello",
+      delta: "Hello",
+      sessionId: params.sessionId,
+      step: 1,
+      timestamp: 20,
+      type: "llm:delta",
+    };
+    yield {
+      finishReason: "stop",
+      sessionId: params.sessionId,
+      step: 1,
+      timestamp: 30,
+      type: "turn:end",
+      usage: {
+        contextLimit: 128,
+        currentTokens: 10,
+        modelId: params.modelId,
+        remainingTokens: 118,
+        shouldCompress: false,
+        usageRatio: 0.08,
+      },
+    };
+
+    return {
+      finalResponse: "Hello",
+      finishReason: "stop",
+      success: true,
+    };
+  }
+}
+
 class BlockingLifecycle implements RunLifecycle {
   readonly started = createDeferred<AbortSignal | undefined>();
   readonly finish = createDeferred<undefined>();
@@ -511,6 +581,37 @@ function createManagerWithOverrides(input: {
 }
 
 describe("RunManager", () => {
+  it("starts a session run without preassembled messages", async () => {
+    const lifecycle = new SessionLifecycle();
+    const { manager, bridge } = createManager(lifecycle);
+
+    const record = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      runId: "run_explicit",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+    await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
+      status: "succeeded",
+    });
+
+    expect(record.runId).toBe("run_explicit");
+    expect(lifecycle.calls[0]).toMatchObject({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_1",
+    });
+    expect(bridge.events.map((event) => event.event)).toEqual([
+      "run.updated",
+      "run.updated",
+      "run.turn.start",
+      "message.part.delta",
+      "run.turn.end",
+      "run.updated",
+    ]);
+  });
+
   it("starts a run, streams lifecycle events, and records success", async () => {
     const lifecycle = new CompletingLifecycle();
     const { manager, ledger, bridge, hooks, sandboxManager } =

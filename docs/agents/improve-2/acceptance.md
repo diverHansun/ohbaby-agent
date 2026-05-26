@@ -94,7 +94,7 @@
 
 **判定**：
 
-- `agents/service.ts` 的 `AgentService` 类暴露 `startSession(params: StartSessionParams): AsyncIterable<LifecycleEvent>`。
+- `agents/service.ts` 的 `AgentService` 类暴露 `startSession(params: StartSessionParams): Promise<AgentSessionStartResult>`，结果包含 `runId / sessionId / events`。
 - `agents/types.ts`（或 `agents/service.ts`）导出 `StartSessionParams` 类型。
 - `agents/index.ts` 导出 `StartSessionParams`。
 - `pnpm -F ohbaby-agent typecheck` 通过。
@@ -144,16 +144,16 @@
 - 期间无 primary 路径相关的回归报告。
 - 此项为 Phase 3 启动的硬门槛。
 
-### AC-2.7 `messages/buildPromptMessages` 过渡债务被显式处理
+### AC-2.7 `messages/buildPromptMessages` 过渡债务被删除
 
 **判定**：
 
-- Phase 2 完成前，文档与类型注释明确 `AgentPromptMessageBuilder` 是过渡期抽象。
-- lifecycle improve-2 接合完成后，满足以下二选一：
-  - `AgentRunCreateOptions.messages` 已删除，`runAgent` 不再调用 `buildPromptMessages`；或
-  - `messages` 与 `buildPromptMessages` 被标记为 `@deprecated`，并有明确删除 follow-up。
+- `core/agents/types.ts` 不再导出 `AgentPromptMessageBuilder`。
+- `AgentRunInput` 不再包含 `buildPromptMessages`。
+- `AgentRunCreateOptions` 不再包含 `messages`，agent 路径改传 `directory / modelId`。
+- `runAgent` 不再调用 `buildPromptMessages`。
 - `composition.ts` 不再持有 primary prompt/context 组装逻辑。
-- `Lifecycle.runSession -> context.prepareTurn` 是长期唯一的 turn message 组装路径。
+- `Lifecycle.runSession -> context.prepareTurn` 是长期唯一的 agent turn message 组装路径。
 
 ---
 

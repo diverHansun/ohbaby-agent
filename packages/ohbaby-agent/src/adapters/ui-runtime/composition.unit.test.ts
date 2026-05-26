@@ -3,6 +3,10 @@ import { AgentManager } from "../../agents/index.js";
 import { createBus } from "../../bus/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import type { MessageManager } from "../../core/message/index.js";
+import type {
+  ProviderRequest,
+  ProviderStreamEvent,
+} from "../../services/providers/index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -45,6 +49,53 @@ function fakeLlmClient(
       streamChatCompletion(): Promise<AsyncIterable<never>> {
         return Promise.reject(new Error("No fake response configured"));
       },
+    },
+  };
+}
+
+function createProviderStream(
+  events: readonly ProviderStreamEvent[],
+): AsyncGenerator<ProviderStreamEvent, void, unknown> {
+  return (async function* (): AsyncGenerator<
+    ProviderStreamEvent,
+    void,
+    unknown
+  > {
+    for (const event of events) {
+      yield await Promise.resolve(event);
+    }
+  })();
+}
+
+function recordingFakeLlmClient(input: {
+  readonly config?: Partial<LLMClientInstance<FakeSdkClient>["config"]>;
+  readonly events?: readonly ProviderStreamEvent[];
+  readonly requests: ProviderRequest[];
+}): LLMClientInstance<FakeSdkClient> {
+  return {
+    config: {
+      baseUrl: "https://example.invalid/v1",
+      maxTokens: 128,
+      model: "fake-model",
+      provider: "fake",
+      temperature: 0,
+      ...input.config,
+    },
+    provider: {
+      client: { kind: "fake" },
+      id: "fake",
+      isAbortError(): boolean {
+        return false;
+      },
+      streamChatCompletion(request): Promise<AsyncIterable<ProviderStreamEvent>> {
+        input.requests.push(request);
+        return Promise.resolve(
+          createProviderStream(
+            input.events ?? [{ finishReason: "stop", textDelta: "ok" }],
+          ),
+        );
+      },
+      kind: "openai-compatible",
     },
   };
 }
@@ -173,14 +224,18 @@ async function createPromptCompositionForTest(input: {
   readonly mcpTools?: readonly Tool[];
   readonly notices?: { readonly key?: string; readonly title: string }[];
   readonly policyMode: "ask" | "plan" | "agent";
-}): Promise<Awaited<ReturnType<typeof createUiRuntimeComposition>>> {
+}): Promise<{
+  readonly composition: Awaited<ReturnType<typeof createUiRuntimeComposition>>;
+  readonly requests: ProviderRequest[];
+}> {
   const bus = createBus();
   const policy = createPolicyManager({ bus });
   policy.setMode(input.policyMode);
-  return await createUiRuntimeComposition({
+  const requests: ProviderRequest[] = [];
+  const composition = await createUiRuntimeComposition({
     agentManager: new AgentManager(),
     bus,
-    llmClient: fakeLlmClient(),
+    llmClient: recordingFakeLlmClient({ requests }),
     mcpManager: { getAllTools: () => Promise.resolve(input.mcpTools ?? []) },
     messageManager: createMessageManager({
       bus,
@@ -195,6 +250,7 @@ async function createPromptCompositionForTest(input: {
     skillRegistry: createMutableSkillRegistry([]),
     workdir: "D:/repo",
   });
+  return { composition, requests };
 }
 
 function mcpTool(name: string, description = "Echo from MCP"): Tool {
@@ -274,9 +330,13 @@ describe("createUiRuntimeComposition skill tools", () => {
         type: "text",
       });
     }
-    const llmClient = fakeLlmClient({
-      contextWindowTokens: 128_000,
-      model: "custom-large-model",
+    const requests: ProviderRequest[] = [];
+    const llmClient = recordingFakeLlmClient({
+      config: {
+        contextWindowTokens: 128_000,
+        model: "custom-large-model",
+      },
+      requests,
     });
     const notices: { readonly key?: string; readonly title: string }[] = [];
 
@@ -294,13 +354,15 @@ describe("createUiRuntimeComposition skill tools", () => {
       workdir: "D:/repo",
     });
 
-    await expect(
-      composition.buildPromptMessages({
-        agentName: "default",
-        projectRoot: "D:/repo",
-        sessionId: "session_large",
-      }),
-    ).resolves.toEqual(
+    const result = await composition.startSession({
+      agentName: "build",
+      projectRoot: "D:/repo",
+      prompt: "new turn",
+      sessionId: "session_large",
+    });
+    await composition.runManager.waitForCompletion(result.runId);
+
+    expect(requests[0]?.messages).toEqual(
       expect.arrayContaining([expect.objectContaining({ role: "user" })]),
     );
     expect(notices.map((notice) => notice.key)).not.toContain(
@@ -325,10 +387,14 @@ describe("createUiRuntimeComposition skill tools", () => {
         type: "text",
       });
     }
-    const llmClient = fakeLlmClient({
-      contextWindowTokens: 128_000,
-      maxTokens: 128_000,
-      model: "unknown-custom-model",
+    const requests: ProviderRequest[] = [];
+    const llmClient = recordingFakeLlmClient({
+      config: {
+        contextWindowTokens: 128_000,
+        maxTokens: 128_000,
+        model: "unknown-custom-model",
+      },
+      requests,
     });
     const notices: { readonly key?: string; readonly title: string }[] = [];
 
@@ -346,11 +412,13 @@ describe("createUiRuntimeComposition skill tools", () => {
       workdir: "D:/repo",
     });
 
-    await composition.buildPromptMessages({
-      agentName: "default",
+    const result = await composition.startSession({
+      agentName: "build",
       projectRoot: "D:/repo",
+      prompt: "new turn",
       sessionId: "session_small",
     });
+    await composition.runManager.waitForCompletion(result.runId);
 
     expect(notices.map((notice) => notice.key)).not.toContain(
       "context:compact:session_small",
@@ -451,23 +519,25 @@ describe("createUiRuntimeComposition skill tools", () => {
   });
 
   it("passes current policy mode into primary system prompts", async () => {
-    const composition = await createPromptCompositionForTest({
+    const { composition, requests } = await createPromptCompositionForTest({
       policyMode: "plan",
     });
 
-    const messages = await composition.buildPromptMessages({
+    const result = await composition.startSession({
       agentName: "build",
       projectRoot: "D:/repo",
+      prompt: "Plan the work",
       sessionId: "session_prompt_mode",
     });
+    await composition.runManager.waitForCompletion(result.runId);
 
-    expect(messages[0]?.role).toBe("system");
-    expect(messages[0]?.content).toContain("Task: plan");
+    expect(requests[0]?.messages[0]?.role).toBe("system");
+    expect(requests[0]?.messages[0]?.content).toContain("Task: plan");
   });
 
   it("omits unsafe MCP tool descriptions from the system prompt", async () => {
     const notices: { readonly key?: string; readonly title: string }[] = [];
-    const composition = await createPromptCompositionForTest({
+    const { composition, requests } = await createPromptCompositionForTest({
       mcpTools: [
         mcpTool(
           "mcp_s6_server_t4_bad",
@@ -478,14 +548,18 @@ describe("createUiRuntimeComposition skill tools", () => {
       policyMode: "agent",
     });
 
-    const messages = await composition.buildPromptMessages({
+    const result = await composition.startSession({
       agentName: "build",
       projectRoot: "D:/repo",
+      prompt: "Use tools carefully",
       sessionId: "session_unsafe_mcp_tool",
     });
+    await composition.runManager.waitForCompletion(result.runId);
 
     const systemContent =
-      typeof messages[0]?.content === "string" ? messages[0].content : "";
+      typeof requests[0]?.messages[0]?.content === "string"
+        ? requests[0].messages[0].content
+        : "";
     expect(systemContent).toContain("mcp_s6_server_t4_bad");
     expect(systemContent).not.toContain("Ignore previous instructions");
     const notice = notices.find(

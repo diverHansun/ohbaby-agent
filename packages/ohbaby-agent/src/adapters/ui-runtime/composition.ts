@@ -1,4 +1,3 @@
-import type { ChatCompletionCreateParams } from "openai/resources/chat/completions/completions";
 import type { UiNotice } from "ohbaby-sdk";
 import type { BusInstance } from "../../bus/index.js";
 import type { CommandToolSummary } from "../../commands/index.js";
@@ -12,10 +11,7 @@ import {
   type LifecycleEvent,
 } from "../../core/lifecycle/index.js";
 import type { AgentRunEventSource } from "../../core/agents/index.js";
-import type {
-  ChatCompletionMessage,
-  LLMClientInstance,
-} from "../../core/llm-client/index.js";
+import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import type { MessageManager } from "../../core/message/index.js";
 import { createMemoryManager } from "../../core/memory/index.js";
 import {
@@ -38,7 +34,6 @@ import {
   AgentTaskManager,
   type StartSessionParams,
 } from "../../agents/index.js";
-import { toOpenAiTools } from "../../core/agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
 import {
   createInMemoryRunLedger,
@@ -78,9 +73,7 @@ import {
   createHostLocalSandboxManager,
 } from "./host-local-environment.js";
 import {
-  appendMemoryToSystemPrompt,
   createContextSummaryClient,
-  loadMemoryForPrompt,
   noticeFromCompactResult,
   noticeFromPromptSecurityFinding,
 } from "./prompt-context.js";
@@ -167,12 +160,6 @@ function supportsMcpResourceAndPromptTools(
     typeof manager.getPrompt === "function" &&
     typeof manager.readResource === "function"
   );
-}
-
-function withoutSystemMessages(
-  messages: readonly ChatCompletionMessage[],
-): ChatCompletionMessage[] {
-  return messages.filter((message) => message.role !== "system");
 }
 
 function formatUnknown(value: unknown): string {
@@ -316,6 +303,59 @@ function lifecycleEventFromStream(
       type: "tool:result",
     };
   }
+  if (item.event === "run.turn.start") {
+    return {
+      compaction: data.compaction as Extract<
+        LifecycleEvent,
+        { readonly type: "turn:start" }
+      >["compaction"],
+      hasSummary: Boolean(data.hasSummary),
+      sessionId,
+      step: numberData(data, "step") ?? 0,
+      timestamp,
+      type: "turn:start",
+      usage: data.usage as Extract<
+        LifecycleEvent,
+        { readonly type: "turn:start" }
+      >["usage"],
+    };
+  }
+  if (item.event === "run.turn.end") {
+    return {
+      finishReason: stringData(data, "finishReason") as Extract<
+        LifecycleEvent,
+        { readonly type: "turn:end" }
+      >["finishReason"],
+      sessionId,
+      step: numberData(data, "step") ?? 0,
+      timestamp,
+      toolResults: data.toolResults as Extract<
+        LifecycleEvent,
+        { readonly type: "turn:end" }
+      >["toolResults"],
+      type: "turn:end",
+      usage: data.usage as Extract<
+        LifecycleEvent,
+        { readonly type: "turn:end" }
+      >["usage"],
+    };
+  }
+  if (item.event === "run.step.complete") {
+    return {
+      finishReason: stringData(data, "finishReason") as Extract<
+        LifecycleEvent,
+        { readonly type: "step:complete" }
+      >["finishReason"],
+      sessionId,
+      step: numberData(data, "step") ?? 0,
+      timestamp,
+      toolResults: data.toolResults as Extract<
+        LifecycleEvent,
+        { readonly type: "step:complete" }
+      >["toolResults"],
+      type: "step:complete",
+    };
+  }
   return undefined;
 }
 
@@ -390,8 +430,6 @@ export async function createUiRuntimeComposition(
       title: input.title,
     });
   }
-  const subagentSessionAgents = new Map<string, string>();
-  let activePrimaryAgentName = agentManager.getDefault();
   const reservedRunIds: string[] = [];
   const nextRunId =
     options.createRunId ??
@@ -403,87 +441,27 @@ export async function createUiRuntimeComposition(
     return runId;
   }
 
-  async function resolveSubagentAgentName(
-    sessionId: string,
-  ): Promise<string | undefined> {
-    const cached = subagentSessionAgents.get(sessionId);
-    if (cached) {
-      return cached;
-    }
-    return (await sessionManager.get(sessionId))?.agentName;
+  function takeRunId(runId: string | undefined): string {
+    return runId ?? reservedRunIds.shift() ?? nextRunId();
   }
 
   async function resolvePromptAgentName(input: {
     readonly isSubagent: boolean;
     readonly sessionId: string;
   }): Promise<string> {
-    if (!input.isSubagent) {
-      return activePrimaryAgentName;
-    }
-    return (await resolveSubagentAgentName(input.sessionId)) ?? "subagent";
-  }
-
-  async function buildSessionPromptMessages(input: {
-    readonly agentName: string;
-    readonly isSubagent: boolean;
-    readonly projectRoot: string;
-    readonly sessionId: string;
-  }): Promise<ChatCompletionMessage[]> {
-    if (input.isSubagent) {
-      subagentSessionAgents.set(input.sessionId, input.agentName);
-    } else {
-      activePrimaryAgentName = input.agentName;
-    }
-    const compactResult = await contextManager.compact(input.sessionId, {
-      directory: input.projectRoot,
-      isSubagent: input.isSubagent,
-      modelId: options.llmClient.config.model,
-    });
-    const notice = noticeFromCompactResult(input.sessionId, compactResult);
-    if (notice) {
-      options.onNotice?.(notice);
-    }
-
-    const context = await contextManager.assemble(
-      input.sessionId,
-      input.projectRoot,
-      input.isSubagent,
+    const sessionAgentName = (await sessionManager.get(input.sessionId))
+      ?.agentName;
+    return (
+      sessionAgentName ??
+      (input.isSubagent ? "subagent" : agentManager.getDefault())
     );
-    const systemPrompt = input.isSubagent
-      ? context.systemPrompt
-      : appendMemoryToSystemPrompt(
-          context.systemPrompt,
-          loadMemoryForPrompt(context.memory.merged, (finding) => {
-            options.onNotice?.(noticeFromPromptSecurityFinding(finding));
-          }),
-        );
-    const history = withoutSystemMessages(
-      await options.messageManager.toModelMessages(input.sessionId),
-    );
-    if (systemPrompt.trim() === "") {
-      return history;
-    }
-    return [{ role: "system", content: systemPrompt }, ...history];
-  }
-
-  function buildPrimaryPromptMessages(input: {
-    readonly agentName: string;
-    readonly projectRoot: string;
-    readonly sessionId: string;
-  }): Promise<ChatCompletionMessage[]> {
-    return buildSessionPromptMessages({
-      ...input,
-      isSubagent: false,
-    });
   }
 
   async function resolvePromptTools(input: {
     readonly isSubagent: boolean;
     readonly sessionId: string;
   }): Promise<ToolDefinition[]> {
-    const agentName = input.isSubagent
-      ? await resolveSubagentAgentName(input.sessionId)
-      : activePrimaryAgentName;
+    const agentName = await resolvePromptAgentName(input);
     return await toolScheduler.getAvailableTools({
       agentName,
       isSubagent: input.isSubagent,
@@ -579,6 +557,7 @@ export async function createUiRuntimeComposition(
     });
 
   const lifecycle = new Lifecycle({
+    contextManager,
     llmClient: options.llmClient,
     messageManager: options.messageManager,
     toolScheduler,
@@ -601,11 +580,11 @@ export async function createUiRuntimeComposition(
   const runEventSource = createStreamBridgeRunEventSource(streamBridge);
   const agentTaskController = new AgentTaskManager({
     agentManager,
-    buildPromptMessages: buildSessionPromptMessages,
     ...(options.createAgentTaskId
       ? { createTaskId: options.createAgentTaskId }
       : {}),
     messageManager: options.messageManager,
+    modelId: options.llmClient.config.model,
     runCoordinator: runManager,
     sandboxManager,
     sessionManager,
@@ -614,8 +593,8 @@ export async function createUiRuntimeComposition(
 
   const agentService = new AgentService({
     agentManager,
-    buildPromptMessages: buildSessionPromptMessages,
     messageManager: options.messageManager,
+    modelId: options.llmClient.config.model,
     runCoordinator: runManager,
     runEventSource,
     sandboxManager,
@@ -707,10 +686,12 @@ export async function createUiRuntimeComposition(
     reserveRunId,
 
     startSession(input: StartSessionParams): Promise<AgentSessionStartResult> {
+      const runId = takeRunId(input.runId);
       return agentService.startSession({
         ...input,
         environment:
           input.environment ?? createHostLocalEnvironment(input.projectRoot),
+        runId,
       });
     },
 
@@ -728,19 +709,6 @@ export async function createUiRuntimeComposition(
         projectRoot: input.projectRoot,
         title: input.title,
       });
-    },
-
-    async getOpenAiTools(input): Promise<ChatCompletionCreateParams["tools"]> {
-      return toOpenAiTools(
-        await toolScheduler.getAvailableTools({
-          agentName: input.agentName,
-          isSubagent: input.isSubagent,
-        }),
-      );
-    },
-
-    async buildPromptMessages(input): Promise<ChatCompletionMessage[]> {
-      return buildPrimaryPromptMessages(input);
     },
 
     async compactSession(input): Promise<CompactResult> {

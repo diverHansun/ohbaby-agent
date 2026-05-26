@@ -94,6 +94,7 @@ export interface StartSessionParams {
   readonly sessionId: string;
   readonly projectRoot: string;
   readonly prompt: string;
+  readonly runId?: string;
   readonly title?: string;
   readonly signal?: AbortSignal;
   readonly environment?: ToolExecutionEnvironment;

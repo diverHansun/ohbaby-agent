@@ -9,6 +9,7 @@ import type {
   ParsedToolCall,
   TokenUsage,
 } from "../llm-client/index.js";
+import type { PreparedTurn } from "../context/index.js";
 import type {
   CoreMessage,
   MessageManager,
@@ -515,6 +516,8 @@ export class Lifecycle {
     let usage: LifecycleResult["usage"];
     let finalResponse = "";
     const allToolCalls: ParsedToolCall[] = [];
+    let preparedTurn: PreparedTurn | undefined;
+    let conversationMessages: ChatCompletionMessage[] | undefined;
 
     for (let step = 1; step <= maxSteps; step += 1) {
       if (params.signal?.aborted) {
@@ -527,35 +530,42 @@ export class Lifecycle {
         };
       }
 
-      const prepared = await contextManager.prepareTurn({
-        directory: params.directory,
-        isSubagent: params.isSubagent,
-        modelId: params.modelId,
-        sessionId: params.sessionId,
-      });
-      yield {
-        type: "turn:start",
-        compaction: prepared.compaction,
-        hasSummary: prepared.hasSummary,
-        sessionId: params.sessionId,
-        step,
-        timestamp: Date.now(),
-        usage: prepared.usage,
-      };
+      if (!conversationMessages) {
+        preparedTurn = await contextManager.prepareTurn({
+          directory: params.directory,
+          isSubagent: params.isSubagent,
+          modelId: params.modelId,
+          sessionId: params.sessionId,
+        });
+        conversationMessages = [...preparedTurn.messages];
+        yield {
+          type: "turn:start",
+          compaction: preparedTurn.compaction,
+          hasSummary: preparedTurn.hasSummary,
+          sessionId: params.sessionId,
+          step,
+          timestamp: Date.now(),
+          usage: preparedTurn.usage,
+        };
+      }
+      const prepared = preparedTurn;
+      if (!prepared) {
+        throw new Error("Lifecycle.runSession failed to prepare context");
+      }
 
       const runParams: LifecycleRunParams = {
         agent: params.agent,
         environment: params.environment,
         isSubagent: params.isSubagent,
         maxSteps: params.maxSteps,
-        messages: prepared.messages,
+        messages: conversationMessages,
         parentMessageId,
         sessionId: params.sessionId,
         signal: params.signal,
         tools: params.tools,
       };
       const stepResult = yield* this.runModelStep({
-        conversationMessages: prepared.messages,
+        conversationMessages,
         params: runParams,
         parentMessageId,
         step,
@@ -725,6 +735,13 @@ export class Lifecycle {
         };
       }
 
+      conversationMessages.push(
+        toAssistantToolMessage({
+          completeMessage: finalEvent.completeMessage,
+          toolCalls,
+        }),
+        ...toolResults.map(toolResultToMessage),
+      );
       yield {
         type: "step:complete",
         finishReason: finalEvent.finishReason,

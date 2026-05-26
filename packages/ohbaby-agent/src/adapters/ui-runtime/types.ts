@@ -1,7 +1,5 @@
-import type { ChatCompletionCreateParams } from "openai/resources/chat/completions/completions";
 import type { UiEvent } from "ohbaby-sdk";
 import type { CommandToolSummary } from "../../commands/index.js";
-import type { ChatCompletionMessage } from "../../core/llm-client/index.js";
 import type { CompactResult } from "../../core/context/index.js";
 import type { ToolSchedulerInstance } from "../../core/tool-scheduler/index.js";
 import type {
@@ -32,15 +30,6 @@ export interface UiRuntimeComposition {
     readonly projectRoot: string;
     readonly title: string;
   }): Promise<void>;
-  getOpenAiTools(input: {
-    readonly agentName?: string;
-    readonly isSubagent?: boolean;
-  }): Promise<ChatCompletionCreateParams["tools"]>;
-  buildPromptMessages(input: {
-    readonly agentName: string;
-    readonly projectRoot: string;
-    readonly sessionId: string;
-  }): Promise<ChatCompletionMessage[]>;
   compactSession(input: {
     readonly force?: boolean;
     readonly isSubagent?: boolean;

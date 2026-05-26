@@ -4,11 +4,9 @@ import { AgentRegistry } from "../registry.js";
 import type { AgentsConfig } from "../types.js";
 import { AgentTaskManager } from "./manager.js";
 import type {
-  AgentPromptMessageBuilder,
   AgentRunCompletion,
   AgentRunCoordinator,
 } from "../../core/agents/index.js";
-import type { ChatCompletionMessage } from "../../core/llm-client/index.js";
 import type {
   CoreMessage,
   MessageManager,
@@ -119,7 +117,6 @@ function assistantText(sessionId: string, text: string): MessageWithParts {
 }
 
 interface AgentRuntimeFixture {
-  readonly buildPromptMessages: AgentPromptMessageBuilder;
   readonly cancel: ReturnType<typeof vi.fn>;
   readonly complete: (
     index: number,
@@ -196,10 +193,6 @@ function createAgentRuntime(): AgentRuntimeFixture {
     (): Promise<ToolDefinition[]> => Promise.resolve([]),
   );
   return {
-    buildPromptMessages: vi.fn(
-      (): Promise<readonly ChatCompletionMessage[]> =>
-        Promise.resolve([{ content: "system", role: "system" }]),
-    ),
     cancel,
     complete(index, output, status = "succeeded"): void {
       const control = controls.at(index - 1);
@@ -219,9 +212,7 @@ function createAgentRuntime(): AgentRuntimeFixture {
       }),
       removeMessage: vi.fn((): Promise<void> => Promise.resolve()),
       removeMessages: vi.fn((): Promise<void> => Promise.resolve()),
-      toModelMessages: vi.fn((): Promise<ChatCompletionMessage[]> =>
-        Promise.resolve([]),
-      ),
+      toModelMessages: vi.fn(() => Promise.resolve([])),
       updateMessage: vi.fn((): Promise<CoreMessage> =>
         Promise.resolve({
           agent: "explore",
@@ -263,10 +254,10 @@ async function createManager(input: {
   return {
     manager: new AgentTaskManager({
       agentManager: await createAgentManager(),
-      buildPromptMessages: runtime.buildPromptMessages,
       createTaskId: input.createTaskId,
       maxTasksPerParent: input.maxTasksPerParent,
       messageManager: runtime.messageManager,
+      modelId: "fake-model",
       runCoordinator: runtime.runCoordinator,
       sessionManager: createSessionManager(),
       toolScheduler: runtime.toolScheduler,

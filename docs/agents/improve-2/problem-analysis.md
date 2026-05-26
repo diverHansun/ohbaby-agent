@@ -88,20 +88,22 @@ improve-1 期间，primary 启动路径仍由 `composition.ts` 手工构造 mess
 
 **目标方向**：在 Phase 1 实现 stream 分支时，把 `AgentRunResult` 改为以 `mode: "stream" | "waitForCompletion"` 为判别字段的 union。这样 stream、成功等待、失败等待三种结果在类型层面互斥。
 
-### 1.7 `AgentPromptMessageBuilder` 是过渡期抽象
+### 1.7 `AgentPromptMessageBuilder` / `messages` 外部预组装路径需要退场
 
-`AgentRunCreateOptions.messages` 当前仍为必填，导致 `core/agents.runAgent` 必须通过 `buildPromptMessages` 预组装模型消息后再交给 coordinator。这是 improve-1 的合理过渡形态，但它与 lifecycle improve-1/2 的长期方向不同：消息组装应由 `Lifecycle.runSession` 内部通过 `context.prepareTurn` 完成。
+improve-1 的过渡形态中，`core/agents.runAgent` 仍通过 `buildPromptMessages` 预组装模型消息，再把 `AgentRunCreateOptions.messages` 交给 coordinator。这与 lifecycle improve-1/2 的长期方向不同：消息组装应由 `Lifecycle.runSession` 内部通过 `context.prepareTurn` 完成。
 
 **问题**：
 
 - `buildPromptMessages` 让 adapter/service 层继续持有一部分 prompt/context 组装职责。
 - `AgentRunCreateOptions.messages` 必填，使 RunManager 的创建入口仍绑定"外部已组装 messages"的旧路径。
-- 如果文档不承认这是过渡期产物，Phase 2 容易把它固化成长期抽象。
+- 如果继续标记为 deprecated 而不删除，长期仍会保留两套 message 组装入口。
 
 **目标方向**：
 
-- Phase 2 完成前：`messages` 仍可必填，`runAgent` 继续调用 `buildPromptMessages`，作为兼容 RunManager 当前 create 契约的过渡。
-- Phase 2 / lifecycle improve-2 接合完成后：`AgentRunCreateOptions.messages` 改为 optional 或删除；`runAgent` 不再调用 `buildPromptMessages`；`AgentPromptMessageBuilder` 标记为 `@deprecated` 并安排退场。
+- Phase 2 接合 RunManager / RunWorker 与 `Lifecycle.runSession`。
+- `AgentRunCreateOptions.messages` 从 core/agents 启动契约中删除。
+- `runAgent` 不再调用 `buildPromptMessages`。
+- `AgentPromptMessageBuilder` 类型删除，不再作为 deprecated alias 保留。
 
 ---
 
@@ -115,7 +117,7 @@ improve-1 期间，primary 启动路径仍由 `composition.ts` 手工构造 mess
 
 **关键设计点**：
 
-- `AgentService` 新增 `startSession(params): AsyncIterable<LifecycleEvent>` 方法（improve-1 已在类型层预留，本轮实现）。
+- `AgentService` 新增 `startSession(params): Promise<AgentSessionStartResult>` 方法（improve-1 已在类型层预留，本轮实现），返回包含 `runId / sessionId / events` 的 stream envelope。
 - `startSession` 内部调用 `core/agents.runAgent({ waitMode: "stream", ... })`。
 - `core/agents.runAgent` 的 `stream` 分支在 improve-1 仅做了类型预留，本轮实现完整。
 - composition.ts:buildSessionPromptMessages 删除；调用方改为 `agentService.startSession`。
@@ -154,9 +156,9 @@ improve-1 期间，primary 启动路径仍由 `composition.ts` 手工构造 mess
 - `AgentRunResult` 改为 discriminated union，编码 stream / wait success / wait failure 的互斥语义。
 - `core/agents` 只定义 agent 运行所需的最小 port，runtime 侧负责适配。
 
-### 目标六：明确 prompt message builder 的退场路径
+### 目标六：移除 prompt message builder 过渡债务
 
-把 `AgentPromptMessageBuilder` 与 `AgentRunCreateOptions.messages` 明确标注为过渡期形态。Phase 2 切 primary 路径时先保证行为等价；与 lifecycle improve-2 完成接合后，再移除或废弃外部预组装 messages 的入口。
+把 `AgentPromptMessageBuilder` 与 `AgentRunCreateOptions.messages` 作为过渡债务处理。Phase 2 切 primary 路径时同步接合 `Lifecycle.runSession`，并移除外部预组装 messages 的入口。
 
 ---
 
