@@ -4,7 +4,11 @@ import type { CommandToolSummary } from "../../commands/index.js";
 import type { ChatCompletionMessage } from "../../core/llm-client/index.js";
 import type { CompactResult } from "../../core/context/index.js";
 import type { ToolSchedulerInstance } from "../../core/tool-scheduler/index.js";
-import type { AgentManager } from "../../agents/index.js";
+import type {
+  AgentManager,
+  AgentSessionStartResult,
+  StartSessionParams,
+} from "../../agents/index.js";
 import type { RunLedger } from "../../runtime/run-ledger/index.js";
 import type { RunManager } from "../../runtime/run-manager/index.js";
 import type { StreamBridge } from "../../runtime/stream-bridge/index.js";
@@ -18,6 +22,9 @@ export interface UiRuntimeComposition {
   readonly streamBridge: StreamBridge;
   readonly toolScheduler: ToolSchedulerInstance;
   reserveRunId(runId?: string): string;
+  startSession(
+    input: StartSessionParams,
+  ): Promise<AgentSessionStartResult>;
   setSessionWorkdir(sessionId: string, workdir: string): void;
   ensureSessionRecord(input: {
     readonly agentName: string;

@@ -5,6 +5,7 @@ import { AgentRegistry } from "./registry.js";
 import type { AgentsConfig } from "./types.js";
 import type {
   AgentPromptMessageBuilder,
+  AgentRunEventSource,
   AgentRunCoordinator,
 } from "../core/agents/index.js";
 import type { ChatCompletionMessage } from "../core/llm-client/index.js";
@@ -197,10 +198,10 @@ function createRunCoordinator(
   readonly coordinator: AgentRunCoordinator;
   readonly create: ReturnType<typeof vi.fn>;
 } {
-  const create = vi.fn<AgentRunCoordinator["create"]>(() =>
+  const create = vi.fn<AgentRunCoordinator["create"]>((options) =>
     Promise.resolve({
       runId: "run_child",
-      sessionId: "child_1",
+      sessionId: options.sessionId,
     }),
   );
   return {
@@ -241,6 +242,74 @@ function createPromptBuilder(): AgentPromptMessageBuilder {
 }
 
 describe("AgentService", () => {
+  it("starts a primary session through core runAgent stream mode", async () => {
+    const messages = createMessageManager();
+    const runs = createRunCoordinator();
+    const sessionManager = createSessionManager();
+    const event = {
+      content: "hello",
+      completeMessage: { content: "hello", role: "assistant" },
+      delta: "hello",
+      sessionId: "primary_1",
+      timestamp: 1,
+      type: "llm:delta",
+    } as const;
+    const subscribeRunEvents = vi.fn<AgentRunEventSource["subscribeRunEvents"]>(
+      (): AsyncIterable<typeof event> =>
+        (async function* (): AsyncIterable<typeof event> {
+          await Promise.resolve();
+          yield event;
+        })(),
+    );
+    const service = new AgentService({
+      agentManager: await createAgentManager(),
+      buildPromptMessages: createPromptBuilder(),
+      messageManager: messages.manager,
+      runCoordinator: runs.coordinator,
+      runEventSource: { subscribeRunEvents },
+      sessionManager,
+      toolScheduler: createToolScheduler().scheduler,
+    });
+
+    const result = await service.startSession({
+      agentName: "build",
+      prompt: "Say hello",
+      projectRoot: "D:/repo",
+      sessionId: "primary_1",
+      title: "Primary",
+    });
+
+    expect(result).toMatchObject({
+      mode: "stream",
+      runId: "run_child",
+      sessionId: "primary_1",
+    });
+    expect(sessionManager.create).toHaveBeenCalledWith("D:/repo", {
+      agentName: "build",
+      id: "primary_1",
+      title: "Primary",
+    });
+    expect(messages.createMessage).toHaveBeenCalledWith({
+      agent: "build",
+      role: "user",
+      sessionId: "primary_1",
+    });
+    expect(messages.appendPart).toHaveBeenCalledWith("message_child", {
+      text: "Say hello",
+      type: "text",
+    });
+    expect(runs.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agent: "build",
+        isSubagent: false,
+        maxSteps: 50,
+        parentMessageId: "message_child",
+        sessionId: "primary_1",
+      }),
+    );
+    expect(subscribeRunEvents).toHaveBeenCalledWith("run_child");
+  });
+
   it("creates an isolated child session, writes the prompt, and runs through core runAgent", async () => {
     const messages = createMessageManager();
     const runs = createRunCoordinator();

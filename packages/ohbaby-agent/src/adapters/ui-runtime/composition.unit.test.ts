@@ -209,6 +209,49 @@ function mcpTool(name: string, description = "Echo from MCP"): Tool {
 }
 
 describe("createUiRuntimeComposition skill tools", () => {
+  it("starts primary sessions through the agent service stream path", async () => {
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      llmClient: fakeLlmClient(),
+      mcpManager: { getAllTools: () => Promise.resolve([]) },
+      messageManager,
+      policy: createPolicyManager({ bus }),
+      skillRegistry: createMutableSkillRegistry([]),
+      workdir: "D:/repo",
+    });
+    composition.reserveRunId("run_primary");
+
+    const result = await composition.startSession({
+      agentName: "build",
+      projectRoot: "D:/repo",
+      prompt: "Say hello",
+      sessionId: "session_primary",
+      title: "Primary",
+    });
+
+    expect(result).toMatchObject({
+      mode: "stream",
+      runId: "run_primary",
+      sessionId: "session_primary",
+    });
+    const persisted = await messageManager.listBySession("session_primary");
+    expect(
+      persisted.some(
+        (message) =>
+          message.info.role === "user" &&
+          message.parts.some(
+            (part) => part.type === "text" && part.text === "Say hello",
+          ),
+      ),
+    ).toBe(true);
+  });
+
   it("uses configured context window tokens for pre-prompt compaction", async () => {
     const bus = createBus();
     const messageManager = createMessageManager({

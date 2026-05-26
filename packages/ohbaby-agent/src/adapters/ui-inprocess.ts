@@ -800,7 +800,6 @@ export function createInProcessUiBackendClient(
     promptInFlight = true;
     const createdAt = timestamp();
     let projection: ReturnType<typeof startRunStreamProjection> | undefined;
-    let runStarted = false;
     let submittedSessionId: string | undefined;
 
     try {
@@ -848,23 +847,28 @@ export function createInProcessUiBackendClient(
         sessionIds.reserve(session.id);
       }
       const resolvedProjectRoot = session.projectRoot ?? baseProjectRoot;
-      runtime.setSessionWorkdir(session.id, resolvedProjectRoot);
       submittedSessionId = session.id;
+
+      const runId = runtime.reserveRunId(await nextRunId());
+      activeRunId = runId;
+      const result = await runtime.startSession({
+        agentName,
+        prompt: text,
+        projectRoot: resolvedProjectRoot,
+        sessionId: session.id,
+        title: session.title,
+      });
+      if (result.runId !== runId) {
+        throw new Error(
+          `Agent service created unexpected run id: ${result.runId}`,
+        );
+      }
 
       const userMessage = createTextMessage({
         id: messageIds.next(),
         role: "user",
         text,
         createdAt,
-      });
-      const coreUserMessage = await messageManager.createMessage({
-        sessionId: session.id,
-        role: "user",
-        agent: agentName,
-      });
-      await messageManager.appendPart(coreUserMessage.id, {
-        type: "text",
-        text,
       });
 
       if (isNewSession) {
@@ -886,16 +890,7 @@ export function createInProcessUiBackendClient(
         message: cloneMessage(userMessage),
       });
 
-      await runtime.ensureSessionRecord({
-        agentName,
-        id: session.id,
-        projectRoot: resolvedProjectRoot,
-        title: session.title,
-      });
-
-      const runId = runtime.reserveRunId(await nextRunId());
       const assistantMessageId = messageIds.next();
-      activeRunId = runId;
       projection = startRunStreamProjection({
         assistantMessageId,
         nextMessageId: () => messageIds.next(),
@@ -908,40 +903,13 @@ export function createInProcessUiBackendClient(
       });
 
       try {
-        const tools = await runtime.getOpenAiTools({
-          agentName,
-        });
-        const messages = await runtime.buildPromptMessages({
-          agentName,
-          projectRoot: resolvedProjectRoot,
-          sessionId: session.id,
-        });
-        const record = await runtime.runManager.create({
-          agent: agentName,
-          messages,
-          parentMessageId: coreUserMessage.id,
-          sessionId: session.id,
-          tools,
-          triggerSource: "user",
-        });
-        runStarted = true;
-        if (record.runId !== runId) {
-          throw new Error(
-            `Run manager created unexpected run id: ${record.runId}`,
-          );
-        }
-
         const completion = await runtime.runManager.waitForCompletion(runId);
         await projection.done;
         if (completion.status !== "succeeded") {
           throw new Error(completion.error ?? `Run ${completion.status}`);
         }
       } catch (error) {
-        if (runStarted) {
-          await projection.done.catch(() => undefined);
-        } else {
-          await projection.stop();
-        }
+        await projection.done.catch(() => undefined);
         const snapshot = await stateStore.readSnapshot();
         if (snapshot.status.kind !== "error") {
           await updateStatus({

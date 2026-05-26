@@ -7,7 +7,11 @@ import {
   type CompactResult,
   type ContextManager,
 } from "../../core/context/index.js";
-import { Lifecycle } from "../../core/lifecycle/index.js";
+import {
+  Lifecycle,
+  type LifecycleEvent,
+} from "../../core/lifecycle/index.js";
+import type { AgentRunEventSource } from "../../core/agents/index.js";
 import type {
   ChatCompletionMessage,
   LLMClientInstance,
@@ -20,6 +24,7 @@ import {
   type PolicyPort,
   type Tool,
   type ToolDefinition,
+  type ToolCallResult,
 } from "../../core/tool-scheduler/index.js";
 import { createHeuristicTokenCounter } from "../../services/llm-model/index.js";
 import {
@@ -28,8 +33,10 @@ import {
 } from "../../services/session/index.js";
 import {
   AgentManager,
+  type AgentSessionStartResult,
   AgentService,
   AgentTaskManager,
+  type StartSessionParams,
 } from "../../agents/index.js";
 import { toOpenAiTools } from "../../core/agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
@@ -61,7 +68,10 @@ import {
 } from "../../runtime/run-manager/index.js";
 import {
   createInMemoryStreamBridge,
+  END_SENTINEL,
+  HEARTBEAT_SENTINEL,
   type StreamBridge,
+  type StreamBridgeYield,
 } from "../../runtime/stream-bridge/index.js";
 import {
   createHostLocalEnvironment,
@@ -75,6 +85,11 @@ import {
   noticeFromPromptSecurityFinding,
 } from "./prompt-context.js";
 import type { UiRuntimeComposition } from "./types.js";
+
+type LlmCompleteEvent = Extract<
+  LifecycleEvent,
+  { readonly type: "llm:complete" }
+>;
 
 const DEFAULT_RUN_POLICY: RunDefaultsPolicy = {
   defaults: {
@@ -220,6 +235,113 @@ function createSkillLogger(
   };
 }
 
+function objectData(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function stringData(
+  data: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = data[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function numberData(
+  data: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = data[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+function lifecycleEventFromStream(
+  item: Exclude<StreamBridgeYield, typeof END_SENTINEL | typeof HEARTBEAT_SENTINEL>,
+): LifecycleEvent | undefined {
+  const data = objectData(item.data);
+  if (!data) {
+    return undefined;
+  }
+  const sessionId = stringData(data, "sessionId");
+  const timestamp = numberData(data, "timestamp") ?? Date.now();
+  if (!sessionId) {
+    return undefined;
+  }
+
+  if (item.event === "message.part.delta") {
+    const content = stringData(data, "content") ?? "";
+    const delta = stringData(data, "delta") ?? "";
+    return {
+      completeMessage: { content, role: "assistant" },
+      content,
+      delta,
+      sessionId,
+      timestamp,
+      type: "llm:delta",
+    };
+  }
+  if (item.event === "run.llm.complete") {
+    return {
+      completeMessage: { content: "", role: "assistant" },
+      finishReason: stringData(data, "finishReason") as
+        | LlmCompleteEvent["finishReason"]
+        | undefined,
+      sessionId,
+      timestamp,
+      type: "llm:complete",
+    };
+  }
+  if (item.event === "run.tool.start") {
+    return {
+      callId: stringData(data, "callId") ?? "",
+      params: objectData(data.params) ?? {},
+      sessionId,
+      step: numberData(data, "step") ?? 0,
+      timestamp,
+      toolName: stringData(data, "toolName") ?? "",
+      type: "tool:start",
+    };
+  }
+  if (item.event === "run.tool.result") {
+    return {
+      callId: stringData(data, "callId") ?? "",
+      params: objectData(data.params) ?? {},
+      result: data.result as ToolCallResult,
+      sessionId,
+      step: numberData(data, "step") ?? 0,
+      timestamp,
+      toolName: stringData(data, "toolName") ?? "",
+      type: "tool:result",
+    };
+  }
+  return undefined;
+}
+
+function createStreamBridgeRunEventSource(
+  streamBridge: StreamBridge,
+): AgentRunEventSource {
+  return {
+    subscribeRunEvents(runId): AsyncIterable<LifecycleEvent> {
+      return (async function* (): AsyncIterable<LifecycleEvent> {
+        for await (const item of streamBridge.subscribe(`run/${runId}`, 0)) {
+          if (item === END_SENTINEL) {
+            return;
+          }
+          if (item === HEARTBEAT_SENTINEL) {
+            continue;
+          }
+          const event = lifecycleEventFromStream(item);
+          if (event) {
+            yield event;
+          }
+        }
+      })();
+    },
+  };
+}
+
 export async function createUiRuntimeComposition(
   options: UiRuntimeCompositionOptions,
 ): Promise<UiRuntimeComposition> {
@@ -355,18 +477,6 @@ export async function createUiRuntimeComposition(
     });
   }
 
-  function buildSubagentPromptMessages(input: {
-    readonly agentName: string;
-    readonly projectRoot: string;
-    readonly sessionId: string;
-  }): Promise<ChatCompletionMessage[]> {
-    subagentSessionAgents.set(input.sessionId, input.agentName);
-    return buildSessionPromptMessages({
-      ...input,
-      isSubagent: true,
-    });
-  }
-
   async function resolvePromptTools(input: {
     readonly isSubagent: boolean;
     readonly sessionId: string;
@@ -488,9 +598,10 @@ export async function createUiRuntimeComposition(
     streamBridge,
   });
 
+  const runEventSource = createStreamBridgeRunEventSource(streamBridge);
   const agentTaskController = new AgentTaskManager({
     agentManager,
-    buildPromptMessages: buildSubagentPromptMessages,
+    buildPromptMessages: buildSessionPromptMessages,
     ...(options.createAgentTaskId
       ? { createTaskId: options.createAgentTaskId }
       : {}),
@@ -501,15 +612,17 @@ export async function createUiRuntimeComposition(
     toolScheduler,
   });
 
-  const taskExecutor = new AgentService({
+  const agentService = new AgentService({
     agentManager,
-    buildPromptMessages: buildSubagentPromptMessages,
+    buildPromptMessages: buildSessionPromptMessages,
     messageManager: options.messageManager,
     runCoordinator: runManager,
+    runEventSource,
     sandboxManager,
     sessionManager,
     toolScheduler,
   });
+  const taskExecutor = agentService;
 
   for (const tool of createBuiltinTools({
     agentTaskController,
@@ -592,6 +705,14 @@ export async function createUiRuntimeComposition(
     toolScheduler,
 
     reserveRunId,
+
+    startSession(input: StartSessionParams): Promise<AgentSessionStartResult> {
+      return agentService.startSession({
+        ...input,
+        environment:
+          input.environment ?? createHostLocalEnvironment(input.projectRoot),
+      });
+    },
 
     setSessionWorkdir(sessionId, workdir): void {
       sandboxManager.setSessionEnvironment(

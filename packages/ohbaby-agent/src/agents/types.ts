@@ -1,4 +1,5 @@
 import type { ToolExecutionEnvironment } from "../core/tool-scheduler/index.js";
+import type { AgentRunResult } from "../core/agents/index.js";
 
 export type AgentMode = "primary" | "subagent" | "all";
 export type PermissionValue = "allow" | "deny" | "ask";
@@ -87,6 +88,22 @@ export interface SubagentResult {
     readonly duration: number;
   };
 }
+
+export interface StartSessionParams {
+  readonly agentName: string;
+  readonly sessionId: string;
+  readonly projectRoot: string;
+  readonly prompt: string;
+  readonly title?: string;
+  readonly signal?: AbortSignal;
+  readonly environment?: ToolExecutionEnvironment;
+  readonly maxSteps?: number;
+}
+
+export type AgentSessionStartResult = Extract<
+  AgentRunResult,
+  { readonly mode: "stream" }
+>;
 
 export interface TaskExecutor {
   execute(params: SubagentExecuteParams): Promise<SubagentResult>;
