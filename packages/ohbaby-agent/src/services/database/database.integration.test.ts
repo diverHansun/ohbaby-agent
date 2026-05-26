@@ -61,6 +61,13 @@ describe("services/database", () => {
         }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
         .get(schema.session.tableName),
     ).toEqual({ name: "session" });
+    expect(
+      db
+        .prepare<{
+          name: string;
+        }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get("scheduler_job"),
+    ).toBeUndefined();
   });
 
   it("records migrations only once across repeated initialization", async () => {
@@ -78,7 +85,56 @@ describe("services/database", () => {
       { version: "001_initial" },
       { version: "002_part_order_unique" },
       { version: "003_app_state" },
+      { version: "004_drop_scheduler_job" },
     ]);
+  });
+
+  it("drops legacy scheduler_job tables when upgrading an existing database", async () => {
+    const dbPath = await tempDbPath();
+    const legacyMigrations: MigrationDefinition[] = [
+      {
+        version: "001_initial",
+        sql: "CREATE TABLE scheduler_job (id TEXT PRIMARY KEY);",
+      },
+      {
+        version: "002_part_order_unique",
+        sql: "SELECT 1;",
+      },
+      {
+        version: "003_app_state",
+        sql: "SELECT 1;",
+      },
+    ];
+
+    initDatabase({ dbPath, migrations: legacyMigrations });
+    expect(
+      getDatabase()
+        .prepare<{
+          name: string;
+        }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get("scheduler_job"),
+    ).toEqual({ name: "scheduler_job" });
+
+    closeDatabase();
+    initDatabase({ dbPath });
+
+    const db = getDatabase();
+    expect(
+      db
+        .prepare<{
+          name: string;
+        }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get("scheduler_job"),
+    ).toBeUndefined();
+    expect(
+      db
+        .prepare<{
+          version: string;
+        }>(
+          `SELECT version FROM ${schema.migration.tableName} WHERE version = ?`,
+        )
+        .get("004_drop_scheduler_job"),
+    ).toEqual({ version: "004_drop_scheduler_job" });
   });
 
   it("rolls back a failed migration and exposes the failed version", async () => {

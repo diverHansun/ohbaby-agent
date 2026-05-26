@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   createInMemoryRunLedger,
   InvalidRunTransitionError,
   RunLedgerNotFoundError,
+  type TriggerSource,
   type RunLedger,
 } from "./index.js";
 
@@ -21,6 +22,10 @@ function createLedger(startAt?: number): RunLedger {
 }
 
 describe("InMemoryRunLedger", () => {
+  it("only accepts user-triggered runs in the MVP runtime", () => {
+    expectTypeOf<TriggerSource>().toEqualTypeOf<"user">();
+  });
+
   it("creates pending records with immutable snapshots", async () => {
     const ledger = createLedger();
 
@@ -55,7 +60,7 @@ describe("InMemoryRunLedger", () => {
     await ledger.createPending({
       runId: "run_1",
       sessionId: "session_1",
-      triggerSource: "scheduler",
+      triggerSource: "user",
     });
 
     await expect(ledger.markRunning("run_1")).resolves.toMatchObject({
@@ -94,7 +99,7 @@ describe("InMemoryRunLedger", () => {
     await ledger.createPending({
       runId: "cancelled_run",
       sessionId: "session_1",
-      triggerSource: "heartbeat",
+      triggerSource: "user",
     });
 
     await expect(
@@ -149,13 +154,13 @@ describe("InMemoryRunLedger", () => {
     await ledger.createPending({
       runId: "running_run",
       sessionId: "session_1",
-      triggerSource: "channel",
+      triggerSource: "user",
     });
     await ledger.markRunning("running_run");
     await ledger.createPending({
       runId: "done_run",
       sessionId: "session_1",
-      triggerSource: "follow-up",
+      triggerSource: "user",
     });
     await ledger.markRunning("done_run");
     await ledger.markSucceeded("done_run");
@@ -210,18 +215,18 @@ describe("InMemoryRunLedger", () => {
     await ledger.createPending({
       runId: "active_pending",
       sessionId: "session_1",
-      triggerSource: "scheduler",
+      triggerSource: "user",
     });
     await ledger.createPending({
       runId: "other_session",
       sessionId: "session_2",
-      triggerSource: "heartbeat",
+      triggerSource: "user",
     });
     await ledger.markRunning("other_session");
     await ledger.createPending({
       runId: "new_pending",
       sessionId: "session_1",
-      triggerSource: "channel",
+      triggerSource: "user",
     });
 
     await expect(ledger.getActiveRuns()).resolves.toMatchObject([

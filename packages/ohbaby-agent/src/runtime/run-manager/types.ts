@@ -64,18 +64,6 @@ export interface RunCompletion {
   readonly error?: string;
 }
 
-export interface PermissionProfile {
-  readonly id: string;
-  readonly canAskUser?: boolean;
-  readonly canWrite?: boolean;
-  readonly canRunCode?: boolean;
-  readonly onDenied?: "notify" | "reject" | "skip";
-}
-
-export interface ProfileRegistry {
-  getProfile(id: string): PermissionProfile | Promise<PermissionProfile>;
-}
-
 export interface SandboxLease {
   readonly id?: string;
   readonly workdir?: string;
@@ -96,7 +84,7 @@ export interface RunContext {
   readonly runId: string;
   readonly sessionId: string;
   readonly triggerSource: TriggerSource;
-  readonly permissionProfile: PermissionProfile;
+  readonly permissionProfileId: string;
   readonly sandboxLease: SandboxLease;
   readonly abortSignal: AbortSignal;
   readonly agent?: string;
@@ -114,7 +102,7 @@ export interface RunHookContext {
   readonly runId: string;
   readonly sessionId: string;
   readonly triggerSource: TriggerSource;
-  readonly permissionProfile?: PermissionProfile;
+  readonly permissionProfileId?: string;
   readonly sandboxLease?: SandboxLease;
   readonly status?: RunStatus;
   readonly result?: LifecycleResult;
@@ -143,7 +131,6 @@ export interface RunManagerDeps {
   readonly streamBridge: StreamBridge;
   readonly hookExecutor?: HookExecutor;
   readonly sandboxManager?: SandboxManager;
-  readonly profileRegistry: ProfileRegistry;
   readonly policy: RunDefaultsPolicy;
   readonly now?: () => number;
   readonly createRunId?: () => string;

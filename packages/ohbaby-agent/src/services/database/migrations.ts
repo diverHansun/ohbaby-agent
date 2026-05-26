@@ -88,19 +88,6 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
         created_at INTEGER NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS scheduler_job (
-        job_id TEXT PRIMARY KEY,
-        kind TEXT NOT NULL,
-        session_id TEXT REFERENCES session(id) ON DELETE CASCADE,
-        next_run_at INTEGER NOT NULL,
-        cron_expr TEXT,
-        status TEXT NOT NULL DEFAULT 'active',
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        payload TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_scheduler_next_run ON scheduler_job(next_run_at, status);
-      CREATE INDEX IF NOT EXISTS idx_scheduler_kind_status ON scheduler_job(kind, status);
     `,
   },
   {
@@ -120,6 +107,12 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (scope, key)
       );
+    `,
+  },
+  {
+    version: "004_drop_scheduler_job",
+    sql: `
+      DROP TABLE IF EXISTS scheduler_job;
     `,
   },
 ];

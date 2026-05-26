@@ -6,12 +6,7 @@ export type RunStatus =
   | "cancelled"
   | "interrupted";
 
-export type TriggerSource =
-  | "user"
-  | "scheduler"
-  | "heartbeat"
-  | "channel"
-  | "follow-up";
+export type TriggerSource = "user";
 
 export interface RunLedgerRecord {
   readonly runId: string;

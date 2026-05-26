@@ -23,8 +23,8 @@ import {
   RunManager,
   RunManagerNotFoundError,
   type HookExecutor,
-  type PermissionProfile,
   type RunDefaultsPolicy,
+  type RunHookContext,
   type RunLifecycle,
   type SandboxLease,
   type SandboxManager,
@@ -34,26 +34,6 @@ const policy: RunDefaultsPolicy = {
   defaults: {
     user: {
       permissionProfileId: "interactive",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-    scheduler: {
-      permissionProfileId: "read-only",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-    heartbeat: {
-      permissionProfileId: "notify-only",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-    channel: {
-      permissionProfileId: "notify-only",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-    "follow-up": {
-      permissionProfileId: "full-auto",
       multitaskStrategy: "reject",
       disconnectMode: "continue",
     },
@@ -182,17 +162,24 @@ class FailingOnceBridge extends RecordingBridge {
 
 class RecordingHooks implements HookExecutor {
   readonly calls: string[] = [];
+  readonly contexts: RunHookContext[] = [];
 
-  execute(point: "pre-run" | "post-run"): Promise<void> {
+  execute(
+    point: "pre-run" | "post-run",
+    context: RunHookContext,
+  ): Promise<void> {
     this.calls.push(point);
+    this.contexts.push(context);
     return Promise.resolve();
   }
 }
 
 class RecordingSandboxManager implements SandboxManager {
+  readonly acquired: string[] = [];
   readonly released: string[] = [];
 
   acquire(sessionId: string): Promise<SandboxLease> {
+    this.acquired.push(sessionId);
     const workdir = `workspace/${sessionId}`;
 
     return Promise.resolve({
@@ -527,11 +514,6 @@ function createManager(lifecycle: RunLifecycle): ManagerFixture {
     streamBridge: bridge,
     hookExecutor: hooks,
     sandboxManager,
-    profileRegistry: {
-      getProfile(id: string): PermissionProfile {
-        return { id };
-      },
-    },
     policy,
     now,
     createRunId(): string {
@@ -556,11 +538,6 @@ function createManagerWithOverrides(input: {
     streamBridge: input.bridge ?? fixture.bridge,
     hookExecutor: fixture.hooks,
     sandboxManager: input.sandboxManager ?? fixture.sandboxManager,
-    profileRegistry: {
-      getProfile(id: string): PermissionProfile {
-        return { id };
-      },
-    },
     policy,
     now: createClock(10_000),
     createRunId(): string {
@@ -602,6 +579,7 @@ describe("RunManager", () => {
       modelId: "fake-model",
       sessionId: "session_1",
     });
+    expect(lifecycle.calls[0]).not.toHaveProperty("permissionProfileId");
     expect(bridge.events.map((event) => event.event)).toEqual([
       "run.updated",
       "run.updated",
@@ -642,6 +620,8 @@ describe("RunManager", () => {
         workdir: "workspace/session_1",
       },
     });
+    expect(lifecycle.calls[0]).not.toHaveProperty("permissionProfileId");
+    expect(hooks.contexts[0]?.permissionProfileId).toBe("interactive");
     expect(bridge.events.map((event) => event.event)).toEqual([
       "run.updated",
       "run.updated",
@@ -872,11 +852,6 @@ describe("RunManager", () => {
       streamBridge: failing.bridge,
       hookExecutor: failing.hooks,
       sandboxManager: failing.sandboxManager,
-      profileRegistry: {
-        getProfile(id: string): PermissionProfile {
-          return { id };
-        },
-      },
       policy,
       now: createClock(20_000),
       createRunId: (): string => "run_after_failure",
@@ -901,7 +876,7 @@ describe("RunManager", () => {
     await ledger.createPending({
       runId: "running_run",
       sessionId: "session_2",
-      triggerSource: "scheduler",
+      triggerSource: "user",
     });
     await ledger.markRunning("running_run");
 

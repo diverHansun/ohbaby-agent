@@ -1,11 +1,7 @@
 import { Bus } from "../../bus/index.js";
 import { createInMemoryRunLedger } from "../run-ledger/index.js";
 import type { RunLedger } from "../run-ledger/index.js";
-import {
-  RunManager,
-  type ProfileRegistry,
-  type RunDefaultsPolicy,
-} from "../run-manager/index.js";
+import { RunManager, type RunDefaultsPolicy } from "../run-manager/index.js";
 import { createInMemoryStreamBridge } from "../stream-bridge/index.js";
 import type { StreamBridge } from "../stream-bridge/index.js";
 import { startAppEventAdapter } from "./app-events.js";
@@ -16,9 +12,7 @@ import type {
   DaemonDatabase,
   DaemonEventAdapter,
   DaemonInteractionBroker,
-  DaemonLifecycleComponent,
   DaemonRunManager,
-  DaemonTaskManager,
   RuntimeBootstrapOptions,
 } from "./types.js";
 
@@ -31,43 +25,11 @@ const DEFAULT_POLICY: RunDefaultsPolicy = {
       multitaskStrategy: "reject",
       disconnectMode: "continue",
     },
-    scheduler: {
-      permissionProfileId: "read-only",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-    heartbeat: {
-      permissionProfileId: "notify-only",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-    channel: {
-      permissionProfileId: "notify-only",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-    "follow-up": {
-      permissionProfileId: "full-auto",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
   },
 };
 
-const DEFAULT_PROFILE_REGISTRY: ProfileRegistry = {
-  getProfile(id: string) {
-    return { id };
-  },
-};
-
-const NOOP_LIFECYCLE_COMPONENT: DaemonLifecycleComponent = {};
 const NOOP_INTERACTION_BROKER: DaemonInteractionBroker = {
   abortAll(): void {
-    return undefined;
-  },
-};
-const NOOP_TASK_MANAGER: DaemonTaskManager = {
-  stopAll(): void {
     return undefined;
   },
 };
@@ -92,23 +54,10 @@ function createRunManager(
     streamBridge,
     hookExecutor: options.hookExecutor,
     sandboxManager: options.sandboxManager,
-    profileRegistry: options.profileRegistry ?? DEFAULT_PROFILE_REGISTRY,
     policy: options.policy ?? DEFAULT_POLICY,
     now: options.now,
     createRunId: options.createRunId,
   });
-}
-
-async function startComponent(
-  component: DaemonLifecycleComponent,
-): Promise<void> {
-  await component.start?.();
-}
-
-async function stopComponent(
-  component: DaemonLifecycleComponent,
-): Promise<void> {
-  await component.stop?.();
 }
 
 async function disposeAdapter(
@@ -164,11 +113,8 @@ export function bootstrapRuntime(
   const runLedger = options.runLedger ?? createInMemoryRunLedger();
   const streamBridge = options.streamBridge ?? createInMemoryStreamBridge();
   const runManager = createRunManager(options, runLedger, streamBridge);
-  const scheduler = options.scheduler ?? NOOP_LIFECYCLE_COMPONENT;
-  const heartbeat = options.heartbeat ?? NOOP_LIFECYCLE_COMPONENT;
   const interactionBroker =
     options.interactionBroker ?? NOOP_INTERACTION_BROKER;
-  const taskManager = options.taskManager ?? NOOP_TASK_MANAGER;
   let appEvents: DaemonEventAdapter | undefined;
   let commandEvents: DaemonEventAdapter | undefined;
   let started = false;
@@ -182,8 +128,6 @@ export function bootstrapRuntime(
     started = true;
     try {
       await runManager.init();
-      await startComponent(scheduler);
-      await startComponent(heartbeat);
       appEvents = (options.startAppEventAdapter ?? startAppEventAdapter)({
         bus,
         streamBridge,
@@ -213,12 +157,9 @@ export function bootstrapRuntime(
     stopping = (async (): Promise<void> => {
       try {
         await runCleanupSteps([
-          (): Promise<void> => stopComponent(heartbeat),
-          (): Promise<void> => stopComponent(scheduler),
           (): Promise<void> => runManager.cancelAll(STOP_REASON),
           (): Promise<void> =>
             Promise.resolve(interactionBroker.abortAll(STOP_REASON)),
-          (): Promise<void> => Promise.resolve(taskManager.stopAll()),
           (): Promise<void> => disposeAdapter(commandEvents),
           (): Promise<void> => disposeAdapter(appEvents),
           (): Promise<void> => closeStreamBridge(streamBridge),
@@ -240,10 +181,7 @@ export function bootstrapRuntime(
     runLedger,
     streamBridge,
     runManager,
-    scheduler,
-    heartbeat,
     interactionBroker,
-    taskManager,
     database: options.database,
     start,
     stop,

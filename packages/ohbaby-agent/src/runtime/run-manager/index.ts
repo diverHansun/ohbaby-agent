@@ -10,8 +10,6 @@ export type {
   DisconnectMode,
   HookExecutor,
   MultitaskStrategy,
-  PermissionProfile,
-  ProfileRegistry,
   RunCompletion,
   RunContext,
   RunDefaults,

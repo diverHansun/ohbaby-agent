@@ -196,14 +196,11 @@ export class RunManager {
     try {
       const sandboxLease = await sandboxManager.acquire(record.sessionId);
       record.sandboxLease = sandboxLease;
-      const permissionProfile = await this.deps.profileRegistry.getProfile(
-        record.permissionProfileId,
-      );
       const context: RunContext = {
         runId: record.runId,
         sessionId: record.sessionId,
         triggerSource: record.triggerSource,
-        permissionProfile,
+        permissionProfileId: record.permissionProfileId,
         sandboxLease,
         abortSignal: record.abortController.signal,
         agent: record.options.agent,

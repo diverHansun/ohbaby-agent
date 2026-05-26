@@ -73,17 +73,6 @@ export const schema = {
     fileCount: "file_count",
     createdAt: "created_at",
   }),
-  schedulerJob: table("scheduler_job", {
-    jobId: "job_id",
-    kind: "kind",
-    sessionId: "session_id",
-    nextRunAt: "next_run_at",
-    cronExpr: "cron_expr",
-    status: "status",
-    createdAt: "created_at",
-    updatedAt: "updated_at",
-    payload: "payload",
-  }),
   migration: table("migration", {
     version: "version",
     appliedAt: "applied_at",

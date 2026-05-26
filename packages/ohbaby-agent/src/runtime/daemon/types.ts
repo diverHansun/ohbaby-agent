@@ -2,7 +2,6 @@ import type { BusEventDefinition, BusInstance } from "../../bus/index.js";
 import type { RunLedger } from "../run-ledger/index.js";
 import type {
   HookExecutor,
-  ProfileRegistry,
   RunDefaultsPolicy,
   RunLifecycle,
   SandboxManager,
@@ -50,17 +49,8 @@ export interface DaemonRunManager {
   cancelAll(reason?: string): Promise<void>;
 }
 
-export interface DaemonLifecycleComponent {
-  start?(): Promise<void> | void;
-  stop?(): Promise<void> | void;
-}
-
 export interface DaemonInteractionBroker {
   abortAll(reason: string): Promise<void> | void;
-}
-
-export interface DaemonTaskManager {
-  stopAll(): Promise<void> | void;
 }
 
 export interface DaemonDatabase {
@@ -89,12 +79,8 @@ export interface RuntimeBootstrapOptions {
   readonly runManager?: DaemonRunManager;
   readonly hookExecutor?: HookExecutor;
   readonly sandboxManager?: SandboxManager;
-  readonly profileRegistry?: ProfileRegistry;
   readonly policy?: RunDefaultsPolicy;
-  readonly scheduler?: DaemonLifecycleComponent;
-  readonly heartbeat?: DaemonLifecycleComponent;
   readonly interactionBroker?: DaemonInteractionBroker;
-  readonly taskManager?: DaemonTaskManager;
   readonly database?: DaemonDatabase;
   readonly startAppEventAdapter?: DaemonEventAdapterStarter;
   readonly startCommandEventAdapter?: DaemonEventAdapterStarter;
@@ -109,10 +95,7 @@ export interface BootstrappedRuntime extends DaemonRuntimeHandle {
   readonly runLedger: RunLedger;
   readonly streamBridge: StreamBridge;
   readonly runManager: DaemonRunManager;
-  readonly scheduler: DaemonLifecycleComponent;
-  readonly heartbeat: DaemonLifecycleComponent;
   readonly interactionBroker: DaemonInteractionBroker;
-  readonly taskManager: DaemonTaskManager;
   readonly database?: DaemonDatabase;
 }
 

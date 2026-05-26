@@ -10,7 +10,7 @@ MVP runtime 的职责是把一次由用户发起的 agent run 做扎实：
 - 持久化 run、message、event、terminal state。
 - 稳定地把 worker event 转换为 stream 和 ledger projection。
 - 在失败、取消、权限拒绝、资源清理路径上保持一致。
-- 提供最小真实语义的 permission profile，而不是只保留 profile id 字符串。
+- 保留 `permissionProfileId` 作为 run record / hook metadata；runtime 不解释 profile 语义，也不把它下钻到 lifecycle、tool scheduler 或 policy。
 
 MVP 不做 scheduler、heartbeat、background task、follow-up、channel trigger。这些设计可以保留为 post-MVP 参考，但不应该继续以 NOOP、空 store、空 schema、空 policy 配置的方式停留在运行时代码里。
 
@@ -29,23 +29,22 @@ MVP 不做 scheduler、heartbeat、background task、follow-up、channel trigger
    - 删除未被真实使用的 scheduler / heartbeat / task manager runtime 入口。
    - 收窄 `TriggerSource` 到当前真实用户路径。
    - 从默认 policy 中移除 scheduler、heartbeat、channel、follow-up 等未触发来源。
-   - 移除 pre-MVP 的 `scheduler_job` schema / migration 痕迹。
+   - 从当前 schema 移除 `scheduler_job`，并提供旧库升级时的 drop migration。
 
 2. Run backend 加固
    - 明确 run 状态机和 terminal state。
    - 统一错误序列化、limit normalize、时间戳、projection 行为。
-   - 覆盖 profile lookup、sandbox acquire/release、worker failure、ledger failure、stream publish failure、cancel/interrupt cleanup 等路径。
+   - 覆盖 sandbox acquire/release、worker failure、ledger failure、stream publish failure、cancel/interrupt cleanup 等路径。
    - 保证 in-memory backend 和 persistent backend 的行为一致。
 
-3. Permission profiles 最小真实语义
-   - 建立 profile registry。
-   - 内置至少 4 个 profile：`interactive`、`read-only`、`dangerous`、`full-auto`。
-   - `RunManager.create` 必须验证 profile id，不允许静默接受不存在的 profile。
-   - profile 必须影响权限决策，而不是只成为 metadata。
-   - 默认路径继续保持交互式编程工具体验，避免引入后台助手语义。
+3. Permission profile 边界校准
+   - runtime 只保存 opaque `permissionProfileId`，并只把它暴露为 run record / hook metadata。
+   - profile registry、builtin profile、profile-aware policy wrapper 不放在 runtime。
+   - `allow / ask / deny`、审批模式、规则匹配、profile 语义后续进入 `permission` 领域设计。
+   - 本轮不扩大 `policy` / `permission` 改动面；后续再评估把 `policy` 合并进 `permission` 的规则 / policy 插件体系。
 
 4. 测试和审核
-   - 单元测试覆盖状态机、profile registry、policy gate、错误归一化。
+   - 单元测试覆盖状态机、`permissionProfileId` metadata 边界、policy gate、错误归一化。
    - 集成测试覆盖 RunManager + RunWorker + RunLedger + StreamBridge。
    - persistent backend 测试必须使用真实 sqlite store。
    - 真实 API e2e 作为 release gate，不用 mock provider 替代。
@@ -106,7 +105,7 @@ MVP 不做 scheduler、heartbeat、background task、follow-up、channel trigger
 - 代码中不再存在 runtime NOOP lifecycle component。
 - `TriggerSource` 只包含当前真实路径。
 - `DEFAULT_POLICY` 不再声明 scheduler、heartbeat、channel、follow-up。
-- pre-MVP schema 中没有 `scheduler_job` 表。
+- 当前 schema 中没有 `scheduler_job` 表；升级迁移会删除旧库里已经存在的遗留 `scheduler_job` 表。
 - 类型检查能阻止创建 scheduler / heartbeat / channel / follow-up 来源的 run。
 - 现有 run、message、event、session 持久化测试仍通过。
 
@@ -146,37 +145,33 @@ MVP 不做 scheduler、heartbeat、background task、follow-up、channel trigger
   - in-memory backend 和 sqlite-backed backend 在 projection、排序、limit、terminal state 上表现一致。
   - createdAt / updatedAt / completedAt 不出现倒序或缺失。
 
-### Phase D - Permission profiles 最小真实语义
+### Phase D - Permission profile 边界清理
 
-目标：profile 进入真实权限链路，解决「DEFAULT_POLICY 依赖 profile id，但 registry 为空」的问题。
+目标：让 runtime 不拥有 permission / policy 语义。MVP 阶段 runtime 只保留 run defaults
+中的 `permissionProfileId` 字符串作为记录字段和 hook metadata；不解释、不校验、不向 policy
+注入 profile 语义。
 
-建议模块：
+明确不做：
 
 ```text
 packages/ohbaby-agent/src/runtime/permission-profiles/
-├── types.ts
-├── builtin.ts
-├── registry.ts
-├── apply-profile.ts
-└── index.ts
 ```
 
-内置 profile 语义：
+建议边界：
 
-| Profile | MVP 语义 |
-| --- | --- |
-| `interactive` | 默认交互式。危险操作需要询问；保持当前 CLI agent 主路径。 |
-| `read-only` | 允许读取、搜索、列目录、查看 git 状态；拒绝写文件、执行破坏性命令、修改 git、子代理写操作。 |
-| `dangerous` | 允许高风险工具请求，但仍记录审计事件；只适合显式指定。 |
-| `full-auto` | 允许自动批准低风险和中风险操作；高风险操作是否放行由 policy 明确配置。 |
+- `RunManager` 合并默认值后得到 `permissionProfileId` 字符串。
+- `RunManager` 的 `RunRecord` 可以记录这个 id，用于当前进程内可观测性和后续迁移。
+- `RunHookContext` 可以暴露这个 id，便于未来外层组合。
+- `RunWorker` 不把它继续下钻到 lifecycle / tool scheduler。
+- profile 真实语义后续进入 `permission` 领域，并考虑把现有 `policy` 合并进 permission 的规则 / policy 插件体系。
 
 验收标准：
 
-- 不存在的 profile id 会在 `RunManager.create` 阶段失败，且错误可被调用方识别。
-- 默认 run 使用 `interactive`。
-- `read-only` profile 的写文件 / shell 修改 / git 修改请求必须被拒绝，并产生可审计事件。
-- profile 决策不依赖 UI 层；TUI/CLI 后续重构只消费结果。
-- profile registry 可测试、可扩展、无全局可变隐患。
+- `runtime` 目录下不再存在 permission profile registry / builtin / wrapper。
+- runtime 类型不导出 `PermissionProfile` 或 `ProfileRegistry`。
+- runtime tests 不 mock profile registry。
+- `policy` 本轮不新增 `permissionProfileId` 字段或 profile 判断逻辑。
+- profile 真实语义的实现文档和测试后续落在 `permission` 模块，而不是 runtime 或本轮 `policy` 改造。
 
 ## 5. 测试矩阵
 
@@ -199,8 +194,8 @@ pnpm test
 - error normalize。
 - safe JSON serialization。
 - ledger projection limit / ordering。
-- permission profile registry。
-- profile 到 policy 的映射。
+- `permissionProfileId` 只作为 run record / hook metadata 保留。
+- runtime 目录边界测试防止重新引入 `runtime/permission-profiles`、`ProfileRegistry` 或 profile-aware policy wrapper。
 
 ### 集成测试
 
@@ -243,13 +238,13 @@ OHBABY_REAL_API_E2E=1
 2. Read-only workspace run
    - 临时 workspace 内创建包含固定 sentinel 的文件。
    - prompt 要求 agent 读取该文件并只回答 sentinel。
-   - 使用 `read-only` profile。
+   - MVP 阶段使用现有 permission / policy gate；如果 post-MVP 已实现 profile 语义，再追加 `read-only` profile 覆盖。
    - 断言最终 assistant message 包含精确 sentinel。
    - 断言 workspace 没有新增、删除、修改文件。
    - 断言没有 write / destructive shell / git mutation 权限被批准。
 
 3. Permission denial run
-   - 使用 `read-only` profile。
+   - 使用现有 permission / policy gate 构造拒绝路径；如果 post-MVP 已实现 profile 语义，再追加 profile 拒绝路径。
    - prompt 明确要求修改文件。
    - 断言修改被拒绝。
    - 断言 workspace 文件内容未变化。
@@ -258,7 +253,8 @@ OHBABY_REAL_API_E2E=1
 4. Persistent reload
    - e2e 完成后重新打开 sqlite backend。
    - 断言 session、run、message、event 可以恢复。
-   - 断言 terminal state、profile id、timestamps 保持一致。
+   - 断言 terminal state、timestamps 保持一致。
+   - 当前 MVP 不要求 sqlite ledger 持久化 `permissionProfileId`；若后续 permission 重构需要持久化 profile metadata，必须先补 schema / migration / reload 测试。
 
 通过标准：
 
@@ -274,7 +270,7 @@ OHBABY_REAL_API_E2E=1
 
 - 是否仍有 scheduler / heartbeat / task manager zombie surface。
 - run terminal state 是否存在分叉或吞错。
-- permission profile 是否真的影响权限，而不是只写入 metadata。
+- `permissionProfileId` 是否只停留在 runtime run record / hook metadata；后续 profile 真实语义是否已记录到 `permission/improve-1`。
 - 测试是否覆盖失败路径和 persistent backend。
 - 真实 API e2e 是否有明确前置条件、日志、失败证据。
 - 是否误动 context improve-2 或 ohbaby-cli refactor 范围。

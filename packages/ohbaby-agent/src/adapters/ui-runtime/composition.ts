@@ -6,10 +6,7 @@ import {
   type CompactResult,
   type ContextManager,
 } from "../../core/context/index.js";
-import {
-  Lifecycle,
-  type LifecycleEvent,
-} from "../../core/lifecycle/index.js";
+import { Lifecycle, type LifecycleEvent } from "../../core/lifecycle/index.js";
 import type { AgentRunEventSource } from "../../core/agents/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import type { MessageManager } from "../../core/message/index.js";
@@ -58,7 +55,6 @@ import {
 import {
   RunManager,
   type HookExecutor,
-  type ProfileRegistry,
   type RunDefaultsPolicy,
 } from "../../runtime/run-manager/index.js";
 import {
@@ -91,32 +87,6 @@ const DEFAULT_RUN_POLICY: RunDefaultsPolicy = {
       multitaskStrategy: "reject",
       disconnectMode: "continue",
     },
-    scheduler: {
-      permissionProfileId: "read-only",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-    heartbeat: {
-      permissionProfileId: "notify-only",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-    channel: {
-      permissionProfileId: "notify-only",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-    "follow-up": {
-      permissionProfileId: "full-auto",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-  },
-};
-
-const DEFAULT_PROFILE_REGISTRY: ProfileRegistry = {
-  getProfile(id: string) {
-    return { id };
   },
 };
 
@@ -245,7 +215,10 @@ function numberData(
 }
 
 function lifecycleEventFromStream(
-  item: Exclude<StreamBridgeYield, typeof END_SENTINEL | typeof HEARTBEAT_SENTINEL>,
+  item: Exclude<
+    StreamBridgeYield,
+    typeof END_SENTINEL | typeof HEARTBEAT_SENTINEL
+  >,
 ): LifecycleEvent | undefined {
   const data = objectData(item.data);
   if (!data) {
@@ -571,7 +544,6 @@ export async function createUiRuntimeComposition(
     hookExecutor: options.hookExecutor,
     now: options.now,
     policy: DEFAULT_RUN_POLICY,
-    profileRegistry: DEFAULT_PROFILE_REGISTRY,
     runLedger,
     sandboxManager,
     streamBridge,

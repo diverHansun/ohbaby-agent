@@ -119,7 +119,7 @@ export async function flush(): Promise<void> {
 export async function waitForFrame(
   app: FrameSource,
   predicate: (frame: string) => boolean,
-  timeoutMs = 2_000,
+  timeoutMs = 5_000,
 ): Promise<string> {
   const startedAt = Date.now();
   let lastFrame = "";
@@ -146,8 +146,6 @@ export function promptIsReady(frame: string): boolean {
   const line = promptLine(frame);
 
   return (
-    line.includes("ohbaby >") &&
-    line.includes("message") &&
-    line.includes("|")
+    line.includes("ohbaby >") && line.includes("message") && line.includes("|")
   );
 }

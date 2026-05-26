@@ -124,7 +124,7 @@ function hookContext(
     runId: context.runId,
     sessionId: context.sessionId,
     triggerSource: context.triggerSource,
-    permissionProfile: context.permissionProfile,
+    permissionProfileId: context.permissionProfileId,
     sandboxLease: context.sandboxLease,
     ...patch,
   };

@@ -126,12 +126,12 @@ describe("createDatabaseRunLedger", () => {
     await ledger.createPending({
       runId: "active_pending",
       sessionId: "session_1",
-      triggerSource: "scheduler",
+      triggerSource: "user",
     });
     await ledger.createPending({
       runId: "other_session",
       sessionId: "session_2",
-      triggerSource: "heartbeat",
+      triggerSource: "user",
     });
     await ledger.markRunning("other_session");
 

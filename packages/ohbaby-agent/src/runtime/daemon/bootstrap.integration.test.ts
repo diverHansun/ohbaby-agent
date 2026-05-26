@@ -18,35 +18,13 @@ import type {
   DaemonDatabase,
   DaemonEventAdapterStarter,
   DaemonInteractionBroker,
-  DaemonLifecycleComponent,
   DaemonRunManager,
-  DaemonTaskManager,
 } from "./types.js";
 
 const policy: RunDefaultsPolicy = {
   defaults: {
     user: {
       permissionProfileId: "interactive",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-    scheduler: {
-      permissionProfileId: "read-only",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-    heartbeat: {
-      permissionProfileId: "notify-only",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-    channel: {
-      permissionProfileId: "notify-only",
-      multitaskStrategy: "reject",
-      disconnectMode: "continue",
-    },
-    "follow-up": {
-      permissionProfileId: "full-auto",
       multitaskStrategy: "reject",
       disconnectMode: "continue",
     },
@@ -67,23 +45,6 @@ class RecordingRunManager implements DaemonRunManager {
   }
 }
 
-class RecordingLifecycleComponent implements DaemonLifecycleComponent {
-  constructor(
-    private readonly label: string,
-    private readonly calls: string[],
-  ) {}
-
-  start(): Promise<void> {
-    this.calls.push(`${this.label}.start`);
-    return Promise.resolve();
-  }
-
-  stop(): Promise<void> {
-    this.calls.push(`${this.label}.stop`);
-    return Promise.resolve();
-  }
-}
-
 class RecordingInteractionBroker implements DaemonInteractionBroker {
   constructor(private readonly calls: string[]) {}
 
@@ -93,12 +54,12 @@ class RecordingInteractionBroker implements DaemonInteractionBroker {
   }
 }
 
-class RecordingTaskManager implements DaemonTaskManager {
+class FailingInteractionBroker implements DaemonInteractionBroker {
   constructor(private readonly calls: string[]) {}
 
-  stopAll(): Promise<void> {
-    this.calls.push("taskManager.stopAll");
-    return Promise.resolve();
+  abortAll(reason: string): Promise<void> {
+    this.calls.push(`interactionBroker.abortAll:${reason}`);
+    return Promise.reject(new Error("interaction broker abort failed"));
   }
 }
 
@@ -160,20 +121,6 @@ class CompletingLifecycle {
   }
 }
 
-class FailingStopComponent implements DaemonLifecycleComponent {
-  constructor(private readonly calls: string[]) {}
-
-  start(): Promise<void> {
-    this.calls.push("scheduler.start");
-    return Promise.resolve();
-  }
-
-  stop(): Promise<void> {
-    this.calls.push("scheduler.stop");
-    return Promise.reject(new Error("scheduler stop failed"));
-  }
-}
-
 function createEventAdapterStarter(
   label: string,
   calls: string[],
@@ -194,10 +141,7 @@ describe("bootstrapRuntime", () => {
     const runtime = bootstrapRuntime({
       runManager: new RecordingRunManager(calls),
       streamBridge: new RecordingStreamBridge(calls),
-      scheduler: new RecordingLifecycleComponent("scheduler", calls),
-      heartbeat: new RecordingLifecycleComponent("heartbeat", calls),
       interactionBroker: new RecordingInteractionBroker(calls),
-      taskManager: new RecordingTaskManager(calls),
       database: new RecordingDatabase(calls),
       startAppEventAdapter: createEventAdapterStarter("appEvents", calls),
       startCommandEventAdapter: createEventAdapterStarter(
@@ -209,17 +153,15 @@ describe("bootstrapRuntime", () => {
     await runtime.start();
     await runtime.stop();
 
+    expect("scheduler" in runtime).toBe(false);
+    expect("heartbeat" in runtime).toBe(false);
+    expect("taskManager" in runtime).toBe(false);
     expect(calls).toEqual([
       "runManager.init",
-      "scheduler.start",
-      "heartbeat.start",
       "appEvents.start",
       "commandEvents.start",
-      "heartbeat.stop",
-      "scheduler.stop",
       "runManager.cancelAll",
       "interactionBroker.abortAll:daemon-stopping",
-      "taskManager.stopAll",
       "commandEvents.dispose",
       "appEvents.dispose",
       "streamBridge.close",
@@ -232,10 +174,7 @@ describe("bootstrapRuntime", () => {
     const runtime = bootstrapRuntime({
       runManager: new RecordingRunManager(calls),
       streamBridge: new RecordingStreamBridge(calls),
-      scheduler: new RecordingLifecycleComponent("scheduler", calls),
-      heartbeat: new RecordingLifecycleComponent("heartbeat", calls),
       interactionBroker: new RecordingInteractionBroker(calls),
-      taskManager: new RecordingTaskManager(calls),
       database: new RecordingDatabase(calls),
       startAppEventAdapter: createEventAdapterStarter("appEvents", calls),
       startCommandEventAdapter: createEventAdapterStarter(
@@ -262,10 +201,7 @@ describe("bootstrapRuntime", () => {
     const runtime = bootstrapRuntime({
       runManager: new RecordingRunManager(calls),
       streamBridge: new RecordingStreamBridge(calls),
-      scheduler: new FailingStopComponent(calls),
-      heartbeat: new RecordingLifecycleComponent("heartbeat", calls),
-      interactionBroker: new RecordingInteractionBroker(calls),
-      taskManager: new RecordingTaskManager(calls),
+      interactionBroker: new FailingInteractionBroker(calls),
       database: new RecordingDatabase(calls),
       startAppEventAdapter: createEventAdapterStarter("appEvents", calls),
       startCommandEventAdapter: createEventAdapterStarter(
@@ -276,19 +212,16 @@ describe("bootstrapRuntime", () => {
 
     await runtime.start();
 
-    await expect(runtime.stop()).rejects.toThrow("scheduler stop failed");
+    await expect(runtime.stop()).rejects.toThrow(
+      "interaction broker abort failed",
+    );
 
     expect(calls).toEqual([
       "runManager.init",
-      "scheduler.start",
-      "heartbeat.start",
       "appEvents.start",
       "commandEvents.start",
-      "heartbeat.stop",
-      "scheduler.stop",
       "runManager.cancelAll",
       "interactionBroker.abortAll:daemon-stopping",
-      "taskManager.stopAll",
       "commandEvents.dispose",
       "appEvents.dispose",
       "streamBridge.close",
@@ -350,7 +283,7 @@ describe("bootstrapRuntime", () => {
     await runLedger.createPending({
       runId: "running_run",
       sessionId: "session_2",
-      triggerSource: "scheduler",
+      triggerSource: "user",
     });
     await runLedger.markRunning("running_run");
 
@@ -358,11 +291,6 @@ describe("bootstrapRuntime", () => {
       lifecycle: new CompletingLifecycle(),
       runLedger,
       policy,
-      profileRegistry: {
-        getProfile(id: string): { readonly id: string } {
-          return { id };
-        },
-      },
       now: () => 2_000,
       createRunId: () => "run_created_by_daemon",
     });
