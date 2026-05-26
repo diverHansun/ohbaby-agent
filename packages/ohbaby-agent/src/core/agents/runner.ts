@@ -85,12 +85,27 @@ function completionError(input: {
   return input.completionError ?? (input.signal?.aborted ? abortReason(input.signal) : undefined);
 }
 
+function cleanupSessionEnvironment(
+  deps: Pick<AgentRunDeps, "sandboxManager">,
+  sessionId: string,
+): () => void {
+  let cleaned = false;
+  return () => {
+    if (cleaned) {
+      return;
+    }
+    cleaned = true;
+    deps.sandboxManager?.setSessionEnvironment(sessionId, undefined);
+  };
+}
+
 export async function runAgent(
   deps: AgentRunDeps,
   input: AgentRunInput,
 ): Promise<AgentRunResult> {
-  if (input.waitMode === "stream") {
-    throw new Error("stream mode not implemented until agents improve-2");
+  const runEventSource = deps.runEventSource;
+  if (input.waitMode === "stream" && !runEventSource) {
+    throw new Error("Agent run event source is required for stream mode");
   }
 
   const isSubagent = input.parentSessionId !== undefined;
@@ -102,6 +117,7 @@ export async function runAgent(
     input.sessionId,
     input.environment,
   );
+  const cleanupEnvironment = cleanupSessionEnvironment(deps, input.sessionId);
 
   try {
     const userMessageId = await writeInitialUserMessage(deps, input);
@@ -126,6 +142,32 @@ export async function runAgent(
       runId: record.runId,
       signal: input.signal,
     });
+    if (input.waitMode === "stream") {
+      try {
+        if (!runEventSource) {
+          throw new Error("Agent run event source is required for stream mode");
+        }
+        const events = runEventSource.subscribeRunEvents(record.runId);
+        void deps.runCoordinator
+          .waitForCompletion(record.runId)
+          .finally(() => {
+            unbindAbort();
+            cleanupEnvironment();
+          })
+          .catch(() => undefined);
+        return {
+          events,
+          mode: "stream",
+          runId: record.runId,
+          sessionId: record.sessionId,
+        };
+      } catch (error) {
+        unbindAbort();
+        cleanupEnvironment();
+        throw error;
+      }
+    }
+
     try {
       const completion = await deps.runCoordinator.waitForCompletion(
         record.runId,
@@ -134,25 +176,39 @@ export async function runAgent(
         await deps.messageManager.listBySession(input.sessionId),
       );
       const success = completion.status === "succeeded";
-      return {
-        error: success
-          ? undefined
-          : completionError({
-              completionError: completion.error,
-              signal: input.signal,
-            }),
-        finalOutput: finalOutput !== "" ? finalOutput : completion.error,
-        finishReason: success ? "stop" : "error",
+      const output = finalOutput !== "" ? finalOutput : completion.error;
+      const base = {
+        mode: "waitForCompletion" as const,
         runId: record.runId,
         sessionId: input.sessionId,
         steps: 0,
-        success,
         toolCalls: [] satisfies readonly AgentToolCallSummary[],
+      };
+      if (success) {
+        return {
+          ...base,
+          finalOutput: output ?? "",
+          finishReason: "stop" as const,
+          success: true,
+        };
+      }
+      return {
+        ...base,
+        error:
+          completionError({
+            completionError: completion.error,
+            signal: input.signal,
+          }) ?? "agent run failed",
+        finalOutput: output,
+        finishReason: "error" as const,
+        success: false,
       };
     } finally {
       unbindAbort();
+      cleanupEnvironment();
     }
-  } finally {
-    deps.sandboxManager?.setSessionEnvironment(input.sessionId, undefined);
+  } catch (error) {
+    cleanupEnvironment();
+    throw error;
   }
 }

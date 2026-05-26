@@ -73,7 +73,9 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 }
 
 function statusAfterRun(result: AgentRunResult): AgentTaskStatus {
-  return result.success ? "completed" : "failed";
+  return result.mode === "waitForCompletion" && result.success
+    ? "completed"
+    : "failed";
 }
 
 export class AgentTaskManager implements AgentTaskController {
@@ -349,7 +351,12 @@ export class AgentTaskManager implements AgentTaskController {
           waitMode: "waitForCompletion",
         },
       );
-      const output = result.finalOutput ?? result.error ?? "";
+      if (result.mode !== "waitForCompletion") {
+        throw new Error("Agent task expected a completed agent run");
+      }
+      const output = result.success
+        ? result.finalOutput
+        : result.finalOutput ?? result.error;
       if (!this.isClosed(taskId)) {
         await this.store.update(taskId, {
           completedAt: this.now(),

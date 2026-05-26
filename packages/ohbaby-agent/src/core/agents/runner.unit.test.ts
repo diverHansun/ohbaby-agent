@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { runAgent } from "./runner.js";
 import type {
+  AgentRunCompletion,
   AgentRunCoordinator,
   AgentRunDeps,
   AgentRunInput,
+  AgentRunEventSource,
 } from "./types.js";
 import type { ChatCompletionMessage } from "../llm-client/index.js";
 import type {
@@ -137,6 +139,25 @@ function createToolScheduler(
   };
 }
 
+async function collectAsync<T>(input: AsyncIterable<T>): Promise<T[]> {
+  const values: T[] = [];
+  for await (const value of input) {
+    values.push(value);
+  }
+  return values;
+}
+
+function deferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 interface RunCoordinatorFixture {
   readonly cancel: ReturnType<typeof vi.fn>;
   readonly coordinator: AgentRunCoordinator;
@@ -152,14 +173,8 @@ function createRunCoordinator(
   const cancel = vi.fn<AgentRunCoordinator["cancel"]>();
   const create = vi.fn<AgentRunCoordinator["create"]>(() =>
     Promise.resolve({
-      createdAt: 1,
-      disconnectMode: "continue",
-      multitaskStrategy: "reject",
-      permissionProfileId: "interactive",
       runId: "run_1",
       sessionId: "session_child",
-      status: "pending",
-      triggerSource: "user",
     }),
   );
   const waitForCompletion = vi.fn<AgentRunCoordinator["waitForCompletion"]>(
@@ -201,12 +216,14 @@ function baseInput(
 
 function createDeps(input: {
   readonly messageManager?: MessageManager;
+  readonly runEventSource?: AgentRunEventSource;
   readonly runCoordinator?: AgentRunCoordinator;
   readonly sandboxManager?: AgentRunDeps["sandboxManager"];
   readonly toolScheduler?: ToolSchedulerInstance;
 } = {}): AgentRunDeps {
   return {
     messageManager: input.messageManager ?? createMessageManager().manager,
+    runEventSource: input.runEventSource,
     runCoordinator: input.runCoordinator ?? createRunCoordinator().coordinator,
     sandboxManager: input.sandboxManager,
     toolScheduler: input.toolScheduler ?? createToolScheduler(),
@@ -282,6 +299,7 @@ describe("runAgent", () => {
     );
     expect(result).toMatchObject({
       finalOutput: "final answer",
+      mode: "waitForCompletion",
       sessionId: "session_child",
       success: true,
     });
@@ -326,7 +344,71 @@ describe("runAgent", () => {
     expect(runCoordinator.cancel).toHaveBeenCalledWith("run_1", "stop");
     expect(result).toMatchObject({
       error: "stop",
+      mode: "waitForCompletion",
       success: false,
     });
+  });
+
+  it("starts a run in stream mode, returns lifecycle events, and cleans up after completion", async () => {
+    const runCoordinator = createRunCoordinator();
+    const completion = deferred<AgentRunCompletion>();
+    runCoordinator.waitForCompletion.mockImplementation(
+      () => completion.promise,
+    );
+    const event = {
+      content: "hello",
+      completeMessage: { content: "hello", role: "assistant" },
+      delta: "hello",
+      sessionId: "session_child",
+      timestamp: 1,
+      type: "llm:delta",
+    } as const;
+    const subscribeRunEvents = vi.fn<AgentRunEventSource["subscribeRunEvents"]>(
+      (): AsyncIterable<typeof event> =>
+        (async function* (): AsyncIterable<typeof event> {
+          await Promise.resolve();
+          yield event;
+        })(),
+    );
+    const runEventSource: AgentRunEventSource = { subscribeRunEvents };
+    const sandboxManager = {
+      setSessionEnvironment: vi.fn(),
+    };
+    const environment = { workdir: "D:/repo" } as ToolExecutionEnvironment;
+
+    const result = await runAgent(
+      createDeps({
+        runCoordinator: runCoordinator.coordinator,
+        runEventSource,
+        sandboxManager,
+      }),
+      baseInput({ environment, waitMode: "stream" }),
+    );
+
+    expect(result.mode).toBe("stream");
+    if (result.mode !== "stream") {
+      throw new Error("Expected stream mode result");
+    }
+    expect(result).toMatchObject({
+      runId: "run_1",
+      sessionId: "session_child",
+    });
+    expect(subscribeRunEvents).toHaveBeenCalledWith("run_1");
+    expect(sandboxManager.setSessionEnvironment).toHaveBeenNthCalledWith(
+      1,
+      "session_child",
+      environment,
+    );
+    expect(sandboxManager.setSessionEnvironment).toHaveBeenCalledTimes(1);
+    await expect(collectAsync(result.events)).resolves.toEqual([event]);
+    completion.resolve({ status: "succeeded" });
+    await vi.waitUntil(
+      () => sandboxManager.setSessionEnvironment.mock.calls.length === 2,
+    );
+    expect(sandboxManager.setSessionEnvironment).toHaveBeenNthCalledWith(
+      2,
+      "session_child",
+      undefined,
+    );
   });
 });

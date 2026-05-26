@@ -199,14 +199,8 @@ function createRunCoordinator(
 } {
   const create = vi.fn<AgentRunCoordinator["create"]>(() =>
     Promise.resolve({
-      createdAt: 1,
-      disconnectMode: "continue",
-      multitaskStrategy: "reject",
-      permissionProfileId: "interactive",
       runId: "run_child",
       sessionId: "child_1",
-      status: "pending",
-      triggerSource: "user",
     }),
   );
   return {

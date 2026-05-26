@@ -88,8 +88,14 @@ export class AgentService implements TaskExecutor {
             waitMode: "waitForCompletion",
           },
         );
+        if (result.mode !== "waitForCompletion") {
+          throw new Error("Task execution expected a completed agent run");
+        }
+        const output = result.success
+          ? result.finalOutput
+          : result.finalOutput ?? result.error;
         return {
-          output: result.finalOutput ?? result.error ?? "",
+          output,
           sessionId: session.id,
           success: result.success,
           summary: {

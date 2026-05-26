@@ -21,6 +21,10 @@ export interface AgentToolCallSummary {
   readonly title?: string;
 }
 
+/**
+ * Transitional until lifecycle improve-2 moves prompt assembly into the
+ * session run path.
+ */
 export type AgentPromptMessageBuilder = (input: {
   readonly agentName: string;
   readonly isSubagent: boolean;
@@ -42,16 +46,34 @@ export interface AgentRunInput {
   readonly buildPromptMessages: AgentPromptMessageBuilder;
 }
 
-export interface AgentRunResult {
+interface AgentRunWaitResultBase {
+  readonly mode: "waitForCompletion";
   readonly sessionId: string;
   readonly runId?: string;
-  readonly success: boolean;
   readonly finishReason?: AgentRunFinishReason;
-  readonly finalOutput?: string;
-  readonly events?: AsyncIterable<LifecycleEvent>;
   readonly steps?: number;
   readonly toolCalls?: readonly AgentToolCallSummary[];
-  readonly error?: string;
+}
+
+export type AgentRunResult =
+  | {
+      readonly mode: "stream";
+      readonly sessionId: string;
+      readonly runId: string;
+      readonly events: AsyncIterable<LifecycleEvent>;
+    }
+  | (AgentRunWaitResultBase & {
+      readonly success: true;
+      readonly finalOutput: string;
+    })
+  | (AgentRunWaitResultBase & {
+      readonly success: false;
+      readonly error: string;
+      readonly finalOutput?: string;
+    });
+
+export interface AgentRunEventSource {
+  subscribeRunEvents(runId: string): AsyncIterable<LifecycleEvent>;
 }
 
 export interface AgentRunCreateOptions {
@@ -61,22 +83,17 @@ export interface AgentRunCreateOptions {
   readonly isSubagent?: boolean;
   readonly parentMessageId?: string;
   readonly maxSteps?: number;
+  /**
+   * Transitional until lifecycle improve-2 lets the run path assemble messages
+   * through Lifecycle.runSession.
+   */
   readonly messages: readonly ChatCompletionMessage[];
   readonly tools?: ChatCompletionCreateParams["tools"];
 }
 
-export interface AgentRunRecord {
+export interface AgentRunHandle {
   readonly runId: string;
   readonly sessionId: string;
-  readonly triggerSource: string;
-  readonly status: string;
-  readonly permissionProfileId: string;
-  readonly multitaskStrategy: string;
-  readonly disconnectMode: string;
-  readonly createdAt: number;
-  readonly startedAt?: number;
-  readonly endedAt?: number;
-  readonly error?: string;
 }
 
 export interface AgentRunCompletion {
@@ -85,7 +102,7 @@ export interface AgentRunCompletion {
 }
 
 export interface AgentRunCoordinator {
-  create(options: AgentRunCreateOptions): Promise<AgentRunRecord>;
+  create(options: AgentRunCreateOptions): Promise<AgentRunHandle>;
   cancel(runId: string, reason?: string): void;
   waitForCompletion(runId: string): Promise<AgentRunCompletion>;
 }
@@ -99,6 +116,7 @@ export interface AgentSandboxEnvironmentManager {
 
 export interface AgentRunDeps {
   readonly runCoordinator: AgentRunCoordinator;
+  readonly runEventSource?: AgentRunEventSource;
   readonly messageManager: MessageManager;
   readonly toolScheduler: Pick<ToolSchedulerInstance, "getAvailableTools">;
   readonly sandboxManager?: AgentSandboxEnvironmentManager;

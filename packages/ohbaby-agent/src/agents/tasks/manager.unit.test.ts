@@ -148,14 +148,8 @@ function createAgentRuntime(): AgentRuntimeFixture {
       runId,
     });
     return Promise.resolve({
-      createdAt: 1,
-      disconnectMode: "continue",
-      multitaskStrategy: "reject",
-      permissionProfileId: "interactive",
       runId,
       sessionId: options.sessionId,
-      status: "pending",
-      triggerSource: "user",
     });
   });
   const cancel = vi.fn<AgentRunCoordinator["cancel"]>();
