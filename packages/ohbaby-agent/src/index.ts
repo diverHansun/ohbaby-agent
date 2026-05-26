@@ -57,9 +57,9 @@ export type {
 export {
   AgentManager,
   AgentRegistry,
+  AgentService,
   BUILTIN_AGENTS,
   BUILTIN_AGENT_NAMES,
-  SubagentExecutor,
   buildAgent,
   exploreAgent,
   planAgent,
@@ -67,18 +67,15 @@ export {
   toolsConfigToRecord,
 } from "./agents/index.js";
 export type {
+  AgentServiceOptions,
+  AgentPromptProvider,
   RuntimeAgent,
   SubagentExecuteParams,
-  SubagentMessageWriter,
   SubagentResult,
-  SubagentRunner,
-  SubagentRunnerResult,
-  SubagentSession,
-  SubagentSessionManager,
   SubagentToolCallSummary,
-  SystemPromptProvider,
   TaskExecutor,
 } from "./agents/index.js";
+export * from "./core/agents/index.js";
 export * from "./core/system-prompt/index.js";
 export * from "./core/llm-client/index.js";
 export * from "./mcp/index.js";

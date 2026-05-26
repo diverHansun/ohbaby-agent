@@ -1,21 +1,29 @@
+import {
+  runAgent,
+  type AgentPromptMessageBuilder,
+  type AgentRunCoordinator,
+  type AgentSandboxEnvironmentManager,
+} from "../core/agents/index.js";
+import type { MessageManager } from "../core/message/index.js";
+import type { ToolSchedulerInstance } from "../core/tool-scheduler/index.js";
+import type { Session, SessionManager } from "../services/session/index.js";
 import { AgentManager } from "./manager.js";
 import type {
   SubagentExecuteParams,
-  SubagentMessageWriter,
   SubagentResult,
-  SubagentRunner,
-  SubagentSession,
-  SubagentSessionManager,
   TaskExecutor,
 } from "./types.js";
 
 const DEFAULT_MAX_CONCURRENCY = 3;
 
-export interface SubagentExecutorOptions {
+export interface AgentServiceOptions {
   readonly agentManager: AgentManager;
-  readonly sessionManager: SubagentSessionManager;
-  readonly runner: SubagentRunner;
-  readonly messageWriter?: SubagentMessageWriter;
+  readonly buildPromptMessages: AgentPromptMessageBuilder;
+  readonly messageManager: MessageManager;
+  readonly runCoordinator: AgentRunCoordinator;
+  readonly sandboxManager?: AgentSandboxEnvironmentManager;
+  readonly sessionManager: Pick<SessionManager, "create" | "get">;
+  readonly toolScheduler: Pick<ToolSchedulerInstance, "getAvailableTools">;
   readonly maxConcurrency?: number;
   readonly now?: () => number;
 }
@@ -24,12 +32,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export class SubagentExecutor implements TaskExecutor {
-  private readonly now: () => number;
+export class AgentService implements TaskExecutor {
   private readonly maxConcurrency: number;
+  private readonly now: () => number;
   private runningCount = 0;
 
-  constructor(private readonly options: SubagentExecutorOptions) {
+  constructor(private readonly options: AgentServiceOptions) {
     this.maxConcurrency = options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
     this.now = options.now ?? Date.now;
   }
@@ -38,7 +46,11 @@ export class SubagentExecutor implements TaskExecutor {
     return this.runningCount;
   }
 
-  async execute(params: SubagentExecuteParams): Promise<SubagentResult> {
+  execute(params: SubagentExecuteParams): Promise<SubagentResult> {
+    return this.executeTask(params);
+  }
+
+  async executeTask(params: SubagentExecuteParams): Promise<SubagentResult> {
     if (this.runningCount >= this.maxConcurrency) {
       throw new Error("Maximum concurrent subagents reached");
     }
@@ -55,27 +67,29 @@ export class SubagentExecutor implements TaskExecutor {
         );
       }
       const session = await this.resolveSession(params);
-      const writeResult = await this.options.messageWriter?.writeUserMessage({
-        agentName: params.agentName,
-        parentSessionId: params.parentSessionId,
-        prompt: params.prompt,
-        sessionId: session.id,
-      });
-      const parentMessageId = writeResult?.messageId;
       try {
-        const result = await this.options.runner.run({
-          agentName: params.agentName,
-          environment: params.environment,
-          parentMessageId,
-          parentSessionId: params.parentSessionId,
-          projectRoot: session.projectRoot,
-          prompt: params.prompt,
-          runtimeAgent,
-          sessionId: session.id,
-          signal: params.signal,
-        });
+        const result = await runAgent(
+          {
+            messageManager: this.options.messageManager,
+            runCoordinator: this.options.runCoordinator,
+            sandboxManager: this.options.sandboxManager,
+            toolScheduler: this.options.toolScheduler,
+          },
+          {
+            agentName: params.agentName,
+            buildPromptMessages: this.options.buildPromptMessages,
+            environment: params.environment,
+            initialUserPrompt: params.prompt,
+            maxSteps: runtimeAgent.config.maxSteps,
+            parentSessionId: params.parentSessionId,
+            projectRoot: session.projectRoot,
+            sessionId: session.id,
+            signal: params.signal,
+            waitMode: "waitForCompletion",
+          },
+        );
         return {
-          output: result.output,
+          output: result.finalOutput ?? result.error ?? "",
           sessionId: session.id,
           success: result.success,
           summary: {
@@ -85,16 +99,8 @@ export class SubagentExecutor implements TaskExecutor {
           },
         };
       } catch (error) {
-        const output = errorMessage(error);
-        await this.options.messageWriter?.writeAssistantMessage?.({
-          agentName: params.agentName,
-          output,
-          parentMessageId,
-          parentSessionId: params.parentSessionId,
-          sessionId: session.id,
-        });
         return {
-          output,
+          output: errorMessage(error),
           sessionId: session.id,
           success: false,
           summary: {
@@ -111,7 +117,7 @@ export class SubagentExecutor implements TaskExecutor {
 
   private async resolveSession(
     params: SubagentExecuteParams,
-  ): Promise<SubagentSession> {
+  ): Promise<Session> {
     if (params.resumeSessionId) {
       const resumed = await this.options.sessionManager.get(
         params.resumeSessionId,

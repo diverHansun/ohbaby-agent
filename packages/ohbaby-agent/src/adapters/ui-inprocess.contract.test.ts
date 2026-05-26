@@ -9,7 +9,10 @@ import type {
   ProviderRequest,
   ProviderStreamEvent,
 } from "../services/providers/index.js";
-import type { LLMClientInstance } from "../core/llm-client/index.js";
+import type {
+  ChatCompletionMessage,
+  LLMClientInstance,
+} from "../core/llm-client/index.js";
 import { createBus } from "../bus/index.js";
 import {
   createInMemoryMessageStore,
@@ -178,8 +181,122 @@ function lastRequestToolCallId(request: ProviderRequest): string | undefined {
   return message?.tool_call_id;
 }
 
+function subagentSessionIdFromMessages(
+  messages: readonly ChatCompletionMessage[],
+): string | undefined {
+  for (const message of messages) {
+    if (message.role !== "tool" || typeof message.content !== "string") {
+      continue;
+    }
+    try {
+      const payload = JSON.parse(message.content) as {
+        readonly metadata?: {
+          readonly subagent?: {
+            readonly sessionId?: unknown;
+          };
+        };
+      };
+      const sessionId = payload.metadata?.subagent?.sessionId;
+      if (typeof sessionId === "string") {
+        return sessionId;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
 function isExploreSubagentRequest(request: ProviderRequest): boolean {
   return JSON.stringify(request.messages).includes("Task: explore");
+}
+
+function createResumableTaskFakeLLMClient(
+  requests: ProviderRequest[],
+): LLMClientInstance<FakeSdkClient> {
+  let lastSubagentSessionId: string | undefined;
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: ProviderRequest,
+      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        requests.push(request);
+        const requestText = JSON.stringify(request.messages);
+        if (isExploreSubagentRequest(request)) {
+          const output = requestText.includes("Use the same child session")
+            ? "child used prior auth.ts"
+            : "child found auth.ts";
+          return Promise.resolve(
+            createProviderStream([{ textDelta: output, finishReason: "stop" }]),
+          );
+        }
+
+        const lastText = lastRequestMessageText(request);
+        if (lastText.includes("Delegate auth exploration")) {
+          return Promise.resolve(
+            createProviderStream([
+              taskToolCallEvent({
+                callId: "call_task_first",
+                description: "Explore auth",
+                prompt: "Find auth files",
+              }),
+            ]),
+          );
+        }
+        if (lastText.includes("Continue the same exploration")) {
+          const resumeSessionId =
+            subagentSessionIdFromMessages(request.messages) ??
+            lastSubagentSessionId;
+          if (!resumeSessionId) {
+            return Promise.reject(
+              new Error("Expected previous subagent session id in parent context"),
+            );
+          }
+          return Promise.resolve(
+            createProviderStream([
+              taskToolCallEvent({
+                callId: "call_task_resume",
+                description: "Resume auth",
+                prompt: "Use the same child session",
+                resumeSessionId,
+              }),
+            ]),
+          );
+        }
+        if (lastText.includes("child found auth.ts")) {
+          lastSubagentSessionId =
+            subagentSessionIdFromMessages(request.messages) ??
+            lastSubagentSessionId;
+          return Promise.resolve(
+            createProviderStream([
+              { textDelta: "parent saw child 1", finishReason: "stop" },
+            ]),
+          );
+        }
+        if (lastText.includes("child used prior auth.ts")) {
+          return Promise.resolve(
+            createProviderStream([
+              { textDelta: "parent saw child 2", finishReason: "stop" },
+            ]),
+          );
+        }
+        return Promise.reject(new Error("No fake LLM response configured"));
+      },
+      isAbortError(): boolean {
+        return false;
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      baseUrl: "https://example.invalid/v1",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
 }
 
 function createAgentTaskFakeLLMClient(
@@ -1317,30 +1434,7 @@ describe("createInProcessUiBackendClient", () => {
   it("runs task subagents in isolated resumable child sessions with child history", async () => {
     const requests: ProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
-      llmClient: createSequentialFakeLLMClient(
-        [
-          [
-            taskToolCallEvent({
-              callId: "call_task_first",
-              description: "Explore auth",
-              prompt: "Find auth files",
-            }),
-          ],
-          [{ textDelta: "child found auth.ts", finishReason: "stop" }],
-          [{ textDelta: "parent saw child 1", finishReason: "stop" }],
-          [
-            taskToolCallEvent({
-              callId: "call_task_resume",
-              description: "Resume auth",
-              prompt: "Use the same child session",
-              resumeSessionId: "subagent_session_1",
-            }),
-          ],
-          [{ textDelta: "child used prior auth.ts", finishReason: "stop" }],
-          [{ textDelta: "parent saw child 2", finishReason: "stop" }],
-        ],
-        requests,
-      ),
+      llmClient: createResumableTaskFakeLLMClient(requests),
     });
 
     await client.submitPrompt("Delegate auth exploration");
@@ -1365,8 +1459,72 @@ describe("createInProcessUiBackendClient", () => {
     expect(resumedChildText).not.toContain("parent saw child 1");
 
     const parentToolResultText = JSON.stringify(requests[2]?.messages);
-    expect(parentToolResultText).toContain("subagent_session_1");
+    const childSessionId = subagentSessionIdFromMessages(
+      requests[2]?.messages ?? [],
+    );
+    expect(childSessionId).toMatch(/^session_/);
+    expect(parentToolResultText).toContain(childSessionId);
     expect(parentToolResultText).toContain("child found auth.ts");
+  });
+
+  it("returns invalid task resume errors to the parent without creating a child session", async () => {
+    const requests: ProviderRequest[] = [];
+    const client = createInProcessUiBackendClient({
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            taskToolCallEvent({
+              callId: "call_task_missing_resume",
+              description: "Resume missing child",
+              prompt: "Try to resume a missing child",
+              resumeSessionId: "session_missing_child",
+            }),
+          ],
+          [{ textDelta: "parent saw invalid resume", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+
+    await client.submitPrompt("Try an invalid task resume");
+
+    expect(requests).toHaveLength(2);
+    const toolResultMessage = requests[1]?.messages.at(-1);
+    expect(toolResultMessage).toMatchObject({
+      role: "tool",
+      tool_call_id: "call_task_missing_resume",
+    });
+    expect(
+      typeof toolResultMessage?.content === "string"
+        ? toolResultMessage.content
+        : "",
+    ).toContain("Subagent session not found: session_missing_child");
+
+    const snapshot = await client.getSnapshot();
+    expect(snapshot.sessions).toHaveLength(1);
+    const parts = snapshot.sessions[0].messages.at(-1)?.parts ?? [];
+    expect(parts).toHaveLength(3);
+    expect(parts[0]?.type).toBe("tool-call");
+    if (parts[0]?.type !== "tool-call") {
+      throw new Error("expected task tool call part");
+    }
+    expect(parts[0].call).toMatchObject({
+      id: "call_task_missing_resume",
+      name: "task",
+      status: "failed",
+    });
+    expect(parts[1]?.type).toBe("tool-result");
+    if (parts[1]?.type !== "tool-result") {
+      throw new Error("expected task tool result part");
+    }
+    expect(parts[1].result.callId).toBe("call_task_missing_resume");
+    expect(parts[1].result.error).toContain(
+      "Subagent session not found: session_missing_child",
+    );
+    expect(parts[2]).toEqual({
+      text: "parent saw invalid resume",
+      type: "text",
+    });
   });
 
   it("appends configured subagent prompts to child model requests", async () => {
@@ -1520,10 +1678,9 @@ describe("createInProcessUiBackendClient", () => {
     });
 
     expect(childSignal?.aborted).toBe(true);
-    await expect(runLedger.get("run_2")).resolves.toMatchObject({
-      sessionId: "subagent_session_1",
-      status: "cancelled",
-    });
+    const childRun = await runLedger.get("run_2");
+    expect(childRun).toMatchObject({ status: "cancelled" });
+    expect(childRun?.sessionId).toMatch(/^session_/);
     const closeToolResultText = JSON.stringify(
       requests.filter((request) => !isExploreSubagentRequest(request)).at(-1)
         ?.messages,
@@ -1629,10 +1786,9 @@ describe("createInProcessUiBackendClient", () => {
     await expect(
       withTimeout(run, 1_000, "parent did not abort"),
     ).rejects.toThrow("run aborted");
-    await expect(runLedger.get("run_2")).resolves.toMatchObject({
-      sessionId: "subagent_session_1",
-      status: "cancelled",
-    });
+    const childRun = await runLedger.get("run_2");
+    expect(childRun).toMatchObject({ status: "cancelled" });
+    expect(childRun?.sessionId).toMatch(/^session_/);
   });
 
   it("continues the LLM loop after allow_once tool permission", async () => {

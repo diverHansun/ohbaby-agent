@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import * as publicApi from "../../../packages/ohbaby-agent/src/index.js";
+import * as agentsApi from "../../../packages/ohbaby-agent/src/agents/index.js";
 import {
   AgentManager,
   AgentRegistry,
-  SubagentExecutor,
 } from "../../../packages/ohbaby-agent/src/agents/index.js";
 
 describe("agents module integration", () => {
@@ -16,6 +17,10 @@ describe("agents module integration", () => {
       mode: "subagent",
       name: "explore",
     });
-    expect(SubagentExecutor).toBeTypeOf("function");
+    expect(agentsApi.AgentService).toBeTypeOf("function");
+    expect("SubagentExecutor" in agentsApi).toBe(false);
+    expect("createSubagentRunner" in agentsApi).toBe(false);
+    expect("SubagentExecutor" in publicApi).toBe(false);
+    expect("SubagentRunner" in publicApi).toBe(false);
   });
 });

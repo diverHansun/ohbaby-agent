@@ -22,17 +22,16 @@ import {
   type ToolDefinition,
 } from "../../core/tool-scheduler/index.js";
 import { createHeuristicTokenCounter } from "../../services/llm-model/index.js";
-import type { SessionManager } from "../../services/session/index.js";
+import {
+  createInMemorySessionManager,
+  type SessionManager,
+} from "../../services/session/index.js";
 import {
   AgentManager,
+  AgentService,
   AgentTaskManager,
-  SubagentExecutor,
-  createRuntimeSubagentSessionManager,
-  createSubagentMessageWriter,
-  createSubagentRunner,
-  toOpenAiTools,
-  type RuntimeSubagentSessionManager,
 } from "../../agents/index.js";
+import { toOpenAiTools } from "../../core/agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
 import {
   createInMemoryRunLedger,
@@ -132,7 +131,8 @@ export interface UiRuntimeCompositionOptions {
   readonly permission?: PermissionPort;
   readonly policy: PolicyPort;
   readonly runLedger?: RunLedger;
-  readonly sessionManager?: Pick<SessionManager, "create" | "get">;
+  readonly sessionManager?: Pick<SessionManager, "create" | "get"> &
+    Partial<Pick<SessionManager, "ensureRoot">>;
   readonly skillRegistry?: SkillRegistryPort;
   readonly streamBridge?: StreamBridge;
   readonly workdir?: string;
@@ -241,8 +241,33 @@ export async function createUiRuntimeComposition(
     policy: options.policy,
   });
   const sandboxManager = createHostLocalSandboxManager(options.workdir);
-  const sessionManager: RuntimeSubagentSessionManager =
-    createRuntimeSubagentSessionManager(options.sessionManager);
+  const sessionManager =
+    options.sessionManager ??
+    createInMemorySessionManager({
+      bus: options.bus,
+      messageCleaner: options.messageManager,
+      now: options.now,
+    });
+
+  async function ensureRootSession(input: {
+    readonly agentName: string;
+    readonly id: string;
+    readonly projectRoot: string;
+    readonly title?: string;
+  }): Promise<void> {
+    if (sessionManager.ensureRoot) {
+      await sessionManager.ensureRoot(input);
+      return;
+    }
+    if (await sessionManager.get(input.id)) {
+      return;
+    }
+    await sessionManager.create(input.projectRoot, {
+      agentName: input.agentName,
+      id: input.id,
+      title: input.title,
+    });
+  }
   const subagentSessionAgents = new Map<string, string>();
   let activePrimaryAgentName = agentManager.getDefault();
   const reservedRunIds: string[] = [];
@@ -463,31 +488,27 @@ export async function createUiRuntimeComposition(
     streamBridge,
   });
 
-  const subagentRunner = createSubagentRunner({
-    buildSubagentPromptMessages,
-    fallbackProjectRoot: options.workdir,
-    messageManager: options.messageManager,
-    runManager,
-    sandboxManager,
-    toolScheduler,
-  });
-
-  const messageWriter = createSubagentMessageWriter(options.messageManager);
   const agentTaskController = new AgentTaskManager({
     agentManager,
+    buildPromptMessages: buildSubagentPromptMessages,
     ...(options.createAgentTaskId
       ? { createTaskId: options.createAgentTaskId }
       : {}),
-    messageWriter,
-    runner: subagentRunner,
+    messageManager: options.messageManager,
+    runCoordinator: runManager,
+    sandboxManager,
     sessionManager,
+    toolScheduler,
   });
 
-  const taskExecutor = new SubagentExecutor({
+  const taskExecutor = new AgentService({
     agentManager,
-    messageWriter,
-    runner: subagentRunner,
+    buildPromptMessages: buildSubagentPromptMessages,
+    messageManager: options.messageManager,
+    runCoordinator: runManager,
+    sandboxManager,
     sessionManager,
+    toolScheduler,
   });
 
   for (const tool of createBuiltinTools({
@@ -580,7 +601,7 @@ export async function createUiRuntimeComposition(
     },
 
     async ensureSessionRecord(input): Promise<void> {
-      await sessionManager.ensureRoot({
+      await ensureRootSession({
         agentName: input.agentName,
         id: input.id,
         projectRoot: input.projectRoot,

@@ -128,15 +128,15 @@ describe('validation', () => {
 })
 ```
 
-### 2.2 SubagentExecutor 测试
+### 2.2 AgentService 测试
 
 #### 2.2.1 并发控制
 
 ```typescript
-describe('SubagentExecutor', () => {
+describe('AgentService', () => {
   describe('concurrency control', () => {
     it('should allow up to 3 concurrent subagents', async () => {
-      const executor = new SubagentExecutor(mockDeps)
+      const executor = new AgentService(mockDeps)
 
       // 启动 3 个子代理（不等待完成）
       const p1 = executor.execute({ agentName: 'explore', ... })
@@ -152,7 +152,7 @@ describe('SubagentExecutor', () => {
     })
 
     it('should decrement count after completion', async () => {
-      const executor = new SubagentExecutor(mockDeps)
+      const executor = new AgentService(mockDeps)
 
       await executor.execute({ agentName: 'explore', ... })
 
@@ -160,7 +160,7 @@ describe('SubagentExecutor', () => {
     })
 
     it('should decrement count on error', async () => {
-      const executor = new SubagentExecutor(mockDeps)
+      const executor = new AgentService(mockDeps)
       mockLifecycleError()
 
       await expect(
@@ -178,7 +178,7 @@ describe('SubagentExecutor', () => {
 ```typescript
 describe('mode validation', () => {
   it('should reject primary agent as subagent', async () => {
-    const executor = new SubagentExecutor(mockDeps)
+    const executor = new AgentService(mockDeps)
 
     await expect(
       executor.execute({ agentName: 'build', ... })
@@ -189,7 +189,7 @@ describe('mode validation', () => {
     // 配置一个 mode: 'all' 的代理
     mockRegistry.set('custom', { mode: 'all', ... })
 
-    const executor = new SubagentExecutor(mockDeps)
+    const executor = new AgentService(mockDeps)
 
     await expect(
       executor.execute({ agentName: 'custom', ... })
@@ -203,7 +203,7 @@ describe('mode validation', () => {
 ```typescript
 describe('session creation', () => {
   it('should create child session with parent ID', async () => {
-    const executor = new SubagentExecutor(mockDeps)
+    const executor = new AgentService(mockDeps)
 
     await executor.execute({
       agentName: 'explore',
@@ -219,7 +219,7 @@ describe('session creation', () => {
   })
 
   it('should resume existing session if provided', async () => {
-    const executor = new SubagentExecutor(mockDeps)
+    const executor = new AgentService(mockDeps)
 
     await executor.execute({
       agentName: 'explore',
@@ -326,12 +326,12 @@ describe('Config Loading Integration', () => {
 ### 3.2 子代理执行集成测试
 
 ```typescript
-describe('Subagent Execution Integration', () => {
+describe('AgentService Execution Integration', () => {
   it('should execute subagent and return result', async () => {
     // 使用真实的 Lifecycle（但 mock LLM）
     mockLLM.setResponse('Found 5 files matching pattern')
 
-    const result = await SubagentExecutor.execute({
+    const result = await AgentService.execute({
       agentName: 'explore',
       parentSessionId: 'parent-123',
       prompt: 'Find all TypeScript files',
@@ -347,7 +347,7 @@ describe('Subagent Execution Integration', () => {
     const events: string[] = []
     Bus.subscribe('agent.subagent.*', (e) => events.push(e.type))
 
-    await SubagentExecutor.execute({
+    await AgentService.execute({
       agentName: 'explore',
       parentSessionId: 'parent-123',
       prompt: 'search'
@@ -438,7 +438,7 @@ describe('Config File Errors', () => {
 ```typescript
 describe('Concurrency Edge Cases', () => {
   it('should handle rapid sequential executions', async () => {
-    const executor = new SubagentExecutor(mockDeps)
+    const executor = new AgentService(mockDeps)
 
     // 快速顺序执行
     for (let i = 0; i < 10; i++) {
@@ -449,7 +449,7 @@ describe('Concurrency Edge Cases', () => {
   })
 
   it('should handle execution cancellation', async () => {
-    const executor = new SubagentExecutor(mockDeps)
+    const executor = new AgentService(mockDeps)
     const controller = new AbortController()
 
     const promise = executor.execute({
@@ -536,7 +536,7 @@ vi.spyOn(SystemPrompt, 'assemble').mockReturnValue(['prompt'])
 | 组件 | 行覆盖率 | 分支覆盖率 |
 |------|----------|------------|
 | AgentRegistry | ≥ 90% | ≥ 85% |
-| SubagentExecutor | ≥ 95% | ≥ 90% |
+| AgentService | ≥ 95% | ≥ 90% |
 | AgentManager | ≥ 85% | ≥ 80% |
 | 整体 | ≥ 85% | ≥ 80% |
 

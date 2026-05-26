@@ -62,7 +62,15 @@ export interface RemoveSessionOptions {
   readonly cascadeChildren?: boolean;
 }
 
+export interface EnsureRootSessionInput {
+  readonly id: string;
+  readonly agentName: string;
+  readonly projectRoot: string;
+  readonly title?: string;
+}
+
 export interface SessionManager {
+  ensureRoot(input: EnsureRootSessionInput): Promise<Session>;
   create(
     projectDirectory: string,
     options?: CreateSessionOptions,

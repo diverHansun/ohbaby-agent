@@ -1,12 +1,15 @@
+import {
+  runAgent,
+  type AgentRunResult,
+  type AgentPromptMessageBuilder,
+  type AgentRunCoordinator,
+  type AgentSandboxEnvironmentManager,
+} from "../../core/agents/index.js";
+import type { MessageManager } from "../../core/message/index.js";
+import type { ToolSchedulerInstance } from "../../core/tool-scheduler/index.js";
+import type { Session, SessionManager } from "../../services/session/index.js";
 import { AgentManager } from "../manager.js";
-import type {
-  RuntimeAgent,
-  SubagentMessageWriter,
-  SubagentRunner,
-  SubagentRunnerResult,
-  SubagentSession,
-  SubagentSessionManager,
-} from "../types.js";
+import type { RuntimeAgent } from "../types.js";
 import { InMemoryAgentTaskStore } from "./in-memory-store.js";
 import type {
   AgentTaskCloseResult,
@@ -34,14 +37,17 @@ interface ActiveTaskState {
   queue: QueuedInput[];
   running: boolean;
   runtimeAgent: RuntimeAgent;
-  session: SubagentSession;
+  session: Session;
 }
 
 export interface AgentTaskManagerOptions {
   readonly agentManager: AgentManager;
-  readonly sessionManager: SubagentSessionManager;
-  readonly runner: SubagentRunner;
-  readonly messageWriter: SubagentMessageWriter;
+  readonly buildPromptMessages: AgentPromptMessageBuilder;
+  readonly messageManager: MessageManager;
+  readonly runCoordinator: AgentRunCoordinator;
+  readonly sandboxManager?: AgentSandboxEnvironmentManager;
+  readonly sessionManager: Pick<SessionManager, "create" | "get">;
+  readonly toolScheduler: Pick<ToolSchedulerInstance, "getAvailableTools">;
   readonly store?: AgentTaskStore;
   readonly createTaskId?: () => string;
   readonly maxTasks?: number;
@@ -66,7 +72,7 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   throw new Error("Agent task open aborted");
 }
 
-function statusAfterRun(result: SubagentRunnerResult): AgentTaskStatus {
+function statusAfterRun(result: AgentRunResult): AgentTaskStatus {
   return result.success ? "completed" : "failed";
 }
 
@@ -321,31 +327,34 @@ export class AgentTaskManager implements AgentTaskController {
       updatedAt: this.now(),
     });
 
-    let parentMessageId: string | undefined;
     try {
-      const writeResult = await this.options.messageWriter.writeUserMessage({
-        agentName: state.runtimeAgent.config.name,
-        parentSessionId: (await this.mustGet(taskId)).parentSessionId,
-        prompt,
-        sessionId: state.session.id,
-      });
-      parentMessageId = writeResult?.messageId;
-      const result = await this.options.runner.run({
-        agentName: state.runtimeAgent.config.name,
-        environment,
-        parentMessageId,
-        parentSessionId: (await this.mustGet(taskId)).parentSessionId,
-        projectRoot: state.session.projectRoot,
-        prompt,
-        runtimeAgent: state.runtimeAgent,
-        sessionId: state.session.id,
-        signal: state.abortController.signal,
-      });
+      const task = await this.mustGet(taskId);
+      const result = await runAgent(
+        {
+          messageManager: this.options.messageManager,
+          runCoordinator: this.options.runCoordinator,
+          sandboxManager: this.options.sandboxManager,
+          toolScheduler: this.options.toolScheduler,
+        },
+        {
+          agentName: state.runtimeAgent.config.name,
+          buildPromptMessages: this.options.buildPromptMessages,
+          environment,
+          initialUserPrompt: prompt,
+          maxSteps: state.runtimeAgent.config.maxSteps,
+          parentSessionId: task.parentSessionId,
+          projectRoot: state.session.projectRoot,
+          sessionId: state.session.id,
+          signal: state.abortController.signal,
+          waitMode: "waitForCompletion",
+        },
+      );
+      const output = result.finalOutput ?? result.error ?? "";
       if (!this.isClosed(taskId)) {
         await this.store.update(taskId, {
           completedAt: this.now(),
-          error: result.success ? undefined : result.output,
-          output: result.output,
+          error: result.success ? undefined : output,
+          output,
           status: statusAfterRun(result),
           updatedAt: this.now(),
         });

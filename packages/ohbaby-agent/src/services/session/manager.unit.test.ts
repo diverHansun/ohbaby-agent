@@ -172,6 +172,54 @@ describe("SessionManager", () => {
     expect(createdEvents).toEqual([]);
   });
 
+  it("ensureRoot creates a project-scoped root session with the requested id", async () => {
+    const { manager, createdEvents } = createManager();
+
+    const session = await manager.ensureRoot({
+      agentName: "build",
+      id: "root_session",
+      projectRoot: "D:/repo",
+      title: "Root",
+    });
+
+    expect(session).toEqual({
+      id: "root_session",
+      projectId: "project:D:/repo",
+      projectRoot: "root:D:/repo",
+      title: "Root",
+      agentName: "build",
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      status: "active",
+      stats: { messageCount: 0 },
+      childrenIds: [],
+      isSubagent: false,
+    });
+    await expect(manager.get("root_session")).resolves.toEqual(session);
+    expect(createdEvents).toEqual([session]);
+  });
+
+  it("ensureRoot returns an existing session without mutating fields or publishing Created", async () => {
+    const { manager, createdEvents } = createManager();
+    const existing = await manager.create("D:/repo", {
+      agentName: "build",
+      id: "root_session",
+      title: "Original",
+    });
+    const createdEventCount = createdEvents.length;
+
+    const session = await manager.ensureRoot({
+      agentName: "research",
+      id: "root_session",
+      projectRoot: "D:/other",
+      title: "Changed",
+    });
+
+    expect(session).toEqual(existing);
+    await expect(manager.get("root_session")).resolves.toEqual(existing);
+    expect(createdEvents).toHaveLength(createdEventCount);
+  });
+
   it("creates child sessions under the parent project and records children on the parent", async () => {
     const { manager, removedEvents, updatedEvents } = createManager();
     const parent = await manager.create("D:/parent", {
