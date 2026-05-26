@@ -63,6 +63,46 @@ improve-1 期间，primary 启动路径仍由 `composition.ts` 手工构造 mess
 - adapter 层仍承担了本应属于 core/service 的 agent 启动编排。
 - primary 与 subagent 的 envelope 差异仍在代码路径层被放大。
 
+### 1.5 `AgentRunRecord` 泄漏 RunManager 内部字段
+
+`core/agents/types.ts` 当前定义的 `AgentRunRecord` 包含 `permissionProfileId / multitaskStrategy / disconnectMode / createdAt / startedAt / endedAt` 等字段。这些字段来自 runtime/run-manager 的内部 run 记录，不是 `core/agents` 启动和跟踪一个 agent run 所需的本质契约。
+
+**问题**：
+
+- `runAgent` 目前实际只消费 `runId`，最多需要 `sessionId` 做一致性核对。
+- `core/agents` 复制 RunManager 内部记录形状，造成稳定层反向感知 runtime 的实现细节。
+- 这违反接口隔离原则：port 应只暴露 consumer 真正使用的最小字段。
+
+**目标方向**：在 Phase 1 将 `AgentRunRecord` 收窄为 `AgentRunHandle { runId, sessionId }`。RunManager adapter 负责把内部 run 记录转换为 handle，`core/agents` 不再知道权限 profile、多任务策略、断连策略等 runtime 内部概念。
+
+### 1.6 `AgentRunResult` 不是可判别联合
+
+当前 `AgentRunResult` 使用单个 interface 承载 `success / finalOutput / events / error`，这些字段大多 optional，真实语义依赖注释和调用方约定。
+
+**问题**：
+
+- `waitMode: "stream"` 时 `events` 必填，但类型不强制。
+- `waitMode: "waitForCompletion"` 且成功时 `finalOutput` 必填，但类型不强制。
+- 失败结果应强制携带 `error`，当前类型同样不保证。
+- 调用方必须靠 `if (result.events)` 这类运行时判断来恢复语义，类型推断不够直接。
+
+**目标方向**：在 Phase 1 实现 stream 分支时，把 `AgentRunResult` 改为以 `mode: "stream" | "waitForCompletion"` 为判别字段的 union。这样 stream、成功等待、失败等待三种结果在类型层面互斥。
+
+### 1.7 `AgentPromptMessageBuilder` 是过渡期抽象
+
+`AgentRunCreateOptions.messages` 当前仍为必填，导致 `core/agents.runAgent` 必须通过 `buildPromptMessages` 预组装模型消息后再交给 coordinator。这是 improve-1 的合理过渡形态，但它与 lifecycle improve-1/2 的长期方向不同：消息组装应由 `Lifecycle.runSession` 内部通过 `context.prepareTurn` 完成。
+
+**问题**：
+
+- `buildPromptMessages` 让 adapter/service 层继续持有一部分 prompt/context 组装职责。
+- `AgentRunCreateOptions.messages` 必填，使 RunManager 的创建入口仍绑定"外部已组装 messages"的旧路径。
+- 如果文档不承认这是过渡期产物，Phase 2 容易把它固化成长期抽象。
+
+**目标方向**：
+
+- Phase 2 完成前：`messages` 仍可必填，`runAgent` 继续调用 `buildPromptMessages`，作为兼容 RunManager 当前 create 契约的过渡。
+- Phase 2 / lifecycle improve-2 接合完成后：`AgentRunCreateOptions.messages` 改为 optional 或删除；`runAgent` 不再调用 `buildPromptMessages`；`AgentPromptMessageBuilder` 标记为 `@deprecated` 并安排退场。
+
 ---
 
 ## 二、本轮目标
@@ -105,6 +145,18 @@ improve-1 期间，primary 启动路径仍由 `composition.ts` 手工构造 mess
 - `core/agents/` 保留纯运行底层契约（`AgentRunInput / AgentRunResult / AgentToolCallSummary`）。
 - `agents/` 保留服务/调度层契约（Task 工具同步 envelope、primary stream envelope）。
 - 如果执行重命名，旧名是否保留 alias 需要单独评估；不再恢复已删除的 runner/executor 旧名。
+
+### 目标五：收紧 `core/agents` 运行契约
+
+把 Phase 1 的 stream 实现与类型边界收紧放在同一批处理：
+
+- `AgentRunCoordinator.create` 返回 `AgentRunHandle`，不再返回含 RunManager 内部字段的 `AgentRunRecord`。
+- `AgentRunResult` 改为 discriminated union，编码 stream / wait success / wait failure 的互斥语义。
+- `core/agents` 只定义 agent 运行所需的最小 port，runtime 侧负责适配。
+
+### 目标六：明确 prompt message builder 的退场路径
+
+把 `AgentPromptMessageBuilder` 与 `AgentRunCreateOptions.messages` 明确标注为过渡期形态。Phase 2 切 primary 路径时先保证行为等价；与 lifecycle improve-2 完成接合后，再移除或废弃外部预组装 messages 的入口。
 
 ---
 

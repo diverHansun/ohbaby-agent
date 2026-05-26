@@ -29,7 +29,7 @@
 **判定**：
 
 - `runAgent(deps, { ..., waitMode: "stream" })` 不再抛 `NotImplementedError`。
-- 返回 `AgentRunResult { events: AsyncIterable<LifecycleEvent>, ... }`。
+- 返回 `AgentRunResult` 的 `mode: "stream"` 分支，且包含 `runId / sessionId / events`。
 - `result.events` 可以被 `for await` 消费。
 
 ### AC-1.2 事件桥接正确
@@ -63,6 +63,26 @@
 
 - `runAgent(..., { waitMode: "waitForCompletion" })` 行为与 improve-1 完全一致。
 - improve-1 的 `core/agents/runner.unit.test.ts` 全部用例不修改且全绿。
+
+### AC-1.6 `AgentRunCoordinator.create` 返回最小 handle
+
+**判定**：
+
+- `core/agents/types.ts` 不再导出 `AgentRunRecord`。
+- `AgentRunCoordinator.create` 返回 `Promise<AgentRunHandle>`。
+- `AgentRunHandle` 只包含 `runId / sessionId`。
+- `core/agents/` 中不出现 `permissionProfileId / multitaskStrategy / disconnectMode` 等 RunManager 内部字段。
+- RunManager adapter 单测覆盖：内部 run 记录可转换为 `AgentRunHandle`。
+
+### AC-1.7 `AgentRunResult` 为 discriminated union
+
+**判定**：
+
+- `AgentRunResult` 使用 `mode: "stream" | "waitForCompletion"` 作为判别字段。
+- `mode: "stream"` 分支必须有 `events`，不得有 `success / finalOutput / error`。
+- `mode: "waitForCompletion" & success: true` 分支必须有 `finalOutput`。
+- `mode: "waitForCompletion" & success: false` 分支必须有 `error`。
+- `AgentService.executeTask` 与 `AgentTaskManager` 编译期按 union 分支消费结果，不再依赖 `finalOutput ?? error ?? ""` 这类 optional 字段兜底。
 
 ---
 
@@ -123,6 +143,17 @@
 - Phase 2 落地后**至少运行 1 个迭代周期**。
 - 期间无 primary 路径相关的回归报告。
 - 此项为 Phase 3 启动的硬门槛。
+
+### AC-2.7 `messages/buildPromptMessages` 过渡债务被显式处理
+
+**判定**：
+
+- Phase 2 完成前，文档与类型注释明确 `AgentPromptMessageBuilder` 是过渡期抽象。
+- lifecycle improve-2 接合完成后，满足以下二选一：
+  - `AgentRunCreateOptions.messages` 已删除，`runAgent` 不再调用 `buildPromptMessages`；或
+  - `messages` 与 `buildPromptMessages` 被标记为 `@deprecated`，并有明确删除 follow-up。
+- `composition.ts` 不再持有 primary prompt/context 组装逻辑。
+- `Lifecycle.runSession -> context.prepareTurn` 是长期唯一的 turn message 组装路径。
 
 ---
 
