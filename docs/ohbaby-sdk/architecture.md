@@ -19,7 +19,7 @@
           ┌────────────────┴────────────────┐
           ▼                                 ▼
 ┌─────────────────────┐          ┌─────────────────────┐
-│ ohbaby-agent         │          │ ohbaby-tui           │
+│ ohbaby-agent         │          │ ohbaby-cli           │
 │ backend adapter      │          │ frontend surface     │
 │ implements client    │          │ consumes client      │
 └─────────────────────┘          └─────────────────────┘

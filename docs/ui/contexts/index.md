@@ -1,6 +1,6 @@
 # Contexts & Store — 状态管理架构
 
-本文档描述 `ohbaby-tui` 的状态管理分层设计。
+本文档描述 `ohbaby-cli` 的状态管理分层设计。
 
 ---
 

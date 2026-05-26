@@ -79,7 +79,7 @@ StdoutEventSink 消费 SDK events：
 |------|--------|----------|
 | CliArgs | CLI args parser | 进程生命周期 |
 | UiBackendClient | `bin.ts` | 进程生命周期 |
-| TUI instance | `ohbaby-tui` | 交互模式生命周期 |
+| TUI instance | `ohbaby-cli` | 交互模式生命周期 |
 | StdoutEventSink | CLI | 非交互模式生命周期 |
 | ExitCode | CLI | 进程退出时使用 |
 

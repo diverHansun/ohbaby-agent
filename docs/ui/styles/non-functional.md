@@ -50,7 +50,7 @@ styles/ 只使用 hex 格式色值（`#RRGGBB`）。**不手动处理 256 色 / 
 
 ### 范围说明
 
-- 适用于 `packages/ohbaby-tui/src/` 下的所有 tsx / ts 文件。
+- 适用于 `packages/ohbaby-cli/src/tui/` 下的所有 tsx / ts 文件。
 - `palette` 导出仅供极少数特殊场景（例如：测试用例验证 token 映射、Storybook 预览），不供组件使用。
 - 违反此约束会使未来的主题切换无法生效，也会让"颜色由哪个 token 控制"无从追溯。
 

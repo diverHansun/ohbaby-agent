@@ -1,7 +1,7 @@
 {
-  "name": "ohbaby-tui",
+  "name": "ohbaby-cli",
   "version": "0.1.0",
-  "description": "Terminal UI package for ohbaby-agent",
+  "description": "CLI frontend package for ohbaby-agent",
   "type": "module",
   "publishConfig": {
     "access": "public"

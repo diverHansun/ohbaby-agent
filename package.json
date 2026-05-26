@@ -1,7 +1,7 @@
 {
   "name": "ohbaby-agent-workspace",
   "version": "0.1.0",
-  "description": "Workspace for ohbaby-agent, ohbaby-sdk, and ohbaby-tui",
+  "description": "Workspace for ohbaby-agent, ohbaby-sdk, and ohbaby-cli",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.0",

@@ -25,7 +25,7 @@ TUI renders tool calls and tool results as message parts:
 
 - `tool-call`: `tool <name> (<running|completed|failed>)`
 - `tool-result`: `tool result <callId>` plus either `output:` or `error:`
-- Inputs and outputs are truncated to 180 characters in `packages/ohbaby-tui/src/components/message/parts/tool-part.tsx`.
+- Inputs and outputs are truncated to 180 characters in `packages/ohbaby-cli/src/tui/components/message/parts/tool-part.tsx`.
 
 This is readable for small tool results, but it still exposes a slice of raw output in the main transcript. For `web_search`, `web_fetch`, `read`, `grep`, and `bash`, even 180 characters can expose content the user did not ask to pin in the TUI.
 

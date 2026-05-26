@@ -34,21 +34,21 @@ export default defineConfig({
         find: "react/jsx-dev-runtime",
         replacement: resolve(
           __dirname,
-          "./packages/ohbaby-tui/node_modules/react/jsx-dev-runtime.js",
+          "./packages/ohbaby-cli/node_modules/react/jsx-dev-runtime.js",
         ),
       },
       {
         find: "react/jsx-runtime",
         replacement: resolve(
           __dirname,
-          "./packages/ohbaby-tui/node_modules/react/jsx-runtime.js",
+          "./packages/ohbaby-cli/node_modules/react/jsx-runtime.js",
         ),
       },
       {
         find: "react",
         replacement: resolve(
           __dirname,
-          "./packages/ohbaby-tui/node_modules/react/index.js",
+          "./packages/ohbaby-cli/node_modules/react/index.js",
         ),
       },
       {
@@ -60,8 +60,8 @@ export default defineConfig({
         replacement: resolve(__dirname, "./packages/ohbaby-sdk/src/index.ts"),
       },
       {
-        find: "ohbaby-tui",
-        replacement: resolve(__dirname, "./packages/ohbaby-tui/src/index.tsx"),
+        find: "ohbaby-cli",
+        replacement: resolve(__dirname, "./packages/ohbaby-cli/src/index.ts"),
       },
     ],
   },

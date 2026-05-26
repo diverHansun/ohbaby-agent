@@ -23,7 +23,7 @@ CLI 采用 composition root 结构：
         │                                 │
         ▼                                 ▼
 ┌─────────────────────┐        ┌─────────────────────┐
-│ ohbaby-agent backend │        │ ohbaby-tui / stdout  │
+│ ohbaby-agent backend │        │ ohbaby-cli / stdout  │
 │ CommandService       │        │ frontend surfaces    │
 │ lifecycle/session    │        │ render events        │
 └─────────────────────┘        └─────────────────────┘
@@ -36,7 +36,7 @@ CLI 不再包含 `cli/commands` 子模块。旧职责迁移如下：
 | slash parser | `ohbaby-sdk` 的 `parseSlashInput()` |
 | command resolver | `ohbaby-sdk` 的 `resolveCommand()` |
 | CommandResult 终端渲染 | TUI command runtime 或 stdout renderer |
-| interactive selector | `ohbaby-tui` DialogManager |
+| interactive selector | `ohbaby-cli` DialogManager |
 | table/list formatter | surface 私有渲染工具 |
 
 ---
@@ -48,7 +48,7 @@ CLI 不再包含 `cli/commands` 子模块。旧职责迁移如下：
 CLI 是唯一组装 backend 与 frontend 的位置。
 
 **理由**：
-- 让 `ohbaby-agent` core 和 `ohbaby-tui` 保持单向依赖 SDK。
+- 让 `ohbaby-agent` core 和 `ohbaby-cli` 保持单向依赖 SDK。
 - 方便未来把 in-process adapter 替换为 HTTP/WebSocket adapter。
 - 保持包依赖图清晰，避免 UI/backend 互相 import。
 
@@ -105,7 +105,7 @@ packages/ohbaby-agent/src/
 
 ### 约束 1: 只有 bin.ts 可跨包组合
 
-**当前选择**：允许 `bin.ts` 同时 import backend adapter 和 `ohbaby-tui`。
+**当前选择**：允许 `bin.ts` 同时 import backend adapter 和 `ohbaby-cli`。
 
 **代价**：`ohbaby-agent` package 的入口层知道 TUI package 的存在。
 

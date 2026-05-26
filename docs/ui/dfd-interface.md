@@ -6,7 +6,7 @@
 
 ## 一、Context & Scope（上下文与范围）
 
-UI 是 `ohbaby-tui` frontend surface，只通过 `UiBackendClient` 与 backend 通信：
+UI 是 `ohbaby-cli` frontend surface，只通过 `UiBackendClient` 与 backend 通信：
 
 ```
 ohbaby-agent/bin.ts

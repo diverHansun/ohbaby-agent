@@ -9,7 +9,7 @@
       "path": "./packages/ohbaby-agent"
     },
     {
-      "path": "./packages/ohbaby-tui"
+      "path": "./packages/ohbaby-cli"
     }
   ]
 }

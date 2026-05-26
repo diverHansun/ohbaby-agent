@@ -81,7 +81,7 @@ Prompt 输入区包含 command runtime：
 建议结构：
 
 ```
-packages/ohbaby-tui/src/
+packages/ohbaby-cli/src/tui/
 ├── index.tsx                 # renderTerminalUi
 ├── app.tsx                   # 根组件
 ├── store/

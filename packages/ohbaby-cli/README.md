@@ -1,6 +1,7 @@
-# ohbaby-tui
+# ohbaby-cli
 
-Ink-based terminal UI package for Ohbaby Agent.
+CLI frontend package for Ohbaby Agent. The current interactive surface is the
+Ink-based TUI under `src/tui/`.
 
 This package owns:
 
@@ -10,5 +11,6 @@ This package owns:
 - TUI state projection from `ohbaby-sdk` events and snapshots
 
 It does not create backend behavior directly. The user-facing `ohbaby-agent`
-package creates a backend client and injects it into this TUI. This package is a
-runtime dependency of `ohbaby-agent` in the npm-facing package graph.
+package creates a backend client and injects it into this CLI frontend. This
+package is a runtime dependency of `ohbaby-agent` in the npm-facing package
+graph.

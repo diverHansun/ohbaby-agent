@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -130,6 +130,10 @@ function npmCommand(): string {
   return process.platform === "win32" ? "npm.cmd" : "npm";
 }
 
+function nodeCommand(): string {
+  return process.platform === "win32" ? "node.exe" : process.execPath;
+}
+
 function pnpmCommand(): string {
   return process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 }
@@ -139,6 +143,13 @@ function installedOhbabyPath(prefix: string): string {
     return join(prefix, "ohbaby.cmd");
   }
   return join(prefix, "bin", "ohbaby");
+}
+
+function installedGlobalPackagePath(prefix: string, packageName: string): string {
+  if (process.platform === "win32") {
+    return join(prefix, "node_modules", packageName);
+  }
+  return join(prefix, "lib", "node_modules", packageName);
 }
 
 function expectSuccess(result: CommandResult, label: string): void {
@@ -205,7 +216,7 @@ describe("npm packed CLI smoke", () => {
         "--filter",
         "ohbaby-sdk",
         "--filter",
-        "ohbaby-tui",
+        "ohbaby-cli",
         "--filter",
         "ohbaby-agent",
         "--sort",
@@ -219,9 +230,9 @@ describe("npm packed CLI smoke", () => {
       packDestination,
       packageDirectory: join(repoRoot, "packages", "ohbaby-sdk"),
     });
-    const tuiPack = await packWorkspacePackage({
+    const cliPack = await packWorkspacePackage({
       packDestination,
-      packageDirectory: join(repoRoot, "packages", "ohbaby-tui"),
+      packageDirectory: join(repoRoot, "packages", "ohbaby-cli"),
     });
     const agentPack = await packWorkspacePackage({
       packDestination,
@@ -241,12 +252,41 @@ describe("npm packed CLI smoke", () => {
         "--loglevel=error",
         "--prefer-offline",
         resolve(packDestination, sdkPack.filename),
-        resolve(packDestination, tuiPack.filename),
+        resolve(packDestination, cliPack.filename),
         resolve(packDestination, agentPack.filename),
       ],
       timeoutMs: 180_000,
     });
     expectSuccess(installResult, "npm install global packed ohbaby-agent");
+
+    const installedAgentPackage = installedGlobalPackagePath(
+      prefix,
+      "ohbaby-agent",
+    );
+    const cliImportSmokePath = join(
+      installedAgentPackage,
+      "import-ohbaby-cli.mjs",
+    );
+    await writeFile(
+      cliImportSmokePath,
+      [
+        'const mod = await import("ohbaby-cli");',
+        'if (typeof mod.renderTerminalUi !== "function") throw new Error("missing renderTerminalUi export");',
+        'if (typeof mod.OhbabyTerminalApp !== "function") throw new Error("missing OhbabyTerminalApp export");',
+        'if (typeof mod.TerminalUiOptions !== "undefined") throw new Error("TerminalUiOptions should be type-only");',
+      ].join("\n"),
+      "utf8",
+    );
+
+    const cliImportResult = await runCommand({
+      command: nodeCommand(),
+      args: [cliImportSmokePath],
+      cwd: installedAgentPackage,
+      timeoutMs: 30_000,
+    });
+    expectSuccess(cliImportResult, "import installed ohbaby-cli");
+    expect(cliImportResult.stdout).toBe("");
+    expect(cliImportResult.stderr).toBe("");
 
     const ohbaby = installedOhbabyPath(prefix);
     const helpResult = await runCommand({

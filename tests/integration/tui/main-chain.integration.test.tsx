@@ -3,8 +3,8 @@ import { join } from "node:path";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createInProcessUiBackendClient } from "ohbaby-agent";
-import { OhbabyTerminalApp } from "ohbaby-tui";
-import type { TuiBackendClient } from "../../../packages/ohbaby-tui/src/store/snapshot.js";
+import { OhbabyTerminalApp } from "ohbaby-cli";
+import type { TuiBackendClient } from "../../../packages/ohbaby-cli/src/tui/store/snapshot.js";
 import {
   createFakeLLMClient,
   createSequentialFakeLLMClient,
@@ -57,7 +57,7 @@ describe("TUI main chain with real in-process backend", () => {
   });
 
   it("renders tool permission flow and accepts another prompt after allow_once", async () => {
-    const workdir = await tempWorkspace("ohbaby-tui-permission");
+    const workdir = await tempWorkspace("ohbaby-cli-permission");
     const requests = [];
     const realClient = createInProcessUiBackendClient({
       llmClient: createSequentialFakeLLMClient(
@@ -115,7 +115,7 @@ describe("TUI main chain with real in-process backend", () => {
   });
 
   it("aborts a pending permission run with Ctrl+C and can submit again", async () => {
-    const workdir = await tempWorkspace("ohbaby-tui-abort");
+    const workdir = await tempWorkspace("ohbaby-cli-abort");
     await mkdir(join(workdir, "src"));
     const realClient = createInProcessUiBackendClient({
       llmClient: createSequentialFakeLLMClient([
@@ -212,7 +212,7 @@ describe("TUI main chain with real in-process backend", () => {
   });
 
   it("rejects write tool calls in ask mode before showing permission", async () => {
-    const workdir = await tempWorkspace("ohbaby-tui-ask-policy");
+    const workdir = await tempWorkspace("ohbaby-cli-ask-policy");
     const requests = [];
     const client = createInProcessUiBackendClient({
       llmClient: createSequentialFakeLLMClient(
@@ -255,7 +255,7 @@ describe("TUI main chain with real in-process backend", () => {
   });
 
   it("runs write tool calls without permission after /permission edit-automatically", async () => {
-    const workdir = await tempWorkspace("ohbaby-tui-auto-edit");
+    const workdir = await tempWorkspace("ohbaby-cli-auto-edit");
     const client = createInProcessUiBackendClient({
       llmClient: createSequentialFakeLLMClient([
         [

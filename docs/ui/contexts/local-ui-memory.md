@@ -2,7 +2,7 @@
 
 本文档定义 LocalUiMemory 的职责、形状与使用边界。
 
-LocalUiMemory 是 `ohbaby-tui` 中**纯 UI 私有的本地记忆切片**，与 [TuiStore](./tui-store.md) 平级。它存放那些**不属于 SDK 数据投影、但又需要跨弹窗或会话保留**的 UI 偏好与历史信息。
+LocalUiMemory 是 `ohbaby-cli` 中**纯 UI 私有的本地记忆切片**，与 [TuiStore](./tui-store.md) 平级。它存放那些**不属于 SDK 数据投影、但又需要跨弹窗或会话保留**的 UI 偏好与历史信息。
 
 ---
 

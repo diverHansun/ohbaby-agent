@@ -26,7 +26,7 @@
 - MCP 连接建立（mcp 模块职责）
 - settings.json 文件 I/O（config/plugins 模块职责）
 - 孤儿 cache 目录的物理删除（定时任务，集成测试外）
-- CLI/TUI 的风险确认交互（backend commands 和 ohbaby-tui 职责）
+- CLI/TUI 的风险确认交互（backend commands 和 ohbaby-cli 职责）
 
 ---
 

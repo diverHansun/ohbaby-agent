@@ -28,7 +28,7 @@ export default defineConfig({
     "net",
     "tls",
     "zlib",
+    "ohbaby-cli",
     "ohbaby-sdk",
-    "ohbaby-tui",
   ],
 });

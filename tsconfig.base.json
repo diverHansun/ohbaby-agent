@@ -16,7 +16,7 @@
     "paths": {
       "ohbaby-sdk": ["packages/ohbaby-sdk/src/index.ts"],
       "ohbaby-agent": ["packages/ohbaby-agent/src/index.ts"],
-      "ohbaby-tui": ["packages/ohbaby-tui/src/index.tsx"]
+      "ohbaby-cli": ["packages/ohbaby-cli/src/index.ts"]
     },
     "types": ["node", "vitest/globals"],
     "jsx": "react-jsx",
@@ -29,4 +29,3 @@
     "incremental": true
   }
 }
-

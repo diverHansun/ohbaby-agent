@@ -13,7 +13,7 @@
 | 识别 slash 输入、提取路径和参数 | `ohbaby-sdk` |
 | catalog resolver 和 alias 解析 | `ohbaby-sdk` + backend catalog |
 | 命令目录、分类、执行 | `commands` backend 模块 |
-| 终端渲染和 dialog | `ohbaby-tui` |
+| 终端渲染和 dialog | `ohbaby-cli` |
 | 非交互文本输出 | `docs/cli` 中的 stdout renderer |
 
 ---
@@ -54,7 +54,7 @@ Command execution 属于 backend `commands` 模块。
 
 ### N4: 不负责 interactive dialog
 
-DialogManager 属于 `ohbaby-tui`。
+DialogManager 属于 `ohbaby-cli`。
 
 ---
 

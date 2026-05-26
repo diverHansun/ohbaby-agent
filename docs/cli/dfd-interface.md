@@ -91,7 +91,7 @@ cli composition root
 | 模块 | 接口 | 用途 |
 |------|------|------|
 | `ohbaby-agent` adapter | `createInProcessUiBackendClient()` | 创建 SDK client |
-| `ohbaby-tui` | `renderTerminalUi({ client })` | 启动交互 UI |
+| `ohbaby-cli` | `renderTerminalUi({ client })` | 启动交互 UI |
 | `ohbaby-sdk` | `UiBackendClient` | 统一通信协议 |
 
 ---

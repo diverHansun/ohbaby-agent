@@ -10,7 +10,7 @@ This package owns:
 - runtime adapters, built-in tools, sessions, policy, permissions, and provider
   wiring
 
-It depends on `ohbaby-sdk` for frontend/backend contracts and `ohbaby-tui` for
+It depends on `ohbaby-sdk` for frontend/backend contracts and `ohbaby-cli` for
 the default terminal frontend.
 
 Development remains in the pnpm workspace. The intended public install command

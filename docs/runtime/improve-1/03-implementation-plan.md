@@ -57,7 +57,7 @@ MVP 不做 scheduler、heartbeat、background task、follow-up、channel trigger
 - daemon background task manager。
 - hook 责任链重构。
 - context improve-2。
-- ohbaby-tui 到 ohbaby-cli 的重命名和架构重组。
+- ohbaby-cli 的架构重组。
 - Hermes 型后台助手产品闭环。
 
 ## 3. Deferred 决策

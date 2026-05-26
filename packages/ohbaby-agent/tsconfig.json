@@ -14,7 +14,7 @@
       "path": "../ohbaby-sdk"
     },
     {
-      "path": "../ohbaby-tui"
+      "path": "../ohbaby-cli"
     }
   ]
 }

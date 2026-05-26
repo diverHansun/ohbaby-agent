@@ -27,7 +27,7 @@
 
 ### G2: 零业务依赖
 
-SDK 不依赖 `ohbaby-agent`、`ohbaby-tui` 或任何业务模块。它只包含类型定义和纯函数，能够在 Node、Worker、WebAssembly 或测试环境中运行。
+SDK 不依赖 `ohbaby-agent`、`ohbaby-cli` 或任何业务模块。它只包含类型定义和纯函数，能够在 Node、Worker、WebAssembly 或测试环境中运行。
 
 ### G3: 一致的命令语法
 
@@ -109,7 +109,7 @@ SDK 事件是 wire protocol，不等同于 backend 内部 Bus。backend adapter 
 
 ### 约束
 
-1. **零 runtime 业务依赖**：不得 import `ohbaby-agent` 或 `ohbaby-tui`。
+1. **零 runtime 业务依赖**：不得 import `ohbaby-agent` 或 `ohbaby-cli`。
 2. **纯函数优先**：parser/resolver 不读取文件、不访问网络、不依赖全局状态。
 3. **事件流统一**：`executeCommand()` 和 `submitPrompt()` 不同步返回业务结果。
 4. **协议版本可演进**：DTO 增加字段时优先使用可选字段，避免破坏旧 surface。

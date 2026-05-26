@@ -32,7 +32,7 @@
 - Broker 发布 `Interaction.Event.Requested`。
 - Broker 发布 `Interaction.Event.Resolved`。
 - 不测试 stream-bridge ring buffer；那属于 `runtime/stream-bridge`。
-- 不测试 TUI dialog；那属于 `ohbaby-tui`。
+- 不测试 TUI dialog；那属于 `ohbaby-cli`。
 
 ---
 

@@ -43,7 +43,7 @@ tool call is visible.
 
 ## Packaging Checks
 
-The packed smoke verifies that local tarballs for `ohbaby-sdk`, `ohbaby-tui`, and `ohbaby-agent` can be installed into a temporary npm global prefix and expose:
+The packed smoke verifies that local tarballs for `ohbaby-sdk`, `ohbaby-cli`, and `ohbaby-agent` can be installed into a temporary npm global prefix and expose:
 
 - `ohbaby --help`
 - `ohbaby --version`

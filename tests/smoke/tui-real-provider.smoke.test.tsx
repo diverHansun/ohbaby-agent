@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPersistentUiBackendClient } from "ohbaby-agent";
-import { OhbabyTerminalApp } from "ohbaby-tui";
+import { OhbabyTerminalApp } from "ohbaby-cli";
 import {
   closeDatabase,
   getDatabase,

@@ -134,7 +134,7 @@ commands 可以使用 backend 内部 Bus，但 UI 只能看到 SDK 事件。
 
 ## 五、硬性依赖规则
 
-1. commands 不得 import `ohbaby-tui`。
+1. commands 不得 import `ohbaby-cli`。
 2. commands 不得依赖 TUI dialog 名称。
 3. commands 输出必须能被 TUI、stdout、remote/headless surface 消费。
 4. command catalog 中的 `provider` 参数不支持 alias。

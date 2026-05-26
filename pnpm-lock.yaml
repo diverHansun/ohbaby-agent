@@ -80,12 +80,12 @@ importers:
       exa-js:
         specifier: ^2.0.12
         version: 2.0.12(ws@8.19.0)
+      ohbaby-cli:
+        specifier: workspace:*
+        version: link:../ohbaby-cli
       ohbaby-sdk:
         specifier: workspace:*
         version: link:../ohbaby-sdk
-      ohbaby-tui:
-        specifier: workspace:*
-        version: link:../ohbaby-tui
       openai:
         specifier: ^4.77.0
         version: 4.104.0(ws@8.19.0)(zod@3.25.76)
@@ -96,9 +96,7 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
 
-  packages/ohbaby-sdk: {}
-
-  packages/ohbaby-tui:
+  packages/ohbaby-cli:
     dependencies:
       chalk:
         specifier: ^5.4.1
@@ -112,6 +110,8 @@ importers:
       react:
         specifier: ^19.0.0
         version: 19.2.3
+
+  packages/ohbaby-sdk: {}
 
 packages:
 

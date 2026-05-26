@@ -55,7 +55,7 @@ src/cli/commands/
 |------|------|
 | parser/resolver | `packages/ohbaby-sdk/src/command/` |
 | command catalog/execution | `packages/ohbaby-agent/src/commands/` |
-| TUI command runtime | `packages/ohbaby-tui/src/` |
+| TUI command runtime | `packages/ohbaby-cli/src/tui/` |
 | stdout renderer | `packages/ohbaby-agent/src/cli/stdout-renderer.ts` |
 
 ---

@@ -2,7 +2,7 @@
 
 本文档定义 TuiStore 的职责、形状与更新规则。
 
-TuiStore 是 `ohbaby-tui` 中 SDK 数据的唯一本地投影。所有来自 `UiBackendClient` 的 snapshot、RPC 结果和事件增量，都先写入 TuiStore，再由 selector hooks 暴露给组件。
+TuiStore 是 `ohbaby-cli` 中 SDK 数据的唯一本地投影。所有来自 `UiBackendClient` 的 snapshot、RPC 结果和事件增量，都先写入 TuiStore，再由 selector hooks 暴露给组件。
 
 ---
 

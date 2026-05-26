@@ -13,7 +13,7 @@
 **一句话说明**：cli 模块是 `ohbaby` 进程的组合根，负责解析 argv、创建 `UiBackendClient`、选择交互或非交互 surface，并统一退出码与进程清理。
 
 **如果没有这个模块**：
-- `ohbaby-agent` 和 `ohbaby-tui` 缺少唯一合法的组合入口。
+- `ohbaby-agent` 和 `ohbaby-cli` 缺少唯一合法的组合入口。
 - 交互 TUI 与非交互 stdout 输出会各自绕过 SDK 协议。
 - 进程级错误处理、stdin、退出码和清理流程会分散在多个模块中。
 
@@ -23,7 +23,7 @@
 
 ### G1: Composition Root 清晰
 
-CLI 是唯一允许同时依赖 `ohbaby-agent` backend adapter 和 `ohbaby-tui` frontend package 的位置。除入口文件外，任何 backend core/service/adapter 不得 import TUI。
+CLI 是唯一允许同时依赖 `ohbaby-agent` backend adapter 和 `ohbaby-cli` frontend package 的位置。除入口文件外，任何 backend core/service/adapter 不得 import TUI。
 
 ### G2: 统一 SDK 通道
 
@@ -108,7 +108,7 @@ Slash command 的纯解析和 resolver 属于 `ohbaby-sdk`。CLI 不维护 `pars
 
 ### N3: 不负责 TUI 渲染
 
-Ink 组件树、DialogManager、补全 UI 和 prompt 交互属于 `ohbaby-tui`。
+Ink 组件树、DialogManager、补全 UI 和 prompt 交互属于 `ohbaby-cli`。
 
 ### N4: 不负责 command catalog
 
@@ -122,9 +122,9 @@ CLI 是进程组合根，不应被 backend service 或 TUI component import。
 
 ## 五、硬性依赖规则
 
-1. `ohbaby-tui` 不得 import `ohbaby-agent` 的任何模块。
-2. `ohbaby-agent` core/services/adapters 不得 import `ohbaby-tui`。
-3. `packages/ohbaby-agent/src/bin.ts` 是 V1 唯一允许同时 import `ohbaby-agent` backend adapter 与 `ohbaby-tui` 的文件。
+1. `ohbaby-cli` 不得 import `ohbaby-agent` 的任何模块。
+2. `ohbaby-agent` core/services/adapters 不得 import `ohbaby-cli`。
+3. `packages/ohbaby-agent/src/bin.ts` 是 V1 唯一允许同时 import `ohbaby-agent` backend adapter 与 `ohbaby-cli` 的文件。
 4. 若未来引入顶层 orchestrator 包，该例外从 `bin.ts` 迁移到 orchestrator，其他规则不变。
 
 ---

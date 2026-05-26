@@ -6,10 +6,10 @@
 
 ## 一、Context & Scope（上下文与范围）
 
-SDK 位于 `ohbaby-agent` 和 `ohbaby-tui` 之间：
+SDK 位于 `ohbaby-agent` 和 `ohbaby-cli` 之间：
 
 ```
-ohbaby-tui / stdout renderer / remote UI
+ohbaby-cli / stdout renderer / remote UI
         │
         │ UiBackendClient
         ▼

@@ -3,7 +3,7 @@
 本文档定义 `ui` 模块的设计目标与职责边界。
 
 **模块位置**：
-- 代码：`packages/ohbaby-tui/`
+- 代码：`packages/ohbaby-cli/`
 - 文档：`docs/ui/`
 
 ---
@@ -138,7 +138,7 @@ stdout renderer 属于 CLI 非交互 surface，不属于 TUI。
 
 ## 五、依赖规则
 
-1. `packages/ohbaby-tui` 只能 import `ohbaby-sdk` 作为 backend 协议依赖。
+1. `packages/ohbaby-cli` 只能 import `ohbaby-sdk` 作为 backend 协议依赖。
 2. TUI 不得 import `ohbaby-agent`。
 3. TUI 不得使用 backend 内部事件名作为 UI 状态来源。
 4. TUI 渲染 interaction 时只读取语义字段，不依赖 backend dialog 名称。

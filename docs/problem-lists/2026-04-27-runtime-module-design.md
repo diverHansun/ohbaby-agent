@@ -354,12 +354,12 @@ core/lifecycle  →  runtime                ❌ 禁止（编译期 + lint）
 runtime/  →  ohbaby-sdk                   ✅ 允许（事件类型从 sdk 来）
 runtime/  →  bus / memory / message / permission   ✅ 允许（只读消费）
 interfaces/sdk  →  runtime/stream-bridge  ✅ 允许（订阅 bridge）
-ohbaby-tui  →  runtime                    ❌ 禁止（UI 只看 SDK）
-ohbaby-tui  →  ohbaby-agent 内任何模块     ❌ 禁止（除 sdk 外）
+ohbaby-cli  →  runtime                    ❌ 禁止（UI 只看 SDK）
+ohbaby-cli  →  ohbaby-agent 内任何模块     ❌ 禁止（除 sdk 外）
 ```
 
 **强制手段**：
-- TypeScript Project References：`ohbaby-tui` 的 tsconfig 不引用 `ohbaby-agent`
+- TypeScript Project References：`ohbaby-cli` 的 tsconfig 不引用 `ohbaby-agent`
 - ESLint `no-restricted-imports`：明确禁止跨包内部路径引用
 
 ---

@@ -158,7 +158,7 @@ ChatView 依赖 `useMessages()` selector，HelpView 依赖 `useCommandCatalog()`
 ### 测试文件位置
 
 ```
-packages/ohbaby-tui/src/views/
+packages/ohbaby-cli/src/tui/views/
 ├── __tests__/
 │   ├── router.test.tsx          # S1 Router 映射 + S5 navigateTo 集成
 │   ├── chat-view.test.tsx       # S2 EmptyState 切换

@@ -11,7 +11,8 @@ The MVP closure target is the local `ohbaby` command:
 - `ohbaby-agent`: user-facing CLI and backend runtime composition.
 - `ohbaby-sdk`: stable TypeScript contracts between runtime adapters and UI
   frontends.
-- `ohbaby-tui`: Ink terminal frontend that controls the backend through the SDK
+- `ohbaby-cli`: CLI frontend package; its current interactive surface is the
+  Ink TUI that controls the backend through the SDK
   client contract.
 
 The current MVP includes local prompt submission, streaming UI projection,
@@ -126,8 +127,8 @@ an Anthropic API base URL such as `https://api.anthropic.com`.
 
 Development stays on the pnpm workspace. The npm-facing package graph is:
 
-- `ohbaby-agent` depends on `ohbaby-tui` and `ohbaby-sdk`.
-- `ohbaby-tui` depends on `ohbaby-sdk`.
+- `ohbaby-agent` depends on `ohbaby-cli` and `ohbaby-sdk`.
+- `ohbaby-cli` depends on `ohbaby-sdk`.
 - `ohbaby-sdk` has no runtime workspace dependency.
 
 After the MCP phase is complete and the project is ready for a public release,
@@ -147,7 +148,7 @@ pnpm exec vitest run tests/integration/cli/packaging-smoke.integration.test.ts -
 ```
 
 The packed smoke verifies that `ohbaby --help` and `ohbaby --version` work after
-installing the packed `ohbaby-sdk`, `ohbaby-tui`, and `ohbaby-agent` tarballs.
+installing the packed `ohbaby-sdk`, `ohbaby-cli`, and `ohbaby-agent` tarballs.
 
 ## Development Commands
 
@@ -172,7 +173,7 @@ ohbaby-agent/
   packages/
     ohbaby-agent/     CLI, backend runtime, adapters, tools, sessions, policy
     ohbaby-sdk/       shared UI/backend contracts and command helpers
-    ohbaby-tui/       Ink terminal UI frontend
+    ohbaby-cli/       CLI frontend package; Ink TUI lives under src/tui/
   docs/               module designs, implementation notes, problem lists
   tests/              cross-package integration and smoke tests
   scripts/            workspace test helpers
@@ -190,9 +191,9 @@ See the `docs/` directory for detailed design documentation:
 
 - [Coding Guide](./coding_guide.md) - development guidelines.
 - [Module Documentation](./docs/) - individual module designs.
-- [NPM Packaging Smoke](./docs/implementation/tui-productization/npm-packaging.md)
+- [NPM Packaging Smoke](./docs/ohbaby-cli/tui-productization/npm-packaging.md)
   - current packaging decision and packed install verification.
-- [TUI Productization Verification](./docs/implementation/tui-productization/verification.md)
+- [TUI Productization Verification](./docs/ohbaby-cli/tui-productization/verification.md)
   - verification gates for the MVP closure slice.
 
 Agent-recognized memory entry files:

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 import { createPersistentUiBackendClient } from "ohbaby-agent";
-import { OhbabyTerminalApp } from "ohbaby-tui";
+import { OhbabyTerminalApp } from "ohbaby-cli";
 import {
   closeDatabase,
   getDatabase,
@@ -53,7 +53,7 @@ function markBackendLeaseDead(): void {
 
 describe("TUI persistent backend display", () => {
   it("renders restored sessions, messages, and run status from the initial snapshot", async () => {
-    const directory = await tempWorkspace("ohbaby-tui-persistent");
+    const directory = await tempWorkspace("ohbaby-cli-persistent");
     const dbPath = join(directory, "agent.db");
     const workdir = join(directory, "workspace");
 
@@ -88,7 +88,7 @@ describe("TUI persistent backend display", () => {
   });
 
   it("does not restore stale permissions and can submit after interrupted run recovery", async () => {
-    const directory = await tempWorkspace("ohbaby-tui-persistent-stale");
+    const directory = await tempWorkspace("ohbaby-cli-persistent-stale");
     const dbPath = join(directory, "agent.db");
     const workdir = join(directory, "workspace");
 
@@ -153,7 +153,7 @@ describe("TUI persistent backend display", () => {
   });
 
   it("resumes a stored session by slash command and continues with restored context", async () => {
-    const directory = await tempWorkspace("ohbaby-tui-resume");
+    const directory = await tempWorkspace("ohbaby-cli-resume");
     const dbPath = join(directory, "agent.db");
     const workdir = join(directory, "workspace");
     const setupClient = createPersistentUiBackendClient({
@@ -212,7 +212,7 @@ describe("TUI persistent backend display", () => {
   });
 
   it("opens /session and resumes a stored session with PgDn selection", async () => {
-    const directory = await tempWorkspace("ohbaby-tui-session-picker");
+    const directory = await tempWorkspace("ohbaby-cli-session-picker");
     const dbPath = join(directory, "agent.db");
     const workdir = join(directory, "workspace");
     let nowTick = 0;
@@ -267,7 +267,7 @@ describe("TUI persistent backend display", () => {
   });
 
   it("continues a restored session from its original project root", async () => {
-    const directory = await tempWorkspace("ohbaby-tui-session-root");
+    const directory = await tempWorkspace("ohbaby-cli-session-root");
     const dbPath = join(directory, "agent.db");
     const originalWorkdir = join(directory, "workspace-a");
     const restoredWorkdir = join(directory, "workspace-b");

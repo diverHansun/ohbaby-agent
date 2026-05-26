@@ -44,7 +44,7 @@ export async function runOhbabyCli(
     return EXIT_CODES.ok;
   }
 
-  const { renderTerminalUi } = await import("ohbaby-tui");
+  const { renderTerminalUi } = await import("ohbaby-cli");
   renderTerminalUi({ client });
   return EXIT_CODES.ok;
 }

@@ -149,7 +149,7 @@ describe('dialog token 分组', () => {
 ## 五、测试文件位置
 
 ```
-packages/ohbaby-tui/src/styles/
+packages/ohbaby-cli/src/tui/theme/
 ├── __tests__/
 │   ├── tokens.test.ts        # palette 完整性 + hex 格式 + dialog 分组
 │   └── theme-manager.test.ts # getter 行为 + setTheme 切换
