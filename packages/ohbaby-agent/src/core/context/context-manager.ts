@@ -1,18 +1,27 @@
 import {
+  COMPACTION_RESERVE_TOKENS,
   COMPRESSION_PRESERVE_RATIO,
   COMPRESSION_THRESHOLD,
+  KEEP_RECENT_TOKENS,
   PRUNE_MINIMUM_TOKENS,
   PRUNE_PROTECT_TOKENS,
   SUMMARY_AGENT_NAME,
 } from "./constants.js";
-import { COMPRESSION_PROMPT } from "./compression-prompt.js";
+import {
+  COMPRESSION_PROMPT,
+  SUMMARIZATION_SYSTEM_PROMPT,
+} from "./compression-prompt.js";
 import { ContextEvent } from "./events.js";
+import { appendFileOpsSummary, extractFileOps } from "./file-ops.js";
+import { isActivePart } from "./filters.js";
 import {
   getCompletedToolOutput,
-  isContextSummary,
   serializeHistory,
   serializeMessage,
 } from "./serialization.js";
+import { serializeForLlm } from "./serializer.js";
+import { isSummaryMessage, partitionSummary } from "./summary.js";
+import { estimateContextTokens } from "./token-estimation.js";
 import type {
   AssembledContext,
   CompactOptions,
@@ -22,6 +31,8 @@ import type {
   ContextManager,
   ContextManagerOptions,
   ContextUsage,
+  PreparedTurn,
+  PrepareTurnInput,
   PruneResult,
   TokenCounter,
 } from "./types.js";
@@ -61,7 +72,7 @@ export function getContextUsage(
       remainingTokens: budget.remainingInputTokens,
       reservedOutputTokens: budget.reservedOutputTokens,
       safetyMarginTokens: budget.safetyMarginTokens,
-      shouldCompress: budget.usageRatio >= compressionThreshold,
+      shouldCompress: budget.remainingInputTokens < COMPACTION_RESERVE_TOKENS,
       usageRatio: budget.usageRatio,
     };
   }
@@ -79,6 +90,118 @@ export function getContextUsage(
   };
 }
 
+export type CompactAction = "skip" | "prune-only" | "compact";
+
+export function decideCompactAction(input: {
+  readonly usage: ContextUsage;
+  readonly historyLength: number;
+  readonly force: boolean;
+}): CompactAction {
+  if (input.force) {
+    return "compact";
+  }
+  if (!input.usage.shouldCompress) {
+    return "skip";
+  }
+  if (input.historyLength <= 2) {
+    return "prune-only";
+  }
+  return "compact";
+}
+
+function skippedReasonForCompression(
+  compression: CompressionResult,
+): "inflated" | "too-short" | undefined {
+  if (compression.status === "inflated") {
+    return "inflated";
+  }
+  if (compression.status === "skipped") {
+    return "too-short";
+  }
+  return undefined;
+}
+
+export interface ContextCutPoint {
+  readonly firstKeptIndex: number;
+  readonly messagesToSummarize: readonly MessageWithParts[];
+  readonly keptMessages: readonly MessageWithParts[];
+  readonly turnPrefixMessages: readonly MessageWithParts[];
+}
+
+export function findCutPoint(input: {
+  readonly history: readonly MessageWithParts[];
+  readonly keepRecentTokens: number;
+  readonly tokenCounter: Pick<TokenCounter, "estimateTokens">;
+}): ContextCutPoint {
+  const { history } = input;
+  if (history.length === 0) {
+    return {
+      firstKeptIndex: 0,
+      keptMessages: [],
+      messagesToSummarize: [],
+      turnPrefixMessages: [],
+    };
+  }
+
+  const fullTokens = tokenCount(input.tokenCounter, serializeHistory(history));
+  if (fullTokens <= input.keepRecentTokens) {
+    return {
+      firstKeptIndex: 0,
+      keptMessages: history,
+      messagesToSummarize: [],
+      turnPrefixMessages: [],
+    };
+  }
+
+  let firstKeptIndex = history.length;
+  let keptTokens = 0;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const messageTokens = tokenCount(
+      input.tokenCounter,
+      serializeMessage(history[index]),
+    );
+    if (
+      firstKeptIndex !== history.length &&
+      keptTokens + messageTokens > input.keepRecentTokens
+    ) {
+      break;
+    }
+    keptTokens += messageTokens;
+    firstKeptIndex = index;
+  }
+
+  const legalCutPoints = new Set<number>([0, history.length]);
+  for (let index = 0; index < history.length; index += 1) {
+    const role = history[index]?.info.role;
+    if (role === "user" || role === "assistant") {
+      legalCutPoints.add(index);
+    }
+  }
+
+  while (
+    firstKeptIndex < history.length &&
+    !legalCutPoints.has(firstKeptIndex)
+  ) {
+    firstKeptIndex += 1;
+  }
+
+  const turnPrefixMessages =
+    firstKeptIndex > 0 &&
+    history[firstKeptIndex]?.info.role === "assistant" &&
+    history[firstKeptIndex - 1]?.info.role === "user"
+      ? [history[firstKeptIndex - 1]]
+      : [];
+  const messagesToSummarizeEnd =
+    firstKeptIndex - turnPrefixMessages.length;
+
+  return {
+    firstKeptIndex,
+    keptMessages: history.slice(firstKeptIndex),
+    messagesToSummarize: history.slice(0, messagesToSummarizeEnd),
+    turnPrefixMessages,
+  };
+}
+
 function getHistoryToCompress(input: {
   readonly history: readonly MessageWithParts[];
   readonly preserveRatio: number;
@@ -88,36 +211,24 @@ function getHistoryToCompress(input: {
     input.tokenCounter,
     serializeHistory(input.history),
   );
-  const preserveTarget = Math.floor(fullTokens * input.preserveRatio);
-  let preservedTokens = 0;
-  let splitIndex = input.history.length;
+  const preserveTarget = Math.max(1, Math.floor(fullTokens * input.preserveRatio));
+  const cut = findCutPoint({
+    history: input.history,
+    keepRecentTokens:
+      fullTokens <= KEEP_RECENT_TOKENS
+        ? preserveTarget
+        : KEEP_RECENT_TOKENS,
+    tokenCounter: input.tokenCounter,
+  });
 
-  for (let index = input.history.length - 1; index >= 0; index -= 1) {
-    const messageTokens = tokenCount(
-      input.tokenCounter,
-      serializeMessage(input.history[index]),
-    );
-    if (
-      splitIndex === input.history.length ||
-      preservedTokens + messageTokens <= preserveTarget
-    ) {
-      preservedTokens += messageTokens;
-      splitIndex = index;
-      continue;
-    }
-    break;
-  }
-
-  return input.history.slice(0, splitIndex);
+  return [...cut.messagesToSummarize, ...cut.turnPrefixMessages];
 }
 
 function getActiveHistory(
   history: readonly MessageWithParts[],
 ): MessageWithParts[] {
   const active = history.flatMap((message) => {
-    const parts = message.parts.filter(
-      (part) => part.time?.compacted === undefined,
-    );
+    const parts = message.parts.filter(isActivePart);
     if (parts.length === 0) {
       return [];
     }
@@ -125,15 +236,31 @@ function getActiveHistory(
     return [{ info: message.info, parts }];
   });
 
-  const summaries = active.filter(isContextSummary);
+  const { summaries, nonSummary } = partitionSummary(active);
   if (summaries.length === 0) {
     return active;
   }
 
-  return [
-    ...summaries,
-    ...active.filter((message) => !isContextSummary(message)),
-  ];
+  return [...summaries, ...nonSummary];
+}
+
+function markCompactedParts(
+  history: readonly MessageWithParts[],
+  compactedPartIds: ReadonlySet<string>,
+  compactedAt: number | undefined,
+): readonly MessageWithParts[] {
+  if (compactedPartIds.size === 0 || compactedAt === undefined) {
+    return history;
+  }
+
+  return history.map((message) => ({
+    info: message.info,
+    parts: message.parts.map((part) =>
+      compactedPartIds.has(part.id)
+        ? { ...part, time: { ...part.time, compacted: compactedAt } }
+        : part,
+    ),
+  }));
 }
 
 export function createContextManager(
@@ -147,6 +274,43 @@ export function createContextManager(
   const pruneProtectTokens = options.pruneProtectTokens ?? PRUNE_PROTECT_TOKENS;
   const pruneMinimumTokens = options.pruneMinimumTokens ?? PRUNE_MINIMUM_TOKENS;
   const summaryAgentName = options.summaryAgentName ?? SUMMARY_AGENT_NAME;
+
+  function estimateAssembledTokens(
+    systemPrompt: string,
+    memory: MergedMemory,
+    history: readonly MessageWithParts[],
+  ): number {
+    return (
+      tokenCount(
+        options.tokenCounter,
+        [systemPrompt, memory.merged].filter(Boolean).join("\n\n"),
+      ) + estimateContextTokens(history, options.tokenCounter).tokens
+    );
+  }
+
+  function assembleFromRawHistory(input: {
+    readonly assembledAt: number;
+    readonly memory: MergedMemory;
+    readonly rawHistory: readonly MessageWithParts[];
+    readonly sessionId: string;
+    readonly systemPrompt: string;
+  }): AssembledContext {
+    const history = getActiveHistory(input.rawHistory);
+
+    return {
+      systemPrompt: input.systemPrompt,
+      memory: input.memory,
+      history,
+      estimatedTokens: estimateAssembledTokens(
+        input.systemPrompt,
+        input.memory,
+        history,
+      ),
+      hasSummary: input.rawHistory.some(isSummaryMessage),
+      assembledAt: input.assembledAt,
+      sessionId: input.sessionId,
+    };
+  }
 
   async function assemble(
     sessionId: string,
@@ -166,27 +330,23 @@ export function createContextManager(
       options.systemPromptProvider.build({ sessionId, directory, isSubagent }),
       options.messageManager.listBySession(sessionId),
     ]);
-    const history = getActiveHistory(rawHistory);
-    const estimatedTokens = tokenCount(
-      options.tokenCounter,
-      [systemPrompt, memory.merged, serializeHistory(history)]
-        .filter(Boolean)
-        .join("\n\n"),
-    );
-
-    return {
-      systemPrompt,
-      memory,
-      history,
-      estimatedTokens,
-      hasSummary: rawHistory.some(isContextSummary),
+    return assembleFromRawHistory({
       assembledAt: now(),
+      memory,
+      rawHistory,
       sessionId,
-    };
+      systemPrompt,
+    });
   }
 
-  async function prune(sessionId: string): Promise<PruneResult> {
-    const history = await options.messageManager.listBySession(sessionId);
+  async function pruneHistory(
+    sessionId: string,
+    history: readonly MessageWithParts[],
+  ): Promise<{
+    readonly compactedAt?: number;
+    readonly compactedPartIds: ReadonlySet<string>;
+    readonly result: PruneResult;
+  }> {
     const candidates: { readonly part: Part; readonly tokens: number }[] = [];
 
     for (const message of history) {
@@ -227,14 +387,16 @@ export function createContextManager(
         totalScanned: candidates.length,
       };
       options.bus.publish(ContextEvent.Pruned, { sessionId, result });
-      return result;
+      return { compactedPartIds: new Set(), result };
     }
 
     const compactedAt = now();
+    const compactedPartIds = new Set<string>();
     for (const candidate of prunable) {
       await options.messageManager.updatePart(candidate.part.id, {
         time: { ...candidate.part.time, compacted: compactedAt },
       });
+      compactedPartIds.add(candidate.part.id);
     }
 
     const result = {
@@ -244,15 +406,22 @@ export function createContextManager(
       totalScanned: candidates.length,
     };
     options.bus.publish(ContextEvent.Pruned, { sessionId, result });
+    return { compactedAt, compactedPartIds, result };
+  }
+
+  async function prune(sessionId: string): Promise<PruneResult> {
+    const history = await options.messageManager.listBySession(sessionId);
+    const { result } = await pruneHistory(sessionId, history);
     return result;
   }
 
-  async function summarizeActiveHistory(
+  async function summarizeHistory(
     sessionId: string,
+    rawHistory: readonly MessageWithParts[],
   ): Promise<CompressionResult> {
-    const activeHistory = (
-      await options.messageManager.listBySession(sessionId)
-    ).filter((message) => !isContextSummary(message));
+    const activeHistory = getActiveHistory(rawHistory).filter(
+      (message) => !isSummaryMessage(message),
+    );
     const activeTokens = tokenCount(
       options.tokenCounter,
       serializeHistory(activeHistory),
@@ -289,6 +458,7 @@ export function createContextManager(
       snapshot = await options.llmClient.generateSummary({
         sessionId,
         prompt: COMPRESSION_PROMPT,
+        systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
         history: historyToCompress,
       });
     } catch (error) {
@@ -300,6 +470,7 @@ export function createContextManager(
         error: errorToMessage(error),
       };
     }
+    snapshot = appendFileOpsSummary(snapshot, extractFileOps(historyToCompress));
 
     const newTokens = tokenCount(options.tokenCounter, snapshot);
     if (newTokens >= originalTokens) {
@@ -363,6 +534,11 @@ export function createContextManager(
     );
 
     if (!force && !usage.shouldCompress) {
+      options.bus.publish(ContextEvent.CompactSkipped, {
+        sessionId,
+        reason: "not-needed",
+        usage,
+      });
       return {
         status: "skipped",
         originalTokens: fullTokens,
@@ -372,7 +548,16 @@ export function createContextManager(
     }
 
     await prune(sessionId);
-    return summarizeActiveHistory(sessionId);
+    const compression = await summarizeHistory(sessionId, historyBeforePrune);
+    const skippedReason = skippedReasonForCompression(compression);
+    if (skippedReason !== undefined) {
+      options.bus.publish(ContextEvent.CompactSkipped, {
+        sessionId,
+        reason: skippedReason,
+        usage,
+      });
+    }
+    return compression;
   }
 
   function compactStatusFromCompression(
@@ -405,6 +590,11 @@ export function createContextManager(
     );
 
     if (input.force !== true && !usageBefore.shouldCompress) {
+      options.bus.publish(ContextEvent.CompactSkipped, {
+        sessionId,
+        reason: "not-needed",
+        usage: usageBefore,
+      });
       return {
         status: "not-needed",
         usageBefore,
@@ -434,7 +624,7 @@ export function createContextManager(
       };
     }
 
-    const compression = await summarizeActiveHistory(sessionId);
+    const compression = await summarizeHistory(sessionId, before.history);
     const afterCompression = await assemble(
       sessionId,
       input.directory,
@@ -446,6 +636,14 @@ export function createContextManager(
       options.tokenCounter,
       compressionThreshold,
     );
+    const skippedReason = skippedReasonForCompression(compression);
+    if (skippedReason !== undefined) {
+      options.bus.publish(ContextEvent.CompactSkipped, {
+        sessionId,
+        reason: skippedReason,
+        usage: usageAfter,
+      });
+    }
 
     return {
       status: compactStatusFromCompression(compression, pruneResult),
@@ -454,6 +652,154 @@ export function createContextManager(
       prune: pruneResult,
       compression,
       error: compression.error,
+    };
+  }
+
+  async function prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn> {
+    const startedAt = now();
+    const assembled = await assemble(
+      input.sessionId,
+      input.directory,
+      input.isSubagent ?? false,
+    );
+    const usageBefore = getContextUsage(
+      assembled,
+      input.modelId,
+      options.tokenCounter,
+      compressionThreshold,
+    );
+    const action = decideCompactAction({
+      force: input.force === true,
+      historyLength: assembled.history.length,
+      usage: usageBefore,
+    });
+    if (action === "skip") {
+      options.bus.publish(ContextEvent.CompactSkipped, {
+        sessionId: input.sessionId,
+        reason: "not-needed",
+        usage: usageBefore,
+      });
+    }
+    let compaction: CompactResult | undefined;
+    let finalContext = assembled;
+    if (action !== "skip") {
+      const pruneOutcome = await pruneHistory(input.sessionId, assembled.history);
+      const historyAfterPrune = markCompactedParts(
+        assembled.history,
+        pruneOutcome.compactedPartIds,
+        pruneOutcome.compactedAt,
+      );
+      const afterPruneContext = {
+        ...assembled,
+        history: getActiveHistory(historyAfterPrune),
+        estimatedTokens: estimateAssembledTokens(
+          assembled.systemPrompt,
+          assembled.memory,
+          getActiveHistory(historyAfterPrune),
+        ),
+        assembledAt: now(),
+      };
+      const usageAfterPrune = getContextUsage(
+        afterPruneContext,
+        input.modelId,
+        options.tokenCounter,
+        compressionThreshold,
+      );
+
+      if (
+        action === "prune-only" ||
+        (input.force !== true && !usageAfterPrune.shouldCompress)
+      ) {
+        finalContext = assembleFromRawHistory({
+          assembledAt: now(),
+          memory: assembled.memory,
+          rawHistory: await options.messageManager.listBySession(
+            input.sessionId,
+          ),
+          sessionId: input.sessionId,
+          systemPrompt: assembled.systemPrompt,
+        });
+        const usageAfter = getContextUsage(
+          finalContext,
+          input.modelId,
+          options.tokenCounter,
+          compressionThreshold,
+        );
+        compaction = {
+          status:
+            pruneOutcome.result.prunedCount > 0 ? "pruned" : "not-needed",
+          usageBefore,
+          usageAfter,
+          prune: pruneOutcome.result,
+        };
+      } else {
+        const compression = await summarizeHistory(
+          input.sessionId,
+          assembled.history,
+        );
+        finalContext = assembleFromRawHistory({
+          assembledAt: now(),
+          memory: assembled.memory,
+          rawHistory: await options.messageManager.listBySession(
+            input.sessionId,
+          ),
+          sessionId: input.sessionId,
+          systemPrompt: assembled.systemPrompt,
+        });
+        const usageAfter = getContextUsage(
+          finalContext,
+          input.modelId,
+          options.tokenCounter,
+          compressionThreshold,
+        );
+        compaction = {
+          status: compactStatusFromCompression(
+            compression,
+            pruneOutcome.result,
+          ),
+          usageBefore,
+          usageAfter,
+          prune: pruneOutcome.result,
+          compression,
+          error: compression.error,
+        };
+        const skippedReason = skippedReasonForCompression(compression);
+        if (skippedReason !== undefined) {
+          options.bus.publish(ContextEvent.CompactSkipped, {
+            sessionId: input.sessionId,
+            reason: skippedReason,
+            usage: usageAfter,
+          });
+        }
+      }
+    }
+    const usage = getContextUsage(
+      finalContext,
+      input.modelId,
+      options.tokenCounter,
+      compressionThreshold,
+    );
+    const messages = serializeForLlm({
+      history: finalContext.history,
+      isSubagent: input.isSubagent ?? false,
+      memory: finalContext.memory,
+      systemPrompt: finalContext.systemPrompt,
+    });
+
+    options.bus.publish(ContextEvent.TurnPrepared, {
+      sessionId: input.sessionId,
+      tookMs: Math.max(0, now() - startedAt),
+      triggeredCompaction:
+        compaction !== undefined && compaction.status !== "not-needed",
+      usage,
+    });
+
+    return {
+      assembledAt: finalContext.assembledAt,
+      compaction,
+      hasSummary: finalContext.hasSummary,
+      messages,
+      usage,
     };
   }
 
@@ -468,10 +814,11 @@ export function createContextManager(
       );
     },
     shouldCompress(usage: ContextUsage): boolean {
-      return usage.usageRatio >= compressionThreshold;
+      return usage.shouldCompress;
     },
     compress,
     compact,
+    prepareTurn,
     prune,
   };
 }

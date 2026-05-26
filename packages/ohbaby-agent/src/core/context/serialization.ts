@@ -1,13 +1,16 @@
 import type { MessageWithParts, Part } from "../message/index.js";
+import { isActivePart } from "./filters.js";
+import { isSummaryMessage } from "./summary.js";
 
+/**
+ * @deprecated Use isSummaryMessage from ./summary.js.
+ */
 export function isContextSummary(message: MessageWithParts): boolean {
-  return message.parts.some(
-    (part) => part.type === "text" && part.metadata?.kind === "context-summary",
-  );
+  return isSummaryMessage(message);
 }
 
 export function serializePart(part: Part): string {
-  if (part.time?.compacted !== undefined) {
+  if (!isActivePart(part)) {
     return "";
   }
   if (part.type === "text" || part.type === "reasoning") {

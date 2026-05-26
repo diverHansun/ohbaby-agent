@@ -1,10 +1,32 @@
-export const COMPRESSION_PROMPT = `Create a compact XML state snapshot for the conversation history.
+export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. Read a conversation between a user and an AI coding assistant, then output only the requested structured summary.
 
-Return only this shape:
-<state_snapshot>
-  <overall_goal></overall_goal>
-  <key_knowledge></key_knowledge>
-  <file_system_state></file_system_state>
-  <recent_actions></recent_actions>
-  <current_plan></current_plan>
-</state_snapshot>`;
+Do not continue the conversation. Do not answer questions from the conversation.`;
+
+export const COMPRESSION_PROMPT = `The messages above are conversation history to summarize. Create a concise context checkpoint another coding agent can use to continue.
+
+Use this exact format:
+
+## Goal
+[What the user is trying to accomplish.]
+
+## Constraints & Preferences
+- [Requirements, preferences, or "(none)".]
+
+## Progress
+### Done
+- [Completed work.]
+### In Progress
+- [Current work.]
+### Blocked
+- [Blockers or "(none)".]
+
+## Key Decisions
+- **[Decision]**: [Reason.]
+
+## Next Steps
+1. [Next action.]
+
+## Critical Context
+- [Exact file paths, APIs, commands, errors, or assumptions needed to continue.]
+
+Keep each section concise. Preserve exact file paths, function names, command names, and error messages.`;

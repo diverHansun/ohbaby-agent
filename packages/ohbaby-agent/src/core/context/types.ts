@@ -1,4 +1,5 @@
 import type { BusInstance } from "../../bus/index.js";
+import type { ChatCompletionMessage } from "../llm-client/index.js";
 import type { MergedMemory } from "../memory/index.js";
 import type { MessageManager, MessageWithParts } from "../message/index.js";
 
@@ -41,6 +42,7 @@ export interface ContextLLMClient {
   generateSummary(input: {
     readonly sessionId: string;
     readonly prompt: string;
+    readonly systemPrompt?: string;
     readonly history: readonly MessageWithParts[];
   }): Promise<string>;
 }
@@ -112,6 +114,22 @@ export interface CompactResult {
   readonly error?: string;
 }
 
+export interface PrepareTurnInput {
+  readonly sessionId: string;
+  readonly directory: string;
+  readonly modelId: string;
+  readonly isSubagent?: boolean;
+  readonly force?: boolean;
+}
+
+export interface PreparedTurn {
+  readonly messages: readonly ChatCompletionMessage[];
+  readonly usage: ContextUsage;
+  readonly compaction?: CompactResult;
+  readonly assembledAt: number;
+  readonly hasSummary: boolean;
+}
+
 export interface ContextManager {
   assemble(
     sessionId: string,
@@ -126,6 +144,7 @@ export interface ContextManager {
     modelId?: string,
   ): Promise<CompressionResult>;
   compact(sessionId: string, options: CompactOptions): Promise<CompactResult>;
+  prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn>;
   prune(sessionId: string): Promise<PruneResult>;
 }
 
