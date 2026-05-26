@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AgentManager } from "./manager.js";
 import { AgentRegistry } from "./registry.js";
-import type { AgentsConfig, SystemPromptProvider } from "./types.js";
+import type { AgentPromptProvider, AgentsConfig } from "./types.js";
 
 async function createManager(): Promise<AgentManager> {
   const registry = new AgentRegistry({
@@ -23,7 +23,7 @@ async function createManager(): Promise<AgentManager> {
     }),
   });
   await registry.initialize();
-  const build: SystemPromptProvider["build"] = ({ agent }) =>
+  const build: AgentPromptProvider["build"] = ({ agent }) =>
     `system:${agent.name}`;
   return new AgentManager({
     registry,
@@ -69,10 +69,10 @@ describe("AgentManager", () => {
   });
 
   it("builds a runtime agent using the injected system prompt provider", async () => {
-    const build = vi.fn<SystemPromptProvider["build"]>(
+    const build = vi.fn<AgentPromptProvider["build"]>(
       ({ agent, isSubagent }) => `${agent.name}:${String(isSubagent)}`,
     );
-    const provider: SystemPromptProvider = {
+    const provider: AgentPromptProvider = {
       build,
     };
     const registry = new AgentRegistry({

@@ -6,6 +6,7 @@ import {
 } from "../core/agents/index.js";
 import type { MessageManager } from "../core/message/index.js";
 import type { ToolSchedulerInstance } from "../core/tool-scheduler/index.js";
+import type { Session, SessionManager } from "../services/session/index.js";
 import { AgentManager } from "./manager.js";
 import type {
   SubagentExecuteParams,
@@ -15,35 +16,13 @@ import type {
 
 const DEFAULT_MAX_CONCURRENCY = 3;
 
-export interface AgentServiceSession {
-  readonly id: string;
-  readonly projectRoot: string;
-  readonly agentName: string;
-  readonly parentId?: string;
-  readonly childrenIds?: readonly string[];
-  readonly isSubagent: boolean;
-}
-
-export interface AgentServiceSessionManager {
-  create(
-    projectDirectory: string,
-    options?: {
-      readonly id?: string;
-      readonly title?: string;
-      readonly agentName?: string;
-      readonly parentId?: string;
-    },
-  ): Promise<AgentServiceSession>;
-  get(sessionId: string): Promise<AgentServiceSession | null>;
-}
-
 export interface AgentServiceOptions {
   readonly agentManager: AgentManager;
   readonly buildPromptMessages: AgentPromptMessageBuilder;
   readonly messageManager: MessageManager;
   readonly runCoordinator: AgentRunCoordinator;
   readonly sandboxManager?: AgentSandboxEnvironmentManager;
-  readonly sessionManager: AgentServiceSessionManager;
+  readonly sessionManager: Pick<SessionManager, "create" | "get">;
   readonly toolScheduler: Pick<ToolSchedulerInstance, "getAvailableTools">;
   readonly maxConcurrency?: number;
   readonly now?: () => number;
@@ -138,7 +117,7 @@ export class AgentService implements TaskExecutor {
 
   private async resolveSession(
     params: SubagentExecuteParams,
-  ): Promise<AgentServiceSession> {
+  ): Promise<Session> {
     if (params.resumeSessionId) {
       const resumed = await this.options.sessionManager.get(
         params.resumeSessionId,

@@ -18,6 +18,7 @@ import type {
   ToolDefinition,
   ToolSchedulerInstance,
 } from "../core/tool-scheduler/index.js";
+import type { Session } from "../services/session/index.js";
 
 function deferred<T>(): {
   readonly promise: Promise<T>;
@@ -55,27 +56,24 @@ async function createAgentManager(): Promise<AgentManager> {
   });
 }
 
-interface ServiceSession {
-  readonly id: string;
-  readonly projectRoot: string;
-  readonly agentName: string;
-  readonly parentId?: string;
-  readonly childrenIds: readonly string[];
-  readonly isSubagent: boolean;
-}
-
 function createSessionManager(): {
   readonly create: ReturnType<typeof vi.fn>;
   readonly get: ReturnType<typeof vi.fn>;
 } {
-  const parent: ServiceSession = {
+  const parent: Session = {
     agentName: "build",
     childrenIds: [],
+    createdAt: 1,
     id: "parent",
     isSubagent: false,
+    projectId: "project",
     projectRoot: "D:/repo",
+    stats: { messageCount: 0 },
+    status: "active",
+    title: "Parent",
+    updatedAt: 1,
   };
-  const sessions = new Map<string, ServiceSession>([["parent", parent]]);
+  const sessions = new Map<string, Session>([["parent", parent]]);
   let nextChild = 1;
   const create = vi.fn(
     (
@@ -86,21 +84,27 @@ function createSessionManager(): {
         readonly agentName?: string;
         readonly parentId?: string;
       } = {},
-    ): Promise<ServiceSession> => {
-      const session: ServiceSession = {
+    ): Promise<Session> => {
+      const session: Session = {
         agentName: options.agentName ?? "default",
         childrenIds: [],
+        createdAt: 1,
         id: options.id ?? `child_${String(nextChild++)}`,
         isSubagent: options.parentId !== undefined,
         parentId: options.parentId,
+        projectId: parent.projectId,
         projectRoot: "D:/repo",
+        stats: { messageCount: 0 },
+        status: "active",
+        title: options.title ?? "Child",
+        updatedAt: 1,
       };
       sessions.set(session.id, session);
       return Promise.resolve(session);
     },
   );
   const get = vi.fn(
-    (sessionId: string): Promise<ServiceSession | null> =>
+    (sessionId: string): Promise<Session | null> =>
       Promise.resolve(sessions.get(sessionId) ?? null),
   );
   return { create, get };

@@ -16,7 +16,7 @@ import type {
   Part,
 } from "../../core/message/index.js";
 import type { ToolDefinition } from "../../core/tool-scheduler/index.js";
-import type { AgentServiceSession } from "../service.js";
+import type { Session } from "../../services/session/index.js";
 
 function deferred<T>(): {
   readonly promise: Promise<T>;
@@ -46,14 +46,20 @@ function createSessionManager(): {
   readonly create: ReturnType<typeof vi.fn>;
   readonly get: ReturnType<typeof vi.fn>;
 } {
-  const parent: AgentServiceSession = {
+  const parent: Session = {
     agentName: "build",
+    createdAt: 1,
     childrenIds: [],
     id: "parent",
     isSubagent: false,
+    projectId: "project",
     projectRoot: "D:/repo",
+    stats: { messageCount: 0 },
+    status: "active",
+    title: "Parent",
+    updatedAt: 1,
   };
-  const sessions = new Map<string, AgentServiceSession>([["parent", parent]]);
+  const sessions = new Map<string, Session>([["parent", parent]]);
   let nextChild = 1;
   const create = vi.fn(
     (
@@ -64,21 +70,27 @@ function createSessionManager(): {
         readonly parentId?: string;
         readonly title?: string;
       } = {},
-    ): Promise<AgentServiceSession> => {
-      const child: AgentServiceSession = {
+    ): Promise<Session> => {
+      const child: Session = {
         agentName: options.agentName ?? "explore",
+        createdAt: 1,
         childrenIds: [],
         id: options.id ?? `child_${String(nextChild++)}`,
         isSubagent: true,
         parentId: options.parentId,
+        projectId: parent.projectId,
         projectRoot: parent.projectRoot,
+        stats: { messageCount: 0 },
+        status: "active",
+        title: options.title ?? "Child",
+        updatedAt: 1,
       };
       sessions.set(child.id, child);
       return Promise.resolve(child);
     },
   );
   const get = vi.fn(
-    (sessionId: string): Promise<AgentServiceSession | null> =>
+    (sessionId: string): Promise<Session | null> =>
       Promise.resolve(sessions.get(sessionId) ?? null),
   );
   return { create, get };

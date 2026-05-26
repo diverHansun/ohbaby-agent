@@ -8,17 +8,17 @@ import { AgentRegistry } from "./registry.js";
 import type {
   AgentConfig,
   AgentMode,
+  AgentPromptProvider,
   RuntimeAgent,
-  SystemPromptProvider,
   ToolsConfig,
 } from "./types.js";
 
 export interface AgentManagerOptions {
   readonly registry?: AgentRegistry;
-  readonly systemPromptProvider?: SystemPromptProvider;
+  readonly systemPromptProvider?: AgentPromptProvider;
 }
 
-const FALLBACK_SYSTEM_PROMPT_PROVIDER: SystemPromptProvider = {
+const FALLBACK_SYSTEM_PROMPT_PROVIDER: AgentPromptProvider = {
   build({ agent, isSubagent }) {
     const promptAddon = agent.prompt?.trim()
       ? `<agent_prompt_addon>\n${agent.prompt.trim()}\n</agent_prompt_addon>`
@@ -81,7 +81,7 @@ function withSubagentDisabledTools(
 
 export class AgentManager implements AgentToolConfigProvider {
   private readonly registry: AgentRegistry;
-  private readonly systemPromptProvider: SystemPromptProvider;
+  private readonly systemPromptProvider: AgentPromptProvider;
 
   constructor(options: AgentManagerOptions = {}) {
     this.registry = options.registry ?? new AgentRegistry();

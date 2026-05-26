@@ -99,8 +99,7 @@ export interface AgentSandboxEnvironmentManager {
 
 export interface AgentRunDeps {
   readonly runCoordinator: AgentRunCoordinator;
-  readonly messageManager: Pick<MessageManager, "listBySession"> &
-    Partial<Pick<MessageManager, "appendPart" | "createMessage">>;
+  readonly messageManager: MessageManager;
   readonly toolScheduler: Pick<ToolSchedulerInstance, "getAvailableTools">;
   readonly sandboxManager?: AgentSandboxEnvironmentManager;
 }

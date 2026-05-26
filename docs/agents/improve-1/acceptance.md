@@ -433,7 +433,7 @@ core/agents/
 - 导出 `AgentConfig / AgentMode / PermissionConfig / PermissionValue / ToolsConfig / AgentsConfig / RuntimeAgent` 等描述符类型。
 - 导出 `AgentManager / toolsConfigToRecord / AgentRegistry`。
 - 导出 `BUILTIN_AGENTS / BUILTIN_AGENT_NAMES / buildAgent / exploreAgent / planAgent / researchAgent`。
-- 导出 `AgentService / AgentServiceOptions / AgentServiceSession / AgentServiceSessionManager`。
+- 导出 `AgentService / AgentServiceOptions`；session 依赖直接消费 `services/session.SessionManager` 的 `create/get` 契约，不再定义 agents 专属的窄 session 包装。
 - 导出 `SubagentToolCallSummary / SubagentExecuteParams / SubagentResult / TaskExecutor`（Task 工具 envelope 契约，名称在 improve-2 再评估）。
 - 导出 `AgentTaskManager / InMemoryAgentTaskStore / AgentTaskRecord` 等。
 - **不**再导出 `SubagentExecutor / SubagentExecutorOptions / createSubagentRunner / SubagentRunner / CreateSubagentRunnerOptions / SubagentPromptMessageBuilder / SubagentSandboxEnvironmentManager`。

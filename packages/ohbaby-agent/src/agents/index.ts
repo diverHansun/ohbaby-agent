@@ -9,8 +9,6 @@ export {
 export {
   AgentService,
   type AgentServiceOptions,
-  type AgentServiceSession,
-  type AgentServiceSessionManager,
 } from "./service.js";
 export { AgentManager, toolsConfigToRecord } from "./manager.js";
 export { AgentRegistry } from "./registry.js";
@@ -30,6 +28,7 @@ export {
 export type {
   AgentConfig,
   AgentMode,
+  AgentPromptProvider,
   AgentsConfig,
   PermissionConfig,
   PermissionValue,
@@ -37,7 +36,6 @@ export type {
   SubagentExecuteParams,
   SubagentResult,
   SubagentToolCallSummary,
-  SystemPromptProvider,
   TaskExecutor,
   ToolsConfig,
 } from "./types.js";

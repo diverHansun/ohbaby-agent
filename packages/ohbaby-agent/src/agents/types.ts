@@ -53,7 +53,7 @@ export interface RuntimeAgent {
   readonly tools: Record<string, boolean>;
 }
 
-export interface SystemPromptProvider {
+export interface AgentPromptProvider {
   build(input: {
     readonly agent: AgentConfig;
     readonly isSubagent: boolean;

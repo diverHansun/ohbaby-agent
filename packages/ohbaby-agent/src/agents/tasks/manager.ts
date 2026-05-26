@@ -7,10 +7,7 @@ import {
 } from "../../core/agents/index.js";
 import type { MessageManager } from "../../core/message/index.js";
 import type { ToolSchedulerInstance } from "../../core/tool-scheduler/index.js";
-import type {
-  AgentServiceSession,
-  AgentServiceSessionManager,
-} from "../service.js";
+import type { Session, SessionManager } from "../../services/session/index.js";
 import { AgentManager } from "../manager.js";
 import type { RuntimeAgent } from "../types.js";
 import { InMemoryAgentTaskStore } from "./in-memory-store.js";
@@ -40,7 +37,7 @@ interface ActiveTaskState {
   queue: QueuedInput[];
   running: boolean;
   runtimeAgent: RuntimeAgent;
-  session: AgentServiceSession;
+  session: Session;
 }
 
 export interface AgentTaskManagerOptions {
@@ -49,7 +46,7 @@ export interface AgentTaskManagerOptions {
   readonly messageManager: MessageManager;
   readonly runCoordinator: AgentRunCoordinator;
   readonly sandboxManager?: AgentSandboxEnvironmentManager;
-  readonly sessionManager: AgentServiceSessionManager;
+  readonly sessionManager: Pick<SessionManager, "create" | "get">;
   readonly toolScheduler: Pick<ToolSchedulerInstance, "getAvailableTools">;
   readonly store?: AgentTaskStore;
   readonly createTaskId?: () => string;
