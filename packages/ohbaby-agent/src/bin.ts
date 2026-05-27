@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
 import type { UiSnapshot } from "ohbaby-sdk";
-import { createPersistentUiBackendClient } from "./adapters/ui-persistent.js";
+import {
+  closePersistentUiBackendDatabase,
+  createPersistentUiBackendClient,
+} from "./adapters/ui-persistent.js";
 import type { CliArgs } from "./cli/args.js";
 import { CliArgumentError, parseCliArgs, renderHelp } from "./cli/args.js";
 import { EXIT_CODES } from "./cli/exit-codes.js";
 import { readStdin } from "./cli/stdin.js";
 import { createStdoutRenderer } from "./cli/stdout-renderer.js";
+import { McpManager } from "./mcp/index.js";
 import { loadRuntimeEnvIntoProcessEnv } from "./utils/project-env.js";
 
 const VERSION = "0.1.0";
@@ -27,6 +31,14 @@ function initialSnapshotFromArgs(args: CliArgs): UiSnapshot | undefined {
     sessions: [],
     status: { kind: "idle" },
   };
+}
+
+async function disposeNonInteractiveResources(): Promise<void> {
+  try {
+    await McpManager.disposeAll();
+  } finally {
+    closePersistentUiBackendDatabase();
+  }
 }
 
 export async function runOhbabyCli(
@@ -63,10 +75,14 @@ export async function runOhbabyCli(
     client.subscribeEvents((event) => {
       renderer.handle(event);
     });
-    const prompt =
-      args.mode === "prompt" ? args.prompt : (await readStdin()).trim();
-    await client.submitPrompt(prompt);
-    return EXIT_CODES.ok;
+    try {
+      const prompt =
+        args.mode === "prompt" ? args.prompt : (await readStdin()).trim();
+      await client.submitPrompt(prompt);
+      return EXIT_CODES.ok;
+    } finally {
+      await disposeNonInteractiveResources();
+    }
   }
 
   const { renderTerminalUi } = await import("ohbaby-cli");

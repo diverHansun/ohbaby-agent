@@ -15,6 +15,7 @@ describe("runOhbabyCli", () => {
       subscribeEvents: vi.fn((): (() => void) => () => undefined),
     }));
     vi.doMock("./adapters/ui-persistent.js", () => ({
+      closePersistentUiBackendDatabase: vi.fn(),
       createPersistentUiBackendClient,
     }));
 
@@ -41,6 +42,7 @@ describe("runOhbabyCli", () => {
       subscribeEvents: vi.fn((): (() => void) => () => undefined),
     }));
     vi.doMock("./adapters/ui-persistent.js", () => ({
+      closePersistentUiBackendDatabase: vi.fn(),
       createPersistentUiBackendClient,
     }));
 
@@ -74,5 +76,50 @@ describe("runOhbabyCli", () => {
       },
     });
     expect(submitPrompt).toHaveBeenCalledWith("hello");
+  });
+
+  it("disposes non-interactive MCP and database resources after the prompt completes", async () => {
+    vi.resetModules();
+    let resolvePrompt!: () => void;
+    const submitPrompt = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvePrompt = resolve;
+        }),
+    );
+    const createPersistentUiBackendClient = vi.fn(() => ({
+      abortRun: vi.fn(() => Promise.resolve()),
+      executeCommand: vi.fn(() => Promise.resolve()),
+      getSnapshot: vi.fn(() => Promise.resolve()),
+      listCommands: vi.fn(() => Promise.resolve({ commands: [] })),
+      respondInteraction: vi.fn(() => Promise.resolve()),
+      respondPermission: vi.fn(() => Promise.resolve()),
+      submitPrompt,
+      subscribeEvents: vi.fn((): (() => void) => () => undefined),
+    }));
+    const closePersistentUiBackendDatabase = vi.fn();
+    const disposeAll = vi.fn(() => Promise.resolve());
+    vi.doMock("./adapters/ui-persistent.js", () => ({
+      closePersistentUiBackendDatabase,
+      createPersistentUiBackendClient,
+    }));
+    vi.doMock("./mcp/index.js", () => ({
+      McpManager: { disposeAll },
+    }));
+
+    const { runOhbabyCli } = await import("./bin.js");
+
+    const run = runOhbabyCli(["node", "ohbaby", "-p", "hello"]);
+    await vi.waitFor(() => {
+      expect(submitPrompt).toHaveBeenCalled();
+    });
+    expect(disposeAll).not.toHaveBeenCalled();
+    expect(closePersistentUiBackendDatabase).not.toHaveBeenCalled();
+
+    resolvePrompt();
+
+    await expect(run).resolves.toBe(0);
+    expect(disposeAll).toHaveBeenCalledTimes(1);
+    expect(closePersistentUiBackendDatabase).toHaveBeenCalledTimes(1);
   });
 });
