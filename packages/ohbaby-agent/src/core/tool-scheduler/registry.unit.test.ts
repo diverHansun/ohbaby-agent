@@ -36,7 +36,7 @@ describe("ToolRegistry", () => {
     expect(registry.getCategory("custom")).toBe("dangerous");
   });
 
-  it("filters tools by mode, agent config, and subagent restrictions", () => {
+  it("lists the same tools across permission modes while honoring agent config and subagent restrictions", () => {
     const registry = createToolRegistry();
     const parameters = {
       properties: { path: { type: "string" } },
@@ -67,16 +67,25 @@ describe("ToolRegistry", () => {
     expect(
       registry
         .getAvailableTools({
-          mode: "plan",
           tools: { web_search: false },
         })
         .map((tool) => tool.name),
-    ).toEqual(["read", "memory_add", "todo_read"]);
+    ).toEqual([
+      "read",
+      "edit",
+      "memory_add",
+      "task",
+      "agent_open",
+      "agent_eval",
+      "agent_status",
+      "agent_close",
+      "todo_read",
+      "todo_write",
+    ]);
     expect(
       registry
         .getAvailableTools({
           isSubagent: true,
-          mode: "agent",
           tools: { "*": true },
         })
         .map((tool) => tool.name),
@@ -91,15 +100,13 @@ describe("ToolRegistry", () => {
     expect(
       registry
         .getAvailableTools({
-          mode: "agent",
           tools: { "*": false, read: true },
         })
         .map((tool) => tool.name),
     ).toEqual(["read"]);
     expect(
-      registry
-        .getAvailableTools({ mode: "agent" })
-        .find((tool) => tool.name === "read")?.parameters,
+      registry.getAvailableTools({}).find((tool) => tool.name === "read")
+        ?.parameters,
     ).toBe(parameters);
   });
 });

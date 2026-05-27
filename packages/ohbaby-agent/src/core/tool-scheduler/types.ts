@@ -1,4 +1,8 @@
 import type { BusInstance } from "../../bus/index.js";
+import type {
+  PermissionDecision,
+  PermissionStateStore,
+} from "../../permission/index.js";
 
 export type ToolCategory =
   | "readonly"
@@ -11,11 +15,9 @@ export type ToolCategory =
 
 export type ToolSource = "builtin" | "module" | "mcp";
 
-export type ToolMode = "ask" | "plan" | "agent";
-
 export type ToolCallStatus =
   | "pending"
-  | "checking_policy"
+  | "checking_permission"
   | "awaiting_approval"
   | "queued"
   | "executing"
@@ -32,7 +34,7 @@ export type FinalToolCallStatus =
 
 export type ToolCallErrorType =
   | "ToolNotFoundError"
-  | "PolicyDeniedError"
+  | "PermissionDeniedError"
   | "PermissionRejectedError"
   | "ExecutionError"
   | "TimeoutError"
@@ -146,26 +148,10 @@ export interface ToolCall {
   error?: ToolCallError;
 }
 
-export type PolicyDecision =
-  | { readonly type: "allow" }
-  | { readonly type: "deny"; readonly reason?: string }
-  | { readonly type: "ask"; readonly reason?: string };
-
-export interface PolicyPort {
-  getMode(): ToolMode | Promise<ToolMode>;
-  check(input: {
-    readonly callId: string;
-    readonly toolName: string;
-    readonly category: ToolCategory;
-    readonly params: Record<string, unknown>;
-    readonly sessionId: string;
-    readonly messageId: string;
-  }): PolicyDecision | Promise<PolicyDecision>;
-}
-
 export type PermissionResponse = "once" | "always" | "reject" | "cancel";
 
 export interface PermissionPort {
+  readonly state?: PermissionStateStore;
   ask(input: {
     readonly sessionId: string;
     readonly messageId: string;
@@ -174,6 +160,7 @@ export interface PermissionPort {
     readonly category: ToolCategory;
     readonly params: Record<string, unknown>;
     readonly reason?: string;
+    readonly rememberable?: boolean;
   }): PermissionResponse | Promise<PermissionResponse>;
 }
 
@@ -213,7 +200,6 @@ export interface ToolRegistry {
   get(toolName: string): Tool | undefined;
   getCategory(toolName: string): ToolCategory | undefined;
   getAvailableTools(input: {
-    readonly mode: ToolMode;
     readonly tools?: Record<string, boolean>;
     readonly isSubagent?: boolean;
   }): ToolDefinition[];
@@ -240,7 +226,7 @@ export interface ToolScheduler {
 
 export interface ToolSchedulerOptions {
   readonly bus: BusInstance;
-  readonly policy: PolicyPort;
+  readonly permissionState?: PermissionStateStore;
   readonly permission?: PermissionPort;
   readonly agentTools?: AgentToolConfigProvider;
   readonly config?: Partial<{
@@ -249,3 +235,5 @@ export interface ToolSchedulerOptions {
   }>;
   readonly now?: () => number;
 }
+
+export type { PermissionDecision };

@@ -7,10 +7,10 @@ import type {
 } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
 import {
   createPermissionManager,
+  createPermissionState,
   PermissionEvent,
 } from "../../../packages/ohbaby-agent/src/permission/index.js";
 import type { PermissionInfo } from "../../../packages/ohbaby-agent/src/permission/index.js";
-import { createPolicyManager } from "../../../packages/ohbaby-agent/src/policy/index.js";
 
 function createEditTool(
   execute: Tool["execute"] = (): ToolExecutionResult => ({ output: "edited" }),
@@ -46,16 +46,21 @@ function createReadTool(
   };
 }
 
-describe("tool-scheduler policy permission integration", () => {
+describe("tool-scheduler permission integration", () => {
   it("passes scheduler callId into permission updates before executing approved tools", async () => {
     const bus = createBus();
-    const policy = createPolicyManager({ bus });
+    const permissionState = createPermissionState({ bus });
     const permission = createPermissionManager({
       bus,
       generateId: () => "permission_1",
+      state: permissionState,
     });
     const execute = vi.fn<Tool["execute"]>(() => ({ output: "edited" }));
-    const scheduler = createToolScheduler({ bus, permission, policy });
+    const scheduler = createToolScheduler({
+      bus,
+      permission,
+      permissionState,
+    });
     const permissionUpdates: PermissionInfo[] = [];
 
     scheduler.register(createEditTool(execute));
@@ -89,20 +94,24 @@ describe("tool-scheduler policy permission integration", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
-  it("keeps always approval scoped to permission patterns instead of global policy writes", async () => {
+  it("keeps always approval scoped to session permission rules", async () => {
     const bus = createBus();
-    const policy = createPolicyManager({ bus });
+    const permissionState = createPermissionState({ bus });
     const permission = createPermissionManager({
       bus,
       generateId: (() => {
         let nextId = 1;
         return () => `permission_${String(nextId++)}`;
       })(),
+      state: permissionState,
     });
-    const scheduler = createToolScheduler({ bus, permission, policy });
+    const scheduler = createToolScheduler({
+      bus,
+      permission,
+      permissionState,
+    });
     const permissionUpdates: PermissionInfo[] = [];
     const permissionReplies: unknown[] = [];
-    const switchRequests: unknown[] = [];
 
     scheduler.register(createEditTool());
     bus.subscribe(PermissionEvent.Updated, (event) => {
@@ -113,9 +122,6 @@ describe("tool-scheduler policy permission integration", () => {
     });
     bus.subscribe(PermissionEvent.Replied, (event) => {
       permissionReplies.push(event);
-    });
-    bus.subscribe(PermissionEvent.AutoEditRequested, (event) => {
-      switchRequests.push(event);
     });
 
     await expect(
@@ -128,9 +134,22 @@ describe("tool-scheduler policy permission integration", () => {
       }),
     ).resolves.toMatchObject({ status: "success" });
 
-    expect(policy.getState()).toEqual({
-      agentState: "ask-before-edit",
-      mode: "agent",
+    expect(permissionState.toSnapshot()).toEqual({
+      level: "default",
+      mode: "auto",
+      sessionRules: [
+        {
+          rules: [
+            {
+              decision: "allow",
+              pattern: "src/components/**",
+              scope: "session",
+              tool: "edit",
+            },
+          ],
+          sessionId: "session_1",
+        },
+      ],
     });
     await expect(
       scheduler.execute({
@@ -160,54 +179,38 @@ describe("tool-scheduler policy permission integration", () => {
         callId: "call_1",
         permissionId: "permission_1",
         response: {
-          pattern: "tool:edit:src/components/**",
+          pattern: "edit(src/components/**)",
           type: "always",
         },
         sessionId: "session_1",
       }),
       expect.objectContaining({
-        callId: "call_2",
-        permissionId: "permission_2",
-        response: {
-          pattern: "tool:edit:src/components/**",
-          type: "auto_approved",
-        },
-        sessionId: "session_1",
-      }),
-      expect.objectContaining({
         callId: "call_3",
-        permissionId: "permission_3",
+        permissionId: "permission_2",
         response: { type: "once" },
         sessionId: "session_1",
       }),
     ]);
-    expect(switchRequests).toEqual([
-      {
-        sessionId: "session_1",
-        targetPermission: "edit-automatically",
-        trigger: {
-          callId: "call_1",
-          pattern: "tool:edit:src/components/**",
-          permissionId: "permission_1",
-        },
-      },
-    ]);
   });
 
-  it("lets ask and plan modes run readonly tools while rejecting writes before permission", async () => {
+  it("asks for writes in auto default and rejects writes in plan before permission", async () => {
     const bus = createBus();
-    const policy = createPolicyManager({ bus });
-    const permission = createPermissionManager({ bus });
-    const scheduler = createToolScheduler({ bus, permission, policy });
+    const permissionState = createPermissionState({ bus });
+    const permission = createPermissionManager({ bus, state: permissionState });
+    const scheduler = createToolScheduler({
+      bus,
+      permission,
+      permissionState,
+    });
     const permissionUpdates: PermissionInfo[] = [];
 
     scheduler.register(createReadTool());
     scheduler.register(createEditTool());
     bus.subscribe(PermissionEvent.Updated, (event) => {
       permissionUpdates.push(event.info);
+      permission.respond(event.info.sessionId, event.info.id, { type: "once" });
     });
 
-    policy.setMode("ask");
     await expect(
       scheduler.execute({
         callId: "read_1",
@@ -225,12 +228,9 @@ describe("tool-scheduler policy permission integration", () => {
         sessionId: "session_1",
         toolName: "edit",
       }),
-    ).resolves.toMatchObject({
-      error: { type: "PolicyDeniedError" },
-      status: "rejected",
-    });
+    ).resolves.toMatchObject({ output: "edited", status: "success" });
 
-    policy.setMode("plan");
+    permissionState.setMode("plan");
     await expect(
       scheduler.execute({
         callId: "write_2",
@@ -240,10 +240,10 @@ describe("tool-scheduler policy permission integration", () => {
         toolName: "edit",
       }),
     ).resolves.toMatchObject({
-      error: { type: "PolicyDeniedError" },
+      error: { type: "PermissionDeniedError" },
       status: "rejected",
     });
 
-    expect(permissionUpdates).toEqual([]);
+    expect(permissionUpdates.map((info) => info.callId)).toEqual(["write_1"]);
   });
 });

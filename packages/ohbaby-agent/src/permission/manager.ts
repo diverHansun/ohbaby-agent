@@ -1,12 +1,14 @@
 import { Bus, type BusInstance } from "../bus/index.js";
 import { PermissionEvent } from "./events.js";
 import {
-  findMatchingPermissionPattern,
   generatePermissionPattern,
   inferPermissionType,
   isRememberablePermissionPattern,
-  matchPermissionPattern,
+  matchesPermissionRule,
 } from "./matcher.js";
+import { evaluatePermission } from "./evaluator.js";
+import { formatPermissionPattern, parsePermissionPattern } from "./rule.js";
+import { createPermissionState } from "./state.js";
 import {
   PermissionRejectedError,
   PermissionRejectedWithSuggestionError,
@@ -17,11 +19,14 @@ import type {
   PermissionManager,
   PermissionEventResponse,
   PermissionResponse,
+  PermissionRule,
+  PermissionStateStore,
   SchedulerPermissionResponse,
 } from "./types.js";
 
 interface PendingRequest {
   readonly info: PermissionInfo;
+  readonly input: PermissionAskInput;
   readonly resolve: (response: SchedulerPermissionResponse) => void;
   readonly reject: (error: Error) => void;
 }
@@ -30,6 +35,7 @@ export interface PermissionManagerOptions {
   readonly bus?: BusInstance;
   readonly generateId?: () => string;
   readonly now?: () => number;
+  readonly state?: PermissionStateStore;
 }
 
 function defaultGenerateId(): string {
@@ -47,10 +53,6 @@ function requestedSkillName(
   return typeof value === "string" && value.trim() !== ""
     ? value.trim()
     : undefined;
-}
-
-function shouldRequestAutoEditSwitch(info: PermissionInfo): boolean {
-  return info.type !== "skill";
 }
 
 function createInfo(
@@ -85,6 +87,7 @@ function createInfo(
       category: input.category,
       params: input.params,
       reason: input.reason,
+      rememberable: input.rememberable,
       toolName: input.toolName,
     },
     pattern,
@@ -100,19 +103,9 @@ export function createPermissionManager(
   const bus = options.bus ?? Bus;
   const generateId = options.generateId ?? defaultGenerateId;
   const now = options.now ?? Date.now;
+  const state = options.state ?? createPermissionState({ bus });
   const queue: PendingRequest[] = [];
-  const approvals = new Map<string, Set<string>>();
   let current: PendingRequest | undefined;
-
-  function approvedFor(sessionId: string): Set<string> {
-    const existing = approvals.get(sessionId);
-    if (existing) {
-      return existing;
-    }
-    const created = new Set<string>();
-    approvals.set(sessionId, created);
-    return created;
-  }
 
   function publishCurrent(): void {
     if (current) {
@@ -162,13 +155,79 @@ export function createPermissionManager(
     );
   }
 
-  function autoApproveMatching(sessionId: string, pattern: string): void {
+  function toRule(input: PermissionInfo): PermissionRule {
+    const parsed = parsePermissionPattern(input.pattern);
+    return {
+      decision: "allow",
+      pattern: parsed.pattern,
+      scope: "session",
+      tool: parsed.tool,
+    };
+  }
+
+  function matchingAllowRule(
+    input: PermissionAskInput,
+  ): PermissionRule | undefined {
+    if (input.rememberable === false) {
+      return undefined;
+    }
+    return state.getSessionRules(input.sessionId).find(
+      (rule) =>
+        rule.decision === "allow" &&
+        matchesPermissionRule(
+          {
+            callId: input.callId,
+            category: input.category,
+            messageId: input.messageId,
+            params: input.params,
+            sessionId: input.sessionId,
+            toolName: input.toolName,
+          },
+          rule,
+        ),
+    );
+  }
+
+  function autoApproveMatching(
+    sessionId: string,
+    rule: PermissionRule,
+    pattern: string,
+  ): void {
     for (let index = queue.length - 1; index >= 0; index -= 1) {
       const request = queue[index];
       if (request.info.sessionId !== sessionId) {
         continue;
       }
-      if (!matchPermissionPattern(request.info.pattern, new Set([pattern]))) {
+      if (request.input.rememberable === false) {
+        continue;
+      }
+      if (
+        !matchesPermissionRule(
+          {
+            callId: request.input.callId,
+            category: request.input.category,
+            messageId: request.input.messageId,
+            params: request.input.params,
+            sessionId: request.input.sessionId,
+            toolName: request.input.toolName,
+          },
+          rule,
+        )
+      ) {
+        continue;
+      }
+      const decision = evaluatePermission(
+        {
+          callId: request.input.callId,
+          category: request.input.category,
+          messageId: request.input.messageId,
+          params: request.input.params,
+          sessionId: request.input.sessionId,
+          toolName: request.input.toolName,
+        },
+        state.getState(),
+      );
+      if (decision.type !== "allow") {
         continue;
       }
       queue.splice(index, 1);
@@ -198,16 +257,17 @@ export function createPermissionManager(
   }
 
   return {
+    state,
+
     ask(input: PermissionAskInput): Promise<SchedulerPermissionResponse> {
       const info = createInfo(input, generateId(), now);
-      const approvedPattern = findMatchingPermissionPattern(
-        info.pattern,
-        approvedFor(info.sessionId),
-      );
-      if (approvedPattern) {
+      const approvedRule = matchingAllowRule(input);
+      if (approvedRule) {
+        const approvedPattern = formatPermissionPattern(approvedRule);
         publishReply(
           {
             info,
+            input,
             reject: () => undefined,
             resolve: () => undefined,
           },
@@ -217,7 +277,12 @@ export function createPermissionManager(
       }
 
       return new Promise((resolve, reject) => {
-        const request = { info, reject, resolve } satisfies PendingRequest;
+        const request = {
+          info,
+          input,
+          reject,
+          resolve,
+        } satisfies PendingRequest;
         if (!current) {
           current = request;
           publishCurrent();
@@ -245,30 +310,23 @@ export function createPermissionManager(
       }
 
       if (response.type === "always") {
-        if (!isRememberablePermissionPattern(request.info.pattern)) {
+        if (
+          request.input.rememberable === false ||
+          !isRememberablePermissionPattern(request.info.pattern)
+        ) {
           publishReply(request, { type: "once" });
           request.resolve("once");
           completeCurrent();
           return;
         }
-        approvedFor(sessionId).add(request.info.pattern);
+        const rule = toRule(request.info);
+        state.addSessionRule(sessionId, rule);
         publishReply(request, {
           type: "always",
           pattern: request.info.pattern,
         });
         request.resolve("always");
-        autoApproveMatching(sessionId, request.info.pattern);
-        if (shouldRequestAutoEditSwitch(request.info)) {
-          bus.publish(PermissionEvent.AutoEditRequested, {
-            sessionId,
-            targetPermission: "edit-automatically",
-            trigger: {
-              callId: request.info.callId,
-              permissionId,
-              pattern: request.info.pattern,
-            },
-          });
-        }
+        autoApproveMatching(sessionId, rule, request.info.pattern);
         completeCurrent();
         return;
       }
@@ -302,7 +360,7 @@ export function createPermissionManager(
     },
 
     clearSession(sessionId: string): void {
-      approvals.delete(sessionId);
+      state.clearSession(sessionId);
       cancelPending(sessionId);
     },
   };

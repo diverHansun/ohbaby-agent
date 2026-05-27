@@ -3,7 +3,7 @@ import { BusEvent } from "../../bus/index.js";
 
 const ToolCallStatusSchema = z.union([
   z.literal("pending"),
-  z.literal("checking_policy"),
+  z.literal("checking_permission"),
   z.literal("awaiting_approval"),
   z.literal("queued"),
   z.literal("executing"),
@@ -16,7 +16,7 @@ const ToolCallStatusSchema = z.union([
 const ToolCallErrorSchema = z.object({
   type: z.union([
     z.literal("ToolNotFoundError"),
-    z.literal("PolicyDeniedError"),
+    z.literal("PermissionDeniedError"),
     z.literal("PermissionRejectedError"),
     z.literal("ExecutionError"),
     z.literal("TimeoutError"),

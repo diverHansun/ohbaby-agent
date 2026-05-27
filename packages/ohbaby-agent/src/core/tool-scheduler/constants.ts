@@ -1,4 +1,4 @@
-import type { ToolCategory, ToolMode, ToolSchedulerConfig } from "./types.js";
+import type { ToolCategory, ToolSchedulerConfig } from "./types.js";
 
 export const DEFAULT_TOOL_SCHEDULER_CONFIG: ToolSchedulerConfig = {
   concurrency: {
@@ -32,23 +32,6 @@ export const BUILTIN_TOOL_CATEGORIES: Record<string, ToolCategory> = {
   agent_eval: "subagent",
   agent_status: "subagent",
   agent_close: "subagent",
-};
-
-export const MODE_ALLOWED_CATEGORIES: Record<
-  ToolMode,
-  readonly ToolCategory[]
-> = {
-  ask: ["readonly", "network", "memory", "skill"],
-  plan: ["readonly", "network", "memory", "skill"],
-  agent: [
-    "readonly",
-    "write",
-    "dangerous",
-    "network",
-    "memory",
-    "skill",
-    "subagent",
-  ],
 };
 
 export const SUBAGENT_DISABLED_TOOLS = new Set([

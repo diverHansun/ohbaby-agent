@@ -4,10 +4,10 @@ import { Lifecycle } from "../../../packages/ohbaby-agent/src/core/lifecycle/ind
 import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
 import { createToolScheduler } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
 import type {
-  PolicyPort,
   Tool,
   ToolExecutionEnvironment,
 } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
+import { createPermissionState } from "../../../packages/ohbaby-agent/src/permission/index.js";
 import type {
   ProviderRequest,
   ProviderStreamEvent,
@@ -85,13 +85,6 @@ function createEnvironment(workdir: string): ToolExecutionEnvironment {
   };
 }
 
-function createAllowPolicy(): PolicyPort {
-  return {
-    check: () => ({ type: "allow" }),
-    getMode: () => "agent",
-  };
-}
-
 async function consumeLifecycle(
   loop: ReturnType<Lifecycle["run"]>,
 ): Promise<Awaited<ReturnType<ReturnType<Lifecycle["run"]>["next"]>>["value"]> {
@@ -109,7 +102,10 @@ describe("lifecycle tool scheduler integration", () => {
     const scheduler = createToolScheduler({
       bus,
       permission: { ask: () => "once" },
-      policy: createAllowPolicy(),
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
     });
     const execute = vi.fn<Tool["execute"]>((params, context) => {
       return {

@@ -14,11 +14,11 @@ import { createMemoryManager } from "../../core/memory/index.js";
 import {
   createToolScheduler,
   type PermissionPort,
-  type PolicyPort,
   type Tool,
   type ToolDefinition,
   type ToolCallResult,
 } from "../../core/tool-scheduler/index.js";
+import type { PermissionStateStore } from "../../permission/index.js";
 import { createHeuristicTokenCounter } from "../../services/llm-model/index.js";
 import {
   createInMemorySessionManager,
@@ -107,7 +107,7 @@ export interface UiRuntimeCompositionOptions {
   readonly hookExecutor?: HookExecutor;
   readonly mcpManager?: McpManagerPort;
   readonly permission?: PermissionPort;
-  readonly policy: PolicyPort;
+  readonly permissionState: PermissionStateStore;
   readonly runLedger?: RunLedger;
   readonly sessionManager?: Pick<SessionManager, "create" | "get"> &
     Partial<Pick<SessionManager, "ensureRoot">>;
@@ -373,7 +373,7 @@ export async function createUiRuntimeComposition(
     agentTools: agentManager,
     bus: options.bus,
     permission: options.permission,
-    policy: options.policy,
+    permissionState: options.permissionState,
   });
   const sandboxManager = createHostLocalSandboxManager(options.workdir);
   const sessionManager =
@@ -479,9 +479,9 @@ export async function createUiRuntimeComposition(
     agentPromptResolver(agentName) {
       return agentManager.get(agentName)?.prompt;
     },
-    async taskKindResolver(input, agentName) {
+    taskKindResolver(input, agentName) {
       if (!input.isSubagent) {
-        return await options.policy.getMode();
+        return options.permissionState.getMode() === "plan" ? "plan" : "agent";
       }
       return resolveSubagentTaskKind(agentName);
     },

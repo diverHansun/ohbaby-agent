@@ -1,16 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../bus/index.js";
 import { createToolScheduler } from "../core/tool-scheduler/index.js";
-import type { PolicyPort } from "../core/tool-scheduler/index.js";
+import { createPermissionState } from "../permission/index.js";
 import type { SearchProvider } from "../services/search-providers/index.js";
 import { createBuiltinTools } from "./index.js";
-
-function createAllowPolicy(): PolicyPort {
-  return {
-    check: () => ({ type: "allow" }),
-    getMode: () => "agent",
-  };
-}
 
 function createProvider(): SearchProvider {
   return {
@@ -37,7 +30,7 @@ describe("web tools scheduler integration", () => {
     const provider = createProvider();
     const scheduler = createToolScheduler({
       bus: createBus(),
-      policy: createAllowPolicy(),
+      permissionState: createPermissionState({ initialLevel: "full-access" }),
     });
 
     for (const tool of createBuiltinTools({

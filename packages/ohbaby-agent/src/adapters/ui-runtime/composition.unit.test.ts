@@ -11,7 +11,7 @@ import {
   createInMemoryMessageStore,
   createMessageManager,
 } from "../../core/message/index.js";
-import { createPolicyManager } from "../../policy/index.js";
+import { createPermissionState } from "../../permission/index.js";
 import type { Tool } from "../../core/tool-scheduler/index.js";
 import type {
   SkillContent,
@@ -87,7 +87,9 @@ function recordingFakeLlmClient(input: {
       isAbortError(): boolean {
         return false;
       },
-      streamChatCompletion(request): Promise<AsyncIterable<ProviderStreamEvent>> {
+      streamChatCompletion(
+        request,
+      ): Promise<AsyncIterable<ProviderStreamEvent>> {
         input.requests.push(request);
         return Promise.resolve(
           createProviderStream(
@@ -229,8 +231,10 @@ async function createPromptCompositionForTest(input: {
   readonly requests: ProviderRequest[];
 }> {
   const bus = createBus();
-  const policy = createPolicyManager({ bus });
-  policy.setMode(input.policyMode);
+  const permissionState = createPermissionState({
+    bus,
+    initialMode: input.policyMode === "plan" ? "plan" : "auto",
+  });
   const requests: ProviderRequest[] = [];
   const composition = await createUiRuntimeComposition({
     agentManager: new AgentManager(),
@@ -246,7 +250,7 @@ async function createPromptCompositionForTest(input: {
           input.notices?.push(notice);
         }
       : undefined,
-    policy,
+    permissionState,
     skillRegistry: createMutableSkillRegistry([]),
     workdir: "D:/repo",
   });
@@ -277,7 +281,10 @@ describe("createUiRuntimeComposition skill tools", () => {
       llmClient: fakeLlmClient(),
       mcpManager: { getAllTools: () => Promise.resolve([]) },
       messageManager,
-      policy: createPolicyManager({ bus }),
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
       skillRegistry: createMutableSkillRegistry([]),
       workdir: "D:/repo",
     });
@@ -349,7 +356,10 @@ describe("createUiRuntimeComposition skill tools", () => {
       onNotice: (notice) => {
         notices.push(notice);
       },
-      policy: createPolicyManager({ bus }),
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
       skillRegistry: createMutableSkillRegistry([]),
       workdir: "D:/repo",
     });
@@ -407,7 +417,10 @@ describe("createUiRuntimeComposition skill tools", () => {
       onNotice: (notice) => {
         notices.push(notice);
       },
-      policy: createPolicyManager({ bus }),
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
       skillRegistry: createMutableSkillRegistry([]),
       workdir: "D:/repo",
     });
@@ -435,7 +448,10 @@ describe("createUiRuntimeComposition skill tools", () => {
       bus,
       llmClient: fakeLlmClient(),
       messageManager: {} as MessageManager,
-      policy: createPolicyManager({ bus }),
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
       skillRegistry: registry,
     });
 
@@ -468,7 +484,10 @@ describe("createUiRuntimeComposition skill tools", () => {
       llmClient: fakeLlmClient(),
       mcpManager,
       messageManager: {} as MessageManager,
-      policy: createPolicyManager({ bus }),
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
       skillRegistry: createMutableSkillRegistry([]),
     } satisfies Parameters<typeof createUiRuntimeComposition>[0] & {
       readonly mcpManager: FakeMcpManager;
@@ -499,7 +518,10 @@ describe("createUiRuntimeComposition skill tools", () => {
       llmClient: fakeLlmClient(),
       mcpManager,
       messageManager: {} as MessageManager,
-      policy: createPolicyManager({ bus }),
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
       skillRegistry: createMutableSkillRegistry([]),
     } satisfies Parameters<typeof createUiRuntimeComposition>[0] & {
       readonly mcpManager: FakeMcpManager;
@@ -518,7 +540,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(names).not.toContain("mcp_s6_server_t3_old");
   });
 
-  it("passes current policy mode into primary system prompts", async () => {
+  it("passes current permission mode into primary system prompts", async () => {
     const { composition, requests } = await createPromptCompositionForTest({
       policyMode: "plan",
     });

@@ -23,6 +23,14 @@ const PermissionInfoSchema = z.object({
   }),
 });
 
+const PermissionRuleSchema = z.object({
+  tool: z.string(),
+  pattern: z.string().optional(),
+  decision: z.union([z.literal("allow"), z.literal("deny")]),
+  scope: z.literal("session"),
+  reason: z.string().optional(),
+});
+
 const PermissionResponseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("once") }),
   z.object({ type: z.literal("always"), pattern: z.string().optional() }),
@@ -33,6 +41,27 @@ const PermissionResponseSchema = z.discriminatedUnion("type", [
 ]);
 
 export const PermissionEvent = {
+  ModeChanged: BusEvent.define(
+    "permission.mode.changed",
+    z.object({
+      previous: z.union([z.literal("plan"), z.literal("auto")]),
+      current: z.union([z.literal("plan"), z.literal("auto")]),
+    }),
+  ),
+  LevelChanged: BusEvent.define(
+    "permission.level.changed",
+    z.object({
+      previous: z.union([z.literal("default"), z.literal("full-access")]),
+      current: z.union([z.literal("default"), z.literal("full-access")]),
+    }),
+  ),
+  RuleAdded: BusEvent.define(
+    "permission.rule.added",
+    z.object({
+      sessionId: z.string(),
+      rule: PermissionRuleSchema,
+    }),
+  ),
   Updated: BusEvent.define(
     "permission.updated",
     z.object({
@@ -46,18 +75,6 @@ export const PermissionEvent = {
       permissionId: z.string(),
       callId: z.string(),
       response: PermissionResponseSchema,
-    }),
-  ),
-  AutoEditRequested: BusEvent.define(
-    "permission.auto-edit-requested",
-    z.object({
-      sessionId: z.string(),
-      targetPermission: z.literal("edit-automatically"),
-      trigger: z.object({
-        callId: z.string(),
-        permissionId: z.string(),
-        pattern: z.string(),
-      }),
     }),
   ),
 } as const;

@@ -5,29 +5,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createBus } from "../bus/index.js";
 import {
   createToolScheduler,
-  type PolicyPort,
   type ToolSchedulerInstance,
 } from "../core/tool-scheduler/index.js";
 import { createHostLocalEnvironment } from "../adapters/ui-runtime/host-local-environment.js";
 import {
   createPermissionManager,
+  createPermissionState,
   PermissionEvent,
   type PermissionInfo,
 } from "../permission/index.js";
-import { createPolicyManager } from "../policy/index.js";
 import { createBuiltinTools } from "./index.js";
-
-function createAllowPolicy(): PolicyPort {
-  return {
-    check: () => ({ type: "allow" }),
-    getMode: () => "agent",
-  };
-}
 
 function createScheduler(): ToolSchedulerInstance {
   const scheduler = createToolScheduler({
     bus: createBus(),
-    policy: createAllowPolicy(),
+    permissionState: createPermissionState({ initialLevel: "full-access" }),
   });
   for (const tool of createBuiltinTools()) {
     scheduler.register(tool);
@@ -175,17 +167,21 @@ describe("file tools scheduler integration", () => {
     await expect(fs.readdir(tempRoot)).resolves.toEqual([]);
   });
 
-  it("allows absolute paths outside the workspace through policy and permission", async () => {
+  it("allows absolute paths outside the workspace through permission approval", async () => {
     const bus = createBus();
-    const policy = createPolicyManager({ bus });
+    const permissionState = createPermissionState({
+      bus,
+      initialLevel: "full-access",
+    });
     const permission = createPermissionManager({
       bus,
       generateId: (() => {
         let next = 1;
         return () => `permission_${String(next++)}`;
       })(),
+      state: permissionState,
     });
-    const scheduler = createToolScheduler({ bus, permission, policy });
+    const scheduler = createToolScheduler({ bus, permission, permissionState });
     const permissionUpdates: PermissionInfo[] = [];
     for (const tool of createBuiltinTools()) {
       scheduler.register(tool);
@@ -251,8 +247,8 @@ describe("file tools scheduler integration", () => {
       "write_outside",
       "edit_outside",
     ]);
-    expect(permissionUpdates[0]?.pattern).toContain("tool:write:");
-    expect(permissionUpdates[1]?.pattern).toContain("tool:edit:");
+    expect(permissionUpdates[0]?.pattern).toContain("write(");
+    expect(permissionUpdates[1]?.pattern).toContain("edit(");
     await expect(fs.readFile(outsideReadPath, "utf8")).resolves.toBe(
       "secret\n",
     );
@@ -266,13 +262,16 @@ describe("file tools scheduler integration", () => {
 
   it("forces permission for external absolute writes even when agent edits are automatic", async () => {
     const bus = createBus();
-    const policy = createPolicyManager({ bus });
-    policy.setAgentState("edit-automatically");
+    const permissionState = createPermissionState({
+      bus,
+      initialLevel: "full-access",
+    });
     const permission = createPermissionManager({
       bus,
       generateId: () => "permission_external_auto",
+      state: permissionState,
     });
-    const scheduler = createToolScheduler({ bus, permission, policy });
+    const scheduler = createToolScheduler({ bus, permission, permissionState });
     const permissionUpdates: PermissionInfo[] = [];
     for (const tool of createBuiltinTools()) {
       scheduler.register(tool);
@@ -348,15 +347,16 @@ describe("file tools scheduler integration", () => {
 
   it("matches remembered absolute-path permissions against canonical paths", async () => {
     const bus = createBus();
-    const policy = createPolicyManager({ bus });
+    const permissionState = createPermissionState({ bus });
     const permission = createPermissionManager({
       bus,
       generateId: (() => {
         let next = 1;
         return () => `permission_canonical_${String(next++)}`;
       })(),
+      state: permissionState,
     });
-    const scheduler = createToolScheduler({ bus, permission, policy });
+    const scheduler = createToolScheduler({ bus, permission, permissionState });
     const permissionUpdates: PermissionInfo[] = [];
     for (const tool of createBuiltinTools()) {
       scheduler.register(tool);
@@ -412,14 +412,19 @@ describe("file tools scheduler integration", () => {
 
   it("allows explicit absolute paths through symlinked parents", async () => {
     const bus = createBus();
+    const permissionState = createPermissionState({
+      bus,
+      initialLevel: "full-access",
+    });
     const permission = createPermissionManager({
       bus,
       generateId: () => "permission_symlink_absolute",
+      state: permissionState,
     });
     const scheduler = createToolScheduler({
       bus,
       permission,
-      policy: createAllowPolicy(),
+      permissionState,
     });
     for (const tool of createBuiltinTools()) {
       scheduler.register(tool);

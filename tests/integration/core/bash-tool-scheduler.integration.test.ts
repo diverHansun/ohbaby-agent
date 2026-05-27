@@ -12,9 +12,9 @@ import { createToolScheduler } from "../../../packages/ohbaby-agent/src/core/too
 import { createHostLocalEnvironment } from "../../../packages/ohbaby-agent/src/adapters/ui-runtime/host-local-environment.js";
 import {
   createPermissionManager,
+  createPermissionState,
   PermissionEvent,
 } from "../../../packages/ohbaby-agent/src/permission/index.js";
-import { createPolicyManager } from "../../../packages/ohbaby-agent/src/policy/index.js";
 import { createBashTool } from "../../../packages/ohbaby-agent/src/tools/bash.js";
 import type { SpawnCommand } from "../../../packages/ohbaby-agent/src/tools/bash.js";
 
@@ -40,9 +40,9 @@ afterEach(async () => {
 
 function createHarness(spawn: SpawnCommand = vi.fn()) {
   const bus = createBus();
-  const policy = createPolicyManager({ bus });
-  const permission = createPermissionManager({ bus });
-  const scheduler = createToolScheduler({ bus, permission, policy });
+  const permissionState = createPermissionState({ bus });
+  const permission = createPermissionManager({ bus, state: permissionState });
+  const scheduler = createToolScheduler({ bus, permission, permissionState });
   const permissionUpdates: string[] = [];
 
   scheduler.register(
@@ -59,7 +59,7 @@ function createHarness(spawn: SpawnCommand = vi.fn()) {
     permission.respond(event.info.sessionId, event.info.id, { type: "once" });
   });
 
-  return { permissionUpdates, policy, scheduler };
+  return { permissionState, permissionUpdates, scheduler };
 }
 
 function request(
@@ -77,7 +77,7 @@ function request(
 }
 
 describe("bash tool scheduler integration", () => {
-  it("runs approved bash commands through policy and permission", async () => {
+  it("runs approved bash commands through permission", async () => {
     const child = new FakeChildProcess();
     const spawn = vi.fn<SpawnCommand>(
       (
@@ -95,7 +95,7 @@ describe("bash tool scheduler integration", () => {
     const { permissionUpdates, scheduler } = createHarness(spawn);
 
     await expect(
-      scheduler.execute(request("bash_ok", "echo scheduler-ok")),
+      scheduler.execute(request("bash_ok", "touch scheduler-ok")),
     ).resolves.toMatchObject({
       metadata: {
         cwd: workspace,
@@ -103,21 +103,20 @@ describe("bash tool scheduler integration", () => {
         shellKind: "bash",
         truncated: false,
       },
-      output: expect.stringContaining("scheduler-ok"),
       status: "success",
     });
     expect(permissionUpdates).toEqual(["bash_ok"]);
     expect(spawn).toHaveBeenCalledOnce();
   });
 
-  it("rejects bash in ask mode before permission is requested", async () => {
-    const { permissionUpdates, policy, scheduler } = createHarness();
-    policy.setMode("ask");
+  it("rejects mutating bash in plan mode before permission is requested", async () => {
+    const { permissionState, permissionUpdates, scheduler } = createHarness();
+    permissionState.setMode("plan");
 
     await expect(
-      scheduler.execute(request("bash_ask", "echo blocked")),
+      scheduler.execute(request("bash_plan", "touch blocked")),
     ).resolves.toMatchObject({
-      error: { type: "PolicyDeniedError" },
+      error: { type: "PermissionDeniedError" },
       status: "rejected",
     });
     expect(permissionUpdates).toEqual([]);

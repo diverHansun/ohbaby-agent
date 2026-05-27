@@ -1,4 +1,10 @@
-import type { PermissionPatternInput } from "./types.js";
+import { matchesPattern } from "../utils/index.js";
+import { parsePermissionPattern } from "./rule.js";
+import type {
+  PermissionCall,
+  PermissionPatternInput,
+  PermissionRule,
+} from "./types.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -44,10 +50,6 @@ function normalizeCommand(command: string): string {
   return command.trim().replace(/\s+/g, " ");
 }
 
-function encodePatternSegment(value: string): string {
-  return Buffer.from(value, "utf8").toString("base64url");
-}
-
 function escapeRegex(value: string): string {
   return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
 }
@@ -70,11 +72,61 @@ function wildcardToRegex(pattern: string): RegExp {
   return new RegExp(`^${regex}$`);
 }
 
+function globToRegex(pattern: string): RegExp {
+  let regex = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+    if (char === "*") {
+      if (pattern[index + 1] === "*") {
+        regex += ".*";
+        index += 1;
+      } else {
+        regex += "[^/]*";
+      }
+      continue;
+    }
+    regex += escapeRegex(char);
+  }
+  return new RegExp(`^${regex}$`, "u");
+}
+
+function canonicalToolName(toolName: string): string {
+  return toolName.trim().toLowerCase();
+}
+
+function effectiveToolName(call: PermissionCall): string {
+  const toolName = canonicalToolName(call.toolName);
+  if (toolName === "bash" || "command" in call.params) {
+    return "bash";
+  }
+  if (
+    call.category === "skill" ||
+    toolName === "skill" ||
+    toolName.startsWith("skill_")
+  ) {
+    return "skill";
+  }
+  return toolName;
+}
+
+function canonicalPath(input: string): string {
+  return normalizeSlashes(input).trim().toLowerCase();
+}
+
+function commandParam(params: Record<string, unknown>): string | undefined {
+  return getStringParam(params, ["command"])?.toLowerCase();
+}
+
+function pathParam(params: Record<string, unknown>): string | undefined {
+  return getStringParam(params, ["file_path", "filePath", "path"]);
+}
+
 export function generatePermissionPattern(
   input: PermissionPatternInput,
 ): string {
   if (input.type === "tool") {
-    if (input.name === "edit" || input.name === "write") {
+    const name = canonicalToolName(input.name);
+    if (name === "edit" || name === "write") {
       const filePath = getStringParam(input.params, [
         "file_path",
         "filePath",
@@ -82,28 +134,40 @@ export function generatePermissionPattern(
       ]);
       const dir = filePath ? directoryOf(filePath) : undefined;
       if (dir) {
-        return `tool:${input.name}:${dir}/**`;
+        return `${name}(${canonicalPath(dir)}/**)`;
       }
     }
-    return `tool:${input.name}`;
+    return name;
   }
 
   if (input.type === "bash") {
     const command = getStringParam(input.params, ["command"]) ?? input.name;
-    const normalizedCommand = normalizeCommand(command);
+    const normalizedCommand = normalizeCommand(command).toLowerCase();
     const [head] = commandParts(normalizedCommand);
-    return `bash:${head ?? input.name}:${encodePatternSegment(normalizedCommand)}`;
+    const pattern =
+      head === "git" && normalizedCommand !== head
+        ? `${head} *`
+        : normalizedCommand;
+    return `bash(${pattern || canonicalToolName(input.name)})`;
   }
 
   if (input.type === "skill") {
-    return `skill:${input.name}`;
+    return `skill(${canonicalToolName(input.name)})`;
   }
 
-  return `${input.type}:${input.name}`;
+  return `${input.type}(${canonicalToolName(input.name)})`;
 }
 
 export function isRememberablePermissionPattern(pattern: string): boolean {
-  return pattern !== "tool:edit" && pattern !== "tool:write";
+  try {
+    const parsed = parsePermissionPattern(pattern);
+    return !(
+      (parsed.tool === "edit" || parsed.tool === "write") &&
+      !parsed.pattern
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function inferPermissionType(
@@ -139,4 +203,31 @@ export function matchPermissionPattern(
   approved: ReadonlySet<string>,
 ): boolean {
   return findMatchingPermissionPattern(pattern, approved) !== undefined;
+}
+
+export function matchesPermissionRule(
+  call: PermissionCall,
+  rule: PermissionRule,
+): boolean {
+  const toolName = effectiveToolName(call);
+  const ruleTool = canonicalToolName(rule.tool);
+  if (toolName !== ruleTool) {
+    return false;
+  }
+  if (!rule.pattern || rule.pattern.trim() === "") {
+    return true;
+  }
+
+  const pattern = rule.pattern.trim().toLowerCase();
+  if (toolName === "bash") {
+    const command = commandParam(call.params);
+    return command ? matchesPattern(command, pattern) : false;
+  }
+  if (toolName === "skill") {
+    const skillName = getStringParam(call.params, ["name"])?.toLowerCase();
+    return skillName ? matchesPattern(skillName, pattern) : false;
+  }
+
+  const path = pathParam(call.params);
+  return path ? globToRegex(pattern).test(canonicalPath(path)) : false;
 }

@@ -10,11 +10,13 @@ import { describe, expect, it, vi } from "vitest";
 import { createBus, type BusInstance } from "../../bus/index.js";
 import type { SpawnCommand } from "../../tools/bash.js";
 import { createBuiltinTools } from "../../tools/index.js";
+import {
+  createPermissionState,
+  type PermissionStateStore,
+} from "../../permission/index.js";
 import { createToolScheduler, ToolSchedulerEvent } from "./index.js";
 import type {
   PermissionPort,
-  PolicyDecision,
-  PolicyPort,
   Tool,
   ToolCallStatus,
   ToolExecutionContext,
@@ -86,13 +88,6 @@ function createFakeEnvironment(root: string): ToolExecutionEnvironment {
   };
 }
 
-function createPolicy(decision: PolicyPort["check"]): PolicyPort {
-  return {
-    check: decision,
-    getMode: () => "agent",
-  };
-}
-
 interface SchedulerFixture {
   readonly bus: BusInstance;
   readonly completed: string[];
@@ -126,8 +121,8 @@ function createTool(input: {
 function createScheduler(
   options: {
     readonly agentTools?: ToolSchedulerOptions["agentTools"];
-    readonly policy?: PolicyPort;
     readonly permission?: PermissionPort;
+    readonly permissionState?: PermissionStateStore;
     readonly config?: ToolSchedulerOptions["config"];
     readonly now?: () => number;
   } = {},
@@ -146,11 +141,9 @@ function createScheduler(
       ({
         ask: (): Promise<"once"> => Promise.resolve("once"),
       } satisfies PermissionPort),
-    policy:
-      options.policy ??
-      createPolicy(
-        (): Promise<PolicyDecision> => Promise.resolve({ type: "allow" }),
-      ),
+    permissionState:
+      options.permissionState ??
+      createPermissionState({ bus, initialLevel: "full-access" }),
   });
 
   bus.subscribe(ToolSchedulerEvent.StatusChanged, (payload) => {
@@ -253,7 +246,7 @@ describe("ToolScheduler", () => {
     });
 
     expect(statuses).toEqual([
-      "checking_policy",
+      "checking_permission",
       "queued",
       "executing",
       "success",
@@ -317,13 +310,21 @@ describe("ToolScheduler", () => {
     });
   });
 
-  it("handles tool-not-found, policy deny, and permission rejection without executing", async () => {
+  it("handles tool-not-found, permission deny, and permission rejection without executing", async () => {
+    const denyBus = createBus();
+    const denyState = createPermissionState({
+      bus: denyBus,
+      initialLevel: "full-access",
+      initialMode: "plan",
+    });
+    const askRejectBus = createBus();
+    const askRejectState = createPermissionState({ bus: askRejectBus });
     const deny = createScheduler({
-      policy: createPolicy(() => Promise.resolve({ type: "deny" })),
+      permissionState: denyState,
     });
     const askReject = createScheduler({
       permission: { ask: () => Promise.resolve("reject") },
-      policy: createPolicy(() => Promise.resolve({ type: "ask" })),
+      permissionState: askRejectState,
     });
     const execute = vi.fn().mockResolvedValue({ output: "nope" });
     deny.scheduler.register(createTool({ execute, name: "bash" }));
@@ -350,7 +351,7 @@ describe("ToolScheduler", () => {
         toolName: "bash",
       }),
     ).resolves.toMatchObject({
-      error: { type: "PolicyDeniedError" },
+      error: { type: "PermissionDeniedError" },
       status: "rejected",
     });
     await expect(
@@ -368,7 +369,38 @@ describe("ToolScheduler", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("asks permission for untrusted MCP tools even when policy allows the category", async () => {
+  it("uses the permission manager state when no scheduler permissionState is provided", async () => {
+    const bus = createBus();
+    const permissionState = createPermissionState({
+      bus,
+      initialLevel: "full-access",
+    });
+    const permission = {
+      ask: vi.fn(() => Promise.resolve("reject" as const)),
+      state: permissionState,
+    } satisfies PermissionPort;
+    const scheduler = createToolScheduler({ bus, permission });
+    const execute = vi.fn().mockResolvedValue({ output: "written" });
+    scheduler.register(
+      createTool({ category: "write", execute, name: "edit" }),
+    );
+
+    await expect(
+      scheduler.execute({
+        callId: "write_full_access",
+        messageId: "message_1",
+        params: { file_path: "src/file.ts" },
+        sessionId: "session_1",
+        toolName: "edit",
+      }),
+    ).resolves.toMatchObject({
+      output: "written",
+      status: "success",
+    });
+    expect(permission.ask).not.toHaveBeenCalled();
+  });
+
+  it("asks permission for untrusted MCP tools even when evaluator allows the category", async () => {
     const permission = {
       ask: vi.fn(() => Promise.resolve("once" as const)),
     };
@@ -460,13 +492,14 @@ describe("ToolScheduler", () => {
     class RejectedError extends Error {}
 
     const execute = vi.fn().mockResolvedValue({ output: "nope" });
+    const bus = createBus();
     const { scheduler } = createScheduler({
+      permissionState: createPermissionState({ bus }),
       permission: {
         ask: () => {
           throw new RejectedError("rejected");
         },
       },
-      policy: createPolicy(() => Promise.resolve({ type: "ask" })),
     });
     scheduler.register(createTool({ execute, name: "edit" }));
 
@@ -836,30 +869,21 @@ describe("ToolScheduler", () => {
   it("preflights every batch call before starting tools and confirms asks serially", async () => {
     const executionOrder: string[] = [];
     const permissionOrder: string[] = [];
-    const policyChecks = new Set<string>();
+    const bus = createBus();
     const { scheduler } = createScheduler({
+      permissionState: createPermissionState({ bus }),
       permission: {
         ask: (input) => {
           permissionOrder.push(input.toolName);
           return Promise.resolve("once");
         },
       },
-      policy: {
-        check: (input) => {
-          policyChecks.add(input.toolName);
-          if (input.toolName === "edit" || input.toolName === "bash") {
-            return Promise.resolve({ type: "ask" });
-          }
-          return Promise.resolve({ type: "allow" });
-        },
-        getMode: () => "agent",
-      },
     });
     for (const toolName of ["read", "edit", "bash"]) {
       scheduler.register(
         createTool({
           execute: (_params, context) => {
-            expect(policyChecks).toEqual(new Set(["read", "edit", "bash"]));
+            expect(permissionOrder).toEqual(["edit", "bash"]);
             executionOrder.push(context.callId);
             return Promise.resolve({ output: context.callId });
           },
@@ -903,12 +927,13 @@ describe("ToolScheduler", () => {
     expect(executionOrder).toEqual(["read_1", "write_1", "danger_1"]);
   });
 
-  it("does not run batch policy or permission side effects for already cancelled calls", async () => {
-    const policyChecks: string[] = [];
+  it("does not run batch permission side effects for already cancelled calls", async () => {
     const permissionOrder: string[] = [];
     const preAborted = new AbortController();
     preAborted.abort();
+    const bus = createBus();
     const { scheduler } = createScheduler({
+      permissionState: createPermissionState({ bus }),
       permission: {
         ask: (input) => {
           permissionOrder.push(input.toolName);
@@ -917,16 +942,6 @@ describe("ToolScheduler", () => {
           }
           return Promise.resolve("once");
         },
-      },
-      policy: {
-        check: (input) => {
-          policyChecks.push(input.toolName);
-          if (input.toolName === "edit" || input.toolName === "bash") {
-            return Promise.resolve({ type: "ask" });
-          }
-          return Promise.resolve({ type: "allow" });
-        },
-        getMode: () => "agent",
       },
     });
     for (const toolName of ["read", "edit", "bash"]) {
@@ -965,7 +980,6 @@ describe("ToolScheduler", () => {
       { callId: "write_1", status: "success" },
       { callId: "danger_1", status: "cancelled" },
     ]);
-    expect(policyChecks).toEqual(["edit", "bash"]);
     expect(permissionOrder).toEqual(["edit"]);
   });
 
@@ -1314,18 +1328,15 @@ describe("ToolScheduler", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("honors request abort signals before policy and while queued", async () => {
+  it("honors request abort signals before permission evaluation and while queued", async () => {
     const blocker = deferred<ToolExecutionResult>();
-    const policyCheck = vi.fn().mockResolvedValue({ type: "allow" });
     const execute = vi.fn((_params, context: ToolExecutionContext) => {
       if (context.callId === "write_1") {
         return blocker.promise;
       }
       return Promise.resolve({ output: context.callId });
     });
-    const { scheduler } = createScheduler({
-      policy: createPolicy(policyCheck),
-    });
+    const { scheduler } = createScheduler();
     scheduler.register(createTool({ execute, name: "edit" }));
 
     const preAborted = new AbortController();
@@ -1343,7 +1354,7 @@ describe("ToolScheduler", () => {
       error: { type: "CancelledError" },
       status: "cancelled",
     });
-    expect(policyCheck).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
 
     const queuedAbort = new AbortController();
     const write1 = scheduler.execute({

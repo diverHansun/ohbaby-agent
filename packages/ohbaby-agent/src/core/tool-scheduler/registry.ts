@@ -1,6 +1,5 @@
 import {
   BUILTIN_TOOL_CATEGORIES,
-  MODE_ALLOWED_CATEGORIES,
   SUBAGENT_DISABLED_TOOLS,
 } from "./constants.js";
 import type {
@@ -77,10 +76,8 @@ export function createToolRegistry(): ToolRegistry {
     },
 
     getAvailableTools(input): ToolDefinition[] {
-      const allowed = new Set(MODE_ALLOWED_CATEGORIES[input.mode]);
       return Array.from(tools.values())
         .map(toDefinition)
-        .filter((tool) => allowed.has(tool.category))
         .filter((tool) => isEnabledByAgentConfig(tool.name, input.tools))
         .filter(
           (tool) =>

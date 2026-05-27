@@ -7,8 +7,13 @@ import {
   PermissionEvent,
   PermissionRejectedError,
   PermissionRejectedWithSuggestionError,
+  createPermissionState,
 } from "./index.js";
-import type { PermissionAskInput, PermissionInfo } from "./index.js";
+import type {
+  PermissionAskInput,
+  PermissionInfo,
+  PermissionRule,
+} from "./index.js";
 
 function baseAskInput(
   overrides: Partial<PermissionAskInput> = {},
@@ -57,7 +62,7 @@ describe("PermissionManager", () => {
         id: "permission_1",
         messageId: "message_1",
         name: "edit",
-        pattern: "tool:edit:src/components/**",
+        pattern: "edit(src/components/**)",
         sessionId: "session_1",
         type: "tool",
       }),
@@ -135,7 +140,7 @@ describe("PermissionManager", () => {
     expect(updated).toEqual([
       expect.objectContaining({
         name: "code-review",
-        pattern: "skill:code-review",
+        pattern: "skill(code-review)",
         title: "Skill requires confirmation: code-review",
         type: "skill",
       }),
@@ -168,23 +173,24 @@ describe("PermissionManager", () => {
     expect(updated).toEqual([
       expect.objectContaining({
         name: "docs",
-        pattern: "skill:docs",
+        pattern: "skill(docs)",
         title: "Skill requires confirmation: docs",
         type: "skill",
       }),
     ]);
   });
 
-  it("does not request auto-edit mode after always allowing a skill", async () => {
+  it("records always skill approvals as session rules without changing mode or level", async () => {
     const bus = createBus();
+    const state = createPermissionState({ bus });
     const permission = createPermissionManager({
       bus,
       generateId: () => "permission_skill",
+      state,
     });
-    const switchRequests: unknown[] = [];
-
-    bus.subscribe(PermissionEvent.AutoEditRequested, (event) => {
-      switchRequests.push(event);
+    const rules: unknown[] = [];
+    bus.subscribe(PermissionEvent.RuleAdded, (event) => {
+      rules.push(event);
     });
 
     const askPromise = permission.ask(
@@ -200,7 +206,27 @@ describe("PermissionManager", () => {
     permission.respond("session_1", "permission_skill", { type: "always" });
 
     await expect(askPromise).resolves.toBe("always");
-    expect(switchRequests).toEqual([]);
+    expect(state.getMode()).toBe("auto");
+    expect(state.getLevel()).toBe("default");
+    expect(state.getSessionRules("session_1")).toEqual([
+      {
+        decision: "allow",
+        pattern: "code-review",
+        scope: "session",
+        tool: "skill",
+      } satisfies PermissionRule,
+    ]);
+    expect(rules).toEqual([
+      {
+        rule: {
+          decision: "allow",
+          pattern: "code-review",
+          scope: "session",
+          tool: "skill",
+        },
+        sessionId: "session_1",
+      },
+    ]);
     await expect(
       permission.ask(
         baseAskInput({
@@ -277,21 +303,23 @@ describe("PermissionManager", () => {
     await expect(cancelled).resolves.toBe("cancel");
   });
 
-  it("records always approvals, auto-approves matching queued requests, and requests agent auto-edit", async () => {
+  it("records always session rules and drains matching queued requests", async () => {
     const bus = createBus();
+    const state = createPermissionState({ bus });
     let nextId = 1;
     const permission = createPermissionManager({
       bus,
       generateId: () => `permission_${String(nextId++)}`,
+      state,
     });
     const replied: unknown[] = [];
-    const switchRequests: unknown[] = [];
+    const rules: unknown[] = [];
 
     bus.subscribe(PermissionEvent.Replied, (event) => {
       replied.push(event);
     });
-    bus.subscribe(PermissionEvent.AutoEditRequested, (event) => {
-      switchRequests.push(event);
+    bus.subscribe(PermissionEvent.RuleAdded, (event) => {
+      rules.push(event);
     });
 
     const first = permission.ask(baseAskInput());
@@ -312,7 +340,7 @@ describe("PermissionManager", () => {
         callId: "call_1",
         permissionId: "permission_1",
         response: {
-          pattern: "tool:edit:src/components/**",
+          pattern: "edit(src/components/**)",
           type: "always",
         },
         sessionId: "session_1",
@@ -321,23 +349,21 @@ describe("PermissionManager", () => {
         callId: "call_2",
         permissionId: "permission_2",
         response: {
-          pattern: "tool:edit:src/components/**",
+          pattern: "edit(src/components/**)",
           type: "auto_approved",
         },
         sessionId: "session_1",
       },
     ]);
-    expect(switchRequests).toEqual([
+    expect(state.getSessionRules("session_1")).toEqual([
       {
-        sessionId: "session_1",
-        targetPermission: "edit-automatically",
-        trigger: {
-          callId: "call_1",
-          pattern: "tool:edit:src/components/**",
-          permissionId: "permission_1",
-        },
+        decision: "allow",
+        pattern: "src/components/**",
+        scope: "session",
+        tool: "edit",
       },
     ]);
+    expect(rules).toHaveLength(1);
 
     await expect(
       permission.ask(
@@ -350,12 +376,162 @@ describe("PermissionManager", () => {
     ).resolves.toBe("always");
   });
 
-  it("keeps approvals and cleanup scoped by session", async () => {
+  it("does not remember non-rememberable confirmations or drain matching queued requests", async () => {
     const bus = createBus();
+    const state = createPermissionState({ bus });
     let nextId = 1;
     const permission = createPermissionManager({
       bus,
       generateId: () => `permission_${String(nextId++)}`,
+      state,
+    });
+    const replied: unknown[] = [];
+    const updated: PermissionInfo[] = [];
+
+    bus.subscribe(PermissionEvent.Updated, (event) => {
+      updated.push(event.info);
+    });
+    bus.subscribe(PermissionEvent.Replied, (event) => {
+      replied.push(event);
+    });
+
+    const first = permission.ask(baseAskInput({ rememberable: false }));
+    const second = permission.ask(
+      baseAskInput({
+        callId: "call_2",
+        messageId: "message_2",
+        rememberable: false,
+      }),
+    );
+
+    permission.respond("session_1", "permission_1", { type: "always" });
+
+    await expect(first).resolves.toBe("once");
+    expect(state.getSessionRules("session_1")).toEqual([]);
+    expect(updated.map((info) => info.id)).toEqual([
+      "permission_1",
+      "permission_2",
+    ]);
+
+    permission.respond("session_1", "permission_2", { type: "once" });
+    await expect(second).resolves.toBe("once");
+    expect(replied).toEqual([
+      {
+        callId: "call_1",
+        permissionId: "permission_1",
+        response: { type: "once" },
+        sessionId: "session_1",
+      },
+      {
+        callId: "call_2",
+        permissionId: "permission_2",
+        response: { type: "once" },
+        sessionId: "session_1",
+      },
+    ]);
+  });
+
+  it("does not auto-approve queued requests marked as non-rememberable", async () => {
+    const bus = createBus();
+    const state = createPermissionState({ bus });
+    let nextId = 1;
+    const permission = createPermissionManager({
+      bus,
+      generateId: () => `permission_${String(nextId++)}`,
+      state,
+    });
+    const replied: unknown[] = [];
+    const updated: PermissionInfo[] = [];
+
+    bus.subscribe(PermissionEvent.Updated, (event) => {
+      updated.push(event.info);
+    });
+    bus.subscribe(PermissionEvent.Replied, (event) => {
+      replied.push(event);
+    });
+
+    const first = permission.ask(baseAskInput());
+    const second = permission.ask(
+      baseAskInput({
+        callId: "call_2",
+        messageId: "message_2",
+        rememberable: false,
+      }),
+    );
+
+    permission.respond("session_1", "permission_1", { type: "always" });
+
+    await expect(first).resolves.toBe("always");
+    expect(updated.map((info) => info.id)).toEqual([
+      "permission_1",
+      "permission_2",
+    ]);
+
+    permission.respond("session_1", "permission_2", { type: "once" });
+    await expect(second).resolves.toBe("once");
+    expect(replied).toEqual([
+      {
+        callId: "call_1",
+        permissionId: "permission_1",
+        response: {
+          pattern: "edit(src/components/**)",
+          type: "always",
+        },
+        sessionId: "session_1",
+      },
+      {
+        callId: "call_2",
+        permissionId: "permission_2",
+        response: { type: "once" },
+        sessionId: "session_1",
+      },
+    ]);
+  });
+
+  it("rechecks evaluator state before auto-approving queued matching requests", async () => {
+    const bus = createBus();
+    const state = createPermissionState({ bus });
+    let nextId = 1;
+    const permission = createPermissionManager({
+      bus,
+      generateId: () => `permission_${String(nextId++)}`,
+      state,
+    });
+    const updated: PermissionInfo[] = [];
+
+    bus.subscribe(PermissionEvent.Updated, (event) => {
+      updated.push(event.info);
+    });
+
+    const first = permission.ask(baseAskInput());
+    const second = permission.ask(
+      baseAskInput({
+        callId: "call_2",
+        messageId: "message_2",
+      }),
+    );
+    state.setMode("plan");
+
+    permission.respond("session_1", "permission_1", { type: "always" });
+
+    await expect(first).resolves.toBe("always");
+    expect(updated.map((info) => info.id)).toEqual([
+      "permission_1",
+      "permission_2",
+    ]);
+
+    permission.respond("session_1", "permission_2", { type: "once" });
+    await expect(second).resolves.toBe("once");
+  });
+
+  it("keeps approvals and cleanup scoped by session", async () => {
+    const bus = createBus();
+    const state = createPermissionState({ bus });
+    let nextId = 1;
+    const permission = createPermissionManager({
+      bus,
+      generateId: () => `permission_${String(nextId++)}`,
+      state,
     });
     const updated: PermissionInfo[] = [];
 
@@ -469,10 +645,12 @@ describe("PermissionManager", () => {
 
   it("can cancel only pending asks while preserving session approvals", async () => {
     const bus = createBus();
+    const state = createPermissionState({ bus });
     let nextId = 1;
     const permission = createPermissionManager({
       bus,
       generateId: () => `permission_${String(nextId++)}`,
+      state,
     });
 
     const approved = permission.ask(baseAskInput());
@@ -509,50 +687,50 @@ describe("permission patterns", () => {
         params: { file_path: "src/components/Button.tsx" },
         type: "tool",
       }),
-    ).toBe("tool:edit:src/components/**");
+    ).toBe("edit(src/components/**)");
     expect(
       generatePermissionPattern({
         name: "git",
         params: { command: "git push origin main" },
         type: "bash",
       }),
-    ).toBe("bash:git:Z2l0IHB1c2ggb3JpZ2luIG1haW4");
+    ).toBe("bash(git *)");
     expect(
       generatePermissionPattern({
         name: "code-review",
         params: {},
         type: "skill",
       }),
-    ).toBe("skill:code-review");
+    ).toBe("skill(code-review)");
     expect(
       generatePermissionPattern({
         name: "outside",
         params: {},
         type: "external_directory",
       }),
-    ).toBe("external_directory:outside");
+    ).toBe("external_directory(outside)");
   });
 
   it("matches exact, wildcard, and parent directory approval patterns", () => {
     expect(
       matchPermissionPattern(
-        "tool:edit:src/components/**",
-        new Set(["tool:edit:src/components/**"]),
+        "edit(src/components/**)",
+        new Set(["edit(src/components/**)"]),
       ),
     ).toBe(true);
     expect(
-      matchPermissionPattern("bash:git:push", new Set(["bash:git:*"])),
+      matchPermissionPattern("bash(git status)", new Set(["bash(git *)"])),
     ).toBe(true);
     expect(
       matchPermissionPattern(
-        "tool:edit:src/components/Button.tsx",
-        new Set(["tool:edit:src/**"]),
+        "edit(src/components/button.tsx)",
+        new Set(["edit(src/**)"]),
       ),
     ).toBe(true);
     expect(
       matchPermissionPattern(
-        "tool:edit:tests/Button.tsx",
-        new Set(["tool:edit:src/**"]),
+        "edit(tests/button.tsx)",
+        new Set(["edit(src/**)"]),
       ),
     ).toBe(false);
     expect(

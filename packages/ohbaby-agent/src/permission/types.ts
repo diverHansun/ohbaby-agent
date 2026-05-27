@@ -1,5 +1,30 @@
 export type PermissionType = "tool" | "bash" | "skill" | "external_directory";
 
+export type Mode = "plan" | "auto";
+
+export type Level = "default" | "full-access";
+
+export type PermissionDecision =
+  | { readonly type: "allow"; readonly reason?: string }
+  | {
+      readonly type: "ask";
+      readonly reason?: string;
+      readonly rememberable?: boolean;
+    }
+  | { readonly type: "deny"; readonly reason: string };
+
+export type PermissionRuleDecision = "allow" | "deny";
+
+export type PermissionRuleScope = "session";
+
+export interface PermissionRule {
+  readonly tool: string;
+  readonly pattern?: string;
+  readonly decision: PermissionRuleDecision;
+  readonly scope: PermissionRuleScope;
+  readonly reason?: string;
+}
+
 export type PermissionResponse =
   | { readonly type: "once" }
   | { readonly type: "always"; readonly pattern?: string }
@@ -31,6 +56,43 @@ export type PermissionToolCategory =
   | "skill"
   | "subagent";
 
+export interface PermissionState {
+  readonly mode: Mode;
+  readonly level: Level;
+  readonly sessionRules: Map<string, readonly PermissionRule[]>;
+}
+
+export interface UiPermissionState {
+  readonly mode: Mode;
+  readonly level: Level;
+  readonly sessionRules: readonly {
+    readonly sessionId: string;
+    readonly rules: readonly PermissionRule[];
+  }[];
+}
+
+export interface PermissionStateStore {
+  getState(): PermissionState;
+  getMode(): Mode;
+  setMode(mode: Mode): void;
+  toggleMode(): Mode;
+  getLevel(): Level;
+  setLevel(level: Level): void;
+  getSessionRules(sessionId: string): readonly PermissionRule[];
+  addSessionRule(sessionId: string, rule: PermissionRule): void;
+  clearSession(sessionId: string): void;
+  toSnapshot(): UiPermissionState;
+}
+
+export interface PermissionCall {
+  readonly sessionId: string;
+  readonly messageId: string;
+  readonly callId: string;
+  readonly toolName: string;
+  readonly category?: PermissionToolCategory;
+  readonly params: Record<string, unknown>;
+}
+
 export interface PermissionInfo {
   readonly id: string;
   readonly sessionId: string;
@@ -54,9 +116,11 @@ export interface PermissionAskInput {
   readonly category: PermissionToolCategory;
   readonly params: Record<string, unknown>;
   readonly reason?: string;
+  readonly rememberable?: boolean;
 }
 
 export interface PermissionManager {
+  readonly state: PermissionStateStore;
   ask(input: PermissionAskInput): Promise<SchedulerPermissionResponse>;
   respond(
     sessionId: string,

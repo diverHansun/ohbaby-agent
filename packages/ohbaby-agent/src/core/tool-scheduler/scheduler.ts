@@ -1,6 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createBus } from "../../bus/index.js";
+import {
+  createPermissionState,
+  evaluatePermission,
+} from "../../permission/index.js";
 import {
   DEFAULT_TOOL_SCHEDULER_CONFIG,
   SUBAGENT_DISABLED_TOOLS,
@@ -12,7 +15,7 @@ import type {
   AgentToolConfig,
   BatchToolCallRequest,
   FinalToolCallStatus,
-  PolicyDecision,
+  PermissionDecision,
   PermissionResponse,
   Tool,
   ToolCall,
@@ -41,10 +44,10 @@ interface PreparedCall extends ScheduledCall {
   readonly tool: Tool;
   readonly controller: AbortController;
   readonly cleanup: () => void;
-  readonly policyContext: ToolPolicyContext;
+  readonly permissionContext: ToolPermissionContext;
 }
 
-interface ToolPolicyContext {
+interface ToolPermissionContext {
   readonly externalWrite: boolean;
   readonly untrustedMcp: boolean;
   readonly params: Record<string, unknown>;
@@ -354,9 +357,13 @@ function isEnabledByAgentConfig(
 }
 
 export function createToolScheduler(
-  options: Partial<ToolSchedulerOptions> & Pick<ToolSchedulerOptions, "policy">,
+  options: ToolSchedulerOptions,
 ): ToolScheduler {
-  const bus = options.bus ?? createBus();
+  const bus = options.bus;
+  const permissionState =
+    options.permissionState ??
+    options.permission?.state ??
+    createPermissionState({ bus });
   const config = mergeConfig(options.config);
   const concurrency = new ConcurrencyController(config.concurrency);
   const registry: ToolRegistry = createToolRegistry();
@@ -548,6 +555,7 @@ export function createToolScheduler(
     call: ToolCall,
     reason: string | undefined,
     params: Record<string, unknown>,
+    rememberable: boolean | undefined,
   ): Promise<PermissionResponse> {
     if (!options.permission) {
       return "reject";
@@ -560,14 +568,15 @@ export function createToolScheduler(
       category: call.category,
       params,
       reason,
+      rememberable,
     });
   }
 
-  async function checkPolicyOnly(
+  async function evaluatePermissionOnly(
     call: ToolCall,
-    context: ToolPolicyContext,
-  ): Promise<PolicyDecision | ToolCallResult> {
-    transition(call, "checking_policy");
+    context: ToolPermissionContext,
+  ): Promise<PermissionDecision | ToolCallResult> {
+    transition(call, "checking_permission");
     const controller = controllers.get(call.callId);
     if (!controller) {
       return makeCancelledResult(call);
@@ -575,18 +584,21 @@ export function createToolScheduler(
     if (isCancelled(call) || controller.signal.aborted) {
       return makeCancelledResult(call);
     }
-    let decision: PolicyDecision;
+    let decision: PermissionDecision;
     try {
       decision = await waitForAbortable(
         () =>
-          options.policy.check({
-            callId: call.callId,
-            toolName: call.toolName,
-            category: call.category,
-            params: context.params,
-            sessionId: call.sessionId,
-            messageId: call.messageId,
-          }),
+          evaluatePermission(
+            {
+              callId: call.callId,
+              toolName: call.toolName,
+              category: call.category,
+              params: context.params,
+              sessionId: call.sessionId,
+              messageId: call.messageId,
+            },
+            permissionState.getState(),
+          ),
         controller.signal,
       );
     } catch (error) {
@@ -604,21 +616,20 @@ export function createToolScheduler(
     if (decision.type === "deny") {
       transition(call, "rejected");
       return makeResult(call, "rejected", {
-        error: createError(
-          "PolicyDeniedError",
-          decision.reason ?? `Tool denied by policy: ${call.toolName}`,
-        ),
+        error: createError("PermissionDeniedError", decision.reason),
       });
     }
     if (decision.type === "allow" && context.externalWrite) {
       return {
         reason: `External path write requires confirmation: ${call.toolName}`,
+        rememberable: false,
         type: "ask",
       };
     }
     if (decision.type === "allow" && context.untrustedMcp) {
       return {
         reason: "untrusted-mcp-tool",
+        rememberable: false,
         type: "ask",
       };
     }
@@ -628,7 +639,7 @@ export function createToolScheduler(
 
   async function confirmPermission(
     call: ToolCall,
-    decision: Extract<PolicyDecision, { readonly type: "ask" }>,
+    decision: Extract<PermissionDecision, { readonly type: "ask" }>,
     params: Record<string, unknown>,
   ): Promise<ToolCallResult | null> {
     const controller = controllers.get(call.callId);
@@ -642,7 +653,8 @@ export function createToolScheduler(
     let response: PermissionResponse;
     try {
       response = await waitForAbortable(
-        () => askPermission(call, decision.reason, params),
+        () =>
+          askPermission(call, decision.reason, params, decision.rememberable),
         controller.signal,
       );
     } catch (error) {
@@ -812,11 +824,11 @@ export function createToolScheduler(
     );
   }
 
-  async function createPolicyContext(
+  async function createPermissionContext(
     request: ToolCallRequest,
     category: ToolCategory,
     tool: Tool,
-  ): Promise<ToolPolicyContext> {
+  ): Promise<ToolPermissionContext> {
     if (category !== "write" || !request.environment) {
       return {
         externalWrite: false,
@@ -885,7 +897,7 @@ export function createToolScheduler(
       return {
         result: makeResult(call, "rejected", {
           error: createError(
-            "PolicyDeniedError",
+            "PermissionDeniedError",
             `Tool not available for agent: ${request.toolName}`,
           ),
         }),
@@ -908,7 +920,11 @@ export function createToolScheduler(
     const controller = new AbortController();
     controllers.set(call.callId, controller);
     const unbindRequestSignal = bindRequestSignal(call, request.signal);
-    const policyContext = await createPolicyContext(request, category, tool);
+    const permissionContext = await createPermissionContext(
+      request,
+      category,
+      tool,
+    );
     return {
       prepared: {
         call,
@@ -919,7 +935,7 @@ export function createToolScheduler(
         },
         controller,
         index,
-        policyContext,
+        permissionContext,
         request,
         tool,
       },
@@ -932,18 +948,18 @@ export function createToolScheduler(
     if (isCancelled(prepared.call)) {
       return makeCancelledResult(prepared.call);
     }
-    const policyDecision = await checkPolicyOnly(
+    const permissionDecision = await evaluatePermissionOnly(
       prepared.call,
-      prepared.policyContext,
+      prepared.permissionContext,
     );
-    if ("status" in policyDecision) {
-      return policyDecision;
+    if ("status" in permissionDecision) {
+      return permissionDecision;
     }
-    if (policyDecision.type === "ask") {
+    if (permissionDecision.type === "ask") {
       return confirmPermission(
         prepared.call,
-        policyDecision,
-        prepared.policyContext.params,
+        permissionDecision,
+        prepared.permissionContext.params,
       );
     }
 
@@ -988,19 +1004,25 @@ export function createToolScheduler(
     }
 
     try {
-      const policyResults = await Promise.all(
+      const permissionResults = await Promise.all(
         prepared.map(async (item) => ({
           item,
-          result: await checkPolicyOnly(item.call, item.policyContext),
+          result: await evaluatePermissionOnly(
+            item.call,
+            item.permissionContext,
+          ),
         })),
       );
       const runnable: PreparedCall[] = [];
       const asks: {
         readonly item: PreparedCall;
-        readonly decision: Extract<PolicyDecision, { readonly type: "ask" }>;
+        readonly decision: Extract<
+          PermissionDecision,
+          { readonly type: "ask" }
+        >;
       }[] = [];
 
-      for (const { item, result } of policyResults) {
+      for (const { item, result } of permissionResults) {
         if ("status" in result) {
           results[item.index] = result;
         } else if (result.type === "ask") {
@@ -1014,7 +1036,7 @@ export function createToolScheduler(
         const result = await confirmPermission(
           ask.item.call,
           ask.decision,
-          ask.item.policyContext.params,
+          ask.item.permissionContext.params,
         );
         if (result) {
           results[ask.item.index] = result;
@@ -1105,12 +1127,10 @@ export function createToolScheduler(
     },
 
     async getAvailableTools(input = {}): Promise<ToolDefinition[]> {
-      const mode = await options.policy.getMode();
       const agentConfig = await options.agentTools?.getAgentConfig(
         input.agentName,
       );
       return registry.getAvailableTools({
-        mode,
         tools: normalizeAgentToolsConfig(agentConfig?.tools),
         isSubagent: input.isSubagent,
       });
