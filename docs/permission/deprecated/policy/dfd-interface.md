@@ -1,5 +1,9 @@
 # policy 模块 dfd-interface.md
 
+> Deprecated: 本文档描述的是已移除的 `policy` 模块，仅作为历史参考保留。
+> 当前实现与后续设计请以 [docs/permission](../../) 与
+> [docs/permission/refactor](../../refactor/) 为准。
+
 本文档描述 `policy` 模块的数据流与对外接口。
 
 ---

@@ -1,5 +1,9 @@
 # policy 模块 test.md
 
+> Deprecated: 本文档描述的是已移除的 `policy` 模块，仅作为历史参考保留。
+> 当前实现与后续设计请以 [docs/permission](../../) 与
+> [docs/permission/refactor](../../refactor/) 为准。
+
 本文档说明如何验证 `policy` 模块在真实协作环境中的可信性。测试围绕模块职责和交互边界展开，而非内部实现细节。
 
 ---

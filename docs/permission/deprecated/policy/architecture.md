@@ -1,5 +1,9 @@
 # policy 模块 architecture.md
 
+> Deprecated: 本文档描述的是已移除的 `policy` 模块，仅作为历史参考保留。
+> 当前实现与后续设计请以 [docs/permission](../../) 与
+> [docs/permission/refactor](../../refactor/) 为准。
+
 本文档描述 `policy` 模块的内部架构与设计模式。所有设计基于 `goals-duty.md` 中定义的职责。
 
 ---
