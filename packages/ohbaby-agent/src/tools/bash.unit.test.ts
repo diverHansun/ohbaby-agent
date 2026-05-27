@@ -18,6 +18,7 @@ import { createBuiltinTools } from "./index.js";
 
 class FakeChildProcess extends EventEmitter {
   readonly pid = 123;
+  readonly stdin = { end: vi.fn() };
   readonly stdout = new EventEmitter();
   readonly stderr = new EventEmitter();
 }
@@ -178,14 +179,9 @@ describe("bash builtin tool", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it("rejects command prefixes until the bridge defines their execution contract", async () => {
+  it("executes command prefixes as wrappers around the resolved shell", async () => {
     const child = new FakeChildProcess();
-    const spawn = vi.fn<SpawnCommand>(() => {
-      queueMicrotask(() => {
-        child.emit("exit", 0, null);
-      });
-      return child as unknown as ChildProcess;
-    });
+    const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
     const bash = getBashTool({
       shell: {
         acceptable: () => "/bin/bash",
@@ -194,20 +190,30 @@ describe("bash builtin tool", () => {
       spawn,
     });
 
-    await expect(
-      bash.execute(
-        { command: "echo hello" },
-        createContext(
-          {},
-          {
-            commandPrefix: ["docker", "exec", "container"],
-            cwd: "/workspace",
-            kind: "container",
-          },
-        ),
+    const resultPromise = bash.execute(
+      { command: "echo hello" },
+      createContext(
+        {},
+        {
+          commandPrefix: ["sandbox-exec", "-p", "policy", "--"],
+          cwd: "/workspace",
+          kind: "seatbelt-host",
+        },
       ),
-    ).rejects.toThrow("commandPrefix");
-    expect(spawn).not.toHaveBeenCalled();
+    );
+    await waitForSpawn(spawn);
+    child.emit("exit", 0, null);
+    await resultPromise;
+
+    expect(spawn.mock.calls[0]?.[0]).toBe("sandbox-exec");
+    expect(spawn.mock.calls[0]?.[1]).toEqual([
+      "-p",
+      "policy",
+      "--",
+      "/bin/bash",
+      "-lc",
+      "echo hello",
+    ]);
   });
 
   it("uses cmd arguments for Windows command shells", async () => {
@@ -284,11 +290,68 @@ describe("bash builtin tool", () => {
     await resultPromise;
 
     expect(spawn.mock.calls[0]?.[2].env).toMatchObject({
+      GIT_TERMINAL_PROMPT: process.env.GIT_TERMINAL_PROMPT ?? "0",
+      NO_COLOR: "1",
       OHBABY_CALL_ID: "call_1",
       OHBABY_MESSAGE_ID: "message_1",
       OHBABY_SESSION_ID: "session_1",
       OHBABY_WORKDIR: "D:/workspace",
+      SHELL: "/bin/bash",
+      TERM: "dumb",
     });
+  });
+
+  it("lets command context env override non-interactive defaults", async () => {
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
+    const bash = getBashTool({
+      shell: {
+        acceptable: () => "/bin/bash",
+        killTree: vi.fn(),
+      },
+      spawn,
+    });
+
+    const resultPromise = bash.execute(
+      { command: "echo state" },
+      createContext(
+        {},
+        {
+          cwd: "D:/workspace",
+          env: { GIT_TERMINAL_PROMPT: "1", TERM: "xterm-256color" },
+          kind: "host-local",
+        },
+      ),
+    );
+    await waitForSpawn(spawn);
+    child.emit("exit", 0, null);
+    await resultPromise;
+
+    expect(spawn.mock.calls[0]?.[2].env).toMatchObject({
+      GIT_TERMINAL_PROMPT: "1",
+      TERM: "xterm-256color",
+    });
+  });
+
+  it("closes stdin immediately after spawning", async () => {
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
+    const bash = getBashTool({
+      shell: {
+        acceptable: () => "/bin/bash",
+        killTree: vi.fn(),
+      },
+      spawn,
+    });
+
+    const resultPromise = bash.execute(
+      { command: "echo state" },
+      createContext(),
+    );
+    await waitForSpawn(spawn);
+    expect(child.stdin.end).toHaveBeenCalledTimes(1);
+    child.emit("exit", 0, null);
+    await resultPromise;
   });
 
   it("rejects cd targets that escape the execution workspace", async () => {

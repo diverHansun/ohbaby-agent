@@ -94,9 +94,14 @@ function stateEnvironment(input: {
   readonly env?: Record<string, string>;
   readonly messageId: string;
   readonly sessionId: string;
+  readonly shellPath: string;
 }): NodeJS.ProcessEnv {
   return {
     ...process.env,
+    GIT_TERMINAL_PROMPT: process.env.GIT_TERMINAL_PROMPT ?? "0",
+    NO_COLOR: "1",
+    SHELL: input.shellPath,
+    TERM: "dumb",
     ...input.env,
     OHBABY_CALL_ID: input.callId,
     OHBABY_MESSAGE_ID: input.messageId,
@@ -150,11 +155,6 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
       }
 
       const commandContext = resolveCommandContext(context);
-      if ((commandContext.commandPrefix?.length ?? 0) > 0) {
-        throw new Error(
-          "ToolExecutionContext commandPrefix is not supported by builtin bash yet; wire a command context bridge with final cwd/env before running bash.",
-        );
-      }
       const shellPath = shell.acceptable();
       const shellKind = detectShellKind(shellPath);
       const preflight = await preflightShellCommand({
@@ -165,7 +165,13 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
         shellKind,
       });
       const args = shellArgs(shellPath, command);
-      const child = spawn(shellPath, args, {
+      const commandPrefix = commandContext.commandPrefix ?? [];
+      const spawnFile = commandPrefix[0] ?? shellPath;
+      const spawnArgs =
+        commandPrefix.length > 0
+          ? [...commandPrefix.slice(1), shellPath, ...args]
+          : args;
+      const child = spawn(spawnFile, spawnArgs, {
         cwd: commandContext.cwd,
         detached: shouldDetach(shellKind),
         env: stateEnvironment({
@@ -174,9 +180,11 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
           env: commandContext.env,
           messageId: context.messageId,
           sessionId: context.sessionId,
+          shellPath,
         }),
         windowsHide: true,
       });
+      child.stdin?.end();
 
       return await new Promise<ToolExecutionResult>((resolve, reject) => {
         let stdout = "";
