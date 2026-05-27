@@ -115,6 +115,7 @@ export interface PermissionAskInput {
   readonly toolName: string;
   readonly category: PermissionToolCategory;
   readonly params: Record<string, unknown>;
+  readonly metadata?: Record<string, unknown>;
   readonly reason?: string;
   readonly rememberable?: boolean;
 }

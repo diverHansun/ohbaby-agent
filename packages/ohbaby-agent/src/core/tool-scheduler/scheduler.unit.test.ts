@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createBus, type BusInstance } from "../../bus/index.js";
 import type { SpawnCommand } from "../../tools/bash.js";
 import { createBuiltinTools } from "../../tools/index.js";
+import type { PreflightResult } from "../../sandbox/index.js";
 import {
   createPermissionState,
   type PermissionStateStore,
@@ -85,6 +86,30 @@ function createFakeEnvironment(root: string): ToolExecutionEnvironment {
         kind: "host-local",
       };
     },
+  };
+}
+
+function createFakeEnvironmentWithPreflight(
+  root: string,
+  preflight: PreflightResult,
+): ToolExecutionEnvironment {
+  return {
+    ...createFakeEnvironment(root),
+    preflight: () => Promise.resolve(preflight),
+  };
+}
+
+function createPreflight(
+  input: Partial<PreflightResult> = {},
+): PreflightResult {
+  return {
+    commands: [],
+    denylistHits: [],
+    externalPaths: [],
+    internalPaths: [],
+    overallDanger: "readonly",
+    shellKind: "bash",
+    ...input,
   };
 }
 
@@ -432,6 +457,97 @@ describe("ToolScheduler", () => {
       }),
     );
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks external directory permissions before bash permissions", async () => {
+    const permissionOrder: string[] = [];
+    const permission = {
+      ask: vi.fn((input: Parameters<PermissionPort["ask"]>[0]) => {
+        permissionOrder.push(input.toolName);
+        return Promise.resolve("once" as const);
+      }),
+    } satisfies PermissionPort;
+    const bus = createBus();
+    const execute = vi.fn(() => ({ output: "pushed" }));
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState({ bus }),
+    });
+    scheduler.register(createTool({ execute, name: "bash" }));
+
+    await expect(
+      scheduler.execute({
+        callId: "external_then_bash",
+        environment: createFakeEnvironmentWithPreflight(
+          "D:/workspace",
+          createPreflight({
+            externalPaths: [
+              {
+                absolutePath: "D:/outside/repo",
+                askPattern: "D:/outside/**",
+                original: "D:/outside/repo",
+              },
+            ],
+            overallDanger: "mutating",
+          }),
+        ),
+        messageId: "message_1",
+        params: { command: "git push D:/outside/repo main" },
+        sessionId: "session_1",
+        toolName: "bash",
+      }),
+    ).resolves.toMatchObject({
+      output: "pushed",
+      status: "success",
+    });
+
+    expect(permissionOrder).toEqual(["external_directory", "bash"]);
+    const firstAsk = permission.ask.mock.calls[0][0];
+    const preflight = firstAsk.metadata?.preflight;
+    const externalPaths = (preflight as { externalPaths?: unknown })
+      .externalPaths;
+    expect(firstAsk.toolName).toBe("external_directory");
+    expect(firstAsk.params).toMatchObject({ path: "D:/outside/repo" });
+    expect(Array.isArray(externalPaths)).toBe(true);
+    expect(externalPaths).toHaveLength(1);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects denylist hits before permission asks even in full access", async () => {
+    const permission = {
+      ask: vi.fn(() => Promise.resolve("once" as const)),
+    } satisfies PermissionPort;
+    const execute = vi.fn(() => ({ output: "nope" }));
+    const { scheduler } = createScheduler({ permission });
+    scheduler.register(createTool({ execute, name: "bash" }));
+
+    await expect(
+      scheduler.execute({
+        callId: "denylisted",
+        environment: createFakeEnvironmentWithPreflight(
+          "D:/workspace",
+          createPreflight({
+            denylistHits: [
+              {
+                absolutePath: "D:/workspace/.env",
+                original: ".env",
+                reason: "env-file",
+              },
+            ],
+          }),
+        ),
+        messageId: "message_1",
+        params: { command: "cat .env" },
+        sessionId: "session_1",
+        toolName: "bash",
+      }),
+    ).resolves.toMatchObject({
+      error: { type: "PermissionDeniedError" },
+      status: "rejected",
+    });
+
+    expect(permission.ask).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("validates request identity and tool parameters before execution", async () => {

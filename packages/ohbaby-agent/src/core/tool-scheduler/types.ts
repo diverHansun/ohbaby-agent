@@ -3,6 +3,7 @@ import type {
   PermissionDecision,
   PermissionStateStore,
 } from "../../permission/index.js";
+import type { PreflightResult } from "../../sandbox/index.js";
 
 export type ToolCategory =
   | "readonly"
@@ -66,6 +67,10 @@ export interface ToolExecutionEnvironment {
   resolveCommandContext(
     options?: ToolCommandContextOptions,
   ): ToolCommandContext;
+  preflight?(
+    command: string,
+    shellKind: PreflightResult["shellKind"],
+  ): Promise<PreflightResult>;
 }
 
 export interface ToolExecutionContext {
@@ -159,6 +164,7 @@ export interface PermissionPort {
     readonly toolName: string;
     readonly category: ToolCategory;
     readonly params: Record<string, unknown>;
+    readonly metadata?: Record<string, unknown>;
     readonly reason?: string;
     readonly rememberable?: boolean;
   }): PermissionResponse | Promise<PermissionResponse>;

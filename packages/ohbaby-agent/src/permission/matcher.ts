@@ -96,6 +96,9 @@ function canonicalToolName(toolName: string): string {
 
 function effectiveToolName(call: PermissionCall): string {
   const toolName = canonicalToolName(call.toolName);
+  if (toolName === "external_directory") {
+    return "external_directory";
+  }
   if (toolName === "bash" || "command" in call.params) {
     return "bash";
   }
@@ -155,7 +158,16 @@ export function generatePermissionPattern(
     return `skill(${canonicalToolName(input.name)})`;
   }
 
-  return `${input.type}(${canonicalToolName(input.name)})`;
+  const explicitPattern = getStringParam(input.params, ["pattern"]);
+  if (explicitPattern) {
+    return `external_directory(${canonicalPath(explicitPattern)})`;
+  }
+  const externalPath = pathParam(input.params);
+  if (externalPath) {
+    const dir = directoryOf(externalPath) ?? externalPath;
+    return `external_directory(${canonicalPath(dir)}/**)`;
+  }
+  return `external_directory(${canonicalToolName(input.name)})`;
 }
 
 export function isRememberablePermissionPattern(pattern: string): boolean {
@@ -176,6 +188,9 @@ export function inferPermissionType(
 ): PermissionPatternInput["type"] {
   if (toolName === "bash" || (isRecord(params) && "command" in params)) {
     return "bash";
+  }
+  if (toolName === "external_directory") {
+    return "external_directory";
   }
   if (toolName === "skill") {
     return "skill";

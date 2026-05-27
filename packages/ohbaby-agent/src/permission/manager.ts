@@ -85,6 +85,7 @@ function createInfo(
     title: titleFor(input),
     metadata: {
       category: input.category,
+      ...(input.metadata ?? {}),
       params: input.params,
       reason: input.reason,
       rememberable: input.rememberable,

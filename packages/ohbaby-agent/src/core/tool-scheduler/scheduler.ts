@@ -4,6 +4,8 @@ import {
   createPermissionState,
   evaluatePermission,
 } from "../../permission/index.js";
+import type { PreflightExternalPath, PreflightResult } from "../../sandbox/index.js";
+import { detectShellKind, Shell } from "../../shell/index.js";
 import {
   DEFAULT_TOOL_SCHEDULER_CONFIG,
   SUBAGENT_DISABLED_TOOLS,
@@ -49,6 +51,7 @@ interface PreparedCall extends ScheduledCall {
 
 interface ToolPermissionContext {
   readonly externalWrite: boolean;
+  readonly preflight?: PreflightResult;
   readonly untrustedMcp: boolean;
   readonly params: Record<string, unknown>;
 }
@@ -553,9 +556,14 @@ export function createToolScheduler(
 
   async function askPermission(
     call: ToolCall,
-    reason: string | undefined,
-    params: Record<string, unknown>,
-    rememberable: boolean | undefined,
+    input: {
+      readonly category?: ToolCategory;
+      readonly metadata?: Record<string, unknown>;
+      readonly params: Record<string, unknown>;
+      readonly reason?: string;
+      readonly rememberable?: boolean;
+      readonly toolName?: string;
+    },
   ): Promise<PermissionResponse> {
     if (!options.permission) {
       return "reject";
@@ -564,11 +572,12 @@ export function createToolScheduler(
       sessionId: call.sessionId,
       messageId: call.messageId,
       callId: call.callId,
-      toolName: call.toolName,
-      category: call.category,
-      params,
-      reason,
-      rememberable,
+      toolName: input.toolName ?? call.toolName,
+      category: input.category ?? call.category,
+      params: input.params,
+      metadata: input.metadata,
+      reason: input.reason,
+      rememberable: input.rememberable,
     });
   }
 
@@ -641,6 +650,12 @@ export function createToolScheduler(
     call: ToolCall,
     decision: Extract<PermissionDecision, { readonly type: "ask" }>,
     params: Record<string, unknown>,
+    input: {
+      readonly category?: ToolCategory;
+      readonly metadata?: Record<string, unknown>;
+      readonly reason?: string;
+      readonly toolName?: string;
+    } = {},
   ): Promise<ToolCallResult | null> {
     const controller = controllers.get(call.callId);
     if (!controller) {
@@ -654,7 +669,14 @@ export function createToolScheduler(
     try {
       response = await waitForAbortable(
         () =>
-          askPermission(call, decision.reason, params, decision.rememberable),
+          askPermission(call, {
+            category: input.category,
+            metadata: input.metadata,
+            params,
+            reason: input.reason ?? decision.reason,
+            rememberable: decision.rememberable,
+            toolName: input.toolName,
+          }),
         controller.signal,
       );
     } catch (error) {
@@ -693,6 +715,115 @@ export function createToolScheduler(
           `Tool rejected by user: ${call.toolName}`,
         ),
       });
+    }
+
+    return null;
+  }
+
+  function denylistRejection(
+    call: ToolCall,
+    preflight: PreflightResult,
+  ): ToolCallResult | null {
+    if (preflight.denylistHits.length === 0) {
+      return null;
+    }
+    const hit = preflight.denylistHits[0];
+    transition(call, "rejected");
+    return makeResult(call, "rejected", {
+      error: createError(
+        "PermissionDeniedError",
+        `Denied: ${hit.absolutePath} (${hit.reason})`,
+        hit,
+      ),
+    });
+  }
+
+  function uniqueExternalPaths(
+    paths: readonly PreflightExternalPath[],
+  ): readonly PreflightExternalPath[] {
+    const seen = new Set<string>();
+    const unique: PreflightExternalPath[] = [];
+    for (const item of paths) {
+      if (seen.has(item.askPattern)) {
+        continue;
+      }
+      seen.add(item.askPattern);
+      unique.push(item);
+    }
+    return unique;
+  }
+
+  async function confirmExternalPreflightPermissions(
+    call: ToolCall,
+    context: ToolPermissionContext,
+  ): Promise<ToolCallResult | null> {
+    const preflight = context.preflight;
+    if (!preflight) {
+      return null;
+    }
+    const denied = denylistRejection(call, preflight);
+    if (denied) {
+      return denied;
+    }
+
+    const controller = controllers.get(call.callId);
+    if (!controller) {
+      return makeCancelledResult(call);
+    }
+    for (const externalPath of uniqueExternalPaths(preflight.externalPaths)) {
+      if (isCancelled(call) || controller.signal.aborted) {
+        return makeCancelledResult(call);
+      }
+      const params = {
+        path: externalPath.absolutePath,
+        pattern: externalPath.askPattern,
+      };
+      let decision: PermissionDecision;
+      try {
+        decision = await waitForAbortable(
+          () =>
+            evaluatePermission(
+              {
+                callId: call.callId,
+                category: "dangerous",
+                messageId: call.messageId,
+                params,
+                sessionId: call.sessionId,
+                toolName: "external_directory",
+              },
+              permissionState.getState(),
+            ),
+          controller.signal,
+        );
+      } catch (error) {
+        if (isSchedulerAbortError(error)) {
+          return makeCancelledResult(call);
+        }
+        transition(call, "error");
+        return makeResult(call, "error", {
+          error: createError("ExecutionError", errorMessage(error), error),
+        });
+      }
+
+      if (decision.type === "deny") {
+        transition(call, "rejected");
+        return makeResult(call, "rejected", {
+          error: createError("PermissionDeniedError", decision.reason),
+        });
+      }
+      if (decision.type === "allow") {
+        continue;
+      }
+
+      const result = await confirmPermission(call, decision, params, {
+        category: "dangerous",
+        metadata: { preflight },
+        reason: `External path access requires confirmation: ${externalPath.absolutePath}`,
+        toolName: "external_directory",
+      });
+      if (result) {
+        return result;
+      }
     }
 
     return null;
@@ -829,6 +960,27 @@ export function createToolScheduler(
     category: ToolCategory,
     tool: Tool,
   ): Promise<ToolPermissionContext> {
+    if (tool.name === "bash" && request.environment?.preflight) {
+      const command =
+        typeof request.params.command === "string" ? request.params.command : "";
+      try {
+        const shellKind = detectShellKind(Shell.acceptable());
+        const preflight = await request.environment.preflight(command, shellKind);
+        return {
+          externalWrite: false,
+          preflight,
+          untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
+          params: request.params,
+        };
+      } catch {
+        return {
+          externalWrite: false,
+          untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
+          params: request.params,
+        };
+      }
+    }
+
     if (category !== "write" || !request.environment) {
       return {
         externalWrite: false,
@@ -948,6 +1100,13 @@ export function createToolScheduler(
     if (isCancelled(prepared.call)) {
       return makeCancelledResult(prepared.call);
     }
+    const externalPermissionResult = await confirmExternalPreflightPermissions(
+      prepared.call,
+      prepared.permissionContext,
+    );
+    if (externalPermissionResult) {
+      return externalPermissionResult;
+    }
     const permissionDecision = await evaluatePermissionOnly(
       prepared.call,
       prepared.permissionContext,
@@ -1004,44 +1163,13 @@ export function createToolScheduler(
     }
 
     try {
-      const permissionResults = await Promise.all(
-        prepared.map(async (item) => ({
-          item,
-          result: await evaluatePermissionOnly(
-            item.call,
-            item.permissionContext,
-          ),
-        })),
-      );
       const runnable: PreparedCall[] = [];
-      const asks: {
-        readonly item: PreparedCall;
-        readonly decision: Extract<
-          PermissionDecision,
-          { readonly type: "ask" }
-        >;
-      }[] = [];
-
-      for (const { item, result } of permissionResults) {
-        if ("status" in result) {
+      for (const item of prepared) {
+        const result = await preflightCall(item);
+        if (result) {
           results[item.index] = result;
-        } else if (result.type === "ask") {
-          asks.push({ decision: result, item });
         } else {
           runnable.push(item);
-        }
-      }
-
-      for (const ask of asks) {
-        const result = await confirmPermission(
-          ask.item.call,
-          ask.decision,
-          ask.item.permissionContext.params,
-        );
-        if (result) {
-          results[ask.item.index] = result;
-        } else {
-          runnable.push(ask.item);
         }
       }
 
