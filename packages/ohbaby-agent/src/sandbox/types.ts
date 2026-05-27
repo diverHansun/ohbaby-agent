@@ -1,6 +1,61 @@
+import type {
+  ShellAnalysisResult,
+  ShellCommandAnalysis,
+  ShellKind,
+} from "../shell/index.js";
+
 export type SandboxIsolation = "none" | "worktree" | "container" | "remote";
 export type SandboxContextStatus = "active" | "destroying" | "destroyed";
 export type SandboxAdapterId = string;
+export type SandboxPathBoundary = "inside" | "outside";
+
+export type DenylistReason =
+  | "ssh-key-dir"
+  | "aws-credentials"
+  | "gnupg-dir"
+  | "env-file"
+  | "private-key"
+  | "shell-rc";
+
+export type PreflightCommand = ShellCommandAnalysis;
+
+export interface PreflightInternalPath {
+  readonly original: string;
+  readonly absolutePath: string;
+}
+
+export interface PreflightExternalPath {
+  readonly original: string;
+  readonly absolutePath: string;
+  readonly askPattern: string;
+}
+
+export interface PreflightDenylistHit {
+  readonly original: string;
+  readonly absolutePath: string;
+  readonly reason: DenylistReason;
+}
+
+export interface PreflightResult {
+  readonly shellKind: ShellKind;
+  readonly commands: readonly PreflightCommand[];
+  readonly internalPaths: readonly PreflightInternalPath[];
+  readonly externalPaths: readonly PreflightExternalPath[];
+  readonly denylistHits: readonly PreflightDenylistHit[];
+  readonly overallDanger: PreflightCommand["danger"];
+  readonly parseError?: string;
+}
+
+export interface SandboxPreflightInput {
+  readonly command: string;
+  readonly shellKind: ShellKind;
+  readonly workdir: string;
+}
+
+export interface SandboxShellAnalysisPreflightInput {
+  readonly shell: ShellAnalysisResult;
+  readonly workdir: string;
+}
 
 export interface SandboxCapabilities {
   readonly isolation: SandboxIsolation;
@@ -63,6 +118,7 @@ export interface SandboxLease {
   resolvePathForExisting(inputPath: string): Promise<string>;
   resolvePathForWrite(inputPath: string): Promise<string>;
   resolveCommandContext(options?: CommandContextOptions): CommandContext;
+  preflight(command: string, shellKind: ShellKind): Promise<PreflightResult>;
   release(): Promise<void>;
 }
 

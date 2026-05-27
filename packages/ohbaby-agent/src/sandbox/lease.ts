@@ -3,9 +3,11 @@ import path from "node:path";
 import { containsOrEqual } from "../utils/index.js";
 import { SandboxBoundaryError } from "./errors.js";
 import type { InternalSandboxContext } from "./context.js";
+import { preflightSandboxCommand } from "./preflight.js";
 import type {
   CommandContext,
   CommandContextOptions,
+  PreflightResult,
   SandboxLease,
 } from "./types.js";
 
@@ -105,6 +107,14 @@ export function createSandboxLease(input: {
           kind: context.adapterId,
         }
       );
+    },
+
+    preflight(command, shellKind): Promise<PreflightResult> {
+      return preflightSandboxCommand({
+        command,
+        shellKind,
+        workdir: context.workdir,
+      });
     },
 
     async release(): Promise<void> {

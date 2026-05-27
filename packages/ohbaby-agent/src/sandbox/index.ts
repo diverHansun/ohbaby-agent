@@ -7,10 +7,23 @@ export {
 } from "./errors.js";
 export { SandboxManager } from "./manager.js";
 export { HostLocalAdapter } from "./adapters/host-local.js";
+export { classifySandboxPath, containsOrEqualPath } from "./boundary.js";
+export { classifyDenylistedPath } from "./denylist.js";
+export { resolveSandboxPathArg } from "./paths.js";
+export {
+  preflightSandboxCommand,
+  preflightSandboxShellAnalysis,
+} from "./preflight.js";
 export type {
   CommandContext,
   CommandContextOptions,
   CreateContextOptions,
+  DenylistReason,
+  PreflightCommand,
+  PreflightDenylistHit,
+  PreflightExternalPath,
+  PreflightInternalPath,
+  PreflightResult,
   SandboxAdapter,
   SandboxAdapterHandle,
   SandboxAdapterId,
@@ -21,4 +34,7 @@ export type {
   SandboxIsolation,
   SandboxLease,
   SandboxManagerOptions,
+  SandboxPathBoundary,
+  SandboxPreflightInput,
+  SandboxShellAnalysisPreflightInput,
 } from "./types.js";
