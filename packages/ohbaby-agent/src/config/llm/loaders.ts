@@ -6,7 +6,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
-import { parse as parseDotenv } from "dotenv";
 import { ConfigError } from "./types.js";
 
 /** Directory name for ohbaby-agent configuration */
@@ -14,9 +13,6 @@ const CONFIG_DIR_NAME = ".ohbaby-agent";
 
 /** Configuration file name */
 const MODEL_JSON_NAME = "model.json";
-const ENV_FILE_NAME = ".env";
-
-export type ProjectEnv = Readonly<Record<string, string>>;
 
 /**
  * Get the path to the global model.json configuration file.
@@ -25,28 +21,6 @@ export type ProjectEnv = Readonly<Record<string, string>>;
 export function getModelJsonPath(): string {
   const homeDir = os.homedir();
   return path.join(homeDir, CONFIG_DIR_NAME, MODEL_JSON_NAME);
-}
-
-/**
- * Parse project-local environment variables from .env without mutating
- * process.env. Parent shell variables are applied by loadApiKey().
- */
-export async function loadProjectEnv(
-  directory = process.cwd(),
-): Promise<ProjectEnv> {
-  const envPath = path.join(directory, ENV_FILE_NAME);
-  try {
-    return parseDotenv(await fs.readFile(envPath, "utf-8"));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return {};
-    }
-    throw new ConfigError(
-      `Failed to read project .env file: ${(error as Error).message}`,
-      "LOAD_FAILED",
-      { path: envPath, cause: error },
-    );
-  }
 }
 
 /**
@@ -91,7 +65,6 @@ export async function loadModelJson(): Promise<unknown> {
  */
 export function loadApiKey(
   envVarName: string,
-  projectEnv: ProjectEnv = {},
 ): string | undefined {
-  return process.env[envVarName] ?? projectEnv[envVarName];
+  return process.env[envVarName];
 }

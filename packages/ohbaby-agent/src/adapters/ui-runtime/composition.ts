@@ -33,6 +33,10 @@ import {
 } from "../../agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
 import {
+  getSearchConfig,
+  toSearchProviderConfig,
+} from "../../config/index.js";
+import {
   createInMemoryRunLedger,
   type RunLedger,
 } from "../../runtime/run-ledger/index.js";
@@ -577,6 +581,11 @@ export async function createUiRuntimeComposition(
 
   for (const tool of createBuiltinTools({
     agentTaskController,
+    searchProvider: {
+      async loadConfig() {
+        return toSearchProviderConfig(await getSearchConfig());
+      },
+    },
     taskExecutor,
   })) {
     toolScheduler.register(tool);

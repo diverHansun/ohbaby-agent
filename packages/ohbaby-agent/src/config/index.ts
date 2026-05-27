@@ -73,3 +73,17 @@ export type {
   McpSseConfig,
   McpStdioConfig,
 } from "./mcp/index.js";
+
+export {
+  getSearchConfig,
+  isSearchConfigCached,
+  reloadSearchConfig,
+  SearchConfigError,
+  toSearchProviderConfig,
+} from "./tools/index.js";
+
+export type {
+  SearchConfig,
+  SearchConfigErrorCode,
+  SearchConfigLoadOptions,
+} from "./tools/index.js";

@@ -5,7 +5,7 @@
 
 import type { LLMConfig, ModelJsonConfig } from "./types.js";
 import { ConfigError } from "./types.js";
-import { loadModelJson, loadApiKey, loadProjectEnv } from "./loaders.js";
+import { loadModelJson, loadApiKey } from "./loaders.js";
 import { validateModelJson, validateApiKey } from "./validation.js";
 
 export interface LLMConfigLoadOptions {
@@ -121,12 +121,7 @@ class LLMConfigManager {
 
       // Load API key from environment
       const apiKeyEnvName = modelJson.apiConfig.apiKeyEnv;
-      const apiKeyFromShell = loadApiKey(apiKeyEnvName);
-      const projectEnv =
-        apiKeyFromShell === undefined
-          ? await loadProjectEnv(projectDirectory)
-          : {};
-      const apiKey = apiKeyFromShell ?? loadApiKey(apiKeyEnvName, projectEnv);
+      const apiKey = loadApiKey(apiKeyEnvName);
 
       // Validate API key
       validateApiKey(apiKey, apiKeyEnvName);

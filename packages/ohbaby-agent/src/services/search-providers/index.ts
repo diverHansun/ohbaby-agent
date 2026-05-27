@@ -1,6 +1,5 @@
 export {
   createSearchProvider,
-  loadDefaultSearchProviderConfig,
   registerSearchProvider,
 } from "./registry.js";
 export { createTavilyProvider } from "./tavily.js";

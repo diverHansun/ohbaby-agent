@@ -95,27 +95,17 @@ describe("LLMConfigManager", () => {
           },
         ],
       });
-      expect(loaders.loadProjectEnv).not.toHaveBeenCalled();
     });
 
-    it("should load API key from project .env when shell env is absent", async () => {
+    it("should read API key only from process.env after startup env loading", async () => {
       vi.mocked(loaders.loadModelJson).mockResolvedValue(validModelJson);
-      vi.mocked(loaders.loadApiKey)
-        .mockReturnValueOnce(undefined)
-        .mockReturnValueOnce("sk-project-key");
-      vi.mocked(loaders.loadProjectEnv).mockResolvedValue({
-        OPENAI_API_KEY: "sk-project-key",
-      });
+      vi.mocked(loaders.loadApiKey).mockReturnValue("sk-process-key");
 
       const manager = LLMConfigManager.getInstance();
       const config = await manager.load({ projectDirectory: "D:/repo" });
 
-      expect(config.apiKey).toBe("sk-project-key");
-      expect(loaders.loadProjectEnv).toHaveBeenCalledWith("D:/repo");
-      expect(loaders.loadApiKey).toHaveBeenNthCalledWith(1, "OPENAI_API_KEY");
-      expect(loaders.loadApiKey).toHaveBeenNthCalledWith(2, "OPENAI_API_KEY", {
-        OPENAI_API_KEY: "sk-project-key",
-      });
+      expect(config.apiKey).toBe("sk-process-key");
+      expect(loaders.loadApiKey).toHaveBeenCalledWith("OPENAI_API_KEY");
     });
 
     it("should cache configuration after first load", async () => {
@@ -134,13 +124,8 @@ describe("LLMConfigManager", () => {
     it("should cache configuration by project directory", async () => {
       vi.mocked(loaders.loadModelJson).mockResolvedValue(validModelJson);
       vi.mocked(loaders.loadApiKey)
-        .mockReturnValueOnce(undefined)
         .mockReturnValueOnce("sk-project-a")
-        .mockReturnValueOnce(undefined)
         .mockReturnValueOnce("sk-project-b");
-      vi.mocked(loaders.loadProjectEnv)
-        .mockResolvedValueOnce({ OPENAI_API_KEY: "sk-project-a" })
-        .mockResolvedValueOnce({ OPENAI_API_KEY: "sk-project-b" });
 
       const manager = LLMConfigManager.getInstance();
 
@@ -151,8 +136,6 @@ describe("LLMConfigManager", () => {
       expect(first).toBe(second);
       expect(third.apiKey).toBe("sk-project-b");
       expect(loaders.loadModelJson).toHaveBeenCalledTimes(2);
-      expect(loaders.loadProjectEnv).toHaveBeenNthCalledWith(1, "D:/repo-a");
-      expect(loaders.loadProjectEnv).toHaveBeenNthCalledWith(2, "D:/repo-b");
     });
 
     it("should return cached config on subsequent calls", async () => {
@@ -254,25 +237,19 @@ describe("LLMConfigManager", () => {
       expect(config2.model).toBe("gpt-4-turbo");
     });
 
-    it("should re-read project .env values on reload", async () => {
+    it("should re-read process env values on reload", async () => {
       vi.mocked(loaders.loadModelJson).mockResolvedValue(validModelJson);
       vi.mocked(loaders.loadApiKey)
-        .mockReturnValueOnce(undefined)
-        .mockReturnValueOnce("sk-old-project-key")
-        .mockReturnValueOnce(undefined)
-        .mockReturnValueOnce("sk-new-project-key");
-      vi.mocked(loaders.loadProjectEnv)
-        .mockResolvedValueOnce({ OPENAI_API_KEY: "sk-old-project-key" })
-        .mockResolvedValueOnce({ OPENAI_API_KEY: "sk-new-project-key" });
+        .mockReturnValueOnce("sk-old-process-key")
+        .mockReturnValueOnce("sk-new-process-key");
 
       const manager = LLMConfigManager.getInstance();
 
       const config1 = await manager.load({ projectDirectory: "D:/repo" });
       const config2 = await manager.reload({ projectDirectory: "D:/repo" });
 
-      expect(config1.apiKey).toBe("sk-old-project-key");
-      expect(config2.apiKey).toBe("sk-new-project-key");
-      expect(loaders.loadProjectEnv).toHaveBeenCalledTimes(2);
+      expect(config1.apiKey).toBe("sk-old-process-key");
+      expect(config2.apiKey).toBe("sk-new-process-key");
     });
 
     it("should clear lastError before reload", async () => {

@@ -10,7 +10,6 @@ import {
   loadModelJson,
   loadApiKey,
   getModelJsonPath,
-  loadProjectEnv,
 } from "../loaders.js";
 import { ConfigError } from "../types.js";
 
@@ -127,58 +126,4 @@ describe("loadApiKey", () => {
     expect(result).toBe("");
   });
 
-  it("should fall back to parsed project env when shell env is absent", () => {
-    delete process.env.PROJECT_KEY;
-
-    const result = loadApiKey("PROJECT_KEY", {
-      PROJECT_KEY: "from-project-env",
-    });
-
-    expect(result).toBe("from-project-env");
-  });
-
-  it("should keep shell env ahead of project env", () => {
-    process.env.PROJECT_KEY = "from-shell";
-
-    const result = loadApiKey("PROJECT_KEY", {
-      PROJECT_KEY: "from-project-env",
-    });
-
-    expect(result).toBe("from-shell");
-  });
-});
-
-describe("loadProjectEnv", () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-  });
-
-  it("parses .env from the project directory without mutating process.env", async () => {
-    const original = process.env.PROJECT_API_KEY;
-    process.env.PROJECT_API_KEY = "from-shell";
-    vi.mocked(fs.readFile).mockResolvedValue("PROJECT_API_KEY=from-file\n");
-
-    await expect(loadProjectEnv("D:/repo")).resolves.toEqual({
-      PROJECT_API_KEY: "from-file",
-    });
-    expect(fs.readFile).toHaveBeenCalledWith(
-      path.join("D:/repo", ".env"),
-      "utf-8",
-    );
-    expect(process.env.PROJECT_API_KEY).toBe("from-shell");
-
-    if (original === undefined) {
-      delete process.env.PROJECT_API_KEY;
-    } else {
-      process.env.PROJECT_API_KEY = original;
-    }
-  });
-
-  it("returns an empty object when project .env is absent", async () => {
-    const error = new Error("ENOENT") as NodeJS.ErrnoException;
-    error.code = "ENOENT";
-    vi.mocked(fs.readFile).mockRejectedValue(error);
-
-    await expect(loadProjectEnv("D:/repo")).resolves.toEqual({});
-  });
 });

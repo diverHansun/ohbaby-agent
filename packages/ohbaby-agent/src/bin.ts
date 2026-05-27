@@ -7,6 +7,7 @@ import { CliArgumentError, parseCliArgs, renderHelp } from "./cli/args.js";
 import { EXIT_CODES } from "./cli/exit-codes.js";
 import { readStdin } from "./cli/stdin.js";
 import { createStdoutRenderer } from "./cli/stdout-renderer.js";
+import { loadRuntimeEnvIntoProcessEnv } from "./utils/project-env.js";
 
 const VERSION = "0.1.0";
 
@@ -51,6 +52,8 @@ export async function runOhbabyCli(
     process.stdout.write(`${VERSION}\n`);
     return EXIT_CODES.ok;
   }
+
+  await loadRuntimeEnvIntoProcessEnv();
 
   const client = createPersistentUiBackendClient({
     initialSnapshot: initialSnapshotFromArgs(args),

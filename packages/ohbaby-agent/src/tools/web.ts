@@ -5,9 +5,9 @@ import type {
 } from "../core/tool-scheduler/index.js";
 import {
   createSearchProvider,
-  loadDefaultSearchProviderConfig,
   type FetchFormat,
   type FetchOptions,
+  InvalidProviderConfigError,
   type SearchOptions,
   type SearchProvider,
   type SearchProviderConfig,
@@ -25,7 +25,7 @@ const WEB_OUTPUT_TOKEN_LIMIT = 8_000;
 
 export interface WebToolsOptions {
   readonly createProvider?: SearchProviderFactory;
-  readonly loadConfig?: () => SearchProviderConfig;
+  readonly loadConfig?: () => Promise<SearchProviderConfig> | SearchProviderConfig;
 }
 
 export function createWebTools(options: WebToolsOptions = {}): Tool[] {
@@ -41,7 +41,7 @@ function createWebSearchTool(options: WebToolsOptions): Tool {
       assertNotAborted(context);
       const query = getStringParam(params, "query");
       const searchOptions = parseSearchOptions(params);
-      const provider = createProvider(options);
+      const provider = await createProvider(options);
 
       const results = await provider.search(query, searchOptions);
       assertNotAborted(context);
@@ -110,7 +110,7 @@ function createWebFetchTool(options: WebToolsOptions): Tool {
       assertNotAborted(context);
       const urls = parseFetchUrls(params);
       const fetchOptions = parseFetchOptions(params);
-      const provider = createProvider(options);
+      const provider = await createProvider(options);
 
       const results = await provider.fetch(urls, fetchOptions);
       assertNotAborted(context);
@@ -163,11 +163,15 @@ function createWebFetchTool(options: WebToolsOptions): Tool {
   };
 }
 
-function createProvider(options: WebToolsOptions): SearchProvider {
-  const loadConfig = options.loadConfig ?? loadDefaultSearchProviderConfig;
+async function createProvider(options: WebToolsOptions): Promise<SearchProvider> {
+  if (!options.loadConfig) {
+    throw new InvalidProviderConfigError(
+      "Search provider config loader is required.",
+    );
+  }
   const createProviderFromConfig =
     options.createProvider ?? createSearchProvider;
-  return createProviderFromConfig(loadConfig());
+  return createProviderFromConfig(await options.loadConfig());
 }
 
 function parseSearchOptions(params: Record<string, unknown>): SearchOptions {
