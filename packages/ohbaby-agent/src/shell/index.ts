@@ -10,11 +10,16 @@ export {
   detectShellKind,
   preflightShellCommand,
   shellArgs,
-  ShellCommandPolicyError,
+  ShellPreflightError,
+  ShellPreflightError as ShellCommandPolicyError,
   type ShellKind,
   type ShellPreflightInput,
   type ShellPreflightResult,
-} from "./command-policy.js";
+} from "./preflight.js";
+export {
+  classifyShellCommand,
+  type ShellCommandClass,
+} from "./command-classifier.js";
 export {
   deriveGitBashPath,
   isBlacklistedShell,

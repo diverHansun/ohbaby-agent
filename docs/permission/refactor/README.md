@@ -49,7 +49,7 @@ interface PermissionState {
 7. plan 模式不按 mode 过滤工具列表；LLM 在 plan / auto 下看到完全相同工具。
 8. `/mode` 不存在；TUI 的 `Shift+Tab` 只切 `plan <-> auto`，`/permission` 只切 `default/full-access`。headless/SDK/启动参数只支持初始值。
 9. `full-access` 不绕过 scheduler 安全闸：external workspace write 与 untrusted MCP 仍强制 ask。
-10. Bash 由 `shell/command-policy.classifyShellCommand(parsed)` 分类为 `readonly | mutating | dangerous`，复合命令按最危险子命令计，未知命令保守走 mutating/ask。
+10. Bash 由 `shell/command-classifier.classifyShellCommand(parsed)` 分类为 `readonly | mutating | dangerous`，复合命令按最危险子命令计，未知命令保守走 mutating/ask；运行前路径、安全闸检查继续由 `shell/preflight.ts` 承担。
 
 ---
 

@@ -12,7 +12,8 @@
 | 旧 permission 模块 | [packages/ohbaby-agent/src/permission/](../../../packages/ohbaby-agent/src/permission/) |
 | 调用入口 | [packages/ohbaby-agent/src/core/tool-scheduler/scheduler.ts](../../../packages/ohbaby-agent/src/core/tool-scheduler/scheduler.ts) |
 | 工具注册与过滤 | [packages/ohbaby-agent/src/core/tool-scheduler/registry.ts](../../../packages/ohbaby-agent/src/core/tool-scheduler/registry.ts) |
-| Shell 命令策略 | [packages/ohbaby-agent/src/shell/command-policy.ts](../../../packages/ohbaby-agent/src/shell/command-policy.ts) |
+| Shell 运行前检查 | [packages/ohbaby-agent/src/shell/preflight.ts](../../../packages/ohbaby-agent/src/shell/preflight.ts) |
+| Shell 命令分类 | [packages/ohbaby-agent/src/shell/command-classifier.ts](../../../packages/ohbaby-agent/src/shell/command-classifier.ts) |
 | UI / SDK 快照 | [packages/ohbaby-sdk/src/snapshot.ts](../../../packages/ohbaby-sdk/src/snapshot.ts) |
 | 命令面 | [packages/ohbaby-agent/src/commands/catalog.ts](../../../packages/ohbaby-agent/src/commands/catalog.ts) |
 

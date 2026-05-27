@@ -138,7 +138,7 @@ manager 不持有任何 approval 状态。所有“已允许”事实都来自 `
 
 ### 4.2 Bash 分类规则
 
-由 `shell/command-policy.classifyShellCommand(parsed)` 提供：
+由 `shell/command-classifier.classifyShellCommand(parsed)` 提供：
 
 ```ts
 type ShellCommandClass = "readonly" | "mutating" | "dangerous";
@@ -257,7 +257,8 @@ export function evaluate(call: PermissionCall, state: PermissionState): Decision
 | `permission/evaluator.ts` | 纯函数判定入口，无副作用 |
 | `permission/manager.ts` | ask 队列、UI 请求、用户响应、always 写 rule、drain queue |
 | `permission/events.ts` | `ModeChanged`、`LevelChanged`、`RuleAdded`、`Updated`、`Replied` |
-| `shell/command-policy.ts` | 新增 `classifyShellCommand(parsed)`，复用现有 shell 安全逻辑 |
+| `shell/command-classifier.ts` | 提供 `classifyShellCommand(parsed)`，只负责 readonly/mutating/dangerous 三档分类 |
+| `shell/preflight.ts` | 保留 workspace path 解析、destructive root check 与 download-and-execute 防护 |
 | `core/tool-scheduler/*` | 改调 evaluator；保留 externalWrite/untrustedMcp 安全闸 |
 
 ---

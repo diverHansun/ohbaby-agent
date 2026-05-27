@@ -4,19 +4,19 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseCommand } from "../utils/index.js";
 import {
-  classifyShellCommand,
   detectShellKind,
   preflightShellCommand,
   shellArgs,
-  type ShellCommandClass,
   type ShellPreflightResult,
   type ShellKind,
-} from "./command-policy.js";
+} from "./preflight.js";
 
 let tempRoot: string;
 
 beforeEach(async () => {
-  tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-shell-policy-"));
+  tempRoot = await fs.mkdtemp(
+    path.join(os.tmpdir(), "ohbaby-shell-preflight-"),
+  );
 });
 
 afterEach(async () => {
@@ -36,7 +36,7 @@ function preflight(
   });
 }
 
-describe("shell command policy", () => {
+describe("shell preflight", () => {
   it("detects supported shell families from executable paths", () => {
     expect(detectShellKind("/bin/bash")).toBe("bash");
     expect(detectShellKind("C:\\Windows\\System32\\cmd.exe")).toBe("cmd");
@@ -173,40 +173,4 @@ describe("shell command policy", () => {
   it("rejects obvious destructive root removal commands", async () => {
     await expect(preflight("rm -rf /")).rejects.toThrow("blacklisted");
   });
-
-  it.each([
-    ["ls", "readonly"],
-    ["cat foo.txt", "readonly"],
-    ["pwd", "readonly"],
-    ["find . -name *.ts", "readonly"],
-    ["grep foo file.txt", "readonly"],
-    ["head -n 10 file.txt", "readonly"],
-    ["tail -n 10 file.txt", "readonly"],
-    ["git status", "readonly"],
-    ["git log", "readonly"],
-    ["git diff", "readonly"],
-    ["mv a b", "mutating"],
-    ["cp a b", "mutating"],
-    ["mkdir foo", "mutating"],
-    ["touch foo", "mutating"],
-    ["echo hi > foo", "mutating"],
-    ["git commit -m x", "mutating"],
-    ["npm install", "mutating"],
-    ["unknown-command --flag", "mutating"],
-    ['bash -c "echo hi"', "mutating"],
-    ["xargs echo", "mutating"],
-    ["rm -rf foo", "dangerous"],
-    ["sudo ls", "dangerous"],
-    ["chmod 777 foo", "dangerous"],
-    ["chown root foo", "dangerous"],
-    ["dd if=a of=b", "dangerous"],
-    ["cat a | tee b", "mutating"],
-    ["git status && rm -rf foo", "dangerous"],
-    ["ls; mkdir foo", "mutating"],
-  ] as readonly (readonly [string, ShellCommandClass])[])(
-    "classifies %s as %s",
-    (command, expected) => {
-      expect(classifyShellCommand(parseCommand(command))).toBe(expected);
-    },
-  );
 });

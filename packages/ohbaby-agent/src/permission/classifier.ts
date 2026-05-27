@@ -1,4 +1,4 @@
-import { classifyShellCommand } from "../shell/command-policy.js";
+import { classifyShellCommand } from "../shell/command-classifier.js";
 import { parseCommand } from "../utils/index.js";
 import type { PermissionCall, PermissionToolCategory } from "./types.js";
 

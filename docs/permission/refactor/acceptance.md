@@ -89,7 +89,7 @@
 - [ ] allow 与 deny 同时匹配时 deny 优先。
 - [ ] evaluator 不发布事件、不改 state。
 
-### Phase 2：Shell command-policy
+### Phase 2：Shell command-classifier / preflight
 
 #### readonly
 

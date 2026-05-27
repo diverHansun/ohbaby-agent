@@ -46,7 +46,8 @@ git switch -c codex/permission-policy-refactor
 | `packages/ohbaby-agent/src/permission/matcher.ts` | 支持 typed `PermissionRule` 匹配，canonical lowercase |
 | `packages/ohbaby-agent/src/permission/events.ts` | 删除 `AutoEditRequested`；新增 `ModeChanged`、`LevelChanged`、`RuleAdded` |
 | `packages/ohbaby-agent/src/permission/index.ts` | 统一导出 state/rule/classifier/evaluator/types |
-| `packages/ohbaby-agent/src/shell/command-policy.ts` | 新增 `classifyShellCommand(parsed)` |
+| `packages/ohbaby-agent/src/shell/preflight.ts` | 保留运行前路径解析、destructive root check、download-and-execute 安全检查 |
+| `packages/ohbaby-agent/src/shell/command-classifier.ts` | 提供 `classifyShellCommand(parsed)`，输出 readonly/mutating/dangerous |
 | `packages/ohbaby-agent/src/core/tool-scheduler/registry.ts` | 移除按 mode 过滤工具列表逻辑 |
 | `packages/ohbaby-agent/src/core/tool-scheduler/constants.ts` | 移除或废弃 mode allowed categories |
 | `packages/ohbaby-agent/src/core/tool-scheduler/scheduler.ts` | 改调 evaluator；保留 externalWrite/untrustedMcp 强制 ask |
@@ -152,16 +153,17 @@ export interface PermissionManager {
 - `rule/classifier/evaluator` 单测全绿。
 - evaluator 无副作用，不依赖 manager。
 
-### Phase 2：Shell command-policy 扩展 + 单测
+### Phase 2：Shell command-classifier 拆分 + 单测
 
 目标：落实 bash readonly/mutating/dangerous 分类。
 
 步骤：
 
-1. 在 `shell/command-policy.ts` 新增 `classifyShellCommand(parsed)`。
-2. 复用现有解析、destructive root check、workspace preflight 相关逻辑。
-3. 补充命令分类单测。
-4. 接通 `permission/classifier.ts` 的 bash 子分类。
+1. 将旧 `shell/command-policy.ts` 拆分为 `shell/preflight.ts` 与 `shell/command-classifier.ts`。
+2. `preflight.ts` 保留运行时 path 解析、destructive root check、workspace preflight 相关逻辑。
+3. `command-classifier.ts` 提供 `classifyShellCommand(parsed)`，只暴露三档命令分类，不泄漏 shell 细节到 `permission/`。
+4. 补充命令分类单测。
+5. 接通 `permission/classifier.ts` 的 bash 子分类。
 
 验收：
 
@@ -287,7 +289,8 @@ export interface PermissionManager {
 | `evaluator` | mode/level 全矩阵、sessionRules、reason、full-access 不压 plan |
 | `state` | mode/level 正交、sessionId 隔离、事件 payload、clearSession |
 | `manager` | ask 队列、always 写 rule、drainQueue、无 AutoEditRequested |
-| `command-policy` | shell 分类表、复合命令、sudo wrapper、未知命令 |
+| `command-classifier` | shell 分类表、复合命令、sudo wrapper、未知命令 |
+| `preflight` | workspace path 解析、destructive root check、download-and-execute 防护 |
 
 ### 5.2 集成测试
 

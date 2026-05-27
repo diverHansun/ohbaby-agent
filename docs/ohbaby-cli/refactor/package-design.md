@@ -392,7 +392,8 @@ Phase 0 已将 `packages/ohbaby-tui/src/` 全部内容迁移到 `packages/ohbaby
 
 **现状**（实测）：
 
-- `shell/command-policy.ts` 用到 `utils/` 的 `parseCommand`、`CommandDetail`、`ParsedCommand`、`containsOrEqual`
+- `shell/preflight.ts` 用到 `utils/` 的 `parseCommand`、`CommandDetail`、`ParsedCommand`、`containsOrEqual`
+- `shell/command-classifier.ts` 用到 `utils/` 的 `CommandDetail`、`ParsedCommand`
 - `shell/index.ts` 用到 `utils/` 的 `lazy`
 - `sandbox/errors.ts` 用到 `utils/` 的 `IrisError`
 - `sandbox/lease.ts` 用到 `utils/` 的 `containsOrEqual`
