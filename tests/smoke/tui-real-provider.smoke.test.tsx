@@ -247,13 +247,15 @@ function sessionMessageCount(sessionId: string): number {
 }
 
 function parentIdForSession(sessionId: string): string | undefined {
-  return getDatabase()
-    .prepare<{ readonly parent_id: string | null }>(
-      `SELECT parent_id
+  return (
+    getDatabase()
+      .prepare<{ readonly parent_id: string | null }>(
+        `SELECT parent_id
        FROM ${schema.session.tableName}
        WHERE id = ?`,
-    )
-    .get(sessionId)?.parent_id ?? undefined;
+      )
+      .get(sessionId)?.parent_id ?? undefined
+  );
 }
 
 function toolPartPermissionPattern(input: {
@@ -359,7 +361,9 @@ function latestAgentTaskId(parentSessionId: string): string | undefined {
        LIMIT 50`,
     )
     .all(parentSessionId);
-  const match = JSON.stringify(parts).match(/task_id:\s*(agent_task_[a-z0-9_]+)/);
+  const match = JSON.stringify(parts).match(
+    /task_id:\s*(agent_task_[a-z0-9_]+)/,
+  );
   return match?.[1];
 }
 
@@ -446,12 +450,10 @@ describe("real provider TUI smoke", () => {
 
       try {
         await waitForFrame(app, promptIsReady, 30_000);
-        app.stdin.write("/mode ask");
-        app.stdin.write("\r");
+        app.stdin.write("\u001B[Z");
         await waitForFrame(
           app,
-          (frame) =>
-            frame.includes("mode: ask | permission: ask-before-edit"),
+          (frame) => frame.includes("mode: plan | level: default"),
           30_000,
         );
 
@@ -463,8 +465,8 @@ describe("real provider TUI smoke", () => {
             frame.includes("tools:") &&
             frame.includes("web_search") &&
             frame.includes("web_fetch") &&
-            !frame.includes(", write") &&
-            !frame.includes("tools: write"),
+            frame.includes("write") &&
+            frame.includes("bash"),
           30_000,
         );
 
@@ -577,7 +579,9 @@ describe("real provider TUI smoke", () => {
         }
         const agentTaskChildId = latestChildSessionId(parentSessionId);
         if (!agentTaskChildId) {
-          throw new Error("real model did not create an agent task child session");
+          throw new Error(
+            "real model did not create an agent task child session",
+          );
         }
         await waitForDatabaseCondition(
           () => sessionMessageCount(agentTaskChildId) >= 2,
@@ -696,7 +700,10 @@ describe("real provider TUI smoke", () => {
           readFile(join(workdir, "child-tools", "child-created.txt"), "utf8"),
         ).resolves.toContain("OHBABY_CHILD_WRITE_MARKER");
         await expect(
-          readFile(join(workdir, "child-tools", "child-edit-target.txt"), "utf8"),
+          readFile(
+            join(workdir, "child-tools", "child-edit-target.txt"),
+            "utf8",
+          ),
         ).resolves.toContain("AFTER_EDIT");
 
         const finalText = JSON.stringify((await client.getSnapshot()).sessions);

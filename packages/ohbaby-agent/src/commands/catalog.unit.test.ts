@@ -20,13 +20,9 @@ describe("command catalog", () => {
         "session.new",
         "session.compact",
         "session.resume",
-        "mode",
-        "mode.agent",
-        "mode.ask",
-        "mode.plan",
         "permission",
-        "permission.ask-before-edit",
-        "permission.edit-automatically",
+        "permission.default",
+        "permission.full-access",
       ],
     );
   });
@@ -69,22 +65,17 @@ describe("command catalog", () => {
           path: ["resume"],
         }),
         expect.objectContaining({
-          id: "mode",
-          parentBehavior: "none",
-          path: ["mode"],
-        }),
-        expect.objectContaining({
           id: "permission",
           parentBehavior: "none",
           path: ["permission"],
         }),
         expect.objectContaining({
-          id: "permission.ask-before-edit",
-          path: ["permission", "ask-before-edit"],
+          id: "permission.default",
+          path: ["permission", "default"],
         }),
         expect.objectContaining({
-          id: "permission.edit-automatically",
-          path: ["permission", "edit-automatically"],
+          id: "permission.full-access",
+          path: ["permission", "full-access"],
         }),
       ]),
     );

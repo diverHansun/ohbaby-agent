@@ -22,6 +22,38 @@ describe("parseCliArgs", () => {
     });
   });
 
+  it("parses initial permission mode and level flags", () => {
+    expect(
+      parseCliArgs([
+        "node",
+        "ohbaby",
+        "--mode",
+        "plan",
+        "--permission=full-access",
+      ]),
+    ).toEqual({
+      mode: "interactive",
+      permissionLevel: "full-access",
+      permissionMode: "plan",
+    });
+    expect(
+      parseCliArgs([
+        "node",
+        "ohbaby",
+        "--prompt",
+        "hello",
+        "--mode=auto",
+        "--permission",
+        "default",
+      ]),
+    ).toEqual({
+      mode: "prompt",
+      permissionLevel: "default",
+      permissionMode: "auto",
+      prompt: "hello",
+    });
+  });
+
   it("throws on missing prompt values and unknown flags", () => {
     expect(() => parseCliArgs(["node", "ohbaby", "-p"])).toThrow(
       CliArgumentError,
@@ -29,6 +61,12 @@ describe("parseCliArgs", () => {
     expect(() => parseCliArgs(["node", "ohbaby", "--wat"])).toThrow(
       CliArgumentError,
     );
+    expect(() => parseCliArgs(["node", "ohbaby", "--mode", "ask"])).toThrow(
+      CliArgumentError,
+    );
+    expect(() =>
+      parseCliArgs(["node", "ohbaby", "--permission", "auto"]),
+    ).toThrow(CliArgumentError);
   });
 
   it("defaults to interactive mode", () => {

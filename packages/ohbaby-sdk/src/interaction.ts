@@ -7,7 +7,7 @@ export type UiInteractionKind =
 export type UiInteractionSubject =
   | "model"
   | "session"
-  | "permission-policy"
+  | "permission"
   | (string & {});
 
 export interface UiInteractionOption {

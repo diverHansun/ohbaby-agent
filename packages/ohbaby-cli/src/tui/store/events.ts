@@ -4,7 +4,7 @@ import type {
   UiMessage,
   UiMessagePart,
   UiNotice,
-  UiPolicyState,
+  UiPermissionState,
   UiPermissionRequest,
   UiRun,
   UiSession,
@@ -38,7 +38,7 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
     messages: activeSession?.messages ?? [],
     notices: [],
     permissions: snapshot.permissions,
-    policy: snapshot.policy,
+    permission: snapshot.permission,
     runs: snapshot.runs,
     runtime: snapshot.status,
     sessions: snapshot.sessions,
@@ -140,9 +140,9 @@ export function applyTuiEvent(
         },
       );
 
-    case "policy.updated":
+    case "permission.updated":
       return rebuildFromCollections(state, {
-        policy: event.policy,
+        permission: event.permission,
       });
 
     case "notice.emitted":
@@ -265,6 +265,7 @@ function preserveLocalQueues(
   );
   const sessions = mergeSessions(next.sessions, previous.sessions);
   const runs = mergeRuns(next.runs, previous.runs);
+  const permission = previous.permission ?? next.permission;
   const runtime = resolveRuntimeAfterSnapshot(
     previous,
     next,
@@ -277,7 +278,7 @@ function preserveLocalQueues(
     runs,
     sessions,
     status: runtime,
-    ...(next.policy === undefined ? {} : { policy: next.policy }),
+    ...(permission === undefined ? {} : { permission }),
   };
 
   return {
@@ -292,6 +293,7 @@ function preserveLocalQueues(
         ?.messages ?? [],
     notices: previous.notices,
     permissions,
+    permission,
     resolvedPermissionIds: previous.resolvedPermissionIds,
     runs,
     runtime,
@@ -307,7 +309,7 @@ function rebuildFromCollections(
     readonly sessions?: readonly UiSession[];
     readonly runs?: readonly UiRun[];
     readonly permissions?: readonly UiPermissionRequest[];
-    readonly policy?: UiPolicyState;
+    readonly permission?: UiPermissionState;
     readonly runtime?: TuiRuntimeStatus;
   },
 ): TuiStoreState {
@@ -318,7 +320,7 @@ function rebuildFromCollections(
   const sessions = patch.sessions ?? state.sessions;
   const runs = patch.runs ?? state.runs;
   const permissions = patch.permissions ?? state.permissions;
-  const policy = patch.policy ?? state.policy;
+  const permission = patch.permission ?? state.permission;
   const runtime = patch.runtime ?? state.runtime;
   const snapshot: UiSnapshot = {
     activeSessionId,
@@ -326,7 +328,7 @@ function rebuildFromCollections(
     runs,
     sessions,
     status: runtime,
-    ...(policy === undefined ? {} : { policy }),
+    ...(permission === undefined ? {} : { permission }),
   };
 
   return {
@@ -336,7 +338,7 @@ function rebuildFromCollections(
       sessions.find((session) => session.id === activeSessionId)?.messages ??
       [],
     permissions,
-    policy,
+    permission,
     runs,
     runtime,
     sessions,
@@ -648,33 +650,37 @@ function formatCommandOutput(output: UiCommandOutput | undefined): string {
   return truncateCommandOutput(formatDataCommandOutput(output));
 }
 
-function formatPolicyOutput(
-  policy: Record<string, unknown> | undefined,
-  focus: "mode" | "permission",
+function formatPermissionOutput(
+  permission: Record<string, unknown> | undefined,
+  focus: "mode" | "level",
 ): string | undefined {
-  const mode = policy ? getString(policy, "mode") : undefined;
-  const agentState = policy ? getString(policy, "agentState") : undefined;
-  if (!mode || !agentState) {
+  const mode = permission ? getString(permission, "mode") : undefined;
+  const level = permission ? getString(permission, "level") : undefined;
+  if (!mode || !level) {
     return undefined;
   }
 
   return focus === "mode"
-    ? `mode: ${mode} | permission: ${agentState}`
-    : `permission: ${agentState} | mode: ${mode}`;
+    ? `mode: ${mode} | level: ${level}`
+    : `level: ${level} | mode: ${mode}`;
 }
 
 function formatDataCommandOutput(
   output: Extract<UiCommandOutput, { readonly kind: "data" }>,
 ): string {
   switch (output.subject) {
-    case "policy.mode": {
-      const policy = getRecord(output.data, "policy");
-      return formatPolicyOutput(policy, "mode") ?? JSON.stringify(output.data);
-    }
-    case "policy.permission": {
-      const policy = getRecord(output.data, "policy");
+    case "permission.mode": {
+      const permission = getRecord(output.data, "permission");
       return (
-        formatPolicyOutput(policy, "permission") ?? JSON.stringify(output.data)
+        formatPermissionOutput(permission, "mode") ??
+        JSON.stringify(output.data)
+      );
+    }
+    case "permission.level": {
+      const permission = getRecord(output.data, "permission");
+      return (
+        formatPermissionOutput(permission, "level") ??
+        JSON.stringify(output.data)
       );
     }
     case "status": {

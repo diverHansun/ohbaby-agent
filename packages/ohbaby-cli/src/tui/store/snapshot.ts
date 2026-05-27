@@ -13,7 +13,7 @@ import type {
   UiInteractionResponse,
   UiMessage,
   UiNotice,
-  UiPolicyState,
+  UiPermissionState,
   UiPermissionRequest,
   UiPermissionResponse,
   UiRun,
@@ -129,7 +129,7 @@ export interface TuiStoreState {
   readonly messages: readonly UiMessage[];
   readonly runs: readonly UiRun[];
   readonly permissions: readonly UiPermissionRequest[];
-  readonly policy: UiPolicyState | undefined;
+  readonly permission: UiPermissionState | undefined;
   readonly runtime: TuiRuntimeStatus;
   readonly interactions: readonly TuiInteractionRequest[];
   readonly notices: readonly UiNotice[];

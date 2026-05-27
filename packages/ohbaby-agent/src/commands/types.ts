@@ -78,12 +78,15 @@ export interface CommandSkillProvider {
   loadPrompt(name: string): Promise<string> | string;
 }
 
-export type CommandPolicyState = NonNullable<UiSnapshot["policy"]>;
+export type CommandPermissionState = NonNullable<UiSnapshot["permission"]>;
 
-export interface CommandPolicyProvider {
-  getState(): CommandPolicyState;
-  setMode(mode: CommandPolicyState["mode"]): Promise<void> | void;
-  setAgentState(state: CommandPolicyState["agentState"]): Promise<void> | void;
+export interface CommandPermissionProvider {
+  getState(): CommandPermissionState;
+  setMode(mode: CommandPermissionState["mode"]): Promise<void> | void;
+  toggleMode():
+    | Promise<CommandPermissionState["mode"]>
+    | CommandPermissionState["mode"];
+  setLevel(level: CommandPermissionState["level"]): Promise<void> | void;
 }
 
 export interface CommandRunContext {
@@ -116,7 +119,7 @@ export interface CommandServiceOptions {
   readonly sessions?: CommandSessionProvider;
   readonly compact?: CommandCompactProvider;
   readonly skills?: CommandSkillProvider;
-  readonly policy?: CommandPolicyProvider;
+  readonly permission?: CommandPermissionProvider;
   readonly abortRun?: (runId?: string) => Promise<void> | void;
   readonly submitPrompt?: (
     text: string,

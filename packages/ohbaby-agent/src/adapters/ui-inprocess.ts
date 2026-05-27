@@ -48,13 +48,14 @@ import type {
 } from "../services/session/index.js";
 import {
   createPermissionManager,
+  createPermissionState,
+  isRememberablePermissionPattern,
   PermissionEvent,
 } from "../permission/index.js";
 import type {
   PermissionInfo,
   PermissionResponse as CorePermissionResponse,
 } from "../permission/index.js";
-import { createPolicyManager, PolicyEvent } from "../policy/index.js";
 import { Project } from "../project/index.js";
 import type { AgentManager } from "../agents/index.js";
 import {
@@ -82,9 +83,10 @@ const EMPTY_SNAPSHOT: UiSnapshot = {
   activeSessionId: null,
   runs: [],
   permissions: [],
-  policy: {
-    agentState: "ask-before-edit",
-    mode: "agent",
+  permission: {
+    level: "default",
+    mode: "auto",
+    sessionRules: [],
   },
   status: {
     kind: "idle",
@@ -95,7 +97,7 @@ type NoticeDraft = Omit<UiNotice, "id" | "createdAt"> & {
   readonly createdAt?: string;
 };
 
-type UiPolicyState = NonNullable<UiSnapshot["policy"]>;
+type UiPermissionState = NonNullable<UiSnapshot["permission"]>;
 
 export interface InProcessUiBackendOptions {
   readonly agentManager?: AgentManager;
@@ -237,6 +239,9 @@ function toUiPermissionRequest(input: {
   readonly info: PermissionInfo;
   readonly runId: string;
 }): UiPermissionRequest {
+  const allowAlways =
+    input.info.metadata.rememberable !== false &&
+    isRememberablePermissionPattern(input.info.pattern);
   return {
     id: input.info.id,
     runId: input.runId,
@@ -244,7 +249,15 @@ function toUiPermissionRequest(input: {
     description: input.info.pattern,
     choices: [
       { id: "allow_once", label: "Allow once", intent: "allow" },
-      { id: "allow_always", label: "Always allow", intent: "allow" },
+      ...(allowAlways
+        ? [
+            {
+              id: "allow_always",
+              label: "Always allow",
+              intent: "allow",
+            } as const,
+          ]
+        : []),
       { id: "reject", label: "Reject", intent: "deny" },
       { id: "cancel", label: "Cancel run", intent: "abort" },
     ],
@@ -277,12 +290,17 @@ export function createInProcessUiBackendClient(
   const stateStore =
     options.stateStore ?? createInMemoryUiStateStore(initialSnapshot);
   const bus = options.bus ?? createBus();
-  const policy = createPolicyManager({ bus });
-  if (initialSnapshot.policy) {
-    policy.setMode(initialSnapshot.policy.mode);
-    policy.setAgentState(initialSnapshot.policy.agentState);
+  const permissionState = createPermissionState({
+    bus,
+    initialLevel: initialSnapshot.permission?.level,
+    initialMode: initialSnapshot.permission?.mode,
+  });
+  for (const rules of initialSnapshot.permission?.sessionRules ?? []) {
+    for (const rule of rules.rules) {
+      permissionState.addSessionRule(rules.sessionId, rule);
+    }
   }
-  const permission = createPermissionManager({ bus });
+  const permission = createPermissionManager({ bus, state: permissionState });
   const messageManager =
     options.messageManager ??
     createMessageManager({
@@ -495,25 +513,21 @@ export function createInProcessUiBackendClient(
     }
   }
 
-  function currentPolicyState(): UiPolicyState {
-    const state = policy.getState();
-    return {
-      agentState: state.agentState,
-      mode: state.mode,
-    };
+  function currentPermissionState(): UiPermissionState {
+    return permissionState.toSnapshot();
   }
 
-  async function readSnapshotWithPolicy(): Promise<UiSnapshot> {
+  async function readSnapshotWithPermission(): Promise<UiSnapshot> {
     return {
       ...(await stateStore.readSnapshot()),
-      policy: currentPolicyState(),
+      permission: currentPermissionState(),
     };
   }
 
-  function publishPolicyUpdated(): void {
+  function publishPermissionUpdated(): void {
     publish({
-      type: "policy.updated",
-      policy: currentPolicyState(),
+      type: "permission.updated",
+      permission: currentPermissionState(),
       timestamp: Date.now(),
     });
   }
@@ -585,7 +599,7 @@ export function createInProcessUiBackendClient(
         now: () => now().getTime(),
         onNotice: publishNotice,
         permission,
-        policy,
+        permissionState,
         runLedger: options.runLedger,
         sessionManager: options.sessionManager,
         skillRegistry,
@@ -683,7 +697,7 @@ export function createInProcessUiBackendClient(
     await stateStore.setActiveSessionId(session.id);
     publish({ type: "session.updated", session: cloneSession(session) });
     publish({
-      snapshot: await readSnapshotWithPolicy(),
+      snapshot: await readSnapshotWithPermission(),
       timestamp: Date.now(),
       type: "snapshot.replaced",
     });
@@ -964,7 +978,7 @@ export function createInProcessUiBackendClient(
         }
         await stateStore.setActiveSessionId(sessionId);
         publish({
-          snapshot: await readSnapshotWithPolicy(),
+          snapshot: await readSnapshotWithPermission(),
           timestamp: Date.now(),
           type: "snapshot.replaced",
         });
@@ -983,13 +997,16 @@ export function createInProcessUiBackendClient(
       },
     },
     submitPrompt: submitPromptInternal,
-    policy: {
-      getState: currentPolicyState,
+    permission: {
+      getState: currentPermissionState,
       setMode(mode): void {
-        policy.setMode(mode);
+        permissionState.setMode(mode);
       },
-      setAgentState(agentState): void {
-        policy.setAgentState(agentState);
+      toggleMode(): ReturnType<typeof permissionState.toggleMode> {
+        return permissionState.toggleMode();
+      },
+      setLevel(level): void {
+        permissionState.setLevel(level);
       },
     },
     abortRun(runId?: string): void {
@@ -1059,11 +1076,14 @@ export function createInProcessUiBackendClient(
       timestamp: payload.timestamp,
     });
   });
-  bus.subscribe(PolicyEvent.ModeChanged, () => {
-    publishPolicyUpdated();
+  bus.subscribe(PermissionEvent.ModeChanged, () => {
+    publishPermissionUpdated();
   });
-  bus.subscribe(PolicyEvent.AgentStateChanged, () => {
-    publishPolicyUpdated();
+  bus.subscribe(PermissionEvent.LevelChanged, () => {
+    publishPermissionUpdated();
+  });
+  bus.subscribe(PermissionEvent.RuleAdded, () => {
+    publishPermissionUpdated();
   });
   bus.subscribe(PermissionEvent.Updated, (payload) => {
     void (async (): Promise<void> => {
@@ -1093,13 +1113,9 @@ export function createInProcessUiBackendClient(
       await reconcileRuntimeStatus();
     })();
   });
-  bus.subscribe(PermissionEvent.AutoEditRequested, () => {
-    policy.setAgentState("edit-automatically");
-  });
-
   return {
     getSnapshot(): Promise<UiSnapshot> {
-      return readSnapshotWithPolicy();
+      return readSnapshotWithPermission();
     },
 
     subscribeEvents(handler: UiEventHandler) {

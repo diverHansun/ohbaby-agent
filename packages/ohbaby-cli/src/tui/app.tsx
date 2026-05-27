@@ -39,8 +39,8 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
   useInput(
     (value, key) => {
       if (key.tab && key.shift && state.permissions.length === 0) {
-        const command = nextPolicyModeCommand(
-          state.policy,
+        const command = nextPermissionModeCommand(
+          state.permission,
           state.activeSessionId ?? undefined,
           () => {
             keyboardCommandSequenceRef.current += 1;
@@ -197,7 +197,7 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
         client={client}
         disabled={hasDialog}
         loadCatalog={loadCatalog}
-        policy={state.policy}
+        permission={state.permission}
       />
       <Footer state={state} />
       {state.catalogInvalidation === null ? null : (
@@ -212,6 +212,11 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
 function createEmptySnapshot(): UiSnapshot {
   return {
     activeSessionId: null,
+    permission: {
+      level: "default",
+      mode: "auto",
+      sessionRules: [],
+    },
     permissions: [],
     runs: [],
     sessions: [],
@@ -219,25 +224,23 @@ function createEmptySnapshot(): UiSnapshot {
   };
 }
 
-function nextPolicyModeCommand(
-  policy: UiSnapshot["policy"],
+function nextPermissionModeCommand(
+  permission: UiSnapshot["permission"],
   sessionId: string | undefined,
   createInvocationId: () => string,
 ): UiCommandInvocation | null {
-  if (policy === undefined) {
+  if (permission === undefined) {
     return null;
   }
 
-  const nextMode =
-    policy.mode === "agent" ? "ask" : policy.mode === "ask" ? "plan" : "agent";
-  const path = ["mode", nextMode] as const;
+  const path = ["permission", "toggle-mode"] as const;
 
   return {
     argv: [],
     clientInvocationId: createInvocationId(),
-    commandId: `mode.${nextMode}`,
+    commandId: "permission.toggle-mode",
     path,
-    raw: `/${path.join(" ")}`,
+    raw: "<shift-tab>",
     rawArgs: "",
     sessionId,
     surface: "tui",

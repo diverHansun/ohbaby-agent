@@ -406,6 +406,7 @@ export function createPersistentUiBackendClient(
       createLLMClient: options.createLLMClient,
       createRunId: options.createRunId,
       hookExecutor,
+      initialSnapshot: options.initialSnapshot,
       llmClient: options.llmClient,
       messageManager,
       now: options.now,

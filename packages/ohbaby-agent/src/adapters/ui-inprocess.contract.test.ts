@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
@@ -252,7 +252,9 @@ function createResumableTaskFakeLLMClient(
             lastSubagentSessionId;
           if (!resumeSessionId) {
             return Promise.reject(
-              new Error("Expected previous subagent session id in parent context"),
+              new Error(
+                "Expected previous subagent session id in parent context",
+              ),
             );
           }
           return Promise.resolve(
@@ -927,7 +929,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("passes slash command mode into the next model system prompt", async () => {
+  it("passes TUI permission mode into the next model system prompt", async () => {
     const requests: ProviderRequest[] = [];
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-mode-prompt-"));
     try {
@@ -941,10 +943,10 @@ describe("createInProcessUiBackendClient", () => {
 
       await client.executeCommand({
         argv: [],
-        clientInvocationId: "inv_mode_plan_prompt",
-        commandId: "mode.plan",
-        path: ["mode", "plan"],
-        raw: "/mode plan",
+        clientInvocationId: "inv_mode_toggle_prompt",
+        commandId: "permission.toggle-mode",
+        path: ["permission", "toggle-mode"],
+        raw: "<shift-tab>",
         rawArgs: "",
         surface: "tui",
       });
@@ -2022,6 +2024,68 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
+  it("omits always approval for non-rememberable external write confirmations", async () => {
+    const requests: ProviderRequest[] = [];
+    const directory = await mkdtemp(
+      join(process.cwd(), ".tmp-ohbaby-ui-external-write-"),
+    );
+    const outsideDirectory = await mkdtemp(
+      join(tmpdir(), "ohbaby-ui-external-write-"),
+    );
+    try {
+      const outsidePath = join(outsideDirectory, "outside.txt");
+      const client = createInProcessUiBackendClient({
+        initialSnapshot: {
+          activeSessionId: null,
+          permission: {
+            level: "full-access",
+            mode: "auto",
+            sessionRules: [],
+          },
+          permissions: [],
+          runs: [],
+          sessions: [],
+          status: { kind: "idle" },
+        },
+        llmClient: createSequentialFakeLLMClient(
+          [
+            [
+              writeToolCallEvent({
+                callId: "call_write_external",
+                content: "external",
+                filePath: outsidePath,
+              }),
+            ],
+            [{ textDelta: "External write complete.", finishReason: "stop" }],
+          ],
+          requests,
+        ),
+        workdir: directory,
+      });
+
+      const permission = waitForUiEvent(
+        client,
+        (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
+          event.type === "permission.requested",
+      );
+      const run = client.submitPrompt("Write outside the workspace");
+      const permissionEvent = await permission;
+
+      expect(
+        permissionEvent.request.choices.map((choice) => choice.id),
+      ).toEqual(["allow_once", "reject", "cancel"]);
+
+      await client.respondPermission(permissionEvent.request.id, {
+        choiceId: "allow_once",
+      });
+      await run;
+      await expect(readFile(outsidePath, "utf8")).resolves.toBe("external");
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+      await rm(outsideDirectory, { force: true, recursive: true });
+    }
+  });
+
   it("treats permission cancel as aborting the whole run and clearing pending permission", async () => {
     const requests: ProviderRequest[] = [];
     const directory = await mkdtemp(
@@ -2485,9 +2549,10 @@ describe("createInProcessUiBackendClient", () => {
       sessions: [],
       runs: [],
       permissions: [],
-      policy: {
-        agentState: "ask-before-edit",
-        mode: "agent",
+      permission: {
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
       },
       status: { kind: "idle" },
     });
@@ -2567,18 +2632,12 @@ describe("createInProcessUiBackendClient", () => {
         "model.current",
         "session",
         "session.resume",
-        "mode",
-        "mode.agent",
-        "mode.ask",
-        "mode.plan",
         "permission",
-        "permission.ask-before-edit",
-        "permission.edit-automatically",
+        "permission.default",
+        "permission.full-access",
       ]),
     );
-    expect(catalog.commands.map((command) => command.id)).not.toContain(
-      "mode.auto-edit",
-    );
+    expect(catalog.commands.map((command) => command.id)).not.toContain("mode");
   });
 
   it("lists user-invocable project skills as slash commands", async () => {
@@ -2779,20 +2838,21 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("exposes policy state in SDK snapshots", async () => {
+  it("exposes permission state in SDK snapshots", async () => {
     const client = createInProcessUiBackendClient({
       llmClient: createFakeLLMClient([]),
     });
 
     await expect(client.getSnapshot()).resolves.toMatchObject({
-      policy: {
-        agentState: "ask-before-edit",
-        mode: "agent",
+      permission: {
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
       },
     });
   });
 
-  it("publishes policy.updated when mode and permission commands change backend policy", async () => {
+  it("publishes permission.updated when mode and level commands change backend permission", async () => {
     const client = createInProcessUiBackendClient({
       llmClient: createFakeLLMClient([]),
     });
@@ -2803,54 +2863,58 @@ describe("createInProcessUiBackendClient", () => {
 
     await client.executeCommand({
       argv: [],
-      clientInvocationId: "inv_mode_ask",
-      commandId: "mode.ask",
-      path: ["mode", "ask"],
-      raw: "/mode ask",
+      clientInvocationId: "inv_mode_toggle",
+      commandId: "permission.toggle-mode",
+      path: ["permission", "toggle-mode"],
+      raw: "<shift-tab>",
       rawArgs: "",
       surface: "tui",
     });
     await client.executeCommand({
       argv: [],
-      clientInvocationId: "inv_mode_agent",
-      commandId: "mode.agent",
-      path: ["mode", "agent"],
-      raw: "/mode agent",
+      clientInvocationId: "inv_mode_toggle_back",
+      commandId: "permission.toggle-mode",
+      path: ["permission", "toggle-mode"],
+      raw: "<shift-tab>",
       rawArgs: "",
       surface: "tui",
     });
     await client.executeCommand({
       argv: [],
-      clientInvocationId: "inv_mode_auto",
-      commandId: "permission.edit-automatically",
-      path: ["permission", "edit-automatically"],
-      raw: "/permission edit-automatically",
+      clientInvocationId: "inv_level_full_access",
+      commandId: "permission.full-access",
+      path: ["permission", "full-access"],
+      raw: "/permission full-access",
       rawArgs: "",
       surface: "tui",
     });
 
-    const policyEvents = events.filter(
-      (event): event is Extract<UiEvent, { type: "policy.updated" }> =>
-        event.type === "policy.updated",
+    const permissionEvents = events.filter(
+      (event): event is Extract<UiEvent, { type: "permission.updated" }> =>
+        event.type === "permission.updated",
     );
-    expect(policyEvents.map((event) => event.policy)).toEqual([
+    expect(permissionEvents.map((event) => event.permission)).toEqual([
       {
-        agentState: "ask-before-edit",
-        mode: "ask",
+        level: "default",
+        mode: "plan",
+        sessionRules: [],
       },
       {
-        agentState: "ask-before-edit",
-        mode: "agent",
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
       },
       {
-        agentState: "edit-automatically",
-        mode: "agent",
+        level: "full-access",
+        mode: "auto",
+        sessionRules: [],
       },
     ]);
     await expect(client.getSnapshot()).resolves.toMatchObject({
-      policy: {
-        agentState: "edit-automatically",
-        mode: "agent",
+      permission: {
+        level: "full-access",
+        mode: "auto",
+        sessionRules: [],
       },
     });
   });

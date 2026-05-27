@@ -37,15 +37,21 @@ const catalog: TuiCommandCatalog = {
       surfaces: ["tui"],
     },
     {
-      description: "Show policy mode",
-      id: "mode",
-      path: ["mode"],
+      description: "Choose permission level",
+      id: "permission",
+      path: ["permission"],
       surfaces: ["tui"],
     },
     {
-      description: "Switch to ask mode",
-      id: "mode.ask",
-      path: ["mode", "ask"],
+      description: "Use default permission level",
+      id: "permission.default",
+      path: ["permission", "default"],
+      surfaces: ["tui"],
+    },
+    {
+      description: "Use full access permission level",
+      id: "permission.full-access",
+      path: ["permission", "full-access"],
       surfaces: ["tui"],
     },
   ],
@@ -126,26 +132,41 @@ describe("slash command runtime", () => {
   });
 
   it("does not resolve removed session subcommands", () => {
-    expect(resolveCommand(parseSlashInput("/session list"), catalog, {
-      surface: "tui",
-    })).toMatchObject({
+    expect(
+      resolveCommand(parseSlashInput("/session list"), catalog, {
+        surface: "tui",
+      }),
+    ).toMatchObject({
       kind: "not-found",
     });
-    expect(resolveCommand(parseSlashInput("/session resume session_1"), catalog, {
-      surface: "tui",
-    })).toMatchObject({
+    expect(
+      resolveCommand(parseSlashInput("/session resume session_1"), catalog, {
+        surface: "tui",
+      }),
+    ).toMatchObject({
       kind: "not-found",
     });
   });
 
+  it("does not resolve removed mode commands through permission", () => {
+    for (const input of ["/permission plan", "/permission auto", "/mode"]) {
+      expect(
+        resolveCommand(parseSlashInput(input), catalog, {
+          surface: "tui",
+        }),
+      ).toMatchObject({
+        kind: "not-found",
+      });
+    }
+  });
+
   it("orders exact slash command hints before shared-prefix commands", () => {
-    const parsed = parseSlashInput("/mode");
+    const parsed = parseSlashInput("/permission");
     const matches = filterCommandCatalog(parsed, catalog, { surface: "tui" });
 
-    expect(matches.map((command) => command.id).slice(0, 3)).toEqual([
-      "mode",
-      "mode.ask",
-      "model",
+    expect(matches.map((command) => command.id).slice(0, 2)).toEqual([
+      "permission",
+      "permission.default",
     ]);
   });
 

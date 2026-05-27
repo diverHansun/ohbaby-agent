@@ -156,41 +156,43 @@ describe("TUI main chain with real in-process backend", () => {
     app.unmount();
   });
 
-  it("switches policy mode through slash commands and Shift+Tab", async () => {
+  it("switches permission mode with Shift+Tab and level with slash commands", async () => {
     const client = createInProcessUiBackendClient({
       llmClient: createFakeLLMClient([]),
     });
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: agent | permission: ask-before-edit"),
+      frame.includes("mode: auto | level: default"),
     );
-    app.stdin.write("/mode ask");
-    app.stdin.write("\r");
-    await waitForFrame(app, (frame) =>
-      frame.includes("mode: ask | permission: ask-before-edit"),
-    );
-
     app.stdin.write("\u001B[Z");
+    await waitForFrame(app, (frame) =>
+      frame.includes("mode: plan | level: default"),
+    );
+    app.stdin.write("\u001B[Z");
+    await waitForFrame(app, (frame) =>
+      frame.includes("mode: auto | level: default"),
+    );
+    app.stdin.write("/permission full-access");
+    app.stdin.write("\r");
     const frame = await waitForFrame(app, (nextFrame) =>
-      nextFrame.includes("mode: plan | permission: ask-before-edit"),
+      nextFrame.includes("mode: auto | level: full-access"),
     );
 
     expect(frame).toContain("status: idle");
     app.unmount();
   });
 
-  it("lists only policy-available tools from the TUI slash command", async () => {
+  it("lists the same tools from the TUI slash command in plan mode", async () => {
     const client = createInProcessUiBackendClient({
       llmClient: createFakeLLMClient([]),
     });
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await waitForFrame(app, promptIsReady);
-    app.stdin.write("/mode ask");
-    app.stdin.write("\r");
+    app.stdin.write("\u001B[Z");
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: ask | permission: ask-before-edit"),
+      frame.includes("mode: plan | level: default"),
     );
 
     app.stdin.write("/tools");
@@ -204,15 +206,14 @@ describe("TUI main chain with real in-process backend", () => {
         !nextFrame.includes('"description"'),
     );
 
-    expect(frame).not.toContain(", write");
-    expect(frame).not.toContain("tools: write");
-    expect(frame).not.toContain("bash");
-    expect(frame).not.toContain("task");
+    expect(frame).toContain("write");
+    expect(frame).toContain("bash");
+    expect(frame).toContain("task");
     app.unmount();
   });
 
-  it("rejects write tool calls in ask mode before showing permission", async () => {
-    const workdir = await tempWorkspace("ohbaby-cli-ask-policy");
+  it("rejects write tool calls in plan mode before showing permission", async () => {
+    const workdir = await tempWorkspace("ohbaby-cli-plan-permission");
     const requests = [];
     const client = createInProcessUiBackendClient({
       llmClient: createSequentialFakeLLMClient(
@@ -224,7 +225,7 @@ describe("TUI main chain with real in-process backend", () => {
               filePath: "denied.txt",
             }),
           ],
-          [{ textDelta: "Write blocked by policy.", finishReason: "stop" }],
+          [{ textDelta: "Write blocked by plan mode.", finishReason: "stop" }],
         ],
         requests,
       ),
@@ -233,29 +234,28 @@ describe("TUI main chain with real in-process backend", () => {
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: agent | permission: ask-before-edit"),
+      frame.includes("mode: auto | level: default"),
     );
-    app.stdin.write("/mode ask");
-    app.stdin.write("\r");
+    app.stdin.write("\u001B[Z");
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: ask | permission: ask-before-edit"),
+      frame.includes("mode: plan | level: default"),
     );
 
     app.stdin.write("try to write");
     app.stdin.write("\r");
     const frame = await waitForFrame(app, (nextFrame) =>
-      nextFrame.includes("Write blocked by policy."),
+      nextFrame.includes("Write blocked by plan mode."),
     );
 
     expect(frame).toContain("tool write (failed)");
-    expect(frame).toContain("not allowed in ask mode");
+    expect(frame).toContain("plan mode");
     expect(frame).not.toContain("Permission:");
     expect(requests).toHaveLength(2);
     app.unmount();
   });
 
-  it("runs write tool calls without permission after /permission edit-automatically", async () => {
-    const workdir = await tempWorkspace("ohbaby-cli-auto-edit");
+  it("runs write tool calls without permission after /permission full-access", async () => {
+    const workdir = await tempWorkspace("ohbaby-cli-full-access");
     const client = createInProcessUiBackendClient({
       llmClient: createSequentialFakeLLMClient([
         [
@@ -272,10 +272,10 @@ describe("TUI main chain with real in-process backend", () => {
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await waitForFrame(app, promptIsReady);
-    app.stdin.write("/permission edit-automatically");
+    app.stdin.write("/permission full-access");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) =>
-      frame.includes("mode: agent | permission: edit-automatically"),
+      frame.includes("mode: auto | level: full-access"),
     );
 
     app.stdin.write("write automatically");

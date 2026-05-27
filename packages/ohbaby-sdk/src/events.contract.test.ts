@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UiEvent, UiSnapshot } from "./index.js";
 
-type UiPolicyState = NonNullable<UiSnapshot["policy"]>;
+type UiPermissionState = NonNullable<UiSnapshot["permission"]>;
 
 describe("UiEvent protocol", () => {
   it("represents command and interaction protocol events with correlation ids", () => {
@@ -59,24 +59,26 @@ describe("UiEvent protocol", () => {
     ]);
   });
 
-  it("represents policy state updates", () => {
-    const policy: UiPolicyState = {
-      agentState: "ask-before-edit",
-      mode: "agent",
+  it("represents permission state updates", () => {
+    const permission: UiPermissionState = {
+      level: "default",
+      mode: "auto",
+      sessionRules: [],
     };
     const event: UiEvent = {
-      policy,
+      permission,
       timestamp: 5,
-      type: "policy.updated",
+      type: "permission.updated",
     };
 
     expect(event).toEqual({
-      policy: {
-        agentState: "ask-before-edit",
-        mode: "agent",
+      permission: {
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
       },
       timestamp: 5,
-      type: "policy.updated",
+      type: "permission.updated",
     });
   });
 });

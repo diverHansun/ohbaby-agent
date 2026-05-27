@@ -1,12 +1,32 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
+import type { UiSnapshot } from "ohbaby-sdk";
 import { createPersistentUiBackendClient } from "./adapters/ui-persistent.js";
+import type { CliArgs } from "./cli/args.js";
 import { CliArgumentError, parseCliArgs, renderHelp } from "./cli/args.js";
 import { EXIT_CODES } from "./cli/exit-codes.js";
 import { readStdin } from "./cli/stdin.js";
 import { createStdoutRenderer } from "./cli/stdout-renderer.js";
 
 const VERSION = "0.1.0";
+
+function initialSnapshotFromArgs(args: CliArgs): UiSnapshot | undefined {
+  if (!args.permissionMode && !args.permissionLevel) {
+    return undefined;
+  }
+  return {
+    activeSessionId: null,
+    permission: {
+      level: args.permissionLevel ?? "default",
+      mode: args.permissionMode ?? "auto",
+      sessionRules: [],
+    },
+    permissions: [],
+    runs: [],
+    sessions: [],
+    status: { kind: "idle" },
+  };
+}
 
 export async function runOhbabyCli(
   argv: readonly string[] = process.argv,
@@ -32,7 +52,9 @@ export async function runOhbabyCli(
     return EXIT_CODES.ok;
   }
 
-  const client = createPersistentUiBackendClient();
+  const client = createPersistentUiBackendClient({
+    initialSnapshot: initialSnapshotFromArgs(args),
+  });
   if (args.mode === "prompt" || !process.stdin.isTTY) {
     const renderer = createStdoutRenderer();
     client.subscribeEvents((event) => {

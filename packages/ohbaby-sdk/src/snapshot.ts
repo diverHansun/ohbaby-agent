@@ -12,13 +12,31 @@ export type UiRunStatus =
       readonly recoverable: boolean;
     };
 
-export type UiPolicyMode = "agent" | "ask" | "plan";
+export type UiPermissionMode = "plan" | "auto";
 
-export type UiPolicyAgentState = "ask-before-edit" | "edit-automatically";
+export type UiPermissionLevel = "default" | "full-access";
 
-export interface UiPolicyState {
-  readonly mode: UiPolicyMode;
-  readonly agentState: UiPolicyAgentState;
+export type UiPermissionRuleDecision = "allow" | "deny";
+
+export type UiPermissionRuleScope = "session";
+
+export interface UiPermissionRule {
+  readonly tool: string;
+  readonly pattern?: string;
+  readonly decision: UiPermissionRuleDecision;
+  readonly scope: UiPermissionRuleScope;
+  readonly reason?: string;
+}
+
+export interface UiSessionPermissionRules {
+  readonly sessionId: string;
+  readonly rules: readonly UiPermissionRule[];
+}
+
+export interface UiPermissionState {
+  readonly mode: UiPermissionMode;
+  readonly level: UiPermissionLevel;
+  readonly sessionRules: readonly UiSessionPermissionRules[];
 }
 
 export interface UiSnapshot {
@@ -27,7 +45,7 @@ export interface UiSnapshot {
   readonly runs: readonly UiRun[];
   readonly permissions: readonly UiPermissionRequest[];
   readonly status: UiRunStatus;
-  readonly policy?: UiPolicyState;
+  readonly permission?: UiPermissionState;
 }
 
 export interface UiSession {

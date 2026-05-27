@@ -71,6 +71,43 @@ const sessionCatalog: UiCommandCatalog = {
   ],
 };
 
+const permissionCatalog: UiCommandCatalog = {
+  version: "permission_catalog",
+  commands: [
+    {
+      aliases: [],
+      argumentMode: "argv",
+      category: "permission",
+      description: "Choose permission level",
+      id: "permission",
+      parentBehavior: "none",
+      path: ["permission"],
+      source: "builtin",
+      surfaces: ["tui", "stdout", "headless"],
+    },
+    {
+      aliases: [],
+      argumentMode: "argv",
+      category: "permission",
+      description: "Use default permission level",
+      id: "permission.default",
+      path: ["permission", "default"],
+      source: "builtin",
+      surfaces: ["tui", "stdout", "headless"],
+    },
+    {
+      aliases: [],
+      argumentMode: "argv",
+      category: "permission",
+      description: "Use full access permission level",
+      id: "permission.full-access",
+      path: ["permission", "full-access"],
+      source: "builtin",
+      surfaces: ["tui", "stdout", "headless"],
+    },
+  ],
+};
+
 describe("resolveCommand", () => {
   it("resolves longest catalog path with remaining argv", () => {
     const parsed = parseSlashInput("/model current --json");
@@ -149,11 +186,28 @@ describe("resolveCommand", () => {
       ok: false,
     });
     expect(
-      resolveCommand(sessionCatalog, parseSlashInput("/session resume session_1")),
+      resolveCommand(
+        sessionCatalog,
+        parseSlashInput("/session resume session_1"),
+      ),
     ).toMatchObject({
       error: { code: "COMMAND_NOT_FOUND" },
       ok: false,
     });
+  });
+
+  it("does not resolve removed mode commands through permission", () => {
+    for (const input of ["/permission plan", "/permission auto", "/mode"]) {
+      expect(resolveCommand(permissionCatalog, parseSlashInput(input))).toEqual(
+        {
+          ok: false,
+          error: {
+            code: "COMMAND_NOT_FOUND",
+            message: `Unknown command "${input}"`,
+          },
+        },
+      );
+    }
   });
 });
 

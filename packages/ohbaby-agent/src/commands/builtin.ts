@@ -2,7 +2,7 @@ import type { UiCommandAction, UiCommandOutput } from "ohbaby-sdk";
 import type {
   CommandHandler,
   CommandModelSummary,
-  CommandPolicyState,
+  CommandPermissionState,
   CommandRunContext,
   CommandServiceOptions,
   CommandSessionSummary,
@@ -33,9 +33,10 @@ async function listSessions(
   return options.sessions?.listSessions() ?? [];
 }
 
-const DEFAULT_POLICY_STATE: CommandPolicyState = {
-  agentState: "ask-before-edit",
-  mode: "agent",
+const DEFAULT_PERMISSION_STATE: CommandPermissionState = {
+  level: "default",
+  mode: "auto",
+  sessionRules: [],
 };
 
 function dataOutput(
@@ -49,23 +50,23 @@ function action(kind: string, data?: Record<string, unknown>): UiCommandAction {
   return data ? { kind, data } : { kind };
 }
 
-function currentPolicyState(
+function currentPermissionState(
   options: CommandServiceOptions,
-): CommandPolicyState {
-  return options.policy?.getState() ?? DEFAULT_POLICY_STATE;
+): CommandPermissionState {
+  return options.permission?.getState() ?? DEFAULT_PERMISSION_STATE;
 }
 
-function emitPolicyState(
+function emitPermissionState(
   options: CommandServiceOptions,
   context: CommandRunContext,
-  subject = "policy.mode",
-): CommandPolicyState {
-  const policy = currentPolicyState(options);
-  context.emitOutput(dataOutput(subject, { policy }));
-  return policy;
+  subject = "permission.level",
+): CommandPermissionState {
+  const permission = currentPermissionState(options);
+  context.emitOutput(dataOutput(subject, { permission }));
+  return permission;
 }
 
-function emitPolicyUpdated(
+function emitPermissionUpdated(
   options: CommandServiceOptions,
   context: CommandRunContext,
   input: {
@@ -73,8 +74,8 @@ function emitPolicyUpdated(
     readonly subject: string;
   },
 ): void {
-  const policy = emitPolicyState(options, context, input.subject);
-  context.emitAction(action(input.actionKind, { policy }));
+  const permission = emitPermissionState(options, context, input.subject);
+  context.emitAction(action(input.actionKind, { permission }));
 }
 
 async function handleModelParent(
@@ -207,7 +208,10 @@ async function handleSessionNew(
   context.emitAction(action("session.selected", { choiceId: session.id }));
 }
 
-function parseForceArg(argv: readonly string[], defaultValue: boolean): boolean {
+function parseForceArg(
+  argv: readonly string[],
+  defaultValue: boolean,
+): boolean {
   if (argv.includes("--no-force")) {
     return false;
   }
@@ -244,27 +248,78 @@ async function handleSessionCompact(
   );
 }
 
-async function handleModeChange(
+async function handleModeToggle(
   options: CommandServiceOptions,
   context: CommandRunContext,
-  mode: CommandPolicyState["mode"],
 ): Promise<void> {
-  await options.policy?.setMode(mode);
-  emitPolicyUpdated(options, context, {
-    actionKind: "policy.mode.updated",
-    subject: "policy.mode",
+  if (context.surface !== "tui") {
+    context.fail({
+      code: "PERMISSION_MODE_TOGGLE_UNAVAILABLE",
+      message: "Mode can only be changed from the interactive TUI",
+      recoverable: true,
+    });
+    return;
+  }
+  await options.permission?.toggleMode();
+  emitPermissionUpdated(options, context, {
+    actionKind: "permission.mode.updated",
+    subject: "permission.mode",
   });
 }
 
-async function handlePermissionChange(
+async function handlePermissionLevelSelection(
   options: CommandServiceOptions,
   context: CommandRunContext,
-  agentState: CommandPolicyState["agentState"],
 ): Promise<void> {
-  await options.policy?.setAgentState(agentState);
-  emitPolicyUpdated(options, context, {
-    actionKind: "policy.permission.updated",
-    subject: "policy.permission",
+  if (context.surface !== "tui") {
+    emitPermissionState(options, context);
+    return;
+  }
+
+  const response = await context.requestInteraction({
+    kind: "select-one",
+    options: [
+      {
+        id: "default",
+        label: "default",
+      },
+      {
+        id: "full-access",
+        label: "full-access",
+      },
+    ],
+    prompt: "Permission level",
+    subject: "permission",
+  });
+  if (response.kind === "cancelled") {
+    context.fail({
+      code: "INTERACTION_CANCELLED",
+      message: `Permission selection cancelled: ${response.reason}`,
+      recoverable: true,
+    });
+    return;
+  }
+  if (response.choiceId !== "default" && response.choiceId !== "full-access") {
+    context.fail({
+      code: "INVALID_INTERACTION_RESPONSE",
+      message: "Permission selection did not include a valid level",
+      recoverable: true,
+    });
+    return;
+  }
+
+  await handlePermissionLevelChange(options, context, response.choiceId);
+}
+
+async function handlePermissionLevelChange(
+  options: CommandServiceOptions,
+  context: CommandRunContext,
+  level: CommandPermissionState["level"],
+): Promise<void> {
+  await options.permission?.setLevel(level);
+  emitPermissionUpdated(options, context, {
+    actionKind: "permission.level.updated",
+    subject: "permission.level",
   });
 }
 
@@ -349,45 +404,27 @@ export function createBuiltinHandlers(
       },
     },
     {
-      id: "mode",
-      execute(_invocation, context): void {
-        emitPolicyState(options, context);
-      },
-    },
-    {
-      id: "mode.agent",
-      execute(_invocation, context): Promise<void> {
-        return handleModeChange(options, context, "agent");
-      },
-    },
-    {
-      id: "mode.ask",
-      execute(_invocation, context): Promise<void> {
-        return handleModeChange(options, context, "ask");
-      },
-    },
-    {
-      id: "mode.plan",
-      execute(_invocation, context): Promise<void> {
-        return handleModeChange(options, context, "plan");
-      },
-    },
-    {
       id: "permission",
-      execute(_invocation, context): void {
-        emitPolicyState(options, context, "policy.permission");
+      execute(_invocation, context): Promise<void> {
+        return handlePermissionLevelSelection(options, context);
       },
     },
     {
-      id: "permission.ask-before-edit",
+      id: "permission.default",
       execute(_invocation, context): Promise<void> {
-        return handlePermissionChange(options, context, "ask-before-edit");
+        return handlePermissionLevelChange(options, context, "default");
       },
     },
     {
-      id: "permission.edit-automatically",
+      id: "permission.full-access",
       execute(_invocation, context): Promise<void> {
-        return handlePermissionChange(options, context, "edit-automatically");
+        return handlePermissionLevelChange(options, context, "full-access");
+      },
+    },
+    {
+      id: "permission.toggle-mode",
+      execute(_invocation, context): Promise<void> {
+        return handleModeToggle(options, context);
       },
     },
   ];

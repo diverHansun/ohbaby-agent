@@ -8,28 +8,22 @@ import { createBus } from "../bus/index.js";
 import { CommandsEvent, createCommandService } from "./index.js";
 import { createInteractionBroker } from "../runtime/interaction-broker/index.js";
 
-type UiPolicyState = NonNullable<UiSnapshot["policy"]>;
+type UiPermissionState = NonNullable<UiSnapshot["permission"]>;
 
 describe("CommandService", () => {
-  it("lists mode commands in the builtin catalog", async () => {
+  it("lists permission commands in the builtin catalog", async () => {
     const { service } = createServiceHarness();
 
     const catalog = await service.listCommands({ surface: "tui" });
 
     expect(catalog.commands.map((command) => command.id)).toEqual(
       expect.arrayContaining([
-        "mode",
-        "mode.agent",
-        "mode.ask",
-        "mode.plan",
         "permission",
-        "permission.ask-before-edit",
-        "permission.edit-automatically",
+        "permission.default",
+        "permission.full-access",
       ]),
     );
-    expect(catalog.commands.map((command) => command.id)).not.toContain(
-      "mode.auto-edit",
-    );
+    expect(catalog.commands.map((command) => command.id)).not.toContain("mode");
   });
 
   it("executes status and publishes command events", async () => {
@@ -457,110 +451,111 @@ describe("CommandService", () => {
     );
   });
 
-  it("reports and updates policy mode", async () => {
-    let policyState: UiPolicyState = {
-      agentState: "ask-before-edit",
-      mode: "agent",
+  it("reports and updates permission mode and level", async () => {
+    let permissionState: UiPermissionState = {
+      level: "default",
+      mode: "auto",
+      sessionRules: [],
     };
-    const setMode = vi.fn<(mode: UiPolicyState["mode"]) => void>((mode) => {
-      policyState = {
-        agentState: "ask-before-edit",
+    const toggleMode = vi.fn(() => {
+      permissionState = {
+        ...permissionState,
+        mode: permissionState.mode === "auto" ? "plan" : "auto",
+      };
+      return permissionState.mode;
+    });
+    const setMode = vi.fn<(mode: UiPermissionState["mode"]) => void>((mode) => {
+      permissionState = {
+        ...permissionState,
         mode,
       };
     });
-    const setAgentState = vi.fn<(state: UiPolicyState["agentState"]) => void>(
-      (agentState) => {
-        if (
-          agentState === "edit-automatically" &&
-          policyState.mode !== "agent"
-        ) {
-          return;
-        }
-        policyState = {
-          agentState,
-          mode: policyState.mode,
+    const setLevel = vi.fn<(level: UiPermissionState["level"]) => void>(
+      (level) => {
+        permissionState = {
+          ...permissionState,
+          level,
         };
       },
     );
     const { events, service } = createServiceHarness({
-      policy: {
+      permission: {
         getState() {
-          return policyState;
+          return permissionState;
         },
+        setLevel,
         setMode,
-        setAgentState,
+        toggleMode,
       },
     });
 
-    await service.executeCommand(makeInvocation("mode", ["mode"]));
-    await service.executeCommand(makeInvocation("mode.ask", ["mode", "ask"]));
-    await service.executeCommand(makeInvocation("permission", ["permission"]));
     await service.executeCommand(
-      makeInvocation("permission.edit-automatically", [
-        "permission",
-        "edit-automatically",
-      ]),
+      makeInvocation("permission.toggle-mode", ["permission", "toggle-mode"]),
     );
     await service.executeCommand(
-      makeInvocation("permission.ask-before-edit", [
-        "permission",
-        "ask-before-edit",
-      ]),
+      makeInvocation("permission.full-access", ["permission", "full-access"]),
+    );
+    await service.executeCommand(
+      makeInvocation("permission.default", ["permission", "default"]),
     );
 
-    expect(setMode).toHaveBeenCalledWith("ask");
-    expect(setMode).not.toHaveBeenCalledWith("agent");
-    expect(setAgentState).toHaveBeenNthCalledWith(1, "edit-automatically");
-    expect(setAgentState).toHaveBeenNthCalledWith(2, "ask-before-edit");
+    expect(toggleMode).toHaveBeenCalledOnce();
+    expect(setMode).not.toHaveBeenCalled();
+    expect(setLevel).toHaveBeenNthCalledWith(1, "full-access");
+    expect(setLevel).toHaveBeenNthCalledWith(2, "default");
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           output: {
             data: {
-              policy: {
-                agentState: "ask-before-edit",
-                mode: "agent",
+              permission: {
+                level: "default",
+                mode: "plan",
+                sessionRules: [],
               },
             },
             kind: "data",
-            subject: "policy.mode",
+            subject: "permission.mode",
           },
           type: "result",
         }),
         expect.objectContaining({
           action: {
             data: {
-              policy: {
-                agentState: "ask-before-edit",
-                mode: "ask",
+              permission: {
+                level: "default",
+                mode: "plan",
+                sessionRules: [],
               },
             },
-            kind: "policy.mode.updated",
+            kind: "permission.mode.updated",
           },
           type: "result",
         }),
         expect.objectContaining({
           output: {
             data: {
-              policy: {
-                agentState: "ask-before-edit",
-                mode: "ask",
+              permission: {
+                level: "full-access",
+                mode: "plan",
+                sessionRules: [],
               },
             },
             kind: "data",
-            subject: "policy.permission",
+            subject: "permission.level",
           },
           type: "result",
         }),
         expect.objectContaining({
           action: {
             data: {
-              policy: {
-                agentState: "ask-before-edit",
-                mode: "ask",
+              permission: {
+                level: "default",
+                mode: "plan",
+                sessionRules: [],
               },
             },
-            kind: "policy.permission.updated",
+            kind: "permission.level.updated",
           },
           type: "result",
         }),
@@ -577,6 +572,32 @@ describe("CommandService", () => {
       error: {
         code: "COMMAND_NOT_FOUND",
         message: "Command not found: missing",
+      },
+      type: "failed",
+    });
+  });
+
+  it("does not accept mode values as permission subcommands", async () => {
+    const { events, service } = createServiceHarness();
+
+    await service.executeCommand(
+      makeInvocation("permission.plan", ["permission", "plan"]),
+    );
+    await service.executeCommand(
+      makeInvocation("permission.auto", ["permission", "auto"]),
+    );
+
+    expect(events.at(1)).toMatchObject({
+      error: {
+        code: "COMMAND_NOT_FOUND",
+        message: "Command not found: permission.plan",
+      },
+      type: "failed",
+    });
+    expect(events.at(3)).toMatchObject({
+      error: {
+        code: "COMMAND_NOT_FOUND",
+        message: "Command not found: permission.auto",
       },
       type: "failed",
     });

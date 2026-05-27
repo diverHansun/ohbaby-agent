@@ -1,5 +1,5 @@
 import { Box, Text, useInput } from "ink";
-import type { UiPolicyState } from "ohbaby-sdk";
+import type { UiPermissionState } from "ohbaby-sdk";
 import { useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
@@ -19,7 +19,7 @@ export interface PromptProps {
   readonly client: TuiBackendClient;
   readonly disabled: boolean;
   readonly loadCatalog?: () => Promise<TuiCommandCatalog>;
-  readonly policy?: UiPolicyState;
+  readonly permission?: UiPermissionState;
 }
 
 export function Prompt({
@@ -28,7 +28,7 @@ export function Prompt({
   client,
   disabled,
   loadCatalog,
-  policy,
+  permission,
 }: PromptProps): ReactElement {
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -121,9 +121,9 @@ export function Prompt({
           {" |"}
         </Text>
       </Text>
-      {policy === undefined ? null : (
+      {permission === undefined ? null : (
         <Text dimColor>
-          mode: {policy.mode} | permission: {policy.agentState}
+          mode: {permission.mode} | level: {permission.level}
         </Text>
       )}
       {error === null ? null : <Text color="red">{error}</Text>}

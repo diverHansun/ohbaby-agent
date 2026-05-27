@@ -53,9 +53,10 @@ describe("TUI store event reducer", () => {
   it("projects the active session messages from the initial snapshot", () => {
     const state = createStateFromSnapshot({
       ...snapshot(),
-      policy: {
-        agentState: "ask-before-edit",
-        mode: "agent",
+      permission: {
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
       },
     });
 
@@ -63,9 +64,10 @@ describe("TUI store event reducer", () => {
     expect(state.messages).toHaveLength(1);
     expect(state.messages[0]?.parts[0]).toMatchObject({ text: "Hello" });
     expect(state.runtime).toEqual({ kind: "idle" });
-    expect(state.policy).toEqual({
-      agentState: "ask-before-edit",
-      mode: "agent",
+    expect(state.permission).toEqual({
+      level: "default",
+      mode: "auto",
+      sessionRules: [],
     });
   });
 
@@ -237,6 +239,56 @@ describe("TUI store event reducer", () => {
     expect(state.interactions).toHaveLength(0);
   });
 
+  it("does not roll back live permission state from a replacement snapshot", () => {
+    let state = createStateFromSnapshot({
+      ...snapshot(),
+      permission: {
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
+      },
+    });
+    state = applyTuiEvent(state, {
+      permission: {
+        level: "full-access",
+        mode: "plan",
+        sessionRules: [],
+      },
+      type: "permission.updated",
+    });
+
+    state = applyTuiEvent(state, {
+      snapshot: {
+        ...snapshot(),
+        permission: {
+          level: "default",
+          mode: "auto",
+          sessionRules: [],
+        },
+      },
+      type: "snapshot.replaced",
+    });
+
+    expect(state.permission).toEqual({
+      level: "full-access",
+      mode: "plan",
+      sessionRules: [],
+    });
+    expect(state.snapshot.permission).toEqual(state.permission);
+
+    state = applyTuiEvent(state, {
+      snapshot: snapshot(),
+      type: "snapshot.replaced",
+    });
+
+    expect(state.permission).toEqual({
+      level: "full-access",
+      mode: "plan",
+      sessionRules: [],
+    });
+    expect(state.snapshot.permission).toEqual(state.permission);
+  });
+
   it("keeps the active run visible after a permission is resolved", () => {
     let state = createStateFromSnapshot(snapshot());
     state = applyTuiEvent(state, {
@@ -309,20 +361,21 @@ describe("TUI store event reducer", () => {
       commandRunId: "command_mode",
       output: {
         data: {
-          policy: {
-            agentState: "ask-before-edit",
-            mode: "ask",
+          permission: {
+            level: "default",
+            mode: "plan",
+            sessionRules: [],
           },
         },
         kind: "data",
-        subject: "policy.mode",
+        subject: "permission.mode",
       },
       timestamp: 1,
       type: "command.result.delivered",
     });
 
     expect(state.commandNotices.at(-1)?.text).toBe(
-      "mode: ask | permission: ask-before-edit",
+      "mode: plan | level: default",
     );
 
     state = applyTuiEvent(state, {
@@ -330,20 +383,21 @@ describe("TUI store event reducer", () => {
       commandRunId: "command_permission",
       output: {
         data: {
-          policy: {
-            agentState: "edit-automatically",
-            mode: "agent",
+          permission: {
+            level: "full-access",
+            mode: "auto",
+            sessionRules: [],
           },
         },
         kind: "data",
-        subject: "policy.permission",
+        subject: "permission.level",
       },
       timestamp: 2,
       type: "command.result.delivered",
     });
 
     expect(state.commandNotices.at(-1)?.text).toBe(
-      "permission: edit-automatically | mode: agent",
+      "level: full-access | mode: auto",
     );
 
     state = applyTuiEvent(state, {
@@ -446,26 +500,29 @@ describe("TUI store event reducer", () => {
     expect(state.notices.at(-1)?.message).toBe("Provider error 11");
   });
 
-  it("applies policy updates and preserves them across collection rebuilds", () => {
+  it("applies permission updates and preserves them across collection rebuilds", () => {
     let state = createStateFromSnapshot({
       ...snapshot(),
-      policy: {
-        agentState: "ask-before-edit",
-        mode: "agent",
+      permission: {
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
       },
     });
 
     state = applyTuiEvent(state, {
-      policy: {
-        agentState: "ask-before-edit",
+      permission: {
+        level: "full-access",
         mode: "plan",
+        sessionRules: [],
       },
-      previousPolicy: {
-        agentState: "ask-before-edit",
-        mode: "agent",
+      previousPermission: {
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
       },
       timestamp: 1,
-      type: "policy.updated",
+      type: "permission.updated",
     });
     state = applyTuiEvent(state, {
       run: {
@@ -479,11 +536,12 @@ describe("TUI store event reducer", () => {
       type: "run.updated",
     });
 
-    expect(state.policy).toEqual({
-      agentState: "ask-before-edit",
+    expect(state.permission).toEqual({
+      level: "full-access",
       mode: "plan",
+      sessionRules: [],
     });
-    expect(state.snapshot.policy).toEqual(state.policy);
+    expect(state.snapshot.permission).toEqual(state.permission);
   });
 
   it("marks catalog invalidation without mutating the loaded catalog", () => {

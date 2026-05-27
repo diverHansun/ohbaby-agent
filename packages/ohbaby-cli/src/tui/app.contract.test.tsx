@@ -68,26 +68,26 @@ const catalog: TuiCommandCatalog = {
   version: "v1",
 };
 
-const modeCatalog: TuiCommandCatalog = {
+const permissionCatalog: TuiCommandCatalog = {
   ...catalog,
   commands: [
     ...catalog.commands,
     {
-      description: "Show policy mode",
-      id: "mode",
-      path: ["mode"],
+      description: "Choose permission level",
+      id: "permission",
+      path: ["permission"],
       surfaces: ["tui"],
     },
     {
-      description: "Switch to agent mode",
-      id: "mode.agent",
-      path: ["mode", "agent"],
+      description: "Use default permission level",
+      id: "permission.default",
+      path: ["permission", "default"],
       surfaces: ["tui"],
     },
     {
-      description: "Switch to ask mode",
-      id: "mode.ask",
-      path: ["mode", "ask"],
+      description: "Use full-access permission level",
+      id: "permission.full-access",
+      path: ["permission", "full-access"],
       surfaces: ["tui"],
     },
   ],
@@ -197,54 +197,54 @@ describe("OhbabyTerminalApp", () => {
     );
   });
 
-  it("renders policy mode below the prompt and updates it from backend events", async () => {
+  it("renders permission state below the prompt and updates it from backend events", async () => {
     const client = createFakeClient({
       ...snapshot(),
-      policy: {
-        agentState: "ask-before-edit",
-        mode: "agent",
+      permission: {
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
       },
     });
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await flush();
-    expect(app.lastFrame()).toContain(
-      "mode: agent | permission: ask-before-edit",
-    );
+    expect(app.lastFrame()).toContain("mode: auto | level: default");
     expect(app.lastFrame()).not.toContain(
       "status: idle | session: session_1 | mode:",
     );
     expect(
-      lineIndex(app.lastFrame(), "mode: agent | permission: ask-before-edit"),
+      lineIndex(app.lastFrame(), "mode: auto | level: default"),
     ).toBeLessThan(
       lineIndex(app.lastFrame(), "status: idle | session: session_1"),
     );
 
     client.emit({
-      policy: {
-        agentState: "edit-automatically",
-        mode: "agent",
+      permission: {
+        level: "full-access",
+        mode: "plan",
+        sessionRules: [],
       },
-      previousPolicy: {
-        agentState: "ask-before-edit",
-        mode: "agent",
+      previousPermission: {
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
       },
       timestamp: 1,
-      type: "policy.updated",
+      type: "permission.updated",
     });
     await flush();
 
-    expect(app.lastFrame()).toContain(
-      "mode: agent | permission: edit-automatically",
-    );
+    expect(app.lastFrame()).toContain("mode: plan | level: full-access");
   });
 
-  it("cycles policy mode with Shift+Tab", async () => {
+  it("toggles permission mode with Shift+Tab", async () => {
     const client = createFakeClient({
       ...snapshot(),
-      policy: {
-        agentState: "ask-before-edit",
-        mode: "agent",
+      permission: {
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
       },
     });
     const app = render(<OhbabyTerminalApp client={client} />);
@@ -256,9 +256,9 @@ describe("OhbabyTerminalApp", () => {
     expect(client.executeCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         argv: [],
-        commandId: "mode.ask",
-        path: ["mode", "ask"],
-        raw: "/mode ask",
+        commandId: "permission.toggle-mode",
+        path: ["permission", "toggle-mode"],
+        raw: "<shift-tab>",
         sessionId: "session_1",
         surface: "tui",
       }),
@@ -705,11 +705,11 @@ describe("OhbabyTerminalApp", () => {
   });
 
   it("executes a selected slash candidate even when the typed parent is exact", async () => {
-    const client = createFakeClient(snapshot(), modeCatalog);
+    const client = createFakeClient(snapshot(), permissionCatalog);
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await flush();
-    app.stdin.write("/mode");
+    app.stdin.write("/permission");
     await flush();
     app.stdin.write("\u001B[B");
     await flush();
@@ -718,8 +718,8 @@ describe("OhbabyTerminalApp", () => {
 
     expect(client.executeCommand).toHaveBeenCalledWith(
       expect.objectContaining({
-        commandId: "mode.agent",
-        path: ["mode", "agent"],
+        commandId: "permission.default",
+        path: ["permission", "default"],
         sessionId: "session_1",
       }),
     );
