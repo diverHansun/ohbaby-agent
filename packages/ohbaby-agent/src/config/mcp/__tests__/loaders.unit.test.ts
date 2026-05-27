@@ -110,6 +110,32 @@ describe("config/mcp loaders", () => {
     expect("global-server" in config.mcpServers.shared).toBe(false);
   });
 
+  it("loads settings files written with a UTF-8 BOM", async () => {
+    await fs.mkdir(path.dirname(globalPath), { recursive: true });
+    await fs.writeFile(
+      globalPath,
+      `\uFEFF${JSON.stringify({
+        mcpServers: {
+          playwright: {
+            args: ["@playwright/mcp@latest"],
+            command: "npx",
+          },
+        },
+      })}`,
+      "utf8",
+    );
+
+    await expect(loadMcpConfigFromPath(globalPath)).resolves.toMatchObject({
+      mcpServers: {
+        playwright: {
+          args: ["@playwright/mcp@latest"],
+          command: "npx",
+          type: "stdio",
+        },
+      },
+    });
+  });
+
   it("exposes full replacement merge as a pure helper", () => {
     const globalShared = McpServerConfigSchema.parse({
       command: "npx",

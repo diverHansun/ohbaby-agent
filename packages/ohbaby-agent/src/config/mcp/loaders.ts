@@ -14,6 +14,7 @@ export const MCP_CONFIG_FILE_NAME = "settings.json";
 export const OHBABY_CONFIG_DIR_NAME = ".ohbaby-agent";
 
 const EMPTY_CONFIG: McpServersConfig = { mcpServers: {} };
+const UTF8_BOM = "\uFEFF";
 
 export interface LoadMcpConfigOptions {
   readonly globalPath?: string;
@@ -68,7 +69,9 @@ export async function loadMcpConfigFromPath(
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(content);
+    parsed = JSON.parse(
+      content.startsWith(UTF8_BOM) ? content.slice(1) : content,
+    );
   } catch (error) {
     throw new McpConfigParseError(configPath, error);
   }
