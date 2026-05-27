@@ -53,13 +53,12 @@ agent profile 只声明权限规则集，工具通过 `ctx.ask()` 进入 permiss
 
 - `packages/ohbaby-agent/src/permission/`
   - 管理 pending ask、reply、always approval、permission events。
-- `packages/ohbaby-agent/src/policy/`
+- `packages/ohbaby-agent/src/permission/`（统一承载 evaluator / rule / state）
   - 管理粗粒度模式和工具类别决策，例如 `agent` / `ask` / `plan`，
     `readonly` / `write` / `dangerous` 等。
 
-`core/tool-scheduler` 当前先调用 `policy.check()`，如果返回 `ask` 再调用
-`permission.ask()`。这个结构可以支撑 MVP，但长期看 permission / policy 的语义
-有重叠。
+`core/tool-scheduler` 现在统一调用 permission evaluator；如果返回 `ask` 再调用
+`permission.ask()`。旧的顶层 policy 模块已经并入 permission 领域。
 
 ## 后续调整方向
 
@@ -68,8 +67,7 @@ permission 内部的规则/模式 provider：
 
 1. 在 `permission` 中定义统一的 `PermissionMode`、`PermissionRule`、
    `PermissionDecision`、`PermissionPolicy`。
-2. 将当前 `policy.check()` 的工具类别矩阵迁移为 permission 内部默认规则或
-   policy 插件。
+2. 将工具类别矩阵迁移为 permission 内部默认规则。
 3. 将 `core/agents` / `core/tool-scheduler` 的执行前拦截点收敛为类似
    `permission.beforeToolCall(context)` 的接口。
 4. 将 future profile/preset 放入 `permission` 领域，例如
