@@ -25,7 +25,7 @@ export default defineConfig({
         "packages/*/src/index.ts",
       ],
     },
-    setupFiles: [],
+    setupFiles: ["tests/setup/vitest-env.ts"],
     testTimeout: 10000,
   },
   resolve: {
