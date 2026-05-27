@@ -170,4 +170,14 @@ describe("web builtin tools", () => {
       "network",
     );
   });
+
+  it("requires injected search provider config at execution time", async () => {
+    const tool = createWebTools().find(
+      (candidate) => candidate.name === "web_search",
+    );
+
+    await expect(
+      tool?.execute({ query: "agent search" }, createContext()),
+    ).rejects.toThrow(/Search provider config loader is required/);
+  });
 });

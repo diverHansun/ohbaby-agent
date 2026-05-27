@@ -194,34 +194,36 @@ function assertIntegerInRange(
 
 function normalizeSearchResult(
   result: {
-    readonly title: string;
-    readonly url: string;
-    readonly content: string;
-    readonly rawContent?: string;
-    readonly score?: number;
-    readonly publishedDate?: string;
+    readonly title?: string | null;
+    readonly url?: string | null;
+    readonly content?: string | null;
+    readonly rawContent?: string | null;
+    readonly score?: number | null;
+    readonly publishedDate?: string | null;
   },
   options: SearchOptions | undefined,
 ): SearchResult {
+  const rawContent =
+    typeof result.rawContent === "string" ? result.rawContent : undefined;
   return {
     content: truncateCharacters(
-      result.content,
+      normalizeStringField(result.content),
       options?.maxCharactersPerResult,
     ),
     ...(result.publishedDate?.trim()
       ? { publishedDate: result.publishedDate }
       : {}),
-    ...(result.rawContent !== undefined
+    ...(rawContent !== undefined
       ? {
           rawContent: truncateCharacters(
-            result.rawContent,
+            rawContent,
             options?.maxCharactersPerResult,
           ),
         }
       : {}),
-    ...(result.score !== undefined ? { score: result.score } : {}),
-    title: result.title,
-    url: result.url,
+    ...(typeof result.score === "number" ? { score: result.score } : {}),
+    title: normalizeStringField(result.title),
+    url: normalizeStringField(result.url),
   };
 }
 
@@ -279,6 +281,10 @@ function truncateCharacters(
   }
 
   return value.slice(0, maxCharacters);
+}
+
+function normalizeStringField(value: string | null | undefined): string {
+  return typeof value === "string" ? value : "";
 }
 
 function mapTavilyError(error: unknown): Error {

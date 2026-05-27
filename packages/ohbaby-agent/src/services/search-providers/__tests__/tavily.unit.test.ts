@@ -181,6 +181,37 @@ describe("Tavily search provider unit", () => {
     ]);
   });
 
+  it("normalizes nullable Tavily search fields from live API responses", async () => {
+    mocks.client.search.mockResolvedValue({
+      images: [],
+      query: "agent search",
+      requestId: "req-search",
+      responseTime: 12,
+      results: [
+        {
+          content: null,
+          publishedDate: null,
+          rawContent: null,
+          score: null,
+          title: "Nullable",
+          url: "https://example.com/nullable",
+        },
+      ],
+    });
+    const provider = createTavilyProvider({
+      apiKey: "test-key",
+      providerId: "tavily",
+    });
+
+    await expect(provider.search("agent search")).resolves.toEqual([
+      {
+        content: "",
+        title: "Nullable",
+        url: "https://example.com/nullable",
+      },
+    ]);
+  });
+
   it("rejects empty queries and URL lists before calling the SDK", async () => {
     const provider = createTavilyProvider({
       apiKey: "test-key",
