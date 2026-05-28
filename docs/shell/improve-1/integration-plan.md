@@ -1,7 +1,8 @@
 # Shell improve-1 接入方案
 
-本文给出 shell improve-1 的分批实施计划。它先用方案二降低风险，但最终能力必须达到
-完整 opencode 风格 tree-sitter + arity + external-first permission 的方案三效果。
+本文给出 shell improve-1 的分批实施计划。当前分支采用方案二降低落地风险：
+先以轻量 parser 达到本轮所需的方案三效果（结构化命令事实、arity、external-first permission），
+再把完整 opencode 风格 tree-sitter parser 作为独立后续增强，不阻塞 improve-1 合并。
 
 ## 总览
 
@@ -11,8 +12,8 @@
 | 2 | shell analysis 类型与轻量实现 | 是 |
 | 3 | sandbox preflight 消费 shell analysis | 与 sandbox 阶段配合 |
 | 4 | scheduler external-first 权限编排 | 与 sandbox 阶段配合 |
-| 5 | tree-sitter parser 替换轻量实现 | 是 |
-| 6 | skill scripts 路径验证 | 与 e2e 配合 |
+| 5 | skill scripts 路径验证 | 与 e2e 配合 |
+| 后续 | tree-sitter parser 替换轻量实现 | 是 |
 
 ## 阶段 1：bash 执行层硬化
 
@@ -90,7 +91,7 @@ shell 侧没有直接改动，但需要保证 `bash.execute()` 不再自己做 p
 4. 外部路径批准后，再按原 `evaluatePermission()` 处理 bash。
 5. 全部批准后才执行 `bash.execute()`。
 
-## 阶段 5：tree-sitter parser
+## 后续阶段：tree-sitter parser
 
 新增：
 
@@ -115,7 +116,7 @@ packages/ohbaby-agent/src/shell/analysis/powershell.ts
 - 动态表达式被标记而不是误解析。
 - 解析失败有 fallback，不导致普通 bash 完全不可用。
 
-## 阶段 6：skill scripts 验证
+## 阶段 5：skill scripts 验证
 
 目标：
 
@@ -139,6 +140,7 @@ packages/ohbaby-agent/src/shell/analysis/powershell.ts
 3. `feat(shell): add structured command analysis`
 4. `feat(sandbox): add preflight facts from shell analysis`
 5. `feat(permission): ask external directories before bash`
-6. `feat(shell): use tree-sitter command analysis`
+6. `test(sandbox): cover external bash path integration`
+7. `fix(sandbox): tighten approved external execution`
 
 如果任一阶段发现现有架构无法支持，不继续硬写代码，应停止并回到设计讨论。

@@ -49,7 +49,8 @@ export interface ShellAnalysisResult {
 
 1. 先用轻量 parser 包装当前 `shell/preflight.ts` 和 `utils/command-parser` 能力。
 2. 让 `shell/preflight.ts` 停止把外部路径当错误抛出，只返回 shell facts。
-3. 后续再用 tree-sitter 替换轻量 parser 内部，实现 opencode 级别的多命令拆分。
+3. tree-sitter 替换轻量 parser 内部留给后续增强；improve-1 只要求轻量 parser 覆盖本轮
+   external-first、denylist、git/docker arity 与 skill runtime 关键路径。
 
 ## 阶段 2：sandbox preflight facts
 
@@ -256,11 +257,12 @@ e2e 要覆盖 skill scripts 的真实调用路径，确认 scripts 不会绕开 
 4. sandbox paths/boundary/denylist/preflight
 5. rich SandboxLease as ToolExecutionEnvironment
 6. scheduler external_directory -> bash sequencing
-7. tree-sitter parser upgrade
-8. unit + integration + e2e + subagent review
+7. unit + integration + e2e + subagent review
+8. 后续：tree-sitter parser upgrade
 ```
 
-每一步都可以独立提交。第 3 步用轻量 parser 是方案二，第 7 步补齐 tree-sitter 后达到方案三效果。
+每一步都可以独立提交。第 3 步用轻量 parser 是方案二；当前 improve-1 通过结构化 facts
+和 targeted arity 达到本轮方案三效果，完整 tree-sitter 作为后续替换 parser 内部的增强。
 
 ## Rollback 策略
 
@@ -280,15 +282,15 @@ OHBABY_SANDBOX_PREFLIGHT_ENABLED=0
 
 ## 验收清单
 
-- [ ] `bash.ts` 不再 throw `"commandPrefix is not supported"`。
-- [ ] `cat ../outside/file.txt` 触发 `external_directory`。
-- [ ] `cat /absolute/outside/file.txt` 触发 `external_directory`。
-- [ ] 外部路径批准后，bash 原权限规则仍会继续判断是否 ask。
-- [ ] `cat ~/.ssh/id_rsa` 被 denylist hard deny。
-- [ ] `git status` 在默认策略下不被外部路径逻辑干扰。
-- [ ] `git push` 仍按 bash 权限规则 ask，always pattern 来自 arity。
-- [ ] rich `SandboxLease` 是 runtime/tool-scheduler 使用的统一 execution environment。
-- [ ] runtime 下简版 sandbox manager / lease 二次实现被删除。
-- [ ] skill scripts 通过 builtin `bash`，没有新增脚本执行绕行。
-- [ ] unit、integration、e2e 全部通过。
-- [ ] 子代理审查通过。
+- [x] `bash.ts` 不再 throw `"commandPrefix is not supported"`。
+- [x] `cat ../outside/file.txt` 触发 `external_directory`。
+- [x] `cat /absolute/outside/file.txt` 触发 `external_directory`。
+- [x] 外部路径批准后，bash 原权限规则仍会继续判断是否 ask。
+- [x] `cat ~/.ssh/id_rsa` 被 denylist hard deny。
+- [x] `git status` 在默认策略下不被外部路径逻辑干扰。
+- [x] `git push` 仍按 bash 权限规则 ask，always pattern 来自 arity。
+- [x] rich `SandboxLease` 是 runtime/tool-scheduler 使用的统一 execution environment。
+- [x] runtime 下简版 sandbox manager / lease 二次实现被删除。
+- [x] skill scripts 通过 builtin `bash`，没有新增脚本执行绕行。
+- [x] unit、integration、e2e 全部通过。
+- [x] 子代理审查通过。

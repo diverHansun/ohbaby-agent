@@ -1,7 +1,8 @@
 # Sandbox Improvement — Round 1
 
-本目录是 `packages/ohbaby-agent/src/sandbox/` 模块第一轮（improve-1）的设计文档。
-配套实现尚未开工；这里只回答"做什么 / 为什么 / 怎么接 / 借鉴谁"。
+本目录是 `packages/ohbaby-agent/src/sandbox/` 模块第一轮（improve-1）的设计与落地记录。
+当前分支 `codex/shell-sandbox-improve-1` 已完成 improve-1 的 host-local 应用层实现；
+本文档回答"做什么 / 为什么 / 怎么接 / 借鉴谁"，并作为后续合并前的工程边界依据。
 与 shell 模块配套的设计见 [Shell Improvement — Round 1](../../shell/improve-1/README.md)。
 
 ## 背景一句话
@@ -20,14 +21,15 @@ improve-1 的任务是把这种"两份同名抽象、一份死、一份名不副
 | 维度 | 决策 | 影响 |
 |---|---|---|
 | 隔离层级 | 纯应用层（不做 OS 级 seatbelt/landlock） | 跨平台一致，工作量小，Windows 端不跛脚 |
-| 命令解析 | 由 shell/improve-1 负责 tree-sitter 全量分析，sandbox 消费其结构化结果 | 命令语法属于 shell 领域，sandbox 不再二次实现 parser |
+| 命令解析 | 由 shell/improve-1 负责结构化分析；当前落地为轻量 parser + 明确的 tree-sitter 替换缝 | 命令语法属于 shell 领域，sandbox 不再二次实现 parser |
 | workspace 边界 | 单一边界 + 内置敏感路径黑名单；外部路径是事实，不是错误 | 对绝对路径和 `../` 解析出的外部路径统一触发 `external_directory` |
 | 与 permission 协作 | external path 优先：先问 `external_directory`，通过后再按 bash 原规则判断是否还要问 | 对齐 opencode，同时保留现有 bash 权限模型 |
-| arity 字典 | 直接拷 opencode 100+ 条，但归 shell analysis 维护 | 高质量 always-allow 粒度，不让 sandbox 理解 bash 语义 |
+| arity 字典 | 先实现 `git` / `docker` 等关键结构化 arity，归 shell analysis 维护 | 高质量 always-allow 粒度，不让 sandbox 理解 bash 语义 |
 | 简版去留 | 删除 runtime 下的简版 sandbox 二次实现，rich `SandboxLease` 成为统一 execution environment | `RunContext.sandboxLease` 仍然由 run-manager 挂载，架构不翻新 |
 | OS 级隔离 | 留接口不实现 | 未来可加 SeatbeltAdapter 不破坏架构 |
 
-详细每一项的论证见各分项文档。
+详细每一项的论证见各分项文档。tree-sitter 与完整 opencode arity 表属于后续增强；
+improve-1 已通过轻量 parser 达到本轮需要的 external-first、安全 hard-deny 与 skill/runtime 复用目标。
 
 ## 文档导航
 

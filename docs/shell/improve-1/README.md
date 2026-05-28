@@ -20,7 +20,7 @@
 | 维度 | 决策 | 影响 |
 |---|---|---|
 | 职责定位 | shell 是命令语法分析与进程执行层 | 不做 permission 决策，不做 workspace 策略 |
-| 命令解析 | 先收敛现有轻量 preflight，再引入 opencode 风格 tree-sitter | 分批实施，最终效果达到完整 AST 解析 |
+| 命令解析 | 先收敛现有轻量 preflight，保留 opencode 风格 tree-sitter 替换缝 | 分批实施；improve-1 已覆盖本轮 external-first 所需路径与 arity 场景 |
 | 外部路径 | shell 只抽取路径候选；外部路径由 sandbox 标注并由 permission ask | `../` 和绝对外部路径不会被 shell 直接拒绝 |
 | 进程硬化 | 补齐 kimi-code 风格 non-interactive env 与 stdin close | 降低交互命令挂死、git 凭据提示、彩色输出噪音 |
 | commandPrefix | `bash` 工具必须支持 commandPrefix 桥接 | 为未来 OS adapter / remote adapter 保留扩展点 |
@@ -39,7 +39,7 @@ shell improve-1 覆盖：
 
 - 稳定 builtin `bash` 的执行环境：non-interactive env、stdin close、输出/取消/超时语义保持一致。
 - 把现有抛错式 `preflightShellCommand()` 逐步拆成结构化 shell analysis。
-- 为 bash / PowerShell 引入 tree-sitter AST 解析，抽取 command source、tokens、path args、dynamic 标志、danger 分类和 arity pattern。
+- 新增结构化 shell analysis，抽取 command source、tokens、path args、dynamic 标志、danger 分类和 arity pattern；tree-sitter AST 替换留在后续阶段。
 - 支持 `commandPrefix`，但 HostLocal 默认不使用。
 - 为 [sandbox preflight](../../sandbox/improve-1/data-flow.md) 提供输入事实，不直接问 permission。
 

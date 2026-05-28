@@ -32,13 +32,13 @@ opencode **没有 sandbox 模块**——它的整个安全模型分布在 [bash 
 
 | 设计点 | 采纳形式 |
 |---|---|
-| tree-sitter 多语言 AST 解析（bash + powershell） | 直接采纳，但落在 [shell/improve-1](../../shell/improve-1/integration-plan.md) 的 `src/shell/analysis/` |
+| tree-sitter 多语言 AST 解析（bash + powershell） | 作为后续替换层采纳；improve-1 当前落地轻量 parser，并把解析职责放在 [shell/improve-1](../../shell/improve-1/integration-plan.md) 的 `src/shell/analysis/` |
 | `dynamic()` 识别动态表达式 | 采纳，作为 `ShellCommandAnalysis.hasDynamic` 字段，再由 PreflightResult 透传 |
 | `expand()` 路径前缀展开（~/$HOME/$env） | 采纳，作为 `src/sandbox/paths.ts` |
 | Git Bash 的 `cygpath -w` 兼容 | 采纳，作为 `paths.ts` 的 Windows 分支 |
 | `Instance.containsPath` workspace 边界 | 采纳，作为 `src/sandbox/boundary.ts` |
 | 两类 ask：external_directory + bash | 采纳，但由 scheduler 编排；先 external_directory，批准后再 bash |
-| 100+ arity 字典 | 整表拷贝，建议作为 `src/shell/analysis/arity.ts` |
+| 100+ arity 字典 | 分批采纳；improve-1 先实现 `git` / `docker` 等关键 arity，完整表后续补齐 |
 | `BashArity.prefix(tokens).join(" ") + " *"` 通配键 | 采纳，作为 `ShellCommandAnalysis.arityKey` |
 
 ### 1.3 不采纳 / 改造
