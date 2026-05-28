@@ -30,6 +30,7 @@ function emptyPreflight(): PreflightResult {
     externalPaths: [],
     internalPaths: [],
     overallDanger: "readonly",
+    sensitivePaths: [],
     shellKind: "bash",
   };
 }

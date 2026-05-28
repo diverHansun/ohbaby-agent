@@ -4,13 +4,14 @@ import {
   type ShellCommandAnalysis,
 } from "../shell/index.js";
 import { classifySandboxPath } from "./boundary.js";
-import { classifyDenylistedPath } from "./denylist.js";
+import { classifyDenylistedPath, classifySensitivePath } from "./denylist.js";
 import { canonicalizeSandboxPath, resolveSandboxPathArg } from "./paths.js";
 import type {
   PreflightCommand,
   PreflightDenylistHit,
   PreflightExternalPath,
   PreflightInternalPath,
+  PreflightSensitivePath,
   PreflightResult,
   SandboxPreflightInput,
   SandboxShellAnalysisPreflightInput,
@@ -44,6 +45,7 @@ export async function preflightSandboxShellAnalysis(
   const internalPaths: PreflightInternalPath[] = [];
   const externalPaths: PreflightExternalPath[] = [];
   const denylistHits: PreflightDenylistHit[] = [];
+  const sensitivePaths: PreflightSensitivePath[] = [];
   const canonicalWorkdir = await canonicalizeSandboxPath(input.workdir);
   let overallDanger: PreflightCommand["danger"] = "readonly";
 
@@ -66,6 +68,18 @@ export async function preflightSandboxShellAnalysis(
       if (reason) {
         denylistHits.push({ absolutePath, original, reason });
         continue;
+      }
+
+      const sensitiveReason =
+        classifySensitivePath(resolvedPath) ??
+        classifySensitivePath(absolutePath);
+      if (sensitiveReason) {
+        sensitivePaths.push({
+          absolutePath,
+          askPattern: absolutePath,
+          original,
+          reason: sensitiveReason,
+        });
       }
 
       if (
@@ -91,6 +105,7 @@ export async function preflightSandboxShellAnalysis(
     internalPaths,
     overallDanger,
     parseError: input.shell.parseError,
+    sensitivePaths,
     shellKind: input.shell.shellKind,
   };
 }

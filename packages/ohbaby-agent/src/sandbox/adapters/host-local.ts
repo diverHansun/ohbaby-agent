@@ -14,7 +14,7 @@ const HOST_LOCAL_CAPABILITIES: SandboxCapabilities = {
   canExecCommands: true,
   isolation: "none",
   readOnly: false,
-  supportsGit: false,
+  supportsGit: true,
 };
 
 export class HostLocalAdapter implements SandboxAdapter {

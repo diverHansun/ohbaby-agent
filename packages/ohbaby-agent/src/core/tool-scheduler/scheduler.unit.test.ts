@@ -108,6 +108,7 @@ function createPreflight(
     externalPaths: [],
     internalPaths: [],
     overallDanger: "readonly",
+    sensitivePaths: [],
     shellKind: "bash",
     ...input,
   };
@@ -617,15 +618,15 @@ describe("ToolScheduler", () => {
           createPreflight({
             denylistHits: [
               {
-                absolutePath: "D:/workspace/.env",
-                original: ".env",
-                reason: "env-file",
+                absolutePath: "C:/Users/test/.ssh/id_rsa",
+                original: "~/.ssh/id_rsa",
+                reason: "ssh-key-dir",
               },
             ],
           }),
         ),
         messageId: "message_1",
-        params: { command: "cat .env" },
+        params: { command: "cat ~/.ssh/id_rsa" },
         sessionId: "session_1",
         toolName: "bash",
       }),
@@ -636,6 +637,71 @@ describe("ToolScheduler", () => {
 
     expect(permission.ask).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("asks sensitive path permissions after external directories and before bash", async () => {
+    const permissionOrder: string[] = [];
+    const permission = {
+      ask: vi.fn((input: Parameters<PermissionPort["ask"]>[0]) => {
+        permissionOrder.push(input.toolName);
+        return Promise.resolve("once" as const);
+      }),
+    } satisfies PermissionPort;
+    const execute = vi.fn(() => ({ output: "read sensitive external" }));
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState(),
+    });
+    scheduler.register(createTool({ execute, name: "bash" }));
+
+    await expect(
+      scheduler.execute({
+        callId: "sensitive_external",
+        environment: createFakeEnvironmentWithPreflight(
+          "D:/workspace",
+          createPreflight({
+            externalPaths: [
+              {
+                absolutePath: "D:/outside/.env",
+                askPattern: "D:/outside/**",
+                original: "D:/outside/.env",
+              },
+            ],
+            overallDanger: "mutating",
+            sensitivePaths: [
+              {
+                absolutePath: "D:/outside/.env",
+                askPattern: "D:/outside/.env",
+                original: "D:/outside/.env",
+                reason: "env-file",
+              },
+            ],
+          }),
+        ),
+        messageId: "message_1",
+        params: { command: "cat D:/outside/.env && git push" },
+        sessionId: "session_1",
+        toolName: "bash",
+      }),
+    ).resolves.toMatchObject({
+      output: "read sensitive external",
+      status: "success",
+    });
+
+    expect(permissionOrder).toEqual([
+      "external_directory",
+      "sensitive_path",
+      "bash",
+    ]);
+    const sensitiveAsk = permission.ask.mock.calls[1][0];
+    expect(sensitiveAsk.toolName).toBe("sensitive_path");
+    expect(sensitiveAsk.params).toMatchObject({
+      path: "D:/outside/.env",
+      reason: "env-file",
+    });
+    expect(sensitiveAsk.params.pattern).toBe("D:/outside/.env");
+    expect(sensitiveAsk.reason).toContain("Sensitive path access");
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it("fails closed when bash preflight cannot be computed", async () => {

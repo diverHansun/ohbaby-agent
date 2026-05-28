@@ -1,4 +1,9 @@
-export type PermissionType = "tool" | "bash" | "skill" | "external_directory";
+export type PermissionType =
+  | "tool"
+  | "bash"
+  | "skill"
+  | "external_directory"
+  | "sensitive_path";
 
 export type Mode = "plan" | "auto";
 

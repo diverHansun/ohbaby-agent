@@ -8,7 +8,7 @@ export {
 export { SandboxManager } from "./manager.js";
 export { HostLocalAdapter } from "./adapters/host-local.js";
 export { classifySandboxPath, containsOrEqualPath } from "./boundary.js";
-export { classifyDenylistedPath } from "./denylist.js";
+export { classifyDenylistedPath, classifySensitivePath } from "./denylist.js";
 export { resolveSandboxPathArg } from "./paths.js";
 export {
   preflightSandboxCommand,
@@ -24,6 +24,7 @@ export type {
   PreflightExternalPath,
   PreflightInternalPath,
   PreflightResult,
+  PreflightSensitivePath,
   SandboxAdapter,
   SandboxAdapterHandle,
   SandboxAdapterId,

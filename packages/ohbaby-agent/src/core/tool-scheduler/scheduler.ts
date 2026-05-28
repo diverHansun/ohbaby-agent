@@ -7,6 +7,7 @@ import {
 import type {
   PreflightExternalPath,
   PreflightResult,
+  PreflightSensitivePath,
 } from "../../sandbox/index.js";
 import { detectShellKind, Shell } from "../../shell/index.js";
 import {
@@ -820,6 +821,21 @@ export function createToolScheduler(
     return unique;
   }
 
+  function uniqueSensitivePaths(
+    paths: readonly PreflightSensitivePath[],
+  ): readonly PreflightSensitivePath[] {
+    const seen = new Set<string>();
+    const unique: PreflightSensitivePath[] = [];
+    for (const item of paths) {
+      if (seen.has(item.askPattern)) {
+        continue;
+      }
+      seen.add(item.askPattern);
+      unique.push(item);
+    }
+    return unique;
+  }
+
   async function confirmExternalPreflightPermissions(
     call: ToolCall,
     context: ToolPermissionContext,
@@ -887,6 +903,65 @@ export function createToolScheduler(
         metadata: { preflight },
         reason: `External path access requires confirmation: ${externalPath.absolutePath}`,
         toolName: "external_directory",
+      });
+      if (result) {
+        return result;
+      }
+    }
+
+    for (const sensitivePath of uniqueSensitivePaths(
+      preflight.sensitivePaths,
+    )) {
+      if (isCancelled(call) || controller.signal.aborted) {
+        return makeCancelledResult(call);
+      }
+      const params = {
+        path: sensitivePath.absolutePath,
+        pattern: sensitivePath.askPattern,
+        reason: sensitivePath.reason,
+      };
+      let decision: PermissionDecision;
+      try {
+        decision = await waitForAbortable(
+          () =>
+            evaluatePermission(
+              {
+                callId: call.callId,
+                category: "dangerous",
+                messageId: call.messageId,
+                params,
+                sessionId: call.sessionId,
+                toolName: "sensitive_path",
+              },
+              permissionState.getState(),
+            ),
+          controller.signal,
+        );
+      } catch (error) {
+        if (isSchedulerAbortError(error)) {
+          return makeCancelledResult(call);
+        }
+        transition(call, "error");
+        return makeResult(call, "error", {
+          error: createError("ExecutionError", errorMessage(error), error),
+        });
+      }
+
+      if (decision.type === "deny") {
+        transition(call, "rejected");
+        return makeResult(call, "rejected", {
+          error: createError("PermissionDeniedError", decision.reason),
+        });
+      }
+      if (decision.type === "allow") {
+        continue;
+      }
+
+      const result = await confirmPermission(call, decision, params, {
+        category: "dangerous",
+        metadata: { preflight },
+        reason: `Sensitive path access requires confirmation: ${sensitivePath.absolutePath}`,
+        toolName: "sensitive_path",
       });
       if (result) {
         return result;

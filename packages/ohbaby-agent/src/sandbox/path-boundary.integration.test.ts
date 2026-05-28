@@ -107,7 +107,7 @@ describe("Sandbox path boundaries", () => {
       canExecCommands: true,
       isolation: "none",
       readOnly: false,
-      supportsGit: false,
+      supportsGit: true,
     });
   });
 });

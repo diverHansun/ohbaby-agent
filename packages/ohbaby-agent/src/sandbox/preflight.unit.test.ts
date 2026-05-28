@@ -135,7 +135,7 @@ describe("sandbox preflight facts", () => {
     expect(result.externalPaths).toEqual([]);
   });
 
-  it("hard denies denylisted symlink names before external directory asks", async () => {
+  it("reports sensitive symlink names without suppressing external facts", async () => {
     const workdir = path.join(tempRoot, "workspace");
     const outside = path.join(tempRoot, "outside");
     await fs.mkdir(workdir);
@@ -148,42 +148,108 @@ describe("sandbox preflight facts", () => {
       workdir,
     });
 
-    expect(result.denylistHits).toEqual([
+    expect(result.denylistHits).toEqual([]);
+    expect(result.sensitivePaths).toEqual([
       {
         absolutePath: await fs.realpath(outside),
+        askPattern: await fs.realpath(outside),
         original: ".env",
         reason: "env-file",
       },
     ]);
-    expect(result.externalPaths).toEqual([]);
+    expect(result.externalPaths).toEqual([
+      {
+        absolutePath: await fs.realpath(outside),
+        askPattern: path.join(path.dirname(await fs.realpath(outside)), "**"),
+        original: ".env",
+      },
+    ]);
     expect(result.internalPaths).toEqual([]);
   });
 
-  it("reports denylist hits without also reporting them as normal paths", async () => {
+  it("reports sensitive files without hard denying normal project fixtures", async () => {
     const workdir = path.join(tempRoot, "workspace");
-    await fs.mkdir(workdir);
+    await fs.mkdir(path.join(workdir, "fixtures"), { recursive: true });
+    await fs.mkdir(path.join(workdir, "certs"));
 
     const result = await preflightSandboxCommand({
-      command: "cat .env secret.pem",
+      command: "cat .env secret.pem fixtures/test.key .env.example",
       shellKind: "bash",
       workdir,
     });
 
     const realWorkdir = await fs.realpath(workdir);
-    expect(result.denylistHits).toEqual([
+    expect(result.denylistHits).toEqual([]);
+    expect(result.sensitivePaths).toEqual([
       {
         absolutePath: path.join(realWorkdir, ".env"),
+        askPattern: path.join(realWorkdir, ".env"),
         original: ".env",
         reason: "env-file",
       },
       {
         absolutePath: path.join(realWorkdir, "secret.pem"),
+        askPattern: path.join(realWorkdir, "secret.pem"),
         original: "secret.pem",
         reason: "private-key",
       },
+      {
+        absolutePath: path.join(realWorkdir, "fixtures", "test.key"),
+        askPattern: path.join(realWorkdir, "fixtures", "test.key"),
+        original: "fixtures/test.key",
+        reason: "private-key",
+      },
     ]);
-    expect(result.internalPaths).toEqual([]);
+    expect(result.internalPaths).toEqual([
+      {
+        absolutePath: path.join(realWorkdir, ".env"),
+        original: ".env",
+      },
+      {
+        absolutePath: path.join(realWorkdir, "secret.pem"),
+        original: "secret.pem",
+      },
+      {
+        absolutePath: path.join(realWorkdir, "fixtures", "test.key"),
+        original: "fixtures/test.key",
+      },
+      {
+        absolutePath: path.join(realWorkdir, ".env.example"),
+        original: ".env.example",
+      },
+    ]);
     expect(result.externalPaths).toEqual([]);
+  });
+
+  it("reports both external and sensitive facts for external sensitive paths", async () => {
+    const workdir = path.join(tempRoot, "workspace");
+    const outside = path.join(tempRoot, "outside");
+    await fs.mkdir(workdir);
+    await fs.mkdir(outside);
+
+    const result = await preflightSandboxCommand({
+      command: "cat ../outside/.env",
+      shellKind: "bash",
+      workdir,
+    });
+
+    const realOutsideEnv = path.join(await fs.realpath(outside), ".env");
+    expect(result.denylistHits).toEqual([]);
+    expect(result.externalPaths).toEqual([
+      {
+        absolutePath: realOutsideEnv,
+        askPattern: path.join(path.dirname(realOutsideEnv), "**"),
+        original: "../outside/.env",
+      },
+    ]);
+    expect(result.sensitivePaths).toEqual([
+      {
+        absolutePath: realOutsideEnv,
+        askPattern: realOutsideEnv,
+        original: "../outside/.env",
+        reason: "env-file",
+      },
+    ]);
   });
 
   it("passes shell command facts through to permission consumers", async () => {

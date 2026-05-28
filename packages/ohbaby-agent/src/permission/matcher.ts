@@ -107,8 +107,8 @@ function canonicalToolName(toolName: string): string {
 
 function effectiveToolName(call: PermissionCall): string {
   const toolName = canonicalToolName(call.toolName);
-  if (toolName === "external_directory") {
-    return "external_directory";
+  if (toolName === "external_directory" || toolName === "sensitive_path") {
+    return toolName;
   }
   if (toolName === "bash" || "command" in call.params) {
     return "bash";
@@ -164,16 +164,28 @@ export function generatePermissionPattern(
     return `skill(${canonicalToolName(input.name)})`;
   }
 
+  if (input.type === "external_directory") {
+    const explicitPattern = getStringParam(input.params, ["pattern"]);
+    if (explicitPattern) {
+      return `external_directory(${canonicalPath(explicitPattern)})`;
+    }
+    const externalPath = pathParam(input.params);
+    if (externalPath) {
+      const dir = directoryOf(externalPath) ?? externalPath;
+      return `external_directory(${canonicalPath(dir)}/**)`;
+    }
+    return `external_directory(${canonicalToolName(input.name)})`;
+  }
+
   const explicitPattern = getStringParam(input.params, ["pattern"]);
   if (explicitPattern) {
-    return `external_directory(${canonicalPath(explicitPattern)})`;
+    return `sensitive_path(${canonicalPath(explicitPattern)})`;
   }
-  const externalPath = pathParam(input.params);
-  if (externalPath) {
-    const dir = directoryOf(externalPath) ?? externalPath;
-    return `external_directory(${canonicalPath(dir)}/**)`;
+  const sensitivePath = pathParam(input.params);
+  if (sensitivePath) {
+    return `sensitive_path(${canonicalPath(sensitivePath)})`;
   }
-  return `external_directory(${canonicalToolName(input.name)})`;
+  return `sensitive_path(${canonicalToolName(input.name)})`;
 }
 
 export function isRememberablePermissionPattern(pattern: string): boolean {
@@ -195,8 +207,8 @@ export function inferPermissionType(
   if (toolName === "bash" || (isRecord(params) && "command" in params)) {
     return "bash";
   }
-  if (toolName === "external_directory") {
-    return "external_directory";
+  if (toolName === "external_directory" || toolName === "sensitive_path") {
+    return toolName;
   }
   if (toolName === "skill") {
     return "skill";

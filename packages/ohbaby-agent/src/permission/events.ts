@@ -6,6 +6,7 @@ const PermissionTypeSchema = z.union([
   z.literal("bash"),
   z.literal("skill"),
   z.literal("external_directory"),
+  z.literal("sensitive_path"),
 ]);
 
 const PermissionInfoSchema = z.object({

@@ -36,12 +36,20 @@ export interface PreflightDenylistHit {
   readonly reason: DenylistReason;
 }
 
+export interface PreflightSensitivePath {
+  readonly original: string;
+  readonly absolutePath: string;
+  readonly askPattern: string;
+  readonly reason: DenylistReason;
+}
+
 export interface PreflightResult {
   readonly shellKind: ShellKind;
   readonly commands: readonly PreflightCommand[];
   readonly internalPaths: readonly PreflightInternalPath[];
   readonly externalPaths: readonly PreflightExternalPath[];
   readonly denylistHits: readonly PreflightDenylistHit[];
+  readonly sensitivePaths: readonly PreflightSensitivePath[];
   readonly overallDanger: PreflightCommand["danger"];
   readonly parseError?: string;
 }

@@ -15,6 +15,12 @@ const SHELL_RC_FILES = new Set([
   ".zshrc",
   "microsoft.powershell_profile.ps1",
 ]);
+const SAFE_ENV_TEMPLATE_FILES = new Set([
+  ".env.defaults",
+  ".env.example",
+  ".env.sample",
+  ".env.template",
+]);
 
 function pathSegments(inputPath: string): readonly string[] {
   return path
@@ -25,7 +31,10 @@ function pathSegments(inputPath: string): readonly string[] {
 }
 
 function isEnvFile(basename: string): boolean {
-  return basename === ".env" || basename.startsWith(".env.");
+  return (
+    basename === ".env" ||
+    (basename.startsWith(".env.") && !SAFE_ENV_TEMPLATE_FILES.has(basename))
+  );
 }
 
 function isPrivateKeyFile(basename: string): boolean {
@@ -33,6 +42,23 @@ function isPrivateKeyFile(basename: string): boolean {
 }
 
 export function classifyDenylistedPath(
+  absolutePath: string,
+): DenylistReason | undefined {
+  const home = os.homedir();
+  if (!pathSegments(absolutePath).includes(path.basename(home).toLowerCase())) {
+    return undefined;
+  }
+  for (const segment of pathSegments(absolutePath)) {
+    const reason = SENSITIVE_DIR_REASONS.get(segment);
+    if (reason) {
+      return reason;
+    }
+  }
+
+  return undefined;
+}
+
+export function classifySensitivePath(
   absolutePath: string,
 ): DenylistReason | undefined {
   const basename = path.basename(absolutePath).toLowerCase();
@@ -44,17 +70,6 @@ export function classifyDenylistedPath(
   }
   if (SHELL_RC_FILES.has(basename)) {
     return "shell-rc";
-  }
-
-  const home = os.homedir();
-  if (!pathSegments(absolutePath).includes(path.basename(home).toLowerCase())) {
-    return undefined;
-  }
-  for (const segment of pathSegments(absolutePath)) {
-    const reason = SENSITIVE_DIR_REASONS.get(segment);
-    if (reason) {
-      return reason;
-    }
   }
 
   return undefined;

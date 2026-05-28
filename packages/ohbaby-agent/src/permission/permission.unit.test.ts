@@ -709,6 +709,13 @@ describe("permission patterns", () => {
         type: "external_directory",
       }),
     ).toBe("external_directory(outside)");
+    expect(
+      generatePermissionPattern({
+        name: "sensitive_path",
+        params: { pattern: "D:/Repo/.env" },
+        type: "sensitive_path",
+      }),
+    ).toBe("sensitive_path(d:/repo/.env)");
   });
 
   it("does not let an always git status approval auto-approve git push", async () => {
