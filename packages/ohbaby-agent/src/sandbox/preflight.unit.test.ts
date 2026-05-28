@@ -25,7 +25,7 @@ describe("sandbox preflight facts", () => {
       workdir,
     });
 
-    const outside = path.join(tempRoot, "outside.txt");
+    const outside = path.join(await fs.realpath(tempRoot), "outside.txt");
     expect(result.externalPaths).toEqual([
       {
         absolutePath: outside,
@@ -40,6 +40,7 @@ describe("sandbox preflight facts", () => {
   it("classifies absolute paths outside the workspace as external paths", async () => {
     const workdir = path.join(tempRoot, "workspace");
     const outside = path.join(tempRoot, "outside.txt");
+    const realOutside = path.join(await fs.realpath(tempRoot), "outside.txt");
     await fs.mkdir(workdir);
 
     const result = await preflightSandboxCommand({
@@ -50,8 +51,8 @@ describe("sandbox preflight facts", () => {
 
     expect(result.externalPaths).toEqual([
       {
-        absolutePath: outside,
-        askPattern: path.join(path.dirname(outside), "**"),
+        absolutePath: realOutside,
+        askPattern: path.join(path.dirname(realOutside), "**"),
         original: outside,
       },
     ]);
@@ -67,13 +68,95 @@ describe("sandbox preflight facts", () => {
       workdir,
     });
 
+    const realSrc = await fs.realpath(path.join(workdir, "src"));
     expect(result.internalPaths).toEqual([
       {
-        absolutePath: path.join(workdir, "src", "app.ts"),
+        absolutePath: path.join(realSrc, "app.ts"),
         original: "src/app.ts",
       },
     ]);
     expect(result.externalPaths).toEqual([]);
+  });
+
+  it("classifies workspace symlink targets outside the workspace as external paths", async () => {
+    const workdir = path.join(tempRoot, "workspace");
+    const outside = path.join(tempRoot, "outside");
+    const externalFile = path.join(outside, "secret.txt");
+    await fs.mkdir(workdir);
+    await fs.mkdir(outside);
+    await fs.writeFile(externalFile, "external\n", "utf8");
+    await fs.symlink(outside, path.join(workdir, "linked-outside"), "junction");
+
+    const result = await preflightSandboxCommand({
+      command: "cat linked-outside/secret.txt",
+      shellKind: "bash",
+      workdir,
+    });
+    const realExternalFile = await fs.realpath(externalFile);
+
+    expect(result.externalPaths).toEqual([
+      {
+        absolutePath: realExternalFile,
+        askPattern: path.join(path.dirname(realExternalFile), "**"),
+        original: "linked-outside/secret.txt",
+      },
+    ]);
+    expect(result.internalPaths).toEqual([]);
+    expect(result.denylistHits).toEqual([]);
+  });
+
+  it("hard denies symlink targets that resolve to sensitive directories", async () => {
+    const workdir = path.join(tempRoot, "workspace");
+    const fakeHomeSsh = path.join(
+      tempRoot,
+      path.basename(os.homedir()),
+      ".ssh",
+    );
+    const keyFile = path.join(fakeHomeSsh, "id_rsa");
+    await fs.mkdir(workdir);
+    await fs.mkdir(fakeHomeSsh, { recursive: true });
+    await fs.writeFile(keyFile, "private\n", "utf8");
+    await fs.symlink(fakeHomeSsh, path.join(workdir, "linked-ssh"), "junction");
+
+    const result = await preflightSandboxCommand({
+      command: "cat linked-ssh/id_rsa",
+      shellKind: "bash",
+      workdir,
+    });
+
+    expect(result.denylistHits).toEqual([
+      {
+        absolutePath: await fs.realpath(keyFile),
+        original: "linked-ssh/id_rsa",
+        reason: "ssh-key-dir",
+      },
+    ]);
+    expect(result.internalPaths).toEqual([]);
+    expect(result.externalPaths).toEqual([]);
+  });
+
+  it("hard denies denylisted symlink names before external directory asks", async () => {
+    const workdir = path.join(tempRoot, "workspace");
+    const outside = path.join(tempRoot, "outside");
+    await fs.mkdir(workdir);
+    await fs.mkdir(outside);
+    await fs.symlink(outside, path.join(workdir, ".env"), "junction");
+
+    const result = await preflightSandboxCommand({
+      command: "cat .env",
+      shellKind: "bash",
+      workdir,
+    });
+
+    expect(result.denylistHits).toEqual([
+      {
+        absolutePath: await fs.realpath(outside),
+        original: ".env",
+        reason: "env-file",
+      },
+    ]);
+    expect(result.externalPaths).toEqual([]);
+    expect(result.internalPaths).toEqual([]);
   });
 
   it("reports denylist hits without also reporting them as normal paths", async () => {
@@ -86,14 +169,15 @@ describe("sandbox preflight facts", () => {
       workdir,
     });
 
+    const realWorkdir = await fs.realpath(workdir);
     expect(result.denylistHits).toEqual([
       {
-        absolutePath: path.join(workdir, ".env"),
+        absolutePath: path.join(realWorkdir, ".env"),
         original: ".env",
         reason: "env-file",
       },
       {
-        absolutePath: path.join(workdir, "secret.pem"),
+        absolutePath: path.join(realWorkdir, "secret.pem"),
         original: "secret.pem",
         reason: "private-key",
       },

@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ShellKind } from "../shell/index.js";
@@ -55,13 +56,59 @@ function expandKnownHomeVariable(target: string): string | undefined {
   return undefined;
 }
 
+function errorCode(error: unknown): string | undefined {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string"
+    ? error.code
+    : undefined;
+}
+
+function isMissingPathError(error: unknown): boolean {
+  const code = errorCode(error);
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+export async function canonicalizeSandboxPath(
+  inputPath: string,
+): Promise<string> {
+  const absolutePath = path.resolve(inputPath);
+  const suffix: string[] = [];
+  let current = absolutePath;
+
+  for (;;) {
+    try {
+      const realPath = await fs.realpath(current);
+      return suffix.length > 0
+        ? path.join(realPath, ...suffix.reverse())
+        : realPath;
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        throw error;
+      }
+
+      const parent = path.dirname(current);
+      if (parent === current) {
+        return absolutePath;
+      }
+      suffix.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
 export function resolveSandboxPathArg(input: {
   readonly arg: string;
   readonly shellKind: ShellKind;
   readonly workdir: string;
 }): string | undefined {
   const target = stripMatchingQuotes(input.arg.trim());
-  if (!target || URL_PATTERN.test(target) || COMMAND_SUBSTITUTION_PATTERN.test(target)) {
+  if (
+    !target ||
+    URL_PATTERN.test(target) ||
+    COMMAND_SUBSTITUTION_PATTERN.test(target)
+  ) {
     return undefined;
   }
   if (target === "~") {

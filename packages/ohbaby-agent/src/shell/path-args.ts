@@ -1,4 +1,5 @@
 import type { CommandDetail } from "../utils/index.js";
+import { gitGlobalPathArgs } from "./git-args.js";
 
 const PATH_ARGUMENT_COMMANDS = new Set([
   "cat",
@@ -96,6 +97,7 @@ const NON_PATH_OPTIONS_WITH_VALUE = new Set([
 const PATH_PREFIX_PATTERN =
   /^(?:\.{1,2}(?:[\\/]|$)|~(?:[\\/]|$)|[\\/]|[A-Za-z]:[\\/])/u;
 const PATH_SUFFIX_PATTERN = /^[\w.-]+(?:[\\/][\w .-]+)+$/u;
+const FIND_LEADING_OPTIONS = new Set(["-H", "-L", "-P"]);
 
 function normalizeRoot(root: string): string {
   return root.toLowerCase().replace(/\.exe$/u, "");
@@ -347,6 +349,9 @@ function addFindPaths(
       continue;
     }
     const token = args[index];
+    if (FIND_LEADING_OPTIONS.has(token)) {
+      continue;
+    }
     if (token === "!" || token === "(" || isOption(token)) {
       break;
     }
@@ -379,6 +384,9 @@ export function extractShellPathArgs(detail: CommandDetail): readonly string[] {
   ) {
     addAllPositionalPaths(paths, args, consumed);
   } else if (root === "git") {
+    for (const gitPathArg of gitGlobalPathArgs(args)) {
+      addCandidate(paths, gitPathArg);
+    }
     for (let index = 0; index < args.length; index += 1) {
       if (args[index] === "-C") {
         addCandidate(paths, args[index + 1]);

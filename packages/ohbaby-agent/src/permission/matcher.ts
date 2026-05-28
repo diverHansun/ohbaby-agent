@@ -1,4 +1,5 @@
-import { matchesPattern } from "../utils/index.js";
+import { computeShellArityKey } from "../shell/analysis/index.js";
+import { matchesPattern, parseCommand } from "../utils/index.js";
 import { parsePermissionPattern } from "./rule.js";
 import type {
   PermissionCall,
@@ -36,18 +37,28 @@ function directoryOf(path: string): string | undefined {
   return normalized.slice(0, index);
 }
 
-function commandParts(
-  command: string,
-): readonly [string | undefined, string | undefined] {
-  const [head, subcommand] = command
-    .trim()
-    .split(/\s+/)
-    .filter((part) => part.length > 0);
-  return [head, subcommand];
-}
-
 function normalizeCommand(command: string): string {
   return command.trim().replace(/\s+/g, " ");
+}
+
+function bashCommandPattern(command: string, fallbackName: string): string {
+  const normalized = normalizeCommand(command).toLowerCase();
+  if (!normalized) {
+    return canonicalToolName(fallbackName);
+  }
+
+  const parsed = parseCommand(command);
+  if (parsed.details.length === 1) {
+    const detail = parsed.details[0];
+    const root = detail.root.toLowerCase().replace(/\.exe$/u, "");
+    if (root === "docker" || root === "git") {
+      return computeShellArityKey(detail.tokens.slice(detail.rootIndex));
+    }
+  }
+  if (parsed.details.length > 1) {
+    return normalized;
+  }
+  return normalized;
 }
 
 function escapeRegex(value: string): string {
@@ -145,12 +156,7 @@ export function generatePermissionPattern(
 
   if (input.type === "bash") {
     const command = getStringParam(input.params, ["command"]) ?? input.name;
-    const normalizedCommand = normalizeCommand(command).toLowerCase();
-    const [head] = commandParts(normalizedCommand);
-    const pattern =
-      head === "git" && normalizedCommand !== head
-        ? `${head} *`
-        : normalizedCommand;
+    const pattern = bashCommandPattern(command, input.name);
     return `bash(${pattern || canonicalToolName(input.name)})`;
   }
 
@@ -236,7 +242,15 @@ export function matchesPermissionRule(
   const pattern = rule.pattern.trim().toLowerCase();
   if (toolName === "bash") {
     const command = commandParam(call.params);
-    return command ? matchesPattern(command, pattern) : false;
+    if (!command) {
+      return false;
+    }
+    const arityPattern = bashCommandPattern(command, call.toolName);
+    return (
+      pattern === arityPattern ||
+      matchesPattern(arityPattern, pattern) ||
+      matchesPattern(command, pattern)
+    );
   }
   if (toolName === "skill") {
     const skillName = getStringParam(call.params, ["name"])?.toLowerCase();

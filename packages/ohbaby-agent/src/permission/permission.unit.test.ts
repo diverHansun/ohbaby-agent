@@ -694,7 +694,7 @@ describe("permission patterns", () => {
         params: { command: "git push origin main" },
         type: "bash",
       }),
-    ).toBe("bash(git *)");
+    ).toBe("bash(git push *)");
     expect(
       generatePermissionPattern({
         name: "code-review",
@@ -709,6 +709,155 @@ describe("permission patterns", () => {
         type: "external_directory",
       }),
     ).toBe("external_directory(outside)");
+  });
+
+  it("does not let an always git status approval auto-approve git push", async () => {
+    const bus = createBus();
+    const state = createPermissionState({ bus });
+    const permission = createPermissionManager({
+      bus,
+      generateId: (() => {
+        let nextId = 1;
+        return (): string => `permission_${String(nextId++)}`;
+      })(),
+      state,
+    });
+    const updated: PermissionInfo[] = [];
+    bus.subscribe(PermissionEvent.Updated, (event) => {
+      updated.push(event.info);
+    });
+
+    const first = permission.ask(
+      baseAskInput({
+        category: "dangerous",
+        params: { command: "git status" },
+        toolName: "bash",
+      }),
+    );
+    permission.respond("session_1", "permission_1", { type: "always" });
+    await expect(first).resolves.toBe("always");
+    expect(state.getSessionRules("session_1")).toEqual([
+      {
+        decision: "allow",
+        pattern: "git status *",
+        scope: "session",
+        tool: "bash",
+      } satisfies PermissionRule,
+    ]);
+
+    const second = permission.ask(
+      baseAskInput({
+        callId: "call_2",
+        category: "dangerous",
+        messageId: "message_2",
+        params: { command: "git push origin main" },
+        toolName: "bash",
+      }),
+    );
+    let settled = false;
+    void second.then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(updated.at(-1)).toMatchObject({
+      id: "permission_2",
+      pattern: "bash(git push *)",
+      type: "bash",
+    });
+
+    permission.respond("session_1", "permission_2", { type: "once" });
+    await expect(second).resolves.toBe("once");
+  });
+
+  it("uses root-relative arity for wrapped git command approvals", async () => {
+    expect(
+      generatePermissionPattern({
+        name: "bash",
+        params: { command: "sudo git status" },
+        type: "bash",
+      }),
+    ).toBe("bash(git status *)");
+    expect(
+      generatePermissionPattern({
+        name: "bash",
+        params: { command: "env FOO=bar git status" },
+        type: "bash",
+      }),
+    ).toBe("bash(git status *)");
+    expect(
+      generatePermissionPattern({
+        name: "bash",
+        params: { command: "command git status" },
+        type: "bash",
+      }),
+    ).toBe("bash(git status *)");
+
+    const bus = createBus();
+    const state = createPermissionState({ bus });
+    const permission = createPermissionManager({
+      bus,
+      generateId: (() => {
+        let nextId = 1;
+        return (): string => `permission_${String(nextId++)}`;
+      })(),
+      state,
+    });
+
+    const first = permission.ask(
+      baseAskInput({
+        category: "dangerous",
+        params: { command: "sudo git status" },
+        toolName: "bash",
+      }),
+    );
+    permission.respond("session_1", "permission_1", { type: "always" });
+    await expect(first).resolves.toBe("always");
+    expect(state.getSessionRules("session_1")).toEqual([
+      {
+        decision: "allow",
+        pattern: "git status *",
+        scope: "session",
+        tool: "bash",
+      } satisfies PermissionRule,
+    ]);
+
+    const sudoRm = permission.ask(
+      baseAskInput({
+        callId: "call_2",
+        category: "dangerous",
+        messageId: "message_2",
+        params: { command: "sudo rm -rf /" },
+        toolName: "bash",
+      }),
+    );
+    let sudoRmSettled = false;
+    void sudoRm.then(() => {
+      sudoRmSettled = true;
+    });
+    await Promise.resolve();
+    expect(sudoRmSettled).toBe(false);
+    permission.respond("session_1", "permission_2", { type: "once" });
+    await expect(sudoRm).resolves.toBe("once");
+
+    const wrappedPush = permission.ask(
+      baseAskInput({
+        callId: "call_3",
+        category: "dangerous",
+        messageId: "message_3",
+        params: { command: "env FOO=bar git push origin main" },
+        toolName: "bash",
+      }),
+    );
+    let wrappedPushSettled = false;
+    void wrappedPush.then(() => {
+      wrappedPushSettled = true;
+    });
+    await Promise.resolve();
+    expect(wrappedPushSettled).toBe(false);
+    permission.respond("session_1", "permission_3", { type: "once" });
+    await expect(wrappedPush).resolves.toBe("once");
   });
 
   it("matches exact, wildcard, and parent directory approval patterns", () => {

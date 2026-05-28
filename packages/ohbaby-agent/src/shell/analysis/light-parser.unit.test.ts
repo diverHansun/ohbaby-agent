@@ -120,4 +120,26 @@ describe("shell command analysis", () => {
       root: "echo",
     });
   });
+
+  it("extracts find traversal options and git global path options", async () => {
+    const result = await analyzeShellCommand(
+      "find -L ../outside -name token && git --work-tree=../tree --git-dir ../repo/.git status && git -C=../other status",
+      "bash",
+    );
+
+    expect(result.commands[0]).toMatchObject({
+      pathArgs: ["../outside"],
+      root: "find",
+    });
+    expect(result.commands[1]).toMatchObject({
+      arityKey: "git status *",
+      pathArgs: ["../tree", "../repo/.git"],
+      root: "git",
+    });
+    expect(result.commands[2]).toMatchObject({
+      arityKey: "git status *",
+      pathArgs: ["../other"],
+      root: "git",
+    });
+  });
 });

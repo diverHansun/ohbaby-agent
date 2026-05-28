@@ -4,7 +4,10 @@ import {
   createPermissionState,
   evaluatePermission,
 } from "../../permission/index.js";
-import type { PreflightExternalPath, PreflightResult } from "../../sandbox/index.js";
+import type {
+  PreflightExternalPath,
+  PreflightResult,
+} from "../../sandbox/index.js";
 import { detectShellKind, Shell } from "../../shell/index.js";
 import {
   DEFAULT_TOOL_SCHEDULER_CONFIG,
@@ -52,6 +55,7 @@ interface PreparedCall extends ScheduledCall {
 interface ToolPermissionContext {
   readonly externalWrite: boolean;
   readonly preflight?: PreflightResult;
+  readonly preflightError?: unknown;
   readonly untrustedMcp: boolean;
   readonly params: Record<string, unknown>;
 }
@@ -962,19 +966,25 @@ export function createToolScheduler(
   ): Promise<ToolPermissionContext> {
     if (tool.name === "bash" && request.environment?.preflight) {
       const command =
-        typeof request.params.command === "string" ? request.params.command : "";
+        typeof request.params.command === "string"
+          ? request.params.command
+          : "";
       try {
         const shellKind = detectShellKind(Shell.acceptable());
-        const preflight = await request.environment.preflight(command, shellKind);
+        const preflight = await request.environment.preflight(
+          command,
+          shellKind,
+        );
         return {
           externalWrite: false,
           preflight,
           untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
           params: request.params,
         };
-      } catch {
+      } catch (error) {
         return {
           externalWrite: false,
+          preflightError: error,
           untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
           params: request.params,
         };
@@ -1099,6 +1109,16 @@ export function createToolScheduler(
   ): Promise<ToolCallResult | null> {
     if (isCancelled(prepared.call)) {
       return makeCancelledResult(prepared.call);
+    }
+    if (prepared.permissionContext.preflightError !== undefined) {
+      transition(prepared.call, "error");
+      return makeResult(prepared.call, "error", {
+        error: createError(
+          "ExecutionError",
+          `Bash preflight failed: ${errorMessage(prepared.permissionContext.preflightError)}`,
+          prepared.permissionContext.preflightError,
+        ),
+      });
     }
     const externalPermissionResult = await confirmExternalPreflightPermissions(
       prepared.call,

@@ -638,6 +638,38 @@ describe("ToolScheduler", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("fails closed when bash preflight cannot be computed", async () => {
+    const permission = {
+      ask: vi.fn(() => Promise.resolve("once" as const)),
+    } satisfies PermissionPort;
+    const execute = vi.fn(() => ({ output: "nope" }));
+    const { scheduler } = createScheduler({ permission });
+    scheduler.register(createTool({ execute, name: "bash" }));
+
+    const result = await scheduler.execute({
+      callId: "preflight_failure",
+      environment: {
+        ...createFakeEnvironment("D:/workspace"),
+        preflight: () => Promise.reject(new Error("preflight exploded")),
+      },
+      messageId: "message_1",
+      params: { command: "cat src/app.ts" },
+      sessionId: "session_1",
+      toolName: "bash",
+    });
+
+    expect(result).toMatchObject({
+      error: {
+        type: "ExecutionError",
+      },
+      status: "error",
+    });
+    expect(result.error?.message).toContain("preflight exploded");
+
+    expect(permission.ask).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("validates request identity and tool parameters before execution", async () => {
     const execute = vi.fn().mockResolvedValue({ output: "validated" });
     const { scheduler } = createScheduler();

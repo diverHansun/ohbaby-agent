@@ -5,7 +5,7 @@ import {
 } from "../shell/index.js";
 import { classifySandboxPath } from "./boundary.js";
 import { classifyDenylistedPath } from "./denylist.js";
-import { resolveSandboxPathArg } from "./paths.js";
+import { canonicalizeSandboxPath, resolveSandboxPathArg } from "./paths.js";
 import type {
   PreflightCommand,
   PreflightDenylistHit,
@@ -33,41 +33,43 @@ function externalAskPattern(absolutePath: string): string {
   return path.join(path.dirname(absolutePath), "**");
 }
 
-function toPreflightCommand(
-  command: ShellCommandAnalysis,
-): PreflightCommand {
+function toPreflightCommand(command: ShellCommandAnalysis): PreflightCommand {
   return { ...command };
 }
 
-export function preflightSandboxShellAnalysis(
+export async function preflightSandboxShellAnalysis(
   input: SandboxShellAnalysisPreflightInput,
-): PreflightResult {
+): Promise<PreflightResult> {
   const commands = input.shell.commands.map(toPreflightCommand);
   const internalPaths: PreflightInternalPath[] = [];
   const externalPaths: PreflightExternalPath[] = [];
   const denylistHits: PreflightDenylistHit[] = [];
+  const canonicalWorkdir = await canonicalizeSandboxPath(input.workdir);
   let overallDanger: PreflightCommand["danger"] = "readonly";
 
   for (const command of commands) {
     overallDanger = maxDanger(overallDanger, command.danger);
     for (const original of command.pathArgs) {
-      const absolutePath = resolveSandboxPathArg({
+      const resolvedPath = resolveSandboxPathArg({
         arg: original,
         shellKind: input.shell.shellKind,
         workdir: input.workdir,
       });
-      if (!absolutePath) {
+      if (!resolvedPath) {
         continue;
       }
+      const absolutePath = await canonicalizeSandboxPath(resolvedPath);
 
-      const reason = classifyDenylistedPath(absolutePath);
+      const reason =
+        classifyDenylistedPath(resolvedPath) ??
+        classifyDenylistedPath(absolutePath);
       if (reason) {
         denylistHits.push({ absolutePath, original, reason });
         continue;
       }
 
       if (
-        classifySandboxPath({ absolutePath, workdir: input.workdir }) ===
+        classifySandboxPath({ absolutePath, workdir: canonicalWorkdir }) ===
         "outside"
       ) {
         externalPaths.push({
