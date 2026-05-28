@@ -1,6 +1,6 @@
 import type { CommandDetail } from "../../utils/index.js";
 import { parseCommand } from "../../utils/index.js";
-import { classifyShellCommand } from "../command-classifier.js";
+import { classifyShellCommandDetail } from "../command-classifier.js";
 import { extractShellPathArgs } from "../path-args.js";
 import type { ShellKind } from "../preflight.js";
 import { computeShellArityKey } from "./arity.js";
@@ -21,16 +21,12 @@ function pathArgs(detail: CommandDetail, root: string): readonly string[] {
   }).filter((candidate) => !URL_PATTERN.test(candidate));
 }
 
-function commandDanger(source: string): ShellCommandAnalysis["danger"] {
-  return classifyShellCommand(parseCommand(source));
-}
-
 function analyzeDetail(detail: CommandDetail): ShellCommandAnalysis {
   const tokens = detail.tokens.slice(detail.rootIndex);
   const root = normalizeRoot(detail.root);
   return {
     arityKey: computeShellArityKey(tokens),
-    danger: commandDanger(detail.text),
+    danger: classifyShellCommandDetail(detail),
     hasDynamic: DYNAMIC_PATTERN.test(detail.text),
     pathArgs: pathArgs(detail, root),
     root,

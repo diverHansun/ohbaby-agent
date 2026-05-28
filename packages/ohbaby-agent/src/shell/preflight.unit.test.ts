@@ -116,6 +116,30 @@ describe("shell preflight", () => {
     ).rejects.toThrow("dynamic");
   });
 
+  it("allows glob path arguments by checking their literal directory prefix", async () => {
+    const src = path.join(tempRoot, "src");
+    const build = path.join(tempRoot, "build");
+    await fs.mkdir(src);
+    await fs.mkdir(build);
+
+    const root = await fs.realpath(tempRoot);
+    const realSrc = await fs.realpath(src);
+    const realBuild = await fs.realpath(build);
+
+    await expect(preflight("cat *.txt")).resolves.toMatchObject({
+      resolvedPaths: [path.join(root, "*.txt")],
+    });
+    await expect(preflight("ls src/*.ts")).resolves.toMatchObject({
+      resolvedPaths: [path.join(realSrc, "*.ts")],
+    });
+    await expect(preflight("rm build/**/*.tmp")).resolves.toMatchObject({
+      resolvedPaths: [path.join(realBuild, "**", "*.tmp")],
+    });
+    await expect(preflight("grep foo *.md")).resolves.toMatchObject({
+      resolvedPaths: [path.join(root, "*.md")],
+    });
+  });
+
   it("handles cmd compact cd syntax and cmd cd options", async () => {
     const child = path.join(tempRoot, "child");
     await fs.mkdir(child);

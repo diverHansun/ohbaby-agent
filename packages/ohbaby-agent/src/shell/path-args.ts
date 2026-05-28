@@ -176,24 +176,6 @@ function looksLikePathArg(token: string): boolean {
   );
 }
 
-function collectRedirectionTargets(args: readonly string[]): Set<number> {
-  const consumed = new Set<number>();
-  for (let index = 0; index < args.length; index += 1) {
-    const token = args[index];
-    if (isStandaloneRedirection(token) && args[index + 1]) {
-      consumed.add(index);
-      consumed.add(index + 1);
-      index += 1;
-      continue;
-    }
-    const stripped = stripRedirectionPrefix(token);
-    if (stripped !== token && stripped.length > 0) {
-      consumed.add(index);
-    }
-  }
-  return consumed;
-}
-
 function addRedirectionTargets(
   paths: Set<string>,
   args: readonly string[],
@@ -364,10 +346,7 @@ export function extractShellPathArgs(detail: CommandDetail): readonly string[] {
   const args = detail.tokens.slice(detail.rootIndex + 1);
   const paths = new Set<string>();
   const redirectionConsumed = addRedirectionTargets(paths, args);
-  const consumed = collectRedirectionTargets(args);
-  for (const index of redirectionConsumed) {
-    consumed.add(index);
-  }
+  const consumed = redirectionConsumed;
 
   if (SEARCH_COMMANDS.has(root)) {
     addSearchCommandPaths(paths, args, consumed, root);

@@ -4,6 +4,7 @@ import path from "node:path";
 import type { CommandDetail, ParsedCommand } from "../utils/index.js";
 import { containsOrEqual, parseCommand } from "../utils/index.js";
 import { extractShellPathArgs } from "./path-args.js";
+import { classifyShellPathPattern, splitGlobPath } from "./path-patterns.js";
 
 export type ShellKind = "bash" | "cmd" | "powershell";
 
@@ -53,7 +54,6 @@ const SHELL_EXEC_COMMANDS = new Set([
   "sh",
   "zsh",
 ]);
-const DYNAMIC_PATH_PATTERN = /[`$%*?[\]{}]/u;
 const URL_PATTERN = /^[a-z][a-z0-9+.-]*:\/\//iu;
 const DRIVE_ABSOLUTE_PATTERN = /^[A-Za-z]:[\\/]/u;
 const DRIVE_RELATIVE_PATTERN = /^[A-Za-z]:[^\\/]/u;
@@ -401,10 +401,10 @@ function cdTarget(detail: CommandDetail, shellKind: ShellKind): string {
   return target;
 }
 
-function assertStaticPath(target: string): void {
+function assertStaticPath(target: string): "static" | "glob" {
   const stripped = stripMatchingQuotes(target);
   if (URL_PATTERN.test(stripped)) {
-    return;
+    return "static";
   }
   if (DRIVE_RELATIVE_PATTERN.test(stripped)) {
     reject(
@@ -419,9 +419,11 @@ function assertStaticPath(target: string): void {
       `Path "${target}" uses provider syntax and cannot be sandbox-checked safely.`,
     );
   }
-  if (DYNAMIC_PATH_PATTERN.test(stripped)) {
+  const patternKind = classifyShellPathPattern(stripped);
+  if (patternKind === "dynamic") {
     reject(`Path "${target}" is dynamic and cannot be sandbox-checked safely.`);
   }
+  return patternKind;
 }
 
 function msysPathToWindowsPath(target: string): string | null {
@@ -462,7 +464,20 @@ async function resolveStaticPathTarget(
   target: string,
   shellKind: ShellKind,
 ): Promise<string> {
-  assertStaticPath(target);
+  const pathKind = assertStaticPath(target);
+  if (pathKind === "glob") {
+    const stripped = stripMatchingQuotes(target);
+    const parts = splitGlobPath(stripped);
+    const resolvedPrefix = await resolveStaticPathTarget(
+      currentCwd,
+      parts.prefix,
+      shellKind,
+    );
+    return parts.suffix
+      ? path.join(resolvedPrefix, parts.suffix)
+      : resolvedPrefix;
+  }
+
   const candidate = resolveLexicalPath(currentCwd, target, shellKind);
   try {
     return await fs.realpath(candidate);

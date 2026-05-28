@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ShellKind } from "../shell/index.js";
+import { classifyShellPathPattern } from "../shell/path-patterns.js";
 
 const URL_PATTERN = /^[a-z][a-z0-9+.-]*:\/\//iu;
 const COMMAND_SUBSTITUTION_PATTERN = /`|\$\(|<\(|>\(/u;
@@ -121,6 +122,9 @@ export function resolveSandboxPathArg(input: {
   const expanded = expandKnownHomeVariable(target);
   if (expanded) {
     return expanded;
+  }
+  if (classifyShellPathPattern(target) === "dynamic") {
+    return undefined;
   }
 
   const msysPath =

@@ -118,7 +118,9 @@ function rmCommandClass(args: readonly string[]): ShellCommandClass {
   return hasUnixRecursiveForce(args) ? "dangerous" : "mutating";
 }
 
-function detailCommandClass(detail: CommandDetail): ShellCommandClass {
+export function classifyShellCommandDetail(
+  detail: CommandDetail,
+): ShellCommandClass {
   if (hasWrapper(detail, "sudo")) {
     return "dangerous";
   }
@@ -162,7 +164,7 @@ export function classifyShellCommand(parsed: ParsedCommand): ShellCommandClass {
 
   let result: ShellCommandClass = "readonly";
   for (const detail of parsed.details) {
-    result = maxShellCommandClass(result, detailCommandClass(detail));
+    result = maxShellCommandClass(result, classifyShellCommandDetail(detail));
   }
   return result;
 }
