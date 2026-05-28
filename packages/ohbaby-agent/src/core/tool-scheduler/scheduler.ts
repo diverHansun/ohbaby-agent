@@ -10,6 +10,7 @@ import type {
   PreflightSensitivePath,
 } from "../../sandbox/index.js";
 import { detectShellKind, Shell } from "../../shell/index.js";
+import { canonicalizePathTarget } from "../../utils/path-canonicalize.js";
 import {
   DEFAULT_TOOL_SCHEDULER_CONFIG,
   SUBAGENT_DISABLED_TOOLS,
@@ -54,6 +55,7 @@ interface PreparedCall extends ScheduledCall {
 }
 
 interface ToolPermissionContext {
+  readonly environment?: ToolExecutionEnvironment;
   readonly externalWrite: boolean;
   readonly externalWritePath?: string;
   readonly preflight?: PreflightResult;
@@ -109,6 +111,16 @@ function isOutsideWorkdir(workdir: string, resolvedPath: string): boolean {
   }
   const relative = path.relative(normalizedRoot, normalizedCandidate);
   return relative.startsWith("..") || path.isAbsolute(relative);
+}
+
+function isOutsideTrustedEnvironment(
+  environment: ToolExecutionEnvironment,
+  resolvedPath: string,
+): boolean {
+  if (environment.containsTrustedPath?.(resolvedPath) === true) {
+    return false;
+  }
+  return isOutsideWorkdir(environment.workdir, resolvedPath);
 }
 
 function isSamePath(left: string, right: string): boolean {
@@ -308,50 +320,8 @@ function normalizeAgentToolsConfig(
   return result;
 }
 
-async function realpathIfExists(
-  inputPath: string,
-): Promise<string | undefined> {
-  try {
-    return await fs.realpath(inputPath);
-  } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === "ENOENT"
-    ) {
-      return undefined;
-    }
-    throw error;
-  }
-}
-
 async function canonicalizeLexicalPath(lexicalPath: string): Promise<string> {
-  const lexical = path.resolve(lexicalPath);
-  const existing = await realpathIfExists(lexical);
-  if (existing) {
-    return existing;
-  }
-
-  const missingSegments: string[] = [];
-  let current = path.dirname(lexical);
-  for (;;) {
-    const realParent = await realpathIfExists(current);
-    if (realParent) {
-      return path.join(
-        realParent,
-        ...missingSegments.reverse(),
-        path.basename(lexical),
-      );
-    }
-
-    const parent = path.dirname(current);
-    if (parent === current) {
-      return lexical;
-    }
-    missingSegments.push(path.basename(current));
-    current = parent;
-  }
+  return canonicalizePathTarget(lexicalPath);
 }
 
 async function canonicalizeForPermission(
@@ -407,6 +377,20 @@ function createExternalWriteEnvironment(
       return environment.resolvePathForWrite(inputPath);
     },
   };
+}
+
+function trustedRootFromExternalPath(pathFact: PreflightExternalPath): string {
+  const globMatch = /^(.*[\\/])\*\*$/u.exec(pathFact.askPattern);
+  if (!globMatch) {
+    return path.resolve(path.dirname(pathFact.absolutePath));
+  }
+  const directory = globMatch[1];
+  const root = path.parse(path.resolve(directory)).root;
+  const withoutTrailingSeparator =
+    directory.length > root.length
+      ? directory.replace(/[\\/]+$/u, "")
+      : directory;
+  return path.resolve(withoutTrailingSeparator);
 }
 
 function isEnabledByAgentConfig(
@@ -721,6 +705,7 @@ export function createToolScheduler(
     input: {
       readonly category?: ToolCategory;
       readonly metadata?: Record<string, unknown>;
+      readonly onResponse?: (response: PermissionResponse) => Promise<void>;
       readonly reason?: string;
       readonly toolName?: string;
     } = {},
@@ -785,6 +770,7 @@ export function createToolScheduler(
       });
     }
 
+    await input.onResponse?.(response);
     return null;
   }
 
@@ -853,6 +839,16 @@ export function createToolScheduler(
     if (!controller) {
       return makeCancelledResult(call);
     }
+    async function trustExternalPath(
+      externalPath: PreflightExternalPath,
+    ): Promise<void> {
+      await context.environment?.trustPath?.({
+        kind: "external-approved",
+        path: trustedRootFromExternalPath(externalPath),
+        source: "external_directory",
+      });
+    }
+
     for (const externalPath of uniqueExternalPaths(preflight.externalPaths)) {
       if (isCancelled(call) || controller.signal.aborted) {
         return makeCancelledResult(call);
@@ -895,12 +891,18 @@ export function createToolScheduler(
         });
       }
       if (decision.type === "allow") {
+        await trustExternalPath(externalPath);
         continue;
       }
 
       const result = await confirmPermission(call, decision, params, {
         category: "dangerous",
         metadata: { preflight },
+        onResponse: async (response) => {
+          if (response === "always") {
+            await trustExternalPath(externalPath);
+          }
+        },
         reason: `External path access requires confirmation: ${externalPath.absolutePath}`,
         toolName: "external_directory",
       });
@@ -1116,6 +1118,7 @@ export function createToolScheduler(
           shellKind,
         );
         return {
+          environment: request.environment,
           externalWrite: false,
           preflight,
           untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
@@ -1123,6 +1126,7 @@ export function createToolScheduler(
         };
       } catch (error) {
         return {
+          environment: request.environment,
           externalWrite: false,
           preflightError: error,
           untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
@@ -1133,6 +1137,7 @@ export function createToolScheduler(
 
     if (category !== "write" || !request.environment) {
       return {
+        environment: request.environment,
         externalWrite: false,
         untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
         params: request.params,
@@ -1142,6 +1147,7 @@ export function createToolScheduler(
     const filePath = getFilePathParam(request.params);
     if (!filePath || !path.isAbsolute(filePath)) {
       return {
+        environment: request.environment,
         externalWrite: false,
         untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
         params: request.params,
@@ -1160,8 +1166,9 @@ export function createToolScheduler(
     }
 
     return {
-      externalWrite: isOutsideWorkdir(
-        request.environment.workdir,
+      environment: request.environment,
+      externalWrite: isOutsideTrustedEnvironment(
+        request.environment,
         canonicalPath,
       ),
       externalWritePath: canonicalPath,

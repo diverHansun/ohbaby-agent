@@ -63,10 +63,10 @@ describe("shell preflight", () => {
     ]);
   });
 
-  it("rejects cd targets outside the sandbox root", async () => {
-    await expect(preflight("cd .. && echo escaped")).rejects.toThrow(
-      "outside the workspace",
-    );
+  it("resolves cd targets outside the workspace for sandbox permission checks", async () => {
+    await expect(preflight("cd .. && echo escaped")).resolves.toMatchObject({
+      cdTargets: [await fs.realpath(path.dirname(tempRoot))],
+    });
   });
 
   it("tracks cd targets inside the sandbox root", async () => {
@@ -206,7 +206,9 @@ describe("shell preflight", () => {
 
     await expect(
       preflight("cd.. && echo escaped", { shellKind: "cmd" }),
-    ).rejects.toThrow("outside the workspace");
+    ).resolves.toMatchObject({
+      cdTargets: [await fs.realpath(path.dirname(tempRoot))],
+    });
     await expect(
       preflight("cd /d child && echo ok", { shellKind: "cmd" }),
     ).resolves.toMatchObject({ cdTargets: [realChild] });
@@ -224,7 +226,9 @@ describe("shell preflight", () => {
     ).resolves.toMatchObject({ cdTargets: [realChild] });
     await expect(
       preflight("Set-Location -LiteralPath ..", { shellKind: "powershell" }),
-    ).rejects.toThrow("outside the workspace");
+    ).resolves.toMatchObject({
+      cdTargets: [await fs.realpath(path.dirname(tempRoot))],
+    });
   });
 
   it("rejects shell-specific destructive root removal commands", async () => {

@@ -107,11 +107,14 @@ function toToolExecutionEnvironment(
 
   return {
     workdir: lease.workdir,
+    containsTrustedPath: lease.containsTrustedPath.bind(lease),
     resolveCommandContext: lease.resolveCommandContext.bind(lease),
     preflight: lease.preflight.bind(lease),
     resolvePath: lease.resolvePath.bind(lease),
     resolvePathForExisting: lease.resolvePathForExisting.bind(lease),
     resolvePathForWrite: lease.resolvePathForWrite.bind(lease),
+    trustPath: lease.trustPath.bind(lease),
+    trustedRoots: lease.trustedRoots.bind(lease),
   };
 }
 

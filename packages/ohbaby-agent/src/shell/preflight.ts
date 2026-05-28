@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { CommandDetail, ParsedCommand } from "../utils/index.js";
-import { containsOrEqual, parseCommand } from "../utils/index.js";
+import { parseCommand } from "../utils/index.js";
 import { canonicalizePathTarget } from "../utils/path-canonicalize.js";
 import {
   msysPathToWindowsPath,
@@ -389,9 +389,7 @@ function cdTarget(detail: CommandDetail, shellKind: ShellKind): string {
   );
   const target = candidates.find((arg) => arg.trim().length > 0);
   if (!target || target === "-") {
-    reject(
-      "Directory-changing commands require a static target inside the workspace.",
-    );
+    reject("Directory-changing commands require a static target.");
   }
   return target;
 }
@@ -478,25 +476,6 @@ async function realpathOrResolve(value: string): Promise<string> {
   }
 }
 
-async function assertPathInsideWorkspace(input: {
-  readonly currentCwd: string;
-  readonly rootCwd: string;
-  readonly shellKind: ShellKind;
-  readonly target: string;
-}): Promise<string> {
-  const resolved = await resolveStaticPathTarget(
-    input.currentCwd,
-    input.target,
-    input.shellKind,
-  );
-  if (!containsOrEqual(input.rootCwd, resolved)) {
-    reject(
-      `Path "${input.target}" resolves outside the workspace: ${resolved}`,
-    );
-  }
-  return resolved;
-}
-
 function pathTokens(detail: CommandDetail): readonly string[] {
   return extractShellPathArgs(detail);
 }
@@ -538,7 +517,6 @@ function downloadOutputTargets(detail: CommandDetail): readonly string[] {
 export async function preflightShellCommand(
   input: ShellPreflightInput,
 ): Promise<ShellPreflightResult> {
-  const rootCwd = await realpathOrResolve(input.rootCwd);
   let currentCwd = await realpathOrResolve(input.cwd);
   const cdTargets: string[] = [];
   const resolvedPaths: string[] = [];
@@ -561,12 +539,11 @@ export async function preflightShellCommand(
 
     if (isDirectoryCommand(detail, input.shellKind)) {
       const target = cdTarget(detail, input.shellKind);
-      const resolved = await assertPathInsideWorkspace({
+      const resolved = await resolveStaticPathTarget(
         currentCwd,
-        rootCwd,
-        shellKind: input.shellKind,
         target,
-      });
+        input.shellKind,
+      );
       currentCwd = resolved;
       cdTargets.push(resolved);
       continue;

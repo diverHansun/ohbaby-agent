@@ -1,8 +1,12 @@
-import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ShellKind } from "../shell/index.js";
 import { classifyShellPathPattern } from "../shell/path-patterns.js";
+import { canonicalizePathTarget } from "../utils/path-canonicalize.js";
+import {
+  msysPathToWindowsPath,
+  stripMatchingQuotes,
+} from "../utils/path-strings.js";
 
 const URL_PATTERN = /^[a-z][a-z0-9+.-]*:\/\//iu;
 const COMMAND_SUBSTITUTION_PATTERN = /`|\$\(|<\(|>\(/u;
@@ -10,27 +14,6 @@ const BRACED_HOME_PATTERN = /^\$\{HOME\}(?:[\\/](.*))?$/iu;
 const HOME_PATTERN = /^\$HOME(?:[\\/](.*))?$/iu;
 const POWERSHELL_HOME_PATTERN = /^\$env:USERPROFILE(?:[\\/](.*))?$/iu;
 const CMD_HOME_PATTERN = /^%USERPROFILE%(?:[\\/](.*))?$/iu;
-
-function stripMatchingQuotes(value: string): string {
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1);
-  }
-
-  return value;
-}
-
-function msysPathToWindowsPath(target: string): string | undefined {
-  const match = /^\/([A-Za-z])(?:\/(.*))?$/u.exec(target);
-  if (!match || process.platform !== "win32") {
-    return undefined;
-  }
-  const drive = match[1].toUpperCase();
-  const rest = match[2] ? match[2].replace(/\//gu, "\\") : "";
-  return `${drive}:\\${rest}`;
-}
 
 function resolveHomePath(match: RegExpExecArray): string {
   return match[1] ? path.resolve(os.homedir(), match[1]) : os.homedir();
@@ -57,46 +40,10 @@ function expandKnownHomeVariable(target: string): string | undefined {
   return undefined;
 }
 
-function errorCode(error: unknown): string | undefined {
-  return typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    typeof error.code === "string"
-    ? error.code
-    : undefined;
-}
-
-function isMissingPathError(error: unknown): boolean {
-  const code = errorCode(error);
-  return code === "ENOENT" || code === "ENOTDIR";
-}
-
 export async function canonicalizeSandboxPath(
   inputPath: string,
 ): Promise<string> {
-  const absolutePath = path.resolve(inputPath);
-  const suffix: string[] = [];
-  let current = absolutePath;
-
-  for (;;) {
-    try {
-      const realPath = await fs.realpath(current);
-      return suffix.length > 0
-        ? path.join(realPath, ...suffix.reverse())
-        : realPath;
-    } catch (error) {
-      if (!isMissingPathError(error)) {
-        throw error;
-      }
-
-      const parent = path.dirname(current);
-      if (parent === current) {
-        return absolutePath;
-      }
-      suffix.push(path.basename(current));
-      current = parent;
-    }
-  }
+  return canonicalizePathTarget(inputPath);
 }
 
 export function resolveSandboxPathArg(input: {
@@ -128,7 +75,7 @@ export function resolveSandboxPathArg(input: {
   }
 
   const msysPath =
-    input.shellKind === "bash" ? msysPathToWindowsPath(target) : undefined;
+    input.shellKind === "bash" ? msysPathToWindowsPath(target) : null;
   if (msysPath) {
     return path.resolve(msysPath);
   }

@@ -7,7 +7,11 @@ export {
 } from "./errors.js";
 export { SandboxManager } from "./manager.js";
 export { HostLocalAdapter } from "./adapters/host-local.js";
-export { classifySandboxPath, containsOrEqualPath } from "./boundary.js";
+export {
+  classifySandboxPath,
+  containsOrEqualPath,
+  containsTrustedPath,
+} from "./boundary.js";
 export { classifyDenylistedPath, classifySensitivePath } from "./denylist.js";
 export { resolveSandboxPathArg } from "./paths.js";
 export {
@@ -39,4 +43,6 @@ export type {
   SandboxPathBoundary,
   SandboxPreflightInput,
   SandboxShellAnalysisPreflightInput,
+  TrustPathInput,
 } from "./types.js";
+export type { TrustedRoot, TrustedRootKind } from "./trusted-roots.js";

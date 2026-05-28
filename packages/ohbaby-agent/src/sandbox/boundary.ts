@@ -28,9 +28,17 @@ export function containsOrEqualPath(parent: string, child: string): boolean {
 
 export function classifySandboxPath(input: {
   readonly absolutePath: string;
-  readonly workdir: string;
+  readonly trustedRoots?: readonly string[];
+  readonly workdir?: string;
 }): SandboxPathBoundary {
-  return containsOrEqualPath(input.workdir, input.absolutePath)
-    ? "inside"
-    : "outside";
+  return containsTrustedPath(input) ? "inside" : "outside";
+}
+
+export function containsTrustedPath(input: {
+  readonly absolutePath: string;
+  readonly trustedRoots?: readonly string[];
+  readonly workdir?: string;
+}): boolean {
+  const roots = input.trustedRoots ?? (input.workdir ? [input.workdir] : []);
+  return roots.some((root) => containsOrEqualPath(root, input.absolutePath));
 }

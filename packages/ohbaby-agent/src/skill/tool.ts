@@ -168,6 +168,18 @@ export function formatSkillResourceToolOutput(
   ].join("\n");
 }
 
+async function activateSkillRoot(input: {
+  readonly baseDir: string;
+  readonly context: Parameters<Tool["execute"]>[1];
+  readonly name: string;
+}): Promise<void> {
+  await input.context.environment?.trustPath?.({
+    kind: "active-skill",
+    path: input.baseDir,
+    source: input.name,
+  });
+}
+
 export async function createSkillTool(
   registry: SkillToolRegistry,
   options: SkillDescriptionOptions = {},
@@ -189,10 +201,15 @@ export async function createSkillTool(
       type: "object",
     },
     source: "module",
-    async execute(params): Promise<ToolExecutionResult> {
+    async execute(params, context): Promise<ToolExecutionResult> {
       const name = requiredString(params, "name");
       await assertModelInvocable(registry, name);
       const content = await registry.load(name);
+      await activateSkillRoot({
+        baseDir: content.baseDir,
+        context,
+        name: content.info.name,
+      });
       return {
         metadata: {
           dir: content.baseDir,
@@ -231,13 +248,18 @@ export function createSkillResourceTool(
       type: "object",
     },
     source: "module",
-    async execute(params): Promise<ToolExecutionResult> {
+    async execute(params, context): Promise<ToolExecutionResult> {
       const name = requiredString(params, "name");
       await assertModelInvocable(registry, name);
       const content = await registry.readResource(
         name,
         requiredString(params, "path"),
       );
+      await activateSkillRoot({
+        baseDir: content.baseDir,
+        context,
+        name: content.info.name,
+      });
       return {
         metadata: {
           dir: content.baseDir,

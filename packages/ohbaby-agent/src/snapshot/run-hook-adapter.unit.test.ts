@@ -48,6 +48,7 @@ function sandboxLease(input: {
       readOnly: false,
       supportsGit: false,
     },
+    containsTrustedPath: () => true,
     contextId: `context_${input.sessionId}`,
     leaseId: `lease_${input.runId}`,
     preflight: () => Promise.resolve(emptyPreflight()),
@@ -59,6 +60,9 @@ function sandboxLease(input: {
     resolvePathForWrite: (inputPath: string) =>
       Promise.resolve(join(input.workdir, inputPath)),
     sessionId: input.sessionId,
+    trustPath: (trustedPath) =>
+      Promise.resolve({ kind: trustedPath.kind, path: trustedPath.path }),
+    trustedRoots: () => [{ kind: "workspace", path: input.workdir }],
     workdir: input.workdir,
   };
 }

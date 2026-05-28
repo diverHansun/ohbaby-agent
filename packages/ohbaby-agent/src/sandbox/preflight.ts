@@ -38,6 +38,17 @@ function toPreflightCommand(command: ShellCommandAnalysis): PreflightCommand {
   return { ...command };
 }
 
+function commandPathFacts(command: ShellCommandAnalysis): readonly string[] {
+  const paths = new Set<string>();
+  if (command.executedScript) {
+    paths.add(command.executedScript);
+  }
+  for (const pathArg of command.pathArgs) {
+    paths.add(pathArg);
+  }
+  return [...paths];
+}
+
 export async function preflightSandboxShellAnalysis(
   input: SandboxShellAnalysisPreflightInput,
 ): Promise<PreflightResult> {
@@ -47,11 +58,17 @@ export async function preflightSandboxShellAnalysis(
   const denylistHits: PreflightDenylistHit[] = [];
   const sensitivePaths: PreflightSensitivePath[] = [];
   const canonicalWorkdir = await canonicalizeSandboxPath(input.workdir);
+  const trustedRoots = [
+    canonicalWorkdir,
+    ...(await Promise.all(
+      (input.trustedRoots ?? []).map((root) => canonicalizeSandboxPath(root)),
+    )),
+  ];
   let overallDanger: PreflightCommand["danger"] = "readonly";
 
   for (const command of commands) {
     overallDanger = maxDanger(overallDanger, command.danger);
-    for (const original of command.pathArgs) {
+    for (const original of commandPathFacts(command)) {
       const resolvedPath = resolveSandboxPathArg({
         arg: original,
         shellKind: input.shell.shellKind,
@@ -82,10 +99,7 @@ export async function preflightSandboxShellAnalysis(
         });
       }
 
-      if (
-        classifySandboxPath({ absolutePath, workdir: canonicalWorkdir }) ===
-        "outside"
-      ) {
+      if (classifySandboxPath({ absolutePath, trustedRoots }) === "outside") {
         externalPaths.push({
           absolutePath,
           askPattern: externalAskPattern(absolutePath),
@@ -116,6 +130,7 @@ export async function preflightSandboxCommand(
   const shell = await analyzeShellCommand(input.command, input.shellKind);
   return preflightSandboxShellAnalysis({
     shell,
+    trustedRoots: input.trustedRoots,
     workdir: input.workdir,
   });
 }

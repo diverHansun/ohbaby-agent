@@ -5,6 +5,7 @@ import type {
   SandboxContext,
   SandboxContextStatus,
 } from "./types.js";
+import type { TrustedRootRegistry } from "./trusted-roots.js";
 
 export interface InternalSandboxContext {
   readonly contextId: string;
@@ -12,6 +13,7 @@ export interface InternalSandboxContext {
   readonly adapter: SandboxAdapter;
   readonly adapterId: string;
   readonly handle: SandboxAdapterHandle;
+  readonly trustedRoots: TrustedRootRegistry;
   readonly workdir: string;
   readonly capabilities: SandboxCapabilities;
   readonly createdAt: number;

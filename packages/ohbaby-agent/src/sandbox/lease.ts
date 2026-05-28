@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { containsOrEqual } from "../utils/index.js";
+import { canonicalizePathTarget } from "../utils/path-canonicalize.js";
 import { SandboxBoundaryError } from "./errors.js";
+import { containsOrEqualPath } from "./boundary.js";
 import type { InternalSandboxContext } from "./context.js";
 import { preflightSandboxCommand } from "./preflight.js";
 import type {
@@ -17,50 +18,32 @@ function resolveInputPath(workdir: string, inputPath: string): string {
     : path.resolve(workdir, inputPath);
 }
 
-function normalizeLexicalForComparison(inputPath: string): string {
-  const normalized = path.normalize(path.resolve(inputPath));
-  const root = path.parse(normalized).root;
-  const withoutTrailingSeparator =
-    normalized.length > root.length
-      ? normalized.replace(/[\\/]+$/u, "")
-      : normalized;
-
-  return process.platform === "win32"
-    ? withoutTrailingSeparator.toLowerCase()
-    : withoutTrailingSeparator;
+function trustedRootPaths(context: InternalSandboxContext): readonly string[] {
+  return context.trustedRoots.snapshot().map((root) => root.path);
 }
 
-function containsOrEqualLexical(parent: string, child: string): boolean {
-  const normalizedParent = normalizeLexicalForComparison(parent);
-  const normalizedChild = normalizeLexicalForComparison(child);
-  if (normalizedParent === normalizedChild) {
-    return true;
-  }
-  const relative = path.relative(normalizedParent, normalizedChild);
-
-  return (
-    relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative)
-  );
-}
-
-function assertInside(
-  workdir: string,
+function assertTrusted(
+  context: InternalSandboxContext,
   inputPath: string,
   resolvedPath: string,
 ): string {
-  if (!containsOrEqual(workdir, resolvedPath)) {
-    throw new SandboxBoundaryError(inputPath, workdir, resolvedPath);
+  if (!context.trustedRoots.contains(resolvedPath)) {
+    throw new SandboxBoundaryError(inputPath, context.workdir, resolvedPath);
   }
   return resolvedPath;
 }
 
-function assertInsideLexical(
-  workdir: string,
+function assertTrustedLexical(
+  context: InternalSandboxContext,
   inputPath: string,
   resolvedPath: string,
 ): string {
-  if (!containsOrEqualLexical(workdir, resolvedPath)) {
-    throw new SandboxBoundaryError(inputPath, workdir, resolvedPath);
+  const trustedRoots = trustedRootPaths(context);
+  const isTrusted = trustedRoots.some((root) =>
+    containsOrEqualPath(root, resolvedPath),
+  );
+  if (!isTrusted) {
+    throw new SandboxBoundaryError(inputPath, context.workdir, resolvedPath);
   }
   return resolvedPath;
 }
@@ -81,23 +64,25 @@ export function createSandboxLease(input: {
     sessionId: context.sessionId,
     workdir: context.workdir,
 
+    containsTrustedPath(absolutePath: string): boolean {
+      return context.trustedRoots.contains(path.resolve(absolutePath));
+    },
+
     resolvePath(inputPath: string): string {
       const resolvedPath = resolveInputPath(context.workdir, inputPath);
-      return assertInsideLexical(context.workdir, inputPath, resolvedPath);
+      return assertTrustedLexical(context, inputPath, resolvedPath);
     },
 
     async resolvePathForExisting(inputPath: string): Promise<string> {
       const target = resolveInputPath(context.workdir, inputPath);
       const resolvedPath = await fs.realpath(target);
-      return assertInside(context.workdir, inputPath, resolvedPath);
+      return assertTrusted(context, inputPath, resolvedPath);
     },
 
     async resolvePathForWrite(inputPath: string): Promise<string> {
       const target = resolveInputPath(context.workdir, inputPath);
-      const parent = path.dirname(target);
-      const realParent = await fs.realpath(parent);
-      const resolvedPath = path.join(realParent, path.basename(target));
-      return assertInside(context.workdir, inputPath, resolvedPath);
+      const resolvedPath = await canonicalizePathTarget(target);
+      return assertTrusted(context, inputPath, resolvedPath);
     },
 
     resolveCommandContext(options?: CommandContextOptions): CommandContext {
@@ -113,8 +98,17 @@ export function createSandboxLease(input: {
       return preflightSandboxCommand({
         command,
         shellKind,
+        trustedRoots: trustedRootPaths(context),
         workdir: context.workdir,
       });
+    },
+
+    trustPath(input): ReturnType<SandboxLease["trustPath"]> {
+      return context.trustedRoots.add(input);
+    },
+
+    trustedRoots(): ReturnType<SandboxLease["trustedRoots"]> {
+      return context.trustedRoots.snapshot();
     },
 
     async release(): Promise<void> {

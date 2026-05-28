@@ -52,6 +52,14 @@ const DOWNLOAD_COMMANDS = new Set([
   "invoke-restmethod",
   "invoke-webrequest",
 ]);
+const DIRECTORY_COMMANDS = new Set([
+  "cd",
+  "chdir",
+  "push-location",
+  "pushd",
+  "set-location",
+  "sl",
+]);
 const PATH_VALUE_OPTIONS = new Set([
   "-c",
   "-f",
@@ -109,6 +117,7 @@ const PATH_SUFFIX_PATTERN = /^[\w.-]+(?:[\\/][\w .-]+)+$/u;
 const FIND_LEADING_OPTIONS = new Set(["-H", "-L", "-P"]);
 const DIRECT_EXECUTABLE_PREFIX_PATTERN =
   /^(?:\.{1,2}[\\/]|~[\\/]|[\\/]|[A-Za-z]:[\\/])/u;
+const DIRECTORY_PATH_OPTIONS = new Set(["-literalpath", "-path"]);
 
 export interface ShellPathFacts {
   readonly executedScript?: string;
@@ -337,6 +346,59 @@ function addDownloadOutputPaths(
   }
 }
 
+function compactDirectoryTarget(root: string): string | null {
+  const normalized = normalizeRoot(root);
+  if (normalized === "cd.." || normalized === "chdir..") {
+    return "..";
+  }
+  if (normalized === "cd." || normalized === "chdir.") {
+    return ".";
+  }
+  if (normalized.startsWith("cd\\") || normalized.startsWith("cd/")) {
+    return root.slice(2);
+  }
+  if (normalized.startsWith("chdir\\") || normalized.startsWith("chdir/")) {
+    return root.slice(5);
+  }
+
+  return null;
+}
+
+function addDirectoryTargetPaths(
+  paths: Set<string>,
+  args: readonly string[],
+  consumed: ReadonlySet<number>,
+): void {
+  for (let index = 0; index < args.length; index += 1) {
+    if (consumed.has(index)) {
+      continue;
+    }
+    const token = args[index];
+    const lower = token.toLowerCase();
+    if (lower === "/d" || token === "-L" || token === "-P" || token === "--") {
+      continue;
+    }
+    if (isOption(token)) {
+      const optionName = normalizeOptionName(token);
+      const inlineValue = optionValue(token);
+      if (DIRECTORY_PATH_OPTIONS.has(optionName)) {
+        if (inlineValue !== null) {
+          addCandidate(paths, inlineValue);
+        } else {
+          addCandidate(paths, args[index + 1]);
+          index += 1;
+        }
+        return;
+      }
+      continue;
+    }
+    if (token !== "-") {
+      addCandidate(paths, token);
+    }
+    return;
+  }
+}
+
 function addFindPaths(
   paths: Set<string>,
   args: readonly string[],
@@ -371,7 +433,12 @@ export function extractShellPathFacts(detail: CommandDetail): ShellPathFacts {
       ? undefined
       : execution.scriptTokenIndex - 1;
 
-  if (execution.executedScript) {
+  const compactTarget = compactDirectoryTarget(detail.root);
+  if (compactTarget) {
+    addCandidate(paths, compactTarget);
+  } else if (DIRECTORY_COMMANDS.has(root)) {
+    addDirectoryTargetPaths(paths, args, consumed);
+  } else if (execution.executedScript) {
     const startIndex =
       scriptArgIndex === undefined ? 0 : Math.max(scriptArgIndex + 1, 0);
     addScriptArgumentPaths(paths, args, consumed, startIndex);
