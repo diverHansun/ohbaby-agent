@@ -124,7 +124,8 @@ sandbox 使用这些事实做 workspace 事实分析：
 - `pathArgs` → 解析为绝对路径。
 - inside path → 记录为内部事实。
 - outside path → `externalPaths`，交给 `external_directory` permission。
-- denylist path → `denylistHits`，交给 scheduler hard deny。
+- sensitive path → `sensitivePaths`，交给 `sensitive_path` permission。
+- hard-deny path → `denylistHits`，交给 scheduler 直接拒绝。
 
 这条边界遵循 SRP：shell 理解 shell，sandbox 理解 workspace，permission 理解决策。
 
@@ -135,8 +136,9 @@ shell 不调用 `permission.ask()`。
 permission ask 的顺序由 scheduler 编排：
 
 1. `external_directory` 优先。
-2. 外部路径批准后，再按原 bash rule 判断 `bash` 权限。
-3. denylist 命中直接拒绝，不进入 ask。
+2. 外部路径批准后，敏感文件再走 `sensitive_path`。
+3. external / sensitive 都通过后，再按原 bash rule 判断 `bash` 权限。
+4. denylist 命中直接拒绝，不进入 ask。
 
 这样可以支持 skill scripts 中常见的 `../`、绝对路径和 `~` 路径，同时仍保留用户控制。
 

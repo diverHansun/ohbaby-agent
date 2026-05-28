@@ -22,6 +22,7 @@
 | 职责定位 | shell 是命令语法分析与进程执行层 | 不做 permission 决策，不做 workspace 策略 |
 | 命令解析 | 先收敛现有轻量 preflight，保留 opencode 风格 tree-sitter 替换缝 | 分批实施；improve-1 已覆盖本轮 external-first 所需路径与 arity 场景 |
 | 外部路径 | shell 只抽取路径候选；外部路径由 sandbox 标注并由 permission ask | `../` 和绝对外部路径不会被 shell 直接拒绝 |
+| glob 路径 | `*` / `?` / `[]` 不是动态路径；shell 保留 glob 参数并由 sandbox 检查字面前缀目录 | `cat *.md`、`rm build/*.tmp` 这类日常命令不再被 preflight 硬抛错 |
 | 进程硬化 | 补齐 kimi-code 风格 non-interactive env 与 stdin close | 降低交互命令挂死、git 凭据提示、彩色输出噪音 |
 | commandPrefix | `bash` 工具必须支持 commandPrefix 桥接 | 为未来 OS adapter / remote adapter 保留扩展点 |
 | skill scripts | 作为重要消费者显式纳入设计 | 避免后续 scripts 运行时再做一套 shell/sandbox 二次实现 |
@@ -40,6 +41,7 @@ shell improve-1 覆盖：
 - 稳定 builtin `bash` 的执行环境：non-interactive env、stdin close、输出/取消/超时语义保持一致。
 - 把现有抛错式 `preflightShellCommand()` 逐步拆成结构化 shell analysis。
 - 新增结构化 shell analysis，抽取 command source、tokens、path args、dynamic 标志、danger 分类和 arity pattern；tree-sitter AST 替换留在后续阶段。
+- 区分 glob 与真动态路径：glob 交给 sandbox 用字面前缀目录做边界判断，`$()` / `${}` / 反引号 / 未求值变量仍标记为 dynamic。
 - 支持 `commandPrefix`，但 HostLocal 默认不使用。
 - 为 [sandbox preflight](../../sandbox/improve-1/data-flow.md) 提供输入事实，不直接问 permission。
 
@@ -73,9 +75,10 @@ sandbox 消费这些事实，结合 lease workdir 解析路径，输出：
 interface PreflightResult {
   readonly externalPaths: readonly PreflightExternalPath[];
   readonly denylistHits: readonly PreflightDenylistHit[];
+  readonly sensitivePaths: readonly PreflightSensitivePath[];
   readonly commands: readonly PreflightCommand[];
 }
 ```
 
-因此，命令解析文件应归在 `src/shell/`；workspace 边界、denylist 和 `SandboxLease.preflight()`
+因此，命令解析文件应归在 `src/shell/`；workspace 边界、denylist、sensitive path 和 `SandboxLease.preflight()`
 归在 `src/sandbox/`。这个边界是为了避免后续再次出现“shell 一套、sandbox 一套”的二次实现。

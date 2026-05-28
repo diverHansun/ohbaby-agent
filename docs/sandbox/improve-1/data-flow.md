@@ -19,10 +19,11 @@ ToolScheduler.prepareCall
   |     |     -> commands/tokens/pathArgs/danger/arityKey/hasDynamic
   |     |
   |     |-- sandbox.preflight(workdir, shellAnalysis)
-  |           -> internalPaths/externalPaths/denylistHits
+  |           -> internalPaths/externalPaths/denylistHits/sensitivePaths
   |
   |-- if denylistHits: reject immediately
   |-- if externalPaths: evaluate/ask external_directory first
+  |-- if sensitivePaths: evaluate/ask sensitive_path
   |-- after external approval: evaluate/ask bash permission
   |
   v
@@ -42,7 +43,7 @@ ToolExecutionResult
 核心顺序是：
 
 ```text
-shell 语法事实 -> sandbox workspace 事实 -> external_directory -> bash -> execute
+shell 语法事实 -> sandbox workspace 事实 -> external_directory -> sensitive_path -> bash -> execute
 ```
 
 不能再出现：
@@ -76,7 +77,7 @@ return sandboxPreflight({
 因此：
 
 - shell 模块拥有 parser、tokens、dynamic、danger、arityKey。
-- sandbox 模块拥有 path expansion、workspace boundary、denylist。
+- sandbox 模块拥有 path expansion、workspace boundary、denylist 和 sensitive path 分类。
 - permission 模块拥有 allow / ask / deny。
 
 这避免 `src/shell/`、`src/sandbox/`、`src/tools/bash.ts` 各自长出一套命令解析。
@@ -125,12 +126,21 @@ export interface PreflightDenylistHit {
   readonly reason: DenylistReason;
 }
 
+export interface PreflightSensitivePath {
+  readonly original: string;
+  readonly absolutePath: string;
+  /** sensitive_path permission 的 pattern，通常是精确路径 */
+  readonly askPattern: string;
+  readonly reason: DenylistReason;
+}
+
 export interface PreflightResult {
   readonly shellKind: ShellKind;
   readonly commands: readonly PreflightCommand[];
   readonly internalPaths: readonly PreflightInternalPath[];
   readonly externalPaths: readonly PreflightExternalPath[];
   readonly denylistHits: readonly PreflightDenylistHit[];
+  readonly sensitivePaths: readonly PreflightSensitivePath[];
   readonly overallDanger: "readonly" | "mutating" | "dangerous";
   readonly parseError?: string;
 }
@@ -138,10 +148,11 @@ export interface PreflightResult {
 
 不变式：
 
-1. `externalPaths` 与 `denylistHits` 不相交。同一路径如果命中 denylist，不再进入外部目录 ask。
-2. `internalPaths` / `externalPaths` / `denylistHits` 只覆盖 shell 能静态识别的字面路径。
-3. `hasDynamic = true` 不代表拒绝；它只提示 bash permission 阶段应保持保守。
-4. `overallDanger` 来自 shell command danger 的最大值。
+1. `denylistHits` 是 hard-deny 事实，不再进入 ask 流程。
+2. `sensitivePaths` 可以与 `internalPaths` 或 `externalPaths` 重叠；外部敏感路径先问 `external_directory`，再问 `sensitive_path`。
+3. `internalPaths` / `externalPaths` / `denylistHits` / `sensitivePaths` 只覆盖 shell 能静态识别的路径。glob 使用字面前缀目录做边界判断，例如 `build/*.tmp` 先检查 `build/`。
+4. 真动态路径（`$()`、`${}`、反引号、未求值变量）不阻断；`hasDynamic=true` 只提示 bash permission 阶段应保持保守。
+5. `overallDanger` 来自 shell command danger 的最大值。
 
 ## external_directory 优先
 
@@ -180,6 +191,34 @@ for (const externalPath of groupExternalDirectories(preflight.externalPaths)) {
   }
 }
 
+for (const sensitivePath of uniqueSensitivePaths(preflight.sensitivePaths)) {
+  const sensitiveCall = {
+    ...originalBashCall,
+    toolName: "sensitive_path",
+    category: "dangerous",
+    params: {
+      path: sensitivePath.absolutePath,
+      pattern: sensitivePath.askPattern,
+      reason: sensitivePath.reason,
+    },
+  };
+  const sensitiveDecision = evaluatePermission(sensitiveCall, permissionState);
+
+  if (sensitiveDecision.type === "ask") {
+    const response = await permission.ask({
+      toolName: "sensitive_path",
+      category: "dangerous",
+      params: sensitiveCall.params,
+      metadata: { preflight },
+    });
+    if (response !== "allow") return rejected("PermissionRejected");
+  }
+
+  if (sensitiveDecision.type === "deny") {
+    return rejected("PermissionDeniedError");
+  }
+}
+
 const bashDecision = evaluatePermission(originalBashCall);
 // bashDecision 如果是 ask，继续走原有 bash ask UI。
 ```
@@ -188,8 +227,9 @@ const bashDecision = evaluatePermission(originalBashCall);
 
 - `external_directory` 不是把 bash allow 升级成 ask，而是 bash 之前独立评估的权限类型。
 - 如果用户已经记住某个外部目录的 allow rule，可以不弹窗，但仍然先经过 external_directory 规则。
-- 外部路径批准后，不代表 bash 自动批准；`git push`、`rm -rf` 等仍按原 bash 规则继续 ask/deny。
-- denylist 是 hard deny，不能被 full-access 或 always allow 绕过。
+- `sensitive_path` 同样是 bash 之前独立评估的权限类型，用于 `.env`、非模板 `.env.*`、`*.pem`、`*.key` 和 shell rc 文件。
+- 外部路径和敏感路径批准后，不代表 bash 自动批准；`git push`、`rm -rf` 等仍按原 bash 规则继续 ask/deny。
+- denylist 只保留高确信 home 凭据目录（如 `~/.ssh`、`~/.aws`、`~/.gnupg`）的 hard deny，不能被 full-access 或 always allow 绕过。
 
 ## Scheduler 接入点
 
@@ -257,6 +297,7 @@ Session / Run lifecycle keeps existing RunManager architecture
 | 动态路径无法解析 | shell analysis / sandbox paths | 标记 `hasDynamic=true`，不阻断 |
 | 外部路径 | sandbox + scheduler | 先走 `external_directory` 评估 / ask |
 | denylist 命中 | sandbox + scheduler | 直接 rejected，不进入 ask |
+| 敏感文件命中 | sandbox + scheduler | 先走 `sensitive_path` 评估 / ask |
 | permission ask 被拒 | scheduler | rejected |
 | spawn 失败 | bash tool | ExecutionError |
 | timeout / abort | bash tool / scheduler | TimeoutError / CancelledError |
@@ -273,6 +314,6 @@ improve-1 不修改 snapshot 模块。snapshot 通过 `RunHookContext.sandboxLea
 
 - shell 负责理解命令。
 - sandbox 负责理解 workspace 边界。
-- scheduler 负责 external-first 编排。
+- scheduler 负责 external-first 与 sensitive-path 编排。
 - permission 负责最终决策与记忆。
 - bash tool 只在 permission 完成后执行命令并做进程硬化。

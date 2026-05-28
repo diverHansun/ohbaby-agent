@@ -14,7 +14,7 @@
 | [src/adapters/ui-runtime/](../../../packages/ohbaby-agent/src/adapters/ui-runtime/) | — | `composition.ts` 接入 rich `SandboxManager` | `host-local-environment.ts` 删除简版 manager，保留测试用 environment 工厂 |
 | [src/core/tool-scheduler/](../../../packages/ohbaby-agent/src/core/tool-scheduler/) | — | `scheduler.ts` external-first 编排 | 不把 external path 塞成 bash ask 升级 |
 | [src/tools/](../../../packages/ohbaby-agent/src/tools/) | — | `bash.ts` 支持 commandPrefix + 进程硬化；fs tools 继续走 `resolvePath*` | 不在 tool 内直接 ask permission |
-| [src/permission/](../../../packages/ohbaby-agent/src/permission/) | 可选 `metadata` 字段 | 补齐 `external_directory` pattern / type 推断 | 不重写 permission 系统 |
+| [src/permission/](../../../packages/ohbaby-agent/src/permission/) | 可选 `metadata` 字段 | 补齐 `external_directory` / `sensitive_path` pattern 与 type 推断 | 不重写 permission 系统 |
 
 ## 阶段 0：文档与分支
 
@@ -50,7 +50,7 @@ export interface ShellAnalysisResult {
 1. 先用轻量 parser 包装当前 `shell/preflight.ts` 和 `utils/command-parser` 能力。
 2. 让 `shell/preflight.ts` 停止把外部路径当错误抛出，只返回 shell facts。
 3. tree-sitter 替换轻量 parser 内部留给后续增强；improve-1 只要求轻量 parser 覆盖本轮
-   external-first、denylist、git/docker arity 与 skill runtime 关键路径。
+   external-first、sensitive_path、denylist、git/docker arity 与 skill runtime 关键路径。
 
 ## 阶段 2：sandbox preflight facts
 
@@ -68,7 +68,7 @@ packages/ohbaby-agent/src/sandbox/
 
 - `paths.ts`：把 shell `pathArgs` 展开成绝对路径，支持 `~`、环境变量、Windows 盘符、Git Bash 路径。
 - `boundary.ts`：判断 resolved path 是 inside 还是 outside workspace。
-- `denylist.ts`：内置 hard-deny 规则，如 `~/.ssh`、`~/.aws`、`~/.gnupg`、`.env`、`*.pem`、`*.key`。
+- `denylist.ts`：内置 hard-deny 规则只覆盖高确信 home 凭据目录，如 `~/.ssh`、`~/.aws`、`~/.gnupg`；项目内 `.env`、非模板 `.env.*`、`*.pem`、`*.key`、shell rc 归入 `sensitive_path` ask。
 - `preflight.ts`：组合 shell facts + path facts，产出 `PreflightResult`。
 
 修改：
@@ -85,7 +85,9 @@ packages/ohbaby-agent/src/sandbox/
 - 绝对路径和 `../` 只要解析到 workspace 外，都进入 `externalPaths`。
 - 外部路径不是异常，不从 sandbox 抛出。
 - denylist 命中是异常事实，由 scheduler 转成 rejected。
-- 动态路径不阻断，只依赖 bash permission 兜底。
+- sensitive 命中是可确认事实，由 scheduler 在 bash 前触发 `sensitive_path` ask。
+- glob 不是动态路径；先取字面前缀目录做 boundary / denylist / sensitive 判断，例如 `src/*.ts` 检查 `src/`。
+- 真动态路径不阻断，只依赖 bash permission 兜底。
 
 ## 阶段 3：rich SandboxLease 统一 execution environment
 
@@ -134,9 +136,10 @@ if (tool.name === "bash" && request.environment?.preflight) {
 
 1. `preflight.denylistHits.length > 0`：直接 rejected。
 2. `preflight.externalPaths`：先逐目录评估 / ask `external_directory`。
-3. external 全部批准后，调用原有 `evaluatePermission()` 处理 bash。
-4. bash 若 ask，再进入原有 bash ask UI。
-5. 全部允许后才调用 `bash.execute()`。
+3. `preflight.sensitivePaths`：再逐路径评估 / ask `sensitive_path`。
+4. external / sensitive 全部批准后，调用原有 `evaluatePermission()` 处理 bash。
+5. bash 若 ask，再进入原有 bash ask UI。
+6. 全部允许后才调用 `bash.execute()`。
 
 不要实现为：
 
@@ -164,6 +167,9 @@ const externalCall: PermissionCall = {
 - `inferPermissionType("external_directory", params) -> "external_directory"`
 - `generatePermissionPattern({ type: "external_directory", params: { path } }) -> external_directory(<dir>/**)`
 - `matchesPermissionRule()` 能用 `params.path` 匹配 `external_directory` rule。
+- `inferPermissionType("sensitive_path", params) -> "sensitive_path"`
+- `generatePermissionPattern({ type: "sensitive_path", params: { path, pattern } }) -> sensitive_path(<pattern-or-path>)`
+- `matchesPermissionRule()` 能用 `params.path` / `params.pattern` 匹配 `sensitive_path` rule。
 
 ### PermissionAskInput metadata
 
@@ -215,11 +221,11 @@ fs tools 的外部路径权限已在 permission/improve-1 侧存在，不与 bas
 | `shell/analysis/*.unit.test.ts` | tokens、pathArgs、hasDynamic、danger、arityKey |
 | `sandbox/paths.unit.test.ts` | `~` / env / Windows / Git Bash 路径展开 |
 | `sandbox/boundary.unit.test.ts` | inside/outside、`../`、绝对路径、大小写规则 |
-| `sandbox/denylist.unit.test.ts` | ssh/aws/gnupg/env/private-key/shell-rc |
+| `sandbox/denylist.unit.test.ts` | ssh/aws/gnupg hard-deny、env/private-key/shell-rc sensitive ask |
 | `sandbox/preflight.unit.test.ts` | shell analysis + boundary facts 组合 |
 | `sandbox/manager.unit.test.ts` | rich lease 暴露 `preflight` |
 | `runtime/run-manager/manager.unit.test.ts` | run-manager 仍 acquire/release lease |
-| `core/tool-scheduler/scheduler.unit.test.ts` | denylist reject、external_directory first、bash second |
+| `core/tool-scheduler/scheduler.unit.test.ts` | denylist reject、external_directory first、sensitive_path second、bash last |
 | `tools/bash.unit.test.ts` | commandPrefix、env、stdin close |
 
 ### 集成测试
@@ -229,6 +235,10 @@ fs tools 的外部路径权限已在 permission/improve-1 侧存在，不与 bas
 - `cat ../outside/file.txt`：触发 `external_directory`，批准后再看 bash 规则。
 - `cat /etc/hosts` 或 Windows 等价外部绝对路径：触发 `external_directory`。
 - `cat ~/.ssh/id_rsa`：denylist rejected。
+- `cat .env`：触发 `sensitive_path`，批准后再看 bash 规则。
+- `cat .env.example`：普通 workspace 内路径，不触发 `sensitive_path`。
+- `cat ../outside/.env`：先 `external_directory`，批准后再 `sensitive_path`，最后 bash。
+- `cat src/*.ts` / `rm build/*.tmp`：glob 用字面前缀目录检查，不因 `*` / `?` / `[]` 直接抛错。
 - `git status`：无外部路径，按 bash readonly 规则。
 - `git push origin main`：无外部路径时仍按 bash mutating/dangerous 规则 ask。
 - 外部路径批准 + `git push /outside/repo`：先 external_directory，再 bash ask。
@@ -245,6 +255,7 @@ e2e 要覆盖 skill scripts 的真实调用路径，确认 scripts 不会绕开 
 
 - 是否出现 shell parser / path boundary / permission ask 的第三套实现。
 - external-first 是否真正是 `external_directory` 类型，而不是 bash ask 伪装。
+- sensitive 文件是否走 `sensitive_path`，而不是退回无逃生口 hard-deny。
 - rich `SandboxLease` 是否成为统一 environment。
 - KISS / YAGNI / DRY / SOLID 是否被破坏。
 
@@ -256,7 +267,7 @@ e2e 要覆盖 skill scripts 的真实调用路径，确认 scripts 不会绕开 
 3. shell analysis light implementation
 4. sandbox paths/boundary/denylist/preflight
 5. rich SandboxLease as ToolExecutionEnvironment
-6. scheduler external_directory -> bash sequencing
+6. scheduler external_directory -> sensitive_path -> bash sequencing
 7. unit + integration + e2e + subagent review
 8. 后续：tree-sitter parser upgrade
 ```
@@ -275,7 +286,7 @@ OHBABY_SANDBOX_PREFLIGHT_ENABLED=0
 关闭后：
 
 - `lease.preflight` 返回空 facts。
-- scheduler 不触发 denylist / external-first 增强。
+- scheduler 不触发 denylist / external-first / sensitive_path 增强。
 - bash 行为退化到旧 permission 规则。
 
 这个开关只作为上线保险，不作为长期产品配置。
@@ -287,6 +298,9 @@ OHBABY_SANDBOX_PREFLIGHT_ENABLED=0
 - [x] `cat /absolute/outside/file.txt` 触发 `external_directory`。
 - [x] 外部路径批准后，bash 原权限规则仍会继续判断是否 ask。
 - [x] `cat ~/.ssh/id_rsa` 被 denylist hard deny。
+- [x] `cat .env` 触发 `sensitive_path` ask。
+- [x] `.env.example` 不触发敏感路径 ask。
+- [x] glob 路径用字面前缀目录校验，不被当作动态路径硬拒。
 - [x] `git status` 在默认策略下不被外部路径逻辑干扰。
 - [x] `git push` 仍按 bash 权限规则 ask，always pattern 来自 arity。
 - [x] rich `SandboxLease` 是 runtime/tool-scheduler 使用的统一 execution environment。

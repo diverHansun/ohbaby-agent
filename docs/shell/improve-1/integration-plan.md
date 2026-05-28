@@ -54,6 +54,7 @@ packages/ohbaby-agent/src/shell/analysis/
 - 复用当前 `utils/command-parser` 和 `shell/preflight.ts` 中已有逻辑。
 - 输出 `ShellAnalysisResult`。
 - 不做 workspace boundary，不抛外部路径错误。
+- 不把 glob 当作真动态路径拒绝；`*` / `?` / `[]` 保留给 sandbox 用字面前缀目录校验。
 - 产出 bash permission 所需的 `arityKey` 与 `danger`。
 
 迁移原则：
@@ -76,6 +77,7 @@ sandbox 侧负责：
 
 - `pathArgs` → 绝对路径。
 - outside → `externalPaths`。
+- sensitive → `sensitivePaths`。
 - denylist → `denylistHits`。
 - `tokens` / `arityKey` / `danger` 从 shell analysis 透传给 permission。
 
@@ -88,8 +90,9 @@ shell 侧没有直接改动，但需要保证 `bash.execute()` 不再自己做 p
 1. scheduler 调 `environment.preflight(command, shellKind)`。
 2. 如果 `denylistHits` 非空，直接 rejected。
 3. 如果 `externalPaths` 非空，逐路径或逐目录发 `external_directory` ask。
-4. 外部路径批准后，再按原 `evaluatePermission()` 处理 bash。
-5. 全部批准后才执行 `bash.execute()`。
+4. 如果 `sensitivePaths` 非空，逐路径发 `sensitive_path` ask。
+5. 外部路径和敏感路径都批准后，再按原 `evaluatePermission()` 处理 bash。
+6. 全部批准后才执行 `bash.execute()`。
 
 ## 后续阶段：tree-sitter parser
 
@@ -122,7 +125,9 @@ packages/ohbaby-agent/src/shell/analysis/powershell.ts
 
 - 确认 skill `scripts/` 后续运行时可以复用 builtin bash。
 - 确认 `../` 和绝对外部路径走 `external_directory`。
-- 确认敏感路径 hard deny。
+- 确认 `~/.ssh` 这类 home 凭据目录 hard deny。
+- 确认 `.env`、`*.pem`、`*.key` 这类项目敏感文件走 `sensitive_path` ask。
+- 确认 glob 路径不会被当作 dynamic 直接抛错。
 
 测试来源：
 
@@ -139,7 +144,7 @@ packages/ohbaby-agent/src/shell/analysis/powershell.ts
 2. `feat(shell): harden bash execution environment`
 3. `feat(shell): add structured command analysis`
 4. `feat(sandbox): add preflight facts from shell analysis`
-5. `feat(permission): ask external directories before bash`
+5. `feat(permission): ask external and sensitive paths before bash`
 6. `test(sandbox): cover external bash path integration`
 7. `fix(sandbox): tighten approved external execution`
 

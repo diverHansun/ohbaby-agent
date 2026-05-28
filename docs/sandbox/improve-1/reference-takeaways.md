@@ -37,7 +37,7 @@ opencode **没有 sandbox 模块**——它的整个安全模型分布在 [bash 
 | `expand()` 路径前缀展开（~/$HOME/$env） | 采纳，作为 `src/sandbox/paths.ts` |
 | Git Bash 的 `cygpath -w` 兼容 | 采纳，作为 `paths.ts` 的 Windows 分支 |
 | `Instance.containsPath` workspace 边界 | 采纳，作为 `src/sandbox/boundary.ts` |
-| 两类 ask：external_directory + bash | 采纳，但由 scheduler 编排；先 external_directory，批准后再 bash |
+| 两类 ask：external_directory + bash | 采纳并扩展，但由 scheduler 编排；先 external_directory，再 sensitive_path，最后 bash |
 | 100+ arity 字典 | 分批采纳；improve-1 先实现 `git` / `docker` 等关键 arity，完整表后续补齐 |
 | `BashArity.prefix(tokens).join(" ") + " *"` 通配键 | 采纳，作为 `ShellCommandAnalysis.arityKey` |
 
@@ -56,9 +56,9 @@ opencode **没有 sandbox 模块**——它的整个安全模型分布在 [bash 
 
 | 增量 | 为什么 |
 |---|---|
-| denylist（`~/.ssh` 等 hard-deny） | opencode 完全靠 external_directory ask 走兜底；我们觉得 ssh-key 这类不应该让用户能"always allow"。属于产品决策。 |
+| denylist（`~/.ssh` 等 hard-deny）+ sensitive ask | opencode 完全靠 external_directory ask 走兜底；我们把 home 凭据目录保留为 hard-deny，同时把 `.env` / `*.pem` / `*.key` 这类项目文件降级为 `sensitive_path` ask，避免合法 fixture 被误伤。 |
 | PreflightResult schema 标准化 | opencode 把 sandbox 嵌入 bash tool，所以没必要标准化；我们要给 permission 消费，需要结构化字段。 |
-| scheduler 做 external-first 编排 | opencode 在 bash tool 内部先问 external_directory 再问 bash；我们的工具不直接 ask，所以把同样顺序放到 scheduler。 |
+| scheduler 做 external-first 编排 | opencode 在 bash tool 内部先问 external_directory 再问 bash；我们的工具不直接 ask，所以把同样顺序放到 scheduler，并在两者之间插入 `sensitive_path`。 |
 
 ## 二、kimi-code（次要标杆，采纳进程硬化思路）
 
@@ -175,7 +175,7 @@ pi 的核心**不预设 sandbox 抽象**，把 sandbox 做成可选 extension：
 |---|---|
 | 配置文件 schema（denyRead/denyWrite/allowWrite/allowDomains）| **未来借鉴**：improve-2 如果做配置化策略，用类似的 schema |
 | `pi -e ./sandbox` extension 化机制 | **不采纳**：ohbaby-agent 当前没有 extension 系统，sandbox 留在核心，作为可禁用模块（`OHBABY_SANDBOX_PREFLIGHT_ENABLED`） |
-| denylist 默认值（`~/.ssh`、`~/.aws`、`~/.gnupg`、`.env`、`*.pem`、`*.key`） | **直接采纳**：作为 `src/sandbox/denylist.ts` 的初始内容 |
+| denylist 默认值（`~/.ssh`、`~/.aws`、`~/.gnupg`、`.env`、`*.pem`、`*.key`） | **改造采纳**：`~/.ssh`、`~/.aws`、`~/.gnupg` 这类 home 凭据目录进入 hard-deny；`.env`、非模板 `.env.*`、`*.pem`、`*.key` 进入 `sensitive_path` ask，防止项目 fixture / dev cert 无法使用。 |
 | network allowlist（npmjs.org/pypi.org/github.com 等） | **不采纳**：网络隔离是 OS 级才能强制的，改造到应用层意义不大 |
 
 ## 五、整体决策摘要表
@@ -185,7 +185,7 @@ pi 的核心**不预设 sandbox 抽象**，把 sandbox 做成可选 extension：
 | OS 级隔离 | ❌ | ❌ | ✅ | ✅(extension) | ❌（但留 adapter 接口） |
 | tree-sitter 解析 | ✅ | ❌ | n/a | ❌ | ✅（shell 模块负责） |
 | workspace 边界 | ✅ | ❌ | n/a | ✅(配置) | ✅ |
-| 敏感路径黑名单 | ❌ | ❌ | n/a | ✅ | ✅ |
+| 敏感路径黑名单 | ❌ | ❌ | n/a | ✅ | ✅（hard-deny + sensitive ask 分层） |
 | arity 字典 | ✅ | ❌ | n/a | ❌ | ✅（shell analysis 负责） |
 | external_directory ask | ✅ | ❌ | n/a | n/a | ✅（scheduler external-first） |
 | 配置化策略 | ❌ | ❌ | ❌ | ✅ | ❌（improve-2 候选） |
