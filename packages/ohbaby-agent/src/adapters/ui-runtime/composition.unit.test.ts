@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -493,6 +493,81 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(findToolDescription(refreshedTools, "skill")).toContain(
       "plugin-skill",
     );
+  });
+
+  it("loads skill search directories from project configuration", async () => {
+    const bus = createBus();
+    const workdir = await tempWorkdir();
+    const configuredSkillRoot = path.join(workdir, "configured-skills");
+    await mkdir(path.join(configuredSkillRoot, "configured"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(configuredSkillRoot, "configured", "SKILL.md"),
+      [
+        "---",
+        "name: configured-skill",
+        "description: Skill from project skill config",
+        "---",
+        "",
+        "# Configured Skill",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await mkdir(path.join(workdir, ".ohbaby-agent", "skill", "configured"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(workdir, ".ohbaby-agent", "skill", "configured", "SKILL.md"),
+      [
+        "---",
+        "name: configured-skill",
+        "description: Default project skill",
+        "---",
+        "",
+        "# Default Skill",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await mkdir(path.join(workdir, ".ohbaby-agent", "skills"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(workdir, ".ohbaby-agent", "skills", "settings.json"),
+      JSON.stringify({
+        directories: [
+          {
+            path: "../../configured-skills",
+            scope: "project",
+            source: "project-native",
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      llmClient: fakeLlmClient(),
+      mcpManager: { getAllTools: () => Promise.resolve([]) },
+      messageManager: {} as MessageManager,
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      workdir,
+    });
+
+    const tools = await composition.toolScheduler.getAvailableTools();
+    const skillDescription = findToolDescription(tools, "skill");
+
+    expect(skillDescription).toContain(
+      "configured-skill: Skill from project skill config",
+    );
+    expect(skillDescription).not.toContain("Default project skill");
   });
 
   it("registers MCP tools supplied by the MCP manager", async () => {

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import path from "node:path";
 import type {
   ToolCommandContext,
   ToolExecutionEnvironment,
@@ -154,15 +155,24 @@ describe("SkillTool", () => {
       source: "module",
     });
     expect(result.output).toContain("## Skill: code-review");
+    expect(result.output).toContain("**Scope**: project");
+    expect(result.output).toContain("**Source**: project-native");
+    expect(result.output).toContain(
+      "**Workspace output directory**: .ohbaby/skill-output/code-review",
+    );
+    expect(result.output).toContain(
+      "Create the workspace output directory before passing it to scripts.",
+    );
     expect(result.output).toContain("**Available files**");
     expect(result.metadata).toEqual({
       dir: "/skills/code-review",
       files: ["script.ts"],
       name: "code-review",
+      outputDirRelative: ".ohbaby/skill-output/code-review",
     });
   });
 
-  it("activates the exact skill base directory after loading", async () => {
+  it("activates the exact skill base directory and workspace output directory after loading", async () => {
     const codeReview = skill({
       name: "code-review",
       description: "Review code",
@@ -185,10 +195,52 @@ describe("SkillTool", () => {
       },
     );
 
-    expect(trustPath).toHaveBeenCalledWith({
+    expect(trustPath).toHaveBeenNthCalledWith(1, {
       kind: "active-skill",
       path: "/skills/code-review",
       source: "code-review",
+    });
+    expect(trustPath).toHaveBeenNthCalledWith(2, {
+      kind: "skill-output",
+      path: path.join("/workspace", ".ohbaby", "skill-output", "code-review"),
+      source: "code-review",
+    });
+  });
+
+  it("defensively keeps unsafe registry skill names inside an encoded workspace output directory", async () => {
+    const unusual = skill({
+      name: "../bad",
+      description: "Unusual skill name",
+    });
+    const trustPath = vi.fn();
+    const tool = await createSkillTool({
+      get: () => Promise.resolve(unusual),
+      listModelInvocable: () => Promise.resolve([unusual]),
+      load: () => Promise.resolve(content(unusual)),
+    });
+
+    const result = await tool.execute(
+      { name: "../bad" },
+      {
+        callId: "call_1",
+        environment: activationEnvironment(trustPath),
+        messageId: "message_1",
+        sessionId: "session_1",
+        signal: new AbortController().signal,
+      },
+    );
+
+    const segment = `skill-${Buffer.from("../bad", "utf8").toString(
+      "base64url",
+    )}`;
+    expect(result.metadata).toMatchObject({
+      outputDir: path.join("/workspace", ".ohbaby", "skill-output", segment),
+      outputDirRelative: [".ohbaby", "skill-output", segment].join("/"),
+    });
+    expect(trustPath).toHaveBeenNthCalledWith(2, {
+      kind: "skill-output",
+      path: path.join("/workspace", ".ohbaby", "skill-output", segment),
+      source: "../bad",
     });
   });
 
@@ -264,7 +316,7 @@ describe("SkillTool", () => {
     });
   });
 
-  it("activates the exact skill base directory after reading a resource", async () => {
+  it("activates the exact skill base directory and workspace output directory after reading a resource", async () => {
     const info = skill({ name: "docs", description: "Docs" });
     const trustPath = vi.fn();
     const tool = createSkillResourceTool({
@@ -283,9 +335,14 @@ describe("SkillTool", () => {
       },
     );
 
-    expect(trustPath).toHaveBeenCalledWith({
+    expect(trustPath).toHaveBeenNthCalledWith(1, {
       kind: "active-skill",
       path: "/skills/docs",
+      source: "docs",
+    });
+    expect(trustPath).toHaveBeenNthCalledWith(2, {
+      kind: "skill-output",
+      path: path.join("/workspace", ".ohbaby", "skill-output", "docs"),
       source: "docs",
     });
   });

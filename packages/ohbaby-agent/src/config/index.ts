@@ -87,3 +87,34 @@ export type {
   SearchConfigErrorCode,
   SearchConfigLoadOptions,
 } from "./tools/index.js";
+
+export {
+  SkillConfigAccessError,
+  SkillConfigError,
+  SkillConfigParseError,
+  SkillConfigSchema,
+  SkillConfigValidationError,
+  SkillDirectoryConfigSchema,
+  SkillDirectorySourceSchema,
+  GLOBAL_SKILL_CONFIG_DIRECTORY_PRIORITY,
+  PROJECT_SKILL_CONFIG_DIRECTORY_PRIORITY,
+  getDefaultSkillDirectories,
+  getGlobalSkillDirectory,
+  getGlobalSkillConfigPath,
+  getProjectSkillDirectory,
+  getProjectSkillConfigPath,
+  loadSkillConfig,
+  loadSkillConfigLenient,
+  loadSkillConfigFromPath,
+  mergeSkillConfigs,
+  validateSkillConfig,
+} from "./skill/index.js";
+
+export type {
+  LoadSkillConfigOptions,
+  LoadSkillConfigFromPathOptions,
+  LoadSkillConfigLenientOptions,
+  SkillConfig,
+  SkillConfigErrorCode,
+  SkillDirectoryConfig,
+} from "./skill/index.js";
