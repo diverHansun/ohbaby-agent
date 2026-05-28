@@ -79,13 +79,15 @@ describe("shell preflight", () => {
     });
   });
 
-  it("rejects path-like arguments that resolve outside the sandbox root", async () => {
-    await expect(preflight("cat ../secret.txt")).rejects.toThrow(
-      "outside the workspace",
-    );
-    await expect(preflight("cp inside.txt ..")).rejects.toThrow(
-      "outside the workspace",
-    );
+  it("records ordinary path-like arguments that resolve outside the sandbox root", async () => {
+    const parent = await fs.realpath(path.dirname(tempRoot));
+    const root = await fs.realpath(tempRoot);
+    await expect(preflight("cat ../secret.txt")).resolves.toMatchObject({
+      resolvedPaths: [path.join(parent, "secret.txt")],
+    });
+    await expect(preflight("cp inside.txt ..")).resolves.toMatchObject({
+      resolvedPaths: [path.join(root, "inside.txt"), parent],
+    });
   });
 
   it("rejects dynamic path arguments for path-aware commands", async () => {

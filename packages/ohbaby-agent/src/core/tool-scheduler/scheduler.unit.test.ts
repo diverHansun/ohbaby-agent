@@ -513,6 +513,94 @@ describe("ToolScheduler", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
+  it("executes bash after external directory and bash permissions are approved", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "ohbaby-scheduler-bash-"),
+    );
+    const workspace = path.join(tempRoot, "workspace");
+    const externalFile = path.join(tempRoot, "outside.txt");
+    await fs.mkdir(workspace);
+    await fs.writeFile(externalFile, "outside\n", "utf8");
+    const permissionOrder: string[] = [];
+    const permission = {
+      ask: vi.fn((input: Parameters<PermissionPort["ask"]>[0]) => {
+        permissionOrder.push(input.toolName);
+        return Promise.resolve("once" as const);
+      }),
+    } satisfies PermissionPort;
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(
+      (
+        _file: string,
+        _args: readonly string[],
+        _options: SpawnOptionsWithoutStdio,
+      ) => child as unknown as ChildProcess,
+    );
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState(),
+    });
+    for (const tool of createBuiltinTools({
+      shell: {
+        acceptable: () => "/bin/bash",
+        killTree: vi.fn(),
+      },
+      spawn,
+    })) {
+      if (tool.name === "bash") {
+        scheduler.register(tool);
+      }
+    }
+
+    try {
+      const resultPromise = scheduler.execute({
+        callId: "external_bash_real",
+        environment: createFakeEnvironmentWithPreflight(
+          workspace,
+          createPreflight({
+            commands: [
+              {
+                arityKey: "chmod *",
+                danger: "mutating",
+                hasDynamic: false,
+                pathArgs: ["../outside.txt"],
+                root: "chmod",
+                source: "chmod 600 ../outside.txt",
+                tokens: ["chmod", "600", "../outside.txt"],
+              },
+            ],
+            externalPaths: [
+              {
+                absolutePath: externalFile,
+                askPattern: path.join(tempRoot, "**"),
+                original: "../outside.txt",
+              },
+            ],
+          }),
+        ),
+        messageId: "message_1",
+        params: { command: "chmod 600 ../outside.txt" },
+        sessionId: "session_1",
+        toolName: "bash",
+      });
+      await vi.waitFor(() => {
+        expect(spawn).toHaveBeenCalledTimes(1);
+      });
+      child.emit("exit", 0, null);
+
+      await expect(resultPromise).resolves.toMatchObject({
+        status: "success",
+      });
+      expect(permissionOrder).toEqual(["external_directory", "bash"]);
+      expect(spawn.mock.calls[0]?.[1]).toEqual([
+        "-lc",
+        "chmod 600 ../outside.txt",
+      ]);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("rejects denylist hits before permission asks even in full access", async () => {
     const permission = {
       ask: vi.fn(() => Promise.resolve("once" as const)),

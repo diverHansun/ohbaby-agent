@@ -494,7 +494,7 @@ function resolveLexicalPath(
   return path.resolve(currentCwd, stripped);
 }
 
-async function resolveForSandboxCheck(
+async function resolveStaticPathTarget(
   currentCwd: string,
   target: string,
   shellKind: ShellKind,
@@ -529,7 +529,7 @@ async function assertPathInsideWorkspace(input: {
   readonly shellKind: ShellKind;
   readonly target: string;
 }): Promise<string> {
-  const resolved = await resolveForSandboxCheck(
+  const resolved = await resolveStaticPathTarget(
     input.currentCwd,
     input.target,
     input.shellKind,
@@ -704,23 +704,21 @@ export async function preflightShellCommand(
     }
 
     for (const target of downloadOutputTargets(detail)) {
-      const resolved = await assertPathInsideWorkspace({
+      const resolved = await resolveStaticPathTarget(
         currentCwd,
-        rootCwd,
-        shellKind: input.shellKind,
         target,
-      });
+        input.shellKind,
+      );
       downloadedFiles.add(resolved);
       resolvedPaths.push(resolved);
     }
 
     for (const target of shellInputTargets(detail)) {
-      const resolved = await assertPathInsideWorkspace({
+      const resolved = await resolveStaticPathTarget(
         currentCwd,
-        rootCwd,
-        shellKind: input.shellKind,
         target,
-      });
+        input.shellKind,
+      );
       if (downloadedFiles.has(resolved)) {
         reject(
           "Command downloads a file and executes it in the same shell request.",
@@ -730,12 +728,11 @@ export async function preflightShellCommand(
     }
 
     for (const target of pathTokens(detail)) {
-      const resolved = await assertPathInsideWorkspace({
+      const resolved = await resolveStaticPathTarget(
         currentCwd,
-        rootCwd,
-        shellKind: input.shellKind,
         target,
-      });
+        input.shellKind,
+      );
       resolvedPaths.push(resolved);
     }
   }

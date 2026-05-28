@@ -383,6 +383,43 @@ describe("bash builtin tool", () => {
     }
   });
 
+  it("allows ordinary external path arguments after scheduler approval", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-bash-"));
+    const workspace = path.join(tempRoot, "workspace");
+    const externalFile = path.join(tempRoot, "outside.txt");
+    await fs.mkdir(workspace);
+    await fs.writeFile(externalFile, "outside\n", "utf8");
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
+    const bash = getBashTool({
+      shell: {
+        acceptable: () => "/bin/bash",
+        killTree: vi.fn(),
+      },
+      spawn,
+    });
+
+    try {
+      const resultPromise = bash.execute(
+        { command: "cat ../outside.txt" },
+        createEnvironmentContext(
+          {},
+          { cwd: workspace, env: {}, kind: "host-local" },
+        ),
+      );
+      await waitForSpawn(spawn);
+      child.emit("exit", 0, null);
+      const result = await resultPromise;
+
+      expect(spawn).toHaveBeenCalledTimes(1);
+      expect(result.metadata?.resolvedPaths).toContain(
+        await fs.realpath(externalFile),
+      );
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("rejects download-and-execute network shell pipelines", async () => {
     const spawn = vi.fn();
     const bash = getBashTool({
