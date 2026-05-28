@@ -31,7 +31,6 @@ function preflight(
     command,
     cwd: options.cwd ?? tempRoot,
     parsed: parseCommand(command),
-    rootCwd: tempRoot,
     shellKind: options.shellKind ?? "bash",
   });
 }

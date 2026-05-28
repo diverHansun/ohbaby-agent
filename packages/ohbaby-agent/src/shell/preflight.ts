@@ -18,7 +18,6 @@ export interface ShellPreflightInput {
   readonly command: string;
   readonly cwd: string;
   readonly parsed: ParsedCommand;
-  readonly rootCwd: string;
   readonly shellKind: ShellKind;
 }
 
