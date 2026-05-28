@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import path from "node:path";
 import type {
   Tool,
@@ -13,6 +14,7 @@ const CHARS_PER_TOKEN = 4;
 const DEFAULT_CHAR_BUDGET = 8_000;
 const MAX_LISTING_DESC_CHARS = 250;
 const MIN_DESC_LENGTH = 20;
+const SAFE_SKILL_OUTPUT_SEGMENT = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 
 export interface SkillToolRegistry {
   get(name: string): Promise<SkillInfo | undefined>;
@@ -159,7 +161,8 @@ function formatSkillToolOutputWithRuntimePaths(
     `## Skill: ${content.info.name}`,
     "",
     `**Base directory**: ${content.baseDir}`,
-    `**Source**: ${content.info.scope}`,
+    `**Scope**: ${content.info.scope}`,
+    `**Source**: ${content.info.source}`,
     `**Workspace output directory**: ${runtimePaths.outputDirRelative}`,
   ];
 
@@ -200,7 +203,15 @@ export function formatSkillResourceToolOutput(
 }
 
 function workspaceOutputDirectory(name: string): string {
-  return [".ohbaby", "skill-output", name].join("/");
+  return [".ohbaby", "skill-output", skillOutputDirectorySegment(name)].join(
+    "/",
+  );
+}
+
+function skillOutputDirectorySegment(name: string): string {
+  return SAFE_SKILL_OUTPUT_SEGMENT.test(name)
+    ? name
+    : `skill-${Buffer.from(name, "utf8").toString("base64url")}`;
 }
 
 async function activateSkillRuntime(input: {
@@ -216,7 +227,12 @@ async function activateSkillRuntime(input: {
   });
   const workdir = input.context.environment?.workdir;
   const outputDir = workdir
-    ? path.join(workdir, ".ohbaby", "skill-output", input.name)
+    ? path.join(
+        workdir,
+        ".ohbaby",
+        "skill-output",
+        skillOutputDirectorySegment(input.name),
+      )
     : undefined;
   if (outputDir) {
     await input.context.environment?.trustPath?.({

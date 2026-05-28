@@ -155,6 +155,8 @@ describe("SkillTool", () => {
       source: "module",
     });
     expect(result.output).toContain("## Skill: code-review");
+    expect(result.output).toContain("**Scope**: project");
+    expect(result.output).toContain("**Source**: project-native");
     expect(result.output).toContain(
       "**Workspace output directory**: .ohbaby/skill-output/code-review",
     );
@@ -202,6 +204,43 @@ describe("SkillTool", () => {
       kind: "skill-output",
       path: path.join("/workspace", ".ohbaby", "skill-output", "code-review"),
       source: "code-review",
+    });
+  });
+
+  it("defensively keeps unsafe registry skill names inside an encoded workspace output directory", async () => {
+    const unusual = skill({
+      name: "../bad",
+      description: "Unusual skill name",
+    });
+    const trustPath = vi.fn();
+    const tool = await createSkillTool({
+      get: () => Promise.resolve(unusual),
+      listModelInvocable: () => Promise.resolve([unusual]),
+      load: () => Promise.resolve(content(unusual)),
+    });
+
+    const result = await tool.execute(
+      { name: "../bad" },
+      {
+        callId: "call_1",
+        environment: activationEnvironment(trustPath),
+        messageId: "message_1",
+        sessionId: "session_1",
+        signal: new AbortController().signal,
+      },
+    );
+
+    const segment = `skill-${Buffer.from("../bad", "utf8").toString(
+      "base64url",
+    )}`;
+    expect(result.metadata).toMatchObject({
+      outputDir: path.join("/workspace", ".ohbaby", "skill-output", segment),
+      outputDirRelative: [".ohbaby", "skill-output", segment].join("/"),
+    });
+    expect(trustPath).toHaveBeenNthCalledWith(2, {
+      kind: "skill-output",
+      path: path.join("/workspace", ".ohbaby", "skill-output", segment),
+      source: "../bad",
     });
   });
 

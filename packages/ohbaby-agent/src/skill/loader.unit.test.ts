@@ -29,7 +29,7 @@ afterEach(async () => {
 });
 
 describe("SkillLoader", () => {
-  it("uses the platform config directory for global skills", () => {
+  it("uses the ohbaby home config directory for global skills", () => {
     const homeDirectory = path.join(tempDir, "home");
     const appDataDirectory = path.join(tempDir, "appdata");
     const xdgConfigDirectory = path.join(tempDir, "xdg");

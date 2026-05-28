@@ -27,11 +27,31 @@ const PRIORITY = {
   "project-native": 60,
 } as const;
 
+export const GLOBAL_SKILL_CONFIG_DIRECTORY_PRIORITY =
+  PRIORITY["user-native"] + 5;
+export const PROJECT_SKILL_CONFIG_DIRECTORY_PRIORITY =
+  PRIORITY["project-native"] + 5;
+
 export interface LoadSkillConfigOptions {
   readonly globalPath?: string;
   readonly homeDirectory?: string;
   readonly projectDirectory?: string;
   readonly projectPath?: string;
+}
+
+export interface LoadSkillConfigFromPathOptions {
+  readonly defaultDirectoryPriority?: number;
+  readonly relativeDirectoryBase?: string;
+}
+
+export interface LoadSkillConfigLenientOptions
+  extends LoadSkillConfigOptions {
+  readonly onWarning?: (
+    error:
+      | SkillConfigAccessError
+      | SkillConfigParseError
+      | SkillConfigValidationError,
+  ) => void;
 }
 
 export function getGlobalSkillConfigPath(
@@ -167,8 +187,47 @@ export function validateSkillConfig(
   return result.data;
 }
 
+function resolveDirectoryConfig(
+  directory: SkillDirectoryConfig,
+  input: {
+    readonly configPath: string;
+    readonly defaultDirectoryPriority?: number;
+    readonly relativeDirectoryBase?: string;
+  },
+): SkillDirectoryConfig {
+  const baseDirectory =
+    input.relativeDirectoryBase ?? path.dirname(input.configPath);
+  const resolvedPath = path.isAbsolute(directory.path)
+    ? path.normalize(directory.path)
+    : path.resolve(baseDirectory, directory.path);
+  return {
+    ...directory,
+    path: resolvedPath,
+    ...(directory.priority === undefined &&
+    input.defaultDirectoryPriority !== undefined
+      ? { priority: input.defaultDirectoryPriority }
+      : {}),
+  };
+}
+
+function resolveSkillConfig(
+  config: SkillConfig,
+  input: {
+    readonly configPath: string;
+    readonly defaultDirectoryPriority?: number;
+    readonly relativeDirectoryBase?: string;
+  },
+): SkillConfig {
+  return {
+    directories: config.directories.map((directory) =>
+      resolveDirectoryConfig(directory, input),
+    ),
+  };
+}
+
 export async function loadSkillConfigFromPath(
   configPath: string,
+  options: LoadSkillConfigFromPathOptions = {},
 ): Promise<SkillConfig> {
   let content: string;
   try {
@@ -189,7 +248,11 @@ export async function loadSkillConfigFromPath(
     throw new SkillConfigParseError(configPath, error);
   }
 
-  return validateSkillConfig(parsed, configPath);
+  return resolveSkillConfig(validateSkillConfig(parsed, configPath), {
+    configPath,
+    defaultDirectoryPriority: options.defaultDirectoryPriority,
+    relativeDirectoryBase: options.relativeDirectoryBase,
+  });
 }
 
 export function mergeSkillConfigs(
@@ -209,8 +272,54 @@ export async function loadSkillConfig(
   const projectPath =
     options.projectPath ?? getProjectSkillConfigPath(options.projectDirectory);
   const [globalConfig, projectConfig] = await Promise.all([
-    loadSkillConfigFromPath(globalPath),
-    loadSkillConfigFromPath(projectPath),
+    loadSkillConfigFromPath(globalPath, {
+      defaultDirectoryPriority: GLOBAL_SKILL_CONFIG_DIRECTORY_PRIORITY,
+    }),
+    loadSkillConfigFromPath(projectPath, {
+      defaultDirectoryPriority: PROJECT_SKILL_CONFIG_DIRECTORY_PRIORITY,
+    }),
+  ]);
+
+  return mergeSkillConfigs(globalConfig, projectConfig);
+}
+
+async function loadSkillConfigFromPathLenient(
+  configPath: string,
+  options: LoadSkillConfigFromPathOptions & {
+    readonly onWarning?: LoadSkillConfigLenientOptions["onWarning"];
+  },
+): Promise<SkillConfig> {
+  try {
+    return await loadSkillConfigFromPath(configPath, options);
+  } catch (error) {
+    if (
+      error instanceof SkillConfigAccessError ||
+      error instanceof SkillConfigParseError ||
+      error instanceof SkillConfigValidationError
+    ) {
+      options.onWarning?.(error);
+      return EMPTY_CONFIG;
+    }
+    throw error;
+  }
+}
+
+export async function loadSkillConfigLenient(
+  options: LoadSkillConfigLenientOptions = {},
+): Promise<SkillConfig> {
+  const globalPath =
+    options.globalPath ?? getGlobalSkillConfigPath(options.homeDirectory);
+  const projectPath =
+    options.projectPath ?? getProjectSkillConfigPath(options.projectDirectory);
+  const [globalConfig, projectConfig] = await Promise.all([
+    loadSkillConfigFromPathLenient(globalPath, {
+      defaultDirectoryPriority: GLOBAL_SKILL_CONFIG_DIRECTORY_PRIORITY,
+      onWarning: options.onWarning,
+    }),
+    loadSkillConfigFromPathLenient(projectPath, {
+      defaultDirectoryPriority: PROJECT_SKILL_CONFIG_DIRECTORY_PRIORITY,
+      onWarning: options.onWarning,
+    }),
   ]);
 
   return mergeSkillConfigs(globalConfig, projectConfig);

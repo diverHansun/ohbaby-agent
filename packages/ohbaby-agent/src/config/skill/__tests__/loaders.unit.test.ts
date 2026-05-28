@@ -8,9 +8,11 @@ import {
   SkillConfigValidationError,
 } from "../types.js";
 import {
+  PROJECT_SKILL_CONFIG_DIRECTORY_PRIORITY,
   getGlobalSkillConfigPath,
   getProjectSkillConfigPath,
   loadSkillConfig,
+  loadSkillConfigLenient,
   loadSkillConfigFromPath,
   mergeSkillConfigs,
 } from "../loaders.js";
@@ -68,10 +70,12 @@ describe("config/skill loaders", () => {
   });
 
   it("loads and merges global and project directories in order", async () => {
+    const globalSkillPath = path.join(tempDir, "global", "native-skills");
+    const projectSkillPath = path.join(tempDir, "repo", ".claude", "skills");
     await writeJson(globalPath, {
       directories: [
         {
-          path: "D:/global/native-skills",
+          path: globalSkillPath,
           priority: 41,
           scope: "user",
           source: "user-native",
@@ -81,7 +85,7 @@ describe("config/skill loaders", () => {
     await writeJson(projectPath, {
       directories: [
         {
-          path: "D:/repo/.claude/skills",
+          path: projectSkillPath,
           scope: "project",
           source: "claude-compatible",
         },
@@ -92,13 +96,14 @@ describe("config/skill loaders", () => {
       {
         directories: [
           {
-            path: "D:/global/native-skills",
+            path: path.normalize(globalSkillPath),
             priority: 41,
             scope: "user",
             source: "user-native",
           },
           {
-            path: "D:/repo/.claude/skills",
+            path: path.normalize(projectSkillPath),
+            priority: PROJECT_SKILL_CONFIG_DIRECTORY_PRIORITY,
             scope: "project",
             source: "claude-compatible",
           },
@@ -107,14 +112,35 @@ describe("config/skill loaders", () => {
     );
   });
 
+  it("resolves relative directory paths from the settings file directory", async () => {
+    await writeJson(projectPath, {
+      directories: [
+        {
+          path: "configured-skills",
+          scope: "project",
+        },
+      ],
+    });
+
+    await expect(loadSkillConfigFromPath(projectPath)).resolves.toEqual({
+      directories: [
+        {
+          path: path.join(path.dirname(projectPath), "configured-skills"),
+          scope: "project",
+        },
+      ],
+    });
+  });
+
   it("loads settings files written with a UTF-8 BOM", async () => {
+    const skillPath = path.join(tempDir, "skills");
     await fs.mkdir(path.dirname(globalPath), { recursive: true });
     await fs.writeFile(
       globalPath,
       `\uFEFF${JSON.stringify({
         directories: [
           {
-            path: "D:/skills",
+            path: skillPath,
             scope: "user",
           },
         ],
@@ -125,7 +151,7 @@ describe("config/skill loaders", () => {
     await expect(loadSkillConfigFromPath(globalPath)).resolves.toEqual({
       directories: [
         {
-          path: "D:/skills",
+          path: path.normalize(skillPath),
           scope: "user",
         },
       ],
@@ -202,5 +228,38 @@ describe("config/skill loaders", () => {
     await expect(loadSkillConfig({ globalPath, projectPath })).rejects.toThrow(
       SkillConfigAccessError,
     );
+  });
+
+  it("loads remaining valid settings when another settings file is invalid", async () => {
+    await fs.mkdir(path.dirname(globalPath), { recursive: true });
+    await fs.writeFile(globalPath, "{ invalid json", "utf8");
+    await writeJson(projectPath, {
+      directories: [
+        {
+          path: "configured-skills",
+          scope: "project",
+        },
+      ],
+    });
+    const warnings: string[] = [];
+
+    await expect(
+      loadSkillConfigLenient({
+        globalPath,
+        onWarning(error) {
+          warnings.push(error.path ?? "");
+        },
+        projectPath,
+      }),
+    ).resolves.toEqual({
+      directories: [
+        {
+          path: path.join(path.dirname(projectPath), "configured-skills"),
+          priority: PROJECT_SKILL_CONFIG_DIRECTORY_PRIORITY,
+          scope: "project",
+        },
+      ],
+    });
+    expect(warnings).toEqual([globalPath]);
   });
 });

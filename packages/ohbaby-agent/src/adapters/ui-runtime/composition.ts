@@ -35,7 +35,7 @@ import { createBuiltinTools } from "../../tools/index.js";
 import {
   getDefaultSkillDirectories,
   getSearchConfig,
-  loadSkillConfig,
+  loadSkillConfigLenient,
   toSearchProviderConfig,
 } from "../../config/index.js";
 import {
@@ -206,21 +206,19 @@ async function loadConfiguredSkillDirectories(input: {
   const defaultDirectories = getDefaultSkillDirectories({
     projectDirectory: input.projectDirectory,
   });
-  try {
-    const config = await loadSkillConfig({
-      projectDirectory: input.projectDirectory,
-    });
-    return [...defaultDirectories, ...config.directories];
-  } catch (error) {
-    const detail = formatUnknown(error);
-    input.onNotice?.({
-      key: `skill:config:${detail}`,
-      level: "warning",
-      message: detail,
-      title: "Skill config warning",
-    });
-    return defaultDirectories;
-  }
+  const config = await loadSkillConfigLenient({
+    onWarning(error) {
+      const detail = formatUnknown(error);
+      input.onNotice?.({
+        key: `skill:config:${detail}`,
+        level: "warning",
+        message: detail,
+        title: "Skill config warning",
+      });
+    },
+    projectDirectory: input.projectDirectory,
+  });
+  return [...defaultDirectories, ...config.directories];
 }
 
 function objectData(value: unknown): Record<string, unknown> | undefined {

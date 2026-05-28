@@ -1,5 +1,7 @@
 export {
   OHBABY_CONFIG_DIR_NAME,
+  GLOBAL_SKILL_CONFIG_DIRECTORY_PRIORITY,
+  PROJECT_SKILL_CONFIG_DIRECTORY_PRIORITY,
   SKILL_CONFIG_DIR_NAME,
   SKILL_CONFIG_FILE_NAME,
   SKILLS_DIR_NAME,
@@ -10,10 +12,13 @@ export {
   getProjectSkillDirectory,
   getProjectSkillConfigPath,
   loadSkillConfig,
+  loadSkillConfigLenient,
   loadSkillConfigFromPath,
   mergeSkillConfigs,
   validateSkillConfig,
   type LoadSkillConfigOptions,
+  type LoadSkillConfigFromPathOptions,
+  type LoadSkillConfigLenientOptions,
 } from "./loaders.js";
 export {
   SkillConfigAccessError,

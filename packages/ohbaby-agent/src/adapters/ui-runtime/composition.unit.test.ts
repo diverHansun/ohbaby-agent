@@ -515,6 +515,22 @@ describe("createUiRuntimeComposition skill tools", () => {
       ].join("\n"),
       "utf8",
     );
+    await mkdir(path.join(workdir, ".ohbaby-agent", "skill", "configured"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(workdir, ".ohbaby-agent", "skill", "configured", "SKILL.md"),
+      [
+        "---",
+        "name: configured-skill",
+        "description: Default project skill",
+        "---",
+        "",
+        "# Default Skill",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
     await mkdir(path.join(workdir, ".ohbaby-agent", "skills"), {
       recursive: true,
     });
@@ -523,7 +539,7 @@ describe("createUiRuntimeComposition skill tools", () => {
       JSON.stringify({
         directories: [
           {
-            path: configuredSkillRoot,
+            path: "../../configured-skills",
             scope: "project",
             source: "project-native",
           },
@@ -546,8 +562,12 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
 
     const tools = await composition.toolScheduler.getAvailableTools();
+    const skillDescription = findToolDescription(tools, "skill");
 
-    expect(findToolDescription(tools, "skill")).toContain("configured-skill");
+    expect(skillDescription).toContain(
+      "configured-skill: Skill from project skill config",
+    );
+    expect(skillDescription).not.toContain("Default project skill");
   });
 
   it("registers MCP tools supplied by the MCP manager", async () => {
