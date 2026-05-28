@@ -275,6 +275,16 @@ e2e 要覆盖 skill scripts 的真实调用路径，确认 scripts 不会绕开 
 每一步都可以独立提交。第 3 步用轻量 parser 是方案二；当前 improve-1 通过结构化 facts
 和 targeted arity 达到本轮方案三效果，完整 tree-sitter 作为后续替换 parser 内部的增强。
 
+## 已登记技术债
+
+- `shell/preflight.ts` 与 `sandbox/paths.ts` 已在行为上对齐缺失父目录的 canonicalize：
+  两边都向上查找最近存在祖先，再拼回缺失 suffix，避免 `mkdir -p a/b/c`、`touch build/out.txt`
+  这类命令被原始 `ENOENT` 阻断。后续仍应把该 walk-up helper 抽到共享路径工具，减少 M3
+  的两套路径解析器风险。
+- `stripMatchingQuotes`、`msysPathToWindowsPath`、option/value 解析等字符串层 helper 仍散落在
+  `shell/preflight.ts`、`shell/path-args.ts`、`sandbox/paths.ts`。这不阻塞 improve-1，但应在
+  下一轮 DRY 整理中收敛，避免 glob / dynamic / Windows 路径规则再次分叉。
+
 ## Rollback 策略
 
 实现期可以加临时开关：

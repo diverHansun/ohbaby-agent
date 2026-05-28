@@ -436,6 +436,46 @@ function msysPathToWindowsPath(target: string): string | null {
   return `${drive}:\\${rest}`;
 }
 
+function errorCode(error: unknown): string | undefined {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string"
+    ? error.code
+    : undefined;
+}
+
+function isMissingPathError(error: unknown): boolean {
+  const code = errorCode(error);
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+async function canonicalizeStaticPath(candidate: string): Promise<string> {
+  const absolutePath = path.resolve(candidate);
+  const suffix: string[] = [];
+  let current = absolutePath;
+
+  for (;;) {
+    try {
+      const realPath = await fs.realpath(current);
+      return suffix.length > 0
+        ? path.join(realPath, ...suffix.reverse())
+        : realPath;
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        throw error;
+      }
+
+      const parent = path.dirname(current);
+      if (parent === current) {
+        return absolutePath;
+      }
+      suffix.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
 function resolveLexicalPath(
   currentCwd: string,
   target: string,
@@ -479,15 +519,7 @@ async function resolveStaticPathTarget(
   }
 
   const candidate = resolveLexicalPath(currentCwd, target, shellKind);
-  try {
-    return await fs.realpath(candidate);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-    const parent = await fs.realpath(path.dirname(candidate));
-    return path.join(parent, path.basename(candidate));
-  }
+  return canonicalizeStaticPath(candidate);
 }
 
 async function realpathOrResolve(value: string): Promise<string> {

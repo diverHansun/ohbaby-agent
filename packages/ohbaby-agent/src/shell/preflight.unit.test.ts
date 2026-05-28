@@ -140,6 +140,27 @@ describe("shell preflight", () => {
     });
   });
 
+  it("resolves paths whose intermediate parent directories do not exist", async () => {
+    const root = await fs.realpath(tempRoot);
+    const source = path.join(tempRoot, "x.txt");
+    await fs.writeFile(source, "x", "utf8");
+
+    await expect(preflight("mkdir -p a/b/c")).resolves.toMatchObject({
+      resolvedPaths: [path.join(root, "a", "b", "c")],
+    });
+    await expect(preflight("touch build/out.txt")).resolves.toMatchObject({
+      resolvedPaths: [path.join(root, "build", "out.txt")],
+    });
+    await expect(preflight("cp x.txt deep/nested/dir/")).resolves.toMatchObject(
+      {
+        resolvedPaths: [
+          await fs.realpath(source),
+          path.join(root, "deep", "nested", "dir"),
+        ],
+      },
+    );
+  });
+
   it("handles cmd compact cd syntax and cmd cd options", async () => {
     const child = path.join(tempRoot, "child");
     await fs.mkdir(child);
