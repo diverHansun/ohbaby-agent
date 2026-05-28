@@ -6,6 +6,7 @@ import type {
   LifecycleSessionParams,
 } from "../../core/lifecycle/index.js";
 import type { ToolCallResult } from "../../core/tool-scheduler/index.js";
+import type { PreflightResult } from "../../sandbox/index.js";
 import {
   createInMemoryRunLedger,
   type MarkInterruptedOptions,
@@ -39,6 +40,43 @@ const policy: RunDefaultsPolicy = {
     },
   },
 };
+
+function emptyPreflight(): PreflightResult {
+  return {
+    commands: [],
+    denylistHits: [],
+    externalPaths: [],
+    internalPaths: [],
+    overallDanger: "readonly",
+    shellKind: "bash",
+  };
+}
+
+function createTestSandboxLease(sessionId: string): SandboxLease {
+  const workdir = `workspace/${sessionId}`;
+
+  return {
+    adapterId: "host-local",
+    capabilities: {
+      canExecCommands: true,
+      isolation: "none",
+      readOnly: false,
+      supportsGit: false,
+    },
+    contextId: `context_${sessionId}`,
+    leaseId: `lease_${sessionId}`,
+    preflight: () => Promise.resolve(emptyPreflight()),
+    release: () => Promise.resolve(),
+    resolveCommandContext: () => ({ cwd: workdir, kind: "host-local" }),
+    resolvePath: (inputPath: string) => `${workdir}/${inputPath}`,
+    resolvePathForExisting: (inputPath: string) =>
+      Promise.resolve(`${workdir}/${inputPath}`),
+    resolvePathForWrite: (inputPath: string) =>
+      Promise.resolve(`${workdir}/${inputPath}`),
+    sessionId,
+    workdir,
+  };
+}
 
 interface Deferred<T> {
   readonly promise: Promise<T>;
@@ -180,29 +218,18 @@ class RecordingSandboxManager implements SandboxManager {
 
   acquire(sessionId: string): Promise<SandboxLease> {
     this.acquired.push(sessionId);
-    const workdir = `workspace/${sessionId}`;
-
-    return Promise.resolve({
-      id: `lease_${sessionId}`,
-      resolveCommandContext: () => ({ cwd: workdir, kind: "host-local" }),
-      resolvePath: (inputPath: string) => `${workdir}/${inputPath}`,
-      resolvePathForExisting: (inputPath: string) =>
-        Promise.resolve(`${workdir}/${inputPath}`),
-      resolvePathForWrite: (inputPath: string) =>
-        Promise.resolve(`${workdir}/${inputPath}`),
-      workdir,
-    });
+    return Promise.resolve(createTestSandboxLease(sessionId));
   }
 
   release(lease: SandboxLease): Promise<void> {
-    this.released.push(lease.id ?? "unknown");
+    this.released.push(lease.leaseId);
     return Promise.resolve();
   }
 }
 
 class RejectingReleaseSandboxManager extends RecordingSandboxManager {
   override release(lease: SandboxLease): Promise<void> {
-    this.released.push(lease.id ?? "unknown");
+    this.released.push(lease.leaseId);
     return Promise.reject(new Error("release failed"));
   }
 }
@@ -620,6 +647,7 @@ describe("RunManager", () => {
         workdir: "workspace/session_1",
       },
     });
+    expect(typeof lifecycle.calls[0]?.environment?.preflight).toBe("function");
     expect(lifecycle.calls[0]).not.toHaveProperty("permissionProfileId");
     expect(hooks.contexts[0]?.permissionProfileId).toBe("interactive");
     expect(bridge.events.map((event) => event.event)).toEqual([

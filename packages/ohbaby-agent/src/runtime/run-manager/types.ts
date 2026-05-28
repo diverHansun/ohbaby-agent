@@ -5,10 +5,7 @@ import type {
   LifecycleSessionParams,
 } from "../../core/lifecycle/index.js";
 import type { ChatCompletionMessage } from "../../core/llm-client/index.js";
-import type {
-  ToolCommandContext,
-  ToolCommandContextOptions,
-} from "../../core/tool-scheduler/index.js";
+import type { SandboxLease, SandboxManagerPort } from "../../sandbox/index.js";
 import type {
   RunLedger,
   RunStatus,
@@ -64,21 +61,8 @@ export interface RunCompletion {
   readonly error?: string;
 }
 
-export interface SandboxLease {
-  readonly id?: string;
-  readonly workdir?: string;
-  resolvePath?(inputPath: string): string;
-  resolvePathForExisting?(inputPath: string): Promise<string>;
-  resolvePathForWrite?(inputPath: string): Promise<string>;
-  resolveCommandContext?(
-    options?: ToolCommandContextOptions,
-  ): ToolCommandContext;
-}
-
-export interface SandboxManager {
-  acquire(sessionId: string): Promise<SandboxLease>;
-  release(lease: SandboxLease): Promise<void>;
-}
+export type { SandboxLease };
+export type SandboxManager = SandboxManagerPort;
 
 export interface RunContext {
   readonly runId: string;
@@ -130,7 +114,7 @@ export interface RunManagerDeps {
   readonly runLedger: RunLedger;
   readonly streamBridge: StreamBridge;
   readonly hookExecutor?: HookExecutor;
-  readonly sandboxManager?: SandboxManager;
+  readonly sandboxManager: SandboxManager;
   readonly policy: RunDefaultsPolicy;
   readonly now?: () => number;
   readonly createRunId?: () => string;

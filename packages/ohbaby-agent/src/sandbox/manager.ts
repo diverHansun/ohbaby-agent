@@ -14,6 +14,7 @@ import type {
   CreateContextOptions,
   SandboxContext,
   SandboxLease,
+  SandboxManagerPort,
   SandboxManagerOptions,
 } from "./types.js";
 
@@ -31,7 +32,7 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-export class SandboxManager {
+export class SandboxManager implements SandboxManagerPort {
   private readonly contexts = new Map<string, InternalSandboxContext>();
   private readonly leases = new Map<string, InternalSandboxContext>();
   private readonly pendingCreates = new Set<string>();

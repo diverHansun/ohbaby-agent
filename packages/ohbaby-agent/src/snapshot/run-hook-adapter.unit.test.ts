@@ -11,6 +11,7 @@ import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
 import { createDatabaseSessionStore } from "../services/session/index.js";
 import { createStorage } from "../services/storage/index.js";
 import type { RunHookContext } from "../runtime/run-manager/index.js";
+import type { PreflightResult, SandboxLease } from "../sandbox/index.js";
 import { ShadowDiffEngine, SnapshotService, SnapshotStore } from "./index.js";
 import { createSnapshotHookExecutor } from "./run-hook-adapter.js";
 
@@ -21,6 +22,45 @@ async function tempDir(prefix: string): Promise<string> {
 afterEach(() => {
   closeDatabase();
 });
+
+function emptyPreflight(): PreflightResult {
+  return {
+    commands: [],
+    denylistHits: [],
+    externalPaths: [],
+    internalPaths: [],
+    overallDanger: "readonly",
+    shellKind: "bash",
+  };
+}
+
+function sandboxLease(input: {
+  readonly runId: string;
+  readonly sessionId: string;
+  readonly workdir: string;
+}): SandboxLease {
+  return {
+    adapterId: "host-local",
+    capabilities: {
+      canExecCommands: true,
+      isolation: "none",
+      readOnly: false,
+      supportsGit: false,
+    },
+    contextId: `context_${input.sessionId}`,
+    leaseId: `lease_${input.runId}`,
+    preflight: () => Promise.resolve(emptyPreflight()),
+    release: () => Promise.resolve(),
+    resolveCommandContext: () => ({ cwd: input.workdir, kind: "host-local" }),
+    resolvePath: (inputPath: string) => join(input.workdir, inputPath),
+    resolvePathForExisting: (inputPath: string) =>
+      Promise.resolve(join(input.workdir, inputPath)),
+    resolvePathForWrite: (inputPath: string) =>
+      Promise.resolve(join(input.workdir, inputPath)),
+    sessionId: input.sessionId,
+    workdir: input.workdir,
+  };
+}
 
 function runHookContext(input: {
   readonly runId: string;
@@ -40,7 +80,7 @@ function runHookContext(input: {
       triggerSource: "user",
     },
     runId: input.runId,
-    sandboxLease: { workdir: input.workdir },
+    sandboxLease: sandboxLease(input),
     sessionId: input.sessionId,
     status: input.status,
     triggerSource: "user",

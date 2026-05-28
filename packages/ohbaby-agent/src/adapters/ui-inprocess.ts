@@ -790,7 +790,7 @@ export function createInProcessUiBackendClient(
   ): Promise<UiCompactSessionResult> {
     const target = await resolveCompactTarget(compactOptions);
     const runtime = await getRuntimeForPrompt();
-    runtime.setSessionWorkdir(target.sessionId, target.projectRoot);
+    await runtime.setSessionWorkdir(target.sessionId, target.projectRoot);
     const result = await runtime.compactSession({
       force: compactOptions.force ?? true,
       projectRoot: target.projectRoot,

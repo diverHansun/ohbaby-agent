@@ -24,11 +24,7 @@ export function toOpenAiTools(
 }
 
 function abortReason(signal: AbortSignal | undefined): string {
-  if (
-    signal &&
-    typeof signal.reason === "string" &&
-    signal.reason.length > 0
-  ) {
+  if (signal && typeof signal.reason === "string" && signal.reason.length > 0) {
     return signal.reason;
   }
   return "agent run aborted";
@@ -93,14 +89,14 @@ function completionError(input: {
 function cleanupSessionEnvironment(
   deps: Pick<AgentRunDeps, "sandboxManager">,
   sessionId: string,
-): () => void {
+): () => Promise<void> {
   let cleaned = false;
-  return () => {
+  return async () => {
     if (cleaned) {
       return;
     }
     cleaned = true;
-    deps.sandboxManager?.setSessionEnvironment(sessionId, undefined);
+    await deps.sandboxManager?.setSessionEnvironment(sessionId, undefined);
   };
 }
 
@@ -140,7 +136,7 @@ export async function runAgent(
     agentName: input.agentName,
     isSubagent,
   });
-  deps.sandboxManager?.setSessionEnvironment(
+  await deps.sandboxManager?.setSessionEnvironment(
     input.sessionId,
     input.environment,
   );
@@ -186,12 +182,13 @@ export async function runAgent(
           );
         }
         const events =
-          preSubscribed?.events ?? runEventSource.subscribeRunEvents(record.runId);
+          preSubscribed?.events ??
+          runEventSource.subscribeRunEvents(record.runId);
         void deps.runCoordinator
           .waitForCompletion(record.runId)
           .finally(() => {
             unbindAbort();
-            cleanupEnvironment();
+            void cleanupEnvironment().catch(() => undefined);
           })
           .catch(() => undefined);
         return {
@@ -203,7 +200,7 @@ export async function runAgent(
       } catch (error) {
         await preSubscribed?.close();
         unbindAbort();
-        cleanupEnvironment();
+        await cleanupEnvironment();
         throw error;
       }
     }
@@ -244,10 +241,10 @@ export async function runAgent(
       };
     } finally {
       unbindAbort();
-      cleanupEnvironment();
+      await cleanupEnvironment();
     }
   } catch (error) {
-    cleanupEnvironment();
+    await cleanupEnvironment();
     throw error;
   }
 }

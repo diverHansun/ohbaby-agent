@@ -33,6 +33,7 @@ export type {
   SandboxCreateOptions,
   SandboxIsolation,
   SandboxLease,
+  SandboxManagerPort,
   SandboxManagerOptions,
   SandboxPathBoundary,
   SandboxPreflightInput,

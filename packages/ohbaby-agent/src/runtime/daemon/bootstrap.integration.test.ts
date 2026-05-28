@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { BusEvent, createBus } from "../../bus/index.js";
+import { createHostLocalSandboxManager } from "../../adapters/ui-runtime/host-local-environment.js";
 import type {
   LifecycleEvent,
   LifecycleResult,
@@ -290,6 +291,7 @@ describe("bootstrapRuntime", () => {
     const runtime = bootstrapRuntime({
       lifecycle: new CompletingLifecycle(),
       runLedger,
+      sandboxManager: createHostLocalSandboxManager(process.cwd()),
       policy,
       now: () => 2_000,
       createRunId: () => "run_created_by_daemon",

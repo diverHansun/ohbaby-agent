@@ -32,10 +32,7 @@ import {
   type StartSessionParams,
 } from "../../agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
-import {
-  getSearchConfig,
-  toSearchProviderConfig,
-} from "../../config/index.js";
+import { getSearchConfig, toSearchProviderConfig } from "../../config/index.js";
 import {
   createInMemoryRunLedger,
   type RunLedger,
@@ -676,8 +673,8 @@ export async function createUiRuntimeComposition(
       });
     },
 
-    setSessionWorkdir(sessionId, workdir): void {
-      sandboxManager.setSessionEnvironment(
+    setSessionWorkdir(sessionId, workdir): Promise<void> {
+      return sandboxManager.setSessionEnvironment(
         sessionId,
         createHostLocalEnvironment(workdir),
       );

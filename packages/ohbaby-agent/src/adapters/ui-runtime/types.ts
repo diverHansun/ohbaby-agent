@@ -20,10 +20,8 @@ export interface UiRuntimeComposition {
   readonly streamBridge: StreamBridge;
   readonly toolScheduler: ToolSchedulerInstance;
   reserveRunId(runId?: string): string;
-  startSession(
-    input: StartSessionParams,
-  ): Promise<AgentSessionStartResult>;
-  setSessionWorkdir(sessionId: string, workdir: string): void;
+  startSession(input: StartSessionParams): Promise<AgentSessionStartResult>;
+  setSessionWorkdir(sessionId: string, workdir: string): Promise<void>;
   ensureSessionRecord(input: {
     readonly agentName: string;
     readonly id: string;

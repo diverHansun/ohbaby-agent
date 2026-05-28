@@ -108,6 +108,7 @@ function toToolExecutionEnvironment(
   return {
     workdir: lease.workdir,
     resolveCommandContext: lease.resolveCommandContext.bind(lease),
+    preflight: lease.preflight.bind(lease),
     resolvePath: lease.resolvePath.bind(lease),
     resolvePathForExisting: lease.resolvePathForExisting.bind(lease),
     resolvePathForWrite: lease.resolvePathForWrite.bind(lease),

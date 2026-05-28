@@ -122,6 +122,11 @@ export interface SandboxLease {
   release(): Promise<void>;
 }
 
+export interface SandboxManagerPort {
+  acquire(sessionId: string): Promise<SandboxLease>;
+  release(lease: SandboxLease): Promise<void>;
+}
+
 export interface SandboxManagerOptions {
   readonly adapterRegistry: {
     get(adapterId: SandboxAdapterId): SandboxAdapter | undefined;

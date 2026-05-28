@@ -10,19 +10,10 @@ import type {
   RunRecord,
   RunStatus,
   RunWorkerResult,
-  SandboxLease,
 } from "./types.js";
 import { RunWorker } from "./worker.js";
 
 const ACTIVE_STATUSES = new Set<RunStatus>(["pending", "running"]);
-const DEFAULT_SANDBOX_MANAGER = {
-  acquire(sessionId: string): Promise<SandboxLease> {
-    return Promise.resolve({ id: `local_${sessionId}` });
-  },
-  release(): Promise<void> {
-    return Promise.resolve();
-  },
-};
 
 function errorToMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -190,7 +181,7 @@ export class RunManager {
   }
 
   private async startRun(record: ManagedRunRecord): Promise<RunCompletion> {
-    const sandboxManager = this.deps.sandboxManager ?? DEFAULT_SANDBOX_MANAGER;
+    const sandboxManager = this.deps.sandboxManager;
     let outcome: RunWorkerResult;
 
     try {
@@ -244,7 +235,7 @@ export class RunManager {
     record: ManagedRunRecord,
     outcome: RunWorkerResult,
   ): Promise<RunCompletion> {
-    const sandboxManager = this.deps.sandboxManager ?? DEFAULT_SANDBOX_MANAGER;
+    const sandboxManager = this.deps.sandboxManager;
     const completion = completionFromResult(outcome);
 
     try {

@@ -97,7 +97,7 @@ export interface AgentSandboxEnvironmentManager {
   setSessionEnvironment(
     sessionId: string,
     environment: ToolExecutionEnvironment | undefined,
-  ): void;
+  ): Promise<void> | void;
 }
 
 export interface AgentRunDeps {

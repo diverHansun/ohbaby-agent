@@ -2,7 +2,10 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createHostLocalEnvironment } from "./host-local-environment.js";
+import {
+  createHostLocalEnvironment,
+  createHostLocalSandboxManager,
+} from "./host-local-environment.js";
 
 const cleanupDirectories: string[] = [];
 
@@ -60,5 +63,44 @@ describe("createHostLocalEnvironment", () => {
     ).resolves.toBe(
       path.join(await realpath(path.join(outside, "new-parent")), "new.txt"),
     );
+  });
+});
+
+describe("createHostLocalSandboxManager", () => {
+  it("acquires rich host-local leases for configured session workdirs", async () => {
+    const workdir = await mkdtemp(path.join(tmpdir(), "ohbaby-host-local-"));
+    cleanupDirectories.push(workdir);
+    const manager = createHostLocalSandboxManager(process.cwd());
+
+    await manager.setSessionEnvironment(
+      "session_1",
+      createHostLocalEnvironment(workdir),
+    );
+    const lease = await manager.acquire("session_1");
+
+    expect(lease).toMatchObject({
+      adapterId: "host-local",
+      sessionId: "session_1",
+      workdir: await realpath(workdir),
+    });
+    expect(lease.leaseId).toEqual(expect.any(String));
+    await expect(lease.preflight("pwd", "bash")).resolves.toMatchObject({
+      shellKind: "bash",
+    });
+
+    await manager.release(lease);
+    await manager.setSessionEnvironment("session_1", undefined);
+  });
+
+  it("uses the fallback workdir when no session workdir is configured", async () => {
+    const workdir = await mkdtemp(path.join(tmpdir(), "ohbaby-host-local-"));
+    cleanupDirectories.push(workdir);
+    const manager = createHostLocalSandboxManager(workdir);
+
+    const lease = await manager.acquire("session_fallback");
+
+    expect(lease.workdir).toBe(await realpath(workdir));
+    await manager.release(lease);
+    await manager.setSessionEnvironment("session_fallback", undefined);
   });
 });

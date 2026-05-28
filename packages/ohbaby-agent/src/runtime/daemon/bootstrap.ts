@@ -47,6 +47,11 @@ function createRunManager(
       "runtime daemon bootstrap requires lifecycle when runManager is not provided",
     );
   }
+  if (!options.sandboxManager) {
+    throw new DaemonBootstrapError(
+      "runtime daemon bootstrap requires sandboxManager when runManager is not provided",
+    );
+  }
 
   return new RunManager({
     lifecycle: options.lifecycle,

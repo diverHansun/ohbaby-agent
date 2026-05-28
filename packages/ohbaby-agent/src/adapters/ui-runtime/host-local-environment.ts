@@ -2,16 +2,19 @@ import { realpathSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ToolExecutionEnvironment } from "../../core/tool-scheduler/index.js";
-import type {
-  SandboxLease,
+import {
+  AdapterRegistry,
+  HostLocalAdapter,
   SandboxManager,
-} from "../../runtime/run-manager/index.js";
+  type SandboxLease,
+  type SandboxManagerPort,
+} from "../../sandbox/index.js";
 
-export interface HostLocalSandboxManager extends SandboxManager {
+export interface HostLocalSandboxManager extends SandboxManagerPort {
   setSessionEnvironment(
     sessionId: string,
     environment: ToolExecutionEnvironment | undefined,
-  ): void;
+  ): Promise<void>;
 }
 
 function normalizeForBoundary(inputPath: string): string {
@@ -78,21 +81,6 @@ function isNotFound(error: unknown): boolean {
   );
 }
 
-function toSandboxLease(
-  environment: ToolExecutionEnvironment,
-  sessionId: string,
-): SandboxLease {
-  return {
-    id: `host-local_${sessionId}`,
-    resolveCommandContext: environment.resolveCommandContext.bind(environment),
-    resolvePath: environment.resolvePath.bind(environment),
-    resolvePathForExisting:
-      environment.resolvePathForExisting.bind(environment),
-    resolvePathForWrite: environment.resolvePathForWrite.bind(environment),
-    workdir: environment.workdir,
-  };
-}
-
 export function createHostLocalEnvironment(
   workdir = process.cwd(),
 ): ToolExecutionEnvironment {
@@ -129,26 +117,71 @@ export function createHostLocalEnvironment(
 export function createHostLocalSandboxManager(
   workdir = process.cwd(),
 ): HostLocalSandboxManager {
-  const fallbackEnvironment = createHostLocalEnvironment(workdir);
-  const sessionEnvironments = new Map<string, ToolExecutionEnvironment>();
+  const fallbackWorkdir = createHostLocalEnvironment(workdir).workdir;
+  const registry = new AdapterRegistry();
+  registry.register(new HostLocalAdapter());
+  const manager = new SandboxManager({ adapterRegistry: registry });
+  const operations = new Map<string, Promise<void>>();
+
+  function withSessionOperation(
+    sessionId: string,
+    operation: () => Promise<void>,
+  ): Promise<void> {
+    const previous = operations.get(sessionId) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    const tracked = current.finally(() => {
+      if (operations.get(sessionId) === tracked) {
+        operations.delete(sessionId);
+      }
+    });
+    operations.set(sessionId, tracked);
+    return tracked;
+  }
+
+  async function ensureSessionWorkdir(
+    sessionId: string,
+    nextWorkdir: string,
+  ): Promise<void> {
+    const resolvedWorkdir = path.resolve(nextWorkdir);
+    const existing = manager.getContext(sessionId);
+    if (existing && path.resolve(existing.workdir) !== resolvedWorkdir) {
+      await manager.destroyContext(sessionId);
+    }
+    await manager.ensureContext(sessionId, {
+      adapterId: "host-local",
+      workdir: resolvedWorkdir,
+    });
+  }
+
+  async function ensureFallback(sessionId: string): Promise<void> {
+    if (manager.getContext(sessionId)) {
+      return;
+    }
+    await ensureSessionWorkdir(sessionId, fallbackWorkdir);
+  }
 
   return {
-    setSessionEnvironment(sessionId, environment): void {
-      if (environment) {
-        sessionEnvironments.set(sessionId, environment);
-        return;
+    setSessionEnvironment(sessionId, environment): Promise<void> {
+      return withSessionOperation(sessionId, async () => {
+        if (!environment) {
+          await manager.destroyContext(sessionId);
+          return;
+        }
+        await ensureSessionWorkdir(sessionId, environment.workdir);
+      });
+    },
+
+    async acquire(sessionId: string): Promise<SandboxLease> {
+      const pending = operations.get(sessionId);
+      if (pending) {
+        await pending;
       }
-      sessionEnvironments.delete(sessionId);
+      await ensureFallback(sessionId);
+      return await manager.acquire(sessionId);
     },
 
-    acquire(sessionId: string): Promise<SandboxLease> {
-      const environment =
-        sessionEnvironments.get(sessionId) ?? fallbackEnvironment;
-      return Promise.resolve(toSandboxLease(environment, sessionId));
-    },
-
-    release(): Promise<void> {
-      return Promise.resolve();
+    release(lease: SandboxLease): Promise<void> {
+      return manager.release(lease);
     },
   };
 }
