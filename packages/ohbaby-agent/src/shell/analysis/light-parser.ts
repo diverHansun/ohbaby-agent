@@ -1,7 +1,7 @@
 import type { CommandDetail } from "../../utils/index.js";
 import { parseCommand } from "../../utils/index.js";
 import { classifyShellCommandDetail } from "../command-classifier.js";
-import { extractShellPathArgs } from "../path-args.js";
+import { extractShellPathFacts } from "../path-args.js";
 import type { ShellKind } from "../preflight.js";
 import { computeShellArityKey } from "./arity.js";
 import type { ShellAnalysisResult, ShellCommandAnalysis } from "./types.js";
@@ -14,25 +14,43 @@ function normalizeRoot(root: string): string {
   return root.toLowerCase().replace(/\.exe$/u, "");
 }
 
-function pathArgs(detail: CommandDetail, root: string): readonly string[] {
-  return extractShellPathArgs({
-    ...detail,
-    root,
-  }).filter((candidate) => !URL_PATTERN.test(candidate));
-}
-
 function analyzeDetail(detail: CommandDetail): ShellCommandAnalysis {
   const tokens = detail.tokens.slice(detail.rootIndex);
   const root = normalizeRoot(detail.root);
-  return {
+  const facts = extractShellPathFacts(detail);
+  const analysis: ShellCommandAnalysis = {
     arityKey: computeShellArityKey(tokens),
     danger: classifyShellCommandDetail(detail),
     hasDynamic: DYNAMIC_PATTERN.test(detail.text),
-    pathArgs: pathArgs(detail, root),
+    pathArgs: facts.pathArgs.filter(
+      (candidate) => !URL_PATTERN.test(candidate),
+    ),
     root,
     source: detail.text,
     tokens,
   };
+  if (facts.executedScript) {
+    return {
+      ...analysis,
+      executedScript: facts.executedScript,
+      interpreter: facts.interpreter,
+    };
+  }
+  if (facts.inlineEval) {
+    return {
+      ...analysis,
+      inlineEval: facts.inlineEval,
+      interpreter: facts.interpreter,
+    };
+  }
+  if (facts.interpreter) {
+    return {
+      ...analysis,
+      interpreter: facts.interpreter,
+    };
+  }
+
+  return analysis;
 }
 
 export function analyzeShellCommandLight(

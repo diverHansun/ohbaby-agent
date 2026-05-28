@@ -3,6 +3,7 @@ import type {
   ShellCommandAnalysis,
   ShellKind,
 } from "../shell/index.js";
+import type { TrustedRoot, TrustedRootKind } from "./trusted-roots.js";
 
 export type SandboxIsolation = "none" | "worktree" | "container" | "remote";
 export type SandboxContextStatus = "active" | "destroying" | "destroyed";
@@ -22,18 +23,21 @@ export type PreflightCommand = ShellCommandAnalysis;
 export interface PreflightInternalPath {
   readonly original: string;
   readonly absolutePath: string;
+  readonly isExecutedScript?: boolean;
 }
 
 export interface PreflightExternalPath {
   readonly original: string;
   readonly absolutePath: string;
   readonly askPattern: string;
+  readonly isExecutedScript?: boolean;
 }
 
 export interface PreflightDenylistHit {
   readonly original: string;
   readonly absolutePath: string;
   readonly reason: DenylistReason;
+  readonly isExecutedScript?: boolean;
 }
 
 export interface PreflightSensitivePath {
@@ -41,6 +45,7 @@ export interface PreflightSensitivePath {
   readonly absolutePath: string;
   readonly askPattern: string;
   readonly reason: DenylistReason;
+  readonly isExecutedScript?: boolean;
 }
 
 export interface PreflightResult {
@@ -57,11 +62,13 @@ export interface PreflightResult {
 export interface SandboxPreflightInput {
   readonly command: string;
   readonly shellKind: ShellKind;
+  readonly trustedRoots?: readonly string[];
   readonly workdir: string;
 }
 
 export interface SandboxShellAnalysisPreflightInput {
   readonly shell: ShellAnalysisResult;
+  readonly trustedRoots?: readonly string[];
   readonly workdir: string;
 }
 
@@ -81,6 +88,12 @@ export interface CommandContext {
 
 export interface CommandContextOptions {
   readonly fileAccess?: "none" | "workspace-ro" | "workspace-rw";
+}
+
+export interface TrustPathInput {
+  readonly kind: TrustedRootKind;
+  readonly path: string;
+  readonly source?: string;
 }
 
 export interface SandboxCreateOptions {
@@ -122,11 +135,14 @@ export interface SandboxLease {
   readonly adapterId: SandboxAdapterId;
   readonly workdir: string;
   readonly capabilities: SandboxCapabilities;
+  containsTrustedPath(absolutePath: string): boolean;
   resolvePath(inputPath: string): string;
   resolvePathForExisting(inputPath: string): Promise<string>;
   resolvePathForWrite(inputPath: string): Promise<string>;
   resolveCommandContext(options?: CommandContextOptions): CommandContext;
   preflight(command: string, shellKind: ShellKind): Promise<PreflightResult>;
+  trustPath(input: TrustPathInput): Promise<TrustedRoot>;
+  trustedRoots(): readonly TrustedRoot[];
   release(): Promise<void>;
 }
 

@@ -354,11 +354,18 @@ describe("bash builtin tool", () => {
     await resultPromise;
   });
 
-  it("rejects cd targets that escape the execution workspace", async () => {
+  it("allows cd targets outside the workspace after scheduler approval", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-bash-"));
     const workspace = path.join(tempRoot, "workspace");
     await fs.mkdir(workspace);
-    const spawn = vi.fn();
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(
+      (
+        _file: string,
+        _args: readonly string[],
+        _options: SpawnOptionsWithoutStdio,
+      ) => child as unknown as ChildProcess,
+    );
     const bash = getBashTool({
       shell: {
         acceptable: () => "/bin/bash",
@@ -368,16 +375,20 @@ describe("bash builtin tool", () => {
     });
 
     try {
-      await expect(
-        bash.execute(
-          { command: "cd .. && echo escaped" },
-          createEnvironmentContext(
-            {},
-            { cwd: workspace, env: {}, kind: "host-local" },
-          ),
+      const resultPromise = bash.execute(
+        { command: "cd .. && echo escaped" },
+        createEnvironmentContext(
+          {},
+          { cwd: workspace, env: {}, kind: "host-local" },
         ),
-      ).rejects.toThrow("outside the workspace");
-      expect(spawn).not.toHaveBeenCalled();
+      );
+      await waitForSpawn(spawn);
+      child.emit("exit", 0, null);
+      await expect(resultPromise).resolves.toMatchObject({
+        metadata: {
+          cdTargets: [await fs.realpath(tempRoot)],
+        },
+      });
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }

@@ -78,6 +78,105 @@ describe("sandbox preflight facts", () => {
     expect(result.externalPaths).toEqual([]);
   });
 
+  it("classifies executed scripts under trusted roots as internal facts", async () => {
+    const workdir = path.join(tempRoot, "workspace");
+    const skillRoot = path.join(tempRoot, "skills", "crawl");
+    await fs.mkdir(path.join(workdir), { recursive: true });
+    await fs.mkdir(path.join(skillRoot, "scripts"), { recursive: true });
+    const script = path.join(skillRoot, "scripts", "run.py");
+    await fs.writeFile(script, "print(1)", "utf8");
+
+    const result = await preflightSandboxCommand({
+      command: `python "${script}" --output-dir ../outside`,
+      shellKind: "bash",
+      trustedRoots: [skillRoot],
+      workdir,
+    });
+
+    expect(result.internalPaths).toEqual([
+      {
+        absolutePath: await fs.realpath(script),
+        isExecutedScript: true,
+        original: script,
+      },
+    ]);
+    expect(result.externalPaths).toEqual([
+      {
+        absolutePath: path.join(await fs.realpath(tempRoot), "outside"),
+        askPattern: path.join(await fs.realpath(tempRoot), "**"),
+        original: "../outside",
+      },
+    ]);
+  });
+
+  it("classifies cd targets against trusted roots instead of only the workspace", async () => {
+    const workdir = path.join(tempRoot, "workspace");
+    const skillRoot = path.join(tempRoot, "skills", "crawl");
+    const outside = path.join(tempRoot, "outside");
+    await fs.mkdir(workdir, { recursive: true });
+    await fs.mkdir(skillRoot, { recursive: true });
+    await fs.mkdir(outside);
+
+    const trusted = await preflightSandboxCommand({
+      command: `cd "${skillRoot}"`,
+      shellKind: "bash",
+      trustedRoots: [skillRoot],
+      workdir,
+    });
+    expect(trusted.internalPaths).toEqual([
+      {
+        absolutePath: await fs.realpath(skillRoot),
+        original: skillRoot,
+      },
+    ]);
+    expect(trusted.externalPaths).toEqual([]);
+
+    const untrusted = await preflightSandboxCommand({
+      command: `cd "${outside}"`,
+      shellKind: "bash",
+      trustedRoots: [skillRoot],
+      workdir,
+    });
+    expect(untrusted.externalPaths).toEqual([
+      {
+        absolutePath: await fs.realpath(outside),
+        askPattern: path.join(await fs.realpath(outside), "**"),
+        original: outside,
+      },
+    ]);
+  });
+
+  it("does not trust sibling skill roots when one exact baseDir is trusted", async () => {
+    const workdir = path.join(tempRoot, "workspace");
+    const skillRoot = path.join(tempRoot, "skills", "crawl");
+    const siblingRoot = path.join(tempRoot, "skills", "other");
+    await fs.mkdir(workdir, { recursive: true });
+    await fs.mkdir(path.join(skillRoot, "scripts"), { recursive: true });
+    await fs.mkdir(path.join(siblingRoot, "scripts"), { recursive: true });
+    const siblingScript = path.join(siblingRoot, "scripts", "run.py");
+    await fs.writeFile(siblingScript, "print(1)", "utf8");
+
+    const result = await preflightSandboxCommand({
+      command: `python "${siblingScript}"`,
+      shellKind: "bash",
+      trustedRoots: [skillRoot],
+      workdir,
+    });
+
+    expect(result.internalPaths).toEqual([]);
+    expect(result.externalPaths).toEqual([
+      {
+        absolutePath: await fs.realpath(siblingScript),
+        askPattern: path.join(
+          await fs.realpath(path.dirname(siblingScript)),
+          "**",
+        ),
+        isExecutedScript: true,
+        original: siblingScript,
+      },
+    ]);
+  });
+
   it("classifies workspace symlink targets outside the workspace as external paths", async () => {
     const workdir = path.join(tempRoot, "workspace");
     const outside = path.join(tempRoot, "outside");
@@ -160,7 +259,7 @@ describe("sandbox preflight facts", () => {
     expect(result.externalPaths).toEqual([
       {
         absolutePath: await fs.realpath(outside),
-        askPattern: path.join(path.dirname(await fs.realpath(outside)), "**"),
+        askPattern: path.join(await fs.realpath(outside), "**"),
         original: ".env",
       },
     ]);

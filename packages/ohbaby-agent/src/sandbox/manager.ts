@@ -1,4 +1,5 @@
 import path from "node:path";
+import { canonicalizePathTarget } from "../utils/path-canonicalize.js";
 import { SandboxAdapterError } from "./errors.js";
 import {
   SandboxContextAlreadyExistsError,
@@ -10,6 +11,7 @@ import {
   snapshotContext,
 } from "./context.js";
 import { createSandboxLease } from "./lease.js";
+import { TrustedRootRegistry } from "./trusted-roots.js";
 import type {
   CreateContextOptions,
   SandboxContext,
@@ -74,6 +76,7 @@ export class SandboxManager implements SandboxManagerPort {
         sessionId,
         workdir: path.resolve(options.workdir),
       });
+      const workdir = await canonicalizePathTarget(handle.workdir);
       const capabilities = freezeCapabilities(adapter.getCapabilities(handle));
       const context: InternalSandboxContext = {
         adapter,
@@ -81,12 +84,13 @@ export class SandboxManager implements SandboxManagerPort {
         capabilities,
         contextId: this.createContextId(),
         createdAt: this.now(),
-        handle,
+        handle: { ...handle, workdir },
         leaseCount: 0,
         sessionId,
         status: "active",
+        trustedRoots: await TrustedRootRegistry.create(workdir),
         waiters: [],
-        workdir: path.resolve(handle.workdir),
+        workdir,
       };
       this.contexts.set(sessionId, context);
 

@@ -142,4 +142,134 @@ describe("shell command analysis", () => {
       root: "git",
     });
   });
+
+  it("identifies interpreter and direct script execution without treating ordinary script args as paths", async () => {
+    const result = await analyzeShellCommand(
+      [
+        "python ~/.agents/skills/crawl/scripts/run.py data.json",
+        "node scripts/build.js --watch",
+        "./tools/run.sh out",
+        "bash setup.sh deploy --prod",
+      ].join(" && "),
+      "bash",
+    );
+
+    expect(result.commands[0]).toMatchObject({
+      executedScript: "~/.agents/skills/crawl/scripts/run.py",
+      interpreter: "python",
+      pathArgs: [],
+      root: "python",
+    });
+    expect(result.commands[1]).toMatchObject({
+      executedScript: "scripts/build.js",
+      interpreter: "node",
+      pathArgs: [],
+      root: "node",
+    });
+    expect(result.commands[2]).toMatchObject({
+      executedScript: "./tools/run.sh",
+      pathArgs: [],
+      root: "./tools/run.sh",
+    });
+    expect(result.commands[3]).toMatchObject({
+      executedScript: "setup.sh",
+      pathArgs: [],
+      root: "bash",
+    });
+  });
+
+  it("preserves direct script token casing in execution facts", async () => {
+    const result = await analyzeShellCommand("../Repo/Tools/Run.SH", "bash");
+
+    expect(result.commands[0]).toMatchObject({
+      executedScript: "../Repo/Tools/Run.SH",
+      pathArgs: [],
+      root: "../repo/tools/run.sh",
+    });
+  });
+
+  it("skips common interpreter option values before script detection", async () => {
+    const result = await analyzeShellCommand(
+      [
+        "ruby -r ./helper.rb script.rb",
+        "ruby -I lib other.rb",
+        "php -d detect_unicode=0 script.php",
+        "perl -I lib script.pl",
+        "perl -x embedded.pl",
+      ].join(" && "),
+      "bash",
+    );
+
+    expect(result.commands[0]).toMatchObject({
+      executedScript: "script.rb",
+      interpreter: "ruby",
+      pathArgs: [],
+    });
+    expect(result.commands[1]).toMatchObject({
+      executedScript: "other.rb",
+      interpreter: "ruby",
+      pathArgs: [],
+    });
+    expect(result.commands[2]).toMatchObject({
+      executedScript: "script.php",
+      interpreter: "php",
+      pathArgs: [],
+    });
+    expect(result.commands[3]).toMatchObject({
+      executedScript: "script.pl",
+      interpreter: "perl",
+      pathArgs: [],
+    });
+    expect(result.commands[4]).toMatchObject({
+      executedScript: "embedded.pl",
+      interpreter: "perl",
+      pathArgs: [],
+    });
+  });
+
+  it("extracts path-like script arguments and common path option values", async () => {
+    const result = await analyzeShellCommand(
+      [
+        "python run.py ../outside/input.json",
+        "python run.py --output-dir C:\\Users\\u\\AppData\\Local\\Temp\\crawl4ai",
+        "node build.js --out dist --watch",
+      ].join(" && "),
+      "bash",
+    );
+
+    expect(result.commands[0]).toMatchObject({
+      executedScript: "run.py",
+      pathArgs: ["../outside/input.json"],
+    });
+    expect(result.commands[1]).toMatchObject({
+      executedScript: "run.py",
+      pathArgs: ["C:\\Users\\u\\AppData\\Local\\Temp\\crawl4ai"],
+    });
+    expect(result.commands[2]).toMatchObject({
+      executedScript: "build.js",
+      pathArgs: ["dist"],
+    });
+  });
+
+  it("marks inline eval facts without inventing an executed script", async () => {
+    const result = await analyzeShellCommand(
+      "python -c 'print(1)' && node -e 'console.log(1)'",
+      "bash",
+    );
+
+    expect(result.commands[0]).toMatchObject({
+      inlineEval: true,
+      interpreter: "python",
+      pathArgs: [],
+      root: "python",
+    });
+    expect(result.commands[0]).not.toHaveProperty("executedScript");
+    expect(result.commands[1]).toMatchObject({
+      inlineEval: true,
+      interpreter: "node",
+      pathArgs: [],
+      root: "node",
+    });
+    expect(result.commands[1]).not.toHaveProperty("executedScript");
+  });
 });

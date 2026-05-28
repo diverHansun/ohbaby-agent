@@ -161,7 +161,6 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
         command,
         cwd: commandContext.cwd,
         parsed,
-        rootCwd: context.environment?.workdir ?? commandContext.cwd,
         shellKind,
       });
       const args = shellArgs(shellPath, command);

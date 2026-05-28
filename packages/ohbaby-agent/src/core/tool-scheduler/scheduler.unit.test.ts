@@ -514,6 +514,214 @@ describe("ToolScheduler", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
+  it("promotes external directory always approvals into trusted roots", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "ohbaby-scheduler-trust-"),
+    );
+    const workspace = path.join(tempRoot, "workspace");
+    const outside = path.join(tempRoot, "outside");
+    await fs.mkdir(workspace);
+    await fs.mkdir(outside);
+    const trustPath = vi.fn();
+    const permission = {
+      ask: vi.fn(() => Promise.resolve("always" as const)),
+    } satisfies PermissionPort;
+    const execute = vi.fn(() => ({ output: "trusted" }));
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState(),
+    });
+    scheduler.register(createTool({ execute, name: "bash" }));
+
+    try {
+      await expect(
+        scheduler.execute({
+          callId: "external_always",
+          environment: {
+            ...createFakeEnvironmentWithPreflight(
+              workspace,
+              createPreflight({
+                externalPaths: [
+                  {
+                    absolutePath: outside,
+                    askPattern: path.join(outside, "**"),
+                    original: outside,
+                  },
+                ],
+                overallDanger: "mutating",
+              }),
+            ),
+            trustPath,
+          },
+          messageId: "message_1",
+          params: { command: `cd ${outside}` },
+          sessionId: "session_1",
+          toolName: "bash",
+        }),
+      ).resolves.toMatchObject({
+        output: "trusted",
+        status: "success",
+      });
+
+      expect(trustPath).toHaveBeenCalledWith({
+        kind: "external-approved",
+        path: path.resolve(outside),
+        source: "external_directory",
+      });
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not promote external directory once approvals into trusted roots", async () => {
+    const trustPath = vi.fn();
+    const permission = {
+      ask: vi.fn(() => Promise.resolve("once" as const)),
+    } satisfies PermissionPort;
+    const execute = vi.fn(() => ({ output: "once" }));
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState(),
+    });
+    scheduler.register(createTool({ execute, name: "bash" }));
+
+    await scheduler.execute({
+      callId: "external_once",
+      environment: {
+        ...createFakeEnvironmentWithPreflight(
+          "D:/workspace",
+          createPreflight({
+            externalPaths: [
+              {
+                absolutePath: "D:/outside/repo",
+                askPattern: "D:/outside/**",
+                original: "D:/outside/repo",
+              },
+            ],
+          }),
+        ),
+        trustPath,
+      },
+      messageId: "message_1",
+      params: { command: "git push D:/outside/repo main" },
+      sessionId: "session_1",
+      toolName: "bash",
+    });
+
+    expect(trustPath).not.toHaveBeenCalled();
+  });
+
+  it("records auto-approved external directories as trusted roots", async () => {
+    const trustPath = vi.fn();
+    const permission = {
+      ask: vi.fn(() => Promise.resolve("once" as const)),
+    } satisfies PermissionPort;
+    const execute = vi.fn(() => ({ output: "auto" }));
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState({ initialLevel: "full-access" }),
+    });
+    scheduler.register(createTool({ execute, name: "bash" }));
+
+    await expect(
+      scheduler.execute({
+        callId: "external_auto",
+        environment: {
+          ...createFakeEnvironmentWithPreflight(
+            "D:/workspace",
+            createPreflight({
+              externalPaths: [
+                {
+                  absolutePath: "D:/outside/repo",
+                  askPattern: "D:/outside/**",
+                  original: "D:/outside/repo",
+                },
+              ],
+            }),
+          ),
+          trustPath,
+        },
+        messageId: "message_1",
+        params: { command: "cat D:/outside/repo" },
+        sessionId: "session_1",
+        toolName: "bash",
+      }),
+    ).resolves.toMatchObject({
+      output: "auto",
+      status: "success",
+    });
+
+    expect(permission.ask).not.toHaveBeenCalled();
+    expect(trustPath).toHaveBeenCalledWith({
+      kind: "external-approved",
+      path: path.resolve("D:/outside"),
+      source: "external_directory",
+    });
+  });
+
+  it("does not force external write confirmation inside trusted roots", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "ohbaby-scheduler-write-"),
+    );
+    const workspace = path.join(tempRoot, "workspace");
+    const trustedRoot = path.join(tempRoot, "trusted-output");
+    const trustedFile = path.join(trustedRoot, "out.txt");
+    await fs.mkdir(workspace);
+    await fs.mkdir(trustedRoot);
+    const realTrustedRoot = await fs.realpath(trustedRoot);
+    const permission = {
+      ask: vi.fn(() => Promise.resolve("once" as const)),
+    } satisfies PermissionPort;
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState({ initialLevel: "full-access" }),
+    });
+    scheduler.register(
+      createTool({
+        category: "write",
+        execute: async (_params, context) => ({
+          metadata: {
+            resolved:
+              await context.environment?.resolvePathForWrite(trustedFile),
+          },
+          output: "wrote",
+        }),
+        name: "write_file",
+        parametersJsonSchema: {
+          additionalProperties: false,
+          properties: { file_path: { type: "string" } },
+          required: ["file_path"],
+          type: "object",
+        },
+      }),
+    );
+
+    try {
+      await expect(
+        scheduler.execute({
+          callId: "trusted_write",
+          environment: {
+            ...createFakeEnvironment(workspace),
+            containsTrustedPath: (candidate) =>
+              candidate.startsWith(realTrustedRoot),
+            resolvePathForWrite: (inputPath) =>
+              Promise.resolve(path.resolve(inputPath)),
+          },
+          messageId: "message_1",
+          params: { file_path: trustedFile },
+          sessionId: "session_1",
+          toolName: "write_file",
+        }),
+      ).resolves.toMatchObject({
+        metadata: { resolved: path.resolve(trustedFile) },
+        status: "success",
+      });
+      expect(permission.ask).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("executes bash after external directory and bash permissions are approved", async () => {
     const tempRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), "ohbaby-scheduler-bash-"),

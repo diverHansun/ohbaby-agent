@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type {
+  ToolCommandContext,
+  ToolExecutionEnvironment,
+} from "../core/tool-scheduler/index.js";
+import type { TrustedRoot } from "../sandbox/index.js";
 import {
   buildSkillToolDescription,
   createSkillResourceTool,
@@ -6,6 +11,26 @@ import {
   formatSkillToolOutput,
 } from "./tool.js";
 import type { SkillContent, SkillInfo, SkillResourceContent } from "./types.js";
+
+function activationEnvironment(
+  trustPath: NonNullable<ToolExecutionEnvironment["trustPath"]>,
+): ToolExecutionEnvironment {
+  return {
+    containsTrustedPath: (): boolean => false,
+    resolveCommandContext: (): ToolCommandContext => ({
+      cwd: "/workspace",
+      kind: "host-local",
+    }),
+    resolvePath: (inputPath: string) => inputPath,
+    resolvePathForExisting: (inputPath: string): Promise<string> =>
+      Promise.resolve(inputPath),
+    resolvePathForWrite: (inputPath: string): Promise<string> =>
+      Promise.resolve(inputPath),
+    trustPath,
+    trustedRoots: (): readonly TrustedRoot[] => [],
+    workdir: "/workspace",
+  };
+}
 
 function skill(input: {
   readonly name: string;
@@ -137,6 +162,36 @@ describe("SkillTool", () => {
     });
   });
 
+  it("activates the exact skill base directory after loading", async () => {
+    const codeReview = skill({
+      name: "code-review",
+      description: "Review code",
+    });
+    const trustPath = vi.fn();
+    const tool = await createSkillTool({
+      get: () => Promise.resolve(codeReview),
+      listModelInvocable: () => Promise.resolve([codeReview]),
+      load: () => Promise.resolve(content(codeReview)),
+    });
+
+    await tool.execute(
+      { name: "code-review" },
+      {
+        callId: "call_1",
+        environment: activationEnvironment(trustPath),
+        messageId: "message_1",
+        sessionId: "session_1",
+        signal: new AbortController().signal,
+      },
+    );
+
+    expect(trustPath).toHaveBeenCalledWith({
+      kind: "active-skill",
+      path: "/skills/code-review",
+      source: "code-review",
+    });
+  });
+
   it("blocks direct model loads for model-disabled skills", async () => {
     const hidden = skill({
       description: "Hidden",
@@ -206,6 +261,32 @@ describe("SkillTool", () => {
       dir: "/skills/docs",
       name: "docs",
       path: "references/notes.md",
+    });
+  });
+
+  it("activates the exact skill base directory after reading a resource", async () => {
+    const info = skill({ name: "docs", description: "Docs" });
+    const trustPath = vi.fn();
+    const tool = createSkillResourceTool({
+      get: () => Promise.resolve(info),
+      readResource: () => Promise.resolve(resource(info)),
+    });
+
+    await tool.execute(
+      { name: "docs", path: "references/notes.md" },
+      {
+        callId: "call_1",
+        environment: activationEnvironment(trustPath),
+        messageId: "message_1",
+        sessionId: "session_1",
+        signal: new AbortController().signal,
+      },
+    );
+
+    expect(trustPath).toHaveBeenCalledWith({
+      kind: "active-skill",
+      path: "/skills/docs",
+      source: "docs",
     });
   });
 

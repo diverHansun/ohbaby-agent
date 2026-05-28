@@ -3,7 +3,11 @@ import type {
   PermissionDecision,
   PermissionStateStore,
 } from "../../permission/index.js";
-import type { PreflightResult } from "../../sandbox/index.js";
+import type {
+  PreflightResult,
+  TrustedRoot,
+  TrustedRootKind,
+} from "../../sandbox/index.js";
 
 export type ToolCategory =
   | "readonly"
@@ -61,6 +65,7 @@ export interface ToolCommandContextOptions {
 
 export interface ToolExecutionEnvironment {
   readonly workdir: string;
+  containsTrustedPath?(absolutePath: string): boolean;
   resolvePath(inputPath: string): string;
   resolvePathForExisting(inputPath: string): Promise<string>;
   resolvePathForWrite(inputPath: string): Promise<string>;
@@ -71,6 +76,12 @@ export interface ToolExecutionEnvironment {
     command: string,
     shellKind: PreflightResult["shellKind"],
   ): Promise<PreflightResult>;
+  trustPath?(input: {
+    readonly kind: TrustedRootKind;
+    readonly path: string;
+    readonly source?: string;
+  }): Promise<TrustedRoot>;
+  trustedRoots?(): readonly TrustedRoot[];
 }
 
 export interface ToolExecutionContext {

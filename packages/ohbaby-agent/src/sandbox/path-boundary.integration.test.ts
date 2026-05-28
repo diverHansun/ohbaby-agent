@@ -35,9 +35,10 @@ describe("Sandbox path boundaries", () => {
       workdir,
     });
     const lease = await manager.acquire("session_1");
+    const realWorkdir = await fs.realpath(workdir);
 
     expect(lease.resolvePath("src/file.ts")).toBe(
-      path.join(workdir, "src", "file.ts"),
+      path.join(realWorkdir, "src", "file.ts"),
     );
     expect(() => lease.resolvePath("../outside.txt")).toThrow(
       SandboxBoundaryError,
@@ -89,6 +90,34 @@ describe("Sandbox path boundaries", () => {
     ).rejects.toBeInstanceOf(SandboxBoundaryError);
   });
 
+  it("allows paths inside session trusted roots", async () => {
+    const workdir = path.join(tempRoot, "workspace");
+    const skillRoot = path.join(tempRoot, "skills", "crawl");
+    await fs.mkdir(workdir);
+    await fs.mkdir(skillRoot, { recursive: true });
+    await fs.writeFile(path.join(skillRoot, "SKILL.md"), "# Skill", "utf8");
+    const realSkillRoot = await fs.realpath(skillRoot);
+    const manager = createHostLocalManager();
+    await manager.createContext("session_1", {
+      adapterId: "host-local",
+      workdir,
+    });
+    const lease = await manager.acquire("session_1");
+    await lease.trustPath({ kind: "active-skill", path: skillRoot });
+
+    expect(
+      lease.containsTrustedPath(
+        await fs.realpath(path.join(skillRoot, "SKILL.md")),
+      ),
+    ).toBe(true);
+    await expect(
+      lease.resolvePathForExisting(path.join(skillRoot, "SKILL.md")),
+    ).resolves.toBe(await fs.realpath(path.join(skillRoot, "SKILL.md")));
+    await expect(
+      lease.resolvePathForWrite(path.join(skillRoot, "notes", "out.txt")),
+    ).resolves.toBe(path.join(realSkillRoot, "notes", "out.txt"));
+  });
+
   it("returns a host-local command context", async () => {
     const workdir = path.join(tempRoot, "workspace");
     await fs.mkdir(workdir);
@@ -100,7 +129,7 @@ describe("Sandbox path boundaries", () => {
     const lease = await manager.acquire("session_1");
 
     expect(lease.resolveCommandContext()).toMatchObject({
-      cwd: workdir,
+      cwd: await fs.realpath(workdir),
       kind: "host-local",
     });
     expect(lease.capabilities).toEqual({
