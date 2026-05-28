@@ -215,4 +215,25 @@ describe("transformMcpResult", () => {
       output: "MCP failed",
     });
   });
+
+  it("keeps structuredContent available for context projection", () => {
+    const output = transformMcpResult(
+      {
+        content: [{ text: "structured result", type: "text" }],
+        structuredContent: { count: 1, ids: ["result_1"] },
+      },
+      { serverName: "server", toolName: "search" },
+    );
+
+    expect(output).toMatchObject({
+      metadata: {
+        contentTypes: ["text"],
+        server: "server",
+        source: "mcp",
+        structuredContent: { count: 1, ids: ["result_1"] },
+        tool: "search",
+      },
+      output: "structured result",
+    });
+  });
 });

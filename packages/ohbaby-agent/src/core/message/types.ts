@@ -120,16 +120,19 @@ export type ToolState =
       readonly status: "completed";
       readonly input: Record<string, unknown>;
       readonly output: string;
+      readonly metadata?: Record<string, unknown>;
     }
   | {
       readonly status: "error";
       readonly input: Record<string, unknown>;
       readonly error: string;
+      readonly metadata?: Record<string, unknown>;
     }
   | {
       readonly status: "aborted";
       readonly input: Record<string, unknown>;
       readonly error: "Tool execution aborted by user";
+      readonly metadata?: Record<string, unknown>;
     };
 
 export type Part = TextPart | ReasoningPart | ToolPart;

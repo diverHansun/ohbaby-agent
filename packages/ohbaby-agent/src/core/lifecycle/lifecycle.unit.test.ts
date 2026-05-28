@@ -1005,6 +1005,93 @@ describe("Lifecycle.run", () => {
     ]);
   });
 
+  it("persists raw tool metadata while sending only whitelisted metadata to the next model step", async () => {
+    const requests: ProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const user = await messageManager.createMessage({
+      sessionId: "session_test",
+      role: "user",
+      agent: "default",
+    });
+    const lifecycle = new Lifecycle({
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"file_path":"README.md"}',
+                  id: "call_read",
+                  index: 0,
+                  name: "read",
+                },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+          [{ textDelta: "Done.", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi
+          .fn<ToolSchedulerInstance["executeBatch"]>()
+          .mockResolvedValue([
+            {
+              callId: "call_read",
+              output: "content",
+              metadata: {
+                diff: "secret diff",
+                mtimeMs: 1234567890,
+                path: "D:/repo/README.md",
+                pid: 42,
+                resolvedPaths: ["D:/repo/README.md"],
+              },
+              status: "success",
+            },
+          ]),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    await consumeLifecycle(
+      lifecycle.run({
+        sessionId: "session_test",
+        agent: "default",
+        parentMessageId: user.id,
+        messages: [{ role: "user", content: "Read README" }],
+      }),
+    );
+
+    expect(requests[1]?.messages[2]).toEqual({
+      role: "tool",
+      tool_call_id: "call_read",
+      content:
+        'content\n\n<tool_metadata>\n{"path":"D:/repo/README.md","mtimeMs":1234567890}\n</tool_metadata>',
+    });
+    const history = await messageManager.listBySession("session_test");
+    const toolPart = history
+      .flatMap((message) => message.parts)
+      .find((part) => part.type === "tool");
+
+    expect(toolPart).toMatchObject({
+      state: {
+        metadata: {
+          diff: "secret diff",
+          mtimeMs: 1234567890,
+          path: "D:/repo/README.md",
+          pid: 42,
+          resolvedPaths: ["D:/repo/README.md"],
+        },
+      },
+    });
+  });
+
   it("stores provider token usage on a pure tool-call assistant turn", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),

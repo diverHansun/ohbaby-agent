@@ -9,7 +9,10 @@ import type {
   ParsedToolCall,
   TokenUsage,
 } from "../llm-client/index.js";
-import type { PreparedTurn } from "../context/index.js";
+import {
+  formatToolResultContentForModel,
+  type PreparedTurn,
+} from "../context/index.js";
 import type {
   CoreMessage,
   MessageManager,
@@ -204,11 +207,10 @@ function toolResultErrorPayload(
   };
 }
 
-function toolResultToContent(result: ToolCallResult): string {
+function toolResultBaseContent(result: ToolCallResult): string {
   if (
     result.status === "success" &&
-    result.output !== undefined &&
-    result.metadata === undefined
+    result.output !== undefined
   ) {
     return result.output;
   }
@@ -220,19 +222,28 @@ function toolResultToContent(result: ToolCallResult): string {
   if (result.error) {
     payload.error = toolResultErrorPayload(result.error);
   }
-  if (result.metadata !== undefined) {
-    payload.metadata = result.metadata;
-  }
 
   return JSON.stringify(payload);
 }
 
+function toolResultToContent(
+  result: ToolCallResult,
+  toolName: string,
+): string {
+  return formatToolResultContentForModel({
+    content: toolResultBaseContent(result),
+    metadata: result.metadata,
+    tool: toolName,
+  });
+}
+
 function toolResultToMessage(
   result: ToolCallResult,
+  toolName: string,
 ): ChatCompletionToolMessageParam {
   return {
     role: "tool",
-    content: toolResultToContent(result),
+    content: toolResultToContent(result, toolName),
     tool_call_id: result.callId,
   };
 }
@@ -244,7 +255,8 @@ function resultToToolState(
   if (result.status === "success") {
     return {
       input,
-      output: result.output ?? toolResultToContent(result),
+      ...(result.metadata === undefined ? {} : { metadata: result.metadata }),
+      output: result.output ?? toolResultBaseContent(result),
       status: "completed",
     };
   }
@@ -253,13 +265,15 @@ function resultToToolState(
     return {
       error: "Tool execution aborted by user",
       input,
+      ...(result.metadata === undefined ? {} : { metadata: result.metadata }),
       status: "aborted",
     };
   }
 
   return {
-    error: toolResultToContent(result),
+    error: toolResultBaseContent(result),
     input,
+    ...(result.metadata === undefined ? {} : { metadata: result.metadata }),
     status: "error",
   };
 }
@@ -421,6 +435,9 @@ export class Lifecycle {
         step,
         toolCalls,
       });
+      const toolNameByCallId = new Map(
+        toolCalls.map((toolCall) => [toolCall.id, toolCall.name] as const),
+      );
       const resultByCallId = new Map(
         toolResults.map((result) => [result.callId, result] as const),
       );
@@ -451,7 +468,12 @@ export class Lifecycle {
           completeMessage: finalEvent.completeMessage,
           toolCalls,
         }),
-        ...toolResults.map(toolResultToMessage),
+        ...toolResults.map((result) =>
+          toolResultToMessage(
+            result,
+            toolNameByCallId.get(result.callId) ?? "",
+          ),
+        ),
       );
       yield {
         type: "step:complete",
@@ -702,6 +724,9 @@ export class Lifecycle {
         step,
         toolCalls,
       });
+      const toolNameByCallId = new Map(
+        toolCalls.map((toolCall) => [toolCall.id, toolCall.name] as const),
+      );
       const resultByCallId = new Map(
         toolResults.map((result) => [result.callId, result] as const),
       );
@@ -740,7 +765,12 @@ export class Lifecycle {
           completeMessage: finalEvent.completeMessage,
           toolCalls,
         }),
-        ...toolResults.map(toolResultToMessage),
+        ...toolResults.map((result) =>
+          toolResultToMessage(
+            result,
+            toolNameByCallId.get(result.callId) ?? "",
+          ),
+        ),
       );
       yield {
         type: "step:complete",

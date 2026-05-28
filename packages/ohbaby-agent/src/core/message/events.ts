@@ -96,16 +96,19 @@ const ToolStateSchema = z.discriminatedUnion("status", [
     status: z.literal("completed"),
     input: z.record(z.unknown()),
     output: z.string(),
+    metadata: z.record(z.unknown()).optional(),
   }),
   z.object({
     status: z.literal("error"),
     input: z.record(z.unknown()),
     error: z.string(),
+    metadata: z.record(z.unknown()).optional(),
   }),
   z.object({
     status: z.literal("aborted"),
     input: z.record(z.unknown()),
     error: z.literal("Tool execution aborted by user"),
+    metadata: z.record(z.unknown()).optional(),
   }),
 ]);
 

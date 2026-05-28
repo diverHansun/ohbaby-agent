@@ -181,6 +181,28 @@ function lastRequestToolCallId(request: ProviderRequest): string | undefined {
   return message?.tool_call_id;
 }
 
+function toolMetadataFromContent(
+  content: string,
+): Record<string, unknown> | undefined {
+  const startMarker = "<tool_metadata>\n";
+  const endMarker = "\n</tool_metadata>";
+  const start = content.indexOf(startMarker);
+  if (start === -1) {
+    return undefined;
+  }
+  const end = content.indexOf(endMarker, start + startMarker.length);
+  if (end === -1) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(
+      content.slice(start + startMarker.length, end),
+    ) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
 function subagentSessionIdFromMessages(
   messages: readonly ChatCompletionMessage[],
 ): string | undefined {
@@ -201,7 +223,11 @@ function subagentSessionIdFromMessages(
         return sessionId;
       }
     } catch {
-      continue;
+      const metadata = toolMetadataFromContent(message.content);
+      const sessionId = metadata?.sessionId;
+      if (typeof sessionId === "string") {
+        return sessionId;
+      }
     }
   }
   return undefined;
@@ -1741,21 +1767,14 @@ describe("createInProcessUiBackendClient", () => {
 
     expect(requests).toHaveLength(3);
     const parentToolMessage = requests[2]?.messages.at(-1);
-    const parentToolPayload =
+    const parentToolContent =
       typeof parentToolMessage?.content === "string"
-        ? (JSON.parse(parentToolMessage.content) as {
-            readonly metadata?: {
-              readonly subagent?: {
-                readonly success?: boolean;
-              };
-            };
-            readonly output?: string;
-          })
-        : undefined;
-    expect(parentToolPayload?.output).toContain(
-      "Lifecycle did not complete successfully",
-    );
-    expect(parentToolPayload?.metadata?.subagent?.success).toBe(false);
+        ? parentToolMessage.content
+        : "";
+    expect(parentToolContent).toContain("Lifecycle did not complete successfully");
+    expect(toolMetadataFromContent(parentToolContent)).toMatchObject({
+      success: false,
+    });
   });
 
   it("cancels an active task subagent when the parent prompt is aborted", async () => {
@@ -1851,7 +1870,12 @@ describe("createInProcessUiBackendClient", () => {
         typeof toolResultMessage?.content === "string"
           ? toolResultMessage.content
           : "",
-      ).toContain('"status":"success"');
+      ).toContain("Wrote 8 bytes to approved.txt.");
+      const toolMetadata =
+        typeof toolResultMessage?.content === "string"
+          ? toolMetadataFromContent(toolResultMessage.content)
+          : undefined;
+      expect(toolMetadata).toMatchObject({ created: true });
 
       const snapshot = await client.getSnapshot();
       expect(snapshot.status).toEqual({ kind: "idle" });

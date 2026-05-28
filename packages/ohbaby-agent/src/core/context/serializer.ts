@@ -7,6 +7,7 @@ import {
   type PromptSecurityFinding,
 } from "../system-prompt/security/index.js";
 import { isActivePart } from "./filters.js";
+import { formatToolResultContentForModel } from "./tool-metadata-projection.js";
 
 export function appendMemoryToSystemPrompt(
   systemPrompt: string,
@@ -148,10 +149,18 @@ function isCompletedToolPart(part: Part): part is ToolPart {
 function toolResultContent(part: ToolPart): string {
   switch (part.state.status) {
     case "completed":
-      return part.state.output;
+      return formatToolResultContentForModel({
+        content: part.state.output,
+        metadata: part.state.metadata,
+        tool: part.tool,
+      });
     case "error":
     case "aborted":
-      return part.state.error;
+      return formatToolResultContentForModel({
+        content: part.state.error,
+        metadata: part.state.metadata,
+        tool: part.tool,
+      });
     case "pending":
       return part.state.raw;
     case "running":

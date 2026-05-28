@@ -448,6 +448,162 @@ describe("ContextManager", () => {
     ]);
   });
 
+  it("projects whitelisted tool metadata without leaking raw internals", async () => {
+    const messageManager = createMessageManagerFixture();
+    const assistant = await messageManager.createMessage({
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "test",
+    });
+    await messageManager.appendPart(assistant.id, {
+      type: "tool",
+      callId: "call_read",
+      tool: "read",
+      state: {
+        status: "completed",
+        input: { file_path: "README.md" },
+        output: "content",
+        metadata: {
+          diff: "secret diff",
+          hasMore: false,
+          mtimeMs: 1234567890,
+          path: "D:/repo/README.md",
+          pid: 42,
+          resolvedPaths: ["D:/repo/README.md"],
+        },
+      },
+    });
+
+    const history = await messageManager.listBySession("session_1");
+    const messages = serializeForLlm({
+      history,
+      isSubagent: false,
+      memory: { global: "", project: "", merged: "" },
+      systemPrompt: "",
+    });
+
+    expect(messages).toEqual([
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "call_read",
+            type: "function",
+            function: {
+              name: "read",
+              arguments: "{\"file_path\":\"README.md\"}",
+            },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "call_read",
+        content:
+          'content\n\n<tool_metadata>\n{"path":"D:/repo/README.md","mtimeMs":1234567890,"hasMore":false}\n</tool_metadata>',
+      },
+    ]);
+  });
+
+  it("projects error metadata for empty bash output", () => {
+    const messages = serializeForLlm({
+      history: [
+        {
+          info: {
+            agent: "test",
+            id: "message_bash",
+            role: "assistant",
+            sessionId: "session_1",
+            time: { created: 1 },
+          },
+          parts: [
+            {
+              callId: "call_bash",
+              id: "part_bash",
+              messageId: "message_bash",
+              orderIndex: 0,
+              sessionId: "session_1",
+              state: {
+                error: "",
+                input: { command: "false" },
+                metadata: {
+                  exitCode: 1,
+                  shell: "powershell",
+                  signal: null,
+                },
+                status: "error",
+              },
+              tool: "bash",
+              type: "tool",
+            },
+          ],
+        },
+      ],
+      isSubagent: false,
+      memory: { global: "", project: "", merged: "" },
+      systemPrompt: "",
+    });
+
+    expect(messages.at(-1)).toEqual({
+      role: "tool",
+      tool_call_id: "call_bash",
+      content:
+        '<tool_metadata>\n{"exitCode":1,"signal":null}\n</tool_metadata>',
+    });
+  });
+
+  it("projects MCP structured content metadata", () => {
+    const messages = serializeForLlm({
+      history: [
+        {
+          info: {
+            agent: "test",
+            id: "message_mcp",
+            role: "assistant",
+            sessionId: "session_1",
+            time: { created: 1 },
+          },
+          parts: [
+            {
+              callId: "call_mcp",
+              id: "part_mcp",
+              messageId: "message_mcp",
+              orderIndex: 0,
+              sessionId: "session_1",
+              state: {
+                input: { query: "ohbaby" },
+                output: "search result",
+                metadata: {
+                  contentTypes: ["text"],
+                  hasImage: true,
+                  isError: false,
+                  server: "search-server",
+                  source: "mcp",
+                  structuredContent: { total: 1 },
+                  tool: "search",
+                },
+                status: "completed",
+              },
+              tool: "mcp_s13_search-server_t6_search",
+              type: "tool",
+            },
+          ],
+        },
+      ],
+      isSubagent: false,
+      memory: { global: "", project: "", merged: "" },
+      systemPrompt: "",
+    });
+
+    expect(messages.at(-1)).toEqual({
+      role: "tool",
+      tool_call_id: "call_mcp",
+      content:
+        'search result\n\n<tool_metadata>\n{"server":"search-server","tool":"search","isError":false,"contentTypes":["text"],"structuredContent":{"total":1}}\n</tool_metadata>',
+    });
+  });
+
   it("prepareTurn returns provider-ready messages without mutating below threshold", async () => {
     const messageManager = createMessageManagerFixture();
     await addTextMessage(messageManager, {

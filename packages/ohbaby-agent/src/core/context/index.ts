@@ -27,6 +27,10 @@ export {
   serializeForLlm,
   serializeHistoryMessages,
 } from "./serializer.js";
+export {
+  formatToolResultContentForModel,
+  projectToolMetadataForModel,
+} from "./tool-metadata-projection.js";
 export type {
   AssembledContext,
   CompactOptions,

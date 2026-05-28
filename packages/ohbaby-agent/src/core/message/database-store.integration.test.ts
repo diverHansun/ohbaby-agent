@@ -100,6 +100,60 @@ describe("createDatabaseMessageStore", () => {
     ]);
   });
 
+  it("round-trips raw metadata inside completed tool state", async () => {
+    const store = createDatabaseMessageStore();
+    await store.insertMessage({
+      id: "message_tool",
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+      time: { created: 1_000 },
+    });
+
+    await store.appendPart({
+      message: {
+        id: "message_tool",
+        sessionId: "session_1",
+        role: "assistant",
+        agent: "default",
+        time: { created: 1_000 },
+      },
+      partId: "part_tool",
+      data: {
+        type: "tool",
+        callId: "call_read",
+        tool: "read",
+        state: {
+          status: "completed",
+          input: { file_path: "README.md" },
+          output: "content",
+          metadata: {
+            mtimeMs: 1234567890,
+            pid: 42,
+          },
+        },
+      },
+      updatedAt: 2_000,
+    });
+
+    await expect(store.listBySession("session_1")).resolves.toMatchObject([
+      {
+        info: { id: "message_tool" },
+        parts: [
+          {
+            id: "part_tool",
+            state: {
+              metadata: {
+                mtimeMs: 1234567890,
+                pid: 42,
+              },
+            },
+          },
+        ],
+      },
+    ]);
+  });
+
   it("allocates distinct order indexes during concurrent appends", async () => {
     const store = createDatabaseMessageStore();
     await store.insertMessage(userMessage());
