@@ -1,3 +1,5 @@
+import { normalizeGitArgs } from "../git-args.js";
+
 const DEFAULT_ARITY = 1;
 
 const COMMAND_ARITY = new Map<string, number>([
@@ -13,6 +15,15 @@ export function computeShellArityKey(tokens: readonly string[]): string {
   const normalized = tokens.map(normalizeToken).filter(Boolean);
   if (normalized.length === 0) {
     return "*";
+  }
+
+  if (normalized[0] === "git") {
+    const gitTokens = [
+      "git",
+      ...normalizeGitArgs(tokens.slice(1)).map(normalizeToken),
+    ];
+    const prefix = gitTokens.slice(0, Math.min(2, gitTokens.length));
+    return `${prefix.join(" ")} *`;
   }
 
   const arity = COMMAND_ARITY.get(normalized[0]) ?? DEFAULT_ARITY;

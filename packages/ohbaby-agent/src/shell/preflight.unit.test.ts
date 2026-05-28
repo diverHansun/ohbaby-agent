@@ -90,6 +90,20 @@ describe("shell preflight", () => {
     });
   });
 
+  it("does not resolve grep and rg search patterns as file paths", async () => {
+    const src = path.join(tempRoot, "src");
+    await fs.mkdir(src);
+
+    await expect(preflight("rg .env src")).resolves.toMatchObject({
+      resolvedPaths: [await fs.realpath(src)],
+    });
+    await expect(preflight("grep token ../secret.txt")).resolves.toMatchObject({
+      resolvedPaths: [
+        path.join(await fs.realpath(path.dirname(tempRoot)), "secret.txt"),
+      ],
+    });
+  });
+
   it("rejects dynamic path arguments for path-aware commands", async () => {
     await expect(preflight("cat $HOME/.ssh/id_rsa")).rejects.toThrow("dynamic");
     await expect(

@@ -1,4 +1,5 @@
 import type { CommandDetail, ParsedCommand } from "../utils/index.js";
+import { gitSubcommand } from "./git-args.js";
 
 export type ShellCommandClass = "readonly" | "mutating" | "dangerous";
 
@@ -99,7 +100,7 @@ function hasUnixRecursiveForce(args: readonly string[]): boolean {
 }
 
 function gitCommandClass(args: readonly string[]): ShellCommandClass {
-  const subcommand = args.find((arg) => !arg.startsWith("-"))?.toLowerCase();
+  const subcommand = gitSubcommand(args);
   return subcommand === "status" ||
     subcommand === "log" ||
     subcommand === "diff"

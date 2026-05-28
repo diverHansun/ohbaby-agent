@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { CommandDetail, ParsedCommand } from "../utils/index.js";
 import { containsOrEqual, parseCommand } from "../utils/index.js";
+import { extractShellPathArgs } from "./path-args.js";
 
 export type ShellKind = "bash" | "cmd" | "powershell";
 
@@ -51,44 +52,6 @@ const SHELL_EXEC_COMMANDS = new Set([
   "pwsh",
   "sh",
   "zsh",
-]);
-const PATH_ARGUMENT_COMMANDS = new Set([
-  "cat",
-  "chmod",
-  "chown",
-  "copy",
-  "cp",
-  "del",
-  "dir",
-  "erase",
-  "find",
-  "grep",
-  "head",
-  "less",
-  "ls",
-  "md",
-  "mkdir",
-  "more",
-  "move",
-  "mv",
-  "add-content",
-  "clear-content",
-  "copy-item",
-  "get-childitem",
-  "get-content",
-  "move-item",
-  "new-item",
-  "rd",
-  "remove-item",
-  "rm",
-  "rmdir",
-  "rg",
-  "set-content",
-  "tail",
-  "tee",
-  "touch",
-  "type",
-  "xcopy",
 ]);
 const DYNAMIC_PATH_PATTERN = /[`$%*?[\]{}]/u;
 const URL_PATTERN = /^[a-z][a-z0-9+.-]*:\/\//iu;
@@ -559,30 +522,6 @@ function optionValue(token: string): string | null {
   return null;
 }
 
-function looksLikePathToken(token: string): boolean {
-  const normalized = stripMatchingQuotes(stripRedirectionPrefix(token));
-  const value = optionValue(normalized) ?? normalized;
-  if (!value || URL_PATTERN.test(value)) {
-    return false;
-  }
-  if (value === "." || value === "..") {
-    return true;
-  }
-  if (value.startsWith("~")) {
-    return true;
-  }
-  if (
-    DRIVE_ABSOLUTE_PATTERN.test(value) ||
-    DRIVE_RELATIVE_PATTERN.test(value)
-  ) {
-    return true;
-  }
-  if (PROVIDER_PATH_PATTERN.test(value) && !URL_PATTERN.test(value)) {
-    return true;
-  }
-  return false;
-}
-
 function candidatePathFromToken(token: string): string | null {
   const normalized = stripMatchingQuotes(stripRedirectionPrefix(token));
   const value = optionValue(normalized) ?? normalized;
@@ -592,41 +531,8 @@ function candidatePathFromToken(token: string): string | null {
   return value;
 }
 
-function rootAcceptsPathArguments(detail: CommandDetail): boolean {
-  const root = normalizeRoot(detail.root);
-  return (
-    PATH_ARGUMENT_COMMANDS.has(root) ||
-    DOWNLOAD_COMMANDS.has(root) ||
-    SHELL_EXEC_COMMANDS.has(root)
-  );
-}
-
 function pathTokens(detail: CommandDetail): readonly string[] {
-  const rootIndex = detail.rootIndex;
-  const candidates = new Set<string>();
-  for (const candidate of detail.paths) {
-    const tokenIndex = detail.tokens.indexOf(candidate);
-    if (tokenIndex === -1 || tokenIndex > rootIndex) {
-      candidates.add(candidate);
-    }
-  }
-  for (const [tokenIndex, token] of detail.tokens.entries()) {
-    if (tokenIndex <= rootIndex) {
-      continue;
-    }
-    if (!rootAcceptsPathArguments(detail) && !looksLikePathToken(token)) {
-      continue;
-    }
-    const candidate = candidatePathFromToken(token);
-    if (!candidate) {
-      continue;
-    }
-    if (rootAcceptsPathArguments(detail) || looksLikePathToken(token)) {
-      candidates.add(candidate);
-    }
-  }
-
-  return [...candidates];
+  return extractShellPathArgs(detail);
 }
 
 function downloadOutputTargets(detail: CommandDetail): readonly string[] {

@@ -82,4 +82,42 @@ describe("shell command analysis", () => {
       root: "get-content",
     });
   });
+
+  it("does not treat grep and rg search patterns as path args", async () => {
+    const result = await analyzeShellCommand(
+      "rg .env src && grep token ../outside.txt",
+      "bash",
+    );
+
+    expect(result.commands[0]).toMatchObject({
+      pathArgs: ["src"],
+      root: "rg",
+    });
+    expect(result.commands[1]).toMatchObject({
+      pathArgs: ["../outside.txt"],
+      root: "grep",
+    });
+  });
+
+  it("uses command-specific path positions for modes, options, and redirection", async () => {
+    const result = await analyzeShellCommand(
+      "chmod 600 ../outside.txt && git -C ../repo status && echo ok > ../out.txt",
+      "bash",
+    );
+
+    expect(result.commands[0]).toMatchObject({
+      pathArgs: ["../outside.txt"],
+      root: "chmod",
+    });
+    expect(result.commands[1]).toMatchObject({
+      arityKey: "git status *",
+      danger: "readonly",
+      pathArgs: ["../repo"],
+      root: "git",
+    });
+    expect(result.commands[2]).toMatchObject({
+      pathArgs: ["../out.txt"],
+      root: "echo",
+    });
+  });
 });
