@@ -32,7 +32,12 @@ import {
   type StartSessionParams,
 } from "../../agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
-import { getSearchConfig, toSearchProviderConfig } from "../../config/index.js";
+import {
+  getDefaultSkillDirectories,
+  getSearchConfig,
+  loadSkillConfig,
+  toSearchProviderConfig,
+} from "../../config/index.js";
 import {
   createInMemoryRunLedger,
   type RunLedger,
@@ -45,6 +50,7 @@ import {
   createSkillTool,
   type SkillLogger,
   type SkillRegistryPort,
+  type SkillSearchDirectory,
 } from "../../skill/index.js";
 import { McpManager } from "../../mcp/index.js";
 import {
@@ -191,6 +197,30 @@ function createSkillLogger(
       });
     },
   };
+}
+
+async function loadConfiguredSkillDirectories(input: {
+  readonly onNotice?: UiRuntimeCompositionOptions["onNotice"];
+  readonly projectDirectory?: string;
+}): Promise<readonly SkillSearchDirectory[]> {
+  const defaultDirectories = getDefaultSkillDirectories({
+    projectDirectory: input.projectDirectory,
+  });
+  try {
+    const config = await loadSkillConfig({
+      projectDirectory: input.projectDirectory,
+    });
+    return [...defaultDirectories, ...config.directories];
+  } catch (error) {
+    const detail = formatUnknown(error);
+    input.onNotice?.({
+      key: `skill:config:${detail}`,
+      level: "warning",
+      message: detail,
+      title: "Skill config warning",
+    });
+    return defaultDirectories;
+  }
 }
 
 function objectData(value: unknown): Record<string, unknown> | undefined {
@@ -592,8 +622,11 @@ export async function createUiRuntimeComposition(
     options.skillRegistry ??
     new SkillRegistry({
       loader: new SkillLoader({
+        directories: await loadConfiguredSkillDirectories({
+          onNotice: options.onNotice,
+          projectDirectory: options.workdir,
+        }),
         ...(skillLogger ? { logger: skillLogger } : {}),
-        projectDirectory: options.workdir,
       }),
     });
   async function refreshSkillTools(): Promise<void> {

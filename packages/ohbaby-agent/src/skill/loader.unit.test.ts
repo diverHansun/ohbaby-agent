@@ -40,11 +40,7 @@ describe("SkillLoader", () => {
     });
 
     expect(directory).toBe(
-      path.join(
-        process.platform === "win32" ? appDataDirectory : xdgConfigDirectory,
-        "ohbaby-agent",
-        "skill",
-      ),
+      path.join(homeDirectory, ".ohbaby-agent", "skill"),
     );
   });
 
