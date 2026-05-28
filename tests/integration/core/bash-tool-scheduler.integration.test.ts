@@ -9,12 +9,16 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";
 import { createToolScheduler } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
-import { createHostLocalEnvironment } from "../../../packages/ohbaby-agent/src/adapters/ui-runtime/host-local-environment.js";
+import {
+  createHostLocalEnvironment,
+  createHostLocalSandboxManager,
+} from "../../../packages/ohbaby-agent/src/adapters/ui-runtime/host-local-environment.js";
 import {
   createPermissionManager,
   createPermissionState,
   PermissionEvent,
 } from "../../../packages/ohbaby-agent/src/permission/index.js";
+import type { PermissionInfo } from "../../../packages/ohbaby-agent/src/permission/index.js";
 import { createBashTool } from "../../../packages/ohbaby-agent/src/tools/bash.js";
 import type { SpawnCommand } from "../../../packages/ohbaby-agent/src/tools/bash.js";
 
@@ -137,5 +141,81 @@ describe("bash tool scheduler integration", () => {
     });
     expect(permissionUpdates).toEqual(["bash_escape"]);
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("asks external_directory before bash and then executes with a rich sandbox lease", async () => {
+    const externalFile = path.join(tempRoot, "outside.txt");
+    await fs.writeFile(externalFile, "outside\n", "utf8");
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(
+      (
+        _file: string,
+        _args: readonly string[],
+        _options: SpawnOptionsWithoutStdio,
+      ) => {
+        queueMicrotask(() => {
+          child.emit("exit", 0, null);
+        });
+        return child as unknown as ChildProcess;
+      },
+    );
+    const bus = createBus();
+    const permissionState = createPermissionState({ bus });
+    const permission = createPermissionManager({ bus, state: permissionState });
+    const scheduler = createToolScheduler({ bus, permission, permissionState });
+    const permissionUpdates: PermissionInfo[] = [];
+    const sandboxManager = createHostLocalSandboxManager(workspace);
+    const lease = await sandboxManager.acquire("session_1");
+
+    scheduler.register(
+      createBashTool({
+        shell: {
+          acceptable: () => "/bin/bash",
+          killTree: vi.fn(),
+        },
+        spawn,
+      }),
+    );
+    bus.subscribe(PermissionEvent.Updated, (event) => {
+      permissionUpdates.push(event.info);
+      permission.respond(event.info.sessionId, event.info.id, { type: "once" });
+    });
+
+    try {
+      await expect(
+        scheduler.execute({
+          callId: "bash_external",
+          environment: lease,
+          messageId: "message_1",
+          params: { command: "chmod 600 ../outside.txt" },
+          sessionId: "session_1",
+          toolName: "bash",
+        }),
+      ).resolves.toMatchObject({
+        metadata: {
+          cwd: workspace,
+          shellKind: "bash",
+        },
+        status: "success",
+      });
+      expect(permissionUpdates.map((info) => info.type)).toEqual([
+        "external_directory",
+        "bash",
+      ]);
+      expect(permissionUpdates[0]?.pattern).toContain("external_directory(");
+      const preflight = permissionUpdates[0]?.metadata.preflight as
+        | {
+            readonly externalPaths?: readonly {
+              readonly absolutePath: string;
+            }[];
+          }
+        | undefined;
+      expect(preflight?.externalPaths?.[0]?.absolutePath).toBe(
+        await fs.realpath(externalFile),
+      );
+      expect(spawn).toHaveBeenCalledOnce();
+    } finally {
+      await sandboxManager.release(lease);
+    }
   });
 });
