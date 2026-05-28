@@ -3,6 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import type { CommandDetail, ParsedCommand } from "../utils/index.js";
 import { containsOrEqual, parseCommand } from "../utils/index.js";
+import { canonicalizePathTarget } from "../utils/path-canonicalize.js";
+import {
+  msysPathToWindowsPath,
+  optionValue,
+  stripMatchingQuotes,
+} from "../utils/path-strings.js";
 import { extractShellPathArgs } from "./path-args.js";
 import { classifyShellPathPattern, splitGlobPath } from "./path-patterns.js";
 
@@ -65,17 +71,6 @@ function basenameLower(shellPath: string): string {
 
 function normalizeRoot(root: string): string {
   return root.toLowerCase().replace(/\.exe$/u, "");
-}
-
-function stripMatchingQuotes(value: string): string {
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1);
-  }
-
-  return value;
 }
 
 export function detectShellKind(shellPath: string): ShellKind {
@@ -426,56 +421,6 @@ function assertStaticPath(target: string): "static" | "glob" {
   return patternKind;
 }
 
-function msysPathToWindowsPath(target: string): string | null {
-  const match = /^\/([A-Za-z])(?:\/(.*))?$/u.exec(target);
-  if (!match || process.platform !== "win32") {
-    return null;
-  }
-  const drive = match[1].toUpperCase();
-  const rest = match[2] ? match[2].replace(/\//gu, "\\") : "";
-  return `${drive}:\\${rest}`;
-}
-
-function errorCode(error: unknown): string | undefined {
-  return typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    typeof error.code === "string"
-    ? error.code
-    : undefined;
-}
-
-function isMissingPathError(error: unknown): boolean {
-  const code = errorCode(error);
-  return code === "ENOENT" || code === "ENOTDIR";
-}
-
-async function canonicalizeStaticPath(candidate: string): Promise<string> {
-  const absolutePath = path.resolve(candidate);
-  const suffix: string[] = [];
-  let current = absolutePath;
-
-  for (;;) {
-    try {
-      const realPath = await fs.realpath(current);
-      return suffix.length > 0
-        ? path.join(realPath, ...suffix.reverse())
-        : realPath;
-    } catch (error) {
-      if (!isMissingPathError(error)) {
-        throw error;
-      }
-
-      const parent = path.dirname(current);
-      if (parent === current) {
-        return absolutePath;
-      }
-      suffix.push(path.basename(current));
-      current = parent;
-    }
-  }
-}
-
 function resolveLexicalPath(
   currentCwd: string,
   target: string,
@@ -519,7 +464,7 @@ async function resolveStaticPathTarget(
   }
 
   const candidate = resolveLexicalPath(currentCwd, target, shellKind);
-  return canonicalizeStaticPath(candidate);
+  return canonicalizePathTarget(candidate);
 }
 
 async function realpathOrResolve(value: string): Promise<string> {
@@ -550,32 +495,6 @@ async function assertPathInsideWorkspace(input: {
     );
   }
   return resolved;
-}
-
-function stripRedirectionPrefix(token: string): string {
-  return token.replace(/^(?:\d+|&)?[<>]+/u, "");
-}
-
-function optionValue(token: string): string | null {
-  const equalsIndex = token.indexOf("=");
-  if (equalsIndex > 0) {
-    return token.slice(equalsIndex + 1);
-  }
-  const colonIndex = token.indexOf(":");
-  if (token.startsWith("/") && colonIndex > 1) {
-    return token.slice(colonIndex + 1);
-  }
-
-  return null;
-}
-
-function candidatePathFromToken(token: string): string | null {
-  const normalized = stripMatchingQuotes(stripRedirectionPrefix(token));
-  const value = optionValue(normalized) ?? normalized;
-  if (!value || URL_PATTERN.test(value)) {
-    return null;
-  }
-  return value;
 }
 
 function pathTokens(detail: CommandDetail): readonly string[] {
@@ -616,18 +535,6 @@ function downloadOutputTargets(detail: CommandDetail): readonly string[] {
   return targets;
 }
 
-function shellInputTargets(detail: CommandDetail): readonly string[] {
-  if (!SHELL_EXEC_COMMANDS.has(normalizeRoot(detail.root))) {
-    return [];
-  }
-  return commandArgs(detail)
-    .filter((arg) => !arg.startsWith("-") && !arg.startsWith("/"))
-    .flatMap((arg) => {
-      const candidate = candidatePathFromToken(arg);
-      return candidate ? [candidate] : [];
-    });
-}
-
 export async function preflightShellCommand(
   input: ShellPreflightInput,
 ): Promise<ShellPreflightResult> {
@@ -635,7 +542,16 @@ export async function preflightShellCommand(
   let currentCwd = await realpathOrResolve(input.cwd);
   const cdTargets: string[] = [];
   const resolvedPaths: string[] = [];
+  const seenResolvedPaths = new Set<string>();
   const downloadedFiles = new Set<string>();
+
+  function addResolvedPath(resolved: string): void {
+    if (seenResolvedPaths.has(resolved)) {
+      return;
+    }
+    seenResolvedPaths.add(resolved);
+    resolvedPaths.push(resolved);
+  }
 
   assertNoDownloadExecutePipeline(input.command);
 
@@ -663,10 +579,10 @@ export async function preflightShellCommand(
         input.shellKind,
       );
       downloadedFiles.add(resolved);
-      resolvedPaths.push(resolved);
+      addResolvedPath(resolved);
     }
 
-    for (const target of shellInputTargets(detail)) {
+    for (const target of pathTokens(detail)) {
       const resolved = await resolveStaticPathTarget(
         currentCwd,
         target,
@@ -677,16 +593,7 @@ export async function preflightShellCommand(
           "Command downloads a file and executes it in the same shell request.",
         );
       }
-      resolvedPaths.push(resolved);
-    }
-
-    for (const target of pathTokens(detail)) {
-      const resolved = await resolveStaticPathTarget(
-        currentCwd,
-        target,
-        input.shellKind,
-      );
-      resolvedPaths.push(resolved);
+      addResolvedPath(resolved);
     }
   }
 

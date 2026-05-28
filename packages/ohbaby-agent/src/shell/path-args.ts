@@ -1,5 +1,12 @@
 import type { CommandDetail } from "../utils/index.js";
+import {
+  candidatePathFromToken,
+  normalizeOptionName,
+  optionValue,
+  stripRedirectionPrefix,
+} from "../utils/path-strings.js";
 import { gitGlobalPathArgs } from "./git-args.js";
+import { resolveShellExecutionTarget } from "./interpreters.js";
 
 const PATH_ARGUMENT_COMMANDS = new Set([
   "cat",
@@ -45,16 +52,6 @@ const DOWNLOAD_COMMANDS = new Set([
   "invoke-restmethod",
   "invoke-webrequest",
 ]);
-const SHELL_EXEC_COMMANDS = new Set([
-  "bash",
-  "cmd",
-  "iex",
-  "invoke-expression",
-  "powershell",
-  "pwsh",
-  "sh",
-  "zsh",
-]);
 const PATH_VALUE_OPTIONS = new Set([
   "-c",
   "-f",
@@ -64,6 +61,18 @@ const PATH_VALUE_OPTIONS = new Set([
   "-path",
   "--output",
   "--output-document",
+]);
+const SCRIPT_PATH_VALUE_OPTIONS = new Set([
+  "--cache-dir",
+  "--config",
+  "--env-file",
+  "--file",
+  "--input",
+  "--input-dir",
+  "--output",
+  "--output-dir",
+  "--out",
+  "--path",
 ]);
 const SEARCH_PATTERN_OPTIONS = new Set([
   "-e",
@@ -98,51 +107,18 @@ const PATH_PREFIX_PATTERN =
   /^(?:\.{1,2}(?:[\\/]|$)|~(?:[\\/]|$)|[\\/]|[A-Za-z]:[\\/])/u;
 const PATH_SUFFIX_PATTERN = /^[\w.-]+(?:[\\/][\w .-]+)+$/u;
 const FIND_LEADING_OPTIONS = new Set(["-H", "-L", "-P"]);
+const DIRECT_EXECUTABLE_PREFIX_PATTERN =
+  /^(?:\.{1,2}[\\/]|~[\\/]|[\\/]|[A-Za-z]:[\\/])/u;
+
+export interface ShellPathFacts {
+  readonly executedScript?: string;
+  readonly inlineEval?: boolean;
+  readonly interpreter?: string;
+  readonly pathArgs: readonly string[];
+}
 
 function normalizeRoot(root: string): string {
   return root.toLowerCase().replace(/\.exe$/u, "");
-}
-
-function stripMatchingQuotes(value: string): string {
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1);
-  }
-
-  return value;
-}
-
-function stripRedirectionPrefix(token: string): string {
-  return token.replace(/^(?:\d+|&)?[<>]+/u, "");
-}
-
-function normalizeOptionName(token: string): string {
-  const equalsIndex = token.indexOf("=");
-  const colonIndex = token.indexOf(":");
-  const endIndexes = [equalsIndex, colonIndex].filter((index) => index > 0);
-  const end = endIndexes.length > 0 ? Math.min(...endIndexes) : token.length;
-  return token.slice(0, end).toLowerCase();
-}
-
-function optionValue(token: string): string | null {
-  const equalsIndex = token.indexOf("=");
-  if (equalsIndex > 0) {
-    return token.slice(equalsIndex + 1);
-  }
-  const colonIndex = token.indexOf(":");
-  if ((token.startsWith("/") || token.startsWith("-")) && colonIndex > 1) {
-    return token.slice(colonIndex + 1);
-  }
-
-  return null;
-}
-
-function candidatePathFromToken(token: string): string | null {
-  const normalized = stripMatchingQuotes(stripRedirectionPrefix(token));
-  const value = optionValue(normalized) ?? normalized;
-  return value.length > 0 ? value : null;
 }
 
 function isOption(token: string): boolean {
@@ -240,6 +216,46 @@ function addAllPositionalPaths(
       continue;
     }
     addCandidate(paths, token);
+  }
+}
+
+function looksLikeDirectExecutableRoot(root: string): boolean {
+  return DIRECT_EXECUTABLE_PREFIX_PATTERN.test(root);
+}
+
+function addScriptArgumentPaths(
+  paths: Set<string>,
+  args: readonly string[],
+  consumed: ReadonlySet<number>,
+  startIndex: number,
+): void {
+  for (let index = startIndex; index < args.length; index += 1) {
+    if (consumed.has(index)) {
+      continue;
+    }
+
+    const token = args[index];
+    if (isOption(token)) {
+      const optionName = normalizeOptionName(token);
+      const inlineValue = optionValue(token);
+      if (SCRIPT_PATH_VALUE_OPTIONS.has(optionName)) {
+        if (inlineValue !== null) {
+          addCandidate(paths, inlineValue);
+        } else {
+          addCandidate(paths, args[index + 1]);
+          index += 1;
+        }
+        continue;
+      }
+      if (NON_PATH_OPTIONS_WITH_VALUE.has(optionName) && inlineValue === null) {
+        index += 1;
+      }
+      continue;
+    }
+
+    if (looksLikePathArg(token)) {
+      addCandidate(paths, token);
+    }
   }
 }
 
@@ -341,14 +357,27 @@ function addFindPaths(
   }
 }
 
-export function extractShellPathArgs(detail: CommandDetail): readonly string[] {
+export function extractShellPathFacts(detail: CommandDetail): ShellPathFacts {
   const root = normalizeRoot(detail.root);
   const args = detail.tokens.slice(detail.rootIndex + 1);
   const paths = new Set<string>();
   const redirectionConsumed = addRedirectionTargets(paths, args);
   const consumed = redirectionConsumed;
+  const execution = resolveShellExecutionTarget(
+    detail.tokens.slice(detail.rootIndex),
+  );
+  const scriptArgIndex =
+    execution.scriptTokenIndex === undefined
+      ? undefined
+      : execution.scriptTokenIndex - 1;
 
-  if (SEARCH_COMMANDS.has(root)) {
+  if (execution.executedScript) {
+    const startIndex =
+      scriptArgIndex === undefined ? 0 : Math.max(scriptArgIndex + 1, 0);
+    addScriptArgumentPaths(paths, args, consumed, startIndex);
+  } else if (looksLikeDirectExecutableRoot(detail.root)) {
+    addScriptArgumentPaths(paths, args, consumed, 0);
+  } else if (SEARCH_COMMANDS.has(root)) {
     addSearchCommandPaths(paths, args, consumed, root);
   } else if (root === "chmod" || root === "chown") {
     addModeThenPathArgs(paths, args, consumed);
@@ -358,8 +387,7 @@ export function extractShellPathArgs(detail: CommandDetail): readonly string[] {
     addDownloadOutputPaths(paths, args, consumed);
   } else if (
     PATH_ARGUMENT_COMMANDS.has(root) ||
-    POWERSHELL_PATH_COMMANDS.has(root) ||
-    SHELL_EXEC_COMMANDS.has(root)
+    POWERSHELL_PATH_COMMANDS.has(root)
   ) {
     addAllPositionalPaths(paths, args, consumed);
   } else if (root === "git") {
@@ -374,6 +402,26 @@ export function extractShellPathArgs(detail: CommandDetail): readonly string[] {
         addCandidate(paths, args[index]);
       }
     }
+  }
+
+  return {
+    executedScript:
+      execution.executedScript ??
+      (looksLikeDirectExecutableRoot(detail.root) ? detail.root : undefined),
+    inlineEval: execution.inlineEval,
+    interpreter: execution.interpreter,
+    pathArgs: [...paths],
+  };
+}
+
+export function extractShellPathArgs(detail: CommandDetail): readonly string[] {
+  const facts = extractShellPathFacts(detail);
+  const paths = new Set<string>();
+  if (facts.executedScript) {
+    addCandidate(paths, facts.executedScript);
+  }
+  for (const pathArg of facts.pathArgs) {
+    addCandidate(paths, pathArg);
   }
 
   return [...paths];

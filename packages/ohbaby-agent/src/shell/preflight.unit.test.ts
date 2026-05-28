@@ -161,6 +161,44 @@ describe("shell preflight", () => {
     );
   });
 
+  it("resolves interpreter and direct script execution paths", async () => {
+    const root = await fs.realpath(tempRoot);
+    const scripts = path.join(tempRoot, "scripts");
+    await fs.mkdir(scripts);
+    const runPy = path.join(scripts, "run.py");
+    const runSh = path.join(scripts, "run.sh");
+    await fs.writeFile(runPy, "print(1)", "utf8");
+    await fs.writeFile(runSh, "echo ok", "utf8");
+
+    await expect(
+      preflight("python scripts/run.py data.json"),
+    ).resolves.toMatchObject({
+      resolvedPaths: [path.join(root, "scripts", "run.py")],
+    });
+    await expect(preflight("./scripts/run.sh out")).resolves.toMatchObject({
+      resolvedPaths: [path.join(root, "scripts", "run.sh")],
+    });
+  });
+
+  it("does not treat ordinary shell script args as paths but keeps path-like args", async () => {
+    const root = await fs.realpath(tempRoot);
+    await fs.writeFile(path.join(tempRoot, "setup.sh"), "echo ok", "utf8");
+
+    await expect(
+      preflight("bash setup.sh deploy --prod"),
+    ).resolves.toMatchObject({
+      resolvedPaths: [path.join(root, "setup.sh")],
+    });
+    await expect(
+      preflight("bash setup.sh --output-dir ../outside"),
+    ).resolves.toMatchObject({
+      resolvedPaths: [
+        path.join(root, "setup.sh"),
+        path.join(await fs.realpath(path.dirname(tempRoot)), "outside"),
+      ],
+    });
+  });
+
   it("handles cmd compact cd syntax and cmd cd options", async () => {
     const child = path.join(tempRoot, "child");
     await fs.mkdir(child);

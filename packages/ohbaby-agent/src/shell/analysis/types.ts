@@ -5,6 +5,9 @@ export interface ShellCommandAnalysis {
   readonly source: string;
   readonly tokens: readonly string[];
   readonly root: string;
+  readonly executedScript?: string;
+  readonly inlineEval?: boolean;
+  readonly interpreter?: string;
   readonly pathArgs: readonly string[];
   readonly arityKey: string;
   readonly danger: ShellCommandClass;
