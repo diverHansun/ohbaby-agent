@@ -771,6 +771,77 @@ describe("permission patterns", () => {
     await expect(second).resolves.toBe("once");
   });
 
+  it("does not let structured bash approvals auto-approve appended shell segments", async () => {
+    const bus = createBus();
+    const state = createPermissionState({ bus });
+    const permission = createPermissionManager({
+      bus,
+      generateId: (() => {
+        let nextId = 1;
+        return (): string => `permission_${String(nextId++)}`;
+      })(),
+      state,
+    });
+
+    const gitStatus = permission.ask(
+      baseAskInput({
+        category: "dangerous",
+        params: { command: "git status" },
+        toolName: "bash",
+      }),
+    );
+    permission.respond("session_1", "permission_1", { type: "always" });
+    await expect(gitStatus).resolves.toBe("always");
+
+    const appendedGit = permission.ask(
+      baseAskInput({
+        callId: "call_2",
+        category: "dangerous",
+        messageId: "message_2",
+        params: { command: "git status && rm -rf build" },
+        toolName: "bash",
+      }),
+    );
+    let appendedGitSettled = false;
+    void appendedGit.then(() => {
+      appendedGitSettled = true;
+    });
+    await Promise.resolve();
+    expect(appendedGitSettled).toBe(false);
+    permission.respond("session_1", "permission_2", { type: "once" });
+    await expect(appendedGit).resolves.toBe("once");
+
+    const dockerPs = permission.ask(
+      baseAskInput({
+        callId: "call_3",
+        category: "dangerous",
+        messageId: "message_3",
+        params: { command: "docker ps" },
+        toolName: "bash",
+      }),
+    );
+    permission.respond("session_1", "permission_3", { type: "always" });
+    await expect(dockerPs).resolves.toBe("always");
+
+    const appendedDocker = permission.ask(
+      baseAskInput({
+        callId: "call_4",
+        category: "dangerous",
+        messageId: "message_4",
+        params: { command: "docker ps && rm -rf build" },
+        toolName: "bash",
+      }),
+    );
+    let appendedDockerSettled = false;
+    void appendedDocker.then(() => {
+      appendedDockerSettled = true;
+    });
+    await Promise.resolve();
+    expect(appendedDockerSettled).toBe(false);
+    permission.respond("session_1", "permission_4", { type: "once" });
+    await expect(appendedDocker).resolves.toBe("once");
+  });
+
   it("uses root-relative arity for wrapped git command approvals", async () => {
     expect(
       generatePermissionPattern({

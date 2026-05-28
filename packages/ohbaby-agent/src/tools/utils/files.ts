@@ -81,8 +81,27 @@ export async function ensureWritableParent(
   context: ToolExecutionContext,
   inputPath: string,
 ): Promise<void> {
+  try {
+    const resolvedTarget = await resolvePathForWrite(context, inputPath);
+    await fs.mkdir(path.dirname(resolvedTarget), { recursive: true });
+    return;
+  } catch (error) {
+    if (!isNodeErrorCode(error, "ENOENT")) {
+      throw error;
+    }
+  }
+
   const parent = path.dirname(inputPath);
   await ensureWritableDirectory(context, parent);
+}
+
+function isNodeErrorCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === code
+  );
 }
 
 async function ensureWritableDirectory(

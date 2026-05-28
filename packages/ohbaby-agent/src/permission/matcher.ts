@@ -245,12 +245,12 @@ export function matchesPermissionRule(
     if (!command) {
       return false;
     }
+    const parsed = parseCommand(command);
     const arityPattern = bashCommandPattern(command, call.toolName);
-    return (
-      pattern === arityPattern ||
-      matchesPattern(arityPattern, pattern) ||
-      matchesPattern(command, pattern)
-    );
+    if (rule.decision === "allow" && parsed.details.length > 1) {
+      return pattern === arityPattern;
+    }
+    return pattern === arityPattern || matchesPattern(arityPattern, pattern);
   }
   if (toolName === "skill") {
     const skillName = getStringParam(call.params, ["name"])?.toLowerCase();

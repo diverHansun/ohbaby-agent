@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -250,7 +250,9 @@ function readBackendLeaseValue(): string | undefined {
 }
 
 async function tempDir(prefix: string): Promise<string> {
-  return mkdtemp(join(tmpdir(), prefix));
+  const directory = await mkdtemp(join(tmpdir(), prefix));
+  await mkdir(join(directory, "workspace"), { recursive: true });
+  return directory;
 }
 
 afterEach(() => {

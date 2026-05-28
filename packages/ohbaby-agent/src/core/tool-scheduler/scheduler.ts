@@ -54,6 +54,7 @@ interface PreparedCall extends ScheduledCall {
 
 interface ToolPermissionContext {
   readonly externalWrite: boolean;
+  readonly externalWritePath?: string;
   readonly preflight?: PreflightResult;
   readonly preflightError?: unknown;
   readonly untrustedMcp: boolean;
@@ -107,6 +108,15 @@ function isOutsideWorkdir(workdir: string, resolvedPath: string): boolean {
   }
   const relative = path.relative(normalizedRoot, normalizedCandidate);
   return relative.startsWith("..") || path.isAbsolute(relative);
+}
+
+function isSamePath(left: string, right: string): boolean {
+  return normalizeForBoundary(left) === normalizeForBoundary(right);
+}
+
+function isRootPath(inputPath: string): boolean {
+  const resolved = path.resolve(inputPath);
+  return path.dirname(resolved) === resolved;
 }
 
 function getFilePathParam(params: Record<string, unknown>): string | undefined {
@@ -315,11 +325,8 @@ async function realpathIfExists(
   }
 }
 
-async function canonicalizeForPermission(
-  environment: ToolExecutionEnvironment,
-  inputPath: string,
-): Promise<string> {
-  const lexical = environment.resolvePath(inputPath);
+async function canonicalizeLexicalPath(lexicalPath: string): Promise<string> {
+  const lexical = path.resolve(lexicalPath);
   const existing = await realpathIfExists(lexical);
   if (existing) {
     return existing;
@@ -344,6 +351,61 @@ async function canonicalizeForPermission(
     missingSegments.push(path.basename(current));
     current = parent;
   }
+}
+
+async function canonicalizeForPermission(
+  environment: ToolExecutionEnvironment,
+  inputPath: string,
+): Promise<string> {
+  const lexical = path.isAbsolute(inputPath)
+    ? path.resolve(inputPath)
+    : environment.resolvePath(inputPath);
+  return canonicalizeLexicalPath(lexical);
+}
+
+function rejectUnapprovedExternalWrite(inputPath: string): never {
+  throw new Error(`External write path was not approved: ${inputPath}`);
+}
+
+function createExternalWriteEnvironment(
+  environment: ToolExecutionEnvironment,
+  externalWritePath: string,
+): ToolExecutionEnvironment {
+  const approvedPath = path.resolve(externalWritePath);
+
+  return {
+    ...environment,
+    resolvePath(inputPath: string): string {
+      if (path.isAbsolute(inputPath)) {
+        const resolved = path.resolve(inputPath);
+        if (isSamePath(resolved, approvedPath)) {
+          return approvedPath;
+        }
+        rejectUnapprovedExternalWrite(inputPath);
+      }
+      return environment.resolvePath(inputPath);
+    },
+    async resolvePathForExisting(inputPath: string): Promise<string> {
+      if (path.isAbsolute(inputPath)) {
+        const resolved = await fs.realpath(path.resolve(inputPath));
+        if (isSamePath(resolved, approvedPath)) {
+          return resolved;
+        }
+        rejectUnapprovedExternalWrite(inputPath);
+      }
+      return environment.resolvePathForExisting(inputPath);
+    },
+    async resolvePathForWrite(inputPath: string): Promise<string> {
+      if (path.isAbsolute(inputPath)) {
+        const resolved = await canonicalizeLexicalPath(inputPath);
+        if (!isRootPath(resolved) && isSamePath(resolved, approvedPath)) {
+          return resolved;
+        }
+        rejectUnapprovedExternalWrite(inputPath);
+      }
+      return environment.resolvePathForWrite(inputPath);
+    },
+  };
 }
 
 function isEnabledByAgentConfig(
@@ -517,6 +579,7 @@ export function createToolScheduler(
     tool: Tool,
     controller: AbortController,
     environment: ToolExecutionEnvironment | undefined,
+    params: Record<string, unknown>,
   ): Promise<ToolExecutionResult> {
     if (controller.signal.aborted) {
       throw new SchedulerAbortError("cancelled");
@@ -525,7 +588,7 @@ export function createToolScheduler(
     let timeout: NodeJS.Timeout | undefined;
     let removeAbortListener = (): void => undefined;
     const toolPromise = Promise.resolve(
-      tool.execute(call.params, {
+      tool.execute(params, {
         callId: call.callId,
         environment,
         messageId: call.messageId,
@@ -838,6 +901,7 @@ export function createToolScheduler(
     tool: Tool,
     controller: AbortController,
     environment: ToolExecutionEnvironment | undefined,
+    params: Record<string, unknown>,
   ): Promise<ToolCallResult> {
     transition(call, "queued");
     const acquired = await concurrency.waitForSlot(call.callId, call.category);
@@ -867,6 +931,7 @@ export function createToolScheduler(
         tool,
         controller,
         environment,
+        params,
       );
       if (isStopped(call, controller)) {
         return makeCancelledResult(call);
@@ -1024,9 +1089,31 @@ export function createToolScheduler(
         request.environment.workdir,
         canonicalPath,
       ),
+      externalWritePath: canonicalPath,
       untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
       params,
     };
+  }
+
+  function executionEnvironmentFor(
+    prepared: PreparedCall,
+  ): ToolExecutionEnvironment | undefined {
+    const environment = prepared.request.environment;
+    const externalWritePath = prepared.permissionContext.externalWritePath;
+    if (
+      environment &&
+      prepared.permissionContext.externalWrite &&
+      externalWritePath
+    ) {
+      return createExternalWriteEnvironment(environment, externalWritePath);
+    }
+    return environment;
+  }
+
+  function executionParamsFor(prepared: PreparedCall): Record<string, unknown> {
+    return prepared.permissionContext.externalWrite
+      ? prepared.permissionContext.params
+      : prepared.call.params;
   }
 
   async function prepareCall(
@@ -1161,7 +1248,8 @@ export function createToolScheduler(
         prepared.call,
         prepared.tool,
         prepared.controller,
-        prepared.request.environment,
+        executionEnvironmentFor(prepared),
+        executionParamsFor(prepared),
       );
     } finally {
       prepared.cleanup();
@@ -1204,7 +1292,8 @@ export function createToolScheduler(
             call.call,
             call.tool,
             call.controller,
-            call.request.environment,
+            executionEnvironmentFor(call),
+            executionParamsFor(call),
           ),
         })),
       ).then(
@@ -1220,7 +1309,8 @@ export function createToolScheduler(
               call.call,
               call.tool,
               call.controller,
-              call.request.environment,
+              executionEnvironmentFor(call),
+              executionParamsFor(call),
             ),
           })),
         );

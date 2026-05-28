@@ -28,6 +28,7 @@ afterEach(async () => {
 
 async function tempWorkspace(prefix: string): Promise<string> {
   const directory = await mkdtemp(join(process.cwd(), `.tmp-${prefix}-`));
+  await mkdir(join(directory, "workspace"), { recursive: true });
   cleanupDirectories.push(directory);
   return directory;
 }

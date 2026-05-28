@@ -1102,6 +1102,137 @@ describe("ToolScheduler", () => {
     }
   });
 
+  it("executes approved external absolute writes through a scoped environment", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "ohbaby-scheduler-external-write-"),
+    );
+    const workspace = path.join(tempRoot, "workspace");
+    const externalDirectory = path.join(tempRoot, "outside");
+    const externalFile = path.join(externalDirectory, "nested", "outside.txt");
+    await fs.mkdir(workspace);
+    await fs.mkdir(externalDirectory);
+    const canonicalExternalFile = path.join(
+      await fs.realpath(externalDirectory),
+      "nested",
+      "outside.txt",
+    );
+    const permissionRequests: Parameters<PermissionPort["ask"]>[0][] = [];
+    const permission = {
+      ask: vi.fn((input: Parameters<PermissionPort["ask"]>[0]) => {
+        permissionRequests.push(input);
+        return Promise.resolve("once" as const);
+      }),
+    } satisfies PermissionPort;
+    const { scheduler } = createScheduler({ permission });
+    for (const tool of createBuiltinTools()) {
+      if (tool.name === "write") {
+        scheduler.register(tool);
+      }
+    }
+
+    try {
+      const result = await scheduler.execute({
+        callId: "write_external",
+        environment: createFakeEnvironment(workspace),
+        messageId: "message_1",
+        params: { content: "external", file_path: externalFile },
+        sessionId: "session_1",
+        toolName: "write",
+      });
+
+      expect(result).toMatchObject({ status: "success" });
+      expect(await fs.readFile(externalFile, "utf8")).toBe("external");
+      expect(permission.ask).toHaveBeenCalledTimes(1);
+      expect(permissionRequests).toHaveLength(1);
+      const [permissionRequest] = permissionRequests as [
+        Parameters<PermissionPort["ask"]>[0],
+      ];
+      expect(permissionRequest.params.file_path).toBe(canonicalExternalFile);
+      expect(permissionRequest.reason).toBe(
+        "External path write requires confirmation: write",
+      );
+      expect(permissionRequest.rememberable).toBe(false);
+      expect(permissionRequest.toolName).toBe("write");
+    } finally {
+      await fs.rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("does not grant sibling or ancestor writes after approving an external file", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "ohbaby-scheduler-external-scope-"),
+    );
+    const workspace = path.join(tempRoot, "workspace");
+    const externalDirectory = path.join(tempRoot, "outside");
+    const externalFile = path.join(externalDirectory, "outside.txt");
+    await fs.mkdir(workspace);
+    await fs.mkdir(externalDirectory);
+    const permission = {
+      ask: vi.fn(() => Promise.resolve("once" as const)),
+    } satisfies PermissionPort;
+    const execute = vi.fn(
+      async (
+        params: Record<string, unknown>,
+        context: ToolExecutionContext,
+      ): Promise<ToolExecutionResult> => {
+        const filePath = String(params.file_path);
+        const environment = context.environment;
+        if (!environment) {
+          throw new Error("expected scheduler environment");
+        }
+
+        await expect(
+          environment.resolvePathForWrite(path.dirname(filePath)),
+        ).rejects.toThrow(/not approved/u);
+        await expect(
+          environment.resolvePathForWrite(
+            path.join(path.dirname(filePath), "sibling.txt"),
+          ),
+        ).rejects.toThrow(/not approved/u);
+
+        const exactPath = await environment.resolvePathForWrite(filePath);
+        await fs.writeFile(exactPath, "external", "utf8");
+        return { output: "external" };
+      },
+    );
+    const { scheduler } = createScheduler({ permission });
+    scheduler.register(
+      createTool({
+        category: "write",
+        execute,
+        name: "custom_write",
+        parametersJsonSchema: {
+          additionalProperties: false,
+          properties: {
+            content: { type: "string" },
+            file_path: { type: "string" },
+          },
+          required: ["file_path"],
+          type: "object",
+        },
+      }),
+    );
+
+    try {
+      const result = await scheduler.execute({
+        callId: "custom_write_external",
+        environment: createFakeEnvironment(workspace),
+        messageId: "message_1",
+        params: { file_path: externalFile },
+        sessionId: "session_1",
+        toolName: "custom_write",
+      });
+
+      expect(result).toMatchObject({ status: "success" });
+      expect(await fs.readFile(externalFile, "utf8")).toBe("external");
+      await expect(
+        fs.readFile(path.join(externalDirectory, "sibling.txt"), "utf8"),
+      ).rejects.toThrow();
+    } finally {
+      await fs.rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("preflights every batch call before starting tools and confirms asks serially", async () => {
     const executionOrder: string[] = [];
     const permissionOrder: string[] = [];
