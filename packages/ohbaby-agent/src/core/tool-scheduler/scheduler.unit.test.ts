@@ -543,9 +543,9 @@ describe("ToolScheduler", () => {
               createPreflight({
                 externalPaths: [
                   {
-                    absolutePath: path.join(outside, "repo"),
+                    absolutePath: outside,
                     askPattern: path.join(outside, "**"),
-                    original: path.join(outside, "repo"),
+                    original: outside,
                   },
                 ],
                 overallDanger: "mutating",
@@ -554,7 +554,7 @@ describe("ToolScheduler", () => {
             trustPath,
           },
           messageId: "message_1",
-          params: { command: `git push ${path.join(outside, "repo")} main` },
+          params: { command: `cd ${outside}` },
           sessionId: "session_1",
           toolName: "bash",
         }),

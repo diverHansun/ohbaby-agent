@@ -32,6 +32,8 @@ const DENO_SCRIPT_SUBCOMMANDS = new Set([
 ]);
 const BUN_SCRIPT_SUBCOMMANDS = new Set(["run", "test"]);
 const SHELL_OPTION_VALUE_FLAGS = new Set(["--init-file", "--rcfile"]);
+const RUBY_OPTION_VALUE_FLAGS = new Set(["-c", "-i", "-r", "-x"]);
+const PHP_OPTION_VALUE_FLAGS = new Set(["-c", "-d"]);
 const POWERSHELL_INLINE_OPTIONS = new Set([
   "-command",
   "-encodedcommand",
@@ -126,11 +128,65 @@ function resolveNode(tokens: readonly string[]): ShellExecutionTarget {
 
 function resolveSimpleInterpreter(
   tokens: readonly string[],
+  input: {
+    readonly inlineOptions?: ReadonlySet<string>;
+    readonly valueOptions?: ReadonlySet<string>;
+  } = {},
 ): ShellExecutionTarget {
   const result = nextScriptAfterOptions(tokens, 1, {
-    inlineOptions: new Set(["-e", "-r"]),
+    inlineOptions: input.inlineOptions,
+    valueOptions: input.valueOptions,
   });
   return { ...result, interpreter: normalizeExecutableName(tokens[0]) };
+}
+
+function resolveRuby(tokens: readonly string[]): ShellExecutionTarget {
+  return resolveSimpleInterpreter(tokens, {
+    inlineOptions: new Set(["-e"]),
+    valueOptions: RUBY_OPTION_VALUE_FLAGS,
+  });
+}
+
+function resolvePerl(tokens: readonly string[]): ShellExecutionTarget {
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const optionName = normalizeOptionName(token);
+    if (token === "--") {
+      const script = tokens[index + 1];
+      return script
+        ? {
+            executedScript: script,
+            interpreter: normalizeExecutableName(tokens[0]),
+            scriptTokenIndex: index + 1,
+          }
+        : { interpreter: normalizeExecutableName(tokens[0]) };
+    }
+    if (!token.startsWith("-")) {
+      return {
+        executedScript: token,
+        interpreter: normalizeExecutableName(tokens[0]),
+        scriptTokenIndex: index,
+      };
+    }
+    if (optionName === "-e") {
+      return {
+        inlineEval: true,
+        interpreter: normalizeExecutableName(tokens[0]),
+      };
+    }
+    if (token === "-I" || token === "-M" || token === "-m") {
+      index += 1;
+    }
+  }
+
+  return { interpreter: normalizeExecutableName(tokens[0]) };
+}
+
+function resolvePhp(tokens: readonly string[]): ShellExecutionTarget {
+  return resolveSimpleInterpreter(tokens, {
+    inlineOptions: new Set(["-b", "-e", "-r"]),
+    valueOptions: PHP_OPTION_VALUE_FLAGS,
+  });
 }
 
 function resolveDeno(tokens: readonly string[]): ShellExecutionTarget {
@@ -250,8 +306,14 @@ export function resolveShellExecutionTarget(
   if (executable === "bun") {
     return resolveBun(tokens);
   }
-  if (executable === "ruby" || executable === "perl" || executable === "php") {
-    return resolveSimpleInterpreter(tokens);
+  if (executable === "ruby") {
+    return resolveRuby(tokens);
+  }
+  if (executable === "perl") {
+    return resolvePerl(tokens);
+  }
+  if (executable === "php") {
+    return resolvePhp(tokens);
   }
   if (executable === "pwsh" || executable === "powershell") {
     return resolvePowerShell(tokens);

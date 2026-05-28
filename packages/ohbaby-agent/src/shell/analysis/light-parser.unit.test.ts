@@ -178,6 +178,55 @@ describe("shell command analysis", () => {
     });
   });
 
+  it("preserves direct script token casing in execution facts", async () => {
+    const result = await analyzeShellCommand("../Repo/Tools/Run.SH", "bash");
+
+    expect(result.commands[0]).toMatchObject({
+      executedScript: "../Repo/Tools/Run.SH",
+      pathArgs: [],
+      root: "../repo/tools/run.sh",
+    });
+  });
+
+  it("skips common interpreter option values before script detection", async () => {
+    const result = await analyzeShellCommand(
+      [
+        "ruby -r ./helper.rb script.rb",
+        "ruby -I lib other.rb",
+        "php -d detect_unicode=0 script.php",
+        "perl -I lib script.pl",
+        "perl -x embedded.pl",
+      ].join(" && "),
+      "bash",
+    );
+
+    expect(result.commands[0]).toMatchObject({
+      executedScript: "script.rb",
+      interpreter: "ruby",
+      pathArgs: [],
+    });
+    expect(result.commands[1]).toMatchObject({
+      executedScript: "other.rb",
+      interpreter: "ruby",
+      pathArgs: [],
+    });
+    expect(result.commands[2]).toMatchObject({
+      executedScript: "script.php",
+      interpreter: "php",
+      pathArgs: [],
+    });
+    expect(result.commands[3]).toMatchObject({
+      executedScript: "script.pl",
+      interpreter: "perl",
+      pathArgs: [],
+    });
+    expect(result.commands[4]).toMatchObject({
+      executedScript: "embedded.pl",
+      interpreter: "perl",
+      pathArgs: [],
+    });
+  });
+
   it("extracts path-like script arguments and common path option values", async () => {
     const result = await analyzeShellCommand(
       [

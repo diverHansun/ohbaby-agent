@@ -96,6 +96,7 @@ describe("sandbox preflight facts", () => {
     expect(result.internalPaths).toEqual([
       {
         absolutePath: await fs.realpath(script),
+        isExecutedScript: true,
         original: script,
       },
     ]);
@@ -139,8 +140,39 @@ describe("sandbox preflight facts", () => {
     expect(untrusted.externalPaths).toEqual([
       {
         absolutePath: await fs.realpath(outside),
-        askPattern: path.join(await fs.realpath(tempRoot), "**"),
+        askPattern: path.join(await fs.realpath(outside), "**"),
         original: outside,
+      },
+    ]);
+  });
+
+  it("does not trust sibling skill roots when one exact baseDir is trusted", async () => {
+    const workdir = path.join(tempRoot, "workspace");
+    const skillRoot = path.join(tempRoot, "skills", "crawl");
+    const siblingRoot = path.join(tempRoot, "skills", "other");
+    await fs.mkdir(workdir, { recursive: true });
+    await fs.mkdir(path.join(skillRoot, "scripts"), { recursive: true });
+    await fs.mkdir(path.join(siblingRoot, "scripts"), { recursive: true });
+    const siblingScript = path.join(siblingRoot, "scripts", "run.py");
+    await fs.writeFile(siblingScript, "print(1)", "utf8");
+
+    const result = await preflightSandboxCommand({
+      command: `python "${siblingScript}"`,
+      shellKind: "bash",
+      trustedRoots: [skillRoot],
+      workdir,
+    });
+
+    expect(result.internalPaths).toEqual([]);
+    expect(result.externalPaths).toEqual([
+      {
+        absolutePath: await fs.realpath(siblingScript),
+        askPattern: path.join(
+          await fs.realpath(path.dirname(siblingScript)),
+          "**",
+        ),
+        isExecutedScript: true,
+        original: siblingScript,
       },
     ]);
   });
@@ -227,7 +259,7 @@ describe("sandbox preflight facts", () => {
     expect(result.externalPaths).toEqual([
       {
         absolutePath: await fs.realpath(outside),
-        askPattern: path.join(path.dirname(await fs.realpath(outside)), "**"),
+        askPattern: path.join(await fs.realpath(outside), "**"),
         original: ".env",
       },
     ]);

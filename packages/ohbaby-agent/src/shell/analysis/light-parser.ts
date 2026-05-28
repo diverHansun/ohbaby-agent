@@ -17,10 +17,7 @@ function normalizeRoot(root: string): string {
 function analyzeDetail(detail: CommandDetail): ShellCommandAnalysis {
   const tokens = detail.tokens.slice(detail.rootIndex);
   const root = normalizeRoot(detail.root);
-  const facts = extractShellPathFacts({
-    ...detail,
-    root,
-  });
+  const facts = extractShellPathFacts(detail);
   const analysis: ShellCommandAnalysis = {
     arityKey: computeShellArityKey(tokens),
     danger: classifyShellCommandDetail(detail),

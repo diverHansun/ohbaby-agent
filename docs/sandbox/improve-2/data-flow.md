@@ -105,6 +105,10 @@ interface PreflightInternalPath {
 `isExecutedScript` 让 UI / 日志能区分"执行脚本 X（在外部）"与"读取数据文件 Y（在外部）"，
 permission ask 的措辞可以更准确（"将执行 workspace 外脚本：…"）。功能上不改变 ask 流程。
 
+`external_directory` 的 `askPattern` 继续表达"本次要批准的目录"：若 resolved path 已存在且是目录，
+pattern 指向该目录本身；若它是文件或尚不存在，则指向父目录。这样 `cd /tmp/foo` 的 always allow
+只升级 `/tmp/foo`，不会意外把 `/tmp` 整体写入 trusted roots。
+
 ## trusted roots 的来源（session 动态事实）
 
 ```text

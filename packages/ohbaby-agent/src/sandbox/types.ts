@@ -23,18 +23,21 @@ export type PreflightCommand = ShellCommandAnalysis;
 export interface PreflightInternalPath {
   readonly original: string;
   readonly absolutePath: string;
+  readonly isExecutedScript?: boolean;
 }
 
 export interface PreflightExternalPath {
   readonly original: string;
   readonly absolutePath: string;
   readonly askPattern: string;
+  readonly isExecutedScript?: boolean;
 }
 
 export interface PreflightDenylistHit {
   readonly original: string;
   readonly absolutePath: string;
   readonly reason: DenylistReason;
+  readonly isExecutedScript?: boolean;
 }
 
 export interface PreflightSensitivePath {
@@ -42,6 +45,7 @@ export interface PreflightSensitivePath {
   readonly absolutePath: string;
   readonly askPattern: string;
   readonly reason: DenylistReason;
+  readonly isExecutedScript?: boolean;
 }
 
 export interface PreflightResult {

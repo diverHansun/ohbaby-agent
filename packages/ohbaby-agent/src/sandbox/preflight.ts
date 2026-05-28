@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import {
   analyzeShellCommand,
@@ -30,7 +31,21 @@ function maxDanger(
   return DANGER_RANK[next] > DANGER_RANK[current] ? next : current;
 }
 
-function externalAskPattern(absolutePath: string): string {
+interface CommandPathFact {
+  readonly original: string;
+  readonly isExecutedScript?: boolean;
+}
+
+async function externalAskPattern(absolutePath: string): Promise<string> {
+  try {
+    const stats = await fs.stat(absolutePath);
+    if (stats.isDirectory()) {
+      return path.join(absolutePath, "**");
+    }
+  } catch {
+    // Missing or unreadable paths fall back to their parent directory.
+  }
+
   return path.join(path.dirname(absolutePath), "**");
 }
 
@@ -38,15 +53,26 @@ function toPreflightCommand(command: ShellCommandAnalysis): PreflightCommand {
   return { ...command };
 }
 
-function commandPathFacts(command: ShellCommandAnalysis): readonly string[] {
-  const paths = new Set<string>();
+function commandPathFacts(
+  command: ShellCommandAnalysis,
+): readonly CommandPathFact[] {
+  const facts: CommandPathFact[] = [];
+  const seen = new Set<string>();
   if (command.executedScript) {
-    paths.add(command.executedScript);
+    facts.push({
+      isExecutedScript: true,
+      original: command.executedScript,
+    });
+    seen.add(command.executedScript);
   }
   for (const pathArg of command.pathArgs) {
-    paths.add(pathArg);
+    if (seen.has(pathArg)) {
+      continue;
+    }
+    facts.push({ original: pathArg });
+    seen.add(pathArg);
   }
-  return [...paths];
+  return facts;
 }
 
 export async function preflightSandboxShellAnalysis(
@@ -68,9 +94,9 @@ export async function preflightSandboxShellAnalysis(
 
   for (const command of commands) {
     overallDanger = maxDanger(overallDanger, command.danger);
-    for (const original of commandPathFacts(command)) {
+    for (const fact of commandPathFacts(command)) {
       const resolvedPath = resolveSandboxPathArg({
-        arg: original,
+        arg: fact.original,
         shellKind: input.shell.shellKind,
         workdir: input.workdir,
       });
@@ -83,7 +109,12 @@ export async function preflightSandboxShellAnalysis(
         classifyDenylistedPath(resolvedPath) ??
         classifyDenylistedPath(absolutePath);
       if (reason) {
-        denylistHits.push({ absolutePath, original, reason });
+        denylistHits.push({
+          absolutePath,
+          ...(fact.isExecutedScript ? { isExecutedScript: true } : {}),
+          original: fact.original,
+          reason,
+        });
         continue;
       }
 
@@ -94,7 +125,8 @@ export async function preflightSandboxShellAnalysis(
         sensitivePaths.push({
           absolutePath,
           askPattern: absolutePath,
-          original,
+          ...(fact.isExecutedScript ? { isExecutedScript: true } : {}),
+          original: fact.original,
           reason: sensitiveReason,
         });
       }
@@ -102,13 +134,18 @@ export async function preflightSandboxShellAnalysis(
       if (classifySandboxPath({ absolutePath, trustedRoots }) === "outside") {
         externalPaths.push({
           absolutePath,
-          askPattern: externalAskPattern(absolutePath),
-          original,
+          askPattern: await externalAskPattern(absolutePath),
+          ...(fact.isExecutedScript ? { isExecutedScript: true } : {}),
+          original: fact.original,
         });
         continue;
       }
 
-      internalPaths.push({ absolutePath, original });
+      internalPaths.push({
+        absolutePath,
+        ...(fact.isExecutedScript ? { isExecutedScript: true } : {}),
+        original: fact.original,
+      });
     }
   }
 
