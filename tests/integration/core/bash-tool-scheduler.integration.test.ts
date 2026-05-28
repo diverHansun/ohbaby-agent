@@ -126,21 +126,33 @@ describe("bash tool scheduler integration", () => {
     expect(permissionUpdates).toEqual([]);
   });
 
-  it("blocks cd escapes after permission but before spawning", async () => {
-    const spawn = vi.fn<SpawnCommand>();
+  it("allows cd escapes after scheduler approval", async () => {
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(
+      (
+        _file: string,
+        _args: readonly string[],
+        _options: SpawnOptionsWithoutStdio,
+      ) => {
+        queueMicrotask(() => {
+          child.emit("exit", 0, null);
+        });
+        return child as unknown as ChildProcess;
+      },
+    );
     const { permissionUpdates, scheduler } = createHarness(spawn);
 
     await expect(
       scheduler.execute(request("bash_escape", "cd .. && pwd")),
     ).resolves.toMatchObject({
-      error: {
-        message: expect.stringContaining("outside the workspace"),
-        type: "ExecutionError",
+      metadata: {
+        cdTargets: [await fs.realpath(tempRoot)],
+        shellKind: "bash",
       },
-      status: "error",
+      status: "success",
     });
     expect(permissionUpdates).toEqual(["bash_escape"]);
-    expect(spawn).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledOnce();
   });
 
   it("asks external_directory before bash and then executes with a rich sandbox lease", async () => {
