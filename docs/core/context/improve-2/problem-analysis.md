@@ -23,8 +23,8 @@
 
 | 材料 | 路径 |
 |------|------|
-| Agent 三层记忆架构 | [D:\Projects\Hansun-database\knowledge-base\computer-science\agent-harness\memory\2026-02-11-agent-memory-architecture.md](file:///D:/Projects/Hansun-database/knowledge-base/computer-science/agent-harness/memory/2026-02-11-agent-memory-architecture.md) |
-| kimi-code agent 模块 | [D:\Projects\Code-cli\kimi-code\packages\agent-core\src\agent\](file:///D:/Projects/Code-cli/kimi-code/packages/agent-core/src/agent/) |
+| Agent 三层记忆架构 | 外部参考：`agent-harness/memory/2026-02-11-agent-memory-architecture.md`（不依赖本仓库绝对路径） |
+| kimi-code agent 模块 | 外部参考：`kimi-code/packages/agent-core/src/agent/`（本地对照项目，不作为仓库链接） |
 | pi agent harness | [pi/packages/agent/src/harness/compaction/compaction.ts](../../../../pi/packages/agent/src/harness/compaction/compaction.ts) |
 | improve-1 问题分析 | [docs/core/context/improve-1/problem-analysis.md](../improve-1/problem-analysis.md) |
 
@@ -556,6 +556,27 @@ for (let step = 1; step <= maxSteps; step++) {
 
 ---
 
+### PC-25：Tool metadata 缺少中央白名单投影
+
+**严重度**：高
+
+**证据**：`core/context/serializer.ts` 的 `toolResultContent(part)` 只读取 `part.state.output` 或 `part.state.error`。当前成功工具结果的 raw metadata 没有进入 `ToolState.completed`，即使后续持久化后，也缺少统一规则决定哪些 metadata 可进入模型上下文。
+
+**描述**：
+
+- 当前 `Lifecycle.runSession` 在同一步内能通过内存里的 `ToolCallResult.metadata` 传给下一次 LLM 请求；但 per-step prepare 会从 message store 重建 provider messages，这条内存捷径会消失。
+- `read -> edit/write` 需要 `mtimeMs`；`bash false` 需要 `exitCode`；MCP 工具可能把关键结构放在 `structuredContent` 中。这些都是模型下一步继续工作的执行事实。
+- 反过来，permission/preflight、pid、resolvedPaths、完整 diff、todos 等 raw/internal metadata 不应无差别进入模型上下文。
+- 因此需要“raw metadata 持久化 + serializer 中央白名单投影”，而不是各工具自行拼接 output 或直接透传完整 metadata。
+
+**违反原则**：接口隔离（ISP）与最小暴露原则（Least Exposure）—— 模型上下文只应接收完成任务所需的最小事实，不应消费工具内部实现细节。
+
+**与 kimi-code / opencode 对比**：两者都倾向让模型看到稳定的 tool output 执行事实，并把 UI/审计 metadata 与模型输入区分开。opencode 的 tool state 持久化 metadata，但 `toModelMessages` 仍以 output 为主；kimi-code 的 `ExecutableToolResult.output` 是模型可见源，`message` 属于人类侧通道。
+
+**优先级**：P0
+
+---
+
 ## 六、根因归纳
 
 问题归并为四条根因，按优先级排列：
@@ -564,17 +585,18 @@ for (let step = 1; step <= maxSteps; step++) {
 
 当前持久化覆盖 message 数据和部分 compaction 投影结果，但不覆盖 context 决策事件（compaction 决策、memory 快照、系统 prompt 构建过程）。这导致：调试时无法精确解释某次上下文投影，溢出恢复也缺少可审计的事件轨迹。
 
-### RC-2：上下文管理缺少中间扩展层（PC-16、PC-17、PC-19、PC-20）
+### RC-2：上下文管理缺少中间扩展层（PC-16、PC-17、PC-19、PC-20、PC-25）
 
 当前 context 的组装 → LLM 输入是硬编码的线性流程。缺少：
 - 投影层：在组装和 LLM 输入之间允许动态注入（PC-16）
 - 中间检查点：在 tool 循环中可触发二次压缩（PC-17）
 - 动态参数计算：每次 LLM 调用前根据当前状态调整参数（PC-19）
 - 事件驱动通知：后台子 Agent 完成时推送到主 Agent（PC-20）
+- 中央投影层：统一决定 tool metadata 哪些进入模型上下文（PC-25）
 
-### RC-3：数据元信息不足（PC-15、PC-21）
+### RC-3：数据元信息不足（PC-15、PC-21、PC-25）
 
-消息不记录来源（origin）、文件操作不跨压缩累积、摘要不提升为一等公民。这些是"数据管道中的筛子"——关键信息在流转过程中被丢弃。
+消息不记录来源（origin）、文件操作不跨压缩累积、tool metadata 不进入持久化上下文事实、摘要不提升为一等公民。这些是"数据管道中的筛子"——关键信息在流转过程中被丢弃。
 
 ### RC-4：可扩展性预留不足（PC-23、PC-24）
 
@@ -590,6 +612,7 @@ for (let step = 1; step <= maxSteps; step++) {
 |--------|------|------|----------|---------|------|
 | **P0** | PC-17 | Per-step 压缩缺失 | 长 tool 链场景直接溢出 | 中 | improve-1 prepareTurn |
 | **P0** | PC-18 | 溢出无自动恢复 | 生产可用性 | 中 | PC-17 |
+| **P0** | PC-25 | Tool metadata 白名单投影缺失 | per-step prepare 后执行事实丢失 | 低 | MessageManager + serializer |
 | **P1** | PC-14 | 事件溯源 | 崩溃恢复、跨进程迁移 | 中 | MessageManager |
 | **P1** | PC-15 | Origin 追踪 | 调试、精准压缩 | 低 | MessageWithParts 类型 |
 | **P2** | PC-21 | 文件操作跨压缩累积 | token 经济 | 低 | improve-1 CP2-D |
@@ -608,31 +631,35 @@ for (let step = 1; step <= maxSteps; step++) {
 
 `Lifecycle.runSession` 在 tool 循环内动态检测是否需要再次压缩，需要时调用 `prepareTurn` 重新组装 context 并更新 `conversationMessages`。溢出错误自动触发压缩 + 重试。
 
-### G2：建立事件溯源基础（P1 → PC-14）
+### G2：建立 Tool metadata 白名单投影（P0 → PC-25）
+
+tool raw metadata 持久化在 message store 中；`serializeForLlm` 通过中央白名单投影模型可见字段。首批覆盖 `read.mtimeMs`、`bash.exitCode`、MCP `structuredContent`、task/subagent `sessionId/success` 等必需事实，同时禁止 permission/preflight、pid、完整 diff 等内部字段进入模型上下文。
+
+### G3：建立事件溯源基础（P1 → PC-14）
 
 定义最小可行的 context 状态变更事件类型，优先记录 compaction / prepareTurn / overflow-recovery 决策。事件持久化形式可先复用现有 SQLite/ledger 思路，不强制照搬 kimi-code 的完整 `wire.jsonl`。
 
-### G3：消息 Origin 追踪（P1 → PC-15）
+### G4：消息 Origin 追踪（P1 → PC-15）
 
 给 `MessageWithParts.info` 新增 `origin` 字段，覆盖：`user` / `tool` / `compression` / `injection` / `system` / `background_task`。`serializeForLlm` 和压缩切点逻辑消费 origin。
 
-### G4：文件操作跨压缩累积（P2 → PC-21）
+### G5：文件操作跨压缩累积（P2 → PC-21）
 
 `CompressionResult` 包含前序压缩的累积文件操作状态，下一代压缩自动继承。
 
-### G5：建立注入系统骨架（P2 → PC-16）
+### G6：建立注入系统骨架（P2 → PC-16）
 
 在 `serializeForLlm` 中预留 injector pipeline，支持注册 ephemeral injection（不持久化，仅本次 LLM 投影出现）。
 
-### G6：动态 completion budget（P2 → PC-19）
+### G7：动态 completion budget（P2 → PC-19）
 
 `Lifecycle.runModelStep` 在调用 LLM 前根据当前 context usage 动态计算并传递 `max_tokens`。
 
-### G7：后台任务异步通知（P2 → PC-20）
+### G8：后台任务异步通知（P2 → PC-20）
 
 后台子 Agent 完成时通过事件总线通知主 Agent session，主 Agent 下一次 `prepareTurn` 时将通知注入 context。
 
-### G8：现有 API 零破坏
+### G9：现有 API 零破坏
 
 所有现有公共方法（`compact / assemble / prepareTurn / prune / getUsage / shouldCompress`）行为与签名保持不变。S1–S8 优势全部保留。improve-1 成果不受影响。
 

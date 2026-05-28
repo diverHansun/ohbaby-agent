@@ -24,6 +24,7 @@
 | PL-4 | `run()` 与 `runSession()` 两套 tool loop 重复 | 中 | 两个 async generator 各自实现 LLM step、tool start/result、step complete、max step |
 | PL-5 | RunWorker 通过 `context.messages` 隐式选择 legacy/session 模式 | 中 | `createLifecycleLoop()` 用字段存在性决定 `run()` vs `runSession()` |
 | PL-6 | session-run 事件语义需要支持多次 context prepare | 中 | 当前 `turn:start` 只在第一次 prepare 时产生 |
+| PL-7 | tool metadata 只在当前 step 内存链路可见，未进入 message store | 高 | `resultToToolState` 只持久化 `output/error`；下一 step 重新 `prepareTurn` 后会丢失 `mtimeMs`、`exitCode`、MCP `structuredContent` |
 
 ---
 
@@ -41,6 +42,12 @@
 
 `run()` 曾是 primary 的主路径，现在 agent 路径已经走 `runSession`，但 `run()` 仍保留大量重复逻辑。它是兼容入口，不应继续驱动新功能设计。
 
+### RC-4：工具执行事实没有进入持久化消息源
+
+当前同一个 step 内，`runSession` 可以通过内存中的 `ToolCallResult.metadata` 把完整 tool result 追加到 `conversationMessages`。但 per-step prepare 的目标是让 provider messages 重新来自 `MessageManager + ContextManager.prepareTurn`，这会暴露一个事实：成功工具结果的 metadata 没有落入 `ToolPart.state`。一旦从 message store 重建上下文，模型只能看到 `state.output`，看不到 `read.mtimeMs`、`bash.exitCode`、MCP `structuredContent` 等后续推理必需事实。
+
+这不是 UI 展示问题，而是 source-of-truth 问题。raw metadata 应持久化到 message store；模型可见内容再由 context serializer 做白名单投影。
+
 ---
 
 ## 三、优先级
@@ -48,10 +55,11 @@
 | 优先级 | 问题 | 理由 |
 |--------|------|------|
 | P0 | PL-1 per-step prepare / PL-2 overflow recovery | 直接影响长 tool 链生产可用性 |
+| P0 | PL-7 tool metadata 持久化 | per-step prepare 后仍需保留模型继续工作所需的执行事实 |
 | P1 | PL-3 dynamic completion budget | 降低 overflow 概率，是恢复链路的前置防线 |
 | P1 | PL-6 多次 context prepare 的事件语义 | UI 和 run stream 必须能解释多次压缩 |
-| P2 | PL-4 legacy 双循环收敛 | 重要但不应阻塞 P0 行为修复 |
-| P2 | PL-5 显式 run mode | runtime 类型清晰度优化 |
+| P1 | PL-4 legacy 双循环收敛 | P0 行为稳定后，用独立 commit 删除旧 message-run 路径 |
+| P1 | PL-5 显式 run mode | runtime 类型清晰度优化 |
 
 ---
 
@@ -60,6 +68,14 @@
 ### 不应该把 P0 变成大重构
 
 虽然 `run()` / `runSession()` 重复违反 DRY，但当前产品路径主要走 `runSession`。首批实现应先让 session-run 正确抗住长 tool 链，再收敛 legacy path。否则会把行为修复和结构整理耦合在一起，扩大风险。
+
+### 不应该把 metadata 白名单分散到各工具里
+
+各工具可以继续产出 raw metadata，但“哪些 metadata 进入模型上下文”必须由 context serializer 统一决定。否则 `bash`、`read`、MCP、task 等工具会各自发明格式，长期会形成新的工具层耦合和 prompt 污染。
+
+### 不应该保留本地 `conversationMessages.push(...)` 作为生产 fallback
+
+per-step prepare 的核心承诺是：provider messages 来自持久化消息源和 `ContextManager.prepareTurn`。本地数组只能作为当前 step 的临时变量，不能成为工具结果、metadata 或压缩后上下文的生产来源。
 
 ### 不应该照搬完整事件溯源
 

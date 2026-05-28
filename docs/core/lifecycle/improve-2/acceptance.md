@@ -10,7 +10,7 @@
 
 - README 明确 agents improve-2 已完成，不再规划 primary 切到 `runAgent`。
 - problem-analysis 明确列出仍存在的问题：per-step prepare、overflow recovery、dynamic budget、legacy run 双路径。
-- implementation-plan 分阶段，且 P0 不依赖大规模 legacy 重构。
+- implementation-plan 分阶段，且 P0 后用独立 commit 删除 legacy `run(messages)`。
 - acceptance 给出可执行测试命令。
 
 ---
@@ -23,6 +23,8 @@
 - 多 tool step 场景中，后续 LLM step 前可重新准备 provider messages。
 - 如果后续 step 触发 compaction，RunWorker/stream adapter 能发布对应 context notice。
 - tool protocol 不回归：assistant `tool_calls` 后紧跟 matching `tool` messages。
+- 每个 LLM step 前都发出 `context:prepared`；`turn:start` 与 `turn:end` 每个 turn 各一次。
+- provider messages 的生产来源是 message store + `ContextManager.prepareTurn`，不是本地 `conversationMessages.push(...)` fallback。
 
 **建议 grep**：
 
@@ -34,7 +36,29 @@ rg -n "if \\(!conversationMessages\\)" packages\ohbaby-agent\src\core\lifecycle\
 
 ---
 
-## AC-2 Overflow recovery
+## AC-2 Tool metadata 持久化与白名单投影
+
+**判定**：
+
+- `ToolState.completed/error/aborted` 能持久化 raw `metadata`，旧消息无 metadata 时兼容。
+- `resultToToolState(...)` 不丢弃 `ToolCallResult.metadata`。
+- `serializeForLlm` 通过中央白名单投影模型可见 metadata，不直接透传 raw metadata。
+- `read -> edit/write` 经过 DB round-trip 后，模型输入仍包含 `mtimeMs`。
+- `bash false` 或无输出失败命令经过 DB round-trip 后，模型输入仍包含 `exitCode`。
+- MCP tool result 经过 DB round-trip 后，模型输入仍包含 `structuredContent`。
+- permission/preflight、pid、resolvedPaths、完整 diff、todos 等 raw/internal 字段不进入模型上下文，除非 output 本身明确展示。
+
+**建议测试**：
+
+```powershell
+pnpm exec vitest run packages\ohbaby-agent\src\core\context\manager.unit.test.ts packages\ohbaby-agent\src\mcp\__tests__\tool-adapter.unit.test.ts packages\ohbaby-agent\src\tools\files.scheduler.integration.test.ts --testTimeout=300000
+```
+
+> 路径确认：`packages\ohbaby-agent\src\mcp\__tests__\tool-adapter.unit.test.ts` 与 `packages\ohbaby-agent\src\tools\files.scheduler.integration.test.ts` 当前已存在；Phase 1 是在现有文件中补 characterization cases，而不是新建占位测试。
+
+---
+
+## AC-3 Overflow recovery
 
 **判定**：
 
@@ -43,10 +67,30 @@ rg -n "if \\(!conversationMessages\\)" packages\ohbaby-agent\src\core\lifecycle\
 - 同一 step 最多重试一次。
 - 非 overflow 错误不触发 compaction retry。
 - 重试失败时错误可读，且 run status 正确进入 failed/cancelled。
+- 发生 overflow 的 assistant message 被标记为 error 并保留审计记录。
+- 失败 assistant message 不进入下一次 LLM 输入。
 
 ---
 
-## AC-3 Dynamic completion budget
+## AC-4 Legacy run 双路径收敛
+
+**判定**：
+
+- session-based `Lifecycle.run(params: LifecycleSessionParams, config?)` 是新的唯一生产入口。
+- 旧 `Lifecycle.run(messages)` 与 `LifecycleRunParams.messages` 被删除。
+- `RunWorker` 不再通过 `context.messages` 选择 legacy/session 模式。
+- 测试 fixture 通过写入 session message + session params 启动 run，不再预组装 provider messages。
+- 如短暂保留 `runSession`，它只能是 deprecated alias，不能包含独立 tool loop。
+
+**建议 grep**：
+
+```powershell
+rg -n "LifecycleRunParams|messages\\?: readonly ChatCompletionMessage|params\\.messages|context\\.messages|lifecycle\\.runSession|lifecycle\\.run\\(.*messages" packages\ohbaby-agent\src tests
+```
+
+---
+
+## AC-5 Dynamic completion budget
 
 **判定**：
 
@@ -57,29 +101,17 @@ rg -n "if \\(!conversationMessages\\)" packages\ohbaby-agent\src\core\lifecycle\
 
 ---
 
-## AC-4 Legacy run 双路径收敛
+## AC-6 Runtime/adapter 回归
 
 **判定**：
 
-- 新功能只加到 `runSession`。
-- `run()` 被明确标记为 legacy，或调用点被迁移到 session-run。
-- 如果保留 `run()`，测试说明它只是 message-run 兼容入口。
-- 不再出现"为了兼容旧路径而复制一份新功能"。
-
----
-
-## AC-5 Runtime/adapter 回归
-
-**判定**：
-
-- `RunWorker` agent path 继续走 `runSession`。
-- legacy `messages` path 行为保持，除非本阶段明确删除并更新调用点。
-- UI stream 中 `turn:start / turn:end / step:complete / context notice` 顺序可解释。
+- `RunWorker` agent path 走 session-based lifecycle `run`。
+- UI stream 中 `turn:start / context:prepared / step:complete / turn:end / context notice` 顺序可解释。
 - `AgentService.startSession` 和 `executeTask` 不需要新增 lifecycle-specific workaround。
 
 ---
 
-## AC-6 测试命令
+## AC-7 测试命令
 
 每个实现 PR 至少运行：
 
@@ -87,6 +119,7 @@ rg -n "if \\(!conversationMessages\\)" packages\ohbaby-agent\src\core\lifecycle\
 pnpm -F ohbaby-agent typecheck
 pnpm run lint -- --no-cache
 pnpm exec vitest run packages\ohbaby-agent\src\core\lifecycle\lifecycle.unit.test.ts packages\ohbaby-agent\src\core\context\manager.unit.test.ts --testTimeout=300000
+pnpm exec vitest run packages\ohbaby-agent\src\mcp\__tests__\tool-adapter.unit.test.ts packages\ohbaby-agent\src\tools\files.scheduler.integration.test.ts --testTimeout=300000
 ```
 
 影响 runtime/adapter 时追加：
@@ -105,9 +138,9 @@ pnpm test
 
 ---
 
-## AC-7 子代理复审标准
+## AC-8 子代理复审标准
 
 至少分两类复审：
 
 - 架构复审：确认 lifecycle / context / runtime 边界没有反向依赖，P0 没有塞入 hooks/RAG/branch 等过度设计。
-- 数据流复审：确认长 tool 链、overflow retry、context notice、tool protocol 顺序与真实测试证据一致。
+- 数据流复审：确认长 tool 链、overflow retry、context notice、tool protocol、tool metadata 白名单投影与真实测试证据一致。
