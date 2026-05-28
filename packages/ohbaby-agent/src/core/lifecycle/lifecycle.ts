@@ -3,7 +3,10 @@ import type {
   ChatCompletionMessageToolCall,
   ChatCompletionToolMessageParam,
 } from "openai/resources/chat/completions/completions";
-import { streamChatCompletion } from "../llm-client/index.js";
+import {
+  isContextOverflowError,
+  streamChatCompletion,
+} from "../llm-client/index.js";
 import type {
   ChatCompletionMessage,
   ParsedToolCall,
@@ -538,8 +541,7 @@ export class Lifecycle {
     let usage: LifecycleResult["usage"];
     let finalResponse = "";
     const allToolCalls: ParsedToolCall[] = [];
-    let preparedTurn: PreparedTurn | undefined;
-    let conversationMessages: ChatCompletionMessage[] | undefined;
+    let turnStarted = false;
 
     for (let step = 1; step <= maxSteps; step += 1) {
       if (params.signal?.aborted) {
@@ -552,30 +554,33 @@ export class Lifecycle {
         };
       }
 
-      if (!conversationMessages) {
-        preparedTurn = await contextManager.prepareTurn({
-          directory: params.directory,
-          isSubagent: params.isSubagent,
-          modelId: params.modelId,
-          sessionId: params.sessionId,
-        });
-        conversationMessages = [...preparedTurn.messages];
+      let prepared = await contextManager.prepareTurn({
+        directory: params.directory,
+        isSubagent: params.isSubagent,
+        modelId: params.modelId,
+        sessionId: params.sessionId,
+      });
+      let conversationMessages = [...prepared.messages];
+
+      if (!turnStarted) {
+        turnStarted = true;
         yield {
           type: "turn:start",
-          compaction: preparedTurn.compaction,
-          hasSummary: preparedTurn.hasSummary,
+          compaction: prepared.compaction,
+          hasSummary: prepared.hasSummary,
           sessionId: params.sessionId,
           step,
           timestamp: Date.now(),
-          usage: preparedTurn.usage,
+          usage: prepared.usage,
         };
       }
-      const prepared = preparedTurn;
-      if (!prepared) {
-        throw new Error("Lifecycle.runSession failed to prepare context");
-      }
+      yield this.createContextPreparedEvent({
+        prepared,
+        sessionId: params.sessionId,
+        step,
+      });
 
-      const runParams: LifecycleRunParams = {
+      let runParams: LifecycleRunParams = {
         agent: params.agent,
         environment: params.environment,
         isSubagent: params.isSubagent,
@@ -586,12 +591,66 @@ export class Lifecycle {
         signal: params.signal,
         tools: params.tools,
       };
-      const stepResult = yield* this.runModelStep({
-        conversationMessages,
-        params: runParams,
-        parentMessageId,
-        step,
-      });
+      let stepResult: StepResult;
+      try {
+        stepResult = yield* this.runModelStep({
+          conversationMessages,
+          params: runParams,
+          parentMessageId,
+          step,
+        });
+      } catch (error) {
+        if (!isContextOverflowError(error)) {
+          throw error;
+        }
+
+        prepared = await contextManager.prepareTurn({
+          directory: params.directory,
+          force: true,
+          isSubagent: params.isSubagent,
+          modelId: params.modelId,
+          sessionId: params.sessionId,
+        });
+        conversationMessages = [...prepared.messages];
+        yield this.createContextPreparedEvent({
+          prepared,
+          sessionId: params.sessionId,
+          step,
+        });
+        runParams = {
+          ...runParams,
+          messages: conversationMessages,
+        };
+        try {
+          stepResult = yield* this.runModelStep({
+            conversationMessages,
+            params: runParams,
+            parentMessageId,
+            step,
+          });
+        } catch (retryError) {
+          if (!isContextOverflowError(retryError)) {
+            throw retryError;
+          }
+
+          const overflowMessage =
+            "Context overflow after forced compaction retry";
+          yield this.createTurnEndEvent({
+            finalResponse: overflowMessage,
+            finishReason: "error",
+            prepared,
+            sessionId: params.sessionId,
+            step,
+          });
+          return {
+            success: false,
+            finishReason: "error",
+            finalResponse: overflowMessage,
+            toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+            usage,
+          };
+        }
+      }
       const { assistantMessage, finalEvent } = stepResult;
       finalResponse = stepResult.finalResponse;
 
@@ -724,9 +783,6 @@ export class Lifecycle {
         step,
         toolCalls,
       });
-      const toolNameByCallId = new Map(
-        toolCalls.map((toolCall) => [toolCall.id, toolCall.name] as const),
-      );
       const resultByCallId = new Map(
         toolResults.map((result) => [result.callId, result] as const),
       );
@@ -760,18 +816,6 @@ export class Lifecycle {
         };
       }
 
-      conversationMessages.push(
-        toAssistantToolMessage({
-          completeMessage: finalEvent.completeMessage,
-          toolCalls,
-        }),
-        ...toolResults.map((result) =>
-          toolResultToMessage(
-            result,
-            toolNameByCallId.get(result.callId) ?? "",
-          ),
-        ),
-      );
       yield {
         type: "step:complete",
         finishReason: finalEvent.finishReason,
@@ -790,9 +834,12 @@ export class Lifecycle {
         step,
         toolResults,
       });
-      yield this.createTurnEndEvent(turn);
 
       if (params.signal?.aborted) {
+        yield this.createTurnEndEvent({
+          ...turn,
+          finishReason: "error",
+        });
         return {
           success: false,
           finishReason: "error",
@@ -803,6 +850,7 @@ export class Lifecycle {
       }
 
       if (config.shouldStopAfterTurn?.(turn) === true) {
+        yield this.createTurnEndEvent(turn);
         return {
           success: true,
           finishReason: finalEvent.finishReason ?? "stop",
@@ -813,6 +861,10 @@ export class Lifecycle {
       }
 
       if (step === maxSteps) {
+        yield this.createTurnEndEvent({
+          ...turn,
+          finishReason: "error",
+        });
         return {
           success: false,
           finishReason: "error",
@@ -989,6 +1041,22 @@ export class Lifecycle {
       step: input.step,
       timestamp: Date.now(),
       toolResults: input.toolResults,
+      usage: input.prepared.usage,
+    };
+  }
+
+  private createContextPreparedEvent(input: {
+    readonly prepared: PreparedTurn;
+    readonly sessionId: string;
+    readonly step: number;
+  }): LifecycleEvent {
+    return {
+      type: "context:prepared",
+      compaction: input.prepared.compaction,
+      hasSummary: input.prepared.hasSummary,
+      sessionId: input.sessionId,
+      step: input.step,
+      timestamp: Date.now(),
       usage: input.prepared.usage,
     };
   }

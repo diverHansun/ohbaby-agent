@@ -133,6 +133,80 @@ function createRejectingLLMClient(
   };
 }
 
+function createFailThenSucceedLLMClient(
+  input: {
+    readonly error: Error;
+    readonly events: readonly ProviderStreamEvent[];
+    readonly requests: ProviderRequest[];
+  },
+): LLMClientInstance<FakeSdkClient> {
+  let callCount = 0;
+
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: ProviderRequest,
+      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        input.requests.push(request);
+        callCount += 1;
+        if (callCount === 1) {
+          return Promise.reject(input.error);
+        }
+        return Promise.resolve(createProviderStream(input.events));
+      },
+      isAbortError(): boolean {
+        return false;
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      baseUrl: "https://example.invalid/v1",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
+function createRejectingSequenceLLMClient(input: {
+  readonly errors: readonly Error[];
+  readonly requests: ProviderRequest[];
+}): LLMClientInstance<FakeSdkClient> {
+  let nextError = 0;
+
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: ProviderRequest,
+      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        input.requests.push(request);
+        if (nextError >= input.errors.length) {
+          return Promise.reject(new Error("No fake error configured"));
+        }
+        const error = input.errors[nextError];
+        nextError += 1;
+        return Promise.reject(error);
+      },
+      isAbortError(): boolean {
+        return false;
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      baseUrl: "https://example.invalid/v1",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
 function createAbortingLLMClient(input: {
   readonly abort: () => void;
   readonly error: Error;
@@ -228,7 +302,7 @@ describe("Lifecycle.runSession", () => {
     ).rejects.toThrow("Lifecycle.runSession requires a MessageManager");
   });
 
-  it("uses prepareTurn for the session context and preserves tool protocol within the run", async () => {
+  it("prepares context before every model step and uses prepared messages as the step source", async () => {
     const requests: ProviderRequest[] = [];
     const messageManager = createMessageManager({
       bus: createBus(),
@@ -245,15 +319,40 @@ describe("Lifecycle.runSession", () => {
     const firstTurnMessages: PreparedTurn["messages"] = [
       { role: "user", content: "Read README" },
     ];
+    const secondStepMessages: PreparedTurn["messages"] = [
+      { role: "user", content: "Read README" },
+      {
+        content: null,
+        role: "assistant",
+        tool_calls: [
+          {
+            function: {
+              arguments: '{"path":"README.md"}',
+              name: "read_file",
+            },
+            id: "call_read",
+            type: "function",
+          },
+        ],
+      },
+      {
+        content:
+          'README contents\n\n<tool_metadata>\n{"mtimeMs":1700000000000}\n</tool_metadata>',
+        role: "tool",
+        tool_call_id: "call_read",
+      },
+    ];
     const prepareTurn = vi
       .fn<ContextManager["prepareTurn"]>()
-      .mockResolvedValueOnce(preparedTurn(firstTurnMessages, compressedUsage));
+      .mockResolvedValueOnce(preparedTurn(firstTurnMessages, compressedUsage))
+      .mockResolvedValueOnce(preparedTurn(secondStepMessages));
     const toolScheduler = {
       executeBatch: vi
         .fn<ToolSchedulerInstance["executeBatch"]>()
         .mockResolvedValue([
           {
             callId: "call_read",
+            metadata: { mtimeMs: 1_700_000_000_000 },
             output: "README contents",
             status: "success",
           },
@@ -298,38 +397,24 @@ describe("Lifecycle.runSession", () => {
       modelId: "fake-model",
       sessionId: "session_test",
     });
-    expect(prepareTurn).toHaveBeenCalledTimes(1);
+    expect(prepareTurn).toHaveBeenNthCalledWith(2, {
+      directory: "D:/repo",
+      isSubagent: undefined,
+      modelId: "fake-model",
+      sessionId: "session_test",
+    });
+    expect(prepareTurn).toHaveBeenCalledTimes(2);
     expect(requests[0]?.messages).toEqual(firstTurnMessages);
-    expect(requests[1]?.messages).toEqual([
-      ...firstTurnMessages,
-      {
-        content: null,
-        role: "assistant",
-        tool_calls: [
-          {
-            function: {
-              arguments: '{"path":"README.md"}',
-              name: "read_file",
-            },
-            id: "call_read",
-            type: "function",
-          },
-        ],
-      },
-      {
-        content: "README contents",
-        role: "tool",
-        tool_call_id: "call_read",
-      },
-    ]);
+    expect(requests[1]?.messages).toEqual(secondStepMessages);
     expect(events).toEqual([
       "turn:start",
+      "context:prepared",
       "llm:start",
       "llm:complete",
       "tool:start",
       "tool:result",
       "step:complete",
-      "turn:end",
+      "context:prepared",
       "llm:start",
       "llm:delta",
       "llm:complete",
@@ -413,10 +498,196 @@ describe("Lifecycle.runSession", () => {
     );
 
     expect(requests).toHaveLength(2);
-    expect(events.filter((event) => event === "turn:end")).toHaveLength(2);
+    expect(events.filter((event) => event === "turn:start")).toHaveLength(1);
+    expect(events.filter((event) => event === "turn:end")).toHaveLength(1);
     expect(result).toMatchObject({
       finishReason: "tool_calls",
       success: true,
+    });
+  });
+
+  it("force prepares and retries once when the provider reports context overflow", async () => {
+    const requests: ProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const initialMessages: PreparedTurn["messages"] = [
+      { role: "user", content: "Summarize a very large project" },
+    ];
+    const forcedMessages: PreparedTurn["messages"] = [
+      { role: "user", content: "Summarize the compacted project state" },
+    ];
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValueOnce(preparedTurn(initialMessages))
+      .mockResolvedValueOnce(preparedTurn(forcedMessages));
+    const overflowError = Object.assign(
+      new Error("maximum context length exceeded"),
+      { code: "context_length_exceeded" },
+    );
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createFailThenSucceedLLMClient({
+        error: overflowError,
+        events: [{ textDelta: "Recovered.", finishReason: "stop" }],
+        requests,
+      }),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const { events, result } = await consumeLifecycleEvents(
+      lifecycle.runSession({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_test",
+      }),
+    );
+
+    expect(prepareTurn).toHaveBeenNthCalledWith(1, {
+      directory: "D:/repo",
+      isSubagent: undefined,
+      modelId: "fake-model",
+      sessionId: "session_test",
+    });
+    expect(prepareTurn).toHaveBeenNthCalledWith(2, {
+      directory: "D:/repo",
+      force: true,
+      isSubagent: undefined,
+      modelId: "fake-model",
+      sessionId: "session_test",
+    });
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.messages).toEqual(initialMessages);
+    expect(requests[1]?.messages).toEqual(forcedMessages);
+    expect(events).toEqual([
+      "turn:start",
+      "context:prepared",
+      "llm:start",
+      "context:prepared",
+      "llm:start",
+      "llm:delta",
+      "llm:complete",
+      "turn:end",
+    ]);
+    const persistedMessages = await messageManager.listBySession(
+      "session_test",
+    );
+    expect(
+      persistedMessages.some(
+        (message) =>
+          message.info.role === "assistant" &&
+          message.info.finish === "error",
+      ),
+    ).toBe(true);
+    expect(result).toMatchObject({
+      finalResponse: "Recovered.",
+      finishReason: "stop",
+      success: true,
+    });
+  });
+
+  it("does not retry non-overflow provider errors", async () => {
+    const requests: ProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValue(
+        preparedTurn([{ role: "user", content: "Say hello" }]),
+      );
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createRejectingSequenceLLMClient({
+        errors: [new Error("network down")],
+        requests,
+      }),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    await expect(
+      consumeLifecycle(
+        lifecycle.runSession({
+          directory: "D:/repo",
+          modelId: "fake-model",
+          sessionId: "session_test",
+        }),
+      ),
+    ).rejects.toThrow("network down");
+
+    expect(prepareTurn).toHaveBeenCalledTimes(1);
+    expect(requests).toHaveLength(1);
+  });
+
+  it("fails clearly when overflow retry also overflows", async () => {
+    const requests: ProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const overflowError = Object.assign(
+      new Error("maximum context length exceeded"),
+      { code: "context_length_exceeded" },
+    );
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValueOnce(
+        preparedTurn([{ role: "user", content: "Huge input" }]),
+      )
+      .mockResolvedValueOnce(
+        preparedTurn([{ role: "user", content: "Compacted huge input" }]),
+      );
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createRejectingSequenceLLMClient({
+        errors: [overflowError, overflowError],
+        requests,
+      }),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const { events, result } = await consumeLifecycleEvents(
+      lifecycle.runSession({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_test",
+      }),
+    );
+
+    expect(prepareTurn).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ force: true }),
+    );
+    expect(requests).toHaveLength(2);
+    expect(events).toEqual([
+      "turn:start",
+      "context:prepared",
+      "llm:start",
+      "context:prepared",
+      "llm:start",
+      "turn:end",
+    ]);
+    expect(result).toMatchObject({
+      finalResponse: "Context overflow after forced compaction retry",
+      finishReason: "error",
+      success: false,
     });
   });
 });

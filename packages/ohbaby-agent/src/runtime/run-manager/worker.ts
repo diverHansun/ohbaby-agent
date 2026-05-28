@@ -315,6 +315,26 @@ export class RunWorker {
       return;
     }
 
+    if (event.type === "context:prepared") {
+      this.publish(
+        scope,
+        "run.context.prepared",
+        withDefined({
+          runId: this.context.runId,
+          sessionId: this.context.sessionId,
+          timestamp: event.timestamp,
+          step: event.step,
+          usage: safeJsonValue(event.usage),
+          compaction:
+            event.compaction === undefined
+              ? undefined
+              : safeJsonValue(event.compaction),
+          hasSummary: event.hasSummary,
+        }),
+      );
+      return;
+    }
+
     if (event.type === "turn:end") {
       this.publish(
         scope,

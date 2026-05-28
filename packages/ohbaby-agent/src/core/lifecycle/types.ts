@@ -98,6 +98,15 @@ export type LifecycleEvent =
       readonly hasSummary: boolean;
     }
   | {
+      readonly type: "context:prepared";
+      readonly sessionId: string;
+      readonly step: number;
+      readonly timestamp: number;
+      readonly usage: ContextUsage;
+      readonly compaction?: CompactResult;
+      readonly hasSummary: boolean;
+    }
+  | {
       readonly type: "turn:end";
       readonly sessionId: string;
       readonly step: number;

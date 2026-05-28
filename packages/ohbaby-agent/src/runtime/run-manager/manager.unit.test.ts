@@ -315,6 +315,40 @@ class SessionLifecycle implements RunLifecycle {
       },
     };
     yield {
+      compaction: {
+        status: "compacted",
+        usageAfter: {
+          contextLimit: 128,
+          currentTokens: 12,
+          modelId: params.modelId,
+          remainingTokens: 116,
+          shouldCompress: false,
+          usageRatio: 0.09,
+        },
+        usageBefore: {
+          contextLimit: 128,
+          currentTokens: 120,
+          modelId: params.modelId,
+          remainingTokens: 8,
+          shouldCompress: true,
+          usageRatio: 0.94,
+        },
+      },
+      hasSummary: true,
+      sessionId: params.sessionId,
+      step: 1,
+      timestamp: 6,
+      type: "context:prepared",
+      usage: {
+        contextLimit: 128,
+        currentTokens: 12,
+        modelId: params.modelId,
+        remainingTokens: 116,
+        shouldCompress: false,
+        usageRatio: 0.09,
+      },
+    };
+    yield {
       completeMessage: { role: "assistant", content: "Hello" },
       content: "Hello",
       delta: "Hello",
@@ -615,10 +649,25 @@ describe("RunManager", () => {
       "run.updated",
       "run.updated",
       "run.turn.start",
+      "run.context.prepared",
       "message.part.delta",
       "run.turn.end",
       "run.updated",
     ]);
+    expect(
+      bridge.events.find((event) => event.event === "run.context.prepared")
+        ?.data,
+    ).toMatchObject({
+      compaction: {
+        status: "compacted",
+      },
+      hasSummary: true,
+      sessionId: "session_1",
+      step: 1,
+      usage: {
+        currentTokens: 12,
+      },
+    });
   });
 
   it("starts a run, streams lifecycle events, and records success", async () => {

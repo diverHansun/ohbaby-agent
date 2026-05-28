@@ -74,6 +74,10 @@ export function serializeHistoryMessages(
 function serializeMessageForLlm(
   message: MessageWithParts,
 ): ChatCompletionMessage[] {
+  if (message.info.role === "assistant" && message.info.finish === "error") {
+    return [];
+  }
+
   const parts = message.parts.filter(isActivePart);
   if (parts.length === 0) {
     return [];

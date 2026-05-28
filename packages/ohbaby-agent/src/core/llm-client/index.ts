@@ -13,6 +13,7 @@
 
 // Export core functions
 export { createLLMClient } from "./client.js";
+export { isContextOverflowError } from "./errors.js";
 export type { CreateLLMClientOptions } from "./client.js";
 export { streamChatCompletion } from "./streaming.js";
 

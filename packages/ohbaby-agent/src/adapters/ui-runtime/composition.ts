@@ -322,6 +322,23 @@ function lifecycleEventFromStream(
       >["usage"],
     };
   }
+  if (item.event === "run.context.prepared") {
+    return {
+      compaction: data.compaction as Extract<
+        LifecycleEvent,
+        { readonly type: "context:prepared" }
+      >["compaction"],
+      hasSummary: Boolean(data.hasSummary),
+      sessionId,
+      step: numberData(data, "step") ?? 0,
+      timestamp,
+      type: "context:prepared",
+      usage: data.usage as Extract<
+        LifecycleEvent,
+        { readonly type: "context:prepared" }
+      >["usage"],
+    };
+  }
   if (item.event === "run.turn.end") {
     return {
       finishReason: stringData(data, "finishReason") as Extract<

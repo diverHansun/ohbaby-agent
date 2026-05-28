@@ -357,7 +357,7 @@ export function startRunStreamProjection(
     );
   }
 
-  function handleTurnStart(event: StreamBridgeEvent): void {
+  function handleContextCompaction(event: StreamBridgeEvent): void {
     const data = eventData(event);
     if (!isRecord(data.compaction)) {
       return;
@@ -389,7 +389,11 @@ export function startRunStreamProjection(
       return;
     }
     if (event.event === "run.turn.start") {
-      handleTurnStart(event);
+      handleContextCompaction(event);
+      return;
+    }
+    if (event.event === "run.context.prepared") {
+      handleContextCompaction(event);
     }
   }
 

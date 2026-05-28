@@ -604,6 +604,48 @@ describe("ContextManager", () => {
     });
   });
 
+  it("omits assistant messages finished with error from model input", () => {
+    const messages = serializeForLlm({
+      history: [
+        messageWithText("user", "Try a large request"),
+        {
+          info: {
+            agent: "test",
+            error: {
+              message: "maximum context length exceeded",
+              name: "Unknown",
+            },
+            finish: "error",
+            id: "assistant_failed",
+            role: "assistant",
+            sessionId: "session_1",
+            time: { created: 1 },
+          },
+          parts: [
+            {
+              id: "part_failed",
+              messageId: "assistant_failed",
+              orderIndex: 0,
+              sessionId: "session_1",
+              text: "Partial failed answer",
+              type: "text",
+            },
+          ],
+        },
+        messageWithText("user", "Retry after compaction"),
+      ],
+      isSubagent: false,
+      memory: { global: "", project: "", merged: "" },
+      systemPrompt: "system prompt",
+    });
+
+    expect(messages).toEqual([
+      { role: "system", content: "system prompt" },
+      { role: "user", content: "Try a large request" },
+      { role: "user", content: "Retry after compaction" },
+    ]);
+  });
+
   it("prepareTurn returns provider-ready messages without mutating below threshold", async () => {
     const messageManager = createMessageManagerFixture();
     await addTextMessage(messageManager, {
