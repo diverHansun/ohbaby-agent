@@ -1,3 +1,4 @@
+import path from "node:path";
 import type {
   Tool,
   ToolExecutionResult,
@@ -29,6 +30,11 @@ export interface SkillResourceToolRegistry {
 
 export interface SkillDescriptionOptions {
   readonly contextWindowTokens?: number;
+}
+
+interface SkillRuntimePaths {
+  readonly outputDir?: string;
+  readonly outputDirRelative: string;
 }
 
 function requiredString(params: Record<string, unknown>, name: string): string {
@@ -140,12 +146,29 @@ export async function buildSkillToolDescription(
 }
 
 export function formatSkillToolOutput(content: SkillContent): string {
+  return formatSkillToolOutputWithRuntimePaths(content, {
+    outputDirRelative: workspaceOutputDirectory(content.info.name),
+  });
+}
+
+function formatSkillToolOutputWithRuntimePaths(
+  content: SkillContent,
+  runtimePaths: SkillRuntimePaths,
+): string {
   const lines = [
     `## Skill: ${content.info.name}`,
     "",
     `**Base directory**: ${content.baseDir}`,
     `**Source**: ${content.info.scope}`,
+    `**Workspace output directory**: ${runtimePaths.outputDirRelative}`,
   ];
+
+  if (content.info.allowedTools.length > 0) {
+    lines.push("", "**Declared tools**:");
+    for (const tool of content.info.allowedTools) {
+      lines.push(`- ${tool}`);
+    }
+  }
 
   if (content.files.length > 0) {
     lines.push("", "**Available files**:");
@@ -153,6 +176,14 @@ export function formatSkillToolOutput(content: SkillContent): string {
       lines.push(`- ${file}`);
     }
   }
+
+  lines.push(
+    "",
+    "**Script execution notes**:",
+    "- Run scripts from the base directory by absolute path, or change into the base directory before using relative script paths.",
+    "- Create the workspace output directory before passing it to scripts.",
+    "- Keep generated files in the workspace output directory unless the user explicitly approves another location.",
+  );
 
   lines.push("", content.content.trim());
   return lines.join("\n").trimEnd();
@@ -168,16 +199,35 @@ export function formatSkillResourceToolOutput(
   ].join("\n");
 }
 
-async function activateSkillRoot(input: {
+function workspaceOutputDirectory(name: string): string {
+  return [".ohbaby", "skill-output", name].join("/");
+}
+
+async function activateSkillRuntime(input: {
   readonly baseDir: string;
   readonly context: Parameters<Tool["execute"]>[1];
   readonly name: string;
-}): Promise<void> {
+}): Promise<SkillRuntimePaths> {
+  const outputDirRelative = workspaceOutputDirectory(input.name);
   await input.context.environment?.trustPath?.({
     kind: "active-skill",
     path: input.baseDir,
     source: input.name,
   });
+  const workdir = input.context.environment?.workdir;
+  const outputDir = workdir
+    ? path.join(workdir, ".ohbaby", "skill-output", input.name)
+    : undefined;
+  if (outputDir) {
+    await input.context.environment?.trustPath?.({
+      kind: "skill-output",
+      path: outputDir,
+      source: input.name,
+    });
+  }
+  return outputDir === undefined
+    ? { outputDirRelative }
+    : { outputDir, outputDirRelative };
 }
 
 export async function createSkillTool(
@@ -205,7 +255,7 @@ export async function createSkillTool(
       const name = requiredString(params, "name");
       await assertModelInvocable(registry, name);
       const content = await registry.load(name);
-      await activateSkillRoot({
+      const runtimePaths = await activateSkillRuntime({
         baseDir: content.baseDir,
         context,
         name: content.info.name,
@@ -215,8 +265,9 @@ export async function createSkillTool(
           dir: content.baseDir,
           files: [...content.files],
           name: content.info.name,
+          ...runtimePaths,
         },
-        output: formatSkillToolOutput(content),
+        output: formatSkillToolOutputWithRuntimePaths(content, runtimePaths),
       };
     },
   };
@@ -255,7 +306,7 @@ export function createSkillResourceTool(
         name,
         requiredString(params, "path"),
       );
-      await activateSkillRoot({
+      await activateSkillRuntime({
         baseDir: content.baseDir,
         context,
         name: content.info.name,
