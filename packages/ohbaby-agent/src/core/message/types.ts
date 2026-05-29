@@ -132,6 +132,7 @@ export type ToolState =
       readonly status: "aborted";
       readonly input: Record<string, unknown>;
       readonly error: "Tool execution aborted by user";
+      readonly output?: string;
       readonly metadata?: Record<string, unknown>;
     };
 

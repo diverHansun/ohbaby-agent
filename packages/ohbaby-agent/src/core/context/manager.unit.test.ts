@@ -604,6 +604,48 @@ describe("ContextManager", () => {
     });
   });
 
+  it("keeps partial aborted tool output before the abort notice", () => {
+    const messages = serializeForLlm({
+      history: [
+        {
+          info: {
+            agent: "test",
+            id: "message_aborted_tool",
+            role: "assistant",
+            sessionId: "session_1",
+            time: { created: 1 },
+          },
+          parts: [
+            {
+              callId: "call_bash",
+              id: "part_aborted_bash",
+              messageId: "message_aborted_tool",
+              orderIndex: 0,
+              sessionId: "session_1",
+              state: {
+                error: "Tool execution aborted by user",
+                input: { command: "long-running-command" },
+                output: "partial stdout before abort",
+                status: "aborted",
+              },
+              tool: "bash",
+              type: "tool",
+            },
+          ],
+        },
+      ],
+      isSubagent: false,
+      memory: { global: "", project: "", merged: "" },
+      systemPrompt: "",
+    });
+
+    expect(messages.at(-1)).toEqual({
+      role: "tool",
+      tool_call_id: "call_bash",
+      content: "partial stdout before abort\n\nTool execution aborted by user",
+    });
+  });
+
   it("omits assistant messages finished with error from model input", () => {
     const messages = serializeForLlm({
       history: [

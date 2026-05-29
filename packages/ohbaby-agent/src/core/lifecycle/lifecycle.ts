@@ -50,7 +50,6 @@ interface ModelStepParams {
   readonly sessionId: string;
   readonly agent?: string;
   readonly parentMessageId?: string;
-  readonly messages: readonly ChatCompletionMessage[];
   readonly signal?: AbortSignal;
   readonly tools?: LifecycleSessionParams["tools"];
   readonly environment?: LifecycleSessionParams["environment"];
@@ -228,6 +227,7 @@ function resultToToolState(
       error: "Tool execution aborted by user",
       input,
       ...(result.metadata === undefined ? {} : { metadata: result.metadata }),
+      ...(result.output === undefined ? {} : { output: result.output }),
       status: "aborted",
     };
   }
@@ -304,6 +304,15 @@ export class Lifecycle {
         modelId: params.modelId,
         sessionId: params.sessionId,
       });
+      if (params.signal?.aborted) {
+        return {
+          success: false,
+          finishReason: "error",
+          finalResponse,
+          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+          usage,
+        };
+      }
       let conversationMessages = [...prepared.messages];
 
       if (!turnStarted) {
@@ -324,12 +333,11 @@ export class Lifecycle {
         step,
       });
 
-      let runParams: ModelStepParams = {
+      const runParams: ModelStepParams = {
         agent: params.agent,
         environment: params.environment,
         isSubagent: params.isSubagent,
         maxSteps: params.maxSteps,
-        messages: conversationMessages,
         parentMessageId,
         sessionId: params.sessionId,
         signal: params.signal,
@@ -355,16 +363,21 @@ export class Lifecycle {
           modelId: params.modelId,
           sessionId: params.sessionId,
         });
+        if (params.signal?.aborted) {
+          return {
+            success: false,
+            finishReason: "error",
+            finalResponse,
+            toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+            usage,
+          };
+        }
         conversationMessages = [...prepared.messages];
         yield this.createContextPreparedEvent({
           prepared,
           sessionId: params.sessionId,
           step,
         });
-        runParams = {
-          ...runParams,
-          messages: conversationMessages,
-        };
         try {
           stepResult = yield* this.runModelStep({
             conversationMessages,

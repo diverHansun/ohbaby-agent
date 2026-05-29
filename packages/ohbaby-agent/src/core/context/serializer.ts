@@ -159,9 +159,17 @@ function toolResultContent(part: ToolPart): string {
         tool: part.tool,
       });
     case "error":
-    case "aborted":
       return formatToolResultContentForModel({
         content: part.state.error,
+        metadata: part.state.metadata,
+        tool: part.tool,
+      });
+    case "aborted":
+      return formatToolResultContentForModel({
+        content:
+          part.state.output === undefined || part.state.output === ""
+            ? part.state.error
+            : `${part.state.output}\n\n${part.state.error}`,
         metadata: part.state.metadata,
         tool: part.tool,
       });
