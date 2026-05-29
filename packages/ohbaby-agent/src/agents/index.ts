@@ -3,6 +3,7 @@ export {
   BUILTIN_AGENT_NAMES,
   buildAgent,
   exploreAgent,
+  genericAgent,
   planAgent,
   researchAgent,
 } from "./builtin/index.js";
@@ -12,6 +13,13 @@ export {
 } from "./service.js";
 export { AgentManager, toolsConfigToRecord } from "./manager.js";
 export { AgentRegistry } from "./registry.js";
+export {
+  DEFAULT_SUBAGENT_ROLE,
+  formatSubagentRoles,
+  isSubagentRole,
+  SUBAGENT_ROLES,
+  type SubagentRole,
+} from "./roles.js";
 export {
   AgentTaskManager,
   InMemoryAgentTaskStore,

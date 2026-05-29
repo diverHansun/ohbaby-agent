@@ -68,6 +68,37 @@ describe("AgentManager", () => {
     });
   });
 
+  it("registers generic as the default broad subagent role", async () => {
+    const manager = await createManager();
+
+    expect(manager.get("generic")).toMatchObject({
+      mode: "subagent",
+      name: "generic",
+    });
+    expect(manager.getAgentToolsConfig("generic", { isSubagent: true })).toEqual(
+      {
+        "*": false,
+        agent_close: false,
+        agent_eval: false,
+        agent_open: false,
+        agent_status: false,
+        bash: true,
+        edit: true,
+        glob: true,
+        grep: true,
+        list: true,
+        memory_list: true,
+        read: true,
+        task: false,
+        todo_read: true,
+        todo_write: true,
+        web_fetch: true,
+        web_search: true,
+        write: true,
+      },
+    );
+  });
+
   it("builds a runtime agent using the injected system prompt provider", async () => {
     const build = vi.fn<AgentPromptProvider["build"]>(
       ({ agent, isSubagent }) => `${agent.name}:${String(isSubagent)}`,

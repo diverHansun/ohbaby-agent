@@ -1,10 +1,12 @@
 import { SUBAGENT_DISABLED_TOOLS } from "../core/tool-scheduler/index.js";
 import { loadAgentConfig } from "../config/agents/index.js";
 import { BUILTIN_AGENTS } from "./builtin/index.js";
+import { DEFAULT_SUBAGENT_ROLE } from "./roles.js";
 import type { AgentConfig, AgentMode, AgentsConfig } from "./types.js";
 
 const AGENT_NAME_REGEX = /^[a-z0-9-]+$/;
 const MAX_AGENT_NAME_LENGTH = 50;
+const RESERVED_AGENT_NAMES = new Set<string>([DEFAULT_SUBAGENT_ROLE]);
 
 export interface AgentRegistryOptions {
   readonly builtinAgents?: readonly AgentConfig[];
@@ -62,6 +64,12 @@ function validateAgent(agent: AgentConfig): void {
   }
 }
 
+function assertUserAgentCanOverride(name: string): void {
+  if (RESERVED_AGENT_NAMES.has(name)) {
+    throw new Error(`Agent ${name} is reserved and cannot be overridden`);
+  }
+}
+
 function shouldExpose(agent: AgentConfig): boolean {
   return agent.disabled !== true;
 }
@@ -86,6 +94,7 @@ export class AgentRegistry {
     const userConfig = await configLoader();
     for (const agent of Object.values(userConfig.agents)) {
       validateAgent(agent);
+      assertUserAgentCanOverride(agent.name);
       merged.set(agent.name, cloneAgent(agent));
     }
 

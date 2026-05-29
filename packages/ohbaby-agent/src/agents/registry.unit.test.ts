@@ -27,6 +27,10 @@ describe("AgentRegistry", () => {
       mode: "subagent",
       name: "research",
     });
+    expect(registry.get("generic")).toMatchObject({
+      mode: "subagent",
+      name: "generic",
+    });
   });
 
   it("gives builtin subagents planning, shell, and file editing tools", async () => {
@@ -53,6 +57,9 @@ describe("AgentRegistry", () => {
         "todo_write",
         "write",
       ]),
+    );
+    expect(registry.get("generic")?.tools?.include).toEqual(
+      registry.get("research")?.tools?.include,
     );
   });
 
@@ -89,6 +96,25 @@ describe("AgentRegistry", () => {
       name: "audit",
     });
     expect(registry.list().map((agent) => agent.name)).toContain("explore");
+  });
+
+  it("rejects config-loaded agents that override reserved generic", async () => {
+    const registry = new AgentRegistry({
+      configLoader: (): AgentsConfig => ({
+        agents: {
+          generic: {
+            description: "User generic override",
+            mode: "subagent",
+            name: "generic",
+            tools: { include: ["read"] },
+          },
+        },
+      }),
+    });
+
+    await expect(registry.initialize()).rejects.toThrow(
+      /generic.*reserved|generic.*cannot be overridden/i,
+    );
   });
 
   it("does not list disabled agents", async () => {
