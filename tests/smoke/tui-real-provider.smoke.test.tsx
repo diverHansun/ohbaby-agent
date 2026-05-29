@@ -234,6 +234,26 @@ function latestChildSessionId(parentSessionId: string): string | undefined {
     .get(parentSessionId)?.id;
 }
 
+function latestChildSessionMetadata(
+  parentSessionId: string,
+):
+  | { readonly agent: string; readonly id: string; readonly title: string }
+  | undefined {
+  return getDatabase()
+    .prepare<{
+      readonly agent: string;
+      readonly id: string;
+      readonly title: string;
+    }>(
+      `SELECT id, agent, title
+       FROM ${schema.session.tableName}
+       WHERE parent_id = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    )
+    .get(parentSessionId);
+}
+
 function sessionMessageCount(sessionId: string): number {
   return (
     getDatabase()
@@ -514,7 +534,7 @@ describe("real provider TUI smoke", () => {
 
         await client.submitPrompt(
           [
-            "Call the task tool exactly once with agent_name explore.",
+            "Call the task tool exactly once with role explore.",
             "Ask the child to inspect subagent-target-a.txt and subagent-target-b.txt.",
             "After the child returns, answer with the exact token OHBABY_REAL_SUBAGENT_FIRST_OK.",
           ].join(" "),
@@ -539,7 +559,7 @@ describe("real provider TUI smoke", () => {
 
         await client.submitPrompt(
           [
-            "Call the task tool exactly once with agent_name explore.",
+            "Call the task tool exactly once with role explore.",
             `Use resume_session_id ${child.id}.`,
             "Ask the child to reference its prior inspection and return one extra concise finding.",
             "After the child returns, answer with the exact token OHBABY_REAL_SUBAGENT_RESUME_OK.",
@@ -566,7 +586,7 @@ describe("real provider TUI smoke", () => {
         );
         await client.submitPrompt(
           [
-            "Call the agent_open tool exactly once with agent_name explore.",
+            "Call the agent_open tool exactly once with role explore.",
             "Ask the child to inspect agent-task-target-c.txt and remember the gamma marker.",
             "Do not call the task tool for this step.",
             "After agent_open returns, answer with the exact token OHBABY_REAL_AGENT_OPEN_OK.",
@@ -629,6 +649,46 @@ describe("real provider TUI smoke", () => {
   );
 
   (runRealSubagentSmoke ? it : it.skip)(
+    "lets a real model omit role and use the generic subagent default",
+    async () => {
+      const { app, client, workdir } = await createRealTuiHarness({});
+      try {
+        await writeFile(
+          join(workdir, "generic-subagent-target.txt"),
+          "generic subagent smoke marker",
+          "utf8",
+        );
+
+        await client.submitPrompt(
+          [
+            "Call the task tool exactly once.",
+            "Do not include role in the task arguments.",
+            'Set name to "events-scout" and description to "AI Events Researcher".',
+            "Ask the child to inspect generic-subagent-target.txt.",
+            "After the child returns, answer with the exact token OHBABY_REAL_GENERIC_SUBAGENT_OK.",
+          ].join(" "),
+        );
+
+        const parentSessionId = (await client.getSnapshot()).activeSessionId;
+        if (!parentSessionId) {
+          throw new Error("expected parent session id");
+        }
+        const child = latestChildSessionMetadata(parentSessionId);
+        if (!child) {
+          throw new Error("real model did not create a generic child session");
+        }
+        expect(child.agent).toBe("generic");
+        expect(child.title).toBe("AI Events Researcher");
+        const finalText = JSON.stringify((await client.getSnapshot()).sessions);
+        expect(finalText).toContain("OHBABY_REAL_GENERIC_SUBAGENT_OK");
+      } finally {
+        app.unmount();
+      }
+    },
+    600_000,
+  );
+
+  (runRealSubagentSmoke ? it : it.skip)(
     "lets a real task child session use shell and file editing tools",
     async () => {
       const { app, client, workdir } = await createRealTuiHarness({});
@@ -673,7 +733,7 @@ describe("real provider TUI smoke", () => {
         await submitPromptApprovingPermissions(
           client,
           [
-            "Call the task tool exactly once with agent_name explore.",
+            "Call the task tool exactly once with role explore.",
             "Do not perform any workspace tool calls in the parent session.",
             `Ask the child to do these steps itself: use bash exactly once with command \`${childBashCommand}\`; use write to create child-tools/child-created.txt with content OHBABY_CHILD_WRITE_MARKER; read child-tools/child-edit-target.txt; use edit to replace BEFORE_EDIT with AFTER_EDIT, passing the mtimeMs from the read result as expected_mtime_ms.`,
             "After the child returns, answer with the exact token OHBABY_REAL_SUBAGENT_WORKSPACE_TOOLS_OK.",

@@ -30,7 +30,7 @@ import {
   createSessionManager,
 } from "../services/session/index.js";
 import { AgentManager, AgentRegistry } from "../agents/index.js";
-import type { AgentsConfig } from "../agents/index.js";
+import type { AgentsConfig, SubagentRole } from "../agents/index.js";
 import {
   createDatabaseRunLedger,
   createInMemoryRunLedger,
@@ -195,9 +195,10 @@ function toolMetadataFromContent(
     return undefined;
   }
   try {
-    return JSON.parse(
-      content.slice(start + startMarker.length, end),
-    ) as Record<string, unknown>;
+    return JSON.parse(content.slice(start + startMarker.length, end)) as Record<
+      string,
+      unknown
+    >;
   } catch {
     return undefined;
   }
@@ -327,6 +328,10 @@ function createResumableTaskFakeLLMClient(
   };
 }
 
+function isGenericSubagentRequest(request: ProviderRequest): boolean {
+  return JSON.stringify(request.messages).includes("Task: generic");
+}
+
 function createAgentTaskFakeLLMClient(
   requests: ProviderRequest[],
 ): LLMClientInstance<FakeSdkClient> {
@@ -355,8 +360,8 @@ function createAgentTaskFakeLLMClient(
             createProviderStream([
               agentTaskToolCallEvent({
                 arguments: {
-                  agent_name: "explore",
                   description: "Background auth exploration",
+                  role: "explore",
                   prompt: "Background first pass",
                 },
                 callId: "call_agent_open",
@@ -521,8 +526,8 @@ function createAbortableAgentTaskLLMClient(
             createProviderStream([
               agentTaskToolCallEvent({
                 arguments: {
-                  agent_name: "explore",
                   description: "Cancellable background task",
+                  role: "explore",
                   prompt: "Run until explicitly closed",
                 },
                 callId: "call_agent_open_cancellable",
@@ -588,21 +593,27 @@ function writeToolCallEvent(input: {
 }
 
 function taskToolCallEvent(input: {
-  readonly agentName?: string;
   readonly callId: string;
   readonly description?: string;
+  readonly name?: string;
+  readonly omitRole?: boolean;
   readonly prompt: string;
   readonly resumeSessionId?: string;
+  readonly role?: SubagentRole;
 }): ProviderStreamEvent {
+  const argumentsPayload: Record<string, unknown> = {
+    description: input.description,
+    name: input.name,
+    prompt: input.prompt,
+    resume_session_id: input.resumeSessionId,
+  };
+  if (input.omitRole !== true) {
+    argumentsPayload.role = input.role ?? "explore";
+  }
   return {
     toolCallDeltas: [
       {
-        argumentsDelta: JSON.stringify({
-          agent_name: input.agentName ?? "explore",
-          description: input.description,
-          prompt: input.prompt,
-          resume_session_id: input.resumeSessionId,
-        }),
+        argumentsDelta: JSON.stringify(argumentsPayload),
         id: input.callId,
         index: 0,
         name: "task",
@@ -1495,6 +1506,50 @@ describe("createInProcessUiBackendClient", () => {
     expect(parentToolResultText).toContain("child found auth.ts");
   });
 
+  it("defaults omitted task role to generic and keeps display metadata out of child context", async () => {
+    const requests: ProviderRequest[] = [];
+    const client = createInProcessUiBackendClient({
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            taskToolCallEvent({
+              callId: "call_task_generic",
+              description: "AI Events Researcher",
+              name: "events-scout",
+              omitRole: true,
+              prompt: "Inspect event marker files.",
+            }),
+          ],
+          [{ textDelta: "generic child done", finishReason: "stop" }],
+          [{ textDelta: "parent saw generic child", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+
+    await client.submitPrompt("Delegate event research");
+
+    expect(requests).toHaveLength(3);
+    const childText = JSON.stringify(requests[1]?.messages);
+    expect(childText).toContain("Task: generic");
+    expect(childText).toContain("Inspect event marker files.");
+    expect(childText).not.toContain("AI Events Researcher");
+    expect(childText).not.toContain("events-scout");
+    expect(requests.filter(isGenericSubagentRequest)).toHaveLength(1);
+
+    const parentToolMessageContent = requests[2]?.messages.at(-1)?.content;
+    const parentToolContent =
+      typeof parentToolMessageContent === "string"
+        ? parentToolMessageContent
+        : "";
+    expect(toolMetadataFromContent(parentToolContent)).toMatchObject({
+      description: "AI Events Researcher",
+      name: "events-scout",
+      role: "generic",
+      success: true,
+    });
+  });
+
   it("returns invalid task resume errors to the parent without creating a child session", async () => {
     const requests: ProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
@@ -1729,10 +1784,10 @@ describe("createInProcessUiBackendClient", () => {
           tools: { include: ["task"] },
         },
         {
-          description: "One-step child test agent",
+          description: "One-step generic child test agent",
           maxSteps: 1,
           mode: "subagent",
-          name: "shorty",
+          name: "generic",
           tools: { include: ["list"] },
         },
       ],
@@ -1745,10 +1800,10 @@ describe("createInProcessUiBackendClient", () => {
         [
           [
             taskToolCallEvent({
-              agentName: "shorty",
               callId: "call_task_short",
               description: "Short max steps",
               prompt: "List once and stop",
+              role: "generic",
             }),
           ],
           [

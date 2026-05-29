@@ -71,9 +71,9 @@ function createProviderTaskEvent(input: {
     toolCallDeltas: [
       {
         argumentsDelta: JSON.stringify({
-          agent_name: "explore",
           description: "Persistent child",
           prompt: input.prompt,
+          role: "explore",
         }),
         id: input.callId,
         index: 0,
@@ -147,9 +147,9 @@ function createPersistentAgentTaskLLMClient(
             createProviderStream([
               createProviderAgentTaskEvent({
                 arguments: {
-                  agent_name: "explore",
                   description: "Persistent background child",
                   prompt: "Inspect persistent background child files",
+                  role: "explore",
                 },
                 callId: "call_agent_open",
                 name: "agent_open",

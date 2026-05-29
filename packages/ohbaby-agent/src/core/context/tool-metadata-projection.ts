@@ -1,9 +1,6 @@
 type ToolMetadata = Record<string, unknown>;
 
-function hasOwnMetadataValue(
-  metadata: ToolMetadata,
-  key: string,
-): boolean {
+function hasOwnMetadataValue(metadata: ToolMetadata, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(metadata, key);
 }
 
@@ -25,11 +22,7 @@ function nestedMetadata(
   key: string,
 ): ToolMetadata | undefined {
   const value = metadata[key];
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    Array.isArray(value)
-  ) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
   }
   return value as ToolMetadata;
@@ -100,8 +93,10 @@ export function projectToolMetadataForModel(
       return subagent === undefined
         ? {}
         : copyMetadataFields(subagent, [
+            "role",
+            "name",
+            "description",
             "sessionId",
-            "agentName",
             "success",
             "error",
           ]);
@@ -113,6 +108,9 @@ export function projectToolMetadataForModel(
       const agentTask = nestedMetadata(metadata, "agentTask");
       if (agentTask !== undefined) {
         return copyMetadataFields(agentTask, [
+          "role",
+          "name",
+          "description",
           "taskId",
           "sessionId",
           "status",
