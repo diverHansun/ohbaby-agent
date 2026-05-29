@@ -311,9 +311,10 @@ describe("bootstrapRuntime", () => {
     }
 
     const created = await runtime.runManager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
       sessionId: "session_1",
       triggerSource: "user",
-      messages: [{ role: "user", content: "hello" }],
     });
 
     await expect(

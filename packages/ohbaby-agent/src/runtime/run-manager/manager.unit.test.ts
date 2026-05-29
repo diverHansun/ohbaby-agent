@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type {
   LifecycleEvent,
   LifecycleResult,
-  LifecycleRunParams,
   LifecycleSessionParams,
 } from "../../core/lifecycle/index.js";
 import type { ToolCallResult } from "../../core/tool-scheduler/index.js";
@@ -239,10 +238,10 @@ class RejectingReleaseSandboxManager extends RecordingSandboxManager {
 }
 
 class CompletingLifecycle implements RunLifecycle {
-  readonly calls: LifecycleRunParams[] = [];
+  readonly calls: LifecycleSessionParams[] = [];
 
   async *run(
-    params: LifecycleRunParams,
+    params: LifecycleSessionParams,
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
     await Promise.resolve();
     this.calls.push(params);
@@ -282,18 +281,6 @@ class SessionLifecycle implements RunLifecycle {
   readonly calls: LifecycleSessionParams[] = [];
 
   async *run(
-    params: LifecycleRunParams,
-  ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
-    await Promise.resolve();
-    yield {
-      sessionId: params.sessionId,
-      timestamp: 1,
-      type: "llm:start",
-    };
-    throw new Error("message run path should not be used");
-  }
-
-  async *runSession(
     params: LifecycleSessionParams,
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
     await Promise.resolve();
@@ -386,7 +373,7 @@ class BlockingLifecycle implements RunLifecycle {
   readonly finish = createDeferred<undefined>();
 
   async *run(
-    params: LifecycleRunParams,
+    params: LifecycleSessionParams,
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
     this.started.resolve(params.signal);
     yield {
@@ -409,7 +396,7 @@ class AbortAwareLifecycle implements RunLifecycle {
   readonly started = createDeferred<AbortSignal | undefined>();
 
   async *run(
-    params: LifecycleRunParams,
+    params: LifecycleSessionParams,
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
     this.started.resolve(params.signal);
     yield {
@@ -450,7 +437,7 @@ class InterruptThenCompleteLifecycle implements RunLifecycle {
   private callCount = 0;
 
   async *run(
-    params: LifecycleRunParams,
+    params: LifecycleSessionParams,
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
     this.callCount += 1;
     yield {
@@ -500,7 +487,7 @@ class InterruptThenCompleteLifecycle implements RunLifecycle {
 
 class ThrowingLifecycle implements RunLifecycle {
   async *run(
-    params: LifecycleRunParams,
+    params: LifecycleSessionParams,
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
     await Promise.resolve();
     yield {
@@ -515,7 +502,7 @@ class ThrowingLifecycle implements RunLifecycle {
 
 class ToolEventLifecycle implements RunLifecycle {
   async *run(
-    params: LifecycleRunParams,
+    params: LifecycleSessionParams,
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
     await Promise.resolve();
     const result: ToolCallResult = {
@@ -676,9 +663,10 @@ describe("RunManager", () => {
       createManager(lifecycle);
 
     const record = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
       sessionId: "session_1",
       triggerSource: "user",
-      messages: [{ role: "user", content: "Say hello" }],
     });
     const completion = await manager.waitForCompletion(record.runId);
 
@@ -694,8 +682,9 @@ describe("RunManager", () => {
     ]);
     expect(hooks.calls).toEqual(["pre-run", "post-run"]);
     expect(lifecycle.calls[0]).toMatchObject({
+      directory: "D:/repo",
+      modelId: "fake-model",
       sessionId: "session_1",
-      messages: [{ role: "user", content: "Say hello" }],
       environment: {
         workdir: "workspace/session_1",
       },
@@ -720,10 +709,11 @@ describe("RunManager", () => {
     const { manager } = createManager(lifecycle);
 
     const record = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      maxSteps: 3,
       sessionId: "session_1",
       triggerSource: "user",
-      messages: [{ role: "user", content: "bounded" }],
-      maxSteps: 3,
     });
     await manager.waitForCompletion(record.runId);
 
@@ -737,9 +727,10 @@ describe("RunManager", () => {
     const { manager, bridge } = createManager(new ToolEventLifecycle());
 
     const record = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
       sessionId: "session_1",
       triggerSource: "user",
-      messages: [{ role: "user", content: "Use a tool" }],
     });
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
       status: "succeeded",
@@ -789,25 +780,28 @@ describe("RunManager", () => {
     const { manager } = createManager(lifecycle);
 
     const first = manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
       sessionId: "session_1",
       triggerSource: "user",
-      messages: [{ role: "user", content: "one" }],
     });
     await lifecycle.started.promise;
 
     await expect(
       manager.create({
+        directory: "D:/repo",
+        modelId: "fake-model",
         sessionId: "session_1",
         triggerSource: "user",
-        messages: [{ role: "user", content: "two" }],
       }),
     ).rejects.toBeInstanceOf(ConcurrencyRejectedError);
 
     await expect(
       manager.create({
+        directory: "D:/other",
+        modelId: "fake-model",
         sessionId: "session_2",
         triggerSource: "user",
-        messages: [{ role: "user", content: "other" }],
       }),
     ).resolves.toMatchObject({ sessionId: "session_2" });
 
@@ -820,9 +814,10 @@ describe("RunManager", () => {
     const lifecycle = new AbortAwareLifecycle();
     const { manager, ledger, bridge } = createManager(lifecycle);
     const record = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
       sessionId: "session_1",
       triggerSource: "user",
-      messages: [{ role: "user", content: "stop" }],
     });
     const signal = await lifecycle.started.promise;
 
@@ -848,9 +843,10 @@ describe("RunManager", () => {
     });
 
     const record = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
       sessionId: "session_1",
       triggerSource: "user",
-      messages: [{ role: "user", content: "release" }],
     });
 
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
@@ -868,9 +864,10 @@ describe("RunManager", () => {
     });
 
     const record = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
       sessionId: "session_1",
       triggerSource: "user",
-      messages: [{ role: "user", content: "publish failure" }],
     });
 
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
@@ -887,17 +884,19 @@ describe("RunManager", () => {
     const { manager } = createManager(lifecycle);
 
     const first = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
       sessionId: "session_1",
       triggerSource: "user",
-      messages: [{ role: "user", content: "first" }],
     });
     const firstSignal = await lifecycle.firstStarted.promise;
 
     const second = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
       sessionId: "session_1",
       triggerSource: "user",
       explicit: { multitaskStrategy: "interrupt-current" },
-      messages: [{ role: "user", content: "second" }],
     });
 
     expect(firstSignal?.aborted).toBe(true);
@@ -913,9 +912,10 @@ describe("RunManager", () => {
   it("isolates lifecycle failures and allows later runs in the same session", async () => {
     const failing = createManager(new ThrowingLifecycle());
     const failed = await failing.manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
       sessionId: "session_1",
       triggerSource: "user",
-      messages: [{ role: "user", content: "boom" }],
     });
 
     await expect(
@@ -940,9 +940,10 @@ describe("RunManager", () => {
 
     await expect(
       manager.create({
+        directory: "D:/repo",
+        modelId: "fake-model",
         sessionId: "session_1",
         triggerSource: "user",
-        messages: [{ role: "user", content: "after" }],
       }),
     ).resolves.toMatchObject({ runId: "run_after_failure" });
   });

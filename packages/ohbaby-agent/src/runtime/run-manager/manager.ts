@@ -195,12 +195,11 @@ export class RunManager {
         sandboxLease,
         abortSignal: record.abortController.signal,
         agent: record.options.agent,
-        isSubagent: record.options.isSubagent,
-        parentMessageId: record.options.parentMessageId,
-        maxSteps: record.options.maxSteps,
-        messages: record.options.messages,
         directory: record.options.directory,
+        isSubagent: record.options.isSubagent,
+        maxSteps: record.options.maxSteps,
         modelId: record.options.modelId,
+        parentMessageId: record.options.parentMessageId,
         tools: record.options.tools,
       };
       const worker = new RunWorker(context, {

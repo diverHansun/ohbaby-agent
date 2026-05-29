@@ -1,7 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";
+import type {
+  ContextManager,
+  ContextUsage,
+  PreparedTurn,
+} from "../../../packages/ohbaby-agent/src/core/context/index.js";
 import { Lifecycle } from "../../../packages/ohbaby-agent/src/core/lifecycle/index.js";
 import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
+import {
+  createInMemoryMessageStore,
+  createMessageManager,
+} from "../../../packages/ohbaby-agent/src/core/message/index.js";
+import type { MessageIdGenerator } from "../../../packages/ohbaby-agent/src/core/message/index.js";
 import { createToolScheduler } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
 import type {
   Tool,
@@ -15,6 +25,56 @@ import type {
 
 interface FakeSdkClient {
   readonly kind: "fake";
+}
+
+const SESSION_USAGE: ContextUsage = {
+  contextLimit: 100_000,
+  currentTokens: 120,
+  modelId: "fake-model",
+  remainingTokens: 99_880,
+  shouldCompress: false,
+  usageRatio: 0.0012,
+};
+
+function preparedTurn(messages: PreparedTurn["messages"]): PreparedTurn {
+  return {
+    assembledAt: 1_700_000_000_000,
+    hasSummary: false,
+    messages,
+    usage: SESSION_USAGE,
+  };
+}
+
+function createContextManagerMock(
+  prepareTurn: ContextManager["prepareTurn"],
+): ContextManager {
+  return {
+    assemble: vi.fn(),
+    compact: vi.fn(),
+    compress: vi.fn(),
+    getUsage: vi.fn(),
+    prepareTurn,
+    prune: vi.fn(),
+    shouldCompress: vi.fn(),
+  };
+}
+
+function createDeterministicIds(): MessageIdGenerator {
+  let nextMessageId = 1;
+  let nextPartId = 1;
+
+  return {
+    messageId(): string {
+      const id = `message_${String(nextMessageId)}`;
+      nextMessageId += 1;
+      return id;
+    },
+    partId(): string {
+      const id = `part_${String(nextPartId)}`;
+      nextPartId += 1;
+      return id;
+    },
+  };
 }
 
 function createProviderStream(
@@ -128,8 +188,45 @@ describe("lifecycle tool scheduler integration", () => {
       },
       source: "builtin",
     });
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValueOnce(
+        preparedTurn([{ role: "user", content: "Read README" }]),
+      )
+      .mockResolvedValueOnce(
+        preparedTurn([
+          { role: "user", content: "Read README" },
+          {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: "call_read",
+                function: {
+                  arguments: '{"path":"README.md"}',
+                  name: "read_fake",
+                },
+                type: "function",
+              },
+            ],
+          },
+          {
+            role: "tool",
+            content:
+              '{"params":{"path":"README.md"},"workdir":"D:/workspace/session_1","commandCwd":"D:/workspace/session_1"}',
+            tool_call_id: "call_read",
+          },
+        ]),
+      );
 
     const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
       llmClient: createSequentialFakeLLMClient(
         [
           [
@@ -149,13 +246,15 @@ describe("lifecycle tool scheduler integration", () => {
         ],
         requests,
       ),
+      messageManager,
       toolScheduler: scheduler,
     });
 
     const result = await consumeLifecycle(
       lifecycle.run({
+        directory: "D:/repo",
         environment: createEnvironment("D:/workspace/session_1"),
-        messages: [{ role: "user", content: "Read README" }],
+        modelId: "fake-model",
         sessionId: "session_1",
       }),
     );
@@ -168,7 +267,7 @@ describe("lifecycle tool scheduler integration", () => {
         environment: expect.objectContaining({
           workdir: "D:/workspace/session_1",
         }),
-        messageId: expect.stringContaining("session_1"),
+        messageId: "message_1",
         sessionId: "session_1",
       }),
     );

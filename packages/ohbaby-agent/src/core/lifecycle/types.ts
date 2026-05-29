@@ -27,18 +27,6 @@ export interface LifecycleDeps {
   readonly generateToolCallId?: () => string;
 }
 
-export interface LifecycleRunParams {
-  readonly sessionId: string;
-  readonly agent?: string;
-  readonly parentMessageId?: string;
-  readonly messages: readonly ChatCompletionMessage[];
-  readonly signal?: AbortSignal;
-  readonly tools?: ChatCompletionCreateParams["tools"];
-  readonly environment?: ToolExecutionEnvironment;
-  readonly isSubagent?: boolean;
-  readonly maxSteps?: number;
-}
-
 export interface LifecycleSessionParams {
   readonly sessionId: string;
   readonly directory: string;

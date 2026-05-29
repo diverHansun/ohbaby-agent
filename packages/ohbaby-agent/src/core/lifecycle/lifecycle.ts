@@ -1,8 +1,3 @@
-import type {
-  ChatCompletionAssistantMessageParam,
-  ChatCompletionMessageToolCall,
-  ChatCompletionToolMessageParam,
-} from "openai/resources/chat/completions/completions";
 import {
   isContextOverflowError,
   streamChatCompletion,
@@ -12,10 +7,7 @@ import type {
   ParsedToolCall,
   TokenUsage,
 } from "../llm-client/index.js";
-import {
-  formatToolResultContentForModel,
-  type PreparedTurn,
-} from "../context/index.js";
+import type { PreparedTurn } from "../context/index.js";
 import type {
   CoreMessage,
   MessageManager,
@@ -32,7 +24,6 @@ import type {
   LifecycleDeps,
   LifecycleEvent,
   LifecycleResult,
-  LifecycleRunParams,
   LifecycleSessionParams,
   TurnContext,
 } from "./types.js";
@@ -53,6 +44,18 @@ interface StepResult {
     { readonly type: "llm:complete" }
   >;
   readonly finalResponse: string;
+}
+
+interface ModelStepParams {
+  readonly sessionId: string;
+  readonly agent?: string;
+  readonly parentMessageId?: string;
+  readonly messages: readonly ChatCompletionMessage[];
+  readonly signal?: AbortSignal;
+  readonly tools?: LifecycleSessionParams["tools"];
+  readonly environment?: LifecycleSessionParams["environment"];
+  readonly isSubagent?: boolean;
+  readonly maxSteps?: number;
 }
 
 function getTextContent(message: ChatCompletionMessage): string {
@@ -167,28 +170,6 @@ function toParsedToolCall(toolCall: ResolvedToolCall): ParsedToolCall {
   };
 }
 
-function toAssistantToolMessage(input: {
-  readonly completeMessage: ChatCompletionMessage;
-  readonly toolCalls: readonly ResolvedToolCall[];
-}): ChatCompletionAssistantMessageParam {
-  const content = getTextContent(input.completeMessage);
-
-  return {
-    role: "assistant",
-    content: content === "" ? null : content,
-    tool_calls: input.toolCalls.map(
-      (toolCall): ChatCompletionMessageToolCall => ({
-        id: toolCall.id,
-        function: {
-          arguments: toolCall.rawArguments,
-          name: toolCall.name,
-        },
-        type: "function",
-      }),
-    ),
-  };
-}
-
 function toolResultErrorPayload(
   error: ToolCallResult["error"],
 ): Record<string, unknown> | undefined {
@@ -227,28 +208,6 @@ function toolResultBaseContent(result: ToolCallResult): string {
   }
 
   return JSON.stringify(payload);
-}
-
-function toolResultToContent(
-  result: ToolCallResult,
-  toolName: string,
-): string {
-  return formatToolResultContentForModel({
-    content: toolResultBaseContent(result),
-    metadata: result.metadata,
-    tool: toolName,
-  });
-}
-
-function toolResultToMessage(
-  result: ToolCallResult,
-  toolName: string,
-): ChatCompletionToolMessageParam {
-  return {
-    role: "tool",
-    content: toolResultToContent(result, toolName),
-    tool_call_id: result.callId,
-  };
 }
 
 function resultToToolState(
@@ -314,224 +273,18 @@ export class Lifecycle {
   }
 
   async *run(
-    params: LifecycleRunParams,
-  ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
-    const maxSteps = params.maxSteps ?? DEFAULT_MAX_STEPS;
-    const conversationMessages: ChatCompletionMessage[] = [...params.messages];
-    const generateToolCallId =
-      this.deps.generateToolCallId ?? createDefaultToolCallId();
-    let parentMessageId = params.parentMessageId;
-    let usage: LifecycleResult["usage"];
-    let finalResponse = "";
-    const allToolCalls: ParsedToolCall[] = [];
-
-    for (let step = 1; step <= maxSteps; step += 1) {
-      if (params.signal?.aborted) {
-        return {
-          success: false,
-          finishReason: "error",
-          finalResponse,
-          toolCalls: allToolCalls,
-          usage,
-        };
-      }
-
-      const stepResult = yield* this.runModelStep({
-        conversationMessages,
-        params,
-        parentMessageId,
-        step,
-      });
-      const { assistantMessage, finalEvent } = stepResult;
-      finalResponse = stepResult.finalResponse;
-
-      if (!finalEvent) {
-        await markAssistantMessageError(
-          this.deps.messageManager,
-          assistantMessage,
-          new Error("Lifecycle did not complete successfully"),
-        );
-        return {
-          success: false,
-          finishReason: "error",
-          finalResponse: "",
-          toolCalls: allToolCalls,
-          usage,
-        };
-      }
-
-      usage = addUsage(usage, toUsage(finalEvent.tokenUsage));
-      if (params.signal?.aborted) {
-        await markAssistantMessageError(
-          this.deps.messageManager,
-          assistantMessage,
-          new Error("Lifecycle aborted"),
-        );
-        return {
-          success: false,
-          finishReason: "error",
-          finalResponse,
-          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-          usage,
-        };
-      }
-
-      const parsedToolCalls = finalEvent.parsedToolCalls ?? [];
-      const shouldExecuteTools =
-        finalEvent.finishReason === "tool_calls" || parsedToolCalls.length > 0;
-
-      if (!shouldExecuteTools || parsedToolCalls.length === 0) {
-        if (shouldExecuteTools && parsedToolCalls.length === 0) {
-          await markAssistantMessageError(
-            this.deps.messageManager,
-            assistantMessage,
-            new Error("Model requested tool calls but none were parsed"),
-          );
-          return {
-            success: false,
-            finishReason: "error",
-            finalResponse: "Model requested tool calls but none were parsed",
-            toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-            usage,
-          };
-        }
-
-        return {
-          success: true,
-          finishReason: finalEvent.finishReason ?? "stop",
-          finalResponse,
-          toolCalls:
-            allToolCalls.length > 0 || parsedToolCalls.length > 0
-              ? [...allToolCalls, ...parsedToolCalls]
-              : undefined,
-          usage,
-        };
-      }
-
-      const toolCalls = normalizeToolCalls(parsedToolCalls, generateToolCallId);
-      allToolCalls.push(...toolCalls.map(toParsedToolCall));
-      const toolParts = await this.appendToolParts(
-        assistantMessage,
-        toolCalls,
-        finalEvent.tokenUsage,
-      );
-
-      for (const toolCall of toolCalls) {
-        await this.updateToolPart(toolParts.get(toolCall.id), {
-          input: toolCall.arguments,
-          status: "running",
-        });
-        yield {
-          type: "tool:start",
-          callId: toolCall.id,
-          params: toolCall.arguments,
-          sessionId: params.sessionId,
-          step,
-          timestamp: Date.now(),
-          toolName: toolCall.name,
-        };
-      }
-
-      const toolResults = await this.executeToolCalls({
-        assistantMessage,
-        params,
-        step,
-        toolCalls,
-      });
-      const toolNameByCallId = new Map(
-        toolCalls.map((toolCall) => [toolCall.id, toolCall.name] as const),
-      );
-      const resultByCallId = new Map(
-        toolResults.map((result) => [result.callId, result] as const),
-      );
-
-      for (const toolCall of toolCalls) {
-        const result = resultByCallId.get(toolCall.id);
-        if (!result) {
-          continue;
-        }
-        await this.updateToolPart(
-          toolParts.get(toolCall.id),
-          resultToToolState(result, toolCall.arguments),
-        );
-        yield {
-          type: "tool:result",
-          callId: result.callId,
-          params: toolCall.arguments,
-          result,
-          sessionId: params.sessionId,
-          step,
-          timestamp: Date.now(),
-          toolName: toolCall.name,
-        };
-      }
-
-      conversationMessages.push(
-        toAssistantToolMessage({
-          completeMessage: finalEvent.completeMessage,
-          toolCalls,
-        }),
-        ...toolResults.map((result) =>
-          toolResultToMessage(
-            result,
-            toolNameByCallId.get(result.callId) ?? "",
-          ),
-        ),
-      );
-      yield {
-        type: "step:complete",
-        finishReason: finalEvent.finishReason,
-        sessionId: params.sessionId,
-        step,
-        timestamp: Date.now(),
-        toolResults,
-      };
-
-      parentMessageId = assistantMessage?.id ?? parentMessageId;
-
-      if (params.signal?.aborted) {
-        return {
-          success: false,
-          finishReason: "error",
-          finalResponse,
-          toolCalls: allToolCalls,
-          usage,
-        };
-      }
-
-      if (step === maxSteps) {
-        return {
-          success: false,
-          finishReason: "error",
-          finalResponse: "Maximum lifecycle tool steps reached",
-          toolCalls: allToolCalls,
-          usage,
-        };
-      }
-    }
-
-    return {
-      success: false,
-      finishReason: "error",
-      finalResponse: "Maximum lifecycle tool steps reached",
-      toolCalls: allToolCalls,
-      usage,
-    };
-  }
-
-  async *runSession(
     params: LifecycleSessionParams,
     config: LifecycleConfig = {},
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
     const contextManager = this.deps.contextManager;
     if (!contextManager) {
-      throw new Error("Lifecycle.runSession requires a ContextManager");
+      throw new Error("Lifecycle.run requires a ContextManager");
     }
     if (!this.deps.messageManager) {
-      throw new Error("Lifecycle.runSession requires a MessageManager");
+      throw new Error("Lifecycle.run requires a MessageManager");
     }
     if (!this.deps.toolScheduler) {
-      throw new Error("Lifecycle.runSession requires a ToolScheduler");
+      throw new Error("Lifecycle.run requires a ToolScheduler");
     }
 
     const maxSteps = params.maxSteps ?? DEFAULT_MAX_STEPS;
@@ -580,7 +333,7 @@ export class Lifecycle {
         step,
       });
 
-      let runParams: LifecycleRunParams = {
+      let runParams: ModelStepParams = {
         agent: params.agent,
         environment: params.environment,
         isSubagent: params.isSubagent,
@@ -886,7 +639,7 @@ export class Lifecycle {
 
   private async *runModelStep(input: {
     readonly conversationMessages: readonly ChatCompletionMessage[];
-    readonly params: LifecycleRunParams;
+    readonly params: ModelStepParams;
     readonly parentMessageId?: string;
     readonly step: number;
   }): AsyncGenerator<LifecycleEvent, StepResult, void> {
@@ -1108,7 +861,7 @@ export class Lifecycle {
 
   private executeToolCalls(input: {
     readonly assistantMessage?: CoreMessage;
-    readonly params: LifecycleRunParams;
+    readonly params: ModelStepParams;
     readonly step: number;
     readonly toolCalls: readonly ResolvedToolCall[];
   }): Promise<ToolCallResult[]> {
