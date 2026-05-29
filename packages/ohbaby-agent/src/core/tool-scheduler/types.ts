@@ -18,7 +18,7 @@ export type ToolCategory =
   | "skill"
   | "subagent";
 
-export type ToolSource = "builtin" | "module" | "mcp";
+export type ToolSource = "builtin" | "module" | "skill" | "mcp";
 
 export type ToolCallStatus =
   | "pending"
@@ -103,6 +103,8 @@ export interface Tool {
   readonly parametersJsonSchema: Record<string, unknown>;
   readonly source: ToolSource;
   readonly category?: ToolCategory;
+  readonly requireExplicitApproval?: boolean;
+  /** @deprecated MCP trust is MCP-local metadata; scheduler uses requireExplicitApproval. */
   readonly isTrusted?: boolean;
   readonly mcpServer?: string;
   readonly mcpToolName?: string;

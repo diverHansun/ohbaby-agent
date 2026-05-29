@@ -266,7 +266,7 @@ export async function createSkillTool(
       required: ["name"],
       type: "object",
     },
-    source: "module",
+    source: "skill",
     async execute(params, context): Promise<ToolExecutionResult> {
       const name = requiredString(params, "name");
       await assertModelInvocable(registry, name);
@@ -314,7 +314,7 @@ export function createSkillResourceTool(
       required: ["name", "path"],
       type: "object",
     },
-    source: "module",
+    source: "skill",
     async execute(params, context): Promise<ToolExecutionResult> {
       const name = requiredString(params, "name");
       await assertModelInvocable(registry, name);

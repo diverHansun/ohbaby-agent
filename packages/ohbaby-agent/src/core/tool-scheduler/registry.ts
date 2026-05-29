@@ -13,6 +13,9 @@ function inferCategory(tool: Tool): ToolCategory {
   if (tool.category) {
     return tool.category;
   }
+  if (tool.source === "skill") {
+    return "skill";
+  }
   if (tool.source === "mcp") {
     return tool.annotations?.readOnlyHint === true ? "readonly" : "write";
   }

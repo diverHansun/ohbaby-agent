@@ -21,6 +21,8 @@
 | 状态管理 | 正确管理工具调用状态 |
 | 事件发布 | 正确发布状态变化事件 |
 | 取消执行 | 正确取消工具调用 |
+| 来源语义 | 区分 `module`、`skill`、`mcp` source |
+| 显式确认 | `requireExplicitApproval` 触发不可 remember 的用户确认 |
 
 ### 不在测试范围
 
@@ -30,6 +32,16 @@
 - 策略决策逻辑（Policy 模块职责）
 - 用户确认 UI（Permission 模块职责）
 - 事件分发机制（Bus 模块职责）
+
+### improve-1 新增验收场景
+
+- `createSkillTool()` 与 `createSkillResourceTool()` 注册为 `source: "skill"`，且 `category: "skill"` 保持不变。
+- `ToolRegistry` 对 `source: "skill"` 且未显式 category 的工具推断为 `category: "skill"`，并在 `list()` / `getAvailableTools()` 中保留 `source: "skill"`。
+- 非 MCP 工具只要设置 `requireExplicitApproval: true`，即使 permission state 已允许，也必须调用 `Permission.ask()`，`reason` 为 `explicit-approval-required`，`rememberable` 为 `false`。
+- `source: "mcp"` 本身不触发额外确认；只有 `requireExplicitApproval: true` 才触发确认。
+- MCP adapter 将 `trust: false` 映射为 `requireExplicitApproval: true`，`trust: true` 映射为 `false`。
+- `mcp_resource` / `mcp_prompt` 固定设置 `requireExplicitApproval: true`。
+- `stream-bridge-run-event-source` 独立测试 stream event 到 lifecycle event 的转换，并验证缺失 `sessionId` 的事件被跳过。
 
 ---
 

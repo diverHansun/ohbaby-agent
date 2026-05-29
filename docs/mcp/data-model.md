@@ -59,7 +59,8 @@ type McpClientStatus =
 interface McpToolMetadata {
   serverName: string           // 所属MCP服务器名称
   toolName: string             // MCP工具原始名称
-  isTrusted: boolean           // 是否信任（来自配置）
+  isTrusted: boolean           // MCP-local trust metadata（来自配置）
+  requireExplicitApproval: boolean // 映射给 ToolScheduler 的通用显式确认字段
   readOnlyHint?: boolean       // 来自 annotations.readOnlyHint，用于并发分类
 }
 ```
@@ -101,13 +102,14 @@ interface ToolAnnotations {
 interface Tool {
   name: string                 // {serverName}_{toolName}
   description: string
-  source: 'builtin' | 'extension' | 'mcp'
+  source: 'builtin' | 'module' | 'skill' | 'mcp'
   category: ToolCategory       // MCP工具通过 readOnlyHint 推断：true→readonly，其余→write
+  requireExplicitApproval?: boolean // scheduler 消费的通用显式确认字段
   parameters: ZodSchema | JSONSchema
 
   // MCP工具特有字段
   mcpServer?: string           // MCP服务器名称
-  isTrusted?: boolean          // 是否信任
+  isTrusted?: boolean          // MCP-local metadata；scheduler 不直接消费
   annotations?: ToolAnnotations // MCP 原始注解（保留完整信息供 Policy 等模块使用）
 
   execute: (
@@ -509,6 +511,7 @@ McpSseConfig → {
   category: undefined,
   mcpServer: 'filesystem',
   isTrusted: false,
+  requireExplicitApproval: true,
   parameters: {
     type: 'object',
     properties: {
@@ -542,6 +545,7 @@ McpSseConfig → {
   category: undefined,
   mcpServer: 'github',
   isTrusted: true,
+  requireExplicitApproval: false,
   parameters: { /* JSONSchema */ },
   execute: async (params, context) => { /* ... */ }
 }

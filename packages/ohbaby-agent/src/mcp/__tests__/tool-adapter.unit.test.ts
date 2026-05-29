@@ -4,14 +4,20 @@ import type {
   McpClientLike,
   McpToolDefinition,
 } from "../types.js";
-import { adaptMcpTool, transformMcpResult } from "../integration/tool-adapter.js";
+import {
+  adaptMcpTool,
+  transformMcpResult,
+} from "../integration/tool-adapter.js";
 
 interface MockClientFixture {
   readonly callTool: ReturnType<typeof vi.fn>;
   readonly client: McpClientLike;
 }
 
-function createMockClient(name = "server-name"): MockClientFixture {
+function createMockClient(
+  name = "server-name",
+  trust = true,
+): MockClientFixture {
   const callResult: McpCallToolResult = {
     content: [{ text: "tool result", type: "text" }],
   };
@@ -23,7 +29,7 @@ function createMockClient(name = "server-name"): MockClientFixture {
       command: "mock",
       enabled: true,
       timeout: 5000,
-      trust: true,
+      trust,
       type: "stdio",
     },
     callTool,
@@ -60,8 +66,23 @@ describe("adaptMcpTool", () => {
       mcpToolName: "read.file",
       name: "mcp_s11_server-name_t13_read_x2e_file",
       parametersJsonSchema: mcpTool.inputSchema,
+      requireExplicitApproval: false,
       source: "mcp",
     });
+  });
+
+  it("maps untrusted MCP servers to generic explicit approval", () => {
+    const { client } = createMockClient("untrusted-server", false);
+    const tool = adaptMcpTool(
+      {
+        inputSchema: { type: "object" },
+        name: "read",
+      },
+      client,
+    );
+
+    expect((tool as { readonly isTrusted: boolean }).isTrusted).toBe(false);
+    expect(tool.requireExplicitApproval).toBe(true);
   });
 
   it("defaults MCP tools without readOnlyHint to write category", () => {
@@ -129,7 +150,9 @@ describe("adaptMcpTool", () => {
     expect(padded.name).toBe("mcp_s6_server_t14__x20_read_x20_");
     expect(empty.name).toBe("mcp_s6_server_t0_");
     expect(unnamed.name).toBe("mcp_s6_server_t7_unnamed");
-    expect(new Set([plain.name, padded.name, empty.name, unnamed.name]).size).toBe(4);
+    expect(
+      new Set([plain.name, padded.name, empty.name, unnamed.name]).size,
+    ).toBe(4);
   });
 
   it("forwards execution to the original MCP tool name", async () => {

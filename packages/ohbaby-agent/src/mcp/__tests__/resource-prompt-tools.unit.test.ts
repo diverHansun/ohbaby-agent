@@ -40,7 +40,7 @@ describe("MCP resource and prompt tools", () => {
       output: "content from file:///README.md",
     });
     expect(tool.category).toBe("readonly");
-    expect(tool.isTrusted).toBe(false);
+    expect(tool.requireExplicitApproval).toBe(true);
     expect(tool.source).toBe("mcp");
   });
 
@@ -89,7 +89,7 @@ describe("MCP resource and prompt tools", () => {
       topic: "runtime",
     });
     expect(tool.category).toBe("readonly");
-    expect(tool.isTrusted).toBe(false);
+    expect(tool.requireExplicitApproval).toBe(true);
     expect(tool.source).toBe("mcp");
   });
 });

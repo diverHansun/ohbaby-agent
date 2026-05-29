@@ -72,7 +72,7 @@ export function createMcpResourceTool(manager: McpResourceReader): Tool {
       required: ["server", "uri"],
       type: "object",
     },
-    isTrusted: false,
+    requireExplicitApproval: true,
     source: "mcp",
     async execute(
       params: Record<string, unknown>,
@@ -112,7 +112,7 @@ export function createMcpPromptTool(manager: McpPromptReader): Tool {
       required: ["server", "name"],
       type: "object",
     },
-    isTrusted: false,
+    requireExplicitApproval: true,
     source: "mcp",
     async execute(
       params: Record<string, unknown>,

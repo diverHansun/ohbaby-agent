@@ -55,7 +55,7 @@ LLM tool call: mcp_s..._t...
 ToolScheduler
   │
   ├─ category from MCP annotations
-  ├─ untrusted MCP check if trust=false
+  ├─ generic explicit approval if requireExplicitApproval=true
   └─ tool.execute()
         │
         ▼
@@ -185,7 +185,7 @@ class McpManager {
 | `mcp_resource` | `readonly` | Read a specific resource from a connected MCP server |
 | `mcp_prompt` | `readonly` | Get a specific prompt from a connected MCP server |
 
-Both tools use `source: "mcp"` and `isTrusted: false`, so the same untrusted MCP confirmation path protects resource and prompt reads. Server-provided executable tools still carry their per-server `trust` setting.
+Both tools use `source: "mcp"` and `requireExplicitApproval: true`, so the generic explicit-approval path protects resource and prompt reads. Server-provided executable tools still carry MCP-local `isTrusted` metadata, but scheduler consumes only `requireExplicitApproval`.
 
 ---
 

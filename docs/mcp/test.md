@@ -629,16 +629,17 @@ it('should execute MCP tool through ToolScheduler', async () => {
 })
 ```
 
-#### 测试用例3：trust机制集成
+#### 测试用例3：trust 到 requireExplicitApproval 的集成
 
 ```typescript
-it('should trigger Permission.ask when trust=false', async () => {
+it('should trigger Permission.ask when requireExplicitApproval=true', async () => {
   const askSpy = jest.spyOn(Permission, 'ask').mockResolvedValue()
 
   const mcpTool = {
     name: 'untrusted_tool',
     source: 'mcp',
-    isTrusted: false,
+    isTrusted: false, // MCP-local metadata
+    requireExplicitApproval: true,
     execute: jest.fn().mockResolvedValue({ content: 'result' })
   }
 
@@ -655,7 +656,8 @@ it('should trigger Permission.ask when trust=false', async () => {
   // 应该触发Permission.ask
   expect(askSpy).toHaveBeenCalledWith(
     expect.objectContaining({
-      type: 'mcp-tool'
+      reason: 'explicit-approval-required',
+      rememberable: false
     })
   )
 

@@ -99,7 +99,7 @@ mcp/
 4. 注册 `mcp_resource` / `mcp_prompt` MCP access tools
 5. 订阅 `McpManager.onChange()`，在 MCP tools 变化时替换旧 MCP tools
 
-ToolScheduler 对 `source: "mcp"` 的工具保持统一权限检查。`trust: false` 的 MCP tool 即使策略允许，也会进入用户确认流程；`mcp_resource` / `mcp_prompt` 作为跨 server 访问入口固定以未信任 MCP tool 处理，避免绕过确认。
+MCP adapter 将配置中的 `trust` 映射到通用 Tool 字段：`trust: false` → `requireExplicitApproval: true`，`trust: true` → `requireExplicitApproval: false`。ToolScheduler 只消费 `requireExplicitApproval`，不直接消费 MCP-local `isTrusted`。`mcp_resource` / `mcp_prompt` 作为跨 server 访问入口固定设置 `requireExplicitApproval: true`，避免绕过确认。
 
 ---
 

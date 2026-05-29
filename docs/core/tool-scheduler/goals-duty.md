@@ -31,6 +31,7 @@
 管理来自不同来源的工具注册和调用：
 - Built-in Tools（内置工具，含网络工具）
 - Module-Owned Tools（模块内置工具）
+- Skill Tools（技能系统工具）
 - MCP Tools（MCP 工具）
 
 > `web_search` / `web_fetch` 是 `tools` 下的内置工具入口，后端走 `services/search-providers/` 对接 Tavily/Exa 等具体后端；它们对调度器而言仍是普通的 builtin 工具。
@@ -39,7 +40,7 @@
 
 ## 二、工具来源架构
 
-ToolScheduler 负责管理三种来源的工具：
+ToolScheduler 负责管理四种来源的工具：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -57,7 +58,11 @@ ToolScheduler 负责管理三种来源的工具：
 │     └── Memory.registerTools(scheduler)                     │
 │     └── source: 'module'                                    │
 │                                                             │
-│  3. MCP Tools（运行时发现）                                  │
+│  3. Skill Tools（技能系统注册）                              │
+│     └── skill / skill_resource                              │
+│     └── source: 'skill'                                     │
+│                                                             │
+│  4. MCP Tools（运行时发现）                                  │
 │     └── MCP Manager 发现并注册                               │
 │     └── source: 'mcp'                                       │
 │                                                             │
@@ -66,7 +71,7 @@ ToolScheduler 负责管理三种来源的工具：
 
 **ToolSource 类型**：
 ```typescript
-type ToolSource = 'builtin' | 'module' | 'mcp'
+type ToolSource = 'builtin' | 'module' | 'skill' | 'mcp'
 ```
 
 ---
@@ -78,6 +83,7 @@ type ToolSource = 'builtin' | 'module' | 'mcp'
 维护所有可用工具的注册表，支持多来源注册：
 - Built-in Tools：启动时静态注册（含 web_search / web_fetch）
 - Module-Owned Tools：模块初始化时调用 `registerTools()`
+- Skill Tools：runtime composition 注册 `skill` / `skill_resource`
 - MCP Tools：运行时动态注册
 
 ### D2: 维护工具类别映射

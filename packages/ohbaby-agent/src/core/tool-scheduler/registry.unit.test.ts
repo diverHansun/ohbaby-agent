@@ -13,11 +13,12 @@ function createTool(input: Partial<Tool> & Pick<Tool, "name">): Tool {
 }
 
 describe("ToolRegistry", () => {
-  it("registers tools and infers built-in, module, and MCP categories", () => {
+  it("registers tools and infers built-in, module, skill, and MCP categories", () => {
     const registry = createToolRegistry();
 
     registry.register(createTool({ name: "read" }));
     registry.register(createTool({ name: "memory_add", source: "module" }));
+    registry.register(createTool({ name: "skill", source: "skill" }));
     registry.register(
       createTool({
         annotations: { readOnlyHint: true },
@@ -31,9 +32,19 @@ describe("ToolRegistry", () => {
     expect(registry.get("read")?.name).toBe("read");
     expect(registry.getCategory("read")).toBe("readonly");
     expect(registry.getCategory("memory_add")).toBe("memory");
+    expect(registry.getCategory("skill")).toBe("skill");
     expect(registry.getCategory("mcp_read")).toBe("readonly");
     expect(registry.getCategory("mcp_write")).toBe("write");
     expect(registry.getCategory("custom")).toBe("dangerous");
+    expect(registry.list()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "skill",
+          name: "skill",
+          source: "skill",
+        }),
+      ]),
+    );
   });
 
   it("lists the same tools across permission modes while honoring agent config and subagent restrictions", () => {
