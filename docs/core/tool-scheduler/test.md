@@ -152,17 +152,17 @@
 **场景 19：状态正常流转（成功）**
 - 前置条件：无
 - 操作：执行一个成功的工具调用
-- 预期结果：状态依次为 pending → checking_policy → queued → executing → success
+- 预期结果：状态依次为 pending → checking_permission → queued → executing → success
 
 **场景 20：状态流转（被拒绝）**
 - 前置条件：Policy 返回 'deny'
 - 操作：调用 execute()
-- 预期结果：状态依次为 pending → checking_policy → rejected
+- 预期结果：状态依次为 pending → checking_permission → rejected
 
 **场景 21：状态流转（等待确认）**
 - 前置条件：Policy 返回 'ask'
 - 操作：调用 execute()
-- 预期结果：状态依次为 pending → checking_policy → awaiting_approval
+- 预期结果：状态依次为 pending → checking_permission → awaiting_approval
 
 **场景 22：查询工具状态**
 - 前置条件：工具正在执行
@@ -173,7 +173,7 @@
 
 **场景 23：状态变化事件**
 - 前置条件：无
-- 操作：执行工具，状态从 pending 变为 checking_policy
+- 操作：执行工具，状态从 pending 变为 checking_permission
 - 预期结果：发布 StatusChanged 事件，携带正确数据
 
 **场景 24：执行开始事件**

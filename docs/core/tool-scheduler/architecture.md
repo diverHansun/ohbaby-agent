@@ -135,7 +135,7 @@ interface Tool {
 ```typescript
 type ToolCallStatus =
   | 'pending'           // 等待处理
-  | 'checking_policy'   // 检查策略
+  | 'checking_permission' // 检查权限状态
   | 'awaiting_approval' // 等待用户确认
   | 'queued'            // 等待执行（并发控制）
   | 'executing'         // 正在执行
@@ -150,7 +150,7 @@ type ToolCallStatus =
 pending
    │
    ▼
-checking_policy
+checking_permission
    │
    ├── DENY ──────────────────────────────→ rejected
    │

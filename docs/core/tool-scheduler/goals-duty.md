@@ -125,7 +125,7 @@ type ToolSource = 'builtin' | 'module' | 'skill' | 'mcp'
 ### D6: 管理执行状态
 
 通过状态机管理每个工具调用的状态：
-- pending → checking_policy → queued/awaiting_approval → executing → success/error/rejected/cancelled
+- pending → checking_permission → queued/awaiting_approval → executing → success/error/rejected/cancelled
 
 ### D7: 发布状态变化事件
 

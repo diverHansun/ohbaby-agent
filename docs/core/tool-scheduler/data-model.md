@@ -41,8 +41,8 @@
 
 | 状态 | 说明 | 可转换到 |
 |------|------|----------|
-| pending | 初始状态，等待处理 | checking_policy |
-| checking_policy | 正在检查策略 | queued, awaiting_approval, rejected |
+| pending | 初始状态，等待处理 | checking_permission |
+| checking_permission | 正在检查权限状态 | queued, awaiting_approval, rejected |
 | awaiting_approval | 等待用户确认 | queued, rejected, cancelled |
 | queued | 已批准，等待并发资源 | executing |
 | executing | 正在执行 | success, error, cancelled |
@@ -79,7 +79,7 @@ type ToolSource = 'builtin' | 'module' | 'skill' | 'mcp'
 // 调用状态
 type ToolCallStatus =
   | 'pending'
-  | 'checking_policy'
+  | 'checking_permission'
   | 'awaiting_approval'
   | 'queued'
   | 'executing'
@@ -320,11 +320,11 @@ const MODE_ALLOWED_CATEGORIES: Record<Mode, ToolCategory[]> = {
 
 | 当前状态 | 事件 | 目标状态 | 条件 |
 |----------|------|----------|------|
-| pending | start | checking_policy | - |
-| checking_policy | policy_allow | queued | 并发检查通过 |
-| checking_policy | policy_allow | queued | 并发检查需等待 |
-| checking_policy | policy_deny | rejected | - |
-| checking_policy | policy_ask | awaiting_approval | - |
+| pending | start | checking_permission | - |
+| checking_permission | permission_allow | queued | 并发检查通过 |
+| checking_permission | permission_allow | queued | 并发检查需等待 |
+| checking_permission | permission_deny | rejected | - |
+| checking_permission | permission_ask | awaiting_approval | - |
 | awaiting_approval | user_approve | queued | - |
 | awaiting_approval | user_reject | rejected | - |
 | awaiting_approval | cancel | cancelled | - |
@@ -344,12 +344,12 @@ function transition(
 ): ToolCallStatus | null {
   const transitions: Record<ToolCallStatus, Partial<Record<TransitionEvent, ToolCallStatus>>> = {
     'pending': {
-      'start': 'checking_policy',
+      'start': 'checking_permission',
     },
-    'checking_policy': {
-      'policy_allow': 'queued',
-      'policy_deny': 'rejected',
-      'policy_ask': 'awaiting_approval',
+    'checking_permission': {
+      'permission_allow': 'queued',
+      'permission_deny': 'rejected',
+      'permission_ask': 'awaiting_approval',
     },
     'awaiting_approval': {
       'user_approve': 'queued',
