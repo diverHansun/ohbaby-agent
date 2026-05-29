@@ -277,6 +277,26 @@ class CompletingLifecycle implements RunLifecycle {
   }
 }
 
+class FailedResultLifecycle implements RunLifecycle {
+  async *run(
+    params: LifecycleSessionParams,
+  ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
+    await Promise.resolve();
+    yield {
+      type: "llm:start",
+      sessionId: params.sessionId,
+      step: 1,
+      timestamp: 10,
+    };
+
+    return {
+      success: false,
+      finishReason: "error",
+      finalResponse: "Context overflow after forced compaction retry",
+    };
+  }
+}
+
 class SessionLifecycle implements RunLifecycle {
   readonly calls: LifecycleSessionParams[] = [];
 
@@ -946,6 +966,21 @@ describe("RunManager", () => {
         triggerSource: "user",
       }),
     ).resolves.toMatchObject({ runId: "run_after_failure" });
+  });
+
+  it("preserves lifecycle failure reasons in run completion", async () => {
+    const { manager } = createManager(new FailedResultLifecycle());
+    const failed = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+
+    await expect(manager.waitForCompletion(failed.runId)).resolves.toEqual({
+      status: "failed",
+      error: "Context overflow after forced compaction retry",
+    });
   });
 
   it("marks prior pending and running ledger records interrupted during init", async () => {

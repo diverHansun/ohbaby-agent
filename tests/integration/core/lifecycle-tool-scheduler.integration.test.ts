@@ -1,13 +1,22 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";
-import type {
-  ContextManager,
-  ContextUsage,
-  PreparedTurn,
+import {
+  createContextManager,
+  type ContextLLMClient,
+  type ContextManager,
+  type ContextUsage,
+  type MemoryReader,
+  type PreparedTurn,
+  type SystemPromptProvider,
+  type TokenCounter,
 } from "../../../packages/ohbaby-agent/src/core/context/index.js";
 import { Lifecycle } from "../../../packages/ohbaby-agent/src/core/lifecycle/index.js";
 import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
 import {
+  createDatabaseMessageStore,
   createInMemoryMessageStore,
   createMessageManager,
 } from "../../../packages/ohbaby-agent/src/core/message/index.js";
@@ -18,6 +27,12 @@ import type {
   ToolExecutionEnvironment,
 } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
 import { createPermissionState } from "../../../packages/ohbaby-agent/src/permission/index.js";
+import {
+  closeDatabase,
+  getDatabase,
+  initDatabase,
+  schema,
+} from "../../../packages/ohbaby-agent/src/services/database/index.js";
 import type {
   ProviderRequest,
   ProviderStreamEvent,
@@ -75,6 +90,58 @@ function createDeterministicIds(): MessageIdGenerator {
       return id;
     },
   };
+}
+
+function createTokenCounter(): TokenCounter {
+  return {
+    estimateTokens(content: string): number {
+      return Math.ceil(content.length / 4);
+    },
+    getLimit(): number {
+      return 100_000;
+    },
+  };
+}
+
+function createEmptyMemory(): MemoryReader {
+  return {
+    load: vi.fn().mockResolvedValue({ global: "", project: "", merged: "" }),
+  };
+}
+
+function createEmptySystemPromptProvider(): SystemPromptProvider {
+  return {
+    build: vi.fn().mockResolvedValue(""),
+  };
+}
+
+function createContextLLMClient(): ContextLLMClient {
+  return {
+    generateSummary: vi
+      .fn()
+      .mockResolvedValue("<state_snapshot>summary</state_snapshot>"),
+  };
+}
+
+function insertSession(sessionId: string): void {
+  getDatabase()
+    .prepare(
+      `INSERT INTO ${schema.session.tableName}
+        (id, project_id, project_root, agent, title, status, created_at, updated_at, message_count, data)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      sessionId,
+      "project_1",
+      "D:/repo",
+      "default",
+      "Session",
+      "active",
+      1_700_000_000_000,
+      1_700_000_000_000,
+      0,
+      "{}",
+    );
 }
 
 function createProviderStream(
@@ -310,5 +377,230 @@ describe("lifecycle tool scheduler integration", () => {
         },
       ],
     });
+  });
+
+  it("persists tool metadata and rebuilds the next provider request through ContextManager", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ohbaby-lifecycle-db-"));
+    const sessionId = "session_metadata";
+    try {
+      initDatabase({ dbPath: join(directory, "agent.db") });
+      insertSession(sessionId);
+
+      const requests: ProviderRequest[] = [];
+      const bus = createBus();
+      const scheduler = createToolScheduler({
+        bus,
+        permission: { ask: () => "once" },
+        permissionState: createPermissionState({
+          bus,
+          initialLevel: "full-access",
+        }),
+      });
+      scheduler.register({
+        category: "readonly",
+        description: "Read file with metadata",
+        execute: () => ({
+          metadata: {
+            internalSecret: "do-not-project",
+            mtimeMs: 1_700_000_000_000,
+            path: "D:/repo/README.md",
+          },
+          output: "README contents",
+        }),
+        name: "read",
+        parametersJsonSchema: {
+          properties: { path: { type: "string" } },
+          required: ["path"],
+          type: "object",
+        },
+        source: "builtin",
+      });
+      scheduler.register({
+        category: "readonly",
+        description: "Run bash with exit metadata",
+        execute: () => ({
+          metadata: {
+            exitCode: 1,
+            pid: 12345,
+            signal: null,
+          },
+          output: "",
+        }),
+        name: "bash",
+        parametersJsonSchema: {
+          properties: { command: { type: "string" } },
+          required: ["command"],
+          type: "object",
+        },
+        source: "builtin",
+      });
+      scheduler.register({
+        category: "network",
+        description: "Fake MCP search",
+        execute: () => ({
+          metadata: {
+            contentTypes: ["text"],
+            internalSecret: "do-not-project",
+            server: "server",
+            source: "mcp",
+            structuredContent: { total: 1 },
+            tool: "search",
+          },
+          output: "search result",
+        }),
+        mcpServer: "server",
+        mcpToolName: "search",
+        name: "mcp_s6_server_t6_search",
+        parametersJsonSchema: {
+          properties: { query: { type: "string" } },
+          required: ["query"],
+          type: "object",
+        },
+        source: "mcp",
+      });
+
+      const messageManager = createMessageManager({
+        bus,
+        store: createDatabaseMessageStore(),
+        idGenerator: createDeterministicIds(),
+        now: () => 1_700_000_000_000,
+      });
+      const user = await messageManager.createMessage({
+        agent: "default",
+        sessionId,
+        role: "user",
+      });
+      await messageManager.appendPart(user.id, {
+        text: "Read README, run bash false, and search with MCP.",
+        type: "text",
+      });
+      const contextManager = createContextManager({
+        bus,
+        llmClient: createContextLLMClient(),
+        memory: createEmptyMemory(),
+        messageManager,
+        systemPromptProvider: createEmptySystemPromptProvider(),
+        tokenCounter: createTokenCounter(),
+        now: () => 1_700_000_000_000,
+      });
+
+      const lifecycle = new Lifecycle({
+        contextManager,
+        llmClient: createSequentialFakeLLMClient(
+          [
+            [
+              {
+                toolCallDeltas: [
+                  {
+                    argumentsDelta: '{"path":"README.md"}',
+                    id: "call_read",
+                    index: 0,
+                    name: "read",
+                  },
+                  {
+                    argumentsDelta: '{"command":"false"}',
+                    id: "call_bash",
+                    index: 1,
+                    name: "bash",
+                  },
+                  {
+                    argumentsDelta: '{"query":"ohbaby"}',
+                    id: "call_mcp",
+                    index: 2,
+                    name: "mcp_s6_server_t6_search",
+                  },
+                ],
+                finishReason: "tool_calls",
+              },
+            ],
+            [{ textDelta: "All metadata was available.", finishReason: "stop" }],
+          ],
+          requests,
+        ),
+        messageManager,
+        toolScheduler: scheduler,
+      });
+
+      const result = await consumeLifecycle(
+        lifecycle.run({
+          directory: "D:/repo",
+          environment: createEnvironment("D:/workspace/session_metadata"),
+          modelId: "fake-model",
+          sessionId,
+        }),
+      );
+
+      expect(requests).toHaveLength(2);
+      const secondMessages = requests[1]?.messages ?? [];
+      const readResult = secondMessages.find(
+        (message) =>
+          message.role === "tool" && message.tool_call_id === "call_read",
+      );
+      const bashResult = secondMessages.find(
+        (message) =>
+          message.role === "tool" && message.tool_call_id === "call_bash",
+      );
+      const mcpResult = secondMessages.find(
+        (message) =>
+          message.role === "tool" && message.tool_call_id === "call_mcp",
+      );
+      expect(readResult?.content).toContain('"mtimeMs":1700000000000');
+      expect(bashResult?.content).toContain('"exitCode":1');
+      expect(mcpResult?.content).toContain(
+        '"structuredContent":{"total":1}',
+      );
+      expect(readResult?.content).not.toContain("internalSecret");
+      expect(bashResult?.content).not.toContain('"pid":12345');
+      expect(mcpResult?.content).not.toContain("internalSecret");
+      await expect(messageManager.listBySession(sessionId)).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            info: expect.objectContaining({ role: "assistant" }),
+            parts: expect.arrayContaining([
+              expect.objectContaining({
+                state: expect.objectContaining({
+                  metadata: expect.objectContaining({
+                    mtimeMs: 1_700_000_000_000,
+                  }),
+                  status: "completed",
+                }),
+                tool: "read",
+                type: "tool",
+              }),
+              expect.objectContaining({
+                state: expect.objectContaining({
+                  metadata: expect.objectContaining({
+                    exitCode: 1,
+                    pid: 12345,
+                  }),
+                  status: "completed",
+                }),
+                tool: "bash",
+                type: "tool",
+              }),
+              expect.objectContaining({
+                state: expect.objectContaining({
+                  metadata: expect.objectContaining({
+                    source: "mcp",
+                    structuredContent: { total: 1 },
+                  }),
+                  status: "completed",
+                }),
+                tool: "mcp_s6_server_t6_search",
+                type: "tool",
+              }),
+            ]),
+          }),
+        ]),
+      );
+      expect(result).toMatchObject({
+        finalResponse: "All metadata was available.",
+        finishReason: "stop",
+        success: true,
+      });
+    } finally {
+      closeDatabase();
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

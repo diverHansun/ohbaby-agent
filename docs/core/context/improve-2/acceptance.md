@@ -8,7 +8,7 @@
 
 **判定**：
 
-- `docs/core/context/improve-2/README.md` 存在并说明当前状态是待实施规划。
+- `docs/core/context/improve-2/README.md` 存在并说明当前实施状态：P0 已完成，P1/P2/P3 仍分批推进。
 - `problem-analysis.md` 明确区分已实现能力与待实现缺口。
 - `implementation-plan.md` 给出分阶段实施顺序。
 - `acceptance.md` 给出可执行验收命令。
@@ -19,7 +19,7 @@
 
 ## AC-1 Per-step context 准备
 
-**目标**：长 tool 链中，`Lifecycle.runSession` 不再只在第一步调用 `prepareTurn`。
+**目标**：长 tool 链中，session-based `Lifecycle.run(...)` 不再只在第一步调用 `prepareTurn`。
 
 **判定**：
 
@@ -68,7 +68,7 @@ pnpm exec vitest run packages\ohbaby-agent\src\core\context\manager.unit.test.ts
 **判定**：
 
 - llm-client/provider 层存在窄错误识别函数。
-- `runSession` 捕获 overflow 后调用 `prepareTurn({ force: true, ... })`。
+- session-based `Lifecycle.run(...)` 捕获 overflow 后调用 `prepareTurn({ force: true, ... })`。
 - 同一 step 最多重试一次，避免无限循环。
 - 强制压缩后仍失败时，返回结构化 error，不吞错。
 - 失败 assistant message 标记为 error 并保留审计记录，但不进入下一次 LLM 输入。
@@ -81,11 +81,13 @@ pnpm exec vitest run packages\ohbaby-agent\src\core\context\manager.unit.test.ts
 
 ---
 
-## AC-4 Dynamic completion budget
+## AC-4 Dynamic completion budget（后续阶段）
 
 **目标**：LLM 调用可以根据当前 input usage 限制输出预算。
 
-**判定**：
+当前分支不宣称完成 dynamic completion budget。该 AC 保留为后续阶段验收口径，不能作为 P0 已通过项。
+
+**后续判定**：
 
 - `streamChatCompletion` 或 provider 调用接收动态 output budget。
 - 当 provider 不支持该字段时有明确降级路径。
@@ -94,11 +96,13 @@ pnpm exec vitest run packages\ohbaby-agent\src\core\context\manager.unit.test.ts
 
 ---
 
-## AC-5 Origin 追踪
+## AC-5 Origin 追踪（后续阶段）
 
 **目标**：新写入的上下文关键内容具备来源信息，旧消息保持兼容。
 
-**判定**：
+当前分支不宣称完成 origin 追踪。该 AC 保留为后续阶段验收口径，不能作为 P0 已通过项。
+
+**后续判定**：
 
 - 新增 `PromptOrigin` 或等价窄类型。
 - user / assistant / tool / context-summary 至少有新增写入路径携带 origin。
@@ -107,11 +111,13 @@ pnpm exec vitest run packages\ohbaby-agent\src\core\context\manager.unit.test.ts
 
 ---
 
-## AC-6 文件操作跨压缩累积
+## AC-6 文件操作跨压缩累积（后续阶段）
 
 **目标**：多次压缩后，summary 仍保留会话级文件读写状态。
 
-**判定**：
+当前分支不宣称完成文件操作跨压缩累积。该 AC 保留为后续阶段验收口径，不能作为 P0 已通过项。
+
+**后续判定**：
 
 - 第二次压缩能继承第一次 summary 的 read/modified files。
 - 已 compacted 的 tool parts 不被重复统计为新操作。

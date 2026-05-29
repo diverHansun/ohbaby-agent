@@ -9,7 +9,7 @@
 **判定**：
 
 - README 明确 agents improve-2 已完成，不再规划 primary 切到 `runAgent`。
-- problem-analysis 明确列出仍存在的问题：per-step prepare、overflow recovery、dynamic budget、legacy run 双路径。
+- problem-analysis 明确区分实施前问题、当前已完成项和仍后续推进项（dynamic budget）。
 - implementation-plan 分阶段，且 P0 后用独立 commit 删除 legacy `run(messages)`。
 - acceptance 给出可执行测试命令。
 
@@ -19,7 +19,7 @@
 
 **判定**：
 
-- `Lifecycle.runSession` 不再只在 `conversationMessages` undefined 时调用 `prepareTurn`。
+- session-based `Lifecycle.run(params: LifecycleSessionParams)` 不再只在第一步调用 `prepareTurn`。
 - 多 tool step 场景中，后续 LLM step 前可重新准备 provider messages。
 - 如果后续 step 触发 compaction，RunWorker/stream adapter 能发布对应 context notice。
 - tool protocol 不回归：assistant `tool_calls` 后紧跟 matching `tool` messages。
@@ -63,7 +63,7 @@ pnpm exec vitest run packages\ohbaby-agent\src\core\context\manager.unit.test.ts
 **判定**：
 
 - 存在 provider-neutral 的 overflow error 识别函数。
-- `runSession` 捕获 overflow 后强制 `prepareTurn({ force: true })`。
+- session-based `Lifecycle.run(...)` 捕获 overflow 后强制 `prepareTurn({ force: true })`。
 - 同一 step 最多重试一次。
 - 非 overflow 错误不触发 compaction retry。
 - 重试失败时错误可读，且 run status 正确进入 failed/cancelled。
@@ -80,7 +80,7 @@ pnpm exec vitest run packages\ohbaby-agent\src\core\context\manager.unit.test.ts
 - 旧 `Lifecycle.run(messages)` 与 `LifecycleRunParams.messages` 被删除。
 - `RunWorker` 不再通过 `context.messages` 选择 legacy/session 模式。
 - 测试 fixture 通过写入 session message + session params 启动 run，不再预组装 provider messages。
-- 如短暂保留 `runSession`，它只能是 deprecated alias，不能包含独立 tool loop。
+- 不保留独立 `runSession` tool loop；如未来需要兼容 alias，只能转发到 session-based `run(...)`。
 
 **建议 grep**：
 
@@ -90,9 +90,11 @@ rg -n "LifecycleRunParams|messages\\?: readonly ChatCompletionMessage|params\\.m
 
 ---
 
-## AC-5 Dynamic completion budget
+## AC-5 Dynamic completion budget（后续阶段）
 
-**判定**：
+当前分支不宣称完成 dynamic completion budget。该 AC 保留为后续阶段验收口径，不能作为 P0/P1 已通过项。
+
+**后续判定**：
 
 - `streamChatCompletion` options 或 provider adapter 支持动态输出预算。
 - 预算来自当前 context usage，而不是写死常量。

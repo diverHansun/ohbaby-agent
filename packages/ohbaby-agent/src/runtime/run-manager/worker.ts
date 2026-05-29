@@ -155,7 +155,7 @@ export class RunWorker {
           : "failed";
       const error =
         status === "failed"
-          ? "Lifecycle did not complete successfully"
+          ? result.finalResponse || "Lifecycle did not complete successfully"
           : status === "cancelled"
             ? abortReason(this.context.abortSignal)
             : undefined;

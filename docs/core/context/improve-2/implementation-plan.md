@@ -1,6 +1,6 @@
 # context improve-2 实施计划
 
-> **实施边界**：本文档只规划 `core/context` 与其必要协作点，不直接重构 agents。agents improve-2 已完成，后续开发从 `Lifecycle.runSession` 的 context 压力点切入。
+> **实施边界**：本文档只规划 `core/context` 与其必要协作点，不直接重构 agents。agents improve-2 已完成，当前 P0 已从 session-based `Lifecycle.run(...)` 的 context 压力点切入并落地。
 
 ---
 
@@ -10,9 +10,9 @@
 |------|------|---------|
 | `packages/ohbaby-agent/src/core/context/context-manager.ts` | `prepareTurn` 已完成 assemble → prune/compress → serialize；可被重复调用 | per-step 压缩的核心复用点 |
 | `packages/ohbaby-agent/src/core/context/types.ts` | `PrepareTurnInput` 已支持 `force`；`PreparedTurn` 返回 `messages / usage / compaction` | 保持现有 API，必要时只做向后兼容扩展 |
-| `packages/ohbaby-agent/src/core/context/serializer.ts` | provider message 投影硬编码为 system + memory + history；tool result 只读取 output/error | P0 metadata 白名单投影；P2 注入系统入口 |
-| `packages/ohbaby-agent/src/core/message/types.ts` | `PartMetadata` 已有 `[key: string]: unknown`，但 `ToolState.completed/error` 未持久化 raw metadata | P0 tool metadata source-of-truth 修复；origin 字段优先落在 metadata/info 扩展，不破坏 schema |
-| `packages/ohbaby-agent/src/core/lifecycle/lifecycle.ts` | `runSession` 只在第一 step 调用一次 `prepareTurn` | P0 协作点 |
+| `packages/ohbaby-agent/src/core/context/serializer.ts` | provider message 投影为 system + memory + history；tool result 已通过中央白名单投影 metadata | P0 已落地；P2 注入系统入口仍后续 |
+| `packages/ohbaby-agent/src/core/message/types.ts` | `PartMetadata` 已有 `[key: string]: unknown`，`ToolState.completed/error/aborted` 已持久化 raw metadata | P0 已落地；origin 字段优先落在 metadata/info 扩展，不破坏 schema |
+| `packages/ohbaby-agent/src/core/lifecycle/lifecycle.ts` | session-based `Lifecycle.run(...)` 每个 model step 前调用 `prepareTurn` | P0 已落地，后续关注性能度量与 dynamic budget |
 
 ---
 
@@ -52,7 +52,7 @@
 
 **推荐实现方向**：
 
-1. `Lifecycle.runSession` 每次进入 LLM step 前调用 `contextManager.prepareTurn(...)`。
+1. session-based `Lifecycle.run(...)` 每次进入 LLM step 前调用 `contextManager.prepareTurn(...)`。
 2. 第一次 step 正常触发 `turn:start`。
 3. 每次 step 前发出 `context:prepared`；`turn:start` 每个 turn 只发一次。
 4. 后续 step 若 `prepareTurn` 产生 `compaction`，继续发出可被 UI 投影的 context notice。
@@ -72,7 +72,7 @@
 **推荐实现方向**：
 
 1. 在 llm-client/provider 层定义窄错误识别函数，例如 `isContextOverflowError(error)`。
-2. `Lifecycle.runSession` 捕获 overflow 后调用 `prepareTurn({ force: true, ... })`。
+2. session-based `Lifecycle.run(...)` 捕获 overflow 后调用 `prepareTurn({ force: true, ... })`。
 3. 重试当前 model step，最多 1 次，避免无限循环。
 4. 若强制压缩后仍 overflow，返回结构化失败，并在 turn end / run status 中记录可读错误。
 
@@ -136,7 +136,7 @@
 - 工具 metadata 回归：`packages/ohbaby-agent/src/mcp/__tests__/tool-adapter.unit.test.ts`、`packages/ohbaby-agent/src/tools/files.scheduler.integration.test.ts`
 - runtime/adapter 回归：`packages/ohbaby-agent/src/runtime/run-manager/manager.unit.test.ts`、`packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts`
 - 集成链路：`tests/integration/tui/main-chain.integration.test.tsx`
-- 真实 provider smoke：只在实现完成后按 `ohbaby-e2e-test.md` 本地配置运行，不提交密钥。
+- 真实 provider smoke：P0/P1 实现完成后按 `ohbaby-e2e-test.md` 本地配置运行，不提交密钥。
 
 ---
 

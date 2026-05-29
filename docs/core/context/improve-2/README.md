@@ -2,7 +2,7 @@
 
 本目录是 `core/context/` 模块第二轮架构优化的完整文档集。在 improve-1 修复了算法层与契约层问题、agents improve-2 完成 primary/subagent 底层统一之后，context improve-2 聚焦**长会话韧性**和**上下文可观测性**。
 
-> 状态：规划文档。本文档只描述待实施范围，不代表代码已经完成。
+> 状态：实施中。当前分支已完成 P0：per-step context 准备、overflow recovery、tool raw metadata 持久化与 serializer 中央白名单投影；P1/P2 项仍按后续阶段分批推进。
 
 ---
 
@@ -49,9 +49,9 @@ ohbaby-agent 的三层记忆架构骨架已完整且方向正确：
 
 工程深度缺口：
 ├── 事件溯源 (Record/Replay) ❌ → P1
-├── Per-step 压缩 ❌ → P0
-├── 溢出自动恢复 ❌ → P0
-├── Tool metadata 白名单投影 ❌ → P0
+├── Per-step 压缩 ✅ → P0 已在 lifecycle improve-2 落地
+├── 溢出自动恢复 ✅ → P0 已在 lifecycle improve-2 落地
+├── Tool metadata 白名单投影 ✅ → P0 已落地
 ├── Origin 追踪 ❌ → P1
 ├── 注入系统 ❌ → P2
 ├── 动态 completion budget ❌ → P2
@@ -104,17 +104,17 @@ context 模块在本轮改造中需要与以下模块协作。首批开发建议
 
 ## 范围声明
 
-本轮（improve-2）只覆盖以下内容：
+本轮（improve-2）分批覆盖以下内容。当前已完成 P0；P1/P2 不应在 P0 验收中被宣称完成。
 
 - Per-step 压缩（P0）
 - 上下文溢出自动恢复（P0）
 - Tool metadata 白名单投影（P0）
-- 事件溯源基础（P1）
-- 消息 Origin 追踪（P1）
-- 文件操作跨压缩累积（P2）
-- 注入系统骨架（P2）
-- 动态 completion budget（P2）
-- 后台任务异步通知（P2）
+- 事件溯源基础（P1，后续）
+- 消息 Origin 追踪（P1，后续）
+- 文件操作跨压缩累积（P2，后续）
+- 注入系统骨架（P2，后续）
+- 动态 completion budget（P2，后续）
+- 后台任务异步通知（P2，后续）
 
 **不在本轮范围**：
 

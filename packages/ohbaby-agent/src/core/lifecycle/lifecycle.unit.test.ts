@@ -41,33 +41,6 @@ function createProviderStream(
   })();
 }
 
-function createFakeLLMClient(
-  events: readonly ProviderStreamEvent[],
-): LLMClientInstance<FakeSdkClient> {
-  return {
-    provider: {
-      id: "fake",
-      kind: "openai-compatible",
-      client: { kind: "fake" },
-      streamChatCompletion(
-        _request: ProviderRequest,
-      ): Promise<AsyncIterable<ProviderStreamEvent>> {
-        return Promise.resolve(createProviderStream(events));
-      },
-      isAbortError(): boolean {
-        return false;
-      },
-    },
-    config: {
-      provider: "fake",
-      model: "fake-model",
-      baseUrl: "https://example.invalid/v1",
-      temperature: 0,
-      maxTokens: 128,
-    },
-  };
-}
-
 function createSequentialFakeLLMClient(
   eventBatches: readonly (readonly ProviderStreamEvent[])[],
   requests: ProviderRequest[],
@@ -214,28 +187,6 @@ function createContextManagerMock(
 }
 
 describe("Lifecycle.run", () => {
-  it("requires persistent message and tool dependencies", async () => {
-    const prepareTurn = vi
-      .fn<ContextManager["prepareTurn"]>()
-      .mockResolvedValue(preparedTurn([{ role: "user", content: "Hello" }]));
-    const lifecycle = new Lifecycle({
-      contextManager: createContextManagerMock(prepareTurn),
-      llmClient: createFakeLLMClient([
-        { textDelta: "Hello", finishReason: "stop" },
-      ]),
-    });
-
-    await expect(
-      consumeLifecycle(
-        lifecycle.run({
-          directory: "D:/repo",
-          modelId: "fake-model",
-          sessionId: "session_test",
-        }),
-      ),
-    ).rejects.toThrow("Lifecycle.run requires a MessageManager");
-  });
-
   it("prepares context before every model step and uses prepared messages as the step source", async () => {
     const requests: ProviderRequest[] = [];
     const messageManager = createMessageManager({

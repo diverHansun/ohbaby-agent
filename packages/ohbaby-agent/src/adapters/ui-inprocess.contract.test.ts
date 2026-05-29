@@ -1771,7 +1771,7 @@ describe("createInProcessUiBackendClient", () => {
       typeof parentToolMessage?.content === "string"
         ? parentToolMessage.content
         : "";
-    expect(parentToolContent).toContain("Lifecycle did not complete successfully");
+    expect(parentToolContent).toContain("Maximum lifecycle tool steps reached");
     expect(toolMetadataFromContent(parentToolContent)).toMatchObject({
       success: false,
     });

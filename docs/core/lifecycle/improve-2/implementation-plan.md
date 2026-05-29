@@ -59,7 +59,7 @@
 
 ## Phase 3：Per-step prepare/compact
 
-**目标**：`runSession` 每次 LLM step 前都能重新进入 context 管理。
+**目标**：session-based `Lifecycle.run(...)` 每次 LLM step 前都能重新进入 context 管理。
 
 **建议实现**：
 
@@ -85,7 +85,7 @@
 **建议实现**：
 
 1. 在 llm-client/provider 层新增 `isContextOverflowError(error)`。
-2. `runSession` 包裹 `runModelStep`，捕获 overflow。
+2. session-based `Lifecycle.run(...)` 包裹 `runModelStep`，捕获 overflow。
 3. 捕获后调用 `contextManager.prepareTurn({ force: true, ... })`。
 4. 用新的 `PreparedTurn.messages` 重试当前 step。
 5. 同一 step 只重试一次。
@@ -113,11 +113,11 @@ async *run(
 
 **建议实现**：
 
-1. 将现有 `runSession(...)` 语义迁移到新的 `run(...)`。
+1. 将 session-run 语义迁移到新的 `run(...)`。
 2. 删除旧 `LifecycleRunParams.messages` 和旧 `run(messages)` tool loop。
 3. `RunWorker` 不再通过 `context.messages` 选择 legacy/session 模式；所有生产 run 都必须有 `sessionId/directory/modelId` 并走 session message store。
 4. 更新 runtime/daemon/bootstrap 与相关单测，测试 fixture 先写 session message，再启动 run。
-5. 对外如必须短暂兼容，可保留 `runSession(...)` 作为 deprecated alias，但不允许保留旧 message-run 行为。
+5. 不保留旧 message-run 行为；如未来需要兼容 alias，只能转发到 session-based `run(...)`，不能包含独立 tool loop。
 
 **设计说明**：
 

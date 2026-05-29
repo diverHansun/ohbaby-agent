@@ -21,9 +21,9 @@ import type {
 
 export interface LifecycleDeps {
   readonly llmClient: LLMClientInstance;
-  readonly messageManager?: MessageManager;
-  readonly toolScheduler?: ToolSchedulerInstance;
-  readonly contextManager?: ContextManager;
+  readonly messageManager: MessageManager;
+  readonly toolScheduler: ToolSchedulerInstance;
+  readonly contextManager: ContextManager;
   readonly generateToolCallId?: () => string;
 }
 

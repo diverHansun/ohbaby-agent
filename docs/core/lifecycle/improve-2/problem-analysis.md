@@ -1,6 +1,8 @@
 # lifecycle improve-2 问题分析
 
-本文档对照 2026-05-28 的代码现状，重新划定 `core/lifecycle` improve-2 的问题范围。
+本文档对照 2026-05-28 的实施前代码现状，重新划定 `core/lifecycle` improve-2 的问题范围。
+
+> 实施状态：当前分支已完成 P0/P1 收口：per-step prepare、overflow recovery、tool metadata 持久化、legacy `run(messages)` 删除、`LifecycleDeps` 必填化。本文保留实施前问题以解释设计动机，并在表格中标注当前状态。
 
 ---
 
@@ -10,21 +12,21 @@
 
 - `agents/service.ts` 的 `startSession` 已调用 `runAgent({ waitMode: "stream" })`。
 - `agents/service.ts` / `agents/tasks/manager.ts` 的 task/subagent 路径已调用 `runAgent({ waitMode: "waitForCompletion" })`。
-- `runtime/run-manager/worker.ts` 在没有 legacy `messages` 时调用 `lifecycle.runSession(...)`。
+- `runtime/run-manager/worker.ts` 当前只调用 session-based `Lifecycle.run(...)`，不再通过 legacy `messages` 选择执行模式。
 
 因此，旧文档中"primary 路径未切换"、"`waitMode: stream` 可以暂不实现"等表述已经过期。
 
-### 仍然存在的问题
+### 实施前问题与当前状态
 
-| 编号 | 问题 | 严重度 | 证据 |
-|------|------|--------|------|
-| PL-1 | `runSession` 只在第一 step 调用 `prepareTurn` | 高 | `lifecycle.ts` 中 `if (!conversationMessages) prepareTurn(...)` |
-| PL-2 | LLM context overflow 无自动恢复 | 高 | `runModelStep` 直接迭代 `streamChatCompletion`，错误向外传播 |
-| PL-3 | completion budget 未动态传入 provider | 中 | `streamChatCompletion(..., { signal, tools })` 未携带 max output 参数 |
-| PL-4 | `run()` 与 `runSession()` 两套 tool loop 重复 | 中 | 两个 async generator 各自实现 LLM step、tool start/result、step complete、max step |
-| PL-5 | RunWorker 通过 `context.messages` 隐式选择 legacy/session 模式 | 中 | `createLifecycleLoop()` 用字段存在性决定 `run()` vs `runSession()` |
-| PL-6 | session-run 事件语义需要支持多次 context prepare | 中 | 当前 `turn:start` 只在第一次 prepare 时产生 |
-| PL-7 | tool metadata 只在当前 step 内存链路可见，未进入 message store | 高 | `resultToToolState` 只持久化 `output/error`；下一 step 重新 `prepareTurn` 后会丢失 `mtimeMs`、`exitCode`、MCP `structuredContent` |
+| 编号 | 问题 | 严重度 | 当前状态 |
+|------|------|--------|----------|
+| PL-1 | 旧 session path 只在第一 step 调用 `prepareTurn` | 高 | 已完成：`Lifecycle.run(...)` 每个 model step 前调用 `prepareTurn` |
+| PL-2 | LLM context overflow 无自动恢复 | 高 | 已完成：overflow 后 `prepareTurn({ force: true })`，当前 step 最多重试一次 |
+| PL-3 | completion budget 未动态传入 provider | 中 | 后续阶段：当前仍使用静态 provider `maxTokens` |
+| PL-4 | `run()` 与 `runSession()` 两套 tool loop 重复 | 中 | 已完成：旧 message-run 删除，session-based `run(...)` 是唯一生产入口 |
+| PL-5 | RunWorker 通过 `context.messages` 隐式选择 legacy/session 模式 | 中 | 已完成：RunWorker 不再消费 preassembled `messages` |
+| PL-6 | session-run 事件语义需要支持多次 context prepare | 中 | 已完成：每个 step 前发出 `context:prepared`，`turn:start` 每 turn 一次 |
+| PL-7 | tool metadata 只在当前 step 内存链路可见，未进入 message store | 高 | 已完成：raw metadata 持久化到 `ToolState`，模型可见字段由 context serializer 投影 |
 
 ---
 
@@ -32,7 +34,7 @@
 
 ### RC-1：lifecycle 把"turn"和"step"混在同一层
 
-当前 `runSession` 在 turn 开始时准备 context，然后在 step 循环中持续追加工具协议消息。这个模型对短链路足够，但长 tool 链会让 step 内上下文增长脱离 `ContextManager` 管控。
+实施前旧 session path 在 turn 开始时准备 context，然后在 step 循环中持续追加工具协议消息。这个模型对短链路足够，但长 tool 链会让 step 内上下文增长脱离 `ContextManager` 管控。当前实现已改为每个 model step 前重新进入 `ContextManager.prepareTurn`。
 
 ### RC-2：错误恢复没有成为 lifecycle 协议的一部分
 
@@ -40,11 +42,11 @@
 
 ### RC-3：legacy message-run 仍保留完整执行循环
 
-`run()` 曾是 primary 的主路径，现在 agent 路径已经走 `runSession`，但 `run()` 仍保留大量重复逻辑。它是兼容入口，不应继续驱动新功能设计。
+旧 `run(messages)` 曾是 primary 的主路径；agents improve-2 后产品路径已走 session-run，但旧 message-run 一度仍保留大量重复逻辑。当前分支已删除该 legacy 入口。
 
 ### RC-4：工具执行事实没有进入持久化消息源
 
-当前同一个 step 内，`runSession` 可以通过内存中的 `ToolCallResult.metadata` 把完整 tool result 追加到 `conversationMessages`。但 per-step prepare 的目标是让 provider messages 重新来自 `MessageManager + ContextManager.prepareTurn`，这会暴露一个事实：成功工具结果的 metadata 没有落入 `ToolPart.state`。一旦从 message store 重建上下文，模型只能看到 `state.output`，看不到 `read.mtimeMs`、`bash.exitCode`、MCP `structuredContent` 等后续推理必需事实。
+实施前同一个 step 内，旧 session path 可以通过内存中的 `ToolCallResult.metadata` 把完整 tool result 追加到 `conversationMessages`。但 per-step prepare 的目标是让 provider messages 重新来自 `MessageManager + ContextManager.prepareTurn`，这暴露了成功工具结果 metadata 未落入 `ToolPart.state` 的问题。当前分支已把 raw metadata 持久化到 tool state，并由 serializer 做白名单投影。
 
 这不是 UI 展示问题，而是 source-of-truth 问题。raw metadata 应持久化到 message store；模型可见内容再由 context serializer 做白名单投影。
 
@@ -67,7 +69,7 @@
 
 ### 不应该把 P0 变成大重构
 
-虽然 `run()` / `runSession()` 重复违反 DRY，但当前产品路径主要走 `runSession`。首批实现应先让 session-run 正确抗住长 tool 链，再收敛 legacy path。否则会把行为修复和结构整理耦合在一起，扩大风险。
+实施顺序上，先让 session-run 正确抗住长 tool 链，再用独立 commit 删除 legacy message-run path。当前分支已按这个边界完成，避免把行为修复和结构整理混在同一提交里。
 
 ### 不应该把 metadata 白名单分散到各工具里
 

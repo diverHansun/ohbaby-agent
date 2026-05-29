@@ -245,11 +245,11 @@ function isToolPart(part: Part): part is ToolPart {
 }
 
 async function markAssistantMessageError(
-  messageManager: MessageManager | undefined,
+  messageManager: MessageManager,
   message: CoreMessage | undefined,
   error: unknown,
 ): Promise<void> {
-  if (!messageManager || message?.role !== "assistant") {
+  if (message?.role !== "assistant") {
     return;
   }
   await messageManager.updateMessage(message.id, {
@@ -277,15 +277,6 @@ export class Lifecycle {
     config: LifecycleConfig = {},
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
     const contextManager = this.deps.contextManager;
-    if (!contextManager) {
-      throw new Error("Lifecycle.run requires a ContextManager");
-    }
-    if (!this.deps.messageManager) {
-      throw new Error("Lifecycle.run requires a MessageManager");
-    }
-    if (!this.deps.toolScheduler) {
-      throw new Error("Lifecycle.run requires a ToolScheduler");
-    }
 
     const maxSteps = params.maxSteps ?? DEFAULT_MAX_STEPS;
     const generateToolCallId =
@@ -648,7 +639,6 @@ export class Lifecycle {
       | Extract<LifecycleEvent, { readonly type: "llm:complete" }>
       | undefined;
     let previousContent = "";
-    let assistantMessage: CoreMessage | undefined;
     let assistantTextPart: Part | undefined;
 
     yield {
@@ -658,14 +648,12 @@ export class Lifecycle {
       timestamp: Date.now(),
     };
 
-    if (this.deps.messageManager) {
-      assistantMessage = await this.deps.messageManager.createMessage({
-        sessionId: params.sessionId,
-        role: "assistant",
-        agent: params.agent ?? "default",
-        parentId: input.parentMessageId,
-      });
-    }
+    const assistantMessage = await this.deps.messageManager.createMessage({
+      sessionId: params.sessionId,
+      role: "assistant",
+      agent: params.agent ?? "default",
+      parentId: input.parentMessageId,
+    });
 
     try {
       for await (const response of streamChatCompletion(
@@ -684,24 +672,22 @@ export class Lifecycle {
             : content;
           previousContent = content;
 
-          if (this.deps.messageManager && assistantMessage) {
-            if (assistantTextPart) {
-              assistantTextPart = await this.deps.messageManager.updatePart(
-                assistantTextPart.id,
-                {
-                  text: content,
-                  delta,
-                },
-              );
-            } else {
-              assistantTextPart = await this.deps.messageManager.appendPart(
-                assistantMessage.id,
-                {
-                  type: "text",
-                  text: content,
-                },
-              );
-            }
+          if (assistantTextPart) {
+            assistantTextPart = await this.deps.messageManager.updatePart(
+              assistantTextPart.id,
+              {
+                text: content,
+                delta,
+              },
+            );
+          } else {
+            assistantTextPart = await this.deps.messageManager.appendPart(
+              assistantMessage.id,
+              {
+                type: "text",
+                text: content,
+              },
+            );
           }
 
           yield {
@@ -738,7 +724,7 @@ export class Lifecycle {
       throw error;
     }
 
-    if (this.deps.messageManager && assistantMessage && finalEvent) {
+    if (finalEvent) {
       await this.deps.messageManager.updateMessage(assistantMessage.id, {
         finish: finalEvent.finishReason,
         time: {
@@ -820,7 +806,7 @@ export class Lifecycle {
     tokenUsage?: TokenUsage,
   ): Promise<Map<string, ToolPart>> {
     const toolParts = new Map<string, ToolPart>();
-    if (!this.deps.messageManager || assistantMessage?.role !== "assistant") {
+    if (assistantMessage?.role !== "assistant") {
       return toolParts;
     }
 
@@ -853,7 +839,7 @@ export class Lifecycle {
     part: ToolPart | undefined,
     state: ToolState,
   ): Promise<void> {
-    if (!this.deps.messageManager || !part) {
+    if (!part) {
       return;
     }
     await this.deps.messageManager.updatePart(part.id, { state });
@@ -880,19 +866,6 @@ export class Lifecycle {
       signal: input.params.signal,
       toolName: toolCall.name,
     }));
-
-    if (!this.deps.toolScheduler) {
-      return Promise.resolve(
-        input.toolCalls.map((toolCall) => ({
-          callId: toolCall.id,
-          error: {
-            message: "Tool scheduler is not configured",
-            type: "ExecutionError",
-          },
-          status: "error",
-        })),
-      );
-    }
 
     return this.deps.toolScheduler
       .executeBatch({ calls: requests })

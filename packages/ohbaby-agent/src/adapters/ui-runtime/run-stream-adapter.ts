@@ -388,10 +388,6 @@ export function startRunStreamProjection(
       await handleToolResult(event);
       return;
     }
-    if (event.event === "run.turn.start") {
-      handleContextCompaction(event);
-      return;
-    }
     if (event.event === "run.context.prepared") {
       handleContextCompaction(event);
     }

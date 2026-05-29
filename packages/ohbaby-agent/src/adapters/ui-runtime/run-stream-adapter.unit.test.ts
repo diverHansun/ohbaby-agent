@@ -4,7 +4,7 @@ import { createInMemoryUiStateStore } from "../ui-state/index.js";
 import { startRunStreamProjection } from "./run-stream-adapter.js";
 
 describe("startRunStreamProjection", () => {
-  it("emits compact notices from context prepared events", async () => {
+  it("emits compact notices from context prepared events without duplicating turn start compaction", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const stateStore = createInMemoryUiStateStore({
       activeSessionId: "session_1",
@@ -35,8 +35,7 @@ describe("startRunStreamProjection", () => {
       timestamp: () => "2026-05-26T00:00:01.000Z",
     });
 
-    streamBridge.publish("run/run_1", "run.context.prepared", {
-      compaction: {
+    const compaction = {
         status: "compacted",
         usageAfter: {
           contextLimit: 100_000,
@@ -54,7 +53,17 @@ describe("startRunStreamProjection", () => {
           shouldCompress: true,
           usageRatio: 0.92,
         },
-      },
+      };
+    streamBridge.publish("run/run_1", "run.turn.start", {
+      compaction,
+      hasSummary: true,
+      runId: "run_1",
+      sessionId: "session_1",
+      step: 1,
+      timestamp: 2,
+    });
+    streamBridge.publish("run/run_1", "run.context.prepared", {
+      compaction,
       hasSummary: true,
       runId: "run_1",
       sessionId: "session_1",
@@ -66,6 +75,7 @@ describe("startRunStreamProjection", () => {
     projection.start();
     await projection.done;
 
+    expect(onNotice).toHaveBeenCalledTimes(1);
     expect(onNotice).toHaveBeenCalledWith(
       expect.objectContaining({
         key: "context:compact:session_1",
