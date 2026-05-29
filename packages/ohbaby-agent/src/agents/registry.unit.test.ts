@@ -98,34 +98,36 @@ describe("AgentRegistry", () => {
     expect(registry.list().map((agent) => agent.name)).toContain("explore");
   });
 
-  it("rejects config-loaded agents that override reserved generic", async () => {
-    const registry = new AgentRegistry({
-      configLoader: (): AgentsConfig => ({
-        agents: {
-          generic: {
-            description: "User generic override",
-            mode: "subagent",
-            name: "generic",
-            tools: { include: ["read"] },
+  it("rejects config-loaded agents that override reserved subagent roles", async () => {
+    for (const name of ["generic", "explore", "research"]) {
+      const registry = new AgentRegistry({
+        configLoader: (): AgentsConfig => ({
+          agents: {
+            [name]: {
+              description: "User subagent role override",
+              mode: "subagent",
+              name,
+              tools: { include: ["read"] },
+            },
           },
-        },
-      }),
-    });
+        }),
+      });
 
-    await expect(registry.initialize()).rejects.toThrow(
-      /generic.*reserved|generic.*cannot be overridden/i,
-    );
+      await expect(registry.initialize()).rejects.toThrow(
+        new RegExp(`${name}.*reserved|${name}.*cannot be overridden`, "i"),
+      );
+    }
   });
 
   it("does not list disabled agents", async () => {
     const registry = new AgentRegistry({
       configLoader: (): AgentsConfig => ({
         agents: {
-          research: {
-            description: "Disabled research",
+          audit: {
+            description: "Disabled audit",
             disabled: true,
             mode: "subagent",
-            name: "research",
+            name: "audit",
           },
         },
       }),
@@ -133,10 +135,8 @@ describe("AgentRegistry", () => {
 
     await registry.initialize();
 
-    expect(registry.get("research")).toBeUndefined();
-    expect(registry.list().map((agent) => agent.name)).not.toContain(
-      "research",
-    );
+    expect(registry.get("audit")).toBeUndefined();
+    expect(registry.list().map((agent) => agent.name)).not.toContain("audit");
   });
 
   it("rejects subagents without a description", async () => {

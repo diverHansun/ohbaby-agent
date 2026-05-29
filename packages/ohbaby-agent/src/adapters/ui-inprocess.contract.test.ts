@@ -1613,16 +1613,24 @@ describe("createInProcessUiBackendClient", () => {
   it("appends configured subagent prompts to child model requests", async () => {
     const requests: ProviderRequest[] = [];
     const registry = new AgentRegistry({
-      configLoader: (): AgentsConfig => ({
-        agents: {
-          explore: {
-            description: "Configured exploration subagent.",
-            mode: "subagent",
-            name: "explore",
-            prompt: "Use the configured child inspection rubric.",
-            tools: { include: ["read"] },
-          },
+      builtinAgents: [
+        {
+          default: true,
+          description: "Primary test agent",
+          mode: "primary",
+          name: "main",
+          tools: { include: ["task"] },
         },
+        {
+          description: "Configured exploration subagent.",
+          mode: "subagent",
+          name: "explore",
+          prompt: "Use the configured child inspection rubric.",
+          tools: { include: ["read"] },
+        },
+      ],
+      configLoader: (): AgentsConfig => ({
+        agents: {},
       }),
     });
     const client = createInProcessUiBackendClient({

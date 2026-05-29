@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the ambiguous `agent_name` subagent contract with a bounded optional `role`, a reserved default `generic` subagent, and metadata-only `name` / `description` fields.
+**Goal:** Replace the ambiguous `agent_name` subagent contract with a bounded optional `role`, reserved built-in subagent roles (`generic` / `explore` / `research`), and metadata-only `name` / `description` fields.
 
-**Architecture:** The tool layer validates and defaults `role`; the agents layer treats subagent role as the execution identity; `generic` is a registered built-in subagent with the research-style wide tool whitelist. System-prompt assembly receives subagent role guidance through provider options so `core/system-prompt` does not import `agents`.
+**Architecture:** The tool layer validates and defaults `role`; the agents layer treats subagent role as the execution identity; `generic` is a registered built-in subagent with the research-style wide tool whitelist. The fixed subagent roles are reserved against user config overrides so schema/prompt advertisement cannot drift from runtime availability. System-prompt assembly receives subagent role guidance through provider options so `core/system-prompt` does not import `agents`.
 
 **Tech Stack:** TypeScript, Vitest, pnpm, existing `AgentManager` / `AgentRegistry` / `ToolScheduler` / `SystemPrompt` modules.
 
@@ -15,7 +15,7 @@
 - Create `packages/ohbaby-agent/src/agents/roles.ts`: shared subagent role constants, default role, and type guard.
 - Create `packages/ohbaby-agent/src/agents/builtin/generic.ts`: built-in `generic` subagent config.
 - Modify `packages/ohbaby-agent/src/agents/builtin/index.ts`: export/register `generic`.
-- Modify `packages/ohbaby-agent/src/agents/registry.ts`: reject user config that attempts to override reserved `generic`.
+- Modify `packages/ohbaby-agent/src/agents/registry.ts`: reject user config that attempts to override reserved `generic` / `explore` / `research`.
 - Modify `packages/ohbaby-agent/src/agents/manager.ts`: centralize mode guard and improve primary/subagent error messages.
 - Modify `packages/ohbaby-agent/src/agents/types.ts`: subagent execution params/results use `role`, `name`, and `description`.
 - Modify `packages/ohbaby-agent/src/agents/service.ts`: map subagent `role` to run/session `agentName`, return metadata, do not inject `name`/`description` into prompt.
@@ -188,19 +188,19 @@ export { buildAgent, exploreAgent, genericAgent, planAgent, researchAgent };
 
 Update `agents/index.ts` to export `genericAgent` and role constants.
 
-- [ ] **Step 5: Reject user override of generic**
+- [ ] **Step 5: Reject user override of fixed subagent roles**
 
 In `packages/ohbaby-agent/src/agents/registry.ts`, add:
 
 ```ts
-const RESERVED_NON_OVERRIDABLE_AGENT_NAMES = new Set(["generic"]);
+const RESERVED_NON_OVERRIDABLE_AGENT_NAMES = new Set(SUBAGENT_ROLES);
 
 function assertNotReservedOverride(key: string, agent: AgentConfig): void {
   if (
     RESERVED_NON_OVERRIDABLE_AGENT_NAMES.has(key) ||
     RESERVED_NON_OVERRIDABLE_AGENT_NAMES.has(agent.name)
   ) {
-    throw new Error(`Agent name is reserved and cannot be overridden: generic`);
+    throw new Error(`Agent ${agent.name} is reserved and cannot be overridden`);
   }
 }
 ```
@@ -1437,3 +1437,43 @@ Expected: PASS.
 git add docs/core/agents/improve-1
 git commit -m "docs(agents): align improve-1 role contract plan"
 ```
+
+---
+
+### Task 10: Post-Review Contract Hardening
+
+**Files:**
+- Modify: `packages/ohbaby-agent/src/tools/utils/subagent-role.ts`
+- Modify: `packages/ohbaby-agent/src/tools/task.unit.test.ts`
+- Modify: `packages/ohbaby-agent/src/tools/agent-task.unit.test.ts`
+- Modify: `packages/ohbaby-agent/src/agents/registry.ts`
+- Modify: `packages/ohbaby-agent/src/agents/registry.unit.test.ts`
+- Modify: `tests/smoke/tui-real-provider.smoke.test.tsx`
+
+- [ ] **Step 1: Reject stale `agent_name` inputs**
+
+Add tests for both `task` and `agent_open` where params contain old `agent_name`. Expected behavior: reject with a recoverable message that says `agent_name` is no longer supported and tells the model to use `role`, `name`, and `description`.
+
+Implementation: the shared `subagentRoleParam` parser should check for own property `agent_name` before defaulting `role` to `generic`. This prevents old tool calls such as `{ agent_name: "research", prompt: "..." }` from silently running `generic`.
+
+- [ ] **Step 2: Reserve all fixed subagent roles**
+
+Update registry user-config validation so `generic`, `explore`, and `research` cannot be disabled or overridden by user config. These names are advertised in tool schemas and primary prompts, so they must remain available as subagent roles at runtime.
+
+- [ ] **Step 3: Extend real smoke coverage**
+
+Add an opt-in real TUI smoke for `agent_open` without `role`, mirroring the `task` default generic smoke. Verify the child session uses `generic` and preserves the provided description as metadata/title.
+
+- [ ] **Step 4: Verify and commit**
+
+Run:
+
+```powershell
+pnpm vitest run packages/ohbaby-agent/src/tools/task.unit.test.ts packages/ohbaby-agent/src/tools/agent-task.unit.test.ts packages/ohbaby-agent/src/agents/registry.unit.test.ts tests/smoke/tui-real-provider.smoke.test.tsx
+pnpm run typecheck
+pnpm run lint
+pnpm run test
+pnpm run build
+```
+
+Expected: PASS. Real smoke remains skipped unless opt-in credentials are already present.

@@ -1,12 +1,12 @@
 import { SUBAGENT_DISABLED_TOOLS } from "../core/tool-scheduler/index.js";
 import { loadAgentConfig } from "../config/agents/index.js";
 import { BUILTIN_AGENTS } from "./builtin/index.js";
-import { DEFAULT_SUBAGENT_ROLE } from "./roles.js";
+import { SUBAGENT_ROLES } from "./roles.js";
 import type { AgentConfig, AgentMode, AgentsConfig } from "./types.js";
 
 const AGENT_NAME_REGEX = /^[a-z0-9-]+$/;
 const MAX_AGENT_NAME_LENGTH = 50;
-const RESERVED_AGENT_NAMES = new Set<string>([DEFAULT_SUBAGENT_ROLE]);
+const RESERVED_AGENT_NAMES = new Set<string>(SUBAGENT_ROLES);
 
 export interface AgentRegistryOptions {
   readonly builtinAgents?: readonly AgentConfig[];

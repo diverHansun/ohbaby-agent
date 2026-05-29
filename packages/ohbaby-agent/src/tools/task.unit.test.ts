@@ -133,6 +133,27 @@ describe("task builtin tool", () => {
     );
   });
 
+  it("rejects stale agent_name input instead of defaulting to generic", async () => {
+    const execute = vi.fn<TaskExecutor["execute"]>();
+    const task = getTaskTool({ execute });
+
+    await expect(
+      task.execute(
+        {
+          agent_name: "research",
+          prompt: "Find events.",
+        },
+        {
+          callId: "call_1",
+          messageId: "message_1",
+          sessionId: "parent_1",
+          signal: new AbortController().signal,
+        },
+      ),
+    ).rejects.toThrow(/agent_name.*no longer supported.*Use role/s);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("rejects missing task parameters", async () => {
     const task = getTaskTool({
       execute: vi.fn<TaskExecutor["execute"]>(),

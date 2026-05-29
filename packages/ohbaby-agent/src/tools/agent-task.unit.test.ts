@@ -151,6 +151,25 @@ describe("agent task builtin tools", () => {
     );
   });
 
+  it("rejects stale open agent_name input instead of defaulting to generic", async () => {
+    const { controller, open } = createController();
+    const tool = getTool(
+      createBuiltinTools({ agentTaskController: controller }),
+      "agent_open",
+    );
+
+    await expect(
+      tool.execute(
+        {
+          agent_name: "research",
+          prompt: "Find events.",
+        },
+        context,
+      ),
+    ).rejects.toThrow(/agent_name.*no longer supported.*Use role/s);
+    expect(open).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid open role values with recoverable guidance", async () => {
     const { controller } = createController();
     const tool = getTool(

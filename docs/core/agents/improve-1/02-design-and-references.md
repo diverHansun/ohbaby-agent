@@ -2,7 +2,7 @@
 
 > 配套文档：[01-问题分析](./01-problem-analysis.md)、[03-测试与验收](./03-test-and-acceptance.md)、[04-实施计划](./04-implementation-plan.md)。
 >
-> 本文档记录最终设计决策：`role` 可选且受控，默认 `generic`；`name` 与 `description` 是元数据；`generic` 是系统保留内置子代理。
+> 本文档记录最终设计决策：`role` 可选且受控，默认 `generic`；`name` 与 `description` 是元数据；`generic` / `explore` / `research` 是系统保留内置子代理身份。
 
 ---
 
@@ -25,7 +25,7 @@
 |------|------|------|
 | D1 `role` 是行为身份 | `role?: "generic" | "explore" | "research"`，缺省为 `generic` | role 决定系统画像和工具边界，必须受控 |
 | D2 `generic` 是真实内置 subagent | 新增内置 `generic` agent，默认工具画像沿用 `research` | 默认路径稳定，工具解析有单一事实源 |
-| D3 `generic` 是保留身份 | 用户配置不得覆盖 `generic` | 默认兜底不能被配置漂移破坏 |
+| D3 固定 subagent roles 是保留身份 | 用户配置不得覆盖 `generic` / `explore` / `research` | schema 和主代理提示词固定暴露这些 role，不能被配置漂移破坏 |
 | D4 `name` 是实例显示名 | 仅用于 UI、日志、结果回显，不决定行为 | 避免模型把显示名当行为身份 |
 | D5 `description` 是元数据 | 仅用于 UI、日志、结果回显，不注入子代理 prompt | 不隐式改写任务；子代理必须从 `prompt` 获得真实任务要求 |
 | D6 `build` / `plan` 只属于 primary side | `build` / `plan` 不进入 subagent role enum | `Shift+Tab` 主模式切换与子代理构造无关 |
@@ -138,9 +138,9 @@ export const genericAgent: AgentConfig = {
 
 ### 4.3 保留身份
 
-`generic` 是保留系统身份。用户配置中出现 `name: "generic"` 时应在加载/初始化阶段失败，错误信息明确说明 `generic` cannot be overridden。
+`generic` / `explore` / `research` 是保留系统身份。用户配置中出现这些 `name` 时应在加载/初始化阶段失败，错误信息明确说明该 role is reserved / cannot be overridden。
 
-`build`、`plan`、`explore`、`research` 暂时保持现有覆盖语义；本轮只保护 `generic`。
+`build`、`plan` 暂时保持现有 primary 覆盖语义；它们不在 subagent role enum 中，也不能通过 `task` / `agent_open` 构造为子代理。
 
 ---
 

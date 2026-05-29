@@ -689,6 +689,48 @@ describe("real provider TUI smoke", () => {
   );
 
   (runRealSubagentSmoke ? it : it.skip)(
+    "lets a real model omit agent_open role and use the generic default",
+    async () => {
+      const { app, client, workdir } = await createRealTuiHarness({});
+      try {
+        await writeFile(
+          join(workdir, "generic-agent-open-target.txt"),
+          "generic background subagent smoke marker",
+          "utf8",
+        );
+
+        await client.submitPrompt(
+          [
+            "Call the agent_open tool exactly once.",
+            "Do not include role in the agent_open arguments.",
+            'Set name to "background-events-scout" and description to "Background AI Events Researcher".',
+            "Ask the child to inspect generic-agent-open-target.txt.",
+            "After agent_open returns, answer with the exact token OHBABY_REAL_GENERIC_AGENT_OPEN_OK.",
+          ].join(" "),
+        );
+
+        const parentSessionId = (await client.getSnapshot()).activeSessionId;
+        if (!parentSessionId) {
+          throw new Error("expected parent session id");
+        }
+        const child = latestChildSessionMetadata(parentSessionId);
+        if (!child) {
+          throw new Error(
+            "real model did not create a generic agent_open child session",
+          );
+        }
+        expect(child.agent).toBe("generic");
+        expect(child.title).toBe("Background AI Events Researcher");
+        const finalText = JSON.stringify((await client.getSnapshot()).sessions);
+        expect(finalText).toContain("OHBABY_REAL_GENERIC_AGENT_OPEN_OK");
+      } finally {
+        app.unmount();
+      }
+    },
+    600_000,
+  );
+
+  (runRealSubagentSmoke ? it : it.skip)(
     "lets a real task child session use shell and file editing tools",
     async () => {
       const { app, client, workdir } = await createRealTuiHarness({});

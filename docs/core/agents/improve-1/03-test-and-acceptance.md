@@ -25,7 +25,7 @@
 
 - **T1 新增 `generic` 内置 agent**：`BUILTIN_AGENT_NAMES` 包含 `generic`；`AgentManager.get("generic")` 返回 `mode: "subagent"`；description 非空。
 - **T2 `generic` 工具白名单**：`generic.tools.include` 等于 `research` 的宽白名单。
-- **T3 `generic` 不可被用户配置覆盖**：用户 config 中包含 `name: "generic"` 时，`AgentRegistry.initialize()` 抛错，错误包含 `generic` 与 `reserved` / `cannot be overridden`。
+- **T3 固定 subagent roles 不可被用户配置覆盖**：用户 config 中包含 `name: "generic"`、`name: "explore"` 或 `name: "research"` 时，`AgentRegistry.initialize()` 抛错，错误包含对应 role 与 `reserved` / `cannot be overridden`。
 - **T4 `getRuntimeAgent` 与 `getAgentToolsConfig` 一致**：对 `generic` 调用 `getRuntimeAgent("generic", { isSubagent: true })` 与 `getAgentToolsConfig("generic", { isSubagent: true })`，归一化工具集合一致，且不含 `task` / `agent_open` / `agent_eval` / `agent_status` / `agent_close`。
 - **T5 mode 守卫集中化**：`getRuntimeAgent("build", { isSubagent: true })` 与 `getRuntimeAgent("plan", { isSubagent: true })` 失败，错误提示说明 `build/plan` 是 primary agents，并列出合法 subagent roles。
 
@@ -42,6 +42,7 @@
 - **T11 显式 role**：调用 `task` 传 `role: "research"`，executor 收到 `role: "research"`。
 - **T12 元数据字段透传**：`name` / `description` 透传到 executor；`prompt` 不被自动拼接 `name` / `description`。
 - **T13 非法 role 拒绝**：传 `role: "AI Events Researcher"` 抛 `ToolParameterError`，错误文案符合 T8。
+- **T13a 旧字段拒绝**：传旧 `agent_name` 字段时不得静默默认到 `generic`；必须抛错提示 `agent_name` 已废弃并改用 `role` / `name` / `description`。
 
 ### 2.4 `tools/agent-task.unit.test.ts`
 
@@ -49,6 +50,7 @@
 - **T15 缺省 role**：`agent_open` 不传 `role` 时 controller 收到 `role: "generic"`。
 - **T16 字段透传**：`name` / `description` 透传到 controller；`prompt` 不被自动拼接元数据。
 - **T17 非法 role 拒绝**：`agent_open` 传非法 `role` 抛可恢复错误。
+- **T17a 旧字段拒绝**：`agent_open` 传旧 `agent_name` 字段时不得静默默认到 `generic`；必须抛错提示改用 `role` / `name` / `description`。
 
 ### 2.5 `agents/service.unit.test.ts`
 
@@ -113,7 +115,7 @@
 | AC-5 | 主代理误传描述性 role | `role: "AI Events Researcher"` | 参数拒绝，错误提示如何改用 `description` / `name` |
 | AC-6 | 主代理误传 primary role | `role: "build"` 或 `role: "plan"` | 参数拒绝，错误提示 `build/plan` 是 primary agents |
 | AC-7 | 任意子代理调用 | 传入 `name` / `description` | 它们只出现在 UI/日志/结果 metadata，不自动注入子代理 prompt |
-| AC-8 | 用户配置 | 尝试覆盖 `generic` | 初始化失败，说明 `generic` 是保留身份 |
+| AC-8 | 用户配置 | 尝试覆盖 `generic` / `explore` / `research` | 初始化失败，说明对应 role 是保留身份 |
 | AC-9 | 子代理执行 | 查询实际工具集 | 工具集为该 role 白名单，并剥离递归子代理工具 |
 | AC-10 | 主模式切换 | TUI Shift+Tab | 行为保持现状，只切 `auto/plan` permission mode，不影响 subagent role |
 | AC-11 | 工具结果进入下一轮模型上下文 | metadata 投影 | 模型可见 `role/name/description` |
