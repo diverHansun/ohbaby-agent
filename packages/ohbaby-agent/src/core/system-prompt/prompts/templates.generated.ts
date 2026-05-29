@@ -15,7 +15,5 @@ export const SUBAGENT_TASK_EXPLORE_PROMPT_TEMPLATE =
   "<subagent_task>\nTask: explore\nCode exploration task: quickly find, inspect, and summarize relevant code. Prefer targeted search before reading large files.\n</subagent_task>";
 export const SUBAGENT_TASK_GENERIC_PROMPT_TEMPLATE =
   "<subagent_task>\nTask: generic\nComplete the delegated bounded task independently and return a concise result to the primary agent.\n</subagent_task>";
-export const SUBAGENT_TASK_PLAN_PROMPT_TEMPLATE =
-  "<subagent_task>\nTask: plan\nPlanning task: analyze a bounded child task and return a concise implementation plan. Do not create more subagents.\n</subagent_task>";
 export const SUBAGENT_TASK_RESEARCH_PROMPT_TEMPLATE =
   "<subagent_task>\nTask: research\nResearch task: investigate a bounded question, separate confirmed facts from inferences, and return a concise synthesis.\n</subagent_task>";

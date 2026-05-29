@@ -652,7 +652,16 @@ describe("createUiRuntimeComposition skill tools", () => {
     await composition.runManager.waitForCompletion(result.runId);
 
     expect(requests[0]?.messages[0]?.role).toBe("system");
-    expect(requests[0]?.messages[0]?.content).toContain("Task: plan");
+    const systemContent =
+      typeof requests[0]?.messages[0]?.content === "string"
+        ? requests[0].messages[0].content
+        : "";
+    expect(systemContent).toContain("Task: plan");
+    expect(systemContent).toContain("Subagent roles for task / agent_open");
+    expect(systemContent).toContain("generic");
+    expect(systemContent).toContain(
+      "build and plan are primary-agent modes, not subagent roles",
+    );
   });
 
   it("omits unsafe MCP tool descriptions from the system prompt", async () => {

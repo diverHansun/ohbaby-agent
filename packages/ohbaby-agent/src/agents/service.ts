@@ -104,9 +104,6 @@ export class AgentService implements TaskExecutor {
         params.role,
         { isSubagent: true },
       );
-      if (runtimeAgent.config.mode === "primary") {
-        throw new Error(`Agent ${params.role} cannot be used as a subagent`);
-      }
       const session = await this.resolveSession(params);
       try {
         const result = await runAgent(

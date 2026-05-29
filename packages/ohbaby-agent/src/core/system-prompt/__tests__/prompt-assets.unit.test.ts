@@ -47,10 +47,6 @@ describe("system prompt template assets", () => {
       path: "../prompts/subagents/tasks/research.md",
     },
     {
-      exported: getSubagentTaskPrompt("plan"),
-      path: "../prompts/subagents/tasks/plan.md",
-    },
-    {
       exported: getSubagentTaskPrompt("generic"),
       path: "../prompts/subagents/tasks/generic.md",
     },

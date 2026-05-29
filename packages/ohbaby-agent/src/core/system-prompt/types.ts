@@ -10,8 +10,14 @@ export type LayerType =
 
 export type AgentKind = "primary" | "subagent";
 export type PrimaryTaskKind = "ask" | "plan" | "agent";
-export type SubagentTaskKind = "explore" | "research" | "plan" | "generic";
+export type SubagentTaskKind = "explore" | "research" | "generic";
 export type PromptTaskKind = PrimaryTaskKind | SubagentTaskKind;
+
+export interface SubagentRolePromptInfo {
+  readonly role: string;
+  readonly description: string;
+  readonly default?: boolean;
+}
 
 export interface ToolPromptInfo {
   readonly name: string;
@@ -32,6 +38,7 @@ export interface AssembleOptions {
   readonly agentPrompt?: string;
   readonly agentPromptAddon?: string;
   readonly isSubagent: boolean;
+  readonly availableSubagentRoles?: readonly SubagentRolePromptInfo[];
   readonly environment: EnvironmentInfo;
   readonly customInstructions?: readonly string[];
   readonly onSecurityFinding?: (finding: PromptSecurityFinding) => void;

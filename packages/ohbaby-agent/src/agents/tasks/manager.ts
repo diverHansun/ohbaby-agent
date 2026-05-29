@@ -101,9 +101,6 @@ export class AgentTaskManager implements AgentTaskController {
       { isSubagent: true },
     );
     throwIfAborted(input.signal);
-    if (runtimeAgent.config.mode === "primary") {
-      throw new Error(`Agent ${input.role} cannot be used as a subagent`);
-    }
     const parent = await this.options.sessionManager.get(input.parentSessionId);
     throwIfAborted(input.signal);
     if (!parent) {

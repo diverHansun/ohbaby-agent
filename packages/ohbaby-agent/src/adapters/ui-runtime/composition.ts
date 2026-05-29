@@ -27,7 +27,9 @@ import {
   type AgentSessionStartResult,
   AgentService,
   AgentTaskManager,
+  DEFAULT_SUBAGENT_ROLE,
   type StartSessionParams,
+  SUBAGENT_ROLES,
 } from "../../agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
 import {
@@ -268,10 +270,8 @@ export async function createUiRuntimeComposition(
 
   function resolveSubagentTaskKind(
     agentName: string,
-  ): "explore" | "research" | "plan" | "generic" {
-    return agentName === "explore" ||
-      agentName === "research" ||
-      agentName === "plan"
+  ): "explore" | "research" | "generic" {
+    return agentName === "explore" || agentName === "research"
       ? agentName
       : "generic";
   }
@@ -303,6 +303,16 @@ export async function createUiRuntimeComposition(
     },
     agentPromptResolver(agentName) {
       return agentManager.get(agentName)?.prompt;
+    },
+    availableSubagentRolesProvider() {
+      return SUBAGENT_ROLES.map((role) => {
+        const agent = agentManager.get(role);
+        return {
+          default: role === DEFAULT_SUBAGENT_ROLE,
+          description: agent?.description ?? `${role} subagent`,
+          role,
+        };
+      });
     },
     taskKindResolver(input, agentName) {
       if (!input.isSubagent) {

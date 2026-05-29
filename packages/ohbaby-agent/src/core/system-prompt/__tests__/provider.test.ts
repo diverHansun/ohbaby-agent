@@ -90,6 +90,39 @@ describe("createSystemPromptProvider", () => {
     );
   });
 
+  it("injects subagent role guidance for primary prompts only", async () => {
+    const availableSubagentRolesProvider = vi.fn().mockResolvedValue([
+      {
+        default: true,
+        description: "Default general-purpose subagent",
+        role: "generic",
+      },
+      { description: "Fast code exploration", role: "explore" },
+      { description: "Deep research", role: "research" },
+    ]);
+    const provider = createSystemPromptProvider({
+      availableSubagentRolesProvider,
+      customInstructionLoader: vi.fn().mockResolvedValue([]),
+      environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
+    });
+
+    const primaryPrompt = await provider.build({
+      sessionId: "session_primary",
+      directory: "D:/repo",
+      isSubagent: false,
+    });
+    const subagentPrompt = await provider.build({
+      sessionId: "session_child",
+      directory: "D:/repo",
+      isSubagent: true,
+    });
+
+    expect(primaryPrompt).toContain("Subagent roles for task / agent_open");
+    expect(primaryPrompt).toContain("Omit role to use generic");
+    expect(subagentPrompt).not.toContain("Subagent roles for task / agent_open");
+    expect(availableSubagentRolesProvider).toHaveBeenCalledTimes(1);
+  });
+
   it("omits unsafe tool descriptions before rendering tool guidance", async () => {
     const findings: PromptSecurityFinding[] = [];
     const provider = createSystemPromptProvider({

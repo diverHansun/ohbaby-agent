@@ -37,10 +37,6 @@ const templates = [
     path: "subagents/tasks/generic.md",
   },
   {
-    exportName: "SUBAGENT_TASK_PLAN_PROMPT_TEMPLATE",
-    path: "subagents/tasks/plan.md",
-  },
-  {
     exportName: "SUBAGENT_TASK_RESEARCH_PROMPT_TEMPLATE",
     path: "subagents/tasks/research.md",
   },

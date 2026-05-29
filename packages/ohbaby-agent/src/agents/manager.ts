@@ -5,6 +5,7 @@ import {
   SystemPrompt,
 } from "../core/system-prompt/index.js";
 import { AgentRegistry } from "./registry.js";
+import { formatSubagentRoles } from "./roles.js";
 import type {
   AgentConfig,
   AgentMode,
@@ -63,6 +64,29 @@ export function toolsConfigToRecord(
 
 function isConfiguredSubagent(agent: AgentConfig): boolean {
   return agent.mode === "subagent";
+}
+
+function modeErrorMessage(agent: AgentConfig, isSubagent: boolean): string {
+  if (isSubagent) {
+    return [
+      `Agent ${agent.name} is a primary agent and cannot be used as a subagent.`,
+      `Allowed subagent roles are: ${formatSubagentRoles()}.`,
+      "Omit role to use generic.",
+    ].join(" ");
+  }
+  return `Agent ${agent.name} is a subagent and cannot be used as a primary agent.`;
+}
+
+function assertRuntimeMode(agent: AgentConfig, isSubagent: boolean): void {
+  if (agent.mode === "all") {
+    return;
+  }
+  if (isSubagent && agent.mode === "primary") {
+    throw new Error(modeErrorMessage(agent, isSubagent));
+  }
+  if (!isSubagent && agent.mode === "subagent") {
+    throw new Error(modeErrorMessage(agent, isSubagent));
+  }
 }
 
 function withSubagentDisabledTools(
@@ -146,6 +170,7 @@ export class AgentManager implements AgentToolConfigProvider {
       throw new Error(`Agent not found: ${name}`);
     }
     const isSubagentAgent = options.isSubagent ?? isConfiguredSubagent(agent);
+    assertRuntimeMode(agent, isSubagentAgent);
     return {
       config: agent,
       isSubagent: isSubagentAgent,

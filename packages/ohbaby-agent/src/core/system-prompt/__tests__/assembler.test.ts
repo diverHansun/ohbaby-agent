@@ -101,10 +101,45 @@ describe("SystemPrompt", () => {
     expect(prompts[5]).toContain("<custom_instructions>");
   });
 
+  it("adds subagent role guidance to primary prompts", () => {
+    const prompts = SystemPrompt.assemble({
+      agentName: "build",
+      availableSubagentRoles: [
+        {
+          default: true,
+          description: "Default general-purpose subagent",
+          role: "generic",
+        },
+        { description: "Fast code exploration", role: "explore" },
+        { description: "Deep research", role: "research" },
+      ],
+      environment: ENVIRONMENT,
+      isSubagent: false,
+    });
+    const fullPrompt = prompts.join("\n\n");
+
+    expect(fullPrompt).toContain("Subagent roles for task / agent_open");
+    expect(fullPrompt).toContain("- generic (default)");
+    expect(fullPrompt).toContain("- explore");
+    expect(fullPrompt).toContain("- research");
+    expect(fullPrompt).toContain("Omit role to use generic");
+    expect(fullPrompt).toContain("description and name are metadata only");
+    expect(fullPrompt).toContain(
+      "build and plan are primary-agent modes, not subagent roles",
+    );
+  });
+
   it("assembles subagent prompts without identity or custom instructions", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "explore",
       agentPrompt: "You are a focused exploration agent.",
+      availableSubagentRoles: [
+        {
+          default: true,
+          description: "Default general-purpose subagent",
+          role: "generic",
+        },
+      ],
       environment: ENVIRONMENT,
       customInstructions: ["This must not leak to subagents."],
       isSubagent: true,
@@ -118,6 +153,7 @@ describe("SystemPrompt", () => {
     expect(fullPrompt).not.toContain("Core Capabilities");
     expect(fullPrompt).not.toContain("This must not leak");
     expect(fullPrompt).not.toContain("Available tools");
+    expect(fullPrompt).not.toContain("Subagent roles for task / agent_open");
   });
 
   it("keeps subagent prompt layers in the documented order", () => {
@@ -156,6 +192,19 @@ describe("SystemPrompt", () => {
     expect(fullPrompt).toContain("quickly find, inspect, and summarize");
   });
 
+  it("does not allow subagent prompts to resolve plan task kind", () => {
+    const prompts = SystemPrompt.assemble({
+      agentName: "generic",
+      environment: ENVIRONMENT,
+      isSubagent: true,
+      taskKind: "plan",
+    });
+    const fullPrompt = prompts.join("\n\n");
+
+    expect(fullPrompt).not.toContain("Task: plan");
+    expect(fullPrompt).toContain("Task: generic");
+  });
+
   it("does not include primary custom instructions in subagent prompts", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "research",
@@ -172,8 +221,10 @@ describe("SystemPrompt", () => {
   });
 
   it("returns builtin agent prompts and undefined for unknown agents", () => {
+    expect(SystemPrompt.getAgentPrompt("generic")).toContain("generic");
     expect(SystemPrompt.getAgentPrompt("explore")).toContain("exploration");
     expect(SystemPrompt.getAgentPrompt("research")).toContain("research");
+    expect(SystemPrompt.getAgentPrompt("plan")).toBeUndefined();
     expect(SystemPrompt.getAgentPrompt("unknown")).toBeUndefined();
   });
 

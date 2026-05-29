@@ -409,7 +409,7 @@ describe("AgentService", () => {
         prompt: "do work",
         role: "build" as never,
       }),
-    ).rejects.toThrow("Agent build cannot be used as a subagent");
+    ).rejects.toThrow(/primary agent.*cannot be used as a subagent/i);
   });
 
   it("enforces and releases the subagent concurrency limit", async () => {

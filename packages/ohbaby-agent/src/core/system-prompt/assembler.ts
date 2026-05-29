@@ -21,6 +21,7 @@ import type {
   EnvironmentInfo,
   PrimaryTaskKind,
   PromptTaskKind,
+  SubagentRolePromptInfo,
   SubagentTaskKind,
 } from "./types.js";
 
@@ -54,6 +55,11 @@ export interface SystemPromptProviderOptions {
     input: SystemPromptProviderInput,
     agentName: string,
   ) => Promise<PromptTaskKind | undefined> | PromptTaskKind | undefined;
+  readonly availableSubagentRolesProvider?: (
+    input: SystemPromptProviderInput,
+  ) =>
+    | Promise<readonly SubagentRolePromptInfo[]>
+    | readonly SubagentRolePromptInfo[];
   readonly toolDetailsProvider?: (input: SystemPromptProviderInput) =>
     | Promise<{
         readonly toolSnippets?: Readonly<Partial<Record<string, string>>>;
@@ -83,12 +89,7 @@ function isPrimaryTaskKind(value: unknown): value is PrimaryTaskKind {
 }
 
 function isSubagentTaskKind(value: unknown): value is SubagentTaskKind {
-  return (
-    value === "explore" ||
-    value === "research" ||
-    value === "plan" ||
-    value === "generic"
-  );
+  return value === "explore" || value === "research" || value === "generic";
 }
 
 function resolvePrimaryTaskKind(
@@ -115,6 +116,30 @@ function generateAgentAddonPrompt(prompt: string | undefined): string {
   return trimmed
     ? `<agent_prompt_addon>\n${trimmed}\n</agent_prompt_addon>`
     : "";
+}
+
+function generateSubagentRolesPrompt(
+  roles: readonly SubagentRolePromptInfo[] | undefined,
+): string {
+  if (!roles || roles.length === 0) {
+    return "";
+  }
+  const roleLines = roles.map((role) => {
+    const suffix = role.default === true ? " (default)" : "";
+    return `- ${role.role}${suffix}: ${role.description}`;
+  });
+  return [
+    "<subagent_roles>",
+    "Subagent roles for task / agent_open:",
+    ...roleLines,
+    "",
+    "Omit role to use generic.",
+    'Do not put descriptive names such as "AI Events Researcher" in role.',
+    "Put those in description. Put display names in name.",
+    "description and name are metadata only. If the subagent must follow a persona, scope, constraints, known files, or expected output format, include those details inside prompt.",
+    "build and plan are primary-agent modes, not subagent roles.",
+    "</subagent_roles>",
+  ].join("\n");
 }
 
 function safeToolSnippets(
@@ -181,6 +206,7 @@ export const SystemPrompt = {
       generateIdentityPrompt(),
       getPrimaryTaskPrompt(resolvePrimaryTaskKind(options.taskKind)),
       generateAgentAddonPrompt(agentPromptAddon),
+      generateSubagentRolesPrompt(options.availableSubagentRoles),
       toolGuidance,
       generateEnvironmentPrompt({
         info: options.environment,
@@ -239,7 +265,16 @@ export function createSystemPromptProvider(
   return {
     async build(input: SystemPromptProviderInput): Promise<string> {
       const agentName = await resolveAgentName(input, options);
-      const [environment, tools, taskKind, toolDetails] = await Promise.all([
+      const [
+        availableSubagentRoles,
+        environment,
+        tools,
+        taskKind,
+        toolDetails,
+      ] = await Promise.all([
+        input.isSubagent
+          ? []
+          : (options.availableSubagentRolesProvider?.(input) ?? []),
         options.environmentDetector
           ? options.environmentDetector(input.directory, input)
           : detectEnvironment(input.directory),
@@ -278,6 +313,7 @@ export function createSystemPromptProvider(
       return SystemPrompt.assemble({
         agentName,
         agentPromptAddon,
+        availableSubagentRoles,
         customInstructions,
         environment,
         isSubagent: false,

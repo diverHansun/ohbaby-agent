@@ -153,6 +153,22 @@ describe("AgentManager", () => {
     expect(runtimeAgent.systemPrompt).not.toContain("Task: plan");
   });
 
+  it("rejects primary agents when requested as subagents", async () => {
+    const registry = new AgentRegistry({
+      configLoader: (): AgentsConfig => ({ agents: {} }),
+    });
+    await registry.initialize();
+    const manager = new AgentManager({ registry });
+
+    for (const primaryAgentName of ["build", "plan"] as const) {
+      await expect(
+        manager.getRuntimeAgent(primaryAgentName, { isSubagent: true }),
+      ).rejects.toThrow(
+        /primary agents|subagent roles|generic, explore, research/i,
+      );
+    }
+  });
+
   it("uses custom subagent descriptions when no explicit prompt exists", async () => {
     const registry = new AgentRegistry({
       configLoader: (): AgentsConfig => ({

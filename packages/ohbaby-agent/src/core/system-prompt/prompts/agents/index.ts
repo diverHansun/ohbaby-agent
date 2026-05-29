@@ -2,9 +2,9 @@ import { GENERIC_SUBAGENT_PROMPT } from "./generic.js";
 import { getSubagentTaskPrompt } from "../subagents/tasks.js";
 
 const AGENT_PROMPTS = new Map<string, string>([
+  ["generic", getSubagentTaskPrompt("generic")],
   ["explore", getSubagentTaskPrompt("explore")],
   ["research", getSubagentTaskPrompt("research")],
-  ["plan", getSubagentTaskPrompt("plan")],
 ]);
 
 export function getBuiltinAgentPrompt(agentName: string): string | undefined {
