@@ -21,7 +21,7 @@
 
 ### Minor
 
-- custom instruction loader 物理上仍在 `layers/custom.ts`，未来可移到 `services/`。
+- custom instruction loader 已从 `layers/custom.ts` 拆到 `services/custom-instruction-loader.ts`，`layers/custom.ts` 只保留 prompt 渲染。
 - provider/modelFamily overlay 没有真实第二份 prompt 内容，暂缓。
 - `LAYER_ORDER + sort` 会增加间接层，暂缓。
 
@@ -69,6 +69,13 @@ TS wrapper 使用 `templates.generated.ts` 中的生成常量。生成脚本从 
 - `dfd-interface.md`
 - `test.md`
 
+### 2.5 custom loader 服务化
+
+- 新增 `services/custom-instruction-loader.ts`。
+- 路径解析、文件 I/O、fallback、截断和 prompt-like 安全扫描集中在 service。
+- `layers/custom.ts` 只保留 custom instructions prompt 渲染。
+- `SystemPrompt.loadCustomInstructions` 与历史 `layers/index.ts` 导出保持兼容。
+
 ---
 
 ## 三、实施边界
@@ -78,6 +85,7 @@ TS wrapper 使用 `templates.generated.ts` 中的生成常量。生成脚本从 
 - Wave 1 低风险清理。
 - Wave 2 模板外置。
 - Wave 3 文档对齐。
+- Wave 3.1 custom loader 服务化。
 
 未实施：
 
@@ -85,7 +93,6 @@ TS wrapper 使用 `templates.generated.ts` 中的生成常量。生成脚本从 
 - profile renderer。
 - prompt template engine。
 - runtime hot reload。
-- custom loader 迁移到 services。
 - 扩充 subagent prompt 内容。
 
 ---

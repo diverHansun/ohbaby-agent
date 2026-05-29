@@ -73,6 +73,8 @@ SystemPrompt.loadCustomInstructions(options): Promise<readonly string[]>
 - 截断超长内容。
 - 扫描 prompt-like 内容并上报 finding。
 
+实现位于 `services/custom-instruction-loader.ts`。`layers/custom.ts` 只负责把已加载内容渲染为 `<custom_instructions>` prompt 片段。
+
 ---
 
 ## 三、primary 组装流
