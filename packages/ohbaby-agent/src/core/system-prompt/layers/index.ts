@@ -1,4 +1,3 @@
-export { generateAgentPrompt } from "./agent.js";
 export { generateIdentityPrompt } from "./identity.js";
 export { detectEnvironment, generateEnvironmentPrompt } from "./environment.js";
 export { generateToolGuidancePrompt } from "./tools.js";

@@ -39,7 +39,9 @@
     "dev": "tsx watch src/index.ts",
     "dev:inspect": "tsx watch --inspect src/index.ts",
     "start": "node dist/bin.js",
-    "build": "rimraf dist && tsup && tsc -b --force",
+    "prompt:generate": "node scripts/generate-system-prompt-assets.mjs",
+    "prompt:check": "node scripts/generate-system-prompt-assets.mjs --check",
+    "build": "pnpm run prompt:check && rimraf dist && tsup && tsc -b --force",
     "typecheck": "tsc -b",
     "clean": "rimraf dist coverage"
   },

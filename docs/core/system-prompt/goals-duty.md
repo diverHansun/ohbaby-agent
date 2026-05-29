@@ -6,158 +6,121 @@
 
 ## 一、模块定位
 
-**一句话说明**：system-prompt 模块是系统提示词的存储和组装中心，负责管理分层的提示词模板，并根据代理类型组装完整的系统提示词。
+`system-prompt` 是系统提示词模板与分层组装中心，负责把静态提示词模板、任务契约、代理附加提示、工具提示、运行环境和用户自定义指令组装为最终 system prompt。
 
-**如果没有这个模块**：
-- 系统提示词将散落在各个模块中，难以统一管理
-- 无法实现主代理和子代理的差异化提示词
-- 环境信息注入将缺乏统一入口
-- 自定义指令（OHBABY.md）的加载将没有归属
-- 提示词的维护和迭代将变得混乱
+如果没有该模块：
 
----
-
-## 二、Design Goals（设计目标）
-
-### G1: 分层的提示词管理
-
-支持分层的提示词结构，每层有明确的职责：
-- **Identity 层**：定义 AI 助手的基础身份和核心能力
-- **Agent 层**：子代理专属提示词；主代理可注入配置中的 runtime prompt
-- **Environment 层**：运行时环境信息
-- **Custom 层**：用户自定义指令（仅主代理使用）
-
-### G2: 按代理类型组装提示词
-
-根据代理类型（主代理/子代理）组装不同的系统提示词：
-- 主代理：Identity + Environment + 可选主代理 Runtime Prompt + Custom
-- 子代理：Agent Prompt + Environment（精简版）
-
-### G3: 集中的提示词存储
-
-将所有提示词模板集中存储在本模块中，便于：
-- 统一维护和更新
-- 版本控制
-- 国际化扩展（未来）
-
-### G4: 支持自定义指令加载
-
-支持从文件系统加载用户自定义指令：
-- 项目级：`.ohbaby-agent/OHBABY.md`
-- 全局级：`~/.ohbaby-agent/OHBABY.md`
+- 默认系统提示词会散落在 agents、context、runtime 等调用方中。
+- primary agent 与 subagent 的任务契约无法统一维护。
+- 工具提示、环境提示和 custom instructions 的边界容易混淆。
+- 提示词内容无法被独立审查和版本化。
 
 ---
 
-## 三、Duties（职责）
+## 二、设计目标
 
-### D1: 存储提示词模板
+### G1: 模板统一管理
 
-存储和管理各层提示词模板：
-- Identity 提示词（基础身份描述）
-- 内置子代理提示词（explore、research 等）
-- 环境信息模板
+静态提示词模板统一放在 `packages/ohbaby-agent/src/core/system-prompt/prompts/` 下，以 `.md` 文件作为内容源。
+
+`.md` 只是模板载体，内容可以是 Markdown、XML block，或 Markdown 与 XML block 的混合结构。
+
+### G2: 分层组装
+
+primary prompt 的层顺序是：
+
+1. identity
+2. task
+3. agent addon
+4. tools
+5. environment
+6. custom
+
+subagent prompt 的层顺序是：
+
+1. subagent base
+2. subagent task
+3. agent addon
+4. tools
+5. minimal environment
+
+其中 tools 层是条件层：只有存在工具描述或 prompt guideline 时才输出。
+
+### G3: 运行时上下文延迟注入
+
+静态模板不保存 cwd、date、git 状态、工具列表、工具片段或 custom instructions。运行时上下文由 layer renderer 在组装时注入。
+
+### G4: 安全加载用户自定义指令
+
+模块负责加载项目/全局的 `OHBABY.md`、`AGENTS.md`、`CLAUDE.md` fallback，并对 prompt-like 内容做安全扫描和截断。
+
+### G5: 适配 ContextManager
+
+`createSystemPromptProvider()` 是面向 context manager 的适配器。它解析 agent name、task kind、environment、tools 和 custom instructions，然后调用 `SystemPrompt.assemble()`。
+
+---
+
+## 三、职责
+
+### D1: 存储静态模板
+
+存储并导出 primary base、primary task、subagent base、subagent task 等静态模板。
 
 ### D2: 组装系统提示词
 
-提供统一的组装接口，根据参数生成完整的系统提示词：
-- `assemble(options)`: 组装完整提示词
-- 自动处理分层逻辑
-- 返回字符串数组格式
+`SystemPrompt.assemble()` 按 primary/subagent 边界返回 `string[]` 层数组。调用方决定是否 join。
 
-### D3: 生成环境信息提示词
+### D3: 渲染运行时层
 
-根据运行时环境生成环境信息提示词：
-- 工作目录
-- 操作系统平台
-- Git 仓库状态
-- 当前日期
-- 可用工具列表
+生成 environment、tool guidance、custom instructions、agent addon 等运行时层。
 
-### D4: 加载自定义指令
+### D4: 安全加载 custom instructions
 
-从文件系统加载用户自定义指令：
-- 读取项目级 OHBABY.md
-- 读取全局级 OHBABY.md
-- 兼容 `AGENTS.md`、`CLAUDE.md` fallback，优先级低于 `OHBABY.md`
-- 合并多个指令文件
-- 处理文件不存在的情况
+读取 custom instruction 文件，处理不存在、读取失败、超长和可疑 prompt-like 内容。
 
-### D5: 提供子代理提示词
+### D5: 提供 provider adapter
 
-为内置子代理提供精简的专属提示词：
-- explore 代理提示词
-- research 代理提示词
-- 未来扩展的其他子代理提示词
+`createSystemPromptProvider()` 将 context manager 的输入适配为 system-prompt 的组装参数。
 
 ---
 
-## 四、Non-Duties（非职责）
+## 四、非职责
 
-### N1: 不负责代理配置管理
+### N1: 不管理代理配置
 
-代理的配置（tools、permission、maxSteps 等）由 Agent 模块管理。本模块只提供提示词。
+agent profile、tools、permission、maxSteps 等由 agents/config/runtime 模块负责。
 
-### N2: 不负责调用时机决策
+### N2: 不选择模型或 provider
 
-何时获取系统提示词由 Lifecycle 和 Agent 模块决定。本模块只响应调用请求。
+LLM provider、model 和 API 调用由服务层负责。本轮不实现 provider/modelFamily 差异化 prompt overlay。
 
-### N3: 不负责提示词缓存
+### N3: 不执行工具或审批权限
 
-提示词的缓存策略由调用方（Agent 模块）决定。本模块每次调用都重新组装。
+工具注册、权限审批、并发调度和执行由 tool-scheduler、permission、runtime 负责。
 
-### N4: 不负责权限相关提示
+### N4: 不做动态 prompt 生成
 
-权限相关的提示信息由 Policy 模块处理。本模块不涉及权限逻辑。
+本模块不调用 LLM 来生成或重写 prompt。
 
-### N5: 不负责消息格式化
+### N5: 不注入 memory
 
-消息的格式化和发送由 Message 模块负责。本模块只生成提示词文本。
-
-### N6: 不负责工具描述生成
-
-工具的描述信息由 Tool 模块提供。本模块只在环境信息中列出工具名称。
-
-### N7: 不负责动态提示词生成
-
-MVP 阶段不支持通过 LLM 动态生成或修改提示词。
+memory 与消息历史由 context 模块处理；system-prompt 只生成系统提示词层。
 
 ---
 
-## 五、设计约束与假设
+## 五、设计约束
 
-### 约束
-
-1. **格式约束**：系统提示词返回 `string[]` 格式，由调用方决定如何拼接
-2. **编码约束**：所有提示词模板使用 UTF-8 编码
-3. **大小约束**：单个提示词层不超过 100KB
-4. **语言约束**：MVP 阶段提示词仅支持英文
-
-### 假设
-
-1. Agent 模块正确传递代理类型和配置
-2. Config 模块提供正确的文件路径
-3. 文件系统可正常读取 OHBABY.md 文件
-4. 调用方正确处理返回的字符串数组
+- 静态模板以 `.md` 为内容源，并生成 checked-in TS 快照供源码运行和打包使用。
+- `.md` 文本在生成脚本中规范化换行，避免 Windows/Unix 换行影响输出。
+- `SystemPrompt.assemble()` 返回 `string[]`，不返回层元数据对象。
+- 继续使用 assembler 内的数组字面量表达层顺序，不引入 `LAYER_ORDER + sort`。
+- 子代理不加载 primary custom instructions。
 
 ---
 
-## 六、与其他模块的关系
+## 六、文档自检
 
-| 模块 | 关系 | 说明 |
-|------|------|------|
-| Agent | 被依赖 | Agent 调用 assemble() 获取系统提示词 |
-| Lifecycle | 间接 | 通过 Agent 模块间接使用 |
-| Config | 依赖 | 获取 OHBABY.md 文件路径 |
-| Tool | 依赖 | 获取可用工具列表（用于环境信息） |
-| Bus | 无关 | 不发布/订阅事件 |
-| Policy | 无关 | 不直接交互 |
-
----
-
-## 七、文档自检
-
-- [x] 可以用一句话说明模块存在的意义
-- [x] 可以清楚回答"这个模块不该做什么"
-- [x] 不存在职责与其他模块明显重叠的风险
-- [x] 所有职责可被测试或验证
-- [x] 设计目标服务于 KISS 和 YAGNI 原则
+- [x] 能说明模块存在的意义。
+- [x] 能说明模块不该负责什么。
+- [x] 层顺序与代码和测试一致。
+- [x] 文档不把不存在的返回模型描述为正式 API。

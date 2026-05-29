@@ -6,7 +6,6 @@ export {
   MAX_CUSTOM_INSTRUCTION_CHARS,
   PROJECT_CUSTOM_CONFIG_DIR,
   detectEnvironment,
-  generateAgentPrompt,
   generateCustomInstructionsPrompt,
   generateEnvironmentPrompt,
   generateIdentityPrompt,
@@ -19,9 +18,4 @@ export type {
   SystemPromptProviderInput,
   SystemPromptProviderOptions,
 } from "./assembler.js";
-export type {
-  AssembleOptions,
-  AssembleResult,
-  EnvironmentInfo,
-  LayerType,
-} from "./types.js";
+export type { AssembleOptions, EnvironmentInfo, LayerType } from "./types.js";
