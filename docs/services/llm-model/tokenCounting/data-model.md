@@ -10,89 +10,50 @@ LLM 的基本上下文计量单位。当前实现使用保守启发式估算：
 - 非 ASCII 字符按 `1.3` token/字符估算。
 - 最终结果向上取整。
 
-### Token Limit
+空字符串返回 `0`；非字符串输入抛出 `TypeError`。
 
-模型允许的最大上下文窗口。当前已内置常见 OpenAI 系列模型的保守限制，未知模型返回默认 `4_096`。
+### Token Limit / Token Budget
 
-### TokenCountMessage
+模型允许的最大 context 窗口及其输入/输出预算由 `modelProfiles` 注册表负责解析，tokenCounting 通过 `HeuristicTokenCounter` 的 `getLimit` / `getBudget` 暴露：
 
-`services/llm-model` 暴露的消息估算输入类型。它只表示 token 估算需要读取的结构，不等同于 provider/lifecycle 的消息边界。
+- 内置常见模型的保守限额（如 `gpt-4` → `8_192`、`gpt-3.5-turbo` → `4_096`、`gpt-4o` → `128_000`、`claude-` → `200_000`、`deepseek-` → `64_000`、`glm-4` → `128_000`、`gpt-5` → `400_000`）。
+- 未知模型回退到 `defaultLimit`（缺省 `128_000`，可通过选项覆盖）。
+- 空模型标识回退到 `4_096`。
 
-```typescript
-type TokenCountMessage =
-  | { role: "system"; content: string }
-  | { role: "user"; content: string }
-  | {
-      role: "assistant";
-      content: string | null;
-      tool_calls?: readonly unknown[];
-    }
-  | {
-      role: "tool";
-      content: string;
-      tool_call_id: string;
-    };
-```
+`TokenBudget` / `TokenBudgetOptions` 的结构定义在 `modelProfiles.ts`，本模块不复制其字段。
 
-不同角色的估算开销：
-
-- system: 文本 token + `100`
-- user: 文本 token + `3`
-- assistant: 文本 token + tool calls 序列化 token + `3`
-- tool: 文本 token + `tool_call_id` token + `5`
-
-### ContextTokens
+### HeuristicTokenCounterOptions
 
 ```typescript
-interface ContextTokens {
-  messagesTokens: number;
-  estimatedResponseTokens: number;
-  totalUsedTokens: number;
-  remainingTokens: number;
-  usage: {
-    hasWarning: boolean;
-    percentUsed: number;
-  };
+interface HeuristicTokenCounterOptions {
+  defaultLimit?: number;
+  defaultMaxOutputTokens?: number;
+  profiles?: readonly ModelProfileRegistration[];
+  provider?: string;
 }
 ```
 
-### TokenWarning
-
-```typescript
-type TokenWarningSeverity = "none" | "warning" | "critical";
-
-interface TokenWarning {
-  isApproaching: boolean;
-  severity: TokenWarningSeverity;
-  percentUsed: number;
-  tokensRemaining: number;
-}
-```
-
-阈值：
-
-- `< 80%`: `none`
-- `>= 80%` 且 `< 95%`: `warning`
-- `>= 95%`: `critical`
+用于配置默认限额、默认输出预算、用户自定义模型 profile 与默认 provider。
 
 ### HeuristicTokenCounter
 
 ```typescript
 interface HeuristicTokenCounter {
   estimateTokens(content: string): number;
+  getBudget(modelId: string, options?: TokenBudgetOptions): TokenBudget;
   getLimit(modelId: string): number;
 }
 ```
 
-`createHeuristicTokenCounter()` 返回的对象与 `core/context` 的 `TokenCounter` 结构兼容，可作为 context manager 的默认估算器注入。
+`createHeuristicTokenCounter()` 返回的对象与 `core/context` 的 `TokenCounter` 端口结构兼容，可作为 context manager 的默认估算器注入。`estimateTokens` 即文本估算原语；`getLimit` / `getBudget` 委托 `modelProfiles` 注册表。
 
-### TokenUsage
+### TokenUsage（非本模块产物）
 
-`TokenUsage` 表示 provider 返回的真实 usage，来源在 `services/providers` 和 `core/llm-client` 的流式响应中。它不是本模块的估算结果，不应和 `ContextTokens` 或 `TokenWarning` 混用。
+`TokenUsage` 表示 provider 返回的真实 usage，来源在 `services/providers` 和 `core/llm-client` 的流式响应中。它不是本模块的估算结果，由 llm-client 透传给上层消费者。`core/context` 的对话级估算会优先采信历史中已回传的真实 `TokenUsage`（anchor），仅对未回传的尾部调用本模块的 `estimateTokens`。
 
 ## 设计约束
 
 1. tokenCounting 是纯计算模块，不持有 session/message/run 状态。
 2. tokenCounting 不发网络请求，不依赖 provider SDK。
-3. 估算结果只能用于规划、预警、压缩决策输入，不能用于费用结算。
+3. 估算结果只能用于规划、压缩决策输入，不能用于费用结算。
 4. provider 返回的真实 usage 由 llm-client 透传给上层消费者。

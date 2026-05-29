@@ -7,6 +7,7 @@
 ```text
 packages/ohbaby-agent/src/services/llm-model/
 ├── index.ts
+├── modelProfiles.ts
 ├── tokenCounting.ts
 └── tokenCounting.unit.test.ts
 ```
@@ -17,13 +18,13 @@ packages/ohbaby-agent/src/services/llm-model/
 
 本模块只负责本地、同步、可注入的模型辅助能力：
 
-- 根据模型标识返回保守的 context token limit。
-- 使用启发式算法估算文本和消息历史的 token 数量。
-- 计算 context 使用率与接近上限的 warning。
-- 通过 `createHeuristicTokenCounter()` 提供可注入到 `core/context` 的默认 `TokenCounter`。
+- 使用启发式算法估算文本的 token 数量（`estimateTokensForText`）。
+- 借 `modelProfiles` 注册表，根据模型标识解析保守的 context token limit 与输入/输出预算。
+- 通过 `createHeuristicTokenCounter()` 提供可注入到 `core/context` 的默认 `TokenCounter`（`estimateTokens` / `getLimit` / `getBudget`）。
 
 本模块不负责：
 
+- 不做对话级 token 估算、使用率计算或 warning 分级；这些由 `core/context` 负责（见 `core/context/token-estimation.ts`）。
 - 不调用任何 LLM provider 或厂商 SDK。
 - 不读取 `config/llm`，不创建 client，不发网络请求。
 - 不解释 provider 返回的真实 usage，也不把估算值写回 `TokenUsage`。
@@ -42,7 +43,7 @@ services/llm-model
   模型元数据、token 估算、上下文限制；无网络 I/O
 ```
 
-`services/llm-model` 的消息输入类型命名为 `TokenCountMessage`，表达“用于估算 token 的结构化消息”。`core/llm-client` 仍保留 `ChatCompletionMessage`，表达 provider/lifecycle 的消息输入边界。两者不要混名。
+`services/llm-model` 当前只暴露文本级估算（`estimateTokensForText`）与可注入的 `HeuristicTokenCounter`，不再持有消息级输入类型。对话历史的结构化估算由 `core/context` 在领域消息（`MessageWithParts`）上完成。`core/llm-client` 仍保留 `ChatCompletionMessage`，表达 provider/lifecycle 的消息输入边界。
 
 ## 设计取舍
 
