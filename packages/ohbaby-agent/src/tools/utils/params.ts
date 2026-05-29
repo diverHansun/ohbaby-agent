@@ -45,6 +45,57 @@ export function getOptionalStringParam(
   return value;
 }
 
+export function getRequiredNonEmptyStringParam(
+  params: Record<string, unknown>,
+  name: string,
+): string {
+  const value = params[name];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new ToolParameterError(
+      `Expected parameter "${name}" to be a non-empty string.`,
+    );
+  }
+  return value;
+}
+
+export function getOptionalNonEmptyStringParam(
+  params: Record<string, unknown>,
+  name: string,
+): string | undefined {
+  const value = params[name];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new ToolParameterError(
+      `Expected parameter "${name}" to be a non-empty string when provided.`,
+    );
+  }
+  return value;
+}
+
+export function optionalEnum<const T extends readonly string[]>(
+  params: Record<string, unknown>,
+  name: string,
+  allowed: T,
+  options: {
+    readonly defaultValue: T[number];
+    readonly invalidMessage: (value: string) => string;
+  },
+): T[number] {
+  const value = params[name];
+  if (value === undefined) {
+    return options.defaultValue;
+  }
+  if (
+    typeof value === "string" &&
+    (allowed as readonly string[]).includes(value)
+  ) {
+    return value;
+  }
+  throw new ToolParameterError(options.invalidMessage(parameterValueLabel(value)));
+}
+
 export function getNumberParam(
   params: Record<string, unknown>,
   name: string,
@@ -118,4 +169,24 @@ export function getStringArrayParam(
   }
 
   return strings;
+}
+
+function parameterValueLabel(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint"
+  ) {
+    return String(value);
+  }
+  if (value === null) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  return typeof value;
 }

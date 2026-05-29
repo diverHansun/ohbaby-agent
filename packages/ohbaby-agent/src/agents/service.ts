@@ -101,13 +101,11 @@ export class AgentService implements TaskExecutor {
     const startedAt = this.now();
     try {
       const runtimeAgent = await this.options.agentManager.getRuntimeAgent(
-        params.agentName,
+        params.role,
         { isSubagent: true },
       );
       if (runtimeAgent.config.mode === "primary") {
-        throw new Error(
-          `Agent ${params.agentName} cannot be used as a subagent`,
-        );
+        throw new Error(`Agent ${params.role} cannot be used as a subagent`);
       }
       const session = await this.resolveSession(params);
       try {
@@ -119,7 +117,7 @@ export class AgentService implements TaskExecutor {
             toolScheduler: this.options.toolScheduler,
           },
           {
-            agentName: params.agentName,
+            agentName: params.role,
             environment: params.environment,
             initialUserPrompt: params.prompt,
             maxSteps: runtimeAgent.config.maxSteps,
@@ -136,7 +134,10 @@ export class AgentService implements TaskExecutor {
         }
         const output = result.success ? result.finalOutput : result.error;
         return {
+          description: params.description,
+          name: params.name,
           output,
+          role: params.role,
           sessionId: session.id,
           success: result.success,
           summary: {
@@ -147,7 +148,10 @@ export class AgentService implements TaskExecutor {
         };
       } catch (error) {
         return {
+          description: params.description,
+          name: params.name,
           output: errorMessage(error),
+          role: params.role,
           sessionId: session.id,
           success: false,
           summary: {
@@ -179,9 +183,9 @@ export class AgentService implements TaskExecutor {
           `Session ${params.resumeSessionId} is not a child of ${params.parentSessionId}`,
         );
       }
-      if (resumed.agentName !== params.agentName) {
+      if (resumed.agentName !== params.role) {
         throw new Error(
-          `Session ${params.resumeSessionId} belongs to agent ${resumed.agentName}, not ${params.agentName}`,
+          `Session ${params.resumeSessionId} belongs to agent ${resumed.agentName}, not ${params.role}`,
         );
       }
       return resumed;
@@ -194,7 +198,7 @@ export class AgentService implements TaskExecutor {
       throw new Error(`Parent session not found: ${params.parentSessionId}`);
     }
     return this.options.sessionManager.create(parent.projectRoot, {
-      agentName: params.agentName,
+      agentName: params.role,
       parentId: parent.id,
       title: params.description,
     });

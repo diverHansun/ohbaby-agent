@@ -3,11 +3,11 @@ import { InMemoryAgentTaskStore } from "./in-memory-store.js";
 import type { AgentTaskRecord } from "./types.js";
 
 const baseRecord: AgentTaskRecord = {
-  agentName: "explore",
   createdAt: 100,
   parentSessionId: "parent",
   pendingInputCount: 0,
   prompt: "Inspect files",
+  role: "explore",
   sessionId: "child",
   status: "pending",
   taskId: "task_1",

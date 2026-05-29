@@ -1,4 +1,5 @@
 import type { ToolExecutionEnvironment } from "../../core/tool-scheduler/index.js";
+import type { SubagentRole } from "../roles.js";
 
 export type AgentTaskStatus =
   | "pending"
@@ -13,7 +14,8 @@ export interface AgentTaskRecord {
   readonly taskId: string;
   readonly sessionId: string;
   readonly parentSessionId: string;
-  readonly agentName: string;
+  readonly role: SubagentRole;
+  readonly name?: string;
   readonly description?: string;
   readonly prompt: string;
   readonly status: AgentTaskStatus;
@@ -26,7 +28,8 @@ export interface AgentTaskRecord {
 }
 
 export interface AgentTaskOpenInput {
-  readonly agentName: string;
+  readonly role: SubagentRole;
+  readonly name?: string;
   readonly parentSessionId: string;
   readonly prompt: string;
   readonly description?: string;

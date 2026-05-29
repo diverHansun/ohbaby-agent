@@ -2,60 +2,58 @@ import type {
   Tool,
   ToolExecutionResult,
 } from "../core/tool-scheduler/index.js";
+import { DEFAULT_SUBAGENT_ROLE, SUBAGENT_ROLES } from "../agents/roles.js";
 import type { TaskExecutor } from "../agents/index.js";
-import { ToolParameterError } from "./utils/params.js";
-
-function requiredString(params: Record<string, unknown>, name: string): string {
-  const value = params[name];
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new ToolParameterError(
-      `Expected parameter "${name}" to be a non-empty string.`,
-    );
-  }
-  return value;
-}
-
-function optionalString(
-  params: Record<string, unknown>,
-  name: string,
-): string | undefined {
-  const value = params[name];
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new ToolParameterError(
-      `Expected parameter "${name}" to be a non-empty string when provided.`,
-    );
-  }
-  return value;
-}
+import {
+  getOptionalNonEmptyStringParam,
+  getRequiredNonEmptyStringParam,
+} from "./utils/params.js";
+import { subagentRoleParam } from "./utils/subagent-role.js";
 
 export function createTaskTool(executor: TaskExecutor): Tool {
   return {
     category: "subagent",
     description:
-      "Run a focused task in an isolated subagent session. Use this for bounded exploration or research without polluting the parent context.",
+      "Run a focused task in an isolated subagent session. Role is optional and defaults to generic. Allowed roles are generic, explore, research. Use name/description for UI metadata only; put behavioral instructions in prompt.",
     name: "task",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {
-        agent_name: { type: "string" },
-        description: { type: "string" },
+        role: {
+          default: DEFAULT_SUBAGENT_ROLE,
+          description:
+            "Optional subagent behavior role. Allowed: generic, explore, research. Omit for generic.",
+          enum: [...SUBAGENT_ROLES],
+          type: "string",
+        },
+        name: {
+          description:
+            "Optional display name for this subagent instance. Metadata only.",
+          type: "string",
+        },
+        description: {
+          description:
+            "Optional UI/log description. Metadata only; include behavioral instructions in prompt.",
+          type: "string",
+        },
         prompt: { type: "string" },
         resume_session_id: { type: "string" },
       },
-      required: ["agent_name", "prompt"],
+      required: ["prompt"],
       type: "object",
     },
     source: "builtin",
     async execute(params, context): Promise<ToolExecutionResult> {
       const result = await executor.execute({
-        agentName: requiredString(params, "agent_name"),
-        description: optionalString(params, "description"),
+        role: subagentRoleParam(params),
+        name: getOptionalNonEmptyStringParam(params, "name"),
+        description: getOptionalNonEmptyStringParam(params, "description"),
         parentSessionId: context.sessionId,
-        prompt: requiredString(params, "prompt"),
-        resumeSessionId: optionalString(params, "resume_session_id"),
+        prompt: getRequiredNonEmptyStringParam(params, "prompt"),
+        resumeSessionId: getOptionalNonEmptyStringParam(
+          params,
+          "resume_session_id",
+        ),
         signal: context.signal,
         environment: context.environment,
       });

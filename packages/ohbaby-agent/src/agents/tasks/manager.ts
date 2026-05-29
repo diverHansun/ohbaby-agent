@@ -97,12 +97,12 @@ export class AgentTaskManager implements AgentTaskController {
   async open(input: AgentTaskOpenInput): Promise<AgentTaskRecord> {
     throwIfAborted(input.signal);
     const runtimeAgent = await this.options.agentManager.getRuntimeAgent(
-      input.agentName,
+      input.role,
       { isSubagent: true },
     );
     throwIfAborted(input.signal);
     if (runtimeAgent.config.mode === "primary") {
-      throw new Error(`Agent ${input.agentName} cannot be used as a subagent`);
+      throw new Error(`Agent ${input.role} cannot be used as a subagent`);
     }
     const parent = await this.options.sessionManager.get(input.parentSessionId);
     throwIfAborted(input.signal);
@@ -113,7 +113,7 @@ export class AgentTaskManager implements AgentTaskController {
     const session = await this.options.sessionManager.create(
       parent.projectRoot,
       {
-        agentName: input.agentName,
+        agentName: input.role,
         parentId: parent.id,
         title: input.description,
       },
@@ -122,12 +122,13 @@ export class AgentTaskManager implements AgentTaskController {
     const taskId = this.createTaskId();
     const now = this.now();
     const record = await this.store.create({
-      agentName: input.agentName,
       createdAt: now,
       description: input.description,
+      name: input.name,
       parentSessionId: input.parentSessionId,
       pendingInputCount: 0,
       prompt: input.prompt,
+      role: input.role,
       sessionId: session.id,
       status: "pending",
       taskId,
@@ -221,7 +222,7 @@ export class AgentTaskManager implements AgentTaskController {
       return existing;
     }
     const runtimeAgent = await this.options.agentManager.getRuntimeAgent(
-      task.agentName,
+      task.role,
       { isSubagent: true },
     );
     const session = await this.options.sessionManager.get(task.sessionId);

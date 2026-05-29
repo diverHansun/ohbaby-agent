@@ -1,10 +1,16 @@
 import type { AgentTaskController, AgentTaskRecord } from "../agents/index.js";
+import { DEFAULT_SUBAGENT_ROLE, SUBAGENT_ROLES } from "../agents/roles.js";
 import type {
   Tool,
   ToolExecutionContext,
   ToolExecutionResult,
 } from "../core/tool-scheduler/index.js";
-import { ToolParameterError } from "./utils/params.js";
+import {
+  getOptionalNonEmptyStringParam,
+  getRequiredNonEmptyStringParam,
+  ToolParameterError,
+} from "./utils/params.js";
+import { subagentRoleParam } from "./utils/subagent-role.js";
 
 export const AGENT_TASK_TOOL_NAMES = [
   "agent_open",
@@ -12,32 +18,6 @@ export const AGENT_TASK_TOOL_NAMES = [
   "agent_status",
   "agent_close",
 ] as const;
-
-function requiredString(params: Record<string, unknown>, name: string): string {
-  const value = params[name];
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new ToolParameterError(
-      `Expected parameter "${name}" to be a non-empty string.`,
-    );
-  }
-  return value;
-}
-
-function optionalString(
-  params: Record<string, unknown>,
-  name: string,
-): string | undefined {
-  const value = params[name];
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new ToolParameterError(
-      `Expected parameter "${name}" to be a non-empty string when provided.`,
-    );
-  }
-  return value;
-}
 
 function optionalBoolean(
   params: Record<string, unknown>,
@@ -88,16 +68,31 @@ export function createAgentTaskTools(
   const open: Tool = {
     category: "subagent",
     description:
-      "Start a background subagent task in an isolated child session and return immediately with a task id.",
+      "Start a background subagent task in an isolated child session. Role is optional and defaults to generic. Allowed roles are generic, explore, research. Use name/description for UI metadata only; put behavioral instructions in prompt.",
     name: "agent_open",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {
-        agent_name: { type: "string" },
-        description: { type: "string" },
+        role: {
+          default: DEFAULT_SUBAGENT_ROLE,
+          description:
+            "Optional subagent behavior role. Allowed: generic, explore, research. Omit for generic.",
+          enum: [...SUBAGENT_ROLES],
+          type: "string",
+        },
+        name: {
+          description:
+            "Optional display name for this subagent instance. Metadata only.",
+          type: "string",
+        },
+        description: {
+          description:
+            "Optional UI/log description. Metadata only; include behavioral instructions in prompt.",
+          type: "string",
+        },
         prompt: { type: "string" },
       },
-      required: ["agent_name", "prompt"],
+      required: ["prompt"],
       type: "object",
     },
     source: "builtin",
@@ -106,11 +101,12 @@ export function createAgentTaskTools(
       context: ToolExecutionContext,
     ): Promise<ToolExecutionResult> {
       const task = await controller.open({
-        agentName: requiredString(params, "agent_name"),
-        description: optionalString(params, "description"),
+        role: subagentRoleParam(params),
+        name: getOptionalNonEmptyStringParam(params, "name"),
+        description: getOptionalNonEmptyStringParam(params, "description"),
         environment: context.environment,
         parentSessionId: context.sessionId,
-        prompt: requiredString(params, "prompt"),
+        prompt: getRequiredNonEmptyStringParam(params, "prompt"),
         signal: context.signal,
       });
       return result(task);
@@ -141,8 +137,8 @@ export function createAgentTaskTools(
         environment: context.environment,
         interrupt: optionalBoolean(params, "interrupt"),
         parentSessionId: context.sessionId,
-        prompt: requiredString(params, "prompt"),
-        taskId: requiredString(params, "task_id"),
+        prompt: getRequiredNonEmptyStringParam(params, "prompt"),
+        taskId: getRequiredNonEmptyStringParam(params, "task_id"),
       });
       return result(task);
     },
@@ -164,7 +160,7 @@ export function createAgentTaskTools(
     },
     source: "builtin",
     async execute(params, context): Promise<ToolExecutionResult> {
-      const taskId = requiredString(params, "task_id");
+      const taskId = getRequiredNonEmptyStringParam(params, "task_id");
       const task = await controller.get({
         parentSessionId: context.sessionId,
         taskId,
@@ -190,7 +186,7 @@ export function createAgentTaskTools(
     async execute(params, context): Promise<ToolExecutionResult> {
       const closed = await controller.close({
         parentSessionId: context.sessionId,
-        taskId: requiredString(params, "task_id"),
+        taskId: getRequiredNonEmptyStringParam(params, "task_id"),
       });
       return {
         metadata: {

@@ -1,5 +1,6 @@
 import type { ToolExecutionEnvironment } from "../core/tool-scheduler/index.js";
 import type { AgentRunResult } from "../core/agents/index.js";
+import type { SubagentRole } from "./roles.js";
 
 export type AgentMode = "primary" | "subagent" | "all";
 export type PermissionValue = "allow" | "deny" | "ask";
@@ -62,7 +63,8 @@ export interface AgentPromptProvider {
 }
 
 export interface SubagentExecuteParams {
-  readonly agentName: string;
+  readonly role: SubagentRole;
+  readonly name?: string;
   readonly parentSessionId: string;
   readonly prompt: string;
   readonly description?: string;
@@ -79,6 +81,9 @@ export interface SubagentToolCallSummary {
 }
 
 export interface SubagentResult {
+  readonly role: SubagentRole;
+  readonly name?: string;
+  readonly description?: string;
   readonly sessionId: string;
   readonly success: boolean;
   readonly output: string;

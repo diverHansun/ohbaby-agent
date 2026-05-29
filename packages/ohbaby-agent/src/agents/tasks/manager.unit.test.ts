@@ -273,13 +273,17 @@ describe("AgentTaskManager", () => {
     });
 
     const task = await manager.open({
-      agentName: "explore",
       description: "Explore files",
+      name: "files-scout",
       parentSessionId: "parent",
       prompt: "Find auth",
+      role: "explore",
     });
 
     expect(task).toMatchObject({
+      description: "Explore files",
+      name: "files-scout",
+      role: "explore",
       sessionId: "child_1",
       status: "pending",
       taskId: "task_1",
@@ -307,9 +311,9 @@ describe("AgentTaskManager", () => {
       createTaskId: () => "task_1",
     });
     await manager.open({
-      agentName: "explore",
       parentSessionId: "parent",
       prompt: "first",
+      role: "explore",
     });
     await vi.waitUntil(() => runtime.create.mock.calls.length === 1);
 
@@ -338,9 +342,9 @@ describe("AgentTaskManager", () => {
       createTaskId: () => "task_1",
     });
     await manager.open({
-      agentName: "explore",
       parentSessionId: "parent",
       prompt: "first",
+      role: "explore",
     });
     await vi.waitUntil(() => runtime.create.mock.calls.length === 1);
 
@@ -372,9 +376,9 @@ describe("AgentTaskManager", () => {
   it("rejects control from a different parent session", async () => {
     const { manager } = await createManager({ createTaskId: () => "task_1" });
     await manager.open({
-      agentName: "explore",
       parentSessionId: "parent",
       prompt: "first",
+      role: "explore",
     });
 
     await expect(
@@ -402,15 +406,15 @@ describe("AgentTaskManager", () => {
     });
 
     await manager.open({
-      agentName: "explore",
       parentSessionId: "parent",
       prompt: "first",
+      role: "explore",
     });
     await expect(
       manager.open({
-        agentName: "explore",
         parentSessionId: "parent",
         prompt: "second",
+        role: "explore",
       }),
     ).rejects.toThrow("Too many retained agent tasks for this session");
 
@@ -418,9 +422,9 @@ describe("AgentTaskManager", () => {
     runtime.complete(1, "cancelled", "cancelled");
     await expect(
       manager.open({
-        agentName: "explore",
         parentSessionId: "parent",
         prompt: "second",
+        role: "explore",
       }),
     ).resolves.toMatchObject({ taskId: "task_2" });
   });
@@ -434,9 +438,9 @@ describe("AgentTaskManager", () => {
 
     await expect(
       manager.open({
-        agentName: "explore",
         parentSessionId: "parent",
         prompt: "first",
+        role: "explore",
         signal: abortController.signal,
       }),
     ).rejects.toThrow("Agent task open aborted");
@@ -448,9 +452,9 @@ describe("AgentTaskManager", () => {
       createTaskId: () => "task_1",
     });
     await manager.open({
-      agentName: "explore",
       parentSessionId: "parent",
       prompt: "long",
+      role: "explore",
     });
     await vi.waitUntil(() => runtime.create.mock.calls.length === 1);
 

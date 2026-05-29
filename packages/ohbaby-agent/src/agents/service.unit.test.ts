@@ -322,13 +322,17 @@ describe("AgentService", () => {
 
     await expect(
       service.execute({
-        agentName: "explore",
         description: "Explore auth",
+        name: "auth-scout",
         parentSessionId: "parent",
         prompt: "Find auth code",
+        role: "explore",
       }),
     ).resolves.toMatchObject({
+      description: "Explore auth",
+      name: "auth-scout",
       output: "exploration complete",
+      role: "explore",
       sessionId: "child_1",
       success: true,
       summary: {
@@ -379,9 +383,9 @@ describe("AgentService", () => {
 
     await expect(
       service.execute({
-        agentName: "explore",
         parentSessionId: "parent",
         prompt: "run",
+        role: "explore",
       }),
     ).resolves.toMatchObject({
       output: "child run rejected",
@@ -401,9 +405,9 @@ describe("AgentService", () => {
 
     await expect(
       service.execute({
-        agentName: "build",
         parentSessionId: "parent",
         prompt: "do work",
+        role: "build" as never,
       }),
     ).rejects.toThrow("Agent build cannot be used as a subagent");
   });
@@ -423,15 +427,15 @@ describe("AgentService", () => {
     });
 
     const first = service.execute({
-      agentName: "explore",
       parentSessionId: "parent",
       prompt: "first",
+      role: "explore",
     });
     await expect(
       service.execute({
-        agentName: "explore",
         parentSessionId: "parent",
         prompt: "second",
+        role: "explore",
       }),
     ).rejects.toThrow("Maximum concurrent subagents reached");
 
@@ -458,10 +462,10 @@ describe("AgentService", () => {
 
     await expect(
       service.execute({
-        agentName: "explore",
         parentSessionId: "parent",
         prompt: "resume",
         resumeSessionId: "child_existing",
+        role: "explore",
       }),
     ).resolves.toMatchObject({ sessionId: "child_existing", success: true });
     expect(sessionManager.create).toHaveBeenCalledTimes(1);
@@ -480,10 +484,10 @@ describe("AgentService", () => {
 
     await expect(
       service.execute({
-        agentName: "explore",
         parentSessionId: "parent",
         prompt: "resume missing",
         resumeSessionId: "child_missing",
+        role: "explore",
       }),
     ).rejects.toThrow("Subagent session not found: child_missing");
     expect(sessionManager.create).not.toHaveBeenCalled();
@@ -508,10 +512,10 @@ describe("AgentService", () => {
 
     await expect(
       service.execute({
-        agentName: "explore",
         parentSessionId: "parent",
         prompt: "resume wrong parent",
         resumeSessionId: "child_other_parent",
+        role: "explore",
       }),
     ).rejects.toThrow(
       "Session child_other_parent is not a child of parent",
@@ -538,10 +542,10 @@ describe("AgentService", () => {
 
     await expect(
       service.execute({
-        agentName: "explore",
         parentSessionId: "parent",
         prompt: "resume wrong agent",
         resumeSessionId: "child_research",
+        role: "explore",
       }),
     ).rejects.toThrow(
       "Session child_research belongs to agent research, not explore",
@@ -560,9 +564,9 @@ describe("AgentService", () => {
     });
 
     await service.execute({
-      agentName: "universal",
       parentSessionId: "parent",
       prompt: "run as child",
+      role: "universal" as never,
     });
 
     expect(tools.getAvailableTools).toHaveBeenCalledWith({

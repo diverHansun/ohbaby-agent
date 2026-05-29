@@ -24,7 +24,10 @@ describe("task builtin tool", () => {
   it("executes a subagent task through the injected executor", async () => {
     const execute = vi.fn<TaskExecutor["execute"]>(() =>
       Promise.resolve({
+        description: "Explore files",
+        name: "files-scout",
         output: "subagent output",
+        role: "explore",
         sessionId: "child_1",
         success: true,
         summary: { duration: 5, steps: 1, toolCalls: [] },
@@ -37,9 +40,10 @@ describe("task builtin tool", () => {
 
     const result = await task.execute(
       {
-        agent_name: "explore",
         description: "Explore files",
+        name: "files-scout",
         prompt: "Find the auth module",
+        role: "explore",
         resume_session_id: "child_existing",
       },
       {
@@ -58,13 +62,75 @@ describe("task builtin tool", () => {
     expect(execute).toHaveBeenCalledOnce();
     const executeInput = execute.mock.calls[0][0];
     expect(executeInput).toMatchObject({
-      agentName: "explore",
       description: "Explore files",
+      name: "files-scout",
       parentSessionId: "parent_1",
       prompt: "Find the auth module",
+      role: "explore",
       resumeSessionId: "child_existing",
     });
     expect(executeInput.signal).toBeInstanceOf(AbortSignal);
+    expect(executeInput).not.toHaveProperty("agentName");
+  });
+
+  it("exposes role metadata schema with generic as the default", () => {
+    const task = getTaskTool({
+      execute: vi.fn<TaskExecutor["execute"]>(),
+    });
+
+    expect(task.parametersJsonSchema.required).toEqual(["prompt"]);
+    expect(task.parametersJsonSchema.properties).toMatchObject({
+      description: { type: "string" },
+      name: { type: "string" },
+      prompt: { type: "string" },
+      role: {
+        default: "generic",
+        enum: ["generic", "explore", "research"],
+        type: "string",
+      },
+      resume_session_id: { type: "string" },
+    });
+    expect(JSON.stringify(task.parametersJsonSchema)).not.toContain(
+      "agent_name",
+    );
+  });
+
+  it("defaults omitted role to generic", async () => {
+    const execute = vi.fn<TaskExecutor["execute"]>(() =>
+      Promise.resolve({
+        description: "AI Events Researcher",
+        name: "events-scout",
+        output: "subagent output",
+        role: "generic",
+        sessionId: "child_1",
+        success: true,
+        summary: { duration: 5, steps: 1, toolCalls: [] },
+      }),
+    );
+    const task = getTaskTool({ execute });
+
+    await task.execute(
+      {
+        description: "AI Events Researcher",
+        name: "events-scout",
+        prompt: "Find events.",
+      },
+      {
+        callId: "call_1",
+        messageId: "message_1",
+        sessionId: "parent_1",
+        signal: new AbortController().signal,
+      },
+    );
+
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "AI Events Researcher",
+        name: "events-scout",
+        prompt: "Find events.",
+        role: "generic",
+      }),
+    );
   });
 
   it("rejects missing task parameters", async () => {
@@ -74,7 +140,7 @@ describe("task builtin tool", () => {
 
     await expect(
       task.execute(
-        { agent_name: "explore" },
+        { role: "explore" },
         {
           callId: "call_1",
           messageId: "message_1",
@@ -83,5 +149,27 @@ describe("task builtin tool", () => {
         },
       ),
     ).rejects.toThrow('Expected parameter "prompt" to be a non-empty string.');
+  });
+
+  it("rejects invalid role values with recoverable guidance", async () => {
+    const task = getTaskTool({
+      execute: vi.fn<TaskExecutor["execute"]>(),
+    });
+
+    for (const role of ["AI Events Researcher", "plan", "build"]) {
+      await expect(
+        task.execute(
+          { prompt: "Find events.", role },
+          {
+            callId: "call_1",
+            messageId: "message_1",
+            sessionId: "parent_1",
+            signal: new AbortController().signal,
+          },
+        ),
+      ).rejects.toThrow(
+        /Allowed roles are: generic, explore, research.*Omit role to use generic.*Use description.*Use name.*build and plan are primary agents/s,
+      );
+    }
   });
 });

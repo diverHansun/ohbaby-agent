@@ -4,11 +4,13 @@ import type { Tool } from "../core/tool-scheduler/index.js";
 import { createBuiltinTools } from "./index.js";
 
 const record: AgentTaskRecord = {
-  agentName: "explore",
   createdAt: 1,
+  description: "Explore files",
+  name: "files-scout",
   parentSessionId: "parent",
   pendingInputCount: 0,
   prompt: "Find files",
+  role: "explore",
   sessionId: "child",
   status: "running",
   taskId: "task_1",
@@ -79,9 +81,10 @@ describe("agent task builtin tools", () => {
 
     const result = await tool.execute(
       {
-        agent_name: "explore",
         description: "Explore files",
+        name: "files-scout",
         prompt: "Find files",
+        role: "explore",
       },
       context,
     );
@@ -89,13 +92,79 @@ describe("agent task builtin tools", () => {
     expect(result.output).toContain("task_id: task_1");
     expect(result.metadata?.agentTask).toMatchObject({ taskId: "task_1" });
     expect(open).toHaveBeenCalledWith({
-      agentName: "explore",
       description: "Explore files",
       environment: undefined,
+      name: "files-scout",
       parentSessionId: "parent",
       prompt: "Find files",
+      role: "explore",
       signal: context.signal,
     });
+  });
+
+  it("exposes role metadata schema with generic as the default", () => {
+    const { controller } = createController();
+    const tool = getTool(
+      createBuiltinTools({ agentTaskController: controller }),
+      "agent_open",
+    );
+
+    expect(tool.parametersJsonSchema.required).toEqual(["prompt"]);
+    expect(tool.parametersJsonSchema.properties).toMatchObject({
+      description: { type: "string" },
+      name: { type: "string" },
+      prompt: { type: "string" },
+      role: {
+        default: "generic",
+        enum: ["generic", "explore", "research"],
+        type: "string",
+      },
+    });
+    expect(JSON.stringify(tool.parametersJsonSchema)).not.toContain(
+      "agent_name",
+    );
+  });
+
+  it("defaults omitted open role to generic", async () => {
+    const { controller, open } = createController();
+    const tool = getTool(
+      createBuiltinTools({ agentTaskController: controller }),
+      "agent_open",
+    );
+
+    await tool.execute(
+      {
+        description: "AI Events Researcher",
+        name: "events-scout",
+        prompt: "Find events.",
+      },
+      context,
+    );
+
+    expect(open).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "AI Events Researcher",
+        name: "events-scout",
+        prompt: "Find events.",
+        role: "generic",
+      }),
+    );
+  });
+
+  it("rejects invalid open role values with recoverable guidance", async () => {
+    const { controller } = createController();
+    const tool = getTool(
+      createBuiltinTools({ agentTaskController: controller }),
+      "agent_open",
+    );
+
+    for (const role of ["AI Events Researcher", "plan", "build"]) {
+      await expect(
+        tool.execute({ prompt: "Find events.", role }, context),
+      ).rejects.toThrow(
+        /Allowed roles are: generic, explore, research.*Omit role to use generic.*Use description.*Use name.*build and plan are primary agents/s,
+      );
+    }
   });
 
   it("sends follow-up input, status, and close commands through the controller", async () => {
