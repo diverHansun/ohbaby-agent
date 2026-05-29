@@ -1,7 +1,6 @@
 import type { SystemPromptProvider } from "../context/index.js";
 import {
   detectEnvironment,
-  generateAgentPrompt,
   generateCustomInstructionsPrompt,
   generateEnvironmentPrompt,
   generateIdentityPrompt,
@@ -114,7 +113,7 @@ function resolveSubagentTaskKind(
 function generateAgentAddonPrompt(prompt: string | undefined): string {
   const trimmed = prompt?.trim();
   return trimmed
-    ? `<agent_prompt_addon>\n${generateAgentPrompt(trimmed)}\n</agent_prompt_addon>`
+    ? `<agent_prompt_addon>\n${trimmed}\n</agent_prompt_addon>`
     : "";
 }
 

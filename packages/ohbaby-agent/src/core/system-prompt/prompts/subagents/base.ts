@@ -1,7 +1,3 @@
-export const SUBAGENT_BASE_PROMPT = `<subagent_base>
-You are a focused subagent working on a bounded delegated task for the primary agent.
+import { SUBAGENT_BASE_PROMPT_TEMPLATE } from "../templates.generated.js";
 
-Complete the assigned task independently and return a concise result to the primary agent.
-Do not load user custom instructions or create more subagents.
-Use your session-scoped todo list for complex multi-step work when it helps you stay organized.
-</subagent_base>`;
+export const SUBAGENT_BASE_PROMPT = SUBAGENT_BASE_PROMPT_TEMPLATE;

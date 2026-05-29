@@ -1,396 +1,133 @@
 # system-prompt 模块 dfd-interface.md
 
-本文档描述 `system-prompt` 模块的数据流与对外接口。
+本文档描述 `system-prompt` 模块的数据流与接口。
 
 ---
 
-## 一、Context & Scope（上下文与范围）
+## 一、数据流概览
 
-### 1.1 模块位置
-
-system-prompt 模块在 ohbaby-agent 系统中的位置：
-
-```
-                  +-------------+
-                  |  Lifecycle  |
-                  +------+------+
-                         |
-                         v
-                  +-------------+
-                  |    Agent    |
-                  | (调用组装)   |
-                  +------+------+
-                         |
-                         v
-              +--------------------+
-              |   System-Prompt    |
-              | (提示词存储与组装) |
-              +--------------------+
-                    |         |
-          +---------+         +---------+
-          v                             v
-    +----------+                  +----------+
-    |  Config  |                  |   Tool   |
-    | (路径)   |                  | (工具列表)|
-    +----------+                  +----------+
-```
-
-### 1.2 交互模块
-
-| 模块 | 交互方式 | 说明 |
-|------|----------|------|
-| **Agent** | 被调用 | Agent 调用 assemble() 获取系统提示词 |
-| **Config** | 调用 | 获取 OHBABY.md 文件路径 |
-| **Tool** | 调用 | 获取可用工具列表（用于环境信息） |
-| **Lifecycle** | 间接 | 通过 Agent 模块间接使用 |
-
----
-
-## 二、Data Flow Description（数据流描述）
-
-### 2.1 主代理提示词组装数据流
-
-```
-1. Agent 模块请求主代理系统提示词
-   |
-   v
-2. SystemPrompt.assemble({
-     agentName: 'build',
-     agentPrompt: '...',      // 可选：主代理 runtime prompt
-     isSubagent: false,
-     environment: {...},
-     customInstructions: [...],
-     tools: [...]
-   })
-   |
-   +---> 判断 isSubagent === false
-   |     --> 确认是主代理
-   |
-   +---> IdentityLayer.generate()
-   |     --> 返回完整身份提示词（约 800 行）
-   |
-   +---> EnvironmentLayer.generate({
-   |       info: environment,
-   |       minimal: false,
-   |       tools: [...]
-   |     })
-   |     --> 返回完整环境信息
-   |
-   +---> AgentLayer.generate(agentPrompt) [optional]
-   |     --> 返回主代理 runtime prompt
-   |
-   +---> CustomLayer.generate(customInstructions)
-   |     --> 返回自定义指令内容
-   |
-   +---> 合并各层结果
-   |
-   v
-3. 返回 string[] 给 Agent 模块
-```
-
-### 2.2 子代理提示词组装数据流
-
-```
-1. Agent 模块请求子代理系统提示词
-   |
-   v
-2. SystemPrompt.assemble({
-     agentName: 'explore',
-     agentPrompt: '...',  // 子代理专属提示
-     isSubagent: true,
-     environment: {...},
-     customInstructions: undefined,  // 子代理不使用
-     tools: ['glob', 'grep', 'read']
-   })
-   |
-   +---> 判断 isSubagent === true
-   |     --> 确认是子代理
-   |
-   +---> AgentLayer.generate(agentPrompt)
-   |     --> 返回子代理专属提示词（约 20 行）
-   |
-   +---> EnvironmentLayer.generate({
-   |       info: environment,
-   |       minimal: true,  // 精简模式
-   |       tools: ['glob', 'grep', 'read']
-   |     })
-   |     --> 返回精简环境信息
-   |
-   +---> 不调用 CustomLayer（子代理不使用）
-   |
-   +---> 合并各层结果
-   |
-   v
-3. 返回 string[] 给 Agent 模块
-```
-
-### 2.3 自定义指令加载数据流
-
-```
-1. Agent 模块需要加载自定义指令
-   |
-   v
-2. SystemPrompt.loadCustomInstructions()
-   |
-   +---> Config.getProjectPath()
-   |     --> 返回项目配置目录路径
-   |
-   +---> 读取 {projectPath}/.ohbaby-agent/OHBABY.md
-   |     --> 文件存在则读取内容
-   |     --> 文件不存在则跳过
-   |
-   +---> Config.getGlobalPath()
-   |     --> 返回全局配置目录路径
-   |
-   +---> 读取 {globalPath}/.ohbaby-agent/OHBABY.md
-   |     --> 文件存在则读取内容
-   |     --> 文件不存在则跳过
-   |
-   +---> 合并两个文件内容
-   |
-   v
-3. 返回 string[] 给调用方
+```mermaid
+flowchart TD
+  runtime["Runtime / ContextManager"] --> provider["createSystemPromptProvider().build(input)"]
+  provider --> resolvers["agent/task/tools/environment/custom resolvers"]
+  resolvers --> assemble["SystemPrompt.assemble(options)"]
+  staticTemplates[".md static templates"] --> generatedTemplates["templates.generated.ts"]
+  generatedTemplates --> assemble
+  assemble --> runtimeLayers["runtime layer renderers"]
+  runtimeLayers --> security["prompt security scan"]
+  assemble --> layers["ordered string[]"]
+  layers --> context["ContextManager joins system prompt"]
 ```
 
 ---
 
-## 三、Interface Definition（接口定义）
+## 二、主要接口
 
-### 3.1 SystemPrompt 主接口
+### 2.1 SystemPrompt.assemble()
 
-```typescript
-namespace SystemPrompt {
-  /**
-   * 组装完整系统提示词
-   * @param options 组装选项
-   * @returns 组装后的提示词数组
-   */
-  function assemble(options: AssembleOptions): string[]
-
-  /**
-   * 加载自定义指令
-   * @returns 自定义指令内容数组
-   */
-  function loadCustomInstructions(): Promise<string[]>
-
-  /**
-   * 获取身份层提示词
-   * @returns 身份提示词文本
-   */
-  function getIdentity(): string
-
-  /**
-   * 获取子代理专属提示词
-   * @param agentName 代理名称
-   * @returns 代理专属提示词，不存在则返回 undefined
-   */
-  function getAgentPrompt(agentName: string): string | undefined
-
-  /**
-   * 生成环境信息提示词
-   * @param info 环境信息
-   * @param minimal 是否精简模式
-   * @param tools 可用工具列表
-   * @returns 环境信息提示词文本
-   */
-  function getEnvironment(
-    info: EnvironmentInfo,
-    minimal?: boolean,
-    tools?: string[]
-  ): string
-}
+```ts
+SystemPrompt.assemble(options: AssembleOptions): string[]
 ```
 
-### 3.2 AssembleOptions 接口
+输入：
 
-```typescript
-interface AssembleOptions {
-  /** 代理名称 */
-  agentName: string
+- `agentName`: 当前 agent 名称，不能为空。
+- `isSubagent`: primary/subagent 边界，必须显式传入。
+- `environment`: 当前运行环境。
+- `taskKind`: 可选任务类型。
+- `agentPromptAddon`: 可选代理附加提示。
+- `tools`: 可用工具名。
+- `toolSnippets`: 工具描述片段。
+- `promptGuidelines`: 工具/提示词指导。
+- `customInstructions`: custom instructions，仅 primary 使用。
 
-  /**
-   * 代理专属提示词
-   * - undefined: 主代理
-   * - string: 子代理
-   */
-  agentPrompt?: string
+输出：
 
-  /** Explicit primary/subagent boundary; do not infer from agentPrompt */
-  isSubagent: boolean
+- 有序、非空的 prompt layer 数组。
 
-  /** 运行时环境信息 */
-  environment: EnvironmentInfo
+### 2.2 createSystemPromptProvider()
 
-  /** 自定义指令（仅主代理） */
-  customInstructions?: string[]
-
-  /** 可用工具列表 */
-  tools?: string[]
-}
+```ts
+createSystemPromptProvider(options?: SystemPromptProviderOptions): SystemPromptProvider
 ```
 
-### 3.3 EnvironmentInfo 接口
+数据流：
 
-```typescript
-interface EnvironmentInfo {
-  /** 当前工作目录 */
-  workingDirectory: string
+1. 解析 agent name。
+2. 并发获取 environment、tools、taskKind、toolDetails。
+3. 获取 agent prompt addon。
+4. primary 分支加载 custom instructions。
+5. 调用 `SystemPrompt.assemble()`。
+6. 使用空行 join 为最终 system prompt 字符串。
 
-  /** 操作系统平台 */
-  platform: NodeJS.Platform
+### 2.3 loadCustomInstructions()
 
-  /** 是否为 Git 仓库 */
-  isGitRepo: boolean
+```ts
+SystemPrompt.loadCustomInstructions(options): Promise<readonly string[]>
+```
 
-  /** 当前日期（YYYY-MM-DD） */
-  date: string
+职责：
 
-  /** 操作系统版本 */
-  osVersion?: string
-}
+- 读取项目与全局 custom instruction 文件。
+- 支持 `OHBABY.md`、`AGENTS.md`、`CLAUDE.md` fallback。
+- 截断超长内容。
+- 扫描 prompt-like 内容并上报 finding。
+
+---
+
+## 三、primary 组装流
+
+```text
+input
+  -> resolve primary task kind (default: agent)
+  -> render identity from prompts/primary/base.md
+  -> render primary task from prompts/primary/tasks/*.md
+  -> wrap agent addon
+  -> render tool guidance when snippets/guidelines exist
+  -> render full environment
+  -> render custom instructions
+  -> compact empty layers
 ```
 
 ---
 
-## 四、Data Ownership & Responsibility（数据归属与责任）
+## 四、subagent 组装流
 
-### 4.1 数据归属
+```text
+input
+  -> resolve subagent task kind (taskKind > agentName > generic)
+  -> render subagent base from prompts/subagents/base.md
+  -> render subagent task from prompts/subagents/tasks/*.md
+  -> wrap agent addon
+  -> render tool guidance when snippets/guidelines exist
+  -> render minimal environment
+  -> compact empty layers
+```
 
-| 数据 | 创建者 | 所有者 | 更新者 | 销毁者 |
-|------|--------|--------|--------|--------|
-| Identity 提示词 | 开发者 | SystemPrompt | 开发者 | - |
-| Agent 提示词 | 开发者 | SystemPrompt | 开发者 | - |
-| 环境信息 | Agent 模块 | Agent 模块 | Agent 模块 | - |
-| 自定义指令 | 用户 | 文件系统 | 用户 | 用户 |
-| 组装结果 | SystemPrompt | 调用方 | - | 调用方 |
-
-### 4.2 责任边界
-
-| 操作 | 责任模块 |
-|------|----------|
-| 存储提示词模板 | SystemPrompt |
-| 组装系统提示词 | SystemPrompt |
-| 生成环境信息 | SystemPrompt |
-| 读取 OHBABY.md | SystemPrompt |
-| 提供文件路径 | Config |
-| 提供工具列表 | Tool |
-| 决定调用时机 | Agent |
-| 缓存组装结果 | Agent（可选） |
-
-### 4.3 文件位置
-
-| 文件类型 | 路径 | 说明 |
-|----------|------|------|
-| 项目级指令 | `.ohbaby-agent/OHBABY.md` | 项目根目录 |
-| 全局级指令 | `~/.ohbaby-agent/OHBABY.md` | 用户主目录 |
+subagent 不加载 primary custom instructions。
 
 ---
 
-## 五、依赖接口说明
+## 五、安全流
 
-### 5.1 Config 模块依赖
+tool snippets 与 custom instructions 都可能来自外部配置或文件：
 
-```typescript
-// SystemPrompt 调用 Config 模块
-Config.getProjectPath(): string    // 获取项目配置目录
-Config.getGlobalPath(): string     // 获取全局配置目录
-```
-
-### 5.2 Tool 模块依赖
-
-```typescript
-// SystemPrompt 调用 Tool 模块（可选）
-Tool.list(): string[]  // 获取可用工具列表
-```
-
-### 5.3 文件系统依赖
-
-```typescript
-// SystemPrompt 使用文件系统
-import { readFile, access } from 'fs/promises'
-
-// 读取 OHBABY.md 文件
-await readFile(path, 'utf-8')
-
-// 检查文件是否存在
-await access(path)
-```
+- `toolSnippets` 在 assembler 中通过 `scanPromptLikeContent()` 过滤。
+- custom instructions 在 loader 中扫描、截断并上报 warning/finding。
+- 可疑内容不会被直接注入为未标记的系统指令。
 
 ---
 
-## 六、错误处理
+## 六、外部边界
 
-### 6.1 文件读取错误
+| 输入来源 | 进入点 | 说明 |
+| --- | --- | --- |
+| agents | `agentNameResolver`, `agentPromptResolver` | 提供 agent 名称和 addon |
+| ui-runtime | `taskKindResolver`, `toolsProvider`, `toolDetailsProvider` | 提供 mode/tool 上下文 |
+| filesystem | `loadCustomInstructions()` | 读取 custom instruction 文件 |
+| environment | `detectEnvironment()` | 读取 cwd、platform、date、git 状态 |
 
-| 错误场景 | 处理方式 |
-|----------|----------|
-| OHBABY.md 不存在 | 静默忽略，返回空数组 |
-| OHBABY.md 读取失败 | 记录警告，返回空数组 |
-| OHBABY.md 内容过大 | 截断并记录警告 |
-
-### 6.2 组装错误
-
-| 错误场景 | 错误类型 | 处理方式 |
-|----------|----------|----------|
-| agentName 为空 | `InvalidArgumentError` | 抛出错误 |
-| environment 缺失 | `InvalidArgumentError` | 抛出错误 |
-| 未知代理提示词 | - | 返回空字符串 |
-
----
-
-## 七、使用示例
-
-### 7.1 Agent 模块调用示例
-
-```typescript
-// 获取主代理系统提示词
-async function getPrimaryAgentPrompt(): Promise<string[]> {
-  const customInstructions = await SystemPrompt.loadCustomInstructions()
-  const tools = await Tool.list()
-
-  return SystemPrompt.assemble({
-    agentName: 'build',
-    agentPrompt: undefined,
-    isSubagent: false,
-    environment: {
-      workingDirectory: process.cwd(),
-      platform: process.platform,
-      isGitRepo: await isGitRepository(),
-      date: new Date().toISOString().split('T')[0]
-    },
-    customInstructions,
-    tools
-  })
-}
-
-// 获取子代理系统提示词
-function getSubagentPrompt(
-  agentName: string,
-  agentPrompt: string,
-  tools: string[]
-): string[] {
-  return SystemPrompt.assemble({
-    agentName,
-    agentPrompt,
-    isSubagent: true,
-    environment: {
-      workingDirectory: process.cwd(),
-      platform: process.platform,
-      isGitRepo: false,  // 子代理通常不需要
-      date: new Date().toISOString().split('T')[0]
-    },
-    customInstructions: undefined,
-    tools
-  })
-}
-```
-
----
-
-## 八、文档自检
-
-- [x] 可以清楚说明每一条数据从哪里来、到哪里去
-- [x] 所有接口都服务于明确的数据流
-- [x] 不存在数据责任不清或重复处理的风险
-- [x] 依赖接口明确定义
-- [x] 错误处理策略清晰
+| 输出去向 | 输出 | 说明 |
+| --- | --- | --- |
+| context manager | joined system prompt | 作为模型请求 system message |
+| tests/debug | `string[]` layer array | 便于断言层顺序 |

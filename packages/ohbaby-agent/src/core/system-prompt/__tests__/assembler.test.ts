@@ -78,6 +78,29 @@ describe("SystemPrompt", () => {
     expect(fullPrompt).toContain("Use extra release-note care.");
   });
 
+  it("keeps primary prompt layers in the documented order", () => {
+    const prompts = SystemPrompt.assemble({
+      agentName: "build",
+      agentPromptAddon: "Primary addon.",
+      customInstructions: ["Project rule."],
+      environment: ENVIRONMENT,
+      isSubagent: false,
+      taskKind: "agent",
+      toolSnippets: {
+        read: "Read one text file.",
+      },
+      tools: ["read"],
+    });
+
+    expect(prompts).toHaveLength(6);
+    expect(prompts[0]).toContain("# Identity");
+    expect(prompts[1]).toContain("<primary_task>");
+    expect(prompts[2]).toContain("<agent_prompt_addon>");
+    expect(prompts[3]).toContain("<tool_guidance>");
+    expect(prompts[4]).toContain("<environment>");
+    expect(prompts[5]).toContain("<custom_instructions>");
+  });
+
   it("assembles subagent prompts without identity or custom instructions", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "explore",
@@ -95,6 +118,27 @@ describe("SystemPrompt", () => {
     expect(fullPrompt).not.toContain("Core Capabilities");
     expect(fullPrompt).not.toContain("This must not leak");
     expect(fullPrompt).not.toContain("Available tools");
+  });
+
+  it("keeps subagent prompt layers in the documented order", () => {
+    const prompts = SystemPrompt.assemble({
+      agentName: "explore",
+      agentPromptAddon: "Subagent addon.",
+      environment: ENVIRONMENT,
+      isSubagent: true,
+      taskKind: "explore",
+      toolSnippets: {
+        read: "Read one text file.",
+      },
+      tools: ["read"],
+    });
+
+    expect(prompts).toHaveLength(5);
+    expect(prompts[0]).toContain("<subagent_base>");
+    expect(prompts[1]).toContain("<subagent_task>");
+    expect(prompts[2]).toContain("<agent_prompt_addon>");
+    expect(prompts[3]).toContain("<tool_guidance>");
+    expect(prompts[4]).toContain("<environment>");
   });
 
   it("includes the selected subagent task contract", () => {

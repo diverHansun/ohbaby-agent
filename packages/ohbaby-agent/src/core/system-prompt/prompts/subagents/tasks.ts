@@ -1,22 +1,16 @@
 import type { SubagentTaskKind } from "../../types.js";
+import {
+  SUBAGENT_TASK_EXPLORE_PROMPT_TEMPLATE,
+  SUBAGENT_TASK_GENERIC_PROMPT_TEMPLATE,
+  SUBAGENT_TASK_PLAN_PROMPT_TEMPLATE,
+  SUBAGENT_TASK_RESEARCH_PROMPT_TEMPLATE,
+} from "../templates.generated.js";
 
 const SUBAGENT_TASK_PROMPTS: Record<SubagentTaskKind, string> = {
-  explore: `<subagent_task>
-Task: explore
-Code exploration task: quickly find, inspect, and summarize relevant code. Prefer targeted search before reading large files.
-</subagent_task>`,
-  research: `<subagent_task>
-Task: research
-Research task: investigate a bounded question, separate confirmed facts from inferences, and return a concise synthesis.
-</subagent_task>`,
-  plan: `<subagent_task>
-Task: plan
-Planning task: analyze a bounded child task and return a concise implementation plan. Do not create more subagents.
-</subagent_task>`,
-  generic: `<subagent_task>
-Task: generic
-Complete the delegated bounded task independently and return a concise result to the primary agent.
-</subagent_task>`,
+  explore: SUBAGENT_TASK_EXPLORE_PROMPT_TEMPLATE,
+  generic: SUBAGENT_TASK_GENERIC_PROMPT_TEMPLATE,
+  plan: SUBAGENT_TASK_PLAN_PROMPT_TEMPLATE,
+  research: SUBAGENT_TASK_RESEARCH_PROMPT_TEMPLATE,
 };
 
 export function getSubagentTaskPrompt(taskKind: SubagentTaskKind): string {

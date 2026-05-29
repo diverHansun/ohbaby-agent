@@ -40,12 +40,3 @@ export interface AssembleOptions {
   readonly toolSnippets?: Readonly<Partial<Record<string, string>>>;
   readonly tools?: readonly string[];
 }
-
-export interface AssembleResult {
-  readonly prompts: readonly string[];
-  readonly layers: readonly {
-    readonly type: LayerType;
-    readonly length: number;
-  }[];
-  readonly totalLength: number;
-}
