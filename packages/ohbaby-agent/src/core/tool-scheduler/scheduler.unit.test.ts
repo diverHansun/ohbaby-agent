@@ -128,6 +128,7 @@ function createTool(input: {
   readonly execute?: Tool["execute"];
   readonly isTrusted?: Tool["isTrusted"];
   readonly parametersJsonSchema?: Tool["parametersJsonSchema"];
+  readonly requireExplicitApproval?: Tool["requireExplicitApproval"];
   readonly source?: Tool["source"];
 }): Tool {
   return {
@@ -140,6 +141,7 @@ function createTool(input: {
     isTrusted: input.isTrusted,
     name: input.name,
     parametersJsonSchema: input.parametersJsonSchema ?? {},
+    requireExplicitApproval: input.requireExplicitApproval,
     source: input.source ?? "builtin",
   };
 }
@@ -426,7 +428,41 @@ describe("ToolScheduler", () => {
     expect(permission.ask).not.toHaveBeenCalled();
   });
 
-  it("asks permission for untrusted MCP tools even when evaluator allows the category", async () => {
+  it("asks permission for tools that require explicit approval even when evaluator allows the category", async () => {
+    const permission = {
+      ask: vi.fn(() => Promise.resolve("once" as const)),
+    };
+    const { scheduler } = createScheduler({ permission });
+    const execute = vi.fn(() => ({ output: "remote result" }));
+    scheduler.register(
+      createTool({
+        category: "readonly",
+        execute,
+        name: "remote_read",
+        requireExplicitApproval: true,
+      }),
+    );
+
+    const result = await scheduler.execute({
+      callId: "explicit_approval",
+      messageId: "message_1",
+      params: {},
+      sessionId: "session_1",
+      toolName: "remote_read",
+    });
+
+    expect(result.status).toBe("success");
+    expect(permission.ask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "explicit-approval-required",
+        rememberable: false,
+        toolName: "remote_read",
+      }),
+    );
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps untrusted MCP tools to explicit approval instead of scheduler MCP-specific trust checks", async () => {
     const permission = {
       ask: vi.fn(() => Promise.resolve("once" as const)),
     };
@@ -436,8 +472,8 @@ describe("ToolScheduler", () => {
       createTool({
         category: "readonly",
         execute,
-        isTrusted: false,
         name: "remote_read",
+        requireExplicitApproval: true,
         source: "mcp",
       }),
     );
@@ -453,11 +489,106 @@ describe("ToolScheduler", () => {
     expect(result.status).toBe("success");
     expect(permission.ask).toHaveBeenCalledWith(
       expect.objectContaining({
-        reason: "untrusted-mcp-tool",
+        reason: "explicit-approval-required",
+        rememberable: false,
         toolName: "remote_read",
       }),
     );
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not ask just because a tool source is MCP when explicit approval is absent", async () => {
+    const permission = {
+      ask: vi.fn(() => Promise.resolve("once" as const)),
+    };
+    const { scheduler } = createScheduler({ permission });
+    const execute = vi.fn(() => ({ output: "trusted mcp result" }));
+    scheduler.register(
+      createTool({
+        category: "readonly",
+        execute,
+        name: "trusted_remote_read",
+        source: "mcp",
+      }),
+    );
+
+    await expect(
+      scheduler.execute({
+        callId: "trusted_mcp",
+        messageId: "message_1",
+        params: {},
+        sessionId: "session_1",
+        toolName: "trusted_remote_read",
+      }),
+    ).resolves.toMatchObject({
+      output: "trusted mcp result",
+      status: "success",
+    });
+    expect(permission.ask).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks explicit approval after approving an external write for tools that require both", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "ohbaby-scheduler-explicit-external-"),
+    );
+    const workspace = path.join(tempRoot, "workspace");
+    const outside = path.join(tempRoot, "outside");
+    const externalFile = path.join(outside, "outside.txt");
+    await fs.mkdir(workspace);
+    await fs.mkdir(outside);
+    const permissionRequests: Parameters<PermissionPort["ask"]>[0][] = [];
+    const permission = {
+      ask: vi.fn((input: Parameters<PermissionPort["ask"]>[0]) => {
+        permissionRequests.push(input);
+        return Promise.resolve("once" as const);
+      }),
+    } satisfies PermissionPort;
+    const execute = vi.fn(() => ({ output: "external write" }));
+    const { scheduler } = createScheduler({ permission });
+    scheduler.register(
+      createTool({
+        category: "write",
+        execute,
+        name: "remote_write",
+        parametersJsonSchema: {
+          additionalProperties: false,
+          properties: {
+            file_path: { type: "string" },
+          },
+          required: ["file_path"],
+          type: "object",
+        },
+        requireExplicitApproval: true,
+      }),
+    );
+
+    try {
+      await expect(
+        scheduler.execute({
+          callId: "explicit_external",
+          environment: createFakeEnvironment(workspace),
+          messageId: "message_1",
+          params: { file_path: externalFile },
+          sessionId: "session_1",
+          toolName: "remote_write",
+        }),
+      ).resolves.toMatchObject({
+        output: "external write",
+        status: "success",
+      });
+
+      expect(permissionRequests.map((request) => request.reason)).toEqual([
+        "External path write requires confirmation: remote_write",
+        "explicit-approval-required",
+      ]);
+      expect(permissionRequests.map((request) => request.rememberable)).toEqual(
+        [false, false],
+      );
+      expect(execute).toHaveBeenCalledTimes(1);
+    } finally {
+      await fs.rm(tempRoot, { force: true, recursive: true });
+    }
   });
 
   it("asks external directory permissions before bash permissions", async () => {

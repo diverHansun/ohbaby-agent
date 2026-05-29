@@ -152,7 +152,7 @@ describe("SkillTool", () => {
     expect(tool).toMatchObject({
       category: "skill",
       name: "skill",
-      source: "module",
+      source: "skill",
     });
     expect(result.output).toContain("## Skill: code-review");
     expect(result.output).toContain("**Scope**: project");
@@ -306,7 +306,7 @@ describe("SkillTool", () => {
       annotations: { readOnlyHint: true },
       category: "skill",
       name: "skill_resource",
-      source: "module",
+      source: "skill",
     });
     expect(result.output).toContain("Reference notes");
     expect(result.metadata).toEqual({

@@ -8,7 +8,7 @@
 
 ### 1.1 ToolCategory（工具类别）
 
-工具根据其操作特性分为六类：
+工具根据其操作特性分为七类：
 
 | 类别 | 说明 | 并发特性 | 示例工具 |
 |------|------|----------|----------|
@@ -17,18 +17,20 @@
 | dangerous | 危险操作 | 串行执行 | bash |
 | network | 网络操作 | 可并行（最多5个） | web_fetch, web_search（内置工具，背后走 search-providers） |
 | memory | 记忆操作 | 可并行（不受读写锁限制） | memory_list, memory_add, memory_update, memory_remove |
+| skill | 技能加载与技能资源读取 | 可并行（最多5个） | skill, skill_resource |
 | subagent | 子代理操作 | 可并行（最多3个，独立计数器） | task |
 
 **MCP工具分类规则**：通过 `annotations.readOnlyHint` 在工具注册时推断，`true` → `readonly`，其余 → `write`。
 
 ### 1.2 ToolSource（工具来源）
 
-工具根据其来源分为三类：
+工具根据其来源分为四类：
 
 | 来源 | 代码位置 | 说明 | 注册时机 |
 |------|----------|------|----------|
 | builtin | `src/tools/` | 内置工具（含 web_search / web_fetch） | 启动时静态注册 |
-| module | 各模块内部 | 模块自带工具（如 Memory Tools、Skill） | 模块初始化时注册 |
+| module | 各模块内部 | 模块自带工具（如 Memory Tools） | 模块初始化时注册 |
+| skill | `src/skill/` | 技能系统工具（skill / skill_resource） | runtime composition 注册并在 skill registry 变化时刷新 |
 | mcp | 运行时动态 | MCP 服务器提供的工具 | 运行时发现注册 |
 
 > `web_search` / `web_fetch` 属于 `builtin`；它们是 `tools` 入口，后端走 `services/search-providers/` 路由到具体厂商（Tavily / Exa），但对调度器仍是普通的 builtin 工具，不另立来源类型。
@@ -69,10 +71,10 @@
 
 ```typescript
 // 工具类别
-type ToolCategory = 'readonly' | 'write' | 'dangerous' | 'network' | 'memory' | 'subagent'
+type ToolCategory = 'readonly' | 'write' | 'dangerous' | 'network' | 'memory' | 'skill' | 'subagent'
 
 // 工具来源
-type ToolSource = 'builtin' | 'module' | 'mcp'
+type ToolSource = 'builtin' | 'module' | 'skill' | 'mcp'
 
 // 调用状态
 type ToolCallStatus =
@@ -107,6 +109,18 @@ interface BatchToolCallRequest {
   calls: ToolCallRequest[]
 }
 ```
+
+### 2.2.1 Tool 定义中的显式确认
+
+```typescript
+interface Tool {
+  source: ToolSource
+  category?: ToolCategory
+  requireExplicitApproval?: boolean
+}
+```
+
+`requireExplicitApproval: true` 表示即使当前 permission state 允许该类别，scheduler 仍必须调用 `Permission.ask()`，并使用 `reason: "explicit-approval-required"` 与 `rememberable: false`。该字段是通用工具语义；MCP 的 `trust`/`isTrusted` 只在 MCP adapter 内映射，不由 scheduler 直接消费。
 
 ### 2.3 调用状态类型
 

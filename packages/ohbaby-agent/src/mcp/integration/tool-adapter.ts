@@ -1,4 +1,7 @@
-import type { ToolCategory, ToolExecutionResult } from "../../core/tool-scheduler/index.js";
+import type {
+  ToolCategory,
+  ToolExecutionResult,
+} from "../../core/tool-scheduler/index.js";
 import { McpToolExecutionError } from "../errors.js";
 import type {
   McpCallToolResult,
@@ -116,6 +119,7 @@ export function adaptMcpTool(
     mcpToolName: mcpTool.name,
     name,
     parametersJsonSchema: mcpTool.inputSchema,
+    requireExplicitApproval: !client.config.trust,
     source: "mcp",
     async execute(params, context): Promise<ToolExecutionResult> {
       const result = await client.callTool(

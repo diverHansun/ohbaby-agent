@@ -60,7 +60,7 @@ interface ToolPermissionContext {
   readonly externalWritePath?: string;
   readonly preflight?: PreflightResult;
   readonly preflightError?: unknown;
-  readonly untrustedMcp: boolean;
+  readonly requireExplicitApproval: boolean;
   readonly params: Record<string, unknown>;
 }
 
@@ -687,14 +687,6 @@ export function createToolScheduler(
         type: "ask",
       };
     }
-    if (decision.type === "allow" && context.untrustedMcp) {
-      return {
-        reason: "untrusted-mcp-tool",
-        rememberable: false,
-        type: "ask",
-      };
-    }
-
     return decision;
   }
 
@@ -772,6 +764,24 @@ export function createToolScheduler(
 
     await input.onResponse?.(response);
     return null;
+  }
+
+  async function confirmExplicitApproval(
+    call: ToolCall,
+    context: ToolPermissionContext,
+  ): Promise<ToolCallResult | null> {
+    if (!context.requireExplicitApproval) {
+      return null;
+    }
+    return confirmPermission(
+      call,
+      {
+        reason: "explicit-approval-required",
+        rememberable: false,
+        type: "ask",
+      },
+      context.params,
+    );
   }
 
   function denylistRejection(
@@ -1106,6 +1116,7 @@ export function createToolScheduler(
     category: ToolCategory,
     tool: Tool,
   ): Promise<ToolPermissionContext> {
+    const requireExplicitApproval = tool.requireExplicitApproval === true;
     if (tool.name === "bash" && request.environment?.preflight) {
       const command =
         typeof request.params.command === "string"
@@ -1121,7 +1132,7 @@ export function createToolScheduler(
           environment: request.environment,
           externalWrite: false,
           preflight,
-          untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
+          requireExplicitApproval,
           params: request.params,
         };
       } catch (error) {
@@ -1129,7 +1140,7 @@ export function createToolScheduler(
           environment: request.environment,
           externalWrite: false,
           preflightError: error,
-          untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
+          requireExplicitApproval,
           params: request.params,
         };
       }
@@ -1139,7 +1150,7 @@ export function createToolScheduler(
       return {
         environment: request.environment,
         externalWrite: false,
-        untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
+        requireExplicitApproval,
         params: request.params,
       };
     }
@@ -1149,7 +1160,7 @@ export function createToolScheduler(
       return {
         environment: request.environment,
         externalWrite: false,
-        untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
+        requireExplicitApproval,
         params: request.params,
       };
     }
@@ -1172,7 +1183,7 @@ export function createToolScheduler(
         canonicalPath,
       ),
       externalWritePath: canonicalPath,
-      untrustedMcp: tool.source === "mcp" && tool.isTrusted !== true,
+      requireExplicitApproval,
       params,
     };
   }
@@ -1304,14 +1315,17 @@ export function createToolScheduler(
       return permissionDecision;
     }
     if (permissionDecision.type === "ask") {
-      return confirmPermission(
+      const permissionResult = await confirmPermission(
         prepared.call,
         permissionDecision,
         prepared.permissionContext.params,
       );
+      if (permissionResult) {
+        return permissionResult;
+      }
     }
 
-    return null;
+    return confirmExplicitApproval(prepared.call, prepared.permissionContext);
   }
 
   async function execute(request: ToolCallRequest): Promise<ToolCallResult> {
