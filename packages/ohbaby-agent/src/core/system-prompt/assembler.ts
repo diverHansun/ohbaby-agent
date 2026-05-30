@@ -5,12 +5,12 @@ import {
   generateEnvironmentPrompt,
   generateIdentityPrompt,
   generateToolGuidancePrompt,
-  loadCustomInstructions,
 } from "./layers/index.js";
 import { getBuiltinAgentPrompt } from "./prompts/agents/index.js";
 import { getPrimaryTaskPrompt } from "./prompts/primary/tasks.js";
 import { SUBAGENT_BASE_PROMPT } from "./prompts/subagents/base.js";
 import { getSubagentTaskPrompt } from "./prompts/subagents/tasks.js";
+import { loadCustomInstructions } from "./services/custom-instruction-loader.js";
 import {
   scanPromptLikeContent,
   shouldLoadPromptLikeContent,

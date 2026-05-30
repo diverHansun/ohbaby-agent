@@ -11,7 +11,11 @@
 ```mermaid
 flowchart TD
   caller["ContextManager / Agents / UI Runtime"] --> provider["createSystemPromptProvider()"]
+  provider --> loader["services/custom-instruction-loader"]
+  loader --> files["OHBABY.md / AGENTS.md / CLAUDE.md"]
+  loader --> customData["loaded custom instructions"]
   provider --> assembler["SystemPrompt.assemble()"]
+  customData --> assembler
   prompts["prompts/*.md"] --> generated["templates.generated.ts"]
   generated --> assembler
   assembler --> layers["layers/* renderers"]
@@ -36,6 +40,8 @@ packages/ohbaby-agent/src/core/system-prompt/
     identity.ts
     index.ts
     tools.ts
+  services/
+    custom-instruction-loader.ts
   prompts/
     templates.generated.ts
     identity.ts
@@ -74,9 +80,15 @@ packages/ohbaby-agent/src/core/system-prompt/
 - `identity.ts`: 返回 primary base prompt。
 - `environment.ts`: 渲染 cwd、platform、date、git 状态和可用工具名。
 - `tools.ts`: 渲染工具片段与 prompt guidelines，并由 assembler 预先过滤可疑内容。
-- `custom.ts`: 加载并渲染 custom instructions。
+- `custom.ts`: 渲染 custom instructions，不做路径解析、文件 I/O 或安全扫描。
 
-### 2.3 assembler
+### 2.3 services
+
+`services/` 放跨层运行时能力：
+
+- `custom-instruction-loader.ts`: 读取项目/全局 custom instruction 文件，处理 fallback、截断、安全扫描和 warning/finding 上报。
+
+### 2.4 assembler
 
 `assembler.ts` 是组装入口。它负责：
 
