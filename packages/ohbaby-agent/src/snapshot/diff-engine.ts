@@ -1,84 +1,101 @@
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { access, mkdir } from "node:fs/promises";
+import { homedir, platform } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import {
-  InvalidSnapshotArtifactError,
+  GitCommandError,
+  GitNotAvailableError,
+  SnapshotBaselineNotFoundError,
   type ComputedSnapshotPatch,
   type FileDiff,
   type FileDiffStatus,
   type SnapshotCheckpoint,
   type SnapshotDiffSummary,
-  type SnapshotFilePatch,
-  type SnapshotPatchArtifact,
-  SnapshotBaselineNotFoundError,
 } from "./types.js";
 
+const execFileAsync = promisify(execFile);
+const APP_DIR_NAME = "ohbaby-agent";
+const CORE_CONFIG = [
+  "-c",
+  "core.longpaths=true",
+  "-c",
+  "core.symlinks=true",
+] as const;
+const CFG_CONFIG = ["-c", "core.autocrlf=false", ...CORE_CONFIG] as const;
+const QUOTE_CONFIG = [...CFG_CONFIG, "-c", "core.quotepath=false"] as const;
+const COMMIT_ENV = {
+  GIT_AUTHOR_NAME: "ohbaby-agent",
+  GIT_AUTHOR_EMAIL: "snapshot@ohbaby.local",
+  GIT_COMMITTER_NAME: "ohbaby-agent",
+  GIT_COMMITTER_EMAIL: "snapshot@ohbaby.local",
+} as const;
+
 export interface DiffEngine {
-  recordBaseline(checkpointId: string, workdir: string): Promise<void>;
+  recordBaseline(checkpointId: string, workdir: string): Promise<string>;
   computeDiff(checkpoint: SnapshotCheckpoint): Promise<ComputedSnapshotPatch>;
-  applyReverse(workdir: string, artifact: SnapshotPatchArtifact): Promise<void>;
+  diffWorkingTree(checkpoint: SnapshotCheckpoint): Promise<readonly FileDiff[]>;
+  restoreTo(workdir: string, commit: string): Promise<void>;
+  diffBetween(
+    workdir: string,
+    from: string,
+    to: string,
+  ): Promise<readonly FileDiff[]>;
+  dropRef(checkpointId: string, workdir: string): Promise<void>;
+  dropPostRef(checkpointId: string, workdir: string): Promise<void>;
+  restoreRefs(
+    checkpointId: string,
+    workdir: string,
+    refs: { readonly preTreeRef?: string; readonly postTreeRef?: string },
+  ): Promise<void>;
+  gc(workdir: string, prune?: string): Promise<void>;
 }
 
-type FileState = ReadonlyMap<string, Buffer>;
-
-const IGNORED_DIRECTORIES = new Set([
-  ".git",
-  "node_modules",
-  ".pnpm-store",
-  "dist",
-  "coverage",
-]);
-
-function toRelativePath(root: string, path: string): string {
-  return relative(root, path).split(sep).join("/");
+export interface GitSnapshotEngineOptions {
+  readonly snapshotRoot?: string;
+  readonly gitCommand?: string;
 }
 
-function resolveRelativePath(root: string, relativePath: string): string {
-  const target = resolve(root, ...relativePath.split("/"));
-  const relation = relative(root, target);
-  if (relation === "" || relation === ".." || relation.startsWith(`..${sep}`)) {
-    throw new InvalidSnapshotArtifactError(
-      `file path escapes workdir: ${relativePath}`,
+interface GitState {
+  readonly gitdir: string;
+  readonly workdir: string;
+}
+
+interface GitExecError extends Error {
+  readonly code?: number | string;
+  readonly stderr?: string | Buffer;
+}
+
+function defaultSnapshotRoot(): string {
+  if (process.env.OHBABY_STORAGE_ROOT) {
+    return dirname(resolve(process.env.OHBABY_STORAGE_ROOT));
+  }
+  if (process.env.XDG_DATA_HOME) {
+    return join(process.env.XDG_DATA_HOME, APP_DIR_NAME);
+  }
+  if (platform() === "darwin") {
+    return join(homedir(), "Library", "Application Support", APP_DIR_NAME);
+  }
+  if (platform() === "win32") {
+    return join(
+      process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"),
+      APP_DIR_NAME,
     );
   }
-  return target;
+  return join(homedir(), ".local", "share", APP_DIR_NAME);
 }
 
-function contentToBase64(content: Buffer): string {
-  return content.toString("base64");
+function workdirHash(workdir: string): string {
+  return createHash("sha1").update(resolve(workdir)).digest("hex").slice(0, 16);
 }
 
-function contentFromBase64(content: string | undefined): Buffer {
-  if (content === undefined) {
-    throw new InvalidSnapshotArtifactError("missing file content");
-  }
-  return Buffer.from(content, "base64");
+function preRef(checkpointId: string): string {
+  return `refs/snapshots/${checkpointId}/pre`;
 }
 
-async function collectFiles(root: string, directory = root): Promise<string[]> {
-  const entries = await readdir(directory, { withFileTypes: true });
-  const files: string[] = [];
-
-  for (const entry of entries) {
-    if (entry.isDirectory() && IGNORED_DIRECTORIES.has(entry.name)) {
-      continue;
-    }
-    const path = resolve(directory, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await collectFiles(root, path)));
-    } else if (entry.isFile()) {
-      files.push(toRelativePath(root, path));
-    }
-  }
-
-  return files.sort();
-}
-
-async function readFileState(workdir: string): Promise<FileState> {
-  const state = new Map<string, Buffer>();
-  for (const path of await collectFiles(workdir)) {
-    state.set(path, await readFile(resolveRelativePath(workdir, path)));
-  }
-  return state;
+function postRef(checkpointId: string): string {
+  return `refs/snapshots/${checkpointId}/post`;
 }
 
 function summarize(files: readonly FileDiff[]): SnapshotDiffSummary {
@@ -89,110 +106,37 @@ function summarize(files: readonly FileDiff[]): SnapshotDiffSummary {
   };
 }
 
-function createFilePatch(
-  path: string,
-  status: FileDiffStatus,
-  before: Buffer | undefined,
-  after: Buffer | undefined,
-): SnapshotFilePatch {
-  return {
-    path,
-    status,
-    ...(before === undefined
-      ? {}
-      : { beforeContentBase64: contentToBase64(before) }),
-    ...(after === undefined
-      ? {}
-      : { afterContentBase64: contentToBase64(after) }),
-  };
+function statusFromCode(code: string): FileDiffStatus {
+  if (code.startsWith("A")) {
+    return "added";
+  }
+  if (code.startsWith("D")) {
+    return "deleted";
+  }
+  return "modified";
 }
 
-function parseFilePatch(input: unknown): SnapshotFilePatch {
-  if (typeof input !== "object" || input === null) {
-    throw new InvalidSnapshotArtifactError("file patch must be an object");
-  }
-  const value = input as Record<string, unknown>;
-  if (typeof value.path !== "string") {
-    throw new InvalidSnapshotArtifactError("file patch path must be a string");
-  }
-  if (
-    value.status !== "added" &&
-    value.status !== "modified" &&
-    value.status !== "deleted"
-  ) {
-    throw new InvalidSnapshotArtifactError("file patch status is invalid");
-  }
-  if (
-    value.beforeContentBase64 !== undefined &&
-    typeof value.beforeContentBase64 !== "string"
-  ) {
-    throw new InvalidSnapshotArtifactError(
-      "beforeContentBase64 must be a string",
-    );
-  }
-  if (
-    value.afterContentBase64 !== undefined &&
-    typeof value.afterContentBase64 !== "string"
-  ) {
-    throw new InvalidSnapshotArtifactError(
-      "afterContentBase64 must be a string",
-    );
-  }
-  return {
-    path: value.path,
-    status: value.status,
-    ...(value.beforeContentBase64 === undefined
-      ? {}
-      : { beforeContentBase64: value.beforeContentBase64 }),
-    ...(value.afterContentBase64 === undefined
-      ? {}
-      : { afterContentBase64: value.afterContentBase64 }),
-  };
+function parseNameStatus(output: string): readonly FileDiff[] {
+  return output
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [code, path] = line.split("\t");
+      return {
+        path,
+        status: statusFromCode(code),
+      };
+    })
+    .filter((file): file is FileDiff => typeof file.path === "string")
+    .sort((left, right) => left.path.localeCompare(right.path));
 }
 
-export function serializePatchArtifact(
-  artifact: SnapshotPatchArtifact,
-): string {
-  return `${JSON.stringify(artifact, null, 2)}\n`;
-}
-
-export function parsePatchArtifact(content: string): SnapshotPatchArtifact {
-  const parsed = JSON.parse(content) as unknown;
-  if (typeof parsed !== "object" || parsed === null) {
-    throw new InvalidSnapshotArtifactError("artifact must be an object");
+function requirePreTreeRef(checkpoint: SnapshotCheckpoint): string {
+  if (!checkpoint.preTreeRef) {
+    throw new SnapshotBaselineNotFoundError(checkpoint.checkpointId);
   }
-  const value = parsed as Record<string, unknown>;
-  if (value.version !== 1) {
-    throw new InvalidSnapshotArtifactError("unsupported artifact version");
-  }
-  if (typeof value.checkpointId !== "string") {
-    throw new InvalidSnapshotArtifactError("checkpointId must be a string");
-  }
-  if (typeof value.patchId !== "string") {
-    throw new InvalidSnapshotArtifactError("patchId must be a string");
-  }
-  if (typeof value.createdAt !== "number") {
-    throw new InvalidSnapshotArtifactError("createdAt must be a number");
-  }
-  if (!Array.isArray(value.files)) {
-    throw new InvalidSnapshotArtifactError("files must be an array");
-  }
-  return {
-    version: 1,
-    checkpointId: value.checkpointId,
-    patchId: value.patchId,
-    createdAt: value.createdAt,
-    files: value.files.map(parseFilePatch),
-  };
-}
-
-export function filesFromArtifact(
-  artifact: SnapshotPatchArtifact,
-): readonly FileDiff[] {
-  return artifact.files.map((file) => ({
-    path: file.path,
-    status: file.status,
-  }));
+  return checkpoint.preTreeRef;
 }
 
 export function summaryFromFiles(
@@ -201,69 +145,368 @@ export function summaryFromFiles(
   return summarize(files);
 }
 
-export class ShadowDiffEngine implements DiffEngine {
-  private readonly baselines = new Map<string, FileState>();
+export class GitSnapshotEngine implements DiffEngine {
+  private readonly snapshotRoot: string;
+  private readonly gitCommand: string;
+  private readonly locks = new Map<string, Promise<void>>();
 
-  async recordBaseline(checkpointId: string, workdir: string): Promise<void> {
-    this.baselines.set(checkpointId, await readFileState(workdir));
+  constructor(options: GitSnapshotEngineOptions = {}) {
+    this.snapshotRoot = resolve(options.snapshotRoot ?? defaultSnapshotRoot());
+    this.gitCommand = options.gitCommand ?? "git";
+  }
+
+  async recordBaseline(checkpointId: string, workdir: string): Promise<string> {
+    const state = this.stateFor(workdir);
+    return this.locked(state, async () => {
+      const commit = await this.captureCommit(state, checkpointId);
+      await this.updateRef(state, preRef(checkpointId), commit);
+      return commit;
+    });
   }
 
   async computeDiff(
     checkpoint: SnapshotCheckpoint,
   ): Promise<ComputedSnapshotPatch> {
-    const baseline = this.baselines.get(checkpoint.checkpointId);
-    if (baseline === undefined) {
-      throw new SnapshotBaselineNotFoundError(checkpoint.checkpointId);
-    }
-    const current = await readFileState(checkpoint.workdir);
-    const paths = Array.from(
-      new Set([...baseline.keys(), ...current.keys()]),
-    ).sort();
-    const files: FileDiff[] = [];
-    const filePatches: SnapshotFilePatch[] = [];
+    const pre = requirePreTreeRef(checkpoint);
+    const state = this.stateFor(checkpoint.workdir);
+    return this.locked(state, async () => {
+      const commit = await this.captureCommit(state, checkpoint.checkpointId);
+      const files = await this.diffCommits(state, pre, commit);
+      await this.updateRef(
+        state,
+        postRef(checkpoint.checkpointId),
+        commit,
+      );
+      return {
+        files,
+        summary: summarize(files),
+        fileCount: files.length,
+        commit,
+      };
+    });
+  }
 
-    for (const path of paths) {
-      const before = baseline.get(path);
-      const after = current.get(path);
+  async diffWorkingTree(
+    checkpoint: SnapshotCheckpoint,
+  ): Promise<readonly FileDiff[]> {
+    const pre = requirePreTreeRef(checkpoint);
+    const state = this.stateFor(checkpoint.workdir);
+    return this.locked(state, async () => {
+      await this.ensureInitialized(state);
+      await this.addAll(state);
+      const output = await this.git(
+        state,
+        [
+          ...QUOTE_CONFIG,
+          ...this.worktreeArgs(state, [
+            "diff",
+            "--no-ext-diff",
+            "--name-status",
+            "--no-renames",
+            "--cached",
+            pre,
+            "--",
+            ".",
+          ]),
+        ],
+        { cwd: state.workdir },
+      );
+      return parseNameStatus(output);
+    });
+  }
 
-      if (before === undefined && after !== undefined) {
-        files.push({ path, status: "added" });
-        filePatches.push(createFilePatch(path, "added", undefined, after));
-      } else if (before !== undefined && after === undefined) {
-        files.push({ path, status: "deleted" });
-        filePatches.push(createFilePatch(path, "deleted", before, undefined));
-      } else if (
-        before !== undefined &&
-        after !== undefined &&
-        !before.equals(after)
-      ) {
-        files.push({ path, status: "modified" });
-        filePatches.push(createFilePatch(path, "modified", before, after));
+  async restoreTo(workdir: string, commit: string): Promise<void> {
+    const state = this.stateFor(workdir);
+    await this.locked(state, async () => {
+      await this.ensureInitialized(state);
+      await this.addAll(state);
+      await this.git(
+        state,
+        [
+          ...CORE_CONFIG,
+          ...this.worktreeArgs(state, ["read-tree", "-u", "--reset", commit]),
+        ],
+        { cwd: state.workdir },
+      );
+    });
+  }
+
+  async diffBetween(
+    workdir: string,
+    from: string,
+    to: string,
+  ): Promise<readonly FileDiff[]> {
+    const state = this.stateFor(workdir);
+    return this.locked(state, async () => {
+      await this.ensureInitialized(state);
+      return this.diffCommits(state, from, to);
+    });
+  }
+
+  async dropRef(checkpointId: string, workdir: string): Promise<void> {
+    const state = this.stateFor(workdir);
+    await this.locked(state, async () => {
+      if (!(await this.isInitialized(state))) {
+        return;
       }
-    }
+      await this.deleteRef(state, preRef(checkpointId));
+      await this.deleteRef(state, postRef(checkpointId));
+    });
+  }
 
+  async dropPostRef(checkpointId: string, workdir: string): Promise<void> {
+    const state = this.stateFor(workdir);
+    await this.locked(state, async () => {
+      if (!(await this.isInitialized(state))) {
+        return;
+      }
+      await this.deleteRef(state, postRef(checkpointId));
+    });
+  }
+
+  async restoreRefs(
+    checkpointId: string,
+    workdir: string,
+    refs: { readonly preTreeRef?: string; readonly postTreeRef?: string },
+  ): Promise<void> {
+    const state = this.stateFor(workdir);
+    await this.locked(state, async () => {
+      await this.ensureInitialized(state);
+      if (refs.preTreeRef) {
+        await this.updateRef(state, preRef(checkpointId), refs.preTreeRef);
+      }
+      if (refs.postTreeRef) {
+        await this.updateRef(state, postRef(checkpointId), refs.postTreeRef);
+      }
+    });
+  }
+
+  async gc(workdir: string, prune = "7.days"): Promise<void> {
+    const state = this.stateFor(workdir);
+    await this.locked(state, async () => {
+      if (!(await this.isInitialized(state))) {
+        return;
+      }
+      if (prune === "now") {
+        await this.git(
+          state,
+          [
+            ...this.worktreeArgs(state, [
+              "reflog",
+              "expire",
+              "--expire=now",
+              "--expire-unreachable=now",
+              "--all",
+            ]),
+          ],
+          { cwd: state.workdir },
+        );
+      }
+      await this.git(
+        state,
+        [...this.worktreeArgs(state, ["gc", `--prune=${prune}`])],
+        { cwd: state.workdir },
+      );
+    });
+  }
+
+  private stateFor(workdir: string): GitState {
+    const resolvedWorkdir = resolve(workdir);
     return {
-      files,
-      filePatches,
-      summary: summarize(files),
-      fileCount: files.length,
+      gitdir: join(this.snapshotRoot, "snapshot-git", workdirHash(workdir)),
+      workdir: resolvedWorkdir,
     };
   }
 
-  async applyReverse(
-    workdir: string,
-    artifact: SnapshotPatchArtifact,
-  ): Promise<void> {
-    for (const file of artifact.files) {
-      const target = resolveRelativePath(workdir, file.path);
-      if (file.status === "added") {
-        await rm(target, { force: true });
-        continue;
+  private async locked<T>(state: GitState, fn: () => Promise<T>): Promise<T> {
+    const previous = this.locks.get(state.gitdir) ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(fn);
+    const tail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.locks.set(state.gitdir, tail);
+    try {
+      return await operation;
+    } finally {
+      if (this.locks.get(state.gitdir) === tail) {
+        this.locks.delete(state.gitdir);
       }
+    }
+  }
 
-      const content = contentFromBase64(file.beforeContentBase64);
-      await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, content);
+  private async captureCommit(
+    state: GitState,
+    checkpointId: string,
+  ): Promise<string> {
+    await this.ensureInitialized(state);
+    await this.addAll(state);
+    const tree = (
+      await this.git(state, [...this.worktreeArgs(state, ["write-tree"])], {
+        cwd: state.workdir,
+      })
+    ).trim();
+    const commit = (
+      await this.git(
+        state,
+        [
+          ...this.worktreeArgs(state, [
+            "commit-tree",
+            tree,
+            "-m",
+            `snapshot ${checkpointId}`,
+          ]),
+        ],
+        { cwd: state.workdir, env: COMMIT_ENV },
+      )
+    ).trim();
+    return commit;
+  }
+
+  private async diffCommits(
+    state: GitState,
+    from: string,
+    to: string,
+  ): Promise<readonly FileDiff[]> {
+    const output = await this.git(
+      state,
+      [
+        ...QUOTE_CONFIG,
+        ...this.worktreeArgs(state, [
+          "diff",
+          "--no-ext-diff",
+          "--name-status",
+          "--no-renames",
+          from,
+          to,
+          "--",
+          ".",
+        ]),
+      ],
+      { cwd: state.workdir },
+    );
+    return parseNameStatus(output);
+  }
+
+  private async ensureInitialized(state: GitState): Promise<void> {
+    if (await this.isInitialized(state)) {
+      return;
+    }
+    await mkdir(state.gitdir, { recursive: true });
+    await this.gitRaw(["init"], {
+      env: {
+        GIT_DIR: state.gitdir,
+        GIT_WORK_TREE: state.workdir,
+      },
+    });
+    await this.gitRaw([
+      "--git-dir",
+      state.gitdir,
+      "config",
+      "core.autocrlf",
+      "false",
+    ]);
+    await this.gitRaw([
+      "--git-dir",
+      state.gitdir,
+      "config",
+      "core.longpaths",
+      "true",
+    ]);
+    await this.gitRaw([
+      "--git-dir",
+      state.gitdir,
+      "config",
+      "core.symlinks",
+      "true",
+    ]);
+    await this.gitRaw([
+      "--git-dir",
+      state.gitdir,
+      "config",
+      "core.fsmonitor",
+      "false",
+    ]);
+  }
+
+  private async isInitialized(state: GitState): Promise<boolean> {
+    try {
+      await access(join(state.gitdir, "config"));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async addAll(state: GitState): Promise<void> {
+    await this.git(
+      state,
+      [...CFG_CONFIG, ...this.worktreeArgs(state, ["add", "--all", "."])],
+      { cwd: state.workdir },
+    );
+  }
+
+  private async deleteRef(state: GitState, ref: string): Promise<void> {
+    await this.git(
+      state,
+      [...this.worktreeArgs(state, ["update-ref", "-d", ref])],
+      { cwd: state.workdir },
+    );
+  }
+
+  private async updateRef(
+    state: GitState,
+    ref: string,
+    commit: string,
+  ): Promise<void> {
+    await this.git(
+      state,
+      [...this.worktreeArgs(state, ["update-ref", ref, commit])],
+      { cwd: state.workdir },
+    );
+  }
+
+  private worktreeArgs(state: GitState, args: readonly string[]): string[] {
+    return ["--git-dir", state.gitdir, "--work-tree", state.workdir, ...args];
+  }
+
+  private git(
+    state: GitState,
+    args: readonly string[],
+    options: {
+      readonly cwd?: string;
+      readonly env?: Record<string, string>;
+    } = {},
+  ): Promise<string> {
+    return this.gitRaw(args, {
+      cwd: options.cwd ?? state.workdir,
+      env: options.env,
+    });
+  }
+
+  private async gitRaw(
+    args: readonly string[],
+    options: {
+      readonly cwd?: string;
+      readonly env?: Record<string, string>;
+    } = {},
+  ): Promise<string> {
+    try {
+      const { stdout } = await execFileAsync(this.gitCommand, [...args], {
+        cwd: options.cwd,
+        env: { ...process.env, ...options.env },
+        maxBuffer: 20 * 1024 * 1024,
+      });
+      return stdout;
+    } catch (error) {
+      const gitError = error as GitExecError;
+      if (gitError.code === "ENOENT") {
+        throw new GitNotAvailableError(this.gitCommand);
+      }
+      const exitCode = typeof gitError.code === "number" ? gitError.code : null;
+      const stderr =
+        gitError.stderr === undefined ? "" : String(gitError.stderr);
+      throw new GitCommandError(args, exitCode, stderr.trim());
     }
   }
 }

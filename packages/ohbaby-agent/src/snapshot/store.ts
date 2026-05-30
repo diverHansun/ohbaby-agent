@@ -4,12 +4,6 @@ import type {
 } from "../services/database/index.js";
 import { schema } from "../services/database/index.js";
 import {
-  NotFoundError as StorageNotFoundError,
-  type Storage,
-  type StorageKey,
-} from "../services/storage/index.js";
-import {
-  ArtifactNotAvailableError,
   type CreateCheckpointInput,
   type CreatePatchInput,
   type ListCheckpointOptions,
@@ -24,7 +18,6 @@ import {
 
 interface SnapshotStoreOptions {
   readonly db: DatabaseConnection;
-  readonly storage: Storage;
 }
 
 interface CreatePatchIfAbsentResult {
@@ -41,13 +34,14 @@ interface CheckpointRow {
   readonly workspace_source: string | null;
   readonly message_cursor_before: string | null;
   readonly message_cursor_after: string | null;
+  readonly pre_tree_ref: string | null;
   readonly created_at: number;
 }
 
 interface PatchRow {
   readonly patch_id: string;
   readonly checkpoint_id: string;
-  readonly artifact_path: string | null;
+  readonly post_tree_ref: string | null;
   readonly file_count: number;
   readonly created_at: number;
 }
@@ -76,6 +70,7 @@ function rowToCheckpoint(row: CheckpointRow): SnapshotCheckpoint {
     ...(row.message_cursor_after === null
       ? {}
       : { messageCursorAfter: decodeCursor(row.message_cursor_after) }),
+    ...(row.pre_tree_ref === null ? {} : { preTreeRef: row.pre_tree_ref }),
     createdAt: row.created_at,
   };
 }
@@ -84,27 +79,18 @@ function rowToPatch(row: PatchRow): SnapshotPatch {
   return {
     patchId: row.patch_id,
     checkpointId: row.checkpoint_id,
-    artifactPath: row.artifact_path,
+    postTreeRef: row.post_tree_ref,
     fileCount: row.file_count,
     createdAt: row.created_at,
   };
 }
 
-function artifactPathToKey(path: string): StorageKey {
-  return path.split("/");
-}
+const CHECKPOINT_COLUMNS = `checkpoint_id, session_id, run_id, turn_id, workdir,
+  workspace_source, message_cursor_before, message_cursor_after, pre_tree_ref,
+  created_at`;
 
-function stableArtifactKey(checkpointId: string, patchId: string): StorageKey {
-  return ["snapshot", "patches", checkpointId, patchId];
-}
-
-function stagingArtifactKey(patchId: string): StorageKey {
-  return ["snapshot", "staging", patchId];
-}
-
-function artifactKeyToPath(key: StorageKey): string {
-  return key.join("/");
-}
+const PATCH_COLUMNS = `patch_id, checkpoint_id, post_tree_ref, file_count,
+  created_at`;
 
 export class SnapshotStore {
   constructor(private readonly options: SnapshotStoreOptions) {}
@@ -114,8 +100,8 @@ export class SnapshotStore {
       .prepare(
         `INSERT INTO ${schema.snapshotCheckpoint.tableName}
           (checkpoint_id, session_id, run_id, turn_id, workdir, workspace_source,
-           message_cursor_before, message_cursor_after, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           message_cursor_before, message_cursor_after, pre_tree_ref, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.checkpointId,
@@ -126,6 +112,7 @@ export class SnapshotStore {
         input.workspaceSource ?? null,
         encodeCursor(input.messageCursorBefore),
         null,
+        input.preTreeRef,
         input.createdAt,
       );
 
@@ -141,6 +128,7 @@ export class SnapshotStore {
       ...(input.messageCursorBefore === undefined
         ? {}
         : { messageCursorBefore: input.messageCursorBefore }),
+      preTreeRef: input.preTreeRef,
       createdAt: input.createdAt,
     };
   }
@@ -162,9 +150,7 @@ export class SnapshotStore {
   getCheckpoint(checkpointId: string): SnapshotCheckpoint | undefined {
     const row = this.options.db
       .prepare<CheckpointRow>(
-        `SELECT checkpoint_id, session_id, run_id, turn_id, workdir,
-                workspace_source, message_cursor_before, message_cursor_after,
-                created_at
+        `SELECT ${CHECKPOINT_COLUMNS}
          FROM ${schema.snapshotCheckpoint.tableName}
          WHERE checkpoint_id = ?`,
       )
@@ -178,6 +164,15 @@ export class SnapshotStore {
       throw new SnapshotCheckpointNotFoundError(checkpointId);
     }
     return checkpoint;
+  }
+
+  deleteCheckpoint(checkpointId: string): void {
+    this.options.db
+      .prepare(
+        `DELETE FROM ${schema.snapshotCheckpoint.tableName}
+         WHERE checkpoint_id = ?`,
+      )
+      .run(checkpointId);
   }
 
   listCheckpoints(
@@ -197,9 +192,7 @@ export class SnapshotStore {
 
     const rows = this.options.db
       .prepare<CheckpointRow>(
-        `SELECT checkpoint_id, session_id, run_id, turn_id, workdir,
-                workspace_source, message_cursor_before, message_cursor_after,
-                created_at
+        `SELECT ${CHECKPOINT_COLUMNS}
          FROM ${schema.snapshotCheckpoint.tableName}
          WHERE ${conditions.join(" AND ")}
          ORDER BY created_at DESC, checkpoint_id DESC`,
@@ -212,20 +205,20 @@ export class SnapshotStore {
     this.options.db
       .prepare(
         `INSERT INTO ${schema.snapshotPatch.tableName}
-          (patch_id, checkpoint_id, artifact_path, file_count, created_at)
+          (patch_id, checkpoint_id, post_tree_ref, file_count, created_at)
          VALUES (?, ?, ?, ?, ?)`,
       )
       .run(
         input.patchId,
         input.checkpointId,
-        input.artifactPath,
+        input.postTreeRef,
         input.fileCount,
         input.createdAt,
       );
     return {
       patchId: input.patchId,
       checkpointId: input.checkpointId,
-      artifactPath: input.artifactPath,
+      postTreeRef: input.postTreeRef,
       fileCount: input.fileCount,
       createdAt: input.createdAt,
     };
@@ -255,7 +248,7 @@ export class SnapshotStore {
   getPatch(patchId: string): SnapshotPatch | undefined {
     const row = this.options.db
       .prepare<PatchRow>(
-        `SELECT patch_id, checkpoint_id, artifact_path, file_count, created_at
+        `SELECT ${PATCH_COLUMNS}
          FROM ${schema.snapshotPatch.tableName}
          WHERE patch_id = ?`,
       )
@@ -274,7 +267,7 @@ export class SnapshotStore {
   getPatchByCheckpoint(checkpointId: string): SnapshotPatch | undefined {
     const row = this.options.db
       .prepare<PatchRow>(
-        `SELECT patch_id, checkpoint_id, artifact_path, file_count, created_at
+        `SELECT ${PATCH_COLUMNS}
          FROM ${schema.snapshotPatch.tableName}
          WHERE checkpoint_id = ?
          ORDER BY created_at ASC, patch_id ASC
@@ -287,7 +280,7 @@ export class SnapshotStore {
   getPatches(checkpointId: string): SnapshotPatch[] {
     const rows = this.options.db
       .prepare<PatchRow>(
-        `SELECT patch_id, checkpoint_id, artifact_path, file_count, created_at
+        `SELECT ${PATCH_COLUMNS}
          FROM ${schema.snapshotPatch.tableName}
          WHERE checkpoint_id = ?
          ORDER BY created_at ASC, patch_id ASC`,
@@ -300,7 +293,7 @@ export class SnapshotStore {
     const checkpoint = this.requireCheckpoint(checkpointId);
     const rows = this.options.db
       .prepare<PatchRow>(
-        `SELECT patch.patch_id, patch.checkpoint_id, patch.artifact_path,
+        `SELECT patch.patch_id, patch.checkpoint_id, patch.post_tree_ref,
                 patch.file_count, patch.created_at
          FROM ${schema.snapshotPatch.tableName} patch
          INNER JOIN ${schema.snapshotCheckpoint.tableName} checkpoint
@@ -330,7 +323,7 @@ export class SnapshotStore {
     }
     const rows = this.options.db
       .prepare<PatchRow>(
-        `SELECT patch.patch_id, patch.checkpoint_id, patch.artifact_path,
+        `SELECT patch.patch_id, patch.checkpoint_id, patch.post_tree_ref,
                 patch.file_count, patch.created_at
          FROM ${schema.snapshotPatch.tableName} patch
          INNER JOIN ${schema.snapshotCheckpoint.tableName} checkpoint
@@ -350,56 +343,17 @@ export class SnapshotStore {
     return rows.map(rowToPatch);
   }
 
-  updatePatchArtifact(
-    patchId: string,
-    artifactPath: string | null,
-  ): SnapshotPatch {
-    this.options.db
-      .prepare(
-        `UPDATE ${schema.snapshotPatch.tableName}
-         SET artifact_path = ?
-         WHERE patch_id = ?`,
-      )
-      .run(artifactPath, patchId);
-    return this.requirePatch(patchId);
-  }
-
-  async writeArtifact(
-    checkpointId: string,
-    patchId: string,
-    content: string,
-  ): Promise<string> {
-    const stagingKey = stagingArtifactKey(patchId);
-    const stableKey = stableArtifactKey(checkpointId, patchId);
-    await this.options.storage.writeText(stagingKey, content);
-    const staged = await this.options.storage.readText(stagingKey);
-    await this.options.storage.writeText(stableKey, staged);
-    await this.options.storage.remove(stagingKey);
-    return artifactKeyToPath(stableKey);
-  }
-
-  async readArtifact(patchId: string): Promise<string> {
-    const patch = this.requirePatch(patchId);
-    if (patch.artifactPath === null) {
-      throw new ArtifactNotAvailableError(patch.patchId, patch.checkpointId);
-    }
-    try {
-      return await this.options.storage.readText(
-        artifactPathToKey(patch.artifactPath),
+  assertSameSessionAndWorkdir(
+    fromCheckpointId: string,
+    toCheckpointId: string,
+  ): { readonly from: SnapshotCheckpoint; readonly to: SnapshotCheckpoint } {
+    const from = this.requireCheckpoint(fromCheckpointId);
+    const to = this.requireCheckpoint(toCheckpointId);
+    if (from.sessionId !== to.sessionId || from.workdir !== to.workdir) {
+      throw new SnapshotError(
+        "Cannot diff checkpoints from different sessions or workdirs",
       );
-    } catch (error) {
-      if (error instanceof StorageNotFoundError) {
-        throw new ArtifactNotAvailableError(patch.patchId, patch.checkpointId);
-      }
-      throw error;
     }
-  }
-
-  async deleteArtifact(patchId: string): Promise<SnapshotPatch> {
-    const patch = this.requirePatch(patchId);
-    if (patch.artifactPath !== null) {
-      await this.options.storage.remove(artifactPathToKey(patch.artifactPath));
-    }
-    return this.updatePatchArtifact(patchId, null);
+    return { from, to };
   }
 }

@@ -18,6 +18,7 @@ import type {
   StreamBridgeYield,
   StreamScope,
 } from "../stream-bridge/index.js";
+import { SnapshotHookExecutionError } from "../../snapshot/index.js";
 import {
   ConcurrencyRejectedError,
   RunManager,
@@ -75,7 +76,8 @@ function createTestSandboxLease(sessionId: string): SandboxLease {
     resolvePathForWrite: (inputPath: string) =>
       Promise.resolve(`${workdir}/${inputPath}`),
     sessionId,
-    trustPath: (input) => Promise.resolve({ kind: input.kind, path: input.path }),
+    trustPath: (input) =>
+      Promise.resolve({ kind: input.kind, path: input.path }),
     trustedRoots: () => [{ kind: "workspace", path: workdir }],
     workdir,
   };
@@ -211,6 +213,20 @@ class RecordingHooks implements HookExecutor {
   ): Promise<void> {
     this.calls.push(point);
     this.contexts.push(context);
+    return Promise.resolve();
+  }
+}
+
+class ConditionalThrowingHooks implements HookExecutor {
+  constructor(private readonly error: Error) {}
+
+  execute(
+    point: "pre-run" | "post-run",
+    _context: RunHookContext,
+  ): Promise<void> {
+    if (point === "pre-run") {
+      return Promise.reject(this.error);
+    }
     return Promise.resolve();
   }
 }
@@ -601,6 +617,7 @@ function createManager(lifecycle: RunLifecycle): ManagerFixture {
 function createManagerWithOverrides(input: {
   readonly lifecycle: RunLifecycle;
   readonly bridge?: StreamBridge;
+  readonly hookExecutor?: HookExecutor;
   readonly sandboxManager?: SandboxManager;
 }): ManagerFixture {
   const fixture = createManager(input.lifecycle);
@@ -608,7 +625,7 @@ function createManagerWithOverrides(input: {
     lifecycle: input.lifecycle,
     runLedger: fixture.ledger,
     streamBridge: input.bridge ?? fixture.bridge,
-    hookExecutor: fixture.hooks,
+    hookExecutor: input.hookExecutor ?? fixture.hooks,
     sandboxManager: input.sandboxManager ?? fixture.sandboxManager,
     policy,
     now: createClock(10_000),
@@ -897,6 +914,60 @@ describe("RunManager", () => {
       status: "succeeded",
     });
     expect(manager.list("session_1")).toEqual([]);
+  });
+
+  it("publishes snapshot hook failures without mislabeling ordinary hook failures", async () => {
+    const snapshotBridge = new RecordingBridge();
+    const snapshotFailure = new SnapshotHookExecutionError(
+      "pre-run",
+      new Error("git missing"),
+    );
+    const snapshotFixture = createManagerWithOverrides({
+      lifecycle: new CompletingLifecycle(),
+      bridge: snapshotBridge,
+      hookExecutor: new ConditionalThrowingHooks(snapshotFailure),
+    });
+
+    const snapshotRecord = await snapshotFixture.manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_snapshot",
+      triggerSource: "user",
+    });
+    await snapshotFixture.manager.waitForCompletion(snapshotRecord.runId);
+
+    const snapshotHookEvents = snapshotBridge.events.filter(
+      (event) => event.event === "snapshot.hook.failed",
+    );
+    expect(snapshotHookEvents).toHaveLength(1);
+    expect(snapshotHookEvents[0]?.scope).toBe("run/run_override");
+    expect(snapshotHookEvents[0]?.data).toMatchObject({
+      error: "git missing",
+      point: "pre-run",
+    });
+
+    const ordinaryBridge = new RecordingBridge();
+    const ordinaryFixture = createManagerWithOverrides({
+      lifecycle: new CompletingLifecycle(),
+      bridge: ordinaryBridge,
+      hookExecutor: new ConditionalThrowingHooks(
+        new Error("ordinary hook failed"),
+      ),
+    });
+
+    const ordinaryRecord = await ordinaryFixture.manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_ordinary",
+      triggerSource: "user",
+    });
+    await ordinaryFixture.manager.waitForCompletion(ordinaryRecord.runId);
+
+    expect(
+      ordinaryBridge.events.filter(
+        (event) => event.event === "snapshot.hook.failed",
+      ),
+    ).toEqual([]);
   });
 
   it("interrupts the current run before starting a replacement when requested", async () => {

@@ -115,4 +115,36 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
       DROP TABLE IF EXISTS scheduler_job;
     `,
   },
+  {
+    version: "005_snapshot_git_sidecar",
+    sql: `
+      CREATE TABLE IF NOT EXISTS snapshot_checkpoint (
+        checkpoint_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+        run_id TEXT,
+        turn_id TEXT NOT NULL,
+        workdir TEXT NOT NULL,
+        workspace_source TEXT,
+        message_cursor_before TEXT,
+        message_cursor_after TEXT,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (run_id, session_id)
+          REFERENCES run_ledger(run_id, session_id)
+          ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_snapshot_session ON snapshot_checkpoint(session_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_snapshot_run_turn ON snapshot_checkpoint(session_id, run_id, turn_id);
+
+      CREATE TABLE IF NOT EXISTS snapshot_patch (
+        patch_id TEXT PRIMARY KEY,
+        checkpoint_id TEXT NOT NULL REFERENCES snapshot_checkpoint(checkpoint_id) ON DELETE CASCADE,
+        artifact_path TEXT,
+        file_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+
+      ALTER TABLE snapshot_checkpoint ADD COLUMN pre_tree_ref TEXT;
+      ALTER TABLE snapshot_patch ADD COLUMN post_tree_ref TEXT;
+    `,
+  },
 ];

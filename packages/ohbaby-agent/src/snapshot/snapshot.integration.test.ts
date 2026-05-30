@@ -8,10 +8,10 @@ import {
   initDatabase,
   schema,
 } from "../services/database/index.js";
-import { createStorage, type Storage } from "../services/storage/index.js";
 import {
-  ArtifactNotAvailableError,
-  ShadowDiffEngine,
+  GitSnapshotEngine,
+  SnapshotEngineMismatchError,
+  SnapshotOperationNotSupportedError,
   SnapshotService,
   SnapshotStore,
 } from "./index.js";
@@ -56,25 +56,29 @@ function insertRun(sessionId: string, runId: string): void {
 }
 
 async function createService(
-  options: { readonly storage?: Storage } = {},
+  options: {
+    readonly activeWriter?: boolean;
+  } = {},
 ): Promise<SnapshotService> {
   initDatabase({
     dbPath: join(await tempDir("ohbaby-snapshot-db-"), "agent.db"),
   });
-  const storage =
-    options.storage ??
-    createStorage({ rootDir: await tempDir("ohbaby-snapshot-storage-") });
-  const store = new SnapshotStore({ db: getDatabase(), storage });
+  const store = new SnapshotStore({ db: getDatabase() });
   let checkpointCounter = 0;
   let patchCounter = 0;
   let now = 1_000;
 
   return new SnapshotService({
     store,
-    diffEngine: new ShadowDiffEngine(),
+    diffEngine: new GitSnapshotEngine({
+      snapshotRoot: await tempDir("ohbaby-snapshot-sidecar-"),
+    }),
     createCheckpointId: () => `checkpoint_${String(++checkpointCounter)}`,
     createPatchId: () => `patch_${String(++patchCounter)}`,
     now: () => now++,
+    ...(options.activeWriter === undefined
+      ? {}
+      : { activeWriterChecker: () => options.activeWriter === true }),
   });
 }
 
@@ -91,7 +95,7 @@ afterEach(async () => {
   );
 });
 
-describe("snapshot MVP", () => {
+describe("snapshot git sidecar integration", () => {
   it("tracks, captures, diffs, and restores added, modified, and deleted files", async () => {
     const service = await createService();
     insertSession("session_1");
@@ -108,6 +112,8 @@ describe("snapshot MVP", () => {
       messageCursorBefore: { sequence: 10, messageId: "message_before" },
     });
 
+    expect(checkpoint.preTreeRef).toMatch(/^[0-9a-f]{40,64}$/);
+
     await writeFile(join(workdir, "modified.txt"), "after\n", "utf8");
     await writeFile(join(workdir, "added.txt"), "new\n", "utf8");
     await rm(join(workdir, "deleted.txt"));
@@ -118,7 +124,7 @@ describe("snapshot MVP", () => {
     });
 
     expect(patch.fileCount).toBe(3);
-    expect(patch.artifactPath).toBeTypeOf("string");
+    expect(patch.postTreeRef).toMatch(/^[0-9a-f]{40,64}$/);
 
     const diff = await service.diff({
       fromCheckpointId: checkpoint.checkpointId,
@@ -148,16 +154,14 @@ describe("snapshot MVP", () => {
       messageId: "message_before",
     });
 
-    const storedCheckpoint = await service.getCheckpoint(
-      checkpoint.checkpointId,
-    );
+    const storedCheckpoint = service.getCheckpoint(checkpoint.checkpointId);
     expect(storedCheckpoint?.messageCursorAfter).toEqual({
       sequence: 20,
       messageId: "message_after",
     });
   });
 
-  it("creates a legal empty patch when no files changed", async () => {
+  it("creates an empty patch with a post tree ref when no files changed", async () => {
     const service = await createService();
     insertSession("session_1");
     const workdir = await tempDir("ohbaby-snapshot-empty-");
@@ -173,7 +177,7 @@ describe("snapshot MVP", () => {
     });
 
     expect(patch.fileCount).toBe(0);
-    expect(patch.artifactPath).toBeNull();
+    expect(patch.postTreeRef).toMatch(/^[0-9a-f]{40,64}$/);
     await expect(
       service.restore({ checkpointId: checkpoint.checkpointId }),
     ).resolves.toEqual({ messageCursorBefore: undefined });
@@ -199,7 +203,7 @@ describe("snapshot MVP", () => {
     });
 
     expect(second).toEqual(first);
-    expect(await service.getPatches(checkpoint.checkpointId)).toHaveLength(1);
+    expect(service.getPatches(checkpoint.checkpointId)).toHaveLength(1);
   });
 
   it("updates the end message cursor when an idempotent capture is retried", async () => {
@@ -220,14 +224,12 @@ describe("snapshot MVP", () => {
       messageCursorAfter: { sequence: 30, messageId: "message_after" },
     });
 
-    await expect(
-      service.getCheckpoint(checkpoint.checkpointId),
-    ).resolves.toMatchObject({
+    expect(service.getCheckpoint(checkpoint.checkpointId)).toMatchObject({
       messageCursorAfter: { sequence: 30, messageId: "message_after" },
     });
   });
 
-  it("diffs a checkpoint to the current workdir when changes are not captured yet", async () => {
+  it("diffs a checkpoint to the current workdir without creating a patch", async () => {
     const service = await createService();
     insertSession("session_1");
     const workdir = await tempDir("ohbaby-snapshot-current-diff-");
@@ -245,9 +247,10 @@ describe("snapshot MVP", () => {
 
     expect(diff.summary).toEqual({ added: 0, modified: 1, deleted: 0 });
     expect(diff.files).toEqual([{ path: "file.txt", status: "modified" }]);
+    expect(service.getPatches(checkpoint.checkpointId)).toEqual([]);
   });
 
-  it("diffs from one checkpoint to the next checkpoint baseline", async () => {
+  it("diffs from one checkpoint baseline to the next checkpoint baseline", async () => {
     const service = await createService();
     insertSession("session_1");
     const workdir = await tempDir("ohbaby-snapshot-to-checkpoint-diff-");
@@ -277,79 +280,32 @@ describe("snapshot MVP", () => {
     expect(diff.files).toEqual([{ path: "file.txt", status: "modified" }]);
   });
 
-  it("nets out add-then-delete changes when diffing checkpoint baselines", async () => {
+  it("rejects diffing checkpoints from different sessions or workdirs", async () => {
     const service = await createService();
     insertSession("session_1");
-    const workdir = await tempDir("ohbaby-snapshot-net-diff-");
-    const firstCheckpoint = await service.track({
+    insertSession("session_2");
+    const workdirA = await tempDir("ohbaby-snapshot-workdir-a-");
+    const workdirB = await tempDir("ohbaby-snapshot-workdir-b-");
+    const first = await service.track({
       sessionId: "session_1",
       turnId: "turn_1",
-      workdir,
+      workdir: workdirA,
     });
-    await writeFile(join(workdir, "temp.txt"), "temporary\n", "utf8");
-    await service.capture({ checkpointId: firstCheckpoint.checkpointId });
-
-    const secondCheckpoint = await service.track({
-      sessionId: "session_1",
+    const second = await service.track({
+      sessionId: "session_2",
       turnId: "turn_2",
-      workdir,
-    });
-    await rm(join(workdir, "temp.txt"));
-    await service.capture({ checkpointId: secondCheckpoint.checkpointId });
-
-    const thirdCheckpoint = await service.track({
-      sessionId: "session_1",
-      turnId: "turn_3",
-      workdir,
+      workdir: workdirB,
     });
 
-    const diff = await service.diff({
-      fromCheckpointId: firstCheckpoint.checkpointId,
-      toCheckpointId: thirdCheckpoint.checkpointId,
-    });
-
-    expect(diff.summary).toEqual({ added: 0, modified: 0, deleted: 0 });
-    expect(diff.files).toEqual([]);
+    await expect(
+      service.diff({
+        fromCheckpointId: first.checkpointId,
+        toCheckpointId: second.checkpointId,
+      }),
+    ).rejects.toThrow(/different sessions or workdirs/);
   });
 
-  it("retries artifact persistence for an existing non-empty patch without an artifact", async () => {
-    let failNextWrite = true;
-    const storage = createStorage({
-      rootDir: await tempDir("ohbaby-snapshot-flaky-storage-"),
-      writeFile: async (path, data) => {
-        if (failNextWrite) {
-          failNextWrite = false;
-          throw new Error("disk full");
-        }
-        await writeFile(path, data);
-      },
-    });
-    const service = await createService({ storage });
-    insertSession("session_1");
-    const workdir = await tempDir("ohbaby-snapshot-artifact-retry-");
-    await writeFile(join(workdir, "file.txt"), "before\n", "utf8");
-    const checkpoint = await service.track({
-      sessionId: "session_1",
-      turnId: "turn_1",
-      workdir,
-    });
-    await writeFile(join(workdir, "file.txt"), "after\n", "utf8");
-
-    const failedArtifactPatch = await service.capture({
-      checkpointId: checkpoint.checkpointId,
-    });
-    expect(failedArtifactPatch.fileCount).toBe(1);
-    expect(failedArtifactPatch.artifactPath).toBeNull();
-
-    const repairedPatch = await service.capture({
-      checkpointId: checkpoint.checkpointId,
-    });
-
-    expect(repairedPatch.patchId).toBe(failedArtifactPatch.patchId);
-    expect(repairedPatch.artifactPath).toBeTypeOf("string");
-  });
-
-  it("lists checkpoints by session with run and turn filters in reverse creation order", async () => {
+  it("lists checkpoints synchronously by session with run and turn filters", async () => {
     const service = await createService();
     insertSession("session_1");
     insertSession("session_2");
@@ -376,26 +332,79 @@ describe("snapshot MVP", () => {
     });
 
     expect(
-      (await service.listCheckpoints("session_1")).map(
-        (checkpoint) => checkpoint.turnId,
-      ),
+      service
+        .listCheckpoints("session_1")
+        .map((checkpoint) => checkpoint.turnId),
     ).toEqual(["turn_2", "turn_1"]);
     expect(
-      (await service.listCheckpoints("session_1", { runId: "run_b" })).map(
-        (checkpoint) => checkpoint.checkpointId,
-      ),
+      service
+        .listCheckpoints("session_1", { runId: "run_b" })
+        .map((checkpoint) => checkpoint.checkpointId),
     ).toEqual([second.checkpointId]);
     expect(
-      (await service.listCheckpoints("session_1", { turnId: "turn_1" })).map(
-        (checkpoint) => checkpoint.turnId,
-      ),
+      service
+        .listCheckpoints("session_1", { turnId: "turn_1" })
+        .map((checkpoint) => checkpoint.turnId),
     ).toEqual(["turn_1"]);
   });
 
-  it("throws ArtifactNotAvailableError when a non-empty patch loses its artifact", async () => {
+  it("throws an explicit mismatch error for old-engine checkpoints", async () => {
     const service = await createService();
     insertSession("session_1");
-    const workdir = await tempDir("ohbaby-snapshot-missing-artifact-");
+    const workdir = await tempDir("ohbaby-snapshot-old-engine-");
+    getDatabase()
+      .prepare(
+        `INSERT INTO ${schema.snapshotCheckpoint.tableName}
+          (checkpoint_id, session_id, run_id, turn_id, workdir, workspace_source,
+           message_cursor_before, message_cursor_after, pre_tree_ref, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        "checkpoint_old",
+        "session_1",
+        null,
+        "turn_1",
+        workdir,
+        null,
+        null,
+        null,
+        null,
+        1,
+      );
+
+    await expect(
+      service.restore({ checkpointId: "checkpoint_old" }),
+    ).rejects.toThrow(SnapshotEngineMismatchError);
+  });
+
+  it("rejects restore while an active writer is present", async () => {
+    const service = await createService({ activeWriter: true });
+    insertSession("session_1");
+    const workdir = await tempDir("ohbaby-snapshot-conflict-");
+    await writeFile(join(workdir, "file.txt"), "one\n", "utf8");
+    const checkpoint = await service.track({
+      sessionId: "session_1",
+      turnId: "turn_1",
+      workdir,
+    });
+
+    await expect(
+      service.restore({ checkpointId: checkpoint.checkpointId }),
+    ).rejects.toThrow(/active writer/);
+  });
+
+  it("does not support selective patch revert in this batch", async () => {
+    const service = await createService();
+
+    await expect(service.revert([])).rejects.toThrow(
+      SnapshotOperationNotSupportedError,
+    );
+  });
+
+  it("deletes checkpoint metadata through the core cleanup lifecycle", async () => {
+    const service = await createService();
+    insertSession("session_1");
+    const workdir = await tempDir("ohbaby-snapshot-delete-");
     await writeFile(join(workdir, "file.txt"), "before\n", "utf8");
     const checkpoint = await service.track({
       sessionId: "session_1",
@@ -403,46 +412,11 @@ describe("snapshot MVP", () => {
       workdir,
     });
     await writeFile(join(workdir, "file.txt"), "after\n", "utf8");
-    const patch = await service.capture({
-      checkpointId: checkpoint.checkpointId,
-    });
+    await service.capture({ checkpointId: checkpoint.checkpointId });
 
-    await service.store.deleteArtifact(patch.patchId);
+    await service.deleteCheckpoint(checkpoint.checkpointId);
 
-    await expect(
-      service.restore({ checkpointId: checkpoint.checkpointId }),
-    ).rejects.toThrow(ArtifactNotAvailableError);
-  });
-
-  it("preflights the restore patch chain before changing files", async () => {
-    const service = await createService();
-    insertSession("session_1");
-    const workdir = await tempDir("ohbaby-snapshot-restore-preflight-");
-    await writeFile(join(workdir, "file.txt"), "v0\n", "utf8");
-    const firstCheckpoint = await service.track({
-      sessionId: "session_1",
-      turnId: "turn_1",
-      workdir,
-    });
-    await writeFile(join(workdir, "file.txt"), "v1\n", "utf8");
-    const firstPatch = await service.capture({
-      checkpointId: firstCheckpoint.checkpointId,
-    });
-
-    const secondCheckpoint = await service.track({
-      sessionId: "session_1",
-      turnId: "turn_2",
-      workdir,
-    });
-    await writeFile(join(workdir, "file.txt"), "v2\n", "utf8");
-    await service.capture({ checkpointId: secondCheckpoint.checkpointId });
-    await service.store.deleteArtifact(firstPatch.patchId);
-
-    await expect(
-      service.restore({ checkpointId: firstCheckpoint.checkpointId }),
-    ).rejects.toThrow(ArtifactNotAvailableError);
-    await expect(readFile(join(workdir, "file.txt"), "utf8")).resolves.toBe(
-      "v2\n",
-    );
+    expect(service.getCheckpoint(checkpoint.checkpointId)).toBeUndefined();
+    expect(service.getPatches(checkpoint.checkpointId)).toEqual([]);
   });
 });

@@ -14,7 +14,6 @@ import {
   schema,
   type DatabaseConnection,
 } from "../services/database/index.js";
-import { createStorage } from "../services/storage/index.js";
 import {
   createDatabaseSessionStore,
   createSessionManager,
@@ -23,7 +22,8 @@ import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
 import {
   createSnapshotHookExecutor,
-  ShadowDiffEngine,
+  GitSnapshotEngine,
+  SnapshotHookExecutionError,
   SnapshotService,
   SnapshotStore,
 } from "../snapshot/index.js";
@@ -189,6 +189,10 @@ function shouldRecoverStartupRuns(input: {
   }
 }
 
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 function composeHookExecutors(
   executors: readonly (HookExecutor | undefined)[],
 ): HookExecutor | undefined {
@@ -204,11 +208,38 @@ function composeHookExecutors(
 
   return {
     async execute(point, context): Promise<void> {
+      let firstError: Error | undefined;
+      let snapshotError: SnapshotHookExecutionError | undefined;
       for (const executor of active) {
-        await executor.execute(point, context);
+        try {
+          await executor.execute(point, context);
+        } catch (error) {
+          const normalized = toError(error);
+          firstError ??= normalized;
+          if (
+            snapshotError === undefined &&
+            normalized instanceof SnapshotHookExecutionError
+          ) {
+            snapshotError = normalized;
+          }
+        }
+      }
+      if (snapshotError !== undefined) {
+        throw snapshotError;
+      }
+      if (firstError !== undefined) {
+        throw firstError;
       }
     },
   };
+}
+
+function resolveSnapshotRoot(
+  storageRoot: string | undefined,
+): string | undefined {
+  return storageRoot === undefined
+    ? undefined
+    : path.dirname(path.resolve(storageRoot));
 }
 
 function createDefaultSnapshotService(input: {
@@ -222,14 +253,11 @@ function createDefaultSnapshotService(input: {
       (await input.runLedger.getActiveRuns(checkpoint.sessionId)).some(
         (run) => run.runId !== checkpoint.runId,
       ),
-    diffEngine: new ShadowDiffEngine(),
-    now: input.now,
-    store: new SnapshotStore({
-      db: input.db,
-      storage: createStorage({
-        rootDir: input.storageRoot,
-      }),
+    diffEngine: new GitSnapshotEngine({
+      snapshotRoot: resolveSnapshotRoot(input.storageRoot),
     }),
+    now: input.now,
+    store: new SnapshotStore({ db: input.db }),
   });
 }
 
@@ -330,7 +358,9 @@ function createPersistentProjectResolver(
 
   return {
     ...Project,
-    async fromDirectory(directory: string) {
+    async fromDirectory(
+      directory: string,
+    ): ReturnType<typeof Project.fromDirectory> {
       const project = await Project.fromDirectory(directory);
       return path.resolve(directory) === explicitRoot
         ? {

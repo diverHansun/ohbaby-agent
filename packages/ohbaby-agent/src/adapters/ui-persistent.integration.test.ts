@@ -14,6 +14,7 @@ import {
   schema,
 } from "../services/database/index.js";
 import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
+import type { HookExecutor } from "../runtime/run-manager/index.js";
 import type { SnapshotService } from "../snapshot/index.js";
 import { createPersistentUiBackendClient } from "./ui-persistent.js";
 
@@ -716,6 +717,57 @@ describe("createPersistentUiBackendClient", () => {
 
       expect(track).not.toHaveBeenCalled();
       expect(capture).not.toHaveBeenCalled();
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("runs enabled snapshot hooks even when an earlier observer hook fails", async () => {
+    const directory = await tempDir("ohbaby-persistent-snapshot-hooks-");
+    try {
+      const track = vi.fn(() =>
+        Promise.resolve({
+          checkpointId: "checkpoint_1",
+          createdAt: 1,
+          preTreeRef: "a".repeat(40),
+          sessionId: "session_1",
+          turnId: "turn_1",
+          workdir: directory,
+        }),
+      );
+      const capture = vi.fn(() =>
+        Promise.resolve({
+          checkpointId: "checkpoint_1",
+          createdAt: 2,
+          fileCount: 0,
+          patchId: "patch_1",
+          postTreeRef: "b".repeat(40),
+        }),
+      );
+      const snapshotService = {
+        capture,
+        track,
+      } as unknown as SnapshotService;
+      const failingHook: HookExecutor = {
+        execute: vi.fn(() => Promise.reject(new Error("ordinary hook failed"))),
+      };
+
+      const client = createPersistentUiBackendClient({
+        dbPath: join(directory, "agent.db"),
+        enableSnapshots: true,
+        hookExecutor: failingHook,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Snapshot enabled", finishReason: "stop" },
+        ]),
+        snapshotService,
+        workdir: directory,
+      });
+
+      await client.submitPrompt("Run with snapshot");
+
+      expect(track).toHaveBeenCalledTimes(1);
+      expect(capture).toHaveBeenCalledTimes(1);
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

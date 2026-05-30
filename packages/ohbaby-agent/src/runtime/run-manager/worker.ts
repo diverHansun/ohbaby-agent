@@ -3,6 +3,7 @@ import type {
   LifecycleResult,
   LifecycleSessionParams,
 } from "../../core/lifecycle/index.js";
+import { SnapshotHookExecutionError } from "../../snapshot/types.js";
 import type {
   ToolCallResult,
   ToolExecutionEnvironment,
@@ -399,7 +400,16 @@ export class RunWorker {
   ): Promise<void> {
     try {
       await this.deps.hookExecutor?.execute(point, context);
-    } catch {
+    } catch (error) {
+      if (error instanceof SnapshotHookExecutionError) {
+        this.publish(`run/${context.runId}`, "snapshot.hook.failed", {
+          point: error.point,
+          error:
+            error.cause instanceof Error
+              ? error.cause.message
+              : String(error.cause),
+        });
+      }
       // Hooks are observers in MVP; a hook failure must not stop the run.
     }
   }

@@ -1,22 +1,19 @@
-export {
-  filesFromArtifact,
-  parsePatchArtifact,
-  serializePatchArtifact,
-  ShadowDiffEngine,
-  summaryFromFiles,
-} from "./diff-engine.js";
-export type { DiffEngine } from "./diff-engine.js";
+export { GitSnapshotEngine, summaryFromFiles } from "./diff-engine.js";
+export type { DiffEngine, GitSnapshotEngineOptions } from "./diff-engine.js";
 export { createSnapshotRunWorkerHook, SnapshotService } from "./service.js";
 export { createSnapshotHookExecutor } from "./run-hook-adapter.js";
 export { SnapshotStore } from "./store.js";
 export type { SnapshotHookExecutorOptions } from "./run-hook-adapter.js";
 export {
-  ArtifactNotAvailableError,
-  InvalidSnapshotArtifactError,
+  GitCommandError,
+  GitNotAvailableError,
   SnapshotBaselineNotFoundError,
   SnapshotCheckpointNotFoundError,
   SnapshotConflictError,
+  SnapshotEngineMismatchError,
   SnapshotError,
+  SnapshotHookExecutionError,
+  SnapshotOperationNotSupportedError,
   SnapshotPatchNotFoundError,
 } from "./types.js";
 export type {
@@ -37,9 +34,7 @@ export type {
   SnapshotCheckpoint,
   SnapshotDiff,
   SnapshotDiffSummary,
-  SnapshotFilePatch,
   SnapshotPatch,
-  SnapshotPatchArtifact,
   SnapshotRunWorkerHook,
   SnapshotRunWorkerHookContext,
   SnapshotRunWorkerHookState,

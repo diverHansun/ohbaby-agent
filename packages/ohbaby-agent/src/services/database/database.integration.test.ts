@@ -86,6 +86,7 @@ describe("services/database", () => {
       { version: "002_part_order_unique" },
       { version: "003_app_state" },
       { version: "004_drop_scheduler_job" },
+      { version: "005_snapshot_git_sidecar" },
     ]);
   });
 
@@ -135,6 +136,15 @@ describe("services/database", () => {
         )
         .get("004_drop_scheduler_job"),
     ).toEqual({ version: "004_drop_scheduler_job" });
+    expect(
+      db
+        .prepare<{
+          version: string;
+        }>(
+          `SELECT version FROM ${schema.migration.tableName} WHERE version = ?`,
+        )
+        .get("005_snapshot_git_sidecar"),
+    ).toEqual({ version: "005_snapshot_git_sidecar" });
   });
 
   it("rolls back a failed migration and exposes the failed version", async () => {

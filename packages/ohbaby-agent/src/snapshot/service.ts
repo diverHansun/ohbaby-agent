@@ -1,17 +1,10 @@
 import { randomUUID } from "node:crypto";
-import {
-  type DiffEngine,
-  parsePatchArtifact,
-  serializePatchArtifact,
-  summaryFromFiles,
-} from "./diff-engine.js";
+import { type DiffEngine, summaryFromFiles } from "./diff-engine.js";
 import { SnapshotStore } from "./store.js";
 import {
-  ArtifactNotAvailableError,
   type ActiveWriterChecker,
   type CaptureSnapshotParams,
   type DiffSnapshotParams,
-  type FileDiff,
   type ListCheckpointOptions,
   type MessageCursor,
   type RestoreSnapshotParams,
@@ -20,9 +13,9 @@ import {
   SnapshotCheckpointNotFoundError,
   SnapshotConflictError,
   type SnapshotDiff,
-  type SnapshotFilePatch,
+  SnapshotEngineMismatchError,
+  SnapshotOperationNotSupportedError,
   type SnapshotPatch,
-  type SnapshotPatchArtifact,
   type SnapshotRunWorkerHook,
   type SnapshotRunWorkerHookContext,
   type SnapshotRunWorkerHookState,
@@ -46,82 +39,15 @@ interface SnapshotRunWorkerHookOptions {
   ) => string | undefined | Promise<string | undefined>;
 }
 
-interface LoadedPatchArtifact {
-  readonly patch: SnapshotPatch;
-  readonly checkpoint: SnapshotCheckpoint;
-  readonly artifact: SnapshotPatchArtifact;
-}
-
 function createId(prefix: string): string {
   return `${prefix}_${randomUUID()}`;
 }
 
-function createArtifact(
-  patch: SnapshotPatch,
-  computedFiles: SnapshotPatchArtifact["files"],
-): SnapshotPatchArtifact {
-  return {
-    version: 1,
-    checkpointId: patch.checkpointId,
-    patchId: patch.patchId,
-    createdAt: patch.createdAt,
-    files: computedFiles,
-  };
-}
-
-function patchBeforeContent(file: SnapshotFilePatch): string | undefined {
-  if (file.status === "added") {
-    return undefined;
+function requireGitCheckpoint(checkpoint: SnapshotCheckpoint): string {
+  if (!checkpoint.preTreeRef) {
+    throw new SnapshotEngineMismatchError(checkpoint.checkpointId);
   }
-  return file.beforeContentBase64;
-}
-
-function patchAfterContent(file: SnapshotFilePatch): string | undefined {
-  if (file.status === "deleted") {
-    return undefined;
-  }
-  return file.afterContentBase64;
-}
-
-function combineNetDiffFiles(
-  artifacts: readonly SnapshotPatchArtifact[],
-): SnapshotDiff["files"] {
-  const filesByPath = new Map<
-    string,
-    { before: string | undefined; after: string | undefined }
-  >();
-  for (const artifact of artifacts) {
-    for (const file of artifact.files) {
-      const existing = filesByPath.get(file.path);
-      if (existing === undefined) {
-        filesByPath.set(file.path, {
-          before: patchBeforeContent(file),
-          after: patchAfterContent(file),
-        });
-      } else {
-        filesByPath.set(file.path, {
-          before: existing.before,
-          after: patchAfterContent(file),
-        });
-      }
-    }
-  }
-  const files: FileDiff[] = [];
-  for (const [path, state] of filesByPath) {
-    if (state.before === state.after) {
-      continue;
-    }
-    files.push({
-      path,
-      status:
-        state.before === undefined
-          ? "added"
-          : state.after === undefined
-            ? "deleted"
-            : "modified",
-    });
-  }
-  return files.sort((left, right) => left.path.localeCompare(right.path));
+  return checkpoint.preTreeRef;
 }
 
 export class SnapshotService {
@@ -146,16 +72,26 @@ export class SnapshotService {
   private readonly diffEngine: DiffEngine;
 
   async track(params: TrackSnapshotParams): Promise<SnapshotCheckpoint> {
-    const checkpoint = this.store.createCheckpoint({
-      ...params,
-      checkpointId: this.createCheckpointId(),
-      createdAt: this.now(),
-    });
-    await this.diffEngine.recordBaseline(
-      checkpoint.checkpointId,
-      checkpoint.workdir,
+    const checkpointId = this.createCheckpointId();
+    const createdAt = this.now();
+    const preTreeRef = await this.diffEngine.recordBaseline(
+      checkpointId,
+      params.workdir,
     );
-    return checkpoint;
+
+    try {
+      return this.store.createCheckpoint({
+        ...params,
+        checkpointId,
+        preTreeRef,
+        createdAt,
+      });
+    } catch (error) {
+      await this.diffEngine.dropRef(checkpointId, params.workdir).catch(() => {
+        // Preserve the metadata write failure as the primary error.
+      });
+      throw error;
+    }
   }
 
   async capture(params: CaptureSnapshotParams): Promise<SnapshotPatch> {
@@ -177,79 +113,70 @@ export class SnapshotService {
     params: CaptureSnapshotParams,
   ): Promise<SnapshotPatch> {
     const checkpoint = this.store.requireCheckpoint(params.checkpointId);
+    requireGitCheckpoint(checkpoint);
+
     const existing = this.store.getPatchByCheckpoint(params.checkpointId);
     if (existing !== undefined) {
-      const patch =
-        existing.fileCount > 0 && existing.artifactPath === null
-          ? await this.persistPatchArtifact(existing, checkpoint)
-          : existing;
-      if (params.messageCursorAfter !== undefined) {
-        this.store.updateCheckpointMessageCursor(
-          params.checkpointId,
-          params.messageCursorAfter,
-        );
-      }
-      return patch;
+      this.updateCursorIfProvided(checkpoint.checkpointId, params);
+      return existing;
     }
 
     const computed = await this.diffEngine.computeDiff(checkpoint);
-    const created = this.store.createPatchIfAbsent({
-      patchId: this.createPatchId(),
-      checkpointId: checkpoint.checkpointId,
-      artifactPath: null,
-      fileCount: computed.fileCount,
-      createdAt: this.now(),
-    });
-    let patch = created.patch;
-    if (!created.created) {
-      patch =
-        patch.fileCount > 0 && patch.artifactPath === null
-          ? await this.persistPatchArtifact(patch, checkpoint)
-          : patch;
-      if (params.messageCursorAfter !== undefined) {
-        this.store.updateCheckpointMessageCursor(
-          checkpoint.checkpointId,
-          params.messageCursorAfter,
-        );
+    try {
+      const created = this.store.createPatchIfAbsent({
+        patchId: this.createPatchId(),
+        checkpointId: checkpoint.checkpointId,
+        postTreeRef: computed.commit,
+        fileCount: computed.fileCount,
+        createdAt: this.now(),
+      });
+
+      if (!created.created) {
+        await this.restoreExistingPostRef(checkpoint, created.patch);
+        this.updateCursorIfProvided(checkpoint.checkpointId, params);
+        return created.patch;
       }
-      return patch;
-    }
 
-    if (computed.fileCount > 0) {
-      patch = await this.persistPatchArtifact(
-        patch,
-        checkpoint,
-        computed.filePatches,
+      this.store.updateCheckpointMessageCursor(
+        checkpoint.checkpointId,
+        params.messageCursorAfter,
       );
+      return created.patch;
+    } catch (error) {
+      await this.diffEngine
+        .dropPostRef(checkpoint.checkpointId, checkpoint.workdir)
+        .catch(() => {
+          // Preserve the metadata write failure as the primary error.
+        });
+      throw error;
     }
-
-    this.store.updateCheckpointMessageCursor(
-      checkpoint.checkpointId,
-      params.messageCursorAfter,
-    );
-    return patch;
   }
 
   async diff(params: DiffSnapshotParams): Promise<SnapshotDiff> {
-    const fromCheckpoint = this.store.requireCheckpoint(
-      params.fromCheckpointId,
-    );
-
     if (params.toCheckpointId === undefined) {
-      const computed = await this.diffEngine.computeDiff(fromCheckpoint);
+      const fromCheckpoint = this.store.requireCheckpoint(
+        params.fromCheckpointId,
+      );
+      requireGitCheckpoint(fromCheckpoint);
+      const files = await this.diffEngine.diffWorkingTree(fromCheckpoint);
       return {
         fromCheckpointId: params.fromCheckpointId,
-        files: computed.files,
-        summary: computed.summary,
+        files,
+        summary: summaryFromFiles(files),
       };
     }
 
-    const patches = this.store.listPatchesBetweenCheckpoints(
+    const { from, to } = this.store.assertSameSessionAndWorkdir(
       params.fromCheckpointId,
       params.toCheckpointId,
     );
-    const artifacts = await this.loadPatchArtifacts(patches);
-    const files = combineNetDiffFiles(artifacts.map((item) => item.artifact));
+    const fromRef = requireGitCheckpoint(from);
+    const toRef = requireGitCheckpoint(to);
+    const files = await this.diffEngine.diffBetween(
+      from.workdir,
+      fromRef,
+      toRef,
+    );
     return {
       fromCheckpointId: params.fromCheckpointId,
       toCheckpointId: params.toCheckpointId,
@@ -267,84 +194,92 @@ export class SnapshotService {
       }
     }
 
-    const patches = this.store.listPatchesFromCheckpoint(
-      checkpoint.checkpointId,
+    await this.diffEngine.restoreTo(
+      checkpoint.workdir,
+      requireGitCheckpoint(checkpoint),
     );
-    const artifacts = await this.loadPatchArtifacts(patches);
-    for (const item of artifacts) {
-      await this.diffEngine.applyReverse(
-        item.checkpoint.workdir,
-        item.artifact,
-      );
-    }
-
     return { messageCursorBefore: checkpoint.messageCursorBefore };
   }
 
-  async revert(patches: readonly SnapshotPatch[]): Promise<void> {
-    const artifacts = await this.loadPatchArtifacts(patches);
-    for (const item of artifacts) {
-      await this.diffEngine.applyReverse(
-        item.checkpoint.workdir,
-        item.artifact,
-      );
-    }
+  revert(_patches: readonly SnapshotPatch[]): Promise<void> {
+    return Promise.reject(new SnapshotOperationNotSupportedError("revert"));
   }
 
-  private async loadPatchArtifacts(
-    patches: readonly SnapshotPatch[],
-  ): Promise<LoadedPatchArtifact[]> {
-    const artifacts: LoadedPatchArtifact[] = [];
-    for (const patch of patches) {
-      if (patch.fileCount === 0 && patch.artifactPath === null) {
-        continue;
-      }
-      if (patch.fileCount > 0 && patch.artifactPath === null) {
-        throw new ArtifactNotAvailableError(patch.patchId, patch.checkpointId);
-      }
-      const checkpoint = this.store.requireCheckpoint(patch.checkpointId);
-      const artifact = parsePatchArtifact(
-        await this.store.readArtifact(patch.patchId),
-      );
-      artifacts.push({ patch, checkpoint, artifact });
-    }
-    return artifacts;
-  }
+  async deleteCheckpoint(checkpointId: string): Promise<void> {
+    const checkpoint = this.store.requireCheckpoint(checkpointId);
+    const patches = this.store.getPatches(checkpointId);
+    const postTreeRef = patches.find(
+      (patch): patch is SnapshotPatch & { readonly postTreeRef: string } =>
+        patch.postTreeRef !== null,
+    )?.postTreeRef;
 
-  private async persistPatchArtifact(
-    patch: SnapshotPatch,
-    checkpoint: SnapshotCheckpoint,
-    filePatches?: readonly SnapshotFilePatch[],
-  ): Promise<SnapshotPatch> {
-    const patches =
-      filePatches ??
-      (await this.diffEngine.computeDiff(checkpoint)).filePatches;
-    const artifact = createArtifact(patch, patches);
+    await this.diffEngine.dropRef(checkpointId, checkpoint.workdir);
     try {
-      const artifactPath = await this.store.writeArtifact(
-        checkpoint.checkpointId,
-        patch.patchId,
-        serializePatchArtifact(artifact),
-      );
-      return this.store.updatePatchArtifact(patch.patchId, artifactPath);
-    } catch {
-      return this.store.requirePatch(patch.patchId);
+      this.store.deleteCheckpoint(checkpointId);
+    } catch (error) {
+      await this.diffEngine
+        .restoreRefs(checkpointId, checkpoint.workdir, {
+          ...(checkpoint.preTreeRef === undefined
+            ? {}
+            : { preTreeRef: checkpoint.preTreeRef }),
+          ...(postTreeRef === undefined ? {} : { postTreeRef }),
+        })
+        .catch(() => {
+          // Preserve the metadata delete failure as the primary error.
+        });
+      throw error;
     }
+  }
+
+  async gc(workdir: string, prune?: string): Promise<void> {
+    await this.diffEngine.gc(workdir, prune);
   }
 
   listCheckpoints(
     sessionId: string,
     options?: ListCheckpointOptions,
-  ): Promise<SnapshotCheckpoint[]> {
-    return Promise.resolve(this.store.listCheckpoints(sessionId, options));
+  ): SnapshotCheckpoint[] {
+    return this.store.listCheckpoints(sessionId, options);
   }
 
-  getCheckpoint(checkpointId: string): Promise<SnapshotCheckpoint | undefined> {
-    return Promise.resolve(this.store.getCheckpoint(checkpointId));
+  getCheckpoint(checkpointId: string): SnapshotCheckpoint | undefined {
+    return this.store.getCheckpoint(checkpointId);
   }
 
-  getPatches(checkpointId: string): Promise<SnapshotPatch[]> {
-    return Promise.resolve(this.store.getPatches(checkpointId));
+  getPatches(checkpointId: string): SnapshotPatch[] {
+    return this.store.getPatches(checkpointId);
+  }
+
+  private updateCursorIfProvided(
+    checkpointId: string,
+    params: CaptureSnapshotParams,
+  ): void {
+    if (params.messageCursorAfter !== undefined) {
+      this.store.updateCheckpointMessageCursor(
+        checkpointId,
+        params.messageCursorAfter,
+      );
+    }
+  }
+
+  private async restoreExistingPostRef(
+    checkpoint: SnapshotCheckpoint,
+    patch: SnapshotPatch,
+  ): Promise<void> {
+    if (patch.postTreeRef === null) {
+      await this.diffEngine.dropPostRef(
+        checkpoint.checkpointId,
+        checkpoint.workdir,
+      );
+      return;
+    }
+    await this.diffEngine.restoreRefs(
+      checkpoint.checkpointId,
+      checkpoint.workdir,
+      {
+        postTreeRef: patch.postTreeRef,
+      },
+    );
   }
 }
 

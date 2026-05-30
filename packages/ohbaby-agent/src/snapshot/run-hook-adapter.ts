@@ -12,6 +12,7 @@ import type {
   SnapshotRunWorkerHookState,
   WorkspaceSource,
 } from "./types.js";
+import { SnapshotHookExecutionError } from "./types.js";
 
 export interface SnapshotHookExecutorOptions {
   readonly service: SnapshotService;
@@ -66,39 +67,43 @@ export function createSnapshotHookExecutor(
 
   return {
     async execute(point, context): Promise<void> {
-      if (point === "pre-run") {
-        const checkpoint = await hook.track(
-          runContextToSnapshotContext({
-            cursor: await cursorFor(context),
-            hookContext: context,
-            options,
-            workdir: await workdirFor(context),
-          }),
-        );
-        if (checkpoint) {
-          states.set(context.runId, {
-            checkpointId: checkpoint.checkpointId,
-          });
-        }
-        return;
-      }
-
-      const state = states.get(context.runId);
-      if (!state) {
-        return;
-      }
       try {
-        await hook.capture(
-          runContextToSnapshotContext({
-            cursor: await cursorFor(context),
-            hookContext: context,
-            options,
-            workdir: await workdirFor(context),
-          }),
-          state,
-        );
-      } finally {
-        states.delete(context.runId);
+        if (point === "pre-run") {
+          const checkpoint = await hook.track(
+            runContextToSnapshotContext({
+              cursor: await cursorFor(context),
+              hookContext: context,
+              options,
+              workdir: await workdirFor(context),
+            }),
+          );
+          if (checkpoint) {
+            states.set(context.runId, {
+              checkpointId: checkpoint.checkpointId,
+            });
+          }
+          return;
+        }
+
+        const state = states.get(context.runId);
+        if (!state) {
+          return;
+        }
+        try {
+          await hook.capture(
+            runContextToSnapshotContext({
+              cursor: await cursorFor(context),
+              hookContext: context,
+              options,
+              workdir: await workdirFor(context),
+            }),
+            state,
+          );
+        } finally {
+          states.delete(context.runId);
+        }
+      } catch (error) {
+        throw new SnapshotHookExecutionError(point, error);
       }
     },
   };

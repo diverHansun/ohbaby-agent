@@ -9,10 +9,14 @@ import {
 } from "../services/database/index.js";
 import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
 import { createDatabaseSessionStore } from "../services/session/index.js";
-import { createStorage } from "../services/storage/index.js";
 import type { RunHookContext } from "../runtime/run-manager/index.js";
 import type { PreflightResult, SandboxLease } from "../sandbox/index.js";
-import { ShadowDiffEngine, SnapshotService, SnapshotStore } from "./index.js";
+import {
+  GitSnapshotEngine,
+  SnapshotHookExecutionError,
+  SnapshotService,
+  SnapshotStore,
+} from "./index.js";
 import { createSnapshotHookExecutor } from "./run-hook-adapter.js";
 
 async function tempDir(prefix: string): Promise<string> {
@@ -93,6 +97,32 @@ function runHookContext(input: {
 }
 
 describe("createSnapshotHookExecutor", () => {
+  it("wraps snapshot hook failures with point context", async () => {
+    const directory = await tempDir("ohbaby-snapshot-hook-failure-");
+    try {
+      const workdir = join(directory, "workspace");
+      await mkdir(workdir);
+      const service = {
+        track: () => Promise.reject(new Error("git missing")),
+      } as unknown as SnapshotService;
+      const hookExecutor = createSnapshotHookExecutor({ service });
+
+      await expect(
+        hookExecutor.execute(
+          "pre-run",
+          runHookContext({
+            runId: "run_1",
+            sessionId: "session_1",
+            status: "pending",
+            workdir,
+          }),
+        ),
+      ).rejects.toThrow(SnapshotHookExecutionError);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("tracks before a run and captures a patch after terminal status", async () => {
     const directory = await tempDir("ohbaby-snapshot-hook-");
     try {
@@ -122,14 +152,11 @@ describe("createSnapshotHookExecutor", () => {
       const service = new SnapshotService({
         createCheckpointId: (): string => "checkpoint_1",
         createPatchId: (): string => "patch_1",
-        diffEngine: new ShadowDiffEngine(),
-        now: (): number => 1_700_000_000_000,
-        store: new SnapshotStore({
-          db,
-          storage: createStorage({
-            rootDir: join(directory, "storage"),
-          }),
+        diffEngine: new GitSnapshotEngine({
+          snapshotRoot: join(directory, "snapshots"),
         }),
+        now: (): number => 1_700_000_000_000,
+        store: new SnapshotStore({ db }),
       });
       const hookExecutor = createSnapshotHookExecutor({ service });
 
@@ -153,7 +180,7 @@ describe("createSnapshotHookExecutor", () => {
         }),
       );
 
-      const checkpoints = await service.listCheckpoints("session_1");
+      const checkpoints = service.listCheckpoints("session_1");
       expect(checkpoints).toHaveLength(1);
       expect(checkpoints[0]).toMatchObject({
         checkpointId: "checkpoint_1",
@@ -161,7 +188,7 @@ describe("createSnapshotHookExecutor", () => {
         turnId: "turn_run_1",
         workdir,
       });
-      await expect(service.getPatches("checkpoint_1")).resolves.toMatchObject([
+      expect(service.getPatches("checkpoint_1")).toMatchObject([
         {
           checkpointId: "checkpoint_1",
           fileCount: 1,

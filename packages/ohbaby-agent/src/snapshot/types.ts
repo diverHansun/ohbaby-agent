@@ -15,13 +15,14 @@ export interface SnapshotCheckpoint {
   readonly workspaceSource?: WorkspaceSource;
   readonly messageCursorBefore?: MessageCursor;
   readonly messageCursorAfter?: MessageCursor;
+  readonly preTreeRef?: string;
   readonly createdAt: number;
 }
 
 export interface SnapshotPatch {
   readonly patchId: string;
   readonly checkpointId: string;
-  readonly artifactPath: string | null;
+  readonly postTreeRef: string | null;
   readonly fileCount: number;
   readonly createdAt: number;
 }
@@ -55,26 +56,11 @@ export interface SnapshotDiff {
   readonly summary: SnapshotDiffSummary;
 }
 
-export interface SnapshotFilePatch {
-  readonly path: string;
-  readonly status: FileDiffStatus;
-  readonly beforeContentBase64?: string;
-  readonly afterContentBase64?: string;
-}
-
-export interface SnapshotPatchArtifact {
-  readonly version: 1;
-  readonly checkpointId: string;
-  readonly patchId: string;
-  readonly createdAt: number;
-  readonly files: readonly SnapshotFilePatch[];
-}
-
 export interface ComputedSnapshotPatch {
   readonly files: readonly FileDiff[];
-  readonly filePatches: readonly SnapshotFilePatch[];
   readonly summary: SnapshotDiffSummary;
   readonly fileCount: number;
+  readonly commit: string;
 }
 
 export interface TrackSnapshotParams {
@@ -111,13 +97,14 @@ export interface ListCheckpointOptions {
 
 export interface CreateCheckpointInput extends TrackSnapshotParams {
   readonly checkpointId: string;
+  readonly preTreeRef: string;
   readonly createdAt: number;
 }
 
 export interface CreatePatchInput {
   readonly patchId: string;
   readonly checkpointId: string;
-  readonly artifactPath: string | null;
+  readonly postTreeRef: string | null;
   readonly fileCount: number;
   readonly createdAt: number;
 }
@@ -178,19 +165,6 @@ export class SnapshotBaselineNotFoundError extends SnapshotError {
   }
 }
 
-export class ArtifactNotAvailableError extends SnapshotError {
-  constructor(
-    readonly patchId: string,
-    readonly checkpointId?: string,
-  ) {
-    super(
-      checkpointId
-        ? `Snapshot artifact is not available for patch ${patchId} on checkpoint ${checkpointId}`
-        : `Snapshot artifact is not available for patch ${patchId}`,
-    );
-  }
-}
-
 export class SnapshotConflictError extends SnapshotError {
   constructor(readonly checkpointId: string) {
     super(
@@ -199,8 +173,47 @@ export class SnapshotConflictError extends SnapshotError {
   }
 }
 
-export class InvalidSnapshotArtifactError extends SnapshotError {
-  constructor(message: string) {
-    super(`Invalid snapshot artifact: ${message}`);
+export class GitNotAvailableError extends SnapshotError {
+  constructor(readonly command = "git") {
+    super(`Git is not available on PATH: ${command}`);
+  }
+}
+
+export class GitCommandError extends SnapshotError {
+  constructor(
+    readonly args: readonly string[],
+    readonly exitCode: number | null,
+    readonly stderr: string,
+  ) {
+    super(
+      `Git command failed (${args.join(" ")}): ${stderr || String(exitCode)}`,
+    );
+  }
+}
+
+export class SnapshotEngineMismatchError extends SnapshotError {
+  constructor(readonly checkpointId: string) {
+    super(
+      `Snapshot checkpoint ${checkpointId} was created by an older snapshot engine and cannot be used by the git sidecar engine`,
+    );
+  }
+}
+
+export class SnapshotOperationNotSupportedError extends SnapshotError {
+  constructor(readonly operation: string) {
+    super(`Snapshot operation is not supported in this batch: ${operation}`);
+  }
+}
+
+export class SnapshotHookExecutionError extends SnapshotError {
+  override readonly cause: unknown;
+
+  constructor(
+    readonly point: "pre-run" | "post-run",
+    cause: unknown,
+  ) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    super(`Snapshot hook failed during ${point}: ${message}`);
+    this.cause = cause;
   }
 }
