@@ -53,6 +53,12 @@ git repository outside the workdir:
 <snapshotRoot>/snapshot-git/<sha1(workdir).slice(0,16)>
 ```
 
+The engine accepts an explicit `snapshotRoot` option so tests and E2E runs can
+use temporary directories. The persistent UI adapter derives that root from the
+existing `storageRoot` option when provided, and otherwise falls back to the
+same app-data convention used by storage/database paths. The sidecar root is a
+normal filesystem path, not a `StorageKey`.
+
 The sidecar gitdir is derived lazily from the workdir on each engine call. This
 is required because the default snapshot service is constructed as a process
 singleton before any per-run workdir is known.
@@ -65,7 +71,8 @@ sidecar index, refs, or object graph run under that lock.
 The new `DiffEngine` contract should expose these operations:
 
 - `recordBaseline(checkpointId, workdir) -> Promise<string>`
-  Creates the pre commit and updates `refs/snapshots/<checkpointId>`.
+  Creates the pre commit and updates
+  `refs/snapshots/<checkpointId>/pre`.
 
 - `computeDiff(checkpoint) -> Promise<ComputedSnapshotPatch>`
   Requires `checkpoint.preTreeRef`. Creates the post commit, updates
@@ -80,11 +87,13 @@ The new `DiffEngine` contract should expose these operations:
   Diffs two snapshot commits.
 
 - `restoreTo(workdir, commit) -> Promise<void>`
-  Restores the whole workdir to the commit, including deletion of files created
-  after the checkpoint.
+  Restores snapshot-tracked files to the commit, including deletion of
+  tracked files created after the checkpoint.
 
 - `dropRef(checkpointId, workdir) -> Promise<void>`
-  Deletes both the pre and post refs for a checkpoint.
+  Deletes both sibling refs for a checkpoint:
+  `refs/snapshots/<checkpointId>/pre` and
+  `refs/snapshots/<checkpointId>/post`.
 
 - `gc(workdir, prune?) -> Promise<void>`
   Runs sidecar git GC. Production default is `7.days`; deterministic tests may
@@ -105,6 +114,16 @@ core.quotepath=false for path-producing commands
 Initialization uses `GIT_DIR` and `GIT_WORK_TREE` environment variables for
 `git init`, then configures the sidecar repository. Other commands use
 `--git-dir <gitdir> --work-tree <workdir>`.
+
+`commit-tree` must not depend on the user's global git identity. The engine
+passes a fixed local identity in the command environment:
+
+```text
+GIT_AUTHOR_NAME=ohbaby-agent
+GIT_AUTHOR_EMAIL=snapshot@ohbaby.local
+GIT_COMMITTER_NAME=ohbaby-agent
+GIT_COMMITTER_EMAIL=snapshot@ohbaby.local
+```
 
 Baseline and post capture use:
 
@@ -156,20 +175,28 @@ clear message rather than producing partial or misleading results.
 
 `track()` should generate the checkpoint id, ask the engine to create the pre
 commit, then create the checkpoint row with `preTreeRef`. This avoids leaving a
-new DB checkpoint row that has no baseline if git capture fails.
+new DB checkpoint row that has no baseline if git capture fails. If the pre ref
+is created but the DB insert fails, `track()` best-effort deletes only the pre
+ref for that checkpoint and rethrows the DB error.
 
 `capture()` preserves the existing `captureLocks` behavior and
 `createPatchIfAbsent` transaction. It stores the post commit in
-`postTreeRef`.
+`postTreeRef`. If the post ref is created but patch metadata insertion fails,
+`capture()` best-effort deletes only the post ref and rethrows the original
+error. It must not delete the pre ref.
 
 `diff(from)` calls `diffWorkingTree`. It must not call `computeDiff` and must
 not create or overwrite a post ref.
 
-`diff(from, to)` compares `from.preTreeRef` and `to.preTreeRef`.
+`diff(from, to)` first preserves the current same-session and same-workdir
+validation, then compares `from.preTreeRef` and `to.preTreeRef` in the sidecar
+for that workdir.
 
 `restore(checkpointId)` keeps the active writer check. If safe, it calls
 `restoreTo(checkpoint.workdir, checkpoint.preTreeRef)` and returns
-`messageCursorBefore`.
+`messageCursorBefore`. Restore is precise for snapshot-tracked files. Files
+that were ignored by git ignore rules and never entered the snapshot are left
+alone.
 
 `revert(patches[])` remains present for compatibility, but this batch does not
 define selective patch revert semantics. It throws
@@ -180,11 +207,31 @@ define selective patch revert semantics. It throws
 wrappers over the synchronous store methods instead of returning
 `Promise.resolve(...)`.
 
+`deleteCheckpoint(checkpointId)` is part of this batch's core P1 lifecycle. It
+loads the checkpoint plus associated post ref metadata, drops both sidecar refs
+for the checkpoint, then deletes the DB row and cascading patch metadata. If ref
+dropping fails, DB metadata is kept so the cleanup can be retried. If DB deletion
+fails after refs were dropped, the service best-effort restores refs from the
+loaded `preTreeRef`/`postTreeRef` values and rethrows the DB error. `gc(workdir,
+prune?)` remains an explicit method and is not run on the track/capture hot path.
+
 ## Hook Observability
 
 Run hooks remain observer-style: a snapshot hook failure must not stop the main
-run. The empty catch in `RunWorker.executeHook` should publish a
-`snapshot.hook.failed` event to the current run scope with:
+run. Snapshot hook failures must be attributable to the snapshot executor, not
+to arbitrary user hooks. The snapshot hook executor wraps its own failures in a
+snapshot-specific error type. The generic `RunWorker.executeHook` publishes a
+`snapshot.hook.failed` event only when it catches that snapshot-specific error.
+Other hook failures keep the existing generic observer behavior and are not
+mislabeled as snapshot failures.
+
+The composed hook executor should attempt every active observer hook even if an
+earlier hook fails. After all executors have been attempted, it rethrows a
+snapshot-specific error if one occurred, otherwise it preserves the current
+non-snapshot observer failure behavior. This prevents a user hook failure from
+silently skipping snapshot tracking or capture.
+
+The event is published to the current run scope with:
 
 - hook point (`pre-run` or `post-run`)
 - error message
@@ -204,6 +251,7 @@ Keep the current snapshot error subclass model. Add:
 - `GitCommandError`
 - `SnapshotEngineMismatchError`
 - `SnapshotOperationNotSupportedError`
+- `SnapshotHookExecutionError`
 
 Remove active uses of artifact-only errors after the artifact path is removed
 from the implementation.
@@ -217,10 +265,13 @@ Engine unit tests:
 - added, modified, and deleted file detection
 - `.gitignore` behavior
 - `restoreTo` restores modified files and deletes newly added files
+- `restoreTo` leaves ignored untracked files alone
 - `diffWorkingTree` has no post ref side effect
 - `diffBetween` returns the net diff between two commits
+- pre and post refs are sibling refs and do not collide
 - post commit survives `gc(now)` while its post ref exists
 - `dropRef` plus `gc(now)` makes deleted checkpoint commits unreachable
+- `commit-tree` succeeds without global `user.name` or `user.email`
 - single-gitdir lock handles concurrent operations
 - CRLF and non-ASCII filename smoke coverage on Windows
 - missing git maps to `GitNotAvailableError`
@@ -235,6 +286,10 @@ Service and store tests:
 - `diff(from)` calls `diffWorkingTree`
 - `diff(from, to)` calls `diffBetween`
 - active writer conflict prevents restore
+- cross-session or cross-workdir `diff(from, to)` is rejected
+- DB insert failure after pre/post ref creation performs scoped best-effort ref
+  cleanup
+- `deleteCheckpoint` deletes DB metadata and drops pre/post refs
 - old-engine NULL `preTreeRef` rows throw `SnapshotEngineMismatchError`
 - `revert()` throws `SnapshotOperationNotSupportedError`
 - list/get methods return synchronously
@@ -244,6 +299,8 @@ Adapter and hook tests:
 - default disabled mode does not install the snapshot executor
 - `enableSnapshots: true` installs the snapshot executor programmatically
 - hook failure publishes `snapshot.hook.failed`
+- non-snapshot hook failure is not mislabeled as `snapshot.hook.failed`
+- non-snapshot hook failure does not prevent snapshot hook execution
 - hook failure does not stop the run
 - missing git while snapshots are enabled is observable and non-fatal to the run
 
@@ -254,11 +311,16 @@ Integration tests:
 - multiple checkpoints and restore to historical checkpoint
 - `.gitignore` end to end
 - ref lifecycle and GC behavior
+- delete checkpoint then run `gc(now)` in a test-only path to verify objects can
+  become unreachable
 
 API-key E2E tests:
 
 - Run multiple real agent E2E passes with snapshots enabled and API keys loaded
   from `.env`.
+- Add or document an explicit E2E harness/command for this batch; do not rely on
+  the default unit/integration test command to accidentally cover real API
+  calls.
 - Cover at least normal file modification, restart/capture or restart/restore,
   and restore followed by another run.
 - Never print key values or environment dumps.
@@ -276,4 +338,3 @@ review before final completion. The review should focus on:
 
 Any actionable review findings must be fixed and re-verified before declaring
 the batch complete.
-
