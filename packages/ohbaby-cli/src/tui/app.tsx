@@ -2,9 +2,12 @@ import { Box, Text, useApp, useInput } from "ink";
 import { useCallback, useEffect, useRef } from "react";
 import type { ReactElement } from "react";
 import type {
+  CoreAPI,
   UiCommandCatalog,
   UiCommandInvocation,
+  UiEventHandler,
   UiSnapshot,
+  UiUnsubscribe,
 } from "ohbaby-sdk";
 import { DialogManager } from "./dialogs/manager.js";
 import { Footer } from "./components/footer.js";
@@ -14,7 +17,6 @@ import { Prompt } from "./components/prompt/index.js";
 import { createTuiStore } from "./store/events.js";
 import { useTuiStoreSelector } from "./store/selectors.js";
 import type {
-  TuiBackendClient,
   TuiCommandCatalog,
   TuiCommandSpec,
   TuiEvent,
@@ -22,10 +24,14 @@ import type {
 } from "./store/snapshot.js";
 
 export interface TerminalUiOptions {
-  readonly client: TuiBackendClient;
+  readonly client: CoreAPI;
+  readonly subscribeEvents: (handler: UiEventHandler) => UiUnsubscribe;
 }
 
-export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
+export function OhbabyTerminalApp({
+  client,
+  subscribeEvents,
+}: TerminalUiOptions): ReactElement {
   const storeRef = useRef<TuiStore>(createTuiStore(createEmptySnapshot()));
   const keyboardCommandSequenceRef = useRef(0);
   const catalogRequestSequenceRef = useRef(0);
@@ -136,7 +142,7 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
   useEffect(() => {
     disposedRef.current = false;
 
-    const unsubscribe = client.subscribeEvents((tuiEvent: TuiEvent) => {
+    const unsubscribe = subscribeEvents((tuiEvent: TuiEvent) => {
       store.dispatch(tuiEvent);
 
       if (
@@ -176,7 +182,7 @@ export function OhbabyTerminalApp({ client }: TerminalUiOptions): ReactElement {
       disposedRef.current = true;
       unsubscribe();
     };
-  }, [client, exit, loadCatalog, store]);
+  }, [client, exit, loadCatalog, store, subscribeEvents]);
 
   return (
     <Box flexDirection="column">

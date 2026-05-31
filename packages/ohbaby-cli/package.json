@@ -8,6 +8,9 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "ohbaby": "./dist/bin.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -32,13 +35,19 @@
   "sideEffects": false,
   "scripts": {
     "build": "rimraf dist && tsup && tsc -b --force",
+    "start": "node dist/bin.js",
     "typecheck": "tsc -b",
     "clean": "rimraf dist coverage"
   },
   "dependencies": {
     "chalk": "^5.4.1",
     "ink": "^6.0.0",
+    "ohbaby-agent": "workspace:*",
     "ohbaby-sdk": "workspace:*",
-    "react": "^19.0.0"
+    "react": "^19.0.0",
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "@types/yargs": "^17.0.33"
   }
 }

@@ -1,16 +1,14 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   createServer,
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 interface CliResult {
   readonly code: number | null;
@@ -26,15 +24,38 @@ interface CapturedRequest {
 }
 
 const cleanupDirectories: string[] = [];
-const require = createRequire(import.meta.url);
-const TSX_IMPORT_URL = pathToFileURL(require.resolve("tsx")).href;
 const CLI_BIN_PATH = join(
   process.cwd(),
   "packages",
-  "ohbaby-agent",
-  "src",
-  "bin.ts",
+  "ohbaby-cli",
+  "dist",
+  "bin.js",
 );
+
+beforeAll(() => {
+  const buildArgs = [
+    "-r",
+    "--filter",
+    "ohbaby-sdk",
+    "--filter",
+    "ohbaby-agent",
+    "--filter",
+    "ohbaby-cli",
+    "--sort",
+    "build",
+  ];
+  const processInput = commandProcessInput(pnpmCommand(), buildArgs);
+  const result = spawnSync(processInput.command, processInput.args, {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    stdio: "pipe",
+    windowsHide: true,
+  });
+  expect(
+    result.status,
+    `CLI package build failed\nerror:\n${String(result.error)}\nstdout:\n${String(result.stdout)}\nstderr:\n${String(result.stderr)}`,
+  ).toBe(0);
+}, 120_000);
 
 afterEach(async () => {
   for (const directory of cleanupDirectories.splice(0)) {
@@ -181,7 +202,7 @@ async function runCliProcess(input: {
 }): Promise<CliResult> {
   const child = spawn(
     process.execPath,
-    ["--no-warnings", "--import", TSX_IMPORT_URL, CLI_BIN_PATH, ...input.args],
+    ["--no-warnings", CLI_BIN_PATH, ...input.args],
     {
       cwd: input.cwd ?? process.cwd(),
       env: input.env,
@@ -216,6 +237,36 @@ async function runCliProcess(input: {
   });
 }
 
+function pnpmCommand(): string {
+  return process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+}
+
+function commandProcessInput(
+  command: string,
+  args: readonly string[],
+): { readonly args: readonly string[]; readonly command: string } {
+  if (process.platform !== "win32") {
+    return { args, command };
+  }
+
+  return {
+    command: process.env.ComSpec ?? "cmd.exe",
+    args: [
+      "/d",
+      "/s",
+      "/c",
+      [command, ...args].map(quoteWindowsCommandArgument).join(" "),
+    ],
+  };
+}
+
+function quoteWindowsCommandArgument(argument: string): string {
+  if (argument.length > 0 && !/[\s"&|<>^]/.test(argument)) {
+    return argument;
+  }
+  return `"${argument.replaceAll('"', '\\"')}"`;
+}
+
 function childEnv(input: {
   readonly dbPath: string;
   readonly home: string;
@@ -246,7 +297,7 @@ describe("CLI prompt process smoke", () => {
       });
 
       const result = await runCliProcess({
-        args: ["-p", "hello"],
+        args: ["run", "hello"],
         cwd: home,
         env: childEnv({
           dbPath,
@@ -294,7 +345,7 @@ describe("CLI prompt process smoke", () => {
     });
 
     const result = await runCliProcess({
-      args: ["-p", "hello"],
+      args: ["run", "hello"],
       cwd: home,
       env,
     });

@@ -1,5 +1,5 @@
 import { Box, Text, useInput } from "ink";
-import type { UiPermissionState } from "ohbaby-sdk";
+import type { CoreAPI, UiPermissionState } from "ohbaby-sdk";
 import { useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
@@ -7,16 +7,13 @@ import {
   getSlashCompletionCandidates,
 } from "../../command/completions.js";
 import { parseSlashInput, resolveCommand } from "../../command/runtime.js";
-import type {
-  TuiBackendClient,
-  TuiCommandCatalog,
-} from "../../store/snapshot.js";
+import type { TuiCommandCatalog } from "../../store/snapshot.js";
 import { Completion } from "./completion.js";
 
 export interface PromptProps {
   readonly activeSessionId: string | null;
   readonly catalog: TuiCommandCatalog | null;
-  readonly client: TuiBackendClient;
+  readonly client: CoreAPI;
   readonly disabled: boolean;
   readonly loadCatalog?: () => Promise<TuiCommandCatalog>;
   readonly permission?: UiPermissionState;
@@ -144,7 +141,7 @@ async function submitInput(
   input: string,
   activeSessionId: string | null,
   catalog: TuiCommandCatalog | null,
-  client: TuiBackendClient,
+  client: CoreAPI,
   loadCatalog: (() => Promise<TuiCommandCatalog>) | undefined,
   replaceInput: (nextInput: string) => void,
   setError: (message: string | null) => void,

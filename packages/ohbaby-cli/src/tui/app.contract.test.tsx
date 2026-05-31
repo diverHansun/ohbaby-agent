@@ -1,9 +1,9 @@
-import { render } from "ink-testing-library";
+﻿import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UiEventHandler, UiSnapshot } from "ohbaby-sdk";
 import { OhbabyTerminalApp } from "./index.js";
 import type {
-  TuiBackendClient,
+  TerminalClient,
   TuiCommandCatalog,
   TuiCommandSpec,
   TuiEvent,
@@ -82,7 +82,12 @@ describe("OhbabyTerminalApp", () => {
       sessions: [],
       status: { kind: "idle" },
     });
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
 
@@ -92,7 +97,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("renders typed prompt text with a visible cursor", async () => {
     const client = createFakeClient(snapshot());
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     app.stdin.write("hello");
@@ -103,7 +113,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("renders snapshot messages and applies assistant deltas", async () => {
     const client = createFakeClient(snapshot());
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     expect(app.lastFrame()).toContain("ohbaby");
@@ -122,7 +137,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("renders UI notices from the backend", async () => {
     const client = createFakeClient(snapshot());
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     client.emit({
@@ -150,7 +170,12 @@ describe("OhbabyTerminalApp", () => {
         Promise.reject(new Error("snapshot unavailable")),
       ),
     };
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
 
@@ -164,7 +189,12 @@ describe("OhbabyTerminalApp", () => {
         Promise.reject(new Error("command catalog unavailable")),
       ),
     };
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
 
@@ -182,7 +212,12 @@ describe("OhbabyTerminalApp", () => {
         sessionRules: [],
       },
     });
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     expect(app.lastFrame()).toContain("mode: auto | level: default");
@@ -223,7 +258,12 @@ describe("OhbabyTerminalApp", () => {
         sessionRules: [],
       },
     });
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     app.stdin.write("\u001B[Z");
@@ -249,7 +289,12 @@ describe("OhbabyTerminalApp", () => {
       sessions: [],
       status: { kind: "idle" },
     });
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     client.emit({
@@ -380,7 +425,12 @@ describe("OhbabyTerminalApp", () => {
         },
       ],
     });
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
 
@@ -429,7 +479,12 @@ describe("OhbabyTerminalApp", () => {
         },
       ],
     });
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
 
@@ -453,7 +508,12 @@ describe("OhbabyTerminalApp", () => {
       ],
       status: { kind: "running", runId: "run_raw_123" },
     });
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     expect(app.lastFrame()).toContain("status: running");
@@ -484,7 +544,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("submits normal prompts with the active session id", async () => {
     const client = createFakeClient(snapshot());
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     app.stdin.write("hello");
@@ -501,7 +566,12 @@ describe("OhbabyTerminalApp", () => {
     client.submitPrompt
       .mockImplementationOnce(() => new Promise<void>(() => undefined))
       .mockRejectedValueOnce(new Error("A prompt is already running"));
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     app.stdin.write("first");
@@ -538,7 +608,12 @@ describe("OhbabyTerminalApp", () => {
       ],
       status: { kind: "running", runId: "run_1" },
     });
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     app.stdin.write("\u0003");
@@ -549,7 +624,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("aborts the permission run on Ctrl+C while a permission dialog is open", async () => {
     const client = createFakeClient(snapshot());
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     client.emit({
@@ -575,7 +655,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("executes exact slash commands but only completes on tab", async () => {
     const client = createFakeClient(snapshot(), catalog);
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     app.stdin.write("/res");
@@ -600,7 +685,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("executes the top-level /new session command from the backend catalog", async () => {
     const client = createFakeClient(snapshot(), catalog);
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     app.stdin.write("/new");
@@ -620,7 +710,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("shows slash candidates and executes a selected catalog command", async () => {
     const client = createFakeClient(snapshot(), catalog);
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     app.stdin.write("/");
@@ -667,7 +762,12 @@ describe("OhbabyTerminalApp", () => {
       version: "long",
     };
     const client = createFakeClient(snapshot(), longCatalog);
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     app.stdin.write("/");
@@ -686,7 +786,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("does not execute permission levels as slash subcommands", async () => {
     const client = createFakeClient(snapshot(), catalog);
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     app.stdin.write("/permission full-access");
@@ -701,7 +806,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("reloads the command catalog after invalidation events", async () => {
     const client = createFakeClient(snapshot(), catalog);
-    render(<OhbabyTerminalApp client={client} />);
+    render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     expect(client.listCommands).toHaveBeenCalledTimes(1);
@@ -719,7 +829,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("opens model and session interactions and sends responses", async () => {
     const client = createFakeClient(snapshot());
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     client.emit({
@@ -767,7 +882,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("supports selection movement for generic select-one interactions", async () => {
     const client = createFakeClient(snapshot());
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     client.emit({
@@ -801,7 +921,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("pages through session selections with PgUp and PgDn before resuming", async () => {
     const client = createFakeClient(snapshot());
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     client.emit({
@@ -838,7 +963,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("opens confirm interactions and sends confirmation responses", async () => {
     const client = createFakeClient(snapshot());
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     client.emit({
@@ -865,7 +995,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("gives permission dialogs priority over interactions", async () => {
     const client = createFakeClient(snapshot());
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     client.emit({
@@ -903,7 +1038,12 @@ describe("OhbabyTerminalApp", () => {
 
   it("defaults permission selection to deny when available", async () => {
     const client = createFakeClient(snapshot());
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await flush();
     client.emit({
@@ -932,7 +1072,7 @@ describe("OhbabyTerminalApp", () => {
 function createFakeClient(
   initialSnapshot: UiSnapshot,
   commandCatalog: TuiCommandCatalog = catalog,
-): TuiBackendClient & {
+): TerminalClient & {
   readonly emit: (event: TuiEvent) => void;
   readonly abortRun: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;

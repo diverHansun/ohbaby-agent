@@ -1,6 +1,5 @@
 import type {
-  SubmitPromptOptions,
-  UiBackendClient,
+  CoreAPI,
   UiCommandCatalog,
   UiCommandInvocation,
   UiCommandSpec,
@@ -8,12 +7,10 @@ import type {
   UiEvent as SdkUiEvent,
   UiEventHandler,
   UiInteractionKind,
-  UiInteractionResponse,
   UiMessage,
   UiNotice,
   UiPermissionState,
   UiPermissionRequest,
-  UiPermissionResponse,
   UiRun,
   UiRunStatus,
   UiSession,
@@ -79,32 +76,10 @@ export type TuiEvent =
 
 export type TuiEventHandler = (event: TuiEvent) => void;
 
-export type TuiBackendClient = Omit<
-  UiBackendClient,
-  "executeCommand" | "listCommands" | "respondInteraction" | "subscribeEvents"
-> & {
-  readonly getSnapshot: () => Promise<UiSnapshot>;
+export type TerminalClient = CoreAPI & {
   readonly subscribeEvents: (
     handler: TuiEventHandler | UiEventHandler,
   ) => UiUnsubscribe;
-  readonly submitPrompt: (
-    text: string,
-    options?: SubmitPromptOptions,
-  ) => Promise<void>;
-  readonly executeCommand: (command: UiCommandInvocation) => Promise<void>;
-  readonly respondPermission: (
-    requestId: string,
-    response: UiPermissionResponse,
-  ) => Promise<void>;
-  readonly listCommands: (query: {
-    readonly surface: UiCommandSurface;
-  }) => Promise<
-    UiCommandCatalog | TuiCommandCatalog | readonly TuiCommandSpec[]
-  >;
-  readonly respondInteraction?: (
-    interactionId: string,
-    response: UiInteractionResponse,
-  ) => Promise<void>;
 };
 
 export interface TuiStoreState {

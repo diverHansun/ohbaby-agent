@@ -1,11 +1,10 @@
 import { Box, Text, useInput } from "ink";
-import type { UiPermissionRequest } from "ohbaby-sdk";
+import type { CoreAPI, UiPermissionRequest } from "ohbaby-sdk";
 import { useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import type { TuiBackendClient } from "../store/snapshot.js";
 
 export interface PermissionDialogProps {
-  readonly client: TuiBackendClient;
+  readonly client: CoreAPI;
   readonly request: UiPermissionRequest;
 }
 
@@ -95,7 +94,7 @@ export function PermissionDialog({
 }
 
 function respondWithChoice(
-  client: TuiBackendClient,
+  client: CoreAPI,
   request: UiPermissionRequest,
   choiceIndex: number,
   setPending: (pending: boolean) => void,

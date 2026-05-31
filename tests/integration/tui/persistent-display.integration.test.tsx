@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+﻿import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it } from "vitest";
@@ -73,7 +73,12 @@ describe("TUI persistent backend display", () => {
       llmClient: createFakeLLMClient([]),
       workdir,
     });
-    const app = render(<OhbabyTerminalApp client={restored} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={restored}
+        subscribeEvents={restored.subscribeEvents}
+      />,
+    );
 
     const frame = await waitForFrame(
       app,
@@ -132,7 +137,12 @@ describe("TUI persistent backend display", () => {
       staleRun?.status.kind === "error" ? staleRun.status.message : "",
     ).toContain("interrupted");
 
-    const app = render(<OhbabyTerminalApp client={restored} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={restored}
+        subscribeEvents={restored.subscribeEvents}
+      />,
+    );
     await waitForFrame(
       app,
       (frame) =>
@@ -183,7 +193,12 @@ describe("TUI persistent backend display", () => {
       ),
       workdir,
     });
-    const app = render(<OhbabyTerminalApp client={restored} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={restored}
+        subscribeEvents={restored.subscribeEvents}
+      />,
+    );
 
     await waitForFrame(app, (frame) => frame.includes("Beta reply."));
     app.stdin.write("/resume --session_id session_alpha");
@@ -212,7 +227,7 @@ describe("TUI persistent backend display", () => {
     app.unmount();
   });
 
-  it("opens /session and resumes a stored session with PgDn selection", async () => {
+  it("opens /sessions and resumes a stored session with PgDn selection", async () => {
     const directory = await tempWorkspace("ohbaby-cli-session-picker");
     const dbPath = join(directory, "agent.db");
     const workdir = join(directory, "workspace");
@@ -246,10 +261,15 @@ describe("TUI persistent backend display", () => {
       now,
       workdir,
     });
-    const app = render(<OhbabyTerminalApp client={restored} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={restored}
+        subscribeEvents={restored.subscribeEvents}
+      />,
+    );
 
     await waitForFrame(app, (frame) => frame.includes("Reply 8."));
-    app.stdin.write("/session");
+    app.stdin.write("/sessions");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) => frame.includes("Session:"));
 
@@ -296,7 +316,12 @@ describe("TUI persistent backend display", () => {
       ),
       workdir: restoredWorkdir,
     });
-    const app = render(<OhbabyTerminalApp client={restored} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={restored}
+        subscribeEvents={restored.subscribeEvents}
+      />,
+    );
 
     await waitForFrame(app, (frame) => frame.includes("Alpha reply."));
     app.stdin.write("/resume --session_id session_alpha");

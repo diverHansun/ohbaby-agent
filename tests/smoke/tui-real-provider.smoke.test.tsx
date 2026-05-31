@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+﻿import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -102,7 +102,12 @@ async function createRealTuiHarness(input: {
     workdir,
   });
   return {
-    app: render(<OhbabyTerminalApp client={client} />),
+    app: render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    ),
     client,
     workdir,
   };
@@ -477,16 +482,13 @@ describe("real provider TUI smoke", () => {
           30_000,
         );
 
-        app.stdin.write("/tools");
+        app.stdin.write("/status");
         app.stdin.write("\r");
         await waitForFrame(
           app,
           (frame) =>
-            frame.includes("tools:") &&
-            frame.includes("web_search") &&
-            frame.includes("web_fetch") &&
-            frame.includes("write") &&
-            frame.includes("bash"),
+            frame.includes("status: idle") &&
+            !frame.includes("Unknown command"),
           30_000,
         );
 

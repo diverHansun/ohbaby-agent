@@ -1,15 +1,13 @@
 import { Box, Text, useInput } from "ink";
+import type { CoreAPI } from "ohbaby-sdk";
 import { useRef, useState } from "react";
 import type { ReactElement } from "react";
-import type {
-  TuiBackendClient,
-  TuiInteractionRequest,
-} from "../store/snapshot.js";
+import type { TuiInteractionRequest } from "../store/snapshot.js";
 
 const SELECT_ONE_PAGE_SIZE = 6;
 
 export interface SelectOneDialogProps {
-  readonly client: TuiBackendClient;
+  readonly client: CoreAPI;
   readonly interaction: TuiInteractionRequest;
   readonly title: string;
 }
@@ -44,7 +42,7 @@ export function SelectOneDialog({
   };
 
   useInput((value, key) => {
-    if (client.respondInteraction === undefined || pending) {
+    if (pending) {
       return;
     }
 

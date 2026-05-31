@@ -5,5 +5,10 @@ export { OhbabyTerminalApp };
 export type { TerminalUiOptions };
 
 export function renderTerminalUi(options: TerminalUiOptions): Instance {
-  return render(<OhbabyTerminalApp client={options.client} />);
+  return render(
+    <OhbabyTerminalApp
+      client={options.client}
+      subscribeEvents={options.subscribeEvents}
+    />,
+  );
 }

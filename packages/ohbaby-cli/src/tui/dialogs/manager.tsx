@@ -1,16 +1,13 @@
-import type { UiPermissionRequest } from "ohbaby-sdk";
+import type { CoreAPI, UiPermissionRequest } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { ConfirmDialog } from "./confirm.js";
 import { ModelDialog } from "./model-dialog.js";
 import { PermissionDialog } from "./permission-dialog.js";
 import { SessionDialog } from "./session-dialog.js";
-import type {
-  TuiBackendClient,
-  TuiInteractionRequest,
-} from "../store/snapshot.js";
+import type { TuiInteractionRequest } from "../store/snapshot.js";
 
 export interface DialogManagerProps {
-  readonly client: TuiBackendClient;
+  readonly client: CoreAPI;
   readonly interactions: readonly TuiInteractionRequest[];
   readonly permissions: readonly UiPermissionRequest[];
 }

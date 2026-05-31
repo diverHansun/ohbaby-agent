@@ -145,7 +145,10 @@ function installedOhbabyPath(prefix: string): string {
   return join(prefix, "bin", "ohbaby");
 }
 
-function installedGlobalPackagePath(prefix: string, packageName: string): string {
+function installedGlobalPackagePath(
+  prefix: string,
+  packageName: string,
+): string {
   if (process.platform === "win32") {
     return join(prefix, "node_modules", packageName);
   }
@@ -202,7 +205,7 @@ async function packWorkspacePackage(input: {
 }
 
 describe("npm packed CLI smoke", () => {
-  it("installs the packed ohbaby-agent tarball globally and exposes ohbaby help and version", async () => {
+  it("installs the packed ohbaby-cli tarball globally and exposes ohbaby help and version", async () => {
     const tempRoot = await tempDirectory("ohbaby-packaging-smoke-");
     const packDestination = join(tempRoot, "pack");
     const prefix = join(tempRoot, "prefix");
@@ -230,13 +233,13 @@ describe("npm packed CLI smoke", () => {
       packDestination,
       packageDirectory: join(repoRoot, "packages", "ohbaby-sdk"),
     });
-    const cliPack = await packWorkspacePackage({
-      packDestination,
-      packageDirectory: join(repoRoot, "packages", "ohbaby-cli"),
-    });
     const agentPack = await packWorkspacePackage({
       packDestination,
       packageDirectory: join(repoRoot, "packages", "ohbaby-agent"),
+    });
+    const cliPack = await packWorkspacePackage({
+      packDestination,
+      packageDirectory: join(repoRoot, "packages", "ohbaby-cli"),
     });
 
     const installResult = await runCommand({
@@ -257,22 +260,24 @@ describe("npm packed CLI smoke", () => {
       ],
       timeoutMs: 180_000,
     });
-    expectSuccess(installResult, "npm install global packed ohbaby-agent");
+    expectSuccess(installResult, "npm install global packed ohbaby-cli");
 
-    const installedAgentPackage = installedGlobalPackagePath(
+    const installedCliPackage = installedGlobalPackagePath(
       prefix,
-      "ohbaby-agent",
+      "ohbaby-cli",
     );
     const cliImportSmokePath = join(
-      installedAgentPackage,
-      "import-ohbaby-cli.mjs",
+      installedCliPackage,
+      "import-ohbaby-packages.mjs",
     );
     await writeFile(
       cliImportSmokePath,
       [
         'const mod = await import("ohbaby-cli");',
+        'const agent = await import("ohbaby-agent");',
         'if (typeof mod.renderTerminalUi !== "function") throw new Error("missing renderTerminalUi export");',
         'if (typeof mod.OhbabyTerminalApp !== "function") throw new Error("missing OhbabyTerminalApp export");',
+        'if (typeof agent.buildCoreAPIImpl !== "function") throw new Error("missing buildCoreAPIImpl export");',
         'if (typeof mod.TerminalUiOptions !== "undefined") throw new Error("TerminalUiOptions should be type-only");',
       ].join("\n"),
       "utf8",
@@ -281,10 +286,10 @@ describe("npm packed CLI smoke", () => {
     const cliImportResult = await runCommand({
       command: nodeCommand(),
       args: [cliImportSmokePath],
-      cwd: installedAgentPackage,
+      cwd: installedCliPackage,
       timeoutMs: 30_000,
     });
-    expectSuccess(cliImportResult, "import installed ohbaby-cli");
+    expectSuccess(cliImportResult, "import installed ohbaby packages");
     expect(cliImportResult.stdout).toBe("");
     expect(cliImportResult.stderr).toBe("");
 
@@ -295,13 +300,14 @@ describe("npm packed CLI smoke", () => {
       timeoutMs: 30_000,
     });
     expectSuccess(helpResult, "ohbaby --help");
-    expect(helpResult.stdout).toContain("Usage: ohbaby [options]");
-    expect(helpResult.stdout).toContain("-p, --prompt <text>");
+    expect(helpResult.stdout).toContain("ohbaby run [prompt..]");
+    expect(helpResult.stdout).toContain("ohbaby serve");
+    expect(helpResult.stdout).not.toContain("-p, --prompt");
     expect(helpResult.stderr).toBe("");
 
     const packageJson = JSON.parse(
       await readFile(
-        join(repoRoot, "packages", "ohbaby-agent", "package.json"),
+        join(repoRoot, "packages", "ohbaby-cli", "package.json"),
         "utf8",
       ),
     ) as { readonly version: string };

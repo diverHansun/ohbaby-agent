@@ -1,13 +1,11 @@
 import { Box, Text, useInput } from "ink";
+import type { CoreAPI } from "ohbaby-sdk";
 import { useState } from "react";
 import type { ReactElement } from "react";
-import type {
-  TuiBackendClient,
-  TuiInteractionRequest,
-} from "../store/snapshot.js";
+import type { TuiInteractionRequest } from "../store/snapshot.js";
 
 export interface ConfirmDialogProps {
-  readonly client: TuiBackendClient;
+  readonly client: CoreAPI;
   readonly interaction: TuiInteractionRequest;
 }
 
@@ -19,7 +17,7 @@ export function ConfirmDialog({
   const [error, setError] = useState<string | null>(null);
 
   useInput((_, key) => {
-    if (client.respondInteraction === undefined || pending) {
+    if (pending) {
       return;
     }
 

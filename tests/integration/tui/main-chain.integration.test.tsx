@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+﻿import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createInProcessUiBackendClient } from "ohbaby-agent";
 import { OhbabyTerminalApp } from "ohbaby-cli";
-import type { TuiBackendClient } from "../../../packages/ohbaby-cli/src/tui/store/snapshot.js";
+import type { TerminalClient } from "../../../packages/ohbaby-cli/src/tui/store/snapshot.js";
 import {
   createFakeLLMClient,
   createSequentialFakeLLMClient,
@@ -38,7 +38,12 @@ describe("TUI main chain with real in-process backend", () => {
         { textDelta: " world", finishReason: "stop" },
       ]),
     });
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await waitForFrame(app, promptIsReady);
     app.stdin.write("hello");
@@ -76,11 +81,16 @@ describe("TUI main chain with real in-process backend", () => {
       ),
       workdir,
     });
-    const client: TuiBackendClient = {
+    const client: TerminalClient = {
       ...realClient,
       submitPrompt: vi.fn(realClient.submitPrompt.bind(realClient)),
     };
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await waitForFrame(app, promptIsReady);
     app.stdin.write("write file");
@@ -130,7 +140,12 @@ describe("TUI main chain with real in-process backend", () => {
       ]),
       workdir,
     });
-    const app = render(<OhbabyTerminalApp client={realClient} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={realClient}
+        subscribeEvents={realClient.subscribeEvents}
+      />,
+    );
 
     await waitForFrame(app, promptIsReady);
     app.stdin.write("abort this");
@@ -160,7 +175,12 @@ describe("TUI main chain with real in-process backend", () => {
     const client = createInProcessUiBackendClient({
       llmClient: createFakeLLMClient([]),
     });
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await waitForFrame(app, (frame) =>
       frame.includes("mode: auto | level: default"),
@@ -173,7 +193,12 @@ describe("TUI main chain with real in-process backend", () => {
     await waitForFrame(app, (frame) =>
       frame.includes("mode: auto | level: default"),
     );
-    app.stdin.write("/permission full-access");
+    app.stdin.write("/permission");
+    app.stdin.write("\r");
+    await waitForFrame(app, (nextFrame) =>
+      nextFrame.includes("Permission level:"),
+    );
+    app.stdin.write("\u001B[B");
     app.stdin.write("\r");
     const frame = await waitForFrame(app, (nextFrame) =>
       nextFrame.includes("mode: auto | level: full-access"),
@@ -183,11 +208,16 @@ describe("TUI main chain with real in-process backend", () => {
     app.unmount();
   });
 
-  it("lists the same tools from the TUI slash command in plan mode", async () => {
+  it("executes slash commands from the TUI in plan mode", async () => {
     const client = createInProcessUiBackendClient({
       llmClient: createFakeLLMClient([]),
     });
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await waitForFrame(app, promptIsReady);
     app.stdin.write("\u001B[Z");
@@ -195,20 +225,16 @@ describe("TUI main chain with real in-process backend", () => {
       frame.includes("mode: plan | level: default"),
     );
 
-    app.stdin.write("/tools");
+    app.stdin.write("/status");
     app.stdin.write("\r");
     const frame = await waitForFrame(
       app,
       (nextFrame) =>
-        nextFrame.includes("tools:") &&
-        nextFrame.includes("web_search") &&
-        nextFrame.includes("web_fetch") &&
-        !nextFrame.includes('"description"'),
+        nextFrame.includes("status: idle") &&
+        !nextFrame.includes("Unknown command"),
     );
 
-    expect(frame).toContain("write");
-    expect(frame).toContain("bash");
-    expect(frame).toContain("task");
+    expect(frame).toContain("mode: plan | level: default");
     app.unmount();
   });
 
@@ -231,7 +257,12 @@ describe("TUI main chain with real in-process backend", () => {
       ),
       workdir,
     });
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await waitForFrame(app, (frame) =>
       frame.includes("mode: auto | level: default"),
@@ -254,7 +285,7 @@ describe("TUI main chain with real in-process backend", () => {
     app.unmount();
   });
 
-  it("runs write tool calls without permission after /permission full-access", async () => {
+  it("runs write tool calls without permission after full-access is selected", async () => {
     const workdir = await tempWorkspace("ohbaby-cli-full-access");
     const client = createInProcessUiBackendClient({
       llmClient: createSequentialFakeLLMClient([
@@ -269,10 +300,18 @@ describe("TUI main chain with real in-process backend", () => {
       ]),
       workdir,
     });
-    const app = render(<OhbabyTerminalApp client={client} />);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
 
     await waitForFrame(app, promptIsReady);
-    app.stdin.write("/permission full-access");
+    app.stdin.write("/permission");
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) => frame.includes("Permission level:"));
+    app.stdin.write("\u001B[B");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) =>
       frame.includes("mode: auto | level: full-access"),

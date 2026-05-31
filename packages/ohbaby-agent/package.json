@@ -1,16 +1,13 @@
 {
   "name": "ohbaby-agent",
   "version": "0.1.0",
-  "description": "Backend runtime and CLI composition layer for ohbaby-agent",
+  "description": "Backend runtime for ohbaby-agent",
   "type": "module",
   "publishConfig": {
     "access": "public"
   },
   "engines": {
     "node": ">=24.0.0"
-  },
-  "bin": {
-    "ohbaby": "./dist/bin.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -38,7 +35,6 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev:inspect": "tsx watch --inspect src/index.ts",
-    "start": "node dist/bin.js",
     "prompt:generate": "node scripts/generate-system-prompt-assets.mjs",
     "prompt:check": "node scripts/generate-system-prompt-assets.mjs --check",
     "build": "pnpm run prompt:check && rimraf dist && tsup && tsc -b --force",
@@ -50,10 +46,8 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@tavily/core": "^0.6.4",
     "chalk": "^5.4.1",
-    "commander": "^13.1.0",
     "dotenv": "^16.4.7",
     "exa-js": "^2.0.12",
-    "ohbaby-cli": "workspace:*",
     "ohbaby-sdk": "workspace:*",
     "openai": "^4.77.0",
     "yaml": "^2.8.1",
