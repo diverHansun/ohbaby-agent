@@ -8,12 +8,11 @@ local CLI/TUI MVP reliable before opening the larger extension surface.
 
 The MVP closure target is the local `ohbaby` command:
 
-- `ohbaby-agent`: user-facing CLI and backend runtime composition.
+- `ohbaby-cli`: user-facing CLI entrypoint, yargs startup commands, stdout
+  renderer, and Ink TUI.
+- `ohbaby-agent`: backend runtime composition.
 - `ohbaby-sdk`: stable TypeScript contracts between runtime adapters and UI
   frontends.
-- `ohbaby-cli`: CLI frontend package; its current interactive surface is the
-  Ink TUI that controls the backend through the SDK
-  client contract.
 
 The current MVP includes local prompt submission, streaming UI projection,
 sessions, provider configuration, built-in file/shell/web/todo tools, policy
@@ -77,8 +76,12 @@ through the shared SDK contract.
 Run one non-interactive prompt:
 
 ```bash
-pnpm start -- --prompt "Summarize this project"
+pnpm start -- run "Summarize this project"
+echo "Summarize this project" | pnpm start -- run
 ```
+
+`run` requires either prompt text or piped stdin; an interactive empty
+`pnpm start -- run` exits with a usage error instead of waiting forever.
 
 Show CLI help and version:
 
@@ -90,8 +93,8 @@ pnpm start -- --version
 For direct local testing after `pnpm build`:
 
 ```bash
-node packages/ohbaby-agent/dist/bin.js --help
-node packages/ohbaby-agent/dist/bin.js --version
+node packages/ohbaby-cli/dist/bin.js --help
+node packages/ohbaby-cli/dist/bin.js --version
 ```
 
 ## Provider Base URLs
@@ -127,15 +130,16 @@ an Anthropic API base URL such as `https://api.anthropic.com`.
 
 Development stays on the pnpm workspace. The npm-facing package graph is:
 
-- `ohbaby-agent` depends on `ohbaby-cli` and `ohbaby-sdk`.
-- `ohbaby-cli` depends on `ohbaby-sdk`.
+- `ohbaby-cli` owns the `ohbaby` binary and depends on `ohbaby-agent` and
+  `ohbaby-sdk`.
+- `ohbaby-agent` depends on `ohbaby-sdk`.
 - `ohbaby-sdk` has no runtime workspace dependency.
 
 After the MCP phase is complete and the project is ready for a public release,
 the intended user installation path is:
 
 ```bash
-npm install -g ohbaby-agent
+npm install -g ohbaby-cli
 ohbaby
 ```
 
@@ -148,7 +152,7 @@ pnpm exec vitest run tests/integration/cli/packaging-smoke.integration.test.ts -
 ```
 
 The packed smoke verifies that `ohbaby --help` and `ohbaby --version` work after
-installing the packed `ohbaby-sdk`, `ohbaby-cli`, and `ohbaby-agent` tarballs.
+installing the packed `ohbaby-sdk`, `ohbaby-agent`, and `ohbaby-cli` tarballs.
 
 ## Development Commands
 
@@ -171,9 +175,9 @@ TUI dogfooding, prefer `pnpm build` followed by `pnpm start`.
 ```text
 ohbaby-agent/
   packages/
-    ohbaby-agent/     CLI, backend runtime, adapters, tools, sessions, policy
+    ohbaby-agent/     backend runtime, adapters, tools, sessions, policy
     ohbaby-sdk/       shared UI/backend contracts and command helpers
-    ohbaby-cli/       CLI frontend package; Ink TUI lives under src/tui/
+    ohbaby-cli/       ohbaby binary, CLI startup commands, stdout renderer, TUI
   docs/               module designs, implementation notes, problem lists
   tests/              cross-package integration and smoke tests
   scripts/            workspace test helpers
