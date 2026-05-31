@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef } from "react";
 import type { ReactElement } from "react";
 import type {
   CoreAPI,
-  UiCommandCatalog,
   UiCommandInvocation,
   UiEventHandler,
   UiSnapshot,
@@ -18,7 +17,6 @@ import { createTuiStore } from "./store/events.js";
 import { useTuiStoreSelector } from "./store/selectors.js";
 import type {
   TuiCommandCatalog,
-  TuiCommandSpec,
   TuiEvent,
   TuiStore,
 } from "./store/snapshot.js";
@@ -113,9 +111,7 @@ export function OhbabyTerminalApp({
     catalogRequestSequenceRef.current = requestSequence;
 
     try {
-      const catalog = normalizeCommandCatalog(
-        await client.listCommands({ surface: "tui" }),
-      );
+      const catalog = await client.listCommands({ surface: "tui" });
 
       if (
         !disposedRef.current &&
@@ -251,32 +247,6 @@ function nextPermissionModeCommand(
     sessionId,
     surface: "tui",
   };
-}
-
-function normalizeCommandCatalog(
-  value: UiCommandCatalog | TuiCommandCatalog | readonly TuiCommandSpec[],
-): TuiCommandCatalog {
-  if (isCommandArray(value)) {
-    return {
-      commands: value,
-      loadedAt: Date.now(),
-      surface: "tui",
-      version: "local",
-    };
-  }
-
-  return {
-    commands: value.commands,
-    loadedAt: "loadedAt" in value ? value.loadedAt : Date.now(),
-    surface: "surface" in value ? value.surface : "tui",
-    version: value.version,
-  };
-}
-
-function isCommandArray(
-  value: UiCommandCatalog | TuiCommandCatalog | readonly TuiCommandSpec[],
-): value is readonly TuiCommandSpec[] {
-  return Array.isArray(value);
 }
 
 function formatError(error: unknown): string {

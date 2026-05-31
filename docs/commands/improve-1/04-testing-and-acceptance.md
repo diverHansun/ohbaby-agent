@@ -73,7 +73,7 @@
 
 | 文件 | 验收点 |
 |------|--------|
-| `packages/ohbaby-cli/src/tui/command/runtime.unit.test.ts` | TUI runtime 只做 SDK thin wrapper |
+| `packages/ohbaby-cli/src/tui/slash-commands/runtime.unit.test.ts` | TUI runtime 只做 SDK thin wrapper |
 | `packages/ohbaby-cli/src/tui/store/events.unit.test.ts` | `/status` 与 `/models` 的人类可读 notice |
 | `packages/ohbaby-cli/src/tui/app.contract.test.tsx` | TUI 输入、补全、执行、旧权限子命令拒绝 |
 | `packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts` | command catalog、`/models` 模型摘要、session interaction、permission interaction |
@@ -81,7 +81,7 @@
 推荐执行：
 
 ```powershell
-pnpm exec vitest run packages/ohbaby-sdk/src/command/parse.unit.test.ts packages/ohbaby-sdk/src/command/resolve.unit.test.ts packages/ohbaby-agent/src/commands/catalog.unit.test.ts packages/ohbaby-agent/src/commands/service.unit.test.ts packages/ohbaby-cli/src/tui/command/runtime.unit.test.ts packages/ohbaby-cli/src/tui/store/events.unit.test.ts packages/ohbaby-cli/src/tui/app.contract.test.tsx packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts
+pnpm exec vitest run packages/ohbaby-sdk/src/command/parse.unit.test.ts packages/ohbaby-sdk/src/command/resolve.unit.test.ts packages/ohbaby-agent/src/commands/catalog.unit.test.ts packages/ohbaby-agent/src/commands/service.unit.test.ts packages/ohbaby-cli/src/tui/slash-commands/runtime.unit.test.ts packages/ohbaby-cli/src/tui/store/events.unit.test.ts packages/ohbaby-cli/src/tui/app.contract.test.tsx packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts
 pnpm run typecheck
 ```
 
@@ -150,7 +150,7 @@ pnpm run typecheck
 
 ```powershell
 rg "permission\.default|permission\.full-access|model\.list|model\.current|session\.new|session\.compact|session\.resume" packages/ohbaby-agent/src/commands packages/ohbaby-cli/src/tui
-rg "function tokenizeCommandLine|function inferDisplayPathLength|function findExactCommand" packages/ohbaby-cli/src/tui/command/runtime.ts
+rg "function tokenizeCommandLine|function inferDisplayPathLength|function findExactCommand" packages/ohbaby-cli/src/tui/slash-commands/runtime.ts
 ```
 
 第一条只允许出现在测试中的“旧命令拒绝”断言里；第二条应无结果。

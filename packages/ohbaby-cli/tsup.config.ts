@@ -12,7 +12,6 @@ export default defineConfig({
   treeshake: true,
   minify: false,
   external: [
-    "ohbaby-agent",
     "ohbaby-sdk",
     "react",
     "ink",

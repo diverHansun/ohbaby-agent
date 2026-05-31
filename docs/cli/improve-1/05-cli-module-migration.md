@@ -61,7 +61,7 @@ ohbaby-sdk  =  契约（UI 类型 + CoreAPI/SDKAPI + createRPC + 命令 parse/re
 命名边界：
 
 - `ohbaby-cli/src/cli/commands/` 是 yargs 启动命令层，只处理进入 TUI 之前的 `$0`、`run`、`serve`。
-- `ohbaby-cli/src/tui/command/` 继续保留，它是 TUI 内 slash command 的补全/解析 UI 适配层，继续通过 SDK resolver 处理 `/models`、`/sessions`、`/permission` 等启动后的输入。它不能被 yargs 的 `cli/commands/` 替代。
+- `ohbaby-cli/src/tui/slash-commands/` 继续保留，它是 TUI 内 slash command 的补全/解析 UI 适配层，继续通过 SDK resolver 处理 `/models`、`/sessions`、`/permission` 等启动后的输入。它不能被 yargs 的 `cli/commands/` 替代。
 
 ### 2.3 三包职责
 
@@ -69,7 +69,7 @@ ohbaby-sdk  =  契约（UI 类型 + CoreAPI/SDKAPI + createRPC + 命令 parse/re
 - **`ohbaby-agent`（后端核心）**：执行 prompt / 命令、管理 session / 权限 / MCP / 工具，发布事件。暴露 `buildCoreAPIImpl`（接缝后端侧）+ 进程级初始化工具。
 - **`ohbaby-sdk`（契约）**：类型、`CoreAPI`/`SDKAPI`、`createRPC`、命令解析函数。前后端唯一共享面。
 
-> **依赖 ≠ 紧耦合**：`ohbaby-cli → ohbaby-agent` 的包依赖仅用于**同进程引导**（前端 import 后端工厂把它启动起来）。真正的运行时通信走 SDK 的 `CoreAPI` 契约。将来要换成跨进程/HTTP 时，前端不再 import 后端，改为用同一份 `CoreAPI` 契约连接远端——UI 代码零改动（见 §4.3）。
+> **依赖 ≠ 紧耦合**：`ohbaby-cli → ohbaby-agent` 的包依赖仅用于默认发行版的**同进程引导**。`bin.ts` 通过可注入 host loader + 默认动态加载启动本地后端；真正的运行时通信走 SDK 的 `CoreAPI` 契约。将来要换成跨进程/HTTP 时，前端可注入同一份 `CoreAPI` 契约连接远端——UI 代码零改动（见 §4.3）。
 
 ---
 
@@ -134,7 +134,7 @@ ohbaby-sdk  =  契约（UI 类型 + CoreAPI/SDKAPI + createRPC + 命令 parse/re
 
 ### 4.3 同进程现在、跨进程将来
 
-- **现在（同进程）**：前端静态 `import { buildCoreAPIImpl } from "ohbaby-agent"`，在本进程启动后端，`createRPC` 提供 JSON 序列化边界（值拷贝，消除对象引用耦合）。
+- **现在（同进程）**：`runOhbabyCli` 支持上层注入 host loader；默认 bin 通过动态加载 `ohbaby-agent` 在本进程启动后端，`createRPC` 提供 JSON 序列化边界（值拷贝，消除对象引用耦合）。
 - **将来（跨进程/HTTP）**：把"获取 CoreAPI"的方式从"import 后端工厂"换成"用 SDK 契约连接远端 server"。**前端 UI/渲染代码不变**，只换 `bin.ts` 里"如何取得 CoreAPI"这一处接线。
 
 > **`serve` 的归属（避免把后端 server 塞进前端包）**：`serve` 子命令在前端 `ohbaby-cli` 里**只做 yargs 注册 + 薄启动器**，真正的 headless server 循环属于**后端**——应由 `ohbaby-agent` 暴露 `startServer()`（未来），前端 `serve` handler 只调用它。当前阶段 `serve` 仅为占位（打印 not-implemented），不实现 server，避免前端重新host后端循环、把刚拆开的耦合又绑回去。
@@ -152,9 +152,9 @@ ohbaby-sdk  =  契约（UI 类型 + CoreAPI/SDKAPI + createRPC + 命令 parse/re
 | 1 | `packages/ohbaby-agent/package.json` | 删除 `bin` 字段；从 deps 移除 `ohbaby-cli`；移除已死的 `commander`（手写 `args.ts` 删除后无消费者） | 残留反向依赖 / 双入口 / 死依赖 |
 | 2 | `packages/ohbaby-cli/package.json` | 新增 `bin: { ohbaby: "./dist/bin.js" }`；deps 增 `ohbaby-agent`、`yargs`；devDeps 增 `@types/yargs` | 无可执行入口 / 解析失败 / 类型缺失 |
 | 3 | `packages/ohbaby-agent/tsconfig.json` | 移除对 `../ohbaby-cli` 的 project reference | 构建图含反向引用，`tsc -b` 可能成环 |
-| 4 | `packages/ohbaby-cli/tsconfig.json` | 新增对 `../ohbaby-agent` 的 project reference | 类型解析失败 |
+| 4 | `packages/ohbaby-cli/tsconfig.json` | 仅引用 `../ohbaby-sdk`；默认后端通过动态 loader 加载，不建立 agent project reference | 避免 CLI 编译期耦合 agent |
 | 5 | `packages/ohbaby-agent/tsup.config.ts` | 从 `external` 移除 `ohbaby-cli`；`entry` 移除 `src/bin.ts` | 试图打包已不存在的依赖 |
-| 6 | `packages/ohbaby-cli/tsup.config.ts` | `entry` 增 `src/bin.ts`；`external` 增 `ohbaby-agent` | bin 未产出 / 后端被错误内联 |
+| 6 | `packages/ohbaby-cli/tsup.config.ts` | `entry` 增 `src/bin.ts`；agent 由运行期动态 loader 加载 | bin 未产出 / 后端被错误内联 |
 | 7 | `tsconfig.json`（根） | 校验两包 references 顺序（被依赖者在前） | 增量构建顺序错误 |
 | 8 | `tsconfig.base.json` | 校验 `ohbaby-cli` / `ohbaby-agent` path 映射齐全（名未变，通常无需改） | 类型解析 |
 | 9 | `vitest.config.ts` / `vitest.e2e.config.ts` | 名未变，`ohbaby-cli` / `ohbaby-agent` alias 与 react 解析路径基本保留；校验即可 | 测试解析 |

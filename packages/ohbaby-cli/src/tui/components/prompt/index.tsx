@@ -5,8 +5,11 @@ import type { ReactElement } from "react";
 import {
   getSlashCompletion,
   getSlashCompletionCandidates,
-} from "../../command/completions.js";
-import { parseSlashInput, resolveCommand } from "../../command/runtime.js";
+} from "../../slash-commands/completions.js";
+import {
+  parseSlashInput,
+  resolveCommand,
+} from "../../slash-commands/runtime.js";
 import type { TuiCommandCatalog } from "../../store/snapshot.js";
 import { Completion } from "./completion.js";
 

@@ -13,8 +13,8 @@ This package owns:
   surfaces
 - TUI state projection from `ohbaby-sdk` events and snapshots
 
-It starts the local backend by importing `buildCoreAPIImpl` from
-`ohbaby-agent`, then talks to that backend through the `ohbaby-sdk` `CoreAPI`
-contract. TUI slash command helpers under `src/tui/command/` are separate from
+It starts the default local backend through a lazy runtime loader, while
+programmatic callers can inject a different `CoreAPI` host. The UI talks to that
+backend through the `ohbaby-sdk` `CoreAPI` contract. TUI slash command helpers under `src/tui/slash-commands/` are separate from
 yargs startup commands; they handle `/models`, `/sessions`, `/permission`, and
 other commands after the TUI has started.

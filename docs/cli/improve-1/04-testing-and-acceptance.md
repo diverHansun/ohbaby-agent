@@ -15,7 +15,7 @@
 | Agent 包（后端）编译 | `pnpm --filter ohbaby-agent build` | 零错误 |
 | CLI 前端包编译 | `pnpm --filter ohbaby-cli build` | 零错误 |
 
-> 迁移后入口为**动态 import 已删除**，模块解析改为静态依赖。但"编译通过 ≠ 运行通过"仍要警惕——必须执行 §5 手动端到端（真实启动 `ohbaby`）。
+> 迁移后后端不再动态 import 前端；CLI 默认后端改为可注入 host loader + 动态加载。但"编译通过 ≠ 运行通过"仍要警惕——必须执行 §5 手动端到端（真实启动 `ohbaby`）。
 >
 > ⚠️ `tests/integration/cli/packaging-smoke.integration.test.ts` 不是"保持通过"，而是**需要重写**：它当前硬编码旧拓扑（bin 属 `ohbaby-agent`、手写 `--help` 文案、`-p/--prompt`、agent 版本号），yargs + bin 迁移后这些断言全部失效。重写范围见 [05 §5 行 12](./05-cli-module-migration.md)。`tests/integration/cli/prompt-process.integration.test.ts` 同理（spawn bin、旧 `-p` 行为）需按 `run` 子命令调整。
 
@@ -32,7 +32,7 @@
 | `agent/src/bin.unit.test.ts` | **删除**（bin.ts 迁出到 `ohbaby-cli`；yargs 入口由 §3 验收覆盖） | — |
 | `cli/src/tui/app.contract.test.tsx` | 微调：mock CoreAPI 替代 TuiBackendClient | 全部通过 |
 | `cli/src/tui/store/events.unit.test.ts` | 不变 | 全部通过 |
-| `cli/src/tui/command/runtime.unit.test.ts` | 不变（commands 改进中已处理） | 全部通过 |
+| `cli/src/tui/slash-commands/runtime.unit.test.ts` | 不变（commands 改进中已处理） | 全部通过 |
 | `tests/integration/tui/main-chain.integration.test.tsx` | 微调：mock CoreAPI 替代 TuiBackendClient | 全部通过 |
 
 > 迁移会移动 `bin`/`cli` 并翻转依赖，连带影响 `tsconfig`（项目引用 + path 映射）、`tsup.config.ts`（external 列表）、`vitest.config.ts` / `vitest.e2e.config.ts`（alias + react 解析路径）等构建配置——完整影响面与逐项验收见 [05 CLI 模块迁移](./05-cli-module-migration.md) 的"影响面"与"验证清单"。

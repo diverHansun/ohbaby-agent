@@ -30,7 +30,7 @@ ohbaby-agent (后端)
     └── stdout-renderer.ts ← 非交互模式渲染 (70 行)
 │
 ohbaby-cli (TUI 前端)
-├── tui/command/
+├── tui/slash-commands/
 │   ├── runtime.ts         ← parseSlashInput   ⚠️ 重复实现 (373 行)
 │   │                       resolveCommand    ⚠️ 重复实现
 │   │                       filterCommandCatalog ⚠️ 重复实现
@@ -115,10 +115,10 @@ CLI prompt/index.tsx
 
 | 函数 | SDK 位置 | CLI 位置 | 生产消费者 |
 |------|----------|----------|------------|
-| `parseSlashInput` | `sdk/command/parse.ts:87` | `cli/tui/command/runtime.ts:41` | **仅 CLI** |
-| `resolveCommand` | `sdk/command/resolve.ts:79` | `cli/tui/command/runtime.ts:79` | **仅 CLI** |
-| `filterCommandCatalog` | `sdk/command/resolve.ts:134` | `cli/tui/command/runtime.ts:120` | **仅 CLI** |
-| `applySlashCompletion` | (SDK 无此函数) | `cli/tui/command/runtime.ts:147` | **仅 CLI** |
+| `parseSlashInput` | `sdk/command/parse.ts:87` | `cli/tui/slash-commands/runtime.ts:41` | **仅 CLI** |
+| `resolveCommand` | `sdk/command/resolve.ts:79` | `cli/tui/slash-commands/runtime.ts:79` | **仅 CLI** |
+| `filterCommandCatalog` | `sdk/command/resolve.ts:134` | `cli/tui/slash-commands/runtime.ts:120` | **仅 CLI** |
+| `applySlashCompletion` | (SDK 无此函数) | `cli/tui/slash-commands/runtime.ts:147` | **仅 CLI** |
 
 **SDK 的 parse/resolve 是幽灵代码**——它们存在、有单元测试、但零生产消费者。CLI 自己重新实现了一套。
 

@@ -118,7 +118,7 @@ Catalog 合并动态命令时必须过滤保留路径：外部 extra command 或
 ### 目标
 
 - `TuiCommandSpec` 改为 `UiCommandSpec` 的类型别名。
-- `TuiCommandCatalog` 扩展 SDK `UiCommandCatalog`，仅额外保留 TUI 内部的 `loadedAt` / `surface` 元数据。
+- `TuiCommandCatalog` 直接等同 SDK `UiCommandCatalog`；TUI 不再维护 `loadedAt` / `surface` 兼容元数据。
 - TUI mock catalog 补齐 SDK 必填字段：`category`、`argumentMode`、`source`、`surfaces`。
 
 ### 文件
@@ -143,9 +143,9 @@ Catalog 合并动态命令时必须过滤保留路径：外部 extra command 或
 
 ### 文件
 
-- `packages/ohbaby-cli/src/tui/command/runtime.ts`
-- `packages/ohbaby-cli/src/tui/command/runtime.unit.test.ts`
-- `packages/ohbaby-cli/src/tui/command/completions.ts`
+- `packages/ohbaby-cli/src/tui/slash-commands/runtime.ts`
+- `packages/ohbaby-cli/src/tui/slash-commands/runtime.unit.test.ts`
+- `packages/ohbaby-cli/src/tui/slash-commands/completions.ts`
 - `packages/ohbaby-cli/src/tui/components/prompt/index.tsx`
 
 ---
@@ -153,7 +153,7 @@ Catalog 合并动态命令时必须过滤保留路径：外部 extra command 或
 ## 6. 验证命令
 
 ```powershell
-pnpm exec vitest run packages/ohbaby-sdk/src/command/parse.unit.test.ts packages/ohbaby-sdk/src/command/resolve.unit.test.ts packages/ohbaby-agent/src/commands/catalog.unit.test.ts packages/ohbaby-agent/src/commands/service.unit.test.ts packages/ohbaby-cli/src/tui/command/runtime.unit.test.ts packages/ohbaby-cli/src/tui/store/events.unit.test.ts packages/ohbaby-cli/src/tui/app.contract.test.tsx packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts
+pnpm exec vitest run packages/ohbaby-sdk/src/command/parse.unit.test.ts packages/ohbaby-sdk/src/command/resolve.unit.test.ts packages/ohbaby-agent/src/commands/catalog.unit.test.ts packages/ohbaby-agent/src/commands/service.unit.test.ts packages/ohbaby-cli/src/tui/slash-commands/runtime.unit.test.ts packages/ohbaby-cli/src/tui/store/events.unit.test.ts packages/ohbaby-cli/src/tui/app.contract.test.tsx packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts
 pnpm run typecheck
 ```
 

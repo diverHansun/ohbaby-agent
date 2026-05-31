@@ -64,8 +64,6 @@ const catalog: TuiCommandCatalog = {
       path: ["permission"],
     }),
   ],
-  loadedAt: 1_771_000_000_000,
-  surface: "tui",
   version: "v1",
 };
 
@@ -757,8 +755,6 @@ describe("OhbabyTerminalApp", () => {
         source: "builtin" as const,
         surfaces: ["tui"],
       })),
-      loadedAt: 1_771_000_000_000,
-      surface: "tui",
       version: "long",
     };
     const client = createFakeClient(snapshot(), longCatalog);

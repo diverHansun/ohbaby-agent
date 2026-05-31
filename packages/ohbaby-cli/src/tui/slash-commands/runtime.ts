@@ -2,7 +2,6 @@ import {
   filterCommandCatalog as filterSdkCommandCatalog,
   parseSlashInput as parseSdkSlashInput,
   resolveCommand as resolveSdkCommand,
-  type UiCommandCatalog,
   type UiCommandInvocation,
   type UiCommandSpec,
   type UiParsedSlashInput,
@@ -85,7 +84,7 @@ export function filterCommandCatalog(
     return [];
   }
 
-  return filterSdkCommandCatalog(asSdkCatalog(catalog), parsed.raw, {
+  return filterSdkCommandCatalog(catalog, parsed.raw, {
     surface: options.surface,
   });
 }
@@ -106,13 +105,6 @@ export function applySlashCompletion(
   }
 
   return `/${matches[0]?.path.join(" ")} `;
-}
-
-function asSdkCatalog(catalog: TuiCommandCatalog): UiCommandCatalog {
-  return {
-    commands: catalog.commands,
-    version: catalog.version,
-  };
 }
 
 function createInvocationId(): string {

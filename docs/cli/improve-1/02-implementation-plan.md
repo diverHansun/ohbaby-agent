@@ -12,7 +12,7 @@
 - **通信层**：引入 RPC 代理边界，用 `CoreAPI` 替代 `TuiBackendClient`。
 - **入口层**：用 yargs 多子命令替代手写参数解析。
 
-> 入口迁移后，前端不再被后端动态 `import`；而是前端**静态依赖**后端，通过 `buildCoreAPIImpl` + `createRPC` 取得 `CoreAPI` 代理。原 `bin.ts` 里的 `await import("ohbaby-cli")` 与 `tsup.config.ts` 的 external 项随之删除。
+> 入口迁移后，前端不再被后端动态 `import`；而是前端提供可注入 host loader，默认 bin 再动态加载后端 `buildCoreAPIImpl` 并通过 `createRPC` 取得 `CoreAPI` 代理。原 `bin.ts` 里的 `await import("ohbaby-cli")` 与后端对前端的 external 项随之删除。
 
 改动方向：
 
@@ -22,7 +22,7 @@
                         → await import("ohbaby-cli") → TUI/stdout
 
 改后（入口在前端，前端依赖后端 —— 依赖翻正）：
-  [ohbaby-cli] bin.ts → yargs subcommands → (ohbaby-agent) buildCoreAPIImpl → createRPC → CoreAPI
+  [ohbaby-cli] bin.ts → yargs subcommands → injected/default agent loader → createRPC → CoreAPI
            ├── $0        → 交互模式 (terminal command) → renderTerminalUi(同包直接调用)
            ├── run       → 非交互模式 (run command)     → stdout-renderer(同包)
            └── serve     → daemon 模式 (占位)
@@ -208,7 +208,7 @@ export function buildCoreAPIImpl(opts: CliOptions): {
 
 #### 3.1 新增目录：`packages/ohbaby-cli/src/cli/commands/`
 
-> 入口位于**前端包** `ohbaby-cli`（迁移后），参照 opencode `packages/opencode/src/cli/cmd/` 结构。`buildCoreAPIImpl` 从后端 `ohbaby-agent` 静态 import；`renderTerminalUi` 是同包模块，直接调用（不再动态 import）。
+> 入口位于**前端包** `ohbaby-cli`（迁移后），参照 opencode `packages/opencode/src/cli/cmd/` 结构。`buildCoreAPIImpl` 由可注入 host loader 提供；默认 bin 动态加载后端 `ohbaby-agent`。`renderTerminalUi` 是同包模块，直接调用（不再动态 import）。
 
 **文件：`cli/commands/terminal.ts`** — `$0` 子命令（默认 TUI 模式）
 

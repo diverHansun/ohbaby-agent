@@ -3,7 +3,6 @@ import type {
   UiCommandCatalog,
   UiCommandInvocation,
   UiCommandSpec,
-  UiCommandSurface,
   UiEvent as SdkUiEvent,
   UiEventHandler,
   UiInteractionKind,
@@ -22,11 +21,7 @@ export type TuiRuntimeStatus = UiRunStatus;
 
 export type TuiCommandSpec = UiCommandSpec;
 
-export interface TuiCommandCatalog extends UiCommandCatalog {
-  readonly surface?: UiCommandSurface;
-  readonly commands: readonly TuiCommandSpec[];
-  readonly loadedAt?: number;
-}
+export type TuiCommandCatalog = UiCommandCatalog;
 
 export interface TuiCommandCatalogInvalidation {
   readonly version?: string;

@@ -1,28 +1,43 @@
 import { describe, expect, it, vi } from "vitest";
 
 describe("runOhbabyCli", () => {
-  it("starts the terminal UI by default", async () => {
+  it("starts the terminal UI through injected host dependencies", async () => {
     vi.resetModules();
     const core = createCore();
+    const createCoreHost = vi.fn(() => ({
+      callbacks: { subscribeEvents },
+      core,
+      dispose,
+    }));
     const dispose = vi.fn(() => Promise.resolve());
+    const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
     const subscribeEvents = vi.fn((): (() => void) => () => undefined);
     const waitUntilExit = vi.fn(() => Promise.resolve());
     const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
-    vi.doMock("ohbaby-agent", () => ({
-      buildCoreAPIImpl: vi.fn(() => ({
-        callbacks: { subscribeEvents },
-        core,
-        dispose,
-      })),
-      loadRuntimeEnvIntoProcessEnv: vi.fn(() => Promise.resolve()),
-    }));
+    vi.doMock("ohbaby-agent", () => {
+      throw new Error("agent should be loaded only by the default loader");
+    });
     vi.doMock("./tui/index.js", () => ({
       renderTerminalUi,
     }));
 
     const { runOhbabyCli } = await import("./bin.js");
 
-    await expect(runOhbabyCli(["node", "ohbaby"])).resolves.toBe(0);
+    await expect(
+      runOhbabyCli(
+        ["node", "ohbaby", "--mode", "plan", "--permission", "full-access"],
+        {},
+        {
+          createCoreHost,
+          loadRuntimeEnvIntoProcessEnv,
+        },
+      ),
+    ).resolves.toBe(0);
+    expect(loadRuntimeEnvIntoProcessEnv).toHaveBeenCalledTimes(1);
+    expect(createCoreHost).toHaveBeenCalledWith({
+      mode: "plan",
+      permission: "full-access",
+    });
     const renderCalls = renderTerminalUi.mock.calls as unknown as [
       {
         readonly client: unknown;

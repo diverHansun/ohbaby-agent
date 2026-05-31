@@ -3,7 +3,6 @@ import type { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
 import type { CoreAPI } from "ohbaby-sdk";
 import { createRPC } from "ohbaby-sdk";
-import { buildCoreAPIImpl, loadRuntimeEnvIntoProcessEnv } from "ohbaby-agent";
 import yargs from "yargs/yargs";
 import { hideBin } from "yargs/helpers";
 import { createRunCommand } from "./cli/commands/run.js";
@@ -21,6 +20,7 @@ import { createStdoutRenderer } from "./cli/stdout-renderer.js";
 import { renderTerminalUi } from "./tui/index.js";
 
 const VERSION = "0.1.0";
+const AGENT_RUNTIME_MODULE = "ohbaby-agent";
 
 class CliUsageError extends Error {
   constructor(message: string) {
@@ -35,8 +35,17 @@ export interface RunOhbabyCliIo {
   readonly stdout?: CliWritable;
 }
 
-function createCoreHost(options: CliGlobalOptions): CliCoreHost {
-  const host = buildCoreAPIImpl(options);
+export interface RunOhbabyCliDependencies {
+  readonly createCoreHost?: (options: CliGlobalOptions) => CliCoreHost;
+  readonly loadRuntimeEnvIntoProcessEnv?: () => Promise<void> | void;
+}
+
+interface AgentRuntimeModule {
+  readonly buildCoreAPIImpl?: unknown;
+  readonly loadRuntimeEnvIntoProcessEnv?: unknown;
+}
+
+function createRpcCoreHost(host: CliCoreHost): CliCoreHost {
   const rpc = createRPC<CoreAPI>();
   rpc.connectImpl(host.core);
   return {
@@ -46,16 +55,70 @@ function createCoreHost(options: CliGlobalOptions): CliCoreHost {
   };
 }
 
+async function importRuntimeModule(specifier: string): Promise<unknown> {
+  return import(specifier);
+}
+
+function requireFunction(
+  value: unknown,
+  name: string,
+): (...args: unknown[]) => unknown {
+  if (typeof value !== "function") {
+    throw new Error(`Missing ${name} export from ${AGENT_RUNTIME_MODULE}`);
+  }
+  return value as (...args: unknown[]) => unknown;
+}
+
+async function loadDefaultDependencies(): Promise<
+  Required<RunOhbabyCliDependencies>
+> {
+  const runtimeModule = (await importRuntimeModule(
+    AGENT_RUNTIME_MODULE,
+  )) as AgentRuntimeModule;
+  const buildCoreAPIImpl = requireFunction(
+    runtimeModule.buildCoreAPIImpl,
+    "buildCoreAPIImpl",
+  ) as (options: CliGlobalOptions) => CliCoreHost;
+  const loadRuntimeEnvIntoProcessEnv = requireFunction(
+    runtimeModule.loadRuntimeEnvIntoProcessEnv,
+    "loadRuntimeEnvIntoProcessEnv",
+  ) as () => Promise<void> | void;
+
+  return {
+    createCoreHost(options): CliCoreHost {
+      return buildCoreAPIImpl(options);
+    },
+    loadRuntimeEnvIntoProcessEnv,
+  };
+}
+
 export async function runOhbabyCli(
   argv: readonly string[] = process.argv,
   io: RunOhbabyCliIo = {},
+  dependencies: RunOhbabyCliDependencies = {},
 ): Promise<number> {
   const stderr = io.stderr ?? process.stderr;
   const stdin = io.stdin ?? process.stdin;
   const stdout = io.stdout ?? process.stdout;
+  const defaultDependencies =
+    dependencies.createCoreHost && dependencies.loadRuntimeEnvIntoProcessEnv
+      ? undefined
+      : await loadDefaultDependencies();
+  const createCoreHost =
+    dependencies.createCoreHost ?? defaultDependencies?.createCoreHost;
+  const loadRuntimeEnvIntoProcessEnv =
+    dependencies.loadRuntimeEnvIntoProcessEnv ??
+    defaultDependencies?.loadRuntimeEnvIntoProcessEnv;
+
+  if (!createCoreHost || !loadRuntimeEnvIntoProcessEnv) {
+    throw new Error("CLI runtime dependencies were not initialized");
+  }
+
   let exitCode: number = EXIT_CODES.ok;
   const runtime: CliCommandRuntime = {
-    createCoreHost,
+    createCoreHost(options) {
+      return createRpcCoreHost(createCoreHost(options));
+    },
     createStdoutRenderer(options = {}) {
       return createStdoutRenderer({
         ...options,

@@ -1,7 +1,7 @@
 import { Box, Text } from "ink";
 import type { ReactElement } from "react";
-import { getSlashCompletionCandidates } from "../../command/completions.js";
-import { formatCommandHints } from "../../command/hints.js";
+import { getSlashCompletionCandidates } from "../../slash-commands/completions.js";
+import { formatCommandHints } from "../../slash-commands/hints.js";
 import type { TuiCommandCatalog } from "../../store/snapshot.js";
 
 export interface CompletionProps {
