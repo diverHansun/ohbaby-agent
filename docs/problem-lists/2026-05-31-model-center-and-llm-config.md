@@ -4,7 +4,9 @@
 
 ## 背景
 
-当前 commands 批次保持单模型范围。`/models` 只作为当前模型信息入口，不实现 provider/model CRUD，不输入 API key，不改造多 provider 配置 schema。
+当前 commands 批次保持单活动模型范围。`/models` 作为当前模型信息入口，并为单活动模型切换准备后端契约：同一时刻只应用一组 OpenAI-compatible `baseUrl + apiKey + model name`。
+
+本批次不实现 provider/model CRUD，不改造多 provider 配置 schema，也不实现完整 TUI 配置中心。
 
 以下问题需要在后续 Model Center 设计中集中解决。
 
@@ -16,11 +18,13 @@
 
 需要同时考虑旧 schema 的读取兼容和迁移策略。
 
-### API key 持久化
+### TUI API key 输入体验
 
 TUI 未来允许用户在 `/models` 中输入 API key。第一阶段建议优先写入 `~/.ohbaby-agent/.env`，并在 `model.json` 中保存对应的 `apiKeyEnv` 名称。
 
 数据库或系统 keychain 暂不作为第一阶段方案。它们更适合在出现用户账户、云同步、workspace profile 或更强密钥管理需求后评估。
+
+当前 commands 批次可以实现底层 `.env` 写入能力，但不实现完整 TUI 表单和密钥管理体验。
 
 ### Provider 和 model CRUD
 
@@ -35,9 +39,9 @@ TUI 未来允许用户在 `/models` 中输入 API key。第一阶段建议优先
 
 当前 commands 分支不实现这些交互。
 
-### 默认模型写回和运行时热切换
+### 多模型默认模型写回和运行时热切换
 
-未来模型选择需要写回配置并成为默认模型，但还需要明确：
+单活动模型切换可以写回当前顶层配置并让后续请求使用新配置。未来多模型中心中的模型选择还需要明确：
 
 - 写回 `model.json` 的 API。
 - 写回后是否立即 reload config。
@@ -45,7 +49,7 @@ TUI 未来允许用户在 `/models` 中输入 API key。第一阶段建议优先
 - 切换失败时如何恢复到旧模型。
 - 正在进行的请求如何处理。
 
-当前 commands 分支不处理持久化切换和热切换。
+当前 commands 分支不处理多模型中心里的批量选择、正在运行请求迁移和复杂回滚。
 
 ### 同名模型唯一标识
 
@@ -71,6 +75,6 @@ TUI 未来允许用户在 `/models` 中输入 API key。第一阶段建议优先
 
 ## 当前批次结论
 
-本批次 `/models` 只展示当前单模型配置和可读取到的只读模型列表。
+本批次 `/models` 展示当前单活动模型配置和可读取到的只读模型列表，并准备单活动模型切换契约。
 
-API key 输入、provider/model CRUD、多 provider schema、默认模型持久化切换和运行时热切换全部延后。
+完整 TUI API key 输入体验、provider/model CRUD、多 provider schema、多模型默认模型选择和运行中请求热迁移全部延后。
