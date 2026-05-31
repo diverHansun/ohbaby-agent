@@ -53,10 +53,29 @@ describe("config/llm integration", () => {
         provider: "openai",
         model: "gpt-4",
         apiKey: "sk-test-integration-key",
+        apiKeyEnv: "OPENAI_API_KEY",
         baseUrl: "https://api.openai.com/v1",
+        interfaceProvider: "openai-compatible",
         temperature: 0.7,
         maxTokens: 4096,
       });
+    });
+
+    it("should load explicit interface provider metadata", async () => {
+      vi.mocked(fs.readFile).mockResolvedValue(
+        JSON.stringify({
+          ...validModelJson,
+          apiConfig: {
+            ...validModelJson.apiConfig,
+            interfaceProvider: "anthropic",
+          },
+        }),
+      );
+
+      const config = await getLLMConfig();
+
+      expect(config.interfaceProvider).toBe("anthropic");
+      expect(config.apiKeyEnv).toBe("OPENAI_API_KEY");
     });
 
     it("should cache after first call", async () => {

@@ -2,6 +2,8 @@
  * Type definitions for the LLM configuration module.
  */
 
+export type InterfaceProviderKind = "openai-compatible" | "anthropic";
+
 /**
  * Raw configuration structure from model.json file.
  * This represents the user-editable configuration format.
@@ -20,6 +22,9 @@ export interface ModelJsonConfig {
 
     /** Environment variable name containing the API key */
     apiKeyEnv: string;
+
+    /** API protocol adapter used for this provider */
+    interfaceProvider?: InterfaceProviderKind;
   };
 
   /** LLM generation parameters */
@@ -72,8 +77,14 @@ export interface LLMConfig {
   /** Resolved API key value */
   apiKey: string;
 
+  /** Environment variable name containing the API key */
+  apiKeyEnv: string;
+
   /** API base URL */
   baseUrl: string;
+
+  /** API protocol adapter used by the runtime client */
+  interfaceProvider: InterfaceProviderKind;
 
   /** Sampling temperature */
   temperature: number;
@@ -100,7 +111,8 @@ export type ConfigErrorCode =
   | "INVALID_MAX_TOKENS"
   | "MISSING_API_KEY"
   | "EMPTY_API_KEY"
-  | "LOAD_FAILED";
+  | "LOAD_FAILED"
+  | "WRITE_FAILED";
 
 /**
  * Configuration error with structured error information.

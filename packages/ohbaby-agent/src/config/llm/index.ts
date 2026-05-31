@@ -8,15 +8,24 @@
 import { LLMConfigManager } from "./manager.js";
 import type { LLMConfigLoadOptions } from "./manager.js";
 import type { LLMConfig } from "./types.js";
+import type {
+  SetActiveLLMConfigInput,
+  SetActiveLLMConfigResult,
+} from "./writer.js";
 
 // Re-export types for consumers
 export type {
   LLMConfig,
+  InterfaceProviderKind,
   ModelJsonConfig,
   ModelJsonModelProfile,
   ConfigErrorCode,
 } from "./types.js";
 export { ConfigError } from "./types.js";
+export type {
+  SetActiveLLMConfigInput,
+  SetActiveLLMConfigResult,
+} from "./writer.js";
 
 /**
  * Get LLM configuration.
@@ -63,6 +72,12 @@ export async function reloadLLMConfig(
   options: LLMConfigLoadOptions = {},
 ): Promise<LLMConfig> {
   return LLMConfigManager.getInstance().reload(options);
+}
+
+export async function setActiveLLMConfig(
+  input: SetActiveLLMConfigInput,
+): Promise<SetActiveLLMConfigResult> {
+  return LLMConfigManager.getInstance().setActive(input);
 }
 
 /**

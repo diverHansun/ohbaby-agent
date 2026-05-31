@@ -9,6 +9,7 @@
 export {
   getLLMConfig,
   reloadLLMConfig,
+  setActiveLLMConfig,
   isLLMConfigCached,
   ConfigError,
 } from "./llm/index.js";
@@ -16,8 +17,11 @@ export {
 export type {
   LLMConfig,
   LLMConfigLoadOptions,
+  InterfaceProviderKind,
   ModelJsonConfig,
   ModelJsonModelProfile,
+  SetActiveLLMConfigInput,
+  SetActiveLLMConfigResult,
   ConfigErrorCode,
 } from "./llm/index.js";
 

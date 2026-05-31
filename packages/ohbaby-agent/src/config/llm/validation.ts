@@ -4,9 +4,14 @@
  */
 
 import { ConfigError } from "./types.js";
-import type { ModelJsonConfig } from "./types.js";
+import type { InterfaceProviderKind, ModelJsonConfig } from "./types.js";
 
 const ENDPOINT_PATHS = ["/chat/completions", "/messages", "/responses"];
+const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+const INTERFACE_PROVIDER_KINDS = new Set<InterfaceProviderKind>([
+  "openai-compatible",
+  "anthropic",
+]);
 
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/u, "");
@@ -43,6 +48,37 @@ function validateBaseUrlValue(baseUrl: string): void {
         { baseUrl, endpointPath },
       );
     }
+  }
+}
+
+function validateInterfaceProviderValue(value: unknown): void {
+  if (value === undefined) {
+    return;
+  }
+
+  if (
+    typeof value !== "string" ||
+    !INTERFACE_PROVIDER_KINDS.has(value as InterfaceProviderKind)
+  ) {
+    throw new ConfigError(
+      `Invalid apiConfig.interfaceProvider: ${formatInvalidValue(
+        value,
+      )}. Must be 'openai-compatible' or 'anthropic'`,
+      "INVALID_FIELD",
+      { value },
+    );
+  }
+}
+
+function validateApiKeyEnvValue(value: string): void {
+  if (!ENV_VAR_NAME_PATTERN.test(value)) {
+    throw new ConfigError(
+      `Invalid apiConfig.apiKeyEnv: ${formatInvalidValue(
+        value,
+      )}. Must be a valid environment variable name`,
+      "INVALID_FIELD",
+      { value },
+    );
   }
 }
 
@@ -153,7 +189,11 @@ export function validateModelJson(
 
     if (!apiConfig.apiKeyEnv || typeof apiConfig.apiKeyEnv !== "string") {
       errors.push("apiConfig.apiKeyEnv (string) is required");
+    } else {
+      validateApiKeyEnvValue(apiConfig.apiKeyEnv);
     }
+
+    validateInterfaceProviderValue(apiConfig.interfaceProvider);
   }
 
   // Validate llmParams

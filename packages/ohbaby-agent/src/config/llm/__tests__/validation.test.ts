@@ -40,6 +40,39 @@ describe("validateModelJson", () => {
     }).not.toThrow();
   });
 
+  it("should accept optional apiConfig.interfaceProvider", () => {
+    const config = {
+      ...validConfig,
+      apiConfig: {
+        ...validConfig.apiConfig,
+        interfaceProvider: "openai-compatible",
+      },
+    };
+
+    expect(() => {
+      validateModelJson(config);
+    }).not.toThrow();
+  });
+
+  it("should reject unknown apiConfig.interfaceProvider", () => {
+    const config = {
+      ...validConfig,
+      apiConfig: {
+        ...validConfig.apiConfig,
+        interfaceProvider: "deepseek",
+      },
+    };
+
+    expect(() => {
+      validateModelJson(config);
+    }).toThrow(ConfigError);
+    try {
+      validateModelJson(config);
+    } catch (error) {
+      expect((error as ConfigError).code).toBe("INVALID_FIELD");
+    }
+  });
+
   it("should accept user-registered model profiles", () => {
     const config = {
       ...validConfig,
@@ -126,6 +159,24 @@ describe("validateModelJson", () => {
     expect(() => {
       validateModelJson(config);
     }).toThrow(/apiKeyEnv/);
+  });
+
+  it("should reject invalid apiConfig.apiKeyEnv names", () => {
+    for (const apiKeyEnv of ["1_BAD", "BAD-NAME", " OPENAI_API_KEY "]) {
+      const config = {
+        ...validConfig,
+        apiConfig: { ...validConfig.apiConfig, apiKeyEnv },
+      };
+
+      expect(() => {
+        validateModelJson(config);
+      }).toThrow(ConfigError);
+      try {
+        validateModelJson(config);
+      } catch (error) {
+        expect((error as ConfigError).code).toBe("INVALID_FIELD");
+      }
+    }
   });
 
   it("should reject full endpoint URLs in apiConfig.baseUrl", () => {

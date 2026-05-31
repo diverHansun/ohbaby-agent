@@ -76,7 +76,9 @@ describe("LLMConfigManager", () => {
         provider: "openai",
         model: "gpt-4",
         apiKey: "sk-test-key-123",
+        apiKeyEnv: "OPENAI_API_KEY",
         baseUrl: "https://api.openai.com/v1",
+        interfaceProvider: "openai-compatible",
         temperature: 0.7,
         maxTokens: 4096,
         contextWindowTokens: 128_000,
@@ -105,7 +107,73 @@ describe("LLMConfigManager", () => {
       const config = await manager.load({ projectDirectory: "D:/repo" });
 
       expect(config.apiKey).toBe("sk-process-key");
-      expect(loaders.loadApiKey).toHaveBeenCalledWith("OPENAI_API_KEY");
+      expect(loaders.loadApiKey).toHaveBeenCalledWith(
+        "OPENAI_API_KEY",
+        expect.objectContaining({
+          OPENAI_API_KEY: "sk-test-key-123",
+        }),
+      );
+    });
+
+    it("should load from explicit paths and provided env", async () => {
+      vi.mocked(loaders.loadModelJson).mockResolvedValue(validModelJson);
+      vi.mocked(loaders.loadEnvFile).mockResolvedValue({});
+      vi.mocked(loaders.loadApiKey).mockReturnValue("sk-from-options");
+
+      const manager = LLMConfigManager.getInstance();
+      const config = await manager.load({
+        projectDirectory: "D:/repo",
+        modelJsonPath: "D:/tmp/model.json",
+        envPath: "D:/repo/.env",
+        env: { OPENAI_API_KEY: "sk-from-options" },
+      });
+
+      expect(config.apiKey).toBe("sk-from-options");
+      expect(config.apiKeyEnv).toBe("OPENAI_API_KEY");
+      expect(config.interfaceProvider).toBe("openai-compatible");
+      expect(loaders.loadModelJson).toHaveBeenCalledWith({
+        modelJsonPath: "D:/tmp/model.json",
+      });
+      expect(loaders.loadEnvFile).toHaveBeenCalledWith("D:/repo/.env");
+      expect(loaders.loadApiKey).toHaveBeenCalledWith("OPENAI_API_KEY", {
+        OPENAI_API_KEY: "sk-from-options",
+      });
+    });
+
+    it("should fall back to envPath values when provided env is missing the API key", async () => {
+      vi.mocked(loaders.loadModelJson).mockResolvedValue(validModelJson);
+      vi.mocked(loaders.loadEnvFile).mockResolvedValue({
+        OPENAI_API_KEY: "sk-from-env-file",
+      });
+      vi.mocked(loaders.loadApiKey).mockReturnValue("sk-from-env-file");
+
+      const manager = LLMConfigManager.getInstance();
+      const config = await manager.load({
+        projectDirectory: "D:/repo",
+        envPath: "D:/repo/.env",
+        env: {},
+      });
+
+      expect(config.apiKey).toBe("sk-from-env-file");
+      expect(loaders.loadApiKey).toHaveBeenCalledWith("OPENAI_API_KEY", {
+        OPENAI_API_KEY: "sk-from-env-file",
+      });
+    });
+
+    it("should use explicit interface provider from model.json", async () => {
+      vi.mocked(loaders.loadModelJson).mockResolvedValue({
+        ...validModelJson,
+        apiConfig: {
+          ...validModelJson.apiConfig,
+          interfaceProvider: "anthropic",
+        },
+      });
+      vi.mocked(loaders.loadApiKey).mockReturnValue("sk-test-key-123");
+
+      const manager = LLMConfigManager.getInstance();
+      const config = await manager.load();
+
+      expect(config.interfaceProvider).toBe("anthropic");
     });
 
     it("should cache configuration after first load", async () => {

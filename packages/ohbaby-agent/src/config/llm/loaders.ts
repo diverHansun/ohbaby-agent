@@ -7,12 +7,17 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import { ConfigError } from "./types.js";
+import { parseEnvFile } from "./env-file.js";
 
 /** Directory name for ohbaby-agent configuration */
 const CONFIG_DIR_NAME = ".ohbaby-agent";
 
 /** Configuration file name */
 const MODEL_JSON_NAME = "model.json";
+
+export interface LoadModelJsonOptions {
+  readonly modelJsonPath?: string;
+}
 
 /**
  * Get the path to the global model.json configuration file.
@@ -27,8 +32,10 @@ export function getModelJsonPath(): string {
  * Load and parse the model.json configuration file.
  * Throws ConfigError if file does not exist or contains invalid JSON.
  */
-export async function loadModelJson(): Promise<unknown> {
-  const configPath = getModelJsonPath();
+export async function loadModelJson(
+  options: LoadModelJsonOptions = {},
+): Promise<unknown> {
+  const configPath = options.modelJsonPath ?? getModelJsonPath();
 
   let content: string;
   try {
@@ -65,6 +72,27 @@ export async function loadModelJson(): Promise<unknown> {
  */
 export function loadApiKey(
   envVarName: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-  return process.env[envVarName];
+  return env[envVarName];
+}
+
+export async function loadEnvFile(
+  envPath: string,
+): Promise<Record<string, string>> {
+  let content: string;
+  try {
+    content = await fs.readFile(envPath, "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return {};
+    }
+    throw new ConfigError(
+      `Failed to read .env file: ${(error as Error).message}`,
+      "LOAD_FAILED",
+      { path: envPath, cause: error },
+    );
+  }
+
+  return parseEnvFile(content);
 }

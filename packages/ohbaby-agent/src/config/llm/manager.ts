@@ -5,16 +5,27 @@
 
 import type { LLMConfig, ModelJsonConfig } from "./types.js";
 import { ConfigError } from "./types.js";
-import { loadModelJson, loadApiKey } from "./loaders.js";
+import { loadModelJson, loadApiKey, loadEnvFile } from "./loaders.js";
 import { validateModelJson, validateApiKey } from "./validation.js";
+import {
+  setActiveLLMConfig as writeActiveLLMConfig,
+  type SetActiveLLMConfigInput,
+  type SetActiveLLMConfigResult,
+} from "./writer.js";
 
 export interface LLMConfigLoadOptions {
   readonly projectDirectory?: string;
+  readonly modelJsonPath?: string;
+  readonly envPath?: string;
+  readonly env?: NodeJS.ProcessEnv;
 }
 
 interface CachedLLMConfig {
   readonly config: LLMConfig;
   readonly projectDirectory: string;
+  readonly modelJsonPath?: string;
+  readonly envPath?: string;
+  readonly env?: NodeJS.ProcessEnv;
 }
 
 function resolveModelProfiles(
@@ -72,12 +83,18 @@ class LLMConfigManager {
    * @throws {ConfigError} If configuration is invalid or missing
    */
   async load(options: LLMConfigLoadOptions = {}): Promise<LLMConfig> {
-    const projectDirectory = options.projectDirectory ?? process.cwd();
-    if (this.cachedConfig?.projectDirectory === projectDirectory) {
+    const resolvedOptions = this.resolveOptions(options);
+    if (
+      this.cachedConfig?.projectDirectory ===
+        resolvedOptions.projectDirectory &&
+      this.cachedConfig.modelJsonPath === resolvedOptions.modelJsonPath &&
+      this.cachedConfig.envPath === resolvedOptions.envPath &&
+      this.cachedConfig.env === resolvedOptions.env
+    ) {
       return this.cachedConfig.config;
     }
 
-    return this.performLoad(projectDirectory);
+    return this.performLoad(resolvedOptions);
   }
 
   /**
@@ -89,7 +106,16 @@ class LLMConfigManager {
   async reload(options: LLMConfigLoadOptions = {}): Promise<LLMConfig> {
     this.cachedConfig = null;
     this.lastError = null;
-    return this.performLoad(options.projectDirectory ?? process.cwd());
+    return this.performLoad(this.resolveOptions(options));
+  }
+
+  async setActive(
+    input: SetActiveLLMConfigInput,
+  ): Promise<SetActiveLLMConfigResult> {
+    const result = await writeActiveLLMConfig(input);
+    this.cachedConfig = null;
+    this.lastError = null;
+    return result;
   }
 
   /**
@@ -110,10 +136,31 @@ class LLMConfigManager {
   /**
    * Perform the actual configuration loading.
    */
-  private async performLoad(projectDirectory: string): Promise<LLMConfig> {
+  private resolveOptions(
+    options: LLMConfigLoadOptions,
+  ): Required<Pick<LLMConfigLoadOptions, "projectDirectory" | "env">> &
+    Pick<LLMConfigLoadOptions, "modelJsonPath" | "envPath"> {
+    return {
+      projectDirectory: options.projectDirectory ?? process.cwd(),
+      env: options.env ?? process.env,
+      ...(options.modelJsonPath === undefined
+        ? {}
+        : { modelJsonPath: options.modelJsonPath }),
+      ...(options.envPath === undefined ? {} : { envPath: options.envPath }),
+    };
+  }
+
+  private async performLoad(
+    options: Required<Pick<LLMConfigLoadOptions, "projectDirectory" | "env">> &
+      Pick<LLMConfigLoadOptions, "modelJsonPath" | "envPath">,
+  ): Promise<LLMConfig> {
     try {
       // Load raw configuration from file
-      const rawConfig = await loadModelJson();
+      const rawConfig = await loadModelJson({
+        ...(options.modelJsonPath === undefined
+          ? {}
+          : { modelJsonPath: options.modelJsonPath }),
+      });
 
       // Validate structure and values
       validateModelJson(rawConfig);
@@ -121,7 +168,12 @@ class LLMConfigManager {
 
       // Load API key from environment
       const apiKeyEnvName = modelJson.apiConfig.apiKeyEnv;
-      const apiKey = loadApiKey(apiKeyEnvName);
+      const envFileValues =
+        options.envPath === undefined ? {} : await loadEnvFile(options.envPath);
+      const apiKey = loadApiKey(apiKeyEnvName, {
+        ...envFileValues,
+        ...options.env,
+      });
 
       // Validate API key
       validateApiKey(apiKey, apiKeyEnvName);
@@ -132,7 +184,10 @@ class LLMConfigManager {
         provider: modelJson.provider,
         model: modelJson.defaultModel,
         apiKey: apiKey,
+        apiKeyEnv: apiKeyEnvName,
         baseUrl: modelJson.apiConfig.baseUrl,
+        interfaceProvider:
+          modelJson.apiConfig.interfaceProvider ?? "openai-compatible",
         temperature: modelJson.llmParams.temperature,
         maxTokens: modelJson.llmParams.maxTokens,
         ...(modelJson.llmParams.contextWindowTokens === undefined
@@ -144,7 +199,15 @@ class LLMConfigManager {
       };
 
       // Cache and return
-      this.cachedConfig = { config, projectDirectory };
+      this.cachedConfig = {
+        config,
+        projectDirectory: options.projectDirectory,
+        ...(options.modelJsonPath === undefined
+          ? {}
+          : { modelJsonPath: options.modelJsonPath }),
+        ...(options.envPath === undefined ? {} : { envPath: options.envPath }),
+        env: options.env,
+      };
       this.lastError = null;
       return config;
     } catch (error) {
