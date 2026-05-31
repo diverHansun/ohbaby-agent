@@ -104,4 +104,13 @@ describe("permission classifier", () => {
       kind: "write",
     });
   });
+
+  it("does not infer bash semantics from a non-bash tool command parameter", () => {
+    expect(
+      classifyPermissionCall(call("custom_tool", { command: "deploy prod" })),
+    ).toMatchObject({
+      category: "write",
+      kind: "write",
+    });
+  });
 });

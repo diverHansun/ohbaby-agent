@@ -7,10 +7,6 @@ import type {
   PermissionRule,
 } from "./types.js";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function getStringParam(
   params: Record<string, unknown>,
   keys: readonly string[],
@@ -110,7 +106,7 @@ function effectiveToolName(call: PermissionCall): string {
   if (toolName === "external_directory" || toolName === "sensitive_path") {
     return toolName;
   }
-  if (toolName === "bash" || "command" in call.params) {
+  if (toolName === "bash") {
     return "bash";
   }
   if (
@@ -202,9 +198,9 @@ export function isRememberablePermissionPattern(pattern: string): boolean {
 
 export function inferPermissionType(
   toolName: string,
-  params: Record<string, unknown>,
+  _params: Record<string, unknown>,
 ): PermissionPatternInput["type"] {
-  if (toolName === "bash" || (isRecord(params) && "command" in params)) {
+  if (toolName === "bash") {
     return "bash";
   }
   if (toolName === "external_directory" || toolName === "sensitive_path") {

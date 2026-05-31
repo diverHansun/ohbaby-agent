@@ -3,6 +3,7 @@ import { createBus } from "../bus/index.js";
 import {
   createPermissionManager,
   generatePermissionPattern,
+  inferPermissionType,
   matchPermissionPattern,
   PermissionEvent,
   PermissionRejectedError,
@@ -716,6 +717,12 @@ describe("permission patterns", () => {
         type: "sensitive_path",
       }),
     ).toBe("sensitive_path(d:/repo/.env)");
+  });
+
+  it("does not infer bash permission type from a non-bash tool command parameter", () => {
+    expect(inferPermissionType("custom_tool", { command: "deploy prod" })).toBe(
+      "tool",
+    );
   });
 
   it("does not let an always git status approval auto-approve git push", async () => {

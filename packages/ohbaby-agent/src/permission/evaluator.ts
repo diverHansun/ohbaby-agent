@@ -70,6 +70,9 @@ function evaluateLevelFallback(
   level: Level,
 ): PermissionDecision {
   const classification = classifyPermissionCall(call);
+  if (call.toolName === "sensitive_path") {
+    return ask(`Sensitive path access requires confirmation: ${call.toolName}`);
+  }
   if (level === "full-access") {
     return allow();
   }
@@ -80,7 +83,6 @@ function evaluateLevelFallback(
     case "memory-read":
     case "memory-write":
     case "subagent":
-    case "bash-readonly":
       return allow();
     case "skill":
       return ask(
@@ -92,8 +94,10 @@ function evaluateLevelFallback(
       );
     case "dangerous":
       return ask(`Dangerous tool requires confirmation: ${call.toolName}`);
-    case "write":
+    case "bash-readonly":
     case "bash-mutating":
+      return ask(`Shell command requires confirmation: ${call.toolName}`);
+    case "write":
       return ask(`Write tool requires confirmation: ${call.toolName}`);
     default:
       return deny("Unhandled permission category.");

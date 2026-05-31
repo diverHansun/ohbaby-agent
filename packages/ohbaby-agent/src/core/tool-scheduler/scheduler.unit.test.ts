@@ -528,7 +528,7 @@ describe("ToolScheduler", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it("asks explicit approval after approving an external write for tools that require both", async () => {
+  it("asks explicit approval for full-access external writes when the tool requires it", async () => {
     const tempRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), "ohbaby-scheduler-explicit-external-"),
     );
@@ -579,11 +579,10 @@ describe("ToolScheduler", () => {
       });
 
       expect(permissionRequests.map((request) => request.reason)).toEqual([
-        "External path write requires confirmation: remote_write",
         "explicit-approval-required",
       ]);
       expect(permissionRequests.map((request) => request.rememberable)).toEqual(
-        [false, false],
+        [false],
       );
       expect(execute).toHaveBeenCalledTimes(1);
     } finally {
@@ -1040,6 +1039,53 @@ describe("ToolScheduler", () => {
     });
     expect(sensitiveAsk.params.pattern).toBe("D:/outside/.env");
     expect(sensitiveAsk.reason).toContain("Sensitive path access");
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks sensitive path permissions even in full access", async () => {
+    const permissionRequests: Parameters<PermissionPort["ask"]>[0][] = [];
+    const permission = {
+      ask: vi.fn((input: Parameters<PermissionPort["ask"]>[0]) => {
+        permissionRequests.push(input);
+        return Promise.resolve("once" as const);
+      }),
+    } satisfies PermissionPort;
+    const execute = vi.fn(() => ({ output: "read sensitive" }));
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState({ initialLevel: "full-access" }),
+    });
+    scheduler.register(createTool({ execute, name: "bash" }));
+
+    await expect(
+      scheduler.execute({
+        callId: "sensitive_full_access",
+        environment: createFakeEnvironmentWithPreflight(
+          "D:/workspace",
+          createPreflight({
+            sensitivePaths: [
+              {
+                absolutePath: "D:/outside/.env",
+                askPattern: "D:/outside/.env",
+                original: "D:/outside/.env",
+                reason: "env-file",
+              },
+            ],
+          }),
+        ),
+        messageId: "message_1",
+        params: { command: "cat D:/outside/.env" },
+        sessionId: "session_1",
+        toolName: "bash",
+      }),
+    ).resolves.toMatchObject({
+      output: "read sensitive",
+      status: "success",
+    });
+
+    expect(permissionRequests.map((request) => request.toolName)).toEqual([
+      "sensitive_path",
+    ]);
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
@@ -1507,7 +1553,233 @@ describe("ToolScheduler", () => {
     }
   });
 
-  it("executes approved external absolute writes through a scoped environment", async () => {
+  it("asks default permission before executing an approved external readonly path", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "ohbaby-scheduler-external-read-"),
+    );
+    const workspace = path.join(tempRoot, "workspace");
+    const externalDirectory = path.join(tempRoot, "outside");
+    const externalFile = path.join(externalDirectory, "secret.txt");
+    await fs.mkdir(workspace);
+    await fs.mkdir(externalDirectory);
+    await fs.writeFile(externalFile, "secret\n", "utf8");
+    const permissionRequests: Parameters<PermissionPort["ask"]>[0][] = [];
+    const permission = {
+      ask: vi.fn((input: Parameters<PermissionPort["ask"]>[0]) => {
+        permissionRequests.push(input);
+        return Promise.resolve("once" as const);
+      }),
+    } satisfies PermissionPort;
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState({ initialLevel: "default" }),
+    });
+    for (const tool of createBuiltinTools()) {
+      if (tool.name === "read") {
+        scheduler.register(tool);
+      }
+    }
+
+    try {
+      const result = await scheduler.execute({
+        callId: "read_external_default",
+        environment: createFakeEnvironment(workspace),
+        messageId: "message_1",
+        params: { file_path: externalFile },
+        sessionId: "session_1",
+        toolName: "read",
+      });
+
+      expect(result).toMatchObject({ status: "success" });
+      expect(result.output).toContain("secret");
+      expect(permissionRequests.map((request) => request.toolName)).toEqual([
+        "external_directory",
+      ]);
+      expect(permissionRequests[0]?.params).toMatchObject({
+        path: await fs.realpath(externalFile),
+        pattern: path.join(await fs.realpath(externalDirectory), "**"),
+      });
+    } finally {
+      await fs.rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("executes external readonly paths in full access without asking", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "ohbaby-scheduler-full-read-"),
+    );
+    const workspace = path.join(tempRoot, "workspace");
+    const externalDirectory = path.join(tempRoot, "outside");
+    const externalFile = path.join(externalDirectory, "secret.txt");
+    await fs.mkdir(workspace);
+    await fs.mkdir(externalDirectory);
+    await fs.writeFile(externalFile, "full access\n", "utf8");
+    const permission = {
+      ask: vi.fn(() => Promise.resolve("reject" as const)),
+    } satisfies PermissionPort;
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState({ initialLevel: "full-access" }),
+    });
+    for (const tool of createBuiltinTools()) {
+      if (tool.name === "read") {
+        scheduler.register(tool);
+      }
+    }
+
+    try {
+      const result = await scheduler.execute({
+        callId: "read_external_full",
+        environment: createFakeEnvironment(workspace),
+        messageId: "message_1",
+        params: { file_path: externalFile },
+        sessionId: "session_1",
+        toolName: "read",
+      });
+
+      expect(result).toMatchObject({ status: "success" });
+      expect(result.output).toContain("full access");
+      expect(permission.ask).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("executes external relative readonly paths after approval", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "ohbaby-scheduler-relative-read-"),
+    );
+    const workspace = path.join(tempRoot, "workspace");
+    const externalDirectory = path.join(tempRoot, "outside");
+    const externalFile = path.join(externalDirectory, "secret.txt");
+    await fs.mkdir(workspace);
+    await fs.mkdir(externalDirectory);
+    await fs.writeFile(externalFile, "relative\n", "utf8");
+    const permission = {
+      ask: vi.fn(() => Promise.resolve("once" as const)),
+    } satisfies PermissionPort;
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState({ initialLevel: "default" }),
+    });
+    for (const tool of createBuiltinTools()) {
+      if (tool.name === "read") {
+        scheduler.register(tool);
+      }
+    }
+
+    try {
+      const result = await scheduler.execute({
+        callId: "read_relative_external",
+        environment: createFakeEnvironment(workspace),
+        messageId: "message_1",
+        params: { file_path: path.join("..", "outside", "secret.txt") },
+        sessionId: "session_1",
+        toolName: "read",
+      });
+
+      expect(result).toMatchObject({ status: "success" });
+      expect(result.output).toContain("relative");
+      expect(permission.ask).toHaveBeenCalledTimes(1);
+    } finally {
+      await fs.rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("executes external glob searches after default approval", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "ohbaby-scheduler-external-glob-"),
+    );
+    const workspace = path.join(tempRoot, "workspace");
+    const externalDirectory = path.join(tempRoot, "outside");
+    await fs.mkdir(workspace);
+    await fs.mkdir(path.join(externalDirectory, "nested"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(externalDirectory, "nested", "match.txt"),
+      "match\n",
+      "utf8",
+    );
+    const permission = {
+      ask: vi.fn(() => Promise.resolve("once" as const)),
+    } satisfies PermissionPort;
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState({ initialLevel: "default" }),
+    });
+    for (const tool of createBuiltinTools()) {
+      if (tool.name === "glob") {
+        scheduler.register(tool);
+      }
+    }
+
+    try {
+      const result = await scheduler.execute({
+        callId: "glob_external_default",
+        environment: createFakeEnvironment(workspace),
+        messageId: "message_1",
+        params: { path: externalDirectory, pattern: "**/*.txt" },
+        sessionId: "session_1",
+        toolName: "glob",
+      });
+
+      expect(result).toMatchObject({ status: "success" });
+      expect(result.output).toContain("nested/match.txt");
+      expect(permission.ask).toHaveBeenCalledTimes(1);
+      expect(permission.ask).toHaveBeenCalledWith(
+        expect.objectContaining({ toolName: "external_directory" }),
+      );
+    } finally {
+      await fs.rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("executes external grep searches in full access without asking", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "ohbaby-scheduler-external-grep-"),
+    );
+    const workspace = path.join(tempRoot, "workspace");
+    const externalDirectory = path.join(tempRoot, "outside");
+    await fs.mkdir(workspace);
+    await fs.mkdir(externalDirectory);
+    await fs.writeFile(
+      path.join(externalDirectory, "secret.txt"),
+      "needle\n",
+      "utf8",
+    );
+    const permission = {
+      ask: vi.fn(() => Promise.resolve("reject" as const)),
+    } satisfies PermissionPort;
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState({ initialLevel: "full-access" }),
+    });
+    for (const tool of createBuiltinTools()) {
+      if (tool.name === "grep") {
+        scheduler.register(tool);
+      }
+    }
+
+    try {
+      const result = await scheduler.execute({
+        callId: "grep_external_full",
+        environment: createFakeEnvironment(workspace),
+        messageId: "message_1",
+        params: { path: externalDirectory, pattern: "needle" },
+        sessionId: "session_1",
+        toolName: "grep",
+      });
+
+      expect(result).toMatchObject({ status: "success" });
+      expect(result.output).toContain("secret.txt:1: needle");
+      expect(permission.ask).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("executes external absolute writes through a scoped environment in full access", async () => {
     const tempRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), "ohbaby-scheduler-external-write-"),
     );
@@ -1516,19 +1788,13 @@ describe("ToolScheduler", () => {
     const externalFile = path.join(externalDirectory, "nested", "outside.txt");
     await fs.mkdir(workspace);
     await fs.mkdir(externalDirectory);
-    const canonicalExternalFile = path.join(
-      await fs.realpath(externalDirectory),
-      "nested",
-      "outside.txt",
-    );
-    const permissionRequests: Parameters<PermissionPort["ask"]>[0][] = [];
     const permission = {
-      ask: vi.fn((input: Parameters<PermissionPort["ask"]>[0]) => {
-        permissionRequests.push(input);
-        return Promise.resolve("once" as const);
-      }),
+      ask: vi.fn(() => Promise.resolve("reject" as const)),
     } satisfies PermissionPort;
-    const { scheduler } = createScheduler({ permission });
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState({ initialLevel: "full-access" }),
+    });
     for (const tool of createBuiltinTools()) {
       if (tool.name === "write") {
         scheduler.register(tool);
@@ -1547,17 +1813,7 @@ describe("ToolScheduler", () => {
 
       expect(result).toMatchObject({ status: "success" });
       expect(await fs.readFile(externalFile, "utf8")).toBe("external");
-      expect(permission.ask).toHaveBeenCalledTimes(1);
-      expect(permissionRequests).toHaveLength(1);
-      const [permissionRequest] = permissionRequests as [
-        Parameters<PermissionPort["ask"]>[0],
-      ];
-      expect(permissionRequest.params.file_path).toBe(canonicalExternalFile);
-      expect(permissionRequest.reason).toBe(
-        "External path write requires confirmation: write",
-      );
-      expect(permissionRequest.rememberable).toBe(false);
-      expect(permissionRequest.toolName).toBe("write");
+      expect(permission.ask).not.toHaveBeenCalled();
     } finally {
       await fs.rm(tempRoot, { force: true, recursive: true });
     }

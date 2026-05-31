@@ -56,6 +56,9 @@ interface PreparedCall extends ScheduledCall {
 
 interface ToolPermissionContext {
   readonly environment?: ToolExecutionEnvironment;
+  readonly externalRead: boolean;
+  readonly externalReadAskPattern?: string;
+  readonly externalReadPath?: string;
   readonly externalWrite: boolean;
   readonly externalWritePath?: string;
   readonly preflight?: PreflightResult;
@@ -132,6 +135,15 @@ function isRootPath(inputPath: string): boolean {
   return path.dirname(resolved) === resolved;
 }
 
+function resolveLexicalForEnvironment(
+  environment: ToolExecutionEnvironment,
+  inputPath: string,
+): string {
+  return path.isAbsolute(inputPath)
+    ? path.resolve(inputPath)
+    : path.resolve(environment.workdir, inputPath);
+}
+
 function getFilePathParam(params: Record<string, unknown>): string | undefined {
   for (const key of ["file_path", "filePath", "path"]) {
     const value = params[key];
@@ -140,6 +152,19 @@ function getFilePathParam(params: Record<string, unknown>): string | undefined {
     }
   }
   return undefined;
+}
+
+function paramsWithCanonicalPath(
+  params: Record<string, unknown>,
+  canonicalPath: string,
+): Record<string, unknown> {
+  const next = { ...params };
+  for (const key of ["file_path", "filePath", "path"]) {
+    if (typeof next[key] === "string") {
+      next[key] = canonicalPath;
+    }
+  }
+  return next;
 }
 
 function getSchemaType(schema: unknown): string | undefined {
@@ -328,14 +353,60 @@ async function canonicalizeForPermission(
   environment: ToolExecutionEnvironment,
   inputPath: string,
 ): Promise<string> {
-  const lexical = path.isAbsolute(inputPath)
-    ? path.resolve(inputPath)
-    : environment.resolvePath(inputPath);
+  const lexical = resolveLexicalForEnvironment(environment, inputPath);
   return canonicalizeLexicalPath(lexical);
+}
+
+async function externalPermissionAskPattern(
+  absolutePath: string,
+): Promise<string> {
+  try {
+    const stats = await fs.stat(absolutePath);
+    if (stats.isDirectory()) {
+      return path.join(absolutePath, "**");
+    }
+  } catch {
+    // Missing or unreadable paths fall back to their parent directory.
+  }
+
+  return path.join(path.dirname(absolutePath), "**");
 }
 
 function rejectUnapprovedExternalWrite(inputPath: string): never {
   throw new Error(`External write path was not approved: ${inputPath}`);
+}
+
+function rejectUnapprovedExternalRead(inputPath: string): never {
+  throw new Error(`External read path was not approved: ${inputPath}`);
+}
+
+function createExternalReadEnvironment(
+  environment: ToolExecutionEnvironment,
+  externalReadPath: string,
+): ToolExecutionEnvironment {
+  const approvedPath = path.resolve(externalReadPath);
+
+  return {
+    ...environment,
+    resolvePath(inputPath: string): string {
+      if (path.isAbsolute(inputPath)) {
+        const resolved = path.resolve(inputPath);
+        if (isSamePath(resolved, approvedPath)) {
+          return approvedPath;
+        }
+        rejectUnapprovedExternalRead(inputPath);
+      }
+      return environment.resolvePath(inputPath);
+    },
+    async resolvePathForExisting(inputPath: string): Promise<string> {
+      const target = resolveLexicalForEnvironment(environment, inputPath);
+      const resolved = await fs.realpath(target);
+      if (isSamePath(resolved, approvedPath)) {
+        return resolved;
+      }
+      return environment.resolvePathForExisting(inputPath);
+    },
+  };
 }
 
 function createExternalWriteEnvironment(
@@ -680,13 +751,6 @@ export function createToolScheduler(
         error: createError("PermissionDeniedError", decision.reason),
       });
     }
-    if (decision.type === "allow" && context.externalWrite) {
-      return {
-        reason: `External path write requires confirmation: ${call.toolName}`,
-        rememberable: false,
-        type: "ask",
-      };
-    }
     return decision;
   }
 
@@ -983,6 +1047,90 @@ export function createToolScheduler(
     return null;
   }
 
+  async function confirmExternalReadPermission(
+    call: ToolCall,
+    context: ToolPermissionContext,
+  ): Promise<ToolCallResult | null> {
+    if (!context.externalRead || !context.externalReadPath) {
+      return null;
+    }
+    const controller = controllers.get(call.callId);
+    if (!controller) {
+      return makeCancelledResult(call);
+    }
+    if (isCancelled(call) || controller.signal.aborted) {
+      return makeCancelledResult(call);
+    }
+
+    const externalPath: PreflightExternalPath = {
+      absolutePath: context.externalReadPath,
+      askPattern:
+        context.externalReadAskPattern ??
+        (await externalPermissionAskPattern(context.externalReadPath)),
+      original: context.externalReadPath,
+    };
+    const params = {
+      path: externalPath.absolutePath,
+      pattern: externalPath.askPattern,
+    };
+
+    async function trustExternalReadPath(): Promise<void> {
+      await context.environment?.trustPath?.({
+        kind: "external-approved",
+        path: trustedRootFromExternalPath(externalPath),
+        source: "external_directory",
+      });
+    }
+
+    let decision: PermissionDecision;
+    try {
+      decision = await waitForAbortable(
+        () =>
+          evaluatePermission(
+            {
+              callId: call.callId,
+              category: "dangerous",
+              messageId: call.messageId,
+              params,
+              sessionId: call.sessionId,
+              toolName: "external_directory",
+            },
+            permissionState.getState(),
+          ),
+        controller.signal,
+      );
+    } catch (error) {
+      if (isSchedulerAbortError(error)) {
+        return makeCancelledResult(call);
+      }
+      transition(call, "error");
+      return makeResult(call, "error", {
+        error: createError("ExecutionError", errorMessage(error), error),
+      });
+    }
+
+    if (decision.type === "deny") {
+      transition(call, "rejected");
+      return makeResult(call, "rejected", {
+        error: createError("PermissionDeniedError", decision.reason),
+      });
+    }
+    if (decision.type === "allow") {
+      return null;
+    }
+
+    return confirmPermission(call, decision, params, {
+      category: "dangerous",
+      onResponse: async (response) => {
+        if (response === "always") {
+          await trustExternalReadPath();
+        }
+      },
+      reason: `External path access requires confirmation: ${externalPath.absolutePath}`,
+      toolName: "external_directory",
+    });
+  }
+
   async function runTool(
     call: ToolCall,
     tool: Tool,
@@ -1130,6 +1278,7 @@ export function createToolScheduler(
         );
         return {
           environment: request.environment,
+          externalRead: false,
           externalWrite: false,
           preflight,
           requireExplicitApproval,
@@ -1138,6 +1287,7 @@ export function createToolScheduler(
       } catch (error) {
         return {
           environment: request.environment,
+          externalRead: false,
           externalWrite: false,
           preflightError: error,
           requireExplicitApproval,
@@ -1146,9 +1296,54 @@ export function createToolScheduler(
       }
     }
 
-    if (category !== "write" || !request.environment) {
+    if (!request.environment) {
       return {
         environment: request.environment,
+        externalRead: false,
+        externalWrite: false,
+        requireExplicitApproval,
+        params: request.params,
+      };
+    }
+
+    if (category === "readonly") {
+      const filePath = getFilePathParam(request.params);
+      if (!filePath) {
+        return {
+          environment: request.environment,
+          externalRead: false,
+          externalWrite: false,
+          requireExplicitApproval,
+          params: request.params,
+        };
+      }
+      const canonicalPath = await canonicalizeForPermission(
+        request.environment,
+        filePath,
+      );
+      const externalRead = isOutsideTrustedEnvironment(
+        request.environment,
+        canonicalPath,
+      );
+      return {
+        environment: request.environment,
+        externalRead,
+        externalReadAskPattern: externalRead
+          ? await externalPermissionAskPattern(canonicalPath)
+          : undefined,
+        externalReadPath: externalRead ? canonicalPath : undefined,
+        externalWrite: false,
+        requireExplicitApproval,
+        params: externalRead
+          ? paramsWithCanonicalPath(request.params, canonicalPath)
+          : request.params,
+      };
+    }
+
+    if (category !== "write") {
+      return {
+        environment: request.environment,
+        externalRead: false,
         externalWrite: false,
         requireExplicitApproval,
         params: request.params,
@@ -1156,9 +1351,10 @@ export function createToolScheduler(
     }
 
     const filePath = getFilePathParam(request.params);
-    if (!filePath || !path.isAbsolute(filePath)) {
+    if (!filePath) {
       return {
         environment: request.environment,
+        externalRead: false,
         externalWrite: false,
         requireExplicitApproval,
         params: request.params,
@@ -1169,15 +1365,11 @@ export function createToolScheduler(
       request.environment,
       filePath,
     );
-    const params = { ...request.params };
-    for (const key of ["file_path", "filePath", "path"]) {
-      if (typeof params[key] === "string") {
-        params[key] = canonicalPath;
-      }
-    }
+    const params = paramsWithCanonicalPath(request.params, canonicalPath);
 
     return {
       environment: request.environment,
+      externalRead: false,
       externalWrite: isOutsideTrustedEnvironment(
         request.environment,
         canonicalPath,
@@ -1192,6 +1384,7 @@ export function createToolScheduler(
     prepared: PreparedCall,
   ): ToolExecutionEnvironment | undefined {
     const environment = prepared.request.environment;
+    const externalReadPath = prepared.permissionContext.externalReadPath;
     const externalWritePath = prepared.permissionContext.externalWritePath;
     if (
       environment &&
@@ -1200,11 +1393,19 @@ export function createToolScheduler(
     ) {
       return createExternalWriteEnvironment(environment, externalWritePath);
     }
+    if (
+      environment &&
+      prepared.permissionContext.externalRead &&
+      externalReadPath
+    ) {
+      return createExternalReadEnvironment(environment, externalReadPath);
+    }
     return environment;
   }
 
   function executionParamsFor(prepared: PreparedCall): Record<string, unknown> {
-    return prepared.permissionContext.externalWrite
+    return prepared.permissionContext.externalWrite ||
+      prepared.permissionContext.externalRead
       ? prepared.permissionContext.params
       : prepared.call.params;
   }
@@ -1306,6 +1507,13 @@ export function createToolScheduler(
     );
     if (externalPermissionResult) {
       return externalPermissionResult;
+    }
+    const externalReadResult = await confirmExternalReadPermission(
+      prepared.call,
+      prepared.permissionContext,
+    );
+    if (externalReadResult) {
+      return externalReadResult;
     }
     const permissionDecision = await evaluatePermissionOnly(
       prepared.call,

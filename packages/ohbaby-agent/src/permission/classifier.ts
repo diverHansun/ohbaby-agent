@@ -81,7 +81,7 @@ export function classifyPermissionCall(
 ): PermissionClassification {
   const toolName = canonicalToolName(call.toolName);
 
-  if (toolName === "bash" || "command" in call.params) {
+  if (toolName === "bash") {
     const bash = classifyShellCommand(parseCommand(bashCommand(call)));
     return {
       bash,
