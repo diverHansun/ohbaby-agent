@@ -15,6 +15,7 @@ export interface UiCommandSpec {
   readonly id: string;
   readonly path: readonly string[];
   readonly aliases?: readonly (readonly string[])[];
+  readonly title?: string;
   readonly category: string;
   readonly description: string;
   readonly argsHint?: string;
@@ -85,11 +86,16 @@ export interface UiCommandError {
 export type UiCommandResolveErrorCode =
   | "NOT_A_COMMAND"
   | "COMMAND_NOT_FOUND"
+  | "COMMAND_NOT_AVAILABLE_ON_SURFACE"
   | "AMBIGUOUS_COMMAND";
 
 export interface UiCommandResolveError {
   readonly code: UiCommandResolveErrorCode;
   readonly message: string;
+}
+
+export interface UiCommandResolveOptions {
+  readonly surface?: UiCommandSurface;
 }
 
 export interface UiCommandResolved {

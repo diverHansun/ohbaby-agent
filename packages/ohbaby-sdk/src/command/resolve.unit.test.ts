@@ -7,135 +7,123 @@ import {
 } from "../index.js";
 
 const catalog: UiCommandCatalog = {
-  version: "catalog_1",
+  version: "commands-v3",
   commands: [
     {
-      id: "model",
-      path: ["model"],
       aliases: [],
       argumentMode: "argv",
       category: "model",
-      description: "Choose a model",
-      parentBehavior: "interaction",
+      description: "Show and switch active model",
+      id: "models",
+      path: ["models"],
       source: "builtin",
-      surfaces: ["tui", "stdout"],
+      surfaces: ["tui", "stdout", "headless"],
+      title: "Models",
     },
     {
-      id: "model.current",
-      path: ["model", "current"],
-      aliases: [["mc"]],
+      aliases: [],
       argumentMode: "argv",
       category: "model",
-      description: "Show current model",
+      description: "Headless only models",
+      id: "models.headless",
+      path: ["models-headless"],
       source: "builtin",
-      surfaces: ["tui", "stdout"],
+      surfaces: ["headless"],
+      title: "Headless Models",
     },
     {
-      id: "exit",
-      path: ["exit"],
       aliases: [["quit"], ["q"]],
       argumentMode: "argv",
       category: "system",
       description: "Exit",
+      id: "exit",
+      path: ["exit"],
       source: "builtin",
       surfaces: ["tui", "stdout"],
+      title: "Exit",
     },
-  ],
-};
-
-const sessionCatalog: UiCommandCatalog = {
-  version: "session_catalog",
-  commands: [
     {
       aliases: [],
       argumentMode: "argv",
       category: "session",
       description: "Choose a session",
-      id: "session",
+      id: "sessions",
       parentBehavior: "interaction",
-      path: ["session"],
+      path: ["sessions"],
       source: "builtin",
       surfaces: ["tui", "stdout", "headless"],
+      title: "Sessions",
     },
     {
       acceptsArguments: true,
       aliases: [],
       argumentMode: "argv",
+      argsHint: "--session_id <id>",
       category: "session",
       description: "Resume a session",
-      id: "session.resume",
+      id: "resume",
       path: ["resume"],
       source: "builtin",
       surfaces: ["tui", "stdout", "headless"],
+      title: "Resume",
     },
-  ],
-};
-
-const permissionCatalog: UiCommandCatalog = {
-  version: "permission_catalog",
-  commands: [
     {
       aliases: [],
       argumentMode: "argv",
       category: "permission",
       description: "Choose permission level",
       id: "permission",
-      parentBehavior: "none",
+      parentBehavior: "interaction",
       path: ["permission"],
       source: "builtin",
       surfaces: ["tui", "stdout", "headless"],
-    },
-    {
-      aliases: [],
-      argumentMode: "argv",
-      category: "permission",
-      description: "Use default permission level",
-      id: "permission.default",
-      path: ["permission", "default"],
-      source: "builtin",
-      surfaces: ["tui", "stdout", "headless"],
-    },
-    {
-      aliases: [],
-      argumentMode: "argv",
-      category: "permission",
-      description: "Use full access permission level",
-      id: "permission.full-access",
-      path: ["permission", "full-access"],
-      source: "builtin",
-      surfaces: ["tui", "stdout", "headless"],
+      title: "Permission",
     },
   ],
 };
 
 describe("resolveCommand", () => {
-  it("resolves longest catalog path with remaining argv", () => {
-    const parsed = parseSlashInput("/model current --json");
-    const result = resolveCommand(catalog, parsed);
-
-    expect(result).toMatchObject({
+  it("resolves /models as the single model command", () => {
+    expect(
+      resolveCommand(catalog, parseSlashInput("/models"), { surface: "tui" }),
+    ).toMatchObject({
       ok: true,
-      command: { id: "model.current" },
-      argv: ["--json"],
-      rawArgs: "--json",
-      path: ["model", "current"],
+      argv: [],
+      command: { id: "models" },
+      path: ["models"],
+      rawArgs: "",
     });
   });
 
-  it("does not infer child commands from a parent command with args", () => {
-    const parsed = parseSlashInput("/model gpt-5.5");
-
-    expect(resolveCommand(catalog, parsed)).toEqual({
+  it("rejects unaccepted argv on non-argument commands", () => {
+    expect(
+      resolveCommand(catalog, parseSlashInput("/models gpt-5.5"), {
+        surface: "tui",
+      }),
+    ).toEqual({
       ok: false,
       error: {
         code: "COMMAND_NOT_FOUND",
-        message: 'Unknown command "/model gpt-5.5"',
+        message: 'Unknown command "/models gpt-5.5"',
       },
     });
   });
 
+  it("rejects commands unavailable on the requested surface", () => {
+    expect(
+      resolveCommand(catalog, parseSlashInput("/models-headless"), {
+        surface: "tui",
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "COMMAND_NOT_AVAILABLE_ON_SURFACE" },
+    });
+  });
+
   it("resolves aliases declared by the catalog", () => {
-    const result = resolveCommand(catalog, parseSlashInput("/quit"));
+    const result = resolveCommand(catalog, parseSlashInput("/quit"), {
+      surface: "tui",
+    });
 
     expect(result).toMatchObject({
       ok: true,
@@ -155,58 +143,58 @@ describe("resolveCommand", () => {
     });
   });
 
-  it("resolves only the public session and resume command paths", () => {
-    const sessionResult = resolveCommand(
-      sessionCatalog,
-      parseSlashInput("/session"),
+  it("resolves only the public sessions and resume command paths", () => {
+    const sessionsResult = resolveCommand(
+      catalog,
+      parseSlashInput("/sessions"),
     );
-    expect(sessionResult.ok).toBe(true);
-    if (!sessionResult.ok) {
-      throw new Error("expected /session to resolve");
-    }
-    expect(sessionResult.command.id).toBe("session");
-    expect(sessionResult.path).toEqual(["session"]);
+    expect(sessionsResult).toMatchObject({
+      ok: true,
+      command: { id: "sessions" },
+      path: ["sessions"],
+    });
 
     const resumeResult = resolveCommand(
-      sessionCatalog,
+      catalog,
       parseSlashInput("/resume session_1"),
     );
-    expect(resumeResult.ok).toBe(true);
-    if (!resumeResult.ok) {
-      throw new Error("expected /resume to resolve");
-    }
-    expect(resumeResult.argv).toEqual(["session_1"]);
-    expect(resumeResult.command.id).toBe("session.resume");
-    expect(resumeResult.path).toEqual(["resume"]);
-    expect(resumeResult.rawArgs).toBe("session_1");
+    expect(resumeResult).toMatchObject({
+      ok: true,
+      argv: ["session_1"],
+      command: { id: "resume" },
+      path: ["resume"],
+      rawArgs: "session_1",
+    });
+
     expect(
-      resolveCommand(sessionCatalog, parseSlashInput("/session list")),
+      resolveCommand(catalog, parseSlashInput("/session list")),
     ).toMatchObject({
       error: { code: "COMMAND_NOT_FOUND" },
       ok: false,
     });
     expect(
-      resolveCommand(
-        sessionCatalog,
-        parseSlashInput("/session resume session_1"),
-      ),
+      resolveCommand(catalog, parseSlashInput("/session resume session_1")),
     ).toMatchObject({
       error: { code: "COMMAND_NOT_FOUND" },
       ok: false,
     });
   });
 
-  it("does not resolve removed mode commands through permission", () => {
-    for (const input of ["/permission plan", "/permission auto", "/mode"]) {
-      expect(resolveCommand(permissionCatalog, parseSlashInput(input))).toEqual(
-        {
-          ok: false,
-          error: {
-            code: "COMMAND_NOT_FOUND",
-            message: `Unknown command "${input}"`,
-          },
+  it("does not resolve permission levels as slash subcommands", () => {
+    for (const input of [
+      "/permission default",
+      "/permission full-access",
+      "/permission plan",
+      "/permission auto",
+      "/mode",
+    ]) {
+      expect(resolveCommand(catalog, parseSlashInput(input))).toEqual({
+        ok: false,
+        error: {
+          code: "COMMAND_NOT_FOUND",
+          message: `Unknown command "${input}"`,
         },
-      );
+      });
     }
   });
 });
@@ -214,9 +202,11 @@ describe("resolveCommand", () => {
 describe("filterCommandCatalog", () => {
   it("filters by surface and partial slash input", () => {
     expect(filterCommandCatalog(catalog, "/mo", { surface: "tui" })).toEqual([
-      expect.objectContaining({ id: "model" }),
-      expect.objectContaining({ id: "model.current" }),
+      expect.objectContaining({ id: "models" }),
     ]);
+    expect(
+      filterCommandCatalog(catalog, "/models-headless", { surface: "tui" }),
+    ).toEqual([]);
   });
 
   it("can match aliases for completion", () => {
@@ -225,15 +215,15 @@ describe("filterCommandCatalog", () => {
     ]);
   });
 
-  it("filters session and resume without exposing removed session subcommands", () => {
+  it("filters sessions and resume without exposing removed session subcommands", () => {
+    expect(filterCommandCatalog(catalog, "/ses", { surface: "tui" })).toEqual([
+      expect.objectContaining({ id: "sessions" }),
+    ]);
+    expect(filterCommandCatalog(catalog, "/res", { surface: "tui" })).toEqual([
+      expect.objectContaining({ id: "resume" }),
+    ]);
     expect(
-      filterCommandCatalog(sessionCatalog, "/ses", { surface: "tui" }),
-    ).toEqual([expect.objectContaining({ id: "session" })]);
-    expect(
-      filterCommandCatalog(sessionCatalog, "/res", { surface: "tui" }),
-    ).toEqual([expect.objectContaining({ id: "session.resume" })]);
-    expect(
-      filterCommandCatalog(sessionCatalog, "/session r", { surface: "tui" }),
+      filterCommandCatalog(catalog, "/session r", { surface: "tui" }),
     ).toEqual([]);
   });
 });

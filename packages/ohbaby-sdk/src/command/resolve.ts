@@ -1,5 +1,6 @@
 import type {
   UiCommandCatalog,
+  UiCommandResolveOptions,
   UiCommandResolveResult,
   UiCommandSpec,
   UiCommandSurface,
@@ -79,6 +80,7 @@ function findCandidates(
 export function resolveCommand(
   catalog: UiCommandCatalog,
   parsed: UiParsedSlashInput | null,
+  options: UiCommandResolveOptions = {},
 ): UiCommandResolveResult {
   if (!parsed) {
     return {
@@ -93,11 +95,24 @@ export function resolveCommand(
     return unknownCommand(parsed);
   }
 
-  const candidates = findCandidates(catalog, parsed.segments);
+  const allCandidates = findCandidates(catalog, parsed.segments);
+  const candidates = allCandidates.filter((candidate) =>
+    isVisibleOnSurface(candidate.command, options.surface),
+  );
+  if (allCandidates.length > 0 && candidates.length === 0) {
+    return {
+      ok: false,
+      error: {
+        code: "COMMAND_NOT_AVAILABLE_ON_SURFACE",
+        message: `Command is not available on surface: ${options.surface ?? "unknown"}`,
+      },
+    };
+  }
+
   for (const candidate of candidates) {
     const matchedLength = candidate.usedAlias?.length ?? candidate.path.length;
     const hasRemainingArgs = parsed.segments.length > matchedLength;
-    if (candidate.command.parentBehavior && hasRemainingArgs) {
+    if (hasRemainingArgs && candidate.command.acceptsArguments !== true) {
       continue;
     }
 

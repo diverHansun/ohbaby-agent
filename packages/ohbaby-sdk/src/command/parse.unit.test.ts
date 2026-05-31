@@ -8,31 +8,29 @@ describe("parseSlashInput", () => {
   });
 
   it("parses a root command candidate", () => {
-    expect(parseSlashInput("/model")).toMatchObject({
+    expect(parseSlashInput("/models")).toMatchObject({
       body: "",
-      commandLine: "model",
-      path: ["model"],
-      raw: "/model",
+      commandLine: "models",
+      path: ["models"],
+      raw: "/models",
       rawArgs: "",
-      segments: ["model"],
+      segments: ["models"],
     });
   });
 
   it("preserves raw args and builds argv from the first command segment", () => {
-    expect(
-      parseSlashInput("/model switch anthropic claude-opus-4-7"),
-    ).toMatchObject({
-      path: ["model"],
-      rawArgs: "switch anthropic claude-opus-4-7",
-      argv: ["switch", "anthropic", "claude-opus-4-7"],
-      segments: ["model", "switch", "anthropic", "claude-opus-4-7"],
+    expect(parseSlashInput("/resume --session_id session_1")).toMatchObject({
+      path: ["resume"],
+      rawArgs: "--session_id session_1",
+      argv: ["--session_id", "session_1"],
+      segments: ["resume", "--session_id", "session_1"],
     });
   });
 
   it("handles quoted argv values", () => {
-    expect(parseSlashInput('/model switch openai "gpt 5.5"')).toMatchObject({
-      argv: ["switch", "openai", "gpt 5.5"],
-      segments: ["model", "switch", "openai", "gpt 5.5"],
+    expect(parseSlashInput('/resume "session 1"')).toMatchObject({
+      argv: ["session 1"],
+      segments: ["resume", "session 1"],
     });
   });
 
