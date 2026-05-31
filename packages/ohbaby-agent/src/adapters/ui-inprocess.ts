@@ -637,8 +637,12 @@ export function createInProcessUiBackendClient(
   async function currentModelFromOptions(): Promise<CommandModelSummary | null> {
     const client = options.llmClient ?? (await resolveLLMClient());
     return {
+      active: true,
+      apiKeyEnv: client.config.apiKeyEnv,
+      baseUrl: client.config.baseUrl,
       id: `${client.config.provider}:${client.config.model}`,
       label: client.config.model,
+      model: client.config.model,
       provider: client.config.provider,
     };
   }

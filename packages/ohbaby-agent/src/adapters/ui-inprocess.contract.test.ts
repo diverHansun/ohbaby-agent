@@ -1319,7 +1319,7 @@ describe("createInProcessUiBackendClient", () => {
     await client.executeCommand({
       argv: [],
       clientInvocationId: "inv_compact",
-      commandId: "session.compact",
+      commandId: "compact",
       path: ["compact"],
       raw: "/compact",
       rawArgs: "",
@@ -2731,20 +2731,30 @@ describe("createInProcessUiBackendClient", () => {
     expect(catalog.commands.map((command) => command.id)).toEqual(
       expect.arrayContaining([
         "status",
+        "exit",
+        "help",
+        "models",
+        "sessions",
+        "new",
+        "compact",
+        "resume",
+        "permission",
+      ]),
+    );
+    expect(catalog.commands.map((command) => command.id)).not.toEqual(
+      expect.arrayContaining([
+        "mode",
         "tools",
         "abort",
-        "exit",
         "model",
         "model.list",
         "model.current",
         "session",
         "session.resume",
-        "permission",
         "permission.default",
         "permission.full-access",
       ]),
     );
-    expect(catalog.commands.map((command) => command.id)).not.toContain("mode");
   });
 
   it("lists user-invocable project skills as slash commands", async () => {
@@ -2959,7 +2969,7 @@ describe("createInProcessUiBackendClient", () => {
     });
   });
 
-  it("publishes permission.updated when mode and level commands change backend permission", async () => {
+  it("publishes permission.updated when mode and level interactions change backend permission", async () => {
     const client = createInProcessUiBackendClient({
       llmClient: createFakeLLMClient([]),
     });
@@ -2986,15 +2996,35 @@ describe("createInProcessUiBackendClient", () => {
       rawArgs: "",
       surface: "tui",
     });
-    await client.executeCommand({
+    const permissionExecution = client.executeCommand({
       argv: [],
       clientInvocationId: "inv_level_full_access",
-      commandId: "permission.full-access",
-      path: ["permission", "full-access"],
-      raw: "/permission full-access",
+      commandId: "permission",
+      path: ["permission"],
+      raw: "/permission",
       rawArgs: "",
       surface: "tui",
     });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    const permissionInteraction = events.find(
+      (event): event is Extract<UiEvent, { type: "interaction.requested" }> =>
+        event.type === "interaction.requested" &&
+        event.request.subject === "permission",
+    );
+    expect(permissionInteraction?.request.options).toEqual([
+      { id: "default", label: "default" },
+      { id: "full-access", label: "full-access" },
+    ]);
+    await client.respondInteraction(
+      permissionInteraction?.request.interactionId ?? "missing",
+      {
+        choiceId: "full-access",
+        kind: "accepted",
+      },
+    );
+    await permissionExecution;
 
     const permissionEvents = events.filter(
       (event): event is Extract<UiEvent, { type: "permission.updated" }> =>
@@ -3056,9 +3086,86 @@ describe("createInProcessUiBackendClient", () => {
     });
     expect(events[1]).toMatchObject({
       clientInvocationId: "inv_status",
-      output: { kind: "data", subject: "status", data: { status: "idle" } },
+      output: {
+        kind: "data",
+        subject: "status",
+        data: {
+          model: {
+            active: true,
+            id: "fake:fake-model",
+            label: "fake-model",
+            model: "fake-model",
+            provider: "fake",
+          },
+          models: [
+            {
+              active: true,
+              model: "fake-model",
+              provider: "fake",
+            },
+          ],
+          status: "idle",
+        },
+      },
       type: "command.result.delivered",
     });
+  });
+
+  it("reports the single active model through /models without leaking api keys", async () => {
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_models",
+      commandId: "models",
+      path: ["models"],
+      raw: "/models",
+      rawArgs: "",
+      sessionId: "session_1",
+      surface: "tui",
+    });
+
+    const resultEvent = events.find(
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "command.result.delivered" }> =>
+        event.type === "command.result.delivered" &&
+        event.output?.kind === "data" &&
+        event.output.subject === "models.current",
+    );
+    expect(resultEvent?.output).toMatchObject({
+      data: {
+        current: {
+          active: true,
+          id: "fake:fake-model",
+          label: "fake-model",
+          model: "fake-model",
+          provider: "fake",
+        },
+        models: [
+          {
+            active: true,
+            id: "fake:fake-model",
+            label: "fake-model",
+            model: "fake-model",
+            provider: "fake",
+          },
+        ],
+        switching: {
+          available: false,
+          mode: "single-active-config",
+        },
+      },
+      kind: "data",
+      subject: "models.current",
+    });
+    expect(JSON.stringify(resultEvent?.output)).not.toContain("sk-test");
   });
 
   it("resumes an existing session through the command catalog", async () => {
@@ -3102,7 +3209,7 @@ describe("createInProcessUiBackendClient", () => {
     await client.executeCommand({
       argv: ["--session_id", "session_2"],
       clientInvocationId: "inv_resume",
-      commandId: "session.resume",
+      commandId: "resume",
       path: ["resume"],
       raw: "/resume --session_id session_2",
       rawArgs: "--session_id session_2",
@@ -3176,7 +3283,7 @@ describe("createInProcessUiBackendClient", () => {
     await client.executeCommand({
       argv: [],
       clientInvocationId: "inv_new",
-      commandId: "session.new",
+      commandId: "new",
       path: ["new"],
       raw: "/new",
       rawArgs: "",
@@ -3272,9 +3379,9 @@ describe("createInProcessUiBackendClient", () => {
       await client.executeCommand({
         argv: [],
         clientInvocationId: "inv_session_list",
-        commandId: "session",
-        path: ["session"],
-        raw: "/session",
+        commandId: "sessions",
+        path: ["sessions"],
+        raw: "/sessions",
         rawArgs: "",
         surface: "headless",
       });
@@ -3438,9 +3545,9 @@ describe("createInProcessUiBackendClient", () => {
     const execution = client.executeCommand({
       argv: [],
       clientInvocationId: "inv_session",
-      commandId: "session",
-      path: ["session"],
-      raw: "/session",
+      commandId: "sessions",
+      path: ["sessions"],
+      raw: "/sessions",
       rawArgs: "",
       sessionId: "session_1",
       surface: "tui",
@@ -3503,9 +3610,9 @@ describe("createInProcessUiBackendClient", () => {
     const execution = client.executeCommand({
       argv: [],
       clientInvocationId: "inv_session",
-      commandId: "session",
-      path: ["session"],
-      raw: "/session",
+      commandId: "sessions",
+      path: ["sessions"],
+      raw: "/sessions",
       rawArgs: "",
       sessionId: "session_1",
       surface: "tui",

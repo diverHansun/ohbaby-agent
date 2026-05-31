@@ -17,170 +17,286 @@ describe("CommandService", () => {
     const catalog = await service.listCommands({ surface: "tui" });
 
     expect(catalog.commands.map((command) => command.id)).toEqual(
+      expect.arrayContaining(["permission"]),
+    );
+    expect(catalog.commands.map((command) => command.id)).not.toEqual(
       expect.arrayContaining([
-        "permission",
+        "mode",
         "permission.default",
         "permission.full-access",
       ]),
     );
-    expect(catalog.commands.map((command) => command.id)).not.toContain("mode");
   });
 
-  it("executes status and publishes command events", async () => {
-    const { events, service } = createServiceHarness();
-
-    await service.executeCommand(makeInvocation("status", ["status"]));
-
-    expect(events).toEqual([
-      expect.objectContaining({
-        commandId: "status",
-        commandRunId: "command_1",
-        type: "started",
-      }),
-      expect.objectContaining({
-        commandRunId: "command_1",
-        output: { kind: "data", subject: "status", data: { status: "idle" } },
-        type: "result",
-      }),
-    ]);
-  });
-
-  it("lists tools from the configured tool provider", async () => {
-    const { events, service } = createServiceHarness({
-      tools: {
-        listTools() {
-          return [
-            {
-              name: "read",
-              description: "Read a file",
-              category: "readonly",
-              source: "builtin",
-            },
-          ];
-        },
-      },
-    });
-
-    await service.executeCommand(makeInvocation("tools", ["tools"]));
-
-    expect(events.at(-1)).toMatchObject({
-      output: {
-        kind: "data",
-        subject: "tools",
-        data: {
-          tools: [
-            {
-              name: "read",
-              description: "Read a file",
-              category: "readonly",
-              source: "builtin",
-            },
-          ],
-        },
-      },
-      type: "result",
-    });
-  });
-
-  it("reports the configured model for the model parent command", async () => {
-    const { events, service } = createServiceHarness({
-      models: {
-        currentModel() {
-          return { id: "openai:gpt-5.5", label: "GPT-5.5", provider: "openai" };
-        },
-        listModels() {
-          return [
-            { id: "openai:gpt-5.5", label: "GPT-5.5", provider: "openai" },
-          ];
-        },
-      },
-    });
-
-    await service.executeCommand(makeInvocation("model", ["model"]));
-
-    expect(events.at(-1)).toMatchObject({
-      output: {
-        data: {
-          model: {
-            id: "openai:gpt-5.5",
-            label: "GPT-5.5",
-            provider: "openai",
-          },
-          models: [
-            {
-              id: "openai:gpt-5.5",
-              label: "GPT-5.5",
-              provider: "openai",
-            },
-          ],
-        },
-        kind: "data",
-        subject: "model.current",
-      },
-      type: "result",
-    });
-  });
-
-  it("publishes model list and current model data", async () => {
+  it("executes status and publishes command events with model context", async () => {
     const { events, service } = createServiceHarness({
       models: {
         currentModel() {
           return {
-            id: "anthropic:claude",
-            label: "Claude",
-            provider: "anthropic",
+            apiKeyEnv: "OPENAI_API_KEY",
+            baseUrl: "https://api.openai.com/v1",
+            id: "openai:gpt-5.5",
+            label: "GPT-5.5",
+            model: "gpt-5.5",
+            provider: "openai",
           };
         },
         listModels() {
           return [
-            { id: "anthropic:claude", label: "Claude", provider: "anthropic" },
+            {
+              apiKeyEnv: "OPENAI_API_KEY",
+              baseUrl: "https://api.openai.com/v1",
+              id: "openai:gpt-5.5",
+              label: "GPT-5.5",
+              model: "gpt-5.5",
+              provider: "openai",
+            },
           ];
         },
       },
     });
 
-    await service.executeCommand(
-      makeInvocation("model.list", ["model", "list"]),
-    );
-    await service.executeCommand(
-      makeInvocation("model.current", ["model", "current"]),
-    );
+    await service.executeCommand(makeInvocation("status", ["status"]));
 
-    expect(events).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          output: {
-            kind: "data",
-            subject: "model.list",
-            data: {
-              models: [
-                {
-                  id: "anthropic:claude",
-                  label: "Claude",
-                  provider: "anthropic",
-                },
-              ],
-            },
+    expect(events[0]).toMatchObject({
+      commandId: "status",
+      commandRunId: "command_1",
+      type: "started",
+    });
+    expect(events[1]).toMatchObject({
+      commandRunId: "command_1",
+      output: {
+        kind: "data",
+        subject: "status",
+        data: {
+          model: {
+            apiKeyEnv: "OPENAI_API_KEY",
+            baseUrl: "https://api.openai.com/v1",
+            model: "gpt-5.5",
+            provider: "openai",
           },
-        }),
-        expect.objectContaining({
-          output: {
-            kind: "data",
-            subject: "model.current",
-            data: {
-              model: {
-                id: "anthropic:claude",
-                label: "Claude",
-                provider: "anthropic",
-              },
+          models: [
+            {
+              model: "gpt-5.5",
+              provider: "openai",
             },
-          },
-        }),
-      ]),
-    );
+          ],
+          status: "idle",
+        },
+      },
+      type: "result",
+    });
   });
 
-  it("opens session selection from /session and lists sessions on non-TUI surfaces", async () => {
+  it("emits help for the active command catalog", async () => {
+    const { events, service } = createServiceHarness();
+
+    await service.executeCommand(makeInvocation("help", ["help"]));
+
+    const helpEvent = events.at(-1);
+    expect(helpEvent).toMatchObject({
+      output: {
+        kind: "data",
+        subject: "help",
+      },
+      type: "result",
+    });
+    const output = isRecord(helpEvent?.output) ? helpEvent.output : undefined;
+    const data = output ? getRecord(output, "data") : undefined;
+    const commands = Array.isArray(data?.commands) ? data.commands : [];
+    expect(
+      commands.map((command) =>
+        isRecord(command) && typeof command.id === "string" ? command.id : "",
+      ),
+    ).toEqual(expect.arrayContaining(["models", "permission"]));
+  });
+
+  it("does not expose dynamic commands that reuse reserved slash roots", async () => {
+    const { service } = createServiceHarness({
+      extraCommands: [
+        {
+          argumentMode: "argv",
+          category: "plugin",
+          description: "Legacy model command",
+          id: "plugin.model",
+          path: ["model"],
+          source: "plugin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "argv",
+          category: "plugin",
+          description: "Diagnostics",
+          id: "diagnostics",
+          path: ["diagnostics"],
+          source: "plugin",
+          surfaces: ["tui"],
+        },
+      ],
+      skills: {
+        listUserInvocable() {
+          return [
+            { name: "session", description: "Legacy session skill" },
+            { name: "review", description: "Review code" },
+          ];
+        },
+        loadPrompt() {
+          return "";
+        },
+      },
+    });
+
+    const catalog = await service.listCommands({ surface: "tui" });
+
+    expect(catalog.commands.map((command) => command.id)).toEqual(
+      expect.arrayContaining(["diagnostics", "skill.review"]),
+    );
+    expect(
+      catalog.commands.map((command) => command.path.join("/")),
+    ).not.toEqual(expect.arrayContaining(["model", "session"]));
+  });
+
+  it("reports configured models from the /models command", async () => {
+    const { events, service } = createServiceHarness({
+      models: {
+        currentModel() {
+          return {
+            apiKeyEnv: "OPENAI_API_KEY",
+            baseUrl: "https://api.openai.com/v1",
+            id: "openai:gpt-5.5",
+            label: "GPT-5.5",
+            model: "gpt-5.5",
+            provider: "openai",
+          };
+        },
+        listModels() {
+          return [
+            {
+              apiKeyEnv: "OPENAI_API_KEY",
+              baseUrl: "https://api.openai.com/v1",
+              id: "openai:gpt-5.5",
+              label: "GPT-5.5",
+              model: "gpt-5.5",
+              provider: "openai",
+            },
+          ];
+        },
+      },
+    });
+
+    await service.executeCommand(makeInvocation("models", ["models"]));
+
+    expect(events.at(-1)).toMatchObject({
+      output: {
+        data: {
+          current: {
+            apiKeyEnv: "OPENAI_API_KEY",
+            baseUrl: "https://api.openai.com/v1",
+            id: "openai:gpt-5.5",
+            label: "GPT-5.5",
+            model: "gpt-5.5",
+            provider: "openai",
+          },
+          models: [
+            {
+              apiKeyEnv: "OPENAI_API_KEY",
+              baseUrl: "https://api.openai.com/v1",
+              id: "openai:gpt-5.5",
+              label: "GPT-5.5",
+              model: "gpt-5.5",
+              provider: "openai",
+            },
+          ],
+          switching: {
+            available: false,
+            mode: "single-active-config",
+          },
+        },
+        kind: "data",
+        subject: "models.current",
+      },
+      type: "result",
+    });
+  });
+
+  it("marks model switching available when a provider exposes switchModel", async () => {
+    const switchModel = vi.fn();
+    const { events, service } = createServiceHarness({
+      models: {
+        currentModel() {
+          return {
+            apiKeyEnv: "OPENAI_API_KEY",
+            baseUrl: "https://api.openai.com/v1",
+            id: "openai:gpt-5.5",
+            label: "GPT-5.5",
+            model: "gpt-5.5",
+            provider: "openai",
+          };
+        },
+        listModels() {
+          return [
+            {
+              apiKeyEnv: "OPENAI_API_KEY",
+              baseUrl: "https://api.openai.com/v1",
+              id: "openai:gpt-5.5",
+              label: "GPT-5.5",
+              model: "gpt-5.5",
+              provider: "openai",
+            },
+          ];
+        },
+        switchModel,
+      },
+    });
+
+    await service.executeCommand(makeInvocation("models", ["models"]));
+
+    expect(events.at(-1)).toMatchObject({
+      output: {
+        data: {
+          switching: {
+            available: true,
+            mode: "single-active-config",
+          },
+        },
+        kind: "data",
+        subject: "models.current",
+      },
+      type: "result",
+    });
+  });
+
+  it("redacts unexpected api keys from model command outputs", async () => {
+    const modelWithSecret = {
+      apiKey: "sk-secret",
+      apiKeyEnv: "OPENAI_API_KEY",
+      baseUrl: "https://api.openai.com/v1",
+      id: "openai:gpt-5.5",
+      label: "GPT-5.5",
+      model: "gpt-5.5",
+      provider: "openai",
+    } as const;
+    const { events, service } = createServiceHarness({
+      models: {
+        currentModel() {
+          return modelWithSecret;
+        },
+        listModels() {
+          return [modelWithSecret];
+        },
+      },
+    });
+
+    await service.executeCommand(makeInvocation("status", ["status"]));
+    await service.executeCommand(makeInvocation("models", ["models"]));
+
+    const payload = JSON.stringify(events);
+    expect(payload).not.toContain("sk-secret");
+    expect(payload).not.toContain('"apiKey":"');
+    expect(payload).toContain("OPENAI_API_KEY");
+  });
+
+  it("opens session selection from /sessions and lists sessions on non-TUI surfaces", async () => {
     const request = vi
       .fn<() => Promise<UiInteractionResponse>>()
       .mockResolvedValue({
@@ -198,9 +314,9 @@ describe("CommandService", () => {
       },
     });
 
-    await service.executeCommand(makeInvocation("session", ["session"]));
+    await service.executeCommand(makeInvocation("sessions", ["sessions"]));
     await service.executeCommand({
-      ...makeInvocation("session", ["session"]),
+      ...makeInvocation("sessions", ["sessions"]),
       surface: "headless",
     });
 
@@ -248,7 +364,7 @@ describe("CommandService", () => {
       },
     });
 
-    await service.executeCommand(makeInvocation("session.new", ["new"]));
+    await service.executeCommand(makeInvocation("new", ["new"]));
 
     expect(createSession).toHaveBeenCalledOnce();
     expect(events).toEqual(
@@ -304,7 +420,7 @@ describe("CommandService", () => {
     });
 
     await service.executeCommand(
-      makeInvocation("session.compact", ["compact"], ["--force"]),
+      makeInvocation("compact", ["compact"], ["--force"]),
     );
 
     expect(compactSession).toHaveBeenCalledWith({
@@ -350,14 +466,10 @@ describe("CommandService", () => {
     });
 
     await service.executeCommand(
-      makeInvocation(
-        "session.resume",
-        ["resume"],
-        ["--session_id", "session_2"],
-      ),
+      makeInvocation("resume", ["resume"], ["--session_id", "session_2"]),
     );
     await service.executeCommand(
-      makeInvocation("session.resume", ["resume"], ["session_1"]),
+      makeInvocation("resume", ["resume"], ["session_1"]),
     );
 
     expect(selectSession).toHaveBeenNthCalledWith(1, "session_2");
@@ -386,9 +498,19 @@ describe("CommandService", () => {
   it("fails /resume without an id instead of opening session selection", async () => {
     const { events, service } = createServiceHarness();
 
-    await service.executeCommand(makeInvocation("session.resume", ["resume"]));
+    await service.executeCommand(makeInvocation("resume", ["resume"]));
+    await service.executeCommand(
+      makeInvocation("resume", ["resume"], ["--session_id", "--force"]),
+    );
 
-    expect(events.at(-1)).toMatchObject({
+    expect(events.at(1)).toMatchObject({
+      error: {
+        code: "SESSION_ID_REQUIRED",
+        message: "Use /resume --session_id <id> to resume a session",
+      },
+      type: "failed",
+    });
+    expect(events.at(3)).toMatchObject({
       error: {
         code: "SESSION_ID_REQUIRED",
         message: "Use /resume --session_id <id> to resume a session",
@@ -415,7 +537,7 @@ describe("CommandService", () => {
       },
     });
 
-    await service.executeCommand(makeInvocation("session", ["session"]));
+    await service.executeCommand(makeInvocation("sessions", ["sessions"]));
 
     expect(selectSession).not.toHaveBeenCalled();
     expect(events.at(-1)).toMatchObject({
@@ -427,22 +549,15 @@ describe("CommandService", () => {
     });
   });
 
-  it("executes abort and exit actions", async () => {
-    const abortRun = vi.fn<() => Promise<void>>().mockResolvedValue();
+  it("executes exit actions", async () => {
     const exit = vi.fn<() => Promise<void>>().mockResolvedValue();
-    const { events, service } = createServiceHarness({ abortRun, exit });
+    const { events, service } = createServiceHarness({ exit });
 
-    await service.executeCommand(makeInvocation("abort", ["abort"]));
     await service.executeCommand(makeInvocation("exit", ["exit"]));
 
-    expect(abortRun).toHaveBeenCalledOnce();
     expect(exit).toHaveBeenCalledOnce();
     expect(events).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          action: { kind: "run.abort" },
-          type: "result",
-        }),
         expect.objectContaining({
           action: { kind: "app.exit" },
           type: "result",
@@ -492,17 +607,10 @@ describe("CommandService", () => {
     await service.executeCommand(
       makeInvocation("permission.toggle-mode", ["permission", "toggle-mode"]),
     );
-    await service.executeCommand(
-      makeInvocation("permission.full-access", ["permission", "full-access"]),
-    );
-    await service.executeCommand(
-      makeInvocation("permission.default", ["permission", "default"]),
-    );
 
     expect(toggleMode).toHaveBeenCalledOnce();
     expect(setMode).not.toHaveBeenCalled();
-    expect(setLevel).toHaveBeenNthCalledWith(1, "full-access");
-    expect(setLevel).toHaveBeenNthCalledWith(2, "default");
+    expect(setLevel).not.toHaveBeenCalled();
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -532,35 +640,69 @@ describe("CommandService", () => {
           },
           type: "result",
         }),
-        expect.objectContaining({
-          output: {
-            data: {
-              permission: {
-                level: "full-access",
-                mode: "plan",
-                sessionRules: [],
-              },
-            },
-            kind: "data",
-            subject: "permission.level",
-          },
-          type: "result",
-        }),
-        expect.objectContaining({
-          action: {
-            data: {
-              permission: {
-                level: "default",
-                mode: "plan",
-                sessionRules: [],
-              },
-            },
-            kind: "permission.level.updated",
-          },
-          type: "result",
-        }),
       ]),
     );
+  });
+
+  it("changes permission level through the /permission interaction", async () => {
+    let permissionState: UiPermissionState = {
+      level: "default",
+      mode: "auto",
+      sessionRules: [],
+    };
+    const request = vi
+      .fn<() => Promise<UiInteractionResponse>>()
+      .mockResolvedValue({
+        choiceId: "full-access",
+        kind: "accepted",
+      });
+    const setLevel = vi.fn<(level: UiPermissionState["level"]) => void>(
+      (level) => {
+        permissionState = { ...permissionState, level };
+      },
+    );
+    const { events, service } = createServiceHarness({
+      interactionBroker: { request },
+      permission: {
+        getState() {
+          return permissionState;
+        },
+        setLevel,
+        setMode: vi.fn<(mode: UiPermissionState["mode"]) => void>(),
+        toggleMode() {
+          return permissionState.mode;
+        },
+      },
+    });
+
+    await service.executeCommand(makeInvocation("permission", ["permission"]));
+
+    expect(request).toHaveBeenCalledWith(
+      {
+        kind: "select-one",
+        options: [
+          { id: "default", label: "default" },
+          { id: "full-access", label: "full-access" },
+        ],
+        prompt: "Permission level",
+        subject: "permission",
+      },
+      expect.objectContaining({ commandRunId: "command_1" }),
+    );
+    expect(setLevel).toHaveBeenCalledWith("full-access");
+    expect(events.at(-1)).toMatchObject({
+      action: {
+        data: {
+          permission: {
+            level: "full-access",
+            mode: "auto",
+            sessionRules: [],
+          },
+        },
+        kind: "permission.level.updated",
+      },
+      type: "result",
+    });
   });
 
   it("publishes command.failed for unknown command ids", async () => {
@@ -678,7 +820,7 @@ describe("CommandService", () => {
     });
 
     const execution = service.executeCommand(
-      makeInvocation("session", ["session"]),
+      makeInvocation("sessions", ["sessions"]),
     );
     await new Promise((resolve) => {
       setTimeout(resolve, 0);
@@ -735,6 +877,14 @@ function createServiceHarness(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getRecord(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | undefined {
+  const value = record[key];
+  return isRecord(value) ? value : undefined;
 }
 
 function makeInvocation(

@@ -1,4 +1,9 @@
-import type { UiCommandAction, UiCommandOutput } from "ohbaby-sdk";
+import type {
+  UiCommandAction,
+  UiCommandCatalog,
+  UiCommandOutput,
+  UiCommandSurface,
+} from "ohbaby-sdk";
 import type {
   CommandHandler,
   CommandModelSummary,
@@ -6,25 +11,27 @@ import type {
   CommandRunContext,
   CommandServiceOptions,
   CommandSessionSummary,
-  CommandToolSummary,
 } from "./types.js";
 
-async function listTools(
-  options: CommandServiceOptions,
-): Promise<readonly CommandToolSummary[]> {
-  return options.tools?.listTools() ?? [];
+interface BuiltinHandlerHelpers {
+  listCommands?(
+    surface?: UiCommandSurface,
+  ): Promise<UiCommandCatalog> | UiCommandCatalog;
 }
 
 async function listModels(
   options: CommandServiceOptions,
 ): Promise<readonly CommandModelSummary[]> {
-  return options.models?.listModels() ?? [];
+  const models = await (options.models?.listModels() ?? []);
+  return models
+    .map(sanitizeModelSummary)
+    .filter((model): model is CommandModelSummary => model !== null);
 }
 
 async function currentModel(
   options: CommandServiceOptions,
 ): Promise<CommandModelSummary | null> {
-  return options.models?.currentModel() ?? null;
+  return sanitizeModelSummary((await options.models?.currentModel()) ?? null);
 }
 
 async function listSessions(
@@ -48,6 +55,24 @@ function dataOutput(
 
 function action(kind: string, data?: Record<string, unknown>): UiCommandAction {
   return data ? { kind, data } : { kind };
+}
+
+function sanitizeModelSummary(
+  model: CommandModelSummary | null,
+): CommandModelSummary | null {
+  if (!model) {
+    return null;
+  }
+
+  return {
+    id: model.id,
+    label: model.label,
+    provider: model.provider,
+    ...(model.model === undefined ? {} : { model: model.model }),
+    ...(model.baseUrl === undefined ? {} : { baseUrl: model.baseUrl }),
+    ...(model.apiKeyEnv === undefined ? {} : { apiKeyEnv: model.apiKeyEnv }),
+    ...(model.active === undefined ? {} : { active: model.active }),
+  };
 }
 
 function currentPermissionState(
@@ -78,15 +103,45 @@ function emitPermissionUpdated(
   context.emitAction(action(input.actionKind, { permission }));
 }
 
-async function handleModelParent(
+async function handleStatus(
   options: CommandServiceOptions,
   context: CommandRunContext,
 ): Promise<void> {
   const models = await listModels(options);
   context.emitOutput(
-    dataOutput("model.current", {
+    dataOutput("status", {
       model: await currentModel(options),
       models,
+      status: options.getStatus?.() ?? "idle",
+    }),
+  );
+}
+
+async function handleHelp(
+  helpers: BuiltinHandlerHelpers,
+  context: CommandRunContext,
+): Promise<void> {
+  const catalog = await helpers.listCommands?.(context.surface);
+  context.emitOutput(
+    dataOutput("help", {
+      commands: catalog?.commands ?? [],
+    }),
+  );
+}
+
+async function handleModels(
+  options: CommandServiceOptions,
+  context: CommandRunContext,
+): Promise<void> {
+  const models = await listModels(options);
+  context.emitOutput(
+    dataOutput("models.current", {
+      current: await currentModel(options),
+      models,
+      switching: {
+        available: typeof options.models?.switchModel === "function",
+        mode: "single-active-config",
+      },
     }),
   );
 }
@@ -145,13 +200,13 @@ function parseSessionIdArg(argv: readonly string[]): string | undefined {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--session_id" || arg === "--session-id") {
-      return argv[index + 1];
+      return parseSessionIdValue(argv[index + 1]);
     }
     if (arg.startsWith("--session_id=")) {
-      return arg.slice("--session_id=".length);
+      return parseSessionIdValue(arg.slice("--session_id=".length));
     }
     if (arg.startsWith("--session-id=")) {
-      return arg.slice("--session-id=".length);
+      return parseSessionIdValue(arg.slice("--session-id=".length));
     }
     if (!arg.startsWith("-")) {
       return arg;
@@ -159,6 +214,13 @@ function parseSessionIdArg(argv: readonly string[]): string | undefined {
   }
 
   return undefined;
+}
+
+function parseSessionIdValue(value: string | undefined): string | undefined {
+  if (!value || value.startsWith("-")) {
+    return undefined;
+  }
+  return value;
 }
 
 async function handleSessionResume(
@@ -325,29 +387,19 @@ async function handlePermissionLevelChange(
 
 export function createBuiltinHandlers(
   options: CommandServiceOptions,
+  helpers: BuiltinHandlerHelpers = {},
 ): Map<string, CommandHandler> {
   const handlers: CommandHandler[] = [
     {
       id: "status",
-      execute(_invocation, context): void {
-        context.emitOutput(
-          dataOutput("status", { status: options.getStatus?.() ?? "idle" }),
-        );
+      execute(_invocation, context): Promise<void> {
+        return handleStatus(options, context);
       },
     },
     {
-      id: "tools",
+      id: "help",
       async execute(_invocation, context): Promise<void> {
-        context.emitOutput(
-          dataOutput("tools", { tools: await listTools(options) }),
-        );
-      },
-    },
-    {
-      id: "abort",
-      async execute(invocation, context): Promise<void> {
-        await options.abortRun?.(invocation.argv[0]);
-        context.emitAction(action("run.abort"));
+        return handleHelp(helpers, context);
       },
     },
     {
@@ -358,47 +410,31 @@ export function createBuiltinHandlers(
       },
     },
     {
-      id: "model",
+      id: "models",
       execute(_invocation, context): Promise<void> {
-        return handleModelParent(options, context);
+        return handleModels(options, context);
       },
     },
     {
-      id: "model.list",
-      async execute(_invocation, context): Promise<void> {
-        context.emitOutput(
-          dataOutput("model.list", { models: await listModels(options) }),
-        );
-      },
-    },
-    {
-      id: "model.current",
-      async execute(_invocation, context): Promise<void> {
-        context.emitOutput(
-          dataOutput("model.current", { model: await currentModel(options) }),
-        );
-      },
-    },
-    {
-      id: "session",
+      id: "sessions",
       execute(_invocation, context): Promise<void> {
         return handleSessionParent(options, context);
       },
     },
     {
-      id: "session.new",
+      id: "new",
       execute(_invocation, context): Promise<void> {
         return handleSessionNew(options, context);
       },
     },
     {
-      id: "session.compact",
+      id: "compact",
       execute(invocation, context): Promise<void> {
         return handleSessionCompact(options, invocation, context);
       },
     },
     {
-      id: "session.resume",
+      id: "resume",
       execute(invocation, context): Promise<void> {
         return handleSessionResume(options, invocation, context);
       },
@@ -407,18 +443,6 @@ export function createBuiltinHandlers(
       id: "permission",
       execute(_invocation, context): Promise<void> {
         return handlePermissionLevelSelection(options, context);
-      },
-    },
-    {
-      id: "permission.default",
-      execute(_invocation, context): Promise<void> {
-        return handlePermissionLevelChange(options, context, "default");
-      },
-    },
-    {
-      id: "permission.full-access",
-      execute(_invocation, context): Promise<void> {
-        return handlePermissionLevelChange(options, context, "full-access");
       },
     },
     {

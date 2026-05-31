@@ -33,6 +33,18 @@ export interface CommandModelSummary {
   readonly id: string;
   readonly label: string;
   readonly provider: string;
+  readonly model?: string;
+  readonly baseUrl?: string;
+  readonly apiKeyEnv?: string;
+  readonly active?: boolean;
+}
+
+export interface CommandModelSwitchInput {
+  readonly provider: string;
+  readonly model: string;
+  readonly baseUrl: string;
+  readonly apiKeyEnv: string;
+  readonly apiKey?: string;
 }
 
 export interface CommandSessionSummary {
@@ -54,6 +66,9 @@ export interface CommandModelProvider {
     | Promise<CommandModelSummary | null>
     | CommandModelSummary
     | null;
+  switchModel?(
+    input: CommandModelSwitchInput,
+  ): Promise<CommandModelSummary> | CommandModelSummary;
 }
 
 export interface CommandSessionProvider {

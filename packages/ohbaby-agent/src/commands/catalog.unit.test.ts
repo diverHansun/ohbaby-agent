@@ -10,9 +10,31 @@ describe("command catalog", () => {
     expect(buildCommandCatalog().commands.map((command) => command.id)).toEqual(
       [
         "status",
+        "exit",
+        "help",
+        "models",
+        "sessions",
+        "new",
+        "compact",
+        "resume",
+        "permission",
+      ],
+    );
+  });
+
+  it("gives every visible command a title", () => {
+    for (const command of buildCommandCatalog().commands) {
+      expect(command.title).toBeTruthy();
+    }
+  });
+
+  it("does not expose removed slash commands", () => {
+    expect(
+      buildCommandCatalog().commands.map((command) => command.id),
+    ).not.toEqual(
+      expect.arrayContaining([
         "tools",
         "abort",
-        "exit",
         "model",
         "model.list",
         "model.current",
@@ -20,10 +42,9 @@ describe("command catalog", () => {
         "session.new",
         "session.compact",
         "session.resume",
-        "permission",
         "permission.default",
         "permission.full-access",
-      ],
+      ]),
     );
   });
 
@@ -36,46 +57,43 @@ describe("command catalog", () => {
           path: ["exit"],
         }),
         expect.objectContaining({
-          id: "model",
-          parentBehavior: "none",
-          path: ["model"],
+          aliases: [["?"]],
+          id: "help",
+          path: ["help"],
         }),
         expect.objectContaining({
-          id: "session",
+          id: "models",
           parentBehavior: "interaction",
-          path: ["session"],
+          path: ["models"],
         }),
         expect.objectContaining({
-          id: "session.new",
-          aliases: [["new"]],
-          path: ["session", "new"],
+          id: "sessions",
+          parentBehavior: "interaction",
+          path: ["sessions"],
+        }),
+        expect.objectContaining({
+          id: "new",
+          aliases: [],
+          path: ["new"],
         }),
         expect.objectContaining({
           acceptsArguments: true,
-          aliases: [["compact"]],
+          aliases: [],
           argsHint: "[--session_id <id>] [--force]",
-          id: "session.compact",
-          path: ["session", "compact"],
+          id: "compact",
+          path: ["compact"],
         }),
         expect.objectContaining({
           acceptsArguments: true,
           aliases: [],
           argsHint: "--session_id <id>",
-          id: "session.resume",
+          id: "resume",
           path: ["resume"],
         }),
         expect.objectContaining({
           id: "permission",
-          parentBehavior: "none",
+          parentBehavior: "interaction",
           path: ["permission"],
-        }),
-        expect.objectContaining({
-          id: "permission.default",
-          path: ["permission", "default"],
-        }),
-        expect.objectContaining({
-          id: "permission.full-access",
-          path: ["permission", "full-access"],
         }),
       ]),
     );

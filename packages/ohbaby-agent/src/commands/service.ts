@@ -16,6 +16,18 @@ import type { CommandService, CommandServiceOptions } from "./types.js";
 
 const SKILL_COMMAND_PREFIX = "skill.";
 const SKILL_COMMAND_SURFACES = ["tui", "stdout", "headless"] as const;
+const RESERVED_EXTERNAL_COMMAND_ROOTS = new Set([
+  "abort",
+  "cancel",
+  "mode",
+  "model",
+  "session",
+  "tools",
+]);
+const RESERVED_EXTERNAL_COMMAND_PATHS = new Set([
+  "permission/default",
+  "permission/full-access",
+]);
 
 function createDefaultCommandRunId(): () => string {
   let next = 1;
@@ -58,6 +70,24 @@ function skillToCommand(skill: CommandSkillSummary): UiCommandSpec {
   } as const;
 }
 
+function commandPathKey(path: readonly string[]): string {
+  return path.join("/").toLowerCase();
+}
+
+function isReservedExternalPath(path: readonly string[]): boolean {
+  const root = path[0]?.toLowerCase();
+  if (root && RESERVED_EXTERNAL_COMMAND_ROOTS.has(root)) {
+    return true;
+  }
+  return RESERVED_EXTERNAL_COMMAND_PATHS.has(commandPathKey(path));
+}
+
+function isAllowedExternalCommand(command: UiCommandSpec): boolean {
+  return [command.path, ...(command.aliases ?? [])].every(
+    (path) => !isReservedExternalPath(path),
+  );
+}
+
 async function buildCatalog(
   options: CommandServiceOptions,
 ): Promise<UiCommandCatalog> {
@@ -65,7 +95,10 @@ async function buildCatalog(
     skillToCommand,
   );
   const catalog = buildCommandCatalog({
-    extraCommands: [...(options.extraCommands ?? []), ...(skillCommands ?? [])],
+    extraCommands: [
+      ...(options.extraCommands ?? []),
+      ...(skillCommands ?? []),
+    ].filter(isAllowedExternalCommand),
   });
   validateUniqueAliases(catalog.commands);
   return catalog;
@@ -111,7 +144,14 @@ async function executeSkillCommand(
 export function createCommandService(
   options: CommandServiceOptions,
 ): CommandService {
-  const handlers = createBuiltinHandlers(options);
+  const handlers = createBuiltinHandlers(options, {
+    async listCommands(surface): Promise<UiCommandCatalog> {
+      return filterCommandCatalogBySurface(
+        await buildCatalog(options),
+        surface,
+      );
+    },
+  });
   for (const handler of options.extraHandlers ?? []) {
     handlers.set(handler.id, handler);
   }
