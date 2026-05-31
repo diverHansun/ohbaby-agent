@@ -1,11 +1,9 @@
 import type {
   SubmitPromptOptions,
   UiBackendClient,
-  UiCommandArgumentMode,
   UiCommandCatalog,
   UiCommandInvocation,
-  UiCommandParentBehavior,
-  UiCommandSource,
+  UiCommandSpec,
   UiCommandSurface,
   UiEvent as SdkUiEvent,
   UiEventHandler,
@@ -25,23 +23,10 @@ import type {
 
 export type TuiRuntimeStatus = UiRunStatus;
 
-export interface TuiCommandSpec {
-  readonly id: string;
-  readonly path: readonly string[];
-  readonly description: string;
-  readonly argumentMode?: UiCommandArgumentMode;
-  readonly source?: UiCommandSource;
-  readonly title?: string;
-  readonly aliases?: readonly (readonly string[])[];
-  readonly surfaces?: readonly string[];
-  readonly category?: string;
-  readonly parentBehavior?: UiCommandParentBehavior;
-  readonly acceptsArguments?: boolean;
-}
+export type TuiCommandSpec = UiCommandSpec;
 
-export interface TuiCommandCatalog {
-  readonly version: string;
-  readonly surface?: string;
+export interface TuiCommandCatalog extends UiCommandCatalog {
+  readonly surface?: UiCommandSurface;
   readonly commands: readonly TuiCommandSpec[];
   readonly loadedAt?: number;
 }

@@ -5,6 +5,7 @@ import { OhbabyTerminalApp } from "./index.js";
 import type {
   TuiBackendClient,
   TuiCommandCatalog,
+  TuiCommandSpec,
   TuiEvent,
   TuiEventHandler,
 } from "./store/snapshot.js";
@@ -36,61 +37,36 @@ function snapshot(): UiSnapshot {
 
 const catalog: TuiCommandCatalog = {
   commands: [
-    {
+    command({
+      description: "Show current model",
+      id: "models",
+      path: ["models"],
+    }),
+    command({
       acceptsArguments: true,
-      description: "Open model switcher",
-      id: "model.switch",
-      path: ["model", "switch"],
-      surfaces: ["tui"],
-    },
-    {
       description: "Resume a session",
-      id: "session.resume",
+      id: "resume",
       path: ["resume"],
-      surfaces: ["tui"],
-    },
-    {
+    }),
+    command({
       description: "Choose a session",
-      id: "session",
-      path: ["session"],
-      surfaces: ["tui"],
-    },
-    {
-      aliases: [["new"]],
+      id: "sessions",
+      path: ["sessions"],
+    }),
+    command({
       description: "Start a new session",
-      id: "session.new",
-      path: ["session", "new"],
-      surfaces: ["tui"],
-    },
+      id: "new",
+      path: ["new"],
+    }),
+    command({
+      description: "Choose permission level",
+      id: "permission",
+      path: ["permission"],
+    }),
   ],
   loadedAt: 1_771_000_000_000,
   surface: "tui",
   version: "v1",
-};
-
-const permissionCatalog: TuiCommandCatalog = {
-  ...catalog,
-  commands: [
-    ...catalog.commands,
-    {
-      description: "Choose permission level",
-      id: "permission",
-      path: ["permission"],
-      surfaces: ["tui"],
-    },
-    {
-      description: "Use default permission level",
-      id: "permission.default",
-      path: ["permission", "default"],
-      surfaces: ["tui"],
-    },
-    {
-      description: "Use full-access permission level",
-      id: "permission.full-access",
-      path: ["permission", "full-access"],
-      surfaces: ["tui"],
-    },
-  ],
 };
 
 afterEach(() => {
@@ -608,20 +584,21 @@ describe("OhbabyTerminalApp", () => {
     expect(client.executeCommand).not.toHaveBeenCalled();
 
     app.stdin.write("\u0015");
-    app.stdin.write("/model switch gpt-5.5");
+    app.stdin.write("/resume session_2");
     app.stdin.write("\r");
     await flush();
 
     expect(client.executeCommand).toHaveBeenCalledWith(
       expect.objectContaining({
-        argv: ["gpt-5.5"],
-        commandId: "model.switch",
+        argv: ["session_2"],
+        commandId: "resume",
+        path: ["resume"],
         sessionId: "session_1",
       }),
     );
   });
 
-  it("executes the /new session alias from the backend catalog", async () => {
+  it("executes the top-level /new session command from the backend catalog", async () => {
     const client = createFakeClient(snapshot(), catalog);
     const app = render(<OhbabyTerminalApp client={client} />);
 
@@ -633,15 +610,15 @@ describe("OhbabyTerminalApp", () => {
     expect(client.executeCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         argv: [],
-        commandId: "session.new",
-        path: ["session", "new"],
+        commandId: "new",
+        path: ["new"],
         raw: "/new",
         sessionId: "session_1",
       }),
     );
   });
 
-  it("shows slash candidates and executes the selected partial command", async () => {
+  it("shows slash candidates and executes a selected catalog command", async () => {
     const client = createFakeClient(snapshot(), catalog);
     const app = render(<OhbabyTerminalApp client={client} />);
 
@@ -650,14 +627,14 @@ describe("OhbabyTerminalApp", () => {
     const frame = await waitForFrame(
       app,
       (nextFrame) =>
-        nextFrame.includes("/model switch - Open model switcher") &&
+        nextFrame.includes("/models - Show current model") &&
         nextFrame.includes("/resume - Resume a session") &&
-        nextFrame.includes("/session - Choose a session"),
+        nextFrame.includes("/sessions - Choose a session"),
     );
 
-    expect(frame).toContain("/model switch - Open model switcher");
+    expect(frame).toContain("/models - Show current model");
     expect(frame).toContain("/resume - Resume a session");
-    expect(frame).toContain("/session - Choose a session");
+    expect(frame).toContain("/sessions - Choose a session");
 
     app.stdin.write("\u001B[B");
     await flush();
@@ -666,7 +643,7 @@ describe("OhbabyTerminalApp", () => {
 
     expect(client.executeCommand).toHaveBeenCalledWith(
       expect.objectContaining({
-        commandId: "session.resume",
+        commandId: "models",
         sessionId: "session_1",
       }),
     );
@@ -677,9 +654,12 @@ describe("OhbabyTerminalApp", () => {
       "A very long command description that should not stretch the input area past a readable terminal width during dogfood sessions";
     const longCatalog: TuiCommandCatalog = {
       commands: Array.from({ length: 8 }, (_, index) => ({
+        argumentMode: "argv" as const,
+        category: "system",
         description: longDescription,
         id: `cmd.${String(index)}`,
         path: [`cmd${String(index)}`],
+        source: "builtin" as const,
         surfaces: ["tui"],
       })),
       loadedAt: 1_771_000_000_000,
@@ -704,24 +684,18 @@ describe("OhbabyTerminalApp", () => {
     expect(frame).not.toContain("/cmd6");
   });
 
-  it("executes a selected slash candidate even when the typed parent is exact", async () => {
-    const client = createFakeClient(snapshot(), permissionCatalog);
+  it("does not execute permission levels as slash subcommands", async () => {
+    const client = createFakeClient(snapshot(), catalog);
     const app = render(<OhbabyTerminalApp client={client} />);
 
     await flush();
-    app.stdin.write("/permission");
-    await flush();
-    app.stdin.write("\u001B[B");
-    await flush();
+    app.stdin.write("/permission full-access");
     app.stdin.write("\r");
     await flush();
 
-    expect(client.executeCommand).toHaveBeenCalledWith(
-      expect.objectContaining({
-        commandId: "permission.default",
-        path: ["permission", "default"],
-        sessionId: "session_1",
-      }),
+    expect(client.executeCommand).not.toHaveBeenCalled();
+    expect(app.lastFrame()).toContain(
+      'Unknown command "/permission full-access"',
     );
   });
 
@@ -1011,6 +985,19 @@ function createFakeClient(
         handlers.delete(handler);
       };
     },
+  };
+}
+
+function command(
+  input: Pick<TuiCommandSpec, "description" | "id" | "path"> &
+    Partial<TuiCommandSpec>,
+): TuiCommandSpec {
+  return {
+    argumentMode: "argv",
+    category: "system",
+    source: "builtin",
+    surfaces: ["tui"],
+    ...input,
   };
 }
 

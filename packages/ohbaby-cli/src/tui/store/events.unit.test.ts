@@ -37,9 +37,12 @@ function catalog(version = "v1"): TuiCommandCatalog {
   return {
     commands: [
       {
-        description: "Select or switch model",
-        id: "model",
-        path: ["model"],
+        argumentMode: "argv",
+        category: "model",
+        description: "Show current model",
+        id: "models",
+        path: ["models"],
+        source: "builtin",
         surfaces: ["tui"],
       },
     ],
@@ -426,12 +429,62 @@ describe("TUI store event reducer", () => {
       "compact: compacted (92 -> 24 tokens)",
     );
 
+    state = applyTuiEvent(state, {
+      clientInvocationId: "invoke_status",
+      commandRunId: "command_status",
+      output: {
+        data: {
+          model: {
+            id: "openai:gpt-5.5",
+            label: "GPT-5.5",
+            provider: "openai",
+          },
+          status: "idle",
+        },
+        kind: "data",
+        subject: "status",
+      },
+      timestamp: 4,
+      type: "command.result.delivered",
+    });
+
+    expect(state.commandNotices.at(-1)?.text).toBe(
+      "status: idle | model: GPT-5.5",
+    );
+
+    state = applyTuiEvent(state, {
+      clientInvocationId: "invoke_models",
+      commandRunId: "command_models",
+      output: {
+        data: {
+          current: {
+            id: "openai:gpt-5.5",
+            label: "GPT-5.5",
+            provider: "openai",
+          },
+          models: [
+            {
+              id: "openai:gpt-5.5",
+              label: "GPT-5.5",
+              provider: "openai",
+            },
+          ],
+        },
+        kind: "data",
+        subject: "models.current",
+      },
+      timestamp: 5,
+      type: "command.result.delivered",
+    });
+
+    expect(state.commandNotices.at(-1)?.text).toBe("model: GPT-5.5");
+
     const longText = "x".repeat(400);
     state = applyTuiEvent(state, {
       clientInvocationId: "invoke_long",
       commandRunId: "command_long",
       output: { kind: "text", text: longText },
-      timestamp: 4,
+      timestamp: 6,
       type: "command.result.delivered",
     });
 

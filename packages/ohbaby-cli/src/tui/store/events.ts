@@ -685,6 +685,10 @@ function formatDataCommandOutput(
     }
     case "status": {
       const status = getString(output.data, "status");
+      const model = formatModelLabel(getRecord(output.data, "model"));
+      if (status && model) {
+        return `status: ${status} | model: ${model}`;
+      }
       return status ? `status: ${status}` : JSON.stringify(output.data);
     }
     case "tools": {
@@ -739,26 +743,16 @@ function formatDataCommandOutput(
         ? `sessions: ${sessions.join(", ")}`
         : "sessions: none";
     }
-    case "model.current": {
-      const model = getRecord(output.data, "model");
-      const label = model
-        ? (getString(model, "label") ?? getString(model, "id"))
-        : undefined;
-      return label ? `model: ${label}` : JSON.stringify(output.data);
-    }
-    case "model.list": {
-      const models = Array.isArray(output.data.models)
-        ? output.data.models
-            .map((model) =>
-              isRecord(model)
-                ? (getString(model, "label") ?? getString(model, "id"))
-                : null,
-            )
-            .filter((model): model is string => Boolean(model))
-        : [];
+    case "models.current": {
+      const model = getRecord(output.data, "current");
+      const label = formatModelLabel(model);
+      if (label) {
+        return `model: ${label}`;
+      }
+      const models = formatModelList(output.data);
       return models.length > 0
         ? `models: ${models.join(", ")}`
-        : "models: none";
+        : JSON.stringify(output.data);
     }
     default:
       return JSON.stringify(output.data);
@@ -789,6 +783,23 @@ function getString(
 ): string | undefined {
   const value = record[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function formatModelLabel(
+  model: Record<string, unknown> | undefined,
+): string | undefined {
+  if (!model) {
+    return undefined;
+  }
+  return getString(model, "label") ?? getString(model, "id");
+}
+
+function formatModelList(data: Record<string, unknown>): string[] {
+  return Array.isArray(data.models)
+    ? data.models
+        .map((model) => (isRecord(model) ? formatModelLabel(model) : null))
+        .filter((model): model is string => Boolean(model))
+    : [];
 }
 
 function getNumber(

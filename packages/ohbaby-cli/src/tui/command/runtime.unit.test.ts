@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TuiCommandCatalog } from "../store/snapshot.js";
+import type { TuiCommandCatalog, TuiCommandSpec } from "../store/snapshot.js";
 import {
   applySlashCompletion,
   filterCommandCatalog,
@@ -9,51 +9,32 @@ import {
 
 const catalog: TuiCommandCatalog = {
   commands: [
-    {
-      description: "Select or switch model",
-      id: "model",
-      path: ["model"],
-      surfaces: ["tui"],
-    },
-    {
-      acceptsArguments: true,
-      description: "Open model switcher",
-      id: "model.switch",
-      path: ["model", "switch"],
-      surfaces: ["tui"],
-    },
-    {
+    command({
+      description: "Show current model",
+      id: "models",
+      path: ["models"],
+    }),
+    command({
       acceptsArguments: true,
       description: "Resume a session",
-      id: "session.resume",
-      aliases: [],
+      id: "resume",
       path: ["resume"],
-      surfaces: ["tui"],
-    },
-    {
+    }),
+    command({
       description: "Choose a session",
-      id: "session",
-      path: ["session"],
-      surfaces: ["tui"],
-    },
-    {
+      id: "sessions",
+      path: ["sessions"],
+    }),
+    command({
+      description: "Start a new session",
+      id: "new",
+      path: ["new"],
+    }),
+    command({
       description: "Choose permission level",
       id: "permission",
       path: ["permission"],
-      surfaces: ["tui"],
-    },
-    {
-      description: "Use default permission level",
-      id: "permission.default",
-      path: ["permission", "default"],
-      surfaces: ["tui"],
-    },
-    {
-      description: "Use full access permission level",
-      id: "permission.full-access",
-      path: ["permission", "full-access"],
-      surfaces: ["tui"],
-    },
+    }),
   ],
   loadedAt: 1_771_000_000_000,
   surface: "tui",
@@ -61,50 +42,60 @@ const catalog: TuiCommandCatalog = {
 };
 
 describe("slash command runtime", () => {
-  it("parses slash input into command path and argv", () => {
-    const parsed = parseSlashInput('/model switch "gpt-5.5" --reason fast');
+  it("delegates slash parsing to the SDK parser", () => {
+    const parsed = parseSlashInput('/resume   "session 1" --force');
 
     expect(parsed).toMatchObject({
-      argv: ["gpt-5.5", "--reason", "fast"],
-      path: ["model", "switch"],
-      rawArgs: '"gpt-5.5" --reason fast',
-      rawPath: "model switch",
+      argv: ["session 1", "--force"],
+      path: ["resume"],
+      rawArgs: '"session 1" --force',
+      segments: ["resume", "session 1", "--force"],
     });
   });
 
-  it("resolves only exact command matches", () => {
-    const parsed = parseSlashInput("/model switch gpt-5.5");
-    const result = resolveCommand(parsed, catalog, {
+  it("returns not-slash for normal prompt text", () => {
+    const result = resolveCommand(parseSlashInput("hello"), catalog, {
+      surface: "tui",
+    });
+
+    expect(result).toMatchObject({
+      kind: "not-slash",
+      reason: "Input is not a slash command",
+    });
+  });
+
+  it("resolves /models as the single model command", () => {
+    const result = resolveCommand(parseSlashInput("/models"), catalog, {
       sessionId: "session_1",
       surface: "tui",
     });
 
     expect(result.kind).toBe("resolved");
-    expect(result.kind === "resolved" ? result.invocation.commandId : "").toBe(
-      "model.switch",
+    expect(result.kind === "resolved" ? result.invocation : null).toEqual(
+      expect.objectContaining({
+        argv: [],
+        commandId: "models",
+        path: ["models"],
+        raw: "/models",
+        rawArgs: "",
+        sessionId: "session_1",
+        surface: "tui",
+      }),
     );
   });
 
-  it("builds invocation args from matched tokens instead of raw spacing", () => {
-    const parsed = parseSlashInput('/model   switch   "gpt-5.5 beta"');
-    const result = resolveCommand(parsed, catalog, { surface: "tui" });
-
-    expect(result.kind).toBe("resolved");
-    expect(result.kind === "resolved" ? result.invocation.rawArgs : "").toBe(
-      '"gpt-5.5 beta"',
+  it("builds invocation args from SDK matched segments", () => {
+    const result = resolveCommand(
+      parseSlashInput('/resume   "session 1"'),
+      catalog,
+      {
+        surface: "tui",
+      },
     );
-    expect(result.kind === "resolved" ? result.invocation.argv : []).toEqual([
-      "gpt-5.5 beta",
-    ]);
-  });
-
-  it("resolves the top-level resume command with its argument span", () => {
-    const parsed = parseSlashInput('/resume   "session 1"');
-    const result = resolveCommand(parsed, catalog, { surface: "tui" });
 
     expect(result.kind).toBe("resolved");
     expect(result.kind === "resolved" ? result.invocation.commandId : "").toBe(
-      "session.resume",
+      "resume",
     );
     expect(result.kind === "resolved" ? result.invocation.argv : []).toEqual([
       "session 1",
@@ -114,42 +105,15 @@ describe("slash command runtime", () => {
     );
   });
 
-  it("does not infer /model gpt-5.5 as /model switch", () => {
-    const parsed = parseSlashInput("/model gpt-5.5");
-    const result = resolveCommand(parsed, catalog, { surface: "tui" });
-
-    expect(result).toMatchObject({
-      kind: "not-found",
-      reason: "No exact command match",
-    });
-  });
-
-  it("filters command catalog for slash hints", () => {
-    const parsed = parseSlashInput("/ses");
-    const matches = filterCommandCatalog(parsed, catalog, { surface: "tui" });
-
-    expect(matches.map((command) => command.id)).toEqual(["session"]);
-  });
-
-  it("does not resolve removed session subcommands", () => {
-    expect(
-      resolveCommand(parseSlashInput("/session list"), catalog, {
-        surface: "tui",
-      }),
-    ).toMatchObject({
-      kind: "not-found",
-    });
-    expect(
-      resolveCommand(parseSlashInput("/session resume session_1"), catalog, {
-        surface: "tui",
-      }),
-    ).toMatchObject({
-      kind: "not-found",
-    });
-  });
-
-  it("does not resolve removed mode commands through permission", () => {
-    for (const input of ["/permission plan", "/permission auto", "/mode"]) {
+  it("does not resolve removed slash commands", () => {
+    for (const input of [
+      "/model",
+      "/model switch gpt-5.5",
+      "/session list",
+      "/session resume session_1",
+      "/permission default",
+      "/permission full-access",
+    ]) {
       expect(
         resolveCommand(parseSlashInput(input), catalog, {
           surface: "tui",
@@ -160,14 +124,12 @@ describe("slash command runtime", () => {
     }
   });
 
-  it("orders exact slash command hints before shared-prefix commands", () => {
-    const parsed = parseSlashInput("/permission");
-    const matches = filterCommandCatalog(parsed, catalog, { surface: "tui" });
+  it("filters command catalog for slash hints through SDK semantics", () => {
+    const matches = filterCommandCatalog(parseSlashInput("/ses"), catalog, {
+      surface: "tui",
+    });
 
-    expect(matches.map((command) => command.id).slice(0, 2)).toEqual([
-      "permission",
-      "permission.default",
-    ]);
+    expect(matches.map((command) => command.id)).toEqual(["sessions"]);
   });
 
   it("applies tab completion without resolving or executing", () => {
@@ -176,3 +138,16 @@ describe("slash command runtime", () => {
     expect(completed).toEqual("/resume ");
   });
 });
+
+function command(
+  input: Pick<TuiCommandSpec, "description" | "id" | "path"> &
+    Partial<TuiCommandSpec>,
+): TuiCommandSpec {
+  return {
+    argumentMode: "argv",
+    category: "system",
+    source: "builtin",
+    surfaces: ["tui"],
+    ...input,
+  };
+}
