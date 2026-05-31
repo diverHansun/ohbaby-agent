@@ -111,7 +111,7 @@ describe("CommandService", () => {
     ).toEqual(expect.arrayContaining(["models", "permission"]));
   });
 
-  it("does not expose dynamic commands that reuse reserved slash roots", async () => {
+  it("allows reclaimed external roots while protecting active reserved paths", async () => {
     const { service } = createServiceHarness({
       extraCommands: [
         {
@@ -120,6 +120,24 @@ describe("CommandService", () => {
           description: "Legacy model command",
           id: "plugin.model",
           path: ["model"],
+          source: "plugin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "argv",
+          category: "plugin",
+          description: "Legacy abort command",
+          id: "plugin.abort",
+          path: ["abort"],
+          source: "plugin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "argv",
+          category: "plugin",
+          description: "Plugin tools command",
+          id: "plugin.tools",
+          path: ["tools"],
           source: "plugin",
           surfaces: ["tui"],
         },
@@ -149,11 +167,17 @@ describe("CommandService", () => {
     const catalog = await service.listCommands({ surface: "tui" });
 
     expect(catalog.commands.map((command) => command.id)).toEqual(
-      expect.arrayContaining(["diagnostics", "skill.review"]),
+      expect.arrayContaining([
+        "diagnostics",
+        "plugin.abort",
+        "plugin.tools",
+        "skill.review",
+        "skill.session",
+      ]),
     );
     expect(
       catalog.commands.map((command) => command.path.join("/")),
-    ).not.toEqual(expect.arrayContaining(["model", "session"]));
+    ).not.toEqual(expect.arrayContaining(["model"]));
   });
 
   it("reports configured models from the /models command", async () => {

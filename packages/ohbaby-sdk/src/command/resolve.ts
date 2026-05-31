@@ -18,6 +18,10 @@ function normalizePath(path: readonly string[]): string {
   return path.join("/").toLowerCase();
 }
 
+function normalizePartialPath(input: string): string {
+  return input.trim().replace(/\s+/g, "/").toLowerCase();
+}
+
 function pathMatches(
   candidatePath: readonly string[],
   segments: readonly string[],
@@ -143,7 +147,8 @@ function isVisibleOnSurface(
 
 function pathOrAliasMatches(command: UiCommandSpec, query: string): boolean {
   const paths = [command.path, ...(command.aliases ?? [])];
-  return paths.some((path) => normalizePath(path).startsWith(query));
+  const normalizedQuery = normalizePartialPath(query);
+  return paths.some((path) => normalizePath(path).startsWith(normalizedQuery));
 }
 
 export function filterCommandCatalog(

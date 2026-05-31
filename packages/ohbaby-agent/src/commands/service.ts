@@ -17,12 +17,9 @@ import type { CommandService, CommandServiceOptions } from "./types.js";
 const SKILL_COMMAND_PREFIX = "skill.";
 const SKILL_COMMAND_SURFACES = ["tui", "stdout", "headless"] as const;
 const RESERVED_EXTERNAL_COMMAND_ROOTS = new Set([
-  "abort",
   "cancel",
   "mode",
   "model",
-  "session",
-  "tools",
 ]);
 const RESERVED_EXTERNAL_COMMAND_PATHS = new Set([
   "permission/default",

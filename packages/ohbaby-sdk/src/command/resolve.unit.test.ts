@@ -68,6 +68,19 @@ const catalog: UiCommandCatalog = {
       title: "Resume",
     },
     {
+      acceptsArguments: true,
+      aliases: [["project", "load"]],
+      argumentMode: "argv",
+      argsHint: "<path>",
+      category: "project",
+      description: "Open a project",
+      id: "project.open",
+      path: ["project", "open"],
+      source: "builtin",
+      surfaces: ["tui", "stdout", "headless"],
+      title: "Open Project",
+    },
+    {
       aliases: [],
       argumentMode: "argv",
       category: "permission",
@@ -180,6 +193,22 @@ describe("resolveCommand", () => {
     });
   });
 
+  it("resolves multi-segment command paths and keeps only remaining argv", () => {
+    expect(
+      resolveCommand(
+        catalog,
+        parseSlashInput('/project open "D:/Projects/Example"'),
+        { surface: "tui" },
+      ),
+    ).toMatchObject({
+      ok: true,
+      argv: ["D:/Projects/Example"],
+      command: { id: "project.open" },
+      path: ["project", "open"],
+      rawArgs: '"D:/Projects/Example"',
+    });
+  });
+
   it("does not resolve permission levels as slash subcommands", () => {
     for (const input of [
       "/permission default",
@@ -225,5 +254,14 @@ describe("filterCommandCatalog", () => {
     expect(
       filterCommandCatalog(catalog, "/session r", { surface: "tui" }),
     ).toEqual([]);
+  });
+
+  it("filters nested command paths with space-separated slash input", () => {
+    expect(
+      filterCommandCatalog(catalog, "/project o", { surface: "tui" }),
+    ).toEqual([expect.objectContaining({ id: "project.open" })]);
+    expect(
+      filterCommandCatalog(catalog, "/project l", { surface: "tui" }),
+    ).toEqual([expect.objectContaining({ id: "project.open" })]);
   });
 });
