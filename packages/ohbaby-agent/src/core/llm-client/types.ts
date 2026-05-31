@@ -11,9 +11,9 @@
 
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions/completions";
 import type {
-  ProviderInstance,
-  ProviderTokenUsage,
-} from "../../services/providers/index.js";
+  InterfaceProviderInstance,
+  InterfaceProviderTokenUsage,
+} from "../../services/interface-providers/index.js";
 import type { LLMConfig } from "../../config/index.js";
 
 /**
@@ -35,7 +35,7 @@ export type ChatCompletionMessage = ChatCompletionMessageParam;
  * - completion_tokens: Number of tokens generated
  * - total_tokens: Sum of prompt and completion tokens
  */
-export type TokenUsage = ProviderTokenUsage;
+export type TokenUsage = InterfaceProviderTokenUsage;
 
 /**
  * Finish reason for chat completion.
@@ -87,7 +87,7 @@ export interface ParsedToolCall {
  */
 export interface LLMClientInstance<TClient = unknown> {
   /** Provider adapter used by the streaming core */
-  provider: ProviderInstance<TClient>;
+  provider: InterfaceProviderInstance<TClient>;
 
   /** Immutable configuration for this LLM client */
   config: {
@@ -97,8 +97,14 @@ export interface LLMClientInstance<TClient = unknown> {
     /** Model identifier (e.g., 'gpt-4', 'gpt-4-turbo') */
     model: string;
 
+    /** Environment variable name used for the API key */
+    apiKeyEnv: string;
+
     /** API base URL */
     baseUrl: string;
+
+    /** API protocol adapter used by the runtime client */
+    interfaceProvider: LLMConfig["interfaceProvider"];
 
     /** Sampling temperature (0-2). Higher = more random */
     temperature: number;

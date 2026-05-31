@@ -7,9 +7,9 @@ import { createBus } from "../../bus/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import type { MessageManager } from "../../core/message/index.js";
 import type {
-  ProviderRequest,
-  ProviderStreamEvent,
-} from "../../services/providers/index.js";
+  InterfaceProviderRequest,
+  InterfaceProviderStreamEvent,
+} from "../../services/interface-providers/index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -55,6 +55,8 @@ function fakeLlmClient(
       provider: "fake",
       temperature: 0,
       ...config,
+      apiKeyEnv: config.apiKeyEnv ?? "FAKE_API_KEY",
+      interfaceProvider: config.interfaceProvider ?? "openai-compatible",
     },
     provider: {
       client: { kind: "fake" },
@@ -71,10 +73,10 @@ function fakeLlmClient(
 }
 
 function createProviderStream(
-  events: readonly ProviderStreamEvent[],
-): AsyncGenerator<ProviderStreamEvent, void, unknown> {
+  events: readonly InterfaceProviderStreamEvent[],
+): AsyncGenerator<InterfaceProviderStreamEvent, void, unknown> {
   return (async function* (): AsyncGenerator<
-    ProviderStreamEvent,
+    InterfaceProviderStreamEvent,
     void,
     unknown
   > {
@@ -86,8 +88,8 @@ function createProviderStream(
 
 function recordingFakeLlmClient(input: {
   readonly config?: Partial<LLMClientInstance<FakeSdkClient>["config"]>;
-  readonly events?: readonly ProviderStreamEvent[];
-  readonly requests: ProviderRequest[];
+  readonly events?: readonly InterfaceProviderStreamEvent[];
+  readonly requests: InterfaceProviderRequest[];
 }): LLMClientInstance<FakeSdkClient> {
   return {
     config: {
@@ -97,6 +99,8 @@ function recordingFakeLlmClient(input: {
       provider: "fake",
       temperature: 0,
       ...input.config,
+      apiKeyEnv: input.config?.apiKeyEnv ?? "FAKE_API_KEY",
+      interfaceProvider: input.config?.interfaceProvider ?? "openai-compatible",
     },
     provider: {
       client: { kind: "fake" },
@@ -106,7 +110,7 @@ function recordingFakeLlmClient(input: {
       },
       streamChatCompletion(
         request,
-      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         input.requests.push(request);
         return Promise.resolve(
           createProviderStream(
@@ -245,7 +249,7 @@ async function createPromptCompositionForTest(input: {
   readonly policyMode: "ask" | "plan" | "agent";
 }): Promise<{
   readonly composition: Awaited<ReturnType<typeof createUiRuntimeComposition>>;
-  readonly requests: ProviderRequest[];
+  readonly requests: InterfaceProviderRequest[];
   readonly workdir: string;
 }> {
   const bus = createBus();
@@ -254,7 +258,7 @@ async function createPromptCompositionForTest(input: {
     bus,
     initialMode: input.policyMode === "plan" ? "plan" : "auto",
   });
-  const requests: ProviderRequest[] = [];
+  const requests: InterfaceProviderRequest[] = [];
   const composition = await createUiRuntimeComposition({
     agentManager: new AgentManager(),
     bus,
@@ -358,7 +362,7 @@ describe("createUiRuntimeComposition skill tools", () => {
         type: "text",
       });
     }
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const llmClient = recordingFakeLlmClient({
       config: {
         contextWindowTokens: 128_000,
@@ -419,7 +423,7 @@ describe("createUiRuntimeComposition skill tools", () => {
         type: "text",
       });
     }
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const llmClient = recordingFakeLlmClient({
       config: {
         contextWindowTokens: 128_000,

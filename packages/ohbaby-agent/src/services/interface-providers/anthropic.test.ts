@@ -1,7 +1,10 @@
 import type { RawMessageStreamEvent } from "@anthropic-ai/sdk/resources/messages";
 import { describe, expect, it, vi } from "vitest";
 import { createAnthropicProvider } from "./anthropic.js";
-import type { ProviderRequest, ProviderStreamEvent } from "./types.js";
+import type {
+  InterfaceProviderRequest,
+  InterfaceProviderStreamEvent,
+} from "./types.js";
 
 function createRawStream(
   events: readonly RawMessageStreamEvent[],
@@ -20,7 +23,7 @@ function createRawStream(
 describe("anthropic provider", () => {
   it("should convert OpenAI-compatible messages and tools to Anthropic params", async () => {
     const provider = createAnthropicProvider({
-      provider: "anthropic",
+      id: "anthropic",
       apiKey: "test-key",
       baseUrl: "https://api.anthropic.com",
     });
@@ -46,8 +49,8 @@ describe("anthropic provider", () => {
     );
 
     const controller = new AbortController();
-    const events: ProviderStreamEvent[] = [];
-    const request: ProviderRequest = {
+    const events: InterfaceProviderStreamEvent[] = [];
+    const request: InterfaceProviderRequest = {
       model: "claude-3-5-sonnet-latest",
       messages: [
         { role: "system", content: "You are helpful." },
@@ -163,7 +166,7 @@ describe("anthropic provider", () => {
 
   it("should normalize Anthropic text and tool-use streaming events", async () => {
     const provider = createAnthropicProvider({
-      provider: "claude",
+      id: "claude",
       apiKey: "test-key",
       baseUrl: "https://api.anthropic.com",
     });
@@ -238,7 +241,7 @@ describe("anthropic provider", () => {
       temperature: 0.2,
       maxTokens: 128,
     });
-    const events: ProviderStreamEvent[] = [];
+    const events: InterfaceProviderStreamEvent[] = [];
 
     for await (const event of result) {
       events.push(event);
@@ -287,7 +290,7 @@ describe("anthropic provider", () => {
 
   it("should preserve pause_turn as raw finish reason", async () => {
     const provider = createAnthropicProvider({
-      provider: "anthropic",
+      id: "anthropic",
       apiKey: "test-key",
       baseUrl: "https://api.anthropic.com",
     });
@@ -318,7 +321,7 @@ describe("anthropic provider", () => {
       temperature: 0.2,
       maxTokens: 32,
     });
-    const events: ProviderStreamEvent[] = [];
+    const events: InterfaceProviderStreamEvent[] = [];
 
     for await (const event of result) {
       events.push(event);

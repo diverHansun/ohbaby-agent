@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UiRun } from "ohbaby-sdk";
 import type {
-  ProviderRequest,
-  ProviderStreamEvent,
-} from "../services/providers/index.js";
+  InterfaceProviderRequest,
+  InterfaceProviderStreamEvent,
+} from "../services/interface-providers/index.js";
 import type { LLMClientInstance } from "../core/llm-client/index.js";
 import {
   closeDatabase,
@@ -23,10 +23,10 @@ interface FakeSdkClient {
 }
 
 function createProviderStream(
-  events: readonly ProviderStreamEvent[],
-): AsyncGenerator<ProviderStreamEvent, void, unknown> {
+  events: readonly InterfaceProviderStreamEvent[],
+): AsyncGenerator<InterfaceProviderStreamEvent, void, unknown> {
   return (async function* (): AsyncGenerator<
-    ProviderStreamEvent,
+    InterfaceProviderStreamEvent,
     void,
     unknown
   > {
@@ -37,7 +37,7 @@ function createProviderStream(
 }
 
 function createFakeLLMClient(
-  events: readonly ProviderStreamEvent[],
+  events: readonly InterfaceProviderStreamEvent[],
 ): LLMClientInstance<FakeSdkClient> {
   return {
     provider: {
@@ -45,8 +45,8 @@ function createFakeLLMClient(
       kind: "openai-compatible",
       client: { kind: "fake" },
       streamChatCompletion(
-        _request: ProviderRequest,
-      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        _request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         return Promise.resolve(createProviderStream(events));
       },
       isAbortError(): boolean {
@@ -56,7 +56,9 @@ function createFakeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
     },
@@ -66,7 +68,7 @@ function createFakeLLMClient(
 function createProviderTaskEvent(input: {
   readonly callId: string;
   readonly prompt: string;
-}): ProviderStreamEvent {
+}): InterfaceProviderStreamEvent {
   return {
     finishReason: "tool_calls",
     toolCallDeltas: [
@@ -88,7 +90,7 @@ function createProviderAgentTaskEvent(input: {
   readonly arguments: Record<string, unknown>;
   readonly callId: string;
   readonly name: "agent_open" | "agent_status";
-}): ProviderStreamEvent {
+}): InterfaceProviderStreamEvent {
   return {
     finishReason: "tool_calls",
     toolCallDeltas: [
@@ -112,16 +114,20 @@ function persistentContentToText(content: unknown): string {
   return JSON.stringify(content);
 }
 
-function lastPersistentRequestMessageText(request: ProviderRequest): string {
+function lastPersistentRequestMessageText(
+  request: InterfaceProviderRequest,
+): string {
   return persistentContentToText(request.messages.at(-1)?.content);
 }
 
-function isPersistentExploreSubagentRequest(request: ProviderRequest): boolean {
+function isPersistentExploreSubagentRequest(
+  request: InterfaceProviderRequest,
+): boolean {
   return JSON.stringify(request.messages).includes("Task: explore");
 }
 
 function createPersistentAgentTaskLLMClient(
-  requests: ProviderRequest[],
+  requests: InterfaceProviderRequest[],
 ): LLMClientInstance<FakeSdkClient> {
   return {
     provider: {
@@ -129,8 +135,8 @@ function createPersistentAgentTaskLLMClient(
       kind: "openai-compatible",
       client: { kind: "fake" },
       streamChatCompletion(
-        request: ProviderRequest,
-      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         requests.push(request);
         if (isPersistentExploreSubagentRequest(request)) {
           return Promise.resolve(
@@ -171,7 +177,9 @@ function createPersistentAgentTaskLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
     },
@@ -179,8 +187,8 @@ function createPersistentAgentTaskLLMClient(
 }
 
 function createSequentialFakeLLMClient(
-  eventBatches: readonly (readonly ProviderStreamEvent[])[],
-  requests: ProviderRequest[],
+  eventBatches: readonly (readonly InterfaceProviderStreamEvent[])[],
+  requests: InterfaceProviderRequest[],
 ): LLMClientInstance<FakeSdkClient> {
   let nextBatch = 0;
 
@@ -190,8 +198,8 @@ function createSequentialFakeLLMClient(
       kind: "openai-compatible",
       client: { kind: "fake" },
       streamChatCompletion(
-        request: ProviderRequest,
-      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (nextBatch >= eventBatches.length) {
           return Promise.reject(new Error("No fake LLM response configured"));
         }
@@ -207,7 +215,9 @@ function createSequentialFakeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
     },
@@ -324,7 +334,7 @@ describe("createPersistentUiBackendClient", () => {
     try {
       const dbPath = join(directory, "agent.db");
       const workdir = join(directory, "workspace");
-      const requests: ProviderRequest[] = [];
+      const requests: InterfaceProviderRequest[] = [];
       const client = createPersistentUiBackendClient({
         dbPath,
         llmClient: createSequentialFakeLLMClient(
@@ -437,7 +447,7 @@ describe("createPersistentUiBackendClient", () => {
     try {
       const dbPath = join(directory, "agent.db");
       const workdir = join(directory, "workspace");
-      const requests: ProviderRequest[] = [];
+      const requests: InterfaceProviderRequest[] = [];
       const client = createPersistentUiBackendClient({
         createAgentTaskId: () => "agent_task_1",
         dbPath,

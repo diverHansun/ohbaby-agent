@@ -4,17 +4,17 @@ import type {
   ChatCompletionCreateParamsStreaming,
 } from "openai/resources/chat/completions/completions";
 import type {
-  CreateProviderOptions,
-  ProviderFinishReason,
-  ProviderInstance,
-  ProviderRequest,
-  ProviderStreamEvent,
-  ProviderTokenUsage,
+  CreateInterfaceProviderOptions,
+  InterfaceProviderFinishReason,
+  InterfaceProviderInstance,
+  InterfaceProviderRequest,
+  InterfaceProviderStreamEvent,
+  InterfaceProviderTokenUsage,
 } from "./types.js";
 
 function mapFinishReason(
   finishReason: ChatCompletionChunk.Choice["finish_reason"] | null | undefined,
-): ProviderFinishReason | undefined {
+): InterfaceProviderFinishReason | undefined {
   switch (finishReason) {
     case null:
     case undefined:
@@ -33,7 +33,7 @@ function mapFinishReason(
 
 function normalizeTokenUsage(
   usage: ChatCompletionChunk["usage"] | undefined | null,
-): ProviderTokenUsage | undefined {
+): InterfaceProviderTokenUsage | undefined {
   if (!usage) {
     return undefined;
   }
@@ -46,7 +46,7 @@ function normalizeTokenUsage(
 }
 
 function buildRequestParams(
-  request: ProviderRequest,
+  request: InterfaceProviderRequest,
 ): ChatCompletionCreateParamsStreaming {
   const params: ChatCompletionCreateParamsStreaming = {
     model: request.model,
@@ -66,7 +66,7 @@ function buildRequestParams(
 
 function buildStreamEvent(
   chunk: ChatCompletionChunk,
-): ProviderStreamEvent | null {
+): InterfaceProviderStreamEvent | null {
   if (chunk.choices.length === 0) {
     const tokenUsage = normalizeTokenUsage(chunk.usage);
     return tokenUsage ? { tokenUsage } : null;
@@ -83,7 +83,7 @@ function buildStreamEvent(
     mappedToolCallDeltas && mappedToolCallDeltas.length > 0
       ? mappedToolCallDeltas
       : undefined;
-  const event: ProviderStreamEvent = {
+  const event: InterfaceProviderStreamEvent = {
     textDelta: choice.delta.content ?? undefined,
     toolCallDeltas,
     finishReason: mapFinishReason(choice.finish_reason),
@@ -103,7 +103,7 @@ function buildStreamEvent(
   return event;
 }
 
-function isUsageOnlyEvent(event: ProviderStreamEvent): boolean {
+function isUsageOnlyEvent(event: InterfaceProviderStreamEvent): boolean {
   return (
     event.tokenUsage !== undefined &&
     event.textDelta === undefined &&
@@ -114,20 +114,20 @@ function isUsageOnlyEvent(event: ProviderStreamEvent): boolean {
 }
 
 export function createOpenAICompatibleProvider(
-  options: CreateProviderOptions,
-): ProviderInstance<OpenAI> {
+  options: CreateInterfaceProviderOptions,
+): InterfaceProviderInstance<OpenAI> {
   const client = new OpenAI({
     apiKey: options.apiKey,
     baseURL: options.baseUrl,
   });
 
   return {
-    id: options.provider,
+    id: options.id,
     kind: "openai-compatible",
     client,
     async streamChatCompletion(
-      request: ProviderRequest,
-    ): Promise<AsyncIterable<ProviderStreamEvent>> {
+      request: InterfaceProviderRequest,
+    ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
       const stream = await client.chat.completions.create(
         buildRequestParams(request),
         {
@@ -136,11 +136,11 @@ export function createOpenAICompatibleProvider(
       );
 
       return (async function* (): AsyncGenerator<
-        ProviderStreamEvent,
+        InterfaceProviderStreamEvent,
         void,
         unknown
       > {
-        let pendingTerminalEvent: ProviderStreamEvent | null = null;
+        let pendingTerminalEvent: InterfaceProviderStreamEvent | null = null;
 
         for await (const chunk of stream) {
           const event = buildStreamEvent(chunk);
@@ -150,7 +150,8 @@ export function createOpenAICompatibleProvider(
                 isUsageOnlyEvent(event) &&
                 pendingTerminalEvent.tokenUsage === undefined
               ) {
-                const terminalEvent: ProviderStreamEvent = pendingTerminalEvent;
+                const terminalEvent: InterfaceProviderStreamEvent =
+                  pendingTerminalEvent;
                 pendingTerminalEvent = {
                   ...terminalEvent,
                   tokenUsage: event.tokenUsage,

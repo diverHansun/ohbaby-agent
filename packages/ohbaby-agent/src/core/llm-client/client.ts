@@ -12,12 +12,16 @@
  * - config module: Provides validated LLM configuration
  */
 
+import * as path from "node:path";
 import { getLLMConfig } from "../../config/index.js";
-import { createProvider } from "../../services/providers/index.js";
+import { createInterfaceProvider } from "../../services/interface-providers/index.js";
 import type { LLMClientInstance } from "./types.js";
 
 export interface CreateLLMClientOptions {
   readonly projectDirectory?: string;
+  readonly modelJsonPath?: string;
+  readonly envPath?: string;
+  readonly env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -40,11 +44,17 @@ export async function createLLMClient(
   options: CreateLLMClientOptions = {},
 ): Promise<LLMClientInstance> {
   // Load validated configuration from config module
-  const config = await getLLMConfig(options);
+  const projectDirectory = options.projectDirectory ?? process.cwd();
+  const config = await getLLMConfig({
+    ...options,
+    projectDirectory,
+    envPath: options.envPath ?? path.join(projectDirectory, ".env"),
+  });
 
-  // Create provider-specific SDK instance
-  const provider = createProvider({
-    provider: config.provider,
+  // Create protocol-specific SDK adapter instance.
+  const provider = createInterfaceProvider({
+    id: config.provider,
+    interfaceProvider: config.interfaceProvider,
     apiKey: config.apiKey,
     baseUrl: config.baseUrl,
   });
@@ -56,7 +66,9 @@ export async function createLLMClient(
     config: {
       provider: config.provider,
       model: config.model,
+      apiKeyEnv: config.apiKeyEnv,
       baseUrl: config.baseUrl,
+      interfaceProvider: config.interfaceProvider,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
       ...(config.contextWindowTokens === undefined

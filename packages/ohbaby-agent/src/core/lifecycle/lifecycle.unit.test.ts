@@ -1,8 +1,8 @@
-﻿import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
-  ProviderRequest,
-  ProviderStreamEvent,
-} from "../../services/providers/index.js";
+  InterfaceProviderRequest,
+  InterfaceProviderStreamEvent,
+} from "../../services/interface-providers/index.js";
 import { createBus } from "../../bus/index.js";
 import {
   createInMemoryMessageStore,
@@ -28,10 +28,10 @@ interface FakeSdkClient {
 }
 
 function createProviderStream(
-  events: readonly ProviderStreamEvent[],
-): AsyncGenerator<ProviderStreamEvent, void, unknown> {
+  events: readonly InterfaceProviderStreamEvent[],
+): AsyncGenerator<InterfaceProviderStreamEvent, void, unknown> {
   return (async function* (): AsyncGenerator<
-    ProviderStreamEvent,
+    InterfaceProviderStreamEvent,
     void,
     unknown
   > {
@@ -42,8 +42,8 @@ function createProviderStream(
 }
 
 function createSequentialFakeLLMClient(
-  eventBatches: readonly (readonly ProviderStreamEvent[])[],
-  requests: ProviderRequest[],
+  eventBatches: readonly (readonly InterfaceProviderStreamEvent[])[],
+  requests: InterfaceProviderRequest[],
 ): LLMClientInstance<FakeSdkClient> {
   let nextBatch = 0;
 
@@ -53,8 +53,8 @@ function createSequentialFakeLLMClient(
       kind: "openai-compatible",
       client: { kind: "fake" },
       streamChatCompletion(
-        request: ProviderRequest,
-      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (nextBatch >= eventBatches.length) {
           return Promise.reject(new Error("No fake LLM response configured"));
         }
@@ -70,20 +70,20 @@ function createSequentialFakeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
     },
   };
 }
 
-function createFailThenSucceedLLMClient(
-  input: {
-    readonly error: Error;
-    readonly events: readonly ProviderStreamEvent[];
-    readonly requests: ProviderRequest[];
-  },
-): LLMClientInstance<FakeSdkClient> {
+function createFailThenSucceedLLMClient(input: {
+  readonly error: Error;
+  readonly events: readonly InterfaceProviderStreamEvent[];
+  readonly requests: InterfaceProviderRequest[];
+}): LLMClientInstance<FakeSdkClient> {
   let callCount = 0;
 
   return {
@@ -92,8 +92,8 @@ function createFailThenSucceedLLMClient(
       kind: "openai-compatible",
       client: { kind: "fake" },
       streamChatCompletion(
-        request: ProviderRequest,
-      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         input.requests.push(request);
         callCount += 1;
         if (callCount === 1) {
@@ -108,7 +108,9 @@ function createFailThenSucceedLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
     },
@@ -117,7 +119,7 @@ function createFailThenSucceedLLMClient(
 
 function createRejectingSequenceLLMClient(input: {
   readonly errors: readonly Error[];
-  readonly requests: ProviderRequest[];
+  readonly requests: InterfaceProviderRequest[];
 }): LLMClientInstance<FakeSdkClient> {
   let nextError = 0;
 
@@ -127,8 +129,8 @@ function createRejectingSequenceLLMClient(input: {
       kind: "openai-compatible",
       client: { kind: "fake" },
       streamChatCompletion(
-        request: ProviderRequest,
-      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         input.requests.push(request);
         if (nextError >= input.errors.length) {
           return Promise.reject(new Error("No fake error configured"));
@@ -144,7 +146,9 @@ function createRejectingSequenceLLMClient(input: {
     config: {
       provider: "fake",
       model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
     },
@@ -154,9 +158,9 @@ function createRejectingSequenceLLMClient(input: {
 function createScriptedFakeLLMClient(
   steps: readonly (
     | { readonly error: Error }
-    | { readonly events: readonly ProviderStreamEvent[] }
+    | { readonly events: readonly InterfaceProviderStreamEvent[] }
   )[],
-  requests: ProviderRequest[],
+  requests: InterfaceProviderRequest[],
 ): LLMClientInstance<FakeSdkClient> {
   let nextStep = 0;
 
@@ -166,8 +170,8 @@ function createScriptedFakeLLMClient(
       kind: "openai-compatible",
       client: { kind: "fake" },
       streamChatCompletion(
-        request: ProviderRequest,
-      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (nextStep >= steps.length) {
           return Promise.reject(new Error("No fake LLM response configured"));
         }
@@ -186,7 +190,9 @@ function createScriptedFakeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
     },
@@ -230,7 +236,7 @@ function createContextManagerMock(
 
 describe("Lifecycle.run", () => {
   it("prepares context before every model step and uses prepared messages as the step source", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const messageManager = createMessageManager({
       bus: createBus(),
       store: createInMemoryMessageStore(),
@@ -355,7 +361,7 @@ describe("Lifecycle.run", () => {
   });
 
   it("stops after a turn through the injected turn policy", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const messageManager = createMessageManager({
       bus: createBus(),
       store: createInMemoryMessageStore(),
@@ -434,7 +440,7 @@ describe("Lifecycle.run", () => {
   });
 
   it("stops before the model step when the signal aborts during prepareTurn", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const abortController = new AbortController();
     const messageManager = createMessageManager({
       bus: createBus(),
@@ -482,7 +488,7 @@ describe("Lifecycle.run", () => {
   });
 
   it("persists partial tool output when a running tool is cancelled", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const messageManager = createMessageManager({
       bus: createBus(),
       store: createInMemoryMessageStore(),
@@ -537,9 +543,9 @@ describe("Lifecycle.run", () => {
       ),
     );
     const messages = await messageManager.listBySession("session_test");
-    const toolPart = messages.flatMap((message) => message.parts).find(
-      (part) => part.type === "tool" && part.callId === "call_bash",
-    );
+    const toolPart = messages
+      .flatMap((message) => message.parts)
+      .find((part) => part.type === "tool" && part.callId === "call_bash");
 
     if (toolPart?.type !== "tool") {
       throw new Error("Expected persisted tool part");
@@ -556,7 +562,7 @@ describe("Lifecycle.run", () => {
   });
 
   it("force prepares and retries once when the provider reports context overflow", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const messageManager = createMessageManager({
       bus: createBus(),
       store: createInMemoryMessageStore(),
@@ -624,14 +630,12 @@ describe("Lifecycle.run", () => {
       "llm:complete",
       "turn:end",
     ]);
-    const persistedMessages = await messageManager.listBySession(
-      "session_test",
-    );
+    const persistedMessages =
+      await messageManager.listBySession("session_test");
     expect(
       persistedMessages.some(
         (message) =>
-          message.info.role === "assistant" &&
-          message.info.finish === "error",
+          message.info.role === "assistant" && message.info.finish === "error",
       ),
     ).toBe(true);
     expect(result).toMatchObject({
@@ -642,7 +646,7 @@ describe("Lifecycle.run", () => {
   });
 
   it("force prepares and retries when context overflow happens after multiple tool steps", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const messageManager = createMessageManager({
       bus: createBus(),
       store: createInMemoryMessageStore(),
@@ -750,7 +754,7 @@ describe("Lifecycle.run", () => {
   });
 
   it("does not retry non-overflow provider errors", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const messageManager = createMessageManager({
       bus: createBus(),
       store: createInMemoryMessageStore(),
@@ -789,7 +793,7 @@ describe("Lifecycle.run", () => {
   });
 
   it("fails clearly when overflow retry also overflows", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const messageManager = createMessageManager({
       bus: createBus(),
       store: createInMemoryMessageStore(),
@@ -848,7 +852,6 @@ describe("Lifecycle.run", () => {
     });
   });
 });
-
 
 async function consumeLifecycle(
   loop: AsyncGenerator<unknown, unknown, void>,

@@ -8,9 +8,9 @@
 import type { ChatCompletionCreateParams } from "openai/resources/chat/completions/completions";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type {
-  ProviderRequest,
-  ProviderStreamEvent,
-} from "../../services/providers/index.js";
+  InterfaceProviderRequest,
+  InterfaceProviderStreamEvent,
+} from "../../services/interface-providers/index.js";
 import { createLLMClient, streamChatCompletion } from "./index.js";
 import type {
   ChatCompletionMessage,
@@ -38,10 +38,10 @@ interface OpenAIClientLike {
 }
 
 function createProviderStream(
-  events: readonly ProviderStreamEvent[],
-): AsyncGenerator<ProviderStreamEvent, void, unknown> {
+  events: readonly InterfaceProviderStreamEvent[],
+): AsyncGenerator<InterfaceProviderStreamEvent, void, unknown> {
   return (async function* (): AsyncGenerator<
-    ProviderStreamEvent,
+    InterfaceProviderStreamEvent,
     void,
     unknown
   > {
@@ -52,11 +52,11 @@ function createProviderStream(
 }
 
 function createAbortingProviderStream(
-  events: readonly ProviderStreamEvent[],
+  events: readonly InterfaceProviderStreamEvent[],
   error: Error,
-): AsyncGenerator<ProviderStreamEvent, void, unknown> {
+): AsyncGenerator<InterfaceProviderStreamEvent, void, unknown> {
   return (async function* (): AsyncGenerator<
-    ProviderStreamEvent,
+    InterfaceProviderStreamEvent,
     void,
     unknown
   > {
@@ -70,12 +70,14 @@ function createAbortingProviderStream(
 
 let streamChatCompletionMock: ReturnType<
   typeof vi.fn<
-    (request: ProviderRequest) => Promise<AsyncIterable<ProviderStreamEvent>>
+    (
+      request: InterfaceProviderRequest,
+    ) => Promise<AsyncIterable<InterfaceProviderStreamEvent>>
   >
 >;
 let isAbortErrorMock: ReturnType<typeof vi.fn<(error: unknown) => boolean>>;
 
-function getProviderRequest(): ProviderRequest {
+function getInterfaceProviderRequest(): InterfaceProviderRequest {
   const request = streamChatCompletionMock.mock.calls[0][0];
   return request;
 }
@@ -91,13 +93,16 @@ vi.mock("../../config/index.js", () => ({
 }));
 
 import { getLLMConfig } from "../../config/index.js";
+import type { LLMConfig } from "../../config/index.js";
 
 describe("LLM Client Integration Tests", () => {
-  const mockConfig = {
+  const mockConfig: LLMConfig = {
     provider: "openai",
     model: "gpt-4",
     apiKey: "sk-test-123",
+    apiKeyEnv: "OPENAI_API_KEY",
     baseUrl: "https://api.openai.com/v1",
+    interfaceProvider: "openai-compatible",
     temperature: 0.7,
     maxTokens: 4096,
   };
@@ -119,6 +124,8 @@ describe("LLM Client Integration Tests", () => {
       expect(client.config.provider).toBe("openai");
       expect(client.config.model).toBe("gpt-4");
       expect(client.config.baseUrl).toBe("https://api.openai.com/v1");
+      expect(client.config.apiKeyEnv).toBe("OPENAI_API_KEY");
+      expect(client.config.interfaceProvider).toBe("openai-compatible");
       expect(client.config.temperature).toBe(0.7);
       expect(client.config.maxTokens).toBe(4096);
       expect("client" in client).toBe(false);
@@ -130,6 +137,7 @@ describe("LLM Client Integration Tests", () => {
       await createLLMClient({ projectDirectory: "D:/repo" });
 
       expect(getLLMConfig).toHaveBeenCalledWith({
+        envPath: "D:\\repo\\.env",
         projectDirectory: "D:/repo",
       });
     });
@@ -144,11 +152,13 @@ describe("LLM Client Integration Tests", () => {
     });
 
     it("should use different provider config", async () => {
-      const zhipuConfig = {
+      const zhipuConfig: LLMConfig = {
         provider: "zhipu",
         model: "glm-4-plus",
         apiKey: "zhipu-key-123",
+        apiKeyEnv: "ZHIPU_API_KEY",
         baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        interfaceProvider: "openai-compatible",
         temperature: 0.2,
         maxTokens: 2048,
       };
@@ -203,8 +213,8 @@ describe("LLM Client Integration Tests", () => {
       streamChatCompletionMock =
         vi.fn<
           (
-            request: ProviderRequest,
-          ) => Promise<AsyncIterable<ProviderStreamEvent>>
+            request: InterfaceProviderRequest,
+          ) => Promise<AsyncIterable<InterfaceProviderStreamEvent>>
         >();
       isAbortErrorMock = vi
         .fn<(error: unknown) => boolean>()
@@ -221,7 +231,9 @@ describe("LLM Client Integration Tests", () => {
         config: {
           provider: "openai",
           model: "gpt-4",
+          apiKeyEnv: "OPENAI_API_KEY",
           baseUrl: "https://api.openai.com/v1",
+          interfaceProvider: "openai-compatible",
           temperature: 0.7,
           maxTokens: 4096,
         },
@@ -229,7 +241,7 @@ describe("LLM Client Integration Tests", () => {
     });
 
     it("should accumulate text content from streaming chunks", async () => {
-      const events: ProviderStreamEvent[] = [
+      const events: InterfaceProviderStreamEvent[] = [
         {
           textDelta: "Hello",
         },
@@ -268,7 +280,7 @@ describe("LLM Client Integration Tests", () => {
     });
 
     it("should accumulate and parse tool calls", async () => {
-      const events: ProviderStreamEvent[] = [
+      const events: InterfaceProviderStreamEvent[] = [
         {
           toolCallDeltas: [
             {
@@ -326,7 +338,7 @@ describe("LLM Client Integration Tests", () => {
     });
 
     it("should handle empty responses with default content", async () => {
-      const events: ProviderStreamEvent[] = [
+      const events: InterfaceProviderStreamEvent[] = [
         {
           finishReason: "stop",
           tokenUsage: {
@@ -364,7 +376,7 @@ describe("LLM Client Integration Tests", () => {
       const iterator = streamChatCompletion(mockClient, messages);
       await iterator.next();
 
-      const callArgs = getProviderRequest();
+      const callArgs = getInterfaceProviderRequest();
 
       expect(callArgs.model).toBe("gpt-4-turbo");
       expect(callArgs.temperature).toBe(1.0);
@@ -394,7 +406,7 @@ describe("LLM Client Integration Tests", () => {
       const iterator = streamChatCompletion(mockClient, messages, { tools });
       await iterator.next();
 
-      const callArgs = getProviderRequest();
+      const callArgs = getInterfaceProviderRequest();
 
       expect(callArgs.tools).toEqual(tools);
     });
@@ -411,7 +423,7 @@ describe("LLM Client Integration Tests", () => {
       });
       await iterator.next();
 
-      const callArgs = getProviderRequest();
+      const callArgs = getInterfaceProviderRequest();
 
       expect(callArgs.signal).toBe(controller.signal);
     });

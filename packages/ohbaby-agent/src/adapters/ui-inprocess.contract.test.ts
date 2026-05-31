@@ -6,9 +6,9 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import type { UiBackendClient, UiEvent, UiSnapshot } from "ohbaby-sdk";
 import type {
-  ProviderRequest,
-  ProviderStreamEvent,
-} from "../services/providers/index.js";
+  InterfaceProviderRequest,
+  InterfaceProviderStreamEvent,
+} from "../services/interface-providers/index.js";
 import type {
   ChatCompletionMessage,
   LLMClientInstance,
@@ -81,10 +81,10 @@ async function initializeGitRepository(directory: string): Promise<void> {
 }
 
 function createProviderStream(
-  events: readonly ProviderStreamEvent[],
-): AsyncGenerator<ProviderStreamEvent, void, unknown> {
+  events: readonly InterfaceProviderStreamEvent[],
+): AsyncGenerator<InterfaceProviderStreamEvent, void, unknown> {
   return (async function* (): AsyncGenerator<
-    ProviderStreamEvent,
+    InterfaceProviderStreamEvent,
     void,
     unknown
   > {
@@ -95,7 +95,7 @@ function createProviderStream(
 }
 
 function createFakeLLMClient(
-  events: readonly ProviderStreamEvent[],
+  events: readonly InterfaceProviderStreamEvent[],
 ): LLMClientInstance<FakeSdkClient> {
   return {
     provider: {
@@ -103,8 +103,8 @@ function createFakeLLMClient(
       kind: "openai-compatible",
       client: { kind: "fake" },
       streamChatCompletion(
-        _request: ProviderRequest,
-      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        _request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         return Promise.resolve(createProviderStream(events));
       },
       isAbortError(): boolean {
@@ -114,7 +114,9 @@ function createFakeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
     },
@@ -122,8 +124,8 @@ function createFakeLLMClient(
 }
 
 function createSequentialFakeLLMClient(
-  eventBatches: readonly (readonly ProviderStreamEvent[])[],
-  requests: ProviderRequest[],
+  eventBatches: readonly (readonly InterfaceProviderStreamEvent[])[],
+  requests: InterfaceProviderRequest[],
   config: Partial<LLMClientInstance<FakeSdkClient>["config"]> = {},
 ): LLMClientInstance<FakeSdkClient> {
   let nextBatch = 0;
@@ -134,8 +136,8 @@ function createSequentialFakeLLMClient(
       kind: "openai-compatible",
       client: { kind: "fake" },
       streamChatCompletion(
-        request: ProviderRequest,
-      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (nextBatch >= eventBatches.length) {
           return Promise.reject(new Error("No fake LLM response configured"));
         }
@@ -151,7 +153,9 @@ function createSequentialFakeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
       ...config,
@@ -169,12 +173,14 @@ function contentToText(content: unknown): string {
   return JSON.stringify(content);
 }
 
-function lastRequestMessageText(request: ProviderRequest): string {
+function lastRequestMessageText(request: InterfaceProviderRequest): string {
   const message = request.messages.at(-1);
   return contentToText(message?.content);
 }
 
-function lastRequestToolCallId(request: ProviderRequest): string | undefined {
+function lastRequestToolCallId(
+  request: InterfaceProviderRequest,
+): string | undefined {
   const message = request.messages.at(-1) as
     | { readonly tool_call_id?: string }
     | undefined;
@@ -234,12 +240,12 @@ function subagentSessionIdFromMessages(
   return undefined;
 }
 
-function isExploreSubagentRequest(request: ProviderRequest): boolean {
+function isExploreSubagentRequest(request: InterfaceProviderRequest): boolean {
   return JSON.stringify(request.messages).includes("Task: explore");
 }
 
 function createResumableTaskFakeLLMClient(
-  requests: ProviderRequest[],
+  requests: InterfaceProviderRequest[],
 ): LLMClientInstance<FakeSdkClient> {
   let lastSubagentSessionId: string | undefined;
   return {
@@ -248,8 +254,8 @@ function createResumableTaskFakeLLMClient(
       kind: "openai-compatible",
       client: { kind: "fake" },
       streamChatCompletion(
-        request: ProviderRequest,
-      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         requests.push(request);
         const requestText = JSON.stringify(request.messages);
         if (isExploreSubagentRequest(request)) {
@@ -321,19 +327,21 @@ function createResumableTaskFakeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
     },
   };
 }
 
-function isGenericSubagentRequest(request: ProviderRequest): boolean {
+function isGenericSubagentRequest(request: InterfaceProviderRequest): boolean {
   return JSON.stringify(request.messages).includes("Task: generic");
 }
 
 function createAgentTaskFakeLLMClient(
-  requests: ProviderRequest[],
+  requests: InterfaceProviderRequest[],
 ): LLMClientInstance<FakeSdkClient> {
   return {
     provider: {
@@ -341,8 +349,8 @@ function createAgentTaskFakeLLMClient(
       kind: "openai-compatible",
       client: { kind: "fake" },
       streamChatCompletion(
-        request: ProviderRequest,
-      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         requests.push(request);
         const requestText = JSON.stringify(request.messages);
         if (isExploreSubagentRequest(request)) {
@@ -414,7 +422,9 @@ function createAgentTaskFakeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
     },
@@ -429,9 +439,9 @@ function createAbortError(): Error {
 
 function createAbortableProviderStream(
   signal: AbortSignal | undefined,
-): AsyncGenerator<ProviderStreamEvent, void, unknown> {
+): AsyncGenerator<InterfaceProviderStreamEvent, void, unknown> {
   return (async function* (): AsyncGenerator<
-    ProviderStreamEvent,
+    InterfaceProviderStreamEvent,
     void,
     unknown
   > {
@@ -456,7 +466,7 @@ function createAbortableProviderStream(
 }
 
 function createAbortableSubagentLLMClient(
-  requests: ProviderRequest[],
+  requests: InterfaceProviderRequest[],
   childStarted: Deferred<AbortSignal | undefined>,
 ): LLMClientInstance<FakeSdkClient> {
   let nextRequest = 0;
@@ -467,8 +477,8 @@ function createAbortableSubagentLLMClient(
       kind: "openai-compatible",
       client: { kind: "fake" },
       streamChatCompletion(
-        request: ProviderRequest,
-      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         requests.push(request);
         nextRequest += 1;
         if (nextRequest === 1) {
@@ -495,7 +505,9 @@ function createAbortableSubagentLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
     },
@@ -503,7 +515,7 @@ function createAbortableSubagentLLMClient(
 }
 
 function createAbortableAgentTaskLLMClient(
-  requests: ProviderRequest[],
+  requests: InterfaceProviderRequest[],
   childStarted: Deferred<AbortSignal | undefined>,
 ): LLMClientInstance<FakeSdkClient> {
   return {
@@ -512,8 +524,8 @@ function createAbortableAgentTaskLLMClient(
       kind: "openai-compatible",
       client: { kind: "fake" },
       streamChatCompletion(
-        request: ProviderRequest,
-      ): Promise<AsyncIterable<ProviderStreamEvent>> {
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         requests.push(request);
         if (isExploreSubagentRequest(request)) {
           childStarted.resolve(request.signal);
@@ -564,7 +576,9 @@ function createAbortableAgentTaskLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
     },
@@ -575,7 +589,7 @@ function writeToolCallEvent(input: {
   readonly callId: string;
   readonly content: string;
   readonly filePath: string;
-}): ProviderStreamEvent {
+}): InterfaceProviderStreamEvent {
   return {
     toolCallDeltas: [
       {
@@ -600,7 +614,7 @@ function taskToolCallEvent(input: {
   readonly prompt: string;
   readonly resumeSessionId?: string;
   readonly role?: SubagentRole;
-}): ProviderStreamEvent {
+}): InterfaceProviderStreamEvent {
   const argumentsPayload: Record<string, unknown> = {
     description: input.description,
     name: input.name,
@@ -627,7 +641,7 @@ function agentTaskToolCallEvent(input: {
   readonly arguments: Record<string, unknown>;
   readonly callId: string;
   readonly name: "agent_open" | "agent_eval" | "agent_status" | "agent_close";
-}): ProviderStreamEvent {
+}): InterfaceProviderStreamEvent {
   return {
     toolCallDeltas: [
       {
@@ -644,7 +658,7 @@ function agentTaskToolCallEvent(input: {
 function listToolCallEvent(input: {
   readonly callId: string;
   readonly path: string;
-}): ProviderStreamEvent {
+}): InterfaceProviderStreamEvent {
   return {
     toolCallDeltas: [
       {
@@ -663,7 +677,7 @@ function listToolCallEvent(input: {
 function skillToolCallEvent(input: {
   readonly callId: string;
   readonly name: string;
-}): ProviderStreamEvent {
+}): InterfaceProviderStreamEvent {
   return {
     toolCallDeltas: [
       {
@@ -732,7 +746,9 @@ function createRejectingLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(): Promise<AsyncIterable<ProviderStreamEvent>> {
+      streamChatCompletion(): Promise<
+        AsyncIterable<InterfaceProviderStreamEvent>
+      > {
         return Promise.reject(error);
       },
       isAbortError(): boolean {
@@ -742,7 +758,9 @@ function createRejectingLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
     },
@@ -921,7 +939,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("prepends a runtime system prompt to model requests without storing it in UI history", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-prompt-"));
     try {
       const client = createInProcessUiBackendClient({
@@ -967,7 +985,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("passes TUI permission mode into the next model system prompt", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-mode-prompt-"));
     try {
       const client = createInProcessUiBackendClient({
@@ -1003,7 +1021,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("appends configured primary agent prompts to the default system prompt", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-primary-addon-"));
     try {
       const registry = new AgentRegistry({
@@ -1046,7 +1064,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("emits a notice and omits unsafe custom instructions from model requests", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-guard-"));
     try {
       await writeFile(
@@ -1090,7 +1108,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("compacts core history before a TUI prompt and sends the compact summary in the model context", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const bus = createBus();
     const messageManager = createMessageManager({
       bus,
@@ -1170,7 +1188,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("exposes manual compact through the SDK client", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const bus = createBus();
     const messageManager = createMessageManager({
       bus,
@@ -1242,7 +1260,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("runs manual compact from the /compact slash command", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const bus = createBus();
     const messageManager = createMessageManager({
       bus,
@@ -1333,7 +1351,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("executes builtin tool calls through the in-process lifecycle scheduler", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
       llmClient: createSequentialFakeLLMClient(
         [
@@ -1419,7 +1437,7 @@ describe("createInProcessUiBackendClient", () => {
         "utf8",
       );
 
-      const requests: ProviderRequest[] = [];
+      const requests: InterfaceProviderRequest[] = [];
       const client = createInProcessUiBackendClient({
         llmClient: createSequentialFakeLLMClient(
           [
@@ -1471,7 +1489,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("runs task subagents in isolated resumable child sessions with child history", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
       llmClient: createResumableTaskFakeLLMClient(requests),
     });
@@ -1507,7 +1525,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("defaults omitted task role to generic and keeps display metadata out of child context", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
       llmClient: createSequentialFakeLLMClient(
         [
@@ -1551,7 +1569,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("returns invalid task resume errors to the parent without creating a child session", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
       llmClient: createSequentialFakeLLMClient(
         [
@@ -1611,7 +1629,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("appends configured subagent prompts to child model requests", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const registry = new AgentRegistry({
       builtinAgents: [
         {
@@ -1660,7 +1678,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("controls background agent tasks without leaking child transcripts into the parent", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
       createAgentTaskId: () => "agent_task_1",
       llmClient: createAgentTaskFakeLLMClient(requests),
@@ -1739,7 +1757,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("closes a running background agent task without aborting the parent run", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const childStarted = createDeferred<AbortSignal | undefined>();
     const runLedger = createInMemoryRunLedger();
     const client = createInProcessUiBackendClient({
@@ -1781,7 +1799,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("applies subagent agent maxSteps through runtime composition", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const registry = new AgentRegistry({
       builtinAgents: [
         {
@@ -1841,7 +1859,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("cancels an active task subagent when the parent prompt is aborted", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const childStarted = createDeferred<AbortSignal | undefined>();
     const runLedger = createInMemoryRunLedger();
     const client = createInProcessUiBackendClient({
@@ -1876,7 +1894,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("continues the LLM loop after allow_once tool permission", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(
       join(process.cwd(), ".tmp-ohbaby-ui-allow-once-"),
     );
@@ -1969,7 +1987,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("surfaces rejected tool permission as a failed tool result and continues", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(
       join(process.cwd(), ".tmp-ohbaby-ui-reject-tool-"),
     );
@@ -2043,7 +2061,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("reuses allow_always approval for later matching tool calls in the run", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(
       join(process.cwd(), ".tmp-ohbaby-ui-allow-always-"),
     );
@@ -2112,7 +2130,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("omits always approval for non-rememberable external write confirmations", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(
       join(process.cwd(), ".tmp-ohbaby-ui-external-write-"),
     );
@@ -2174,7 +2192,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("treats permission cancel as aborting the whole run and clearing pending permission", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(
       join(process.cwd(), ".tmp-ohbaby-ui-permission-cancel-"),
     );
@@ -2233,7 +2251,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("clears pending permission when abortRun cancels a running prompt", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(
       join(process.cwd(), ".tmp-ohbaby-ui-abort-permission-"),
     );
@@ -2349,7 +2367,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("filters available tools through AgentManager", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const registry = new AgentRegistry({
       builtinAgents: [
         {
@@ -2414,7 +2432,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("appends a fresh assistant message when continuing a session", async () => {
-    const requests: ProviderRequest[] = [];
+    const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
       llmClient: createSequentialFakeLLMClient(
         [
@@ -2675,10 +2693,12 @@ describe("createInProcessUiBackendClient", () => {
         ...baseClient,
         provider: {
           ...baseClient.provider,
-          streamChatCompletion(): Promise<AsyncIterable<ProviderStreamEvent>> {
+          streamChatCompletion(): Promise<
+            AsyncIterable<InterfaceProviderStreamEvent>
+          > {
             return Promise.resolve(
               (async function* (): AsyncGenerator<
-                ProviderStreamEvent,
+                InterfaceProviderStreamEvent,
                 void,
                 unknown
               > {
@@ -2897,7 +2917,7 @@ describe("createInProcessUiBackendClient", () => {
         ].join("\n"),
         "utf8",
       );
-      const requests: ProviderRequest[] = [];
+      const requests: InterfaceProviderRequest[] = [];
       const client = createInProcessUiBackendClient({
         llmClient: createSequentialFakeLLMClient(
           [[{ textDelta: "Reviewed.", finishReason: "stop" }]],

@@ -1,7 +1,7 @@
 import type { ChatCompletionChunk } from "openai/resources/chat/completions/completions";
 import { describe, expect, it, vi } from "vitest";
 import { createOpenAICompatibleProvider } from "./openai-compatible.js";
-import type { ProviderStreamEvent } from "./types.js";
+import type { InterfaceProviderStreamEvent } from "./types.js";
 
 function createChunk(
   chunk: Omit<ChatCompletionChunk, "id" | "created" | "model" | "object">,
@@ -32,7 +32,7 @@ function createChunkStream(
 describe("openai-compatible provider", () => {
   it("should build streaming request parameters for OpenAI-compatible APIs", async () => {
     const provider = createOpenAICompatibleProvider({
-      provider: "openai",
+      id: "openai",
       apiKey: "test-key",
       baseUrl: "https://api.openai.com/v1",
     });
@@ -81,7 +81,7 @@ describe("openai-compatible provider", () => {
       tools,
       signal: controller.signal,
     });
-    const events: ProviderStreamEvent[] = [];
+    const events: InterfaceProviderStreamEvent[] = [];
 
     for await (const event of stream) {
       events.push(event);
@@ -115,7 +115,7 @@ describe("openai-compatible provider", () => {
 
   it("should normalize tool call deltas and legacy finish reasons", async () => {
     const provider = createOpenAICompatibleProvider({
-      provider: "zhipu",
+      id: "zhipu",
       apiKey: "test-key",
       baseUrl: "https://example.com/v1",
     });
@@ -170,7 +170,7 @@ describe("openai-compatible provider", () => {
       temperature: 0.2,
       maxTokens: 64,
     });
-    const events: ProviderStreamEvent[] = [];
+    const events: InterfaceProviderStreamEvent[] = [];
 
     for await (const event of stream) {
       events.push(event);
@@ -202,7 +202,7 @@ describe("openai-compatible provider", () => {
 
   it("should yield token usage from the final usage-only chunk", async () => {
     const provider = createOpenAICompatibleProvider({
-      provider: "openai",
+      id: "openai",
       apiKey: "test-key",
       baseUrl: "https://api.openai.com/v1",
     });
@@ -236,7 +236,7 @@ describe("openai-compatible provider", () => {
       temperature: 0.7,
       maxTokens: 128,
     });
-    const events: ProviderStreamEvent[] = [];
+    const events: InterfaceProviderStreamEvent[] = [];
 
     for await (const event of stream) {
       events.push(event);

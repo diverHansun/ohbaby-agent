@@ -11,12 +11,12 @@ import type {
 } from "@anthropic-ai/sdk/resources/messages";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions/completions";
 import type {
-  CreateProviderOptions,
-  ProviderFinishReason,
-  ProviderInstance,
-  ProviderRequest,
-  ProviderStreamEvent,
-  ProviderTokenUsage,
+  CreateInterfaceProviderOptions,
+  InterfaceProviderFinishReason,
+  InterfaceProviderInstance,
+  InterfaceProviderRequest,
+  InterfaceProviderStreamEvent,
+  InterfaceProviderTokenUsage,
 } from "./types.js";
 
 type OpenAIMessageWithExtras = ChatCompletionMessageParam & {
@@ -35,7 +35,7 @@ type OpenAIMessageWithExtras = ChatCompletionMessageParam & {
 
 function mapStopReason(
   stopReason: string | null | undefined,
-): ProviderFinishReason | undefined {
+): InterfaceProviderFinishReason | undefined {
   switch (stopReason) {
     case "tool_use":
       return "tool_calls";
@@ -48,7 +48,7 @@ function mapStopReason(
     case "stop_sequence":
       return "stop";
     // Keep the shared finish-reason enum compact while preserving the
-    // original provider value via ProviderStreamEvent.rawFinishReason.
+    // original provider value via InterfaceProviderStreamEvent.rawFinishReason.
     case "pause_turn":
       return "stop";
     default:
@@ -64,7 +64,7 @@ function normalizeTokenUsage(
       }
     | null
     | undefined,
-): ProviderTokenUsage | undefined {
+): InterfaceProviderTokenUsage | undefined {
   if (!usage) {
     return undefined;
   }
@@ -278,7 +278,9 @@ function convertMessages(messages: ChatCompletionMessageParam[]): {
   };
 }
 
-function convertTools(tools: ProviderRequest["tools"]): Tool[] | undefined {
+function convertTools(
+  tools: InterfaceProviderRequest["tools"],
+): Tool[] | undefined {
   if (!tools || tools.length === 0) {
     return undefined;
   }
@@ -299,7 +301,9 @@ function convertTools(tools: ProviderRequest["tools"]): Tool[] | undefined {
   });
 }
 
-function buildRequestParams(request: ProviderRequest): MessageCreateParams {
+function buildRequestParams(
+  request: InterfaceProviderRequest,
+): MessageCreateParams {
   const convertedMessages = convertMessages(request.messages);
   const params: MessageCreateParams = {
     model: request.model,
@@ -322,7 +326,7 @@ function buildRequestParams(request: ProviderRequest): MessageCreateParams {
 
 function buildStreamEvent(
   event: RawMessageStreamEvent,
-): ProviderStreamEvent | null {
+): InterfaceProviderStreamEvent | null {
   switch (event.type) {
     case "content_block_start":
       if (event.content_block.type === "tool_use") {
@@ -353,7 +357,7 @@ function buildStreamEvent(
       }
       return null;
     case "message_delta": {
-      const streamEvent: ProviderStreamEvent = {
+      const streamEvent: InterfaceProviderStreamEvent = {
         finishReason: mapStopReason(event.delta.stop_reason),
         rawFinishReason: event.delta.stop_reason ?? undefined,
         tokenUsage: normalizeTokenUsage(event.usage),
@@ -372,27 +376,27 @@ function buildStreamEvent(
 }
 
 export function createAnthropicProvider(
-  options: CreateProviderOptions,
-): ProviderInstance<Anthropic> {
+  options: CreateInterfaceProviderOptions,
+): InterfaceProviderInstance<Anthropic> {
   const client = new Anthropic({
     apiKey: options.apiKey,
     baseURL: options.baseUrl,
   });
 
   return {
-    id: options.provider,
+    id: options.id,
     kind: "anthropic",
     client,
     streamChatCompletion(
-      request: ProviderRequest,
-    ): Promise<AsyncIterable<ProviderStreamEvent>> {
+      request: InterfaceProviderRequest,
+    ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
       const stream = client.messages.stream(buildRequestParams(request), {
         signal: request.signal,
       });
 
       return Promise.resolve(
         (async function* (): AsyncGenerator<
-          ProviderStreamEvent,
+          InterfaceProviderStreamEvent,
           void,
           unknown
         > {
