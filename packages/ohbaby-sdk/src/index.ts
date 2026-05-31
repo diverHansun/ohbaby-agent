@@ -73,3 +73,5 @@ export type {
 } from "./snapshot.js";
 export { parseSlashInput } from "./command/parse.js";
 export { filterCommandCatalog, resolveCommand } from "./command/resolve.js";
+export type { CoreAPI, SDKAPI } from "./rpc/types.js";
+export { createRPC } from "./rpc/proxy.js";

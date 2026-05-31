@@ -1,6 +1,11 @@
 export { createInProcessUiBackendClient } from "./adapters/ui-inprocess.js";
 export { createPersistentUiBackendClient } from "./adapters/ui-persistent.js";
 export type { PersistentUiBackendOptions } from "./adapters/ui-persistent.js";
+export { buildCoreAPIImpl } from "./host/core-api-factory.js";
+export type {
+  CoreApiFactoryOptions,
+  CoreApiHost,
+} from "./host/core-api-factory.js";
 export * from "./commands/index.js";
 export {
   AgentConfigAccessError,
