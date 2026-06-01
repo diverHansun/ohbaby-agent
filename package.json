@@ -19,6 +19,7 @@
     "test:contract": "node scripts/run-vitest-by-type.mjs contract",
     "test:integration": "node scripts/run-vitest-by-type.mjs integration",
     "test:smoke": "node scripts/run-vitest-by-type.mjs smoke",
+    "test:smoke:real": "node scripts/run-real-smoke.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage --passWithNoTests",
     "test:e2e:snapshot": "vitest run --config vitest.e2e.config.ts packages/ohbaby-agent/src/snapshot/snapshot.e2e.test.ts --passWithNoTests",

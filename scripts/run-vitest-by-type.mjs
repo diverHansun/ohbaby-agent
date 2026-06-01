@@ -54,7 +54,14 @@ if (testFiles.length === 0) {
 }
 
 const vitestEntry = path.join(root, "node_modules", "vitest", "vitest.mjs");
-const result = spawnSync(process.execPath, [vitestEntry, "run", ...testFiles], {
+const vitestArgs = ["run"];
+if (type === "integration") {
+  // Integration CLI packaging tests rebuild shared dist directories.
+  vitestArgs.push("--no-file-parallelism");
+}
+vitestArgs.push(...testFiles);
+
+const result = spawnSync(process.execPath, [vitestEntry, ...vitestArgs], {
   shell: false,
   stdio: "inherit",
 });
