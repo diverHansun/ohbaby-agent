@@ -270,7 +270,7 @@ describe("file tools scheduler integration", () => {
     );
   });
 
-  it("does not ask for external absolute writes in full-access even when agent edits are automatic", async () => {
+  it("remembers full-access external absolute write approval", async () => {
     const bus = createBus();
     const permissionState = createPermissionState({
       bus,
@@ -278,7 +278,10 @@ describe("file tools scheduler integration", () => {
     });
     const permission = createPermissionManager({
       bus,
-      generateId: () => "permission_external_auto",
+      generateId: (() => {
+        let next = 1;
+        return (): string => `permission_external_auto_${String(next++)}`;
+      })(),
       state: permissionState,
     });
     const scheduler = createToolScheduler({ bus, permission, permissionState });
@@ -288,7 +291,9 @@ describe("file tools scheduler integration", () => {
     }
     bus.subscribe(PermissionEvent.Updated, (event) => {
       permissionUpdates.push(event.info);
-      permission.respond(event.info.sessionId, event.info.id, { type: "once" });
+      permission.respond(event.info.sessionId, event.info.id, {
+        type: permissionUpdates.length === 1 ? "always" : "once",
+      });
     });
     const environment = createHostLocalEnvironment(tempRoot);
     const outsideWritePath = path.join(outsideRoot, "auto-external.txt");
@@ -343,7 +348,13 @@ describe("file tools scheduler integration", () => {
     expect(external.status).toBe("success");
     expect(readForEdit.status).toBe("success");
     expect(externalEdit.status).toBe("success");
-    expect(permissionUpdates).toEqual([]);
+    expect(permissionUpdates.map((info) => info.callId)).toEqual([
+      "write_external_auto",
+    ]);
+    expect(permissionUpdates[0]?.name).toBe("external_directory");
+    expect(permissionUpdates[0]?.pattern.replaceAll("\\", "/")).toContain(
+      outsideRoot.replaceAll("\\", "/").toLowerCase(),
+    );
     await expect(fs.readFile(outsideWritePath, "utf8")).resolves.toBe(
       "external\n",
     );
@@ -480,7 +491,9 @@ describe("file tools scheduler integration", () => {
     }
     bus.subscribe(PermissionEvent.Updated, (event) => {
       permissionUpdates.push(event.info);
-      permission.respond(event.info.sessionId, event.info.id, { type: "once" });
+      permission.respond(event.info.sessionId, event.info.id, {
+        type: permissionUpdates.length === 1 ? "always" : "once",
+      });
     });
     const environment = createHostLocalEnvironment(tempRoot);
     await fs.symlink(

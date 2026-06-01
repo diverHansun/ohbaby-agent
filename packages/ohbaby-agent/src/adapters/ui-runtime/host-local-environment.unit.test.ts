@@ -44,7 +44,43 @@ describe("createHostLocalEnvironment", () => {
     expect(() => createHostLocalEnvironment(workdir)).not.toThrow();
   });
 
-  it("allows explicit absolute paths outside the workspace", async () => {
+  it("allows explicit absolute paths inside the workspace", async () => {
+    const workdir = await mkdtemp(path.join(tmpdir(), "ohbaby-host-local-"));
+    cleanupDirectories.push(workdir);
+    const environment = createHostLocalEnvironment(workdir);
+    const insideFile = path.join(environment.workdir, "note.txt");
+    await writeFile(insideFile, "internal\n", "utf8");
+
+    expect(environment.resolvePath(insideFile)).toBe(path.resolve(insideFile));
+    await expect(environment.resolvePathForExisting(insideFile)).resolves.toBe(
+      await realpath(insideFile),
+    );
+    await expect(
+      environment.resolvePathForWrite(path.join(workdir, "new.txt")),
+    ).resolves.toBe(path.join(await realpath(workdir), "new.txt"));
+  });
+
+  it("allows dot-dot-prefixed directories inside the workspace", async () => {
+    const workdir = await mkdtemp(path.join(tmpdir(), "ohbaby-host-local-"));
+    cleanupDirectories.push(workdir);
+    const environment = createHostLocalEnvironment(workdir);
+    const directory = path.join(environment.workdir, "..cache");
+    const file = path.join(directory, "note.txt");
+    await mkdir(directory);
+    await writeFile(file, "internal\n", "utf8");
+
+    expect(environment.resolvePath(path.join("..cache", "note.txt"))).toBe(
+      path.resolve(environment.workdir, "..cache", "note.txt"),
+    );
+    await expect(
+      environment.resolvePathForExisting(path.join("..cache", "note.txt")),
+    ).resolves.toBe(await realpath(file));
+    await expect(
+      environment.resolvePathForWrite(path.join("..cache", "new.txt")),
+    ).resolves.toBe(path.join(await realpath(directory), "new.txt"));
+  });
+
+  it("rejects explicit absolute paths outside the workspace", async () => {
     const workdir = await mkdtemp(path.join(tmpdir(), "ohbaby-host-local-"));
     const outside = await mkdtemp(path.join(tmpdir(), "ohbaby-host-outside-"));
     cleanupDirectories.push(workdir, outside);
@@ -52,17 +88,18 @@ describe("createHostLocalEnvironment", () => {
     await writeFile(outsideFile, "external\n", "utf8");
     const environment = createHostLocalEnvironment(workdir);
 
-    await expect(environment.resolvePathForExisting(outsideFile)).resolves.toBe(
-      await realpath(outsideFile),
+    expect(() => environment.resolvePath(outsideFile)).toThrow(
+      /Path escapes workspace/u,
     );
+    await expect(
+      environment.resolvePathForExisting(outsideFile),
+    ).rejects.toThrow(/Path escapes workspace/u);
     await mkdir(path.join(outside, "new-parent"));
     await expect(
       environment.resolvePathForWrite(
         path.join(outside, "new-parent", "new.txt"),
       ),
-    ).resolves.toBe(
-      path.join(await realpath(path.join(outside, "new-parent")), "new.txt"),
-    );
+    ).rejects.toThrow(/Path escapes workspace/u);
   });
 });
 

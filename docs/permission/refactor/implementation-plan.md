@@ -286,7 +286,7 @@ export interface PermissionManager {
 | `rule` | DSL 小写解析、格式化、非法语法 |
 | `matcher` | bash pattern、path glob、无 pattern、deny/allow 共存 |
 | `classifier` | 工具名分类、memory read/write、skill/subagent、未知工具保守处理 |
-| `evaluator` | mode/level 全矩阵、sessionRules、reason、full-access 不压 plan |
+| `evaluator` | default/full-access 全矩阵、sessionRules、reason、plan 对齐 auto |
 | `state` | mode/level 正交、sessionId 隔离、事件 payload、clearSession |
 | `manager` | ask 队列、always 写 rule、drainQueue、无 AutoEditRequested |
 | `command-classifier` | shell 分类表、复合命令、sudo wrapper、未知命令 |
@@ -297,7 +297,7 @@ export interface PermissionManager {
 | 场景 | 断言 |
 |------|------|
 | scheduler + evaluator | allow/ask/deny 流向正确 |
-| scheduler safety gate | full-access 下 externalWrite/untrustedMcp 仍 ask |
+| scheduler safety gate | full-access 下 externalWrite/untrustedMcp 仍 ask；externalWrite 可 always 记住 |
 | registry | plan/auto 工具列表完全相同 |
 | snapshot | `permission` 字段存在，`policy` 字段不存在 |
 | command surface | `/permission` level-only，`/mode` 不存在 |
@@ -311,9 +311,9 @@ export interface PermissionManager {
 1. 默认 `auto + default`：读工具直接执行，写工具 ask。
 2. 写工具点 once：只本次通过。
 3. 写工具点 always：生成当前 session rule；相同 pattern 通过；不同 pattern 仍 ask。
-4. `Shift+Tab` 到 plan：写、memory-write、bash-mutating、subagent 被 deny；read、memory-read 通过；skill 走 ask。
-5. `/permission full-access`：auto 下写、skill、bash-dangerous 由 evaluator allow。
-6. full-access + external workspace write：scheduler 仍强制 ask。
+4. `Shift+Tab` 到 plan：审批结果与 auto 的当前 level 一致；default 下写和 bash ask，memory/subagent allow，skill ask。
+5. `/permission full-access`：plan/auto 下写、skill、bash-dangerous 由 evaluator allow。
+6. full-access + external workspace write：scheduler 仍强制 ask，选择 always 后相同外部路径范围不再弹窗。
 7. full-access + untrusted MCP：scheduler 仍强制 ask。
 8. 重启或新 session：旧 sessionRules 不泄漏。
 
@@ -357,7 +357,7 @@ rg "\"ask\"|\"agent\"" packages/ohbaby-agent/src/permission packages/ohbaby-sdk/
 
 | 风险 | 应对 |
 |------|------|
-| Plan deny 循环 | system prompt 注入约束；e2e 观察连续 deny 次数 |
+| Plan 语义漂移 | system prompt 仅保留软约束；e2e 覆盖 plan/default 与 auto/default 的审批一致性 |
 | Bash 分类漏判 | 未知保守 mutating；dangerous case 单测覆盖；保留原 preflight |
 | Scheduler 安全闸被误删 | Phase 4 单测和 e2e 专门覆盖 |
 | Snapshot Map 不可序列化 | 内部 Map，snapshot 显式转数组 |

@@ -173,7 +173,7 @@ if (externalReadResult) {
 
 **执行能力**：
 - `once` 批准：使用 scoped read wrapper，仅允许本次调用访问 `externalReadPath`
-- `always` 批准：可调用 `environment.trustPath({ kind: "external-approved", ... })`，同时本次仍使用 wrapper 兜底
+- `always` 批准：可调用 `environment.trustPath({ kind: "external-approved", ... })`，同时本次仍使用 wrapper 兜底；该 read trust 不能绕过后续外部写审批
 - `full-access`：不询问用户，但仍使用 wrapper 或 full-access resolver，避免工具执行阶段被 sandbox lease 拦截
 
 ---
@@ -188,7 +188,8 @@ if (externalReadResult) {
 - `default` 下所有 bash（包括 `bash-readonly`）返回 ask
 - `full-access` 下普通 bash 返回 allow
 - `sensitive_path` 在 `full-access` 下仍返回 ask
-- `full-access` 下 `externalWrite` 不再强制 ask；执行环境继续使用 scoped write wrapper 让外部写实际可执行
+- `full-access` 下 `externalWrite` 仍通过 scheduler 安全闸询问用户；审批使用可记住的 `external_directory` 规则，`always` 后写入 `external-write-approved` trust，下一次匹配路径不再弹窗；执行环境继续使用 scoped write wrapper 让外部写实际可执行
+- `plan` 模式不再使用独立 deny gate；审批结果全面对齐 `auto` 模式下的 `default/full-access` permission 矩阵
 
 ```typescript
 if (call.toolName === "sensitive_path") {

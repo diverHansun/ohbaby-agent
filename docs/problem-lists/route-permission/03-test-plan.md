@@ -343,7 +343,7 @@ describe("Scheduler 权限集成 - write 工具（回归）", () => {
     expect(result.status).toBe("completed");
   });
 
-  it("full-access level: 工作区外写 → 直接执行，不询问用户", async () => {
+  it("full-access level: 工作区外写 → 询问用户并可记住", async () => {
     const permissionState = createPermissionState();
     permissionState.setLevel("full-access");
     const askSpy = vi.fn().mockResolvedValue("once");
@@ -358,7 +358,7 @@ describe("Scheduler 权限集成 - write 工具（回归）", () => {
       environment: createMockEnvironment("/workspace"),
     });
 
-    expect(askSpy).not.toHaveBeenCalled();  // full-access 下外部写不再批准
+    expect(askSpy).toHaveBeenCalled();  // full-access 下外部写仍需外部路径审批
     expect(result.status).toBe("completed");
   });
 });
@@ -441,7 +441,7 @@ describe("安全测试 - 绝对路径绕过防护", () => {
 | 工作区内读 | ✅ 不拦截 | ✅ 不拦截 | `askSpy` 未被调用 |
 | 工作区外读 | ⚠️ 询问用户 | ✅ 不拦截 | `askSpy` 被调用 / 未被调用 |
 | 工作区内写 | ⚠️ 询问用户 | ✅ 不拦截 | `askSpy` 被调用 / 未被调用 |
-| 工作区外写 | ⚠️ 询问用户 | ✅ 不拦截 | `askSpy` 被调用 / 未被调用 |
+| 工作区外写 | ⚠️ 询问用户 | ⚠️ 询问用户（可记住） | `askSpy` 被调用；记住后匹配路径不再调用 |
 | bash（普通） | ⚠️ 询问用户 | ✅ 不拦截 | `askSpy` 被调用 / 未被调用 |
 | bash（敏感路径） | ⚠️ 询问用户 | ⚠️ 询问用户 | `askSpy` 被调用 |
 

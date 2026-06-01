@@ -58,7 +58,7 @@ describe("SystemPrompt", () => {
     expect(fullPrompt).toContain("<primary_task>");
     expect(fullPrompt).toContain("Task: plan");
     expect(fullPrompt).toContain(
-      "Do not write files or execute workspace changes.",
+      "Prefer analysis and read-only exploration unless the user explicitly asks to execute changes.",
     );
   });
 

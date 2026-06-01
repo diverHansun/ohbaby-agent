@@ -86,7 +86,7 @@ describe("createSystemPromptProvider", () => {
 
     expect(prompt).toContain("Task: plan");
     expect(prompt).toContain(
-      "Do not write files or execute workspace changes.",
+      "Prefer analysis and read-only exploration unless the user explicitly asks to execute changes.",
     );
   });
 

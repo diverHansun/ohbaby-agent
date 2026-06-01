@@ -9,6 +9,7 @@ export type PermissionCallKind =
   | "network"
   | "memory-read"
   | "memory-write"
+  | "sensitive"
   | "skill"
   | "subagent"
   | "bash-readonly"
@@ -98,6 +99,9 @@ export function classifyPermissionCall(
   }
   if (SUBAGENT_TOOLS.has(toolName) || call.category === "subagent") {
     return { category: "subagent", kind: "subagent" };
+  }
+  if (toolName === "sensitive_path") {
+    return { category: "dangerous", kind: "sensitive" };
   }
   if (
     toolName === "skill" ||

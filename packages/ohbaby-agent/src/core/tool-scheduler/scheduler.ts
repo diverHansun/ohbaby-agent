@@ -113,7 +113,7 @@ function isOutsideWorkdir(workdir: string, resolvedPath: string): boolean {
     return false;
   }
   const relative = path.relative(normalizedRoot, normalizedCandidate);
-  return relative.startsWith("..") || path.isAbsolute(relative);
+  return isOutsideRelativePath(relative);
 }
 
 function isOutsideTrustedEnvironment(
@@ -126,8 +126,59 @@ function isOutsideTrustedEnvironment(
   return isOutsideWorkdir(environment.workdir, resolvedPath);
 }
 
+function isWriteTrustedRootKind(kind: string): boolean {
+  return (
+    kind === "workspace" ||
+    kind === "skill-output" ||
+    kind === "external-write-approved"
+  );
+}
+
+function containsWriteTrustedPath(
+  environment: ToolExecutionEnvironment,
+  resolvedPath: string,
+): boolean {
+  return (
+    environment
+      .trustedRoots?.()
+      .some(
+        (root) =>
+          isWriteTrustedRootKind(root.kind) &&
+          isSameOrInsidePath(resolvedPath, root.path),
+      ) ?? false
+  );
+}
+
+function isOutsideWriteTrustedEnvironment(
+  environment: ToolExecutionEnvironment,
+  resolvedPath: string,
+): boolean {
+  if (!isOutsideWorkdir(environment.workdir, resolvedPath)) {
+    return false;
+  }
+  return !containsWriteTrustedPath(environment, resolvedPath);
+}
+
 function isSamePath(left: string, right: string): boolean {
   return normalizeForBoundary(left) === normalizeForBoundary(right);
+}
+
+function isOutsideRelativePath(relativePath: string): boolean {
+  return (
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  );
+}
+
+function isSameOrInsidePath(candidatePath: string, rootPath: string): boolean {
+  const normalizedRoot = normalizeForBoundary(rootPath);
+  const normalizedCandidate = normalizeForBoundary(candidatePath);
+  if (normalizedRoot === normalizedCandidate) {
+    return true;
+  }
+  const relative = path.relative(normalizedRoot, normalizedCandidate);
+  return !isOutsideRelativePath(relative);
 }
 
 function isRootPath(inputPath: string): boolean {
@@ -372,12 +423,40 @@ async function externalPermissionAskPattern(
   return path.join(path.dirname(absolutePath), "**");
 }
 
-function rejectUnapprovedExternalWrite(inputPath: string): never {
-  throw new Error(`External write path was not approved: ${inputPath}`);
+type ExternalAccessMode = "read" | "write";
+
+function rejectUnapprovedExternalAccess(
+  mode: ExternalAccessMode,
+  inputPath: string,
+): never {
+  throw new Error(`External ${mode} path was not approved: ${inputPath}`);
 }
 
-function rejectUnapprovedExternalRead(inputPath: string): never {
-  throw new Error(`External read path was not approved: ${inputPath}`);
+function resolveApprovedAbsolutePath(
+  environment: ToolExecutionEnvironment,
+  inputPath: string,
+  approvedPath: string,
+  mode: ExternalAccessMode,
+  input: { readonly allowDescendants?: boolean } = {},
+): string | null {
+  if (!path.isAbsolute(inputPath)) {
+    return null;
+  }
+  const resolved = path.resolve(inputPath);
+  if (isSamePath(resolved, approvedPath)) {
+    return approvedPath;
+  }
+  if (input.allowDescendants && isSameOrInsidePath(resolved, approvedPath)) {
+    return resolved;
+  }
+  const isOutsideEnvironment =
+    mode === "write"
+      ? isOutsideWriteTrustedEnvironment(environment, resolved)
+      : isOutsideTrustedEnvironment(environment, resolved);
+  if (isOutsideEnvironment) {
+    rejectUnapprovedExternalAccess(mode, inputPath);
+  }
+  return null;
 }
 
 function createExternalReadEnvironment(
@@ -389,20 +468,26 @@ function createExternalReadEnvironment(
   return {
     ...environment,
     resolvePath(inputPath: string): string {
-      if (path.isAbsolute(inputPath)) {
-        const resolved = path.resolve(inputPath);
-        if (isSamePath(resolved, approvedPath)) {
-          return approvedPath;
-        }
-        rejectUnapprovedExternalRead(inputPath);
+      const approved = resolveApprovedAbsolutePath(
+        environment,
+        inputPath,
+        approvedPath,
+        "read",
+        { allowDescendants: true },
+      );
+      if (approved) {
+        return approved;
       }
       return environment.resolvePath(inputPath);
     },
     async resolvePathForExisting(inputPath: string): Promise<string> {
       const target = resolveLexicalForEnvironment(environment, inputPath);
       const resolved = await fs.realpath(target);
-      if (isSamePath(resolved, approvedPath)) {
+      if (isSameOrInsidePath(resolved, approvedPath)) {
         return resolved;
+      }
+      if (isOutsideTrustedEnvironment(environment, resolved)) {
+        rejectUnapprovedExternalAccess("read", inputPath);
       }
       return environment.resolvePathForExisting(inputPath);
     },
@@ -418,12 +503,14 @@ function createExternalWriteEnvironment(
   return {
     ...environment,
     resolvePath(inputPath: string): string {
-      if (path.isAbsolute(inputPath)) {
-        const resolved = path.resolve(inputPath);
-        if (isSamePath(resolved, approvedPath)) {
-          return approvedPath;
-        }
-        rejectUnapprovedExternalWrite(inputPath);
+      const approved = resolveApprovedAbsolutePath(
+        environment,
+        inputPath,
+        approvedPath,
+        "write",
+      );
+      if (approved) {
+        return approved;
       }
       return environment.resolvePath(inputPath);
     },
@@ -433,7 +520,9 @@ function createExternalWriteEnvironment(
         if (isSamePath(resolved, approvedPath)) {
           return resolved;
         }
-        rejectUnapprovedExternalWrite(inputPath);
+        if (isOutsideWriteTrustedEnvironment(environment, resolved)) {
+          rejectUnapprovedExternalAccess("write", inputPath);
+        }
       }
       return environment.resolvePathForExisting(inputPath);
     },
@@ -443,7 +532,9 @@ function createExternalWriteEnvironment(
         if (!isRootPath(resolved) && isSamePath(resolved, approvedPath)) {
           return resolved;
         }
-        rejectUnapprovedExternalWrite(inputPath);
+        if (isOutsideWriteTrustedEnvironment(environment, resolved)) {
+          rejectUnapprovedExternalAccess("write", inputPath);
+        }
       }
       return environment.resolvePathForWrite(inputPath);
     },
@@ -1076,7 +1167,7 @@ export function createToolScheduler(
 
     async function trustExternalReadPath(): Promise<void> {
       await context.environment?.trustPath?.({
-        kind: "external-approved",
+        kind: "external-write-approved",
         path: trustedRootFromExternalPath(externalPath),
         source: "external_directory",
       });
@@ -1127,6 +1218,92 @@ export function createToolScheduler(
         }
       },
       reason: `External path access requires confirmation: ${externalPath.absolutePath}`,
+      toolName: "external_directory",
+    });
+  }
+
+  async function confirmExternalWritePermission(
+    call: ToolCall,
+    context: ToolPermissionContext,
+  ): Promise<ToolCallResult | null> {
+    if (!context.externalWrite || !context.externalWritePath) {
+      return null;
+    }
+    const controller = controllers.get(call.callId);
+    if (!controller) {
+      return makeCancelledResult(call);
+    }
+    if (isCancelled(call) || controller.signal.aborted) {
+      return makeCancelledResult(call);
+    }
+
+    const externalPath: PreflightExternalPath = {
+      absolutePath: context.externalWritePath,
+      askPattern: await externalPermissionAskPattern(context.externalWritePath),
+      original: context.externalWritePath,
+    };
+    const params = {
+      path: externalPath.absolutePath,
+      pattern: externalPath.askPattern,
+    };
+
+    async function trustExternalWritePath(): Promise<void> {
+      await context.environment?.trustPath?.({
+        kind: "external-approved",
+        path: trustedRootFromExternalPath(externalPath),
+        source: "external_directory",
+      });
+    }
+
+    let decision: PermissionDecision;
+    try {
+      decision = await waitForAbortable(
+        () =>
+          evaluatePermission(
+            {
+              callId: call.callId,
+              category: "dangerous",
+              messageId: call.messageId,
+              params,
+              sessionId: call.sessionId,
+              toolName: "external_directory",
+            },
+            {
+              ...permissionState.getState(),
+              level: "default",
+            },
+          ),
+        controller.signal,
+      );
+    } catch (error) {
+      if (isSchedulerAbortError(error)) {
+        return makeCancelledResult(call);
+      }
+      transition(call, "error");
+      return makeResult(call, "error", {
+        error: createError("ExecutionError", errorMessage(error), error),
+      });
+    }
+
+    if (decision.type === "deny") {
+      transition(call, "rejected");
+      return makeResult(call, "rejected", {
+        error: createError("PermissionDeniedError", decision.reason),
+      });
+    }
+    if (decision.type === "allow") {
+      await trustExternalWritePath();
+      return null;
+    }
+
+    return confirmPermission(call, decision, params, {
+      category: "dangerous",
+      onResponse: async (response) => {
+        if (response === "always") {
+          await trustExternalWritePath();
+        }
+      },
+      reason: `External write path access requires confirmation: ${externalPath.absolutePath}`,
       toolName: "external_directory",
     });
   }
@@ -1365,7 +1542,7 @@ export function createToolScheduler(
       request.environment,
       filePath,
     );
-    const externalWrite = isOutsideTrustedEnvironment(
+    const externalWrite = isOutsideWriteTrustedEnvironment(
       request.environment,
       canonicalPath,
     );
@@ -1523,6 +1700,15 @@ export function createToolScheduler(
     );
     if ("status" in permissionDecision) {
       return permissionDecision;
+    }
+    if (permissionDecision.type === "allow") {
+      const externalWriteResult = await confirmExternalWritePermission(
+        prepared.call,
+        prepared.permissionContext,
+      );
+      if (externalWriteResult) {
+        return externalWriteResult;
+      }
     }
     if (permissionDecision.type === "ask") {
       const permissionResult = await confirmPermission(

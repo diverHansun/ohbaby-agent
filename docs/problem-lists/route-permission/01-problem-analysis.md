@@ -20,7 +20,7 @@
 | 工作区内读 | ✅ 不拦截 | ✅ 不拦截 |
 | 工作区外读 | ⚠️ 用户批准 | ✅ 不拦截 |
 | 工作区内写 | ⚠️ 用户批准 | ✅ 不拦截 |
-| 工作区外写 | ⚠️ 用户批准 | ✅ 不拦截 |
+| 工作区外写 | ⚠️ 用户批准 | ⚠️ 用户批准（可记住） |
 | bash（普通） | ⚠️ 用户批准 | ✅ 不拦截 |
 | bash（敏感路径） | ⚠️ 用户批准 | ⚠️ 用户批准 |
 
@@ -205,17 +205,18 @@ if (toolName === "bash" || "command" in call.params) {
 **当前行为**：
 - `default` 下 `bash-readonly` 直接 allow，例如 `git status` 不需要用户批准
 - `full-access` fallback 直接 allow，导致 `sensitive_path` 也不会询问用户
-- scheduler 对 `externalWrite` 强制 ask，导致 `full-access` 下工作区外写仍然询问
+- scheduler 需要对 `externalWrite` 保留安全审批；`full-access` 下工作区外写仍应询问，并允许用户记住审批
 
 **期望行为**：
 - `default` 下所有 bash 都需要用户批准
 - `full-access` 下普通 bash 直接允许，但敏感路径仍需要用户批准
-- `full-access` 下 write/edit 不需要批准，包括工作区外路径；执行层仍应获得 scoped path capability，避免 policy allow 后被 sandbox resolver 拦截
+- `full-access` 下工作区内 write/edit 不需要批准；工作区外 write/edit 需要外部路径审批，审批可记住，执行层仍应获得 scoped path capability，避免 policy allow 后被 sandbox resolver 拦截
+- `plan` 模式的审批规则与 `auto` 模式的 `default/full-access` 矩阵保持一致，不再使用单独的 plan deny gate
 
 **根因**：
 - `evaluatePermission()` 的 `full-access` 分支过早返回 allow，无法保留敏感路径例外
 - `bash-readonly` 被归入 default allow 列表，和产品语义不一致
-- external write 的额外 ask 是 scheduler 层硬编码的旧语义，不再匹配当前要求
+- external write 的安全审批需要与 session rule 记忆机制打通，否则无法做到"批准一次，下次不再弹"
 
 ---
 

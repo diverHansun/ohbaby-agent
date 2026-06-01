@@ -59,18 +59,18 @@
 | # | mode | level | call | sessionRules | 期望 |
 |---|------|-------|------|--------------|------|
 | 1 | plan | default | read | [] | allow |
-| 2 | plan | full-access | write/edit | [] | deny，reason 含 plan |
-| 3 | plan | default | bash `ls` | [] | allow |
-| 4 | plan | full-access | bash `mkdir a` | [] | deny，full-access 不能压过 plan |
+| 2 | plan | full-access | write/edit | [] | allow |
+| 3 | plan | default | bash `ls` | [] | ask |
+| 4 | plan | full-access | bash `mkdir a` | [] | allow |
 | 5 | plan | default | memory_read | [] | allow |
-| 6 | plan | full-access | memory_add | [] | deny |
-| 7 | plan | default | subagent | [] | deny |
+| 6 | plan | full-access | memory_add | [] | allow |
+| 7 | plan | default | subagent | [] | allow |
 | 8 | plan | default | skill `foo` | [] | ask，reason 含 `foo` |
 | 9 | plan | full-access | skill `foo` | [] | allow |
 | 10 | auto | default | read | [] | allow |
 | 11 | auto | default | write/edit | [] | ask |
 | 12 | auto | full-access | write/edit | [] | allow |
-| 13 | auto | default | bash `git status` | [] | allow |
+| 13 | auto | default | bash `git status` | [] | ask |
 | 14 | auto | default | bash `npm install` | [] | ask |
 | 15 | auto | default | bash `rm -rf foo` | [] | ask，reason 含 dangerous |
 | 16 | auto | full-access | bash `rm -rf foo` | [] | allow |
@@ -81,7 +81,7 @@
 | 21 | auto | default | edit `src/a.ts` | allow `edit(src/**)` | allow |
 | 22 | auto | default | edit `lib/a.ts` | allow `edit(src/**)` | ask |
 | 23 | auto | full-access | bash `rm -rf foo` | deny `bash(rm *)` | deny，deny rule 优先 |
-| 24 | plan | full-access | edit `src/a.ts` | allow `edit(src/**)` | deny，mode 优先 |
+| 24 | plan | full-access | edit `src/a.ts` | allow `edit(src/**)` | allow |
 
 额外要求：
 
@@ -228,7 +228,7 @@
 - `lib/a.ts` 仍 ask。
 - 数据流记录能看到 `state.sessionRules.get(sessionId)` 命中。
 
-### E2E-3：plan 能力层
+### E2E-3：plan 审批层
 
 1. 切到 plan。
 2. 触发 read。
@@ -241,10 +241,10 @@
 
 期望：
 
-- read、bash readonly、memory-read allow。
-- edit、bash mutating、memory-write、subagent deny。
-- skill default ask。
-- deny reason 告诉 LLM 当前是 plan mode。
+- plan 下审批结果与 auto 的当前 `default/full-access` level 一致。
+- default 下 read、memory-read、memory-write、subagent allow；edit/write、bash、skill ask。
+- full-access 下普通 edit/write、bash、memory、subagent、skill allow。
+- system prompt 仍可提示 plan 模式不要主动写文件，但 permission evaluator 不再用 plan gate 强制 deny。
 
 ### E2E-4：full-access 与安全闸
 
@@ -257,7 +257,7 @@
 期望：
 
 - 普通 edit/write 与 bash dangerous 由 evaluator allow。
-- externalWrite / untrustedMcp 仍由 scheduler 强制 ask。
+- externalWrite / untrustedMcp 仍由 scheduler 强制 ask；externalWrite 可通过 always 记住。
 
 ### E2E-5：工具列表稳定
 
@@ -324,7 +324,7 @@ rg "MODE_ALLOWED_CATEGORIES|allowedCategories" packages/ohbaby-agent/src/core/to
 
 | 审查 | 必看问题 |
 |------|----------|
-| 权限安全 | Plan 是否可被 sessionRule/full-access 绕过；scheduler 闸是否保留 |
+| 权限安全 | plan/auto 是否共享 default/full-access 矩阵；scheduler 外部写/不可信 MCP 闸是否保留 |
 | 架构契约 | 是否删除 policy 真相源；SDK/UI 是否一致；manager 是否重新持有 approval 状态 |
 | 测试质量 | 矩阵是否完整；是否存在 mock 套 mock；是否覆盖失败路径 |
 

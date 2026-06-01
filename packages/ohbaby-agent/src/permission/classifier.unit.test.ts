@@ -74,6 +74,13 @@ describe("permission classifier", () => {
     );
   });
 
+  it("classifies synthetic sensitive path prompts explicitly", () => {
+    expect(classifyPermissionCall(call("Sensitive_Path"))).toMatchObject({
+      category: "dangerous",
+      kind: "sensitive",
+    });
+  });
+
   it("delegates bash commands to shell command classification", () => {
     expect(
       classifyPermissionCall(call("bash", { command: "git status" })),

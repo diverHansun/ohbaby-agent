@@ -43,12 +43,12 @@ interface PermissionState {
 1. `mode` / `level` 是全局 UI 状态；`sessionRules` 按 `sessionId` 隔离。
 2. evaluator 是唯一判定入口；manager 只负责 UI 队列、用户响应、always 写 rule 与 drain queue。
 3. Pattern DSL 内部 canonical 全小写，匹配真实注册工具名。
-4. `subagent` 保持现状：`plan` deny，`auto` allow，不受 level 影响。
+4. `plan` 与 `auto` 使用同一套 `default/full-access` permission 矩阵；`plan` 不再通过独立 gate 改写 allow/ask/deny。
 5. `memory` 在 classifier 内拆成 `memory-read` / `memory-write`，不扩展顶层 enum。
-6. `skill` 不被 plan 能力层拦截；default ask，full-access allow。
+6. `skill` default ask，full-access allow。
 7. plan 模式不按 mode 过滤工具列表；LLM 在 plan / auto 下看到完全相同工具。
 8. `/mode` 不存在；TUI 的 `Shift+Tab` 只切 `plan <-> auto`，`/permission` 只切 `default/full-access`。headless/SDK/启动参数只支持初始值。
-9. `full-access` 不绕过 scheduler 安全闸：external workspace write 与 untrusted MCP 仍强制 ask。
+9. `full-access` 不绕过 scheduler 安全闸：external workspace write 与 untrusted MCP 仍强制 ask；external write 审批可记住。
 10. Bash 由 `shell/command-classifier.classifyShellCommand(parsed)` 分类为 `readonly | mutating | dangerous`，复合命令按最危险子命令计，未知命令保守走 mutating/ask；运行前路径、安全闸检查继续由 `shell/preflight.ts` 承担。
 
 ---

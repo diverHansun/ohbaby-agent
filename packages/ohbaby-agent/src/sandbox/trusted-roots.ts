@@ -5,6 +5,7 @@ import { containsOrEqualPath } from "./boundary.js";
 export type TrustedRootKind =
   | "active-skill"
   | "external-approved"
+  | "external-write-approved"
   | "skill-output"
   | "workspace";
 

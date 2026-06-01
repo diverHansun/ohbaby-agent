@@ -1013,7 +1013,7 @@ describe("createInProcessUiBackendClient", () => {
           : "";
       expect(systemContent).toContain("Task: plan");
       expect(systemContent).toContain(
-        "Do not write files or execute workspace changes.",
+        "Prefer analysis and read-only exploration unless the user explicitly asks to execute changes.",
       );
     } finally {
       await rm(directory, { force: true, recursive: true });
@@ -2129,7 +2129,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("omits always approval for non-rememberable external write confirmations", async () => {
+  it("offers always approval for full-access external write confirmations", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(
       join(process.cwd(), ".tmp-ohbaby-ui-external-write-"),
@@ -2139,6 +2139,7 @@ describe("createInProcessUiBackendClient", () => {
     );
     try {
       const outsidePath = join(outsideDirectory, "outside.txt");
+      const secondOutsidePath = join(outsideDirectory, "outside-2.txt");
       const client = createInProcessUiBackendClient({
         initialSnapshot: {
           activeSessionId: null,
@@ -2161,6 +2162,13 @@ describe("createInProcessUiBackendClient", () => {
                 filePath: outsidePath,
               }),
             ],
+            [
+              writeToolCallEvent({
+                callId: "call_write_external_2",
+                content: "external-2",
+                filePath: secondOutsidePath,
+              }),
+            ],
             [{ textDelta: "External write complete.", finishReason: "stop" }],
           ],
           requests,
@@ -2178,13 +2186,16 @@ describe("createInProcessUiBackendClient", () => {
 
       expect(
         permissionEvent.request.choices.map((choice) => choice.id),
-      ).toEqual(["allow_once", "reject", "cancel"]);
+      ).toEqual(["allow_once", "allow_always", "reject", "cancel"]);
 
       await client.respondPermission(permissionEvent.request.id, {
-        choiceId: "allow_once",
+        choiceId: "allow_always",
       });
       await run;
       await expect(readFile(outsidePath, "utf8")).resolves.toBe("external");
+      await expect(readFile(secondOutsidePath, "utf8")).resolves.toBe(
+        "external-2",
+      );
     } finally {
       await rm(directory, { force: true, recursive: true });
       await rm(outsideDirectory, { force: true, recursive: true });

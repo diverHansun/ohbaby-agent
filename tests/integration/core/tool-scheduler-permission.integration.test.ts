@@ -193,7 +193,7 @@ describe("tool-scheduler permission integration", () => {
     ]);
   });
 
-  it("asks for writes in auto default and rejects writes in plan before permission", async () => {
+  it("asks for writes in auto default and plan default", async () => {
     const bus = createBus();
     const permissionState = createPermissionState({ bus });
     const permission = createPermissionManager({ bus, state: permissionState });
@@ -239,11 +239,11 @@ describe("tool-scheduler permission integration", () => {
         sessionId: "session_1",
         toolName: "edit",
       }),
-    ).resolves.toMatchObject({
-      error: { type: "PermissionDeniedError" },
-      status: "rejected",
-    });
+    ).resolves.toMatchObject({ output: "edited", status: "success" });
 
-    expect(permissionUpdates.map((info) => info.callId)).toEqual(["write_1"]);
+    expect(permissionUpdates.map((info) => info.callId)).toEqual([
+      "write_1",
+      "write_2",
+    ]);
   });
 });

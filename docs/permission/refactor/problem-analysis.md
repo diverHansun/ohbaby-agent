@@ -92,7 +92,7 @@ mode: "plan" | "auto";
 level: "default" | "full-access";
 ```
 
-`mode` 表示能力层，`level` 表示审批层，二者不互相修改。
+`mode` 表示交互意图，`level` 表示审批层，二者不互相修改。
 
 ### P4：工具列表按 mode 过滤会让 LLM 失去稳定上下文
 
@@ -101,7 +101,7 @@ level: "default" | "full-access";
 - prompt/tool schema 缓存不稳定；
 - 从 plan 切回 auto 后，LLM 对可用工具的认知需要重新恢复。
 
-**已确认方向**：工具注册表不按 mode 过滤。Plan 模式下 LLM 仍看到完整工具列表；真正调用时由 evaluator 返回 `deny` 和明确 reason。
+**已确认方向**：工具注册表不按 mode 过滤。Plan 模式下 LLM 仍看到完整工具列表；真正调用时与 auto 模式共用当前 `default/full-access` 审批矩阵。
 
 ### P5：`policy` 字段已经渗透到 SDK / UI 契约
 
@@ -158,7 +158,7 @@ flowchart TD
   C --> D{Decision}
   D -->|deny| E["return denied result with reason"]
   D -->|allow| F{"scheduler safety gate"}
-  F -->|externalWrite / untrustedMcp| G["manager.requestApproval(non-rememberable)"]
+  F -->|externalWrite / untrustedMcp| G["manager.requestApproval(rememberable for externalWrite)"]
   F -->|trusted| H["execute tool"]
   D -->|ask| I["manager.requestApproval(info)"]
   I -->|once| H

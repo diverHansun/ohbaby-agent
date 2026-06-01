@@ -55,12 +55,12 @@ function rule(input: {
 describe("permission evaluator", () => {
   it.each([
     ["plan", "default", call("read", { file_path: "src/a.ts" }), "allow"],
-    ["plan", "full-access", call("edit", { file_path: "src/a.ts" }), "deny"],
+    ["plan", "full-access", call("edit", { file_path: "src/a.ts" }), "allow"],
     ["plan", "default", call("bash", { command: "ls" }), "ask"],
-    ["plan", "full-access", call("bash", { command: "mkdir tmp" }), "deny"],
+    ["plan", "full-access", call("bash", { command: "mkdir tmp" }), "allow"],
     ["plan", "default", call("memory_read"), "allow"],
-    ["plan", "full-access", call("memory_add"), "deny"],
-    ["plan", "default", call("task"), "deny"],
+    ["plan", "full-access", call("memory_add"), "allow"],
+    ["plan", "default", call("task"), "allow"],
     ["plan", "default", call("skill", { name: "review" }), "ask"],
     ["plan", "full-access", call("skill", { name: "review" }), "allow"],
     ["auto", "default", call("read", { file_path: "src/a.ts" }), "allow"],
@@ -85,14 +85,7 @@ describe("permission evaluator", () => {
     },
   );
 
-  it("includes actionable reasons for plan denials and skill asks", () => {
-    const planDecision = evaluatePermission(
-      call("edit", { file_path: "src/a.ts" }),
-      state({ level: "full-access", mode: "plan" }),
-    );
-    expect(planDecision.type).toBe("deny");
-    expect(planDecision.reason).toMatch(/plan mode/i);
-
+  it("includes actionable reasons for skill and shell asks", () => {
     const skillDecision = evaluatePermission(
       call("skill", { name: "review" }),
       state({ level: "default", mode: "auto" }),
@@ -108,7 +101,7 @@ describe("permission evaluator", () => {
     expect(bashDecision.reason).toMatch(/dangerous/i);
   });
 
-  it("uses session rules after the mode gate and before level fallback", () => {
+  it("uses session rules before level fallback", () => {
     const allowSrc = rule({ pattern: "src/**", tool: "edit" });
     const denyRm = rule({
       decision: "deny",
@@ -140,7 +133,24 @@ describe("permission evaluator", () => {
         call("edit", { file_path: "src/a.ts" }),
         state({ level: "full-access", mode: "plan", rules: [allowSrc] }),
       ).type,
-    ).toBe("deny");
+    ).toBe("allow");
+  });
+
+  it("does not let session allow rules bypass sensitive path confirmations", () => {
+    const decision = evaluatePermission(
+      call("sensitive_path", { path: "C:/Windows/System32/config/SAM" }),
+      state({
+        level: "full-access",
+        mode: "auto",
+        rules: [rule({ tool: "sensitive_path" })],
+      }),
+    );
+
+    expect(decision).toMatchObject({
+      rememberable: false,
+      type: "ask",
+    });
+    expect(decision.reason).toMatch(/Sensitive path access/i);
   });
 
   it("keeps session rules isolated by session id", () => {

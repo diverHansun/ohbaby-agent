@@ -9,7 +9,7 @@
 | 编号 | 目标 | 说明 |
 |------|------|------|
 | G1 | 单一判定入口 | 所有工具调用都先经 `permission.evaluator.evaluate(call, state)` |
-| G2 | 二轴正交 | `mode` 表示能力层；`level` 表示审批层，互不诱导改变 |
+| G2 | 二轴正交 | `mode` 表示交互意图；`level` 表示审批层，互不诱导改变 |
 | G3 | 会话级规则 | `always` 只写入当前 `sessionId` 下的 `sessionRules` |
 | G4 | 删除 policy | `policy` 模块、`PolicyEvent`、`agentState`、`AutoEditRequested` 全部移除 |
 | G5 | 工具列表稳定 | plan / auto 下 LLM 看到完全相同工具列表 |
@@ -97,7 +97,7 @@ UI 展示时再 prettify，例如 `bash(git *)` 显示为 `Bash(git *)`。
 permission/evaluator
   1. 读取当前 session rules
   2. 分类工具调用
-  3. 按 mode / sessionRules / level 返回 allow|ask|deny
+  3. 按 sessionRules / level 返回 allow|ask|deny
 
 permission/manager
   1. 只在 ask 时进入
@@ -125,16 +125,17 @@ manager 不持有任何 approval 状态。所有“已允许”事实都来自 `
 | 顶层/子语义 | 示例 | 行为 |
 |-------------|------|------|
 | `readonly` | read/list/grep 类 | 默认 allow |
-| `write` | edit/write | plan deny；auto default ask；auto full-access allow |
-| `dangerous` | 高风险工具 | plan deny；auto default ask；auto full-access allow |
+| `write` | edit/write | default ask；full-access allow |
+| `dangerous` | 高风险工具 | default ask；full-access allow |
 | `network` | web fetch/search | 默认 allow，若已有现状风险闸则保留 |
 | `memory-read` | `memory_read`、`memory_list` | 所有 mode/level allow |
-| `memory-write` | `memory_add`、`memory_update`、`memory_remove` | plan deny；auto allow，不看 level |
+| `memory-write` | `memory_add`、`memory_update`、`memory_remove` | 所有 mode/level allow |
 | `skill` | skill tool | plan/auto default ask；full-access allow |
-| `subagent` | agent task tool | plan deny；auto allow，不看 level |
-| `bash-readonly` | `ls`、`cat`、`git status` | 同 readonly |
-| `bash-mutating` | `mkdir`、`npm install`、未知命令 | plan deny；auto default ask；auto full-access allow |
+| `subagent` | agent task tool | 所有 mode/level allow |
+| `bash-readonly` | `ls`、`cat`、`git status` | default ask；full-access allow |
+| `bash-mutating` | `mkdir`、`npm install`、未知命令 | default ask；full-access allow |
 | `bash-dangerous` | `rm -rf`、`sudo`、`chmod 777` | 同 mutating，但 ask reason 强调 dangerous |
+| `sensitive` | `sensitive_path` | 始终 ask，且不可记住 |
 
 ### 4.2 Bash 分类规则
 
@@ -157,34 +158,34 @@ type ShellCommandClass = "readonly" | "mutating" | "dangerous";
 
 ## 五、判定矩阵
 
-### 5.1 Mode 能力层
+### 5.1 Mode 行为层
 
-| Mode | 允许能力 | 被拒能力 |
-|------|----------|----------|
-| `plan` | readonly、network、memory-read、skill 进入审批层、bash-readonly | write、dangerous、subagent、memory-write、bash-mutating、bash-dangerous |
-| `auto` | 全部能力进入后续层 | 无 mode-level deny |
+| Mode | 行为 |
+|------|------|
+| `plan` | 工具列表与审批矩阵对齐 `auto`；系统提示仍引导模型先分析、少做变更 |
+| `auto` | 工具列表与审批矩阵对齐 `plan` |
 
-Plan 下 deny reason 必须明确：
+Plan 下提示信息用于降低误操作概率，但不再作为独立 deny gate：
 
 ```text
-You are in plan mode. Write/Edit/Bash mutations and memory writes will be denied. Use read tools or ask the user to switch to auto mode.
+You are in plan mode. Prefer analysis and read-only exploration unless the user explicitly asks to execute changes.
 ```
 
 ### 5.2 Level 审批层
 
 | 类别 | default | full-access |
 |------|---------|-------------|
-| readonly / network / memory-read / bash-readonly | allow | allow |
-| write / dangerous / bash-mutating / bash-dangerous | ask | allow |
+| readonly / network / memory-read / memory-write / subagent | allow | allow |
+| write / dangerous / bash-readonly / bash-mutating / bash-dangerous | ask | allow |
 | skill | ask，reason 含 skill name | allow |
-| memory-write | auto 下 allow | auto 下 allow |
-| subagent | auto 下 allow | auto 下 allow |
+| sensitive | ask，不可记住 | ask，不可记住 |
 
 ### 5.3 Subagent
 
 | Mode | Level | Decision |
 |------|-------|----------|
-| plan | 任意 | deny |
+| plan | default | allow |
+| plan | full-access | allow |
 | auto | default | allow |
 | auto | full-access | allow |
 
@@ -193,7 +194,7 @@ You are in plan mode. Write/Edit/Bash mutations and memory writes will be denied
 | 子类 | 工具示例 | Decision |
 |------|----------|----------|
 | memory-read | `memory_read`、`memory_list` | 所有 mode/level allow |
-| memory-write | `memory_add`、`memory_update`、`memory_remove` | plan deny；auto allow |
+| memory-write | `memory_add`、`memory_update`、`memory_remove` | 所有 mode/level allow |
 
 ### 5.5 Skill
 
@@ -212,10 +213,10 @@ Skill 不被 plan 能力层拦截。`ask.reason` 必须包含 skill name。
 
 | 条件 | 处理 |
 |------|------|
-| `context.externalWrite === true` | ask |
+| `context.externalWrite === true` | ask，可通过 `always` 记住同一外部路径范围 |
 | `context.untrustedMcp === true` | ask |
 
-这类 ask 建议设置为不可记忆或隐藏 `always`，因为 sessionRule 不能绕过安全闸。
+external write 的 `always` 写入 session rule，并将路径标记为 `external-write-approved`；下一次匹配同一外部路径范围不再弹窗。外部读或 bash preflight 的自动放行只写入普通 `external-approved`，不能绕过后续外部写审批；untrusted MCP 仍可选择不可记住。
 
 ---
 
@@ -226,11 +227,11 @@ export function evaluate(call: PermissionCall, state: PermissionState): Decision
   const sessionRules = state.sessionRules.get(call.sessionId) ?? [];
   const classification = classifyToolCall(call);
 
-  const modeDecision = evaluateModeGate(call, classification, state.mode);
-  if (modeDecision.type === "deny") return modeDecision;
-
   const ruleDecision = evaluateSessionRules(call, sessionRules);
   if (ruleDecision) return ruleDecision;
+
+  const invariantDecision = evaluateInvariantSafety(call, classification);
+  if (invariantDecision) return invariantDecision;
 
   return evaluateLevelFallback(call, classification, state.level);
 }
@@ -238,8 +239,8 @@ export function evaluate(call: PermissionCall, state: PermissionState): Decision
 
 顺序不可调换：
 
-1. `mode` 能力层先于 session rule。Plan 下被禁止的写操作，不能被 sessionRule 打开。
-2. session rule 中 `deny` 优先于 `allow`。
+1. session rule 中 `deny` 优先于 `allow`。
+2. `sensitive_path` 等不可记住安全判定不能被 allow rule 绕过。
 3. `level` 是兜底审批策略。
 4. scheduler 安全闸在 evaluator 之后执行。
 
@@ -299,10 +300,10 @@ MVP 不支持 headless 中途动态切 mode；未来如果需要，另起 `/mode
 Plan 模式下，工具列表不变，但 system prompt 需要注入简短约束：
 
 ```text
-You are in plan mode. Write/Edit/Bash mutations and memory writes will be denied. Use read tools or ask the user to switch to auto mode.
+You are in plan mode. Prefer analysis and read-only exploration unless the user explicitly asks to execute changes.
 ```
 
-这条提示用于降低 deny 循环概率；真正安全边界仍由 evaluator 执行。
+这条提示用于降低误操作概率；真正安全边界仍由 evaluator 与 scheduler 执行。
 
 ---
 

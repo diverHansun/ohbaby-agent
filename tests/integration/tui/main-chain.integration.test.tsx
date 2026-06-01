@@ -238,7 +238,7 @@ describe("TUI main chain with real in-process backend", () => {
     app.unmount();
   });
 
-  it("rejects write tool calls in plan mode before showing permission", async () => {
+  it("uses default permission approval for write tool calls in plan mode", async () => {
     const workdir = await tempWorkspace("ohbaby-cli-plan-permission");
     const requests = [];
     const client = createInProcessUiBackendClient({
@@ -251,7 +251,7 @@ describe("TUI main chain with real in-process backend", () => {
               filePath: "denied.txt",
             }),
           ],
-          [{ textDelta: "Write blocked by plan mode.", finishReason: "stop" }],
+          [{ textDelta: "Plan write completed.", finishReason: "stop" }],
         ],
         requests,
       ),
@@ -274,14 +274,22 @@ describe("TUI main chain with real in-process backend", () => {
 
     app.stdin.write("try to write");
     app.stdin.write("\r");
+    await waitForFrame(app, (frame) => frame.includes("Permission:"));
+
+    app.stdin.write("\t");
+    app.stdin.write("\t");
+    app.stdin.write("\r");
+
     const frame = await waitForFrame(app, (nextFrame) =>
-      nextFrame.includes("Write blocked by plan mode."),
+      nextFrame.includes("Plan write completed."),
     );
 
-    expect(frame).toContain("tool write (failed)");
-    expect(frame).toContain("plan mode");
-    expect(frame).not.toContain("Permission:");
+    expect(frame).toContain("tool write (completed)");
+    expect(frame).not.toContain("plan mode");
     expect(requests).toHaveLength(2);
+    await expect(readFile(join(workdir, "denied.txt"), "utf8")).resolves.toBe(
+      "denied",
+    );
     app.unmount();
   });
 

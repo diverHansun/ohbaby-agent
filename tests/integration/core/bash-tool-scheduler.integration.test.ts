@@ -113,17 +113,31 @@ describe("bash tool scheduler integration", () => {
     expect(spawn).toHaveBeenCalledOnce();
   });
 
-  it("rejects mutating bash in plan mode before permission is requested", async () => {
-    const { permissionState, permissionUpdates, scheduler } = createHarness();
+  it("uses default permission approval for mutating bash in plan mode", async () => {
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(
+      (
+        _file: string,
+        _args: readonly string[],
+        _options: SpawnOptionsWithoutStdio,
+      ) => {
+        queueMicrotask(() => {
+          child.emit("exit", 0, null);
+        });
+        return child as unknown as ChildProcess;
+      },
+    );
+    const { permissionState, permissionUpdates, scheduler } =
+      createHarness(spawn);
     permissionState.setMode("plan");
 
     await expect(
-      scheduler.execute(request("bash_plan", "touch blocked")),
+      scheduler.execute(request("bash_plan", "touch approved")),
     ).resolves.toMatchObject({
-      error: { type: "PermissionDeniedError" },
-      status: "rejected",
+      status: "success",
     });
-    expect(permissionUpdates).toEqual([]);
+    expect(permissionUpdates).toEqual(["bash_plan"]);
+    expect(spawn).toHaveBeenCalledOnce();
   });
 
   it("allows cd escapes after scheduler approval", async () => {

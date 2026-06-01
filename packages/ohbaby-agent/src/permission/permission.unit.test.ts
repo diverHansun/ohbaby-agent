@@ -489,7 +489,7 @@ describe("PermissionManager", () => {
     ]);
   });
 
-  it("rechecks evaluator state before auto-approving queued matching requests", async () => {
+  it("auto-approves queued matching requests after a plan-mode always approval", async () => {
     const bus = createBus();
     const state = createPermissionState({ bus });
     let nextId = 1;
@@ -499,9 +499,13 @@ describe("PermissionManager", () => {
       state,
     });
     const updated: PermissionInfo[] = [];
+    const replied: unknown[] = [];
 
     bus.subscribe(PermissionEvent.Updated, (event) => {
       updated.push(event.info);
+    });
+    bus.subscribe(PermissionEvent.Replied, (event) => {
+      replied.push(event);
     });
 
     const first = permission.ask(baseAskInput());
@@ -516,13 +520,28 @@ describe("PermissionManager", () => {
     permission.respond("session_1", "permission_1", { type: "always" });
 
     await expect(first).resolves.toBe("always");
-    expect(updated.map((info) => info.id)).toEqual([
-      "permission_1",
-      "permission_2",
+    await expect(second).resolves.toBe("always");
+    expect(updated.map((info) => info.id)).toEqual(["permission_1"]);
+    expect(replied).toEqual([
+      {
+        callId: "call_1",
+        permissionId: "permission_1",
+        response: {
+          pattern: "edit(src/components/**)",
+          type: "always",
+        },
+        sessionId: "session_1",
+      },
+      {
+        callId: "call_2",
+        permissionId: "permission_2",
+        response: {
+          pattern: "edit(src/components/**)",
+          type: "auto_approved",
+        },
+        sessionId: "session_1",
+      },
     ]);
-
-    permission.respond("session_1", "permission_2", { type: "once" });
-    await expect(second).resolves.toBe("once");
   });
 
   it("keeps approvals and cleanup scoped by session", async () => {

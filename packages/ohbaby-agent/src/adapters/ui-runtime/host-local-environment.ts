@@ -27,22 +27,26 @@ function normalizeForBoundary(inputPath: string): string {
     : withoutTrailingSeparator;
 }
 
+function isOutsideRelativePath(relativePath: string): boolean {
+  return (
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  );
+}
+
 function assertInsideWorkdir(
   workdir: string,
   inputPath: string,
   resolved: string,
 ): string {
-  if (path.isAbsolute(inputPath)) {
-    return resolved;
-  }
-
   const normalizedRoot = normalizeForBoundary(workdir);
   const normalizedCandidate = normalizeForBoundary(resolved);
   if (normalizedRoot === normalizedCandidate) {
     return resolved;
   }
   const relative = path.relative(normalizedRoot, normalizedCandidate);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+  if (isOutsideRelativePath(relative)) {
     throw new Error(`Path escapes workspace: ${inputPath}`);
   }
   return resolved;
