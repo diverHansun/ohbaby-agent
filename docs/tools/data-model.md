@@ -129,11 +129,11 @@ const WriteParams = z.object({
 ```typescript
 const EditParams = z.object({
   file_path: z.string().describe('要编辑的文件的绝对路径'),
-  old_string: z.string().describe('要替换的原始文本'),
+  old_string: z.string().describe('要替换的原始文本；精确匹配失败时可能按有限空白 fuzzy 比较，需提供足够上下文'),
   new_string: z.string().describe('替换后的新文本'),
   replace_all: z.boolean().optional().describe('是否替换所有匹配'),
   dry_run: z.boolean().optional().describe('仅返回 Unified Diff 预览，不写入文件'),
-  expected_mtime_ms: z.number().optional().describe('兼容旧调用；edit 不使用该值'),
+  expected_mtime_ms: z.number().optional().describe('deprecated；兼容旧调用；edit 不使用该值'),
 })
 ```
 

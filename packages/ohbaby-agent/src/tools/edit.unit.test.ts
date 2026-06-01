@@ -72,6 +72,19 @@ describe("edit file tool", () => {
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
+  it("marks expected_mtime_ms as deprecated compatibility input", () => {
+    const schema = createEditTool().parametersJsonSchema as {
+      readonly properties: Record<string, Record<string, unknown>>;
+    };
+
+    expect(schema.properties.expected_mtime_ms).toMatchObject({
+      deprecated: true,
+    });
+    expect(schema.properties.old_string.description).toEqual(
+      expect.stringContaining("Whitespace fuzzy matching"),
+    );
+  });
+
   it("allows editing without an expected mtime", async () => {
     const target = await writeFile(tempRoot, "note.txt", "old\n");
     const context = createTestContext(tempRoot);

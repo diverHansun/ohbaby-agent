@@ -143,7 +143,7 @@ metadata: mtimeMs, sizeBytes, encoding, lineEnding, hasMore, nextOffset
 ```
 输入: file_path, old_string, new_string, replace_all?, dry_run?, expected_mtime_ms?（兼容旧调用，edit 不使用）
 输出: diff 信息、诊断信息
-特殊: 每次执行时读取当前文件；old_string 必须唯一匹配，精确匹配失败时允许有限空白/缩进 fuzzy；replace_all 只替换精确匹配；保留既有 CRLF/LF 风格与 UTF-8 BOM
+特殊: 每次执行时读取当前文件；old_string 必须唯一匹配，精确匹配失败时允许有限空白/缩进 fuzzy；空白 fuzzy 会把候选片段内连续空格、Tab、换行按单空格比较，空白敏感编辑必须提供更多上下文；replace_all 只替换精确匹配；保留既有 CRLF/LF 风格与 UTF-8 BOM
 预览: dry_run 返回 Unified Diff，不写入文件
 ```
 

@@ -50,6 +50,8 @@ export function createWriteTool(): Tool {
         ? (existingPath ?? resolvePreviewPath(context, inputPath))
         : await resolveWritableFile(context, inputPath);
       return await withFileLock(resolvedPath, async () => {
+        // Re-resolve inside the lock so the mtime check observes the same file
+        // state the write will replace.
         const lockedExistingPath = await resolveExistingFileIfPresent(
           context,
           inputPath,

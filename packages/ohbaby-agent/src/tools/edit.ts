@@ -27,12 +27,13 @@ export function createEditTool(): Tool {
   return {
     name: "edit",
     description:
-      "Replace unique text in the current contents of an existing workspace file. Exact old_string matches are preferred; bounded whitespace and indentation fuzzy matching is used only when exact matching fails.",
+      "Replace unique text in the current contents of an existing workspace file. Exact old_string matches are preferred; bounded indentation and whitespace fuzzy matching is used only when exact matching fails. Whitespace fuzzy matching can treat runs of spaces, tabs, and newlines as equivalent inside a candidate, so include enough surrounding context for whitespace-sensitive edits.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {
         dry_run: { type: "boolean" },
         expected_mtime_ms: {
+          deprecated: true,
           description:
             "Deprecated for edit; accepted for compatibility but content matching is authoritative.",
           type: "number",
@@ -44,7 +45,7 @@ export function createEditTool(): Tool {
         },
         old_string: {
           description:
-            "Text to replace. Include enough surrounding context so the match is unique.",
+            "Text to replace. Include enough surrounding context so the match is unique. Whitespace fuzzy matching may collapse spaces, tabs, and newlines inside a candidate when exact matching fails.",
           type: "string",
         },
         replace_all: {
