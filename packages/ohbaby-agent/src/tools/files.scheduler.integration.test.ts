@@ -527,64 +527,11 @@ describe("file tools scheduler integration", () => {
     ).resolves.toBe("escape\n");
   });
 
-  it("requires scheduler read before edit and supports edit dry_run", async () => {
+  it("uses content-based edit matching through ToolScheduler and supports edit dry_run", async () => {
     const scheduler = createScheduler();
     const environment = createHostLocalEnvironment(tempRoot);
     const filePath = path.join(tempRoot, "note.txt");
-    await fs.writeFile(filePath, "old\n", "utf8");
-    const staleFreeMtime = (await fs.stat(filePath)).mtimeMs;
-
-    const editWithoutRead = await scheduler.execute({
-      callId: "edit_without_read",
-      environment,
-      messageId: "message_1",
-      params: {
-        expected_mtime_ms: staleFreeMtime,
-        file_path: "note.txt",
-        new_string: "new",
-        old_string: "old",
-      },
-      sessionId: "session_requires_read",
-      toolName: "edit",
-    });
-
-    expect(editWithoutRead.status).toBe("error");
-    expect(editWithoutRead.error?.message).toContain(
-      "must be read before edit",
-    );
-    await expect(fs.readFile(filePath, "utf8")).resolves.toBe("old\n");
-
-    const read = await scheduler.execute({
-      callId: "read_before_edit",
-      environment,
-      messageId: "message_1",
-      params: { file_path: "note.txt" },
-      sessionId: "session_edit",
-      toolName: "read",
-    });
-    expect(read.status).toBe("success");
-    const mtimeMs = read.metadata?.mtimeMs;
-    expect(mtimeMs).toEqual(expect.any(Number));
-
-    const otherSessionEdit = await scheduler.execute({
-      callId: "edit_other_session",
-      environment,
-      messageId: "message_1",
-      params: {
-        expected_mtime_ms: mtimeMs,
-        file_path: "note.txt",
-        new_string: "new",
-        old_string: "old",
-      },
-      sessionId: "session_other",
-      toolName: "edit",
-    });
-
-    expect(otherSessionEdit.status).toBe("error");
-    expect(otherSessionEdit.error?.message).toContain(
-      "must be read before edit",
-    );
-    await expect(fs.readFile(filePath, "utf8")).resolves.toBe("old\n");
+    await fs.writeFile(filePath, "old\nunchanged\n", "utf8");
 
     const preview = await scheduler.execute({
       callId: "edit_preview",
@@ -592,7 +539,6 @@ describe("file tools scheduler integration", () => {
       messageId: "message_1",
       params: {
         dry_run: true,
-        expected_mtime_ms: mtimeMs,
         file_path: "note.txt",
         new_string: "new",
         old_string: "old",
@@ -603,48 +549,16 @@ describe("file tools scheduler integration", () => {
 
     expect(preview.status).toBe("success");
     expect(preview.output).toContain("Dry run: no changes written.");
-    expect(preview.output).toContain("@@ -1,1 +1,1 @@");
-    await expect(fs.readFile(filePath, "utf8")).resolves.toBe("old\n");
-
-    await fs.writeFile(filePath, "old external\n", "utf8");
-    await fs.utimes(filePath, new Date(), new Date(Date.now() + 2_000));
-    const modifiedMtime = (await fs.stat(filePath)).mtimeMs;
-    const staleReadStateEdit = await scheduler.execute({
-      callId: "edit_stale_read_state",
-      environment,
-      messageId: "message_1",
-      params: {
-        expected_mtime_ms: modifiedMtime,
-        file_path: "note.txt",
-        new_string: "new",
-        old_string: "old",
-      },
-      sessionId: "session_edit",
-      toolName: "edit",
-    });
-
-    expect(staleReadStateEdit.status).toBe("error");
-    expect(staleReadStateEdit.error?.message).toContain(
-      "read again before edit",
+    expect(preview.output).toContain("@@ -1,2 +1,2 @@");
+    await expect(fs.readFile(filePath, "utf8")).resolves.toBe(
+      "old\nunchanged\n",
     );
-
-    const readAgain = await scheduler.execute({
-      callId: "read_again_before_edit",
-      environment,
-      messageId: "message_1",
-      params: { file_path: "note.txt" },
-      sessionId: "session_edit",
-      toolName: "read",
-    });
-    const freshMtime = readAgain.metadata?.mtimeMs;
-    expect(freshMtime).toEqual(expect.any(Number));
 
     const actual = await scheduler.execute({
       callId: "edit_actual",
       environment,
       messageId: "message_1",
       params: {
-        expected_mtime_ms: freshMtime,
         file_path: "note.txt",
         new_string: "new",
         old_string: "old",
@@ -654,6 +568,61 @@ describe("file tools scheduler integration", () => {
     });
 
     expect(actual.status).toBe("success");
-    await expect(fs.readFile(filePath, "utf8")).resolves.toBe("new external\n");
+    expect(actual.metadata?.mtimeMs).toEqual(expect.any(Number));
+    await expect(fs.readFile(filePath, "utf8")).resolves.toBe(
+      "new\nunchanged\n",
+    );
+
+    const consecutive = await scheduler.execute({
+      callId: "edit_consecutive",
+      environment,
+      messageId: "message_1",
+      params: {
+        file_path: "note.txt",
+        new_string: "newer",
+        old_string: "new",
+      },
+      sessionId: "session_edit",
+      toolName: "edit",
+    });
+
+    expect(consecutive.status).toBe("success");
+    await expect(fs.readFile(filePath, "utf8")).resolves.toBe(
+      "newer\nunchanged\n",
+    );
+
+    await fs.writeFile(filePath, "external\n", "utf8");
+    const staleContentEdit = await scheduler.execute({
+      callId: "edit_stale_content",
+      environment,
+      messageId: "message_1",
+      params: {
+        file_path: "note.txt",
+        new_string: "bad",
+        old_string: "newer",
+      },
+      sessionId: "session_edit",
+      toolName: "edit",
+    });
+
+    expect(staleContentEdit.status).toBe("error");
+    expect(staleContentEdit.error?.message).toContain("No occurrences found");
+    await expect(fs.readFile(filePath, "utf8")).resolves.toBe("external\n");
+
+    const contentMatched = await scheduler.execute({
+      callId: "edit_current_content",
+      environment,
+      messageId: "message_1",
+      params: {
+        file_path: "note.txt",
+        new_string: "updated",
+        old_string: "external",
+      },
+      sessionId: "session_edit",
+      toolName: "edit",
+    });
+
+    expect(contentMatched.status).toBe("success");
+    await expect(fs.readFile(filePath, "utf8")).resolves.toBe("updated\n");
   });
 });

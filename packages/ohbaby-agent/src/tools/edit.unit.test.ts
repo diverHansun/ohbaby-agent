@@ -1,10 +1,9 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolExecutionContext } from "../core/tool-scheduler/index.js";
 import { createEditTool } from "./edit.js";
-import { createReadTool } from "./read.js";
 
 interface TestContext extends ToolExecutionContext {
   writeCalls: number;
@@ -59,26 +58,6 @@ async function writeFile(
   return target;
 }
 
-async function statMtimeMs(filePath: string): Promise<number> {
-  return (await fs.stat(filePath)).mtimeMs;
-}
-
-async function readBeforeEdit(
-  context: ToolExecutionContext,
-  filePath: string,
-): Promise<number> {
-  const result = await createReadTool().execute(
-    { file_path: filePath },
-    context,
-  );
-  const mtimeMs = result.metadata?.mtimeMs;
-  if (typeof mtimeMs !== "number") {
-    throw new Error("read did not return mtimeMs");
-  }
-
-  return mtimeMs;
-}
-
 describe("edit file tool", () => {
   let tempRoot: string;
 
@@ -89,31 +68,28 @@ describe("edit file tool", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
-  it("requires expected_mtime_ms before modifying a file", async () => {
+  it("allows editing without an expected mtime", async () => {
     const target = await writeFile(tempRoot, "note.txt", "old\n");
     const context = createTestContext(tempRoot);
 
-    await expect(
-      createEditTool().execute(
-        { file_path: "note.txt", new_string: "new", old_string: "old" },
-        context,
-      ),
-    ).rejects.toThrow("expected_mtime_ms is required");
+    await createEditTool().execute(
+      { file_path: "note.txt", new_string: "new", old_string: "old" },
+      context,
+    );
 
-    await expect(fs.readFile(target, "utf8")).resolves.toBe("old\n");
+    await expect(fs.readFile(target, "utf8")).resolves.toBe("new\n");
   });
 
-  it("edits a unique match only when mtime matches and preserves CRLF", async () => {
+  it("edits a unique match and preserves CRLF", async () => {
     const target = await writeFile(tempRoot, "note.txt", "alpha\r\nbeta\r\n");
     const context = createTestContext(tempRoot);
-    const mtimeMs = await readBeforeEdit(context, "note.txt");
 
     const result = await createEditTool().execute(
       {
-        expected_mtime_ms: mtimeMs,
         file_path: "note.txt",
         new_string: "alpha\nbeta changed",
         old_string: "alpha\nbeta",
@@ -132,14 +108,12 @@ describe("edit file tool", () => {
     });
   });
 
-  it("supports replace_all with a matching mtime", async () => {
+  it("supports replace_all for exact matches", async () => {
     const target = await writeFile(tempRoot, "note.txt", "x\nx\n");
     const context = createTestContext(tempRoot);
-    const mtimeMs = await readBeforeEdit(context, "note.txt");
 
     await createEditTool().execute(
       {
-        expected_mtime_ms: mtimeMs,
         file_path: "note.txt",
         new_string: "y",
         old_string: "x",
@@ -151,34 +125,30 @@ describe("edit file tool", () => {
     await expect(fs.readFile(target, "utf8")).resolves.toBe("y\ny\n");
   });
 
-  it("requires the file to be read in the same session before edit", async () => {
-    const target = await writeFile(tempRoot, "note.txt", "old\n");
-    const mtimeMs = await statMtimeMs(target);
+  it("allows consecutive edits without re-reading", async () => {
+    const target = await writeFile(tempRoot, "note.txt", "alpha\nbeta\n");
     const context = createTestContext(tempRoot);
+    const edit = createEditTool();
 
-    await expect(
-      createEditTool().execute(
-        {
-          expected_mtime_ms: mtimeMs,
-          file_path: "note.txt",
-          new_string: "new",
-          old_string: "old",
-        },
-        context,
-      ),
-    ).rejects.toThrow("must be read before edit");
-    await expect(fs.readFile(target, "utf8")).resolves.toBe("old\n");
+    await edit.execute(
+      { file_path: "note.txt", new_string: "ALPHA", old_string: "alpha" },
+      context,
+    );
+    await edit.execute(
+      { file_path: "note.txt", new_string: "BETA", old_string: "beta" },
+      context,
+    );
+
+    await expect(fs.readFile(target, "utf8")).resolves.toBe("ALPHA\nBETA\n");
   });
 
   it("previews edits with dry_run unified diff without modifying the file", async () => {
     const target = await writeFile(tempRoot, "note.txt", "old\n");
     const context = createTestContext(tempRoot);
-    const mtimeMs = await readBeforeEdit(context, "note.txt");
 
     const result = await createEditTool().execute(
       {
         dry_run: true,
-        expected_mtime_ms: mtimeMs,
         file_path: "note.txt",
         new_string: "new",
         old_string: "old",
@@ -197,7 +167,7 @@ describe("edit file tool", () => {
     });
   });
 
-  it("rejects missing, multiple, stale, binary, and oversized edits without changing text files", async () => {
+  it("rejects missing, multiple, binary, and oversized edits without changing text files", async () => {
     const target = await writeFile(tempRoot, "note.txt", "same\nsame\n");
     await writeFile(tempRoot, "large.txt", "x".repeat(1_000_001));
     await fs.writeFile(
@@ -205,13 +175,11 @@ describe("edit file tool", () => {
       Buffer.from([0x61, 0x00, 0x62]),
     );
     const context = createTestContext(tempRoot);
-    const mtimeMs = await readBeforeEdit(context, "note.txt");
     const edit = createEditTool();
 
     await expect(
       edit.execute(
         {
-          expected_mtime_ms: mtimeMs,
           file_path: "note.txt",
           new_string: "after",
           old_string: "missing",
@@ -222,7 +190,6 @@ describe("edit file tool", () => {
     await expect(
       edit.execute(
         {
-          expected_mtime_ms: mtimeMs,
           file_path: "note.txt",
           new_string: "once",
           old_string: "same",
@@ -233,19 +200,6 @@ describe("edit file tool", () => {
     await expect(
       edit.execute(
         {
-          expected_mtime_ms: 1,
-          file_path: "note.txt",
-          new_string: "once",
-          old_string: "same",
-          replace_all: true,
-        },
-        context,
-      ),
-    ).rejects.toThrow("mtime");
-    await expect(
-      edit.execute(
-        {
-          expected_mtime_ms: mtimeMs,
           file_path: "binary.bin",
           new_string: "b",
           old_string: "a",
@@ -256,7 +210,6 @@ describe("edit file tool", () => {
     await expect(
       edit.execute(
         {
-          expected_mtime_ms: mtimeMs,
           file_path: "large.txt",
           new_string: "y",
           old_string: "x",
@@ -266,5 +219,117 @@ describe("edit file tool", () => {
     ).rejects.toThrow("File is too large to read");
 
     await expect(fs.readFile(target, "utf8")).resolves.toBe("same\nsame\n");
+  });
+
+  it("uses bounded fuzzy matching for whitespace-only drift", async () => {
+    const target = await writeFile(
+      tempRoot,
+      "note.txt",
+      "  const value = 1;\n  const label = 'ready';\n",
+    );
+    const context = createTestContext(tempRoot);
+
+    await createEditTool().execute(
+      {
+        file_path: "note.txt",
+        new_string: "  const value = 2;\n  const label = 'ready';",
+        old_string: "const value = 1;\nconst label = 'ready';",
+      },
+      context,
+    );
+
+    await expect(fs.readFile(target, "utf8")).resolves.toBe(
+      "  const value = 2;\n  const label = 'ready';\n",
+    );
+  });
+
+  it("rejects fuzzy matches that are not unique", async () => {
+    const target = await writeFile(tempRoot, "note.txt", "  value\n\tvalue\n");
+    const context = createTestContext(tempRoot);
+
+    await expect(
+      createEditTool().execute(
+        {
+          file_path: "note.txt",
+          new_string: "changed",
+          old_string: "value",
+        },
+        context,
+      ),
+    ).rejects.toThrow("Multiple occurrences found");
+    await expect(fs.readFile(target, "utf8")).resolves.toBe(
+      "  value\n\tvalue\n",
+    );
+  });
+
+  it("prefers narrower fuzzy matches before broader whitespace normalization", async () => {
+    const target = await writeFile(
+      tempRoot,
+      "note.txt",
+      "  alpha beta\n  guard\nalpha    beta\n  guard\n",
+    );
+    const context = createTestContext(tempRoot);
+
+    await createEditTool().execute(
+      {
+        file_path: "note.txt",
+        new_string: "  changed\n  guard",
+        old_string: "alpha beta\nguard",
+      },
+      context,
+    );
+
+    await expect(fs.readFile(target, "utf8")).resolves.toBe(
+      "  changed\n  guard\nalpha    beta\n  guard\n",
+    );
+  });
+
+  it("serializes concurrent direct edits to preserve both changes", async () => {
+    const target = await writeFile(
+      tempRoot,
+      "note.txt",
+      "top = 0\nmiddle = keep\nbottom = 0\n",
+    );
+    const context = createTestContext(tempRoot);
+    const edit = createEditTool();
+    const actualRename = fs.rename.bind(fs);
+    let releaseFirstRename!: () => void;
+    let firstRenameStarted!: () => void;
+    const releaseFirstRenamePromise = new Promise<void>((resolve) => {
+      releaseFirstRename = resolve;
+    });
+    const firstRenameStartedPromise = new Promise<void>((resolve) => {
+      firstRenameStarted = resolve;
+    });
+    let renameCount = 0;
+    vi.spyOn(fs, "rename").mockImplementation(async (...args) => {
+      renameCount += 1;
+      if (renameCount === 1) {
+        firstRenameStarted();
+        await releaseFirstRenamePromise;
+      }
+      await actualRename(...args);
+    });
+
+    const first = edit.execute(
+      { file_path: "note.txt", new_string: "top = 1", old_string: "top = 0" },
+      context,
+    );
+    await firstRenameStartedPromise;
+    const second = edit.execute(
+      {
+        file_path: "note.txt",
+        new_string: "bottom = 2",
+        old_string: "bottom = 0",
+      },
+      context,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    releaseFirstRename();
+    await Promise.all([first, second]);
+
+    await expect(fs.readFile(target, "utf8")).resolves.toBe(
+      "top = 1\nmiddle = keep\nbottom = 2\n",
+    );
   });
 });

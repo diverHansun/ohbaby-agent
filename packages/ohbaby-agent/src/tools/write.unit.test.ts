@@ -215,6 +215,60 @@ describe("write file tool", () => {
     });
   });
 
+  it("serializes concurrent overwrites so stale mtime values are rejected", async () => {
+    const target = await writeFile(tempRoot, "note.txt", "old\n");
+    const mtimeMs = await statMtimeMs(target);
+    const context = createTestContext(tempRoot);
+    const write = createWriteTool();
+    const actualRename = fs.rename.bind(fs);
+    let releaseFirstRename!: () => void;
+    let firstRenameStarted!: () => void;
+    const releaseFirstRenamePromise = new Promise<void>((resolve) => {
+      releaseFirstRename = resolve;
+    });
+    const firstRenameStartedPromise = new Promise<void>((resolve) => {
+      firstRenameStarted = resolve;
+    });
+    let renameCount = 0;
+    vi.spyOn(fs, "rename").mockImplementation(async (...args) => {
+      renameCount += 1;
+      if (renameCount === 1) {
+        firstRenameStarted();
+        await releaseFirstRenamePromise;
+      }
+      await actualRename(...args);
+    });
+
+    const first = write.execute(
+      {
+        content: "first\n",
+        expected_mtime_ms: mtimeMs,
+        file_path: "note.txt",
+      },
+      context,
+    );
+    await firstRenameStartedPromise;
+    const second = write.execute(
+      {
+        content: "second\n",
+        expected_mtime_ms: mtimeMs,
+        file_path: "note.txt",
+      },
+      context,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    releaseFirstRename();
+    const results = await Promise.allSettled([first, second]);
+
+    expect(results[0].status).toBe("fulfilled");
+    expect(results[1].status).toBe("rejected");
+    if (results[1].status === "rejected") {
+      expect(results[1].reason).toBeInstanceOf(Error);
+      expect((results[1].reason as Error).message).toContain("mtime");
+    }
+    await expect(fs.readFile(target, "utf8")).resolves.toBe("first\n");
+  });
+
   it("cleans up the same-directory temporary file when atomic rename fails", async () => {
     const context = createTestContext(tempRoot);
     vi.spyOn(fs, "rename").mockRejectedValueOnce(new Error("rename failed"));

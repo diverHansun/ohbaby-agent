@@ -7,7 +7,6 @@ import { splitTextLines } from "./utils/files.js";
 import { getNumberParam, getStringParam } from "./utils/params.js";
 import { truncateOutput } from "./utils/output.js";
 import { resolvePathForExisting } from "./utils/context.js";
-import { recordTextFileRead } from "./utils/read-state.js";
 import {
   DEFAULT_READ_LIMIT,
   FILE_PATH_SCHEMA,
@@ -47,11 +46,6 @@ export function createReadTool(): Tool {
       });
       const resolvedPath = await resolvePathForExisting(context, inputPath);
       const file = await readTextFileContent(resolvedPath, inputPath);
-      recordTextFileRead({
-        context,
-        mtimeMs: file.mtimeMs,
-        resolvedPath,
-      });
       const lines = splitTextLines(file.text);
       const selected = lines.slice(offset - 1, offset - 1 + limit);
       const hasMore = offset - 1 + selected.length < lines.length;

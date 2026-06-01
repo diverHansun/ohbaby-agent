@@ -114,43 +114,53 @@
 
 **场景 12：精确替换文本**
 - 前置条件：文件包含目标文本
-- 操作：先调用 read({ file_path })，再调用 edit({ file_path, old_string, new_string, expected_mtime_ms })
+- 操作：调用 edit({ file_path, old_string, new_string })
 - 预期结果：替换成功，返回 diff
 
 **场景 13：替换所有匹配**
 - 前置条件：文件包含多处目标文本
-- 操作：先 read，再调用 edit({ file_path, old_string, new_string, expected_mtime_ms, replace_all: true })
+- 操作：调用 edit({ file_path, old_string, new_string, replace_all: true })
 - 预期结果：替换所有匹配，metadata.replacementCount > 1
 
 **场景 14：未找到匹配文本**
 - 前置条件：文件不包含目标文本
-- 操作：调用 edit({ file_path, old_string, new_string, expected_mtime_ms })
+- 操作：调用 edit({ file_path, old_string, new_string })
 - 预期结果：返回 NoMatchFoundError
 
-**场景 14.1：mtime 缺失或不匹配**
-- 前置条件：文件存在
-- 操作：调用 edit({ file_path, old_string, new_string }) 或传入过期 expected_mtime_ms
-- 预期结果：拒绝修改，文件内容不变
+**场景 14.1：内容已变化**
+- 前置条件：文件内容已被外部程序改写，旧的 old_string 不再存在
+- 操作：调用 edit({ file_path, old_string, new_string })
+- 预期结果：拒绝修改，提示 old_string 未找到，文件内容不变
 
-**场景 14.2：未先 read**
-- 前置条件：文件存在，且调用方只通过 stat 获得 mtime
-- 操作：直接调用 edit({ file_path, old_string, new_string, expected_mtime_ms })
-- 预期结果：拒绝修改，并提示必须先 read
+**场景 14.2：连续编辑**
+- 前置条件：文件包含两个不同目标文本
+- 操作：连续调用两次 edit，中间不调用 read
+- 预期结果：两次都基于当前文件内容执行成功
 
 **场景 14.3：dry_run 预览编辑**
-- 前置条件：已先 read，且文件包含唯一目标文本
-- 操作：调用 edit({ file_path, old_string, new_string, expected_mtime_ms, dry_run: true })
+- 前置条件：文件包含唯一目标文本
+- 操作：调用 edit({ file_path, old_string, new_string, dry_run: true })
 - 预期结果：返回 Unified Diff，文件内容不变
 
 **场景 15：多处匹配但未开启 replace_all**
 - 前置条件：文件包含多处目标文本
-- 操作：调用 edit({ file_path, old_string, new_string, expected_mtime_ms })
+- 操作：调用 edit({ file_path, old_string, new_string })
 - 预期结果：拒绝修改，并提示开启 replace_all
 
 **场景 15.1：CRLF 保留**
 - 前置条件：文件使用 CRLF 换行
-- 操作：调用 edit({ file_path, old_string, new_string, expected_mtime_ms })
+- 操作：调用 edit({ file_path, old_string, new_string })
 - 预期结果：替换成功后仍使用 CRLF
+
+**场景 15.2：有限 fuzzy 匹配**
+- 前置条件：文件内容与 old_string 仅存在行首尾空白或整体缩进差异
+- 操作：调用 edit({ file_path, old_string, new_string })
+- 预期结果：唯一 fuzzy 匹配时替换成功；多个 fuzzy 候选时拒绝并要求更多上下文
+
+**场景 15.3：同文件并发编辑**
+- 前置条件：两个 edit 同时修改同一文件不同位置
+- 操作：并发调用 edit
+- 预期结果：文件级锁串行化读写，最终两处修改都保留
 
 ### 2.4 glob 工具
 

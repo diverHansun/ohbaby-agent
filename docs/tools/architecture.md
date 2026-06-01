@@ -21,7 +21,7 @@ tools/
 │   ├── files.ts         # 遍历、glob、基础文件辅助
 │   ├── output.ts        # 输出格式化工具
 │   ├── params.ts        # 参数读取与错误
-│   └── text-files.ts    # UTF-8/BOM、mtime、二进制检测、原子写入
+│   └── text-files.ts    # UTF-8/BOM、write mtime 校验、二进制检测、原子写入
 │
 ├── read.ts              # 文件读取
 ├── write.ts             # 文件写入
@@ -39,9 +39,9 @@ tools/
 
 ### v1 文件工具拆分边界
 
-本轮文件工具按 `read.ts`、`write.ts`、`edit.ts`、`list.ts`、`glob.ts`、`grep.ts` 独立实现，由 `builtin.ts` 直接组合注册，不再保留旧的文件工具聚合转发层。共享文本文件内核集中在 `utils/text-files.ts`，统一处理 UTF-8 BOM、CRLF/LF metadata、前 4KB sample + 扩展名二进制检测、mtime 校验、同目录临时文件 + rename 的原子写入。
+本轮文件工具按 `read.ts`、`write.ts`、`edit.ts`、`list.ts`、`glob.ts`、`grep.ts` 独立实现，由 `builtin.ts` 直接组合注册，不再保留旧的文件工具聚合转发层。共享文本文件内核集中在 `utils/text-files.ts`，统一处理 UTF-8 BOM、CRLF/LF metadata、前 4KB sample + 扩展名二进制检测、write 覆盖时的 mtime 校验、同目录临时文件 + rename 的原子写入。
 
-本轮已加入轻量 read-before-edit 会话状态：`read` 记录同 session 下文件的 `mtimeMs`，`edit` 必须先读过且 mtime 仍匹配才允许修改。仍不引入权限 diff preview、LSP 诊断或 ripgrep/provider 替换；这些能力作为下一轮向 Claude Code / opencode 靠拢的候选大改。
+`edit` 不维护 read-before-edit 会话状态，也不强制 `expected_mtime_ms`。编辑安全以当前文件内容为真相：工具执行时重新读取文件，要求 `old_string` 在当前内容中唯一匹配；精确匹配失败时只启用有限的空白/缩进 fuzzy 匹配。`write` 作为整文件覆盖工具仍保留 `expected_mtime_ms`，防止旧内容覆盖外部修改。`edit` 与 `write` 都在文件级锁内完成“读取/校验/写入”，避免同一文件并发修改交错。
 
 ---
 
@@ -109,7 +109,7 @@ const ReadTool = Tool.define({
 **text-files.ts**：文本文件处理
 - UTF-8 BOM 读取/写回处理
 - 扩展名 + 前 4KB sample 二进制检测
-- mtime 乐观校验
+- write 覆盖时的 mtime 乐观校验
 - 同目录临时文件 + rename 原子写入
 
 ---
@@ -141,9 +141,9 @@ metadata: mtimeMs, sizeBytes, encoding, lineEnding, hasMore, nextOffset
 #### edit（文件编辑）
 
 ```
-输入: file_path, old_string, new_string, expected_mtime_ms, replace_all?, dry_run?
+输入: file_path, old_string, new_string, replace_all?, dry_run?, expected_mtime_ms?（兼容旧调用，edit 不使用）
 输出: diff 信息、诊断信息
-特殊: 必须先 read 再 edit，且 expected_mtime_ms 匹配；保留既有 CRLF/LF 风格与 UTF-8 BOM
+特殊: 每次执行时读取当前文件；old_string 必须唯一匹配，精确匹配失败时允许有限空白/缩进 fuzzy；replace_all 只替换精确匹配；保留既有 CRLF/LF 风格与 UTF-8 BOM
 预览: dry_run 返回 Unified Diff，不写入文件
 ```
 
