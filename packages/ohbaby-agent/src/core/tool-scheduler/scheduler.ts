@@ -1365,18 +1365,20 @@ export function createToolScheduler(
       request.environment,
       filePath,
     );
-    const params = paramsWithCanonicalPath(request.params, canonicalPath);
+    const externalWrite = isOutsideTrustedEnvironment(
+      request.environment,
+      canonicalPath,
+    );
 
     return {
       environment: request.environment,
       externalRead: false,
-      externalWrite: isOutsideTrustedEnvironment(
-        request.environment,
-        canonicalPath,
-      ),
-      externalWritePath: canonicalPath,
+      externalWrite,
+      externalWritePath: externalWrite ? canonicalPath : undefined,
       requireExplicitApproval,
-      params,
+      params: externalWrite
+        ? paramsWithCanonicalPath(request.params, canonicalPath)
+        : request.params,
     };
   }
 

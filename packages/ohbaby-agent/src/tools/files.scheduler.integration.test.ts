@@ -167,17 +167,17 @@ describe("file tools scheduler integration", () => {
     await expect(fs.readdir(tempRoot)).resolves.toEqual([]);
   });
 
-  it("allows absolute paths outside the workspace through permission approval", async () => {
+  it("allows absolute paths outside the workspace through default permission approval", async () => {
     const bus = createBus();
     const permissionState = createPermissionState({
       bus,
-      initialLevel: "full-access",
+      initialLevel: "default",
     });
     const permission = createPermissionManager({
       bus,
       generateId: (() => {
         let next = 1;
-        return () => `permission_${String(next++)}`;
+        return (): string => `permission_${String(next++)}`;
       })(),
       state: permissionState,
     });
@@ -244,11 +244,21 @@ describe("file tools scheduler integration", () => {
     expect(write.status).toBe("success");
     expect(edit.status).toBe("success");
     expect(permissionUpdates.map((info) => info.callId)).toEqual([
+      "read_outside",
+      "read_outside_edit_target",
       "write_outside",
       "edit_outside",
     ]);
-    expect(permissionUpdates[0]?.pattern).toContain("write(");
-    expect(permissionUpdates[1]?.pattern).toContain("edit(");
+    expect(permissionUpdates.map((info) => info.name)).toEqual([
+      "external_directory",
+      "external_directory",
+      "write",
+      "edit",
+    ]);
+    expect(permissionUpdates[0]?.title).toContain("External path access");
+    expect(permissionUpdates[1]?.title).toContain("External path access");
+    expect(permissionUpdates[2]?.pattern).toContain("write(");
+    expect(permissionUpdates[3]?.pattern).toContain("edit(");
     await expect(fs.readFile(outsideReadPath, "utf8")).resolves.toBe(
       "secret\n",
     );
@@ -260,7 +270,7 @@ describe("file tools scheduler integration", () => {
     );
   });
 
-  it("forces permission for external absolute writes even when agent edits are automatic", async () => {
+  it("does not ask for external absolute writes in full-access even when agent edits are automatic", async () => {
     const bus = createBus();
     const permissionState = createPermissionState({
       bus,
@@ -333,12 +343,7 @@ describe("file tools scheduler integration", () => {
     expect(external.status).toBe("success");
     expect(readForEdit.status).toBe("success");
     expect(externalEdit.status).toBe("success");
-    expect(permissionUpdates.map((info) => info.callId)).toEqual([
-      "write_external_auto",
-      "edit_external_auto",
-    ]);
-    expect(permissionUpdates[0]?.title).toContain("External path write");
-    expect(permissionUpdates[1]?.title).toContain("External path write");
+    expect(permissionUpdates).toEqual([]);
     await expect(fs.readFile(outsideWritePath, "utf8")).resolves.toBe(
       "external\n",
     );
@@ -352,7 +357,7 @@ describe("file tools scheduler integration", () => {
       bus,
       generateId: (() => {
         let next = 1;
-        return () => `permission_canonical_${String(next++)}`;
+        return (): string => `permission_canonical_${String(next++)}`;
       })(),
       state: permissionState,
     });
@@ -457,8 +462,26 @@ describe("file tools scheduler integration", () => {
     ).resolves.toBe("escape\n");
   });
 
-  it("still rejects relative symlink escapes", async () => {
-    const scheduler = createScheduler();
+  it("asks before default relative symlink escapes and writes the canonical target", async () => {
+    const bus = createBus();
+    const permissionState = createPermissionState({
+      bus,
+      initialLevel: "default",
+    });
+    const permission = createPermissionManager({
+      bus,
+      generateId: () => "permission_relative_symlink_escape",
+      state: permissionState,
+    });
+    const scheduler = createToolScheduler({ bus, permission, permissionState });
+    const permissionUpdates: PermissionInfo[] = [];
+    for (const tool of createBuiltinTools()) {
+      scheduler.register(tool);
+    }
+    bus.subscribe(PermissionEvent.Updated, (event) => {
+      permissionUpdates.push(event.info);
+      permission.respond(event.info.sessionId, event.info.id, { type: "once" });
+    });
     const environment = createHostLocalEnvironment(tempRoot);
     await fs.symlink(
       outsideRoot,
@@ -478,9 +501,17 @@ describe("file tools scheduler integration", () => {
       toolName: "write",
     });
 
-    expect(result.status).toBe("error");
-    expect(result.error?.message).toContain("escapes workspace");
-    await expect(fs.access(path.join(outsideRoot, "newdir"))).rejects.toThrow();
+    expect(result.status).toBe("success");
+    expect(permissionUpdates.map((info) => info.callId)).toEqual([
+      "write_relative_symlink_escape",
+    ]);
+    expect(permissionUpdates[0]?.name).toBe("write");
+    expect(permissionUpdates[0]?.pattern.replaceAll("\\", "/")).toContain(
+      "/newdir/**",
+    );
+    await expect(
+      fs.readFile(path.join(outsideRoot, "newdir", "note.txt"), "utf8"),
+    ).resolves.toBe("escape\n");
   });
 
   it("requires scheduler read before edit and supports edit dry_run", async () => {

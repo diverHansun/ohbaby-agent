@@ -590,6 +590,63 @@ describe("ToolScheduler", () => {
     }
   });
 
+  it("keeps internal write permission params relative", async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "ohbaby-scheduler-internal-write-"),
+    );
+    const workspace = path.join(tempRoot, "workspace");
+    await fs.mkdir(path.join(workspace, "child-tools"), { recursive: true });
+    const realWorkspace = await fs.realpath(workspace);
+    const permissionRequests: Parameters<PermissionPort["ask"]>[0][] = [];
+    const permission = {
+      ask: vi.fn((input: Parameters<PermissionPort["ask"]>[0]) => {
+        permissionRequests.push(input);
+        return Promise.resolve("once" as const);
+      }),
+    } satisfies PermissionPort;
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState({ initialLevel: "default" }),
+    });
+    scheduler.register(
+      createTool({
+        category: "write",
+        execute: () => ({ output: "internal write" }),
+        name: "write",
+        parametersJsonSchema: {
+          additionalProperties: false,
+          properties: {
+            file_path: { type: "string" },
+          },
+          required: ["file_path"],
+          type: "object",
+        },
+      }),
+    );
+
+    try {
+      await expect(
+        scheduler.execute({
+          callId: "internal_write",
+          environment: createFakeEnvironment(realWorkspace),
+          messageId: "message_1",
+          params: { file_path: "child-tools/child-created.txt" },
+          sessionId: "session_1",
+          toolName: "write",
+        }),
+      ).resolves.toMatchObject({
+        output: "internal write",
+        status: "success",
+      });
+
+      expect(permissionRequests[0]?.params).toMatchObject({
+        file_path: "child-tools/child-created.txt",
+      });
+    } finally {
+      await fs.rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("asks external directory permissions before bash permissions", async () => {
     const permissionOrder: string[] = [];
     const permission = {
