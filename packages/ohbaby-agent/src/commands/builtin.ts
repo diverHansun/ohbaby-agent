@@ -1,17 +1,25 @@
 import type {
   UiCommandAction,
   UiCommandCatalog,
+  UiCommandInvocation,
   UiCommandOutput,
+  UiCommandSpec,
   UiCommandSurface,
 } from "ohbaby-sdk";
 import type {
   CommandHandler,
+  CommandMcpServerSummary,
   CommandModelSummary,
   CommandPermissionState,
   CommandRunContext,
   CommandServiceOptions,
   CommandSessionSummary,
+  CommandSkillSummary,
 } from "./types.js";
+import {
+  sanitizeCommandMcpServerSummary,
+  sanitizeCommandSkillSummary,
+} from "./normalize.js";
 
 interface BuiltinHandlerHelpers {
   listCommands?(
@@ -38,6 +46,32 @@ async function listSessions(
   options: CommandServiceOptions,
 ): Promise<readonly CommandSessionSummary[]> {
   return options.sessions?.listSessions() ?? [];
+}
+
+async function listMcpServers(
+  options: CommandServiceOptions,
+): Promise<readonly CommandMcpServerSummary[]> {
+  try {
+    const servers = await (options.mcps?.listServers() ?? []);
+    return servers
+      .map(sanitizeCommandMcpServerSummary)
+      .filter((server): server is CommandMcpServerSummary => server !== null);
+  } catch {
+    return [];
+  }
+}
+
+async function listSkills(
+  options: CommandServiceOptions,
+): Promise<readonly CommandSkillSummary[]> {
+  try {
+    const skills = await (options.skills?.listUserInvocable() ?? []);
+    return skills
+      .map(sanitizeCommandSkillSummary)
+      .filter((skill): skill is CommandSkillSummary => skill !== null);
+  } catch {
+    return [];
+  }
 }
 
 const DEFAULT_PERMISSION_STATE: CommandPermissionState = {
@@ -75,6 +109,84 @@ function sanitizeModelSummary(
   };
 }
 
+function formatCategoryTitle(category: string): string {
+  return category
+    .split(/[-_.\s]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function categorizeCommands(commands: readonly UiCommandSpec[]): readonly {
+  readonly name: string;
+  readonly title: string;
+  readonly commands: readonly UiCommandSpec[];
+}[] {
+  const groups = new Map<string, UiCommandSpec[]>();
+  for (const command of commands) {
+    groups.set(command.category, [
+      ...(groups.get(command.category) ?? []),
+      command,
+    ]);
+  }
+  return Array.from(groups.entries()).map(([name, commands]) => ({
+    commands,
+    name,
+    title: formatCategoryTitle(name),
+  }));
+}
+
+function countTools(tools: readonly { readonly source?: string }[]): {
+  readonly builtin: number;
+  readonly module: number;
+  readonly skill: number;
+  readonly mcp: number;
+} {
+  const counts = {
+    builtin: 0,
+    mcp: 0,
+    module: 0,
+    skill: 0,
+  };
+  for (const tool of tools) {
+    switch (tool.source) {
+      case "builtin":
+        counts.builtin += 1;
+        break;
+      case "module":
+        counts.module += 1;
+        break;
+      case "skill":
+        counts.skill += 1;
+        break;
+      case "mcp":
+        counts.mcp += 1;
+        break;
+    }
+  }
+  return counts;
+}
+
+function summarizeMcpServers(servers: readonly CommandMcpServerSummary[]): {
+  readonly total: number;
+  readonly connected: number;
+  readonly failed: number;
+  readonly disabled: number;
+  readonly disconnected: number;
+} {
+  const summary = {
+    connected: 0,
+    disabled: 0,
+    disconnected: 0,
+    failed: 0,
+    total: servers.length,
+  };
+  for (const server of servers) {
+    summary[server.status] += 1;
+  }
+  return summary;
+}
+
 function currentPermissionState(
   options: CommandServiceOptions,
 ): CommandPermissionState {
@@ -105,14 +217,30 @@ function emitPermissionUpdated(
 
 async function handleStatus(
   options: CommandServiceOptions,
+  invocation: UiCommandInvocation,
   context: CommandRunContext,
 ): Promise<void> {
-  const models = await listModels(options);
+  const [models, model, tools, skills, mcpServers, contextUsage, projectRoot] =
+    await Promise.all([
+      listModels(options),
+      currentModel(options),
+      options.tools?.listTools() ?? [],
+      listSkills(options),
+      listMcpServers(options),
+      options.getContextUsage?.({ sessionId: invocation.sessionId }) ?? null,
+      options.getProjectRoot?.() ?? null,
+    ]);
   context.emitOutput(
     dataOutput("status", {
-      model: await currentModel(options),
+      context: contextUsage,
+      mcps: summarizeMcpServers(mcpServers),
+      model,
       models,
+      projectRoot,
+      sessionId: invocation.sessionId ?? null,
+      skillsCount: skills.length,
       status: options.getStatus?.() ?? "idle",
+      tools: countTools(tools),
     }),
   );
 }
@@ -122,9 +250,41 @@ async function handleHelp(
   context: CommandRunContext,
 ): Promise<void> {
   const catalog = await helpers.listCommands?.(context.surface);
+  const commands = catalog?.commands ?? [];
   context.emitOutput(
     dataOutput("help", {
-      commands: catalog?.commands ?? [],
+      categories: categorizeCommands(commands),
+      commands,
+    }),
+  );
+}
+
+async function handleMcps(
+  options: CommandServiceOptions,
+  context: CommandRunContext,
+): Promise<void> {
+  context.emitOutput(
+    dataOutput("mcps", {
+      servers: await listMcpServers(options),
+    }),
+  );
+}
+
+async function handleSkills(
+  options: CommandServiceOptions,
+  context: CommandRunContext,
+): Promise<void> {
+  const skills = await listSkills(options);
+  context.emitOutput(
+    dataOutput("skills", {
+      skills: skills.map((skill) => ({
+        commandId: `skill.${skill.name}`,
+        description: skill.description,
+        name: skill.name,
+        path: [skill.name],
+        scope: skill.scope,
+        ...(skill.source === undefined ? {} : { source: skill.source }),
+      })),
     }),
   );
 }
@@ -392,8 +552,8 @@ export function createBuiltinHandlers(
   const handlers: CommandHandler[] = [
     {
       id: "status",
-      execute(_invocation, context): Promise<void> {
-        return handleStatus(options, context);
+      execute(invocation, context): Promise<void> {
+        return handleStatus(options, invocation, context);
       },
     },
     {
@@ -443,6 +603,18 @@ export function createBuiltinHandlers(
       id: "permission",
       execute(_invocation, context): Promise<void> {
         return handlePermissionLevelSelection(options, context);
+      },
+    },
+    {
+      id: "mcps",
+      execute(_invocation, context): Promise<void> {
+        return handleMcps(options, context);
+      },
+    },
+    {
+      id: "skills",
+      execute(_invocation, context): Promise<void> {
+        return handleSkills(options, context);
       },
     },
     {

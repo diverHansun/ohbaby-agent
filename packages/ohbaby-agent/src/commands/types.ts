@@ -16,6 +16,7 @@ import type {
   InteractionRequestContext,
   InteractionRequestInput,
 } from "../runtime/interaction-broker/index.js";
+import type { ContextUsage } from "../core/context/index.js";
 
 export interface CommandToolSummary {
   readonly name: string;
@@ -24,9 +25,24 @@ export interface CommandToolSummary {
   readonly source?: string;
 }
 
+export type CommandSkillScope = "user" | "project";
+
 export interface CommandSkillSummary {
   readonly name: string;
   readonly description: string;
+  readonly scope: CommandSkillScope;
+  readonly source?: string;
+}
+
+export type CommandMcpServerStatus =
+  | "connected"
+  | "failed"
+  | "disconnected"
+  | "disabled";
+
+export interface CommandMcpServerSummary {
+  readonly name: string;
+  readonly status: CommandMcpServerStatus;
 }
 
 export interface CommandModelSummary {
@@ -56,6 +72,12 @@ export interface CommandToolProvider {
   listTools():
     | Promise<readonly CommandToolSummary[]>
     | readonly CommandToolSummary[];
+}
+
+export interface CommandMcpProvider {
+  listServers():
+    | Promise<readonly CommandMcpServerSummary[]>
+    | readonly CommandMcpServerSummary[];
 }
 
 export interface CommandModelProvider {
@@ -134,6 +156,7 @@ export interface CommandServiceOptions {
   readonly sessions?: CommandSessionProvider;
   readonly compact?: CommandCompactProvider;
   readonly skills?: CommandSkillProvider;
+  readonly mcps?: CommandMcpProvider;
   readonly permission?: CommandPermissionProvider;
   readonly abortRun?: (runId?: string) => Promise<void> | void;
   readonly submitPrompt?: (
@@ -142,6 +165,10 @@ export interface CommandServiceOptions {
   ) => Promise<void> | void;
   readonly exit?: () => Promise<void> | void;
   readonly getStatus?: () => string;
+  readonly getContextUsage?: (input: {
+    readonly sessionId?: string;
+  }) => Promise<ContextUsage | null> | ContextUsage | null;
+  readonly getProjectRoot?: () => Promise<string> | string;
   readonly createCommandRunId?: () => string;
   readonly now?: () => number;
   readonly extraCommands?: readonly UiCommandSpec[];

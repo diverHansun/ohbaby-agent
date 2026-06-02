@@ -115,6 +115,28 @@ const BUILTIN_COMMANDS: readonly UiCommandSpec[] = [
     surfaces: COMMON_SURFACES,
     title: "Permission Level",
   },
+  {
+    id: "mcps",
+    path: ["mcps"],
+    aliases: [["mcp"]],
+    argumentMode: "argv",
+    category: "system",
+    description: "List MCP server status",
+    source: "builtin",
+    surfaces: COMMON_SURFACES,
+    title: "MCP Servers",
+  },
+  {
+    id: "skills",
+    path: ["skills"],
+    aliases: [],
+    argumentMode: "argv",
+    category: "skill",
+    description: "List available skills",
+    source: "builtin",
+    surfaces: COMMON_SURFACES,
+    title: "Skills",
+  },
 ];
 
 function keyForPath(path: readonly string[]): string {

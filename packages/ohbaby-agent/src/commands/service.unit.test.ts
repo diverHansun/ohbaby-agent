@@ -4,6 +4,7 @@ import type {
   UiInteractionResponse,
   UiSnapshot,
 } from "ohbaby-sdk";
+import type { CommandMcpProvider, CommandSkillProvider } from "./types.js";
 import { createBus } from "../bus/index.js";
 import { CommandsEvent, createCommandService } from "./index.js";
 import { createInteractionBroker } from "../runtime/interaction-broker/index.js";
@@ -58,33 +59,33 @@ describe("CommandService", () => {
 
     await service.executeCommand(makeInvocation("status", ["status"]));
 
-    expect(events[0]).toMatchObject({
+    const startedEvent = events.find(
+      (event) => event.type === "started" && event.commandId === "status",
+    );
+    expect(startedEvent).toMatchObject({
       commandId: "status",
       commandRunId: "command_1",
       type: "started",
     });
-    expect(events[1]).toMatchObject({
-      commandRunId: "command_1",
-      output: {
-        kind: "data",
-        subject: "status",
-        data: {
-          model: {
-            apiKeyEnv: "OPENAI_API_KEY",
-            baseUrl: "https://api.openai.com/v1",
+
+    expect(dataOutputBySubject(events, "status")).toMatchObject({
+      data: {
+        model: {
+          apiKeyEnv: "OPENAI_API_KEY",
+          baseUrl: "https://api.openai.com/v1",
+          model: "gpt-5.5",
+          provider: "openai",
+        },
+        models: [
+          {
             model: "gpt-5.5",
             provider: "openai",
           },
-          models: [
-            {
-              model: "gpt-5.5",
-              provider: "openai",
-            },
-          ],
-          status: "idle",
-        },
+        ],
+        status: "idle",
       },
-      type: "result",
+      kind: "data",
+      subject: "status",
     });
   });
 
@@ -103,12 +104,68 @@ describe("CommandService", () => {
     });
     const output = isRecord(helpEvent?.output) ? helpEvent.output : undefined;
     const data = output ? getRecord(output, "data") : undefined;
-    const commands = Array.isArray(data?.commands) ? data.commands : [];
+    const commands = data ? getArray(data, "commands") : [];
+    const categories = data ? getArray(data, "categories") : [];
     expect(
       commands.map((command) =>
         isRecord(command) && typeof command.id === "string" ? command.id : "",
       ),
     ).toEqual(expect.arrayContaining(["models", "permission"]));
+    expect(
+      categories.map((category) =>
+        isRecord(category) ? category.name : undefined,
+      ),
+    ).toEqual(expect.arrayContaining(["system", "model", "permission"]));
+    expect(
+      categories.flatMap((category): readonly unknown[] =>
+        isRecord(category) ? getArray(category, "commands") : [],
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "models" }),
+        expect.objectContaining({ id: "permission" }),
+      ]),
+    );
+  });
+
+  it("emits help categories including dynamic skill commands", async () => {
+    const { events, service } = createServiceHarness({
+      skills: {
+        listUserInvocable() {
+          return [
+            {
+              description: "Review code",
+              name: "review",
+              scope: "project",
+              source: "project-native",
+            },
+          ];
+        },
+        loadPrompt() {
+          return "";
+        },
+      },
+    });
+
+    await service.executeCommand(makeInvocation("help", ["help"]));
+
+    const output = dataOutputFrom(events.at(-1));
+    expect(output?.subject).toBe("help");
+    expect(output?.data.commands).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "skill.review" })]),
+    );
+    const categories = output ? getArray(output.data, "categories") : [];
+    const skillCategory = categories.find(
+      (category) => isRecord(category) && category.name === "skill",
+    );
+    const skillCommands = isRecord(skillCategory)
+      ? getArray(skillCategory, "commands")
+      : [];
+    expect(skillCommands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "skill.review", path: ["review"] }),
+      ]),
+    );
   });
 
   it("allows reclaimed external roots while protecting active reserved paths", async () => {
@@ -154,8 +211,17 @@ describe("CommandService", () => {
       skills: {
         listUserInvocable() {
           return [
-            { name: "session", description: "Legacy session skill" },
-            { name: "review", description: "Review code" },
+            {
+              name: "session",
+              description: "Legacy session skill",
+              scope: "project",
+            },
+            {
+              name: "review",
+              description: "Review code",
+              scope: "project",
+              source: "project-native",
+            },
           ];
         },
         loadPrompt() {
@@ -178,6 +244,327 @@ describe("CommandService", () => {
     expect(
       catalog.commands.map((command) => command.path.join("/")),
     ).not.toEqual(expect.arrayContaining(["model"]));
+  });
+
+  it("emits MCP server summaries from the /mcps command", async () => {
+    const { events, service } = createServiceHarness({
+      mcps: {
+        listServers() {
+          return [
+            { name: "github", status: "connected", toolCount: 8 },
+            { error: "boom", name: "bad", status: "failed" },
+            { name: "memory", status: "disabled" },
+          ] as unknown as ReturnType<CommandMcpProvider["listServers"]>;
+        },
+      },
+    });
+
+    await service.executeCommand(makeInvocation("mcps", ["mcps"]));
+
+    expect(dataOutputFrom(events.at(-1))).toMatchObject({
+      data: {
+        servers: [
+          { name: "github", status: "connected" },
+          { name: "bad", status: "failed" },
+          { name: "memory", status: "disabled" },
+        ],
+      },
+      kind: "data",
+      subject: "mcps",
+    });
+  });
+
+  it("emits an empty MCP server list when the provider fails", async () => {
+    const { events, service } = createServiceHarness({
+      mcps: {
+        listServers() {
+          throw new Error("mcp status unavailable");
+        },
+      },
+    });
+
+    await service.executeCommand(makeInvocation("mcps", ["mcps"]));
+
+    expect(dataOutputFrom(events.at(-1))).toMatchObject({
+      data: { servers: [] },
+      kind: "data",
+      subject: "mcps",
+    });
+  });
+
+  it("emits an empty MCP server list when the provider is missing", async () => {
+    const { events, service } = createServiceHarness();
+
+    await service.executeCommand(makeInvocation("mcps", ["mcps"]));
+
+    expect(dataOutputFrom(events.at(-1))).toMatchObject({
+      data: { servers: [] },
+      kind: "data",
+      subject: "mcps",
+    });
+  });
+
+  it("emits user-invocable skills from the /skills command", async () => {
+    const { events, service } = createServiceHarness({
+      skills: {
+        listUserInvocable() {
+          return [
+            {
+              description: "Review code",
+              name: "review",
+              scope: "project",
+              source: "project-native",
+            },
+            {
+              description: "Brainstorm ideas",
+              name: "brainstorming",
+              scope: "user",
+            },
+          ];
+        },
+        loadPrompt() {
+          return "";
+        },
+      },
+    });
+
+    await service.executeCommand(makeInvocation("skills", ["skills"]));
+
+    expect(dataOutputFrom(events.at(-1))).toMatchObject({
+      data: {
+        skills: [
+          {
+            commandId: "skill.review",
+            description: "Review code",
+            name: "review",
+            path: ["review"],
+            scope: "project",
+            source: "project-native",
+          },
+          {
+            commandId: "skill.brainstorming",
+            description: "Brainstorm ideas",
+            name: "brainstorming",
+            path: ["brainstorming"],
+            scope: "user",
+          },
+        ],
+      },
+      kind: "data",
+      subject: "skills",
+    });
+  });
+
+  it("filters skills with invalid scopes from command outputs", async () => {
+    const { events, service } = createServiceHarness({
+      skills: {
+        listUserInvocable() {
+          return [
+            {
+              description: "Review code",
+              name: "review",
+              scope: "project",
+            },
+            {
+              description: "Invalid skill",
+              name: "invalid",
+              scope: "workspace",
+            },
+          ] as unknown as ReturnType<CommandSkillProvider["listUserInvocable"]>;
+        },
+        loadPrompt() {
+          return "";
+        },
+      },
+    });
+
+    await service.executeCommand(makeInvocation("skills", ["skills"]));
+    await service.executeCommand(makeInvocation("help", ["help"]));
+
+    const outputs = events
+      .map(dataOutputFrom)
+      .filter((output): output is NonNullable<typeof output> =>
+        Boolean(output),
+      );
+    const skillsOutput = outputs.find((output) => output.subject === "skills");
+    const helpOutput = outputs.find((output) => output.subject === "help");
+
+    expect(skillsOutput).toMatchObject({
+      data: {
+        skills: [
+          expect.objectContaining({
+            commandId: "skill.review",
+            name: "review",
+            scope: "project",
+          }),
+        ],
+      },
+      kind: "data",
+      subject: "skills",
+    });
+    const emittedSkills = skillsOutput
+      ? getArray(skillsOutput.data, "skills")
+      : [];
+    expect(
+      emittedSkills.map((skill) =>
+        isRecord(skill) ? getString(skill, "name") : undefined,
+      ),
+    ).toEqual(["review"]);
+
+    const helpCommands = helpOutput
+      ? getArray(helpOutput.data, "commands")
+      : [];
+    expect(
+      helpCommands.map((command) =>
+        isRecord(command) ? getString(command, "id") : undefined,
+      ),
+    ).not.toContain("skill.invalid");
+  });
+
+  it("emits an empty skills list when the provider is missing", async () => {
+    const { events, service } = createServiceHarness();
+
+    await service.executeCommand(makeInvocation("skills", ["skills"]));
+
+    expect(dataOutputFrom(events.at(-1))).toMatchObject({
+      data: { skills: [] },
+      kind: "data",
+      subject: "skills",
+    });
+  });
+
+  it("aggregates extended backend status fields", async () => {
+    const contextUsage = {
+      contextLimit: 128_000,
+      currentTokens: 9_000,
+      modelId: "fake-model",
+      remainingTokens: 119_000,
+      shouldCompress: false,
+      usageRatio: 9_000 / 128_000,
+    };
+    const { events, service } = createServiceHarness({
+      getContextUsage() {
+        return contextUsage;
+      },
+      getProjectRoot() {
+        return "D:/Projects/app";
+      },
+      mcps: {
+        listServers() {
+          return [
+            { name: "github", status: "connected", toolCount: 8 },
+            { error: "boom", name: "bad", status: "failed" },
+            { name: "memory", status: "disabled" },
+            { name: "local", status: "disconnected" },
+          ];
+        },
+      },
+      skills: {
+        listUserInvocable() {
+          return [
+            { description: "Review code", name: "review", scope: "project" },
+            { description: "Brainstorm", name: "brainstorm", scope: "user" },
+          ];
+        },
+        loadPrompt() {
+          return "";
+        },
+      },
+      tools: {
+        listTools() {
+          return [
+            { description: "Shell", name: "bash", source: "builtin" },
+            { description: "Task", name: "task", source: "module" },
+            { description: "Skill", name: "skill", source: "skill" },
+            { description: "GitHub", name: "github", source: "mcp" },
+            { description: "Unknown", name: "unknown", source: "other" },
+          ];
+        },
+      },
+    });
+
+    await service.executeCommand(makeInvocation("status", ["status"]));
+
+    expect(dataOutputFrom(events.at(-1))).toMatchObject({
+      data: {
+        context: contextUsage,
+        mcps: {
+          connected: 1,
+          disabled: 1,
+          disconnected: 1,
+          failed: 1,
+          total: 4,
+        },
+        projectRoot: "D:/Projects/app",
+        sessionId: "session_1",
+        skillsCount: 2,
+        status: "idle",
+        tools: {
+          builtin: 1,
+          mcp: 1,
+          module: 1,
+          skill: 1,
+        },
+      },
+      kind: "data",
+      subject: "status",
+    });
+  });
+
+  it("uses empty status aggregates when optional providers are missing", async () => {
+    const { events, service } = createServiceHarness();
+
+    await service.executeCommand(makeInvocation("status", ["status"]));
+
+    expect(dataOutputFrom(events.at(-1))).toMatchObject({
+      data: {
+        context: null,
+        mcps: {
+          connected: 0,
+          disabled: 0,
+          disconnected: 0,
+          failed: 0,
+          total: 0,
+        },
+        projectRoot: null,
+        sessionId: "session_1",
+        skillsCount: 0,
+        tools: {
+          builtin: 0,
+          mcp: 0,
+          module: 0,
+          skill: 0,
+        },
+      },
+      kind: "data",
+      subject: "status",
+    });
+  });
+
+  it("uses empty MCP aggregates in /status when the MCP provider fails", async () => {
+    const { events, service } = createServiceHarness({
+      mcps: {
+        listServers() {
+          throw new Error("mcp status unavailable");
+        },
+      },
+    });
+
+    await service.executeCommand(makeInvocation("status", ["status"]));
+
+    expect(dataOutputFrom(events.at(-1))).toMatchObject({
+      data: {
+        mcps: {
+          connected: 0,
+          disabled: 0,
+          disconnected: 0,
+          failed: 0,
+          total: 0,
+        },
+      },
+      kind: "data",
+      subject: "status",
+    });
   });
 
   it("reports configured models from the /models command", async () => {
@@ -909,6 +1296,54 @@ function getRecord(
 ): Record<string, unknown> | undefined {
   const value = record[key];
   return isRecord(value) ? value : undefined;
+}
+
+function isUnknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
+}
+
+function getArray(
+  record: Record<string, unknown>,
+  key: string,
+): readonly unknown[] {
+  const value = record[key];
+  return isUnknownArray(value) ? value : [];
+}
+
+function getString(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+interface CommandDataOutput {
+  readonly data: Record<string, unknown>;
+  readonly kind: "data";
+  readonly subject: string;
+}
+
+function dataOutputFrom(event: unknown): CommandDataOutput | undefined {
+  if (!isRecord(event)) {
+    return undefined;
+  }
+  const output = event.output;
+  if (!isRecord(output) || output.kind !== "data") {
+    return undefined;
+  }
+  const data = getRecord(output, "data");
+  const subject = getString(output, "subject");
+  return data && subject ? { data, kind: "data", subject } : undefined;
+}
+
+function dataOutputBySubject(
+  events: readonly unknown[],
+  subject: string,
+): CommandDataOutput | undefined {
+  return events
+    .map(dataOutputFrom)
+    .find((output) => output?.subject === subject);
 }
 
 function makeInvocation(

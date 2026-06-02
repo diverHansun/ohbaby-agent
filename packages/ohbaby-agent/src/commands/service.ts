@@ -9,6 +9,7 @@ import {
   validateUniqueAliases,
 } from "./catalog.js";
 import { CommandsEvent } from "./events.js";
+import { sanitizeCommandSkillSummary } from "./normalize.js";
 import { createCommandRunContext } from "./run-context.js";
 import { createBuiltinHandlers } from "./builtin.js";
 import type { CommandSkillSummary } from "./types.js";
@@ -16,11 +17,7 @@ import type { CommandService, CommandServiceOptions } from "./types.js";
 
 const SKILL_COMMAND_PREFIX = "skill.";
 const SKILL_COMMAND_SURFACES = ["tui", "stdout", "headless"] as const;
-const RESERVED_EXTERNAL_COMMAND_ROOTS = new Set([
-  "cancel",
-  "mode",
-  "model",
-]);
+const RESERVED_EXTERNAL_COMMAND_ROOTS = new Set(["cancel", "mode", "model"]);
 const RESERVED_EXTERNAL_COMMAND_PATHS = new Set([
   "permission/default",
   "permission/full-access",
@@ -88,14 +85,15 @@ function isAllowedExternalCommand(command: UiCommandSpec): boolean {
 async function buildCatalog(
   options: CommandServiceOptions,
 ): Promise<UiCommandCatalog> {
-  const skillCommands = (await options.skills?.listUserInvocable())?.map(
-    skillToCommand,
-  );
+  const rawSkills = await (options.skills?.listUserInvocable() ?? []);
+  const skillCommands = rawSkills
+    .map(sanitizeCommandSkillSummary)
+    .filter((skill): skill is CommandSkillSummary => skill !== null)
+    .map(skillToCommand);
   const catalog = buildCommandCatalog({
-    extraCommands: [
-      ...(options.extraCommands ?? []),
-      ...(skillCommands ?? []),
-    ].filter(isAllowedExternalCommand),
+    extraCommands: [...(options.extraCommands ?? []), ...skillCommands].filter(
+      isAllowedExternalCommand,
+    ),
   });
   validateUniqueAliases(catalog.commands);
   return catalog;

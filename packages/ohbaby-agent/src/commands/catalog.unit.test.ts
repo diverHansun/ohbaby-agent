@@ -18,6 +18,8 @@ describe("command catalog", () => {
         "compact",
         "resume",
         "permission",
+        "mcps",
+        "skills",
       ],
     );
   });
@@ -95,6 +97,16 @@ describe("command catalog", () => {
           parentBehavior: "interaction",
           path: ["permission"],
         }),
+        expect.objectContaining({
+          aliases: [["mcp"]],
+          id: "mcps",
+          path: ["mcps"],
+        }),
+        expect.objectContaining({
+          aliases: [],
+          id: "skills",
+          path: ["skills"],
+        }),
       ]),
     );
   });
@@ -149,5 +161,16 @@ describe("command catalog", () => {
         (command) => command.id === "headless.only",
       ),
     ).toBe(true);
+  });
+
+  it("exposes mcps and skills on command surfaces", () => {
+    for (const surface of ["tui", "stdout", "headless"] as const) {
+      const ids = filterCommandCatalogBySurface(
+        buildCommandCatalog(),
+        surface,
+      ).commands.map((command) => command.id);
+
+      expect(ids).toEqual(expect.arrayContaining(["mcps", "skills"]));
+    }
   });
 });
