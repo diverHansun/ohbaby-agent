@@ -1,8 +1,8 @@
 import type {
-  UiCommandAction,
-  UiCommandError,
-  UiCommandOutput,
-} from "./command/types.js";
+  UiSlashCommandAction,
+  UiSlashCommandError,
+  UiSlashCommandOutput,
+} from "./slash-command/types.js";
 import type { UiInteractionRequest } from "./interaction.js";
 import type {
   UiMessage,
@@ -114,8 +114,8 @@ export interface UiCommandResultDeliveredEvent {
   readonly type: "command.result.delivered";
   readonly commandRunId: string;
   readonly clientInvocationId: string;
-  readonly output?: UiCommandOutput;
-  readonly action?: UiCommandAction;
+  readonly output?: UiSlashCommandOutput;
+  readonly action?: UiSlashCommandAction;
   readonly timestamp: number;
 }
 
@@ -123,7 +123,7 @@ export interface UiCommandFailedEvent {
   readonly type: "command.failed";
   readonly commandRunId: string;
   readonly clientInvocationId: string;
-  readonly error: UiCommandError;
+  readonly error: UiSlashCommandError;
   readonly timestamp: number;
 }
 

@@ -5,9 +5,9 @@ import type {
   UiUnsubscribe,
 } from "../client.js";
 import type {
-  UiCommandCatalog,
-  UiCommandInvocation,
-} from "../command/types.js";
+  UiSlashCommandCatalog,
+  UiSlashCommandInvocation,
+} from "../slash-command/types.js";
 import type {
   UiCompactSessionOptions,
   UiCompactSessionResult,
@@ -17,12 +17,12 @@ import type { UiPermissionResponse, UiSnapshot } from "../snapshot.js";
 
 export interface CoreAPI {
   getSnapshot(): Promise<UiSnapshot>;
-  listCommands(query: UiListCommandsQuery): Promise<UiCommandCatalog>;
+  listCommands(query: UiListCommandsQuery): Promise<UiSlashCommandCatalog>;
   submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void>;
   compactSession(
     options?: UiCompactSessionOptions,
   ): Promise<UiCompactSessionResult>;
-  executeCommand(invocation: UiCommandInvocation): Promise<void>;
+  executeCommand(invocation: UiSlashCommandInvocation): Promise<void>;
   respondPermission(
     requestId: string,
     response: UiPermissionResponse,

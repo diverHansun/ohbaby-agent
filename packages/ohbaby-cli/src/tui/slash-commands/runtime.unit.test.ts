@@ -45,10 +45,10 @@ describe("slash command runtime", () => {
 
     expect(parsed).toMatchObject({
       argv: ["session 1", "--force"],
-      path: ["resume"],
       rawArgs: '"session 1" --force',
       segments: ["resume", "session 1", "--force"],
     });
+    expect(parsed).not.toHaveProperty("path");
   });
 
   it("returns not-slash for normal prompt text", () => {

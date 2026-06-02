@@ -1,4 +1,4 @@
-import type { UiParsedSlashInput, UiSlashTokenSpan } from "./types.js";
+import type { UiParsedSlashCommandInput, UiSlashTokenSpan } from "./types.js";
 
 function splitFirstLine(input: string): {
   readonly firstLine: string;
@@ -84,7 +84,9 @@ function rawArgsFromToken(
   return commandLine.slice(token.start).trimStart();
 }
 
-export function parseSlashInput(input: string): UiParsedSlashInput | null {
+export function parseSlashCommandInput(
+  input: string,
+): UiParsedSlashCommandInput | null {
   if (!input.startsWith("/")) {
     return null;
   }
@@ -93,13 +95,11 @@ export function parseSlashInput(input: string): UiParsedSlashInput | null {
   const commandLine = firstLine.slice(1).trim();
   const tokenSpans = tokenizeCommandLine(commandLine);
   const segments = tokenSpans.map((token) => token.value);
-  const path = segments.slice(0, 1);
   const rawArgs = rawArgsFromToken(commandLine, tokenSpans[1]);
 
   return {
     raw: input,
     commandLine,
-    path,
     segments,
     rawArgs,
     argv: segments.slice(1),
@@ -107,3 +107,5 @@ export function parseSlashInput(input: string): UiParsedSlashInput | null {
     tokenSpans,
   };
 }
+
+export const parseSlashInput = parseSlashCommandInput;

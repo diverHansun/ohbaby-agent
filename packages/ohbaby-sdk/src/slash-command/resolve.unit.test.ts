@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  filterCommandCatalog,
-  parseSlashInput,
-  resolveCommand,
-  type UiCommandCatalog,
+  filterSlashCommandCatalog as filterCommandCatalog,
+  parseSlashCommandInput as parseSlashInput,
+  resolveSlashCommand as resolveCommand,
+  type UiSlashCommandCatalog as UiCommandCatalog,
 } from "../index.js";
 
 const catalog: UiCommandCatalog = {
@@ -153,6 +153,74 @@ describe("resolveCommand", () => {
         code: "COMMAND_NOT_FOUND",
         message: 'Unknown command "/wat"',
       },
+    });
+  });
+
+  it("returns AMBIGUOUS_COMMAND when multiple visible commands match the same input", () => {
+    const ambiguousCatalog: UiCommandCatalog = {
+      version: "ambiguous",
+      commands: [
+        {
+          aliases: [],
+          argumentMode: "argv",
+          category: "project",
+          description: "Open a project",
+          id: "project.open",
+          path: ["project", "open"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+        {
+          aliases: [["project", "open"]],
+          argumentMode: "argv",
+          category: "workspace",
+          description: "Open a workspace",
+          id: "workspace.open",
+          path: ["workspace", "open"],
+          source: "plugin",
+          surfaces: ["tui"],
+        },
+      ],
+    };
+
+    expect(
+      resolveCommand(ambiguousCatalog, parseSlashInput("/project open"), {
+        surface: "tui",
+      }),
+    ).toEqual({
+      ok: false,
+      error: {
+        code: "AMBIGUOUS_COMMAND",
+        message: 'Ambiguous command "/project open"',
+      },
+    });
+  });
+
+  it("does not treat the same command matching through path and alias as ambiguous", () => {
+    const selfAliasCatalog: UiCommandCatalog = {
+      version: "self-alias",
+      commands: [
+        {
+          aliases: [["exit"]],
+          argumentMode: "argv",
+          category: "system",
+          description: "Exit",
+          id: "exit",
+          path: ["exit"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+      ],
+    };
+
+    expect(
+      resolveCommand(selfAliasCatalog, parseSlashInput("/exit"), {
+        surface: "tui",
+      }),
+    ).toMatchObject({
+      ok: true,
+      command: { id: "exit" },
+      path: ["exit"],
     });
   });
 

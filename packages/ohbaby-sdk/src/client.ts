@@ -1,8 +1,8 @@
 import type {
-  UiCommandCatalog,
-  UiCommandInvocation,
-  UiCommandSurface,
-} from "./command/types.js";
+  UiSlashCommandCatalog,
+  UiSlashCommandInvocation,
+  UiSlashCommandSurface,
+} from "./slash-command/types.js";
 import type {
   UiCompactSessionOptions,
   UiCompactSessionResult,
@@ -16,7 +16,7 @@ export interface SubmitPromptOptions {
 }
 
 export interface UiListCommandsQuery {
-  readonly surface: UiCommandSurface;
+  readonly surface: UiSlashCommandSurface;
 }
 
 export type UiEventHandler = (event: UiEvent) => void;
@@ -25,12 +25,12 @@ export type UiUnsubscribe = () => void;
 export interface UiBackendClient {
   getSnapshot(): Promise<UiSnapshot>;
   subscribeEvents(handler: UiEventHandler): UiUnsubscribe;
-  listCommands(query: UiListCommandsQuery): Promise<UiCommandCatalog>;
+  listCommands(query: UiListCommandsQuery): Promise<UiSlashCommandCatalog>;
   submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void>;
   compactSession(
     options?: UiCompactSessionOptions,
   ): Promise<UiCompactSessionResult>;
-  executeCommand(invocation: UiCommandInvocation): Promise<void>;
+  executeCommand(invocation: UiSlashCommandInvocation): Promise<void>;
   respondPermission(
     requestId: string,
     response: UiPermissionResponse,

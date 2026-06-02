@@ -1,17 +1,21 @@
 import type {
-  UiCommandCatalog,
-  UiCommandResolveOptions,
-  UiCommandResolveResult,
-  UiCommandSpec,
-  UiCommandSurface,
-  UiParsedSlashInput,
+  UiParsedSlashCommandInput,
+  UiSlashCommandCatalog,
+  UiSlashCommandResolveOptions,
+  UiSlashCommandResolveResult,
+  UiSlashCommandSpec,
+  UiSlashCommandSurface,
   UiSlashTokenSpan,
 } from "./types.js";
 
 interface MatchCandidate {
-  readonly command: UiCommandSpec;
+  readonly command: UiSlashCommandSpec;
   readonly path: readonly string[];
   readonly usedAlias?: readonly string[];
+}
+
+function candidateMatchedLength(candidate: MatchCandidate): number {
+  return candidate.usedAlias?.length ?? candidate.path.length;
 }
 
 function normalizePath(path: readonly string[]): string {
@@ -35,7 +39,9 @@ function pathMatches(
   );
 }
 
-function unknownCommand(parsed: UiParsedSlashInput): UiCommandResolveResult {
+function unknownCommand(
+  parsed: UiParsedSlashCommandInput,
+): UiSlashCommandResolveResult {
   return {
     ok: false,
     error: {
@@ -56,7 +62,7 @@ function rawArgsFromToken(
 }
 
 function findCandidates(
-  catalog: UiCommandCatalog,
+  catalog: UiSlashCommandCatalog,
   segments: readonly string[],
 ): MatchCandidate[] {
   const candidates: MatchCandidate[] = [];
@@ -81,11 +87,11 @@ function findCandidates(
   });
 }
 
-export function resolveCommand(
-  catalog: UiCommandCatalog,
-  parsed: UiParsedSlashInput | null,
-  options: UiCommandResolveOptions = {},
-): UiCommandResolveResult {
+export function resolveSlashCommand(
+  catalog: UiSlashCommandCatalog,
+  parsed: UiParsedSlashCommandInput | null,
+  options: UiSlashCommandResolveOptions = {},
+): UiSlashCommandResolveResult {
   if (!parsed) {
     return {
       ok: false,
@@ -113,49 +119,72 @@ export function resolveCommand(
     };
   }
 
-  for (const candidate of candidates) {
-    const matchedLength = candidate.usedAlias?.length ?? candidate.path.length;
+  const validCandidates = candidates.filter((candidate) => {
+    const matchedLength = candidateMatchedLength(candidate);
     const hasRemainingArgs = parsed.segments.length > matchedLength;
-    if (hasRemainingArgs && candidate.command.acceptsArguments !== true) {
-      continue;
-    }
+    return !hasRemainingArgs || candidate.command.acceptsArguments === true;
+  });
+  const bestMatchedLength = validCandidates[0]
+    ? candidateMatchedLength(validCandidates[0])
+    : undefined;
+  const bestCandidates = validCandidates.filter(
+    (candidate) => candidateMatchedLength(candidate) === bestMatchedLength,
+  );
+  if (bestCandidates.length === 0) {
+    return unknownCommand(parsed);
+  }
 
+  const matchedCommandIds = new Set(
+    bestCandidates.map((candidate) => candidate.command.id),
+  );
+  if (matchedCommandIds.size > 1) {
     return {
-      ok: true,
-      command: candidate.command,
-      path: candidate.path,
-      usedAlias: candidate.usedAlias,
-      raw: parsed.raw,
-      rawArgs: rawArgsFromToken(
-        parsed.commandLine,
-        parsed.tokenSpans[matchedLength],
-      ),
-      argv: parsed.segments.slice(matchedLength),
-      body: parsed.body,
+      ok: false,
+      error: {
+        code: "AMBIGUOUS_COMMAND",
+        message: `Ambiguous command "/${parsed.commandLine}"`,
+      },
     };
   }
 
-  return unknownCommand(parsed);
+  const candidate = bestCandidates[0];
+  const matchedLength = candidateMatchedLength(candidate);
+  return {
+    ok: true,
+    command: candidate.command,
+    path: candidate.path,
+    usedAlias: candidate.usedAlias,
+    raw: parsed.raw,
+    rawArgs: rawArgsFromToken(
+      parsed.commandLine,
+      parsed.tokenSpans[matchedLength],
+    ),
+    argv: parsed.segments.slice(matchedLength),
+    body: parsed.body,
+  };
 }
 
 function isVisibleOnSurface(
-  command: UiCommandSpec,
-  surface?: UiCommandSurface,
+  command: UiSlashCommandSpec,
+  surface?: UiSlashCommandSurface,
 ): boolean {
   return surface === undefined || command.surfaces.includes(surface);
 }
 
-function pathOrAliasMatches(command: UiCommandSpec, query: string): boolean {
+function pathOrAliasMatches(
+  command: UiSlashCommandSpec,
+  query: string,
+): boolean {
   const paths = [command.path, ...(command.aliases ?? [])];
   const normalizedQuery = normalizePartialPath(query);
   return paths.some((path) => normalizePath(path).startsWith(normalizedQuery));
 }
 
-export function filterCommandCatalog(
-  catalog: UiCommandCatalog,
+export function filterSlashCommandCatalog(
+  catalog: UiSlashCommandCatalog,
   partialInput: string,
-  options: { readonly surface?: UiCommandSurface } = {},
-): UiCommandSpec[] {
+  options: { readonly surface?: UiSlashCommandSurface } = {},
+): UiSlashCommandSpec[] {
   const query = partialInput.startsWith("/")
     ? partialInput.slice(1).toLowerCase()
     : partialInput.toLowerCase();
@@ -172,3 +201,6 @@ export function filterCommandCatalog(
       return leftPath.localeCompare(rightPath);
     });
 }
+
+export const resolveCommand = resolveSlashCommand;
+export const filterCommandCatalog = filterSlashCommandCatalog;

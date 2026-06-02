@@ -43,7 +43,23 @@ export type {
   UiCommandSpec,
   UiCommandSurface,
   UiParsedSlashInput,
-} from "./command/types.js";
+  UiParsedSlashCommandInput,
+  UiSlashCommandAction,
+  UiSlashCommandArgumentMode,
+  UiSlashCommandCatalog,
+  UiSlashCommandError,
+  UiSlashCommandInvocation,
+  UiSlashCommandOutput,
+  UiSlashCommandParentBehavior,
+  UiSlashCommandResolved,
+  UiSlashCommandResolveError,
+  UiSlashCommandResolveErrorCode,
+  UiSlashCommandResolveOptions,
+  UiSlashCommandResolveResult,
+  UiSlashCommandSource,
+  UiSlashCommandSpec,
+  UiSlashCommandSurface,
+} from "./slash-command/types.js";
 export type {
   UiInteractionKind,
   UiInteractionOption,
@@ -71,7 +87,15 @@ export type {
   UiToolCall,
   UiToolResult,
 } from "./snapshot.js";
-export { parseSlashInput } from "./command/parse.js";
-export { filterCommandCatalog, resolveCommand } from "./command/resolve.js";
+export {
+  parseSlashCommandInput,
+  parseSlashInput,
+} from "./slash-command/parse.js";
+export {
+  filterCommandCatalog,
+  filterSlashCommandCatalog,
+  resolveCommand,
+  resolveSlashCommand,
+} from "./slash-command/resolve.js";
 export type { CoreAPI, SDKAPI } from "./rpc/types.js";
 export { createRPC } from "./rpc/proxy.js";

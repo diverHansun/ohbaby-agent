@@ -53,7 +53,7 @@ src/cli/commands/
 
 | 能力 | 位置 |
 |------|------|
-| parser/resolver | `packages/ohbaby-sdk/src/command/` |
+| parser/resolver | `packages/ohbaby-sdk/src/slash-command/` |
 | command catalog/execution | `packages/ohbaby-agent/src/commands/` |
 | TUI command runtime | `packages/ohbaby-cli/src/tui/` |
 | stdout renderer | `packages/ohbaby-agent/src/cli/stdout-renderer.ts` |
