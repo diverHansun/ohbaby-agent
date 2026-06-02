@@ -240,6 +240,15 @@ function findToolDescription(
 
 interface FakeMcpManager {
   getAllTools(): Promise<readonly Tool[]>;
+  getStatus?(): Promise<
+    Record<
+      string,
+      | { readonly status: "connected"; readonly toolCount: number }
+      | { readonly status: "failed"; readonly error: string }
+      | { readonly status: "disconnected" }
+      | { readonly status: "disabled" }
+    >
+  >;
   onChange?(listener: () => void | Promise<void>): () => void;
 }
 
@@ -292,6 +301,43 @@ function mcpTool(name: string, description = "Echo from MCP"): Tool {
 }
 
 describe("createUiRuntimeComposition skill tools", () => {
+  it("lists MCP server summaries from manager status", async () => {
+    const bus = createBus();
+    const workdir = await tempWorkdir();
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      llmClient: fakeLlmClient(),
+      mcpManager: {
+        getAllTools: () => Promise.resolve([]),
+        getStatus: () =>
+          Promise.resolve({
+            bad: { error: "boom", status: "failed" },
+            disabled: { status: "disabled" },
+            github: { status: "connected", toolCount: 8 },
+            local: { status: "disconnected" },
+          }),
+      },
+      messageManager: createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      }),
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      skillRegistry: createMutableSkillRegistry([]),
+      workdir,
+    });
+
+    await expect(composition.listMcpServerSummaries()).resolves.toEqual([
+      { name: "bad", status: "failed" },
+      { name: "disabled", status: "disabled" },
+      { name: "github", status: "connected" },
+      { name: "local", status: "disconnected" },
+    ]);
+  });
+
   it("starts primary sessions through the agent service stream path", async () => {
     const bus = createBus();
     const workdir = await tempWorkdir();

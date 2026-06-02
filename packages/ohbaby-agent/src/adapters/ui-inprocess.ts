@@ -1000,6 +1000,12 @@ export function createInProcessUiBackendClient(
         return formatSkillToolOutput(await registry.load(name));
       },
     },
+    mcps: {
+      async listServers() {
+        const runtime = await getRuntime();
+        return runtime.listMcpServerSummaries();
+      },
+    },
     submitPrompt: submitPromptInternal,
     permission: {
       getState: currentPermissionState,
@@ -1028,6 +1034,21 @@ export function createInProcessUiBackendClient(
     getStatus(): string {
       return promptInFlight ? "running" : "idle";
     },
+    async getContextUsage(input) {
+      if (!input.sessionId) {
+        return null;
+      }
+      try {
+        const runtime = await getRuntime();
+        return await runtime.getContextUsage({
+          projectRoot: await resolveProjectRoot(),
+          sessionId: input.sessionId,
+        });
+      } catch {
+        return null;
+      }
+    },
+    getProjectRoot: resolveProjectRoot,
   });
 
   bus.subscribe(CommandsEvent.Started, (payload) => {

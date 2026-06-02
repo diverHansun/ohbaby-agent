@@ -669,6 +669,25 @@ function formatDataCommandOutput(
   output: Extract<UiCommandOutput, { readonly kind: "data" }>,
 ): string {
   switch (output.subject) {
+    case "help": {
+      const categories = Array.isArray(output.data.categories)
+        ? output.data.categories
+        : [];
+      if (categories.length > 0) {
+        return categories
+          .map((category) =>
+            isRecord(category) ? formatHelpCategory(category) : "",
+          )
+          .filter(Boolean)
+          .join("\n\n");
+      }
+      const commands = Array.isArray(output.data.commands)
+        ? output.data.commands
+        : [];
+      return commands.length > 0
+        ? formatHelpCategory({ commands, title: "Commands" })
+        : JSON.stringify(output.data);
+    }
     case "permission.mode": {
       const permission = getRecord(output.data, "permission");
       return (
@@ -686,10 +705,64 @@ function formatDataCommandOutput(
     case "status": {
       const status = getString(output.data, "status");
       const model = formatModelLabel(getRecord(output.data, "model"));
-      if (status && model) {
-        return `status: ${status} | model: ${model}`;
+      const parts: string[] = [];
+      if (status) {
+        parts.push(`status: ${status}`);
       }
-      return status ? `status: ${status}` : JSON.stringify(output.data);
+      if (model) {
+        parts.push(`model: ${model}`);
+      }
+      const sessionId = getString(output.data, "sessionId");
+      if (sessionId) {
+        parts.push(`session: ${sessionId}`);
+      }
+      const tools = getRecord(output.data, "tools");
+      if (tools) {
+        parts.push(
+          `tools: ${formatTokenCount(
+            getNumber(tools, "builtin") ?? 0,
+          )} builtin, ${formatTokenCount(
+            getNumber(tools, "module") ?? 0,
+          )} module, ${formatTokenCount(
+            getNumber(tools, "skill") ?? 0,
+          )} skill, ${formatTokenCount(getNumber(tools, "mcp") ?? 0)} mcp`,
+        );
+      }
+      const skillsCount = getNumber(output.data, "skillsCount");
+      if (skillsCount !== undefined) {
+        parts.push(`skills: ${formatTokenCount(skillsCount)}`);
+      }
+      const mcps = getRecord(output.data, "mcps");
+      if (mcps) {
+        parts.push(
+          `mcps: ${formatTokenCount(
+            getNumber(mcps, "connected") ?? 0,
+          )} connected, ${formatTokenCount(
+            getNumber(mcps, "failed") ?? 0,
+          )} failed, ${formatTokenCount(
+            getNumber(mcps, "disabled") ?? 0,
+          )} disabled, ${formatTokenCount(
+            getNumber(mcps, "disconnected") ?? 0,
+          )} disconnected`,
+        );
+      }
+      const context = getRecord(output.data, "context");
+      if (context) {
+        const current = getNumber(context, "currentTokens");
+        const limit = getNumber(context, "contextLimit");
+        if (current !== undefined && limit !== undefined) {
+          parts.push(
+            `context: ${formatTokenCount(current)}/${formatTokenCount(
+              limit,
+            )} tokens`,
+          );
+        }
+      }
+      const projectRoot = getString(output.data, "projectRoot");
+      if (projectRoot) {
+        parts.push(`project: ${projectRoot}`);
+      }
+      return parts.length > 0 ? parts.join(" | ") : JSON.stringify(output.data);
     }
     case "tools": {
       const tools = Array.isArray(output.data.tools)
@@ -754,9 +827,71 @@ function formatDataCommandOutput(
         ? `models: ${models.join(", ")}`
         : JSON.stringify(output.data);
     }
+    case "mcps": {
+      const servers = Array.isArray(output.data.servers)
+        ? output.data.servers
+        : [];
+      const labels = servers
+        .map((server) => (isRecord(server) ? formatMcpServer(server) : null))
+        .filter((server): server is string => Boolean(server));
+      return labels.length > 0 ? `mcps: ${labels.join(", ")}` : "mcps: none";
+    }
+    case "skills": {
+      const skills = Array.isArray(output.data.skills)
+        ? output.data.skills
+        : [];
+      const labels = skills
+        .map((skill) => (isRecord(skill) ? formatSkillSummary(skill) : null))
+        .filter((skill): skill is string => Boolean(skill));
+      return labels.length > 0
+        ? `skills: ${labels.join(", ")}`
+        : "skills: none";
+    }
     default:
       return JSON.stringify(output.data);
   }
+}
+
+function formatHelpCategory(category: Record<string, unknown>): string {
+  const title =
+    getString(category, "title") ?? getString(category, "name") ?? "Commands";
+  const commands = Array.isArray(category.commands) ? category.commands : [];
+  const lines = commands
+    .map((command) => (isRecord(command) ? formatHelpCommand(command) : ""))
+    .filter(Boolean);
+  return lines.length > 0 ? `${title}:\n${lines.join("\n")}` : `${title}: none`;
+}
+
+function formatHelpCommand(command: Record<string, unknown>): string {
+  const path = getStringArray(command, "path");
+  const description = getString(command, "description") ?? "";
+  const label = path.length > 0 ? `/${path.join(" ")}` : "/";
+  return `  ${label}${description ? ` ${description}` : ""}`;
+}
+
+function formatMcpServer(server: Record<string, unknown>): string | null {
+  const name = getString(server, "name");
+  const status = getString(server, "status");
+  if (!name || !status) {
+    return null;
+  }
+  return `${name} ${status}`;
+}
+
+function formatSkillSummary(skill: Record<string, unknown>): string | null {
+  const name = getString(skill, "name");
+  const scope = getString(skill, "scope");
+  if (!name || !scope) {
+    return null;
+  }
+  const source = getString(skill, "source");
+  const description = getString(skill, "description");
+  const metadata = [scope, source].filter((value): value is string =>
+    Boolean(value),
+  );
+  return `${name} [${metadata.join(", ")}]${
+    description ? ` - ${description}` : ""
+  }`;
 }
 
 function truncateCommandOutput(value: string): string {
@@ -783,6 +918,16 @@ function getString(
 ): string | undefined {
   const value = record[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function getStringArray(
+  record: Record<string, unknown>,
+  key: string,
+): string[] {
+  const value = record[key];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
 function formatModelLabel(

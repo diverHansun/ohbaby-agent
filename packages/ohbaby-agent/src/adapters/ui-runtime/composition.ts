@@ -1,10 +1,14 @@
 import type { UiNotice } from "ohbaby-sdk";
 import type { BusInstance } from "../../bus/index.js";
-import type { CommandToolSummary } from "../../commands/index.js";
+import type {
+  CommandMcpServerSummary,
+  CommandToolSummary,
+} from "../../commands/index.js";
 import {
   createContextManager,
   type CompactResult,
   type ContextManager,
+  type ContextUsage,
 } from "../../core/context/index.js";
 import { Lifecycle } from "../../core/lifecycle/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
@@ -52,7 +56,7 @@ import {
   type SkillRegistryPort,
   type SkillSearchDirectory,
 } from "../../skill/index.js";
-import { McpManager } from "../../mcp/index.js";
+import { McpManager, type McpClientStatus } from "../../mcp/index.js";
 import {
   createMcpPromptTool,
   createMcpResourceTool,
@@ -120,6 +124,7 @@ export interface UiRuntimeCompositionOptions {
 export interface McpManagerPort {
   getAllTools(): Promise<readonly Tool[]>;
   getPrompt?: McpPromptReader["getPrompt"];
+  getStatus?(): Promise<Record<string, McpClientStatus>>;
   onChange?(listener: () => void | Promise<void>): () => void;
   readResource?: McpResourceReader["readResource"];
 }
@@ -158,6 +163,13 @@ function createSkillLogger(
       });
     },
   };
+}
+
+function mcpStatusToSummary(
+  name: string,
+  status: McpClientStatus,
+): CommandMcpServerSummary {
+  return { name, status: status.status };
 }
 
 async function loadConfiguredSkillDirectories(input: {
@@ -538,6 +550,26 @@ export async function createUiRuntimeComposition(
         options.onNotice?.(notice);
       }
       return result;
+    },
+
+    async getContextUsage(input): Promise<ContextUsage> {
+      const assembled = await contextManager.assemble(
+        input.sessionId,
+        input.projectRoot,
+      );
+      return contextManager.getUsage(assembled, options.llmClient.config.model);
+    },
+
+    async listMcpServerSummaries(): Promise<
+      readonly CommandMcpServerSummary[]
+    > {
+      const statuses = await mcpManager.getStatus?.();
+      if (!statuses) {
+        return [];
+      }
+      return Object.entries(statuses)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([name, status]) => mcpStatusToSummary(name, status));
     },
 
     async listToolSummaries(

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { UiSnapshot } from "ohbaby-sdk";
+import type { UiCommandOutput, UiSnapshot } from "ohbaby-sdk";
 import {
   applyTuiEvent,
   createStateFromSnapshot,
   createTuiStore,
   setCommandCatalog,
 } from "./events.js";
-import type { TuiCommandCatalog } from "./snapshot.js";
+import type { TuiCommandCatalog, TuiStoreState } from "./snapshot.js";
 
 function snapshot(): UiSnapshot {
   return {
@@ -48,6 +48,25 @@ function catalog(version = "v1"): TuiCommandCatalog {
     ],
     version,
   };
+}
+
+function applyCommandOutput(
+  state: TuiStoreState,
+  output: UiCommandOutput,
+  commandId: string,
+  timestamp = 1,
+): TuiStoreState {
+  return applyTuiEvent(state, {
+    clientInvocationId: `invoke_${commandId}`,
+    commandRunId: `command_${commandId}`,
+    output,
+    timestamp,
+    type: "command.result.delivered",
+  });
+}
+
+function latestCommandNoticeText(state: TuiStoreState): string | undefined {
+  return state.commandNotices.at(-1)?.text;
 }
 
 describe("TUI store event reducer", () => {
@@ -354,13 +373,12 @@ describe("TUI store event reducer", () => {
     expect(state.runtime).toEqual({ kind: "running", runId: "run_1" });
   });
 
-  it("formats command notices for humans and truncates large outputs", () => {
+  it("formats permission and compact command notices for humans", () => {
     let state = createStateFromSnapshot(snapshot());
 
-    state = applyTuiEvent(state, {
-      clientInvocationId: "invoke_mode",
-      commandRunId: "command_mode",
-      output: {
+    state = applyCommandOutput(
+      state,
+      {
         data: {
           permission: {
             level: "default",
@@ -371,18 +389,14 @@ describe("TUI store event reducer", () => {
         kind: "data",
         subject: "permission.mode",
       },
-      timestamp: 1,
-      type: "command.result.delivered",
-    });
-
-    expect(state.commandNotices.at(-1)?.text).toBe(
-      "mode: plan | level: default",
+      "mode",
     );
 
-    state = applyTuiEvent(state, {
-      clientInvocationId: "invoke_permission",
-      commandRunId: "command_permission",
-      output: {
+    expect(latestCommandNoticeText(state)).toBe("mode: plan | level: default");
+
+    state = applyCommandOutput(
+      state,
+      {
         data: {
           permission: {
             level: "full-access",
@@ -393,18 +407,16 @@ describe("TUI store event reducer", () => {
         kind: "data",
         subject: "permission.level",
       },
-      timestamp: 2,
-      type: "command.result.delivered",
-    });
+      "permission",
+    );
 
-    expect(state.commandNotices.at(-1)?.text).toBe(
+    expect(latestCommandNoticeText(state)).toBe(
       "level: full-access | mode: auto",
     );
 
-    state = applyTuiEvent(state, {
-      clientInvocationId: "invoke_compact",
-      commandRunId: "command_compact",
-      output: {
+    state = applyCommandOutput(
+      state,
+      {
         data: {
           result: {
             status: "compacted",
@@ -419,18 +431,20 @@ describe("TUI store event reducer", () => {
         kind: "data",
         subject: "session.compact",
       },
-      timestamp: 3,
-      type: "command.result.delivered",
-    });
-
-    expect(state.commandNotices.at(-1)?.text).toBe(
-      "compact: compacted (92 -> 24 tokens)",
+      "compact",
     );
 
-    state = applyTuiEvent(state, {
-      clientInvocationId: "invoke_status",
-      commandRunId: "command_status",
-      output: {
+    expect(latestCommandNoticeText(state)).toBe(
+      "compact: compacted (92 -> 24 tokens)",
+    );
+  });
+
+  it("formats status command notices with optional backend summaries", () => {
+    let state = createStateFromSnapshot(snapshot());
+
+    state = applyCommandOutput(
+      state,
+      {
         data: {
           model: {
             id: "openai:gpt-5.5",
@@ -442,18 +456,61 @@ describe("TUI store event reducer", () => {
         kind: "data",
         subject: "status",
       },
-      timestamp: 4,
-      type: "command.result.delivered",
-    });
+      "status",
+    );
 
-    expect(state.commandNotices.at(-1)?.text).toBe(
+    expect(latestCommandNoticeText(state)).toBe(
       "status: idle | model: GPT-5.5",
     );
 
-    state = applyTuiEvent(state, {
-      clientInvocationId: "invoke_models",
-      commandRunId: "command_models",
-      output: {
+    state = applyCommandOutput(
+      state,
+      {
+        data: {
+          context: {
+            contextLimit: 128000,
+            currentTokens: 9000,
+          },
+          mcps: {
+            connected: 1,
+            disabled: 1,
+            disconnected: 1,
+            failed: 1,
+            total: 4,
+          },
+          model: {
+            id: "openai:gpt-5.5",
+            label: "GPT-5.5",
+            provider: "openai",
+          },
+          projectRoot: "D:/Projects/app",
+          sessionId: "session_1",
+          skillsCount: 2,
+          status: "idle",
+          tools: {
+            builtin: 1,
+            mcp: 1,
+            module: 1,
+            skill: 1,
+          },
+        },
+        kind: "data",
+        subject: "status",
+      },
+      "status_full",
+    );
+
+    expect(latestCommandNoticeText(state)).toBe(
+      "status: idle | model: GPT-5.5 | session: session_1 | tools: 1 builtin, 1 module, 1 skill, 1 mcp | skills: 2 | mcps: 1 connected, 1 failed, 1 disabled, 1 disconnected | context: 9,000/128,000 tokens | project: D:/Projects/app",
+    );
+  });
+
+  it("formats model and help command notices", () => {
+    let state = createStateFromSnapshot(snapshot());
+
+    state = applyCommandOutput(
+      state,
+      {
         data: {
           current: {
             id: "openai:gpt-5.5",
@@ -471,25 +528,102 @@ describe("TUI store event reducer", () => {
         kind: "data",
         subject: "models.current",
       },
-      timestamp: 5,
-      type: "command.result.delivered",
-    });
+      "models",
+    );
 
-    expect(state.commandNotices.at(-1)?.text).toBe("model: GPT-5.5");
+    expect(latestCommandNoticeText(state)).toBe("model: GPT-5.5");
 
+    state = applyCommandOutput(
+      state,
+      {
+        data: {
+          categories: [
+            {
+              commands: [
+                { description: "Show status", path: ["status"] },
+                { description: "List MCP server status", path: ["mcps"] },
+              ],
+              name: "system",
+              title: "System",
+            },
+          ],
+          commands: [],
+        },
+        kind: "data",
+        subject: "help",
+      },
+      "help",
+    );
+
+    expect(latestCommandNoticeText(state)).toBe(
+      "System:\n  /status Show status\n  /mcps List MCP server status",
+    );
+  });
+
+  it("formats MCP server and skill command notices without leaking MCP details", () => {
+    let state = createStateFromSnapshot(snapshot());
+
+    state = applyCommandOutput(
+      state,
+      {
+        data: {
+          servers: [
+            { name: "github", status: "connected", toolCount: 8 },
+            { error: "boom", name: "bad", status: "failed" },
+            { name: "memory", status: "disabled" },
+          ],
+        },
+        kind: "data",
+        subject: "mcps",
+      },
+      "mcps",
+    );
+
+    expect(latestCommandNoticeText(state)).toBe(
+      "mcps: github connected, bad failed, memory disabled",
+    );
+
+    state = applyCommandOutput(
+      state,
+      {
+        data: {
+          skills: [
+            {
+              description: "Review code",
+              name: "review",
+              scope: "project",
+              source: "project-native",
+            },
+            {
+              description: "Brainstorm ideas",
+              name: "brainstorming",
+              scope: "user",
+            },
+          ],
+        },
+        kind: "data",
+        subject: "skills",
+      },
+      "skills",
+    );
+
+    expect(latestCommandNoticeText(state)).toBe(
+      "skills: review [project, project-native] - Review code, brainstorming [user] - Brainstorm ideas",
+    );
+  });
+
+  it("truncates large command outputs", () => {
     const longText = "x".repeat(400);
-    state = applyTuiEvent(state, {
-      clientInvocationId: "invoke_long",
-      commandRunId: "command_long",
-      output: { kind: "text", text: longText },
-      timestamp: 6,
-      type: "command.result.delivered",
-    });
+    const state = applyCommandOutput(
+      createStateFromSnapshot(snapshot()),
+      { kind: "text", text: longText },
+      "long",
+    );
 
-    expect(state.commandNotices.at(-1)?.text.length).toBeLessThan(
+    expect(latestCommandNoticeText(state)?.length).toBeLessThan(
       longText.length,
     );
-    expect(state.commandNotices.at(-1)?.text.endsWith("...")).toBe(true);
+    expect(latestCommandNoticeText(state)?.endsWith("...")).toBe(true);
   });
 
   it("deduplicates UI notices by key and keeps the most recent ten", () => {

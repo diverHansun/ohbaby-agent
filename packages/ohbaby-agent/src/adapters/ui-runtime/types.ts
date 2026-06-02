@@ -1,6 +1,9 @@
 import type { UiEvent } from "ohbaby-sdk";
-import type { CommandToolSummary } from "../../commands/index.js";
-import type { CompactResult } from "../../core/context/index.js";
+import type {
+  CommandMcpServerSummary,
+  CommandToolSummary,
+} from "../../commands/index.js";
+import type { CompactResult, ContextUsage } from "../../core/context/index.js";
 import type { ToolSchedulerInstance } from "../../core/tool-scheduler/index.js";
 import type {
   AgentManager,
@@ -34,6 +37,11 @@ export interface UiRuntimeComposition {
     readonly projectRoot: string;
     readonly sessionId: string;
   }): Promise<CompactResult>;
+  getContextUsage(input: {
+    readonly projectRoot: string;
+    readonly sessionId: string;
+  }): Promise<ContextUsage>;
+  listMcpServerSummaries(): Promise<readonly CommandMcpServerSummary[]>;
   listToolSummaries(input?: {
     readonly agentName?: string;
   }): Promise<readonly CommandToolSummary[]>;

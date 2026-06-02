@@ -2750,6 +2750,8 @@ describe("createInProcessUiBackendClient", () => {
         "compact",
         "resume",
         "permission",
+        "mcps",
+        "skills",
       ]),
     );
     expect(catalog.commands.map((command) => command.id)).not.toEqual(
@@ -2822,6 +2824,46 @@ describe("createInProcessUiBackendClient", () => {
       expect(catalog.commands.map((command) => command.id)).not.toContain(
         "skill.internal",
       );
+
+      const events: UiEvent[] = [];
+      client.subscribeEvents((event) => {
+        events.push(event);
+      });
+      await client.executeCommand({
+        argv: [],
+        clientInvocationId: "inv_skills",
+        commandId: "skills",
+        path: ["skills"],
+        raw: "/skills",
+        rawArgs: "",
+        surface: "tui",
+      });
+
+      expect(
+        events.find(
+          (
+            event,
+          ): event is Extract<UiEvent, { type: "command.result.delivered" }> =>
+            event.type === "command.result.delivered" &&
+            event.output?.kind === "data" &&
+            event.output.subject === "skills",
+        )?.output,
+      ).toMatchObject({
+        data: {
+          skills: [
+            {
+              commandId: "skill.code-review",
+              description: "Review code with project conventions",
+              name: "code-review",
+              path: ["code-review"],
+              scope: "project",
+              source: "project-native",
+            },
+          ],
+        },
+        kind: "data",
+        subject: "skills",
+      });
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
