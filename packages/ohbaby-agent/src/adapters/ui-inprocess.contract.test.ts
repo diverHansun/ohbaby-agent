@@ -14,6 +14,7 @@ import type {
   LLMClientInstance,
 } from "../core/llm-client/index.js";
 import { createBus } from "../bus/index.js";
+import { CommandsEvent } from "../commands/index.js";
 import {
   createInMemoryMessageStore,
   createDatabaseMessageStore,
@@ -3162,6 +3163,33 @@ describe("createInProcessUiBackendClient", () => {
       },
       type: "command.result.delivered",
     });
+  });
+
+  it("publishes command catalog updates from the injected bus", () => {
+    const bus = createBus();
+    const client = createInProcessUiBackendClient({
+      bus,
+      llmClient: createFakeLLMClient([]),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    bus.publish(CommandsEvent.CatalogUpdated, {
+      reason: "registered",
+      timestamp: 123,
+      version: "v1",
+    });
+
+    expect(events).toEqual([
+      {
+        reason: "registered",
+        timestamp: 123,
+        type: "command.catalog.updated",
+        version: "v1",
+      },
+    ]);
   });
 
   it("reports the single active model through /models without leaking api keys", async () => {

@@ -29,11 +29,8 @@ import type {
   CommandModelSummary,
   CommandSessionSummary,
 } from "../commands/index.js";
-import { CommandsEvent, createCommandService } from "../commands/index.js";
-import {
-  createInteractionBroker,
-  InteractionEvent,
-} from "../runtime/interaction-broker/index.js";
+import { createCommandService } from "../commands/index.js";
+import { createInteractionBroker } from "../runtime/interaction-broker/index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -77,6 +74,7 @@ import type { UiStateStore } from "./ui-state/index.js";
 import { createUiRuntimeComposition } from "./ui-runtime/composition.js";
 import { startRunStreamProjection } from "./ui-runtime/run-stream-adapter.js";
 import type { UiRuntimeComposition } from "./ui-runtime/types.js";
+import { subscribeAppEventProjectors } from "./app-events/index.js";
 
 const EMPTY_SNAPSHOT: UiSnapshot = {
   sessions: [],
@@ -1051,55 +1049,11 @@ export function createInProcessUiBackendClient(
     getProjectRoot: resolveProjectRoot,
   });
 
-  bus.subscribe(CommandsEvent.Started, (payload) => {
-    publish({
-      type: "command.started",
-      command: {
-        commandRunId: payload.commandRunId,
-        clientInvocationId: payload.clientInvocationId,
-        commandId: payload.commandId,
-        path: payload.path,
-        surface: payload.surface,
-        sessionId: payload.sessionId,
-      },
-      timestamp: payload.timestamp,
-    });
-  });
-  bus.subscribe(CommandsEvent.ResultDelivered, (payload) => {
-    publish({
-      type: "command.result.delivered",
-      commandRunId: payload.commandRunId,
-      clientInvocationId: payload.clientInvocationId,
-      output: payload.output,
-      action: payload.action,
-      timestamp: payload.timestamp,
-    });
-  });
-  bus.subscribe(CommandsEvent.Failed, (payload) => {
-    publish({
-      type: "command.failed",
-      commandRunId: payload.commandRunId,
-      clientInvocationId: payload.clientInvocationId,
-      error: payload.error,
-      timestamp: payload.timestamp,
-    });
-  });
-  bus.subscribe(InteractionEvent.Requested, (payload) => {
-    publish({
-      type: "interaction.requested",
-      request: payload.request,
-      timestamp: payload.timestamp,
-    });
-  });
-  bus.subscribe(InteractionEvent.Resolved, (payload) => {
-    publish({
-      type: "interaction.resolved",
-      interactionId: payload.interactionId,
-      commandRunId: payload.commandRunId,
-      clientInvocationId: payload.clientInvocationId,
-      status: payload.response.kind,
-      timestamp: payload.timestamp,
-    });
+  subscribeAppEventProjectors({
+    bus,
+    target(projected) {
+      publish(projected.uiEvent);
+    },
   });
   bus.subscribe(PermissionEvent.ModeChanged, () => {
     publishPermissionUpdated();
