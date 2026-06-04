@@ -1,7 +1,10 @@
 import { describe, expect, it, vi, type Mock } from "vitest";
 import type { UiEvent, UiPermissionRequest, UiRunStatus } from "ohbaby-sdk";
 import { createBus } from "../../bus/index.js";
-import { PermissionEvent, type PermissionInfo } from "../../permission/index.js";
+import {
+  PermissionEvent,
+  type PermissionInfo,
+} from "../../permission/index.js";
 import { startPermissionEventProjection } from "./permission-projection.js";
 
 interface PermissionProjectionHarness {
@@ -36,12 +39,14 @@ function createPermissionInfo(
   };
 }
 
-function createHarness(options: {
-  readonly activeRunId?: string;
-  readonly currentStatus?: UiRunStatus;
-  readonly upsertPermission?: (request: UiPermissionRequest) => Promise<void>;
-  readonly removePermission?: (requestId: string) => Promise<void>;
-} = {}): PermissionProjectionHarness {
+function createHarness(
+  options: {
+    readonly activeRunId?: string;
+    readonly currentStatus?: UiRunStatus;
+    readonly upsertPermission?: (request: UiPermissionRequest) => Promise<void>;
+    readonly removePermission?: (requestId: string) => Promise<void>;
+  } = {},
+): PermissionProjectionHarness {
   const bus = createBus();
   const events: UiEvent[] = [];
   const pendingPermissionSessions = new Map<string, string>();
@@ -196,8 +201,13 @@ describe("startPermissionEventProjection", () => {
   });
 
   it("projects PermissionEvent.Updated into permission.requested state and runtime updates", async () => {
-    const { bus, events, pendingPermissionSessions, reconcileRuntimeStatus, stateStore } =
-      createHarness({ activeRunId: "run_1" });
+    const {
+      bus,
+      events,
+      pendingPermissionSessions,
+      reconcileRuntimeStatus,
+      stateStore,
+    } = createHarness({ activeRunId: "run_1" });
     const info = createPermissionInfo({ id: "perm_2", sessionId: "session_2" });
 
     bus.publish(PermissionEvent.Updated, { info });
@@ -251,8 +261,13 @@ describe("startPermissionEventProjection", () => {
   });
 
   it("projects PermissionEvent.Replied into permission.resolved state and runtime updates", async () => {
-    const { bus, events, pendingPermissionSessions, reconcileRuntimeStatus, stateStore } =
-      createHarness();
+    const {
+      bus,
+      events,
+      pendingPermissionSessions,
+      reconcileRuntimeStatus,
+      stateStore,
+    } = createHarness();
     pendingPermissionSessions.set("perm_1", "session_1");
 
     bus.publish(PermissionEvent.Replied, {

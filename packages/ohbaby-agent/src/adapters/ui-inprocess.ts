@@ -1024,6 +1024,16 @@ export function createInProcessUiBackendClient(
     publish,
     reconcileRuntimeStatus,
     stateStore,
+    onAsyncError(error): void {
+      const message = getErrorMessage(error);
+      publishNotice({
+        key: `permission:projection:${message}`,
+        level: "error",
+        message: `Permission event projection failed: ${message}`,
+        source: "permission",
+        title: "Permission update failed",
+      });
+    },
   });
   return {
     getSnapshot(): Promise<UiSnapshot> {

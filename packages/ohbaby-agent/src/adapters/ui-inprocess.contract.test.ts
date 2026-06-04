@@ -40,10 +40,13 @@ import {
   type RunLedger,
   type RunLedgerRecord,
 } from "../runtime/run-ledger/index.js";
+import { PermissionEvent } from "../permission/index.js";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
 import {
+  createInMemoryUiStateStore,
   createDatabaseUiAppStateStore,
   createPersistentUiStateStore,
+  type UiStateStore,
 } from "./ui-state/index.js";
 
 interface FakeSdkClient {
@@ -2523,6 +2526,62 @@ describe("createInProcessUiBackendClient", () => {
       message: "OPENAI_API_KEY is not configured",
       title: "Runtime error",
     });
+  });
+
+  it("publishes a visible notice when async permission projection fails", async () => {
+    const bus = createBus();
+    const baseStateStore = createInMemoryUiStateStore({
+      activeSessionId: null,
+      permissions: [],
+      runs: [],
+      sessions: [],
+      status: { kind: "idle" },
+    });
+    const stateStore: UiStateStore = {
+      ...baseStateStore,
+      upsertPermission(): Promise<void> {
+        return Promise.reject(new Error("permission store unavailable"));
+      },
+    };
+    const client = createInProcessUiBackendClient({
+      bus,
+      llmClient: createFakeLLMClient([]),
+      stateStore,
+    });
+    const notice = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "notice.emitted" }> =>
+        event.type === "notice.emitted" && event.notice.level === "error",
+    );
+
+    expect(() => {
+      bus.publish(PermissionEvent.Updated, {
+        info: {
+          callId: "call_permission_projection",
+          id: "permission_projection_failure",
+          messageId: "message_1",
+          metadata: {},
+          name: "write",
+          pattern: "write:D:/repo/blocked.txt",
+          sessionId: "session_1",
+          time: { created: 1_000 },
+          title: "Write tool requires confirmation: write",
+          type: "tool",
+        },
+      });
+    }).not.toThrow();
+
+    const noticeEvent = await notice;
+    expect(noticeEvent).toMatchObject({
+      notice: {
+        level: "error",
+        title: "Permission update failed",
+      },
+      type: "notice.emitted",
+    });
+    expect(noticeEvent.notice.message).toContain(
+      "Permission event projection failed: permission store unavailable",
+    );
   });
 
   it("activates an existing session when submitting to it", async () => {
