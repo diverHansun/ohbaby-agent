@@ -6,13 +6,13 @@ import type {
   StreamBridge,
   StreamBridgeYield,
 } from "../stream-bridge/index.js";
-import { startCommandEventAdapter } from "./command-events.js";
+import { startAppEventAdapter } from "./app-events.js";
 
-describe("startCommandEventAdapter", () => {
+describe("startAppEventAdapter", () => {
   it("projects command and interaction bus events to SDK app events", () => {
     const bus = createBus();
     const streamBridge = new RecordingStreamBridge();
-    const adapter = startCommandEventAdapter({ bus, streamBridge });
+    const adapter = startAppEventAdapter({ bus, streamBridge });
 
     bus.publish(CommandsEvent.Started, {
       clientInvocationId: "inv_1",

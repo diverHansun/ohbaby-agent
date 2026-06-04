@@ -16,9 +16,13 @@ export interface AppEventProjectorError {
   readonly error: unknown;
 }
 
+type AppEventProjectorTarget = <Type extends AppProjectedEventType>(
+  event: ProjectedAppEvent<Type>,
+) => void;
+
 export interface SubscribeAppEventProjectorsOptions {
   readonly bus: BusInstance;
-  readonly target: (event: ProjectedAppEvent) => void;
+  readonly target: AppEventProjectorTarget;
   readonly onError?: (error: AppEventProjectorError) => void;
 }
 
@@ -27,17 +31,22 @@ export function subscribeAppEventProjectors({
   target,
   onError,
 }: SubscribeAppEventProjectorsOptions): BusUnsubscribe {
-  // The readonly projector table is a tuple of distinct projector functions.
-  // Widen each entry at the subscription boundary so map can iterate the table
-  // without rebuilding the same list by hand.
-  const unsubscribers = appEventProjectors.map((projector) =>
-    subscribeProjector(
-      bus,
-      target,
-      onError,
-      projector as AppEventProjector,
-    ),
-  );
+  const [
+    commandStarted,
+    commandResultDelivered,
+    commandFailed,
+    commandCatalogUpdated,
+    interactionRequested,
+    interactionResolved,
+  ] = appEventProjectors;
+  const unsubscribers = [
+    subscribeProjector(bus, target, onError, commandStarted),
+    subscribeProjector(bus, target, onError, commandResultDelivered),
+    subscribeProjector(bus, target, onError, commandFailed),
+    subscribeProjector(bus, target, onError, commandCatalogUpdated),
+    subscribeProjector(bus, target, onError, interactionRequested),
+    subscribeProjector(bus, target, onError, interactionResolved),
+  ];
 
   return () => {
     for (const unsubscribe of unsubscribers.splice(0)) {
@@ -51,13 +60,13 @@ function subscribeProjector<
   Type extends AppProjectedEventType,
 >(
   bus: BusInstance,
-  target: (event: ProjectedAppEvent) => void,
+  target: AppEventProjectorTarget,
   onError: ((error: AppEventProjectorError) => void) | undefined,
   projector: AppEventProjector<Event, Type>,
 ): BusUnsubscribe {
   return bus.subscribe(projector.event, (payload: BusEventPayload<Event>) => {
     try {
-      target(projector.project(payload) as unknown as ProjectedAppEvent);
+      target(projector.project(payload));
     } catch (error) {
       onError?.({ eventType: projector.event.type, error });
       throw error;

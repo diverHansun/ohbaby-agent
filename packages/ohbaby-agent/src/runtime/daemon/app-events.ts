@@ -1,11 +1,23 @@
 import type { DaemonEventAdapter, DaemonEventAdapterDeps } from "./types.js";
+import {
+  subscribeAppEventProjectors,
+  toAppStreamEvent,
+} from "../../adapters/app-events/index.js";
 
 export function startAppEventAdapter(
-  _deps: DaemonEventAdapterDeps,
+  { bus, streamBridge }: DaemonEventAdapterDeps,
 ): DaemonEventAdapter {
+  const unsubscribe = subscribeAppEventProjectors({
+    bus,
+    target: (projected) => {
+      const event = toAppStreamEvent(projected);
+      streamBridge.publish("app", event.type, event.data);
+    },
+  });
+
   return {
     dispose(): void {
-      return undefined;
+      unsubscribe();
     },
   };
 }

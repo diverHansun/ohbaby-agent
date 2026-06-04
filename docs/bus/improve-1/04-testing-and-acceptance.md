@@ -67,7 +67,9 @@ describe("startAppEventProjection", () => {
 目标 publish 接口应足够小：
 
 ```typescript
-type AppEventTarget = (event: ProjectedAppEvent) => void;
+type AppEventTarget = <Type extends AppProjectedEventType>(
+  event: ProjectedAppEvent<Type>,
+) => void;
 ```
 
 这样 `ui-inprocess` 和 daemon 都能复用同一套订阅逻辑。
@@ -76,10 +78,10 @@ daemon 的 `eventDefinitions` 通用透传必须被删除或改成显式 allowli
 
 ### 2.3 回归要求
 
-- `runtime/daemon/command-events.unit.test.ts` 的核心断言应迁移到 projector 测试，或改为验证 daemon adapter 使用 projector。
-- `runtime/daemon/bootstrap.integration.test.ts` 中传入 `appEventDefinitions` / `commandEventDefinitions` 的测试必须同步迁移到 projector 或 allowlist 语义。
+- `runtime/daemon/app-events.unit.test.ts` 应验证 daemon app adapter 使用共享 projector，并覆盖 Commands + Interaction app stream 输出。
+- `runtime/daemon/bootstrap.integration.test.ts` 应只注入 `startAppEventAdapter`，启动/停止顺序不再包含 command adapter。
 - `ui-inprocess` 中 Commands/Interaction 的重复 `bus.subscribe` 分支应消失。
-- `runtime/daemon/command-events.ts` 不再手写 Commands/Interaction 字段映射。
+- `runtime/daemon/app-events.ts` 是 daemon 侧唯一 app event projection adapter；不再保留 `command-events.ts` 历史命名适配器。
 
 ---
 

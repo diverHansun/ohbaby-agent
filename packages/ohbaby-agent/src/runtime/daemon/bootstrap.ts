@@ -5,7 +5,6 @@ import { RunManager, type RunDefaultsPolicy } from "../run-manager/index.js";
 import { createInMemoryStreamBridge } from "../stream-bridge/index.js";
 import type { StreamBridge } from "../stream-bridge/index.js";
 import { startAppEventAdapter } from "./app-events.js";
-import { startCommandEventAdapter } from "./command-events.js";
 import { DaemonBootstrapError } from "./errors.js";
 import type {
   BootstrappedRuntime,
@@ -121,7 +120,6 @@ export function bootstrapRuntime(
   const interactionBroker =
     options.interactionBroker ?? NOOP_INTERACTION_BROKER;
   let appEvents: DaemonEventAdapter | undefined;
-  let commandEvents: DaemonEventAdapter | undefined;
   let started = false;
   let stopping: Promise<void> | undefined;
 
@@ -134,12 +132,6 @@ export function bootstrapRuntime(
     try {
       await runManager.init();
       appEvents = (options.startAppEventAdapter ?? startAppEventAdapter)({
-        bus,
-        streamBridge,
-      });
-      commandEvents = (
-        options.startCommandEventAdapter ?? startCommandEventAdapter
-      )({
         bus,
         streamBridge,
       });
@@ -163,13 +155,11 @@ export function bootstrapRuntime(
           (): Promise<void> => runManager.cancelAll(STOP_REASON),
           (): Promise<void> =>
             Promise.resolve(interactionBroker.abortAll(STOP_REASON)),
-          (): Promise<void> => disposeAdapter(commandEvents),
           (): Promise<void> => disposeAdapter(appEvents),
           (): Promise<void> => closeStreamBridge(streamBridge),
           (): Promise<void> => closeDatabase(options.database),
         ]);
       } finally {
-        commandEvents = undefined;
         appEvents = undefined;
         started = false;
         stopping = undefined;

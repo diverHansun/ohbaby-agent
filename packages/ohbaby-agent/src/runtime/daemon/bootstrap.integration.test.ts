@@ -221,10 +221,6 @@ describe("bootstrapRuntime", () => {
       interactionBroker: new RecordingInteractionBroker(calls),
       database: new RecordingDatabase(calls),
       startAppEventAdapter: createEventAdapterStarter("appEvents", calls),
-      startCommandEventAdapter: createEventAdapterStarter(
-        "commandEvents",
-        calls,
-      ),
     });
 
     await runtime.start();
@@ -236,10 +232,8 @@ describe("bootstrapRuntime", () => {
     expect(calls).toEqual([
       "runManager.init",
       "appEvents.start",
-      "commandEvents.start",
       "runManager.cancelAll",
       "interactionBroker.abortAll:daemon-stopping",
-      "commandEvents.dispose",
       "appEvents.dispose",
       "streamBridge.close",
       "database.close",
@@ -254,10 +248,6 @@ describe("bootstrapRuntime", () => {
       interactionBroker: new RecordingInteractionBroker(calls),
       database: new RecordingDatabase(calls),
       startAppEventAdapter: createEventAdapterStarter("appEvents", calls),
-      startCommandEventAdapter: createEventAdapterStarter(
-        "commandEvents",
-        calls,
-      ),
     });
 
     await runtime.start();
@@ -281,10 +271,6 @@ describe("bootstrapRuntime", () => {
       interactionBroker: new FailingInteractionBroker(calls),
       database: new RecordingDatabase(calls),
       startAppEventAdapter: createEventAdapterStarter("appEvents", calls),
-      startCommandEventAdapter: createEventAdapterStarter(
-        "commandEvents",
-        calls,
-      ),
     });
 
     await runtime.start();
@@ -296,10 +282,8 @@ describe("bootstrapRuntime", () => {
     expect(calls).toEqual([
       "runManager.init",
       "appEvents.start",
-      "commandEvents.start",
       "runManager.cancelAll",
       "interactionBroker.abortAll:daemon-stopping",
-      "commandEvents.dispose",
       "appEvents.dispose",
       "streamBridge.close",
       "database.close",

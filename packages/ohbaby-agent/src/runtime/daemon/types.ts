@@ -82,7 +82,6 @@ export interface RuntimeBootstrapOptions {
   readonly interactionBroker?: DaemonInteractionBroker;
   readonly database?: DaemonDatabase;
   readonly startAppEventAdapter?: DaemonEventAdapterStarter;
-  readonly startCommandEventAdapter?: DaemonEventAdapterStarter;
   readonly now?: () => number;
   readonly createRunId?: () => string;
 }
