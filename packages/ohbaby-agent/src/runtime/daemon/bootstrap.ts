@@ -136,14 +136,12 @@ export function bootstrapRuntime(
       appEvents = (options.startAppEventAdapter ?? startAppEventAdapter)({
         bus,
         streamBridge,
-        eventDefinitions: options.appEventDefinitions,
       });
       commandEvents = (
         options.startCommandEventAdapter ?? startCommandEventAdapter
       )({
         bus,
         streamBridge,
-        eventDefinitions: options.commandEventDefinitions,
       });
     } catch (error) {
       await stop().catch(() => undefined);

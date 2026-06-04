@@ -35,6 +35,11 @@ describe("startCommandEventAdapter", () => {
       error: { code: "INVALID_ARGS", message: "bad args" },
       timestamp: 3,
     });
+    bus.publish(CommandsEvent.CatalogUpdated, {
+      reason: "registered",
+      timestamp: 4,
+      version: "v1",
+    });
     bus.publish(InteractionEvent.Requested, {
       request: {
         clientInvocationId: "inv_3",
@@ -43,14 +48,14 @@ describe("startCommandEventAdapter", () => {
         kind: "select-one",
         subject: "model",
       },
-      timestamp: 4,
+      timestamp: 5,
     });
     bus.publish(InteractionEvent.Resolved, {
       clientInvocationId: "inv_3",
       commandRunId: "cmd_3",
       interactionId: "interaction_1",
       response: { kind: "cancelled", reason: "user-cancelled" },
-      timestamp: 5,
+      timestamp: 6,
     });
 
     expect(streamBridge.published).toEqual([
@@ -91,6 +96,15 @@ describe("startCommandEventAdapter", () => {
       },
       {
         data: {
+          reason: "registered",
+          timestamp: 4,
+          version: "v1",
+        },
+        event: "command.catalog.updated",
+        scope: "app",
+      },
+      {
+        data: {
           request: {
             clientInvocationId: "inv_3",
             commandRunId: "cmd_3",
@@ -98,7 +112,7 @@ describe("startCommandEventAdapter", () => {
             kind: "select-one",
             subject: "model",
           },
-          timestamp: 4,
+          timestamp: 5,
         },
         event: "interaction.requested",
         scope: "app",
@@ -109,7 +123,7 @@ describe("startCommandEventAdapter", () => {
           commandRunId: "cmd_3",
           interactionId: "interaction_1",
           status: "cancelled",
-          timestamp: 5,
+          timestamp: 6,
         },
         event: "interaction.resolved",
         scope: "app",
@@ -121,9 +135,9 @@ describe("startCommandEventAdapter", () => {
       clientInvocationId: "inv_after",
       commandRunId: "cmd_after",
       output: { kind: "text", text: "after dispose" },
-      timestamp: 6,
+      timestamp: 7,
     });
-    expect(streamBridge.published).toHaveLength(5);
+    expect(streamBridge.published).toHaveLength(6);
   });
 });
 

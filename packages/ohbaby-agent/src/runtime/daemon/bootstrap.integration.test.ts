@@ -230,48 +230,30 @@ describe("bootstrapRuntime", () => {
     ]);
   });
 
-  it("adapts configured bus events into the app stream and disposes subscriptions", async () => {
+  it("does not generically forward arbitrary bus events into the app stream", async () => {
     const bus = createBus();
     const calls: string[] = [];
     const bridge = new RecordingStreamBridge(calls);
-    const appEvent = BusEvent.define(
-      "daemon.test.app",
-      z.object({ value: z.string() }),
-    );
-    const commandEvent = BusEvent.define(
-      "daemon.test.command",
-      z.object({ id: z.string() }),
+    const arbitraryEvent = BusEvent.define(
+      "daemon.test.arbitrary",
+      z.object({ value: z.string() }).strict(),
     );
     const runtime = bootstrapRuntime({
       bus,
       runManager: new RecordingRunManager(calls),
       streamBridge: bridge,
-      appEventDefinitions: [appEvent],
-      commandEventDefinitions: [commandEvent],
     });
 
     await runtime.start();
 
-    bus.publish(appEvent, { value: "one" });
-    bus.publish(commandEvent, { id: "cmd_1" });
+    bus.publish(arbitraryEvent, { value: "ignored" });
 
-    expect(bridge.published).toEqual([
-      {
-        scope: "app",
-        event: "daemon.test.app",
-        data: { value: "one" },
-      },
-      {
-        scope: "app",
-        event: "daemon.test.command",
-        data: { id: "cmd_1" },
-      },
-    ]);
+    expect(bridge.published).toEqual([]);
 
     await runtime.stop();
-    bus.publish(appEvent, { value: "after-stop" });
+    bus.publish(arbitraryEvent, { value: "after-stop" });
 
-    expect(bridge.published).toHaveLength(2);
+    expect(bridge.published).toEqual([]);
   });
 
   it("wires the real in-memory ledger, stream bridge, and run manager", async () => {

@@ -1,4 +1,4 @@
-import type { BusEventDefinition, BusInstance } from "../../bus/index.js";
+import type { BusInstance } from "../../bus/index.js";
 import type { RunLedger } from "../run-ledger/index.js";
 import type {
   HookExecutor,
@@ -64,7 +64,6 @@ export interface DaemonEventAdapter {
 export interface DaemonEventAdapterDeps {
   readonly bus: BusInstance;
   readonly streamBridge: StreamBridge;
-  readonly eventDefinitions?: readonly BusEventDefinition[];
 }
 
 export type DaemonEventAdapterStarter = (
@@ -84,8 +83,6 @@ export interface RuntimeBootstrapOptions {
   readonly database?: DaemonDatabase;
   readonly startAppEventAdapter?: DaemonEventAdapterStarter;
   readonly startCommandEventAdapter?: DaemonEventAdapterStarter;
-  readonly appEventDefinitions?: readonly BusEventDefinition[];
-  readonly commandEventDefinitions?: readonly BusEventDefinition[];
   readonly now?: () => number;
   readonly createRunId?: () => string;
 }
