@@ -613,7 +613,10 @@ describe("ToolScheduler", () => {
     } satisfies PermissionPort;
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState({ initialLevel: "default" }),
+      permissionState: createPermissionState({
+        bus: createBus(),
+        initialLevel: "default",
+      }),
     });
     scheduler.register(
       createTool({
@@ -723,7 +726,7 @@ describe("ToolScheduler", () => {
     const execute = vi.fn(() => ({ output: "trusted" }));
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState(),
+      permissionState: createPermissionState({ bus: createBus() }),
     });
     scheduler.register(createTool({ execute, name: "bash" }));
 
@@ -775,7 +778,7 @@ describe("ToolScheduler", () => {
     const execute = vi.fn(() => ({ output: "once" }));
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState(),
+      permissionState: createPermissionState({ bus: createBus() }),
     });
     scheduler.register(createTool({ execute, name: "bash" }));
 
@@ -813,7 +816,10 @@ describe("ToolScheduler", () => {
     const execute = vi.fn(() => ({ output: "auto" }));
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState({ initialLevel: "full-access" }),
+      permissionState: createPermissionState({
+        bus: createBus(),
+        initialLevel: "full-access",
+      }),
     });
     scheduler.register(createTool({ execute, name: "bash" }));
 
@@ -896,7 +902,10 @@ describe("ToolScheduler", () => {
     };
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState({ initialLevel: "full-access" }),
+      permissionState: createPermissionState({
+        bus: createBus(),
+        initialLevel: "full-access",
+      }),
     });
     scheduler.register(createTool({ name: "bash" }));
     for (const tool of createBuiltinTools()) {
@@ -960,7 +969,10 @@ describe("ToolScheduler", () => {
     } satisfies PermissionPort;
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState({ initialLevel: "full-access" }),
+      permissionState: createPermissionState({
+        bus: createBus(),
+        initialLevel: "full-access",
+      }),
     });
     scheduler.register(
       createTool({
@@ -1040,7 +1052,7 @@ describe("ToolScheduler", () => {
     );
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState(),
+      permissionState: createPermissionState({ bus: createBus() }),
     });
     for (const tool of createBuiltinTools({
       shell: {
@@ -1151,7 +1163,7 @@ describe("ToolScheduler", () => {
     const execute = vi.fn(() => ({ output: "read sensitive external" }));
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState(),
+      permissionState: createPermissionState({ bus: createBus() }),
     });
     scheduler.register(createTool({ execute, name: "bash" }));
 
@@ -1216,7 +1228,10 @@ describe("ToolScheduler", () => {
     const execute = vi.fn(() => ({ output: "read sensitive" }));
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState({ initialLevel: "full-access" }),
+      permissionState: createPermissionState({
+        bus: createBus(),
+        initialLevel: "full-access",
+      }),
     });
     scheduler.register(createTool({ execute, name: "bash" }));
 
@@ -1735,7 +1750,10 @@ describe("ToolScheduler", () => {
     } satisfies PermissionPort;
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState({ initialLevel: "default" }),
+      permissionState: createPermissionState({
+        bus: createBus(),
+        initialLevel: "default",
+      }),
     });
     for (const tool of createBuiltinTools()) {
       if (tool.name === "read") {
@@ -1782,7 +1800,10 @@ describe("ToolScheduler", () => {
     } satisfies PermissionPort;
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState({ initialLevel: "full-access" }),
+      permissionState: createPermissionState({
+        bus: createBus(),
+        initialLevel: "full-access",
+      }),
     });
     for (const tool of createBuiltinTools()) {
       if (tool.name === "read") {
@@ -1823,7 +1844,10 @@ describe("ToolScheduler", () => {
     } satisfies PermissionPort;
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState({ initialLevel: "default" }),
+      permissionState: createPermissionState({
+        bus: createBus(),
+        initialLevel: "default",
+      }),
     });
     for (const tool of createBuiltinTools()) {
       if (tool.name === "read") {
@@ -1905,7 +1929,10 @@ describe("ToolScheduler", () => {
     );
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState({ initialLevel: "default" }),
+      permissionState: createPermissionState({
+        bus: createBus(),
+        initialLevel: "default",
+      }),
     });
     scheduler.register(
       createTool({
@@ -1993,7 +2020,10 @@ describe("ToolScheduler", () => {
     );
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState({ initialLevel: "default" }),
+      permissionState: createPermissionState({
+        bus: createBus(),
+        initialLevel: "default",
+      }),
     });
     scheduler.register(
       createTool({
@@ -2047,7 +2077,10 @@ describe("ToolScheduler", () => {
     } satisfies PermissionPort;
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState({ initialLevel: "default" }),
+      permissionState: createPermissionState({
+        bus: createBus(),
+        initialLevel: "default",
+      }),
     });
     for (const tool of createBuiltinTools()) {
       if (tool.name === "read") {
@@ -2093,7 +2126,10 @@ describe("ToolScheduler", () => {
     } satisfies PermissionPort;
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState({ initialLevel: "default" }),
+      permissionState: createPermissionState({
+        bus: createBus(),
+        initialLevel: "default",
+      }),
     });
     for (const tool of createBuiltinTools()) {
       if (tool.name === "glob") {
@@ -2140,7 +2176,10 @@ describe("ToolScheduler", () => {
     } satisfies PermissionPort;
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState({ initialLevel: "full-access" }),
+      permissionState: createPermissionState({
+        bus: createBus(),
+        initialLevel: "full-access",
+      }),
     });
     for (const tool of createBuiltinTools()) {
       if (tool.name === "grep") {
@@ -2184,7 +2223,10 @@ describe("ToolScheduler", () => {
     } satisfies PermissionPort;
     const { scheduler } = createScheduler({
       permission,
-      permissionState: createPermissionState({ initialLevel: "full-access" }),
+      permissionState: createPermissionState({
+        bus: createBus(),
+        initialLevel: "full-access",
+      }),
     });
     for (const tool of createBuiltinTools()) {
       if (tool.name === "write") {

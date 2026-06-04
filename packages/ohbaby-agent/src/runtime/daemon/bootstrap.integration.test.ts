@@ -137,6 +137,26 @@ function createEventAdapterStarter(
 }
 
 describe("bootstrapRuntime", () => {
+  it("creates isolated buses for daemon instances unless a bus is provided", () => {
+    const firstCalls: string[] = [];
+    const secondCalls: string[] = [];
+    const providedBus = createBus();
+
+    const first = bootstrapRuntime({
+      runManager: new RecordingRunManager(firstCalls),
+    });
+    const second = bootstrapRuntime({
+      runManager: new RecordingRunManager(secondCalls),
+    });
+    const provided = bootstrapRuntime({
+      bus: providedBus,
+      runManager: new RecordingRunManager([]),
+    });
+
+    expect(first.bus).not.toBe(second.bus);
+    expect(provided.bus).toBe(providedBus);
+  });
+
   it("starts and stops daemon-owned components in documented order", async () => {
     const calls: string[] = [];
     const runtime = bootstrapRuntime({

@@ -15,7 +15,7 @@ function allowEditRule(pattern = "src/**"): PermissionRule {
 
 describe("PermissionState", () => {
   it("starts in auto/default with no session rules", () => {
-    const state = createPermissionState();
+    const state = createPermissionState({ bus: createBus() });
 
     expect(state.getMode()).toBe("auto");
     expect(state.getLevel()).toBe("default");
@@ -54,7 +54,7 @@ describe("PermissionState", () => {
   });
 
   it("toggles only between plan and auto", () => {
-    const state = createPermissionState();
+    const state = createPermissionState({ bus: createBus() });
 
     expect(state.toggleMode()).toBe("plan");
     expect(state.toggleMode()).toBe("auto");
@@ -88,7 +88,7 @@ describe("PermissionState", () => {
   });
 
   it("serializes snapshot state without exposing a Map", () => {
-    const state = createPermissionState();
+    const state = createPermissionState({ bus: createBus() });
     const rule = allowEditRule();
     state.setMode("plan");
     state.setLevel("full-access");

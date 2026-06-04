@@ -1,7 +1,3 @@
-import { Bus } from "../bus/index.js";
-import { PermissionEvent } from "./events.js";
-import { createPermissionManager } from "./manager.js";
-
 export { PermissionEvent } from "./events.js";
 export { classifyPermissionCall } from "./classifier.js";
 export { evaluatePermission } from "./evaluator.js";
@@ -46,8 +42,3 @@ export type {
   SchedulerPermissionResponse,
   SystemPermissionResponse,
 } from "./types.js";
-
-export const Permission = {
-  Event: PermissionEvent,
-  ...createPermissionManager({ bus: Bus }),
-} as const;

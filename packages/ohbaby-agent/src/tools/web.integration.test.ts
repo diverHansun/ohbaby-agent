@@ -28,9 +28,13 @@ function createProvider(): SearchProvider {
 describe("web tools scheduler integration", () => {
   it("executes registered web_search and web_fetch tools without real network", async () => {
     const provider = createProvider();
+    const bus = createBus();
     const scheduler = createToolScheduler({
-      bus: createBus(),
-      permissionState: createPermissionState({ initialLevel: "full-access" }),
+      bus,
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
     });
 
     for (const tool of createBuiltinTools({

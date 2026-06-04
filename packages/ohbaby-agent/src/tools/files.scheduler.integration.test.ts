@@ -17,9 +17,13 @@ import {
 import { createBuiltinTools } from "./index.js";
 
 function createScheduler(): ToolSchedulerInstance {
+  const bus = createBus();
   const scheduler = createToolScheduler({
-    bus: createBus(),
-    permissionState: createPermissionState({ initialLevel: "full-access" }),
+    bus,
+    permissionState: createPermissionState({
+      bus,
+      initialLevel: "full-access",
+    }),
   });
   for (const tool of createBuiltinTools()) {
     scheduler.register(tool);

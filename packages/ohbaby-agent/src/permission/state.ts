@@ -1,4 +1,4 @@
-import { Bus, type BusInstance } from "../bus/index.js";
+import type { BusInstance } from "../bus/index.js";
 import { PermissionEvent } from "./events.js";
 import type {
   Level,
@@ -10,7 +10,7 @@ import type {
 } from "./types.js";
 
 export interface PermissionStateOptions {
-  readonly bus?: BusInstance;
+  readonly bus: BusInstance;
   readonly initialMode?: Mode;
   readonly initialLevel?: Level;
 }
@@ -27,9 +27,9 @@ function cloneRules(
 }
 
 export function createPermissionState(
-  options: PermissionStateOptions = {},
+  options: PermissionStateOptions,
 ): PermissionStateStore {
-  const bus = options.bus ?? Bus;
+  const bus = options.bus;
   let mode: Mode = options.initialMode ?? "auto";
   let level: Level = options.initialLevel ?? "default";
   const sessionRules = new Map<string, readonly PermissionRule[]>();

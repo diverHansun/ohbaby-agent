@@ -1,4 +1,4 @@
-import { Bus, type BusInstance } from "../bus/index.js";
+import type { BusInstance } from "../bus/index.js";
 import { PermissionEvent } from "./events.js";
 import {
   generatePermissionPattern,
@@ -32,7 +32,7 @@ interface PendingRequest {
 }
 
 export interface PermissionManagerOptions {
-  readonly bus?: BusInstance;
+  readonly bus: BusInstance;
   readonly generateId?: () => string;
   readonly now?: () => number;
   readonly state?: PermissionStateStore;
@@ -99,9 +99,9 @@ function createInfo(
 }
 
 export function createPermissionManager(
-  options: PermissionManagerOptions = {},
+  options: PermissionManagerOptions,
 ): PermissionManager {
-  const bus = options.bus ?? Bus;
+  const bus = options.bus;
   const generateId = options.generateId ?? defaultGenerateId;
   const now = options.now ?? Date.now;
   const state = options.state ?? createPermissionState({ bus });

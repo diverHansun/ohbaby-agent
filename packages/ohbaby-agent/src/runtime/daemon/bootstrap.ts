@@ -1,4 +1,4 @@
-import { Bus } from "../../bus/index.js";
+import { createBus } from "../../bus/index.js";
 import { createInMemoryRunLedger } from "../run-ledger/index.js";
 import type { RunLedger } from "../run-ledger/index.js";
 import { RunManager, type RunDefaultsPolicy } from "../run-manager/index.js";
@@ -114,7 +114,7 @@ async function runCleanupSteps(
 export function bootstrapRuntime(
   options: RuntimeBootstrapOptions,
 ): BootstrappedRuntime {
-  const bus = options.bus ?? Bus;
+  const bus = options.bus ?? createBus();
   const runLedger = options.runLedger ?? createInMemoryRunLedger();
   const streamBridge = options.streamBridge ?? createInMemoryStreamBridge();
   const runManager = createRunManager(options, runLedger, streamBridge);
