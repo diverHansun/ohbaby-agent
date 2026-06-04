@@ -6,12 +6,12 @@ import { appEventProjectors, toAppStreamEvent } from "./projectors.js";
 describe("app event projectors", () => {
   it("exposes app event projector entries in bus subscription order", () => {
     expect(appEventProjectors.map((projector) => projector.event.type)).toEqual([
-      "commands.started.internal",
-      "commands.result.delivered.internal",
-      "commands.failed.internal",
-      "commands.catalog.updated.internal",
-      "interaction.requested.internal",
-      "interaction.resolved.internal",
+      "commands.started",
+      "commands.result.delivered",
+      "commands.failed",
+      "commands.catalog.updated",
+      "interaction.requested",
+      "interaction.resolved",
     ]);
 
     expect(appEventProjectors.map((projector) => projector.event)).toEqual([

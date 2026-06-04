@@ -46,7 +46,7 @@ const interactionResponseSchema = z.union([
 
 export const InteractionEvent = {
   Requested: BusEvent.define(
-    "interaction.requested.internal",
+    "interaction.requested",
     z
       .object({
         request: interactionRequestSchema,
@@ -55,7 +55,7 @@ export const InteractionEvent = {
       .strict(),
   ),
   Resolved: BusEvent.define(
-    "interaction.resolved.internal",
+    "interaction.resolved",
     z
       .object({
         interactionId: z.string(),

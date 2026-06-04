@@ -40,7 +40,7 @@ const commandBaseSchema = z
 
 export const CommandsEvent = {
   Started: BusEvent.define(
-    "commands.started.internal",
+    "commands.started",
     commandBaseSchema
       .extend({
         commandId: z.string(),
@@ -51,7 +51,7 @@ export const CommandsEvent = {
       .strict(),
   ),
   ResultDelivered: BusEvent.define(
-    "commands.result.delivered.internal",
+    "commands.result.delivered",
     commandBaseSchema
       .extend({
         output: commandOutputSchema.optional(),
@@ -60,11 +60,11 @@ export const CommandsEvent = {
       .strict(),
   ),
   Failed: BusEvent.define(
-    "commands.failed.internal",
+    "commands.failed",
     commandBaseSchema.extend({ error: commandErrorSchema }).strict(),
   ),
   CatalogUpdated: BusEvent.define(
-    "commands.catalog.updated.internal",
+    "commands.catalog.updated",
     z
       .object({
         version: z.string(),

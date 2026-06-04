@@ -105,6 +105,25 @@ describe("bus event catalog", () => {
     expect(new Set(actualCatalog).size).toBe(actualCatalog.length);
   });
 
+  it("uses domain event names without redundant internal suffixes for Commands and Interaction", () => {
+    const appProjectedBusEventTypes = [
+      ...eventDefinitions(CommandsEvent),
+      ...eventDefinitions(InteractionEvent),
+    ].map((event) => event.type);
+
+    expect(appProjectedBusEventTypes).toEqual([
+      "commands.started",
+      "commands.result.delivered",
+      "commands.failed",
+      "commands.catalog.updated",
+      "interaction.requested",
+      "interaction.resolved",
+    ]);
+    expect(
+      appProjectedBusEventTypes.every((type) => !type.endsWith(".internal")),
+    ).toBe(true);
+  });
+
   it("documents every event owner, scope, audience, context, and UI visibility", () => {
     const allowedScopes = new Set(["app", "project", "session", "run"]);
     const allowedAudience = new Set([

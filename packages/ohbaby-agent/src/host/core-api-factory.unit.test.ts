@@ -86,12 +86,14 @@ describe("buildCoreAPIImpl", () => {
   it("disposes MCP and persistent database resources", async () => {
     vi.resetModules();
     const closePersistentUiBackendDatabase = vi.fn();
+    const clientDispose = vi.fn(() => Promise.resolve());
     const disposeAll = vi.fn(() => Promise.resolve());
     vi.doMock("../adapters/ui-persistent.js", () => ({
       closePersistentUiBackendDatabase,
       createPersistentUiBackendClient: vi.fn(() => ({
         abortRun: vi.fn(() => Promise.resolve()),
         compactSession: vi.fn(() => Promise.resolve()),
+        dispose: clientDispose,
         executeCommand: vi.fn(() => Promise.resolve()),
         getSnapshot: vi.fn(() => Promise.resolve()),
         listCommands: vi.fn(() => Promise.resolve({ commands: [] })),
@@ -110,6 +112,7 @@ describe("buildCoreAPIImpl", () => {
     const api = buildCoreAPIImpl({});
     await api.dispose();
 
+    expect(clientDispose).toHaveBeenCalledTimes(1);
     expect(disposeAll).toHaveBeenCalledTimes(1);
     expect(closePersistentUiBackendDatabase).toHaveBeenCalledTimes(1);
   });

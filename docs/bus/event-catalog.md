@@ -4,12 +4,12 @@ Bus is the internal domain event bus. This catalog records scope, required conte
 
 | Event | Owner | Scope | Audience | Frequency | Required context | Context status | UI visible | Decision |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| commands.started.internal | Commands | app | ui-projection, daemon, tests | medium | commandRunId, clientInvocationId, timestamp | complete | via-projector | Projected by Phase 1A app event projectors. |
-| commands.result.delivered.internal | Commands | app | ui-projection, daemon, tests | medium | commandRunId, clientInvocationId, timestamp | complete | via-projector | Projected by Phase 1A app event projectors. |
-| commands.failed.internal | Commands | app | ui-projection, daemon, tests | low | commandRunId, clientInvocationId, timestamp | complete | via-projector | Projected by Phase 1A app event projectors. |
-| commands.catalog.updated.internal | Commands | app | ui-projection, daemon, tests | low | version, timestamp | complete | via-projector | Projected by Phase 1A app event projectors. |
-| interaction.requested.internal | Interaction | app | ui-projection, daemon, tests | medium | request.interactionId, request.commandRunId, timestamp | complete | via-projector | Projected by Phase 1A app event projectors. |
-| interaction.resolved.internal | Interaction | app | ui-projection, daemon, tests | medium | interactionId, commandRunId, timestamp | complete | via-projector | Projected by Phase 1A app event projectors. |
+| commands.started | Commands | app | ui-projection, daemon, tests | medium | commandRunId, clientInvocationId, timestamp | complete | via-projector | Projected by Phase 1A app event projectors. |
+| commands.result.delivered | Commands | app | ui-projection, daemon, tests | medium | commandRunId, clientInvocationId, timestamp | complete | via-projector | Projected by Phase 1A app event projectors. |
+| commands.failed | Commands | app | ui-projection, daemon, tests | low | commandRunId, clientInvocationId, timestamp | complete | via-projector | Projected by Phase 1A app event projectors. |
+| commands.catalog.updated | Commands | app | ui-projection, daemon, tests | low | version, timestamp | complete | via-projector | Projected by Phase 1A app event projectors. |
+| interaction.requested | Interaction | app | ui-projection, daemon, tests | medium | request.interactionId, request.commandRunId, timestamp | complete | via-projector | Projected by Phase 1A app event projectors. |
+| interaction.resolved | Interaction | app | ui-projection, daemon, tests | medium | interactionId, commandRunId, timestamp | complete | via-projector | Projected by Phase 1A app event projectors. |
 | permission.mode.changed | Permission | app | ui-projection, tests | low | current, previous | complete | yes | Stateful in-process projection publishes permission.updated. |
 | permission.level.changed | Permission | app | ui-projection, tests | low | current, previous | complete | yes | Stateful in-process projection publishes permission.updated. |
 | permission.rule.added | Permission | session | ui-projection, tests | low | sessionId, rule | complete | yes | Stateful in-process projection publishes permission.updated. |

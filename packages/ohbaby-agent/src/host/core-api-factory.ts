@@ -84,7 +84,11 @@ export function buildCoreAPIImpl(
     },
     async dispose(): Promise<void> {
       try {
-        await McpManager.disposeAll();
+        try {
+          await client.dispose();
+        } finally {
+          await McpManager.disposeAll();
+        }
       } finally {
         closePersistentUiBackendDatabase();
       }

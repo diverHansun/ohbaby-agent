@@ -29,7 +29,10 @@ import {
 } from "../snapshot/index.js";
 import type { SnapshotHookExecutorOptions } from "../snapshot/index.js";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
-import type { InProcessUiBackendOptions } from "./ui-inprocess.js";
+import type {
+  InProcessUiBackendClient,
+  InProcessUiBackendOptions,
+} from "./ui-inprocess.js";
 import {
   createDatabaseUiAppStateStore,
   createPersistentUiStateStore,
@@ -50,6 +53,10 @@ export interface PersistentUiBackendOptions extends Omit<
   readonly hookExecutor?: HookExecutor;
   readonly snapshotService?: SnapshotService;
   readonly storageRoot?: string;
+}
+
+export interface PersistentUiBackendClient extends UiBackendClient {
+  dispose(): Promise<void> | void;
 }
 
 function numericNow(now?: () => Date): () => number {
@@ -289,14 +296,17 @@ function createSnapshotExecutor(input: {
 }
 
 function withStartupRecovery(
-  client: UiBackendClient,
+  client: InProcessUiBackendClient,
   recovery: Promise<unknown>,
-): UiBackendClient {
+): PersistentUiBackendClient {
   async function ready(): Promise<void> {
     await recovery;
   }
 
   return {
+    dispose(): ReturnType<InProcessUiBackendClient["dispose"]> {
+      client.dispose();
+    },
     async getSnapshot(): ReturnType<UiBackendClient["getSnapshot"]> {
       await ready();
       return client.getSnapshot();
@@ -374,7 +384,7 @@ function createPersistentProjectResolver(
 
 export function createPersistentUiBackendClient(
   options: PersistentUiBackendOptions = {},
-): UiBackendClient {
+): PersistentUiBackendClient {
   const now = numericNow(options.now);
   initDatabase({ dbPath: options.dbPath, now });
   const db = getDatabase();

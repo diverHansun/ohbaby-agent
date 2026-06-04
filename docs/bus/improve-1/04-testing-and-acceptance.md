@@ -43,10 +43,7 @@ describe("app event projectors", () => {
 - optional 字段为 `undefined` 时不会进入 stream payload。
 - 输入 payload 不被 mutate。
 
-`CommandsEvent.CatalogUpdated` 当前 daemon 已订阅，但 `ui-inprocess` 尚未订阅。Phase 1A 实施时必须明确选择：
-
-1. `command.catalog.updated` 同时进入 in-process UI event handlers，并补 contract 测试。
-2. mapper 共享，但 in-process target 暂不订阅该 projector，并在测试中记录 daemon-only 现状。
+`CommandsEvent.CatalogUpdated` 已选择进入 in-process UI event handlers；daemon 与 `ui-inprocess` 共享同一套 projector/subscription helper。
 
 ### 2.2 订阅集成测试
 
@@ -81,6 +78,7 @@ daemon 的 `eventDefinitions` 通用透传必须被删除或改成显式 allowli
 - `runtime/daemon/app-events.unit.test.ts` 应验证 daemon app adapter 使用共享 projector，并覆盖 Commands + Interaction app stream 输出。
 - `runtime/daemon/bootstrap.integration.test.ts` 应只注入 `startAppEventAdapter`，启动/停止顺序不再包含 command adapter。
 - `ui-inprocess` 中 Commands/Interaction 的重复 `bus.subscribe` 分支应消失。
+- `ui-inprocess` client 的 `dispose()` 应释放 app event projector 与 permission projection 的 Bus 订阅。
 - `runtime/daemon/app-events.ts` 是 daemon 侧唯一 app event projection adapter；不再保留 `command-events.ts` 历史命名适配器。
 
 ---

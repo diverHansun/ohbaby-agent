@@ -98,13 +98,13 @@ describe("subscribeAppEventProjectors", () => {
 
     expect(localErrors).toEqual([
       {
-        eventType: "commands.failed.internal",
+        eventType: "commands.failed",
         error: targetError,
       },
     ]);
     expect(subscriberErrors).toEqual([
       {
-        eventType: "commands.failed.internal",
+        eventType: "commands.failed",
         error: targetError,
       },
     ]);

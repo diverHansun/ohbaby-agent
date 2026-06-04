@@ -13,7 +13,7 @@ import type {
   ChatCompletionMessage,
   LLMClientInstance,
 } from "../core/llm-client/index.js";
-import { createBus } from "../bus/index.js";
+import { createBus, type BusInstance } from "../bus/index.js";
 import { CommandsEvent } from "../commands/index.js";
 import {
   createInMemoryMessageStore,
@@ -123,6 +123,37 @@ function createFakeLLMClient(
       interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
+    },
+  };
+}
+
+function createCountingBus(): {
+  readonly activeSubscriptions: () => number;
+  readonly bus: BusInstance;
+} {
+  const base = createBus();
+  let activeSubscriptions = 0;
+
+  return {
+    activeSubscriptions: () => activeSubscriptions,
+    bus: {
+      publish(event, payload): void {
+        base.publish(event, payload);
+      },
+      subscribe(event, callback) {
+        activeSubscriptions += 1;
+        const unsubscribe = base.subscribe(event, callback);
+        let disposed = false;
+
+        return () => {
+          if (disposed) {
+            return;
+          }
+          disposed = true;
+          activeSubscriptions -= 1;
+          unsubscribe();
+        };
+      },
     },
   };
 }
@@ -718,6 +749,11 @@ function waitForUiEvent<T extends UiEvent>(
       resolve(event);
     });
   });
+}
+
+async function flushAsyncProjection(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 function withTimeout<T>(
@@ -3249,6 +3285,53 @@ describe("createInProcessUiBackendClient", () => {
         version: "v1",
       },
     ]);
+  });
+
+  it("disposes bus-backed app and permission event subscriptions", async () => {
+    const { activeSubscriptions, bus } = createCountingBus();
+    const client = createInProcessUiBackendClient({
+      bus,
+      llmClient: createFakeLLMClient([]),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    bus.publish(CommandsEvent.CatalogUpdated, {
+      reason: "registered",
+      timestamp: 123,
+      version: "v1",
+    });
+    bus.publish(PermissionEvent.ModeChanged, {
+      current: "plan",
+      previous: "auto",
+    });
+
+    expect(events.map((event) => event.type)).toEqual([
+      "command.catalog.updated",
+      "permission.updated",
+    ]);
+    expect(activeSubscriptions()).toBeGreaterThan(0);
+
+    client.dispose();
+    expect(activeSubscriptions()).toBe(0);
+    client.dispose();
+    expect(activeSubscriptions()).toBe(0);
+    events.length = 0;
+
+    bus.publish(CommandsEvent.CatalogUpdated, {
+      reason: "registered",
+      timestamp: 124,
+      version: "v2",
+    });
+    bus.publish(PermissionEvent.ModeChanged, {
+      current: "auto",
+      previous: "plan",
+    });
+    await flushAsyncProjection();
+
+    expect(events).toEqual([]);
   });
 
   it("reports the single active model through /models without leaking api keys", async () => {

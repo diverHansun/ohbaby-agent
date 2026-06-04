@@ -17,7 +17,7 @@ import type {
   UiSnapshot,
   UiSession,
 } from "ohbaby-sdk";
-import type { BusInstance } from "../bus/index.js";
+import type { BusInstance, BusUnsubscribe } from "../bus/index.js";
 import { createLLMClient } from "../core/llm-client/index.js";
 import type {
   CreateLLMClientOptions,
@@ -117,6 +117,10 @@ export interface InProcessUiBackendOptions {
   readonly runLedger?: RunLedger;
   readonly streamBridge?: StreamBridge;
   readonly workdir?: string;
+}
+
+export interface InProcessUiBackendClient extends UiBackendClient {
+  dispose(): void;
 }
 
 function isSnapshot(
@@ -248,7 +252,7 @@ function toCorePermissionResponse(
 
 export function createInProcessUiBackendClient(
   optionsOrSnapshot: UiSnapshot | InProcessUiBackendOptions = EMPTY_SNAPSHOT,
-): UiBackendClient {
+): InProcessUiBackendClient {
   const options = isSnapshot(optionsOrSnapshot)
     ? { initialSnapshot: optionsOrSnapshot }
     : optionsOrSnapshot;
@@ -275,6 +279,7 @@ export function createInProcessUiBackendClient(
     });
   const interactionBroker = createInteractionBroker({ bus });
   const handlers = new Set<UiEventHandler>();
+  const busSubscriptions: BusUnsubscribe[] = [];
   const sessionIds = createIdFactory(
     "session",
     initialSnapshot.sessions.map((session) => session.id),
@@ -1009,33 +1014,42 @@ export function createInProcessUiBackendClient(
     getProjectRoot: resolveProjectRoot,
   });
 
-  subscribeAppEventProjectors({
-    bus,
-    target(projected) {
-      publish(projected.uiEvent);
-    },
-  });
-  startPermissionEventProjection({
-    bus,
-    currentPermissionState,
-    getActiveRunId: () => activeRunId,
-    now: () => Date.now(),
-    pendingPermissionSessions,
-    publish,
-    reconcileRuntimeStatus,
-    stateStore,
-    onAsyncError(error): void {
-      const message = getErrorMessage(error);
-      publishNotice({
-        key: `permission:projection:${message}`,
-        level: "error",
-        message: `Permission event projection failed: ${message}`,
-        source: "permission",
-        title: "Permission update failed",
-      });
-    },
-  });
+  busSubscriptions.push(
+    subscribeAppEventProjectors({
+      bus,
+      target(projected) {
+        publish(projected.uiEvent);
+      },
+    }),
+    startPermissionEventProjection({
+      bus,
+      currentPermissionState,
+      getActiveRunId: () => activeRunId,
+      now: () => Date.now(),
+      pendingPermissionSessions,
+      publish,
+      reconcileRuntimeStatus,
+      stateStore,
+      onAsyncError(error): void {
+        const message = getErrorMessage(error);
+        publishNotice({
+          key: `permission:projection:${message}`,
+          level: "error",
+          message: `Permission event projection failed: ${message}`,
+          source: "permission",
+          title: "Permission update failed",
+        });
+      },
+    }),
+  );
   return {
+    dispose(): void {
+      for (const unsubscribe of busSubscriptions.splice(0)) {
+        unsubscribe();
+      }
+      handlers.clear();
+    },
+
     getSnapshot(): Promise<UiSnapshot> {
       return readSnapshotWithPermission();
     },
