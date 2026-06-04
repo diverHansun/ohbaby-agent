@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { BusEvent, createBus } from "../../bus/index.js";
+import { CommandsEvent } from "../../commands/index.js";
 import { createHostLocalSandboxManager } from "../../adapters/ui-runtime/host-local-environment.js";
 import type {
   LifecycleEvent,
@@ -155,6 +156,61 @@ describe("bootstrapRuntime", () => {
 
     expect(first.bus).not.toBe(second.bus);
     expect(provided.bus).toBe(providedBus);
+  });
+
+  it("isolates real app event projections between daemon instances", async () => {
+    const firstCalls: string[] = [];
+    const secondCalls: string[] = [];
+    const firstBridge = new RecordingStreamBridge(firstCalls);
+    const secondBridge = new RecordingStreamBridge(secondCalls);
+    const first = bootstrapRuntime({
+      runManager: new RecordingRunManager(firstCalls),
+      streamBridge: firstBridge,
+    });
+    const second = bootstrapRuntime({
+      runManager: new RecordingRunManager(secondCalls),
+      streamBridge: secondBridge,
+    });
+
+    await first.start();
+    await second.start();
+
+    first.bus.publish(CommandsEvent.CatalogUpdated, {
+      reason: "first-runtime",
+      timestamp: 1,
+      version: "catalog_first",
+    });
+    second.bus.publish(CommandsEvent.CatalogUpdated, {
+      reason: "second-runtime",
+      timestamp: 2,
+      version: "catalog_second",
+    });
+
+    expect(firstBridge.published).toEqual([
+      {
+        scope: "app",
+        event: "command.catalog.updated",
+        data: {
+          reason: "first-runtime",
+          timestamp: 1,
+          version: "catalog_first",
+        },
+      },
+    ]);
+    expect(secondBridge.published).toEqual([
+      {
+        scope: "app",
+        event: "command.catalog.updated",
+        data: {
+          reason: "second-runtime",
+          timestamp: 2,
+          version: "catalog_second",
+        },
+      },
+    ]);
+
+    await first.stop();
+    await second.stop();
   });
 
   it("starts and stops daemon-owned components in documented order", async () => {
