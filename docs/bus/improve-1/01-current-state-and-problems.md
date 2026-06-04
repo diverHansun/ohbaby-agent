@@ -1,5 +1,7 @@
 # Bus 模块优化 — 1. 代码/架构现状与问题分析
 
+> Implementation note: this file records the pre-optimization baseline that motivated Phase 1-3. The current implementation has removed the global `Bus` singleton export and production fallback; see `docs/bus/event-catalog.md` and `03-recommended-design-and-plan.md` for the post-Phase 3 decision.
+
 > 基于 SWE 审阅模式（learn-swe-before-implement），对 bus 模块及其在系统中的使用现状进行全面分析。
 
 ---

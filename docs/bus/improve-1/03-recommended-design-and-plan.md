@@ -275,6 +275,19 @@ Phase 3 完成后再判断是否需要 per-session bus：
 - 如果串话测试暴露高风险，再进入 Phase 4。
 - 如果只有某类事件高风险，优先做局部 session-scoped event source，而不是全系统 per-session bus。
 
+Phase 3 conclusion: per-backend bus is sufficient.
+
+Reason:
+- All direct UI projection paths are explicit: Commands and Interaction go through `appEventProjectors`, and Permission goes through the stateful in-process projection.
+- Known ToolScheduler and Memory context gaps are not projected to UI. They are documented in `docs/bus/event-catalog.md` and guarded by `packages/ohbaby-agent/src/bus/event-catalog.contract.test.ts`.
+- Run-scoped user-visible events remain isolated by `StreamBridge` `run/{runId}` scope.
+- `permission.updated` remains run-visible only through stateful projector context; `callId` fallback is legacy compatibility and is not treated as Bus payload scope.
+
+Decision:
+- Do not implement Phase 4 now.
+- Reopen Phase 4 only if new tests show cross-session leakage or projector filtering becomes complex.
+- If Memory or ToolScheduler events later need UI visibility, first update their payload/context contract or design a local session-scoped event source; do not patch direct Bus-to-UI forwarding into projectors.
+
 ---
 
 ## 五、Phase 4（可选）：Session-Scoped Event Source

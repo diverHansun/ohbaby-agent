@@ -1,5 +1,7 @@
 # bus 模块 dfd-interface.md
 
+> Legacy note: this document predates the Phase 2 cleanup. Examples that import or subscribe through a global `Bus` singleton are historical only; current production code should use `createBus()`/DI plus explicit app-event projectors.
+
 本文档描述 `bus` 模块的数据流与对外接口。数据流优先，接口从属于数据流。
 
 ---

@@ -244,6 +244,19 @@ Phase 3 最终必须产出结论：
 | 某类事件需要更强隔离 | 做局部 session-scoped event source |
 | 全局过滤复杂且高风险 | 启动 Phase 4 per-session bus 设计 |
 
+Phase 3 conclusion: per-backend bus is sufficient.
+
+Evidence:
+- `packages/ohbaby-agent/src/bus/event-catalog.contract.test.ts` records all 29 Bus events exactly once and keeps `docs/bus/event-catalog.md` synchronized with source.
+- Known context gaps are limited to `MemoryEvent.Added/Updated/Removed` and `ToolSchedulerEvent.*`; these events have `uiVisible: "no"`.
+- Commands and Interaction app visibility is only `via-projector`.
+- Permission UI visibility is stateful and explicitly depends on projector context, including `projector.activeRunId`.
+- Run-visible Message/ToolScheduler UI behavior remains on `StreamBridge` `run/{runId}`, not on Bus projectors.
+
+Decision:
+- Phase 4 is not implemented in this optimization.
+- Future work must add a failing contract or leakage test before introducing per-session bus or local session-scoped event source.
+
 ---
 
 ## 六、回归命令
@@ -274,5 +287,5 @@ Phase 1-3 完成后：
 3. Permission stateful projection 从 `ui-inprocess.ts` 中分离，行为不变。
 4. 生产路径不依赖全局 `Bus` fallback。
 5. 事件目录明确记录 scope、audience 和 required context。
-6. 串话测试证明 per-backend bus 当前是否足够。
-7. 是否进入 per-session bus 有测试证据支持，而不是架构偏好驱动。
+6. 事件目录与 contract test 证明 known gaps 不直接进入 UI projection。
+7. per-backend bus 当前足够，Phase 4 不实施；是否进入 per-session bus 必须由新的失败测试支持，而不是架构偏好驱动。

@@ -1,5 +1,7 @@
 # bus 模块 test.md
 
+> Legacy note: this document predates the Phase 2 cleanup. Examples that import or mock a global `Bus` singleton are historical only; current code should use `createBus()` and pass a `BusInstance` explicitly.
+
 本文档描述 `bus` 模块的测试策略与验证重点。测试围绕职责，而不是代码结构。
 
 ---
