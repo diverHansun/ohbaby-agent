@@ -1,12 +1,12 @@
-import { CommandsEvent } from "../commands/index.js";
-import { ContextEvent } from "../core/context/index.js";
-import { MemoryEvent } from "../core/memory/index.js";
-import { MessageEvent } from "../core/message/index.js";
-import { ToolSchedulerEvent } from "../core/tool-scheduler/index.js";
-import { PermissionEvent } from "../permission/index.js";
-import { InteractionEvent } from "../runtime/interaction-broker/index.js";
-import { SessionEvent } from "../services/session/index.js";
-import type { BusEventDefinition } from "./index.js";
+import { CommandsEvent } from "../commands/events.js";
+import { ContextEvent } from "../core/context/events.js";
+import { MemoryEvent } from "../core/memory/events.js";
+import { MessageEvent } from "../core/message/events.js";
+import { ToolSchedulerEvent } from "../core/tool-scheduler/events.js";
+import { PermissionEvent } from "../permission/events.js";
+import { InteractionEvent } from "../runtime/interaction-broker/events.js";
+import { SessionEvent } from "../services/session/events.js";
+import type { BusEventDefinition } from "./bus-event.js";
 
 export type BusEventScope = "app" | "project" | "run" | "session";
 export type BusEventAudience = "daemon" | "domain" | "tests" | "ui-projection";
@@ -26,36 +26,23 @@ export interface BusEventCatalogEntry {
   readonly decision: string;
 }
 
+type BusEventNamespace = Record<string, BusEventDefinition>;
+
+function eventDefinitions<Events extends BusEventNamespace>(
+  events: Events,
+): readonly Events[keyof Events][] {
+  return Object.values(events) as Events[keyof Events][];
+}
+
 export const allBusEvents = [
-  CommandsEvent.Started,
-  CommandsEvent.ResultDelivered,
-  CommandsEvent.Failed,
-  CommandsEvent.CatalogUpdated,
-  InteractionEvent.Requested,
-  InteractionEvent.Resolved,
-  PermissionEvent.ModeChanged,
-  PermissionEvent.LevelChanged,
-  PermissionEvent.RuleAdded,
-  PermissionEvent.Updated,
-  PermissionEvent.Replied,
-  MessageEvent.Updated,
-  MessageEvent.Removed,
-  MessageEvent.PartUpdated,
-  MessageEvent.PartRemoved,
-  ContextEvent.Compressed,
-  ContextEvent.Pruned,
-  ContextEvent.TurnPrepared,
-  ContextEvent.CompactSkipped,
-  MemoryEvent.Added,
-  MemoryEvent.Updated,
-  MemoryEvent.Removed,
-  MemoryEvent.Refreshed,
-  ToolSchedulerEvent.StatusChanged,
-  ToolSchedulerEvent.ExecutionStarted,
-  ToolSchedulerEvent.ExecutionCompleted,
-  SessionEvent.Created,
-  SessionEvent.Updated,
-  SessionEvent.Removed,
+  ...eventDefinitions(CommandsEvent),
+  ...eventDefinitions(InteractionEvent),
+  ...eventDefinitions(PermissionEvent),
+  ...eventDefinitions(MessageEvent),
+  ...eventDefinitions(ContextEvent),
+  ...eventDefinitions(MemoryEvent),
+  ...eventDefinitions(ToolSchedulerEvent),
+  ...eventDefinitions(SessionEvent),
 ] as const;
 
 export const busEventCatalog: readonly BusEventCatalogEntry[] = [
@@ -173,11 +160,12 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
       "info.messageId",
       "info.callId",
       "info.id",
+      "projector.activeRunId",
     ],
     contextStatus: "complete",
     uiVisible: "yes",
     decision:
-      "Stateful in-process projection publishes permission.requested; callId fallback remains legacy.",
+      "Stateful in-process projection supplies active run context for permission.requested; no-active-run callId fallback remains legacy and is not bus payload scope.",
   },
   {
     event: PermissionEvent.Replied,

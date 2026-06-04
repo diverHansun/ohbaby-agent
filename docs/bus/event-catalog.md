@@ -13,7 +13,7 @@ Bus is the internal domain event bus. This catalog records scope, required conte
 | permission.mode.changed | Permission | app | ui-projection, tests | low | current, previous | complete | yes | Stateful in-process projection publishes permission.updated. |
 | permission.level.changed | Permission | app | ui-projection, tests | low | current, previous | complete | yes | Stateful in-process projection publishes permission.updated. |
 | permission.rule.added | Permission | session | ui-projection, tests | low | sessionId, rule | complete | yes | Stateful in-process projection publishes permission.updated. |
-| permission.updated | Permission | run | ui-projection, tests | medium | info.sessionId, info.messageId, info.callId, info.id | complete | yes | Stateful in-process projection publishes permission.requested; callId fallback remains legacy. |
+| permission.updated | Permission | run | ui-projection, tests | medium | info.sessionId, info.messageId, info.callId, info.id, projector.activeRunId | complete | yes | Stateful in-process projection supplies active run context for permission.requested; no-active-run callId fallback remains legacy and is not bus payload scope. |
 | permission.replied | Permission | run | ui-projection, tests | medium | sessionId, permissionId, callId | complete | yes | Stateful in-process projection publishes permission.resolved. |
 | message.updated | Message | session | domain, tests | medium | info.sessionId, info.id | complete | no | Do not project directly because SDK has a different message.updated payload. |
 | message.removed | Message | session | domain, tests | low | sessionId, messageId | complete | no | Internal domain event only. |

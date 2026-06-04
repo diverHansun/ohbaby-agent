@@ -1,50 +1,19 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { CommandsEvent } from "../commands/index.js";
-import { ContextEvent } from "../core/context/index.js";
-import { MemoryEvent } from "../core/memory/index.js";
-import { MessageEvent } from "../core/message/index.js";
-import { ToolSchedulerEvent } from "../core/tool-scheduler/index.js";
-import { PermissionEvent } from "../permission/index.js";
-import { InteractionEvent } from "../runtime/interaction-broker/index.js";
-import { SessionEvent } from "../services/session/index.js";
+import { CommandsEvent } from "../commands/events.js";
+import { ContextEvent } from "../core/context/events.js";
+import { MemoryEvent } from "../core/memory/events.js";
+import { MessageEvent } from "../core/message/events.js";
+import { ToolSchedulerEvent } from "../core/tool-scheduler/events.js";
+import { PermissionEvent } from "../permission/events.js";
+import { InteractionEvent } from "../runtime/interaction-broker/events.js";
+import { SessionEvent } from "../services/session/events.js";
+import type { BusEventDefinition } from "./bus-event.js";
 import {
   allBusEvents,
   busEventCatalog,
   type BusEventCatalogEntry,
 } from "./event-catalog.js";
-
-const expectedBusEvents = [
-  CommandsEvent.Started,
-  CommandsEvent.ResultDelivered,
-  CommandsEvent.Failed,
-  CommandsEvent.CatalogUpdated,
-  InteractionEvent.Requested,
-  InteractionEvent.Resolved,
-  PermissionEvent.ModeChanged,
-  PermissionEvent.LevelChanged,
-  PermissionEvent.RuleAdded,
-  PermissionEvent.Updated,
-  PermissionEvent.Replied,
-  MessageEvent.Updated,
-  MessageEvent.Removed,
-  MessageEvent.PartUpdated,
-  MessageEvent.PartRemoved,
-  ContextEvent.Compressed,
-  ContextEvent.Pruned,
-  ContextEvent.TurnPrepared,
-  ContextEvent.CompactSkipped,
-  MemoryEvent.Added,
-  MemoryEvent.Updated,
-  MemoryEvent.Removed,
-  MemoryEvent.Refreshed,
-  ToolSchedulerEvent.StatusChanged,
-  ToolSchedulerEvent.ExecutionStarted,
-  ToolSchedulerEvent.ExecutionCompleted,
-  SessionEvent.Created,
-  SessionEvent.Updated,
-  SessionEvent.Removed,
-] as const;
 
 const catalogFields = [
   "audience",
@@ -57,6 +26,27 @@ const catalogFields = [
   "scope",
   "uiVisible",
 ].sort();
+
+type BusEventNamespace = Record<string, BusEventDefinition>;
+
+function eventDefinitions<Events extends BusEventNamespace>(
+  events: Events,
+): readonly Events[keyof Events][] {
+  return Object.values(events) as Events[keyof Events][];
+}
+
+function expectedBusEvents(): readonly BusEventDefinition[] {
+  return [
+    ...eventDefinitions(CommandsEvent),
+    ...eventDefinitions(InteractionEvent),
+    ...eventDefinitions(PermissionEvent),
+    ...eventDefinitions(MessageEvent),
+    ...eventDefinitions(ContextEvent),
+    ...eventDefinitions(MemoryEvent),
+    ...eventDefinitions(ToolSchedulerEvent),
+    ...eventDefinitions(SessionEvent),
+  ];
+}
 
 function asDocRow(entry: BusEventCatalogEntry): readonly string[] {
   return [
@@ -105,7 +95,7 @@ function readDocRows(): readonly (readonly string[])[] {
 
 describe("bus event catalog", () => {
   it("contains every known Bus event exactly once", () => {
-    const expected = expectedBusEvents.map((event) => event.type);
+    const expected = expectedBusEvents().map((event) => event.type);
     const actualEvents = allBusEvents.map((event) => event.type);
     const actualCatalog = busEventCatalog.map((entry) => entry.event.type);
 
@@ -174,6 +164,25 @@ describe("bus event catalog", () => {
     );
 
     expect(directlyVisible).toEqual([]);
+  });
+
+  it("documents permission run projection context as stateful projector context", () => {
+    const permissionUpdated = busEventCatalog.find(
+      (entry) => entry.event.type === PermissionEvent.Updated.type,
+    );
+
+    expect(permissionUpdated).toMatchObject({
+      contextStatus: "complete",
+      scope: "run",
+      uiVisible: "yes",
+    });
+    expect(permissionUpdated?.requiredContext).toContain(
+      "projector.activeRunId",
+    );
+    expect(permissionUpdated?.decision).toContain(
+      "Stateful in-process projection supplies active run context",
+    );
+    expect(permissionUpdated?.decision).toContain("not bus payload scope");
   });
 
   it("keeps the human-readable catalog synchronized with the source catalog", () => {
