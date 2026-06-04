@@ -1,5 +1,5 @@
 import type { UiEvent } from "ohbaby-sdk";
-import type { BusEventPayload } from "../../bus/index.js";
+import type { BusEventDefinition, BusEventPayload } from "../../bus/index.js";
 import { CommandsEvent } from "../../commands/index.js";
 import { InteractionEvent } from "../../runtime/interaction-broker/index.js";
 
@@ -28,6 +28,14 @@ export interface AppStreamEvent<
 > {
   readonly type: Type;
   readonly data: Omit<AppProjectedUiEventFor<Type>, "type">;
+}
+
+export interface AppEventProjector<
+  Event extends BusEventDefinition = BusEventDefinition,
+  Type extends AppProjectedEventType = AppProjectedEventType,
+> {
+  readonly event: Event;
+  project(payload: BusEventPayload<Event>): ProjectedAppEvent<Type>;
 }
 
 type CommandStartedPayload = BusEventPayload<typeof CommandsEvent.Started>;
@@ -140,18 +148,24 @@ function projectInteractionResolved(
   });
 }
 
-export const appEventProjectors = {
-  commands: {
-    started: projectCommandStarted,
-    resultDelivered: projectCommandResultDelivered,
-    failed: projectCommandFailed,
-    catalogUpdated: projectCommandCatalogUpdated,
-  },
-  interaction: {
-    requested: projectInteractionRequested,
-    resolved: projectInteractionResolved,
-  },
-} as const;
+function appEventProjector<
+  Event extends BusEventDefinition,
+  Type extends AppProjectedEventType,
+>(
+  event: Event,
+  project: (payload: BusEventPayload<Event>) => ProjectedAppEvent<Type>,
+): AppEventProjector<Event, Type> {
+  return { event, project };
+}
+
+export const appEventProjectors = [
+  appEventProjector(CommandsEvent.Started, projectCommandStarted),
+  appEventProjector(CommandsEvent.ResultDelivered, projectCommandResultDelivered),
+  appEventProjector(CommandsEvent.Failed, projectCommandFailed),
+  appEventProjector(CommandsEvent.CatalogUpdated, projectCommandCatalogUpdated),
+  appEventProjector(InteractionEvent.Requested, projectInteractionRequested),
+  appEventProjector(InteractionEvent.Resolved, projectInteractionResolved),
+] as const;
 
 export function toAppStreamEvent<Type extends AppProjectedEventType>(
   projectedEvent: ProjectedAppEvent<Type>,

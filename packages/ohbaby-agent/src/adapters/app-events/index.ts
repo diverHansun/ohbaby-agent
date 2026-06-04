@@ -1,6 +1,7 @@
 export {
   appEventProjectors,
   toAppStreamEvent,
+  type AppEventProjector,
   type AppProjectedEventType,
   type AppProjectedUiEvent,
   type AppProjectedUiEventFor,

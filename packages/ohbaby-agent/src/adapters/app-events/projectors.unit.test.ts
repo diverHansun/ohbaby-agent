@@ -1,10 +1,41 @@
 import { describe, expect, it } from "vitest";
+import { CommandsEvent } from "../../commands/index.js";
+import { InteractionEvent } from "../../runtime/interaction-broker/index.js";
 import { appEventProjectors, toAppStreamEvent } from "./projectors.js";
 
 describe("app event projectors", () => {
+  it("exposes app event projector entries in bus subscription order", () => {
+    expect(appEventProjectors.map((projector) => projector.event.type)).toEqual([
+      "commands.started.internal",
+      "commands.result.delivered.internal",
+      "commands.failed.internal",
+      "commands.catalog.updated.internal",
+      "interaction.requested.internal",
+      "interaction.resolved.internal",
+    ]);
+
+    expect(appEventProjectors.map((projector) => projector.event)).toEqual([
+      CommandsEvent.Started,
+      CommandsEvent.ResultDelivered,
+      CommandsEvent.Failed,
+      CommandsEvent.CatalogUpdated,
+      InteractionEvent.Requested,
+      InteractionEvent.Resolved,
+    ]);
+  });
+
   it("projects command and interaction bus events to SDK UI events", () => {
+    const [
+      commandStarted,
+      commandResultDelivered,
+      commandFailed,
+      commandCatalogUpdated,
+      interactionRequested,
+      interactionResolved,
+    ] = appEventProjectors;
+
     expect(
-      appEventProjectors.commands.started({
+      commandStarted.project({
         clientInvocationId: "inv_1",
         commandId: "status",
         commandRunId: "cmd_1",
@@ -30,7 +61,7 @@ describe("app event projectors", () => {
     });
 
     expect(
-      appEventProjectors.commands.resultDelivered({
+      commandResultDelivered.project({
         clientInvocationId: "inv_1",
         commandRunId: "cmd_1",
         output: { kind: "text", text: "OK" },
@@ -50,7 +81,7 @@ describe("app event projectors", () => {
     });
 
     expect(
-      appEventProjectors.commands.failed({
+      commandFailed.project({
         clientInvocationId: "inv_2",
         commandRunId: "cmd_2",
         error: { code: "INVALID_ARGS", message: "bad args" },
@@ -68,7 +99,7 @@ describe("app event projectors", () => {
     });
 
     expect(
-      appEventProjectors.commands.catalogUpdated({
+      commandCatalogUpdated.project({
         version: "v1",
         reason: "registered",
         timestamp: 4,
@@ -84,7 +115,7 @@ describe("app event projectors", () => {
     });
 
     expect(
-      appEventProjectors.interaction.requested({
+      interactionRequested.project({
         request: {
           clientInvocationId: "inv_3",
           commandRunId: "cmd_3",
@@ -110,7 +141,7 @@ describe("app event projectors", () => {
     });
 
     expect(
-      appEventProjectors.interaction.resolved({
+      interactionResolved.project({
         clientInvocationId: "inv_3",
         commandRunId: "cmd_3",
         interactionId: "interaction_1",
@@ -131,9 +162,12 @@ describe("app event projectors", () => {
   });
 
   it("converts projected UI events to stream events without type or undefined fields", () => {
+    const [, commandResultDelivered, , commandCatalogUpdated, , interactionResolved] =
+      appEventProjectors;
+
     expect(
       toAppStreamEvent(
-        appEventProjectors.commands.resultDelivered({
+        commandResultDelivered.project({
           clientInvocationId: "inv_1",
           commandRunId: "cmd_1",
           timestamp: 2,
@@ -150,7 +184,7 @@ describe("app event projectors", () => {
 
     expect(
       toAppStreamEvent(
-        appEventProjectors.commands.catalogUpdated({
+        commandCatalogUpdated.project({
           version: "v1",
           timestamp: 4,
         }),
@@ -165,7 +199,7 @@ describe("app event projectors", () => {
 
     expect(
       toAppStreamEvent(
-        appEventProjectors.interaction.resolved({
+        interactionResolved.project({
           commandRunId: "cmd_3",
           interactionId: "interaction_1",
           response: { kind: "accepted", choiceId: "yes" },
