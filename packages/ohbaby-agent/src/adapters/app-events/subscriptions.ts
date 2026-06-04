@@ -1,6 +1,12 @@
-import type { BusInstance, BusUnsubscribe } from "../../bus/index.js";
+import type {
+  BusEventDefinition,
+  BusEventPayload,
+  BusInstance,
+  BusUnsubscribe,
+} from "../../bus/index.js";
 import {
   appEventProjectors,
+  type AppProjectedEventType,
   type ProjectedAppEvent,
 } from "./projectors.js";
 
@@ -20,19 +26,82 @@ export function subscribeAppEventProjectors({
   target,
   onError,
 }: SubscribeAppEventProjectorsOptions): BusUnsubscribe {
-  const unsubscribers = appEventProjectors.map((projector) =>
-    bus.subscribe(projector.event, (payload) => {
-      try {
-        target(projector.project(payload as never) as ProjectedAppEvent);
-      } catch (error) {
-        onError?.({ eventType: projector.event.type, error });
-      }
-    }),
-  );
+  const [
+    commandStarted,
+    commandResultDelivered,
+    commandFailed,
+    commandCatalogUpdated,
+    interactionRequested,
+    interactionResolved,
+  ] = appEventProjectors;
+  const unsubscribers = [
+    subscribeProjector(
+      bus,
+      target,
+      onError,
+      commandStarted.event,
+      (payload) => commandStarted.project(payload),
+    ),
+    subscribeProjector(
+      bus,
+      target,
+      onError,
+      commandResultDelivered.event,
+      (payload) => commandResultDelivered.project(payload),
+    ),
+    subscribeProjector(
+      bus,
+      target,
+      onError,
+      commandFailed.event,
+      (payload) => commandFailed.project(payload),
+    ),
+    subscribeProjector(
+      bus,
+      target,
+      onError,
+      commandCatalogUpdated.event,
+      (payload) => commandCatalogUpdated.project(payload),
+    ),
+    subscribeProjector(
+      bus,
+      target,
+      onError,
+      interactionRequested.event,
+      (payload) => interactionRequested.project(payload),
+    ),
+    subscribeProjector(
+      bus,
+      target,
+      onError,
+      interactionResolved.event,
+      (payload) => interactionResolved.project(payload),
+    ),
+  ];
 
   return () => {
     for (const unsubscribe of unsubscribers.splice(0)) {
       unsubscribe();
     }
   };
+}
+
+function subscribeProjector<
+  Event extends BusEventDefinition,
+  Type extends AppProjectedEventType,
+>(
+  bus: BusInstance,
+  target: (event: ProjectedAppEvent) => void,
+  onError: ((error: AppEventProjectorError) => void) | undefined,
+  event: Event,
+  project: (payload: BusEventPayload<Event>) => ProjectedAppEvent<Type>,
+): BusUnsubscribe {
+  return bus.subscribe(event, (payload) => {
+    try {
+      target(project(payload) as unknown as ProjectedAppEvent);
+    } catch (error) {
+      onError?.({ eventType: event.type, error });
+      throw error;
+    }
+  });
 }

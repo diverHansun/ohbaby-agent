@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { BusEvent, createBus } from "../../bus/index.js";
+import { BusEvent, createBus, type BusSubscriberError } from "../../bus/index.js";
 import { CommandsEvent } from "../../commands/index.js";
 import type { ProjectedAppEvent } from "./projectors.js";
 import { subscribeAppEventProjectors } from "./subscriptions.js";
@@ -67,17 +67,23 @@ describe("subscribeAppEventProjectors", () => {
     expect(projectedEvents).toEqual([]);
   });
 
-  it("reports synchronous projector or target errors without throwing through Bus", () => {
-    const bus = createBus();
+  it("observes synchronous projector or target errors and lets Bus report subscriber errors", () => {
+    const subscriberErrors: BusSubscriberError[] = [];
+    const bus = createBus({
+      onSubscriberError(error) {
+        subscriberErrors.push(error);
+      },
+    });
     const targetError = new Error("target failed");
-    const errors: { readonly eventType: string; readonly error: unknown }[] = [];
+    const localErrors: { readonly eventType: string; readonly error: unknown }[] =
+      [];
     subscribeAppEventProjectors({
       bus,
       target: () => {
         throw targetError;
       },
       onError: (error) => {
-        errors.push(error);
+        localErrors.push(error);
       },
     });
 
@@ -90,7 +96,13 @@ describe("subscribeAppEventProjectors", () => {
       });
     }).not.toThrow();
 
-    expect(errors).toEqual([
+    expect(localErrors).toEqual([
+      {
+        eventType: "commands.failed.internal",
+        error: targetError,
+      },
+    ]);
+    expect(subscriberErrors).toEqual([
       {
         eventType: "commands.failed.internal",
         error: targetError,
