@@ -11,7 +11,6 @@ import type {
   UiInteractionResponse,
   UiMessage,
   UiNotice,
-  UiPermissionRequest,
   UiPermissionResponse,
   UiRun,
   UiRunStatus,
@@ -46,13 +45,8 @@ import type {
 import {
   createPermissionManager,
   createPermissionState,
-  isRememberablePermissionPattern,
-  PermissionEvent,
 } from "../permission/index.js";
-import type {
-  PermissionInfo,
-  PermissionResponse as CorePermissionResponse,
-} from "../permission/index.js";
+import type { PermissionResponse as CorePermissionResponse } from "../permission/index.js";
 import { Project } from "../project/index.js";
 import type { AgentManager } from "../agents/index.js";
 import {
@@ -74,7 +68,10 @@ import type { UiStateStore } from "./ui-state/index.js";
 import { createUiRuntimeComposition } from "./ui-runtime/composition.js";
 import { startRunStreamProjection } from "./ui-runtime/run-stream-adapter.js";
 import type { UiRuntimeComposition } from "./ui-runtime/types.js";
-import { subscribeAppEventProjectors } from "./app-events/index.js";
+import {
+  startPermissionEventProjection,
+  subscribeAppEventProjectors,
+} from "./app-events/index.js";
 
 const EMPTY_SNAPSHOT: UiSnapshot = {
   sessions: [],
@@ -231,35 +228,6 @@ function maxMessageTimestamp(
     }
   }
   return latest;
-}
-
-function toUiPermissionRequest(input: {
-  readonly info: PermissionInfo;
-  readonly runId: string;
-}): UiPermissionRequest {
-  const allowAlways =
-    input.info.metadata.rememberable !== false &&
-    isRememberablePermissionPattern(input.info.pattern);
-  return {
-    id: input.info.id,
-    runId: input.runId,
-    title: input.info.title,
-    description: input.info.pattern,
-    choices: [
-      { id: "allow_once", label: "Allow once", intent: "allow" },
-      ...(allowAlways
-        ? [
-            {
-              id: "allow_always",
-              label: "Always allow",
-              intent: "allow",
-            } as const,
-          ]
-        : []),
-      { id: "reject", label: "Reject", intent: "deny" },
-      { id: "cancel", label: "Cancel run", intent: "abort" },
-    ],
-  };
 }
 
 function toCorePermissionResponse(
@@ -520,14 +488,6 @@ export function createInProcessUiBackendClient(
       ...(await stateStore.readSnapshot()),
       permission: currentPermissionState(),
     };
-  }
-
-  function publishPermissionUpdated(): void {
-    publish({
-      type: "permission.updated",
-      permission: currentPermissionState(),
-      timestamp: Date.now(),
-    });
   }
 
   async function abortPromptRun(runId?: string): Promise<boolean> {
@@ -1055,42 +1015,15 @@ export function createInProcessUiBackendClient(
       publish(projected.uiEvent);
     },
   });
-  bus.subscribe(PermissionEvent.ModeChanged, () => {
-    publishPermissionUpdated();
-  });
-  bus.subscribe(PermissionEvent.LevelChanged, () => {
-    publishPermissionUpdated();
-  });
-  bus.subscribe(PermissionEvent.RuleAdded, () => {
-    publishPermissionUpdated();
-  });
-  bus.subscribe(PermissionEvent.Updated, (payload) => {
-    void (async (): Promise<void> => {
-      const request = toUiPermissionRequest({
-        info: payload.info,
-        runId: activeRunId ?? payload.info.callId,
-      });
-      pendingPermissionSessions.set(payload.info.id, payload.info.sessionId);
-      await stateStore.upsertPermission(request);
-      await reconcileRuntimeStatus();
-      publish({
-        type: "permission.requested",
-        request,
-        timestamp: Date.now(),
-      });
-    })();
-  });
-  bus.subscribe(PermissionEvent.Replied, (payload) => {
-    void (async (): Promise<void> => {
-      pendingPermissionSessions.delete(payload.permissionId);
-      await stateStore.removePermission(payload.permissionId);
-      publish({
-        type: "permission.resolved",
-        requestId: payload.permissionId,
-        timestamp: Date.now(),
-      });
-      await reconcileRuntimeStatus();
-    })();
+  startPermissionEventProjection({
+    bus,
+    currentPermissionState,
+    getActiveRunId: () => activeRunId,
+    now: () => Date.now(),
+    pendingPermissionSessions,
+    publish,
+    reconcileRuntimeStatus,
+    stateStore,
   });
   return {
     getSnapshot(): Promise<UiSnapshot> {

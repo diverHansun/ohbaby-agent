@@ -14,3 +14,10 @@ export {
   type AppEventProjectorError,
   type SubscribeAppEventProjectorsOptions,
 } from "./subscriptions.js";
+
+export {
+  startPermissionEventProjection,
+  toUiPermissionRequest,
+  type StartPermissionEventProjectionOptions,
+  type UiPermissionState,
+} from "./permission-projection.js";
