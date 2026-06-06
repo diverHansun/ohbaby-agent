@@ -1,9 +1,79 @@
 import { describe, expect, it, vi } from "vitest";
+import { createContextWindowUsageTracker } from "../../core/context/index.js";
 import { createInMemoryStreamBridge } from "../../runtime/stream-bridge/index.js";
 import { createInMemoryUiStateStore } from "../ui-state/index.js";
 import { startRunStreamProjection } from "./run-stream-adapter.js";
 
 describe("startRunStreamProjection", () => {
+  it("publishes context window usage from context prepared events", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const stateStore = createInMemoryUiStateStore({
+      activeSessionId: "session_1",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_1",
+          messages: [],
+          title: "Session",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "idle" },
+    });
+    const publish = vi.fn();
+    const contextWindowUsage = createContextWindowUsageTracker({
+      now: () => "2026-06-06T00:00:00.000Z",
+    });
+    const projection = startRunStreamProjection({
+      assistantMessageId: "message_assistant",
+      autoStart: false,
+      contextWindowUsage,
+      nextMessageId: () => "message_next",
+      publish,
+      runId: "run_1",
+      sessionId: "session_1",
+      stateStore,
+      streamBridge,
+      timestamp: () => "2026-05-26T00:00:01.000Z",
+    });
+
+    streamBridge.publish("run/run_1", "run.context.prepared", {
+      hasSummary: false,
+      runId: "run_1",
+      sessionId: "session_1",
+      step: 2,
+      timestamp: 3,
+      usage: {
+        contextLimit: 1_000_000,
+        currentTokens: 38_400,
+        inputBudgetTokens: 950_000,
+        modelId: "deepseek-v4-pro",
+        remainingTokens: 911_600,
+        shouldCompress: false,
+        usageRatio: 38_400 / 950_000,
+      },
+    });
+    streamBridge.end("run/run_1");
+
+    projection.start();
+    await projection.done;
+
+    expect(contextWindowUsage.get("session_1")).toEqual({
+      contextWindowRatio: 0.0384,
+      contextWindowTokens: 1_000_000,
+      currentTokens: 38_400,
+      estimatedAt: "2026-06-06T00:00:00.000Z",
+      modelId: "deepseek-v4-pro",
+      sessionId: "session_1",
+    });
+    expect(publish).toHaveBeenCalledWith({
+      type: "context.window.updated",
+      usage: contextWindowUsage.get("session_1"),
+    });
+  });
+
   it("emits compact notices from context prepared events without duplicating turn start compaction", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const stateStore = createInMemoryUiStateStore({

@@ -9,6 +9,7 @@ import type {
 } from "./compact.js";
 import type { UiEvent } from "./events.js";
 import type { UiInteractionResponse } from "./interaction.js";
+import type { UiContextWindowUsage } from "./context-window.js";
 import type { UiPermissionResponse, UiSnapshot } from "./snapshot.js";
 
 export interface SubmitPromptOptions {
@@ -24,6 +25,9 @@ export type UiUnsubscribe = () => void;
 
 export interface UiBackendClient {
   getSnapshot(): Promise<UiSnapshot>;
+  getContextWindowUsage(input: {
+    readonly sessionId: string;
+  }): Promise<UiContextWindowUsage | null>;
   subscribeEvents(handler: UiEventHandler): UiUnsubscribe;
   listCommands(query: UiListCommandsQuery): Promise<UiSlashCommandCatalog>;
   submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void>;

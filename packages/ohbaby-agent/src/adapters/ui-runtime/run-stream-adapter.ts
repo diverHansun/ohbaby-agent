@@ -7,7 +7,11 @@ import type {
   UiSession,
   UiToolCall,
 } from "ohbaby-sdk";
-import type { CompactResult } from "../../core/context/index.js";
+import type {
+  CompactResult,
+  ContextUsage,
+  ContextWindowUsageTracker,
+} from "../../core/context/index.js";
 import type { UiStateStore } from "../ui-state/index.js";
 import { cloneMessage, cloneRun } from "../ui-state/index.js";
 import { noticeFromCompactResult } from "./prompt-context.js";
@@ -46,6 +50,7 @@ type NoticeDraft = Omit<UiNotice, "id" | "createdAt"> & {
 export interface RunStreamProjectionOptions {
   readonly assistantMessageId?: string;
   readonly autoStart?: boolean;
+  readonly contextWindowUsage?: ContextWindowUsageTracker;
   readonly nextMessageId: () => string;
   readonly onNotice?: (notice: NoticeDraft) => void;
   readonly publish: PublishUiEvent;
@@ -371,6 +376,27 @@ export function startRunStreamProjection(
     }
   }
 
+  function handleContextWindowUsage(event: StreamBridgeEvent): void {
+    if (!options.contextWindowUsage) {
+      return;
+    }
+    const data = eventData(event);
+    if (!isRecord(data.usage)) {
+      return;
+    }
+    const usage = options.contextWindowUsage.updateFromContextUsage(
+      options.sessionId,
+      data.usage as unknown as ContextUsage,
+    );
+    if (!usage) {
+      return;
+    }
+    options.publish({
+      type: "context.window.updated",
+      usage,
+    });
+  }
+
   async function handleEvent(event: StreamBridgeEvent): Promise<void> {
     if (event.event === "run.updated") {
       await handleRunUpdated(event);
@@ -389,6 +415,7 @@ export function startRunStreamProjection(
       return;
     }
     if (event.event === "run.context.prepared") {
+      handleContextWindowUsage(event);
       handleContextCompaction(event);
     }
   }

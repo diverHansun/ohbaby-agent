@@ -1,3 +1,5 @@
+import type { UiContextWindowUsage } from "./context-window.js";
+
 export type UiRunStatus =
   | { readonly kind: "idle" }
   | {
@@ -46,6 +48,7 @@ export interface UiSnapshot {
   readonly permissions: readonly UiPermissionRequest[];
   readonly status: UiRunStatus;
   readonly permission?: UiPermissionState;
+  readonly contextWindowUsages?: readonly UiContextWindowUsage[];
 }
 
 export interface UiSession {
@@ -70,6 +73,10 @@ export interface UiMessage {
   readonly role: "user" | "assistant" | "system" | "tool";
   readonly parts: readonly UiMessagePart[];
   readonly createdAt: string;
+  readonly updatedAt?: string;
+  readonly completedAt?: string;
+  readonly status?: "streaming" | "completed" | "error";
+  readonly finishReason?: string;
 }
 
 export type UiMessagePart =

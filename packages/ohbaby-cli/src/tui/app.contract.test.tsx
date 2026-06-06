@@ -1073,6 +1073,7 @@ function createFakeClient(
   readonly abortRun: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
+  readonly getContextWindowUsage: ReturnType<typeof vi.fn>;
   readonly listCommands: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
   readonly respondPermission: ReturnType<typeof vi.fn>;
@@ -1110,6 +1111,7 @@ function createFakeClient(
       }
     },
     executeCommand: vi.fn(() => Promise.resolve()),
+    getContextWindowUsage: vi.fn(() => Promise.resolve(null)),
     getSnapshot: vi.fn(() => Promise.resolve(initialSnapshot)),
     listCommands: vi.fn(() => Promise.resolve(commandCatalog)),
     respondInteraction: vi.fn(() => Promise.resolve()),

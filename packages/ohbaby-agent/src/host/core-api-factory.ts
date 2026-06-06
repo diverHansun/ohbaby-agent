@@ -63,6 +63,11 @@ export function buildCoreAPIImpl(
       getSnapshot(): ReturnType<CoreAPI["getSnapshot"]> {
         return client.getSnapshot();
       },
+      getContextWindowUsage(
+        input,
+      ): ReturnType<CoreAPI["getContextWindowUsage"]> {
+        return client.getContextWindowUsage(input);
+      },
       listCommands(query): ReturnType<CoreAPI["listCommands"]> {
         return client.listCommands(query);
       },

@@ -442,7 +442,17 @@ describe("CommandService", () => {
       shouldCompress: false,
       usageRatio: 9_000 / 128_000,
     };
+    const contextWindowUsage = {
+      contextWindowRatio: 0.0384,
+      contextWindowTokens: 1_000_000,
+      currentTokens: 38_400,
+      estimatedAt: "2026-06-06T00:00:00.000Z",
+      modelId: "fake-model",
+      sessionId: "session_1",
+    };
+    const getContextWindowUsage = vi.fn(() => contextWindowUsage);
     const { events, service } = createServiceHarness({
+      getContextWindowUsage,
       getContextUsage() {
         return contextUsage;
       },
@@ -485,9 +495,13 @@ describe("CommandService", () => {
 
     await service.executeCommand(makeInvocation("status", ["status"]));
 
+    expect(getContextWindowUsage).toHaveBeenCalledWith({
+      sessionId: "session_1",
+    });
     expect(dataOutputFrom(events.at(-1))).toMatchObject({
       data: {
         context: contextUsage,
+        contextWindow: contextWindowUsage,
         mcps: {
           connected: 1,
           disabled: 1,

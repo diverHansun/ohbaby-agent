@@ -6,6 +6,7 @@ import type {
   UiCommandInvocation,
   UiCompactSessionOptions,
   UiCompactSessionResult,
+  UiContextWindowUsage,
   UiEvent,
   UiEventHandler,
   UiInteractionResponse,
@@ -30,6 +31,10 @@ import type {
 } from "../commands/index.js";
 import { createCommandService } from "../commands/index.js";
 import { createInteractionBroker } from "../runtime/interaction-broker/index.js";
+import {
+  createContextWindowUsageTracker,
+  type ContextWindowUsageTracker,
+} from "../core/context/index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -280,6 +285,8 @@ export function createInProcessUiBackendClient(
   const interactionBroker = createInteractionBroker({ bus });
   const handlers = new Set<UiEventHandler>();
   const busSubscriptions: BusUnsubscribe[] = [];
+  const contextWindowUsage: ContextWindowUsageTracker =
+    createContextWindowUsageTracker({ now: timestamp });
   const sessionIds = createIdFactory(
     "session",
     initialSnapshot.sessions.map((session) => session.id),
@@ -489,8 +496,11 @@ export function createInProcessUiBackendClient(
   }
 
   async function readSnapshotWithPermission(): Promise<UiSnapshot> {
+    const snapshot = await stateStore.readSnapshot();
+    const contextWindowUsages = contextWindowUsage.list();
     return {
-      ...(await stateStore.readSnapshot()),
+      ...snapshot,
+      ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
       permission: currentPermissionState(),
     };
   }
@@ -770,6 +780,48 @@ export function createInProcessUiBackendClient(
     };
   }
 
+  async function resolveSessionProjectRoot(
+    sessionId: string,
+  ): Promise<string | null> {
+    const [uiSession, coreSession] = await Promise.all([
+      stateStore.getSession(sessionId),
+      options.sessionManager?.get(sessionId),
+    ]);
+    if (!uiSession && !coreSession) {
+      return null;
+    }
+    return (
+      uiSession?.projectRoot ??
+      coreSession?.projectRoot ??
+      (await resolveProjectRoot())
+    );
+  }
+
+  async function getContextWindowUsageInternal(input: {
+    readonly sessionId: string;
+  }): Promise<UiContextWindowUsage | null> {
+    const cached = contextWindowUsage.get(input.sessionId);
+    if (cached) {
+      return cached;
+    }
+
+    const projectRoot = await resolveSessionProjectRoot(input.sessionId);
+    if (!projectRoot) {
+      return null;
+    }
+
+    try {
+      const runtime = await getRuntime();
+      const usage = await runtime.getContextUsage({
+        projectRoot,
+        sessionId: input.sessionId,
+      });
+      return contextWindowUsage.updateFromContextUsage(input.sessionId, usage);
+    } catch {
+      return null;
+    }
+  }
+
   async function submitPromptInternal(
     text: string,
     submitOptions?: SubmitPromptOptions,
@@ -842,6 +894,7 @@ export function createInProcessUiBackendClient(
       projection = startRunStreamProjection({
         assistantMessageId,
         autoStart: false,
+        contextWindowUsage,
         nextMessageId: () => messageIds.next(),
         onNotice: publishNotice,
         publish,
@@ -997,6 +1050,9 @@ export function createInProcessUiBackendClient(
     getStatus(): string {
       return promptInFlight ? "running" : "idle";
     },
+    getContextWindowUsage(input) {
+      return getContextWindowUsageInternal(input);
+    },
     async getContextUsage(input) {
       if (!input.sessionId) {
         return null;
@@ -1052,6 +1108,10 @@ export function createInProcessUiBackendClient(
 
     getSnapshot(): Promise<UiSnapshot> {
       return readSnapshotWithPermission();
+    },
+
+    getContextWindowUsage(input): Promise<UiContextWindowUsage | null> {
+      return getContextWindowUsageInternal(input);
     },
 
     subscribeEvents(handler: UiEventHandler) {

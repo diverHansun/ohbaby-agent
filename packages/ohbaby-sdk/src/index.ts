@@ -14,7 +14,11 @@ export type {
   UiCompactSessionUsage,
 } from "./compact.js";
 export type {
+  UiContextWindowUsage,
+} from "./context-window.js";
+export type {
   UiEvent,
+  UiContextWindowUpdatedEvent,
   UiMessageAppendedEvent,
   UiMessagePartDeltaEvent,
   UiMessageUpdatedEvent,

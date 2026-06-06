@@ -15,6 +15,15 @@ export {
 } from "./compression-prompt.js";
 export { ContextEvent } from "./events.js";
 export {
+  contextUsageToContextWindowUsage,
+  createContextWindowUsageTracker,
+} from "./context-window-usage.js";
+export type {
+  ContextWindowUsageInput,
+  ContextWindowUsageTracker,
+  ContextWindowUsageTrackerOptions,
+} from "./context-window-usage.js";
+export {
   createContextManager,
   decideCompactAction,
   findCutPoint,

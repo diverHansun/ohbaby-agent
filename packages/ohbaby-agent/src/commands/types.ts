@@ -7,6 +7,7 @@ import type {
   UiCommandSpec,
   UiCommandSurface,
   UiCompactSessionResult,
+  UiContextWindowUsage,
   UiInteractionResponse,
   UiSnapshot,
 } from "ohbaby-sdk";
@@ -168,6 +169,9 @@ export interface CommandServiceOptions {
   readonly getContextUsage?: (input: {
     readonly sessionId?: string;
   }) => Promise<ContextUsage | null> | ContextUsage | null;
+  readonly getContextWindowUsage?: (input: {
+    readonly sessionId: string;
+  }) => Promise<UiContextWindowUsage | null> | UiContextWindowUsage | null;
   readonly getProjectRoot?: () => Promise<string> | string;
   readonly createCommandRunId?: () => string;
   readonly now?: () => number;

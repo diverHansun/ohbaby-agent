@@ -311,6 +311,12 @@ function withStartupRecovery(
       await ready();
       return client.getSnapshot();
     },
+    async getContextWindowUsage(
+      input,
+    ): ReturnType<UiBackendClient["getContextWindowUsage"]> {
+      await ready();
+      return client.getContextWindowUsage(input);
+    },
     subscribeEvents(handler): ReturnType<UiBackendClient["subscribeEvents"]> {
       return client.subscribeEvents(handler);
     },

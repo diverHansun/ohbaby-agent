@@ -142,6 +142,7 @@ function createCore(): {
   readonly abortRun: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
+  readonly getContextWindowUsage: ReturnType<typeof vi.fn>;
   readonly getSnapshot: ReturnType<typeof vi.fn>;
   readonly listCommands: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
@@ -152,6 +153,7 @@ function createCore(): {
     abortRun: vi.fn(() => Promise.resolve()),
     compactSession: vi.fn(() => Promise.resolve()),
     executeCommand: vi.fn(() => Promise.resolve()),
+    getContextWindowUsage: vi.fn(() => Promise.resolve(null)),
     getSnapshot: vi.fn(() => Promise.resolve()),
     listCommands: vi.fn(() => Promise.resolve({ commands: [] })),
     respondInteraction: vi.fn(() => Promise.resolve()),

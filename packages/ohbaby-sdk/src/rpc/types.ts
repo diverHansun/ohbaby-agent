@@ -13,10 +13,14 @@ import type {
   UiCompactSessionResult,
 } from "../compact.js";
 import type { UiInteractionResponse } from "../interaction.js";
+import type { UiContextWindowUsage } from "../context-window.js";
 import type { UiPermissionResponse, UiSnapshot } from "../snapshot.js";
 
 export interface CoreAPI {
   getSnapshot(): Promise<UiSnapshot>;
+  getContextWindowUsage(input: {
+    readonly sessionId: string;
+  }): Promise<UiContextWindowUsage | null>;
   listCommands(query: UiListCommandsQuery): Promise<UiSlashCommandCatalog>;
   submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void>;
   compactSession(

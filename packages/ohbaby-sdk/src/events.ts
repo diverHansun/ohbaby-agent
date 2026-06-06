@@ -4,6 +4,7 @@ import type {
   UiSlashCommandOutput,
 } from "./slash-command/types.js";
 import type { UiInteractionRequest } from "./interaction.js";
+import type { UiContextWindowUsage } from "./context-window.js";
 import type {
   UiMessage,
   UiPermissionState,
@@ -66,6 +67,12 @@ export interface UiMessagePartDeltaEvent {
 export interface UiRunUpdatedEvent {
   readonly type: "run.updated";
   readonly run: UiRun;
+  readonly timestamp?: number;
+}
+
+export interface UiContextWindowUpdatedEvent {
+  readonly type: "context.window.updated";
+  readonly usage: UiContextWindowUsage;
   readonly timestamp?: number;
 }
 
@@ -158,6 +165,7 @@ export type UiEvent =
   | UiMessageUpdatedEvent
   | UiMessagePartDeltaEvent
   | UiRunUpdatedEvent
+  | UiContextWindowUpdatedEvent
   | UiPermissionRequestedEvent
   | UiPermissionResolvedEvent
   | UiNoticeEmittedEvent

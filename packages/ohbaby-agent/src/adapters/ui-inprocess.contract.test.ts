@@ -100,6 +100,7 @@ function createProviderStream(
 
 function createFakeLLMClient(
   events: readonly InterfaceProviderStreamEvent[],
+  config: Partial<LLMClientInstance<FakeSdkClient>["config"]> = {},
 ): LLMClientInstance<FakeSdkClient> {
   return {
     provider: {
@@ -123,6 +124,7 @@ function createFakeLLMClient(
       interfaceProvider: "openai-compatible",
       temperature: 0,
       maxTokens: 128,
+      ...config,
     },
   };
 }
@@ -915,7 +917,7 @@ describe("createInProcessUiBackendClient", () => {
       llmClient: createFakeLLMClient([
         { textDelta: "Hello" },
         { textDelta: " world", finishReason: "stop" },
-      ]),
+      ], { contextWindowTokens: 1_000_000 }),
     });
     const events: UiEvent[] = [];
 
@@ -934,6 +936,7 @@ describe("createInProcessUiBackendClient", () => {
       "message.appended",
       "runtime.updated",
       "run.updated",
+      "context.window.updated",
       "message.appended",
       "message.updated",
       "message.part.delta",
@@ -970,6 +973,16 @@ describe("createInProcessUiBackendClient", () => {
     const snapshot = await client.getSnapshot();
     expect(snapshot.status).toEqual({ kind: "idle" });
     expect(snapshot.sessions).toHaveLength(1);
+    expect(snapshot.contextWindowUsages).toEqual([
+      expect.objectContaining({
+        contextWindowTokens: 1_000_000,
+        modelId: "fake-model",
+        sessionId: snapshot.sessions[0].id,
+      }),
+    ]);
+    await expect(
+      client.getContextWindowUsage({ sessionId: snapshot.sessions[0].id }),
+    ).resolves.toEqual(snapshot.contextWindowUsages?.[0]);
     expect(
       snapshot.sessions[0].messages.map((message) => message.role),
     ).toEqual(["user", "assistant"]);
