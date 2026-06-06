@@ -18,6 +18,7 @@ export function renderStatusPanel(data: Record<string, unknown>): string {
     row("Runtime", getString(data, "status") ?? "unknown"),
   ];
   const sessionId = getString(data, "sessionId");
+  const permission = formatPermission(getRecord(data, "permission"));
   const model = formatModelLabel(getRecord(data, "model"));
   const tools = formatTools(getRecord(data, "tools"));
   const mcps = formatMcps(getRecord(data, "mcps"));
@@ -25,6 +26,9 @@ export function renderStatusPanel(data: Record<string, unknown>): string {
 
   if (sessionId) {
     rows.push(row("Session", sessionId));
+  }
+  if (permission) {
+    rows.push(row("Permission", permission));
   }
   if (model) {
     rows.push(row("Model", model));
@@ -87,6 +91,17 @@ function formatModelLabel(
     return undefined;
   }
   return getString(model, "label") ?? getString(model, "id");
+}
+
+function formatPermission(
+  permission: Record<string, unknown> | undefined,
+): string | undefined {
+  if (!permission) {
+    return undefined;
+  }
+  const mode = getString(permission, "mode");
+  const level = getString(permission, "level");
+  return mode && level ? `${mode} / ${level}` : undefined;
 }
 
 function formatTools(tools: Record<string, unknown> | undefined): string | null {

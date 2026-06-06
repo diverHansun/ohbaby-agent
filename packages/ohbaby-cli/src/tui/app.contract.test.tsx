@@ -368,7 +368,8 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
 
-    expect(app.lastFrame()).toContain("status: error: snapshot unavailable");
+    expect(app.lastFrame()).toContain("error: snapshot unavailable");
+    expect(app.lastFrame()).not.toContain("status: error");
   });
 
   it("shows a readable status error when command catalog loading fails", async () => {
@@ -387,14 +388,14 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
 
-    expect(app.lastFrame()).toContain(
-      "status: error: command catalog unavailable",
-    );
+    expect(app.lastFrame()).toContain("error: command catalog unavailable");
+    expect(app.lastFrame()).not.toContain("status: error");
   });
 
   it("renders permission state below the prompt and updates it from backend events", async () => {
     const client = createFakeClient({
       ...snapshot(),
+      contextWindowUsages: [contextWindowUsage()],
       permission: {
         level: "default",
         mode: "auto",
@@ -409,13 +410,9 @@ describe("OhbabyTerminalApp", () => {
     );
 
     await flush();
-    expect(app.lastFrame()).toContain("auto · default");
-    expect(app.lastFrame()).not.toContain(
-      "status: idle | session: session_1 | mode:",
-    );
-    expect(lineIndex(app.lastFrame(), "auto · default")).toBeLessThan(
-      lineIndex(app.lastFrame(), "status: idle | session: session_1"),
-    );
+    expect(app.lastFrame()).toContain("auto · default · session_1");
+    expect(app.lastFrame()).toContain("38.4K / 1M (4%)");
+    expect(app.lastFrame()).not.toContain("status: idle | session:");
 
     client.emit({
       permission: {
@@ -573,7 +570,8 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("Hello");
     expect(app.lastFrame()).not.toContain("Hellolo");
     expect(app.lastFrame()).not.toContain("ohbaby");
-    expect(app.lastFrame()).toContain("status: idle | session: session_stream");
+    expect(app.lastFrame()).toContain("auto · default · session_stream");
+    expect(app.lastFrame()).not.toContain("status: idle | session:");
   });
 
   it("renders tool calls and tool result status without raw result output", async () => {
@@ -683,6 +681,56 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).not.toContain("Sensitive search body");
   });
 
+  it("merges failed tool results into the tool call line", async () => {
+    const toolSnapshot = snapshot();
+    const baseSession = toolSnapshot.sessions[0];
+    const client = createFakeClient({
+      ...toolSnapshot,
+      sessions: [
+        {
+          ...baseSession,
+          messages: [
+            {
+              createdAt: "2026-05-14T00:00:01.000Z",
+              id: "message_failed_tool",
+              parts: [
+                {
+                  call: {
+                    id: "call_edit",
+                    input: { file_path: "src/app.ts" },
+                    name: "edit",
+                    status: "failed",
+                  },
+                  type: "tool-call",
+                },
+                {
+                  result: {
+                    callId: "call_edit",
+                    error: "permission denied",
+                    output: "",
+                  },
+                  type: "tool-result",
+                },
+              ],
+              role: "assistant",
+            },
+          ],
+        },
+      ],
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+
+    expect(app.lastFrame()).toContain("  Edit src/app.ts permission denied");
+    expect(app.lastFrame()).not.toContain("  Error permission denied");
+  });
+
   it("uses readable runtime labels without raw run or permission ids", async () => {
     const client = createFakeClient({
       ...snapshot(),
@@ -705,7 +753,8 @@ describe("OhbabyTerminalApp", () => {
     );
 
     await flush();
-    expect(app.lastFrame()).toContain("status: running");
+    expect(app.lastFrame()).toContain("auto · default · session_1");
+    expect(app.lastFrame()).not.toContain("status: running");
     expect(app.lastFrame()).not.toContain("run_raw_123");
 
     client.emit({
@@ -723,7 +772,8 @@ describe("OhbabyTerminalApp", () => {
     });
     await flush();
 
-    expect(app.lastFrame()).toContain("status: waiting: Write file");
+    expect(app.lastFrame()).toContain("Permission: Write file");
+    expect(app.lastFrame()).not.toContain("status: waiting");
     expect(app.lastFrame()).not.toContain("permission_raw_123");
     expect(app.lastFrame()).toContain("Enter select");
     expect(app.lastFrame()).toContain("Esc safe default");
@@ -1375,10 +1425,4 @@ async function waitForFrame(
     }
   }
   throw new Error(`Timed out waiting for frame. Last frame:\n${frame}`);
-}
-
-function lineIndex(frame: string | undefined, needle: string): number {
-  return (frame ?? "")
-    .split(/\r?\n/u)
-    .findIndex((line) => line.includes(needle));
 }

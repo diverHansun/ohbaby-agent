@@ -5,6 +5,7 @@ import type {
   UiCommandOutput,
   UiCommandSpec,
   UiCommandSurface,
+  UiContextWindowUsage,
 } from "ohbaby-sdk";
 import type {
   CommandHandler,
@@ -215,11 +216,26 @@ function emitPermissionUpdated(
   context.emitAction(action(input.actionKind, { permission }));
 }
 
+async function getStatusContextWindowUsage(
+  options: CommandServiceOptions,
+  sessionId: string | undefined,
+): Promise<UiContextWindowUsage | null> {
+  if (!sessionId || !options.getContextWindowUsage) {
+    return null;
+  }
+  try {
+    return await options.getContextWindowUsage({ sessionId });
+  } catch {
+    return null;
+  }
+}
+
 async function handleStatus(
   options: CommandServiceOptions,
   invocation: UiCommandInvocation,
   context: CommandRunContext,
 ): Promise<void> {
+  const permission = currentPermissionState(options);
   const [
     models,
     model,
@@ -236,10 +252,7 @@ async function handleStatus(
     listSkills(options),
     listMcpServers(options),
     options.getContextUsage?.({ sessionId: invocation.sessionId }) ?? null,
-    invocation.sessionId
-      ? (options.getContextWindowUsage?.({ sessionId: invocation.sessionId }) ??
-        null)
-      : null,
+    getStatusContextWindowUsage(options, invocation.sessionId),
     options.getProjectRoot?.() ?? null,
   ]);
   context.emitOutput(
@@ -249,6 +262,7 @@ async function handleStatus(
       mcps: summarizeMcpServers(mcpServers),
       model,
       models,
+      permission,
       projectRoot,
       sessionId: invocation.sessionId ?? null,
       skillsCount: skills.length,

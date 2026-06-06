@@ -810,16 +810,12 @@ export function createInProcessUiBackendClient(
       return null;
     }
 
-    try {
-      const runtime = await getRuntime();
-      const usage = await runtime.getContextUsage({
-        projectRoot,
-        sessionId: input.sessionId,
-      });
-      return contextWindowUsage.updateFromContextUsage(input.sessionId, usage);
-    } catch {
-      return null;
-    }
+    const runtime = await getRuntime();
+    const usage = await runtime.getContextUsage({
+      projectRoot,
+      sessionId: input.sessionId,
+    });
+    return contextWindowUsage.updateFromContextUsage(input.sessionId, usage);
   }
 
   async function submitPromptInternal(

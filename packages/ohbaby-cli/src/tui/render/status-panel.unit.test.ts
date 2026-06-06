@@ -21,6 +21,11 @@ describe("renderStatusPanel", () => {
       model: {
         label: "GPT-5.5",
       },
+      permission: {
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
+      },
       projectRoot: "D:/Projects/app",
       sessionId: "session_1",
       status: "idle",
@@ -35,6 +40,7 @@ describe("renderStatusPanel", () => {
     expect(panel).toContain("╭─ Status");
     expect(panel).toContain("│ Runtime  idle");
     expect(panel).toContain("│ Session  session_1");
+    expect(panel).toContain("│ Permission auto / default");
     expect(panel).toContain("│ Model    GPT-5.5");
     expect(panel).toContain("│ Context  38.4K / 1M (4%)");
     expect(panel).toContain("│ Tools    1 builtin, 1 module, 1 skill, 1 mcp");

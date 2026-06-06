@@ -57,7 +57,7 @@ describe("TUI main chain with real in-process backend", () => {
 
     expect(frame).not.toContain("ohbaby");
     expect(frame).not.toContain("Hellolo");
-    expect(frame).toContain("status: idle | session: session_1");
+    expect(frame).toContain("auto · default · session_1");
     app.unmount();
   });
 
@@ -112,7 +112,7 @@ describe("TUI main chain with real in-process backend", () => {
     expect(completedFrame).not.toContain("tool write");
     expect(completedFrame).not.toContain("tool result");
     expect(completedFrame).not.toContain("result hidden");
-    expect(completedFrame).toContain("status: idle | session: session_1");
+    expect(completedFrame).toContain("auto · default · session_1");
 
     app.stdin.write("again");
     app.stdin.write("\r");
@@ -120,7 +120,7 @@ describe("TUI main chain with real in-process backend", () => {
       frame.includes("Second prompt works."),
     );
 
-    expect(secondFrame).toContain("status: idle | session: session_1");
+    expect(secondFrame).toContain("auto · default · session_1");
     expect(client.submitPrompt).toHaveBeenCalledTimes(2);
     app.unmount();
   });
@@ -159,7 +159,8 @@ describe("TUI main chain with real in-process backend", () => {
       (frame) =>
         frame.includes("run aborted") && !frame.includes("Permission:"),
     );
-    expect(abortedFrame).toContain("status: error: run aborted");
+    expect(abortedFrame).toContain("error: run aborted");
+    expect(abortedFrame).not.toContain("status: error");
 
     app.stdin.write("continue");
     app.stdin.write("\r");
@@ -167,7 +168,7 @@ describe("TUI main chain with real in-process backend", () => {
       frame.includes("After abort works."),
     );
 
-    expect(recoveredFrame).toContain("status: idle | session: session_1");
+    expect(recoveredFrame).toContain("auto · default · session_1");
     expect(recoveredFrame).not.toContain("Permission:");
     app.unmount();
   });
@@ -199,7 +200,8 @@ describe("TUI main chain with real in-process backend", () => {
       nextFrame.includes("auto · full-access"),
     );
 
-    expect(frame).toContain("status: idle");
+    expect(frame).toContain("auto · full-access");
+    expect(frame).not.toContain("status: idle");
     app.unmount();
   });
 
@@ -223,11 +225,12 @@ describe("TUI main chain with real in-process backend", () => {
     const frame = await waitForFrame(
       app,
       (nextFrame) =>
-        nextFrame.includes("status: idle") &&
+        nextFrame.includes("│ Runtime  idle") &&
         !nextFrame.includes("Unknown command"),
     );
 
     expect(frame).toContain("plan · default");
+    expect(frame).not.toContain("status: idle");
     app.unmount();
   });
 

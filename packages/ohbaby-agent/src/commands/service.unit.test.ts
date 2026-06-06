@@ -509,6 +509,11 @@ describe("CommandService", () => {
           failed: 1,
           total: 4,
         },
+        permission: {
+          level: "default",
+          mode: "auto",
+          sessionRules: [],
+        },
         projectRoot: "D:/Projects/app",
         sessionId: "session_1",
         skillsCount: 2,
@@ -541,6 +546,11 @@ describe("CommandService", () => {
           total: 0,
         },
         projectRoot: null,
+        permission: {
+          level: "default",
+          mode: "auto",
+          sessionRules: [],
+        },
         sessionId: "session_1",
         skillsCount: 0,
         tools: {
@@ -549,6 +559,31 @@ describe("CommandService", () => {
           module: 0,
           skill: 0,
         },
+      },
+      kind: "data",
+      subject: "status",
+    });
+  });
+
+  it("keeps /status available when context window usage cannot refresh", async () => {
+    const { events, service } = createServiceHarness({
+      getContextWindowUsage() {
+        throw new Error("context unavailable");
+      },
+    });
+
+    await service.executeCommand(makeInvocation("status", ["status"]));
+
+    expect(dataOutputFrom(events.at(-1))).toMatchObject({
+      data: {
+        contextWindow: null,
+        permission: {
+          level: "default",
+          mode: "auto",
+          sessionRules: [],
+        },
+        sessionId: "session_1",
+        status: "idle",
       },
       kind: "data",
       subject: "status",

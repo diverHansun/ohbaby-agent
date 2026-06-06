@@ -418,7 +418,7 @@ describe("real provider TUI smoke", () => {
         );
         await waitForFrame(
           app,
-          (frame) => frame.includes("status: idle | session:"),
+          (frame) => frame.includes("auto · default ·"),
           240_000,
         );
 
@@ -457,7 +457,7 @@ describe("real provider TUI smoke", () => {
           app,
           (frame) =>
             frame.includes("Read marker.txt") &&
-            frame.includes("status: idle | session:"),
+            frame.includes("auto · default ·"),
           240_000,
         );
 
@@ -482,7 +482,7 @@ describe("real provider TUI smoke", () => {
         app.stdin.write("\u001B[Z");
         await waitForFrame(
           app,
-          (frame) => frame.includes("mode: plan | level: default"),
+          (frame) => frame.includes("plan · default"),
           30_000,
         );
 
@@ -491,7 +491,7 @@ describe("real provider TUI smoke", () => {
         await waitForFrame(
           app,
           (frame) =>
-            frame.includes("status: idle") &&
+            frame.includes("│ Runtime  idle") &&
             !frame.includes("Unknown command"),
           30_000,
         );
@@ -503,18 +503,18 @@ describe("real provider TUI smoke", () => {
 
         await waitForFrame(
           app,
-          (frame) => frame.includes("tool web_search (completed)"),
+          (frame) => frame.includes("Web Search"),
           240_000,
         );
         const finalFrame = await waitForFrame(
           app,
           (frame) =>
-            frame.includes("tool web_search (completed)") &&
-            frame.includes("status: idle | session:"),
+            frame.includes("Web Search") &&
+            frame.includes("plan · default ·"),
           240_000,
         );
 
-        expect(finalFrame).toContain("tool web_search (completed)");
+        expect(finalFrame).toContain("Web Search");
       } finally {
         app.unmount();
       }

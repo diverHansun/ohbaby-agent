@@ -85,7 +85,7 @@ describe("TUI persistent backend display", () => {
       (nextFrame) =>
         nextFrame.includes("Remember this") &&
         nextFrame.includes("Persisted") &&
-        nextFrame.includes("status: idle | session:"),
+        nextFrame.includes("auto · default ·"),
     );
 
     expect(frame).toContain("| Remember this");
@@ -148,7 +148,7 @@ describe("TUI persistent backend display", () => {
       app,
       (frame) =>
         frame.includes("Seeded") &&
-        frame.includes("status: idle | session:") &&
+        frame.includes("auto · default ·") &&
         !frame.includes("Permission:"),
     );
 
@@ -160,7 +160,7 @@ describe("TUI persistent backend display", () => {
 
     expect(promptIsReady(frame)).toBe(true);
     expect(frame).not.toContain("Permission:");
-    expect(frame).toContain("status: idle | session:");
+    expect(frame).toContain("auto · default ·");
     app.unmount();
   });
 
@@ -220,7 +220,7 @@ describe("TUI persistent backend display", () => {
     const lastRequest = requests.at(-1);
     const serializedMessages = JSON.stringify(lastRequest?.messages ?? []);
 
-    expect(frame).toContain("status: idle | session: session_alpha");
+    expect(frame).toContain("auto · default · session_alpha");
     expect(serializedMessages).toContain("Alpha prompt");
     expect(serializedMessages).toContain("Alpha reply.");
     expect(serializedMessages).toContain("Continue alpha");
@@ -279,7 +279,7 @@ describe("TUI persistent backend display", () => {
     const frame = await waitForFrame(
       app,
       (nextFrame) =>
-        nextFrame.includes("status: idle | session: session_2") &&
+        nextFrame.includes("auto · default · session_2") &&
         nextFrame.includes("Prompt 2") &&
         nextFrame.includes("Reply 2."),
     );

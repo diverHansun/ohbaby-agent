@@ -9,13 +9,18 @@ import type {
   UiUnsubscribe,
 } from "ohbaby-sdk";
 import { DialogManager } from "./dialogs/manager.js";
-import { Footer } from "./components/footer.js";
 import { Header } from "./components/header.js";
 import { MessageList } from "./components/message/message-list.js";
 import { Prompt } from "./components/prompt/index.js";
 import { AppShell } from "./layout/app-shell.js";
+import { formatContextWindowUsage } from "./render/usage.js";
 import { createTuiStore } from "./store/events.js";
-import { useTuiStoreSelector } from "./store/selectors.js";
+import {
+  selectActiveContextWindowUsage,
+  selectEffectiveRuntime,
+  selectRuntimeLabel,
+  useTuiStoreSelector,
+} from "./store/selectors.js";
 import type {
   TuiCommandCatalog,
   TuiEvent,
@@ -42,6 +47,12 @@ export function OhbabyTerminalApp({
   const state = useTuiStoreSelector(store, (current) => current);
   const hasDialog =
     state.permissions.length > 0 || state.interactions.length > 0;
+  const contextWindowUsageLabel = formatContextWindowUsage(
+    selectActiveContextWindowUsage(state),
+  );
+  const runtime = selectEffectiveRuntime(state);
+  const runtimeStatusLabel =
+    runtime.kind === "error" ? selectRuntimeLabel(state) : undefined;
 
   useInput(
     (value, key) => {
@@ -260,8 +271,9 @@ export function OhbabyTerminalApp({
         disabled={hasDialog}
         loadCatalog={loadCatalog}
         permission={state.permission}
+        contextWindowUsage={contextWindowUsageLabel}
+        runtimeStatusLabel={runtimeStatusLabel}
       />
-      <Footer state={state} />
       {state.catalogInvalidation === null ? null : (
         <Text dimColor>
           command catalog refresh: {state.catalogInvalidation.version ?? "new"}

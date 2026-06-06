@@ -9,6 +9,12 @@ describe("renderToolPart", () => {
     ).toBe("⠋ Bash pnpm test");
   });
 
+  it("uses the spinner slot while a tool call is pending", () => {
+    expect(
+      renderToolPart(toolCall("bash", "pending", { command: "pnpm test" })),
+    ).toBe("⠋ Bash pnpm test");
+  });
+
   it("keeps the leading slot after a tool call completes", () => {
     expect(
       renderToolPart(toolCall("bash", "completed", { command: "pnpm test" })),
@@ -30,7 +36,7 @@ describe("renderToolPart", () => {
 
 function toolCall(
   name: string,
-  status: "running" | "completed" | "failed",
+  status: "pending" | "running" | "completed" | "failed",
   input: Record<string, unknown>,
 ): UiMessagePart {
   return {

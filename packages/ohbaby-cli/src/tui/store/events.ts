@@ -707,7 +707,6 @@ function formatCommandOutput(output: UiCommandOutput | undefined): string {
 
 function formatPermissionOutput(
   permission: Record<string, unknown> | undefined,
-  focus: "mode" | "level",
 ): string | undefined {
   const mode = permission ? getString(permission, "mode") : undefined;
   const level = permission ? getString(permission, "level") : undefined;
@@ -715,9 +714,7 @@ function formatPermissionOutput(
     return undefined;
   }
 
-  return focus === "mode"
-    ? `mode: ${mode} | level: ${level}`
-    : `level: ${level} | mode: ${mode}`;
+  return `${mode} · ${level}`;
 }
 
 function formatDataCommandOutput(
@@ -746,14 +743,14 @@ function formatDataCommandOutput(
     case "permission.mode": {
       const permission = getRecord(output.data, "permission");
       return (
-        formatPermissionOutput(permission, "mode") ??
+        formatPermissionOutput(permission) ??
         JSON.stringify(output.data)
       );
     }
     case "permission.level": {
       const permission = getRecord(output.data, "permission");
       return (
-        formatPermissionOutput(permission, "level") ??
+        formatPermissionOutput(permission) ??
         JSON.stringify(output.data)
       );
     }

@@ -483,7 +483,7 @@ describe("TUI store event reducer", () => {
       "mode",
     );
 
-    expect(latestCommandNoticeText(state)).toBe("mode: plan | level: default");
+    expect(latestCommandNoticeText(state)).toBe("plan · default");
 
     state = applyCommandOutput(
       state,
@@ -501,9 +501,7 @@ describe("TUI store event reducer", () => {
       "permission",
     );
 
-    expect(latestCommandNoticeText(state)).toBe(
-      "level: full-access | mode: auto",
-    );
+    expect(latestCommandNoticeText(state)).toBe("auto · full-access");
 
     state = applyCommandOutput(
       state,

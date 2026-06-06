@@ -997,6 +997,40 @@ describe("createInProcessUiBackendClient", () => {
     ]);
   });
 
+  it("rejects context window usage refresh failures for existing sessions", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-context-fail-"));
+    const initialSnapshot: UiSnapshot = {
+      activeSessionId: "session_1",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-06-06T00:00:00.000Z",
+          id: "session_1",
+          messages: [],
+          projectRoot: directory,
+          title: "Session",
+          updatedAt: "2026-06-06T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "idle" },
+    };
+    const client = createInProcessUiBackendClient({
+      createLLMClient: () =>
+        Promise.reject(new Error("token estimator unavailable")),
+      initialSnapshot,
+      workdir: directory,
+    });
+
+    try {
+      await expect(
+        client.getContextWindowUsage({ sessionId: "session_1" }),
+      ).rejects.toThrow("token estimator unavailable");
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("prepends a runtime system prompt to model requests without storing it in UI history", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-prompt-"));

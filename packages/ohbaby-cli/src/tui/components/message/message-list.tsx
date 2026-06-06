@@ -5,7 +5,8 @@ import { useTuiLayout } from "../../layout/context.js";
 import { mdToAnsi } from "../../render/markdown.js";
 import { wrapAnsi } from "../../render/wrap.js";
 import type { TuiCommandNotice } from "../../store/snapshot.js";
-import { renderToolPart } from "./parts/tool-part.js";
+import { tuiTheme } from "../../theme.js";
+import { renderToolCallLine, renderToolPart } from "./parts/tool-part.js";
 
 export interface MessageListProps {
   readonly messages: readonly UiMessage[];
@@ -23,27 +24,20 @@ export function MessageList({
   return (
     <Box flexDirection="column">
       {messages.map((message) => {
-        const renderedParts = message.parts
-          .map((part, index) => ({
-            index,
-            part,
-            text: renderMessagePart(
-              message,
-              part,
-              Math.max(
-                1,
-                layout.contentWidth - (message.role === "user" ? 2 : 0),
-              ),
-            ),
-          }))
-          .filter((part) => part.text !== "");
+        const partWidth = Math.max(
+          1,
+          layout.contentWidth - (message.role === "user" ? 2 : 0),
+        );
+        const renderedParts = renderMessageParts(message, partWidth);
 
         return (
           <Box flexDirection="column" key={message.id} marginBottom={1}>
             {renderedParts.map(({ index, part, text }) => (
               <Box key={`${message.id}_${String(index)}`}>
                 <Text
-                  color={message.role === "user" ? "green" : partColor(part)}
+                  color={
+                    message.role === "user" ? tuiTheme.colors.user : partColor(part)
+                  }
                   dimColor={part.type === "reasoning"}
                 >
                   {message.role === "user"
@@ -67,7 +61,15 @@ export function MessageList({
       ))}
       {commandNotices.map((notice) => (
         <Box flexDirection="row" key={notice.id} marginBottom={1}>
-          <Text color={notice.kind === "error" ? "red" : "green"}>command</Text>
+          <Text
+            color={
+              notice.kind === "error"
+                ? tuiTheme.colors.error
+                : tuiTheme.colors.success
+            }
+          >
+            command
+          </Text>
           <Text dimColor> {notice.commandId}: </Text>
           <Text>{notice.text}</Text>
         </Box>
@@ -76,14 +78,54 @@ export function MessageList({
   );
 }
 
+interface RenderedMessagePart {
+  readonly index: number;
+  readonly part: UiMessagePart;
+  readonly text: string;
+}
+
+function renderMessageParts(
+  message: UiMessage,
+  partWidth: number,
+): readonly RenderedMessagePart[] {
+  const rendered: RenderedMessagePart[] = [];
+  for (let index = 0; index < message.parts.length; index += 1) {
+    const part = message.parts[index];
+    const nextPart = message.parts.at(index + 1);
+
+    if (
+      part.type === "tool-call" &&
+      nextPart?.type === "tool-result" &&
+      nextPart.result.callId === part.call.id
+    ) {
+      const text = wrapAnsi(
+        renderToolCallLine(part.call, nextPart.result),
+        partWidth,
+      ).join("\n");
+      if (text !== "") {
+        rendered.push({ index, part, text });
+      }
+      index += 1;
+      continue;
+    }
+
+    const text = renderMessagePart(message, part, partWidth);
+    if (text !== "") {
+      rendered.push({ index, part, text });
+    }
+  }
+
+  return rendered;
+}
+
 function noticeColor(level: UiNotice["level"]): string | undefined {
   switch (level) {
     case "error":
-      return "red";
+      return tuiTheme.colors.error;
     case "warning":
-      return "yellow";
+      return tuiTheme.colors.warning;
     case "info":
-      return "cyan";
+      return tuiTheme.colors.accent;
   }
 }
 
@@ -110,11 +152,13 @@ function renderMessagePart(
 function partColor(part: UiMessagePart): string | undefined {
   switch (part.type) {
     case "tool-call":
-      return "yellow";
+      return part.call.status === "failed"
+        ? tuiTheme.colors.error
+        : tuiTheme.colors.tool;
     case "tool-result":
-      return part.result.error ? "red" : "green";
+      return part.result.error ? tuiTheme.colors.error : tuiTheme.colors.success;
     case "reasoning":
-      return "gray";
+      return tuiTheme.colors.reasoning;
     case "text":
       return undefined;
   }

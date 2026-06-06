@@ -2,6 +2,7 @@ import { Box, Text, useInput } from "ink";
 import type { CoreAPI, UiPermissionRequest } from "ohbaby-sdk";
 import { useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
+import { tuiTheme } from "../theme.js";
 
 export interface PermissionDialogProps {
   readonly client: CoreAPI;
@@ -76,7 +77,7 @@ export function PermissionDialog({
 
   return (
     <Box flexDirection="column">
-      <Text color="yellow">Permission: {request.title}</Text>
+      <Text color={tuiTheme.colors.warning}>Permission: {request.title}</Text>
       <Text>{request.description}</Text>
       {request.choices.map((choice, index) => (
         <Text key={choice.id}>
@@ -88,7 +89,9 @@ export function PermissionDialog({
         <Text dimColor>Enter select | Esc safe default | arrows move</Text>
       )}
       {pending ? <Text dimColor>sending...</Text> : null}
-      {error === null ? null : <Text color="red">{error}</Text>}
+      {error === null ? null : (
+        <Text color={tuiTheme.colors.error}>{error}</Text>
+      )}
     </Box>
   );
 }

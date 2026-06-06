@@ -11,6 +11,7 @@ import {
   resolveCommand,
 } from "../../slash-commands/runtime.js";
 import type { TuiCommandCatalog } from "../../store/snapshot.js";
+import { tuiTheme } from "../../theme.js";
 import { Completion } from "./completion.js";
 import {
   applyEditorAction,
@@ -24,18 +25,22 @@ export interface PromptProps {
   readonly activeSessionId: string | null;
   readonly catalog: TuiCommandCatalog | null;
   readonly client: CoreAPI;
+  readonly contextWindowUsage?: string;
   readonly disabled: boolean;
   readonly loadCatalog?: () => Promise<TuiCommandCatalog>;
   readonly permission?: UiPermissionState;
+  readonly runtimeStatusLabel?: string;
 }
 
 export function Prompt({
   activeSessionId,
   catalog,
   client,
+  contextWindowUsage = "",
   disabled,
   loadCatalog,
   permission,
+  runtimeStatusLabel,
 }: PromptProps): ReactElement {
   const [editor, setEditor] = useState<EditorState>(() => createEditorState());
   const [error, setError] = useState<string | null>(null);
@@ -171,15 +176,26 @@ export function Prompt({
     { isActive: !disabled },
   );
 
+  const dockStatus = formatDockStatus({
+    activeSessionId,
+    permission,
+    runtimeStatusLabel,
+  });
+
   return (
     <Box flexDirection="column">
       {renderEditorLines(editor, disabled)}
-      {permission === undefined ? null : (
-        <Text dimColor>
-          {permission.mode} · {permission.level}
-        </Text>
+      {dockStatus === "" && contextWindowUsage === "" ? null : (
+        <Box justifyContent="space-between">
+          <Text dimColor>{dockStatus}</Text>
+          {contextWindowUsage === "" ? null : (
+            <Text dimColor>{contextWindowUsage}</Text>
+          )}
+        </Box>
       )}
-      {error === null ? null : <Text color="red">{error}</Text>}
+      {error === null ? null : (
+        <Text color={tuiTheme.colors.error}>{error}</Text>
+      )}
       <Completion
         catalog={catalog}
         input={editorText(editor)}
@@ -204,6 +220,24 @@ function renderEditorLines(
       )}
     </Text>
   ));
+}
+
+function formatDockStatus(input: {
+  readonly activeSessionId: string | null;
+  readonly permission?: UiPermissionState;
+  readonly runtimeStatusLabel?: string;
+}): string {
+  const parts: string[] = [];
+  if (input.runtimeStatusLabel) {
+    parts.push(input.runtimeStatusLabel);
+  }
+  if (input.permission) {
+    parts.push(input.permission.mode, input.permission.level);
+  }
+  if (input.activeSessionId) {
+    parts.push(input.activeSessionId);
+  }
+  return parts.join(" · ");
 }
 
 function formatError(error: unknown): string {

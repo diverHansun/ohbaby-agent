@@ -1,20 +1,28 @@
-import type { UiMessagePart } from "ohbaby-sdk";
+import type { UiMessagePart, UiToolCall, UiToolResult } from "ohbaby-sdk";
 
 export function renderToolPart(part: UiMessagePart): string {
   switch (part.type) {
-    case "tool-call": {
-      const leading = part.call.status === "running" ? "⠋ " : "  ";
-      const summary = formatPrimaryInput(part.call.input);
-      return `${leading}${formatToolName(part.call.name)}${
-        summary === "" ? "" : ` ${summary}`
-      }`;
-    }
+    case "tool-call":
+      return renderToolCallLine(part.call);
     case "tool-result":
       return part.result.error ? `  Error ${formatBody(part.result.error)}` : "";
     case "text":
     case "reasoning":
       return part.text;
   }
+}
+
+export function renderToolCallLine(
+  call: UiToolCall,
+  result?: UiToolResult,
+): string {
+  const leading =
+    call.status === "running" || call.status === "pending" ? "⠋ " : "  ";
+  const summary = formatPrimaryInput(call.input);
+  const error = result?.error ? ` ${formatBody(result.error)}` : "";
+  return `${leading}${formatToolName(call.name)}${
+    summary === "" ? "" : ` ${summary}`
+  }${error}`;
 }
 
 function formatToolName(name: string): string {
