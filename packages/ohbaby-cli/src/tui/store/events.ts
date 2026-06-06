@@ -20,6 +20,7 @@ import type {
   TuiStore,
   TuiStoreState,
 } from "./snapshot.js";
+import { renderStatusPanel } from "../render/status-panel.js";
 
 const COMMAND_NOTICE_LIMIT = 20;
 const COMMAND_NOTICE_TEXT_LIMIT = 240;
@@ -757,66 +758,7 @@ function formatDataCommandOutput(
       );
     }
     case "status": {
-      const status = getString(output.data, "status");
-      const model = formatModelLabel(getRecord(output.data, "model"));
-      const parts: string[] = [];
-      if (status) {
-        parts.push(`status: ${status}`);
-      }
-      if (model) {
-        parts.push(`model: ${model}`);
-      }
-      const sessionId = getString(output.data, "sessionId");
-      if (sessionId) {
-        parts.push(`session: ${sessionId}`);
-      }
-      const tools = getRecord(output.data, "tools");
-      if (tools) {
-        parts.push(
-          `tools: ${formatTokenCount(
-            getNumber(tools, "builtin") ?? 0,
-          )} builtin, ${formatTokenCount(
-            getNumber(tools, "module") ?? 0,
-          )} module, ${formatTokenCount(
-            getNumber(tools, "skill") ?? 0,
-          )} skill, ${formatTokenCount(getNumber(tools, "mcp") ?? 0)} mcp`,
-        );
-      }
-      const skillsCount = getNumber(output.data, "skillsCount");
-      if (skillsCount !== undefined) {
-        parts.push(`skills: ${formatTokenCount(skillsCount)}`);
-      }
-      const mcps = getRecord(output.data, "mcps");
-      if (mcps) {
-        parts.push(
-          `mcps: ${formatTokenCount(
-            getNumber(mcps, "connected") ?? 0,
-          )} connected, ${formatTokenCount(
-            getNumber(mcps, "failed") ?? 0,
-          )} failed, ${formatTokenCount(
-            getNumber(mcps, "disabled") ?? 0,
-          )} disabled, ${formatTokenCount(
-            getNumber(mcps, "disconnected") ?? 0,
-          )} disconnected`,
-        );
-      }
-      const context = getRecord(output.data, "context");
-      if (context) {
-        const current = getNumber(context, "currentTokens");
-        const limit = getNumber(context, "contextLimit");
-        if (current !== undefined && limit !== undefined) {
-          parts.push(
-            `context: ${formatTokenCount(current)}/${formatTokenCount(
-              limit,
-            )} tokens`,
-          );
-        }
-      }
-      const projectRoot = getString(output.data, "projectRoot");
-      if (projectRoot) {
-        parts.push(`project: ${projectRoot}`);
-      }
-      return parts.length > 0 ? parts.join(" | ") : JSON.stringify(output.data);
+      return renderStatusPanel(output.data);
     }
     case "tools": {
       const tools = Array.isArray(output.data.tools)

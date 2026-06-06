@@ -3,48 +3,37 @@ import type { UiMessagePart } from "ohbaby-sdk";
 export function renderToolPart(part: UiMessagePart): string {
   switch (part.type) {
     case "tool-call": {
-      const input = formatInput(part.call.input);
-
-      return formatBlock(
-        `tool ${part.call.name} (${part.call.status})`,
-        input === "" ? null : `input: ${input}`,
-      );
+      const leading = part.call.status === "running" ? "⠋ " : "  ";
+      const summary = formatPrimaryInput(part.call.input);
+      return `${leading}${formatToolName(part.call.name)}${
+        summary === "" ? "" : ` ${summary}`
+      }`;
     }
     case "tool-result":
-      return formatBlock(
-        `tool result ${part.result.callId} (${
-          part.result.error ? "failed" : "completed"
-        })`,
-        part.result.error
-          ? `error: ${formatBody(part.result.error)}`
-          : formatOutput(part.result.output),
-      );
+      return part.result.error ? `  Error ${formatBody(part.result.error)}` : "";
     case "text":
     case "reasoning":
       return part.text;
   }
 }
 
-function formatBlock(title: string, detail: string | null): string {
-  if (detail === null || detail.trim() === "") {
-    return title;
-  }
-
-  return `${title}\n  ${detail.replace(/\r?\n/gu, "\n  ")}`;
+function formatToolName(name: string): string {
+  return name
+    .split(/[-_\s]+/u)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
 }
 
-function formatInput(input: Record<string, unknown>): string {
-  const keys = Object.keys(input);
-
-  if (keys.length === 0) {
-    return "";
+function formatPrimaryInput(input: Record<string, unknown>): string {
+  for (const key of ["command", "file_path", "path", "query", "prompt"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim() !== "") {
+      return truncate(value.trim());
+    }
   }
 
-  return truncate(JSON.stringify(input));
-}
-
-function formatOutput(output: string): string {
-  return output.trim() === "" ? "result hidden" : "result hidden";
+  return "";
 }
 
 function formatBody(output: string): string {

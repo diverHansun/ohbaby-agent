@@ -1,4 +1,4 @@
-import { Box, Text, useApp, useInput } from "ink";
+import { Text, useApp, useInput } from "ink";
 import { useCallback, useEffect, useRef } from "react";
 import type { ReactElement } from "react";
 import type {
@@ -13,6 +13,7 @@ import { Footer } from "./components/footer.js";
 import { Header } from "./components/header.js";
 import { MessageList } from "./components/message/message-list.js";
 import { Prompt } from "./components/prompt/index.js";
+import { AppShell } from "./layout/app-shell.js";
 import { createTuiStore } from "./store/events.js";
 import { useTuiStoreSelector } from "./store/selectors.js";
 import type {
@@ -240,7 +241,7 @@ export function OhbabyTerminalApp({
   }, [client, state.activeSessionId, store]);
 
   return (
-    <Box flexDirection="column">
+    <AppShell>
       <Header state={state} />
       <MessageList
         commandNotices={state.commandNotices}
@@ -266,7 +267,7 @@ export function OhbabyTerminalApp({
           command catalog refresh: {state.catalogInvalidation.version ?? "new"}
         </Text>
       )}
-    </Box>
+    </AppShell>
   );
 }
 

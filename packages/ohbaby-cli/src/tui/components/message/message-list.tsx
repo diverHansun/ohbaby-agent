@@ -19,16 +19,18 @@ export function MessageList({
     <Box flexDirection="column">
       {messages.map((message) => (
         <Box flexDirection="column" key={message.id} marginBottom={1}>
-          <Text bold={message.role === "user"} color={roleColor(message.role)}>
-            {roleLabel(message.role)}
-          </Text>
           {message.parts.map((part, index) => (
-            <Box key={`${message.id}_${String(index)}`} marginLeft={2}>
+            <Box key={`${message.id}_${String(index)}`}>
               <Text
-                color={partColor(part)}
+                color={message.role === "user" ? "green" : partColor(part)}
                 dimColor={part.type === "reasoning"}
               >
-                {renderMessagePart(part)}
+                {message.role === "user"
+                  ? `${index === 0 ? "| " : "  "}${renderMessagePart(
+                      message,
+                      part,
+                    )}`
+                  : renderMessagePart(message, part)}
               </Text>
             </Box>
           ))}
@@ -66,40 +68,15 @@ function noticeColor(level: UiNotice["level"]): string | undefined {
   }
 }
 
-function renderMessagePart(part: UiMessagePart): string {
+function renderMessagePart(message: UiMessage, part: UiMessagePart): string {
   switch (part.type) {
     case "text":
-    case "reasoning":
       return part.text;
+    case "reasoning":
+      return message.status === "streaming" ? part.text : "Thought";
     case "tool-call":
     case "tool-result":
       return renderToolPart(part);
-  }
-}
-
-function roleLabel(role: UiMessage["role"]): string {
-  switch (role) {
-    case "assistant":
-      return "ohbaby";
-    case "system":
-      return "system";
-    case "tool":
-      return "tool";
-    case "user":
-      return "you";
-  }
-}
-
-function roleColor(role: UiMessage["role"]): string | undefined {
-  switch (role) {
-    case "assistant":
-      return "cyan";
-    case "system":
-      return "gray";
-    case "tool":
-      return "magenta";
-    case "user":
-      return "green";
   }
 }
 

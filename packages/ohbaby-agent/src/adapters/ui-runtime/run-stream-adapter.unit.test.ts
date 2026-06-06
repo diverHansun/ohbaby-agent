@@ -172,11 +172,12 @@ describe("startRunStreamProjection", () => {
       ],
       status: { kind: "idle" },
     });
+    const publish = vi.fn();
     const projection = startRunStreamProjection({
       assistantMessageId: "message_assistant",
       autoStart: false,
       nextMessageId: () => "message_next",
-      publish: vi.fn(),
+      publish,
       runId: "run_1",
       sessionId: "session_1",
       stateStore,
@@ -226,14 +227,59 @@ describe("startRunStreamProjection", () => {
         {
           messages: [
             {
+              completedAt: "2026-05-26T00:00:01.000Z",
               id: "message_assistant",
               parts: [{ text: "fast answer", type: "text" }],
               role: "assistant",
+              status: "completed",
             },
           ],
         },
       ],
       status: { kind: "idle" },
     });
+    const publishedEvents = publish.mock.calls.map((call): unknown => call[0]);
+    expect(
+      publishedEvents.some((event) =>
+        hasMessageStatus(event, "message.appended", "streaming"),
+      ),
+    ).toBe(true);
+    expect(
+      publishedEvents.some((event) =>
+        hasMessageStatus(event, "message.updated", "completed"),
+      ),
+    ).toBe(true);
+    expect(
+      publishedEvents.some(
+        (event) =>
+          hasMessageStatus(event, "message.updated", "completed") &&
+          getMessageField(event, "completedAt") ===
+            "2026-05-26T00:00:01.000Z",
+      ),
+    ).toBe(true);
   });
 });
+
+function hasMessageStatus(
+  event: unknown,
+  type: string,
+  status: string,
+): boolean {
+  return (
+    isRecord(event) &&
+    event.type === type &&
+    isRecord(event.message) &&
+    event.message.id === "message_assistant" &&
+    event.message.status === status
+  );
+}
+
+function getMessageField(event: unknown, field: string): unknown {
+  return isRecord(event) && isRecord(event.message)
+    ? event.message[field]
+    : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

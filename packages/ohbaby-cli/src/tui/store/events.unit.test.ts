@@ -550,8 +550,11 @@ describe("TUI store event reducer", () => {
       "status",
     );
 
-    expect(latestCommandNoticeText(state)).toBe(
-      "status: idle | model: GPT-5.5",
+    expect(latestCommandNoticeText(state)).toContain("╭─ Status");
+    expect(latestCommandNoticeText(state)).toContain("│ Runtime  idle");
+    expect(latestCommandNoticeText(state)).toContain("│ Model    GPT-5.5");
+    expect(latestCommandNoticeText(state)).toContain(
+      "│ Context  Context unavailable",
     );
 
     state = applyCommandOutput(
@@ -561,6 +564,14 @@ describe("TUI store event reducer", () => {
           context: {
             contextLimit: 128000,
             currentTokens: 9000,
+          },
+          contextWindow: {
+            contextWindowRatio: 0.0384,
+            contextWindowTokens: 1_000_000,
+            currentTokens: 38_400,
+            estimatedAt: "2026-06-06T00:00:00.000Z",
+            modelId: "fake-model",
+            sessionId: "session_1",
           },
           mcps: {
             connected: 1,
@@ -591,8 +602,14 @@ describe("TUI store event reducer", () => {
       "status_full",
     );
 
-    expect(latestCommandNoticeText(state)).toBe(
-      "status: idle | model: GPT-5.5 | session: session_1 | tools: 1 builtin, 1 module, 1 skill, 1 mcp | skills: 2 | mcps: 1 connected, 1 failed, 1 disabled, 1 disconnected | context: 9,000/128,000 tokens | project: D:/Projects/app",
+    expect(latestCommandNoticeText(state)).toContain("╭─ Status");
+    expect(latestCommandNoticeText(state)).toContain("│ Runtime  idle");
+    expect(latestCommandNoticeText(state)).toContain("│ Model    GPT-5.5");
+    expect(latestCommandNoticeText(state)).toContain(
+      "│ Context  38.4K / 1M (4%)",
+    );
+    expect(latestCommandNoticeText(state)).not.toContain(
+      "9,000/128,000 tokens",
     );
   });
 

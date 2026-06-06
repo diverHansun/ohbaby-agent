@@ -108,7 +108,10 @@ describe("OhbabyTerminalApp", () => {
     await flush();
 
     expect(app.lastFrame()).toContain("OHBABY");
-    expect(app.lastFrame()).toContain("ohbaby > message |");
+    expect(app.lastFrame()).toContain("> message");
+    expect(app.lastFrame()).not.toContain("ohbaby >");
+    expect(app.lastFrame()).not.toContain("single-process coding agent");
+    expect(app.lastFrame()).not.toContain("/ for commands");
   });
 
   it("renders typed prompt text with a visible cursor", async () => {
@@ -124,7 +127,8 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("hello");
     await flush();
 
-    expect(app.lastFrame()).toContain("ohbaby > hello |");
+    expect(app.lastFrame()).toContain("> hello");
+    expect(app.lastFrame()).not.toContain("ohbaby >");
   });
 
   it("refreshes and renders active session context window usage", async () => {
@@ -174,7 +178,7 @@ describe("OhbabyTerminalApp", () => {
         nextFrame.includes("Context unavailable"),
     );
 
-    expect(frame).toContain("usage offline");
+    expect(frame).toContain("offline");
   });
 
   it("renders snapshot messages and applies assistant deltas", async () => {
@@ -187,8 +191,8 @@ describe("OhbabyTerminalApp", () => {
     );
 
     await flush();
-    expect(app.lastFrame()).toContain("ohbaby");
     expect(app.lastFrame()).toContain("Hel");
+    expect(app.lastFrame()).not.toContain("ohbaby");
 
     client.emit({
       delta: "lo",
@@ -199,6 +203,85 @@ describe("OhbabyTerminalApp", () => {
     await flush();
 
     expect(app.lastFrame()).toContain("Hello");
+  });
+
+  it("renders historical user messages without a role label", async () => {
+    const baseSnapshot = snapshot();
+    const client = createFakeClient({
+      ...baseSnapshot,
+      sessions: [
+        {
+          ...baseSnapshot.sessions[0],
+          messages: [
+            {
+              createdAt: "2026-05-14T00:00:01.000Z",
+              id: "message_user",
+              parts: [{ text: "please inspect the repo", type: "text" }],
+              role: "user",
+            },
+          ],
+        },
+      ],
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+
+    expect(app.lastFrame()).toContain("| please inspect the repo");
+    expect(app.lastFrame()).not.toContain("you");
+  });
+
+  it("folds reasoning from completed and legacy assistant messages only by message lifecycle", async () => {
+    const baseSnapshot = snapshot();
+    const client = createFakeClient({
+      ...baseSnapshot,
+      sessions: [
+        {
+          ...baseSnapshot.sessions[0],
+          messages: [
+            {
+              completedAt: "2026-05-14T00:00:02.000Z",
+              createdAt: "2026-05-14T00:00:01.000Z",
+              id: "message_completed",
+              parts: [{ text: "completed reasoning details", type: "reasoning" }],
+              role: "assistant",
+              status: "completed",
+            },
+            {
+              createdAt: "2026-05-14T00:00:03.000Z",
+              id: "message_streaming",
+              parts: [{ text: "streaming reasoning details", type: "reasoning" }],
+              role: "assistant",
+              status: "streaming",
+            },
+            {
+              createdAt: "2026-05-14T00:00:04.000Z",
+              id: "message_legacy",
+              parts: [{ text: "legacy reasoning details", type: "reasoning" }],
+              role: "assistant",
+            },
+          ],
+        },
+      ],
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+
+    expect(app.lastFrame()).toContain("Thought");
+    expect(app.lastFrame()).not.toContain("completed reasoning details");
+    expect(app.lastFrame()).toContain("streaming reasoning details");
+    expect(app.lastFrame()).not.toContain("legacy reasoning details");
   });
 
   it("renders UI notices from the backend", async () => {
@@ -286,12 +369,12 @@ describe("OhbabyTerminalApp", () => {
     );
 
     await flush();
-    expect(app.lastFrame()).toContain("mode: auto | level: default");
+    expect(app.lastFrame()).toContain("auto · default");
     expect(app.lastFrame()).not.toContain(
       "status: idle | session: session_1 | mode:",
     );
     expect(
-      lineIndex(app.lastFrame(), "mode: auto | level: default"),
+      lineIndex(app.lastFrame(), "auto · default"),
     ).toBeLessThan(
       lineIndex(app.lastFrame(), "status: idle | session: session_1"),
     );
@@ -312,7 +395,7 @@ describe("OhbabyTerminalApp", () => {
     });
     await flush();
 
-    expect(app.lastFrame()).toContain("mode: plan | level: full-access");
+    expect(app.lastFrame()).toContain("plan · full-access");
   });
 
   it("toggles permission mode with Shift+Tab", async () => {
@@ -449,9 +532,9 @@ describe("OhbabyTerminalApp", () => {
     });
     await flush();
 
-    expect(app.lastFrame()).toContain("ohbaby");
     expect(app.lastFrame()).toContain("Hello");
     expect(app.lastFrame()).not.toContain("Hellolo");
+    expect(app.lastFrame()).not.toContain("ohbaby");
     expect(app.lastFrame()).toContain("status: idle | session: session_stream");
   });
 
@@ -500,10 +583,11 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
 
-    expect(app.lastFrame()).toContain("tool bash (completed)");
-    expect(app.lastFrame()).toContain('input: {"command":"pwd"}');
-    expect(app.lastFrame()).toContain("tool result call_1 (completed)");
-    expect(app.lastFrame()).toContain("result hidden");
+    expect(app.lastFrame()).toContain("  Bash pwd");
+    expect(app.lastFrame()).not.toContain("tool bash");
+    expect(app.lastFrame()).not.toContain('input: {"command":"pwd"}');
+    expect(app.lastFrame()).not.toContain("tool result");
+    expect(app.lastFrame()).not.toContain("result hidden");
     expect(app.lastFrame()).not.toContain("output: D:/Projects");
     expect(app.lastFrame()).not.toContain("D:/Projects");
   });
@@ -554,9 +638,10 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
 
-    expect(app.lastFrame()).toContain("tool web_search (completed)");
-    expect(app.lastFrame()).toContain("tool result call_search (completed)");
-    expect(app.lastFrame()).toContain("result hidden");
+    expect(app.lastFrame()).toContain("  Web Search secret query");
+    expect(app.lastFrame()).not.toContain("tool web_search");
+    expect(app.lastFrame()).not.toContain("tool result");
+    expect(app.lastFrame()).not.toContain("result hidden");
     expect(app.lastFrame()).not.toContain("Sensitive search body");
   });
 

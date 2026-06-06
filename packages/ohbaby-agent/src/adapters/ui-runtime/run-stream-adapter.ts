@@ -180,6 +180,15 @@ function appendToolResult(input: {
   };
 }
 
+function markAssistantStreaming(message: UiMessage): UiMessage {
+  return message.status === "streaming"
+    ? message
+    : {
+        ...message,
+        status: "streaming",
+      };
+}
+
 export function startRunStreamProjection(
   options: RunStreamProjectionOptions,
 ): RunStreamProjection {
@@ -217,7 +226,7 @@ export function startRunStreamProjection(
   async function updateAssistant(
     updater: (message: UiMessage) => UiMessage,
   ): Promise<UiMessage> {
-    const message = await ensureAssistantMessage();
+    const message = markAssistantStreaming(await ensureAssistantMessage());
     const updated = updater(message);
     const session = await requireSession();
     const updatedSession: UiSession = {
@@ -265,6 +274,8 @@ export function startRunStreamProjection(
       id: options.assistantMessageId ?? options.nextMessageId(),
       role: "assistant",
       createdAt: options.timestamp(),
+      status: "streaming",
+      updatedAt: options.timestamp(),
       parts: [],
     };
     const updatedSession: UiSession = {
@@ -280,6 +291,24 @@ export function startRunStreamProjection(
       sessionId: options.sessionId,
     });
     return created;
+  }
+
+  async function completeAssistantMessage(
+    status: "completed" | "error",
+    finishReason: string,
+  ): Promise<void> {
+    if (!assistantMessage) {
+      return;
+    }
+
+    const completedAt = options.timestamp();
+    await updateAssistant((message) => ({
+      ...message,
+      completedAt,
+      finishReason,
+      status,
+      updatedAt: completedAt,
+    }));
   }
 
   async function handleRunUpdated(event: StreamBridgeEvent): Promise<void> {
@@ -303,6 +332,10 @@ export function startRunStreamProjection(
 
     await upsertRun(uiRun);
     options.publish({ type: "run.updated", run: cloneRun(uiRun) });
+    await completeAssistantMessage(
+      record.status === "succeeded" ? "completed" : "error",
+      record.status,
+    );
     await updateStatus(uiRun.status);
   }
 

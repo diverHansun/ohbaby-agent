@@ -7,7 +7,6 @@ export function Logo(): ReactElement {
       <Text color="cyan" bold>
         OHBABY
       </Text>
-      <Text dimColor>single-process coding agent</Text>
     </Box>
   );
 }
