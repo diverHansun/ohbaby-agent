@@ -1,10 +1,12 @@
 import { Text } from "ink";
 import type { ReactElement } from "react";
 import {
+  selectActiveContextWindowUsage,
   selectEffectiveRuntime,
   selectRuntimeLabel,
 } from "../store/selectors.js";
 import type { TuiStoreState } from "../store/snapshot.js";
+import { formatContextWindowUsage } from "../render/usage.js";
 
 export interface StatusBarProps {
   readonly state: TuiStoreState;
@@ -12,6 +14,9 @@ export interface StatusBarProps {
 
 export function StatusBar({ state }: StatusBarProps): ReactElement {
   const runtime = selectEffectiveRuntime(state);
+  const contextWindowUsage = formatContextWindowUsage(
+    selectActiveContextWindowUsage(state),
+  );
 
   return (
     <Text color={statusColor(state)} dimColor={runtime.kind === "idle"}>
@@ -19,6 +24,7 @@ export function StatusBar({ state }: StatusBarProps): ReactElement {
       {state.activeSessionId === null
         ? ""
         : ` | session: ${state.activeSessionId}`}
+      {contextWindowUsage === "" ? "" : ` | ${contextWindowUsage}`}
     </Text>
   );
 }

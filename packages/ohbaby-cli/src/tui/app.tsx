@@ -33,6 +33,8 @@ export function OhbabyTerminalApp({
   const storeRef = useRef<TuiStore>(createTuiStore(createEmptySnapshot()));
   const keyboardCommandSequenceRef = useRef(0);
   const catalogRequestSequenceRef = useRef(0);
+  const contextRefreshSequenceRef = useRef(0);
+  const contextNoticeSequenceRef = useRef(0);
   const disposedRef = useRef(false);
   const store = storeRef.current;
   const { exit } = useApp();
@@ -179,6 +181,63 @@ export function OhbabyTerminalApp({
       unsubscribe();
     };
   }, [client, exit, loadCatalog, store, subscribeEvents]);
+
+  useEffect(() => {
+    const sessionId = state.activeSessionId;
+    if (!sessionId) {
+      return;
+    }
+
+    const requestSequence = contextRefreshSequenceRef.current + 1;
+    contextRefreshSequenceRef.current = requestSequence;
+    let cancelled = false;
+
+    void client
+      .getContextWindowUsage({ sessionId })
+      .then((usage) => {
+        if (
+          cancelled ||
+          disposedRef.current ||
+          requestSequence !== contextRefreshSequenceRef.current ||
+          !usage
+        ) {
+          return;
+        }
+        store.dispatch({
+          type: "context.window.updated",
+          usage,
+        });
+      })
+      .catch((caught: unknown) => {
+        if (
+          cancelled ||
+          disposedRef.current ||
+          requestSequence !== contextRefreshSequenceRef.current
+        ) {
+          return;
+        }
+
+        contextNoticeSequenceRef.current += 1;
+        store.dispatch({
+          notice: {
+            createdAt: new Date().toISOString(),
+            id: `context_notice_${String(contextNoticeSequenceRef.current)}`,
+            key: `context-window:${sessionId}`,
+            level: "warning",
+            message: `Context window usage could not be refreshed: ${formatError(
+              caught,
+            )}`,
+            source: "context",
+            title: "Context unavailable",
+          },
+          type: "notice.emitted",
+        });
+      });
+
+    return (): void => {
+      cancelled = true;
+    };
+  }, [client, state.activeSessionId, store]);
 
   return (
     <Box flexDirection="column">

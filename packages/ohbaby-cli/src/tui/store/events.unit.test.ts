@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { UiCommandOutput, UiSnapshot } from "ohbaby-sdk";
+import type {
+  UiCommandOutput,
+  UiContextWindowUsage,
+  UiSnapshot,
+} from "ohbaby-sdk";
+import {
+  selectActiveContextWindowUsage,
+} from "./selectors.js";
 import {
   applyTuiEvent,
   createStateFromSnapshot,
@@ -30,6 +37,20 @@ function snapshot(): UiSnapshot {
       },
     ],
     status: { kind: "idle" },
+  };
+}
+
+function contextWindowUsage(
+  sessionId: string,
+  currentTokens: number,
+): UiContextWindowUsage {
+  return {
+    contextWindowRatio: currentTokens / 1_000_000,
+    contextWindowTokens: 1_000_000,
+    currentTokens,
+    estimatedAt: "2026-06-06T00:00:00.000Z",
+    modelId: "fake-model",
+    sessionId,
   };
 }
 
@@ -89,6 +110,76 @@ describe("TUI store event reducer", () => {
       mode: "auto",
       sessionRules: [],
     });
+  });
+
+  it("keeps context window usage scoped to the active session", () => {
+    const sessionOneUsage = contextWindowUsage("session_1", 38_400);
+    const sessionTwoUsage = contextWindowUsage("session_2", 12_000);
+    let state = createStateFromSnapshot({
+      ...snapshot(),
+      contextWindowUsages: [sessionOneUsage, sessionTwoUsage],
+    });
+
+    expect(state.contextWindowUsages).toEqual([
+      sessionOneUsage,
+      sessionTwoUsage,
+    ]);
+    expect(selectActiveContextWindowUsage(state)).toEqual(sessionOneUsage);
+
+    state = applyTuiEvent(state, {
+      usage: contextWindowUsage("session_2", 20_000),
+      type: "context.window.updated",
+    });
+
+    expect(selectActiveContextWindowUsage(state)).toEqual(sessionOneUsage);
+
+    const refreshedSessionOneUsage = contextWindowUsage("session_1", 40_000);
+    state = applyTuiEvent(state, {
+      usage: refreshedSessionOneUsage,
+      type: "context.window.updated",
+    });
+
+    expect(selectActiveContextWindowUsage(state)).toEqual(
+      refreshedSessionOneUsage,
+    );
+    expect(state.contextWindowUsages).toHaveLength(2);
+  });
+
+  it("does not show another session's cached context window usage after session switch", () => {
+    const sessionOneUsage = contextWindowUsage("session_1", 38_400);
+    let state = createStateFromSnapshot({
+      ...snapshot(),
+      contextWindowUsages: [sessionOneUsage],
+    });
+
+    state = applyTuiEvent(state, {
+      snapshot: {
+        ...snapshot(),
+        activeSessionId: "session_2",
+        sessions: [
+          ...snapshot().sessions,
+          {
+            createdAt: "2026-05-14T00:00:03.000Z",
+            id: "session_2",
+            messages: [],
+            title: "Second",
+            updatedAt: "2026-05-14T00:00:03.000Z",
+          },
+        ],
+      },
+      type: "snapshot.replaced",
+    });
+
+    expect(state.contextWindowUsages).toEqual([sessionOneUsage]);
+    expect(selectActiveContextWindowUsage(state)).toBeNull();
+
+    const sessionTwoUsage = contextWindowUsage("session_2", 12_000);
+    state = applyTuiEvent(state, {
+      usage: sessionTwoUsage,
+      type: "context.window.updated",
+    });
+
+    expect(selectActiveContextWindowUsage(state)).toEqual(sessionTwoUsage);
   });
 
   it("applies message deltas to an existing assistant message part", () => {

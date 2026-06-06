@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import type { UiContextWindowUsage } from "ohbaby-sdk";
 import type {
   TuiInteractionRequest,
   TuiRuntimeStatus,
@@ -24,6 +25,20 @@ export function selectEffectiveRuntime(state: TuiStoreState): TuiRuntimeStatus {
     };
   }
   return state.runtime;
+}
+
+export function selectActiveContextWindowUsage(
+  state: TuiStoreState,
+): UiContextWindowUsage | null {
+  if (!state.activeSessionId) {
+    return null;
+  }
+
+  return (
+    state.contextWindowUsages.find(
+      (usage) => usage.sessionId === state.activeSessionId,
+    ) ?? null
+  );
 }
 
 export function selectRuntimeLabel(state: TuiStoreState): string {

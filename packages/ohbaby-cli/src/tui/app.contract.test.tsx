@@ -1,6 +1,10 @@
 ﻿import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { UiEventHandler, UiSnapshot } from "ohbaby-sdk";
+import type {
+  UiContextWindowUsage,
+  UiEventHandler,
+  UiSnapshot,
+} from "ohbaby-sdk";
 import { OhbabyTerminalApp } from "./index.js";
 import type {
   TerminalClient,
@@ -32,6 +36,20 @@ function snapshot(): UiSnapshot {
       },
     ],
     status: { kind: "idle" },
+  };
+}
+
+function contextWindowUsage(
+  sessionId = "session_1",
+  currentTokens = 38_400,
+): UiContextWindowUsage {
+  return {
+    contextWindowRatio: currentTokens / 1_000_000,
+    contextWindowTokens: 1_000_000,
+    currentTokens,
+    estimatedAt: "2026-06-06T00:00:00.000Z",
+    modelId: "fake-model",
+    sessionId,
   };
 }
 
@@ -107,6 +125,56 @@ describe("OhbabyTerminalApp", () => {
     await flush();
 
     expect(app.lastFrame()).toContain("ohbaby > hello |");
+  });
+
+  it("refreshes and renders active session context window usage", async () => {
+    const usage = contextWindowUsage();
+    const client = {
+      ...createFakeClient(snapshot()),
+      getContextWindowUsage: vi.fn(() => Promise.resolve(usage)),
+    };
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    await waitForFrame(app, (frame) => frame.includes("38.4K / 1M (4%)"));
+
+    expect(client.getContextWindowUsage).toHaveBeenCalledWith({
+      sessionId: "session_1",
+    });
+  });
+
+  it("keeps cached context window usage and emits a warning notice when refresh fails", async () => {
+    const usage = contextWindowUsage();
+    const client = {
+      ...createFakeClient({
+        ...snapshot(),
+        contextWindowUsages: [usage],
+      }),
+      getContextWindowUsage: vi.fn(() =>
+        Promise.reject(new Error("usage offline")),
+      ),
+    };
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    const frame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("38.4K / 1M (4%)") &&
+        nextFrame.includes("Context unavailable"),
+    );
+
+    expect(frame).toContain("usage offline");
   });
 
   it("renders snapshot messages and applies assistant deltas", async () => {

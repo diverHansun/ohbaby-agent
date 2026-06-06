@@ -1,5 +1,6 @@
 import type {
   UiCommandOutput,
+  UiContextWindowUsage,
   UiInteractionRequest,
   UiMessage,
   UiMessagePart,
@@ -33,6 +34,7 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
     catalogInvalidation: null,
     commandNotices: [],
     commandNoticeSequence: 0,
+    contextWindowUsages: snapshot.contextWindowUsages ?? [],
     resolvedPermissionIds: [],
     interactions: [],
     messages: activeSession?.messages ?? [],
@@ -110,6 +112,14 @@ export function applyTuiEvent(
     case "runtime.updated":
       return rebuildFromCollections(state, {
         runtime: event.status,
+      });
+
+    case "context.window.updated":
+      return rebuildFromCollections(state, {
+        contextWindowUsages: upsertContextWindowUsage(
+          state.contextWindowUsages,
+          event.usage,
+        ),
       });
 
     case "permission.requested":
@@ -266,6 +276,10 @@ function preserveLocalQueues(
   const sessions = mergeSessions(next.sessions, previous.sessions);
   const runs = mergeRuns(next.runs, previous.runs);
   const permission = previous.permission ?? next.permission;
+  const contextWindowUsages = mergeContextWindowUsages(
+    next.contextWindowUsages,
+    previous.contextWindowUsages,
+  );
   const runtime = resolveRuntimeAfterSnapshot(
     previous,
     next,
@@ -278,6 +292,7 @@ function preserveLocalQueues(
     runs,
     sessions,
     status: runtime,
+    ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
     ...(permission === undefined ? {} : { permission }),
   };
 
@@ -287,6 +302,7 @@ function preserveLocalQueues(
     catalogInvalidation: previous.catalogInvalidation,
     commandNotices: activeSessionChanged ? [] : previous.commandNotices,
     commandNoticeSequence: previous.commandNoticeSequence,
+    contextWindowUsages,
     interactions: previous.interactions,
     messages:
       sessions.find((session) => session.id === next.activeSessionId)
@@ -311,6 +327,7 @@ function rebuildFromCollections(
     readonly permissions?: readonly UiPermissionRequest[];
     readonly permission?: UiPermissionState;
     readonly runtime?: TuiRuntimeStatus;
+    readonly contextWindowUsages?: readonly UiContextWindowUsage[];
   },
 ): TuiStoreState {
   const activeSessionId =
@@ -322,18 +339,22 @@ function rebuildFromCollections(
   const permissions = patch.permissions ?? state.permissions;
   const permission = patch.permission ?? state.permission;
   const runtime = patch.runtime ?? state.runtime;
+  const contextWindowUsages =
+    patch.contextWindowUsages ?? state.contextWindowUsages;
   const snapshot: UiSnapshot = {
     activeSessionId,
     permissions,
     runs,
     sessions,
     status: runtime,
+    ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
     ...(permission === undefined ? {} : { permission }),
   };
 
   return {
     ...state,
     activeSessionId,
+    contextWindowUsages,
     messages:
       sessions.find((session) => session.id === activeSessionId)?.messages ??
       [],
@@ -456,6 +477,39 @@ function mergeRuns(
   }
 
   return Array.from(merged.values());
+}
+
+function mergeContextWindowUsages(
+  next: readonly UiContextWindowUsage[],
+  previous: readonly UiContextWindowUsage[],
+): readonly UiContextWindowUsage[] {
+  const merged = new Map<string, UiContextWindowUsage>();
+
+  for (const usage of previous) {
+    merged.set(usage.sessionId, usage);
+  }
+  for (const usage of next) {
+    merged.set(usage.sessionId, usage);
+  }
+
+  return Array.from(merged.values());
+}
+
+function upsertContextWindowUsage(
+  usages: readonly UiContextWindowUsage[],
+  usage: UiContextWindowUsage,
+): readonly UiContextWindowUsage[] {
+  const index = usages.findIndex(
+    (candidate) => candidate.sessionId === usage.sessionId,
+  );
+
+  if (index === -1) {
+    return [...usages, usage];
+  }
+
+  return usages.map((candidate) =>
+    candidate.sessionId === usage.sessionId ? usage : candidate,
+  );
 }
 
 function compareIso(left: string, right: string): number {

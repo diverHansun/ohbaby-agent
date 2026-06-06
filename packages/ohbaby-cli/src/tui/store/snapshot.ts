@@ -3,6 +3,7 @@ import type {
   UiCommandCatalog,
   UiCommandInvocation,
   UiCommandSpec,
+  UiContextWindowUsage,
   UiEvent as SdkUiEvent,
   UiEventHandler,
   UiInteractionKind,
@@ -89,6 +90,7 @@ export interface TuiStoreState {
   readonly interactions: readonly TuiInteractionRequest[];
   readonly notices: readonly UiNotice[];
   readonly commandNotices: readonly TuiCommandNotice[];
+  readonly contextWindowUsages: readonly UiContextWindowUsage[];
   readonly commandNoticeSequence: number;
   readonly resolvedPermissionIds: readonly string[];
   readonly catalog: TuiCommandCatalog | null;
