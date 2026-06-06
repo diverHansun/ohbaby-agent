@@ -136,16 +136,12 @@ export async function waitForFrame(
 export function promptLine(frame: string): string {
   const lines = frame.split(/\r?\n/u);
   return (
-    [...lines]
-      .reverse()
-      .find((line) => line.trimStart().startsWith("ohbaby >")) ?? ""
+    [...lines].reverse().find((line) => line.trimStart().startsWith("> ")) ?? ""
   );
 }
 
 export function promptIsReady(frame: string): boolean {
   const line = promptLine(frame);
 
-  return (
-    line.includes("ohbaby >") && line.includes("message") && line.includes("|")
-  );
+  return line.trimStart() === "> message";
 }

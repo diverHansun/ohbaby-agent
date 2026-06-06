@@ -55,7 +55,7 @@ describe("TUI main chain with real in-process backend", () => {
       nextFrame.includes("Hello world"),
     );
 
-    expect(frame).toContain("ohbaby");
+    expect(frame).not.toContain("ohbaby");
     expect(frame).not.toContain("Hellolo");
     expect(frame).toContain("status: idle | session: session_1");
     app.unmount();
@@ -108,9 +108,10 @@ describe("TUI main chain with real in-process backend", () => {
     const completedFrame = await waitForFrame(app, (frame) =>
       frame.includes("Permission complete."),
     );
-    expect(completedFrame).toContain("tool write (completed)");
-    expect(completedFrame).toContain("tool result call_write");
-    expect(completedFrame).toContain("result hidden");
+    expect(completedFrame).toContain("Write allowed.txt");
+    expect(completedFrame).not.toContain("tool write");
+    expect(completedFrame).not.toContain("tool result");
+    expect(completedFrame).not.toContain("result hidden");
     expect(completedFrame).toContain("status: idle | session: session_1");
 
     app.stdin.write("again");
@@ -182,17 +183,11 @@ describe("TUI main chain with real in-process backend", () => {
       />,
     );
 
-    await waitForFrame(app, (frame) =>
-      frame.includes("mode: auto | level: default"),
-    );
+    await waitForFrame(app, (frame) => frame.includes("auto · default"));
     app.stdin.write("\u001B[Z");
-    await waitForFrame(app, (frame) =>
-      frame.includes("mode: plan | level: default"),
-    );
+    await waitForFrame(app, (frame) => frame.includes("plan · default"));
     app.stdin.write("\u001B[Z");
-    await waitForFrame(app, (frame) =>
-      frame.includes("mode: auto | level: default"),
-    );
+    await waitForFrame(app, (frame) => frame.includes("auto · default"));
     app.stdin.write("/permission");
     app.stdin.write("\r");
     await waitForFrame(app, (nextFrame) =>
@@ -201,7 +196,7 @@ describe("TUI main chain with real in-process backend", () => {
     app.stdin.write("\u001B[B");
     app.stdin.write("\r");
     const frame = await waitForFrame(app, (nextFrame) =>
-      nextFrame.includes("mode: auto | level: full-access"),
+      nextFrame.includes("auto · full-access"),
     );
 
     expect(frame).toContain("status: idle");
@@ -221,9 +216,7 @@ describe("TUI main chain with real in-process backend", () => {
 
     await waitForFrame(app, promptIsReady);
     app.stdin.write("\u001B[Z");
-    await waitForFrame(app, (frame) =>
-      frame.includes("mode: plan | level: default"),
-    );
+    await waitForFrame(app, (frame) => frame.includes("plan · default"));
 
     app.stdin.write("/status");
     app.stdin.write("\r");
@@ -234,7 +227,7 @@ describe("TUI main chain with real in-process backend", () => {
         !nextFrame.includes("Unknown command"),
     );
 
-    expect(frame).toContain("mode: plan | level: default");
+    expect(frame).toContain("plan · default");
     app.unmount();
   });
 
@@ -264,13 +257,9 @@ describe("TUI main chain with real in-process backend", () => {
       />,
     );
 
-    await waitForFrame(app, (frame) =>
-      frame.includes("mode: auto | level: default"),
-    );
+    await waitForFrame(app, (frame) => frame.includes("auto · default"));
     app.stdin.write("\u001B[Z");
-    await waitForFrame(app, (frame) =>
-      frame.includes("mode: plan | level: default"),
-    );
+    await waitForFrame(app, (frame) => frame.includes("plan · default"));
 
     app.stdin.write("try to write");
     app.stdin.write("\r");
@@ -284,7 +273,7 @@ describe("TUI main chain with real in-process backend", () => {
       nextFrame.includes("Plan write completed."),
     );
 
-    expect(frame).toContain("tool write (completed)");
+    expect(frame).toContain("Write denied.txt");
     expect(frame).not.toContain("plan mode");
     expect(requests).toHaveLength(2);
     await expect(readFile(join(workdir, "denied.txt"), "utf8")).resolves.toBe(
@@ -321,9 +310,7 @@ describe("TUI main chain with real in-process backend", () => {
     await waitForFrame(app, (frame) => frame.includes("Permission level:"));
     app.stdin.write("\u001B[B");
     app.stdin.write("\r");
-    await waitForFrame(app, (frame) =>
-      frame.includes("mode: auto | level: full-access"),
-    );
+    await waitForFrame(app, (frame) => frame.includes("auto · full-access"));
 
     app.stdin.write("write automatically");
     app.stdin.write("\r");
@@ -331,7 +318,7 @@ describe("TUI main chain with real in-process backend", () => {
       nextFrame.includes("Auto edit wrote the file."),
     );
 
-    expect(frame).toContain("tool write (completed)");
+    expect(frame).toContain("Write auto.txt");
     expect(frame).not.toContain("Permission:");
     await expect(readFile(join(workdir, "auto.txt"), "utf8")).resolves.toBe(
       "auto edit ok",

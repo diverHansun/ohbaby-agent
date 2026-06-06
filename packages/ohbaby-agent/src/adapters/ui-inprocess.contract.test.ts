@@ -914,10 +914,10 @@ class RecordingRunLedger implements RunLedger {
 describe("createInProcessUiBackendClient", () => {
   it("submits a prompt and publishes streaming message updates", async () => {
     const client = createInProcessUiBackendClient({
-      llmClient: createFakeLLMClient([
-        { textDelta: "Hello" },
-        { textDelta: " world", finishReason: "stop" },
-      ], { contextWindowTokens: 1_000_000 }),
+      llmClient: createFakeLLMClient(
+        [{ textDelta: "Hello" }, { textDelta: " world", finishReason: "stop" }],
+        { contextWindowTokens: 1_000_000 },
+      ),
     });
     const events: UiEvent[] = [];
 
@@ -943,6 +943,7 @@ describe("createInProcessUiBackendClient", () => {
       "message.updated",
       "message.part.delta",
       "run.updated",
+      "message.updated",
       "runtime.updated",
     ]);
 
@@ -954,7 +955,12 @@ describe("createInProcessUiBackendClient", () => {
     expect(assistantUpdates.map((event) => event.message.parts)).toEqual([
       [{ type: "text", text: "Hello" }],
       [{ type: "text", text: "Hello world" }],
+      [{ type: "text", text: "Hello world" }],
     ]);
+    expect(assistantUpdates.at(-1)?.message).toMatchObject({
+      finishReason: "succeeded",
+      status: "completed",
+    });
     const assistantDeltas = events.filter(
       (event): event is Extract<UiEvent, { type: "message.part.delta" }> =>
         event.type === "message.part.delta",

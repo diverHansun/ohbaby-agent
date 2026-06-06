@@ -208,9 +208,13 @@ describe("npm packed CLI smoke", () => {
   it("installs the packed ohbaby-cli tarball globally and exposes ohbaby help and version", async () => {
     const tempRoot = await tempDirectory("ohbaby-packaging-smoke-");
     const packDestination = join(tempRoot, "pack");
+    const npmCache = join(tempRoot, "npm-cache");
+    const npmTmp = join(tempRoot, "npm-tmp");
     const prefix = join(tempRoot, "prefix");
     const npm = npmCommand();
     await mkdir(packDestination, { recursive: true });
+    await mkdir(npmCache, { recursive: true });
+    await mkdir(npmTmp, { recursive: true });
 
     const buildResult = await runCommand({
       command: pnpmCommand(),
@@ -258,6 +262,11 @@ describe("npm packed CLI smoke", () => {
         resolve(packDestination, cliPack.filename),
         resolve(packDestination, agentPack.filename),
       ],
+      env: {
+        ...process.env,
+        npm_config_cache: npmCache,
+        npm_config_tmp: npmTmp,
+      },
       timeoutMs: 180_000,
     });
     expectSuccess(installResult, "npm install global packed ohbaby-cli");

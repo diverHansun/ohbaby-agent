@@ -88,8 +88,9 @@ describe("TUI persistent backend display", () => {
         nextFrame.includes("status: idle | session:"),
     );
 
-    expect(frame).toContain("you");
-    expect(frame).toContain("ohbaby");
+    expect(frame).toContain("| Remember this");
+    expect(frame).not.toContain("you");
+    expect(frame).not.toContain("ohbaby");
     app.unmount();
   });
 
