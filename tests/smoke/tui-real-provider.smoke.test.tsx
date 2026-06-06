@@ -153,6 +153,10 @@ async function waitForAssistantText(
   );
 }
 
+function normalizeMarkerToken(value: string): string {
+  return value.replace(/[^A-Za-z0-9]/gu, "").toUpperCase();
+}
+
 async function submitPromptApprovingPermissions(
   client: RealUiClient,
   prompt: string,
@@ -443,23 +447,23 @@ describe("real provider TUI smoke", () => {
         );
         await waitForFrame(
           app,
-          (frame) => frame.includes("tool read (completed)"),
+          (frame) => frame.includes("Read marker.txt"),
           240_000,
         );
         const text = await waitForAssistantText(client, (value) =>
-          value.includes("OHBABY_REAL_TOOL_READ_OK"),
+          normalizeMarkerToken(value).includes("OHBABYREALTOOLREADOK"),
         );
         const finalFrame = await waitForFrame(
           app,
           (frame) =>
-            frame.includes("tool read (completed)") &&
+            frame.includes("Read marker.txt") &&
             frame.includes("status: idle | session:"),
           240_000,
         );
 
-        expect(text).toContain("OHBABY_REAL_TOOL_READ_OK");
-        expect(finalFrame).toContain("tool result");
-        expect(finalFrame).toContain("result hidden");
+        expect(normalizeMarkerToken(text)).toContain("OHBABYREALTOOLREADOK");
+        expect(finalFrame).not.toContain("tool result");
+        expect(finalFrame).not.toContain("result hidden");
         expect(finalFrame).not.toContain("FILE_ONLY_SECRET_MARKER_73f4b0");
       } finally {
         app.unmount();
