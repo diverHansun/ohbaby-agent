@@ -12,6 +12,13 @@ import {
 } from "../../slash-commands/runtime.js";
 import type { TuiCommandCatalog } from "../../store/snapshot.js";
 import { Completion } from "./completion.js";
+import {
+  applyEditorAction,
+  createEditorState,
+  editorText,
+  type EditorAction,
+  type EditorState,
+} from "./editor-reducer.js";
 
 export interface PromptProps {
   readonly activeSessionId: string | null;
@@ -30,15 +37,32 @@ export function Prompt({
   loadCatalog,
   permission,
 }: PromptProps): ReactElement {
-  const [input, setInput] = useState("");
+  const [editor, setEditor] = useState<EditorState>(() => createEditorState());
   const [error, setError] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const inputRef = useRef("");
+  const editorRef = useRef(editor);
   const selectedIndexRef = useRef(0);
 
+  const replaceEditor = (nextEditor: EditorState): void => {
+    editorRef.current = nextEditor;
+    setEditor(nextEditor);
+  };
+
   const replaceInput = (nextInput: string): void => {
-    inputRef.current = nextInput;
-    setInput(nextInput);
+    replaceEditor(
+      createEditorState({
+        history: editorRef.current.history,
+        text: nextInput,
+      }),
+    );
+  };
+
+  const applyEditor = (
+    action: EditorAction,
+  ): ReturnType<typeof applyEditorAction> => {
+    const result = applyEditorAction(editorRef.current, action);
+    replaceEditor(result.state);
+    return result;
   };
 
   const selectIndex = (index: number): void => {
@@ -48,12 +72,21 @@ export function Prompt({
 
   useInput(
     (value, key) => {
-      const currentInput = inputRef.current;
+      const currentInput = editorText(editorRef.current);
       const candidates = getSlashCompletionCandidates(currentInput, catalog);
 
       if (key.return) {
+        if (key.shift) {
+          applyEditor({ type: "newline" });
+          return;
+        }
+
+        const result = applyEditor({ type: "submit" });
+        if (result.submission === undefined) {
+          return;
+        }
         void submitInput(
-          currentInput,
+          result.submission,
           activeSessionId,
           catalog,
           client,
@@ -80,6 +113,16 @@ export function Prompt({
         }
       }
 
+      if (key.upArrow) {
+        applyEditor({ type: "history-up" });
+        return;
+      }
+
+      if (key.downArrow) {
+        applyEditor({ type: "history-down" });
+        return;
+      }
+
       if (key.tab && !key.shift) {
         replaceInput(getSlashCompletion(currentInput, catalog));
         selectIndex(0);
@@ -87,20 +130,40 @@ export function Prompt({
       }
 
       if (value === "\u0015" || (key.ctrl && value === "u")) {
-        replaceInput("");
+        applyEditor({ type: "clear-line" });
         selectIndex(0);
         setError(null);
         return;
       }
 
       if (key.backspace || key.delete) {
-        replaceInput(currentInput.slice(0, -1));
+        applyEditor({ type: "backspace" });
         selectIndex(0);
         return;
       }
 
+      if (key.leftArrow) {
+        applyEditor({ type: "move-left" });
+        return;
+      }
+
+      if (key.rightArrow) {
+        applyEditor({ type: "move-right" });
+        return;
+      }
+
+      if (key.pageUp) {
+        applyEditor({ type: "move-home" });
+        return;
+      }
+
+      if (key.pageDown) {
+        applyEditor({ type: "move-end" });
+        return;
+      }
+
       if (value.length > 0 && !key.ctrl && !key.meta) {
-        replaceInput(`${currentInput}${value}`);
+        applyEditor({ text: value, type: "insert" });
         selectIndex(0);
         setError(null);
       }
@@ -110,14 +173,7 @@ export function Prompt({
 
   return (
     <Box flexDirection="column">
-      <Text>
-        <Text dimColor={disabled}>{">"} </Text>
-        {input.length === 0 ? (
-          <Text dimColor>{disabled ? "paused" : "message"}</Text>
-        ) : (
-          <Text>{input}</Text>
-        )}
-      </Text>
+      {renderEditorLines(editor, disabled)}
       {permission === undefined ? null : (
         <Text dimColor>
           {permission.mode} · {permission.level}
@@ -126,11 +182,28 @@ export function Prompt({
       {error === null ? null : <Text color="red">{error}</Text>}
       <Completion
         catalog={catalog}
-        input={input}
+        input={editorText(editor)}
         selectedIndex={selectedIndex}
       />
     </Box>
   );
+}
+
+function renderEditorLines(
+  editor: EditorState,
+  disabled: boolean,
+): readonly ReactElement[] {
+  const isEmpty = editorText(editor).length === 0;
+  return editor.lines.map((line, index) => (
+    <Text key={String(index)}>
+      <Text dimColor={disabled}>{index === 0 ? "> " : "  "}</Text>
+      {isEmpty && index === 0 ? (
+        <Text dimColor>{disabled ? "paused" : "message"}</Text>
+      ) : (
+        <Text>{line}</Text>
+      )}
+    </Text>
+  ));
 }
 
 function formatError(error: unknown): string {

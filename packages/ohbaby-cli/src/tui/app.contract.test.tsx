@@ -750,6 +750,30 @@ describe("OhbabyTerminalApp", () => {
     });
   });
 
+  it("browses prompt history without losing the current draft", async () => {
+    const client = createFakeClient(snapshot());
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("first");
+    app.stdin.write("\r");
+    await flush();
+
+    app.stdin.write("draft");
+    app.stdin.write("\u001B[A");
+    await flush();
+    expect(app.lastFrame()).toContain("> first");
+
+    app.stdin.write("\u001B[B");
+    await flush();
+    expect(app.lastFrame()).toContain("> draft");
+  });
+
   it("clears submitted prompts immediately and surfaces concurrent submit errors", async () => {
     const client = createFakeClient(snapshot());
     client.submitPrompt
