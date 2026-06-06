@@ -1,132 +1,155 @@
 # 04 — 测试与验收方案
 
 日期: 2026-06-05
+更新: 2026-06-06
 
 测试栈：`vitest 2` + `ink-testing-library 4`。命名沿用项目规范：
-`*.unit.test.ts`（纯函数）/ `*.contract.test.tsx`（组件契约）/ `*.integration.test.ts`。
-分类跑：`pnpm test:unit` / `test:contract` / `test:integration`（`scripts/run-vitest-by-type.mjs`）。
+`*.unit.test.ts` / `*.contract.test.tsx` / `*.integration.test.ts`。
 
-测试金字塔：**纯函数单测为主**（render 层 + editor reducer），组件契约测试覆盖渲染/交互不变量，少量端到端验收靠 `/run`。
+最终测试范围以
+[05-a-c-contract-appshell-viewport-plan.md](05-a-c-contract-appshell-viewport-plan.md)
+为准。本文件聚焦实施完成后的验证与验收。
 
----
+## 1. 单元测试
 
-## 1. 单元测试（TDD，纯函数）
+### SDK / agent contract
 
-### theme
-- `detect.unit.test.ts`：
-  - 无法探测背景 → 回退暗色。
-  - `COLORFGBG` / 环境覆盖 → 选对主题。
-  - 暗色为默认。
-- `tokens.unit.test.ts`：暗/亮两套 token 完整（无 undefined）；按 `chalk.level` 降级到 ansi 名。
+- `UiContextWindowUsage` 类型导出与 snapshot normalize。
+- `contextWindowRatio = currentTokens / contextWindowTokens`。
+- 使用模型完整 context window 作为分母，不使用 input budget ratio。
+- unknown model/window 返回 `null` 或不输出 usage。
+- message lifecycle 字段兼容旧消息。
 
-### render/wrap
-- `wrap.unit.test.ts`：
-  - `visibleWidth` 忽略 ANSI 转义、正确处理 CJK 宽字符（中文占 2）。
-  - `wrapAnsi` 按可见宽度折行且不切断 ANSI 序列。
-  - `truncateAnsi` 超宽加 `…`，保留已开样式的复位。
+### render/usage
 
-### render/markdown
-- `markdown.unit.test.ts`：「输入文本 → 期望行」：
-  - 标题/加粗/斜体/行内码/列表/引用/链接/分隔线各一例。
-  - 代码块：围栏 + 缩进 2 + 调用 highlight；无边框/背景。
-  - 宽度折行：长段落按 width 折行；CJK 正确。
+- `38400 / 1000000` 输出 `38.4K / 1M (4%)`。
+- `0 < ratio < 1%` 输出 `<1%`。
+- 缺失或非法 `contextWindowTokens` 输出空字符串。
+- 不输出费用。
 
-### render/highlight
-- `highlight.unit.test.ts`：已知语言高亮非空；未知语言回退 `text.normal`；空代码不崩。
+### render/wrap / markdown / highlight
 
-### 工具渲染器
-- `tool/renderers/*.unit.test.ts`：每工具 header：
-  - read/write/edit → 显示 `file_path`；bash → `command` 截断；grep/glob → `pattern`；default → 键摘要。
-  - 状态图标随 `status` 变（pending/running `▸`、completed `✓`、failed `✗`）。
-  - **不泄漏** 输出/diff/参数全文。
+- `visibleWidth` 忽略 ANSI 转义、正确处理 CJK 宽字符。
+- `wrapAnsi` 不切断 ANSI 序列。
+- markdown 标题、列表、引用、链接、代码块能按 `contentWidth` 折行。
+- unknown language 代码块回退普通文本。
+- ANSI 行满足 `visibleWidth(line) <= partWidth`。
+- ANSI 字符串进入 Ink `Text` 后不会被二次折行破坏序列。
+
+### tool renderers
+
+- running/pending 左侧显示 spinner。
+- completed 不保留图标，只显示工具名与主参摘要，但保留 leading slot 宽度。
+- failed 不使用失败 icon，追加短错误摘要。
+- 不泄漏输出 body、diff、完整 JSON 参数。
+- `extractPrimaryArg(call)` 或等价 helper 覆盖 read/write/edit/bash/grep/glob/todo/default。
 
 ### editor reducer
-- `editor-reducer.unit.test.ts`（重点）：
-  - 光标 ←/→/Home/End 边界。
-  - `Shift+Enter` 插入换行；`Enter` 返回 submit 意图并清空。
-  - `Backspace` 跨行合并；`Ctrl+U` 清行。
-  - 批量插入（粘贴）一次性进入，不逐字。
-  - **历史草稿**：输入未发送 → ↑ 进历史 → ↓ 回末尾 → 草稿原样恢复（核心回归点）。
-  - 多次 ↑/↓ 在历史与草稿间稳定切换。
 
----
+- 光标、Home/End、Backspace、Ctrl+U、多行输入。
+- Shift+Enter 插入换行；Enter 提交。
+- 批量粘贴一次性进入。
+- 历史浏览不丢未发送草稿。
 
-## 2. 组件契约测试（ink-testing-library）
+### reasoning
 
-### message-block.contract.test.tsx
-- 助手 text part → markdown 渲染（含加粗/代码块标记），**不出现** `ohbaby` 文字角色头。
-- 用户 part：暗色出现左竖线 `▎`、**不出现** `you`。
-- reasoning part → `theme.reasoning`（灰 textMuted）渲染，相对正文克制。
-- tool part → 单行 header（图标+名+主参），不含输出体。
-- **回归守卫**：任何 part 渲染输出中**不得**出现 `you` / `ohbaby` / `assistant` / `tool` 角色文字标签（断言不包含）。
+- streaming message 默认展开 reasoning。
+- completed/error message 自动折叠为 `Thought`。
+- legacy message 无 lifecycle 字段时按 completed 处理。
+- 不使用 runtime `running/idle` 判断折叠。
 
-### prompt/editor.contract.test.tsx
-- 输入字符 → 显示；Shift+Enter → 多行显示；光标可见。
-- slash 输入 `/` → completion 显示；↑/↓ 切候选（不触发历史）；Tab 补全；Enter 提交。
+## 2. 组件契约测试
 
-### status-bar.contract.test.tsx
-- 显示 mode·permission·session；无 token 数据时右侧不出现占位文本。
+### AppShell / layout
 
-### app.contract.test.tsx（扩展现有）
-- 保持现有不变量：快照渲染、catalog 刷新、`app.exit` 退出。
-- `Shift+Tab` 触发权限模式切换命令；运行中 `Ctrl+C` abort。
-- 空会话显示 Logo。
+- 宽屏和窄屏共用同一 `contentWidth` 口径。
+- prompt dock、message flow、slash completion、status panel 同步缩放。
+- 空会话显示 OHBABY ASCII/ANSI logo，不显示 tip，不显示模型。
+- `AppShell` 是唯一读取 `useStdout().stdout.columns` 的布局入口。
+- `markdown-part.tsx` 通过 layout context 获取 `partWidth`，不自行猜测终端宽度。
 
-### dialogs（按风险覆盖，非随机抽样）
-现有 6 个 dialog 组件，按复杂度/频率定向覆盖，避免抽样遗漏：
-- **manager.contract.test.tsx**（最复杂）：permission/interaction 队列路由逻辑——多个请求排队、依次弹出、响应后出队。
-- **permission-dialog.contract.test.tsx**（最复杂交互）：渲染 choices、选中态主题色、allow/deny/abort intent 正确回传、remember 选项。
-- **confirm.contract.test.tsx**（最高频）：确认/取消渲染与回调。
-- **select-one** 系（model/session/select-one 三个 wrapper）：抽 **一个** 代表测渲染 + 选中切换即可，逻辑同构。
+### message-block
 
----
+- 用户历史消息有左竖线，无背景块。
+- assistant 消息直接 markdown。
+- 输出中不得出现 `you` / `ohbaby` / `assistant` / `tool` 角色文字头。
+- reasoning 折叠/展开由 message lifecycle 决定。
+- tool line 不出现成功/失败 icon。
 
-## 3. 验收场景（`/run`，真实 PowerShell）
+### PromptDock
 
-在 Windows PowerShell（黑底）实际启动 `ohbaby`，逐项目测：
+- 当前输入有背景块。
+- prompt 符号只使用 `>`。
+- mode 只显示 `auto` 或 `plan`，不得出现 `ask` / `build`。
+- 不显示模型。
+- 无 context window usage 时右侧留空。
+
+### status-bar
+
+- 只显示 active session 的 context window usage。
+- session 切换不能显示其他 session 的旧 usage。
+- 目标 session 有自己的缓存时可先显示自己的旧值。
+- 目标 session 无缓存时留空。
+
+### StatusPanel
+
+- `/status` 渲染为轻边框多行 panel。
+- 读取 `contextWindow` 字段。
+- context 缺失时显示 `Context unavailable`。
+- 不显示费用、severity、progress bar。
+
+## 3. 集成测试
+
+- `run.context.prepared` 能映射并 publish `context.window.updated`。
+- `getContextWindowUsage({ sessionId })` 只接收 `sessionId`，成功返回当前 session usage。
+- real-session mapping gate：真实 session 中
+  `ContextUsage -> UiContextWindowUsage` 映射口径正确，分母为完整 context window。
+- query 不 publish；TUI 成功后本地 dispatch。
+- refresh 失败时当前 session 旧缓存保留，并发 warning notice。
+- `/status` command data 包含 `contextWindow`，旧 `context` alias 可兼容一版。
+- app 现有不变量保持：快照拉取、catalog 刷新、`app.exit`、`Shift+Tab`、`Ctrl+C`。
+
+## 4. 真实 API E2E
+
+使用根目录 `.env` 中的真实 API key，沿用项目现有真实 smoke 机制。
+
+必须覆盖：
 
 | # | 场景 | 期望 |
 |---|---|---|
-| 1 | 空会话启动 | 显示 Logo（OHBABY 紫金标题，金主紫辅）+ 暗色主题，无报错 |
-| 2 | 发送中文消息 | 用户消息带左竖线，无 `you` 字样，CJK 不错位 |
-| 3 | AI 返回 markdown（标题/列表/加粗/代码块） | 正确渲染，代码块高亮、缩进、无边框 |
-| 4 | AI 调用工具（read/edit/bash） | 每个工具单行折叠：图标+名+主参，无输出刷屏 |
-| 5 | reasoning | 灰（theme.reasoning / textMuted），相对正文克制、不喧宾夺主 |
-| 6 | 多行输入 Shift+Enter | 正确换行，Enter 才提交 |
-| 7 | 粘贴多行文本 | 一次性插入，不逐字、不卡顿 |
-| 8 | 历史 ↑/↓ + 未发送草稿 | 翻历史再回来草稿不丢 |
-| 9 | slash 命令 `/` | 补全列表正常，↑/↓ 选候选 |
-| 10 | 运行中 spinner | 金紫交替动画（呼应 logo）；Ctrl+C 能中断 |
+| 1 | 空会话启动 | OHBABY ANSI logo + PromptDock，无 tip、无模型 |
+| 2 | 发送中文消息 | 历史用户消息左竖线，无 `you` 字样，CJK 不错位 |
+| 3 | AI 返回 markdown | 标题/列表/加粗/代码块正确渲染 |
+| 4 | reasoning | 运行中灰色展开，完成后折叠为 `Thought` |
+| 5 | 工具调用 | 运行中 spinner，完成后只留工具名与摘要 |
+| 6 | status bar | 右侧显示当前 session `38.4K / 1M (4%)` 同类格式 |
+| 7 | `/status` | 轻边框 panel，包含 context window 行 |
+| 8 | session 切换 | 不显示其他 session 的旧 usage |
+| 9 | 多行输入 | Shift+Enter 换行，Enter 提交 |
+| 10 | slash 命令 `/` | 补全列表正常，选择和提交不回退 |
 | 11 | 权限弹窗 | dialog 主题统一，可选择 |
-| 12 | 窄/宽终端 resize | 折行自适应，不溢出 |
-| 13 | 状态行 | 左 mode·permission·session，右侧 token 槽位留空 |
+| 12 | 窄/宽终端 resize | 整体同步缩放，不溢出 |
 
-记录每项截图/结果。任何项失败回到对应模块修复并补测。
+任何项失败都回到对应模块修复并补测。
 
----
+## 5. 子代理测试审核
 
-## 4. 子代理测试审核（实施完成后）
+实施完成后，使用子代理做独立审核：
 
-实施完成后派**子代理**做独立审核（用户触发），范围：
+1. 跑 unit、contract、integration、真实 API e2e。
+2. 对照 05 文档检查 SDK/agent/CLI 字段语义一致性。
+3. 检查 TUI 是否存在本地 token 估算、费用展示、成功/失败 icon、`ask/build`、
+   `you/ohbaby` 等违背决策的残留。
+4. 检查 viewport/contentWidth 是否统一，窄屏是否同步缩放。
+5. 输出问题清单，修复后回归。
 
-1. **跑全量测试**：`pnpm -F ohbaby-cli test`（unit + contract），报告通过/失败与覆盖。
-2. **代码审查**：对照本 specs 检查
-   - 组件是否只引语义 token、无硬编码颜色残留；
-   - `render/` 是否纯函数、无 React 依赖；
-   - 工具渲染是否泄漏内部详情（应只单行）；
-   - 不变量（app 行为、slash 补全）是否保持。
-3. **验收对照**：按第 3 节场景表逐项确认或指出差距。
-4. 输出问题清单，回归到对应模块。
+## 6. Definition of Done
 
-> 注：`/code-review` 与 `ultrareview` 为用户触发、计费操作，子代理审核由维护者发起，不在实施代理内自动运行。
-
----
-
-## 退出标准（Definition of Done）
-
-- 第一版范围（02 文档第 4 节"做"）全部实现。
-- 所有单测/契约测试通过。
-- 验收场景 1–13 通过（或差距已记录并经维护者接受）。
-- 无硬编码颜色残留（全部走 theme token）。
-- `store / slash-commands / ohbaby-sdk` 零改动。
-- 延后项（diff、token 统计、展开等）已在文档/problem-lists 标注，未偷偷半实现。
+- 05 文档第 2 节“做”全部完成。
+- unit、contract、integration 测试通过。
+- 真实 API e2e 通过，或失败原因已明确并经维护者接受。
+- 子代理审查通过或问题已修复。
+- TUI 不自行实现 token 估算。
+- 新增组件不写硬编码颜色，全部走 theme token。
+- 不显示费用、草稿 token、模型常驻 header/status、tip 行。
+- 不出现被禁的角色头、`ask/build`、成功/失败 icon。

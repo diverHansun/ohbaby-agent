@@ -1,6 +1,7 @@
 # 02a — 主题与配色方案
 
 日期: 2026-06-05
+更新: 2026-06-06
 状态: **结合 logo 对齐（金/紫/蓝暖调）**，待维护者微调
 
 设计原则：
@@ -10,7 +11,8 @@
 - **降级**：按 `chalk.level` 决定真彩 hex 还是 16 色 ansi 名。
 
 > **⚠️ 硬性约定：不渲染文字角色头。** 任何消息**不得**输出 `you` / `ohbaby` / `assistant` / `tool` 等角色文字标签。
-> 用户与 AI 的区分**只靠样式**（暗色竖线 / 亮色亮块+icon+圆点）。组件层、测试都要守住这条。
+> 用户与 AI 的区分**只靠样式**。本批次固定为：历史用户消息左竖线，
+> assistant 无角色头，当前 prompt 背景块突出。
 
 ---
 
@@ -63,7 +65,7 @@ ohbaby logo（金边圆徽：金铠甲少年怀抱紫襁褓婴儿，天蓝背景
 | `text` | `#1A1714` | 正文（暖黑） |
 | `textDim` | `#5F5750` | 次要 |
 | `textMuted` | `#6E675F` | reasoning |
-| `surface` | `#F0EBE2` | 用户消息浅亮块（暖浅） |
+| `surface` | `#F0EBE2` | 当前 prompt 背景块（暖浅） |
 | `border` | `#C0B8AC` | 边框 |
 
 ---
@@ -76,11 +78,9 @@ interface Theme {
   role:    { assistant };                       // 仅颜色，无文字标签
   message: {
     userGutter?: string;             // 暗色：左竖线颜色（中性 border，不上品牌色）
-    userBlockBg?: string;            // 亮色：用户亮块底
-    userPrefix?: { icon; color };    // 亮色：用户前缀 ❯
-    assistantPrefix?: { icon; color };// 亮色：AI 圆点 ●
+    userBlockBg?: string;            // 当前 prompt 背景块；历史用户消息不用背景块
   };
-  tool:    { name; arg; running; ok; failed };
+  tool:    { name; arg; running; failed };
   status:  { idle; running; waiting; error };
   reasoning: string;                 // 思考文本（灰 textMuted，克制）
   brandTitle: { primary; secondary; tertiary }; // OHBABY：金主 + 紫/蓝点缀
@@ -102,14 +102,11 @@ interface Theme {
 | `text.link` | `skyBlue` | `skyBlue` | markdown 链接 |
 | `role.assistant` | `text`（无装饰） | `text` | AI 消息 |
 | `message.userGutter` | `textMuted`（比 border 微提亮，仍中性、不上品牌色） | — | 暗色用户左竖线 `▎` |
-| `message.userBlockBg` | — | `surface` | 亮色用户亮块底 |
-| `message.userPrefix` | — | `gold` + `❯` | 亮色用户前缀 |
-| `message.assistantPrefix` | — | `text` + `●` | 亮色 AI 圆点 |
+| `message.userBlockBg` | `surface` 或暗色等价 surface | `surface` | 当前 prompt 背景块；历史用户消息不用 |
 | `tool.name` | `skyBlue` | `skyBlue` | 工具名（天蓝） |
 | `tool.arg` | `textDim` | `textMuted` | 工具主参摘要 |
-| `tool.running` | `purple` | `purple` | `▸` 进行中（呼应 spinner） |
-| `tool.ok` | `green` | `green` | `✓` 成功 |
-| `tool.failed` | `red` | `red` | `✗` 失败 |
+| `tool.running` | `purple` | `purple` | running spinner（呼应 spinner） |
+| `tool.failed` | `red` | `red` | 失败短错误摘要，不使用失败 icon |
 | `status.idle` | `textDim` | `textMuted` | 状态行常态 |
 | `status.running` | `gold` | `gold` | 运行中（品牌金） |
 | `status.waiting` | `yellow` | `yellow` | 等待权限 |
@@ -131,7 +128,7 @@ spinner = {
   palette: [goldBright, purple],   // 帧着色在金/紫间交替（或按帧 index 取色）
 }
 ```
-渲染：`status.kind === "running"` 时显示；每帧颜色按 `frameIndex % palette.length` 在金/紫间切换，形成紫金脉动。工具 `▸` running 图标用 `tool.running`（紫），与 spinner 同色系。
+渲染：运行中显示；每帧颜色按 `frameIndex % palette.length` 在金/紫间切换，形成紫金脉动。工具行 running 状态复用 spinner，完成后不保留图标。
 
 ### syntax（代码块高亮）
 
@@ -139,42 +136,48 @@ spinner = {
 
 ---
 
-## 消息装饰：两套主题视觉差异
+## 消息装饰与 PromptDock
 
-**暗色（opencode 风，默认）**
+**历史消息（暗色默认，亮色同口径调色）**
 ```
-▎你好啊                         用户：左竖线 ▎（border 中性灰，不上色），无背景块
+▎你好啊                         用户历史：左竖线 ▎，无背景块
 
   你好！有什么我可以帮你的？       AI：无装饰，直接渲染 markdown
-  Thought: 730ms                reasoning：textMuted 灰（克制）
-  ▸ read  src/app.ts            工具：单行折叠（名=天蓝，▸=紫）
+  Thought                      reasoning 完成后：折叠为灰色摘要
+  Bash    pnpm test             工具完成后：工具名 + 主参摘要
 ```
 
-**亮色（claude-code 风）**
+**运行中工具**
 ```
-❯ 你好啊                        用户：浅亮块 surface + ❯ 前缀(gold)
-
-● 你好！有什么我可以帮你的？      AI：● 圆点前缀(text) + 渲染
-  ▸ read  src/app.ts
+⠙ Bash    pnpm test             running：左侧 spinner，金/紫交替
 ```
 
-> 再次强调：以上**没有任何 `you`/`ohbaby` 文字**，区分全靠竖线/亮块/icon/圆点。
+**当前 PromptDock**
+```
+> ask anything...
+
+auto · default · session_abc     38.4K / 1M (4%)
+```
+
+> 再次强调：历史消息**没有任何 `you`/`ohbaby` 文字角色头**；当前输入靠背景块突出，
+> 工具完成态不保留成功/失败 icon。
 
 ---
 
 ## 品牌标题 OHBABY（header / logo）
 
 空会话 header 的 **OHBABY** 字样用**紫金蓝三色，金为主、紫与蓝点缀**（呼应 logo 金铠甲 + 紫襁褓 + 天蓝背景）。
-- 实现：`brandTitle.primary`（金）渲染主体，`brandTitle.secondary`（紫）+ `brandTitle.tertiary`（蓝）做点缀。
-- 建议形态：`OH` 金 · `BA` 紫 · `BY` 蓝（按字母段分色，金占主），或金主体 + 紫/蓝装饰符/星点。具体在 `logo.tsx` 定，色值取 `brandTitle.*`。
+- 实现：`renderOhbabyLogo()` 返回静态 ANSI 行，色值取 `brandTitle.*`。不引入 `figlet` 运行时依赖。
+- 建议形态：`OH` 金 · `BA` 紫 · `BY` 蓝（按字母段分色，金占主），或金主体 + 紫/蓝装饰符/星点。具体在 `logo.tsx` 定。
 - **注意区分**：这是 header 品牌标题；markdown 正文里的 `#` 标题走 `text.heading`（纯金）+ `text.headingAccent`（标记符轻微蓝），二者不同。
 
 ## 已定决策（本轮 review 敲定）
 
 1. **reasoning = 灰**（`textMuted`），克制不抢正文。（不用紫）
-2. **亮色用户前缀 icon = `❯`**。
-3. **OHBABY 品牌标题 = 紫金蓝三色**（金主，紫/蓝点缀）；markdown `text.heading` = 纯金 + `text.headingAccent` 标记符轻微蓝。
-4. **暗色用户竖线微提亮**：用 `textMuted` 而非 `border`，仍中性不上品牌色；亮色不用竖线（走亮块+icon），两套主题装饰本就有别。
-5. **暗色金/蓝降亮柔化**（护眼）：金 `#E5B567→#D4A24F`、金亮 `#F0C674→#E0B463`、天蓝 `#82B7E8→#6E9FCE`；紫保持（暗底最稳）。亮色主题不受影响。原则：金蓝只点缀、正文走暖白，避免大面积高亮造成纯黑底光晕/疲劳。
+2. **历史用户消息 = 左竖线**；当前 prompt 才使用背景块。
+3. **工具 running = spinner**；完成后不保留图标，失败只追加短错误摘要。
+4. **OHBABY 品牌标题 = 紫金蓝三色**（金主，紫/蓝点缀）；markdown `text.heading` = 纯金 + `text.headingAccent` 标记符轻微蓝。
+5. **暗色用户竖线微提亮**：用 `textMuted` 而非 `border`，仍中性不上品牌色；亮色主题保持同一结构，只调色不换交互语义。
+6. **暗色金/蓝降亮柔化**（护眼）：金 `#E5B567→#D4A24F`、金亮 `#F0C674→#E0B463`、天蓝 `#82B7E8→#6E9FCE`；紫保持（暗底最稳）。亮色主题不受影响。原则：金蓝只点缀、正文走暖白，避免大面积高亮造成纯黑底光晕/疲劳。
 
 后续仅配色微调，改本文件 `colors.ts` 表即可，语义层与组件不受影响。

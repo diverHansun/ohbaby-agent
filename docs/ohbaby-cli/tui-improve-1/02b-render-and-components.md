@@ -1,6 +1,12 @@
 # 02b — render 层与组件层详细设计
 
 日期: 2026-06-05
+更新: 2026-06-06
+
+> 2026-06-06 修订：组件层以
+> [05-a-c-contract-appshell-viewport-plan.md](05-a-c-contract-appshell-viewport-plan.md)
+> 为准。本文保留 render/editor 的细节，但更新 AppShell、tool、reasoning、status
+> 与 prompt 的最终口径。
 
 ## A. render/ 原语层（纯函数）
 
@@ -28,6 +34,9 @@ mdToAnsi(text: string, opts: { theme: Theme; width: number }): string[]
 - 代码块：委托 `highlight.ts`；**简洁风**——```` ``` ```` 围栏线 + 每行缩进 2 空格 + 高亮，**无边框/背景**（学 kimi/opencode）。
 - 自己 wrap 到 `width` 后交给组件，组件不再二次折行。
 
+不要在 v1 为未来能力预建复杂抽象。`marked` token 有二十多种，第一版只覆盖上面列出的
+正文能力；表格、HTML、图片、嵌套块等保持普通文本或降级渲染。
+
 ### highlight.ts
 
 ```ts
@@ -46,23 +55,44 @@ renderDiff(oldStr, newStr, { theme, width, context }): string[]
 
 ## B. 组件层
 
-### message-list.tsx
+### layout/app-shell.tsx + layout/metrics.ts
 
-`<Static items={messages}>` 流式渲染，每条交给 `message-block`。notices / commandNotices 也归入（套主题）。
+AppShell 是本批次新增的页面壳，统一终端宽高、`contentWidth`、左右 padding 与
+compact 判断。Logo、message flow、prompt dock、slash completion、status panel
+必须使用同一组 metrics。
+
+建议规则：
+
+- `isCompact = columns < 80`。
+- compact 下 `horizontalPadding = 2`。
+- 非 compact 下 `horizontalPadding = 4`。
+- `contentWidth = min(132, max(24, columns - horizontalPadding * 2))`。
+
+本批次仍使用 Ink `<Static>` 和终端原生 scrollback，不实现完整虚拟滚动、滚动条或
+历史搜索。
+
+`AppShell` 是唯一读取 `useStdout().stdout.columns` 的布局入口。它计算 metrics 后
+通过 layout context 传给子组件；`markdown-part.tsx` 等渲染组件只接收扣除 gutter、
+padding、indent 后的 `partWidth`。
+
+### message-flow.tsx
+
+通过 `MessageFlow` 封装 `<Static items={messages}>` 流式渲染，每条交给
+`message-block`。notices / command outputs / status panel 也归入同一历史流。
+组件名避免承诺自定义滚动；真正的 scrollback 仍由终端提供。
 
 ### message-block.tsx
 
 单条消息。**不输出 you/ohbaby 文字角色头**，改主题驱动装饰：
 
 - `role === "user"`：读 `theme.message`。
-  - 暗色：每行前置左竖线 `▎`（`message.userGutter` 中性色）。
-  - 亮色：`message.userBlockBg` 亮块 + 首行 `message.userPrefix.icon`（`❯`）。
+  - 历史用户消息只显示左竖线 `▎` 或同等轻量 gutter。
+  - 不使用背景块；当前 prompt 才使用背景块。
 - `role === "assistant"`：
-  - 暗色：无装饰，正文 markdown。
-  - 亮色：首行 `message.assistantPrefix.icon`（`●`）。
+  - 无角色头，正文 markdown。
 - parts 派发：
   - `text` → `markdown-part`
-  - `reasoning` → `reasoning-part`（`theme.reasoning` 灰，可加 `Thought: <ms>` 头）
+  - `reasoning` → `reasoning-part`（streaming 时灰色展开，completed/error 后折叠为一行 `Thought`）
   - `tool-call` / `tool-result` → `tool-part`
 
 缩进：parts 相对消息左边距缩进 2。
@@ -71,14 +101,28 @@ renderDiff(oldStr, newStr, { theme, width, context }): string[]
 
 ```tsx
 const t = useTheme();
-const lines = mdToAnsi(part.text, { theme: t, width });   // width 来自 useStdout/measure
-return <Text wrap="end">{lines.join("\n")}</Text>;
+const lines = mdToAnsi(part.text, { theme: t, width: partWidth });
+return <Text>{lines.join("\n")}</Text>;
 ```
-`width` 取终端列宽减去缩进；用 Ink `useStdout().stdout.columns` 或固定测量。
+`partWidth` 来自 AppShell layout metrics，等于 `contentWidth` 扣掉当前消息 gutter、
+padding 与 part 缩进后的宽度。`render/` 已经把行折到 `partWidth` 内，组件不依赖 Ink
+再做换行。
+
+必须补 contract 测试：ANSI 字符串进入 Ink `Text` 后不被二次折行破坏 ANSI 序列；
+若发现 Ink 对某类 ANSI 行仍会错误折行，优先调整 `wrap.ts` 或改为逐行渲染，不在
+markdown 组件里临时补空格。
 
 ### parts/reasoning-part.tsx
 
-`theme.reasoning`（灰 `textMuted`，克制不抢正文）渲染；可折叠（第一版直接显示，超长截断由 wrap 处理）。
+`theme.reasoning`（灰 `textMuted`，克制不抢正文）渲染。
+
+折叠规则：
+
+- owning `UiMessage.status === "streaming"` 时默认展开。
+- owning `UiMessage.completedAt` 存在，或 `status === "completed" | "error"` 时折叠为
+  一行 `Thought`。
+- 旧消息没有 lifecycle 字段时按 completed 处理，默认折叠。
+- 禁止使用全局 runtime `running/idle` 判断 reasoning 是否完成。
 
 ### parts/tool-part.tsx + tool/registry.ts
 
@@ -86,22 +130,24 @@ return <Text wrap="end">{lines.join("\n")}</Text>;
 
 ```ts
 interface ToolRenderer {
-  // 第一版只实现 header：图标 + 名 + 主参摘要
+  // 第一版只实现 header：leading slot + 名 + 主参摘要
   header(call: UiToolCall, theme: Theme): string;
-  // 预留给 Ctrl+O 展开，第一版不实现/不调用
-  body?(call: UiToolCall, result: UiToolResult | undefined,
-        opts: { theme: Theme; width: number }): string[];
 }
 ```
 
+第一版不在 `ToolRenderer` 接口中保留 `body`。将来若实现 `Ctrl+O` 或工具 body 展开，
+再新增明确的 deferred 接口，避免当前接口承诺未实现能力。
+
 **关键：`tool-call` 与 `tool-result` 是两个独立 message part，先后到达**（`UiToolResult.callId` 指回 `UiToolCall.id`）。`tool-part.tsx` 必须维护 `callId → result` 的匹配，不能假设两者同步出现：
 
-- **第一版 header 的状态图标只读 `call.status`**（`pending`/`running`/`completed`/`failed`），不依赖 result 是否到达 —— 状态语义已在 call 上，避免耦合到达顺序。
-- `body`（延后）才需要 `result`：tool-part 在同一消息（或 store 派生层）按 `callId` 把对应 `tool-result` 找出来传入；result 未到时传 `undefined`。
+- **第一版 header 的 leading slot 只读 `call.status`**（`pending`/`running`/`completed`/`failed`），不依赖 result 是否到达 —— 状态语义已在 call 上，避免耦合到达顺序。
+- failed 短错误摘要可读取匹配到的 `tool-result.error`；成功 result 不显示 body。
 - 建议匹配逻辑下沉到一个 selector（如 `selectToolResult(callId)`），保持组件无状态、可测；不要在渲染期做线性扫描丢关联。
 
-**第一版 header 行格式**：`<icon> <name>  <arg-summary>`
-- 图标来自 `theme.tool`（`▸` running/pending、`✓` ok、`✗` failed）。
+**第一版 header 行格式**：`<spinner-or-space> <name>  <arg-summary>`
+- running/pending：左侧 leading slot 显示 running spinner。
+- completed：leading slot 保留同宽空白，不保留图标，只显示工具名与摘要。
+- failed：不使用失败图标，追加短错误摘要。
 - 主参摘要按工具取 `call.input` 已知字段：
   - read/write → `file_path`（相对化）
   - edit → `file_path`
@@ -112,7 +158,17 @@ interface ToolRenderer {
   - default → 工具名 + `input` 键摘要
 - **不显示** 参数全文 / 输出 / diff（避免刷屏）。
 
-每个 renderer 是纯函数（取 input 字段 → 格式化字符串），可单测。
+每个 renderer 是纯函数（取 input 字段 → 格式化字符串），可单测。参数抽取可以用
+小 helper，例如 `extractPrimaryArg(call)`，但不要引入 `BaseToolRenderer` 这类基类。
+如果三个以上工具共享同一字段提取规则，再抽公共函数；否则保持各工具 renderer 简单直写。
+
+示例：
+
+```text
+⠙ Bash    pnpm test
+  Bash    pnpm test
+  Edit    src/foo.ts  permission denied
+```
 
 ### prompt/editor-reducer.ts（编辑器状态机）
 
@@ -144,7 +200,22 @@ editorReducer(state, key): EditorState   // 纯函数
 
 ### prompt/index.tsx
 
-装配 editor + 状态行 + completion。协调：slash 补全激活时拦截 ↑/↓；提交时区分 slash 命令 vs 普通 prompt（保留现有 `submitInput` 逻辑）。
+装配 editor + PromptDock 状态行 + completion。协调：slash 补全激活时拦截 ↑/↓；
+提交时区分 slash 命令 vs 普通 prompt（保留现有 `submitInput` 逻辑）。
+
+PromptDock 视觉：
+
+```text
+> ask anything...
+
+auto · default · session_abc                    38.4K / 1M (4%)
+```
+
+- 当前输入有背景块。
+- prompt 符号只使用 `>`。
+- mode 只显示 `auto` 或 `plan`，不显示 `ask/build`。
+- 不显示模型。
+- 不显示 tip 行。
 
 ### prompt/completion.tsx
 
@@ -154,17 +225,32 @@ editorReducer(state, key): EditorState   // 纯函数
 
 一行：
 ```
-<mode> · <permission> · <session_id>            [右对齐: token 槽位(留空)]
+<mode> · <permission> · <session_id>            [右对齐: context window usage]
 ```
-左侧着 `theme.status.*`；右侧 token 估算**预留位置**，无数据时留空（见 problem-lists）。
+左侧着 `theme.status.*`；右侧读取当前 session 的 `UiContextWindowUsage` 并格式化为
+`38.4K / 1M (4%)`。无数据时留空，不显示占位文本。
+
+### command/status-panel.tsx
+
+`/status` command output 渲染为轻边框多行 panel，作为 scrollback 中的一条历史输出。
+
+第一版包含 runtime、session、permission、model、tools、project、context window。
+context window 缺失时显示 `Context unavailable`。不做 severity、progress bar 或费用。
 
 ### header.tsx / logo.tsx
 
-空会话显示 Logo：**OHBABY** 品牌标题用紫金蓝三色（`brandTitle.primary` 金为主 + `brandTitle.secondary` 紫 + `brandTitle.tertiary` 蓝点缀，呼应 logo 金铠甲/紫襁褓/天蓝背景；如 `OH` 金 · `BA` 紫 · `BY` 蓝）。非空时极简一行。配色全取 `theme`，留作与 logo 美化对齐。
+空会话显示 **OHBABY** ASCII/ANSI logo。配色用紫金蓝三色（`brandTitle.primary`
+金为主 + `brandTitle.secondary` 紫 + `brandTitle.tertiary` 蓝点缀）。不显示 tip，不显示
+模型。
+
+实现通过 `renderOhbabyLogo()` 生成静态 ANSI 行，不引入 `figlet` 运行时依赖。组件只
+消费渲染结果，不在 JSX 中散落 print 字符串。如需要调整字体，可在开发期用外部工具
+重新生成静态文本。
 
 ### spinner.tsx
 
-运行中（`runtime.kind === "running"`）显示 `theme.spinner` 旋转帧，**颜色在金/紫间逐帧交替**（湖人紫金，呼应 logo）；工具 `▸` running 图标用 `tool.running`（紫），同色系。
+运行中显示 `theme.spinner` 旋转帧，颜色在金/紫间逐帧交替。工具调用行 running 状态
+复用该 spinner；完成后 spinner 消失。
 
 ### footer.tsx
 
@@ -182,12 +268,12 @@ editorReducer(state, key): EditorState   // 纯函数
 
 ```tsx
 <ThemeProvider value={detectTheme()}>   // 默认暗
-  <Box flexDirection="column">
+  <AppShell>
     <Header/>
-    <MessageList/>            // <Static>
+    <MessageFlow/>            // wraps <Static>
     <DialogManager/>
-    <Prompt/>                 // editor + 状态行
-  </Box>
+    <PromptDock/>             // editor + status + completion
+  </AppShell>
 </ThemeProvider>
 ```
 事件订阅/退出/catalog/快照逻辑保留。

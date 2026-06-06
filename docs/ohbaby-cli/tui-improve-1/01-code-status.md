@@ -1,7 +1,13 @@
 # 01 — 代码现状
 
 日期: 2026-06-05
-对象: `packages/ohbaby-cli/src/tui`
+更新: 2026-06-06
+对象: `packages/ohbaby-cli/src/tui`，以及本批次需要扩展的
+`packages/ohbaby-sdk/src`、`packages/ohbaby-agent/src`
+
+> 2026-06-06 修订：早期结论“SDK 类型零改动、token/context window 延后”已被
+> A+C 方案替换。最终契约与实施边界见
+> [05-a-c-contract-appshell-viewport-plan.md](05-a-c-contract-appshell-viewport-plan.md)。
 
 ## 技术栈
 
@@ -33,9 +39,9 @@ tui/
 
 ## 各模块职责与质量
 
-### 健康（保留不动）
+### 健康（保留架构，允许有边界扩展）
 
-- **store/**：事件溯源。`events.ts` 把 `TuiEvent` reduce 进 `TuiStoreState`，`selectors.ts` 派生运行时标签/有效状态，`snapshot.ts` 定义内部类型。设计清晰，与渲染框架解耦。
+- **store/**：事件溯源。`events.ts` 把 `TuiEvent` reduce 进 `TuiStoreState`，`selectors.ts` 派生运行时标签/有效状态，`snapshot.ts` 定义内部类型。设计清晰，与渲染框架解耦。本批次允许增加 `context.window.updated` reducer、session 级 memory cache 与 selector。
 - **slash-commands/**：`runtime.ts` 解析/解析 slash 输入，`completions.ts`/`hints.ts` 提供补全候选。逻辑独立、已有单测。
 - **dialogs/manager.tsx**：编排 permission/interaction 队列，逻辑可保留，仅需套主题。
 
@@ -51,7 +57,7 @@ tui/
 6. **footer 提示行**写死英文（`footer.tsx`），与目标设计不符。
 7. **状态行信息薄**。`status-bar.tsx` 仅 `status: <label>` + 可选 session，无 mode/permission/token。
 
-## 数据契约现状（关键约束）
+## 数据契约现状与本批次缺口
 
 来源 `packages/ohbaby-sdk/src/snapshot.ts`：
 
@@ -67,15 +73,30 @@ interface UiToolCall   { id; name; input: Record<string, unknown>;
 interface UiToolResult { callId; output: string; error?: string }
 ```
 
-**结论**：工具富渲染所需的数据（工具名、输入参数、状态、输出、错误）**已经全部在 snapshot 里**。当前 `"result hidden"` 是渲染层主动隐藏，不是数据缺失。
+**结论**：工具单行富渲染所需的数据（工具名、输入参数、状态、输出、错误）已经在
+snapshot 里。当前 `"result hidden"` 是渲染层主动隐藏，不是数据缺失。
 
 工具参数命名（来自 `packages/ohbaby-agent/src/tools/*`）：
 - `edit`: `old_string` / `new_string` / `file_path` → 可生成 diff（本批次延后渲染 diff）。
 - `bash`: `command`。
 - `read` / `write` / `grep` / `glob`: `file_path` / `path` / `pattern` 等。
 
-**缺口**：`UiSnapshot` 没有 token / cost / context-window 字段 → 状态行 token 估算本批次无法实现，已记入
-`docs/problem-lists/2026-06-05-tui-status-bar-token-estimation.md`。
+### 本批次必须补的契约
+
+1. `UiSnapshot` 需要增加 session 级 `contextWindowUsages`。
+2. `CoreAPI` 需要增加 `getContextWindowUsage({ sessionId })`。
+3. 事件流需要增加 `context.window.updated`。
+4. `UiMessage` 需要增加可选 lifecycle 字段：
+   `updatedAt`、`completedAt`、`status`、`finishReason`。
+
+这些字段用于两个 UI 语义：
+
+- status bar 右侧显示当前 session 的 context window usage，例如
+  `38.4K / 1M (4%)`。
+- reasoning 在对应 assistant message 完成后自动折叠为 `Thought`。
+
+TUI 不自行估算 token；context window usage 由 agent 后端根据当前 session、
+模型 profile 和 context manager 结果提供。
 
 ## app.tsx 现有行为（需保留）
 

@@ -1,8 +1,9 @@
 # 03 — 项目借鉴（opencode / kimi-code / pi-tui）
 
 日期: 2026-06-05
+更新: 2026-06-06
 
-记录我们从两个参考项目和 pi-tui 借鉴了什么、如何取舍。原则：**借鉴设计思路，不引入运行时依赖**（不依赖 pi-tui，保留 Ink）。
+记录我们从两个参考项目和 pi-tui 借鉴了什么、如何取舍。原则：**借鉴设计思路，不引入渲染运行时依赖**（不依赖 pi-tui，保留 Ink）。
 
 参考路径：
 - `D:/Projects/Code-cli/kimi-code`
@@ -41,8 +42,8 @@ TUI 在 **SolidJS + @opentui**（自研终端渲染引擎；`packages/opencode/s
 
 1. **step 色阶**（`darkStep1..12` 从 `#0a0a0a` 到 `#eeeeee`）+ 语义映射（`primary/secondary/accent/error/warning/success/info/text/textMuted/...`）。→ 启发我们的语义 token 命名与降级层级。
 2. **One Dark 系 syntax 配色** + **橙色 primary `#fab283`**：启发我们用暖色品牌主色。→ 但我们最终**品牌色对齐自家 logo**（金 `#D4A24F` / 紫 `#B9A3E3` / 天蓝 `#6E9FCE` 暖调，暗色金蓝已降亮护眼），syntax token 仍参考 One Dark 思路。见 02a。
-3. **消息样式**：用户消息左竖线 + 背景块，AI 消息无装饰直接渲染（截图参考）。→ 我们暗色主题采用此风。
-4. **状态栏 token/cost 展示**（`37.8K (4%) · $0.07`）。→ 我们预留右侧槽位，数据待后端（problem-lists）。
+3. **消息样式**：用户输入更突出、AI 消息无装饰直接渲染（截图参考）。→ 我们采用“当前 prompt 背景块 + 历史用户消息左竖线”的拆分口径。
+4. **状态栏 usage 展示**（类似 `37.8K (4%) · $0.07`）。→ 我们只采用 context window usage 展示，费用不做；数据由 agent/SDK 契约提供，TUI 不自行估算。
 5. **多内置主题**（catppuccin/dracula/gruvbox/...）的可扩展结构。→ 我们第一版只做暗/亮两套，但 token 结构为将来留口。
 
 ### 不采用
@@ -78,7 +79,8 @@ TUI 在 **SolidJS + @opentui**（自研终端渲染引擎；`packages/opencode/s
 | markdown→ANSI | pi markdown.ts | `render/markdown.ts` |
 | ANSI wrap | pi utils.ts | `render/wrap.ts` |
 | 语法高亮 | kimi cli-highlight | `render/highlight.ts` |
-| 消息样式 | opencode(暗)/claude-code(亮) | 主题驱动装饰 |
+| 消息样式 | opencode/claude-code 截图 | 当前 prompt 背景块，历史用户消息左竖线 |
 | 多行编辑器 | pi editor | `editor-reducer.ts` |
-| 状态栏 token | opencode | 预留槽位（后端待补） |
+| 状态栏 context window | opencode + kimi usage 口径 | agent/SDK 提供 `contextWindow`，TUI 显示 `38.4K / 1M (4%)` |
+| AppShell / contentWidth | opencode | Ink AppShell + viewport metrics + `<Static>` scrollback |
 | 渲染运行时 | — | **保留 Ink，不引 pi-tui** |
