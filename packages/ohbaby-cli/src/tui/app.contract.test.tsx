@@ -108,6 +108,7 @@ describe("OhbabyTerminalApp", () => {
     await flush();
 
     expect(app.lastFrame()).toContain("OHBABY");
+    expect(app.lastFrame()).toContain("___  _   _");
     expect(app.lastFrame()).toContain("> message");
     expect(app.lastFrame()).not.toContain("ohbaby >");
     expect(app.lastFrame()).not.toContain("single-process coding agent");
@@ -128,7 +129,42 @@ describe("OhbabyTerminalApp", () => {
     await flush();
 
     expect(app.lastFrame()).toContain("> hello");
+    expect(app.lastFrame()).not.toContain("> hello |");
     expect(app.lastFrame()).not.toContain("ohbaby >");
+  });
+
+  it("renders assistant markdown through the terminal markdown renderer", async () => {
+    const baseSnapshot = snapshot();
+    const client = createFakeClient({
+      ...baseSnapshot,
+      sessions: [
+        {
+          ...baseSnapshot.sessions[0],
+          messages: [
+            {
+              createdAt: "2026-05-14T00:00:01.000Z",
+              id: "message_markdown",
+              parts: [{ text: "# Heading\n\n- **item**", type: "text" }],
+              role: "assistant",
+            },
+          ],
+        },
+      ],
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+
+    expect(app.lastFrame()).toContain("Heading");
+    expect(app.lastFrame()).toContain("-------");
+    expect(app.lastFrame()).toContain("- item");
+    expect(app.lastFrame()).not.toContain("# Heading");
+    expect(app.lastFrame()).not.toContain("**item**");
   });
 
   it("refreshes and renders active session context window usage", async () => {
@@ -248,14 +284,18 @@ describe("OhbabyTerminalApp", () => {
               completedAt: "2026-05-14T00:00:02.000Z",
               createdAt: "2026-05-14T00:00:01.000Z",
               id: "message_completed",
-              parts: [{ text: "completed reasoning details", type: "reasoning" }],
+              parts: [
+                { text: "completed reasoning details", type: "reasoning" },
+              ],
               role: "assistant",
               status: "completed",
             },
             {
               createdAt: "2026-05-14T00:00:03.000Z",
               id: "message_streaming",
-              parts: [{ text: "streaming reasoning details", type: "reasoning" }],
+              parts: [
+                { text: "streaming reasoning details", type: "reasoning" },
+              ],
               role: "assistant",
               status: "streaming",
             },
@@ -373,9 +413,7 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).not.toContain(
       "status: idle | session: session_1 | mode:",
     );
-    expect(
-      lineIndex(app.lastFrame(), "auto · default"),
-    ).toBeLessThan(
+    expect(lineIndex(app.lastFrame(), "auto · default")).toBeLessThan(
       lineIndex(app.lastFrame(), "status: idle | session: session_1"),
     );
 

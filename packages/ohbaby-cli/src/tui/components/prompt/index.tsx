@@ -117,9 +117,6 @@ export function Prompt({
         ) : (
           <Text>{input}</Text>
         )}
-        <Text color={disabled ? undefined : "cyan"} dimColor={disabled}>
-          {" |"}
-        </Text>
       </Text>
       {permission === undefined ? null : (
         <Text dimColor>

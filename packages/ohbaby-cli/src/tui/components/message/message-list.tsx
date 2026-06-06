@@ -1,6 +1,9 @@
 import { Box, Text } from "ink";
 import type { UiMessage, UiMessagePart, UiNotice } from "ohbaby-sdk";
 import type { ReactElement } from "react";
+import { useTuiLayout } from "../../layout/context.js";
+import { mdToAnsi } from "../../render/markdown.js";
+import { wrapAnsi } from "../../render/wrap.js";
 import type { TuiCommandNotice } from "../../store/snapshot.js";
 import { renderToolPart } from "./parts/tool-part.js";
 
@@ -15,27 +18,43 @@ export function MessageList({
   messages,
   notices,
 }: MessageListProps): ReactElement {
+  const layout = useTuiLayout();
+
   return (
     <Box flexDirection="column">
-      {messages.map((message) => (
-        <Box flexDirection="column" key={message.id} marginBottom={1}>
-          {message.parts.map((part, index) => (
-            <Box key={`${message.id}_${String(index)}`}>
-              <Text
-                color={message.role === "user" ? "green" : partColor(part)}
-                dimColor={part.type === "reasoning"}
-              >
-                {message.role === "user"
-                  ? `${index === 0 ? "| " : "  "}${renderMessagePart(
-                      message,
-                      part,
-                    )}`
-                  : renderMessagePart(message, part)}
-              </Text>
-            </Box>
-          ))}
-        </Box>
-      ))}
+      {messages.map((message) => {
+        const renderedParts = message.parts
+          .map((part, index) => ({
+            index,
+            part,
+            text: renderMessagePart(
+              message,
+              part,
+              Math.max(
+                1,
+                layout.contentWidth - (message.role === "user" ? 2 : 0),
+              ),
+            ),
+          }))
+          .filter((part) => part.text !== "");
+
+        return (
+          <Box flexDirection="column" key={message.id} marginBottom={1}>
+            {renderedParts.map(({ index, part, text }) => (
+              <Box key={`${message.id}_${String(index)}`}>
+                <Text
+                  color={message.role === "user" ? "green" : partColor(part)}
+                  dimColor={part.type === "reasoning"}
+                >
+                  {message.role === "user"
+                    ? `${index === 0 ? "| " : "  "}${text}`
+                    : text}
+                </Text>
+              </Box>
+            ))}
+          </Box>
+        );
+      })}
       {notices.map((notice) => (
         <Box flexDirection="row" key={notice.id} marginBottom={1}>
           <Text color={noticeColor(notice.level)}>notice</Text>
@@ -68,15 +87,23 @@ function noticeColor(level: UiNotice["level"]): string | undefined {
   }
 }
 
-function renderMessagePart(message: UiMessage, part: UiMessagePart): string {
+function renderMessagePart(
+  message: UiMessage,
+  part: UiMessagePart,
+  partWidth: number,
+): string {
   switch (part.type) {
     case "text":
-      return part.text;
+      return message.role === "assistant"
+        ? mdToAnsi(part.text, { width: partWidth }).join("\n")
+        : wrapAnsi(part.text, partWidth).join("\n");
     case "reasoning":
-      return message.status === "streaming" ? part.text : "Thought";
+      return message.status === "streaming"
+        ? wrapAnsi(part.text, partWidth).join("\n")
+        : "Thought";
     case "tool-call":
     case "tool-result":
-      return renderToolPart(part);
+      return wrapAnsi(renderToolPart(part), partWidth).join("\n");
   }
 }
 

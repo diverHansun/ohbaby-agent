@@ -1,5 +1,6 @@
 import { Box, useStdout } from "ink";
 import type { ReactElement, ReactNode } from "react";
+import { LayoutProvider } from "./context.js";
 import { computeLayoutMetrics } from "./metrics.js";
 
 export interface AppShellProps {
@@ -14,15 +15,17 @@ export function AppShell({ children }: AppShellProps): ReactElement {
   });
 
   return (
-    <Box
-      flexDirection="column"
-      paddingLeft={metrics.horizontalPadding}
-      paddingRight={metrics.horizontalPadding}
-      width={metrics.contentWidth + metrics.horizontalPadding * 2}
-    >
-      <Box flexDirection="column" width={metrics.contentWidth}>
-        {children}
+    <LayoutProvider value={metrics}>
+      <Box
+        flexDirection="column"
+        paddingLeft={metrics.horizontalPadding}
+        paddingRight={metrics.horizontalPadding}
+        width={metrics.contentWidth + metrics.horizontalPadding * 2}
+      >
+        <Box flexDirection="column" width={metrics.contentWidth}>
+          {children}
+        </Box>
       </Box>
-    </Box>
+    </LayoutProvider>
   );
 }
