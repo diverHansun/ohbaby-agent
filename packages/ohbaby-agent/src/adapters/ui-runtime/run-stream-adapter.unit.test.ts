@@ -106,24 +106,24 @@ describe("startRunStreamProjection", () => {
     });
 
     const compaction = {
-        status: "compacted",
-        usageAfter: {
-          contextLimit: 100_000,
-          currentTokens: 10_000,
-          modelId: "fake-model",
-          remainingTokens: 90_000,
-          shouldCompress: false,
-          usageRatio: 0.1,
-        },
-        usageBefore: {
-          contextLimit: 100_000,
-          currentTokens: 92_000,
-          modelId: "fake-model",
-          remainingTokens: 8_000,
-          shouldCompress: true,
-          usageRatio: 0.92,
-        },
-      };
+      status: "compacted",
+      usageAfter: {
+        contextLimit: 100_000,
+        currentTokens: 10_000,
+        modelId: "fake-model",
+        remainingTokens: 90_000,
+        shouldCompress: false,
+        usageRatio: 0.1,
+      },
+      usageBefore: {
+        contextLimit: 100_000,
+        currentTokens: 92_000,
+        modelId: "fake-model",
+        remainingTokens: 8_000,
+        shouldCompress: true,
+        usageRatio: 0.92,
+      },
+    };
     streamBridge.publish("run/run_1", "run.turn.start", {
       compaction,
       hasSummary: true,
@@ -253,10 +253,99 @@ describe("startRunStreamProjection", () => {
       publishedEvents.some(
         (event) =>
           hasMessageStatus(event, "message.updated", "completed") &&
-          getMessageField(event, "completedAt") ===
-            "2026-05-26T00:00:01.000Z",
+          getMessageField(event, "completedAt") === "2026-05-26T00:00:01.000Z",
       ),
     ).toBe(true);
+  });
+
+  it("appends text that arrives after a tool result in chronological part order", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const stateStore = createInMemoryUiStateStore({
+      activeSessionId: "session_1",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_1",
+          messages: [],
+          title: "Session",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "idle" },
+    });
+    const projection = startRunStreamProjection({
+      assistantMessageId: "message_assistant",
+      autoStart: false,
+      nextMessageId: () => "message_next",
+      publish: vi.fn(),
+      runId: "run_1",
+      sessionId: "session_1",
+      stateStore,
+      streamBridge,
+      timestamp: () => "2026-05-26T00:00:01.000Z",
+    });
+
+    streamBridge.publish("run/run_1", "message.part.delta", {
+      content: "I will inspect it.",
+      delta: "I will inspect it.",
+      runId: "run_1",
+      sessionId: "session_1",
+      timestamp: 1,
+    });
+    streamBridge.publish("run/run_1", "run.tool.start", {
+      callId: "call_read",
+      params: { file_path: "README.md" },
+      runId: "run_1",
+      sessionId: "session_1",
+      timestamp: 2,
+      toolName: "read",
+    });
+    streamBridge.publish("run/run_1", "run.tool.result", {
+      callId: "call_read",
+      result: {
+        output: "README content",
+        status: "success",
+      },
+      runId: "run_1",
+      sessionId: "session_1",
+      timestamp: 3,
+    });
+    streamBridge.publish("run/run_1", "message.part.delta", {
+      content: "Done.",
+      delta: "Done.",
+      runId: "run_1",
+      sessionId: "session_1",
+      timestamp: 4,
+    });
+    streamBridge.end("run/run_1");
+
+    projection.start();
+    await projection.done;
+
+    const snapshot = await stateStore.readSnapshot();
+    expect(snapshot.sessions[0]?.messages[0]?.parts).toEqual([
+      { text: "I will inspect it.", type: "text" },
+      {
+        call: {
+          id: "call_read",
+          input: { file_path: "README.md" },
+          name: "read",
+          status: "completed",
+        },
+        type: "tool-call",
+      },
+      {
+        result: {
+          callId: "call_read",
+          error: undefined,
+          output: "README content",
+        },
+        type: "tool-result",
+      },
+      { text: "Done.", type: "text" },
+    ]);
   });
 });
 

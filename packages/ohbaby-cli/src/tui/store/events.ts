@@ -160,7 +160,7 @@ export function applyTuiEvent(
       return appendUiNotice(state, event.notice);
 
     case "command.result.delivered":
-      if (!event.output) {
+      if (!event.output || !shouldDisplayCommandOutput(event.output)) {
         return state;
       }
       return appendCommandNotice(state, {
@@ -644,7 +644,7 @@ function appendDeltaToLastTextPart(
   message: UiMessage,
   delta: string,
 ): UiMessage {
-  const textIndex = findLastTextPartIndex(message);
+  const textIndex = findTailTextPartIndex(message);
 
   if (textIndex === -1) {
     return {
@@ -662,7 +662,7 @@ function appendDeltaToLastTextPart(
 }
 
 function upsertLastTextPart(message: UiMessage, content: string): UiMessage {
-  const textIndex = findLastTextPartIndex(message);
+  const textIndex = findTailTextPartIndex(message);
 
   if (textIndex === -1) {
     return {
@@ -683,10 +683,13 @@ function upsertLastTextPart(message: UiMessage, content: string): UiMessage {
   };
 }
 
-function findLastTextPartIndex(message: UiMessage): number {
-  return message.parts.findLastIndex(
-    (part) => part.type === "text" || part.type === "reasoning",
-  );
+function findTailTextPartIndex(message: UiMessage): number {
+  const lastIndex = message.parts.length - 1;
+  const lastPart = message.parts.at(lastIndex);
+
+  return lastPart?.type === "text" || lastPart?.type === "reasoning"
+    ? lastIndex
+    : -1;
 }
 
 function formatCommandOutput(output: UiCommandOutput | undefined): string {
@@ -703,6 +706,19 @@ function formatCommandOutput(output: UiCommandOutput | undefined): string {
   }
 
   return truncateCommandOutput(formatDataCommandOutput(output));
+}
+
+function shouldDisplayCommandOutput(output: UiCommandOutput): boolean {
+  if (output.kind !== "data") {
+    return true;
+  }
+
+  return ![
+    "permission.level",
+    "permission.mode",
+    "session.created",
+    "session.current",
+  ].includes(output.subject);
 }
 
 function formatPermissionOutput(
@@ -742,17 +758,11 @@ function formatDataCommandOutput(
     }
     case "permission.mode": {
       const permission = getRecord(output.data, "permission");
-      return (
-        formatPermissionOutput(permission) ??
-        JSON.stringify(output.data)
-      );
+      return formatPermissionOutput(permission) ?? JSON.stringify(output.data);
     }
     case "permission.level": {
       const permission = getRecord(output.data, "permission");
-      return (
-        formatPermissionOutput(permission) ??
-        JSON.stringify(output.data)
-      );
+      return formatPermissionOutput(permission) ?? JSON.stringify(output.data);
     }
     case "status": {
       return renderStatusPanel(output.data);

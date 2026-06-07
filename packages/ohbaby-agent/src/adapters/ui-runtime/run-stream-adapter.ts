@@ -105,15 +105,15 @@ function toUiRun(record: StreamRunRecord): UiRun {
 }
 
 function upsertTextPart(message: UiMessage, content: string): UiMessage {
-  const textPartIndex = message.parts.findLastIndex(
-    (part) => part.type === "text",
-  );
-  if (textPartIndex >= 0) {
+  const lastPart = message.parts.at(-1);
+  if (lastPart?.type === "text") {
     return {
       ...message,
       parts: message.parts.map(
         (part, index): UiMessagePart =>
-          index === textPartIndex ? { type: "text", text: content } : part,
+          index === message.parts.length - 1
+            ? { type: "text", text: content }
+            : part,
       ),
     };
   }

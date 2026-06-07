@@ -17,8 +17,6 @@ import { formatContextWindowUsage } from "./render/usage.js";
 import { createTuiStore } from "./store/events.js";
 import {
   selectActiveContextWindowUsage,
-  selectEffectiveRuntime,
-  selectRuntimeLabel,
   useTuiStoreSelector,
 } from "./store/selectors.js";
 import { ThemeProvider } from "./theme/index.js";
@@ -26,6 +24,7 @@ import type {
   TuiCommandCatalog,
   TuiEvent,
   TuiStore,
+  TuiRuntimeStatus,
 } from "./store/snapshot.js";
 
 export interface TerminalUiOptions {
@@ -45,22 +44,38 @@ export function OhbabyTerminalApp({
   const disposedRef = useRef(false);
   const store = storeRef.current;
   const { exit } = useApp();
-  const state = useTuiStoreSelector(store, (current) => current);
-  const hasDialog =
-    state.permissions.length > 0 || state.interactions.length > 0;
-  const contextWindowUsageLabel = formatContextWindowUsage(
-    selectActiveContextWindowUsage(state),
+  const activeSessionId = useTuiStoreSelector(
+    store,
+    (state) => state.activeSessionId,
   );
-  const runtime = selectEffectiveRuntime(state);
+  const activeContextWindowUsage = useTuiStoreSelector(
+    store,
+    selectActiveContextWindowUsage,
+  );
+  const catalog = useTuiStoreSelector(store, (state) => state.catalog);
+  const interactions = useTuiStoreSelector(
+    store,
+    (state) => state.interactions,
+  );
+  const permission = useTuiStoreSelector(store, (state) => state.permission);
+  const permissions = useTuiStoreSelector(store, (state) => state.permissions);
+  const runtime = useTuiStoreSelector(store, (state) => state.runtime);
+  const hasDialog = permissions.length > 0 || interactions.length > 0;
+  const contextWindowUsageLabel = formatContextWindowUsage(
+    activeContextWindowUsage,
+  );
+  const effectiveRuntime = resolveEffectiveRuntime(permissions, runtime);
   const runtimeStatusLabel =
-    runtime.kind === "error" ? selectRuntimeLabel(state) : undefined;
+    effectiveRuntime.kind === "error"
+      ? formatRuntimeLabel(permissions, runtime)
+      : undefined;
 
   useInput(
     (value, key) => {
-      if (key.tab && key.shift && state.permissions.length === 0) {
+      if (key.tab && key.shift && permissions.length === 0) {
         const command = nextPermissionModeCommand(
-          state.permission,
-          state.activeSessionId ?? undefined,
+          permission,
+          activeSessionId ?? undefined,
           () => {
             keyboardCommandSequenceRef.current += 1;
             return `tui_key_${String(keyboardCommandSequenceRef.current)}`;
@@ -86,24 +101,22 @@ export function OhbabyTerminalApp({
         return;
       }
 
-      if (state.permissions.length > 0) {
-        void client
-          .abortRun(state.permissions[0].runId)
-          .catch((caught: unknown) => {
-            store.dispatch({
-              status: {
-                kind: "error",
-                message: formatError(caught),
-                recoverable: true,
-              },
-              type: "runtime.updated",
-            });
+      if (permissions.length > 0) {
+        void client.abortRun(permissions[0].runId).catch((caught: unknown) => {
+          store.dispatch({
+            status: {
+              kind: "error",
+              message: formatError(caught),
+              recoverable: true,
+            },
+            type: "runtime.updated",
           });
+        });
         return;
       }
 
-      if (state.runtime.kind === "running") {
-        void client.abortRun(state.runtime.runId).catch((caught: unknown) => {
+      if (runtime.kind === "running") {
+        void client.abortRun(runtime.runId).catch((caught: unknown) => {
           store.dispatch({
             status: {
               kind: "error",
@@ -118,7 +131,7 @@ export function OhbabyTerminalApp({
 
       exit();
     },
-    { isActive: state.interactions.length === 0 },
+    { isActive: interactions.length === 0 },
   );
 
   const loadCatalog = useCallback(async (): Promise<TuiCommandCatalog> => {
@@ -196,7 +209,7 @@ export function OhbabyTerminalApp({
   }, [client, exit, loadCatalog, store, subscribeEvents]);
 
   useEffect(() => {
-    const sessionId = state.activeSessionId;
+    const sessionId = activeSessionId;
     if (!sessionId) {
       return;
     }
@@ -250,40 +263,82 @@ export function OhbabyTerminalApp({
     return (): void => {
       cancelled = true;
     };
-  }, [client, state.activeSessionId, store]);
+  }, [activeSessionId, client, store]);
 
   return (
     <ThemeProvider>
       <AppShell>
-        <Header state={state} />
-        <MessageList
-          commandNotices={state.commandNotices}
-          messages={state.messages}
-          notices={state.notices}
-        />
+        <HeaderContainer store={store} />
+        <MessageListContainer store={store} />
         <DialogManager
           client={client}
-          interactions={state.interactions}
-          permissions={state.permissions}
+          interactions={interactions}
+          permissions={permissions}
         />
         <Prompt
-          activeSessionId={state.activeSessionId}
-          catalog={state.catalog}
+          activeSessionId={activeSessionId}
+          catalog={catalog}
           client={client}
           disabled={hasDialog}
           loadCatalog={loadCatalog}
-          permission={state.permission}
+          permission={permission}
           contextWindowUsage={contextWindowUsageLabel}
           runtimeStatusLabel={runtimeStatusLabel}
         />
-        {state.catalogInvalidation === null ? null : (
-          <Text dimColor>
-            command catalog refresh:{" "}
-            {state.catalogInvalidation.version ?? "new"}
-          </Text>
-        )}
+        <CatalogInvalidation store={store} />
       </AppShell>
     </ThemeProvider>
+  );
+}
+
+function HeaderContainer({
+  store,
+}: {
+  readonly store: TuiStore;
+}): ReactElement {
+  const isEmpty = useTuiStoreSelector(
+    store,
+    (state) => state.messages.length === 0,
+  );
+
+  return <Header isEmpty={isEmpty} />;
+}
+
+function MessageListContainer({
+  store,
+}: {
+  readonly store: TuiStore;
+}): ReactElement {
+  const commandNotices = useTuiStoreSelector(
+    store,
+    (state) => state.commandNotices,
+  );
+  const messages = useTuiStoreSelector(store, (state) => state.messages);
+  const notices = useTuiStoreSelector(store, (state) => state.notices);
+
+  return (
+    <MessageList
+      commandNotices={commandNotices}
+      messages={messages}
+      notices={notices}
+    />
+  );
+}
+
+function CatalogInvalidation({
+  store,
+}: {
+  readonly store: TuiStore;
+}): ReactElement | null {
+  const catalogInvalidation = useTuiStoreSelector(
+    store,
+    (state) => state.catalogInvalidation,
+  );
+
+  return catalogInvalidation === null ? null : (
+    <Text dimColor>
+      command catalog refresh: {catalogInvalidation.version ?? "new"}
+    </Text>
   );
 }
 
@@ -300,6 +355,64 @@ function createEmptySnapshot(): UiSnapshot {
     sessions: [],
     status: { kind: "idle" },
   };
+}
+
+function resolveEffectiveRuntime(
+  permissions: UiSnapshot["permissions"],
+  runtime: TuiRuntimeStatus,
+): TuiRuntimeStatus {
+  if (permissions.length > 0) {
+    return {
+      kind: "waiting-for-permission",
+      requestId: permissions[0].id,
+    };
+  }
+  return runtime;
+}
+
+function formatRuntimeLabel(
+  permissions: UiSnapshot["permissions"],
+  runtime: TuiRuntimeStatus,
+): string {
+  const effectiveRuntime = resolveEffectiveRuntime(permissions, runtime);
+
+  switch (effectiveRuntime.kind) {
+    case "idle":
+      return "idle";
+    case "running":
+      return effectiveRuntime.title
+        ? `running: ${trimLabel(effectiveRuntime.title)}`
+        : "running";
+    case "waiting-for-permission":
+      return formatPermissionWaitLabel(permissions);
+    case "error":
+      return `error: ${effectiveRuntime.message}`;
+  }
+}
+
+function formatPermissionWaitLabel(
+  permissions: UiSnapshot["permissions"],
+): string {
+  const request = permissions.at(0);
+  const title =
+    request?.title === undefined || request.title.trim() === ""
+      ? "permission"
+      : trimLabel(request.title);
+
+  return permissions.length > 1
+    ? `waiting: ${title} (+${String(permissions.length - 1)})`
+    : `waiting: ${title}`;
+}
+
+function trimLabel(value: string): string {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  const maxLength = 48;
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 3)}...`;
 }
 
 function nextPermissionModeCommand(

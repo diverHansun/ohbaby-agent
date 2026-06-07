@@ -5,6 +5,7 @@ import type { ReactElement } from "react";
 import {
   getSlashCompletion,
   getSlashCompletionCandidates,
+  getSlashCompletionPageIndex,
 } from "../../slash-commands/completions.js";
 import {
   parseSlashInput,
@@ -117,6 +118,28 @@ export function Prompt({
 
         if (key.downArrow) {
           selectIndex((selectedIndexRef.current + 1) % candidates.length);
+          return;
+        }
+
+        if (key.pageUp) {
+          selectIndex(
+            getSlashCompletionPageIndex(
+              candidates.length,
+              selectedIndexRef.current,
+              "previous",
+            ),
+          );
+          return;
+        }
+
+        if (key.pageDown) {
+          selectIndex(
+            getSlashCompletionPageIndex(
+              candidates.length,
+              selectedIndexRef.current,
+              "next",
+            ),
+          );
           return;
         }
       }

@@ -4,9 +4,7 @@ import type {
   UiContextWindowUsage,
   UiSnapshot,
 } from "ohbaby-sdk";
-import {
-  selectActiveContextWindowUsage,
-} from "./selectors.js";
+import { selectActiveContextWindowUsage } from "./selectors.js";
 import {
   applyTuiEvent,
   createStateFromSnapshot,
@@ -214,6 +212,56 @@ describe("TUI store event reducer", () => {
     });
 
     expect(state.messages[0]?.parts[0]).toMatchObject({ text: "Hello world" });
+  });
+
+  it("appends direct text deltas after a tool result instead of replacing earlier text", () => {
+    const initial = {
+      ...snapshot(),
+      sessions: [
+        {
+          ...snapshot().sessions[0],
+          messages: [
+            {
+              ...snapshot().sessions[0].messages[0],
+              parts: [
+                { text: "Before tool", type: "text" },
+                {
+                  call: {
+                    id: "call_1",
+                    input: {},
+                    name: "read",
+                    status: "completed",
+                  },
+                  type: "tool-call",
+                },
+                {
+                  result: {
+                    callId: "call_1",
+                    output: "file contents",
+                  },
+                  type: "tool-result",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as UiSnapshot;
+
+    const state = applyTuiEvent(createStateFromSnapshot(initial), {
+      content: "After tool",
+      delta: "After tool",
+      messageId: "message_1",
+      sessionId: "session_1",
+      type: "message.part.delta",
+    });
+
+    expect(state.messages[0]?.parts).toEqual([
+      { text: "Before tool", type: "text" },
+      expect.objectContaining({ type: "tool-call" }),
+      expect.objectContaining({ type: "tool-result" }),
+      { text: "After tool", type: "text" },
+    ]);
   });
 
   it("uses delta content as authoritative text even when a part id resolves", () => {
@@ -464,7 +512,7 @@ describe("TUI store event reducer", () => {
     expect(state.runtime).toEqual({ kind: "running", runId: "run_1" });
   });
 
-  it("formats permission and compact command notices for humans", () => {
+  it("keeps successful state-changing command results silent", () => {
     let state = createStateFromSnapshot(snapshot());
 
     state = applyCommandOutput(
@@ -483,7 +531,7 @@ describe("TUI store event reducer", () => {
       "mode",
     );
 
-    expect(latestCommandNoticeText(state)).toBe("plan · default");
+    expect(state.commandNotices).toHaveLength(0);
 
     state = applyCommandOutput(
       state,
@@ -501,7 +549,42 @@ describe("TUI store event reducer", () => {
       "permission",
     );
 
-    expect(latestCommandNoticeText(state)).toBe("auto · full-access");
+    expect(state.commandNotices).toHaveLength(0);
+
+    state = applyCommandOutput(
+      state,
+      {
+        data: {
+          session: {
+            id: "session_2",
+            title: "New session",
+          },
+        },
+        kind: "data",
+        subject: "session.created",
+      },
+      "new",
+    );
+
+    expect(state.commandNotices).toHaveLength(0);
+
+    state = applyCommandOutput(
+      state,
+      {
+        data: {
+          sessionId: "session_2",
+        },
+        kind: "data",
+        subject: "session.current",
+      },
+      "resume",
+    );
+
+    expect(state.commandNotices).toHaveLength(0);
+  });
+
+  it("formats compact command notices for humans", () => {
+    let state = createStateFromSnapshot(snapshot());
 
     state = applyCommandOutput(
       state,

@@ -98,3 +98,11 @@ tui-improve-2 = **主题系统（地基）+ message-list 拆分 + 5 个前端修
 1. **Logo 依赖改口径**：`ink-big-text + ink-gradient` → `figlet + ink-gradient`。技术目标不变（OHBABY 大字 + 紫金蓝渐变），但避开 `cfonts` GPL-3.0-or-later 传递依赖。
 2. **分支策略写明**：improve-2 当前为 stacked 临时分支，基于 improve-1 代码结构；后续按 improve-1 → improve-2 顺序 merge 到 `mvp`。
 3. **启动/发布口径写明**：本地运行先 `pnpm build` 再 `pnpm start`；正式 npm 发布需等待 TUI 修复、打包 smoke、全量 preflight 与 MCP phase 口径一起放行。
+
+### 第四轮二次修复（当前）
+
+1. **风险表收口**：`app.tsx` 不再订阅整份 state，拆成 `HeaderContainer` / `MessageListContainer` / `CatalogInvalidation` 等窄 selector 容器；logo 增加 app contract 正向断言，确认空态 frame 包含 `renderOhbabyLogo()` 的 figlet 锚点。
+2. **command 输出静默**：权限模式切换、权限等级选择、`/new`、`/resume` 这类状态型成功命令不再进入 TUI notice；失败命令仍显示为 `error`，显式查询类输出（如 `/status`、`/help`、`/models`）保留文本/面板，但不暴露 `command_#`。
+3. **slash 候选分页**：`/` 的候选池保留完整 catalog，显示层只窗口化 6 条；`PgUp/PgDn` 在 slash 菜单打开时按页起点翻页，输入 `/s` 后仍按前缀过滤。
+4. **工具/文本顺序**：后端 `run-stream-adapter` 只在最后一个 part 是 text 时更新文本；工具结果后到来的文本追加为新的 text part，保证 TUI 按实际事件先后顺序渲染。
+5. **prompt 位置**：本轮通过隐藏 command 噪声减少输入框跳动；完整 fixed viewport / Static transcript 仍作为独立后续 spike，不混入本批。

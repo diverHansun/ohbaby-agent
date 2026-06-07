@@ -29,17 +29,14 @@ export function NoticeBanner({
       ))}
       {commandNotices.map((notice) => (
         <Box flexDirection="row" key={notice.id} marginBottom={1}>
-          <Text
-            color={
-              notice.kind === "error"
-                ? theme.status.error
-                : theme.status.success
-            }
-          >
-            command
-          </Text>
-          <Text dimColor> {notice.commandId}: </Text>
-          <Text>{notice.text}</Text>
+          {notice.kind === "error" ? (
+            <>
+              <Text color={theme.status.error}>error</Text>
+              <Text> {notice.text}</Text>
+            </>
+          ) : (
+            <Text>{notice.text}</Text>
+          )}
         </Box>
       ))}
     </>

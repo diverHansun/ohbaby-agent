@@ -1,6 +1,10 @@
 import { Box, Text } from "ink";
 import type { ReactElement } from "react";
-import { getSlashCompletionCandidates } from "../../slash-commands/completions.js";
+import {
+  getSlashCompletionCandidates,
+  getSlashCompletionWindow,
+  getSlashCompletionWindowStart,
+} from "../../slash-commands/completions.js";
 import { formatCommandHints } from "../../slash-commands/hints.js";
 import type { TuiCommandCatalog } from "../../store/snapshot.js";
 import { useTheme } from "../../theme/index.js";
@@ -17,9 +21,15 @@ export function Completion({
   selectedIndex,
 }: CompletionProps): ReactElement {
   const theme = useTheme();
-  const hints = formatCommandHints(
-    getSlashCompletionCandidates(input, catalog),
+  const candidates = getSlashCompletionCandidates(input, catalog);
+  const windowStart = getSlashCompletionWindowStart(
+    candidates.length,
+    selectedIndex,
   );
+  const hints = formatCommandHints(
+    getSlashCompletionWindow(input, catalog, selectedIndex),
+  );
+  const selectedWindowIndex = selectedIndex - windowStart;
 
   if (!input.startsWith("/") || hints.length === 0) {
     return <></>;
@@ -29,12 +39,14 @@ export function Completion({
     <Box flexDirection="column">
       {hints.map((hint, index) => (
         <Text
-          bold={index === selectedIndex}
-          color={index === selectedIndex ? theme.status.accent : undefined}
-          dimColor={index !== selectedIndex}
+          bold={index === selectedWindowIndex}
+          color={
+            index === selectedWindowIndex ? theme.status.accent : undefined
+          }
+          dimColor={index !== selectedWindowIndex}
           key={hint}
         >
-          {index === selectedIndex ? "> " : "  "}
+          {index === selectedWindowIndex ? "> " : "  "}
           {hint}
         </Text>
       ))}

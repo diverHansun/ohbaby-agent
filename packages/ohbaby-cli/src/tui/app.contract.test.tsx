@@ -6,6 +6,7 @@ import type {
   UiSnapshot,
 } from "ohbaby-sdk";
 import { OhbabyTerminalApp } from "./index.js";
+import { renderOhbabyLogo } from "./render/logo.js";
 import type {
   TerminalClient,
   TuiCommandCatalog,
@@ -107,8 +108,10 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
 
+    const logoAnchor = renderOhbabyLogo({ maxWidth: 80 })[0]?.trim();
     expect(app.lastFrame()).toContain("╭");
     expect(app.lastFrame()).toContain("╰");
+    expect(app.lastFrame()).toContain(logoAnchor);
     expect(app.lastFrame()).not.toContain("___  _   _");
     expect(app.lastFrame()).toContain("> message");
     expect(app.lastFrame()).not.toContain("ohbaby >");
@@ -1008,11 +1011,11 @@ describe("OhbabyTerminalApp", () => {
     );
   });
 
-  it("caps slash candidates and truncates long descriptions", async () => {
+  it("windows slash candidates and pages through the full command list", async () => {
     const longDescription =
       "A very long command description that should not stretch the input area past a readable terminal width during dogfood sessions";
     const longCatalog: TuiCommandCatalog = {
-      commands: Array.from({ length: 8 }, (_, index) => ({
+      commands: Array.from({ length: 12 }, (_, index) => ({
         argumentMode: "argv" as const,
         category: "system",
         description: longDescription,
@@ -1044,6 +1047,26 @@ describe("OhbabyTerminalApp", () => {
     expect(hintLines[0]?.trimStart()).toMatch(/^> \/cmd0/u);
     expect(hintLines[0]).toContain("...");
     expect(frame).not.toContain("/cmd6");
+
+    app.stdin.write("\u001B[6~");
+    const pageFrame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("/cmd6") && nextFrame.includes("/cmd11"),
+    );
+    expect(pageFrame).not.toContain("/cmd0");
+    expect(pageFrame).toContain("> /cmd6");
+    expect(pageFrame).toContain("/cmd11");
+
+    app.stdin.write("\r");
+    await flush();
+
+    expect(client.executeCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commandId: "cmd.6",
+        path: ["cmd6"],
+      }),
+    );
   });
 
   it("does not execute permission levels as slash subcommands", async () => {
