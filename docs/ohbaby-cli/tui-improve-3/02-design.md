@@ -17,6 +17,7 @@
 - 不处于 `status: "streaming"`。
 - 不包含 pending/running tool call。
 - 不属于当前 run 的活跃尾部。
+- 在连续 `message.part.delta` 下保持数组引用稳定。
 - session 切换时必须整体替换，不能继承上一 session 的内容。
 
 ### Live Tail
@@ -25,8 +26,9 @@ live tail 是当前仍会变化的消息区域。它包括：
 
 - `status: "streaming"` 的 assistant message。
 - 包含 pending/running tool call 的 assistant message。
-- 当前 run 尚未完成时的最后 assistant message。
+- 当前 run 尚未完成，且最后一条 message 是 assistant 时的尾部 message。
 - 刚完成但还需要折叠 reasoning 或合并 tool result 的短暂尾部状态。
+- user message 不进入 live tail；用户敲回车后立即进入 committed transcript，保证历史 prompt 淡色块立即可见。
 
 ### PromptDock
 
@@ -60,6 +62,8 @@ AppShell
 - 调用纯函数 `splitTranscript(messages, runtime)` 得到 committed/live 两段。
 - 用 `key={activeSessionId}` 或等价 reset 策略隔离 session。
 - 暂时保持普通 Ink column，不实现虚拟滚动。
+- 不持有跨 session 的隐式缓存。
+- 不决定 part-level 顺序；part 合并由 `MessageRow` 负责。
 
 ### CommittedTranscript
 
@@ -68,6 +72,8 @@ AppShell
 - 渲染稳定历史消息。
 - 未来可以被替换为 `<Static>` 或 scrollback 实现。
 - 本阶段不直接启用 `<Static>`，但接口设计为可替换。
+- 用 `React.memo` 或等价方式保护 committed 区域。
+- props 中的 committed message array 在 live tail delta 下必须保持引用稳定。
 
 ### LiveTail
 
@@ -76,6 +82,7 @@ AppShell
 - 渲染流式 assistant message、running tool line、reasoning 当前态。
 - spinner 只存在于 running/pending tool line。
 - 完成后工具行保留固定 leading 占位，避免文字左移跳动。
+- running 行的前缀宽度必须与 completed 行前缀宽度一致。当前约定为 running spinner 占 2 cell，completed 用两个空格占位。
 
 ### MessageRow
 
@@ -86,6 +93,44 @@ AppShell
 - 不判断 session。
 - 不重新排序不同 message。
 - 对同一 message 内的 parts 只做局部展示合并：tool call 与 matching result 可合并为一条工具摘要行，但不能改变 text part 与 tool call 的相对位置。
+- `splitTranscript` 永远不切分 message.parts，只按 message 粒度划分 committed/live。
+- 如果以后需要把单个 message 的部分内容固化，必须先引入独立的 part transcript 设计，不能把该逻辑塞进 `splitTranscript`。
+
+## splitTranscript 判定表
+
+`splitTranscript(messages, runtime)` 是纯函数，返回：
+
+```ts
+{
+  committedMessages: readonly UiMessage[];
+  liveMessage: UiMessage | null;
+}
+```
+
+第一版只支持一个 live message，不切分 parts。
+
+| runtime.status | lastMessage.role | lastMessage 状态 | liveMessage | committedMessages |
+| --- | --- | --- | --- | --- |
+| `idle` | any | any | `null` | `messages` |
+| `running` | `assistant` | `status === "streaming"` 或包含 pending/running tool | `last` | `messages.slice(0, -1)` |
+| `running` | `assistant` | 全 completed，包括已折叠 reasoning | `last`，短暂等待 run 完成 | `messages.slice(0, -1)` |
+| `running` | `user` | any | `null` | `messages` |
+| `waiting-for-permission` | any | 包含 pending/running tool | `last` | `messages.slice(0, -1)` |
+| `error` | any | any | `null` | `messages` |
+
+判定优先级：
+
+1. 首选 `message.status === "streaming"`。
+2. 其次检查 `message.parts[*].type === "tool-call"` 且 `call.status` 为 `pending` 或 `running`。
+3. 只有在 message 状态缺失时，才使用 runtime 作为 fallback。
+4. runtime 为 `running` 但 messages 全部 completed 时，不强行把 completed assistant 放入 live tail，除非它是最后一条 assistant 且 run 尚未完成。
+5. user message 永远不因 runtime 为 `running` 进入 live tail。
+
+必须满足的 invariant：
+
+- 连续 100 次 `message.part.delta` 只改变 `liveMessage`，`committedMessages` 保持 `Object.is` 引用稳定。
+- active session 变化或 `snapshot.replaced` 后，旧 `committedMessages` 与 `liveMessage` 必须丢弃，由新 snapshot 重建。
+- `splitTranscript` 不处理 notices，不处理 command notices，不渲染任何 UI。
 
 ## 历史用户消息样式
 
@@ -104,20 +149,34 @@ AppShell
 - 历史用户消息不使用边框。
 - 历史用户消息背景应比 PromptDock 更弱。
 
+量化规则：
+
+- `theme.message.userBlockBg` 必须贴近 page background；dark 模式下相对 page background 的感知亮度差异应小于约 4%。
+- `theme.border` 与 `userBlockBg` 的感知亮度差异应至少约 6%，保证 PromptDock 边框更突出。
+- `theme.spinner` 颜色不得与 `userBlockBg` 同色相，避免 16 色降级路径下混成一块。
+- 16 色或低 color level 下必须回退到可读 ANSI 色名，不允许出现白底白字。
+
 ## 数据流
 
 ```text
 SDK UI events
-  -> createCoalescedTuiEventDispatcher
-  -> TuiStore
-  -> selectors
-  -> TranscriptViewport / PromptDock / DialogManager
+  -> createCoalescedTuiEventDispatcher  (合并相邻 message.part.delta 为单次 dispatch)
+  -> TuiStore.dispatchMany
+  -> state.committedMessages / state.liveMessage
+  -> memoized selectors
+  -> TranscriptViewport
+      CommittedTranscript  (React.memo，只在 activeSessionId 或 committed 引用变化时重渲)
+      LiveTail             (React.memo，可随 delta 重渲)
+      NoticeLane           (React.memo，只随 notices 变化)
+  -> PromptDock / DialogManager
 ```
 
 改造重点：
 
 - `app.tsx` 不再让根组件订阅过多 state。
 - `MessageListContainer` 拆为 `TranscriptViewportContainer`。
+- `HeaderContainer` 保持现有 `state.messages.length === 0` 订阅即可；它只在长度或 session 切换时变化，不参与 committed/live 切分优化。
+- 在 `TuiStoreState` 中拆出 `committedMessages: readonly UiMessage[]` 和 `liveMessage: UiMessage | null`，让 delta 只更新 live slice。
 - selector 输出应尽量稳定，例如：
   - `selectActiveSessionId`
   - `selectTranscriptMessages`
@@ -125,6 +184,20 @@ SDK UI events
   - `selectPromptDockState`
   - `selectNoticeLaneState`
 - `splitTranscript` 是纯函数，便于单测。
+- transcript 相关 selector 放在 `tui/store/selectors/transcript.ts`，避免单个 `selectors.ts` 继续膨胀。
+- `tui/store/selectors.ts` 保留 context window、runtime 等全局 selector。
+
+### Notice 归属
+
+notice 分两类处理：
+
+- `state.notices` 是全局/后端 UI notice，例如 startup warning、context unavailable，进入 `NoticeLane`。
+- `state.commandNotices` 是命令执行结果，属于会话作用域提示。第一版不放入全局 `NoticeLane`；优先随 transcript 渲染，若没有明确 anchor，则放在 `LiveTail` 末尾。
+
+session 切换时：
+
+- command notices 继续按现有逻辑清空。
+- UI notices 可保留，但不能伪装成某个 session 的历史消息。
 
 ## 顺序规则
 
@@ -152,7 +225,10 @@ reasoning：
 
 - active session 切换时 transcript view 必须 reset。
 - context window usage 刷新失败仍沿用 improve-1 决策：当前 session 自己的旧缓存可保留，并发 warning notice；无缓存则右侧留空。
-- 如果 split 逻辑无法判断 live tail，默认只把最后一个 streaming 或包含 running tool 的 message 放入 live tail，其余归 committed。
+- 如果 `message.part.delta` 的 `messageId` 在当前 session 不存在，静默 drop，并发 warning notice。
+- `snapshot.replaced` 触发时旧 live tail 直接丢弃，旧 committed 也丢弃，等待新 snapshot 提供。
+- session 删除导致 `activeSessionId` 变为 `null` 时，`TranscriptViewport` 渲染空态或 `select a session` hint。
+- dispatcher/coalescer 捕获 SDK 上游报错时，保留当前 frame，并通过 `runtime.updated` 发出 recoverable error。
 - 如果 SDK 事件顺序无法表达正确 UI 顺序，先用测试定位原因，再决定是否扩展 SDK 字段；本阶段不预设新字段。
 
 ## 与 `<Static>` 的关系
@@ -165,4 +241,4 @@ reasoning：
 - active session 切换测试证明旧内容不会残留。
 - `/resume`、`/sessions`、新 session、清空 session 都有 contract 测试。
 - streaming tail 不进入 `<Static>`。
-
+- 在 200 次连续 delta 压力下，对比 `<Static>` 启用前后的 ANSI 序列字节数和 frame 间隔，证明收益明确。

@@ -52,6 +52,9 @@ kimi-code 的关键点是每个 message 组件负责自己的 `render(width): st
 - 不迁移 OpenTUI 或 pi-tui。
 - 不把所有历史消息做强卡片化。
 - 不改变 SDK 消息协议，除非测试证明当前协议无法表达正确顺序。
+- 不引入新的 streaming coalescer；继续使用 improve-2 已就位的 `stream-coalescer.ts`。
+- 不把 `<Spinner>` 改造成 CSS-style 动画；Ink 下继续使用定时帧渲染。
+- 不让 `<Static>` 进入本阶段主路径；只保留后续启用条件。
 
 ## 成功标准
 
@@ -62,4 +65,3 @@ kimi-code 的关键点是每个 message 组件负责自己的 `render(width): st
 - active session 切换后，不出现其他 session 的旧消息。
 - 单元测试、集成测试、TUI E2E、真实 API key 测试通过。
 - 子代理审查后无阻塞级风险。
-

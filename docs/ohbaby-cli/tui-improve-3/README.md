@@ -15,4 +15,4 @@
 - [01-problem-and-scope.md](./01-problem-and-scope.md)：问题、范围、参考项目结论。
 - [02-design.md](./02-design.md)：核心设计、组件边界、数据流、颜色语义。
 - [03-tests-and-acceptance.md](./03-tests-and-acceptance.md)：测试矩阵、验收标准、子代理检查点。
-
+- [04-implementation-plan.md](./04-implementation-plan.md)：实施顺序、文件落点、风险处理。
