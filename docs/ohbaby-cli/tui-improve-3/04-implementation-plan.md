@@ -78,6 +78,7 @@ export interface TranscriptSplit {
 - 新增 `CommandNoticeLane`，位于 committed 与 live tail 之间。
 - command notices 不再混入全局 NoticeLane，也不放入 LiveTail。
 - active session 用 `key={activeSessionId ?? "none"}` 重置 viewport。
+- 用户验收反馈 PowerShell 输入仍闪后，`CommittedTranscript` 可增加 guarded Static：仅真实 Windows TTY 默认启用，非 TTY/测试保持动态。
 
 测试：
 
@@ -174,7 +175,7 @@ pnpm lint
 
 - 先完成 `splitTranscript` 和 store slices，再迁移组件。
 - 先让 tests fail，再实现。
-- 不在同一个 PR/批次中启用 `<Static>`。
+- 不启用无条件 `<Static>`；只允许 Windows TTY guarded Static，并提供 `OHBABY_TUI_STATIC_TRANSCRIPT=0/1` 覆盖。
 - 不改 SDK 协议字段。
 - 不新增 coalescer。
 - 不改变 PromptDock 交互行为。

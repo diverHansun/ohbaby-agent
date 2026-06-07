@@ -42,7 +42,7 @@ kimi-code 的关键点是每个 message 组件负责自己的 `render(width): st
 - 明确 active session 切换时的 reset/key 策略，避免旧 session 内容残留。
 - 增加顺序验收：用户消息、assistant text、tool call/result、后续 text 必须按 UI 语义顺序显示。
 - 增加 selector 粒度，减少 app 根组件对整份 state 的订阅。
-- 为后续 `<Static>` 或真正 scrollback 留出边界，但本阶段不强行启用。
+- 为 guarded `<Static>` 或真正 scrollback 留出边界；本阶段只允许真实 Windows TTY 的 committed transcript 使用 `<Static>`。
 
 不纳入 improve-3：
 
@@ -54,7 +54,7 @@ kimi-code 的关键点是每个 message 组件负责自己的 `render(width): st
 - 不改变 SDK 消息协议，除非测试证明当前协议无法表达正确顺序。
 - 不引入新的 streaming coalescer；继续使用 improve-2 已就位的 `stream-coalescer.ts`。
 - 不把 `<Spinner>` 改造成 CSS-style 动画；Ink 下继续使用定时帧渲染。
-- 不让 `<Static>` 进入本阶段主路径；只保留后续启用条件。
+- 不让无条件 `<Static>` 进入本阶段主路径；guarded Windows TTY committed transcript 例外，可用 `OHBABY_TUI_STATIC_TRANSCRIPT=0` 关闭。
 
 ## 成功标准
 

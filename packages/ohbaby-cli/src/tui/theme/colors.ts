@@ -12,6 +12,7 @@ export interface RawPalette {
   readonly textDim: string;
   readonly textMuted: string;
   readonly textStrong: string;
+  readonly userBlockBg: string;
   readonly yellow: string;
 }
 
@@ -29,6 +30,7 @@ export const darkPalette = {
   textDim: "#9A938A",
   textMuted: "#6E675F",
   textStrong: "#F5F2EC",
+  userBlockBg: "#122238",
   yellow: "#E0C06B",
 } as const satisfies RawPalette;
 
@@ -46,5 +48,6 @@ export const lightPalette = {
   textDim: "#5F5750",
   textMuted: "#6E675F",
   textStrong: "#0F0D0B",
+  userBlockBg: "#DCEEFF",
   yellow: "#9A7B1F",
 } as const satisfies RawPalette;

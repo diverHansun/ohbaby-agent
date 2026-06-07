@@ -6,7 +6,7 @@
 
 > `CommittedTranscript` 渲染稳定历史，`LiveTail` 渲染当前流式尾部，`PromptDock` 固定在底部。历史用户 prompt 使用淡色块增强定位。
 
-不把 `<Static>` 作为第一步。`<Static>` 是后续优化工具，不是本阶段目标。直接套 `<Static>` 会放大 `/resume`、`/sessions`、active session 切换时旧内容残留的风险。
+第一步不直接把所有 transcript 套进 `<Static>`；先建立 committed/live 边界。用户验收后补一个 guarded Static 收尾：真实 Windows TTY 默认把 `CommittedTranscript` 放入 `<Static>`，用于降低 PowerShell 输入时的动态区重绘；非 TTY、测试环境、重定向输出仍保持动态渲染，避免 `/resume`、`/sessions`、active session 切换时旧内容残留污染 contract。
 
 ## 术语
 
@@ -73,8 +73,8 @@ AppShell
 职责：
 
 - 渲染稳定历史消息。
-- 未来可以被替换为 `<Static>` 或 scrollback 实现。
-- 本阶段不直接启用 `<Static>`，但接口设计为可替换。
+- 默认保持可替换动态渲染；真实 Windows TTY 下使用 guarded `<Static>` 降低 PowerShell prompt 输入重绘。
+- 后续仍可替换为真正 scrollback 实现。
 - 用 `React.memo` 或等价方式保护 committed 区域。
 - props 中的 committed message array 在 live tail delta 下必须保持引用稳定。
 
@@ -248,12 +248,13 @@ reasoning：
 
 ## 与 `<Static>` 的关系
 
-本阶段先建边界，不启用 `<Static>`。
+本阶段主体仍是先建边界；`<Static>` 只作为 PowerShell 闪烁反馈后的 guarded 收尾启用。
 
-后续启用条件：
+启用规则：
 
 - `CommittedTranscript` 已经不依赖全局动态状态。
-- active session 切换测试证明旧内容不会残留。
-- `/resume`、`/sessions`、新 session、清空 session 都有 contract 测试。
+- 真实 Windows TTY 默认启用 committed Static，减少 prompt 输入时历史行参与动态重绘。
+- 非 TTY、测试、重定向输出保持动态渲染，保证 contract 测试可以验证 active session 替换不残留旧 committed 行。
+- `OHBABY_TUI_STATIC_TRANSCRIPT=0` 可关闭；`OHBABY_TUI_STATIC_TRANSCRIPT=1` 可强制开启。
 - streaming tail 不进入 `<Static>`。
-- 在 200 次连续 delta 压力下，对比 `<Static>` 启用前后的 ANSI 序列字节数和 frame 间隔，证明收益明确。
+- 后续若扩展到所有终端，必须先补 active session 清屏/视口代际策略，并比较 ANSI 序列字节数和 frame 间隔。

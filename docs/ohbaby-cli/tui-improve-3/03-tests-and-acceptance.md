@@ -33,6 +33,12 @@
 - `theme`：
   - `userBlockBg`、`userGutter` 在 dark/light 和 16 色降级路径均可读。
   - `userBlockBg` 低于 PromptDock 边框视觉权重。
+  - 用户历史消息色块不再复用 `surface`，dark/light 使用淡蓝语义背景，16 色降级为稳定蓝底。
+
+- `CommittedTranscript`：
+  - `shouldUseStaticTranscript` 在 Windows TTY 下默认启用。
+  - 非 TTY 下保持动态渲染，测试和重定向输出不走 Static。
+  - `OHBABY_TUI_STATIC_TRANSCRIPT=0/1` 可显式覆盖默认行为。
 
 - `selectors`：
   - prompt dock selector 只输出 PromptDock 需要的字段。
@@ -93,7 +99,7 @@
 - 1000 条 committed message 下，执行一次 prompt 输入 dispatch 的 reducer 路径耗时应小于 5ms。该测试可先标记 `it.skip`，作为性能债务基线。
 - 1000 条 committed message + 1 条 live message 下，执行一次 `message.part.delta` dispatch 路径耗时应小于 2ms。该测试覆盖本阶段 split 工程的核心性能承诺。
 - 200 次连续 `message.part.delta` 后，Header 与 PromptDock 不应因 transcript delta 获得新 props。可用测试替身计数、React Profiler 或 why-did-you-render 类工具验证。
-- `<Static>` 不进入本阶段；后续若启用，必须先比较 ANSI 序列字节数和 frame 间隔。
+- guarded `<Static>` 只进入 Windows TTY committed transcript；后续若扩大范围，必须先比较 ANSI 序列字节数和 frame 间隔。
 
 ## Definition Of Done
 
@@ -111,5 +117,6 @@
 ### Manual Gate
 
 - 用户在 PowerShell terminal 手动验收历史用户消息、streaming 输出、session 切换。
+- 用户在 PowerShell terminal 手动验收 prompt 输入时历史 committed 行不再随每个字符明显重绘。
 - 用户在 VS Code terminal 手动验收同样 3 个场景。
 - 真实 API key 场景完成并记录结果。

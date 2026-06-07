@@ -86,7 +86,7 @@ export function createTheme(mode: ColorMode, colorLevel = 3): Theme {
       remove: color("red", "red"),
     },
     message: {
-      userBlockBg: color("surface", "black"),
+      userBlockBg: color("userBlockBg", "blue"),
       userGutter: color("textMuted", "gray"),
     },
     mode,
