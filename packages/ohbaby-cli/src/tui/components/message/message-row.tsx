@@ -10,7 +10,11 @@ import { mdToAnsi } from "../../render/markdown.js";
 import { wrapAnsi } from "../../render/wrap.js";
 import { useTheme, type Theme } from "../../theme/index.js";
 import { Spinner } from "../spinner.js";
-import { renderToolLabel, renderToolPart } from "./parts/tool-part.js";
+import {
+  renderToolLabel,
+  renderToolLabelParts,
+  renderToolPart,
+} from "./parts/tool-part.js";
 
 export interface MessageRowProps {
   readonly contentWidth: number;
@@ -108,6 +112,13 @@ interface RenderedMessagePart {
   readonly indent: number;
   readonly index: number;
   readonly kind: "text";
+  readonly segments?: readonly RenderedTextSegment[];
+  readonly text: string;
+}
+
+interface RenderedTextSegment {
+  readonly color: string | undefined;
+  readonly dimColor?: boolean;
   readonly text: string;
 }
 
@@ -138,12 +149,13 @@ export function renderMessageParts(
     }
 
     const indent = message.role === "user" ? 0 : pairedPartIndent(part);
-    const text = renderPairedMessagePart(
+    const renderedPart = renderPairedMessagePart(
       message,
       part,
       Math.max(1, partWidth - indent),
+      theme,
     );
-    if (text === "") {
+    if (renderedPart.text === "") {
       continue;
     }
 
@@ -160,7 +172,10 @@ export function renderMessageParts(
       indent,
       index: part.index,
       kind: "text",
-      text,
+      ...(renderedPart.segments === undefined
+        ? {}
+        : { segments: renderedPart.segments }),
+      text: renderedPart.text,
     });
   }
 
@@ -175,7 +190,17 @@ function renderTextPart(
     return (
       <Box marginLeft={part.indent}>
         <Text color={part.color} dimColor={part.dimColor}>
-          {part.text}
+          {part.segments
+            ? part.segments.map((segment, index) => (
+                <Text
+                  color={segment.color}
+                  dimColor={segment.dimColor}
+                  key={String(index)}
+                >
+                  {segment.text}
+                </Text>
+              ))
+            : part.text}
         </Text>
       </Box>
     );
@@ -201,14 +226,44 @@ function renderPairedMessagePart(
   message: UiMessage,
   part: PairedMessagePart,
   partWidth: number,
-): string {
+  theme: Theme,
+): {
+  readonly segments?: readonly RenderedTextSegment[];
+  readonly text: string;
+} {
   if (part.kind === "tool") {
-    return wrapAnsi(renderToolLabel(part.call, part.result), partWidth).join(
-      "\n",
-    );
+    const text = wrapAnsi(
+      renderToolLabel(part.call, part.result),
+      partWidth,
+    ).join("\n");
+    if (text.includes("\n")) {
+      return { text };
+    }
+    return {
+      segments: renderToolLabelSegments(part.call, part.result, theme),
+      text,
+    };
   }
 
-  return renderSingleMessagePart(message, part.part, partWidth);
+  return { text: renderSingleMessagePart(message, part.part, partWidth) };
+}
+
+function renderToolLabelSegments(
+  call: UiToolCall,
+  result: UiToolResult | undefined,
+  theme: Theme,
+): readonly RenderedTextSegment[] {
+  const parts = renderToolLabelParts(call, result);
+  const segments: RenderedTextSegment[] = [
+    { color: theme.tool.name, text: parts.name },
+  ];
+  if (parts.summary !== "") {
+    segments.push({ color: theme.tool.arg, text: ` ${parts.summary}` });
+  }
+  if (parts.error !== "") {
+    segments.push({ color: theme.tool.failed, text: ` ${parts.error}` });
+  }
+  return segments;
 }
 
 function pairedPartIndent(part: PairedMessagePart): number {

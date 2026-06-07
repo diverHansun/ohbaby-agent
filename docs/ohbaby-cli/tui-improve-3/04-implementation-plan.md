@@ -179,3 +179,38 @@ pnpm lint
 - 不改 SDK 协议字段。
 - 不新增 coalescer。
 - 不改变 PromptDock 交互行为。
+
+## Step 8: `/new` 强新窗口与单空会话收尾
+
+文件落点：
+
+- `packages/ohbaby-agent/src/services/session/types.ts`
+- `packages/ohbaby-agent/src/services/session/manager.ts`
+- `packages/ohbaby-agent/src/adapters/ui-inprocess.ts`
+- `packages/ohbaby-agent/src/commands/builtin.ts`
+- `packages/ohbaby-cli/src/tui/app.tsx`
+- `packages/ohbaby-cli/src/tui/layout/metrics.ts`
+- `packages/ohbaby-cli/src/tui/components/prompt/index.tsx`
+- `packages/ohbaby-cli/src/tui/theme/colors.ts`
+- `packages/ohbaby-cli/src/tui/theme/tokens.ts`
+- `packages/ohbaby-cli/src/tui/components/message/message-row.tsx`
+- `packages/ohbaby-cli/src/tui/components/message/parts/tool-part.tsx`
+
+任务：
+
+- 在 session lifecycle 层新增 project-scope empty primary session 查询。
+- `/new` 先复用同 project/root 下 empty primary session，没有再创建。
+- `/new` 的 command action 带明确来源标记，TUI 只认该标记触发强清屏。
+- TUI 写 `\x1b[2J\x1b[3J\x1b[H` 清当前屏幕和 scrollback，并推进 viewport generation。
+- Prompt content width cap 从 132 改为 160，PromptDock 保持输入内容在框内。
+- 用户历史 prompt 背景调整为克制淡蓝。
+- tool name 使用克制 brand gold，tool arg 使用 dim gray，并在渲染层分色。
+
+测试：
+
+- session manager unit：同 project empty primary 可查到；subagent 和不同 project 不匹配。
+- ui-inprocess contract：连续 `/new` 复用 empty primary，不创建多个空会话。
+- command service unit：`/new` action 带来源标记。
+- app contract：`/new` action 写强清屏 ANSI；`/resume` 不清屏。
+- layout unit：宽屏 cap 为 160。
+- theme/message unit：用户淡蓝块和工具金/灰分色。

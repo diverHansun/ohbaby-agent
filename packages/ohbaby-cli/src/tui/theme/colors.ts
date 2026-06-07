@@ -30,7 +30,7 @@ export const darkPalette = {
   textDim: "#9A938A",
   textMuted: "#6E675F",
   textStrong: "#F5F2EC",
-  userBlockBg: "#122238",
+  userBlockBg: "#1E3A5F",
   yellow: "#E0C06B",
 } as const satisfies RawPalette;
 

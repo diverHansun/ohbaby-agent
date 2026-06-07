@@ -67,6 +67,7 @@ export interface CommandModelSwitchInput {
 export interface CommandSessionSummary {
   readonly id: string;
   readonly title: string;
+  readonly created?: boolean;
 }
 
 export interface CommandToolProvider {

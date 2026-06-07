@@ -8,6 +8,14 @@
 
 第一步不直接把所有 transcript 套进 `<Static>`；先建立 committed/live 边界。用户验收后补一个 guarded Static 收尾：真实 Windows TTY 默认把 `CommittedTranscript` 放入 `<Static>`，用于降低 PowerShell 输入时的动态区重绘；非 TTY、测试环境、重定向输出仍保持动态渲染，避免 `/resume`、`/sessions`、active session 切换时旧内容残留污染 contract。
 
+补充决策：
+
+- `/new` 采用强新窗口语义：清当前屏幕、清 scrollback、光标回左上角，然后重新渲染空会话。
+- `/new` 清屏必须由 command action 明确标记触发，不能仅凭 active session 为空推断，避免 `/resume` 到空会话误清屏。
+- 后端采用 project-scope 单空会话：同 project/root 下最多保留一个 empty primary session；已有则复用并切换，没有才创建。
+- PromptDock 宽屏上限调整为 160 列，输入内容必须始终被框约束，保留现有手动换行体验。
+- 历史用户消息使用克制的淡蓝块；工具名使用克制品牌金色，参数摘要使用灰色，二者不能复用同一蓝色语义。
+
 ## 术语
 
 ### Committed Transcript
@@ -38,6 +46,30 @@ PromptDock 是输入区和状态区：
 - 右侧显示 context window usage。
 - 状态行显示 mode、permission、session。
 - 不显示草稿 token。
+- 宽屏下最多扩展到 160 列，不无限拉长。
+- 输入内容、中文宽字符、长英文和手动换行都必须保持在边框内。
+
+### New Session Screen Reset
+
+`/new` 是新会话画布切换，不只是 active session id 变化。
+
+- 后端 command action 必须带有明确来源，例如 `data.source === "new"`。
+- TUI 只在收到 `/new` 的 `session.selected` action 后写清屏序列。
+- 清屏序列为 `\x1b[2J\x1b[3J\x1b[H`：清当前屏幕、清 scrollback、光标回左上角。
+- 清屏后必须推进 viewport generation，确保下一帧重新渲染 Header、TranscriptViewport、PromptDock。
+- `/resume`、`/sessions` 或普通 `snapshot.replaced` 不能触发强清屏。
+
+### Project-Scope Empty Session
+
+`/new` 在后端保证同 project/root 下最多保留一个空的 primary session。
+
+- empty 判定优先使用 session stats：`stats.messageCount === 0`。
+- primary 判定排除 subagent/child session。
+- 当前 active session 为空时直接复用。
+- 当前 active session 不为空，但同 project/root 下已有 empty primary session 时切换到该 session。
+- 没有可复用 empty primary session 时才创建新 session。
+- in-memory UI fallback 使用 `messages.length === 0` 判定。
+- 该规则属于 session lifecycle，不由 TUI 自行删除或清理历史 session。
 
 ## 组件边界
 
@@ -156,6 +188,8 @@ AppShell
 - 圆角不适用于终端；使用 padding 和背景即可。
 - 不显示 `you`、`user`、`prompt` 等文字标签。
 - 多行 prompt 的背景块覆盖每一行，续行缩进与首行正文对齐。
+- dark 模式背景应比深蓝/海军蓝更浅，但不能过亮。
+- light 模式保持淡蓝底，确保浅色终端下仍可辨。
 
 当前 PromptDock 仍然比历史用户消息更突出：
 
@@ -169,6 +203,16 @@ AppShell
 - `theme.border` 与 `userBlockBg` 的感知亮度差异应至少约 6%，保证 PromptDock 边框更突出。
 - `theme.spinner` 颜色不得与 `userBlockBg` 同色相，避免 16 色降级路径下混成一块。
 - 16 色或低 color level 下必须回退到可读 ANSI 色名，不允许出现白底白字。
+
+## 工具行颜色语义
+
+工具调用是行动语义，不再使用信息蓝作为主色：
+
+- tool name 使用 `theme.tool.name`，映射到克制的 brand gold，不使用 `goldBright`。
+- tool arg 使用 `theme.tool.arg`，映射到 dim gray。
+- tool error 仍使用 error red。
+- completed tool 不显示勾叉图标；running tool 使用 spinner。
+- 如果工具输出需要背景，不能复用 `theme.message.userBlockBg`；第一版优先无背景或中性 panel/surface。
 
 ## 数据流
 

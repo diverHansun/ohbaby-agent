@@ -120,7 +120,7 @@ export function createTheme(mode: ColorMode, colorLevel = 3): Theme {
     tool: {
       arg: color("textDim", "gray"),
       failed: color("red", "red"),
-      name: color("skyBlue", "cyan"),
+      name: color("gold", "yellow"),
       running: color("purple", "magenta"),
       success: color("green", "green"),
     },

@@ -115,7 +115,9 @@ export interface InProcessUiBackendOptions {
     SessionManager,
     "create" | "get" | "getRecent"
   > &
-    Partial<Pick<SessionManager, "incrementStats">>;
+    Partial<
+      Pick<SessionManager, "findReusableEmptyPrimary" | "incrementStats">
+    >;
   readonly stateStore?: UiStateStore;
   readonly projectDirectory?: string;
   readonly now?: () => Date;
@@ -648,13 +650,116 @@ export function createInProcessUiBackendClient(
     }));
   }
 
+  function normalizeProjectRootForCompare(root: string | undefined): string {
+    return (root ?? "").replace(/\\/gu, "/").replace(/\/+$/u, "").toLowerCase();
+  }
+
+  function sameProjectRoot(
+    left: string | undefined,
+    right: string | undefined,
+  ): boolean {
+    return (
+      normalizeProjectRootForCompare(left) !== "" &&
+      normalizeProjectRootForCompare(left) ===
+        normalizeProjectRootForCompare(right)
+    );
+  }
+
+  function isReusableUiSession(
+    session: UiSession,
+    projectRoot: string,
+  ): boolean {
+    return (
+      session.messages.length === 0 &&
+      sameProjectRoot(session.projectRoot, projectRoot)
+    );
+  }
+
+  async function resolveNewSessionProjectRoot(
+    snapshot: UiSnapshot,
+  ): Promise<string> {
+    const activeSession = snapshot.sessions.find(
+      (session) => session.id === snapshot.activeSessionId,
+    );
+    if (activeSession?.projectRoot && activeSession.projectRoot !== "") {
+      return activeSession.projectRoot;
+    }
+    return resolveProjectRoot();
+  }
+
+  async function activateSessionForNewCommand(input: {
+    readonly publishUpdate: boolean;
+    readonly session: UiSession;
+  }): Promise<CommandSessionSummary> {
+    sessionIds.reserve(input.session.id);
+    await upsertSession(input.session);
+    await stateStore.setActiveSessionId(input.session.id);
+    if (input.publishUpdate) {
+      publish({
+        type: "session.updated",
+        session: cloneSession(input.session),
+      });
+    }
+    publish({
+      snapshot: await readSnapshotWithPermission(),
+      timestamp: Date.now(),
+      type: "snapshot.replaced",
+    });
+
+    return {
+      created: false,
+      id: input.session.id,
+      title: input.session.title,
+    };
+  }
+
   async function createSessionFromCommand(): Promise<CommandSessionSummary> {
     await reserveIdsFromState();
+    const snapshot = await stateStore.readSnapshot();
     const createdAt = timestamp();
-    const projectRoot = await resolveProjectRoot();
+    const projectRoot = await resolveNewSessionProjectRoot(snapshot);
     const title = "New session";
     const agentName = options.agentManager?.getDefault() ?? "default";
     let session: UiSession;
+
+    const activeSession = snapshot.sessions.find(
+      (candidate) => candidate.id === snapshot.activeSessionId,
+    );
+    if (activeSession && isReusableUiSession(activeSession, projectRoot)) {
+      return activateSessionForNewCommand({
+        publishUpdate: false,
+        session: activeSession,
+      });
+    }
+
+    const reusableCoreSession =
+      await options.sessionManager?.findReusableEmptyPrimary?.(projectRoot);
+    if (reusableCoreSession) {
+      const existingUiSession = snapshot.sessions.find(
+        (candidate) => candidate.id === reusableCoreSession.id,
+      );
+      if (
+        existingUiSession === undefined ||
+        isReusableUiSession(existingUiSession, projectRoot)
+      ) {
+        return activateSessionForNewCommand({
+          publishUpdate: existingUiSession === undefined,
+          session:
+            existingUiSession ??
+            sessionMetadataToUiSession(reusableCoreSession),
+        });
+      }
+    }
+
+    const reusableUiSession = snapshot.sessions.find((candidate) =>
+      isReusableUiSession(candidate, projectRoot),
+    );
+    if (reusableUiSession) {
+      return activateSessionForNewCommand({
+        publishUpdate: false,
+        session: reusableUiSession,
+      });
+    }
 
     if (options.sessionManager) {
       const created = await options.sessionManager.create(projectRoot, {
@@ -683,7 +788,7 @@ export function createInProcessUiBackendClient(
       type: "snapshot.replaced",
     });
 
-    return { id: session.id, title: session.title };
+    return { created: true, id: session.id, title: session.title };
   }
 
   async function assertCanUseAsPrimarySession(

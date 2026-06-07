@@ -1,5 +1,11 @@
 import type { UiMessagePart, UiToolCall, UiToolResult } from "ohbaby-sdk";
 
+export interface ToolLabelParts {
+  readonly error: string;
+  readonly name: string;
+  readonly summary: string;
+}
+
 export function renderToolPart(part: UiMessagePart): string {
   switch (part.type) {
     case "tool-call":
@@ -16,11 +22,23 @@ export function renderToolLabel(
   call: UiToolCall,
   result?: UiToolResult,
 ): string {
+  const parts = renderToolLabelParts(call, result);
+  const summary = parts.summary === "" ? "" : ` ${parts.summary}`;
+  const error = parts.error === "" ? "" : ` ${parts.error}`;
+  return `${parts.name}${summary}${error}`;
+}
+
+export function renderToolLabelParts(
+  call: UiToolCall,
+  result?: UiToolResult,
+): ToolLabelParts {
   const summary = formatPrimaryInput(call.input);
-  const error = result?.error ? ` ${formatBody(result.error)}` : "";
-  return `${formatToolName(call.name)}${
-    summary === "" ? "" : ` ${summary}`
-  }${error}`;
+  const error = result?.error ? formatBody(result.error) : "";
+  return {
+    error,
+    name: formatToolName(call.name),
+    summary,
+  };
 }
 
 function formatToolName(name: string): string {

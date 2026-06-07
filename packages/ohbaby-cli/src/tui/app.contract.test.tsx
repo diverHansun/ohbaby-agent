@@ -1040,6 +1040,66 @@ describe("OhbabyTerminalApp", () => {
     );
   });
 
+  it("clears screen and scrollback when /new selects a session", async () => {
+    const writeSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const client = createFakeClient(snapshot(), catalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    writeSpy.mockClear();
+    client.emit({
+      action: {
+        data: { choiceId: "session_2", source: "new" },
+        kind: "session.selected",
+      },
+      clientInvocationId: "inv_new",
+      commandRunId: "command_new",
+      timestamp: Date.now(),
+      type: "command.result.delivered",
+    });
+    await flush();
+
+    expect(writeSpy).toHaveBeenCalledWith("\x1b[2J\x1b[3J\x1b[H");
+    app.unmount();
+  });
+
+  it("does not clear screen for ordinary session selection actions", async () => {
+    const writeSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const client = createFakeClient(snapshot(), catalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    writeSpy.mockClear();
+    client.emit({
+      action: {
+        data: { choiceId: "session_2" },
+        kind: "session.selected",
+      },
+      clientInvocationId: "inv_resume",
+      commandRunId: "command_resume",
+      timestamp: Date.now(),
+      type: "command.result.delivered",
+    });
+    await flush();
+
+    expect(writeSpy).not.toHaveBeenCalledWith("\x1b[2J\x1b[3J\x1b[H");
+    app.unmount();
+  });
+
   it("shows slash candidates and executes a selected catalog command", async () => {
     const client = createFakeClient(snapshot(), catalog);
     const app = render(

@@ -3663,8 +3663,113 @@ describe("createInProcessUiBackendClient", () => {
       subject: "session.created",
     });
     expect(selectedEvent?.action).toEqual({
-      data: { choiceId: "session_2" },
+      data: { choiceId: "session_2", source: "new" },
       kind: "session.selected",
+    });
+  });
+
+  it("reuses an existing empty project session through the /new command", async () => {
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "session_1",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_1",
+            messages: [
+              {
+                createdAt: "2026-05-20T00:00:01.000Z",
+                id: "message_1",
+                parts: [{ text: "Old", type: "text" }],
+                role: "user",
+              },
+            ],
+            projectRoot: "D:/repo",
+            title: "Existing",
+            updatedAt: "2026-05-20T00:00:01.000Z",
+          },
+          {
+            createdAt: "2026-05-20T00:00:02.000Z",
+            id: "session_empty",
+            messages: [],
+            projectRoot: "D:/repo",
+            title: "New session",
+            updatedAt: "2026-05-20T00:00:02.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([]),
+      now: () => new Date("2026-05-20T00:02:00.000Z"),
+    });
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_new",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "tui",
+    });
+
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      activeSessionId: "session_empty",
+      sessions: [
+        { id: "session_1", messages: [{ parts: [{ text: "Old" }] }] },
+        { id: "session_empty", messages: [], title: "New session" },
+      ],
+    });
+  });
+
+  it("keeps the current empty project session active when /new is repeated", async () => {
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "session_empty_current",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_empty_other",
+            messages: [],
+            projectRoot: "D:/repo",
+            title: "Other empty session",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+          {
+            createdAt: "2026-05-20T00:00:01.000Z",
+            id: "session_empty_current",
+            messages: [],
+            projectRoot: "D:/repo",
+            title: "Current empty session",
+            updatedAt: "2026-05-20T00:00:01.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([]),
+      now: () => new Date("2026-05-20T00:02:00.000Z"),
+    });
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_new",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "tui",
+    });
+
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      activeSessionId: "session_empty_current",
+      sessions: [
+        { id: "session_empty_other", messages: [] },
+        { id: "session_empty_current", messages: [] },
+      ],
     });
   });
 

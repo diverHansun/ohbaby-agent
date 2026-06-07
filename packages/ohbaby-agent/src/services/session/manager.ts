@@ -146,6 +146,22 @@ export function createSessionManager(
   return {
     create,
 
+    async findReusableEmptyPrimary(
+      projectDirectory: string,
+    ): Promise<Session | null> {
+      const project =
+        await options.projectResolver.fromDirectory(projectDirectory);
+      const sessions = await options.store.listByProject(project.id, {
+        status: "active",
+      });
+
+      return (
+        sessions.find(
+          (session) => !session.isSubagent && session.stats.messageCount === 0,
+        ) ?? null
+      );
+    },
+
     async ensureRoot(input: EnsureRootSessionInput): Promise<Session> {
       const existing = await options.store.get(input.id);
       if (existing) {

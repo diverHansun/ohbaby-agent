@@ -28,7 +28,9 @@ describe("createTheme", () => {
       frames: BRAILLE_SPINNER_FRAMES,
       palette: [darkPalette.goldBright, darkPalette.purple],
     });
-    expect(theme.tool.name).toBe(darkPalette.skyBlue);
+    expect(theme.tool.name).toBe(darkPalette.gold);
+    expect(theme.tool.name).not.toBe(darkPalette.goldBright);
+    expect(theme.tool.arg).toBe(darkPalette.textDim);
     expect(theme.reasoning).toBe(darkPalette.textMuted);
     expect(theme.border).toBe(darkPalette.border);
     expect(theme.message.userBlockBg).toBe(darkPalette.userBlockBg);
@@ -61,6 +63,8 @@ describe("createTheme", () => {
     expect(theme.border).toBe("gray");
     expect(theme.message.userBlockBg).toBe("blue");
     expect(theme.message.userGutter).toBe("gray");
+    expect(theme.tool.name).toBe("yellow");
+    expect(theme.tool.arg).toBe("gray");
     expect(theme.spinner.palette).toEqual(["yellow", "magenta"]);
   });
 });

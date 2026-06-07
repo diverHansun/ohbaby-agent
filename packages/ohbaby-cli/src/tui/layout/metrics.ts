@@ -15,7 +15,7 @@ export function computeLayoutMetrics(input: {
   const isCompact = columns < 80;
   const horizontalPadding = isCompact ? 2 : 4;
   const contentWidth = Math.min(
-    132,
+    160,
     Math.max(24, columns - horizontalPadding * 2),
   );
 

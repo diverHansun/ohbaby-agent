@@ -453,8 +453,17 @@ async function handleSessionNew(
   }
 
   const session = await options.sessions.createSession();
-  context.emitOutput(dataOutput("session.created", { session }));
-  context.emitAction(action("session.selected", { choiceId: session.id }));
+  context.emitOutput(
+    dataOutput(
+      session.created === false ? "session.current" : "session.created",
+      {
+        session,
+      },
+    ),
+  );
+  context.emitAction(
+    action("session.selected", { choiceId: session.id, source: "new" }),
+  );
 }
 
 function parseForceArg(

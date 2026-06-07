@@ -1,5 +1,5 @@
 import { Text, useApp, useInput } from "ink";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type {
   CoreAPI,
@@ -32,6 +32,8 @@ import type {
   TuiRuntimeStatus,
 } from "./store/snapshot.js";
 
+export const NEW_SESSION_CLEAR_SEQUENCE = "\x1b[2J\x1b[3J\x1b[H";
+
 export interface TerminalUiOptions {
   readonly client: CoreAPI;
   readonly subscribeEvents: (handler: UiEventHandler) => UiUnsubscribe;
@@ -47,6 +49,7 @@ export function OhbabyTerminalApp({
   const contextRefreshSequenceRef = useRef(0);
   const contextNoticeSequenceRef = useRef(0);
   const disposedRef = useRef(false);
+  const [screenGeneration, setScreenGeneration] = useState(0);
   const store = storeRef.current;
   const { exit } = useApp();
   const activeSessionId = useTuiStoreSelector(
@@ -177,6 +180,11 @@ export function OhbabyTerminalApp({
     const unsubscribe = subscribeEvents((tuiEvent: TuiEvent) => {
       eventDispatcher.dispatch(tuiEvent);
 
+      if (isNewSessionSelectionEvent(tuiEvent)) {
+        process.stdout.write(NEW_SESSION_CLEAR_SEQUENCE);
+        setScreenGeneration((current) => current + 1);
+      }
+
       if (
         tuiEvent.type === "command.result.delivered" &&
         tuiEvent.action?.kind === "app.exit"
@@ -276,7 +284,7 @@ export function OhbabyTerminalApp({
 
   return (
     <ThemeProvider>
-      <AppShell>
+      <AppShell key={screenGeneration}>
         <HeaderContainer store={store} />
         <TranscriptViewportContainer store={store} />
         <DialogManager
@@ -371,6 +379,21 @@ function createEmptySnapshot(): UiSnapshot {
     sessions: [],
     status: { kind: "idle" },
   };
+}
+
+function isNewSessionSelectionEvent(tuiEvent: TuiEvent): boolean {
+  if (
+    tuiEvent.type !== "command.result.delivered" ||
+    tuiEvent.action?.kind !== "session.selected"
+  ) {
+    return false;
+  }
+  const data = tuiEvent.action.data;
+  return isStringRecord(data) && data.source === "new";
+}
+
+function isStringRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function resolveEffectiveRuntime(

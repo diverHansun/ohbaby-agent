@@ -75,6 +75,7 @@ export interface SessionManager {
     projectDirectory: string,
     options?: CreateSessionOptions,
   ): Promise<Session>;
+  findReusableEmptyPrimary(projectDirectory: string): Promise<Session | null>;
   get(sessionId: string): Promise<Session | null>;
   listByProject(
     projectId: string,

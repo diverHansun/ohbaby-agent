@@ -34,6 +34,24 @@
   - `userBlockBg`、`userGutter` 在 dark/light 和 16 色降级路径均可读。
   - `userBlockBg` 低于 PromptDock 边框视觉权重。
   - 用户历史消息色块不再复用 `surface`，dark/light 使用淡蓝语义背景，16 色降级为稳定蓝底。
+  - dark 模式用户淡蓝块明显区别于深蓝/海军蓝，但不过亮。
+  - `tool.name` 使用克制 brand gold，`tool.arg` 使用 dim gray。
+
+- `layout`：
+  - 宽屏 content width cap 为 160。
+  - PromptDock 跟随父容器宽度。
+  - 长英文、中文宽字符和手动换行都不能越过输入框边界。
+
+- `session manager` / `/new`：
+  - 同 project/root 下已有 empty primary session 时，`/new` 复用该 session。
+  - 当前 active session 为空时，`/new` 复用当前 session。
+  - subagent/child session 不参与 empty primary 复用。
+  - 不同 project/root 下的 empty session 不互相复用。
+
+- `app`：
+  - `/new` 的 `session.selected` action 触发 `\x1b[2J\x1b[3J\x1b[H`。
+  - `/resume` 或普通 `snapshot.replaced` 到空 session 不触发强清屏。
+  - 清屏后推进 viewport generation，下一帧能重新显示 logo/prompt。
 
 - `CommittedTranscript`：
   - `shouldUseStaticTranscript` 在 Windows TTY 下默认启用。
@@ -71,6 +89,8 @@
 - 发送会触发工具调用的 prompt，确认 running spinner 出现，完成后只留工具名称/摘要。
 - 触发一段 streaming assistant 输出，确认 Header/Logo 不出现重复或旧内容残留。
 - `/sessions` 或 `/new` 后确认旧 session transcript 不残留。
+- `/new` 后确认当前屏幕和 scrollback 都被清空；上方不再残留旧 session transcript。
+- 连续执行 `/new` 不产生多个空 primary session。
 - 窄屏下历史用户消息块整体缩放，文本不越界。
 
 ## 真实 API 测试
@@ -118,5 +138,8 @@
 
 - 用户在 PowerShell terminal 手动验收历史用户消息、streaming 输出、session 切换。
 - 用户在 PowerShell terminal 手动验收 prompt 输入时历史 committed 行不再随每个字符明显重绘。
+- 用户在 PowerShell terminal 手动验收 `/new` 后旧 session 内容不可见，向上滚动也不见旧 transcript。
+- 用户在 PowerShell terminal 手动验收宽屏输入框更宽，且输入内容始终在框内。
+- 用户在 PowerShell terminal 手动验收历史用户淡蓝块与工具金色行能清晰区分。
 - 用户在 VS Code terminal 手动验收同样 3 个场景。
 - 真实 API key 场景完成并记录结果。

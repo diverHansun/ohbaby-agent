@@ -841,7 +841,7 @@ describe("CommandService", () => {
         }),
         expect.objectContaining({
           action: {
-            data: { choiceId: "session_new" },
+            data: { choiceId: "session_new", source: "new" },
             kind: "session.selected",
           },
           type: "result",

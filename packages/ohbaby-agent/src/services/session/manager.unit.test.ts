@@ -260,6 +260,34 @@ describe("SessionManager", () => {
     expect(removedEvents).toEqual([child.id]);
   });
 
+  it("finds a reusable empty primary session within the same project only", async () => {
+    const { manager } = createManager();
+    const filled = await manager.create("D:/repo", {
+      title: "Filled",
+    });
+    await manager.incrementStats(filled.id, {
+      lastMessageAt: 1_500,
+      messageCountDelta: 1,
+    });
+    const empty = await manager.create("D:/repo", {
+      title: "Reusable",
+    });
+    await manager.create("D:/other", {
+      title: "Other project",
+    });
+    await manager.create("D:/ignored", {
+      parentId: filled.id,
+      title: "Child empty",
+    });
+
+    await expect(manager.findReusableEmptyPrimary("D:/repo")).resolves.toEqual(
+      empty,
+    );
+    await expect(
+      manager.findReusableEmptyPrimary("D:/missing"),
+    ).resolves.toBeNull();
+  });
+
   it("updates metadata and increments stats without touching immutable fields", async () => {
     const { manager, updatedEvents } = createManager();
     const session = await manager.create("D:/repo");

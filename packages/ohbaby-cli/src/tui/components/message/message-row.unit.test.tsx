@@ -104,6 +104,7 @@ describe("MessageRow", () => {
   });
 
   it("renders a paired completed tool call as one tool line", () => {
+    const theme = createTheme("dark", 3);
     const message = assistantMessage([
       {
         call: {
@@ -118,6 +119,15 @@ describe("MessageRow", () => {
         type: "tool-result",
       },
     ]);
+
+    const rendered = renderMessageParts(message, 80, theme);
+    expect(rendered[0]).toMatchObject({
+      kind: "text",
+      segments: [
+        { color: theme.tool.name, text: "Bash" },
+        { color: theme.tool.arg, text: " pnpm test" },
+      ],
+    });
 
     const app = render(<MessageRow contentWidth={80} message={message} />);
 

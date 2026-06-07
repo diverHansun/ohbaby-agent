@@ -15,7 +15,7 @@ describe("computeLayoutMetrics", () => {
   it("uses regular padding and caps wide content", () => {
     expect(computeLayoutMetrics({ columns: 300, rows: 40 })).toEqual({
       columns: 300,
-      contentWidth: 132,
+      contentWidth: 160,
       horizontalPadding: 4,
       isCompact: false,
       rows: 40,
