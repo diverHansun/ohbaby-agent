@@ -167,7 +167,7 @@ export function Prompt({
         return;
       }
 
-      if (key.backspace || key.delete) {
+      if (isDeleteControlInput(value, key)) {
         applyEditor({ type: "backspace" });
         selectIndex(0);
         return;
@@ -273,12 +273,32 @@ function renderEditorLineText(input: {
   }
 
   const cursorColumn = input.editor.cursor.col;
+  const cursorChar =
+    cursorColumn >= input.line.length
+      ? " "
+      : input.line.slice(cursorColumn, cursorColumn + 1);
   return (
     <Text>
       {input.line.slice(0, cursorColumn)}
-      <Text color={input.cursorColor}>▌</Text>
-      {input.line.slice(cursorColumn)}
+      <Text color={input.cursorColor} inverse>
+        {cursorChar}
+      </Text>
+      {input.line.slice(cursorColumn + cursorChar.length)}
     </Text>
+  );
+}
+
+function isDeleteControlInput(
+  value: string,
+  key: { readonly backspace: boolean; readonly delete: boolean },
+): boolean {
+  return (
+    key.backspace ||
+    key.delete ||
+    value === "\b" ||
+    value === "\x7f" ||
+    value === "[P" ||
+    value === "\u001B[P"
   );
 }
 

@@ -48,11 +48,7 @@ export function MessageRow({
           {part.kind === "spinner" ? (
             <Spinner label={part.label} />
           ) : (
-            <Text color={part.color} dimColor={part.dimColor}>
-              {message.role === "user"
-                ? `${part.index === 0 ? "| " : "  "}${part.text}`
-                : part.text}
-            </Text>
+            renderTextPart(message, part)
           )}
         </Box>
       ))}
@@ -107,6 +103,7 @@ export function pairToolCallResult(
 interface RenderedMessagePart {
   readonly color: string | undefined;
   readonly dimColor: boolean;
+  readonly gutterColor?: string;
   readonly index: number;
   readonly kind: "text";
   readonly text: string;
@@ -118,7 +115,7 @@ interface RenderedSpinnerPart {
   readonly label: string;
 }
 
-function renderMessageParts(
+export function renderMessageParts(
   message: UiMessage,
   partWidth: number,
   theme: Theme,
@@ -146,9 +143,11 @@ function renderMessageParts(
     rendered.push({
       color:
         message.role === "user"
-          ? theme.message.userGutter
+          ? theme.role.user
           : pairedPartColor(part, theme),
       dimColor: part.kind === "part" && part.part.type === "reasoning",
+      gutterColor:
+        message.role === "user" ? theme.message.userGutter : undefined,
       index: part.index,
       kind: "text",
       text,
@@ -156,6 +155,28 @@ function renderMessageParts(
   }
 
   return rendered;
+}
+
+function renderTextPart(
+  message: UiMessage,
+  part: RenderedMessagePart,
+): ReactElement {
+  if (message.role !== "user") {
+    return (
+      <Text color={part.color} dimColor={part.dimColor}>
+        {part.text}
+      </Text>
+    );
+  }
+
+  return (
+    <Text>
+      <Text color={part.gutterColor}>{part.index === 0 ? "| " : "  "}</Text>
+      <Text color={part.color} dimColor={part.dimColor}>
+        {part.text}
+      </Text>
+    </Text>
+  );
 }
 
 function renderPairedMessagePart(

@@ -1,7 +1,12 @@
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
 import type { UiMessage, UiMessagePart, UiToolCall } from "ohbaby-sdk";
-import { MessageRow, pairToolCallResult } from "./message-row.js";
+import {
+  MessageRow,
+  pairToolCallResult,
+  renderMessageParts,
+} from "./message-row.js";
+import { createTheme } from "../../theme/index.js";
 
 describe("pairToolCallResult", () => {
   it("pairs a tool call with the immediately following matching result", () => {
@@ -69,6 +74,22 @@ describe("pairToolCallResult", () => {
 });
 
 describe("MessageRow", () => {
+  it("keeps historical user message text readable while muting only the gutter", () => {
+    const theme = createTheme("dark", 3);
+    const message = userMessage([
+      { text: "please inspect the repo", type: "text" },
+    ]);
+
+    const rendered = renderMessageParts(message, 80, theme);
+
+    expect(rendered[0]).toMatchObject({
+      color: theme.role.user,
+      gutterColor: theme.message.userGutter,
+      kind: "text",
+      text: "please inspect the repo",
+    });
+  });
+
   it("renders a paired completed tool call as one tool line", () => {
     const message = assistantMessage([
       {
@@ -125,6 +146,15 @@ function assistantMessage(parts: readonly UiMessagePart[]): UiMessage {
     id: "message_1",
     parts,
     role: "assistant",
+  };
+}
+
+function userMessage(parts: readonly UiMessagePart[]): UiMessage {
+  return {
+    createdAt: "2026-06-07T00:00:00.000Z",
+    id: "message_user",
+    parts,
+    role: "user",
   };
 }
 

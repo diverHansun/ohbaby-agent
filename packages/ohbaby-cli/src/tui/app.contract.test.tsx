@@ -113,14 +113,15 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("╰");
     expect(app.lastFrame()).toContain(logoAnchor);
     expect(app.lastFrame()).not.toContain("___  _   _");
-    expect(app.lastFrame()).toContain("> ▌");
+    expect(app.lastFrame()).toContain(">");
+    expect(app.lastFrame()).not.toContain("▌");
     expect(app.lastFrame()).not.toContain("> message");
     expect(app.lastFrame()).not.toContain("ohbaby >");
     expect(app.lastFrame()).not.toContain("single-process coding agent");
     expect(app.lastFrame()).not.toContain("/ for commands");
   });
 
-  it("renders typed prompt text with a visible cursor", async () => {
+  it("renders typed prompt text without adding a cursor glyph to the buffer", async () => {
     const client = createFakeClient(snapshot());
     const app = render(
       <OhbabyTerminalApp
@@ -133,19 +134,41 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("hello");
     await flush();
 
-    expect(app.lastFrame()).toContain("> hello▌");
+    expect(app.lastFrame()).toContain("> hello");
+    expect(app.lastFrame()).not.toContain("▌");
 
     app.stdin.write("\u001B[H");
     await flush();
 
-    expect(app.lastFrame()).toContain("> ▌hello");
+    expect(app.lastFrame()).toContain("> hello");
+    expect(app.lastFrame()).not.toContain("▌");
 
     app.stdin.write("\u001B[F");
     await flush();
 
-    expect(app.lastFrame()).toContain("> hello▌");
+    expect(app.lastFrame()).toContain("> hello");
+    expect(app.lastFrame()).not.toContain("▌");
     expect(app.lastFrame()).not.toContain("> hello |");
     expect(app.lastFrame()).not.toContain("ohbaby >");
+  });
+
+  it("treats terminal delete control fallbacks as editor deletion", async () => {
+    const client = createFakeClient(snapshot());
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("hello");
+    await flush();
+    app.stdin.write("\u001B[P");
+    await flush();
+
+    expect(app.lastFrame()).toContain("> hell");
+    expect(app.lastFrame()).not.toContain("[P");
   });
 
   it("renders assistant markdown through the terminal markdown renderer", async () => {

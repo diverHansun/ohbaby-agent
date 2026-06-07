@@ -134,12 +134,12 @@ export async function waitForFrame(
 }
 
 export function promptLine(frame: string): string {
-  const lines = frame.split(/\r?\n/u);
+  const lines = stripAnsi(frame).split(/\r?\n/u);
   return (
     [...lines]
       .reverse()
       .map(normalizePromptFrameLine)
-      .find((line) => line.trimStart().startsWith("> ")) ?? ""
+      .find((line) => line.trimStart().startsWith(">")) ?? ""
   );
 }
 
@@ -149,11 +149,18 @@ export function promptIsReady(frame: string): boolean {
   return line.trim() === ">";
 }
 
+function stripAnsi(input: string): string {
+  return input.replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, "");
+}
+
 function normalizePromptFrameLine(line: string): string {
   const trimmed = line.trim();
   const promptStart = trimmed.indexOf("> ");
   if (promptStart >= 0) {
-    return trimmed.slice(promptStart).replace(/[^\x00-\x7F]+$/gu, "").trimEnd();
+    return trimmed
+      .slice(promptStart)
+      .replace(/[^\x00-\x7F]+$/gu, "")
+      .trimEnd();
   }
 
   return line;
