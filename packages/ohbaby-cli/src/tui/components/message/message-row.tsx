@@ -101,9 +101,11 @@ export function pairToolCallResult(
 }
 
 interface RenderedMessagePart {
+  readonly backgroundColor?: string;
   readonly color: string | undefined;
   readonly dimColor: boolean;
   readonly gutterColor?: string;
+  readonly indent: number;
   readonly index: number;
   readonly kind: "text";
   readonly text: string;
@@ -135,12 +137,19 @@ export function renderMessageParts(
       continue;
     }
 
-    const text = renderPairedMessagePart(message, part, partWidth);
+    const indent = message.role === "user" ? 0 : pairedPartIndent(part);
+    const text = renderPairedMessagePart(
+      message,
+      part,
+      Math.max(1, partWidth - indent),
+    );
     if (text === "") {
       continue;
     }
 
     rendered.push({
+      backgroundColor:
+        message.role === "user" ? theme.message.userBlockBg : undefined,
       color:
         message.role === "user"
           ? theme.role.user
@@ -148,6 +157,7 @@ export function renderMessageParts(
       dimColor: part.kind === "part" && part.part.type === "reasoning",
       gutterColor:
         message.role === "user" ? theme.message.userGutter : undefined,
+      indent,
       index: part.index,
       kind: "text",
       text,
@@ -163,19 +173,27 @@ function renderTextPart(
 ): ReactElement {
   if (message.role !== "user") {
     return (
-      <Text color={part.color} dimColor={part.dimColor}>
-        {part.text}
-      </Text>
+      <Box marginLeft={part.indent}>
+        <Text color={part.color} dimColor={part.dimColor}>
+          {part.text}
+        </Text>
+      </Box>
     );
   }
 
   return (
-    <Text>
-      <Text color={part.gutterColor}>{part.index === 0 ? "| " : "  "}</Text>
-      <Text color={part.color} dimColor={part.dimColor}>
-        {part.text}
-      </Text>
-    </Text>
+    <Box flexDirection="column">
+      {part.text.split("\n").map((line, index) => (
+        <Text backgroundColor={part.backgroundColor} key={String(index)}>
+          <Text color={part.gutterColor}>
+            {part.index === 0 && index === 0 ? "| " : "  "}
+          </Text>
+          <Text color={part.color} dimColor={part.dimColor}>
+            {line}
+          </Text>
+        </Text>
+      ))}
+    </Box>
   );
 }
 
@@ -185,13 +203,22 @@ function renderPairedMessagePart(
   partWidth: number,
 ): string {
   if (part.kind === "tool") {
-    return wrapAnsi(
-      `  ${renderToolLabel(part.call, part.result)}`,
-      partWidth,
-    ).join("\n");
+    return wrapAnsi(renderToolLabel(part.call, part.result), partWidth).join(
+      "\n",
+    );
   }
 
   return renderSingleMessagePart(message, part.part, partWidth);
+}
+
+function pairedPartIndent(part: PairedMessagePart): number {
+  if (part.kind === "tool") {
+    return 2;
+  }
+
+  return part.part.type === "tool-call" || part.part.type === "tool-result"
+    ? 2
+    : 0;
 }
 
 function renderSingleMessagePart(

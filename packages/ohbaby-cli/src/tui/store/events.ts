@@ -21,13 +21,17 @@ import type {
   TuiStoreState,
 } from "./snapshot.js";
 import { renderStatusPanel } from "../render/status-panel.js";
+import { splitTranscript } from "./transcript.js";
 
 const COMMAND_NOTICE_LIMIT = 20;
+const COMMAND_SESSION_LIMIT = 100;
 const COMMAND_NOTICE_TEXT_LIMIT = 240;
 const UI_NOTICE_LIMIT = 10;
 
 export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
   const activeSession = findActiveSession(snapshot);
+  const messages = activeSession?.messages ?? [];
+  const transcript = splitTranscript(messages, snapshot.status);
 
   return {
     activeSessionId: snapshot.activeSessionId,
@@ -35,10 +39,13 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
     catalogInvalidation: null,
     commandNotices: [],
     commandNoticeSequence: 0,
+    commandSessionIds: {},
     contextWindowUsages: snapshot.contextWindowUsages ?? [],
     resolvedPermissionIds: [],
     interactions: [],
-    messages: activeSession?.messages ?? [],
+    committedMessages: transcript.committedMessages,
+    liveMessage: transcript.liveMessage,
+    messages,
     notices: [],
     permissions: snapshot.permissions,
     permission: snapshot.permission,
@@ -86,6 +93,22 @@ export function applyTuiEvent(
       });
 
     case "message.part.delta":
+      if (
+        event.messageId &&
+        event.sessionId === state.activeSessionId &&
+        !state.messages.some((message) => message.id === event.messageId)
+      ) {
+        return appendUiNotice(state, {
+          createdAt: new Date(event.timestamp ?? Date.now()).toISOString(),
+          id: `message_delta_${event.sessionId}_${event.messageId}`,
+          key: `message-delta:${event.sessionId}:${event.messageId}`,
+          level: "warning",
+          message: `Dropped streaming delta for missing message ${event.messageId}.`,
+          source: "transcript",
+          title: "Message unavailable",
+        });
+      }
+
       return rebuildFromCollections(state, {
         sessions: updateSessionMessages(
           state.sessions,
@@ -159,22 +182,40 @@ export function applyTuiEvent(
     case "notice.emitted":
       return appendUiNotice(state, event.notice);
 
+    case "command.started":
+      return {
+        ...state,
+        commandSessionIds: rememberCommandSessionId(
+          state.commandSessionIds,
+          event.command.commandRunId,
+          event.command.sessionId,
+        ),
+      };
+
     case "command.result.delivered":
       if (!event.output || !shouldDisplayCommandOutput(event.output)) {
+        return state;
+      }
+      if (!shouldDisplayCommandNotice(state, event.commandRunId)) {
         return state;
       }
       return appendCommandNotice(state, {
         clientInvocationId: event.clientInvocationId,
         commandId: event.commandRunId,
         kind: "result",
+        sessionId: commandSessionId(state, event.commandRunId) ?? undefined,
         text: formatCommandOutput(event.output),
       });
 
     case "command.failed":
+      if (!shouldDisplayCommandNotice(state, event.commandRunId)) {
+        return state;
+      }
       return appendCommandNotice(state, {
         clientInvocationId: event.clientInvocationId,
         commandId: event.commandRunId,
         kind: "error",
+        sessionId: commandSessionId(state, event.commandRunId) ?? undefined,
         text: event.error.message,
       });
 
@@ -309,6 +350,15 @@ function preserveLocalQueues(
     ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
     ...(permission === undefined ? {} : { permission }),
   };
+  const messages =
+    sessions.find((session) => session.id === next.activeSessionId)?.messages ??
+    [];
+  const transcript = resolveTranscriptState(
+    activeSessionChanged ? undefined : previous,
+    next.activeSessionId,
+    messages,
+    runtime,
+  );
 
   return {
     ...next,
@@ -316,12 +366,17 @@ function preserveLocalQueues(
     catalogInvalidation: previous.catalogInvalidation,
     commandNotices: activeSessionChanged ? [] : previous.commandNotices,
     commandNoticeSequence: previous.commandNoticeSequence,
+    commandSessionIds: previous.commandSessionIds,
     contextWindowUsages,
     interactions: previous.interactions,
-    messages:
-      sessions.find((session) => session.id === next.activeSessionId)
-        ?.messages ?? [],
-    notices: previous.notices,
+    committedMessages: transcript.committedMessages,
+    liveMessage: transcript.liveMessage,
+    messages,
+    notices: activeSessionChanged
+      ? previous.notices.filter((notice) =>
+          noticeBelongsToActiveSession(notice, next.activeSessionId),
+        )
+      : previous.notices,
     permissions,
     permission,
     resolvedPermissionIds: previous.resolvedPermissionIds,
@@ -364,14 +419,22 @@ function rebuildFromCollections(
     ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
     ...(permission === undefined ? {} : { permission }),
   };
+  const messages =
+    sessions.find((session) => session.id === activeSessionId)?.messages ?? [];
+  const transcript = resolveTranscriptState(
+    state,
+    activeSessionId,
+    messages,
+    runtime,
+  );
 
   return {
     ...state,
     activeSessionId,
+    committedMessages: transcript.committedMessages,
     contextWindowUsages,
-    messages:
-      sessions.find((session) => session.id === activeSessionId)?.messages ??
-      [],
+    liveMessage: transcript.liveMessage,
+    messages,
     permissions,
     permission,
     runs,
@@ -379,6 +442,36 @@ function rebuildFromCollections(
     sessions,
     snapshot,
   };
+}
+
+function resolveTranscriptState(
+  previous: TuiStoreState | undefined,
+  activeSessionId: string | null,
+  messages: readonly UiMessage[],
+  runtime: TuiRuntimeStatus,
+): Pick<TuiStoreState, "committedMessages" | "liveMessage"> {
+  const next = splitTranscript(messages, runtime);
+  if (
+    previous?.activeSessionId === activeSessionId &&
+    sameMessageReferences(previous.committedMessages, next.committedMessages)
+  ) {
+    return {
+      committedMessages: previous.committedMessages,
+      liveMessage: next.liveMessage,
+    };
+  }
+
+  return next;
+}
+
+function sameMessageReferences(
+  left: readonly UiMessage[],
+  right: readonly UiMessage[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((message, index) => message === right[index])
+  );
 }
 
 function rebuildWithPermissions(
@@ -1046,6 +1139,10 @@ function appendCommandNotice(
 }
 
 function appendUiNotice(state: TuiStoreState, notice: UiNotice): TuiStoreState {
+  if (!noticeBelongsToActiveSession(notice, state.activeSessionId)) {
+    return state;
+  }
+
   const dedupeId = notice.key ?? notice.id;
   const notices = [
     ...state.notices.filter(
@@ -1058,4 +1155,60 @@ function appendUiNotice(state: TuiStoreState, notice: UiNotice): TuiStoreState {
     ...state,
     notices,
   };
+}
+
+function rememberCommandSessionId(
+  commandSessionIds: Readonly<Record<string, string | null>>,
+  commandRunId: string,
+  sessionId: string | undefined,
+): Readonly<Record<string, string | null>> {
+  const entries = Object.entries(commandSessionIds).filter(
+    ([existingCommandRunId]) => existingCommandRunId !== commandRunId,
+  );
+  entries.push([commandRunId, sessionId ?? null]);
+
+  return Object.fromEntries(entries.slice(-COMMAND_SESSION_LIMIT));
+}
+
+function commandSessionId(
+  state: TuiStoreState,
+  commandRunId: string,
+): string | null | undefined {
+  return Object.hasOwn(state.commandSessionIds, commandRunId)
+    ? state.commandSessionIds[commandRunId]
+    : undefined;
+}
+
+function shouldDisplayCommandNotice(
+  state: TuiStoreState,
+  commandRunId: string,
+): boolean {
+  const sessionId = commandSessionId(state, commandRunId);
+
+  return (
+    sessionId === undefined ||
+    sessionId === null ||
+    sessionId === state.activeSessionId
+  );
+}
+
+function noticeBelongsToActiveSession(
+  notice: UiNotice,
+  activeSessionId: string | null,
+): boolean {
+  const sessionId = noticeSessionId(notice);
+
+  return sessionId === undefined || sessionId === activeSessionId;
+}
+
+function noticeSessionId(notice: UiNotice): string | undefined {
+  const key = notice.key ?? "";
+  if (key.startsWith("context-window:")) {
+    return key.slice("context-window:".length);
+  }
+  if (key.startsWith("message-delta:")) {
+    return key.slice("message-delta:".length).split(":").at(0);
+  }
+
+  return undefined;
 }

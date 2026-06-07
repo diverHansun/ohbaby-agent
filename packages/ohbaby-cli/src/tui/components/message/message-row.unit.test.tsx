@@ -83,11 +83,24 @@ describe("MessageRow", () => {
     const rendered = renderMessageParts(message, 80, theme);
 
     expect(rendered[0]).toMatchObject({
+      backgroundColor: theme.message.userBlockBg,
       color: theme.role.user,
       gutterColor: theme.message.userGutter,
       kind: "text",
       text: "please inspect the repo",
     });
+  });
+
+  it("aligns wrapped historical user message lines under the muted gutter", () => {
+    const message = userMessage([
+      { text: "please inspect the repository now", type: "text" },
+    ]);
+
+    const app = render(<MessageRow contentWidth={16} message={message} />);
+    const frame = app.lastFrame() ?? "";
+
+    expect(frame).toContain("| please");
+    expect(frame).toContain("  the repository");
   });
 
   it("renders a paired completed tool call as one tool line", () => {
@@ -109,6 +122,30 @@ describe("MessageRow", () => {
     const app = render(<MessageRow contentWidth={80} message={message} />);
 
     expect(app.lastFrame()).toContain("Bash pnpm test");
+  });
+
+  it("keeps completed tool rows aligned with the running spinner prefix", () => {
+    const message = assistantMessage([
+      {
+        call: {
+          ...toolCall("call_1"),
+          input: { command: "pnpm test" },
+          status: "completed",
+        },
+        type: "tool-call",
+      },
+      {
+        result: { callId: "call_1", output: "ok" },
+        type: "tool-result",
+      },
+    ]);
+
+    const app = render(<MessageRow contentWidth={80} message={message} />);
+    const frame = app.lastFrame() ?? "";
+
+    expect(frame).toContain("  Bash pnpm test");
+    expect(frame).not.toContain("✓");
+    expect(frame).not.toContain("✗");
   });
 
   it("renders an unpaired running tool call with the live spinner", () => {

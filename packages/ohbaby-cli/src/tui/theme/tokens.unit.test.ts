@@ -31,6 +31,10 @@ describe("createTheme", () => {
     expect(theme.tool.name).toBe(darkPalette.skyBlue);
     expect(theme.reasoning).toBe(darkPalette.textMuted);
     expect(theme.border).toBe(darkPalette.border);
+    expect(theme.message.userBlockBg).toBe(darkPalette.surface);
+    expect(theme.message.userGutter).toBe(darkPalette.textMuted);
+    expect(theme.message.userBlockBg).not.toBe(theme.border);
+    expect(theme.spinner.palette).not.toContain(theme.message.userBlockBg);
   });
 
   it("maps light semantic tokens to the light palette", () => {
@@ -39,6 +43,8 @@ describe("createTheme", () => {
     expect(theme.brandTitle.primary).toBe(lightPalette.gold);
     expect(theme.text.normal).toBe(lightPalette.text);
     expect(theme.border).toBe(lightPalette.border);
+    expect(theme.message.userBlockBg).toBe(lightPalette.surface);
+    expect(theme.message.userGutter).toBe(lightPalette.textMuted);
   });
 
   it("downgrades truecolor tokens to stable ansi names for low-color terminals", () => {
@@ -51,5 +57,8 @@ describe("createTheme", () => {
     });
     expect(theme.status.error).toBe("red");
     expect(theme.border).toBe("gray");
+    expect(theme.message.userBlockBg).toBe("black");
+    expect(theme.message.userGutter).toBe("gray");
+    expect(theme.spinner.palette).toEqual(["yellow", "magenta"]);
   });
 });

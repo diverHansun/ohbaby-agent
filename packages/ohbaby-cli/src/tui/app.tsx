@@ -10,7 +10,7 @@ import type {
 } from "ohbaby-sdk";
 import { DialogManager } from "./dialogs/manager.js";
 import { Header } from "./components/header.js";
-import { MessageList } from "./components/message/message-list.js";
+import { TranscriptViewport } from "./components/transcript/transcript-viewport.js";
 import { Prompt } from "./components/prompt/index.js";
 import { AppShell } from "./layout/app-shell.js";
 import { formatContextWindowUsage } from "./render/usage.js";
@@ -19,6 +19,10 @@ import {
   selectActiveContextWindowUsage,
   useTuiStoreSelector,
 } from "./store/selectors.js";
+import {
+  selectCommittedMessages,
+  selectLiveMessage,
+} from "./store/selectors/transcript.js";
 import { createCoalescedTuiEventDispatcher } from "./store/stream-coalescer.js";
 import { ThemeProvider } from "./theme/index.js";
 import type {
@@ -274,7 +278,7 @@ export function OhbabyTerminalApp({
     <ThemeProvider>
       <AppShell>
         <HeaderContainer store={store} />
-        <MessageListContainer store={store} />
+        <TranscriptViewportContainer store={store} />
         <DialogManager
           client={client}
           interactions={interactions}
@@ -309,22 +313,29 @@ function HeaderContainer({
   return <Header isEmpty={isEmpty} />;
 }
 
-function MessageListContainer({
+function TranscriptViewportContainer({
   store,
 }: {
   readonly store: TuiStore;
 }): ReactElement {
+  const activeSessionId = useTuiStoreSelector(
+    store,
+    (state) => state.activeSessionId,
+  );
   const commandNotices = useTuiStoreSelector(
     store,
     (state) => state.commandNotices,
   );
-  const messages = useTuiStoreSelector(store, (state) => state.messages);
+  const committedMessages = useTuiStoreSelector(store, selectCommittedMessages);
+  const liveMessage = useTuiStoreSelector(store, selectLiveMessage);
   const notices = useTuiStoreSelector(store, (state) => state.notices);
 
   return (
-    <MessageList
+    <TranscriptViewport
+      key={activeSessionId ?? "none"}
       commandNotices={commandNotices}
-      messages={messages}
+      committedMessages={committedMessages}
+      liveMessage={liveMessage}
       notices={notices}
     />
   );

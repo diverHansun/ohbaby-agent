@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   UiCommandOutput,
   UiContextWindowUsage,
+  UiMessage,
   UiSnapshot,
 } from "ohbaby-sdk";
 import { selectActiveContextWindowUsage } from "./selectors.js";
@@ -49,6 +50,45 @@ function contextWindowUsage(
     estimatedAt: "2026-06-06T00:00:00.000Z",
     modelId: "fake-model",
     sessionId,
+  };
+}
+
+function snapshotWithTranscript(input: {
+  readonly messages: readonly UiMessage[];
+  readonly status: UiSnapshot["status"];
+}): UiSnapshot {
+  return {
+    ...snapshot(),
+    sessions: [
+      {
+        ...snapshot().sessions[0],
+        messages: input.messages,
+      },
+    ],
+    status: input.status,
+  };
+}
+
+function userMessage(id: string, text: string): UiMessage {
+  return {
+    createdAt: "2026-05-14T00:00:01.000Z",
+    id,
+    parts: [{ text, type: "text" }],
+    role: "user",
+  };
+}
+
+function assistantMessage(
+  id: string,
+  text: string,
+  patch: Partial<UiMessage> = {},
+): UiMessage {
+  return {
+    createdAt: "2026-05-14T00:00:02.000Z",
+    id,
+    parts: text === "" ? [] : [{ text, type: "text" }],
+    role: "assistant",
+    ...patch,
   };
 }
 
@@ -108,6 +148,232 @@ describe("TUI store event reducer", () => {
       mode: "auto",
       sessionRules: [],
     });
+  });
+
+  it("projects committed transcript slices from the initial snapshot", () => {
+    const messages = [
+      userMessage("user_1", "inspect this"),
+      assistantMessage("assistant_1", "working", {
+        status: "streaming",
+      }),
+    ];
+    const state = createStateFromSnapshot(
+      snapshotWithTranscript({
+        messages,
+        status: { kind: "running", runId: "run_1" },
+      }),
+    );
+
+    expect(state.committedMessages).toEqual([messages[0]]);
+    expect(state.liveMessage).toEqual(messages[1]);
+  });
+
+  it("keeps user messages committed while a run is active", () => {
+    const messages = [userMessage("user_1", "inspect this")];
+    const state = createStateFromSnapshot(
+      snapshotWithTranscript({
+        messages,
+        status: { kind: "running", runId: "run_1" },
+      }),
+    );
+
+    expect(state.committedMessages).toEqual(messages);
+    expect(state.liveMessage).toBeNull();
+  });
+
+  it("keeps committed transcript references stable across message deltas", () => {
+    const committed = userMessage("user_1", "inspect this");
+    const live = assistantMessage("assistant_1", "Hello", {
+      status: "streaming",
+    });
+    let state = createStateFromSnapshot(
+      snapshotWithTranscript({
+        messages: [committed, live],
+        status: { kind: "running", runId: "run_1" },
+      }),
+    );
+    const committedRef = state.committedMessages;
+
+    for (let index = 0; index < 100; index += 1) {
+      state = applyTuiEvent(state, {
+        content: `Hello ${String(index)}`,
+        delta: "x",
+        messageId: "assistant_1",
+        sessionId: "session_1",
+        type: "message.part.delta",
+      });
+    }
+
+    expect(state.committedMessages).toBe(committedRef);
+    expect(state.liveMessage?.parts[0]).toMatchObject({ text: "Hello 99" });
+  });
+
+  it("keeps committed transcript references stable with a large committed transcript", () => {
+    const committed = Array.from({ length: 1_000 }, (_, index) =>
+      index % 2 === 0
+        ? userMessage(`user_${String(index)}`, `prompt ${String(index)}`)
+        : assistantMessage(
+            `assistant_${String(index)}`,
+            `reply ${String(index)}`,
+            { status: "completed" },
+          ),
+    );
+    const state = createStateFromSnapshot(
+      snapshotWithTranscript({
+        messages: [
+          ...committed,
+          assistantMessage("assistant_live", "stream", {
+            status: "streaming",
+          }),
+        ],
+        status: { kind: "running", runId: "run_1" },
+      }),
+    );
+    const committedRef = state.committedMessages;
+
+    const next = applyTuiEvent(state, {
+      delta: "ing",
+      messageId: "assistant_live",
+      sessionId: "session_1",
+      timestamp: 1,
+      type: "message.part.delta",
+    });
+
+    expect(next.committedMessages).toBe(committedRef);
+    expect(next.liveMessage?.parts[0]).toMatchObject({
+      text: "streaming",
+    });
+  });
+
+  it("moves a completed live tail into committed transcript only after runtime idles", () => {
+    const user = userMessage("user_1", "inspect this");
+    const streaming = assistantMessage("assistant_1", "working", {
+      status: "streaming",
+    });
+    let state = createStateFromSnapshot(
+      snapshotWithTranscript({
+        messages: [user, streaming],
+        status: { kind: "running", runId: "run_1" },
+      }),
+    );
+
+    state = applyTuiEvent(state, {
+      message: assistantMessage("assistant_1", "done", {
+        status: "completed",
+      }),
+      sessionId: "session_1",
+      type: "message.updated",
+    });
+
+    expect(state.committedMessages.map((message) => message.id)).toEqual([
+      "user_1",
+    ]);
+    expect(state.liveMessage?.id).toBe("assistant_1");
+
+    state = applyTuiEvent(state, {
+      status: { kind: "idle" },
+      timestamp: 2,
+      type: "runtime.updated",
+    });
+
+    expect(state.committedMessages.map((message) => message.id)).toEqual([
+      "user_1",
+      "assistant_1",
+    ]);
+    expect(state.liveMessage).toBeNull();
+  });
+
+  it("resets committed and live transcript slices when the active session changes", () => {
+    const state = createStateFromSnapshot(
+      snapshotWithTranscript({
+        messages: [
+          userMessage("user_alpha", "alpha prompt"),
+          assistantMessage("assistant_alpha", "alpha live", {
+            status: "streaming",
+          }),
+        ],
+        status: { kind: "running", runId: "run_alpha" },
+      }),
+    );
+
+    const next = applyTuiEvent(state, {
+      snapshot: {
+        ...snapshot(),
+        activeSessionId: "session_beta",
+        sessions: [
+          ...snapshot().sessions,
+          {
+            createdAt: "2026-05-14T00:00:03.000Z",
+            id: "session_beta",
+            messages: [userMessage("user_beta", "beta prompt")],
+            title: "Beta",
+            updatedAt: "2026-05-14T00:00:04.000Z",
+          },
+        ],
+      },
+      type: "snapshot.replaced",
+    });
+
+    expect(next.activeSessionId).toBe("session_beta");
+    expect(next.committedMessages.map((message) => message.id)).toEqual([
+      "user_beta",
+    ]);
+    expect(next.liveMessage).toBeNull();
+    expect(next.messages.map((message) => message.id)).toEqual(["user_beta"]);
+  });
+
+  it("shows the target session cached transcript when switching to a known session", () => {
+    const state = createStateFromSnapshot({
+      ...snapshot(),
+      activeSessionId: "session_alpha",
+      sessions: [
+        {
+          createdAt: "2026-05-14T00:00:00.000Z",
+          id: "session_alpha",
+          messages: [userMessage("user_alpha", "alpha prompt")],
+          title: "Alpha",
+          updatedAt: "2026-05-14T00:00:01.000Z",
+        },
+        {
+          createdAt: "2026-05-14T00:00:02.000Z",
+          id: "session_beta",
+          messages: [userMessage("user_beta", "beta cached prompt")],
+          title: "Beta",
+          updatedAt: "2026-05-14T00:00:03.000Z",
+        },
+      ],
+    });
+
+    const next = applyTuiEvent(state, {
+      snapshot: {
+        ...snapshot(),
+        activeSessionId: "session_beta",
+        sessions: [],
+      },
+      type: "snapshot.replaced",
+    });
+
+    expect(next.messages.map((message) => message.id)).toEqual(["user_beta"]);
+    expect(next.committedMessages.map((message) => message.id)).toEqual([
+      "user_beta",
+    ]);
+  });
+
+  it("leaves the transcript empty when switching to an unknown session", () => {
+    const state = createStateFromSnapshot(snapshot());
+
+    const next = applyTuiEvent(state, {
+      snapshot: {
+        ...snapshot(),
+        activeSessionId: "session_unknown",
+        sessions: [],
+      },
+      type: "snapshot.replaced",
+    });
+
+    expect(next.messages).toEqual([]);
+    expect(next.committedMessages).toEqual([]);
+    expect(next.liveMessage).toBeNull();
   });
 
   it("keeps context window usage scoped to the active session", () => {
@@ -301,6 +567,24 @@ describe("TUI store event reducer", () => {
     expect(state.messages[0]?.parts[0]).toMatchObject({ text: "Hello" });
   });
 
+  it("drops current-session deltas for missing messages and emits a warning notice", () => {
+    const state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      delta: " lost",
+      messageId: "message_missing",
+      sessionId: "session_1",
+      timestamp: 1,
+      type: "message.part.delta",
+    });
+
+    expect(state.messages[0]?.parts[0]).toMatchObject({ text: "Hello" });
+    expect(state.notices.at(-1)).toMatchObject({
+      key: "message-delta:session_1:message_missing",
+      level: "warning",
+      source: "transcript",
+      title: "Message unavailable",
+    });
+  });
+
   it("projects the first backend session update when no session is active", () => {
     let state = createStateFromSnapshot({
       activeSessionId: null,
@@ -396,6 +680,93 @@ describe("TUI store event reducer", () => {
 
     expect(state.permissions).toHaveLength(0);
     expect(state.interactions).toHaveLength(0);
+  });
+
+  it("drops late command notices that belong to another session", () => {
+    let state = createStateFromSnapshot(snapshot());
+
+    state = applyTuiEvent(state, {
+      command: {
+        clientInvocationId: "invoke_1",
+        commandId: "status",
+        commandRunId: "command_1",
+        path: ["status"],
+        sessionId: "session_1",
+        surface: "tui",
+      },
+      timestamp: 1,
+      type: "command.started",
+    });
+    state = applyTuiEvent(state, {
+      snapshot: {
+        ...snapshot(),
+        activeSessionId: "session_2",
+        sessions: [
+          ...snapshot().sessions,
+          {
+            createdAt: "2026-05-14T00:00:04.000Z",
+            id: "session_2",
+            messages: [],
+            title: "Second",
+            updatedAt: "2026-05-14T00:00:04.000Z",
+          },
+        ],
+      },
+      type: "snapshot.replaced",
+    });
+    state = applyTuiEvent(state, {
+      clientInvocationId: "invoke_1",
+      commandRunId: "command_1",
+      output: { kind: "text", text: "stale status" },
+      timestamp: 2,
+      type: "command.result.delivered",
+    });
+
+    expect(state.commandNotices).toHaveLength(0);
+  });
+
+  it("keeps command notices for global commands without a session owner", () => {
+    let state = createStateFromSnapshot(snapshot());
+
+    state = applyTuiEvent(state, {
+      command: {
+        clientInvocationId: "invoke_1",
+        commandId: "help",
+        commandRunId: "command_1",
+        path: ["help"],
+        surface: "tui",
+      },
+      timestamp: 1,
+      type: "command.started",
+    });
+    state = applyTuiEvent(state, {
+      snapshot: {
+        ...snapshot(),
+        activeSessionId: "session_2",
+        sessions: [
+          ...snapshot().sessions,
+          {
+            createdAt: "2026-05-14T00:00:04.000Z",
+            id: "session_2",
+            messages: [],
+            title: "Second",
+            updatedAt: "2026-05-14T00:00:04.000Z",
+          },
+        ],
+      },
+      type: "snapshot.replaced",
+    });
+    state = applyTuiEvent(state, {
+      clientInvocationId: "invoke_1",
+      commandRunId: "command_1",
+      output: { kind: "text", text: "global help" },
+      timestamp: 2,
+      type: "command.result.delivered",
+    });
+
+    expect(state.commandNotices.map((notice) => notice.text)).toEqual([
+      "global help",
+    ]);
   });
 
   it("does not roll back live permission state from a replacement snapshot", () => {
@@ -1071,6 +1442,73 @@ describe("TUI store event reducer", () => {
         message: "OPENAI_API_KEY is not configured",
       }),
     ]);
+  });
+
+  it("filters session-scoped UI notices when a snapshot switches sessions", () => {
+    let state = createStateFromSnapshot(snapshot());
+    state = applyTuiEvent(state, {
+      notice: {
+        createdAt: "2026-05-19T00:00:00.000Z",
+        id: "notice_context",
+        key: "context-window:session_1",
+        level: "warning",
+        message: "Context window usage could not be refreshed",
+        source: "context",
+        title: "Context unavailable",
+      },
+      timestamp: 1,
+      type: "notice.emitted",
+    });
+    state = applyTuiEvent(state, {
+      notice: {
+        createdAt: "2026-05-19T00:00:01.000Z",
+        id: "notice_global",
+        key: "runtime:missing-key",
+        level: "error",
+        message: "OPENAI_API_KEY is not configured",
+        title: "Runtime error",
+      },
+      timestamp: 2,
+      type: "notice.emitted",
+    });
+
+    state = applyTuiEvent(state, {
+      snapshot: {
+        ...snapshot(),
+        activeSessionId: "session_2",
+        sessions: [
+          ...snapshot().sessions,
+          {
+            createdAt: "2026-05-14T00:00:04.000Z",
+            id: "session_2",
+            messages: [],
+            title: "Second",
+            updatedAt: "2026-05-14T00:00:04.000Z",
+          },
+        ],
+      },
+      type: "snapshot.replaced",
+    });
+
+    expect(state.notices.map((notice) => notice.id)).toEqual(["notice_global"]);
+  });
+
+  it("drops session-scoped UI notices for inactive sessions", () => {
+    const state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      notice: {
+        createdAt: "2026-05-19T00:00:00.000Z",
+        id: "notice_context",
+        key: "context-window:session_2",
+        level: "warning",
+        message: "Context window usage could not be refreshed",
+        source: "context",
+        title: "Context unavailable",
+      },
+      timestamp: 1,
+      type: "notice.emitted",
+    });
+
+    expect(state.notices).toHaveLength(0);
   });
 
   it("keeps live permissions across an old snapshot and does not revive resolved permissions", () => {

@@ -324,4 +324,59 @@ describe("TUI main chain with real in-process backend", () => {
     );
     app.unmount();
   });
+
+  it("renders submitted user prompt and assistant tool parts in event order", async () => {
+    const workdir = await tempWorkspace("ohbaby-cli-transcript-order");
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: null,
+        permission: {
+          level: "full-access",
+          mode: "auto",
+          sessionRules: [],
+        },
+        permissions: [],
+        runs: [],
+        sessions: [],
+        status: { kind: "idle" },
+      },
+      llmClient: createSequentialFakeLLMClient([
+        [
+          { textDelta: "Before tool. " },
+          writeToolCallEvent({
+            callId: "call_write_ordered",
+            content: "ordered",
+            filePath: "ordered.txt",
+          }),
+        ],
+        [{ textDelta: "After tool.", finishReason: "stop" }],
+      ]),
+      workdir,
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await waitForFrame(app, promptIsReady);
+    app.stdin.write("Please write ordered file");
+    app.stdin.write("\r");
+    const frame = await waitForFrame(app, (nextFrame) =>
+      nextFrame.includes("After tool."),
+    );
+    const userIndex = frame.indexOf("Please write ordered file");
+    const beforeIndex = frame.indexOf("Before tool.");
+    const toolIndex = frame.indexOf("Write ordered.txt");
+    const afterIndex = frame.indexOf("After tool.");
+
+    expect(userIndex).toBeGreaterThanOrEqual(0);
+    expect(beforeIndex).toBeGreaterThan(userIndex);
+    expect(toolIndex).toBeGreaterThan(beforeIndex);
+    expect(afterIndex).toBeGreaterThan(toolIndex);
+    expect(frame).not.toContain("tool write");
+    expect(frame).not.toContain("tool result");
+    app.unmount();
+  });
 });

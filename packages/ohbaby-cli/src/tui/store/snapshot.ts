@@ -38,6 +38,7 @@ export interface TuiCommandNotice {
   readonly kind: "result" | "error";
   readonly commandId: string;
   readonly clientInvocationId?: string;
+  readonly sessionId?: string;
   readonly text: string;
 }
 
@@ -67,6 +68,7 @@ export type TuiEvent =
       readonly partId?: string;
       readonly delta: string;
       readonly content?: string;
+      readonly timestamp?: number;
     }
   | { readonly type: "snapshot.replaced"; readonly snapshot: UiSnapshot };
 
@@ -90,6 +92,9 @@ export interface TuiStoreState {
   readonly interactions: readonly TuiInteractionRequest[];
   readonly notices: readonly UiNotice[];
   readonly commandNotices: readonly TuiCommandNotice[];
+  readonly commandSessionIds: Readonly<Record<string, string | null>>;
+  readonly committedMessages: readonly UiMessage[];
+  readonly liveMessage: UiMessage | null;
   readonly contextWindowUsages: readonly UiContextWindowUsage[];
   readonly commandNoticeSequence: number;
   readonly resolvedPermissionIds: readonly string[];

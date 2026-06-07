@@ -389,6 +389,58 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("OPENAI_API_KEY is not configured");
   });
 
+  it("renders command notices between committed transcript and live tail", async () => {
+    const baseSnapshot = snapshot();
+    const client = createFakeClient({
+      ...baseSnapshot,
+      sessions: [
+        {
+          ...baseSnapshot.sessions[0],
+          messages: [
+            {
+              createdAt: "2026-05-14T00:00:01.000Z",
+              id: "message_user",
+              parts: [{ text: "committed prompt", type: "text" }],
+              role: "user",
+            },
+            {
+              createdAt: "2026-05-14T00:00:02.000Z",
+              id: "message_live",
+              parts: [{ text: "live answer", type: "text" }],
+              role: "assistant",
+              status: "streaming",
+            },
+          ],
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    client.emit({
+      clientInvocationId: "invoke_status",
+      commandRunId: "command_status",
+      output: { kind: "text", text: "command output" },
+      timestamp: 1,
+      type: "command.result.delivered",
+    });
+    await flush();
+
+    const frame = app.lastFrame() ?? "";
+    expect(frame.indexOf("committed prompt")).toBeLessThan(
+      frame.indexOf("command output"),
+    );
+    expect(frame.indexOf("command output")).toBeLessThan(
+      frame.indexOf("live answer"),
+    );
+  });
+
   it("shows a readable status error when the initial snapshot fails", async () => {
     const client = {
       ...createFakeClient(snapshot()),
