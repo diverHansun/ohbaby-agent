@@ -10,5 +10,6 @@ export function renderTerminalUi(options: TerminalUiOptions): Instance {
       client={options.client}
       subscribeEvents={options.subscribeEvents}
     />,
+    { incrementalRendering: true },
   );
 }

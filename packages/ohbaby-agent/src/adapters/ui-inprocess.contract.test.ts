@@ -938,9 +938,7 @@ describe("createInProcessUiBackendClient", () => {
       "run.updated",
       "context.window.updated",
       "message.appended",
-      "message.updated",
       "message.part.delta",
-      "message.updated",
       "message.part.delta",
       "run.updated",
       "message.updated",
@@ -953,8 +951,6 @@ describe("createInProcessUiBackendClient", () => {
     );
 
     expect(assistantUpdates.map((event) => event.message.parts)).toEqual([
-      [{ type: "text", text: "Hello" }],
-      [{ type: "text", text: "Hello world" }],
       [{ type: "text", text: "Hello world" }],
     ]);
     expect(assistantUpdates.at(-1)?.message).toMatchObject({

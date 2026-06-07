@@ -113,7 +113,8 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("╰");
     expect(app.lastFrame()).toContain(logoAnchor);
     expect(app.lastFrame()).not.toContain("___  _   _");
-    expect(app.lastFrame()).toContain("> message");
+    expect(app.lastFrame()).toContain("> ▌");
+    expect(app.lastFrame()).not.toContain("> message");
     expect(app.lastFrame()).not.toContain("ohbaby >");
     expect(app.lastFrame()).not.toContain("single-process coding agent");
     expect(app.lastFrame()).not.toContain("/ for commands");
@@ -132,7 +133,17 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("hello");
     await flush();
 
-    expect(app.lastFrame()).toContain("> hello");
+    expect(app.lastFrame()).toContain("> hello▌");
+
+    app.stdin.write("\u001B[H");
+    await flush();
+
+    expect(app.lastFrame()).toContain("> ▌hello");
+
+    app.stdin.write("\u001B[F");
+    await flush();
+
+    expect(app.lastFrame()).toContain("> hello▌");
     expect(app.lastFrame()).not.toContain("> hello |");
     expect(app.lastFrame()).not.toContain("ohbaby >");
   });
@@ -240,9 +251,8 @@ describe("OhbabyTerminalApp", () => {
       sessionId: "session_1",
       type: "message.part.delta",
     });
-    await flush();
 
-    expect(app.lastFrame()).toContain("Hello");
+    await waitForFrame(app, (frame) => frame.includes("Hello"));
   });
 
   it("renders historical user messages without a role label", async () => {
@@ -526,31 +536,11 @@ describe("OhbabyTerminalApp", () => {
       type: "message.appended",
     });
     client.emit({
-      message: {
-        createdAt: "2026-05-14T00:00:03.000Z",
-        id: "message_assistant",
-        parts: [{ text: "Hel", type: "text" }],
-        role: "assistant",
-      },
-      sessionId: "session_stream",
-      type: "message.updated",
-    });
-    client.emit({
       content: "Hel",
       delta: "Hel",
       messageId: "message_assistant",
       sessionId: "session_stream",
       type: "message.part.delta",
-    });
-    client.emit({
-      message: {
-        createdAt: "2026-05-14T00:00:03.000Z",
-        id: "message_assistant",
-        parts: [{ text: "Hello", type: "text" }],
-        role: "assistant",
-      },
-      sessionId: "session_stream",
-      type: "message.updated",
     });
     client.emit({
       content: "Hello",

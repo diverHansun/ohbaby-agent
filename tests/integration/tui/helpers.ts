@@ -144,15 +144,16 @@ export function promptLine(frame: string): string {
 }
 
 export function promptIsReady(frame: string): boolean {
-  const line = promptLine(frame);
+  const line = promptLine(frame).replace(/[^\x00-\x7F]/gu, "");
 
-  return line.trimStart() === "> message";
+  return line.trim() === ">";
 }
 
 function normalizePromptFrameLine(line: string): string {
   const trimmed = line.trim();
-  if (trimmed.startsWith("│") && trimmed.endsWith("│")) {
-    return trimmed.slice(1, -1).trimEnd();
+  const promptStart = trimmed.indexOf("> ");
+  if (promptStart >= 0) {
+    return trimmed.slice(promptStart).replace(/[^\x00-\x7F]+$/gu, "").trimEnd();
   }
 
   return line;

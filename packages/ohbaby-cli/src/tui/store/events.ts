@@ -231,8 +231,21 @@ export function createTuiStore(snapshot: UiSnapshot): TuiStore {
 
   return {
     dispatch(event): void {
-      state = applyTuiEvent(state, event);
-      notify();
+      const nextState = applyTuiEvent(state, event);
+      if (nextState !== state) {
+        state = nextState;
+        notify();
+      }
+    },
+    dispatchMany(events): void {
+      let nextState = state;
+      for (const event of events) {
+        nextState = applyTuiEvent(nextState, event);
+      }
+      if (nextState !== state) {
+        state = nextState;
+        notify();
+      }
     },
     getState(): TuiStoreState {
       return state;

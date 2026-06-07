@@ -258,6 +258,80 @@ describe("startRunStreamProjection", () => {
     ).toBe(true);
   });
 
+  it("publishes lightweight deltas while keeping the draft in state", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const stateStore = createInMemoryUiStateStore({
+      activeSessionId: "session_1",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_1",
+          messages: [],
+          title: "Session",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "idle" },
+    });
+    const publish = vi.fn();
+    const projection = startRunStreamProjection({
+      assistantMessageId: "message_assistant",
+      autoStart: false,
+      nextMessageId: () => "message_next",
+      publish,
+      runId: "run_1",
+      sessionId: "session_1",
+      stateStore,
+      streamBridge,
+      timestamp: () => "2026-05-26T00:00:01.000Z",
+    });
+
+    streamBridge.publish("run/run_1", "message.part.delta", {
+      content: "Hello",
+      delta: "Hello",
+      runId: "run_1",
+      sessionId: "session_1",
+      timestamp: 1,
+    });
+    streamBridge.end("run/run_1");
+
+    projection.start();
+    await projection.done;
+
+    const publishedEvents = publish.mock.calls.map((call): unknown => call[0]);
+    expect(
+      publishedEvents.filter(
+        (event) => isRecord(event) && event.type === "message.updated",
+      ),
+    ).toEqual([]);
+    expect(
+      publishedEvents.filter(
+        (event) => isRecord(event) && event.type === "message.part.delta",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        content: "Hello",
+        delta: "Hello",
+        messageId: "message_assistant",
+      }),
+    ]);
+    await expect(stateStore.readSnapshot()).resolves.toMatchObject({
+      sessions: [
+        {
+          messages: [
+            {
+              id: "message_assistant",
+              parts: [{ text: "Hello", type: "text" }],
+              status: "streaming",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
   it("appends text that arrives after a tool result in chronological part order", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const stateStore = createInMemoryUiStateStore({

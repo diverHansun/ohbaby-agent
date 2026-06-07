@@ -183,12 +183,12 @@ export function Prompt({
         return;
       }
 
-      if (key.pageUp) {
+      if (key.home) {
         applyEditor({ type: "move-home" });
         return;
       }
 
-      if (key.pageDown) {
+      if (key.end) {
         applyEditor({ type: "move-end" });
         return;
       }
@@ -217,7 +217,7 @@ export function Prompt({
         paddingX={1}
         width={layout.contentWidth}
       >
-        {renderEditorLines(editor, disabled)}
+        {renderEditorLines(editor, disabled, theme.cursor)}
       </Box>
       {dockStatus === "" && contextWindowUsage === "" ? null : (
         <Box justifyContent="space-between">
@@ -240,18 +240,46 @@ export function Prompt({
 function renderEditorLines(
   editor: EditorState,
   disabled: boolean,
+  cursorColor: string,
 ): readonly ReactElement[] {
   const isEmpty = editorText(editor).length === 0;
   return editor.lines.map((line, index) => (
     <Text key={String(index)}>
       <Text dimColor={disabled}>{index === 0 ? "> " : "  "}</Text>
-      {isEmpty && index === 0 ? (
-        <Text dimColor>{disabled ? "paused" : "message"}</Text>
+      {disabled && isEmpty && index === 0 ? (
+        <Text dimColor>paused</Text>
       ) : (
-        <Text>{line}</Text>
+        renderEditorLineText({
+          cursorColor,
+          editor,
+          enabled: !disabled,
+          index,
+          line,
+        })
       )}
     </Text>
   ));
+}
+
+function renderEditorLineText(input: {
+  readonly cursorColor: string;
+  readonly editor: EditorState;
+  readonly enabled: boolean;
+  readonly index: number;
+  readonly line: string;
+}): ReactElement {
+  if (!input.enabled || input.editor.cursor.row !== input.index) {
+    return <Text>{input.line}</Text>;
+  }
+
+  const cursorColumn = input.editor.cursor.col;
+  return (
+    <Text>
+      {input.line.slice(0, cursorColumn)}
+      <Text color={input.cursorColor}>▌</Text>
+      {input.line.slice(cursorColumn)}
+    </Text>
+  );
 }
 
 function formatDockStatus(input: {

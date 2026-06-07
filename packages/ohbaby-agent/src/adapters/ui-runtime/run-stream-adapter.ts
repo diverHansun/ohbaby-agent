@@ -225,6 +225,7 @@ export function startRunStreamProjection(
 
   async function updateAssistant(
     updater: (message: UiMessage) => UiMessage,
+    settings: { readonly publishUpdate?: boolean } = {},
   ): Promise<UiMessage> {
     const message = markAssistantStreaming(await ensureAssistantMessage());
     const updated = updater(message);
@@ -238,11 +239,13 @@ export function startRunStreamProjection(
     };
     assistantMessage = updated;
     await options.stateStore.upsertSession(updatedSession);
-    options.publish({
-      type: "message.updated",
-      message: cloneMessage(updated),
-      sessionId: options.sessionId,
-    });
+    if (settings.publishUpdate !== false) {
+      options.publish({
+        type: "message.updated",
+        message: cloneMessage(updated),
+        sessionId: options.sessionId,
+      });
+    }
     return updated;
   }
 
@@ -343,8 +346,9 @@ export function startRunStreamProjection(
     const data = eventData(event);
     const content = typeof data.content === "string" ? data.content : "";
     const delta = typeof data.delta === "string" ? data.delta : content;
-    const updated = await updateAssistant((message) =>
-      upsertTextPart(message, content),
+    const updated = await updateAssistant(
+      (message) => upsertTextPart(message, content),
+      { publishUpdate: false },
     );
     options.publish({
       type: "message.part.delta",

@@ -100,6 +100,7 @@ export interface TuiStoreState {
 export interface TuiStore {
   readonly getState: () => TuiStoreState;
   readonly dispatch: (event: TuiEvent) => void;
+  readonly dispatchMany: (events: readonly TuiEvent[]) => void;
   readonly replaceSnapshot: (snapshot: UiSnapshot) => void;
   readonly setCatalog: (catalog: TuiCommandCatalog) => void;
   readonly subscribe: (listener: () => void) => () => void;

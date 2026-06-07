@@ -19,6 +19,7 @@ import {
   selectActiveContextWindowUsage,
   useTuiStoreSelector,
 } from "./store/selectors.js";
+import { createCoalescedTuiEventDispatcher } from "./store/stream-coalescer.js";
 import { ThemeProvider } from "./theme/index.js";
 import type {
   TuiCommandCatalog,
@@ -165,9 +166,12 @@ export function OhbabyTerminalApp({
 
   useEffect(() => {
     disposedRef.current = false;
+    const eventDispatcher = createCoalescedTuiEventDispatcher((events) => {
+      store.dispatchMany(events);
+    });
 
     const unsubscribe = subscribeEvents((tuiEvent: TuiEvent) => {
-      store.dispatch(tuiEvent);
+      eventDispatcher.dispatch(tuiEvent);
 
       if (
         tuiEvent.type === "command.result.delivered" &&
@@ -204,6 +208,7 @@ export function OhbabyTerminalApp({
 
     return (): void => {
       disposedRef.current = true;
+      eventDispatcher.dispose();
       unsubscribe();
     };
   }, [client, exit, loadCatalog, store, subscribeEvents]);
