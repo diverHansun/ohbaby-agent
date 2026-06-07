@@ -3773,6 +3773,93 @@ describe("createInProcessUiBackendClient", () => {
     });
   });
 
+  it("does not reuse the active empty UI session when core metadata marks it as a subagent", async () => {
+    const coreChild = {
+      agentName: "default",
+      childrenIds: [],
+      createdAt: 1_000,
+      id: "session_child_empty",
+      isSubagent: true,
+      parentId: "session_parent",
+      projectId: "project_repo",
+      projectRoot: "D:/repo",
+      stats: { messageCount: 0 },
+      status: "active" as const,
+      title: "Child empty",
+      updatedAt: 1_000,
+    };
+    const corePrimary = {
+      agentName: "default",
+      childrenIds: [],
+      createdAt: 2_000,
+      id: "session_primary_empty",
+      isSubagent: false,
+      projectId: "project_repo",
+      projectRoot: "D:/repo",
+      stats: { messageCount: 0 },
+      status: "active" as const,
+      title: "Primary empty",
+      updatedAt: 2_000,
+    };
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "session_child_empty",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_child_empty",
+            messages: [],
+            projectRoot: "D:/repo",
+            title: "Child empty",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([]),
+      sessionManager: {
+        create() {
+          throw new Error("should reuse the primary session");
+        },
+        findReusableEmptyPrimary() {
+          return Promise.resolve(corePrimary);
+        },
+        get(sessionId: string) {
+          return Promise.resolve(
+            sessionId === coreChild.id
+              ? coreChild
+              : sessionId === corePrimary.id
+                ? corePrimary
+                : null,
+          );
+        },
+        getRecent() {
+          return Promise.resolve([]);
+        },
+      },
+    });
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_new",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "tui",
+    });
+
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      activeSessionId: "session_primary_empty",
+      sessions: [
+        { id: "session_child_empty", messages: [] },
+        { id: "session_primary_empty", messages: [], title: "Primary empty" },
+      ],
+    });
+  });
+
   it("lists sessions from an injected persistent session manager", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-client-db-"));
     try {

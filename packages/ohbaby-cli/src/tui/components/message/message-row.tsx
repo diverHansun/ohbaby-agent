@@ -236,11 +236,8 @@ function renderPairedMessagePart(
       renderToolLabel(part.call, part.result),
       partWidth,
     ).join("\n");
-    if (text.includes("\n")) {
-      return { text };
-    }
     return {
-      segments: renderToolLabelSegments(part.call, part.result, theme),
+      segments: renderToolLabelSegments(part.call, part.result, theme, text),
       text,
     };
   }
@@ -252,18 +249,69 @@ function renderToolLabelSegments(
   call: UiToolCall,
   result: UiToolResult | undefined,
   theme: Theme,
+  wrappedText: string,
 ): readonly RenderedTextSegment[] {
   const parts = renderToolLabelParts(call, result);
-  const segments: RenderedTextSegment[] = [
-    { color: theme.tool.name, text: parts.name },
-  ];
-  if (parts.summary !== "") {
-    segments.push({ color: theme.tool.arg, text: ` ${parts.summary}` });
+  const nameText = parts.name;
+  const summaryText = parts.summary === "" ? "" : ` ${parts.summary}`;
+  const errorText = parts.error === "" ? "" : ` ${parts.error}`;
+  const nameEnd = Array.from(nameText).length;
+  const errorStart = Array.from(`${nameText}${summaryText}`).length;
+  const rawChars = Array.from(`${nameText}${summaryText}${errorText}`);
+  const segments: RenderedTextSegment[] = [];
+  let rawIndex = 0;
+
+  for (const char of Array.from(wrappedText)) {
+    appendSegment(
+      segments,
+      colorForToolLabelIndex(rawIndex, theme, {
+        errorStart,
+        hasError: errorText !== "",
+        nameEnd,
+      }),
+      char,
+    );
+
+    if (rawChars[rawIndex] === char || char !== "\n") {
+      rawIndex += 1;
+    }
   }
-  if (parts.error !== "") {
-    segments.push({ color: theme.tool.failed, text: ` ${parts.error}` });
-  }
+
   return segments;
+}
+
+function appendSegment(
+  segments: RenderedTextSegment[],
+  color: string,
+  text: string,
+): void {
+  const previous = segments.at(-1);
+  if (previous?.color === color && previous.dimColor === undefined) {
+    segments[segments.length - 1] = {
+      color,
+      text: `${previous.text}${text}`,
+    };
+    return;
+  }
+  segments.push({ color, text });
+}
+
+function colorForToolLabelIndex(
+  rawIndex: number,
+  theme: Theme,
+  boundaries: {
+    readonly errorStart: number;
+    readonly hasError: boolean;
+    readonly nameEnd: number;
+  },
+): string {
+  if (rawIndex < boundaries.nameEnd) {
+    return theme.tool.name;
+  }
+  if (boundaries.hasError && rawIndex >= boundaries.errorStart) {
+    return theme.tool.failed;
+  }
+  return theme.tool.arg;
 }
 
 function pairedPartIndent(part: PairedMessagePart): number {

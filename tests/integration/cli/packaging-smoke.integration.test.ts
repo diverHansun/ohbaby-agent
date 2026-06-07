@@ -23,7 +23,7 @@ afterEach(async () => {
   for (const directory of cleanupDirectories.splice(0)) {
     await rm(directory, { force: true, recursive: true });
   }
-});
+}, 120_000);
 
 async function tempDirectory(prefix: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), prefix));

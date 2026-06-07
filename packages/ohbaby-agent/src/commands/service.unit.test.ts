@@ -850,6 +850,55 @@ describe("CommandService", () => {
     );
   });
 
+  it("selects a reused new session with a consistent current-session payload", async () => {
+    const createSession = vi.fn<
+      () => Promise<{ created: boolean; id: string; title: string }>
+    >(() =>
+      Promise.resolve({
+        created: false,
+        id: "session_reused",
+        title: "New session",
+      }),
+    );
+    const { events, service } = createServiceHarness({
+      sessions: {
+        createSession,
+        listSessions() {
+          return [];
+        },
+      },
+    });
+
+    await service.executeCommand(makeInvocation("new", ["new"]));
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          output: {
+            data: {
+              session: {
+                created: false,
+                id: "session_reused",
+                title: "New session",
+              },
+              sessionId: "session_reused",
+            },
+            kind: "data",
+            subject: "session.current",
+          },
+          type: "result",
+        }),
+        expect.objectContaining({
+          action: {
+            data: { choiceId: "session_reused", source: "new" },
+            kind: "session.selected",
+          },
+          type: "result",
+        }),
+      ]),
+    );
+  });
+
   it("manually compacts the current session", async () => {
     const compactSession = vi.fn(() =>
       Promise.resolve({

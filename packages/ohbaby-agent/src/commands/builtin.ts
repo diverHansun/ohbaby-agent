@@ -453,13 +453,12 @@ async function handleSessionNew(
   }
 
   const session = await options.sessions.createSession();
+  const reused = session.created === false;
   context.emitOutput(
-    dataOutput(
-      session.created === false ? "session.current" : "session.created",
-      {
-        session,
-      },
-    ),
+    dataOutput(reused ? "session.current" : "session.created", {
+      session,
+      ...(reused ? { sessionId: session.id } : {}),
+    }),
   );
   context.emitAction(
     action("session.selected", { choiceId: session.id, source: "new" }),

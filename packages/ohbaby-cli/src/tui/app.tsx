@@ -1,4 +1,4 @@
-import { Text, useApp, useInput } from "ink";
+import { Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type {
@@ -52,6 +52,7 @@ export function OhbabyTerminalApp({
   const [screenGeneration, setScreenGeneration] = useState(0);
   const store = storeRef.current;
   const { exit } = useApp();
+  const { write: writeStdout } = useStdout();
   const activeSessionId = useTuiStoreSelector(
     store,
     (state) => state.activeSessionId,
@@ -181,7 +182,7 @@ export function OhbabyTerminalApp({
       eventDispatcher.dispatch(tuiEvent);
 
       if (isNewSessionSelectionEvent(tuiEvent)) {
-        process.stdout.write(NEW_SESSION_CLEAR_SEQUENCE);
+        writeStdout(NEW_SESSION_CLEAR_SEQUENCE);
         setScreenGeneration((current) => current + 1);
       }
 

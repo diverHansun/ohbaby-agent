@@ -675,6 +675,38 @@ export function createInProcessUiBackendClient(
     );
   }
 
+  async function canReuseUiSessionForNewCommand(
+    session: UiSession,
+    projectRoot: string,
+  ): Promise<boolean> {
+    if (!isReusableUiSession(session, projectRoot)) {
+      return false;
+    }
+    if (!options.sessionManager) {
+      return true;
+    }
+
+    const coreSession = await options.sessionManager.get(session.id);
+    return (
+      coreSession !== null &&
+      !coreSession.isSubagent &&
+      coreSession.stats.messageCount === 0 &&
+      sameProjectRoot(coreSession.projectRoot, projectRoot)
+    );
+  }
+
+  async function findReusableUiSession(
+    snapshot: UiSnapshot,
+    projectRoot: string,
+  ): Promise<UiSession | null> {
+    for (const candidate of snapshot.sessions) {
+      if (await canReuseUiSessionForNewCommand(candidate, projectRoot)) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
   async function resolveNewSessionProjectRoot(
     snapshot: UiSnapshot,
   ): Promise<string> {
@@ -725,7 +757,10 @@ export function createInProcessUiBackendClient(
     const activeSession = snapshot.sessions.find(
       (candidate) => candidate.id === snapshot.activeSessionId,
     );
-    if (activeSession && isReusableUiSession(activeSession, projectRoot)) {
+    if (
+      activeSession &&
+      (await canReuseUiSessionForNewCommand(activeSession, projectRoot))
+    ) {
       return activateSessionForNewCommand({
         publishUpdate: false,
         session: activeSession,
@@ -751,8 +786,9 @@ export function createInProcessUiBackendClient(
       }
     }
 
-    const reusableUiSession = snapshot.sessions.find((candidate) =>
-      isReusableUiSession(candidate, projectRoot),
+    const reusableUiSession = await findReusableUiSession(
+      snapshot,
+      projectRoot,
     );
     if (reusableUiSession) {
       return activateSessionForNewCommand({

@@ -5,6 +5,7 @@ import type {
   UiEventHandler,
   UiSnapshot,
 } from "ohbaby-sdk";
+import { NEW_SESSION_CLEAR_SEQUENCE } from "./app.js";
 import { OhbabyTerminalApp } from "./index.js";
 import { renderOhbabyLogo } from "./render/logo.js";
 import type {
@@ -1041,9 +1042,6 @@ describe("OhbabyTerminalApp", () => {
   });
 
   it("clears screen and scrollback when /new selects a session", async () => {
-    const writeSpy = vi
-      .spyOn(process.stdout, "write")
-      .mockImplementation(() => true);
     const client = createFakeClient(snapshot(), catalog);
     const app = render(
       <OhbabyTerminalApp
@@ -1053,7 +1051,7 @@ describe("OhbabyTerminalApp", () => {
     );
 
     await flush();
-    writeSpy.mockClear();
+    const frameCount = app.stdout.frames.length;
     client.emit({
       action: {
         data: { choiceId: "session_2", source: "new" },
@@ -1066,14 +1064,61 @@ describe("OhbabyTerminalApp", () => {
     });
     await flush();
 
-    expect(writeSpy).toHaveBeenCalledWith("\x1b[2J\x1b[3J\x1b[H");
+    expect(app.stdout.frames.slice(frameCount).join("")).toContain(
+      NEW_SESSION_CLEAR_SEQUENCE,
+    );
+    app.unmount();
+  });
+
+  it("repaints the current empty frame when /new reuses the active session", async () => {
+    const client = createFakeClient({
+      activeSessionId: "session_empty",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-14T00:00:00.000Z",
+          id: "session_empty",
+          messages: [],
+          projectRoot: "D:/Projects/app",
+          title: "New session",
+          updatedAt: "2026-05-14T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "idle" },
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    expect(app.lastFrame()).toContain(">");
+    const frameCount = app.stdout.frames.length;
+    client.emit({
+      action: {
+        data: { choiceId: "session_empty", source: "new" },
+        kind: "session.selected",
+      },
+      clientInvocationId: "inv_new",
+      commandRunId: "command_new",
+      timestamp: Date.now(),
+      type: "command.result.delivered",
+    });
+    await flush();
+
+    const output = app.stdout.frames.slice(frameCount).join("");
+    const clearIndex = output.indexOf(NEW_SESSION_CLEAR_SEQUENCE);
+    expect(clearIndex).toBeGreaterThanOrEqual(0);
+    expect(
+      output.slice(clearIndex + NEW_SESSION_CLEAR_SEQUENCE.length),
+    ).toContain(">");
     app.unmount();
   });
 
   it("does not clear screen for ordinary session selection actions", async () => {
-    const writeSpy = vi
-      .spyOn(process.stdout, "write")
-      .mockImplementation(() => true);
     const client = createFakeClient(snapshot(), catalog);
     const app = render(
       <OhbabyTerminalApp
@@ -1083,7 +1128,7 @@ describe("OhbabyTerminalApp", () => {
     );
 
     await flush();
-    writeSpy.mockClear();
+    const frameCount = app.stdout.frames.length;
     client.emit({
       action: {
         data: { choiceId: "session_2" },
@@ -1096,7 +1141,9 @@ describe("OhbabyTerminalApp", () => {
     });
     await flush();
 
-    expect(writeSpy).not.toHaveBeenCalledWith("\x1b[2J\x1b[3J\x1b[H");
+    expect(app.stdout.frames.slice(frameCount).join("")).not.toContain(
+      NEW_SESSION_CLEAR_SEQUENCE,
+    );
     app.unmount();
   });
 

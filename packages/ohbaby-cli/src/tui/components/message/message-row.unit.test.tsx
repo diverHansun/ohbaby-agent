@@ -134,6 +134,74 @@ describe("MessageRow", () => {
     expect(app.lastFrame()).toContain("Bash pnpm test");
   });
 
+  it("keeps tool name and argument colors when a completed tool line wraps", () => {
+    const theme = createTheme("dark", 3);
+    const message = assistantMessage([
+      {
+        call: {
+          ...toolCall("call_1"),
+          input: {
+            command: "pnpm test --filter packages/ohbaby-cli --runInBand",
+          },
+          status: "completed",
+        },
+        type: "tool-call",
+      },
+      {
+        result: { callId: "call_1", output: "ok" },
+        type: "tool-result",
+      },
+    ]);
+
+    const rendered = renderMessageParts(message, 24, theme);
+
+    const first = rendered[0];
+    expect(first.kind).toBe("text");
+    if (first.kind !== "text" || !first.segments) {
+      throw new Error("Expected wrapped tool label segments");
+    }
+    expect(first.segments[0]).toEqual({ color: theme.tool.name, text: "Bash" });
+    expect(first.segments[1]?.color).toBe(theme.tool.arg);
+    expect(first.segments[1]?.text).toContain("\n");
+  });
+
+  it("keeps failed suffix color when a tool error wraps", () => {
+    const theme = createTheme("dark", 3);
+    const message = assistantMessage([
+      {
+        call: {
+          ...toolCall("call_1"),
+          input: { command: "pnpm test" },
+          status: "failed",
+        },
+        type: "tool-call",
+      },
+      {
+        result: {
+          callId: "call_1",
+          error:
+            "Permission denied because the requested command touches protected files",
+          output: "",
+        },
+        type: "tool-result",
+      },
+    ]);
+
+    const rendered = renderMessageParts(message, 26, theme);
+
+    const first = rendered[0];
+    expect(first.kind).toBe("text");
+    if (first.kind !== "text" || !first.segments) {
+      throw new Error("Expected wrapped failed tool label segments");
+    }
+    const failedText = first.segments
+      .filter((segment) => segment.color === theme.tool.failed)
+      .map((segment) => segment.text)
+      .join("");
+    expect(failedText).toContain("\n");
+    expect(failedText).toContain("Permission denied");
+  });
+
   it("keeps completed tool rows aligned with the running spinner prefix", () => {
     const message = assistantMessage([
       {
