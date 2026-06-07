@@ -1,8 +1,8 @@
 import { Box, Text, useInput } from "ink";
 import type { CoreAPI, UiPermissionRequest } from "ohbaby-sdk";
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { tuiTheme } from "../theme.js";
+import { useTheme } from "../theme/index.js";
 
 export interface PermissionDialogProps {
   readonly client: CoreAPI;
@@ -13,12 +13,11 @@ export function PermissionDialog({
   client,
   request,
 }: PermissionDialogProps): ReactElement {
-  const defaultIndex = useMemo(
-    () => findSafeDefaultChoiceIndex(request),
-    [request],
+  const theme = useTheme();
+  const [selectedIndex, setSelectedIndex] = useState(() =>
+    findInitialChoiceIndex(request),
   );
-  const [selectedIndex, setSelectedIndex] = useState(defaultIndex);
-  const selectedIndexRef = useRef(defaultIndex);
+  const selectedIndexRef = useRef(selectedIndex);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,7 +56,7 @@ export function PermissionDialog({
       respondWithChoice(
         client,
         request,
-        findSafeDefaultChoiceIndex(request),
+        findEscapeDefaultChoiceIndex(request),
         setPending,
         setError,
       );
@@ -77,7 +76,7 @@ export function PermissionDialog({
 
   return (
     <Box flexDirection="column">
-      <Text color={tuiTheme.colors.warning}>Permission: {request.title}</Text>
+      <Text color={theme.status.warning}>Permission: {request.title}</Text>
       <Text>{request.description}</Text>
       {request.choices.map((choice, index) => (
         <Text key={choice.id}>
@@ -89,9 +88,7 @@ export function PermissionDialog({
         <Text dimColor>Enter select | Esc safe default | arrows move</Text>
       )}
       {pending ? <Text dimColor>sending...</Text> : null}
-      {error === null ? null : (
-        <Text color={tuiTheme.colors.error}>{error}</Text>
-      )}
+      {error === null ? null : <Text color={theme.status.error}>{error}</Text>}
     </Box>
   );
 }
@@ -119,7 +116,15 @@ function respondWithChoice(
     });
 }
 
-function findSafeDefaultChoiceIndex(request: UiPermissionRequest): number {
+function findInitialChoiceIndex(request: UiPermissionRequest): number {
+  const allowIndex = request.choices.findIndex(
+    (choice) => choice.intent === "allow",
+  );
+
+  return allowIndex >= 0 ? allowIndex : findEscapeDefaultChoiceIndex(request);
+}
+
+function findEscapeDefaultChoiceIndex(request: UiPermissionRequest): number {
   const denyIndex = request.choices.findIndex(
     (choice) => choice.intent === "deny",
   );

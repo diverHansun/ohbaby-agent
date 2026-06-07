@@ -384,6 +384,10 @@ export function createInProcessUiBackendClient(
   function createSkillLogger(): SkillLogger {
     return {
       warn(message, context): void {
+        if (context?.kind === "skill-override") {
+          return;
+        }
+
         const detail = formatSkillWarning(message, context);
         publishNotice({
           key: `skill:warning:${detail}`,

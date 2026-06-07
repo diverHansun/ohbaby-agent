@@ -3,7 +3,7 @@ import type { ReactElement } from "react";
 import { getSlashCompletionCandidates } from "../../slash-commands/completions.js";
 import { formatCommandHints } from "../../slash-commands/hints.js";
 import type { TuiCommandCatalog } from "../../store/snapshot.js";
-import { tuiTheme } from "../../theme.js";
+import { useTheme } from "../../theme/index.js";
 
 export interface CompletionProps {
   readonly input: string;
@@ -16,6 +16,7 @@ export function Completion({
   input,
   selectedIndex,
 }: CompletionProps): ReactElement {
+  const theme = useTheme();
   const hints = formatCommandHints(
     getSlashCompletionCandidates(input, catalog),
   );
@@ -29,7 +30,7 @@ export function Completion({
       {hints.map((hint, index) => (
         <Text
           bold={index === selectedIndex}
-          color={index === selectedIndex ? tuiTheme.colors.accent : undefined}
+          color={index === selectedIndex ? theme.status.accent : undefined}
           dimColor={index !== selectedIndex}
           key={hint}
         >

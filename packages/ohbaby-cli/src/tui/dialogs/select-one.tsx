@@ -3,7 +3,7 @@ import type { CoreAPI } from "ohbaby-sdk";
 import { useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { TuiInteractionRequest } from "../store/snapshot.js";
-import { tuiTheme } from "../theme.js";
+import { useTheme } from "../theme/index.js";
 
 const SELECT_ONE_PAGE_SIZE = 6;
 
@@ -18,6 +18,7 @@ export function SelectOneDialog({
   interaction,
   title,
 }: SelectOneDialogProps): ReactElement {
+  const theme = useTheme();
   const options = interaction.options ?? [];
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selectedIndexRef = useRef(0);
@@ -116,7 +117,7 @@ export function SelectOneDialog({
 
   return (
     <Box flexDirection="column">
-      <Text color={tuiTheme.colors.warning}>
+      <Text color={theme.status.warning}>
         {title}: {interaction.title ?? "Select one"}
       </Text>
       {options.map((option, index) => (
@@ -127,9 +128,7 @@ export function SelectOneDialog({
       ))}
       {options.length === 0 ? <Text dimColor>No options</Text> : null}
       {pending ? <Text dimColor>sending...</Text> : null}
-      {error === null ? null : (
-        <Text color={tuiTheme.colors.error}>{error}</Text>
-      )}
+      {error === null ? null : <Text color={theme.status.error}>{error}</Text>}
     </Box>
   );
 }

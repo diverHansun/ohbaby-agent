@@ -4,9 +4,7 @@ import path from "node:path";
 import { TextDecoder } from "node:util";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import {
-  getDefaultSkillDirectories as configuredDefaultSkillDirectories,
-} from "../config/skill/index.js";
+import { getDefaultSkillDirectories as configuredDefaultSkillDirectories } from "../config/skill/index.js";
 import { SkillLoadError, SkillResourceError } from "./errors.js";
 import type {
   SkillContent,
@@ -572,6 +570,7 @@ export class SkillLoader implements SkillLoaderPort {
           this.logger.warn(
             `Skill "${info.name}" from ${info.location} overrides ${previous.location}`,
             {
+              kind: "skill-override",
               nextScope: info.scope,
               nextSource: info.source,
               previousScope: previous.scope,

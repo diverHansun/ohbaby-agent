@@ -101,8 +101,6 @@ describe("TUI main chain with real in-process backend", () => {
     await flush();
     expect(client.submitPrompt).toHaveBeenCalledTimes(1);
 
-    app.stdin.write("\t");
-    app.stdin.write("\t");
     app.stdin.write("\r");
 
     const completedFrame = await waitForFrame(app, (frame) =>
@@ -268,8 +266,6 @@ describe("TUI main chain with real in-process backend", () => {
     app.stdin.write("\r");
     await waitForFrame(app, (frame) => frame.includes("Permission:"));
 
-    app.stdin.write("\t");
-    app.stdin.write("\t");
     app.stdin.write("\r");
 
     const frame = await waitForFrame(app, (nextFrame) =>

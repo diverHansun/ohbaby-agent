@@ -154,6 +154,10 @@ function createSkillLogger(
   }
   return {
     warn(message, context): void {
+      if (context?.kind === "skill-override") {
+        return;
+      }
+
       const detail = formatSkillWarning(message, context);
       onNotice({
         key: `skill:warning:${detail}`,

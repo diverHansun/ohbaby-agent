@@ -136,7 +136,10 @@ export async function waitForFrame(
 export function promptLine(frame: string): string {
   const lines = frame.split(/\r?\n/u);
   return (
-    [...lines].reverse().find((line) => line.trimStart().startsWith("> ")) ?? ""
+    [...lines]
+      .reverse()
+      .map(normalizePromptFrameLine)
+      .find((line) => line.trimStart().startsWith("> ")) ?? ""
   );
 }
 
@@ -144,4 +147,13 @@ export function promptIsReady(frame: string): boolean {
   const line = promptLine(frame);
 
   return line.trimStart() === "> message";
+}
+
+function normalizePromptFrameLine(line: string): string {
+  const trimmed = line.trim();
+  if (trimmed.startsWith("│") && trimmed.endsWith("│")) {
+    return trimmed.slice(1, -1).trimEnd();
+  }
+
+  return line;
 }

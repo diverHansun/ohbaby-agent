@@ -21,6 +21,7 @@ import {
   selectRuntimeLabel,
   useTuiStoreSelector,
 } from "./store/selectors.js";
+import { ThemeProvider } from "./theme/index.js";
 import type {
   TuiCommandCatalog,
   TuiEvent,
@@ -252,34 +253,37 @@ export function OhbabyTerminalApp({
   }, [client, state.activeSessionId, store]);
 
   return (
-    <AppShell>
-      <Header state={state} />
-      <MessageList
-        commandNotices={state.commandNotices}
-        messages={state.messages}
-        notices={state.notices}
-      />
-      <DialogManager
-        client={client}
-        interactions={state.interactions}
-        permissions={state.permissions}
-      />
-      <Prompt
-        activeSessionId={state.activeSessionId}
-        catalog={state.catalog}
-        client={client}
-        disabled={hasDialog}
-        loadCatalog={loadCatalog}
-        permission={state.permission}
-        contextWindowUsage={contextWindowUsageLabel}
-        runtimeStatusLabel={runtimeStatusLabel}
-      />
-      {state.catalogInvalidation === null ? null : (
-        <Text dimColor>
-          command catalog refresh: {state.catalogInvalidation.version ?? "new"}
-        </Text>
-      )}
-    </AppShell>
+    <ThemeProvider>
+      <AppShell>
+        <Header state={state} />
+        <MessageList
+          commandNotices={state.commandNotices}
+          messages={state.messages}
+          notices={state.notices}
+        />
+        <DialogManager
+          client={client}
+          interactions={state.interactions}
+          permissions={state.permissions}
+        />
+        <Prompt
+          activeSessionId={state.activeSessionId}
+          catalog={state.catalog}
+          client={client}
+          disabled={hasDialog}
+          loadCatalog={loadCatalog}
+          permission={state.permission}
+          contextWindowUsage={contextWindowUsageLabel}
+          runtimeStatusLabel={runtimeStatusLabel}
+        />
+        {state.catalogInvalidation === null ? null : (
+          <Text dimColor>
+            command catalog refresh:{" "}
+            {state.catalogInvalidation.version ?? "new"}
+          </Text>
+        )}
+      </AppShell>
+    </ThemeProvider>
   );
 }
 

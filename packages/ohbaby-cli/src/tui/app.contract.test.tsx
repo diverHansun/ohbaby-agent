@@ -107,8 +107,9 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
 
-    expect(app.lastFrame()).toContain("OHBABY");
-    expect(app.lastFrame()).toContain("___  _   _");
+    expect(app.lastFrame()).toContain("╭");
+    expect(app.lastFrame()).toContain("╰");
+    expect(app.lastFrame()).not.toContain("___  _   _");
     expect(app.lastFrame()).toContain("> message");
     expect(app.lastFrame()).not.toContain("ohbaby >");
     expect(app.lastFrame()).not.toContain("single-process coding agent");
@@ -777,8 +778,8 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).not.toContain("permission_raw_123");
     expect(app.lastFrame()).toContain("Enter select");
     expect(app.lastFrame()).toContain("Esc safe default");
-    expect(app.lastFrame()).toContain("> Reject [deny]");
-    expect(app.lastFrame()).toContain("  Allow once [allow]");
+    expect(app.lastFrame()).toContain("> Allow once [allow]");
+    expect(app.lastFrame()).toContain("  Reject [deny]");
   });
 
   it("submits normal prompts with the active session id", async () => {
@@ -1297,7 +1298,7 @@ describe("OhbabyTerminalApp", () => {
     });
   });
 
-  it("defaults permission selection to deny when available", async () => {
+  it("defaults permission selection to first allow when available", async () => {
     const client = createFakeClient(snapshot());
     const app = render(
       <OhbabyTerminalApp
@@ -1325,6 +1326,38 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("\r");
     await flush();
     expect(client.respondPermission).toHaveBeenCalledWith("permission_2", {
+      choiceId: "allow",
+    });
+  });
+
+  it("keeps escape on the deny permission safe default", async () => {
+    const client = createFakeClient(snapshot());
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    client.emit({
+      request: {
+        choices: [
+          { id: "allow", intent: "allow", label: "Allow" },
+          { id: "deny", intent: "deny", label: "Deny" },
+        ],
+        description: "Run bash",
+        id: "permission_3",
+        runId: "run_1",
+        title: "Permission",
+      },
+      type: "permission.requested",
+    });
+    await flush();
+
+    app.stdin.write("\u001B");
+    await flush();
+    expect(client.respondPermission).toHaveBeenCalledWith("permission_3", {
       choiceId: "deny",
     });
   });

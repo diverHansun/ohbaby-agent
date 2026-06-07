@@ -39,9 +39,7 @@ describe("SkillLoader", () => {
       XDG_CONFIG_HOME: xdgConfigDirectory,
     });
 
-    expect(directory).toBe(
-      path.join(homeDirectory, ".ohbaby-agent", "skill"),
-    );
+    expect(directory).toBe(path.join(homeDirectory, ".ohbaby-agent", "skill"));
   });
 
   it("discovers SKILL.md directories, applies defaults, and lets project skills override user skills", async () => {
@@ -65,14 +63,18 @@ describe("SkillLoader", () => {
     );
 
     const warnings: string[] = [];
+    const warningContexts: Record<string, unknown>[] = [];
     const loader = new SkillLoader({
       directories: [
         { path: userDir, scope: "user" },
         { path: projectDir, scope: "project" },
       ],
       logger: {
-        warn(message): void {
+        warn(message, context): void {
           warnings.push(message);
+          if (message.includes("overrides") && context) {
+            warningContexts.push(context);
+          }
         },
       },
     });
@@ -94,6 +96,9 @@ describe("SkillLoader", () => {
     expect(warnings.some((message) => message.includes("overrides"))).toBe(
       true,
     );
+    expect(
+      warningContexts.some((context) => context.kind === "skill-override"),
+    ).toBe(true);
   });
 
   it("skips invalid files without stopping the scan", async () => {

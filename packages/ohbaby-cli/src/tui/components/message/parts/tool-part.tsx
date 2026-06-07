@@ -3,24 +3,22 @@ import type { UiMessagePart, UiToolCall, UiToolResult } from "ohbaby-sdk";
 export function renderToolPart(part: UiMessagePart): string {
   switch (part.type) {
     case "tool-call":
-      return renderToolCallLine(part.call);
+      return renderToolLabel(part.call);
     case "tool-result":
-      return part.result.error ? `  Error ${formatBody(part.result.error)}` : "";
+      return part.result.error ? `Error ${formatBody(part.result.error)}` : "";
     case "text":
     case "reasoning":
       return part.text;
   }
 }
 
-export function renderToolCallLine(
+export function renderToolLabel(
   call: UiToolCall,
   result?: UiToolResult,
 ): string {
-  const leading =
-    call.status === "running" || call.status === "pending" ? "⠋ " : "  ";
   const summary = formatPrimaryInput(call.input);
   const error = result?.error ? ` ${formatBody(result.error)}` : "";
-  return `${leading}${formatToolName(call.name)}${
+  return `${formatToolName(call.name)}${
     summary === "" ? "" : ` ${summary}`
   }${error}`;
 }

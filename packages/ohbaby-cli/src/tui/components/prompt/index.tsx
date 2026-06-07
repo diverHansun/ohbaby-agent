@@ -10,8 +10,9 @@ import {
   parseSlashInput,
   resolveCommand,
 } from "../../slash-commands/runtime.js";
+import { useTuiLayout } from "../../layout/context.js";
 import type { TuiCommandCatalog } from "../../store/snapshot.js";
-import { tuiTheme } from "../../theme.js";
+import { useTheme } from "../../theme/index.js";
 import { Completion } from "./completion.js";
 import {
   applyEditorAction,
@@ -42,6 +43,8 @@ export function Prompt({
   permission,
   runtimeStatusLabel,
 }: PromptProps): ReactElement {
+  const theme = useTheme();
+  const layout = useTuiLayout();
   const [editor, setEditor] = useState<EditorState>(() => createEditorState());
   const [error, setError] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -184,7 +187,15 @@ export function Prompt({
 
   return (
     <Box flexDirection="column">
-      {renderEditorLines(editor, disabled)}
+      <Box
+        borderColor={theme.border}
+        borderStyle="round"
+        flexDirection="column"
+        paddingX={1}
+        width={layout.contentWidth}
+      >
+        {renderEditorLines(editor, disabled)}
+      </Box>
       {dockStatus === "" && contextWindowUsage === "" ? null : (
         <Box justifyContent="space-between">
           <Text dimColor>{dockStatus}</Text>
@@ -193,9 +204,7 @@ export function Prompt({
           )}
         </Box>
       )}
-      {error === null ? null : (
-        <Text color={tuiTheme.colors.error}>{error}</Text>
-      )}
+      {error === null ? null : <Text color={theme.status.error}>{error}</Text>}
       <Completion
         catalog={catalog}
         input={editorText(editor)}

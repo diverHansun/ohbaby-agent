@@ -3105,6 +3105,73 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
+  it("does not publish warning notices for normal skill override precedence", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-skill-override-"));
+    const previousCodexHome = process.env.CODEX_HOME;
+    const codexHome = join(projectRoot, "codex-home");
+    try {
+      process.env.CODEX_HOME = codexHome;
+      await mkdir(join(codexHome, "skills", "review"), { recursive: true });
+      await writeFile(
+        join(codexHome, "skills", "review", "SKILL.md"),
+        [
+          "---",
+          "name: code-review",
+          "description: User review guidance",
+          "---",
+          "",
+          "# User Review",
+        ].join("\n"),
+        "utf8",
+      );
+      await mkdir(join(projectRoot, ".ohbaby-agent", "skill", "review"), {
+        recursive: true,
+      });
+      await writeFile(
+        join(projectRoot, ".ohbaby-agent", "skill", "review", "SKILL.md"),
+        [
+          "---",
+          "name: code-review",
+          "description: Project review guidance",
+          "---",
+          "",
+          "# Project Review",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const events: UiEvent[] = [];
+      const client = createInProcessUiBackendClient({
+        llmClient: createFakeLLMClient([]),
+        workdir: projectRoot,
+      });
+      client.subscribeEvents((event) => {
+        events.push(event);
+      });
+
+      await client.listCommands({ surface: "tui" });
+
+      const notices = events.filter(
+        (event): event is Extract<UiEvent, { type: "notice.emitted" }> =>
+          event.type === "notice.emitted",
+      );
+      expect(
+        notices.some(
+          (event) =>
+            event.notice.title === "Skill warning" &&
+            event.notice.message.includes("overrides"),
+        ),
+      ).toBe(false);
+    } finally {
+      if (previousCodexHome === undefined) {
+        delete process.env.CODEX_HOME;
+      } else {
+        process.env.CODEX_HOME = previousCodexHome;
+      }
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it("submits skill command content together with the user request", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-skill-submit-"));
     try {

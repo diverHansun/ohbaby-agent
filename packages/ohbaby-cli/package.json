@@ -41,10 +41,12 @@
   },
   "dependencies": {
     "chalk": "^5.4.1",
+    "figlet": "^1.11.0",
     "ink": "^6.0.0",
+    "ink-gradient": "^4.0.1",
     "ohbaby-agent": "workspace:*",
     "ohbaby-sdk": "workspace:*",
-    "react": "^19.0.0",
+    "react": "^19.2.0",
     "yargs": "^17.7.2"
   },
   "devDependencies": {

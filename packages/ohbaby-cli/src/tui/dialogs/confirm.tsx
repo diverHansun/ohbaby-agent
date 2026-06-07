@@ -3,7 +3,7 @@ import type { CoreAPI } from "ohbaby-sdk";
 import { useState } from "react";
 import type { ReactElement } from "react";
 import type { TuiInteractionRequest } from "../store/snapshot.js";
-import { tuiTheme } from "../theme.js";
+import { useTheme } from "../theme/index.js";
 
 export interface ConfirmDialogProps {
   readonly client: CoreAPI;
@@ -14,6 +14,7 @@ export function ConfirmDialog({
   client,
   interaction,
 }: ConfirmDialogProps): ReactElement {
+  const theme = useTheme();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,16 +52,14 @@ export function ConfirmDialog({
 
   return (
     <Box flexDirection="column">
-      <Text color={tuiTheme.colors.warning}>
+      <Text color={theme.status.warning}>
         Confirm: {interaction.title ?? "Confirm"}
       </Text>
       {interaction.message === undefined ? null : (
         <Text>{interaction.message}</Text>
       )}
       {pending ? <Text dimColor>sending...</Text> : null}
-      {error === null ? null : (
-        <Text color={tuiTheme.colors.error}>{error}</Text>
-      )}
+      {error === null ? null : <Text color={theme.status.error}>{error}</Text>}
     </Box>
   );
 }
