@@ -18,6 +18,8 @@
   - 用户消息提交后立即进入 committed，runtime 为 `running` 时也不进入 live tail。
   - `message.updated(status=completed)` 且 runtime 已结束后 live tail 转入 committed。
   - runtime 为 `running` 但 message 全部 completed 时，按判定表处理，不让 runtime 独自决定 reasoning 或 split。
+  - runtime 为 `waiting-for-permission` 且最后一条 user message 时，live 为 `null`，全部 committed。
+  - runtime 为 `waiting-for-permission` 且最后一条 assistant completed、无 pending/running tool 时，live 为 `null`，全部 committed。
 
 - `MessageRow`：
   - 历史用户消息使用淡背景块和左 accent。
@@ -89,6 +91,7 @@
 第一版以可测 smoke 为主：
 
 - 1000 条 committed message 下，执行一次 prompt 输入 dispatch 的 reducer 路径耗时应小于 5ms。该测试可先标记 `it.skip`，作为性能债务基线。
+- 1000 条 committed message + 1 条 live message 下，执行一次 `message.part.delta` dispatch 路径耗时应小于 2ms。该测试覆盖本阶段 split 工程的核心性能承诺。
 - 200 次连续 `message.part.delta` 后，Header 与 PromptDock 不应因 transcript delta 获得新 props。可用测试替身计数、React Profiler 或 why-did-you-render 类工具验证。
 - `<Static>` 不进入本阶段；后续若启用，必须先比较 ANSI 序列字节数和 frame 间隔。
 

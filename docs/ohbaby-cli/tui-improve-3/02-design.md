@@ -48,6 +48,7 @@ AppShell
   Header
   TranscriptViewport
     CommittedTranscript
+    CommandNoticeLane
     LiveTail
     NoticeLane
   DialogManager
@@ -59,7 +60,9 @@ AppShell
 职责：
 
 - 接收 active session 的消息、notice、layout metrics。
-- 调用纯函数 `splitTranscript(messages, runtime)` 得到 committed/live 两段。
+- 接收 pre-computed 的 `committedMessages` 和 `liveMessage` props。
+- split 逻辑由 store 在 `rebuildFromCollections` 时完成。
+- `TranscriptViewport` 不自行调用 `splitTranscript`。
 - 用 `key={activeSessionId}` 或等价 reset 策略隔离 session。
 - 暂时保持普通 Ink column，不实现虚拟滚动。
 - 不持有跨 session 的隐式缓存。
@@ -83,6 +86,15 @@ AppShell
 - spinner 只存在于 running/pending tool line。
 - 完成后工具行保留固定 leading 占位，避免文字左移跳动。
 - running 行的前缀宽度必须与 completed 行前缀宽度一致。当前约定为 running spinner 占 2 cell，completed 用两个空格占位。
+
+### CommandNoticeLane
+
+职责：
+
+- 渲染 `state.commandNotices`。
+- 位于 `CommittedTranscript` 与 `LiveTail` 之间。
+- 不属于 `LiveTail`，避免 command notice 与 streaming assistant/tool 职责混杂。
+- session 切换时沿用 store 现有清空策略。
 
 ### MessageRow
 
@@ -116,6 +128,8 @@ AppShell
 | `running` | `assistant` | 全 completed，包括已折叠 reasoning | `last`，短暂等待 run 完成 | `messages.slice(0, -1)` |
 | `running` | `user` | any | `null` | `messages` |
 | `waiting-for-permission` | any | 包含 pending/running tool | `last` | `messages.slice(0, -1)` |
+| `waiting-for-permission` | `user` | any | `null` | `messages` |
+| `waiting-for-permission` | `assistant` | completed 且无 pending/running tool | `null` | `messages` |
 | `error` | any | any | `null` | `messages` |
 
 判定优先级：
@@ -166,6 +180,7 @@ SDK UI events
   -> memoized selectors
   -> TranscriptViewport
       CommittedTranscript  (React.memo，只在 activeSessionId 或 committed 引用变化时重渲)
+      CommandNoticeLane    (React.memo，只随 commandNotices 变化)
       LiveTail             (React.memo，可随 delta 重渲)
       NoticeLane           (React.memo，只随 notices 变化)
   -> PromptDock / DialogManager
@@ -192,7 +207,7 @@ SDK UI events
 notice 分两类处理：
 
 - `state.notices` 是全局/后端 UI notice，例如 startup warning、context unavailable，进入 `NoticeLane`。
-- `state.commandNotices` 是命令执行结果，属于会话作用域提示。第一版不放入全局 `NoticeLane`；优先随 transcript 渲染，若没有明确 anchor，则放在 `LiveTail` 末尾。
+- `state.commandNotices` 是命令执行结果，属于会话作用域提示。第一版不放入全局 `NoticeLane`，也不放入 `LiveTail`；由 `CommandNoticeLane` 单独渲染。
 
 session 切换时：
 

@@ -75,7 +75,8 @@ export interface TranscriptSplit {
 - `CommittedTranscript` 使用 `React.memo`。
 - `LiveTail` 使用 `React.memo`，允许 streaming delta 重渲。
 - `NoticeLane` 只渲染 `state.notices`。
-- command notices 不再混入全局 NoticeLane；没有 anchor 时跟随 live tail 末尾。
+- 新增 `CommandNoticeLane`，位于 committed 与 live tail 之间。
+- command notices 不再混入全局 NoticeLane，也不放入 LiveTail。
 - active session 用 `key={activeSessionId ?? "none"}` 重置 viewport。
 
 测试：
