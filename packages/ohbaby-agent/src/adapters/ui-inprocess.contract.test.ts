@@ -1122,6 +1122,68 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
+  it("reads the current saved model config without requiring an api key", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-current-model-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "ohbaby-current-model-home-"));
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    const modelJsonPath = join(homeDir, ".ohbaby-agent", "model.json");
+
+    try {
+      process.env.HOME = homeDir;
+      process.env.USERPROFILE = homeDir;
+      await mkdir(join(homeDir, ".ohbaby-agent"), { recursive: true });
+      await writeFile(
+        modelJsonPath,
+        JSON.stringify({
+          apiConfig: {
+            apiKeyEnv: "ZENMUX_API_KEY",
+            baseUrl: "https://zenmux.ai/api/anthropic",
+            interfaceProvider: "anthropic",
+          },
+          defaultModel: "anthropic/claude-sonnet-4.6",
+          llmParams: {
+            contextWindowTokens: 200_000,
+            maxTokens: 8192,
+            temperature: 0.7,
+          },
+          provider: "zenmux",
+        }),
+        "utf-8",
+      );
+
+      const client = createInProcessUiBackendClient({
+        createLLMClient: () => {
+          throw new Error("runtime client should not be loaded");
+        },
+        projectDirectory: projectRoot,
+      });
+
+      await expect(client.getCurrentModel()).resolves.toEqual({
+        apiKeyEnv: "ZENMUX_API_KEY",
+        baseUrl: "https://zenmux.ai/api/anthropic",
+        contextWindowTokens: 200_000,
+        interfaceProvider: "anthropic",
+        maxOutputTokens: 8192,
+        model: "anthropic/claude-sonnet-4.6",
+        provider: "zenmux",
+      });
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousUserProfile === undefined) {
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = previousUserProfile;
+      }
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects connectModel while a prompt is running", async () => {
     const release = createDeferred<undefined>();
     const client = createInProcessUiBackendClient({

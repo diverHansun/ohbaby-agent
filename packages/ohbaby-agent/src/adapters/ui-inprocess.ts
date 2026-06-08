@@ -9,6 +9,7 @@ import type {
   UiConnectModelInput,
   UiConnectModelResult,
   UiContextWindowUsage,
+  UiCurrentModelConfig,
   UiEvent,
   UiEventHandler,
   UiInteractionResponse,
@@ -80,6 +81,10 @@ import {
   subscribeAppEventProjectors,
 } from "./app-events/index.js";
 import { applyActiveModelConfig } from "../config/llm/apply-active-model-config.js";
+import { loadModelJson } from "../config/llm/loaders.js";
+import { ConfigError } from "../config/llm/types.js";
+import { validateModelJson } from "../config/llm/validation.js";
+import type { ModelJsonConfig } from "../config/llm/types.js";
 
 const EMPTY_SNAPSHOT: UiSnapshot = {
   sessions: [],
@@ -631,6 +636,55 @@ export function createInProcessUiBackendClient(
     };
   }
 
+  function connectModelConfigFromRuntimeConfig(
+    config: LLMClientInstance["config"],
+  ): UiCurrentModelConfig {
+    return {
+      apiKeyEnv: config.apiKeyEnv,
+      baseUrl: config.baseUrl,
+      ...(config.contextWindowTokens === undefined
+        ? {}
+        : { contextWindowTokens: config.contextWindowTokens }),
+      interfaceProvider: config.interfaceProvider,
+      maxOutputTokens: config.maxTokens,
+      model: config.model,
+      provider: config.provider,
+    };
+  }
+
+  function connectModelConfigFromModelJson(
+    modelJson: ModelJsonConfig,
+  ): UiCurrentModelConfig {
+    return {
+      apiKeyEnv: modelJson.apiConfig.apiKeyEnv,
+      baseUrl: modelJson.apiConfig.baseUrl,
+      ...(modelJson.llmParams.contextWindowTokens === undefined
+        ? {}
+        : { contextWindowTokens: modelJson.llmParams.contextWindowTokens }),
+      interfaceProvider:
+        modelJson.apiConfig.interfaceProvider ?? "openai-compatible",
+      maxOutputTokens: modelJson.llmParams.maxTokens,
+      model: modelJson.defaultModel,
+      provider: modelJson.provider,
+    };
+  }
+
+  async function currentConnectModelFromOptions(): Promise<UiCurrentModelConfig | null> {
+    if (options.llmClient) {
+      return connectModelConfigFromRuntimeConfig(options.llmClient.config);
+    }
+    try {
+      const rawConfig = await loadModelJson();
+      validateModelJson(rawConfig);
+      return connectModelConfigFromModelJson(rawConfig);
+    } catch (error) {
+      if (error instanceof ConfigError && error.code === "FILE_NOT_FOUND") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   async function listModelsFromOptions(): Promise<
     readonly CommandModelSummary[]
   > {
@@ -1134,7 +1188,10 @@ export function createInProcessUiBackendClient(
     const currentSave = new Promise<void>((resolve) => {
       releaseSave = resolve;
     });
-    connectModelQueue = previousSave.then(() => currentSave, () => currentSave);
+    connectModelQueue = previousSave.then(
+      () => currentSave,
+      () => currentSave,
+    );
 
     await previousSave.catch(() => undefined);
     if (isPromptRunning()) {
@@ -1331,6 +1388,10 @@ export function createInProcessUiBackendClient(
 
     connectModel(input: UiConnectModelInput): Promise<UiConnectModelResult> {
       return connectModelInternal(input);
+    },
+
+    getCurrentModel(): Promise<UiCurrentModelConfig | null> {
+      return currentConnectModelFromOptions();
     },
 
     executeCommand(invocation: UiCommandInvocation): Promise<void> {

@@ -5,6 +5,7 @@ describe("buildCoreAPIImpl", () => {
     vi.resetModules();
     const unsubscribe = vi.fn();
     const submitPrompt = vi.fn(() => Promise.resolve());
+    const getCurrentModel = vi.fn(() => Promise.resolve(null));
     const connectModel = vi.fn(() =>
       Promise.resolve({
         apiKeyEnv: "ZENMUX_API_KEY",
@@ -44,6 +45,7 @@ describe("buildCoreAPIImpl", () => {
       ),
       connectModel,
       executeCommand: vi.fn(() => Promise.resolve()),
+      getCurrentModel,
       getSnapshot: vi.fn(() =>
         Promise.resolve({
           activeSessionId: null,
@@ -74,6 +76,7 @@ describe("buildCoreAPIImpl", () => {
       permission: "full-access",
     });
     await api.core.submitPrompt("hello");
+    await api.core.getCurrentModel();
     await api.core.connectModel({
       apiKeyEnv: "ZENMUX_API_KEY",
       baseUrl: "https://zenmux.ai/api/anthropic",
@@ -99,6 +102,7 @@ describe("buildCoreAPIImpl", () => {
       },
     });
     expect(submitPrompt).toHaveBeenCalledWith("hello", undefined);
+    expect(getCurrentModel).toHaveBeenCalledTimes(1);
     expect(connectModel).toHaveBeenCalledWith({
       apiKeyEnv: "ZENMUX_API_KEY",
       baseUrl: "https://zenmux.ai/api/anthropic",
@@ -123,6 +127,7 @@ describe("buildCoreAPIImpl", () => {
         connectModel: vi.fn(() => Promise.resolve()),
         dispose: clientDispose,
         executeCommand: vi.fn(() => Promise.resolve()),
+        getCurrentModel: vi.fn(() => Promise.resolve(null)),
         getSnapshot: vi.fn(() => Promise.resolve()),
         listCommands: vi.fn(() => Promise.resolve({ commands: [] })),
         respondInteraction: vi.fn(() => Promise.resolve()),

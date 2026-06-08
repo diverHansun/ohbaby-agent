@@ -341,6 +341,10 @@ function withStartupRecovery(
       await ready();
       return client.connectModel(input);
     },
+    async getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
+      await ready();
+      return client.getCurrentModel();
+    },
     async executeCommand(
       invocation,
     ): ReturnType<UiBackendClient["executeCommand"]> {

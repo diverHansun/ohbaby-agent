@@ -15,6 +15,7 @@ import type {
 import type { UiInteractionResponse } from "../interaction.js";
 import type { UiContextWindowUsage } from "../context-window.js";
 import type {
+  UiCurrentModelConfig,
   UiConnectModelInput,
   UiConnectModelResult,
 } from "../connect-model.js";
@@ -30,6 +31,7 @@ export interface CoreAPI {
   compactSession(
     options?: UiCompactSessionOptions,
   ): Promise<UiCompactSessionResult>;
+  getCurrentModel(): Promise<UiCurrentModelConfig | null>;
   connectModel(input: UiConnectModelInput): Promise<UiConnectModelResult>;
   executeCommand(invocation: UiSlashCommandInvocation): Promise<void>;
   respondPermission(

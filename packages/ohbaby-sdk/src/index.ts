@@ -13,10 +13,9 @@ export type {
   UiCompactSessionStatus,
   UiCompactSessionUsage,
 } from "./compact.js";
+export type { UiContextWindowUsage } from "./context-window.js";
 export type {
-  UiContextWindowUsage,
-} from "./context-window.js";
-export type {
+  UiCurrentModelConfig,
   UiConnectModelInput,
   UiConnectModelInterfaceProvider,
   UiConnectModelResult,

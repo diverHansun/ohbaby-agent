@@ -71,6 +71,9 @@ export function buildCoreAPIImpl(
       ): ReturnType<CoreAPI["getContextWindowUsage"]> {
         return client.getContextWindowUsage(input);
       },
+      getCurrentModel(): ReturnType<CoreAPI["getCurrentModel"]> {
+        return client.getCurrentModel();
+      },
       listCommands(query): ReturnType<CoreAPI["listCommands"]> {
         return client.listCommands(query);
       },

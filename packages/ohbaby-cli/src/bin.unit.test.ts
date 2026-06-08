@@ -144,6 +144,7 @@ function createCore(): {
   readonly connectModel: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
   readonly getContextWindowUsage: ReturnType<typeof vi.fn>;
+  readonly getCurrentModel: ReturnType<typeof vi.fn>;
   readonly getSnapshot: ReturnType<typeof vi.fn>;
   readonly listCommands: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
@@ -167,6 +168,7 @@ function createCore(): {
     ),
     executeCommand: vi.fn(() => Promise.resolve()),
     getContextWindowUsage: vi.fn(() => Promise.resolve(null)),
+    getCurrentModel: vi.fn(() => Promise.resolve(null)),
     getSnapshot: vi.fn(() => Promise.resolve()),
     listCommands: vi.fn(() => Promise.resolve({ commands: [] })),
     respondInteraction: vi.fn(() => Promise.resolve()),

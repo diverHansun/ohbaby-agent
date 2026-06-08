@@ -113,6 +113,9 @@ describe("context window UI contract", () => {
           input.sessionId === usage.sessionId ? usage : null,
         );
       },
+      getCurrentModel(): ReturnType<CoreAPI["getCurrentModel"]> {
+        return Promise.resolve(null);
+      },
       getSnapshot(): ReturnType<CoreAPI["getSnapshot"]> {
         return Promise.resolve({
           activeSessionId: null,
