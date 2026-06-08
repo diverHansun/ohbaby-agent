@@ -3483,6 +3483,7 @@ describe("createInProcessUiBackendClient", () => {
         current: {
           active: true,
           id: "fake:fake-model",
+          interfaceProvider: "openai-compatible",
           label: "fake-model",
           model: "fake-model",
           provider: "fake",
@@ -3491,6 +3492,7 @@ describe("createInProcessUiBackendClient", () => {
           {
             active: true,
             id: "fake:fake-model",
+            interfaceProvider: "openai-compatible",
             label: "fake-model",
             model: "fake-model",
             provider: "fake",

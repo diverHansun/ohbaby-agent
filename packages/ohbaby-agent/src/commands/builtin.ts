@@ -104,6 +104,9 @@ function sanitizeModelSummary(
     label: model.label,
     provider: model.provider,
     ...(model.model === undefined ? {} : { model: model.model }),
+    ...(model.interfaceProvider === undefined
+      ? {}
+      : { interfaceProvider: model.interfaceProvider }),
     ...(model.baseUrl === undefined ? {} : { baseUrl: model.baseUrl }),
     ...(model.apiKeyEnv === undefined ? {} : { apiKeyEnv: model.apiKeyEnv }),
     ...(model.active === undefined ? {} : { active: model.active }),

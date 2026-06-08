@@ -4,11 +4,18 @@ import type { ReactElement } from "react";
 import type {
   CoreAPI,
   UiCommandInvocation,
+  UiCommandOutput,
   UiEventHandler,
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
 import { DialogManager } from "./dialogs/manager.js";
+import { CommandPanelManager } from "./components/dialog/command-panel-manager.js";
+import {
+  displayPanelKindForCommandId,
+  type CommandPanelKind,
+  type CommandPanelState,
+} from "./components/dialog/command-panel-state.js";
 import { Header } from "./components/header.js";
 import { TranscriptViewport } from "./components/transcript/transcript-viewport.js";
 import { Prompt } from "./components/prompt/index.js";
@@ -50,6 +57,14 @@ export function OhbabyTerminalApp({
   const contextNoticeSequenceRef = useRef(0);
   const disposedRef = useRef(false);
   const [screenGeneration, setScreenGeneration] = useState(0);
+  const [commandPanel, setCommandPanel] = useState<CommandPanelState | null>(
+    null,
+  );
+  const activeSessionIdRef = useRef<string | null>(null);
+  const commandPanelRef = useRef<CommandPanelState | null>(null);
+  const pendingDisplayCommandInvocationsRef = useRef<
+    Map<string, { readonly sessionId: string | null }>
+  >(new Map());
   const store = storeRef.current;
   const { exit } = useApp();
   const { write: writeStdout } = useStdout();
@@ -57,6 +72,7 @@ export function OhbabyTerminalApp({
     store,
     (state) => state.activeSessionId,
   );
+  activeSessionIdRef.current = activeSessionId;
   const activeContextWindowUsage = useTuiStoreSelector(
     store,
     selectActiveContextWindowUsage,
@@ -69,7 +85,8 @@ export function OhbabyTerminalApp({
   const permission = useTuiStoreSelector(store, (state) => state.permission);
   const permissions = useTuiStoreSelector(store, (state) => state.permissions);
   const runtime = useTuiStoreSelector(store, (state) => state.runtime);
-  const hasDialog = permissions.length > 0 || interactions.length > 0;
+  const hasBackendDialog = permissions.length > 0 || interactions.length > 0;
+  const hasDialog = hasBackendDialog || commandPanel !== null;
   const contextWindowUsageLabel = formatContextWindowUsage(
     activeContextWindowUsage,
   );
@@ -78,9 +95,110 @@ export function OhbabyTerminalApp({
     effectiveRuntime.kind === "error"
       ? formatRuntimeLabel(permissions, runtime)
       : undefined;
+  const setActiveCommandPanel = useCallback(
+    (panel: CommandPanelState | null): void => {
+      commandPanelRef.current = panel;
+      setCommandPanel(panel);
+    },
+    [],
+  );
+  const closeCommandPanel = useCallback((): void => {
+    setActiveCommandPanel(null);
+  }, [setActiveCommandPanel]);
+  const openCommandPanel = useCallback(
+    (input: {
+      readonly invocation: UiCommandInvocation;
+      readonly kind: CommandPanelKind;
+    }): void => {
+      pendingDisplayCommandInvocationsRef.current.set(
+        input.invocation.clientInvocationId,
+        {
+          sessionId: activeSessionId,
+        },
+      );
+      setActiveCommandPanel({
+        clientInvocationId: input.invocation.clientInvocationId,
+        kind: input.kind,
+        mode: "display",
+        openedAt: Date.now(),
+        sessionId: activeSessionId,
+        status: "loading",
+      });
+    },
+    [activeSessionId, setActiveCommandPanel],
+  );
+  const consumeCommandPanelEvent = useCallback(
+    (tuiEvent: TuiEvent): boolean => {
+      if (
+        tuiEvent.type === "command.started" &&
+        displayPanelKindForCommandId(tuiEvent.command.commandId) !== null
+      ) {
+        return pendingDisplayCommandInvocationsRef.current.has(
+          tuiEvent.command.clientInvocationId,
+        );
+      }
+
+      if (
+        tuiEvent.type !== "command.result.delivered" &&
+        tuiEvent.type !== "command.failed"
+      ) {
+        return false;
+      }
+
+      const pendingDisplayCommand =
+        pendingDisplayCommandInvocationsRef.current.get(
+          tuiEvent.clientInvocationId,
+        );
+      if (pendingDisplayCommand === undefined) {
+        return false;
+      }
+      pendingDisplayCommandInvocationsRef.current.delete(
+        tuiEvent.clientInvocationId,
+      );
+
+      if (pendingDisplayCommand.sessionId !== store.getState().activeSessionId) {
+        return true;
+      }
+
+      const panel = commandPanelRef.current;
+      if (panel === null) {
+        return true;
+      }
+      if (
+        panel.clientInvocationId !== tuiEvent.clientInvocationId ||
+        panel.sessionId !== pendingDisplayCommand.sessionId
+      ) {
+        return true;
+      }
+
+      if (tuiEvent.type === "command.result.delivered") {
+        setActiveCommandPanel({
+          ...panel,
+          output:
+            tuiEvent.output === undefined
+              ? undefined
+              : sanitizeCommandPanelOutput(tuiEvent.output),
+          status: "ready",
+        });
+        return true;
+      }
+
+      setActiveCommandPanel({
+        ...panel,
+        error: sanitizeCommandPanelError(tuiEvent.error.message),
+        status: "error",
+      });
+      return true;
+    },
+    [setActiveCommandPanel],
+  );
 
   useInput(
     (value, key) => {
+      if (commandPanelRef.current !== null) {
+        return;
+      }
+
       if (key.tab && key.shift && permissions.length === 0) {
         const command = nextPermissionModeCommand(
           permission,
@@ -140,7 +258,7 @@ export function OhbabyTerminalApp({
 
       exit();
     },
-    { isActive: interactions.length === 0 },
+    { isActive: interactions.length === 0 && commandPanel === null },
   );
 
   const loadCatalog = useCallback(async (): Promise<TuiCommandCatalog> => {
@@ -179,11 +297,16 @@ export function OhbabyTerminalApp({
     });
 
     const unsubscribe = subscribeEvents((tuiEvent: TuiEvent) => {
+      if (consumeCommandPanelEvent(tuiEvent)) {
+        return;
+      }
+
       eventDispatcher.dispatch(tuiEvent);
 
       if (isNewSessionSelectionEvent(tuiEvent)) {
         writeStdout(NEW_SESSION_CLEAR_SEQUENCE);
         setScreenGeneration((current) => current + 1);
+        setActiveCommandPanel(null);
       }
 
       if (
@@ -224,7 +347,22 @@ export function OhbabyTerminalApp({
       eventDispatcher.dispose();
       unsubscribe();
     };
-  }, [client, exit, loadCatalog, store, subscribeEvents]);
+  }, [
+    client,
+    consumeCommandPanelEvent,
+    exit,
+    loadCatalog,
+    setActiveCommandPanel,
+    store,
+    subscribeEvents,
+  ]);
+
+  useEffect(() => {
+    const panel = commandPanelRef.current;
+    if (panel !== null && panel.sessionId !== activeSessionId) {
+      setActiveCommandPanel(null);
+    }
+  }, [activeSessionId, setActiveCommandPanel]);
 
   useEffect(() => {
     const sessionId = activeSessionId;
@@ -293,12 +431,19 @@ export function OhbabyTerminalApp({
           interactions={interactions}
           permissions={permissions}
         />
+        <CommandPanelManager
+          catalog={catalog}
+          contextWindowUsage={activeContextWindowUsage}
+          onClose={closeCommandPanel}
+          panel={hasBackendDialog ? null : commandPanel}
+        />
         <Prompt
           activeSessionId={activeSessionId}
           catalog={catalog}
           client={client}
           disabled={hasDialog}
           loadCatalog={loadCatalog}
+          onCommandPanelOpen={openCommandPanel}
           permission={permission}
           contextWindowUsage={contextWindowUsageLabel}
           runtimeStatusLabel={runtimeStatusLabel}
@@ -394,7 +539,139 @@ function isNewSessionSelectionEvent(tuiEvent: TuiEvent): boolean {
 }
 
 function isStringRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sanitizeCommandPanelOutput(
+  output: UiCommandOutput,
+): UiCommandOutput {
+  if (output.kind !== "data") {
+    return output;
+  }
+
+  switch (output.subject) {
+    case "models.current":
+      return {
+        ...output,
+        data: {
+          current: sanitizePublicModelRecord(
+            getRecordValue(output.data, "current"),
+          ),
+          models: sanitizePublicModelList(output.data.models),
+          switching: sanitizeSwitchingRecord(
+            getRecordValue(output.data, "switching"),
+          ),
+        },
+      };
+    case "status":
+      return {
+        ...output,
+        data: sanitizeStatusPanelData(output.data),
+      };
+    default:
+      return output;
+  }
+}
+
+function sanitizeCommandPanelError(message: string): string {
+  return message
+    .replace(/https?:\/\/[^\s)]*/giu, "[redacted-url]")
+    .replace(
+      /\bBearer\s+[A-Za-z0-9._~+/=-]+/giu,
+      "Bearer [redacted]",
+    )
+    .replace(
+      /((?:api[_-]?key|access[_-]?token|auth[_-]?token|token)=)[^&\s)]+/giu,
+      "$1[redacted]",
+    )
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/gu, "sk-[redacted]")
+    .replace(
+      /\b[A-Z0-9_]*(?:API_KEY|ACCESS_TOKEN|AUTH_TOKEN|SECRET|PASSWORD)[A-Z0-9_]*\b/gu,
+      "[redacted-env]",
+    );
+}
+
+function sanitizeStatusPanelData(
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key of [
+    "context",
+    "contextWindow",
+    "mcps",
+    "permission",
+    "projectRoot",
+    "sessionId",
+    "skillsCount",
+    "status",
+    "tools",
+  ]) {
+    const value = data[key];
+    if (value !== undefined) {
+      result[key] = value;
+    }
+  }
+  result.model = sanitizePublicModelRecord(getRecordValue(data, "model"));
+  result.models = sanitizePublicModelList(data.models);
+  return result;
+}
+
+function sanitizePublicModelList(
+  value: unknown,
+): readonly Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value
+        .map((item) =>
+          isStringRecord(item) ? sanitizePublicModelRecord(item) : undefined,
+        )
+        .filter((item): item is Record<string, unknown> => item !== undefined)
+    : [];
+}
+
+function sanitizePublicModelRecord(
+  record: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!record) {
+    return undefined;
+  }
+
+  const result: Record<string, unknown> = {};
+  for (const key of ["id", "label", "provider", "model", "interfaceProvider"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim() !== "") {
+      result[key] = value;
+    }
+  }
+  if (typeof record.active === "boolean") {
+    result.active = record.active;
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function sanitizeSwitchingRecord(
+  record: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!record) {
+    return undefined;
+  }
+
+  const result: Record<string, unknown> = {};
+  if (typeof record.available === "boolean") {
+    result.available = record.available;
+  }
+  if (typeof record.mode === "string" && record.mode.trim() !== "") {
+    result.mode = record.mode;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function getRecordValue(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | undefined {
+  const value = record[key];
+  return isStringRecord(value) ? value : undefined;
 }
 
 function resolveEffectiveRuntime(

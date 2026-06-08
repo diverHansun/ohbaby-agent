@@ -223,12 +223,18 @@ describe("TUI main chain with real in-process backend", () => {
     const frame = await waitForFrame(
       app,
       (nextFrame) =>
-        nextFrame.includes("│ Runtime  idle") &&
+        nextFrame.includes("Status") &&
+        nextFrame.includes("esc") &&
+        nextFrame.includes("Runtime") &&
+        nextFrame.includes("idle") &&
         !nextFrame.includes("Unknown command"),
     );
 
     expect(frame).toContain("plan · default");
     expect(frame).not.toContain("status: idle");
+
+    app.stdin.write("\u001B");
+    await waitForFrame(app, promptIsReady);
     app.unmount();
   });
 

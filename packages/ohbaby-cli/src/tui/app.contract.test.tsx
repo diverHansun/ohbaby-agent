@@ -1,6 +1,7 @@
 ﻿import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
+  UiCommandInvocation,
   UiContextWindowUsage,
   UiEventHandler,
   UiSnapshot,
@@ -85,6 +86,37 @@ const catalog: TuiCommandCatalog = {
     }),
   ],
   version: "v1",
+};
+
+const displayCommandCatalog: TuiCommandCatalog = {
+  commands: [
+    command({
+      description: "Show status",
+      id: "status",
+      path: ["status"],
+    }),
+    command({
+      description: "List available commands",
+      id: "help",
+      path: ["help"],
+    }),
+    command({
+      description: "Show current model",
+      id: "models",
+      path: ["models"],
+    }),
+    command({
+      description: "List MCP server status",
+      id: "mcps",
+      path: ["mcps"],
+    }),
+    command({
+      description: "Start a new session",
+      id: "new",
+      path: ["new"],
+    }),
+  ],
+  version: "display",
 };
 
 afterEach(() => {
@@ -1220,6 +1252,497 @@ describe("OhbabyTerminalApp", () => {
     app.unmount();
   });
 
+  it("routes /status result into an overlay card that closes with Escape", async () => {
+    const client = createFakeClient(snapshot(), displayCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("/status");
+    app.stdin.write("\r");
+    await flush();
+
+    const invocation = firstExecutedCommand(client);
+    client.emit({
+      clientInvocationId: invocation.clientInvocationId,
+      commandRunId: "command_status",
+      output: {
+        data: {
+          contextWindow: contextWindowUsage(),
+          mcps: {
+            connected: 2,
+            disabled: 0,
+            disconnected: 0,
+            failed: 0,
+            total: 2,
+          },
+          model: {
+            id: "glm-5.1",
+            label: "GLM 5.1",
+            provider: "zhipu",
+          },
+          permission: {
+            level: "default",
+            mode: "auto",
+            sessionRules: [],
+          },
+          projectRoot: "D:/Projects/Code-cli/ohbaby-agent",
+          sessionId: "session_1",
+          status: "idle",
+          tools: { builtin: 16, mcp: 45, module: 0, skill: 2 },
+        },
+        kind: "data",
+        subject: "status",
+      },
+      timestamp: 1,
+      type: "command.result.delivered",
+    });
+
+    const frame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("Status") &&
+        nextFrame.includes("esc") &&
+        nextFrame.includes("Runtime") &&
+        nextFrame.includes("idle"),
+    );
+    expect(frame).toContain("38.4K / 1M (4%)");
+
+    app.stdin.write("\u001B");
+    await waitForFrame(
+      app,
+      (nextFrame) =>
+        !nextFrame.includes("Runtime") && !nextFrame.includes("Project"),
+    );
+  });
+
+  it("swallows a late display command result after its overlay has been closed", async () => {
+    const client = createFakeClient(snapshot(), displayCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("/status");
+    app.stdin.write("\r");
+    await waitForCommandCount(client, 1);
+
+    const invocation = firstExecutedCommand(client);
+    await waitForFrame(app, (nextFrame) => nextFrame.includes("Loading..."));
+    app.stdin.write("\u001B");
+    await waitForFrame(app, (nextFrame) => !nextFrame.includes("Loading..."));
+
+    client.emit({
+      clientInvocationId: invocation.clientInvocationId,
+      commandRunId: "command_status_late",
+      output: {
+        data: {
+          projectRoot: "D:/Projects/Code-cli/ohbaby-agent",
+          sessionId: "session_1",
+          status: "idle",
+        },
+        kind: "data",
+        subject: "status",
+      },
+      timestamp: 2,
+      type: "command.result.delivered",
+    });
+    await flush();
+
+    const frame = app.lastFrame() ?? "";
+    expect(frame).not.toContain("Runtime");
+    expect(frame).not.toContain("command_status_late");
+    expect(frame).not.toContain("Project");
+  });
+
+  it("routes display command failures into an overlay without leaking connection secrets", async () => {
+    const client = createFakeClient(snapshot(), displayCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("/models");
+    app.stdin.write("\r");
+    await waitForCommandCount(client, 1);
+
+    const invocation = firstExecutedCommand(client);
+    client.emit({
+      clientInvocationId: invocation.clientInvocationId,
+      commandRunId: "command_models_failed",
+      error: {
+        code: "MODEL_CONFIG_FAILED",
+        message:
+          "Failed https://proxy.example/v1?api_key=do-not-print with Bearer secret-token and OPENAI_API_KEY sk-ai-v1-secret",
+        recoverable: true,
+      },
+      timestamp: 3,
+      type: "command.failed",
+    });
+
+    const frame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("Models") && nextFrame.includes("Failed"),
+    );
+    expect(frame).not.toContain("proxy.example");
+    expect(frame).not.toContain("do-not-print");
+    expect(frame).not.toContain("secret-token");
+    expect(frame).not.toContain("OPENAI_API_KEY");
+    expect(frame).not.toContain("sk-ai-v1-secret");
+    expect(frame).not.toContain("command_models_failed");
+  });
+
+  it("swallows a late display command failure after its overlay has been closed", async () => {
+    const client = createFakeClient(snapshot(), displayCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("/status");
+    app.stdin.write("\r");
+    await waitForCommandCount(client, 1);
+
+    const invocation = firstExecutedCommand(client);
+    await waitForFrame(app, (nextFrame) => nextFrame.includes("Loading..."));
+    app.stdin.write("\u001B");
+    await waitForFrame(app, (nextFrame) => !nextFrame.includes("Loading..."));
+
+    client.emit({
+      clientInvocationId: invocation.clientInvocationId,
+      commandRunId: "command_status_late_failed",
+      error: {
+        code: "STATUS_FAILED",
+        message: "late display failure should not render",
+        recoverable: true,
+      },
+      timestamp: 4,
+      type: "command.failed",
+    });
+    await flush();
+
+    const frame = app.lastFrame() ?? "";
+    expect(frame).not.toContain("late display failure");
+    expect(frame).not.toContain("STATUS_FAILED");
+  });
+
+  it("closes a display command overlay when the active session changes", async () => {
+    const client = createFakeClient(snapshot(), displayCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("/status");
+    app.stdin.write("\r");
+    await waitForFrame(app, (nextFrame) => nextFrame.includes("Loading..."));
+
+    client.emit({
+      snapshot: {
+        activeSessionId: "session_2",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-14T00:00:00.000Z",
+            id: "session_2",
+            messages: [],
+            title: "Second",
+            updatedAt: "2026-05-14T00:00:01.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      timestamp: 2,
+      type: "snapshot.replaced",
+    });
+
+    await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("session_2") &&
+        !nextFrame.includes("Loading...") &&
+        !nextFrame.includes("Status"),
+    );
+  });
+
+  it("swallows a same-tick stale display result after active session replacement", async () => {
+    const client = createFakeClient(snapshot(), displayCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("/status");
+    app.stdin.write("\r");
+    await waitForCommandCount(client, 1);
+    const invocation = firstExecutedCommand(client);
+
+    client.emit({
+      snapshot: {
+        activeSessionId: "session_2",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-14T00:00:00.000Z",
+            id: "session_2",
+            messages: [],
+            title: "Second",
+            updatedAt: "2026-05-14T00:00:01.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      timestamp: 5,
+      type: "snapshot.replaced",
+    });
+    client.emit({
+      clientInvocationId: invocation.clientInvocationId,
+      commandRunId: "command_status_stale",
+      output: {
+        data: {
+          projectRoot: "D:/Stale",
+          sessionId: "session_1",
+          status: "idle",
+        },
+        kind: "data",
+        subject: "status",
+      },
+      timestamp: 6,
+      type: "command.result.delivered",
+    });
+
+    const frame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("session_2") &&
+        !nextFrame.includes("D:/Stale") &&
+        !nextFrame.includes("Status"),
+    );
+    expect(frame).not.toContain("Runtime");
+  });
+
+  it("keeps app-level shortcuts inactive while a display overlay is open", async () => {
+    const client = createFakeClient(
+      {
+        ...snapshot(),
+        permission: {
+          level: "default",
+          mode: "auto",
+          sessionRules: [],
+        },
+      },
+      displayCommandCatalog,
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("/status");
+    app.stdin.write("\r");
+    await waitForFrame(app, (nextFrame) => nextFrame.includes("Loading..."));
+    const callsAfterStatus = client.executeCommand.mock.calls.length;
+
+    app.stdin.write("\u001B[Z");
+    await flush();
+
+    expect(client.executeCommand).toHaveBeenCalledTimes(callsAfterStatus);
+    expect(app.lastFrame()).toContain("Loading...");
+  });
+
+  it("routes /help into an overlay card instead of a persistent command notice", async () => {
+    const client = createFakeClient(snapshot(), displayCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("/help");
+    app.stdin.write("\r");
+    await flush();
+
+    const helpInvocation = firstExecutedCommand(client);
+    client.emit({
+      clientInvocationId: helpInvocation.clientInvocationId,
+      commandRunId: "command_help",
+      output: {
+        data: {
+          categories: [
+            {
+              commands: displayCommandCatalog.commands,
+              title: "System",
+            },
+          ],
+        },
+        kind: "data",
+        subject: "help",
+      },
+      timestamp: 1,
+      type: "command.result.delivered",
+    });
+
+    const helpFrame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("Help") &&
+        nextFrame.includes("esc") &&
+        nextFrame.includes("/models"),
+    );
+    expect(helpFrame).toContain("/mcps");
+
+    app.stdin.write("\u001B");
+    await waitForFrame(app, (nextFrame) => !nextFrame.includes("/models"));
+  });
+
+  it("routes /mcps into an overlay card instead of a persistent command notice", async () => {
+    const client = createFakeClient(snapshot(), displayCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("/mcps");
+    app.stdin.write("\r");
+    await waitForCommandCount(client, 1);
+
+    const mcpsInvocation = firstExecutedCommand(client);
+    client.emit({
+      clientInvocationId: mcpsInvocation.clientInvocationId,
+      commandRunId: "command_mcps",
+      output: {
+        data: {
+          servers: [
+            { name: "firecrawl", status: "connected" },
+            { name: "playwright", status: "connected" },
+          ],
+        },
+        kind: "data",
+        subject: "mcps",
+      },
+      timestamp: 2,
+      type: "command.result.delivered",
+    });
+
+    const mcpsFrame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("MCP") &&
+        nextFrame.includes("firecrawl") &&
+        nextFrame.includes("connected"),
+    );
+    expect(mcpsFrame).toContain("esc");
+
+    app.stdin.write("\u001B");
+    await waitForFrame(app, (nextFrame) => !nextFrame.includes("firecrawl"));
+  });
+
+  it("routes /models into a read-only selector-ready panel without leaking connection secrets", async () => {
+    const usage = contextWindowUsage("session_1", 51_600);
+    const client = createFakeClient(
+      {
+        ...snapshot(),
+        contextWindowUsages: [usage],
+      },
+      displayCommandCatalog,
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("/models");
+    app.stdin.write("\r");
+    await flush();
+
+    const invocation = firstExecutedCommand(client);
+    client.emit({
+      clientInvocationId: invocation.clientInvocationId,
+      commandRunId: "command_models",
+      output: {
+        data: {
+          current: {
+            active: true,
+            apiKeyEnv: "ZENMUX_API_KEY",
+            baseUrl: "https://proxy.example/v1?api_key=do-not-print",
+            id: "glm-5.1",
+            interfaceProvider: "openai-compatible",
+            label: "GLM 5.1",
+            model: "glm-5.1",
+            provider: "zenmux",
+          },
+          models: [
+            {
+              active: true,
+              id: "glm-5.1",
+              interfaceProvider: "openai-compatible",
+              label: "GLM 5.1",
+              model: "glm-5.1",
+              provider: "zenmux",
+            },
+          ],
+          switching: {
+            available: true,
+            mode: "single-active-config",
+          },
+        },
+        kind: "data",
+        subject: "models.current",
+      },
+      timestamp: 1,
+      type: "command.result.delivered",
+    });
+
+    const frame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("Models") &&
+        nextFrame.includes("GLM 5.1") &&
+        nextFrame.includes("zenmux") &&
+        nextFrame.includes("openai-compatible"),
+    );
+    expect(frame).toContain("51.6K / 1M (5%)");
+    expect(frame).toContain("single-active-config");
+    expect(frame).not.toContain("do-not-print");
+    expect(frame).not.toContain("ZENMUX_API_KEY");
+
+    app.stdin.write("\u001B");
+    await waitForFrame(app, (nextFrame) => !nextFrame.includes("GLM 5.1"));
+  });
+
   it("shows slash candidates and executes a selected catalog command", async () => {
     const client = createFakeClient(snapshot(), catalog);
     const app = render(
@@ -1703,6 +2226,50 @@ function command(
     surfaces: ["tui"],
     ...input,
   };
+}
+
+function firstExecutedCommand(
+  client: Pick<
+    ReturnType<typeof createFakeClient>,
+    "executeCommand"
+  >,
+): UiCommandInvocation {
+  const invocation = client.executeCommand.mock.calls[0]?.[0] as unknown;
+  if (!isUiCommandInvocation(invocation)) {
+    throw new Error("Expected executeCommand to be called");
+  }
+  return invocation;
+}
+
+async function waitForCommandCount(
+  client: Pick<
+    ReturnType<typeof createFakeClient>,
+    "executeCommand"
+  >,
+  count: number,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 1_000) {
+    await flush();
+    if (client.executeCommand.mock.calls.length >= count) {
+      return;
+    }
+  }
+  throw new Error(
+    `Timed out waiting for ${String(count)} executeCommand calls`,
+  );
+}
+
+function isUiCommandInvocation(value: unknown): value is UiCommandInvocation {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.clientInvocationId === "string" &&
+    typeof record.commandId === "string" &&
+    Array.isArray(record.path)
+  );
 }
 
 async function flush(): Promise<void> {

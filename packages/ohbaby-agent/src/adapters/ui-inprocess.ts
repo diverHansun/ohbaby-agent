@@ -620,6 +620,7 @@ export function createInProcessUiBackendClient(
       apiKeyEnv: client.config.apiKeyEnv,
       baseUrl: client.config.baseUrl,
       id: `${client.config.provider}:${client.config.model}`,
+      interfaceProvider: client.config.interfaceProvider,
       label: client.config.model,
       model: client.config.model,
       provider: client.config.provider,

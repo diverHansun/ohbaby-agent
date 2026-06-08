@@ -1,5 +1,5 @@
 import { Box, Text, useInput } from "ink";
-import type { CoreAPI, UiPermissionState } from "ohbaby-sdk";
+import type { CoreAPI, UiCommandInvocation, UiPermissionState } from "ohbaby-sdk";
 import { useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
@@ -22,6 +22,10 @@ import {
   type EditorAction,
   type EditorState,
 } from "./editor-reducer.js";
+import {
+  displayPanelKindForCommandId,
+  type CommandPanelKind,
+} from "../dialog/command-panel-state.js";
 
 export interface PromptProps {
   readonly activeSessionId: string | null;
@@ -30,6 +34,10 @@ export interface PromptProps {
   readonly contextWindowUsage?: string;
   readonly disabled: boolean;
   readonly loadCatalog?: () => Promise<TuiCommandCatalog>;
+  readonly onCommandPanelOpen?: (input: {
+    readonly invocation: UiCommandInvocation;
+    readonly kind: CommandPanelKind;
+  }) => void;
   readonly permission?: UiPermissionState;
   readonly runtimeStatusLabel?: string;
 }
@@ -41,6 +49,7 @@ export function Prompt({
   contextWindowUsage = "",
   disabled,
   loadCatalog,
+  onCommandPanelOpen,
   permission,
   runtimeStatusLabel,
 }: PromptProps): ReactElement {
@@ -103,6 +112,7 @@ export function Prompt({
           replaceInput,
           setError,
           selectedIndexRef.current,
+          onCommandPanelOpen,
         );
         return;
       }
@@ -335,6 +345,12 @@ async function submitInput(
   replaceInput: (nextInput: string) => void,
   setError: (message: string | null) => void,
   selectedIndex: number,
+  onCommandPanelOpen:
+    | ((input: {
+        readonly invocation: UiCommandInvocation;
+        readonly kind: CommandPanelKind;
+      }) => void)
+    | undefined,
 ): Promise<void> {
   const text = input.trim();
 
@@ -398,11 +414,12 @@ async function submitInput(
     if (selectedResult.kind === "resolved") {
       setError(null);
       replaceInput("");
-      void client
-        .executeCommand(selectedResult.invocation)
-        .catch((caught: unknown) => {
-          setError(formatError(caught));
-        });
+      executeCommandInvocation(
+        selectedResult.invocation,
+        client,
+        setError,
+        onCommandPanelOpen,
+      );
       return;
     }
   }
@@ -414,7 +431,31 @@ async function submitInput(
 
   setError(null);
   replaceInput("");
-  void client.executeCommand(result.invocation).catch((caught: unknown) => {
+  executeCommandInvocation(
+    result.invocation,
+    client,
+    setError,
+    onCommandPanelOpen,
+  );
+}
+
+function executeCommandInvocation(
+  invocation: UiCommandInvocation,
+  client: CoreAPI,
+  setError: (message: string | null) => void,
+  onCommandPanelOpen:
+    | ((input: {
+        readonly invocation: UiCommandInvocation;
+        readonly kind: CommandPanelKind;
+      }) => void)
+    | undefined,
+): void {
+  const displayKind = displayPanelKindForCommandId(invocation.commandId);
+  if (displayKind !== null) {
+    onCommandPanelOpen?.({ invocation, kind: displayKind });
+  }
+
+  void client.executeCommand(invocation).catch((caught: unknown) => {
     setError(formatError(caught));
   });
 }

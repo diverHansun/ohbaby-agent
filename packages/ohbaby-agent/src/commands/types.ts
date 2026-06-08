@@ -18,6 +18,7 @@ import type {
   InteractionRequestInput,
 } from "../runtime/interaction-broker/index.js";
 import type { ContextUsage } from "../core/context/index.js";
+import type { InterfaceProviderKind } from "../config/llm/types.js";
 
 export interface CommandToolSummary {
   readonly name: string;
@@ -51,6 +52,7 @@ export interface CommandModelSummary {
   readonly label: string;
   readonly provider: string;
   readonly model?: string;
+  readonly interfaceProvider?: InterfaceProviderKind;
   readonly baseUrl?: string;
   readonly apiKeyEnv?: string;
   readonly active?: boolean;
