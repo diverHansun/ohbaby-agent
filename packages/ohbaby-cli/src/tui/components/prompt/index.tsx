@@ -24,6 +24,7 @@ import {
 } from "./editor-reducer.js";
 import {
   displayPanelKindForCommandId,
+  interactivePanelKindForCommandId,
   type CommandPanelKind,
 } from "../dialog/command-panel-state.js";
 
@@ -450,6 +451,14 @@ function executeCommandInvocation(
       }) => void)
     | undefined,
 ): void {
+  const interactiveKind = interactivePanelKindForCommandId(
+    invocation.commandId,
+  );
+  if (interactiveKind !== null) {
+    onCommandPanelOpen?.({ invocation, kind: interactiveKind });
+    return;
+  }
+
   const displayKind = displayPanelKindForCommandId(invocation.commandId);
   if (displayKind !== null) {
     onCommandPanelOpen?.({ invocation, kind: displayKind });

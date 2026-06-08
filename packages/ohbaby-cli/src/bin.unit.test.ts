@@ -141,6 +141,7 @@ describe("runOhbabyCli", () => {
 function createCore(): {
   readonly abortRun: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
+  readonly connectModel: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
   readonly getContextWindowUsage: ReturnType<typeof vi.fn>;
   readonly getSnapshot: ReturnType<typeof vi.fn>;
@@ -152,6 +153,18 @@ function createCore(): {
   return {
     abortRun: vi.fn(() => Promise.resolve()),
     compactSession: vi.fn(() => Promise.resolve()),
+    connectModel: vi.fn(() =>
+      Promise.resolve({
+        apiKeyEnv: "ZENMUX_API_KEY",
+        baseUrl: "https://api.example.com",
+        envPath: ".env",
+        interfaceProvider: "openai-compatible",
+        model: "example-model",
+        modelJsonPath: "model.json",
+        provider: "example",
+        saved: true,
+      } as const),
+    ),
     executeCommand: vi.fn(() => Promise.resolve()),
     getContextWindowUsage: vi.fn(() => Promise.resolve(null)),
     getSnapshot: vi.fn(() => Promise.resolve()),

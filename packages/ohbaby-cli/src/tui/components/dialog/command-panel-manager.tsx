@@ -1,10 +1,19 @@
 import { Box, Text, useInput } from "ink";
-import type { UiCommandCatalog, UiContextWindowUsage } from "ohbaby-sdk";
+import type {
+  CoreAPI,
+  UiCommandCatalog,
+  UiContextWindowUsage,
+  UiRunStatus,
+} from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { useEffect, useRef, useState } from "react";
 import { formatContextWindowUsage } from "../../render/usage.js";
 import { useTheme } from "../../theme/index.js";
-import type { CommandPanelState } from "./command-panel-state.js";
+import type {
+  CommandPanelState,
+  DisplayCommandPanelState,
+} from "./command-panel-state.js";
+import { ConnectPanel } from "./connect-panel.js";
 import { OverlayCard } from "./overlay-card.js";
 
 const SKILLS_PANEL_VISIBLE_LINES = 10;
@@ -22,16 +31,20 @@ interface SkillsNavigationSignal {
 
 export interface CommandPanelManagerProps {
   readonly catalog: UiCommandCatalog | null;
+  readonly client: CoreAPI;
   readonly contextWindowUsage: UiContextWindowUsage | null;
   readonly onClose: () => void;
   readonly panel: CommandPanelState | null;
+  readonly runtime: UiRunStatus;
 }
 
 export function CommandPanelManager({
   catalog,
+  client,
   contextWindowUsage,
   onClose,
   panel,
+  runtime,
 }: CommandPanelManagerProps): ReactElement | null {
   const theme = useTheme();
   const [skillsNavigationSignal, setSkillsNavigationSignal] =
@@ -76,11 +89,19 @@ export function CommandPanelManager({
         }));
       }
     },
-    { isActive: panel !== null },
+    { isActive: panel?.mode === "display" },
   );
 
   if (panel === null) {
     return null;
+  }
+
+  if (panel.mode === "interactive") {
+    return (
+      <OverlayCard title={panelTitle(panel.kind)}>
+        <ConnectPanel client={client} onClose={onClose} runtime={runtime} />
+      </OverlayCard>
+    );
   }
 
   return (
@@ -109,7 +130,7 @@ function CommandPanelBody({
 }: {
   readonly catalog: UiCommandCatalog | null;
   readonly contextWindowUsage: UiContextWindowUsage | null;
-  readonly panel: CommandPanelState;
+  readonly panel: DisplayCommandPanelState;
   readonly skillsNavigationSignal: SkillsNavigationSignal | null;
 }): ReactElement {
   const data = panel.output?.kind === "data" ? panel.output.data : {};
@@ -402,6 +423,8 @@ function panelTitle(kind: CommandPanelState["kind"]): string {
       return "Models";
     case "skills":
       return "Skills";
+    case "connect":
+      return "Connect";
   }
 }
 

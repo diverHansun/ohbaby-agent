@@ -1,16 +1,22 @@
 import type { UiCommandOutput } from "ohbaby-sdk";
 
-export type CommandPanelKind =
+export type DisplayCommandPanelKind =
   | "status"
   | "help"
   | "mcps"
   | "models"
   | "skills";
 
+export type InteractiveCommandPanelKind = "connect";
+
+export type CommandPanelKind =
+  | DisplayCommandPanelKind
+  | InteractiveCommandPanelKind;
+
 export type CommandPanelStatus = "loading" | "ready" | "error";
 
-export interface CommandPanelState {
-  readonly kind: CommandPanelKind;
+export interface DisplayCommandPanelState {
+  readonly kind: DisplayCommandPanelKind;
   readonly mode: "display";
   readonly clientInvocationId: string;
   readonly openedAt: number;
@@ -20,7 +26,18 @@ export interface CommandPanelState {
   readonly error?: string;
 }
 
-const DISPLAY_COMMAND_IDS = new Set<CommandPanelKind>([
+export interface InteractiveCommandPanelState {
+  readonly kind: InteractiveCommandPanelKind;
+  readonly mode: "interactive";
+  readonly openedAt: number;
+  readonly sessionId: string | null;
+}
+
+export type CommandPanelState =
+  | DisplayCommandPanelState
+  | InteractiveCommandPanelState;
+
+const DISPLAY_COMMAND_IDS = new Set<DisplayCommandPanelKind>([
   "help",
   "mcps",
   "models",
@@ -28,10 +45,22 @@ const DISPLAY_COMMAND_IDS = new Set<CommandPanelKind>([
   "status",
 ]);
 
+const INTERACTIVE_COMMAND_IDS = new Set<InteractiveCommandPanelKind>([
+  "connect",
+]);
+
 export function displayPanelKindForCommandId(
   commandId: string,
-): CommandPanelKind | null {
-  return DISPLAY_COMMAND_IDS.has(commandId as CommandPanelKind)
-    ? (commandId as CommandPanelKind)
+): DisplayCommandPanelKind | null {
+  return DISPLAY_COMMAND_IDS.has(commandId as DisplayCommandPanelKind)
+    ? (commandId as DisplayCommandPanelKind)
+    : null;
+}
+
+export function interactivePanelKindForCommandId(
+  commandId: string,
+): InteractiveCommandPanelKind | null {
+  return INTERACTIVE_COMMAND_IDS.has(commandId as InteractiveCommandPanelKind)
+    ? (commandId as InteractiveCommandPanelKind)
     : null;
 }

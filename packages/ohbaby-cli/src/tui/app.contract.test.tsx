@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   UiCommandInvocation,
+  UiConnectModelResult,
   UiContextWindowUsage,
   UiEventHandler,
   UiSnapshot,
@@ -122,6 +123,17 @@ const displayCommandCatalog: TuiCommandCatalog = {
     }),
   ],
   version: "display",
+};
+
+const connectCommandCatalog: TuiCommandCatalog = {
+  commands: [
+    command({
+      description: "Connect a model provider",
+      id: "connect",
+      path: ["connect"],
+    }),
+  ],
+  version: "connect",
 };
 
 afterEach(() => {
@@ -1580,6 +1592,151 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("Loading...");
   });
 
+  it("opens /connect as a local form without executing a slash command", async () => {
+    const client = createFakeClient(snapshot(), connectCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("/connect");
+    app.stdin.write("\r");
+
+    const frame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("Connect") && nextFrame.includes("Provider"),
+    );
+
+    expect(frame).toContain("Base URL");
+    expect(client.executeCommand).not.toHaveBeenCalled();
+    expect(client.connectModel).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
+  it("auto-saves /connect after field commits and keeps the API key masked", async () => {
+    const client = createFakeClient(snapshot(), connectCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await openConnectForm(app);
+    await submitConnectField(app, "zenmux");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "https://zenmux.example/v1");
+    await sendConnectKey(app, "\u001B[B");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "ZENMUX_API_KEY");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "sk-connect-secret");
+    const secretFrame = app.lastFrame() ?? "";
+    expect(secretFrame).not.toContain("sk-connect-secret");
+    expect(secretFrame).toContain("********");
+    await sendConnectKey(app, "\u001B[6~");
+    await submitConnectField(app, "anthropic/claude-sonnet-4.6");
+
+    const frame = await waitForFrame(app, (nextFrame) =>
+      nextFrame.includes("saved"),
+    );
+
+    expect(client.connectModel).toHaveBeenCalledTimes(1);
+    expect(client.connectModel).toHaveBeenCalledWith({
+      apiKey: "sk-connect-secret",
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.example/v1",
+      interfaceProvider: "openai-compatible",
+      model: "anthropic/claude-sonnet-4.6",
+      provider: "zenmux",
+    });
+    expect(frame).not.toContain("sk-connect-secret");
+    app.unmount();
+  });
+
+  it("does not save /connect while runtime status is running", async () => {
+    const client = createFakeClient(
+      {
+        ...snapshot(),
+        status: { kind: "running", runId: "run_1", title: "Working" },
+      },
+      connectCommandCatalog,
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await openConnectForm(app);
+    await submitConnectField(app, "zenmux");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "https://zenmux.example/v1");
+    await sendConnectKey(app, "\u001B[B");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "ZENMUX_API_KEY");
+    await sendConnectKey(app, "\u001B[6~");
+    await submitConnectField(app, "anthropic/claude-sonnet-4.6");
+    await flush();
+
+    expect(client.connectModel).not.toHaveBeenCalled();
+    expect(app.lastFrame()).toContain("running");
+    app.unmount();
+  });
+
+  it("queues /connect auto-saves so the latest committed payload wins", async () => {
+    const firstSave = createDeferred<UiConnectModelResult>();
+    const secondSave = createDeferred<UiConnectModelResult>();
+    let saveCount = 0;
+    const client = createFakeClient(snapshot(), connectCommandCatalog);
+    client.connectModel.mockImplementation(() => {
+      saveCount += 1;
+      return saveCount === 1 ? firstSave.promise : secondSave.promise;
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await openConnectForm(app);
+    await submitConnectField(app, "zenmux");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "https://zenmux.example/v1");
+    await sendConnectKey(app, "\u001B[B");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "ZENMUX_API_KEY");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "sk-connect-secret");
+    await sendConnectKey(app, "\u001B[6~");
+    await submitConnectField(app, "anthropic/claude-sonnet-4.6");
+    await waitForConnectModelCount(client, 1);
+
+    await sendConnectKey(app, "\u001B[B");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "4096");
+    await settleConnectInput();
+    expect(client.connectModel).toHaveBeenCalledTimes(1);
+
+    firstSave.resolve(connectResult());
+    await waitForConnectModelCount(client, 2);
+    expect(client.connectModel.mock.calls[1]?.[0]).toMatchObject({
+      maxOutputTokens: 4096,
+      model: "anthropic/claude-sonnet-4.6",
+    });
+
+    secondSave.resolve(connectResult({ maxOutputTokens: 4096 }));
+    await waitForFrame(app, (nextFrame) => nextFrame.includes("saved"));
+    expect(client.connectModel).toHaveBeenCalledTimes(2);
+    app.unmount();
+  });
+
   it("routes /help into an overlay card instead of a persistent command notice", async () => {
     const client = createFakeClient(snapshot(), displayCommandCatalog);
     const app = render(
@@ -2244,6 +2401,7 @@ function createFakeClient(
   readonly emit: (event: TuiEvent) => void;
   readonly abortRun: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
+  readonly connectModel: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
   readonly getContextWindowUsage: ReturnType<typeof vi.fn>;
   readonly listCommands: ReturnType<typeof vi.fn>;
@@ -2276,6 +2434,18 @@ function createFakeClient(
           usageRatio: 0.01,
         },
       }),
+    ),
+    connectModel: vi.fn(() =>
+      Promise.resolve({
+        apiKeyEnv: "ZENMUX_API_KEY",
+        baseUrl: "https://api.example.com",
+        envPath: ".env",
+        interfaceProvider: "openai-compatible",
+        model: "example-model",
+        modelJsonPath: "model.json",
+        provider: "example",
+        saved: true,
+      } as const),
     ),
     emit(event): void {
       for (const handler of handlers) {
@@ -2311,6 +2481,79 @@ function command(
   };
 }
 
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+  return { promise, resolve, reject };
+}
+
+function connectResult(
+  overrides: Partial<UiConnectModelResult> = {},
+): UiConnectModelResult {
+  return {
+    apiKeyEnv: "ZENMUX_API_KEY",
+    baseUrl: "https://zenmux.example/v1",
+    envPath: ".env",
+    interfaceProvider: "openai-compatible",
+    model: "anthropic/claude-sonnet-4.6",
+    modelJsonPath: "model.json",
+    provider: "zenmux",
+    saved: true,
+    ...overrides,
+  };
+}
+
+async function openConnectForm(app: {
+  readonly lastFrame: () => string | undefined;
+  readonly stdin: { readonly write: (chunk: string) => void };
+}): Promise<void> {
+  await flush();
+  app.stdin.write("/connect");
+  app.stdin.write("\r");
+  await waitForFrame(
+    app,
+    (nextFrame) =>
+      nextFrame.includes("Connect") && nextFrame.includes("Provider"),
+  );
+  await settleConnectInput();
+}
+
+async function submitConnectField(
+  app: { readonly stdin: { readonly write: (chunk: string) => void } },
+  value: string,
+): Promise<void> {
+  app.stdin.write("\r");
+  await settleConnectInput();
+  app.stdin.write(value);
+  await settleConnectInput();
+  app.stdin.write("\r");
+  await settleConnectInput();
+}
+
+async function sendConnectKey(
+  app: { readonly stdin: { readonly write: (chunk: string) => void } },
+  value: string,
+): Promise<void> {
+  app.stdin.write(value);
+  await settleConnectInput();
+}
+
+async function settleConnectInput(): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, 50);
+  });
+}
+
 function firstExecutedCommand(
   client: Pick<
     ReturnType<typeof createFakeClient>,
@@ -2340,6 +2583,22 @@ async function waitForCommandCount(
   }
   throw new Error(
     `Timed out waiting for ${String(count)} executeCommand calls`,
+  );
+}
+
+async function waitForConnectModelCount(
+  client: Pick<ReturnType<typeof createFakeClient>, "connectModel">,
+  count: number,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 1_000) {
+    await flush();
+    if (client.connectModel.mock.calls.length >= count) {
+      return;
+    }
+  }
+  throw new Error(
+    `Timed out waiting for ${String(count)} connectModel calls`,
   );
 }
 

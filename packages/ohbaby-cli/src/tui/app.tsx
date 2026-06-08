@@ -110,6 +110,16 @@ export function OhbabyTerminalApp({
       readonly invocation: UiCommandInvocation;
       readonly kind: CommandPanelKind;
     }): void => {
+      if (input.kind === "connect") {
+        setActiveCommandPanel({
+          kind: "connect",
+          mode: "interactive",
+          openedAt: Date.now(),
+          sessionId: activeSessionId,
+        });
+        return;
+      }
+
       pendingDisplayCommandInvocationsRef.current.set(
         input.invocation.clientInvocationId,
         {
@@ -162,6 +172,9 @@ export function OhbabyTerminalApp({
 
       const panel = commandPanelRef.current;
       if (panel === null) {
+        return true;
+      }
+      if (panel.mode !== "display") {
         return true;
       }
       if (
@@ -433,9 +446,11 @@ export function OhbabyTerminalApp({
         />
         <CommandPanelManager
           catalog={catalog}
+          client={client}
           contextWindowUsage={activeContextWindowUsage}
           onClose={closeCommandPanel}
           panel={hasBackendDialog ? null : commandPanel}
+          runtime={runtime}
         />
         <Prompt
           activeSessionId={activeSessionId}
