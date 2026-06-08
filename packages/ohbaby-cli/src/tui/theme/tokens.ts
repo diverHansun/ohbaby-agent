@@ -97,7 +97,7 @@ export function createTheme(mode: ColorMode, colorLevel = 3): Theme {
     },
     spinner: {
       frames: BRAILLE_SPINNER_FRAMES,
-      palette: [color("goldBright", "yellow"), color("purple", "magenta")],
+      palette: [color("gold", "yellow")],
     },
     status: {
       accent: color("skyBlue", "cyan"),

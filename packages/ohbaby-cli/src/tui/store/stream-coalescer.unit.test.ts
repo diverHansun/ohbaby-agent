@@ -3,6 +3,25 @@ import { createCoalescedTuiEventDispatcher } from "./stream-coalescer.js";
 import type { TuiEvent } from "./snapshot.js";
 
 describe("createCoalescedTuiEventDispatcher", () => {
+  it("uses a conservative default flush cadence for streaming text", () => {
+    vi.useFakeTimers();
+    const batches: readonly TuiEvent[][] = [];
+    const dispatcher = createCoalescedTuiEventDispatcher((events) => {
+      (batches as TuiEvent[][]).push([...events]);
+    });
+
+    dispatcher.dispatch(delta("Hel", "Hel"));
+
+    vi.advanceTimersByTime(49);
+    expect(batches).toEqual([]);
+
+    vi.advanceTimersByTime(1);
+    expect(batches).toHaveLength(1);
+
+    dispatcher.dispose();
+    vi.useRealTimers();
+  });
+
   it("coalesces adjacent text deltas for the same message part", () => {
     vi.useFakeTimers();
     const batches: readonly TuiEvent[][] = [];

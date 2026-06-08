@@ -1,5 +1,10 @@
+import { render } from "ink-testing-library";
+import type { UiMessage } from "ohbaby-sdk";
 import { describe, expect, it } from "vitest";
-import { shouldUseStaticTranscript } from "./committed-transcript.js";
+import {
+  CommittedTranscript,
+  shouldUseStaticTranscript,
+} from "./committed-transcript.js";
 
 describe("shouldUseStaticTranscript", () => {
   it("uses static transcript for Windows TTYs to reduce prompt repaint flicker", () => {
@@ -69,4 +74,41 @@ describe("shouldUseStaticTranscript", () => {
       }),
     ).toBe(false);
   });
+
+  it("renders forced static transcript items into stdout frames", () => {
+    const previousOverride = process.env.OHBABY_TUI_STATIC_TRANSCRIPT;
+    process.env.OHBABY_TUI_STATIC_TRANSCRIPT = "1";
+
+    try {
+      const app = render(
+        <CommittedTranscript
+          messages={[
+            message("message_1", "first committed"),
+            message("message_2", "last committed"),
+          ]}
+        />,
+      );
+      const output = app.stdout.frames.join("");
+
+      expect(output).toContain("first committed");
+      expect(output).toContain("last committed");
+
+      app.unmount();
+    } finally {
+      if (previousOverride === undefined) {
+        delete process.env.OHBABY_TUI_STATIC_TRANSCRIPT;
+      } else {
+        process.env.OHBABY_TUI_STATIC_TRANSCRIPT = previousOverride;
+      }
+    }
+  });
 });
+
+function message(id: string, text: string): UiMessage {
+  return {
+    createdAt: "2026-06-07T00:00:00.000Z",
+    id,
+    parts: [{ text, type: "text" }],
+    role: "assistant",
+  };
+}

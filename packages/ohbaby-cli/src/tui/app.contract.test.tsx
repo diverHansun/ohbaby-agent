@@ -111,6 +111,11 @@ const displayCommandCatalog: TuiCommandCatalog = {
       path: ["mcps"],
     }),
     command({
+      description: "List available skills",
+      id: "skills",
+      path: ["skills"],
+    }),
+    command({
       description: "Start a new session",
       id: "new",
       path: ["new"],
@@ -1667,6 +1672,79 @@ describe("OhbabyTerminalApp", () => {
     await waitForFrame(app, (nextFrame) => !nextFrame.includes("firecrawl"));
   });
 
+  it("routes /skills into a scrollable overlay card instead of a persistent command notice", async () => {
+    const client = createFakeClient(snapshot(), displayCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("/skills");
+    app.stdin.write("\r");
+    await waitForCommandCount(client, 1);
+
+    const skills = Array.from({ length: 12 }, (_, index) => {
+      const ordinal = String(index + 1).padStart(2, "0");
+      return {
+        description: `Description ${ordinal}`,
+        name: `skill-${ordinal}`,
+        scope: index % 2 === 0 ? "user" : "project",
+        source: "project-native",
+      };
+    });
+    const skillsInvocation = firstExecutedCommand(client);
+    client.emit({
+      clientInvocationId: skillsInvocation.clientInvocationId,
+      commandRunId: "command_skills",
+      output: {
+        data: {
+          skills,
+        },
+        kind: "data",
+        subject: "skills",
+      },
+      timestamp: 3,
+      type: "command.result.delivered",
+    });
+
+    const firstFrame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("Skills") &&
+        nextFrame.includes("skill-01") &&
+        nextFrame.includes("showing 1-10 of 24"),
+    );
+    expect(firstFrame).toContain("Description 01");
+    expect(firstFrame).not.toContain("skill-06");
+    expect(firstFrame).not.toContain("skills:");
+
+    app.stdin.write("\u001B[6~");
+    const nextPageFrame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("skill-06") &&
+        nextFrame.includes("showing 11-20 of 24"),
+    );
+    expect(nextPageFrame).not.toContain("skill-01");
+
+    app.stdin.write("\u001B[5~");
+    await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("skill-01") &&
+        nextFrame.includes("showing 1-10 of 24"),
+    );
+
+    app.stdin.write("\u001B");
+    await waitForFrame(
+      app,
+      (nextFrame) => !nextFrame.includes("showing 1-10 of 24"),
+    );
+  });
+
   it("routes /models into a read-only selector-ready panel without leaking connection secrets", async () => {
     const usage = contextWindowUsage("session_1", 51_600);
     const client = createFakeClient(
@@ -1734,8 +1812,11 @@ describe("OhbabyTerminalApp", () => {
         nextFrame.includes("zenmux") &&
         nextFrame.includes("openai-compatible"),
     );
+    expect(frame).toContain("Models (current)");
+    expect(frame).toContain("Models (switch)");
     expect(frame).toContain("51.6K / 1M (5%)");
-    expect(frame).toContain("single-active-config");
+    expect(frame).not.toContain("Switching");
+    expect(frame).not.toContain("single-active-config");
     expect(frame).not.toContain("do-not-print");
     expect(frame).not.toContain("ZENMUX_API_KEY");
 

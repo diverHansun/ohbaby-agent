@@ -253,6 +253,30 @@ describe("MessageRow", () => {
       }
     }
   });
+
+  it("keeps running tool label colors stable outside the spinner frame", () => {
+    const theme = createTheme("dark", 3);
+    const message = assistantMessage([
+      {
+        call: {
+          ...toolCall("call_1"),
+          input: { command: "pnpm test" },
+          status: "running",
+        },
+        type: "tool-call",
+      },
+    ]);
+
+    const rendered = renderMessageParts(message, 80, theme);
+
+    expect(rendered[0]).toMatchObject({
+      kind: "spinner",
+      segments: [
+        { color: theme.tool.name, text: "Bash" },
+        { color: theme.tool.arg, text: " pnpm test" },
+      ],
+    });
+  });
 });
 
 function assistantMessage(parts: readonly UiMessagePart[]): UiMessage {

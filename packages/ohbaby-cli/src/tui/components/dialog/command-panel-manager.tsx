@@ -1,10 +1,18 @@
 import { Box, Text, useInput } from "ink";
 import type { UiCommandCatalog, UiContextWindowUsage } from "ohbaby-sdk";
 import type { ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatContextWindowUsage } from "../../render/usage.js";
 import { useTheme } from "../../theme/index.js";
 import type { CommandPanelState } from "./command-panel-state.js";
 import { OverlayCard } from "./overlay-card.js";
+
+const SKILLS_PANEL_VISIBLE_LINES = 10;
+
+interface SkillsScrollSignal {
+  readonly direction: "next" | "previous";
+  readonly sequence: number;
+}
 
 export interface CommandPanelManagerProps {
   readonly catalog: UiCommandCatalog | null;
@@ -20,11 +28,30 @@ export function CommandPanelManager({
   panel,
 }: CommandPanelManagerProps): ReactElement | null {
   const theme = useTheme();
+  const [skillsScrollSignal, setSkillsScrollSignal] =
+    useState<SkillsScrollSignal | null>(null);
 
   useInput(
     (_value, key) => {
       if (key.escape) {
+        setSkillsScrollSignal(null);
         onClose();
+        return;
+      }
+
+      if (panel?.kind === "skills" && key.pageDown) {
+        setSkillsScrollSignal((current) => ({
+          direction: "next",
+          sequence: (current?.sequence ?? 0) + 1,
+        }));
+        return;
+      }
+
+      if (panel?.kind === "skills" && key.pageUp) {
+        setSkillsScrollSignal((current) => ({
+          direction: "previous",
+          sequence: (current?.sequence ?? 0) + 1,
+        }));
       }
     },
     { isActive: panel !== null },
@@ -45,6 +72,7 @@ export function CommandPanelManager({
           catalog={catalog}
           contextWindowUsage={contextWindowUsage}
           panel={panel}
+          skillsScrollSignal={skillsScrollSignal}
         />
       )}
     </OverlayCard>
@@ -55,10 +83,12 @@ function CommandPanelBody({
   catalog,
   contextWindowUsage,
   panel,
+  skillsScrollSignal,
 }: {
   readonly catalog: UiCommandCatalog | null;
   readonly contextWindowUsage: UiContextWindowUsage | null;
   readonly panel: CommandPanelState;
+  readonly skillsScrollSignal: SkillsScrollSignal | null;
 }): ReactElement {
   const data = panel.output?.kind === "data" ? panel.output.data : {};
 
@@ -71,6 +101,8 @@ function CommandPanelBody({
       return <McpsPanel data={data} />;
     case "models":
       return <ModelsPanel contextWindowUsage={contextWindowUsage} data={data} />;
+    case "skills":
+      return <SkillsPanel data={data} scrollSignal={skillsScrollSignal} />;
   }
 }
 
@@ -183,6 +215,78 @@ function McpsPanel({
   );
 }
 
+function SkillsPanel({
+  data,
+  scrollSignal,
+}: {
+  readonly data: Record<string, unknown>;
+  readonly scrollSignal: SkillsScrollSignal | null;
+}): ReactElement {
+  const theme = useTheme();
+  const skills = Array.isArray(data.skills)
+    ? data.skills.filter(isRecord)
+    : [];
+  const lines = useMemo(() => formatSkillLines(skills), [skills]);
+  const maxStart = Math.max(0, lines.length - SKILLS_PANEL_VISIBLE_LINES);
+  const maxStartRef = useRef(maxStart);
+  const [start, setStart] = useState(0);
+
+  useEffect(() => {
+    maxStartRef.current = maxStart;
+    setStart((current) => Math.min(current, maxStart));
+  }, [maxStart]);
+
+  useEffect(() => {
+    if (scrollSignal === null) {
+      return;
+    }
+
+    const delta =
+      scrollSignal.direction === "next"
+        ? SKILLS_PANEL_VISIBLE_LINES
+        : -SKILLS_PANEL_VISIBLE_LINES;
+    setStart((current) =>
+      Math.max(0, Math.min(maxStartRef.current, current + delta)),
+    );
+  }, [scrollSignal]);
+
+  if (skills.length === 0) {
+    return <Text dimColor>No skills</Text>;
+  }
+
+  const visibleLines = lines.slice(
+    start,
+    start + SKILLS_PANEL_VISIBLE_LINES,
+  );
+
+  return (
+    <Box flexDirection="column">
+      {visibleLines.map((line) =>
+        line.kind === "summary" ? (
+          <Text key={line.key}>
+            <Text color={theme.text.headingAccent}>{line.name}</Text>
+            {line.metadata ? <Text dimColor> {line.metadata}</Text> : null}
+          </Text>
+        ) : (
+          <Text dimColor key={line.key}>
+            {"  "}
+            {line.description}
+          </Text>
+        ),
+      )}
+      {lines.length > SKILLS_PANEL_VISIBLE_LINES ? (
+        <Box marginTop={1}>
+          <Text dimColor>
+            showing {start + 1}-
+            {Math.min(start + SKILLS_PANEL_VISIBLE_LINES, lines.length)} of{" "}
+            {lines.length} · pgup/pgdn
+          </Text>
+        </Box>
+      ) : null}
+    </Box>
+  );
+}
+
 function ModelsPanel({
   contextWindowUsage,
   data,
@@ -193,24 +297,27 @@ function ModelsPanel({
   const theme = useTheme();
   const current = getRecord(data, "current");
   const models = Array.isArray(data.models) ? data.models : [];
-  const switching = getRecord(data, "switching");
 
   return (
     <Box flexDirection="column">
-      <PanelRow label="Current" value={formatModelLabel(current)} />
-      <PanelRow label="Provider" value={getString(current ?? {}, "provider")} />
-      <PanelRow label="Model" value={getString(current ?? {}, "model")} />
-      <PanelRow
-        label="Interface"
-        value={getString(current ?? {}, "interfaceProvider")}
-      />
-      <PanelRow
-        label="Context"
-        value={formatUsageOrUnavailable(contextWindowUsage)}
-      />
-      <PanelRow label="Switching" value={formatSwitching(switching)} />
+      <Text color={theme.text.heading}>Models (current)</Text>
       <Box flexDirection="column" marginTop={1}>
-        <Text color={theme.text.heading}>Models</Text>
+        <PanelRow label="Model" value={getString(current ?? {}, "model")} />
+        <PanelRow
+          label="Provider"
+          value={getString(current ?? {}, "provider")}
+        />
+        <PanelRow
+          label="Interface"
+          value={getString(current ?? {}, "interfaceProvider")}
+        />
+        <PanelRow
+          label="Context"
+          value={formatUsageOrUnavailable(contextWindowUsage)}
+        />
+      </Box>
+      <Box flexDirection="column" marginTop={1}>
+        <Text color={theme.text.heading}>Models (switch)</Text>
         {models.length === 0 ? (
           <Text dimColor>No models</Text>
         ) : (
@@ -238,6 +345,14 @@ function ModelsPanel({
   );
 }
 
+interface SkillPanelLine {
+  readonly description?: string;
+  readonly key: string;
+  readonly kind: "summary" | "description";
+  readonly metadata?: string;
+  readonly name?: string;
+}
+
 function PanelRow({
   label,
   value,
@@ -263,6 +378,8 @@ function panelTitle(kind: CommandPanelState["kind"]): string {
       return "MCP";
     case "models":
       return "Models";
+    case "skills":
+      return "Skills";
   }
 }
 
@@ -307,19 +424,6 @@ function formatMcpSummary(
   return labels.length > 0 ? labels.join(", ") : "none";
 }
 
-function formatSwitching(
-  switching: Record<string, unknown> | undefined,
-): string | null {
-  if (!switching) {
-    return null;
-  }
-  const available = getBoolean(switching, "available");
-  const mode = getString(switching, "mode");
-  return `${available ? "available" : "unavailable"}${
-    mode ? ` · ${mode}` : ""
-  }`;
-}
-
 function formatModelLabel(
   model: Record<string, unknown> | undefined,
 ): string | undefined {
@@ -332,6 +436,36 @@ function formatModelLabel(
 function formatCommandPath(command: Record<string, unknown>): string {
   const path = getStringArray(command, "path");
   return path.length > 0 ? `/${path.join(" ")}` : "/";
+}
+
+function formatSkillLines(
+  skills: readonly Record<string, unknown>[],
+): SkillPanelLine[] {
+  return skills.flatMap((skill, index) => {
+    const name = getString(skill, "name") ?? "skill";
+    const description = getString(skill, "description")?.trim();
+    const metadata = [
+      getString(skill, "scope"),
+      getString(skill, "source"),
+    ].filter((item): item is string => Boolean(item));
+    const summaryLine: SkillPanelLine = {
+      key: `${String(index)}:summary`,
+      kind: "summary",
+      metadata: metadata.join(" · "),
+      name,
+    };
+
+    return description
+      ? [
+          summaryLine,
+          {
+            description,
+            key: `${String(index)}:description`,
+            kind: "description",
+          },
+        ]
+      : [summaryLine];
+  });
 }
 
 function formatUsageOrUnavailable(

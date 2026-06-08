@@ -1,6 +1,6 @@
 import type { TuiEvent } from "./snapshot.js";
 
-export const STREAMING_UI_FLUSH_MS = 33;
+export const STREAMING_UI_FLUSH_MS = 50;
 
 export interface CoalescedTuiEventDispatcher {
   readonly dispatch: (event: TuiEvent) => void;

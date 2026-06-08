@@ -1,6 +1,11 @@
 import type { UiCommandOutput } from "ohbaby-sdk";
 
-export type CommandPanelKind = "status" | "help" | "mcps" | "models";
+export type CommandPanelKind =
+  | "status"
+  | "help"
+  | "mcps"
+  | "models"
+  | "skills";
 
 export type CommandPanelStatus = "loading" | "ready" | "error";
 
@@ -19,6 +24,7 @@ const DISPLAY_COMMAND_IDS = new Set<CommandPanelKind>([
   "help",
   "mcps",
   "models",
+  "skills",
   "status",
 ]);
 

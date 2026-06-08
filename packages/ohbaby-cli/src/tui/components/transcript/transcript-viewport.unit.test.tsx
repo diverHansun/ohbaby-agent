@@ -66,13 +66,54 @@ describe("TranscriptViewport", () => {
     expect(app.lastFrame()).toContain("Alpha prompt");
     expect(app.lastFrame()).not.toContain("Beta prompt");
   });
+
+  it("renders the complete committed transcript so terminal scrollback owns overflow", () => {
+    const messages = Array.from({ length: 20 }, (_, index) =>
+      message(`message_${String(index)}`, `committed ${String(index)}`),
+    );
+    const app = render(
+      <TranscriptViewport
+        commandNotices={[]}
+        committedMessages={messages}
+        liveMessage={null}
+        notices={[]}
+      />,
+    );
+
+    const frame = app.lastFrame() ?? "";
+
+    expect(frame).toContain("committed 0");
+    expect(frame).toContain("committed 19");
+    expect(frame).not.toContain("lines below");
+  });
+
+  it("keeps visible spacing between a submitted user prompt and the assistant reply", () => {
+    const app = render(
+      <TranscriptViewport
+        commandNotices={[]}
+        committedMessages={[
+          message("user_message", "try the read tool", "user"),
+        ]}
+        liveMessage={message("assistant_message", "read succeeded")}
+        notices={[]}
+      />,
+    );
+
+    expect(app.lastFrame()).toMatch(
+      /try the read tool[\s\S]*\n\s*\nread succeeded/,
+    );
+  });
 });
 
-function message(id: string, text: string): UiMessage {
+function message(
+  id: string,
+  text: string,
+  role: UiMessage["role"] = "assistant",
+): UiMessage {
   return {
     createdAt: "2026-06-07T00:00:00.000Z",
     id,
     parts: [{ text, type: "text" }],
-    role: "assistant",
+    role,
   };
 }

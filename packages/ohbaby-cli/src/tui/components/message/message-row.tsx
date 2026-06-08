@@ -50,7 +50,7 @@ export function MessageRow({
       {renderedParts.map((part) => (
         <Box key={`${message.id}_${String(part.index)}`}>
           {part.kind === "spinner" ? (
-            <Spinner label={part.label} />
+            renderSpinnerPart(part)
           ) : (
             renderTextPart(message, part)
           )}
@@ -116,7 +116,7 @@ interface RenderedMessagePart {
   readonly text: string;
 }
 
-interface RenderedTextSegment {
+export interface RenderedTextSegment {
   readonly color: string | undefined;
   readonly dimColor?: boolean;
   readonly text: string;
@@ -126,6 +126,7 @@ interface RenderedSpinnerPart {
   readonly index: number;
   readonly kind: "spinner";
   readonly label: string;
+  readonly segments?: readonly RenderedTextSegment[];
 }
 
 export function renderMessageParts(
@@ -144,6 +145,12 @@ export function renderMessageParts(
         index: part.index,
         kind: "spinner",
         label: renderToolLabel(part.call, part.result),
+        segments: renderToolLabelSegments(
+          part.call,
+          part.result,
+          theme,
+          renderToolLabel(part.call, part.result),
+        ),
       });
       continue;
     }
@@ -180,6 +187,28 @@ export function renderMessageParts(
   }
 
   return rendered;
+}
+
+function renderSpinnerPart(part: RenderedSpinnerPart): ReactElement {
+  if (!part.segments) {
+    return <Spinner label={part.label} />;
+  }
+
+  return (
+    <Text>
+      <Spinner />
+      <Text> </Text>
+      {part.segments.map((segment, index) => (
+        <Text
+          color={segment.color}
+          dimColor={segment.dimColor}
+          key={String(index)}
+        >
+          {segment.text}
+        </Text>
+      ))}
+    </Text>
+  );
 }
 
 function renderTextPart(
