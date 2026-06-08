@@ -1,7 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import type { UiCommandCatalog, UiContextWindowUsage } from "ohbaby-sdk";
 import type { ReactElement } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatContextWindowUsage } from "../../render/usage.js";
 import { useTheme } from "../../theme/index.js";
 import type { CommandPanelState } from "./command-panel-state.js";
@@ -9,8 +9,14 @@ import { OverlayCard } from "./overlay-card.js";
 
 const SKILLS_PANEL_VISIBLE_LINES = 10;
 
-interface SkillsScrollSignal {
-  readonly direction: "next" | "previous";
+type SkillsNavigationAction =
+  | "next"
+  | "previous"
+  | "page-next"
+  | "page-previous";
+
+interface SkillsNavigationSignal {
+  readonly action: SkillsNavigationAction;
   readonly sequence: number;
 }
 
@@ -28,28 +34,44 @@ export function CommandPanelManager({
   panel,
 }: CommandPanelManagerProps): ReactElement | null {
   const theme = useTheme();
-  const [skillsScrollSignal, setSkillsScrollSignal] =
-    useState<SkillsScrollSignal | null>(null);
+  const [skillsNavigationSignal, setSkillsNavigationSignal] =
+    useState<SkillsNavigationSignal | null>(null);
 
   useInput(
     (_value, key) => {
       if (key.escape) {
-        setSkillsScrollSignal(null);
+        setSkillsNavigationSignal(null);
         onClose();
         return;
       }
 
+      if (panel?.kind === "skills" && key.downArrow) {
+        setSkillsNavigationSignal((current) => ({
+          action: "next",
+          sequence: (current?.sequence ?? 0) + 1,
+        }));
+        return;
+      }
+
+      if (panel?.kind === "skills" && key.upArrow) {
+        setSkillsNavigationSignal((current) => ({
+          action: "previous",
+          sequence: (current?.sequence ?? 0) + 1,
+        }));
+        return;
+      }
+
       if (panel?.kind === "skills" && key.pageDown) {
-        setSkillsScrollSignal((current) => ({
-          direction: "next",
+        setSkillsNavigationSignal((current) => ({
+          action: "page-next",
           sequence: (current?.sequence ?? 0) + 1,
         }));
         return;
       }
 
       if (panel?.kind === "skills" && key.pageUp) {
-        setSkillsScrollSignal((current) => ({
-          direction: "previous",
+        setSkillsNavigationSignal((current) => ({
+          action: "page-previous",
           sequence: (current?.sequence ?? 0) + 1,
         }));
       }
@@ -72,7 +94,7 @@ export function CommandPanelManager({
           catalog={catalog}
           contextWindowUsage={contextWindowUsage}
           panel={panel}
-          skillsScrollSignal={skillsScrollSignal}
+          skillsNavigationSignal={skillsNavigationSignal}
         />
       )}
     </OverlayCard>
@@ -83,12 +105,12 @@ function CommandPanelBody({
   catalog,
   contextWindowUsage,
   panel,
-  skillsScrollSignal,
+  skillsNavigationSignal,
 }: {
   readonly catalog: UiCommandCatalog | null;
   readonly contextWindowUsage: UiContextWindowUsage | null;
   readonly panel: CommandPanelState;
-  readonly skillsScrollSignal: SkillsScrollSignal | null;
+  readonly skillsNavigationSignal: SkillsNavigationSignal | null;
 }): ReactElement {
   const data = panel.output?.kind === "data" ? panel.output.data : {};
 
@@ -102,7 +124,9 @@ function CommandPanelBody({
     case "models":
       return <ModelsPanel contextWindowUsage={contextWindowUsage} data={data} />;
     case "skills":
-      return <SkillsPanel data={data} scrollSignal={skillsScrollSignal} />;
+      return (
+        <SkillsPanel data={data} navigationSignal={skillsNavigationSignal} />
+      );
   }
 }
 
@@ -217,69 +241,75 @@ function McpsPanel({
 
 function SkillsPanel({
   data,
-  scrollSignal,
+  navigationSignal,
 }: {
   readonly data: Record<string, unknown>;
-  readonly scrollSignal: SkillsScrollSignal | null;
+  readonly navigationSignal: SkillsNavigationSignal | null;
 }): ReactElement {
   const theme = useTheme();
   const skills = Array.isArray(data.skills)
     ? data.skills.filter(isRecord)
     : [];
-  const lines = useMemo(() => formatSkillLines(skills), [skills]);
-  const maxStart = Math.max(0, lines.length - SKILLS_PANEL_VISIBLE_LINES);
-  const maxStartRef = useRef(maxStart);
-  const [start, setStart] = useState(0);
+  const maxIndex = Math.max(0, skills.length - 1);
+  const maxIndexRef = useRef(maxIndex);
+  const [selectedIndex, setSelectedIndex] = useState(0);
 
   useEffect(() => {
-    maxStartRef.current = maxStart;
-    setStart((current) => Math.min(current, maxStart));
-  }, [maxStart]);
+    maxIndexRef.current = maxIndex;
+    setSelectedIndex((current) => Math.min(current, maxIndex));
+  }, [maxIndex]);
 
   useEffect(() => {
-    if (scrollSignal === null) {
+    if (navigationSignal === null) {
       return;
     }
 
-    const delta =
-      scrollSignal.direction === "next"
-        ? SKILLS_PANEL_VISIBLE_LINES
-        : -SKILLS_PANEL_VISIBLE_LINES;
-    setStart((current) =>
-      Math.max(0, Math.min(maxStartRef.current, current + delta)),
+    setSelectedIndex((current) =>
+      clampSkillIndex(
+        current + navigationDelta(navigationSignal.action),
+        maxIndexRef.current,
+      ),
     );
-  }, [scrollSignal]);
+  }, [navigationSignal]);
 
   if (skills.length === 0) {
     return <Text dimColor>No skills</Text>;
   }
 
-  const visibleLines = lines.slice(
-    start,
-    start + SKILLS_PANEL_VISIBLE_LINES,
+  const windowStart =
+    Math.floor(selectedIndex / SKILLS_PANEL_VISIBLE_LINES) *
+    SKILLS_PANEL_VISIBLE_LINES;
+  const visibleSkills = skills.slice(
+    windowStart,
+    windowStart + SKILLS_PANEL_VISIBLE_LINES,
   );
 
   return (
     <Box flexDirection="column">
-      {visibleLines.map((line) =>
-        line.kind === "summary" ? (
-          <Text key={line.key}>
-            <Text color={theme.text.headingAccent}>{line.name}</Text>
-            {line.metadata ? <Text dimColor> {line.metadata}</Text> : null}
+      {visibleSkills.map((skill, index) => {
+        const absoluteIndex = windowStart + index;
+        const selected = absoluteIndex === selectedIndex;
+        return (
+          <Text
+            bold={selected}
+            color={selected ? theme.status.accent : undefined}
+            dimColor={!selected}
+            key={String(absoluteIndex)}
+          >
+            {selected ? "> " : "  "}
+            {formatSkillRow(skill)}
           </Text>
-        ) : (
-          <Text dimColor key={line.key}>
-            {"  "}
-            {line.description}
-          </Text>
-        ),
-      )}
-      {lines.length > SKILLS_PANEL_VISIBLE_LINES ? (
+        );
+      })}
+      {skills.length > SKILLS_PANEL_VISIBLE_LINES ? (
         <Box marginTop={1}>
           <Text dimColor>
-            showing {start + 1}-
-            {Math.min(start + SKILLS_PANEL_VISIBLE_LINES, lines.length)} of{" "}
-            {lines.length} · pgup/pgdn
+            showing {windowStart + 1}-
+            {Math.min(
+              windowStart + SKILLS_PANEL_VISIBLE_LINES,
+              skills.length,
+            )}{" "}
+            of {skills.length} · pgup/pgdn
           </Text>
         </Box>
       ) : null}
@@ -343,14 +373,6 @@ function ModelsPanel({
       </Box>
     </Box>
   );
-}
-
-interface SkillPanelLine {
-  readonly description?: string;
-  readonly key: string;
-  readonly kind: "summary" | "description";
-  readonly metadata?: string;
-  readonly name?: string;
 }
 
 function PanelRow({
@@ -438,34 +460,47 @@ function formatCommandPath(command: Record<string, unknown>): string {
   return path.length > 0 ? `/${path.join(" ")}` : "/";
 }
 
-function formatSkillLines(
-  skills: readonly Record<string, unknown>[],
-): SkillPanelLine[] {
-  return skills.flatMap((skill, index) => {
-    const name = getString(skill, "name") ?? "skill";
-    const description = getString(skill, "description")?.trim();
-    const metadata = [
-      getString(skill, "scope"),
-      getString(skill, "source"),
-    ].filter((item): item is string => Boolean(item));
-    const summaryLine: SkillPanelLine = {
-      key: `${String(index)}:summary`,
-      kind: "summary",
-      metadata: metadata.join(" · "),
-      name,
-    };
+function formatSkillRow(skill: Record<string, unknown>): string {
+  const name = getString(skill, "name") ?? "skill";
+  const description = truncatePanelText(getString(skill, "description"));
+  const metadata = [
+    getString(skill, "scope"),
+    getString(skill, "source"),
+  ].filter((item): item is string => Boolean(item));
+  const suffixes = [
+    metadata.length > 0 ? metadata.join(" · ") : "",
+    description ? `- ${description}` : "",
+  ].filter((item) => item !== "");
 
-    return description
-      ? [
-          summaryLine,
-          {
-            description,
-            key: `${String(index)}:description`,
-            kind: "description",
-          },
-        ]
-      : [summaryLine];
-  });
+  return suffixes.length > 0 ? `${name} ${suffixes.join(" ")}` : name;
+}
+
+function navigationDelta(action: SkillsNavigationAction): number {
+  switch (action) {
+    case "next":
+      return 1;
+    case "previous":
+      return -1;
+    case "page-next":
+      return SKILLS_PANEL_VISIBLE_LINES;
+    case "page-previous":
+      return -SKILLS_PANEL_VISIBLE_LINES;
+  }
+}
+
+function clampSkillIndex(index: number, maxIndex: number): number {
+  return Math.max(0, Math.min(maxIndex, index));
+}
+
+function truncatePanelText(value: string | undefined, maxLength = 64): string {
+  if (!value) {
+    return "";
+  }
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 3)}...`;
 }
 
 function formatUsageOrUnavailable(

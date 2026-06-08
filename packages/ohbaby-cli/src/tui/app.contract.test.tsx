@@ -1672,7 +1672,7 @@ describe("OhbabyTerminalApp", () => {
     await waitForFrame(app, (nextFrame) => !nextFrame.includes("firecrawl"));
   });
 
-  it("routes /skills into a scrollable overlay card instead of a persistent command notice", async () => {
+  it("routes /skills into a selectable overlay card instead of a persistent command notice", async () => {
     const client = createFakeClient(snapshot(), displayCommandCatalog);
     const app = render(
       <OhbabyTerminalApp
@@ -1714,34 +1714,36 @@ describe("OhbabyTerminalApp", () => {
       app,
       (nextFrame) =>
         nextFrame.includes("Skills") &&
-        nextFrame.includes("skill-01") &&
-        nextFrame.includes("showing 1-10 of 24"),
+        nextFrame.includes("> skill-01") &&
+        nextFrame.includes("showing 1-10 of 12"),
     );
     expect(firstFrame).toContain("Description 01");
-    expect(firstFrame).not.toContain("skill-06");
+    expect(firstFrame).toContain("skill-10");
+    expect(firstFrame).not.toContain("skill-11");
     expect(firstFrame).not.toContain("skills:");
 
     app.stdin.write("\u001B[6~");
     const nextPageFrame = await waitForFrame(
       app,
       (nextFrame) =>
-        nextFrame.includes("skill-06") &&
-        nextFrame.includes("showing 11-20 of 24"),
+        nextFrame.includes("> skill-11") &&
+        nextFrame.includes("showing 11-12 of 12"),
     );
     expect(nextPageFrame).not.toContain("skill-01");
+    expect(nextPageFrame).toContain("skill-12");
 
     app.stdin.write("\u001B[5~");
     await waitForFrame(
       app,
       (nextFrame) =>
-        nextFrame.includes("skill-01") &&
-        nextFrame.includes("showing 1-10 of 24"),
+        nextFrame.includes("> skill-01") &&
+        nextFrame.includes("showing 1-10 of 12"),
     );
 
     app.stdin.write("\u001B");
     await waitForFrame(
       app,
-      (nextFrame) => !nextFrame.includes("showing 1-10 of 24"),
+      (nextFrame) => !nextFrame.includes("showing 1-10 of 12"),
     );
   });
 
