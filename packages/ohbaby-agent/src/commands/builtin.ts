@@ -21,6 +21,7 @@ import {
   sanitizeCommandMcpServerSummary,
   sanitizeCommandSkillSummary,
 } from "./normalize.js";
+import { handleConnect } from "./connect.js";
 
 interface BuiltinHandlerHelpers {
   listCommands?(
@@ -605,6 +606,12 @@ export function createBuiltinHandlers(
       async execute(_invocation, context): Promise<void> {
         await options.exit?.();
         context.emitAction(action("app.exit"));
+      },
+    },
+    {
+      id: "connect",
+      execute(invocation, context): Promise<void> {
+        return handleConnect(options, invocation.argv, context);
       },
     },
     {

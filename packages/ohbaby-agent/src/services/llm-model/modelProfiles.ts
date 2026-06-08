@@ -286,16 +286,20 @@ function findBuiltinProfile(
   modelId: string,
   provider: string | undefined,
 ): ModelProfile | undefined {
-  const normalizedModel = normalizeKey(modelId);
+  const normalizedModelCandidates = modelKeyCandidates(modelId);
   const normalizedProvider = normalizeProvider(provider);
   const matchingRules = BUILTIN_PROFILE_RULES.filter((rule) => {
     const providerMatches =
       normalizedProvider === undefined ||
       normalizedProvider === rule.provider ||
-      normalizedProvider === "custom";
+      normalizedProvider === "custom" ||
+      !isKnownBuiltinProvider(normalizedProvider);
+    const normalizedPrefix = normalizeKey(rule.modelPrefix);
     return (
       providerMatches &&
-      normalizedModel.startsWith(normalizeKey(rule.modelPrefix))
+      normalizedModelCandidates.some((candidate) =>
+        candidate.startsWith(normalizedPrefix),
+      )
     );
   }).sort((left, right) => right.modelPrefix.length - left.modelPrefix.length);
 
@@ -308,6 +312,20 @@ function findBuiltinProfile(
     ...ruleToProfile(rule),
     model: modelId.trim(),
   };
+}
+
+function isKnownBuiltinProvider(provider: string): boolean {
+  return BUILTIN_PROFILE_RULES.some((rule) => rule.provider === provider);
+}
+
+function modelKeyCandidates(modelId: string): readonly string[] {
+  const normalized = normalizeKey(modelId);
+  const candidates = [normalized];
+  const slashIndex = normalized.indexOf("/");
+  if (slashIndex >= 0 && slashIndex < normalized.length - 1) {
+    candidates.push(normalized.slice(slashIndex + 1));
+  }
+  return [...new Set(candidates)];
 }
 
 function ruleToProfile(rule: BuiltinProfileRule): ModelProfile {

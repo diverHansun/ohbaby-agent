@@ -129,6 +129,46 @@ function createFakeLLMClient(
   };
 }
 
+function createBlockingLLMClient(
+  release: Promise<void>,
+  config: Partial<LLMClientInstance<FakeSdkClient>["config"]> = {},
+): LLMClientInstance<FakeSdkClient> {
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        _request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        return Promise.resolve(
+          (async function* (): AsyncGenerator<
+            InterfaceProviderStreamEvent,
+            void,
+            unknown
+          > {
+            await release;
+            yield { textDelta: "done", finishReason: "stop" };
+          })(),
+        );
+      },
+      isAbortError(): boolean {
+        return false;
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
+      baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
+      temperature: 0,
+      maxTokens: 128,
+      ...config,
+    },
+  };
+}
+
 function createCountingBus(): {
   readonly activeSubscriptions: () => number;
   readonly bus: BusInstance;
@@ -991,6 +1031,123 @@ describe("createInProcessUiBackendClient", () => {
     expect(snapshot.sessions[0].messages[1].parts).toEqual([
       { type: "text", text: "Hello world" },
     ]);
+  });
+
+  it("connects a model through a safe structured backend payload", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-connect-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "ohbaby-connect-home-"));
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    const previousApiKey = process.env.ZENMUX_API_KEY;
+
+    try {
+      process.env.HOME = homeDir;
+      process.env.USERPROFILE = homeDir;
+
+      const client = createInProcessUiBackendClient({
+        projectDirectory: projectRoot,
+      });
+      const events: UiEvent[] = [];
+      client.subscribeEvents((event) => {
+        events.push(event);
+      });
+
+      const result = await client.connectModel({
+        apiKey: "sk-connect-contract",
+        apiKeyEnv: "ZENMUX_API_KEY",
+        baseUrl: "https://zenmux.example/v1/",
+        interfaceProvider: "openai-compatible",
+        maxOutputTokens: 8192,
+        model: "anthropic/claude-sonnet-4.6",
+        provider: "zenmux",
+      });
+
+      const modelJsonPath = join(homeDir, ".ohbaby-agent", "model.json");
+      expect(result).toEqual({
+        apiKeyEnv: "ZENMUX_API_KEY",
+        baseUrl: "https://zenmux.example/v1",
+        contextWindowTokens: 200_000,
+        envPath: join(projectRoot, ".env"),
+        interfaceProvider: "openai-compatible",
+        maxOutputTokens: 8192,
+        model: "anthropic/claude-sonnet-4.6",
+        modelJsonPath,
+        provider: "zenmux",
+        saved: true,
+      });
+      expect(JSON.stringify(result)).not.toContain("sk-connect-contract");
+
+      const modelJson = JSON.parse(
+        await readFile(modelJsonPath, "utf-8"),
+      ) as Record<string, unknown>;
+      expect(modelJson).toMatchObject({
+        apiConfig: {
+          apiKeyEnv: "ZENMUX_API_KEY",
+          baseUrl: "https://zenmux.example/v1",
+          interfaceProvider: "openai-compatible",
+        },
+        defaultModel: "anthropic/claude-sonnet-4.6",
+        llmParams: {
+          contextWindowTokens: 200_000,
+          maxTokens: 8192,
+        },
+        provider: "zenmux",
+      });
+      expect(modelJson).not.toHaveProperty("apiKey");
+      expect(await readFile(join(projectRoot, ".env"), "utf-8")).toContain(
+        "ZENMUX_API_KEY=sk-connect-contract",
+      );
+      expect(process.env.ZENMUX_API_KEY).toBe("sk-connect-contract");
+      expect(events.some((event) => event.type === "snapshot.replaced")).toBe(
+        true,
+      );
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousUserProfile === undefined) {
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = previousUserProfile;
+      }
+      if (previousApiKey === undefined) {
+        delete process.env.ZENMUX_API_KEY;
+      } else {
+        process.env.ZENMUX_API_KEY = previousApiKey;
+      }
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects connectModel while a prompt is running", async () => {
+    const release = createDeferred<undefined>();
+    const client = createInProcessUiBackendClient({
+      llmClient: createBlockingLLMClient(release.promise),
+    });
+    const running = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "runtime.updated" }> =>
+        event.type === "runtime.updated" && event.status.kind === "running",
+    );
+    const prompt = client.submitPrompt("block");
+
+    await running;
+    await expect(
+      client.connectModel({
+        apiKey: "sk-no-write",
+        apiKeyEnv: "ZENMUX_API_KEY",
+        baseUrl: "https://zenmux.example/v1",
+        interfaceProvider: "openai-compatible",
+        model: "anthropic/claude-sonnet-4.6",
+        provider: "zenmux",
+      }),
+    ).rejects.toThrow("Cannot save while running");
+
+    release.resolve(undefined);
+    await prompt;
   });
 
   it("rejects context window usage refresh failures for existing sessions", async () => {

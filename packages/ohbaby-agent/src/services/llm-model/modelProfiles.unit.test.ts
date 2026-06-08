@@ -72,6 +72,27 @@ describe("modelProfiles", () => {
     });
   });
 
+  it("matches namespaced built-in model names through proxy providers", () => {
+    const registry = createModelProfileRegistry({
+      defaultProvider: "zenmux",
+    });
+
+    expect(
+      registry.resolve("anthropic/claude-sonnet-4.6", "zenmux"),
+    ).toMatchObject({
+      contextWindowTokens: 200_000,
+      maxOutputTokens: 8_192,
+      model: "anthropic/claude-sonnet-4.6",
+      source: "builtin",
+    });
+    expect(registry.resolve("openai/gpt-4o", "openrouter")).toMatchObject({
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 16_384,
+      model: "openai/gpt-4o",
+      source: "builtin",
+    });
+  });
+
   it("calculates input token budgets with output reservation and safety margin", () => {
     const budget = calculateTokenBudget(
       {

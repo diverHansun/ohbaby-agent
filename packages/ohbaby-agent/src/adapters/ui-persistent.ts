@@ -337,6 +337,10 @@ function withStartupRecovery(
       await ready();
       return client.compactSession(compactOptions);
     },
+    async connectModel(input): ReturnType<UiBackendClient["connectModel"]> {
+      await ready();
+      return client.connectModel(input);
+    },
     async executeCommand(
       invocation,
     ): ReturnType<UiBackendClient["executeCommand"]> {

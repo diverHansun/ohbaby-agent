@@ -168,4 +168,134 @@ describe("setActiveLLMConfig", () => {
     const envWrite = findWriteCall((file) => file.endsWith(".env"));
     expect(envWrite).toBeUndefined();
   });
+
+  it("should update the active per-model profile and max token settings", async () => {
+    const existingModelJson = {
+      provider: "zenmux",
+      defaultModel: "old-model",
+      apiConfig: {
+        baseUrl: "https://zenmux.ai/api/v1",
+        apiKeyEnv: "ZENMUX_API_KEY",
+      },
+      llmParams: {
+        temperature: 0,
+        maxTokens: 4096,
+        contextWindowTokens: 128_000,
+      },
+      models: [
+        {
+          provider: "zenmux",
+          model: "anthropic/claude-sonnet-4.6",
+          contextWindowTokens: 128_000,
+          maxOutputTokens: 4096,
+        },
+        {
+          provider: "openai",
+          model: "gpt-4o",
+          contextWindowTokens: 128_000,
+        },
+      ],
+    };
+    vi.mocked(fs.readFile).mockImplementation((file) => {
+      const filePath = callPathToString(file);
+      if (filePath.endsWith("model.json")) {
+        return Promise.resolve(JSON.stringify(existingModelJson));
+      }
+      return Promise.reject(new Error(`Unexpected read: ${filePath}`));
+    });
+
+    await setActiveLLMConfig({
+      provider: "zenmux",
+      model: "anthropic/claude-sonnet-4.6",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      apiKeyEnv: "ZENMUX_API_KEY",
+      interfaceProvider: "anthropic",
+      contextWindowTokens: 200_000,
+      maxOutputTokens: 8192,
+      maxTokens: 8192,
+      updateActiveModelProfile: true,
+      modelJsonPath: "D:/repo/.ohbaby-agent/model.json",
+    });
+
+    const modelJsonWrite = findWriteCall((file) => file.includes("model.json"));
+    const modelJson = parseModelJsonWrite(modelJsonWrite);
+
+    expect(modelJson.llmParams).toEqual({
+      temperature: 0,
+      maxTokens: 8192,
+      contextWindowTokens: 200_000,
+    });
+    expect(modelJson.models).toEqual([
+      {
+        provider: "openai",
+        model: "gpt-4o",
+        contextWindowTokens: 128_000,
+      },
+      {
+        provider: "zenmux",
+        model: "anthropic/claude-sonnet-4.6",
+        contextWindowTokens: 200_000,
+        maxOutputTokens: 8192,
+      },
+    ]);
+  });
+
+  it("should clear stale active context window tokens when requested", async () => {
+    const existingModelJson = {
+      provider: "openai",
+      defaultModel: "gpt-4.1",
+      apiConfig: {
+        baseUrl: "https://api.openai.com/v1",
+        apiKeyEnv: "OPENAI_API_KEY",
+      },
+      llmParams: {
+        temperature: 0.1,
+        maxTokens: 32_768,
+        contextWindowTokens: 1_000_000,
+      },
+      models: [
+        {
+          provider: "custom",
+          model: "unknown-model",
+          contextWindowTokens: 900_000,
+        },
+        {
+          provider: "openai",
+          model: "gpt-4o",
+          contextWindowTokens: 128_000,
+        },
+      ],
+    };
+    vi.mocked(fs.readFile).mockImplementation((file) => {
+      const filePath = callPathToString(file);
+      if (filePath.endsWith("model.json")) {
+        return Promise.resolve(JSON.stringify(existingModelJson));
+      }
+      return Promise.reject(new Error(`Unexpected read: ${filePath}`));
+    });
+
+    await setActiveLLMConfig({
+      provider: "custom",
+      model: "unknown-model",
+      baseUrl: "https://example.com/v1",
+      apiKeyEnv: "CUSTOM_API_KEY",
+      clearContextWindowTokens: true,
+      modelJsonPath: "D:/repo/.ohbaby-agent/model.json",
+    });
+
+    const modelJsonWrite = findWriteCall((file) => file.includes("model.json"));
+    const modelJson = parseModelJsonWrite(modelJsonWrite);
+
+    expect(modelJson.llmParams).toEqual({
+      temperature: 0.1,
+      maxTokens: 32_768,
+    });
+    expect(modelJson.models).toEqual([
+      {
+        provider: "openai",
+        model: "gpt-4o",
+        contextWindowTokens: 128_000,
+      },
+    ]);
+  });
 });

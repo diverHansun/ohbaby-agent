@@ -57,6 +57,9 @@ export function buildCoreAPIImpl(
       compactSession(compactOptions): ReturnType<CoreAPI["compactSession"]> {
         return client.compactSession(compactOptions);
       },
+      connectModel(input): ReturnType<CoreAPI["connectModel"]> {
+        return client.connectModel(input);
+      },
       executeCommand(invocation): ReturnType<CoreAPI["executeCommand"]> {
         return client.executeCommand(invocation);
       },

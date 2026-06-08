@@ -10,6 +10,10 @@ import type {
 import type { UiEvent } from "./events.js";
 import type { UiInteractionResponse } from "./interaction.js";
 import type { UiContextWindowUsage } from "./context-window.js";
+import type {
+  UiConnectModelInput,
+  UiConnectModelResult,
+} from "./connect-model.js";
 import type { UiPermissionResponse, UiSnapshot } from "./snapshot.js";
 
 export interface SubmitPromptOptions {
@@ -34,6 +38,7 @@ export interface UiBackendClient {
   compactSession(
     options?: UiCompactSessionOptions,
   ): Promise<UiCompactSessionResult>;
+  connectModel(input: UiConnectModelInput): Promise<UiConnectModelResult>;
   executeCommand(invocation: UiSlashCommandInvocation): Promise<void>;
   respondPermission(
     requestId: string,

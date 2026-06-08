@@ -6,6 +6,8 @@ import type {
   UiCommandInvocation,
   UiCompactSessionOptions,
   UiCompactSessionResult,
+  UiConnectModelInput,
+  UiConnectModelResult,
   UiContextWindowUsage,
   UiEvent,
   UiEventHandler,
@@ -77,6 +79,7 @@ import {
   startPermissionEventProjection,
   subscribeAppEventProjectors,
 } from "./app-events/index.js";
+import { applyActiveModelConfig } from "../config/llm/apply-active-model-config.js";
 
 const EMPTY_SNAPSHOT: UiSnapshot = {
   sessions: [],
@@ -307,6 +310,7 @@ export function createInProcessUiBackendClient(
   let promptInFlight = false;
   let activeRunId: string | undefined;
   let runtimePromise: Promise<UiRuntimeComposition> | undefined;
+  let connectModelQueue: Promise<void> = Promise.resolve();
   let skillRegistryPromise: Promise<SkillRegistry> | undefined;
   const pendingPermissionSessions = new Map<string, string>();
 
@@ -1114,6 +1118,49 @@ export function createInProcessUiBackendClient(
     }
   }
 
+  async function connectModelInternal(
+    input: UiConnectModelInput,
+  ): Promise<UiConnectModelResult> {
+    const isPromptRunning = (): boolean => promptInFlight;
+    if (isPromptRunning()) {
+      throw new Error("Cannot save while running");
+    }
+    if (options.llmClient) {
+      throw new Error("Connect model is unavailable for injected LLM clients");
+    }
+
+    const previousSave = connectModelQueue;
+    let releaseSave!: () => void;
+    const currentSave = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    connectModelQueue = previousSave.then(() => currentSave, () => currentSave);
+
+    await previousSave.catch(() => undefined);
+    if (isPromptRunning()) {
+      releaseSave();
+      throw new Error("Cannot save while running");
+    }
+
+    try {
+      const projectRoot = await resolveProjectRoot();
+      const result = await applyActiveModelConfig({
+        ...input,
+        projectRoot,
+      });
+      runtimePromise = undefined;
+      contextWindowUsage.clear();
+      publish({
+        snapshot: await readSnapshotWithPermission(),
+        timestamp: Date.now(),
+        type: "snapshot.replaced",
+      });
+      return result;
+    } finally {
+      releaseSave();
+    }
+  }
+
   const commandService = createCommandService({
     bus,
     interactionBroker,
@@ -1165,6 +1212,7 @@ export function createInProcessUiBackendClient(
       },
     },
     submitPrompt: submitPromptInternal,
+    connectModel: connectModelInternal,
     permission: {
       getState: currentPermissionState,
       setMode(mode): void {
@@ -1279,6 +1327,10 @@ export function createInProcessUiBackendClient(
       compactOptions?: UiCompactSessionOptions,
     ): Promise<UiCompactSessionResult> {
       return compactSessionInternal(compactOptions);
+    },
+
+    connectModel(input: UiConnectModelInput): Promise<UiConnectModelResult> {
+      return connectModelInternal(input);
     },
 
     executeCommand(invocation: UiCommandInvocation): Promise<void> {

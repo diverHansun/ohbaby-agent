@@ -91,6 +91,18 @@ describe("context window UI contract", () => {
           },
         });
       },
+      connectModel(): ReturnType<CoreAPI["connectModel"]> {
+        return Promise.resolve({
+          apiKeyEnv: "ZENMUX_API_KEY",
+          baseUrl: "https://api.example.com",
+          envPath: ".env",
+          interfaceProvider: "openai-compatible",
+          model: "example-model",
+          modelJsonPath: "model.json",
+          provider: "example",
+          saved: true,
+        } as const);
+      },
       executeCommand(): ReturnType<CoreAPI["executeCommand"]> {
         return Promise.resolve();
       },

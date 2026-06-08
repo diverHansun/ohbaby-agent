@@ -5,6 +5,18 @@ describe("buildCoreAPIImpl", () => {
     vi.resetModules();
     const unsubscribe = vi.fn();
     const submitPrompt = vi.fn(() => Promise.resolve());
+    const connectModel = vi.fn(() =>
+      Promise.resolve({
+        apiKeyEnv: "ZENMUX_API_KEY",
+        baseUrl: "https://zenmux.ai/api/anthropic",
+        envPath: "D:/repo/.env",
+        interfaceProvider: "anthropic" as const,
+        model: "anthropic/claude-sonnet-4.6",
+        modelJsonPath: "D:/home/.ohbaby-agent/model.json",
+        provider: "zenmux",
+        saved: true as const,
+      }),
+    );
     const subscribeEvents = vi.fn(() => unsubscribe);
     const createPersistentUiBackendClient = vi.fn(() => ({
       abortRun: vi.fn(() => Promise.resolve()),
@@ -30,6 +42,7 @@ describe("buildCoreAPIImpl", () => {
           },
         }),
       ),
+      connectModel,
       executeCommand: vi.fn(() => Promise.resolve()),
       getSnapshot: vi.fn(() =>
         Promise.resolve({
@@ -61,6 +74,13 @@ describe("buildCoreAPIImpl", () => {
       permission: "full-access",
     });
     await api.core.submitPrompt("hello");
+    await api.core.connectModel({
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      interfaceProvider: "anthropic",
+      model: "anthropic/claude-sonnet-4.6",
+      provider: "zenmux",
+    });
     const handler = vi.fn();
     const result = api.callbacks.subscribeEvents(handler);
 
@@ -79,6 +99,13 @@ describe("buildCoreAPIImpl", () => {
       },
     });
     expect(submitPrompt).toHaveBeenCalledWith("hello", undefined);
+    expect(connectModel).toHaveBeenCalledWith({
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      interfaceProvider: "anthropic",
+      model: "anthropic/claude-sonnet-4.6",
+      provider: "zenmux",
+    });
     expect(subscribeEvents).toHaveBeenCalledWith(handler);
     expect(result).toBe(unsubscribe);
   });
@@ -93,6 +120,7 @@ describe("buildCoreAPIImpl", () => {
       createPersistentUiBackendClient: vi.fn(() => ({
         abortRun: vi.fn(() => Promise.resolve()),
         compactSession: vi.fn(() => Promise.resolve()),
+        connectModel: vi.fn(() => Promise.resolve()),
         dispose: clientDispose,
         executeCommand: vi.fn(() => Promise.resolve()),
         getSnapshot: vi.fn(() => Promise.resolve()),

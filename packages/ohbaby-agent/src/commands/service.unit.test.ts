@@ -18,7 +18,7 @@ describe("CommandService", () => {
     const catalog = await service.listCommands({ surface: "tui" });
 
     expect(catalog.commands.map((command) => command.id)).toEqual(
-      expect.arrayContaining(["permission"]),
+      expect.arrayContaining(["connect", "permission"]),
     );
     expect(catalog.commands.map((command) => command.id)).not.toEqual(
       expect.arrayContaining([
@@ -27,6 +27,79 @@ describe("CommandService", () => {
         "permission.full-access",
       ]),
     );
+  });
+
+  it("rejects API key values in /connect argv mode", async () => {
+    const connectModel = vi.fn();
+    const { events, service } = createServiceHarness({ connectModel });
+
+    await service.executeCommand(
+      makeInvocation("connect", ["connect"], ["--api-key", "sk-secret"]),
+    );
+
+    expect(connectModel).not.toHaveBeenCalled();
+    const failed = events.at(-1);
+    expect(failed).toMatchObject({ type: "failed" });
+    const error = failed ? getRecord(failed, "error") : undefined;
+    expect(getString(error ?? {}, "code")).toBe("UNSUPPORTED_SECRET_ARG");
+    expect(getString(error ?? {}, "message")).toContain("--api-key");
+  });
+
+  it("executes /connect with non-sensitive arguments", async () => {
+    const connectModel = vi.fn(() =>
+      Promise.resolve({
+        apiKeyEnv: "ZENMUX_API_KEY",
+        baseUrl: "https://zenmux.ai/api/anthropic",
+        contextWindowTokens: 200_000,
+        envPath: "D:/repo/.env",
+        interfaceProvider: "anthropic" as const,
+        maxOutputTokens: 8192,
+        model: "anthropic/claude-sonnet-4.6",
+        modelJsonPath: "D:/home/.ohbaby-agent/model.json",
+        provider: "zenmux",
+        saved: true as const,
+      }),
+    );
+    const { events, service } = createServiceHarness({ connectModel });
+
+    await service.executeCommand(
+      makeInvocation("connect", ["connect"], [
+        "--provider",
+        "zenmux",
+        "--base-url",
+        "https://zenmux.ai/api/anthropic",
+        "--api-key-env",
+        "ZENMUX_API_KEY",
+        "--model",
+        "anthropic/claude-sonnet-4.6",
+        "--interface-provider",
+        "anthropic",
+        "--context-window",
+        "200000",
+        "--max-output-tokens",
+        "8192",
+      ]),
+    );
+
+    expect(connectModel).toHaveBeenCalledWith({
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      contextWindowTokens: 200_000,
+      interfaceProvider: "anthropic",
+      maxOutputTokens: 8192,
+      model: "anthropic/claude-sonnet-4.6",
+      provider: "zenmux",
+    });
+    expect(dataOutputBySubject(events, "model.connected")).toMatchObject({
+      data: {
+        result: {
+          apiKeyEnv: "ZENMUX_API_KEY",
+          model: "anthropic/claude-sonnet-4.6",
+          provider: "zenmux",
+        },
+      },
+    });
+    expect(JSON.stringify(events)).not.toContain("sk-secret");
   });
 
   it("executes status and publishes command events with model context", async () => {

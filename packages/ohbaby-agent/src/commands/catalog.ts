@@ -43,6 +43,21 @@ const BUILTIN_COMMANDS: readonly UiCommandSpec[] = [
     title: "Help",
   },
   {
+    id: "connect",
+    path: ["connect"],
+    aliases: [],
+    acceptsArguments: true,
+    argsHint:
+      "[--provider <name>] [--base-url <url>] [--api-key-env <ENV>] [--model <name>] [--interface-provider <openai-compatible|anthropic>] [--context-window <tokens>] [--max-output-tokens <tokens>]",
+    argumentMode: "argv",
+    category: "model",
+    description: "Connect to an LLM provider",
+    parentBehavior: "interaction",
+    source: "builtin",
+    surfaces: COMMON_SURFACES,
+    title: "Connect Provider",
+  },
+  {
     id: "models",
     path: ["models"],
     aliases: [],

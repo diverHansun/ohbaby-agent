@@ -17,6 +17,11 @@ export type {
   UiContextWindowUsage,
 } from "./context-window.js";
 export type {
+  UiConnectModelInput,
+  UiConnectModelInterfaceProvider,
+  UiConnectModelResult,
+} from "./connect-model.js";
+export type {
   UiEvent,
   UiContextWindowUpdatedEvent,
   UiMessageAppendedEvent,

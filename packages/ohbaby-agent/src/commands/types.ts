@@ -7,6 +7,8 @@ import type {
   UiCommandSpec,
   UiCommandSurface,
   UiCompactSessionResult,
+  UiConnectModelInput,
+  UiConnectModelResult,
   UiContextWindowUsage,
   UiInteractionResponse,
   UiSnapshot,
@@ -167,6 +169,9 @@ export interface CommandServiceOptions {
     text: string,
     options?: { readonly sessionId?: string },
   ) => Promise<void> | void;
+  readonly connectModel?: (
+    input: UiConnectModelInput,
+  ) => Promise<UiConnectModelResult> | UiConnectModelResult;
   readonly exit?: () => Promise<void> | void;
   readonly getStatus?: () => string;
   readonly getContextUsage?: (input: {
