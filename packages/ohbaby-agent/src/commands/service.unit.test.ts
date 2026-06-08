@@ -45,6 +45,37 @@ describe("CommandService", () => {
     expect(getString(error ?? {}, "message")).toContain("--api-key");
   });
 
+  it("does not accept interface provider in /connect argv mode", async () => {
+    const connectModel = vi.fn();
+    const { events, service } = createServiceHarness({ connectModel });
+
+    await service.executeCommand(
+      makeInvocation(
+        "connect",
+        ["connect"],
+        [
+          "--provider",
+          "zenmux",
+          "--base-url",
+          "https://zenmux.ai/api/anthropic",
+          "--api-key-env",
+          "ZENMUX_API_KEY",
+          "--model",
+          "kimi-k2.6",
+          "--interface-provider",
+          "anthropic",
+        ],
+      ),
+    );
+
+    expect(connectModel).not.toHaveBeenCalled();
+    const failed = events.at(-1);
+    expect(failed).toMatchObject({ type: "failed" });
+    const error = failed ? getRecord(failed, "error") : undefined;
+    expect(getString(error ?? {}, "code")).toBe("INVALID_ARGS");
+    expect(getString(error ?? {}, "message")).toContain("--interface-provider");
+  });
+
   it("executes /connect with non-sensitive arguments", async () => {
     const connectModel = vi.fn(() =>
       Promise.resolve({
@@ -63,22 +94,24 @@ describe("CommandService", () => {
     const { events, service } = createServiceHarness({ connectModel });
 
     await service.executeCommand(
-      makeInvocation("connect", ["connect"], [
-        "--provider",
-        "zenmux",
-        "--base-url",
-        "https://zenmux.ai/api/anthropic",
-        "--api-key-env",
-        "ZENMUX_API_KEY",
-        "--model",
-        "anthropic/claude-sonnet-4.6",
-        "--interface-provider",
-        "anthropic",
-        "--context-window",
-        "200000",
-        "--max-output-tokens",
-        "8192",
-      ]),
+      makeInvocation(
+        "connect",
+        ["connect"],
+        [
+          "--provider",
+          "zenmux",
+          "--base-url",
+          "https://zenmux.ai/api/anthropic",
+          "--api-key-env",
+          "ZENMUX_API_KEY",
+          "--model",
+          "anthropic/claude-sonnet-4.6",
+          "--context-window",
+          "200000",
+          "--max-output-tokens",
+          "8192",
+        ],
+      ),
     );
 
     expect(connectModel).toHaveBeenCalledWith({
@@ -100,6 +133,88 @@ describe("CommandService", () => {
       },
     });
     expect(JSON.stringify(events)).not.toContain("sk-secret");
+  });
+
+  it("infers openai-compatible interface for /connect api/v1 base urls", async () => {
+    const connectModel = vi.fn(() =>
+      Promise.resolve({
+        apiKeyEnv: "ZENMUX_API_KEY",
+        baseUrl: "https://zenmux.ai/api/v1",
+        envPath: "D:/repo/.env",
+        interfaceProvider: "openai-compatible" as const,
+        model: "kimi-k2.6",
+        modelJsonPath: "D:/home/.ohbaby-agent/model.json",
+        provider: "zenmux",
+        saved: true as const,
+      }),
+    );
+    const { service } = createServiceHarness({ connectModel });
+
+    await service.executeCommand(
+      makeInvocation(
+        "connect",
+        ["connect"],
+        [
+          "--provider",
+          "zenmux",
+          "--base-url",
+          "https://zenmux.ai/api/v1",
+          "--api-key-env",
+          "ZENMUX_API_KEY",
+          "--model",
+          "kimi-k2.6",
+        ],
+      ),
+    );
+
+    expect(connectModel).toHaveBeenCalledWith({
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/v1",
+      interfaceProvider: "openai-compatible",
+      model: "kimi-k2.6",
+      provider: "zenmux",
+    });
+  });
+
+  it("infers anthropic interface for /connect anthropic hosts", async () => {
+    const connectModel = vi.fn(() =>
+      Promise.resolve({
+        apiKeyEnv: "ANTHROPIC_API_KEY",
+        baseUrl: "https://api.anthropic.com/v1",
+        envPath: "D:/repo/.env",
+        interfaceProvider: "anthropic" as const,
+        model: "claude-sonnet-4.6",
+        modelJsonPath: "D:/home/.ohbaby-agent/model.json",
+        provider: "anthropic",
+        saved: true as const,
+      }),
+    );
+    const { service } = createServiceHarness({ connectModel });
+
+    await service.executeCommand(
+      makeInvocation(
+        "connect",
+        ["connect"],
+        [
+          "--provider",
+          "anthropic",
+          "--base-url",
+          "https://api.anthropic.com/v1",
+          "--api-key-env",
+          "ANTHROPIC_API_KEY",
+          "--model",
+          "claude-sonnet-4.6",
+        ],
+      ),
+    );
+
+    expect(connectModel).toHaveBeenCalledWith({
+      apiKeyEnv: "ANTHROPIC_API_KEY",
+      baseUrl: "https://api.anthropic.com/v1",
+      interfaceProvider: "anthropic",
+      model: "claude-sonnet-4.6",
+      provider: "anthropic",
+    });
   });
 
   it("executes status and publishes command events with model context", async () => {

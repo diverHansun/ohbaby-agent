@@ -1,19 +1,18 @@
 import { Box, Text, useInput } from "ink";
 import type {
   CoreAPI,
+  UiCurrentModelConfig,
   UiConnectModelInput,
   UiConnectModelInterfaceProvider,
   UiRunStatus,
 } from "ohbaby-sdk";
 import type { ReactElement } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../theme/index.js";
 
-type ConnectSection = "connection" | "model";
 type ConnectFieldKey =
   | "provider"
   | "baseUrl"
-  | "interfaceProvider"
   | "apiKeyEnv"
   | "apiKey"
   | "model"
@@ -23,13 +22,13 @@ type ConnectFieldKey =
 interface ConnectField {
   readonly key: ConnectFieldKey;
   readonly label: string;
+  readonly optional?: boolean;
   readonly secret?: boolean;
 }
 
 interface ConnectDraft {
   readonly provider: string;
   readonly baseUrl: string;
-  readonly interfaceProvider: string;
   readonly apiKeyEnv: string;
   readonly apiKey: string;
   readonly model: string;
@@ -49,18 +48,14 @@ type SaveState =
   | { readonly kind: "saved" }
   | { readonly kind: "error"; readonly message: string };
 
-const CONNECTION_FIELDS: readonly ConnectField[] = [
+const CONNECT_FIELDS: readonly ConnectField[] = [
   { key: "provider", label: "Provider" },
   { key: "baseUrl", label: "Base URL" },
-  { key: "interfaceProvider", label: "Interface" },
   { key: "apiKeyEnv", label: "API key env" },
   { key: "apiKey", label: "API key value", secret: true },
-];
-
-const MODEL_FIELDS: readonly ConnectField[] = [
   { key: "model", label: "Model name" },
-  { key: "contextWindowTokens", label: "Context window" },
-  { key: "maxOutputTokens", label: "Max output tokens" },
+  { key: "contextWindowTokens", label: "Context window", optional: true },
+  { key: "maxOutputTokens", label: "Max output tokens", optional: true },
 ];
 
 const EMPTY_DRAFT: ConnectDraft = {
@@ -68,7 +63,6 @@ const EMPTY_DRAFT: ConnectDraft = {
   apiKeyEnv: "",
   baseUrl: "",
   contextWindowTokens: "",
-  interfaceProvider: "",
   maxOutputTokens: "",
   model: "",
   provider: "",
@@ -85,9 +79,7 @@ export function ConnectPanel({
   onClose,
   runtime,
 }: ConnectPanelProps): ReactElement {
-  const theme = useTheme();
   const [draft, setDraft] = useState<ConnectDraft>(EMPTY_DRAFT);
-  const [section, setSection] = useState<ConnectSection>("connection");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [editingField, setEditingField] = useState<ConnectFieldKey | null>(
     null,
@@ -95,14 +87,15 @@ export function ConnectPanel({
   const [editValue, setEditValue] = useState("");
   const [saveState, setSaveState] = useState<SaveState>({ kind: "idle" });
   const draftRef = useRef<ConnectDraft>(EMPTY_DRAFT);
+  const hasLocalEditRef = useRef(false);
   const editValueRef = useRef("");
   const lastSavedPayloadKeyRef = useRef<string | null>(null);
   const inFlightSaveKeyRef = useRef<string | null>(null);
   const latestSaveKeyRef = useRef<string | null>(null);
   const pendingSaveRef = useRef<PendingSave | null>(null);
 
-  const fields = section === "connection" ? CONNECTION_FIELDS : MODEL_FIELDS;
-  const selectedField = fields[Math.min(selectedIndex, fields.length - 1)];
+  const selectedField =
+    CONNECT_FIELDS[Math.min(selectedIndex, CONNECT_FIELDS.length - 1)];
   const isRunning = runtime.kind === "running";
 
   const replaceEditValue = (nextValue: string): void => {
@@ -114,6 +107,23 @@ export function ConnectPanel({
     draftRef.current = nextDraft;
     setDraft(nextDraft);
   };
+
+  useEffect(() => {
+    let isStale = false;
+    void client
+      .getCurrentModel()
+      .then((current) => {
+        if (isStale || current === null || hasLocalEditRef.current) {
+          return;
+        }
+        replaceDraft(draftFromCurrentModel(current));
+      })
+      .catch(() => undefined);
+
+    return (): void => {
+      isStale = true;
+    };
+  }, [client]);
 
   const startSave = (save: PendingSave): void => {
     inFlightSaveKeyRef.current = save.key;
@@ -216,17 +226,20 @@ export function ConnectPanel({
             editingField,
             editValueRef.current,
           );
+          hasLocalEditRef.current = true;
           replaceDraft(nextDraft);
           setEditingField(null);
           replaceEditValue("");
           maybeSave(nextDraft);
           return;
         }
-        if (key.backspace || key.delete || value === "\u007F") {
+        if (key.backspace || key.delete || isBackspaceInput(value)) {
+          hasLocalEditRef.current = true;
           replaceEditValue(editValueRef.current.slice(0, -1));
           return;
         }
-        if (value !== "" && !key.ctrl && !key.meta) {
+        if (isPrintableInput(value) && !key.ctrl && !key.meta) {
+          hasLocalEditRef.current = true;
           replaceEditValue(editValueRef.current + value);
         }
         return;
@@ -236,23 +249,14 @@ export function ConnectPanel({
         onClose();
         return;
       }
-      if (key.pageDown) {
-        setSection("model");
-        setSelectedIndex(0);
-        return;
-      }
-      if (key.pageUp) {
-        setSection("connection");
-        setSelectedIndex(0);
-        return;
-      }
       if (key.downArrow) {
-        setSelectedIndex((current) => (current + 1) % fields.length);
+        setSelectedIndex((current) => (current + 1) % CONNECT_FIELDS.length);
         return;
       }
       if (key.upArrow) {
         setSelectedIndex(
-          (current) => (current - 1 + fields.length) % fields.length,
+          (current) =>
+            (current - 1 + CONNECT_FIELDS.length) % CONNECT_FIELDS.length,
         );
         return;
       }
@@ -266,14 +270,8 @@ export function ConnectPanel({
 
   return (
     <Box flexDirection="column">
-      <Box justifyContent="space-between">
-        <Text color={theme.status.accent}>
-          {section === "connection" ? "Connection 1/2" : "Model 2/2"}
-        </Text>
-        <Text color={theme.text.muted}>pgup/pgdn</Text>
-      </Box>
       <Box flexDirection="column" marginTop={1}>
-        {fields.map((field, index) => (
+        {CONNECT_FIELDS.map((field, index) => (
           <ConnectFieldRow
             draft={draft}
             editValue={editValue}
@@ -309,12 +307,13 @@ function ConnectFieldRow({
   const rawValue = isEditing ? editValue : draft[field.key];
   const displayValue = field.secret ? maskSecret(rawValue) : rawValue;
   const prefix = isSelected ? "> " : "  ";
-  const label = field.label.padEnd(17, " ");
+  const label = field.label.padEnd(18, " ");
 
   return (
     <Text color={isSelected ? theme.text.strong : undefined}>
       {prefix}
       <Text bold>{label}</Text>
+      {field.optional ? <Text dimColor>optional </Text> : null}
       {displayValue}
     </Text>
   );
@@ -349,17 +348,33 @@ type PayloadBuildResult =
   | { readonly kind: "error"; readonly message: string }
   | { readonly kind: "ready"; readonly input: UiConnectModelInput };
 
+function draftFromCurrentModel(current: UiCurrentModelConfig): ConnectDraft {
+  return {
+    apiKey: "",
+    apiKeyEnv: current.apiKeyEnv,
+    baseUrl: current.baseUrl,
+    contextWindowTokens:
+      current.contextWindowTokens === undefined
+        ? ""
+        : String(current.contextWindowTokens),
+    maxOutputTokens:
+      current.maxOutputTokens === undefined
+        ? ""
+        : String(current.maxOutputTokens),
+    model: current.model,
+    provider: current.provider,
+  };
+}
+
 function buildPayload(draft: ConnectDraft): PayloadBuildResult {
   const provider = draft.provider.trim();
   const baseUrl = draft.baseUrl.trim();
-  const interfaceProvider = normalizeInterfaceProvider(
-    draft.interfaceProvider,
-  );
+  const interfaceProvider = inferInterfaceProvider(baseUrl);
   const apiKeyEnv = draft.apiKeyEnv.trim();
   const apiKey = draft.apiKey.trim();
   const model = draft.model.trim();
 
-  if (!provider || !baseUrl || !interfaceProvider || !apiKeyEnv || !model) {
+  if (!provider || !baseUrl || !apiKeyEnv || !model) {
     return { kind: "incomplete" };
   }
 
@@ -419,21 +434,9 @@ function updateDraft(
 ): ConnectDraft {
   const trimmedValue = value.trim();
   if (field === "baseUrl") {
-    const inferredInterface =
-      draft.interfaceProvider.trim() === ""
-        ? inferInterfaceProvider(trimmedValue)
-        : draft.interfaceProvider;
     return {
       ...draft,
       baseUrl: trimmedValue,
-      interfaceProvider: inferredInterface,
-    };
-  }
-  if (field === "interfaceProvider") {
-    return {
-      ...draft,
-      interfaceProvider:
-        normalizeInterfaceProvider(trimmedValue) ?? trimmedValue,
     };
   }
   return {
@@ -444,31 +447,35 @@ function updateDraft(
 
 function inferInterfaceProvider(
   baseUrl: string,
-): UiConnectModelInterfaceProvider | "" {
-  if (!baseUrl) {
-    return "";
-  }
+): UiConnectModelInterfaceProvider {
   const lower = baseUrl.toLowerCase();
-  return lower.includes("anthropic") || lower.includes("/v1/messages")
+  return lower.includes("anthropic") ||
+    lower.includes("/api/anthropic") ||
+    lower.endsWith("/anthropic") ||
+    lower.includes("/v1/messages")
     ? "anthropic"
     : "openai-compatible";
 }
 
-function normalizeInterfaceProvider(
-  value: string,
-): UiConnectModelInterfaceProvider | null {
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "openai" || normalized === "openai-compatible") {
-    return "openai-compatible";
-  }
-  if (normalized === "anthropic") {
-    return "anthropic";
-  }
-  return null;
+function maskSecret(value: string): string {
+  return "*".repeat(value.length);
 }
 
-function maskSecret(value: string): string {
-  return value.length > 0 ? "********" : "";
+function isBackspaceInput(value: string): boolean {
+  return value === "\b" || value === "\u007F";
+}
+
+function isPrintableInput(value: string): boolean {
+  if (value === "") {
+    return false;
+  }
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (code <= 31 || code === 127) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function sanitizeError(error: unknown, secret?: string): string {

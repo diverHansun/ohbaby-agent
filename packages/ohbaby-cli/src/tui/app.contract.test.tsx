@@ -1617,6 +1617,50 @@ describe("OhbabyTerminalApp", () => {
     app.unmount();
   });
 
+  it("prefills /connect from the current saved model on a single page", async () => {
+    const client = createFakeClient(snapshot(), connectCommandCatalog);
+    client.getCurrentModel.mockResolvedValue({
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      contextWindowTokens: 128_000,
+      interfaceProvider: "anthropic",
+      maxOutputTokens: 8192,
+      model: "glm-5.1",
+      provider: "zenmux",
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await openConnectForm(app);
+    const frame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("zenmux") &&
+        nextFrame.includes("glm-5.1") &&
+        nextFrame.includes("Context window"),
+    );
+
+    expect(frame).not.toContain("Connection 1/2");
+    expect(frame).not.toContain("pgup/pgdn");
+    expect(frame).not.toContain("Interface");
+    expect(frame).toContain("Base URL");
+    expect(frame).toContain("https://zenmux.ai/api/anthropic");
+    expect(frame).toContain("API key env");
+    expect(frame).toContain("ZENMUX_API_KEY");
+    expect(frame).toContain("API key value");
+    expect(frame).toMatch(/Model name\s+glm-5\.1/u);
+    expect(frame).toContain("Context window");
+    expect(frame).toContain("optional 128000");
+    expect(frame).toContain("Max output tokens");
+    expect(frame).toContain("optional 8192");
+    expect(client.connectModel).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
   it("auto-saves /connect after field commits and keeps the API key masked", async () => {
     const client = createFakeClient(snapshot(), connectCommandCatalog);
     const app = render(
@@ -1629,8 +1673,7 @@ describe("OhbabyTerminalApp", () => {
     await openConnectForm(app);
     await submitConnectField(app, "zenmux");
     await sendConnectKey(app, "\u001B[B");
-    await submitConnectField(app, "https://zenmux.example/v1");
-    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "https://zenmux.ai/api/anthropic");
     await sendConnectKey(app, "\u001B[B");
     await submitConnectField(app, "ZENMUX_API_KEY");
     await sendConnectKey(app, "\u001B[B");
@@ -1638,7 +1681,7 @@ describe("OhbabyTerminalApp", () => {
     const secretFrame = app.lastFrame() ?? "";
     expect(secretFrame).not.toContain("sk-connect-secret");
     expect(secretFrame).toContain("********");
-    await sendConnectKey(app, "\u001B[6~");
+    await sendConnectKey(app, "\u001B[B");
     await submitConnectField(app, "anthropic/claude-sonnet-4.6");
 
     const frame = await waitForFrame(app, (nextFrame) =>
@@ -1649,12 +1692,44 @@ describe("OhbabyTerminalApp", () => {
     expect(client.connectModel).toHaveBeenCalledWith({
       apiKey: "sk-connect-secret",
       apiKeyEnv: "ZENMUX_API_KEY",
-      baseUrl: "https://zenmux.example/v1",
-      interfaceProvider: "openai-compatible",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      interfaceProvider: "anthropic",
       model: "anthropic/claude-sonnet-4.6",
       provider: "zenmux",
     });
     expect(frame).not.toContain("sk-connect-secret");
+    app.unmount();
+  });
+
+  it("updates the /connect API key mask while typing and deleting", async () => {
+    const client = createFakeClient(snapshot(), connectCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await openConnectForm(app);
+    await sendConnectKey(app, "\u001B[B");
+    await sendConnectKey(app, "\u001B[B");
+    await sendConnectKey(app, "\u001B[B");
+    await sendConnectKey(app, "\r");
+    await sendConnectKey(app, "s");
+    expect(app.lastFrame() ?? "").toMatch(/API key value\s+\*/u);
+    await sendConnectKey(app, "k");
+    expect(app.lastFrame() ?? "").toMatch(/API key value\s+\*{2}/u);
+    await sendConnectKey(app, "1");
+
+    const typedFrame = app.lastFrame() ?? "";
+    expect(typedFrame).toMatch(/API key value\s+\*{3}/u);
+    expect(typedFrame).not.toContain("sk1");
+
+    await sendConnectKey(app, "\b");
+    const deletedFrame = app.lastFrame() ?? "";
+    expect(deletedFrame).toMatch(/API key value\s+\*{2}/u);
+    expect(deletedFrame).not.toMatch(/API key value\s+\*{3}/u);
+    expect(deletedFrame).not.toContain("sk");
     app.unmount();
   });
 
@@ -1678,9 +1753,9 @@ describe("OhbabyTerminalApp", () => {
     await sendConnectKey(app, "\u001B[B");
     await submitConnectField(app, "https://zenmux.example/v1");
     await sendConnectKey(app, "\u001B[B");
-    await sendConnectKey(app, "\u001B[B");
     await submitConnectField(app, "ZENMUX_API_KEY");
-    await sendConnectKey(app, "\u001B[6~");
+    await sendConnectKey(app, "\u001B[B");
+    await sendConnectKey(app, "\u001B[B");
     await submitConnectField(app, "anthropic/claude-sonnet-4.6");
     await flush();
 
@@ -1710,11 +1785,10 @@ describe("OhbabyTerminalApp", () => {
     await sendConnectKey(app, "\u001B[B");
     await submitConnectField(app, "https://zenmux.example/v1");
     await sendConnectKey(app, "\u001B[B");
-    await sendConnectKey(app, "\u001B[B");
     await submitConnectField(app, "ZENMUX_API_KEY");
     await sendConnectKey(app, "\u001B[B");
     await submitConnectField(app, "sk-connect-secret");
-    await sendConnectKey(app, "\u001B[6~");
+    await sendConnectKey(app, "\u001B[B");
     await submitConnectField(app, "anthropic/claude-sonnet-4.6");
     await waitForConnectModelCount(client, 1);
 
@@ -2404,6 +2478,7 @@ function createFakeClient(
   readonly connectModel: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
   readonly getContextWindowUsage: ReturnType<typeof vi.fn>;
+  readonly getCurrentModel: ReturnType<typeof vi.fn>;
   readonly listCommands: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
   readonly respondPermission: ReturnType<typeof vi.fn>;
@@ -2454,6 +2529,7 @@ function createFakeClient(
     },
     executeCommand: vi.fn(() => Promise.resolve()),
     getContextWindowUsage: vi.fn(() => Promise.resolve(null)),
+    getCurrentModel: vi.fn(() => Promise.resolve(null)),
     getSnapshot: vi.fn(() => Promise.resolve(initialSnapshot)),
     listCommands: vi.fn(() => Promise.resolve(commandCatalog)),
     respondInteraction: vi.fn(() => Promise.resolve()),
@@ -2555,10 +2631,7 @@ async function settleConnectInput(): Promise<void> {
 }
 
 function firstExecutedCommand(
-  client: Pick<
-    ReturnType<typeof createFakeClient>,
-    "executeCommand"
-  >,
+  client: Pick<ReturnType<typeof createFakeClient>, "executeCommand">,
 ): UiCommandInvocation {
   const invocation = client.executeCommand.mock.calls[0]?.[0] as unknown;
   if (!isUiCommandInvocation(invocation)) {
@@ -2568,10 +2641,7 @@ function firstExecutedCommand(
 }
 
 async function waitForCommandCount(
-  client: Pick<
-    ReturnType<typeof createFakeClient>,
-    "executeCommand"
-  >,
+  client: Pick<ReturnType<typeof createFakeClient>, "executeCommand">,
   count: number,
 ): Promise<void> {
   const startedAt = Date.now();
@@ -2597,9 +2667,7 @@ async function waitForConnectModelCount(
       return;
     }
   }
-  throw new Error(
-    `Timed out waiting for ${String(count)} connectModel calls`,
-  );
+  throw new Error(`Timed out waiting for ${String(count)} connectModel calls`);
 }
 
 function isUiCommandInvocation(value: unknown): value is UiCommandInvocation {

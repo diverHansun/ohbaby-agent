@@ -11,7 +11,6 @@ type ConnectArgName =
   | "baseUrl"
   | "apiKeyEnv"
   | "model"
-  | "interfaceProvider"
   | "contextWindowTokens"
   | "maxOutputTokens";
 
@@ -20,7 +19,6 @@ const FLAG_MAP = new Map<string, ConnectArgName>([
   ["--base-url", "baseUrl"],
   ["--api-key-env", "apiKeyEnv"],
   ["--model", "model"],
-  ["--interface-provider", "interfaceProvider"],
   ["--context-window", "contextWindowTokens"],
   ["--max-output-tokens", "maxOutputTokens"],
 ]);
@@ -94,7 +92,6 @@ export function parseConnectArgs(
     ["baseUrl", "--base-url"],
     ["apiKeyEnv", "--api-key-env"],
     ["model", "--model"],
-    ["interfaceProvider", "--interface-provider"],
   ] as const;
   const missing = required
     .filter(([name]) => !values[name])
@@ -111,13 +108,11 @@ export function parseConnectArgs(
   const baseUrl = values.baseUrl;
   const apiKeyEnv = values.apiKeyEnv;
   const model = values.model;
-  const interfaceProvider = values.interfaceProvider;
   if (
     provider === undefined ||
     baseUrl === undefined ||
     apiKeyEnv === undefined ||
-    model === undefined ||
-    interfaceProvider === undefined
+    model === undefined
   ) {
     return {
       code: "MISSING_ARGS",
@@ -126,17 +121,7 @@ export function parseConnectArgs(
     };
   }
 
-  if (
-    interfaceProvider !== "openai-compatible" &&
-    interfaceProvider !== "anthropic"
-  ) {
-    return {
-      code: "INVALID_INTERFACE_PROVIDER",
-      message:
-        "Invalid interface provider. Use openai-compatible or anthropic.",
-      recoverable: true,
-    };
-  }
+  const interfaceProvider = inferInterfaceProvider(baseUrl);
 
   const contextWindowTokens = parsePositiveInteger(
     values.contextWindowTokens,
@@ -212,6 +197,18 @@ function parsePositiveInteger(
     };
   }
   return parsed;
+}
+
+function inferInterfaceProvider(
+  baseUrl: string,
+): UiConnectModelInput["interfaceProvider"] {
+  const lower = baseUrl.toLowerCase();
+  return lower.includes("anthropic") ||
+    lower.includes("/api/anthropic") ||
+    lower.endsWith("/anthropic") ||
+    lower.includes("/v1/messages")
+    ? "anthropic"
+    : "openai-compatible";
 }
 
 function isCommandError(value: unknown): value is UiCommandError {
