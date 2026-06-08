@@ -38,7 +38,7 @@
   - `tool.name` 使用克制 brand gold，`tool.arg` 使用 dim gray。
 
 - `layout`：
-  - 宽屏 content width cap 为 160。
+  - 普通宽屏 content width 跟随终端可用宽度；超宽屏 cap 为 220 并居中。
   - PromptDock 跟随父容器宽度。
   - 长英文、中文宽字符和手动换行都不能越过输入框边界。
 

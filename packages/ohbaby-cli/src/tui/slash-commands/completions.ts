@@ -9,12 +9,22 @@ import { COMMAND_HINT_LIMIT } from "./hints.js";
 export function getSlashCompletion(
   input: string,
   catalog: TuiCommandCatalog | null,
+  selectedIndex = 0,
 ): string {
   if (catalog === null) {
     return input;
   }
 
-  return applySlashCompletion(input, catalog, { surface: "tui" });
+  const candidates = getSlashCompletionCandidates(input, catalog);
+  if (candidates.length === 0) {
+    return applySlashCompletion(input, catalog, { surface: "tui" });
+  }
+
+  const normalizedIndex =
+    ((Math.floor(selectedIndex) % candidates.length) + candidates.length) %
+    candidates.length;
+  const selected = candidates[normalizedIndex];
+  return `/${selected.path.join(" ")} `;
 }
 
 export function getSlashCompletionCandidates(

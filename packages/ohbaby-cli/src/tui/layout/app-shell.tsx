@@ -17,10 +17,11 @@ export function AppShell({ children }: AppShellProps): ReactElement {
   return (
     <LayoutProvider value={metrics}>
       <Box
+        alignItems="center"
         flexDirection="column"
         paddingLeft={metrics.horizontalPadding}
         paddingRight={metrics.horizontalPadding}
-        width={metrics.contentWidth + metrics.horizontalPadding * 2}
+        width={metrics.columns}
       >
         <Box flexDirection="column" width={metrics.contentWidth}>
           {children}

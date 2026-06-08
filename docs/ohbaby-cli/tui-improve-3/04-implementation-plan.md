@@ -202,7 +202,7 @@ pnpm lint
 - `/new` 先复用同 project/root 下 empty primary session，没有再创建。
 - `/new` 的 command action 带明确来源标记，TUI 只认该标记触发强清屏。
 - TUI 写 `\x1b[2J\x1b[3J\x1b[H` 清当前屏幕和 scrollback，并推进 viewport generation。
-- Prompt content width cap 从 132 改为 160，PromptDock 保持输入内容在框内。
+- Prompt content width 从 132/160 旧上限改为普通宽屏跟随终端可用宽度，超宽屏 cap 220 并居中；PromptDock 保持输入内容在框内。
 - 用户历史 prompt 背景调整为克制淡蓝。
 - tool name 使用克制 brand gold，tool arg 使用 dim gray，并在渲染层分色。
 
@@ -212,5 +212,5 @@ pnpm lint
 - ui-inprocess contract：连续 `/new` 复用 empty primary，不创建多个空会话。
 - command service unit：`/new` action 带来源标记。
 - app contract：`/new` action 写强清屏 ANSI；`/resume` 不清屏。
-- layout unit：宽屏 cap 为 160。
+- layout unit：普通宽屏跟随终端可用宽度，超宽屏 cap 为 220。
 - theme/message unit：用户淡蓝块和工具金/灰分色。

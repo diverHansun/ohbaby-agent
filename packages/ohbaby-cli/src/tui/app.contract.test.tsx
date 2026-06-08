@@ -1016,6 +1016,79 @@ describe("OhbabyTerminalApp", () => {
     );
   });
 
+  it("tab completes the highlighted slash candidate without executing it", async () => {
+    const commandCatalog: TuiCommandCatalog = {
+      commands: [
+        command({
+          description: "Start a new session",
+          id: "new",
+          path: ["new"],
+        }),
+        command({
+          description: "Use this skill whenever the user wants PDFs",
+          id: "skill.pdf",
+          path: ["pdf"],
+        }),
+        command({
+          description: "Exit the current UI surface",
+          id: "exit",
+          path: ["exit"],
+        }),
+        command({
+          description: "List available commands",
+          id: "help",
+          path: ["help"],
+        }),
+        command({
+          description: "List MCP server status",
+          id: "mcps",
+          path: ["mcps"],
+        }),
+      ],
+      version: "slash-tab",
+    };
+    const client = createFakeClient(snapshot(), commandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("/");
+    await waitForFrame(
+      app,
+      (frame) =>
+        frame.includes("/new - Start a new session") &&
+        frame.includes("/mcps - List MCP server status"),
+    );
+
+    for (let index = 0; index < 4; index += 1) {
+      app.stdin.write("\u001B[B");
+      await flush();
+    }
+    expect(app.lastFrame()).toContain("> /mcps - List MCP server status");
+
+    app.stdin.write("\t");
+    await waitForFrame(app, (frame) => frame.includes("> /mcps "));
+
+    expect(client.executeCommand).not.toHaveBeenCalled();
+
+    app.stdin.write("\r");
+    await flush();
+
+    expect(client.executeCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        argv: [],
+        commandId: "mcps",
+        path: ["mcps"],
+        raw: "/mcps",
+        sessionId: "session_1",
+      }),
+    );
+  });
+
   it("executes the top-level /new session command from the backend catalog", async () => {
     const client = createFakeClient(snapshot(), catalog);
     const app = render(

@@ -12,10 +12,20 @@ describe("computeLayoutMetrics", () => {
     });
   });
 
-  it("uses regular padding and caps wide content", () => {
+  it("uses the available width on ordinary wide terminals", () => {
+    expect(computeLayoutMetrics({ columns: 180, rows: 40 })).toEqual({
+      columns: 180,
+      contentWidth: 172,
+      horizontalPadding: 4,
+      isCompact: false,
+      rows: 40,
+    });
+  });
+
+  it("uses regular padding and caps ultra-wide content", () => {
     expect(computeLayoutMetrics({ columns: 300, rows: 40 })).toEqual({
       columns: 300,
-      contentWidth: 160,
+      contentWidth: 220,
       horizontalPadding: 4,
       isCompact: false,
       rows: 40,

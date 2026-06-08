@@ -155,7 +155,9 @@ export function Prompt({
       }
 
       if (key.tab && !key.shift) {
-        replaceInput(getSlashCompletion(currentInput, catalog));
+        replaceInput(
+          getSlashCompletion(currentInput, catalog, selectedIndexRef.current),
+        );
         selectIndex(0);
         return;
       }

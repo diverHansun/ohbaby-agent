@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TuiCommandCatalog, TuiCommandSpec } from "../store/snapshot.js";
 import {
+  getSlashCompletion,
   getSlashCompletionCandidates,
   getSlashCompletionPageIndex,
   getSlashCompletionWindow,
@@ -43,6 +44,26 @@ describe("slash command completions", () => {
     expect(getSlashCompletionPageIndex(12, 6, "next")).toBe(0);
     expect(getSlashCompletionPageIndex(8, 0, "previous")).toBe(2);
     expect(getSlashCompletionPageIndex(8, 6, "next")).toBe(0);
+  });
+
+  it("completes the currently selected candidate", () => {
+    const catalog: TuiCommandCatalog = {
+      commands: [
+        command({
+          description: "Start a new session",
+          id: "new",
+          path: ["new"],
+        }),
+        command({
+          description: "List MCP server status",
+          id: "mcps",
+          path: ["mcps"],
+        }),
+      ],
+      version: "selected",
+    };
+
+    expect(getSlashCompletion("/", catalog, 1)).toBe("/mcps ");
   });
 });
 

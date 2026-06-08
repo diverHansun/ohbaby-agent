@@ -6,6 +6,8 @@ export interface TuiLayoutMetrics {
   readonly isCompact: boolean;
 }
 
+const MAX_CONTENT_WIDTH = 220;
+
 export function computeLayoutMetrics(input: {
   readonly columns: number;
   readonly rows: number;
@@ -15,7 +17,7 @@ export function computeLayoutMetrics(input: {
   const isCompact = columns < 80;
   const horizontalPadding = isCompact ? 2 : 4;
   const contentWidth = Math.min(
-    160,
+    MAX_CONTENT_WIDTH,
     Math.max(24, columns - horizontalPadding * 2),
   );
 

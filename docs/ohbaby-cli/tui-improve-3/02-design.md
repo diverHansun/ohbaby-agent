@@ -13,7 +13,7 @@
 - `/new` 采用强新窗口语义：清当前屏幕、清 scrollback、光标回左上角，然后重新渲染空会话。
 - `/new` 清屏必须由 command action 明确标记触发，不能仅凭 active session 为空推断，避免 `/resume` 到空会话误清屏。
 - 后端采用 project-scope 单空会话：同 project/root 下最多保留一个 empty primary session；已有则复用并切换，没有才创建。
-- PromptDock 宽屏上限调整为 160 列，输入内容必须始终被框约束，保留现有手动换行体验。
+- PromptDock 普通宽屏使用终端可用宽度，超宽屏上限为 220 列并居中；输入内容必须始终被框约束，保留现有手动换行体验。
 - 历史用户消息使用克制的淡蓝块；工具名使用克制品牌金色，参数摘要使用灰色，二者不能复用同一蓝色语义。
 
 ## 术语
@@ -46,7 +46,7 @@ PromptDock 是输入区和状态区：
 - 右侧显示 context window usage。
 - 状态行显示 mode、permission、session。
 - 不显示草稿 token。
-- 宽屏下最多扩展到 160 列，不无限拉长。
+- 普通宽屏下跟随终端可用宽度扩展；超宽屏最多扩展到 220 列并居中，不无限拉长。
 - 输入内容、中文宽字符、长英文和手动换行都必须保持在边框内。
 
 ### New Session Screen Reset
