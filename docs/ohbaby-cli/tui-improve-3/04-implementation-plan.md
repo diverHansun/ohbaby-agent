@@ -177,7 +177,7 @@ pnpm lint
 - 先让 tests fail，再实现。
 - 不启用无条件 `<Static>`；只允许 Windows TTY guarded Static，并提供 `OHBABY_TUI_STATIC_TRANSCRIPT=0/1` 覆盖。
 - 不改 SDK 协议字段。
-- 不新增 coalescer。
+- 不新增第二套 coalescer；现有 `stream-coalescer.ts` 可保持，但 terminal buffer/virtual scroll 调优放入 improve-4。
 - 不改变 PromptDock 交互行为。
 
 ## Step 8: `/new` 强新窗口与单空会话收尾
@@ -214,3 +214,40 @@ pnpm lint
 - app contract：`/new` action 写强清屏 ANSI；`/resume` 不清屏。
 - layout unit：普通宽屏跟随终端可用宽度，超宽屏 cap 为 220。
 - theme/message unit：用户淡蓝块和工具金/灰分色。
+
+## Step 9: command notice 生命周期收尾
+
+文件落点：
+
+- `packages/ohbaby-cli/src/tui/store/events.ts`
+- `packages/ohbaby-cli/src/tui/store/events.unit.test.ts`
+
+任务：
+
+- 新增 `clearCommandNotices(state)` 或等价小 helper，集中表达 command notice 的短生命周期。
+- active session append user message 时清空 `state.commandNotices`。
+- active session runtime 进入 running 时清空 `state.commandNotices`。
+- `command.failed` 产生的 error notice 与 result notice 一样短暂显示，但下一轮 user prompt/run start 后清空。
+- 保留 session 切换时清空 command notices 的现有行为。
+- 不把 command notices 移入 `LiveTail`，也不把它们合并进 transcript message。
+
+测试：
+
+- 先有 `/status` result notice，再 append user message，notice 清空。
+- 先有 `command.failed` error notice，再 append user message，notice 清空。
+- 先有 command notice，再收到 active session run start/runtime running，notice 清空。
+- active assistant message append 不清 command notice，避免把普通 assistant 同步误判为下一轮用户动作。
+- 非 active session message append/run start 不清 command notice，避免其他 session 事件影响当前提示。
+- Reducer 层清空后，`CommandNoticeLane` 接收到空 `commandNotices`，旧 command notice 不会出现在新 assistant live tail 下方。
+
+## Step 10: improve-4 交接文档
+
+文件落点：
+
+- 新建 `docs/ohbaby-cli/tui-improve-4/`
+
+任务：
+
+- 记录 opencode、kimi-code、gemini-cli 对 dialog、slash command、terminal buffer/virtual scroll 的参考调查。
+- 明确 improve-4 范围：`/status`、`/help`、`/mcps`、`/models` 卡片化，以及 terminal buffer/virtual scroll 级别的滚动管理。
+- 明确 improve-4 不在本分支实施；本阶段只完成文档对齐，后续新建临时分支执行。

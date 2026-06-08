@@ -73,8 +73,8 @@ export function applyTuiEvent(
         sessions: upsertById(state.sessions, event.session),
       });
 
-    case "message.appended":
-      return rebuildFromCollections(state, {
+    case "message.appended": {
+      const next = rebuildFromCollections(state, {
         activeSessionId: state.activeSessionId ?? event.sessionId,
         sessions: updateSessionMessages(
           state.sessions,
@@ -82,6 +82,11 @@ export function applyTuiEvent(
           (messages) => [...messages, event.message],
         ),
       });
+      return event.message.role === "user" &&
+        next.activeSessionId === event.sessionId
+        ? clearCommandNotices(next)
+        : next;
+    }
 
     case "message.updated":
       return rebuildFromCollections(state, {
@@ -127,16 +132,23 @@ export function applyTuiEvent(
         ),
       });
 
-    case "run.updated":
-      return rebuildFromCollections(state, {
+    case "run.updated": {
+      const next = rebuildFromCollections(state, {
         runs: upsertById(state.runs, event.run),
         runtime: event.run.status,
       });
+      return event.run.status.kind === "running" &&
+        event.run.sessionId === next.activeSessionId
+        ? clearCommandNotices(next)
+        : next;
+    }
 
-    case "runtime.updated":
-      return rebuildFromCollections(state, {
+    case "runtime.updated": {
+      const next = rebuildFromCollections(state, {
         runtime: event.status,
       });
+      return event.status.kind === "running" ? clearCommandNotices(next) : next;
+    }
 
     case "context.window.updated":
       return rebuildFromCollections(state, {
@@ -1135,6 +1147,17 @@ function appendCommandNotice(
       },
     ].slice(-COMMAND_NOTICE_LIMIT),
     commandNoticeSequence,
+  };
+}
+
+function clearCommandNotices(state: TuiStoreState): TuiStoreState {
+  if (state.commandNotices.length === 0) {
+    return state;
+  }
+
+  return {
+    ...state,
+    commandNotices: [],
   };
 }
 

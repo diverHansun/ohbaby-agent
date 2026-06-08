@@ -127,6 +127,11 @@ AppShell
 - 位于 `CommittedTranscript` 与 `LiveTail` 之间。
 - 不属于 `LiveTail`，避免 command notice 与 streaming assistant/tool 职责混杂。
 - session 切换时沿用 store 现有清空策略。
+- command notice 是短生命周期提示，不是 transcript 历史；它只允许解释刚刚完成的命令，不允许污染下一轮 user prompt 或 agent 输出。
+- 下一轮 active session user prompt 被提交时，必须清空旧 command notices。
+- active session run 进入 running 时，也必须清空旧 command notices，避免 `/status`、Esc 取消、slash command 错误继续显示在新 assistant 输出下面。
+- `command.failed` 产生的 error notice 与 command result notice 使用同一生命周期：可短暂显示，但下一次用户动作或 run 开始后清掉。
+- 第一版不追求 command notice 与 message 的严格时间线合并；若命令输出需要长期可见，improve-4 改为 OverlayCard，而不是把 notice 塞进 transcript。
 
 ### MessageRow
 
@@ -257,6 +262,19 @@ session 切换时：
 
 - command notices 继续按现有逻辑清空。
 - UI notices 可保留，但不能伪装成某个 session 的历史消息。
+
+用户进入下一轮操作时：
+
+- 任何 active session user message 被 append 到 store 后，清空旧 command notices。
+- runtime 从 idle/permission/error 等状态进入 running 时，清空旧 command notices。
+- `command.failed` error notice 同样清空；错误不应该在下一轮 assistant 输出完成后仍停留在底部。
+- 清空只作用于 `state.commandNotices`，不影响全局 `state.notices`，也不删除 transcript message。
+
+命令输出卡片化不属于 improve-3：
+
+- `/status`、`/help`、`/mcps`、`/models` 等展示型命令仍可短期沿用 command notice 机制，但不得跨下一轮输出残留。
+- improve-4 会把这些展示型命令迁移到居中 OverlayCard，按 Esc 关闭，不再作为 transcript 或 command notice 长期输出。
+- improve-3 不引入虚拟滚动、terminal buffer 管理或全局 modal manager。
 
 ## 顺序规则
 

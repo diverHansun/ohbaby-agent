@@ -74,6 +74,10 @@
   - `message.updated` completed 后 live tail 可转入 committed。
   - session 切换后旧 session 消息不显示。
   - command notices 不进入全局 `NoticeLane`，随 transcript/live tail 显示或在 session 切换时清空。
+  - active session 提交新的 user prompt 后，旧 command notices 清空。
+  - active session runtime 进入 running 后，旧 command notices 清空。
+  - `command.failed` 产生的 error notice 与 result notice 生命周期一致，下一轮 user prompt/run start 后不再显示。
+  - `/status` 或 Esc 取消产生的旧提示，不允许显示在下一轮 assistant 输出下面。
   - `message.part.delta` 指向不存在的当前 session message 时，drop 并产生 warning notice。
 
 - run stream adapter 已有顺序测试继续保留：
@@ -141,5 +145,6 @@
 - 用户在 PowerShell terminal 手动验收 `/new` 后旧 session 内容不可见，向上滚动也不见旧 transcript。
 - 用户在 PowerShell terminal 手动验收宽屏输入框更宽，且输入内容始终在框内。
 - 用户在 PowerShell terminal 手动验收历史用户淡蓝块与工具金色行能清晰区分。
+- 用户在 PowerShell terminal 手动验收：执行 `/status` 或取消一个 slash command 后，再发送普通 prompt，旧 command notice/error 不出现在新的 agent 输出下方。
 - 用户在 VS Code terminal 手动验收同样 3 个场景。
 - 真实 API key 场景完成并记录结果。

@@ -682,6 +682,158 @@ describe("TUI store event reducer", () => {
     expect(state.interactions).toHaveLength(0);
   });
 
+  it("clears command notices when the active session appends a user message", () => {
+    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      clientInvocationId: "invoke_1",
+      commandRunId: "command_1",
+      output: { kind: "text", text: "status output" },
+      timestamp: 1,
+      type: "command.result.delivered",
+    });
+
+    state = applyTuiEvent(state, {
+      message: userMessage("user_2", "next prompt"),
+      sessionId: "session_1",
+      type: "message.appended",
+    });
+
+    expect(state.commandNotices).toHaveLength(0);
+  });
+
+  it("clears command error notices when the active session appends a user message", () => {
+    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      clientInvocationId: "invoke_1",
+      commandRunId: "command_1",
+      error: {
+        code: "USER_CANCELLED",
+        message: "Session selection cancelled",
+      },
+      timestamp: 1,
+      type: "command.failed",
+    });
+
+    state = applyTuiEvent(state, {
+      message: userMessage("user_2", "next prompt"),
+      sessionId: "session_1",
+      type: "message.appended",
+    });
+
+    expect(state.commandNotices).toHaveLength(0);
+  });
+
+  it("clears command notices when the active session run starts", () => {
+    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      clientInvocationId: "invoke_1",
+      commandRunId: "command_1",
+      output: { kind: "text", text: "status output" },
+      timestamp: 1,
+      type: "command.result.delivered",
+    });
+
+    state = applyTuiEvent(state, {
+      run: {
+        id: "run_1",
+        sessionId: "session_1",
+        startedAt: "2026-05-14T00:00:03.000Z",
+        status: { kind: "running", runId: "run_1" },
+        updatedAt: "2026-05-14T00:00:03.000Z",
+      },
+      type: "run.updated",
+    });
+
+    expect(state.commandNotices).toHaveLength(0);
+  });
+
+  it("clears command notices when runtime enters running directly", () => {
+    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      clientInvocationId: "invoke_1",
+      commandRunId: "command_1",
+      output: { kind: "text", text: "status output" },
+      timestamp: 1,
+      type: "command.result.delivered",
+    });
+
+    state = applyTuiEvent(state, {
+      status: { kind: "running", runId: "run_1" },
+      timestamp: 2,
+      type: "runtime.updated",
+    });
+
+    expect(state.commandNotices).toHaveLength(0);
+  });
+
+  it("does not clear command notices when the active session appends an assistant message", () => {
+    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      clientInvocationId: "invoke_1",
+      commandRunId: "command_1",
+      output: { kind: "text", text: "status output" },
+      timestamp: 1,
+      type: "command.result.delivered",
+    });
+
+    state = applyTuiEvent(state, {
+      message: assistantMessage("assistant_2", "reply"),
+      sessionId: "session_1",
+      type: "message.appended",
+    });
+
+    expect(state.commandNotices).toHaveLength(1);
+  });
+
+  it("does not clear command notices for a non-active session message append", () => {
+    let state = createStateFromSnapshot({
+      ...snapshot(),
+      sessions: [
+        ...snapshot().sessions,
+        {
+          createdAt: "2026-05-14T00:00:04.000Z",
+          id: "session_2",
+          messages: [],
+          title: "Second",
+          updatedAt: "2026-05-14T00:00:04.000Z",
+        },
+      ],
+    });
+    state = applyTuiEvent(state, {
+      clientInvocationId: "invoke_1",
+      commandRunId: "command_1",
+      output: { kind: "text", text: "status output" },
+      timestamp: 1,
+      type: "command.result.delivered",
+    });
+
+    state = applyTuiEvent(state, {
+      message: userMessage("user_2", "other prompt"),
+      sessionId: "session_2",
+      type: "message.appended",
+    });
+
+    expect(state.commandNotices).toHaveLength(1);
+  });
+
+  it("does not clear command notices when a non-active session run starts", () => {
+    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      clientInvocationId: "invoke_1",
+      commandRunId: "command_1",
+      output: { kind: "text", text: "status output" },
+      timestamp: 1,
+      type: "command.result.delivered",
+    });
+
+    state = applyTuiEvent(state, {
+      run: {
+        id: "run_2",
+        sessionId: "session_2",
+        startedAt: "2026-05-14T00:00:03.000Z",
+        status: { kind: "running", runId: "run_2" },
+        updatedAt: "2026-05-14T00:00:03.000Z",
+      },
+      type: "run.updated",
+    });
+
+    expect(state.commandNotices).toHaveLength(1);
+  });
+
   it("drops late command notices that belong to another session", () => {
     let state = createStateFromSnapshot(snapshot());
 
