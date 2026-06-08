@@ -15,24 +15,20 @@
 字段：
 
 ```text
-Connection
-  Provider
-  Base URL
-  Interface
-  API key env
-  API key value
-
-Model
-  Model name
-  Context window
-  Max output tokens
+Provider
+Base URL
+API key env
+API key value
+Model name
+Context window
+Max output tokens
 ```
 
 确认：
 
 - `Provider` 用户自行填写，必填
 - `Base URL` 必填
-- `Interface` 根据 `base_url` 推断默认值，但保存时显式写入
+- `Interface` 不展示为用户字段；根据 `base_url` 自动推断，但保存时显式写入
 - `API key env` 必填
 - `API key value` masked；已有 env 时可不重新输入
 - `Context window` 默认空
@@ -41,7 +37,6 @@ Model
 ## 3. 键盘行为
 
 - `Up/Down` 移动字段
-- `PgUp/PgDn` 切换 section
 - `Enter` 是字段级操作：进入编辑或提交当前字段
 - 字段提交后，若表单完整且合法，自动保存整张配置
 - `Esc` 编辑中取消编辑，非编辑中关闭 panel
@@ -66,10 +61,10 @@ Saved
 
 ## 5. Interface Provider
 
-`/connect` 可以根据 `base_url` 推断默认 `interfaceProvider`：
+`/connect` 根据 `base_url` 推断 `interfaceProvider`：
 
-- URL 明确包含 Anthropic 语义时默认 `anthropic`
-- 其他情况默认 `openai-compatible`
+- URL host 含 `anthropic`、path 包含 `/api/anthropic` 或 Anthropic messages endpoint 时为 `anthropic`
+- URL path 包含 `/api/v1` 或其他 OpenAI-compatible base URL 时为 `openai-compatible`
 
 保存时必须显式写入：
 

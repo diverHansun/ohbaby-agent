@@ -106,7 +106,7 @@ ConnectPanel 采用字段列表形式，参考 gemini-cli 的 `BaseSettingsDialo
   path: ["connect"],
   acceptsArguments: true,
   argsHint:
-    "[--provider <name>] [--base-url <url>] [--api-key-env <ENV>] [--model <name>] [--interface-provider <type>] [--context-window <tokens>] [--max-output-tokens <tokens>]",
+    "[--provider <name>] [--base-url <url>] [--api-key-env <ENV>] [--model <name>] [--context-window <tokens>] [--max-output-tokens <tokens>]",
   argumentMode: "argv",
   category: "model",
   description: "Connect to an LLM provider",
@@ -125,8 +125,7 @@ ConnectPanel 采用字段列表形式，参考 gemini-cli 的 `BaseSettingsDialo
 | Section | Field | 必填 | 行为 |
 |---------|-------|------|------|
 | Connection | Provider | 是 | 用户自行填写，不自动隐藏 |
-| Connection | Base URL | 是 | 合法 URL；修改后重新推断 Interface 默认值 |
-| Connection | Interface | 是 | `openai-compatible` / `anthropic` |
+| Connection | Base URL | 是 | 合法 URL；保存时自动推断 Interface |
 | Connection | API key env | 是 | env var 格式 |
 | Connection | API key value | 条件 | masked；已有 env/.env 时可留空 |
 | Model | Model name | 是 | 支持 `anthropic/...`、`openai/...` namespace |
@@ -136,7 +135,6 @@ ConnectPanel 采用字段列表形式，参考 gemini-cli 的 `BaseSettingsDialo
 键盘：
 
 - `Up/Down` 移动字段
-- `PgUp/PgDn` 切 section
 - `Enter` 编辑/提交当前字段
 - `Esc` 取消编辑或关闭 panel
 
@@ -164,10 +162,10 @@ ConnectPanel 采用字段列表形式，参考 gemini-cli 的 `BaseSettingsDialo
 
 建议默认推断：
 
-- URL path 或 host 明确包含 `anthropic`：`anthropic`
-- 其他情况：`openai-compatible`
+- URL host 含 `anthropic`、path 包含 `/api/anthropic` 或 Anthropic messages endpoint：`anthropic`
+- URL path 包含 `/api/v1` 或其他 OpenAI-compatible base URL：`openai-compatible`
 
-用户可在表单里覆盖该值。后端运行时只读取显式 `apiConfig.interfaceProvider`，不在每次请求时重新猜测。
+用户不可在表单或 `/connect` 参数模式里覆盖该值。后端运行时只读取保存后的显式 `apiConfig.interfaceProvider`，不在每次请求时重新猜测。
 
 ## 6. 保存数据流
 

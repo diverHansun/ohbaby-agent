@@ -26,13 +26,13 @@ Storage
 ## 2. 核心问题
 
 1. **缺少 `/connect` 入口**  
-   用户无法在终端内配置 `provider`、`baseUrl`、`apiKeyEnv`、`model` 和 `interfaceProvider`。
+   用户无法在终端内配置 `provider`、`baseUrl`、`apiKeyEnv` 和 `model`。
 
 2. **API key 不能安全走 slash command 字符串**  
    当前 `executeCommand` 只有 `raw/rawArgs/argv/body`。如果实现 `/connect --api-key ...`，密钥可能进入命令历史、事件、测试快照、错误输出或 transcript。API key 必须通过安全结构化 payload 提交。
 
 3. **interfaceProvider 对用户不可达**  
-   代码已支持 `"openai-compatible"` 与 `"anthropic"`，但当前用户只能手动改 JSON。新设计中，`/connect` 根据 `base_url` 推断默认值，并在保存时显式写入 `apiConfig.interfaceProvider`。
+   代码已支持 `"openai-compatible"` 与 `"anthropic"`，但当前用户只能手动改 JSON。新设计中，`/connect` 根据 `base_url` 自动推断，并在保存时显式写入 `apiConfig.interfaceProvider`；用户不直接配置该字段。
 
 4. **切换后 runtime 可能仍使用旧 client**  
    `ui-inprocess.ts` 会缓存 runtime。只调用 `reloadLLMConfig()` 不够，保存新配置后必须清掉并重建当前 LLM runtime。
@@ -52,7 +52,6 @@ Storage
 |---------|-------|----------|-------|
 | Connection | Provider | 是 | 用户自行填写；用于配置标识、UI 展示和 profile hint |
 | Connection | Base URL | 是 | LLM API endpoint |
-| Connection | Interface | 是 | 根据 `base_url` 推断默认值，可手动覆盖 |
 | Connection | API key env name | 是 | 环境变量名，例如 `ZENMUX_API_KEY` |
 | Connection | API key value | 条件 | masked；当当前 env/.env 已有对应 key 时可留空 |
 | Model | Model name | 是 | 模型名，例如 `anthropic/claude-sonnet-4.6` |
@@ -70,7 +69,6 @@ Storage
 - 字段提交后，如果表单完整且合法，自动保存整张配置
 - 保存成功仅显示 `Saved`
 - `Esc`：编辑中取消编辑；非编辑中关闭 panel
-- `PgUp/PgDn`：切换 section
 - runtime status 为 `running` 时禁止落盘保存，显示 `Busy` 或 `Cannot save while running`
 - API key 永远只渲染 mask，不进入 transcript、notice、panel output、日志或普通 argv
 
@@ -93,7 +91,6 @@ TUI ConnectPanel 保存时调用该 API。API key value 只存在于结构化 pa
          --base-url <url>
          --api-key-env <ENV_NAME>
          --model <name>
-         --interface-provider <openai-compatible|anthropic>
          [--context-window <tokens>]
          [--max-output-tokens <tokens>]
 ```

@@ -32,10 +32,10 @@ E2E / Manual
 
 | ID | 输入 | 期望 |
 |----|------|------|
-| UT-PARSE-01 | `--provider zenmux --base-url https://zenmux.ai/api/anthropic --api-key-env ZENMUX_API_KEY --model anthropic/claude-sonnet-4.6 --interface-provider anthropic` | 解析出完整非敏感配置 |
+| UT-PARSE-01 | `--provider zenmux --base-url https://zenmux.ai/api/anthropic --api-key-env ZENMUX_API_KEY --model anthropic/claude-sonnet-4.6` | 解析出完整非敏感配置，`interfaceProvider=anthropic` |
 | UT-PARSE-02 | `--base-url=https://api.example.com/v1 --model=gpt-4o` | 支持 `=` 分隔符 |
 | UT-PARSE-03 | `--context-window 200000 --max-output-tokens 8192` | 解析为正整数 |
-| UT-PARSE-04 | `--interface-provider invalid` | 报 `INVALID_INTERFACE_PROVIDER` |
+| UT-PARSE-04 | `--interface-provider anthropic` | 报 `INVALID_ARGS`，该字段不接受用户配置 |
 | UT-PARSE-05 | `--api-key sk-test` | 报 `UNSUPPORTED_SECRET_ARG` |
 | UT-PARSE-06 | 空参数 | TUI surface 打开 ConnectPanel；非 TUI 返回缺字段 |
 
@@ -121,12 +121,12 @@ E2E / Manual
 |----|------|------|
 | TUI-01 | `/connect` 无参数 | 打开 ConnectPanel，不调用普通 `executeCommand` |
 | TUI-02 | Provider/Base URL/API key env/Model 输入 | `Enter` 提交字段 |
-| TUI-03 | Base URL 输入 Anthropic URL | Interface 默认显示 `anthropic` |
-| TUI-04 | 手动覆盖 Interface | 保存使用用户选择 |
+| TUI-03 | Base URL 输入 Anthropic URL | 保存 payload 使用 `interfaceProvider=anthropic` |
+| TUI-04 | ConnectPanel 表单 | 不显示可编辑 Interface 字段 |
 | TUI-05 | API key 输入 | 只显示 mask，不出现在 rendered output |
 | TUI-06 | 表单不完整 | 不保存，显示短错误 |
 | TUI-07 | 表单完整 | 自动保存，显示 `Saved` |
-| TUI-08 | `PgUp/PgDn` | 切换 section |
+| TUI-08 | `Up/Down` | 在单页字段列表内移动 |
 | TUI-09 | `Esc` 编辑中 | 取消编辑 |
 | TUI-10 | `Esc` 非编辑中 | 关闭 panel |
 | TUI-11 | runtime running | 显示 `Busy`，不提交 |
@@ -149,7 +149,6 @@ E2E / Manual
 ```text
 □ /connect 出现在 slash command 补全中
 □ /connect 无参数打开 ConnectPanel
-□ PgUp/PgDn 可以切换 Connection/Model section
 □ API key 输入显示 mask
 □ 字段 Enter 后自动保存完整有效配置
 □ 保存成功只显示 Saved
