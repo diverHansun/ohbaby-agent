@@ -25,7 +25,8 @@ describe("theme color palettes", () => {
   });
 
   it("uses a restrained visible blue block for dark historical user prompts", () => {
-    expect(darkPalette.userBlockBg).toBe("#1E3A5F");
+    expect(darkPalette.userBlockBg).toBe("#2C5D8A");
+    expect(darkPalette.userBlockBg).not.toBe("#1E3A5F");
     expect(darkPalette.userBlockBg).not.toBe("#122238");
   });
 });

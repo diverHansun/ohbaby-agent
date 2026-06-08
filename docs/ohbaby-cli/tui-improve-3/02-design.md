@@ -182,7 +182,7 @@ AppShell
 
 历史用户 prompt 使用淡色块，不再只依靠竖线：
 
-- 背景：`theme.message.userBlockBg`，保持低对比。
+- 背景：`theme.message.userBlockBg`，保持克制但清晰可分辨。
 - 左侧：`theme.message.userGutter` 或后续新增 `userAccent`。
 - 正文：`theme.role.user`，不 dim。
 - 圆角不适用于终端；使用 padding 和背景即可。
@@ -199,7 +199,7 @@ AppShell
 
 量化规则：
 
-- `theme.message.userBlockBg` 必须贴近 page background；dark 模式下相对 page background 的感知亮度差异应小于约 4%。
+- `theme.message.userBlockBg` 在 dark 模式下应比深蓝/海军蓝更浅，能快速定位用户历史 prompt，但不能接近当前 PromptDock 的视觉权重。
 - `theme.border` 与 `userBlockBg` 的感知亮度差异应至少约 6%，保证 PromptDock 边框更突出。
 - `theme.spinner` 颜色不得与 `userBlockBg` 同色相，避免 16 色降级路径下混成一块。
 - 16 色或低 color level 下必须回退到可读 ANSI 色名，不允许出现白底白字。
