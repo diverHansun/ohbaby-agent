@@ -22,7 +22,7 @@
 ```
 
 - **Unit tests**: TitleGenerator、脱敏逻辑、title 截断逻辑
-- **Integration tests**: ESC 取消流程、AI 命名端到端、全量 session 加载
+- **Integration tests**: ESC 取消流程、AI 命名端到端、当前 project active sessions 全量加载
 - **E2E / manual**: 视觉卡片风格一致性、PgUp/PgDn 翻页流畅度
 
 ---
@@ -208,28 +208,41 @@ When: 首条消息发出
 Then: TitleGenerator.generateTitle() 不被调用（title !== "New session"）
 ```
 
-### 3.3 全量 Session 加载
+### 3.3 当前 project sessions 全量加载
 
-#### TEST-FL-01: 超过 50 条 session 全量加载
+#### TEST-FL-01: 超过 50 条当前 project active sessions 全量加载
 
 ```
-Given: 项目有 150 条 session
-When: readSessions() 被调用（sessionLimit = 0 即无限）
-Then: 返回所有 150 条 primary session
+Given: 当前 project 有 150 条 active primary sessions
+When: /sessions 请求 session interaction options
+Then: 返回所有 150 条 active primary sessions
 ```
 
 **验证方式**:
-1. 在内存 store 中插入 150 条 mock session
-2. 调用 `getRecent(undefined)`
-3. 断言返回长度为 150
+1. 注入超过 50 条当前 project active primary sessions
+2. 同时注入 archived session、subagent session、其他 project session
+3. 执行 `/sessions`
+4. 断言 interaction options 只包含当前 project、`status === "active"`、非 subagent 的 sessions，且数量完整
 
-#### TEST-FL-02: limit = 0 等价于无限制
+#### TEST-FL-02: 按 updatedAt 由近到远排序
 
 ```
-Given: sessionLimit = 0 传入
-When: store.getRecent(0) 或 store.getRecent(undefined)
-Then: SQL 查询不包含 LIMIT 子句
+Given: 当前 project 有多条 active primary sessions，updatedAt/createdAt 不同
+When: /sessions 请求 session interaction options
+Then: options 按 updatedAt DESC, createdAt DESC 排序
 ```
+
+**验证方式**: 构造乱序 sessions，断言第 1 项是最近 updatedAt；updatedAt 相同时 createdAt 较新的排前。
+
+#### TEST-FL-03: Snapshot limit 不影响 /sessions
+
+```
+Given: PersistentUiStateStore.DEFAULT_SESSION_LIMIT 保持 50
+When: 当前 project 有 150 条 active primary sessions
+Then: /sessions 仍显示全部 150 条 metadata
+```
+
+**验证方式**: 断言 `/sessions` 数据源走 `listByProject`，不依赖 UI snapshot `readSessions` 或 `getRecent()` 默认 limit。
 
 ---
 
@@ -249,13 +262,13 @@ Then: SQL 查询不包含 LIMIT 子句
 
 | 操作 | 预期行为 |
 |------|----------|
-| PgUp | 向上翻 8 条（到页首为止） |
-| PgDn | 向下翻 8 条（到页尾为止） |
+| PgUp | 向上跳 10 条（到页首为止） |
+| PgDn | 向下跳 10 条（到页尾为止） |
 | ↑ | 上移 1 条 |
 | ↓ | 下移 1 条 |
 | ↑ 在顶部 | 无变化（clamp） |
 | ↓ 在底部 | 无变化（clamp） |
-| 翻页底栏 | 始终显示当前位置（如 `Showing 1-8 of 42 sessions`） |
+| 翻页底栏 | 始终显示当前位置（如 `Showing 1-10 of 42 sessions · pgup/pgdn · ↑↓`） |
 
 ### 4.3 ESC 行为
 

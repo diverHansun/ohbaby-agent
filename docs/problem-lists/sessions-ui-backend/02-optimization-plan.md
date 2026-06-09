@@ -10,9 +10,9 @@
 | # | 决策 | 选择 |
 |---|------|------|
 | 1 | 前端架构 | 方案 B：保留 interaction broker 路径，SessionDialog 升级 OverlayCard 卡片式 UI |
-| 2 | 卡片样式 | 1 行极简，只显示 session title |
-| 3 | AI 命名触发 | 首条 user 消息发出后异步触发，小模型，不阻塞主流程 |
-| 4 | Session 上限 | 全量显示，配合 PgUp/PgDn 翻页 |
+| 2 | 卡片样式 | 1 行：左侧 title，右侧 `updatedAt`，title 过长截断 |
+| 3 | AI 命名触发 | 首条 user 消息发出后异步触发，复用当前 active model/provider，不阻塞主流程 |
+| 4 | Session 范围 | 当前 project 的全部 active primary sessions，配合 PgUp/PgDn 切换 |
 | 5 | Title 语言 | 跟随用户输入语言（中文→中文，英文→英文） |
 | 6 | 未命名展示 | 首条消息截断作为临时 title，AI 完成后替换 |
 
@@ -31,9 +31,9 @@ SessionDialog
   └── OverlayCard (borderStyle="round", title="Sessions")
         ├── 标题栏: "Sessions" [esc]
         ├── 搜索栏（可选，后续迭代）
-        ├── 会话列表（全量渲染，PgUp/PgDn 翻页）
-        │     └── 每个 item: "> session title"  (1 行)
-        └── 页脚: "Showing 1-10 of 42 sessions · pgup/pgdn"
+        ├── 会话列表（10 行可见窗口，PgUp/PgDn 切换）
+        │     └── 每个 item: "> session title              MM-DD HH:mm"  (1 行)
+        └── 页脚: "Showing 1-10 of 42 sessions · pgup/pgdn · ↑↓"
 ```
 
 **数据流不变**：仍然通过 `interaction.options` 接收 session 列表，选中后调用 `client.respondInteraction()` 返回 `choiceId`。
@@ -45,16 +45,18 @@ SessionDialog
 - **圆角边框**：`borderStyle="round"`（与 skills/mcps/connect 一致）
 - **宽度**：`Math.max(24, Math.min(88, layout.contentWidth))`
 - **标题栏**：左 "Sessions"（bold, accent），右 "esc"（muted）
+- **行布局**：左侧 title，右侧 `updatedAt` 短时间，title 过长截断
 - **选中行高亮**：`> title` 前缀 + accent 色 + bold
 
 ### 2.3 PgUp/PgDn 翻页
 
 参考 `SkillsPanel`（`command-panel-manager.tsx:263`）的实现模式：
 
-- **可见窗口行数**：`SESSION_PAGE_SIZE = 8`（比 SelectOneDialog 的 6 略大）
-- **PgUp**：向上跳 `SESSION_PAGE_SIZE` 条
-- **PgDn**：向下跳 `SESSION_PAGE_SIZE` 条
-- **窗口计算**：`windowStart = Math.floor(selectedIndex / SESSION_PAGE_SIZE) * SESSION_PAGE_SIZE`
+- **可见窗口行数**：`SESSION_VISIBLE_LINES = 10`
+- **PgUp**：向上跳 10 条
+- **PgDn**：向下跳 10 条
+- **边界行为**：clamp 到首尾，不循环
+- **窗口计算**：保持选中项在 10 行可见窗口内
 - **页脚提示**：`Showing {start}-{end} of {total} sessions · pgup/pgdn · ↑↓`
 
 键盘处理框架：
@@ -89,13 +91,10 @@ if (response.kind === "cancelled") {
 
 // 修改后:
 if (response.kind === "cancelled") {
-  // 静默取消，不报错
-  context.emitAction(action("session.selectionCancelled", {}));
+  // 静默取消，不报错、不发 action、不改变 active session
   return;
 }
 ```
-
-或者检查 `CommandRunContext` 是否有 `cancel()` 或 `abort()` 方法，若无则使用空 action 事件。
 
 ---
 
@@ -109,9 +108,10 @@ if (response.kind === "cancelled") {
 用户发送首条消息
   → backend 记录消息
   → 检查是否为该 session 第一条 user 消息
+  → 先写入首条消息截断后的临时 title
   → 若是：异步启动 AI 命名线程
-  → AI 线程：调用小模型生成 title
-  → 更新 session.title
+  → AI 线程：复用当前 active model/provider 生成 title
+  → 若 title 未被用户或其他流程改写，则更新 session.title
   → 发布 SessionEvent.Updated
 ```
 
@@ -140,8 +140,10 @@ Title:
 
 #### 模型配置
 
-- 使用 ohbaby-agent 的 LLM 配置系统中的小模型（与 title generation 场景匹配）
-- 不阻塞主流程：使用 `Promise` 异步，失败不抛出、只 log
+- 复用 ohbaby-agent 当前 active model/provider，不新增 small/title model 配置
+- 本次 title 请求使用 `maxTokens = 512`，长度主要由 system prompt 约束
+- 本次 title 请求使用 `temperature = 0.2`
+- 不阻塞主流程：使用 `Promise` 异步，失败不抛出、不打扰用户
 - 超时设置：5 秒，超时则放弃本次命名
 
 #### 新文件
@@ -164,8 +166,8 @@ export function createTitleGenerator(options: {
             { role: "system", content: TITLE_PROMPT },
             { role: "user", content: firstUserMessage },
           ],
-          maxTokens: 30,
-          temperature: 0.3,
+          maxTokens: 512,
+          temperature: 0.2,
         });
         return cleanTitle(result);
       } catch {
@@ -184,42 +186,34 @@ export function createTitleGenerator(options: {
 - 英文：截断前 48 个字符（约 8-10 个英文词）
 - 均以 "…" 结尾表示截断
 
-### 3.2 Session 上限移除
+### 3.2 当前 project sessions 全量列出
 
-#### 存储层
+本次不修改 UI snapshot 恢复路径的默认上限，也不把 `getRecent()` 改造成 `/sessions` 的数据源。
 
-`persistent-store.ts` 修改：
-
-```ts
-// 移除前 (L34):
-const DEFAULT_SESSION_LIMIT = 50;
-
-// 修改后:
-const DEFAULT_SESSION_LIMIT = 0; // 0 表示无上限
-```
+`/sessions` 数据源改为当前 project 的 session metadata 查询：
 
 ```ts
-// readSessions 修改前 (L389-423):
-options.sessionManager.getRecent(sessionLimit)
+const sessions = await options.sessionManager.listByProject(project.id, {
+  status: "active",
+});
 
-// readSessions 修改后:
-options.sessionManager.getRecent(
-  sessionLimit > 0 ? sessionLimit : undefined
-)
+return sessions
+  .filter((session) => !session.isSubagent)
+  .sort((left, right) => {
+    if (right.updatedAt !== left.updatedAt) {
+      return right.updatedAt - left.updatedAt;
+    }
+    return right.createdAt - left.createdAt;
+  });
 ```
 
-#### 管理层
+关键边界：
 
-`manager.ts` 修改：
-
-```ts
-// getRecent 支持 undefined limit → 不限制:
-getRecent(limit?: number): Promise<Session[]> {
-  return options.store.getRecent(limit);
-}
-```
-
-`database-store.ts` 修改 `getRecent` 实现，当 `limit` 为 `undefined` 时不添加 `LIMIT` 子句。
+- 只显示当前 project 的 sessions。
+- 只显示 `status === "active"` 的 sessions。
+- 只显示 primary sessions，不显示 subagent sessions。
+- 显示全部匹配 metadata，不受 snapshot `DEFAULT_SESSION_LIMIT = 50` 影响。
+- `SessionManager.getRecent()` 默认 20 可以保留为全局 recent API，本次不再作为 `/sessions` 数据源。
 
 #### 统一命名逻辑
 
@@ -227,8 +221,8 @@ getRecent(limit?: number): Promise<Session[]> {
 
 1. 删除 `manager.ts:defaultTitle()` 的 ISO 时间戳
 2. 修改 `createSessionRecord`：新 session 初始 title 为 `""` 或 `"New session"`
-3. 删除 `ui-inprocess.ts:1062` 的 48 字符截断
-4. 首条消息后统一调用 `TitleGenerator.generateTitle()`
+3. 首条真实 user message 后先写入首条消息截断生成的临时 title
+4. 再异步调用 `TitleGenerator.generateTitle()`
 
 ---
 
@@ -247,25 +241,25 @@ getRecent(limit?: number): Promise<Session[]> {
 |------|------|------|
 | 2.1 | `session-dialog.tsx` | 重写：OverlayCard + 自主渲染列表，替代 SelectOneDialog |
 | 2.2 | `session-dialog.tsx` | 实现 PgUp/PgDn 翻页 |
-| 2.3 | `session-dialog.tsx` | 实现卡片式渲染（1 行 title + 选中高亮） |
+| 2.3 | `session-dialog.tsx` | 实现卡片式渲染（1 行 title + updatedAt + 选中高亮） |
 | 2.4 | 验证 | 视觉验收：与 skills/mcps 卡片风格一致 |
 
-### Phase 3：Session 上限移除
+### Phase 3：当前 project sessions 查询
 
 | 步骤 | 文件 | 操作 |
 |------|------|------|
-| 3.1 | `persistent-store.ts` | `DEFAULT_SESSION_LIMIT` → 0（无上限） |
-| 3.2 | `manager.ts` | `getRecent(limit?)` 支持 undefined |
-| 3.3 | `database-store.ts` | 无 limit 时省略 LIMIT 子句 |
+| 3.1 | `ui-inprocess.ts` | `/sessions` 改用 `listByProject(project.id, { status: "active" })` |
+| 3.2 | `ui-inprocess.ts` | 过滤 subagent sessions，按 `updatedAt DESC, createdAt DESC` 排序 |
+| 3.3 | `builtin.ts` / command types | 将 `createdAt/updatedAt` 传入 interaction option metadata |
 
 ### Phase 4：AI 自动命名
 
 | 步骤 | 文件 | 操作 |
 |------|------|------|
 | 4.1 | 新增 `title-generator.ts` | 创建 `TitleGenerator` 接口和实现 |
-| 4.2 | `manager.ts` | `createSessionRecord` 初始 title 统一为 `"New session"` |
-| 4.3 | `ui-inprocess.ts` | 首条消息后触发 `TitleGenerator.generateTitle()` |
-| 4.4 | `ui-inprocess.ts` | 临时标题改为 "New session"（AI 完成前） |
+| 4.2 | 新增 `prompt-sanitizer.ts` | 首条 user message 脱敏与临时标题截断 |
+| 4.3 | `ui-inprocess.ts` | 首条消息后先写临时标题，再触发 `TitleGenerator.generateTitle()` |
+| 4.4 | `ui-inprocess.ts` | AI 完成前后 recheck，避免覆盖已改写 title |
 
 ### Phase 5：测试与验收
 

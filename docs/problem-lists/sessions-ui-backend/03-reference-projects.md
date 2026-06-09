@@ -47,7 +47,7 @@ gutter: isWorking ? <Spinner /> : undefined
 
 **借鉴点**: 用 `●` 或 spinner 标记当前活跃 session。
 
-**ohbaby 采用**: 无此需求（1 行设计不区分当前/历史）。
+**ohbaby 不采用**: 无此需求（1 行设计不区分当前/历史）。
 
 ### 1.4 AI 自动命名
 
@@ -74,7 +74,7 @@ const cleaned = text
 - 标题最长 100 字符（97 + "..."）
 - 仅在有且只有一条 real user message 时触发
 
-**ohbaby 采用**: 全部采纳。
+**ohbaby 采用**: 采纳异步命名、`<think>` 清理、长度清理、首条 real user message guard。第一版不新增 small/title model 配置，复用当前 active model/provider，并用 system prompt 约束输出长度。
 
 ### 1.5 isDefaultTitle 检测
 
@@ -92,7 +92,7 @@ export function isDefaultTitle(title: string) {
 
 **借鉴点**: 用正则匹配判断 title 是否是默认生成值，从而区分"用户/AI 已命名"和"未命名"。
 
-**ohbaby 不采用**: 改为用 `title === "New session"` 简单等值判断。
+**ohbaby 部分采用**: 保留“默认标题才允许自动覆盖”的 guard 思路；实现上识别 `""`、`"New session"`、`"Untitled session"` 和旧的 `New session - ISO` 格式。
 
 ---
 
@@ -146,7 +146,7 @@ const visibleSessions = this.sessions.slice(visibleStart, visibleStart + this.ma
 
 **借鉴点**: 明确告知用户总条数和当前位置。
 
-**ohbaby 采用**: PgUp/PgDn 后显示 `"Showing {start}-{end} of {total} sessions · pgup/pgdn"`。
+**ohbaby 采用**: PgUp/PgDn 后显示 `"Showing {start}-{end} of {total} sessions · pgup/pgdn · ↑↓"`。
 
 ### 2.4 首条消息作为临时标题
 
@@ -190,7 +190,7 @@ private needUpdateEasyTitle(metadata: SessionMeta): boolean {
 
 **借鉴点**: 只有 title 仍然是默认值时才自动生成，防止覆盖用户手动设置的标题。
 
-**ohbaby 采用**: 同理，只覆盖 `title === "New session"` 的 session。
+**ohbaby 采用**: 同理，只在 title 仍是默认/未命名状态，或仍等于本次写入的临时标题时覆盖，避免覆盖用户或其他流程改写的标题。
 
 ---
 
@@ -268,7 +268,7 @@ MAX_SESSIONS_TO_SEARCH = 100
 
 | 借鉴点 | 来源 | Phase | 理由 |
 |--------|------|-------|------|
-| AI 命名 small model + 异步 | opencode | 4 | 核心功能 |
+| AI 命名异步触发与清理 | opencode | 4 | 核心功能；模型复用当前 active model/provider |
 | AI 命名 prompt 格式 | claude-code | 4 | 质量保证 |
 | PgUp/PgDn ±10 翻页 | opencode | 2 | 核心交互 |
 | 页脚提示 "Showing X of Y" | kimi-code | 2 | UX 完整性 |
