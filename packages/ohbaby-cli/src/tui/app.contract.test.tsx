@@ -136,8 +136,22 @@ const connectCommandCatalog: TuiCommandCatalog = {
   version: "connect",
 };
 
+const previousNoAnimation = process.env.OHBABY_TUI_NO_ANIM;
+
+beforeEach(() => {
+  // Disable spinner/shimmer intervals: these content-level contract tests do not
+  // assert animation, and leaked timers from un-unmounted running-state apps
+  // otherwise pollute later tests.
+  process.env.OHBABY_TUI_NO_ANIM = "1";
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
+  if (previousNoAnimation === undefined) {
+    delete process.env.OHBABY_TUI_NO_ANIM;
+  } else {
+    process.env.OHBABY_TUI_NO_ANIM = previousNoAnimation;
+  }
 });
 
 describe("OhbabyTerminalApp", () => {

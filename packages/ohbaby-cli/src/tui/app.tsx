@@ -498,6 +498,7 @@ function TranscriptViewportContainer({
   const committedMessages = useTuiStoreSelector(store, selectCommittedMessages);
   const liveMessage = useTuiStoreSelector(store, selectLiveMessage);
   const notices = useTuiStoreSelector(store, (state) => state.notices);
+  const runtime = useTuiStoreSelector(store, (state) => state.runtime);
 
   return (
     <TranscriptViewport
@@ -506,6 +507,7 @@ function TranscriptViewportContainer({
       committedMessages={committedMessages}
       liveMessage={liveMessage}
       notices={notices}
+      runtime={runtime}
     />
   );
 }

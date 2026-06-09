@@ -28,6 +28,7 @@ describe("TranscriptViewport", () => {
             title: "Context unavailable",
           },
         ]}
+        runtime={{ kind: "idle" }}
       />,
     );
 
@@ -51,6 +52,7 @@ describe("TranscriptViewport", () => {
         committedMessages={[message("beta", "Beta prompt")]}
         liveMessage={null}
         notices={[]}
+        runtime={{ kind: "idle" }}
       />,
     );
 
@@ -60,6 +62,7 @@ describe("TranscriptViewport", () => {
         committedMessages={[message("alpha", "Alpha prompt")]}
         liveMessage={null}
         notices={[]}
+        runtime={{ kind: "idle" }}
       />,
     );
 
@@ -77,6 +80,7 @@ describe("TranscriptViewport", () => {
         committedMessages={messages}
         liveMessage={null}
         notices={[]}
+        runtime={{ kind: "idle" }}
       />,
     );
 
@@ -96,6 +100,7 @@ describe("TranscriptViewport", () => {
         ]}
         liveMessage={message("assistant_message", "read succeeded")}
         notices={[]}
+        runtime={{ kind: "idle" }}
       />,
     );
 

@@ -5,6 +5,7 @@ export interface RawPalette {
   readonly green: string;
   readonly purple: string;
   readonly purpleBright: string;
+  readonly purpleShimmer: string;
   readonly red: string;
   readonly skyBlue: string;
   readonly surface: string;
@@ -23,6 +24,7 @@ export const darkPalette = {
   green: "#8FCB9B",
   purple: "#B9A3E3",
   purpleBright: "#C9B8EC",
+  purpleShimmer: "#F3ECFF",
   red: "#E8857D",
   skyBlue: "#6E9FCE",
   surface: "#141A12",
@@ -41,6 +43,7 @@ export const lightPalette = {
   green: "#3D9A57",
   purple: "#7C5BC4",
   purpleBright: "#8E6ED4",
+  purpleShimmer: "#C9B2F5",
   red: "#C8453E",
   skyBlue: "#2E6FB0",
   surface: "#F0EBE2",

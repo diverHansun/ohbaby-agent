@@ -8,16 +8,17 @@ const SPINNER_INTERVAL_MS = 80;
 export interface SpinnerProps {
   readonly children?: ReactNode;
   readonly label?: string;
+  readonly color?: string;
 }
 
-export function Spinner({ children, label }: SpinnerProps): ReactElement {
+export function Spinner({ children, label, color }: SpinnerProps): ReactElement {
   const theme = useTheme();
   const animate = process.env.OHBABY_TUI_NO_ANIM !== "1";
   const [frameIndex, setFrameIndex] = useState(0);
   const frames = theme.spinner.frames;
   const palette = theme.spinner.palette;
   const frame = frames[frameIndex % frames.length] ?? "⠋";
-  const color = palette[frameIndex % palette.length];
+  const frameColor = color ?? palette[frameIndex % palette.length];
 
   useEffect(() => {
     if (!animate) {
@@ -35,7 +36,7 @@ export function Spinner({ children, label }: SpinnerProps): ReactElement {
 
   return (
     <Text>
-      <Text color={color}>{frame}</Text>
+      <Text color={frameColor}>{frame}</Text>
       {label ? <Text> {label}</Text> : null}
       {children}
     </Text>

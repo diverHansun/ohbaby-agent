@@ -28,6 +28,10 @@ describe("createTheme", () => {
       frames: BRAILLE_SPINNER_FRAMES,
       palette: [darkPalette.gold],
     });
+    expect(theme.workingSpinner).toEqual({
+      base: darkPalette.purple,
+      highlight: darkPalette.purpleShimmer,
+    });
     expect(theme.tool.name).toBe(darkPalette.gold);
     expect(theme.tool.name).not.toBe(darkPalette.goldBright);
     expect(theme.tool.arg).toBe(darkPalette.textDim);
@@ -44,6 +48,10 @@ describe("createTheme", () => {
     const theme = createTheme("light", 3);
 
     expect(theme.brandTitle.primary).toBe(lightPalette.gold);
+    expect(theme.workingSpinner).toEqual({
+      base: lightPalette.purple,
+      highlight: lightPalette.purpleShimmer,
+    });
     expect(theme.text.normal).toBe(lightPalette.text);
     expect(theme.border).toBe(lightPalette.border);
     expect(theme.message.userBlockBg).toBe(lightPalette.userBlockBg);
@@ -66,5 +74,9 @@ describe("createTheme", () => {
     expect(theme.tool.name).toBe("yellow");
     expect(theme.tool.arg).toBe("gray");
     expect(theme.spinner.palette).toEqual(["yellow"]);
+    expect(theme.workingSpinner).toEqual({
+      base: "magenta",
+      highlight: "whiteBright",
+    });
   });
 });

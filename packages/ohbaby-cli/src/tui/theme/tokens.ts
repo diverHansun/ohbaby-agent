@@ -29,6 +29,10 @@ export interface Theme {
     readonly frames: readonly string[];
     readonly palette: readonly string[];
   };
+  readonly workingSpinner: {
+    readonly base: string;
+    readonly highlight: string;
+  };
   readonly status: {
     readonly accent: string;
     readonly error: string;
@@ -98,6 +102,10 @@ export function createTheme(mode: ColorMode, colorLevel = 3): Theme {
     spinner: {
       frames: BRAILLE_SPINNER_FRAMES,
       palette: [color("gold", "yellow")],
+    },
+    workingSpinner: {
+      base: color("purple", "magenta"),
+      highlight: color("purpleShimmer", "whiteBright"),
     },
     status: {
       accent: color("skyBlue", "cyan"),
