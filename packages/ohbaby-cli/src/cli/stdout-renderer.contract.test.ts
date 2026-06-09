@@ -57,4 +57,76 @@ describe("createStdoutRenderer", () => {
       "warning: Custom instructions skipped: OHBABY.md was skipped because it tried to override instructions. (/repo/OHBABY.md)\n",
     ]);
   });
+
+  it("formats connect output without exposing internal context window source", () => {
+    const stdout: string[] = [];
+    const renderer = createStdoutRenderer({
+      write: (chunk) => stdout.push(chunk),
+    });
+
+    renderer.handle({
+      clientInvocationId: "inv_connect",
+      commandRunId: "cmd_connect",
+      output: {
+        data: {
+          result: {
+            apiKeyEnv: "ZENMUX_API_KEY",
+            baseUrl: "https://zenmux.ai/api/anthropic",
+            contextWindowSource: "detected",
+            contextWindowTokens: 262_144,
+            interfaceProvider: "anthropic",
+            model: "moonshotai/kimi-k2.6",
+            provider: "zenmux",
+            saved: true,
+          },
+        },
+        kind: "data",
+        subject: "model.connected",
+      },
+      timestamp: 1,
+      type: "command.result.delivered",
+    });
+
+    expect(stdout.join("")).toContain("model connected:");
+    expect(stdout.join("")).toContain("moonshotai/kimi-k2.6");
+    expect(stdout.join("")).toContain("262,144");
+    expect(stdout.join("")).not.toContain("contextWindowSource");
+    expect(stdout.join("")).not.toContain("detected");
+  });
+
+  it("prints connect warnings without exposing internal context window source", () => {
+    const stdout: string[] = [];
+    const renderer = createStdoutRenderer({
+      write: (chunk) => stdout.push(chunk),
+    });
+
+    renderer.handle({
+      clientInvocationId: "inv_connect",
+      commandRunId: "cmd_connect",
+      output: {
+        data: {
+          result: {
+            apiKeyEnv: "ZENMUX_API_KEY",
+            baseUrl: "https://zenmux.ai/api/anthropic",
+            contextWindowSource: "default",
+            contextWindowTokens: 128_000,
+            interfaceProvider: "anthropic",
+            model: "moonshotai/kimi-k2.6",
+            provider: "zenmux",
+            saved: true,
+            warning:
+              "Unable to detect model context window from metadata; using the configured fallback.",
+          },
+        },
+        kind: "data",
+        subject: "model.connected",
+      },
+      timestamp: 1,
+      type: "command.result.delivered",
+    });
+
+    expect(stdout.join("")).toContain("warning: Unable to detect");
+    expect(stdout.join("")).not.toContain("contextWindowSource");
+    expect(stdout.join("")).not.toContain("default");
+  });
 });

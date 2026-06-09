@@ -62,6 +62,16 @@ describe("WorkingSpinner", () => {
     expect(matchedPhrase(frame)).toBeDefined();
   });
 
+  it("uses the runtime title when one is provided", () => {
+    const frame = frameOf({
+      kind: "running",
+      runId: "command_compact",
+      title: "Compacting...",
+    });
+    expect(frame).toContain("Compacting...");
+    expect(matchedPhrase(frame)).toBeUndefined();
+  });
+
   it("keeps the same phrase across re-renders within one turn", () => {
     let app: ReturnType<typeof render> | undefined;
     act(() => {

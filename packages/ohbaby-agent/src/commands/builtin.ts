@@ -502,7 +502,7 @@ async function handleSessionCompact(
   });
   context.emitOutput(dataOutput("session.compact", { result }));
   context.emitAction(
-    action("session.compacted", {
+    action("session.compact.completed", {
       sessionId: result.sessionId,
       status: result.status,
     }),

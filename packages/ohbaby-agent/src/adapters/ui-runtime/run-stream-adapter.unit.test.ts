@@ -74,7 +74,7 @@ describe("startRunStreamProjection", () => {
     });
   });
 
-  it("emits compact notices from context prepared events without duplicating turn start compaction", async () => {
+  it("does not emit persistent notices for successful context compaction", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const stateStore = createInMemoryUiStateStore({
       activeSessionId: "session_1",
@@ -145,14 +145,7 @@ describe("startRunStreamProjection", () => {
     projection.start();
     await projection.done;
 
-    expect(onNotice).toHaveBeenCalledTimes(1);
-    expect(onNotice).toHaveBeenCalledWith(
-      expect.objectContaining({
-        key: "context:compact:session_1",
-        level: "info",
-        title: "Context compacted",
-      }),
-    );
+    expect(onNotice).not.toHaveBeenCalled();
   });
 
   it("can subscribe before a fast run ends and pump the buffered events later", async () => {

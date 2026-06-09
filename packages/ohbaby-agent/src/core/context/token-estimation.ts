@@ -1,5 +1,6 @@
 import type { MessageWithParts, TokenUsageMetadata } from "../message/index.js";
 import { serializeHistory, serializeMessage } from "./serialization.js";
+import { isSummaryMessage } from "./summary.js";
 import type { TokenCounter } from "./types.js";
 
 export interface ContextTokenEstimate {
@@ -13,7 +14,8 @@ export function estimateContextTokens(
   history: readonly MessageWithParts[],
   tokenCounter: Pick<TokenCounter, "estimateTokens">,
 ): ContextTokenEstimate {
-  const anchor = findLatestUsageAnchor(history);
+  const latestSummaryIndex = findLatestSummaryIndex(history);
+  const anchor = findLatestUsageAnchor(history, latestSummaryIndex);
   if (!anchor) {
     const tokens = tokenCounter.estimateTokens(serializeHistory(history));
     return { tokens, anchorTokens: 0, tailTokens: tokens, anchorIndex: -1 };
@@ -36,9 +38,15 @@ export function estimateContextTokens(
 
 function findLatestUsageAnchor(
   history: readonly MessageWithParts[],
+  latestSummaryIndex: number,
 ): { readonly index: number; readonly tokens: number } | undefined {
   for (let index = history.length - 1; index >= 0; index -= 1) {
-    const usage = history[index]?.parts
+    const message = history[index];
+    if (index < latestSummaryIndex) {
+      continue;
+    }
+
+    const usage = message.parts
       .map((part) => readTokenUsage(part.metadata))
       .find(
         (candidate): candidate is TokenUsageMetadata =>
@@ -51,12 +59,27 @@ function findLatestUsageAnchor(
   return undefined;
 }
 
-function readTokenUsage(metadata: unknown): TokenUsageMetadata | undefined {
-  if (metadata === null || typeof metadata !== "object") {
+function findLatestSummaryIndex(
+  history: readonly MessageWithParts[],
+): number {
+  let latest = -1;
+  for (let index = 0; index < history.length; index += 1) {
+    const message = history[index];
+    if (isSummaryMessage(message)) {
+      latest = index;
+    }
+  }
+  return latest;
+}
+
+function readTokenUsage(
+  metadata: { readonly tokenUsage?: unknown } | undefined,
+): TokenUsageMetadata | undefined {
+  const tokenUsage = metadata?.tokenUsage;
+  if (tokenUsage === undefined || tokenUsage === null) {
     return undefined;
   }
-  const tokenUsage = (metadata as Record<string, unknown>).tokenUsage;
-  if (tokenUsage === null || typeof tokenUsage !== "object") {
+  if (typeof tokenUsage !== "object") {
     return undefined;
   }
   const record = tokenUsage as Record<string, unknown>;

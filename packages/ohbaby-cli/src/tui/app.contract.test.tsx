@@ -1715,6 +1715,41 @@ describe("OhbabyTerminalApp", () => {
     app.unmount();
   });
 
+  it("shows a lightweight /connect probe warning after save", async () => {
+    const client = createFakeClient(snapshot(), connectCommandCatalog);
+    client.connectModel.mockResolvedValue(
+      connectResult({
+        warning:
+          "Unable to detect model context window from metadata; using the configured fallback.",
+      }),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await openConnectForm(app);
+    await submitConnectField(app, "zenmux");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "https://zenmux.ai/api/anthropic");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "ZENMUX_API_KEY");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "sk-connect-secret");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "anthropic/claude-sonnet-4.6");
+
+    const frame = await waitForFrame(app, (nextFrame) =>
+      nextFrame.includes("saved - Unable to detect model context window"),
+    );
+
+    expect(frame).not.toContain("contextWindowSource");
+    expect(frame).not.toContain("sk-connect-secret");
+    app.unmount();
+  });
+
   it("updates the /connect API key mask while typing and deleting", async () => {
     const client = createFakeClient(snapshot(), connectCommandCatalog);
     const app = render(
@@ -2528,6 +2563,8 @@ function createFakeClient(
       Promise.resolve({
         apiKeyEnv: "ZENMUX_API_KEY",
         baseUrl: "https://api.example.com",
+        contextWindowSource: "default",
+        contextWindowTokens: 128_000,
         envPath: ".env",
         interfaceProvider: "openai-compatible",
         model: "example-model",
@@ -2593,6 +2630,8 @@ function connectResult(
   return {
     apiKeyEnv: "ZENMUX_API_KEY",
     baseUrl: "https://zenmux.example/v1",
+    contextWindowSource: "default",
+    contextWindowTokens: 128_000,
     envPath: ".env",
     interfaceProvider: "openai-compatible",
     model: "anthropic/claude-sonnet-4.6",
@@ -2619,13 +2658,16 @@ async function openConnectForm(app: {
 }
 
 async function submitConnectField(
-  app: { readonly stdin: { readonly write: (chunk: string) => void } },
+  app: {
+    readonly lastFrame: () => string | undefined;
+    readonly stdin: { readonly write: (chunk: string) => void };
+  },
   value: string,
 ): Promise<void> {
   app.stdin.write("\r");
   await settleConnectInput();
   app.stdin.write(value);
-  await settleConnectInput();
+  await waitForFrame(app, (nextFrame) => connectInputEchoed(nextFrame, value));
   app.stdin.write("\r");
   await settleConnectInput();
 }
@@ -2642,6 +2684,10 @@ async function settleConnectInput(): Promise<void> {
   await new Promise((resolve) => {
     setTimeout(resolve, 50);
   });
+}
+
+function connectInputEchoed(frame: string, value: string): boolean {
+  return frame.includes(value) || frame.includes("*".repeat(value.length));
 }
 
 function firstExecutedCommand(

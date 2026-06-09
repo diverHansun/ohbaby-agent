@@ -49,12 +49,14 @@ export function noticeFromCompactResult(
   sessionId: string,
   result: CompactResult,
 ): Omit<UiNotice, "id" | "createdAt"> | undefined {
-  if (result.status === "not-needed") {
+  if (
+    result.status === "not-needed" ||
+    result.status === "compacted" ||
+    result.status === "pruned"
+  ) {
     return undefined;
   }
 
-  const before = formatTokenCount(result.usageBefore.currentTokens);
-  const after = formatTokenCount(result.usageAfter.currentTokens);
   if (result.status === "failed") {
     return {
       key: `context:compact:${sessionId}`,
@@ -65,24 +67,12 @@ export function noticeFromCompactResult(
       title: "Context compact warning",
     };
   }
-  if (result.status === "inflated") {
-    return {
-      key: `context:compact:${sessionId}`,
-      level: "warning",
-      message: `Context compact skipped because the summary was not smaller (${before} -> ${after} tokens).`,
-      title: "Context compact warning",
-    };
-  }
-
   return {
     key: `context:compact:${sessionId}`,
-    level: "info",
+    level: "warning",
     message:
-      result.status === "compacted"
-        ? `Context compacted: ${before} -> ${after} tokens.`
-        : `Context pruned: ${before} -> ${after} tokens.`,
-    title:
-      result.status === "compacted" ? "Context compacted" : "Context pruned",
+      "Context compact skipped because the summary was not smaller. Continuing with the available context.",
+    title: "Context compact warning",
   };
 }
 
@@ -91,27 +81,26 @@ export function createContextSummaryClient(
 ): ContextLLMClient {
   return {
     async generateSummary(input): Promise<string> {
-      let summary = "";
-      for await (const response of streamChatCompletion(llmClient, [
-        { role: "system", content: input.systemPrompt ?? input.prompt },
-        { role: "user", content: serializeHistory(input.history) },
-      ])) {
-        if (response.isComplete) {
-          summary = messageContentToText(response.completeMessage.content);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        let summary = "";
+        for await (const response of streamChatCompletion(llmClient, [
+          { role: "system", content: input.systemPrompt ?? input.prompt },
+          { role: "user", content: serializeHistory(input.history) },
+          { role: "user", content: input.prompt },
+        ])) {
+          if (response.isComplete) {
+            summary = messageContentToText(response.completeMessage.content);
+          }
+        }
+
+        const trimmed = summary.trim();
+        if (trimmed !== "") {
+          return trimmed;
         }
       }
-
-      const trimmed = summary.trim();
-      if (trimmed === "") {
-        throw new Error("Context compact summary was empty");
-      }
-      return trimmed;
+      throw new Error("Context compact summary was empty after retries");
     },
   };
-}
-
-function formatTokenCount(tokens: number): string {
-  return Math.round(tokens).toLocaleString("en-US");
 }
 
 function messageContentToText(content: unknown): string {

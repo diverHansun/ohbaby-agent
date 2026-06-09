@@ -1066,7 +1066,8 @@ describe("createInProcessUiBackendClient", () => {
       expect(result).toEqual({
         apiKeyEnv: "ZENMUX_API_KEY",
         baseUrl: "https://zenmux.example/v1",
-        contextWindowTokens: 200_000,
+        contextWindowSource: "default",
+        contextWindowTokens: 128_000,
         envPath: join(projectRoot, ".env"),
         interfaceProvider: "openai-compatible",
         maxOutputTokens: 8192,
@@ -1074,6 +1075,8 @@ describe("createInProcessUiBackendClient", () => {
         modelJsonPath,
         provider: "zenmux",
         saved: true,
+        warning:
+          "Unable to detect model context window from metadata; using the configured fallback.",
       });
       expect(JSON.stringify(result)).not.toContain("sk-connect-contract");
 
@@ -1088,7 +1091,7 @@ describe("createInProcessUiBackendClient", () => {
         },
         defaultModel: "anthropic/claude-sonnet-4.6",
         llmParams: {
-          contextWindowTokens: 200_000,
+          contextWindowTokens: 128_000,
           maxTokens: 8192,
         },
         provider: "zenmux",
@@ -1492,7 +1495,7 @@ describe("createInProcessUiBackendClient", () => {
           event.type === "notice.emitted" &&
           event.notice.key === "context:compact:session_1",
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("exposes manual compact through the SDK client", async () => {

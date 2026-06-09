@@ -16,7 +16,62 @@ function renderOutput(output: UiCommandOutput): string {
   if (output.kind === "markdown") {
     return output.markdown;
   }
+  if (output.subject === "model.connected") {
+    return formatModelConnectedOutput(output.data);
+  }
   return JSON.stringify(output.data);
+}
+
+function formatModelConnectedOutput(data: Record<string, unknown>): string {
+  const result = getRecord(data, "result");
+  const model = result ? getString(result, "model") : undefined;
+  const provider = result ? getString(result, "provider") : undefined;
+  const contextWindowTokens = result
+    ? getNumber(result, "contextWindowTokens")
+    : undefined;
+  const label = [provider, model].filter(Boolean).join("/");
+  const context =
+    contextWindowTokens === undefined
+      ? ""
+      : ` (${formatTokenCount(contextWindowTokens)} context tokens)`;
+  const connected =
+    label === ""
+    ? "model connected"
+    : `model connected: ${label}${context}`;
+  const warning = result ? getString(result, "warning") : undefined;
+  return warning === undefined ? connected : `${connected}\nwarning: ${warning}`;
+}
+
+function getRecord(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | undefined {
+  const value = record[key];
+  return isRecord(value) ? value : undefined;
+}
+
+function getString(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function getNumber(
+  record: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = record[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+function formatTokenCount(value: number): string {
+  return Math.round(value).toLocaleString("en-US");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function createStdoutRenderer(

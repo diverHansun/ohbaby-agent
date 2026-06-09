@@ -84,7 +84,7 @@ export function applyTuiEvent(
       });
       return event.message.role === "user" &&
         next.activeSessionId === event.sessionId
-        ? clearCommandNotices(next)
+        ? clearEphemeralNotices(clearCommandNotices(next))
         : next;
     }
 
@@ -139,7 +139,7 @@ export function applyTuiEvent(
       });
       return event.run.status.kind === "running" &&
         event.run.sessionId === next.activeSessionId
-        ? clearCommandNotices(next)
+        ? clearEphemeralNotices(clearCommandNotices(next))
         : next;
     }
 
@@ -147,7 +147,9 @@ export function applyTuiEvent(
       const next = rebuildFromCollections(state, {
         runtime: event.status,
       });
-      return event.status.kind === "running" ? clearCommandNotices(next) : next;
+      return event.status.kind === "running"
+        ? clearEphemeralNotices(clearCommandNotices(next))
+        : next;
     }
 
     case "context.window.updated":
@@ -194,8 +196,8 @@ export function applyTuiEvent(
     case "notice.emitted":
       return appendUiNotice(state, event.notice);
 
-    case "command.started":
-      return {
+    case "command.started": {
+      const next = {
         ...state,
         commandSessionIds: rememberCommandSessionId(
           state.commandSessionIds,
@@ -203,33 +205,50 @@ export function applyTuiEvent(
           event.command.sessionId,
         ),
       };
+      if (event.command.commandId !== "compact") {
+        return next;
+      }
+      return clearEphemeralNotices(
+        rebuildFromCollections(next, {
+          runtime: {
+            kind: "running",
+            runId: event.command.commandRunId,
+            title: "Compacting...",
+          },
+        }),
+      );
+    }
 
-    case "command.result.delivered":
+    case "command.result.delivered": {
+      const next = clearCommandRuntime(state, event.commandRunId);
       if (!event.output || !shouldDisplayCommandOutput(event.output)) {
-        return state;
+        return next;
       }
-      if (!shouldDisplayCommandNotice(state, event.commandRunId)) {
-        return state;
+      if (!shouldDisplayCommandNotice(next, event.commandRunId)) {
+        return next;
       }
-      return appendCommandNotice(state, {
+      return appendCommandNotice(next, {
         clientInvocationId: event.clientInvocationId,
         commandId: event.commandRunId,
         kind: "result",
-        sessionId: commandSessionId(state, event.commandRunId) ?? undefined,
+        sessionId: commandSessionId(next, event.commandRunId) ?? undefined,
         text: formatCommandOutput(event.output),
       });
+    }
 
-    case "command.failed":
-      if (!shouldDisplayCommandNotice(state, event.commandRunId)) {
-        return state;
+    case "command.failed": {
+      const next = clearCommandRuntime(state, event.commandRunId);
+      if (!shouldDisplayCommandNotice(next, event.commandRunId)) {
+        return next;
       }
-      return appendCommandNotice(state, {
+      return appendCommandNotice(next, {
         clientInvocationId: event.clientInvocationId,
         commandId: event.commandRunId,
         kind: "error",
-        sessionId: commandSessionId(state, event.commandRunId) ?? undefined,
+        sessionId: commandSessionId(next, event.commandRunId) ?? undefined,
         text: event.error.message,
       });
+    }
 
     case "command.catalog.updated":
       return {
@@ -909,19 +928,18 @@ function formatDataCommandOutput(
     case "session.compact": {
       const result = getRecord(output.data, "result");
       const status = result ? getString(result, "status") : undefined;
-      const usageBefore = result ? getRecord(result, "usageBefore") : undefined;
-      const usageAfter = result ? getRecord(result, "usageAfter") : undefined;
-      const before = usageBefore
-        ? getNumber(usageBefore, "currentTokens")
-        : undefined;
-      const after = usageAfter
-        ? getNumber(usageAfter, "currentTokens")
-        : undefined;
-      return status && before !== undefined && after !== undefined
-        ? `compact: ${status} (${formatTokenCount(before)} -> ${formatTokenCount(
-            after,
-          )} tokens)`
-        : JSON.stringify(output.data);
+      switch (status) {
+        case "compacted":
+        case "pruned":
+          return "Compacted";
+        case "failed":
+          return "Compact failed";
+        case "inflated":
+        case "not-needed":
+          return "Compact skipped";
+        default:
+          return JSON.stringify(output.data);
+      }
     }
     case "session.list": {
       const sessions = Array.isArray(output.data.sessions)
@@ -948,6 +966,9 @@ function formatDataCommandOutput(
         ? `models: ${models.join(", ")}`
         : JSON.stringify(output.data);
     }
+    case "model.connected": {
+      return formatModelConnectedOutput(output.data);
+    }
     case "mcps": {
       const servers = Array.isArray(output.data.servers)
         ? output.data.servers
@@ -971,6 +992,26 @@ function formatDataCommandOutput(
     default:
       return JSON.stringify(output.data);
   }
+}
+
+function formatModelConnectedOutput(data: Record<string, unknown>): string {
+  const result = getRecord(data, "result");
+  const model = result ? getString(result, "model") : undefined;
+  const provider = result ? getString(result, "provider") : undefined;
+  const contextWindowTokens = result
+    ? getNumber(result, "contextWindowTokens")
+    : undefined;
+  const label = [provider, model].filter(Boolean).join("/");
+  const context =
+    contextWindowTokens === undefined
+      ? ""
+      : ` (${formatTokenCount(contextWindowTokens)} context tokens)`;
+  const connected =
+    label === "" ? "model connected" : `model connected: ${label}${context}`;
+  const warning = result ? getString(result, "warning") : undefined;
+  return warning === undefined
+    ? connected
+    : `${connected}\nwarning: ${warning}`;
 }
 
 function formatHelpCategory(category: Record<string, unknown>): string {
@@ -1159,6 +1200,27 @@ function clearCommandNotices(state: TuiStoreState): TuiStoreState {
     ...state,
     commandNotices: [],
   };
+}
+
+function clearCommandRuntime(
+  state: TuiStoreState,
+  commandRunId: string,
+): TuiStoreState {
+  return state.runtime.kind === "running" &&
+    state.runtime.runId === commandRunId
+    ? rebuildFromCollections(state, { runtime: { kind: "idle" } })
+    : state;
+}
+
+function clearEphemeralNotices(state: TuiStoreState): TuiStoreState {
+  const notices = state.notices.filter(isPersistentNotice);
+  return notices.length === state.notices.length
+    ? state
+    : { ...state, notices };
+}
+
+function isPersistentNotice(notice: UiNotice): boolean {
+  return (notice.key ?? notice.id).startsWith("prompt-security:");
 }
 
 function appendUiNotice(state: TuiStoreState, notice: UiNotice): TuiStoreState {

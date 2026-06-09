@@ -129,6 +129,66 @@ function latestCommandNoticeText(state: TuiStoreState): string | undefined {
 }
 
 describe("TUI store event reducer", () => {
+  it("formats connect command output without exposing internal context window source", () => {
+    const state = applyCommandOutput(
+      createStateFromSnapshot(snapshot()),
+      {
+        data: {
+          result: {
+            apiKeyEnv: "ZENMUX_API_KEY",
+            baseUrl: "https://zenmux.ai/api/anthropic",
+            contextWindowSource: "detected",
+            contextWindowTokens: 262_144,
+            interfaceProvider: "anthropic",
+            model: "moonshotai/kimi-k2.6",
+            provider: "zenmux",
+            saved: true,
+          },
+        },
+        kind: "data",
+        subject: "model.connected",
+      },
+      "connect",
+    );
+
+    expect(latestCommandNoticeText(state)).toContain("model connected:");
+    expect(latestCommandNoticeText(state)).toContain("moonshotai/kimi-k2.6");
+    expect(latestCommandNoticeText(state)).toContain("262,144");
+    expect(latestCommandNoticeText(state)).not.toContain("contextWindowSource");
+    expect(latestCommandNoticeText(state)).not.toContain("detected");
+  });
+
+  it("formats connect warnings without exposing internal context window source", () => {
+    const state = applyCommandOutput(
+      createStateFromSnapshot(snapshot()),
+      {
+        data: {
+          result: {
+            apiKeyEnv: "ZENMUX_API_KEY",
+            baseUrl: "https://zenmux.ai/api/anthropic",
+            contextWindowSource: "default",
+            contextWindowTokens: 128_000,
+            interfaceProvider: "anthropic",
+            model: "moonshotai/kimi-k2.6",
+            provider: "zenmux",
+            saved: true,
+            warning:
+              "Unable to detect model context window from metadata; using the configured fallback.",
+          },
+        },
+        kind: "data",
+        subject: "model.connected",
+      },
+      "connect",
+    );
+
+    expect(latestCommandNoticeText(state)).toContain(
+      "warning: Unable to detect",
+    );
+    expect(latestCommandNoticeText(state)).not.toContain("contextWindowSource");
+    expect(latestCommandNoticeText(state)).not.toContain("default");
+  });
+
   it("projects the active session messages from the initial snapshot", () => {
     const state = createStateFromSnapshot({
       ...snapshot(),
@@ -762,6 +822,123 @@ describe("TUI store event reducer", () => {
     expect(state.commandNotices).toHaveLength(0);
   });
 
+  it("shows compact runtime while a compact command is running and clears it on result", () => {
+    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      command: {
+        clientInvocationId: "invoke_compact",
+        commandId: "compact",
+        commandRunId: "command_compact",
+        path: ["compact"],
+        sessionId: "session_1",
+        surface: "tui",
+      },
+      timestamp: 1,
+      type: "command.started",
+    });
+
+    expect(state.runtime).toEqual({
+      kind: "running",
+      runId: "command_compact",
+      title: "Compacting...",
+    });
+
+    state = applyTuiEvent(state, {
+      clientInvocationId: "invoke_compact",
+      commandRunId: "command_compact",
+      output: {
+        data: {
+          result: {
+            status: "compacted",
+          },
+        },
+        kind: "data",
+        subject: "session.compact",
+      },
+      timestamp: 2,
+      type: "command.result.delivered",
+    });
+
+    expect(state.runtime).toEqual({ kind: "idle" });
+  });
+
+  it("clears ephemeral UI notices when compact command starts while keeping prompt security notices", () => {
+    let state = createStateFromSnapshot(snapshot());
+    state = applyTuiEvent(state, {
+      notice: {
+        createdAt: "2026-05-19T00:00:00.000Z",
+        id: "notice_security",
+        key: "prompt-security:OHBABY.md:ignore_previous_instructions",
+        level: "warning",
+        message: "OHBABY.md was skipped.",
+        title: "Custom instructions skipped",
+      },
+      timestamp: 1,
+      type: "notice.emitted",
+    });
+    state = applyTuiEvent(state, {
+      notice: {
+        createdAt: "2026-05-19T00:00:01.000Z",
+        id: "notice_provider",
+        key: "provider:warning",
+        level: "warning",
+        message: "Provider warning.",
+        title: "Provider warning",
+      },
+      timestamp: 2,
+      type: "notice.emitted",
+    });
+
+    state = applyTuiEvent(state, {
+      command: {
+        clientInvocationId: "invoke_compact",
+        commandId: "compact",
+        commandRunId: "command_compact",
+        path: ["compact"],
+        sessionId: "session_1",
+        surface: "tui",
+      },
+      timestamp: 3,
+      type: "command.started",
+    });
+
+    expect(state.runtime).toEqual({
+      kind: "running",
+      runId: "command_compact",
+      title: "Compacting...",
+    });
+    expect(state.notices.map((notice) => notice.id)).toEqual([
+      "notice_security",
+    ]);
+  });
+
+  it("shows compact runtime while a compact command is running and clears it on failure", () => {
+    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      command: {
+        clientInvocationId: "invoke_compact",
+        commandId: "compact",
+        commandRunId: "command_compact",
+        path: ["compact"],
+        sessionId: "session_1",
+        surface: "tui",
+      },
+      timestamp: 1,
+      type: "command.started",
+    });
+
+    state = applyTuiEvent(state, {
+      clientInvocationId: "invoke_compact",
+      commandRunId: "command_compact",
+      error: {
+        code: "COMPACT_FAILED",
+        message: "Compact failed",
+      },
+      timestamp: 2,
+      type: "command.failed",
+    });
+
+    expect(state.runtime).toEqual({ kind: "idle" });
+  });
+
   it("does not clear command notices when the active session appends an assistant message", () => {
     let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
       clientInvocationId: "invoke_1",
@@ -1106,7 +1283,7 @@ describe("TUI store event reducer", () => {
     expect(state.commandNotices).toHaveLength(0);
   });
 
-  it("formats compact command notices for humans", () => {
+  it("formats compact command notices for humans without token deltas", () => {
     let state = createStateFromSnapshot(snapshot());
 
     state = applyCommandOutput(
@@ -1129,9 +1306,37 @@ describe("TUI store event reducer", () => {
       "compact",
     );
 
-    expect(latestCommandNoticeText(state)).toBe(
-      "compact: compacted (92 -> 24 tokens)",
+    expect(latestCommandNoticeText(state)).toBe("Compacted");
+
+    state = applyCommandOutput(
+      state,
+      {
+        data: {
+          result: {
+            status: "inflated",
+          },
+        },
+        kind: "data",
+        subject: "session.compact",
+      },
+      "compact",
     );
+    expect(latestCommandNoticeText(state)).toBe("Compact skipped");
+
+    state = applyCommandOutput(
+      state,
+      {
+        data: {
+          result: {
+            status: "failed",
+          },
+        },
+        kind: "data",
+        subject: "session.compact",
+      },
+      "compact",
+    );
+    expect(latestCommandNoticeText(state)).toBe("Compact failed");
   });
 
   it("formats status command notices with optional backend summaries", () => {
@@ -1395,6 +1600,82 @@ describe("TUI store event reducer", () => {
     ).toBe(false);
     expect(new Set(state.notices.map((notice) => notice.id)).size).toBe(10);
     expect(state.notices.at(-1)?.message).toBe("Provider error 11");
+  });
+
+  it("clears ephemeral UI notices on the next active user message while keeping prompt security notices", () => {
+    let state = createStateFromSnapshot(snapshot());
+    state = applyTuiEvent(state, {
+      notice: {
+        createdAt: "2026-05-19T00:00:00.000Z",
+        id: "notice_security",
+        key: "prompt-security:OHBABY.md:ignore_previous_instructions",
+        level: "warning",
+        message: "OHBABY.md was skipped.",
+        title: "Custom instructions skipped",
+      },
+      timestamp: 1,
+      type: "notice.emitted",
+    });
+    state = applyTuiEvent(state, {
+      notice: {
+        createdAt: "2026-05-19T00:00:01.000Z",
+        id: "notice_provider",
+        key: "provider:warning",
+        level: "warning",
+        message: "Provider warning.",
+        title: "Provider warning",
+      },
+      timestamp: 2,
+      type: "notice.emitted",
+    });
+
+    state = applyTuiEvent(state, {
+      message: userMessage("user_2", "next prompt"),
+      sessionId: "session_1",
+      type: "message.appended",
+    });
+
+    expect(state.notices.map((notice) => notice.id)).toEqual([
+      "notice_security",
+    ]);
+  });
+
+  it("clears ephemeral UI notices when runtime enters running while keeping prompt security notices", () => {
+    let state = createStateFromSnapshot(snapshot());
+    state = applyTuiEvent(state, {
+      notice: {
+        createdAt: "2026-05-19T00:00:00.000Z",
+        id: "notice_security",
+        key: "prompt-security:OHBABY.md:ignore_previous_instructions",
+        level: "warning",
+        message: "OHBABY.md was skipped.",
+        title: "Custom instructions skipped",
+      },
+      timestamp: 1,
+      type: "notice.emitted",
+    });
+    state = applyTuiEvent(state, {
+      notice: {
+        createdAt: "2026-05-19T00:00:01.000Z",
+        id: "notice_provider",
+        key: "provider:warning",
+        level: "warning",
+        message: "Provider warning.",
+        title: "Provider warning",
+      },
+      timestamp: 2,
+      type: "notice.emitted",
+    });
+
+    state = applyTuiEvent(state, {
+      status: { kind: "running", runId: "run_1" },
+      timestamp: 3,
+      type: "runtime.updated",
+    });
+
+    expect(state.notices.map((notice) => notice.id)).toEqual([
+      "notice_security",
+    ]);
   });
 
   it("applies permission updates and preserves them across collection rebuilds", () => {

@@ -15,6 +15,8 @@ import type {
   ToolPart,
   ToolState,
 } from "../../core/message/index.js";
+import { SUMMARY_AGENT_NAME } from "../../core/context/constants.js";
+import { isActivePart } from "../../core/context/filters.js";
 import type {
   RunLedger,
   RunLedgerRecord,
@@ -34,6 +36,7 @@ const ACTIVE_SESSION_ID_KEY = "activeSessionId";
 const DEFAULT_APP_STATE_SCOPE = "global";
 const ACTIVE_RUN_STATUSES = new Set<RunStatus>(["pending", "running"]);
 const SESSION_TRANSACTION_ACTIVE_MESSAGE = "Session transaction is active";
+const CONTEXT_COMPACTED_TEXT = "Context compacted";
 
 export interface UiAppStateStore {
   getActiveSessionId(): Promise<string | null>;
@@ -125,11 +128,33 @@ function partToUiParts(part: Part): UiMessagePart[] {
   return toolPartToUiParts(part);
 }
 
-function messageToUiMessage(message: MessageWithParts): UiMessage {
+function isContextSummaryPart(part: Part): boolean {
+  return part.type === "text" && part.metadata?.kind === "context-summary";
+}
+
+function messageToUiMessage(message: MessageWithParts): UiMessage | undefined {
+  const activeParts = message.parts.filter(isActivePart);
+  if (
+    message.info.agent === SUMMARY_AGENT_NAME &&
+    activeParts.some(isContextSummaryPart)
+  ) {
+    return {
+      createdAt: toIsoString(message.info.time.created),
+      id: message.info.id,
+      parts: [{ text: CONTEXT_COMPACTED_TEXT, type: "text" }],
+      role: "assistant",
+    };
+  }
+
+  const parts = activeParts.flatMap(partToUiParts);
+  if (parts.length === 0) {
+    return undefined;
+  }
+
   return {
     createdAt: toIsoString(message.info.time.created),
     id: message.info.id,
-    parts: message.parts.flatMap(partToUiParts),
+    parts,
     role: message.info.role,
   };
 }
@@ -141,7 +166,9 @@ function sessionToUiSession(input: {
   return {
     createdAt: toIsoString(input.session.createdAt),
     id: input.session.id,
-    messages: input.messages.map(messageToUiMessage),
+    messages: input.messages
+      .map(messageToUiMessage)
+      .filter((message): message is UiMessage => message !== undefined),
     projectRoot: input.session.projectRoot,
     title: input.session.title,
     updatedAt: toIsoString(input.session.updatedAt),

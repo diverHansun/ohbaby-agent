@@ -7,6 +7,7 @@ import {
   type PromptSecurityFinding,
 } from "../system-prompt/security/index.js";
 import { isActivePart } from "./filters.js";
+import { isSummaryMessage } from "./summary.js";
 import { formatToolResultContentForModel } from "./tool-metadata-projection.js";
 
 export function appendMemoryToSystemPrompt(
@@ -81,6 +82,19 @@ function serializeMessageForLlm(
   const parts = message.parts.filter(isActivePart);
   if (parts.length === 0) {
     return [];
+  }
+
+  if (isSummaryMessage({ info: message.info, parts })) {
+    const summary = textContentFromParts(parts).trim();
+    if (summary === "") {
+      return [];
+    }
+    return [
+      {
+        role: "user",
+        content: `<context_summary>\n${summary}\n</context_summary>`,
+      },
+    ];
   }
 
   if (message.info.role === "assistant") {
