@@ -8,6 +8,7 @@ import {
   SUMMARY_AGENT_NAME,
 } from "./constants.js";
 import {
+  AGGRESSIVE_COMPRESSION_PROMPT,
   COMPRESSION_PROMPT,
   SUMMARIZATION_SYSTEM_PROMPT,
 } from "./compression-prompt.js";
@@ -36,7 +37,7 @@ import type {
   PruneResult,
   TokenCounter,
 } from "./types.js";
-import type { MessageWithParts, Part } from "../message/index.js";
+import type { MessageWithParts, Part, PartMetadata } from "../message/index.js";
 import type { MergedMemory } from "../memory/index.js";
 
 const EMPTY_MEMORY: MergedMemory = { global: "", project: "", merged: "" };
@@ -255,12 +256,24 @@ function markCompactedParts(
 
   return history.map((message) => ({
     info: message.info,
-    parts: message.parts.map((part) =>
-      compactedPartIds.has(part.id)
-        ? { ...part, time: { ...part.time, compacted: compactedAt } }
-        : part,
-    ),
+    parts: message.parts.map((part) => {
+      if (compactedPartIds.has(part.id)) {
+        return { ...part, time: { ...part.time, compacted: compactedAt } };
+      }
+      const metadata = removeTokenUsageMetadata(part.metadata);
+      return metadata === undefined ? part : { ...part, metadata };
+    }),
   }));
+}
+
+function removeTokenUsageMetadata(
+  metadata: PartMetadata | undefined,
+): PartMetadata | undefined {
+  if (metadata?.tokenUsage === undefined) {
+    return undefined;
+  }
+  const { tokenUsage: _tokenUsage, ...retained } = metadata;
+  return retained;
 }
 
 export function createContextManager(
@@ -398,6 +411,7 @@ export function createContextManager(
       });
       compactedPartIds.add(candidate.part.id);
     }
+    await clearRetainedTokenUsageMetadata(history, compactedPartIds);
 
     const result = {
       prunedCount: prunable.length,
@@ -413,6 +427,23 @@ export function createContextManager(
     const history = await options.messageManager.listBySession(sessionId);
     const { result } = await pruneHistory(sessionId, history);
     return result;
+  }
+
+  async function clearRetainedTokenUsageMetadata(
+    history: readonly MessageWithParts[],
+    compactedPartIds: ReadonlySet<string>,
+  ): Promise<void> {
+    for (const message of history) {
+      for (const part of message.parts) {
+        if (compactedPartIds.has(part.id)) {
+          continue;
+        }
+        const metadata = removeTokenUsageMetadata(part.metadata);
+        if (metadata !== undefined) {
+          await options.messageManager.updatePart(part.id, { metadata });
+        }
+      }
+    }
   }
 
   async function summarizeHistory(
@@ -453,26 +484,37 @@ export function createContextManager(
       };
     }
 
-    let snapshot: string;
-    try {
-      snapshot = await options.llmClient.generateSummary({
-        sessionId,
-        prompt: COMPRESSION_PROMPT,
-        systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
-        history: historyToCompress,
-      });
-    } catch (error) {
-      return {
-        status: "failed",
-        originalTokens,
-        newTokens: originalTokens,
-        savedTokens: 0,
-        error: errorToMessage(error),
-      };
-    }
-    snapshot = appendFileOpsSummary(snapshot, extractFileOps(historyToCompress));
+    let snapshot = "";
+    let newTokens = originalTokens;
+    const prompts = [COMPRESSION_PROMPT, AGGRESSIVE_COMPRESSION_PROMPT];
+    for (const prompt of prompts) {
+      try {
+        snapshot = await options.llmClient.generateSummary({
+          sessionId,
+          prompt,
+          systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
+          history: historyToCompress,
+        });
+      } catch (error) {
+        return {
+          status: "failed",
+          originalTokens,
+          newTokens: originalTokens,
+          savedTokens: 0,
+          error: errorToMessage(error),
+        };
+      }
+      snapshot = appendFileOpsSummary(
+        snapshot,
+        extractFileOps(historyToCompress),
+      );
 
-    const newTokens = tokenCount(options.tokenCounter, snapshot);
+      newTokens = tokenCount(options.tokenCounter, snapshot);
+      if (newTokens < originalTokens) {
+        break;
+      }
+    }
+
     if (newTokens >= originalTokens) {
       return {
         status: "inflated",
@@ -494,12 +536,25 @@ export function createContextManager(
       metadata: { kind: "context-summary" },
     });
     const compactedAt = now();
+    const compactedPartIds = new Set<string>();
     for (const message of historyToCompress) {
       for (const part of message.parts) {
+        compactedPartIds.add(part.id);
         if (part.time?.compacted === undefined) {
           await options.messageManager.updatePart(part.id, {
             time: { ...part.time, compacted: compactedAt },
           });
+        }
+      }
+    }
+    for (const message of rawHistory) {
+      for (const part of message.parts) {
+        if (compactedPartIds.has(part.id)) {
+          continue;
+        }
+        const metadata = removeTokenUsageMetadata(part.metadata);
+        if (metadata !== undefined) {
+          await options.messageManager.updatePart(part.id, { metadata });
         }
       }
     }
@@ -624,7 +679,7 @@ export function createContextManager(
       };
     }
 
-    const compression = await summarizeHistory(sessionId, before.history);
+    const compression = await summarizeHistory(sessionId, afterPrune.history);
     const afterCompression = await assemble(
       sessionId,
       input.directory,
@@ -735,7 +790,7 @@ export function createContextManager(
       } else {
         const compression = await summarizeHistory(
           input.sessionId,
-          assembled.history,
+          afterPruneContext.history,
         );
         finalContext = assembleFromRawHistory({
           assembledAt: now(),

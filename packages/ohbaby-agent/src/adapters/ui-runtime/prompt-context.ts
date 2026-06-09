@@ -91,21 +91,24 @@ export function createContextSummaryClient(
 ): ContextLLMClient {
   return {
     async generateSummary(input): Promise<string> {
-      let summary = "";
-      for await (const response of streamChatCompletion(llmClient, [
-        { role: "system", content: input.systemPrompt ?? input.prompt },
-        { role: "user", content: serializeHistory(input.history) },
-      ])) {
-        if (response.isComplete) {
-          summary = messageContentToText(response.completeMessage.content);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        let summary = "";
+        for await (const response of streamChatCompletion(llmClient, [
+          { role: "system", content: input.systemPrompt ?? input.prompt },
+          { role: "user", content: serializeHistory(input.history) },
+          { role: "user", content: input.prompt },
+        ])) {
+          if (response.isComplete) {
+            summary = messageContentToText(response.completeMessage.content);
+          }
+        }
+
+        const trimmed = summary.trim();
+        if (trimmed !== "") {
+          return trimmed;
         }
       }
-
-      const trimmed = summary.trim();
-      if (trimmed === "") {
-        throw new Error("Context compact summary was empty");
-      }
-      return trimmed;
+      throw new Error("Context compact summary was empty after retries");
     },
   };
 }

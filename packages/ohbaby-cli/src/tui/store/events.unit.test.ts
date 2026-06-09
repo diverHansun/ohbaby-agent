@@ -129,6 +129,70 @@ function latestCommandNoticeText(state: TuiStoreState): string | undefined {
 }
 
 describe("TUI store event reducer", () => {
+  it("formats connect command output without exposing internal context window source", () => {
+    const state = applyCommandOutput(
+      createStateFromSnapshot(snapshot()),
+      {
+        data: {
+          result: {
+            apiKeyEnv: "ZENMUX_API_KEY",
+            baseUrl: "https://zenmux.ai/api/anthropic",
+            contextWindowSource: "detected",
+            contextWindowTokens: 262_144,
+            interfaceProvider: "anthropic",
+            model: "moonshotai/kimi-k2.6",
+            provider: "zenmux",
+            saved: true,
+          },
+        },
+        kind: "data",
+        subject: "model.connected",
+      },
+      "connect",
+    );
+
+    expect(latestCommandNoticeText(state)).toContain("model connected:");
+    expect(latestCommandNoticeText(state)).toContain("moonshotai/kimi-k2.6");
+    expect(latestCommandNoticeText(state)).toContain("262,144");
+    expect(latestCommandNoticeText(state)).not.toContain(
+      "contextWindowSource",
+    );
+    expect(latestCommandNoticeText(state)).not.toContain("detected");
+  });
+
+  it("formats connect warnings without exposing internal context window source", () => {
+    const state = applyCommandOutput(
+      createStateFromSnapshot(snapshot()),
+      {
+        data: {
+          result: {
+            apiKeyEnv: "ZENMUX_API_KEY",
+            baseUrl: "https://zenmux.ai/api/anthropic",
+            contextWindowSource: "default",
+            contextWindowTokens: 128_000,
+            interfaceProvider: "anthropic",
+            model: "moonshotai/kimi-k2.6",
+            provider: "zenmux",
+            saved: true,
+            warning:
+              "Unable to detect model context window from metadata; using the configured fallback.",
+          },
+        },
+        kind: "data",
+        subject: "model.connected",
+      },
+      "connect",
+    );
+
+    expect(latestCommandNoticeText(state)).toContain(
+      "warning: Unable to detect",
+    );
+    expect(latestCommandNoticeText(state)).not.toContain(
+      "contextWindowSource",
+    );
+    expect(latestCommandNoticeText(state)).not.toContain("default");
+  });
+
   it("projects the active session messages from the initial snapshot", () => {
     const state = createStateFromSnapshot({
       ...snapshot(),

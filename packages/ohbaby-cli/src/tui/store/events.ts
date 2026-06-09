@@ -948,6 +948,9 @@ function formatDataCommandOutput(
         ? `models: ${models.join(", ")}`
         : JSON.stringify(output.data);
     }
+    case "model.connected": {
+      return formatModelConnectedOutput(output.data);
+    }
     case "mcps": {
       const servers = Array.isArray(output.data.servers)
         ? output.data.servers
@@ -971,6 +974,26 @@ function formatDataCommandOutput(
     default:
       return JSON.stringify(output.data);
   }
+}
+
+function formatModelConnectedOutput(data: Record<string, unknown>): string {
+  const result = getRecord(data, "result");
+  const model = result ? getString(result, "model") : undefined;
+  const provider = result ? getString(result, "provider") : undefined;
+  const contextWindowTokens = result
+    ? getNumber(result, "contextWindowTokens")
+    : undefined;
+  const label = [provider, model].filter(Boolean).join("/");
+  const context =
+    contextWindowTokens === undefined
+      ? ""
+      : ` (${formatTokenCount(contextWindowTokens)} context tokens)`;
+  const connected =
+    label === ""
+    ? "model connected"
+    : `model connected: ${label}${context}`;
+  const warning = result ? getString(result, "warning") : undefined;
+  return warning === undefined ? connected : `${connected}\nwarning: ${warning}`;
 }
 
 function formatHelpCategory(category: Record<string, unknown>): string {

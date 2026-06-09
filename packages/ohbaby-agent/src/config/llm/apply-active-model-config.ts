@@ -2,9 +2,14 @@ import * as path from "node:path";
 import { createModelProfileRegistry } from "../../services/llm-model/modelProfiles.js";
 import type { InterfaceProviderKind } from "./types.js";
 import { ConfigError } from "./types.js";
+import {
+  probeContextWindow,
+  type ContextWindowSource,
+} from "./context-window-probe.js";
 import { loadEnvFile } from "./loaders.js";
 import { reloadLLMConfig, setActiveLLMConfig } from "./index.js";
 
+const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
 const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const INTERFACE_PROVIDER_KINDS = new Set<InterfaceProviderKind>([
   "openai-compatible",
@@ -31,11 +36,13 @@ export interface ApplyActiveModelConfigResult {
   readonly interfaceProvider: InterfaceProviderKind;
   readonly apiKeyEnv: string;
   readonly model: string;
-  readonly contextWindowTokens?: number;
+  readonly contextWindowTokens: number;
+  readonly contextWindowSource: ContextWindowSource;
   readonly maxOutputTokens?: number;
   readonly modelJsonPath: string;
   readonly envPath: string;
   readonly saved: true;
+  readonly warning?: string;
 }
 
 export async function applyActiveModelConfig(
@@ -56,17 +63,26 @@ export async function applyActiveModelConfig(
   );
   const envPath = input.envPath ?? path.join(input.projectRoot, ".env");
 
-  await validateApiKeyAvailable({
+  const apiKey = await resolveApiKey({
     apiKey: input.apiKey,
     apiKeyEnv,
     envPath,
+  });
+  const probe = await probeContextWindow({
+    apiKey,
+    baseUrl,
+    interfaceProvider,
+    model,
+  });
+  const resolvedContextWindow = resolveContextWindow({
+    detectedContextWindowTokens: probe.contextWindowTokens,
+    probeWarning: probe.warning,
+    userContextWindowTokens: contextWindowTokens,
   });
 
   const profile = createModelProfileRegistry({
     defaultProvider: provider,
   }).resolve(model, provider);
-  const resolvedContextWindowTokens =
-    contextWindowTokens ?? (profile.source === "fallback" ? undefined : profile.contextWindowTokens);
   const resolvedMaxOutputTokens =
     maxOutputTokens ?? (profile.source === "fallback" ? undefined : profile.maxOutputTokens);
 
@@ -77,17 +93,14 @@ export async function applyActiveModelConfig(
     apiKeyEnv,
     interfaceProvider,
     ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
-    ...(resolvedContextWindowTokens === undefined
-      ? { clearContextWindowTokens: true }
-      : { contextWindowTokens: resolvedContextWindowTokens }),
-    clearActiveModelProfile: resolvedContextWindowTokens === undefined,
+    contextWindowTokens: resolvedContextWindow.contextWindowTokens,
     ...(resolvedMaxOutputTokens === undefined
       ? {}
       : {
           maxOutputTokens: resolvedMaxOutputTokens,
           maxTokens: resolvedMaxOutputTokens,
         }),
-    updateActiveModelProfile: resolvedContextWindowTokens !== undefined,
+    updateActiveModelProfile: true,
     ...(input.modelJsonPath === undefined
       ? {}
       : { modelJsonPath: input.modelJsonPath }),
@@ -110,15 +123,48 @@ export async function applyActiveModelConfig(
     interfaceProvider,
     apiKeyEnv,
     model,
-    ...(resolvedContextWindowTokens === undefined
-      ? {}
-      : { contextWindowTokens: resolvedContextWindowTokens }),
+    contextWindowTokens: resolvedContextWindow.contextWindowTokens,
+    contextWindowSource: resolvedContextWindow.contextWindowSource,
     ...(resolvedMaxOutputTokens === undefined
       ? {}
       : { maxOutputTokens: resolvedMaxOutputTokens }),
     modelJsonPath: writeResult.modelJsonPath,
     envPath,
     saved: true,
+    ...(resolvedContextWindow.warning === undefined
+      ? {}
+      : { warning: resolvedContextWindow.warning }),
+  };
+}
+
+function resolveContextWindow(input: {
+  readonly detectedContextWindowTokens?: number;
+  readonly probeWarning?: string;
+  readonly userContextWindowTokens?: number;
+}): {
+  readonly contextWindowTokens: number;
+  readonly contextWindowSource: ContextWindowSource;
+  readonly warning?: string;
+} {
+  if (input.detectedContextWindowTokens !== undefined) {
+    return {
+      contextWindowSource: "detected",
+      contextWindowTokens: input.detectedContextWindowTokens,
+    };
+  }
+  if (input.userContextWindowTokens !== undefined) {
+    return {
+      contextWindowSource: "user",
+      contextWindowTokens: input.userContextWindowTokens,
+      ...(input.probeWarning === undefined
+        ? {}
+        : { warning: input.probeWarning }),
+    };
+  }
+  return {
+    contextWindowSource: "default",
+    contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+    ...(input.probeWarning === undefined ? {} : { warning: input.probeWarning }),
   };
 }
 
@@ -179,13 +225,13 @@ function validateOptionalPositiveInteger(
   return value;
 }
 
-async function validateApiKeyAvailable(input: {
+async function resolveApiKey(input: {
   readonly apiKey?: string;
   readonly apiKeyEnv: string;
   readonly envPath: string;
-}): Promise<void> {
+}): Promise<string> {
   if (input.apiKey !== undefined && input.apiKey.trim() !== "") {
-    return;
+    return input.apiKey;
   }
   const envFile: Partial<Record<string, string>> = await loadEnvFile(
     input.envPath,
@@ -196,4 +242,5 @@ async function validateApiKeyAvailable(input: {
       apiKeyEnv: input.apiKeyEnv,
     });
   }
+  return existing;
 }

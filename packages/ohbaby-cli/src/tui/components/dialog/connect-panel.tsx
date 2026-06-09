@@ -45,7 +45,7 @@ interface PendingSave {
 type SaveState =
   | { readonly kind: "idle" }
   | { readonly kind: "saving" }
-  | { readonly kind: "saved" }
+  | { readonly kind: "saved"; readonly warning?: string }
   | { readonly kind: "error"; readonly message: string };
 
 const CONNECT_FIELDS: readonly ConnectField[] = [
@@ -93,6 +93,7 @@ export function ConnectPanel({
   const inFlightSaveKeyRef = useRef<string | null>(null);
   const latestSaveKeyRef = useRef<string | null>(null);
   const pendingSaveRef = useRef<PendingSave | null>(null);
+  const lastSavedWarningRef = useRef<string | undefined>(undefined);
 
   const selectedField =
     CONNECT_FIELDS[Math.min(selectedIndex, CONNECT_FIELDS.length - 1)];
@@ -130,12 +131,13 @@ export function ConnectPanel({
     setSaveState({ kind: "saving" });
     void client
       .connectModel(save.input)
-      .then(() => {
+      .then((result) => {
         lastSavedPayloadKeyRef.current = save.key;
+        lastSavedWarningRef.current = readConnectWarning(result);
         if (pendingSaveRef.current === null) {
           setSaveState(
             latestSaveKeyRef.current === save.key
-              ? { kind: "saved" }
+              ? savedState(lastSavedWarningRef.current)
               : { kind: "idle" },
           );
         }
@@ -159,7 +161,7 @@ export function ConnectPanel({
         if (pending !== null) {
           pendingSaveRef.current = null;
           if (pending.key === lastSavedPayloadKeyRef.current) {
-            setSaveState({ kind: "saved" });
+            setSaveState(savedState(lastSavedWarningRef.current));
             return;
           }
           startSave(pending);
@@ -191,7 +193,7 @@ export function ConnectPanel({
     latestSaveKeyRef.current = payloadKey;
     if (payloadKey === lastSavedPayloadKeyRef.current) {
       pendingSaveRef.current = null;
-      setSaveState({ kind: "saved" });
+      setSaveState(savedState(lastSavedWarningRef.current));
       return;
     }
 
@@ -335,12 +337,32 @@ function ConnectStatusLine({
     case "saving":
       return <Text color={theme.status.running}>saving</Text>;
     case "saved":
-      return <Text color={theme.status.success}>saved</Text>;
+      return saveState.warning === undefined ? (
+        <Text color={theme.status.success}>saved</Text>
+      ) : (
+        <Text color={theme.status.warning}>saved - {saveState.warning}</Text>
+      );
     case "error":
       return <Text color={theme.status.error}>{saveState.message}</Text>;
     case "idle":
       return <Text> </Text>;
   }
+}
+
+function savedState(warning: string | undefined): SaveState {
+  return warning === undefined
+    ? { kind: "saved" }
+    : { kind: "saved", warning };
+}
+
+function readConnectWarning(result: unknown): string | undefined {
+  if (typeof result !== "object" || result === null || Array.isArray(result)) {
+    return undefined;
+  }
+  const warning = (result as Record<string, unknown>).warning;
+  return typeof warning === "string" && warning.trim() !== ""
+    ? warning
+    : undefined;
 }
 
 type PayloadBuildResult =

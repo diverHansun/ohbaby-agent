@@ -95,6 +95,8 @@ describe("context window UI contract", () => {
         return Promise.resolve({
           apiKeyEnv: "ZENMUX_API_KEY",
           baseUrl: "https://api.example.com",
+          contextWindowSource: "default",
+          contextWindowTokens: 128_000,
           envPath: ".env",
           interfaceProvider: "openai-compatible",
           model: "example-model",

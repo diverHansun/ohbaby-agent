@@ -81,6 +81,7 @@ describe("CommandService", () => {
       Promise.resolve({
         apiKeyEnv: "ZENMUX_API_KEY",
         baseUrl: "https://zenmux.ai/api/anthropic",
+        contextWindowSource: "detected" as const,
         contextWindowTokens: 200_000,
         envPath: "D:/repo/.env",
         interfaceProvider: "anthropic" as const,
@@ -140,6 +141,8 @@ describe("CommandService", () => {
       Promise.resolve({
         apiKeyEnv: "ZENMUX_API_KEY",
         baseUrl: "https://zenmux.ai/api/v1",
+        contextWindowSource: "default" as const,
+        contextWindowTokens: 128_000,
         envPath: "D:/repo/.env",
         interfaceProvider: "openai-compatible" as const,
         model: "kimi-k2.6",
@@ -181,6 +184,8 @@ describe("CommandService", () => {
       Promise.resolve({
         apiKeyEnv: "ANTHROPIC_API_KEY",
         baseUrl: "https://api.anthropic.com/v1",
+        contextWindowSource: "default" as const,
+        contextWindowTokens: 128_000,
         envPath: "D:/repo/.env",
         interfaceProvider: "anthropic" as const,
         model: "claude-sonnet-4.6",

@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyActiveModelConfig } from "../apply-active-model-config.js";
 import { _LLMConfigManager as LLMConfigManager } from "../index.js";
 
@@ -10,6 +10,7 @@ describe("applyActiveModelConfig", () => {
   let modelJsonPath: string;
   let envPath: string;
   const originalEnv = process.env;
+  let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-connect-"));
@@ -17,10 +18,25 @@ describe("applyActiveModelConfig", () => {
     envPath = path.join(tempRoot, ".env");
     process.env = { ...originalEnv };
     delete process.env.ZENMUX_API_KEY;
+    fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              context_length: 200_000,
+              id: "anthropic/claude-sonnet-4.6",
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
     LLMConfigManager.resetInstance();
   });
 
   afterEach(async () => {
+    vi.unstubAllGlobals();
     process.env = originalEnv;
     LLMConfigManager.resetInstance();
     await fs.rm(tempRoot, { force: true, recursive: true });
@@ -81,6 +97,7 @@ describe("applyActiveModelConfig", () => {
     expect(result).toEqual({
       apiKeyEnv: "ZENMUX_API_KEY",
       baseUrl: "https://zenmux.ai/api/anthropic",
+      contextWindowSource: "detected",
       contextWindowTokens: 200_000,
       interfaceProvider: "anthropic",
       maxOutputTokens: 8_192,
@@ -139,5 +156,94 @@ describe("applyActiveModelConfig", () => {
     await expect(fs.readFile(envPath, "utf-8")).resolves.toBe(
       "ZENMUX_API_KEY=sk-existing\n",
     );
+  });
+
+  it("uses detected context window over a user-provided value", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              context_length: 262_144,
+              id: "moonshotai/kimi-k2.6",
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await applyActiveModelConfig({
+      apiKey: "sk-test-secret",
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      contextWindowTokens: 128_000,
+      interfaceProvider: "anthropic",
+      model: "moonshotai/kimi-k2.6",
+      modelJsonPath,
+      projectRoot: tempRoot,
+      provider: "zenmux",
+    });
+
+    expect(result.contextWindowTokens).toBe(262_144);
+    expect(result.contextWindowSource).toBe("detected");
+    expect(JSON.stringify(result)).not.toContain("sk-test-secret");
+
+    const modelJson = JSON.parse(
+      await fs.readFile(modelJsonPath, "utf-8"),
+    ) as {
+      readonly llmParams: {
+        readonly contextWindowTokens?: number;
+      };
+    };
+    expect(modelJson.llmParams.contextWindowTokens).toBe(262_144);
+  });
+
+  it("uses the user-provided context window and returns a warning when detection fails", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
+
+    const result = await applyActiveModelConfig({
+      apiKey: "sk-test-secret",
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      contextWindowTokens: 64_000,
+      interfaceProvider: "anthropic",
+      model: "custom-model",
+      modelJsonPath,
+      projectRoot: tempRoot,
+      provider: "zenmux",
+    });
+
+    expect(result.contextWindowTokens).toBe(64_000);
+    expect(result.contextWindowSource).toBe("user");
+    expect(result.warning).toMatch(/context window/i);
+  });
+
+  it("uses a 128k default and returns a warning when detection fails without a user value", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
+
+    const result = await applyActiveModelConfig({
+      apiKey: "sk-test-secret",
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      interfaceProvider: "anthropic",
+      model: "custom-model",
+      modelJsonPath,
+      projectRoot: tempRoot,
+      provider: "zenmux",
+    });
+
+    expect(result.contextWindowTokens).toBe(128_000);
+    expect(result.contextWindowSource).toBe("default");
+    expect(result.warning).toMatch(/context window/i);
+
+    const modelJson = JSON.parse(
+      await fs.readFile(modelJsonPath, "utf-8"),
+    ) as {
+      readonly llmParams: {
+        readonly contextWindowTokens?: number;
+      };
+    };
+    expect(modelJson.llmParams.contextWindowTokens).toBe(128_000);
   });
 });
