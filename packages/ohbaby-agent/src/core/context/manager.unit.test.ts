@@ -235,6 +235,40 @@ async function addTextMessage(
   });
 }
 
+async function addCompletedToolMessage(
+  messageManager: MessageManager,
+  input: {
+    readonly sessionId: string;
+    readonly output: string;
+  },
+): Promise<void> {
+  const message = await messageManager.createMessage({
+    sessionId: input.sessionId,
+    role: "assistant",
+    agent: "test",
+  });
+  await messageManager.appendPart(message.id, {
+    type: "tool",
+    callId: `${message.id}_call`,
+    tool: "read_file",
+    state: {
+      status: "completed",
+      input: {},
+      output: input.output,
+    },
+  });
+}
+
+async function summaryMessageCount(
+  messageManager: MessageManager,
+  sessionId: string,
+): Promise<number> {
+  const history = await messageManager.listBySession(sessionId);
+  return history.filter((message) =>
+    message.parts.some((part) => part.metadata?.kind === "context-summary"),
+  ).length;
+}
+
 describe("ContextManager", () => {
   it("estimates context tokens from serialized history when no provider anchor exists", () => {
     const history = [
@@ -484,11 +518,9 @@ describe("ContextManager", () => {
   it("projects context summaries as user-wrapped summary blocks for LLM input", () => {
     const messages = serializeForLlm({
       history: [
-        messageWithText(
-          "assistant",
-          "## Goal\n- Continue compact work.",
-          { kind: "context-summary" },
-        ),
+        messageWithText("assistant", "## Goal\n- Continue compact work.", {
+          kind: "context-summary",
+        }),
         messageWithText("user", "continue"),
       ],
       isSubagent: false,
@@ -572,7 +604,7 @@ describe("ContextManager", () => {
             type: "function",
             function: {
               name: "read_file",
-              arguments: "{\"path\":\"README.md\"}",
+              arguments: '{"path":"README.md"}',
             },
           },
         ],
@@ -625,7 +657,7 @@ describe("ContextManager", () => {
             type: "function",
             function: {
               name: "read",
-              arguments: "{\"file_path\":\"README.md\"}",
+              arguments: '{"file_path":"README.md"}',
             },
           },
         ],
@@ -875,7 +907,9 @@ describe("ContextManager", () => {
       text: "fourth long text",
     });
     const { manager } = createManager({
-      llmClient: { generateSummary: vi.fn().mockResolvedValue("## Goal\nshort") },
+      llmClient: {
+        generateSummary: vi.fn().mockResolvedValue("## Goal\nshort"),
+      },
       memory,
       messageManager,
     });
@@ -1363,7 +1397,9 @@ describe("ContextManager", () => {
       },
     });
     const { manager } = createManager({
-      llmClient: { generateSummary: vi.fn().mockResolvedValue("## Goal\nshort") },
+      llmClient: {
+        generateSummary: vi.fn().mockResolvedValue("## Goal\nshort"),
+      },
       messageManager,
     });
 
@@ -1374,7 +1410,8 @@ describe("ContextManager", () => {
     });
 
     expect(result.status).toBe("compacted");
-    const activeHistory = (await manager.assemble("session_1", "D:/repo")).history;
+    const activeHistory = (await manager.assemble("session_1", "D:/repo"))
+      .history;
     const retained = activeHistory.find(
       (message) => message.info.id === "message_4",
     );
@@ -1382,6 +1419,101 @@ describe("ContextManager", () => {
     expect(result.usageAfter.currentTokens).toBeLessThan(
       result.usageBefore.currentTokens,
     );
+  });
+
+  it("does not commit a summary when projected usage is not lower than current usage", async () => {
+    const messageManager = createMessageManagerFixture();
+    for (const [index, role] of [
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ].entries()) {
+      await addTextMessage(messageManager, {
+        sessionId: "session_1",
+        role: role as "user" | "assistant",
+        text: `${String(index)} ${"x".repeat(80)}`,
+        metadata:
+          index === 3
+            ? {
+                tokenUsage: {
+                  promptTokens: 1,
+                  completionTokens: 1,
+                  totalTokens: 2,
+                },
+              }
+            : undefined,
+      });
+    }
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockImplementation((input) =>
+        Promise.resolve(
+          "s".repeat(Math.max(1, serializeHistory(input.history).length - 1)),
+        ),
+      );
+    const { manager } = createManager({
+      llmClient: { generateSummary },
+      messageManager,
+    });
+
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
+
+    expect(result.status).toBe("inflated");
+    expect(result.usageAfter.currentTokens).toBe(
+      result.usageBefore.currentTokens,
+    );
+    expect(await summaryMessageCount(messageManager, "session_1")).toBe(0);
+  });
+
+  it("returns pruned when a projected summary would be worse than prune-only context", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addCompletedToolMessage(messageManager, {
+      sessionId: "session_1",
+      output: "tool output ".repeat(20),
+    });
+    for (const [index, role] of [
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ].entries()) {
+      await addTextMessage(messageManager, {
+        sessionId: "session_1",
+        role: role as "user" | "assistant",
+        text: `${String(index)} ${"x".repeat(80)}`,
+      });
+    }
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockImplementation((input) =>
+        Promise.resolve(
+          "s".repeat(Math.max(1, serializeHistory(input.history).length - 1)),
+        ),
+      );
+    const { manager } = createManager({
+      llmClient: { generateSummary },
+      messageManager,
+      pruneMinimumTokens: 1,
+      pruneProtectTokens: 0,
+    });
+
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
+
+    expect(result.status).toBe("pruned");
+    expect(result.usageAfter.currentTokens).toBeLessThan(
+      result.usageBefore.currentTokens,
+    );
+    expect(result.prune?.prunedCount).toBe(1);
+    expect(await summaryMessageCount(messageManager, "session_1")).toBe(0);
   });
 
   it("passes the structured summarization system prompt to the summary client", async () => {
@@ -1452,7 +1584,7 @@ describe("ContextManager", () => {
     expect(generateSummary.mock.calls[1][0].prompt).toContain("CRITICAL");
   });
 
-  it("appends compressed read and modified file paths to the summary", async () => {
+  it("does not summarize same-pass pruned file paths in compress summaries", async () => {
     const messageManager = createMessageManagerFixture();
     const assistant = await messageManager.createMessage({
       sessionId: "session_1",
@@ -1490,7 +1622,9 @@ describe("ContextManager", () => {
       text: "recent long text",
     });
     const { manager } = createManager({
-      llmClient: { generateSummary: vi.fn().mockResolvedValue("## Goal\nshort") },
+      llmClient: {
+        generateSummary: vi.fn().mockResolvedValue("## Goal\nshort"),
+      },
       messageManager,
     });
 
@@ -1504,7 +1638,7 @@ describe("ContextManager", () => {
       );
     const summaryText = summaryPart?.type === "text" ? summaryPart.text : "";
 
-    expect(summaryText).toContain("<read-files>\n- src/a.ts\n</read-files>");
+    expect(summaryText).not.toContain("src/a.ts");
     expect(summaryText).toContain(
       "<modified-files>\n- src/b.ts\n</modified-files>",
     );
@@ -1546,7 +1680,9 @@ describe("ContextManager", () => {
       text: "third active long text",
     });
     const { manager } = createManager({
-      llmClient: { generateSummary: vi.fn().mockResolvedValue("## Goal\nshort") },
+      llmClient: {
+        generateSummary: vi.fn().mockResolvedValue("## Goal\nshort"),
+      },
       messageManager,
     });
 

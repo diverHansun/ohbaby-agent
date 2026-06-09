@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { CompactResult, ContextUsage } from "../../core/context/index.js";
 import type {
   LLMClientInstance,
   StreamingResponse,
@@ -17,7 +18,10 @@ vi.mock("../../core/llm-client/index.js", () => ({
   streamChatCompletion: streamChatCompletionMock,
 }));
 
-import { createContextSummaryClient } from "./prompt-context.js";
+import {
+  createContextSummaryClient,
+  noticeFromCompactResult,
+} from "./prompt-context.js";
 
 function streamWithContent(content: string): AsyncIterable<StreamingResponse> {
   return (async function* (): AsyncGenerator<StreamingResponse, void, unknown> {
@@ -27,6 +31,29 @@ function streamWithContent(content: string): AsyncIterable<StreamingResponse> {
       isComplete: true,
     };
   })();
+}
+
+function usage(currentTokens: number): ContextUsage {
+  return {
+    contextLimit: 128_000,
+    currentTokens,
+    modelId: "test-model",
+    remainingTokens: 128_000 - currentTokens,
+    shouldCompress: false,
+    usageRatio: currentTokens / 128_000,
+  };
+}
+
+function compactResult(
+  status: CompactResult["status"],
+  input: Partial<CompactResult> = {},
+): CompactResult {
+  return {
+    status,
+    usageAfter: usage(20_000),
+    usageBefore: usage(17_000),
+    ...input,
+  };
 }
 
 describe("createContextSummaryClient", () => {
@@ -114,5 +141,42 @@ describe("createContextSummaryClient", () => {
         content: expect.stringContaining("Use this exact format") as string,
       },
     ]);
+  });
+});
+
+describe("noticeFromCompactResult", () => {
+  it("does not emit notices for successful compact results", () => {
+    expect(
+      noticeFromCompactResult("session_1", compactResult("compacted")),
+    ).toBeUndefined();
+    expect(
+      noticeFromCompactResult("session_1", compactResult("pruned")),
+    ).toBeUndefined();
+  });
+
+  it("emits compact warnings without token deltas for failed and inflated results", () => {
+    const failedNotice = noticeFromCompactResult(
+      "session_1",
+      compactResult("failed", { error: "summary generation failed" }),
+    );
+    const inflatedNotice = noticeFromCompactResult(
+      "session_1",
+      compactResult("inflated"),
+    );
+
+    expect(failedNotice).toMatchObject({
+      key: "context:compact:session_1",
+      level: "warning",
+      title: "Context compact warning",
+    });
+    expect(inflatedNotice).toMatchObject({
+      key: "context:compact:session_1",
+      level: "warning",
+      title: "Context compact warning",
+    });
+    expect(failedNotice?.message).not.toContain("->");
+    expect(inflatedNotice?.message).not.toContain("->");
+    expect(failedNotice?.message).not.toMatch(/\d[\d,]*\s*tokens/u);
+    expect(inflatedNotice?.message).not.toMatch(/\d[\d,]*\s*tokens/u);
   });
 });

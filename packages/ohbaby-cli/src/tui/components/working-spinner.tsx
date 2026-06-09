@@ -27,12 +27,13 @@ export function WorkingSpinner({
   if (runtime.kind !== "running") {
     return null;
   }
+  const text = runtime.title?.trim() ? runtime.title : phrase;
 
   return (
     <Box>
       <Spinner color={theme.workingSpinner.base} />
       <Text> </Text>
-      <ShimmerText text={phrase} />
+      <ShimmerText text={text} />
     </Box>
   );
 }

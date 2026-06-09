@@ -1495,7 +1495,7 @@ describe("createInProcessUiBackendClient", () => {
           event.type === "notice.emitted" &&
           event.notice.key === "context:compact:session_1",
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("exposes manual compact through the SDK client", async () => {

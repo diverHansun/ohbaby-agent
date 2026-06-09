@@ -1156,7 +1156,7 @@ describe("CommandService", () => {
         expect.objectContaining({
           action: {
             data: { sessionId: "session_1", status: "compacted" },
-            kind: "session.compacted",
+            kind: "session.compact.completed",
           },
           type: "result",
         }),
