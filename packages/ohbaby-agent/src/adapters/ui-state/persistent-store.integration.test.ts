@@ -7,6 +7,7 @@ import {
   createDatabaseMessageStore,
   createMessageManager,
 } from "../../core/message/index.js";
+import { SUMMARY_AGENT_NAME } from "../../core/context/index.js";
 import {
   closeDatabase,
   getDatabase,
@@ -186,6 +187,121 @@ describe("createPersistentUiStateStore", () => {
       ],
       status: { kind: "idle" },
     });
+  });
+
+  it("projects active context summaries as compact boundaries without leaking summary text", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+      idGenerator: createDeterministicMessageIds(),
+      now: createClock(2_000),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => "session_1",
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      now: createClock(1_000),
+      projectResolver: PROJECT_RESOLVER,
+      store: createDatabaseSessionStore(),
+    });
+    const session = await sessionManager.create("D:/repo", {
+      title: "Compacted session",
+    });
+    const summary = await messageManager.createMessage({
+      agent: SUMMARY_AGENT_NAME,
+      role: "assistant",
+      sessionId: session.id,
+    });
+    await messageManager.appendPart(summary.id, {
+      metadata: { kind: "context-summary" },
+      synthetic: true,
+      text: "Goal\n- raw summary text that belongs only in model context",
+      type: "text",
+    });
+    const appState = createDatabaseUiAppStateStore();
+    await appState.setActiveSessionId(session.id);
+    const store = createPersistentUiStateStore({
+      appState,
+      messageManager,
+      runLedger: createDatabaseRunLedger(),
+      sessionManager,
+    });
+
+    const snapshot = await store.readSnapshot();
+    const messages = snapshot.sessions[0]?.messages ?? [];
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.role).toBe("assistant");
+    expect(messages[0]?.parts).toEqual([
+      { text: "Context compacted", type: "text" },
+    ]);
+    expect(JSON.stringify(messages)).not.toContain("raw summary text");
+  });
+
+  it("omits compacted message parts from persistent UI snapshots", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+      idGenerator: createDeterministicMessageIds(),
+      now: createClock(2_000),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => "session_1",
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      now: createClock(1_000),
+      projectResolver: PROJECT_RESOLVER,
+      store: createDatabaseSessionStore(),
+    });
+    const session = await sessionManager.create("D:/repo", {
+      title: "Compacted history",
+    });
+    const compactedUser = await messageManager.createMessage({
+      agent: "default",
+      role: "user",
+      sessionId: session.id,
+    });
+    const compactedPart = await messageManager.appendPart(compactedUser.id, {
+      text: "already compacted prompt",
+      type: "text",
+    });
+    await messageManager.updatePart(compactedPart.id, {
+      time: { compacted: 5_000 },
+    });
+    const activeUser = await messageManager.createMessage({
+      agent: "default",
+      role: "user",
+      sessionId: session.id,
+    });
+    await messageManager.appendPart(activeUser.id, {
+      text: "still visible prompt",
+      type: "text",
+    });
+    const appState = createDatabaseUiAppStateStore();
+    await appState.setActiveSessionId(session.id);
+    const store = createPersistentUiStateStore({
+      appState,
+      messageManager,
+      runLedger: createDatabaseRunLedger(),
+      sessionManager,
+    });
+
+    const snapshot = await store.readSnapshot();
+    const messages = snapshot.sessions[0]?.messages ?? [];
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.parts).toEqual([
+      { text: "still visible prompt", type: "text" },
+    ]);
+    expect(JSON.stringify(messages)).not.toContain("already compacted prompt");
   });
 
   it("persists active session id in app_state", async () => {
