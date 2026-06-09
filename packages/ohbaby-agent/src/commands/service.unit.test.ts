@@ -961,6 +961,12 @@ describe("CommandService", () => {
   });
 
   it("opens session selection from /sessions and lists sessions on non-TUI surfaces", async () => {
+    const session = {
+      createdAt: 1_700_000_000_000,
+      id: "session_1",
+      title: "First",
+      updatedAt: 1_700_000_123_000,
+    };
     const request = vi
       .fn<() => Promise<UiInteractionResponse>>()
       .mockResolvedValue({
@@ -972,7 +978,7 @@ describe("CommandService", () => {
       interactionBroker: { request },
       sessions: {
         listSessions() {
-          return [{ id: "session_1", title: "First" }];
+          return [session];
         },
         selectSession,
       },
@@ -987,7 +993,16 @@ describe("CommandService", () => {
     expect(request).toHaveBeenCalledWith(
       {
         kind: "select-one",
-        options: [{ id: "session_1", label: "First" }],
+        options: [
+          {
+            id: "session_1",
+            label: "First",
+            metadata: {
+              createdAt: 1_700_000_000_000,
+              updatedAt: 1_700_000_123_000,
+            },
+          },
+        ],
         prompt: "Select session",
         subject: "session",
       },
@@ -1009,10 +1024,39 @@ describe("CommandService", () => {
       output: {
         kind: "data",
         subject: "session.list",
-        data: { sessions: [{ id: "session_1", title: "First" }] },
+        data: { sessions: [session] },
       },
       type: "result",
     });
+  });
+
+  it("silently ignores cancelled /sessions selection", async () => {
+    const request = vi
+      .fn<() => Promise<UiInteractionResponse>>()
+      .mockResolvedValue({
+        kind: "cancelled",
+        reason: "user-cancelled",
+      });
+    const selectSession = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const { events, service } = createServiceHarness({
+      interactionBroker: { request },
+      sessions: {
+        listSessions() {
+          return [{ id: "session_1", title: "First" }];
+        },
+        selectSession,
+      },
+    });
+
+    await service.executeCommand(makeInvocation("sessions", ["sessions"]));
+
+    expect(selectSession).not.toHaveBeenCalled();
+    expect(events).toEqual([
+      expect.objectContaining({
+        commandId: "sessions",
+        type: "started",
+      }),
+    ]);
   });
 
   it("creates and selects a new session", async () => {
@@ -1508,7 +1552,7 @@ describe("CommandService", () => {
     });
   });
 
-  it("aborts pending command interactions by command run", async () => {
+  it("silently aborts pending session selection interactions by command run", async () => {
     const bus = createBus();
     const broker = createInteractionBroker({
       bus,
@@ -1548,14 +1592,14 @@ describe("CommandService", () => {
     expect(service.abortCommandRun("command_1", "aborted")).toBe(1);
     await execution;
 
-    expect(events.at(-1)).toMatchObject({
-      commandRunId: "command_1",
-      error: {
-        code: "INTERACTION_CANCELLED",
-        message: "Session selection cancelled: aborted",
-      },
-      type: "failed",
-    });
+    expect(broker.listPending()).toEqual([]);
+    expect(events).toEqual([
+      expect.objectContaining({
+        commandId: "sessions",
+        commandRunId: "command_1",
+        type: "started",
+      }),
+    ]);
   });
 });
 

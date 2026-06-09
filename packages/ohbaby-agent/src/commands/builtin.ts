@@ -352,16 +352,19 @@ async function handleSessionParent(
     options: sessions.map((session) => ({
       id: session.id,
       label: session.title,
+      metadata: {
+        ...(session.createdAt === undefined
+          ? {}
+          : { createdAt: session.createdAt }),
+        ...(session.updatedAt === undefined
+          ? {}
+          : { updatedAt: session.updatedAt }),
+      },
     })),
     prompt: "Select session",
     subject: "session",
   });
   if (response.kind === "cancelled") {
-    context.fail({
-      code: "INTERACTION_CANCELLED",
-      message: `Session selection cancelled: ${response.reason}`,
-      recoverable: true,
-    });
     return;
   }
   if (!response.choiceId) {

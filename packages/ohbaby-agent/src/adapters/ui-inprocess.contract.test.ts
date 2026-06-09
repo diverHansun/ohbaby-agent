@@ -4352,7 +4352,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(snapshotEvent?.snapshot.activeSessionId).toBe("session_2");
   });
 
-  it("aborts pending command interactions by command run id", async () => {
+  it("silently aborts pending session interactions by command run id", async () => {
     const client = createInProcessUiBackendClient({
       initialSnapshot: createInitialSnapshotWithTwoSessions(),
       llmClient: createFakeLLMClient([]),
@@ -4379,14 +4379,23 @@ describe("createInProcessUiBackendClient", () => {
     await client.abortRun("command_1");
     await execution;
 
-    expect(events.at(-1)).toMatchObject({
-      clientInvocationId: "inv_session",
-      commandRunId: "command_1",
-      error: {
-        code: "INTERACTION_CANCELLED",
-      },
-      type: "command.failed",
-    });
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          clientInvocationId: "inv_session",
+          commandRunId: "command_1",
+          type: "interaction.resolved",
+        }),
+      ]),
+    );
+    expect(events).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          commandRunId: "command_1",
+          type: "command.failed",
+        }),
+      ]),
+    );
   });
 });
 

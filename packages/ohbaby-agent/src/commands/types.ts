@@ -71,6 +71,8 @@ export interface CommandModelSwitchInput {
 export interface CommandSessionSummary {
   readonly id: string;
   readonly title: string;
+  readonly createdAt?: number;
+  readonly updatedAt?: number;
   readonly created?: boolean;
 }
 
