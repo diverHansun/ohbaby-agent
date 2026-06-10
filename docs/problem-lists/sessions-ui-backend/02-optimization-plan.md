@@ -190,10 +190,10 @@ export function createTitleGenerator(options: {
 
 本次不修改 UI snapshot 恢复路径的默认上限，也不把 `getRecent()` 改造成 `/sessions` 的数据源。
 
-`/sessions` 数据源改为当前 project 的 session metadata 查询：
+`/sessions` 数据源改为当前 project root 的 session metadata 查询：
 
 ```ts
-const sessions = await options.sessionManager.listByProject(project.id, {
+const sessions = await options.sessionManager.listByProjectRoot(projectRoot, {
   status: "active",
 });
 
@@ -248,7 +248,7 @@ return sessions
 
 | 步骤 | 文件 | 操作 |
 |------|------|------|
-| 3.1 | `ui-inprocess.ts` | `/sessions` 改用 `listByProject(project.id, { status: "active" })` |
+| 3.1 | `ui-inprocess.ts` | `/sessions` 改用 `listByProjectRoot(projectRoot, { status: "active" })` |
 | 3.2 | `ui-inprocess.ts` | 过滤 subagent sessions，按 `updatedAt DESC, createdAt DESC` 排序 |
 | 3.3 | `builtin.ts` / command types | 将 `createdAt/updatedAt` 传入 interaction option metadata |
 

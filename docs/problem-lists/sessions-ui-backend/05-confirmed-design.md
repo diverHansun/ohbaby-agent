@@ -199,7 +199,7 @@ const sessions = await options.sessionManager.getRecent();
 ```ts
 readonly sessionManager?: Pick<
   SessionManager,
-  "create" | "get" | "getRecent" | "listByProject"
+  "create" | "get" | "getRecent" | "listByProject" | "listByProjectRoot"
 > & Partial<Pick<SessionManager, "findReusableEmptyPrimary" | "incrementStats">>;
 ```
 
@@ -207,8 +207,7 @@ readonly sessionManager?: Pick<
 
 ```ts
 const projectRoot = await resolveProjectRoot();
-const project = await Project.fromDirectory(projectRoot);
-const sessions = await options.sessionManager.listByProject(project.id, {
+const sessions = await options.sessionManager.listByProjectRoot(projectRoot, {
   status: "active",
 });
 return sessions

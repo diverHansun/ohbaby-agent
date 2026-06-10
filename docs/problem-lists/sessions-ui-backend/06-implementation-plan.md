@@ -4,7 +4,7 @@
 
 **Goal:** Implement the confirmed `/sessions` UI/backend improvements: card-style session picker, current-project active session listing, silent ESC cancellation, and first-message session auto-title behavior.
 
-**Architecture:** Keep the existing interaction broker path and specialize only `SessionDialog` for session selection. Backend session browsing becomes a current-project metadata query through `listByProject`, while prompt submission owns temporary-title and asynchronous AI-title orchestration because it has access to the active model, project root, and first user message. Snapshot restore limits stay unchanged.
+**Architecture:** Keep the existing interaction broker path and specialize only `SessionDialog` for session selection. Backend session browsing becomes a current-project metadata query keyed by canonical `projectRoot`, while prompt submission owns temporary-title and asynchronous AI-title orchestration because it has access to the active model, project root, and first user message. Snapshot restore limits stay unchanged.
 
 **Tech Stack:** TypeScript, pnpm, Vitest, Ink/React TUI, ohbaby-agent session services, ohbaby-sdk interaction types.
 
@@ -14,7 +14,8 @@
 
 - Modify `packages/ohbaby-agent/src/commands/types.ts`: add `createdAt` and `updatedAt` to `CommandSessionSummary`.
 - Modify `packages/ohbaby-agent/src/commands/builtin.ts`: include session timestamps in interaction metadata and make `/sessions` cancellation silent.
-- Modify `packages/ohbaby-agent/src/adapters/ui-inprocess.ts`: list current-project active primary sessions with `listByProject`, detect first user message, write temporary titles, and schedule AI title generation.
+- Modify `packages/ohbaby-agent/src/services/session/types.ts`, `store.ts`, `database-store.ts`, and `manager.ts`: expose project-root session listing so `/sessions` is not tied only to a mutable Git-derived `project_id`.
+- Modify `packages/ohbaby-agent/src/adapters/ui-inprocess.ts`: list current-project active primary sessions by canonical `projectRoot`, detect first user message, write temporary titles, and schedule AI title generation.
 - Create `packages/ohbaby-agent/src/services/session/prompt-sanitizer.ts`: sanitize and normalize first-prompt text for titles.
 - Create `packages/ohbaby-agent/src/services/session/title-generator.ts`: generate and clean AI titles with the active model.
 - Modify `packages/ohbaby-agent/src/services/session/index.ts`: export new title helpers where needed.
@@ -81,9 +82,9 @@ Run: `pnpm vitest run packages/ohbaby-agent/src/adapters/ui-inprocess.contract.t
 
 Expected: current code uses global `getRecent()` and does not pass the current-project/full-list assertions.
 
-- [ ] **Step 3: Implement `listByProject` session provider path**
+- [ ] **Step 3: Implement project-root session provider path**
 
-Extend the injected `sessionManager` type to include `listByProject`. In `listSessionsFromState()`, resolve current project root, compute `Project.fromDirectory(projectRoot).id`, call `listByProject(project.id, { status: "active" })`, filter `!isSubagent`, sort by `updatedAt DESC, createdAt DESC`, and return timestamps.
+Extend the session store and manager with `listByProjectRoot(projectRoot, { status: "active" })`. In `listSessionsFromState()`, resolve the current project root, call `listByProjectRoot(projectRoot, { status: "active" })`, filter `!isSubagent`, sort by `updatedAt DESC, createdAt DESC`, and return timestamps. This preserves the confirmed "current project" behavior even when the same `projectRoot` has historical sessions under older Git-derived `project_id` values.
 
 - [ ] **Step 4: Run green tests**
 

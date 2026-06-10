@@ -37,7 +37,7 @@
 - 将 PgUp/PgDn 可见窗口从 8 条改为 10 条。
 - 将 ESC cancelled 后发 action 的方案改为完全静默 `return`。
 - 删除“将 `DEFAULT_SESSION_LIMIT` 改为 0 / 改造 `getRecent(undefined)`”的实现方向。
-- 改为 `/sessions` 走当前 project `listByProject(project.id, { status: "active" })`，过滤 subagent，并按 `updatedAt DESC, createdAt DESC` 排序。
+- 改为 `/sessions` 走当前 project root 的 `listByProjectRoot(projectRoot, { status: "active" })`，过滤 subagent，并按 `updatedAt DESC, createdAt DESC` 排序。
 
 ### 2.2 `03-reference-projects.md`
 
