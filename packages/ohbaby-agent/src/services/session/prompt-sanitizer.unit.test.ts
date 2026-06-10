@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createTemporarySessionTitle,
+  isDefaultSessionTitle,
   sanitizePromptForSessionTitle,
 } from "./prompt-sanitizer.js";
 
@@ -41,5 +42,16 @@ describe("session prompt sanitizer", () => {
     expect(title).toContain("...");
     expect(title).not.toContain("secret-value");
     expect(title.length).toBeLessThanOrEqual(48);
+  });
+
+  it("recognizes only legacy placeholder titles as default session titles", () => {
+    expect(isDefaultSessionTitle("")).toBe(true);
+    expect(isDefaultSessionTitle("  New session  ")).toBe(true);
+    expect(isDefaultSessionTitle("Untitled session")).toBe(true);
+    expect(
+      isDefaultSessionTitle("New session - 2026-06-10T10:00:00.000Z"),
+    ).toBe(true);
+    expect(isDefaultSessionTitle("Fix session title generation")).toBe(false);
+    expect(isDefaultSessionTitle("New session details")).toBe(false);
   });
 });

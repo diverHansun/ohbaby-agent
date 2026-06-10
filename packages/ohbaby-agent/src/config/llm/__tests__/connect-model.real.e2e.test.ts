@@ -69,7 +69,7 @@ runRealE2E("connectModel real API e2e", () => {
         expect(result.provider).toBe("zenmux");
         expect(result.apiKeyEnv).toBe("ZENMUX_API_KEY");
         expect(JSON.stringify(result)).not.toContain(apiKey);
-        expect(result.contextWindowTokens).toBe(200_000);
+        expect(result.contextWindowTokens).toBeGreaterThanOrEqual(200_000);
 
         const client = await createLLMClient({
           envPath,

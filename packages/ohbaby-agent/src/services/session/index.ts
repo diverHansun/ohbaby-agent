@@ -9,8 +9,13 @@ export { createDatabaseSessionStore } from "./database-store.js";
 export { createInMemorySessionStore } from "./store.js";
 export {
   createTemporarySessionTitle,
+  isDefaultSessionTitle,
   sanitizePromptForSessionTitle,
 } from "./prompt-sanitizer.js";
+export {
+  createFallbackSessionTitleFromMessages,
+  resolveSessionDisplayTitle,
+} from "./title-fallback.js";
 export {
   cleanGeneratedSessionTitle,
   generateSessionTitle,

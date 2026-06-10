@@ -180,9 +180,7 @@ function createControlledTitleLLMClient(title: string): {
             );
           }
           return Promise.resolve(
-            createProviderStream([
-              { textDelta: "Done", finishReason: "stop" },
-            ]),
+            createProviderStream([{ textDelta: "Done", finishReason: "stop" }]),
           );
         },
       },
@@ -215,7 +213,9 @@ function titleTextForSessionTitleRequest(
   if (markerIndex < 0) {
     return "Fake session title";
   }
-  return createTemporarySessionTitle(content.slice(markerIndex + marker.length));
+  return createTemporarySessionTitle(
+    content.slice(markerIndex + marker.length),
+  );
 }
 
 function createTitleProviderStream(
@@ -3162,7 +3162,9 @@ describe("createInProcessUiBackendClient", () => {
       },
       store: createInMemorySessionStore(),
     });
-    const controlled = createControlledTitleLLMClient("Sessions backend naming");
+    const controlled = createControlledTitleLLMClient(
+      "Sessions backend naming",
+    );
     const client = createInProcessUiBackendClient({
       llmClient: controlled.client,
       messageManager,
@@ -3201,9 +3203,9 @@ describe("createInProcessUiBackendClient", () => {
       title: "Sessions backend naming",
     });
     expect(titleRequest).toMatchObject({
-      maxTokens: 512,
+      maxTokens: 128,
       model: "fake-model",
-      temperature: 0.2,
+      temperature: 0,
     });
   });
 
@@ -3256,11 +3258,11 @@ describe("createInProcessUiBackendClient", () => {
       "Timed out waiting for title generation to start",
     );
 
-    await expect(sessionManager.get("session_after_new")).resolves.toMatchObject(
-      {
-        title: "First prompt after slash new",
-      },
-    );
+    await expect(
+      sessionManager.get("session_after_new"),
+    ).resolves.toMatchObject({
+      title: "First prompt after slash new",
+    });
 
     const aiTitle = waitForUiEvent(
       client,
@@ -3271,11 +3273,54 @@ describe("createInProcessUiBackendClient", () => {
     controlled.releaseTitle();
     await aiTitle;
 
-    await expect(sessionManager.get("session_after_new")).resolves.toMatchObject(
-      {
-        title: "Slash new title",
+    await expect(
+      sessionManager.get("session_after_new"),
+    ).resolves.toMatchObject({
+      title: "Slash new title",
+    });
+  });
+
+  it("does not auto-name an empty session that already has a non-placeholder title", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => "session_1",
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
       },
-    );
+      projectResolver: {
+        fromDirectory(projectDirectory: string) {
+          return {
+            id: "project:title",
+            rootPath: projectDirectory,
+          };
+        },
+      },
+      store: createInMemorySessionStore(),
+    });
+    await sessionManager.create(process.cwd(), {
+      title: "Manual empty title",
+    });
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([
+        { textDelta: "OK", finishReason: "stop" },
+      ]),
+      messageManager,
+      sessionManager,
+    });
+
+    await client.submitPrompt("This first message must not rename manually", {
+      sessionId: "session_1",
+    });
+
+    await expect(sessionManager.get("session_1")).resolves.toMatchObject({
+      title: "Manual empty title",
+    });
   });
 
   it("does not overwrite a session title changed before AI naming finishes", async () => {
@@ -4521,6 +4566,89 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
+  it("derives /sessions titles for persisted placeholder sessions from the first user message", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-client-db-"));
+    try {
+      await initializeGitRepository(directory);
+      initDatabase({ dbPath: join(directory, "agent.db") });
+      const messageManager = createMessageManager({
+        bus: createBus(),
+        store: createDatabaseMessageStore(),
+        idGenerator: createDeterministicMessageIds(),
+      });
+      const sessionManager = createSessionManager({
+        bus: createBus(),
+        createSessionId: () => "session_from_db",
+        messageCleaner: {
+          removeMessages(sessionId: string) {
+            return messageManager.removeMessages(sessionId);
+          },
+        },
+        now: () => 1_000,
+        projectResolver: Project,
+        store: createDatabaseSessionStore(),
+      });
+      const session = await sessionManager.create(directory, {
+        title: "New session",
+      });
+      const user = await messageManager.createMessage({
+        agent: "default",
+        role: "user",
+        sessionId: session.id,
+      });
+      await messageManager.appendPart(user.id, {
+        text: "请修复 /sessions 默认标题 TOKEN=secret-value",
+        type: "text",
+      });
+
+      const client = createInProcessUiBackendClient({
+        llmClient: createFakeLLMClient([]),
+        messageManager,
+        projectDirectory: directory,
+        sessionManager,
+        stateStore: createPersistentUiStateStore({
+          appState: createDatabaseUiAppStateStore(),
+          messageManager,
+          runLedger: createDatabaseRunLedger(),
+          sessionManager,
+        }),
+      });
+      const events: UiEvent[] = [];
+      client.subscribeEvents((event) => {
+        events.push(event);
+      });
+
+      await client.executeCommand({
+        argv: [],
+        clientInvocationId: "inv_session_list",
+        commandId: "sessions",
+        path: ["sessions"],
+        raw: "/sessions",
+        rawArgs: "",
+        surface: "headless",
+      });
+
+      expect(events.at(-1)).toMatchObject({
+        output: {
+          data: {
+            sessions: [
+              {
+                id: "session_from_db",
+                title: "请修复 /sessions 默认标题 TOKEN=[redacted]",
+              },
+            ],
+          },
+          kind: "data",
+          subject: "session.list",
+        },
+        type: "command.result.delivered",
+      });
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("lists all current project active primary sessions sorted by updated time", async () => {
     const currentProjectRoot = await mkdtemp(
       join(tmpdir(), "ohbaby-current-sessions-"),
@@ -4656,9 +4784,7 @@ describe("createInProcessUiBackendClient", () => {
 
       const interactionPromise = waitForUiEvent(
         client,
-        (
-          event,
-        ): event is Extract<UiEvent, { type: "interaction.requested" }> =>
+        (event): event is Extract<UiEvent, { type: "interaction.requested" }> =>
           event.type === "interaction.requested" &&
           event.request.subject === "session",
       );

@@ -189,6 +189,54 @@ describe("createPersistentUiStateStore", () => {
     });
   });
 
+  it("derives a display title for persisted placeholder sessions from the first user message", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+      idGenerator: createDeterministicMessageIds(),
+      now: createClock(2_000),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => "session_1",
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      now: createClock(1_000),
+      projectResolver: PROJECT_RESOLVER,
+      store: createDatabaseSessionStore(),
+    });
+    const session = await sessionManager.create("D:/repo", {
+      title: "New session",
+    });
+    const user = await messageManager.createMessage({
+      agent: "default",
+      role: "user",
+      sessionId: session.id,
+    });
+    await messageManager.appendPart(user.id, {
+      text: "请修复 sessions 标题 OPENAI_API_KEY=sk-secret-value",
+      type: "text",
+    });
+    const store = createPersistentUiStateStore({
+      appState: createDatabaseUiAppStateStore(),
+      messageManager,
+      runLedger: createDatabaseRunLedger(),
+      sessionManager,
+    });
+
+    await expect(store.readSnapshot()).resolves.toMatchObject({
+      sessions: [
+        {
+          id: "session_1",
+          title: "请修复 sessions 标题 OPENAI_API_KEY=[redacted]",
+        },
+      ],
+    });
+  });
+
   it("projects active context summaries as compact boundaries without leaking summary text", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),

@@ -1,6 +1,7 @@
 const DEFAULT_TITLE_PROMPT_MAX_LENGTH = 2_000;
 const DEFAULT_TEMPORARY_TITLE_MAX_LENGTH = 48;
 const REDACTION = "[redacted]";
+const LEGACY_NEW_SESSION_TITLE_PATTERN = /^New session\s+-\s+.+$/u;
 
 export interface SanitizePromptOptions {
   readonly maxLength?: number;
@@ -22,12 +23,19 @@ export function createTemporarySessionTitle(
   return title === "" ? "Untitled session" : title;
 }
 
+export function isDefaultSessionTitle(title: string): boolean {
+  const normalized = normalizeWhitespace(title);
+  return (
+    normalized === "" ||
+    normalized === "New session" ||
+    normalized === "Untitled session" ||
+    LEGACY_NEW_SESSION_TITLE_PATTERN.test(normalized)
+  );
+}
+
 function redactSecrets(value: string): string {
   return value
-    .replace(
-      /\b(authorization\s*:\s*bearer\s+)([^\s,;]+)/giu,
-      `$1${REDACTION}`,
-    )
+    .replace(/\b(authorization\s*:\s*bearer\s+)([^\s,;]+)/giu, `$1${REDACTION}`)
     .replace(
       /\b([a-z0-9_]*(?:api[_-]?key|token|secret|password|passwd|pwd)[a-z0-9_]*\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu,
       `$1${REDACTION}`,

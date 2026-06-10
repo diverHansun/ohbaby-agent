@@ -53,6 +53,8 @@ import type {
 import {
   createTemporarySessionTitle,
   generateSessionTitle,
+  isDefaultSessionTitle,
+  resolveSessionDisplayTitle,
   sameSessionProjectRoot,
 } from "../services/session/index.js";
 import {
@@ -732,6 +734,45 @@ export function createInProcessUiBackendClient(
     return current ? [current] : [];
   }
 
+  async function resolveCoreSessionDisplayTitle(
+    session: CoreSession,
+  ): Promise<string> {
+    if (!isDefaultSessionTitle(session.title)) {
+      return session.title;
+    }
+
+    try {
+      const messages = await messageManager.listBySession(session.id);
+      return resolveSessionDisplayTitle({
+        messages,
+        title: session.title,
+      });
+    } catch {
+      return session.title;
+    }
+  }
+
+  function resolveUiSessionDisplayTitle(session: UiSession): string {
+    if (!isDefaultSessionTitle(session.title)) {
+      return session.title;
+    }
+
+    for (const message of session.messages) {
+      if (message.role !== "user") {
+        continue;
+      }
+      const text = message.parts
+        .flatMap((part) => (part.type === "text" ? [part.text] : []))
+        .join(" ")
+        .trim();
+      if (text !== "") {
+        return createTemporarySessionTitle(text);
+      }
+    }
+
+    return session.title;
+  }
+
   async function listSessionsFromState(): Promise<
     readonly CommandSessionSummary[]
   > {
@@ -743,19 +784,21 @@ export function createInProcessUiBackendClient(
           status: "active",
         },
       );
-      return sessions
-        .filter(
-          (session) =>
-            isPrimarySession(session) &&
-            sameSessionProjectRoot(session.projectRoot, projectRoot),
-        )
-        .sort(sortCoreSessionsByUpdatedAtDesc)
-        .map((session) => ({
-          createdAt: session.createdAt,
-          id: session.id,
-          title: session.title,
-          updatedAt: session.updatedAt,
-        }));
+      return Promise.all(
+        sessions
+          .filter(
+            (session) =>
+              isPrimarySession(session) &&
+              sameSessionProjectRoot(session.projectRoot, projectRoot),
+          )
+          .sort(sortCoreSessionsByUpdatedAtDesc)
+          .map(async (session) => ({
+            createdAt: session.createdAt,
+            id: session.id,
+            title: await resolveCoreSessionDisplayTitle(session),
+            updatedAt: session.updatedAt,
+          })),
+      );
     }
     const snapshot = await stateStore.readSnapshot();
     return snapshot.sessions
@@ -768,7 +811,7 @@ export function createInProcessUiBackendClient(
       .map((session) => ({
         createdAt: parseUiTimestamp(session.createdAt),
         id: session.id,
-        title: session.title,
+        title: resolveUiSessionDisplayTitle(session),
         updatedAt: parseUiTimestamp(session.updatedAt),
       }));
   }
@@ -990,6 +1033,12 @@ export function createInProcessUiBackendClient(
     readonly uiSession: UiSession;
   }): Promise<boolean> {
     if (input.coreSession?.isSubagent === true) {
+      return false;
+    }
+    if (
+      !isDefaultSessionTitle(input.uiSession.title) ||
+      (input.coreSession && !isDefaultSessionTitle(input.coreSession.title))
+    ) {
       return false;
     }
     if (input.uiSession.messages.length > 0) {

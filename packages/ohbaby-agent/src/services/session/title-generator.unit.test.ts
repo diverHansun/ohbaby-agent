@@ -21,7 +21,7 @@ describe("session title generator", () => {
     );
   });
 
-  it("uses active model configuration with constrained title generation settings", async () => {
+  it("uses the active model configuration without overriding output tokens", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const client = createFakeLLMClient(
       [
@@ -40,9 +40,9 @@ describe("session title generator", () => {
     expect(title).toBe("Sessions UI cards");
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
-      maxTokens: 512,
+      maxTokens: 8192,
       model: "active-model",
-      temperature: 0.2,
+      temperature: 0.8,
     });
     expect(JSON.stringify(requests[0].messages)).toContain("[redacted]");
     expect(JSON.stringify(requests[0].messages)).not.toContain(
@@ -74,7 +74,7 @@ function createFakeLLMClient(
       apiKeyEnv: "ACTIVE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
-      maxTokens: 128,
+      maxTokens: 8192,
       model: "active-model",
       provider: "active-provider",
       temperature: 0.8,

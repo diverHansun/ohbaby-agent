@@ -27,7 +27,11 @@ import {
   schema,
   type DatabaseConnection,
 } from "../../services/database/index.js";
-import type { Session, SessionManager } from "../../services/session/index.js";
+import {
+  resolveSessionDisplayTitle,
+  type Session,
+  type SessionManager,
+} from "../../services/session/index.js";
 import { cloneSnapshot } from "./memory-store.js";
 import type { UiStateStore } from "./types.js";
 
@@ -170,7 +174,10 @@ function sessionToUiSession(input: {
       .map(messageToUiMessage)
       .filter((message): message is UiMessage => message !== undefined),
     projectRoot: input.session.projectRoot,
-    title: input.session.title,
+    title: resolveSessionDisplayTitle({
+      messages: input.messages,
+      title: input.session.title,
+    }),
     updatedAt: toIsoString(input.session.updatedAt),
   };
 }

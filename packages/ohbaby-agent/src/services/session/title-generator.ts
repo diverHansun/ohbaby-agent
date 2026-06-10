@@ -5,8 +5,6 @@ import type {
 import { streamChatCompletion } from "../../core/llm-client/index.js";
 import { sanitizePromptForSessionTitle } from "./prompt-sanitizer.js";
 
-const TITLE_GENERATION_MAX_TOKENS = 512;
-const TITLE_GENERATION_TEMPERATURE = 0.2;
 const DEFAULT_TITLE_GENERATION_TIMEOUT_MS = 5_000;
 const GENERATED_TITLE_MAX_LENGTH = 80;
 
@@ -31,7 +29,6 @@ export async function generateSessionTitle({
 }: GenerateSessionTitleInput): Promise<string | null> {
   const abortController = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const titleClient = withTitleGenerationConfig(llmClient);
   const messages: ChatCompletionMessage[] = [
     {
       content: TITLE_GENERATION_SYSTEM_PROMPT,
@@ -46,7 +43,7 @@ export async function generateSessionTitle({
   ];
 
   const generation = collectGeneratedTitle(
-    titleClient,
+    llmClient,
     messages,
     abortController.signal,
   ).catch(() => null);
@@ -83,19 +80,6 @@ export function cleanGeneratedSessionTitle(rawTitle: string): string {
     .trim();
 
   return truncateGeneratedTitle(stripWrappingQuotes(title));
-}
-
-function withTitleGenerationConfig(
-  llmClient: LLMClientInstance,
-): LLMClientInstance {
-  return {
-    ...llmClient,
-    config: {
-      ...llmClient.config,
-      maxTokens: TITLE_GENERATION_MAX_TOKENS,
-      temperature: TITLE_GENERATION_TEMPERATURE,
-    },
-  };
 }
 
 async function collectGeneratedTitle(
