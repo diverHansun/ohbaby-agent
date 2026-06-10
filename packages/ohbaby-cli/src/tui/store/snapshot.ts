@@ -46,6 +46,7 @@ export interface TuiInteractionOption {
   readonly id: string;
   readonly label: string;
   readonly description?: string;
+  readonly metadata?: Record<string, unknown>;
 }
 
 export type TuiInteractionSubject = string;

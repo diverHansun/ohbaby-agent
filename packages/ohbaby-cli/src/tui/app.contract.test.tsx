@@ -2335,7 +2335,7 @@ describe("OhbabyTerminalApp", () => {
     });
   });
 
-  it("pages through session selections with PgUp and PgDn before resuming", async () => {
+  it("renders session selections as paged cards with updated time metadata", async () => {
     const client = createFakeClient(snapshot());
     const app = render(
       <OhbabyTerminalApp
@@ -2352,7 +2352,13 @@ describe("OhbabyTerminalApp", () => {
         kind: "select-one",
         options: Array.from({ length: 12 }, (_, index) => ({
           id: `session_${String(index + 1)}`,
-          label: `Session ${String(index + 1)}`,
+          label:
+            index === 0
+              ? "This is a very long generated session title that should truncate before the hidden tail becomes visible"
+              : `Session ${String(index + 1)}`,
+          metadata: {
+            updatedAt: new Date(2026, 0, index + 1, 9, 30).getTime(),
+          },
         })),
         prompt: "Select session",
         subject: "session",
@@ -2362,17 +2368,31 @@ describe("OhbabyTerminalApp", () => {
     });
     await flush();
 
+    const firstFrame = app.lastFrame() ?? "";
+    expect(firstFrame).toContain("Session");
+    expect(firstFrame).toContain("showing 1-10 of 12");
+    expect(firstFrame).toContain("pgup/pgdn");
+    expect(firstFrame).toContain("01-01 09:30");
+    expect(firstFrame).toContain("This is a very long generated session title");
+    expect(firstFrame).toContain("...");
+    expect(firstFrame).not.toContain("hidden tail");
+    expect(firstFrame).toContain("Session 10");
+    expect(firstFrame).not.toContain("Session 11");
+
     app.stdin.write("\u001B[6~");
-    await flush();
-    app.stdin.write("\u001B[5~");
-    await flush();
-    app.stdin.write("\u001B[6~");
-    await flush();
+    const pageFrame = await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("> Session 11") &&
+        nextFrame.includes("showing 11-12 of 12"),
+    );
+    expect(pageFrame).not.toContain("Session 10");
+
     app.stdin.write("\r");
     await flush();
 
     expect(client.respondInteraction).toHaveBeenCalledWith("session_chooser", {
-      choiceId: "session_7",
+      choiceId: "session_11",
       kind: "accepted",
     });
   });
