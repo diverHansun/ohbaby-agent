@@ -24,6 +24,8 @@ interface CapturedRequest {
 }
 
 const cleanupDirectories: string[] = [];
+const TITLE_GENERATION_PROMPT_MARKER =
+  "Generate a concise title for a coding-agent chat session.";
 const CLI_BIN_PATH = join(
   process.cwd(),
   "packages",
@@ -194,6 +196,10 @@ function writeSse(response: ServerResponse, payload: unknown): void {
   response.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
+function isTitleGenerationRequest(request: CapturedRequest): boolean {
+  return JSON.stringify(request.body).includes(TITLE_GENERATION_PROMPT_MARKER);
+}
+
 async function runCliProcess(input: {
   readonly args: readonly string[];
   readonly cwd?: string;
@@ -309,23 +315,38 @@ describe("CLI prompt process smoke", () => {
       expect(result.code).toBe(0);
       expect(result.stdout).toBe("fake smoke ok");
       expect(result.stderr).toBe("");
-      expect(server.requests).toHaveLength(1);
-      expect(server.requests[0]).toMatchObject({
+      const mainRequests = server.requests.filter(
+        (request) => !isTitleGenerationRequest(request),
+      );
+      const titleRequests = server.requests.filter(isTitleGenerationRequest);
+      expect(mainRequests).toHaveLength(1);
+      expect(titleRequests).toHaveLength(1);
+
+      const mainRequest = mainRequests[0];
+      expect(mainRequest).toMatchObject({
         authorization: "Bearer fake-key",
         method: "POST",
         url: "/v1/chat/completions",
       });
-      expect(server.requests[0].body).toMatchObject({
+      expect(mainRequest.body).toMatchObject({
         max_tokens: 128,
         model: "fake-model",
         stream: true,
         stream_options: { include_usage: true },
         temperature: 0,
       });
-      const messages = server.requests[0].body.messages;
+      const messages = mainRequest.body.messages;
       expect(Array.isArray(messages) ? messages.at(-1) : null).toMatchObject({
         content: "hello",
         role: "user",
+      });
+
+      const titleRequest = titleRequests[0];
+      expect(titleRequest.body).toMatchObject({
+        max_tokens: 512,
+        model: "fake-model",
+        stream: true,
+        temperature: 0.2,
       });
     } finally {
       await server.close();

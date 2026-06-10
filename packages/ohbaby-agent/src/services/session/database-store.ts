@@ -9,6 +9,7 @@ import {
   InvalidSessionLimitError,
   SessionNotFoundError,
 } from "./errors.js";
+import { sameSessionProjectRoot } from "./project-root.js";
 import type { ListSessionOptions, Session, SessionStore } from "./types.js";
 
 interface SessionRow {
@@ -341,6 +342,52 @@ export function createDatabaseSessionStore(
             )
             .all(...params);
           return rows.map(rowToSession).map(cloneSession);
+        });
+      },
+
+      listByProjectRoot(
+        projectRoot: string,
+        options: ListSessionOptions = {},
+      ): Promise<Session[]> {
+        return withAsyncBoundary(() => {
+          assertStoreAvailable(transaction);
+          const limit = normalizeLimit(options.limit);
+          if (transaction) {
+            return listTransactionSessions(transaction)
+              .filter((session) =>
+                sameSessionProjectRoot(session.projectRoot, projectRoot),
+              )
+              .filter(
+                (session) =>
+                  options.status === undefined ||
+                  session.status === options.status,
+              )
+              .sort(sortByUpdatedAtDesc)
+              .slice(0, limit)
+              .map(cloneSession);
+          }
+          const clauses: string[] = [];
+          const params: (string | number)[] = [];
+          if (options.status !== undefined) {
+            clauses.push("status = ?");
+            params.push(options.status);
+          }
+          const where =
+            clauses.length === 0 ? "" : `WHERE ${clauses.join(" AND ")}`;
+          const rows = db
+            .prepare<SessionRow>(
+              `SELECT * FROM ${schema.session.tableName}
+               ${where}
+               ORDER BY updated_at DESC, created_at DESC`,
+            )
+            .all(...params);
+          return rows
+            .map(rowToSession)
+            .filter((session) =>
+              sameSessionProjectRoot(session.projectRoot, projectRoot),
+            )
+            .slice(0, limit)
+            .map(cloneSession);
         });
       },
 

@@ -30,6 +30,7 @@ import {
   createDatabaseSessionStore,
   createInMemorySessionStore,
   createSessionManager,
+  createTemporarySessionTitle,
   type Session,
 } from "../services/session/index.js";
 import { AgentManager, AgentRegistry } from "../agents/index.js";
@@ -111,8 +112,18 @@ function createFakeLLMClient(
       kind: "openai-compatible",
       client: { kind: "fake" },
       streamChatCompletion(
-        _request: InterfaceProviderRequest,
+        request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isTitleGenerationRequest(request)) {
+          return Promise.resolve(
+            createProviderStream([
+              {
+                textDelta: titleTextForSessionTitleRequest(request),
+                finishReason: "stop",
+              },
+            ]),
+          );
+        }
         return Promise.resolve(createProviderStream(events));
       },
       isAbortError(): boolean {
@@ -189,6 +200,33 @@ function isTitleGenerationRequest(request: InterfaceProviderRequest): boolean {
   return JSON.stringify(request.messages).includes(
     "Generate a concise title for a coding-agent chat session.",
   );
+}
+
+function titleTextForSessionTitleRequest(
+  request: InterfaceProviderRequest,
+): string {
+  const userMessage = request.messages.find(
+    (message) => message.role === "user",
+  );
+  const content =
+    typeof userMessage?.content === "string" ? userMessage.content : "";
+  const marker = "First user message:\n";
+  const markerIndex = content.indexOf(marker);
+  if (markerIndex < 0) {
+    return "Fake session title";
+  }
+  return createTemporarySessionTitle(content.slice(markerIndex + marker.length));
+}
+
+function createTitleProviderStream(
+  request: InterfaceProviderRequest,
+): AsyncIterable<InterfaceProviderStreamEvent> {
+  return createProviderStream([
+    {
+      textDelta: titleTextForSessionTitleRequest(request),
+      finishReason: "stop",
+    },
+  ]);
 }
 
 function createBlockingLLMClient(
@@ -277,6 +315,16 @@ function createSequentialFakeLLMClient(
       streamChatCompletion(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isTitleGenerationRequest(request)) {
+          return Promise.resolve(
+            createProviderStream([
+              {
+                textDelta: titleTextForSessionTitleRequest(request),
+                finishReason: "stop",
+              },
+            ]),
+          );
+        }
         if (nextBatch >= eventBatches.length) {
           return Promise.reject(new Error("No fake LLM response configured"));
         }
@@ -395,6 +443,9 @@ function createResumableTaskFakeLLMClient(
       streamChatCompletion(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isTitleGenerationRequest(request)) {
+          return Promise.resolve(createTitleProviderStream(request));
+        }
         requests.push(request);
         const requestText = JSON.stringify(request.messages);
         if (isExploreSubagentRequest(request)) {
@@ -490,6 +541,9 @@ function createAgentTaskFakeLLMClient(
       streamChatCompletion(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isTitleGenerationRequest(request)) {
+          return Promise.resolve(createTitleProviderStream(request));
+        }
         requests.push(request);
         const requestText = JSON.stringify(request.messages);
         if (isExploreSubagentRequest(request)) {
@@ -618,6 +672,9 @@ function createAbortableSubagentLLMClient(
       streamChatCompletion(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isTitleGenerationRequest(request)) {
+          return Promise.resolve(createTitleProviderStream(request));
+        }
         requests.push(request);
         nextRequest += 1;
         if (nextRequest === 1) {
@@ -665,6 +722,9 @@ function createAbortableAgentTaskLLMClient(
       streamChatCompletion(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isTitleGenerationRequest(request)) {
+          return Promise.resolve(createTitleProviderStream(request));
+        }
         requests.push(request);
         if (isExploreSubagentRequest(request)) {
           childStarted.resolve(request.signal);
@@ -1101,10 +1161,13 @@ describe("createInProcessUiBackendClient", () => {
     const previousHome = process.env.HOME;
     const previousUserProfile = process.env.USERPROFILE;
     const previousApiKey = process.env.ZENMUX_API_KEY;
+    const previousFetch = globalThis.fetch;
 
     try {
       process.env.HOME = homeDir;
       process.env.USERPROFILE = homeDir;
+      globalThis.fetch = (): Promise<Response> =>
+        Promise.reject(new Error("metadata probe unavailable"));
 
       const client = createInProcessUiBackendClient({
         projectDirectory: projectRoot,
@@ -1182,6 +1245,7 @@ describe("createInProcessUiBackendClient", () => {
       } else {
         process.env.ZENMUX_API_KEY = previousApiKey;
       }
+      globalThis.fetch = previousFetch;
       await rm(projectRoot, { recursive: true, force: true });
       await rm(homeDir, { recursive: true, force: true });
     }
@@ -3260,6 +3324,48 @@ describe("createInProcessUiBackendClient", () => {
     });
   });
 
+  it("applies an async AI title to in-memory sessions without a session manager", async () => {
+    const controlled = createControlledTitleLLMClient("In-memory AI title");
+    const client = createInProcessUiBackendClient({
+      llmClient: controlled.client,
+    });
+
+    await client.submitPrompt("Name the in-memory session");
+    await withTimeout(
+      controlled.titleStarted.promise,
+      250,
+      "Timed out waiting for title generation to start",
+    );
+
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      sessions: [
+        {
+          id: "session_1",
+          title: "Name the in-memory session",
+        },
+      ],
+    });
+
+    const aiTitle = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "session.updated" }> =>
+        event.type === "session.updated" &&
+        event.session.title === "In-memory AI title",
+    );
+    controlled.releaseTitle();
+    await aiTitle;
+    await controlled.titleCompleted.promise;
+
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      sessions: [
+        {
+          id: "session_1",
+          title: "In-memory AI title",
+        },
+      ],
+    });
+  });
+
   it("does not mutate the SDK snapshot when core message persistence fails before run start", async () => {
     const client = createInProcessUiBackendClient({
       messageManager: createRejectingMessageManager(
@@ -4312,6 +4418,9 @@ describe("createInProcessUiBackendClient", () => {
         listByProject() {
           return Promise.resolve([]);
         },
+        listByProjectRoot() {
+          return Promise.resolve([]);
+        },
         update() {
           throw new Error("update should not be called");
         },
@@ -4506,6 +4615,16 @@ describe("createInProcessUiBackendClient", () => {
       );
       await store.insert(
         session({
+          createdAt: 5_500,
+          id: "legacy_same_root",
+          projectId: "legacy_project_id",
+          projectRoot: currentProject.rootPath,
+          title: "Legacy same root",
+          updatedAt: 49_500,
+        }),
+      );
+      await store.insert(
+        session({
           createdAt: 5_000,
           id: "current_same_time_older",
           title: "Same time older",
@@ -4558,12 +4677,13 @@ describe("createInProcessUiBackendClient", () => {
       expect(interaction.request.options?.map((option) => option.id)).toEqual([
         "current_same_time_newer",
         "current_same_time_older",
+        "legacy_same_root",
         ...Array.from({ length: 53 }, (_, index) => {
           const rank = String(index + 1).padStart(2, "0");
           return `current_${rank}`;
         }),
       ]);
-      expect(interaction.request.options).toHaveLength(55);
+      expect(interaction.request.options).toHaveLength(56);
       expect(interaction.request.options?.at(0)).toMatchObject({
         id: "current_same_time_newer",
         label: "Same time newer",
@@ -4589,6 +4709,181 @@ describe("createInProcessUiBackendClient", () => {
         recursive: true,
         retryDelay: 100,
       });
+    }
+  });
+
+  it("keeps non-git project sessions isolated by project root", async () => {
+    const currentProjectRoot = await mkdtemp(
+      join(tmpdir(), "ohbaby-current-non-git-sessions-"),
+    );
+    const otherProjectRoot = await mkdtemp(
+      join(tmpdir(), "ohbaby-other-non-git-sessions-"),
+    );
+    try {
+      const currentProject = await Project.fromDirectory(currentProjectRoot);
+      const otherProject = await Project.fromDirectory(otherProjectRoot);
+      expect(currentProject.id).toBe(otherProject.id);
+
+      const store = createInMemorySessionStore();
+      const messageManager = createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+      });
+      const sessionManager = createSessionManager({
+        bus: createBus(),
+        messageCleaner: {
+          removeMessages(sessionId: string) {
+            return messageManager.removeMessages(sessionId);
+          },
+        },
+        projectResolver: Project,
+        store,
+      });
+
+      await store.insert({
+        agentName: "default",
+        childrenIds: [],
+        createdAt: 1_000,
+        id: "current_non_git",
+        isSubagent: false,
+        projectId: currentProject.id,
+        projectRoot: currentProject.rootPath,
+        stats: { messageCount: 1 },
+        status: "active",
+        title: "Current non-git",
+        updatedAt: 3_000,
+      });
+      await store.insert({
+        agentName: "default",
+        childrenIds: [],
+        createdAt: 2_000,
+        id: "other_non_git",
+        isSubagent: false,
+        projectId: otherProject.id,
+        projectRoot: otherProject.rootPath,
+        stats: { messageCount: 1 },
+        status: "active",
+        title: "Other non-git",
+        updatedAt: 4_000,
+      });
+
+      const client = createInProcessUiBackendClient({
+        llmClient: createFakeLLMClient([]),
+        messageManager,
+        projectDirectory: currentProjectRoot,
+        sessionManager,
+      });
+      const events: UiEvent[] = [];
+      client.subscribeEvents((event) => {
+        events.push(event);
+      });
+
+      await client.executeCommand({
+        argv: [],
+        clientInvocationId: "inv_non_git_session_list",
+        commandId: "sessions",
+        path: ["sessions"],
+        raw: "/sessions",
+        rawArgs: "",
+        surface: "headless",
+      });
+
+      expect(events.at(-1)).toMatchObject({
+        output: {
+          data: {
+            sessions: [
+              {
+                id: "current_non_git",
+                title: "Current non-git",
+              },
+            ],
+          },
+          kind: "data",
+          subject: "session.list",
+        },
+        type: "command.result.delivered",
+      });
+    } finally {
+      await rm(currentProjectRoot, { force: true, recursive: true });
+      await rm(otherProjectRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("filters and sorts snapshot sessions by current project without a session manager", async () => {
+    const currentProjectRoot = await mkdtemp(
+      join(tmpdir(), "ohbaby-current-snapshot-sessions-"),
+    );
+    const otherProjectRoot = await mkdtemp(
+      join(tmpdir(), "ohbaby-other-snapshot-sessions-"),
+    );
+    try {
+      const client = createInProcessUiBackendClient({
+        initialSnapshot: {
+          activeSessionId: null,
+          permissions: [],
+          runs: [],
+          sessions: [
+            {
+              createdAt: new Date(2_000).toISOString(),
+              id: "other_recent",
+              messages: [],
+              projectRoot: otherProjectRoot,
+              title: "Other recent",
+              updatedAt: new Date(9_000).toISOString(),
+            },
+            {
+              createdAt: new Date(1_000).toISOString(),
+              id: "current_old",
+              messages: [],
+              projectRoot: currentProjectRoot,
+              title: "Current old",
+              updatedAt: new Date(3_000).toISOString(),
+            },
+            {
+              createdAt: new Date(4_000).toISOString(),
+              id: "current_recent",
+              messages: [],
+              projectRoot: currentProjectRoot,
+              title: "Current recent",
+              updatedAt: new Date(8_000).toISOString(),
+            },
+          ],
+          status: { kind: "idle" },
+        },
+        llmClient: createFakeLLMClient([]),
+        projectDirectory: currentProjectRoot,
+      });
+      const events: UiEvent[] = [];
+      client.subscribeEvents((event) => {
+        events.push(event);
+      });
+
+      await client.executeCommand({
+        argv: [],
+        clientInvocationId: "inv_snapshot_session_list",
+        commandId: "sessions",
+        path: ["sessions"],
+        raw: "/sessions",
+        rawArgs: "",
+        surface: "headless",
+      });
+
+      expect(events.at(-1)).toMatchObject({
+        output: {
+          data: {
+            sessions: [
+              { id: "current_recent", title: "Current recent" },
+              { id: "current_old", title: "Current old" },
+            ],
+          },
+          kind: "data",
+          subject: "session.list",
+        },
+        type: "command.result.delivered",
+      });
+    } finally {
+      await rm(currentProjectRoot, { force: true, recursive: true });
+      await rm(otherProjectRoot, { force: true, recursive: true });
     }
   });
 
@@ -4732,6 +5027,12 @@ describe("createInProcessUiBackendClient", () => {
       events.push(event);
     });
 
+    const interaction = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "interaction.requested" }> =>
+        event.type === "interaction.requested" &&
+        event.request.interactionId === "interaction_1",
+    );
     const execution = client.executeCommand({
       argv: [],
       clientInvocationId: "inv_session",
@@ -4742,13 +5043,10 @@ describe("createInProcessUiBackendClient", () => {
       sessionId: "session_1",
       surface: "tui",
     });
-    await new Promise((resolve) => {
-      setTimeout(resolve, 0);
-    });
+    const interactionEvent = await interaction;
 
-    expect(events).toHaveLength(2);
     expect(events[0]).toMatchObject({ type: "command.started" });
-    expect(events[1]).toMatchObject({
+    expect(interactionEvent).toMatchObject({
       request: {
         clientInvocationId: "inv_session",
         interactionId: "interaction_1",
@@ -4757,7 +5055,6 @@ describe("createInProcessUiBackendClient", () => {
       },
       type: "interaction.requested",
     });
-
     await client.respondInteraction("interaction_1", {
       choiceId: "session_2",
       kind: "accepted",
@@ -4797,6 +5094,12 @@ describe("createInProcessUiBackendClient", () => {
       events.push(event);
     });
 
+    const interaction = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "interaction.requested" }> =>
+        event.type === "interaction.requested" &&
+        event.request.interactionId === "interaction_1",
+    );
     const execution = client.executeCommand({
       argv: [],
       clientInvocationId: "inv_session",
@@ -4807,9 +5110,7 @@ describe("createInProcessUiBackendClient", () => {
       sessionId: "session_1",
       surface: "tui",
     });
-    await new Promise((resolve) => {
-      setTimeout(resolve, 0);
-    });
+    await interaction;
 
     await client.abortRun("command_1");
     await execution;

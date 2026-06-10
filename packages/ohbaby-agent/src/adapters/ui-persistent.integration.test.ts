@@ -16,11 +16,15 @@ import {
 import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
 import type { SnapshotService } from "../snapshot/index.js";
+import { createTemporarySessionTitle } from "../services/session/index.js";
 import { createPersistentUiBackendClient } from "./ui-persistent.js";
 
 interface FakeSdkClient {
   readonly kind: "fake";
 }
+
+const TITLE_GENERATION_PROMPT_MARKER =
+  "Generate a concise title for a coding-agent chat session.";
 
 function createProviderStream(
   events: readonly InterfaceProviderStreamEvent[],
@@ -45,8 +49,18 @@ function createFakeLLMClient(
       kind: "openai-compatible",
       client: { kind: "fake" },
       streamChatCompletion(
-        _request: InterfaceProviderRequest,
+        request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isSessionTitleGenerationRequest(request)) {
+          return Promise.resolve(
+            createProviderStream([
+              {
+                textDelta: titleTextForSessionTitleRequest(request),
+                finishReason: "stop",
+              },
+            ]),
+          );
+        }
         return Promise.resolve(createProviderStream(events));
       },
       isAbortError(): boolean {
@@ -200,6 +214,16 @@ function createSequentialFakeLLMClient(
       streamChatCompletion(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isSessionTitleGenerationRequest(request)) {
+          return Promise.resolve(
+            createProviderStream([
+              {
+                textDelta: titleTextForSessionTitleRequest(request),
+                finishReason: "stop",
+              },
+            ]),
+          );
+        }
         if (nextBatch >= eventBatches.length) {
           return Promise.reject(new Error("No fake LLM response configured"));
         }
@@ -222,6 +246,25 @@ function createSequentialFakeLLMClient(
       maxTokens: 128,
     },
   };
+}
+
+function isSessionTitleGenerationRequest(
+  request: InterfaceProviderRequest,
+): boolean {
+  return JSON.stringify(request.messages).includes(TITLE_GENERATION_PROMPT_MARKER);
+}
+
+function titleTextForSessionTitleRequest(
+  request: InterfaceProviderRequest,
+): string {
+  const userMessage = request.messages.find((message) => message.role === "user");
+  const content = typeof userMessage?.content === "string" ? userMessage.content : "";
+  const marker = "First user message:\n";
+  const markerIndex = content.indexOf(marker);
+  if (markerIndex < 0) {
+    return "Fake session title";
+  }
+  return createTemporarySessionTitle(content.slice(markerIndex + marker.length));
 }
 
 function requireRun(runs: readonly UiRun[], id: string): UiRun {

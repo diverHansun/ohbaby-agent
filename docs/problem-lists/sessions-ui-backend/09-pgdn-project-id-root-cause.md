@@ -100,7 +100,7 @@ a6e02732abca778f3ae0fbbd00d61c622eefc306 2026-02-05 first commit
 采用 project root 优先的 metadata 查询：
 
 1. 在 session store / manager 增加 `listByProjectRoot(projectRoot, options)`。
-2. 该方法按规范化后的 `projectRoot` 聚合 sessions，支持不同斜杠、尾斜杠和大小写差异。
+2. 该方法按规范化后的 `projectRoot` 聚合 sessions，支持不同斜杠和尾斜杠；大小写比较按平台处理，Windows 默认大小写不敏感，POSIX 默认大小写敏感。
 3. `/sessions` 调用 `listByProjectRoot(currentProjectRoot, { status: "active" })`。
 4. UI backend 继续过滤 primary sessions：`!session.isSubagent`。
 5. 排序保持 `updatedAt DESC, createdAt DESC`。
@@ -128,6 +128,8 @@ showing 11-18 of 18
 
 - session store unit test：同一 `projectRoot`、不同 `projectId` 的 active sessions 均被 `listByProjectRoot()` 返回。
 - database store integration test：SQLite 持久化路径同样按 `projectRoot` 聚合，并在过滤后应用 `limit`。
+- project-root unit test：路径比较 helper 覆盖斜杠/尾斜杠归一、Windows 大小写折叠、POSIX 大小写敏感。
+- database store transaction test：事务内 `listByProjectRoot()` 也按同一规则返回同根不同 `projectId` 的 sessions。
 - ui-inprocess contract test：`/sessions` 显示同一项目根目录下不同 `project_id` 的 active primary sessions，并排除 archived、subagent 和其它 projectRoot。
 - TUI contract/integration 现有 PgDn 测试继续证明：当 options 超过 10 条，PgDn 可进入第二页。
 
@@ -139,4 +141,5 @@ showing 11-18 of 18
 - 与“暂不考虑 archived 前端接口”一致：archived 不进入 `/sessions` 默认列表。
 - 与“当前 project sessions”一致：当前 project 以启动根目录 `projectRoot` 为用户可见边界。
 - 与非 git 目录隔离修正一致：非 git 项目共享 `global` project id 时，也依赖 `projectRoot` 隔离。
+- 与跨平台路径语义一致：不在 POSIX 上无条件折叠大小写，避免 `/repo/App` 与 `/repo/app` 被误合并。
 - 不改变 UI snapshot 恢复上限，也不重新使用 `getRecent()` 作为 `/sessions` 数据源。

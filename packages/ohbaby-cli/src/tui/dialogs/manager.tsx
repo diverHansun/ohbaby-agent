@@ -3,6 +3,7 @@ import type { ReactElement } from "react";
 import { ConfirmDialog } from "./confirm.js";
 import { ModelDialog } from "./model-dialog.js";
 import { PermissionDialog } from "./permission-dialog.js";
+import { SelectOneDialog } from "./select-one.js";
 import { SessionDialog } from "./session-dialog.js";
 import type { TuiInteractionRequest } from "../store/snapshot.js";
 
@@ -55,7 +56,7 @@ export function DialogManager({
 
   if (interaction.kind === "select-one") {
     return (
-      <SessionDialog
+      <SelectOneDialog
         client={client}
         key={interaction.interactionId}
         interaction={interaction}

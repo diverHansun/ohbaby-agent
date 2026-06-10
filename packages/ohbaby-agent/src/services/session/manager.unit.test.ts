@@ -107,6 +107,13 @@ class RejectingInsertStore implements SessionStore {
     return this.inner.listByProject(projectId, options);
   }
 
+  listByProjectRoot(
+    projectRoot: string,
+    options?: Parameters<SessionStore["listByProjectRoot"]>[1],
+  ): Promise<Session[]> {
+    return this.inner.listByProjectRoot(projectRoot, options);
+  }
+
   listChildren(
     parentId: string,
     options?: Parameters<SessionStore["listChildren"]>[1],

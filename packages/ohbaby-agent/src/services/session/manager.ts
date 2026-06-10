@@ -186,6 +186,13 @@ export function createSessionManager(
       return options.store.listByProject(projectId, listOptions);
     },
 
+    listByProjectRoot(
+      projectRoot: string,
+      listOptions?: ListSessionOptions,
+    ): Promise<Session[]> {
+      return options.store.listByProjectRoot(projectRoot, listOptions);
+    },
+
     listChildren(
       parentId: string,
       listOptions?: ListSessionOptions,

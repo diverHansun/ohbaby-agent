@@ -272,16 +272,22 @@ describe("TUI persistent backend display", () => {
     await waitForFrame(app, (frame) => frame.includes("Reply 8."));
     app.stdin.write("/sessions");
     app.stdin.write("\r");
-    await waitForFrame(app, (frame) => frame.includes("Session:"));
+    await waitForFrame(app, (frame) => frame.includes("showing 1-8 of 8"));
 
     app.stdin.write("\u001B[6~");
+    await waitForFrame(
+      app,
+      (nextFrame) =>
+        nextFrame.includes("> Prompt 1") &&
+        nextFrame.includes("showing 1-8 of 8"),
+    );
     app.stdin.write("\r");
     const frame = await waitForFrame(
       app,
       (nextFrame) =>
-        nextFrame.includes("auto · default · session_2") &&
-        nextFrame.includes("Prompt 2") &&
-        nextFrame.includes("Reply 2."),
+        nextFrame.includes("auto · default · session_1") &&
+        nextFrame.includes("Prompt 1") &&
+        nextFrame.includes("Reply 1."),
     );
 
     expect(frame).not.toContain("Reply 8.");

@@ -56,6 +56,11 @@
    - 当前 Git 仓库存在两个 root commits，`Project.fromDirectory()` 通过 `git rev-list --max-parents=0 --all` 排序取第一个 root commit，导致当前 `project_id` 从旧值切换到 `34110ec4...`。
    - 修正方向：`/sessions` 的用户语义是“当前 project 根目录的 sessions”，因此列表数据源应按 canonical `projectRoot` 聚合 active primary sessions，而不是只依赖 Git-derived `project_id`。
 
+7. 子代理复审指出 `projectRoot` 比较不应无条件折叠大小写。
+   - 修正为：路径比较 helper 统一放在 session 服务层，斜杠和尾斜杠归一；默认仅 Windows 折叠大小写，POSIX 保持大小写敏感。
+   - `ui-inprocess.ts` 删除本地重复 helper，复用 `sameSessionProjectRoot()`，避免前后端路径边界规则分叉。
+   - 新增 project-root unit test 覆盖 Windows/POSIX 大小写策略，并新增 database transaction test 覆盖事务内 `listByProjectRoot()`。
+
 ---
 
 ## 3. 验证记录
@@ -63,12 +68,14 @@
 已执行并通过：
 
 ```bash
+pnpm.cmd exec vitest run packages/ohbaby-agent/src/services/session/project-root.unit.test.ts packages/ohbaby-agent/src/services/session/database-store.integration.test.ts -t "session project root comparison|lists project-root sessions inside a transaction" --passWithNoTests
+pnpm.cmd exec vitest run packages/ohbaby-agent/src/services/session/project-root.unit.test.ts packages/ohbaby-agent/src/services/session/store.unit.test.ts packages/ohbaby-agent/src/services/session/database-store.integration.test.ts packages/ohbaby-agent/src/services/session/manager.unit.test.ts packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts --passWithNoTests
 pnpm.cmd exec vitest run packages/ohbaby-agent/src/adapters/ui-persistent.integration.test.ts tests/integration/tui/persistent-display.integration.test.tsx tests/integration/cli/prompt-process.integration.test.ts --passWithNoTests
-pnpm.cmd run lint
-pnpm.cmd run typecheck
 pnpm.cmd run test:unit
 pnpm.cmd run test:contract
 pnpm.cmd run test:integration
+pnpm.cmd run lint
+pnpm.cmd run typecheck
 pnpm.cmd run test:smoke
 pnpm.cmd run test:e2e:snapshot
 pnpm.cmd run test:smoke:real
@@ -76,16 +83,18 @@ pnpm.cmd run test:smoke:real
 
 结果摘要：
 
-- focused integration: 3 files / 15 tests passed。
-- focused contract after review fixes: 1 file / 70 tests passed。
+- project-root focused RED/GREEN：新增 helper 测试先失败于无条件大小写折叠，修正后 2 files / 5 tests passed。
+- focused session/backend contract: 5 files / 94 tests passed。
+- focused UI integration: 3 files / 15 tests passed。
 - lint: 0 errors；保留既有 warning：`packages/ohbaby-agent/src/tools/agent-task.unit.test.ts:20` 缺少显式返回类型。
 - typecheck: passed。
-- unit: 134 files / 960 tests passed。
-- contract: 6 files / 142 tests passed。
-- integration: 24 files / 124 tests passed。
+- unit: 135 files / 964 tests passed。
+- contract: 6 files / 145 tests passed。
+- integration: 24 files / 125 tests passed。
 - smoke: 2 files / 8 tests skipped，符合当前 smoke 配置。
-- snapshot e2e: 1 file / 1 test passed。首次在默认沙箱下因真实 API 连接失败，提升网络权限后通过。
+- snapshot e2e: 1 file / 1 test passed。
 - real smoke: 1 file passed；2 tests passed，5 tests skipped。
+- 备注：`test:contract` 首次全量运行时 `/connect` auto-save 队列测试出现一次等待 `connectModel` 调用超时；随后该单测、整份 `app.contract.test.tsx`、完整 `test:contract` 均重跑通过，未稳定复现。
 
 ---
 

@@ -15,7 +15,13 @@ export {
   cleanGeneratedSessionTitle,
   generateSessionTitle,
 } from "./title-generator.js";
+export {
+  isSessionProjectRootCaseInsensitivePlatform,
+  normalizeSessionProjectRoot,
+  sameSessionProjectRoot,
+} from "./project-root.js";
 export type { GenerateSessionTitleInput } from "./title-generator.js";
+export type { SessionProjectRootCompareOptions } from "./project-root.js";
 export type {
   CreateSessionOptions,
   ListSessionOptions,

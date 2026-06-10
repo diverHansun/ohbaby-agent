@@ -53,6 +53,7 @@ import type {
 import {
   createTemporarySessionTitle,
   generateSessionTitle,
+  sameSessionProjectRoot,
 } from "../services/session/index.js";
 import {
   createPermissionManager,
@@ -125,7 +126,12 @@ export interface InProcessUiBackendOptions {
   readonly messageManager?: MessageManager;
   readonly sessionManager?: Pick<
     SessionManager,
-    "create" | "get" | "getRecent" | "listByProject" | "update"
+    | "create"
+    | "get"
+    | "getRecent"
+    | "listByProject"
+    | "listByProjectRoot"
+    | "update"
   > &
     Partial<
       Pick<SessionManager, "findReusableEmptyPrimary" | "incrementStats">
@@ -244,6 +250,21 @@ function sortCoreSessionsByUpdatedAtDesc(
     return right.updatedAt - left.updatedAt;
   }
   return right.createdAt - left.createdAt;
+}
+
+function sortUiSessionsByUpdatedAtDesc(
+  left: UiSession,
+  right: UiSession,
+): number {
+  const leftUpdatedAt = parseUiTimestamp(left.updatedAt) ?? 0;
+  const rightUpdatedAt = parseUiTimestamp(right.updatedAt) ?? 0;
+  if (rightUpdatedAt !== leftUpdatedAt) {
+    return rightUpdatedAt - leftUpdatedAt;
+  }
+  return (
+    (parseUiTimestamp(right.createdAt) ?? 0) -
+    (parseUiTimestamp(left.createdAt) ?? 0)
+  );
 }
 
 function parseUiTimestamp(value: string): number | undefined {
@@ -714,14 +735,20 @@ export function createInProcessUiBackendClient(
   async function listSessionsFromState(): Promise<
     readonly CommandSessionSummary[]
   > {
+    const projectRoot = await resolveProjectRoot();
     if (options.sessionManager) {
-      const projectRoot = await resolveProjectRoot();
-      const project = await Project.fromDirectory(projectRoot);
-      const sessions = await options.sessionManager.listByProject(project.id, {
-        status: "active",
-      });
+      const sessions = await options.sessionManager.listByProjectRoot(
+        projectRoot,
+        {
+          status: "active",
+        },
+      );
       return sessions
-        .filter(isPrimarySession)
+        .filter(
+          (session) =>
+            isPrimarySession(session) &&
+            sameSessionProjectRoot(session.projectRoot, projectRoot),
+        )
         .sort(sortCoreSessionsByUpdatedAtDesc)
         .map((session) => ({
           createdAt: session.createdAt,
@@ -731,27 +758,19 @@ export function createInProcessUiBackendClient(
         }));
     }
     const snapshot = await stateStore.readSnapshot();
-    return snapshot.sessions.map((session) => ({
-      createdAt: parseUiTimestamp(session.createdAt),
-      id: session.id,
-      title: session.title,
-      updatedAt: parseUiTimestamp(session.updatedAt),
-    }));
-  }
-
-  function normalizeProjectRootForCompare(root: string | undefined): string {
-    return (root ?? "").replace(/\\/gu, "/").replace(/\/+$/u, "").toLowerCase();
-  }
-
-  function sameProjectRoot(
-    left: string | undefined,
-    right: string | undefined,
-  ): boolean {
-    return (
-      normalizeProjectRootForCompare(left) !== "" &&
-      normalizeProjectRootForCompare(left) ===
-        normalizeProjectRootForCompare(right)
-    );
+    return snapshot.sessions
+      .filter(
+        (session) =>
+          session.projectRoot === undefined ||
+          sameSessionProjectRoot(session.projectRoot, projectRoot),
+      )
+      .sort(sortUiSessionsByUpdatedAtDesc)
+      .map((session) => ({
+        createdAt: parseUiTimestamp(session.createdAt),
+        id: session.id,
+        title: session.title,
+        updatedAt: parseUiTimestamp(session.updatedAt),
+      }));
   }
 
   function isReusableUiSession(
@@ -760,7 +779,7 @@ export function createInProcessUiBackendClient(
   ): boolean {
     return (
       session.messages.length === 0 &&
-      sameProjectRoot(session.projectRoot, projectRoot)
+      sameSessionProjectRoot(session.projectRoot, projectRoot)
     );
   }
 
@@ -780,7 +799,7 @@ export function createInProcessUiBackendClient(
       coreSession !== null &&
       !coreSession.isSubagent &&
       coreSession.stats.messageCount === 0 &&
-      sameProjectRoot(coreSession.projectRoot, projectRoot)
+      sameSessionProjectRoot(coreSession.projectRoot, projectRoot)
     );
   }
 
@@ -1310,7 +1329,7 @@ export function createInProcessUiBackendClient(
         message: cloneMessage(userMessage),
       });
 
-      if (shouldGenerateSessionTitle && options.sessionManager?.update) {
+      if (shouldGenerateSessionTitle) {
         scheduleSessionTitleGeneration({
           expectedTitle: temporaryTitle,
           firstUserMessage: text,

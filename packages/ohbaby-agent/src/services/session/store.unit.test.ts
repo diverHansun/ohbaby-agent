@@ -56,6 +56,7 @@ describe("createInMemorySessionStore", () => {
       createSession({
         id: "other_project",
         projectId: "project_2",
+        projectRoot: "D:/other",
         updatedAt: 2_000,
       }),
     );
@@ -67,9 +68,26 @@ describe("createInMemorySessionStore", () => {
     await expect(
       store.listByProject("project_1", { status: "active", limit: 1 }),
     ).resolves.toMatchObject([{ id: "old_active" }]);
+    await store.insert(
+      createSession({
+        id: "same_root_other_project",
+        projectId: "legacy_project",
+        projectRoot: "D:\\repo\\",
+        updatedAt: 2_500,
+      }),
+    );
+    await expect(
+      store.listByProjectRoot("D:/repo", { status: "active" }),
+    ).resolves.toMatchObject([
+      { id: "same_root_other_project" },
+      { id: "old_active" },
+    ]);
+    await expect(
+      store.listByProjectRoot("D:/repo", { status: "active", limit: 1 }),
+    ).resolves.toMatchObject([{ id: "same_root_other_project" }]);
     await expect(store.getRecent(2)).resolves.toMatchObject([
       { id: "new_archived" },
-      { id: "other_project" },
+      { id: "same_root_other_project" },
     ]);
 
     await store.insert(
@@ -86,7 +104,7 @@ describe("createInMemorySessionStore", () => {
     ]);
     await expect(store.getRecent(2)).resolves.toMatchObject([
       { id: "new_archived" },
-      { id: "other_project" },
+      { id: "same_root_other_project" },
     ]);
   });
 

@@ -111,6 +111,7 @@ describe("createDatabaseSessionStore", () => {
       createSession({
         id: "other_project",
         projectId: "project_2",
+        projectRoot: "D:/other",
         updatedAt: 2_000,
       }),
     );
@@ -131,12 +132,33 @@ describe("createDatabaseSessionStore", () => {
     await expect(
       store.listByProject("project_1", { status: "active", limit: 1 }),
     ).resolves.toMatchObject([{ id: "child_1" }]);
+    await store.insert(
+      createSession({
+        id: "same_root_other_project",
+        projectId: "legacy_project",
+        projectRoot: "D:\\repo\\",
+        updatedAt: 2_500,
+      }),
+    );
+    await expect(
+      store.listByProjectRoot("D:/repo", { status: "active" }),
+    ).resolves.toMatchObject([
+      { id: "child_1" },
+      { id: "same_root_other_project" },
+      { id: "old_active" },
+    ]);
+    await expect(
+      store.listByProjectRoot("D:/repo", { status: "active", limit: 2 }),
+    ).resolves.toMatchObject([
+      { id: "child_1" },
+      { id: "same_root_other_project" },
+    ]);
     await expect(store.listChildren("old_active")).resolves.toMatchObject([
       { id: "child_1" },
     ]);
     await expect(store.getRecent(2)).resolves.toMatchObject([
       { id: "new_archived" },
-      { id: "other_project" },
+      { id: "same_root_other_project" },
     ]);
   });
 
@@ -151,6 +173,37 @@ describe("createDatabaseSessionStore", () => {
     ).rejects.toBeInstanceOf(SessionNotFoundError);
 
     await expect(store.get("rolled_back")).resolves.toBeNull();
+  });
+
+  it("lists project-root sessions inside a transaction", async () => {
+    const store = createDatabaseSessionStore();
+    await store.insert(createSession({ id: "old_active", updatedAt: 1_000 }));
+
+    await store.withTransaction(async (transaction) => {
+      await transaction.insert(
+        createSession({
+          id: "same_root_other_project",
+          projectId: "legacy_project",
+          projectRoot: "D:\\repo\\",
+          updatedAt: 2_000,
+        }),
+      );
+      await transaction.insert(
+        createSession({
+          id: "other_project",
+          projectId: "project_2",
+          projectRoot: "D:/other",
+          updatedAt: 3_000,
+        }),
+      );
+
+      await expect(
+        transaction.listByProjectRoot("D:/repo", {
+          status: "active",
+          limit: 1,
+        }),
+      ).resolves.toMatchObject([{ id: "same_root_other_project" }]);
+    });
   });
 
   it("rejects writes made outside the transaction store while active", async () => {

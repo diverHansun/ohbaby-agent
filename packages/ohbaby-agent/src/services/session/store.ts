@@ -3,6 +3,7 @@ import {
   InvalidSessionLimitError,
   SessionNotFoundError,
 } from "./errors.js";
+import { sameSessionProjectRoot } from "./project-root.js";
 import type { ListSessionOptions, Session, SessionStore } from "./types.js";
 
 function cloneSession(session: Session): Session {
@@ -60,6 +61,26 @@ export function createInMemorySessionStore(): SessionStore {
       const limit = normalizeLimit(options.limit);
       const items = Array.from(sessions.values())
         .filter((session) => session.projectId === projectId)
+        .filter(
+          (session) =>
+            options.status === undefined || session.status === options.status,
+        )
+        .sort(sortByUpdatedAtDesc)
+        .slice(0, limit)
+        .map(cloneSession);
+
+      return Promise.resolve(items);
+    },
+
+    listByProjectRoot(
+      projectRoot: string,
+      options: ListSessionOptions = {},
+    ): Promise<Session[]> {
+      const limit = normalizeLimit(options.limit);
+      const items = Array.from(sessions.values())
+        .filter((session) =>
+          sameSessionProjectRoot(session.projectRoot, projectRoot),
+        )
         .filter(
           (session) =>
             options.status === undefined || session.status === options.status,

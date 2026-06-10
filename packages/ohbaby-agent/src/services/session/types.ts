@@ -81,6 +81,10 @@ export interface SessionManager {
     projectId: string,
     options?: ListSessionOptions,
   ): Promise<Session[]>;
+  listByProjectRoot(
+    projectRoot: string,
+    options?: ListSessionOptions,
+  ): Promise<Session[]>;
   listChildren(
     parentId: string,
     options?: ListSessionOptions,
@@ -96,6 +100,10 @@ export interface SessionStore {
   get(sessionId: string): Promise<Session | null>;
   listByProject(
     projectId: string,
+    options?: ListSessionOptions,
+  ): Promise<Session[]>;
+  listByProjectRoot(
+    projectRoot: string,
     options?: ListSessionOptions,
   ): Promise<Session[]>;
   listChildren(
