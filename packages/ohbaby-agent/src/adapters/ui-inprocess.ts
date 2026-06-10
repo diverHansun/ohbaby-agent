@@ -121,7 +121,7 @@ export interface InProcessUiBackendOptions {
   readonly messageManager?: MessageManager;
   readonly sessionManager?: Pick<
     SessionManager,
-    "create" | "get" | "getRecent"
+    "create" | "get" | "getRecent" | "listByProject"
   > &
     Partial<
       Pick<SessionManager, "findReusableEmptyPrimary" | "incrementStats">
@@ -230,6 +230,21 @@ function sessionMetadataToUiSession(session: CoreSession): UiSession {
 
 function isPrimarySession(session: CoreSession): boolean {
   return !session.isSubagent;
+}
+
+function sortCoreSessionsByUpdatedAtDesc(
+  left: CoreSession,
+  right: CoreSession,
+): number {
+  if (right.updatedAt !== left.updatedAt) {
+    return right.updatedAt - left.updatedAt;
+  }
+  return right.createdAt - left.createdAt;
+}
+
+function parseUiTimestamp(value: string): number | undefined {
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? undefined : timestamp;
 }
 
 function maxMessageTimestamp(
@@ -696,16 +711,27 @@ export function createInProcessUiBackendClient(
     readonly CommandSessionSummary[]
   > {
     if (options.sessionManager) {
-      const sessions = await options.sessionManager.getRecent();
-      return sessions.filter(isPrimarySession).map((session) => ({
-        id: session.id,
-        title: session.title,
-      }));
+      const projectRoot = await resolveProjectRoot();
+      const project = await Project.fromDirectory(projectRoot);
+      const sessions = await options.sessionManager.listByProject(project.id, {
+        status: "active",
+      });
+      return sessions
+        .filter(isPrimarySession)
+        .sort(sortCoreSessionsByUpdatedAtDesc)
+        .map((session) => ({
+          createdAt: session.createdAt,
+          id: session.id,
+          title: session.title,
+          updatedAt: session.updatedAt,
+        }));
     }
     const snapshot = await stateStore.readSnapshot();
     return snapshot.sessions.map((session) => ({
+      createdAt: parseUiTimestamp(session.createdAt),
       id: session.id,
       title: session.title,
+      updatedAt: parseUiTimestamp(session.updatedAt),
     }));
   }
 

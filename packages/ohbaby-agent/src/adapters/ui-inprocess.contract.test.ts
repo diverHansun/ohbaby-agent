@@ -28,7 +28,9 @@ import type {
 import { closeDatabase, initDatabase } from "../services/database/index.js";
 import {
   createDatabaseSessionStore,
+  createInMemorySessionStore,
   createSessionManager,
+  type Session,
 } from "../services/session/index.js";
 import { AgentManager, AgentRegistry } from "../agents/index.js";
 import type { AgentsConfig, SubagentRole } from "../agents/index.js";
@@ -41,6 +43,7 @@ import {
   type RunLedgerRecord,
 } from "../runtime/run-ledger/index.js";
 import { PermissionEvent } from "../permission/index.js";
+import { Project } from "../project/index.js";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
 import {
   createInMemoryUiStateStore,
@@ -4062,6 +4065,9 @@ describe("createInProcessUiBackendClient", () => {
         getRecent() {
           return Promise.resolve([]);
         },
+        listByProject() {
+          return Promise.resolve([]);
+        },
       },
     });
 
@@ -4087,6 +4093,7 @@ describe("createInProcessUiBackendClient", () => {
   it("lists sessions from an injected persistent session manager", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-client-db-"));
     try {
+      await initializeGitRepository(directory);
       initDatabase({ dbPath: join(directory, "agent.db") });
       const messageManager = createMessageManager({
         bus: createBus(),
@@ -4101,23 +4108,17 @@ describe("createInProcessUiBackendClient", () => {
           },
         },
         now: () => 1_000,
-        projectResolver: {
-          fromDirectory(projectDirectory: string) {
-            return {
-              id: "project:db",
-              rootPath: projectDirectory,
-            };
-          },
-        },
+        projectResolver: Project,
         store: createDatabaseSessionStore(),
       });
-      await sessionManager.create("D:/repo", {
+      await sessionManager.create(directory, {
         title: "Stored session",
       });
 
       const client = createInProcessUiBackendClient({
         llmClient: createFakeLLMClient([]),
         messageManager,
+        projectDirectory: directory,
         sessionManager,
         stateStore: createPersistentUiStateStore({
           appState: createDatabaseUiAppStateStore(),
@@ -4144,7 +4145,14 @@ describe("createInProcessUiBackendClient", () => {
       expect(events.at(-1)).toMatchObject({
         output: {
           data: {
-            sessions: [{ id: "session_from_db", title: "Stored session" }],
+            sessions: [
+              {
+                createdAt: 1_000,
+                id: "session_from_db",
+                title: "Stored session",
+                updatedAt: 1_000,
+              },
+            ],
           },
           kind: "data",
           subject: "session.list",
@@ -4154,6 +4162,186 @@ describe("createInProcessUiBackendClient", () => {
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("lists all current project active primary sessions sorted by updated time", async () => {
+    const currentProjectRoot = await mkdtemp(
+      join(tmpdir(), "ohbaby-current-sessions-"),
+    );
+    const otherProjectRoot = await mkdtemp(
+      join(tmpdir(), "ohbaby-other-sessions-"),
+    );
+    let client: ReturnType<typeof createInProcessUiBackendClient> | undefined;
+    try {
+      await initializeGitRepository(currentProjectRoot);
+      const currentProject = await Project.fromDirectory(currentProjectRoot);
+      const otherProject = await Project.fromDirectory(otherProjectRoot);
+      const store = createInMemorySessionStore();
+      const messageManager = createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+      });
+      const sessionManager = createSessionManager({
+        bus: createBus(),
+        messageCleaner: {
+          removeMessages(sessionId: string) {
+            return messageManager.removeMessages(sessionId);
+          },
+        },
+        projectResolver: Project,
+        store,
+      });
+
+      function session(input: {
+        readonly id: string;
+        readonly projectId?: string;
+        readonly projectRoot?: string;
+        readonly title?: string;
+        readonly createdAt: number;
+        readonly updatedAt: number;
+        readonly status?: Session["status"];
+        readonly isSubagent?: boolean;
+        readonly parentId?: string;
+      }): Session {
+        return {
+          agentName: "default",
+          childrenIds: [],
+          createdAt: input.createdAt,
+          id: input.id,
+          isSubagent: input.isSubagent ?? false,
+          projectId: input.projectId ?? currentProject.id,
+          projectRoot: input.projectRoot ?? currentProject.rootPath,
+          stats: { messageCount: 1 },
+          status: input.status ?? "active",
+          title: input.title ?? input.id,
+          updatedAt: input.updatedAt,
+          ...(input.parentId === undefined ? {} : { parentId: input.parentId }),
+        };
+      }
+
+      await store.insert(
+        session({
+          createdAt: 9_999_000,
+          id: "archived_recent",
+          status: "archived",
+          title: "Archived recent",
+          updatedAt: 9_999_000,
+        }),
+      );
+      await store.insert(
+        session({
+          createdAt: 9_998_000,
+          id: "subagent_recent",
+          isSubagent: true,
+          parentId: "current_01",
+          title: "Subagent recent",
+          updatedAt: 9_998_000,
+        }),
+      );
+      await store.insert(
+        session({
+          createdAt: 9_997_000,
+          id: "other_recent",
+          projectId: otherProject.id,
+          projectRoot: otherProject.rootPath,
+          title: "Other recent",
+          updatedAt: 9_997_000,
+        }),
+      );
+      await store.insert(
+        session({
+          createdAt: 6_000,
+          id: "current_same_time_newer",
+          title: "Same time newer",
+          updatedAt: 50_000,
+        }),
+      );
+      await store.insert(
+        session({
+          createdAt: 5_000,
+          id: "current_same_time_older",
+          title: "Same time older",
+          updatedAt: 50_000,
+        }),
+      );
+      for (let index = 0; index < 53; index += 1) {
+        const rank = String(index + 1).padStart(2, "0");
+        await store.insert(
+          session({
+            createdAt: 1_000 + index,
+            id: `current_${rank}`,
+            title: `Current ${rank}`,
+            updatedAt: 49_000 - index,
+          }),
+        );
+      }
+
+      client = createInProcessUiBackendClient({
+        llmClient: createFakeLLMClient([]),
+        messageManager,
+        projectDirectory: currentProjectRoot,
+        sessionManager,
+      });
+      const events: UiEvent[] = [];
+      client.subscribeEvents((event) => {
+        events.push(event);
+      });
+
+      const interactionPromise = waitForUiEvent(
+        client,
+        (
+          event,
+        ): event is Extract<UiEvent, { type: "interaction.requested" }> =>
+          event.type === "interaction.requested" &&
+          event.request.subject === "session",
+      );
+
+      const execution = client.executeCommand({
+        argv: [],
+        clientInvocationId: "inv_session_list",
+        commandId: "sessions",
+        path: ["sessions"],
+        raw: "/sessions",
+        rawArgs: "",
+        surface: "tui",
+      });
+
+      const interaction = await interactionPromise;
+      expect(interaction.request.options?.map((option) => option.id)).toEqual([
+        "current_same_time_newer",
+        "current_same_time_older",
+        ...Array.from({ length: 53 }, (_, index) => {
+          const rank = String(index + 1).padStart(2, "0");
+          return `current_${rank}`;
+        }),
+      ]);
+      expect(interaction.request.options).toHaveLength(55);
+      expect(interaction.request.options?.at(0)).toMatchObject({
+        id: "current_same_time_newer",
+        label: "Same time newer",
+        metadata: { createdAt: 6_000, updatedAt: 50_000 },
+      });
+
+      await client.respondInteraction(interaction.request.interactionId, {
+        kind: "cancelled",
+        reason: "user-cancelled",
+      });
+      await execution;
+    } finally {
+      client?.dispose();
+      await rm(currentProjectRoot, {
+        force: true,
+        maxRetries: 5,
+        recursive: true,
+        retryDelay: 100,
+      });
+      await rm(otherProjectRoot, {
+        force: true,
+        maxRetries: 5,
+        recursive: true,
+        retryDelay: 100,
+      });
     }
   });
 
