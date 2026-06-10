@@ -7,6 +7,15 @@ export {
 } from "./manager.js";
 export { createDatabaseSessionStore } from "./database-store.js";
 export { createInMemorySessionStore } from "./store.js";
+export {
+  createTemporarySessionTitle,
+  sanitizePromptForSessionTitle,
+} from "./prompt-sanitizer.js";
+export {
+  cleanGeneratedSessionTitle,
+  generateSessionTitle,
+} from "./title-generator.js";
+export type { GenerateSessionTitleInput } from "./title-generator.js";
 export type {
   CreateSessionOptions,
   ListSessionOptions,
@@ -23,3 +32,4 @@ export type {
   SessionStatus,
   UpdateSessionPatch,
 } from "./types.js";
+export type { SanitizePromptOptions } from "./prompt-sanitizer.js";
