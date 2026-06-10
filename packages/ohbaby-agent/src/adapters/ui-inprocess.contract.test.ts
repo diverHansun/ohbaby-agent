@@ -132,6 +132,65 @@ function createFakeLLMClient(
   };
 }
 
+function createControlledTitleLLMClient(title: string): {
+  readonly client: LLMClientInstance<FakeSdkClient>;
+  readonly requests: InterfaceProviderRequest[];
+  readonly titleCompleted: Deferred<undefined>;
+  readonly titleStarted: Deferred<undefined>;
+  releaseTitle(): void;
+} {
+  const requests: InterfaceProviderRequest[] = [];
+  const releaseTitle = createDeferred<undefined>();
+  const titleStarted = createDeferred<undefined>();
+  const titleCompleted = createDeferred<undefined>();
+  const client = createFakeLLMClient([]);
+  return {
+    client: {
+      ...client,
+      provider: {
+        ...client.provider,
+        streamChatCompletion(
+          request: InterfaceProviderRequest,
+        ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+          requests.push(request);
+          if (isTitleGenerationRequest(request)) {
+            titleStarted.resolve(undefined);
+            return Promise.resolve(
+              (async function* (): AsyncGenerator<
+                InterfaceProviderStreamEvent,
+                void,
+                unknown
+              > {
+                await releaseTitle.promise;
+                yield { textDelta: JSON.stringify({ title }) };
+                yield { finishReason: "stop" };
+                titleCompleted.resolve(undefined);
+              })(),
+            );
+          }
+          return Promise.resolve(
+            createProviderStream([
+              { textDelta: "Done", finishReason: "stop" },
+            ]),
+          );
+        },
+      },
+    },
+    releaseTitle(): void {
+      releaseTitle.resolve(undefined);
+    },
+    requests,
+    titleCompleted,
+    titleStarted,
+  };
+}
+
+function isTitleGenerationRequest(request: InterfaceProviderRequest): boolean {
+  return JSON.stringify(request.messages).includes(
+    "Generate a concise title for a coding-agent chat session.",
+  );
+}
+
 function createBlockingLLMClient(
   release: Promise<void>,
   config: Partial<LLMClientInstance<FakeSdkClient>["config"]> = {},
@@ -3016,6 +3075,191 @@ describe("createInProcessUiBackendClient", () => {
     ]);
   });
 
+  it("writes a temporary first-message title then applies an async AI title", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => "session_1",
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      projectResolver: {
+        fromDirectory(projectDirectory: string) {
+          return {
+            id: "project:title",
+            rootPath: projectDirectory,
+          };
+        },
+      },
+      store: createInMemorySessionStore(),
+    });
+    const controlled = createControlledTitleLLMClient("Sessions backend naming");
+    const client = createInProcessUiBackendClient({
+      llmClient: controlled.client,
+      messageManager,
+      sessionManager,
+    });
+
+    await client.submitPrompt(
+      "Please fix sessions OPENAI_API_KEY=sk-secret-value",
+    );
+    await withTimeout(
+      controlled.titleStarted.promise,
+      250,
+      "Timed out waiting for title generation to start",
+    );
+
+    await expect(sessionManager.get("session_1")).resolves.toMatchObject({
+      title: "Please fix sessions OPENAI_API_KEY=[redacted]",
+    });
+    const titleRequest = controlled.requests.find(isTitleGenerationRequest);
+    expect(JSON.stringify(titleRequest?.messages)).toContain("[redacted]");
+    expect(JSON.stringify(titleRequest?.messages)).not.toContain(
+      "sk-secret-value",
+    );
+
+    const aiTitle = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "session.updated" }> =>
+        event.type === "session.updated" &&
+        event.session.title === "Sessions backend naming",
+    );
+    controlled.releaseTitle();
+    await aiTitle;
+    await controlled.titleCompleted.promise;
+
+    await expect(sessionManager.get("session_1")).resolves.toMatchObject({
+      title: "Sessions backend naming",
+    });
+    expect(titleRequest).toMatchObject({
+      maxTokens: 512,
+      model: "fake-model",
+      temperature: 0.2,
+    });
+  });
+
+  it("auto-names the first prompt submitted after /new", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => "session_after_new",
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      projectResolver: {
+        fromDirectory(projectDirectory: string) {
+          return {
+            id: "project:title",
+            rootPath: projectDirectory,
+          };
+        },
+      },
+      store: createInMemorySessionStore(),
+    });
+    const controlled = createControlledTitleLLMClient("Slash new title");
+    const client = createInProcessUiBackendClient({
+      llmClient: controlled.client,
+      messageManager,
+      sessionManager,
+    });
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_new",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "tui",
+    });
+    const activeSessionId = (await client.getSnapshot()).activeSessionId;
+    await client.submitPrompt("First prompt after slash new", {
+      sessionId: activeSessionId ?? undefined,
+    });
+    await withTimeout(
+      controlled.titleStarted.promise,
+      250,
+      "Timed out waiting for title generation to start",
+    );
+
+    await expect(sessionManager.get("session_after_new")).resolves.toMatchObject(
+      {
+        title: "First prompt after slash new",
+      },
+    );
+
+    const aiTitle = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "session.updated" }> =>
+        event.type === "session.updated" &&
+        event.session.title === "Slash new title",
+    );
+    controlled.releaseTitle();
+    await aiTitle;
+
+    await expect(sessionManager.get("session_after_new")).resolves.toMatchObject(
+      {
+        title: "Slash new title",
+      },
+    );
+  });
+
+  it("does not overwrite a session title changed before AI naming finishes", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => "session_1",
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      projectResolver: {
+        fromDirectory(projectDirectory: string) {
+          return {
+            id: "project:title",
+            rootPath: projectDirectory,
+          };
+        },
+      },
+      store: createInMemorySessionStore(),
+    });
+    const controlled = createControlledTitleLLMClient("AI should not win");
+    const client = createInProcessUiBackendClient({
+      llmClient: controlled.client,
+      messageManager,
+      sessionManager,
+    });
+
+    await client.submitPrompt("Keep manual title safe");
+    await withTimeout(
+      controlled.titleStarted.promise,
+      250,
+      "Timed out waiting for title generation to start",
+    );
+    await sessionManager.update("session_1", { title: "Manual rename" });
+
+    controlled.releaseTitle();
+    await controlled.titleCompleted.promise;
+
+    await expect(sessionManager.get("session_1")).resolves.toMatchObject({
+      title: "Manual rename",
+    });
+  });
+
   it("does not mutate the SDK snapshot when core message persistence fails before run start", async () => {
     const client = createInProcessUiBackendClient({
       messageManager: createRejectingMessageManager(
@@ -4067,6 +4311,9 @@ describe("createInProcessUiBackendClient", () => {
         },
         listByProject() {
           return Promise.resolve([]);
+        },
+        update() {
+          throw new Error("update should not be called");
         },
       },
     });

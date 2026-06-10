@@ -51,6 +51,10 @@ import type {
   SessionManager,
 } from "../services/session/index.js";
 import {
+  createTemporarySessionTitle,
+  generateSessionTitle,
+} from "../services/session/index.js";
+import {
   createPermissionManager,
   createPermissionState,
 } from "../permission/index.js";
@@ -121,7 +125,7 @@ export interface InProcessUiBackendOptions {
   readonly messageManager?: MessageManager;
   readonly sessionManager?: Pick<
     SessionManager,
-    "create" | "get" | "getRecent" | "listByProject"
+    "create" | "get" | "getRecent" | "listByProject" | "update"
   > &
     Partial<
       Pick<SessionManager, "findReusableEmptyPrimary" | "incrementStats">
@@ -962,6 +966,130 @@ export function createInProcessUiBackendClient(
     }
   }
 
+  async function isFirstUserMessageForTitle(input: {
+    readonly coreSession?: CoreSession;
+    readonly uiSession: UiSession;
+  }): Promise<boolean> {
+    if (input.coreSession?.isSubagent === true) {
+      return false;
+    }
+    if (input.uiSession.messages.length > 0) {
+      return false;
+    }
+    if ((input.coreSession?.stats.messageCount ?? 0) > 0) {
+      return false;
+    }
+
+    try {
+      const messages = await messageManager.listBySession(input.uiSession.id);
+      return messages.length === 0;
+    } catch {
+      return true;
+    }
+  }
+
+  async function applyTemporarySessionTitle(input: {
+    readonly session: UiSession;
+    readonly title: string;
+  }): Promise<UiSession> {
+    if (input.session.title === input.title) {
+      return input.session;
+    }
+
+    let updatedSession: UiSession;
+    if (options.sessionManager?.update) {
+      const updatedCoreSession = await options.sessionManager.update(
+        input.session.id,
+        { title: input.title },
+      );
+      updatedSession = {
+        ...sessionMetadataToUiSession(updatedCoreSession),
+        messages: input.session.messages,
+      };
+    } else {
+      updatedSession = {
+        ...input.session,
+        title: input.title,
+        updatedAt: timestamp(),
+      };
+    }
+
+    await upsertSession(updatedSession);
+    publish({
+      type: "session.updated",
+      session: cloneSession(updatedSession),
+    });
+    return updatedSession;
+  }
+
+  function scheduleSessionTitleGeneration(input: {
+    readonly expectedTitle: string;
+    readonly firstUserMessage: string;
+    readonly projectRoot: string;
+    readonly sessionId: string;
+  }): void {
+    void (async (): Promise<void> => {
+      const llmClient = await resolveLLMClient(input.projectRoot);
+      const generatedTitle = await generateSessionTitle({
+        firstUserMessage: input.firstUserMessage,
+        llmClient,
+      });
+      if (!generatedTitle || generatedTitle === input.expectedTitle) {
+        return;
+      }
+      await applyGeneratedSessionTitleIfUnchanged({
+        expectedTitle: input.expectedTitle,
+        sessionId: input.sessionId,
+        title: generatedTitle,
+      });
+    })().catch(() => undefined);
+  }
+
+  async function applyGeneratedSessionTitleIfUnchanged(input: {
+    readonly expectedTitle: string;
+    readonly sessionId: string;
+    readonly title: string;
+  }): Promise<void> {
+    if (options.sessionManager?.update) {
+      const coreSession = await options.sessionManager.get(input.sessionId);
+      if (coreSession?.title !== input.expectedTitle) {
+        return;
+      }
+      const updatedCoreSession = await options.sessionManager.update(
+        input.sessionId,
+        { title: input.title },
+      );
+      const uiSession = await stateStore.getSession(input.sessionId);
+      if (uiSession?.title === input.expectedTitle) {
+        const updatedUiSession = {
+          ...sessionMetadataToUiSession(updatedCoreSession),
+          messages: uiSession.messages,
+        };
+        await upsertSession(updatedUiSession);
+        publish({
+          type: "session.updated",
+          session: cloneSession(updatedUiSession),
+        });
+      }
+      return;
+    }
+
+    const uiSession = await stateStore.getSession(input.sessionId);
+    if (uiSession?.title !== input.expectedTitle) {
+      return;
+    }
+    const updatedUiSession = {
+      ...uiSession,
+      title: input.title,
+      updatedAt: timestamp(),
+    };
+    await upsertSession(updatedUiSession);
+    publish({
+      type: "session.updated",
+      session: cloneSession(updatedUiSession),
+    });
+  }
+
   async function resolveCompactTarget(
     compactOptions: UiCompactSessionOptions = {},
   ): Promise<{
@@ -1083,20 +1211,22 @@ export function createInProcessUiBackendClient(
         };
       }
 
+      const temporaryTitle = createTemporarySessionTitle(text);
+      let shouldGenerateSessionTitle = false;
       const isNewSession = !session;
       if (!session) {
-        const title = text.trim().slice(0, 48) || "Untitled session";
+        shouldGenerateSessionTitle = true;
         if (options.sessionManager) {
           const created = await options.sessionManager.create(baseProjectRoot, {
             agentName,
             id: submitOptions?.sessionId,
-            title,
+            title: temporaryTitle,
           });
           session = sessionMetadataToUiSession(created);
         } else {
           session = {
             id: submitOptions?.sessionId ?? sessionIds.next(),
-            title,
+            title: temporaryTitle,
             messages: [],
             projectRoot: baseProjectRoot,
             createdAt,
@@ -1104,6 +1234,17 @@ export function createInProcessUiBackendClient(
           };
         }
         sessionIds.reserve(session.id);
+      } else if (
+        await isFirstUserMessageForTitle({
+          coreSession: existingCoreSession ?? undefined,
+          uiSession: session,
+        })
+      ) {
+        shouldGenerateSessionTitle = true;
+        session = await applyTemporarySessionTitle({
+          session,
+          title: temporaryTitle,
+        });
       }
       const resolvedProjectRoot = session.projectRoot ?? baseProjectRoot;
       submittedSessionId = session.id;
@@ -1168,6 +1309,15 @@ export function createInProcessUiBackendClient(
         sessionId: session.id,
         message: cloneMessage(userMessage),
       });
+
+      if (shouldGenerateSessionTitle && options.sessionManager?.update) {
+        scheduleSessionTitleGeneration({
+          expectedTitle: temporaryTitle,
+          firstUserMessage: text,
+          projectRoot: resolvedProjectRoot,
+          sessionId: session.id,
+        });
+      }
 
       projection.start();
 
