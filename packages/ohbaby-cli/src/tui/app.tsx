@@ -27,7 +27,7 @@ import {
   useTuiStoreSelector,
 } from "./store/selectors.js";
 import {
-  selectCommittedMessages,
+  selectCommittedItems,
   selectLiveMessage,
 } from "./store/selectors/transcript.js";
 import { createCoalescedTuiEventDispatcher } from "./store/stream-coalescer.js";
@@ -495,7 +495,7 @@ function TranscriptViewportContainer({
     store,
     (state) => state.commandNotices,
   );
-  const committedMessages = useTuiStoreSelector(store, selectCommittedMessages);
+  const committedItems = useTuiStoreSelector(store, selectCommittedItems);
   const liveMessage = useTuiStoreSelector(store, selectLiveMessage);
   const notices = useTuiStoreSelector(store, (state) => state.notices);
   const runtime = useTuiStoreSelector(store, (state) => state.runtime);
@@ -504,7 +504,7 @@ function TranscriptViewportContainer({
     <TranscriptViewport
       key={activeSessionId ?? "none"}
       commandNotices={commandNotices}
-      committedMessages={committedMessages}
+      committedItems={committedItems}
       liveMessage={liveMessage}
       notices={notices}
       runtime={runtime}

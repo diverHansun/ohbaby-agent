@@ -21,7 +21,10 @@ import type {
   TuiStoreState,
 } from "./snapshot.js";
 import { renderStatusPanel } from "../render/status-panel.js";
-import { splitTranscript } from "./transcript.js";
+import {
+  advanceTranscriptCommit,
+  type TranscriptCommitState,
+} from "./transcript.js";
 
 const COMMAND_NOTICE_LIMIT = 20;
 const COMMAND_SESSION_LIMIT = 100;
@@ -31,7 +34,11 @@ const UI_NOTICE_LIMIT = 10;
 export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
   const activeSession = findActiveSession(snapshot);
   const messages = activeSession?.messages ?? [];
-  const transcript = splitTranscript(messages, snapshot.status);
+  const transcript = advanceTranscriptCommit(
+    undefined,
+    messages,
+    snapshot.status,
+  );
 
   return {
     activeSessionId: snapshot.activeSessionId,
@@ -43,7 +50,8 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
     contextWindowUsages: snapshot.contextWindowUsages ?? [],
     resolvedPermissionIds: [],
     interactions: [],
-    committedMessages: transcript.committedMessages,
+    committedItems: transcript.committedItems,
+    committedPartCounts: transcript.committedPartCounts,
     liveMessage: transcript.liveMessage,
     messages,
     notices: [],
@@ -400,7 +408,8 @@ function preserveLocalQueues(
     commandSessionIds: previous.commandSessionIds,
     contextWindowUsages,
     interactions: previous.interactions,
-    committedMessages: transcript.committedMessages,
+    committedItems: transcript.committedItems,
+    committedPartCounts: transcript.committedPartCounts,
     liveMessage: transcript.liveMessage,
     messages,
     notices: activeSessionChanged
@@ -462,7 +471,8 @@ function rebuildFromCollections(
   return {
     ...state,
     activeSessionId,
-    committedMessages: transcript.committedMessages,
+    committedItems: transcript.committedItems,
+    committedPartCounts: transcript.committedPartCounts,
     contextWindowUsages,
     liveMessage: transcript.liveMessage,
     messages,
@@ -480,29 +490,19 @@ function resolveTranscriptState(
   activeSessionId: string | null,
   messages: readonly UiMessage[],
   runtime: TuiRuntimeStatus,
-): Pick<TuiStoreState, "committedMessages" | "liveMessage"> {
-  const next = splitTranscript(messages, runtime);
-  if (
-    previous?.activeSessionId === activeSessionId &&
-    sameMessageReferences(previous.committedMessages, next.committedMessages)
-  ) {
-    return {
-      committedMessages: previous.committedMessages,
-      liveMessage: next.liveMessage,
-    };
-  }
+): TranscriptCommitState {
+  // A session switch starts a fresh transcript: committed items are rebuilt
+  // wholesale because the viewport remounts its <Static> region.
+  const previousCommit =
+    previous?.activeSessionId === activeSessionId
+      ? {
+          committedItems: previous.committedItems,
+          committedPartCounts: previous.committedPartCounts,
+          liveMessage: previous.liveMessage,
+        }
+      : undefined;
 
-  return next;
-}
-
-function sameMessageReferences(
-  left: readonly UiMessage[],
-  right: readonly UiMessage[],
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every((message, index) => message === right[index])
-  );
+  return advanceTranscriptCommit(previousCommit, messages, runtime);
 }
 
 function rebuildWithPermissions(

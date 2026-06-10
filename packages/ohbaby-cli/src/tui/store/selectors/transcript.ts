@@ -1,8 +1,9 @@
 import type { UiMessage, UiNotice } from "ohbaby-sdk";
 import type { TuiCommandNotice, TuiStoreState } from "../snapshot.js";
+import type { TranscriptItem } from "../transcript.js";
 
 export interface TranscriptSplitSelection {
-  readonly committedMessages: readonly UiMessage[];
+  readonly committedItems: readonly TranscriptItem[];
   readonly liveMessage: UiMessage | null;
 }
 
@@ -14,10 +15,10 @@ export interface CommandNoticeLaneState {
   readonly commandNotices: readonly TuiCommandNotice[];
 }
 
-export function selectCommittedMessages(
+export function selectCommittedItems(
   state: TuiStoreState,
-): readonly UiMessage[] {
-  return state.committedMessages;
+): readonly TranscriptItem[] {
+  return state.committedItems;
 }
 
 export function selectLiveMessage(state: TuiStoreState): UiMessage | null {
@@ -28,7 +29,7 @@ export function selectTranscriptSplit(
   state: TuiStoreState,
 ): TranscriptSplitSelection {
   return {
-    committedMessages: state.committedMessages,
+    committedItems: state.committedItems,
     liveMessage: state.liveMessage,
   };
 }

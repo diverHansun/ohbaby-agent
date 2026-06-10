@@ -8,6 +8,7 @@ describe("computeLayoutMetrics", () => {
       contentWidth: 56,
       horizontalPadding: 2,
       isCompact: true,
+      liveTailRows: 20,
       rows: 30,
     });
   });
@@ -18,6 +19,7 @@ describe("computeLayoutMetrics", () => {
       contentWidth: 172,
       horizontalPadding: 4,
       isCompact: false,
+      liveTailRows: 30,
       rows: 40,
     });
   });
@@ -28,7 +30,23 @@ describe("computeLayoutMetrics", () => {
       contentWidth: 220,
       horizontalPadding: 4,
       isCompact: false,
+      liveTailRows: 30,
       rows: 40,
     });
+  });
+
+  it("keeps a minimum live tail height on tiny terminals", () => {
+    expect(computeLayoutMetrics({ columns: 80, rows: 8 }).liveTailRows).toBe(3);
+  });
+
+  it("falls back to default dimensions when the stream reports none", () => {
+    const metrics = computeLayoutMetrics({
+      columns: Number.NaN,
+      rows: Number.NaN,
+    });
+
+    expect(metrics.columns).toBe(80);
+    expect(metrics.rows).toBe(24);
+    expect(metrics.liveTailRows).toBe(14);
   });
 });

@@ -224,7 +224,9 @@ describe("TUI store event reducer", () => {
       }),
     );
 
-    expect(state.committedMessages).toEqual([messages[0]]);
+    expect(state.committedItems.map((item) => item.message)).toEqual([
+      messages[0],
+    ]);
     expect(state.liveMessage).toEqual(messages[1]);
   });
 
@@ -237,7 +239,7 @@ describe("TUI store event reducer", () => {
       }),
     );
 
-    expect(state.committedMessages).toEqual(messages);
+    expect(state.committedItems.map((item) => item.message)).toEqual(messages);
     expect(state.liveMessage).toBeNull();
   });
 
@@ -252,7 +254,7 @@ describe("TUI store event reducer", () => {
         status: { kind: "running", runId: "run_1" },
       }),
     );
-    const committedRef = state.committedMessages;
+    const committedRef = state.committedItems;
 
     for (let index = 0; index < 100; index += 1) {
       state = applyTuiEvent(state, {
@@ -264,7 +266,7 @@ describe("TUI store event reducer", () => {
       });
     }
 
-    expect(state.committedMessages).toBe(committedRef);
+    expect(state.committedItems).toBe(committedRef);
     expect(state.liveMessage?.parts[0]).toMatchObject({ text: "Hello 99" });
   });
 
@@ -289,7 +291,7 @@ describe("TUI store event reducer", () => {
         status: { kind: "running", runId: "run_1" },
       }),
     );
-    const committedRef = state.committedMessages;
+    const committedRef = state.committedItems;
 
     const next = applyTuiEvent(state, {
       delta: "ing",
@@ -299,7 +301,7 @@ describe("TUI store event reducer", () => {
       type: "message.part.delta",
     });
 
-    expect(next.committedMessages).toBe(committedRef);
+    expect(next.committedItems).toBe(committedRef);
     expect(next.liveMessage?.parts[0]).toMatchObject({
       text: "streaming",
     });
@@ -325,7 +327,7 @@ describe("TUI store event reducer", () => {
       type: "message.updated",
     });
 
-    expect(state.committedMessages.map((message) => message.id)).toEqual([
+    expect(state.committedItems.map((item) => item.messageId)).toEqual([
       "user_1",
     ]);
     expect(state.liveMessage?.id).toBe("assistant_1");
@@ -336,7 +338,7 @@ describe("TUI store event reducer", () => {
       type: "runtime.updated",
     });
 
-    expect(state.committedMessages.map((message) => message.id)).toEqual([
+    expect(state.committedItems.map((item) => item.messageId)).toEqual([
       "user_1",
       "assistant_1",
     ]);
@@ -375,7 +377,7 @@ describe("TUI store event reducer", () => {
     });
 
     expect(next.activeSessionId).toBe("session_beta");
-    expect(next.committedMessages.map((message) => message.id)).toEqual([
+    expect(next.committedItems.map((item) => item.messageId)).toEqual([
       "user_beta",
     ]);
     expect(next.liveMessage).toBeNull();
@@ -414,7 +416,7 @@ describe("TUI store event reducer", () => {
     });
 
     expect(next.messages.map((message) => message.id)).toEqual(["user_beta"]);
-    expect(next.committedMessages.map((message) => message.id)).toEqual([
+    expect(next.committedItems.map((item) => item.messageId)).toEqual([
       "user_beta",
     ]);
   });
@@ -432,7 +434,7 @@ describe("TUI store event reducer", () => {
     });
 
     expect(next.messages).toEqual([]);
-    expect(next.committedMessages).toEqual([]);
+    expect(next.committedItems).toEqual([]);
     expect(next.liveMessage).toBeNull();
   });
 
@@ -841,6 +843,10 @@ describe("TUI store event reducer", () => {
       runId: "command_compact",
       title: "Compacting...",
     });
+    expect(state.committedItems.map((item) => item.messageId)).toEqual([
+      "message_1",
+    ]);
+    expect(state.liveMessage).toBeNull();
 
     state = applyTuiEvent(state, {
       clientInvocationId: "invoke_compact",

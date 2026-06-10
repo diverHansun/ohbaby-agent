@@ -17,6 +17,7 @@ import type {
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
+import type { TranscriptItem } from "./transcript.js";
 
 export type TuiRuntimeStatus = UiRunStatus;
 
@@ -94,7 +95,8 @@ export interface TuiStoreState {
   readonly notices: readonly UiNotice[];
   readonly commandNotices: readonly TuiCommandNotice[];
   readonly commandSessionIds: Readonly<Record<string, string | null>>;
-  readonly committedMessages: readonly UiMessage[];
+  readonly committedItems: readonly TranscriptItem[];
+  readonly committedPartCounts: Readonly<Partial<Record<string, number>>>;
   readonly liveMessage: UiMessage | null;
   readonly contextWindowUsages: readonly UiContextWindowUsage[];
   readonly commandNoticeSequence: number;

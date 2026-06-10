@@ -1,11 +1,11 @@
 import { Box, Static, useStdout } from "ink";
-import type { UiMessage } from "ohbaby-sdk";
 import { memo, type ReactElement } from "react";
 import { useTuiLayout } from "../../layout/context.js";
+import type { TranscriptItem } from "../../store/transcript.js";
 import { MessageRow } from "../message/message-row.js";
 
 export interface CommittedTranscriptProps {
-  readonly messages: readonly UiMessage[];
+  readonly items: readonly TranscriptItem[];
 }
 
 interface StaticTranscriptDecisionInput {
@@ -15,7 +15,7 @@ interface StaticTranscriptDecisionInput {
 }
 
 export const CommittedTranscript = memo(function CommittedTranscript({
-  messages,
+  items,
 }: CommittedTranscriptProps): ReactElement {
   const layout = useTuiLayout();
   const { stdout } = useStdout();
@@ -25,12 +25,13 @@ export const CommittedTranscript = memo(function CommittedTranscript({
 
   if (useStatic) {
     return (
-      <Static items={messages as UiMessage[]}>
-        {(message): ReactElement => (
+      <Static items={items as TranscriptItem[]}>
+        {(item): ReactElement => (
           <MessageRow
+            bottomMargin={item.spacing ? 1 : 0}
             contentWidth={layout.contentWidth}
-            key={message.id}
-            message={message}
+            key={item.id}
+            message={item.message}
           />
         )}
       </Static>
@@ -39,11 +40,12 @@ export const CommittedTranscript = memo(function CommittedTranscript({
 
   return (
     <Box flexDirection="column">
-      {messages.map((message) => (
+      {items.map((item) => (
         <MessageRow
+          bottomMargin={item.spacing ? 1 : 0}
           contentWidth={layout.contentWidth}
-          key={message.id}
-          message={message}
+          key={item.id}
+          message={item.message}
         />
       ))}
     </Box>

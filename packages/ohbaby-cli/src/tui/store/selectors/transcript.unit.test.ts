@@ -3,7 +3,7 @@ import type { UiMessage, UiSnapshot } from "ohbaby-sdk";
 import { createStateFromSnapshot } from "../events.js";
 import {
   selectCommandNoticeLaneState,
-  selectCommittedMessages,
+  selectCommittedItems,
   selectLiveMessage,
   selectNoticeLaneState,
   selectTranscriptSplit,
@@ -22,10 +22,19 @@ describe("transcript selectors", () => {
       }),
     );
 
-    expect(selectCommittedMessages(state)).toEqual([committed]);
+    expect(
+      selectCommittedItems(state).map((item) => item.message),
+    ).toEqual([committed]);
     expect(selectLiveMessage(state)).toEqual(live);
     expect(selectTranscriptSplit(state)).toEqual({
-      committedMessages: [committed],
+      committedItems: [
+        {
+          id: "user_1",
+          message: committed,
+          messageId: "user_1",
+          spacing: true,
+        },
+      ],
       liveMessage: live,
     });
   });

@@ -1,6 +1,7 @@
 import { render } from "ink-testing-library";
 import type { UiMessage } from "ohbaby-sdk";
 import { describe, expect, it } from "vitest";
+import type { TranscriptItem } from "../../store/transcript.js";
 import {
   CommittedTranscript,
   shouldUseStaticTranscript,
@@ -82,9 +83,9 @@ describe("shouldUseStaticTranscript", () => {
     try {
       const app = render(
         <CommittedTranscript
-          messages={[
-            message("message_1", "first committed"),
-            message("message_2", "last committed"),
+          items={[
+            item(message("message_1", "first committed")),
+            item(message("message_2", "last committed")),
           ]}
         />,
       );
@@ -103,6 +104,15 @@ describe("shouldUseStaticTranscript", () => {
     }
   });
 });
+
+function item(message: UiMessage): TranscriptItem {
+  return {
+    id: message.id,
+    message,
+    messageId: message.id,
+    spacing: true,
+  };
+}
 
 function message(id: string, text: string): UiMessage {
   return {

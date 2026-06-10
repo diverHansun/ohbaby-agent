@@ -103,6 +103,43 @@ describe("MessageRow", () => {
     expect(frame).toContain("  the repository");
   });
 
+  it("marks a length-truncated assistant message in the rendered output", () => {
+    const message: UiMessage = {
+      ...assistantMessage([{ text: "partial answer", type: "text" }]),
+      finishReason: "length",
+      status: "completed",
+    };
+
+    const app = render(<MessageRow contentWidth={80} message={message} />);
+    const frame = app.lastFrame() ?? "";
+
+    expect(frame).toContain("partial answer");
+    expect(frame).toContain("output truncated");
+  });
+
+  it("does not mark assistant messages that finished normally", () => {
+    const message: UiMessage = {
+      ...assistantMessage([{ text: "complete answer", type: "text" }]),
+      finishReason: "stop",
+      status: "completed",
+    };
+
+    const app = render(<MessageRow contentWidth={80} message={message} />);
+
+    expect(app.lastFrame()).not.toContain("output truncated");
+  });
+
+  it("does not mark a still-streaming assistant message", () => {
+    const message: UiMessage = {
+      ...assistantMessage([{ text: "streaming answer", type: "text" }]),
+      status: "streaming",
+    };
+
+    const app = render(<MessageRow contentWidth={80} message={message} />);
+
+    expect(app.lastFrame()).not.toContain("output truncated");
+  });
+
   it("renders a paired completed tool call as one tool line", () => {
     const theme = createTheme("dark", 3);
     const message = assistantMessage([

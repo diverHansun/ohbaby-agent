@@ -1,6 +1,7 @@
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
 import type { UiMessage } from "ohbaby-sdk";
+import type { TranscriptItem } from "../../store/transcript.js";
 import { TranscriptViewport } from "./transcript-viewport.js";
 
 describe("TranscriptViewport", () => {
@@ -17,7 +18,7 @@ describe("TranscriptViewport", () => {
             text: "command output",
           },
         ]}
-        committedMessages={[committed]}
+        committedItems={[item(committed)]}
         liveMessage={live}
         notices={[
           {
@@ -49,7 +50,7 @@ describe("TranscriptViewport", () => {
     const app = render(
       <TranscriptViewport
         commandNotices={[]}
-        committedMessages={[message("beta", "Beta prompt")]}
+        committedItems={[item(message("beta", "Beta prompt"))]}
         liveMessage={null}
         notices={[]}
         runtime={{ kind: "idle" }}
@@ -59,7 +60,7 @@ describe("TranscriptViewport", () => {
     app.rerender(
       <TranscriptViewport
         commandNotices={[]}
-        committedMessages={[message("alpha", "Alpha prompt")]}
+        committedItems={[item(message("alpha", "Alpha prompt"))]}
         liveMessage={null}
         notices={[]}
         runtime={{ kind: "idle" }}
@@ -77,7 +78,7 @@ describe("TranscriptViewport", () => {
     const app = render(
       <TranscriptViewport
         commandNotices={[]}
-        committedMessages={messages}
+        committedItems={messages.map(item)}
         liveMessage={null}
         notices={[]}
         runtime={{ kind: "idle" }}
@@ -95,8 +96,8 @@ describe("TranscriptViewport", () => {
     const app = render(
       <TranscriptViewport
         commandNotices={[]}
-        committedMessages={[
-          message("user_message", "try the read tool", "user"),
+        committedItems={[
+          item(message("user_message", "try the read tool", "user")),
         ]}
         liveMessage={message("assistant_message", "read succeeded")}
         notices={[]}
@@ -109,6 +110,15 @@ describe("TranscriptViewport", () => {
     );
   });
 });
+
+function item(message: UiMessage): TranscriptItem {
+  return {
+    id: message.id,
+    message,
+    messageId: message.id,
+    spacing: true,
+  };
+}
 
 function message(
   id: string,

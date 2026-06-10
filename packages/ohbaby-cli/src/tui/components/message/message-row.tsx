@@ -16,7 +16,11 @@ import {
   renderToolPart,
 } from "./parts/tool-part.js";
 
+const OUTPUT_TRUNCATED_LABEL = "output truncated";
+
 export interface MessageRowProps {
+  /** Bottom margin rows; 0 for transcript fragments that continue below. */
+  readonly bottomMargin?: number;
   readonly contentWidth: number;
   readonly message: UiMessage;
 }
@@ -35,6 +39,7 @@ export type PairedMessagePart =
     };
 
 export function MessageRow({
+  bottomMargin = 1,
   contentWidth,
   message,
 }: MessageRowProps): ReactElement {
@@ -46,17 +51,29 @@ export function MessageRow({
   const renderedParts = renderMessageParts(message, partWidth, theme);
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      {renderedParts.map((part) => (
+    <Box flexDirection="column" marginBottom={bottomMargin}>
+      <MessageParts message={message} parts={renderedParts} />
+    </Box>
+  );
+}
+
+export function MessageParts({
+  message,
+  parts,
+}: {
+  readonly message: UiMessage;
+  readonly parts: readonly RenderedPart[];
+}): ReactElement {
+  return (
+    <>
+      {parts.map((part) => (
         <Box key={`${message.id}_${String(part.index)}`}>
-          {part.kind === "spinner" ? (
-            renderSpinnerPart(part)
-          ) : (
-            renderTextPart(message, part)
-          )}
+          {part.kind === "spinner"
+            ? renderSpinnerPart(part)
+            : renderTextPart(message, part)}
         </Box>
       ))}
-    </Box>
+    </>
   );
 }
 
@@ -104,7 +121,7 @@ export function pairToolCallResult(
   return paired;
 }
 
-interface RenderedMessagePart {
+export interface RenderedMessagePart {
   readonly backgroundColor?: string;
   readonly color: string | undefined;
   readonly dimColor: boolean;
@@ -122,12 +139,14 @@ export interface RenderedTextSegment {
   readonly text: string;
 }
 
-interface RenderedSpinnerPart {
+export interface RenderedSpinnerPart {
   readonly index: number;
   readonly kind: "spinner";
   readonly label: string;
   readonly segments?: readonly RenderedTextSegment[];
 }
+
+export type RenderedPart = RenderedMessagePart | RenderedSpinnerPart;
 
 export function renderMessageParts(
   message: UiMessage,
@@ -186,7 +205,26 @@ export function renderMessageParts(
     });
   }
 
+  if (shouldRenderOutputTruncated(message)) {
+    rendered.push({
+      color: undefined,
+      dimColor: true,
+      indent: 0,
+      index: message.parts.length,
+      kind: "text",
+      text: OUTPUT_TRUNCATED_LABEL,
+    });
+  }
+
   return rendered;
+}
+
+function shouldRenderOutputTruncated(message: UiMessage): boolean {
+  return (
+    message.role === "assistant" &&
+    message.status === "completed" &&
+    message.finishReason === "length"
+  );
 }
 
 function renderSpinnerPart(part: RenderedSpinnerPart): ReactElement {
