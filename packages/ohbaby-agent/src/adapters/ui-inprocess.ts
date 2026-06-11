@@ -1392,6 +1392,10 @@ export function createInProcessUiBackendClient(
       try {
         const completion = await runtime.runManager.waitForCompletion(runId);
         await projection.done;
+        if (completion.status === "cancelled") {
+          // Interruption is a normal user action, not an error.
+          return;
+        }
         if (completion.status !== "succeeded") {
           throw new Error(completion.error ?? `Run ${completion.status}`);
         }

@@ -83,7 +83,7 @@ function toUiRunStatus(record: StreamRunRecord): UiRunStatus {
   if (record.status === "pending" || record.status === "running") {
     return { kind: "running", runId: record.runId };
   }
-  if (record.status === "succeeded") {
+  if (record.status === "succeeded" || record.status === "cancelled") {
     return { kind: "idle" };
   }
   return {
@@ -336,9 +336,17 @@ export function startRunStreamProjection(
     await upsertRun(uiRun);
     options.publish({ type: "run.updated", run: cloneRun(uiRun) });
     await completeAssistantMessage(
-      record.status === "succeeded" ? "completed" : "error",
+      record.status === "failed" ? "error" : "completed",
       record.status,
     );
+    if (record.status === "cancelled") {
+      options.publish({
+        type: "run.interrupted",
+        runId: options.runId,
+        sessionId: options.sessionId,
+        timestamp: Date.now(),
+      });
+    }
     await updateStatus(uiRun.status);
   }
 

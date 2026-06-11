@@ -414,6 +414,112 @@ describe("startRunStreamProjection", () => {
       { text: "Done.", type: "text" },
     ]);
   });
+
+  it("treats a cancelled run as an interruption and completes partial output", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const stateStore = createInMemoryUiStateStore({
+      activeSessionId: "session_1",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_1",
+          messages: [],
+          title: "Session",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "idle" },
+    });
+    const publish = vi.fn();
+    const projection = startRunStreamProjection({
+      assistantMessageId: "message_assistant",
+      autoStart: false,
+      nextMessageId: () => "message_next",
+      publish,
+      runId: "run_1",
+      sessionId: "session_1",
+      stateStore,
+      streamBridge,
+      timestamp: () => "2026-05-26T00:00:01.000Z",
+    });
+
+    streamBridge.publish("run/run_1", "run.updated", {
+      run: {
+        createdAt: 1,
+        runId: "run_1",
+        sessionId: "session_1",
+        startedAt: 2,
+        status: "running",
+      },
+    });
+    streamBridge.publish("run/run_1", "message.part.delta", {
+      content: "partial answer",
+      delta: "partial answer",
+      runId: "run_1",
+      sessionId: "session_1",
+      timestamp: 3,
+    });
+    streamBridge.publish("run/run_1", "run.updated", {
+      run: {
+        createdAt: 1,
+        endedAt: 4,
+        error: "run aborted",
+        runId: "run_1",
+        sessionId: "session_1",
+        startedAt: 2,
+        status: "cancelled",
+      },
+    });
+    streamBridge.end("run/run_1");
+
+    projection.start();
+    await projection.done;
+
+    await expect(stateStore.readSnapshot()).resolves.toMatchObject({
+      runs: [
+        {
+          id: "run_1",
+          status: { kind: "idle" },
+        },
+      ],
+      sessions: [
+        {
+          messages: [
+            {
+              completedAt: "2026-05-26T00:00:01.000Z",
+              finishReason: "cancelled",
+              id: "message_assistant",
+              parts: [{ text: "partial answer", type: "text" }],
+              role: "assistant",
+              status: "completed",
+            },
+          ],
+        },
+      ],
+      status: { kind: "idle" },
+    });
+    const publishedEvents = publish.mock.calls.map((call): unknown => call[0]);
+    expect(publishedEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          runId: "run_1",
+          sessionId: "session_1",
+          type: "run.interrupted",
+        }),
+      ]),
+    );
+    expect(
+      publishedEvents.some(
+        (event) =>
+          isRecord(event) &&
+          event.type === "runtime.updated" &&
+          isRecord(event.status) &&
+          event.status.kind === "error",
+      ),
+    ).toBe(false);
+  });
 });
 
 function hasMessageStatus(

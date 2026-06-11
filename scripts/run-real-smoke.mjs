@@ -13,7 +13,7 @@ function stripOptionalQuotes(value) {
   }
   const first = trimmed[0];
   const last = trimmed[trimmed.length - 1];
-  if ((first === "\"" && last === "\"") || (first === "'" && last === "'")) {
+  if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
     return trimmed.slice(1, -1);
   }
   return trimmed;
@@ -61,7 +61,7 @@ const result = spawnSync(
     "run",
     "tests/smoke/tui-real-provider.smoke.test.tsx",
     "-t",
-    "submits a prompt through the rendered TUI|lets a real model call the read tool",
+    "submits a prompt through the rendered TUI|interrupts a real rendered TUI run|lets a real model call the read tool",
   ],
   {
     env: process.env,

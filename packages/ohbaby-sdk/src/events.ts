@@ -70,6 +70,13 @@ export interface UiRunUpdatedEvent {
   readonly timestamp?: number;
 }
 
+export interface UiRunInterruptedEvent {
+  readonly type: "run.interrupted";
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly timestamp?: number;
+}
+
 export interface UiContextWindowUpdatedEvent {
   readonly type: "context.window.updated";
   readonly usage: UiContextWindowUsage;
@@ -165,6 +172,7 @@ export type UiEvent =
   | UiMessageUpdatedEvent
   | UiMessagePartDeltaEvent
   | UiRunUpdatedEvent
+  | UiRunInterruptedEvent
   | UiContextWindowUpdatedEvent
   | UiPermissionRequestedEvent
   | UiPermissionResolvedEvent

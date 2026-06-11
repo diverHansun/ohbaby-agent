@@ -41,6 +41,9 @@ import type {
 
 export const NEW_SESSION_CLEAR_SEQUENCE = "\x1b[2J\x1b[3J\x1b[H";
 
+export const ESC_INTERRUPT_WINDOW_MS = 1500;
+const ESC_INTERRUPT_HINT = "Press Esc again to interrupt";
+
 export interface TerminalUiOptions {
   readonly client: CoreAPI;
   readonly subscribeEvents: (handler: UiEventHandler) => UiUnsubscribe;
@@ -90,11 +93,80 @@ export function OhbabyTerminalApp({
   const contextWindowUsageLabel = formatContextWindowUsage(
     activeContextWindowUsage,
   );
+  const [escInterruptArmedRunId, setEscInterruptArmedRunId] = useState<
+    string | null
+  >(null);
+  const escInterruptArmedRunIdRef = useRef<string | null>(null);
+  const escInterruptTimerRef = useRef<{
+    readonly runId: string;
+    readonly timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  const disarmEscInterrupt = useCallback((runId?: string): void => {
+    if (runId !== undefined && escInterruptArmedRunIdRef.current !== runId) {
+      return;
+    }
+    if (
+      escInterruptTimerRef.current !== null &&
+      (runId === undefined || escInterruptTimerRef.current.runId === runId)
+    ) {
+      clearTimeout(escInterruptTimerRef.current.timer);
+      escInterruptTimerRef.current = null;
+    }
+    escInterruptArmedRunIdRef.current = null;
+    setEscInterruptArmedRunId((current) =>
+      runId !== undefined && current !== runId ? current : null,
+    );
+  }, []);
+  const armEscInterrupt = useCallback((runId: string): void => {
+    if (escInterruptTimerRef.current !== null) {
+      clearTimeout(escInterruptTimerRef.current.timer);
+    }
+    escInterruptArmedRunIdRef.current = runId;
+    setEscInterruptArmedRunId(runId);
+    escInterruptTimerRef.current = {
+      runId,
+      timer: setTimeout(() => {
+        if (escInterruptTimerRef.current?.runId === runId) {
+          escInterruptTimerRef.current = null;
+        }
+        if (escInterruptArmedRunIdRef.current === runId) {
+          escInterruptArmedRunIdRef.current = null;
+        }
+        setEscInterruptArmedRunId((current) =>
+          current === runId ? null : current,
+        );
+      }, ESC_INTERRUPT_WINDOW_MS),
+    };
+  }, []);
+  useEffect(() => {
+    if (escInterruptArmedRunId === null) {
+      return;
+    }
+    if (
+      permissions.length > 0 ||
+      runtime.kind !== "running" ||
+      runtime.runId !== escInterruptArmedRunId
+    ) {
+      disarmEscInterrupt(escInterruptArmedRunId);
+    }
+  }, [disarmEscInterrupt, escInterruptArmedRunId, permissions.length, runtime]);
+  useEffect(
+    () => (): void => {
+      if (escInterruptTimerRef.current !== null) {
+        clearTimeout(escInterruptTimerRef.current.timer);
+        escInterruptTimerRef.current = null;
+      }
+      escInterruptArmedRunIdRef.current = null;
+    },
+    [],
+  );
   const effectiveRuntime = resolveEffectiveRuntime(permissions, runtime);
   const runtimeStatusLabel =
-    effectiveRuntime.kind === "error"
-      ? formatRuntimeLabel(permissions, runtime)
-      : undefined;
+    runtime.kind === "running" && escInterruptArmedRunId === runtime.runId
+      ? ESC_INTERRUPT_HINT
+      : effectiveRuntime.kind === "error"
+        ? formatRuntimeLabel(permissions, runtime)
+        : undefined;
   const setActiveCommandPanel = useCallback(
     (panel: CommandPanelState | null): void => {
       commandPanelRef.current = panel;
@@ -166,7 +238,9 @@ export function OhbabyTerminalApp({
         tuiEvent.clientInvocationId,
       );
 
-      if (pendingDisplayCommand.sessionId !== store.getState().activeSessionId) {
+      if (
+        pendingDisplayCommand.sessionId !== store.getState().activeSessionId
+      ) {
         return true;
       }
 
@@ -234,6 +308,29 @@ export function OhbabyTerminalApp({
             });
           });
         }
+        return;
+      }
+
+      if (key.escape) {
+        if (permissions.length > 0 || runtime.kind !== "running") {
+          disarmEscInterrupt();
+          return;
+        }
+        if (escInterruptArmedRunIdRef.current !== runtime.runId) {
+          armEscInterrupt(runtime.runId);
+          return;
+        }
+        disarmEscInterrupt(runtime.runId);
+        void client.abortRun(runtime.runId).catch((caught: unknown) => {
+          store.dispatch({
+            status: {
+              kind: "error",
+              message: formatError(caught),
+              recoverable: true,
+            },
+            type: "runtime.updated",
+          });
+        });
         return;
       }
 
@@ -559,9 +656,7 @@ function isStringRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function sanitizeCommandPanelOutput(
-  output: UiCommandOutput,
-): UiCommandOutput {
+function sanitizeCommandPanelOutput(output: UiCommandOutput): UiCommandOutput {
   if (output.kind !== "data") {
     return output;
   }
@@ -593,10 +688,7 @@ function sanitizeCommandPanelOutput(
 function sanitizeCommandPanelError(message: string): string {
   return message
     .replace(/https?:\/\/[^\s)]*/giu, "[redacted-url]")
-    .replace(
-      /\bBearer\s+[A-Za-z0-9._~+/=-]+/giu,
-      "Bearer [redacted]",
-    )
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/giu, "Bearer [redacted]")
     .replace(
       /((?:api[_-]?key|access[_-]?token|auth[_-]?token|token)=)[^&\s)]+/giu,
       "$1[redacted]",

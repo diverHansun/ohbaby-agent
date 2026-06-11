@@ -214,7 +214,7 @@ function runStatusToUiStatus(record: RunLedgerRecord): UiRunStatus {
   if (record.status === "pending" || record.status === "running") {
     return { kind: "running", runId: record.runId };
   }
-  if (record.status === "succeeded") {
+  if (record.status === "succeeded" || record.status === "cancelled") {
     return { kind: "idle" };
   }
   return {

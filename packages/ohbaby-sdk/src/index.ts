@@ -31,6 +31,7 @@ export type {
   UiPermissionUpdatedEvent,
   UiPermissionRequestedEvent,
   UiPermissionResolvedEvent,
+  UiRunInterruptedEvent,
   UiRunUpdatedEvent,
   UiRuntimeUpdatedEvent,
   UiSnapshotReplacedEvent,

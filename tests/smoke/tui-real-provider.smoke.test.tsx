@@ -153,6 +153,30 @@ async function waitForAssistantText(
   );
 }
 
+async function waitForSnapshot(
+  client: RealUiClient,
+  predicate: (
+    snapshot: Awaited<ReturnType<RealUiClient["getSnapshot"]>>,
+  ) => boolean,
+  timeoutMs = 240_000,
+): Promise<Awaited<ReturnType<RealUiClient["getSnapshot"]>>> {
+  const startedAt = Date.now();
+  let snapshot = await client.getSnapshot();
+  while (Date.now() - startedAt < timeoutMs) {
+    await flush();
+    snapshot = await client.getSnapshot();
+    if (predicate(snapshot)) {
+      return snapshot;
+    }
+  }
+
+  throw new Error(
+    `Timed out waiting for real snapshot condition. Status: ${JSON.stringify(
+      snapshot.status,
+    )}`,
+  );
+}
+
 function normalizeMarkerToken(value: string): string {
   return value.replace(/[^A-Za-z0-9]/gu, "").toUpperCase();
 }
@@ -431,6 +455,63 @@ describe("real provider TUI smoke", () => {
   );
 
   (runRealTuiSmoke ? it : it.skip)(
+    "interrupts a real rendered TUI run with double Esc without surfacing an error",
+    async () => {
+      const { app, client } = await createRealTuiHarness({});
+
+      try {
+        await submitPrompt(
+          app,
+          [
+            "Write a long numbered list of 500 short items.",
+            "Keep going until the list is complete unless interrupted.",
+          ].join(" "),
+        );
+        const runningSnapshot = await waitForSnapshot(
+          client,
+          (snapshot) => snapshot.status.kind === "running",
+          60_000,
+        );
+        if (runningSnapshot.status.kind !== "running") {
+          throw new Error("expected a running real run before interrupting");
+        }
+        const runId = runningSnapshot.status.runId;
+
+        app.stdin.write("\u001B");
+        await waitForFrame(
+          app,
+          (frame) => frame.includes("Press Esc again to interrupt"),
+          30_000,
+        );
+        app.stdin.write("\u001B");
+
+        const idleSnapshot = await waitForSnapshot(
+          client,
+          (snapshot) =>
+            snapshot.status.kind === "idle" &&
+            snapshot.runs.some(
+              (run) => run.id === runId && run.status.kind === "idle",
+            ),
+          120_000,
+        );
+        const interruptedFrame = await waitForFrame(
+          app,
+          (frame) => frame.includes("Interrupted"),
+          120_000,
+        );
+
+        expect(idleSnapshot.status).toEqual({ kind: "idle" });
+        expect(interruptedFrame).toContain("Interrupted");
+        expect(interruptedFrame).not.toContain("error: run aborted");
+      } finally {
+        await client.abortRun().catch(() => undefined);
+        app.unmount();
+      }
+    },
+    300_000,
+  );
+
+  (runRealTuiSmoke ? it : it.skip)(
     "lets a real model call the read tool from the rendered TUI",
     async () => {
       const { app, client, workdir } = await createRealTuiHarness({});
@@ -509,8 +590,7 @@ describe("real provider TUI smoke", () => {
         const finalFrame = await waitForFrame(
           app,
           (frame) =>
-            frame.includes("Web Search") &&
-            frame.includes("plan · default ·"),
+            frame.includes("Web Search") && frame.includes("plan · default ·"),
           240_000,
         );
 

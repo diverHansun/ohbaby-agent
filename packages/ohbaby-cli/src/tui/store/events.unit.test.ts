@@ -824,6 +824,35 @@ describe("TUI store event reducer", () => {
     expect(state.commandNotices).toHaveLength(0);
   });
 
+  it("shows active run interruption as a lightweight command notice", () => {
+    const state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      runId: "run_1",
+      sessionId: "session_1",
+      timestamp: 1,
+      type: "run.interrupted",
+    });
+
+    expect(state.commandNotices).toMatchObject([
+      {
+        commandId: "run.interrupted",
+        kind: "result",
+        sessionId: "session_1",
+        text: "Interrupted",
+      },
+    ]);
+  });
+
+  it("ignores run interruption notices from inactive sessions", () => {
+    const state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
+      runId: "run_2",
+      sessionId: "session_2",
+      timestamp: 1,
+      type: "run.interrupted",
+    });
+
+    expect(state.commandNotices).toHaveLength(0);
+  });
+
   it("shows compact runtime while a compact command is running and clears it on result", () => {
     let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
       command: {

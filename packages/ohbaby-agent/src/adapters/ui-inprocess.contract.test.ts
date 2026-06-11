@@ -2324,7 +2324,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(childSignal?.aborted).toBe(true);
     await expect(
       withTimeout(run, 1_000, "parent did not abort"),
-    ).rejects.toThrow("run aborted");
+    ).resolves.toBeUndefined();
     const childRun = await runLedger.get("run_2");
     expect(childRun).toMatchObject({ status: "cancelled" });
     expect(childRun?.sessionId).toMatch(/^session_/);
@@ -2661,6 +2661,10 @@ describe("createInProcessUiBackendClient", () => {
         ),
         workdir: directory,
       });
+      const events: UiEvent[] = [];
+      client.subscribeEvents((event) => {
+        events.push(event);
+      });
 
       const permission = waitForUiEvent(
         client,
@@ -2675,15 +2679,18 @@ describe("createInProcessUiBackendClient", () => {
       });
       await expect(
         withTimeout(run, 1_000, "run did not abort"),
-      ).rejects.toThrow("run aborted");
+      ).resolves.toBeUndefined();
 
       let snapshot = await client.getSnapshot();
       expect(snapshot.permissions).toEqual([]);
-      expect(snapshot.status).toEqual({
-        kind: "error",
-        message: "run aborted",
-        recoverable: true,
-      });
+      expect(snapshot.status).toEqual({ kind: "idle" });
+      expect(
+        events.some(
+          (event) =>
+            event.type === "run.interrupted" &&
+            event.runId === permissionEvent.request.runId,
+        ),
+      ).toBe(true);
       expect(requests).toHaveLength(1);
 
       await client.submitPrompt("Can I continue?", { sessionId: "session_1" });
@@ -2736,15 +2743,18 @@ describe("createInProcessUiBackendClient", () => {
       await client.abortRun(permissionEvent.request.runId);
       await expect(
         withTimeout(run, 1_000, "run did not abort"),
-      ).rejects.toThrow("run aborted");
+      ).resolves.toBeUndefined();
 
       let snapshot = await client.getSnapshot();
       expect(snapshot.permissions).toEqual([]);
-      expect(snapshot.status).toEqual({
-        kind: "error",
-        message: "run aborted",
-        recoverable: true,
-      });
+      expect(snapshot.status).toEqual({ kind: "idle" });
+      expect(
+        events.some(
+          (event) =>
+            event.type === "run.interrupted" &&
+            event.runId === permissionEvent.request.runId,
+        ),
+      ).toBe(true);
       expect(
         events.some(
           (event) =>
@@ -3509,11 +3519,11 @@ describe("createInProcessUiBackendClient", () => {
         "status",
         "exit",
         "help",
+        "connect",
         "models",
         "sessions",
         "new",
         "compact",
-        "resume",
         "permission",
         "mcps",
         "skills",

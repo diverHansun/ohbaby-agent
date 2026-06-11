@@ -151,6 +151,16 @@ export function applyTuiEvent(
         : next;
     }
 
+    case "run.interrupted":
+      return event.sessionId === state.activeSessionId
+        ? appendCommandNotice(state, {
+            commandId: "run.interrupted",
+            kind: "result",
+            sessionId: event.sessionId,
+            text: "Interrupted",
+          })
+        : state;
+
     case "runtime.updated": {
       const next = rebuildFromCollections(state, {
         runtime: event.status,

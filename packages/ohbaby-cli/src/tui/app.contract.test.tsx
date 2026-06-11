@@ -1012,6 +1012,168 @@ describe("OhbabyTerminalApp", () => {
     expect(client.abortRun).toHaveBeenCalledWith("run_1");
   });
 
+  it("aborts the active run on double Esc when no dialog is open", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      runs: [
+        {
+          id: "run_1",
+          sessionId: "session_1",
+          startedAt: "2026-05-14T00:00:03.000Z",
+          status: { kind: "running", runId: "run_1" },
+          updatedAt: "2026-05-14T00:00:03.000Z",
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("\u001B");
+    await waitForFrame(app, (frame) =>
+      frame.includes("Press Esc again to interrupt"),
+    );
+
+    app.stdin.write("\u001B");
+    await flush();
+
+    expect(client.abortRun).toHaveBeenCalledWith("run_1");
+  });
+
+  it("requires a fresh double Esc after the active run changes", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      runs: [
+        {
+          id: "run_1",
+          sessionId: "session_1",
+          startedAt: "2026-05-14T00:00:03.000Z",
+          status: { kind: "running", runId: "run_1" },
+          updatedAt: "2026-05-14T00:00:03.000Z",
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("\u001B");
+    await waitForFrame(app, (frame) =>
+      frame.includes("Press Esc again to interrupt"),
+    );
+
+    client.emit({
+      run: {
+        id: "run_1",
+        sessionId: "session_1",
+        startedAt: "2026-05-14T00:00:03.000Z",
+        status: { kind: "idle" },
+        updatedAt: "2026-05-14T00:00:04.000Z",
+      },
+      type: "run.updated",
+    });
+    await flush();
+    client.emit({
+      run: {
+        id: "run_2",
+        sessionId: "session_1",
+        startedAt: "2026-05-14T00:00:05.000Z",
+        status: { kind: "running", runId: "run_2" },
+        updatedAt: "2026-05-14T00:00:05.000Z",
+      },
+      type: "run.updated",
+    });
+    await waitForFrame(
+      app,
+      (frame) => !frame.includes("Press Esc again to interrupt"),
+    );
+
+    app.stdin.write("\u001B");
+    await waitForFrame(app, (frame) =>
+      frame.includes("Press Esc again to interrupt"),
+    );
+
+    expect(client.abortRun).not.toHaveBeenCalled();
+
+    app.stdin.write("\u001B");
+    await flush();
+
+    expect(client.abortRun).toHaveBeenCalledWith("run_2");
+  });
+
+  it("disarms Esc interruption while a permission dialog is open", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      runs: [
+        {
+          id: "run_1",
+          sessionId: "session_1",
+          startedAt: "2026-05-14T00:00:03.000Z",
+          status: { kind: "running", runId: "run_1" },
+          updatedAt: "2026-05-14T00:00:03.000Z",
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("\u001B");
+    await waitForFrame(app, (frame) =>
+      frame.includes("Press Esc again to interrupt"),
+    );
+
+    client.emit({
+      request: {
+        choices: [
+          { id: "allow_once", intent: "allow", label: "Allow once" },
+          { id: "reject", intent: "deny", label: "Reject" },
+        ],
+        description: "tool:write",
+        id: "permission_1",
+        runId: "run_1",
+        title: "Write file",
+      },
+      type: "permission.requested",
+    });
+    await flush();
+    client.emit({
+      requestId: "permission_1",
+      type: "permission.resolved",
+    });
+    await waitForFrame(
+      app,
+      (frame) => !frame.includes("Press Esc again to interrupt"),
+    );
+
+    app.stdin.write("\u001B");
+    await waitForFrame(app, (frame) =>
+      frame.includes("Press Esc again to interrupt"),
+    );
+
+    expect(client.abortRun).not.toHaveBeenCalled();
+
+    app.stdin.write("\u001B");
+    await flush();
+
+    expect(client.abortRun).toHaveBeenCalledWith("run_1");
+  });
+
   it("aborts the permission run on Ctrl+C while a permission dialog is open", async () => {
     const client = createFakeClient(snapshot());
     const app = render(

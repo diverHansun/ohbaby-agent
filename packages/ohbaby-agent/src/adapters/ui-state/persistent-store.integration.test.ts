@@ -189,6 +189,53 @@ describe("createPersistentUiStateStore", () => {
     });
   });
 
+  it("restores cancelled runs as idle instead of errors", async () => {
+    const messageStore = createDatabaseMessageStore();
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageStore.deleteBySession(sessionId);
+        },
+      },
+      projectResolver: PROJECT_RESOLVER,
+      store: createDatabaseSessionStore(),
+    });
+    const runLedger = createDatabaseRunLedger({ now: createClock(10_000) });
+    const appState = createDatabaseUiAppStateStore({ now: () => 20_000 });
+    const session = await sessionManager.create("D:/repo", {
+      title: "Cancelled session",
+    });
+    await runLedger.createPending({
+      runId: "run_cancelled",
+      sessionId: session.id,
+      triggerSource: "user",
+    });
+    await runLedger.markRunning("run_cancelled");
+    await runLedger.markCancelled("run_cancelled", "run aborted");
+    await appState.setActiveSessionId(session.id);
+
+    const store = createPersistentUiStateStore({
+      appState,
+      messageManager: createMessageManager({
+        bus: createBus(),
+        store: createDatabaseMessageStore(),
+      }),
+      runLedger,
+      sessionManager,
+    });
+
+    await expect(store.readSnapshot()).resolves.toMatchObject({
+      runs: [
+        {
+          id: "run_cancelled",
+          status: { kind: "idle" },
+        },
+      ],
+      status: { kind: "idle" },
+    });
+  });
+
   it("derives a display title for persisted placeholder sessions from the first user message", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),
