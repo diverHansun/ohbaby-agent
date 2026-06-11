@@ -38,6 +38,7 @@ import type {
   ToolScheduler,
   ToolSchedulerConfig,
   ToolSchedulerOptions,
+  TimeoutPolicy,
 } from "./types.js";
 
 interface ScheduledCall {
@@ -84,8 +85,22 @@ function mergeConfig(
     timeout: {
       ...DEFAULT_TOOL_SCHEDULER_CONFIG.timeout,
       ...input?.timeout,
+      // Merge per-tool overrides instead of replacing them, so a caller that
+      // overrides one tool's timeout does not silently drop the built-in
+      // `task` guard and break the sync-subagent deadline layering.
+      byTool: {
+        ...DEFAULT_TOOL_SCHEDULER_CONFIG.timeout.byTool,
+        ...input?.timeout?.byTool,
+      },
     },
   };
+}
+
+export function timeoutForTool(
+  config: TimeoutPolicy,
+  toolName: string,
+): number {
+  return config.byTool?.[toolName] ?? config.defaultTimeout;
 }
 
 function errorMessage(error: unknown): string {
@@ -752,10 +767,13 @@ export function createToolScheduler(
         controller.signal.removeEventListener("abort", onAbort);
       };
       controller.signal.addEventListener("abort", onAbort, { once: true });
-      timeout = setTimeout(() => {
-        timedOut = true;
-        controller.abort();
-      }, config.timeout.defaultTimeout);
+      timeout = setTimeout(
+        () => {
+          timedOut = true;
+          controller.abort();
+        },
+        timeoutForTool(config.timeout, tool.name),
+      );
     });
 
     try {

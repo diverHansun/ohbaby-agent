@@ -4,7 +4,7 @@ export const researchAgent: AgentConfig = {
   color: "#E67E22",
   description:
     "Research subagent for deeper code inspection, web lookup, bounded workspace help, and information synthesis.",
-  maxSteps: 30,
+  maxSteps: 100,
   mode: "subagent",
   name: "research",
   permission: {

@@ -7,7 +7,7 @@ export {
 export { ConcurrencyController } from "./concurrency.js";
 export { ToolSchedulerEvent } from "./events.js";
 export { createToolRegistry } from "./registry.js";
-export { createToolScheduler } from "./scheduler.js";
+export { createToolScheduler, timeoutForTool } from "./scheduler.js";
 export type {
   AgentToolConfig,
   AgentToolConfigProvider,
@@ -18,6 +18,7 @@ export type {
   PermissionDecision,
   PermissionResponse,
   TimeoutConfig,
+  TimeoutPolicy,
   Tool,
   ToolCall,
   ToolCallError,

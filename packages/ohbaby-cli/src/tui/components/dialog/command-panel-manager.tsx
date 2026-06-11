@@ -6,7 +6,8 @@ import type {
   UiRunStatus,
 } from "ohbaby-sdk";
 import type { ReactElement } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useTuiLayout } from "../../layout/context.js";
 import { formatContextWindowUsage } from "../../render/usage.js";
 import { useTheme } from "../../theme/index.js";
 import type {
@@ -16,17 +17,27 @@ import type {
 import { ConnectPanel } from "./connect-panel.js";
 import { OverlayCard } from "./overlay-card.js";
 
-const SKILLS_PANEL_VISIBLE_LINES = 10;
+const SKILLS_PANEL_MAX_VISIBLE_LINES = 10;
+const SKILLS_PANEL_MIN_VISIBLE_LINES = 3;
+// Rows kept free around the skills list: overlay border, padding, title, and
+// footer plus the prompt area below the card. Keeping the dynamic frame
+// shorter than the terminal avoids Ink's clearTerminal-per-frame fallback
+// (see layout/metrics.ts).
+const SKILLS_PANEL_RESERVED_ROWS = 14;
 
-type SkillsNavigationAction =
-  | "next"
-  | "previous"
-  | "page-next"
-  | "page-previous";
+export function resolveSkillsPanelVisibleLines(rows: number): number {
+  const available =
+    (Number.isFinite(rows) ? Math.floor(rows) : 24) -
+    SKILLS_PANEL_RESERVED_ROWS;
+  return Math.max(
+    SKILLS_PANEL_MIN_VISIBLE_LINES,
+    Math.min(SKILLS_PANEL_MAX_VISIBLE_LINES, available),
+  );
+}
 
-interface SkillsNavigationSignal {
-  readonly action: SkillsNavigationAction;
-  readonly sequence: number;
+interface SkillsSelection {
+  readonly index: number;
+  readonly invocationId: string | null;
 }
 
 export interface CommandPanelManagerProps {
@@ -47,46 +58,71 @@ export function CommandPanelManager({
   runtime,
 }: CommandPanelManagerProps): ReactElement | null {
   const theme = useTheme();
-  const [skillsNavigationSignal, setSkillsNavigationSignal] =
-    useState<SkillsNavigationSignal | null>(null);
+  const layout = useTuiLayout();
+  const skillsVisibleLines = resolveSkillsPanelVisibleLines(layout.rows);
+  const skills = panelSkills(panel);
+  const maxSkillIndex = Math.max(0, skills.length - 1);
+  const skillsPanelInvocationId =
+    panel !== null && panel.mode === "display" && panel.kind === "skills"
+      ? panel.clientInvocationId
+      : null;
+  // Selection is keyed by the panel invocation so a freshly opened panel
+  // derives index 0 without a reset effect.
+  const [skillsSelection, setSkillsSelection] = useState<SkillsSelection>({
+    index: 0,
+    invocationId: null,
+  });
+  const skillsSelectedIndex =
+    skillsSelection.invocationId === skillsPanelInvocationId
+      ? skillsSelection.index
+      : 0;
+  // Input handlers re-register in a passive effect, so a keypress can hit a
+  // handler whose closure predates the latest commit (e.g. the loading frame
+  // before skills data arrived). Route per-frame data through a render-synced
+  // ref so navigation always sees the committed skills window.
+  const skillsNavigationRef = useRef({
+    invocationId: skillsPanelInvocationId,
+    maxIndex: maxSkillIndex,
+    pageSize: skillsVisibleLines,
+  });
+  skillsNavigationRef.current = {
+    invocationId: skillsPanelInvocationId,
+    maxIndex: maxSkillIndex,
+    pageSize: skillsVisibleLines,
+  };
 
   useInput(
     (_value, key) => {
       if (key.escape) {
-        setSkillsNavigationSignal(null);
         onClose();
         return;
       }
 
-      if (panel?.kind === "skills" && key.downArrow) {
-        setSkillsNavigationSignal((current) => ({
-          action: "next",
-          sequence: (current?.sequence ?? 0) + 1,
-        }));
+      if (panel?.kind !== "skills") {
         return;
       }
 
-      if (panel?.kind === "skills" && key.upArrow) {
-        setSkillsNavigationSignal((current) => ({
-          action: "previous",
-          sequence: (current?.sequence ?? 0) + 1,
-        }));
-        return;
-      }
-
-      if (panel?.kind === "skills" && key.pageDown) {
-        setSkillsNavigationSignal((current) => ({
-          action: "page-next",
-          sequence: (current?.sequence ?? 0) + 1,
-        }));
-        return;
-      }
-
-      if (panel?.kind === "skills" && key.pageUp) {
-        setSkillsNavigationSignal((current) => ({
-          action: "page-previous",
-          sequence: (current?.sequence ?? 0) + 1,
-        }));
+      const { invocationId, maxIndex, pageSize } = skillsNavigationRef.current;
+      const delta = key.downArrow
+        ? 1
+        : key.upArrow
+          ? -1
+          : key.pageDown
+            ? pageSize
+            : key.pageUp
+              ? -pageSize
+              : 0;
+      if (delta !== 0) {
+        setSkillsSelection((current) => {
+          const baseIndex =
+            current.invocationId === invocationId
+              ? clampSkillIndex(current.index, maxIndex)
+              : 0;
+          return {
+            index: clampSkillIndex(baseIndex + delta, maxIndex),
+            invocationId,
+          };
+        });
       }
     },
     { isActive: panel?.mode === "display" },
@@ -117,7 +153,9 @@ export function CommandPanelManager({
           catalog={catalog}
           contextWindowUsage={contextWindowUsage}
           panel={panel}
-          skillsNavigationSignal={skillsNavigationSignal}
+          skills={skills}
+          skillsSelectedIndex={skillsSelectedIndex}
+          skillsVisibleLines={skillsVisibleLines}
         />
       )}
     </OverlayCard>
@@ -128,12 +166,16 @@ function CommandPanelBody({
   catalog,
   contextWindowUsage,
   panel,
-  skillsNavigationSignal,
+  skills,
+  skillsSelectedIndex,
+  skillsVisibleLines,
 }: {
   readonly catalog: UiCommandCatalog | null;
   readonly contextWindowUsage: UiContextWindowUsage | null;
   readonly panel: DisplayCommandPanelState;
-  readonly skillsNavigationSignal: SkillsNavigationSignal | null;
+  readonly skills: readonly Record<string, unknown>[];
+  readonly skillsSelectedIndex: number;
+  readonly skillsVisibleLines: number;
 }): ReactElement {
   const data = panel.output?.kind === "data" ? panel.output.data : {};
 
@@ -150,7 +192,11 @@ function CommandPanelBody({
       );
     case "skills":
       return (
-        <SkillsPanel data={data} navigationSignal={skillsNavigationSignal} />
+        <SkillsPanel
+          selectedIndex={skillsSelectedIndex}
+          skills={skills}
+          visibleLines={skillsVisibleLines}
+        />
       );
   }
 }
@@ -258,71 +304,48 @@ function McpsPanel({
 }
 
 function SkillsPanel({
-  data,
-  navigationSignal,
+  selectedIndex,
+  skills,
+  visibleLines,
 }: {
-  readonly data: Record<string, unknown>;
-  readonly navigationSignal: SkillsNavigationSignal | null;
+  readonly selectedIndex: number;
+  readonly skills: readonly Record<string, unknown>[];
+  readonly visibleLines: number;
 }): ReactElement {
   const theme = useTheme();
-  const skills = Array.isArray(data.skills) ? data.skills.filter(isRecord) : [];
-  const maxIndex = Math.max(0, skills.length - 1);
-  const maxIndexRef = useRef(maxIndex);
-  const [selectedIndex, setSelectedIndex] = useState(0);
-
-  useEffect(() => {
-    maxIndexRef.current = maxIndex;
-    setSelectedIndex((current) => Math.min(current, maxIndex));
-  }, [maxIndex]);
-
-  useEffect(() => {
-    if (navigationSignal === null) {
-      return;
-    }
-
-    setSelectedIndex((current) =>
-      clampSkillIndex(
-        current + navigationDelta(navigationSignal.action),
-        maxIndexRef.current,
-      ),
-    );
-  }, [navigationSignal]);
 
   if (skills.length === 0) {
     return <Text dimColor>No skills</Text>;
   }
 
-  const windowStart =
-    Math.floor(selectedIndex / SKILLS_PANEL_VISIBLE_LINES) *
-    SKILLS_PANEL_VISIBLE_LINES;
-  const visibleSkills = skills.slice(
-    windowStart,
-    windowStart + SKILLS_PANEL_VISIBLE_LINES,
-  );
+  const clampedIndex = clampSkillIndex(selectedIndex, skills.length - 1);
+  const windowStart = Math.floor(clampedIndex / visibleLines) * visibleLines;
+  const visibleSkills = skills.slice(windowStart, windowStart + visibleLines);
 
   return (
     <Box flexDirection="column">
       {visibleSkills.map((skill, index) => {
         const absoluteIndex = windowStart + index;
-        const selected = absoluteIndex === selectedIndex;
+        const selected = absoluteIndex === clampedIndex;
         return (
           <Text
             bold={selected}
             color={selected ? theme.status.accent : undefined}
             dimColor={!selected}
             key={String(absoluteIndex)}
+            wrap="truncate-end"
           >
             {selected ? "> " : "  "}
             {formatSkillRow(skill)}
           </Text>
         );
       })}
-      {skills.length > SKILLS_PANEL_VISIBLE_LINES ? (
+      {skills.length > visibleLines ? (
         <Box marginTop={1}>
           <Text dimColor>
             showing {windowStart + 1}-
-            {Math.min(windowStart + SKILLS_PANEL_VISIBLE_LINES, skills.length)}{" "}
-            of {skills.length} · pgup/pgdn
+            {Math.min(windowStart + visibleLines, skills.length)} of{" "}
+            {skills.length} · pgup/pgdn
           </Text>
         </Box>
       ) : null}
@@ -490,17 +513,20 @@ function formatSkillRow(skill: Record<string, unknown>): string {
   return suffixes.length > 0 ? `${name} ${suffixes.join(" ")}` : name;
 }
 
-function navigationDelta(action: SkillsNavigationAction): number {
-  switch (action) {
-    case "next":
-      return 1;
-    case "previous":
-      return -1;
-    case "page-next":
-      return SKILLS_PANEL_VISIBLE_LINES;
-    case "page-previous":
-      return -SKILLS_PANEL_VISIBLE_LINES;
+function panelSkills(
+  panel: CommandPanelState | null,
+): readonly Record<string, unknown>[] {
+  if (
+    panel?.mode !== "display" ||
+    panel.kind !== "skills" ||
+    panel.status !== "ready" ||
+    panel.output?.kind !== "data"
+  ) {
+    return [];
   }
+
+  const skills = panel.output.data.skills;
+  return Array.isArray(skills) ? skills.filter(isRecord) : [];
 }
 
 function clampSkillIndex(index: number, maxIndex: number): number {

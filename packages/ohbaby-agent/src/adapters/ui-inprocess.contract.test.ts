@@ -2289,7 +2289,9 @@ describe("createInProcessUiBackendClient", () => {
       typeof parentToolMessage?.content === "string"
         ? parentToolMessage.content
         : "";
-    expect(parentToolContent).toContain("Maximum lifecycle tool steps reached");
+    expect(parentToolContent).toContain(
+      "Max steps reached and finalization response still requested tools.",
+    );
     expect(toolMetadataFromContent(parentToolContent)).toMatchObject({
       success: false,
     });
@@ -2822,6 +2824,33 @@ describe("createInProcessUiBackendClient", () => {
         },
       ]),
     );
+  });
+
+  it("publishes lifecycle terminal reasons on failed prompt run updates", async () => {
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([{ finishReason: "tool_calls" }]),
+    });
+    const events: UiEvent[] = [];
+
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    await expect(
+      client.submitPrompt("Trigger a malformed tool call"),
+    ).rejects.toThrow("Model requested tool calls but none were parsed");
+
+    const runUpdates = events.filter(
+      (event): event is Extract<UiEvent, { type: "run.updated" }> =>
+        event.type === "run.updated",
+    );
+    expect(runUpdates.at(-1)?.run).toMatchObject({
+      status: {
+        kind: "error",
+        message: "Model requested tool calls but none were parsed",
+      },
+      terminalReason: "tool_parse_failure",
+    });
   });
 
   it("filters available tools through AgentManager", async () => {

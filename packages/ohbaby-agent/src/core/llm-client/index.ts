@@ -13,7 +13,16 @@
 
 // Export core functions
 export { createLLMClient } from "./client.js";
-export { isContextOverflowError } from "./errors.js";
+export { isContextOverflowError, ToolCallParseError } from "./errors.js";
+export {
+  DEFAULT_PROVIDER_RETRY_POLICY,
+  ProviderRetryExhaustedError,
+  ProviderStreamInterruptedError,
+  isRetryableProviderError,
+  nextRetryDelayMs,
+  parseRetryAfterMs,
+  retryReason,
+} from "./retry.js";
 export type { CreateLLMClientOptions } from "./client.js";
 export { streamChatCompletion } from "./streaming.js";
 
@@ -29,7 +38,9 @@ export type {
   ParsedToolCall,
   // Metadata types
   ChatFinishReason,
+  StreamStopReason,
 } from "./types.js";
+export type { ProviderRetryEvent, ProviderRetryPolicy } from "./retry.js";
 
 // Re-export error class for convenience
 // Allows consumers to: import { APIUserAbortError } from '@/core/llm-client'

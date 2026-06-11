@@ -1,5 +1,8 @@
 import {
   isContextOverflowError,
+  ProviderRetryExhaustedError,
+  ProviderStreamInterruptedError,
+  ToolCallParseError,
   streamChatCompletion,
 } from "../llm-client/index.js";
 import type {
@@ -28,7 +31,9 @@ import type {
   TurnContext,
 } from "./types.js";
 
-const DEFAULT_MAX_STEPS = 8;
+export const DEFAULT_MAX_STEPS = 1000;
+const MAX_STEPS_FINALIZATION_TOOL_MESSAGE =
+  "Max steps reached and finalization response still requested tools.";
 
 interface ResolvedToolCall {
   readonly id: string;
@@ -90,13 +95,15 @@ function toUsage(tokenUsage: TokenUsage | undefined): LifecycleResult["usage"] {
   };
 }
 
-function toPartTokenUsageMetadata(
-  tokenUsage: TokenUsage | undefined,
-): { readonly tokenUsage: {
-  readonly promptTokens: number;
-  readonly completionTokens: number;
-  readonly totalTokens: number;
-} } | undefined {
+function toPartTokenUsageMetadata(tokenUsage: TokenUsage | undefined):
+  | {
+      readonly tokenUsage: {
+        readonly promptTokens: number;
+        readonly completionTokens: number;
+        readonly totalTokens: number;
+      };
+    }
+  | undefined {
   if (!tokenUsage) {
     return undefined;
   }
@@ -135,6 +142,34 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
+function providerFailure(error: unknown):
+  | {
+      readonly finalResponse: string;
+      readonly terminalReason: LifecycleResult["terminalReason"];
+    }
+  | undefined {
+  if (error instanceof ProviderRetryExhaustedError) {
+    return {
+      finalResponse: `LLM provider is unavailable after ${String(error.attempts)} retries. Retry or resume this run when the connection recovers.`,
+      terminalReason: "provider_retry_exhausted",
+    };
+  }
+  if (error instanceof ProviderStreamInterruptedError) {
+    return {
+      finalResponse:
+        "LLM provider stream was interrupted after partial output. Retry or resume this run to continue.",
+      terminalReason: "provider_stream_interrupted",
+    };
+  }
+  if (error instanceof ToolCallParseError) {
+    return {
+      finalResponse: error.message,
+      terminalReason: "tool_parse_failure",
+    };
+  }
+  return undefined;
+}
+
 function createDefaultToolCallId(): () => string {
   let nextId = 1;
 
@@ -143,6 +178,26 @@ function createDefaultToolCallId(): () => string {
     nextId += 1;
     return id;
   };
+}
+
+function buildMaxStepsFinalizationMessage(): ChatCompletionMessage {
+  return {
+    role: "system",
+    content: [
+      "Maximum lifecycle steps reached.",
+      "Tools are disabled for this final response.",
+      "Summarize completed work, state remaining work, and recommend the next user action.",
+    ].join("\n"),
+  };
+}
+
+function messagesForStep(
+  messages: readonly ChatCompletionMessage[],
+  isFinalStep: boolean,
+): ChatCompletionMessage[] {
+  return isFinalStep
+    ? [...messages, buildMaxStepsFinalizationMessage()]
+    : [...messages];
 }
 
 function normalizeToolCalls(
@@ -191,10 +246,7 @@ function toolResultErrorPayload(
 }
 
 function toolResultBaseContent(result: ToolCallResult): string {
-  if (
-    result.status === "success" &&
-    result.output !== undefined
-  ) {
+  if (result.status === "success" && result.output !== undefined) {
     return result.output;
   }
 
@@ -278,7 +330,13 @@ export class Lifecycle {
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
     const contextManager = this.deps.contextManager;
 
-    const maxSteps = params.maxSteps ?? DEFAULT_MAX_STEPS;
+    // Clamp so the loop always runs at least one step and `step === maxSteps`
+    // is reachable for non-integer overrides; otherwise the loop could exit
+    // without ever entering the finalization branch.
+    const maxSteps = Math.max(
+      1,
+      Math.floor(params.maxSteps ?? DEFAULT_MAX_STEPS),
+    );
     const generateToolCallId =
       this.deps.generateToolCallId ?? createDefaultToolCallId();
     let parentMessageId = params.parentMessageId;
@@ -293,6 +351,7 @@ export class Lifecycle {
           success: false,
           finishReason: "error",
           finalResponse,
+          terminalReason: "cancelled",
           toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
           usage,
         };
@@ -309,11 +368,16 @@ export class Lifecycle {
           success: false,
           finishReason: "error",
           finalResponse,
+          terminalReason: "cancelled",
           toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
           usage,
         };
       }
-      let conversationMessages = [...prepared.messages];
+      const isFinalStep = step === maxSteps;
+      let conversationMessages = messagesForStep(
+        prepared.messages,
+        isFinalStep,
+      );
 
       if (!turnStarted) {
         turnStarted = true;
@@ -337,11 +401,11 @@ export class Lifecycle {
         agent: params.agent,
         environment: params.environment,
         isSubagent: params.isSubagent,
-        maxSteps: params.maxSteps,
+        maxSteps,
         parentMessageId,
         sessionId: params.sessionId,
         signal: params.signal,
-        tools: params.tools,
+        tools: isFinalStep ? [] : params.tools,
       };
       let stepResult: StepResult;
       try {
@@ -352,6 +416,25 @@ export class Lifecycle {
           step,
         });
       } catch (error) {
+        const failure = providerFailure(error);
+        if (failure) {
+          finalResponse = failure.finalResponse;
+          yield this.createTurnEndEvent({
+            finalResponse,
+            finishReason: "error",
+            prepared,
+            sessionId: params.sessionId,
+            step,
+          });
+          return {
+            success: false,
+            finishReason: "error",
+            finalResponse,
+            terminalReason: failure.terminalReason,
+            toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+            usage,
+          };
+        }
         if (!isContextOverflowError(error)) {
           throw error;
         }
@@ -368,11 +451,12 @@ export class Lifecycle {
             success: false,
             finishReason: "error",
             finalResponse,
+            terminalReason: "cancelled",
             toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
             usage,
           };
         }
-        conversationMessages = [...prepared.messages];
+        conversationMessages = messagesForStep(prepared.messages, isFinalStep);
         yield this.createContextPreparedEvent({
           prepared,
           sessionId: params.sessionId,
@@ -386,6 +470,25 @@ export class Lifecycle {
             step,
           });
         } catch (retryError) {
+          const failure = providerFailure(retryError);
+          if (failure) {
+            finalResponse = failure.finalResponse;
+            yield this.createTurnEndEvent({
+              finalResponse,
+              finishReason: "error",
+              prepared,
+              sessionId: params.sessionId,
+              step,
+            });
+            return {
+              success: false,
+              finishReason: "error",
+              finalResponse,
+              terminalReason: failure.terminalReason,
+              toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+              usage,
+            };
+          }
           if (!isContextOverflowError(retryError)) {
             throw retryError;
           }
@@ -403,6 +506,7 @@ export class Lifecycle {
             success: false,
             finishReason: "error",
             finalResponse: overflowMessage,
+            terminalReason: "context_overflow",
             toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
             usage,
           };
@@ -428,6 +532,9 @@ export class Lifecycle {
           success: false,
           finishReason: "error",
           finalResponse: "",
+          // The stream ended without a completion event; treat it as an
+          // interrupted provider stream for terminal-reason purposes.
+          terminalReason: "provider_stream_interrupted",
           toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
           usage,
         };
@@ -451,6 +558,7 @@ export class Lifecycle {
           success: false,
           finishReason: "error",
           finalResponse,
+          terminalReason: "cancelled",
           toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
           usage,
         };
@@ -459,6 +567,29 @@ export class Lifecycle {
       const parsedToolCalls = finalEvent.parsedToolCalls ?? [];
       const shouldExecuteTools =
         finalEvent.finishReason === "tool_calls" || parsedToolCalls.length > 0;
+
+      if (isFinalStep && shouldExecuteTools) {
+        await markAssistantMessageError(
+          this.deps.messageManager,
+          assistantMessage,
+          new Error(MAX_STEPS_FINALIZATION_TOOL_MESSAGE),
+        );
+        yield this.createTurnEndEvent({
+          finalResponse: MAX_STEPS_FINALIZATION_TOOL_MESSAGE,
+          finishReason: "error",
+          prepared,
+          sessionId: params.sessionId,
+          step,
+        });
+        return {
+          success: false,
+          finishReason: "error",
+          finalResponse: MAX_STEPS_FINALIZATION_TOOL_MESSAGE,
+          terminalReason: "max_steps_finalization_requested_tool",
+          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+          usage,
+        };
+      }
 
       if (!shouldExecuteTools || parsedToolCalls.length === 0) {
         if (shouldExecuteTools && parsedToolCalls.length === 0) {
@@ -478,6 +609,7 @@ export class Lifecycle {
             success: false,
             finishReason: "error",
             finalResponse: "Model requested tool calls but none were parsed",
+            terminalReason: "tool_parse_failure",
             toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
             usage,
           };
@@ -495,6 +627,7 @@ export class Lifecycle {
           success: true,
           finishReason: finalEvent.finishReason ?? "stop",
           finalResponse,
+          terminalReason: isFinalStep ? "max_steps_finalized" : "completed",
           toolCalls:
             allToolCalls.length > 0 || parsedToolCalls.length > 0
               ? [...allToolCalls, ...parsedToolCalls]
@@ -601,6 +734,7 @@ export class Lifecycle {
           success: false,
           finishReason: "error",
           finalResponse,
+          terminalReason: "cancelled",
           toolCalls: allToolCalls,
           usage,
         };
@@ -612,33 +746,17 @@ export class Lifecycle {
           success: true,
           finishReason: finalEvent.finishReason ?? "stop",
           finalResponse,
-          toolCalls: allToolCalls,
-          usage,
-        };
-      }
-
-      if (step === maxSteps) {
-        yield this.createTurnEndEvent({
-          ...turn,
-          finishReason: "error",
-        });
-        return {
-          success: false,
-          finishReason: "error",
-          finalResponse: "Maximum lifecycle tool steps reached",
+          terminalReason: "completed",
           toolCalls: allToolCalls,
           usage,
         };
       }
     }
 
-    return {
-      success: false,
-      finishReason: "error",
-      finalResponse: "Maximum lifecycle tool steps reached",
-      toolCalls: allToolCalls,
-      usage,
-    };
+    // Unreachable: the final step disables tools and every branch of the
+    // final iteration returns. Kept as an invariant guard instead of a
+    // fabricated terminal result.
+    throw new Error("Lifecycle loop exited without reaching a terminal state");
   }
 
   private async *runModelStep(input: {
@@ -677,6 +795,19 @@ export class Lifecycle {
           tools: params.tools,
         },
       )) {
+        if (response.retry) {
+          yield {
+            type: "llm:retrying",
+            attempt: response.retry.attempt,
+            delayMs: response.retry.delayMs,
+            maxRetries: response.retry.maxRetries,
+            reason: response.retry.reason,
+            sessionId: params.sessionId,
+            step,
+            timestamp: Date.now(),
+          };
+          continue;
+        }
         const content = getTextContent(response.completeMessage);
 
         if (content !== "") {

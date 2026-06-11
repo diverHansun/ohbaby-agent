@@ -8,7 +8,8 @@ export type AgentTaskStatus =
   | "completed"
   | "failed"
   | "cancelled"
-  | "blocked";
+  | "blocked"
+  | "timed_out";
 
 export interface AgentTaskRecord {
   readonly taskId: string;
@@ -22,6 +23,7 @@ export interface AgentTaskRecord {
   readonly output?: string;
   readonly error?: string;
   readonly pendingInputCount: number;
+  readonly timeoutMs?: number;
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly completedAt?: number;

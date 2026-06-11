@@ -65,6 +65,7 @@ export interface UiRun {
   readonly sessionId: string;
   readonly status: UiRunStatus;
   readonly startedAt: string;
+  readonly terminalReason?: string;
   readonly updatedAt: string;
 }
 

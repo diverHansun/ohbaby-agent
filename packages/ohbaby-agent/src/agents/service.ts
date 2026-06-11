@@ -7,6 +7,7 @@ import {
 import type { MessageManager } from "../core/message/index.js";
 import type { ToolSchedulerInstance } from "../core/tool-scheduler/index.js";
 import type { Session, SessionManager } from "../services/session/index.js";
+import { createDeadlineController } from "./deadline.js";
 import { AgentManager } from "./manager.js";
 import type {
   AgentSessionStartResult,
@@ -17,6 +18,8 @@ import type {
 } from "./types.js";
 
 const DEFAULT_MAX_CONCURRENCY = 3;
+export const SYNC_SUBAGENT_TIMEOUT_MS = 300_000;
+const SYNC_SUBAGENT_TIMEOUT_REASON = "sync subagent timed out";
 
 export interface AgentServiceOptions {
   readonly agentManager: AgentManager;
@@ -33,6 +36,20 @@ export interface AgentServiceOptions {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export function resolveSyncSubagentTimeout(timeoutMs?: number): number {
+  // Config schema validation lands in a later phase; until then a zero or
+  // negative timeout would make the deadline fire immediately, so fall back
+  // to the default instead of honoring an unusable value.
+  if (
+    timeoutMs === undefined ||
+    !Number.isFinite(timeoutMs) ||
+    timeoutMs <= 0
+  ) {
+    return SYNC_SUBAGENT_TIMEOUT_MS;
+  }
+  return Math.min(timeoutMs, SYNC_SUBAGENT_TIMEOUT_MS);
 }
 
 export class AgentService implements TaskExecutor {
@@ -105,8 +122,14 @@ export class AgentService implements TaskExecutor {
         { isSubagent: true },
       );
       const session = await this.resolveSession(params);
+      const timeoutMs = resolveSyncSubagentTimeout(runtimeAgent.config.timeout);
+      const deadline = createDeadlineController({
+        parent: params.signal,
+        reason: SYNC_SUBAGENT_TIMEOUT_REASON,
+        timeoutMs,
+      });
       try {
-        const result = await runAgent(
+        const runPromise = runAgent(
           {
             messageManager: this.options.messageManager,
             runCoordinator: this.options.runCoordinator,
@@ -122,10 +145,48 @@ export class AgentService implements TaskExecutor {
             parentSessionId: params.parentSessionId,
             projectRoot: session.projectRoot,
             sessionId: session.id,
-            signal: params.signal,
+            signal: deadline.signal,
             waitMode: "waitForCompletion",
           },
         );
+        void runPromise.catch(() => undefined);
+        const outcome = await Promise.race([
+          runPromise.then((result) => ({ result, type: "result" as const })),
+          deadline.parentAborted.then(() => ({ type: "cancelled" as const })),
+          deadline.timedOut.then(() => ({ type: "timeout" as const })),
+        ]);
+        if (outcome.type === "cancelled") {
+          return {
+            description: params.description,
+            name: params.name,
+            output: "Subagent cancelled.",
+            role: params.role,
+            sessionId: session.id,
+            success: false,
+            summary: {
+              duration: this.now() - startedAt,
+              steps: 0,
+              toolCalls: [],
+            },
+          };
+        }
+        if (outcome.type === "timeout") {
+          return {
+            description: params.description,
+            name: params.name,
+            output: `Subagent timed out after ${String(timeoutMs)}ms. Use resume_session_id to continue.`,
+            role: params.role,
+            sessionId: session.id,
+            success: false,
+            summary: {
+              duration: this.now() - startedAt,
+              steps: 0,
+              toolCalls: [],
+            },
+            timeout: true,
+          };
+        }
+        const result = outcome.result;
         if (result.mode !== "waitForCompletion") {
           throw new Error("Task execution expected a completed agent run");
         }
@@ -157,6 +218,8 @@ export class AgentService implements TaskExecutor {
             toolCalls: [],
           },
         };
+      } finally {
+        deadline.dispose();
       }
     } finally {
       this.runningCount = Math.max(0, this.runningCount - 1);

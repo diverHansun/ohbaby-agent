@@ -51,11 +51,13 @@ export interface RunRecord {
   readonly startedAt?: number;
   readonly endedAt?: number;
   readonly error?: string;
+  readonly terminalReason?: LifecycleResult["terminalReason"];
 }
 
 export interface RunCompletion {
   readonly status: TerminalRunStatus;
   readonly error?: string;
+  readonly terminalReason?: LifecycleResult["terminalReason"];
 }
 
 export type { SandboxLease };
@@ -117,6 +119,7 @@ export interface RunWorkerResult {
   readonly status: "succeeded" | "failed" | "cancelled";
   readonly result?: LifecycleResult;
   readonly error?: string;
+  readonly terminalReason?: LifecycleResult["terminalReason"];
 }
 
 export interface RunWorkerDeps {
@@ -140,6 +143,7 @@ export interface ManagedRunRecord extends RunRecord {
   startedAt?: number;
   endedAt?: number;
   error?: string;
+  terminalReason?: LifecycleResult["terminalReason"];
 }
 
 export type { RunStatus, TriggerSource };

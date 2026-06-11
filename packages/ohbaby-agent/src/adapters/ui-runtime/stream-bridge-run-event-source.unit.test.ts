@@ -14,6 +14,58 @@ async function nextEvent(
 }
 
 describe("createStreamBridgeRunEventSource", () => {
+  it("translates llm start events from the run stream", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const source = createStreamBridgeRunEventSource(streamBridge);
+    const iterator = source.subscribeRunEvents("run_1")[Symbol.asyncIterator]();
+
+    streamBridge.publish("run/run_1", "run.llm.start", {
+      sessionId: "session_1",
+      step: 2,
+      timestamp: 123,
+    });
+
+    await expect(nextEvent(iterator)).resolves.toMatchObject({
+      sessionId: "session_1",
+      step: 2,
+      timestamp: 123,
+      type: "llm:start",
+    });
+
+    streamBridge.end("run/run_1");
+    await expect(iterator.next()).resolves.toMatchObject({ done: true });
+  });
+
+  it("translates retry events from the run stream", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const source = createStreamBridgeRunEventSource(streamBridge);
+    const iterator = source.subscribeRunEvents("run_1")[Symbol.asyncIterator]();
+
+    streamBridge.publish("run/run_1", "run.llm.retrying", {
+      attempt: 1,
+      delayMs: 500,
+      maxRetries: 5,
+      reason: "rate_limit",
+      sessionId: "session_1",
+      step: 3,
+      timestamp: 123,
+    });
+
+    await expect(nextEvent(iterator)).resolves.toMatchObject({
+      attempt: 1,
+      delayMs: 500,
+      maxRetries: 5,
+      reason: "rate_limit",
+      sessionId: "session_1",
+      step: 3,
+      timestamp: 123,
+      type: "llm:retrying",
+    });
+
+    streamBridge.end("run/run_1");
+    await expect(iterator.next()).resolves.toMatchObject({ done: true });
+  });
+
   it("translates stream bridge tool events and skips events without a session id", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const source = createStreamBridgeRunEventSource(streamBridge);

@@ -470,6 +470,7 @@ describe("startRunStreamProjection", () => {
         sessionId: "session_1",
         startedAt: 2,
         status: "cancelled",
+        terminalReason: "cancelled",
       },
     });
     streamBridge.end("run/run_1");
@@ -482,6 +483,7 @@ describe("startRunStreamProjection", () => {
         {
           id: "run_1",
           status: { kind: "idle" },
+          terminalReason: "cancelled",
         },
       ],
       sessions: [

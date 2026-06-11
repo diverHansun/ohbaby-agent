@@ -160,6 +160,7 @@ export class RunWorker {
           : status === "cancelled"
             ? abortReason(this.context.abortSignal)
             : undefined;
+      const terminalReason = result.terminalReason;
 
       await this.executeHook(
         "post-run",
@@ -171,10 +172,19 @@ export class RunWorker {
       );
 
       if (error) {
-        return { status, result, error };
+        return {
+          status,
+          result,
+          error,
+          ...(terminalReason === undefined ? {} : { terminalReason }),
+        };
       }
 
-      return { status, result };
+      return {
+        status,
+        result,
+        ...(terminalReason === undefined ? {} : { terminalReason }),
+      };
     } catch (error) {
       const status: RunStatus = this.context.abortSignal.aborted
         ? "cancelled"
@@ -260,6 +270,20 @@ export class RunWorker {
       return;
     }
 
+    if (event.type === "llm:start") {
+      this.publish(
+        scope,
+        "run.llm.start",
+        withDefined({
+          runId: this.context.runId,
+          sessionId: this.context.sessionId,
+          timestamp: event.timestamp,
+          step: event.step,
+        }),
+      );
+      return;
+    }
+
     if (event.type === "turn:start") {
       this.publish(
         scope,
@@ -334,6 +358,20 @@ export class RunWorker {
       return;
     }
 
+    if (event.type === "llm:retrying") {
+      this.publish(scope, "run.llm.retrying", {
+        runId: this.context.runId,
+        sessionId: this.context.sessionId,
+        timestamp: event.timestamp,
+        step: event.step,
+        attempt: event.attempt,
+        maxRetries: event.maxRetries,
+        delayMs: event.delayMs,
+        reason: event.reason,
+      });
+      return;
+    }
+
     if (event.type === "tool:start") {
       this.publish(scope, "run.tool.start", {
         runId: this.context.runId,
@@ -363,23 +401,22 @@ export class RunWorker {
       return;
     }
 
-    if (event.type === "step:complete") {
-      this.publish(
-        scope,
-        "run.step.complete",
-        withDefined({
-          runId: this.context.runId,
-          sessionId: this.context.sessionId,
-          timestamp: event.timestamp,
-          step: event.step,
-          finishReason: event.finishReason,
-          toolResults:
-            event.toolResults === undefined
-              ? undefined
-              : safeJsonValue(event.toolResults),
-        }),
-      );
-    }
+    // Only "step:complete" remains after the early returns above.
+    this.publish(
+      scope,
+      "run.step.complete",
+      withDefined({
+        runId: this.context.runId,
+        sessionId: this.context.sessionId,
+        timestamp: event.timestamp,
+        step: event.step,
+        finishReason: event.finishReason,
+        toolResults:
+          event.toolResults === undefined
+            ? undefined
+            : safeJsonValue(event.toolResults),
+      }),
+    );
   }
 
   private publish(
