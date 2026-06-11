@@ -65,12 +65,6 @@ const catalog: TuiCommandCatalog = {
       path: ["models"],
     }),
     command({
-      acceptsArguments: true,
-      description: "Resume a session",
-      id: "resume",
-      path: ["resume"],
-    }),
-    command({
       description: "Choose a session",
       id: "sessions",
       path: ["sessions"],
@@ -1059,24 +1053,42 @@ describe("OhbabyTerminalApp", () => {
     );
 
     await flush();
-    app.stdin.write("/res");
+    app.stdin.write("/ses");
     app.stdin.write("\t");
-    await waitForFrame(app, (frame) => frame.includes("/resume "));
+    await waitForFrame(app, (frame) => frame.includes("/sessions "));
     expect(client.executeCommand).not.toHaveBeenCalled();
 
     app.stdin.write("\u0015");
-    app.stdin.write("/resume session_2");
+    app.stdin.write("/sessions");
     app.stdin.write("\r");
     await flush();
 
     expect(client.executeCommand).toHaveBeenCalledWith(
       expect.objectContaining({
-        argv: ["session_2"],
-        commandId: "resume",
-        path: ["resume"],
+        argv: [],
+        commandId: "sessions",
+        path: ["sessions"],
         sessionId: "session_1",
       }),
     );
+  });
+
+  it("does not execute the removed /resume slash command", async () => {
+    const client = createFakeClient(snapshot(), catalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("/resume session_2");
+    app.stdin.write("\r");
+    await flush();
+
+    expect(client.executeCommand).not.toHaveBeenCalled();
+    expect(app.lastFrame()).toContain('Unknown command "/resume session_2"');
   });
 
   it("tab completes the highlighted slash candidate without executing it", async () => {
@@ -1880,12 +1892,7 @@ describe("OhbabyTerminalApp", () => {
       commandRunId: "command_help",
       output: {
         data: {
-          categories: [
-            {
-              commands: displayCommandCatalog.commands,
-              title: "System",
-            },
-          ],
+          commands: displayCommandCatalog.commands,
         },
         kind: "data",
         subject: "help",
@@ -1902,6 +1909,7 @@ describe("OhbabyTerminalApp", () => {
         nextFrame.includes("/models"),
     );
     expect(helpFrame).toContain("/mcps");
+    expect(helpFrame).not.toContain("System");
 
     app.stdin.write("\u001B");
     await waitForFrame(app, (nextFrame) => !nextFrame.includes("/models"));
@@ -2121,13 +2129,12 @@ describe("OhbabyTerminalApp", () => {
       app,
       (nextFrame) =>
         nextFrame.includes("/models - Show current model") &&
-        nextFrame.includes("/resume - Resume a session") &&
         nextFrame.includes("/sessions - Choose a session"),
     );
 
     expect(frame).toContain("/models - Show current model");
-    expect(frame).toContain("/resume - Resume a session");
     expect(frame).toContain("/sessions - Choose a session");
+    expect(frame).not.toContain("/resume - Resume a session");
 
     app.stdin.write("\u001B[B");
     await flush();

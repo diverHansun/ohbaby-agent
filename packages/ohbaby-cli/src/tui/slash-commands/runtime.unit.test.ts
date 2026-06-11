@@ -15,15 +15,15 @@ const catalog: TuiCommandCatalog = {
       path: ["models"],
     }),
     command({
-      acceptsArguments: true,
-      description: "Resume a session",
-      id: "resume",
-      path: ["resume"],
-    }),
-    command({
       description: "Choose a session",
       id: "sessions",
       path: ["sessions"],
+    }),
+    command({
+      acceptsArguments: true,
+      description: "Compact a session",
+      id: "compact",
+      path: ["compact"],
     }),
     command({
       description: "Start a new session",
@@ -84,7 +84,7 @@ describe("slash command runtime", () => {
 
   it("builds invocation args from SDK matched segments", () => {
     const result = resolveCommand(
-      parseSlashInput('/resume   "session 1"'),
+      parseSlashInput('/compact   "session 1"'),
       catalog,
       {
         surface: "tui",
@@ -93,7 +93,7 @@ describe("slash command runtime", () => {
 
     expect(result.kind).toBe("resolved");
     expect(result.kind === "resolved" ? result.invocation.commandId : "").toBe(
-      "resume",
+      "compact",
     );
     expect(result.kind === "resolved" ? result.invocation.argv : []).toEqual([
       "session 1",
@@ -107,6 +107,7 @@ describe("slash command runtime", () => {
     for (const input of [
       "/model",
       "/model switch gpt-5.5",
+      "/resume session_1",
       "/session list",
       "/session resume session_1",
       "/permission default",
@@ -131,9 +132,9 @@ describe("slash command runtime", () => {
   });
 
   it("applies tab completion without resolving or executing", () => {
-    const completed = applySlashCompletion("/res", catalog, { surface: "tui" });
+    const completed = applySlashCompletion("/ses", catalog, { surface: "tui" });
 
-    expect(completed).toEqual("/resume ");
+    expect(completed).toEqual("/sessions ");
   });
 });
 

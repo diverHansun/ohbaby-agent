@@ -109,7 +109,9 @@ export function CommandPanelManager({
       {panel.status === "loading" ? (
         <Text dimColor>Loading...</Text>
       ) : panel.status === "error" ? (
-        <Text color={theme.status.error}>{panel.error ?? "Command failed"}</Text>
+        <Text color={theme.status.error}>
+          {panel.error ?? "Command failed"}
+        </Text>
       ) : (
         <CommandPanelBody
           catalog={catalog}
@@ -143,7 +145,9 @@ function CommandPanelBody({
     case "mcps":
       return <McpsPanel data={data} />;
     case "models":
-      return <ModelsPanel contextWindowUsage={contextWindowUsage} data={data} />;
+      return (
+        <ModelsPanel contextWindowUsage={contextWindowUsage} data={data} />
+      );
     case "skills":
       return (
         <SkillsPanel data={data} navigationSignal={skillsNavigationSignal} />
@@ -164,7 +168,10 @@ function StatusPanel({
 
   return (
     <Box flexDirection="column">
-      <PanelRow label="Runtime" value={getString(data, "status") ?? "unknown"} />
+      <PanelRow
+        label="Runtime"
+        value={getString(data, "status") ?? "unknown"}
+      />
       <PanelRow label="Session" value={getString(data, "sessionId")} />
       <PanelRow label="Permission" value={formatPermission(permission)} />
       <PanelRow label="Model" value={formatModelLabel(model)} />
@@ -186,51 +193,39 @@ function HelpPanel({
   readonly catalog: UiCommandCatalog | null;
   readonly data: Record<string, unknown>;
 }): ReactElement {
-  const categories = Array.isArray(data.categories)
-    ? data.categories
+  const commands = Array.isArray(data.commands)
+    ? data.commands
     : catalog
-      ? [{ commands: catalog.commands, title: "Commands" }]
+      ? catalog.commands
       : [];
 
-  if (categories.length === 0) {
+  if (commands.length === 0) {
     return <Text dimColor>No commands</Text>;
   }
 
   return (
     <Box flexDirection="column">
-      {categories.slice(0, 6).map((category, index) =>
-        isRecord(category) ? (
-          <HelpCategory category={category} key={String(index)} />
+      {commands.map((command, index) =>
+        isRecord(command) ? (
+          <HelpCommand command={command} key={String(index)} />
         ) : null,
       )}
     </Box>
   );
 }
 
-function HelpCategory({
-  category,
+function HelpCommand({
+  command,
 }: {
-  readonly category: Record<string, unknown>;
+  readonly command: Record<string, unknown>;
 }): ReactElement {
   const theme = useTheme();
-  const title =
-    getString(category, "title") ?? getString(category, "name") ?? "Commands";
-  const commands = Array.isArray(category.commands) ? category.commands : [];
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Text color={theme.text.heading}>{title}</Text>
-      {commands.slice(0, 8).map((command, index) =>
-        isRecord(command) ? (
-          <Text key={String(index)}>
-            <Text color={theme.text.headingAccent}>
-              {formatCommandPath(command)}
-            </Text>
-            <Text dimColor> - {getString(command, "description") ?? ""}</Text>
-          </Text>
-        ) : null,
-      )}
-    </Box>
+    <Text>
+      <Text color={theme.text.headingAccent}>{formatCommandPath(command)}</Text>
+      <Text dimColor> - {getString(command, "description") ?? ""}</Text>
+    </Text>
   );
 }
 
@@ -247,15 +242,17 @@ function McpsPanel({
 
   return (
     <Box flexDirection="column">
-      {servers.slice(0, 12).map((server, index) =>
-        isRecord(server) ? (
-          <PanelRow
-            key={String(index)}
-            label={getString(server, "name") ?? "server"}
-            value={getString(server, "status") ?? "unknown"}
-          />
-        ) : null,
-      )}
+      {servers
+        .slice(0, 12)
+        .map((server, index) =>
+          isRecord(server) ? (
+            <PanelRow
+              key={String(index)}
+              label={getString(server, "name") ?? "server"}
+              value={getString(server, "status") ?? "unknown"}
+            />
+          ) : null,
+        )}
     </Box>
   );
 }
@@ -268,9 +265,7 @@ function SkillsPanel({
   readonly navigationSignal: SkillsNavigationSignal | null;
 }): ReactElement {
   const theme = useTheme();
-  const skills = Array.isArray(data.skills)
-    ? data.skills.filter(isRecord)
-    : [];
+  const skills = Array.isArray(data.skills) ? data.skills.filter(isRecord) : [];
   const maxIndex = Math.max(0, skills.length - 1);
   const maxIndexRef = useRef(maxIndex);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -326,10 +321,7 @@ function SkillsPanel({
         <Box marginTop={1}>
           <Text dimColor>
             showing {windowStart + 1}-
-            {Math.min(
-              windowStart + SKILLS_PANEL_VISIBLE_LINES,
-              skills.length,
-            )}{" "}
+            {Math.min(windowStart + SKILLS_PANEL_VISIBLE_LINES, skills.length)}{" "}
             of {skills.length} · pgup/pgdn
           </Text>
         </Box>
@@ -376,9 +368,7 @@ function ModelsPanel({
             isRecord(model) ? (
               <Text key={String(index)}>
                 <Text
-                  color={
-                    isActiveModel(model) ? theme.status.accent : undefined
-                  }
+                  color={isActiveModel(model) ? theme.status.accent : undefined}
                 >
                   {isActiveModel(model) ? "> " : "  "}
                   {formatModelLabel(model) ?? "Unnamed model"}
@@ -436,7 +426,9 @@ function formatPermission(
   return mode && level ? `${mode} / ${level}` : undefined;
 }
 
-function formatTools(tools: Record<string, unknown> | undefined): string | null {
+function formatTools(
+  tools: Record<string, unknown> | undefined,
+): string | null {
   if (!tools) {
     return null;
   }
@@ -526,9 +518,7 @@ function truncatePanelText(value: string | undefined, maxLength = 64): string {
   return `${normalized.slice(0, maxLength - 3)}...`;
 }
 
-function formatUsageOrUnavailable(
-  usage: UiContextWindowUsage | null,
-): string {
+function formatUsageOrUnavailable(usage: UiContextWindowUsage | null): string {
   const formatted = formatContextWindowUsage(usage);
   return formatted === "" ? "Unavailable" : formatted;
 }

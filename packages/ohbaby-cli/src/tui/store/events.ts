@@ -890,7 +890,7 @@ function formatDataCommandOutput(
         ? output.data.commands
         : [];
       return commands.length > 0
-        ? formatHelpCategory({ commands, title: "Commands" })
+        ? formatHelpCommands(commands)
         : JSON.stringify(output.data);
     }
     case "permission.mode": {
@@ -1024,11 +1024,18 @@ function formatHelpCategory(category: Record<string, unknown>): string {
   return lines.length > 0 ? `${title}:\n${lines.join("\n")}` : `${title}: none`;
 }
 
+function formatHelpCommands(commands: readonly unknown[]): string {
+  const lines = commands
+    .map((command) => (isRecord(command) ? formatHelpCommand(command) : ""))
+    .filter(Boolean);
+  return lines.length > 0 ? lines.join("\n") : "commands: none";
+}
+
 function formatHelpCommand(command: Record<string, unknown>): string {
   const path = getStringArray(command, "path");
   const description = getString(command, "description") ?? "";
   const label = path.length > 0 ? `/${path.join(" ")}` : "/";
-  return `  ${label}${description ? ` ${description}` : ""}`;
+  return `${label}${description ? ` - ${description}` : ""}`;
 }
 
 function formatMcpServer(server: Record<string, unknown>): string | null {

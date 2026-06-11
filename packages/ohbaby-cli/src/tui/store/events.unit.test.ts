@@ -1460,17 +1460,10 @@ describe("TUI store event reducer", () => {
       state,
       {
         data: {
-          categories: [
-            {
-              commands: [
-                { description: "Show status", path: ["status"] },
-                { description: "List MCP server status", path: ["mcps"] },
-              ],
-              name: "system",
-              title: "System",
-            },
+          commands: [
+            { description: "Show status", path: ["status"] },
+            { description: "List MCP server status", path: ["mcps"] },
           ],
-          commands: [],
         },
         kind: "data",
         subject: "help",
@@ -1479,7 +1472,7 @@ describe("TUI store event reducer", () => {
     );
 
     expect(latestCommandNoticeText(state)).toBe(
-      "System:\n  /status Show status\n  /mcps List MCP server status",
+      "/status - Show status\n/mcps - List MCP server status",
     );
   });
 

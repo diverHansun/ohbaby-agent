@@ -29,6 +29,20 @@ interface BuiltinHandlerHelpers {
   ): Promise<UiCommandCatalog> | UiCommandCatalog;
 }
 
+const HELP_COMMAND_ORDER = [
+  "status",
+  "models",
+  "connect",
+  "sessions",
+  "new",
+  "compact",
+  "permission",
+  "mcps",
+  "skills",
+  "help",
+  "exit",
+] as const;
+
 async function listModels(
   options: CommandServiceOptions,
 ): Promise<readonly CommandModelSummary[]> {
@@ -114,33 +128,6 @@ function sanitizeModelSummary(
   };
 }
 
-function formatCategoryTitle(category: string): string {
-  return category
-    .split(/[-_.\s]+/)
-    .filter(Boolean)
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(" ");
-}
-
-function categorizeCommands(commands: readonly UiCommandSpec[]): readonly {
-  readonly name: string;
-  readonly title: string;
-  readonly commands: readonly UiCommandSpec[];
-}[] {
-  const groups = new Map<string, UiCommandSpec[]>();
-  for (const command of commands) {
-    groups.set(command.category, [
-      ...(groups.get(command.category) ?? []),
-      command,
-    ]);
-  }
-  return Array.from(groups.entries()).map(([name, commands]) => ({
-    commands,
-    name,
-    title: formatCategoryTitle(name),
-  }));
-}
-
 function countTools(tools: readonly { readonly source?: string }[]): {
   readonly builtin: number;
   readonly module: number;
@@ -170,6 +157,15 @@ function countTools(tools: readonly { readonly source?: string }[]): {
     }
   }
   return counts;
+}
+
+function selectHelpCommands(
+  commands: readonly UiCommandSpec[],
+): readonly UiCommandSpec[] {
+  const byId = new Map(commands.map((command) => [command.id, command]));
+  return HELP_COMMAND_ORDER.map((id) => byId.get(id)).filter(
+    (command): command is UiCommandSpec => command !== undefined,
+  );
 }
 
 function summarizeMcpServers(servers: readonly CommandMcpServerSummary[]): {
@@ -281,10 +277,9 @@ async function handleHelp(
   context: CommandRunContext,
 ): Promise<void> {
   const catalog = await helpers.listCommands?.(context.surface);
-  const commands = catalog?.commands ?? [];
+  const commands = selectHelpCommands(catalog?.commands ?? []);
   context.emitOutput(
     dataOutput("help", {
-      categories: categorizeCommands(commands),
       commands,
     }),
   );

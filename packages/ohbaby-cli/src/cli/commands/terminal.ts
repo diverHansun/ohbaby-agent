@@ -1,18 +1,47 @@
-import type { ArgumentsCamelCase, CommandModule } from "yargs";
+import type { ArgumentsCamelCase, Argv, CommandModule } from "yargs";
 import type { CliCommandRuntime, CliGlobalOptions } from "./types.js";
+
+interface TerminalArgs extends CliGlobalOptions {
+  readonly resume?: string;
+}
+
+function normalizeResumeSessionId(
+  resume: TerminalArgs["resume"],
+  runtime: CliCommandRuntime,
+): string | undefined {
+  if (resume === undefined) {
+    return undefined;
+  }
+  const sessionId = resume.trim();
+  if (sessionId.length === 0) {
+    runtime.failUsage("--resume requires a non-empty session id");
+  }
+  return sessionId;
+}
 
 export function createTerminalCommand(
   runtime: CliCommandRuntime,
-): CommandModule<CliGlobalOptions, CliGlobalOptions> {
+): CommandModule<CliGlobalOptions, TerminalArgs> {
   return {
+    builder(yargs: Argv<CliGlobalOptions>): Argv<TerminalArgs> {
+      return yargs.option("resume", {
+        describe: "resume a session by id before starting the terminal UI",
+        type: "string",
+      });
+    },
     command: "$0",
     describe: "start the interactive terminal UI",
-    async handler(args: ArgumentsCamelCase<CliGlobalOptions>): Promise<void> {
+    async handler(args: ArgumentsCamelCase<TerminalArgs>): Promise<void> {
+      const resume = normalizeResumeSessionId(args.resume, runtime);
       const host = runtime.createCoreHost({
         mode: args.mode,
         permission: args.permission,
+        ...(resume === undefined ? {} : { resume }),
       });
       try {
+        if (resume !== undefined) {
+          await host.core.getSnapshot();
+        }
         const instance = runtime.renderTerminalUi({
           client: host.core,
           subscribeEvents: (handler) => host.callbacks.subscribeEvents(handler),

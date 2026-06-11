@@ -53,6 +53,7 @@ export interface PersistentUiBackendOptions extends Omit<
   readonly hookExecutor?: HookExecutor;
   readonly snapshotService?: SnapshotService;
   readonly storageRoot?: string;
+  readonly resumeSessionId?: string;
 }
 
 export interface PersistentUiBackendClient extends UiBackendClient {
@@ -396,6 +397,20 @@ function createPersistentProjectResolver(
   };
 }
 
+async function applyResumeSessionOption(input: {
+  readonly resumeSessionId?: string;
+  readonly stateStore: ReturnType<typeof createPersistentUiStateStore>;
+}): Promise<void> {
+  if (input.resumeSessionId === undefined) {
+    return;
+  }
+  const session = await input.stateStore.getSession(input.resumeSessionId);
+  if (!session) {
+    throw new Error(`Session not found: ${input.resumeSessionId}`);
+  }
+  await input.stateStore.setActiveSessionId(input.resumeSessionId);
+}
+
 export function createPersistentUiBackendClient(
   options: PersistentUiBackendOptions = {},
 ): PersistentUiBackendClient {
@@ -449,6 +464,12 @@ export function createPersistentUiBackendClient(
         statuses: ["pending", "running"],
       })
     : Promise.resolve({ updatedCount: 0 });
+  const startupReady = startupRecovery.then(async () => {
+    await applyResumeSessionOption({
+      resumeSessionId: options.resumeSessionId,
+      stateStore,
+    });
+  });
 
   return withStartupRecovery(
     createInProcessUiBackendClient({
@@ -471,7 +492,7 @@ export function createPersistentUiBackendClient(
       streamBridge: options.streamBridge,
       workdir: options.workdir,
     }),
-    startupRecovery,
+    startupReady,
   );
 }
 

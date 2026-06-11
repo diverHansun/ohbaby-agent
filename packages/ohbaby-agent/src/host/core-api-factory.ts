@@ -8,6 +8,7 @@ import { McpManager } from "../mcp/index.js";
 export interface CoreApiFactoryOptions {
   readonly mode?: "plan" | "auto";
   readonly permission?: "default" | "full-access";
+  readonly resume?: string;
 }
 
 export interface CoreApiHost {
@@ -42,6 +43,9 @@ export function buildCoreAPIImpl(
 ): CoreApiHost {
   const client = createPersistentUiBackendClient({
     initialSnapshot: initialSnapshotFromOptions(options),
+    ...(options.resume === undefined
+      ? {}
+      : { resumeSessionId: options.resume }),
   });
 
   return {

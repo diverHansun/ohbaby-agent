@@ -251,20 +251,27 @@ function createSequentialFakeLLMClient(
 function isSessionTitleGenerationRequest(
   request: InterfaceProviderRequest,
 ): boolean {
-  return JSON.stringify(request.messages).includes(TITLE_GENERATION_PROMPT_MARKER);
+  return JSON.stringify(request.messages).includes(
+    TITLE_GENERATION_PROMPT_MARKER,
+  );
 }
 
 function titleTextForSessionTitleRequest(
   request: InterfaceProviderRequest,
 ): string {
-  const userMessage = request.messages.find((message) => message.role === "user");
-  const content = typeof userMessage?.content === "string" ? userMessage.content : "";
+  const userMessage = request.messages.find(
+    (message) => message.role === "user",
+  );
+  const content =
+    typeof userMessage?.content === "string" ? userMessage.content : "";
   const marker = "First user message:\n";
   const markerIndex = content.indexOf(marker);
   if (markerIndex < 0) {
     return "Fake session title";
   }
-  return createTemporarySessionTitle(content.slice(markerIndex + marker.length));
+  return createTemporarySessionTitle(
+    content.slice(markerIndex + marker.length),
+  );
 }
 
 function requireRun(runs: readonly UiRun[], id: string): UiRun {
@@ -366,6 +373,74 @@ describe("createPersistentUiBackendClient", () => {
       ]);
       expect(snapshot.runs).toHaveLength(1);
       expect(snapshot.runs[0].status).toEqual({ kind: "idle" });
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("selects the requested startup resume session before the first snapshot", async () => {
+    const directory = await tempDir("ohbaby-persistent-resume-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      const client = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createSequentialFakeLLMClient(
+          [
+            [{ textDelta: "First response", finishReason: "stop" }],
+            [{ textDelta: "Second response", finishReason: "stop" }],
+          ],
+          [],
+        ),
+        workdir,
+      });
+
+      await client.submitPrompt("First session");
+      const firstSessionId = (await client.getSnapshot()).activeSessionId;
+      await client.submitPrompt("Second session");
+      const secondSessionId = (await client.getSnapshot()).activeSessionId;
+
+      expect(firstSessionId).toBeTruthy();
+      expect(secondSessionId).toBeTruthy();
+      expect(secondSessionId).not.toBe(firstSessionId);
+
+      const restored = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        resumeSessionId: firstSessionId ?? undefined,
+        workdir,
+      });
+      const snapshot = await restored.getSnapshot();
+
+      expect(snapshot.activeSessionId).toBe(firstSessionId);
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("fails the first snapshot when the requested startup resume session is missing", async () => {
+    const directory = await tempDir("ohbaby-persistent-resume-missing-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        workdir,
+      });
+
+      const restored = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        resumeSessionId: "missing",
+        workdir,
+      });
+
+      await expect(restored.getSnapshot()).rejects.toThrow(
+        "Session not found: missing",
+      );
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

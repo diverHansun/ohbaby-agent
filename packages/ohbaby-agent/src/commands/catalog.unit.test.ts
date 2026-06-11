@@ -181,4 +181,21 @@ describe("command catalog", () => {
       expect(ids).toEqual(expect.arrayContaining(["mcps", "skills"]));
     }
   });
+
+  it("hides resume from the TUI catalog while keeping compatibility surfaces", () => {
+    expect(
+      buildCommandCatalog().commands.map((command) => command.id),
+    ).toContain("resume");
+    expect(
+      filterCommandCatalogBySurface(buildCommandCatalog(), "tui").commands.map(
+        (command) => command.id,
+      ),
+    ).not.toContain("resume");
+    expect(
+      filterCommandCatalogBySurface(
+        buildCommandCatalog(),
+        "headless",
+      ).commands.map((command) => command.id),
+    ).toContain("resume");
+  });
 });

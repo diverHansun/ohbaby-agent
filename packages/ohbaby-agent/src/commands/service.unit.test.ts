@@ -302,30 +302,27 @@ describe("CommandService", () => {
     const output = isRecord(helpEvent?.output) ? helpEvent.output : undefined;
     const data = output ? getRecord(output, "data") : undefined;
     const commands = data ? getArray(data, "commands") : [];
-    const categories = data ? getArray(data, "categories") : [];
     expect(
       commands.map((command) =>
         isRecord(command) && typeof command.id === "string" ? command.id : "",
       ),
-    ).toEqual(expect.arrayContaining(["models", "permission"]));
-    expect(
-      categories.map((category) =>
-        isRecord(category) ? category.name : undefined,
-      ),
-    ).toEqual(expect.arrayContaining(["system", "model", "permission"]));
-    expect(
-      categories.flatMap((category): readonly unknown[] =>
-        isRecord(category) ? getArray(category, "commands") : [],
-      ),
-    ).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: "models" }),
-        expect.objectContaining({ id: "permission" }),
-      ]),
-    );
+    ).toEqual([
+      "status",
+      "models",
+      "connect",
+      "sessions",
+      "new",
+      "compact",
+      "permission",
+      "mcps",
+      "skills",
+      "help",
+      "exit",
+    ]);
+    expect(data).not.toHaveProperty("categories");
   });
 
-  it("emits help categories including dynamic skill commands", async () => {
+  it("keeps dynamic skill commands in the catalog but omits them from help", async () => {
     const { events, service } = createServiceHarness({
       skills: {
         listUserInvocable() {
@@ -344,25 +341,20 @@ describe("CommandService", () => {
       },
     });
 
+    expect((await service.listCommands({ surface: "tui" })).commands).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "skill.review" })]),
+    );
+
     await service.executeCommand(makeInvocation("help", ["help"]));
 
     const output = dataOutputFrom(events.at(-1));
     expect(output?.subject).toBe("help");
-    expect(output?.data.commands).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: "skill.review" })]),
-    );
-    const categories = output ? getArray(output.data, "categories") : [];
-    const skillCategory = categories.find(
-      (category) => isRecord(category) && category.name === "skill",
-    );
-    const skillCommands = isRecord(skillCategory)
-      ? getArray(skillCategory, "commands")
-      : [];
-    expect(skillCommands).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: "skill.review", path: ["review"] }),
-      ]),
-    );
+    expect(
+      getArray(output?.data ?? {}, "commands").map((command) =>
+        isRecord(command) ? getString(command, "id") : undefined,
+      ),
+    ).not.toContain("skill.review");
+    expect(output?.data).not.toHaveProperty("categories");
   });
 
   it("allows reclaimed external roots while protecting active reserved paths", async () => {
@@ -615,7 +607,7 @@ describe("CommandService", () => {
       helpCommands.map((command) =>
         isRecord(command) ? getString(command, "id") : undefined,
       ),
-    ).not.toContain("skill.invalid");
+    ).not.toEqual(expect.arrayContaining(["skill.review", "skill.invalid"]));
   });
 
   it("emits an empty skills list when the provider is missing", async () => {

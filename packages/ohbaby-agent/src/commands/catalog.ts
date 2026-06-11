@@ -7,6 +7,7 @@ import type {
 const CATALOG_VERSION = "builtin-v2";
 const COMMON_SURFACES = ["tui", "stdout", "headless"] as const;
 const INTERACTIVE_SURFACES = ["tui", "stdout"] as const;
+const COMPATIBILITY_SURFACES = ["stdout", "headless"] as const;
 
 const BUILTIN_COMMANDS: readonly UiCommandSpec[] = [
   {
@@ -115,7 +116,7 @@ const BUILTIN_COMMANDS: readonly UiCommandSpec[] = [
     category: "session",
     description: "Resume a session",
     source: "builtin",
-    surfaces: COMMON_SURFACES,
+    surfaces: COMPATIBILITY_SURFACES,
     title: "Resume Session",
   },
   {
