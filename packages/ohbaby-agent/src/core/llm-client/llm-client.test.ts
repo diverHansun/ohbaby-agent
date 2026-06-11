@@ -240,6 +240,42 @@ describe("LLM Client Integration Tests", () => {
       };
     });
 
+    it("sends the configured maxTokens when no per-request override is given", async () => {
+      streamChatCompletionMock.mockResolvedValue(
+        createProviderStream([{ textDelta: "ok", finishReason: "stop" }]),
+      );
+
+      const messages = [{ role: "user" as const, content: "Say hello" }];
+      for await (const response of streamChatCompletion(
+        mockClient,
+        messages,
+      )) {
+        void response;
+      }
+
+      expect(streamChatCompletionMock).toHaveBeenCalledWith(
+        expect.objectContaining({ maxTokens: 4096 }),
+      );
+    });
+
+    it("sends a per-request maxTokens override without touching client config", async () => {
+      streamChatCompletionMock.mockResolvedValue(
+        createProviderStream([{ textDelta: "ok", finishReason: "stop" }]),
+      );
+
+      const messages = [{ role: "user" as const, content: "Say hello" }];
+      for await (const response of streamChatCompletion(mockClient, messages, {
+        maxTokens: 128,
+      })) {
+        void response;
+      }
+
+      expect(streamChatCompletionMock).toHaveBeenCalledWith(
+        expect.objectContaining({ maxTokens: 128 }),
+      );
+      expect(mockClient.config.maxTokens).toBe(4096);
+    });
+
     it("should accumulate text content from streaming chunks", async () => {
       const events: InterfaceProviderStreamEvent[] = [
         {

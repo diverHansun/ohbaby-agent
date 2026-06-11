@@ -7,6 +7,11 @@ import { sanitizePromptForSessionTitle } from "./prompt-sanitizer.js";
 
 const DEFAULT_TITLE_GENERATION_TIMEOUT_MS = 5_000;
 const GENERATED_TITLE_MAX_LENGTH = 80;
+// Titles are at most ~80 characters; a small per-request cap keeps a
+// misbehaving model from burning tokens until the timeout. Passed as a
+// request option so the shared client config is never copied or mutated
+// (a config-level override is how main-run output once got capped at 512).
+export const TITLE_GENERATION_MAX_TOKENS = 128;
 
 const TITLE_GENERATION_SYSTEM_PROMPT = [
   "Generate a concise title for a coding-agent chat session.",
@@ -46,7 +51,10 @@ export async function generateSessionTitle({
     llmClient,
     messages,
     abortController.signal,
-  ).catch(() => null);
+  ).catch((caught: unknown) => {
+    logTitleGenerationFailure(caught);
+    return null;
+  });
   const timeout = new Promise<null>((resolve) => {
     timeoutId = setTimeout(() => {
       abortController.abort();
@@ -82,6 +90,22 @@ export function cleanGeneratedSessionTitle(rawTitle: string): string {
   return truncateGeneratedTitle(stripWrappingQuotes(title));
 }
 
+/**
+ * Title failures degrade gracefully (the temporary title stays), so they are
+ * not surfaced to the UI. Gate diagnostics behind OHBABY_DEBUG: unconditional
+ * stderr writes would corrupt the TUI frame.
+ */
+function logTitleGenerationFailure(caught: unknown): void {
+  const debug = process.env.OHBABY_DEBUG;
+  if (debug === undefined || debug === "") {
+    return;
+  }
+  const message = caught instanceof Error ? caught.message : String(caught);
+  process.stderr.write(
+    `[ohbaby] session title generation failed: ${message}\n`,
+  );
+}
+
 async function collectGeneratedTitle(
   llmClient: LLMClientInstance,
   messages: readonly ChatCompletionMessage[],
@@ -89,6 +113,7 @@ async function collectGeneratedTitle(
 ): Promise<string | null> {
   let rawTitle = "";
   for await (const response of streamChatCompletion(llmClient, [...messages], {
+    maxTokens: TITLE_GENERATION_MAX_TOKENS,
     signal,
   })) {
     const content = response.completeMessage.content;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import type {
   InterfaceProviderRequest,
@@ -7,6 +7,7 @@ import type {
 import {
   cleanGeneratedSessionTitle,
   generateSessionTitle,
+  TITLE_GENERATION_MAX_TOKENS,
 } from "./title-generator.js";
 
 describe("session title generator", () => {
@@ -21,7 +22,7 @@ describe("session title generator", () => {
     );
   });
 
-  it("uses the active model configuration without overriding output tokens", async () => {
+  it("caps title output per request without touching the client config", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const client = createFakeLLMClient(
       [
@@ -40,14 +41,64 @@ describe("session title generator", () => {
     expect(title).toBe("Sessions UI cards");
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
-      maxTokens: 8192,
+      maxTokens: TITLE_GENERATION_MAX_TOKENS,
       model: "active-model",
       temperature: 0.8,
     });
+    expect(client.config.maxTokens).toBe(8192);
     expect(JSON.stringify(requests[0].messages)).toContain("[redacted]");
     expect(JSON.stringify(requests[0].messages)).not.toContain(
       "sk-secret-value",
     );
+  });
+
+  it("logs title generation failures to stderr when OHBABY_DEBUG is set", async () => {
+    vi.stubEnv("OHBABY_DEBUG", "1");
+    const write = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    try {
+      const client = createRejectingLLMClient(new Error("provider offline"));
+
+      await expect(
+        generateSessionTitle({
+          firstUserMessage: "Please name this session",
+          llmClient: client,
+        }),
+      ).resolves.toBeNull();
+
+      expect(write).toHaveBeenCalledWith(
+        expect.stringContaining("session title generation failed"),
+      );
+      expect(write).toHaveBeenCalledWith(
+        expect.stringContaining("provider offline"),
+      );
+    } finally {
+      write.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("stays silent about failures when OHBABY_DEBUG is not set", async () => {
+    vi.stubEnv("OHBABY_DEBUG", "");
+    const write = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    try {
+      const client = createRejectingLLMClient(new Error("provider offline"));
+
+      await expect(
+        generateSessionTitle({
+          firstUserMessage: "Please name this session",
+          llmClient: client,
+        }),
+      ).resolves.toBeNull();
+
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      write.mockRestore();
+      vi.unstubAllEnvs();
+    }
   });
 
   it("returns null when title generation times out", async () => {
@@ -91,6 +142,24 @@ function createFakeLLMClient(
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         requests.push(request);
         return Promise.resolve(createProviderStream(events));
+      },
+    },
+  };
+}
+
+function createRejectingLLMClient(
+  error: Error,
+): LLMClientInstance<{ readonly kind: "fake" }> {
+  const requests: InterfaceProviderRequest[] = [];
+  const client = createFakeLLMClient([], requests);
+  return {
+    ...client,
+    provider: {
+      ...client.provider,
+      streamChatCompletion(): Promise<
+        AsyncIterable<InterfaceProviderStreamEvent>
+      > {
+        return Promise.reject(error);
       },
     },
   };

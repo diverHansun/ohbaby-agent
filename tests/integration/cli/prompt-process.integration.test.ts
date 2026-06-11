@@ -341,12 +341,14 @@ describe("CLI prompt process smoke", () => {
         role: "user",
       });
 
+      // Title generation uses a small request-level output cap while keeping
+      // the active model and temperature from the configured client.
       const titleRequest = titleRequests[0];
       expect(titleRequest.body).toMatchObject({
-        max_tokens: 512,
+        max_tokens: 128,
         model: "fake-model",
         stream: true,
-        temperature: 0.2,
+        temperature: 0,
       });
     } finally {
       await server.close();

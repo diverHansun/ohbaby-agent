@@ -100,6 +100,9 @@ function parseToolCalls(
  * @param {Object} [options] - Optional parameters
  * @param {AbortSignal} [options.signal] - Signal to interrupt streaming
  * @param {ChatCompletionCreateParams['tools']} [options.tools] - Tool definitions
+ * @param {number} [options.maxTokens] - Per-request output cap; overrides
+ *   config.maxTokens for this call only. Never mutate (or copy-and-replace)
+ *   the shared client config to express a per-call limit.
  *
  * @returns {AsyncGenerator<StreamingResponse>} Yields responses as they stream
  *
@@ -130,10 +133,11 @@ export async function* streamChatCompletion(
   options?: {
     signal?: AbortSignal;
     tools?: ChatCompletionCreateParams["tools"];
+    maxTokens?: number;
   },
 ): AsyncGenerator<StreamingResponse, void, unknown> {
   const { provider, config } = llmClient;
-  const { signal, tools } = options ?? {};
+  const { signal, tools, maxTokens } = options ?? {};
 
   // Accumulation state - maintained across iterations
   let accumulatedContent = "";
@@ -147,7 +151,7 @@ export async function* streamChatCompletion(
       model: config.model,
       messages,
       temperature: config.temperature,
-      maxTokens: config.maxTokens,
+      maxTokens: maxTokens ?? config.maxTokens,
       tools,
       signal,
     });

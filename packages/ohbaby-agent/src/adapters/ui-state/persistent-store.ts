@@ -136,7 +136,9 @@ function isContextSummaryPart(part: Part): boolean {
   return part.type === "text" && part.metadata?.kind === "context-summary";
 }
 
-function messageToUiMessage(message: MessageWithParts): UiMessage | undefined {
+export function messageToUiMessage(
+  message: MessageWithParts,
+): UiMessage | undefined {
   const activeParts = message.parts.filter(isActivePart);
   if (
     message.info.agent === SUMMARY_AGENT_NAME &&
@@ -160,6 +162,32 @@ function messageToUiMessage(message: MessageWithParts): UiMessage | undefined {
     id: message.info.id,
     parts,
     role: message.info.role,
+    ...assistantCompletionFields(message.info),
+  };
+}
+
+/**
+ * Carries finish/status metadata into reloaded transcripts so UI affordances
+ * that depend on them (e.g. the "output truncated" marker for
+ * finishReason === "length") survive a restart.
+ */
+function assistantCompletionFields(
+  info: MessageWithParts["info"],
+): Pick<UiMessage, "finishReason" | "status"> {
+  if (info.role !== "assistant") {
+    return {};
+  }
+
+  const status =
+    info.error !== undefined
+      ? "error"
+      : info.time.completed !== undefined
+        ? "completed"
+        : undefined;
+
+  return {
+    ...(info.finish === undefined ? {} : { finishReason: info.finish }),
+    ...(status === undefined ? {} : { status }),
   };
 }
 
