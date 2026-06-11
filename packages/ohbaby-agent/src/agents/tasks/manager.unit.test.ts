@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../manager.js";
 import { AgentRegistry } from "../registry.js";
 import type { AgentsConfig } from "../types.js";
-import { AgentTaskManager } from "./manager.js";
+import {
+  AgentTaskManager,
+  DEFAULT_ASYNC_AGENT_TASK_TIMEOUT_MS,
+  MAX_ASYNC_AGENT_TASK_TIMEOUT_MS,
+  resolveAsyncAgentTaskTimeout,
+} from "./manager.js";
 import type {
   AgentRunCompletion,
   AgentRunCoordinator,
@@ -208,29 +213,33 @@ function createAgentRuntime(): AgentRuntimeFixture {
       createMessage,
       listBySession: vi.fn<MessageManager["listBySession"]>((sessionId) => {
         const output = latestOutputForSession(sessionId);
-        return Promise.resolve(output ? [assistantText(sessionId, output)] : []);
+        return Promise.resolve(
+          output ? [assistantText(sessionId, output)] : [],
+        );
       }),
       removeMessage: vi.fn((): Promise<void> => Promise.resolve()),
       removeMessages: vi.fn((): Promise<void> => Promise.resolve()),
       toModelMessages: vi.fn(() => Promise.resolve([])),
-      updateMessage: vi.fn((): Promise<CoreMessage> =>
-        Promise.resolve({
-          agent: "explore",
-          id: "assistant",
-          role: "assistant",
-          sessionId: "child_1",
-          time: { created: 1 },
-        }),
+      updateMessage: vi.fn(
+        (): Promise<CoreMessage> =>
+          Promise.resolve({
+            agent: "explore",
+            id: "assistant",
+            role: "assistant",
+            sessionId: "child_1",
+            time: { created: 1 },
+          }),
       ),
-      updatePart: vi.fn((): Promise<Part> =>
-        Promise.resolve({
-          id: "part",
-          messageId: "assistant",
-          orderIndex: 0,
-          sessionId: "child_1",
-          text: "updated",
-          type: "text",
-        }),
+      updatePart: vi.fn(
+        (): Promise<Part> =>
+          Promise.resolve({
+            id: "part",
+            messageId: "assistant",
+            orderIndex: 0,
+            sessionId: "child_1",
+            text: "updated",
+            type: "text",
+          }),
       ),
     },
     runCoordinator: {
@@ -242,11 +251,13 @@ function createAgentRuntime(): AgentRuntimeFixture {
   };
 }
 
-async function createManager(input: {
-  readonly createTaskId?: () => string;
-  readonly maxTasksPerParent?: number;
-  readonly runtime?: AgentRuntimeFixture;
-} = {}): Promise<{
+async function createManager(
+  input: {
+    readonly createTaskId?: () => string;
+    readonly maxTasksPerParent?: number;
+    readonly runtime?: AgentRuntimeFixture;
+  } = {},
+): Promise<{
   readonly manager: AgentTaskManager;
   readonly runtime: AgentRuntimeFixture;
 }> {
@@ -465,5 +476,156 @@ describe("AgentTaskManager", () => {
       task: { status: "cancelled" },
     });
     expect(runtime.cancel).toHaveBeenCalledWith("run_1", "agent task closed");
+  });
+
+  it("resolves async task timeouts with defaults, clamping, and invalid-value fallback", () => {
+    expect(resolveAsyncAgentTaskTimeout(undefined)).toBe(
+      DEFAULT_ASYNC_AGENT_TASK_TIMEOUT_MS,
+    );
+    expect(resolveAsyncAgentTaskTimeout(600_000)).toBe(600_000);
+    expect(resolveAsyncAgentTaskTimeout(7_200_000)).toBe(
+      MAX_ASYNC_AGENT_TASK_TIMEOUT_MS,
+    );
+    expect(resolveAsyncAgentTaskTimeout(0)).toBe(
+      DEFAULT_ASYNC_AGENT_TASK_TIMEOUT_MS,
+    );
+    expect(resolveAsyncAgentTaskTimeout(-1)).toBe(
+      DEFAULT_ASYNC_AGENT_TASK_TIMEOUT_MS,
+    );
+    expect(resolveAsyncAgentTaskTimeout(Number.NaN)).toBe(
+      DEFAULT_ASYNC_AGENT_TASK_TIMEOUT_MS,
+    );
+  });
+
+  it("marks a background task as timed_out when it exceeds the async deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, runtime } = await createManager({
+        createTaskId: () => "task_1",
+      });
+      await manager.open({
+        parentSessionId: "parent",
+        prompt: "long",
+        role: "explore",
+      });
+      await vi.waitUntil(() => runtime.create.mock.calls.length === 1);
+
+      await vi.advanceTimersByTimeAsync(1_800_000);
+
+      await expect(
+        manager.get({ parentSessionId: "parent", taskId: "task_1" }),
+      ).resolves.toMatchObject({
+        error: expect.stringContaining("timed out") as string,
+        status: "timed_out",
+        timeoutMs: 1_800_000,
+      });
+      expect(runtime.cancel).toHaveBeenCalledWith(
+        "run_1",
+        "async subagent timed out",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps queued input after a background task times out and runs it next", async () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, runtime } = await createManager({
+        createTaskId: () => "task_1",
+      });
+      await manager.open({
+        parentSessionId: "parent",
+        prompt: "long",
+        role: "explore",
+      });
+      await vi.waitUntil(() => runtime.create.mock.calls.length === 1);
+
+      await expect(
+        manager.sendInput({
+          parentSessionId: "parent",
+          prompt: "recover",
+          taskId: "task_1",
+        }),
+      ).resolves.toMatchObject({
+        pendingInputCount: 1,
+        status: "running",
+      });
+
+      await vi.advanceTimersByTimeAsync(1_800_000);
+      await vi.waitUntil(() => runtime.create.mock.calls.length === 2);
+
+      expect(runtime.create.mock.calls[1]?.[0]).toMatchObject({
+        sessionId: "child_1",
+      });
+      runtime.complete(2, "recovered");
+      await vi.waitUntil(async () => {
+        const current = await manager.get({
+          parentSessionId: "parent",
+          taskId: "task_1",
+        });
+        return current?.output === "recovered";
+      });
+      await expect(
+        manager.get({ parentSessionId: "parent", taskId: "task_1" }),
+      ).resolves.toMatchObject({
+        output: "recovered",
+        pendingInputCount: 0,
+        status: "completed",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("allows explicit follow-up input to resume a timed out background task", async () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, runtime } = await createManager({
+        createTaskId: () => "task_1",
+      });
+      await manager.open({
+        parentSessionId: "parent",
+        prompt: "long",
+        role: "explore",
+      });
+      await vi.waitUntil(() => runtime.create.mock.calls.length === 1);
+      await vi.advanceTimersByTimeAsync(1_800_000);
+      await expect(
+        manager.get({ parentSessionId: "parent", taskId: "task_1" }),
+      ).resolves.toMatchObject({ status: "timed_out" });
+
+      await expect(
+        manager.sendInput({
+          parentSessionId: "parent",
+          prompt: "resume",
+          taskId: "task_1",
+        }),
+      ).resolves.toMatchObject({
+        pendingInputCount: 0,
+        status: "pending",
+      });
+      await vi.waitUntil(() => runtime.create.mock.calls.length === 2);
+      expect(runtime.create.mock.calls[1]?.[0]).toMatchObject({
+        sessionId: "child_1",
+      });
+      runtime.complete(2, "resumed");
+
+      await vi.waitUntil(async () => {
+        const current = await manager.get({
+          parentSessionId: "parent",
+          taskId: "task_1",
+        });
+        return current?.output === "resumed";
+      });
+      await expect(
+        manager.get({ parentSessionId: "parent", taskId: "task_1" }),
+      ).resolves.toMatchObject({
+        output: "resumed",
+        status: "completed",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

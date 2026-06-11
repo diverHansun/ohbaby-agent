@@ -7,6 +7,7 @@ import {
 import type { MessageManager } from "../../core/message/index.js";
 import type { ToolSchedulerInstance } from "../../core/tool-scheduler/index.js";
 import type { Session, SessionManager } from "../../services/session/index.js";
+import { createDeadlineController } from "../deadline.js";
 import { AgentManager } from "../manager.js";
 import type { RuntimeAgent } from "../types.js";
 import { InMemoryAgentTaskStore } from "./in-memory-store.js";
@@ -23,6 +24,9 @@ import type {
 
 const DEFAULT_MAX_TASKS = 12;
 const DEFAULT_MAX_TASKS_PER_PARENT = 3;
+export const DEFAULT_ASYNC_AGENT_TASK_TIMEOUT_MS = 1_800_000;
+export const MAX_ASYNC_AGENT_TASK_TIMEOUT_MS = 3_600_000;
+const ASYNC_SUBAGENT_TIMEOUT_REASON = "async subagent timed out";
 
 interface QueuedInput {
   readonly prompt: string;
@@ -75,6 +79,20 @@ function statusAfterRun(result: AgentRunResult): AgentTaskStatus {
   return result.mode === "waitForCompletion" && result.success
     ? "completed"
     : "failed";
+}
+
+export function resolveAsyncAgentTaskTimeout(timeoutMs?: number): number {
+  // Config schema validation lands in a later phase; until then a zero or
+  // negative timeout would make the deadline fire immediately, so fall back
+  // to the default instead of honoring an unusable value.
+  if (
+    timeoutMs === undefined ||
+    !Number.isFinite(timeoutMs) ||
+    timeoutMs <= 0
+  ) {
+    return DEFAULT_ASYNC_AGENT_TASK_TIMEOUT_MS;
+  }
+  return Math.min(timeoutMs, MAX_ASYNC_AGENT_TASK_TIMEOUT_MS);
 }
 
 export class AgentTaskManager implements AgentTaskController {
@@ -305,6 +323,17 @@ export class AgentTaskManager implements AgentTaskController {
     );
   }
 
+  private async scheduleQueuedTurn(
+    taskId: string,
+    state: ActiveTaskState,
+  ): Promise<void> {
+    const next = state.queue.shift();
+    await this.updatePendingCount(taskId, state);
+    if (next) {
+      this.scheduleTurn(taskId, next.prompt, next.environment);
+    }
+  }
+
   private async runTurn(
     taskId: string,
     prompt: string,
@@ -316,19 +345,27 @@ export class AgentTaskManager implements AgentTaskController {
     }
     state.running = true;
     state.environment = environment;
-    state.abortController = new AbortController();
+    const timeoutMs = resolveAsyncAgentTaskTimeout(
+      state.runtimeAgent.config.timeout,
+    );
+    const deadline = createDeadlineController({
+      reason: ASYNC_SUBAGENT_TIMEOUT_REASON,
+      timeoutMs,
+    });
+    state.abortController = deadline.controller;
     await this.store.update(taskId, {
       completedAt: undefined,
       error: undefined,
       output: undefined,
       pendingInputCount: state.queue.length,
       status: "running",
+      timeoutMs,
       updatedAt: this.now(),
     });
 
     try {
       const task = await this.mustGet(taskId);
-      const result = await runAgent(
+      const runPromise = runAgent(
         {
           messageManager: this.options.messageManager,
           runCoordinator: this.options.runCoordinator,
@@ -348,6 +385,25 @@ export class AgentTaskManager implements AgentTaskController {
           waitMode: "waitForCompletion",
         },
       );
+      void runPromise.catch(() => undefined);
+      const outcome = await Promise.race([
+        runPromise.then((result) => ({ result, type: "result" as const })),
+        deadline.timedOut.then(() => ({ type: "timeout" as const })),
+      ]);
+      if (outcome.type === "timeout") {
+        if (!this.isClosed(taskId)) {
+          await this.store.update(taskId, {
+            completedAt: this.now(),
+            error: `Agent task timed out after ${String(timeoutMs)}ms.`,
+            output: `Agent task timed out after ${String(timeoutMs)}ms.`,
+            pendingInputCount: state.queue.length,
+            status: "timed_out",
+            updatedAt: this.now(),
+          });
+        }
+        return;
+      }
+      const result = outcome.result;
       if (result.mode !== "waitForCompletion") {
         throw new Error("Agent task expected a completed agent run");
       }
@@ -372,16 +428,13 @@ export class AgentTaskManager implements AgentTaskController {
         });
       }
     } finally {
+      deadline.dispose();
       state.abortController = undefined;
       state.running = false;
       if (this.isClosed(taskId)) {
         this.active.delete(taskId);
       } else {
-        const next = state.queue.shift();
-        await this.updatePendingCount(taskId, state);
-        if (next) {
-          this.scheduleTurn(taskId, next.prompt, next.environment);
-        }
+        await this.scheduleQueuedTurn(taskId, state);
       }
     }
   }

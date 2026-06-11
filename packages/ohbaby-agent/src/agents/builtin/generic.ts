@@ -5,7 +5,7 @@ export const genericAgent: AgentConfig = {
   color: "#4F8EF7",
   description:
     "Default general-purpose subagent for broad workspace tasks when no specialized role is required.",
-  maxSteps: 30,
+  maxSteps: 100,
   mode: "subagent",
   name: DEFAULT_SUBAGENT_ROLE,
   permission: {

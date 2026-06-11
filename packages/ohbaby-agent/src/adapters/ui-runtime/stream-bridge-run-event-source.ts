@@ -63,6 +63,14 @@ function lifecycleEventFromStream(
       type: "llm:delta",
     };
   }
+  if (item.event === "run.llm.start") {
+    return {
+      sessionId,
+      step: numberData(data, "step") ?? 0,
+      timestamp,
+      type: "llm:start",
+    };
+  }
   if (item.event === "run.llm.complete") {
     return {
       completeMessage: { content: "", role: "assistant" },
@@ -72,6 +80,18 @@ function lifecycleEventFromStream(
       sessionId,
       timestamp,
       type: "llm:complete",
+    };
+  }
+  if (item.event === "run.llm.retrying") {
+    return {
+      attempt: numberData(data, "attempt") ?? 0,
+      delayMs: numberData(data, "delayMs") ?? 0,
+      maxRetries: numberData(data, "maxRetries") ?? 0,
+      reason: stringData(data, "reason") ?? "unknown",
+      sessionId,
+      step: numberData(data, "step") ?? 0,
+      timestamp,
+      type: "llm:retrying",
     };
   }
   if (item.event === "run.tool.start") {

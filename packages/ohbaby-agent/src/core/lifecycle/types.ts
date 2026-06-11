@@ -4,6 +4,7 @@ import type {
   ChatFinishReason,
   LLMClientInstance,
   ParsedToolCall,
+  ProviderRetryEvent,
   TokenUsage,
 } from "../llm-client/index.js";
 import type {
@@ -75,6 +76,16 @@ export interface LifecycleConfig {
   ) => Promise<AfterToolCallResult | undefined>;
 }
 
+export type AgentTerminalReason =
+  | "completed"
+  | "cancelled"
+  | "max_steps_finalized"
+  | "max_steps_finalization_requested_tool"
+  | "provider_retry_exhausted"
+  | "provider_stream_interrupted"
+  | "tool_parse_failure"
+  | "context_overflow";
+
 export type LifecycleEvent =
   | {
       readonly type: "turn:start";
@@ -109,6 +120,12 @@ export type LifecycleEvent =
       readonly step?: number;
       readonly timestamp: number;
     }
+  | ({
+      readonly type: "llm:retrying";
+      readonly sessionId: string;
+      readonly step?: number;
+      readonly timestamp: number;
+    } & ProviderRetryEvent)
   | {
       readonly type: "llm:delta";
       readonly sessionId: string;
@@ -160,6 +177,7 @@ export interface LifecycleResult {
   readonly success: boolean;
   readonly finishReason: ChatFinishReason | "error";
   readonly finalResponse: string;
+  readonly terminalReason?: AgentTerminalReason;
   readonly toolCalls?: readonly ParsedToolCall[];
   readonly usage?: {
     readonly inputTokens: number;

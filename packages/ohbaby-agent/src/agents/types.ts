@@ -87,6 +87,7 @@ export interface SubagentResult {
   readonly sessionId: string;
   readonly success: boolean;
   readonly output: string;
+  readonly timeout?: boolean;
   readonly summary: {
     readonly toolCalls: readonly SubagentToolCallSummary[];
     readonly steps: number;

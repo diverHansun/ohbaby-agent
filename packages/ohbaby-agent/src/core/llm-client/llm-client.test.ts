@@ -11,7 +11,16 @@ import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
 } from "../../services/interface-providers/index.js";
-import { createLLMClient, streamChatCompletion } from "./index.js";
+import {
+  createLLMClient,
+  isRetryableProviderError,
+  nextRetryDelayMs,
+  parseRetryAfterMs,
+  ProviderStreamInterruptedError,
+  retryReason,
+  streamChatCompletion,
+  ToolCallParseError,
+} from "./index.js";
 import type {
   ChatCompletionMessage,
   LLMClientInstance,
@@ -499,9 +508,178 @@ describe("LLM Client Integration Tests", () => {
       expect(responses[0].isComplete).toBe(false);
       expect(responses[1]).toMatchObject({
         isComplete: true,
-        finishReason: "length",
+        streamStopReason: "user_aborted",
       });
+      expect(responses[1].finishReason).toBeUndefined();
       expect(responses[1].completeMessage.content).toBe("Partial");
+    });
+
+    it("retries retryable provider errors before any stream delta is emitted", async () => {
+      const unavailable = Object.assign(new Error("temporarily unavailable"), {
+        status: 503,
+      });
+      streamChatCompletionMock
+        .mockRejectedValueOnce(unavailable)
+        .mockResolvedValueOnce(
+          createProviderStream([
+            { textDelta: "Recovered", finishReason: "stop" },
+          ]),
+        );
+
+      const responses: StreamingResponse[] = [];
+      for await (const response of streamChatCompletion(
+        mockClient,
+        [{ role: "user" as const, content: "test" }],
+        {
+          retry: {
+            initialDelayMs: 0,
+            maxDelayMs: 0,
+            maxRetriesPerStep: 5,
+            retryAfterCapMs: 0,
+          },
+        },
+      )) {
+        responses.push(response);
+      }
+
+      expect(streamChatCompletionMock).toHaveBeenCalledTimes(2);
+      expect(responses[0]).toMatchObject({
+        isComplete: false,
+        retry: { attempt: 1, maxRetries: 5, reason: "server_error" },
+      });
+      expect(responses.at(-1)).toMatchObject({
+        finishReason: "stop",
+        isComplete: true,
+        streamStopReason: "provider_finished",
+      });
+      expect(responses.at(-1)?.completeMessage.content).toBe("Recovered");
+    });
+
+    it("returns an aborted partial response when the signal aborts during retry sleep", async () => {
+      vi.useFakeTimers();
+      try {
+        const unavailable = Object.assign(
+          new Error("temporarily unavailable"),
+          {
+            status: 503,
+          },
+        );
+        const controller = new AbortController();
+        streamChatCompletionMock.mockRejectedValueOnce(unavailable);
+
+        const responses: StreamingResponse[] = [];
+        const consume = (async (): Promise<void> => {
+          for await (const response of streamChatCompletion(
+            mockClient,
+            [{ role: "user" as const, content: "test" }],
+            {
+              retry: {
+                initialDelayMs: 1_000,
+                maxDelayMs: 1_000,
+                maxRetriesPerStep: 5,
+                retryAfterCapMs: 0,
+              },
+              signal: controller.signal,
+            },
+          )) {
+            responses.push(response);
+          }
+        })();
+
+        await vi.waitUntil(() =>
+          responses.some((response) => response.retry !== undefined),
+        );
+        controller.abort("user cancelled");
+
+        await expect(consume).resolves.toBeUndefined();
+        expect(streamChatCompletionMock).toHaveBeenCalledTimes(1);
+        expect(responses).toHaveLength(2);
+        expect(responses[0]).toMatchObject({
+          isComplete: false,
+          retry: { attempt: 1, maxRetries: 5 },
+        });
+        expect(responses[1]).toMatchObject({
+          isComplete: true,
+          streamStopReason: "user_aborted",
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("yields a complete empty assistant response when the provider stream has no events", async () => {
+      streamChatCompletionMock.mockResolvedValue(createProviderStream([]));
+
+      const responses: StreamingResponse[] = [];
+      for await (const response of streamChatCompletion(mockClient, [
+        { role: "user" as const, content: "test" },
+      ])) {
+        responses.push(response);
+      }
+
+      expect(responses).toHaveLength(1);
+      expect(responses[0]).toMatchObject({
+        completeMessage: { role: "assistant", content: "(Empty response)" },
+        isComplete: true,
+        streamStopReason: "provider_finished",
+      });
+    });
+
+    it("does not replay a provider stream after a non-abort error follows emitted delta", async () => {
+      const streamError = new Error("socket closed");
+      streamChatCompletionMock.mockResolvedValueOnce(
+        createAbortingProviderStream([{ textDelta: "Partial" }], streamError),
+      );
+
+      await expect(
+        (async (): Promise<void> => {
+          for await (const response of streamChatCompletion(
+            mockClient,
+            [{ role: "user" as const, content: "test" }],
+            {
+              retry: {
+                initialDelayMs: 0,
+                maxDelayMs: 0,
+                maxRetriesPerStep: 5,
+                retryAfterCapMs: 0,
+              },
+            },
+          )) {
+            void response;
+          }
+        })(),
+      ).rejects.toBeInstanceOf(ProviderStreamInterruptedError);
+      expect(streamChatCompletionMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("classifies malformed tool call arguments as a parse error, not a stream interruption", async () => {
+      streamChatCompletionMock.mockResolvedValue(
+        createProviderStream([
+          {
+            toolCallDeltas: [
+              {
+                index: 0,
+                id: "call_bad",
+                name: "get_weather",
+                argumentsDelta: '{"location": broken',
+              },
+            ],
+            finishReason: "tool_calls",
+          },
+        ]),
+      );
+
+      await expect(
+        (async (): Promise<void> => {
+          for await (const response of streamChatCompletion(mockClient, [
+            { role: "user" as const, content: "test" },
+          ])) {
+            void response;
+          }
+        })(),
+      ).rejects.toBeInstanceOf(ToolCallParseError);
+      // A model output defect must not be retried.
+      expect(streamChatCompletionMock).toHaveBeenCalledTimes(1);
     });
 
     it("should surface raw finish reason from provider events", async () => {
@@ -541,6 +719,55 @@ describe("LLM Client Integration Tests", () => {
       expect(client).toBeDefined();
       const gen = streamChatCompletion(client, []);
       expect(typeof gen[Symbol.asyncIterator]).toBe("function");
+    });
+  });
+
+  describe("retry helpers", () => {
+    it("parses retry-after headers and caps explicit retry delays", () => {
+      const error = {
+        headers: {
+          "retry-after-ms": "2500",
+        },
+      };
+
+      expect(parseRetryAfterMs(error)).toBe(2500);
+      expect(
+        nextRetryDelayMs({
+          attempt: 1,
+          error,
+          policy: {
+            initialDelayMs: 100,
+            maxDelayMs: 1_000,
+            maxRetriesPerStep: 5,
+            retryAfterCapMs: 1_000,
+          },
+          random: () => 0.5,
+        }),
+      ).toBe(1_000);
+    });
+
+    it("uses deterministic exponential backoff jitter when retry-after is absent", () => {
+      expect(
+        nextRetryDelayMs({
+          attempt: 3,
+          error: Object.assign(new Error("reset"), { code: "ECONNRESET" }),
+          policy: {
+            initialDelayMs: 100,
+            maxDelayMs: 1_000,
+            maxRetriesPerStep: 5,
+            retryAfterCapMs: 1_000,
+          },
+          random: () => 0.5,
+        }),
+      ).toBe(400);
+    });
+
+    it("classifies retriable transport and rate-limit errors without retrying conflicts", () => {
+      expect(isRetryableProviderError({ status: 429 })).toBe(true);
+      expect(isRetryableProviderError({ status: 503 })).toBe(true);
+      expect(isRetryableProviderError({ code: "ECONNRESET" })).toBe(true);
+      expect(isRetryableProviderError({ status: 409 })).toBe(false);
+      expect(retryReason({ code: "ECONNRESET" })).toBe("econnreset");
     });
   });
 });

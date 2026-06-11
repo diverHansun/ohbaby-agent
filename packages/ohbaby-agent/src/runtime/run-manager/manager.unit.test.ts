@@ -309,6 +309,7 @@ class FailedResultLifecycle implements RunLifecycle {
       success: false,
       finishReason: "error",
       finalResponse: "Context overflow after forced compaction retry",
+      terminalReason: "context_overflow",
     };
   }
 }
@@ -581,6 +582,30 @@ class ToolEventLifecycle implements RunLifecycle {
   }
 }
 
+class RetryingLifecycle implements RunLifecycle {
+  async *run(
+    params: LifecycleSessionParams,
+  ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
+    await Promise.resolve();
+    yield {
+      type: "llm:retrying",
+      attempt: 2,
+      delayMs: 1250,
+      maxRetries: 5,
+      reason: "server_error",
+      sessionId: params.sessionId,
+      step: 1,
+      timestamp: 25,
+    };
+
+    return {
+      finalResponse: "done",
+      finishReason: "stop",
+      success: true,
+    };
+  }
+}
+
 interface ManagerFixture {
   readonly manager: RunManager;
   readonly ledger: RecordingLedger;
@@ -732,10 +757,21 @@ describe("RunManager", () => {
     expect(bridge.events.map((event) => event.event)).toEqual([
       "run.updated",
       "run.updated",
+      "run.llm.start",
       "message.part.delta",
       "run.llm.complete",
       "run.updated",
     ]);
+    expect(bridge.events.find((event) => event.event === "run.llm.start"))
+      .toMatchObject({
+        data: {
+          runId: "run_1",
+          sessionId: "session_1",
+          step: 1,
+        },
+        event: "run.llm.start",
+        scope: "run/run_1",
+      });
     expect(bridge.endedScopes).toEqual(["run/run_1"]);
     expect(sandboxManager.released).toEqual(["lease_session_1"]);
     expect(manager.list("session_1")).toEqual([]);
@@ -808,6 +844,36 @@ describe("RunManager", () => {
         status: "success",
         step: 1,
         toolName: "get_weather",
+      },
+    });
+  });
+
+  it("publishes lifecycle retry events to the run stream", async () => {
+    const { manager, bridge } = createManager(new RetryingLifecycle());
+
+    const record = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+    await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
+      status: "succeeded",
+    });
+
+    expect(
+      bridge.events.find((event) => event.event === "run.llm.retrying"),
+    ).toMatchObject({
+      event: "run.llm.retrying",
+      scope: "run/run_1",
+      data: {
+        attempt: 2,
+        delayMs: 1250,
+        maxRetries: 5,
+        reason: "server_error",
+        runId: "run_1",
+        sessionId: "session_1",
+        step: 1,
       },
     });
   });
@@ -1040,7 +1106,7 @@ describe("RunManager", () => {
   });
 
   it("preserves lifecycle failure reasons in run completion", async () => {
-    const { manager } = createManager(new FailedResultLifecycle());
+    const { manager, bridge } = createManager(new FailedResultLifecycle());
     const failed = await manager.create({
       directory: "D:/repo",
       modelId: "fake-model",
@@ -1051,6 +1117,18 @@ describe("RunManager", () => {
     await expect(manager.waitForCompletion(failed.runId)).resolves.toEqual({
       status: "failed",
       error: "Context overflow after forced compaction retry",
+      terminalReason: "context_overflow",
+    });
+    expect(
+      bridge.events
+        .filter((event) => event.event === "run.updated")
+        .at(-1)?.data,
+    ).toMatchObject({
+      run: {
+        runId: failed.runId,
+        status: "failed",
+        terminalReason: "context_overflow",
+      },
     });
   });
 

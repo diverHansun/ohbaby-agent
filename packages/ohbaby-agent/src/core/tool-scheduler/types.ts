@@ -203,9 +203,12 @@ export interface ConcurrencyConfig {
   readonly maxSubagentConcurrency: number;
 }
 
-export interface TimeoutConfig {
+export interface TimeoutPolicy {
   readonly defaultTimeout: number;
+  readonly byTool?: Readonly<Record<string, number>>;
 }
+
+export type TimeoutConfig = TimeoutPolicy;
 
 export interface ToolSchedulerConfig {
   readonly concurrency: ConcurrencyConfig;

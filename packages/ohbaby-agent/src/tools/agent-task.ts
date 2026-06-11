@@ -41,6 +41,7 @@ function renderTask(task: AgentTaskRecord): string {
     `session_id: ${task.sessionId}`,
     `status: ${task.status}`,
     `pending_inputs: ${String(task.pendingInputCount)}`,
+    task.timeoutMs ? `timeout_ms: ${String(task.timeoutMs)}` : undefined,
     task.output ? `<task_output>\n${task.output}\n</task_output>` : undefined,
     task.error ? `<task_error>\n${task.error}\n</task_error>` : undefined,
   ]

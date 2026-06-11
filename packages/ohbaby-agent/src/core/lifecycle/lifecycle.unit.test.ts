@@ -9,7 +9,7 @@ import {
   createMessageManager,
 } from "../message/index.js";
 import type { MessageIdGenerator } from "../message/index.js";
-import { Lifecycle } from "./index.js";
+import { DEFAULT_MAX_STEPS, Lifecycle } from "./index.js";
 import type { LLMClientInstance } from "../llm-client/index.js";
 import type { ToolSchedulerInstance } from "../tool-scheduler/index.js";
 import type {
@@ -235,6 +235,10 @@ function createContextManagerMock(
 }
 
 describe("Lifecycle.run", () => {
+  it("uses a Kimi-style generous default maxSteps", () => {
+    expect(DEFAULT_MAX_STEPS).toBe(1000);
+  });
+
   it("prepares context before every model step and uses prepared messages as the step source", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const messageManager = createMessageManager({
@@ -439,6 +443,339 @@ describe("Lifecycle.run", () => {
     });
   });
 
+  it("uses the final maxSteps model step for text-only finalization", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValueOnce(
+        preparedTurn([{ role: "user", content: "Do bounded work" }]),
+      )
+      .mockResolvedValueOnce(
+        preparedTurn([
+          { role: "user", content: "Do bounded work" },
+          {
+            content: null,
+            role: "assistant",
+            tool_calls: [
+              {
+                function: {
+                  arguments: '{"path":"README.md"}',
+                  name: "read_file",
+                },
+                id: "call_read",
+                type: "function",
+              },
+            ],
+          },
+          {
+            content: "README contents",
+            role: "tool",
+            tool_call_id: "call_read",
+          },
+        ]),
+      );
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"path":"README.md"}',
+                  id: "call_read",
+                  index: 0,
+                  name: "read_file",
+                },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+          [{ textDelta: "Summary after limit.", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(
+          ({ calls }) =>
+            Promise.resolve(
+              calls.map((call) => ({
+                callId: call.callId,
+                output: "README contents",
+                status: "success" as const,
+              })),
+            ),
+        ),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        maxSteps: 2,
+        modelId: "fake-model",
+        sessionId: "session_test",
+        tools: [
+          {
+            function: {
+              name: "read_file",
+              parameters: { type: "object" },
+            },
+            type: "function",
+          },
+        ],
+      }),
+    );
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.tools).toHaveLength(1);
+    expect(requests[1]?.tools).toEqual([]);
+    expect(requests[1]?.messages.at(-1)).toMatchObject({
+      role: "system",
+      content: expect.stringContaining(
+        "Maximum lifecycle steps reached",
+      ) as string,
+    });
+    expect(result).toMatchObject({
+      finalResponse: "Summary after limit.",
+      finishReason: "stop",
+      success: true,
+      terminalReason: "max_steps_finalized",
+    });
+  });
+
+  it("fails when the final maxSteps finalization step still requests a tool", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValue(
+        preparedTurn([{ role: "user", content: "Finish within one step" }]),
+      );
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"path":"README.md"}',
+                  id: "call_read",
+                  index: 0,
+                  name: "read_file",
+                },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        maxSteps: 1,
+        modelId: "fake-model",
+        sessionId: "session_test",
+        tools: [
+          {
+            function: {
+              name: "read_file",
+              parameters: { type: "object" },
+            },
+            type: "function",
+          },
+        ],
+      }),
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.tools).toEqual([]);
+    expect(result).toMatchObject({
+      finishReason: "error",
+      success: false,
+      terminalReason: "max_steps_finalization_requested_tool",
+    });
+  });
+
+  it("clamps non-positive maxSteps to a single finalization step", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValue(
+        preparedTurn([{ role: "user", content: "Quick question" }]),
+      );
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createSequentialFakeLLMClient(
+        [[{ textDelta: "Clamped summary.", finishReason: "stop" }]],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        maxSteps: 0,
+        modelId: "fake-model",
+        sessionId: "session_test",
+        tools: [
+          {
+            function: {
+              name: "read_file",
+              parameters: { type: "object" },
+            },
+            type: "function",
+          },
+        ],
+      }),
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.tools).toEqual([]);
+    expect(result).toMatchObject({
+      finalResponse: "Clamped summary.",
+      success: true,
+      terminalReason: "max_steps_finalized",
+    });
+  });
+
+  it("maps malformed tool call arguments to a tool_parse_failure terminal reason", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValue(
+        preparedTurn([{ role: "user", content: "Read the file" }]),
+      );
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"path": broken',
+                  id: "call_bad",
+                  index: 0,
+                  name: "read_file",
+                },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_test",
+        tools: [
+          {
+            function: {
+              name: "read_file",
+              parameters: { type: "object" },
+            },
+            type: "function",
+          },
+        ],
+      }),
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(result).toMatchObject({
+      finalResponse: expect.stringContaining(
+        "malformed tool call arguments",
+      ) as string,
+      finishReason: "error",
+      success: false,
+      terminalReason: "tool_parse_failure",
+    });
+  });
+
+  it("classifies tool-call finish events without parsed calls as tool parse failures", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValue(
+        preparedTurn([{ role: "user", content: "Use a tool" }]),
+      );
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createSequentialFakeLLMClient(
+        [[{ finishReason: "tool_calls" }]],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_test",
+      }),
+    );
+
+    expect(result).toMatchObject({
+      finishReason: "error",
+      success: false,
+      terminalReason: "tool_parse_failure",
+    });
+  });
+
   it("stops before the model step when the signal aborts during prepareTurn", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const abortController = new AbortController();
@@ -483,6 +820,7 @@ describe("Lifecycle.run", () => {
     expect(result).toMatchObject({
       finishReason: "error",
       success: false,
+      terminalReason: "cancelled",
     });
     expect(result.usage).toBeUndefined();
   });
@@ -790,6 +1128,55 @@ describe("Lifecycle.run", () => {
 
     expect(prepareTurn).toHaveBeenCalledTimes(1);
     expect(requests).toHaveLength(1);
+  });
+
+  it("returns a structured result when retryable provider errors exhaust retries", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValue(
+        preparedTurn([{ role: "user", content: "Say hello" }]),
+      );
+    const retryableErrors = Array.from({ length: 6 }, () =>
+      Object.assign(new Error("provider unavailable"), {
+        headers: { "retry-after-ms": "0" },
+        status: 503,
+      }),
+    );
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createRejectingSequenceLLMClient({
+        errors: retryableErrors,
+        requests,
+      }),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const { events, result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_test",
+      }),
+    );
+
+    expect(events.filter((event) => event === "llm:retrying")).toHaveLength(5);
+    expect(requests).toHaveLength(6);
+    expect(result).toMatchObject({
+      finalResponse: expect.stringContaining("after 5 retries") as string,
+      finishReason: "error",
+      success: false,
+      terminalReason: "provider_retry_exhausted",
+    });
   });
 
   it("fails clearly when overflow retry also overflows", async () => {

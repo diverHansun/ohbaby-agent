@@ -1,5 +1,8 @@
 import type { ToolCategory, ToolSchedulerConfig } from "./types.js";
 
+const SYNC_SUBAGENT_BUDGET_MS = 300_000;
+const TOOL_SCHEDULER_GUARD_BAND_MS = 10_000;
+
 export const DEFAULT_TOOL_SCHEDULER_CONFIG: ToolSchedulerConfig = {
   concurrency: {
     maxReadConcurrency: 5,
@@ -7,6 +10,12 @@ export const DEFAULT_TOOL_SCHEDULER_CONFIG: ToolSchedulerConfig = {
   },
   timeout: {
     defaultTimeout: 120_000,
+    byTool: {
+      // Keep the scheduler slightly longer than the sync subagent deadline so
+      // the subagent can report its own timeout result before the tool wrapper
+      // aborts the call.
+      task: SYNC_SUBAGENT_BUDGET_MS + TOOL_SCHEDULER_GUARD_BAND_MS,
+    },
   },
 };
 

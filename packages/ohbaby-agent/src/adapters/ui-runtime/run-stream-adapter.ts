@@ -32,6 +32,7 @@ interface StreamRunRecord {
   readonly sessionId: string;
   readonly startedAt?: number;
   readonly status: string;
+  readonly terminalReason?: string;
 }
 
 interface ToolResultPayload {
@@ -100,6 +101,7 @@ function toUiRun(record: StreamRunRecord): UiRun {
     sessionId: record.sessionId,
     startedAt: toDateString(record.startedAt, record.createdAt),
     status: toUiRunStatus(record),
+    terminalReason: record.terminalReason,
     updatedAt: toDateString(updatedAt, record.createdAt),
   };
 }

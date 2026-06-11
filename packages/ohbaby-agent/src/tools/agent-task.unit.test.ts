@@ -17,7 +17,13 @@ const record: AgentTaskRecord = {
   updatedAt: 2,
 };
 
-function createController() {
+function createController(): {
+  readonly close: ReturnType<typeof vi.fn>;
+  readonly controller: AgentTaskController;
+  readonly get: ReturnType<typeof vi.fn>;
+  readonly open: ReturnType<typeof vi.fn>;
+  readonly sendInput: ReturnType<typeof vi.fn>;
+} {
   const close = vi.fn<AgentTaskController["close"]>(() =>
     Promise.resolve({
       previousStatus: "running" as const,

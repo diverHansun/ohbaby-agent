@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { AgentService } from "./service.js";
+import { AgentService, resolveSyncSubagentTimeout } from "./service.js";
 import { AgentManager } from "./manager.js";
 import { AgentRegistry } from "./registry.js";
 import type { AgentsConfig } from "./types.js";
@@ -132,7 +132,9 @@ function assistantText(text: string): MessageWithParts {
 }
 
 function createMessageManager(
-  messages: readonly MessageWithParts[] = [assistantText("exploration complete")],
+  messages: readonly MessageWithParts[] = [
+    assistantText("exploration complete"),
+  ],
 ): {
   readonly appendPart: ReturnType<typeof vi.fn>;
   readonly createMessage: ReturnType<typeof vi.fn>;
@@ -165,25 +167,33 @@ function createMessageManager(
     manager: {
       appendPart,
       createMessage,
-      listBySession: vi.fn((): Promise<MessageWithParts[]> => Promise.resolve([...messages])),
+      listBySession: vi.fn(
+        (): Promise<MessageWithParts[]> => Promise.resolve([...messages]),
+      ),
       removeMessage: vi.fn((): Promise<void> => Promise.resolve()),
       removeMessages: vi.fn((): Promise<void> => Promise.resolve()),
       toModelMessages: vi.fn(() => Promise.resolve([])),
-      updateMessage: vi.fn((): Promise<CoreMessage> => Promise.resolve({
-        agent: "explore",
-        id: "assistant",
-        role: "assistant",
-        sessionId: "child_1",
-        time: { created: 1 },
-      })),
-      updatePart: vi.fn((): Promise<Part> => Promise.resolve({
-        id: "part",
-        messageId: "assistant",
-        orderIndex: 0,
-        sessionId: "child_1",
-        text: "updated",
-        type: "text",
-      })),
+      updateMessage: vi.fn(
+        (): Promise<CoreMessage> =>
+          Promise.resolve({
+            agent: "explore",
+            id: "assistant",
+            role: "assistant",
+            sessionId: "child_1",
+            time: { created: 1 },
+          }),
+      ),
+      updatePart: vi.fn(
+        (): Promise<Part> =>
+          Promise.resolve({
+            id: "part",
+            messageId: "assistant",
+            orderIndex: 0,
+            sessionId: "child_1",
+            text: "updated",
+            type: "text",
+          }),
+      ),
     },
   };
 }
@@ -193,9 +203,11 @@ function createRunCoordinator(
     status: "succeeded",
   },
 ): {
+  readonly cancel: ReturnType<typeof vi.fn>;
   readonly coordinator: AgentRunCoordinator;
   readonly create: ReturnType<typeof vi.fn>;
 } {
+  const cancel = vi.fn<AgentRunCoordinator["cancel"]>();
   const create = vi.fn<AgentRunCoordinator["create"]>((options) =>
     Promise.resolve({
       runId: "run_child",
@@ -203,8 +215,9 @@ function createRunCoordinator(
     }),
   );
   return {
+    cancel,
     coordinator: {
-      cancel: vi.fn(),
+      cancel,
       create,
       waitForCompletion: vi.fn(() => Promise.resolve(completion)),
     },
@@ -233,6 +246,19 @@ function createToolScheduler(): {
 }
 
 describe("AgentService", () => {
+  it("clamps sync subagent timeout to five minutes", () => {
+    expect(resolveSyncSubagentTimeout(undefined)).toBe(300_000);
+    expect(resolveSyncSubagentTimeout(120_000)).toBe(120_000);
+    expect(resolveSyncSubagentTimeout(600_000)).toBe(300_000);
+  });
+
+  it("falls back to the default sync timeout for non-positive or invalid values", () => {
+    expect(resolveSyncSubagentTimeout(0)).toBe(300_000);
+    expect(resolveSyncSubagentTimeout(-5_000)).toBe(300_000);
+    expect(resolveSyncSubagentTimeout(Number.NaN)).toBe(300_000);
+    expect(resolveSyncSubagentTimeout(Number.POSITIVE_INFINITY)).toBe(300_000);
+  });
+
   it("starts a primary session through core runAgent stream mode", async () => {
     const messages = createMessageManager();
     const runs = createRunCoordinator();
@@ -294,7 +320,7 @@ describe("AgentService", () => {
         agent: "build",
         directory: "D:/repo",
         isSubagent: false,
-        maxSteps: 50,
+        maxSteps: 1000,
         modelId: "fake-model",
         parentMessageId: "message_child",
         sessionId: "primary_1",
@@ -355,7 +381,7 @@ describe("AgentService", () => {
         agent: "explore",
         directory: "D:/repo",
         isSubagent: true,
-        maxSteps: 15,
+        maxSteps: 50,
         modelId: "fake-model",
         parentMessageId: "message_child",
         sessionId: "child_1",
@@ -443,6 +469,85 @@ describe("AgentService", () => {
     await expect(first).resolves.toMatchObject({ success: true });
   });
 
+  it("returns a structured timeout result when a sync subagent exceeds five minutes", async () => {
+    vi.useFakeTimers();
+    try {
+      const runs = createRunCoordinator();
+      runs.coordinator.waitForCompletion = vi.fn(
+        () => new Promise<never>(() => undefined),
+      );
+      const service = new AgentService({
+        agentManager: await createAgentManager(),
+        messageManager: createMessageManager().manager,
+        modelId: "fake-model",
+        now: Date.now,
+        runCoordinator: runs.coordinator,
+        sessionManager: createSessionManager(),
+        toolScheduler: createToolScheduler().scheduler,
+      });
+
+      const resultPromise = service.execute({
+        parentSessionId: "parent",
+        prompt: "long work",
+        role: "explore",
+      });
+      await vi.waitUntil(() => runs.create.mock.calls.length === 1);
+      await vi.advanceTimersByTimeAsync(300_000);
+
+      const settled = await Promise.race([
+        resultPromise,
+        Promise.resolve("pending" as const),
+      ]);
+      expect(settled).toMatchObject({
+        output: expect.stringContaining("timed out") as string,
+        role: "explore",
+        sessionId: "child_1",
+        success: false,
+        timeout: true,
+      });
+      expect(runs.cancel).toHaveBeenCalledWith(
+        "run_child",
+        "sync subagent timed out",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns without timeout metadata when a sync subagent is cancelled by the parent signal", async () => {
+    const abortController = new AbortController();
+    const runs = createRunCoordinator();
+    runs.coordinator.waitForCompletion = vi.fn(
+      () => new Promise<never>(() => undefined),
+    );
+    const service = new AgentService({
+      agentManager: await createAgentManager(),
+      messageManager: createMessageManager().manager,
+      modelId: "fake-model",
+      runCoordinator: runs.coordinator,
+      sessionManager: createSessionManager(),
+      toolScheduler: createToolScheduler().scheduler,
+    });
+
+    const resultPromise = service.execute({
+      parentSessionId: "parent",
+      prompt: "long work",
+      role: "explore",
+      signal: abortController.signal,
+    });
+    await vi.waitUntil(() => runs.create.mock.calls.length === 1);
+    abortController.abort("parent stopped");
+
+    await expect(resultPromise).resolves.toMatchObject({
+      output: "Subagent cancelled.",
+      success: false,
+    });
+    await expect(resultPromise).resolves.not.toMatchObject({
+      timeout: true,
+    });
+    expect(runs.cancel).toHaveBeenCalledWith("run_child", "parent stopped");
+  });
+
   it("uses a resumed child session instead of creating a new one", async () => {
     const sessionManager = createSessionManager();
     await sessionManager.create("D:/repo", {
@@ -517,9 +622,7 @@ describe("AgentService", () => {
         resumeSessionId: "child_other_parent",
         role: "explore",
       }),
-    ).rejects.toThrow(
-      "Session child_other_parent is not a child of parent",
-    );
+    ).rejects.toThrow("Session child_other_parent is not a child of parent");
     expect(sessionManager.create).toHaveBeenCalledTimes(1);
   });
 

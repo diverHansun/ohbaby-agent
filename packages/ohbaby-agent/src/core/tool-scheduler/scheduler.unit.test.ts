@@ -16,7 +16,11 @@ import {
   createPermissionState,
   type PermissionStateStore,
 } from "../../permission/index.js";
-import { createToolScheduler, ToolSchedulerEvent } from "./index.js";
+import {
+  createToolScheduler,
+  timeoutForTool,
+  ToolSchedulerEvent,
+} from "./index.js";
 import type {
   PermissionPort,
   Tool,
@@ -189,6 +193,141 @@ function createScheduler(
 }
 
 describe("ToolScheduler", () => {
+  it("uses a longer guard timeout for task without extending other subagent tools", () => {
+    expect(
+      timeoutForTool(
+        {
+          byTool: { task: 310_000 },
+          defaultTimeout: 120_000,
+        },
+        "task",
+      ),
+    ).toBe(310_000);
+    expect(
+      timeoutForTool(
+        {
+          byTool: { task: 310_000 },
+          defaultTimeout: 120_000,
+        },
+        "agent_open",
+      ),
+    ).toBe(120_000);
+  });
+
+  it("applies the task guard timeout through the actual execution path", async () => {
+    vi.useFakeTimers();
+    try {
+      const started: string[] = [];
+      const { scheduler } = createScheduler();
+      scheduler.register(
+        createTool({
+          category: "subagent",
+          execute: (_params, context) => {
+            started.push(context.callId);
+            return new Promise<ToolExecutionResult>(() => undefined);
+          },
+          name: "task",
+        }),
+      );
+
+      const result = scheduler.execute({
+        callId: "task_1",
+        messageId: "message_1",
+        params: {},
+        sessionId: "session_1",
+        toolName: "task",
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(started).toEqual(["task_1"]);
+
+      await vi.advanceTimersByTimeAsync(309_999);
+      expect(scheduler.getStatus("task_1")).toBe("executing");
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(result).resolves.toMatchObject({
+        error: { type: "TimeoutError" },
+        status: "error",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the task guard when a caller overrides byTool for another tool", async () => {
+    vi.useFakeTimers();
+    try {
+      const { scheduler } = createScheduler({
+        config: { timeout: { byTool: { custom_tool: 5_000 } } },
+      });
+      scheduler.register(
+        createTool({
+          category: "subagent",
+          execute: () => new Promise<ToolExecutionResult>(() => undefined),
+          name: "task",
+        }),
+      );
+
+      const result = scheduler.execute({
+        callId: "task_merge_1",
+        messageId: "message_1",
+        params: {},
+        sessionId: "session_1",
+        toolName: "task",
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      await vi.advanceTimersByTimeAsync(309_999);
+      expect(scheduler.getStatus("task_merge_1")).toBe("executing");
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(result).resolves.toMatchObject({
+        error: { type: "TimeoutError" },
+        status: "error",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps agent_open on the default scheduler timeout during execution", async () => {
+    vi.useFakeTimers();
+    try {
+      const started: string[] = [];
+      const { scheduler } = createScheduler();
+      scheduler.register(
+        createTool({
+          category: "subagent",
+          execute: (_params, context) => {
+            started.push(context.callId);
+            return new Promise<ToolExecutionResult>(() => undefined);
+          },
+          name: "agent_open",
+        }),
+      );
+
+      const result = scheduler.execute({
+        callId: "agent_open_1",
+        messageId: "message_1",
+        params: {},
+        sessionId: "session_1",
+        toolName: "agent_open",
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(started).toEqual(["agent_open_1"]);
+
+      await vi.advanceTimersByTimeAsync(119_999);
+      expect(scheduler.getStatus("agent_open_1")).toBe("executing");
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(result).resolves.toMatchObject({
+        error: { type: "TimeoutError" },
+        status: "error",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("applies agent tool config before listing available tools", async () => {
     const { scheduler } = createScheduler({
       agentTools: {

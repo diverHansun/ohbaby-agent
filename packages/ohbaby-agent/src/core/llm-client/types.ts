@@ -15,6 +15,7 @@ import type {
   InterfaceProviderTokenUsage,
 } from "../../services/interface-providers/index.js";
 import type { LLMConfig } from "../../config/index.js";
+import type { ProviderRetryEvent } from "./retry.js";
 
 /**
  * Re-export OpenAI message type for convenience.
@@ -51,6 +52,8 @@ export type ChatFinishReason =
   | "tool_calls"
   | "length"
   | "content_filter";
+
+export type StreamStopReason = "provider_finished" | "user_aborted";
 
 /**
  * Parsed tool call with resolved arguments.
@@ -179,12 +182,28 @@ export interface StreamingResponse {
   finishReason?: ChatFinishReason;
 
   /**
+   * Local runtime reason for why streaming stopped.
+   *
+   * This is intentionally separate from provider finishReason. User aborts
+   * and transport interruptions are runtime facts, not model stop reasons.
+   */
+  streamStopReason?: StreamStopReason;
+
+  /**
    * Provider-specific raw finish reason before normalization.
    *
    * Example: Anthropic may emit `pause_turn`, which is normalized to `stop`
    * for the shared finish-reason enum while still being exposed here.
    */
   rawFinishReason?: string;
+
+  /**
+   * Present when this yield is a retry notification, emitted before the
+   * backoff sleep so consumers can surface progress in real time instead of
+   * appearing stuck. Notification yields carry an empty message and
+   * `isComplete: false`; consumers that only read content can ignore them.
+   */
+  retry?: ProviderRetryEvent;
 
   /**
    * Token usage statistics for the complete request.

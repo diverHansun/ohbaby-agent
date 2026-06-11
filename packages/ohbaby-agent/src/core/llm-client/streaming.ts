@@ -22,6 +22,16 @@ import type {
   ChatFinishReason,
   TokenUsage,
 } from "./types.js";
+import {
+  ProviderRetryExhaustedError,
+  ProviderStreamInterruptedError,
+  isRetryableProviderError,
+  nextRetryDelayMs,
+  resolveProviderRetryPolicy,
+  retryReason,
+  type ProviderRetryPolicy,
+} from "./retry.js";
+import { ToolCallParseError } from "./errors.js";
 
 interface AccumulatedToolCall {
   id: string;
@@ -32,19 +42,30 @@ interface AccumulatedToolCall {
   };
 }
 
+class RetrySleepAbortedError extends Error {
+  constructor(readonly reason: unknown) {
+    super("Retry sleep aborted");
+    this.name = "RetrySleepAbortedError";
+  }
+}
+
+function sortedToolCalls(
+  accumulatedToolCalls: Map<number, AccumulatedToolCall>,
+): AccumulatedToolCall[] {
+  return Array.from(accumulatedToolCalls.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([, call]) => call);
+}
+
 function buildCompleteMessage(
   accumulatedContent: string,
   accumulatedToolCalls: Map<number, AccumulatedToolCall>,
 ): ChatCompletionMessageParam {
   if (accumulatedToolCalls.size > 0) {
-    const toolCalls = Array.from(accumulatedToolCalls.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([, call]) => call);
-
     return {
       role: "assistant",
       content: accumulatedContent === "" ? null : accumulatedContent,
-      tool_calls: toolCalls,
+      tool_calls: sortedToolCalls(accumulatedToolCalls),
     };
   }
 
@@ -55,14 +76,54 @@ function buildCompleteMessage(
   };
 }
 
+function buildAbortResponse(input: {
+  readonly accumulatedContent: string;
+  readonly accumulatedToolCalls: Map<number, AccumulatedToolCall>;
+  readonly rawFinishReason: string | undefined;
+  readonly tokenUsage: TokenUsage | null;
+}): StreamingResponse {
+  const completeMessage: ChatCompletionMessageParam =
+    input.accumulatedToolCalls.size > 0
+      ? {
+          role: "assistant",
+          content:
+            input.accumulatedContent === "" ? null : input.accumulatedContent,
+          tool_calls: sortedToolCalls(input.accumulatedToolCalls),
+        }
+      : {
+          role: "assistant",
+          content:
+            input.accumulatedContent === ""
+              ? "(Interrupted)"
+              : input.accumulatedContent,
+        };
+
+  return {
+    completeMessage,
+    isComplete: true,
+    rawFinishReason: input.rawFinishReason,
+    streamStopReason: "user_aborted",
+    tokenUsage: input.tokenUsage ?? undefined,
+  };
+}
+
 function parseToolCalls(
   accumulatedToolCalls: Map<number, AccumulatedToolCall>,
 ): ParsedToolCall[] {
-  return Array.from(accumulatedToolCalls.values()).map((call) => ({
-    id: call.id,
-    name: call.function.name,
-    arguments: JSON.parse(call.function.arguments) as Record<string, unknown>,
-  }));
+  return Array.from(accumulatedToolCalls.values()).map((call) => {
+    try {
+      return {
+        id: call.id,
+        name: call.function.name,
+        arguments: JSON.parse(call.function.arguments) as Record<
+          string,
+          unknown
+        >,
+      };
+    } catch (error) {
+      throw new ToolCallParseError(call.function.name, error);
+    }
+  });
 }
 
 function validateRequestMaxTokens(
@@ -145,13 +206,15 @@ export async function* streamChatCompletion(
   llmClient: LLMClientInstance,
   messages: ChatCompletionMessageParam[],
   options?: {
+    retry?: Partial<ProviderRetryPolicy>;
     signal?: AbortSignal;
     tools?: ChatCompletionCreateParams["tools"];
     maxTokens?: number;
   },
 ): AsyncGenerator<StreamingResponse, void, unknown> {
   const { provider, config } = llmClient;
-  const { signal, tools, maxTokens } = options ?? {};
+  const { retry, signal, tools, maxTokens } = options ?? {};
+  const retryPolicy = resolveProviderRetryPolicy(retry);
   const requestMaxTokens =
     validateRequestMaxTokens(maxTokens) ?? config.maxTokens;
 
@@ -162,128 +225,208 @@ export async function* streamChatCompletion(
   let rawFinishReason: string | undefined;
   let tokenUsage: TokenUsage | null = null;
 
-  try {
-    const stream = await provider.streamChatCompletion({
-      model: config.model,
-      messages,
-      temperature: config.temperature,
-      maxTokens: requestMaxTokens,
-      tools,
-      signal,
-    });
+  let failedAttempts = 0;
 
-    // Stream each normalized event from the provider
-    for await (const event of stream) {
-      const finish = event.finishReason;
+  for (;;) {
+    try {
+      const stream = await provider.streamChatCompletion({
+        model: config.model,
+        messages,
+        temperature: config.temperature,
+        maxTokens: requestMaxTokens,
+        tools,
+        signal,
+      });
 
-      // Update finish reason when stream ends
-      if (finish) {
-        finishReason = finish;
-      }
-      if (event.rawFinishReason) {
-        rawFinishReason = event.rawFinishReason;
-      }
+      let emittedAnyResponse = false;
+      // Stream each normalized event from the provider
+      for await (const event of stream) {
+        const finish = event.finishReason;
 
-      // Capture token usage (typically only in last chunk)
-      if (event.tokenUsage) {
-        tokenUsage = event.tokenUsage;
-      }
+        // Update finish reason when stream ends
+        if (finish) {
+          finishReason = finish;
+        }
+        if (event.rawFinishReason) {
+          rawFinishReason = event.rawFinishReason;
+        }
 
-      // Accumulate text content
-      if (event.textDelta) {
-        accumulatedContent += event.textDelta;
-      }
+        // Capture token usage (typically only in last chunk)
+        if (event.tokenUsage) {
+          tokenUsage = event.tokenUsage;
+        }
 
-      // Accumulate tool call fragments
-      if (event.toolCallDeltas) {
-        for (const toolCall of event.toolCallDeltas) {
-          const index = toolCall.index;
+        // Accumulate text content
+        if (event.textDelta) {
+          accumulatedContent += event.textDelta;
+        }
 
-          // Create new tool call entry if first fragment
-          if (!accumulatedToolCalls.has(index)) {
-            accumulatedToolCalls.set(index, {
-              id: toolCall.id ?? "",
-              type: "function",
-              function: {
-                name: toolCall.name ?? "",
-                arguments: "",
-              },
-            });
-          }
+        // Accumulate tool call fragments
+        if (event.toolCallDeltas) {
+          for (const toolCall of event.toolCallDeltas) {
+            const index = toolCall.index;
 
-          // Accumulate fragments into the tool call
-          const accumulated = accumulatedToolCalls.get(index);
-          if (!accumulated) {
-            continue;
-          }
+            // Create new tool call entry if first fragment
+            if (!accumulatedToolCalls.has(index)) {
+              accumulatedToolCalls.set(index, {
+                id: toolCall.id ?? "",
+                type: "function",
+                function: {
+                  name: toolCall.name ?? "",
+                  arguments: "",
+                },
+              });
+            }
 
-          if (toolCall.id) {
-            accumulated.id = toolCall.id;
-          }
-          if (toolCall.name) {
-            accumulated.function.name = toolCall.name;
-          }
-          if (toolCall.argumentsDelta) {
-            accumulated.function.arguments += toolCall.argumentsDelta;
+            // Accumulate fragments into the tool call
+            const accumulated = accumulatedToolCalls.get(index);
+            if (!accumulated) {
+              continue;
+            }
+
+            if (toolCall.id) {
+              accumulated.id = toolCall.id;
+            }
+            if (toolCall.name) {
+              accumulated.function.name = toolCall.name;
+            }
+            if (toolCall.argumentsDelta) {
+              accumulated.function.arguments += toolCall.argumentsDelta;
+            }
           }
         }
+
+        // Build complete message from accumulated state
+        const completeMessage = buildCompleteMessage(
+          accumulatedContent,
+          accumulatedToolCalls,
+        );
+
+        // Parse tool calls only when stream is complete
+        let parsedToolCalls: ParsedToolCall[] | undefined;
+        if (finishReason && accumulatedToolCalls.size > 0) {
+          parsedToolCalls = parseToolCalls(accumulatedToolCalls);
+        }
+
+        // Yield response with accumulated data
+        emittedAnyResponse = true;
+        yield {
+          completeMessage,
+          parsedToolCalls,
+          isComplete: finishReason !== null,
+          finishReason: finishReason ?? undefined,
+          rawFinishReason,
+          streamStopReason:
+            finishReason === null ? undefined : "provider_finished",
+          tokenUsage: tokenUsage ?? undefined,
+        };
       }
-
-      // Build complete message from accumulated state
-      const completeMessage = buildCompleteMessage(
-        accumulatedContent,
-        accumulatedToolCalls,
-      );
-
-      // Parse tool calls only when stream is complete
-      let parsedToolCalls: ParsedToolCall[] | undefined;
-      if (finishReason && accumulatedToolCalls.size > 0) {
-        parsedToolCalls = parseToolCalls(accumulatedToolCalls);
+      if (!emittedAnyResponse) {
+        yield {
+          completeMessage: buildCompleteMessage(
+            accumulatedContent,
+            accumulatedToolCalls,
+          ),
+          isComplete: true,
+          rawFinishReason,
+          streamStopReason: "provider_finished",
+          tokenUsage: tokenUsage ?? undefined,
+        };
       }
-
-      // Yield response with accumulated data
-      yield {
-        completeMessage,
-        parsedToolCalls,
-        isComplete: finishReason !== null,
-        finishReason: finishReason ?? undefined,
-        rawFinishReason,
-        tokenUsage: tokenUsage ?? undefined,
-      };
-    }
-  } catch (error) {
-    // Handle user-initiated interruption
-    if (provider.isAbortError(error)) {
-      // Build final message with accumulated content
-      const completeMessage: ChatCompletionMessageParam =
-        accumulatedToolCalls.size > 0
-          ? {
-              role: "assistant",
-              content: accumulatedContent === "" ? null : accumulatedContent,
-              tool_calls: Array.from(accumulatedToolCalls.values()),
-            }
-          : {
-              role: "assistant",
-              content:
-                accumulatedContent === ""
-                  ? "(Interrupted)"
-                  : accumulatedContent,
-            };
-
-      // Return partial results instead of throwing
-      // This allows consumers to save or reuse the partial response
-      yield {
-        completeMessage,
-        isComplete: true,
-        finishReason: "length", // Use 'length' as marker for interruption
-        rawFinishReason,
-        tokenUsage: tokenUsage ?? undefined,
-      };
-
       return;
-    }
+    } catch (error) {
+      // Malformed tool arguments are a model output defect; surface them
+      // as-is so consumers do not mistake them for a transport interruption.
+      if (error instanceof ToolCallParseError) {
+        throw error;
+      }
+      // Handle user-initiated interruption
+      if (
+        provider.isAbortError(error) ||
+        error instanceof RetrySleepAbortedError ||
+        signal?.aborted === true
+      ) {
+        // Return partial results instead of throwing
+        // This allows consumers to save or reuse the partial response
+        yield buildAbortResponse({
+          accumulatedContent,
+          accumulatedToolCalls,
+          rawFinishReason,
+          tokenUsage,
+        });
 
-    // Re-throw other errors (network, auth, API errors)
-    throw error;
+        return;
+      }
+
+      if (accumulatedContent !== "" || accumulatedToolCalls.size > 0) {
+        throw new ProviderStreamInterruptedError(error);
+      }
+
+      failedAttempts += 1;
+      if (
+        failedAttempts > retryPolicy.maxRetriesPerStep ||
+        !isRetryableProviderError(error)
+      ) {
+        if (isRetryableProviderError(error)) {
+          throw new ProviderRetryExhaustedError(error, failedAttempts - 1);
+        }
+        throw error;
+      }
+
+      const delayMs = nextRetryDelayMs({
+        attempt: failedAttempts,
+        error,
+        policy: retryPolicy,
+      });
+      // Notify before the backoff sleep so consumers see the retry while it
+      // is happening, not after the next attempt succeeds.
+      yield {
+        completeMessage: { role: "assistant", content: "" },
+        isComplete: false,
+        retry: {
+          attempt: failedAttempts,
+          delayMs,
+          maxRetries: retryPolicy.maxRetriesPerStep,
+          reason: retryReason(error),
+        },
+      };
+      try {
+        await sleepForRetry(delayMs, signal);
+      } catch (sleepError) {
+        if (sleepError instanceof RetrySleepAbortedError) {
+          yield buildAbortResponse({
+            accumulatedContent,
+            accumulatedToolCalls,
+            rawFinishReason,
+            tokenUsage,
+          });
+          return;
+        }
+        throw sleepError;
+      }
+    }
   }
+}
+
+async function sleepForRetry(
+  delayMs: number,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  if (delayMs <= 0) {
+    return;
+  }
+  if (signal?.aborted) {
+    throw new RetrySleepAbortedError(signal.reason);
+  }
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timeout);
+      reject(new RetrySleepAbortedError(signal?.reason));
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }

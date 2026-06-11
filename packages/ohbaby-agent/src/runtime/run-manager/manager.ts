@@ -40,6 +40,7 @@ function cloneRunRecord(record: RunRecord): RunRecord {
     startedAt: record.startedAt,
     endedAt: record.endedAt,
     error: record.error,
+    terminalReason: record.terminalReason,
   };
 }
 
@@ -56,13 +57,18 @@ function isActive(record: RunRecord): boolean {
 }
 
 function completionFromResult(result: RunWorkerResult): RunCompletion {
+  const terminalReason = result.terminalReason ?? result.result?.terminalReason;
   if (result.status === "succeeded") {
-    return { status: "succeeded" };
+    return {
+      status: "succeeded",
+      ...(terminalReason === undefined ? {} : { terminalReason }),
+    };
   }
 
   return {
     status: result.status,
     error: result.error,
+    ...(terminalReason === undefined ? {} : { terminalReason }),
   };
 }
 
@@ -240,10 +246,14 @@ export class RunManager {
     try {
       const ledgerRecord = await this.markLedgerTerminal(record, outcome);
       this.applyLedgerProjection(record, ledgerRecord);
+      record.terminalReason =
+        outcome.terminalReason ?? outcome.result?.terminalReason;
     } catch (error) {
       record.status = outcome.status;
       record.endedAt = this.now();
       record.error = outcome.error ?? errorToMessage(error);
+      record.terminalReason =
+        outcome.terminalReason ?? outcome.result?.terminalReason;
     } finally {
       this.removeActive(record);
       if (record.sandboxLease) {
