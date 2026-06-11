@@ -65,6 +65,20 @@ function parseToolCalls(
   }));
 }
 
+function validateRequestMaxTokens(
+  value: number | undefined,
+): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new RangeError(
+      `Invalid maxTokens: ${String(value)}. Must be a positive integer`,
+    );
+  }
+  return value;
+}
+
 /**
  * Stream chat completion and accumulate complete messages in real-time.
  *
@@ -138,6 +152,8 @@ export async function* streamChatCompletion(
 ): AsyncGenerator<StreamingResponse, void, unknown> {
   const { provider, config } = llmClient;
   const { signal, tools, maxTokens } = options ?? {};
+  const requestMaxTokens =
+    validateRequestMaxTokens(maxTokens) ?? config.maxTokens;
 
   // Accumulation state - maintained across iterations
   let accumulatedContent = "";
@@ -151,7 +167,7 @@ export async function* streamChatCompletion(
       model: config.model,
       messages,
       temperature: config.temperature,
-      maxTokens: maxTokens ?? config.maxTokens,
+      maxTokens: requestMaxTokens,
       tools,
       signal,
     });

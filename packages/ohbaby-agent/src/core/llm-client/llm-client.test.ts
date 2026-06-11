@@ -246,10 +246,7 @@ describe("LLM Client Integration Tests", () => {
       );
 
       const messages = [{ role: "user" as const, content: "Say hello" }];
-      for await (const response of streamChatCompletion(
-        mockClient,
-        messages,
-      )) {
+      for await (const response of streamChatCompletion(mockClient, messages)) {
         void response;
       }
 
@@ -274,6 +271,24 @@ describe("LLM Client Integration Tests", () => {
         expect.objectContaining({ maxTokens: 128 }),
       );
       expect(mockClient.config.maxTokens).toBe(4096);
+    });
+
+    it("rejects invalid per-request maxTokens before calling the provider", async () => {
+      const messages = [{ role: "user" as const, content: "Say hello" }];
+
+      await expect(
+        (async (): Promise<void> => {
+          for await (const response of streamChatCompletion(
+            mockClient,
+            messages,
+            { maxTokens: 0 },
+          )) {
+            void response;
+          }
+        })(),
+      ).rejects.toThrow(/maxTokens.*positive integer/u);
+
+      expect(streamChatCompletionMock).not.toHaveBeenCalled();
     });
 
     it("should accumulate text content from streaming chunks", async () => {

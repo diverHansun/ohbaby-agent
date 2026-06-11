@@ -72,9 +72,7 @@ describe("applyActiveModelConfig", () => {
       provider: "zenmux",
     });
 
-    const modelJson = JSON.parse(
-      await fs.readFile(modelJsonPath, "utf-8"),
-    ) as {
+    const modelJson = JSON.parse(await fs.readFile(modelJsonPath, "utf-8")) as {
       readonly provider: string;
       readonly defaultModel: string;
       readonly apiConfig: {
@@ -189,9 +187,7 @@ describe("applyActiveModelConfig", () => {
     expect(result.contextWindowSource).toBe("detected");
     expect(JSON.stringify(result)).not.toContain("sk-test-secret");
 
-    const modelJson = JSON.parse(
-      await fs.readFile(modelJsonPath, "utf-8"),
-    ) as {
+    const modelJson = JSON.parse(await fs.readFile(modelJsonPath, "utf-8")) as {
       readonly llmParams: {
         readonly contextWindowTokens?: number;
       };
@@ -237,13 +233,53 @@ describe("applyActiveModelConfig", () => {
     expect(result.contextWindowSource).toBe("default");
     expect(result.warning).toMatch(/context window/i);
 
-    const modelJson = JSON.parse(
-      await fs.readFile(modelJsonPath, "utf-8"),
-    ) as {
+    const modelJson = JSON.parse(await fs.readFile(modelJsonPath, "utf-8")) as {
       readonly llmParams: {
         readonly contextWindowTokens?: number;
       };
     };
     expect(modelJson.llmParams.contextWindowTokens).toBe(128_000);
+  });
+
+  it("rejects non-positive user-provided context window tokens before probing or writing", async () => {
+    await expect(
+      applyActiveModelConfig({
+        apiKey: "sk-test-secret",
+        apiKeyEnv: "ZENMUX_API_KEY",
+        baseUrl: "https://zenmux.ai/api/anthropic",
+        contextWindowTokens: 0,
+        interfaceProvider: "anthropic",
+        model: "custom-model",
+        modelJsonPath,
+        projectRoot: tempRoot,
+        provider: "zenmux",
+      }),
+    ).rejects.toThrow("Context window must be a positive integer");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(fs.stat(modelJsonPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("rejects non-positive user-provided max output tokens before probing or writing", async () => {
+    await expect(
+      applyActiveModelConfig({
+        apiKey: "sk-test-secret",
+        apiKeyEnv: "ZENMUX_API_KEY",
+        baseUrl: "https://zenmux.ai/api/anthropic",
+        interfaceProvider: "anthropic",
+        maxOutputTokens: -1,
+        model: "custom-model",
+        modelJsonPath,
+        projectRoot: tempRoot,
+        provider: "zenmux",
+      }),
+    ).rejects.toThrow("Max output tokens must be a positive integer");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(fs.stat(modelJsonPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 });
