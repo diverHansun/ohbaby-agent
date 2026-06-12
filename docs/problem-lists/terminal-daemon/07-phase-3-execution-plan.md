@@ -147,11 +147,11 @@ git commit -m "feat(daemon): define explicit ui protocol"
 - Create: `packages/ohbaby-agent/src/runtime/daemon/permission-router.ts`
 - Create: `packages/ohbaby-agent/src/runtime/daemon/permission-router.unit.test.ts`
 
-- [ ] Write failing tests for routing behavior.
+- [x] Write failing tests for routing behavior.
 
 Test cases:
 
-- `trackPromptStart(clientA)` followed by `observeEvent(run.updated run_1)` maps `run_1` to `clientA`.
+- `trackPromptClient(clientA)` followed by `observeEvent(run.updated run_1)` maps `run_1` to `clientA`.
 - `filterEventForClient(permission.requested run_1, clientA)` returns the event.
 - `filterEventForClient(permission.requested run_1, clientB)` returns `null`.
 - `filterSnapshotForClient(snapshotWithPermissionRun1, clientB)` removes that permission but keeps sessions, runs, messages, and permission state.
@@ -165,7 +165,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/permission-router.
 
 Expected RED: fails because `permission-router.ts` does not exist.
 
-- [ ] Implement `PermissionRouter`.
+- [x] Implement `PermissionRouter`.
 
 Required public API:
 
@@ -186,7 +186,7 @@ Implementation rules:
 - Snapshots remove permission requests whose `runId` belongs to a different client.
 - No mutation of input events or snapshots.
 
-- [ ] Run focused tests.
+- [x] Run focused tests.
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/permission-router.unit.test.ts
@@ -194,7 +194,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/permission-router.
 
 Expected GREEN: permission router tests pass.
 
-- [ ] Commit.
+- [x] Commit.
 
 ```powershell
 git add packages/ohbaby-agent/src/runtime/daemon/permission-router.ts packages/ohbaby-agent/src/runtime/daemon/permission-router.unit.test.ts
