@@ -236,6 +236,105 @@ describe("createPersistentUiStateStore", () => {
     });
   });
 
+  it("does not report another session's active run as the active session status", async () => {
+    let nextSession = 1;
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => {
+        const id = `session_${String(nextSession)}`;
+        nextSession += 1;
+        return id;
+      },
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      now: createClock(1_000),
+      projectResolver: PROJECT_RESOLVER,
+      store: createDatabaseSessionStore(),
+    });
+    const activeSession = await sessionManager.create("D:/repo", {
+      title: "Active session",
+    });
+    const otherSession = await sessionManager.create("D:/repo", {
+      title: "Other session",
+    });
+    const appState = createDatabaseUiAppStateStore();
+    await appState.setActiveSessionId(activeSession.id);
+    const runLedger = createDatabaseRunLedger({ now: createClock(10_000) });
+    await runLedger.createPending({
+      runId: "run_other_active",
+      sessionId: otherSession.id,
+      triggerSource: "user",
+    });
+    await runLedger.markRunning("run_other_active");
+    const store = createPersistentUiStateStore({
+      appState,
+      messageManager,
+      runLedger,
+      sessionManager,
+    });
+
+    await expect(store.readSnapshot()).resolves.toMatchObject({
+      activeSessionId: "session_1",
+      runs: [
+        {
+          id: "run_other_active",
+          sessionId: "session_2",
+          status: { kind: "running", runId: "run_other_active" },
+        },
+      ],
+      status: { kind: "idle" },
+    });
+  });
+
+  it("reports the active session's own active run as running", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => "session_active",
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      now: createClock(1_000),
+      projectResolver: PROJECT_RESOLVER,
+      store: createDatabaseSessionStore(),
+    });
+    const activeSession = await sessionManager.create("D:/repo", {
+      title: "Active session",
+    });
+    const appState = createDatabaseUiAppStateStore();
+    await appState.setActiveSessionId(activeSession.id);
+    const runLedger = createDatabaseRunLedger({ now: createClock(10_000) });
+    await runLedger.createPending({
+      runId: "run_active",
+      sessionId: activeSession.id,
+      triggerSource: "user",
+    });
+    await runLedger.markRunning("run_active");
+    const store = createPersistentUiStateStore({
+      appState,
+      messageManager,
+      runLedger,
+      sessionManager,
+    });
+
+    await expect(store.readSnapshot()).resolves.toMatchObject({
+      activeSessionId: "session_active",
+      status: { kind: "running", runId: "run_active" },
+    });
+  });
+
   it("derives a display title for persisted placeholder sessions from the first user message", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),

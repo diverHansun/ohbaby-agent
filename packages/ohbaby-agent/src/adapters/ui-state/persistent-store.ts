@@ -462,11 +462,19 @@ export function createPersistentUiStateStore(
     };
   }
 
-  function snapshotStatus(runs: readonly RunLedgerRecord[]): UiRunStatus {
+  function snapshotStatus(input: {
+    readonly activeSessionId: string | null;
+    readonly runs: readonly RunLedgerRecord[];
+  }): UiRunStatus {
     if (mutable.status.kind !== "idle") {
       return { ...mutable.status };
     }
-    const activeRun = runs.find(isActiveRun);
+    if (input.activeSessionId === null) {
+      return { kind: "idle" };
+    }
+    const activeRun = input.runs.find(
+      (run) => run.sessionId === input.activeSessionId && isActiveRun(run),
+    );
     return activeRun
       ? { kind: "running", runId: activeRun.runId }
       : { kind: "idle" };
@@ -487,7 +495,7 @@ export function createPersistentUiStateStore(
         permissions: mutable.permissions.map(clonePermission),
         runs: runs.map(runToUiRun),
         sessions: await Promise.all(sessions.map(readUiSession)),
-        status: snapshotStatus(runs),
+        status: snapshotStatus({ activeSessionId, runs }),
       };
       return cloneSnapshot(snapshot);
     },

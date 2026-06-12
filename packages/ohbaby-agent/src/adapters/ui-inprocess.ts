@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type {
   SubmitPromptOptions,
@@ -361,6 +362,14 @@ export function createInProcessUiBackendClient(
   let skillRegistryPromise: Promise<SkillRegistry> | undefined;
   const pendingPermissionSessions = new Map<string, string>();
 
+  function usesPersistentStateStore(): boolean {
+    return stateStore.requiresServiceManagersForWrites === true;
+  }
+
+  function createDefaultRunId(): string {
+    return usesPersistentStateStore() ? `run_${randomUUID()}` : runIds.next();
+  }
+
   function assertStateStoreWritable(): void {
     if (
       stateStore.requiresServiceManagersForWrites === true &&
@@ -386,9 +395,9 @@ export function createInProcessUiBackendClient(
   }
 
   async function nextRunId(): Promise<string> {
-    let runId = options.createRunId?.() ?? runIds.next();
+    let runId = options.createRunId?.() ?? createDefaultRunId();
     while ((await stateStore.hasRun?.(runId)) === true) {
-      runId = options.createRunId?.() ?? runIds.next();
+      runId = options.createRunId?.() ?? createDefaultRunId();
     }
     runIds.reserve(runId);
     return runId;
@@ -615,6 +624,9 @@ export function createInProcessUiBackendClient(
       const baseProjectRoot = await resolveProjectRoot();
       const llmClient = await resolveLLMClient(baseProjectRoot);
       const skillRegistry = await getSkillRegistry();
+      const runtimeRunIdFactory =
+        options.createRunId ??
+        (usesPersistentStateStore() ? undefined : ((): string => runIds.next()));
 
       return createUiRuntimeComposition({
         agentManager: options.agentManager,
@@ -622,7 +634,9 @@ export function createInProcessUiBackendClient(
         ...(options.createAgentTaskId
           ? { createAgentTaskId: options.createAgentTaskId }
           : {}),
-        createRunId: options.createRunId ?? ((): string => runIds.next()),
+        ...(runtimeRunIdFactory === undefined
+          ? {}
+          : { createRunId: runtimeRunIdFactory }),
         llmClient,
         messageManager,
         hookExecutor: options.hookExecutor,

@@ -5052,7 +5052,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("reserves run ids from an injected persistent state store before submitting", async () => {
+  it("uses collision-resistant default run ids with an injected persistent state store", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-run-id-db-"));
     try {
       initDatabase({ dbPath: join(directory, "agent.db") });
@@ -5123,13 +5123,18 @@ describe("createInProcessUiBackendClient", () => {
         runId: "run_1",
         sessionId: "session_1",
       });
-      await expect(runLedger.get("run_2")).resolves.toMatchObject({
-        runId: "run_2",
-        sessionId: "session_52",
-      });
-      await expect(client.getSnapshot()).resolves.toMatchObject({
-        runs: [{ id: "run_2", sessionId: "session_52" }],
-      });
+      const snapshot = await client.getSnapshot();
+      const createdRun = snapshot.runs.find(
+        (run) => run.sessionId === "session_52",
+      );
+      expect(createdRun?.id).toMatch(/^run_/u);
+      expect(createdRun?.id).not.toBe("run_2");
+      await expect(runLedger.get(createdRun?.id ?? "")).resolves.toMatchObject(
+        {
+          runId: createdRun?.id,
+          sessionId: "session_52",
+        },
+      );
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
