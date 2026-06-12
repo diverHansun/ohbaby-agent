@@ -47,10 +47,7 @@ import type {
   MessageManager,
   MessageWithParts,
 } from "../core/message/index.js";
-import type {
-  Session as CoreSession,
-  SessionManager,
-} from "../services/session/index.js";
+import type { Session as CoreSession } from "../services/session/index.js";
 import {
   createTemporarySessionTitle,
   generateSessionTitle,
@@ -97,6 +94,15 @@ import { ConfigError } from "../config/llm/types.js";
 import { validateModelJson } from "../config/llm/validation.js";
 import type { ModelJsonConfig } from "../config/llm/types.js";
 import { PromptQueueController } from "./ui-prompt-queue.js";
+import {
+  isPrimarySession,
+  parseUiTimestamp,
+  resolveSessionForNewPrompt,
+  sessionMetadataToUiSession,
+  sortCoreSessionsByUpdatedAtDesc,
+  sortUiSessionsByUpdatedAtDesc,
+  type InProcessSessionManager,
+} from "./ui-inprocess/session-controller.js";
 
 const EMPTY_SNAPSHOT: UiSnapshot = {
   sessions: [],
@@ -133,18 +139,7 @@ export interface InProcessUiBackendOptions {
     options?: CreateLLMClientOptions,
   ) => Promise<LLMClientInstance>;
   readonly messageManager?: MessageManager;
-  readonly sessionManager?: Pick<
-    SessionManager,
-    | "create"
-    | "get"
-    | "getRecent"
-    | "listByProject"
-    | "listByProjectRoot"
-    | "update"
-  > &
-    Partial<
-      Pick<SessionManager, "findReusableEmptyPrimary" | "incrementStats">
-    >;
+  readonly sessionManager?: InProcessSessionManager;
   readonly stateStore?: UiStateStore;
   readonly projectDirectory?: string;
   readonly now?: () => Date;
@@ -234,51 +229,6 @@ function createTextMessage(input: {
     createdAt: input.createdAt,
     parts: input.text === "" ? [] : [{ type: "text", text: input.text }],
   };
-}
-
-function sessionMetadataToUiSession(session: CoreSession): UiSession {
-  return {
-    createdAt: new Date(session.createdAt).toISOString(),
-    id: session.id,
-    messages: [],
-    projectRoot: session.projectRoot,
-    title: session.title,
-    updatedAt: new Date(session.updatedAt).toISOString(),
-  };
-}
-
-function isPrimarySession(session: CoreSession): boolean {
-  return !session.isSubagent;
-}
-
-function sortCoreSessionsByUpdatedAtDesc(
-  left: CoreSession,
-  right: CoreSession,
-): number {
-  if (right.updatedAt !== left.updatedAt) {
-    return right.updatedAt - left.updatedAt;
-  }
-  return right.createdAt - left.createdAt;
-}
-
-function sortUiSessionsByUpdatedAtDesc(
-  left: UiSession,
-  right: UiSession,
-): number {
-  const leftUpdatedAt = parseUiTimestamp(left.updatedAt) ?? 0;
-  const rightUpdatedAt = parseUiTimestamp(right.updatedAt) ?? 0;
-  if (rightUpdatedAt !== leftUpdatedAt) {
-    return rightUpdatedAt - leftUpdatedAt;
-  }
-  return (
-    (parseUiTimestamp(right.createdAt) ?? 0) -
-    (parseUiTimestamp(left.createdAt) ?? 0)
-  );
-}
-
-function parseUiTimestamp(value: string): number | undefined {
-  const timestamp = Date.parse(value);
-  return Number.isNaN(timestamp) ? undefined : timestamp;
 }
 
 function maxMessageTimestamp(
@@ -853,48 +803,6 @@ export function createInProcessUiBackendClient(
       }));
   }
 
-  function isReusableUiSession(
-    session: UiSession,
-    projectRoot: string,
-  ): boolean {
-    return (
-      session.messages.length === 0 &&
-      sameSessionProjectRoot(session.projectRoot, projectRoot)
-    );
-  }
-
-  async function canReuseUiSessionForNewCommand(
-    session: UiSession,
-    projectRoot: string,
-  ): Promise<boolean> {
-    if (!isReusableUiSession(session, projectRoot)) {
-      return false;
-    }
-    if (!options.sessionManager) {
-      return true;
-    }
-
-    const coreSession = await options.sessionManager.get(session.id);
-    return (
-      coreSession !== null &&
-      !coreSession.isSubagent &&
-      coreSession.stats.messageCount === 0 &&
-      sameSessionProjectRoot(coreSession.projectRoot, projectRoot)
-    );
-  }
-
-  async function findReusableUiSession(
-    snapshot: UiSnapshot,
-    projectRoot: string,
-  ): Promise<UiSession | null> {
-    for (const candidate of snapshot.sessions) {
-      if (await canReuseUiSessionForNewCommand(candidate, projectRoot)) {
-        return candidate;
-      }
-    }
-    return null;
-  }
-
   async function resolveNewSessionProjectRoot(
     snapshot: UiSnapshot,
   ): Promise<string> {
@@ -940,66 +848,39 @@ export function createInProcessUiBackendClient(
     const projectRoot = await resolveNewSessionProjectRoot(snapshot);
     const title = "New session";
     const agentName = options.agentManager?.getDefault() ?? "default";
-    let session: UiSession;
-
-    const activeSession = snapshot.sessions.find(
-      (candidate) => candidate.id === snapshot.activeSessionId,
-    );
-    if (
-      activeSession &&
-      (await canReuseUiSessionForNewCommand(activeSession, projectRoot))
-    ) {
-      return activateSessionForNewCommand({
-        publishUpdate: false,
-        session: activeSession,
-      });
-    }
-
-    const reusableCoreSession =
-      await options.sessionManager?.findReusableEmptyPrimary?.(projectRoot);
-    if (reusableCoreSession) {
-      const existingUiSession = snapshot.sessions.find(
-        (candidate) => candidate.id === reusableCoreSession.id,
-      );
-      if (
-        existingUiSession === undefined ||
-        isReusableUiSession(existingUiSession, projectRoot)
-      ) {
-        return activateSessionForNewCommand({
-          publishUpdate: existingUiSession === undefined,
-          session:
-            existingUiSession ??
-            sessionMetadataToUiSession(reusableCoreSession),
-        });
-      }
-    }
-
-    const reusableUiSession = await findReusableUiSession(
-      snapshot,
+    const resolved = await resolveSessionForNewPrompt({
+      createSession: async () => {
+        if (options.sessionManager) {
+          const created = await options.sessionManager.create(projectRoot, {
+            agentName,
+            title,
+          });
+          return sessionMetadataToUiSession(created);
+        }
+        return {
+          id: sessionIds.next(),
+          title,
+          messages: [],
+          projectRoot,
+          createdAt,
+          updatedAt: createdAt,
+        };
+      },
+      getUiSession: (id) => stateStore.getSession(id),
       projectRoot,
+      sessionManager: options.sessionManager,
+      snapshot,
+    });
+    const session = resolved.session;
+    const sessionAlreadyInSnapshot = snapshot.sessions.some(
+      (candidate) => candidate.id === session.id,
     );
-    if (reusableUiSession) {
-      return activateSessionForNewCommand({
-        publishUpdate: false,
-        session: reusableUiSession,
-      });
-    }
 
-    if (options.sessionManager) {
-      const created = await options.sessionManager.create(projectRoot, {
-        agentName,
-        title,
+    if (!resolved.isNewSession) {
+      return activateSessionForNewCommand({
+        publishUpdate: !sessionAlreadyInSnapshot,
+        session,
       });
-      session = sessionMetadataToUiSession(created);
-    } else {
-      session = {
-        id: sessionIds.next(),
-        title,
-        messages: [],
-        projectRoot,
-        createdAt,
-        updatedAt: createdAt,
-      };
     }
 
     sessionIds.reserve(session.id);
@@ -1301,44 +1182,42 @@ export function createInProcessUiBackendClient(
       const runtime = await getRuntimeForPrompt();
       const agentName = runtime.agentManager.getDefault();
       const baseProjectRoot = await resolveProjectRoot();
-      let session = submitOptions?.sessionId
-        ? await stateStore.getSession(submitOptions.sessionId)
-        : undefined;
-      const existingCoreSession =
-        submitOptions?.sessionId && options.sessionManager
-          ? await options.sessionManager.get(submitOptions.sessionId)
-          : undefined;
-      if (!session && existingCoreSession) {
-        session = sessionMetadataToUiSession(existingCoreSession);
-      } else if (session && !session.projectRoot && existingCoreSession) {
-        session = {
-          ...session,
-          projectRoot: existingCoreSession.projectRoot,
-        };
-      }
-
       const temporaryTitle = createTemporarySessionTitle(text);
-      let shouldGenerateSessionTitle = false;
-      const isNewSession = !session;
-      if (!session) {
-        shouldGenerateSessionTitle = true;
-        if (options.sessionManager) {
-          const created = await options.sessionManager.create(baseProjectRoot, {
-            agentName,
-            id: submitOptions?.sessionId,
-            title: temporaryTitle,
-          });
-          session = sessionMetadataToUiSession(created);
-        } else {
-          session = {
-            id: submitOptions?.sessionId ?? sessionIds.next(),
+      const snapshot = await stateStore.readSnapshot();
+      const resolvedSession = await resolveSessionForNewPrompt({
+        createSession: async (id) => {
+          if (options.sessionManager) {
+            const created = await options.sessionManager.create(
+              baseProjectRoot,
+              {
+                agentName,
+                id,
+                title: temporaryTitle,
+              },
+            );
+            return sessionMetadataToUiSession(created);
+          }
+          return {
+            id: id ?? sessionIds.next(),
             title: temporaryTitle,
             messages: [],
             projectRoot: baseProjectRoot,
             createdAt,
             updatedAt: createdAt,
           };
-        }
+        },
+        explicitSessionId: submitOptions?.sessionId,
+        getUiSession: (id) => stateStore.getSession(id),
+        projectRoot: baseProjectRoot,
+        sessionManager: options.sessionManager,
+        snapshot,
+      });
+      let session = resolvedSession.session;
+      const existingCoreSession = resolvedSession.coreSession;
+      let shouldGenerateSessionTitle = false;
+      const isNewSession = resolvedSession.isNewSession;
+      if (isNewSession) {
+        shouldGenerateSessionTitle = true;
         sessionIds.reserve(session.id);
       } else if (
         await isFirstUserMessageForTitle({

@@ -3085,6 +3085,41 @@ describe("createInProcessUiBackendClient", () => {
     ).toHaveLength(2);
   });
 
+  it("reuses the active empty session when submitting a prompt without an explicit session id", async () => {
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "session_empty",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_empty",
+            messages: [],
+            projectRoot: process.cwd(),
+            title: "New session",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([
+        { textDelta: "Reused active empty session.", finishReason: "stop" },
+      ]),
+    });
+
+    await client.submitPrompt("Use the active empty session");
+
+    const snapshot = await client.getSnapshot();
+    expect(snapshot.activeSessionId).toBe("session_empty");
+    expect(snapshot.sessions.map((session) => session.id)).toEqual([
+      "session_empty",
+    ]);
+    expect(snapshot.sessions[0].messages.map((message) => message.role)).toEqual(
+      ["user", "assistant"],
+    );
+  });
+
   it("generates ids that do not collide with initial snapshot records", async () => {
     const client = createInProcessUiBackendClient({
       initialSnapshot: {
