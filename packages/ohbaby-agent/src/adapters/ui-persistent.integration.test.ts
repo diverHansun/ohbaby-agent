@@ -293,11 +293,35 @@ function markBackendLeaseDead(): void {
       JSON.stringify({
         ownerId: "dead_backend",
         pid: -1,
+        state: "idle",
         updatedAt: 42_000,
       }),
       42_000,
       "global",
       "persistentUiBackendLease",
+    );
+}
+
+function writePreparingBackendLease(ownerId: string): void {
+  getDatabase()
+    .prepare(
+      `INSERT INTO ${schema.appState.tableName}
+       (scope, key, value, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(scope, key) DO UPDATE SET
+         value = excluded.value,
+         updated_at = excluded.updated_at`,
+    )
+    .run(
+      "global",
+      "persistentUiBackendLease",
+      JSON.stringify({
+        ownerId,
+        pid: process.pid,
+        state: "preparing",
+        updatedAt: 43_000,
+      }),
+      43_000,
     );
 }
 
@@ -455,6 +479,62 @@ describe("createPersistentUiBackendClient", () => {
       const snapshot = await restored.getSnapshot();
 
       expect(snapshot.activeSessionId).toBe(secondSessionId);
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("skips sessions marked as subagents during explicit continue startup", async () => {
+    const directory = await tempDir("ohbaby-persistent-continue-subagent-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      const client = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createSequentialFakeLLMClient(
+          [[{ textDelta: "Primary response", finishReason: "stop" }]],
+          [],
+        ),
+        workdir,
+      });
+
+      await client.submitPrompt("Primary session");
+      const primarySessionId = (await client.getSnapshot()).activeSessionId;
+      if (!primarySessionId) {
+        throw new Error("expected primary session");
+      }
+      const now = Date.now() + 1_000;
+      getDatabase()
+        .prepare(
+          `INSERT INTO ${schema.session.tableName}
+           (id, project_id, project_root, agent, parent_id, title, status, created_at, updated_at, message_count, last_message_at, data)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "session_legacy_subagent",
+          "global",
+          workdir,
+          "explore",
+          null,
+          "Legacy subagent",
+          "active",
+          now,
+          now,
+          1,
+          now,
+          JSON.stringify({ isSubagent: true }),
+        );
+
+      const restored = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        startupSessionMode: { type: "continue" },
+        workdir,
+      });
+      const snapshot = await restored.getSnapshot();
+
+      expect(snapshot.activeSessionId).toBe(primarySessionId);
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
@@ -857,7 +937,219 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 
-  it("does not steal a live backend lease while the owner is idle", async () => {
+  it("does not let an idle backend steal the lease for another live backend's active run", async () => {
+    const directory = await tempDir("ohbaby-persistent-live-owner-steal-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      const owner = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Seeded", finishReason: "stop" },
+        ]),
+        workdir,
+      });
+
+      await owner.submitPrompt("Seed session");
+      const seededSnapshot = await owner.getSnapshot();
+      const sessionId = seededSnapshot.activeSessionId;
+      if (!sessionId) {
+        throw new Error("expected seeded prompt to create an active session");
+      }
+      const ownerLease = readBackendLeaseValue();
+      expect(ownerLease).toBeDefined();
+
+      const runLedger = createDatabaseRunLedger({ now: () => 42_000 });
+      await runLedger.createPending({
+        runId: "run_live_owner",
+        sessionId,
+        triggerSource: "user",
+      });
+      await runLedger.markRunning("run_live_owner");
+
+      const idleBackend = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        workdir,
+      });
+      await idleBackend.getSnapshot();
+      await idleBackend.dispose();
+
+      expect(readBackendLeaseValue()).toBe(ownerLease);
+
+      const restored = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        startupSessionMode: { type: "continue" },
+        workdir,
+      });
+      const restoredSnapshot = await restored.getSnapshot();
+      const liveRun = requireRun(restoredSnapshot.runs, "run_live_owner");
+
+      expect(liveRun.status).toEqual({
+        kind: "running",
+        runId: "run_live_owner",
+      });
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("queues a prompt instead of starting a run without the backend lease", async () => {
+    const directory = await tempDir("ohbaby-persistent-lease-queue-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      const owner = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Seeded", finishReason: "stop" },
+        ]),
+        workdir,
+      });
+
+      await owner.submitPrompt("Seed session");
+      const ownerSnapshot = await owner.getSnapshot();
+      const ownerSessionId = ownerSnapshot.activeSessionId;
+      if (!ownerSessionId) {
+        throw new Error("expected seeded prompt to create an active session");
+      }
+      const ownerLease = readBackendLeaseValue();
+
+      const runLedger = createDatabaseRunLedger({ now: () => 42_000 });
+      await runLedger.createPending({
+        runId: "run_owner_active",
+        sessionId: ownerSessionId,
+        triggerSource: "user",
+      });
+      await runLedger.markRunning("run_owner_active");
+
+      const contender = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Queued response", finishReason: "stop" },
+        ]),
+        workdir,
+      });
+      const queuedPrompt = contender.submitPrompt("Run after owner");
+      const earlyResult = await Promise.race([
+        queuedPrompt.then(() => "resolved"),
+        new Promise<"pending">((resolve) => {
+          setTimeout(() => {
+            resolve("pending");
+          }, 80);
+        }),
+      ]);
+
+      expect(earlyResult).toBe("pending");
+      expect(readBackendLeaseValue()).toBe(ownerLease);
+
+      await runLedger.markInterrupted({
+        reason: "owner interrupted",
+        statuses: ["running"],
+      });
+      await queuedPrompt;
+
+      const contenderSnapshot = await contender.getSnapshot();
+      expect(contenderSnapshot.activeSessionId).not.toBe(ownerSessionId);
+      expect(readBackendLeaseValue()).not.toBe(ownerLease);
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("recovers stale active runs before a queued prompt continues after owner death", async () => {
+    const directory = await tempDir("ohbaby-persistent-lease-dead-queue-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      const owner = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Seeded", finishReason: "stop" },
+        ]),
+        workdir,
+      });
+
+      await owner.submitPrompt("Seed session");
+      const ownerSnapshot = await owner.getSnapshot();
+      const ownerSessionId = ownerSnapshot.activeSessionId;
+      if (!ownerSessionId) {
+        throw new Error("expected seeded prompt to create an active session");
+      }
+
+      const runLedger = createDatabaseRunLedger({ now: () => 42_000 });
+      await runLedger.createPending({
+        runId: "run_owner_stale",
+        sessionId: ownerSessionId,
+        triggerSource: "user",
+      });
+      await runLedger.markRunning("run_owner_stale");
+
+      const contender = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Recovered response", finishReason: "stop" },
+        ]),
+        workdir,
+      });
+      const queuedPrompt = contender.submitPrompt("Run after owner death", {
+        sessionId: ownerSessionId,
+      });
+      const earlyResult = await Promise.race([
+        queuedPrompt.then(() => "resolved"),
+        new Promise<"pending">((resolve) => {
+          setTimeout(() => {
+            resolve("pending");
+          }, 80);
+        }),
+      ]);
+
+      expect(earlyResult).toBe("pending");
+
+      markBackendLeaseDead();
+      await queuedPrompt;
+
+      const contenderSnapshot = await contender.getSnapshot();
+      const staleRun = requireRun(contenderSnapshot.runs, "run_owner_stale");
+      expect(contenderSnapshot.activeSessionId).toBe(ownerSessionId);
+      expect(staleRun.status.kind).toBe("error");
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("does not steal a preparing backend lease before the run claim is visible", async () => {
+    const directory = await tempDir("ohbaby-persistent-preparing-lease-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        workdir,
+      });
+      writePreparingBackendLease("backend_preparing_owner");
+      const preparingLease = readBackendLeaseValue();
+
+      const contender = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        workdir,
+      });
+      await contender.getSnapshot();
+
+      expect(readBackendLeaseValue()).toBe(preparingLease);
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("refreshes the backend lease when another backend starts while the owner is idle", async () => {
     const directory = await tempDir("ohbaby-persistent-live-lease-");
     try {
       const dbPath = join(directory, "agent.db");
@@ -880,7 +1172,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir,
       });
 
-      expect(readBackendLeaseValue()).toBe(firstLease);
+      expect(readBackendLeaseValue()).not.toBe(firstLease);
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

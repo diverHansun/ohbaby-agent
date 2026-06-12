@@ -12,6 +12,7 @@ import {
   type SqliteValue,
   type StatementRunResult,
 } from "../../services/database/index.js";
+import { NodeSqliteConnection } from "../../services/database/connection.js";
 import {
   createDatabaseRunLedger,
   InvalidRunTransitionError,
@@ -126,6 +127,46 @@ describe("createDatabaseRunLedger", () => {
       sessionId: "session_2",
       status: "pending",
     });
+  });
+
+  it("allows only one same-session claim across two database connections", async () => {
+    const firstConnection = new NodeSqliteConnection(getDatabase().path);
+    const secondConnection = new NodeSqliteConnection(getDatabase().path);
+    try {
+      const firstLedger = createDatabaseRunLedger({
+        db: firstConnection,
+        now: () => 1_000,
+      });
+      const secondLedger = createDatabaseRunLedger({
+        db: secondConnection,
+        now: () => 2_000,
+      });
+
+      const results = await Promise.allSettled([
+        firstLedger.claimPendingRun({
+          runId: "run_first",
+          sessionId: "session_1",
+          triggerSource: "user",
+        }),
+        secondLedger.claimPendingRun({
+          runId: "run_second",
+          sessionId: "session_1",
+          triggerSource: "user",
+        }),
+      ]);
+
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(
+        1,
+      );
+      const rejected = results.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected",
+      );
+      expect(rejected?.reason).toBeInstanceOf(SessionRunBusyError);
+    } finally {
+      firstConnection.close();
+      secondConnection.close();
+    }
   });
 
   it("allows a later claim after the session's active run reaches a terminal state", async () => {

@@ -120,7 +120,9 @@ type NoticeDraft = Omit<UiNotice, "id" | "createdAt"> & {
 type UiPermissionState = NonNullable<UiSnapshot["permission"]>;
 
 export interface InProcessUiBackendOptions {
+  readonly afterPromptSubmitSettled?: () => Promise<void> | void;
   readonly agentManager?: AgentManager;
+  readonly beforePromptSubmit?: () => Promise<void> | void;
   readonly bus?: BusInstance;
   readonly createAgentTaskId?: () => string;
   readonly createRunId?: () => string;
@@ -368,8 +370,18 @@ export function createInProcessUiBackendClient(
   const promptQueue = new PromptQueueController({
     isBusyError: (error): boolean => error instanceof SessionRunBusyError,
     retryDelayMs: 250,
-    submit(item): Promise<void> {
-      return submitPromptInternal(item.text, item.submitOptions);
+    async submit(item): Promise<void> {
+      let submitOptions = item.submitOptions;
+      if (item.useActiveSessionOnDrain && item.sessionId === null) {
+        const snapshot = await stateStore.readSnapshot();
+        if (snapshot.activeSessionId) {
+          submitOptions = {
+            ...submitOptions,
+            sessionId: snapshot.activeSessionId,
+          };
+        }
+      }
+      await submitPromptInternal(item.text, submitOptions);
     },
   });
 
@@ -1277,6 +1289,7 @@ export function createInProcessUiBackendClient(
       throw new Error("A prompt is already running");
     }
     assertStateStoreWritable();
+    await options.beforePromptSubmit?.();
     promptInFlight = true;
     const createdAt = timestamp();
     let projection: ReturnType<typeof startRunStreamProjection> | undefined;
@@ -1442,6 +1455,7 @@ export function createInProcessUiBackendClient(
       }
       promptInFlight = false;
       activeRunId = undefined;
+      await options.afterPromptSubmitSettled?.();
     }
   }
 
@@ -1651,9 +1665,12 @@ export function createInProcessUiBackendClient(
       text: string,
       submitOptions?: SubmitPromptOptions,
     ): Promise<void> {
+      const useActiveSessionOnDrain =
+        !submitOptions?.sessionId && promptQueue.hasPendingWork();
       return promptQueue.enqueue({
         sessionId: submitOptions?.sessionId ?? null,
         text,
+        ...(useActiveSessionOnDrain ? { useActiveSessionOnDrain } : {}),
         ...(submitOptions === undefined ? {} : { submitOptions }),
       });
     },

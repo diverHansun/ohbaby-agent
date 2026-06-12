@@ -34,6 +34,7 @@ export interface PromptProps {
   readonly client: CoreAPI;
   readonly contextWindowUsage?: string;
   readonly disabled: boolean;
+  readonly isRuntimeRunning?: boolean;
   readonly loadCatalog?: () => Promise<TuiCommandCatalog>;
   readonly onCommandPanelOpen?: (input: {
     readonly invocation: UiCommandInvocation;
@@ -49,6 +50,7 @@ export function Prompt({
   client,
   contextWindowUsage = "",
   disabled,
+  isRuntimeRunning = false,
   loadCatalog,
   onCommandPanelOpen,
   permission,
@@ -58,8 +60,10 @@ export function Prompt({
   const layout = useTuiLayout();
   const [editor, setEditor] = useState<EditorState>(() => createEditorState());
   const [error, setError] = useState<string | null>(null);
+  const [queuedPromptCount, setQueuedPromptCount] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const editorRef = useRef(editor);
+  const pendingPromptSubmissionCountRef = useRef(0);
   const selectedIndexRef = useRef(0);
 
   const replaceEditor = (nextEditor: EditorState): void => {
@@ -112,6 +116,9 @@ export function Prompt({
           loadCatalog,
           replaceInput,
           setError,
+          isRuntimeRunning,
+          pendingPromptSubmissionCountRef,
+          setQueuedPromptCount,
           selectedIndexRef.current,
           onCommandPanelOpen,
         );
@@ -218,6 +225,7 @@ export function Prompt({
   const dockStatus = formatDockStatus({
     activeSessionId,
     permission,
+    queuedPromptCount,
     runtimeStatusLabel,
   });
 
@@ -318,11 +326,19 @@ function isDeleteControlInput(
 function formatDockStatus(input: {
   readonly activeSessionId: string | null;
   readonly permission?: UiPermissionState;
+  readonly queuedPromptCount: number;
   readonly runtimeStatusLabel?: string;
 }): string {
   const parts: string[] = [];
   if (input.runtimeStatusLabel) {
     parts.push(input.runtimeStatusLabel);
+  }
+  if (input.queuedPromptCount > 0) {
+    parts.push(
+      input.queuedPromptCount === 1
+        ? "Queued"
+        : `Queued ${String(input.queuedPromptCount)}`,
+    );
   }
   if (input.permission) {
     parts.push(input.permission.mode, input.permission.level);
@@ -345,6 +361,9 @@ async function submitInput(
   loadCatalog: (() => Promise<TuiCommandCatalog>) | undefined,
   replaceInput: (nextInput: string) => void,
   setError: (message: string | null) => void,
+  isRuntimeRunning: boolean,
+  pendingPromptSubmissionCountRef: { current: number },
+  setQueuedPromptCount: (updater: (current: number) => number) => void,
   selectedIndex: number,
   onCommandPanelOpen:
     | ((input: {
@@ -362,12 +381,27 @@ async function submitInput(
   if (!text.startsWith("/")) {
     setError(null);
     replaceInput("");
+    const trackQueuedPrompt =
+      isRuntimeRunning || pendingPromptSubmissionCountRef.current > 0;
+    pendingPromptSubmissionCountRef.current += 1;
+    if (trackQueuedPrompt) {
+      setQueuedPromptCount((current) => current + 1);
+    }
     void client
       .submitPrompt(text, {
         sessionId: activeSessionId ?? undefined,
       })
       .catch((caught: unknown) => {
         setError(formatError(caught));
+      })
+      .finally(() => {
+        pendingPromptSubmissionCountRef.current = Math.max(
+          0,
+          pendingPromptSubmissionCountRef.current - 1,
+        );
+        if (trackQueuedPrompt) {
+          setQueuedPromptCount((current) => Math.max(0, current - 1));
+        }
       });
     return;
   }

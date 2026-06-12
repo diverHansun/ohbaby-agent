@@ -18,7 +18,10 @@ import {
   createDatabaseSessionStore,
   createSessionManager,
 } from "../services/session/index.js";
-import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
+import {
+  createDatabaseRunLedger,
+  SessionRunBusyError,
+} from "../runtime/run-ledger/index.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
 import {
   createSnapshotHookExecutor,
@@ -33,10 +36,7 @@ import type {
   InProcessUiBackendClient,
   InProcessUiBackendOptions,
 } from "./ui-inprocess.js";
-import {
-  createDatabaseUiAppStateStore,
-  createPersistentUiStateStore,
-} from "./ui-state/index.js";
+import { createPersistentUiStateStore } from "./ui-state/index.js";
 import {
   resolveStartupSession,
   type StartupSessionMode,
@@ -44,7 +44,9 @@ import {
 
 export interface PersistentUiBackendOptions extends Omit<
   InProcessUiBackendOptions,
+  | "afterPromptSubmitSettled"
   | "bus"
+  | "beforePromptSubmit"
   | "hookExecutor"
   | "messageManager"
   | "runLedger"
@@ -75,6 +77,7 @@ const BACKEND_LEASE_KEY = "persistentUiBackendLease";
 interface BackendLease {
   readonly ownerId: string;
   readonly pid: number;
+  readonly state?: "idle" | "preparing";
   readonly updatedAt: number;
 }
 
@@ -84,6 +87,10 @@ interface BackendLeaseRow {
 
 interface ActiveRunCountRow {
   readonly count: number;
+}
+
+interface ActiveRunRow {
+  readonly runId: string;
 }
 
 function createBackendOwnerId(): string {
@@ -144,11 +151,13 @@ function writeBackendLease(input: {
   readonly db: DatabaseConnection;
   readonly now: () => number;
   readonly ownerId: string;
+  readonly state?: BackendLease["state"];
 }): void {
   const updatedAt = input.now();
   const lease: BackendLease = {
     ownerId: input.ownerId,
     pid: process.pid,
+    state: input.state ?? "idle",
     updatedAt,
   };
   input.db
@@ -178,25 +187,83 @@ function countActiveRuns(db: DatabaseConnection): number {
   );
 }
 
-function shouldRecoverStartupRuns(input: {
+function listActiveRunIds(db: DatabaseConnection): readonly string[] {
+  return db
+    .prepare<ActiveRunRow>(
+      `SELECT run_id as runId FROM ${schema.runLedger.tableName}
+       WHERE status IN ('pending', 'running')
+       ORDER BY created_at ASC, run_id ASC`,
+    )
+    .all()
+    .map((row) => row.runId);
+}
+
+function refreshBackendLeaseIfSafe(input: {
   readonly db: DatabaseConnection;
   readonly now: () => number;
   readonly ownerId: string;
-}): boolean {
+  readonly state?: BackendLease["state"];
+}): {
+  readonly activeRunCount: number;
+  readonly activeRunIds: readonly string[];
+  readonly acquired: boolean;
+  readonly liveOwner: boolean;
+} {
   input.db.exec("BEGIN IMMEDIATE");
   try {
     const activeRunCount = countActiveRuns(input.db);
-    const liveOwner = isProcessAlive(readBackendLease(input.db)?.pid ?? -1);
-    if (!liveOwner) {
+    const previousLease = readBackendLease(input.db);
+    const liveOwner = isProcessAlive(previousLease?.pid ?? -1);
+    const preparingOwner =
+      liveOwner &&
+      previousLease?.state === "preparing" &&
+      previousLease.ownerId !== input.ownerId;
+    const acquired =
+      !liveOwner ||
+      (activeRunCount === 0 && !preparingOwner) ||
+      previousLease?.ownerId === input.ownerId;
+    if (acquired) {
       writeBackendLease(input);
     }
+    const activeRunIds = acquired ? [] : listActiveRunIds(input.db);
     input.db.exec("COMMIT");
-    return activeRunCount > 0 && !liveOwner;
+    return { activeRunCount, activeRunIds, acquired, liveOwner };
   } catch (error) {
     try {
       input.db.exec("ROLLBACK");
     } catch {
       // Keep the original startup recovery failure.
+    }
+    throw error;
+  }
+}
+
+function shouldRecoverStartupRuns(input: {
+  readonly db: DatabaseConnection;
+  readonly now: () => number;
+  readonly ownerId: string;
+}): boolean {
+  const leaseState = refreshBackendLeaseIfSafe(input);
+  return leaseState.activeRunCount > 0 && !leaseState.liveOwner;
+}
+
+function releaseBackendLeasePreparation(input: {
+  readonly db: DatabaseConnection;
+  readonly now: () => number;
+  readonly ownerId: string;
+}): void {
+  input.db.exec("BEGIN IMMEDIATE");
+  try {
+    const previousLease = readBackendLease(input.db);
+    if (previousLease?.ownerId === input.ownerId) {
+      writeBackendLease({ ...input, state: "idle" });
+    }
+    input.db.exec("COMMIT");
+  } catch (error) {
+    try {
+      input.db.exec("ROLLBACK");
+    } catch {
+      // Keep the original lease release failure.
     }
     throw error;
   }
@@ -413,7 +480,7 @@ async function resolvePersistentStartupSession(input: {
   const candidates = (await input.sessionManager.getRecent()).map(
     (session) => ({
       id: session.id,
-      kind: "primary" as const,
+      kind: session.isSubagent ? ("temporary" as const) : ("primary" as const),
       updatedAt: session.updatedAt,
     }),
   );
@@ -468,9 +535,7 @@ export function createPersistentUiBackendClient(
   const runLedger = createDatabaseRunLedger({ db, now });
   const startupSessionMode = resolveStartupSessionMode(options);
   const stateStore = createPersistentUiStateStore({
-    appState: createDatabaseUiAppStateStore({ db, now }),
-    initialActiveSessionId:
-      startupSessionMode.type === "fresh" ? null : undefined,
+    initialActiveSessionId: null,
     messageManager,
     runLedger,
     sessionManager,
@@ -506,7 +571,33 @@ export function createPersistentUiBackendClient(
 
   return withStartupRecovery(
     createInProcessUiBackendClient({
+      afterPromptSubmitSettled: () => {
+        releaseBackendLeasePreparation({
+          db,
+          now,
+          ownerId: backendOwnerId,
+        });
+      },
       agentManager: options.agentManager,
+      beforePromptSubmit: async () => {
+        const leaseState = refreshBackendLeaseIfSafe({
+          db,
+          now,
+          ownerId: backendOwnerId,
+          state: "preparing",
+        });
+        if (!leaseState.acquired) {
+          throw new SessionRunBusyError(
+            "persistent-backend",
+            leaseState.activeRunIds,
+          );
+        }
+        if (leaseState.activeRunCount > 0 && !leaseState.liveOwner) {
+          await runLedger.markInterrupted({
+            statuses: ["pending", "running"],
+          });
+        }
+      },
       bus,
       ...(options.createAgentTaskId
         ? { createAgentTaskId: options.createAgentTaskId }

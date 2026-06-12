@@ -183,4 +183,23 @@ describe("buildCoreAPIImpl", () => {
       startupSessionMode: { type: "continue" },
     });
   });
+
+  it("rejects resume and continue startup modes together", async () => {
+    vi.resetModules();
+    const createPersistentUiBackendClient = vi.fn();
+    vi.doMock("../adapters/ui-persistent.js", () => ({
+      closePersistentUiBackendDatabase: vi.fn(),
+      createPersistentUiBackendClient,
+    }));
+    vi.doMock("../mcp/index.js", () => ({
+      McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
+    }));
+
+    const { buildCoreAPIImpl } = await import("./core-api-factory.js");
+
+    expect(() =>
+      buildCoreAPIImpl({ continue: true, resume: "session_1" }),
+    ).toThrow("--resume and --continue cannot be used together");
+    expect(createPersistentUiBackendClient).not.toHaveBeenCalled();
+  });
 });

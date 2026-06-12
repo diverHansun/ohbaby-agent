@@ -90,4 +90,40 @@ describe("PromptQueueController", () => {
     await expect(secondDone).rejects.toBeInstanceOf(PromptQueueClosedError);
     expect(queue.size()).toBe(0);
   });
+
+  it("rejects a busy-retrying prompt on close and does not submit it again", async () => {
+    vi.useFakeTimers();
+    try {
+      const busy = new Error("busy");
+      const calls: string[] = [];
+      const queue = new PromptQueueController({
+        isBusyError: (error): boolean => error === busy,
+        retryDelayMs: 1_000,
+        submit(item): Promise<void> {
+          calls.push(item.text);
+          return Promise.reject(busy);
+        },
+      });
+
+      const done = queue.enqueue({
+        sessionId: "session_1",
+        text: "retry until closed",
+      });
+      let rejection: unknown;
+      void done.catch((error: unknown) => {
+        rejection = error;
+      });
+      await Promise.resolve();
+      expect(calls).toEqual(["retry until closed"]);
+
+      queue.close();
+      await Promise.resolve();
+      expect(rejection).toBeInstanceOf(PromptQueueClosedError);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(calls).toEqual(["retry until closed"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

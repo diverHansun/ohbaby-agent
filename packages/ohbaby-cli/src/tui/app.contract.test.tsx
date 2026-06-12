@@ -984,6 +984,75 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("A prompt is already running");
   });
 
+  it("shows queued state for prompts submitted while a run is active", async () => {
+    const queuedSubmit = createDeferred<undefined>();
+    const client = createFakeClient({
+      ...snapshot(),
+      runs: [
+        {
+          id: "run_1",
+          sessionId: "session_1",
+          startedAt: "2026-05-14T00:00:03.000Z",
+          status: { kind: "running", runId: "run_1" },
+          updatedAt: "2026-05-14T00:00:03.000Z",
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
+    });
+    client.submitPrompt.mockReturnValueOnce(queuedSubmit.promise);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("follow up");
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) => frame.includes("Queued"));
+
+    expect(client.submitPrompt).toHaveBeenCalledWith("follow up", {
+      sessionId: "session_1",
+    });
+    expect(app.lastFrame()).not.toContain("follow up");
+
+    queuedSubmit.resolve(undefined);
+    await waitForFrame(app, (frame) => !frame.includes("Queued"));
+  });
+
+  it("shows queued state for a rapid second prompt before runtime events arrive", async () => {
+    const firstSubmit = createDeferred<undefined>();
+    const secondSubmit = createDeferred<undefined>();
+    const client = createFakeClient(snapshot());
+    client.submitPrompt
+      .mockReturnValueOnce(firstSubmit.promise)
+      .mockReturnValueOnce(secondSubmit.promise);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    app.stdin.write("first");
+    app.stdin.write("\r");
+    await flush();
+
+    app.stdin.write("second");
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) => frame.includes("Queued"));
+
+    expect(client.submitPrompt).toHaveBeenCalledWith("second", {
+      sessionId: "session_1",
+    });
+
+    firstSubmit.resolve(undefined);
+    secondSubmit.resolve(undefined);
+    await waitForFrame(app, (frame) => !frame.includes("Queued"));
+  });
+
   it("aborts the active run on Ctrl+C when no dialog is open", async () => {
     const client = createFakeClient({
       ...snapshot(),

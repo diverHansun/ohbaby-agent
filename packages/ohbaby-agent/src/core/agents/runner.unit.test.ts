@@ -345,6 +345,28 @@ describe("runAgent", () => {
     expect(messageManager.listBySession).not.toHaveBeenCalled();
   });
 
+  it("preserves the run creation error when initial user message cleanup fails", async () => {
+    const messageManager = createMessageManager();
+    const runCoordinator = createRunCoordinator();
+    const busyError = new SessionRunBusyError("session_child", ["run_active"]);
+    runCoordinator.create.mockRejectedValue(busyError);
+    messageManager.removeMessage.mockRejectedValue(new Error("cleanup failed"));
+
+    await expect(
+      runAgent(
+        createDeps({
+          messageManager: messageManager.manager,
+          runCoordinator: runCoordinator.coordinator,
+        }),
+        baseInput(),
+      ),
+    ).rejects.toBe(busyError);
+
+    expect(messageManager.removeMessage).toHaveBeenCalledWith("user_1");
+    expect(runCoordinator.waitForCompletion).not.toHaveBeenCalled();
+    expect(messageManager.listBySession).not.toHaveBeenCalled();
+  });
+
   it("cancels the run when the caller aborts", async () => {
     const runCoordinator = createRunCoordinator({ status: "cancelled" });
     const abortController = new AbortController();

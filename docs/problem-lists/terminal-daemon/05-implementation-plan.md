@@ -110,11 +110,11 @@ Create:
 - `packages/ohbaby-agent/src/adapters/ui-prompt-queue.unit.test.ts` - queue ordering, cancellation, retry, and close behavior.
 - `packages/ohbaby-cli/src/cli/commands/terminal.unit.test.ts` - direct terminal-command option tests if bin coverage is too indirect.
 - `tests/integration/tui/terminal-session-isolation.integration.test.tsx` - rendered TUI integration for blank startup and explicit continue.
-- `tests/integration/tui/prompt-queue.integration.test.tsx` - rendered TUI integration for queued prompt drain after interrupt.
+- Phase 4 follow-up: `tests/integration/tui/prompt-queue.integration.test.tsx` - rendered multi-client/daemon TUI integration for global queued prompt drain after interrupt.
 
 ### Task 1.1: Startup Session Policy
 
-- [ ] Write failing tests in `packages/ohbaby-agent/src/adapters/ui-startup-session.unit.test.ts`.
+- [x] Write failing tests in `packages/ohbaby-agent/src/adapters/ui-startup-session.unit.test.ts`.
 
 Cover these cases:
 
@@ -127,7 +127,7 @@ describe("resolveStartupSession", () => {
 });
 ```
 
-- [ ] Add `packages/ohbaby-agent/src/adapters/ui-startup-session.ts`.
+- [x] Add `packages/ohbaby-agent/src/adapters/ui-startup-session.ts`.
 
 Expose a small pure API:
 
@@ -149,7 +149,7 @@ export function resolveStartupSession(
 ): string | null;
 ```
 
-- [ ] Run the focused test:
+- [x] Run the focused test:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-startup-session.unit.test.ts
@@ -157,21 +157,21 @@ pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-startup-session.unit.
 
 Expected: pass after implementation.
 
-- [ ] Wire `resolveStartupSession` into `packages/ohbaby-agent/src/adapters/ui-persistent.ts`.
+- [x] Wire `resolveStartupSession` into `packages/ohbaby-agent/src/adapters/ui-persistent.ts`.
 
 Default client creation must pass `{ type: "fresh" }`. `--resume` passes `{ type: "resume", sessionId }`. `--continue` passes `{ type: "continue" }`.
 
-- [ ] Update `packages/ohbaby-agent/src/adapters/ui-state/persistent-store.ts`.
+- [x] Update `packages/ohbaby-agent/src/adapters/ui-state/persistent-store.ts`.
 
 `readSessions()` must no longer adopt `app_state.activeSessionId` during fresh startup. The persisted value may remain for migration compatibility, but fresh startup must report `activeSessionId: null`.
 
-- [ ] Add integration coverage in `packages/ohbaby-agent/src/adapters/ui-persistent.integration.test.ts`.
+- [x] Add integration coverage in `packages/ohbaby-agent/src/adapters/ui-persistent.integration.test.ts`.
 
 Assert that a DB with a stored active session opens with `activeSessionId: null` by default, opens the explicit session with `resume`, and opens the newest primary session with `continue`.
 
 ### Task 1.2: Do Not Create Empty Sessions On Startup
 
-- [ ] Add a failing integration test in `packages/ohbaby-agent/src/adapters/ui-state/persistent-store.integration.test.ts`.
+- [x] Add a failing integration test in `packages/ohbaby-agent/src/adapters/ui-state/persistent-store.integration.test.ts`.
 
 Scenario:
 
@@ -180,9 +180,9 @@ Scenario:
 3. Assert `snapshot.sessions.length` is unchanged from the DB seed.
 4. Assert no new empty session row was inserted.
 
-- [ ] Adjust startup and snapshot read paths so session creation only happens from an explicit create-session command or first prompt submission.
-- [ ] Reuse the existing empty-session reuse logic for first prompt submission, but make it reachable from one place only.
-- [ ] Run:
+- [x] Adjust startup and snapshot read paths so session creation only happens from an explicit create-session command or first prompt submission.
+- [x] Reuse the existing empty-session reuse logic for first prompt submission, but make it reachable from one place only.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-state/persistent-store.integration.test.ts packages/ohbaby-agent/src/adapters/ui-persistent.integration.test.ts --no-file-parallelism
@@ -192,7 +192,7 @@ Expected: fresh startup produces no new session; first prompt creates or reuses 
 
 ### Task 1.3: Filter Snapshot Status To The Active Session
 
-- [ ] Add failing tests in `packages/ohbaby-agent/src/adapters/ui-state/persistent-store.unit.test.ts`.
+- [x] Add failing tests in `packages/ohbaby-agent/src/adapters/ui-state/persistent-store.unit.test.ts`.
 
 Cases:
 
@@ -200,9 +200,9 @@ Cases:
 - Active session is `session_a`, run is active in `session_a`, status is running.
 - No active session, unrelated active run exists, status is idle.
 
-- [ ] Change `snapshotStatus` to accept the selected session id and only consider active runs for that session.
-- [ ] Update all call sites in `persistent-store.ts`.
-- [ ] Run:
+- [x] Change `snapshotStatus` to accept the selected session id and only consider active runs for that session.
+- [x] Update all call sites in `persistent-store.ts`.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-state/persistent-store.unit.test.ts
@@ -212,14 +212,14 @@ Expected: no cross-session running status leakage.
 
 ### Task 1.4: Collision-Resistant Run IDs
 
-- [ ] Add a failing test in `packages/ohbaby-agent/src/adapters/ui-runtime/composition.unit.test.ts`.
+- [x] Add a failing test in `packages/ohbaby-agent/src/adapters/ui-runtime/composition.unit.test.ts`.
 
 Create two persistent backend/client instances from the same DB snapshot and assert their first generated run IDs are not equal.
 
-- [ ] Stop using process-local sequential IDs for production persistent run creation.
-- [ ] Keep deterministic ID injection for tests that intentionally pass a `createRunId` override.
-- [ ] Use the existing random/default ID path from `createUiRuntimeComposition` or a `crypto.randomUUID()`-based helper.
-- [ ] Run:
+- [x] Stop using process-local sequential IDs for production persistent run creation.
+- [x] Keep deterministic ID injection for tests that intentionally pass a `createRunId` override.
+- [x] Use the existing random/default ID path from `createUiRuntimeComposition` or a `crypto.randomUUID()`-based helper.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-runtime/composition.unit.test.ts packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts
@@ -229,7 +229,7 @@ Expected: existing deterministic tests still pass, and production defaults are c
 
 ### Task 1.5: Atomic Same-Session Run Claim
 
-- [ ] Extend `packages/ohbaby-agent/src/runtime/run-ledger/types.ts`.
+- [x] Extend `packages/ohbaby-agent/src/runtime/run-ledger/types.ts`.
 
 Add a method with this meaning:
 
@@ -244,8 +244,8 @@ claimPendingRun(input: {
 
 The method must atomically create a pending run only when the session has no `pending` or `running` run.
 
-- [ ] Add `SessionRunBusyError` in `packages/ohbaby-agent/src/runtime/run-ledger/errors.ts`.
-- [ ] Write failing tests in `packages/ohbaby-agent/src/runtime/run-ledger/in-memory.unit.test.ts`.
+- [x] Add `SessionRunBusyError` in `packages/ohbaby-agent/src/runtime/run-ledger/errors.ts`.
+- [x] Write failing tests in `packages/ohbaby-agent/src/runtime/run-ledger/in-memory.unit.test.ts`.
 
 Cases:
 
@@ -254,16 +254,16 @@ Cases:
 - Second claim succeeds after the first run is marked `succeeded`, `failed`, `cancelled`, or `interrupted`.
 - Claims for different sessions both succeed.
 
-- [ ] Implement the same semantics in `packages/ohbaby-agent/src/runtime/run-ledger/in-memory.ts`.
-- [ ] Write SQLite race coverage in `packages/ohbaby-agent/src/runtime/run-ledger/database.integration.test.ts`.
+- [x] Implement the same semantics in `packages/ohbaby-agent/src/runtime/run-ledger/in-memory.ts`.
+- [x] Write SQLite race coverage in `packages/ohbaby-agent/src/runtime/run-ledger/database.integration.test.ts`.
 
 Open two ledger instances over the same database and race two `claimPendingRun` calls for the same session with `Promise.allSettled`. Assert exactly one succeeds and one rejects with `SessionRunBusyError`.
 
-- [ ] Implement SQLite claim in `packages/ohbaby-agent/src/runtime/run-ledger/database.ts`.
+- [x] Implement SQLite claim in `packages/ohbaby-agent/src/runtime/run-ledger/database.ts`.
 
 Use a transaction and an active-run existence check against `pending` and `running` statuses. The insert and check must be in the same transaction.
 
-- [ ] Run:
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/runtime/run-ledger/in-memory.unit.test.ts packages/ohbaby-agent/src/runtime/run-ledger/database.integration.test.ts --no-file-parallelism
@@ -273,7 +273,7 @@ Expected: same-session claim is single-winner across two DB clients.
 
 ### Task 1.6: Run Manager Uses Ledger Claim
 
-- [ ] Add failing tests in `packages/ohbaby-agent/src/runtime/run-manager/manager.unit.test.ts`.
+- [x] Add failing tests in `packages/ohbaby-agent/src/runtime/run-manager/manager.unit.test.ts`.
 
 Cases:
 
@@ -281,9 +281,9 @@ Cases:
 - A second run for the same session cannot become active in memory if the ledger rejects the claim.
 - A second run for another session can start.
 
-- [ ] Update `packages/ohbaby-agent/src/runtime/run-manager/manager.ts` so run creation goes through `claimPendingRun`.
-- [ ] Ensure `markRunning`, `markSucceeded`, `markFailed`, `markCancelled`, and `markInterrupted` still release the claim through ledger status transition.
-- [ ] Run:
+- [x] Update `packages/ohbaby-agent/src/runtime/run-manager/manager.ts` so run creation goes through `claimPendingRun`.
+- [x] Ensure `markRunning`, `markSucceeded`, `markFailed`, `markCancelled`, and `markInterrupted` still release the claim through ledger status transition.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/runtime/run-manager/manager.unit.test.ts packages/ohbaby-agent/src/runtime/run-manager/policy.unit.test.ts
@@ -293,7 +293,7 @@ Expected: run-manager policy remains compatible while persistence prevents cross
 
 ### Task 1.7: Ghost User Message Regression
 
-- [ ] Add a failing test in `packages/ohbaby-agent/src/core/agents/runner.unit.test.ts`.
+- [x] Add a failing test in `packages/ohbaby-agent/src/core/agents/runner.unit.test.ts`.
 
 Scenario:
 
@@ -303,11 +303,11 @@ Scenario:
 4. Assert no assistant/runtime messages are written.
 5. Assert the caller receives a busy result that the prompt queue can retry.
 
-- [ ] Update `packages/ohbaby-agent/src/core/agents/runner.ts`.
+- [x] Update `packages/ohbaby-agent/src/core/agents/runner.ts`.
 
 If run creation fails before runtime execution begins, clean up the initial user message through the message manager/store path already used by the runner. If the existing message API lacks delete support, add the smallest scoped delete-by-id method to the message store and cover it in existing message-store tests.
 
-- [ ] Run:
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/core/agents/runner.unit.test.ts packages/ohbaby-agent/src/core/message/manager.unit.test.ts packages/ohbaby-agent/src/core/message/database-store.integration.test.ts --no-file-parallelism
@@ -317,7 +317,7 @@ Expected: busy claim failure leaves no ghost user message.
 
 ### Task 1.8: Process-Local Prompt FIFO
 
-- [ ] Add `packages/ohbaby-agent/src/adapters/ui-prompt-queue.unit.test.ts`.
+- [x] Add `packages/ohbaby-agent/src/adapters/ui-prompt-queue.unit.test.ts`.
 
 Cover:
 
@@ -327,7 +327,7 @@ Cover:
 - Cancelling the active run resolves the active item and starts the next item.
 - Closing the queue rejects unsent items with a typed local shutdown error.
 
-- [ ] Add `packages/ohbaby-agent/src/adapters/ui-prompt-queue.ts`.
+- [x] Add `packages/ohbaby-agent/src/adapters/ui-prompt-queue.ts`.
 
 Expose a focused controller:
 
@@ -353,15 +353,15 @@ export class PromptQueueController {
 }
 ```
 
-- [ ] Use the controller from `packages/ohbaby-agent/src/adapters/ui-inprocess.ts`.
+- [x] Use the controller from `packages/ohbaby-agent/src/adapters/ui-inprocess.ts`.
 
 `submitPrompt` should enqueue. The internal prompt execution path should still call the existing runtime composition, but it should run only from the queue drain loop.
 
-- [ ] Add contract coverage in `packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts`.
+- [x] Add contract coverage in `packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts`.
 
 Assert two fast `submitPrompt()` calls execute in order. Assert the second starts after a simulated `run.interrupted` from the first.
 
-- [ ] Run:
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-prompt-queue.unit.test.ts packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts
@@ -371,7 +371,7 @@ Expected: same-process FIFO is deterministic.
 
 ### Task 1.9: TUI Queue And Double-Esc UX
 
-- [ ] Add rendered tests in `packages/ohbaby-cli/src/tui/app.contract.test.tsx` or `tests/integration/tui/prompt-queue.integration.test.tsx`.
+- [x] Add rendered tests in `packages/ohbaby-cli/src/tui/app.contract.test.tsx` or `tests/integration/tui/prompt-queue.integration.test.tsx`.
 
 Cases:
 
@@ -380,25 +380,25 @@ Cases:
 - B starts automatically after the abort event resolves A.
 - The prompt input shows a queued/running state without accepting duplicate submit of the same editor content.
 
-- [ ] Update `packages/ohbaby-cli/src/tui/components/prompt/index.tsx`.
+- [x] Update `packages/ohbaby-cli/src/tui/components/prompt/index.tsx`.
 
-Display concise state text such as `Queued` or `Running` only when the backend snapshot exposes queue state. Keep keyboard interaction stable.
+Display concise state text such as `Queued` for Phase 1 local queued submissions while runtime is active. Keep keyboard interaction stable; richer backend-exposed queue state is deferred to Phase 4 daemon mode.
 
-- [ ] Update `packages/ohbaby-cli/src/tui/app.tsx`.
+- [x] Update `packages/ohbaby-cli/src/tui/app.tsx`.
 
 Double-`Esc` should continue calling `client.abortRun(runtime.runId)`. The queue drain must react to the abort completion instead of requiring separate TUI-specific logic.
 
-- [ ] Run:
+- [x] Run:
 
 ```powershell
-pnpm exec vitest run packages/ohbaby-cli/src/tui/app.contract.test.tsx tests/integration/tui/prompt-queue.integration.test.tsx --no-file-parallelism
+pnpm exec vitest run packages/ohbaby-cli/src/tui/app.contract.test.tsx --no-file-parallelism
 ```
 
-Expected: queued prompt starts after interrupt.
+Expected: backend queue drain after interrupt is covered by `ui-inprocess.contract.test.ts`; rendered TUI coverage shows the local `Queued` state while a running session accepts a follow-up.
 
 ### Task 1.10: CLI `--continue`
 
-- [ ] Add tests in `packages/ohbaby-cli/src/cli/commands/terminal.unit.test.ts` or extend `packages/ohbaby-cli/src/bin.unit.test.ts`.
+- [x] Add tests in `packages/ohbaby-cli/src/cli/commands/terminal.unit.test.ts` or extend `packages/ohbaby-cli/src/bin.unit.test.ts`.
 
 Cases:
 
@@ -407,8 +407,8 @@ Cases:
 - `ohbaby terminal --continue` maps to continue startup.
 - `--resume` and `--continue` together fail with a clear CLI error.
 
-- [ ] Update `packages/ohbaby-cli/src/cli/commands/terminal.ts`.
-- [ ] Run:
+- [x] Update `packages/ohbaby-cli/src/cli/commands/terminal.ts`.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-cli/src/cli/commands/terminal.unit.test.ts packages/ohbaby-cli/src/bin.unit.test.ts
@@ -418,7 +418,9 @@ Expected: CLI startup intent is explicit.
 
 ### Phase 1 Verification And Commit
 
-- [ ] Run all verification commands listed at the top of this plan.
+- [x] Run all verification commands listed at the top of this plan.
+
+Note: `pnpm test:integration` passed all non-packaging integration files on the full run. `tests/integration/cli/packaging-smoke.integration.test.ts` timed out once during the full concurrent run, then passed when rerun directly in 167s, close to its 180s internal timeout.
 - [ ] Run a manual two-terminal check:
 
 ```powershell
@@ -435,7 +437,7 @@ Expected:
 - Two prompts submitted quickly in terminal A run FIFO.
 - Double-`Esc` during prompt A starts prompt B automatically.
 
-- [ ] Request subagent code review for Phase 1.
+- [x] Request subagent code review for Phase 1.
 - [ ] All Phase 1 work lives as per-task scoped commits on `feat/terminal-daemon-phase-1` (e.g. `fix(agent): claim session runs atomically`, `feat(cli): add --continue startup`). After review passes, merge:
 
 ```powershell

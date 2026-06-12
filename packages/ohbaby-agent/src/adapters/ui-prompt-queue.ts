@@ -4,6 +4,7 @@ export interface PromptQueueItem {
   readonly text: string;
   readonly sessionId: string | null;
   readonly submitOptions?: SubmitPromptOptions;
+  readonly useActiveSessionOnDrain?: boolean;
 }
 
 export type PromptQueueSubmit = (item: PromptQueueItem) => Promise<void>;
@@ -37,9 +38,11 @@ function delay(ms: number): Promise<void> {
 }
 
 export class PromptQueueController {
+  private activeEntry: QueueEntry | undefined;
   private readonly queue: QueueEntry[] = [];
   private closed = false;
   private draining = false;
+  private retryingEntry: QueueEntry | undefined;
 
   constructor(private readonly options: PromptQueueOptions) {}
 
@@ -59,9 +62,19 @@ export class PromptQueueController {
     return this.queue.length;
   }
 
+  hasPendingWork(): boolean {
+    return (
+      this.activeEntry !== undefined ||
+      this.queue.length > 0 ||
+      this.retryingEntry !== undefined
+    );
+  }
+
   close(): void {
     this.closed = true;
     const error = new PromptQueueClosedError();
+    this.retryingEntry?.reject(error);
+    this.retryingEntry = undefined;
     for (const entry of this.queue.splice(0)) {
       entry.reject(error);
     }
@@ -89,18 +102,48 @@ export class PromptQueueController {
   }
 
   private async submitWithBusyRetry(entry: QueueEntry): Promise<void> {
-    for (;;) {
-      try {
-        await this.options.submit(entry.item);
-        entry.resolve();
-        return;
-      } catch (error) {
-        if (!this.options.isBusyError(error) || this.closed) {
-          entry.reject(error);
+    this.activeEntry = entry;
+    try {
+      for (;;) {
+        if (this.rejectIfClosed(entry)) {
           return;
         }
-        await delay(this.options.retryDelayMs);
+        try {
+          await this.options.submit(entry.item);
+          this.activeEntry = undefined;
+          entry.resolve();
+          return;
+        } catch (error) {
+          if (this.rejectIfClosed(entry)) {
+            return;
+          }
+          if (!this.options.isBusyError(error)) {
+            this.activeEntry = undefined;
+            entry.reject(error);
+            return;
+          }
+          this.retryingEntry = entry;
+          await delay(this.options.retryDelayMs);
+          if (this.retryingEntry === entry) {
+            this.retryingEntry = undefined;
+          }
+          if (this.rejectIfClosed(entry)) {
+            return;
+          }
+        }
+      }
+    } finally {
+      if (this.activeEntry === entry) {
+        this.activeEntry = undefined;
       }
     }
+  }
+
+  private rejectIfClosed(entry: QueueEntry): boolean {
+    if (!this.closed) {
+      return false;
+    }
+    entry.reject(new PromptQueueClosedError());
+    return true;
   }
 }

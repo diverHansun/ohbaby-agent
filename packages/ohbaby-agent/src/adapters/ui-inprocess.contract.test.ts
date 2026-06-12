@@ -48,7 +48,6 @@ import { Project } from "../project/index.js";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
 import {
   createInMemoryUiStateStore,
-  createDatabaseUiAppStateStore,
   createPersistentUiStateStore,
   type UiStateStore,
 } from "./ui-state/index.js";
@@ -3562,6 +3561,19 @@ describe("createInProcessUiBackendClient", () => {
     await Promise.all([first, second]);
 
     expect(mainPrompts).toEqual(["First", "Second"]);
+    const snapshot = await client.getSnapshot();
+    expect(snapshot.sessions).toHaveLength(1);
+    expect(
+      snapshot.sessions[0].messages.map((message) => ({
+        parts: message.parts,
+        role: message.role,
+      })),
+    ).toEqual([
+      { role: "user", parts: [{ type: "text", text: "First" }] },
+      { role: "assistant", parts: [{ type: "text", text: "Done 1" }] },
+      { role: "user", parts: [{ type: "text", text: "Second" }] },
+      { role: "assistant", parts: [{ type: "text", text: "Done 2" }] },
+    ]);
   });
 
   it("lists command catalog entries for the requested surface", async () => {
@@ -4589,7 +4601,6 @@ describe("createInProcessUiBackendClient", () => {
         projectDirectory: directory,
         sessionManager,
         stateStore: createPersistentUiStateStore({
-          appState: createDatabaseUiAppStateStore(),
           messageManager,
           runLedger: createDatabaseRunLedger(),
           sessionManager,
@@ -4674,7 +4685,6 @@ describe("createInProcessUiBackendClient", () => {
         projectDirectory: directory,
         sessionManager,
         stateStore: createPersistentUiStateStore({
-          appState: createDatabaseUiAppStateStore(),
           messageManager,
           runLedger: createDatabaseRunLedger(),
           sessionManager,
@@ -5138,7 +5148,6 @@ describe("createInProcessUiBackendClient", () => {
         messageManager,
         sessionManager,
         stateStore: createPersistentUiStateStore({
-          appState: createDatabaseUiAppStateStore(),
           messageManager,
           runLedger,
           sessionManager,
@@ -5180,7 +5189,6 @@ describe("createInProcessUiBackendClient", () => {
           { textDelta: "Never reached", finishReason: "stop" },
         ]),
         stateStore: createPersistentUiStateStore({
-          appState: createDatabaseUiAppStateStore(),
           messageManager: createMessageManager({
             bus: createBus(),
             store: createDatabaseMessageStore(),

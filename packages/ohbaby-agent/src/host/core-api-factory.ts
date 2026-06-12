@@ -39,9 +39,17 @@ function initialSnapshotFromOptions(
   };
 }
 
+function assertStartupOptions(options: CoreApiFactoryOptions): void {
+  if (options.resume !== undefined && options.continue === true) {
+    throw new Error("--resume and --continue cannot be used together");
+  }
+}
+
 export function buildCoreAPIImpl(
   options: CoreApiFactoryOptions = {},
 ): CoreApiHost {
+  assertStartupOptions(options);
+
   const initialSnapshot = initialSnapshotFromOptions(options);
   const client = createPersistentUiBackendClient({
     ...(initialSnapshot === undefined ? {} : { initialSnapshot }),

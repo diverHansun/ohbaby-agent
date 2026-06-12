@@ -53,7 +53,65 @@ afterEach(async () => {
 });
 
 describe("createPersistentUiStateStore", () => {
-  it("restores sessions, messages, tool parts, active session, and runs from database services", async () => {
+  it("does not restore active session id from app_state by default", async () => {
+    const messageStore = createDatabaseMessageStore();
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: messageStore,
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      projectResolver: PROJECT_RESOLVER,
+      store: createDatabaseSessionStore(),
+    });
+    const session = await sessionManager.create("D:/repo", {
+      title: "Stored active",
+    });
+    const appState = createDatabaseUiAppStateStore();
+    await appState.setActiveSessionId(session.id);
+    const store = createPersistentUiStateStore({
+      messageManager,
+      runLedger: createDatabaseRunLedger(),
+      sessionManager,
+    });
+
+    await expect(store.readSnapshot()).resolves.toMatchObject({
+      activeSessionId: null,
+      sessions: [{ id: session.id }],
+    });
+  });
+
+  it("does not persist process-local active session changes to app_state", async () => {
+    const appState = createDatabaseUiAppStateStore();
+    const store = createPersistentUiStateStore({
+      messageManager: createMessageManager({
+        bus: createBus(),
+        store: createDatabaseMessageStore(),
+      }),
+      runLedger: createDatabaseRunLedger(),
+      sessionManager: createSessionManager({
+        bus: createBus(),
+        messageCleaner: {
+          removeMessages(): Promise<void> {
+            return Promise.resolve();
+          },
+        },
+        projectResolver: PROJECT_RESOLVER,
+        store: createDatabaseSessionStore(),
+      }),
+    });
+
+    await store.setActiveSessionId("session_process_local");
+
+    await expect(appState.getActiveSessionId()).resolves.toBeNull();
+  });
+
+  it("restores sessions, messages, tool parts, explicit active session, and runs from database services", async () => {
     const messageStore = createDatabaseMessageStore();
     const messageManager = createMessageManager({
       bus: createBus(),
@@ -74,7 +132,6 @@ describe("createPersistentUiStateStore", () => {
       store: createDatabaseSessionStore(),
     });
     const runLedger = createDatabaseRunLedger({ now: createClock(10_000) });
-    const appState = createDatabaseUiAppStateStore({ now: () => 20_000 });
 
     const session = await sessionManager.create("D:/repo", {
       title: "Recovered session",
@@ -115,10 +172,9 @@ describe("createPersistentUiStateStore", () => {
     });
     await runLedger.markRunning("run_1");
     await runLedger.markSucceeded("run_1");
-    await appState.setActiveSessionId(session.id);
 
     const restoredStore = createPersistentUiStateStore({
-      appState,
+      initialActiveSessionId: session.id,
       messageManager: createMessageManager({
         bus: createBus(),
         store: createDatabaseMessageStore(),
@@ -202,7 +258,6 @@ describe("createPersistentUiStateStore", () => {
       store: createDatabaseSessionStore(),
     });
     const runLedger = createDatabaseRunLedger({ now: createClock(10_000) });
-    const appState = createDatabaseUiAppStateStore({ now: () => 20_000 });
     const session = await sessionManager.create("D:/repo", {
       title: "Cancelled session",
     });
@@ -213,10 +268,8 @@ describe("createPersistentUiStateStore", () => {
     });
     await runLedger.markRunning("run_cancelled");
     await runLedger.markCancelled("run_cancelled", "run aborted");
-    await appState.setActiveSessionId(session.id);
 
     const store = createPersistentUiStateStore({
-      appState,
       messageManager: createMessageManager({
         bus: createBus(),
         store: createDatabaseMessageStore(),
@@ -264,8 +317,6 @@ describe("createPersistentUiStateStore", () => {
     const otherSession = await sessionManager.create("D:/repo", {
       title: "Other session",
     });
-    const appState = createDatabaseUiAppStateStore();
-    await appState.setActiveSessionId(activeSession.id);
     const runLedger = createDatabaseRunLedger({ now: createClock(10_000) });
     await runLedger.createPending({
       runId: "run_other_active",
@@ -274,7 +325,7 @@ describe("createPersistentUiStateStore", () => {
     });
     await runLedger.markRunning("run_other_active");
     const store = createPersistentUiStateStore({
-      appState,
+      initialActiveSessionId: activeSession.id,
       messageManager,
       runLedger,
       sessionManager,
@@ -313,8 +364,6 @@ describe("createPersistentUiStateStore", () => {
     const activeSession = await sessionManager.create("D:/repo", {
       title: "Active session",
     });
-    const appState = createDatabaseUiAppStateStore();
-    await appState.setActiveSessionId(activeSession.id);
     const runLedger = createDatabaseRunLedger({ now: createClock(10_000) });
     await runLedger.createPending({
       runId: "run_active",
@@ -323,7 +372,7 @@ describe("createPersistentUiStateStore", () => {
     });
     await runLedger.markRunning("run_active");
     const store = createPersistentUiStateStore({
-      appState,
+      initialActiveSessionId: activeSession.id,
       messageManager,
       runLedger,
       sessionManager,
@@ -367,7 +416,6 @@ describe("createPersistentUiStateStore", () => {
       type: "text",
     });
     const store = createPersistentUiStateStore({
-      appState: createDatabaseUiAppStateStore(),
       messageManager,
       runLedger: createDatabaseRunLedger(),
       sessionManager,
@@ -416,10 +464,7 @@ describe("createPersistentUiStateStore", () => {
       text: "Goal\n- raw summary text that belongs only in model context",
       type: "text",
     });
-    const appState = createDatabaseUiAppStateStore();
-    await appState.setActiveSessionId(session.id);
     const store = createPersistentUiStateStore({
-      appState,
       messageManager,
       runLedger: createDatabaseRunLedger(),
       sessionManager,
@@ -479,10 +524,7 @@ describe("createPersistentUiStateStore", () => {
       text: "still visible prompt",
       type: "text",
     });
-    const appState = createDatabaseUiAppStateStore();
-    await appState.setActiveSessionId(session.id);
     const store = createPersistentUiStateStore({
-      appState,
       messageManager,
       runLedger: createDatabaseRunLedger(),
       sessionManager,
@@ -560,10 +602,8 @@ describe("createPersistentUiStateStore", () => {
     await sessionManager.create("D:/repo", {
       title: "Newer recent",
     });
-    const appState = createDatabaseUiAppStateStore();
-    await appState.setActiveSessionId(older.id);
     const store = createPersistentUiStateStore({
-      appState,
+      initialActiveSessionId: older.id,
       messageManager,
       runLedger: createDatabaseRunLedger(),
       sessionLimit: 1,
@@ -618,7 +658,6 @@ describe("createPersistentUiStateStore", () => {
       type: "tool",
     });
     const store = createPersistentUiStateStore({
-      appState: createDatabaseUiAppStateStore(),
       messageManager,
       runLedger: createDatabaseRunLedger(),
       sessionManager,

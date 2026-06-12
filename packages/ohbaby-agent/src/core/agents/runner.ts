@@ -165,7 +165,11 @@ export async function runAgent(
     } catch (error) {
       await preSubscribed?.close();
       if (userMessageId) {
-        await deps.messageManager.removeMessage(userMessageId);
+        try {
+          await deps.messageManager.removeMessage(userMessageId);
+        } catch {
+          // Preserve the run creation error so callers can still classify busy sessions.
+        }
       }
       throw error;
     }

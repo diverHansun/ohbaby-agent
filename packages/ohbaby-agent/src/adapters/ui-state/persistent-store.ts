@@ -57,7 +57,6 @@ export interface PersistentUiStateStoreOptions {
   readonly sessionManager: Pick<SessionManager, "get" | "getRecent" | "update">;
   readonly messageManager: Pick<MessageManager, "listBySession">;
   readonly runLedger: RunLedger;
-  readonly appState: UiAppStateStore;
   readonly initialActiveSessionId?: string | null;
   readonly sessionLimit?: number;
 }
@@ -403,7 +402,7 @@ export function createPersistentUiStateStore(
     status: { kind: "idle" },
   };
   const sessionLimit = options.sessionLimit ?? DEFAULT_SESSION_LIMIT;
-  let activeSessionIdOverride = options.initialActiveSessionId;
+  let activeSessionId = options.initialActiveSessionId ?? null;
 
   async function readUiSession(session: Session): Promise<UiSession> {
     return sessionToUiSession({
@@ -427,27 +426,24 @@ export function createPersistentUiStateStore(
     readonly activeSessionId: string | null;
     readonly sessions: readonly Session[];
   }> {
-    const activeSessionId =
-      activeSessionIdOverride === undefined
-        ? await options.appState.getActiveSessionId()
-        : activeSessionIdOverride;
+    const selectedActiveSessionId = activeSessionId;
     const recentSessions = (
       await withSessionTransactionRetry(() =>
         options.sessionManager.getRecent(sessionLimit),
       )
     ).filter(isPrimarySession);
     if (
-      activeSessionId === null ||
-      recentSessions.some((session) => session.id === activeSessionId)
+      selectedActiveSessionId === null ||
+      recentSessions.some((session) => session.id === selectedActiveSessionId)
     ) {
       return {
-        activeSessionId,
+        activeSessionId: selectedActiveSessionId,
         sessions: recentSessions,
       };
     }
 
     const activeSession = await withSessionTransactionRetry(() =>
-      options.sessionManager.get(activeSessionId),
+      options.sessionManager.get(selectedActiveSessionId),
     );
     if (!activeSession || !isPrimarySession(activeSession)) {
       return {
@@ -457,7 +453,7 @@ export function createPersistentUiStateStore(
     }
 
     return {
-      activeSessionId,
+      activeSessionId: selectedActiveSessionId,
       sessions: [...recentSessions, activeSession],
     };
   }
@@ -525,9 +521,9 @@ export function createPersistentUiStateStore(
       }
     },
 
-    async setActiveSessionId(sessionId: string | null): Promise<void> {
-      activeSessionIdOverride = sessionId;
-      await options.appState.setActiveSessionId(sessionId);
+    setActiveSessionId(sessionId: string | null): Promise<void> {
+      activeSessionId = sessionId;
+      return Promise.resolve();
     },
 
     addRun(run: UiRun): Promise<void> {
