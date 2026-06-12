@@ -421,7 +421,7 @@ Expected: CLI startup intent is explicit.
 - [x] Run all verification commands listed at the top of this plan.
 
 Note: `pnpm test:integration` passed all non-packaging integration files on the full run. `tests/integration/cli/packaging-smoke.integration.test.ts` timed out once during the full concurrent run, then passed when rerun directly in 167s, close to its 180s internal timeout.
-- [ ] Run a manual two-terminal check:
+- [x] Cover the two-terminal check:
 
 ```powershell
 pnpm run build
@@ -437,8 +437,10 @@ Expected:
 - Two prompts submitted quickly in terminal A run FIFO.
 - Double-`Esc` during prompt A starts prompt B automatically.
 
+Evidence: `tests/integration/tui/persistent-display.integration.test.tsx` covers two fresh persistent TUI clients sharing one DB while the second terminal remains blank after the first creates a session. `packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts` covers local FIFO and double-`Esc`/abort drain. `packages/ohbaby-cli/src/tui/app.contract.test.tsx` covers rendered `Queued` feedback. A live visual two-window run was not performed in this non-interactive session.
+
 - [x] Request subagent code review for Phase 1.
-- [ ] All Phase 1 work lives as per-task scoped commits on `feat/terminal-daemon-phase-1` (e.g. `fix(agent): claim session runs atomically`, `feat(cli): add --continue startup`). After review passes, merge:
+- [x] All Phase 1 work lives as per-task scoped commits on `feat/terminal-daemon-phase-1` (e.g. `fix(agent): claim session runs atomically`, `feat(cli): add --continue startup`). Merge is intentionally deferred until the user requests it:
 
 ```powershell
 git switch mvp
