@@ -19,8 +19,8 @@
 4. [Phase 3 测试标准](#phase-3-测试标准)
    - [3.1 Daemon 启动与关闭](#31-daemon-启动与关闭)
    - [3.2 CLI remote 连接](#32-cli-remote-连接)
-   - [3.3 StreamBridge 事件传输](#33-streambridge-事件传输)
-   - [3.4 Auto-spawn 与生命周期（Phase 3b）](#34-auto-spawn-与生命周期phase-3b)
+   - [3.3 HTTP/SSE 事件传输](#33-httpsse-事件传输)
+   - [Phase 4 预览：Auto-spawn 与生命周期](#phase-4-预览auto-spawn-与生命周期)
 5. [端到端验收场景](#端到端验收场景)
 6. [回归安全网](#回归安全网)
 
@@ -100,7 +100,7 @@
 #### 已知限制（不在本 Phase 解决）
 
 - 进程崩溃留下的僵尸 running 行依赖启动恢复（`markInterrupted`）清理；崩溃后、恢复前该 session 表现为"忙"
-- 跨进程排队/合流需 Phase 3 daemon 架构（单写者 + 内存 RunState）
+- 跨终端严格 FIFO / 合流需 Phase 4 daemon 全局队列（单写者 + 内存 RunState）
 
 ---
 
@@ -227,10 +227,10 @@
 
 | 测试 | 验证点 | 位置 |
 |------|-------|------|
-| remote client getSnapshot | HTTP GET 到 daemon → 返回 snapshot JSON | `ui-remote.integration.test.ts` |
-| remote client submitPrompt | HTTP POST prompt → daemon 创建 run → 返回确认 | `ui-remote.integration.test.ts` |
-| remote client subscribeEvents | WebSocket 连接 → 接收 StreamBridge 事件 | `ui-remote.integration.test.ts` |
-| remote client 断线重连 | WebSocket 断开 → 重连 → 获取最新 snapshot | `ui-remote.integration.test.ts` |
+| remote client getSnapshot | HTTP JSON-RPC 到 daemon → 返回 snapshot JSON | `runtime/daemon/client.integration.test.ts` |
+| remote client submitPrompt | HTTP JSON-RPC prompt → daemon 创建 run → 返回确认 | `runtime/daemon/client.integration.test.ts` |
+| remote client subscribeEvents | SSE 连接 → 接收 `UiEvent` 事件 | `runtime/daemon/client.integration.test.ts` |
+| remote client 重建连接 | SSE 断开 → 新 client 连接 → 获取最新 snapshot | `runtime/daemon/client.integration.test.ts` |
 
 #### Contract 测试
 
@@ -246,15 +246,15 @@
 
 ---
 
-### 3.3 StreamBridge 事件传输
+### 3.3 HTTP/SSE 事件传输
 
 #### 集成测试
 
 | 测试 | 验证点 |
 |------|-------|
-| 事件广播到所有 WS 客户端 | Daemon 产生事件 → 所有连接的 WS 客户端都收到同一事件 |
+| 事件广播到所有 SSE 客户端 | Daemon 产生事件 → 所有连接的 SSE 客户端都收到同一事件 |
 | 单客户端断线不影响其他客户端 | 客户端 A 断开 → 客户端 B 仍能收到后续事件 |
-| 事件类型完整性 | 所有 `UiEvent` union type 的变体都能通过 WS 传输（序列化/反序列化循环） |
+| 事件类型完整性 | 所有 `UiEvent` union type 的变体都能通过 SSE JSON 传输（序列化/反序列化循环） |
 
 #### 验收标准
 
@@ -264,7 +264,9 @@
 
 ---
 
-### 3.4 Auto-spawn 与生命周期（Phase 3b）
+### Phase 4 预览：Auto-spawn 与生命周期
+
+以下内容不作为 Phase 3 验收阻塞项，留给 Phase 4 实施。
 
 #### 集成测试
 
@@ -355,7 +357,7 @@
   - Step 6：CLI snapshot 显示旧 run 状态为 interrupted/failed
 ```
 
-### E2E-5: Auto-spawn 全流程（Phase 3b）
+### E2E-5: Auto-spawn 全流程（Phase 4）
 
 ```
 前置：无 daemon 运行，state-file 不存在

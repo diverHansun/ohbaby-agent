@@ -560,7 +560,7 @@ Modify:
 Create:
 
 - `packages/ohbaby-agent/src/runtime/daemon/protocol.ts` - request/response and event envelope types.
-- `packages/ohbaby-agent/src/runtime/daemon/server.ts` - localhost HTTP + WebSocket server (Hono, per 02-solution-design; chosen over named pipes for Windows reliability and direct Web/App reuse).
+- `packages/ohbaby-agent/src/runtime/daemon/server.ts` - localhost HTTP JSON-RPC + SSE server (Node `http`; chosen over named pipes for Windows reliability and direct Web/App reuse without new dependencies).
 - `packages/ohbaby-agent/src/runtime/daemon/client.ts` - remote `UiBackendClient` implementation.
 - `packages/ohbaby-agent/src/runtime/daemon/permission-router.ts` - route permission requests to the initiating client; queue pending requests on disconnect.
 - `packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts` - daemon server/client contract.

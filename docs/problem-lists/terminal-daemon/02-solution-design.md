@@ -16,11 +16,11 @@
 3. [Phase 2: 内部重构 —— 净化代码结构](#phase-2-内部重构--净化代码结构)
    - [2.1 拆分 ui-inprocess.ts](#21-拆分-ui-inprocessts)
    - [2.2 统一空 session 查找逻辑](#22-统一空-session-查找逻辑)
-4. [Phase 3: 战略投资 —— Daemon 架构上线（3a 显式 / 3b 自动拉起）](#phase-3-战略投资--daemon-架构上线3a-显式--3b-自动拉起)
+4. [Phase 3: 战略投资 —— 显式 Daemon 与 Remote Client](#phase-3-战略投资--显式-daemon-与-remote-client)
    - [3.1 Daemon 入口与 CLI serve 命令接通](#31-daemon-入口与-cli-serve-命令接通)
    - [3.2 CLI terminal 接入 Daemon](#32-cli-terminal-接入-daemon)
-   - [3.3 StreamBridge 远程传输层](#33-streambridge-远程传输层)
-   - [3.4 Phase 3b: daemon 按需自动拉起（生产终态）](#34-phase-3b-daemon-按需自动拉起生产终态)
+   - [3.3 HTTP/SSE 远程事件传输层](#33-httpsse-远程事件传输层)
+   - [3.4 Phase 4 预览：daemon 按需自动拉起（生产终态）](#34-phase-4-预览daemon-按需自动拉起生产终态)
    - [3.5 并发控制终态与审批路由](#35-并发控制终态与审批路由)
 5. [通信协议决策：ACP / A2A 暂缓](#通信协议决策acp--a2a-暂缓)
 6. [变更影响范围总览](#变更影响范围总览)
@@ -30,11 +30,11 @@
 ## 总体策略：分三阶段推进
 
 ```
-Phase 1 (2-3 天)          Phase 2 (3-5 天)          Phase 3 (2-3 周 + auto-spawn)
+Phase 1 (2-3 天)          Phase 2 (3-5 天)          Phase 3 (显式 daemon)     Phase 4 (生产终态)
   ┌──────────────┐       ┌──────────────┐       ┌──────────────────────┐
-  │ 终端窗口解耦  │  ──►  │ 内部重构净化  │  ──►  │ Daemon 上线           │
-  │              │       │              │       │ 3a 显式 serve（架构）  │
-  │ P1,P2,P3,    │       │ P4,P5        │       │ 3b auto-spawn（产品） │
+  │ 终端窗口解耦  │  ──►  │ 内部重构净化  │  ──►  │ serve + remote client │
+  │              │       │              │       │ HTTP/SSE              │  ──► auto-spawn + global FIFO
+  │ P1,P2,P3,    │       │ P4,P5        │       │ explicit only         │
   │ P7,P9        │       │              │       │ P6,P8                │
   └──────────────┘       └──────────────┘       └──────────────────────┘
   低风险，高收益           中等风险，结构改善        高收益，架构升级
@@ -42,7 +42,8 @@ Phase 1 (2-3 天)          Phase 2 (3-5 天)          Phase 3 (2-3 周 + auto-sp
 
 - **Phase 1 可独立交付**：解决最紧迫的多终端问题，无需改架构
 - **Phase 2 在 Phase 1 基础上安全重构**：修改的代码已经是 Phase 1 解耦后的，风险可控
-- **Phase 3 是最终目标**：daemon 单后端多前端，为 web/app 铺路
+- **Phase 3 打通显式 daemon**：daemon 单后端多前端的 remote client 契约先跑通
+- **Phase 4 做产品化默认路径**：auto-spawn、全局 FIFO、版本握手、空闲自退与 backend lease 去留
 
 ---
 
@@ -305,16 +306,16 @@ async function resolveSessionForNewPrompt(params: {
 
 ---
 
-## Phase 3: 战略投资 —— Daemon 架构上线（3a 显式 / 3b 自动拉起）
+## Phase 3: 战略投资 —— 显式 Daemon 与 Remote Client
 
-### 分两步走
+### 与 Phase 4 的边界
 
-| 子阶段 | 定位 | 内容 |
-|--------|------|------|
-| **Phase 3a** | 架构验证（面向开发者） | 显式 `serve` 启动 daemon；终端加 `--remote` 才连 daemon，默认仍嵌入式。对应 3.1-3.3 |
-| **Phase 3b** | 生产终态（面向 npm 发布用户） | `ohbaby` 启动时按需自动拉起 daemon 并连接，用户无感知。嵌入式降级为 `--no-daemon` 逃生舱。对应 3.4 |
+| Phase | 定位 | 内容 |
+|-------|------|------|
+| **Phase 3** | 架构验证（面向开发者） | 显式 `serve` 启动 daemon；终端加 `--remote-port` 才连 daemon，默认仍嵌入式。对应 3.1-3.3 与 permission routing |
+| **Phase 4** | 生产终态（面向 npm 发布用户） | `ohbaby` 启动时按需自动拉起 daemon 并连接，用户无感知。嵌入式降级为 `--no-daemon` / `--in-process` 逃生舱 |
 
-理由：发布形态下不能要求用户先 `ohbaby serve` 再 `ohbaby`（两条命令）。但 auto-spawn 的运维复杂度（版本握手、孤儿进程、空闲回收）应与架构验证解耦——3a 先把"daemon 单写者 + 远程 client 契约"跑通，3b 再解决产品化。先例：Gradle daemon、Bazel client/server、opencode TUI 自动拉起 server。
+理由：发布形态下不能要求用户先 `ohbaby serve` 再 `ohbaby`（两条命令）。但 auto-spawn 的运维复杂度（版本握手、孤儿进程、空闲回收）应与架构验证解耦——Phase 3 先把"daemon 单写者 + remote client 契约"跑通，Phase 4 再解决产品化。先例：Gradle daemon、Bazel client/server、opencode TUI 自动拉起 server。
 
 ### 目标架构图
 
@@ -335,9 +336,9 @@ async function resolveSessionForNewPrompt(params: {
 │  └──────┬──────────────┬──────────────┬─────────┘ │
 │         │              │              │            │
 │  ┌──────▼──────┐ ┌─────▼──────┐ ┌─────▼──────────┐│
-│  │ Local RPC   │ │HTTP/WS     │ │StreamBridge    ││
-│  │ (stdio/unix │ │Server      │ │"app" scope     ││
-│  │  socket)    │ │(Hono)      │ │                ││
+│  │ Local RPC   │ │HTTP/SSE    │ │StreamBridge    ││
+│  │ (future)    │ │Server      │ │"app" scope     ││
+│  │             │ │(Node http) │ │                ││
 │  └──────┬──────┘ └─────┬──────┘ └────────────────┘│
 └─────────┼──────────────┼──────────────────────────┘
           │              │
@@ -356,7 +357,7 @@ async function resolveSessionForNewPrompt(params: {
 | 文件 | 说明 |
 |------|------|
 | `runtime/daemon/main.ts` | **新建** — `main()` 入口：创建 Supervisor + bootstrap + start |
-| `runtime/daemon/server.ts` | **新建** — HTTP/WebSocket server（Hono），暴露 session 操作 API |
+| `runtime/daemon/server.ts` | **新建** — HTTP JSON-RPC + SSE server（Node `http`），暴露 `CoreAPI` 操作与事件流 |
 | `cli/commands/serve.ts` | **修改** — 用 Supervisor + bootstrap 替换当前 stub |
 
 #### 设计要点
@@ -367,11 +368,10 @@ async function resolveSessionForNewPrompt(params: {
   3. `bootstrapRuntime(...)` ← 复用现有代码
   4. `new Supervisor({bootstrap, ...})`
   5. `supervisor.start()`
-- `daemon/server.ts` 基于 Hono，提供：
-  - `GET /api/sessions` — 列出 sessions
-  - `POST /api/sessions` — 创建 session
-  - `POST /api/sessions/:id/prompt` — 提交 prompt
-  - `WS /api/events` — StreamBridge 实时事件流
+- `daemon/server.ts` 基于 Node `http`，提供：
+  - `GET /api/health` — 健康检查
+  - `POST /api/rpc` — JSON-RPC 形式代理完整 `CoreAPI`
+  - `GET /api/events?clientId=...` — SSE 实时 `UiEvent` 事件流
 - `serve.ts` 调用 `daemon/main.ts` 的入口函数
 
 #### 牵动文件
@@ -382,7 +382,7 @@ async function resolveSessionForNewPrompt(params: {
 | `runtime/daemon/server.ts` | **新建** |
 | `cli/commands/serve.ts` | **重写** |
 | `runtime/daemon/index.ts` | **修改** — 增加新导出 |
-| `runtime/daemon/bootstrap.ts` | **修改** — 增加 SessionManager 组装 |
+| `runtime/daemon/bootstrap.ts` | **不强制修改** — Phase 3 允许 daemon server 先包裹现有 persistent backend，组合根去重可后续推进 |
 
 ---
 
@@ -410,43 +410,42 @@ if (daemonPort || daemonSocketPath) {
 }
 ```
 
-`createRemoteUiBackendClient` 实现 `UiBackendClient` 接口，所有方法通过 HTTP/WS 代理到 daemon：
+`createRemoteUiBackendClient` 实现 `UiBackendClient` 接口，所有方法通过 HTTP JSON-RPC / SSE 代理到 daemon：
 
 | UiBackendClient 方法 | 远程实现方式 |
 |---------------------|------------|
-| `getSnapshot()` | `GET /api/snapshot` |
-| `submitPrompt(text, opts)` | `POST /api/sessions/:id/prompt` |
-| `executeCommand(invocation)` | `POST /api/commands` |
-| `subscribeEvents(handler)` | WebSocket 连接，接收 StreamBridge 事件 |
-| `respondPermission(...)` | `POST /api/permissions/:id` |
-| `abortRun(runId)` | `POST /api/runs/:id/abort` |
+| `getSnapshot()` | `POST /api/rpc` method `getSnapshot` |
+| `submitPrompt(text, opts)` | `POST /api/rpc` method `submitPrompt` |
+| `executeCommand(invocation)` | `POST /api/rpc` method `executeCommand` |
+| `subscribeEvents(handler)` | SSE 连接 `GET /api/events?clientId=...` |
+| `respondPermission(...)` | `POST /api/rpc` method `respondPermission` |
+| `abortRun(runId)` | `POST /api/rpc` method `abortRun` |
 
 #### 新增文件
 
 | 文件 | 说明 |
 |------|------|
-| `adapters/ui-remote.ts` | **新建** — `createRemoteUiBackendClient` |
-| `adapters/ui-remote.integration.test.ts` | **新建** — 远程 client 的集成测试 |
-| `adapters/ui-remote.contract.test.ts` | **新建** — 远程 client 的 contract 测试 |
+| `runtime/daemon/client.ts` | **新建** — `createRemoteUiBackendClient` / `createRemoteCoreApiHost` |
+| `runtime/daemon/client.integration.test.ts` | **新建** — 远程 client 的集成测试 |
 
 ---
 
-### 3.3 StreamBridge 远程传输层
+### 3.3 HTTP/SSE 远程事件传输层
 
 **解决的问题**：P8
 
 #### 设计要点
 
-Daemon 的 StreamBridge 当前是纯内存的发布/订阅。需要增加一个传输适配器，将事件从 StreamBridge 桥接到 WebSocket：
+Daemon 的 StreamBridge / `UiBackendClient.subscribeEvents` 当前是进程内发布/订阅。Phase 3 先通过 SSE 传输 `UiEvent`，避免新增 WebSocket 依赖，并且保持未来 web/app 可以直接消费：
 
 ```
-StreamBridge (in-memory)
+UiBackendClient.subscribeEvents / StreamBridge
        │
        ▼
-StreamBridgeWsAdapter  ← 新增
+Daemon HTTP server event fanout
        │
        ▼
-WebSocket Server (Hono)
+SSE endpoint (Node http)
        │
        ▼
 Remote UiBackendClient (CLI)
@@ -459,11 +458,11 @@ TUI Store (React state)
 
 | 文件 | 说明 |
 |------|------|
-| `runtime/daemon/stream-bridge-ws-adapter.ts` | **新建** — 订阅 StreamBridge，广播到 WS 客户端 |
+| `runtime/daemon/server.ts` | **新建** — 订阅 backend events，按 clientId 过滤 permission 后广播到 SSE 客户端 |
 
 ---
 
-### 3.4 Phase 3b: daemon 按需自动拉起（生产终态）
+### 3.4 Phase 4 预览：daemon 按需自动拉起（生产终态）
 
 **解决的问题**：npm 发布后用户只运行 `ohbaby` 一条命令；终端/web/app 的写入统一收口到单写者。
 
@@ -474,7 +473,7 @@ ohbaby 启动
   │
   ├─► 读 state-file（runtime/daemon/state-file.ts，已有）
   │     ├─ 有记录 → PID 存活校验（pid-file.ts，已有）+ 版本握手
-  │     │     ├─ 通过 → 直连（WS/本地端口）
+  │     │     ├─ 通过 → 直连（HTTP/SSE 本地端口）
   │     │     └─ 版本不匹配 → 请求旧 daemon 优雅退出 → 走拉起路径
   │     └─ 无记录/进程已死 → 拉起路径
   │
@@ -521,7 +520,7 @@ session 级 daemon 进程内存中每 session 一个 RunState（idle/running）
 
 职责转移：daemon 模式下锁的载体从 DB 事务（Phase 1 的 1.2）转移到 daemon 内存 RunState——锁放在最便宜的地方；`run_ledger` 降级为**持久化审计 + 崩溃恢复**，不再承担锁职责。`claimPendingRun` 接口契约不变，实现替换。
 
-过渡期（Phase 1-2 嵌入式多进程）不做跨进程排队：排队需要协调者，协调者就是 daemon 本身，提前实现是预支 Phase 3 复杂度（YAGNI）。
+过渡期（Phase 1-3 嵌入式/显式 daemon 并存）不承诺跨终端严格 FIFO：严格排序需要 daemon 拥有全局队列，这是 Phase 4 的产品化职责。
 
 #### Phase 1-2 过渡：backend lease 全局写互斥
 
@@ -553,11 +552,11 @@ Phase 4 daemon 默认路径上线后，这层 lease 必须被显式评估：daem
 |--------|--------|--------|
 | `UiBackendClient` 契约 | 前端与核心之间的稳定接口 | remote client 与 in-process client 跑**同一套 contract 测试**，保证缝不腐烂 |
 | daemon 单写者 | 所有写入收口到一个进程 | 任何新前端/协议都不再引入并发写问题 |
-| 协议无关的事件流 | StreamBridge → 传输适配器 | WS 只是第一个适配器，换协议不动核心 |
+| 协议无关的事件流 | StreamBridge / UiEvent → 传输适配器 | SSE 是第一个适配器，后续换 WS/ACP 不动核心 |
 
 按需后加的路线（依据 `03-reference-projects.md` 的证据）：
 
-- **web/app**：Phase 3 的 HTTP/WS 即可覆盖，无需 ACP
+- **web/app**：Phase 3 的 HTTP/SSE 即可覆盖基础远程 UI，无需 ACP
 - **ACP**（IDE 集成）：需求真实出现时，按 opencode / claude-code 先例做薄适配层（约 7 个文件，预估 3-5 天），叠加在 daemon API 之上，不动核心
 - **A2A**（外部 agent 互操作）：仅当出现真实的跨 agent 协作需求时再评估；当前没有该需求（YAGNI）
 
