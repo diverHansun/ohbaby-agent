@@ -209,7 +209,7 @@ git commit -m "feat(daemon): route permission prompts by client"
 - Create: `packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts`
 - Modify: `packages/ohbaby-agent/src/runtime/daemon/index.ts`
 
-- [ ] Write failing integration tests using a fake `UiBackendClient`.
+- [x] Write failing integration tests using a fake `UiBackendClient`.
 
 Test cases:
 
@@ -228,7 +228,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/server.integration
 
 Expected RED: fails because `server.ts` does not exist.
 
-- [ ] Implement `createDaemonHttpServer`.
+- [x] Implement `createDaemonHttpServer`.
 
 Required public API:
 
@@ -268,7 +268,7 @@ Implementation rules:
 - SSE event format uses `event: ui.event` and JSON `data`.
 - Send an initial `hello` event containing the client id.
 
-- [ ] Run focused tests.
+- [x] Run focused tests.
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/protocol.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/permission-router.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts --no-file-parallelism
@@ -276,7 +276,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/protocol.unit.test
 
 Expected GREEN: protocol, router, and server tests pass.
 
-- [ ] Commit.
+- [x] Commit.
 
 ```powershell
 git add packages/ohbaby-agent/src/runtime/daemon/server.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/index.ts
