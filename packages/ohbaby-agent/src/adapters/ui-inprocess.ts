@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type {
   SubmitPromptOptions,
@@ -21,7 +22,7 @@ import type {
   UiSnapshot,
   UiSession,
 } from "ohbaby-sdk";
-import type { BusInstance, BusUnsubscribe } from "../bus/index.js";
+import type { BusInstance } from "../bus/index.js";
 import { createLLMClient } from "../core/llm-client/index.js";
 import type {
   CreateLLMClientOptions,
@@ -46,10 +47,7 @@ import type {
   MessageManager,
   MessageWithParts,
 } from "../core/message/index.js";
-import type {
-  Session as CoreSession,
-  SessionManager,
-} from "../services/session/index.js";
+import type { Session as CoreSession } from "../services/session/index.js";
 import {
   createTemporarySessionTitle,
   generateSessionTitle,
@@ -71,7 +69,10 @@ import {
   type SkillLogger,
 } from "../skill/index.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
-import type { RunLedger } from "../runtime/run-ledger/index.js";
+import {
+  SessionRunBusyError,
+  type RunLedger,
+} from "../runtime/run-ledger/index.js";
 import type { StreamBridge } from "../runtime/stream-bridge/index.js";
 import {
   cloneMessage,
@@ -81,7 +82,6 @@ import {
 } from "./ui-state/index.js";
 import type { UiStateStore } from "./ui-state/index.js";
 import { createUiRuntimeComposition } from "./ui-runtime/composition.js";
-import { startRunStreamProjection } from "./ui-runtime/run-stream-adapter.js";
 import type { UiRuntimeComposition } from "./ui-runtime/types.js";
 import {
   startPermissionEventProjection,
@@ -92,6 +92,22 @@ import { loadModelJson } from "../config/llm/loaders.js";
 import { ConfigError } from "../config/llm/types.js";
 import { validateModelJson } from "../config/llm/validation.js";
 import type { ModelJsonConfig } from "../config/llm/types.js";
+import { InProcessPromptController } from "./ui-inprocess/prompt-controller.js";
+import { InProcessEventRouter } from "./ui-inprocess/event-router.js";
+import {
+  InProcessRuntimeController,
+  type RunStreamProjection,
+} from "./ui-inprocess/runtime-controller.js";
+import {
+  isPrimarySession,
+  parseUiTimestamp,
+  resolveSessionForNewPrompt,
+  sessionMetadataToUiSession,
+  sortCoreSessionsByUpdatedAtDesc,
+  sortUiSessionsByUpdatedAtDesc,
+  type InProcessSessionManager,
+} from "./ui-inprocess/session-controller.js";
+import type { NoticeDraft } from "./ui-inprocess/types.js";
 
 const EMPTY_SNAPSHOT: UiSnapshot = {
   sessions: [],
@@ -108,14 +124,12 @@ const EMPTY_SNAPSHOT: UiSnapshot = {
   },
 };
 
-type NoticeDraft = Omit<UiNotice, "id" | "createdAt"> & {
-  readonly createdAt?: string;
-};
-
 type UiPermissionState = NonNullable<UiSnapshot["permission"]>;
 
 export interface InProcessUiBackendOptions {
+  readonly afterPromptSubmitSettled?: () => Promise<void> | void;
   readonly agentManager?: AgentManager;
+  readonly beforePromptSubmit?: () => Promise<void> | void;
   readonly bus?: BusInstance;
   readonly createAgentTaskId?: () => string;
   readonly createRunId?: () => string;
@@ -126,18 +140,7 @@ export interface InProcessUiBackendOptions {
     options?: CreateLLMClientOptions,
   ) => Promise<LLMClientInstance>;
   readonly messageManager?: MessageManager;
-  readonly sessionManager?: Pick<
-    SessionManager,
-    | "create"
-    | "get"
-    | "getRecent"
-    | "listByProject"
-    | "listByProjectRoot"
-    | "update"
-  > &
-    Partial<
-      Pick<SessionManager, "findReusableEmptyPrimary" | "incrementStats">
-    >;
+  readonly sessionManager?: InProcessSessionManager;
   readonly stateStore?: UiStateStore;
   readonly projectDirectory?: string;
   readonly now?: () => Date;
@@ -229,51 +232,6 @@ function createTextMessage(input: {
   };
 }
 
-function sessionMetadataToUiSession(session: CoreSession): UiSession {
-  return {
-    createdAt: new Date(session.createdAt).toISOString(),
-    id: session.id,
-    messages: [],
-    projectRoot: session.projectRoot,
-    title: session.title,
-    updatedAt: new Date(session.updatedAt).toISOString(),
-  };
-}
-
-function isPrimarySession(session: CoreSession): boolean {
-  return !session.isSubagent;
-}
-
-function sortCoreSessionsByUpdatedAtDesc(
-  left: CoreSession,
-  right: CoreSession,
-): number {
-  if (right.updatedAt !== left.updatedAt) {
-    return right.updatedAt - left.updatedAt;
-  }
-  return right.createdAt - left.createdAt;
-}
-
-function sortUiSessionsByUpdatedAtDesc(
-  left: UiSession,
-  right: UiSession,
-): number {
-  const leftUpdatedAt = parseUiTimestamp(left.updatedAt) ?? 0;
-  const rightUpdatedAt = parseUiTimestamp(right.updatedAt) ?? 0;
-  if (rightUpdatedAt !== leftUpdatedAt) {
-    return rightUpdatedAt - leftUpdatedAt;
-  }
-  return (
-    (parseUiTimestamp(right.createdAt) ?? 0) -
-    (parseUiTimestamp(left.createdAt) ?? 0)
-  );
-}
-
-function parseUiTimestamp(value: string): number | undefined {
-  const timestamp = Date.parse(value);
-  return Number.isNaN(timestamp) ? undefined : timestamp;
-}
-
 function maxMessageTimestamp(
   messages: readonly MessageWithParts[],
 ): number | undefined {
@@ -335,8 +293,6 @@ export function createInProcessUiBackendClient(
       store: createInMemoryMessageStore(),
     });
   const interactionBroker = createInteractionBroker({ bus });
-  const handlers = new Set<UiEventHandler>();
-  const busSubscriptions: BusUnsubscribe[] = [];
   const contextWindowUsage: ContextWindowUsageTracker =
     createContextWindowUsageTracker({ now: timestamp });
   const sessionIds = createIdFactory(
@@ -354,12 +310,71 @@ export function createInProcessUiBackendClient(
     initialSnapshot.runs.map((run) => run.id),
   );
   const noticeIds = createIdFactory("notice", []);
+  const eventRouter = new InProcessEventRouter({
+    createNotice: (notice): UiNotice => ({
+      ...notice,
+      createdAt: notice.createdAt ?? timestamp(),
+      id: noticeIds.next(),
+    }),
+    nowMs: (): number => Date.now(),
+  });
   let promptInFlight = false;
-  let activeRunId: string | undefined;
-  let runtimePromise: Promise<UiRuntimeComposition> | undefined;
   let connectModelQueue: Promise<void> = Promise.resolve();
   let skillRegistryPromise: Promise<SkillRegistry> | undefined;
   const pendingPermissionSessions = new Map<string, string>();
+  const runtimeController = new InProcessRuntimeController({
+    clearPendingPermissionsForRun,
+    createRuntime: async (): Promise<UiRuntimeComposition> => {
+      const baseProjectRoot = await resolveProjectRoot();
+      const llmClient = await resolveLLMClient(baseProjectRoot);
+      const skillRegistry = await getSkillRegistry();
+      const runtimeRunIdFactory =
+        options.createRunId ??
+        (usesPersistentStateStore() ? undefined : ((): string => runIds.next()));
+
+      return createUiRuntimeComposition({
+        agentManager: options.agentManager,
+        bus,
+        ...(options.createAgentTaskId
+          ? { createAgentTaskId: options.createAgentTaskId }
+          : {}),
+        ...(runtimeRunIdFactory === undefined
+          ? {}
+          : { createRunId: runtimeRunIdFactory }),
+        llmClient,
+        messageManager,
+        hookExecutor: options.hookExecutor,
+        now: () => now().getTime(),
+        onNotice: publishNotice,
+        permission,
+        permissionState,
+        runLedger: options.runLedger,
+        sessionManager: options.sessionManager,
+        skillRegistry,
+        streamBridge: options.streamBridge,
+        workdir: baseProjectRoot,
+      });
+    },
+    publishNotice,
+    updateStatus,
+  });
+  const promptController = new InProcessPromptController({
+    isBusyError: (error): boolean => error instanceof SessionRunBusyError,
+    readActiveSessionId: async (): Promise<string | null> => {
+      const snapshot = await stateStore.readSnapshot();
+      return snapshot.activeSessionId;
+    },
+    retryDelayMs: 250,
+    submitPromptInternal,
+  });
+
+  function usesPersistentStateStore(): boolean {
+    return stateStore.requiresServiceManagersForWrites === true;
+  }
+
+  function createDefaultRunId(): string {
+    return usesPersistentStateStore() ? `run_${randomUUID()}` : runIds.next();
+  }
 
   function assertStateStoreWritable(): void {
     if (
@@ -386,9 +401,9 @@ export function createInProcessUiBackendClient(
   }
 
   async function nextRunId(): Promise<string> {
-    let runId = options.createRunId?.() ?? runIds.next();
+    let runId = options.createRunId?.() ?? createDefaultRunId();
     while ((await stateStore.hasRun?.(runId)) === true) {
-      runId = options.createRunId?.() ?? runIds.next();
+      runId = options.createRunId?.() ?? createDefaultRunId();
     }
     runIds.reserve(runId);
     return runId;
@@ -403,25 +418,15 @@ export function createInProcessUiBackendClient(
   }
 
   function publish(event: UiEvent): void {
-    for (const handler of handlers) {
-      try {
-        handler(event);
-      } catch {
-        // UI event handlers are observers; they must not break backend state.
-      }
-    }
+    eventRouter.publish(event);
   }
 
   function publishNotice(notice: NoticeDraft): void {
-    publish({
-      notice: {
-        ...notice,
-        createdAt: notice.createdAt ?? timestamp(),
-        id: noticeIds.next(),
-      },
-      timestamp: Date.now(),
-      type: "notice.emitted",
-    });
+    eventRouter.publishNotice(notice);
+  }
+
+  function publishSnapshotReplacement(): Promise<void> {
+    return eventRouter.publishSnapshotReplacement(readSnapshotWithPermission);
   }
 
   function formatSkillWarning(
@@ -466,7 +471,7 @@ export function createInProcessUiBackendClient(
   }
 
   async function updateActiveRunStatus(status: UiRunStatus): Promise<void> {
-    const runId = activeRunId;
+    const runId = runtimeController.getActiveRunId();
     if (!runId) {
       return;
     }
@@ -486,6 +491,7 @@ export function createInProcessUiBackendClient(
 
   async function reconcileRuntimeStatus(): Promise<UiRunStatus> {
     const snapshot = await stateStore.readSnapshot();
+    const activeRunId = runtimeController.getActiveRunId();
     let status: UiRunStatus;
     if (snapshot.permissions.length > 0) {
       status = {
@@ -537,17 +543,6 @@ export function createInProcessUiBackendClient(
     await reconcileRuntimeStatus();
   }
 
-  async function cancelPromptRun(runId: string): Promise<void> {
-    try {
-      const runtime = await getRuntime();
-      runtime.cancel(runId, "run aborted");
-    } catch {
-      // Abort is best-effort; the run may already have completed.
-    } finally {
-      await clearPendingPermissionsForRun(runId);
-    }
-  }
-
   function currentPermissionState(): UiPermissionState {
     return permissionState.toSnapshot();
   }
@@ -560,15 +555,6 @@ export function createInProcessUiBackendClient(
       ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
       permission: currentPermissionState(),
     };
-  }
-
-  async function abortPromptRun(runId?: string): Promise<boolean> {
-    const targetRunId = runId ?? activeRunId;
-    if (!targetRunId || targetRunId !== activeRunId) {
-      return false;
-    }
-    await cancelPromptRun(targetRunId);
-    return true;
   }
 
   function projectDirectory(): string {
@@ -608,60 +594,6 @@ export function createInProcessUiBackendClient(
       return options.createLLMClient({ projectDirectory });
     }
     return createLLMClient({ projectDirectory });
-  }
-
-  function getRuntime(): Promise<UiRuntimeComposition> {
-    runtimePromise ??= (async (): Promise<UiRuntimeComposition> => {
-      const baseProjectRoot = await resolveProjectRoot();
-      const llmClient = await resolveLLMClient(baseProjectRoot);
-      const skillRegistry = await getSkillRegistry();
-
-      return createUiRuntimeComposition({
-        agentManager: options.agentManager,
-        bus,
-        ...(options.createAgentTaskId
-          ? { createAgentTaskId: options.createAgentTaskId }
-          : {}),
-        createRunId: options.createRunId ?? ((): string => runIds.next()),
-        llmClient,
-        messageManager,
-        hookExecutor: options.hookExecutor,
-        now: () => now().getTime(),
-        onNotice: publishNotice,
-        permission,
-        permissionState,
-        runLedger: options.runLedger,
-        sessionManager: options.sessionManager,
-        skillRegistry,
-        streamBridge: options.streamBridge,
-        workdir: baseProjectRoot,
-      });
-    })().catch((error: unknown) => {
-      runtimePromise = undefined;
-      throw error;
-    });
-
-    return runtimePromise;
-  }
-
-  async function getRuntimeForPrompt(): Promise<UiRuntimeComposition> {
-    try {
-      return await getRuntime();
-    } catch (error) {
-      const message = getErrorMessage(error);
-      await updateStatus({
-        kind: "error",
-        message,
-        recoverable: true,
-      });
-      publishNotice({
-        key: `runtime:${message}`,
-        level: "error",
-        message,
-        title: "Runtime error",
-      });
-      throw error;
-    }
   }
 
   async function currentModelFromOptions(): Promise<CommandModelSummary | null> {
@@ -816,48 +748,6 @@ export function createInProcessUiBackendClient(
       }));
   }
 
-  function isReusableUiSession(
-    session: UiSession,
-    projectRoot: string,
-  ): boolean {
-    return (
-      session.messages.length === 0 &&
-      sameSessionProjectRoot(session.projectRoot, projectRoot)
-    );
-  }
-
-  async function canReuseUiSessionForNewCommand(
-    session: UiSession,
-    projectRoot: string,
-  ): Promise<boolean> {
-    if (!isReusableUiSession(session, projectRoot)) {
-      return false;
-    }
-    if (!options.sessionManager) {
-      return true;
-    }
-
-    const coreSession = await options.sessionManager.get(session.id);
-    return (
-      coreSession !== null &&
-      !coreSession.isSubagent &&
-      coreSession.stats.messageCount === 0 &&
-      sameSessionProjectRoot(coreSession.projectRoot, projectRoot)
-    );
-  }
-
-  async function findReusableUiSession(
-    snapshot: UiSnapshot,
-    projectRoot: string,
-  ): Promise<UiSession | null> {
-    for (const candidate of snapshot.sessions) {
-      if (await canReuseUiSessionForNewCommand(candidate, projectRoot)) {
-        return candidate;
-      }
-    }
-    return null;
-  }
-
   async function resolveNewSessionProjectRoot(
     snapshot: UiSnapshot,
   ): Promise<string> {
@@ -883,11 +773,7 @@ export function createInProcessUiBackendClient(
         session: cloneSession(input.session),
       });
     }
-    publish({
-      snapshot: await readSnapshotWithPermission(),
-      timestamp: Date.now(),
-      type: "snapshot.replaced",
-    });
+    await publishSnapshotReplacement();
 
     return {
       created: false,
@@ -903,77 +789,47 @@ export function createInProcessUiBackendClient(
     const projectRoot = await resolveNewSessionProjectRoot(snapshot);
     const title = "New session";
     const agentName = options.agentManager?.getDefault() ?? "default";
-    let session: UiSession;
-
-    const activeSession = snapshot.sessions.find(
-      (candidate) => candidate.id === snapshot.activeSessionId,
-    );
-    if (
-      activeSession &&
-      (await canReuseUiSessionForNewCommand(activeSession, projectRoot))
-    ) {
-      return activateSessionForNewCommand({
-        publishUpdate: false,
-        session: activeSession,
-      });
-    }
-
-    const reusableCoreSession =
-      await options.sessionManager?.findReusableEmptyPrimary?.(projectRoot);
-    if (reusableCoreSession) {
-      const existingUiSession = snapshot.sessions.find(
-        (candidate) => candidate.id === reusableCoreSession.id,
-      );
-      if (
-        existingUiSession === undefined ||
-        isReusableUiSession(existingUiSession, projectRoot)
-      ) {
-        return activateSessionForNewCommand({
-          publishUpdate: existingUiSession === undefined,
-          session:
-            existingUiSession ??
-            sessionMetadataToUiSession(reusableCoreSession),
-        });
-      }
-    }
-
-    const reusableUiSession = await findReusableUiSession(
-      snapshot,
+    const resolved = await resolveSessionForNewPrompt({
+      createSession: async () => {
+        if (options.sessionManager) {
+          const created = await options.sessionManager.create(projectRoot, {
+            agentName,
+            title,
+          });
+          return sessionMetadataToUiSession(created);
+        }
+        return {
+          id: sessionIds.next(),
+          title,
+          messages: [],
+          projectRoot,
+          createdAt,
+          updatedAt: createdAt,
+        };
+      },
+      getUiSession: (id) => stateStore.getSession(id),
       projectRoot,
+      reuseInactiveEmptySessions: true,
+      sessionManager: options.sessionManager,
+      snapshot,
+    });
+    const session = resolved.session;
+    const sessionAlreadyInSnapshot = snapshot.sessions.some(
+      (candidate) => candidate.id === session.id,
     );
-    if (reusableUiSession) {
-      return activateSessionForNewCommand({
-        publishUpdate: false,
-        session: reusableUiSession,
-      });
-    }
 
-    if (options.sessionManager) {
-      const created = await options.sessionManager.create(projectRoot, {
-        agentName,
-        title,
+    if (!resolved.isNewSession) {
+      return activateSessionForNewCommand({
+        publishUpdate: !sessionAlreadyInSnapshot,
+        session,
       });
-      session = sessionMetadataToUiSession(created);
-    } else {
-      session = {
-        id: sessionIds.next(),
-        title,
-        messages: [],
-        projectRoot,
-        createdAt,
-        updatedAt: createdAt,
-      };
     }
 
     sessionIds.reserve(session.id);
     await upsertSession(session);
     await stateStore.setActiveSessionId(session.id);
     publish({ type: "session.updated", session: cloneSession(session) });
-    publish({
-      snapshot: await readSnapshotWithPermission(),
-      timestamp: Date.now(),
-      type: "snapshot.replaced",
-    });
+    await publishSnapshotReplacement();
 
     return { created: true, id: session.id, title: session.title };
   }
@@ -1192,7 +1048,7 @@ export function createInProcessUiBackendClient(
     compactOptions: UiCompactSessionOptions = {},
   ): Promise<UiCompactSessionResult> {
     const target = await resolveCompactTarget(compactOptions);
-    const runtime = await getRuntimeForPrompt();
+    const runtime = await runtimeController.getRuntimeForPrompt();
     await runtime.setSessionWorkdir(target.sessionId, target.projectRoot);
     const result = await runtime.compactSession({
       force: compactOptions.force ?? true,
@@ -1236,7 +1092,7 @@ export function createInProcessUiBackendClient(
       return null;
     }
 
-    const runtime = await getRuntime();
+    const runtime = await runtimeController.getRuntime();
     const usage = await runtime.getContextUsage({
       projectRoot,
       sessionId: input.sessionId,
@@ -1252,55 +1108,54 @@ export function createInProcessUiBackendClient(
       throw new Error("A prompt is already running");
     }
     assertStateStoreWritable();
+    await options.beforePromptSubmit?.();
     promptInFlight = true;
     const createdAt = timestamp();
-    let projection: ReturnType<typeof startRunStreamProjection> | undefined;
+    let projection: RunStreamProjection | undefined;
     let submittedSessionId: string | undefined;
 
     try {
       await assertCanUseAsPrimarySession(submitOptions?.sessionId);
       await reserveIdsFromState();
-      const runtime = await getRuntimeForPrompt();
+      const runtime = await runtimeController.getRuntimeForPrompt();
       const agentName = runtime.agentManager.getDefault();
       const baseProjectRoot = await resolveProjectRoot();
-      let session = submitOptions?.sessionId
-        ? await stateStore.getSession(submitOptions.sessionId)
-        : undefined;
-      const existingCoreSession =
-        submitOptions?.sessionId && options.sessionManager
-          ? await options.sessionManager.get(submitOptions.sessionId)
-          : undefined;
-      if (!session && existingCoreSession) {
-        session = sessionMetadataToUiSession(existingCoreSession);
-      } else if (session && !session.projectRoot && existingCoreSession) {
-        session = {
-          ...session,
-          projectRoot: existingCoreSession.projectRoot,
-        };
-      }
-
       const temporaryTitle = createTemporarySessionTitle(text);
-      let shouldGenerateSessionTitle = false;
-      const isNewSession = !session;
-      if (!session) {
-        shouldGenerateSessionTitle = true;
-        if (options.sessionManager) {
-          const created = await options.sessionManager.create(baseProjectRoot, {
-            agentName,
-            id: submitOptions?.sessionId,
-            title: temporaryTitle,
-          });
-          session = sessionMetadataToUiSession(created);
-        } else {
-          session = {
-            id: submitOptions?.sessionId ?? sessionIds.next(),
+      const snapshot = await stateStore.readSnapshot();
+      const resolvedSession = await resolveSessionForNewPrompt({
+        createSession: async (id) => {
+          if (options.sessionManager) {
+            const created = await options.sessionManager.create(
+              baseProjectRoot,
+              {
+                agentName,
+                id,
+                title: temporaryTitle,
+              },
+            );
+            return sessionMetadataToUiSession(created);
+          }
+          return {
+            id: id ?? sessionIds.next(),
             title: temporaryTitle,
             messages: [],
             projectRoot: baseProjectRoot,
             createdAt,
             updatedAt: createdAt,
           };
-        }
+        },
+        explicitSessionId: submitOptions?.sessionId,
+        getUiSession: (id) => stateStore.getSession(id),
+        projectRoot: baseProjectRoot,
+        sessionManager: options.sessionManager,
+        snapshot,
+      });
+      let session = resolvedSession.session;
+      const existingCoreSession = resolvedSession.coreSession;
+      let shouldGenerateSessionTitle = false;
+      const isNewSession = resolvedSession.isNewSession;
+      if (isNewSession) {
+        shouldGenerateSessionTitle = true;
         sessionIds.reserve(session.id);
       } else if (
         await isFirstUserMessageForTitle({
@@ -1325,8 +1180,8 @@ export function createInProcessUiBackendClient(
       });
       const runId = await nextRunId();
       const assistantMessageId = messageIds.next();
-      activeRunId = runId;
-      projection = startRunStreamProjection({
+      runtimeController.setActiveRunId(runId);
+      projection = runtimeController.startRunStreamProjection({
         assistantMessageId,
         autoStart: false,
         contextWindowUsage,
@@ -1416,7 +1271,8 @@ export function createInProcessUiBackendClient(
         await syncSessionStatsBestEffort(submittedSessionId);
       }
       promptInFlight = false;
-      activeRunId = undefined;
+      runtimeController.clearActiveRunId();
+      await options.afterPromptSubmitSettled?.();
     }
   }
 
@@ -1453,13 +1309,9 @@ export function createInProcessUiBackendClient(
         ...input,
         projectRoot,
       });
-      runtimePromise = undefined;
+      runtimeController.resetRuntime();
       contextWindowUsage.clear();
-      publish({
-        snapshot: await readSnapshotWithPermission(),
-        timestamp: Date.now(),
-        type: "snapshot.replaced",
-      });
+      await publishSnapshotReplacement();
       return result;
     } finally {
       releaseSave();
@@ -1471,7 +1323,7 @@ export function createInProcessUiBackendClient(
     interactionBroker,
     tools: {
       async listTools() {
-        const runtime = await getRuntime();
+        const runtime = await runtimeController.getRuntime();
         return runtime.listToolSummaries({
           agentName: runtime.agentManager.getDefault(),
         });
@@ -1491,11 +1343,7 @@ export function createInProcessUiBackendClient(
           throw new Error(`Session not found: ${sessionId}`);
         }
         await stateStore.setActiveSessionId(sessionId);
-        publish({
-          snapshot: await readSnapshotWithPermission(),
-          timestamp: Date.now(),
-          type: "snapshot.replaced",
-        });
+        await publishSnapshotReplacement();
       },
     },
     compact: {
@@ -1512,7 +1360,7 @@ export function createInProcessUiBackendClient(
     },
     mcps: {
       async listServers() {
-        const runtime = await getRuntime();
+        const runtime = await runtimeController.getRuntime();
         return runtime.listMcpServerSummaries();
       },
     },
@@ -1532,12 +1380,12 @@ export function createInProcessUiBackendClient(
     },
     abortRun(runId?: string): void {
       if (!runId) {
-        void abortPromptRun();
+        void runtimeController.abortPromptRun();
         interactionBroker.abortAll("aborted");
         return;
       }
-      if (runId === activeRunId) {
-        void abortPromptRun(runId);
+      if (runtimeController.isActiveRun(runId)) {
+        void runtimeController.abortPromptRun(runId);
         return;
       }
       commandService.abortCommandRun(runId, "aborted");
@@ -1553,7 +1401,7 @@ export function createInProcessUiBackendClient(
         return null;
       }
       try {
-        const runtime = await getRuntime();
+        const runtime = await runtimeController.getRuntime();
         return await runtime.getContextUsage({
           projectRoot: await resolveProjectRoot(),
           sessionId: input.sessionId,
@@ -1565,7 +1413,7 @@ export function createInProcessUiBackendClient(
     getProjectRoot: resolveProjectRoot,
   });
 
-  busSubscriptions.push(
+  eventRouter.addSubscriptions(
     subscribeAppEventProjectors({
       bus,
       target(projected) {
@@ -1575,7 +1423,7 @@ export function createInProcessUiBackendClient(
     startPermissionEventProjection({
       bus,
       currentPermissionState,
-      getActiveRunId: () => activeRunId,
+      getActiveRunId: () => runtimeController.getActiveRunId(),
       now: () => Date.now(),
       pendingPermissionSessions,
       publish,
@@ -1595,10 +1443,8 @@ export function createInProcessUiBackendClient(
   );
   return {
     dispose(): void {
-      for (const unsubscribe of busSubscriptions.splice(0)) {
-        unsubscribe();
-      }
-      handlers.clear();
+      promptController.close();
+      eventRouter.dispose();
     },
 
     getSnapshot(): Promise<UiSnapshot> {
@@ -1609,12 +1455,8 @@ export function createInProcessUiBackendClient(
       return getContextWindowUsageInternal(input);
     },
 
-    subscribeEvents(handler: UiEventHandler) {
-      handlers.add(handler);
-
-      return () => {
-        handlers.delete(handler);
-      };
+    subscribeEvents(handler: UiEventHandler): () => void {
+      return eventRouter.subscribeEvents(handler);
     },
 
     listCommands(query): Promise<UiCommandCatalog> {
@@ -1625,7 +1467,7 @@ export function createInProcessUiBackendClient(
       text: string,
       submitOptions?: SubmitPromptOptions,
     ): Promise<void> {
-      return submitPromptInternal(text, submitOptions);
+      return promptController.submitPrompt(text, submitOptions);
     },
 
     compactSession(
@@ -1659,9 +1501,9 @@ export function createInProcessUiBackendClient(
           const snapshot = await stateStore.readSnapshot();
           const runId =
             snapshot.permissions.find((request) => request.id === requestId)
-              ?.runId ?? activeRunId;
+              ?.runId ?? runtimeController.getActiveRunId();
           if (runId) {
-            await cancelPromptRun(runId);
+            await runtimeController.cancelPromptRun(runId);
             return;
           }
           permission.cancelPending(sessionId);
@@ -1684,10 +1526,10 @@ export function createInProcessUiBackendClient(
 
     async abortRun(runId?: string): Promise<void> {
       if (!runId) {
-        await abortPromptRun();
+        await runtimeController.abortPromptRun();
         interactionBroker.abortAll("aborted");
-      } else if (runId === activeRunId) {
-        await abortPromptRun(runId);
+      } else if (runtimeController.isActiveRun(runId)) {
+        await runtimeController.abortPromptRun(runId);
       } else {
         commandService.abortCommandRun(runId, "aborted");
       }

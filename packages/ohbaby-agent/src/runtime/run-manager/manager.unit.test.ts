@@ -8,6 +8,7 @@ import type { ToolCallResult } from "../../core/tool-scheduler/index.js";
 import type { PreflightResult } from "../../sandbox/index.js";
 import {
   createInMemoryRunLedger,
+  SessionRunBusyError,
   type MarkInterruptedOptions,
   type MarkInterruptedResult,
   type RunLedger,
@@ -123,6 +124,13 @@ class RecordingLedger implements RunLedger {
   ): Promise<RunLedgerRecord> {
     this.calls.push("createPending");
     return this.inner.createPending(input);
+  }
+
+  claimPendingRun(
+    input: Parameters<RunLedger["claimPendingRun"]>[0],
+  ): Promise<RunLedgerRecord> {
+    this.calls.push("claimPendingRun");
+    return this.inner.claimPendingRun(input);
   }
 
   markRunning(runId: string): Promise<RunLedgerRecord> {
@@ -738,7 +746,7 @@ describe("RunManager", () => {
     expect(typeof ledgerRecord?.startedAt).toBe("number");
     expect(typeof ledgerRecord?.endedAt).toBe("number");
     expect(ledger.calls).toEqual([
-      "createPending",
+      "claimPendingRun",
       "markRunning",
       "markSucceeded",
     ]);
@@ -911,6 +919,27 @@ describe("RunManager", () => {
     lifecycle.finish.resolve(undefined);
     await expect(first).resolves.toMatchObject({ runId: "run_1" });
     await manager.cancelAll();
+  });
+
+  it("does not add an active record when the ledger rejects a same-session claim", async () => {
+    const { manager, ledger, bridge } = createManager(new CompletingLifecycle());
+    await ledger.claimPendingRun({
+      runId: "run_external",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+
+    await expect(
+      manager.create({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_1",
+        triggerSource: "user",
+      }),
+    ).rejects.toBeInstanceOf(SessionRunBusyError);
+
+    expect(manager.list("session_1")).toEqual([]);
+    expect(bridge.events).toEqual([]);
   });
 
   it("propagates cancel through AbortSignal and marks the run cancelled", async () => {

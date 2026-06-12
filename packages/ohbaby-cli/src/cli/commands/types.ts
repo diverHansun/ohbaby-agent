@@ -7,6 +7,7 @@ import type {
 import type { createStdoutRenderer } from "../stdout-renderer.js";
 
 export interface CliGlobalOptions {
+  readonly continue?: boolean;
   readonly mode?: "plan" | "auto";
   readonly permission?: "default" | "full-access";
   readonly resume?: string;

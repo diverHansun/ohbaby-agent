@@ -57,7 +57,7 @@ export interface PersistentUiStateStoreOptions {
   readonly sessionManager: Pick<SessionManager, "get" | "getRecent" | "update">;
   readonly messageManager: Pick<MessageManager, "listBySession">;
   readonly runLedger: RunLedger;
-  readonly appState: UiAppStateStore;
+  readonly initialActiveSessionId?: string | null;
   readonly sessionLimit?: number;
 }
 
@@ -402,6 +402,7 @@ export function createPersistentUiStateStore(
     status: { kind: "idle" },
   };
   const sessionLimit = options.sessionLimit ?? DEFAULT_SESSION_LIMIT;
+  let activeSessionId = options.initialActiveSessionId ?? null;
 
   async function readUiSession(session: Session): Promise<UiSession> {
     return sessionToUiSession({
@@ -425,24 +426,24 @@ export function createPersistentUiStateStore(
     readonly activeSessionId: string | null;
     readonly sessions: readonly Session[];
   }> {
-    const activeSessionId = await options.appState.getActiveSessionId();
+    const selectedActiveSessionId = activeSessionId;
     const recentSessions = (
       await withSessionTransactionRetry(() =>
         options.sessionManager.getRecent(sessionLimit),
       )
     ).filter(isPrimarySession);
     if (
-      activeSessionId === null ||
-      recentSessions.some((session) => session.id === activeSessionId)
+      selectedActiveSessionId === null ||
+      recentSessions.some((session) => session.id === selectedActiveSessionId)
     ) {
       return {
-        activeSessionId,
+        activeSessionId: selectedActiveSessionId,
         sessions: recentSessions,
       };
     }
 
     const activeSession = await withSessionTransactionRetry(() =>
-      options.sessionManager.get(activeSessionId),
+      options.sessionManager.get(selectedActiveSessionId),
     );
     if (!activeSession || !isPrimarySession(activeSession)) {
       return {
@@ -452,16 +453,24 @@ export function createPersistentUiStateStore(
     }
 
     return {
-      activeSessionId,
+      activeSessionId: selectedActiveSessionId,
       sessions: [...recentSessions, activeSession],
     };
   }
 
-  function snapshotStatus(runs: readonly RunLedgerRecord[]): UiRunStatus {
+  function snapshotStatus(input: {
+    readonly activeSessionId: string | null;
+    readonly runs: readonly RunLedgerRecord[];
+  }): UiRunStatus {
     if (mutable.status.kind !== "idle") {
       return { ...mutable.status };
     }
-    const activeRun = runs.find(isActiveRun);
+    if (input.activeSessionId === null) {
+      return { kind: "idle" };
+    }
+    const activeRun = input.runs.find(
+      (run) => run.sessionId === input.activeSessionId && isActiveRun(run),
+    );
     return activeRun
       ? { kind: "running", runId: activeRun.runId }
       : { kind: "idle" };
@@ -482,7 +491,7 @@ export function createPersistentUiStateStore(
         permissions: mutable.permissions.map(clonePermission),
         runs: runs.map(runToUiRun),
         sessions: await Promise.all(sessions.map(readUiSession)),
-        status: snapshotStatus(runs),
+        status: snapshotStatus({ activeSessionId, runs }),
       };
       return cloneSnapshot(snapshot);
     },
@@ -513,7 +522,8 @@ export function createPersistentUiStateStore(
     },
 
     setActiveSessionId(sessionId: string | null): Promise<void> {
-      return options.appState.setActiveSessionId(sessionId);
+      activeSessionId = sessionId;
+      return Promise.resolve();
     },
 
     addRun(run: UiRun): Promise<void> {

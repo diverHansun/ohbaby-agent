@@ -48,7 +48,6 @@ import { Project } from "../project/index.js";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
 import {
   createInMemoryUiStateStore,
-  createDatabaseUiAppStateStore,
   createPersistentUiStateStore,
   type UiStateStore,
 } from "./ui-state/index.js";
@@ -1028,6 +1027,13 @@ class RecordingRunLedger implements RunLedger {
   ): Promise<RunLedgerRecord> {
     this.calls.push("createPending");
     return this.inner.createPending(input);
+  }
+
+  claimPendingRun(
+    input: Parameters<RunLedger["claimPendingRun"]>[0],
+  ): Promise<RunLedgerRecord> {
+    this.calls.push("claimPendingRun");
+    return this.inner.claimPendingRun(input);
   }
 
   markRunning(runId: string): Promise<RunLedgerRecord> {
@@ -2741,10 +2747,19 @@ describe("createInProcessUiBackendClient", () => {
       );
       const run = client.submitPrompt("Abort this write");
       const permissionEvent = await permission;
+      const queuedRun = client.submitPrompt("Continue after abort", {
+        sessionId: "session_1",
+      });
+
+      await Promise.resolve();
+      expect(requests).toHaveLength(1);
 
       await client.abortRun(permissionEvent.request.runId);
       await expect(
         withTimeout(run, 1_000, "run did not abort"),
+      ).resolves.toBeUndefined();
+      await expect(
+        withTimeout(queuedRun, 1_000, "queued run did not continue"),
       ).resolves.toBeUndefined();
 
       let snapshot = await client.getSnapshot();
@@ -2767,9 +2782,6 @@ describe("createInProcessUiBackendClient", () => {
 
       await client.respondPermission(permissionEvent.request.id, {
         choiceId: "allow_once",
-      });
-      await client.submitPrompt("Continue after abort", {
-        sessionId: "session_1",
       });
 
       snapshot = await client.getSnapshot();
@@ -2799,7 +2811,7 @@ describe("createInProcessUiBackendClient", () => {
     await client.submitPrompt("Use the runtime manager");
 
     expect(runLedger.calls).toEqual([
-      "createPending",
+      "claimPendingRun",
       "markRunning",
       "markSucceeded",
     ]);
@@ -3071,6 +3083,101 @@ describe("createInProcessUiBackendClient", () => {
     expect(
       snapshot.sessions.find((session) => session.id === "session_2")?.messages,
     ).toHaveLength(2);
+  });
+
+  it("reuses the active empty session when submitting a prompt without an explicit session id", async () => {
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "session_empty",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_empty",
+            messages: [],
+            projectRoot: process.cwd(),
+            title: "New session",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([
+        { textDelta: "Reused active empty session.", finishReason: "stop" },
+      ]),
+    });
+
+    await client.submitPrompt("Use the active empty session");
+
+    const snapshot = await client.getSnapshot();
+    expect(snapshot.activeSessionId).toBe("session_empty");
+    expect(snapshot.sessions.map((session) => session.id)).toEqual([
+      "session_empty",
+    ]);
+    expect(snapshot.sessions[0].messages.map((message) => message.role)).toEqual(
+      ["user", "assistant"],
+    );
+  });
+
+  it("does not reuse an inactive empty session when submitting a prompt without an explicit session id", async () => {
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "session_active",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_active",
+            messages: [
+              {
+                createdAt: "2026-05-20T00:00:00.000Z",
+                id: "message_existing",
+                parts: [{ text: "Existing", type: "text" }],
+                role: "user",
+              },
+            ],
+            projectRoot: process.cwd(),
+            title: "Active session",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_inactive_empty",
+            messages: [],
+            projectRoot: process.cwd(),
+            title: "New session",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([
+        { textDelta: "Created a new session.", finishReason: "stop" },
+      ]),
+    });
+
+    await client.submitPrompt("Create a new session instead");
+
+    const snapshot = await client.getSnapshot();
+    expect(snapshot.activeSessionId).toBe("session_1");
+    expect(snapshot.sessions.map((session) => session.id)).toEqual([
+      "session_active",
+      "session_inactive_empty",
+      "session_1",
+    ]);
+    const inactiveEmpty = snapshot.sessions.find(
+      (session) => session.id === "session_inactive_empty",
+    );
+    const created = snapshot.sessions.find(
+      (session) => session.id === "session_1",
+    );
+    expect(inactiveEmpty?.messages).toEqual([]);
+    expect(created?.messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
   });
 
   it("generates ids that do not collide with initial snapshot records", async () => {
@@ -3497,28 +3604,40 @@ describe("createInProcessUiBackendClient", () => {
     ]);
   });
 
-  it("rejects concurrent prompt submission in v1", async () => {
+  it("queues concurrent prompt submissions in insertion order", async () => {
     let releaseStream: (() => void) | undefined;
     const release = new Promise<void>((resolve) => {
       releaseStream = resolve;
     });
     const baseClient = createFakeLLMClient([]);
+    const mainPrompts: string[] = [];
     const client = createInProcessUiBackendClient({
       llmClient: {
         ...baseClient,
         provider: {
           ...baseClient.provider,
-          streamChatCompletion(): Promise<
+          streamChatCompletion(
+            request: InterfaceProviderRequest,
+          ): Promise<
             AsyncIterable<InterfaceProviderStreamEvent>
           > {
+            if (isTitleGenerationRequest(request)) {
+              return Promise.resolve(createTitleProviderStream(request));
+            }
+            mainPrompts.push(lastRequestMessageText(request));
             return Promise.resolve(
               (async function* (): AsyncGenerator<
                 InterfaceProviderStreamEvent,
                 void,
                 unknown
               > {
-                await release;
-                yield { textDelta: "Done", finishReason: "stop" };
+                if (mainPrompts.length === 1) {
+                  await release;
+                }
+                yield {
+                  textDelta: `Done ${String(mainPrompts.length)}`,
+                  finishReason: "stop",
+                };
               })(),
             );
           },
@@ -3527,13 +3646,29 @@ describe("createInProcessUiBackendClient", () => {
     });
 
     const first = client.submitPrompt("First");
+    await vi.waitUntil(() => mainPrompts.length === 1);
+    const second = client.submitPrompt("Second");
 
-    await expect(client.submitPrompt("Second")).rejects.toThrow(
-      "A prompt is already running",
-    );
+    await Promise.resolve();
+    expect(mainPrompts).toEqual(["First"]);
 
     releaseStream?.();
-    await first;
+    await Promise.all([first, second]);
+
+    expect(mainPrompts).toEqual(["First", "Second"]);
+    const snapshot = await client.getSnapshot();
+    expect(snapshot.sessions).toHaveLength(1);
+    expect(
+      snapshot.sessions[0].messages.map((message) => ({
+        parts: message.parts,
+        role: message.role,
+      })),
+    ).toEqual([
+      { role: "user", parts: [{ type: "text", text: "First" }] },
+      { role: "assistant", parts: [{ type: "text", text: "Done 1" }] },
+      { role: "user", parts: [{ type: "text", text: "Second" }] },
+      { role: "assistant", parts: [{ type: "text", text: "Done 2" }] },
+    ]);
   });
 
   it("lists command catalog entries for the requested surface", async () => {
@@ -4561,7 +4696,6 @@ describe("createInProcessUiBackendClient", () => {
         projectDirectory: directory,
         sessionManager,
         stateStore: createPersistentUiStateStore({
-          appState: createDatabaseUiAppStateStore(),
           messageManager,
           runLedger: createDatabaseRunLedger(),
           sessionManager,
@@ -4646,7 +4780,6 @@ describe("createInProcessUiBackendClient", () => {
         projectDirectory: directory,
         sessionManager,
         stateStore: createPersistentUiStateStore({
-          appState: createDatabaseUiAppStateStore(),
           messageManager,
           runLedger: createDatabaseRunLedger(),
           sessionManager,
@@ -5052,7 +5185,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("reserves run ids from an injected persistent state store before submitting", async () => {
+  it("uses collision-resistant default run ids with an injected persistent state store", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-run-id-db-"));
     try {
       initDatabase({ dbPath: join(directory, "agent.db") });
@@ -5110,7 +5243,6 @@ describe("createInProcessUiBackendClient", () => {
         messageManager,
         sessionManager,
         stateStore: createPersistentUiStateStore({
-          appState: createDatabaseUiAppStateStore(),
           messageManager,
           runLedger,
           sessionManager,
@@ -5123,13 +5255,18 @@ describe("createInProcessUiBackendClient", () => {
         runId: "run_1",
         sessionId: "session_1",
       });
-      await expect(runLedger.get("run_2")).resolves.toMatchObject({
-        runId: "run_2",
-        sessionId: "session_52",
-      });
-      await expect(client.getSnapshot()).resolves.toMatchObject({
-        runs: [{ id: "run_2", sessionId: "session_52" }],
-      });
+      const snapshot = await client.getSnapshot();
+      const createdRun = snapshot.runs.find(
+        (run) => run.sessionId === "session_52",
+      );
+      expect(createdRun?.id).toMatch(/^run_/u);
+      expect(createdRun?.id).not.toBe("run_2");
+      await expect(runLedger.get(createdRun?.id ?? "")).resolves.toMatchObject(
+        {
+          runId: createdRun?.id,
+          sessionId: "session_52",
+        },
+      );
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
@@ -5147,7 +5284,6 @@ describe("createInProcessUiBackendClient", () => {
           { textDelta: "Never reached", finishReason: "stop" },
         ]),
         stateStore: createPersistentUiStateStore({
-          appState: createDatabaseUiAppStateStore(),
           messageManager: createMessageManager({
             bus: createBus(),
             store: createDatabaseMessageStore(),

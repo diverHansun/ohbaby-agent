@@ -1,5 +1,10 @@
-import { InvalidRunTransitionError, RunLedgerNotFoundError } from "./errors.js";
+import {
+  InvalidRunTransitionError,
+  RunLedgerNotFoundError,
+  SessionRunBusyError,
+} from "./errors.js";
 import type {
+  ClaimPendingRunLedgerInput,
   CreatePendingRunLedgerInput,
   InMemoryRunLedgerOptions,
   ListRunLedgerOptions,
@@ -60,21 +65,22 @@ export class InMemoryRunLedger implements RunLedger {
 
   createPending(input: CreatePendingRunLedgerInput): Promise<RunLedgerRecord> {
     return this.withAsyncBoundary(() => {
-      const existing = this.records.get(input.runId);
-      if (existing) {
-        throw new InvalidRunTransitionError(input.runId, undefined, "pending");
+      return cloneRecord(this.createPendingSync(input));
+    });
+  }
+
+  claimPendingRun(
+    input: ClaimPendingRunLedgerInput,
+  ): Promise<RunLedgerRecord> {
+    return this.withAsyncBoundary(() => {
+      const activeRunIds = Array.from(this.records.values())
+        .filter((record) => record.sessionId === input.sessionId)
+        .filter((record) => ACTIVE_STATUSES.has(record.status))
+        .map((record) => record.runId);
+      if (activeRunIds.length > 0) {
+        throw new SessionRunBusyError(input.sessionId, activeRunIds);
       }
-
-      const record: RunLedgerRecord = {
-        runId: input.runId,
-        sessionId: input.sessionId,
-        triggerSource: input.triggerSource,
-        status: "pending",
-        createdAt: this.now(),
-      };
-      this.records.set(input.runId, record);
-
-      return cloneRecord(record);
+      return cloneRecord(this.createPendingSync(input));
     });
   }
 
@@ -218,6 +224,26 @@ export class InMemoryRunLedger implements RunLedger {
     const next = update(current);
     this.records.set(runId, next);
     return next;
+  }
+
+  private createPendingSync(
+    input: CreatePendingRunLedgerInput,
+  ): RunLedgerRecord {
+    const existing = this.records.get(input.runId);
+    if (existing) {
+      throw new InvalidRunTransitionError(input.runId, undefined, "pending");
+    }
+
+    const record: RunLedgerRecord = {
+      runId: input.runId,
+      sessionId: input.sessionId,
+      triggerSource: input.triggerSource,
+      status: "pending",
+      createdAt: this.now(),
+    };
+    this.records.set(input.runId, record);
+
+    return record;
   }
 }
 

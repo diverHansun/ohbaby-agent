@@ -12,10 +12,12 @@ import {
   type SqliteValue,
   type StatementRunResult,
 } from "../../services/database/index.js";
+import { NodeSqliteConnection } from "../../services/database/connection.js";
 import {
   createDatabaseRunLedger,
   InvalidRunTransitionError,
   RunLedgerNotFoundError,
+  SessionRunBusyError,
 } from "./index.js";
 
 const cleanupPaths: string[] = [];
@@ -91,6 +93,103 @@ describe("createDatabaseRunLedger", () => {
     await expect(ledger.markRunning("run_1")).rejects.toBeInstanceOf(
       InvalidRunTransitionError,
     );
+  });
+
+  it("claims a pending run only when the session has no active run", async () => {
+    const ledger = createDatabaseRunLedger({ now: createClock() });
+
+    await expect(
+      ledger.claimPendingRun({
+        runId: "run_1",
+        sessionId: "session_1",
+        triggerSource: "user",
+      }),
+    ).resolves.toMatchObject({
+      runId: "run_1",
+      sessionId: "session_1",
+      status: "pending",
+    });
+    await expect(
+      ledger.claimPendingRun({
+        runId: "run_2",
+        sessionId: "session_1",
+        triggerSource: "user",
+      }),
+    ).rejects.toBeInstanceOf(SessionRunBusyError);
+    await expect(
+      ledger.claimPendingRun({
+        runId: "run_other",
+        sessionId: "session_2",
+        triggerSource: "user",
+      }),
+    ).resolves.toMatchObject({
+      runId: "run_other",
+      sessionId: "session_2",
+      status: "pending",
+    });
+  });
+
+  it("allows only one same-session claim across two database connections", async () => {
+    const firstConnection = new NodeSqliteConnection(getDatabase().path);
+    const secondConnection = new NodeSqliteConnection(getDatabase().path);
+    try {
+      const firstLedger = createDatabaseRunLedger({
+        db: firstConnection,
+        now: () => 1_000,
+      });
+      const secondLedger = createDatabaseRunLedger({
+        db: secondConnection,
+        now: () => 2_000,
+      });
+
+      const results = await Promise.allSettled([
+        firstLedger.claimPendingRun({
+          runId: "run_first",
+          sessionId: "session_1",
+          triggerSource: "user",
+        }),
+        secondLedger.claimPendingRun({
+          runId: "run_second",
+          sessionId: "session_1",
+          triggerSource: "user",
+        }),
+      ]);
+
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(
+        1,
+      );
+      const rejected = results.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected",
+      );
+      expect(rejected?.reason).toBeInstanceOf(SessionRunBusyError);
+    } finally {
+      firstConnection.close();
+      secondConnection.close();
+    }
+  });
+
+  it("allows a later claim after the session's active run reaches a terminal state", async () => {
+    const ledger = createDatabaseRunLedger({ now: createClock() });
+    await ledger.claimPendingRun({
+      runId: "run_1",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+    await ledger.markRunning("run_1");
+    await ledger.markCancelled("run_1", "interrupted by test");
+
+    await expect(
+      ledger.claimPendingRun({
+        runId: "run_2",
+        sessionId: "session_1",
+        triggerSource: "user",
+      }),
+    ).resolves.toMatchObject({
+      runId: "run_2",
+      sessionId: "session_1",
+      status: "pending",
+    });
   });
 
   it("does not overwrite terminal status when a transition races", async () => {

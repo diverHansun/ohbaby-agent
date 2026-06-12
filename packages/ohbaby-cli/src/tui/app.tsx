@@ -554,6 +554,7 @@ export function OhbabyTerminalApp({
           catalog={catalog}
           client={client}
           disabled={hasDialog}
+          isRuntimeRunning={runtime.kind === "running"}
           loadCatalog={loadCatalog}
           onCommandPanelOpen={openCommandPanel}
           permission={permission}

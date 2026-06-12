@@ -1,10 +1,16 @@
 import {
   getDatabase,
+  runWithBusyRetry,
   schema,
   type DatabaseConnection,
 } from "../../services/database/index.js";
-import { InvalidRunTransitionError, RunLedgerNotFoundError } from "./errors.js";
+import {
+  InvalidRunTransitionError,
+  RunLedgerNotFoundError,
+  SessionRunBusyError,
+} from "./errors.js";
 import type {
+  ClaimPendingRunLedgerInput,
   CreatePendingRunLedgerInput,
   InMemoryRunLedgerOptions,
   ListRunLedgerOptions,
@@ -101,6 +107,81 @@ export function createDatabaseRunLedger(
       .get(runId);
   }
 
+  function getRowInConnection(
+    connection: DatabaseConnection,
+    runId: string,
+  ): RunLedgerRow | undefined {
+    return connection
+      .prepare<RunLedgerRow>(
+        `SELECT * FROM ${schema.runLedger.tableName} WHERE run_id = ?`,
+      )
+      .get(runId);
+  }
+
+  function insertPendingRow(
+    connection: DatabaseConnection,
+    input: CreatePendingRunLedgerInput,
+  ): RunLedgerRecord {
+    if (getRowInConnection(connection, input.runId)) {
+      throw new InvalidRunTransitionError(input.runId, undefined, "pending");
+    }
+    const record: RunLedgerRecord = {
+      runId: input.runId,
+      sessionId: input.sessionId,
+      triggerSource: input.triggerSource,
+      status: "pending",
+      createdAt: now(),
+    };
+    connection
+      .prepare(
+        `INSERT INTO ${schema.runLedger.tableName}
+          (run_id, session_id, trigger, status, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.runId,
+        record.sessionId,
+        record.triggerSource,
+        record.status,
+        record.createdAt,
+      );
+    return record;
+  }
+
+  function getActiveRunIdsForSession(
+    connection: DatabaseConnection,
+    sessionId: string,
+  ): string[] {
+    const statuses = Array.from(ACTIVE_STATUSES);
+    const placeholders = statuses.map(() => "?").join(", ");
+    return connection
+      .prepare<{ readonly run_id: string }>(
+        `SELECT run_id FROM ${schema.runLedger.tableName}
+         WHERE session_id = ? AND status IN (${placeholders})
+         ORDER BY created_at ASC`,
+      )
+      .all(sessionId, ...statuses)
+      .map((row) => row.run_id);
+  }
+
+  function withImmediateTransaction<T>(operation: () => T): T {
+    return runWithBusyRetry(() => {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const result = operation();
+        db.exec("COMMIT");
+        return result;
+      } catch (error) {
+        try {
+          db.exec("ROLLBACK");
+        } catch {
+          // Preserve the original ledger error.
+        }
+        throw error;
+      }
+    });
+  }
+
   function transition(
     runId: string,
     toStatus: RunStatus,
@@ -146,31 +227,21 @@ export function createDatabaseRunLedger(
       input: CreatePendingRunLedgerInput,
     ): Promise<RunLedgerRecord> {
       return withAsyncBoundary(() => {
-        if (getRow(input.runId)) {
-          throw new InvalidRunTransitionError(
-            input.runId,
-            undefined,
-            "pending",
-          );
-        }
-        const record: RunLedgerRecord = {
-          runId: input.runId,
-          sessionId: input.sessionId,
-          triggerSource: input.triggerSource,
-          status: "pending",
-          createdAt: now(),
-        };
-        db.prepare(
-          `INSERT INTO ${schema.runLedger.tableName}
-            (run_id, session_id, trigger, status, created_at)
-           VALUES (?, ?, ?, ?, ?)`,
-        ).run(
-          record.runId,
-          record.sessionId,
-          record.triggerSource,
-          record.status,
-          record.createdAt,
-        );
+        return cloneRecord(insertPendingRow(db, input));
+      });
+    },
+
+    claimPendingRun(
+      input: ClaimPendingRunLedgerInput,
+    ): Promise<RunLedgerRecord> {
+      return withAsyncBoundary(() => {
+        const record = withImmediateTransaction(() => {
+          const activeRunIds = getActiveRunIdsForSession(db, input.sessionId);
+          if (activeRunIds.length > 0) {
+            throw new SessionRunBusyError(input.sessionId, activeRunIds);
+          }
+          return insertPendingRow(db, input);
+        });
         return cloneRecord(record);
       });
     },

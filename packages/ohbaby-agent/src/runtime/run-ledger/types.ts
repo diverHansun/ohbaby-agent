@@ -25,6 +25,8 @@ export interface CreatePendingRunLedgerInput {
   readonly triggerSource: TriggerSource;
 }
 
+export type ClaimPendingRunLedgerInput = CreatePendingRunLedgerInput;
+
 export interface ListRunLedgerOptions {
   readonly limit?: number;
 }
@@ -40,6 +42,9 @@ export interface MarkInterruptedResult {
 
 export interface RunLedger {
   createPending(input: CreatePendingRunLedgerInput): Promise<RunLedgerRecord>;
+  claimPendingRun(
+    input: ClaimPendingRunLedgerInput,
+  ): Promise<RunLedgerRecord>;
   markRunning(runId: string): Promise<RunLedgerRecord>;
   markSucceeded(runId: string): Promise<RunLedgerRecord>;
   markFailed(runId: string, error: unknown): Promise<RunLedgerRecord>;

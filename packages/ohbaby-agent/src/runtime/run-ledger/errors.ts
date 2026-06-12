@@ -21,3 +21,15 @@ export class InvalidRunTransitionError extends Error {
     this.name = "InvalidRunTransitionError";
   }
 }
+
+export class SessionRunBusyError extends Error {
+  constructor(
+    readonly sessionId: string,
+    readonly activeRunIds: readonly string[],
+  ) {
+    super(
+      `Session ${sessionId} already has active run(s): ${activeRunIds.join(", ")}`,
+    );
+    this.name = "SessionRunBusyError";
+  }
+}

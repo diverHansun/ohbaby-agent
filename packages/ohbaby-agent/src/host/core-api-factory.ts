@@ -6,6 +6,7 @@ import {
 import { McpManager } from "../mcp/index.js";
 
 export interface CoreApiFactoryOptions {
+  readonly continue?: boolean;
   readonly mode?: "plan" | "auto";
   readonly permission?: "default" | "full-access";
   readonly resume?: string;
@@ -38,11 +39,23 @@ function initialSnapshotFromOptions(
   };
 }
 
+function assertStartupOptions(options: CoreApiFactoryOptions): void {
+  if (options.resume !== undefined && options.continue === true) {
+    throw new Error("--resume and --continue cannot be used together");
+  }
+}
+
 export function buildCoreAPIImpl(
   options: CoreApiFactoryOptions = {},
 ): CoreApiHost {
+  assertStartupOptions(options);
+
+  const initialSnapshot = initialSnapshotFromOptions(options);
   const client = createPersistentUiBackendClient({
-    initialSnapshot: initialSnapshotFromOptions(options),
+    ...(initialSnapshot === undefined ? {} : { initialSnapshot }),
+    ...(options.continue === true
+      ? { startupSessionMode: { type: "continue" as const } }
+      : {}),
     ...(options.resume === undefined
       ? {}
       : { resumeSessionId: options.resume }),

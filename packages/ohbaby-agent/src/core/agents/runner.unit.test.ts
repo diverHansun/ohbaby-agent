@@ -18,6 +18,7 @@ import type {
   ToolExecutionEnvironment,
   ToolSchedulerInstance,
 } from "../tool-scheduler/index.js";
+import { SessionRunBusyError } from "../../runtime/run-ledger/index.js";
 
 function userMessage(id: string): CoreMessage {
   return {
@@ -56,6 +57,7 @@ interface MessageManagerFixture {
   readonly createMessage: ReturnType<typeof vi.fn>;
   readonly listBySession: ReturnType<typeof vi.fn>;
   readonly manager: MessageManager;
+  readonly removeMessage: ReturnType<typeof vi.fn>;
 }
 
 function createMessageManager(
@@ -91,11 +93,12 @@ function createMessageManager(
   const listBySession = vi.fn<MessageManager["listBySession"]>(
     (): Promise<MessageWithParts[]> => Promise.resolve([...messages]),
   );
+  const removeMessage = vi.fn((): Promise<void> => Promise.resolve());
   const manager: MessageManager = {
     appendPart,
     createMessage,
     listBySession,
-    removeMessage: vi.fn((): Promise<void> => Promise.resolve()),
+    removeMessage,
     removeMessages: vi.fn((): Promise<void> => Promise.resolve()),
     toModelMessages: vi.fn(() => Promise.resolve([])),
     updateMessage: vi.fn((): Promise<CoreMessage> => Promise.resolve(userMessage("updated"))),
@@ -108,7 +111,7 @@ function createMessageManager(
       type: "text",
     })),
   };
-  return { appendPart, createMessage, listBySession, manager };
+  return { appendPart, createMessage, listBySession, manager, removeMessage };
 }
 
 function createToolScheduler(
@@ -316,6 +319,52 @@ describe("runAgent", () => {
         parentMessageId: "parent_message",
       }),
     );
+  });
+
+  it("removes the initial user message when run creation fails", async () => {
+    const messageManager = createMessageManager();
+    const runCoordinator = createRunCoordinator();
+    runCoordinator.create.mockRejectedValue(
+      new SessionRunBusyError("session_child", ["run_active"]),
+    );
+
+    await expect(
+      runAgent(
+        createDeps({
+          messageManager: messageManager.manager,
+          runCoordinator: runCoordinator.coordinator,
+        }),
+        baseInput(),
+      ),
+    ).rejects.toBeInstanceOf(SessionRunBusyError);
+
+    expect(messageManager.createMessage).toHaveBeenCalledTimes(1);
+    expect(messageManager.appendPart).toHaveBeenCalledTimes(1);
+    expect(messageManager.removeMessage).toHaveBeenCalledWith("user_1");
+    expect(runCoordinator.waitForCompletion).not.toHaveBeenCalled();
+    expect(messageManager.listBySession).not.toHaveBeenCalled();
+  });
+
+  it("preserves the run creation error when initial user message cleanup fails", async () => {
+    const messageManager = createMessageManager();
+    const runCoordinator = createRunCoordinator();
+    const busyError = new SessionRunBusyError("session_child", ["run_active"]);
+    runCoordinator.create.mockRejectedValue(busyError);
+    messageManager.removeMessage.mockRejectedValue(new Error("cleanup failed"));
+
+    await expect(
+      runAgent(
+        createDeps({
+          messageManager: messageManager.manager,
+          runCoordinator: runCoordinator.coordinator,
+        }),
+        baseInput(),
+      ),
+    ).rejects.toBe(busyError);
+
+    expect(messageManager.removeMessage).toHaveBeenCalledWith("user_1");
+    expect(runCoordinator.waitForCompletion).not.toHaveBeenCalled();
+    expect(messageManager.listBySession).not.toHaveBeenCalled();
   });
 
   it("cancels the run when the caller aborts", async () => {
