@@ -291,7 +291,7 @@ git commit -m "feat(daemon): serve ui backend over http"
 - Create: `packages/ohbaby-agent/src/runtime/daemon/client.integration.test.ts`
 - Modify: `packages/ohbaby-agent/src/runtime/daemon/index.ts`
 
-- [ ] Write failing integration tests against `createDaemonHttpServer`.
+- [x] Write failing integration tests against `createDaemonHttpServer`.
 
 Test cases:
 
@@ -309,7 +309,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/client.integration
 
 Expected RED: fails because `client.ts` does not exist.
 
-- [ ] Implement `createRemoteUiBackendClient` and `createRemoteCoreApiHost`.
+- [x] Implement `createRemoteUiBackendClient` and `createRemoteCoreApiHost`.
 
 Required public API:
 
@@ -338,7 +338,7 @@ Implementation rules:
 - `dispose` aborts the SSE loop and clears handlers.
 - The client does not reconnect automatically in Phase 3; reconnect behavior is covered by calling `getSnapshot` after a new client is created.
 
-- [ ] Run focused tests.
+- [x] Run focused tests.
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/client.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts --no-file-parallelism
@@ -346,7 +346,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/client.integration
 
 Expected GREEN: client and server integration tests pass.
 
-- [ ] Commit.
+- [x] Commit.
 
 ```powershell
 git add packages/ohbaby-agent/src/runtime/daemon/client.ts packages/ohbaby-agent/src/runtime/daemon/client.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/index.ts

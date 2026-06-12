@@ -7,3 +7,8 @@ export type {
   DaemonHttpServerHandle,
   DaemonHttpServerOptions,
 } from "./server.js";
+export {
+  createRemoteCoreApiHost,
+  createRemoteUiBackendClient,
+} from "./client.js";
+export type { RemoteDaemonClientOptions } from "./client.js";
