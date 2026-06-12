@@ -53,6 +53,65 @@ function markBackendLeaseDead(): void {
 }
 
 describe("TUI persistent backend display", () => {
+  it("keeps a second fresh terminal blank after another terminal creates a session", async () => {
+    const directory = await tempWorkspace("ohbaby-cli-two-fresh");
+    const dbPath = join(directory, "agent.db");
+    const workdir = join(directory, "workspace");
+    const clientA = createPersistentUiBackendClient({
+      dbPath,
+      llmClient: createFakeLLMClient([
+        { textDelta: "Terminal A response.", finishReason: "stop" },
+      ]),
+      workdir,
+    });
+    const clientB = createPersistentUiBackendClient({
+      dbPath,
+      llmClient: createFakeLLMClient([]),
+      workdir,
+    });
+    const appA = render(
+      <OhbabyTerminalApp
+        client={clientA}
+        subscribeEvents={clientA.subscribeEvents}
+      />,
+    );
+    const appB = render(
+      <OhbabyTerminalApp
+        client={clientB}
+        subscribeEvents={clientB.subscribeEvents}
+      />,
+    );
+
+    try {
+      await waitForFrame(appA, promptIsReady);
+      await waitForFrame(appB, promptIsReady);
+      await expect(clientA.getSnapshot()).resolves.toMatchObject({
+        activeSessionId: null,
+      });
+      await expect(clientB.getSnapshot()).resolves.toMatchObject({
+        activeSessionId: null,
+      });
+
+      appA.stdin.write("Terminal A prompt");
+      appA.stdin.write("\r");
+      await waitForFrame(appA, (frame) =>
+        frame.includes("Terminal A response."),
+      );
+
+      const terminalBSnapshot = await clientB.getSnapshot();
+      const terminalBFrame = appB.lastFrame() ?? "";
+
+      expect(terminalBSnapshot.activeSessionId).toBeNull();
+      expect(terminalBSnapshot.sessions).toHaveLength(1);
+      expect(terminalBSnapshot.status).toEqual({ kind: "idle" });
+      expect(terminalBFrame).not.toContain("Terminal A prompt");
+      expect(terminalBFrame).not.toContain("Terminal A response.");
+    } finally {
+      appA.unmount();
+      appB.unmount();
+    }
+  });
+
   it("renders continued sessions, messages, and run status from the initial snapshot", async () => {
     const directory = await tempWorkspace("ohbaby-cli-persistent");
     const dbPath = join(directory, "agent.db");
