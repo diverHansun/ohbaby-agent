@@ -23,6 +23,7 @@ export interface ResolveSessionForNewPromptInput {
   readonly explicitSessionId?: string;
   readonly getUiSession: (id: string) => Promise<UiSession | null | undefined>;
   readonly projectRoot: string;
+  readonly reuseInactiveEmptySessions?: boolean;
   readonly sessionManager?: InProcessSessionManager;
   readonly snapshot: UiSnapshot;
 }
@@ -199,6 +200,13 @@ export async function resolveSessionForNewPrompt(
     if (resolved) {
       return resolved;
     }
+  }
+
+  if (input.reuseInactiveEmptySessions !== true) {
+    return {
+      isNewSession: true,
+      session: await input.createSession(),
+    };
   }
 
   const reusableCoreSession =

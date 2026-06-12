@@ -60,6 +60,7 @@ function snapshot(input: {
 }
 
 function createResolver(input: {
+  readonly reuseInactiveEmptySessions?: boolean;
   readonly snapshot: UiSnapshot;
   readonly sessionManager?: InProcessSessionManager;
 }): ReturnType<typeof resolveSessionForNewPrompt> {
@@ -71,6 +72,7 @@ function createResolver(input: {
         input.snapshot.sessions.find((session) => session.id === id) ?? null,
       ),
     projectRoot: "D:/repo",
+    reuseInactiveEmptySessions: input.reuseInactiveEmptySessions,
     sessionManager: input.sessionManager,
     snapshot: input.snapshot,
   });
@@ -119,6 +121,33 @@ describe("resolveSessionForNewPrompt", () => {
     });
   });
 
+  it("does not reuse an inactive empty UI session for a prompt by default", async () => {
+    const active = uiSession({
+      id: "session_active_non_empty",
+      messages: [
+        {
+          createdAt: BASE_TIME,
+          id: "message_1",
+          parts: [{ text: "Existing", type: "text" }],
+          role: "user",
+        },
+      ],
+    });
+    const inactiveEmpty = uiSession({ id: "session_inactive_empty" });
+
+    await expect(
+      createResolver({
+        snapshot: snapshot({
+          activeSessionId: active.id,
+          sessions: [active, inactiveEmpty],
+        }),
+      }),
+    ).resolves.toMatchObject({
+      isNewSession: true,
+      session: { id: "session_created" },
+    });
+  });
+
   it("reuses a core empty primary session before scanning UI-only empty sessions", async () => {
     const uiOnly = uiSession({ id: "session_ui_empty" });
     const core = coreSession({
@@ -153,6 +182,7 @@ describe("resolveSessionForNewPrompt", () => {
       createResolver({
         sessionManager: manager,
         snapshot: snapshot({ sessions: [uiOnly] }),
+        reuseInactiveEmptySessions: true,
       }),
     ).resolves.toMatchObject({
       isNewSession: false,
@@ -166,6 +196,7 @@ describe("resolveSessionForNewPrompt", () => {
     await expect(
       createResolver({
         snapshot: snapshot({ sessions: [uiOnly] }),
+        reuseInactiveEmptySessions: true,
       }),
     ).resolves.toMatchObject({
       isNewSession: false,

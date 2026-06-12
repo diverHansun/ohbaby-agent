@@ -471,7 +471,7 @@ Create:
 
 ### Task 2.1: Characterization Tests
 
-- [ ] Add or expand contract tests before moving code.
+- [x] Add or expand contract tests before moving code.
 
 Cover:
 
@@ -482,7 +482,7 @@ Cover:
 - abort active run.
 - queued prompt behavior from Phase 1.
 
-- [ ] Run:
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts
@@ -492,10 +492,10 @@ Expected: all behavior is characterized before refactor.
 
 ### Task 2.2: Extract Session Controller
 
-- [ ] Move session-specific logic into `session-controller.ts`.
-- [ ] Keep public `UiBackendClient` method names unchanged.
-- [ ] Add unit tests for active-session transitions and empty-session reuse.
-- [ ] Run:
+- [x] Move session-specific logic into `session-controller.ts`.
+- [x] Keep public `UiBackendClient` method names unchanged.
+- [x] Add unit tests for active-session transitions and empty-session reuse.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-inprocess/session-controller.unit.test.ts packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts
@@ -505,11 +505,11 @@ Expected: no behavior change.
 
 ### Task 2.3: Extract Prompt And Runtime Controllers
 
-- [ ] Move queue binding into `prompt-controller.ts`.
-- [ ] Move runtime construction, run stream subscription, and abort handling into `runtime-controller.ts`.
-- [ ] Ensure the prompt controller depends on an interface, not on concrete TUI code.
-- [ ] Add unit tests for queue-to-runtime transitions.
-- [ ] Run:
+- [x] Move queue binding into `prompt-controller.ts`.
+- [x] Move runtime construction, run stream subscription, and abort handling into `runtime-controller.ts`.
+- [x] Ensure the prompt controller depends on an interface, not on concrete TUI code.
+- [x] Add unit tests for queue-to-runtime transitions.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-inprocess/prompt-controller.unit.test.ts packages/ohbaby-agent/src/adapters/ui-inprocess/runtime-controller.unit.test.ts packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts
@@ -519,10 +519,10 @@ Expected: prompt behavior is unchanged.
 
 ### Task 2.4: Extract Event Router
 
-- [ ] Move app-event subscription logic into `event-router.ts`.
-- [ ] Add unit tests for event-to-snapshot invalidation.
-- [ ] Keep `ui-inprocess.ts` as a small composition module.
-- [ ] Run:
+- [x] Move app-event subscription logic into `event-router.ts`.
+- [x] Add unit tests for event-to-snapshot invalidation.
+- [x] Keep `ui-inprocess.ts` as a small composition module.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-inprocess/event-router.unit.test.ts packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts
@@ -532,9 +532,9 @@ Expected: event delivery and snapshots remain stable.
 
 ### Phase 2 Verification And Commit
 
-- [ ] Run all verification commands listed at the top of this plan.
-- [ ] Request subagent code review for Phase 2, focused on accidental behavior drift.
-- [ ] Per-task scoped commits on `feat/terminal-daemon-phase-2` (e.g. `refactor(agent): extract session controller`). After review passes, merge:
+- [x] Run all verification commands listed at the top of this plan.
+- [x] Request subagent code review for Phase 2, focused on accidental behavior drift.
+- [x] Per-task scoped commits on `feat/terminal-daemon-phase-2` (e.g. `refactor(agent): extract session controller`). After review passes, merge:
 
 ```powershell
 git switch mvp

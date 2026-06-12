@@ -3120,6 +3120,66 @@ describe("createInProcessUiBackendClient", () => {
     );
   });
 
+  it("does not reuse an inactive empty session when submitting a prompt without an explicit session id", async () => {
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "session_active",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_active",
+            messages: [
+              {
+                createdAt: "2026-05-20T00:00:00.000Z",
+                id: "message_existing",
+                parts: [{ text: "Existing", type: "text" }],
+                role: "user",
+              },
+            ],
+            projectRoot: process.cwd(),
+            title: "Active session",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_inactive_empty",
+            messages: [],
+            projectRoot: process.cwd(),
+            title: "New session",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([
+        { textDelta: "Created a new session.", finishReason: "stop" },
+      ]),
+    });
+
+    await client.submitPrompt("Create a new session instead");
+
+    const snapshot = await client.getSnapshot();
+    expect(snapshot.activeSessionId).toBe("session_1");
+    expect(snapshot.sessions.map((session) => session.id)).toEqual([
+      "session_active",
+      "session_inactive_empty",
+      "session_1",
+    ]);
+    const inactiveEmpty = snapshot.sessions.find(
+      (session) => session.id === "session_inactive_empty",
+    );
+    const created = snapshot.sessions.find(
+      (session) => session.id === "session_1",
+    );
+    expect(inactiveEmpty?.messages).toEqual([]);
+    expect(created?.messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
+  });
+
   it("generates ids that do not collide with initial snapshot records", async () => {
     const client = createInProcessUiBackendClient({
       initialSnapshot: {

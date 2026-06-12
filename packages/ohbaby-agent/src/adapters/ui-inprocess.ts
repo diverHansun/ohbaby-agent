@@ -809,6 +809,7 @@ export function createInProcessUiBackendClient(
       },
       getUiSession: (id) => stateStore.getSession(id),
       projectRoot,
+      reuseInactiveEmptySessions: true,
       sessionManager: options.sessionManager,
       snapshot,
     });
