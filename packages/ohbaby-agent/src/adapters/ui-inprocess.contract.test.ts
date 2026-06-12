@@ -2748,10 +2748,19 @@ describe("createInProcessUiBackendClient", () => {
       );
       const run = client.submitPrompt("Abort this write");
       const permissionEvent = await permission;
+      const queuedRun = client.submitPrompt("Continue after abort", {
+        sessionId: "session_1",
+      });
+
+      await Promise.resolve();
+      expect(requests).toHaveLength(1);
 
       await client.abortRun(permissionEvent.request.runId);
       await expect(
         withTimeout(run, 1_000, "run did not abort"),
+      ).resolves.toBeUndefined();
+      await expect(
+        withTimeout(queuedRun, 1_000, "queued run did not continue"),
       ).resolves.toBeUndefined();
 
       let snapshot = await client.getSnapshot();
@@ -2774,9 +2783,6 @@ describe("createInProcessUiBackendClient", () => {
 
       await client.respondPermission(permissionEvent.request.id, {
         choiceId: "allow_once",
-      });
-      await client.submitPrompt("Continue after abort", {
-        sessionId: "session_1",
       });
 
       snapshot = await client.getSnapshot();
@@ -3504,28 +3510,40 @@ describe("createInProcessUiBackendClient", () => {
     ]);
   });
 
-  it("rejects concurrent prompt submission in v1", async () => {
+  it("queues concurrent prompt submissions in insertion order", async () => {
     let releaseStream: (() => void) | undefined;
     const release = new Promise<void>((resolve) => {
       releaseStream = resolve;
     });
     const baseClient = createFakeLLMClient([]);
+    const mainPrompts: string[] = [];
     const client = createInProcessUiBackendClient({
       llmClient: {
         ...baseClient,
         provider: {
           ...baseClient.provider,
-          streamChatCompletion(): Promise<
+          streamChatCompletion(
+            request: InterfaceProviderRequest,
+          ): Promise<
             AsyncIterable<InterfaceProviderStreamEvent>
           > {
+            if (isTitleGenerationRequest(request)) {
+              return Promise.resolve(createTitleProviderStream(request));
+            }
+            mainPrompts.push(lastRequestMessageText(request));
             return Promise.resolve(
               (async function* (): AsyncGenerator<
                 InterfaceProviderStreamEvent,
                 void,
                 unknown
               > {
-                await release;
-                yield { textDelta: "Done", finishReason: "stop" };
+                if (mainPrompts.length === 1) {
+                  await release;
+                }
+                yield {
+                  textDelta: `Done ${String(mainPrompts.length)}`,
+                  finishReason: "stop",
+                };
               })(),
             );
           },
@@ -3534,13 +3552,16 @@ describe("createInProcessUiBackendClient", () => {
     });
 
     const first = client.submitPrompt("First");
+    await vi.waitUntil(() => mainPrompts.length === 1);
+    const second = client.submitPrompt("Second");
 
-    await expect(client.submitPrompt("Second")).rejects.toThrow(
-      "A prompt is already running",
-    );
+    await Promise.resolve();
+    expect(mainPrompts).toEqual(["First"]);
 
     releaseStream?.();
-    await first;
+    await Promise.all([first, second]);
+
+    expect(mainPrompts).toEqual(["First", "Second"]);
   });
 
   it("lists command catalog entries for the requested surface", async () => {

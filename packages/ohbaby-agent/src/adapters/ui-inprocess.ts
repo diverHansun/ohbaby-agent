@@ -72,7 +72,10 @@ import {
   type SkillLogger,
 } from "../skill/index.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
-import type { RunLedger } from "../runtime/run-ledger/index.js";
+import {
+  SessionRunBusyError,
+  type RunLedger,
+} from "../runtime/run-ledger/index.js";
 import type { StreamBridge } from "../runtime/stream-bridge/index.js";
 import {
   cloneMessage,
@@ -93,6 +96,7 @@ import { loadModelJson } from "../config/llm/loaders.js";
 import { ConfigError } from "../config/llm/types.js";
 import { validateModelJson } from "../config/llm/validation.js";
 import type { ModelJsonConfig } from "../config/llm/types.js";
+import { PromptQueueController } from "./ui-prompt-queue.js";
 
 const EMPTY_SNAPSHOT: UiSnapshot = {
   sessions: [],
@@ -361,6 +365,13 @@ export function createInProcessUiBackendClient(
   let connectModelQueue: Promise<void> = Promise.resolve();
   let skillRegistryPromise: Promise<SkillRegistry> | undefined;
   const pendingPermissionSessions = new Map<string, string>();
+  const promptQueue = new PromptQueueController({
+    isBusyError: (error): boolean => error instanceof SessionRunBusyError,
+    retryDelayMs: 250,
+    submit(item): Promise<void> {
+      return submitPromptInternal(item.text, item.submitOptions);
+    },
+  });
 
   function usesPersistentStateStore(): boolean {
     return stateStore.requiresServiceManagersForWrites === true;
@@ -1609,6 +1620,7 @@ export function createInProcessUiBackendClient(
   );
   return {
     dispose(): void {
+      promptQueue.close();
       for (const unsubscribe of busSubscriptions.splice(0)) {
         unsubscribe();
       }
@@ -1639,7 +1651,11 @@ export function createInProcessUiBackendClient(
       text: string,
       submitOptions?: SubmitPromptOptions,
     ): Promise<void> {
-      return submitPromptInternal(text, submitOptions);
+      return promptQueue.enqueue({
+        sessionId: submitOptions?.sessionId ?? null,
+        text,
+        ...(submitOptions === undefined ? {} : { submitOptions }),
+      });
     },
 
     compactSession(
