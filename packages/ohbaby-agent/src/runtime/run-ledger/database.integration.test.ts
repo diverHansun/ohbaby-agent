@@ -16,6 +16,7 @@ import {
   createDatabaseRunLedger,
   InvalidRunTransitionError,
   RunLedgerNotFoundError,
+  SessionRunBusyError,
 } from "./index.js";
 
 const cleanupPaths: string[] = [];
@@ -91,6 +92,63 @@ describe("createDatabaseRunLedger", () => {
     await expect(ledger.markRunning("run_1")).rejects.toBeInstanceOf(
       InvalidRunTransitionError,
     );
+  });
+
+  it("claims a pending run only when the session has no active run", async () => {
+    const ledger = createDatabaseRunLedger({ now: createClock() });
+
+    await expect(
+      ledger.claimPendingRun({
+        runId: "run_1",
+        sessionId: "session_1",
+        triggerSource: "user",
+      }),
+    ).resolves.toMatchObject({
+      runId: "run_1",
+      sessionId: "session_1",
+      status: "pending",
+    });
+    await expect(
+      ledger.claimPendingRun({
+        runId: "run_2",
+        sessionId: "session_1",
+        triggerSource: "user",
+      }),
+    ).rejects.toBeInstanceOf(SessionRunBusyError);
+    await expect(
+      ledger.claimPendingRun({
+        runId: "run_other",
+        sessionId: "session_2",
+        triggerSource: "user",
+      }),
+    ).resolves.toMatchObject({
+      runId: "run_other",
+      sessionId: "session_2",
+      status: "pending",
+    });
+  });
+
+  it("allows a later claim after the session's active run reaches a terminal state", async () => {
+    const ledger = createDatabaseRunLedger({ now: createClock() });
+    await ledger.claimPendingRun({
+      runId: "run_1",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+    await ledger.markRunning("run_1");
+    await ledger.markCancelled("run_1", "interrupted by test");
+
+    await expect(
+      ledger.claimPendingRun({
+        runId: "run_2",
+        sessionId: "session_1",
+        triggerSource: "user",
+      }),
+    ).resolves.toMatchObject({
+      runId: "run_2",
+      sessionId: "session_1",
+      status: "pending",
+    });
   });
 
   it("does not overwrite terminal status when a transition races", async () => {

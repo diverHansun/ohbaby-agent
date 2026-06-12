@@ -1030,6 +1030,13 @@ class RecordingRunLedger implements RunLedger {
     return this.inner.createPending(input);
   }
 
+  claimPendingRun(
+    input: Parameters<RunLedger["claimPendingRun"]>[0],
+  ): Promise<RunLedgerRecord> {
+    this.calls.push("claimPendingRun");
+    return this.inner.claimPendingRun(input);
+  }
+
   markRunning(runId: string): Promise<RunLedgerRecord> {
     this.calls.push("markRunning");
     return this.inner.markRunning(runId);
@@ -2799,7 +2806,7 @@ describe("createInProcessUiBackendClient", () => {
     await client.submitPrompt("Use the runtime manager");
 
     expect(runLedger.calls).toEqual([
-      "createPending",
+      "claimPendingRun",
       "markRunning",
       "markSucceeded",
     ]);

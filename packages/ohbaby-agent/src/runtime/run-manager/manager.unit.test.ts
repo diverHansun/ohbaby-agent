@@ -125,6 +125,13 @@ class RecordingLedger implements RunLedger {
     return this.inner.createPending(input);
   }
 
+  claimPendingRun(
+    input: Parameters<RunLedger["claimPendingRun"]>[0],
+  ): Promise<RunLedgerRecord> {
+    this.calls.push("claimPendingRun");
+    return this.inner.claimPendingRun(input);
+  }
+
   markRunning(runId: string): Promise<RunLedgerRecord> {
     this.calls.push("markRunning");
     return this.inner.markRunning(runId);
@@ -738,7 +745,7 @@ describe("RunManager", () => {
     expect(typeof ledgerRecord?.startedAt).toBe("number");
     expect(typeof ledgerRecord?.endedAt).toBe("number");
     expect(ledger.calls).toEqual([
-      "createPending",
+      "claimPendingRun",
       "markRunning",
       "markSucceeded",
     ]);

@@ -108,7 +108,7 @@ export class RunManager {
       }
 
       const runId = options.runId ?? this.createRunId();
-      await this.deps.runLedger.createPending({
+      const ledgerRecord = await this.deps.runLedger.claimPendingRun({
         runId,
         sessionId: options.sessionId,
         triggerSource: options.triggerSource,
@@ -122,7 +122,7 @@ export class RunManager {
         permissionProfileId: resolved.permissionProfileId,
         multitaskStrategy: resolved.multitaskStrategy,
         disconnectMode: resolved.disconnectMode,
-        createdAt: this.now(),
+        createdAt: ledgerRecord.createdAt,
         abortController: new AbortController(),
         options,
       };

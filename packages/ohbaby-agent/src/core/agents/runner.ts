@@ -164,6 +164,9 @@ export async function runAgent(
       });
     } catch (error) {
       await preSubscribed?.close();
+      if (userMessageId) {
+        await deps.messageManager.removeMessage(userMessageId);
+      }
       throw error;
     }
     const unbindAbort = bindAgentAbort({

@@ -3,6 +3,7 @@ import {
   createInMemoryRunLedger,
   InvalidRunTransitionError,
   RunLedgerNotFoundError,
+  SessionRunBusyError,
   type TriggerSource,
   type RunLedger,
 } from "./index.js";
@@ -141,6 +142,63 @@ describe("InMemoryRunLedger", () => {
     await expect(ledger.get("run_1")).resolves.toMatchObject({
       status: "succeeded",
       startedAt: 2_000,
+    });
+  });
+
+  it("claims a pending run only when the session has no active run", async () => {
+    const ledger = createLedger();
+
+    await expect(
+      ledger.claimPendingRun({
+        runId: "run_1",
+        sessionId: "session_1",
+        triggerSource: "user",
+      }),
+    ).resolves.toMatchObject({
+      runId: "run_1",
+      sessionId: "session_1",
+      status: "pending",
+    });
+    await expect(
+      ledger.claimPendingRun({
+        runId: "run_2",
+        sessionId: "session_1",
+        triggerSource: "user",
+      }),
+    ).rejects.toBeInstanceOf(SessionRunBusyError);
+    await expect(
+      ledger.claimPendingRun({
+        runId: "run_other",
+        sessionId: "session_2",
+        triggerSource: "user",
+      }),
+    ).resolves.toMatchObject({
+      runId: "run_other",
+      sessionId: "session_2",
+      status: "pending",
+    });
+  });
+
+  it("allows a later claim after the session's active run reaches a terminal state", async () => {
+    const ledger = createLedger();
+    await ledger.claimPendingRun({
+      runId: "run_1",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+    await ledger.markRunning("run_1");
+    await ledger.markSucceeded("run_1");
+
+    await expect(
+      ledger.claimPendingRun({
+        runId: "run_2",
+        sessionId: "session_1",
+        triggerSource: "user",
+      }),
+    ).resolves.toMatchObject({
+      runId: "run_2",
+      sessionId: "session_1",
+      status: "pending",
     });
   });
 
