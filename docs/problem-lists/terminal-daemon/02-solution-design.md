@@ -231,41 +231,42 @@ function snapshotStatus(
 
 **解决的问题**：P5（单文件 1696 行）
 
-#### 拆分方案
+#### 2026-06-12 Phase 2 实施修订
+
+Phase 2 已按 `06-phase-2-execution-plan.md` 收窄为 daemon 前置重构的最小有价值切片，而不是一次性删除 `ui-inprocess.ts`。当前落地结构为：
 
 ```
 adapters/
+  ui-inprocess.ts              # public assembly / composition entry (~1424 行)
   ui-inprocess/
-    index.ts              # createInProcessUiBackendClient 外壳 (~200行)
-    session-orchestrator.ts  # session 创建/查找/复用/激活 (~200行)
-    prompt-pipeline.ts    # submitPromptInternal + stream 投影集成 (~250行)
-    command-orchestrator.ts  # 命令执行 (~200行)
-    snapshot-service.ts   # readSnapshot + publish (~150行)
-    title-generator.ts    # session title 生成逻辑 (~180行)
-    context-tracker.ts    # context window 追踪 (~80行)
-    types.ts              # 内部类型
+    types.ts                   # 内部共享类型
+    session-controller.ts      # active session、create/rename/delete、空 session 复用
+    prompt-controller.ts       # prompt queue 绑定与 drain 入口
+    runtime-controller.ts      # runtime lazy creation、stream、abort
+    event-router.ts            # app event routing、snapshot invalidation、handler isolation
 ```
+
+这个结果只解决了 P5 的一半：它把 Phase 3 daemon 需要接触的 session/prompt/runtime/event 边界从大文件中抽出，降低继续接线时的风险；但命令执行、title 生成、snapshot 管理、permission/context 等逻辑仍在 `ui-inprocess.ts` 内。后续不应把这部分作为 Phase 3 的阻塞项，而应在 Phase 3/4 真正触碰对应边界时继续按同样原则拆出。
 
 #### 拆分原则
 
-- 每个文件只引入它**直接需要**的依赖（不传整个 `options` 对象）
+- 每个新 controller 只引入它**直接需要**的依赖（不传整个 `options` 对象）
 - 通过构造函数或函数参数显式传递依赖
-- 原 `ui-inprocess.ts` 的 `index.ts` 只做组装，不包含业务逻辑
+- `ui-inprocess.ts` 保留为 public import 兼容层和组装入口，不再新增 daemon 相关业务逻辑
 - 单元测试跟随新文件拆分
+- command/title/snapshot/permission/context 的继续拆分延后到触碰对应功能的阶段
 
 #### 牵动文件
 
-| 文件 | 变更类型 |
-|------|---------|
-| `adapters/ui-inprocess.ts` | **删除**（内容迁移） |
-| `adapters/ui-inprocess/index.ts` | **新建** |
-| `adapters/ui-inprocess/session-orchestrator.ts` | **新建** |
-| `adapters/ui-inprocess/prompt-pipeline.ts` | **新建** |
-| `adapters/ui-inprocess/command-orchestrator.ts` | **新建** |
-| `adapters/ui-inprocess/snapshot-service.ts` | **新建** |
-| `adapters/ui-inprocess/title-generator.ts` | **新建** |
-| `adapters/ui-inprocess/context-tracker.ts` | **新建** |
-| `adapters/ui-inprocess.contract.test.ts` | **不变**（接口不变） |
+| 文件 | 变更类型 | 说明 |
+|------|---------|------|
+| `adapters/ui-inprocess.ts` | **修改** | 保留为 public assembly，组装 controllers，兼容既有 imports |
+| `adapters/ui-inprocess/types.ts` | **新建** | 内部共享类型 |
+| `adapters/ui-inprocess/session-controller.ts` | **新建** | session 创建/查找/复用/激活 |
+| `adapters/ui-inprocess/prompt-controller.ts` | **新建** | prompt queue binding |
+| `adapters/ui-inprocess/runtime-controller.ts` | **新建** | runtime lifecycle、stream、abort |
+| `adapters/ui-inprocess/event-router.ts` | **新建** | event fanout、snapshot invalidation、异常隔离 |
+| `adapters/ui-inprocess.contract.test.ts` | **保持接口契约** | 只补充行为覆盖，不改 public contract |
 
 ---
 
@@ -275,23 +276,32 @@ adapters/
 
 #### 设计思路
 
-将 `findReusableEmptyPrimary`（Core层）、`findReusableUiSession`（UI层）、`createSessionFromCommand` 中的内联复用逻辑合并为一处：
+将 `findReusableEmptyPrimary`（Core层）、UI 层空 session 判断、`createSessionFromCommand` 与普通 prompt 的 session 选择合并为一处：
 
 ```typescript
-// 在 session-orchestrator.ts 中
+// 在 ui-inprocess/session-controller.ts 中
 async function resolveSessionForNewPrompt(params: {
   projectRoot: string;
-  activeSessionId: string | null;
+  explicitSessionId?: string;
   snapshot: UiSnapshot;
   sessionManager: SessionManager;
-}): Promise<{ session: UiSession; created: boolean }>
+  reuseInactiveEmptySessions?: boolean;
+}): Promise<{ session: UiSession; isNewSession: boolean }>
 ```
 
 这个函数内部做**一次**从高到低优先级的查找（不需要调用方知道细节）：
-1. 当前 activeSession 如果是空 session → 复用
-2. Core 层查找可复用空 session
-3. UI 层查找可复用空 session
-4. 都不满足 → 创建新 session
+1. 显式 sessionId 存在 → 使用该 session，不存在则按给定 id 创建
+2. 当前 activeSession 如果是同 project 的空 primary session → 复用
+3. `reuseInactiveEmptySessions !== true` → 直接创建新 session
+4. `reuseInactiveEmptySessions === true` 时，Core 层查找可复用空 primary session
+5. `reuseInactiveEmptySessions === true` 时，UI snapshot 中查找可复用空 primary session
+6. 都不满足 → 创建新 session
+
+调用语义：
+
+- 普通 `submitPrompt()` 默认不传 `reuseInactiveEmptySessions`，只允许复用当前 active 空 session，避免 fresh terminal 意外捡起 inactive 空 session。
+- `/new` 命令显式传 `reuseInactiveEmptySessions: true`，允许复用 inactive empty primary session，避免用户主动新建时制造重复空 session。
+- `findReusableEmptyPrimary` 只应从 `resolveSessionForNewPrompt` 这一条路径调用。
 
 ---
 
@@ -513,6 +523,18 @@ session 级 daemon 进程内存中每 session 一个 RunState（idle/running）
 
 过渡期（Phase 1-2 嵌入式多进程）不做跨进程排队：排队需要协调者，协调者就是 daemon 本身，提前实现是预支 Phase 3 复杂度（YAGNI）。
 
+#### Phase 1-2 过渡：backend lease 全局写互斥
+
+Phase 1 实现中除了 session 级 `claimPendingRun`，还引入了一个 persistent backend 级 lease：`app_state(global, persistentUiBackendLease)`。这不是 daemon 终态锁，而是嵌入式多进程时期的过渡保护：
+
+- 每个 persistent backend 启动时生成 `ownerId = backend_<pid>_<uuid>`，lease 记录 `ownerId`、`pid`、`state`、`updatedAt`。
+- `beforePromptSubmit` 先在 `BEGIN IMMEDIATE` 中刷新 lease，并把 state 写为 `preparing`。这段窗口保护的是“prompt 已经准备提交但 run claim 尚未可见”的瞬间，避免另一个进程把它误判为 idle 并接管。
+- 如果已有 active run 且 lease owner 仍存活，新的 backend 不抢占，`SessionRunBusyError` 留给本地队列重试。
+- 如果已有 active run 但 owner pid 已死亡，新的 backend 可以接管并先把 stale `pending/running` run 标为 interrupted，再继续 drain 自己的队列。
+- `afterPromptSubmitSettled` 将同 owner 的 `preparing` lease 释放回 `idle`，避免准备态长期阻塞后续 prompt。
+
+Phase 4 daemon 默认路径上线后，这层 lease 必须被显式评估：daemon 单写者路径不应再依赖 backend lease，也不应叠加出 daemon queue + backend lease 的双重阻塞；但 `--no-daemon` / `--in-process` 逃生路径如果保留，就仍需要某种跨进程保护。该取舍放入 Phase 4 验收任务，而不是让 lease 作为隐形遗留机制继续存在。
+
 #### 审批路由（多前端必须回答的问题）
 
 多个前端（终端 + web）同时连接 daemon 时，permission 请求发给谁：
@@ -552,8 +574,9 @@ session 级 daemon 进程内存中每 session 一个 RunState（idle/running）
 | 1 | `adapters/ui-inprocess.ts` | 0 | 1 | 0 |
 | 1 | `runtime/run-ledger/` | 1 | 1 | 0 |
 | 1 | `cli/commands/terminal.ts` | 0 | 1 | 0 |
-| 2 | `adapters/ui-inprocess/` | 7 | 0 | 1 |
-| 2 | `adapters/ui-inprocess.contract.test.ts` | 0 | 1（import路径）| 0 |
+| 2 | `adapters/ui-inprocess/` | 5 | 0 | 0 |
+| 2 | `adapters/ui-inprocess.ts` | 0 | 1 | 0 |
+| 2 | `adapters/ui-inprocess.contract.test.ts` | 0 | 1（补充覆盖）| 0 |
 | 3a | `runtime/daemon/` | 3 | 2 | 0 |
 | 3a | `adapters/` | 3 | 0 | 0 |
 | 3a | `cli/commands/serve.ts` | 0 | 1 | 0 |

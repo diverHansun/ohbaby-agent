@@ -116,3 +116,5 @@ pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-inprocess/event-route
 - [x] Commit final docs/review note if needed.
 
 Review note: subagent review found one behavior drift where normal `submitPrompt()` could reuse an inactive empty session through the `/new` fallback path. Fixed by making inactive empty-session reuse opt-in for `/new`, while prompt submission only reuses the active empty session or creates a new one.
+
+Documentation follow-up: `02-solution-design.md`, `04-test-criteria.md`, and `05-implementation-plan.md` were synced after Phase 2 review to record the narrowed Phase 2 extraction scope, the prompt vs `/new` empty-session reuse contract, and the Phase 1-2 backend lease transition. Phase 4 now has an explicit task to retain or retire the backend lease once daemon mode becomes the default single-writer path.

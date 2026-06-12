@@ -671,6 +671,7 @@ Modify:
 - `packages/ohbaby-agent/src/runtime/daemon/pid-file.ts` - process liveness validation.
 - `packages/ohbaby-agent/src/runtime/daemon/server.ts` - global queue ownership.
 - `packages/ohbaby-agent/src/runtime/daemon/client.ts` - queue state projection.
+- `packages/ohbaby-agent/src/adapters/ui-persistent.ts` - evaluate whether the Phase 1 backend lease remains only for in-process fallback.
 - `packages/ohbaby-cli/src/cli/commands/terminal.ts` - default to supervisor-backed daemon.
 
 Create:
@@ -772,6 +773,23 @@ pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/supervisor.unit.te
 
 Expected: npm upgrades replace the daemon transparently; no daemon lingers when unused.
 
+### Task 4.6: Backend Lease Retention Decision
+
+Phase 1 introduced `persistentUiBackendLease` as a global write mutex for embedded persistent backends. Once Phase 4 makes the daemon the default single writer, this lease must be either scoped to the in-process fallback or retired from the daemon path.
+
+- [ ] Add tests proving the default daemon-backed terminal path does not rely on `persistentUiBackendLease` to order prompts.
+- [ ] Ensure daemon global FIFO and per-session RunState are the only prompt-ordering gates in daemon mode.
+- [ ] Keep cross-process protection for the explicit in-process escape hatch (`--in-process` / `--no-daemon`) if that path remains supported.
+- [ ] Verify a stale or `preparing` backend lease cannot block daemon startup, daemon prompt submission, or daemon queue drain.
+- [ ] Document the final decision in `02-solution-design.md` 3.5 before Phase 4 merge.
+- [ ] Run:
+
+```powershell
+pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-persistent.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts --no-file-parallelism
+```
+
+Expected: daemon mode is coordinated by the daemon, while any retained in-process fallback still has explicit cross-process protection and tests.
+
 ### Phase 4 Verification And Commit
 
 - [ ] Run all verification commands listed at the top of this plan.
@@ -821,6 +839,7 @@ The correct near-term abstraction is a stable internal `UiBackendClient` plus a 
 - Production run IDs do not collide across terminal processes started from the same DB snapshot.
 - Status rendering does not leak active runs from unrelated sessions.
 - Permission prompts work in remote mode: requests route to the initiating client, queue across disconnects, and never deadlock (Phase 3).
+- Backend lease semantics are explicit after Phase 4: daemon mode does not depend on the Phase 1 lease, and any retained in-process fallback remains protected.
 - npm upgrades replace a running daemon via version handshake; an idle daemon exits on its own (Phase 4).
 - Unit, contract, integration, e2e snapshot, real `.env` smoke, lint, typecheck, and build pass after every phase.
 - A review subagent checks every phase before merge.

@@ -149,24 +149,25 @@
 
 #### 测试策略
 
-**Contract 测试保持不变**：`ui-inprocess.contract.test.ts` 测试的是 `UiBackendClient` 接口，只要接口不变，该测试文件**一行都不需要改**（除了 import 路径从 `../ui-inprocess.js` 改为 `../ui-inprocess/index.js`）。
+**Contract 测试保持 public contract 不变**：`ui-inprocess.contract.test.ts` 测试的是 `UiBackendClient` 接口。Phase 2 精简版保留 `ui-inprocess.ts` 作为 public assembly，因此 import 路径不变；测试可以补充行为覆盖，但不应改变接口语义。
 
 **新增模块级单元测试**：
 
 | 新模块 | 测试文件 | 最小验证点 |
 |--------|---------|-----------|
-| `session-orchestrator.ts` | `session-orchestrator.unit.test.ts` | `resolveSessionForNewPrompt` 的 4 种 fallback 路径 |
-| `prompt-pipeline.ts` | `prompt-pipeline.unit.test.ts` | `submitPromptInternal` 的 session 忙检查、message 创建、stream 投影启动 |
-| `command-orchestrator.ts` | `command-orchestrator.unit.test.ts` | 命令执行的 session 解析、display 模式检测 |
-| `title-generator.ts` | `title-generator.unit.test.ts` | 临时 title 创建、isFirstUserMessageForTitle 判断、异步 title 生成 |
-| `context-tracker.ts` | `context-tracker.unit.test.ts` | getContextWindowUsage 缓存逻辑 |
+| `session-controller.ts` | `session-controller.unit.test.ts` | `resolveSessionForNewPrompt` 的 active/explicit/inactive opt-in 路径 |
+| `prompt-controller.ts` | `prompt-controller.unit.test.ts` | queue binding、active session inheritance、close rejection |
+| `runtime-controller.ts` | `runtime-controller.unit.test.ts` | runtime lazy creation、creation failure status、abort target |
+| `event-router.ts` | `event-router.unit.test.ts` | handler 异常隔离、snapshot replacement、unsubscribe |
+| `types.ts` | 无需独立测试 | 仅内部类型，无运行时逻辑 |
 
 #### 验收标准
 
 - [ ] `ui-inprocess.contract.test.ts` 全部通过（无需修改测试逻辑）
 - [ ] 拆分后每个新模块有独立的单元测试
 - [ ] 新模块间无循环 import
-- [ ] 原 `ui-inprocess.ts` 文件被删除
+- [ ] `ui-inprocess.ts` 保留为 public assembly，且不新增 daemon 相关业务逻辑
+- [ ] command/title/snapshot/permission/context 的继续拆分在 Phase 3/4 触碰对应边界时单独验收
 
 ---
 
@@ -176,14 +177,17 @@
 
 | 测试 | 验证点 |
 |------|-------|
-| `resolveSessionForNewPrompt` 优先级 | activeSession 空 → 复用；无 → 查 Core 空 session；无 → 查 UI 空 session；无 → 创建新 session |
+| `resolveSessionForNewPrompt` 优先级 | explicit session → active 空 session → inactive reuse opt-in → 创建新 session |
 | 不可复用非空 session | activeSession 有 messages 时，不应复用 |
 | 不可复用其他 project 的 session | projectRoot 不匹配的 session 不应被复用 |
+| 普通 prompt 不复用 inactive empty session | fresh terminal 普通提交不捡起 inactive 空 session |
+| `/new` opt-in 复用 inactive empty session | `/new` 传 `reuseInactiveEmptySessions: true` 后才走 Core/UI inactive fallback |
 
 #### 验收标准
 
 - [ ] `/new` 命令行为不变（按优先级查找可复用 session）
-- [ ] `findReusableEmptyPrimary` 和 `findReusableUiSession` 的调用**只有一处**（`resolveSessionForNewPrompt` 中）
+- [ ] 普通 `submitPrompt()` 不走 inactive empty session fallback
+- [ ] `findReusableEmptyPrimary` 的调用**只有一处**（`resolveSessionForNewPrompt` 中）
 
 ---
 
