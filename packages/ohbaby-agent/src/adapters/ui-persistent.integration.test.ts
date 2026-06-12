@@ -360,7 +360,7 @@ describe("createPersistentUiBackendClient", () => {
       });
       const snapshot = await restored.getSnapshot();
 
-      expect(snapshot.activeSessionId).toBe(snapshot.sessions[0]?.id);
+      expect(snapshot.activeSessionId).toBeNull();
       expect(snapshot.sessions).toHaveLength(1);
       expect(
         snapshot.sessions[0].messages.map((message) => message.role),
@@ -414,6 +414,74 @@ describe("createPersistentUiBackendClient", () => {
       const snapshot = await restored.getSnapshot();
 
       expect(snapshot.activeSessionId).toBe(firstSessionId);
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("selects the latest primary session for explicit continue startup", async () => {
+    const directory = await tempDir("ohbaby-persistent-continue-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      const client = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createSequentialFakeLLMClient(
+          [
+            [{ textDelta: "First response", finishReason: "stop" }],
+            [{ textDelta: "Second response", finishReason: "stop" }],
+          ],
+          [],
+        ),
+        workdir,
+      });
+
+      await client.submitPrompt("First session");
+      const firstSessionId = (await client.getSnapshot()).activeSessionId;
+      await client.submitPrompt("Second session");
+      const secondSessionId = (await client.getSnapshot()).activeSessionId;
+
+      expect(firstSessionId).toBeTruthy();
+      expect(secondSessionId).toBeTruthy();
+      expect(secondSessionId).not.toBe(firstSessionId);
+
+      const restored = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        startupSessionMode: { type: "continue" },
+        workdir,
+      });
+      const snapshot = await restored.getSnapshot();
+
+      expect(snapshot.activeSessionId).toBe(secondSessionId);
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("does not create an empty session during fresh startup", async () => {
+    const directory = await tempDir("ohbaby-persistent-empty-startup-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      const client = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        workdir,
+      });
+
+      const snapshot = await client.getSnapshot();
+      const sessionCount = getDatabase()
+        .prepare<{ readonly count: number }>(
+          `SELECT COUNT(*) as count FROM ${schema.session.tableName}`,
+        )
+        .get()?.count;
+
+      expect(snapshot.activeSessionId).toBeNull();
+      expect(snapshot.sessions).toEqual([]);
+      expect(sessionCount).toBe(0);
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

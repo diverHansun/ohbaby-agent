@@ -37,6 +37,10 @@ import {
   createDatabaseUiAppStateStore,
   createPersistentUiStateStore,
 } from "./ui-state/index.js";
+import {
+  resolveStartupSession,
+  type StartupSessionMode,
+} from "./ui-startup-session.js";
 
 export interface PersistentUiBackendOptions extends Omit<
   InProcessUiBackendOptions,
@@ -54,6 +58,7 @@ export interface PersistentUiBackendOptions extends Omit<
   readonly snapshotService?: SnapshotService;
   readonly storageRoot?: string;
   readonly resumeSessionId?: string;
+  readonly startupSessionMode?: StartupSessionMode;
 }
 
 export interface PersistentUiBackendClient extends UiBackendClient {
@@ -397,18 +402,42 @@ function createPersistentProjectResolver(
   };
 }
 
-async function applyResumeSessionOption(input: {
-  readonly resumeSessionId?: string;
+async function resolvePersistentStartupSession(input: {
+  readonly mode: StartupSessionMode;
   readonly stateStore: ReturnType<typeof createPersistentUiStateStore>;
+  readonly sessionManager: ReturnType<typeof createSessionManager>;
 }): Promise<void> {
-  if (input.resumeSessionId === undefined) {
+  if (input.mode.type === "fresh") {
     return;
   }
-  const session = await input.stateStore.getSession(input.resumeSessionId);
-  if (!session) {
-    throw new Error(`Session not found: ${input.resumeSessionId}`);
+  const candidates = (await input.sessionManager.getRecent()).map(
+    (session) => ({
+      id: session.id,
+      kind: "primary" as const,
+      updatedAt: session.updatedAt,
+    }),
+  );
+  const sessionId = resolveStartupSession(input.mode, candidates);
+  if (sessionId === null) {
+    return;
   }
-  await input.stateStore.setActiveSessionId(input.resumeSessionId);
+  const session = await input.stateStore.getSession(sessionId);
+  if (!session) {
+    throw new Error(`Session not found: ${sessionId}`);
+  }
+  await input.stateStore.setActiveSessionId(sessionId);
+}
+
+function resolveStartupSessionMode(
+  options: PersistentUiBackendOptions,
+): StartupSessionMode {
+  if (options.startupSessionMode !== undefined) {
+    return options.startupSessionMode;
+  }
+  if (options.resumeSessionId !== undefined) {
+    return { type: "resume", sessionId: options.resumeSessionId };
+  }
+  return { type: "fresh" };
 }
 
 export function createPersistentUiBackendClient(
@@ -437,8 +466,11 @@ export function createPersistentUiBackendClient(
     store: createDatabaseSessionStore({ db }),
   });
   const runLedger = createDatabaseRunLedger({ db, now });
+  const startupSessionMode = resolveStartupSessionMode(options);
   const stateStore = createPersistentUiStateStore({
     appState: createDatabaseUiAppStateStore({ db, now }),
+    initialActiveSessionId:
+      startupSessionMode.type === "fresh" ? null : undefined,
     messageManager,
     runLedger,
     sessionManager,
@@ -465,8 +497,9 @@ export function createPersistentUiBackendClient(
       })
     : Promise.resolve({ updatedCount: 0 });
   const startupReady = startupRecovery.then(async () => {
-    await applyResumeSessionOption({
-      resumeSessionId: options.resumeSessionId,
+    await resolvePersistentStartupSession({
+      mode: startupSessionMode,
+      sessionManager,
       stateStore,
     });
   });
