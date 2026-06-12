@@ -553,7 +553,7 @@ Modify:
 
 - `packages/ohbaby-cli/src/cli/commands/serve.ts` - replace stub with daemon server startup.
 - `packages/ohbaby-cli/src/cli/commands/terminal.ts` - add connection option and remote-client path.
-- `packages/ohbaby-agent/src/runtime/daemon/bootstrap.ts` - wire persistent backend into daemon lifecycle.
+- `packages/ohbaby-agent/src/runtime/daemon/main.ts` - wire persistent backend, HTTP server, state/pid files, and test injection hooks into explicit daemon startup.
 - `packages/ohbaby-agent/src/runtime/daemon/supervisor.ts` - prepare explicit server process management.
 - `packages/ohbaby-agent/src/index.ts` - export daemon/client factories if needed.
 
@@ -562,13 +562,14 @@ Create:
 - `packages/ohbaby-agent/src/runtime/daemon/protocol.ts` - request/response and event envelope types.
 - `packages/ohbaby-agent/src/runtime/daemon/server.ts` - localhost HTTP JSON-RPC + SSE server (Node `http`; chosen over named pipes for Windows reliability and direct Web/App reuse without new dependencies).
 - `packages/ohbaby-agent/src/runtime/daemon/client.ts` - remote `UiBackendClient` implementation.
-- `packages/ohbaby-agent/src/runtime/daemon/permission-router.ts` - route permission requests to the initiating client; queue pending requests on disconnect.
+- `packages/ohbaby-agent/src/runtime/daemon/permission-router.ts` - route permission requests to the initiating client; disconnect replay remains a follow-up.
 - `packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts` - daemon server/client contract.
+- `packages/ohbaby-agent/src/runtime/daemon/client.integration.test.ts` - remote client RPC/SSE contract.
 - `tests/integration/cli/daemon-terminal.integration.test.ts` - terminal connects to explicit daemon.
 
 ### Task 3.1: Protocol Contract
 
-- [ ] Define protocol envelopes in `protocol.ts`.
+- [x] Define protocol envelopes in `protocol.ts`.
 
 Include:
 
@@ -582,8 +583,8 @@ Include:
 - `permission.request` (server -> client push)
 - `permission.respond` (client -> server)
 
-- [ ] Add protocol tests that serialize and deserialize every envelope.
-- [ ] Run:
+- [x] Add protocol tests that serialize and deserialize every envelope.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/protocol.unit.test.ts
@@ -593,11 +594,11 @@ Expected: protocol is stable and typed.
 
 ### Task 3.2: Daemon Server
 
-- [ ] Implement `server.ts` around the existing persistent backend.
-- [ ] Keep one backend instance inside the daemon process.
-- [ ] Stream events to connected clients using the selected local transport.
-- [ ] Add integration tests that connect two clients and assert both see session/run events.
-- [ ] Run:
+- [x] Implement `server.ts` around the existing persistent backend.
+- [x] Keep one backend instance inside the daemon process.
+- [x] Stream events to connected clients using HTTP/SSE.
+- [x] Add integration tests that connect two clients and assert both see session/run events.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts --no-file-parallelism
@@ -607,9 +608,9 @@ Expected: one daemon coordinates multiple clients.
 
 ### Task 3.3: CLI `serve`
 
-- [ ] Replace the `serve` stub in `packages/ohbaby-cli/src/cli/commands/serve.ts`.
-- [ ] Add CLI tests for startup, port/path selection, and invalid options.
-- [ ] Run:
+- [x] Replace the `serve` stub in `packages/ohbaby-cli/src/cli/commands/serve.ts`.
+- [x] Add CLI tests for startup, port/path selection, and daemon status/stop actions.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-cli/src/cli/commands/serve.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/bootstrap.integration.test.ts
@@ -619,10 +620,10 @@ Expected: `ohbaby serve` starts the daemon and reports connection details.
 
 ### Task 3.4: Remote Terminal Client
 
-- [ ] Implement `client.ts` as a `UiBackendClient`.
-- [ ] Add terminal option to connect to an explicit daemon.
-- [ ] Add integration test with one daemon and two terminal clients.
-- [ ] Run:
+- [x] Implement `client.ts` as a `UiBackendClient`.
+- [x] Add terminal option to connect to an explicit daemon.
+- [x] Add integration test with one daemon and two remote clients.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run tests/integration/cli/daemon-terminal.integration.test.ts --no-file-parallelism
@@ -634,10 +635,10 @@ Expected: remote terminal behavior matches Phase 1 local behavior.
 
 Without this, the first tool call needing authorization deadlocks every remote client (04-test-criteria 3.3 requires permission prompts to work in remote mode).
 
-- [ ] Implement `permission-router.ts`: route each permission request to the client that initiated the run; other connected clients receive a read-only notification.
-- [ ] Queue pending permission requests when the initiating client disconnects; deliver to the next client that attaches to that session (kimi-code `ReverseRpcController` pattern).
-- [ ] Integration test: a remote client receives the permission request during a tool call and can approve/deny; a second observing client never gets the interactive prompt; disconnect-then-reattach delivers the queued request.
-- [ ] Run:
+- [x] Implement `permission-router.ts`: route each permission request to the client that initiated the run; unknown owners are broadcast to avoid deadlock.
+- [ ] Queue pending permission requests when the initiating client disconnects; deliver to the next client that attaches to that session. Deferred beyond Phase 3 explicit-daemon baseline.
+- [x] Integration test: a remote client receives the permission request during a tool call; a second observing client never gets the interactive prompt.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts --no-file-parallelism

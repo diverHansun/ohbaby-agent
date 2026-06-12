@@ -452,7 +452,7 @@ git commit -m "feat(cli): connect terminal to explicit daemon"
 - Modify: `docs/problem-lists/terminal-daemon/05-implementation-plan.md`
 - Modify: `docs/problem-lists/terminal-daemon/07-phase-3-execution-plan.md`
 
-- [ ] Write an integration test for explicit daemon + remote CLI.
+- [x] Write an integration test for explicit daemon + remote CLI.
 
 Scenario:
 
@@ -472,7 +472,7 @@ pnpm exec vitest run tests/integration/cli/daemon-terminal.integration.test.ts -
 
 Expected RED: test fails until the daemon start/client path is fully wired.
 
-- [ ] Implement missing wiring exposed by the E2E test.
+- [x] Implement missing wiring exposed by the E2E test.
 
 Allowed fixes:
 
@@ -480,7 +480,7 @@ Allowed fixes:
 - Export a test-only server factory only if it is under `runtime/daemon` and used by production code too.
 - Do not make `pnpm start` default to daemon in Phase 3.
 
-- [ ] Run Phase 3 focused verification.
+- [x] Run Phase 3 focused verification.
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/protocol.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/permission-router.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/client.integration.test.ts packages/ohbaby-cli/src/bin.unit.test.ts packages/ohbaby-cli/src/cli/commands/serve.unit.test.ts tests/integration/cli/daemon-terminal.integration.test.ts --no-file-parallelism
@@ -488,7 +488,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/protocol.unit.test
 
 Expected GREEN: all Phase 3 focused tests pass.
 
-- [ ] Update docs and commit.
+- [x] Update docs and commit.
 
 ```powershell
 git add tests/integration/cli/daemon-terminal.integration.test.ts docs/problem-lists/terminal-daemon/04-test-criteria.md docs/problem-lists/terminal-daemon/05-implementation-plan.md docs/problem-lists/terminal-daemon/07-phase-3-execution-plan.md

@@ -231,6 +231,7 @@
 | remote client submitPrompt | HTTP JSON-RPC prompt → daemon 创建 run → 返回确认 | `runtime/daemon/client.integration.test.ts` |
 | remote client subscribeEvents | SSE 连接 → 接收 `UiEvent` 事件 | `runtime/daemon/client.integration.test.ts` |
 | remote client 重建连接 | SSE 断开 → 新 client 连接 → 获取最新 snapshot | `runtime/daemon/client.integration.test.ts` |
+| explicit daemon 重连保留历史 | client A 通过 daemon 提交 prompt，client B 重新连接同一 daemon 后 snapshot 保留 session/message 历史 | `tests/integration/cli/daemon-terminal.integration.test.ts` |
 
 #### Contract 测试
 
@@ -339,6 +340,9 @@
   - Step 3-4：流式输出正常
   - Step 6-7：重连后 session 状态完整（之前对话可见）
   - Step 8：daemon 优雅关闭，状态文件为 "stopped"
+
+自动化覆盖：
+  - `tests/integration/cli/daemon-terminal.integration.test.ts` 使用 explicit daemon、fake LLM、remote client A/B 验证 Step 3-7；真实前台进程 `pnpm serve`/`pnpm start` 的手工窗口演练仍作为最终发布前检查。
 ```
 
 ### E2E-4: Daemon 崩溃恢复

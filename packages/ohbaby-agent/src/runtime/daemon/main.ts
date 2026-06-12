@@ -4,6 +4,7 @@ import {
   closePersistentUiBackendDatabase,
   createPersistentUiBackendClient,
   type PersistentUiBackendClient,
+  type PersistentUiBackendOptions,
 } from "../../adapters/ui-persistent.js";
 import { createDaemonHttpServer, type DaemonHttpServerHandle } from "./server.js";
 import { JsonDaemonStateFile } from "./state-file.js";
@@ -19,6 +20,10 @@ export interface StartDaemonServerOptions {
   readonly host?: string;
   readonly port?: number;
   readonly dbPath?: string;
+  readonly llmClient?: PersistentUiBackendOptions["llmClient"];
+  readonly pidFilePath?: string;
+  readonly stateFilePath?: string;
+  readonly workdir?: string;
 }
 
 export interface RunningDaemonServer {
@@ -62,6 +67,10 @@ export async function startDaemonServer(
     bootstrap(): DaemonRuntimeHandle {
       const backend = createPersistentUiBackendClient({
         ...(options.dbPath === undefined ? {} : { dbPath: options.dbPath }),
+        ...(options.llmClient === undefined
+          ? {}
+          : { llmClient: options.llmClient }),
+        ...(options.workdir === undefined ? {} : { workdir: options.workdir }),
       });
       server = createDaemonHttpServer({
         backend,
@@ -70,6 +79,12 @@ export async function startDaemonServer(
       });
       return createServerRuntime({ backend, server });
     },
+    ...(options.pidFilePath === undefined
+      ? {}
+      : { pidFilePath: options.pidFilePath }),
+    ...(options.stateFilePath === undefined
+      ? {}
+      : { stateFilePath: options.stateFilePath }),
   });
 
   await supervisor.start();
