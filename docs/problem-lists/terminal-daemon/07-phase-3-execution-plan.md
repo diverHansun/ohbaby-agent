@@ -69,7 +69,7 @@ Modify:
 - Create: `packages/ohbaby-agent/src/runtime/daemon/protocol.unit.test.ts`
 - Modify: `packages/ohbaby-agent/src/runtime/daemon/index.ts`
 
-- [ ] Write failing tests for all protocol envelopes.
+- [x] Write failing tests for all protocol envelopes.
 
 Test cases:
 
@@ -87,7 +87,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/protocol.unit.test
 
 Expected RED: fails because `protocol.ts` does not exist.
 
-- [ ] Implement `protocol.ts`.
+- [x] Implement `protocol.ts`.
 
 Required public API:
 
@@ -124,7 +124,7 @@ export type DaemonRpcResponse =
     };
 ```
 
-- [ ] Run protocol tests and typecheck the daemon package path.
+- [x] Run protocol tests and typecheck the daemon package path.
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/protocol.unit.test.ts
@@ -133,7 +133,7 @@ pnpm run typecheck
 
 Expected GREEN: protocol tests pass; typecheck exits 0.
 
-- [ ] Commit.
+- [x] Commit.
 
 ```powershell
 git add packages/ohbaby-agent/src/runtime/daemon/protocol.ts packages/ohbaby-agent/src/runtime/daemon/protocol.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/index.ts
