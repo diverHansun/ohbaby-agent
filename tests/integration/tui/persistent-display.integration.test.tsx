@@ -53,7 +53,7 @@ function markBackendLeaseDead(): void {
 }
 
 describe("TUI persistent backend display", () => {
-  it("renders restored sessions, messages, and run status from the initial snapshot", async () => {
+  it("renders continued sessions, messages, and run status from the initial snapshot", async () => {
     const directory = await tempWorkspace("ohbaby-cli-persistent");
     const dbPath = join(directory, "agent.db");
     const workdir = join(directory, "workspace");
@@ -71,6 +71,7 @@ describe("TUI persistent backend display", () => {
     const restored = createPersistentUiBackendClient({
       dbPath,
       llmClient: createFakeLLMClient([]),
+      startupSessionMode: { type: "continue" },
       workdir,
     });
     const app = render(
@@ -127,6 +128,7 @@ describe("TUI persistent backend display", () => {
       llmClient: createFakeLLMClient([
         { textDelta: "Recovered prompt.", finishReason: "stop" },
       ]),
+      startupSessionMode: { type: "continue" },
       workdir,
     });
     const snapshot = await restored.getSnapshot();
@@ -164,7 +166,7 @@ describe("TUI persistent backend display", () => {
     app.unmount();
   });
 
-  it("resumes a stored session by slash command and continues with restored context", async () => {
+  it("resumes a stored session from startup intent and continues with restored context", async () => {
     const directory = await tempWorkspace("ohbaby-cli-resume");
     const dbPath = join(directory, "agent.db");
     const workdir = join(directory, "workspace");
@@ -192,6 +194,7 @@ describe("TUI persistent backend display", () => {
         [[{ textDelta: "Alpha continued.", finishReason: "stop" }]],
         requests,
       ),
+      startupSessionMode: { type: "resume", sessionId: "session_alpha" },
       workdir,
     });
     const app = render(
@@ -201,9 +204,6 @@ describe("TUI persistent backend display", () => {
       />,
     );
 
-    await waitForFrame(app, (frame) => frame.includes("Beta reply."));
-    app.stdin.write("/resume --session_id session_alpha");
-    app.stdin.write("\r");
     await waitForFrame(
       app,
       (frame) =>
@@ -269,7 +269,6 @@ describe("TUI persistent backend display", () => {
       />,
     );
 
-    await waitForFrame(app, (frame) => frame.includes("Reply 8."));
     app.stdin.write("/sessions");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) => frame.includes("showing 1-8 of 8"));
@@ -294,7 +293,7 @@ describe("TUI persistent backend display", () => {
     app.unmount();
   });
 
-  it("continues a restored session from its original project root", async () => {
+  it("continues a resumed session from its original project root", async () => {
     const directory = await tempWorkspace("ohbaby-cli-session-root");
     const dbPath = join(directory, "agent.db");
     const originalWorkdir = join(directory, "workspace-a");
@@ -321,6 +320,7 @@ describe("TUI persistent backend display", () => {
         [[{ textDelta: "Alpha from original root.", finishReason: "stop" }]],
         requests,
       ),
+      startupSessionMode: { type: "resume", sessionId: "session_alpha" },
       workdir: restoredWorkdir,
     });
     const app = render(
@@ -330,9 +330,6 @@ describe("TUI persistent backend display", () => {
       />,
     );
 
-    await waitForFrame(app, (frame) => frame.includes("Alpha reply."));
-    app.stdin.write("/resume --session_id session_alpha");
-    app.stdin.write("\r");
     await waitForFrame(app, (frame) => frame.includes("Alpha prompt"));
 
     app.stdin.write("Continue alpha");

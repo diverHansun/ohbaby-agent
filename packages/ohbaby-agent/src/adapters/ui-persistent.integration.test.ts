@@ -837,6 +837,7 @@ describe("createPersistentUiBackendClient", () => {
       const restored = createPersistentUiBackendClient({
         dbPath,
         llmClient: createFakeLLMClient([]),
+        startupSessionMode: { type: "continue" },
         workdir,
       });
       const snapshot = await restored.getSnapshot();
