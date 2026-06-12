@@ -4,11 +4,14 @@ import {
   createPersistentUiBackendClient,
 } from "../adapters/ui-persistent.js";
 import { McpManager } from "../mcp/index.js";
+import { createRemoteCoreApiHost } from "../runtime/daemon/client.js";
 
 export interface CoreApiFactoryOptions {
   readonly continue?: boolean;
   readonly mode?: "plan" | "auto";
   readonly permission?: "default" | "full-access";
+  readonly remoteHost?: string;
+  readonly remotePort?: number;
   readonly resume?: string;
 }
 
@@ -49,6 +52,13 @@ export function buildCoreAPIImpl(
   options: CoreApiFactoryOptions = {},
 ): CoreApiHost {
   assertStartupOptions(options);
+
+  if (options.remotePort !== undefined) {
+    return createRemoteCoreApiHost({
+      host: options.remoteHost,
+      port: options.remotePort,
+    });
+  }
 
   const initialSnapshot = initialSnapshotFromOptions(options);
   const client = createPersistentUiBackendClient({

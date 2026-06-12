@@ -38,11 +38,17 @@ export interface RunOhbabyCliIo {
 export interface RunOhbabyCliDependencies {
   readonly createCoreHost?: (options: CliGlobalOptions) => CliCoreHost;
   readonly loadRuntimeEnvIntoProcessEnv?: () => Promise<void> | void;
+  readonly readDaemonStatus?: CliCommandRuntime["readDaemonStatus"];
+  readonly startDaemonServer?: CliCommandRuntime["startDaemonServer"];
+  readonly stopDaemonFromState?: CliCommandRuntime["stopDaemonFromState"];
 }
 
 interface AgentRuntimeModule {
   readonly buildCoreAPIImpl?: unknown;
   readonly loadRuntimeEnvIntoProcessEnv?: unknown;
+  readonly readDaemonStatus?: unknown;
+  readonly startDaemonServer?: unknown;
+  readonly stopDaemonFromState?: unknown;
 }
 
 function createRpcCoreHost(host: CliCoreHost): CliCoreHost {
@@ -69,9 +75,31 @@ function requireFunction(
   return value as (...args: unknown[]) => unknown;
 }
 
-async function loadDefaultDependencies(): Promise<
-  Required<RunOhbabyCliDependencies>
-> {
+function optionalFunction(
+  value: unknown,
+  name: string,
+): ((...args: unknown[]) => unknown) | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return requireFunction(value, name);
+}
+
+function optionalRuntimeExport(
+  runtimeModule: AgentRuntimeModule,
+  name: keyof AgentRuntimeModule,
+): unknown {
+  const exports = runtimeModule as Record<string, unknown>;
+  return Object.prototype.hasOwnProperty.call(exports, name)
+    ? exports[name]
+    : undefined;
+}
+
+function missingRuntimeDependency(name: string): never {
+  throw new Error(`CLI runtime dependency ${name} was not initialized`);
+}
+
+async function loadDefaultDependencies(): Promise<RunOhbabyCliDependencies> {
   const runtimeModule = (await importRuntimeModule(
     AGENT_RUNTIME_MODULE,
   )) as AgentRuntimeModule;
@@ -83,12 +111,27 @@ async function loadDefaultDependencies(): Promise<
     runtimeModule.loadRuntimeEnvIntoProcessEnv,
     "loadRuntimeEnvIntoProcessEnv",
   ) as () => Promise<void> | void;
+  const readDaemonStatus = optionalFunction(
+    optionalRuntimeExport(runtimeModule, "readDaemonStatus"),
+    "readDaemonStatus",
+  ) as CliCommandRuntime["readDaemonStatus"] | undefined;
+  const startDaemonServer = optionalFunction(
+    optionalRuntimeExport(runtimeModule, "startDaemonServer"),
+    "startDaemonServer",
+  ) as CliCommandRuntime["startDaemonServer"] | undefined;
+  const stopDaemonFromState = optionalFunction(
+    optionalRuntimeExport(runtimeModule, "stopDaemonFromState"),
+    "stopDaemonFromState",
+  ) as CliCommandRuntime["stopDaemonFromState"] | undefined;
 
   return {
     createCoreHost(options): CliCoreHost {
       return buildCoreAPIImpl(options);
     },
     loadRuntimeEnvIntoProcessEnv,
+    ...(readDaemonStatus === undefined ? {} : { readDaemonStatus }),
+    ...(startDaemonServer === undefined ? {} : { startDaemonServer }),
+    ...(stopDaemonFromState === undefined ? {} : { stopDaemonFromState }),
   };
 }
 
@@ -109,6 +152,21 @@ export async function runOhbabyCli(
   const loadRuntimeEnvIntoProcessEnv =
     dependencies.loadRuntimeEnvIntoProcessEnv ??
     defaultDependencies?.loadRuntimeEnvIntoProcessEnv;
+  const readDaemonStatus =
+    dependencies.readDaemonStatus ??
+    defaultDependencies?.readDaemonStatus ??
+    ((): ReturnType<CliCommandRuntime["readDaemonStatus"]> =>
+      missingRuntimeDependency("readDaemonStatus"));
+  const startDaemonServer =
+    dependencies.startDaemonServer ??
+    defaultDependencies?.startDaemonServer ??
+    ((): ReturnType<CliCommandRuntime["startDaemonServer"]> =>
+      missingRuntimeDependency("startDaemonServer"));
+  const stopDaemonFromState =
+    dependencies.stopDaemonFromState ??
+    defaultDependencies?.stopDaemonFromState ??
+    ((): ReturnType<CliCommandRuntime["stopDaemonFromState"]> =>
+      missingRuntimeDependency("stopDaemonFromState"));
 
   if (!createCoreHost || !loadRuntimeEnvIntoProcessEnv) {
     throw new Error("CLI runtime dependencies were not initialized");
@@ -140,6 +198,7 @@ export async function runOhbabyCli(
     isStdinTTY() {
       return stdin.isTTY === true;
     },
+    readDaemonStatus,
     readStdin() {
       return readStdin(stdin);
     },
@@ -147,7 +206,10 @@ export async function runOhbabyCli(
     setExitCode(code) {
       exitCode = code;
     },
+    startDaemonServer,
     stderr,
+    stdout,
+    stopDaemonFromState,
   };
 
   try {

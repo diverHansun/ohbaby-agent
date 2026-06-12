@@ -364,10 +364,11 @@ git commit -m "feat(daemon): add remote ui client"
 - Modify: `packages/ohbaby-cli/src/cli/commands/terminal.ts`
 - Modify: `packages/ohbaby-cli/src/cli/commands/serve.ts`
 - Modify: `packages/ohbaby-cli/src/bin.ts`
+- Test: `packages/ohbaby-agent/src/host/core-api-factory.unit.test.ts`
 - Test: `packages/ohbaby-cli/src/bin.unit.test.ts`
 - Test: `packages/ohbaby-cli/src/cli/commands/serve.unit.test.ts`
 
-- [ ] Write failing CLI tests.
+- [x] Write failing CLI tests.
 
 Test cases:
 
@@ -385,7 +386,7 @@ pnpm exec vitest run packages/ohbaby-cli/src/bin.unit.test.ts packages/ohbaby-cl
 
 Expected RED: remote and serve tests fail because options and serve helper are missing.
 
-- [ ] Implement daemon main helpers.
+- [x] Implement daemon main helpers.
 
 Required public API:
 
@@ -418,7 +419,7 @@ Implementation rules:
 - `serve` foreground process stays alive because the HTTP server is listening.
 - `buildCoreAPIImpl` returns `createRemoteCoreApiHost` when `remotePort` is present.
 
-- [ ] Implement CLI option parsing and serve command.
+- [x] Implement CLI option parsing and serve command.
 
 Options:
 
@@ -426,7 +427,7 @@ Options:
 - Serve: `ohbaby serve [start|status|stop]`, default action `start`.
 - Serve start: `--port <number>` default `4096`, `--host <host>` default `127.0.0.1`, optional `--db-path <path>`.
 
-- [ ] Run focused tests.
+- [x] Run focused tests.
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-cli/src/bin.unit.test.ts packages/ohbaby-cli/src/cli/commands/serve.unit.test.ts --no-file-parallelism
@@ -435,7 +436,7 @@ pnpm run typecheck
 
 Expected GREEN: CLI tests and typecheck pass.
 
-- [ ] Commit.
+- [x] Commit.
 
 ```powershell
 git add packages/ohbaby-agent/src/runtime/daemon/main.ts packages/ohbaby-agent/src/host/core-api-factory.ts packages/ohbaby-agent/src/index.ts packages/ohbaby-cli/src/cli/commands/types.ts packages/ohbaby-cli/src/cli/commands/terminal.ts packages/ohbaby-cli/src/cli/commands/serve.ts packages/ohbaby-cli/src/bin.ts packages/ohbaby-cli/src/bin.unit.test.ts packages/ohbaby-cli/src/cli/commands/serve.unit.test.ts

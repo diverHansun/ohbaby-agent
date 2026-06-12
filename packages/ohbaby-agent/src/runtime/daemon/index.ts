@@ -12,3 +12,13 @@ export {
   createRemoteUiBackendClient,
 } from "./client.js";
 export type { RemoteDaemonClientOptions } from "./client.js";
+export {
+  readDaemonStatus,
+  startDaemonServer,
+  stopDaemonFromState,
+} from "./main.js";
+export type {
+  RunningDaemonServer,
+  StartDaemonServerOptions,
+} from "./main.js";
+export type { DaemonState } from "./types.js";
