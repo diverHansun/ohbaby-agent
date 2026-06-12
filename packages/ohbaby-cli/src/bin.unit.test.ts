@@ -102,6 +102,86 @@ describe("runOhbabyCli", () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
+  it("preflights the terminal UI when continuing the latest session at startup", async () => {
+    vi.resetModules();
+    const core = createCore();
+    const dispose = vi.fn(() => Promise.resolve());
+    const createCoreHost = vi.fn(() => ({
+      callbacks: { subscribeEvents },
+      core,
+      dispose,
+    }));
+    const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
+    const subscribeEvents = vi.fn((): (() => void) => () => undefined);
+    const waitUntilExit = vi.fn(() => Promise.resolve());
+    const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
+    vi.doMock("ohbaby-agent", () => {
+      throw new Error("agent should be loaded only by the default loader");
+    });
+    vi.doMock("./tui/index.js", () => ({
+      renderTerminalUi,
+    }));
+
+    const { runOhbabyCli } = await import("./bin.js");
+
+    await expect(
+      runOhbabyCli(
+        ["node", "ohbaby", "--continue"],
+        {},
+        {
+          createCoreHost,
+          loadRuntimeEnvIntoProcessEnv,
+        },
+      ),
+    ).resolves.toBe(0);
+    expect(createCoreHost).toHaveBeenCalledWith({ continue: true });
+    expect(core.getSnapshot).toHaveBeenCalledTimes(1);
+    expect(renderTerminalUi).toHaveBeenCalledTimes(1);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects resume and continue together before rendering", async () => {
+    vi.resetModules();
+    const stderr: string[] = [];
+    const core = createCore();
+    const dispose = vi.fn(() => Promise.resolve());
+    const createCoreHost = vi.fn(() => ({
+      callbacks: { subscribeEvents },
+      core,
+      dispose,
+    }));
+    const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
+    const subscribeEvents = vi.fn((): (() => void) => () => undefined);
+    const renderTerminalUi = vi.fn();
+    vi.doMock("ohbaby-agent", () => {
+      throw new Error("agent should be loaded only by the default loader");
+    });
+    vi.doMock("./tui/index.js", () => ({
+      renderTerminalUi,
+    }));
+
+    const { runOhbabyCli } = await import("./bin.js");
+
+    await expect(
+      runOhbabyCli(
+        ["node", "ohbaby", "--resume", "session_2", "--continue"],
+        {
+          stderr: { write: (chunk: string) => stderr.push(chunk) },
+          stdout: { write: vi.fn() },
+        },
+        {
+          createCoreHost,
+          loadRuntimeEnvIntoProcessEnv,
+        },
+      ),
+    ).resolves.toBe(2);
+    expect(stderr.join("")).toContain(
+      "--resume and --continue cannot be used together",
+    );
+    expect(createCoreHost).not.toHaveBeenCalled();
+    expect(renderTerminalUi).not.toHaveBeenCalled();
+  });
+
   it("fails startup before rendering when resume preflight fails", async () => {
     vi.resetModules();
     const core = createCore();

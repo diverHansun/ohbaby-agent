@@ -149,4 +149,38 @@ describe("buildCoreAPIImpl", () => {
     expect(disposeAll).toHaveBeenCalledTimes(1);
     expect(closePersistentUiBackendDatabase).toHaveBeenCalledTimes(1);
   });
+
+  it("passes continue startup mode to the persistent backend", async () => {
+    vi.resetModules();
+    const createPersistentUiBackendClient = vi.fn(() => ({
+      abortRun: vi.fn(() => Promise.resolve()),
+      compactSession: vi.fn(() => Promise.resolve()),
+      connectModel: vi.fn(() => Promise.resolve()),
+      dispose: vi.fn(() => Promise.resolve()),
+      executeCommand: vi.fn(() => Promise.resolve()),
+      getContextWindowUsage: vi.fn(() => Promise.resolve(null)),
+      getCurrentModel: vi.fn(() => Promise.resolve(null)),
+      getSnapshot: vi.fn(() => Promise.resolve()),
+      listCommands: vi.fn(() => Promise.resolve({ commands: [] })),
+      respondInteraction: vi.fn(() => Promise.resolve()),
+      respondPermission: vi.fn(() => Promise.resolve()),
+      submitPrompt: vi.fn(() => Promise.resolve()),
+      subscribeEvents: vi.fn((): (() => void) => () => undefined),
+    }));
+    vi.doMock("../adapters/ui-persistent.js", () => ({
+      closePersistentUiBackendDatabase: vi.fn(),
+      createPersistentUiBackendClient,
+    }));
+    vi.doMock("../mcp/index.js", () => ({
+      McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
+    }));
+
+    const { buildCoreAPIImpl } = await import("./core-api-factory.js");
+
+    buildCoreAPIImpl({ continue: true });
+
+    expect(createPersistentUiBackendClient).toHaveBeenCalledWith({
+      startupSessionMode: { type: "continue" },
+    });
+  });
 });

@@ -6,6 +6,7 @@ import {
 import { McpManager } from "../mcp/index.js";
 
 export interface CoreApiFactoryOptions {
+  readonly continue?: boolean;
   readonly mode?: "plan" | "auto";
   readonly permission?: "default" | "full-access";
   readonly resume?: string;
@@ -41,8 +42,12 @@ function initialSnapshotFromOptions(
 export function buildCoreAPIImpl(
   options: CoreApiFactoryOptions = {},
 ): CoreApiHost {
+  const initialSnapshot = initialSnapshotFromOptions(options);
   const client = createPersistentUiBackendClient({
-    initialSnapshot: initialSnapshotFromOptions(options),
+    ...(initialSnapshot === undefined ? {} : { initialSnapshot }),
+    ...(options.continue === true
+      ? { startupSessionMode: { type: "continue" as const } }
+      : {}),
     ...(options.resume === undefined
       ? {}
       : { resumeSessionId: options.resume }),
