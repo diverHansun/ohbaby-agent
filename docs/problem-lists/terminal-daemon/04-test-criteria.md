@@ -19,8 +19,8 @@
 4. [Phase 3 测试标准](#phase-3-测试标准)
    - [3.1 Daemon 启动与关闭](#31-daemon-启动与关闭)
    - [3.2 CLI remote 连接](#32-cli-remote-连接)
-   - [3.3 StreamBridge 事件传输](#33-streambridge-事件传输)
-   - [3.4 Auto-spawn 与生命周期（Phase 3b）](#34-auto-spawn-与生命周期phase-3b)
+   - [3.3 HTTP/SSE 事件传输](#33-httpsse-事件传输)
+   - [Phase 4 预览：Auto-spawn 与生命周期](#phase-4-预览auto-spawn-与生命周期)
 5. [端到端验收场景](#端到端验收场景)
 6. [回归安全网](#回归安全网)
 
@@ -100,7 +100,7 @@
 #### 已知限制（不在本 Phase 解决）
 
 - 进程崩溃留下的僵尸 running 行依赖启动恢复（`markInterrupted`）清理；崩溃后、恢复前该 session 表现为"忙"
-- 跨进程排队/合流需 Phase 3 daemon 架构（单写者 + 内存 RunState）
+- 跨终端严格 FIFO / 合流需 Phase 4 daemon 全局队列（单写者 + 内存 RunState）
 
 ---
 
@@ -227,34 +227,37 @@
 
 | 测试 | 验证点 | 位置 |
 |------|-------|------|
-| remote client getSnapshot | HTTP GET 到 daemon → 返回 snapshot JSON | `ui-remote.integration.test.ts` |
-| remote client submitPrompt | HTTP POST prompt → daemon 创建 run → 返回确认 | `ui-remote.integration.test.ts` |
-| remote client subscribeEvents | WebSocket 连接 → 接收 StreamBridge 事件 | `ui-remote.integration.test.ts` |
-| remote client 断线重连 | WebSocket 断开 → 重连 → 获取最新 snapshot | `ui-remote.integration.test.ts` |
+| remote client getSnapshot | HTTP JSON-RPC 到 daemon → 返回 snapshot JSON | `runtime/daemon/client.integration.test.ts` |
+| remote client submitPrompt | HTTP JSON-RPC prompt → daemon 创建 run → 返回确认 | `runtime/daemon/client.integration.test.ts` |
+| remote client subscribeEvents | SSE 连接 → 接收 `UiEvent` 事件 | `runtime/daemon/client.integration.test.ts` |
+| remote client 重建连接 | SSE 断开 → 新 client 连接 → 获取最新 snapshot | `runtime/daemon/client.integration.test.ts` |
+| explicit daemon 重连保留历史 | client A 通过 daemon 提交 prompt，client B 重新连接同一 daemon 后 snapshot 保留 session/message 历史 | `tests/integration/cli/daemon-terminal.integration.test.ts` |
 
 #### Contract 测试
 
 | 测试 | 验证点 |
 |------|-------|
-| Remote client 满足 UiBackendClient 接口 | 对 remote client 执行与 `ui-inprocess.contract.test.ts` **相同的测试套件** |
+| Remote client CoreAPI 方法契约 | `runtime/daemon/client.integration.test.ts` 逐个调用所有 `CoreAPI` 方法，断言 remote client → daemon → backend 的参数与返回值不漂移 |
+| Remote client 行为契约套件 | Phase 4 开工前抽出可复用 contract harness，让 remote client 能跑与 `ui-inprocess.contract.test.ts` 等价的行为断言 |
 
 #### 验收标准
 
 - [ ] CLI `terminal` 命令通过 `--remote-port` 连接到 daemon，UI 行为与嵌入式模式一致
-- [ ] remote client 的 `UiBackendClient` 实现通过 contract 测试套件
+- [x] remote client 的 `CoreAPI` 方法转发契约通过测试
+- [ ] remote client 的完整行为契约套件抽象完成并通过
 - [ ] 两个 CLI 终端同时连接到同一 daemon，分别操作不同 session，互不干扰
 
 ---
 
-### 3.3 StreamBridge 事件传输
+### 3.3 HTTP/SSE 事件传输
 
 #### 集成测试
 
 | 测试 | 验证点 |
 |------|-------|
-| 事件广播到所有 WS 客户端 | Daemon 产生事件 → 所有连接的 WS 客户端都收到同一事件 |
+| 事件广播到所有 SSE 客户端 | Daemon 产生事件 → 所有连接的 SSE 客户端都收到同一事件 |
 | 单客户端断线不影响其他客户端 | 客户端 A 断开 → 客户端 B 仍能收到后续事件 |
-| 事件类型完整性 | 所有 `UiEvent` union type 的变体都能通过 WS 传输（序列化/反序列化循环） |
+| 事件类型完整性 | 所有 `UiEvent` union type 的变体都能通过 SSE JSON 传输（序列化/反序列化循环） |
 
 #### 验收标准
 
@@ -264,26 +267,41 @@
 
 ---
 
-### 3.4 Auto-spawn 与生命周期（Phase 3b）
+### Phase 4：Auto-spawn、生命周期与全局 FIFO
+
+Phase 4 将 daemon 变为默认 terminal 路径；以下条目是本阶段 merge 前的自动化与手工验收口径。
 
 #### 集成测试
 
 | 测试 | 验证点 |
 |------|-------|
-| 无 daemon 时自动拉起 | state-file 不存在 → CLI 启动后 daemon 进程存在且 CLI 已连接 |
-| 有 daemon 时直连复用 | daemon 已运行 → 第二个 CLI 启动不产生新 daemon 进程 |
-| 并发拉起只有一个胜出 | 同时启动两个 CLI（无 daemon）→ 恰好一个 daemon，两个 CLI 都成功连接 |
-| 版本握手不匹配 | state-file 中版本与 client 不一致 → 旧 daemon 优雅退出 → 新版 daemon 拉起 |
-| 僵尸 state-file 恢复 | state-file 存在但 PID 已死 → CLI 清理后正常拉起 |
-| 空闲自退 | 最后一个 client 断开后超过空闲阈值 → daemon 自动退出，state-file 清理 |
-| `--no-daemon` 逃生舱 | 使用该 flag 时不发现/不拉起 daemon，走嵌入式路径 |
+| 无 daemon 时自动拉起 | state-file 不存在 → CLI 启动后 daemon 进程存在且 CLI 已连接 | `tests/integration/cli/daemon-auto-spawn.integration.test.ts` |
+| 有 daemon 时直连复用 | daemon 已运行 → 第二个 CLI 启动不产生新 daemon 进程 | `tests/integration/cli/daemon-auto-spawn.integration.test.ts` |
+| 并发拉起只有一个胜出 | 同时启动两个 CLI（无 daemon）→ 恰好一个 daemon，两个 CLI 都成功连接 | 待手工/子代理补充 |
+| 版本握手不匹配 | state-file 中版本与 client 不一致 → 旧 daemon 优雅退出 → 新版 daemon 拉起 | `runtime/daemon/spawn.unit.test.ts` |
+| 僵尸 state-file 恢复 | state-file 存在但 PID 已死 → CLI 清理后正常拉起 | `runtime/daemon/spawn.unit.test.ts` |
+| 空闲自退 | 最后一个 client 断开后超过空闲阈值 → daemon 自动退出，state-file 清理 | `runtime/daemon/supervisor.unit.test.ts`, `runtime/daemon/server.integration.test.ts` |
+| 默认 idle timeout | `startDaemonServer()` 未显式传 idle timeout 时使用 15 分钟默认值 | `runtime/daemon/main.unit.test.ts` |
+| health 身份校验 | 配置 auth token 后 `/api/health` 也要求 bearer token；client 校验 health `packageVersion` | `runtime/daemon/server.integration.test.ts`, `runtime/daemon/spawn.unit.test.ts` |
+| state-file token 权限 | POSIX 下 daemon state-file 以 owner-only 权限写入 | `runtime/daemon/state-file.unit.test.ts` |
+| `--no-daemon` 逃生舱 | 使用该 flag 时不发现/不拉起 daemon，走嵌入式路径 | `packages/ohbaby-cli/src/bin.unit.test.ts` |
+| 显式 remote auth | `ohbaby serve --auth-token` 与 `ohbaby --remote-auth-token` 可打通带 auth 的显式 daemon remote 路径 | `packages/ohbaby-cli/src/cli/commands/serve.unit.test.ts`, `packages/ohbaby-cli/src/bin.unit.test.ts` |
+| `ohbaby run` 非交互边界 | 一次性 prompt 不走 daemon auto-spawn，保持嵌入式 stdout/error 语义 | `packages/ohbaby-cli/src/cli/commands/run.unit.test.ts`, `tests/integration/cli/prompt-process.integration.test.ts` |
+| 全局 FIFO | 两个 remote client 对同一 session submit，第二条在第一条 abort 后自动跟进 | `tests/integration/cli/daemon-global-fifo.integration.test.ts` |
+| backend lease 边界 | daemon mode 不被 preparing lease 阻塞；in-process fallback 保留 lease 保护 | `ui-persistent.integration.test.ts` |
+| daemon 崩溃恢复 | daemon 禁用 backend lease gate 时，启动仍会恢复 stale `pending/running` runs | `ui-persistent.integration.test.ts` |
+| permission owner routing | permission 请求只发给发起 run 的 client | `runtime/daemon/server.integration.test.ts` |
+| permission owner 断线 | owner client 断开后释放 owner 映射，pending permission 回到 unknown-owner 防死锁规则 | `runtime/daemon/permission-router.unit.test.ts` |
 
 #### 验收标准
 
-- [ ] 用户全程只需 `ohbaby` 一条命令，无需感知 daemon 存在
-- [ ] npm 升级后首次启动，旧 daemon 被替换为新版，session 数据完整
-- [ ] daemon 不会在无人使用时常驻（空闲自退）
-- [ ] 审批路由：permission 请求只发给发起该 run 的前端，其他前端只读
+- [x] 默认 terminal host 走 daemon auto-spawn/reuse；`--in-process` / `--no-daemon` 走嵌入式 fallback
+- [x] npm 升级路径的版本握手逻辑有 unit 覆盖；session 数据完整性仍需发布前手工 smoke
+- [x] daemon 不会在无人使用时常驻（空闲自退逻辑有 fake-timer 覆盖）
+- [x] 审批路由：permission 请求只发给发起该 run 的前端，其他前端只读
+- [x] 子代理 review 的 must-fix 与安全/握手 important 项已补测试并修复
+- [x] 真实 `.env` smoke 已执行：`pnpm run test:smoke:real`，3 个真实 provider TUI 场景通过，5 个按开关跳过
+- [ ] 真实双终端手工演练仍需在可交互终端中执行
 
 ---
 
@@ -337,6 +355,9 @@
   - Step 3-4：流式输出正常
   - Step 6-7：重连后 session 状态完整（之前对话可见）
   - Step 8：daemon 优雅关闭，状态文件为 "stopped"
+
+自动化覆盖：
+  - `tests/integration/cli/daemon-terminal.integration.test.ts` 使用 explicit daemon、fake LLM、remote client A/B 验证 Step 3-7；真实前台进程 `pnpm serve`/`pnpm start` 的手工窗口演练仍作为最终发布前检查。
 ```
 
 ### E2E-4: Daemon 崩溃恢复
@@ -355,7 +376,7 @@
   - Step 6：CLI snapshot 显示旧 run 状态为 interrupted/failed
 ```
 
-### E2E-5: Auto-spawn 全流程（Phase 3b）
+### E2E-5: Auto-spawn 全流程（Phase 4）
 
 ```
 前置：无 daemon 运行，state-file 不存在

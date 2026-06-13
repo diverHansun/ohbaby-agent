@@ -86,6 +86,16 @@ export * from "./core/llm-client/index.js";
 export * from "./mcp/index.js";
 export * from "./project/index.js";
 export * from "./runtime/interaction-broker/index.js";
+export {
+  readDaemonStatus,
+  startDaemonServer,
+  stopDaemonFromState,
+} from "./runtime/daemon/index.js";
+export type {
+  DaemonState,
+  RunningDaemonServer,
+  StartDaemonServerOptions,
+} from "./runtime/daemon/index.js";
 export * from "./sandbox/index.js";
 export * from "./shell/index.js";
 export * from "./snapshot/index.js";

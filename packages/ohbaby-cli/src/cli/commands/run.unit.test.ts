@@ -3,6 +3,24 @@ import { createRunCommand } from "./run.js";
 import type { CliCommandRuntime, CliCoreHost } from "./types.js";
 
 describe("createRunCommand", () => {
+  it("uses the embedded backend for non-interactive prompt runs", async () => {
+    const runtime = createRuntime({ isStdinTTY: () => true });
+    const command = createRunCommand(runtime);
+
+    await command.handler({
+      mode: "plan",
+      permission: "full-access",
+      prompt: ["hello"],
+    } as never);
+
+    expect(runtime.createCoreHost).toHaveBeenCalledWith({
+      daemon: false,
+      inProcess: true,
+      mode: "plan",
+      permission: "full-access",
+    });
+  });
+
   it("rejects missing prompt on an interactive stdin before creating a host", async () => {
     const runtime = createRuntime({ isStdinTTY: () => true });
     const command = createRunCommand(runtime);

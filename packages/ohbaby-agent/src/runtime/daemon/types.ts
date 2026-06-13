@@ -16,6 +16,11 @@ export interface DaemonState {
   readonly startedAt?: number;
   readonly updatedAt: number;
   readonly error?: string;
+  readonly host?: string;
+  readonly port?: number;
+  readonly packageVersion?: string;
+  readonly authToken?: string;
+  readonly idleSince?: number;
 }
 
 export interface DaemonStateFile {
@@ -40,6 +45,12 @@ export interface DaemonPidFile {
 }
 
 export interface DaemonRuntimeHandle {
+  readonly connection?: {
+    readonly host: string;
+    readonly port: number;
+    readonly authToken?: string;
+    readonly packageVersion?: string;
+  };
   start(): Promise<void>;
   stop(): Promise<void>;
 }

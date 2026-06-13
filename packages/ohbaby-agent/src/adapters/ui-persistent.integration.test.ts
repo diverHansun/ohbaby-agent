@@ -886,6 +886,54 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 
+  it("recovers stale runs during daemon startup even when backend lease gate is disabled", async () => {
+    const directory = await tempDir("ohbaby-persistent-daemon-recovery-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      const client = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Seeded", finishReason: "stop" },
+        ]),
+        workdir,
+      });
+
+      await client.submitPrompt("Seed session");
+      const sessionId = (await client.getSnapshot()).activeSessionId;
+      if (!sessionId) {
+        throw new Error("expected seeded prompt to create an active session");
+      }
+
+      const runLedger = createDatabaseRunLedger({ now: () => 42_000 });
+      await runLedger.createPending({
+        runId: "run_daemon_stale",
+        sessionId,
+        triggerSource: "user",
+      });
+      await runLedger.markRunning("run_daemon_stale");
+      markBackendLeaseDead();
+
+      const restored = createPersistentUiBackendClient({
+        backendLeaseMode: "disabled",
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        workdir,
+      });
+      const snapshot = await restored.getSnapshot();
+      const staleRun = requireRun(snapshot.runs, "run_daemon_stale");
+
+      expect(snapshot.status).toEqual({ kind: "idle" });
+      expect(staleRun.status.kind).toBe("error");
+      expect(
+        staleRun.status.kind === "error" ? staleRun.status.message : "",
+      ).toContain("interrupted");
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("does not interrupt active runs when another live backend owns the database", async () => {
     const directory = await tempDir("ohbaby-persistent-live-owner-");
     try {
@@ -1143,6 +1191,44 @@ describe("createPersistentUiBackendClient", () => {
       await contender.getSnapshot();
 
       expect(readBackendLeaseValue()).toBe(preparingLease);
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("does not let a preparing backend lease block daemon-mode prompt submission", async () => {
+    const directory = await tempDir("ohbaby-persistent-daemon-lease-disabled-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        workdir,
+      });
+      writePreparingBackendLease("backend_preparing_owner");
+
+      const daemonBackend = createPersistentUiBackendClient({
+        backendLeaseMode: "disabled",
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Daemon response", finishReason: "stop" },
+        ]),
+        workdir,
+      });
+      const submitted = daemonBackend.submitPrompt("Run through daemon");
+      const result = await Promise.race([
+        submitted.then(() => "resolved" as const),
+        new Promise<"pending">((resolve) => {
+          setTimeout(() => {
+            resolve("pending");
+          }, 80);
+        }),
+      ]);
+
+      await daemonBackend.dispose();
+      expect(result).toBe("resolved");
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

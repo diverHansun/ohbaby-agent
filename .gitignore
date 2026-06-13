@@ -15,6 +15,7 @@ coverage/
 .claude/
 .codex/
 .agent/
+.ohbaby/
 
 # Local reference repositories used for design comparison only.
 # They are not product source and must not be included in package artifacts.
