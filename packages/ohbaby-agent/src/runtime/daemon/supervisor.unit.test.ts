@@ -1,9 +1,11 @@
+import process from "node:process";
 import { describe, expect, it } from "vitest";
 import { Supervisor } from "./supervisor.js";
 import type {
   DaemonLogger,
   DaemonPidFile,
   DaemonPidLock,
+  DaemonState,
   DaemonRuntimeHandle,
   DaemonStateFile,
 } from "./types.js";
@@ -73,6 +75,15 @@ class RecordingStateFile implements DaemonStateFile {
   }
 }
 
+class CapturingStateFile implements DaemonStateFile {
+  readonly states: DaemonState[] = [];
+
+  write(state: DaemonState): Promise<void> {
+    this.states.push(state);
+    return Promise.resolve();
+  }
+}
+
 class FirstStatusWriteFailsStateFile implements DaemonStateFile {
   private failed = false;
 
@@ -111,6 +122,15 @@ class RecordingRuntime implements DaemonRuntimeHandle {
   }
 }
 
+class RecordingConnectionRuntime extends RecordingRuntime {
+  readonly connection = {
+    authToken: "token_1",
+    host: "127.0.0.1",
+    packageVersion: "0.1.0",
+    port: 4096,
+  };
+}
+
 class FailingRuntime extends RecordingRuntime {
   override start(): Promise<void> {
     return Promise.reject(new Error("runtime failed"));
@@ -132,6 +152,36 @@ class StartFailingAndStopRejectingRuntime implements DaemonRuntimeHandle {
 }
 
 describe("Supervisor", () => {
+  it("writes running connection metadata after the runtime starts", async () => {
+    const calls: string[] = [];
+    const stateFile = new CapturingStateFile();
+    const supervisor = new Supervisor({
+      pidFile: new RecordingPidFile(calls),
+      stateFile,
+      bootstrap: (): Promise<DaemonRuntimeHandle> =>
+        Promise.resolve(new RecordingConnectionRuntime(calls)),
+      logger: silentLogger,
+      signalTarget: null,
+      now: (): number => 1_000,
+    });
+
+    await supervisor.start();
+
+    expect(calls).toEqual(["pid.acquire", "runtime.start"]);
+    expect(stateFile.states[0]).toEqual({
+      authToken: "token_1",
+      host: "127.0.0.1",
+      packageVersion: "0.1.0",
+      pid: process.pid,
+      port: 4096,
+      startedAt: 1_000,
+      status: "running",
+      updatedAt: 1_000,
+    });
+
+    await supervisor.stop();
+  });
+
   it("acquires process ownership, starts runtime, and releases ownership on stop", async () => {
     const calls: string[] = [];
     const supervisor = new Supervisor({
@@ -149,8 +199,8 @@ describe("Supervisor", () => {
 
     expect(calls).toEqual([
       "pid.acquire",
-      "state.running",
       "runtime.start",
+      "state.running",
       "state.stopping",
       "runtime.stop",
       "state.stopped",
@@ -174,7 +224,6 @@ describe("Supervisor", () => {
 
     expect(calls).toEqual([
       "pid.acquire",
-      "state.running",
       "state.crashed:runtime failed",
       "runtime.stop",
       "pid.release",
@@ -206,14 +255,13 @@ describe("Supervisor", () => {
 
     expect(calls).toEqual([
       "pid.acquire",
-      "state.running",
       "runtime.start",
       "state.crashed:runtime failed",
       "runtime.stop",
       "pid.release",
       "pid.acquire",
-      "state.running",
       "runtime.start",
+      "state.running",
       "state.stopping",
       "runtime.stop",
       "state.stopped",
@@ -243,12 +291,14 @@ describe("Supervisor", () => {
 
     expect(calls).toEqual([
       "pid.acquire",
+      "runtime.start",
       "state.running",
       "state.crashed:state running failed",
+      "runtime.stop",
       "pid.release",
       "pid.acquire",
-      "state.running",
       "runtime.start",
+      "state.running",
       "state.stopping",
       "runtime.stop",
       "state.stopped",
@@ -279,15 +329,15 @@ describe("Supervisor", () => {
 
     expect(calls).toEqual([
       "pid.acquire",
-      "state.running",
       "runtime.start",
+      "state.running",
       "state.stopping",
       "runtime.stop",
       "state.stopped",
       "pid.release",
       "pid.acquire",
-      "state.running",
       "runtime.start",
+      "state.running",
       "state.stopping",
       "runtime.stop",
       "state.stopped",
@@ -314,15 +364,15 @@ describe("Supervisor", () => {
 
     expect(calls).toEqual([
       "pid.acquire",
-      "state.running",
       "runtime.start",
+      "state.running",
       "state.stopping",
       "runtime.stop",
       "state.stopped",
       "pid.release",
       "pid.acquire",
-      "state.running",
       "runtime.start",
+      "state.running",
       "state.stopping",
       "runtime.stop",
       "state.stopped",

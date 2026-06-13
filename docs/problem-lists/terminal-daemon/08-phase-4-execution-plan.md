@@ -70,7 +70,7 @@ Modify:
 - Modify: `packages/ohbaby-agent/src/runtime/daemon/main.ts`
 - Modify: `packages/ohbaby-agent/src/runtime/daemon/index.ts`
 
-- [ ] **Step 1: Write auth unit tests**
+- [x] **Step 1: Write auth unit tests**
 
 Add `auth.unit.test.ts` with these cases:
 
@@ -104,7 +104,7 @@ describe("daemon auth", () => {
 });
 ```
 
-- [ ] **Step 2: Run auth tests and verify RED**
+- [x] **Step 2: Run auth tests and verify RED**
 
 Run:
 
@@ -114,7 +114,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/auth.unit.test.ts
 
 Expected: FAIL because `auth.ts` does not exist.
 
-- [ ] **Step 3: Implement auth helpers**
+- [x] **Step 3: Implement auth helpers**
 
 Add `auth.ts`:
 
@@ -149,7 +149,7 @@ export function redactDaemonAuthToken(token: string | undefined): string {
 }
 ```
 
-- [ ] **Step 4: Extend daemon state tests**
+- [x] **Step 4: Extend daemon state tests**
 
 Add cases to `state-file.unit.test.ts`:
 
@@ -191,7 +191,7 @@ it("ignores running state without connection metadata", async () => {
 });
 ```
 
-- [ ] **Step 5: Run state/auth tests and verify RED**
+- [x] **Step 5: Run state/auth tests and verify RED**
 
 Run:
 
@@ -201,7 +201,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/auth.unit.test.ts 
 
 Expected: auth passes; state metadata test fails until `DaemonState` and parser are extended.
 
-- [ ] **Step 6: Extend `DaemonState` and parser**
+- [x] **Step 6: Extend `DaemonState` and parser**
 
 Update `types.ts`:
 
@@ -222,7 +222,7 @@ export interface DaemonState {
 
 Update `state-file.ts` parser so `running` states require `pid`, `host`, `port`, `packageVersion`, and `authToken`; `stopping`, `stopped`, and `crashed` keep accepting lifecycle-only state.
 
-- [ ] **Step 7: Write spawn unit tests**
+- [x] **Step 7: Write spawn unit tests**
 
 Create `spawn.unit.test.ts` with injected dependencies:
 
@@ -336,7 +336,7 @@ describe("ensureDaemonRunning", () => {
 });
 ```
 
-- [ ] **Step 8: Run spawn tests and verify RED**
+- [x] **Step 8: Run spawn tests and verify RED**
 
 Run:
 
@@ -346,7 +346,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/spawn.unit.test.ts
 
 Expected: FAIL because `spawn.ts` does not exist.
 
-- [ ] **Step 9: Implement `ensureDaemonRunning`**
+- [x] **Step 9: Implement `ensureDaemonRunning`**
 
 Implement `spawn.ts` with this public interface:
 
@@ -380,7 +380,7 @@ Implementation rules:
 - If concurrent spawn loses the PID lock, the spawned process exits and the client still polls state; the caller sees a connection, not a failure.
 - Timeout message must include `daemon did not become ready`.
 
-- [ ] **Step 10: Wire auth and metadata into server/main/supervisor/client**
+- [x] **Step 10: Wire auth and metadata into server/main/supervisor/client**
 
 Make these concrete changes:
 
@@ -403,7 +403,7 @@ export interface DaemonRuntimeHandle {
 }
 ```
 
-- [ ] **Step 11: Run 4A focused verification**
+- [x] **Step 11: Run 4A focused verification**
 
 Run:
 
@@ -414,7 +414,7 @@ pnpm run typecheck
 
 Expected: all listed tests pass, typecheck passes.
 
-- [ ] **Step 12: Commit 4A**
+- [x] **Step 12: Commit 4A**
 
 ```powershell
 git add packages/ohbaby-agent/src/runtime/daemon/auth.ts packages/ohbaby-agent/src/runtime/daemon/auth.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/spawn.ts packages/ohbaby-agent/src/runtime/daemon/spawn.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/types.ts packages/ohbaby-agent/src/runtime/daemon/state-file.ts packages/ohbaby-agent/src/runtime/daemon/supervisor.ts packages/ohbaby-agent/src/runtime/daemon/server.ts packages/ohbaby-agent/src/runtime/daemon/client.ts packages/ohbaby-agent/src/runtime/daemon/main.ts packages/ohbaby-agent/src/runtime/daemon/index.ts

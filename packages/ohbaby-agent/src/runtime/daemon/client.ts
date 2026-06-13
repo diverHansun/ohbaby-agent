@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { CoreAPI, SDKAPI, UiBackendClient, UiEventHandler } from "ohbaby-sdk";
 import type { CoreApiHost } from "../../host/core-api-factory.js";
+import { daemonAuthHeader } from "./auth.js";
 import {
   createDaemonRpcRequest,
   parseDaemonSseEvent,
@@ -11,6 +12,7 @@ import {
 const DEFAULT_HOST = "127.0.0.1";
 
 export interface RemoteDaemonClientOptions {
+  readonly authToken?: string;
   readonly host?: string;
   readonly port: number;
   readonly fetch?: typeof fetch;
@@ -78,6 +80,7 @@ function ignoreAbort(error: unknown): void {
 
 class RemoteDaemonClient implements RemoteUiBackendClient {
   private readonly baseUrl: string;
+  private readonly authToken: string | undefined;
   private readonly clientId: string;
   private readonly fetchImpl: typeof fetch;
   private readonly handlers = new Set<UiEventHandler>();
@@ -85,6 +88,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   private sseLoop: Promise<void> | undefined;
 
   constructor(options: RemoteDaemonClientOptions) {
+    this.authToken = options.authToken;
     this.clientId = options.clientId ?? randomUUID();
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     if (typeof this.fetchImpl !== "function") {
@@ -191,7 +195,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     });
     const response = await this.fetchImpl(`${this.baseUrl}/api/rpc`, {
       body: JSON.stringify(request),
-      headers: { "content-type": "application/json" },
+      headers: this.requestHeaders({ "content-type": "application/json" }),
       method: "POST",
     });
     const body = parseRpcResponse(await response.json());
@@ -231,7 +235,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     const url = new URL(`${this.baseUrl}/api/events`);
     url.searchParams.set("clientId", this.clientId);
     const response = await this.fetchImpl(url, {
-      headers: { accept: "text/event-stream" },
+      headers: this.requestHeaders({ accept: "text/event-stream" }),
       signal,
     });
     if (!response.ok) {
@@ -290,6 +294,18 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     for (const handler of Array.from(this.handlers)) {
       handler(event.event);
     }
+  }
+
+  private requestHeaders(
+    headers: Record<string, string>,
+  ): Record<string, string> {
+    if (!this.authToken) {
+      return headers;
+    }
+    return {
+      ...headers,
+      authorization: daemonAuthHeader(this.authToken),
+    };
   }
 }
 

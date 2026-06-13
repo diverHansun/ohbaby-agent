@@ -10,8 +10,14 @@ import type {
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
-import { createRemoteUiBackendClient } from "./client.js";
-import { createDaemonHttpServer } from "./server.js";
+import {
+  createRemoteUiBackendClient,
+  type RemoteDaemonClientOptions,
+} from "./client.js";
+import {
+  createDaemonHttpServer,
+  type DaemonHttpServerOptions,
+} from "./server.js";
 
 const timestamp = "2026-06-12T00:00:00.000Z";
 
@@ -218,17 +224,25 @@ async function withRemoteClient<T>(
   callback: (
     client: ReturnType<typeof createRemoteUiBackendClient>,
   ) => Promise<T>,
+  options: {
+    readonly client?: Partial<Omit<RemoteDaemonClientOptions, "port">>;
+    readonly server?: Partial<
+      Omit<DaemonHttpServerOptions, "backend" | "host" | "port">
+    >;
+  } = {},
 ): Promise<T> {
   const server = createDaemonHttpServer({
     backend,
     host: "127.0.0.1",
     port: 0,
+    ...options.server,
   });
   await server.start();
   const client = createRemoteUiBackendClient({
     clientId: "client_a",
     host: "127.0.0.1",
     port: server.port,
+    ...options.client,
   });
   try {
     return await callback(client);
@@ -264,6 +278,50 @@ describe("createRemoteUiBackendClient", () => {
         },
       ]);
     });
+  });
+
+  it("sends daemon auth tokens for rpc and sse", async () => {
+    const backend = new FakeBackend();
+
+    await withRemoteClient(
+      backend,
+      async (client) => {
+        await client.submitPrompt("authenticated", { sessionId: "session_1" });
+        const eventPromise = new Promise<UiEvent>((resolve) => {
+          client.subscribeEvents(resolve);
+        });
+        await eventuallyEmit(
+          backend,
+          sessionUpdated(),
+          eventPromise,
+        );
+
+        expect(backend.submitted).toEqual([
+          {
+            options: { sessionId: "session_1" },
+            text: "authenticated",
+          },
+        ]);
+        await expect(eventPromise).resolves.toEqual(sessionUpdated());
+      },
+      {
+        client: { authToken: "token_1" },
+        server: { authToken: "token_1" },
+      },
+    );
+  });
+
+  it("surfaces daemon auth failures from rpc responses", async () => {
+    await withRemoteClient(
+      new FakeBackend(),
+      async (client) => {
+        await expect(client.getSnapshot()).rejects.toThrow("Unauthorized");
+      },
+      {
+        client: { authToken: "wrong_token" },
+        server: { authToken: "token_1" },
+      },
+    );
   });
 
   it("forwards every CoreAPI method shape through the daemon", async () => {

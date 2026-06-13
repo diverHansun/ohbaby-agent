@@ -1,6 +1,7 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import process from "node:process";
 import { describe, expect, it, vi } from "vitest";
 import type { UiBackendClient } from "ohbaby-sdk";
 
@@ -67,6 +68,54 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
 }
 
 describe("startDaemonServer", () => {
+  it("writes connection metadata to the daemon state file", async () => {
+    vi.resetModules();
+    const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-main-"));
+    const disposeAll = vi.fn(() => Promise.resolve());
+    const closePersistentUiBackendDatabase = vi.fn();
+    const createPersistentUiBackendClient = vi.fn(() =>
+      createFakeBackend(vi.fn(() => Promise.resolve())),
+    );
+    vi.doMock("../../adapters/ui-persistent.js", () => ({
+      closePersistentUiBackendDatabase,
+      createPersistentUiBackendClient,
+    }));
+    vi.doMock("../../mcp/index.js", () => ({
+      McpManager: { disposeAll },
+    }));
+
+    try {
+      const stateFilePath = join(tempDir, "daemon-state.json");
+      const { startDaemonServer } = await import("./main.js");
+      const daemon = await startDaemonServer({
+        authToken: "token_1",
+        packageVersion: "0.1.0",
+        pidFilePath: join(tempDir, "daemon.pid"),
+        port: 0,
+        stateFilePath,
+      });
+
+      const state = JSON.parse(await readFile(stateFilePath, "utf8")) as Record<
+        string,
+        unknown
+      >;
+      expect(state).toMatchObject({
+        authToken: "token_1",
+        host: "127.0.0.1",
+        packageVersion: "0.1.0",
+        pid: process.pid,
+        port: daemon.port,
+        status: "running",
+      });
+
+      await daemon.stop();
+    } finally {
+      vi.doUnmock("../../adapters/ui-persistent.js");
+      vi.doUnmock("../../mcp/index.js");
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
   it("disposes MCP managers when the daemon stops", async () => {
     vi.resetModules();
     const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-main-"));

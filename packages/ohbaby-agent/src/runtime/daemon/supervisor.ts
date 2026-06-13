@@ -112,9 +112,9 @@ export class Supervisor {
     try {
       this.pidLock = await this.pidFile.acquire();
       this.startedAt = this.now();
-      await this.writeState("running");
       this.runtime = await this.options.bootstrap();
       await this.runtime.start();
+      await this.writeState("running");
       this.registerSignals();
       this.logger.info("daemon started");
     } catch (error) {
@@ -244,6 +244,9 @@ export class Supervisor {
       startedAt: this.startedAt,
       updatedAt: this.now(),
       error,
+      ...(status === "running" && this.runtime?.connection
+        ? this.runtime.connection
+        : {}),
     });
   }
 

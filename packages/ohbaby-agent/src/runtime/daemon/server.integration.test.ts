@@ -11,7 +11,10 @@ import type {
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
-import { createDaemonHttpServer } from "./server.js";
+import {
+  createDaemonHttpServer,
+  type DaemonHttpServerOptions,
+} from "./server.js";
 
 const timestamp = "2026-06-12T00:00:00.000Z";
 
@@ -212,11 +215,15 @@ class FakeBackend implements UiBackendClient {
 async function withServer<T>(
   backend: FakeBackend,
   callback: (url: string) => Promise<T>,
+  options: Partial<
+    Omit<DaemonHttpServerOptions, "backend" | "host" | "port">
+  > = {},
 ): Promise<T> {
   const server = createDaemonHttpServer({
     backend,
     host: "127.0.0.1",
     port: 0,
+    ...options,
   });
   await server.start();
   try {
@@ -229,10 +236,11 @@ async function withServer<T>(
 async function postRpc(
   url: string,
   body: Record<string, unknown>,
+  headers: Record<string, string> = {},
 ): Promise<Response> {
   return fetch(`${url}/api/rpc`, {
     body: JSON.stringify(body),
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
     method: "POST",
   });
 }
@@ -343,6 +351,81 @@ describe("createDaemonHttpServer", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ ok: true });
     });
+  });
+
+  it("includes daemon package version in health checks when configured", async () => {
+    await withServer(
+      new FakeBackend(),
+      async (url) => {
+        const response = await fetch(`${url}/api/health`);
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+          ok: true,
+          packageVersion: "0.1.0",
+        });
+      },
+      { packageVersion: "0.1.0" },
+    );
+  });
+
+  it("requires daemon auth for rpc and sse when configured", async () => {
+    await withServer(
+      new FakeBackend(),
+      async (url) => {
+        const missingRpc = await postRpc(url, {
+          clientId: "client_1",
+          id: "rpc_missing_auth",
+          method: "getSnapshot",
+          params: [],
+        });
+        expect(missingRpc.status).toBe(401);
+
+        const missingSse = await fetch(`${url}/api/events?clientId=client_a`);
+        expect(missingSse.status).toBe(401);
+
+        const allowed = await postRpc(
+          url,
+          {
+            clientId: "client_1",
+            id: "rpc_allowed",
+            method: "getSnapshot",
+            params: [],
+          },
+          { authorization: "Bearer token_1" },
+        );
+        expect(allowed.status).toBe(200);
+
+        const sse = await fetch(`${url}/api/events?clientId=client_a`, {
+          headers: { authorization: "Bearer token_1" },
+        });
+        expect(sse.status).toBe(200);
+        await sse.body?.cancel();
+      },
+      { authToken: "token_1" },
+    );
+  });
+
+  it("handles authorized shutdown requests", async () => {
+    const onShutdown = vi.fn(() => Promise.resolve());
+    await withServer(
+      new FakeBackend(),
+      async (url) => {
+        const rejected = await fetch(`${url}/api/shutdown`, {
+          method: "POST",
+        });
+        expect(rejected.status).toBe(401);
+
+        const accepted = await fetch(`${url}/api/shutdown`, {
+          headers: { authorization: "Bearer token_1" },
+          method: "POST",
+        });
+        expect(accepted.status).toBe(200);
+        expect(await accepted.json()).toEqual({ ok: true });
+        expect(onShutdown).toHaveBeenCalledTimes(1);
+      },
+      { authToken: "token_1", onShutdown },
+    );
   });
 
   it("dispatches rpc requests to the backend", async () => {

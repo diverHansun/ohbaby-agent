@@ -19,6 +19,19 @@ function parseDaemonState(raw: string): DaemonState | undefined {
   if (typeof parsed.updatedAt !== "number") {
     return undefined;
   }
+  if (
+    parsed.status === "running" &&
+    (typeof parsed.pid !== "number" ||
+      typeof parsed.host !== "string" ||
+      parsed.host.length === 0 ||
+      !Number.isInteger(parsed.port) ||
+      typeof parsed.packageVersion !== "string" ||
+      parsed.packageVersion.length === 0 ||
+      typeof parsed.authToken !== "string" ||
+      parsed.authToken.length === 0)
+  ) {
+    return undefined;
+  }
 
   return {
     status: parsed.status,
@@ -26,6 +39,11 @@ function parseDaemonState(raw: string): DaemonState | undefined {
     startedAt: parsed.startedAt,
     updatedAt: parsed.updatedAt,
     error: parsed.error,
+    host: parsed.host,
+    port: parsed.port,
+    packageVersion: parsed.packageVersion,
+    authToken: parsed.authToken,
+    idleSince: parsed.idleSince,
   };
 }
 

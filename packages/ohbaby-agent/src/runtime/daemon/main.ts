@@ -7,6 +7,7 @@ import {
   type PersistentUiBackendOptions,
 } from "../../adapters/ui-persistent.js";
 import { McpManager } from "../../mcp/index.js";
+import { createDaemonAuthToken } from "./auth.js";
 import { createDaemonHttpServer, type DaemonHttpServerHandle } from "./server.js";
 import { JsonDaemonStateFile } from "./state-file.js";
 import { Supervisor } from "./supervisor.js";
@@ -16,10 +17,13 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4096;
 const DEFAULT_STATE_DIR = ".ohbaby";
 const DEFAULT_STATE_FILE = resolve(DEFAULT_STATE_DIR, "daemon-state.json");
+const DEFAULT_PACKAGE_VERSION = "0.1.0";
 
 export interface StartDaemonServerOptions {
   readonly host?: string;
   readonly port?: number;
+  readonly authToken?: string;
+  readonly packageVersion?: string;
   readonly dbPath?: string;
   readonly llmClient?: PersistentUiBackendOptions["llmClient"];
   readonly pidFilePath?: string;
@@ -39,10 +43,20 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 }
 
 function createServerRuntime(input: {
+  readonly authToken: string;
   readonly backend: PersistentUiBackendClient;
+  readonly packageVersion: string;
   readonly server: DaemonHttpServerHandle;
 }): DaemonRuntimeHandle {
   return {
+    get connection(): NonNullable<DaemonRuntimeHandle["connection"]> {
+      return {
+        authToken: input.authToken,
+        host: input.server.host,
+        packageVersion: input.packageVersion,
+        port: input.server.port,
+      };
+    },
     start(): Promise<void> {
       return input.server.start();
     },
@@ -68,6 +82,8 @@ export async function startDaemonServer(
   options: StartDaemonServerOptions = {},
 ): Promise<RunningDaemonServer> {
   let server: DaemonHttpServerHandle | undefined;
+  const authToken = options.authToken ?? createDaemonAuthToken();
+  const packageVersion = options.packageVersion ?? DEFAULT_PACKAGE_VERSION;
   const supervisor = new Supervisor({
     bootstrap(): DaemonRuntimeHandle {
       const backend = createPersistentUiBackendClient({
@@ -78,11 +94,14 @@ export async function startDaemonServer(
         ...(options.workdir === undefined ? {} : { workdir: options.workdir }),
       });
       server = createDaemonHttpServer({
+        authToken,
         backend,
         host: options.host ?? DEFAULT_HOST,
+        onShutdown: () => supervisor.stop(),
+        packageVersion,
         port: options.port ?? DEFAULT_PORT,
       });
-      return createServerRuntime({ backend, server });
+      return createServerRuntime({ authToken, backend, packageVersion, server });
     },
     ...(options.pidFilePath === undefined
       ? {}

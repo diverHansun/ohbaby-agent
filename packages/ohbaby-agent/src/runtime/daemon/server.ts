@@ -5,6 +5,7 @@ import type {
   UiEvent,
   UiUnsubscribe,
 } from "ohbaby-sdk";
+import { isAuthorizedDaemonRequest } from "./auth.js";
 import { PermissionRouter } from "./permission-router.js";
 import {
   createDaemonRpcFailure,
@@ -26,7 +27,10 @@ interface SseClient {
 
 export interface DaemonHttpServerOptions {
   readonly backend: UiBackendClient;
+  readonly authToken?: string;
   readonly host?: string;
+  readonly onShutdown?: () => Promise<void> | void;
+  readonly packageVersion?: string;
   readonly port?: number;
   readonly permissionRouter?: PermissionRouter;
 }
@@ -38,6 +42,15 @@ export interface DaemonHttpServerHandle {
   start(): Promise<void>;
   stop(): Promise<void>;
 }
+
+type NormalizedDaemonHttpServerOptions = Omit<
+  DaemonHttpServerOptions,
+  "host" | "permissionRouter" | "port"
+> & {
+  readonly host: string;
+  readonly permissionRouter: PermissionRouter;
+  readonly port: number;
+};
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -218,7 +231,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
   private currentPort: number;
   private started = false;
 
-  constructor(private readonly options: Required<DaemonHttpServerOptions>) {
+  constructor(private readonly options: NormalizedDaemonHttpServerOptions) {
     this.currentPort = options.port;
   }
 
@@ -295,7 +308,17 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     const url = new URL(request.url ?? "/", this.url);
 
     if (request.method === "GET" && url.pathname === "/api/health") {
-      writeJson(response, 200, { ok: true });
+      writeJson(response, 200, {
+        ok: true,
+        ...(this.options.packageVersion === undefined
+          ? {}
+          : { packageVersion: this.options.packageVersion }),
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/shutdown") {
+      await this.handleShutdown(request, response);
       return;
     }
 
@@ -312,10 +335,40 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     writeJson(response, 404, { error: { message: "Not found" }, ok: false });
   }
 
+  private isAuthorized(request: IncomingMessage): boolean {
+    const authorization = request.headers.authorization;
+    return isAuthorizedDaemonRequest(
+      typeof authorization === "string" ? authorization : undefined,
+      this.options.authToken,
+    );
+  }
+
+  private writeUnauthorized(response: ServerResponse, id = "unknown"): void {
+    writeJson(response, 401, createDaemonRpcFailure(id, new Error("Unauthorized")));
+  }
+
+  private async handleShutdown(
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    if (!this.isAuthorized(request)) {
+      this.writeUnauthorized(response);
+      return;
+    }
+
+    writeJson(response, 200, { ok: true });
+    await this.options.onShutdown?.();
+  }
+
   private async handleRpc(
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> {
+    if (!this.isAuthorized(request)) {
+      this.writeUnauthorized(response);
+      return;
+    }
+
     let parsedBody: unknown;
     let rpcRequest: DaemonRpcRequest;
     try {
@@ -357,6 +410,10 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       });
       return;
     }
+    if (!this.isAuthorized(request)) {
+      this.writeUnauthorized(response);
+      return;
+    }
 
     response.writeHead(200, {
       "cache-control": "no-cache",
@@ -393,7 +450,10 @@ export function createDaemonHttpServer(
 ): DaemonHttpServerHandle {
   return new DaemonHttpServer({
     backend: options.backend,
+    authToken: options.authToken,
     host: options.host ?? DEFAULT_HOST,
+    onShutdown: options.onShutdown,
+    packageVersion: options.packageVersion,
     permissionRouter: options.permissionRouter ?? new PermissionRouter(),
     port: options.port ?? DEFAULT_PORT,
   });

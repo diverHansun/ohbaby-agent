@@ -1,7 +1,18 @@
 export { Supervisor } from "./supervisor.js";
 export type { SupervisorOptions } from "./supervisor.js";
 export { PermissionRouter } from "./permission-router.js";
+export {
+  createDaemonAuthToken,
+  daemonAuthHeader,
+  isAuthorizedDaemonRequest,
+  redactDaemonAuthToken,
+} from "./auth.js";
 export * from "./protocol.js";
+export { ensureDaemonRunning } from "./spawn.js";
+export type {
+  EnsureDaemonRunningOptions,
+  RunningDaemonConnection,
+} from "./spawn.js";
 export { createDaemonHttpServer } from "./server.js";
 export type {
   DaemonHttpServerHandle,
