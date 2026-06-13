@@ -1,6 +1,30 @@
 import { describe, expect, it, vi } from "vitest";
 
 describe("runOhbabyCli", () => {
+  it("loads the CLI version from package metadata", async () => {
+    vi.resetModules();
+    const getCliPackageVersion = vi.fn(() => "9.9.9");
+    vi.doMock("./package-version.js", () => ({
+      getCliPackageVersion,
+    }));
+    vi.doMock("ohbaby-agent", () => {
+      throw new Error("agent should be loaded only by injected dependencies");
+    });
+    vi.doMock("./tui/index.js", () => ({
+      renderTerminalUi: vi.fn(),
+    }));
+
+    try {
+      await import("./bin.js");
+
+      expect(getCliPackageVersion).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.doUnmock("./package-version.js");
+      vi.doUnmock("ohbaby-agent");
+      vi.doUnmock("./tui/index.js");
+    }
+  });
+
   it("starts the terminal UI through injected host dependencies", async () => {
     vi.resetModules();
     const core = createCore();

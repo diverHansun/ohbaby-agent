@@ -1029,7 +1029,7 @@ git commit -m "fix(daemon): harden lifecycle and lease boundaries"
 pnpm run test:unit
 ```
 
-Evidence: 152 files, 1122 tests passed.
+Evidence: 155 files, 1127 tests passed.
 
 - [x] Run all contract tests:
 
@@ -1129,6 +1129,19 @@ $changed = git diff --name-only
 git add -- $changed
 git commit -m "fix(daemon): address phase four review findings"
 ```
+
+Post-merge review follow-up:
+
+- Replaced hardcoded daemon/client/MCP/CLI version constants with package metadata sources, so npm package version bumps drive daemon `packageVersion`, client `currentVersion`, MCP client metadata, and CLI `--version`.
+- Added focused package-version tests plus daemon main, core factory, MCP client metadata, and CLI import coverage for the version source.
+
+Focused version-source verification:
+
+```powershell
+pnpm exec vitest run packages/ohbaby-agent/src/mcp/__tests__/client-version.unit.test.ts packages/ohbaby-agent/src/package-version.unit.test.ts packages/ohbaby-cli/src/package-version.unit.test.ts packages/ohbaby-agent/src/host/core-api-factory.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/main.unit.test.ts packages/ohbaby-cli/src/bin.unit.test.ts --no-file-parallelism
+```
+
+Evidence: 6 files, 27 tests passed.
 
 ---
 

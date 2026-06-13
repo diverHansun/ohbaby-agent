@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServerConfig } from "../../config/index.js";
+import { getAgentPackageVersion } from "../../package-version.js";
 import { McpConnectionError, McpToolDiscoveryError } from "../errors.js";
 import type {
   McpCallToolRequest,
@@ -33,7 +34,7 @@ function errorMessage(error: unknown): string {
 function createDefaultSdkClient(): McpSdkClient {
   return new Client({
     name: "ohbaby-agent",
-    version: "0.1.0",
+    version: getAgentPackageVersion(),
   });
 }
 

@@ -817,7 +817,7 @@ Expected: daemon mode is coordinated by the daemon, while any retained in-proces
 Final verification evidence:
 
 ```powershell
-pnpm run test:unit            # 152 files, 1122 tests passed
+pnpm run test:unit            # 155 files, 1127 tests passed
 pnpm run test:contract        # 8 files, 164 tests passed
 pnpm run test:integration     # 29 files, 177 tests passed
 pnpm run test:e2e:snapshot    # 1 file, 1 test passed
@@ -830,6 +830,10 @@ pnpm run build                # passed
 Note: the worktree did not contain a local `.env`, so the real smoke was run with variables loaded into the shell from the main workspace root `.env` without printing secret values.
 
 - [x] Run subagent review and fix findings with tests.
+
+Post-merge review follow-up:
+
+- [x] Replace hardcoded daemon/client/MCP/CLI version constants with package metadata sources, so npm package version bumps drive daemon `packageVersion`, client `currentVersion`, MCP client metadata, and CLI `--version`.
 
 Review follow-up evidence:
 

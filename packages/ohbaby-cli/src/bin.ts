@@ -18,9 +18,10 @@ import type {
 import { EXIT_CODES } from "./cli/exit-codes.js";
 import { readStdin } from "./cli/stdin.js";
 import { createStdoutRenderer } from "./cli/stdout-renderer.js";
+import { getCliPackageVersion } from "./package-version.js";
 import { renderTerminalUi } from "./tui/index.js";
 
-const VERSION = "0.1.0";
+const VERSION = getCliPackageVersion();
 const AGENT_RUNTIME_MODULE = "ohbaby-agent";
 
 class CliUsageError extends Error {

@@ -279,6 +279,7 @@ Phase 4 将 daemon 变为默认 terminal 路径；以下条目是本阶段 merge
 | 有 daemon 时直连复用 | daemon 已运行 → 第二个 CLI 启动不产生新 daemon 进程 | `tests/integration/cli/daemon-auto-spawn.integration.test.ts` |
 | 并发拉起只有一个胜出 | 同时启动两个 CLI（无 daemon）→ 恰好一个 daemon，两个 CLI 都成功连接 | 待手工/子代理补充 |
 | 版本握手不匹配 | state-file 中版本与 client 不一致 → 旧 daemon 优雅退出 → 新版 daemon 拉起 | `runtime/daemon/spawn.unit.test.ts` |
+| 版本来源一致 | daemon 上报版本、client `currentVersion`、MCP client metadata、CLI `--version` 都来自对应 `package.json`，避免发布 bump 后继续握手旧硬编码版本 | `packages/ohbaby-agent/src/package-version.unit.test.ts`, `packages/ohbaby-agent/src/host/core-api-factory.unit.test.ts`, `packages/ohbaby-agent/src/runtime/daemon/main.unit.test.ts`, `packages/ohbaby-agent/src/mcp/__tests__/client-version.unit.test.ts`, `packages/ohbaby-cli/src/package-version.unit.test.ts`, `packages/ohbaby-cli/src/bin.unit.test.ts` |
 | 僵尸 state-file 恢复 | state-file 存在但 PID 已死 → CLI 清理后正常拉起 | `runtime/daemon/spawn.unit.test.ts` |
 | 空闲自退 | 最后一个 client 断开后超过空闲阈值 → daemon 自动退出，state-file 清理 | `runtime/daemon/supervisor.unit.test.ts`, `runtime/daemon/server.integration.test.ts` |
 | 默认 idle timeout | `startDaemonServer()` 未显式传 idle timeout 时使用 15 分钟默认值 | `runtime/daemon/main.unit.test.ts` |
@@ -296,7 +297,7 @@ Phase 4 将 daemon 变为默认 terminal 路径；以下条目是本阶段 merge
 #### 验收标准
 
 - [x] 默认 terminal host 走 daemon auto-spawn/reuse；`--in-process` / `--no-daemon` 走嵌入式 fallback
-- [x] npm 升级路径的版本握手逻辑有 unit 覆盖；session 数据完整性仍需发布前手工 smoke
+- [x] npm 升级路径的版本握手逻辑有 unit 覆盖；版本号从 package metadata 读取；session 数据完整性仍需发布前手工 smoke
 - [x] daemon 不会在无人使用时常驻（空闲自退逻辑有 fake-timer 覆盖）
 - [x] 审批路由：permission 请求只发给发起该 run 的前端，其他前端只读
 - [x] 子代理 review 的 must-fix 与安全/握手 important 项已补测试并修复

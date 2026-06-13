@@ -9,6 +9,7 @@ import {
 import { McpManager } from "../../mcp/index.js";
 import { createDaemonAuthToken } from "./auth.js";
 import { createDaemonHttpServer, type DaemonHttpServerHandle } from "./server.js";
+import { getAgentPackageVersion } from "../../package-version.js";
 import { JsonDaemonStateFile } from "./state-file.js";
 import { Supervisor } from "./supervisor.js";
 import type { DaemonRuntimeHandle, DaemonState } from "./types.js";
@@ -17,7 +18,6 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4096;
 const DEFAULT_STATE_DIR = ".ohbaby";
 const DEFAULT_STATE_FILE = resolve(DEFAULT_STATE_DIR, "daemon-state.json");
-const DEFAULT_PACKAGE_VERSION = "0.1.0";
 const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 
 export interface StartDaemonServerOptions {
@@ -85,7 +85,7 @@ export async function startDaemonServer(
 ): Promise<RunningDaemonServer> {
   let server: DaemonHttpServerHandle | undefined;
   const authToken = options.authToken ?? createDaemonAuthToken();
-  const packageVersion = options.packageVersion ?? DEFAULT_PACKAGE_VERSION;
+  const packageVersion = options.packageVersion ?? getAgentPackageVersion();
   const supervisor = new Supervisor({
     bootstrap(): DaemonRuntimeHandle {
       const backend = createPersistentUiBackendClient({

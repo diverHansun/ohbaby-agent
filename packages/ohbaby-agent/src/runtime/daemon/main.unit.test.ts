@@ -68,6 +68,48 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
 }
 
 describe("startDaemonServer", () => {
+  it("uses the agent package version for daemon discovery metadata by default", async () => {
+    vi.resetModules();
+    let capturedPackageVersion: string | undefined;
+    vi.doMock("../../package-version.js", () => ({
+      getAgentPackageVersion: (): string => "9.9.9",
+    }));
+    vi.doMock("../../adapters/ui-persistent.js", () => ({
+      closePersistentUiBackendDatabase: vi.fn(),
+      createPersistentUiBackendClient: vi.fn(() =>
+        createFakeBackend(vi.fn(() => Promise.resolve())),
+      ),
+    }));
+    vi.doMock("../../mcp/index.js", () => ({
+      McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
+    }));
+    vi.doMock("./server.js", () => ({
+      createDaemonHttpServer: vi.fn((options: { readonly packageVersion?: string }) => {
+        capturedPackageVersion = options.packageVersion;
+        return {
+          host: "127.0.0.1",
+          port: 4096,
+          start: vi.fn(() => Promise.resolve()),
+          stop: vi.fn(() => Promise.resolve()),
+          url: "http://127.0.0.1:4096",
+        };
+      }),
+    }));
+
+    try {
+      const { startDaemonServer } = await import("./main.js");
+      const daemon = await startDaemonServer({ port: 0 });
+      await daemon.stop();
+
+      expect(capturedPackageVersion).toBe("9.9.9");
+    } finally {
+      vi.doUnmock("../../package-version.js");
+      vi.doUnmock("../../adapters/ui-persistent.js");
+      vi.doUnmock("../../mcp/index.js");
+      vi.doUnmock("./server.js");
+    }
+  });
+
   it("uses a default idle timeout for daemon servers", async () => {
     vi.resetModules();
     let capturedIdleTimeoutMs: number | undefined;

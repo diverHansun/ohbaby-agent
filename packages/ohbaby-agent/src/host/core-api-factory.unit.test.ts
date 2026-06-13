@@ -262,6 +262,9 @@ describe("buildCoreAPIImpl", () => {
     vi.doMock("../runtime/daemon/spawn.js", () => ({
       ensureDaemonRunning,
     }));
+    vi.doMock("../package-version.js", () => ({
+      getAgentPackageVersion: (): string => "9.9.9",
+    }));
     vi.doMock("../adapters/ui-persistent.js", () => ({
       closePersistentUiBackendDatabase: vi.fn(),
       createPersistentUiBackendClient,
@@ -274,7 +277,7 @@ describe("buildCoreAPIImpl", () => {
 
     await expect(buildCoreAPIImpl({})).resolves.toBe(remoteHost);
     expect(ensureDaemonRunning).toHaveBeenCalledWith({
-      currentVersion: "0.1.0",
+      currentVersion: "9.9.9",
     });
     expect(createRemoteCoreApiHost).toHaveBeenCalledWith({
       authToken: "token_1",

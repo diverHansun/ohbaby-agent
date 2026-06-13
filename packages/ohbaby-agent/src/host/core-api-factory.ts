@@ -10,8 +10,7 @@ import {
   ensureDaemonRunning,
   type EnsureDaemonRunningOptions,
 } from "../runtime/daemon/spawn.js";
-
-const PACKAGE_VERSION = "0.1.0";
+import { getAgentPackageVersion } from "../package-version.js";
 
 export interface CoreApiFactoryOptions {
   readonly continue?: boolean;
@@ -101,7 +100,7 @@ export async function buildCoreAPIImpl(
   if (options.inProcess !== true && options.daemon !== false) {
     const discoverDaemon = options.ensureDaemonRunning ?? ensureDaemonRunning;
     const connection = await discoverDaemon({
-      currentVersion: PACKAGE_VERSION,
+      currentVersion: getAgentPackageVersion(),
       ...(options.daemonPollIntervalMs === undefined
         ? {}
         : { pollIntervalMs: options.daemonPollIntervalMs }),
