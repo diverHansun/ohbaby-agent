@@ -31,7 +31,10 @@ export interface CliRunningDaemonServer {
 
 export interface CliGlobalOptions {
   readonly continue?: boolean;
+  readonly daemon?: boolean;
+  readonly inProcess?: boolean;
   readonly mode?: "plan" | "auto";
+  readonly noDaemon?: boolean;
   readonly permission?: "default" | "full-access";
   readonly remoteHost?: string;
   readonly remotePort?: number;
@@ -44,6 +47,8 @@ export interface CliCoreHost {
   readonly dispose: () => Promise<void>;
 }
 
+export type CliCoreHostResult = CliCoreHost | Promise<CliCoreHost>;
+
 export interface CliWritable {
   write(chunk: string): unknown;
 }
@@ -53,7 +58,7 @@ export interface TerminalUiLifecycle {
 }
 
 export interface CliCommandRuntime {
-  readonly createCoreHost: (options: CliGlobalOptions) => CliCoreHost;
+  readonly createCoreHost: (options: CliGlobalOptions) => CliCoreHostResult;
   readonly createStdoutRenderer: typeof createStdoutRenderer;
   readonly failUsage: (message: string) => never;
   readonly isStdinTTY: () => boolean;

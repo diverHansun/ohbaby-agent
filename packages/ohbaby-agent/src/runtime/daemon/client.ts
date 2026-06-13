@@ -7,6 +7,7 @@ import {
   parseDaemonSseEvent,
   type DaemonRpcMethod,
   type DaemonRpcResponse,
+  type DaemonStartupIntent,
 } from "./protocol.js";
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -17,6 +18,7 @@ export interface RemoteDaemonClientOptions {
   readonly port: number;
   readonly fetch?: typeof fetch;
   readonly clientId?: string;
+  readonly startupIntent?: DaemonStartupIntent;
 }
 
 type RemoteUiBackendClient = UiBackendClient & {
@@ -83,13 +85,16 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   private readonly authToken: string | undefined;
   private readonly clientId: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly startupIntent: DaemonStartupIntent | undefined;
   private readonly handlers = new Set<UiEventHandler>();
   private abortController: AbortController | undefined;
+  private initializePromise: Promise<void> | undefined;
   private sseLoop: Promise<void> | undefined;
 
   constructor(options: RemoteDaemonClientOptions) {
     this.authToken = options.authToken;
     this.clientId = options.clientId ?? randomUUID();
+    this.startupIntent = options.startupIntent;
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     if (typeof this.fetchImpl !== "function") {
       throw new Error("fetch is required to create a remote daemon client");
@@ -186,7 +191,11 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   private async rpc<T>(
     method: DaemonRpcMethod,
     params: readonly unknown[],
+    options: { readonly skipInitialize?: boolean } = {},
   ): Promise<T> {
+    if (options.skipInitialize !== true) {
+      await this.ensureInitialized();
+    }
     const request = createDaemonRpcRequest({
       clientId: this.clientId,
       id: randomUUID(),
@@ -203,6 +212,16 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
       throw new Error(body.error.message);
     }
     return body.result as T;
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (this.startupIntent === undefined) {
+      return;
+    }
+    this.initializePromise ??= this.rpc("initializeClient", [this.startupIntent], {
+      skipInitialize: true,
+    });
+    await this.initializePromise;
   }
 
   private ensureSseLoop(): void {
@@ -232,6 +251,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   }
 
   private async runSseLoop(signal: AbortSignal): Promise<void> {
+    await this.ensureInitialized();
     const url = new URL(`${this.baseUrl}/api/events`);
     url.searchParams.set("clientId", this.clientId);
     const response = await this.fetchImpl(url, {

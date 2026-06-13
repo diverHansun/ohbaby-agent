@@ -1,5 +1,9 @@
-import process from "node:process";
+import {
+  spawn as spawnChildProcess,
+  type SpawnOptions,
+} from "node:child_process";
 import { resolve } from "node:path";
+import process from "node:process";
 import { daemonAuthHeader } from "./auth.js";
 import { JsonDaemonStateFile } from "./state-file.js";
 import type { DaemonState, DaemonStateFile } from "./types.js";
@@ -23,10 +27,17 @@ export interface EnsureDaemonRunningOptions {
   readonly fetch?: typeof fetch;
   readonly isProcessAlive?: (pid: number) => boolean;
   readonly spawn?: () => Promise<void>;
+  readonly spawnProcess?: SpawnDetachedDaemonProcess;
   readonly waitForState?: () => Promise<DaemonState>;
   readonly pollIntervalMs?: number;
   readonly timeoutMs?: number;
 }
+
+export type SpawnDetachedDaemonProcess = (
+  command: string,
+  args: readonly string[],
+  options: SpawnOptions,
+) => { unref(): void };
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
@@ -129,8 +140,23 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-function defaultSpawn(): Promise<void> {
-  return Promise.reject(new Error("daemon spawn function is required"));
+function defaultSpawn(
+  spawnProcess: SpawnDetachedDaemonProcess = spawnChildProcess,
+): Promise<void> {
+  const entrypoint = process.argv[1].trim();
+  if (entrypoint.length === 0) {
+    throw new Error("daemon spawn entrypoint is unavailable");
+  }
+
+  const child = spawnProcess(process.execPath, [entrypoint, "serve"], {
+    cwd: process.cwd(),
+    detached: true,
+    env: process.env,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  child.unref();
+  return Promise.resolve();
 }
 
 async function waitForReadyState(
@@ -183,7 +209,9 @@ export async function ensureDaemonRunning(
     throw new Error("fetch is required to discover the daemon");
   }
   const isProcessAlive = options.isProcessAlive ?? defaultIsProcessAlive;
-  const spawn = options.spawn ?? defaultSpawn;
+  const spawn =
+    options.spawn ??
+    ((): Promise<void> => defaultSpawn(options.spawnProcess));
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 

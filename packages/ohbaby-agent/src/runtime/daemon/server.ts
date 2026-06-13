@@ -3,6 +3,7 @@ import type {
   SubmitPromptOptions,
   UiBackendClient,
   UiEvent,
+  UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
 import { SessionRunBusyError } from "../run-ledger/index.js";
@@ -16,6 +17,7 @@ import {
   type DaemonRpcRequest,
   type DaemonRpcResponse,
   type DaemonSseEvent,
+  type DaemonStartupIntent,
 } from "./protocol.js";
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -25,6 +27,11 @@ const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
 interface SseClient {
   readonly clientId: string;
   readonly response: ServerResponse;
+}
+
+interface ClientView {
+  readonly activeSessionId?: string | null;
+  readonly initialPermission?: DaemonStartupIntent["initialPermission"];
 }
 
 export interface DaemonHttpServerOptions {
@@ -146,6 +153,7 @@ function requestIdFromBody(body: unknown): string {
 
 async function callBackend(
   backend: UiBackendClient,
+  clientViews: Map<string, ClientView>,
   permissionRouter: PermissionRouter,
   promptQueue: DaemonPromptQueue,
   request: DaemonRpcRequest,
@@ -154,9 +162,20 @@ async function callBackend(
     case "getSnapshot": {
       const snapshot = await backend.getSnapshot();
       return permissionRouter.filterSnapshotForClient(
-        snapshot,
+        snapshotForClient(snapshot, clientViews.get(request.clientId)),
         request.clientId,
       );
+    }
+    case "initializeClient": {
+      const intent = parseStartupIntent(request.params[0]);
+      const snapshot = await backend.getSnapshot();
+      clientViews.set(request.clientId, {
+        activeSessionId: resolveStartupActiveSessionId(snapshot, intent),
+        ...(intent.initialPermission === undefined
+          ? {}
+          : { initialPermission: intent.initialPermission }),
+      });
+      return undefined;
     }
     case "getContextWindowUsage":
       return backend.getContextWindowUsage(
@@ -168,12 +187,16 @@ async function callBackend(
       );
     case "submitPrompt": {
       const options = submitPromptOptions(request.params[1]);
+      const submitOptions = optionsForClientSubmit(
+        options,
+        clientViews.get(request.clientId),
+      );
       await promptQueue.enqueue({
         clientId: request.clientId,
-        ...(options === undefined ? {} : { options }),
-        ...(options?.sessionId === undefined
+        ...(submitOptions === undefined ? {} : { options: submitOptions }),
+        ...(submitOptions?.sessionId === undefined
           ? {}
-          : { sessionId: options.sessionId }),
+          : { sessionId: submitOptions.sessionId }),
         text: request.params[0] as string,
       });
       return undefined;
@@ -217,6 +240,95 @@ async function callBackend(
   }
 }
 
+function parseStartupIntent(value: unknown): DaemonStartupIntent {
+  if (!isRecord(value)) {
+    return {};
+  }
+  const startupSessionMode = isRecord(value.startupSessionMode) &&
+    value.startupSessionMode.type === "continue"
+      ? ({ type: "continue" } as const)
+      : undefined;
+  const resumeSessionId =
+    typeof value.resumeSessionId === "string" ? value.resumeSessionId : undefined;
+  const rawInitialPermission = value.initialPermission;
+  let initialPermission: DaemonStartupIntent["initialPermission"];
+  if (isRecord(rawInitialPermission)) {
+    const level = rawInitialPermission.level;
+    const mode = rawInitialPermission.mode;
+    if (
+      (level === "default" || level === "full-access") &&
+      (mode === "plan" || mode === "auto")
+    ) {
+      initialPermission = { level, mode };
+    }
+  }
+
+  return {
+    ...(startupSessionMode === undefined ? {} : { startupSessionMode }),
+    ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
+    ...(initialPermission === undefined ? {} : { initialPermission }),
+  };
+}
+
+function resolveStartupActiveSessionId(
+  snapshot: UiSnapshot,
+  intent: DaemonStartupIntent,
+): string | null {
+  if (intent.resumeSessionId !== undefined) {
+    if (!snapshot.sessions.some((session) => session.id === intent.resumeSessionId)) {
+      throw new Error(`Session not found: ${intent.resumeSessionId}`);
+    }
+    return intent.resumeSessionId;
+  }
+  if (intent.startupSessionMode?.type === "continue") {
+    if (snapshot.sessions.length === 0) {
+      return null;
+    }
+    const latest = [...snapshot.sessions].sort((left, right) =>
+      right.updatedAt.localeCompare(left.updatedAt),
+    )[0];
+    return latest.id;
+  }
+  return null;
+}
+
+function snapshotForClient(
+  snapshot: UiSnapshot,
+  view: ClientView | undefined,
+): UiSnapshot {
+  if (!view) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    ...(view.activeSessionId === undefined
+      ? {}
+      : { activeSessionId: view.activeSessionId }),
+    ...(view.initialPermission === undefined
+      ? {}
+      : {
+          permission: {
+            level: view.initialPermission.level,
+            mode: view.initialPermission.mode,
+            sessionRules: snapshot.permission?.sessionRules ?? [],
+          },
+        }),
+  };
+}
+
+function optionsForClientSubmit(
+  options: SubmitPromptOptions | undefined,
+  view: ClientView | undefined,
+): SubmitPromptOptions | undefined {
+  if (options?.sessionId !== undefined) {
+    return options;
+  }
+  if (view?.activeSessionId) {
+    return { ...options, sessionId: view.activeSessionId };
+  }
+  return options;
+}
+
 function createDefaultPromptQueue(
   backend: UiBackendClient,
   permissionRouter: PermissionRouter,
@@ -246,6 +358,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       });
     });
   });
+  private readonly clientViews = new Map<string, ClientView>();
   private readonly clients = new Set<SseClient>();
   private readonly promptQueue: DaemonPromptQueue;
   private unsubscribe: UiUnsubscribe | undefined;
@@ -409,6 +522,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     try {
       const result = await callBackend(
         this.options.backend,
+        this.clientViews,
         this.options.permissionRouter,
         this.promptQueue,
         rpcRequest,

@@ -84,6 +84,46 @@ describe("ensureDaemonRunning", () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
+  it("starts the current CLI entrypoint as a detached daemon by default", async () => {
+    const originalArgv = process.argv;
+    const unref = vi.fn();
+    const spawnProcess = vi.fn(() => ({ unref }));
+    process.argv = ["node", "D:/repo/packages/ohbaby-cli/dist/bin.js"];
+
+    try {
+      await ensureDaemonRunning({
+        currentVersion: "0.1.0",
+        fetch: vi.fn(() =>
+          Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 })),
+        ),
+        isProcessAlive: () => true,
+        pollIntervalMs: 0,
+        spawnProcess,
+        stateFile: new MemoryStateFile(undefined),
+        waitForState: () =>
+          Promise.resolve(runningState({
+            authToken: "token_2",
+            packageVersion: "0.1.0",
+            pid: 124,
+            port: 4097,
+          })),
+      });
+    } finally {
+      process.argv = originalArgv;
+    }
+
+    expect(spawnProcess).toHaveBeenCalledWith(
+      process.execPath,
+      ["D:/repo/packages/ohbaby-cli/dist/bin.js", "serve"],
+      expect.objectContaining({
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      }),
+    );
+    expect(unref).toHaveBeenCalledTimes(1);
+  });
+
   it("spawns when the recorded pid is stale", async () => {
     const spawn = vi.fn(() => Promise.resolve());
 

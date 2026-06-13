@@ -35,6 +35,7 @@ describe("runOhbabyCli", () => {
     ).resolves.toBe(0);
     expect(loadRuntimeEnvIntoProcessEnv).toHaveBeenCalledTimes(1);
     expect(createCoreHost).toHaveBeenCalledWith({
+      daemon: true,
       mode: "plan",
       permission: "full-access",
     });
@@ -61,6 +62,84 @@ describe("runOhbabyCli", () => {
     expect(subscribeEvents).toHaveBeenCalledWith(handler);
     expect(core.submitPrompt).not.toHaveBeenCalled();
     expect(waitUntilExit).toHaveBeenCalledTimes(1);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses in-process mode when requested", async () => {
+    vi.resetModules();
+    const core = createCore();
+    const dispose = vi.fn(() => Promise.resolve());
+    const createCoreHost = vi.fn(() => ({
+      callbacks: { subscribeEvents },
+      core,
+      dispose,
+    }));
+    const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
+    const subscribeEvents = vi.fn((): (() => void) => () => undefined);
+    const waitUntilExit = vi.fn(() => Promise.resolve());
+    const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
+    vi.doMock("ohbaby-agent", () => {
+      throw new Error("agent should be loaded only by the default loader");
+    });
+    vi.doMock("./tui/index.js", () => ({
+      renderTerminalUi,
+    }));
+
+    const { runOhbabyCli } = await import("./bin.js");
+
+    await expect(
+      runOhbabyCli(
+        ["node", "ohbaby", "--in-process"],
+        {},
+        {
+          createCoreHost,
+          loadRuntimeEnvIntoProcessEnv,
+        },
+      ),
+    ).resolves.toBe(0);
+    expect(createCoreHost).toHaveBeenCalledWith({
+      daemon: false,
+      inProcess: true,
+    });
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps --no-daemon as an alias for in-process mode", async () => {
+    vi.resetModules();
+    const core = createCore();
+    const dispose = vi.fn(() => Promise.resolve());
+    const createCoreHost = vi.fn(() => ({
+      callbacks: { subscribeEvents },
+      core,
+      dispose,
+    }));
+    const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
+    const subscribeEvents = vi.fn((): (() => void) => () => undefined);
+    const waitUntilExit = vi.fn(() => Promise.resolve());
+    const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
+    vi.doMock("ohbaby-agent", () => {
+      throw new Error("agent should be loaded only by the default loader");
+    });
+    vi.doMock("./tui/index.js", () => ({
+      renderTerminalUi,
+    }));
+
+    const { runOhbabyCli } = await import("./bin.js");
+
+    await expect(
+      runOhbabyCli(
+        ["node", "ohbaby", "--no-daemon"],
+        {},
+        {
+          createCoreHost,
+          loadRuntimeEnvIntoProcessEnv,
+        },
+      ),
+    ).resolves.toBe(0);
+    expect(createCoreHost).toHaveBeenCalledWith({
+      daemon: false,
+      inProcess: true,
+    });
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
@@ -96,7 +175,10 @@ describe("runOhbabyCli", () => {
         },
       ),
     ).resolves.toBe(0);
-    expect(createCoreHost).toHaveBeenCalledWith({ resume: "session_2" });
+    expect(createCoreHost).toHaveBeenCalledWith({
+      daemon: true,
+      resume: "session_2",
+    });
     expect(core.getSnapshot).toHaveBeenCalledTimes(1);
     expect(renderTerminalUi).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
@@ -223,7 +305,10 @@ describe("runOhbabyCli", () => {
         },
       ),
     ).resolves.toBe(0);
-    expect(createCoreHost).toHaveBeenCalledWith({ continue: true });
+    expect(createCoreHost).toHaveBeenCalledWith({
+      continue: true,
+      daemon: true,
+    });
     expect(core.getSnapshot).toHaveBeenCalledTimes(1);
     expect(renderTerminalUi).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);

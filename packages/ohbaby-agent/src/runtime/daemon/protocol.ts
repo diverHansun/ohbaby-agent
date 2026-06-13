@@ -2,6 +2,7 @@ import type { UiEvent } from "ohbaby-sdk";
 
 export const DAEMON_RPC_METHODS = [
   "getSnapshot",
+  "initializeClient",
   "getContextWindowUsage",
   "listCommands",
   "submitPrompt",
@@ -15,6 +16,15 @@ export const DAEMON_RPC_METHODS = [
 ] as const;
 
 export type DaemonRpcMethod = (typeof DAEMON_RPC_METHODS)[number];
+
+export interface DaemonStartupIntent {
+  readonly startupSessionMode?: { readonly type: "continue" };
+  readonly resumeSessionId?: string;
+  readonly initialPermission?: {
+    readonly level: "default" | "full-access";
+    readonly mode: "plan" | "auto";
+  };
+}
 
 export interface DaemonRpcRequest {
   readonly id: string;

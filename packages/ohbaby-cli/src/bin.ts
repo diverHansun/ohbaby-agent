@@ -11,6 +11,7 @@ import { createTerminalCommand } from "./cli/commands/terminal.js";
 import type {
   CliCommandRuntime,
   CliCoreHost,
+  CliCoreHostResult,
   CliGlobalOptions,
   CliWritable,
 } from "./cli/commands/types.js";
@@ -36,7 +37,7 @@ export interface RunOhbabyCliIo {
 }
 
 export interface RunOhbabyCliDependencies {
-  readonly createCoreHost?: (options: CliGlobalOptions) => CliCoreHost;
+  readonly createCoreHost?: (options: CliGlobalOptions) => CliCoreHostResult;
   readonly loadRuntimeEnvIntoProcessEnv?: () => Promise<void> | void;
   readonly readDaemonStatus?: CliCommandRuntime["readDaemonStatus"];
   readonly startDaemonServer?: CliCommandRuntime["startDaemonServer"];
@@ -106,7 +107,7 @@ async function loadDefaultDependencies(): Promise<RunOhbabyCliDependencies> {
   const buildCoreAPIImpl = requireFunction(
     runtimeModule.buildCoreAPIImpl,
     "buildCoreAPIImpl",
-  ) as (options: CliGlobalOptions) => CliCoreHost;
+  ) as (options: CliGlobalOptions) => CliCoreHost | Promise<CliCoreHost>;
   const loadRuntimeEnvIntoProcessEnv = requireFunction(
     runtimeModule.loadRuntimeEnvIntoProcessEnv,
     "loadRuntimeEnvIntoProcessEnv",
@@ -125,7 +126,7 @@ async function loadDefaultDependencies(): Promise<RunOhbabyCliDependencies> {
   ) as CliCommandRuntime["stopDaemonFromState"] | undefined;
 
   return {
-    createCoreHost(options): CliCoreHost {
+    createCoreHost(options): CliCoreHost | Promise<CliCoreHost> {
       return buildCoreAPIImpl(options);
     },
     loadRuntimeEnvIntoProcessEnv,
@@ -174,8 +175,8 @@ export async function runOhbabyCli(
 
   let exitCode: number = EXIT_CODES.ok;
   const runtime: CliCommandRuntime = {
-    createCoreHost(options) {
-      return createRpcCoreHost(createCoreHost(options));
+    async createCoreHost(options) {
+      return createRpcCoreHost(await createCoreHost(options));
     },
     createStdoutRenderer(options = {}) {
       return createStdoutRenderer({

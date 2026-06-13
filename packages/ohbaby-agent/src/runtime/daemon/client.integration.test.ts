@@ -280,6 +280,74 @@ describe("createRemoteUiBackendClient", () => {
     });
   });
 
+  it("initializes startup intent before the first rpc", async () => {
+    const snapshot = {
+      ...emptySnapshot(),
+      sessions: [sessionUpdated("session_1").session],
+    } satisfies UiSnapshot;
+    const backend = new FakeBackend(snapshot);
+
+    await withRemoteClient(
+      backend,
+      async (client) => {
+        await client.submitPrompt("resume target");
+
+        expect(backend.submitted).toEqual([
+          {
+            options: { sessionId: "session_1" },
+            text: "resume target",
+          },
+        ]);
+      },
+      {
+        client: { startupIntent: { resumeSessionId: "session_1" } },
+      },
+    );
+  });
+
+  it("initializes startup intent before opening the sse stream", async () => {
+    const backend = new FakeBackend();
+    const requests: string[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      if (url.includes("/api/rpc") && typeof init?.body === "string") {
+        const body = JSON.parse(init.body) as { readonly method?: string };
+        requests.push(body.method ?? "unknown-rpc");
+      }
+      if (url.includes("/api/events")) {
+        requests.push("events");
+      }
+      return fetch(input, init);
+    };
+
+    await withRemoteClient(
+      backend,
+      async (client) => {
+        const eventPromise = new Promise<UiEvent>((resolve) => {
+          client.subscribeEvents(resolve);
+        });
+
+        await eventuallyEmit(backend, sessionUpdated(), eventPromise);
+        await eventPromise;
+
+        expect(requests.slice(0, 2)).toEqual(["initializeClient", "events"]);
+      },
+      {
+        client: {
+          fetch: fetchImpl,
+          startupIntent: {
+            initialPermission: { level: "full-access", mode: "plan" },
+          },
+        },
+      },
+    );
+  });
+
   it("sends daemon auth tokens for rpc and sse", async () => {
     const backend = new FakeBackend();
 

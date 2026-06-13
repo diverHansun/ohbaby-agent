@@ -71,7 +71,8 @@ describe("buildCoreAPIImpl", () => {
 
     const { buildCoreAPIImpl } = await import("./core-api-factory.js");
 
-    const api = buildCoreAPIImpl({
+    const api = await buildCoreAPIImpl({
+      inProcess: true,
       mode: "plan",
       permission: "full-access",
     });
@@ -142,7 +143,7 @@ describe("buildCoreAPIImpl", () => {
 
     const { buildCoreAPIImpl } = await import("./core-api-factory.js");
 
-    const api = buildCoreAPIImpl({});
+    const api = await buildCoreAPIImpl({ inProcess: true });
     await api.dispose();
 
     expect(clientDispose).toHaveBeenCalledTimes(1);
@@ -172,7 +173,7 @@ describe("buildCoreAPIImpl", () => {
 
     const { buildCoreAPIImpl } = await import("./core-api-factory.js");
 
-    const api = buildCoreAPIImpl({
+    const api = await buildCoreAPIImpl({
       remoteHost: "127.0.0.1",
       remotePort: 4096,
     });
@@ -212,7 +213,7 @@ describe("buildCoreAPIImpl", () => {
 
     const { buildCoreAPIImpl } = await import("./core-api-factory.js");
 
-    buildCoreAPIImpl({ continue: true });
+    await buildCoreAPIImpl({ continue: true, inProcess: true });
 
     expect(createPersistentUiBackendClient).toHaveBeenCalledWith({
       startupSessionMode: { type: "continue" },
@@ -232,9 +233,54 @@ describe("buildCoreAPIImpl", () => {
 
     const { buildCoreAPIImpl } = await import("./core-api-factory.js");
 
-    expect(() =>
+    await expect(
       buildCoreAPIImpl({ continue: true, resume: "session_1" }),
-    ).toThrow("--resume and --continue cannot be used together");
+    ).rejects.toThrow("--resume and --continue cannot be used together");
+    expect(createPersistentUiBackendClient).not.toHaveBeenCalled();
+  });
+
+  it("uses an auto-spawned daemon by default", async () => {
+    vi.resetModules();
+    const remoteHost = {
+      callbacks: { subscribeEvents: vi.fn() },
+      core: {},
+      dispose: vi.fn(() => Promise.resolve()),
+    };
+    const createRemoteCoreApiHost = vi.fn(() => remoteHost);
+    const ensureDaemonRunning = vi.fn(() =>
+      Promise.resolve({
+        authToken: "token_1",
+        host: "127.0.0.1",
+        packageVersion: "0.1.0",
+        port: 4096,
+      }),
+    );
+    const createPersistentUiBackendClient = vi.fn();
+    vi.doMock("../runtime/daemon/client.js", () => ({
+      createRemoteCoreApiHost,
+    }));
+    vi.doMock("../runtime/daemon/spawn.js", () => ({
+      ensureDaemonRunning,
+    }));
+    vi.doMock("../adapters/ui-persistent.js", () => ({
+      closePersistentUiBackendDatabase: vi.fn(),
+      createPersistentUiBackendClient,
+    }));
+    vi.doMock("../mcp/index.js", () => ({
+      McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
+    }));
+
+    const { buildCoreAPIImpl } = await import("./core-api-factory.js");
+
+    await expect(buildCoreAPIImpl({})).resolves.toBe(remoteHost);
+    expect(ensureDaemonRunning).toHaveBeenCalledWith({
+      currentVersion: "0.1.0",
+    });
+    expect(createRemoteCoreApiHost).toHaveBeenCalledWith({
+      authToken: "token_1",
+      host: "127.0.0.1",
+      port: 4096,
+    });
     expect(createPersistentUiBackendClient).not.toHaveBeenCalled();
   });
 });

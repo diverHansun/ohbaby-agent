@@ -680,7 +680,7 @@ git commit -m "feat(daemon): queue prompts globally"
 - Modify: `packages/ohbaby-cli/src/bin.unit.test.ts`
 - Create: `tests/integration/cli/daemon-auto-spawn.integration.test.ts`
 
-- [ ] **Step 1: Add startup intent to protocol tests**
+- [x] **Step 1: Add startup intent to protocol tests**
 
 Extend protocol method list tests so `initializeClient` is a valid RPC method:
 
@@ -694,7 +694,7 @@ expect(createDaemonRpcRequest({
 })).toMatchObject({ method: "initializeClient" });
 ```
 
-- [ ] **Step 2: Add remote client startup tests**
+- [x] **Step 2: Add remote client startup tests**
 
 In `client.integration.test.ts`, assert a client with startup intent calls `initializeClient` before first snapshot:
 
@@ -711,7 +711,7 @@ expect(backend.initializedClients).toEqual([
 ]);
 ```
 
-- [ ] **Step 3: Implement startup intent RPC**
+- [x] **Step 3: Implement startup intent RPC**
 
 Add:
 
@@ -735,7 +735,7 @@ Server behavior:
 - `getSnapshot` returns a cloned snapshot with the requesting client's `activeSessionId` and initial permission/mode overlay; it never writes startup intent into the daemon backend's global store.
 - `submitPrompt` without an explicit `sessionId` uses the requesting client's `activeSessionId` when present; if the client-local id is `null`, the backend creates the first session on first prompt.
 
-- [ ] **Step 4: Add core factory tests**
+- [x] **Step 4: Add core factory tests**
 
 Update `core-api-factory.unit.test.ts`:
 
@@ -765,7 +765,7 @@ it("keeps in-process fallback explicit", async () => {
 });
 ```
 
-- [ ] **Step 5: Change `buildCoreAPIImpl` to async for daemon discovery**
+- [x] **Step 5: Change `buildCoreAPIImpl` to async for daemon discovery**
 
 Update call sites so `runtime.createCoreHost` returns `Promise<CliCoreHost> | CliCoreHost`, and `terminal.ts` awaits it:
 
@@ -790,7 +790,7 @@ if (options.remotePort !== undefined) {
 }
 ```
 
-- [ ] **Step 6: Add CLI flag tests**
+- [x] **Step 6: Add CLI flag tests**
 
 Update `bin.unit.test.ts`:
 
@@ -811,7 +811,7 @@ it("keeps --no-daemon as an alias for in-process mode", async () => {
 });
 ```
 
-- [ ] **Step 7: Add auto-spawn integration test**
+- [x] **Step 7: Add auto-spawn integration test**
 
 Create `daemon-auto-spawn.integration.test.ts`:
 
@@ -836,7 +836,7 @@ describe("daemon auto-spawn terminal flow", () => {
 });
 ```
 
-- [ ] **Step 8: Run 4C focused verification**
+- [x] **Step 8: Run 4C focused verification**
 
 Run:
 
@@ -847,7 +847,7 @@ pnpm run typecheck
 
 Expected: startup intent, CLI default daemon mode, explicit remote mode, and in-process fallback pass.
 
-- [ ] **Step 9: Commit 4C**
+- [x] **Step 9: Commit 4C**
 
 ```powershell
 git add packages/ohbaby-agent/src/runtime/daemon/protocol.ts packages/ohbaby-agent/src/runtime/daemon/server.ts packages/ohbaby-agent/src/runtime/daemon/client.ts packages/ohbaby-agent/src/host/core-api-factory.ts packages/ohbaby-agent/src/host/core-api-factory.unit.test.ts packages/ohbaby-cli/src/cli/commands/types.ts packages/ohbaby-cli/src/cli/commands/terminal.ts packages/ohbaby-cli/src/bin.ts packages/ohbaby-cli/src/bin.unit.test.ts tests/integration/cli/daemon-auto-spawn.integration.test.ts

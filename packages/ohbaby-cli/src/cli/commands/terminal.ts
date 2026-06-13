@@ -3,6 +3,7 @@ import type { CliCommandRuntime, CliGlobalOptions } from "./types.js";
 
 interface TerminalArgs extends CliGlobalOptions {
   readonly continue?: boolean;
+  readonly inProcess?: boolean;
   readonly remoteHost?: string;
   readonly remotePort?: number;
   readonly resume?: string;
@@ -62,6 +63,14 @@ export function createTerminalCommand(
           default: "127.0.0.1",
           describe: "connect the terminal UI to an explicit daemon host",
           type: "string",
+        })
+        .option("in-process", {
+          describe: "run the terminal UI against an embedded backend",
+          type: "boolean",
+        })
+        .option("daemon", {
+          describe: "run the terminal UI through the local daemon",
+          type: "boolean",
         });
     },
     command: "$0",
@@ -72,8 +81,20 @@ export function createTerminalCommand(
       if (resume !== undefined && args.continue === true) {
         runtime.failUsage("--resume and --continue cannot be used together");
       }
-      const host = runtime.createCoreHost({
+      if (
+        remotePort !== undefined &&
+        (args.inProcess === true || args.daemon === false)
+      ) {
+        runtime.failUsage("--remote-port cannot be used with --in-process");
+      }
+      const useInProcess = args.inProcess === true || args.daemon === false;
+      const host = await runtime.createCoreHost({
         ...(args.continue === true ? { continue: true } : {}),
+        ...(remotePort === undefined
+          ? useInProcess
+            ? { daemon: false, inProcess: true }
+            : { daemon: true }
+          : {}),
         ...(args.mode === undefined ? {} : { mode: args.mode }),
         ...(args.permission === undefined ? {} : { permission: args.permission }),
         ...(remotePort === undefined

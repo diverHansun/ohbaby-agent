@@ -635,6 +635,74 @@ describe("createDaemonHttpServer", () => {
     });
   });
 
+  it("keeps startup resume intent local to the requesting client", async () => {
+    const snapshot = {
+      ...emptySnapshot(),
+      sessions: [
+        {
+          createdAt: timestamp,
+          id: "session_1",
+          messages: [],
+          title: "Session 1",
+          updatedAt: "2026-06-12T00:00:00.000Z",
+        },
+        {
+          createdAt: timestamp,
+          id: "session_2",
+          messages: [],
+          title: "Session 2",
+          updatedAt: "2026-06-12T00:01:00.000Z",
+        },
+      ],
+    } satisfies UiSnapshot;
+    const backend = new FakeBackend(snapshot);
+
+    await withServer(backend, async (url) => {
+      const initialized = await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_init",
+        method: "initializeClient",
+        params: [{ resumeSessionId: "session_2" }],
+      });
+      expect(initialized.status).toBe(200);
+
+      const owner = await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_owner_snapshot",
+        method: "getSnapshot",
+        params: [],
+      });
+      await expect(owner.json()).resolves.toMatchObject({
+        id: "rpc_owner_snapshot",
+        ok: true,
+        result: { activeSessionId: "session_2" },
+      });
+
+      const observer = await postRpc(url, {
+        clientId: "client_b",
+        id: "rpc_observer_snapshot",
+        method: "getSnapshot",
+        params: [],
+      });
+      await expect(observer.json()).resolves.toMatchObject({
+        id: "rpc_observer_snapshot",
+        ok: true,
+        result: { activeSessionId: null },
+      });
+
+      const submitted = await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_prompt",
+        method: "submitPrompt",
+        params: ["hello"],
+      });
+      expect(submitted.status).toBe(200);
+      expect(backend.submitted).toEqual([
+        { options: { sessionId: "session_2" }, text: "hello" },
+      ]);
+    });
+  });
+
   it("rejects permission responses from non-owner clients", async () => {
     const backend = new FakeBackend();
     await withServer(backend, async (url) => {

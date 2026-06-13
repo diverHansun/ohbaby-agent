@@ -31,14 +31,14 @@ describe("daemon protocol", () => {
       parseDaemonRpcRequest({
         clientId: "client_1",
         id: "rpc_1",
-        method: "submitPrompt",
-        params: ["hello", { sessionId: "session_1" }],
+        method: "initializeClient",
+        params: [{ resumeSessionId: "session_1" }],
       }),
     ).toEqual({
       clientId: "client_1",
       id: "rpc_1",
-      method: "submitPrompt",
-      params: ["hello", { sessionId: "session_1" }],
+      method: "initializeClient",
+      params: [{ resumeSessionId: "session_1" }],
     });
 
     expect(() =>
@@ -99,6 +99,7 @@ describe("daemon protocol", () => {
   it("covers every CoreAPI method", () => {
     expect(DAEMON_RPC_METHODS).toEqual([
       "getSnapshot",
+      "initializeClient",
       "getContextWindowUsage",
       "listCommands",
       "submitPrompt",
