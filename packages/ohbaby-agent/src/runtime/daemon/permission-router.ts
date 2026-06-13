@@ -2,6 +2,7 @@ import type { UiEvent, UiSnapshot } from "ohbaby-sdk";
 
 interface ActivePromptClient {
   readonly clientId: string;
+  readonly targetSessionId?: string;
   released: boolean;
 }
 
@@ -11,6 +12,10 @@ type PermissionRequestedEvent = Extract<
 >;
 
 type RunUpdatedEvent = Extract<UiEvent, { readonly type: "run.updated" }>;
+type PermissionResolvedEvent = Extract<
+  UiEvent,
+  { readonly type: "permission.resolved" }
+>;
 
 function isPermissionRequestedEvent(
   event: UiEvent,
@@ -22,12 +27,23 @@ function isRunUpdatedEvent(event: UiEvent): event is RunUpdatedEvent {
   return event.type === "run.updated";
 }
 
+function isPermissionResolvedEvent(
+  event: UiEvent,
+): event is PermissionResolvedEvent {
+  return event.type === "permission.resolved";
+}
+
 export class PermissionRouter {
   private readonly activePromptClients: ActivePromptClient[] = [];
+  private readonly permissionOwners = new Map<string, string>();
   private readonly runOwners = new Map<string, string>();
 
-  trackPromptClient(clientId: string): () => void {
-    const entry: ActivePromptClient = { clientId, released: false };
+  trackPromptClient(clientId: string, targetSessionId?: string): () => void {
+    const entry: ActivePromptClient = {
+      clientId,
+      released: false,
+      ...(targetSessionId === undefined ? {} : { targetSessionId }),
+    };
     this.activePromptClients.push(entry);
 
     return () => {
@@ -40,11 +56,29 @@ export class PermissionRouter {
   }
 
   observeEvent(event: UiEvent): void {
-    if (!isRunUpdatedEvent(event) || this.runOwners.has(event.run.id)) {
+    if (isPermissionResolvedEvent(event)) {
+      this.permissionOwners.delete(event.requestId);
       return;
     }
 
-    const activeClient = this.currentPromptClient();
+    if (isPermissionRequestedEvent(event)) {
+      const owner = this.runOwners.get(event.request.runId);
+      if (owner) {
+        this.permissionOwners.set(event.request.id, owner);
+      }
+      return;
+    }
+
+    if (!isRunUpdatedEvent(event)) {
+      return;
+    }
+
+    if (this.runOwners.has(event.run.id)) {
+      this.cleanupTerminalRun(event);
+      return;
+    }
+
+    const activeClient = this.promptClientForSession(event.run.sessionId);
     if (activeClient) {
       this.runOwners.set(event.run.id, activeClient);
     }
@@ -73,10 +107,30 @@ export class PermissionRouter {
     };
   }
 
-  private currentPromptClient(): string | undefined {
-    for (let index = this.activePromptClients.length - 1; index >= 0; index--) {
-      const entry = this.activePromptClients[index];
-      if (!entry.released) {
+  canRespondPermission(requestId: string, clientId: string): boolean {
+    const owner = this.permissionOwners.get(requestId);
+    return owner === undefined || owner === clientId;
+  }
+
+  private cleanupTerminalRun(event: RunUpdatedEvent): void {
+    if (event.run.status.kind === "running") {
+      return;
+    }
+    if (event.run.status.kind === "waiting-for-permission") {
+      return;
+    }
+    this.runOwners.delete(event.run.id);
+  }
+
+  private promptClientForSession(sessionId: string): string | undefined {
+    for (const entry of this.activePromptClients) {
+      if (!entry.released && entry.targetSessionId === sessionId) {
+        return entry.clientId;
+      }
+    }
+
+    for (const entry of this.activePromptClients) {
+      if (!entry.released && entry.targetSessionId === undefined) {
         return entry.clientId;
       }
     }

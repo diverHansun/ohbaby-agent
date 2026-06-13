@@ -103,6 +103,10 @@ async function eventuallyEmit(
 }
 
 class FakeBackend implements UiBackendClient {
+  readonly calls: {
+    readonly method: string;
+    readonly args: readonly unknown[];
+  }[] = [];
   readonly handlers = new Set<UiEventHandler>();
   readonly submitted: {
     readonly text: string;
@@ -119,12 +123,16 @@ class FakeBackend implements UiBackendClient {
   }
 
   getSnapshot(): Promise<UiSnapshot> {
+    this.calls.push({ args: [], method: "getSnapshot" });
     return Promise.resolve(this.snapshot);
   }
 
-  getContextWindowUsage(): ReturnType<
+  getContextWindowUsage(
+    input: Parameters<UiBackendClient["getContextWindowUsage"]>[0],
+  ): ReturnType<
     UiBackendClient["getContextWindowUsage"]
   > {
+    this.calls.push({ args: [input], method: "getContextWindowUsage" });
     return Promise.resolve(null);
   }
 
@@ -135,7 +143,10 @@ class FakeBackend implements UiBackendClient {
     };
   }
 
-  listCommands(): ReturnType<UiBackendClient["listCommands"]> {
+  listCommands(
+    query: Parameters<UiBackendClient["listCommands"]>[0],
+  ): ReturnType<UiBackendClient["listCommands"]> {
+    this.calls.push({ args: [query], method: "listCommands" });
     return Promise.resolve({ commands: [], version: "v1" });
   }
 
@@ -146,35 +157,58 @@ class FakeBackend implements UiBackendClient {
     if (this.submitError) {
       return Promise.reject(this.submitError);
     }
+    this.calls.push({ args: [text, options], method: "submitPrompt" });
     this.submitted.push({ text, ...(options ? { options } : {}) });
     return Promise.resolve();
   }
 
-  compactSession(): ReturnType<UiBackendClient["compactSession"]> {
+  compactSession(
+    options?: Parameters<UiBackendClient["compactSession"]>[0],
+  ): ReturnType<UiBackendClient["compactSession"]> {
+    this.calls.push({ args: [options], method: "compactSession" });
     return Promise.resolve(compactResult());
   }
 
   getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
+    this.calls.push({ args: [], method: "getCurrentModel" });
     return Promise.resolve(null);
   }
 
-  connectModel(): ReturnType<UiBackendClient["connectModel"]> {
+  connectModel(
+    input: Parameters<UiBackendClient["connectModel"]>[0],
+  ): ReturnType<UiBackendClient["connectModel"]> {
+    this.calls.push({ args: [input], method: "connectModel" });
     return Promise.resolve(connectModelResult());
   }
 
-  executeCommand(): Promise<void> {
+  executeCommand(
+    invocation: Parameters<UiBackendClient["executeCommand"]>[0],
+  ): Promise<void> {
+    this.calls.push({ args: [invocation], method: "executeCommand" });
     return Promise.resolve();
   }
 
-  respondPermission(): Promise<void> {
+  respondPermission(
+    requestId: string,
+    response: Parameters<UiBackendClient["respondPermission"]>[1],
+  ): Promise<void> {
+    this.calls.push({ args: [requestId, response], method: "respondPermission" });
     return Promise.resolve();
   }
 
-  respondInteraction(): Promise<void> {
+  respondInteraction(
+    interactionId: string,
+    response: Parameters<UiBackendClient["respondInteraction"]>[1],
+  ): Promise<void> {
+    this.calls.push({
+      args: [interactionId, response],
+      method: "respondInteraction",
+    });
     return Promise.resolve();
   }
 
-  abortRun(): Promise<void> {
+  abortRun(runId?: string): Promise<void> {
+    this.calls.push({ args: [runId], method: "abortRun" });
     return Promise.resolve();
   }
 }
@@ -232,6 +266,74 @@ describe("createRemoteUiBackendClient", () => {
     });
   });
 
+  it("forwards every CoreAPI method shape through the daemon", async () => {
+    const backend = new FakeBackend();
+    const listQuery = { surface: "tui" } as const;
+    const contextInput = { sessionId: "session_1" };
+    const compactOptions = { force: true, sessionId: "session_1" };
+    const connectInput = {
+      apiKeyEnv: "FAKE_API_KEY",
+      baseUrl: "https://example.invalid/v1",
+      contextWindowTokens: 100,
+      interfaceProvider: "openai-compatible" as const,
+      model: "fake-model",
+      provider: "fake",
+    };
+    const invocation = {
+      argv: ["now"],
+      clientInvocationId: "invoke_1",
+      commandId: "time",
+      path: ["time"],
+      raw: "/time now",
+      rawArgs: "now",
+      sessionId: "session_1",
+      surface: "tui" as const,
+    };
+
+    await withRemoteClient(backend, async (client) => {
+      await client.getSnapshot();
+      await client.getContextWindowUsage(contextInput);
+      await client.listCommands(listQuery);
+      await client.submitPrompt("hello", { sessionId: "session_1" });
+      await client.compactSession(compactOptions);
+      await client.getCurrentModel();
+      await client.connectModel(connectInput);
+      await client.executeCommand(invocation);
+      await client.respondPermission("permission_1", { choiceId: "allow" });
+      await client.respondInteraction("interaction_1", {
+        choiceId: "choice_1",
+        kind: "accepted",
+      });
+      await client.abortRun("run_1");
+    });
+
+    expect(backend.calls).toEqual([
+      { args: [], method: "getSnapshot" },
+      { args: [contextInput], method: "getContextWindowUsage" },
+      { args: [listQuery], method: "listCommands" },
+      {
+        args: ["hello", { sessionId: "session_1" }],
+        method: "submitPrompt",
+      },
+      { args: [compactOptions], method: "compactSession" },
+      { args: [], method: "getCurrentModel" },
+      { args: [connectInput], method: "connectModel" },
+      { args: [invocation], method: "executeCommand" },
+      {
+        args: ["permission_1", { choiceId: "allow" }],
+        method: "respondPermission",
+      },
+      {
+        args: [
+          "interaction_1",
+          { choiceId: "choice_1", kind: "accepted" },
+        ],
+        method: "respondInteraction",
+      },
+      { args: ["run_1"], method: "abortRun" },
+    ]);
+  });
+
   it("receives ui events from the daemon SSE endpoint", async () => {
     const backend = new FakeBackend();
 
@@ -280,5 +382,20 @@ describe("createRemoteUiBackendClient", () => {
         "backend exploded",
       );
     });
+  });
+
+  it("keeps SSE connection failures contained until reconnect support exists", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(() =>
+      Promise.resolve(new Response("", { status: 503 })),
+    );
+    const client = createRemoteUiBackendClient({
+      fetch: fetchImpl,
+      port: 4096,
+    });
+
+    client.subscribeEvents(vi.fn());
+    await delay(20);
+
+    await expect(client.dispose()).resolves.toBeUndefined();
   });
 });

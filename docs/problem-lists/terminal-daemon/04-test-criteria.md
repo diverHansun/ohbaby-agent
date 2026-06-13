@@ -237,12 +237,14 @@
 
 | 测试 | 验证点 |
 |------|-------|
-| Remote client 满足 UiBackendClient 接口 | 对 remote client 执行与 `ui-inprocess.contract.test.ts` **相同的测试套件** |
+| Remote client CoreAPI 方法契约 | `runtime/daemon/client.integration.test.ts` 逐个调用所有 `CoreAPI` 方法，断言 remote client → daemon → backend 的参数与返回值不漂移 |
+| Remote client 行为契约套件 | Phase 4 开工前抽出可复用 contract harness，让 remote client 能跑与 `ui-inprocess.contract.test.ts` 等价的行为断言 |
 
 #### 验收标准
 
 - [ ] CLI `terminal` 命令通过 `--remote-port` 连接到 daemon，UI 行为与嵌入式模式一致
-- [ ] remote client 的 `UiBackendClient` 实现通过 contract 测试套件
+- [x] remote client 的 `CoreAPI` 方法转发契约通过测试
+- [ ] remote client 的完整行为契约套件抽象完成并通过
 - [ ] 两个 CLI 终端同时连接到同一 daemon，分别操作不同 session，互不干扰
 
 ---

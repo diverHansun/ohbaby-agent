@@ -6,6 +6,7 @@ import {
   type PersistentUiBackendClient,
   type PersistentUiBackendOptions,
 } from "../../adapters/ui-persistent.js";
+import { McpManager } from "../../mcp/index.js";
 import { createDaemonHttpServer, type DaemonHttpServerHandle } from "./server.js";
 import { JsonDaemonStateFile } from "./state-file.js";
 import { Supervisor } from "./supervisor.js";
@@ -50,7 +51,11 @@ function createServerRuntime(input: {
         await input.server.stop();
       } finally {
         try {
-          await input.backend.dispose();
+          try {
+            await input.backend.dispose();
+          } finally {
+            await McpManager.disposeAll();
+          }
         } finally {
           closePersistentUiBackendDatabase();
         }

@@ -87,6 +87,21 @@ describe("PermissionRouter", () => {
     expect(router.filterEventForClient(event, "client_b")).toBeNull();
   });
 
+  it("maps overlapping prompt windows by target session before using recency", () => {
+    const router = new PermissionRouter();
+    const releaseFirst = router.trackPromptClient("client_a", "session_a");
+    const releaseSecond = router.trackPromptClient("client_b", "session_b");
+
+    router.observeEvent(runUpdated("run_a", "session_a"));
+
+    releaseFirst();
+    releaseSecond();
+
+    const event = permissionRequested("run_a");
+    expect(router.filterEventForClient(event, "client_a")).toEqual(event);
+    expect(router.filterEventForClient(event, "client_b")).toBeNull();
+  });
+
   it("delivers unknown permission requests to all clients to avoid deadlock", () => {
     const router = new PermissionRouter();
     const event = permissionRequested("run_unknown");
@@ -104,6 +119,32 @@ describe("PermissionRouter", () => {
     const event = permissionResolved("permission_run_1");
     expect(router.filterEventForClient(event, "client_a")).toEqual(event);
     expect(router.filterEventForClient(event, "client_b")).toEqual(event);
+  });
+
+  it("authorizes permission responses only for the owning client", () => {
+    const router = new PermissionRouter();
+    const release = router.trackPromptClient("client_a", "session_1");
+    router.observeEvent(runUpdated("run_1", "session_1"));
+    router.observeEvent(permissionRequested("run_1"));
+    release();
+
+    expect(router.canRespondPermission("permission_run_1", "client_a")).toBe(
+      true,
+    );
+    expect(router.canRespondPermission("permission_run_1", "client_b")).toBe(
+      false,
+    );
+  });
+
+  it("allows all clients to respond to unknown-owner permissions", () => {
+    const router = new PermissionRouter();
+
+    expect(router.canRespondPermission("permission_unknown", "client_a")).toBe(
+      true,
+    );
+    expect(router.canRespondPermission("permission_unknown", "client_b")).toBe(
+      true,
+    );
   });
 
   it("filters snapshot permissions for observing clients without mutating the snapshot", () => {

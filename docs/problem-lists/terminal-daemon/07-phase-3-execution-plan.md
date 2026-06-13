@@ -483,7 +483,7 @@ Allowed fixes:
 - [x] Run Phase 3 focused verification.
 
 ```powershell
-pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/protocol.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/permission-router.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/client.integration.test.ts packages/ohbaby-cli/src/bin.unit.test.ts packages/ohbaby-cli/src/cli/commands/serve.unit.test.ts tests/integration/cli/daemon-terminal.integration.test.ts --no-file-parallelism
+pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/protocol.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/permission-router.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/client.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/main.unit.test.ts packages/ohbaby-cli/src/bin.unit.test.ts packages/ohbaby-cli/src/cli/commands/serve.unit.test.ts tests/integration/cli/daemon-terminal.integration.test.ts --no-file-parallelism
 ```
 
 Expected GREEN: all Phase 3 focused tests pass.
@@ -497,13 +497,13 @@ git commit -m "test(cli): cover explicit daemon terminal flow"
 
 ## Phase 3 Verification
 
-- [ ] Run narrow Phase 3 tests first:
+- [x] Run narrow Phase 3 tests first:
 
 ```powershell
-pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/protocol.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/permission-router.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/client.integration.test.ts packages/ohbaby-cli/src/bin.unit.test.ts packages/ohbaby-cli/src/cli/commands/serve.unit.test.ts tests/integration/cli/daemon-terminal.integration.test.ts --no-file-parallelism
+pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/protocol.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/permission-router.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/client.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/main.unit.test.ts packages/ohbaby-cli/src/bin.unit.test.ts packages/ohbaby-cli/src/cli/commands/serve.unit.test.ts tests/integration/cli/daemon-terminal.integration.test.ts --no-file-parallelism
 ```
 
-- [ ] Run full phase gates:
+- [x] Run full phase gates:
 
 ```powershell
 pnpm run typecheck
@@ -516,7 +516,7 @@ pnpm test:smoke:real
 pnpm run build
 ```
 
-- [ ] Request subagent review focused on:
+- [x] Request subagent review focused on:
 
   - protocol compatibility with `CoreAPI`.
   - server lifecycle cleanup and dangling SSE connections.
@@ -524,9 +524,20 @@ pnpm run build
   - accidental Phase 4 scope creep.
   - Windows localhost reliability.
 
-- [ ] Fix review findings with tests.
-- [ ] Commit final fixes.
-- [ ] Stop with branch `feat/terminal-daemon-phase-3` unmerged for user review.
+- [x] Fix review findings with tests.
+- [x] Commit final fixes.
+- [x] Stop with branch `feat/terminal-daemon-phase-3` unmerged for user review.
+
+### Review Disposition
+
+- Fixed: permission ownership no longer uses newest active prompt as a heuristic; `submitPrompt` records explicit target session ownership, and overlapping prompt windows are covered by tests.
+- Fixed: non-owner clients cannot answer permission requests owned by another client.
+- Fixed: request body decoding preserves UTF-8 across chunk boundaries.
+- Fixed: startup failure after HTTP bind closes the listening socket during cleanup.
+- Fixed: daemon shutdown also disposes MCP managers before closing persistent DB resources.
+- Fixed: remote SSE failures are contained in Phase 3 rather than producing unhandled promise rejections.
+- Fixed: remote client has method-level CoreAPI contract coverage for every RPC method.
+- Recorded for Phase 4: full reusable behavior contract harness equivalent to `ui-inprocess.contract.test.ts`, remote startup intent (`--resume`/`--continue`/permission defaults), daemon auth token, and TUI reconnect state.
 
 ## Self-Review
 

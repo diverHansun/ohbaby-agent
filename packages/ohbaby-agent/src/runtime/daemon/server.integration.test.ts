@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { request as httpRequest, createServer as createHttpServer } from "node:http";
+import { describe, expect, it, vi } from "vitest";
 import type {
   SubmitPromptOptions,
   UiBackendClient,
@@ -78,11 +79,11 @@ function sessionUpdated(): UiEvent {
   };
 }
 
-function runUpdated(runId: string): UiEvent {
+function runUpdated(runId: string, sessionId = "session_1"): UiEvent {
   return {
     run: {
       id: runId,
-      sessionId: "session_1",
+      sessionId,
       startedAt: timestamp,
       status: { kind: "running", runId },
       updatedAt: timestamp,
@@ -109,16 +110,30 @@ function permissionRequested(runId: string): Extract<
 
 class FakeBackend implements UiBackendClient {
   readonly handlers = new Set<UiEventHandler>();
+  readonly permissionResponses: {
+    readonly requestId: string;
+    readonly response: Parameters<UiBackendClient["respondPermission"]>[1];
+  }[] = [];
   readonly submitted: {
     readonly text: string;
     readonly options?: SubmitPromptOptions;
   }[] = [];
+  emitOnSubmit = true;
+  holdSubmits = false;
+  subscribeError: Error | undefined;
+  private readonly submitResolvers: (() => void)[] = [];
 
   constructor(private snapshot: UiSnapshot = emptySnapshot()) {}
 
   emit(event: UiEvent): void {
     for (const handler of this.handlers) {
       handler(event);
+    }
+  }
+
+  resolveHeldSubmits(): void {
+    for (const resolve of this.submitResolvers.splice(0)) {
+      resolve();
     }
   }
 
@@ -131,6 +146,9 @@ class FakeBackend implements UiBackendClient {
   }
 
   subscribeEvents(handler: UiEventHandler): UiUnsubscribe {
+    if (this.subscribeError) {
+      throw this.subscribeError;
+    }
     this.handlers.add(handler);
     return () => {
       this.handlers.delete(handler);
@@ -146,8 +164,15 @@ class FakeBackend implements UiBackendClient {
     options?: SubmitPromptOptions,
   ): Promise<void> {
     this.submitted.push({ text, ...(options ? { options } : {}) });
-    this.emit(runUpdated("run_1"));
-    this.emit(permissionRequested("run_1"));
+    if (this.emitOnSubmit) {
+      this.emit(runUpdated("run_1", options?.sessionId));
+      this.emit(permissionRequested("run_1"));
+    }
+    if (this.holdSubmits) {
+      return new Promise((resolve) => {
+        this.submitResolvers.push(resolve);
+      });
+    }
     return Promise.resolve();
   }
 
@@ -167,7 +192,11 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve();
   }
 
-  respondPermission(): Promise<void> {
+  respondPermission(
+    requestId: string,
+    response: Parameters<UiBackendClient["respondPermission"]>[1],
+  ): Promise<void> {
+    this.permissionResponses.push({ requestId, response });
     return Promise.resolve();
   }
 
@@ -206,6 +235,69 @@ async function postRpc(
     headers: { "content-type": "application/json" },
     method: "POST",
   });
+}
+
+async function postRpcChunks(
+  url: string,
+  chunks: readonly Buffer[],
+): Promise<{ readonly statusCode: number; readonly body: string }> {
+  const endpoint = new URL(`${url}/api/rpc`);
+  return await new Promise((resolve, reject) => {
+    const request = httpRequest(
+      {
+        headers: {
+          "content-length": String(
+            chunks.reduce((total, chunk) => total + chunk.byteLength, 0),
+          ),
+          "content-type": "application/json",
+        },
+        hostname: endpoint.hostname,
+        method: "POST",
+        path: `${endpoint.pathname}${endpoint.search}`,
+        port: endpoint.port,
+      },
+      (response) => {
+        const responseChunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => {
+          responseChunks.push(chunk);
+        });
+        response.on("end", () => {
+          resolve({
+            body: Buffer.concat(responseChunks).toString("utf8"),
+            statusCode: response.statusCode ?? 0,
+          });
+        });
+      },
+    );
+    request.on("error", reject);
+    for (const chunk of chunks) {
+      request.write(chunk);
+    }
+    request.end();
+  });
+}
+
+async function reservePort(): Promise<number> {
+  const server = createHttpServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (typeof address !== "object" || address === null) {
+    throw new Error("failed to reserve a port");
+  }
+  const port = address.port;
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+  return port;
 }
 
 function createSseReader(response: Response): () => Promise<unknown> {
@@ -314,7 +406,7 @@ describe("createDaemonHttpServer", () => {
   });
 
   it("routes permission requests only to the prompt owner", async () => {
-      const backend = new FakeBackend();
+    const backend = new FakeBackend();
     await withServer(backend, async (url) => {
       const owner = await fetch(`${url}/api/events?clientId=client_a`);
       const observer = await fetch(`${url}/api/events?clientId=client_b`);
@@ -360,6 +452,135 @@ describe("createDaemonHttpServer", () => {
     });
   });
 
+  it("routes overlapping prompt permissions by submitted session", async () => {
+    const backend = new FakeBackend();
+    backend.emitOnSubmit = false;
+    backend.holdSubmits = true;
+    await withServer(backend, async (url) => {
+      const owner = await fetch(`${url}/api/events?clientId=client_a`);
+      const observer = await fetch(`${url}/api/events?clientId=client_b`);
+      const readOwner = createSseReader(owner);
+      const readObserver = createSseReader(observer);
+      await readOwner();
+      await readObserver();
+
+      const first = postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_first",
+        method: "submitPrompt",
+        params: ["first", { sessionId: "session_a" }],
+      });
+      const second = postRpc(url, {
+        clientId: "client_b",
+        id: "rpc_second",
+        method: "submitPrompt",
+        params: ["second", { sessionId: "session_b" }],
+      });
+      await vi.waitUntil(() => backend.submitted.length === 2);
+
+      backend.emit(runUpdated("run_a", "session_a"));
+      backend.emit(permissionRequested("run_a"));
+
+      expect(await readOwner()).toEqual({
+        event: runUpdated("run_a", "session_a"),
+        type: "ui.event",
+      });
+      expect(await readObserver()).toEqual({
+        event: runUpdated("run_a", "session_a"),
+        type: "ui.event",
+      });
+      expect(await readOwner()).toEqual({
+        event: permissionRequested("run_a"),
+        type: "ui.event",
+      });
+      await expect(
+        Promise.race([
+          readObserver().then(() => "event" as const),
+          new Promise<"timeout">((resolve) => {
+            setTimeout(() => {
+              resolve("timeout");
+            }, 25);
+          }),
+        ]),
+      ).resolves.toBe("timeout");
+
+      backend.resolveHeldSubmits();
+      await Promise.all([first, second]);
+    });
+  });
+
+  it("rejects permission responses from non-owner clients", async () => {
+    const backend = new FakeBackend();
+    await withServer(backend, async (url) => {
+      const submit = await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_prompt",
+        method: "submitPrompt",
+        params: ["hello", { sessionId: "session_1" }],
+      });
+      expect(submit.status).toBe(200);
+
+      const rejected = await postRpc(url, {
+        clientId: "client_b",
+        id: "rpc_reject",
+        method: "respondPermission",
+        params: ["permission_run_1", { choiceId: "allow" }],
+      });
+      expect(rejected.status).toBe(403);
+      expect(await rejected.json()).toMatchObject({
+        id: "rpc_reject",
+        ok: false,
+        error: { message: "Permission request is owned by another client" },
+      });
+
+      const allowed = await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_allow",
+        method: "respondPermission",
+        params: ["permission_run_1", { choiceId: "allow" }],
+      });
+      expect(allowed.status).toBe(200);
+      expect(backend.permissionResponses).toEqual([
+        {
+          requestId: "permission_run_1",
+          response: { choiceId: "allow" },
+        },
+      ]);
+    });
+  });
+
+  it("preserves UTF-8 request bodies across chunk boundaries", async () => {
+    const backend = new FakeBackend();
+    await withServer(backend, async (url) => {
+      const body = Buffer.from(
+        JSON.stringify({
+          clientId: "client_a",
+          id: "rpc_utf8",
+          method: "submitPrompt",
+          params: ["你好 daemon", { sessionId: "session_1" }],
+        }),
+        "utf8",
+      );
+      const splitAt = body.indexOf(Buffer.from("你", "utf8")) + 1;
+      const response = await postRpcChunks(url, [
+        body.subarray(0, splitAt),
+        body.subarray(splitAt),
+      ]);
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body) as unknown).toMatchObject({
+        id: "rpc_utf8",
+        ok: true,
+      });
+      expect(backend.submitted).toEqual([
+        {
+          options: { sessionId: "session_1" },
+          text: "你好 daemon",
+        },
+      ]);
+    });
+  });
+
   it("unsubscribes backend events when stopped", async () => {
     const backend = new FakeBackend();
     const server = createDaemonHttpServer({
@@ -374,5 +595,27 @@ describe("createDaemonHttpServer", () => {
 
     await server.stop();
     expect(backend.handlers.size).toBe(0);
+  });
+
+  it("closes the listening socket if event subscription fails during start", async () => {
+    const port = await reservePort();
+    const backend = new FakeBackend();
+    backend.subscribeError = new Error("subscribe failed");
+    const server = createDaemonHttpServer({
+      backend,
+      host: "127.0.0.1",
+      port,
+    });
+
+    await expect(server.start()).rejects.toThrow("subscribe failed");
+    await server.stop();
+
+    const nextServer = createDaemonHttpServer({
+      backend: new FakeBackend(),
+      host: "127.0.0.1",
+      port,
+    });
+    await nextServer.start();
+    await nextServer.stop();
   });
 });

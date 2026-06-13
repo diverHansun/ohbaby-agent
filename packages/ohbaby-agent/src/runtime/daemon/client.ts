@@ -53,17 +53,24 @@ function parseRpcResponse(value: unknown): DaemonRpcResponse {
   throw new TypeError("Daemon rpc response ok flag is required");
 }
 
-function ignoreAbort(error: unknown): void {
+function isAbortError(error: unknown): boolean {
   if (
     error instanceof DOMException &&
     (error.name === "AbortError" || error.code === DOMException.ABORT_ERR)
   ) {
-    return;
+    return true;
   }
   if (
     isRecord(error) &&
     (error.name === "AbortError" || error.code === "ABORT_ERR")
   ) {
+    return true;
+  }
+  return false;
+}
+
+function ignoreAbort(error: unknown): void {
+  if (isAbortError(error)) {
     return;
   }
   throw error;
@@ -202,7 +209,9 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     this.abortController = controller;
     this.sseLoop = this.runSseLoop(controller.signal)
       .catch((error: unknown) => {
-        ignoreAbort(error);
+        if (isAbortError(error)) {
+          return;
+        }
       })
       .finally(() => {
         if (this.abortController === controller) {

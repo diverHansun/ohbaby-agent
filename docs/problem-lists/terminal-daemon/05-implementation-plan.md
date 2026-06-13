@@ -565,6 +565,7 @@ Create:
 - `packages/ohbaby-agent/src/runtime/daemon/permission-router.ts` - route permission requests to the initiating client; disconnect replay remains a follow-up.
 - `packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts` - daemon server/client contract.
 - `packages/ohbaby-agent/src/runtime/daemon/client.integration.test.ts` - remote client RPC/SSE contract.
+- `packages/ohbaby-agent/src/runtime/daemon/main.unit.test.ts` - explicit daemon stop cleanup contract.
 - `tests/integration/cli/daemon-terminal.integration.test.ts` - terminal connects to explicit daemon.
 
 ### Task 3.1: Protocol Contract
@@ -635,9 +636,9 @@ Expected: remote terminal behavior matches Phase 1 local behavior.
 
 Without this, the first tool call needing authorization deadlocks every remote client (04-test-criteria 3.3 requires permission prompts to work in remote mode).
 
-- [x] Implement `permission-router.ts`: route each permission request to the client that initiated the run; unknown owners are broadcast to avoid deadlock.
+- [x] Implement `permission-router.ts`: route each permission request to the client that owns the run session; unknown owners are broadcast to avoid deadlock.
 - [ ] Queue pending permission requests when the initiating client disconnects; deliver to the next client that attaches to that session. Deferred beyond Phase 3 explicit-daemon baseline.
-- [x] Integration test: a remote client receives the permission request during a tool call; a second observing client never gets the interactive prompt.
+- [x] Integration test: a remote client receives the permission request during a tool call; a second observing client never gets the interactive prompt and cannot respond to the owned permission request.
 - [x] Run:
 
 ```powershell
@@ -648,8 +649,9 @@ Expected: permissions work end-to-end in remote mode with multiple clients.
 
 ### Phase 3 Verification And Commit
 
-- [ ] Run all verification commands listed at the top of this plan.
-- [ ] Request subagent code review for Phase 3, focused on protocol correctness, permission routing, lifecycle cleanup, and event fanout.
+- [x] Run all verification commands listed at the top of this plan.
+- [x] Request subagent code review for Phase 3, focused on protocol correctness, permission routing, lifecycle cleanup, and event fanout.
+- [x] Fix Phase 3 review findings with tests: session-based permission ownership, response authorization, UTF-8 request body decoding, startup cleanup, SSE failure containment, MCP manager cleanup, remote CoreAPI method contract, and `.ohbaby/` ignore.
 - [ ] Per-task scoped commits on `feat/terminal-daemon-phase-3` (e.g. `feat(daemon): add ui protocol server`). After review passes, merge:
 
 ```powershell
@@ -672,6 +674,7 @@ Modify:
 - `packages/ohbaby-agent/src/runtime/daemon/pid-file.ts` - process liveness validation.
 - `packages/ohbaby-agent/src/runtime/daemon/server.ts` - global queue ownership.
 - `packages/ohbaby-agent/src/runtime/daemon/client.ts` - queue state projection.
+- `packages/ohbaby-agent/src/runtime/daemon/state-file.ts` - add local auth token/version metadata if auto-spawn exposes long-lived localhost HTTP.
 - `packages/ohbaby-agent/src/adapters/ui-persistent.ts` - evaluate whether the Phase 1 backend lease remains only for in-process fallback.
 - `packages/ohbaby-cli/src/cli/commands/terminal.ts` - default to supervisor-backed daemon.
 
@@ -693,6 +696,9 @@ Cases:
 - Fail clearly when daemon cannot bind.
 
 - [ ] Implement supervisor changes.
+- [ ] Decide how `--resume`, `--continue`, `--mode`, and `--permission` map to per-client startup intent in daemon mode, without mutating another attached client.
+- [ ] Add local auth token validation for daemon RPC before auto-spawn makes localhost HTTP the default path.
+- [ ] Surface remote SSE disconnect/reconnect state in the TUI instead of silently freezing.
 - [ ] Run:
 
 ```powershell

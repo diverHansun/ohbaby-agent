@@ -1,5 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { UiBackendClient, UiEvent, UiUnsubscribe } from "ohbaby-sdk";
+import type {
+  SubmitPromptOptions,
+  UiBackendClient,
+  UiEvent,
+  UiUnsubscribe,
+} from "ohbaby-sdk";
 import { PermissionRouter } from "./permission-router.js";
 import {
   createDaemonRpcFailure,
@@ -42,6 +47,32 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return typeof error === "object" && error !== null && "code" in error;
 }
 
+class DaemonForbiddenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DaemonForbiddenError";
+  }
+}
+
+function isDaemonForbiddenError(error: unknown): error is DaemonForbiddenError {
+  return error instanceof DaemonForbiddenError;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function submitPromptOptions(value: unknown): SubmitPromptOptions | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return {
+    ...(typeof value.sessionId === "string"
+      ? { sessionId: value.sessionId }
+      : {}),
+  };
+}
+
 function writeJson(
   response: ServerResponse,
   statusCode: number,
@@ -58,28 +89,31 @@ function writeSse(response: ServerResponse, event: DaemonSseEvent): void {
   response.write(`data: ${JSON.stringify(event)}\n\n`);
 }
 
-function requestChunkToString(chunk: unknown): string {
+function requestChunkToBuffer(chunk: unknown): Buffer {
   if (typeof chunk === "string") {
-    return chunk;
+    return Buffer.from(chunk, "utf8");
   }
   if (Buffer.isBuffer(chunk)) {
-    return chunk.toString("utf8");
+    return chunk;
   }
   if (chunk instanceof Uint8Array) {
-    return Buffer.from(chunk).toString("utf8");
+    return Buffer.from(chunk);
   }
   throw new Error("Unexpected request body chunk");
 }
 
 async function readRequestBody(request: IncomingMessage): Promise<string> {
-  let body = "";
+  const chunks: Buffer[] = [];
+  let size = 0;
   for await (const chunk of request as AsyncIterable<unknown>) {
-    body += requestChunkToString(chunk);
-    if (Buffer.byteLength(body, "utf8") > MAX_REQUEST_BODY_BYTES) {
+    const buffer = requestChunkToBuffer(chunk);
+    chunks.push(buffer);
+    size += buffer.byteLength;
+    if (size > MAX_REQUEST_BODY_BYTES) {
       throw new Error("Request body is too large");
     }
   }
-  return body;
+  return Buffer.concat(chunks, size).toString("utf8");
 }
 
 function requestIdFromBody(body: unknown): string {
@@ -116,7 +150,11 @@ async function callBackend(
         request.params[0] as Parameters<UiBackendClient["listCommands"]>[0],
       );
     case "submitPrompt": {
-      const release = permissionRouter.trackPromptClient(request.clientId);
+      const options = submitPromptOptions(request.params[1]);
+      const release = permissionRouter.trackPromptClient(
+        request.clientId,
+        options?.sessionId,
+      );
       try {
         await backend.submitPrompt(
           request.params[0] as string,
@@ -142,6 +180,16 @@ async function callBackend(
         request.params[0] as Parameters<UiBackendClient["executeCommand"]>[0],
       );
     case "respondPermission":
+      if (
+        !permissionRouter.canRespondPermission(
+          request.params[0] as string,
+          request.clientId,
+        )
+      ) {
+        throw new DaemonForbiddenError(
+          "Permission request is owned by another client",
+        );
+      }
       return backend.respondPermission(
         request.params[0] as string,
         request.params[1] as Parameters<UiBackendClient["respondPermission"]>[1],
@@ -205,6 +253,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       this.server.listen(this.options.port, this.options.host);
     });
 
+    this.started = true;
     const address = this.server.address();
     if (typeof address === "object" && address !== null) {
       this.currentPort = address.port;
@@ -212,7 +261,6 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     this.unsubscribe = this.options.backend.subscribeEvents((event) => {
       this.broadcast(event);
     });
-    this.started = true;
   }
 
   async stop(): Promise<void> {
@@ -292,7 +340,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         rpcRequest.id,
         error,
       );
-      writeJson(response, 500, failure);
+      writeJson(response, isDaemonForbiddenError(error) ? 403 : 500, failure);
     }
   }
 
