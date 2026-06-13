@@ -5,8 +5,10 @@ import type {
   UiEvent,
   UiUnsubscribe,
 } from "ohbaby-sdk";
+import { SessionRunBusyError } from "../run-ledger/index.js";
 import { isAuthorizedDaemonRequest } from "./auth.js";
 import { PermissionRouter } from "./permission-router.js";
+import { DaemonPromptQueue } from "./prompt-queue.js";
 import {
   createDaemonRpcFailure,
   createDaemonRpcSuccess,
@@ -33,6 +35,7 @@ export interface DaemonHttpServerOptions {
   readonly packageVersion?: string;
   readonly port?: number;
   readonly permissionRouter?: PermissionRouter;
+  readonly promptQueue?: DaemonPromptQueue;
 }
 
 export interface DaemonHttpServerHandle {
@@ -144,6 +147,7 @@ function requestIdFromBody(body: unknown): string {
 async function callBackend(
   backend: UiBackendClient,
   permissionRouter: PermissionRouter,
+  promptQueue: DaemonPromptQueue,
   request: DaemonRpcRequest,
 ): Promise<unknown> {
   switch (request.method) {
@@ -164,19 +168,15 @@ async function callBackend(
       );
     case "submitPrompt": {
       const options = submitPromptOptions(request.params[1]);
-      const release = permissionRouter.trackPromptClient(
-        request.clientId,
-        options?.sessionId,
-      );
-      try {
-        await backend.submitPrompt(
-          request.params[0] as string,
-          request.params[1] as Parameters<UiBackendClient["submitPrompt"]>[1],
-        );
-        return undefined;
-      } finally {
-        release();
-      }
+      await promptQueue.enqueue({
+        clientId: request.clientId,
+        ...(options === undefined ? {} : { options }),
+        ...(options?.sessionId === undefined
+          ? {}
+          : { sessionId: options.sessionId }),
+        text: request.params[0] as string,
+      });
+      return undefined;
     }
     case "compactSession":
       return backend.compactSession(
@@ -217,6 +217,26 @@ async function callBackend(
   }
 }
 
+function createDefaultPromptQueue(
+  backend: UiBackendClient,
+  permissionRouter: PermissionRouter,
+): DaemonPromptQueue {
+  return new DaemonPromptQueue({
+    isBusyError: (error): boolean => error instanceof SessionRunBusyError,
+    submit: async (item): Promise<void> => {
+      const release = permissionRouter.trackPromptClient(
+        item.clientId,
+        item.sessionId,
+      );
+      try {
+        await backend.submitPrompt(item.text, item.options);
+      } finally {
+        release();
+      }
+    },
+  });
+}
+
 class DaemonHttpServer implements DaemonHttpServerHandle {
   private readonly server = createServer((request, response) => {
     void this.handleRequest(request, response).catch((error: unknown) => {
@@ -227,12 +247,16 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     });
   });
   private readonly clients = new Set<SseClient>();
+  private readonly promptQueue: DaemonPromptQueue;
   private unsubscribe: UiUnsubscribe | undefined;
   private currentPort: number;
   private started = false;
 
   constructor(private readonly options: NormalizedDaemonHttpServerOptions) {
     this.currentPort = options.port;
+    this.promptQueue =
+      options.promptQueue ??
+      createDefaultPromptQueue(options.backend, options.permissionRouter);
   }
 
   get host(): string {
@@ -277,6 +301,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
   }
 
   async stop(): Promise<void> {
+    this.promptQueue.shutdown("daemon stopped");
     this.unsubscribe?.();
     this.unsubscribe = undefined;
 
@@ -385,6 +410,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       const result = await callBackend(
         this.options.backend,
         this.options.permissionRouter,
+        this.promptQueue,
         rpcRequest,
       );
       writeJson(response, 200, createDaemonRpcSuccess(rpcRequest.id, result));
@@ -456,5 +482,6 @@ export function createDaemonHttpServer(
     packageVersion: options.packageVersion,
     permissionRouter: options.permissionRouter ?? new PermissionRouter(),
     port: options.port ?? DEFAULT_PORT,
+    promptQueue: options.promptQueue,
   });
 }

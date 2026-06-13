@@ -432,7 +432,7 @@ git commit -m "feat(daemon): discover and authenticate local daemon"
 - Modify: `packages/ohbaby-agent/src/runtime/daemon/server.ts`
 - Modify: `packages/ohbaby-agent/src/runtime/daemon/index.ts`
 
-- [ ] **Step 1: Write prompt queue unit tests**
+- [x] **Step 1: Write prompt queue unit tests**
 
 Create tests covering this exact behavior:
 
@@ -532,7 +532,7 @@ it("rejects accepted but unstarted prompts on shutdown", async () => {
 });
 ```
 
-- [ ] **Step 2: Run queue tests and verify RED**
+- [x] **Step 2: Run queue tests and verify RED**
 
 Run:
 
@@ -542,7 +542,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/prompt-queue.unit.
 
 Expected: FAIL because `prompt-queue.ts` does not exist.
 
-- [ ] **Step 3: Implement `DaemonPromptQueue`**
+- [x] **Step 3: Implement `DaemonPromptQueue`**
 
 Implement this public API:
 
@@ -576,7 +576,7 @@ Rules:
 - Busy errors are retried inside the queue with bounded exponential backoff from 250ms to 2000ms.
 - `shutdown` rejects only unstarted queued items and lets active items settle.
 
-- [ ] **Step 4: Wire `server.submitPrompt` through the queue**
+- [x] **Step 4: Wire `server.submitPrompt` through the queue**
 
 Change `createDaemonHttpServer` so it constructs one `DaemonPromptQueue` by default:
 
@@ -605,7 +605,7 @@ return promptQueue.enqueue({
 });
 ```
 
-- [ ] **Step 5: Add server integration coverage**
+- [x] **Step 5: Add server integration coverage**
 
 Add to `server.integration.test.ts`:
 
@@ -645,7 +645,7 @@ it("queues same-session prompt submissions across clients", async () => {
 });
 ```
 
-- [ ] **Step 6: Run 4B focused verification**
+- [x] **Step 6: Run 4B focused verification**
 
 Run:
 
@@ -656,7 +656,7 @@ pnpm run typecheck
 
 Expected: queue and server tests pass, typecheck passes.
 
-- [ ] **Step 7: Commit 4B**
+- [x] **Step 7: Commit 4B**
 
 ```powershell
 git add packages/ohbaby-agent/src/runtime/daemon/prompt-queue.ts packages/ohbaby-agent/src/runtime/daemon/prompt-queue.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/server.ts packages/ohbaby-agent/src/runtime/daemon/index.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts

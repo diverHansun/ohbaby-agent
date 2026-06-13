@@ -140,6 +140,10 @@ class FakeBackend implements UiBackendClient {
     }
   }
 
+  resolveNextSubmit(): void {
+    this.submitResolvers.shift()?.();
+  }
+
   getSnapshot(): Promise<UiSnapshot> {
     return Promise.resolve(this.snapshot);
   }
@@ -589,6 +593,45 @@ describe("createDaemonHttpServer", () => {
 
       backend.resolveHeldSubmits();
       await Promise.all([first, second]);
+    });
+  });
+
+  it("queues same-session prompt submissions across clients", async () => {
+    const backend = new FakeBackend();
+    backend.holdSubmits = true;
+    await withServer(backend, async (url) => {
+      const first = postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_first",
+        method: "submitPrompt",
+        params: ["first", { sessionId: "session_1" }],
+      });
+      const second = postRpc(url, {
+        clientId: "client_b",
+        id: "rpc_second",
+        method: "submitPrompt",
+        params: ["second", { sessionId: "session_1" }],
+      });
+
+      await vi.waitUntil(() => backend.submitted.length >= 1);
+      const submittedBeforeRelease = [...backend.submitted];
+      if (backend.submitted.length > 1) {
+        backend.resolveHeldSubmits();
+      }
+      expect(submittedBeforeRelease).toEqual([
+        { options: { sessionId: "session_1" }, text: "first" },
+      ]);
+
+      backend.resolveNextSubmit();
+      await expect(first).resolves.toMatchObject({ status: 200 });
+      await vi.waitUntil(() => backend.submitted.length === 2);
+      expect(backend.submitted[1]).toEqual({
+        options: { sessionId: "session_1" },
+        text: "second",
+      });
+
+      backend.resolveNextSubmit();
+      await expect(second).resolves.toMatchObject({ status: 200 });
     });
   });
 

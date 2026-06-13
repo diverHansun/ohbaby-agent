@@ -8,6 +8,14 @@ export {
   redactDaemonAuthToken,
 } from "./auth.js";
 export * from "./protocol.js";
+export {
+  DaemonPromptQueue,
+  DaemonPromptQueueShutdownError,
+} from "./prompt-queue.js";
+export type {
+  DaemonPromptQueueItem,
+  DaemonPromptQueueOptions,
+} from "./prompt-queue.js";
 export { ensureDaemonRunning } from "./spawn.js";
 export type {
   EnsureDaemonRunningOptions,
