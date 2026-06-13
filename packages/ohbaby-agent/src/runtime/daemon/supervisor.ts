@@ -46,6 +46,7 @@ export interface SupervisorOptions {
   readonly bootstrap: () => DaemonRuntimeHandle | Promise<DaemonRuntimeHandle>;
   readonly signalTarget?: DaemonSignalTarget | null;
   readonly shutdownTimeoutMs?: number;
+  readonly idleTimeoutMs?: number;
   readonly exit?: (code: number) => void;
   readonly logger?: DaemonLogger;
   readonly now?: () => number;
@@ -63,7 +64,9 @@ export class Supervisor {
   private runtime: DaemonRuntimeHandle | undefined;
   private startedAt: number | undefined;
   private stopPromise: Promise<void> | undefined;
+  private idleTimer: ReturnType<typeof setTimeout> | undefined;
   private signalsRegistered = false;
+  private readonly activeClients = new Set<string>();
 
   private readonly signalHandler = (): void => {
     void this.stopWithTimeout()
@@ -158,7 +161,26 @@ export class Supervisor {
     return this.stopPromise;
   }
 
+  clientConnected(clientId: string): void {
+    this.activeClients.add(clientId);
+    this.clearIdleTimer();
+  }
+
+  clientDisconnected(clientId: string): void {
+    this.activeClients.delete(clientId);
+    if (this.activeClients.size === 0) {
+      this.scheduleIdleStop();
+    }
+  }
+
+  async retire(reason: string): Promise<void> {
+    this.logger.info("daemon retiring", { reason });
+    await this.stop();
+  }
+
   private async stopInternal(): Promise<void> {
+    this.clearIdleTimer();
+    this.activeClients.clear();
     this.unregisterSignals();
 
     if (!this.runtime && !this.pidLock) {
@@ -232,6 +254,33 @@ export class Supervisor {
         clearTimeout(timeout);
       }
     }
+  }
+
+  private scheduleIdleStop(): void {
+    if (
+      this.options.idleTimeoutMs === undefined ||
+      this.idleTimer !== undefined ||
+      this.runtime === undefined
+    ) {
+      return;
+    }
+
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = undefined;
+      void this.stop().catch((error: unknown) => {
+        this.logger.error("daemon idle shutdown failed", {
+          error: errorToMessage(error),
+        });
+      });
+    }, this.options.idleTimeoutMs);
+  }
+
+  private clearIdleTimer(): void {
+    if (this.idleTimer === undefined) {
+      return;
+    }
+    clearTimeout(this.idleTimer);
+    this.idleTimer = undefined;
   }
 
   private async writeState(

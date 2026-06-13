@@ -54,6 +54,7 @@ export interface PersistentUiBackendOptions extends Omit<
   | "stateStore"
 > {
   readonly bus?: BusInstance;
+  readonly backendLeaseMode?: "enabled" | "disabled";
   readonly dbPath?: string;
   readonly enableSnapshots?: boolean;
   readonly hookExecutor?: HookExecutor;
@@ -552,11 +553,13 @@ export function createPersistentUiBackendClient(
     }),
   ]);
   const backendOwnerId = createBackendOwnerId();
-  const startupRecovery = shouldRecoverStartupRuns({
-    db,
-    now,
-    ownerId: backendOwnerId,
-  })
+  const backendLeaseEnabled = options.backendLeaseMode !== "disabled";
+  const startupRecovery = backendLeaseEnabled &&
+    shouldRecoverStartupRuns({
+      db,
+      now,
+      ownerId: backendOwnerId,
+    })
     ? runLedger.markInterrupted({
         statuses: ["pending", "running"],
       })
@@ -572,6 +575,9 @@ export function createPersistentUiBackendClient(
   return withStartupRecovery(
     createInProcessUiBackendClient({
       afterPromptSubmitSettled: () => {
+        if (!backendLeaseEnabled) {
+          return;
+        }
         releaseBackendLeasePreparation({
           db,
           now,
@@ -580,6 +586,9 @@ export function createPersistentUiBackendClient(
       },
       agentManager: options.agentManager,
       beforePromptSubmit: async () => {
+        if (!backendLeaseEnabled) {
+          return;
+        }
         const leaseState = refreshBackendLeaseIfSafe({
           db,
           now,

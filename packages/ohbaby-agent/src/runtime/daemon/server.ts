@@ -38,6 +38,8 @@ export interface DaemonHttpServerOptions {
   readonly backend: UiBackendClient;
   readonly authToken?: string;
   readonly host?: string;
+  readonly onClientConnected?: (clientId: string) => void;
+  readonly onClientDisconnected?: (clientId: string) => void;
   readonly onShutdown?: () => Promise<void> | void;
   readonly packageVersion?: string;
   readonly port?: number;
@@ -564,10 +566,13 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
 
     const client: SseClient = { clientId, response };
     this.clients.add(client);
+    this.options.onClientConnected?.(clientId);
     writeSse(response, { clientId, type: "hello" });
 
     request.on("close", () => {
-      this.clients.delete(client);
+      if (this.clients.delete(client)) {
+        this.options.onClientDisconnected?.(clientId);
+      }
     });
   }
 
@@ -592,6 +597,8 @@ export function createDaemonHttpServer(
     backend: options.backend,
     authToken: options.authToken,
     host: options.host ?? DEFAULT_HOST,
+    onClientConnected: options.onClientConnected,
+    onClientDisconnected: options.onClientDisconnected,
     onShutdown: options.onShutdown,
     packageVersion: options.packageVersion,
     permissionRouter: options.permissionRouter ?? new PermissionRouter(),

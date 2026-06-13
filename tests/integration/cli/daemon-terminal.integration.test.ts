@@ -32,7 +32,9 @@ function delay(ms: number): Promise<void> {
 describe("explicit daemon remote terminal flow", () => {
   it("submits through one remote client and resumes history through another", async () => {
     const home = await tempDirectory("ohbaby-daemon-terminal-");
+    const authToken = "token_1";
     const daemon = await startDaemonServer({
+      authToken,
       dbPath: join(home, "agent.db"),
       host: "127.0.0.1",
       llmClient: createFakeLLMClient([
@@ -50,6 +52,7 @@ describe("explicit daemon remote terminal flow", () => {
     try {
       const events: UiEvent[] = [];
       const firstClient = createRemoteUiBackendClient({
+        authToken,
         clientId: "terminal_a",
         host: daemon.host,
         port: daemon.port,
@@ -76,6 +79,7 @@ describe("explicit daemon remote terminal flow", () => {
       );
 
       const secondClient = createRemoteUiBackendClient({
+        authToken,
         clientId: "terminal_b",
         host: daemon.host,
         port: daemon.port,

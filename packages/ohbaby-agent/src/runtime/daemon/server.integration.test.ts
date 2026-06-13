@@ -791,6 +791,38 @@ describe("createDaemonHttpServer", () => {
     expect(backend.handlers.size).toBe(0);
   });
 
+  it("notifies client lifecycle for sse connections", async () => {
+    const backend = new FakeBackend();
+    const connected: string[] = [];
+    const disconnected: string[] = [];
+    const server = createDaemonHttpServer({
+      backend,
+      host: "127.0.0.1",
+      onClientConnected: (clientId) => {
+        connected.push(clientId);
+      },
+      onClientDisconnected: (clientId) => {
+        disconnected.push(clientId);
+      },
+      port: 0,
+    });
+
+    await server.start();
+    try {
+      const response = await fetch(`${server.url}/api/events?clientId=client_a`);
+      expect(response.status).toBe(200);
+      const reader = response.body?.getReader();
+      await reader?.read();
+      await reader?.cancel();
+
+      expect(connected).toEqual(["client_a"]);
+      await vi.waitUntil(() => disconnected.length === 1);
+      expect(disconnected).toEqual(["client_a"]);
+    } finally {
+      await server.stop();
+    }
+  });
+
   it("closes the listening socket if event subscription fails during start", async () => {
     const port = await reservePort();
     const backend = new FakeBackend();

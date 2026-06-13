@@ -532,7 +532,13 @@ Phase 1 实现中除了 session 级 `claimPendingRun`，还引入了一个 persi
 - 如果已有 active run 但 owner pid 已死亡，新的 backend 可以接管并先把 stale `pending/running` run 标为 interrupted，再继续 drain 自己的队列。
 - `afterPromptSubmitSettled` 将同 owner 的 `preparing` lease 释放回 `idle`，避免准备态长期阻塞后续 prompt。
 
-Phase 4 daemon 默认路径上线后，这层 lease 必须被显式评估：daemon 单写者路径不应再依赖 backend lease，也不应叠加出 daemon queue + backend lease 的双重阻塞；但 `--no-daemon` / `--in-process` 逃生路径如果保留，就仍需要某种跨进程保护。该取舍放入 Phase 4 验收任务，而不是让 lease 作为隐形遗留机制继续存在。
+Phase 4 决策：daemon 默认路径显式禁用这层 backend lease（`backendLeaseMode: "disabled"`），让 daemon 内存全局 FIFO 成为 prompt 排序的唯一入口门控；`run_ledger` 继续负责持久化审计、崩溃恢复和 run 状态投影。`--no-daemon` / `--in-process` 逃生路径不传该选项，默认保留 backend lease 作为跨进程保护。
+
+对应验证：
+
+- `packages/ohbaby-agent/src/adapters/ui-persistent.integration.test.ts` 覆盖 `backendLeaseMode: "disabled"` 时 preparing lease 不会阻塞 daemon-mode prompt。
+- 同文件既有 lease 测试继续覆盖 in-process fallback 的 preparing/live-owner 保护。
+- `tests/integration/cli/daemon-global-fifo.integration.test.ts` 覆盖 daemon remote clients 同 session 严格 FIFO，abort 后队首自动推进。
 
 #### 审批路由（多前端必须回答的问题）
 

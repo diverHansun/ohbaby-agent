@@ -25,6 +25,7 @@ export interface StartDaemonServerOptions {
   readonly authToken?: string;
   readonly packageVersion?: string;
   readonly dbPath?: string;
+  readonly idleTimeoutMs?: number;
   readonly llmClient?: PersistentUiBackendOptions["llmClient"];
   readonly pidFilePath?: string;
   readonly stateFilePath?: string;
@@ -87,6 +88,7 @@ export async function startDaemonServer(
   const supervisor = new Supervisor({
     bootstrap(): DaemonRuntimeHandle {
       const backend = createPersistentUiBackendClient({
+        backendLeaseMode: "disabled",
         ...(options.dbPath === undefined ? {} : { dbPath: options.dbPath }),
         ...(options.llmClient === undefined
           ? {}
@@ -97,6 +99,12 @@ export async function startDaemonServer(
         authToken,
         backend,
         host: options.host ?? DEFAULT_HOST,
+        onClientConnected: (clientId) => {
+          supervisor.clientConnected(clientId);
+        },
+        onClientDisconnected: (clientId) => {
+          supervisor.clientDisconnected(clientId);
+        },
         onShutdown: () => supervisor.stop(),
         packageVersion,
         port: options.port ?? DEFAULT_PORT,
@@ -106,6 +114,9 @@ export async function startDaemonServer(
     ...(options.pidFilePath === undefined
       ? {}
       : { pidFilePath: options.pidFilePath }),
+    ...(options.idleTimeoutMs === undefined
+      ? {}
+      : { idleTimeoutMs: options.idleTimeoutMs }),
     ...(options.stateFilePath === undefined
       ? {}
       : { stateFilePath: options.stateFilePath }),

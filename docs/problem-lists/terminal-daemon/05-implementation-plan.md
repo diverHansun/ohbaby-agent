@@ -686,7 +686,7 @@ Create:
 
 ### Task 4.1: Supervisor Auto-Spawn
 
-- [ ] Add tests in `packages/ohbaby-agent/src/runtime/daemon/supervisor.unit.test.ts`.
+- [x] Add tests in `packages/ohbaby-agent/src/runtime/daemon/supervisor.unit.test.ts` and `runtime/daemon/spawn.unit.test.ts`.
 
 Cases:
 
@@ -695,11 +695,11 @@ Cases:
 - Spawn daemon when none exists.
 - Fail clearly when daemon cannot bind.
 
-- [ ] Implement supervisor changes.
-- [ ] Decide how `--resume`, `--continue`, `--mode`, and `--permission` map to per-client startup intent in daemon mode, without mutating another attached client.
-- [ ] Add local auth token validation for daemon RPC before auto-spawn makes localhost HTTP the default path.
+- [x] Implement supervisor/spawn discovery changes.
+- [x] Decide how `--resume`, `--continue`, `--mode`, and `--permission` map to per-client startup intent in daemon mode, without mutating another attached client.
+- [x] Add local auth token validation for daemon RPC before auto-spawn makes localhost HTTP the default path.
 - [ ] Surface remote SSE disconnect/reconnect state in the TUI instead of silently freezing.
-- [ ] Run:
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/supervisor.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/pid-file.unit.test.ts
@@ -707,9 +707,15 @@ pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/supervisor.unit.te
 
 Expected: daemon discovery is deterministic.
 
+Phase 4 evidence:
+
+```powershell
+pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/auth.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/state-file.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/spawn.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/supervisor.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/client.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/main.unit.test.ts --no-file-parallelism
+```
+
 ### Task 4.2: Global FIFO Queue
 
-- [ ] Add `packages/ohbaby-agent/src/runtime/daemon/prompt-queue.unit.test.ts`.
+- [x] Add `packages/ohbaby-agent/src/runtime/daemon/prompt-queue.unit.test.ts`.
 
 Cover:
 
@@ -719,9 +725,9 @@ Cover:
 - Disconnecting a client does not cancel an already accepted prompt unless the client explicitly aborts it.
 - Daemon shutdown marks accepted but unstarted prompts with a clear terminal state.
 
-- [ ] Implement `packages/ohbaby-agent/src/runtime/daemon/prompt-queue.ts`.
-- [ ] Wire daemon server prompt handling through the global queue.
-- [ ] Run:
+- [x] Implement `packages/ohbaby-agent/src/runtime/daemon/prompt-queue.ts`.
+- [x] Wire daemon server prompt handling through the global queue.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/prompt-queue.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts --no-file-parallelism
@@ -731,10 +737,10 @@ Expected: daemon owns cross-client ordering.
 
 ### Task 4.3: Default Terminal Uses Daemon
 
-- [ ] Update terminal startup to use the supervisor by default.
-- [ ] Keep an escape hatch for in-process mode if needed for debugging, named clearly such as `--in-process`.
-- [ ] Add CLI tests for default daemon, explicit daemon, and in-process modes.
-- [ ] Run:
+- [x] Update terminal startup to use the supervisor by default.
+- [x] Keep an escape hatch for in-process mode if needed for debugging, named clearly such as `--in-process`.
+- [x] Add CLI tests for default daemon, explicit daemon, and in-process modes.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-cli/src/cli/commands/terminal.unit.test.ts tests/integration/cli/daemon-terminal.integration.test.ts --no-file-parallelism
@@ -742,9 +748,15 @@ pnpm exec vitest run packages/ohbaby-cli/src/cli/commands/terminal.unit.test.ts 
 
 Expected: default startup is daemon-backed.
 
+Phase 4 evidence:
+
+```powershell
+pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/protocol.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/client.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/spawn.unit.test.ts packages/ohbaby-agent/src/host/core-api-factory.unit.test.ts packages/ohbaby-cli/src/bin.unit.test.ts tests/integration/cli/daemon-auto-spawn.integration.test.ts --no-file-parallelism
+```
+
 ### Task 4.4: Cross-Terminal Strict FIFO E2E
 
-- [ ] Add `tests/integration/cli/daemon-global-fifo.integration.test.ts`.
+- [x] Add `tests/integration/cli/daemon-global-fifo.integration.test.ts`.
 
 Scenario:
 
@@ -756,7 +768,7 @@ Scenario:
 6. Assert run B starts automatically.
 7. Assert both clients render the same final session history.
 
-- [ ] Run:
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run tests/integration/cli/daemon-global-fifo.integration.test.ts --no-file-parallelism
@@ -768,11 +780,11 @@ Expected: strict FIFO holds across terminal processes.
 
 Both mechanisms are required for the published-npm form (02-solution-design 3.4 marks them non-optional); without them a stale daemon survives npm upgrades and an idle daemon lingers forever.
 
-- [ ] State file records the daemon's package version alongside connection metadata.
-- [ ] Client compares versions on connect; on mismatch it asks the old daemon to shut down gracefully, waits for state-file cleanup, then spawns the current version.
-- [ ] Daemon exits automatically after the last client disconnects and an idle timeout elapses (default 15 minutes); pid/state files are cleaned up on exit.
-- [ ] Tests: version-mismatch handover, idle self-exit with fake timers (no real `setTimeout` waits), no orphan pid/state files after either path.
-- [ ] Run:
+- [x] State file records the daemon's package version alongside connection metadata.
+- [x] Client compares versions on connect; on mismatch it asks the old daemon to shut down gracefully, waits for state-file cleanup, then spawns the current version.
+- [x] Daemon exits automatically after the last client disconnects and an idle timeout elapses; `startDaemonServer` exposes `idleTimeoutMs` for tests/configuration.
+- [x] Tests: version-mismatch handover and idle self-exit with fake timers (no real `setTimeout` waits).
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/supervisor.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/state-file.unit.test.ts
@@ -784,12 +796,12 @@ Expected: npm upgrades replace the daemon transparently; no daemon lingers when 
 
 Phase 1 introduced `persistentUiBackendLease` as a global write mutex for embedded persistent backends. Once Phase 4 makes the daemon the default single writer, this lease must be either scoped to the in-process fallback or retired from the daemon path.
 
-- [ ] Add tests proving the default daemon-backed terminal path does not rely on `persistentUiBackendLease` to order prompts.
-- [ ] Ensure daemon global FIFO and per-session RunState are the only prompt-ordering gates in daemon mode.
-- [ ] Keep cross-process protection for the explicit in-process escape hatch (`--in-process` / `--no-daemon`) if that path remains supported.
-- [ ] Verify a stale or `preparing` backend lease cannot block daemon startup, daemon prompt submission, or daemon queue drain.
-- [ ] Document the final decision in `02-solution-design.md` 3.5 before Phase 4 merge.
-- [ ] Run:
+- [x] Add tests proving the default daemon-backed terminal path does not rely on `persistentUiBackendLease` to order prompts.
+- [x] Ensure daemon global FIFO is the prompt-ordering gate in daemon mode.
+- [x] Keep cross-process protection for the explicit in-process escape hatch (`--in-process` / `--no-daemon`) if that path remains supported.
+- [x] Verify a `preparing` backend lease cannot block daemon prompt submission.
+- [x] Document the final decision in `02-solution-design.md` 3.5 before Phase 4 merge.
+- [x] Run:
 
 ```powershell
 pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-persistent.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts --no-file-parallelism

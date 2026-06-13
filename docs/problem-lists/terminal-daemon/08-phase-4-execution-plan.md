@@ -871,7 +871,7 @@ git commit -m "feat(cli): start terminal through daemon by default"
 - Modify: `docs/problem-lists/terminal-daemon/05-implementation-plan.md`
 - Modify: `docs/problem-lists/terminal-daemon/08-phase-4-execution-plan.md`
 
-- [ ] **Step 1: Add idle exit tests**
+- [x] **Step 1: Add idle exit tests**
 
 In `supervisor.unit.test.ts`:
 
@@ -898,7 +898,7 @@ it("stops after the idle timeout when the last client disconnects", async () => 
 });
 ```
 
-- [ ] **Step 2: Implement idle client tracking**
+- [x] **Step 2: Implement idle client tracking**
 
 Add methods:
 
@@ -910,7 +910,7 @@ retire(reason: string): Promise<void>;
 
 Server calls these from SSE connection open/close. RPC-only clients call `clientConnected` on first authorized request and `clientDisconnected` from `disposeClient` if a dispose RPC exists; otherwise idle timeout remains conservative for SSE-backed terminal clients.
 
-- [ ] **Step 3: Add backend lease tests**
+- [x] **Step 3: Add backend lease tests**
 
 In `ui-persistent.integration.test.ts`, prove daemon mode bypasses stale lease:
 
@@ -945,7 +945,7 @@ it("keeps backend lease protection for in-process mode", async () => {
 });
 ```
 
-- [ ] **Step 4: Implement `backendLeaseMode`**
+- [x] **Step 4: Implement `backendLeaseMode`**
 
 Add option:
 
@@ -955,7 +955,7 @@ readonly backendLeaseMode?: "enabled" | "disabled";
 
 Default is `"enabled"` for direct persistent backend construction. `startDaemonServer` passes `"disabled"`. `buildCoreAPIImpl({ inProcess: true })` does not override the default.
 
-- [ ] **Step 5: Add global FIFO E2E**
+- [x] **Step 5: Add global FIFO E2E**
 
 Create `daemon-global-fifo.integration.test.ts`:
 
@@ -992,7 +992,7 @@ describe("daemon global FIFO", () => {
 });
 ```
 
-- [ ] **Step 6: Update docs**
+- [x] **Step 6: Update docs**
 
 Update:
 
@@ -1001,7 +1001,7 @@ Update:
 - `05-implementation-plan.md` Phase 4: check off completed tasks and add exact test commands run.
 - `08-phase-4-execution-plan.md`: check boxes completed by this task.
 
-- [ ] **Step 7: Run 4D focused verification**
+- [x] **Step 7: Run 4D focused verification**
 
 Run:
 
@@ -1012,7 +1012,7 @@ pnpm run typecheck
 
 Expected: lifecycle, lease, server, and FIFO E2E tests pass.
 
-- [ ] **Step 8: Commit 4D**
+- [x] **Step 8: Commit 4D**
 
 ```powershell
 git add packages/ohbaby-agent/src/runtime/daemon/supervisor.ts packages/ohbaby-agent/src/runtime/daemon/server.ts packages/ohbaby-agent/src/runtime/daemon/spawn.ts packages/ohbaby-agent/src/adapters/ui-persistent.ts packages/ohbaby-agent/src/adapters/ui-persistent.integration.test.ts tests/integration/cli/daemon-global-fifo.integration.test.ts docs/problem-lists/terminal-daemon/02-solution-design.md docs/problem-lists/terminal-daemon/04-test-criteria.md docs/problem-lists/terminal-daemon/05-implementation-plan.md docs/problem-lists/terminal-daemon/08-phase-4-execution-plan.md

@@ -267,28 +267,32 @@
 
 ---
 
-### Phase 4 预览：Auto-spawn 与生命周期
+### Phase 4：Auto-spawn、生命周期与全局 FIFO
 
-以下内容不作为 Phase 3 验收阻塞项，留给 Phase 4 实施。
+Phase 4 将 daemon 变为默认 terminal 路径；以下条目是本阶段 merge 前的自动化与手工验收口径。
 
 #### 集成测试
 
 | 测试 | 验证点 |
 |------|-------|
-| 无 daemon 时自动拉起 | state-file 不存在 → CLI 启动后 daemon 进程存在且 CLI 已连接 |
-| 有 daemon 时直连复用 | daemon 已运行 → 第二个 CLI 启动不产生新 daemon 进程 |
-| 并发拉起只有一个胜出 | 同时启动两个 CLI（无 daemon）→ 恰好一个 daemon，两个 CLI 都成功连接 |
-| 版本握手不匹配 | state-file 中版本与 client 不一致 → 旧 daemon 优雅退出 → 新版 daemon 拉起 |
-| 僵尸 state-file 恢复 | state-file 存在但 PID 已死 → CLI 清理后正常拉起 |
-| 空闲自退 | 最后一个 client 断开后超过空闲阈值 → daemon 自动退出，state-file 清理 |
-| `--no-daemon` 逃生舱 | 使用该 flag 时不发现/不拉起 daemon，走嵌入式路径 |
+| 无 daemon 时自动拉起 | state-file 不存在 → CLI 启动后 daemon 进程存在且 CLI 已连接 | `tests/integration/cli/daemon-auto-spawn.integration.test.ts` |
+| 有 daemon 时直连复用 | daemon 已运行 → 第二个 CLI 启动不产生新 daemon 进程 | `tests/integration/cli/daemon-auto-spawn.integration.test.ts` |
+| 并发拉起只有一个胜出 | 同时启动两个 CLI（无 daemon）→ 恰好一个 daemon，两个 CLI 都成功连接 | 待手工/子代理补充 |
+| 版本握手不匹配 | state-file 中版本与 client 不一致 → 旧 daemon 优雅退出 → 新版 daemon 拉起 | `runtime/daemon/spawn.unit.test.ts` |
+| 僵尸 state-file 恢复 | state-file 存在但 PID 已死 → CLI 清理后正常拉起 | `runtime/daemon/spawn.unit.test.ts` |
+| 空闲自退 | 最后一个 client 断开后超过空闲阈值 → daemon 自动退出，state-file 清理 | `runtime/daemon/supervisor.unit.test.ts`, `runtime/daemon/server.integration.test.ts` |
+| `--no-daemon` 逃生舱 | 使用该 flag 时不发现/不拉起 daemon，走嵌入式路径 | `packages/ohbaby-cli/src/bin.unit.test.ts` |
+| 全局 FIFO | 两个 remote client 对同一 session submit，第二条在第一条 abort 后自动跟进 | `tests/integration/cli/daemon-global-fifo.integration.test.ts` |
+| backend lease 边界 | daemon mode 不被 preparing lease 阻塞；in-process fallback 保留 lease 保护 | `ui-persistent.integration.test.ts` |
+| permission owner routing | permission 请求只发给发起 run 的 client | `runtime/daemon/server.integration.test.ts` |
 
 #### 验收标准
 
-- [ ] 用户全程只需 `ohbaby` 一条命令，无需感知 daemon 存在
-- [ ] npm 升级后首次启动，旧 daemon 被替换为新版，session 数据完整
-- [ ] daemon 不会在无人使用时常驻（空闲自退）
-- [ ] 审批路由：permission 请求只发给发起该 run 的前端，其他前端只读
+- [x] 默认 terminal host 走 daemon auto-spawn/reuse；`--in-process` / `--no-daemon` 走嵌入式 fallback
+- [x] npm 升级路径的版本握手逻辑有 unit 覆盖；session 数据完整性仍需发布前手工 smoke
+- [x] daemon 不会在无人使用时常驻（空闲自退逻辑有 fake-timer 覆盖）
+- [x] 审批路由：permission 请求只发给发起该 run 的前端，其他前端只读
+- [ ] 真实双终端手工演练与真实 `.env` smoke 仍需 merge 前执行
 
 ---
 

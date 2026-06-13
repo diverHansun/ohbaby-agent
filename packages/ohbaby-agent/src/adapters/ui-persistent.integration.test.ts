@@ -1149,6 +1149,44 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 
+  it("does not let a preparing backend lease block daemon-mode prompt submission", async () => {
+    const directory = await tempDir("ohbaby-persistent-daemon-lease-disabled-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        workdir,
+      });
+      writePreparingBackendLease("backend_preparing_owner");
+
+      const daemonBackend = createPersistentUiBackendClient({
+        backendLeaseMode: "disabled",
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Daemon response", finishReason: "stop" },
+        ]),
+        workdir,
+      });
+      const submitted = daemonBackend.submitPrompt("Run through daemon");
+      const result = await Promise.race([
+        submitted.then(() => "resolved" as const),
+        new Promise<"pending">((resolve) => {
+          setTimeout(() => {
+            resolve("pending");
+          }, 80);
+        }),
+      ]);
+
+      await daemonBackend.dispose();
+      expect(result).toBe("resolved");
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("refreshes the backend lease when another backend starts while the owner is idle", async () => {
     const directory = await tempDir("ohbaby-persistent-live-lease-");
     try {

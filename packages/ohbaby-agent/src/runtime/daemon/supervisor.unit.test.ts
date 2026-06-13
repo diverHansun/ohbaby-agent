@@ -1,5 +1,5 @@
 import process from "node:process";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Supervisor } from "./supervisor.js";
 import type {
   DaemonLogger,
@@ -152,6 +152,30 @@ class StartFailingAndStopRejectingRuntime implements DaemonRuntimeHandle {
 }
 
 describe("Supervisor", () => {
+  it("stops after the idle timeout when the last client disconnects", async () => {
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    const supervisor = new Supervisor({
+      bootstrap: (): DaemonRuntimeHandle => new RecordingRuntime(calls),
+      idleTimeoutMs: 15 * 60 * 1000,
+      logger: silentLogger,
+      pidFile: new RecordingPidFile(calls),
+      signalTarget: null,
+      stateFile: new RecordingStateFile(calls),
+    });
+
+    try {
+      await supervisor.start();
+      supervisor.clientConnected("client_a");
+      supervisor.clientDisconnected("client_a");
+      await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+
+      expect(calls).toContain("runtime.stop");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("writes running connection metadata after the runtime starts", async () => {
     const calls: string[] = [];
     const stateFile = new CapturingStateFile();
