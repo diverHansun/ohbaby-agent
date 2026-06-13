@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -69,5 +69,30 @@ describe("JsonDaemonStateFile", () => {
       status: "stopped",
       updatedAt: 1_002,
     });
+  });
+
+  it("writes daemon state with owner-only file permissions on POSIX", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const file = new JsonDaemonStateFile(statePath);
+    const previousUmask = process.umask(0);
+
+    try {
+      await file.write({
+        authToken: "token_1",
+        host: "127.0.0.1",
+        packageVersion: "0.1.0",
+        pid: 123,
+        port: 4096,
+        startedAt: 1_000,
+        status: "running",
+        updatedAt: 1_001,
+      });
+    } finally {
+      process.umask(previousUmask);
+    }
+
+    expect((await stat(statePath)).mode & 0o777).toBe(0o600);
   });
 });

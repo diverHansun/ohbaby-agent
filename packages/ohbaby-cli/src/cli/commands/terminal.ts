@@ -4,6 +4,7 @@ import type { CliCommandRuntime, CliGlobalOptions } from "./types.js";
 interface TerminalArgs extends CliGlobalOptions {
   readonly continue?: boolean;
   readonly inProcess?: boolean;
+  readonly remoteAuthToken?: string;
   readonly remoteHost?: string;
   readonly remotePort?: number;
   readonly resume?: string;
@@ -64,6 +65,10 @@ export function createTerminalCommand(
           describe: "connect the terminal UI to an explicit daemon host",
           type: "string",
         })
+        .option("remote-auth-token", {
+          describe: "bearer token for an explicit remote daemon",
+          type: "string",
+        })
         .option("in-process", {
           describe: "run the terminal UI against an embedded backend",
           type: "boolean",
@@ -100,6 +105,9 @@ export function createTerminalCommand(
         ...(remotePort === undefined
           ? {}
           : {
+              ...(args.remoteAuthToken === undefined
+                ? {}
+                : { remoteAuthToken: args.remoteAuthToken }),
               remoteHost: normalizeRemoteHost(args.remoteHost),
               remotePort,
             }),

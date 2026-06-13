@@ -740,6 +740,7 @@ Expected: daemon owns cross-client ordering.
 - [x] Update terminal startup to use the supervisor by default.
 - [x] Keep an escape hatch for in-process mode if needed for debugging, named clearly such as `--in-process`.
 - [x] Add CLI tests for default daemon, explicit daemon, and in-process modes.
+- [x] Keep non-interactive `ohbaby run` on the embedded backend; Phase 4 default daemon mode is scoped to terminal UI startup.
 - [x] Run:
 
 ```powershell
@@ -811,7 +812,33 @@ Expected: daemon mode is coordinated by the daemon, while any retained in-proces
 
 ### Phase 4 Verification And Commit
 
-- [ ] Run all verification commands listed at the top of this plan.
+- [x] Run all verification commands listed at the top of this plan.
+
+Final verification evidence:
+
+```powershell
+pnpm run test:unit            # 152 files, 1122 tests passed
+pnpm run test:contract        # 8 files, 164 tests passed
+pnpm run test:integration     # 29 files, 177 tests passed
+pnpm run test:e2e:snapshot    # 1 file, 1 test passed
+pnpm run test:smoke:real      # 1 file, 3 real-provider tests passed, 5 skipped by smoke flags
+pnpm run lint                 # passed
+pnpm run typecheck            # passed
+pnpm run build                # passed
+```
+
+Note: the worktree did not contain a local `.env`, so the real smoke was run with variables loaded into the shell from the main workspace root `.env` without printing secret values.
+
+- [x] Run subagent review and fix findings with tests.
+
+Review follow-up evidence:
+
+```powershell
+pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/auth.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/state-file.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/spawn.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/supervisor.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/main.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/permission-router.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/client.integration.test.ts packages/ohbaby-agent/src/adapters/ui-persistent.integration.test.ts packages/ohbaby-cli/src/bin.unit.test.ts packages/ohbaby-cli/src/cli/commands/serve.unit.test.ts packages/ohbaby-cli/src/cli/commands/run.unit.test.ts tests/integration/cli/daemon-auto-spawn.integration.test.ts tests/integration/cli/daemon-terminal.integration.test.ts tests/integration/cli/daemon-global-fifo.integration.test.ts tests/integration/cli/prompt-process.integration.test.ts --no-file-parallelism
+```
+
+Result: 16 files, 111 tests passed.
+
 - [ ] Run manual two-terminal daemon check:
 
 ```powershell
@@ -829,7 +856,7 @@ Expected:
 - Same-session prompts are globally FIFO.
 - Double-`Esc` in the terminal showing the active run starts the next queued prompt.
 
-- [ ] Request subagent code review for Phase 4, focused on daemon lifecycle (version handshake, idle exit), strict FIFO, stale state, and cross-client rendering.
+- [x] Request subagent code review for Phase 4, focused on daemon lifecycle (version handshake, idle exit), strict FIFO, stale state, and cross-client rendering.
 - [ ] Per-task scoped commits on `feat/terminal-daemon-phase-4` (e.g. `feat(daemon): auto-spawn with version handshake`). After review passes, merge:
 
 ```powershell

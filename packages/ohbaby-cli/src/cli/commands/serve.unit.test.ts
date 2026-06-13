@@ -99,6 +99,18 @@ describe("createServeCommand", () => {
     expect(stdout.join("")).toContain("http://127.0.0.1:4096");
   });
 
+  it("passes an explicit auth token to the daemon server", async () => {
+    const { runtime, startDaemonServer } = createRuntime();
+
+    await runServe(["serve", "--auth-token", "token_1"], runtime);
+
+    expect(startDaemonServer).toHaveBeenCalledWith({
+      authToken: "token_1",
+      host: "127.0.0.1",
+      port: 4096,
+    });
+  });
+
   it("prints daemon status from the state file", async () => {
     const { readDaemonStatus, runtime, stdout } = createRuntime();
 

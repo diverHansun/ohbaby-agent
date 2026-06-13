@@ -62,9 +62,12 @@ export class JsonDaemonStateFile implements DaemonStateFile {
   }
 
   async write(state: DaemonState): Promise<void> {
-    await mkdir(dirname(this.path), { recursive: true });
+    await mkdir(dirname(this.path), { mode: 0o700, recursive: true });
     const tempPath = `${this.path}.${String(process.pid)}.tmp`;
-    await writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    await writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
     await rename(tempPath, this.path);
   }
 }

@@ -281,10 +281,17 @@ Phase 4 将 daemon 变为默认 terminal 路径；以下条目是本阶段 merge
 | 版本握手不匹配 | state-file 中版本与 client 不一致 → 旧 daemon 优雅退出 → 新版 daemon 拉起 | `runtime/daemon/spawn.unit.test.ts` |
 | 僵尸 state-file 恢复 | state-file 存在但 PID 已死 → CLI 清理后正常拉起 | `runtime/daemon/spawn.unit.test.ts` |
 | 空闲自退 | 最后一个 client 断开后超过空闲阈值 → daemon 自动退出，state-file 清理 | `runtime/daemon/supervisor.unit.test.ts`, `runtime/daemon/server.integration.test.ts` |
+| 默认 idle timeout | `startDaemonServer()` 未显式传 idle timeout 时使用 15 分钟默认值 | `runtime/daemon/main.unit.test.ts` |
+| health 身份校验 | 配置 auth token 后 `/api/health` 也要求 bearer token；client 校验 health `packageVersion` | `runtime/daemon/server.integration.test.ts`, `runtime/daemon/spawn.unit.test.ts` |
+| state-file token 权限 | POSIX 下 daemon state-file 以 owner-only 权限写入 | `runtime/daemon/state-file.unit.test.ts` |
 | `--no-daemon` 逃生舱 | 使用该 flag 时不发现/不拉起 daemon，走嵌入式路径 | `packages/ohbaby-cli/src/bin.unit.test.ts` |
+| 显式 remote auth | `ohbaby serve --auth-token` 与 `ohbaby --remote-auth-token` 可打通带 auth 的显式 daemon remote 路径 | `packages/ohbaby-cli/src/cli/commands/serve.unit.test.ts`, `packages/ohbaby-cli/src/bin.unit.test.ts` |
+| `ohbaby run` 非交互边界 | 一次性 prompt 不走 daemon auto-spawn，保持嵌入式 stdout/error 语义 | `packages/ohbaby-cli/src/cli/commands/run.unit.test.ts`, `tests/integration/cli/prompt-process.integration.test.ts` |
 | 全局 FIFO | 两个 remote client 对同一 session submit，第二条在第一条 abort 后自动跟进 | `tests/integration/cli/daemon-global-fifo.integration.test.ts` |
 | backend lease 边界 | daemon mode 不被 preparing lease 阻塞；in-process fallback 保留 lease 保护 | `ui-persistent.integration.test.ts` |
+| daemon 崩溃恢复 | daemon 禁用 backend lease gate 时，启动仍会恢复 stale `pending/running` runs | `ui-persistent.integration.test.ts` |
 | permission owner routing | permission 请求只发给发起 run 的 client | `runtime/daemon/server.integration.test.ts` |
+| permission owner 断线 | owner client 断开后释放 owner 映射，pending permission 回到 unknown-owner 防死锁规则 | `runtime/daemon/permission-router.unit.test.ts` |
 
 #### 验收标准
 
@@ -292,7 +299,9 @@ Phase 4 将 daemon 变为默认 terminal 路径；以下条目是本阶段 merge
 - [x] npm 升级路径的版本握手逻辑有 unit 覆盖；session 数据完整性仍需发布前手工 smoke
 - [x] daemon 不会在无人使用时常驻（空闲自退逻辑有 fake-timer 覆盖）
 - [x] 审批路由：permission 请求只发给发起该 run 的前端，其他前端只读
-- [ ] 真实双终端手工演练与真实 `.env` smoke 仍需 merge 前执行
+- [x] 子代理 review 的 must-fix 与安全/握手 important 项已补测试并修复
+- [x] 真实 `.env` smoke 已执行：`pnpm run test:smoke:real`，3 个真实 provider TUI 场景通过，5 个按开关跳过
+- [ ] 真实双终端手工演练仍需在可交互终端中执行
 
 ---
 

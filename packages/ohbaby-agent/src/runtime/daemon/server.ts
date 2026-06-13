@@ -448,6 +448,10 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     const url = new URL(request.url ?? "/", this.url);
 
     if (request.method === "GET" && url.pathname === "/api/health") {
+      if (!this.isAuthorized(request)) {
+        this.writeUnauthorized(response);
+        return;
+      }
       writeJson(response, 200, {
         ok: true,
         ...(this.options.packageVersion === undefined
@@ -571,6 +575,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
 
     request.on("close", () => {
       if (this.clients.delete(client)) {
+        this.options.permissionRouter.disconnectClient(clientId);
         this.options.onClientDisconnected?.(clientId);
       }
     });

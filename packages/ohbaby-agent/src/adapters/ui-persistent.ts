@@ -239,12 +239,39 @@ function refreshBackendLeaseIfSafe(input: {
   }
 }
 
+function inspectBackendLeaseForRecovery(input: {
+  readonly db: DatabaseConnection;
+}): {
+  readonly activeRunCount: number;
+  readonly liveOwner: boolean;
+} {
+  input.db.exec("BEGIN IMMEDIATE");
+  try {
+    const activeRunCount = countActiveRuns(input.db);
+    const previousLease = readBackendLease(input.db);
+    const liveOwner = isProcessAlive(previousLease?.pid ?? -1);
+    input.db.exec("COMMIT");
+    return { activeRunCount, liveOwner };
+  } catch (error) {
+    try {
+      input.db.exec("ROLLBACK");
+    } catch {
+      // Keep the original startup recovery failure.
+    }
+    throw error;
+  }
+}
+
 function shouldRecoverStartupRuns(input: {
+  readonly acquireBackendLease?: boolean;
   readonly db: DatabaseConnection;
   readonly now: () => number;
   readonly ownerId: string;
 }): boolean {
-  const leaseState = refreshBackendLeaseIfSafe(input);
+  const leaseState =
+    input.acquireBackendLease === false
+      ? inspectBackendLeaseForRecovery(input)
+      : refreshBackendLeaseIfSafe(input);
   return leaseState.activeRunCount > 0 && !leaseState.liveOwner;
 }
 
@@ -554,12 +581,12 @@ export function createPersistentUiBackendClient(
   ]);
   const backendOwnerId = createBackendOwnerId();
   const backendLeaseEnabled = options.backendLeaseMode !== "disabled";
-  const startupRecovery = backendLeaseEnabled &&
-    shouldRecoverStartupRuns({
-      db,
-      now,
-      ownerId: backendOwnerId,
-    })
+  const startupRecovery = shouldRecoverStartupRuns({
+    acquireBackendLease: backendLeaseEnabled,
+    db,
+    now,
+    ownerId: backendOwnerId,
+  })
     ? runLedger.markInterrupted({
         statuses: ["pending", "running"],
       })

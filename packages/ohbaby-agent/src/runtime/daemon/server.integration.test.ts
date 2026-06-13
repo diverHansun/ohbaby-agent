@@ -410,6 +410,26 @@ describe("createDaemonHttpServer", () => {
     );
   });
 
+  it("requires daemon auth for health checks when configured", async () => {
+    await withServer(
+      new FakeBackend(),
+      async (url) => {
+        const rejected = await fetch(`${url}/api/health`);
+        expect(rejected.status).toBe(401);
+
+        const allowed = await fetch(`${url}/api/health`, {
+          headers: { authorization: "Bearer token_1" },
+        });
+        expect(allowed.status).toBe(200);
+        expect(await allowed.json()).toEqual({
+          ok: true,
+          packageVersion: "0.1.0",
+        });
+      },
+      { authToken: "token_1", packageVersion: "0.1.0" },
+    );
+  });
+
   it("handles authorized shutdown requests", async () => {
     const onShutdown = vi.fn(() => Promise.resolve());
     await withServer(

@@ -33,7 +33,12 @@ describe("ensureDaemonRunning", () => {
     const stateFile = new MemoryStateFile(runningState());
     const spawn = vi.fn();
     const fetchImpl = vi.fn(() =>
-      Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 })),
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ ok: true, packageVersion: "0.1.0" }),
+          { status: 200 },
+        ),
+      ),
     );
 
     await expect(
@@ -190,6 +195,59 @@ describe("ensureDaemonRunning", () => {
     });
 
     expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("spawns when health check does not match the recorded daemon version", async () => {
+    const spawn = vi.fn(() => Promise.resolve());
+
+    await ensureDaemonRunning({
+      currentVersion: "0.1.0",
+      fetch: vi.fn(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({ ok: true, packageVersion: "0.0.9" }),
+            { status: 200 },
+          ),
+        ),
+      ),
+      isProcessAlive: () => true,
+      pollIntervalMs: 0,
+      spawn,
+      stateFile: new MemoryStateFile(runningState()),
+      waitForState: () => Promise.resolve(runningState({ pid: 124 })),
+    });
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("still spawns when retiring a mismatched daemon fails", async () => {
+    const calls: string[] = [];
+
+    await expect(
+      ensureDaemonRunning({
+        currentVersion: "0.1.0",
+        fetch: vi.fn((input) => {
+          calls.push(String(input));
+          return Promise.reject(new Error("shutdown unavailable"));
+        }),
+        isProcessAlive: () => true,
+        pollIntervalMs: 0,
+        spawn: vi.fn(() => {
+          calls.push("spawn");
+          return Promise.resolve();
+        }),
+        stateFile: new MemoryStateFile(runningState({ packageVersion: "0.0.9" })),
+        waitForState: () =>
+          Promise.resolve(runningState({
+            authToken: "new_token",
+            packageVersion: "0.1.0",
+            pid: 124,
+            port: 4097,
+          })),
+      }),
+    ).resolves.toMatchObject({ authToken: "new_token", port: 4097 });
+
+    expect(calls).toEqual(["http://127.0.0.1:4096/api/shutdown", "spawn"]);
   });
 
   it("fails clearly when the daemon never becomes ready", async () => {

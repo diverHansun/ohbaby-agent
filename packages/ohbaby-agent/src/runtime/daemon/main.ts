@@ -18,6 +18,7 @@ const DEFAULT_PORT = 4096;
 const DEFAULT_STATE_DIR = ".ohbaby";
 const DEFAULT_STATE_FILE = resolve(DEFAULT_STATE_DIR, "daemon-state.json");
 const DEFAULT_PACKAGE_VERSION = "0.1.0";
+const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 
 export interface StartDaemonServerOptions {
   readonly host?: string;
@@ -114,9 +115,7 @@ export async function startDaemonServer(
     ...(options.pidFilePath === undefined
       ? {}
       : { pidFilePath: options.pidFilePath }),
-    ...(options.idleTimeoutMs === undefined
-      ? {}
-      : { idleTimeoutMs: options.idleTimeoutMs }),
+    idleTimeoutMs: options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
     ...(options.stateFilePath === undefined
       ? {}
       : { stateFilePath: options.stateFilePath }),

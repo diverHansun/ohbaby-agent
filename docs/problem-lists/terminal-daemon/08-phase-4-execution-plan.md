@@ -23,7 +23,7 @@ Do not add ACP or A2A infrastructure. The supported remote surface remains the e
 Create:
 
 - `packages/ohbaby-agent/src/runtime/daemon/spawn.ts` - client-side daemon discovery, stale-state cleanup, version check, spawn, and ready polling.
-- `packages/ohbaby-agent/src/runtime/daemon/spawn.unit.test.ts` - auto-spawn, reuse, stale pid, bind failure, version handoff, and concurrent spawn tests using injected process/fetch/state dependencies.
+- `packages/ohbaby-agent/src/runtime/daemon/spawn.unit.test.ts` - auto-spawn, reuse, stale pid, version handoff, health identity, and shutdown-fallback tests using injected process/fetch/state dependencies.
 - `packages/ohbaby-agent/src/runtime/daemon/auth.ts` - local bearer token helpers used by state file, server, and client.
 - `packages/ohbaby-agent/src/runtime/daemon/auth.unit.test.ts` - token creation, redaction, and auth header validation tests.
 - `packages/ohbaby-agent/src/runtime/daemon/prompt-queue.ts` - daemon-owned prompt FIFO with per-session active state, owner tracking, abort drain, shutdown rejection, and busy retry.
@@ -1023,43 +1023,55 @@ git commit -m "fix(daemon): harden lifecycle and lease boundaries"
 
 ## Phase 4 Final Verification
 
-- [ ] Run all unit tests:
+- [x] Run all unit tests:
 
 ```powershell
 pnpm run test:unit
 ```
 
-- [ ] Run all contract tests:
+Evidence: 152 files, 1122 tests passed.
+
+- [x] Run all contract tests:
 
 ```powershell
 pnpm run test:contract
 ```
 
-- [ ] Run all integration tests:
+Evidence: 8 files, 164 tests passed.
+
+- [x] Run all integration tests:
 
 ```powershell
 pnpm run test:integration
 ```
 
-- [ ] Run E2E snapshot tests:
+Evidence: 29 files, 177 tests passed. This includes `tests/integration/cli/prompt-process.integration.test.ts`, which verifies non-interactive `ohbaby run` remains embedded instead of daemon-backed.
+
+- [x] Run E2E snapshot tests:
 
 ```powershell
 pnpm run test:e2e:snapshot
 ```
 
-- [ ] Run real `.env` smoke tests:
+Evidence: 1 file, 1 test passed.
+
+- [x] Run real `.env` smoke tests:
 
 ```powershell
 pnpm run test:smoke:real
 ```
 
-- [ ] Run lint, typecheck, and build:
+Evidence: current worktree had no local `.env`; rerun loaded variables from the main workspace root `.env` into the shell without printing secrets. Result: 1 file passed; 3 real-provider TUI tests passed; 5 optional smoke scenarios skipped by flags.
+
+- [x] Run lint, typecheck, and build:
 
 ```powershell
 pnpm run lint
 pnpm run typecheck
 pnpm run build
 ```
+
+Evidence: all three commands exited 0.
 
 - [ ] Run manual two-terminal daemon check:
 
@@ -1083,15 +1095,34 @@ Expected manual result:
 - Double-`Esc` in the active terminal aborts the current run and the next queued prompt starts automatically.
 - Closing all terminal clients lets the daemon exit after the idle timeout when the timeout is configured to a short test value.
 
-- [ ] Request subagent review focused on:
+Status: not executed in this non-interactive review session. Automated coverage exists in `tests/integration/cli/daemon-auto-spawn.integration.test.ts`, `tests/integration/cli/daemon-terminal.integration.test.ts`, and `tests/integration/cli/daemon-global-fifo.integration.test.ts`; a live two-terminal TUI pass is still recommended before merge.
+
+- [x] Request subagent review focused on:
 
 ```text
 Review Phase 4 daemon auto-spawn and global FIFO. Check state-file/version/auth safety, stale daemon recovery, prompt ordering, permission ownership, idle shutdown, backend lease boundaries, CLI default daemon mode, tests, and docs. Report must-fix issues first with file/line evidence.
 ```
 
-- [ ] Fix review findings with tests.
+- [x] Fix review findings with tests.
 
-- [ ] Commit review fixes:
+Subagent review follow-up:
+
+- Fixed daemon startup recovery when `backendLeaseMode: "disabled"` so daemon-mode stale `pending/running` runs are interrupted on restart instead of causing infinite FIFO busy retries.
+- Added default 15-minute idle timeout in `startDaemonServer()`.
+- Added explicit auth-token plumbing for `ohbaby serve --auth-token` and `ohbaby --remote-auth-token`.
+- Required auth on `/api/health`, verified health package version in daemon discovery, and tolerated failed shutdown requests during version handoff.
+- Wrote daemon state files with POSIX owner-only mode.
+- Released permission ownership when the owning SSE client disconnects, returning pending permissions to the existing unknown-owner anti-deadlock rule.
+
+Focused review-fix verification:
+
+```powershell
+pnpm exec vitest run packages/ohbaby-agent/src/runtime/daemon/auth.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/state-file.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/spawn.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/supervisor.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/main.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/permission-router.unit.test.ts packages/ohbaby-agent/src/runtime/daemon/server.integration.test.ts packages/ohbaby-agent/src/runtime/daemon/client.integration.test.ts packages/ohbaby-agent/src/adapters/ui-persistent.integration.test.ts packages/ohbaby-cli/src/bin.unit.test.ts packages/ohbaby-cli/src/cli/commands/serve.unit.test.ts packages/ohbaby-cli/src/cli/commands/run.unit.test.ts tests/integration/cli/daemon-auto-spawn.integration.test.ts tests/integration/cli/daemon-terminal.integration.test.ts tests/integration/cli/daemon-global-fifo.integration.test.ts tests/integration/cli/prompt-process.integration.test.ts --no-file-parallelism
+```
+
+Evidence: 16 files, 111 tests passed.
+
+- [x] Commit review fixes:
 
 ```powershell
 $changed = git diff --name-only

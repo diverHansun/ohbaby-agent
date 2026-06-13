@@ -48,6 +48,8 @@ export function createRunCommand(
     async handler(args: ArgumentsCamelCase<RunArgs>): Promise<void> {
       const prompt = await resolvePrompt(args, runtime);
       const host = await runtime.createCoreHost({
+        daemon: false,
+        inProcess: true,
         mode: args.mode,
         permission: args.permission,
       });

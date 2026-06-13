@@ -224,6 +224,53 @@ describe("runOhbabyCli", () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
+  it("passes an explicit remote daemon auth token to the terminal host", async () => {
+    vi.resetModules();
+    const core = createCore();
+    const dispose = vi.fn(() => Promise.resolve());
+    const createCoreHost = vi.fn(() => ({
+      callbacks: { subscribeEvents },
+      core,
+      dispose,
+    }));
+    const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
+    const subscribeEvents = vi.fn((): (() => void) => () => undefined);
+    const waitUntilExit = vi.fn(() => Promise.resolve());
+    const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
+    vi.doMock("ohbaby-agent", () => {
+      throw new Error("agent should be loaded only by the default loader");
+    });
+    vi.doMock("./tui/index.js", () => ({
+      renderTerminalUi,
+    }));
+
+    const { runOhbabyCli } = await import("./bin.js");
+
+    await expect(
+      runOhbabyCli(
+        [
+          "node",
+          "ohbaby",
+          "--remote-port",
+          "4096",
+          "--remote-auth-token",
+          "token_1",
+        ],
+        {},
+        {
+          createCoreHost,
+          loadRuntimeEnvIntoProcessEnv,
+        },
+      ),
+    ).resolves.toBe(0);
+    expect(createCoreHost).toHaveBeenCalledWith({
+      remoteAuthToken: "token_1",
+      remoteHost: "127.0.0.1",
+      remotePort: 4096,
+    });
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
   it("preserves resume options when using a remote daemon", async () => {
     vi.resetModules();
     const core = createCore();

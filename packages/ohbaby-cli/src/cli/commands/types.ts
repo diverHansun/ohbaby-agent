@@ -17,6 +17,7 @@ export interface CliDaemonState {
 }
 
 export interface CliStartDaemonServerOptions {
+  readonly authToken?: string;
   readonly host?: string;
   readonly port?: number;
   readonly dbPath?: string;
@@ -38,6 +39,7 @@ export interface CliGlobalOptions {
   readonly permission?: "default" | "full-access";
   readonly remoteHost?: string;
   readonly remotePort?: number;
+  readonly remoteAuthToken?: string;
   readonly resume?: string;
 }
 

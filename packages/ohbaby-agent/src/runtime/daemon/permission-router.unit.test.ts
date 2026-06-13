@@ -136,6 +136,22 @@ describe("PermissionRouter", () => {
     );
   });
 
+  it("releases permission ownership when the owning client disconnects", () => {
+    const router = new PermissionRouter();
+    const release = router.trackPromptClient("client_a", "session_1");
+    router.observeEvent(runUpdated("run_1", "session_1"));
+    const event = permissionRequested("run_1");
+    router.observeEvent(event);
+    release();
+
+    router.disconnectClient("client_a");
+
+    expect(router.filterEventForClient(event, "client_b")).toEqual(event);
+    expect(router.canRespondPermission("permission_run_1", "client_b")).toBe(
+      true,
+    );
+  });
+
   it("allows all clients to respond to unknown-owner permissions", () => {
     const router = new PermissionRouter();
 

@@ -55,6 +55,29 @@ export class PermissionRouter {
     };
   }
 
+  disconnectClient(clientId: string): void {
+    for (const entry of this.activePromptClients) {
+      if (entry.clientId === clientId) {
+        entry.released = true;
+      }
+    }
+    for (let index = this.activePromptClients.length - 1; index >= 0; index -= 1) {
+      if (this.activePromptClients[index]?.clientId === clientId) {
+        this.activePromptClients.splice(index, 1);
+      }
+    }
+    for (const [runId, ownerClientId] of this.runOwners) {
+      if (ownerClientId === clientId) {
+        this.runOwners.delete(runId);
+      }
+    }
+    for (const [requestId, ownerClientId] of this.permissionOwners) {
+      if (ownerClientId === clientId) {
+        this.permissionOwners.delete(requestId);
+      }
+    }
+  }
+
   observeEvent(event: UiEvent): void {
     if (isPermissionResolvedEvent(event)) {
       this.permissionOwners.delete(event.requestId);

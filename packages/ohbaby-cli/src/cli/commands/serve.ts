@@ -5,6 +5,7 @@ type ServeAction = "start" | "status" | "stop";
 
 interface ServeArgs extends CliGlobalOptions {
   readonly action?: ServeAction;
+  readonly authToken?: string;
   readonly dbPath?: string;
   readonly host?: string;
   readonly port?: number;
@@ -63,6 +64,10 @@ export function createServeCommand(
         .option("db-path", {
           describe: "daemon database path",
           type: "string",
+        })
+        .option("auth-token", {
+          describe: "bearer token required by explicit daemon clients",
+          type: "string",
         });
     },
     command: "serve [action]",
@@ -79,6 +84,7 @@ export function createServeCommand(
       }
 
       const server = await runtime.startDaemonServer({
+        ...(args.authToken === undefined ? {} : { authToken: args.authToken }),
         ...(args.dbPath === undefined ? {} : { dbPath: args.dbPath }),
         host: normalizeHost(args.host),
         port: normalizePort(args.port, runtime),

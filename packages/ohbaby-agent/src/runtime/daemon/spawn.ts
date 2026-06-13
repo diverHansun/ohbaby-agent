@@ -118,7 +118,16 @@ async function isHealthy(
       headers: { authorization: daemonAuthHeader(state.authToken) },
       method: "GET",
     });
-    return response.ok;
+    if (!response.ok) {
+      return false;
+    }
+    const body = (await response.json().catch(() => undefined)) as
+      | { readonly ok?: unknown; readonly packageVersion?: unknown }
+      | undefined;
+    return (
+      body?.ok === true &&
+      body.packageVersion === state.packageVersion
+    );
   } catch {
     return false;
   }
@@ -128,10 +137,14 @@ async function requestShutdown(
   state: ReturnType<typeof assertRunningState>,
   fetchImpl: typeof fetch,
 ): Promise<void> {
-  await fetchImpl(stateUrl(state, "/api/shutdown"), {
-    headers: { authorization: daemonAuthHeader(state.authToken) },
-    method: "POST",
-  });
+  try {
+    await fetchImpl(stateUrl(state, "/api/shutdown"), {
+      headers: { authorization: daemonAuthHeader(state.authToken) },
+      method: "POST",
+    });
+  } catch {
+    // Continue to spawn and poll; the old daemon may already be gone or stale.
+  }
 }
 
 function delay(ms: number): Promise<void> {
