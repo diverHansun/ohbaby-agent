@@ -2,20 +2,27 @@
 
 ## Decision
 
-Development stays on the pnpm workspace. The user-facing npm package is `ohbaby-agent`, and its global binary remains `ohbaby`.
+Development stays on the pnpm workspace. The user-facing npm package is `ohbaby-cli`, and its global binary is `ohbaby`.
 
 The publishable package graph is:
 
-- `ohbaby-agent` depends on `ohbaby-cli` and `ohbaby-sdk`.
-- `ohbaby-cli` depends on `ohbaby-sdk`.
+- `ohbaby-cli` depends on `ohbaby-agent` and `ohbaby-sdk`.
+- `ohbaby-agent` depends on `ohbaby-sdk`.
 - `ohbaby-sdk` has no runtime workspace dependency.
 
 Workspace packages should be publishable npm packages, with `dist` as the shipped artifact. Development manifests keep `workspace:*` dependencies, and the publish artifact is produced with pnpm's pack/publish semantics so those workspace ranges are rewritten to package versions in the generated tarballs:
 
-- `ohbaby-agent` depends on the packed `ohbaby-cli` and `ohbaby-sdk` packages.
-- `ohbaby-cli` depends on the packed `ohbaby-sdk` package.
+- `ohbaby-cli` depends on the published `ohbaby-agent` and `ohbaby-sdk` package versions.
+- `ohbaby-agent` depends on the published `ohbaby-sdk` package version.
 
 External runtime dependencies still resolve through npm during installation. The packed smoke test verifies the npm-facing artifact by installing the locally packed package graph into a temporary global prefix.
+
+For a public release, publish the same version of `ohbaby-sdk`, `ohbaby-agent`, and `ohbaby-cli`, with `ohbaby-sdk` first and `ohbaby-cli` last. End users only install `ohbaby-cli`:
+
+```bash
+npm install -g ohbaby-cli
+ohbaby
+```
 
 ## Risks
 
@@ -32,8 +39,8 @@ The packaging smoke test will:
 1. Pack `ohbaby-sdk`, `ohbaby-cli`, and `ohbaby-agent` into a temporary directory with `pnpm pack --json`.
 2. Assert packed file lists do not contain `node_modules` or parent-directory paths.
 3. Install those tarballs with `npm install -g --prefix <temp-prefix>`.
-4. Import the installed `ohbaby-cli` package from the installed `ohbaby-agent` dependency tree and assert the public exports exist.
-5. Run the installed `ohbaby --help` and assert the usage output.
-6. Run the installed `ohbaby --version` and assert it matches the package version.
+4. Import the installed `ohbaby-cli` and `ohbaby-agent` packages and assert the public exports exist.
+5. Run the installed `ohbaby --help` and assert the yargs command surface.
+6. Run the installed `ohbaby --version` and assert it matches the `ohbaby-cli` package version.
 
 The smoke intentionally imports `ohbaby-cli` without rendering the TUI, then uses `--help` and `--version` for the binary. Those paths do not load provider keys, start an interactive TUI, or contact network services.
