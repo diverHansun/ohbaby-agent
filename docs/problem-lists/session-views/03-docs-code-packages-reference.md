@@ -583,6 +583,16 @@ tests/integration/cli/packaging-smoke.integration.test.ts
 README.md
 ```
 
+审查后新增必须对照的实现点:
+
+```text
+packages/ohbaby-agent/src/runtime/daemon/server.ts
+- createSessionId: fresh/null view submitPrompt uses an explicit generated sessionId.
+- snapshotForClient: scrubs non-active session messages and filters runs/status/permissions/context usage.
+- routeEventForClient: session.updated and runtime.updated are scoped, not global.
+- commandEventBelongsToClient: unowned command result events are not broadcast.
+```
+
 ---
 
 ## 10. Review 时重点看什么

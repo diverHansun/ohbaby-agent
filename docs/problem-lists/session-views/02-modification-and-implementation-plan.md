@@ -465,3 +465,16 @@ ohbaby
 ```
 
 真实安装验证必须在 Windows PowerShell/Windows Terminal 至少打开两个 tab 手动确认。
+
+---
+
+## 9. Code Review Hardening Update
+
+审查后实施时对原计划做了两处收紧:
+
+1. fresh view 提交 prompt 时不再等待“下一条 `session.updated`”来推断归属。daemon server 直接生成显式 `sessionId` 并传给 backend `submitPrompt()`，同时把该 `sessionId` 写入当前 client view。这样可以避免 prompt queue、后台标题更新、其他窗口 `/new` 事件交错时误绑定。
+2. `session.updated` 不再作为全局 metadata 事件广播给所有 client。它现在按 `event.session.id` 走 session-scoped 过滤；非当前 view 的窗口不会收到其中携带的 `UiSession.messages`。
+3. `snapshotForClient()` 不只重写 `activeSessionId`，也会裁剪非当前 view 的 `sessions[].messages`、`runs`、`permissions`、`contextWindowUsages` 和不属于当前 session 的 running/waiting status。
+4. `runtime.updated` 现在按 run/session owner 路由；未归属的 command result 不再广播给所有 client。
+
+这些调整优先保证多窗口隔离与 transcript 不泄漏；session list 的跨窗口 metadata 同步可以后续用不含 messages 的专用 summary 事件补充。

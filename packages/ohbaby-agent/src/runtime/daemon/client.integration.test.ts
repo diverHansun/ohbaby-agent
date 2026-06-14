@@ -87,6 +87,19 @@ function sessionUpdated(
   };
 }
 
+function noticeEmitted(id = "notice_1"): UiEvent {
+  return {
+    notice: {
+      createdAt: timestamp,
+      id,
+      level: "info",
+      message: "Notice",
+      title: "Notice",
+    },
+    type: "notice.emitted",
+  };
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -352,7 +365,7 @@ describe("createRemoteUiBackendClient", () => {
           client.subscribeEvents(resolve);
         });
 
-        await eventuallyEmit(backend, sessionUpdated(), eventPromise);
+        await eventuallyEmit(backend, noticeEmitted(), eventPromise);
         await eventPromise;
 
         expect(requests.slice(0, 2)).toEqual(["initializeClient", "events"]);
@@ -489,9 +502,9 @@ describe("createRemoteUiBackendClient", () => {
         client.subscribeEvents(resolve);
       });
 
-      await eventuallyEmit(backend, sessionUpdated(), eventPromise);
+      await eventuallyEmit(backend, noticeEmitted(), eventPromise);
 
-      await expect(eventPromise).resolves.toEqual(sessionUpdated());
+      await expect(eventPromise).resolves.toEqual(noticeEmitted());
     });
   });
 
@@ -508,12 +521,12 @@ describe("createRemoteUiBackendClient", () => {
       });
       const unsubscribe = client.subscribeEvents(handler);
 
-      await eventuallyEmit(backend, sessionUpdated("session_1"), firstEvent);
+      await eventuallyEmit(backend, noticeEmitted("notice_1"), firstEvent);
       await delay(20);
       unsubscribe();
       const callsAfterUnsubscribe = handler.mock.calls.length;
 
-      backend.emit(sessionUpdated("session_2"));
+      backend.emit(noticeEmitted("notice_2"));
       await delay(50);
 
       expect(handler).toHaveBeenCalledTimes(callsAfterUnsubscribe);

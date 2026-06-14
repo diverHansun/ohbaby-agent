@@ -6,10 +6,14 @@ import type {
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
+import { createSessionIdGenerator } from "../../services/session/index.js";
 import { SessionRunBusyError } from "../run-ledger/index.js";
 import { isAuthorizedDaemonRequest } from "./auth.js";
 import { PermissionRouter } from "./permission-router.js";
-import { DaemonPromptQueue } from "./prompt-queue.js";
+import {
+  DaemonPromptQueue,
+  type DaemonPromptQueueItem,
+} from "./prompt-queue.js";
 import {
   createDaemonRpcFailure,
   createDaemonRpcSuccess,
@@ -37,6 +41,7 @@ interface ClientView {
 export interface DaemonHttpServerOptions {
   readonly backend: UiBackendClient;
   readonly authToken?: string;
+  readonly createSessionId?: () => string;
   readonly host?: string;
   readonly onClientConnected?: (clientId: string) => void;
   readonly onClientDisconnected?: (clientId: string) => void;
@@ -57,8 +62,9 @@ export interface DaemonHttpServerHandle {
 
 type NormalizedDaemonHttpServerOptions = Omit<
   DaemonHttpServerOptions,
-  "host" | "permissionRouter" | "port"
+  "createSessionId" | "host" | "permissionRouter" | "port"
 > & {
+  readonly createSessionId: () => string;
   readonly host: string;
   readonly permissionRouter: PermissionRouter;
   readonly port: number;
@@ -157,7 +163,7 @@ async function callBackend(
   backend: UiBackendClient,
   clientViews: Map<string, ClientView>,
   commandOwnersByInvocationId: Map<string, string>,
-  pendingFreshPromptClients: string[],
+  createSessionId: () => string,
   permissionRouter: PermissionRouter,
   promptQueue: DaemonPromptQueue,
   request: DaemonRpcRequest,
@@ -192,14 +198,16 @@ async function callBackend(
     case "submitPrompt": {
       const options = submitPromptOptions(request.params[1]);
       const view = clientViews.get(request.clientId);
-      const submitOptions = optionsForClientSubmit(
+      let submitOptions = optionsForClientSubmit(
         options,
         view,
       );
       if (submitOptions?.sessionId !== undefined && view !== undefined) {
         view.activeSessionId = submitOptions.sessionId;
       } else if (view?.activeSessionId === null) {
-        pendingFreshPromptClients.push(request.clientId);
+        const sessionId = createSessionId();
+        submitOptions = { ...options, sessionId };
+        view.activeSessionId = sessionId;
       }
       await promptQueue.enqueue({
         clientId: request.clientId,
@@ -321,11 +329,33 @@ function snapshotForClient(
   if (!view) {
     return snapshot;
   }
+  const activeSessionId = view.activeSessionId;
   return {
     ...snapshot,
-    ...(view.activeSessionId === undefined
+    ...(activeSessionId === undefined
       ? {}
-      : { activeSessionId: view.activeSessionId }),
+      : { activeSessionId }),
+    ...(activeSessionId === undefined
+      ? {}
+      : {
+          ...(snapshot.contextWindowUsages === undefined
+            ? {}
+            : {
+                contextWindowUsages: snapshot.contextWindowUsages.filter(
+                  (usage) => usage.sessionId === activeSessionId,
+                ),
+              }),
+          permissions: permissionsForClientSnapshot(snapshot, activeSessionId),
+          runs: snapshot.runs.filter(
+            (run) => run.sessionId === activeSessionId,
+          ),
+          sessions: snapshot.sessions.map((session) =>
+            session.id === activeSessionId
+              ? session
+              : { ...session, messages: [] },
+          ),
+          status: statusForClientSnapshot(snapshot, activeSessionId),
+        }),
     ...(view.initialPermission === undefined
       ? {}
       : {
@@ -373,6 +403,48 @@ function commandInvocationForClient(
   };
 }
 
+function permissionsForClientSnapshot(
+  snapshot: UiSnapshot,
+  activeSessionId: string | null,
+): UiSnapshot["permissions"] {
+  if (activeSessionId === null) {
+    return [];
+  }
+  return snapshot.permissions.filter((permission) => {
+    const run = snapshot.runs.find(
+      (candidate) => candidate.id === permission.runId,
+    );
+    return run?.sessionId === activeSessionId;
+  });
+}
+
+function statusForClientSnapshot(
+  snapshot: UiSnapshot,
+  activeSessionId: string | null,
+): UiSnapshot["status"] {
+  const status = snapshot.status;
+  if (activeSessionId === null) {
+    return { kind: "idle" };
+  }
+  if (status.kind === "running") {
+    const run = snapshot.runs.find(
+      (candidate) => candidate.id === status.runId,
+    );
+    return run?.sessionId === activeSessionId ? status : { kind: "idle" };
+  }
+  if (status.kind === "waiting-for-permission") {
+    const permission = snapshot.permissions.find(
+      (candidate) => candidate.id === status.requestId,
+    );
+    const run =
+      permission === undefined
+        ? undefined
+        : snapshot.runs.find((candidate) => candidate.id === permission.runId);
+    return run?.sessionId === activeSessionId ? status : { kind: "idle" };
+  }
+  return status;
+}
+
 function selectedSessionIdFromCommandAction(
   action: Extract<UiEvent, { type: "command.result.delivered" }>["action"],
 ): string | undefined {
@@ -387,6 +459,8 @@ function selectedSessionIdFromCommandAction(
 
 function sessionIdForEvent(event: UiEvent): string | undefined {
   switch (event.type) {
+    case "session.updated":
+      return event.session.id;
     case "message.appended":
     case "message.updated":
     case "message.part.delta":
@@ -404,6 +478,10 @@ function sessionIdForEvent(event: UiEvent): string | undefined {
 function createDefaultPromptQueue(
   backend: UiBackendClient,
   permissionRouter: PermissionRouter,
+  lifecycle: {
+    readonly onPromptSettled?: (item: DaemonPromptQueueItem) => void;
+    readonly onPromptStarted?: (item: DaemonPromptQueueItem) => void;
+  } = {},
 ): DaemonPromptQueue {
   return new DaemonPromptQueue({
     isBusyError: (error): boolean => error instanceof SessionRunBusyError,
@@ -412,9 +490,11 @@ function createDefaultPromptQueue(
         item.clientId,
         item.sessionId,
       );
+      lifecycle.onPromptStarted?.(item);
       try {
         await backend.submitPrompt(item.text, item.options);
       } finally {
+        lifecycle.onPromptSettled?.(item);
         release();
       }
     },
@@ -434,12 +514,10 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
   private readonly clients = new Set<SseClient>();
   private readonly commandOwnersByInvocationId = new Map<string, string>();
   private readonly commandOwnersByRunId = new Map<string, string>();
-  private readonly commandOwnerCleanupTimers = new Map<
-    string,
-    ReturnType<typeof setTimeout>
-  >();
-  private readonly pendingFreshPromptClients: string[] = [];
+  private readonly runOwnersByRunId = new Map<string, string>();
+  private readonly runSessionIdsByRunId = new Map<string, string>();
   private readonly promptQueue: DaemonPromptQueue;
+  private activePrompt: DaemonPromptQueueItem | undefined;
   private unsubscribe: UiUnsubscribe | undefined;
   private currentPort: number;
   private started = false;
@@ -448,7 +526,16 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     this.currentPort = options.port;
     this.promptQueue =
       options.promptQueue ??
-      createDefaultPromptQueue(options.backend, options.permissionRouter);
+      createDefaultPromptQueue(options.backend, options.permissionRouter, {
+        onPromptSettled: (item) => {
+          if (this.activePrompt === item) {
+            this.activePrompt = undefined;
+          }
+        },
+        onPromptStarted: (item) => {
+          this.activePrompt = item;
+        },
+      });
   }
 
   get host(): string {
@@ -501,10 +588,9 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       client.response.end();
     }
     this.clients.clear();
-    for (const timer of this.commandOwnerCleanupTimers.values()) {
-      clearTimeout(timer);
-    }
-    this.commandOwnerCleanupTimers.clear();
+    this.activePrompt = undefined;
+    this.runOwnersByRunId.clear();
+    this.runSessionIdsByRunId.clear();
 
     if (!this.started) {
       return;
@@ -611,7 +697,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         this.options.backend,
         this.clientViews,
         this.commandOwnersByInvocationId,
-        this.pendingFreshPromptClients,
+        this.options.createSessionId,
         this.options.permissionRouter,
         this.promptQueue,
         rpcRequest,
@@ -658,10 +744,29 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
 
     request.on("close", () => {
       if (this.clients.delete(client)) {
-        this.options.permissionRouter.disconnectClient(clientId);
+        this.disconnectClient(clientId);
         this.options.onClientDisconnected?.(clientId);
       }
     });
+  }
+
+  private disconnectClient(clientId: string): void {
+    this.options.permissionRouter.disconnectClient(clientId);
+    for (const [invocationId, owner] of this.commandOwnersByInvocationId) {
+      if (owner === clientId) {
+        this.commandOwnersByInvocationId.delete(invocationId);
+      }
+    }
+    for (const [runId, owner] of this.commandOwnersByRunId) {
+      if (owner === clientId) {
+        this.commandOwnersByRunId.delete(runId);
+      }
+    }
+    for (const [runId, owner] of this.runOwnersByRunId) {
+      if (owner === clientId) {
+        this.runOwnersByRunId.delete(runId);
+      }
+    }
   }
 
   private broadcast(event: UiEvent): void {
@@ -685,13 +790,8 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
 
   private updateClientViewsFromEvent(event: UiEvent): void {
     switch (event.type) {
-      case "session.updated": {
-        const clientId = this.pendingFreshPromptClients.shift();
-        if (clientId !== undefined) {
-          this.setClientActiveSession(clientId, event.session.id);
-        }
+      case "session.updated":
         return;
-      }
       case "command.started": {
         const owner = this.commandOwnersByInvocationId.get(
           event.command.clientInvocationId,
@@ -713,6 +813,34 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       }
       case "command.failed":
         return;
+      case "runtime.updated": {
+        const runId =
+          event.status.kind === "running" ? event.status.runId : undefined;
+        if (runId !== undefined && this.activePrompt !== undefined) {
+          this.runOwnersByRunId.set(runId, this.activePrompt.clientId);
+          if (this.activePrompt.sessionId !== undefined) {
+            this.runSessionIdsByRunId.set(runId, this.activePrompt.sessionId);
+          }
+        }
+        return;
+      }
+      case "run.updated": {
+        this.runSessionIdsByRunId.set(event.run.id, event.run.sessionId);
+        if (
+          this.activePrompt?.sessionId === event.run.sessionId ||
+          (this.activePrompt?.sessionId === undefined &&
+            this.activePrompt !== undefined)
+        ) {
+          this.runOwnersByRunId.set(event.run.id, this.activePrompt.clientId);
+        }
+        if (
+          event.run.status.kind !== "running" &&
+          event.run.status.kind !== "waiting-for-permission"
+        ) {
+          this.runOwnersByRunId.delete(event.run.id);
+        }
+        return;
+      }
       default:
         return;
     }
@@ -729,6 +857,12 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         ...event,
         snapshot: snapshotForClient(event.snapshot, view),
       };
+    }
+
+    if (event.type === "runtime.updated") {
+      return this.runtimeEventBelongsToClient(event, clientId)
+        ? event
+        : undefined;
     }
 
     if (
@@ -771,7 +905,43 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       event.type === "command.started"
         ? this.commandOwnersByInvocationId.get(event.command.clientInvocationId)
         : this.commandOwnerForEvent(event);
-    return owner === undefined || owner === clientId;
+    return owner === clientId;
+  }
+
+  private runtimeEventBelongsToClient(
+    event: Extract<UiEvent, { type: "runtime.updated" }>,
+    clientId: string,
+  ): boolean {
+    const sessionId = this.runtimeEventSessionId(event);
+    if (sessionId !== undefined) {
+      return this.clientViews.get(clientId)?.activeSessionId === sessionId;
+    }
+
+    return this.runtimeEventOwner(event) === clientId;
+  }
+
+  private runtimeEventOwner(
+    event: Extract<UiEvent, { type: "runtime.updated" }>,
+  ): string | undefined {
+    if (event.status.kind === "running") {
+      return (
+        this.runOwnersByRunId.get(event.status.runId) ??
+        this.activePrompt?.clientId
+      );
+    }
+    return this.activePrompt?.clientId;
+  }
+
+  private runtimeEventSessionId(
+    event: Extract<UiEvent, { type: "runtime.updated" }>,
+  ): string | undefined {
+    if (event.status.kind === "running") {
+      return (
+        this.runSessionIdsByRunId.get(event.status.runId) ??
+        this.activePrompt?.sessionId
+      );
+    }
+    return this.activePrompt?.sessionId;
   }
 
   private interactionEventBelongsToClient(
@@ -815,38 +985,14 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       { type: "command.result.delivered" | "command.failed" }
     >,
   ): void {
-    const timer = this.commandOwnerCleanupTimers.get(event.commandRunId);
-    if (timer !== undefined) {
-      clearTimeout(timer);
-      this.commandOwnerCleanupTimers.delete(event.commandRunId);
-    }
     this.commandOwnersByInvocationId.delete(event.clientInvocationId);
     this.commandOwnersByRunId.delete(event.commandRunId);
   }
 
   private finalizeEventAfterBroadcast(event: UiEvent): void {
-    if (event.type === "command.result.delivered") {
-      this.scheduleForgetCommandOwner(event);
-      return;
-    }
     if (event.type === "command.failed") {
       this.forgetCommandOwner(event);
     }
-  }
-
-  private scheduleForgetCommandOwner(
-    event: Extract<UiEvent, { type: "command.result.delivered" }>,
-  ): void {
-    const currentTimer = this.commandOwnerCleanupTimers.get(event.commandRunId);
-    if (currentTimer !== undefined) {
-      clearTimeout(currentTimer);
-    }
-    const timer = setTimeout(() => {
-      this.commandOwnerCleanupTimers.delete(event.commandRunId);
-      this.forgetCommandOwner(event);
-    }, 30_000);
-    timer.unref();
-    this.commandOwnerCleanupTimers.set(event.commandRunId, timer);
   }
 
   private setClientActiveSession(clientId: string, sessionId: string): void {
@@ -864,6 +1010,7 @@ export function createDaemonHttpServer(
   return new DaemonHttpServer({
     backend: options.backend,
     authToken: options.authToken,
+    createSessionId: options.createSessionId ?? createSessionIdGenerator(),
     host: options.host ?? DEFAULT_HOST,
     onClientConnected: options.onClientConnected,
     onClientDisconnected: options.onClientDisconnected,

@@ -83,6 +83,7 @@ describe("explicit daemon remote terminal flow", () => {
         clientId: "terminal_b",
         host: daemon.host,
         port: daemon.port,
+        startupIntent: { startupSessionMode: { type: "continue" } },
       });
       try {
         const snapshot = await secondClient.getSnapshot();

@@ -554,6 +554,25 @@ npm install -g ohbaby-cli@latest
 
 ---
 
+## 5.5 Review Hardening Acceptance
+
+审查后新增的阻断级验收项:
+
+```text
+server.integration:
+- fresh/null client getSnapshot() does not contain non-active session messages.
+- snapshot.replaced is rewritten and scrubbed per client view.
+- session.updated for another session is not delivered to fresh/null view.
+- fresh/null submitPrompt gets a generated explicit sessionId before backend.submitPrompt.
+- unrelated session.updated cannot rebind a pending fresh prompt client.
+- runtime.updated is scoped by run/session owner and does not reach fresh/null view.
+- unowned command.result.delivered is dropped instead of broadcast.
+```
+
+这些用例必须与原有 default fresh、explicit continue/resume、/new no-reuse、TUI clearOnStart、packaging smoke 一起通过，才可进入 v0.1.2 release/tag 阶段。
+
+---
+
 ## 6. 回滚标准
 
 如果 v0.1.2 发布后出现以下情况，应优先回滚 npm latest 到 v0.1.1 或发布 v0.1.3 hotfix:
