@@ -13,6 +13,12 @@ It depends on `ohbaby-sdk` for frontend/backend contracts. The user-facing
 `ohbaby` binary now lives in `ohbaby-cli`, which imports this package as the
 backend runtime.
 
-Development remains in the pnpm workspace. The intended public install command
-is `npm install -g ohbaby-cli`, but the project should wait until the MCP phase
-lands before the formal npm release.
+Most users should install the CLI package:
+
+```bash
+npm install -g ohbaby-cli
+ohbaby
+```
+
+Development remains in the pnpm workspace, while this package is published so
+the CLI can resolve the backend runtime from npm.
