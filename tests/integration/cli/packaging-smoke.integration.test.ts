@@ -16,6 +16,7 @@ interface NpmPackEntry {
   readonly name: string;
 }
 
+const pinnedRuntimeDependencies = ["ink", "ink-gradient", "react"] as const;
 const repoRoot = process.cwd();
 const cleanupDirectories: string[] = [];
 
@@ -167,6 +168,21 @@ function parsePackEntry(stdout: string): NpmPackEntry {
   return Array.isArray(parsed) ? parsed[0] : parsed;
 }
 
+async function readInstalledDependencyVersion(
+  installedPackage: string,
+  dependencyName: string,
+): Promise<string> {
+  const dependencyPackageJson = JSON.parse(
+    await readFile(
+      join(installedPackage, "node_modules", dependencyName, "package.json"),
+      "utf8",
+    ),
+  ) as { readonly version?: unknown };
+
+  expect(typeof dependencyPackageJson.version).toBe("string");
+  return dependencyPackageJson.version as string;
+}
+
 async function packWorkspacePackage(input: {
   readonly packDestination: string;
   readonly packageDirectory: string;
@@ -275,6 +291,23 @@ describe("npm packed CLI smoke", () => {
       prefix,
       "ohbaby-cli",
     );
+    const packageJson = JSON.parse(
+      await readFile(
+        join(repoRoot, "packages", "ohbaby-cli", "package.json"),
+        "utf8",
+      ),
+    ) as {
+      readonly dependencies: Readonly<Record<string, string>>;
+      readonly version: string;
+    };
+    for (const dependencyName of pinnedRuntimeDependencies) {
+      const declaredVersion = packageJson.dependencies[dependencyName];
+      expect(declaredVersion).toMatch(/^\d+\.\d+\.\d+$/u);
+      await expect(
+        readInstalledDependencyVersion(installedCliPackage, dependencyName),
+      ).resolves.toBe(declaredVersion);
+    }
+
     const cliImportSmokePath = join(
       installedCliPackage,
       "import-ohbaby-packages.mjs",
@@ -314,12 +347,6 @@ describe("npm packed CLI smoke", () => {
     expect(helpResult.stdout).not.toContain("-p, --prompt");
     expect(helpResult.stderr).toBe("");
 
-    const packageJson = JSON.parse(
-      await readFile(
-        join(repoRoot, "packages", "ohbaby-cli", "package.json"),
-        "utf8",
-      ),
-    ) as { readonly version: string };
     const versionResult = await runCommand({
       command: ohbaby,
       args: ["--version"],

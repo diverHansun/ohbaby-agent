@@ -1,6 +1,6 @@
 {
   "name": "ohbaby-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI frontend package for ohbaby-agent",
   "type": "module",
   "engines": {
@@ -45,11 +45,11 @@
   "dependencies": {
     "chalk": "^5.4.1",
     "figlet": "^1.11.0",
-    "ink": "^6.0.0",
-    "ink-gradient": "^4.0.1",
+    "ink": "6.6.0",
+    "ink-gradient": "4.0.1",
     "ohbaby-agent": "workspace:*",
     "ohbaby-sdk": "workspace:*",
-    "react": "^19.2.0",
+    "react": "19.2.3",
     "yargs": "^17.7.2"
   },
   "devDependencies": {

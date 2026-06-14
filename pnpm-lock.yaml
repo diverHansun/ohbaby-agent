@@ -99,10 +99,10 @@ importers:
         specifier: ^1.11.0
         version: 1.11.0
       ink:
-        specifier: ^6.0.0
+        specifier: 6.6.0
         version: 6.6.0(@types/react@19.2.8)(react@19.2.3)
       ink-gradient:
-        specifier: ^4.0.1
+        specifier: 4.0.1
         version: 4.0.1(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))(react@19.2.3)
       ohbaby-agent:
         specifier: workspace:*
@@ -111,7 +111,7 @@ importers:
         specifier: workspace:*
         version: link:../ohbaby-sdk
       react:
-        specifier: ^19.2.0
+        specifier: 19.2.3
         version: 19.2.3
       yargs:
         specifier: ^17.7.2
