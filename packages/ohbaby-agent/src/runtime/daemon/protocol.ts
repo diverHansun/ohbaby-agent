@@ -18,7 +18,7 @@ export const DAEMON_RPC_METHODS = [
 export type DaemonRpcMethod = (typeof DAEMON_RPC_METHODS)[number];
 
 export interface DaemonStartupIntent {
-  readonly startupSessionMode?: { readonly type: "continue" };
+  readonly startupSessionMode?: { readonly type: "continue" | "fresh" };
   readonly resumeSessionId?: string;
   readonly initialPermission?: {
     readonly level: "default" | "full-access";

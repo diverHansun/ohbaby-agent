@@ -95,6 +95,23 @@ describe("resolveSessionForNewPrompt", () => {
     });
   });
 
+  it("skips the active empty UI session when empty reuse is disabled", async () => {
+    const active = uiSession({ id: "session_active_empty" });
+
+    await expect(
+      createResolver({
+        reuseInactiveEmptySessions: false,
+        snapshot: snapshot({
+          activeSessionId: active.id,
+          sessions: [active],
+        }),
+      }),
+    ).resolves.toMatchObject({
+      isNewSession: true,
+      session: { id: "session_created" },
+    });
+  });
+
   it("skips a non-empty active session and creates a new session", async () => {
     const active = uiSession({
       id: "session_active_non_empty",

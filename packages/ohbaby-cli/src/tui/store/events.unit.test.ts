@@ -647,7 +647,33 @@ describe("TUI store event reducer", () => {
     });
   });
 
-  it("projects the first backend session update when no session is active", () => {
+  it("keeps a fresh view inactive when other sessions update", () => {
+    const state = applyTuiEvent(
+      createStateFromSnapshot({
+        activeSessionId: null,
+        permissions: [],
+        runs: [],
+        sessions: [],
+        status: { kind: "idle" },
+      }),
+      {
+        session: {
+          createdAt: "2026-05-14T00:00:00.000Z",
+          id: "session_new",
+          messages: [],
+          title: "New",
+          updatedAt: "2026-05-14T00:00:00.000Z",
+        },
+        type: "session.updated",
+      },
+    );
+
+    expect(state.activeSessionId).toBeNull();
+    expect(state.messages).toEqual([]);
+    expect(state.sessions).toHaveLength(1);
+  });
+
+  it("binds a fresh view when it receives a transcript event", () => {
     let state = createStateFromSnapshot({
       activeSessionId: null,
       permissions: [],
@@ -678,7 +704,11 @@ describe("TUI store event reducer", () => {
     });
 
     expect(state.activeSessionId).toBe("session_new");
-    expect(state.messages[0]?.parts[0]).toMatchObject({ text: "Started" });
+    expect(state.messages).toHaveLength(1);
+    expect(state.sessions).toHaveLength(1);
+    expect(state.sessions[0]?.messages[0]?.parts[0]).toMatchObject({
+      text: "Started",
+    });
   });
 
   it("tracks permission, interaction, and command event queues", () => {

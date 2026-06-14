@@ -1052,8 +1052,8 @@ describe("CommandService", () => {
   });
 
   it("creates and selects a new session", async () => {
-    const createSession = vi.fn<() => Promise<{ id: string; title: string }>>(
-      () => Promise.resolve({ id: "session_new", title: "New session" }),
+    const createSession = vi.fn(() =>
+      Promise.resolve({ id: "session_new", title: "New session" }),
     );
     const { events, service } = createServiceHarness({
       sessions: {
@@ -1066,7 +1066,9 @@ describe("CommandService", () => {
 
     await service.executeCommand(makeInvocation("new", ["new"]));
 
-    expect(createSession).toHaveBeenCalledOnce();
+    expect(createSession).toHaveBeenCalledWith({
+      reuseInactiveEmptySessions: true,
+    });
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1088,6 +1090,28 @@ describe("CommandService", () => {
         }),
       ]),
     );
+  });
+
+  it("can force /new to skip reusable empty sessions", async () => {
+    const createSession = vi.fn(() =>
+      Promise.resolve({ id: "session_new", title: "New session" }),
+    );
+    const { service } = createServiceHarness({
+      sessions: {
+        createSession,
+        listSessions() {
+          return [];
+        },
+      },
+    });
+
+    await service.executeCommand(
+      makeInvocation("new", ["new"], ["--no-reuse-empty-session"]),
+    );
+
+    expect(createSession).toHaveBeenCalledWith({
+      reuseInactiveEmptySessions: false,
+    });
   });
 
   it("selects a reused new session with a consistent current-session payload", async () => {

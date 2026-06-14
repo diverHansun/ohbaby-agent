@@ -782,7 +782,9 @@ export function createInProcessUiBackendClient(
     };
   }
 
-  async function createSessionFromCommand(): Promise<CommandSessionSummary> {
+  async function createSessionFromCommand(input?: {
+    readonly reuseInactiveEmptySessions?: boolean;
+  }): Promise<CommandSessionSummary> {
     await reserveIdsFromState();
     const snapshot = await stateStore.readSnapshot();
     const createdAt = timestamp();
@@ -809,7 +811,7 @@ export function createInProcessUiBackendClient(
       },
       getUiSession: (id) => stateStore.getSession(id),
       projectRoot,
-      reuseInactiveEmptySessions: true,
+      reuseInactiveEmptySessions: input?.reuseInactiveEmptySessions ?? true,
       sessionManager: options.sessionManager,
       snapshot,
     });

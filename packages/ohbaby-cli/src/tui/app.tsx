@@ -45,11 +45,13 @@ export const ESC_INTERRUPT_WINDOW_MS = 1500;
 const ESC_INTERRUPT_HINT = "Press Esc again to interrupt";
 
 export interface TerminalUiOptions {
+  readonly clearOnStart?: boolean;
   readonly client: CoreAPI;
   readonly subscribeEvents: (handler: UiEventHandler) => UiUnsubscribe;
 }
 
 export function OhbabyTerminalApp({
+  clearOnStart = false,
   client,
   subscribeEvents,
 }: TerminalUiOptions): ReactElement {
@@ -58,6 +60,7 @@ export function OhbabyTerminalApp({
   const catalogRequestSequenceRef = useRef(0);
   const contextRefreshSequenceRef = useRef(0);
   const contextNoticeSequenceRef = useRef(0);
+  const didClearOnStartRef = useRef(false);
   const disposedRef = useRef(false);
   const [screenGeneration, setScreenGeneration] = useState(0);
   const [commandPanel, setCommandPanel] = useState<CommandPanelState | null>(
@@ -71,6 +74,10 @@ export function OhbabyTerminalApp({
   const store = storeRef.current;
   const { exit } = useApp();
   const { write: writeStdout } = useStdout();
+  if (clearOnStart && !didClearOnStartRef.current) {
+    writeStdout(NEW_SESSION_CLEAR_SEQUENCE);
+    didClearOnStartRef.current = true;
+  }
   const activeSessionId = useTuiStoreSelector(
     store,
     (state) => state.activeSessionId,

@@ -1449,6 +1449,43 @@ describe("OhbabyTerminalApp", () => {
     app.unmount();
   });
 
+  it("clears screen once before rendering a fresh startup frame", async () => {
+    const client = createFakeClient({
+      activeSessionId: null,
+      permissions: [],
+      runs: [],
+      sessions: [],
+      status: { kind: "idle" },
+    });
+    const startupProps = {
+      clearOnStart: true,
+      client,
+      subscribeEvents: client.subscribeEvents,
+    };
+    const app = render(
+      <OhbabyTerminalApp {...startupProps} />,
+    );
+
+    await flush();
+
+    const clearFrames = app.stdout.frames.filter((frame) =>
+      frame.includes(NEW_SESSION_CLEAR_SEQUENCE),
+    );
+    expect(clearFrames).toHaveLength(1);
+    expect(app.stdout.frames.join("").indexOf(NEW_SESSION_CLEAR_SEQUENCE)).toBe(
+      0,
+    );
+    expect(app.lastFrame()).toContain(">");
+    app.rerender(<OhbabyTerminalApp {...startupProps} />);
+    await flush();
+    expect(
+      app.stdout.frames.filter((frame) =>
+        frame.includes(NEW_SESSION_CLEAR_SEQUENCE),
+      ),
+    ).toHaveLength(1);
+    app.unmount();
+  });
+
   it("repaints the current empty frame when /new reuses the active session", async () => {
     const client = createFakeClient({
       activeSessionId: "session_empty",
