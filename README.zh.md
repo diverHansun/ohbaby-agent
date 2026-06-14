@@ -7,9 +7,8 @@
 <p align="center">
   <a href="https://github.com/diverHansun/ohbaby-agent/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/diverHansun/ohbaby-agent/ci.yml?style=flat-square&label=CI&logo=github"></a>
   <a href="https://www.npmjs.com/package/ohbaby-cli"><img alt="npm" src="https://img.shields.io/npm/v/ohbaby-cli?style=flat-square&color=cb3837&logo=npm"></a>
-  <a href="https://www.npmjs.com/package/ohbaby-cli"><img alt="downloads" src="https://img.shields.io/npm/dm/ohbaby-cli?style=flat-square&color=cb3837"></a>
   <a href="./LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
-  <img alt="node" src="https://img.shields.io/node/v/ohbaby-cli?style=flat-square&color=339933&logo=node.js">
+  <img alt="node" src="https://img.shields.io/badge/node-%3E%3D24-339933?style=flat-square&logo=node.js">
   <img alt="typescript" src="https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript">
 </p>
 
