@@ -42,6 +42,10 @@ This installs the `ohbaby` command globally.
 2. Type `/connect` to configure your model provider (provider, base URL, API key, model
    name), then save.
 
+   <p align="center">
+     <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/main/assets/images/connect-providers.png" alt="ohbaby /connect provider setup" width="760">
+   </p>
+
 3. Start coding.
 
 Supports OpenAI, Anthropic/Claude, and any OpenAI-compatible endpoint (Zhipu/GLM,
