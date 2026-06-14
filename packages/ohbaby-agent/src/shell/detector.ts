@@ -31,9 +31,11 @@ function shellName(shellPath: string, platform: NodeJS.Platform): string {
 
 function defaultWhich(command: string): string | undefined {
   try {
-    return execFileSync(process.platform === "win32" ? "where" : "which", [
-      command,
-    ])
+    return execFileSync(
+      process.platform === "win32" ? "where" : "which",
+      [command],
+      { windowsHide: true },
+    )
       .toString("utf8")
       .split(/\r?\n/u)
       .map((item) => item.trim())

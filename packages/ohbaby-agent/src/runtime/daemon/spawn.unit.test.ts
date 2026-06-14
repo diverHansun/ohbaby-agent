@@ -89,7 +89,7 @@ describe("ensureDaemonRunning", () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
-  it("starts the current CLI entrypoint as a detached daemon by default", async () => {
+  it("starts the current CLI entrypoint as a background daemon by default", async () => {
     const originalArgv = process.argv;
     const unref = vi.fn();
     const spawnProcess = vi.fn(() => ({ unref }));
@@ -121,12 +121,58 @@ describe("ensureDaemonRunning", () => {
       process.execPath,
       ["D:/repo/packages/ohbaby-cli/dist/bin.js", "serve"],
       expect.objectContaining({
-        detached: true,
+        detached: process.platform !== "win32",
         stdio: "ignore",
         windowsHide: true,
       }),
     );
     expect(unref).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not detach the auto-spawned daemon on Windows", async () => {
+    const originalArgv = process.argv;
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    const unref = vi.fn();
+    const spawnProcess = vi.fn(() => ({ unref }));
+    process.argv = ["node", "D:/repo/packages/ohbaby-cli/dist/bin.js"];
+    Object.defineProperty(process, "platform", {
+      configurable: true,
+      value: "win32",
+    });
+
+    try {
+      await ensureDaemonRunning({
+        currentVersion: "0.1.0",
+        fetch: vi.fn(() =>
+          Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 })),
+        ),
+        isProcessAlive: () => true,
+        pollIntervalMs: 0,
+        spawnProcess,
+        stateFile: new MemoryStateFile(undefined),
+        waitForState: () =>
+          Promise.resolve(runningState({
+            authToken: "token_2",
+            packageVersion: "0.1.0",
+            pid: 124,
+            port: 4097,
+          })),
+      });
+    } finally {
+      process.argv = originalArgv;
+      if (originalPlatform) {
+        Object.defineProperty(process, "platform", originalPlatform);
+      }
+    }
+
+    expect(spawnProcess).toHaveBeenCalledWith(
+      process.execPath,
+      ["D:/repo/packages/ohbaby-cli/dist/bin.js", "serve"],
+      expect.objectContaining({
+        detached: false,
+        windowsHide: true,
+      }),
+    );
   });
 
   it("spawns when the recorded pid is stale", async () => {

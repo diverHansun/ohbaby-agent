@@ -496,6 +496,7 @@ export class GitSnapshotEngine implements DiffEngine {
         cwd: options.cwd,
         env: { ...process.env, ...options.env },
         maxBuffer: 20 * 1024 * 1024,
+        windowsHide: true,
       });
       return stdout;
     } catch (error) {

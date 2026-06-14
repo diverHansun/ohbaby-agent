@@ -17,6 +17,7 @@ export async function getGitProjectId(
         encoding: "utf8",
         maxBuffer: GIT_COMMAND_MAX_BUFFER,
         timeout: GIT_COMMAND_TIMEOUT_MS,
+        windowsHide: true,
       },
     );
     const commits = stdout

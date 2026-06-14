@@ -110,8 +110,8 @@ function stateEnvironment(input: {
   };
 }
 
-function shouldDetach(shellKind: string): boolean {
-  return !(process.platform === "win32" && shellKind === "powershell");
+function shouldDetach(): boolean {
+  return process.platform !== "win32";
 }
 
 export function createBashTool(options: BashToolOptions = {}): Tool {
@@ -172,7 +172,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
           : args;
       const child = spawn(spawnFile, spawnArgs, {
         cwd: commandContext.cwd,
-        detached: shouldDetach(shellKind),
+        detached: shouldDetach(),
         env: stateEnvironment({
           callId: context.callId,
           cwd: commandContext.cwd,

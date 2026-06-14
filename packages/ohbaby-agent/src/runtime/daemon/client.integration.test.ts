@@ -510,6 +510,40 @@ describe("createRemoteUiBackendClient", () => {
     });
   });
 
+  it("wraps daemon rpc transport failures with method context", async () => {
+    const client = createRemoteUiBackendClient({
+      fetch: vi.fn<typeof fetch>(() =>
+        Promise.reject(new TypeError("fetch failed")),
+      ),
+      port: 4096,
+    });
+
+    await expect(
+      client.connectModel({
+        apiKeyEnv: "FAKE_API_KEY",
+        baseUrl: "https://example.invalid/v1",
+        interfaceProvider: "openai-compatible",
+        model: "fake-model",
+        provider: "fake",
+      }),
+    ).rejects.toThrow(
+      "Daemon connection failed while running connectModel: fetch failed",
+    );
+  });
+
+  it("reports non-success daemon rpc HTTP responses with non-JSON bodies", async () => {
+    const client = createRemoteUiBackendClient({
+      fetch: vi.fn<typeof fetch>(() =>
+        Promise.resolve(new Response("service unavailable", { status: 503 })),
+      ),
+      port: 4096,
+    });
+
+    await expect(client.getSnapshot()).rejects.toThrow(
+      "Daemon request getSnapshot failed with HTTP 503",
+    );
+  });
+
   it("keeps SSE connection failures contained until reconnect support exists", async () => {
     const fetchImpl = vi.fn<typeof fetch>(() =>
       Promise.resolve(new Response("", { status: 503 })),

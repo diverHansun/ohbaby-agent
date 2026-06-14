@@ -80,6 +80,22 @@ function ignoreAbort(error: unknown): void {
   throw error;
 }
 
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.length > 0) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function daemonConnectionError(
+  method: DaemonRpcMethod,
+  error: unknown,
+): Error {
+  return new Error(
+    `Daemon connection failed while running ${method}: ${errorMessage(error)}`,
+  );
+}
+
 class RemoteDaemonClient implements RemoteUiBackendClient {
   private readonly baseUrl: string;
   private readonly authToken: string | undefined;
@@ -202,14 +218,37 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
       method,
       params,
     });
-    const response = await this.fetchImpl(`${this.baseUrl}/api/rpc`, {
-      body: JSON.stringify(request),
-      headers: this.requestHeaders({ "content-type": "application/json" }),
-      method: "POST",
-    });
-    const body = parseRpcResponse(await response.json());
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}/api/rpc`, {
+        body: JSON.stringify(request),
+        headers: this.requestHeaders({ "content-type": "application/json" }),
+        method: "POST",
+      });
+    } catch (error) {
+      throw daemonConnectionError(method, error);
+    }
+    let responseJson: unknown;
+    try {
+      responseJson = await response.json();
+    } catch (error) {
+      if (!response.ok) {
+        throw new Error(
+          `Daemon request ${method} failed with HTTP ${String(response.status)}`,
+        );
+      }
+      throw new Error(
+        `Daemon request ${method} returned invalid JSON: ${errorMessage(error)}`,
+      );
+    }
+    const body = parseRpcResponse(responseJson);
     if (!body.ok) {
       throw new Error(body.error.message);
+    }
+    if (!response.ok) {
+      throw new Error(
+        `Daemon request ${method} failed with HTTP ${String(response.status)}`,
+      );
     }
     return body.result as T;
   }

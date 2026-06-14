@@ -163,7 +163,8 @@ function defaultSpawn(
 
   const child = spawnProcess(process.execPath, [entrypoint, "serve"], {
     cwd: process.cwd(),
-    detached: true,
+    // Windows detached console processes can flash a separate terminal window.
+    detached: process.platform !== "win32",
     env: process.env,
     stdio: "ignore",
     windowsHide: true,

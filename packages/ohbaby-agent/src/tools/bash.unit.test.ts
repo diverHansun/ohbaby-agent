@@ -126,7 +126,9 @@ describe("bash builtin tool", () => {
     expect(spawn.mock.calls[0]?.[0]).toBe("/bin/bash");
     expect(spawn.mock.calls[0]?.[1]).toEqual(["-lc", "echo hello"]);
     expect(spawn.mock.calls[0]?.[2].cwd).toBe("D:/workspace");
-    expect(spawn.mock.calls[0]?.[2].detached).toBe(true);
+    expect(spawn.mock.calls[0]?.[2].detached).toBe(
+      process.platform !== "win32",
+    );
     expect(spawn.mock.calls[0]?.[2].env?.FOO).toBe("bar");
     expect(result.output).toContain("hello");
     expect(result.metadata).toMatchObject({ exitCode: 0, signal: null });
@@ -236,6 +238,9 @@ describe("bash builtin tool", () => {
     await resultPromise;
 
     expect(spawn.mock.calls[0]?.[1]).toEqual(["/d", "/s", "/c", "echo hello"]);
+    expect(spawn.mock.calls[0]?.[2].detached).toBe(
+      process.platform !== "win32",
+    );
   });
 
   it("uses PowerShell arguments for PowerShell command shells", async () => {
