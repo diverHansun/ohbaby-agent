@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseCommand } from "../utils/index.js";
 import {
   detectShellKind,
@@ -43,6 +43,36 @@ describe("shell preflight", () => {
       "powershell",
     );
     expect(detectShellKind("powershell.exe")).toBe("powershell");
+  });
+
+  it("detects Windows shell paths when the host path parser is POSIX", async () => {
+    vi.resetModules();
+    vi.doMock("node:path", (): { readonly default: typeof path } => {
+      const mockedPath: typeof path = {
+        ...path,
+        basename: (target: string, suffix?: string) =>
+          path.posix.basename(target, suffix),
+        posix: path.posix,
+        win32: path.win32,
+      };
+      return { default: mockedPath };
+    });
+
+    try {
+      const { detectShellKind: detectWithPosixPath } = await import(
+        "./preflight.js"
+      );
+
+      expect(detectWithPosixPath("C:\\Windows\\System32\\cmd.exe")).toBe("cmd");
+      expect(
+        detectWithPosixPath(
+          "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        ),
+      ).toBe("powershell");
+    } finally {
+      vi.doUnmock("node:path");
+      vi.resetModules();
+    }
   });
 
   it("builds shell-specific command arguments", () => {

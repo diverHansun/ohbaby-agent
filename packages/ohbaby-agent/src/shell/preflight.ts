@@ -65,7 +65,7 @@ const DRIVE_RELATIVE_PATTERN = /^[A-Za-z]:[^\\/]/u;
 const PROVIDER_PATH_PATTERN = /^[A-Za-z][\w-]*:/u;
 
 function basenameLower(shellPath: string): string {
-  return path.basename(shellPath).toLowerCase();
+  return path.win32.basename(shellPath).toLowerCase();
 }
 
 function normalizeRoot(root: string): string {
