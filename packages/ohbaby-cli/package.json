@@ -12,7 +12,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "ohbaby": "./dist/bin.js"
+    "ohbaby": "dist/bin.js"
   },
   "exports": {
     ".": {
