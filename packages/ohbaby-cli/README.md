@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/main/assets/images/logo.png" alt="ohbaby" width="150">
+  <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/main/assets/images/logo.png" alt="ohbaby-agent" width="150">
 </p>
 
-<p align="center">An open-source AI coding agent for your terminal.</p>
+<p align="center">The MVP CLI/TUI package for ohbaby-agent.</p>
 
 <p align="center">
   <a href="https://github.com/diverHansun/ohbaby-agent/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/diverHansun/ohbaby-agent/ci.yml?style=flat-square&label=CI&logo=github"></a>
@@ -12,14 +12,15 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/main/assets/images/dashboard.png" alt="ohbaby terminal UI" width="760">
+  <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/main/assets/images/dashboard.png" alt="ohbaby-agent CLI/TUI" width="760">
 </p>
 
 ---
 
-**ohbaby** is a provider-agnostic AI coding agent that lives in your terminal, extensible
-through [MCP](https://modelcontextprotocol.io) servers and drop-in skills, with a fast
-[Ink](https://github.com/vadimdemedes/ink)-based TUI.
+**ohbaby-agent** is a provider-agnostic AI coding agent. This package provides its
+current MVP interface: a fast [Ink](https://github.com/vadimdemedes/ink)-based CLI/TUI
+installed from npm as `ohbaby-cli` and launched with the `ohbaby` command. The same
+runtime can support future web or app interfaces.
 
 ## Installation
 
@@ -33,17 +34,17 @@ This installs the `ohbaby` command globally.
 
 ## Quick Start
 
-1. Launch the TUI:
+1. Launch the ohbaby-agent CLI/TUI:
 
    ```bash
    ohbaby
    ```
 
-2. Type `/connect` to configure your model provider (provider, base URL, API key, model
-   name), then save.
+2. Type `/connect` in the CLI/TUI to configure your model provider (provider, base URL,
+   API key, model name), then save.
 
    <p align="center">
-     <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/main/assets/images/connect-providers.png" alt="ohbaby /connect provider setup" width="760">
+     <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/main/assets/images/connect-providers.png" alt="ohbaby-agent /connect provider setup" width="760">
    </p>
 
 3. Start coding.
@@ -55,7 +56,7 @@ DeepSeek, Qwen/DashScope, …).
 `TAVILY_API_KEY=tvly-...` to `~/.ohbaby-agent/.env` or your project's `.env`.
 
 **MCP & Skills:** configure MCP servers globally or per project under `.ohbaby-agent/mcp/`.
-Skills are discovered from ohbaby-compatible skill directories and exposed as slash commands.
+Skills are discovered from ohbaby-agent-compatible skill directories and exposed as slash commands.
 
 ## Documentation
 
