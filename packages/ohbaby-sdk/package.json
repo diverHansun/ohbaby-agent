@@ -1,6 +1,6 @@
 {
   "name": "ohbaby-sdk",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Stable DTO and client contracts shared by ohbaby-agent frontends and runtime adapters",
   "type": "module",
   "publishConfig": {

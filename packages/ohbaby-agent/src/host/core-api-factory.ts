@@ -64,11 +64,11 @@ function assertStartupOptions(options: CoreApiFactoryOptions): void {
 
 function startupIntentFromOptions(
   options: CoreApiFactoryOptions,
-): DaemonStartupIntent | undefined {
+): DaemonStartupIntent {
   const intent: DaemonStartupIntent = {
     ...(options.continue === true
       ? { startupSessionMode: { type: "continue" as const } }
-      : {}),
+      : { startupSessionMode: { type: "fresh" as const } }),
     ...(options.resume === undefined ? {} : { resumeSessionId: options.resume }),
     ...(!options.mode && !options.permission
       ? {}
@@ -77,9 +77,9 @@ function startupIntentFromOptions(
             level: options.permission ?? "default",
             mode: options.mode ?? "auto",
           },
-        }),
+      }),
   };
-  return Object.keys(intent).length === 0 ? undefined : intent;
+  return intent;
 }
 
 export async function buildCoreAPIImpl(
@@ -93,7 +93,7 @@ export async function buildCoreAPIImpl(
       authToken: options.remoteAuthToken,
       host: options.remoteHost,
       port: options.remotePort,
-      ...(startupIntent === undefined ? {} : { startupIntent }),
+      startupIntent,
     });
   }
 
@@ -116,7 +116,7 @@ export async function buildCoreAPIImpl(
       authToken: connection.authToken,
       host: connection.host,
       port: connection.port,
-      ...(startupIntent === undefined ? {} : { startupIntent }),
+      startupIntent,
     });
   }
 

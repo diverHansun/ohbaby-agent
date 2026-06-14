@@ -6,10 +6,14 @@ import type {
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
+import { createSessionIdGenerator } from "../../services/session/index.js";
 import { SessionRunBusyError } from "../run-ledger/index.js";
 import { isAuthorizedDaemonRequest } from "./auth.js";
 import { PermissionRouter } from "./permission-router.js";
-import { DaemonPromptQueue } from "./prompt-queue.js";
+import {
+  DaemonPromptQueue,
+  type DaemonPromptQueueItem,
+} from "./prompt-queue.js";
 import {
   createDaemonRpcFailure,
   createDaemonRpcSuccess,
@@ -30,13 +34,14 @@ interface SseClient {
 }
 
 interface ClientView {
-  readonly activeSessionId?: string | null;
+  activeSessionId?: string | null;
   readonly initialPermission?: DaemonStartupIntent["initialPermission"];
 }
 
 export interface DaemonHttpServerOptions {
   readonly backend: UiBackendClient;
   readonly authToken?: string;
+  readonly createSessionId?: () => string;
   readonly host?: string;
   readonly onClientConnected?: (clientId: string) => void;
   readonly onClientDisconnected?: (clientId: string) => void;
@@ -57,8 +62,9 @@ export interface DaemonHttpServerHandle {
 
 type NormalizedDaemonHttpServerOptions = Omit<
   DaemonHttpServerOptions,
-  "host" | "permissionRouter" | "port"
+  "createSessionId" | "host" | "permissionRouter" | "port"
 > & {
+  readonly createSessionId: () => string;
   readonly host: string;
   readonly permissionRouter: PermissionRouter;
   readonly port: number;
@@ -156,6 +162,8 @@ function requestIdFromBody(body: unknown): string {
 async function callBackend(
   backend: UiBackendClient,
   clientViews: Map<string, ClientView>,
+  commandOwnersByInvocationId: Map<string, string>,
+  createSessionId: () => string,
   permissionRouter: PermissionRouter,
   promptQueue: DaemonPromptQueue,
   request: DaemonRpcRequest,
@@ -189,10 +197,18 @@ async function callBackend(
       );
     case "submitPrompt": {
       const options = submitPromptOptions(request.params[1]);
-      const submitOptions = optionsForClientSubmit(
+      const view = clientViews.get(request.clientId);
+      let submitOptions = optionsForClientSubmit(
         options,
-        clientViews.get(request.clientId),
+        view,
       );
+      if (submitOptions?.sessionId !== undefined && view !== undefined) {
+        view.activeSessionId = submitOptions.sessionId;
+      } else if (view?.activeSessionId === null) {
+        const sessionId = createSessionId();
+        submitOptions = { ...options, sessionId };
+        view.activeSessionId = sessionId;
+      }
       await promptQueue.enqueue({
         clientId: request.clientId,
         ...(submitOptions === undefined ? {} : { options: submitOptions }),
@@ -213,10 +229,19 @@ async function callBackend(
       return backend.connectModel(
         request.params[0] as Parameters<UiBackendClient["connectModel"]>[0],
       );
-    case "executeCommand":
-      return backend.executeCommand(
-        request.params[0] as Parameters<UiBackendClient["executeCommand"]>[0],
+    case "executeCommand": {
+      const invocation = commandInvocationForClient(
+        request.params[0] as ExecuteCommandInvocation,
+        clientViews.get(request.clientId),
       );
+      if (typeof invocation.clientInvocationId === "string") {
+        commandOwnersByInvocationId.set(
+          invocation.clientInvocationId,
+          request.clientId,
+        );
+      }
+      return backend.executeCommand(invocation);
+    }
     case "respondPermission":
       if (
         !permissionRouter.canRespondPermission(
@@ -246,10 +271,13 @@ function parseStartupIntent(value: unknown): DaemonStartupIntent {
   if (!isRecord(value)) {
     return {};
   }
-  const startupSessionMode = isRecord(value.startupSessionMode) &&
-    value.startupSessionMode.type === "continue"
-      ? ({ type: "continue" } as const)
-      : undefined;
+  let startupSessionMode: DaemonStartupIntent["startupSessionMode"];
+  if (isRecord(value.startupSessionMode)) {
+    const type = value.startupSessionMode.type;
+    if (type === "continue" || type === "fresh") {
+      startupSessionMode = { type };
+    }
+  }
   const resumeSessionId =
     typeof value.resumeSessionId === "string" ? value.resumeSessionId : undefined;
   const rawInitialPermission = value.initialPermission;
@@ -301,11 +329,33 @@ function snapshotForClient(
   if (!view) {
     return snapshot;
   }
+  const activeSessionId = view.activeSessionId;
   return {
     ...snapshot,
-    ...(view.activeSessionId === undefined
+    ...(activeSessionId === undefined
       ? {}
-      : { activeSessionId: view.activeSessionId }),
+      : { activeSessionId }),
+    ...(activeSessionId === undefined
+      ? {}
+      : {
+          ...(snapshot.contextWindowUsages === undefined
+            ? {}
+            : {
+                contextWindowUsages: snapshot.contextWindowUsages.filter(
+                  (usage) => usage.sessionId === activeSessionId,
+                ),
+              }),
+          permissions: permissionsForClientSnapshot(snapshot, activeSessionId),
+          runs: snapshot.runs.filter(
+            (run) => run.sessionId === activeSessionId,
+          ),
+          sessions: snapshot.sessions.map((session) =>
+            session.id === activeSessionId
+              ? session
+              : { ...session, messages: [] },
+          ),
+          status: statusForClientSnapshot(snapshot, activeSessionId),
+        }),
     ...(view.initialPermission === undefined
       ? {}
       : {
@@ -331,9 +381,107 @@ function optionsForClientSubmit(
   return options;
 }
 
+type ExecuteCommandInvocation = Parameters<UiBackendClient["executeCommand"]>[0];
+
+function commandInvocationForClient(
+  invocation: ExecuteCommandInvocation,
+  view: ClientView | undefined,
+): ExecuteCommandInvocation {
+  if (invocation.commandId !== "new" || view?.activeSessionId !== null) {
+    return invocation;
+  }
+  const internalArg = "--no-reuse-empty-session";
+  if (invocation.argv.includes(internalArg)) {
+    return invocation;
+  }
+  const argv = [...invocation.argv, internalArg];
+  return {
+    ...invocation,
+    argv,
+    raw: `${invocation.raw}${invocation.raw.length > 0 ? " " : ""}${internalArg}`,
+    rawArgs: argv.join(" "),
+  };
+}
+
+function permissionsForClientSnapshot(
+  snapshot: UiSnapshot,
+  activeSessionId: string | null,
+): UiSnapshot["permissions"] {
+  if (activeSessionId === null) {
+    return [];
+  }
+  return snapshot.permissions.filter((permission) => {
+    const run = snapshot.runs.find(
+      (candidate) => candidate.id === permission.runId,
+    );
+    return run?.sessionId === activeSessionId;
+  });
+}
+
+function statusForClientSnapshot(
+  snapshot: UiSnapshot,
+  activeSessionId: string | null,
+): UiSnapshot["status"] {
+  const status = snapshot.status;
+  if (activeSessionId === null) {
+    return { kind: "idle" };
+  }
+  if (status.kind === "running") {
+    const run = snapshot.runs.find(
+      (candidate) => candidate.id === status.runId,
+    );
+    return run?.sessionId === activeSessionId ? status : { kind: "idle" };
+  }
+  if (status.kind === "waiting-for-permission") {
+    const permission = snapshot.permissions.find(
+      (candidate) => candidate.id === status.requestId,
+    );
+    const run =
+      permission === undefined
+        ? undefined
+        : snapshot.runs.find((candidate) => candidate.id === permission.runId);
+    return run?.sessionId === activeSessionId ? status : { kind: "idle" };
+  }
+  return status;
+}
+
+function selectedSessionIdFromCommandAction(
+  action: Extract<UiEvent, { type: "command.result.delivered" }>["action"],
+): string | undefined {
+  if (action?.kind !== "session.selected" || !isRecord(action.data)) {
+    return undefined;
+  }
+  const choiceId = action.data.choiceId;
+  return typeof choiceId === "string" && choiceId.length > 0
+    ? choiceId
+    : undefined;
+}
+
+function sessionIdForEvent(event: UiEvent): string | undefined {
+  switch (event.type) {
+    case "session.updated":
+      return event.session.id;
+    case "message.appended":
+    case "message.updated":
+    case "message.part.delta":
+    case "run.interrupted":
+      return event.sessionId;
+    case "run.updated":
+      return event.run.sessionId;
+    case "context.window.updated":
+      return event.usage.sessionId;
+    default:
+      return undefined;
+  }
+}
+
 function createDefaultPromptQueue(
   backend: UiBackendClient,
   permissionRouter: PermissionRouter,
+  lifecycle: {
+    readonly onPromptSettled?: (item: DaemonPromptQueueItem) => void;
+    readonly onPromptStarted?: (item: DaemonPromptQueueItem) => void;
+  } = {},
 ): DaemonPromptQueue {
   return new DaemonPromptQueue({
     isBusyError: (error): boolean => error instanceof SessionRunBusyError,
@@ -342,9 +490,11 @@ function createDefaultPromptQueue(
         item.clientId,
         item.sessionId,
       );
+      lifecycle.onPromptStarted?.(item);
       try {
         await backend.submitPrompt(item.text, item.options);
       } finally {
+        lifecycle.onPromptSettled?.(item);
         release();
       }
     },
@@ -362,7 +512,12 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
   });
   private readonly clientViews = new Map<string, ClientView>();
   private readonly clients = new Set<SseClient>();
+  private readonly commandOwnersByInvocationId = new Map<string, string>();
+  private readonly commandOwnersByRunId = new Map<string, string>();
+  private readonly runOwnersByRunId = new Map<string, string>();
+  private readonly runSessionIdsByRunId = new Map<string, string>();
   private readonly promptQueue: DaemonPromptQueue;
+  private activePrompt: DaemonPromptQueueItem | undefined;
   private unsubscribe: UiUnsubscribe | undefined;
   private currentPort: number;
   private started = false;
@@ -371,7 +526,16 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     this.currentPort = options.port;
     this.promptQueue =
       options.promptQueue ??
-      createDefaultPromptQueue(options.backend, options.permissionRouter);
+      createDefaultPromptQueue(options.backend, options.permissionRouter, {
+        onPromptSettled: (item) => {
+          if (this.activePrompt === item) {
+            this.activePrompt = undefined;
+          }
+        },
+        onPromptStarted: (item) => {
+          this.activePrompt = item;
+        },
+      });
   }
 
   get host(): string {
@@ -424,6 +588,9 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       client.response.end();
     }
     this.clients.clear();
+    this.activePrompt = undefined;
+    this.runOwnersByRunId.clear();
+    this.runSessionIdsByRunId.clear();
 
     if (!this.started) {
       return;
@@ -529,6 +696,8 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       const result = await callBackend(
         this.options.backend,
         this.clientViews,
+        this.commandOwnersByInvocationId,
+        this.options.createSessionId,
         this.options.permissionRouter,
         this.promptQueue,
         rpcRequest,
@@ -575,23 +744,263 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
 
     request.on("close", () => {
       if (this.clients.delete(client)) {
-        this.options.permissionRouter.disconnectClient(clientId);
+        this.disconnectClient(clientId);
         this.options.onClientDisconnected?.(clientId);
       }
     });
   }
 
+  private disconnectClient(clientId: string): void {
+    this.options.permissionRouter.disconnectClient(clientId);
+    for (const [invocationId, owner] of this.commandOwnersByInvocationId) {
+      if (owner === clientId) {
+        this.commandOwnersByInvocationId.delete(invocationId);
+      }
+    }
+    for (const [runId, owner] of this.commandOwnersByRunId) {
+      if (owner === clientId) {
+        this.commandOwnersByRunId.delete(runId);
+      }
+    }
+    for (const [runId, owner] of this.runOwnersByRunId) {
+      if (owner === clientId) {
+        this.runOwnersByRunId.delete(runId);
+      }
+    }
+  }
+
   private broadcast(event: UiEvent): void {
     this.options.permissionRouter.observeEvent(event);
+    this.updateClientViewsFromEvent(event);
     for (const client of Array.from(this.clients)) {
+      const routed = this.routeEventForClient(event, client.clientId);
+      if (!routed) {
+        continue;
+      }
       const filtered = this.options.permissionRouter.filterEventForClient(
-        event,
+        routed,
         client.clientId,
       );
       if (filtered) {
         writeSse(client.response, { event: filtered, type: "ui.event" });
       }
     }
+    this.finalizeEventAfterBroadcast(event);
+  }
+
+  private updateClientViewsFromEvent(event: UiEvent): void {
+    switch (event.type) {
+      case "session.updated":
+        return;
+      case "command.started": {
+        const owner = this.commandOwnersByInvocationId.get(
+          event.command.clientInvocationId,
+        );
+        if (owner !== undefined) {
+          this.commandOwnersByRunId.set(event.command.commandRunId, owner);
+        }
+        return;
+      }
+      case "command.result.delivered": {
+        const owner = this.commandOwnerForEvent(event);
+        const selectedSessionId = selectedSessionIdFromCommandAction(
+          event.action,
+        );
+        if (owner !== undefined && selectedSessionId !== undefined) {
+          this.setClientActiveSession(owner, selectedSessionId);
+        }
+        return;
+      }
+      case "command.failed":
+        return;
+      case "runtime.updated": {
+        const runId =
+          event.status.kind === "running" ? event.status.runId : undefined;
+        if (runId !== undefined && this.activePrompt !== undefined) {
+          this.runOwnersByRunId.set(runId, this.activePrompt.clientId);
+          if (this.activePrompt.sessionId !== undefined) {
+            this.runSessionIdsByRunId.set(runId, this.activePrompt.sessionId);
+          }
+        }
+        return;
+      }
+      case "run.updated": {
+        this.runSessionIdsByRunId.set(event.run.id, event.run.sessionId);
+        if (
+          this.activePrompt?.sessionId === event.run.sessionId ||
+          (this.activePrompt?.sessionId === undefined &&
+            this.activePrompt !== undefined)
+        ) {
+          this.runOwnersByRunId.set(event.run.id, this.activePrompt.clientId);
+        }
+        if (
+          event.run.status.kind !== "running" &&
+          event.run.status.kind !== "waiting-for-permission"
+        ) {
+          this.runOwnersByRunId.delete(event.run.id);
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  private routeEventForClient(
+    event: UiEvent,
+    clientId: string,
+  ): UiEvent | undefined {
+    const view = this.clientViews.get(clientId);
+
+    if (event.type === "snapshot.replaced") {
+      return {
+        ...event,
+        snapshot: snapshotForClient(event.snapshot, view),
+      };
+    }
+
+    if (event.type === "runtime.updated") {
+      return this.runtimeEventBelongsToClient(event, clientId)
+        ? event
+        : undefined;
+    }
+
+    if (
+      event.type === "command.started" ||
+      event.type === "command.result.delivered" ||
+      event.type === "command.failed"
+    ) {
+      return this.commandEventBelongsToClient(event, clientId) ? event : undefined;
+    }
+
+    if (
+      event.type === "interaction.requested" ||
+      event.type === "interaction.resolved"
+    ) {
+      return this.interactionEventBelongsToClient(event, clientId)
+        ? event
+        : undefined;
+    }
+
+    const sessionId = sessionIdForEvent(event);
+    if (sessionId === undefined || view === undefined) {
+      return event;
+    }
+    return view.activeSessionId === sessionId ? event : undefined;
+  }
+
+  private commandEventBelongsToClient(
+    event: Extract<
+      UiEvent,
+      {
+        type:
+          | "command.started"
+          | "command.result.delivered"
+          | "command.failed";
+      }
+    >,
+    clientId: string,
+  ): boolean {
+    const owner =
+      event.type === "command.started"
+        ? this.commandOwnersByInvocationId.get(event.command.clientInvocationId)
+        : this.commandOwnerForEvent(event);
+    return owner === clientId;
+  }
+
+  private runtimeEventBelongsToClient(
+    event: Extract<UiEvent, { type: "runtime.updated" }>,
+    clientId: string,
+  ): boolean {
+    const sessionId = this.runtimeEventSessionId(event);
+    if (sessionId !== undefined) {
+      return this.clientViews.get(clientId)?.activeSessionId === sessionId;
+    }
+
+    return this.runtimeEventOwner(event) === clientId;
+  }
+
+  private runtimeEventOwner(
+    event: Extract<UiEvent, { type: "runtime.updated" }>,
+  ): string | undefined {
+    if (event.status.kind === "running") {
+      return (
+        this.runOwnersByRunId.get(event.status.runId) ??
+        this.activePrompt?.clientId
+      );
+    }
+    return this.activePrompt?.clientId;
+  }
+
+  private runtimeEventSessionId(
+    event: Extract<UiEvent, { type: "runtime.updated" }>,
+  ): string | undefined {
+    if (event.status.kind === "running") {
+      return (
+        this.runSessionIdsByRunId.get(event.status.runId) ??
+        this.activePrompt?.sessionId
+      );
+    }
+    return this.activePrompt?.sessionId;
+  }
+
+  private interactionEventBelongsToClient(
+    event: Extract<
+      UiEvent,
+      { type: "interaction.requested" | "interaction.resolved" }
+    >,
+    clientId: string,
+  ): boolean {
+    const clientInvocationId =
+      event.type === "interaction.requested"
+        ? event.request.clientInvocationId
+        : event.clientInvocationId;
+    const commandRunId =
+      event.type === "interaction.requested"
+        ? event.request.commandRunId
+        : event.commandRunId;
+    const owner =
+      (clientInvocationId === undefined
+        ? undefined
+        : this.commandOwnersByInvocationId.get(clientInvocationId)) ??
+      this.commandOwnersByRunId.get(commandRunId);
+    return owner === undefined || owner === clientId;
+  }
+
+  private commandOwnerForEvent(
+    event: Extract<
+      UiEvent,
+      { type: "command.result.delivered" | "command.failed" }
+    >,
+  ): string | undefined {
+    return (
+      this.commandOwnersByInvocationId.get(event.clientInvocationId) ??
+      this.commandOwnersByRunId.get(event.commandRunId)
+    );
+  }
+
+  private forgetCommandOwner(
+    event: Extract<
+      UiEvent,
+      { type: "command.result.delivered" | "command.failed" }
+    >,
+  ): void {
+    this.commandOwnersByInvocationId.delete(event.clientInvocationId);
+    this.commandOwnersByRunId.delete(event.commandRunId);
+  }
+
+  private finalizeEventAfterBroadcast(event: UiEvent): void {
+    if (event.type === "command.failed") {
+      this.forgetCommandOwner(event);
+    }
+  }
+
+  private setClientActiveSession(clientId: string, sessionId: string): void {
+    const view = this.clientViews.get(clientId);
+    if (view === undefined) {
+      return;
+    }
+    view.activeSessionId = sessionId;
   }
 }
 
@@ -601,6 +1010,7 @@ export function createDaemonHttpServer(
   return new DaemonHttpServer({
     backend: options.backend,
     authToken: options.authToken,
+    createSessionId: options.createSessionId ?? createSessionIdGenerator(),
     host: options.host ?? DEFAULT_HOST,
     onClientConnected: options.onClientConnected,
     onClientDisconnected: options.onClientDisconnected,

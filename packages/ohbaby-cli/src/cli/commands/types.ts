@@ -67,6 +67,7 @@ export interface CliCommandRuntime {
   readonly readDaemonStatus: () => Promise<CliDaemonState | undefined>;
   readonly readStdin: () => Promise<string>;
   readonly renderTerminalUi: (options: {
+    readonly clearOnStart?: boolean;
     readonly client: CoreAPI;
     readonly subscribeEvents: (handler: UiEventHandler) => UiUnsubscribe;
   }) => TerminalUiLifecycle;

@@ -180,8 +180,10 @@ describe("buildCoreAPIImpl", () => {
 
     expect(api).toBe(remoteHost);
     expect(createRemoteCoreApiHost).toHaveBeenCalledWith({
+      authToken: undefined,
       host: "127.0.0.1",
       port: 4096,
+      startupIntent: { startupSessionMode: { type: "fresh" } },
     });
     expect(createPersistentUiBackendClient).not.toHaveBeenCalled();
   });
@@ -283,6 +285,7 @@ describe("buildCoreAPIImpl", () => {
       authToken: "token_1",
       host: "127.0.0.1",
       port: 4096,
+      startupIntent: { startupSessionMode: { type: "fresh" } },
     });
     expect(createPersistentUiBackendClient).not.toHaveBeenCalled();
   });

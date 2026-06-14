@@ -441,8 +441,11 @@ async function handleSessionResume(
   context.emitAction(action("session.selected", { choiceId: sessionId }));
 }
 
+const NO_REUSE_EMPTY_SESSION_ARG = "--no-reuse-empty-session";
+
 async function handleSessionNew(
   options: CommandServiceOptions,
+  invocation: UiCommandInvocation,
   context: CommandRunContext,
 ): Promise<void> {
   if (!options.sessions?.createSession) {
@@ -454,7 +457,11 @@ async function handleSessionNew(
     return;
   }
 
-  const session = await options.sessions.createSession();
+  const session = await options.sessions.createSession({
+    reuseInactiveEmptySessions: !invocation.argv.includes(
+      NO_REUSE_EMPTY_SESSION_ARG,
+    ),
+  });
   const reused = session.created === false;
   context.emitOutput(
     dataOutput(reused ? "session.current" : "session.created", {
@@ -626,8 +633,8 @@ export function createBuiltinHandlers(
     },
     {
       id: "new",
-      execute(_invocation, context): Promise<void> {
-        return handleSessionNew(options, context);
+      execute(invocation, context): Promise<void> {
+        return handleSessionNew(options, invocation, context);
       },
     },
     {

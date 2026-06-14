@@ -8,6 +8,7 @@ import type {
   UiConnectModelResult,
   UiEvent,
   UiEventHandler,
+  UiMessage,
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
@@ -95,6 +96,90 @@ function runUpdated(runId: string, sessionId = "session_1"): UiEvent {
   };
 }
 
+function messageAppended(sessionId = "session_1"): UiEvent {
+  return {
+    message: {
+      createdAt: timestamp,
+      id: `message_${sessionId}`,
+      parts: [{ text: `Prompt for ${sessionId}`, type: "text" }],
+      role: "user",
+    },
+    sessionId,
+    type: "message.appended",
+  };
+}
+
+function textMessage(id: string, text: string): UiMessage {
+  return {
+    createdAt: timestamp,
+    id,
+    parts: [{ text, type: "text" }],
+    role: "user",
+  };
+}
+
+function sessionWithMessages(
+  id: string,
+  messages: readonly UiMessage[],
+): UiSnapshot["sessions"][number] {
+  return {
+    createdAt: timestamp,
+    id,
+    messages,
+    title: id,
+    updatedAt: timestamp,
+  };
+}
+
+function snapshotReplaced(activeSessionId: string | null): UiEvent {
+  return {
+    snapshot: {
+      ...emptySnapshot(),
+      activeSessionId,
+      sessions: [
+        {
+          createdAt: timestamp,
+          id: "session_1",
+          messages: [],
+          title: "Session 1",
+          updatedAt: timestamp,
+        },
+      ],
+    },
+    type: "snapshot.replaced",
+  };
+}
+
+function runtimeRunning(runId: string): UiEvent {
+  return {
+    status: { kind: "running", runId },
+    type: "runtime.updated",
+  };
+}
+
+function commandResultDelivered(): UiEvent {
+  return {
+    clientInvocationId: "invoke_1",
+    commandRunId: "command_1",
+    output: { kind: "text", text: "done" },
+    timestamp: Date.parse(timestamp),
+    type: "command.result.delivered",
+  };
+}
+
+function commandSessionSelected(sessionId: string): UiEvent {
+  return {
+    action: {
+      data: { choiceId: sessionId, source: "new" },
+      kind: "session.selected",
+    },
+    clientInvocationId: "invoke_1",
+    commandRunId: "command_1",
+    timestamp: Date.parse(timestamp),
+    type: "command.result.delivered",
+  };
+}
+
 function permissionRequested(runId: string): Extract<
   UiEvent,
   { type: "permission.requested" }
@@ -121,6 +206,8 @@ class FakeBackend implements UiBackendClient {
     readonly text: string;
     readonly options?: SubmitPromptOptions;
   }[] = [];
+  readonly commandInvocations: Parameters<UiBackendClient["executeCommand"]>[0][] =
+    [];
   emitOnSubmit = true;
   holdSubmits = false;
   subscribeError: Error | undefined;
@@ -195,7 +282,10 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(connectModelResult());
   }
 
-  executeCommand(): Promise<void> {
+  executeCommand(
+    invocation: Parameters<UiBackendClient["executeCommand"]>[0],
+  ): Promise<void> {
+    this.commandInvocations.push(invocation);
     return Promise.resolve();
   }
 
@@ -720,6 +810,494 @@ describe("createDaemonHttpServer", () => {
       expect(backend.submitted).toEqual([
         { options: { sessionId: "session_2" }, text: "hello" },
       ]);
+    });
+  });
+
+  it("scrubs non-active transcript data from initialized client snapshots", async () => {
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      activeSessionId: "session_1",
+      contextWindowUsages: [
+        {
+          contextWindowRatio: 0.1,
+          contextWindowTokens: 100,
+          currentTokens: 10,
+          estimatedAt: timestamp,
+          modelId: "model",
+          sessionId: "session_1",
+        },
+      ],
+      runs: [
+        {
+          id: "run_1",
+          sessionId: "session_1",
+          startedAt: timestamp,
+          status: { kind: "running", runId: "run_1" },
+          updatedAt: timestamp,
+        },
+      ],
+      sessions: [
+        sessionWithMessages("session_1", [
+          textMessage("message_secret", "secret transcript"),
+        ]),
+      ],
+      status: { kind: "running", runId: "run_1" },
+    });
+
+    await withServer(backend, async (url) => {
+      await postRpc(url, {
+        clientId: "client_b",
+        id: "rpc_init_b",
+        method: "initializeClient",
+        params: [{ startupSessionMode: { type: "fresh" } }],
+      });
+
+      const snapshot = await postRpc(url, {
+        clientId: "client_b",
+        id: "rpc_snapshot",
+        method: "getSnapshot",
+        params: [],
+      });
+      const body = (await snapshot.json()) as { readonly result: UiSnapshot };
+      expect(body.result.activeSessionId).toBeNull();
+      expect(body.result.sessions).toHaveLength(1);
+      expect(body.result.sessions[0]?.messages).toEqual([]);
+      expect(body.result.runs).toEqual([]);
+      expect(body.result.contextWindowUsages).toEqual([]);
+      expect(body.result.status).toEqual({ kind: "idle" });
+    });
+  });
+
+  it("rewrites snapshot replacement events for each initialized client view", async () => {
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      sessions: [
+        {
+          createdAt: timestamp,
+          id: "session_1",
+          messages: [],
+          title: "Session 1",
+          updatedAt: timestamp,
+        },
+      ],
+    });
+
+    await withServer(backend, async (url) => {
+      await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_init_a",
+        method: "initializeClient",
+        params: [{ resumeSessionId: "session_1" }],
+      });
+      await postRpc(url, {
+        clientId: "client_b",
+        id: "rpc_init_b",
+        method: "initializeClient",
+        params: [{}],
+      });
+      const active = await fetch(`${url}/api/events?clientId=client_a`);
+      const fresh = await fetch(`${url}/api/events?clientId=client_b`);
+      const readActive = createSseReader(active);
+      const readFresh = createSseReader(fresh);
+      await readActive();
+      await readFresh();
+
+      backend.emit(snapshotReplaced("session_1"));
+
+      await expect(readActive()).resolves.toMatchObject({
+        event: { snapshot: { activeSessionId: "session_1" } },
+        type: "ui.event",
+      });
+      await expect(readFresh()).resolves.toMatchObject({
+        event: {
+          snapshot: {
+            activeSessionId: null,
+            runs: [],
+            sessions: [{ id: "session_1", messages: [] }],
+          },
+        },
+        type: "ui.event",
+      });
+    });
+  });
+
+  it("filters session updates outside each client view", async () => {
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      sessions: [
+        sessionWithMessages("session_1", [
+          textMessage("message_secret", "secret transcript"),
+        ]),
+      ],
+    });
+
+    await withServer(backend, async (url) => {
+      await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_init_a",
+        method: "initializeClient",
+        params: [{ resumeSessionId: "session_1" }],
+      });
+      await postRpc(url, {
+        clientId: "client_b",
+        id: "rpc_init_b",
+        method: "initializeClient",
+        params: [{ startupSessionMode: { type: "fresh" } }],
+      });
+      const active = await fetch(`${url}/api/events?clientId=client_a`);
+      const fresh = await fetch(`${url}/api/events?clientId=client_b`);
+      const readActive = createSseReader(active);
+      const readFresh = createSseReader(fresh);
+      await readActive();
+      await readFresh();
+
+      const update: UiEvent = {
+        session: sessionWithMessages("session_1", [
+          textMessage("message_secret", "secret transcript"),
+        ]),
+        type: "session.updated",
+      };
+      backend.emit(update);
+
+      await expect(readActive()).resolves.toEqual({
+        event: update,
+        type: "ui.event",
+      });
+      await expect(
+        Promise.race([
+          readFresh().then(() => "event" as const),
+          new Promise<"timeout">((resolve) => {
+            setTimeout(() => {
+              resolve("timeout");
+            }, 25);
+          }),
+        ]),
+      ).resolves.toBe("timeout");
+    });
+  });
+
+  it("does not deliver transcript events to fresh client views", async () => {
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      sessions: [
+        {
+          createdAt: timestamp,
+          id: "session_1",
+          messages: [],
+          title: "Session 1",
+          updatedAt: timestamp,
+        },
+      ],
+    });
+
+    await withServer(backend, async (url) => {
+      await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_init_a",
+        method: "initializeClient",
+        params: [{ resumeSessionId: "session_1" }],
+      });
+      await postRpc(url, {
+        clientId: "client_b",
+        id: "rpc_init_b",
+        method: "initializeClient",
+        params: [{}],
+      });
+      const active = await fetch(`${url}/api/events?clientId=client_a`);
+      const fresh = await fetch(`${url}/api/events?clientId=client_b`);
+      const readActive = createSseReader(active);
+      const readFresh = createSseReader(fresh);
+      await readActive();
+      await readFresh();
+
+      backend.emit(messageAppended("session_1"));
+
+      await expect(readActive()).resolves.toEqual({
+        event: messageAppended("session_1"),
+        type: "ui.event",
+      });
+      await expect(
+        Promise.race([
+          readFresh().then(() => "event" as const),
+          new Promise<"timeout">((resolve) => {
+            setTimeout(() => {
+              resolve("timeout");
+            }, 25);
+          }),
+        ]),
+      ).resolves.toBe("timeout");
+    });
+  });
+
+  it("uses an explicit generated session for fresh prompt submits", async () => {
+    const backend = new FakeBackend();
+    backend.emitOnSubmit = false;
+    backend.holdSubmits = true;
+
+    await withServer(
+      backend,
+      async (url) => {
+        await postRpc(url, {
+          clientId: "client_a",
+          id: "rpc_init_a",
+          method: "initializeClient",
+          params: [{ startupSessionMode: { type: "fresh" } }],
+        });
+
+        const submitted = postRpc(url, {
+          clientId: "client_a",
+          id: "rpc_prompt",
+          method: "submitPrompt",
+          params: ["hello"],
+        });
+        try {
+          await vi.waitUntil(() => backend.submitted.length === 1);
+          expect(backend.submitted).toEqual([
+            {
+              options: { sessionId: "session_generated" },
+              text: "hello",
+            },
+          ]);
+
+          backend.emit({
+            session: sessionWithMessages("session_other", []),
+            type: "session.updated",
+          });
+          const snapshot = await postRpc(url, {
+            clientId: "client_a",
+            id: "rpc_snapshot",
+            method: "getSnapshot",
+            params: [],
+          });
+          await expect(snapshot.json()).resolves.toMatchObject({
+            ok: true,
+            result: { activeSessionId: "session_generated" },
+          });
+        } finally {
+          backend.resolveNextSubmit();
+        }
+        await expect(submitted).resolves.toMatchObject({ status: 200 });
+      },
+      { createSessionId: () => "session_generated" },
+    );
+  });
+
+  it("routes runtime updates only to clients that own the run session", async () => {
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      sessions: [sessionWithMessages("session_1", [])],
+    });
+
+    await withServer(backend, async (url) => {
+      await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_init_a",
+        method: "initializeClient",
+        params: [{ resumeSessionId: "session_1" }],
+      });
+      await postRpc(url, {
+        clientId: "client_b",
+        id: "rpc_init_b",
+        method: "initializeClient",
+        params: [{ startupSessionMode: { type: "fresh" } }],
+      });
+      const active = await fetch(`${url}/api/events?clientId=client_a`);
+      const fresh = await fetch(`${url}/api/events?clientId=client_b`);
+      const readActive = createSseReader(active);
+      const readFresh = createSseReader(fresh);
+      await readActive();
+      await readFresh();
+
+      const run = runUpdated("run_1", "session_1");
+      backend.emit(run);
+      await expect(readActive()).resolves.toEqual({
+        event: run,
+        type: "ui.event",
+      });
+
+      const runtime = runtimeRunning("run_1");
+      backend.emit(runtime);
+      await expect(readActive()).resolves.toEqual({
+        event: runtime,
+        type: "ui.event",
+      });
+      await expect(
+        Promise.race([
+          readFresh().then(() => "event" as const),
+          new Promise<"timeout">((resolve) => {
+            setTimeout(() => {
+              resolve("timeout");
+            }, 25);
+          }),
+        ]),
+      ).resolves.toBe("timeout");
+    });
+  });
+
+  it("does not broadcast unowned command results to all clients", async () => {
+    const backend = new FakeBackend();
+
+    await withServer(backend, async (url) => {
+      const first = await fetch(`${url}/api/events?clientId=client_a`);
+      const second = await fetch(`${url}/api/events?clientId=client_b`);
+      const readFirst = createSseReader(first);
+      const readSecond = createSseReader(second);
+      await readFirst();
+      await readSecond();
+
+      backend.emit(commandResultDelivered());
+
+      const timeout = (): Promise<"timeout"> =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve("timeout");
+          }, 25);
+        });
+      await expect(
+        Promise.race([readFirst().then(() => "event" as const), timeout()]),
+      ).resolves.toBe("timeout");
+      await expect(
+        Promise.race([readSecond().then(() => "event" as const), timeout()]),
+      ).resolves.toBe("timeout");
+    });
+  });
+
+  it("routes command results only to the invoking client", async () => {
+    const backend = new FakeBackend();
+
+    await withServer(backend, async (url) => {
+      const owner = await fetch(`${url}/api/events?clientId=client_a`);
+      const observer = await fetch(`${url}/api/events?clientId=client_b`);
+      const readOwner = createSseReader(owner);
+      const readObserver = createSseReader(observer);
+      await readOwner();
+      await readObserver();
+
+      const invoked = await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_command",
+        method: "executeCommand",
+        params: [
+          {
+            argv: [],
+            clientInvocationId: "invoke_1",
+            commandId: "status",
+            path: ["status"],
+            raw: "/status",
+            rawArgs: "",
+            surface: "tui",
+          },
+        ],
+      });
+      expect(invoked.status).toBe(200);
+
+      backend.emit(commandResultDelivered());
+
+      await expect(readOwner()).resolves.toEqual({
+        event: commandResultDelivered(),
+        type: "ui.event",
+      });
+      await expect(
+        Promise.race([
+          readObserver().then(() => "event" as const),
+          new Promise<"timeout">((resolve) => {
+            setTimeout(() => {
+              resolve("timeout");
+            }, 25);
+          }),
+        ]),
+      ).resolves.toBe("timeout");
+    });
+  });
+
+  it("keeps command ownership across multiple result events", async () => {
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      sessions: [
+        {
+          createdAt: timestamp,
+          id: "session_2",
+          messages: [],
+          title: "Session 2",
+          updatedAt: timestamp,
+        },
+      ],
+    });
+
+    await withServer(backend, async (url) => {
+      await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_init_a",
+        method: "initializeClient",
+        params: [{ startupSessionMode: { type: "fresh" } }],
+      });
+      const invoked = await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_command",
+        method: "executeCommand",
+        params: [
+          {
+            argv: [],
+            clientInvocationId: "invoke_1",
+            commandId: "new",
+            path: ["new"],
+            raw: "/new",
+            rawArgs: "",
+            surface: "tui",
+          },
+        ],
+      });
+      expect(invoked.status).toBe(200);
+
+      backend.emit(commandResultDelivered());
+      backend.emit(commandSessionSelected("session_2"));
+
+      const snapshot = await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_snapshot",
+        method: "getSnapshot",
+        params: [],
+      });
+      await expect(snapshot.json()).resolves.toMatchObject({
+        id: "rpc_snapshot",
+        ok: true,
+        result: { activeSessionId: "session_2" },
+      });
+    });
+  });
+
+  it("forces fresh client /new commands to create a separate empty session", async () => {
+    const backend = new FakeBackend();
+
+    await withServer(backend, async (url) => {
+      await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_init_a",
+        method: "initializeClient",
+        params: [{ startupSessionMode: { type: "fresh" } }],
+      });
+      const invoked = await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_command",
+        method: "executeCommand",
+        params: [
+          {
+            argv: [],
+            clientInvocationId: "invoke_1",
+            commandId: "new",
+            path: ["new"],
+            raw: "/new",
+            rawArgs: "",
+            surface: "tui",
+          },
+        ],
+      });
+      expect(invoked.status).toBe(200);
+      expect(backend.commandInvocations[0]).toMatchObject({
+        argv: ["--no-reuse-empty-session"],
+        commandId: "new",
+        rawArgs: "--no-reuse-empty-session",
+      });
     });
   });
 

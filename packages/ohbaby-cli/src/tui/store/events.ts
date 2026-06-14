@@ -77,7 +77,6 @@ export function applyTuiEvent(
 
     case "session.updated":
       return rebuildFromCollections(state, {
-        activeSessionId: state.activeSessionId ?? event.session.id,
         sessions: upsertById(state.sessions, event.session),
       });
 
@@ -238,7 +237,16 @@ export function applyTuiEvent(
     }
 
     case "command.result.delivered": {
-      const next = clearCommandRuntime(state, event.commandRunId);
+      const selectedSessionId = selectedSessionIdFromCommandAction(event.action);
+      const next =
+        selectedSessionId === undefined
+          ? clearCommandRuntime(state, event.commandRunId)
+          : clearCommandRuntime(
+              rebuildFromCollections(state, {
+                activeSessionId: selectedSessionId,
+              }),
+              event.commandRunId,
+            );
       if (!event.output || !shouldDisplayCommandOutput(event.output)) {
         return next;
       }
@@ -296,6 +304,18 @@ export function applyTuiEvent(
   }
 
   return state;
+}
+
+function selectedSessionIdFromCommandAction(
+  action: Extract<TuiEvent, { type: "command.result.delivered" }>["action"],
+): string | undefined {
+  if (action?.kind !== "session.selected" || !isRecord(action.data)) {
+    return undefined;
+  }
+  const choiceId = action.data.choiceId;
+  return typeof choiceId === "string" && choiceId.length > 0
+    ? choiceId
+    : undefined;
 }
 
 export function setCommandCatalog(

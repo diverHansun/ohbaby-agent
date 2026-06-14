@@ -118,6 +118,7 @@ export function createTerminalCommand(
           await host.core.getSnapshot();
         }
         const instance = runtime.renderTerminalUi({
+          clearOnStart: resume === undefined && args.continue !== true,
           client: host.core,
           subscribeEvents: (handler) => host.callbacks.subscribeEvents(handler),
         });

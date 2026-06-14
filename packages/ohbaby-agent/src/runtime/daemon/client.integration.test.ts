@@ -87,6 +87,19 @@ function sessionUpdated(
   };
 }
 
+function noticeEmitted(id = "notice_1"): UiEvent {
+  return {
+    notice: {
+      createdAt: timestamp,
+      id,
+      level: "info",
+      message: "Notice",
+      title: "Notice",
+    },
+    type: "notice.emitted",
+  };
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -260,8 +273,28 @@ describe("createRemoteUiBackendClient", () => {
       sessions: [sessionUpdated().session],
     } satisfies UiSnapshot;
 
+    await withRemoteClient(
+      new FakeBackend(snapshot),
+      async (client) => {
+        await expect(client.getSnapshot()).resolves.toEqual(snapshot);
+      },
+      {
+        client: { startupIntent: { resumeSessionId: "session_1" } },
+      },
+    );
+  });
+
+  it("initializes default remote clients as fresh views", async () => {
+    const snapshot = {
+      ...emptySnapshot(),
+      activeSessionId: "session_1",
+      sessions: [sessionUpdated().session],
+    } satisfies UiSnapshot;
+
     await withRemoteClient(new FakeBackend(snapshot), async (client) => {
-      await expect(client.getSnapshot()).resolves.toEqual(snapshot);
+      await expect(client.getSnapshot()).resolves.toMatchObject({
+        activeSessionId: null,
+      });
     });
   });
 
@@ -332,7 +365,7 @@ describe("createRemoteUiBackendClient", () => {
           client.subscribeEvents(resolve);
         });
 
-        await eventuallyEmit(backend, sessionUpdated(), eventPromise);
+        await eventuallyEmit(backend, noticeEmitted(), eventPromise);
         await eventPromise;
 
         expect(requests.slice(0, 2)).toEqual(["initializeClient", "events"]);
@@ -435,6 +468,7 @@ describe("createRemoteUiBackendClient", () => {
 
     expect(backend.calls).toEqual([
       { args: [], method: "getSnapshot" },
+      { args: [], method: "getSnapshot" },
       { args: [contextInput], method: "getContextWindowUsage" },
       { args: [listQuery], method: "listCommands" },
       {
@@ -468,9 +502,9 @@ describe("createRemoteUiBackendClient", () => {
         client.subscribeEvents(resolve);
       });
 
-      await eventuallyEmit(backend, sessionUpdated(), eventPromise);
+      await eventuallyEmit(backend, noticeEmitted(), eventPromise);
 
-      await expect(eventPromise).resolves.toEqual(sessionUpdated());
+      await expect(eventPromise).resolves.toEqual(noticeEmitted());
     });
   });
 
@@ -487,12 +521,12 @@ describe("createRemoteUiBackendClient", () => {
       });
       const unsubscribe = client.subscribeEvents(handler);
 
-      await eventuallyEmit(backend, sessionUpdated("session_1"), firstEvent);
+      await eventuallyEmit(backend, noticeEmitted("notice_1"), firstEvent);
       await delay(20);
       unsubscribe();
       const callsAfterUnsubscribe = handler.mock.calls.length;
 
-      backend.emit(sessionUpdated("session_2"));
+      backend.emit(noticeEmitted("notice_2"));
       await delay(50);
 
       expect(handler).toHaveBeenCalledTimes(callsAfterUnsubscribe);
@@ -510,7 +544,7 @@ describe("createRemoteUiBackendClient", () => {
     });
   });
 
-  it("wraps daemon rpc transport failures with method context", async () => {
+  it("wraps daemon startup transport failures with method context", async () => {
     const client = createRemoteUiBackendClient({
       fetch: vi.fn<typeof fetch>(() =>
         Promise.reject(new TypeError("fetch failed")),
@@ -527,11 +561,11 @@ describe("createRemoteUiBackendClient", () => {
         provider: "fake",
       }),
     ).rejects.toThrow(
-      "Daemon connection failed while running connectModel: fetch failed",
+      "Daemon connection failed while running initializeClient: fetch failed",
     );
   });
 
-  it("reports non-success daemon rpc HTTP responses with non-JSON bodies", async () => {
+  it("reports non-success daemon startup HTTP responses with non-JSON bodies", async () => {
     const client = createRemoteUiBackendClient({
       fetch: vi.fn<typeof fetch>(() =>
         Promise.resolve(new Response("service unavailable", { status: 503 })),
@@ -540,7 +574,7 @@ describe("createRemoteUiBackendClient", () => {
     });
 
     await expect(client.getSnapshot()).rejects.toThrow(
-      "Daemon request getSnapshot failed with HTTP 503",
+      "Daemon request initializeClient failed with HTTP 503",
     );
   });
 

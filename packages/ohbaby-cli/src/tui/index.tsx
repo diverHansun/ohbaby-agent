@@ -7,6 +7,7 @@ export type { TerminalUiOptions };
 export function renderTerminalUi(options: TerminalUiOptions): Instance {
   return render(
     <OhbabyTerminalApp
+      clearOnStart={options.clearOnStart}
       client={options.client}
       subscribeEvents={options.subscribeEvents}
     />,

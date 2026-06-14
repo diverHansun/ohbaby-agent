@@ -29,8 +29,22 @@ function delay(ms: number): Promise<void> {
   });
 }
 
+async function waitUntil(
+  predicate: () => boolean,
+  timeoutMs = 5_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+    await delay(10);
+  }
+  throw new Error("Timed out waiting for daemon terminal condition");
+}
+
 describe("explicit daemon remote terminal flow", () => {
-  it("submits through one remote client and resumes history through another", async () => {
+  it("starts fresh by default and resumes history only on explicit continue", async () => {
     const home = await tempDirectory("ohbaby-daemon-terminal-");
     const authToken = "token_1";
     const daemon = await startDaemonServer({
@@ -64,6 +78,7 @@ describe("explicit daemon remote terminal flow", () => {
       try {
         await delay(25);
         await firstClient.submitPrompt("hello daemon");
+        await waitUntil(() => JSON.stringify(events).includes("daemon reply"));
       } finally {
         unsubscribe();
         await firstClient.dispose();
@@ -88,11 +103,30 @@ describe("explicit daemon remote terminal flow", () => {
         const snapshot = await secondClient.getSnapshot();
         const serializedSnapshot = JSON.stringify(snapshot);
 
+        expect(snapshot.activeSessionId).toBeNull();
+        expect(snapshot.sessions).toHaveLength(1);
+        expect(snapshot.sessions[0]?.messages).toEqual([]);
+        expect(serializedSnapshot).not.toContain("daemon reply");
+      } finally {
+        await secondClient.dispose();
+      }
+
+      const continuedClient = createRemoteUiBackendClient({
+        authToken,
+        clientId: "terminal_c",
+        host: daemon.host,
+        port: daemon.port,
+        startupIntent: { startupSessionMode: { type: "continue" } },
+      });
+      try {
+        const snapshot = await continuedClient.getSnapshot();
+        const serializedSnapshot = JSON.stringify(snapshot);
+
         expect(snapshot.sessions).toHaveLength(1);
         expect(serializedSnapshot).toContain("hello daemon");
         expect(serializedSnapshot).toContain("daemon reply");
       } finally {
-        await secondClient.dispose();
+        await continuedClient.dispose();
       }
     } finally {
       await daemon.stop();

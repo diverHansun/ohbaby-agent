@@ -187,6 +187,13 @@ export async function resolveSessionForNewPrompt(
     };
   }
 
+  if (input.reuseInactiveEmptySessions === false) {
+    return {
+      isNewSession: true,
+      session: await input.createSession(),
+    };
+  }
+
   if (input.snapshot.activeSessionId) {
     const activeSession = await resolveUiSession(
       input,

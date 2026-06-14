@@ -11,6 +11,9 @@ import {
 } from "./protocol.js";
 
 const DEFAULT_HOST = "127.0.0.1";
+const DEFAULT_STARTUP_INTENT: DaemonStartupIntent = {
+  startupSessionMode: { type: "fresh" },
+};
 
 export interface RemoteDaemonClientOptions {
   readonly authToken?: string;
@@ -110,7 +113,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   constructor(options: RemoteDaemonClientOptions) {
     this.authToken = options.authToken;
     this.clientId = options.clientId ?? randomUUID();
-    this.startupIntent = options.startupIntent;
+    this.startupIntent = options.startupIntent ?? DEFAULT_STARTUP_INTENT;
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     if (typeof this.fetchImpl !== "function") {
       throw new Error("fetch is required to create a remote daemon client");
