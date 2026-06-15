@@ -62,7 +62,9 @@ function defaultIsProcessAlive(pid: number): boolean {
   }
 }
 
-function isRunningState(state: DaemonState | undefined): state is DaemonState & {
+function isRunningState(
+  state: DaemonState | undefined,
+): state is DaemonState & {
   readonly authToken: string;
   readonly host: string;
   readonly packageVersion: string;
@@ -82,7 +84,9 @@ function isRunningState(state: DaemonState | undefined): state is DaemonState & 
   );
 }
 
-function toConnection(state: ReturnType<typeof assertRunningState>): RunningDaemonConnection {
+function toConnection(
+  state: ReturnType<typeof assertRunningState>,
+): RunningDaemonConnection {
   return {
     authToken: state.authToken,
     host: state.host,
@@ -104,7 +108,21 @@ function assertRunningState(state: DaemonState): DaemonState & {
   return state;
 }
 
-function stateUrl(state: { readonly host?: string; readonly port?: number }, path: string): string {
+function crashReason(state: DaemonState | undefined): string | undefined {
+  if (
+    state?.status === "crashed" &&
+    typeof state.error === "string" &&
+    state.error.trim().length > 0
+  ) {
+    return state.error.trim();
+  }
+  return undefined;
+}
+
+function stateUrl(
+  state: { readonly host?: string; readonly port?: number },
+  path: string,
+): string {
   const host = state.host ?? DEFAULT_HOST;
   return `http://${host}:${String(state.port)}/${path.replace(/^\/+/, "")}`;
 }
@@ -124,10 +142,7 @@ async function isHealthy(
     const body = (await response.json().catch(() => undefined)) as
       | { readonly ok?: unknown; readonly packageVersion?: unknown }
       | undefined;
-    return (
-      body?.ok === true &&
-      body.packageVersion === state.packageVersion
-    );
+    return body?.ok === true && body.packageVersion === state.packageVersion;
   } catch {
     return false;
   }
@@ -161,14 +176,18 @@ function defaultSpawn(
     throw new Error("daemon spawn entrypoint is unavailable");
   }
 
-  const child = spawnProcess(process.execPath, [entrypoint, "serve"], {
-    cwd: process.cwd(),
-    // Windows detached console processes can flash a separate terminal window.
-    detached: process.platform !== "win32",
-    env: process.env,
-    stdio: "ignore",
-    windowsHide: true,
-  });
+  const child = spawnProcess(
+    process.execPath,
+    [entrypoint, "serve", "--port", "0"],
+    {
+      cwd: process.cwd(),
+      // Windows detached console processes can flash a separate terminal window.
+      detached: process.platform !== "win32",
+      env: process.env,
+      stdio: "ignore",
+      windowsHide: true,
+    },
+  );
   child.unref();
   return Promise.resolve();
 }
@@ -177,7 +196,11 @@ async function waitForReadyState(
   options: Required<
     Pick<
       EnsureDaemonRunningOptions,
-      "currentVersion" | "fetch" | "isProcessAlive" | "pollIntervalMs" | "timeoutMs"
+      | "currentVersion"
+      | "fetch"
+      | "isProcessAlive"
+      | "pollIntervalMs"
+      | "timeoutMs"
     >
   > & {
     readonly stateFile: DaemonStateFile;
@@ -193,10 +216,12 @@ async function waitForReadyState(
   }
 
   const deadline = Date.now() + options.timeoutMs;
+  let lastCrashReason: string | undefined;
   for (;;) {
     const state = options.stateFile.read
       ? await options.stateFile.read()
       : undefined;
+    lastCrashReason = crashReason(state) ?? lastCrashReason;
     if (
       isRunningState(state) &&
       state.packageVersion === options.currentVersion &&
@@ -206,6 +231,9 @@ async function waitForReadyState(
       return toConnection(state);
     }
     if (Date.now() >= deadline) {
+      if (lastCrashReason !== undefined) {
+        throw new Error(`daemon did not become ready: ${lastCrashReason}`);
+      }
       throw new Error("daemon did not become ready");
     }
     await delay(options.pollIntervalMs);
@@ -224,8 +252,7 @@ export async function ensureDaemonRunning(
   }
   const isProcessAlive = options.isProcessAlive ?? defaultIsProcessAlive;
   const spawn =
-    options.spawn ??
-    ((): Promise<void> => defaultSpawn(options.spawnProcess));
+    options.spawn ?? ((): Promise<void> => defaultSpawn(options.spawnProcess));
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 

@@ -52,6 +52,18 @@ describe("session title generator", () => {
     );
   });
 
+  it("does not persist the empty-response placeholder as a generated title", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const client = createFakeLLMClient([{ finishReason: "stop" }], requests);
+
+    await expect(
+      generateSessionTitle({
+        firstUserMessage: "hello?之前我们讨论了什么？",
+        llmClient: client,
+      }),
+    ).resolves.toBeNull();
+  });
+
   it("logs title generation failures to stderr when OHBABY_DEBUG is set", async () => {
     vi.stubEnv("OHBABY_DEBUG", "1");
     const write = vi

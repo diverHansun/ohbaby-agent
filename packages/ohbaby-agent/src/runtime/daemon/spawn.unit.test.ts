@@ -2,9 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ensureDaemonRunning } from "./spawn.js";
 import type { DaemonState, DaemonStateFile } from "./types.js";
 
-function runningState(
-  overrides: Partial<DaemonState> = {},
-): DaemonState {
+function runningState(overrides: Partial<DaemonState> = {}): DaemonState {
   return {
     authToken: "token_1",
     host: "127.0.0.1",
@@ -34,10 +32,9 @@ describe("ensureDaemonRunning", () => {
     const spawn = vi.fn();
     const fetchImpl = vi.fn(() =>
       Promise.resolve(
-        new Response(
-          JSON.stringify({ ok: true, packageVersion: "0.1.0" }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ ok: true, packageVersion: "0.1.0" }), {
+          status: 200,
+        }),
       ),
     );
 
@@ -70,19 +67,23 @@ describe("ensureDaemonRunning", () => {
       ensureDaemonRunning({
         currentVersion: "0.1.0",
         fetch: vi.fn(() =>
-          Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 })),
+          Promise.resolve(
+            new Response(JSON.stringify({ ok: true }), { status: 200 }),
+          ),
         ),
         isProcessAlive: () => true,
         pollIntervalMs: 0,
         spawn,
         stateFile,
         waitForState: () =>
-          Promise.resolve(runningState({
-            authToken: "token_2",
-            packageVersion: "0.1.0",
-            pid: 124,
-            port: 4097,
-          })),
+          Promise.resolve(
+            runningState({
+              authToken: "token_2",
+              packageVersion: "0.1.0",
+              pid: 124,
+              port: 4097,
+            }),
+          ),
       }),
     ).resolves.toMatchObject({ authToken: "token_2", port: 4097 });
 
@@ -99,19 +100,23 @@ describe("ensureDaemonRunning", () => {
       await ensureDaemonRunning({
         currentVersion: "0.1.0",
         fetch: vi.fn(() =>
-          Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 })),
+          Promise.resolve(
+            new Response(JSON.stringify({ ok: true }), { status: 200 }),
+          ),
         ),
         isProcessAlive: () => true,
         pollIntervalMs: 0,
         spawnProcess,
         stateFile: new MemoryStateFile(undefined),
         waitForState: () =>
-          Promise.resolve(runningState({
-            authToken: "token_2",
-            packageVersion: "0.1.0",
-            pid: 124,
-            port: 4097,
-          })),
+          Promise.resolve(
+            runningState({
+              authToken: "token_2",
+              packageVersion: "0.1.0",
+              pid: 124,
+              port: 4097,
+            }),
+          ),
       });
     } finally {
       process.argv = originalArgv;
@@ -119,7 +124,7 @@ describe("ensureDaemonRunning", () => {
 
     expect(spawnProcess).toHaveBeenCalledWith(
       process.execPath,
-      ["D:/repo/packages/ohbaby-cli/dist/bin.js", "serve"],
+      ["D:/repo/packages/ohbaby-cli/dist/bin.js", "serve", "--port", "0"],
       expect.objectContaining({
         detached: process.platform !== "win32",
         stdio: "ignore",
@@ -131,7 +136,10 @@ describe("ensureDaemonRunning", () => {
 
   it("does not detach the auto-spawned daemon on Windows", async () => {
     const originalArgv = process.argv;
-    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    const originalPlatform = Object.getOwnPropertyDescriptor(
+      process,
+      "platform",
+    );
     const unref = vi.fn();
     const spawnProcess = vi.fn(() => ({ unref }));
     process.argv = ["node", "D:/repo/packages/ohbaby-cli/dist/bin.js"];
@@ -144,19 +152,23 @@ describe("ensureDaemonRunning", () => {
       await ensureDaemonRunning({
         currentVersion: "0.1.0",
         fetch: vi.fn(() =>
-          Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 })),
+          Promise.resolve(
+            new Response(JSON.stringify({ ok: true }), { status: 200 }),
+          ),
         ),
         isProcessAlive: () => true,
         pollIntervalMs: 0,
         spawnProcess,
         stateFile: new MemoryStateFile(undefined),
         waitForState: () =>
-          Promise.resolve(runningState({
-            authToken: "token_2",
-            packageVersion: "0.1.0",
-            pid: 124,
-            port: 4097,
-          })),
+          Promise.resolve(
+            runningState({
+              authToken: "token_2",
+              packageVersion: "0.1.0",
+              pid: 124,
+              port: 4097,
+            }),
+          ),
       });
     } finally {
       process.argv = originalArgv;
@@ -167,7 +179,7 @@ describe("ensureDaemonRunning", () => {
 
     expect(spawnProcess).toHaveBeenCalledWith(
       process.execPath,
-      ["D:/repo/packages/ohbaby-cli/dist/bin.js", "serve"],
+      ["D:/repo/packages/ohbaby-cli/dist/bin.js", "serve", "--port", "0"],
       expect.objectContaining({
         detached: false,
         windowsHide: true,
@@ -181,7 +193,9 @@ describe("ensureDaemonRunning", () => {
     await ensureDaemonRunning({
       currentVersion: "0.1.0",
       fetch: vi.fn(() =>
-        Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 })),
+        Promise.resolve(
+          new Response(JSON.stringify({ ok: true }), { status: 200 }),
+        ),
       ),
       isProcessAlive: () => false,
       pollIntervalMs: 0,
@@ -211,14 +225,18 @@ describe("ensureDaemonRunning", () => {
           calls.push("spawn");
           return Promise.resolve();
         }),
-        stateFile: new MemoryStateFile(runningState({ packageVersion: "0.0.9" })),
+        stateFile: new MemoryStateFile(
+          runningState({ packageVersion: "0.0.9" }),
+        ),
         waitForState: () =>
-          Promise.resolve(runningState({
-            authToken: "new_token",
-            packageVersion: "0.1.0",
-            pid: 124,
-            port: 4097,
-          })),
+          Promise.resolve(
+            runningState({
+              authToken: "new_token",
+              packageVersion: "0.1.0",
+              pid: 124,
+              port: 4097,
+            }),
+          ),
       }),
     ).resolves.toMatchObject({ authToken: "new_token", port: 4097 });
 
@@ -231,7 +249,9 @@ describe("ensureDaemonRunning", () => {
     await ensureDaemonRunning({
       currentVersion: "0.1.0",
       fetch: vi.fn(() =>
-        Promise.resolve(new Response(JSON.stringify({ ok: false }), { status: 503 })),
+        Promise.resolve(
+          new Response(JSON.stringify({ ok: false }), { status: 503 }),
+        ),
       ),
       isProcessAlive: () => true,
       pollIntervalMs: 0,
@@ -250,10 +270,9 @@ describe("ensureDaemonRunning", () => {
       currentVersion: "0.1.0",
       fetch: vi.fn(() =>
         Promise.resolve(
-          new Response(
-            JSON.stringify({ ok: true, packageVersion: "0.0.9" }),
-            { status: 200 },
-          ),
+          new Response(JSON.stringify({ ok: true, packageVersion: "0.0.9" }), {
+            status: 200,
+          }),
         ),
       ),
       isProcessAlive: () => true,
@@ -282,14 +301,18 @@ describe("ensureDaemonRunning", () => {
           calls.push("spawn");
           return Promise.resolve();
         }),
-        stateFile: new MemoryStateFile(runningState({ packageVersion: "0.0.9" })),
+        stateFile: new MemoryStateFile(
+          runningState({ packageVersion: "0.0.9" }),
+        ),
         waitForState: () =>
-          Promise.resolve(runningState({
-            authToken: "new_token",
-            packageVersion: "0.1.0",
-            pid: 124,
-            port: 4097,
-          })),
+          Promise.resolve(
+            runningState({
+              authToken: "new_token",
+              packageVersion: "0.1.0",
+              pid: 124,
+              port: 4097,
+            }),
+          ),
       }),
     ).resolves.toMatchObject({ authToken: "new_token", port: 4097 });
 
@@ -301,7 +324,9 @@ describe("ensureDaemonRunning", () => {
       ensureDaemonRunning({
         currentVersion: "0.1.0",
         fetch: vi.fn(() =>
-          Promise.resolve(new Response(JSON.stringify({ ok: false }), { status: 503 })),
+          Promise.resolve(
+            new Response(JSON.stringify({ ok: false }), { status: 503 }),
+          ),
         ),
         isProcessAlive: () => true,
         pollIntervalMs: 0,
@@ -310,5 +335,29 @@ describe("ensureDaemonRunning", () => {
         timeoutMs: 0,
       }),
     ).rejects.toThrow("daemon did not become ready");
+  });
+
+  it("includes the daemon crash reason when startup writes a crashed state", async () => {
+    await expect(
+      ensureDaemonRunning({
+        currentVersion: "0.1.0",
+        fetch: vi.fn(() =>
+          Promise.resolve(
+            new Response(JSON.stringify({ ok: false }), { status: 503 }),
+          ),
+        ),
+        isProcessAlive: () => true,
+        pollIntervalMs: 0,
+        spawn: vi.fn(() => Promise.resolve()),
+        stateFile: new MemoryStateFile({
+          error: "listen EADDRINUSE: address already in use 127.0.0.1:4096",
+          pid: 123,
+          startedAt: 1,
+          status: "crashed",
+          updatedAt: 2,
+        }),
+        timeoutMs: 0,
+      }),
+    ).rejects.toThrow("address already in use 127.0.0.1:4096");
   });
 });
