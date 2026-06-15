@@ -39,10 +39,15 @@ import type {
   TuiRuntimeStatus,
 } from "./store/snapshot.js";
 
-export const NEW_SESSION_CLEAR_SEQUENCE = "\x1b[2J\x1b[3J\x1b[H";
+export const SESSION_VIEW_CLEAR_SEQUENCE = "\x1b[2J\x1b[3J\x1b[H";
+export const NEW_SESSION_CLEAR_SEQUENCE = SESSION_VIEW_CLEAR_SEQUENCE;
 
 export const ESC_INTERRUPT_WINDOW_MS = 1500;
 const ESC_INTERRUPT_HINT = "Press Esc again to interrupt";
+
+type TranscriptSurfaceResetReason =
+  | "new-session"
+  | "switch-session";
 
 export interface TerminalUiOptions {
   readonly clearOnStart?: boolean;
@@ -181,6 +186,14 @@ export function OhbabyTerminalApp({
       setCommandPanel(panel);
     },
     [],
+  );
+  const resetTranscriptSurface = useCallback(
+    (_reason: TranscriptSurfaceResetReason): void => {
+      writeStdout(SESSION_VIEW_CLEAR_SEQUENCE);
+      setScreenGeneration((current) => current + 1);
+      setActiveCommandPanel(null);
+    },
+    [setActiveCommandPanel, writeStdout],
   );
   const closeCommandPanel = useCallback((): void => {
     setActiveCommandPanel(null);
@@ -419,19 +432,10 @@ export function OhbabyTerminalApp({
         return;
       }
 
-      eventDispatcher.dispatch(tuiEvent);
-
-      const isNewSessionSelection = isNewSessionSelectionEvent(tuiEvent);
-      if (isNewSessionSelection) {
-        snapshotRefreshSequenceRef.current += 1;
-        writeStdout(NEW_SESSION_CLEAR_SEQUENCE);
-        setScreenGeneration((current) => current + 1);
-        setActiveCommandPanel(null);
-      }
-
       const selectedExistingSessionId =
         selectedExistingSessionIdFromEvent(tuiEvent);
       if (selectedExistingSessionId !== undefined) {
+        eventDispatcher.dispatch(commandResultWithoutSessionSelection(tuiEvent));
         const requestSequence = snapshotRefreshSequenceRef.current + 1;
         snapshotRefreshSequenceRef.current = requestSequence;
         void client
@@ -444,9 +448,32 @@ export function OhbabyTerminalApp({
             ) {
               return;
             }
+            resetTranscriptSurface("switch-session");
             store.replaceSnapshot(snapshot);
           })
-          .catch(() => undefined);
+          .catch((caught: unknown) => {
+            if (
+              !disposedRef.current &&
+              requestSequence === snapshotRefreshSequenceRef.current
+            ) {
+              store.dispatch({
+                status: {
+                  kind: "error",
+                  message: formatError(caught),
+                  recoverable: true,
+                },
+                type: "runtime.updated",
+              });
+            }
+          });
+      } else {
+        eventDispatcher.dispatch(tuiEvent);
+
+        const isNewSessionSelection = isNewSessionSelectionEvent(tuiEvent);
+        if (isNewSessionSelection) {
+          snapshotRefreshSequenceRef.current += 1;
+          resetTranscriptSurface("new-session");
+        }
       }
 
       if (
@@ -500,6 +527,7 @@ export function OhbabyTerminalApp({
     consumeCommandPanelEvent,
     exit,
     loadCatalog,
+    resetTranscriptSurface,
     setActiveCommandPanel,
     store,
     subscribeEvents,
@@ -708,6 +736,19 @@ function selectedExistingSessionIdFromEvent(
   return typeof choiceId === "string" && choiceId.length > 0
     ? choiceId
     : undefined;
+}
+
+function commandResultWithoutSessionSelection(tuiEvent: TuiEvent): TuiEvent {
+  if (
+    tuiEvent.type !== "command.result.delivered" ||
+    tuiEvent.action?.kind !== "session.selected"
+  ) {
+    return tuiEvent;
+  }
+  return {
+    ...tuiEvent,
+    action: undefined,
+  };
 }
 
 function isStringRecord(value: unknown): value is Record<string, unknown> {

@@ -7,7 +7,10 @@ import type {
   UiEventHandler,
   UiSnapshot,
 } from "ohbaby-sdk";
-import { NEW_SESSION_CLEAR_SEQUENCE } from "./app.js";
+import {
+  NEW_SESSION_CLEAR_SEQUENCE,
+  SESSION_VIEW_CLEAR_SEQUENCE,
+} from "./app.js";
 import { OhbabyTerminalApp } from "./index.js";
 import { renderOhbabyLogo } from "./render/logo.js";
 import type {
@@ -227,6 +230,35 @@ describe("OhbabyTerminalApp", () => {
 
     expect(app.lastFrame()).toContain("> hell");
     expect(app.lastFrame()).not.toContain("[P");
+  });
+
+  it("does not clear the transcript surface while editing the prompt or receiving runtime updates", async () => {
+    const client = createFakeClient(snapshot());
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    const frameCount = app.stdout.frames.length;
+    app.stdin.write("hello");
+    await flush();
+    app.stdin.write("\u001B[P");
+    await flush();
+    client.emit({
+      status: { kind: "running", runId: "run_prompt_edit" },
+      timestamp: Date.now(),
+      type: "runtime.updated",
+    });
+    await flush();
+
+    expect(app.lastFrame()).toContain("> hell");
+    expect(app.stdout.frames.slice(frameCount).join("")).not.toContain(
+      SESSION_VIEW_CLEAR_SEQUENCE,
+    );
+    app.unmount();
   });
 
   it("renders assistant markdown through the terminal markdown renderer", async () => {
@@ -1534,8 +1566,50 @@ describe("OhbabyTerminalApp", () => {
     app.unmount();
   });
 
-  it("does not clear screen for ordinary session selection actions", async () => {
-    const client = createFakeClient(snapshot(), catalog);
+  it("clears the transcript surface after an existing session snapshot is confirmed", async () => {
+    const currentSession: UiSnapshot["sessions"][number] = {
+      createdAt: "2026-05-14T00:00:00.000Z",
+      id: "session_1",
+      messages: [
+        {
+          createdAt: "2026-05-14T00:00:01.000Z",
+          id: "message_1",
+          parts: [{ text: "Source history before switch", type: "text" }],
+          role: "assistant",
+        },
+      ],
+      title: "Source",
+      updatedAt: "2026-05-14T00:00:02.000Z",
+    };
+    const targetSession: UiSnapshot["sessions"][number] = {
+      createdAt: "2026-05-14T00:00:03.000Z",
+      id: "session_2",
+      messages: [
+        {
+          createdAt: "2026-05-14T00:00:04.000Z",
+          id: "message_2",
+          parts: [{ text: "Target history after switch", type: "text" }],
+          role: "assistant",
+        },
+      ],
+      title: "Target",
+      updatedAt: "2026-05-14T00:00:05.000Z",
+    };
+    const initialSnapshot: UiSnapshot = {
+      ...snapshot(),
+      activeSessionId: "session_1",
+      sessions: [currentSession, { ...targetSession, messages: [] }],
+    };
+    const refreshedSnapshot: UiSnapshot = {
+      ...initialSnapshot,
+      activeSessionId: "session_2",
+      sessions: [{ ...currentSession, messages: [] }, targetSession],
+    };
+    const refresh = createDeferred<UiSnapshot>();
+    const client = createFakeClient(initialSnapshot, catalog);
+    client.getSnapshot
+      .mockResolvedValueOnce(initialSnapshot)
+      .mockReturnValueOnce(refresh.promise);
     const app = render(
       <OhbabyTerminalApp
         client={client}
@@ -1543,7 +1617,9 @@ describe("OhbabyTerminalApp", () => {
       />,
     );
 
-    await flush();
+    await waitForFrame(app, (frame) =>
+      frame.includes("Source history before switch"),
+    );
     const frameCount = app.stdout.frames.length;
     client.emit({
       action: {
@@ -1558,8 +1634,168 @@ describe("OhbabyTerminalApp", () => {
     await flush();
 
     expect(app.stdout.frames.slice(frameCount).join("")).not.toContain(
-      NEW_SESSION_CLEAR_SEQUENCE,
+      SESSION_VIEW_CLEAR_SEQUENCE,
     );
+    refresh.resolve(refreshedSnapshot);
+    await waitForFrame(app, (frame) =>
+      frame.includes("Target history after switch"),
+    );
+
+    const output = app.stdout.frames.slice(frameCount).join("");
+    expect(countOccurrences(output, SESSION_VIEW_CLEAR_SEQUENCE)).toBe(1);
+    const clearIndex = output.lastIndexOf(SESSION_VIEW_CLEAR_SEQUENCE);
+    expect(clearIndex).toBeGreaterThanOrEqual(0);
+    const afterClear = output.slice(
+      clearIndex + SESSION_VIEW_CLEAR_SEQUENCE.length,
+    );
+    expect(afterClear).toContain("Target history after switch");
+    expect(afterClear).not.toContain("Source history before switch");
+    expect(afterClear).not.toContain(renderOhbabyLogo());
+    app.unmount();
+  });
+
+  it("keeps the current transcript surface when an existing session refresh fails", async () => {
+    const currentSession: UiSnapshot["sessions"][number] = {
+      createdAt: "2026-05-14T00:00:00.000Z",
+      id: "session_1",
+      messages: [
+        {
+          createdAt: "2026-05-14T00:00:01.000Z",
+          id: "message_1",
+          parts: [{ text: "Source history before failed switch", type: "text" }],
+          role: "assistant",
+        },
+      ],
+      title: "Source",
+      updatedAt: "2026-05-14T00:00:02.000Z",
+    };
+    const targetSession: UiSnapshot["sessions"][number] = {
+      createdAt: "2026-05-14T00:00:03.000Z",
+      id: "session_2",
+      messages: [],
+      title: "Target",
+      updatedAt: "2026-05-14T00:00:04.000Z",
+    };
+    const initialSnapshot: UiSnapshot = {
+      ...snapshot(),
+      activeSessionId: "session_1",
+      sessions: [currentSession, targetSession],
+    };
+    const client = createFakeClient(initialSnapshot, catalog);
+    client.getSnapshot
+      .mockResolvedValueOnce(initialSnapshot)
+      .mockRejectedValueOnce(new Error("snapshot refresh failed"));
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await waitForFrame(app, (frame) =>
+      frame.includes("Source history before failed switch"),
+    );
+    const frameCount = app.stdout.frames.length;
+    client.emit({
+      action: {
+        data: { choiceId: "session_2" },
+        kind: "session.selected",
+      },
+      clientInvocationId: "inv_sessions",
+      commandRunId: "command_sessions",
+      timestamp: Date.now(),
+      type: "command.result.delivered",
+    });
+    await flush();
+
+    expect(app.stdout.frames.slice(frameCount).join("")).not.toContain(
+      SESSION_VIEW_CLEAR_SEQUENCE,
+    );
+    expect(app.lastFrame()).toContain("Source history before failed switch");
+    expect(app.lastFrame()).toContain("auto · default · session_1");
+    expect(app.lastFrame()).not.toContain(renderOhbabyLogo());
+    app.unmount();
+  });
+
+  it("keeps the current transcript surface when an existing session refresh returns a mismatched active session", async () => {
+    const currentSession: UiSnapshot["sessions"][number] = {
+      createdAt: "2026-05-14T00:00:00.000Z",
+      id: "session_1",
+      messages: [
+        {
+          createdAt: "2026-05-14T00:00:01.000Z",
+          id: "message_1",
+          parts: [
+            {
+              text: "Source history before mismatched switch",
+              type: "text",
+            },
+          ],
+          role: "assistant",
+        },
+      ],
+      title: "Source",
+      updatedAt: "2026-05-14T00:00:02.000Z",
+    };
+    const targetSession: UiSnapshot["sessions"][number] = {
+      createdAt: "2026-05-14T00:00:03.000Z",
+      id: "session_2",
+      messages: [
+        {
+          createdAt: "2026-05-14T00:00:04.000Z",
+          id: "message_2",
+          parts: [{ text: "Mismatched target history", type: "text" }],
+          role: "assistant",
+        },
+      ],
+      title: "Target",
+      updatedAt: "2026-05-14T00:00:05.000Z",
+    };
+    const initialSnapshot: UiSnapshot = {
+      ...snapshot(),
+      activeSessionId: "session_1",
+      sessions: [currentSession, { ...targetSession, messages: [] }],
+    };
+    const mismatchedSnapshot: UiSnapshot = {
+      ...initialSnapshot,
+      activeSessionId: "session_1",
+      sessions: [currentSession, targetSession],
+    };
+    const client = createFakeClient(initialSnapshot, catalog);
+    client.getSnapshot
+      .mockResolvedValueOnce(initialSnapshot)
+      .mockResolvedValueOnce(mismatchedSnapshot);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await waitForFrame(app, (frame) =>
+      frame.includes("Source history before mismatched switch"),
+    );
+    const frameCount = app.stdout.frames.length;
+    client.emit({
+      action: {
+        data: { choiceId: "session_2" },
+        kind: "session.selected",
+      },
+      clientInvocationId: "inv_sessions_mismatch",
+      commandRunId: "command_sessions_mismatch",
+      timestamp: Date.now(),
+      type: "command.result.delivered",
+    });
+    await flush();
+
+    const output = app.stdout.frames.slice(frameCount).join("");
+    expect(output).not.toContain(SESSION_VIEW_CLEAR_SEQUENCE);
+    expect(app.lastFrame()).toContain(
+      "Source history before mismatched switch",
+    );
+    expect(app.lastFrame()).toContain("auto · default · session_1");
+    expect(app.lastFrame()).not.toContain("Mismatched target history");
+    expect(app.lastFrame()).not.toContain(renderOhbabyLogo());
     app.unmount();
   });
 
@@ -1640,9 +1876,16 @@ describe("OhbabyTerminalApp", () => {
     );
     expect(frame).not.toContain(renderOhbabyLogo());
     expect(client.getSnapshot).toHaveBeenCalledTimes(2);
-    expect(app.stdout.frames.slice(frameCount).join("")).not.toContain(
-      NEW_SESSION_CLEAR_SEQUENCE,
+    const output = app.stdout.frames.slice(frameCount).join("");
+    expect(countOccurrences(output, SESSION_VIEW_CLEAR_SEQUENCE)).toBe(1);
+    const clearIndex = output.lastIndexOf(SESSION_VIEW_CLEAR_SEQUENCE);
+    expect(clearIndex).toBeGreaterThanOrEqual(0);
+    const afterClear = output.slice(
+      clearIndex + SESSION_VIEW_CLEAR_SEQUENCE.length,
     );
+    expect(afterClear).toContain("Restored target history");
+    expect(afterClear).not.toContain("Main history");
+    expect(afterClear).not.toContain(renderOhbabyLogo());
     app.unmount();
   });
 
@@ -3422,6 +3665,10 @@ async function flush(): Promise<void> {
   await new Promise((resolve) => {
     setTimeout(resolve, 0);
   });
+}
+
+function countOccurrences(value: string, search: string): number {
+  return value.split(search).length - 1;
 }
 
 async function waitForFrame(

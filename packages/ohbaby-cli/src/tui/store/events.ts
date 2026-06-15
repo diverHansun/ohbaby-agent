@@ -522,7 +522,8 @@ function resolveTranscriptState(
   runtime: TuiRuntimeStatus,
 ): TranscriptCommitState {
   // A session switch starts a fresh transcript: committed items are rebuilt
-  // wholesale because the viewport remounts its <Static> region.
+  // wholesale. Real TTY Static output is cleared by the app-level session
+  // surface reset before the replacement snapshot is rendered.
   const previousCommit =
     previous?.activeSessionId === activeSessionId
       ? {
