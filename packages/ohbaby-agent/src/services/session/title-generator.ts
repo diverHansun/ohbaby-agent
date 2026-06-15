@@ -3,7 +3,10 @@ import type {
   LLMClientInstance,
 } from "../../core/llm-client/index.js";
 import { streamChatCompletion } from "../../core/llm-client/index.js";
-import { sanitizePromptForSessionTitle } from "./prompt-sanitizer.js";
+import {
+  isDefaultSessionTitle,
+  sanitizePromptForSessionTitle,
+} from "./prompt-sanitizer.js";
 
 const DEFAULT_TITLE_GENERATION_TIMEOUT_MS = 5_000;
 const GENERATED_TITLE_MAX_LENGTH = 80;
@@ -56,10 +59,13 @@ export async function generateSessionTitle({
     return null;
   });
   const timeout = new Promise<null>((resolve) => {
-    timeoutId = setTimeout(() => {
-      abortController.abort();
-      resolve(null);
-    }, Math.max(0, timeoutMs));
+    timeoutId = setTimeout(
+      () => {
+        abortController.abort();
+        resolve(null);
+      },
+      Math.max(0, timeoutMs),
+    );
   });
 
   try {
@@ -123,7 +129,7 @@ async function collectGeneratedTitle(
   }
 
   const cleaned = cleanGeneratedSessionTitle(rawTitle);
-  return cleaned === "" ? null : cleaned;
+  return isDefaultSessionTitle(cleaned) ? null : cleaned;
 }
 
 function parseJsonTitle(value: string): string | undefined {

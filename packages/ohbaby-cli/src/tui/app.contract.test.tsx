@@ -1563,6 +1563,386 @@ describe("OhbabyTerminalApp", () => {
     app.unmount();
   });
 
+  it("refreshes the selected existing session snapshot after session selection", async () => {
+    const currentSession: UiSnapshot["sessions"][number] = {
+      createdAt: "2026-05-14T00:00:00.000Z",
+      id: "session_1",
+      messages: [
+        {
+          createdAt: "2026-05-14T00:00:01.000Z",
+          id: "message_1",
+          parts: [{ text: "Main history", type: "text" }],
+          role: "assistant",
+        },
+      ],
+      title: "Main",
+      updatedAt: "2026-05-14T00:00:02.000Z",
+    };
+    const targetSession: UiSnapshot["sessions"][number] = {
+      createdAt: "2026-05-14T00:00:03.000Z",
+      id: "session_2",
+      messages: [],
+      title: "Target",
+      updatedAt: "2026-05-14T00:00:04.000Z",
+    };
+    const staleFilteredSnapshot: UiSnapshot = {
+      ...snapshot(),
+      activeSessionId: "session_1",
+      sessions: [currentSession, targetSession],
+    };
+    const refreshedSnapshot: UiSnapshot = {
+      ...staleFilteredSnapshot,
+      activeSessionId: "session_2",
+      sessions: [
+        {
+          ...currentSession,
+          messages: [],
+        },
+        {
+          ...targetSession,
+          messages: [
+            {
+              createdAt: "2026-05-14T00:00:05.000Z",
+              id: "message_2",
+              parts: [{ text: "Restored target history", type: "text" }],
+              role: "assistant",
+            },
+          ],
+        },
+      ],
+    };
+    const client = createFakeClient(staleFilteredSnapshot, catalog);
+    client.getSnapshot
+      .mockResolvedValueOnce(staleFilteredSnapshot)
+      .mockResolvedValueOnce(refreshedSnapshot);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await waitForFrame(app, (frame) => frame.includes("Main history"));
+    const frameCount = app.stdout.frames.length;
+    client.emit({
+      action: {
+        data: { choiceId: "session_2" },
+        kind: "session.selected",
+      },
+      clientInvocationId: "inv_sessions",
+      commandRunId: "command_sessions",
+      timestamp: Date.now(),
+      type: "command.result.delivered",
+    });
+
+    const frame = await waitForFrame(app, (candidate) =>
+      candidate.includes("Restored target history"),
+    );
+    expect(frame).not.toContain(renderOhbabyLogo());
+    expect(client.getSnapshot).toHaveBeenCalledTimes(2);
+    expect(app.stdout.frames.slice(frameCount).join("")).not.toContain(
+      NEW_SESSION_CLEAR_SEQUENCE,
+    );
+    app.unmount();
+  });
+
+  it("ignores a stale initial snapshot after an existing session refresh wins", async () => {
+    const staleInitialSnapshot: UiSnapshot = {
+      ...snapshot(),
+      activeSessionId: "session_1",
+      sessions: [
+        {
+          createdAt: "2026-05-14T00:00:00.000Z",
+          id: "session_1",
+          messages: [
+            {
+              createdAt: "2026-05-14T00:00:01.000Z",
+              id: "message_1",
+              parts: [{ text: "Stale initial history", type: "text" }],
+              role: "assistant",
+            },
+          ],
+          title: "Main",
+          updatedAt: "2026-05-14T00:00:02.000Z",
+        },
+        {
+          createdAt: "2026-05-14T00:00:03.000Z",
+          id: "session_2",
+          messages: [],
+          title: "Target",
+          updatedAt: "2026-05-14T00:00:04.000Z",
+        },
+      ],
+    };
+    const refreshedSnapshot: UiSnapshot = {
+      ...staleInitialSnapshot,
+      activeSessionId: "session_2",
+      sessions: [
+        {
+          ...staleInitialSnapshot.sessions[0],
+          messages: [],
+        },
+        {
+          ...staleInitialSnapshot.sessions[1],
+          messages: [
+            {
+              createdAt: "2026-05-14T00:00:05.000Z",
+              id: "message_2",
+              parts: [{ text: "Fresh selected history", type: "text" }],
+              role: "assistant",
+            },
+          ],
+        },
+      ],
+    };
+    const initial = createDeferred<UiSnapshot>();
+    const refresh = createDeferred<UiSnapshot>();
+    const client = createFakeClient(staleInitialSnapshot, catalog);
+    client.getSnapshot
+      .mockReturnValueOnce(initial.promise)
+      .mockReturnValueOnce(refresh.promise);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    client.emit({
+      action: {
+        data: { choiceId: "session_2" },
+        kind: "session.selected",
+      },
+      clientInvocationId: "inv_sessions",
+      commandRunId: "command_sessions",
+      timestamp: Date.now(),
+      type: "command.result.delivered",
+    });
+    refresh.resolve(refreshedSnapshot);
+    const selectedFrame = await waitForFrame(app, (candidate) =>
+      candidate.includes("Fresh selected history"),
+    );
+    expect(selectedFrame).not.toContain("Stale initial history");
+
+    initial.resolve(staleInitialSnapshot);
+    await flush();
+    expect(app.lastFrame()).toContain("Fresh selected history");
+    expect(app.lastFrame()).not.toContain("Stale initial history");
+    app.unmount();
+  });
+
+  it("keeps the latest selected session when refreshes resolve out of order", async () => {
+    const sessionOne = {
+      createdAt: "2026-05-14T00:00:00.000Z",
+      id: "session_1",
+      messages: [
+        {
+          createdAt: "2026-05-14T00:00:01.000Z",
+          id: "message_1",
+          parts: [{ text: "Original history", type: "text" }],
+          role: "assistant",
+        },
+      ],
+      title: "One",
+      updatedAt: "2026-05-14T00:00:02.000Z",
+    } satisfies UiSnapshot["sessions"][number];
+    const sessionTwo = {
+      createdAt: "2026-05-14T00:00:03.000Z",
+      id: "session_2",
+      messages: [],
+      title: "Two",
+      updatedAt: "2026-05-14T00:00:04.000Z",
+    } satisfies UiSnapshot["sessions"][number];
+    const sessionThree = {
+      createdAt: "2026-05-14T00:00:05.000Z",
+      id: "session_3",
+      messages: [],
+      title: "Three",
+      updatedAt: "2026-05-14T00:00:06.000Z",
+    } satisfies UiSnapshot["sessions"][number];
+    const initialSnapshot: UiSnapshot = {
+      ...snapshot(),
+      activeSessionId: "session_1",
+      sessions: [sessionOne, sessionTwo, sessionThree],
+    };
+    const secondSelection = createDeferred<UiSnapshot>();
+    const thirdSelection = createDeferred<UiSnapshot>();
+    const client = createFakeClient(initialSnapshot, catalog);
+    client.getSnapshot
+      .mockResolvedValueOnce(initialSnapshot)
+      .mockReturnValueOnce(secondSelection.promise)
+      .mockReturnValueOnce(thirdSelection.promise);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await waitForFrame(app, (frame) => frame.includes("Original history"));
+    client.emit({
+      action: {
+        data: { choiceId: "session_2" },
+        kind: "session.selected",
+      },
+      clientInvocationId: "inv_sessions_2",
+      commandRunId: "command_sessions_2",
+      timestamp: Date.now(),
+      type: "command.result.delivered",
+    });
+    client.emit({
+      action: {
+        data: { choiceId: "session_3" },
+        kind: "session.selected",
+      },
+      clientInvocationId: "inv_sessions_3",
+      commandRunId: "command_sessions_3",
+      timestamp: Date.now(),
+      type: "command.result.delivered",
+    });
+    thirdSelection.resolve({
+      ...initialSnapshot,
+      activeSessionId: "session_3",
+      sessions: [
+        { ...sessionOne, messages: [] },
+        { ...sessionTwo, messages: [] },
+        {
+          ...sessionThree,
+          messages: [
+            {
+              createdAt: "2026-05-14T00:00:07.000Z",
+              id: "message_3",
+              parts: [{ text: "Latest selected history", type: "text" }],
+              role: "assistant",
+            },
+          ],
+        },
+      ],
+    });
+    await waitForFrame(app, (frame) =>
+      frame.includes("Latest selected history"),
+    );
+
+    secondSelection.resolve({
+      ...initialSnapshot,
+      activeSessionId: "session_2",
+      sessions: [
+        { ...sessionOne, messages: [] },
+        {
+          ...sessionTwo,
+          messages: [
+            {
+              createdAt: "2026-05-14T00:00:08.000Z",
+              id: "message_2",
+              parts: [{ text: "Older selected history", type: "text" }],
+              role: "assistant",
+            },
+          ],
+        },
+        { ...sessionThree, messages: [] },
+      ],
+    });
+    await flush();
+    expect(app.lastFrame()).toContain("Latest selected history");
+    expect(app.lastFrame()).not.toContain("Older selected history");
+    app.unmount();
+  });
+
+  it("does not let a pending existing-session refresh override /new", async () => {
+    const initialSnapshot: UiSnapshot = {
+      ...snapshot(),
+      activeSessionId: "session_1",
+      sessions: [
+        {
+          createdAt: "2026-05-14T00:00:00.000Z",
+          id: "session_1",
+          messages: [
+            {
+              createdAt: "2026-05-14T00:00:01.000Z",
+              id: "message_1",
+              parts: [{ text: "Original history", type: "text" }],
+              role: "assistant",
+            },
+          ],
+          title: "One",
+          updatedAt: "2026-05-14T00:00:02.000Z",
+        },
+        {
+          createdAt: "2026-05-14T00:00:03.000Z",
+          id: "session_2",
+          messages: [],
+          title: "Two",
+          updatedAt: "2026-05-14T00:00:04.000Z",
+        },
+      ],
+    };
+    const oldRefresh = createDeferred<UiSnapshot>();
+    const client = createFakeClient(initialSnapshot, catalog);
+    client.getSnapshot
+      .mockResolvedValueOnce(initialSnapshot)
+      .mockReturnValueOnce(oldRefresh.promise);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await waitForFrame(app, (frame) => frame.includes("Original history"));
+    const frameCount = app.stdout.frames.length;
+    client.emit({
+      action: {
+        data: { choiceId: "session_2" },
+        kind: "session.selected",
+      },
+      clientInvocationId: "inv_sessions",
+      commandRunId: "command_sessions",
+      timestamp: Date.now(),
+      type: "command.result.delivered",
+    });
+    client.emit({
+      action: {
+        data: { choiceId: "session_new", source: "new" },
+        kind: "session.selected",
+      },
+      clientInvocationId: "inv_new",
+      commandRunId: "command_new",
+      timestamp: Date.now(),
+      type: "command.result.delivered",
+    });
+    await flush();
+    expect(app.stdout.frames.slice(frameCount).join("")).toContain(
+      NEW_SESSION_CLEAR_SEQUENCE,
+    );
+
+    oldRefresh.resolve({
+      ...initialSnapshot,
+      activeSessionId: "session_2",
+      sessions: [
+        {
+          ...initialSnapshot.sessions[0],
+          messages: [],
+        },
+        {
+          ...initialSnapshot.sessions[1],
+          messages: [
+            {
+              createdAt: "2026-05-14T00:00:05.000Z",
+              id: "message_2",
+              parts: [{ text: "Old refresh history", type: "text" }],
+              role: "assistant",
+            },
+          ],
+        },
+      ],
+    });
+    await flush();
+    expect(app.lastFrame()).not.toContain("Old refresh history");
+    expect(client.getSnapshot).toHaveBeenCalledTimes(2);
+    app.unmount();
+  });
+
   it("routes /status result into an overlay card that closes with Escape", async () => {
     const client = createFakeClient(snapshot(), displayCommandCatalog);
     const app = render(
@@ -2823,6 +3203,7 @@ function createFakeClient(
   readonly executeCommand: ReturnType<typeof vi.fn>;
   readonly getContextWindowUsage: ReturnType<typeof vi.fn>;
   readonly getCurrentModel: ReturnType<typeof vi.fn>;
+  readonly getSnapshot: ReturnType<typeof vi.fn>;
   readonly listCommands: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
   readonly respondPermission: ReturnType<typeof vi.fn>;

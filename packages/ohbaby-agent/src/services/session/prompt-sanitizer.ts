@@ -29,6 +29,7 @@ export function isDefaultSessionTitle(title: string): boolean {
     normalized === "" ||
     normalized === "New session" ||
     normalized === "Untitled session" ||
+    normalized === "(Empty response)" ||
     LEGACY_NEW_SESSION_TITLE_PATTERN.test(normalized)
   );
 }

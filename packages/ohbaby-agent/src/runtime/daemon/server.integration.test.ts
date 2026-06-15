@@ -921,6 +921,187 @@ describe("createDaemonHttpServer", () => {
     });
   });
 
+  it("returns selected session transcript after selection updates the client view", async () => {
+    const targetMessage = textMessage("message_target", "target transcript");
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      activeSessionId: "session_1",
+      sessions: [
+        sessionWithMessages("session_1", [
+          textMessage("message_current", "current transcript"),
+        ]),
+        sessionWithMessages("session_2", [targetMessage]),
+      ],
+    });
+
+    await withServer(backend, async (url) => {
+      await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_init_a",
+        method: "initializeClient",
+        params: [{ resumeSessionId: "session_1" }],
+      });
+      const events = await fetch(`${url}/api/events?clientId=client_a`);
+      const readEvent = createSseReader(events);
+      await readEvent();
+
+      const before = await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_before",
+        method: "getSnapshot",
+        params: [],
+      });
+      const beforeBody = (await before.json()) as {
+        readonly result: UiSnapshot;
+      };
+      expect(beforeBody.result.activeSessionId).toBe("session_1");
+      expect(
+        beforeBody.result.sessions.find((session) => session.id === "session_2")
+          ?.messages,
+      ).toEqual([]);
+
+      await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_command",
+        method: "executeCommand",
+        params: [
+          {
+            argv: [],
+            clientInvocationId: "invoke_sessions",
+            commandId: "sessions",
+            path: ["sessions"],
+            raw: "/sessions",
+            rawArgs: "",
+            surface: "tui",
+          },
+        ],
+      });
+      const selected: UiEvent = {
+        action: {
+          data: { choiceId: "session_2" },
+          kind: "session.selected",
+        },
+        clientInvocationId: "invoke_sessions",
+        commandRunId: "command_sessions",
+        timestamp: Date.parse(timestamp),
+        type: "command.result.delivered",
+      };
+      backend.emit(selected);
+      await expect(readEvent()).resolves.toEqual({
+        event: selected,
+        type: "ui.event",
+      });
+
+      const after = await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_after",
+        method: "getSnapshot",
+        params: [],
+      });
+      const afterBody = (await after.json()) as { readonly result: UiSnapshot };
+      expect(afterBody.result.activeSessionId).toBe("session_2");
+      expect(
+        afterBody.result.sessions.find((session) => session.id === "session_2")
+          ?.messages,
+      ).toEqual([targetMessage]);
+      expect(
+        afterBody.result.sessions.find((session) => session.id === "session_1")
+          ?.messages,
+      ).toEqual([]);
+    });
+  });
+
+  it("keeps other client views unchanged when one client selects a session", async () => {
+    const currentMessage = textMessage("message_current", "current transcript");
+    const targetMessage = textMessage("message_target", "target transcript");
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      activeSessionId: "session_1",
+      sessions: [
+        sessionWithMessages("session_1", [currentMessage]),
+        sessionWithMessages("session_2", [targetMessage]),
+      ],
+    });
+
+    await withServer(backend, async (url) => {
+      await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_init_a",
+        method: "initializeClient",
+        params: [{ resumeSessionId: "session_1" }],
+      });
+      await postRpc(url, {
+        clientId: "client_b",
+        id: "rpc_init_b",
+        method: "initializeClient",
+        params: [{ resumeSessionId: "session_1" }],
+      });
+
+      await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_command",
+        method: "executeCommand",
+        params: [
+          {
+            argv: [],
+            clientInvocationId: "invoke_sessions",
+            commandId: "sessions",
+            path: ["sessions"],
+            raw: "/sessions",
+            rawArgs: "",
+            surface: "tui",
+          },
+        ],
+      });
+      backend.emit({
+        action: {
+          data: { choiceId: "session_2" },
+          kind: "session.selected",
+        },
+        clientInvocationId: "invoke_sessions",
+        commandRunId: "command_sessions",
+        timestamp: Date.parse(timestamp),
+        type: "command.result.delivered",
+      });
+
+      const owner = await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_owner",
+        method: "getSnapshot",
+        params: [],
+      });
+      const ownerBody = (await owner.json()) as { readonly result: UiSnapshot };
+      expect(ownerBody.result.activeSessionId).toBe("session_2");
+      expect(
+        ownerBody.result.sessions.find((session) => session.id === "session_2")
+          ?.messages,
+      ).toEqual([targetMessage]);
+      expect(
+        ownerBody.result.sessions.find((session) => session.id === "session_1")
+          ?.messages,
+      ).toEqual([]);
+
+      const observer = await postRpc(url, {
+        clientId: "client_b",
+        id: "rpc_observer",
+        method: "getSnapshot",
+        params: [],
+      });
+      const observerBody = (await observer.json()) as {
+        readonly result: UiSnapshot;
+      };
+      expect(observerBody.result.activeSessionId).toBe("session_1");
+      expect(
+        observerBody.result.sessions.find((session) => session.id === "session_1")
+          ?.messages,
+      ).toEqual([currentMessage]);
+      expect(
+        observerBody.result.sessions.find((session) => session.id === "session_2")
+          ?.messages,
+      ).toEqual([]);
+    });
+  });
+
   it("filters session updates outside each client view", async () => {
     const backend = new FakeBackend({
       ...emptySnapshot(),

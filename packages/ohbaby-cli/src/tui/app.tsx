@@ -60,6 +60,7 @@ export function OhbabyTerminalApp({
   const catalogRequestSequenceRef = useRef(0);
   const contextRefreshSequenceRef = useRef(0);
   const contextNoticeSequenceRef = useRef(0);
+  const snapshotRefreshSequenceRef = useRef(0);
   const didClearOnStartRef = useRef(false);
   const disposedRef = useRef(false);
   const [screenGeneration, setScreenGeneration] = useState(0);
@@ -420,10 +421,32 @@ export function OhbabyTerminalApp({
 
       eventDispatcher.dispatch(tuiEvent);
 
-      if (isNewSessionSelectionEvent(tuiEvent)) {
+      const isNewSessionSelection = isNewSessionSelectionEvent(tuiEvent);
+      if (isNewSessionSelection) {
+        snapshotRefreshSequenceRef.current += 1;
         writeStdout(NEW_SESSION_CLEAR_SEQUENCE);
         setScreenGeneration((current) => current + 1);
         setActiveCommandPanel(null);
+      }
+
+      const selectedExistingSessionId =
+        selectedExistingSessionIdFromEvent(tuiEvent);
+      if (selectedExistingSessionId !== undefined) {
+        const requestSequence = snapshotRefreshSequenceRef.current + 1;
+        snapshotRefreshSequenceRef.current = requestSequence;
+        void client
+          .getSnapshot()
+          .then((snapshot) => {
+            if (
+              disposedRef.current ||
+              requestSequence !== snapshotRefreshSequenceRef.current ||
+              snapshot.activeSessionId !== selectedExistingSessionId
+            ) {
+              return;
+            }
+            store.replaceSnapshot(snapshot);
+          })
+          .catch(() => undefined);
       }
 
       if (
@@ -438,15 +461,23 @@ export function OhbabyTerminalApp({
       }
     });
 
+    const requestSequence = snapshotRefreshSequenceRef.current + 1;
+    snapshotRefreshSequenceRef.current = requestSequence;
     void client
       .getSnapshot()
       .then((snapshot) => {
-        if (!disposedRef.current) {
+        if (
+          !disposedRef.current &&
+          requestSequence === snapshotRefreshSequenceRef.current
+        ) {
           store.replaceSnapshot(snapshot);
         }
       })
       .catch((caught: unknown) => {
-        if (!disposedRef.current) {
+        if (
+          !disposedRef.current &&
+          requestSequence === snapshotRefreshSequenceRef.current
+        ) {
           store.dispatch({
             status: {
               kind: "error",
@@ -658,6 +689,25 @@ function isNewSessionSelectionEvent(tuiEvent: TuiEvent): boolean {
   }
   const data = tuiEvent.action.data;
   return isStringRecord(data) && data.source === "new";
+}
+
+function selectedExistingSessionIdFromEvent(
+  tuiEvent: TuiEvent,
+): string | undefined {
+  if (
+    tuiEvent.type !== "command.result.delivered" ||
+    tuiEvent.action?.kind !== "session.selected"
+  ) {
+    return undefined;
+  }
+  const data = tuiEvent.action.data;
+  if (!isStringRecord(data) || data.source === "new") {
+    return undefined;
+  }
+  const choiceId = data.choiceId;
+  return typeof choiceId === "string" && choiceId.length > 0
+    ? choiceId
+    : undefined;
 }
 
 function isStringRecord(value: unknown): value is Record<string, unknown> {

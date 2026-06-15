@@ -16,8 +16,8 @@ function normalizePort(
   runtime: CliCommandRuntime,
 ): number {
   const value = port ?? 4096;
-  if (!Number.isInteger(value) || value <= 0 || value > 65_535) {
-    runtime.failUsage("--port must be a TCP port between 1 and 65535");
+  if (!Number.isInteger(value) || value < 0 || value > 65_535) {
+    runtime.failUsage("--port must be a TCP port between 0 and 65535");
   }
   return value;
 }

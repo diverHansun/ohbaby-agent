@@ -57,9 +57,9 @@ function createRuntime(): CreatedRuntime {
       updatedAt: 2,
     }),
   );
-  const stopDaemonFromState = vi.fn<
-    CliCommandRuntime["stopDaemonFromState"]
-  >(() => Promise.resolve("stopped"));
+  const stopDaemonFromState = vi.fn<CliCommandRuntime["stopDaemonFromState"]>(
+    () => Promise.resolve("stopped"),
+  );
   const runtime: CliCommandRuntime = {
     createCoreHost: vi.fn(),
     createStdoutRenderer: vi.fn(),
@@ -97,6 +97,17 @@ describe("createServeCommand", () => {
       port: 4096,
     });
     expect(stdout.join("")).toContain("http://127.0.0.1:4096");
+  });
+
+  it("accepts port 0 so auto-spawned daemons can bind a free port", async () => {
+    const { runtime, startDaemonServer } = createRuntime();
+
+    await runServe(["serve", "--port", "0"], runtime);
+
+    expect(startDaemonServer).toHaveBeenCalledWith({
+      host: "127.0.0.1",
+      port: 0,
+    });
   });
 
   it("passes an explicit auth token to the daemon server", async () => {

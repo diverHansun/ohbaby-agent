@@ -44,10 +44,11 @@ describe("session prompt sanitizer", () => {
     expect(title.length).toBeLessThanOrEqual(48);
   });
 
-  it("recognizes only legacy placeholder titles as default session titles", () => {
+  it("recognizes placeholder titles as default session titles", () => {
     expect(isDefaultSessionTitle("")).toBe(true);
     expect(isDefaultSessionTitle("  New session  ")).toBe(true);
     expect(isDefaultSessionTitle("Untitled session")).toBe(true);
+    expect(isDefaultSessionTitle("(Empty response)")).toBe(true);
     expect(
       isDefaultSessionTitle("New session - 2026-06-10T10:00:00.000Z"),
     ).toBe(true);
