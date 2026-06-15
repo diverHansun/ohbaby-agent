@@ -1,5 +1,7 @@
 # 04 · 路线 A：抽 `ohbaby-server` 新包（完整方案）
 
+> **2026-06-15 状态更新**：路线 A 仍是长期目标，但不建议短期立即执行。当前短期推荐先看 [`07-route-c-cli-inprocess-explicit-server.md`](./07-route-c-cli-inprocess-explicit-server.md)：默认 CLI 回到 in-process，`ohbaby serve`/未来 `ohbaby-server` 作为显式能力。路线 A 应在 web/app、ACP/A2A 或重协议依赖成为真实需求后再启动。
+
 > **文档职责**：一次到位的架构方案——把传输/协议/协调从 `ohbaby-agent` 抽成独立包，承载 web / 未来 app / ACP / A2A。给出架构改动、文件迁移清单、sdk/agent 调整、借鉴点引用、触发条件与风险。
 > **配套**：现状 `01`，目标 `02`，借鉴 `03`。**这是终态参考，不是必须现在执行——触发条件见第六节。**
 

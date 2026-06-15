@@ -1,5 +1,7 @@
 # 05 · 路线 B：就地优化（最小可适配本机 web 端）
 
+> **2026-06-15 状态更新**：路线 B 现在降级为 fallback/历史方案，不再作为主线推荐。它适用于“继续保留 daemon 并就地增强”的前提；当前短期推荐是 [`07-route-c-cli-inprocess-explicit-server.md`](./07-route-c-cli-inprocess-explicit-server.md)，先把默认 CLI 从 hidden daemon auto-spawn 中解耦出来。
+
 > **文档职责**：不新增包，在现有 `runtime/daemon/` 就地加最少的东西，让**本机浏览器 web 端**可接入。给出架构改动、逐文件调整、借鉴点引用。
 > **配套**：现状 `01`，目标 `02`，借鉴 `03`；与新包路线对照见 `04`。
 

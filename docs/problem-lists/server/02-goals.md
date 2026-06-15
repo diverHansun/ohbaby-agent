@@ -1,77 +1,66 @@
-# 02 · 目标与需求
+# 02 目标与非目标
 
-> **文档职责**：定义本通信层规划要达到的目标、非功能需求，以及明确**不做**什么（YAGNI 红线）。
-> **配套**：现状见 `01`，借鉴见 `03`，两条路线见 `04`/`05`。
+> 本文档更新 server 规划的目标：先恢复 CLI 的可预测性，再把 server 作为显式能力建设。默认 `ohbaby` 不应继续依赖隐藏 daemon。
 
----
+## 背景
 
-## 一、背景与定位
+当前 ohbaby 已经有一套 daemon/server 代码：HTTP JSON-RPC、SSE、权限路由、prompt queue、state/pid 文件、auto-spawn 等。它解决了一部分多窗口和前后端协作问题，但也把默认 CLI 的生命周期变复杂了：
 
-`terminal-daemon` Phase 1-4 已交付：单写者 daemon、HTTP JSON-RPC + SSE 协议、per-client 审批路由、全局 FIFO、auto-spawn。**多 CLI 终端已完整可用。**
+- 用户只是运行 `ohbaby`，却可能触发后台进程发现、启动、连接、重启、旧状态复用。
+- 多路径、多窗口、版本升级后容易出现 stale daemon、旧 session 被误复用、连接失败、端口/状态文件漂移。
+- 默认 CLI 的错误模型变成“前台 UI + 后台 daemon + 持久化 session + 网络传输”的混合体，调试成本偏高。
 
-本规划的定位：在这套已验证的协调基座上，**让非 CLI 前端（本机 web 端、未来 app 端）也能接入**，而不重新架构、不污染领域核心。
+四个参考项目的复核结论是：默认 CLI 应该是当前命令生命周期内的 runtime。server 可以很强，但必须是显式入口。
 
-核心资产是 `ohbaby-sdk` 的 `CoreApiHost`/`UiBackendClient`/`UiEvent` 契约——它是协议中性的 seam，所有目标都挂在它上面。
-
----
-
-## 二、功能目标
+## 功能目标
 
 | 优先级 | 目标 | 说明 |
 |--------|------|------|
-| P0 | **本机浏览器 web UI 可接入** | 浏览器经 HTTP+SSE 消费现有 `CoreApiHost`，提交 prompt、看流式输出、响应审批 |
-| P0 | **断线重连不丢事件** | web/app 刷新、弱网抖动后重连，补发断开期间的事件 |
-| P1 | **多前端并发** | CLI + web 同时连一个 daemon，分别操作不同 session 互不干扰；审批路由到发起方 |
-| P2 | **（未来）app 端 over LAN** | 同网段 app 发现并连接 daemon —— 需求驱动，本期仅留架构余地 |
-| P3 | **（未来）IDE 集成 ACP / agent 委派 A2A** | 作为 `CoreApiHost` 上的协议适配器后加 —— 需求驱动 |
+| P0 | 默认 `ohbaby` 走 in-process runtime | 不自动 discover/start daemon；前台进程退出即释放 runtime |
+| P0 | 默认启动创建新 session | 同一 project root 下新开窗口默认是新 session；恢复历史必须显式选择 |
+| P0 | `/new` 与首次启动显示干净启动视图 | 不带 PowerShell 历史、不混入旧 transcript；历史 session 切换才渲染历史消息 |
+| P0 | 保留显式 server 能力 | `ohbaby serve` 或未来 `ohbaby-server` 启动 HTTP/SSE server，用于 web/app/attach |
+| P1 | 支持显式 attach | TUI 或 headless run 可以连接用户指定 server URL，不隐式启动 |
+| P1 | server 负责多客户端协调 | 权限、prompt queue、SSE replay、CORS、auth、session writer 仲裁只属于 server 模式 |
+| P2 | 抽 `packages/ohbaby-server` | 当 web/app/ACP/A2A 或重协议依赖真实落地时执行 |
 
----
+## 非功能目标
 
-## 三、非功能需求
+| 维度 | 要求 |
+|------|------|
+| 可预测性 | 默认 CLI 不依赖端口、pid 文件、state 文件、后台重启 |
+| 可测试性 | CLI in-process 与 server/remote 两套路径分别测试，不互相污染 |
+| 依赖隔离 | HTTP/CORS/mDNS/auth/OpenAPI/ACP/A2A 不进入核心 agent runtime |
+| 显式生命周期 | 长生命周期 server 必须由用户显式启动、显式连接、显式停止 |
+| 渐进迁移 | 先改默认路径，再重命名/抽包；避免一次性大迁移影响 npm 稳定性 |
+| 失败可解释 | 连接失败只发生在显式 remote/server 模式；默认 CLI 失败就是当前进程失败 |
 
-| 维度 | 要求 | 依据问题 |
-|------|------|---------|
-| **可靠性** | 事件投递可恢复（seqNum + 重放），重连后前后端状态一致 | S1 |
-| **安全（本机基线）** | 鉴权 fail-closed；浏览器 CORS 白名单；不在 query string 放 secret | S2/S4 |
-| **依赖隔离** | 重协议依赖（Hono/ACP/A2A SDK）不进领域包 `ohbaby-agent` | S6（路线 A） |
-| **可演进** | 新增协议 = 新增适配器，核心零改（OCP） | S5/S6 |
-| **可逆性** | 每步增量、可回退；嵌入式/`--in-process` 逃生舱保留 | 全局 |
-| **契约稳定** | `UiBackendClient` 契约不破坏；remote 与 in-process 跑同一行为套件 | 全局 |
+## 明确非目标
 
----
+- 不继续把 hidden daemon auto-spawn 作为默认 CLI 路径。
+- 不在 v0.1.x 短期内强行引入 ACP/A2A。
+- 不默认开放 LAN 访问、mDNS、TLS、多用户权限模型。
+- 不自动重放用户 prompt。server 断开后应重新 discover/start，并提示用户重新提交。
+- 不把“session 持久化”解释为“多个终端可同时写同一个 session”。同 session 多写者要么由显式 server 仲裁，要么由文件锁/lease 拒绝或只读化。
 
-## 四、YAGNI 红线（明确不做）
+## SWE 判断
 
-这些不是疏漏，是**有意识地推迟到真实需求出现**：
+### SRP
 
-- ❌ **不引入 ACP / A2A**：没有 IDE 集成或多 agent 委派的真实需求前不建。架构上留 `CoreApiHost` 这条缝即可，适配器按需后加（claude/opencode 证明 ACP 约 7 文件薄适配）。
-- ❌ **不做远程/跨网络**：不绑 `0.0.0.0`、不上 TLS、不做多用户 authz。localhost 信任模型对当前正确；远程 app 是独立工作包。
-- ❌ **不引入 Effect 等范式框架**（opencode 用 Effect）：范式迁移成本远超收益，结论同 `terminal-daemon/03-reference-projects.md`。
-- ❌ **不为想象中的未来预先抽象领域事件**（除非选路线 A 且确认 ACP/A2A 近期上）：当前 CLI+web 共用 `UiEvent` 无痛点，提前抽象属于"为未来付费"。
+CLI 的职责是驱动一个终端会话；server 的职责是提供多客户端、远程传输、鉴权、CORS、重连、事件分发。把这两类生命周期混在默认路径里，是 daemon 问题反复出现的根因。
 
----
+### YAGNI
 
-## 五、成功标准
+当前 npm CLI 用户最需要的是稳定启动、稳定输入、稳定切换 session。web/app/ACP/A2A 是未来能力，不应让默认 CLI 先承担 server 拓扑成本。
 
-### 本机 web 端（P0，本期）
+### 依赖倒置
 
-- [ ] 浏览器从独立 origin（如 vite dev）能调通 daemon 的 RPC 与 SSE（CORS 通过）。
-- [ ] 浏览器刷新/断线重连后，通过 `lastEventId` 补回断开期间事件，UI 状态与后端一致。
-- [ ] daemon 鉴权 fail-closed：无 token 头的请求被拒，而非放行。
-- [ ] CLI 与 web 同连一个 daemon，审批弹窗只发给发起 run 的前端。
-- [ ] `UiBackendClient` 契约未破坏；现有 daemon/CLI 测试全绿。
+核心 runtime 应暴露稳定的 `CoreApiHost` / `UiBackendClient` 契约。CLI 默认直接使用本地实现；server 通过 adapter 暴露 HTTP/SSE；attach 通过 remote client 使用同一契约。
 
-### 演进余地（P2/P3，验收"不堵死"）
+### 故障隔离
 
-- [ ] 接入 web 协议未改动 `ohbaby-agent` 领域核心代码（仅传输层变化）。
-- [ ] 文档明确记录：远程 app、ACP、A2A 的接入点是 `CoreApiHost` 上的新适配器，触发条件已写明（见 04 触发点）。
+默认 CLI 没有网络连接失败、端口冲突、旧 daemon 版本、state 文件漂移这些故障面。显式 server 失败时也更容易解释：启动失败、认证失败、连接失败或 server 已退出。
 
----
+## 当前决策
 
-## 六、决策清单（需拍板）
-
-| 决策 | 选项 | 影响 |
-|------|------|------|
-| 路线选择 | A（新包）/ B（就地） | 见 04/05；推荐先 B |
-| 事件层 | UiEvent 直发 / 抽协议中性领域事件 | 仅路线 A 且 ACP/A2A 近期时选后者；否则 YAGNI 直发 |
-| 包命名（若走 A） | `ohbaby-server` / `ohbaby-host` / 保留 `daemon` | "gateway" 对单后端名不副实，建议 `ohbaby-server` |
+短期推荐路线 C：默认 CLI in-process + 显式 server。路线 A 作为长期抽包方案保留；路线 B 降级为历史/fallback。
