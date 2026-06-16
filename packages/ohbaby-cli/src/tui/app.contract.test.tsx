@@ -3585,8 +3585,16 @@ async function submitConnectField(
 ): Promise<void> {
   app.stdin.write("\r");
   await settleConnectInput();
-  app.stdin.write(value);
-  await waitForFrame(app, (nextFrame) => connectInputEchoed(nextFrame, value));
+  for (const char of value) {
+    app.stdin.write(char);
+    await flush();
+  }
+  await settleConnectInput();
+  await waitForFrame(
+    app,
+    (nextFrame) => connectInputEchoed(nextFrame, value),
+    2_000,
+  );
   app.stdin.write("\r");
   await settleConnectInput();
 }

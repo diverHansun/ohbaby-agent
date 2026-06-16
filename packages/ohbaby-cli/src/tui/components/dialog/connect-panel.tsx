@@ -87,6 +87,7 @@ export function ConnectPanel({
   const [editValue, setEditValue] = useState("");
   const [saveState, setSaveState] = useState<SaveState>({ kind: "idle" });
   const draftRef = useRef<ConnectDraft>(EMPTY_DRAFT);
+  const editingFieldRef = useRef<ConnectFieldKey | null>(null);
   const hasLocalEditRef = useRef(false);
   const editValueRef = useRef("");
   const lastSavedPayloadKeyRef = useRef<string | null>(null);
@@ -102,6 +103,11 @@ export function ConnectPanel({
   const replaceEditValue = (nextValue: string): void => {
     editValueRef.current = nextValue;
     setEditValue(nextValue);
+  };
+
+  const replaceEditingField = (nextField: ConnectFieldKey | null): void => {
+    editingFieldRef.current = nextField;
+    setEditingField(nextField);
   };
 
   const replaceDraft = (nextDraft: ConnectDraft): void => {
@@ -216,21 +222,22 @@ export function ConnectPanel({
   useInput(
     (value, key) => {
       const isReturn = key.return || value === "\r" || value === "\n";
-      if (editingField !== null) {
+      const activeEditingField = editingFieldRef.current;
+      if (activeEditingField !== null) {
         if (key.escape) {
-          setEditingField(null);
+          replaceEditingField(null);
           replaceEditValue("");
           return;
         }
         if (isReturn) {
           const nextDraft = updateDraft(
             draftRef.current,
-            editingField,
+            activeEditingField,
             editValueRef.current,
           );
           hasLocalEditRef.current = true;
           replaceDraft(nextDraft);
-          setEditingField(null);
+          replaceEditingField(null);
           replaceEditValue("");
           maybeSave(nextDraft);
           return;
@@ -263,7 +270,7 @@ export function ConnectPanel({
         return;
       }
       if (isReturn) {
-        setEditingField(selectedField.key);
+        replaceEditingField(selectedField.key);
         replaceEditValue(draftRef.current[selectedField.key]);
       }
     },

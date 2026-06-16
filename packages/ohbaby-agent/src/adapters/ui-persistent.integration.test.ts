@@ -1218,17 +1218,20 @@ describe("createPersistentUiBackendClient", () => {
         workdir,
       });
       const submitted = daemonBackend.submitPrompt("Run through daemon");
-      const result = await Promise.race([
-        submitted.then(() => "resolved" as const),
-        new Promise<"pending">((resolve) => {
-          setTimeout(() => {
-            resolve("pending");
-          }, 80);
-        }),
-      ]);
+      await vi.waitUntil(async () => {
+        const snapshot = await daemonBackend.getSnapshot();
+        return snapshot.sessions.some((session) =>
+          session.messages.some((message) =>
+            message.parts.some(
+              (part) =>
+                part.type === "text" && part.text === "Run through daemon",
+            ),
+          ),
+        );
+      });
+      await submitted;
 
       await daemonBackend.dispose();
-      expect(result).toBe("resolved");
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

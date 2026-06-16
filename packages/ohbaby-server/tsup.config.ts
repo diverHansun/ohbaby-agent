@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/bin.ts"],
+  entry: ["src/index.ts"],
   format: ["esm"],
   dts: false,
   splitting: false,
@@ -11,13 +11,6 @@ export default defineConfig({
   outDir: "dist",
   treeshake: true,
   minify: false,
-  external: [
-    "ohbaby-sdk",
-    "ohbaby-server",
-    "react",
-    "ink",
-    "yargs",
-    "yargs/helpers",
-    "yargs/yargs",
-  ],
+  shims: true,
+  external: ["ohbaby-agent", "ohbaby-sdk"],
 });

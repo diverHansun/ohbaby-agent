@@ -2,6 +2,8 @@
 
 > 本文只回答 `packages/ohbaby-server` 这个包如何落到当前 monorepo 的构建、类型检查、测试、npm 发布链路里。架构职责见 [`goals-duty.md`](./goals-duty.md)，实施顺序见 [`migration-sequence.md`](./migration-sequence.md)。
 
+> **v0.1.4 transitional state:** `ohbaby-server` owns copied auth/protocol/coordination primitives and exposes explicit server/remote entrypoints. Remote client code now lives in `ohbaby-server`; lifecycle/HTTP server start/status/stop still delegates to existing `ohbaby-agent` exports until the deeper `runtime/daemon/server.ts` split is completed. This keeps default CLI in-process and avoids reversing the dependency direction.
+
 ---
 
 ## 1. 包定位
@@ -72,15 +74,13 @@ packages/ohbaby-server/package.json
     "clean": "rimraf dist coverage"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.0",
-    "hono": "^4.10.0",
     "ohbaby-agent": "workspace:*",
     "ohbaby-sdk": "workspace:*"
   }
 }
 ```
 
-版本号在实施时应与 workspace 其他 public packages 同步到 v0.1.4。若 Hono 版本更新，以 lockfile 实际安装版本为准，不手填猜测版本。
+版本号在实施时应与 workspace 其他 public packages 同步到 v0.1.4。本期 transitional package 不引入 Hono；后续若 web/app 协议适配启用，再按 lockfile 实际版本补充依赖。
 
 ---
 
@@ -163,15 +163,13 @@ export default defineConfig({
     "net",
     "stream",
     "url",
-    "@hono/node-server",
-    "hono",
     "ohbaby-agent",
     "ohbaby-sdk"
   ]
 });
 ```
 
-`hono` 与 `@hono/node-server` 建议 external 化，让 npm 依赖按 package manager 解析，避免 bundle 后调试困难。
+显式 server/remote 路径所需的 workspace 依赖建议 external 化，让 npm 依赖按 package manager 解析，避免 bundle 后调试困难。
 
 ---
 
@@ -225,12 +223,13 @@ pnpm run build
 
 ```bash
 pnpm run build
-npm pack --workspace packages/ohbaby-cli
-npm install -g <生成的 ohbaby-cli tgz>
+pnpm exec vitest run tests/integration/cli/packaging-smoke.integration.test.ts --passWithNoTests
 ohbaby
 ohbaby serve --port 4096
 ohbaby --remote-port 4096
 ```
+
+`packaging-smoke.integration.test.ts` 必须模拟真实发布拓扑：先 pack `ohbaby-sdk` / `ohbaby-agent` / `ohbaby-server` / `ohbaby-cli`，再通过临时本地 registry 只执行 `npm install -g ohbaby-cli@<version>`。测试需要读取每个 `.tgz` 内部的 `package/package.json`，确认没有 `workspace:` 依赖残留，避免用测试代码手动改写 manifest 造成假阳性。
 
 实际命令可根据仓库当前 pack 脚本调整，但验证含义不变：
 

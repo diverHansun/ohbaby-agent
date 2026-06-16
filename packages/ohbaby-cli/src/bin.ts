@@ -3,6 +3,10 @@ import type { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
 import type { CoreAPI } from "ohbaby-sdk";
 import { createRPC } from "ohbaby-sdk";
+import type {
+  DaemonStartupIntent,
+  RemoteDaemonClientOptions,
+} from "ohbaby-server";
 import yargs from "yargs/yargs";
 import { hideBin } from "yargs/helpers";
 import { createRunCommand } from "./cli/commands/run.js";
@@ -23,6 +27,7 @@ import { renderTerminalUi } from "./tui/index.js";
 
 const VERSION = getCliPackageVersion();
 const AGENT_RUNTIME_MODULE = "ohbaby-agent";
+const SERVER_RUNTIME_MODULE = "ohbaby-server";
 
 class CliUsageError extends Error {
   constructor(message: string) {
@@ -48,6 +53,10 @@ export interface RunOhbabyCliDependencies {
 interface AgentRuntimeModule {
   readonly buildCoreAPIImpl?: unknown;
   readonly loadRuntimeEnvIntoProcessEnv?: unknown;
+}
+
+interface ServerRuntimeModule {
+  readonly createRemoteCoreApiHost?: unknown;
   readonly readDaemonStatus?: unknown;
   readonly startDaemonServer?: unknown;
   readonly stopDaemonFromState?: unknown;
@@ -70,35 +79,69 @@ async function importRuntimeModule(specifier: string): Promise<unknown> {
 function requireFunction(
   value: unknown,
   name: string,
+  moduleName: string,
 ): (...args: unknown[]) => unknown {
   if (typeof value !== "function") {
-    throw new Error(`Missing ${name} export from ${AGENT_RUNTIME_MODULE}`);
+    throw new Error(`Missing ${name} export from ${moduleName}`);
   }
   return value as (...args: unknown[]) => unknown;
 }
 
-function optionalFunction(
-  value: unknown,
-  name: string,
-): ((...args: unknown[]) => unknown) | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  return requireFunction(value, name);
-}
-
 function optionalRuntimeExport(
-  runtimeModule: AgentRuntimeModule,
-  name: keyof AgentRuntimeModule,
+  runtimeModule: Record<string, unknown>,
+  name: string,
 ): unknown {
-  const exports = runtimeModule as Record<string, unknown>;
-  return Object.prototype.hasOwnProperty.call(exports, name)
-    ? exports[name]
+  return Object.prototype.hasOwnProperty.call(runtimeModule, name)
+    ? runtimeModule[name]
     : undefined;
 }
 
 function missingRuntimeDependency(name: string): never {
   throw new Error(`CLI runtime dependency ${name} was not initialized`);
+}
+
+function assertStartupOptions(options: CliGlobalOptions): void {
+  if (options.resume !== undefined && options.continue === true) {
+    throw new Error("--resume and --continue cannot be used together");
+  }
+}
+
+function startupIntentFromOptions(
+  options: CliGlobalOptions,
+): DaemonStartupIntent {
+  return {
+    ...(options.continue === true
+      ? { startupSessionMode: { type: "continue" as const } }
+      : { startupSessionMode: { type: "fresh" as const } }),
+    ...(options.resume === undefined
+      ? {}
+      : { resumeSessionId: options.resume }),
+    ...(!options.mode && !options.permission
+      ? {}
+      : {
+          initialPermission: {
+            level: options.permission ?? "default",
+            mode: options.mode ?? "auto",
+          },
+        }),
+  };
+}
+
+function remoteHostOptionsFromCliOptions(
+  options: CliGlobalOptions,
+): RemoteDaemonClientOptions | undefined {
+  if (options.remotePort === undefined) {
+    return undefined;
+  }
+  assertStartupOptions(options);
+  return {
+    ...(options.remoteAuthToken === undefined
+      ? {}
+      : { authToken: options.remoteAuthToken }),
+    host: options.remoteHost,
+    port: options.remotePort,
+    startupIntent: startupIntentFromOptions(options),
+  };
 }
 
 async function loadDefaultDependencies(): Promise<RunOhbabyCliDependencies> {
@@ -108,32 +151,70 @@ async function loadDefaultDependencies(): Promise<RunOhbabyCliDependencies> {
   const buildCoreAPIImpl = requireFunction(
     runtimeModule.buildCoreAPIImpl,
     "buildCoreAPIImpl",
+    AGENT_RUNTIME_MODULE,
   ) as (options: CliGlobalOptions) => CliCoreHost | Promise<CliCoreHost>;
   const loadRuntimeEnvIntoProcessEnv = requireFunction(
     runtimeModule.loadRuntimeEnvIntoProcessEnv,
     "loadRuntimeEnvIntoProcessEnv",
+    AGENT_RUNTIME_MODULE,
   ) as () => Promise<void> | void;
-  const readDaemonStatus = optionalFunction(
-    optionalRuntimeExport(runtimeModule, "readDaemonStatus"),
-    "readDaemonStatus",
-  ) as CliCommandRuntime["readDaemonStatus"] | undefined;
-  const startDaemonServer = optionalFunction(
-    optionalRuntimeExport(runtimeModule, "startDaemonServer"),
-    "startDaemonServer",
-  ) as CliCommandRuntime["startDaemonServer"] | undefined;
-  const stopDaemonFromState = optionalFunction(
-    optionalRuntimeExport(runtimeModule, "stopDaemonFromState"),
-    "stopDaemonFromState",
-  ) as CliCommandRuntime["stopDaemonFromState"] | undefined;
+
+  let serverRuntimePromise: Promise<ServerRuntimeModule> | undefined;
+  const loadServerRuntimeModule = (): Promise<ServerRuntimeModule> => {
+    serverRuntimePromise ??= importRuntimeModule(
+      SERVER_RUNTIME_MODULE,
+    ) as Promise<ServerRuntimeModule>;
+    return serverRuntimePromise;
+  };
+  const requireServerFunction = async (
+    name: keyof ServerRuntimeModule,
+  ): Promise<(...args: unknown[]) => unknown> => {
+    const serverModule = await loadServerRuntimeModule();
+    return requireFunction(
+      optionalRuntimeExport(serverModule as Record<string, unknown>, name),
+      name,
+      SERVER_RUNTIME_MODULE,
+    );
+  };
 
   return {
-    createCoreHost(options): CliCoreHost | Promise<CliCoreHost> {
+    async createCoreHost(options): Promise<CliCoreHost> {
+      const remoteOptions = remoteHostOptionsFromCliOptions(options);
+      if (remoteOptions !== undefined) {
+        const createRemoteCoreApiHost = (await requireServerFunction(
+          "createRemoteCoreApiHost",
+        )) as (
+          remoteOptions: RemoteDaemonClientOptions,
+        ) => CliCoreHost | Promise<CliCoreHost>;
+        return createRemoteCoreApiHost(remoteOptions);
+      }
       return buildCoreAPIImpl(options);
     },
     loadRuntimeEnvIntoProcessEnv,
-    ...(readDaemonStatus === undefined ? {} : { readDaemonStatus }),
-    ...(startDaemonServer === undefined ? {} : { startDaemonServer }),
-    ...(stopDaemonFromState === undefined ? {} : { stopDaemonFromState }),
+    async readDaemonStatus(): ReturnType<
+      CliCommandRuntime["readDaemonStatus"]
+    > {
+      const readDaemonStatus = (await requireServerFunction(
+        "readDaemonStatus",
+      )) as CliCommandRuntime["readDaemonStatus"];
+      return readDaemonStatus();
+    },
+    async startDaemonServer(
+      options,
+    ): ReturnType<CliCommandRuntime["startDaemonServer"]> {
+      const startDaemonServer = (await requireServerFunction(
+        "startDaemonServer",
+      )) as CliCommandRuntime["startDaemonServer"];
+      return startDaemonServer(options);
+    },
+    async stopDaemonFromState(): ReturnType<
+      CliCommandRuntime["stopDaemonFromState"]
+    > {
+      const stopDaemonFromState = (await requireServerFunction(
+        "stopDaemonFromState",
+      )) as CliCommandRuntime["stopDaemonFromState"];
+      return stopDaemonFromState();
+    },
   };
 }
 
