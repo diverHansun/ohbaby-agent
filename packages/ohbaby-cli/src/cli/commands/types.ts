@@ -35,7 +35,6 @@ export interface CliGlobalOptions {
   readonly daemon?: boolean;
   readonly inProcess?: boolean;
   readonly mode?: "plan" | "auto";
-  readonly noDaemon?: boolean;
   readonly permission?: "default" | "full-access";
   readonly remoteHost?: string;
   readonly remotePort?: number;

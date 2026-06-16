@@ -59,7 +59,7 @@ describe("runOhbabyCli", () => {
     ).resolves.toBe(0);
     expect(loadRuntimeEnvIntoProcessEnv).toHaveBeenCalledTimes(1);
     expect(createCoreHost).toHaveBeenCalledWith({
-      daemon: true,
+      inProcess: true,
       mode: "plan",
       permission: "full-access",
     });
@@ -89,82 +89,70 @@ describe("runOhbabyCli", () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
-  it("uses in-process mode when requested", async () => {
+  it("rejects the removed --in-process flag", async () => {
     vi.resetModules();
-    const core = createCore();
-    const dispose = vi.fn(() => Promise.resolve());
-    const createCoreHost = vi.fn(() => ({
-      callbacks: { subscribeEvents },
-      core,
-      dispose,
+    const stderr: string[] = [];
+    vi.doMock("ohbaby-agent", () => ({
+      buildCoreAPIImpl: vi.fn(),
+      loadRuntimeEnvIntoProcessEnv: vi.fn(() => Promise.resolve()),
     }));
-    const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
-    const subscribeEvents = vi.fn((): (() => void) => () => undefined);
-    const waitUntilExit = vi.fn(() => Promise.resolve());
-    const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
-    vi.doMock("ohbaby-agent", () => {
-      throw new Error("agent should be loaded only by the default loader");
-    });
     vi.doMock("./tui/index.js", () => ({
-      renderTerminalUi,
+      renderTerminalUi: vi.fn(),
     }));
 
     const { runOhbabyCli } = await import("./bin.js");
 
     await expect(
-      runOhbabyCli(
-        ["node", "ohbaby", "--in-process"],
-        {},
-        {
-          createCoreHost,
-          loadRuntimeEnvIntoProcessEnv,
-        },
-      ),
-    ).resolves.toBe(0);
-    expect(createCoreHost).toHaveBeenCalledWith({
-      daemon: false,
-      inProcess: true,
-    });
-    expect(dispose).toHaveBeenCalledTimes(1);
+      runOhbabyCli(["node", "ohbaby", "--in-process"], {
+        stderr: { write: (chunk: string) => stderr.push(chunk) },
+        stdout: { write: vi.fn() },
+      }),
+    ).resolves.toBe(2);
+    expect(stderr.join("")).toContain("Unknown argument");
   });
 
-  it("keeps --no-daemon as an alias for in-process mode", async () => {
+  it("rejects the removed --daemon flag", async () => {
     vi.resetModules();
-    const core = createCore();
-    const dispose = vi.fn(() => Promise.resolve());
-    const createCoreHost = vi.fn(() => ({
-      callbacks: { subscribeEvents },
-      core,
-      dispose,
+    const stderr: string[] = [];
+    vi.doMock("ohbaby-agent", () => ({
+      buildCoreAPIImpl: vi.fn(),
+      loadRuntimeEnvIntoProcessEnv: vi.fn(() => Promise.resolve()),
     }));
-    const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
-    const subscribeEvents = vi.fn((): (() => void) => () => undefined);
-    const waitUntilExit = vi.fn(() => Promise.resolve());
-    const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
-    vi.doMock("ohbaby-agent", () => {
-      throw new Error("agent should be loaded only by the default loader");
-    });
     vi.doMock("./tui/index.js", () => ({
-      renderTerminalUi,
+      renderTerminalUi: vi.fn(),
     }));
 
     const { runOhbabyCli } = await import("./bin.js");
 
     await expect(
-      runOhbabyCli(
-        ["node", "ohbaby", "--no-daemon"],
-        {},
-        {
-          createCoreHost,
-          loadRuntimeEnvIntoProcessEnv,
-        },
-      ),
-    ).resolves.toBe(0);
-    expect(createCoreHost).toHaveBeenCalledWith({
-      daemon: false,
-      inProcess: true,
-    });
-    expect(dispose).toHaveBeenCalledTimes(1);
+      runOhbabyCli(["node", "ohbaby", "--daemon"], {
+        stderr: { write: (chunk: string) => stderr.push(chunk) },
+        stdout: { write: vi.fn() },
+      }),
+    ).resolves.toBe(2);
+    expect(stderr.join("")).toContain("Unknown argument");
+  });
+
+  it("rejects the removed --no-daemon alias", async () => {
+    vi.resetModules();
+    const stderr: string[] = [];
+    vi.doMock("ohbaby-agent", () => ({
+      buildCoreAPIImpl: vi.fn(),
+      loadRuntimeEnvIntoProcessEnv: vi.fn(() => Promise.resolve()),
+    }));
+    vi.doMock("./tui/index.js", () => ({
+      renderTerminalUi: vi.fn(),
+    }));
+
+    const { runOhbabyCli } = await import("./bin.js");
+
+    await expect(
+      runOhbabyCli(["node", "ohbaby", "--no-daemon"], {
+        stderr: { write: (chunk: string) => stderr.push(chunk) },
+        stdout: { write: vi.fn() },
+      }),
+    ).resolves.toBe(2);
+    expect(stderr.join("")).toContain("Unknown argument");
   });
 
   it("preflights the terminal UI when resuming a session at startup", async () => {
@@ -200,7 +188,7 @@ describe("runOhbabyCli", () => {
       ),
     ).resolves.toBe(0);
     expect(createCoreHost).toHaveBeenCalledWith({
-      daemon: true,
+      inProcess: true,
       resume: "session_2",
     });
     expect(core.getSnapshot).toHaveBeenCalledTimes(1);
@@ -208,7 +196,7 @@ describe("runOhbabyCli", () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
-  it("passes remote daemon options to the terminal host", async () => {
+  it("passes remote server options to the terminal host", async () => {
     vi.resetModules();
     const core = createCore();
     const dispose = vi.fn(() => Promise.resolve());
@@ -248,7 +236,7 @@ describe("runOhbabyCli", () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
-  it("passes an explicit remote daemon auth token to the terminal host", async () => {
+  it("passes an explicit remote server auth token to the terminal host", async () => {
     vi.resetModules();
     const core = createCore();
     const dispose = vi.fn(() => Promise.resolve());
@@ -295,7 +283,7 @@ describe("runOhbabyCli", () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
-  it("preserves resume options when using a remote daemon", async () => {
+  it("preserves resume options when using a remote server", async () => {
     vi.resetModules();
     const core = createCore();
     const dispose = vi.fn(() => Promise.resolve());
@@ -378,7 +366,7 @@ describe("runOhbabyCli", () => {
     ).resolves.toBe(0);
     expect(createCoreHost).toHaveBeenCalledWith({
       continue: true,
-      daemon: true,
+      inProcess: true,
     });
     expect(core.getSnapshot).toHaveBeenCalledTimes(1);
     expect(renderTerminalUi).toHaveBeenCalledTimes(1);
