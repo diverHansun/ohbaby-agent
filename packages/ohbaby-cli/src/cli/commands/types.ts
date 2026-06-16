@@ -32,7 +32,6 @@ export interface CliRunningDaemonServer {
 
 export interface CliGlobalOptions {
   readonly continue?: boolean;
-  readonly daemon?: boolean;
   readonly inProcess?: boolean;
   readonly mode?: "plan" | "auto";
   readonly permission?: "default" | "full-access";

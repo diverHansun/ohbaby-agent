@@ -3,13 +3,13 @@ import { resolve } from "node:path";
 import {
   closePersistentUiBackendDatabase,
   createPersistentUiBackendClient,
+  getAgentPackageVersion,
+  McpManager,
   type PersistentUiBackendClient,
   type PersistentUiBackendOptions,
-} from "../../adapters/ui-persistent.js";
-import { McpManager } from "../../mcp/index.js";
-import { createDaemonAuthToken } from "./auth.js";
+} from "ohbaby-agent";
+import { createDaemonAuthToken } from "../../auth/token.js";
 import { createDaemonHttpServer, type DaemonHttpServerHandle } from "./server.js";
-import { getAgentPackageVersion } from "../../package-version.js";
 import { JsonDaemonStateFile } from "./state-file.js";
 import { Supervisor } from "./supervisor.js";
 import type { DaemonRuntimeHandle, DaemonState } from "./types.js";

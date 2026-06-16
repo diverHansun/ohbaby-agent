@@ -19,10 +19,10 @@ export {
   createRemoteUiBackendClient,
 } from "./protocols/jsonrpc/client.js";
 export type { RemoteDaemonClientOptions } from "./protocols/jsonrpc/client.js";
-export { readDaemonStatus, startDaemonServer, stopDaemonFromState } from "ohbaby-agent";
+export { readDaemonStatus, startDaemonServer, stopDaemonFromState } from "./runtime/daemon/main.js";
 export type {
-  CoreApiHost,
-  DaemonState,
   RunningDaemonServer,
   StartDaemonServerOptions,
-} from "ohbaby-agent";
+} from "./runtime/daemon/main.js";
+export type { DaemonState } from "./runtime/daemon/types.js";
+export type { CoreApiHost } from "ohbaby-agent";

@@ -4,28 +4,12 @@ import {
   createPersistentUiBackendClient,
 } from "../adapters/ui-persistent.js";
 import { McpManager } from "../mcp/index.js";
-import { createRemoteCoreApiHost } from "../runtime/daemon/client.js";
-import type { DaemonStartupIntent } from "../runtime/daemon/protocol.js";
-import {
-  ensureDaemonRunning,
-  type EnsureDaemonRunningOptions,
-} from "../runtime/daemon/spawn.js";
-import { getAgentPackageVersion } from "../package-version.js";
 
 export interface CoreApiFactoryOptions {
   readonly continue?: boolean;
-  readonly daemon?: boolean;
-  readonly daemonPollIntervalMs?: number;
-  readonly daemonSpawn?: EnsureDaemonRunningOptions["spawn"];
-  readonly daemonStateFilePath?: string;
-  readonly daemonTimeoutMs?: number;
   readonly inProcess?: boolean;
-  readonly ensureDaemonRunning?: typeof ensureDaemonRunning;
   readonly mode?: "plan" | "auto";
   readonly permission?: "default" | "full-access";
-  readonly remoteAuthToken?: string;
-  readonly remoteHost?: string;
-  readonly remotePort?: number;
   readonly resume?: string;
 }
 
@@ -62,63 +46,8 @@ function assertStartupOptions(options: CoreApiFactoryOptions): void {
   }
 }
 
-function startupIntentFromOptions(
-  options: CoreApiFactoryOptions,
-): DaemonStartupIntent {
-  const intent: DaemonStartupIntent = {
-    ...(options.continue === true
-      ? { startupSessionMode: { type: "continue" as const } }
-      : { startupSessionMode: { type: "fresh" as const } }),
-    ...(options.resume === undefined ? {} : { resumeSessionId: options.resume }),
-    ...(!options.mode && !options.permission
-      ? {}
-      : {
-          initialPermission: {
-            level: options.permission ?? "default",
-            mode: options.mode ?? "auto",
-          },
-      }),
-  };
-  return intent;
-}
-
-export async function buildCoreAPIImpl(
-  options: CoreApiFactoryOptions = {},
-): Promise<CoreApiHost> {
+function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
   assertStartupOptions(options);
-  const startupIntent = startupIntentFromOptions(options);
-
-  if (options.remotePort !== undefined) {
-    return createRemoteCoreApiHost({
-      authToken: options.remoteAuthToken,
-      host: options.remoteHost,
-      port: options.remotePort,
-      startupIntent,
-    });
-  }
-
-  if (options.daemon === true) {
-    const discoverDaemon = options.ensureDaemonRunning ?? ensureDaemonRunning;
-    const connection = await discoverDaemon({
-      currentVersion: getAgentPackageVersion(),
-      ...(options.daemonPollIntervalMs === undefined
-        ? {}
-        : { pollIntervalMs: options.daemonPollIntervalMs }),
-      ...(options.daemonSpawn === undefined ? {} : { spawn: options.daemonSpawn }),
-      ...(options.daemonStateFilePath === undefined
-        ? {}
-        : { stateFilePath: options.daemonStateFilePath }),
-      ...(options.daemonTimeoutMs === undefined
-        ? {}
-        : { timeoutMs: options.daemonTimeoutMs }),
-    });
-    return createRemoteCoreApiHost({
-      authToken: connection.authToken,
-      host: connection.host,
-      port: connection.port,
-      startupIntent,
-    });
-  }
 
   const initialSnapshot = initialSnapshotFromOptions(options);
   const client = createPersistentUiBackendClient({
@@ -192,4 +121,10 @@ export async function buildCoreAPIImpl(
       }
     },
   };
+}
+
+export function buildCoreAPIImpl(
+  options: CoreApiFactoryOptions = {},
+): Promise<CoreApiHost> {
+  return Promise.resolve().then(() => createCoreAPIHost(options));
 }

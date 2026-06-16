@@ -151,43 +151,6 @@ describe("buildCoreAPIImpl", () => {
     expect(closePersistentUiBackendDatabase).toHaveBeenCalledTimes(1);
   });
 
-  it("uses a remote daemon host when remote port is provided", async () => {
-    vi.resetModules();
-    const createPersistentUiBackendClient = vi.fn();
-    const remoteHost = {
-      callbacks: { subscribeEvents: vi.fn() },
-      core: {},
-      dispose: vi.fn(() => Promise.resolve()),
-    };
-    const createRemoteCoreApiHost = vi.fn(() => remoteHost);
-    vi.doMock("../adapters/ui-persistent.js", () => ({
-      closePersistentUiBackendDatabase: vi.fn(),
-      createPersistentUiBackendClient,
-    }));
-    vi.doMock("../mcp/index.js", () => ({
-      McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
-    }));
-    vi.doMock("../runtime/daemon/client.js", () => ({
-      createRemoteCoreApiHost,
-    }));
-
-    const { buildCoreAPIImpl } = await import("./core-api-factory.js");
-
-    const api = await buildCoreAPIImpl({
-      remoteHost: "127.0.0.1",
-      remotePort: 4096,
-    });
-
-    expect(api).toBe(remoteHost);
-    expect(createRemoteCoreApiHost).toHaveBeenCalledWith({
-      authToken: undefined,
-      host: "127.0.0.1",
-      port: 4096,
-      startupIntent: { startupSessionMode: { type: "fresh" } },
-    });
-    expect(createPersistentUiBackendClient).not.toHaveBeenCalled();
-  });
-
   it("passes continue startup mode to the persistent backend", async () => {
     vi.resetModules();
     const createPersistentUiBackendClient = vi.fn(() => ({
@@ -245,14 +208,6 @@ describe("buildCoreAPIImpl", () => {
     vi.resetModules();
     const client = createPersistentClientMock();
     const createPersistentUiBackendClient = vi.fn(() => client);
-    const ensureDaemonRunning = vi.fn();
-    const createRemoteCoreApiHost = vi.fn();
-    vi.doMock("../runtime/daemon/client.js", () => ({
-      createRemoteCoreApiHost,
-    }));
-    vi.doMock("../runtime/daemon/spawn.js", () => ({
-      ensureDaemonRunning,
-    }));
     vi.doMock("../adapters/ui-persistent.js", () => ({
       closePersistentUiBackendDatabase: vi.fn(),
       createPersistentUiBackendClient,
@@ -265,58 +220,7 @@ describe("buildCoreAPIImpl", () => {
 
     const host = await buildCoreAPIImpl({});
     expect(createPersistentUiBackendClient).toHaveBeenCalledWith({});
-    expect(ensureDaemonRunning).not.toHaveBeenCalled();
-    expect(createRemoteCoreApiHost).not.toHaveBeenCalled();
     await expect(host.dispose()).resolves.toBeUndefined();
-  });
-
-  it("uses an auto-spawned daemon only when daemon is explicitly true", async () => {
-    vi.resetModules();
-    const remoteHost = {
-      callbacks: { subscribeEvents: vi.fn() },
-      core: {},
-      dispose: vi.fn(() => Promise.resolve()),
-    };
-    const createRemoteCoreApiHost = vi.fn(() => remoteHost);
-    const ensureDaemonRunning = vi.fn(() =>
-      Promise.resolve({
-        authToken: "token_1",
-        host: "127.0.0.1",
-        packageVersion: "0.1.0",
-        port: 4096,
-      }),
-    );
-    const createPersistentUiBackendClient = vi.fn();
-    vi.doMock("../runtime/daemon/client.js", () => ({
-      createRemoteCoreApiHost,
-    }));
-    vi.doMock("../runtime/daemon/spawn.js", () => ({
-      ensureDaemonRunning,
-    }));
-    vi.doMock("../package-version.js", () => ({
-      getAgentPackageVersion: (): string => "9.9.9",
-    }));
-    vi.doMock("../adapters/ui-persistent.js", () => ({
-      closePersistentUiBackendDatabase: vi.fn(),
-      createPersistentUiBackendClient,
-    }));
-    vi.doMock("../mcp/index.js", () => ({
-      McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
-    }));
-
-    const { buildCoreAPIImpl } = await import("./core-api-factory.js");
-
-    await expect(buildCoreAPIImpl({ daemon: true })).resolves.toBe(remoteHost);
-    expect(ensureDaemonRunning).toHaveBeenCalledWith({
-      currentVersion: "9.9.9",
-    });
-    expect(createRemoteCoreApiHost).toHaveBeenCalledWith({
-      authToken: "token_1",
-      host: "127.0.0.1",
-      port: 4096,
-      startupIntent: { startupSessionMode: { type: "fresh" } },
-    });
-    expect(createPersistentUiBackendClient).not.toHaveBeenCalled();
   });
 });
 

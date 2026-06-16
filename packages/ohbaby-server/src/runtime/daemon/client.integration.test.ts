@@ -13,7 +13,7 @@ import type {
 import {
   createRemoteUiBackendClient,
   type RemoteDaemonClientOptions,
-} from "./client.js";
+} from "../../protocols/jsonrpc/client.js";
 import {
   createDaemonHttpServer,
   type DaemonHttpServerOptions,

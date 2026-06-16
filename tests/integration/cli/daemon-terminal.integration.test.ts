@@ -6,7 +6,7 @@ import type { UiEvent } from "../../../packages/ohbaby-sdk/src/index.js";
 import {
   createRemoteUiBackendClient,
   startDaemonServer,
-} from "../../../packages/ohbaby-agent/src/runtime/daemon/index.js";
+} from "../../../packages/ohbaby-server/src/index.js";
 import { createFakeLLMClient } from "../tui/helpers.js";
 
 const cleanupDirectories: string[] = [];

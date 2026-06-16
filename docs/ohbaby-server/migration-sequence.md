@@ -19,7 +19,7 @@ v0.1.4 采用**两阶段、同一发布门禁**：
    - `ohbaby-cli` 显式 server/remote 路径接到 `ohbaby-server`。
    - 默认 `ohbaby` 仍保持 in-process，不触达 server 包。
 
-当前状态：S0 package skeleton、S1 low-risk primitives、remote client 迁移已经落地；显式 CLI server/remote 路径解析到 `ohbaby-server`。生命周期/HTTP server 文件的深层拆分仍是后续 cleanup，v0.1.4 不把 detached daemon 重新引入默认路径。
+当前状态：C1、S0、S1、S2 与必要的 S3 清理已经合并到 `main`。`ohbaby-server` 已接管 auth/protocol/coordination、remote client、HTTP server、foreground lifecycle、state/pid 文件与 `start/read/stop` 入口；`packages/ohbaby-agent/src/runtime/daemon` 已删除。v0.1.4 不把 detached auto-spawn daemon 重新引入默认路径。
 
 两阶段可以分批 commit、分批审查，但不发布中间版本。v0.1.4 发布前必须完成自动化测试、真实 API key 验证、用户本机验证。
 
@@ -49,7 +49,7 @@ work/v0.1.4-ohbaby-server
 
 目标见 [`c1-cli-inprocess.md`](./c1-cli-inprocess.md)。
 
-当前状态：`work/v0.1.4-c1-inprocess` 已实现并通过聚焦单测；仍需在 `ohbaby-server` 迁移完成后一并跑完整回归与真实环境验证，不单独发布。
+当前状态：已合并到 `main`。默认 `ohbaby` 与 `ohbaby run` 走 in-process/persistent backend；显式 `--remote-port` 由 CLI 分发到 `ohbaby-server` remote client。
 
 必要改动：
 
@@ -59,8 +59,8 @@ work/v0.1.4-ohbaby-server
   - 默认传 `{ inProcess: true }`。
   - 有 `--remote-port` 时走显式 remote。
 - `packages/ohbaby-agent/src/host/core-api-factory.ts`
-  - auto-spawn 条件收紧为仅 `options.daemon === true`。
-  - 无 remotePort、无显式 daemon 时走 local backend。
+  - 删除 remote/daemon 分支。
+  - 仅负责 local in-process/persistent backend。
 - 测试更新：
   - `packages/ohbaby-cli/src/bin.unit.test.ts`
   - `packages/ohbaby-agent/src/host/core-api-factory.unit.test.ts`
@@ -68,7 +68,7 @@ work/v0.1.4-ohbaby-server
 
 验收：
 
-- 默认 `ohbaby` 不调用 `ensureDaemonRunning()`。
+- 默认 `ohbaby` 不调用 `ensureDaemonRunning()`，并且代码库中不再保留该 auto-spawn 入口。
 - 默认 `ohbaby` 不创建 daemon state/pid 文件。
 - 同一目录两个终端启动是两个新 session。
 - 终端闪烁与 session view reset 回归不破坏。
@@ -122,11 +122,9 @@ work/v0.1.4-ohbaby-server
 候选迁移：
 
 - `runtime/daemon/client.ts` → `ohbaby-server/src/protocols/jsonrpc/client.ts`
-- `runtime/daemon/server.ts` → 拆入：
-  - `ohbaby-server/src/transport/app.ts`
-  - `ohbaby-server/src/transport/node-server.ts`
-  - `ohbaby-server/src/protocols/jsonrpc/rpc-handler.ts`
-  - `ohbaby-server/src/protocols/web/routes.ts`（如本期启用 web 路由）
+- `runtime/daemon/server.ts` → `ohbaby-server/src/runtime/daemon/server.ts`
+
+> 说明：v0.1.4 先采用保守迁移，保留现有 server 文件的内部结构，避免在包迁移同时做 HTTP/router 大拆分。后续 web/app 适配时，再把该文件拆入 `transport/` 与 `protocols/`。
 
 接线原则：
 
@@ -157,13 +155,13 @@ work/v0.1.4-ohbaby-server
 策略：
 
 - foreground server 是主路径。
-- detached lifecycle 若保留，迁到 `ohbaby-server/src/lifecycle/detached/`，并只由显式命令触达。
-- 若当前 v0.1.4 不需要 detached，先不打磨，只保留必要兼容或删除入口。
+- `supervisor.ts`、`state-file.ts`、`pid-file.ts`、`main.ts` 已迁移到 `ohbaby-server/src/runtime/daemon/`，只服务显式 `ohbaby serve/status/stop`。
+- `spawn.ts` / `ensureDaemonRunning()` 已删除，不再作为默认 CLI 或显式 server 的稳定性方案。
 
 验收：
 
 - 默认 CLI 不 import `spawn/supervisor/state-file/pid-file`。
-- `rg "ensureDaemonRunning|pid-file|state-file"` 不应命中默认 terminal path 的生产调用链。
+- `rg "ensureDaemonRunning|packages/ohbaby-agent/src/runtime/daemon" packages tests` 不应命中生产代码。
 
 ---
 

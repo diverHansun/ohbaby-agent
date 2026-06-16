@@ -2,7 +2,7 @@
 
 > 本文只回答 `packages/ohbaby-server` 这个包如何落到当前 monorepo 的构建、类型检查、测试、npm 发布链路里。架构职责见 [`goals-duty.md`](./goals-duty.md)，实施顺序见 [`migration-sequence.md`](./migration-sequence.md)。
 
-> **v0.1.4 transitional state:** `ohbaby-server` owns copied auth/protocol/coordination primitives and exposes explicit server/remote entrypoints. Remote client code now lives in `ohbaby-server`; lifecycle/HTTP server start/status/stop still delegates to existing `ohbaby-agent` exports until the deeper `runtime/daemon/server.ts` split is completed. This keeps default CLI in-process and avoids reversing the dependency direction.
+> **v0.1.4 implementation state:** `ohbaby-server` owns auth/protocol/coordination primitives, remote client code, and explicit server lifecycle/HTTP start/status/stop entrypoints. `ohbaby-agent` no longer contains `src/runtime/daemon`; it exposes only backend/domain runtime capabilities needed by `ohbaby-server`. Default `ohbaby` remains in-process and does not import or start the server package.
 
 ---
 
@@ -80,7 +80,7 @@ packages/ohbaby-server/package.json
 }
 ```
 
-版本号在实施时应与 workspace 其他 public packages 同步到 v0.1.4。本期 transitional package 不引入 Hono；后续若 web/app 协议适配启用，再按 lockfile 实际版本补充依赖。
+版本号在实施时应与 workspace 其他 public packages 同步到 v0.1.4。本期 server package 不引入 Hono；后续若 web/app 协议适配启用，再按 lockfile 实际版本补充依赖。
 
 ---
 

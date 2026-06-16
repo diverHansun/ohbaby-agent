@@ -1,6 +1,12 @@
 export { createInProcessUiBackendClient } from "./adapters/ui-inprocess.js";
-export { createPersistentUiBackendClient } from "./adapters/ui-persistent.js";
-export type { PersistentUiBackendOptions } from "./adapters/ui-persistent.js";
+export {
+  closePersistentUiBackendDatabase,
+  createPersistentUiBackendClient,
+} from "./adapters/ui-persistent.js";
+export type {
+  PersistentUiBackendClient,
+  PersistentUiBackendOptions,
+} from "./adapters/ui-persistent.js";
 export { buildCoreAPIImpl } from "./host/core-api-factory.js";
 export type {
   CoreApiFactoryOptions,
@@ -86,18 +92,11 @@ export * from "./core/llm-client/index.js";
 export * from "./mcp/index.js";
 export * from "./project/index.js";
 export * from "./runtime/interaction-broker/index.js";
-export {
-  readDaemonStatus,
-  startDaemonServer,
-  stopDaemonFromState,
-} from "./runtime/daemon/index.js";
-export type {
-  DaemonState,
-  RunningDaemonServer,
-  StartDaemonServerOptions,
-} from "./runtime/daemon/index.js";
+export { SessionRunBusyError } from "./runtime/run-ledger/index.js";
 export * from "./sandbox/index.js";
 export * from "./shell/index.js";
 export * from "./snapshot/index.js";
+export { getAgentPackageVersion } from "./package-version.js";
+export { createSessionIdGenerator } from "./services/session/index.js";
 export * from "./skill/index.js";
 export * from "./utils/index.js";

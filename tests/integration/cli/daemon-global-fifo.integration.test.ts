@@ -10,7 +10,7 @@ import type {
 import {
   createRemoteUiBackendClient,
   startDaemonServer,
-} from "../../../packages/ohbaby-agent/src/runtime/daemon/index.js";
+} from "../../../packages/ohbaby-server/src/index.js";
 import { createTemporarySessionTitle } from "../../../packages/ohbaby-agent/src/services/session/index.js";
 
 interface FakeSdkClient {

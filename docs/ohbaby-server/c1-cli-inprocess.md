@@ -4,7 +4,7 @@
 > **来源决策**：`docs/problem-lists/server/07-route-c-cli-inprocess-explicit-server.md` 的 C1。本文是它的落地版。
 > **交付**：独立阶段、独立 commit，可单独测试审查；但与 `ohbaby-server` 迁移共用同一个 v0.1.4 release gate，不单独发布中间版本。
 
-> **实施状态**：已在 `work/v0.1.4-c1-inprocess` 实现默认 in-process、删除用户可见 `--daemon` / `--in-process`，等待 `ohbaby-server` 迁移、完整回归、真实 API key 验证和用户本机测试后进入 v0.1.4 发布门禁。
+> **实施状态**：已合并到 `main`。默认 in-process、删除用户可见 `--daemon` / `--in-process`，并在 `ohbaby-server` 迁移后删除 `ohbaby-agent/src/runtime/daemon`。仍需完整回归、真实 API key 验证和用户本机测试后进入 v0.1.4 发布门禁。
 
 ---
 
@@ -23,14 +23,14 @@ daemon/server 能力**不删除**，改为显式：`ohbaby serve` 起 server，`
 | 入口 | 文件 | 当前默认 | 处置 |
 |------|------|---------|------|
 | `terminal`（`ohbaby`） | [terminal.ts:95-102](../../packages/ohbaby-cli/src/cli/commands/terminal.ts#L95-L102) | 无 flag → `{ daemon: true }` auto-spawn | ✅ 翻为 in-process |
-| `core-api-factory` | [core-api-factory.ts:100](../../packages/ohbaby-agent/src/host/core-api-factory.ts#L100) | `inProcess !== true && daemon !== false` → spawn | ✅ 收紧为仅显式 daemon |
-| `run`（`ohbaby run`） | [run.ts:51-52](../../packages/ohbaby-cli/src/cli/commands/run.ts#L51-L52) | 已 `{ daemon: false, inProcess: true }` | ✓ 已正确，作样板 |
+| `core-api-factory` | [core-api-factory.ts](../../packages/ohbaby-agent/src/host/core-api-factory.ts) | `inProcess !== true && daemon !== false` → spawn | ✓ 删除 remote/daemon 分支，仅保留 local backend |
+| `run`（`ohbaby run`） | [run.ts](../../packages/ohbaby-cli/src/cli/commands/run.ts) | 已 `{ daemon: false, inProcess: true }` | ✓ 仅保留 `{ inProcess: true }` |
 | `serve`（`ohbaby serve`） | [serve.ts](../../packages/ohbaby-cli/src/cli/commands/serve.ts) | 显式 server（start/status/stop） | ✓ 保留（文案 daemon→server 属 C2） |
 
 连锁反应（删 `--daemon` 后）：
 - `terminal` 只剩两种模式：默认 in-process / `--remote-port` 显式 attach。
-- `ensureDaemonRunning` / `spawn.ts`（自动发现-或-拉起）**失去唯一生产调用方**，只剩测试/SDK 使用 → 白纸黑字证明"自动 spawn 不在任何默认路径"，为迁移时把它归入 detached 降级抽屉提供依据。
-- daemon/server 代码本身**不在 C1 删除**，仍供 `serve` + 显式 attach 使用；删码是迁移阶段的事。
+- `ensureDaemonRunning` / `spawn.ts`（自动发现-或-拉起）在 C1 后失去生产调用方，并已在 server 迁移清理中删除。
+- daemon/server 代码不再留在 `ohbaby-agent`；显式 `serve` + remote attach 由 `ohbaby-server` 承担。
 
 ---
 
@@ -40,7 +40,7 @@ daemon/server 能力**不删除**，改为显式：`ohbaby serve` 起 server，`
 |------|------|------|
 | `--daemon` 标志 | **删除** | 偏好干净；daemon 能力经 serve+attach 显式保留 |
 | `--in-process` 标志 | **删除** | 默认已 in-process，该 flag 成冗余别名 |
-| daemon 分支代码 | **C1 保留，迁移再删** | C1 保持最小，只翻默认值 |
+| daemon 分支代码 | **迁移到 ohbaby-server，并删除 agent 目录** | C1 后的 v0.1.4 清理已完成 |
 | 交付节奏 | **独立阶段 + 同一 v0.1.4 门禁** | 小改动先落地验证，但不单独发布中间版本 |
 
 ---
@@ -54,12 +54,12 @@ daemon/server 能力**不删除**，改为显式：`ohbaby serve` 起 server，`
 - 清理 describe 文案中的 "daemon" 措辞（如 `--remote-port` 描述）。
 
 ### 步骤 2：`core-api-factory.ts`
-- 将 [line 100](../../packages/ohbaby-agent/src/host/core-api-factory.ts#L100) 条件从 `options.inProcess !== true && options.daemon !== false` 改为 **仅 `options.daemon === true`** 才进 `ensureDaemonRunning` 分支。
-- 默认（无 daemon、无 remotePort）直接落到 `createPersistentUiBackendClient` in-process 分支。
-- daemon 分支代码保留（迁移阶段处理）。
+- 删除 `remotePort` / `daemon` / `ensureDaemonRunning` 分支。
+- 默认直接落到 `createPersistentUiBackendClient` in-process/persistent 分支。
+- remote 选择由 `ohbaby-cli` 命令层分发到 `ohbaby-server`。
 
 ### 步骤 3：测试跟随
-- `core-api-factory.unit.test.ts`：默认用例断言从"走 daemon"改为"走 in-process"；保留显式 `daemon: true` 仍走 spawn 的用例。
+- `core-api-factory.unit.test.ts`：默认用例断言从"走 daemon"改为"走 in-process"；删除显式 `daemon: true` auto-spawn 用例。
 - `bin.unit.test.ts`：terminal 默认传参断言更新（不再有 `{ daemon: true }`）。
 - `spawn.unit.test.ts`：确认无"默认必被调用"的隐式断言（spawn 自身逻辑不变）。
 - daemon 全局 FIFO 集成测试：改用 `serve` + `--remote-port` 驱动 daemon 路径（不能再靠 `terminal --daemon`）。
@@ -91,7 +91,7 @@ daemon/server 能力**不删除**，改为显式：`ohbaby serve` 起 server，`
 
 ## 七、与后续迁移的衔接
 
-C1 完成后，不单独发布；进入 `ohbaby-server` 迁移阶段。迁移 plan 见 [`migration-sequence.md`](./migration-sequence.md)。C1 已证明自动 spawn 不在默认路径，迁移时可放心把 `spawn/supervisor/state-file/pid-file` 归入 `lifecycle/` 降级抽屉（见 [architecture.md](./architecture.md)）。
+C1 完成后，不单独发布；进入 `ohbaby-server` 迁移阶段。迁移 plan 见 [`migration-sequence.md`](./migration-sequence.md)。当前 `spawn/ensureDaemonRunning` 已删除，`supervisor/state-file/pid-file/main` 已迁到 `ohbaby-server` 的显式 server runtime。
 
 ---
 

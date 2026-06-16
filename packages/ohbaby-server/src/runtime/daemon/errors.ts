@@ -4,8 +4,8 @@ export class DaemonAlreadyRunningError extends Error {
   constructor(readonly record?: DaemonPidRecord) {
     super(
       record
-        ? `ohbaby-agent daemon is already running with pid ${String(record.pid)}`
-        : "ohbaby-agent daemon is already running",
+        ? `ohbaby-server is already running with pid ${String(record.pid)}`
+        : "ohbaby-server is already running",
     );
     this.name = "DaemonAlreadyRunningError";
   }

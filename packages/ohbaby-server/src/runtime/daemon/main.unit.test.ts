@@ -71,16 +71,13 @@ describe("startDaemonServer", () => {
   it("uses the agent package version for daemon discovery metadata by default", async () => {
     vi.resetModules();
     let capturedPackageVersion: string | undefined;
-    vi.doMock("../../package-version.js", () => ({
-      getAgentPackageVersion: (): string => "9.9.9",
-    }));
-    vi.doMock("../../adapters/ui-persistent.js", () => ({
+    vi.doMock("ohbaby-agent", () => ({
       closePersistentUiBackendDatabase: vi.fn(),
+      createSessionIdGenerator: (): (() => string) => () => "session_test",
       createPersistentUiBackendClient: vi.fn(() =>
         createFakeBackend(vi.fn(() => Promise.resolve())),
       ),
-    }));
-    vi.doMock("../../mcp/index.js", () => ({
+      getAgentPackageVersion: (): string => "9.9.9",
       McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
     }));
     vi.doMock("./server.js", () => ({
@@ -103,9 +100,7 @@ describe("startDaemonServer", () => {
 
       expect(capturedPackageVersion).toBe("9.9.9");
     } finally {
-      vi.doUnmock("../../package-version.js");
-      vi.doUnmock("../../adapters/ui-persistent.js");
-      vi.doUnmock("../../mcp/index.js");
+      vi.doUnmock("ohbaby-agent");
       vi.doUnmock("./server.js");
     }
   });
@@ -117,11 +112,11 @@ describe("startDaemonServer", () => {
     const createPersistentUiBackendClient = vi.fn(() =>
       createFakeBackend(vi.fn(() => Promise.resolve())),
     );
-    vi.doMock("../../adapters/ui-persistent.js", () => ({
+    vi.doMock("ohbaby-agent", () => ({
       closePersistentUiBackendDatabase,
+      createSessionIdGenerator: (): (() => string) => () => "session_test",
       createPersistentUiBackendClient,
-    }));
-    vi.doMock("../../mcp/index.js", () => ({
+      getAgentPackageVersion: (): string => "0.1.0",
       McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
     }));
     vi.doMock("./server.js", () => ({
@@ -163,8 +158,7 @@ describe("startDaemonServer", () => {
 
       expect(capturedIdleTimeoutMs).toBe(15 * 60 * 1000);
     } finally {
-      vi.doUnmock("../../adapters/ui-persistent.js");
-      vi.doUnmock("../../mcp/index.js");
+      vi.doUnmock("ohbaby-agent");
       vi.doUnmock("./server.js");
       vi.doUnmock("./supervisor.js");
     }
@@ -178,11 +172,11 @@ describe("startDaemonServer", () => {
     const createPersistentUiBackendClient = vi.fn(() =>
       createFakeBackend(vi.fn(() => Promise.resolve())),
     );
-    vi.doMock("../../adapters/ui-persistent.js", () => ({
+    vi.doMock("ohbaby-agent", () => ({
       closePersistentUiBackendDatabase,
+      createSessionIdGenerator: (): (() => string) => () => "session_test",
       createPersistentUiBackendClient,
-    }));
-    vi.doMock("../../mcp/index.js", () => ({
+      getAgentPackageVersion: (): string => "0.1.0",
       McpManager: { disposeAll },
     }));
 
@@ -212,8 +206,7 @@ describe("startDaemonServer", () => {
 
       await daemon.stop();
     } finally {
-      vi.doUnmock("../../adapters/ui-persistent.js");
-      vi.doUnmock("../../mcp/index.js");
+      vi.doUnmock("ohbaby-agent");
       await rm(tempDir, { force: true, recursive: true });
     }
   });
@@ -227,11 +220,11 @@ describe("startDaemonServer", () => {
     const createPersistentUiBackendClient = vi.fn(() =>
       createFakeBackend(disposeBackend),
     );
-    vi.doMock("../../adapters/ui-persistent.js", () => ({
+    vi.doMock("ohbaby-agent", () => ({
       closePersistentUiBackendDatabase,
+      createSessionIdGenerator: (): (() => string) => () => "session_test",
       createPersistentUiBackendClient,
-    }));
-    vi.doMock("../../mcp/index.js", () => ({
+      getAgentPackageVersion: (): string => "0.1.0",
       McpManager: { disposeAll },
     }));
 
@@ -249,8 +242,7 @@ describe("startDaemonServer", () => {
       expect(disposeAll).toHaveBeenCalledTimes(1);
       expect(closePersistentUiBackendDatabase).toHaveBeenCalledTimes(1);
     } finally {
-      vi.doUnmock("../../adapters/ui-persistent.js");
-      vi.doUnmock("../../mcp/index.js");
+      vi.doUnmock("ohbaby-agent");
       await rm(tempDir, { force: true, recursive: true });
     }
   });

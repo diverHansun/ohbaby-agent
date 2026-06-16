@@ -6,14 +6,16 @@ import type {
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
-import { createSessionIdGenerator } from "../../services/session/index.js";
-import { SessionRunBusyError } from "../run-ledger/index.js";
-import { isAuthorizedDaemonRequest } from "./auth.js";
-import { PermissionRouter } from "./permission-router.js";
+import {
+  createSessionIdGenerator,
+  SessionRunBusyError,
+} from "ohbaby-agent";
+import { isAuthorizedDaemonRequest } from "../../auth/token.js";
+import { PermissionRouter } from "../../coordination/permission-router.js";
 import {
   DaemonPromptQueue,
   type DaemonPromptQueueItem,
-} from "./prompt-queue.js";
+} from "../../coordination/prompt-queue.js";
 import {
   createDaemonRpcFailure,
   createDaemonRpcSuccess,
@@ -22,7 +24,7 @@ import {
   type DaemonRpcResponse,
   type DaemonSseEvent,
   type DaemonStartupIntent,
-} from "./protocol.js";
+} from "../../protocols/jsonrpc/protocol.js";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4096;

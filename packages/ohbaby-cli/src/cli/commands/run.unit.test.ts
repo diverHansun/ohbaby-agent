@@ -14,7 +14,6 @@ describe("createRunCommand", () => {
     } as never);
 
     expect(runtime.createCoreHost).toHaveBeenCalledWith({
-      daemon: false,
       inProcess: true,
       mode: "plan",
       permission: "full-access",

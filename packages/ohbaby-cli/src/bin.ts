@@ -3,10 +3,6 @@ import type { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
 import type { CoreAPI } from "ohbaby-sdk";
 import { createRPC } from "ohbaby-sdk";
-import type {
-  DaemonStartupIntent,
-  RemoteDaemonClientOptions,
-} from "ohbaby-server";
 import yargs from "yargs/yargs";
 import { hideBin } from "yargs/helpers";
 import { createRunCommand } from "./cli/commands/run.js";
@@ -48,6 +44,22 @@ export interface RunOhbabyCliDependencies {
   readonly readDaemonStatus?: CliCommandRuntime["readDaemonStatus"];
   readonly startDaemonServer?: CliCommandRuntime["startDaemonServer"];
   readonly stopDaemonFromState?: CliCommandRuntime["stopDaemonFromState"];
+}
+
+interface DaemonStartupIntent {
+  readonly startupSessionMode?: { readonly type: "continue" | "fresh" };
+  readonly resumeSessionId?: string;
+  readonly initialPermission?: {
+    readonly level: "default" | "full-access";
+    readonly mode: "plan" | "auto";
+  };
+}
+
+interface RemoteDaemonClientOptions {
+  readonly authToken?: string;
+  readonly host?: string;
+  readonly port: number;
+  readonly startupIntent?: DaemonStartupIntent;
 }
 
 interface AgentRuntimeModule {

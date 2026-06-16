@@ -63,6 +63,10 @@ export default defineConfig({
         find: "ohbaby-cli",
         replacement: resolve(__dirname, "./packages/ohbaby-cli/src/index.ts"),
       },
+      {
+        find: "ohbaby-server",
+        replacement: resolve(__dirname, "./packages/ohbaby-server/src/index.ts"),
+      },
     ],
   },
 });
