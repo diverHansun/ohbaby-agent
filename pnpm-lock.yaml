@@ -110,6 +110,9 @@ importers:
       ohbaby-sdk:
         specifier: workspace:*
         version: link:../ohbaby-sdk
+      ohbaby-server:
+        specifier: workspace:*
+        version: link:../ohbaby-server
       react:
         specifier: 19.2.3
         version: 19.2.3
@@ -122,6 +125,15 @@ importers:
         version: 17.0.35
 
   packages/ohbaby-sdk: {}
+
+  packages/ohbaby-server:
+    dependencies:
+      ohbaby-agent:
+        specifier: workspace:*
+        version: link:../ohbaby-agent
+      ohbaby-sdk:
+        specifier: workspace:*
+        version: link:../ohbaby-sdk
 
 packages:
 

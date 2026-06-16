@@ -19,6 +19,8 @@ v0.1.4 采用**两阶段、同一发布门禁**：
    - `ohbaby-cli` 显式 server/remote 路径接到 `ohbaby-server`。
    - 默认 `ohbaby` 仍保持 in-process，不触达 server 包。
 
+当前状态：S0 package skeleton、S1 low-risk primitives、remote client 迁移已经落地；显式 CLI server/remote 路径解析到 `ohbaby-server`。生命周期/HTTP server 文件的深层拆分仍是后续 cleanup，v0.1.4 不把 detached daemon 重新引入默认路径。
+
 两阶段可以分批 commit、分批审查，但不发布中间版本。v0.1.4 发布前必须完成自动化测试、真实 API key 验证、用户本机验证。
 
 ---

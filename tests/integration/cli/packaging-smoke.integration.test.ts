@@ -1,7 +1,15 @@
 import { spawn, spawnSync } from "node:child_process";
+import { createReadStream } from "node:fs";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
+import type { AddressInfo } from "node:net";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 interface CommandResult {
@@ -13,7 +21,37 @@ interface CommandResult {
 interface NpmPackEntry {
   readonly filename: string;
   readonly files?: readonly { readonly path: string }[];
+  readonly integrity?: string;
   readonly name: string;
+  readonly shasum?: string;
+  readonly version?: string;
+}
+
+interface PackageJson {
+  readonly bin?: Readonly<Record<string, string>>;
+  readonly dependencies?: Readonly<Record<string, string>>;
+  readonly description?: string;
+  readonly engines?: Readonly<Record<string, string>>;
+  readonly exports?: unknown;
+  readonly license?: string;
+  readonly main?: string;
+  readonly name: string;
+  readonly optionalDependencies?: Readonly<Record<string, string>>;
+  readonly peerDependencies?: Readonly<Record<string, string>>;
+  readonly type?: string;
+  readonly version: string;
+}
+
+interface PackedWorkspacePackage {
+  readonly entry: NpmPackEntry;
+  readonly packageJson: PackageJson;
+  readonly tarballPath: string;
+}
+
+interface LocalRegistryPackage {
+  readonly entry: NpmPackEntry;
+  readonly manifest: PackageJson;
+  readonly tarballPath: string;
 }
 
 const pinnedRuntimeDependencies = ["ink", "ink-gradient", "react"] as const;
@@ -139,6 +177,10 @@ function pnpmCommand(): string {
   return process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 }
 
+function tarCommand(): string {
+  return process.platform === "win32" ? "tar.exe" : "tar";
+}
+
 function installedOhbabyPath(prefix: string): string {
   if (process.platform === "win32") {
     return join(prefix, "ohbaby.cmd");
@@ -183,10 +225,209 @@ async function readInstalledDependencyVersion(
   return dependencyPackageJson.version as string;
 }
 
+function createPackageManifest(input: {
+  readonly baseUrl: string;
+  readonly entry: NpmPackEntry;
+  readonly packageJson: PackageJson;
+}): PackageJson & {
+  readonly dist: {
+    readonly integrity?: string;
+    readonly shasum?: string;
+    readonly tarball: string;
+  };
+} {
+  const tarballUrl = new URL(
+    `/tarballs/${encodeURIComponent(input.entry.filename)}`,
+    input.baseUrl,
+  );
+
+  return {
+    ...input.packageJson,
+    dist: {
+      ...(input.entry.integrity ? { integrity: input.entry.integrity } : {}),
+      ...(input.entry.shasum ? { shasum: input.entry.shasum } : {}),
+      tarball: tarballUrl.toString(),
+    },
+  };
+}
+
+async function startLocalNpmRegistry(
+  packages: readonly PackedWorkspacePackage[],
+): Promise<{ readonly close: () => Promise<void>; readonly url: string }> {
+  const packageMap = new Map<string, LocalRegistryPackage>();
+  for (const packedPackage of packages) {
+    packageMap.set(packedPackage.packageJson.name, {
+      entry: packedPackage.entry,
+      manifest: packedPackage.packageJson,
+      tarballPath: packedPackage.tarballPath,
+    });
+  }
+
+  const server = createServer((request, response) => {
+    void handleRegistryRequest({
+      packageMap,
+      request,
+      response,
+      server,
+    });
+  });
+
+  await new Promise<void>((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolveListen();
+    });
+  });
+
+  const address = server.address() as AddressInfo;
+  const url = `http://127.0.0.1:${String(address.port)}/`;
+  return {
+    close: () =>
+      new Promise<void>((resolveClose, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolveClose();
+        });
+      }),
+    url,
+  };
+}
+
+async function handleRegistryRequest(input: {
+  readonly packageMap: ReadonlyMap<string, LocalRegistryPackage>;
+  readonly request: IncomingMessage;
+  readonly response: ServerResponse;
+  readonly server: Server;
+}): Promise<void> {
+  try {
+    const requestUrl = new URL(input.request.url ?? "/", "http://localhost");
+    const pathname = requestUrl.pathname;
+
+    if (pathname.startsWith("/tarballs/")) {
+      const filename = decodeURIComponent(pathname.slice("/tarballs/".length));
+      for (const localPackage of input.packageMap.values()) {
+        if (localPackage.tarballPath.endsWith(filename)) {
+          streamFile(input.response, localPackage.tarballPath);
+          return;
+        }
+      }
+      sendJson(input.response, 404, { error: "tarball not found" });
+      return;
+    }
+
+    const localPackageRequest = parseLocalPackageRequest(pathname);
+    if (localPackageRequest) {
+      const localPackage = input.packageMap.get(localPackageRequest.name);
+      if (localPackage) {
+        if (
+          localPackageRequest.version !== undefined &&
+          localPackageRequest.version !== localPackage.manifest.version
+        ) {
+          sendJson(input.response, 404, { error: "version not found" });
+          return;
+        }
+        const baseUrl = registryBaseUrl(input.server);
+        const manifest = createPackageManifest({
+          baseUrl,
+          entry: localPackage.entry,
+          packageJson: localPackage.manifest,
+        });
+
+        if (localPackageRequest.version) {
+          sendJson(input.response, 200, manifest);
+          return;
+        }
+
+        sendJson(input.response, 200, {
+          _id: localPackage.manifest.name,
+          "dist-tags": { latest: localPackage.manifest.version },
+          name: localPackage.manifest.name,
+          versions: {
+            [localPackage.manifest.version]: manifest,
+          },
+        });
+        return;
+      }
+      if (localPackageRequest.name.startsWith("ohbaby-")) {
+        sendJson(input.response, 404, { error: "local package not found" });
+        return;
+      }
+    }
+
+    await proxyRegistryRequest(input.request, input.response);
+  } catch (error) {
+    sendJson(input.response, 500, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function parseLocalPackageRequest(
+  pathname: string,
+): { readonly name: string; readonly version?: string } | undefined {
+  const parts = pathname
+    .split("/")
+    .filter((part) => part.length > 0)
+    .map(decodeURIComponent);
+  if (parts.length === 1) {
+    return { name: parts[0] };
+  }
+  if (parts.length === 2) {
+    return { name: parts[0], version: parts[1] };
+  }
+  return undefined;
+}
+
+function registryBaseUrl(server: Server): string {
+  const address = server.address() as AddressInfo;
+  return `http://127.0.0.1:${String(address.port)}/`;
+}
+
+function sendJson(
+  response: ServerResponse,
+  statusCode: number,
+  payload: unknown,
+): void {
+  response.writeHead(statusCode, { "content-type": "application/json" });
+  response.end(JSON.stringify(payload));
+}
+
+function streamFile(response: ServerResponse, path: string): void {
+  response.writeHead(200, { "content-type": "application/octet-stream" });
+  createReadStream(path).pipe(response);
+}
+
+async function proxyRegistryRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  if (request.method !== "GET") {
+    sendJson(response, 405, { error: "method not allowed" });
+    return;
+  }
+
+  const upstream = await fetch(
+    new URL(request.url ?? "/", "https://registry.npmjs.org/"),
+    {
+      headers: request.headers.accept
+        ? { accept: String(request.headers.accept) }
+        : undefined,
+    },
+  );
+  response.writeHead(upstream.status, {
+    "content-type": upstream.headers.get("content-type") ?? "application/json",
+  });
+  response.end(Buffer.from(await upstream.arrayBuffer()));
+}
+
 async function packWorkspacePackage(input: {
   readonly packDestination: string;
   readonly packageDirectory: string;
-}): Promise<NpmPackEntry> {
+}): Promise<PackedWorkspacePackage> {
   const result = await runCommand({
     command: pnpmCommand(),
     args: ["pack", "--json", "--pack-destination", input.packDestination],
@@ -196,6 +437,17 @@ async function packWorkspacePackage(input: {
   expectSuccess(result, `pnpm pack ${input.packageDirectory}`);
 
   const entry = parsePackEntry(result.stdout);
+  const tarballPath = resolve(input.packDestination, entry.filename);
+  const packageJson = await readPackedPackageJson({
+    packDestination: input.packDestination,
+    tarballPath,
+  });
+  expect(packageJson.name).toBe(entry.name);
+  if (entry.version !== undefined) {
+    expect(packageJson.version).toBe(entry.version);
+  }
+  expectNoWorkspaceDependencyRanges(packageJson);
+
   expect(entry.files ?? []).not.toEqual(
     expect.arrayContaining([
       expect.objectContaining({
@@ -217,7 +469,56 @@ async function packWorkspacePackage(input: {
       }),
     ]),
   );
-  return entry;
+  return {
+    entry,
+    packageJson,
+    tarballPath,
+  };
+}
+
+async function readPackedPackageJson(input: {
+  readonly packDestination: string;
+  readonly tarballPath: string;
+}): Promise<PackageJson> {
+  const extractDirectory = join(
+    input.packDestination,
+    `${basename(input.tarballPath)}-contents`,
+  );
+  await mkdir(extractDirectory, { recursive: true });
+
+  const extractResult = await runCommand({
+    command: tarCommand(),
+    args: [
+      "-xzf",
+      input.tarballPath,
+      "-C",
+      extractDirectory,
+      "package/package.json",
+    ],
+    timeoutMs: 30_000,
+  });
+  expectSuccess(extractResult, `extract ${input.tarballPath} package.json`);
+
+  return JSON.parse(
+    await readFile(join(extractDirectory, "package", "package.json"), "utf8"),
+  ) as PackageJson;
+}
+
+function expectNoWorkspaceDependencyRanges(packageJson: PackageJson): void {
+  const dependencyFields = {
+    dependencies: packageJson.dependencies,
+    optionalDependencies: packageJson.optionalDependencies,
+    peerDependencies: packageJson.peerDependencies,
+  };
+
+  for (const [field, dependencies] of Object.entries(dependencyFields)) {
+    for (const [name, version] of Object.entries(dependencies ?? {})) {
+      expect(
+        version,
+        `${packageJson.name} ${field}.${name} must be npm-compatible`,
+      ).not.toMatch(/^workspace:/u);
+    }
+  }
 }
 
 describe("npm packed CLI smoke", () => {
@@ -242,6 +543,8 @@ describe("npm packed CLI smoke", () => {
         "ohbaby-cli",
         "--filter",
         "ohbaby-agent",
+        "--filter",
+        "ohbaby-server",
         "--sort",
         "build",
       ],
@@ -257,35 +560,50 @@ describe("npm packed CLI smoke", () => {
       packDestination,
       packageDirectory: join(repoRoot, "packages", "ohbaby-agent"),
     });
+    const serverPack = await packWorkspacePackage({
+      packDestination,
+      packageDirectory: join(repoRoot, "packages", "ohbaby-server"),
+    });
     const cliPack = await packWorkspacePackage({
       packDestination,
       packageDirectory: join(repoRoot, "packages", "ohbaby-cli"),
     });
+    const cliPackageJson = cliPack.packageJson;
 
-    const installResult = await runCommand({
-      command: npm,
-      args: [
-        "install",
-        "-g",
-        "--prefix",
-        prefix,
-        "--no-audit",
-        "--no-fund",
-        "--ignore-scripts",
-        "--loglevel=error",
-        "--prefer-offline",
-        resolve(packDestination, sdkPack.filename),
-        resolve(packDestination, cliPack.filename),
-        resolve(packDestination, agentPack.filename),
-      ],
-      env: {
-        ...process.env,
-        npm_config_cache: npmCache,
-        npm_config_tmp: npmTmp,
-      },
-      timeoutMs: 180_000,
-    });
-    expectSuccess(installResult, "npm install global packed ohbaby-cli");
+    const registry = await startLocalNpmRegistry([
+      sdkPack,
+      agentPack,
+      serverPack,
+      cliPack,
+    ]);
+
+    try {
+      const installResult = await runCommand({
+        command: npm,
+        args: [
+          "install",
+          "-g",
+          "--prefix",
+          prefix,
+          "--registry",
+          registry.url,
+          "--no-audit",
+          "--no-fund",
+          "--ignore-scripts",
+          "--loglevel=error",
+          `${cliPackageJson.name}@${cliPackageJson.version}`,
+        ],
+        env: {
+          ...process.env,
+          npm_config_cache: npmCache,
+          npm_config_tmp: npmTmp,
+        },
+        timeoutMs: 180_000,
+      });
+      expectSuccess(installResult, "npm install global packed ohbaby-cli");
+    } finally {
+      await registry.close();
+    }
 
     const installedCliPackage = installedGlobalPackagePath(
       prefix,
@@ -317,9 +635,12 @@ describe("npm packed CLI smoke", () => {
       [
         'const mod = await import("ohbaby-cli");',
         'const agent = await import("ohbaby-agent");',
+        'const server = await import("ohbaby-server");',
         'if (typeof mod.renderTerminalUi !== "function") throw new Error("missing renderTerminalUi export");',
         'if (typeof mod.OhbabyTerminalApp !== "function") throw new Error("missing OhbabyTerminalApp export");',
         'if (typeof agent.buildCoreAPIImpl !== "function") throw new Error("missing buildCoreAPIImpl export");',
+        'if (typeof server.createRemoteCoreApiHost !== "function") throw new Error("missing createRemoteCoreApiHost export");',
+        'if (typeof server.startDaemonServer !== "function") throw new Error("missing startDaemonServer export");',
         'if (typeof mod.TerminalUiOptions !== "undefined") throw new Error("TerminalUiOptions should be type-only");',
       ].join("\n"),
       "utf8",

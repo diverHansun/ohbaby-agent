@@ -7,14 +7,14 @@
     "outDir": "dist",
     "tsBuildInfoFile": "tsconfig.tsbuildinfo"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "include": ["src/**/*.ts"],
   "exclude": ["dist", "coverage", "node_modules"],
   "references": [
     {
       "path": "../ohbaby-sdk"
     },
     {
-      "path": "../ohbaby-server"
+      "path": "../ohbaby-agent"
     }
   ]
 }

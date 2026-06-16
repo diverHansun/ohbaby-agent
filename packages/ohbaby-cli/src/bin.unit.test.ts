@@ -25,6 +25,43 @@ describe("runOhbabyCli", () => {
     }
   });
 
+  it("starts the default terminal through ohbaby-agent without loading ohbaby-server", async () => {
+    vi.resetModules();
+    const core = createCore();
+    const dispose = vi.fn(() => Promise.resolve());
+    const subscribeEvents = vi.fn((): (() => void) => () => undefined);
+    const buildCoreAPIImpl = vi.fn(() => ({
+      callbacks: { subscribeEvents },
+      core,
+      dispose,
+    }));
+    const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
+    const waitUntilExit = vi.fn(() => Promise.resolve());
+    const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
+    vi.doMock("ohbaby-agent", () => ({
+      buildCoreAPIImpl,
+      loadRuntimeEnvIntoProcessEnv,
+    }));
+    vi.doMock("ohbaby-server", () => {
+      throw new Error(
+        "ohbaby-server should not be loaded for default terminal",
+      );
+    });
+    vi.doMock("./tui/index.js", () => ({
+      renderTerminalUi,
+    }));
+
+    const { runOhbabyCli } = await import("./bin.js");
+
+    await expect(runOhbabyCli(["node", "ohbaby"])).resolves.toBe(0);
+    expect(loadRuntimeEnvIntoProcessEnv).toHaveBeenCalledTimes(1);
+    expect(buildCoreAPIImpl).toHaveBeenCalledWith({
+      inProcess: true,
+    });
+    expect(renderTerminalUi).toHaveBeenCalledTimes(1);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
   it("starts the terminal UI through injected host dependencies", async () => {
     vi.resetModules();
     const core = createCore();
@@ -236,6 +273,114 @@ describe("runOhbabyCli", () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
+  it("loads explicit remote hosts from ohbaby-server", async () => {
+    vi.resetModules();
+    const core = createCore();
+    const dispose = vi.fn(() => Promise.resolve());
+    const subscribeEvents = vi.fn((): (() => void) => () => undefined);
+    const createRemoteCoreApiHost = vi.fn(() => ({
+      callbacks: { subscribeEvents },
+      core,
+      dispose,
+    }));
+    const buildCoreAPIImpl = vi.fn(() => {
+      throw new Error("agent host should not be used for explicit remote");
+    });
+    const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
+    const waitUntilExit = vi.fn(() => Promise.resolve());
+    const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
+    vi.doMock("ohbaby-agent", () => ({
+      buildCoreAPIImpl,
+      loadRuntimeEnvIntoProcessEnv,
+    }));
+    vi.doMock("ohbaby-server", () => ({
+      createRemoteCoreApiHost,
+      readDaemonStatus: vi.fn(),
+      startDaemonServer: vi.fn(),
+      stopDaemonFromState: vi.fn(),
+    }));
+    vi.doMock("./tui/index.js", () => ({
+      renderTerminalUi,
+    }));
+
+    const { runOhbabyCli } = await import("./bin.js");
+
+    await expect(
+      runOhbabyCli(["node", "ohbaby", "--remote-port", "4096"]),
+    ).resolves.toBe(0);
+    expect(createRemoteCoreApiHost).toHaveBeenCalledWith({
+      host: "127.0.0.1",
+      port: 4096,
+      startupIntent: { startupSessionMode: { type: "fresh" } },
+    });
+    expect(buildCoreAPIImpl).not.toHaveBeenCalled();
+    expect(renderTerminalUi).toHaveBeenCalledTimes(1);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps remote auth and startup intent before loading ohbaby-server", async () => {
+    vi.resetModules();
+    const core = createCore();
+    const dispose = vi.fn(() => Promise.resolve());
+    const subscribeEvents = vi.fn((): (() => void) => () => undefined);
+    const createRemoteCoreApiHost = vi.fn(() => ({
+      callbacks: { subscribeEvents },
+      core,
+      dispose,
+    }));
+    const buildCoreAPIImpl = vi.fn(() => {
+      throw new Error("agent host should not be used for explicit remote");
+    });
+    const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
+    const waitUntilExit = vi.fn(() => Promise.resolve());
+    const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
+    vi.doMock("ohbaby-agent", () => ({
+      buildCoreAPIImpl,
+      loadRuntimeEnvIntoProcessEnv,
+    }));
+    vi.doMock("ohbaby-server", () => ({
+      createRemoteCoreApiHost,
+      readDaemonStatus: vi.fn(),
+      startDaemonServer: vi.fn(),
+      stopDaemonFromState: vi.fn(),
+    }));
+    vi.doMock("./tui/index.js", () => ({
+      renderTerminalUi,
+    }));
+
+    const { runOhbabyCli } = await import("./bin.js");
+
+    await expect(
+      runOhbabyCli([
+        "node",
+        "ohbaby",
+        "--remote-port",
+        "4096",
+        "--remote-auth-token",
+        "token_1",
+        "--resume",
+        "session_1",
+        "--mode",
+        "plan",
+        "--permission",
+        "full-access",
+      ]),
+    ).resolves.toBe(0);
+    expect(createRemoteCoreApiHost).toHaveBeenCalledWith({
+      authToken: "token_1",
+      host: "127.0.0.1",
+      port: 4096,
+      startupIntent: {
+        initialPermission: { level: "full-access", mode: "plan" },
+        resumeSessionId: "session_1",
+        startupSessionMode: { type: "fresh" },
+      },
+    });
+    expect(buildCoreAPIImpl).not.toHaveBeenCalled();
+    expect(renderTerminalUi).toHaveBeenCalledTimes(1);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
   it("passes an explicit remote server auth token to the terminal host", async () => {
     vi.resetModules();
     const core = createCore();
@@ -307,14 +452,7 @@ describe("runOhbabyCli", () => {
 
     await expect(
       runOhbabyCli(
-        [
-          "node",
-          "ohbaby",
-          "--remote-port",
-          "4096",
-          "--resume",
-          "session_1",
-        ],
+        ["node", "ohbaby", "--remote-port", "4096", "--resume", "session_1"],
         {},
         {
           createCoreHost,
@@ -516,6 +654,8 @@ describe("runOhbabyCli", () => {
     vi.doMock("ohbaby-agent", () => ({
       buildCoreAPIImpl: vi.fn(),
       loadRuntimeEnvIntoProcessEnv: vi.fn(() => Promise.resolve()),
+    }));
+    vi.doMock("ohbaby-server", () => ({
       readDaemonStatus: vi.fn(() => Promise.resolve(undefined)),
       startDaemonServer,
       stopDaemonFromState: vi.fn(() => Promise.resolve("not-running")),
