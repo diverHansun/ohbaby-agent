@@ -11,9 +11,57 @@ import type {
 } from "./types.js";
 
 const require = createRequire(import.meta.url);
+const NODE_SQLITE_EXPERIMENTAL_WARNING =
+  "SQLite is an experimental feature and might change at any time";
+
+function isNodeSqliteExperimentalWarning(
+  warning: unknown,
+  typeOrOptions: unknown,
+): boolean {
+  const message =
+    warning instanceof Error
+      ? warning.message
+      : typeof warning === "string"
+        ? warning
+        : undefined;
+  const type =
+    typeof typeOrOptions === "string"
+      ? typeOrOptions
+      : typeof typeOrOptions === "object" &&
+          typeOrOptions !== null &&
+          "type" in typeOrOptions &&
+          typeof typeOrOptions.type === "string"
+        ? typeOrOptions.type
+        : undefined;
+  return (
+    type === "ExperimentalWarning" &&
+    message === NODE_SQLITE_EXPERIMENTAL_WARNING
+  );
+}
+
+export function suppressNodeSqliteExperimentalWarning<T>(
+  operation: () => T,
+): T {
+  const originalEmitWarning = Reflect.get(process, "emitWarning");
+  process.emitWarning = (...args: unknown[]): void => {
+    if (isNodeSqliteExperimentalWarning(args[0], args[1])) {
+      return;
+    }
+    Reflect.apply(originalEmitWarning, process, args);
+  };
+  try {
+    return operation();
+  } finally {
+    process.emitWarning = originalEmitWarning;
+  }
+}
 
 function loadNodeSqlite(): typeof import("node:sqlite") {
-  return require("node:sqlite") as typeof import("node:sqlite");
+  const sqliteModule = suppressNodeSqliteExperimentalWarning((): unknown => {
+    const loadedModule: unknown = require("node:sqlite");
+    return loadedModule;
+  });
+  return sqliteModule as typeof import("node:sqlite");
 }
 
 class NodeSqliteStatement<Row> implements DatabaseStatement<Row> {
