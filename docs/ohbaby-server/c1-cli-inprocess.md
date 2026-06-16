@@ -4,6 +4,8 @@
 > **来源决策**：`docs/problem-lists/server/07-route-c-cli-inprocess-explicit-server.md` 的 C1。本文是它的落地版。
 > **交付**：独立阶段、独立 commit，可单独测试审查；但与 `ohbaby-server` 迁移共用同一个 v0.1.4 release gate，不单独发布中间版本。
 
+> **实施状态**：已在 `work/v0.1.4-c1-inprocess` 实现默认 in-process、删除用户可见 `--daemon` / `--in-process`，等待 `ohbaby-server` 迁移、完整回归、真实 API key 验证和用户本机测试后进入 v0.1.4 发布门禁。
+
 ---
 
 ## 一、目标
@@ -90,3 +92,11 @@ daemon/server 能力**不删除**，改为显式：`ohbaby serve` 起 server，`
 ## 七、与后续迁移的衔接
 
 C1 完成后，不单独发布；进入 `ohbaby-server` 迁移阶段。迁移 plan 见 [`migration-sequence.md`](./migration-sequence.md)。C1 已证明自动 spawn 不在默认路径，迁移时可放心把 `spawn/supervisor/state-file/pid-file` 归入 `lifecycle/` 降级抽屉（见 [architecture.md](./architecture.md)）。
+
+---
+
+## 八、Release notes draft
+
+- 默认 `ohbaby` 改为 in-process runtime，不再自动 discover/spawn 隐藏 daemon。
+- 移除 `--daemon` 与 `--in-process`；它们属于内部实现细节，不再作为用户 CLI surface 暴露。
+- 显式 server 使用路径仍保留：`ohbaby serve` 启动服务，`ohbaby --remote-port <port>` 连接显式 server。

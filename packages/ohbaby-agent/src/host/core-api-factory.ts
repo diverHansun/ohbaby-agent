@@ -97,7 +97,7 @@ export async function buildCoreAPIImpl(
     });
   }
 
-  if (options.inProcess !== true && options.daemon !== false) {
+  if (options.daemon === true) {
     const discoverDaemon = options.ensureDaemonRunning ?? ensureDaemonRunning;
     const connection = await discoverDaemon({
       currentVersion: getAgentPackageVersion(),

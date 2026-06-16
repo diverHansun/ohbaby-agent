@@ -241,7 +241,36 @@ describe("buildCoreAPIImpl", () => {
     expect(createPersistentUiBackendClient).not.toHaveBeenCalled();
   });
 
-  it("uses an auto-spawned daemon by default", async () => {
+  it("uses the in-process persistent backend by default", async () => {
+    vi.resetModules();
+    const client = createPersistentClientMock();
+    const createPersistentUiBackendClient = vi.fn(() => client);
+    const ensureDaemonRunning = vi.fn();
+    const createRemoteCoreApiHost = vi.fn();
+    vi.doMock("../runtime/daemon/client.js", () => ({
+      createRemoteCoreApiHost,
+    }));
+    vi.doMock("../runtime/daemon/spawn.js", () => ({
+      ensureDaemonRunning,
+    }));
+    vi.doMock("../adapters/ui-persistent.js", () => ({
+      closePersistentUiBackendDatabase: vi.fn(),
+      createPersistentUiBackendClient,
+    }));
+    vi.doMock("../mcp/index.js", () => ({
+      McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
+    }));
+
+    const { buildCoreAPIImpl } = await import("./core-api-factory.js");
+
+    const host = await buildCoreAPIImpl({});
+    expect(createPersistentUiBackendClient).toHaveBeenCalledWith({});
+    expect(ensureDaemonRunning).not.toHaveBeenCalled();
+    expect(createRemoteCoreApiHost).not.toHaveBeenCalled();
+    await expect(host.dispose()).resolves.toBeUndefined();
+  });
+
+  it("uses an auto-spawned daemon only when daemon is explicitly true", async () => {
     vi.resetModules();
     const remoteHost = {
       callbacks: { subscribeEvents: vi.fn() },
@@ -277,7 +306,7 @@ describe("buildCoreAPIImpl", () => {
 
     const { buildCoreAPIImpl } = await import("./core-api-factory.js");
 
-    await expect(buildCoreAPIImpl({})).resolves.toBe(remoteHost);
+    await expect(buildCoreAPIImpl({ daemon: true })).resolves.toBe(remoteHost);
     expect(ensureDaemonRunning).toHaveBeenCalledWith({
       currentVersion: "9.9.9",
     });
@@ -290,3 +319,35 @@ describe("buildCoreAPIImpl", () => {
     expect(createPersistentUiBackendClient).not.toHaveBeenCalled();
   });
 });
+
+function createPersistentClientMock(): {
+  readonly abortRun: ReturnType<typeof vi.fn>;
+  readonly compactSession: ReturnType<typeof vi.fn>;
+  readonly connectModel: ReturnType<typeof vi.fn>;
+  readonly dispose: ReturnType<typeof vi.fn>;
+  readonly executeCommand: ReturnType<typeof vi.fn>;
+  readonly getContextWindowUsage: ReturnType<typeof vi.fn>;
+  readonly getCurrentModel: ReturnType<typeof vi.fn>;
+  readonly getSnapshot: ReturnType<typeof vi.fn>;
+  readonly listCommands: ReturnType<typeof vi.fn>;
+  readonly respondInteraction: ReturnType<typeof vi.fn>;
+  readonly respondPermission: ReturnType<typeof vi.fn>;
+  readonly submitPrompt: ReturnType<typeof vi.fn>;
+  readonly subscribeEvents: ReturnType<typeof vi.fn>;
+} {
+  return {
+    abortRun: vi.fn(() => Promise.resolve()),
+    compactSession: vi.fn(() => Promise.resolve()),
+    connectModel: vi.fn(() => Promise.resolve()),
+    dispose: vi.fn(() => Promise.resolve()),
+    executeCommand: vi.fn(() => Promise.resolve()),
+    getContextWindowUsage: vi.fn(() => Promise.resolve(null)),
+    getCurrentModel: vi.fn(() => Promise.resolve(null)),
+    getSnapshot: vi.fn(() => Promise.resolve()),
+    listCommands: vi.fn(() => Promise.resolve({ commands: [] })),
+    respondInteraction: vi.fn(() => Promise.resolve()),
+    respondPermission: vi.fn(() => Promise.resolve()),
+    submitPrompt: vi.fn(() => Promise.resolve()),
+    subscribeEvents: vi.fn((): (() => void) => () => undefined),
+  };
+}

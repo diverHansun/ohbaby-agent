@@ -47,6 +47,8 @@ work/v0.1.4-ohbaby-server
 
 目标见 [`c1-cli-inprocess.md`](./c1-cli-inprocess.md)。
 
+当前状态：`work/v0.1.4-c1-inprocess` 已实现并通过聚焦单测；仍需在 `ohbaby-server` 迁移完成后一并跑完整回归与真实环境验证，不单独发布。
+
 必要改动：
 
 - `packages/ohbaby-cli/src/cli/commands/terminal.ts`
