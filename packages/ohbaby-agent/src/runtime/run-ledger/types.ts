@@ -17,12 +17,16 @@ export interface RunLedgerRecord {
   readonly startedAt?: number;
   readonly endedAt?: number;
   readonly error?: string;
+  readonly ownerId?: string;
+  readonly ownerPid?: number;
 }
 
 export interface CreatePendingRunLedgerInput {
   readonly runId: string;
   readonly sessionId: string;
   readonly triggerSource: TriggerSource;
+  readonly ownerId?: string;
+  readonly ownerPid?: number;
 }
 
 export type ClaimPendingRunLedgerInput = CreatePendingRunLedgerInput;
@@ -42,9 +46,7 @@ export interface MarkInterruptedResult {
 
 export interface RunLedger {
   createPending(input: CreatePendingRunLedgerInput): Promise<RunLedgerRecord>;
-  claimPendingRun(
-    input: ClaimPendingRunLedgerInput,
-  ): Promise<RunLedgerRecord>;
+  claimPendingRun(input: ClaimPendingRunLedgerInput): Promise<RunLedgerRecord>;
   markRunning(runId: string): Promise<RunLedgerRecord>;
   markSucceeded(runId: string): Promise<RunLedgerRecord>;
   markFailed(runId: string, error: unknown): Promise<RunLedgerRecord>;
@@ -52,6 +54,7 @@ export interface RunLedger {
   markInterrupted(
     options?: MarkInterruptedOptions,
   ): Promise<MarkInterruptedResult>;
+  recoverOrphanedRuns(): Promise<MarkInterruptedResult>;
   get(runId: string): Promise<RunLedgerRecord | undefined>;
   listBySession(
     sessionId: string,
@@ -61,5 +64,8 @@ export interface RunLedger {
 }
 
 export interface InMemoryRunLedgerOptions {
+  readonly isOwnerAlive?: (pid: number) => boolean;
   readonly now?: () => number;
+  readonly ownerId?: string;
+  readonly ownerPid?: number;
 }

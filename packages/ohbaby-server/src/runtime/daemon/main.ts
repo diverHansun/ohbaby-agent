@@ -9,7 +9,10 @@ import {
   type PersistentUiBackendOptions,
 } from "ohbaby-agent";
 import { createDaemonAuthToken } from "../../auth/token.js";
-import { createDaemonHttpServer, type DaemonHttpServerHandle } from "./server.js";
+import {
+  createDaemonHttpServer,
+  type DaemonHttpServerHandle,
+} from "./server.js";
 import { JsonDaemonStateFile } from "./state-file.js";
 import { Supervisor } from "./supervisor.js";
 import type { DaemonRuntimeHandle, DaemonState } from "./types.js";
@@ -89,7 +92,6 @@ export async function startDaemonServer(
   const supervisor = new Supervisor({
     bootstrap(): DaemonRuntimeHandle {
       const backend = createPersistentUiBackendClient({
-        backendLeaseMode: "disabled",
         ...(options.dbPath === undefined ? {} : { dbPath: options.dbPath }),
         ...(options.llmClient === undefined
           ? {}
@@ -110,7 +112,12 @@ export async function startDaemonServer(
         packageVersion,
         port: options.port ?? DEFAULT_PORT,
       });
-      return createServerRuntime({ authToken, backend, packageVersion, server });
+      return createServerRuntime({
+        authToken,
+        backend,
+        packageVersion,
+        server,
+      });
     },
     ...(options.pidFilePath === undefined
       ? {}
@@ -147,7 +154,9 @@ export async function readDaemonStatus(): Promise<DaemonState | undefined> {
   return new JsonDaemonStateFile(DEFAULT_STATE_FILE).read();
 }
 
-export async function stopDaemonFromState(): Promise<"stopped" | "not-running"> {
+export async function stopDaemonFromState(): Promise<
+  "stopped" | "not-running"
+> {
   const state = await readDaemonStatus();
   if (
     state?.pid === undefined ||

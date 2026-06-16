@@ -147,4 +147,36 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
       ALTER TABLE snapshot_patch ADD COLUMN post_tree_ref TEXT;
     `,
   },
+  {
+    version: "006_run_owner",
+    sql: `
+      CREATE TABLE IF NOT EXISTS run_ledger (
+        run_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+        trigger TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at INTEGER NOT NULL,
+        started_at INTEGER,
+        ended_at INTEGER,
+        error TEXT,
+        UNIQUE (run_id, session_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_run_ledger_session ON run_ledger(session_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_run_ledger_status ON run_ledger(status);
+
+      CREATE TABLE IF NOT EXISTS app_state (
+        scope TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (scope, key)
+      );
+
+      ALTER TABLE run_ledger ADD COLUMN owner_id TEXT;
+      ALTER TABLE run_ledger ADD COLUMN owner_pid INTEGER;
+
+      DELETE FROM app_state
+        WHERE scope = 'global' AND key = 'persistentUiBackendLease';
+    `,
+  },
 ];

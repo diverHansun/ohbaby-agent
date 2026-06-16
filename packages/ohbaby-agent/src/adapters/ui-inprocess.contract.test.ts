@@ -1063,6 +1063,11 @@ class RecordingRunLedger implements RunLedger {
     return this.inner.markInterrupted(options);
   }
 
+  recoverOrphanedRuns(): Promise<MarkInterruptedResult> {
+    this.calls.push("recoverOrphanedRuns");
+    return this.inner.recoverOrphanedRuns();
+  }
+
   get(runId: string): Promise<RunLedgerRecord | undefined> {
     return this.inner.get(runId);
   }
@@ -3115,9 +3120,9 @@ describe("createInProcessUiBackendClient", () => {
     expect(snapshot.sessions.map((session) => session.id)).toEqual([
       "session_empty",
     ]);
-    expect(snapshot.sessions[0].messages.map((message) => message.role)).toEqual(
-      ["user", "assistant"],
-    );
+    expect(
+      snapshot.sessions[0].messages.map((message) => message.role),
+    ).toEqual(["user", "assistant"]);
   });
 
   it("does not reuse an inactive empty session when submitting a prompt without an explicit session id", async () => {
@@ -3618,9 +3623,7 @@ describe("createInProcessUiBackendClient", () => {
           ...baseClient.provider,
           streamChatCompletion(
             request: InterfaceProviderRequest,
-          ): Promise<
-            AsyncIterable<InterfaceProviderStreamEvent>
-          > {
+          ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
             if (isTitleGenerationRequest(request)) {
               return Promise.resolve(createTitleProviderStream(request));
             }
@@ -5261,12 +5264,10 @@ describe("createInProcessUiBackendClient", () => {
       );
       expect(createdRun?.id).toMatch(/^run_/u);
       expect(createdRun?.id).not.toBe("run_2");
-      await expect(runLedger.get(createdRun?.id ?? "")).resolves.toMatchObject(
-        {
-          runId: createdRun?.id,
-          sessionId: "session_52",
-        },
-      );
+      await expect(runLedger.get(createdRun?.id ?? "")).resolves.toMatchObject({
+        runId: createdRun?.id,
+        sessionId: "session_52",
+      });
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

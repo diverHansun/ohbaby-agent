@@ -23,8 +23,24 @@ interface FakeSdkClient {
   readonly kind: "fake";
 }
 
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  reject(error: unknown): void;
+  resolve(value: T | PromiseLike<T>): void;
+}
+
 const TITLE_GENERATION_PROMPT_MARKER =
   "Generate a concise title for a coding-agent chat session.";
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+  return { promise, reject, resolve };
+}
 
 function createProviderStream(
   events: readonly InterfaceProviderStreamEvent[],
@@ -62,6 +78,57 @@ function createFakeLLMClient(
           );
         }
         return Promise.resolve(createProviderStream(events));
+      },
+      isAbortError(): boolean {
+        return false;
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
+      baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
+function createBlockingLLMClient(input: {
+  readonly release: Promise<undefined>;
+  readonly started: Deferred<undefined>;
+  readonly text: string;
+}): LLMClientInstance<FakeSdkClient> {
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isSessionTitleGenerationRequest(request)) {
+          return Promise.resolve(
+            createProviderStream([
+              {
+                textDelta: titleTextForSessionTitleRequest(request),
+                finishReason: "stop",
+              },
+            ]),
+          );
+        }
+        input.started.resolve(undefined);
+        return Promise.resolve(
+          (async function* (): AsyncGenerator<
+            InterfaceProviderStreamEvent,
+            void,
+            unknown
+          > {
+            await input.release;
+            yield { textDelta: input.text, finishReason: "stop" };
+          })(),
+        );
       },
       isAbortError(): boolean {
         return false;
@@ -282,56 +349,26 @@ function requireRun(runs: readonly UiRun[], id: string): UiRun {
   return run;
 }
 
-function markBackendLeaseDead(): void {
-  getDatabase()
-    .prepare(
-      `UPDATE ${schema.appState.tableName}
-       SET value = ?, updated_at = ?
-       WHERE scope = ? AND key = ?`,
-    )
-    .run(
-      JSON.stringify({
-        ownerId: "dead_backend",
-        pid: -1,
-        state: "idle",
-        updatedAt: 42_000,
-      }),
-      42_000,
-      "global",
-      "persistentUiBackendLease",
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
     );
-}
-
-function writePreparingBackendLease(ownerId: string): void {
-  getDatabase()
-    .prepare(
-      `INSERT INTO ${schema.appState.tableName}
-       (scope, key, value, updated_at)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(scope, key) DO UPDATE SET
-         value = excluded.value,
-         updated_at = excluded.updated_at`,
-    )
-    .run(
-      "global",
-      "persistentUiBackendLease",
-      JSON.stringify({
-        ownerId,
-        pid: process.pid,
-        state: "preparing",
-        updatedAt: 43_000,
-      }),
-      43_000,
-    );
-}
-
-function readBackendLeaseValue(): string | undefined {
-  return getDatabase()
-    .prepare<{ readonly value: string }>(
-      `SELECT value FROM ${schema.appState.tableName}
-       WHERE scope = ? AND key = ?`,
-    )
-    .get("global", "persistentUiBackendLease")?.value;
+  });
 }
 
 async function tempDir(prefix: string): Promise<string> {
@@ -554,9 +591,9 @@ describe("createPersistentUiBackendClient", () => {
 
       const snapshot = await client.getSnapshot();
       const sessionCount = getDatabase()
-        .prepare<{ readonly count: number }>(
-          `SELECT COUNT(*) as count FROM ${schema.session.tableName}`,
-        )
+        .prepare<{
+          readonly count: number;
+        }>(`SELECT COUNT(*) as count FROM ${schema.session.tableName}`)
         .get()?.count;
 
       expect(snapshot.activeSessionId).toBeNull();
@@ -828,7 +865,7 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 
-  it("marks stale pending and running runs interrupted before restoring the first snapshot", async () => {
+  it("marks orphaned pending and running runs interrupted before restoring the first snapshot", async () => {
     const directory = await tempDir("ohbaby-persistent-recovery-");
     try {
       const dbPath = join(directory, "agent.db");
@@ -860,8 +897,6 @@ describe("createPersistentUiBackendClient", () => {
         triggerSource: "user",
       });
       await runLedger.markRunning("run_stale_running");
-      markBackendLeaseDead();
-
       const restored = createPersistentUiBackendClient({
         dbPath,
         llmClient: createFakeLLMClient([]),
@@ -886,7 +921,7 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 
-  it("recovers stale runs during daemon startup even when backend lease gate is disabled", async () => {
+  it("recovers legacy ownerless runs during startup", async () => {
     const directory = await tempDir("ohbaby-persistent-daemon-recovery-");
     try {
       const dbPath = join(directory, "agent.db");
@@ -912,10 +947,7 @@ describe("createPersistentUiBackendClient", () => {
         triggerSource: "user",
       });
       await runLedger.markRunning("run_daemon_stale");
-      markBackendLeaseDead();
-
       const restored = createPersistentUiBackendClient({
-        backendLeaseMode: "disabled",
         dbPath,
         llmClient: createFakeLLMClient([]),
         workdir,
@@ -954,7 +986,11 @@ describe("createPersistentUiBackendClient", () => {
         throw new Error("expected seeded prompt to create an active session");
       }
 
-      const runLedger = createDatabaseRunLedger({ now: () => 42_000 });
+      const runLedger = createDatabaseRunLedger({
+        now: () => 42_000,
+        ownerId: "backend_live_owner",
+        ownerPid: process.pid,
+      });
       await runLedger.createPending({
         runId: "run_live_pending",
         sessionId,
@@ -985,7 +1021,7 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 
-  it("does not let an idle backend steal the lease for another live backend's active run", async () => {
+  it("does not recover another live backend's active run when an idle backend starts", async () => {
     const directory = await tempDir("ohbaby-persistent-live-owner-steal-");
     try {
       const dbPath = join(directory, "agent.db");
@@ -1004,10 +1040,11 @@ describe("createPersistentUiBackendClient", () => {
       if (!sessionId) {
         throw new Error("expected seeded prompt to create an active session");
       }
-      const ownerLease = readBackendLeaseValue();
-      expect(ownerLease).toBeDefined();
-
-      const runLedger = createDatabaseRunLedger({ now: () => 42_000 });
+      const runLedger = createDatabaseRunLedger({
+        now: () => 42_000,
+        ownerId: "backend_live_owner",
+        ownerPid: process.pid,
+      });
       await runLedger.createPending({
         runId: "run_live_owner",
         sessionId,
@@ -1022,8 +1059,6 @@ describe("createPersistentUiBackendClient", () => {
       });
       await idleBackend.getSnapshot();
       await idleBackend.dispose();
-
-      expect(readBackendLeaseValue()).toBe(ownerLease);
 
       const restored = createPersistentUiBackendClient({
         dbPath,
@@ -1044,8 +1079,82 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 
-  it("queues a prompt instead of starting a run without the backend lease", async () => {
-    const directory = await tempDir("ohbaby-persistent-lease-queue-");
+  it("lets another backend submit a fresh session while a different session is running", async () => {
+    const directory = await tempDir("ohbaby-persistent-multiwindow-");
+    const firstStarted = createDeferred<undefined>();
+    const releaseFirst = createDeferred<undefined>();
+    let firstBackend:
+      | ReturnType<typeof createPersistentUiBackendClient>
+      | undefined;
+    let secondBackend:
+      | ReturnType<typeof createPersistentUiBackendClient>
+      | undefined;
+    let firstRun: Promise<void> | undefined;
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      firstBackend = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createBlockingLLMClient({
+          release: releaseFirst.promise,
+          started: firstStarted,
+          text: "First backend completed",
+        }),
+        workdir,
+      });
+      secondBackend = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Second backend completed", finishReason: "stop" },
+        ]),
+        workdir,
+      });
+
+      firstRun = firstBackend.submitPrompt("Keep first window running");
+      await withTimeout(
+        firstStarted.promise,
+        1_000,
+        "first backend did not start running",
+      );
+
+      await expect(
+        withTimeout(
+          secondBackend.submitPrompt("Run in another fresh window"),
+          1_000,
+          "second backend was blocked by another session's active run",
+        ),
+      ).resolves.toBeUndefined();
+
+      const secondSnapshot = await secondBackend.getSnapshot();
+      expect(secondSnapshot.activeSessionId).toBeDefined();
+      expect(
+        secondSnapshot.sessions.some((session) =>
+          session.messages.some((message) =>
+            message.parts.some(
+              (part) =>
+                part.type === "text" &&
+                part.text === "Run in another fresh window",
+            ),
+          ),
+        ),
+      ).toBe(true);
+
+      releaseFirst.resolve(undefined);
+      await firstRun;
+      await firstBackend.dispose();
+      await secondBackend.dispose();
+    } finally {
+      await secondBackend?.dispose();
+      releaseFirst.resolve(undefined);
+      await firstRun?.catch(() => undefined);
+      await firstBackend?.dispose();
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("queues a same-session prompt while a live owner run is active", async () => {
+    const directory = await tempDir("ohbaby-persistent-session-queue-");
     try {
       const dbPath = join(directory, "agent.db");
       const workdir = join(directory, "workspace");
@@ -1063,9 +1172,12 @@ describe("createPersistentUiBackendClient", () => {
       if (!ownerSessionId) {
         throw new Error("expected seeded prompt to create an active session");
       }
-      const ownerLease = readBackendLeaseValue();
 
-      const runLedger = createDatabaseRunLedger({ now: () => 42_000 });
+      const runLedger = createDatabaseRunLedger({
+        now: () => 42_000,
+        ownerId: "backend_live_owner",
+        ownerPid: process.pid,
+      });
       await runLedger.createPending({
         runId: "run_owner_active",
         sessionId: ownerSessionId,
@@ -1080,7 +1192,9 @@ describe("createPersistentUiBackendClient", () => {
         ]),
         workdir,
       });
-      const queuedPrompt = contender.submitPrompt("Run after owner");
+      const queuedPrompt = contender.submitPrompt("Run after owner", {
+        sessionId: ownerSessionId,
+      });
       const earlyResult = await Promise.race([
         queuedPrompt.then(() => "resolved"),
         new Promise<"pending">((resolve) => {
@@ -1091,25 +1205,27 @@ describe("createPersistentUiBackendClient", () => {
       ]);
 
       expect(earlyResult).toBe("pending");
-      expect(readBackendLeaseValue()).toBe(ownerLease);
 
       await runLedger.markInterrupted({
         reason: "owner interrupted",
         statuses: ["running"],
       });
-      await queuedPrompt;
+      await withTimeout(
+        queuedPrompt,
+        1_000,
+        "same-session prompt did not resume after the active run finished",
+      );
 
       const contenderSnapshot = await contender.getSnapshot();
-      expect(contenderSnapshot.activeSessionId).not.toBe(ownerSessionId);
-      expect(readBackendLeaseValue()).not.toBe(ownerLease);
+      expect(contenderSnapshot.activeSessionId).toBe(ownerSessionId);
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
   });
 
-  it("recovers stale active runs before a queued prompt continues after owner death", async () => {
-    const directory = await tempDir("ohbaby-persistent-lease-dead-queue-");
+  it("recovers a dead-owner same-session run before submitting a prompt", async () => {
+    const directory = await tempDir("ohbaby-persistent-owner-dead-submit-");
     try {
       const dbPath = join(directory, "agent.db");
       const workdir = join(directory, "workspace");
@@ -1128,7 +1244,11 @@ describe("createPersistentUiBackendClient", () => {
         throw new Error("expected seeded prompt to create an active session");
       }
 
-      const runLedger = createDatabaseRunLedger({ now: () => 42_000 });
+      const runLedger = createDatabaseRunLedger({
+        now: () => 42_000,
+        ownerId: "backend_dead_owner",
+        ownerPid: -1,
+      });
       await runLedger.createPending({
         runId: "run_owner_stale",
         sessionId: ownerSessionId,
@@ -1143,125 +1263,20 @@ describe("createPersistentUiBackendClient", () => {
         ]),
         workdir,
       });
-      const queuedPrompt = contender.submitPrompt("Run after owner death", {
-        sessionId: ownerSessionId,
-      });
-      const earlyResult = await Promise.race([
-        queuedPrompt.then(() => "resolved"),
-        new Promise<"pending">((resolve) => {
-          setTimeout(() => {
-            resolve("pending");
-          }, 80);
-        }),
-      ]);
-
-      expect(earlyResult).toBe("pending");
-
-      markBackendLeaseDead();
-      await queuedPrompt;
+      await expect(
+        withTimeout(
+          contender.submitPrompt("Run after owner death", {
+            sessionId: ownerSessionId,
+          }),
+          1_000,
+          "dead-owner prompt was not recovered before submission",
+        ),
+      ).resolves.toBeUndefined();
 
       const contenderSnapshot = await contender.getSnapshot();
       const staleRun = requireRun(contenderSnapshot.runs, "run_owner_stale");
       expect(contenderSnapshot.activeSessionId).toBe(ownerSessionId);
       expect(staleRun.status.kind).toBe("error");
-    } finally {
-      closeDatabase();
-      await rm(directory, { force: true, recursive: true });
-    }
-  });
-
-  it("does not steal a preparing backend lease before the run claim is visible", async () => {
-    const directory = await tempDir("ohbaby-persistent-preparing-lease-");
-    try {
-      const dbPath = join(directory, "agent.db");
-      const workdir = join(directory, "workspace");
-      createPersistentUiBackendClient({
-        dbPath,
-        llmClient: createFakeLLMClient([]),
-        workdir,
-      });
-      writePreparingBackendLease("backend_preparing_owner");
-      const preparingLease = readBackendLeaseValue();
-
-      const contender = createPersistentUiBackendClient({
-        dbPath,
-        llmClient: createFakeLLMClient([]),
-        workdir,
-      });
-      await contender.getSnapshot();
-
-      expect(readBackendLeaseValue()).toBe(preparingLease);
-    } finally {
-      closeDatabase();
-      await rm(directory, { force: true, recursive: true });
-    }
-  });
-
-  it("does not let a preparing backend lease block daemon-mode prompt submission", async () => {
-    const directory = await tempDir("ohbaby-persistent-daemon-lease-disabled-");
-    try {
-      const dbPath = join(directory, "agent.db");
-      const workdir = join(directory, "workspace");
-      createPersistentUiBackendClient({
-        dbPath,
-        llmClient: createFakeLLMClient([]),
-        workdir,
-      });
-      writePreparingBackendLease("backend_preparing_owner");
-
-      const daemonBackend = createPersistentUiBackendClient({
-        backendLeaseMode: "disabled",
-        dbPath,
-        llmClient: createFakeLLMClient([
-          { textDelta: "Daemon response", finishReason: "stop" },
-        ]),
-        workdir,
-      });
-      const submitted = daemonBackend.submitPrompt("Run through daemon");
-      await vi.waitUntil(async () => {
-        const snapshot = await daemonBackend.getSnapshot();
-        return snapshot.sessions.some((session) =>
-          session.messages.some((message) =>
-            message.parts.some(
-              (part) =>
-                part.type === "text" && part.text === "Run through daemon",
-            ),
-          ),
-        );
-      });
-      await submitted;
-
-      await daemonBackend.dispose();
-    } finally {
-      closeDatabase();
-      await rm(directory, { force: true, recursive: true });
-    }
-  });
-
-  it("refreshes the backend lease when another backend starts while the owner is idle", async () => {
-    const directory = await tempDir("ohbaby-persistent-live-lease-");
-    try {
-      const dbPath = join(directory, "agent.db");
-      const workdir = join(directory, "workspace");
-      const client = createPersistentUiBackendClient({
-        dbPath,
-        llmClient: createFakeLLMClient([
-          { textDelta: "Seeded", finishReason: "stop" },
-        ]),
-        workdir,
-      });
-
-      await client.submitPrompt("Seed session");
-      const firstLease = readBackendLeaseValue();
-      expect(firstLease).toBeDefined();
-
-      createPersistentUiBackendClient({
-        dbPath,
-        llmClient: createFakeLLMClient([]),
-        workdir,
-      });
-
-      expect(readBackendLeaseValue()).not.toBe(firstLease);
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

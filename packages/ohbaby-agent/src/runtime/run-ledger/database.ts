@@ -25,6 +25,7 @@ import type {
 const ACTIVE_STATUSES = new Set<RunStatus>(["pending", "running"]);
 const INTERRUPTABLE_STATUSES = new Set<RunStatus>(["pending", "running"]);
 const INTERRUPTED_REASON = "process interrupted before run completed";
+const ORPHANED_OWNER_REASON = "process interrupted before owner exited";
 
 interface RunLedgerRow {
   readonly run_id: string;
@@ -35,6 +36,8 @@ interface RunLedgerRow {
   readonly started_at: number | null;
   readonly ended_at: number | null;
   readonly error: string | null;
+  readonly owner_id: string | null;
+  readonly owner_pid: number | null;
 }
 
 interface DatabaseRunLedgerOptions extends InMemoryRunLedgerOptions {
@@ -51,6 +54,8 @@ function rowToRecord(row: RunLedgerRow): RunLedgerRecord {
     startedAt: row.started_at ?? undefined,
     endedAt: row.ended_at ?? undefined,
     error: row.error ?? undefined,
+    ownerId: row.owner_id ?? undefined,
+    ownerPid: row.owner_pid ?? undefined,
   };
 }
 
@@ -88,10 +93,27 @@ function validateInterruptibleStatuses(statuses: Iterable<RunStatus>): void {
   }
 }
 
+function defaultIsOwnerAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? error.code
+        : undefined;
+    return code !== "ESRCH";
+  }
+}
+
 export function createDatabaseRunLedger(
   options: DatabaseRunLedgerOptions = {},
 ): RunLedger {
   const db = options.db ?? getDatabase();
+  const isOwnerAlive = options.isOwnerAlive ?? defaultIsOwnerAlive;
   const now = options.now ?? Date.now;
 
   async function withAsyncBoundary<T>(operation: () => T): Promise<T> {
@@ -125,18 +147,22 @@ export function createDatabaseRunLedger(
     if (getRowInConnection(connection, input.runId)) {
       throw new InvalidRunTransitionError(input.runId, undefined, "pending");
     }
+    const ownerId = input.ownerId ?? options.ownerId;
+    const ownerPid = input.ownerPid ?? options.ownerPid;
     const record: RunLedgerRecord = {
       runId: input.runId,
       sessionId: input.sessionId,
       triggerSource: input.triggerSource,
       status: "pending",
       createdAt: now(),
+      ...(ownerId === undefined ? {} : { ownerId }),
+      ...(ownerPid === undefined ? {} : { ownerPid }),
     };
     connection
       .prepare(
         `INSERT INTO ${schema.runLedger.tableName}
-          (run_id, session_id, trigger, status, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+          (run_id, session_id, trigger, status, created_at, owner_id, owner_pid)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.runId,
@@ -144,24 +170,72 @@ export function createDatabaseRunLedger(
         record.triggerSource,
         record.status,
         record.createdAt,
+        record.ownerId ?? null,
+        record.ownerPid ?? null,
       );
     return record;
   }
 
-  function getActiveRunIdsForSession(
+  function getActiveRowsForSession(
     connection: DatabaseConnection,
     sessionId: string,
-  ): string[] {
+  ): RunLedgerRow[] {
     const statuses = Array.from(ACTIVE_STATUSES);
     const placeholders = statuses.map(() => "?").join(", ");
     return connection
-      .prepare<{ readonly run_id: string }>(
-        `SELECT run_id FROM ${schema.runLedger.tableName}
+      .prepare<RunLedgerRow>(
+        `SELECT * FROM ${schema.runLedger.tableName}
          WHERE session_id = ? AND status IN (${placeholders})
          ORDER BY created_at ASC`,
       )
-      .all(sessionId, ...statuses)
-      .map((row) => row.run_id);
+      .all(sessionId, ...statuses);
+  }
+
+  function getActiveRows(connection: DatabaseConnection): RunLedgerRow[] {
+    const statuses = Array.from(ACTIVE_STATUSES);
+    const placeholders = statuses.map(() => "?").join(", ");
+    return connection
+      .prepare<RunLedgerRow>(
+        `SELECT * FROM ${schema.runLedger.tableName}
+         WHERE status IN (${placeholders})
+         ORDER BY created_at ASC`,
+      )
+      .all(...statuses);
+  }
+
+  function isOrphaned(
+    row: RunLedgerRow,
+    recoverUnknownOwner: boolean,
+  ): boolean {
+    if (!ACTIVE_STATUSES.has(row.status)) {
+      return false;
+    }
+    if (row.owner_pid === null) {
+      return recoverUnknownOwner;
+    }
+    return !isOwnerAlive(row.owner_pid);
+  }
+
+  function recoverOrphanedRows(
+    connection: DatabaseConnection,
+    rows: readonly RunLedgerRow[],
+    recoverUnknownOwner: boolean,
+  ): number {
+    let updatedCount = 0;
+    for (const row of rows) {
+      if (!isOrphaned(row, recoverUnknownOwner)) {
+        continue;
+      }
+      const result = connection
+        .prepare(
+          `UPDATE ${schema.runLedger.tableName}
+           SET status = ?, ended_at = ?, error = ?
+           WHERE run_id = ? AND status IN ('pending', 'running')`,
+        )
+        .run("interrupted", now(), ORPHANED_OWNER_REASON, row.run_id);
+      updatedCount += result.changes;
+    }
+    return updatedCount;
   }
 
   function withImmediateTransaction<T>(operation: () => T): T {
@@ -236,7 +310,11 @@ export function createDatabaseRunLedger(
     ): Promise<RunLedgerRecord> {
       return withAsyncBoundary(() => {
         const record = withImmediateTransaction(() => {
-          const activeRunIds = getActiveRunIdsForSession(db, input.sessionId);
+          const activeRows = getActiveRowsForSession(db, input.sessionId);
+          recoverOrphanedRows(db, activeRows, false);
+          const activeRunIds = activeRows
+            .filter((row) => !isOrphaned(row, false))
+            .map((row) => row.run_id);
           if (activeRunIds.length > 0) {
             throw new SessionRunBusyError(input.sessionId, activeRunIds);
           }
@@ -325,6 +403,15 @@ export function createDatabaseRunLedger(
             ...statuses,
           );
         return { updatedCount: result.changes };
+      });
+    },
+
+    recoverOrphanedRuns(): Promise<MarkInterruptedResult> {
+      return withAsyncBoundary(() => {
+        const updatedCount = withImmediateTransaction(() =>
+          recoverOrphanedRows(db, getActiveRows(db), true),
+        );
+        return { updatedCount };
       });
     },
 

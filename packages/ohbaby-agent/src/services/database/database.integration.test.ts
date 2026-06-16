@@ -87,6 +87,7 @@ describe("services/database", () => {
       { version: "003_app_state" },
       { version: "004_drop_scheduler_job" },
       { version: "005_snapshot_git_sidecar" },
+      { version: "006_run_owner" },
     ]);
   });
 
@@ -145,6 +146,72 @@ describe("services/database", () => {
         )
         .get("005_snapshot_git_sidecar"),
     ).toEqual({ version: "005_snapshot_git_sidecar" });
+  });
+
+  it("adds run owner columns and removes the legacy backend lease when upgrading", async () => {
+    const dbPath = await tempDbPath();
+    const legacyMigrations: MigrationDefinition[] = [
+      {
+        version: "001_initial",
+        sql: `
+          CREATE TABLE run_ledger (
+            run_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            trigger TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at INTEGER NOT NULL,
+            started_at INTEGER,
+            ended_at INTEGER,
+            error TEXT
+          );
+        `,
+      },
+      { version: "002_part_order_unique", sql: "SELECT 1;" },
+      {
+        version: "003_app_state",
+        sql: `
+          CREATE TABLE app_state (
+            scope TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (scope, key)
+          );
+        `,
+      },
+      { version: "004_drop_scheduler_job", sql: "SELECT 1;" },
+      { version: "005_snapshot_git_sidecar", sql: "SELECT 1;" },
+    ];
+
+    initDatabase({ dbPath, migrations: legacyMigrations });
+    getDatabase()
+      .prepare(
+        `INSERT INTO ${schema.appState.tableName} (scope, key, value, updated_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(
+        "global",
+        "persistentUiBackendLease",
+        JSON.stringify({ ownerId: "old", pid: 123, updatedAt: 1 }),
+        1,
+      );
+
+    closeDatabase();
+    initDatabase({ dbPath });
+
+    const columns = getDatabase()
+      .prepare<{ name: string }>("PRAGMA table_info(run_ledger)")
+      .all()
+      .map((row) => row.name);
+    expect(columns).toEqual(expect.arrayContaining(["owner_id", "owner_pid"]));
+    expect(
+      getDatabase()
+        .prepare<{ value: string }>(
+          `SELECT value FROM ${schema.appState.tableName}
+           WHERE scope = ? AND key = ?`,
+        )
+        .get("global", "persistentUiBackendLease"),
+    ).toBeUndefined();
   });
 
   it("rolls back a failed migration and exposes the failed version", async () => {

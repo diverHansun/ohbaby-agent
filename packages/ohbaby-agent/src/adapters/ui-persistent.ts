@@ -11,17 +11,13 @@ import {
   closeDatabase,
   getDatabase,
   initDatabase,
-  schema,
   type DatabaseConnection,
 } from "../services/database/index.js";
 import {
   createDatabaseSessionStore,
   createSessionManager,
 } from "../services/session/index.js";
-import {
-  createDatabaseRunLedger,
-  SessionRunBusyError,
-} from "../runtime/run-ledger/index.js";
+import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
 import {
   createSnapshotHookExecutor,
@@ -54,7 +50,6 @@ export interface PersistentUiBackendOptions extends Omit<
   | "stateStore"
 > {
   readonly bus?: BusInstance;
-  readonly backendLeaseMode?: "enabled" | "disabled";
   readonly dbPath?: string;
   readonly enableSnapshots?: boolean;
   readonly hookExecutor?: HookExecutor;
@@ -72,229 +67,8 @@ function numericNow(now?: () => Date): () => number {
   return () => (now?.() ?? new Date()).getTime();
 }
 
-const BACKEND_LEASE_SCOPE = "global";
-const BACKEND_LEASE_KEY = "persistentUiBackendLease";
-
-interface BackendLease {
-  readonly ownerId: string;
-  readonly pid: number;
-  readonly state?: "idle" | "preparing";
-  readonly updatedAt: number;
-}
-
-interface BackendLeaseRow {
-  readonly value: string;
-}
-
-interface ActiveRunCountRow {
-  readonly count: number;
-}
-
-interface ActiveRunRow {
-  readonly runId: string;
-}
-
 function createBackendOwnerId(): string {
   return `backend_${String(process.pid)}_${randomUUID()}`;
-}
-
-function isBackendLease(value: unknown): value is BackendLease {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "ownerId" in value &&
-    typeof value.ownerId === "string" &&
-    "pid" in value &&
-    typeof value.pid === "number" &&
-    "updatedAt" in value &&
-    typeof value.updatedAt === "number"
-  );
-}
-
-function parseBackendLease(value: string): BackendLease | undefined {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return isBackendLease(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function isProcessAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return false;
-  }
-
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === "EPERM"
-    );
-  }
-}
-
-function readBackendLease(db: DatabaseConnection): BackendLease | undefined {
-  const row = db
-    .prepare<BackendLeaseRow>(
-      `SELECT value FROM ${schema.appState.tableName}
-       WHERE scope = ? AND key = ?`,
-    )
-    .get(BACKEND_LEASE_SCOPE, BACKEND_LEASE_KEY);
-  return row ? parseBackendLease(row.value) : undefined;
-}
-
-function writeBackendLease(input: {
-  readonly db: DatabaseConnection;
-  readonly now: () => number;
-  readonly ownerId: string;
-  readonly state?: BackendLease["state"];
-}): void {
-  const updatedAt = input.now();
-  const lease: BackendLease = {
-    ownerId: input.ownerId,
-    pid: process.pid,
-    state: input.state ?? "idle",
-    updatedAt,
-  };
-  input.db
-    .prepare(
-      `INSERT INTO ${schema.appState.tableName} (scope, key, value, updated_at)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(scope, key) DO UPDATE SET
-         value = excluded.value,
-         updated_at = excluded.updated_at`,
-    )
-    .run(
-      BACKEND_LEASE_SCOPE,
-      BACKEND_LEASE_KEY,
-      JSON.stringify(lease),
-      updatedAt,
-    );
-}
-
-function countActiveRuns(db: DatabaseConnection): number {
-  return (
-    db
-      .prepare<ActiveRunCountRow>(
-        `SELECT COUNT(*) as count FROM ${schema.runLedger.tableName}
-         WHERE status IN ('pending', 'running')`,
-      )
-      .get()?.count ?? 0
-  );
-}
-
-function listActiveRunIds(db: DatabaseConnection): readonly string[] {
-  return db
-    .prepare<ActiveRunRow>(
-      `SELECT run_id as runId FROM ${schema.runLedger.tableName}
-       WHERE status IN ('pending', 'running')
-       ORDER BY created_at ASC, run_id ASC`,
-    )
-    .all()
-    .map((row) => row.runId);
-}
-
-function refreshBackendLeaseIfSafe(input: {
-  readonly db: DatabaseConnection;
-  readonly now: () => number;
-  readonly ownerId: string;
-  readonly state?: BackendLease["state"];
-}): {
-  readonly activeRunCount: number;
-  readonly activeRunIds: readonly string[];
-  readonly acquired: boolean;
-  readonly liveOwner: boolean;
-} {
-  input.db.exec("BEGIN IMMEDIATE");
-  try {
-    const activeRunCount = countActiveRuns(input.db);
-    const previousLease = readBackendLease(input.db);
-    const liveOwner = isProcessAlive(previousLease?.pid ?? -1);
-    const preparingOwner =
-      liveOwner &&
-      previousLease?.state === "preparing" &&
-      previousLease.ownerId !== input.ownerId;
-    const acquired =
-      !liveOwner ||
-      (activeRunCount === 0 && !preparingOwner) ||
-      previousLease?.ownerId === input.ownerId;
-    if (acquired) {
-      writeBackendLease(input);
-    }
-    const activeRunIds = acquired ? [] : listActiveRunIds(input.db);
-    input.db.exec("COMMIT");
-    return { activeRunCount, activeRunIds, acquired, liveOwner };
-  } catch (error) {
-    try {
-      input.db.exec("ROLLBACK");
-    } catch {
-      // Keep the original startup recovery failure.
-    }
-    throw error;
-  }
-}
-
-function inspectBackendLeaseForRecovery(input: {
-  readonly db: DatabaseConnection;
-}): {
-  readonly activeRunCount: number;
-  readonly liveOwner: boolean;
-} {
-  input.db.exec("BEGIN IMMEDIATE");
-  try {
-    const activeRunCount = countActiveRuns(input.db);
-    const previousLease = readBackendLease(input.db);
-    const liveOwner = isProcessAlive(previousLease?.pid ?? -1);
-    input.db.exec("COMMIT");
-    return { activeRunCount, liveOwner };
-  } catch (error) {
-    try {
-      input.db.exec("ROLLBACK");
-    } catch {
-      // Keep the original startup recovery failure.
-    }
-    throw error;
-  }
-}
-
-function shouldRecoverStartupRuns(input: {
-  readonly acquireBackendLease?: boolean;
-  readonly db: DatabaseConnection;
-  readonly now: () => number;
-  readonly ownerId: string;
-}): boolean {
-  const leaseState =
-    input.acquireBackendLease === false
-      ? inspectBackendLeaseForRecovery(input)
-      : refreshBackendLeaseIfSafe(input);
-  return leaseState.activeRunCount > 0 && !leaseState.liveOwner;
-}
-
-function releaseBackendLeasePreparation(input: {
-  readonly db: DatabaseConnection;
-  readonly now: () => number;
-  readonly ownerId: string;
-}): void {
-  input.db.exec("BEGIN IMMEDIATE");
-  try {
-    const previousLease = readBackendLease(input.db);
-    if (previousLease?.ownerId === input.ownerId) {
-      writeBackendLease({ ...input, state: "idle" });
-    }
-    input.db.exec("COMMIT");
-  } catch (error) {
-    try {
-      input.db.exec("ROLLBACK");
-    } catch {
-      // Keep the original lease release failure.
-    }
-    throw error;
-  }
 }
 
 function toError(error: unknown): Error {
@@ -560,7 +334,13 @@ export function createPersistentUiBackendClient(
     ),
     store: createDatabaseSessionStore({ db }),
   });
-  const runLedger = createDatabaseRunLedger({ db, now });
+  const backendOwnerId = createBackendOwnerId();
+  const runLedger = createDatabaseRunLedger({
+    db,
+    now,
+    ownerId: backendOwnerId,
+    ownerPid: process.pid,
+  });
   const startupSessionMode = resolveStartupSessionMode(options);
   const stateStore = createPersistentUiStateStore({
     initialActiveSessionId: null,
@@ -579,18 +359,7 @@ export function createPersistentUiBackendClient(
       storageRoot: options.storageRoot,
     }),
   ]);
-  const backendOwnerId = createBackendOwnerId();
-  const backendLeaseEnabled = options.backendLeaseMode !== "disabled";
-  const startupRecovery = shouldRecoverStartupRuns({
-    acquireBackendLease: backendLeaseEnabled,
-    db,
-    now,
-    ownerId: backendOwnerId,
-  })
-    ? runLedger.markInterrupted({
-        statuses: ["pending", "running"],
-      })
-    : Promise.resolve({ updatedCount: 0 });
+  const startupRecovery = runLedger.recoverOrphanedRuns();
   const startupReady = startupRecovery.then(async () => {
     await resolvePersistentStartupSession({
       mode: startupSessionMode,
@@ -601,39 +370,7 @@ export function createPersistentUiBackendClient(
 
   return withStartupRecovery(
     createInProcessUiBackendClient({
-      afterPromptSubmitSettled: () => {
-        if (!backendLeaseEnabled) {
-          return;
-        }
-        releaseBackendLeasePreparation({
-          db,
-          now,
-          ownerId: backendOwnerId,
-        });
-      },
       agentManager: options.agentManager,
-      beforePromptSubmit: async () => {
-        if (!backendLeaseEnabled) {
-          return;
-        }
-        const leaseState = refreshBackendLeaseIfSafe({
-          db,
-          now,
-          ownerId: backendOwnerId,
-          state: "preparing",
-        });
-        if (!leaseState.acquired) {
-          throw new SessionRunBusyError(
-            "persistent-backend",
-            leaseState.activeRunIds,
-          );
-        }
-        if (leaseState.activeRunCount > 0 && !leaseState.liveOwner) {
-          await runLedger.markInterrupted({
-            statuses: ["pending", "running"],
-          });
-        }
-      },
       bus,
       ...(options.createAgentTaskId
         ? { createAgentTaskId: options.createAgentTaskId }

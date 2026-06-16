@@ -18,6 +18,7 @@ import type {
 const ACTIVE_STATUSES = new Set<RunStatus>(["pending", "running"]);
 const INTERRUPTABLE_STATUSES = new Set<RunStatus>(["pending", "running"]);
 const INTERRUPTED_REASON = "process interrupted before run completed";
+const ORPHANED_OWNER_REASON = "process interrupted before owner exited";
 
 function cloneRecord(record: RunLedgerRecord): RunLedgerRecord {
   return { ...record };
@@ -57,10 +58,16 @@ function validateInterruptibleStatuses(statuses: Iterable<RunStatus>): void {
 
 export class InMemoryRunLedger implements RunLedger {
   private readonly records = new Map<string, RunLedgerRecord>();
+  private readonly isOwnerAlive: (pid: number) => boolean;
   private readonly now: () => number;
+  private readonly ownerId?: string;
+  private readonly ownerPid?: number;
 
   constructor(options: InMemoryRunLedgerOptions = {}) {
+    this.isOwnerAlive = options.isOwnerAlive ?? ((): boolean => true);
     this.now = options.now ?? Date.now;
+    this.ownerId = options.ownerId;
+    this.ownerPid = options.ownerPid;
   }
 
   createPending(input: CreatePendingRunLedgerInput): Promise<RunLedgerRecord> {
@@ -69,13 +76,13 @@ export class InMemoryRunLedger implements RunLedger {
     });
   }
 
-  claimPendingRun(
-    input: ClaimPendingRunLedgerInput,
-  ): Promise<RunLedgerRecord> {
+  claimPendingRun(input: ClaimPendingRunLedgerInput): Promise<RunLedgerRecord> {
     return this.withAsyncBoundary(() => {
-      const activeRunIds = Array.from(this.records.values())
+      const activeRecords = Array.from(this.records.values())
         .filter((record) => record.sessionId === input.sessionId)
-        .filter((record) => ACTIVE_STATUSES.has(record.status))
+        .filter((record) => ACTIVE_STATUSES.has(record.status));
+      const activeRunIds = activeRecords
+        .filter((record) => !this.recoverIfOrphaned(record, false))
         .map((record) => record.runId);
       if (activeRunIds.length > 0) {
         throw new SessionRunBusyError(input.sessionId, activeRunIds);
@@ -169,6 +176,18 @@ export class InMemoryRunLedger implements RunLedger {
     });
   }
 
+  recoverOrphanedRuns(): Promise<MarkInterruptedResult> {
+    return this.withAsyncBoundary(() => {
+      let updatedCount = 0;
+      for (const record of this.records.values()) {
+        if (this.recoverIfOrphaned(record, true)) {
+          updatedCount += 1;
+        }
+      }
+      return { updatedCount };
+    });
+  }
+
   get(runId: string): Promise<RunLedgerRecord | undefined> {
     return this.withAsyncBoundary(() => {
       const record = this.records.get(runId);
@@ -234,16 +253,49 @@ export class InMemoryRunLedger implements RunLedger {
       throw new InvalidRunTransitionError(input.runId, undefined, "pending");
     }
 
+    const ownerId = input.ownerId ?? this.ownerId;
+    const ownerPid = input.ownerPid ?? this.ownerPid;
     const record: RunLedgerRecord = {
       runId: input.runId,
       sessionId: input.sessionId,
       triggerSource: input.triggerSource,
       status: "pending",
       createdAt: this.now(),
+      ...(ownerId === undefined ? {} : { ownerId }),
+      ...(ownerPid === undefined ? {} : { ownerPid }),
     };
     this.records.set(input.runId, record);
 
     return record;
+  }
+
+  private isOrphaned(
+    record: RunLedgerRecord,
+    recoverUnknownOwner: boolean,
+  ): boolean {
+    if (!ACTIVE_STATUSES.has(record.status)) {
+      return false;
+    }
+    if (record.ownerPid === undefined) {
+      return recoverUnknownOwner;
+    }
+    return !this.isOwnerAlive(record.ownerPid);
+  }
+
+  private recoverIfOrphaned(
+    record: RunLedgerRecord,
+    recoverUnknownOwner: boolean,
+  ): boolean {
+    if (!this.isOrphaned(record, recoverUnknownOwner)) {
+      return false;
+    }
+    this.records.set(record.runId, {
+      ...record,
+      status: "interrupted",
+      endedAt: this.now(),
+      error: ORPHANED_OWNER_REASON,
+    });
+    return true;
   }
 }
 

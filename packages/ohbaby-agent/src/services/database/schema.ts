@@ -48,6 +48,8 @@ export const schema = {
     startedAt: "started_at",
     endedAt: "ended_at",
     error: "error",
+    ownerId: "owner_id",
+    ownerPid: "owner_pid",
   }),
   appState: table("app_state", {
     scope: "scope",

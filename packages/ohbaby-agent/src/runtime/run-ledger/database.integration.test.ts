@@ -155,9 +155,9 @@ describe("createDatabaseRunLedger", () => {
         }),
       ]);
 
-      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(
-        1,
-      );
+      expect(
+        results.filter((result) => result.status === "fulfilled"),
+      ).toHaveLength(1);
       const rejected = results.find(
         (result): result is PromiseRejectedResult =>
           result.status === "rejected",
@@ -189,6 +189,84 @@ describe("createDatabaseRunLedger", () => {
       runId: "run_2",
       sessionId: "session_1",
       status: "pending",
+    });
+  });
+
+  it("recovers dead-owner active runs without interrupting live owners", async () => {
+    const livePids = new Set([111]);
+    const ledger = createDatabaseRunLedger({
+      isOwnerAlive: (pid) => livePids.has(pid),
+      now: createClock(),
+      ownerId: "owner_live",
+      ownerPid: 111,
+    });
+    const staleLedger = createDatabaseRunLedger({
+      isOwnerAlive: (pid) => livePids.has(pid),
+      now: createClock(10_000),
+      ownerId: "owner_dead",
+      ownerPid: 222,
+    });
+
+    await ledger.claimPendingRun({
+      runId: "run_live",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+    await ledger.markRunning("run_live");
+    await staleLedger.claimPendingRun({
+      runId: "run_dead",
+      sessionId: "session_2",
+      triggerSource: "user",
+    });
+    await staleLedger.markRunning("run_dead");
+
+    await expect(ledger.recoverOrphanedRuns()).resolves.toEqual({
+      updatedCount: 1,
+    });
+    await expect(ledger.get("run_live")).resolves.toMatchObject({
+      ownerId: "owner_live",
+      ownerPid: 111,
+      status: "running",
+    });
+    await expect(ledger.get("run_dead")).resolves.toMatchObject({
+      error: "process interrupted before owner exited",
+      ownerId: "owner_dead",
+      ownerPid: 222,
+      status: "interrupted",
+    });
+  });
+
+  it("lazily recovers dead-owner runs before a same-session claim", async () => {
+    const ledger = createDatabaseRunLedger({
+      isOwnerAlive: () => false,
+      now: createClock(),
+      ownerId: "owner_live",
+      ownerPid: 111,
+    });
+
+    await ledger.createPending({
+      ownerId: "owner_dead",
+      ownerPid: 222,
+      runId: "run_stale",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+    await ledger.markRunning("run_stale");
+
+    await expect(
+      ledger.claimPendingRun({
+        runId: "run_after_stale",
+        sessionId: "session_1",
+        triggerSource: "user",
+      }),
+    ).resolves.toMatchObject({
+      ownerId: "owner_live",
+      ownerPid: 111,
+      runId: "run_after_stale",
+      status: "pending",
+    });
+    await expect(ledger.get("run_stale")).resolves.toMatchObject({
+      status: "interrupted",
     });
   });
 

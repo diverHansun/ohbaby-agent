@@ -160,6 +160,11 @@ class RecordingLedger implements RunLedger {
     return this.inner.markInterrupted(options);
   }
 
+  recoverOrphanedRuns(): Promise<MarkInterruptedResult> {
+    this.calls.push("recoverOrphanedRuns");
+    return this.inner.recoverOrphanedRuns();
+  }
+
   get(runId: string): Promise<RunLedgerRecord | undefined> {
     return this.inner.get(runId);
   }
@@ -770,16 +775,17 @@ describe("RunManager", () => {
       "run.llm.complete",
       "run.updated",
     ]);
-    expect(bridge.events.find((event) => event.event === "run.llm.start"))
-      .toMatchObject({
-        data: {
-          runId: "run_1",
-          sessionId: "session_1",
-          step: 1,
-        },
-        event: "run.llm.start",
-        scope: "run/run_1",
-      });
+    expect(
+      bridge.events.find((event) => event.event === "run.llm.start"),
+    ).toMatchObject({
+      data: {
+        runId: "run_1",
+        sessionId: "session_1",
+        step: 1,
+      },
+      event: "run.llm.start",
+      scope: "run/run_1",
+    });
     expect(bridge.endedScopes).toEqual(["run/run_1"]);
     expect(sandboxManager.released).toEqual(["lease_session_1"]);
     expect(manager.list("session_1")).toEqual([]);
@@ -922,7 +928,9 @@ describe("RunManager", () => {
   });
 
   it("does not add an active record when the ledger rejects a same-session claim", async () => {
-    const { manager, ledger, bridge } = createManager(new CompletingLifecycle());
+    const { manager, ledger, bridge } = createManager(
+      new CompletingLifecycle(),
+    );
     await ledger.claimPendingRun({
       runId: "run_external",
       sessionId: "session_1",
@@ -1149,9 +1157,8 @@ describe("RunManager", () => {
       terminalReason: "context_overflow",
     });
     expect(
-      bridge.events
-        .filter((event) => event.event === "run.updated")
-        .at(-1)?.data,
+      bridge.events.filter((event) => event.event === "run.updated").at(-1)
+        ?.data,
     ).toMatchObject({
       run: {
         runId: failed.runId,

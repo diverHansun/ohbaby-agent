@@ -179,6 +179,41 @@ describe("InMemoryRunLedger", () => {
     });
   });
 
+  it("recovers dead-owner active runs before claiming the same session", async () => {
+    const ledger = createInMemoryRunLedger({
+      isOwnerAlive: () => false,
+      now: createClock(),
+      ownerId: "owner_live",
+      ownerPid: 1234,
+    });
+
+    await ledger.createPending({
+      ownerId: "owner_dead",
+      ownerPid: 4321,
+      runId: "run_stale",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+    await ledger.markRunning("run_stale");
+
+    await expect(
+      ledger.claimPendingRun({
+        runId: "run_after_stale",
+        sessionId: "session_1",
+        triggerSource: "user",
+      }),
+    ).resolves.toMatchObject({
+      ownerId: "owner_live",
+      ownerPid: 1234,
+      runId: "run_after_stale",
+      status: "pending",
+    });
+    await expect(ledger.get("run_stale")).resolves.toMatchObject({
+      error: "process interrupted before owner exited",
+      status: "interrupted",
+    });
+  });
+
   it("allows a later claim after the session's active run reaches a terminal state", async () => {
     const ledger = createLedger();
     await ledger.claimPendingRun({
