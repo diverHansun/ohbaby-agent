@@ -271,28 +271,48 @@ function createPersistentProjectResolver(
   };
 }
 
+function persistentProjectDirectory(
+  options: PersistentUiBackendOptions,
+): string {
+  return options.workdir ?? options.projectDirectory ?? process.cwd();
+}
+
+async function resolvePersistentProjectRoot(
+  options: PersistentUiBackendOptions,
+): Promise<string> {
+  const directory = persistentProjectDirectory(options);
+  const project = await Project.fromDirectory(directory);
+
+  return options.workdir || options.projectDirectory
+    ? path.resolve(directory)
+    : project.rootPath;
+}
+
 async function resolvePersistentStartupSession(input: {
   readonly mode: StartupSessionMode;
+  readonly projectRoot: string;
   readonly stateStore: ReturnType<typeof createPersistentUiStateStore>;
   readonly sessionManager: ReturnType<typeof createSessionManager>;
 }): Promise<void> {
   if (input.mode.type === "fresh") {
     return;
   }
-  const candidates = (await input.sessionManager.getRecent()).map(
-    (session) => ({
-      id: session.id,
-      kind: session.isSubagent ? ("temporary" as const) : ("primary" as const),
-      updatedAt: session.updatedAt,
-    }),
-  );
+  const candidates = (
+    await input.sessionManager.listByProjectRoot(input.projectRoot, {
+      status: "active",
+    })
+  ).map((session) => ({
+    id: session.id,
+    kind: session.isSubagent ? ("temporary" as const) : ("primary" as const),
+    updatedAt: session.updatedAt,
+  }));
   const sessionId = resolveStartupSession(input.mode, candidates);
   if (sessionId === null) {
     return;
   }
   const session = await input.stateStore.getSession(sessionId);
   if (!session) {
-    throw new Error(`Session not found: ${sessionId}`);
+    throw new Error(`Session not found: ${sessionId} in current project`);
   }
   await input.stateStore.setActiveSessionId(sessionId);
 }
@@ -342,9 +362,11 @@ export function createPersistentUiBackendClient(
     ownerPid: process.pid,
   });
   const startupSessionMode = resolveStartupSessionMode(options);
+  const projectRoot = resolvePersistentProjectRoot(options);
   const stateStore = createPersistentUiStateStore({
     initialActiveSessionId: null,
     messageManager,
+    projectRoot: () => projectRoot,
     runLedger,
     sessionManager,
   });
@@ -363,6 +385,7 @@ export function createPersistentUiBackendClient(
   const startupReady = startupRecovery.then(async () => {
     await resolvePersistentStartupSession({
       mode: startupSessionMode,
+      projectRoot: await projectRoot,
       sessionManager,
       stateStore,
     });

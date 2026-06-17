@@ -481,6 +481,46 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 
+  it("rejects startup resume sessions from another project root", async () => {
+    const directory = await tempDir("ohbaby-persistent-resume-scope-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const currentWorkdir = join(directory, "workspace-current");
+      const otherWorkdir = join(directory, "workspace-other");
+      await mkdir(currentWorkdir, { recursive: true });
+      await mkdir(otherWorkdir, { recursive: true });
+      const otherClient = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Other response", finishReason: "stop" },
+        ]),
+        now: () => new Date(10_000),
+        workdir: otherWorkdir,
+      });
+
+      await otherClient.submitPrompt("Other project session");
+      const otherSessionId = (await otherClient.getSnapshot()).activeSessionId;
+      expect(otherSessionId).toBeTruthy();
+      await otherClient.dispose();
+      closeDatabase();
+
+      const restored = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        resumeSessionId: otherSessionId ?? undefined,
+        workdir: currentWorkdir,
+      });
+
+      await expect(restored.getSnapshot()).rejects.toThrow(
+        /current project|Session not found/u,
+      );
+      await restored.dispose();
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("selects the latest primary session for explicit continue startup", async () => {
     const directory = await tempDir("ohbaby-persistent-continue-");
     try {
@@ -516,6 +556,65 @@ describe("createPersistentUiBackendClient", () => {
       const snapshot = await restored.getSnapshot();
 
       expect(snapshot.activeSessionId).toBe(secondSessionId);
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("selects the latest current-project session for explicit continue startup", async () => {
+    const directory = await tempDir("ohbaby-persistent-continue-scope-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const currentWorkdir = join(directory, "workspace-current");
+      const otherWorkdir = join(directory, "workspace-other");
+      await mkdir(currentWorkdir, { recursive: true });
+      await mkdir(otherWorkdir, { recursive: true });
+      const currentClient = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Current response", finishReason: "stop" },
+        ]),
+        now: () => new Date(1_000),
+        workdir: currentWorkdir,
+      });
+
+      await currentClient.submitPrompt("Current project session");
+      const currentSessionId = (await currentClient.getSnapshot())
+        .activeSessionId;
+      expect(currentSessionId).toBeTruthy();
+      await currentClient.dispose();
+      closeDatabase();
+
+      const otherClient = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Other response", finishReason: "stop" },
+        ]),
+        now: () => new Date(10_000),
+        workdir: otherWorkdir,
+      });
+
+      await otherClient.submitPrompt("Other project session");
+      const otherSessionId = (await otherClient.getSnapshot()).activeSessionId;
+      expect(otherSessionId).toBeTruthy();
+      expect(otherSessionId).not.toBe(currentSessionId);
+      await otherClient.dispose();
+      closeDatabase();
+
+      const restored = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        startupSessionMode: { type: "continue" },
+        workdir: currentWorkdir,
+      });
+      const snapshot = await restored.getSnapshot();
+      const serializedSnapshot = JSON.stringify(snapshot);
+
+      expect(snapshot.activeSessionId).toBe(currentSessionId);
+      expect(serializedSnapshot).toContain("Current project session");
+      expect(serializedSnapshot).not.toContain("Other project session");
+      await restored.dispose();
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

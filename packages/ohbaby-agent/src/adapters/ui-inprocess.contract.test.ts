@@ -4634,9 +4634,6 @@ describe("createInProcessUiBackendClient", () => {
                 : null,
           );
         },
-        getRecent() {
-          return Promise.resolve([]);
-        },
         listByProject() {
           return Promise.resolve([]);
         },
@@ -4700,6 +4697,7 @@ describe("createInProcessUiBackendClient", () => {
         sessionManager,
         stateStore: createPersistentUiStateStore({
           messageManager,
+          projectRoot: directory,
           runLedger: createDatabaseRunLedger(),
           sessionManager,
         }),
@@ -4784,6 +4782,7 @@ describe("createInProcessUiBackendClient", () => {
         sessionManager,
         stateStore: createPersistentUiStateStore({
           messageManager,
+          projectRoot: directory,
           runLedger: createDatabaseRunLedger(),
           sessionManager,
         }),
@@ -5190,7 +5189,9 @@ describe("createInProcessUiBackendClient", () => {
 
   it("uses collision-resistant default run ids with an injected persistent state store", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-run-id-db-"));
+    const projectRoot = join(directory, "repo");
     try {
+      await mkdir(projectRoot, { recursive: true });
       initDatabase({ dbPath: join(directory, "agent.db") });
       let nextSession = 1;
       const messageManager = createMessageManager({
@@ -5220,11 +5221,11 @@ describe("createInProcessUiBackendClient", () => {
         },
         store: createDatabaseSessionStore(),
       });
-      const existingSession = await sessionManager.create("D:/repo", {
+      const existingSession = await sessionManager.create(projectRoot, {
         title: "Existing",
       });
       for (let index = 2; index <= 51; index += 1) {
-        await sessionManager.create("D:/repo", {
+        await sessionManager.create(projectRoot, {
           title: `Recent ${String(index)}`,
         });
       }
@@ -5244,9 +5245,11 @@ describe("createInProcessUiBackendClient", () => {
           { textDelta: "Persisted", finishReason: "stop" },
         ]),
         messageManager,
+        projectDirectory: projectRoot,
         sessionManager,
         stateStore: createPersistentUiStateStore({
           messageManager,
+          projectRoot,
           runLedger,
           sessionManager,
         }),
@@ -5289,6 +5292,7 @@ describe("createInProcessUiBackendClient", () => {
             bus: createBus(),
             store: createDatabaseMessageStore(),
           }),
+          projectRoot: directory,
           runLedger: createDatabaseRunLedger(),
           sessionManager: createSessionManager({
             bus: createBus(),

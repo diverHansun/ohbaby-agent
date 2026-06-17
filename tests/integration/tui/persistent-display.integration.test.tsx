@@ -352,7 +352,7 @@ describe("TUI persistent backend display", () => {
     app.unmount();
   });
 
-  it("continues a resumed session from its original project root", async () => {
+  it("rejects a resumed session from another project root", async () => {
     const directory = await tempWorkspace("ohbaby-cli-session-root");
     const dbPath = join(directory, "agent.db");
     const originalWorkdir = join(directory, "workspace-a");
@@ -370,6 +370,7 @@ describe("TUI persistent backend display", () => {
     await setupClient.submitPrompt("Alpha prompt", {
       sessionId: "session_alpha",
     });
+    await setupClient.dispose();
     closeDatabase();
 
     const requests: Parameters<typeof createSequentialFakeLLMClient>[1] = [];
@@ -389,24 +390,13 @@ describe("TUI persistent backend display", () => {
       />,
     );
 
-    await waitForFrame(app, (frame) => frame.includes("Alpha prompt"));
-
-    app.stdin.write("Continue alpha");
-    app.stdin.write("\r");
-    await waitForFrame(app, (frame) =>
-      frame.includes("Alpha from original root."),
+    const frame = await waitForFrame(app, (nextFrame) =>
+      nextFrame.includes("Session not found: session_alpha in current project"),
     );
 
-    const systemContent =
-      typeof requests[0]?.messages[0]?.content === "string"
-        ? requests[0].messages[0].content
-        : "";
-    expect(systemContent).toContain(
-      `Current working directory: ${originalWorkdir}`,
-    );
-    expect(systemContent).not.toContain(
-      `Current working directory: ${restoredWorkdir}`,
-    );
+    expect(frame).not.toContain("Alpha prompt");
+    expect(frame).not.toContain("Alpha reply.");
+    expect(requests).toHaveLength(0);
     app.unmount();
   });
 });

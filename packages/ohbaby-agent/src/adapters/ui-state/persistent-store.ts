@@ -23,12 +23,8 @@ import type {
   RunStatus,
 } from "../../runtime/run-ledger/index.js";
 import {
-  getDatabase,
-  schema,
-  type DatabaseConnection,
-} from "../../services/database/index.js";
-import {
   resolveSessionDisplayTitle,
+  sameSessionProjectRoot,
   type Session,
   type SessionManager,
 } from "../../services/session/index.js";
@@ -36,33 +32,20 @@ import { cloneSnapshot } from "./memory-store.js";
 import type { UiStateStore } from "./types.js";
 
 const DEFAULT_SESSION_LIMIT = 50;
-const ACTIVE_SESSION_ID_KEY = "activeSessionId";
-const DEFAULT_APP_STATE_SCOPE = "global";
 const ACTIVE_RUN_STATUSES = new Set<RunStatus>(["pending", "running"]);
 const SESSION_TRANSACTION_ACTIVE_MESSAGE = "Session transaction is active";
 const CONTEXT_COMPACTED_TEXT = "Context compacted";
 
-export interface UiAppStateStore {
-  getActiveSessionId(): Promise<string | null>;
-  setActiveSessionId(sessionId: string | null): Promise<void>;
-}
-
-export interface DatabaseUiAppStateStoreOptions {
-  readonly db?: DatabaseConnection;
-  readonly now?: () => number;
-  readonly scope?: string;
-}
-
 export interface PersistentUiStateStoreOptions {
-  readonly sessionManager: Pick<SessionManager, "get" | "getRecent" | "update">;
+  readonly sessionManager: Pick<
+    SessionManager,
+    "get" | "listByProjectRoot" | "update"
+  >;
   readonly messageManager: Pick<MessageManager, "listBySession">;
   readonly runLedger: RunLedger;
   readonly initialActiveSessionId?: string | null;
+  readonly projectRoot: string | (() => Promise<string> | string);
   readonly sessionLimit?: number;
-}
-
-interface AppStateRow {
-  readonly value: string;
 }
 
 interface MutableUiState {
@@ -351,49 +334,6 @@ async function applyRunUpdate(runLedger: RunLedger, run: UiRun): Promise<void> {
   }
 }
 
-export function createDatabaseUiAppStateStore(
-  options: DatabaseUiAppStateStoreOptions = {},
-): UiAppStateStore {
-  const db = options.db ?? getDatabase();
-  const now = options.now ?? Date.now;
-  const scope = options.scope ?? DEFAULT_APP_STATE_SCOPE;
-
-  async function withAsyncBoundary<T>(operation: () => T): Promise<T> {
-    await Promise.resolve();
-    return operation();
-  }
-
-  return {
-    getActiveSessionId(): Promise<string | null> {
-      return withAsyncBoundary(() => {
-        const row = db
-          .prepare<AppStateRow>(
-            `SELECT value FROM ${schema.appState.tableName}
-             WHERE scope = ? AND key = ?`,
-          )
-          .get(scope, ACTIVE_SESSION_ID_KEY);
-        if (!row) {
-          return null;
-        }
-        const value = JSON.parse(row.value) as unknown;
-        return typeof value === "string" ? value : null;
-      });
-    },
-
-    setActiveSessionId(sessionId: string | null): Promise<void> {
-      return withAsyncBoundary(() => {
-        db.prepare(
-          `INSERT INTO ${schema.appState.tableName} (scope, key, value, updated_at)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(scope, key) DO UPDATE SET
-             value = excluded.value,
-             updated_at = excluded.updated_at`,
-        ).run(scope, ACTIVE_SESSION_ID_KEY, JSON.stringify(sessionId), now());
-      });
-    },
-  };
-}
-
 export function createPersistentUiStateStore(
   options: PersistentUiStateStoreOptions,
 ): UiStateStore {
@@ -403,6 +343,17 @@ export function createPersistentUiStateStore(
   };
   const sessionLimit = options.sessionLimit ?? DEFAULT_SESSION_LIMIT;
   let activeSessionId = options.initialActiveSessionId ?? null;
+
+  async function currentProjectRoot(): Promise<string> {
+    if (typeof options.projectRoot === "function") {
+      return options.projectRoot();
+    }
+    return options.projectRoot;
+  }
+
+  function isInCurrentProject(session: Session, projectRoot: string): boolean {
+    return sameSessionProjectRoot(session.projectRoot, projectRoot);
+  }
 
   async function readUiSession(session: Session): Promise<UiSession> {
     return sessionToUiSession({
@@ -426,10 +377,14 @@ export function createPersistentUiStateStore(
     readonly activeSessionId: string | null;
     readonly sessions: readonly Session[];
   }> {
+    const projectRoot = await currentProjectRoot();
     const selectedActiveSessionId = activeSessionId;
     const recentSessions = (
       await withSessionTransactionRetry(() =>
-        options.sessionManager.getRecent(sessionLimit),
+        options.sessionManager.listByProjectRoot(projectRoot, {
+          limit: sessionLimit,
+          status: "active",
+        }),
       )
     ).filter(isPrimarySession);
     if (
@@ -445,7 +400,11 @@ export function createPersistentUiStateStore(
     const activeSession = await withSessionTransactionRetry(() =>
       options.sessionManager.get(selectedActiveSessionId),
     );
-    if (!activeSession || !isPrimarySession(activeSession)) {
+    if (
+      !activeSession ||
+      !isPrimarySession(activeSession) ||
+      !isInCurrentProject(activeSession, projectRoot)
+    ) {
       return {
         activeSessionId: null,
         sessions: recentSessions,
@@ -500,7 +459,10 @@ export function createPersistentUiStateStore(
       const session = await withSessionTransactionRetry(() =>
         options.sessionManager.get(sessionId),
       );
-      return session && isPrimarySession(session)
+      const projectRoot = await currentProjectRoot();
+      return session &&
+        isPrimarySession(session) &&
+        isInCurrentProject(session, projectRoot)
         ? readUiSession(session)
         : undefined;
     },

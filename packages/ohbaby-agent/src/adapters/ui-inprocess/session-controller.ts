@@ -7,16 +7,9 @@ import { sameSessionProjectRoot } from "../../services/session/index.js";
 
 export type InProcessSessionManager = Pick<
   SessionManager,
-  | "create"
-  | "get"
-  | "getRecent"
-  | "listByProject"
-  | "listByProjectRoot"
-  | "update"
+  "create" | "get" | "listByProject" | "listByProjectRoot" | "update"
 > &
-  Partial<
-    Pick<SessionManager, "findReusableEmptyPrimary" | "incrementStats">
-  >;
+  Partial<Pick<SessionManager, "findReusableEmptyPrimary" | "incrementStats">>;
 
 export interface ResolveSessionForNewPromptInput {
   readonly createSession: (id?: string) => Promise<UiSession>;
@@ -138,7 +131,10 @@ async function resolveReusableUiSession(input: {
   readonly session: UiSession | null | undefined;
   readonly sessionManager?: InProcessSessionManager;
 }): Promise<ResolvedSessionForNewPrompt | null> {
-  if (!input.session || !isReusableUiSession(input.session, input.projectRoot)) {
+  if (
+    !input.session ||
+    !isReusableUiSession(input.session, input.projectRoot)
+  ) {
     return null;
   }
   if (!input.sessionManager) {

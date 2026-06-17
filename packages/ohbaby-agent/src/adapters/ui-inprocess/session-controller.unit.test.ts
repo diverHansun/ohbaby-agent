@@ -181,9 +181,6 @@ describe("resolveSessionForNewPrompt", () => {
       get() {
         return Promise.resolve(null);
       },
-      getRecent() {
-        return Promise.resolve([]);
-      },
       listByProject() {
         return Promise.resolve([]);
       },
