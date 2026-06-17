@@ -22,6 +22,7 @@ import {
   sanitizeCommandSkillSummary,
 } from "./normalize.js";
 import { handleConnect } from "./connect.js";
+import { handleConnectSearch } from "./connect-search.js";
 
 interface BuiltinHandlerHelpers {
   listCommands?(
@@ -33,6 +34,7 @@ const HELP_COMMAND_ORDER = [
   "status",
   "models",
   "connect",
+  "connect-search",
   "sessions",
   "new",
   "compact",
@@ -617,6 +619,12 @@ export function createBuiltinHandlers(
       id: "connect",
       execute(invocation, context): Promise<void> {
         return handleConnect(options, invocation.argv, context);
+      },
+    },
+    {
+      id: "connect-search",
+      execute(invocation, context): Promise<void> {
+        return handleConnectSearch(options, invocation.argv, context);
       },
     },
     {

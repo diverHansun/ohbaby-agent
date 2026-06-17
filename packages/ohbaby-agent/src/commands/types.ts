@@ -11,6 +11,8 @@ import type {
   UiConnectModelResult,
   UiContextWindowUsage,
   UiInteractionResponse,
+  UiSetSearchApiKeyInput,
+  UiSetSearchApiKeyResult,
   UiSnapshot,
 } from "ohbaby-sdk";
 import type { BusInstance } from "../bus/index.js";
@@ -176,6 +178,9 @@ export interface CommandServiceOptions {
   readonly connectModel?: (
     input: UiConnectModelInput,
   ) => Promise<UiConnectModelResult> | UiConnectModelResult;
+  readonly setSearchApiKey?: (
+    input: UiSetSearchApiKeyInput,
+  ) => Promise<UiSetSearchApiKeyResult> | UiSetSearchApiKeyResult;
   readonly exit?: () => Promise<void> | void;
   readonly getStatus?: () => string;
   readonly getContextUsage?: (input: {

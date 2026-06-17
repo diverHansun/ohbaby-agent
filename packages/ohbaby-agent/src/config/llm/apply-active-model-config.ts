@@ -1,5 +1,5 @@
-import * as path from "node:path";
 import { createModelProfileRegistry } from "../../services/llm-model/modelProfiles.js";
+import { getGlobalEnvPath } from "../../utils/project-env.js";
 import type { InterfaceProviderKind } from "./types.js";
 import { ConfigError } from "./types.js";
 import {
@@ -61,7 +61,7 @@ export async function applyActiveModelConfig(
     input.maxOutputTokens,
     "Max output tokens must be a positive integer",
   );
-  const envPath = input.envPath ?? path.join(input.projectRoot, ".env");
+  const envPath = input.envPath ?? getGlobalEnvPath();
 
   const apiKey = await resolveApiKey({
     apiKey: input.apiKey,
@@ -84,7 +84,8 @@ export async function applyActiveModelConfig(
     defaultProvider: provider,
   }).resolve(model, provider);
   const resolvedMaxOutputTokens =
-    maxOutputTokens ?? (profile.source === "fallback" ? undefined : profile.maxOutputTokens);
+    maxOutputTokens ??
+    (profile.source === "fallback" ? undefined : profile.maxOutputTokens);
 
   const writeResult = await setActiveLLMConfig({
     provider,
@@ -164,7 +165,9 @@ function resolveContextWindow(input: {
   return {
     contextWindowSource: "default",
     contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
-    ...(input.probeWarning === undefined ? {} : { warning: input.probeWarning }),
+    ...(input.probeWarning === undefined
+      ? {}
+      : { warning: input.probeWarning }),
   };
 }
 

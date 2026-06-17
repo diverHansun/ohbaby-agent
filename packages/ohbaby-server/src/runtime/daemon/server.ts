@@ -1,4 +1,8 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import type {
   SubmitPromptOptions,
   UiBackendClient,
@@ -6,10 +10,7 @@ import type {
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
-import {
-  createSessionIdGenerator,
-  SessionRunBusyError,
-} from "ohbaby-agent";
+import { createSessionIdGenerator, SessionRunBusyError } from "ohbaby-agent";
 import { isAuthorizedDaemonRequest } from "../../auth/token.js";
 import { PermissionRouter } from "../../coordination/permission-router.js";
 import {
@@ -191,7 +192,9 @@ async function callBackend(
     }
     case "getContextWindowUsage":
       return backend.getContextWindowUsage(
-        request.params[0] as Parameters<UiBackendClient["getContextWindowUsage"]>[0],
+        request.params[0] as Parameters<
+          UiBackendClient["getContextWindowUsage"]
+        >[0],
       );
     case "listCommands":
       return backend.listCommands(
@@ -200,10 +203,7 @@ async function callBackend(
     case "submitPrompt": {
       const options = submitPromptOptions(request.params[1]);
       const view = clientViews.get(request.clientId);
-      let submitOptions = optionsForClientSubmit(
-        options,
-        view,
-      );
+      let submitOptions = optionsForClientSubmit(options, view);
       if (submitOptions?.sessionId !== undefined && view !== undefined) {
         view.activeSessionId = submitOptions.sessionId;
       } else if (view?.activeSessionId === null) {
@@ -231,6 +231,10 @@ async function callBackend(
       return backend.connectModel(
         request.params[0] as Parameters<UiBackendClient["connectModel"]>[0],
       );
+    case "setSearchApiKey":
+      return backend.setSearchApiKey(
+        request.params[0] as Parameters<UiBackendClient["setSearchApiKey"]>[0],
+      );
     case "executeCommand": {
       const invocation = commandInvocationForClient(
         request.params[0] as ExecuteCommandInvocation,
@@ -257,12 +261,16 @@ async function callBackend(
       }
       return backend.respondPermission(
         request.params[0] as string,
-        request.params[1] as Parameters<UiBackendClient["respondPermission"]>[1],
+        request.params[1] as Parameters<
+          UiBackendClient["respondPermission"]
+        >[1],
       );
     case "respondInteraction":
       return backend.respondInteraction(
         request.params[0] as string,
-        request.params[1] as Parameters<UiBackendClient["respondInteraction"]>[1],
+        request.params[1] as Parameters<
+          UiBackendClient["respondInteraction"]
+        >[1],
       );
     case "abortRun":
       return backend.abortRun(request.params[0] as string | undefined);
@@ -281,7 +289,9 @@ function parseStartupIntent(value: unknown): DaemonStartupIntent {
     }
   }
   const resumeSessionId =
-    typeof value.resumeSessionId === "string" ? value.resumeSessionId : undefined;
+    typeof value.resumeSessionId === "string"
+      ? value.resumeSessionId
+      : undefined;
   const rawInitialPermission = value.initialPermission;
   let initialPermission: DaemonStartupIntent["initialPermission"];
   if (isRecord(rawInitialPermission)) {
@@ -307,7 +317,11 @@ function resolveStartupActiveSessionId(
   intent: DaemonStartupIntent,
 ): string | null {
   if (intent.resumeSessionId !== undefined) {
-    if (!snapshot.sessions.some((session) => session.id === intent.resumeSessionId)) {
+    if (
+      !snapshot.sessions.some(
+        (session) => session.id === intent.resumeSessionId,
+      )
+    ) {
       throw new Error(`Session not found: ${intent.resumeSessionId}`);
     }
     return intent.resumeSessionId;
@@ -334,9 +348,7 @@ function snapshotForClient(
   const activeSessionId = view.activeSessionId;
   return {
     ...snapshot,
-    ...(activeSessionId === undefined
-      ? {}
-      : { activeSessionId }),
+    ...(activeSessionId === undefined ? {} : { activeSessionId }),
     ...(activeSessionId === undefined
       ? {}
       : {
@@ -383,7 +395,9 @@ function optionsForClientSubmit(
   return options;
 }
 
-type ExecuteCommandInvocation = Parameters<UiBackendClient["executeCommand"]>[0];
+type ExecuteCommandInvocation = Parameters<
+  UiBackendClient["executeCommand"]
+>[0];
 
 function commandInvocationForClient(
   invocation: ExecuteCommandInvocation,
@@ -600,7 +614,10 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
 
     await new Promise<void>((resolve, reject) => {
       this.server.close((error?: Error) => {
-        if (error && !(isNodeError(error) && error.code === "ERR_SERVER_NOT_RUNNING")) {
+        if (
+          error &&
+          !(isNodeError(error) && error.code === "ERR_SERVER_NOT_RUNNING")
+        ) {
           reject(error);
           return;
         }
@@ -657,7 +674,11 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
   }
 
   private writeUnauthorized(response: ServerResponse, id = "unknown"): void {
-    writeJson(response, 401, createDaemonRpcFailure(id, new Error("Unauthorized")));
+    writeJson(
+      response,
+      401,
+      createDaemonRpcFailure(id, new Error("Unauthorized")),
+    );
   }
 
   private async handleShutdown(
@@ -689,7 +710,10 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       parsedBody = body.length > 0 ? (JSON.parse(body) as unknown) : {};
       rpcRequest = parseDaemonRpcRequest(parsedBody);
     } catch (error) {
-      const failure = createDaemonRpcFailure(requestIdFromBody(parsedBody), error);
+      const failure = createDaemonRpcFailure(
+        requestIdFromBody(parsedBody),
+        error,
+      );
       writeJson(response, 400, failure);
       return;
     }
@@ -872,7 +896,9 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       event.type === "command.result.delivered" ||
       event.type === "command.failed"
     ) {
-      return this.commandEventBelongsToClient(event, clientId) ? event : undefined;
+      return this.commandEventBelongsToClient(event, clientId)
+        ? event
+        : undefined;
     }
 
     if (
@@ -895,10 +921,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     event: Extract<
       UiEvent,
       {
-        type:
-          | "command.started"
-          | "command.result.delivered"
-          | "command.failed";
+        type: "command.started" | "command.result.delivered" | "command.failed";
       }
     >,
     clientId: string,

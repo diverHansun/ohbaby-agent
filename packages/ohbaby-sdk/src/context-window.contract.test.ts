@@ -105,6 +105,14 @@ describe("context window UI contract", () => {
           saved: true,
         } as const);
       },
+      setSearchApiKey(): ReturnType<CoreAPI["setSearchApiKey"]> {
+        return Promise.resolve({
+          apiKeyEnv: "TAVILY_API_KEY",
+          envPath: ".env",
+          provider: "tavily",
+          searchJsonPath: "search.json",
+        } as const);
+      },
       executeCommand(): ReturnType<CoreAPI["executeCommand"]> {
         return Promise.resolve();
       },

@@ -9,6 +9,7 @@ export const DAEMON_RPC_METHODS = [
   "compactSession",
   "getCurrentModel",
   "connectModel",
+  "setSearchApiKey",
   "executeCommand",
   "respondPermission",
   "respondInteraction",
@@ -156,7 +157,11 @@ export function parseDaemonSseEvent(value: unknown): DaemonSseEvent {
     throw new TypeError("Daemon SSE event must be an object");
   }
 
-  const type = requireString(value, "type", "Daemon SSE event type is required");
+  const type = requireString(
+    value,
+    "type",
+    "Daemon SSE event type is required",
+  );
   switch (type) {
     case "hello":
       return {

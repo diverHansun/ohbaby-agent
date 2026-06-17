@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+
 export type SearchConfigErrorCode =
   | "FILE_NOT_FOUND"
   | "INVALID_JSON"
@@ -41,7 +43,13 @@ export const SearchDefaultsConfigSchema = z
 export const SearchJsonConfigSchema = z
   .object({
     provider: z.enum(["tavily"]).optional().default("tavily"),
-    apiKeyEnv: z.string().trim().min(1).optional().default("TAVILY_API_KEY"),
+    apiKeyEnv: z
+      .string()
+      .trim()
+      .min(1)
+      .regex(ENV_VAR_NAME_PATTERN, "must be an environment variable name")
+      .optional()
+      .default("TAVILY_API_KEY"),
     baseUrl: z.string().url().optional(),
     defaults: SearchDefaultsConfigSchema.optional().default({}),
   })

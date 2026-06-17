@@ -1,4 +1,7 @@
-import { request as httpRequest, createServer as createHttpServer } from "node:http";
+import {
+  request as httpRequest,
+  createServer as createHttpServer,
+} from "node:http";
 import { describe, expect, it, vi } from "vitest";
 import type {
   SubmitPromptOptions,
@@ -9,6 +12,7 @@ import type {
   UiEvent,
   UiEventHandler,
   UiMessage,
+  UiSetSearchApiKeyResult,
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
@@ -67,6 +71,15 @@ function connectModelResult(): UiConnectModelResult {
     modelJsonPath: "model.json",
     provider: "fake",
     saved: true,
+  };
+}
+
+function setSearchApiKeyResult(): UiSetSearchApiKeyResult {
+  return {
+    apiKeyEnv: "TAVILY_API_KEY",
+    envPath: ".env",
+    provider: "tavily",
+    searchJsonPath: "search.json",
   };
 }
 
@@ -180,10 +193,9 @@ function commandSessionSelected(sessionId: string): UiEvent {
   };
 }
 
-function permissionRequested(runId: string): Extract<
-  UiEvent,
-  { type: "permission.requested" }
-> {
+function permissionRequested(
+  runId: string,
+): Extract<UiEvent, { type: "permission.requested" }> {
   return {
     request: {
       choices: [{ id: "allow", intent: "allow", label: "Allow" }],
@@ -206,8 +218,9 @@ class FakeBackend implements UiBackendClient {
     readonly text: string;
     readonly options?: SubmitPromptOptions;
   }[] = [];
-  readonly commandInvocations: Parameters<UiBackendClient["executeCommand"]>[0][] =
-    [];
+  readonly commandInvocations: Parameters<
+    UiBackendClient["executeCommand"]
+  >[0][] = [];
   emitOnSubmit = true;
   holdSubmits = false;
   subscribeError: Error | undefined;
@@ -253,10 +266,7 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve({ commands: [], version: "v1" });
   }
 
-  submitPrompt(
-    text: string,
-    options?: SubmitPromptOptions,
-  ): Promise<void> {
+  submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void> {
     this.submitted.push({ text, ...(options ? { options } : {}) });
     if (this.emitOnSubmit) {
       this.emit(runUpdated("run_1", options?.sessionId));
@@ -280,6 +290,10 @@ class FakeBackend implements UiBackendClient {
 
   connectModel(): ReturnType<UiBackendClient["connectModel"]> {
     return Promise.resolve(connectModelResult());
+  }
+
+  setSearchApiKey(): ReturnType<UiBackendClient["setSearchApiKey"]> {
+    return Promise.resolve(setSearchApiKeyResult());
   }
 
   executeCommand(
@@ -1092,12 +1106,14 @@ describe("createDaemonHttpServer", () => {
       };
       expect(observerBody.result.activeSessionId).toBe("session_1");
       expect(
-        observerBody.result.sessions.find((session) => session.id === "session_1")
-          ?.messages,
+        observerBody.result.sessions.find(
+          (session) => session.id === "session_1",
+        )?.messages,
       ).toEqual([currentMessage]);
       expect(
-        observerBody.result.sessions.find((session) => session.id === "session_2")
-          ?.messages,
+        observerBody.result.sessions.find(
+          (session) => session.id === "session_2",
+        )?.messages,
       ).toEqual([]);
     });
   });
@@ -1588,7 +1604,9 @@ describe("createDaemonHttpServer", () => {
 
     await server.start();
     try {
-      const response = await fetch(`${server.url}/api/events?clientId=client_a`);
+      const response = await fetch(
+        `${server.url}/api/events?clientId=client_a`,
+      );
       expect(response.status).toBe(200);
       const reader = response.body?.getReader();
       await reader?.read();

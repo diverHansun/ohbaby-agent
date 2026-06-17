@@ -216,6 +216,12 @@ function withStartupRecovery(
       await ready();
       return client.connectModel(input);
     },
+    async setSearchApiKey(
+      input,
+    ): ReturnType<UiBackendClient["setSearchApiKey"]> {
+      await ready();
+      return client.setSearchApiKey(input);
+    },
     async getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
       await ready();
       return client.getCurrentModel();

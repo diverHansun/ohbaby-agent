@@ -64,7 +64,8 @@ ohbaby
 ```
 
 **2. Connect a model.** In the CLI/TUI, type `/connect` to open the provider setup panel,
-fill in your provider, base URL, API key, and model name, then save.
+fill in your provider, base URL, API key, and model name, then save. Secrets
+entered here are persisted to `~/.ohbaby-agent/.env`.
 
 <p align="center">
   <img src="assets/images/connect-providers.png" alt="ohbaby-agent /connect provider setup" width="760">
@@ -84,7 +85,12 @@ fill in your provider, base URL, API key, and model name, then save.
 ## 🔍 Web Search (optional)
 
 To enable the web search tool, get a free API key from
-[Tavily](https://tavily.com) and add it to a `.env` file in either location:
+[Tavily](https://tavily.com), then type `/connect-search` in the CLI/TUI and
+enter the key. ohbaby-agent saves it as `TAVILY_API_KEY` in
+`~/.ohbaby-agent/.env` and keeps only search metadata in
+`~/.ohbaby-agent/tools/search.json`.
+
+You can also set the key manually in a `.env` file:
 
 - `~/.ohbaby-agent/.env` (global), or
 - `<your-project>/.env` (project)

@@ -76,6 +76,9 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
       connectModel(input): ReturnType<CoreAPI["connectModel"]> {
         return client.connectModel(input);
       },
+      setSearchApiKey(input): ReturnType<CoreAPI["setSearchApiKey"]> {
+        return client.setSearchApiKey(input);
+      },
       executeCommand(invocation): ReturnType<CoreAPI["executeCommand"]> {
         return client.executeCommand(invocation);
       },

@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { CoreApiHost } from "ohbaby-agent";
-import type { CoreAPI, SDKAPI, UiBackendClient, UiEventHandler } from "ohbaby-sdk";
+import type {
+  CoreAPI,
+  SDKAPI,
+  UiBackendClient,
+  UiEventHandler,
+} from "ohbaby-sdk";
 import { daemonAuthHeader } from "../../auth/token.js";
 import {
   createDaemonRpcRequest,
@@ -90,10 +95,7 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
-function daemonConnectionError(
-  method: DaemonRpcMethod,
-  error: unknown,
-): Error {
+function daemonConnectionError(method: DaemonRpcMethod, error: unknown): Error {
   return new Error(
     `Daemon connection failed while running ${method}: ${errorMessage(error)}`,
   );
@@ -132,9 +134,9 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("getContextWindowUsage", [input]);
   }
 
-  subscribeEvents(handler: UiEventHandler): ReturnType<
-    UiBackendClient["subscribeEvents"]
-  > {
+  subscribeEvents(
+    handler: UiEventHandler,
+  ): ReturnType<UiBackendClient["subscribeEvents"]> {
     this.handlers.add(handler);
     this.ensureSseLoop();
     return () => {
@@ -172,6 +174,12 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     input: Parameters<UiBackendClient["connectModel"]>[0],
   ): ReturnType<UiBackendClient["connectModel"]> {
     return this.rpc("connectModel", [input]);
+  }
+
+  setSearchApiKey(
+    input: Parameters<UiBackendClient["setSearchApiKey"]>[0],
+  ): ReturnType<UiBackendClient["setSearchApiKey"]> {
+    return this.rpc("setSearchApiKey", [input]);
   }
 
   executeCommand(
@@ -260,9 +268,13 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     if (this.startupIntent === undefined) {
       return;
     }
-    this.initializePromise ??= this.rpc("initializeClient", [this.startupIntent], {
-      skipInitialize: true,
-    });
+    this.initializePromise ??= this.rpc(
+      "initializeClient",
+      [this.startupIntent],
+      {
+        skipInitialize: true,
+      },
+    );
     await this.initializePromise;
   }
 
@@ -301,7 +313,9 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
       signal,
     });
     if (!response.ok) {
-      throw new Error(`Daemon SSE connection failed: ${String(response.status)}`);
+      throw new Error(
+        `Daemon SSE connection failed: ${String(response.status)}`,
+      );
     }
     const reader = response.body?.getReader() as
       | ReadableStreamDefaultReader<Uint8Array>
@@ -396,6 +410,9 @@ export function createRemoteCoreApiHost(
       },
       connectModel(input): ReturnType<CoreAPI["connectModel"]> {
         return client.connectModel(input);
+      },
+      setSearchApiKey(input): ReturnType<CoreAPI["setSearchApiKey"]> {
+        return client.setSearchApiKey(input);
       },
       executeCommand(invocation): ReturnType<CoreAPI["executeCommand"]> {
         return client.executeCommand(invocation);

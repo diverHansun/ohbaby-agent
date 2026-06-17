@@ -690,6 +690,7 @@ function createCore(): {
   readonly listCommands: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
   readonly respondPermission: ReturnType<typeof vi.fn>;
+  readonly setSearchApiKey: ReturnType<typeof vi.fn>;
   readonly submitPrompt: ReturnType<typeof vi.fn>;
 } {
   return {
@@ -705,6 +706,14 @@ function createCore(): {
         modelJsonPath: "model.json",
         provider: "example",
         saved: true,
+      } as const),
+    ),
+    setSearchApiKey: vi.fn(() =>
+      Promise.resolve({
+        apiKeyEnv: "TAVILY_API_KEY",
+        envPath: ".env",
+        provider: "tavily",
+        searchJsonPath: "search.json",
       } as const),
     ),
     executeCommand: vi.fn(() => Promise.resolve()),

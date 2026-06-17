@@ -45,6 +45,125 @@ describe("CommandService", () => {
     expect(getString(error ?? {}, "message")).toContain("--api-key");
   });
 
+  it("does not echo unknown /connect argv values in errors", async () => {
+    const connectModel = vi.fn();
+    const { events, service } = createServiceHarness({ connectModel });
+
+    await service.executeCommand(
+      makeInvocation("connect", ["connect"], ["sk-unknown-secret"]),
+    );
+
+    expect(connectModel).not.toHaveBeenCalled();
+    const failed = events.at(-1);
+    expect(failed).toMatchObject({ type: "failed" });
+    const error = failed ? getRecord(failed, "error") : undefined;
+    expect(getString(error ?? {}, "code")).toBe("INVALID_ARGS");
+    expect(getString(error ?? {}, "message")).toContain(
+      "Unknown /connect argument",
+    );
+    expect(JSON.stringify(error)).not.toContain("sk-unknown-secret");
+  });
+
+  it("rejects API key values in /connect-search argv mode", async () => {
+    const setSearchApiKey = vi.fn();
+    const { events, service } = createServiceHarness({ setSearchApiKey });
+
+    await service.executeCommand(
+      makeInvocation(
+        "connect-search",
+        ["connect-search"],
+        ["--api-key", "tvly-secret"],
+      ),
+    );
+
+    expect(setSearchApiKey).not.toHaveBeenCalled();
+    const failed = events.at(-1);
+    expect(failed).toMatchObject({ type: "failed" });
+    const error = failed ? getRecord(failed, "error") : undefined;
+    expect(getString(error ?? {}, "code")).toBe("UNSUPPORTED_SECRET_ARG");
+    expect(getString(error ?? {}, "message")).toContain("--api-key");
+  });
+
+  it("does not echo unknown /connect-search argv values in errors", async () => {
+    const setSearchApiKey = vi.fn();
+    const { events, service } = createServiceHarness({ setSearchApiKey });
+
+    await service.executeCommand(
+      makeInvocation(
+        "connect-search",
+        ["connect-search"],
+        ["tvly-unknown-secret"],
+      ),
+    );
+
+    expect(setSearchApiKey).not.toHaveBeenCalled();
+    const failed = events.at(-1);
+    expect(failed).toMatchObject({ type: "failed" });
+    const error = failed ? getRecord(failed, "error") : undefined;
+    expect(getString(error ?? {}, "code")).toBe("INVALID_ARGS");
+    expect(getString(error ?? {}, "message")).toContain(
+      "Unknown /connect-search argument",
+    );
+    expect(JSON.stringify(error)).not.toContain("tvly-unknown-secret");
+  });
+
+  it("does not echo unsupported /connect-search provider values in errors", async () => {
+    const setSearchApiKey = vi.fn();
+    const { events, service } = createServiceHarness({ setSearchApiKey });
+
+    await service.executeCommand(
+      makeInvocation(
+        "connect-search",
+        ["connect-search"],
+        ["--provider", "tvly-provider-secret"],
+      ),
+    );
+
+    expect(setSearchApiKey).not.toHaveBeenCalled();
+    const failed = events.at(-1);
+    expect(failed).toMatchObject({ type: "failed" });
+    const error = failed ? getRecord(failed, "error") : undefined;
+    expect(getString(error ?? {}, "code")).toBe("INVALID_ARGS");
+    expect(getString(error ?? {}, "message")).toContain(
+      "Unsupported search provider",
+    );
+    expect(JSON.stringify(error)).not.toContain("tvly-provider-secret");
+  });
+
+  it("executes /connect-search with non-sensitive arguments", async () => {
+    const setSearchApiKey = vi.fn(() =>
+      Promise.resolve({
+        apiKeyEnv: "CUSTOM_TAVILY_KEY",
+        envPath: "D:/home/.ohbaby-agent/.env",
+        provider: "tavily" as const,
+        searchJsonPath: "D:/home/.ohbaby-agent/tools/search.json",
+      }),
+    );
+    const { events, service } = createServiceHarness({ setSearchApiKey });
+
+    await service.executeCommand(
+      makeInvocation(
+        "connect-search",
+        ["connect-search"],
+        ["--provider", "tavily", "--api-key-env", "CUSTOM_TAVILY_KEY"],
+      ),
+    );
+
+    expect(setSearchApiKey).toHaveBeenCalledWith({
+      apiKeyEnv: "CUSTOM_TAVILY_KEY",
+      provider: "tavily",
+    });
+    expect(dataOutputBySubject(events, "search.connected")).toMatchObject({
+      data: {
+        result: {
+          apiKeyEnv: "CUSTOM_TAVILY_KEY",
+          provider: "tavily",
+        },
+      },
+    });
+    expect(JSON.stringify(events)).not.toContain("tvly-secret");
+  });
+
   it("does not accept interface provider in /connect argv mode", async () => {
     const connectModel = vi.fn();
     const { events, service } = createServiceHarness({ connectModel });
@@ -73,7 +192,10 @@ describe("CommandService", () => {
     expect(failed).toMatchObject({ type: "failed" });
     const error = failed ? getRecord(failed, "error") : undefined;
     expect(getString(error ?? {}, "code")).toBe("INVALID_ARGS");
-    expect(getString(error ?? {}, "message")).toContain("--interface-provider");
+    expect(getString(error ?? {}, "message")).toContain(
+      "Unknown /connect argument",
+    );
+    expect(JSON.stringify(error)).not.toContain("--interface-provider");
   });
 
   it("executes /connect with non-sensitive arguments", async () => {
@@ -310,6 +432,7 @@ describe("CommandService", () => {
       "status",
       "models",
       "connect",
+      "connect-search",
       "sessions",
       "new",
       "compact",

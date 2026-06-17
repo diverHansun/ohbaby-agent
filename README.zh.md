@@ -62,7 +62,8 @@ ohbaby
 ```
 
 **2. 配置模型。** 在 CLI/TUI 里输入 `/connect` 打开 provider 配置面板，填入 provider、
-base URL、API Key、模型名后保存即可。
+base URL、API Key、模型名后保存即可。这里输入的密钥会持久化到
+`~/.ohbaby-agent/.env`。
 
 <p align="center">
   <img src="assets/images/connect-providers.png" alt="ohbaby-agent /connect 模型配置" width="760">
@@ -81,8 +82,12 @@ base URL、API Key、模型名后保存即可。
 
 ## 🔍 Web 搜索（可选）
 
-想启用 Web 搜索工具，去 [Tavily](https://tavily.com) 申请一个免费 API Key，然后写进
-任意一个位置的 `.env` 文件：
+想启用 Web 搜索工具，先去 [Tavily](https://tavily.com) 申请一个免费 API Key，然后在
+CLI/TUI 里输入 `/connect-search` 并填入 Key。ohbaby-agent 会把它作为
+`TAVILY_API_KEY` 保存到 `~/.ohbaby-agent/.env`，并且只把搜索元数据写入
+`~/.ohbaby-agent/tools/search.json`。
+
+你也可以手动把 Key 写进 `.env` 文件：
 
 - `~/.ohbaby-agent/.env`（全局），或
 - `<你的项目>/.env`（项目）

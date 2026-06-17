@@ -5,6 +5,7 @@ import type {
   UiConnectModelResult,
   UiContextWindowUsage,
   UiEventHandler,
+  UiSetSearchApiKeyResult,
   UiSnapshot,
 } from "ohbaby-sdk";
 import {
@@ -131,6 +132,17 @@ const connectCommandCatalog: TuiCommandCatalog = {
     }),
   ],
   version: "connect",
+};
+
+const connectSearchCommandCatalog: TuiCommandCatalog = {
+  commands: [
+    command({
+      description: "Connect a search provider",
+      id: "connect-search",
+      path: ["connect-search"],
+    }),
+  ],
+  version: "connect-search",
 };
 
 const previousNoAnimation = process.env.OHBABY_TUI_NO_ANIM;
@@ -1494,9 +1506,7 @@ describe("OhbabyTerminalApp", () => {
       client,
       subscribeEvents: client.subscribeEvents,
     };
-    const app = render(
-      <OhbabyTerminalApp {...startupProps} />,
-    );
+    const app = render(<OhbabyTerminalApp {...startupProps} />);
 
     await flush();
 
@@ -1662,7 +1672,9 @@ describe("OhbabyTerminalApp", () => {
         {
           createdAt: "2026-05-14T00:00:01.000Z",
           id: "message_1",
-          parts: [{ text: "Source history before failed switch", type: "text" }],
+          parts: [
+            { text: "Source history before failed switch", type: "text" },
+          ],
           role: "assistant",
         },
       ],
@@ -2531,6 +2543,57 @@ describe("OhbabyTerminalApp", () => {
     expect(frame).toContain("Base URL");
     expect(client.executeCommand).not.toHaveBeenCalled();
     expect(client.connectModel).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
+  it("opens /connect-search as a local form without executing a slash command", async () => {
+    const client = createFakeClient(snapshot(), connectSearchCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await openConnectSearchForm(app);
+    const frame = app.lastFrame() ?? "";
+
+    expect(frame).toContain("Connect Search");
+    expect(frame).toContain("API key env");
+    expect(frame).toContain("API key value");
+    expect(client.executeCommand).not.toHaveBeenCalled();
+    expect(client.setSearchApiKey).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
+  it("auto-saves /connect-search after key commit and keeps the API key masked", async () => {
+    const client = createFakeClient(snapshot(), connectSearchCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await openConnectSearchForm(app);
+    await sendConnectKey(app, "\u001B[B");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "tvly-search-secret");
+    const secretFrame = app.lastFrame() ?? "";
+    expect(secretFrame).not.toContain("tvly-search-secret");
+    expect(secretFrame).toContain("******************");
+
+    const frame = await waitForFrame(app, (nextFrame) =>
+      nextFrame.includes("saved"),
+    );
+
+    expect(client.setSearchApiKey).toHaveBeenCalledTimes(1);
+    expect(client.setSearchApiKey).toHaveBeenCalledWith({
+      apiKey: "tvly-search-secret",
+      apiKeyEnv: "TAVILY_API_KEY",
+      provider: "tavily",
+    });
+    expect(frame).not.toContain("tvly-search-secret");
     app.unmount();
   });
 
@@ -3450,6 +3513,7 @@ function createFakeClient(
   readonly listCommands: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
   readonly respondPermission: ReturnType<typeof vi.fn>;
+  readonly setSearchApiKey: ReturnType<typeof vi.fn>;
   readonly submitPrompt: ReturnType<typeof vi.fn>;
 } {
   const handlers = new Set<TuiEventHandler>();
@@ -3492,6 +3556,7 @@ function createFakeClient(
         saved: true,
       } as const),
     ),
+    setSearchApiKey: vi.fn(() => Promise.resolve(searchConnectResult())),
     emit(event): void {
       for (const handler of handlers) {
         handler(event);
@@ -3543,6 +3608,18 @@ function createDeferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
+function searchConnectResult(
+  overrides: Partial<UiSetSearchApiKeyResult> = {},
+): UiSetSearchApiKeyResult {
+  return {
+    apiKeyEnv: "TAVILY_API_KEY",
+    envPath: ".env",
+    provider: "tavily",
+    searchJsonPath: "search.json",
+    ...overrides,
+  };
+}
+
 function connectResult(
   overrides: Partial<UiConnectModelResult> = {},
 ): UiConnectModelResult {
@@ -3572,6 +3649,21 @@ async function openConnectForm(app: {
     app,
     (nextFrame) =>
       nextFrame.includes("Connect") && nextFrame.includes("Provider"),
+  );
+  await settleConnectInput();
+}
+
+async function openConnectSearchForm(app: {
+  readonly lastFrame: () => string | undefined;
+  readonly stdin: { readonly write: (chunk: string) => void };
+}): Promise<void> {
+  await flush();
+  app.stdin.write("/connect-search");
+  app.stdin.write("\r");
+  await waitForFrame(
+    app,
+    (nextFrame) =>
+      nextFrame.includes("Connect Search") && nextFrame.includes("API key env"),
   );
   await settleConnectInput();
 }

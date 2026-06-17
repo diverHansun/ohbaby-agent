@@ -7,16 +7,24 @@ import { _LLMConfigManager as LLMConfigManager } from "../index.js";
 
 describe("applyActiveModelConfig", () => {
   let tempRoot: string;
+  let homeRoot: string;
   let modelJsonPath: string;
   let envPath: string;
-  const originalEnv = process.env;
+  let originalHome: string | undefined;
+  let originalUserProfile: string | undefined;
+  let originalApiKey: string | undefined;
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-connect-"));
+    homeRoot = path.join(tempRoot, "home");
     modelJsonPath = path.join(tempRoot, ".ohbaby-agent", "model.json");
-    envPath = path.join(tempRoot, ".env");
-    process.env = { ...originalEnv };
+    envPath = path.join(homeRoot, ".ohbaby-agent", ".env");
+    originalHome = process.env.HOME;
+    originalUserProfile = process.env.USERPROFILE;
+    originalApiKey = process.env.ZENMUX_API_KEY;
+    process.env.HOME = homeRoot;
+    process.env.USERPROFILE = homeRoot;
     delete process.env.ZENMUX_API_KEY;
     fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -37,7 +45,9 @@ describe("applyActiveModelConfig", () => {
 
   afterEach(async () => {
     vi.unstubAllGlobals();
-    process.env = originalEnv;
+    restoreEnvValue("HOME", originalHome);
+    restoreEnvValue("USERPROFILE", originalUserProfile);
+    restoreEnvValue("ZENMUX_API_KEY", originalApiKey);
     LLMConfigManager.resetInstance();
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
@@ -134,6 +144,7 @@ describe("applyActiveModelConfig", () => {
   });
 
   it("uses existing env values when API key value is omitted", async () => {
+    await fs.mkdir(path.dirname(envPath), { recursive: true });
     await fs.writeFile(envPath, "ZENMUX_API_KEY=sk-existing\n", "utf-8");
 
     await expect(
@@ -283,3 +294,11 @@ describe("applyActiveModelConfig", () => {
     });
   });
 });
+
+function restoreEnvValue(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    Reflect.deleteProperty(process.env, key);
+    return;
+  }
+  process.env[key] = value;
+}

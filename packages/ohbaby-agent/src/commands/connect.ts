@@ -62,7 +62,7 @@ export function parseConnectArgs(
     if (!name) {
       return {
         code: "INVALID_ARGS",
-        message: `Unknown /connect argument: ${arg}`,
+        message: "Unknown /connect argument",
         recoverable: true,
       };
     }

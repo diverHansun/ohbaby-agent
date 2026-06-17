@@ -16,6 +16,9 @@ coverage/
 .codex/
 .agent/
 .ohbaby/
+.local-npm-cache/
+.local-npm-pack/
+.local-npm-prefix/
 
 # Local reference repositories used for design comparison only.
 # They are not product source and must not be included in package artifacts.

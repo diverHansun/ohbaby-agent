@@ -46,6 +46,14 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
         saved: true as const,
       }),
     ),
+    setSearchApiKey: vi.fn(() =>
+      Promise.resolve({
+        apiKeyEnv: "TAVILY_API_KEY",
+        envPath: ".env",
+        provider: "tavily" as const,
+        searchJsonPath: "search.json",
+      }),
+    ),
     dispose,
     executeCommand: vi.fn(() => Promise.resolve()),
     getContextWindowUsage: vi.fn(() => Promise.resolve(null)),
@@ -81,16 +89,18 @@ describe("startDaemonServer", () => {
       McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
     }));
     vi.doMock("./server.js", () => ({
-      createDaemonHttpServer: vi.fn((options: { readonly packageVersion?: string }) => {
-        capturedPackageVersion = options.packageVersion;
-        return {
-          host: "127.0.0.1",
-          port: 4096,
-          start: vi.fn(() => Promise.resolve()),
-          stop: vi.fn(() => Promise.resolve()),
-          url: "http://127.0.0.1:4096",
-        };
-      }),
+      createDaemonHttpServer: vi.fn(
+        (options: { readonly packageVersion?: string }) => {
+          capturedPackageVersion = options.packageVersion;
+          return {
+            host: "127.0.0.1",
+            port: 4096,
+            start: vi.fn(() => Promise.resolve()),
+            stop: vi.fn(() => Promise.resolve()),
+            url: "http://127.0.0.1:4096",
+          };
+        },
+      ),
     }));
 
     try {

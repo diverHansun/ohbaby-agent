@@ -21,6 +21,11 @@ export type {
   UiConnectModelResult,
 } from "./connect-model.js";
 export type {
+  UiSearchProvider,
+  UiSetSearchApiKeyInput,
+  UiSetSearchApiKeyResult,
+} from "./connect-search.js";
+export type {
   UiEvent,
   UiContextWindowUpdatedEvent,
   UiMessageAppendedEvent,

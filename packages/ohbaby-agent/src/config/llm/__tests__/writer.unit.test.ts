@@ -100,7 +100,7 @@ describe("setActiveLLMConfig", () => {
     });
     expect(fs.rename).toHaveBeenCalled();
 
-    const envWrite = findWriteCall((file) => file.endsWith(".env"));
+    const envWrite = findWriteCall((file) => file.includes(".env.tmp-"));
     expect(callContentToString(envWrite?.[1])).toBe(
       "ZHIPU_API_KEY=sk-secret\n",
     );

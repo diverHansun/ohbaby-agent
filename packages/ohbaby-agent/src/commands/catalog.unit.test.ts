@@ -13,6 +13,7 @@ describe("command catalog", () => {
         "exit",
         "help",
         "connect",
+        "connect-search",
         "models",
         "sessions",
         "new",
@@ -70,6 +71,14 @@ describe("command catalog", () => {
           id: "connect",
           parentBehavior: "interaction",
           path: ["connect"],
+        }),
+        expect.objectContaining({
+          acceptsArguments: true,
+          aliases: [],
+          category: "tool",
+          id: "connect-search",
+          parentBehavior: "interaction",
+          path: ["connect-search"],
         }),
         expect.objectContaining({
           id: "models",

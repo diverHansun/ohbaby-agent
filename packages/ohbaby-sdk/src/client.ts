@@ -15,6 +15,10 @@ import type {
   UiConnectModelInput,
   UiConnectModelResult,
 } from "./connect-model.js";
+import type {
+  UiSetSearchApiKeyInput,
+  UiSetSearchApiKeyResult,
+} from "./connect-search.js";
 import type { UiPermissionResponse, UiSnapshot } from "./snapshot.js";
 
 export interface SubmitPromptOptions {
@@ -41,6 +45,9 @@ export interface UiBackendClient {
   ): Promise<UiCompactSessionResult>;
   getCurrentModel(): Promise<UiCurrentModelConfig | null>;
   connectModel(input: UiConnectModelInput): Promise<UiConnectModelResult>;
+  setSearchApiKey(
+    input: UiSetSearchApiKeyInput,
+  ): Promise<UiSetSearchApiKeyResult>;
   executeCommand(invocation: UiSlashCommandInvocation): Promise<void>;
   respondPermission(
     requestId: string,

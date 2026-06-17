@@ -84,16 +84,16 @@ describe("daemon protocol", () => {
       type: "session.updated",
     };
 
-    expect(parseDaemonSseEvent({ type: "hello", clientId: "client_1" })).toEqual(
-      { clientId: "client_1", type: "hello" },
-    );
+    expect(
+      parseDaemonSseEvent({ type: "hello", clientId: "client_1" }),
+    ).toEqual({ clientId: "client_1", type: "hello" });
     expect(parseDaemonSseEvent({ type: "ui.event", event: uiEvent })).toEqual({
       event: uiEvent,
       type: "ui.event",
     });
-    expect(parseDaemonSseEvent({ type: "error", message: "stream died" })).toEqual(
-      { message: "stream died", type: "error" },
-    );
+    expect(
+      parseDaemonSseEvent({ type: "error", message: "stream died" }),
+    ).toEqual({ message: "stream died", type: "error" });
   });
 
   it("covers every CoreAPI method", () => {
@@ -106,6 +106,7 @@ describe("daemon protocol", () => {
       "compactSession",
       "getCurrentModel",
       "connectModel",
+      "setSearchApiKey",
       "executeCommand",
       "respondPermission",
       "respondInteraction",

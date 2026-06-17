@@ -19,6 +19,8 @@ import type {
   UiPermissionResponse,
   UiRun,
   UiRunStatus,
+  UiSetSearchApiKeyInput,
+  UiSetSearchApiKeyResult,
   UiSnapshot,
   UiSession,
 } from "ohbaby-sdk";
@@ -92,6 +94,10 @@ import { loadModelJson } from "../config/llm/loaders.js";
 import { ConfigError } from "../config/llm/types.js";
 import { validateModelJson } from "../config/llm/validation.js";
 import type { ModelJsonConfig } from "../config/llm/types.js";
+import {
+  reloadSearchConfig,
+  setSearchApiKey as writeSearchApiKey,
+} from "../config/tools/search/index.js";
 import { InProcessPromptController } from "./ui-inprocess/prompt-controller.js";
 import { InProcessEventRouter } from "./ui-inprocess/event-router.js";
 import {
@@ -319,7 +325,7 @@ export function createInProcessUiBackendClient(
     nowMs: (): number => Date.now(),
   });
   let promptInFlight = false;
-  let connectModelQueue: Promise<void> = Promise.resolve();
+  let configSaveQueue: Promise<void> = Promise.resolve();
   let skillRegistryPromise: Promise<SkillRegistry> | undefined;
   const pendingPermissionSessions = new Map<string, string>();
   const runtimeController = new InProcessRuntimeController({
@@ -330,7 +336,7 @@ export function createInProcessUiBackendClient(
       const skillRegistry = await getSkillRegistry();
       const runtimeRunIdFactory =
         options.createRunId ??
-        (usesPersistentStateStore() ? undefined : ((): string => runIds.next()));
+        (usesPersistentStateStore() ? undefined : (): string => runIds.next());
 
       return createUiRuntimeComposition({
         agentManager: options.agentManager,
@@ -1289,12 +1295,12 @@ export function createInProcessUiBackendClient(
       throw new Error("Connect model is unavailable for injected LLM clients");
     }
 
-    const previousSave = connectModelQueue;
+    const previousSave = configSaveQueue;
     let releaseSave!: () => void;
     const currentSave = new Promise<void>((resolve) => {
       releaseSave = resolve;
     });
-    connectModelQueue = previousSave.then(
+    configSaveQueue = previousSave.then(
       () => currentSave,
       () => currentSave,
     );
@@ -1314,6 +1320,39 @@ export function createInProcessUiBackendClient(
       runtimeController.resetRuntime();
       contextWindowUsage.clear();
       await publishSnapshotReplacement();
+      return result;
+    } finally {
+      releaseSave();
+    }
+  }
+
+  async function setSearchApiKeyInternal(
+    input: UiSetSearchApiKeyInput,
+  ): Promise<UiSetSearchApiKeyResult> {
+    const isPromptRunning = (): boolean => promptInFlight;
+    if (isPromptRunning()) {
+      throw new Error("Cannot save while running");
+    }
+
+    const previousSave = configSaveQueue;
+    let releaseSave!: () => void;
+    const currentSave = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    configSaveQueue = previousSave.then(
+      () => currentSave,
+      () => currentSave,
+    );
+
+    await previousSave.catch(() => undefined);
+    if (isPromptRunning()) {
+      releaseSave();
+      throw new Error("Cannot save while running");
+    }
+
+    try {
+      const result = await writeSearchApiKey(input);
+      await reloadSearchConfig();
       return result;
     } finally {
       releaseSave();
@@ -1368,6 +1407,7 @@ export function createInProcessUiBackendClient(
     },
     submitPrompt: submitPromptInternal,
     connectModel: connectModelInternal,
+    setSearchApiKey: setSearchApiKeyInternal,
     permission: {
       getState: currentPermissionState,
       setMode(mode): void {
@@ -1480,6 +1520,12 @@ export function createInProcessUiBackendClient(
 
     connectModel(input: UiConnectModelInput): Promise<UiConnectModelResult> {
       return connectModelInternal(input);
+    },
+
+    setSearchApiKey(
+      input: UiSetSearchApiKeyInput,
+    ): Promise<UiSetSearchApiKeyResult> {
+      return setSearchApiKeyInternal(input);
     },
 
     getCurrentModel(): Promise<UiCurrentModelConfig | null> {

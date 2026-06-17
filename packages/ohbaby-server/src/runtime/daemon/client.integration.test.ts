@@ -7,6 +7,7 @@ import type {
   UiConnectModelResult,
   UiEvent,
   UiEventHandler,
+  UiSetSearchApiKeyResult,
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
@@ -69,6 +70,15 @@ function connectModelResult(): UiConnectModelResult {
     modelJsonPath: "model.json",
     provider: "fake",
     saved: true,
+  };
+}
+
+function setSearchApiKeyResult(): UiSetSearchApiKeyResult {
+  return {
+    apiKeyEnv: "TAVILY_API_KEY",
+    envPath: ".env",
+    provider: "tavily",
+    searchJsonPath: "search.json",
   };
 }
 
@@ -148,9 +158,7 @@ class FakeBackend implements UiBackendClient {
 
   getContextWindowUsage(
     input: Parameters<UiBackendClient["getContextWindowUsage"]>[0],
-  ): ReturnType<
-    UiBackendClient["getContextWindowUsage"]
-  > {
+  ): ReturnType<UiBackendClient["getContextWindowUsage"]> {
     this.calls.push({ args: [input], method: "getContextWindowUsage" });
     return Promise.resolve(null);
   }
@@ -169,10 +177,7 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve({ commands: [], version: "v1" });
   }
 
-  submitPrompt(
-    text: string,
-    options?: SubmitPromptOptions,
-  ): Promise<void> {
+  submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void> {
     if (this.submitError) {
       return Promise.reject(this.submitError);
     }
@@ -200,6 +205,13 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(connectModelResult());
   }
 
+  setSearchApiKey(
+    input: Parameters<UiBackendClient["setSearchApiKey"]>[0],
+  ): ReturnType<UiBackendClient["setSearchApiKey"]> {
+    this.calls.push({ args: [input], method: "setSearchApiKey" });
+    return Promise.resolve(setSearchApiKeyResult());
+  }
+
   executeCommand(
     invocation: Parameters<UiBackendClient["executeCommand"]>[0],
   ): Promise<void> {
@@ -211,7 +223,10 @@ class FakeBackend implements UiBackendClient {
     requestId: string,
     response: Parameters<UiBackendClient["respondPermission"]>[1],
   ): Promise<void> {
-    this.calls.push({ args: [requestId, response], method: "respondPermission" });
+    this.calls.push({
+      args: [requestId, response],
+      method: "respondPermission",
+    });
     return Promise.resolve();
   }
 
@@ -391,11 +406,7 @@ describe("createRemoteUiBackendClient", () => {
         const eventPromise = new Promise<UiEvent>((resolve) => {
           client.subscribeEvents(resolve);
         });
-        await eventuallyEmit(
-          backend,
-          sessionUpdated(),
-          eventPromise,
-        );
+        await eventuallyEmit(backend, sessionUpdated(), eventPromise);
 
         expect(backend.submitted).toEqual([
           {
@@ -438,6 +449,11 @@ describe("createRemoteUiBackendClient", () => {
       model: "fake-model",
       provider: "fake",
     };
+    const searchInput = {
+      apiKey: "tvly-test-secret",
+      apiKeyEnv: "TAVILY_API_KEY",
+      provider: "tavily" as const,
+    };
     const invocation = {
       argv: ["now"],
       clientInvocationId: "invoke_1",
@@ -457,6 +473,7 @@ describe("createRemoteUiBackendClient", () => {
       await client.compactSession(compactOptions);
       await client.getCurrentModel();
       await client.connectModel(connectInput);
+      await client.setSearchApiKey(searchInput);
       await client.executeCommand(invocation);
       await client.respondPermission("permission_1", { choiceId: "allow" });
       await client.respondInteraction("interaction_1", {
@@ -478,16 +495,14 @@ describe("createRemoteUiBackendClient", () => {
       { args: [compactOptions], method: "compactSession" },
       { args: [], method: "getCurrentModel" },
       { args: [connectInput], method: "connectModel" },
+      { args: [searchInput], method: "setSearchApiKey" },
       { args: [invocation], method: "executeCommand" },
       {
         args: ["permission_1", { choiceId: "allow" }],
         method: "respondPermission",
       },
       {
-        args: [
-          "interaction_1",
-          { choiceId: "choice_1", kind: "accepted" },
-        ],
+        args: ["interaction_1", { choiceId: "choice_1", kind: "accepted" }],
         method: "respondInteraction",
       },
       { args: ["run_1"], method: "abortRun" },

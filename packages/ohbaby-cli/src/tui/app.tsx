@@ -13,6 +13,7 @@ import { DialogManager } from "./dialogs/manager.js";
 import { CommandPanelManager } from "./components/dialog/command-panel-manager.js";
 import {
   displayPanelKindForCommandId,
+  interactivePanelKindForCommandId,
   type CommandPanelKind,
   type CommandPanelState,
 } from "./components/dialog/command-panel-state.js";
@@ -45,9 +46,7 @@ export const NEW_SESSION_CLEAR_SEQUENCE = SESSION_VIEW_CLEAR_SEQUENCE;
 export const ESC_INTERRUPT_WINDOW_MS = 1500;
 const ESC_INTERRUPT_HINT = "Press Esc again to interrupt";
 
-type TranscriptSurfaceResetReason =
-  | "new-session"
-  | "switch-session";
+type TranscriptSurfaceResetReason = "new-session" | "switch-session";
 
 export interface TerminalUiOptions {
   readonly clearOnStart?: boolean;
@@ -203,13 +202,18 @@ export function OhbabyTerminalApp({
       readonly invocation: UiCommandInvocation;
       readonly kind: CommandPanelKind;
     }): void => {
-      if (input.kind === "connect") {
+      const interactiveKind = interactivePanelKindForCommandId(input.kind);
+      if (interactiveKind !== null) {
         setActiveCommandPanel({
-          kind: "connect",
+          kind: interactiveKind,
           mode: "interactive",
           openedAt: Date.now(),
           sessionId: activeSessionId,
         });
+        return;
+      }
+      const displayKind = displayPanelKindForCommandId(input.kind);
+      if (displayKind === null) {
         return;
       }
 
@@ -221,7 +225,7 @@ export function OhbabyTerminalApp({
       );
       setActiveCommandPanel({
         clientInvocationId: input.invocation.clientInvocationId,
-        kind: input.kind,
+        kind: displayKind,
         mode: "display",
         openedAt: Date.now(),
         sessionId: activeSessionId,
@@ -435,7 +439,9 @@ export function OhbabyTerminalApp({
       const selectedExistingSessionId =
         selectedExistingSessionIdFromEvent(tuiEvent);
       if (selectedExistingSessionId !== undefined) {
-        eventDispatcher.dispatch(commandResultWithoutSessionSelection(tuiEvent));
+        eventDispatcher.dispatch(
+          commandResultWithoutSessionSelection(tuiEvent),
+        );
         const requestSequence = snapshotRefreshSequenceRef.current + 1;
         snapshotRefreshSequenceRef.current = requestSequence;
         void client

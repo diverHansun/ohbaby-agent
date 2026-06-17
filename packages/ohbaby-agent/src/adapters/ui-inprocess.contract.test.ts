@@ -1199,12 +1199,13 @@ describe("createInProcessUiBackendClient", () => {
       });
 
       const modelJsonPath = join(homeDir, ".ohbaby-agent", "model.json");
+      const globalEnvPath = join(homeDir, ".ohbaby-agent", ".env");
       expect(result).toEqual({
         apiKeyEnv: "ZENMUX_API_KEY",
         baseUrl: "https://zenmux.example/v1",
         contextWindowSource: "default",
         contextWindowTokens: 128_000,
-        envPath: join(projectRoot, ".env"),
+        envPath: globalEnvPath,
         interfaceProvider: "openai-compatible",
         maxOutputTokens: 8192,
         model: "anthropic/claude-sonnet-4.6",
@@ -1233,7 +1234,7 @@ describe("createInProcessUiBackendClient", () => {
         provider: "zenmux",
       });
       expect(modelJson).not.toHaveProperty("apiKey");
-      expect(await readFile(join(projectRoot, ".env"), "utf-8")).toContain(
+      expect(await readFile(globalEnvPath, "utf-8")).toContain(
         "ZENMUX_API_KEY=sk-connect-contract",
       );
       expect(process.env.ZENMUX_API_KEY).toBe("sk-connect-contract");

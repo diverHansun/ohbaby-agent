@@ -1,8 +1,5 @@
 import { SearchConfigManager } from "./manager.js";
-import type {
-  SearchConfig,
-  SearchConfigLoadOptions,
-} from "./types.js";
+import type { SearchConfig, SearchConfigLoadOptions } from "./types.js";
 import type { SearchProviderConfig } from "../../../services/search-providers/index.js";
 
 export type {
@@ -14,6 +11,11 @@ export type {
 export { SearchConfigError } from "./types.js";
 export { getSearchJsonPath, loadSearchJson } from "./loaders.js";
 export { validateApiKey, validateSearchJson } from "./validation.js";
+export {
+  setSearchApiKey,
+  type SetSearchApiKeyInput,
+  type SetSearchApiKeyResult,
+} from "./writer.js";
 
 export async function getSearchConfig(
   options: SearchConfigLoadOptions = {},

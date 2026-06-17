@@ -15,6 +15,7 @@ import type {
   DisplayCommandPanelState,
 } from "./command-panel-state.js";
 import { ConnectPanel } from "./connect-panel.js";
+import { ConnectSearchPanel } from "./connect-search-panel.js";
 import { OverlayCard } from "./overlay-card.js";
 
 const SKILLS_PANEL_MAX_VISIBLE_LINES = 10;
@@ -133,10 +134,18 @@ export function CommandPanelManager({
   }
 
   if (panel.mode === "interactive") {
-    return (
-      <OverlayCard title={panelTitle(panel.kind)}>
+    const panelBody =
+      panel.kind === "connect-search" ? (
+        <ConnectSearchPanel
+          client={client}
+          onClose={onClose}
+          runtime={runtime}
+        />
+      ) : (
         <ConnectPanel client={client} onClose={onClose} runtime={runtime} />
-      </OverlayCard>
+      );
+    return (
+      <OverlayCard title={panelTitle(panel.kind)}>{panelBody}</OverlayCard>
     );
   }
 
@@ -438,6 +447,8 @@ function panelTitle(kind: CommandPanelState["kind"]): string {
       return "Skills";
     case "connect":
       return "Connect";
+    case "connect-search":
+      return "Connect Search";
   }
 }
 
