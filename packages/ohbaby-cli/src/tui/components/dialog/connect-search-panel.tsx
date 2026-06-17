@@ -71,6 +71,7 @@ export function ConnectSearchPanel({
   const latestSaveKeyRef = useRef<string | null>(null);
   const pendingSaveRef = useRef<PendingSave | null>(null);
   const lastSavedEnvPathRef = useRef<string | null>(null);
+  const lastSavedWroteSecretRef = useRef(false);
 
   const selectedField =
     SEARCH_FIELDS[Math.min(selectedIndex, SEARCH_FIELDS.length - 1)];
@@ -97,12 +98,14 @@ export function ConnectSearchPanel({
     void client
       .setSearchApiKey(save.input)
       .then((result) => {
+        const wroteSecret = save.input.apiKey !== undefined;
         lastSavedPayloadKeyRef.current = save.key;
         lastSavedEnvPathRef.current = result.envPath;
+        lastSavedWroteSecretRef.current = wroteSecret;
         if (pendingSaveRef.current === null) {
           setSaveState(
             latestSaveKeyRef.current === save.key
-              ? savedState(result)
+              ? savedState(result, wroteSecret)
               : { kind: "idle" },
           );
         }
@@ -129,7 +132,10 @@ export function ConnectSearchPanel({
             setSaveState(
               lastSavedEnvPathRef.current === null
                 ? { kind: "idle" }
-                : { kind: "saved", envPath: lastSavedEnvPathRef.current },
+                : savedState(
+                    { envPath: lastSavedEnvPathRef.current },
+                    lastSavedWroteSecretRef.current,
+                  ),
             );
             return;
           }
@@ -165,7 +171,10 @@ export function ConnectSearchPanel({
       setSaveState(
         lastSavedEnvPathRef.current === null
           ? { kind: "idle" }
-          : { kind: "saved", envPath: lastSavedEnvPathRef.current },
+          : savedState(
+              { envPath: lastSavedEnvPathRef.current },
+              lastSavedWroteSecretRef.current,
+            ),
       );
       return;
     }
@@ -319,8 +328,13 @@ function SearchStatusLine({
   }
 }
 
-function savedState(result: UiSetSearchApiKeyResult): SaveState {
-  return { envPath: result.envPath, kind: "saved" };
+function savedState(
+  result: Pick<UiSetSearchApiKeyResult, "envPath">,
+  wroteSecret: boolean,
+): SaveState {
+  return wroteSecret
+    ? { envPath: result.envPath, kind: "saved" }
+    : { kind: "idle" };
 }
 
 type PayloadBuildResult =

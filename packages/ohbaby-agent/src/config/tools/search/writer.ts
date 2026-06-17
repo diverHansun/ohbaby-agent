@@ -1,6 +1,5 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { getGlobalEnvPath } from "../../../utils/project-env.js";
+import { writeFileAtomically } from "../../secrets/atomic-file.js";
 import { writeGlobalEnvSecret } from "../../secrets/env-secrets.js";
 import { getSearchJsonPath, loadSearchJson } from "./loaders.js";
 import { validateSearchJson } from "./validation.js";
@@ -70,14 +69,4 @@ export async function setSearchApiKey(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-async function writeFileAtomically(
-  filePath: string,
-  content: string,
-): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.tmp-${String(process.pid)}-${String(Date.now())}`;
-  await fs.writeFile(tempPath, content, "utf-8");
-  await fs.rename(tempPath, filePath);
 }

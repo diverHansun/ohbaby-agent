@@ -1,9 +1,9 @@
 import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import { getModelJsonPath } from "./loaders.js";
 import type { InterfaceProviderKind, ModelJsonConfig } from "./types.js";
 import { ConfigError } from "./types.js";
 import { validateModelJson } from "./validation.js";
+import { writeFileAtomically } from "../secrets/atomic-file.js";
 import { writeEnvSecret } from "../secrets/env-secrets.js";
 import { getGlobalEnvPath } from "../../utils/project-env.js";
 
@@ -153,16 +153,6 @@ function buildModelJson(
     llmParams: buildLLMParams(input, existing),
     ...(models === undefined ? {} : { models }),
   };
-}
-
-async function writeFileAtomically(
-  filePath: string,
-  content: string,
-): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.tmp-${String(process.pid)}-${String(Date.now())}`;
-  await fs.writeFile(tempPath, content, "utf-8");
-  await fs.rename(tempPath, filePath);
 }
 
 export async function setActiveLLMConfig(

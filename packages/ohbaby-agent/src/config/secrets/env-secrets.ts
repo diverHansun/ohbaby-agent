@@ -1,8 +1,8 @@
 import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import { setEnvFileValue } from "../llm/env-file.js";
 import { ConfigError } from "../llm/types.js";
 import { getGlobalEnvPath } from "../../utils/project-env.js";
+import { writeFileAtomically } from "./atomic-file.js";
 
 export interface GlobalEnvSecretWriteOptions {
   readonly homeDirectory?: string;
@@ -37,14 +37,4 @@ export async function writeGlobalEnvSecret(
 ): Promise<string> {
   const envPath = getGlobalEnvPath(options.homeDirectory);
   return writeEnvSecret(envPath, key, value);
-}
-
-async function writeFileAtomically(
-  filePath: string,
-  content: string,
-): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.tmp-${String(process.pid)}-${String(Date.now())}`;
-  await fs.writeFile(tempPath, content, "utf-8");
-  await fs.rename(tempPath, filePath);
 }
