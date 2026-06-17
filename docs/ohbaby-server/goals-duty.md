@@ -38,6 +38,7 @@
 - **G3 协议中性**：同一个 backend 能同时服务 CLI（jsonrpc）和 web（REST+SSE），未来 app / ACP / A2A 接入时对领域核心零摩擦。
 - **G4 显式生命周期**：server 永远由用户**显式启动、显式连接、显式停止**，绝不作为默认 CLI 的隐藏依赖。
 - **G5 单写者不变量**：后面只有一个 backend；本包是"把唯一 backend 暴露给多前端"，不是网关/多服务聚合。依赖方向恒为 `protocols → coordination → CoreApiHost(sdk 契约)`，核心永远看不见适配器，无环。
+  - **细化（web/app 适配阶段）**：`ohbaby serve` 用单进程承载多项目时，单写者量词从"全局一个 backend"精确为"**每 workspace scope 一个 backend**"——跨 scope 是互不共享状态的独立 backend，由 InstanceStore 隔离，仍非聚合网关、仍无环、单写者在每 scope 内成立。见 [`hono-app/04`](./hono-app/04-multi-project-runtime.md) §6。
 
 ---
 

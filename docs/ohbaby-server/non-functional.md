@@ -41,7 +41,7 @@
 | detached 后台常驻打磨 | 同上，foreground 已覆盖本机 web/attach |
 | 领域事件投影层（A1） | CLI+web 共用 UiEvent 无痛点，YAGNI（N5）；ACP/A2A 接入时再补 |
 | 队列吞吐优化（S8 fresh-lane） | 正确性已满足，吞吐非本期瓶颈，记 backlog |
-| OpenAPI / 协议文档自动化 | 协议成员只有 jsonrpc+web，未到投资点 |
+| ~~OpenAPI / 协议文档自动化~~ | ~~协议成员只有 jsonrpc+web，未到投资点~~ → **已在 web/app 适配阶段激活**：web/app 需要 typed client，投资点已到，经 `@hono/zod-openapi` 出 spec。见 [`hono-app/02`](./hono-app/02-web-api-surface.md) §4 |
 
 > 提醒：以上是**刻意延后**，不是遗漏缺陷。
 

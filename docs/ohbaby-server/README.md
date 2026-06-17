@@ -17,6 +17,7 @@
 | [`test.md`](./test.md) | 测试范围、关键场景、契约参数化 |
 | [`package-build.md`](./package-build.md) | `packages/ohbaby-server` 的包骨架、构建接线、依赖与发布顺序 |
 | [`migration-sequence.md`](./migration-sequence.md) | v0.1.4 的分阶段实施顺序：C1 → server 包 → 测试/真实验证 |
+| [`hono-app/`](./hono-app/README.md) | **web/app 适配阶段**：`server.ts`→Hono、REST+SSE、OpenAPI/SDK、SSE replay、多项目 runtime、消费路径统一 |
 
 ## 一句话定位
 

@@ -19,6 +19,8 @@
 
 > 领域对象（session、message、tool run、agent backend）**不属于本包**——它们是 `ohbaby-agent` 的概念，本包只透传（N1）。
 
+> **web/app 适配阶段新增概念**（见 [`hono-app/04`](./hono-app/04-multi-project-runtime.md)）：**WorkspaceInstance**（一个 workspace scope 的 backend + 协调状态，按 scopeKey 隔离）、**ServerRegistry / 全局锁**（机器级"当前运行的唯一 foreground server"记录，用于发现/防重复）。
+
 ---
 
 ## 2. Entity / Value Object 区分

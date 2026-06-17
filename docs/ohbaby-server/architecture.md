@@ -69,6 +69,8 @@
 
 ## 3. Module Structure & File Layout（模块结构与文件组织）
 
+> 下面是抽包阶段的结构。**`server.ts`→Hono 的具体装配、web REST+SSE surface、多项目 runtime 的细化布局见 [`hono-app/01`](./hono-app/01-app-assembly-and-transport.md) 与 [`hono-app/02`](./hono-app/02-web-api-surface.md)、[`hono-app/04`](./hono-app/04-multi-project-runtime.md)**——当前包仍是保守迁移后的手写 http，尚未落 Hono。
+
 ```
 packages/ohbaby-server/src/
 ├── index.ts                  对外窄导出面：startServer + remote client + 必要类型

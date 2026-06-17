@@ -124,7 +124,7 @@ work/v0.1.4-ohbaby-server
 - `runtime/daemon/client.ts` → `ohbaby-server/src/protocols/jsonrpc/client.ts`
 - `runtime/daemon/server.ts` → `ohbaby-server/src/runtime/daemon/server.ts`
 
-> 说明：v0.1.4 先采用保守迁移，保留现有 server 文件的内部结构，避免在包迁移同时做 HTTP/router 大拆分。后续 web/app 适配时，再把该文件拆入 `transport/` 与 `protocols/`。
+> 说明：v0.1.4 先采用保守迁移，保留现有 server 文件的内部结构，避免在包迁移同时做 HTTP/router 大拆分。后续 web/app 适配时，再把该文件拆入 `transport/` 与 `protocols/`。**该适配（`server.ts`→Hono、web surface、多项目 runtime、消费路径统一）的完整设计与增量步骤见 [`hono-app/`](./hono-app/README.md)，尤其 [`hono-app/06`](./hono-app/06-migration-and-tests.md)。**
 
 接线原则：
 
