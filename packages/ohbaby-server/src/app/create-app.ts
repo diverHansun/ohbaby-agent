@@ -27,6 +27,7 @@ import {
 } from "../protocols/jsonrpc/protocol.js";
 
 const encoder = new TextEncoder();
+const DEFAULT_CLIENT_DISCONNECT_RETENTION_MS = 5_000;
 
 interface SseClient {
   readonly clientId: string;
@@ -37,6 +38,7 @@ interface SseClient {
 export interface DaemonServerAppOptions {
   readonly backend: UiBackendClient;
   readonly authToken?: string;
+  readonly clientDisconnectRetentionMs?: number;
   readonly createSessionId?: () => string;
   readonly eventBufferCapacity?: number;
   readonly onClientConnected?: (clientId: string) => void;
@@ -169,10 +171,16 @@ async function readRequestTextWithLimit(request: Request): Promise<
 
 class DaemonServerAppRuntime {
   readonly app = new Hono();
+  private readonly clientDisconnectRetentionMs: number;
   private readonly clientViews = new DaemonClientViewCoordinator();
   private readonly clients = new Set<SseClient>();
   private readonly createSessionId: () => string;
+  private readonly disconnectCleanupTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
   private readonly eventBus: EventBus;
+  private readonly expiredClientIds = new Set<string>();
   private readonly knownClientIds = new Set<string>();
   private readonly authToken: string;
   private readonly permissionRouter: PermissionRouter;
@@ -183,6 +191,9 @@ class DaemonServerAppRuntime {
 
   constructor(private readonly options: DaemonServerAppOptions) {
     this.authToken = requireAuthToken(options.authToken);
+    this.clientDisconnectRetentionMs =
+      options.clientDisconnectRetentionMs ??
+      DEFAULT_CLIENT_DISCONNECT_RETENTION_MS;
     this.createSessionId = options.createSessionId ?? randomUUID;
     this.eventBus =
       options.eventBufferCapacity === undefined
@@ -222,6 +233,11 @@ class DaemonServerAppRuntime {
       client.close();
     }
     this.clients.clear();
+    for (const timer of this.disconnectCleanupTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.disconnectCleanupTimers.clear();
+    this.expiredClientIds.clear();
     this.knownClientIds.clear();
     this.clientViews.resetRuntimeState();
     this.replayEventsBySeqNum.clear();
@@ -342,6 +358,7 @@ class DaemonServerAppRuntime {
           },
         };
         this.clients.add(client);
+        this.cancelClientRoutingCleanup(clientId);
         this.knownClientIds.add(clientId);
         this.options.onClientConnected?.(clientId);
         client.write({ clientId, type: "hello" });
@@ -374,7 +391,28 @@ class DaemonServerAppRuntime {
       return;
     }
     client.close();
+    this.scheduleClientRoutingCleanup(client.clientId);
     this.options.onClientDisconnected?.(client.clientId);
+  }
+
+  private cancelClientRoutingCleanup(clientId: string): void {
+    const timer = this.disconnectCleanupTimers.get(clientId);
+    if (timer === undefined) {
+      return;
+    }
+    clearTimeout(timer);
+    this.disconnectCleanupTimers.delete(clientId);
+  }
+
+  private scheduleClientRoutingCleanup(clientId: string): void {
+    this.cancelClientRoutingCleanup(clientId);
+    const timer = setTimeout(() => {
+      this.disconnectCleanupTimers.delete(clientId);
+      this.permissionRouter.disconnectClient(clientId);
+      this.clientViews.disconnectClient(clientId);
+      this.expiredClientIds.add(clientId);
+    }, this.clientDisconnectRetentionMs);
+    this.disconnectCleanupTimers.set(clientId, timer);
   }
 
   private replayMissedEvents(
@@ -383,6 +421,12 @@ class DaemonServerAppRuntime {
   ): void {
     const parsed = parseLastEventId(lastEventId);
     if (parsed.kind === "absent") {
+      this.expiredClientIds.delete(client.clientId);
+      return;
+    }
+    if (this.expiredClientIds.has(client.clientId)) {
+      this.writeResyncRequired(client);
+      this.expiredClientIds.delete(client.clientId);
       return;
     }
     if (parsed.kind === "invalid") {

@@ -29,6 +29,12 @@ function authHeaders(): Record<string, string> {
   return { authorization: daemonAuthHeader(authToken) };
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 function emptySnapshot(): UiSnapshot {
   return {
     activeSessionId: null,
@@ -915,6 +921,72 @@ describe("createDaemonHttpServer", () => {
       }
     });
     await expect(submitted).resolves.toMatchObject({ status: 200 });
+  });
+
+  it("releases permission ownership after the disconnect replay window", async () => {
+    const backend = new FakeBackend();
+    await withServer(
+      backend,
+      async (url) => {
+        const stream = await fetchEvents(url, "client_a");
+        const reader = createSseFrameReader(stream);
+        await reader.read();
+
+        const submit = await postRpc(url, {
+          clientId: "client_a",
+          id: "rpc_prompt",
+          method: "submitPrompt",
+          params: ["hello", { sessionId: "session_1" }],
+        });
+        expect(submit.status).toBe(200);
+        await reader.cancel();
+        await delay(30);
+
+        const response = await postRpc(url, {
+          clientId: "client_b",
+          id: "rpc_allow",
+          method: "respondPermission",
+          params: ["permission_run_1", { choiceId: "allow" }],
+        });
+
+        expect(response.status).toBe(200);
+      },
+      { clientDisconnectRetentionMs: 10 },
+    );
+  });
+
+  it("signals resync when a client reconnects after routing retention expires", async () => {
+    const backend = new FakeBackend();
+    await withServer(
+      backend,
+      async (url) => {
+        const stream = await fetchEvents(url, "client_a");
+        const reader = createSseFrameReader(stream);
+        await reader.read();
+        await reader.cancel();
+        await delay(30);
+
+        backend.emit(sessionUpdated());
+        const resumed = await fetchEvents(url, "client_a", {
+          "last-event-id": "0",
+        });
+        const resumedReader = createSseFrameReader(resumed);
+
+        await expect(resumedReader.read()).resolves.toMatchObject({
+          data: { clientId: "client_a", type: "hello" },
+        });
+        await expect(resumedReader.read()).resolves.toEqual({
+          data: {
+            maxSeqNum: 1,
+            minSeqNum: 1,
+            type: "resync-required",
+          },
+          event: "resync-required",
+        });
+        await resumedReader.cancel();
+      },
+      { clientDisconnectRetentionMs: 10 },
+    );
   });
 
   it("signals resync when Last-Event-ID is outside the replay window", async () => {

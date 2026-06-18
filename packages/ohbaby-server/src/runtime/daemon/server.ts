@@ -17,6 +17,7 @@ const DEFAULT_PORT = 4096;
 export interface DaemonHttpServerOptions {
   readonly backend: UiBackendClient;
   readonly authToken?: string;
+  readonly clientDisconnectRetentionMs?: number;
   readonly createSessionId?: () => string;
   readonly eventBufferCapacity?: number;
   readonly host?: string;
@@ -54,6 +55,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     this.appHandle = createDaemonServerApp({
       authToken: options.authToken,
       backend: options.backend,
+      clientDisconnectRetentionMs: options.clientDisconnectRetentionMs,
       createSessionId: options.createSessionId,
       eventBufferCapacity: options.eventBufferCapacity,
       onClientConnected: options.onClientConnected,
@@ -113,6 +115,7 @@ export function createDaemonHttpServer(
   return new DaemonHttpServer({
     backend: options.backend,
     authToken: options.authToken,
+    clientDisconnectRetentionMs: options.clientDisconnectRetentionMs,
     createSessionId: options.createSessionId ?? createSessionIdGenerator(),
     eventBufferCapacity: options.eventBufferCapacity,
     host: options.host ?? DEFAULT_HOST,
