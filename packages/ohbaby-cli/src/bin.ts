@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import type { Readable } from "node:stream";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { CoreAPI } from "ohbaby-sdk";
 import { createRPC } from "ohbaby-sdk";
 import yargs from "yargs/yargs";
@@ -24,6 +25,26 @@ import { renderTerminalUi } from "./tui/index.js";
 const VERSION = getCliPackageVersion();
 const AGENT_RUNTIME_MODULE = "ohbaby-agent";
 const SERVER_RUNTIME_MODULE = "ohbaby-server";
+
+type RealpathResolver = (path: string) => string;
+
+export function isDirectCliInvocation(
+  moduleUrl: string,
+  argvEntry: string | undefined,
+  realpath: RealpathResolver = realpathSync.native,
+): boolean {
+  if (argvEntry === undefined) {
+    return false;
+  }
+  if (moduleUrl === pathToFileURL(argvEntry).href) {
+    return true;
+  }
+  try {
+    return realpath(fileURLToPath(moduleUrl)) === realpath(argvEntry);
+  } catch {
+    return false;
+  }
+}
 
 class CliUsageError extends Error {
   constructor(message: string) {
@@ -343,7 +364,7 @@ export async function runOhbabyCli(
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+if (isDirectCliInvocation(import.meta.url, process.argv[1])) {
   runOhbabyCli()
     .then((code) => {
       process.exitCode = code;

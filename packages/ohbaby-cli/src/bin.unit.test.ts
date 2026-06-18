@@ -1,6 +1,35 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
 describe("runOhbabyCli", () => {
+  it("recognizes npm symlinked bin entrypoints on Unix-like platforms", async () => {
+    vi.resetModules();
+    const tempDir = join(tmpdir(), "ohbaby-bin");
+    const realBinPath = join(
+      tempDir,
+      "lib",
+      "node_modules",
+      "ohbaby-cli",
+      "dist",
+      "bin.js",
+    );
+    const linkedBinPath = join(tempDir, "bin", "ohbaby");
+    const realpath = (value: string): string =>
+      value === linkedBinPath ? realBinPath : value;
+
+    const { isDirectCliInvocation } = await import("./bin.js");
+
+    expect(
+      isDirectCliInvocation(
+        pathToFileURL(realBinPath).href,
+        linkedBinPath,
+        realpath,
+      ),
+    ).toBe(true);
+  });
+
   it("loads the CLI version from package metadata", async () => {
     vi.resetModules();
     const getCliPackageVersion = vi.fn(() => "9.9.9");
