@@ -453,7 +453,16 @@ async function reservePort(): Promise<number> {
   return port;
 }
 
-function createSseReader(response: Response): () => Promise<unknown> {
+interface SseFrameReader {
+  cancel(): Promise<void>;
+  read(): Promise<{
+    readonly data: unknown;
+    readonly event?: string;
+    readonly id?: string;
+  }>;
+}
+
+function createSseFrameReader(response: Response): SseFrameReader {
   const reader = response.body?.getReader() as
     | ReadableStreamDefaultReader<Uint8Array>
     | undefined;
@@ -463,28 +472,55 @@ function createSseReader(response: Response): () => Promise<unknown> {
   const decoder = new TextDecoder();
   let buffer = "";
 
-  return async (): Promise<unknown> => {
-    for (;;) {
-      const boundary = buffer.indexOf("\n\n");
-      if (boundary >= 0) {
-        const frame = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        const data = frame
-          .split("\n")
-          .find((line) => line.startsWith("data: "))
-          ?.slice("data: ".length);
-        if (!data) {
-          throw new Error(`SSE frame missing data: ${frame}`);
+  return {
+    cancel(): Promise<void> {
+      return reader.cancel();
+    },
+    async read(): Promise<{
+      readonly data: unknown;
+      readonly event?: string;
+      readonly id?: string;
+    }> {
+      for (;;) {
+        const boundary = buffer.indexOf("\n\n");
+        if (boundary >= 0) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const lines = frame.split("\n");
+          const data = lines
+            .find((line) => line.startsWith("data: "))
+            ?.slice("data: ".length);
+          if (!data) {
+            throw new Error(`SSE frame missing data: ${frame}`);
+          }
+          const event = lines
+            .find((line) => line.startsWith("event: "))
+            ?.slice("event: ".length);
+          const id = lines
+            .find((line) => line.startsWith("id: "))
+            ?.slice("id: ".length);
+          return {
+            data: JSON.parse(data) as unknown,
+            ...(event === undefined ? {} : { event }),
+            ...(id === undefined ? {} : { id }),
+          };
         }
-        return JSON.parse(data) as unknown;
-      }
 
-      const { done, value } = await reader.read();
-      if (done) {
-        throw new Error("SSE stream ended before an event arrived");
+        const { done, value } = await reader.read();
+        if (done) {
+          throw new Error("SSE stream ended before an event arrived");
+        }
+        buffer += decoder.decode(value, { stream: true });
       }
-      buffer += decoder.decode(value, { stream: true });
-    }
+    },
+  };
+}
+
+function createSseReader(response: Response): () => Promise<unknown> {
+  const frameReader = createSseFrameReader(response);
+  return async (): Promise<unknown> => {
+    const frame = await frameReader.read();
+    return frame.data;
   };
 }
 
@@ -648,6 +684,77 @@ describe("createDaemonHttpServer", () => {
         type: "ui.event",
       });
     });
+  });
+
+  it("replays missed SSE events after Last-Event-ID", async () => {
+    const backend = new FakeBackend();
+    await withServer(backend, async (url) => {
+      const first = await fetchEvents(url, "client_a");
+      const readFirst = createSseFrameReader(first);
+
+      await expect(readFirst.read()).resolves.toMatchObject({
+        data: { clientId: "client_a", type: "hello" },
+      });
+      backend.emit(sessionUpdated());
+      await expect(readFirst.read()).resolves.toEqual({
+        data: {
+          event: sessionUpdated(),
+          type: "ui.event",
+        },
+        event: "ui.event",
+        id: "1",
+      });
+      await readFirst.cancel();
+
+      backend.emit(sessionUpdated());
+      const resumed = await fetchEvents(url, "client_a", {
+        "last-event-id": "1",
+      });
+      const readResumed = createSseFrameReader(resumed);
+
+      await expect(readResumed.read()).resolves.toMatchObject({
+        data: { clientId: "client_a", type: "hello" },
+      });
+      await expect(readResumed.read()).resolves.toEqual({
+        data: {
+          event: sessionUpdated(),
+          type: "ui.event",
+        },
+        event: "ui.event",
+        id: "2",
+      });
+      await readResumed.cancel();
+    });
+  });
+
+  it("signals resync when Last-Event-ID is outside the replay window", async () => {
+    const backend = new FakeBackend();
+    await withServer(
+      backend,
+      async (url) => {
+        backend.emit(sessionUpdated());
+        backend.emit(runUpdated("run_1"));
+
+        const response = await fetchEvents(url, "client_a", {
+          "last-event-id": "0",
+        });
+        const reader = createSseFrameReader(response);
+
+        await expect(reader.read()).resolves.toMatchObject({
+          data: { clientId: "client_a", type: "hello" },
+        });
+        await expect(reader.read()).resolves.toEqual({
+          data: {
+            maxSeqNum: 2,
+            minSeqNum: 2,
+            type: "resync-required",
+          },
+          event: "resync-required",
+        });
+        await reader.cancel();
+      },
+      { eventBufferCapacity: 1 },
+    );
   });
 
   it("routes permission requests only to the prompt owner", async () => {

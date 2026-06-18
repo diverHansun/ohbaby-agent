@@ -59,6 +59,11 @@ export type DaemonSseEvent =
       readonly event: UiEvent;
     }
   | {
+      readonly type: "resync-required";
+      readonly maxSeqNum: number;
+      readonly minSeqNum: number;
+    }
+  | {
       readonly type: "error";
       readonly message: string;
     };
@@ -79,6 +84,18 @@ function requireString(
     throw new TypeError(message);
   }
   return value;
+}
+
+function requireNonNegativeInteger(
+  record: Record<string, unknown>,
+  key: string,
+  message: string,
+): number {
+  const value = record[key];
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new TypeError(message);
+  }
+  return value as number;
 }
 
 export function createDaemonRpcRequest(
@@ -182,6 +199,20 @@ export function parseDaemonSseEvent(value: unknown): DaemonSseEvent {
         type,
       };
     }
+    case "resync-required":
+      return {
+        maxSeqNum: requireNonNegativeInteger(
+          value,
+          "maxSeqNum",
+          "Daemon SSE resync maxSeqNum is required",
+        ),
+        minSeqNum: requireNonNegativeInteger(
+          value,
+          "minSeqNum",
+          "Daemon SSE resync minSeqNum is required",
+        ),
+        type,
+      };
     case "error":
       return {
         message: requireString(

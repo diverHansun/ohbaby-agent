@@ -2,11 +2,14 @@ import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import type {
   UiBackendClient,
-  UiEvent,
   UiUnsubscribe,
 } from "ohbaby-sdk";
 import { isAuthorizedDaemonRequest } from "../auth/token.js";
 import { DaemonClientViewCoordinator } from "../coordination/client-view.js";
+import {
+  EventBus,
+  type EventEnvelope,
+} from "../coordination/event-bus.js";
 import { PermissionRouter } from "../coordination/permission-router.js";
 import { DaemonPromptQueue } from "../coordination/prompt-queue.js";
 import {
@@ -26,13 +29,14 @@ const encoder = new TextEncoder();
 interface SseClient {
   readonly clientId: string;
   close(): void;
-  write(event: DaemonSseEvent): void;
+  write(event: DaemonSseEvent, id?: number): void;
 }
 
 export interface DaemonServerAppOptions {
   readonly backend: UiBackendClient;
   readonly authToken?: string;
   readonly createSessionId?: () => string;
+  readonly eventBufferCapacity?: number;
   readonly onClientConnected?: (clientId: string) => void;
   readonly onClientDisconnected?: (clientId: string) => void;
   readonly onShutdown?: () => Promise<void> | void;
@@ -47,9 +51,10 @@ export interface DaemonServerAppHandle {
   start(): Promise<void>;
 }
 
-function writeSseFrame(event: DaemonSseEvent): Uint8Array {
+function writeSseFrame(event: DaemonSseEvent, id?: number): Uint8Array {
+  const idLine = id === undefined ? "" : `id: ${String(id)}\n`;
   return encoder.encode(
-    `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+    `${idLine}event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
   );
 }
 
@@ -67,11 +72,23 @@ function unauthorizedBody(id = "unknown"): unknown {
   return createDaemonRpcFailure(id, new Error("Unauthorized"));
 }
 
+function parseLastEventId(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim().length === 0) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    return undefined;
+  }
+  return parsed;
+}
+
 class DaemonServerAppRuntime {
   readonly app = new Hono();
   private readonly clientViews = new DaemonClientViewCoordinator();
   private readonly clients = new Set<SseClient>();
   private readonly createSessionId: () => string;
+  private readonly eventBus: EventBus;
   private readonly permissionRouter: PermissionRouter;
   private readonly promptQueue: DaemonPromptQueue;
   private started = false;
@@ -79,6 +96,10 @@ class DaemonServerAppRuntime {
 
   constructor(private readonly options: DaemonServerAppOptions) {
     this.createSessionId = options.createSessionId ?? randomUUID;
+    this.eventBus =
+      options.eventBufferCapacity === undefined
+        ? new EventBus()
+        : new EventBus({ capacity: options.eventBufferCapacity });
     this.permissionRouter = options.permissionRouter ?? new PermissionRouter();
     this.promptQueue =
       options.promptQueue ??
@@ -98,7 +119,8 @@ class DaemonServerAppRuntime {
       return;
     }
     this.unsubscribe = this.options.backend.subscribeEvents((event) => {
-      this.broadcast(event);
+      const envelope = this.eventBus.publish(event);
+      this.broadcast(envelope);
     });
     this.started = true;
   }
@@ -178,7 +200,11 @@ class DaemonServerAppRuntime {
       if (!this.isAuthorized(context.req.header("authorization"))) {
         return context.json(unauthorizedBody(), 401);
       }
-      return this.createSseResponse(clientId, context.req.raw.signal);
+      return this.createSseResponse(
+        clientId,
+        context.req.raw.signal,
+        context.req.header("last-event-id"),
+      );
     });
   }
 
@@ -189,6 +215,7 @@ class DaemonServerAppRuntime {
   private createSseResponse(
     clientId: string,
     signal: AbortSignal,
+    lastEventId: string | undefined,
   ): Response {
     let client: SseClient | undefined;
     const stream = new ReadableStream<Uint8Array>({
@@ -212,16 +239,17 @@ class DaemonServerAppRuntime {
               // The reader may already have cancelled the stream.
             }
           },
-          write: (event): void => {
+          write: (event, id): void => {
             if (closed) {
               return;
             }
-            controller.enqueue(writeSseFrame(event));
+            controller.enqueue(writeSseFrame(event, id));
           },
         };
         this.clients.add(client);
         this.options.onClientConnected?.(clientId);
         client.write({ clientId, type: "hello" });
+        this.replayMissedEvents(client, lastEventId);
         signal.addEventListener(
           "abort",
           (): void => {
@@ -255,26 +283,58 @@ class DaemonServerAppRuntime {
     this.options.onClientDisconnected?.(client.clientId);
   }
 
-  private broadcast(event: UiEvent): void {
+  private replayMissedEvents(
+    client: SseClient,
+    lastEventId: string | undefined,
+  ): void {
+    const seqNum = parseLastEventId(lastEventId);
+    if (seqNum === undefined) {
+      return;
+    }
+
+    const replay = this.eventBus.replayAfter(seqNum);
+    if (replay.kind === "resync-required") {
+      client.write({
+        maxSeqNum: replay.maxSeqNum,
+        minSeqNum: replay.minSeqNum,
+        type: "resync-required",
+      });
+      return;
+    }
+
+    for (const envelope of replay.envelopes) {
+      this.writeEnvelopeToClient(envelope, client);
+    }
+  }
+
+  private broadcast(envelope: EventEnvelope): void {
+    const event = envelope.event;
     this.permissionRouter.observeEvent(event);
     this.clientViews.observeEvent(event);
     for (const client of Array.from(this.clients)) {
-      const routed = this.clientViews.routeEventForClient(
-        event,
-        client.clientId,
-      );
-      if (!routed) {
-        continue;
-      }
-      const filtered = this.permissionRouter.filterEventForClient(
-        routed,
-        client.clientId,
-      );
-      if (filtered) {
-        client.write({ event: filtered, type: "ui.event" });
-      }
+      this.writeEnvelopeToClient(envelope, client);
     }
     this.clientViews.afterEventBroadcast(event);
+  }
+
+  private writeEnvelopeToClient(
+    envelope: EventEnvelope,
+    client: SseClient,
+  ): void {
+    const routed = this.clientViews.routeEventForClient(
+      envelope.event,
+      client.clientId,
+    );
+    if (!routed) {
+      return;
+    }
+    const filtered = this.permissionRouter.filterEventForClient(
+      routed,
+      client.clientId,
+    );
+    if (filtered) {
+      client.write({ event: filtered, type: "ui.event" }, envelope.seqNum);
+    }
   }
 }
 

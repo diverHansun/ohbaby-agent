@@ -18,6 +18,7 @@ export interface DaemonHttpServerOptions {
   readonly backend: UiBackendClient;
   readonly authToken?: string;
   readonly createSessionId?: () => string;
+  readonly eventBufferCapacity?: number;
   readonly host?: string;
   readonly onClientConnected?: (clientId: string) => void;
   readonly onClientDisconnected?: (clientId: string) => void;
@@ -54,6 +55,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       authToken: options.authToken,
       backend: options.backend,
       createSessionId: options.createSessionId,
+      eventBufferCapacity: options.eventBufferCapacity,
       onClientConnected: options.onClientConnected,
       onClientDisconnected: options.onClientDisconnected,
       onShutdown: options.onShutdown,
@@ -112,6 +114,7 @@ export function createDaemonHttpServer(
     backend: options.backend,
     authToken: options.authToken,
     createSessionId: options.createSessionId ?? createSessionIdGenerator(),
+    eventBufferCapacity: options.eventBufferCapacity,
     host: options.host ?? DEFAULT_HOST,
     onClientConnected: options.onClientConnected,
     onClientDisconnected: options.onClientDisconnected,

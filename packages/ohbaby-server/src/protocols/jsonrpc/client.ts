@@ -110,6 +110,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   private readonly handlers = new Set<UiEventHandler>();
   private abortController: AbortController | undefined;
   private initializePromise: Promise<void> | undefined;
+  private lastEventId: string | undefined;
   private sseLoop: Promise<void> | undefined;
 
   constructor(options: RemoteDaemonClientOptions) {
@@ -308,8 +309,12 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     await this.ensureInitialized();
     const url = new URL(`${this.baseUrl}/api/events`);
     url.searchParams.set("clientId", this.clientId);
+    const headers = this.requestHeaders({ accept: "text/event-stream" });
+    if (this.lastEventId !== undefined) {
+      headers["last-event-id"] = this.lastEventId;
+    }
     const response = await this.fetchImpl(url, {
-      headers: this.requestHeaders({ accept: "text/event-stream" }),
+      headers,
       signal,
     });
     if (!response.ok) {
@@ -355,8 +360,11 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   }
 
   private handleSseFrame(frame: string): void {
-    const data = frame
-      .split("\n")
+    const lines = frame.split("\n");
+    const id = lines
+      .find((line) => line.startsWith("id: "))
+      ?.slice("id: ".length);
+    const data = lines
       .find((line) => line.startsWith("data: "))
       ?.slice("data: ".length);
     if (!data) {
@@ -364,8 +372,15 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     }
 
     const event = parseDaemonSseEvent(JSON.parse(data) as unknown);
+    if (event.type === "resync-required") {
+      this.lastEventId = undefined;
+      return;
+    }
     if (event.type !== "ui.event") {
       return;
+    }
+    if (id !== undefined) {
+      this.lastEventId = id;
     }
     for (const handler of Array.from(this.handlers)) {
       handler(event.event);
