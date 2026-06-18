@@ -39,6 +39,8 @@
     "clean": "rimraf dist coverage"
   },
   "dependencies": {
+    "@hono/node-server": "^2.0.5",
+    "hono": "^4.12.25",
     "ohbaby-agent": "workspace:*",
     "ohbaby-sdk": "workspace:*"
   }

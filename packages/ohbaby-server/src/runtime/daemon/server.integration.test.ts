@@ -20,8 +20,14 @@ import {
   createDaemonHttpServer,
   type DaemonHttpServerOptions,
 } from "./server.js";
+import { daemonAuthHeader } from "../../auth/token.js";
 
 const timestamp = "2026-06-12T00:00:00.000Z";
+const authToken = "token_1";
+
+function authHeaders(): Record<string, string> {
+  return { authorization: daemonAuthHeader(authToken) };
+}
 
 function emptySnapshot(): UiSnapshot {
   return {
@@ -328,6 +334,7 @@ async function withServer<T>(
   > = {},
 ): Promise<T> {
   const server = createDaemonHttpServer({
+    authToken,
     backend,
     host: "127.0.0.1",
     port: 0,
@@ -348,7 +355,36 @@ async function postRpc(
 ): Promise<Response> {
   return fetch(`${url}/api/rpc`, {
     body: JSON.stringify(body),
-    headers: { "content-type": "application/json", ...headers },
+    headers: { "content-type": "application/json", ...authHeaders(), ...headers },
+    method: "POST",
+  });
+}
+
+function fetchHealth(
+  url: string,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return fetch(`${url}/api/health`, {
+    headers: { ...authHeaders(), ...headers },
+  });
+}
+
+function fetchEvents(
+  url: string,
+  clientId: string,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return fetch(`${url}/api/events?clientId=${clientId}`, {
+    headers: { ...authHeaders(), ...headers },
+  });
+}
+
+function postShutdown(
+  url: string,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return fetch(`${url}/api/shutdown`, {
+    headers: { ...authHeaders(), ...headers },
     method: "POST",
   });
 }
@@ -366,6 +402,7 @@ async function postRpcChunks(
             chunks.reduce((total, chunk) => total + chunk.byteLength, 0),
           ),
           "content-type": "application/json",
+          ...authHeaders(),
         },
         hostname: endpoint.hostname,
         method: "POST",
@@ -454,7 +491,7 @@ function createSseReader(response: Response): () => Promise<unknown> {
 describe("createDaemonHttpServer", () => {
   it("serves health checks", async () => {
     await withServer(new FakeBackend(), async (url) => {
-      const response = await fetch(`${url}/api/health`);
+      const response = await fetchHealth(url);
 
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ ok: true });
@@ -465,7 +502,7 @@ describe("createDaemonHttpServer", () => {
     await withServer(
       new FakeBackend(),
       async (url) => {
-        const response = await fetch(`${url}/api/health`);
+        const response = await fetchHealth(url);
 
         expect(response.status).toBe(200);
         expect(await response.json()).toEqual({
@@ -481,15 +518,21 @@ describe("createDaemonHttpServer", () => {
     await withServer(
       new FakeBackend(),
       async (url) => {
-        const missingRpc = await postRpc(url, {
-          clientId: "client_1",
-          id: "rpc_missing_auth",
-          method: "getSnapshot",
-          params: [],
-        });
+        const missingRpc = await postRpc(
+          url,
+          {
+            clientId: "client_1",
+            id: "rpc_missing_auth",
+            method: "getSnapshot",
+            params: [],
+          },
+          { authorization: "" },
+        );
         expect(missingRpc.status).toBe(401);
 
-        const missingSse = await fetch(`${url}/api/events?clientId=client_a`);
+        const missingSse = await fetchEvents(url, "client_a", {
+          authorization: "",
+        });
         expect(missingSse.status).toBe(401);
 
         const allowed = await postRpc(
@@ -504,9 +547,7 @@ describe("createDaemonHttpServer", () => {
         );
         expect(allowed.status).toBe(200);
 
-        const sse = await fetch(`${url}/api/events?clientId=client_a`, {
-          headers: { authorization: "Bearer token_1" },
-        });
+        const sse = await fetchEvents(url, "client_a");
         expect(sse.status).toBe(200);
         await sse.body?.cancel();
       },
@@ -518,12 +559,10 @@ describe("createDaemonHttpServer", () => {
     await withServer(
       new FakeBackend(),
       async (url) => {
-        const rejected = await fetch(`${url}/api/health`);
+        const rejected = await fetchHealth(url, { authorization: "" });
         expect(rejected.status).toBe(401);
 
-        const allowed = await fetch(`${url}/api/health`, {
-          headers: { authorization: "Bearer token_1" },
-        });
+        const allowed = await fetchHealth(url);
         expect(allowed.status).toBe(200);
         expect(await allowed.json()).toEqual({
           ok: true,
@@ -539,15 +578,10 @@ describe("createDaemonHttpServer", () => {
     await withServer(
       new FakeBackend(),
       async (url) => {
-        const rejected = await fetch(`${url}/api/shutdown`, {
-          method: "POST",
-        });
+        const rejected = await postShutdown(url, { authorization: "" });
         expect(rejected.status).toBe(401);
 
-        const accepted = await fetch(`${url}/api/shutdown`, {
-          headers: { authorization: "Bearer token_1" },
-          method: "POST",
-        });
+        const accepted = await postShutdown(url);
         expect(accepted.status).toBe(200);
         expect(await accepted.json()).toEqual({ ok: true });
         expect(onShutdown).toHaveBeenCalledTimes(1);
@@ -596,8 +630,8 @@ describe("createDaemonHttpServer", () => {
   it("broadcasts backend events to SSE clients", async () => {
     const backend = new FakeBackend();
     await withServer(backend, async (url) => {
-      const first = await fetch(`${url}/api/events?clientId=client_a`);
-      const second = await fetch(`${url}/api/events?clientId=client_b`);
+      const first = await fetchEvents(url, "client_a");
+      const second = await fetchEvents(url, "client_b");
       const readFirst = createSseReader(first);
       const readSecond = createSseReader(second);
 
@@ -619,8 +653,8 @@ describe("createDaemonHttpServer", () => {
   it("routes permission requests only to the prompt owner", async () => {
     const backend = new FakeBackend();
     await withServer(backend, async (url) => {
-      const owner = await fetch(`${url}/api/events?clientId=client_a`);
-      const observer = await fetch(`${url}/api/events?clientId=client_b`);
+      const owner = await fetchEvents(url, "client_a");
+      const observer = await fetchEvents(url, "client_b");
       const readOwner = createSseReader(owner);
       const readObserver = createSseReader(observer);
       await readOwner();
@@ -668,8 +702,8 @@ describe("createDaemonHttpServer", () => {
     backend.emitOnSubmit = false;
     backend.holdSubmits = true;
     await withServer(backend, async (url) => {
-      const owner = await fetch(`${url}/api/events?clientId=client_a`);
-      const observer = await fetch(`${url}/api/events?clientId=client_b`);
+      const owner = await fetchEvents(url, "client_a");
+      const observer = await fetchEvents(url, "client_b");
       const readOwner = createSseReader(owner);
       const readObserver = createSseReader(observer);
       await readOwner();
@@ -909,8 +943,8 @@ describe("createDaemonHttpServer", () => {
         method: "initializeClient",
         params: [{}],
       });
-      const active = await fetch(`${url}/api/events?clientId=client_a`);
-      const fresh = await fetch(`${url}/api/events?clientId=client_b`);
+      const active = await fetchEvents(url, "client_a");
+      const fresh = await fetchEvents(url, "client_b");
       const readActive = createSseReader(active);
       const readFresh = createSseReader(fresh);
       await readActive();
@@ -955,7 +989,7 @@ describe("createDaemonHttpServer", () => {
         method: "initializeClient",
         params: [{ resumeSessionId: "session_1" }],
       });
-      const events = await fetch(`${url}/api/events?clientId=client_a`);
+      const events = await fetchEvents(url, "client_a");
       const readEvent = createSseReader(events);
       await readEvent();
 
@@ -1141,8 +1175,8 @@ describe("createDaemonHttpServer", () => {
         method: "initializeClient",
         params: [{ startupSessionMode: { type: "fresh" } }],
       });
-      const active = await fetch(`${url}/api/events?clientId=client_a`);
-      const fresh = await fetch(`${url}/api/events?clientId=client_b`);
+      const active = await fetchEvents(url, "client_a");
+      const fresh = await fetchEvents(url, "client_b");
       const readActive = createSseReader(active);
       const readFresh = createSseReader(fresh);
       await readActive();
@@ -1200,8 +1234,8 @@ describe("createDaemonHttpServer", () => {
         method: "initializeClient",
         params: [{}],
       });
-      const active = await fetch(`${url}/api/events?clientId=client_a`);
-      const fresh = await fetch(`${url}/api/events?clientId=client_b`);
+      const active = await fetchEvents(url, "client_a");
+      const fresh = await fetchEvents(url, "client_b");
       const readActive = createSseReader(active);
       const readFresh = createSseReader(fresh);
       await readActive();
@@ -1298,8 +1332,8 @@ describe("createDaemonHttpServer", () => {
         method: "initializeClient",
         params: [{ startupSessionMode: { type: "fresh" } }],
       });
-      const active = await fetch(`${url}/api/events?clientId=client_a`);
-      const fresh = await fetch(`${url}/api/events?clientId=client_b`);
+      const active = await fetchEvents(url, "client_a");
+      const fresh = await fetchEvents(url, "client_b");
       const readActive = createSseReader(active);
       const readFresh = createSseReader(fresh);
       await readActive();
@@ -1335,8 +1369,8 @@ describe("createDaemonHttpServer", () => {
     const backend = new FakeBackend();
 
     await withServer(backend, async (url) => {
-      const first = await fetch(`${url}/api/events?clientId=client_a`);
-      const second = await fetch(`${url}/api/events?clientId=client_b`);
+      const first = await fetchEvents(url, "client_a");
+      const second = await fetchEvents(url, "client_b");
       const readFirst = createSseReader(first);
       const readSecond = createSseReader(second);
       await readFirst();
@@ -1363,8 +1397,8 @@ describe("createDaemonHttpServer", () => {
     const backend = new FakeBackend();
 
     await withServer(backend, async (url) => {
-      const owner = await fetch(`${url}/api/events?clientId=client_a`);
-      const observer = await fetch(`${url}/api/events?clientId=client_b`);
+      const owner = await fetchEvents(url, "client_a");
+      const observer = await fetchEvents(url, "client_b");
       const readOwner = createSseReader(owner);
       const readObserver = createSseReader(observer);
       await readOwner();
@@ -1579,7 +1613,7 @@ describe("createDaemonHttpServer", () => {
     });
 
     await server.start();
-    await fetch(`${server.url}/api/events?clientId=client_a`);
+    await fetchEvents(server.url, "client_a");
     expect(backend.handlers.size).toBe(1);
 
     await server.stop();
@@ -1591,6 +1625,7 @@ describe("createDaemonHttpServer", () => {
     const connected: string[] = [];
     const disconnected: string[] = [];
     const server = createDaemonHttpServer({
+      authToken,
       backend,
       host: "127.0.0.1",
       onClientConnected: (clientId) => {
@@ -1604,9 +1639,7 @@ describe("createDaemonHttpServer", () => {
 
     await server.start();
     try {
-      const response = await fetch(
-        `${server.url}/api/events?clientId=client_a`,
-      );
+      const response = await fetchEvents(server.url, "client_a");
       expect(response.status).toBe(200);
       const reader = response.body?.getReader();
       await reader?.read();

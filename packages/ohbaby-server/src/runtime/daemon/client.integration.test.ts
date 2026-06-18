@@ -21,6 +21,7 @@ import {
 } from "./server.js";
 
 const timestamp = "2026-06-12T00:00:00.000Z";
+const authToken = "token_1";
 
 function emptySnapshot(): UiSnapshot {
   return {
@@ -260,6 +261,7 @@ async function withRemoteClient<T>(
   } = {},
 ): Promise<T> {
   const server = createDaemonHttpServer({
+    authToken,
     backend,
     host: "127.0.0.1",
     port: 0,
@@ -267,6 +269,7 @@ async function withRemoteClient<T>(
   });
   await server.start();
   const client = createRemoteUiBackendClient({
+    authToken,
     clientId: "client_a",
     host: "127.0.0.1",
     port: server.port,

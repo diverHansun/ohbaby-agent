@@ -1,42 +1,18 @@
+import type { UiBackendClient } from "ohbaby-sdk";
+import { createSessionIdGenerator } from "ohbaby-agent";
 import {
-  createServer,
-  type IncomingMessage,
-  type ServerResponse,
-} from "node:http";
-import type {
-  SubmitPromptOptions,
-  UiBackendClient,
-  UiEvent,
-  UiUnsubscribe,
-} from "ohbaby-sdk";
-import { createSessionIdGenerator, SessionRunBusyError } from "ohbaby-agent";
-import { isAuthorizedDaemonRequest } from "../../auth/token.js";
-import {
-  DaemonClientViewCoordinator,
-  parseDaemonStartupIntent,
-} from "../../coordination/client-view.js";
+  createDaemonServerApp,
+  type DaemonServerAppHandle,
+} from "../../app/create-app.js";
 import { PermissionRouter } from "../../coordination/permission-router.js";
+import { DaemonPromptQueue } from "../../coordination/prompt-queue.js";
 import {
-  DaemonPromptQueue,
-  type DaemonPromptQueueItem,
-} from "../../coordination/prompt-queue.js";
-import {
-  createDaemonRpcFailure,
-  createDaemonRpcSuccess,
-  parseDaemonRpcRequest,
-  type DaemonRpcRequest,
-  type DaemonRpcResponse,
-  type DaemonSseEvent,
-} from "../../protocols/jsonrpc/protocol.js";
+  listenToNodeServer,
+  type NodeListenHandle,
+} from "../../transport/node-listen.js";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4096;
-const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
-
-interface SseClient {
-  readonly clientId: string;
-  readonly response: ServerResponse;
-}
 
 export interface DaemonHttpServerOptions {
   readonly backend: UiBackendClient;
@@ -62,508 +38,70 @@ export interface DaemonHttpServerHandle {
 
 type NormalizedDaemonHttpServerOptions = Omit<
   DaemonHttpServerOptions,
-  "createSessionId" | "host" | "permissionRouter" | "port"
+  "createSessionId" | "host" | "port"
 > & {
   readonly createSessionId: () => string;
   readonly host: string;
-  readonly permissionRouter: PermissionRouter;
   readonly port: number;
 };
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return typeof error === "object" && error !== null && "code" in error;
-}
-
-class DaemonForbiddenError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "DaemonForbiddenError";
-  }
-}
-
-function isDaemonForbiddenError(error: unknown): error is DaemonForbiddenError {
-  return error instanceof DaemonForbiddenError;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function submitPromptOptions(value: unknown): SubmitPromptOptions | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-  return {
-    ...(typeof value.sessionId === "string"
-      ? { sessionId: value.sessionId }
-      : {}),
-  };
-}
-
-function writeJson(
-  response: ServerResponse,
-  statusCode: number,
-  body: unknown,
-): void {
-  response.writeHead(statusCode, {
-    "content-type": "application/json; charset=utf-8",
-  });
-  response.end(JSON.stringify(body));
-}
-
-function writeSse(response: ServerResponse, event: DaemonSseEvent): void {
-  response.write(`event: ${event.type}\n`);
-  response.write(`data: ${JSON.stringify(event)}\n\n`);
-}
-
-function requestChunkToBuffer(chunk: unknown): Buffer {
-  if (typeof chunk === "string") {
-    return Buffer.from(chunk, "utf8");
-  }
-  if (Buffer.isBuffer(chunk)) {
-    return chunk;
-  }
-  if (chunk instanceof Uint8Array) {
-    return Buffer.from(chunk);
-  }
-  throw new Error("Unexpected request body chunk");
-}
-
-async function readRequestBody(request: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of request as AsyncIterable<unknown>) {
-    const buffer = requestChunkToBuffer(chunk);
-    chunks.push(buffer);
-    size += buffer.byteLength;
-    if (size > MAX_REQUEST_BODY_BYTES) {
-      throw new Error("Request body is too large");
-    }
-  }
-  return Buffer.concat(chunks, size).toString("utf8");
-}
-
-function requestIdFromBody(body: unknown): string {
-  if (
-    typeof body === "object" &&
-    body !== null &&
-    "id" in body &&
-    typeof body.id === "string"
-  ) {
-    return body.id;
-  }
-  return "unknown";
-}
-
-async function callBackend(
-  backend: UiBackendClient,
-  clientViews: DaemonClientViewCoordinator,
-  createSessionId: () => string,
-  permissionRouter: PermissionRouter,
-  promptQueue: DaemonPromptQueue,
-  request: DaemonRpcRequest,
-): Promise<unknown> {
-  switch (request.method) {
-    case "getSnapshot": {
-      const snapshot = await backend.getSnapshot();
-      return permissionRouter.filterSnapshotForClient(
-        clientViews.projectSnapshot(request.clientId, snapshot),
-        request.clientId,
-      );
-    }
-    case "initializeClient": {
-      const intent = parseDaemonStartupIntent(request.params[0]);
-      const snapshot = await backend.getSnapshot();
-      clientViews.initializeClient(request.clientId, snapshot, intent);
-      return undefined;
-    }
-    case "getContextWindowUsage":
-      return backend.getContextWindowUsage(
-        request.params[0] as Parameters<
-          UiBackendClient["getContextWindowUsage"]
-        >[0],
-      );
-    case "listCommands":
-      return backend.listCommands(
-        request.params[0] as Parameters<UiBackendClient["listCommands"]>[0],
-      );
-    case "submitPrompt": {
-      const options = submitPromptOptions(request.params[1]);
-      const prepared = clientViews.preparePromptSubmit(
-        request.clientId,
-        options,
-        createSessionId,
-      );
-      await promptQueue.enqueue({
-        clientId: request.clientId,
-        ...(prepared.options === undefined
-          ? {}
-          : { options: prepared.options }),
-        ...(prepared.sessionId === undefined
-          ? {}
-          : { sessionId: prepared.sessionId }),
-        text: request.params[0] as string,
-      });
-      return undefined;
-    }
-    case "compactSession":
-      return backend.compactSession(
-        request.params[0] as Parameters<UiBackendClient["compactSession"]>[0],
-      );
-    case "getCurrentModel":
-      return backend.getCurrentModel();
-    case "connectModel":
-      return backend.connectModel(
-        request.params[0] as Parameters<UiBackendClient["connectModel"]>[0],
-      );
-    case "setSearchApiKey":
-      return backend.setSearchApiKey(
-        request.params[0] as Parameters<UiBackendClient["setSearchApiKey"]>[0],
-      );
-    case "executeCommand": {
-      const invocation = clientViews.prepareCommandInvocation(
-        request.clientId,
-        request.params[0] as ExecuteCommandInvocation,
-      );
-      return backend.executeCommand(invocation);
-    }
-    case "respondPermission":
-      if (
-        !permissionRouter.canRespondPermission(
-          request.params[0] as string,
-          request.clientId,
-        )
-      ) {
-        throw new DaemonForbiddenError(
-          "Permission request is owned by another client",
-        );
-      }
-      return backend.respondPermission(
-        request.params[0] as string,
-        request.params[1] as Parameters<
-          UiBackendClient["respondPermission"]
-        >[1],
-      );
-    case "respondInteraction":
-      return backend.respondInteraction(
-        request.params[0] as string,
-        request.params[1] as Parameters<
-          UiBackendClient["respondInteraction"]
-        >[1],
-      );
-    case "abortRun":
-      return backend.abortRun(request.params[0] as string | undefined);
-  }
-}
-
-type ExecuteCommandInvocation = Parameters<
-  UiBackendClient["executeCommand"]
->[0];
-
-function createDefaultPromptQueue(
-  backend: UiBackendClient,
-  permissionRouter: PermissionRouter,
-  lifecycle: {
-    readonly onPromptSettled?: (item: DaemonPromptQueueItem) => void;
-    readonly onPromptStarted?: (item: DaemonPromptQueueItem) => void;
-  } = {},
-): DaemonPromptQueue {
-  return new DaemonPromptQueue({
-    isBusyError: (error): boolean => error instanceof SessionRunBusyError,
-    submit: async (item): Promise<void> => {
-      const release = permissionRouter.trackPromptClient(
-        item.clientId,
-        item.sessionId,
-      );
-      lifecycle.onPromptStarted?.(item);
-      try {
-        await backend.submitPrompt(item.text, item.options);
-      } finally {
-        lifecycle.onPromptSettled?.(item);
-        release();
-      }
-    },
-  });
-}
-
 class DaemonHttpServer implements DaemonHttpServerHandle {
-  private readonly server = createServer((request, response) => {
-    void this.handleRequest(request, response).catch((error: unknown) => {
-      writeJson(response, 500, {
-        error: { message: errorMessage(error) },
-        ok: false,
-      });
-    });
-  });
-  private readonly clientViews = new DaemonClientViewCoordinator();
-  private readonly clients = new Set<SseClient>();
-  private readonly promptQueue: DaemonPromptQueue;
-  private unsubscribe: UiUnsubscribe | undefined;
-  private currentPort: number;
-  private started = false;
+  private readonly appHandle: DaemonServerAppHandle;
+  private nodeServer: NodeListenHandle | undefined;
 
   constructor(private readonly options: NormalizedDaemonHttpServerOptions) {
-    this.currentPort = options.port;
-    this.promptQueue =
-      options.promptQueue ??
-      createDefaultPromptQueue(options.backend, options.permissionRouter, {
-        onPromptSettled: (item) => {
-          this.clientViews.promptSettled(item);
-        },
-        onPromptStarted: (item) => {
-          this.clientViews.promptStarted(item);
-        },
-      });
+    this.appHandle = createDaemonServerApp({
+      authToken: options.authToken,
+      backend: options.backend,
+      createSessionId: options.createSessionId,
+      onClientConnected: options.onClientConnected,
+      onClientDisconnected: options.onClientDisconnected,
+      onShutdown: options.onShutdown,
+      packageVersion: options.packageVersion,
+      permissionRouter: options.permissionRouter,
+      promptQueue: options.promptQueue,
+    });
   }
 
   get host(): string {
-    return this.options.host;
+    return this.nodeServer?.host ?? this.options.host;
   }
 
   get port(): number {
-    return this.currentPort;
+    return this.nodeServer?.port ?? this.options.port;
   }
 
   get url(): string {
-    return `http://${this.host}:${String(this.port)}`;
+    return this.nodeServer?.url ?? `http://${this.host}:${String(this.port)}`;
   }
 
   async start(): Promise<void> {
-    if (this.started) {
+    if (this.nodeServer) {
       return;
     }
 
-    await new Promise<void>((resolve, reject) => {
-      const onError = (error: Error): void => {
-        this.server.off("listening", onListening);
-        reject(error);
-      };
-      const onListening = (): void => {
-        this.server.off("error", onError);
-        resolve();
-      };
-      this.server.once("error", onError);
-      this.server.once("listening", onListening);
-      this.server.listen(this.options.port, this.options.host);
+    const nodeServer = await listenToNodeServer({
+      app: this.appHandle.app,
+      host: this.options.host,
+      port: this.options.port,
     });
-
-    this.started = true;
-    const address = this.server.address();
-    if (typeof address === "object" && address !== null) {
-      this.currentPort = address.port;
+    try {
+      await this.appHandle.start();
+    } catch (error) {
+      await nodeServer.stop();
+      throw error;
     }
-    this.unsubscribe = this.options.backend.subscribeEvents((event) => {
-      this.broadcast(event);
-    });
+    this.nodeServer = nodeServer;
   }
 
   async stop(): Promise<void> {
-    this.promptQueue.shutdown("daemon stopped");
-    this.unsubscribe?.();
-    this.unsubscribe = undefined;
-
-    for (const client of Array.from(this.clients)) {
-      client.response.end();
-    }
-    this.clients.clear();
-    this.clientViews.resetRuntimeState();
-
-    if (!this.started) {
-      return;
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      this.server.close((error?: Error) => {
-        if (
-          error &&
-          !(isNodeError(error) && error.code === "ERR_SERVER_NOT_RUNNING")
-        ) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
-    });
-    this.started = false;
-  }
-
-  private async handleRequest(
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> {
-    const url = new URL(request.url ?? "/", this.url);
-
-    if (request.method === "GET" && url.pathname === "/api/health") {
-      if (!this.isAuthorized(request)) {
-        this.writeUnauthorized(response);
-        return;
-      }
-      writeJson(response, 200, {
-        ok: true,
-        ...(this.options.packageVersion === undefined
-          ? {}
-          : { packageVersion: this.options.packageVersion }),
-      });
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/shutdown") {
-      await this.handleShutdown(request, response);
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/rpc") {
-      await this.handleRpc(request, response);
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/api/events") {
-      this.handleEvents(url, request, response);
-      return;
-    }
-
-    writeJson(response, 404, { error: { message: "Not found" }, ok: false });
-  }
-
-  private isAuthorized(request: IncomingMessage): boolean {
-    const authorization = request.headers.authorization;
-    return isAuthorizedDaemonRequest(
-      typeof authorization === "string" ? authorization : undefined,
-      this.options.authToken,
-    );
-  }
-
-  private writeUnauthorized(response: ServerResponse, id = "unknown"): void {
-    writeJson(
-      response,
-      401,
-      createDaemonRpcFailure(id, new Error("Unauthorized")),
-    );
-  }
-
-  private async handleShutdown(
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> {
-    if (!this.isAuthorized(request)) {
-      this.writeUnauthorized(response);
-      return;
-    }
-
-    writeJson(response, 200, { ok: true });
-    await this.options.onShutdown?.();
-  }
-
-  private async handleRpc(
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> {
-    if (!this.isAuthorized(request)) {
-      this.writeUnauthorized(response);
-      return;
-    }
-
-    let parsedBody: unknown;
-    let rpcRequest: DaemonRpcRequest;
     try {
-      const body = await readRequestBody(request);
-      parsedBody = body.length > 0 ? (JSON.parse(body) as unknown) : {};
-      rpcRequest = parseDaemonRpcRequest(parsedBody);
-    } catch (error) {
-      const failure = createDaemonRpcFailure(
-        requestIdFromBody(parsedBody),
-        error,
-      );
-      writeJson(response, 400, failure);
-      return;
+      await this.appHandle.dispose();
+    } finally {
+      const nodeServer = this.nodeServer;
+      this.nodeServer = undefined;
+      await nodeServer?.stop();
     }
-
-    try {
-      const result = await callBackend(
-        this.options.backend,
-        this.clientViews,
-        this.options.createSessionId,
-        this.options.permissionRouter,
-        this.promptQueue,
-        rpcRequest,
-      );
-      writeJson(response, 200, createDaemonRpcSuccess(rpcRequest.id, result));
-    } catch (error) {
-      const failure: DaemonRpcResponse = createDaemonRpcFailure(
-        rpcRequest.id,
-        error,
-      );
-      writeJson(response, isDaemonForbiddenError(error) ? 403 : 500, failure);
-    }
-  }
-
-  private handleEvents(
-    url: URL,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): void {
-    const clientId = url.searchParams.get("clientId");
-    if (!clientId) {
-      writeJson(response, 400, {
-        error: { message: "clientId is required" },
-        ok: false,
-      });
-      return;
-    }
-    if (!this.isAuthorized(request)) {
-      this.writeUnauthorized(response);
-      return;
-    }
-
-    response.writeHead(200, {
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-      "content-type": "text/event-stream; charset=utf-8",
-      "x-accel-buffering": "no",
-    });
-
-    const client: SseClient = { clientId, response };
-    this.clients.add(client);
-    this.options.onClientConnected?.(clientId);
-    writeSse(response, { clientId, type: "hello" });
-
-    request.on("close", () => {
-      if (this.clients.delete(client)) {
-        this.disconnectClient(clientId);
-        this.options.onClientDisconnected?.(clientId);
-      }
-    });
-  }
-
-  private disconnectClient(clientId: string): void {
-    this.options.permissionRouter.disconnectClient(clientId);
-    this.clientViews.disconnectClient(clientId);
-  }
-
-  private broadcast(event: UiEvent): void {
-    this.options.permissionRouter.observeEvent(event);
-    this.clientViews.observeEvent(event);
-    for (const client of Array.from(this.clients)) {
-      const routed = this.clientViews.routeEventForClient(
-        event,
-        client.clientId,
-      );
-      if (!routed) {
-        continue;
-      }
-      const filtered = this.options.permissionRouter.filterEventForClient(
-        routed,
-        client.clientId,
-      );
-      if (filtered) {
-        writeSse(client.response, { event: filtered, type: "ui.event" });
-      }
-    }
-    this.clientViews.afterEventBroadcast(event);
   }
 }
 
