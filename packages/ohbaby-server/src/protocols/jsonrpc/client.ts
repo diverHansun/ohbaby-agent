@@ -4,7 +4,9 @@ import type {
   CoreAPI,
   SDKAPI,
   UiBackendClient,
+  UiEvent,
   UiEventHandler,
+  UiSnapshot,
 } from "ohbaby-sdk";
 import { daemonAuthHeader } from "../../auth/token.js";
 import {
@@ -19,6 +21,7 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_STARTUP_INTENT: DaemonStartupIntent = {
   startupSessionMode: { type: "fresh" },
 };
+const SSE_RECONNECT_DELAY_MS = 50;
 
 export interface RemoteDaemonClientOptions {
   readonly authToken?: string;
@@ -99,6 +102,21 @@ function daemonConnectionError(method: DaemonRpcMethod, error: unknown): Error {
   return new Error(
     `Daemon connection failed while running ${method}: ${errorMessage(error)}`,
   );
+}
+
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const done = (): void => {
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timeout = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+  });
 }
 
 class RemoteDaemonClient implements RemoteUiBackendClient {
@@ -285,7 +303,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     }
     const controller = new AbortController();
     this.abortController = controller;
-    this.sseLoop = this.runSseLoop(controller.signal)
+    this.sseLoop = this.runSseReconnectLoop(controller.signal)
       .catch((error: unknown) => {
         if (isAbortError(error)) {
           return;
@@ -305,8 +323,23 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     this.sseLoop = undefined;
   }
 
-  private async runSseLoop(signal: AbortSignal): Promise<void> {
+  private async runSseReconnectLoop(signal: AbortSignal): Promise<void> {
     await this.ensureInitialized();
+    while (!signal.aborted && this.handlers.size > 0) {
+      try {
+        await this.openSseConnection(signal);
+      } catch (error) {
+        if (isAbortError(error)) {
+          return;
+        }
+      }
+      if (this.handlers.size > 0) {
+        await delay(SSE_RECONNECT_DELAY_MS, signal);
+      }
+    }
+  }
+
+  private async openSseConnection(signal: AbortSignal): Promise<void> {
     const url = new URL(`${this.baseUrl}/api/events`);
     url.searchParams.set("clientId", this.clientId);
     const headers = this.requestHeaders({ accept: "text/event-stream" });
@@ -354,12 +387,12 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
         }
         const frame = buffer.slice(0, boundary);
         buffer = buffer.slice(boundary + 2);
-        this.handleSseFrame(frame);
+        await this.handleSseFrame(frame);
       }
     }
   }
 
-  private handleSseFrame(frame: string): void {
+  private async handleSseFrame(frame: string): Promise<void> {
     const lines = frame.split("\n");
     const id = lines
       .find((line) => line.startsWith("id: "))
@@ -373,7 +406,9 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
 
     const event = parseDaemonSseEvent(JSON.parse(data) as unknown);
     if (event.type === "resync-required") {
-      this.lastEventId = undefined;
+      this.lastEventId = String(event.maxSeqNum);
+      const snapshot = await this.rpc<UiSnapshot>("getSnapshot", []);
+      this.emitEvent({ snapshot, type: "snapshot.replaced" });
       return;
     }
     if (event.type !== "ui.event") {
@@ -382,8 +417,12 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     if (id !== undefined) {
       this.lastEventId = id;
     }
+    this.emitEvent(event.event);
+  }
+
+  private emitEvent(event: UiEvent): void {
     for (const handler of Array.from(this.handlers)) {
-      handler(event.event);
+      handler(event);
     }
   }
 

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import type {
   UiBackendClient,
+  UiEvent,
   UiUnsubscribe,
 } from "ohbaby-sdk";
 import { isAuthorizedDaemonRequest } from "../auth/token.js";
@@ -17,6 +18,7 @@ import {
   createDaemonRpcSuccessResponse,
   createDefaultDaemonPromptQueue,
   isDaemonForbiddenError,
+  MAX_REQUEST_BODY_BYTES,
   parseDaemonRpcBody,
 } from "../protocols/jsonrpc/rpc-route.js";
 import {
@@ -68,19 +70,101 @@ function isAuthorized(
   return isAuthorizedDaemonRequest(authorization, token);
 }
 
+function requireAuthToken(token: string | undefined): string {
+  if (!token) {
+    throw new Error("Daemon auth token is required");
+  }
+  return token;
+}
+
 function unauthorizedBody(id = "unknown"): unknown {
   return createDaemonRpcFailure(id, new Error("Unauthorized"));
 }
 
-function parseLastEventId(value: string | undefined): number | undefined {
+function requestTooLargeBody(): unknown {
+  return createDaemonRpcFailure(
+    "unknown",
+    new Error("Request body is too large"),
+  );
+}
+
+function scheduleAfterResponse(
+  callback: (() => Promise<void> | void) | undefined,
+): void {
+  if (!callback) {
+    return;
+  }
+  setTimeout(() => {
+    void Promise.resolve()
+      .then(callback)
+      .catch(() => undefined);
+  }, 0);
+}
+
+type LastEventIdParseResult =
+  | {
+      readonly kind: "absent";
+    }
+  | {
+      readonly kind: "invalid";
+    }
+  | {
+      readonly kind: "ok";
+      readonly seqNum: number;
+    };
+
+function parseLastEventId(
+  value: string | undefined,
+): LastEventIdParseResult {
   if (value === undefined || value.trim().length === 0) {
-    return undefined;
+    return { kind: "absent" };
   }
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    return undefined;
+    return { kind: "invalid" };
   }
-  return parsed;
+  return { kind: "ok", seqNum: parsed };
+}
+
+async function readRequestTextWithLimit(request: Request): Promise<
+  | {
+      readonly body: string;
+      readonly ok: true;
+    }
+  | {
+      readonly ok: false;
+    }
+> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength !== null) {
+    const bytes = Number(contentLength);
+    if (Number.isFinite(bytes) && bytes > MAX_REQUEST_BODY_BYTES) {
+      return { ok: false };
+    }
+  }
+
+  if (!request.body) {
+    return { body: "", ok: true };
+  }
+
+  const reader: ReadableStreamDefaultReader<Uint8Array> =
+    request.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let body = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      body += decoder.decode();
+      return { body, ok: true };
+    }
+    bytes += value.byteLength;
+    if (bytes > MAX_REQUEST_BODY_BYTES) {
+      await reader.cancel();
+      return { ok: false };
+    }
+    body += decoder.decode(value, { stream: true });
+  }
 }
 
 class DaemonServerAppRuntime {
@@ -89,12 +173,16 @@ class DaemonServerAppRuntime {
   private readonly clients = new Set<SseClient>();
   private readonly createSessionId: () => string;
   private readonly eventBus: EventBus;
+  private readonly knownClientIds = new Set<string>();
+  private readonly authToken: string;
   private readonly permissionRouter: PermissionRouter;
   private readonly promptQueue: DaemonPromptQueue;
+  private readonly replayEventsBySeqNum = new Map<number, Map<string, UiEvent>>();
   private started = false;
   private unsubscribe: UiUnsubscribe | undefined;
 
   constructor(private readonly options: DaemonServerAppOptions) {
+    this.authToken = requireAuthToken(options.authToken);
     this.createSessionId = options.createSessionId ?? randomUUID;
     this.eventBus =
       options.eventBufferCapacity === undefined
@@ -134,7 +222,9 @@ class DaemonServerAppRuntime {
       client.close();
     }
     this.clients.clear();
+    this.knownClientIds.clear();
     this.clientViews.resetRuntimeState();
+    this.replayEventsBySeqNum.clear();
     this.started = false;
   }
 
@@ -151,11 +241,11 @@ class DaemonServerAppRuntime {
       });
     });
 
-    this.app.post("/api/shutdown", async (context) => {
+    this.app.post("/api/shutdown", (context) => {
       if (!this.isAuthorized(context.req.header("authorization"))) {
         return context.json(unauthorizedBody(), 401);
       }
-      await this.options.onShutdown?.();
+      scheduleAfterResponse(this.options.onShutdown);
       return context.json({ ok: true });
     });
 
@@ -164,7 +254,12 @@ class DaemonServerAppRuntime {
         return context.json(unauthorizedBody(), 401);
       }
 
-      const parsed = parseDaemonRpcBody(await context.req.text());
+      const body = await readRequestTextWithLimit(context.req.raw);
+      if (!body.ok) {
+        return context.json(requestTooLargeBody(), 413);
+      }
+
+      const parsed = parseDaemonRpcBody(body.body);
       if (parsed.failure || !parsed.request) {
         return context.json(parsed.failure, 400);
       }
@@ -209,7 +304,7 @@ class DaemonServerAppRuntime {
   }
 
   private isAuthorized(authorization: string | undefined): boolean {
-    return isAuthorized(authorization, this.options.authToken);
+    return isAuthorized(authorization, this.authToken);
   }
 
   private createSseResponse(
@@ -247,6 +342,7 @@ class DaemonServerAppRuntime {
           },
         };
         this.clients.add(client);
+        this.knownClientIds.add(clientId);
         this.options.onClientConnected?.(clientId);
         client.write({ clientId, type: "hello" });
         this.replayMissedEvents(client, lastEventId);
@@ -278,8 +374,6 @@ class DaemonServerAppRuntime {
       return;
     }
     client.close();
-    this.permissionRouter.disconnectClient(client.clientId);
-    this.clientViews.disconnectClient(client.clientId);
     this.options.onClientDisconnected?.(client.clientId);
   }
 
@@ -287,53 +381,107 @@ class DaemonServerAppRuntime {
     client: SseClient,
     lastEventId: string | undefined,
   ): void {
-    const seqNum = parseLastEventId(lastEventId);
-    if (seqNum === undefined) {
+    const parsed = parseLastEventId(lastEventId);
+    if (parsed.kind === "absent") {
+      return;
+    }
+    if (parsed.kind === "invalid") {
+      this.writeResyncRequired(client);
       return;
     }
 
-    const replay = this.eventBus.replayAfter(seqNum);
+    const replay = this.eventBus.replayAfter(parsed.seqNum);
     if (replay.kind === "resync-required") {
-      client.write({
-        maxSeqNum: replay.maxSeqNum,
-        minSeqNum: replay.minSeqNum,
-        type: "resync-required",
-      });
+      this.writeResyncRequired(client);
       return;
     }
 
     for (const envelope of replay.envelopes) {
-      this.writeEnvelopeToClient(envelope, client);
+      this.writeReplayEnvelopeToClient(envelope, client);
     }
+  }
+
+  private writeResyncRequired(client: SseClient): void {
+    const minSeqNum = this.eventBus.minSeqNum;
+    if (minSeqNum === undefined) {
+      return;
+    }
+    client.write({
+      maxSeqNum: this.eventBus.latestSeqNum,
+      minSeqNum,
+      type: "resync-required",
+    });
   }
 
   private broadcast(envelope: EventEnvelope): void {
     const event = envelope.event;
     this.permissionRouter.observeEvent(event);
     this.clientViews.observeEvent(event);
+    const replayEvents = this.routeEnvelopeForKnownClients(envelope);
+    this.replayEventsBySeqNum.set(envelope.seqNum, replayEvents);
     for (const client of Array.from(this.clients)) {
-      this.writeEnvelopeToClient(envelope, client);
+      const routed = replayEvents.get(client.clientId);
+      if (routed) {
+        client.write({ event: routed, type: "ui.event" }, envelope.seqNum);
+      }
     }
     this.clientViews.afterEventBroadcast(event);
+    this.pruneReplayEvents();
   }
 
-  private writeEnvelopeToClient(
+  private routeEnvelopeForKnownClients(
     envelope: EventEnvelope,
-    client: SseClient,
-  ): void {
+  ): Map<string, UiEvent> {
+    const replayEvents = new Map<string, UiEvent>();
+    for (const clientId of this.knownClientIds) {
+      const routed = this.routeEnvelopeForClient(envelope, clientId);
+      if (routed) {
+        replayEvents.set(clientId, routed);
+      }
+    }
+    return replayEvents;
+  }
+
+  private routeEnvelopeForClient(
+    envelope: EventEnvelope,
+    clientId: string,
+  ): UiEvent | undefined {
     const routed = this.clientViews.routeEventForClient(
       envelope.event,
-      client.clientId,
+      clientId,
     );
     if (!routed) {
-      return;
+      return undefined;
     }
     const filtered = this.permissionRouter.filterEventForClient(
       routed,
-      client.clientId,
+      clientId,
     );
-    if (filtered) {
-      client.write({ event: filtered, type: "ui.event" }, envelope.seqNum);
+    return filtered ?? undefined;
+  }
+
+  private writeReplayEnvelopeToClient(
+    envelope: EventEnvelope,
+    client: SseClient,
+  ): void {
+    const routed = this.replayEventsBySeqNum
+      .get(envelope.seqNum)
+      ?.get(client.clientId);
+    if (routed) {
+      client.write({ event: routed, type: "ui.event" }, envelope.seqNum);
+    }
+  }
+
+  private pruneReplayEvents(): void {
+    const minSeqNum = this.eventBus.minSeqNum;
+    if (minSeqNum === undefined) {
+      this.replayEventsBySeqNum.clear();
+      return;
+    }
+    for (const seqNum of this.replayEventsBySeqNum.keys()) {
+      if (seqNum < minSeqNum) {
+        this.replayEventsBySeqNum.delete(seqNum);
+      }
     }
   }
 }

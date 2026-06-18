@@ -20,7 +20,7 @@ import {
   type DaemonRpcResponse,
 } from "./protocol.js";
 
-const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
+export const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
 
 type ExecuteCommandInvocation = Parameters<
   UiBackendClient["executeCommand"]

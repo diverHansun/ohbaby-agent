@@ -603,6 +603,9 @@ describe("runOhbabyCli", () => {
       })),
       loadRuntimeEnvIntoProcessEnv: vi.fn(() => Promise.resolve()),
     }));
+    vi.doMock("ohbaby-server", () => {
+      throw new Error("ohbaby-server should not be loaded for run subcommand");
+    });
     vi.doMock("./tui/index.js", () => ({
       renderTerminalUi: vi.fn(),
     }));

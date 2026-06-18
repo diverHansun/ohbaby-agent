@@ -455,11 +455,13 @@ async function reservePort(): Promise<number> {
 
 interface SseFrameReader {
   cancel(): Promise<void>;
-  read(): Promise<{
-    readonly data: unknown;
-    readonly event?: string;
-    readonly id?: string;
-  }>;
+  read(): Promise<SseFrame>;
+}
+
+interface SseFrame {
+  readonly data: unknown;
+  readonly event?: string;
+  readonly id?: string;
 }
 
 function createSseFrameReader(response: Response): SseFrameReader {
@@ -522,6 +524,20 @@ function createSseReader(response: Response): () => Promise<unknown> {
     const frame = await frameReader.read();
     return frame.data;
   };
+}
+
+function readSseFrameWithTimeout(
+  reader: SseFrameReader,
+  ms = 100,
+): Promise<SseFrame> {
+  return Promise.race([
+    reader.read(),
+    new Promise<SseFrame>((_resolve, reject) => {
+      setTimeout(() => {
+        reject(new Error("Timed out waiting for SSE frame"));
+      }, ms);
+    }),
+  ]);
 }
 
 describe("createDaemonHttpServer", () => {
@@ -620,10 +636,42 @@ describe("createDaemonHttpServer", () => {
         const accepted = await postShutdown(url);
         expect(accepted.status).toBe(200);
         expect(await accepted.json()).toEqual({ ok: true });
+        await vi.waitUntil(() => onShutdown.mock.calls.length === 1);
         expect(onShutdown).toHaveBeenCalledTimes(1);
       },
       { authToken: "token_1", onShutdown },
     );
+  });
+
+  it("responds before stopping itself from shutdown hooks", async () => {
+    const backend = new FakeBackend();
+    const server = createDaemonHttpServer({
+      authToken,
+      backend,
+      host: "127.0.0.1",
+      onShutdown: () => server.stop(),
+      port: 0,
+    });
+    await server.start();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, 500);
+
+    try {
+      const response = await fetch(`${server.url}/api/shutdown`, {
+        headers: authHeaders(),
+        method: "POST",
+        signal: controller.signal,
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      await vi.waitUntil(() => backend.handlers.size === 0);
+    } finally {
+      clearTimeout(timeout);
+      await server.stop();
+    }
   });
 
   it("dispatches rpc requests to the backend", async () => {
@@ -659,6 +707,27 @@ describe("createDaemonHttpServer", () => {
         id: "rpc_bad",
         ok: false,
         error: { message: "Unsupported daemon rpc method: missing" },
+      });
+    });
+  });
+
+  it("rejects oversized rpc request bodies with payload-too-large", async () => {
+    await withServer(new FakeBackend(), async (url) => {
+      const body = "x".repeat(1024 * 1024 + 1);
+      const response = await fetch(`${url}/api/rpc`, {
+        body,
+        headers: {
+          ...authHeaders(),
+          "content-length": String(Buffer.byteLength(body, "utf8")),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(413);
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        error: { message: "Request body is too large" },
       });
     });
   });
@@ -727,6 +796,127 @@ describe("createDaemonHttpServer", () => {
     });
   });
 
+  it("replays owner-routed command events after reconnect", async () => {
+    const backend = new FakeBackend();
+    await withServer(backend, async (url) => {
+      const stream = await fetchEvents(url, "client_a");
+      const reader = createSseFrameReader(stream);
+      await reader.read();
+
+      const invoked = await postRpc(url, {
+        clientId: "client_a",
+        id: "rpc_command",
+        method: "executeCommand",
+        params: [
+          {
+            argv: [],
+            clientInvocationId: "invoke_1",
+            commandId: "status",
+            path: ["status"],
+            raw: "/status",
+            rawArgs: "",
+            surface: "tui",
+          },
+        ],
+      });
+      expect(invoked.status).toBe(200);
+      await reader.cancel();
+
+      backend.emit(commandResultDelivered());
+      const resumed = await fetchEvents(url, "client_a", {
+        "last-event-id": "0",
+      });
+      const resumedReader = createSseFrameReader(resumed);
+
+      await expect(resumedReader.read()).resolves.toMatchObject({
+        data: { clientId: "client_a", type: "hello" },
+      });
+      await expect(resumedReader.read()).resolves.toEqual({
+        data: {
+          event: commandResultDelivered(),
+          type: "ui.event",
+        },
+        event: "ui.event",
+        id: "1",
+      });
+      await resumedReader.cancel();
+    });
+  });
+
+  it("replays prompt-owned runtime and permission events after reconnect", async () => {
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      sessions: [sessionWithMessages("session_1", [])],
+    });
+    backend.emitOnSubmit = false;
+    backend.holdSubmits = true;
+    let submitted: Promise<Response> | undefined;
+    await withServer(backend, async (url) => {
+      try {
+        await postRpc(url, {
+          clientId: "client_a",
+          id: "rpc_init",
+          method: "initializeClient",
+          params: [{ resumeSessionId: "session_1" }],
+        });
+        const stream = await fetchEvents(url, "client_a");
+        const reader = createSseFrameReader(stream);
+        await reader.read();
+
+        submitted = postRpc(url, {
+          clientId: "client_a",
+          id: "rpc_prompt",
+          method: "submitPrompt",
+          params: ["hello", { sessionId: "session_1" }],
+        });
+        await vi.waitUntil(() => backend.submitted.length === 1);
+        await reader.cancel();
+
+        backend.emit(runUpdated("run_1", "session_1"));
+        backend.emit(runtimeRunning("run_1"));
+        backend.emit(permissionRequested("run_1"));
+
+        const resumed = await fetchEvents(url, "client_a", {
+          "last-event-id": "0",
+        });
+        const resumedReader = createSseFrameReader(resumed);
+
+        await expect(resumedReader.read()).resolves.toMatchObject({
+          data: { clientId: "client_a", type: "hello" },
+        });
+        await expect(resumedReader.read()).resolves.toEqual({
+          data: {
+            event: runUpdated("run_1", "session_1"),
+            type: "ui.event",
+          },
+          event: "ui.event",
+          id: "1",
+        });
+        await expect(resumedReader.read()).resolves.toEqual({
+          data: {
+            event: runtimeRunning("run_1"),
+            type: "ui.event",
+          },
+          event: "ui.event",
+          id: "2",
+        });
+        await expect(resumedReader.read()).resolves.toEqual({
+          data: {
+            event: permissionRequested("run_1"),
+            type: "ui.event",
+          },
+          event: "ui.event",
+          id: "3",
+        });
+        await resumedReader.cancel();
+      } finally {
+        backend.resolveHeldSubmits();
+        await submitted?.catch(() => undefined);
+      }
+    });
+    await expect(submitted).resolves.toMatchObject({ status: 200 });
+  });
+
   it("signals resync when Last-Event-ID is outside the replay window", async () => {
     const backend = new FakeBackend();
     await withServer(
@@ -755,6 +945,31 @@ describe("createDaemonHttpServer", () => {
       },
       { eventBufferCapacity: 1 },
     );
+  });
+
+  it("signals resync when Last-Event-ID is malformed", async () => {
+    const backend = new FakeBackend();
+    await withServer(backend, async (url) => {
+      backend.emit(sessionUpdated());
+
+      const response = await fetchEvents(url, "client_a", {
+        "last-event-id": "not-a-number",
+      });
+      const reader = createSseFrameReader(response);
+
+      await expect(reader.read()).resolves.toMatchObject({
+        data: { clientId: "client_a", type: "hello" },
+      });
+      await expect(readSseFrameWithTimeout(reader)).resolves.toEqual({
+        data: {
+          maxSeqNum: 1,
+          minSeqNum: 1,
+          type: "resync-required",
+        },
+        event: "resync-required",
+      });
+      await reader.cancel();
+    });
   });
 
   it("routes permission requests only to the prompt owner", async () => {
@@ -1714,6 +1929,7 @@ describe("createDaemonHttpServer", () => {
   it("unsubscribes backend events when stopped", async () => {
     const backend = new FakeBackend();
     const server = createDaemonHttpServer({
+      authToken,
       backend,
       host: "127.0.0.1",
       port: 0,
@@ -1765,6 +1981,7 @@ describe("createDaemonHttpServer", () => {
     const backend = new FakeBackend();
     backend.subscribeError = new Error("subscribe failed");
     const server = createDaemonHttpServer({
+      authToken,
       backend,
       host: "127.0.0.1",
       port,
@@ -1774,6 +1991,7 @@ describe("createDaemonHttpServer", () => {
     await server.stop();
 
     const nextServer = createDaemonHttpServer({
+      authToken,
       backend: new FakeBackend(),
       host: "127.0.0.1",
       port,

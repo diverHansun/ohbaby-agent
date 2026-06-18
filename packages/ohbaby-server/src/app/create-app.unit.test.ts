@@ -206,25 +206,23 @@ describe("createDaemonServerApp", () => {
     }
   });
 
-  it("rejects requests when auth is missing or misconfigured", async () => {
+  it("requires a configured auth token", () => {
+    expect(() =>
+      createDaemonServerApp({
+        backend: new FakeBackend(),
+        packageVersion: "0.1.5-test",
+      }),
+    ).toThrow("Daemon auth token is required");
+  });
+
+  it("rejects requests when auth headers are missing", async () => {
     const handle = createApp();
-    const missingTokenApp = createDaemonServerApp({
-      backend: new FakeBackend(),
-      packageVersion: "0.1.5-test",
-    });
     await handle.start();
-    await missingTokenApp.start();
     try {
       const missingHeader = await handle.app.request("/api/health");
       expect(missingHeader.status).toBe(401);
-
-      const missingConfiguredToken = await missingTokenApp.app.request(
-        "/api/health",
-      );
-      expect(missingConfiguredToken.status).toBe(401);
     } finally {
       await handle.dispose();
-      await missingTokenApp.dispose();
     }
   });
 
