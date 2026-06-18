@@ -28,12 +28,13 @@ with it through a fast [Ink](https://github.com/vadimdemedes/ink)-based CLI/TUI,
 from npm as `ohbaby-cli` and launched with the `ohbaby` command. The runtime and SDK are
 kept separate so future web and app interfaces can adapt to the same agent core.
 
-Bring your own API key from any OpenAI-compatible or Anthropic provider and start coding.
+Bring your own API key from an LLM provider such as OpenAI, Anthropic, or Zhipu,
+then start coding.
 
 ## ✨ Features
 
-- **🤖 Provider-agnostic** — OpenAI, Anthropic/Claude, and any OpenAI-compatible
-  endpoint (Zhipu/GLM, DeepSeek, Qwen/DashScope, and more). Your keys, your models.
+- **🤖 Provider-agnostic** — OpenAI, Anthropic, Zhipu, DeepSeek, Qwen/DashScope,
+  and other LLM providers or OpenAI-compatible endpoints. Your keys, your models.
 - **🧩 MCP support** — connect [Model Context Protocol](https://modelcontextprotocol.io)
   servers so their tools, resources, and prompts become available to the agent.
 - **🛠️ Skills** — extend ohbaby-agent with reusable skills that show up as slash commands.
@@ -73,11 +74,11 @@ entered here are persisted to `~/.ohbaby-agent/.env`.
 
 | Field | Description |
 | --- | --- |
-| Provider | `openai`, `anthropic` / `claude`, `zhipu`, … |
+| Provider | `openai`, `anthropic`, `zhipu`, … |
 | Base URL | The SDK base URL (no `/chat/completions` suffix) |
 | API key env | Environment variable that holds the key (e.g. `OPENAI_API_KEY`) |
 | API key value | The key itself |
-| Model name | e.g. `gpt-4.1`, `glm-5.1`, or your provider's model id |
+| Model name | e.g. `gpt-5.5`, `claude-sonnet-4-5`, `glm-5.1`, or your provider's model id |
 | Context window / Max output tokens | Optional |
 
 **3. Start coding.** That's it — describe what you want and ohbaby-agent gets to work.
@@ -127,16 +128,13 @@ pnpm test             # run tests
 pnpm preflight        # format + lint + typecheck + test + build
 ```
 
-The repo is a pnpm workspace with three published packages:
+The repo is a pnpm workspace with four published packages:
 
 - **`ohbaby-cli`** — the MVP CLI/TUI package that installs the `ohbaby` command.
 - **`ohbaby-agent`** — the backend runtime: adapters, tools, sessions, policy, MCP, skills.
+- **`ohbaby-server`** — the explicit local server and remote client transport package.
 - **`ohbaby-sdk`** — stable TypeScript contracts shared between the runtime and interfaces
   such as the current CLI/TUI and future web/app adapters.
-
-Reference repositories checked out alongside the code (`claude-code/`, `opencode/`,
-`DeepSeek-TUI/`, `deer-flow/`) are for design comparison only — they are not project
-source and are never included in npm artifacts.
 
 ## 📄 License
 
