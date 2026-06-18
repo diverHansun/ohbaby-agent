@@ -79,6 +79,20 @@ function requireAuthToken(token: string | undefined): string {
   return token;
 }
 
+function normalizeClientDisconnectRetentionMs(
+  value: number | undefined,
+): number {
+  if (value === undefined) {
+    return DEFAULT_CLIENT_DISCONNECT_RETENTION_MS;
+  }
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(
+      "clientDisconnectRetentionMs must be a non-negative finite number",
+    );
+  }
+  return value;
+}
+
 function unauthorizedBody(id = "unknown"): unknown {
   return createDaemonRpcFailure(id, new Error("Unauthorized"));
 }
@@ -191,9 +205,9 @@ class DaemonServerAppRuntime {
 
   constructor(private readonly options: DaemonServerAppOptions) {
     this.authToken = requireAuthToken(options.authToken);
-    this.clientDisconnectRetentionMs =
-      options.clientDisconnectRetentionMs ??
-      DEFAULT_CLIENT_DISCONNECT_RETENTION_MS;
+    this.clientDisconnectRetentionMs = normalizeClientDisconnectRetentionMs(
+      options.clientDisconnectRetentionMs,
+    );
     this.createSessionId = options.createSessionId ?? randomUUID;
     this.eventBus =
       options.eventBufferCapacity === undefined
@@ -446,13 +460,9 @@ class DaemonServerAppRuntime {
   }
 
   private writeResyncRequired(client: SseClient): void {
-    const minSeqNum = this.eventBus.minSeqNum;
-    if (minSeqNum === undefined) {
-      return;
-    }
     client.write({
       maxSeqNum: this.eventBus.latestSeqNum,
-      minSeqNum,
+      minSeqNum: this.eventBus.minSeqNum ?? 0,
       type: "resync-required",
     });
   }

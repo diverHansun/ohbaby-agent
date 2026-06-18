@@ -802,6 +802,29 @@ describe("createDaemonHttpServer", () => {
     });
   });
 
+  it("signals resync when Last-Event-ID is ahead of the latest event", async () => {
+    const backend = new FakeBackend();
+    await withServer(backend, async (url) => {
+      const response = await fetchEvents(url, "client_a", {
+        "last-event-id": "99",
+      });
+      const reader = createSseFrameReader(response);
+
+      await expect(reader.read()).resolves.toMatchObject({
+        data: { clientId: "client_a", type: "hello" },
+      });
+      await expect(readSseFrameWithTimeout(reader)).resolves.toEqual({
+        data: {
+          maxSeqNum: 0,
+          minSeqNum: 0,
+          type: "resync-required",
+        },
+        event: "resync-required",
+      });
+      await reader.cancel();
+    });
+  });
+
   it("replays owner-routed command events after reconnect", async () => {
     const backend = new FakeBackend();
     await withServer(backend, async (url) => {

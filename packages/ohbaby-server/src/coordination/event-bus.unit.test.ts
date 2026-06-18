@@ -60,6 +60,25 @@ describe("EventBus", () => {
     });
   });
 
+  it("returns resync-required when the cursor is ahead of the latest event", () => {
+    const bus = new EventBus({ capacity: 10 });
+
+    expect(bus.replayAfter(1)).toEqual({
+      kind: "resync-required",
+      maxSeqNum: 0,
+      minSeqNum: 0,
+    });
+
+    bus.publish(notice("one"));
+    bus.publish(notice("two"));
+
+    expect(bus.replayAfter(99)).toEqual({
+      kind: "resync-required",
+      maxSeqNum: 2,
+      minSeqNum: 1,
+    });
+  });
+
   it("notifies realtime subscribers and stops after unsubscribe", () => {
     const bus = new EventBus({ capacity: 10 });
     const handler = vi.fn();

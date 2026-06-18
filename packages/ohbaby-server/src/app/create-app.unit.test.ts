@@ -215,6 +215,26 @@ describe("createDaemonServerApp", () => {
     ).toThrow("Daemon auth token is required");
   });
 
+  it("requires a finite non-negative disconnect retention window", () => {
+    expect(() =>
+      createDaemonServerApp({
+        authToken,
+        backend: new FakeBackend(),
+        clientDisconnectRetentionMs: -1,
+        packageVersion: "0.1.5-test",
+      }),
+    ).toThrow("clientDisconnectRetentionMs must be a non-negative finite number");
+
+    expect(() =>
+      createDaemonServerApp({
+        authToken,
+        backend: new FakeBackend(),
+        clientDisconnectRetentionMs: Number.POSITIVE_INFINITY,
+        packageVersion: "0.1.5-test",
+      }),
+    ).toThrow("clientDisconnectRetentionMs must be a non-negative finite number");
+  });
+
   it("rejects requests when auth headers are missing", async () => {
     const handle = createApp();
     await handle.start();

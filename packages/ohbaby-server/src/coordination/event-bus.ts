@@ -63,6 +63,15 @@ export class EventBus {
   }
 
   replayAfter(seqNum: number): EventBusReplayResult {
+    const latestSeqNum = this.latestSeqNum;
+    if (seqNum > latestSeqNum) {
+      return {
+        kind: "resync-required",
+        maxSeqNum: latestSeqNum,
+        minSeqNum: this.minSeqNum ?? 0,
+      };
+    }
+
     const minSeqNum = this.minSeqNum;
     if (minSeqNum === undefined) {
       return { envelopes: [], kind: "ok" };
@@ -70,7 +79,7 @@ export class EventBus {
     if (seqNum < minSeqNum - 1) {
       return {
         kind: "resync-required",
-        maxSeqNum: this.latestSeqNum,
+        maxSeqNum: latestSeqNum,
         minSeqNum,
       };
     }
