@@ -36,6 +36,7 @@
 | [`04-multi-project-runtime.md`](./04-multi-project-runtime.md) | InstanceStore（git-root scope）、全局单锁、`x-ohbaby-directory` workspace 路由、`serve ps`、反多后端、G5 细化 |
 | [`05-consumption-path-unification.md`](./05-consumption-path-unification.md) | **本阶段新增步骤**：在契约层统一直连/server 两条消费路径，避免行为漂移 |
 | [`06-migration-and-tests.md`](./06-migration-and-tests.md) | 从当前 `server.ts` 到 Hono 的增量步骤、新增依赖、测试/验收/回归范围 |
+| [`07-v0.1.5-stable-server-kernel.md`](./07-v0.1.5-stable-server-kernel.md) | **v0.1.5 发布范围**：只做 M1-M4，先稳定显式 server 内核，暂缓 web REST/OpenAPI 与多项目 runtime |
 
 ---
 
