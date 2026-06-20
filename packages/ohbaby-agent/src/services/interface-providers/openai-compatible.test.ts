@@ -1,3 +1,9 @@
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
+import type { AddressInfo } from "node:net";
 import type { ChatCompletionChunk } from "openai/resources/chat/completions/completions";
 import { describe, expect, it, vi } from "vitest";
 import { createOpenAICompatibleProvider } from "./openai-compatible.js";
@@ -27,6 +33,16 @@ function createChunkStream(
       yield await Promise.resolve(chunk);
     }
   })();
+}
+
+function writeSse(response: ServerResponse, payload: unknown): void {
+  response.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+async function drainRequest(request: IncomingMessage): Promise<void> {
+  for await (const _ of request) {
+    // Drain the request body before returning the fake streaming response.
+  }
 }
 
 describe("openai-compatible provider", () => {
@@ -254,5 +270,110 @@ describe("openai-compatible provider", () => {
         },
       },
     ]);
+  });
+
+  it("should stream chunked local SSE responses with native fetch on Node", async () => {
+    const server = createServer((request, response) => {
+      void drainRequest(request)
+        .then(() => {
+          response.writeHead(200, {
+            "cache-control": "no-cache",
+            "content-type": "text/event-stream; charset=utf-8",
+          });
+          writeSse(response, {
+            choices: [
+              {
+                delta: { content: "chunked ok" },
+                finish_reason: null,
+                index: 0,
+              },
+            ],
+            created: 0,
+            id: "chatcmpl-test",
+            model: "fake-model",
+            object: "chat.completion.chunk",
+          });
+          writeSse(response, {
+            choices: [
+              {
+                delta: {},
+                finish_reason: "stop",
+                index: 0,
+              },
+            ],
+            created: 0,
+            id: "chatcmpl-test",
+            model: "fake-model",
+            object: "chat.completion.chunk",
+          });
+          writeSse(response, {
+            choices: [],
+            created: 0,
+            id: "chatcmpl-test",
+            model: "fake-model",
+            object: "chat.completion.chunk",
+            usage: {
+              completion_tokens: 2,
+              prompt_tokens: 1,
+              total_tokens: 3,
+            },
+          });
+          response.end("data: [DONE]\n\n");
+        })
+        .catch((error: unknown) => {
+          response.destroy(error instanceof Error ? error : undefined);
+        });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+
+    try {
+      const address = server.address() as AddressInfo;
+      const provider = createOpenAICompatibleProvider({
+        id: "openai",
+        apiKey: "test-key",
+        baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
+      });
+      const stream = await provider.streamChatCompletion({
+        model: "fake-model",
+        messages: [{ role: "user", content: "Hello" }],
+        temperature: 0,
+        maxTokens: 128,
+      });
+      const events: InterfaceProviderStreamEvent[] = [];
+
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      expect(events).toEqual([
+        { textDelta: "chunked ok" },
+        {
+          finishReason: "stop",
+          rawFinishReason: "stop",
+          tokenUsage: {
+            completion_tokens: 2,
+            prompt_tokens: 1,
+            total_tokens: 3,
+          },
+        },
+      ]);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    }
   });
 });

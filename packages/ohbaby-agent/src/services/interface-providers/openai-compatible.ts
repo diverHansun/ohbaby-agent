@@ -1,4 +1,4 @@
-import OpenAI, { APIUserAbortError } from "openai";
+import OpenAI, { APIUserAbortError, type ClientOptions } from "openai";
 import type {
   ChatCompletionChunk,
   ChatCompletionCreateParamsStreaming,
@@ -11,6 +11,18 @@ import type {
   InterfaceProviderStreamEvent,
   InterfaceProviderTokenUsage,
 } from "./types.js";
+
+function nativeFetchOptions(): Pick<ClientOptions, "fetch"> {
+  if (typeof globalThis.fetch !== "function") {
+    return {};
+  }
+
+  return {
+    fetch: globalThis.fetch.bind(
+      globalThis,
+    ) as unknown as ClientOptions["fetch"],
+  };
+}
 
 function mapFinishReason(
   finishReason: ChatCompletionChunk.Choice["finish_reason"] | null | undefined,
@@ -119,6 +131,7 @@ export function createOpenAICompatibleProvider(
   const client = new OpenAI({
     apiKey: options.apiKey,
     baseURL: options.baseUrl,
+    ...nativeFetchOptions(),
   });
 
   return {

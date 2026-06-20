@@ -6,6 +6,7 @@
  */
 
 import type { ChatCompletionCreateParams } from "openai/resources/chat/completions/completions";
+import * as path from "node:path";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type {
   InterfaceProviderRequest,
@@ -146,7 +147,7 @@ describe("LLM Client Integration Tests", () => {
       await createLLMClient({ projectDirectory: "D:/repo" });
 
       expect(getLLMConfig).toHaveBeenCalledWith({
-        envPath: "D:\\repo\\.env",
+        envPath: path.join("D:/repo", ".env"),
         projectDirectory: "D:/repo",
       });
     });
