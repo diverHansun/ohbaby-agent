@@ -31,12 +31,14 @@
   - 折叠态一行摘要，点击展开（chevron 旋转）。
 - **思考指示器**（running 时）：三色波点 + `Thinking · {elapsed}s · double click esc to interrupt`——与 CLI 的 double-esc 中断一致（落 G3）。
 - **定稿行**（idle 时）：如"Run stopped. 待审批的编辑已暂存"。
+- **命令结果 notice**：`/status`、`/help`、`/new` 等最小 slash passthrough 的结果以轻量 notice 出现在流内或 composer 上方；running/success/error 三态清楚，不进入消息历史。
 
 ---
 
 ## 3. Composer（输入区，底部 dock）
 
 - **输入框**：`>` 提示符 + 单行输入，聚焦环 + 轻阴影；`↵` 发送、`⇧↵` 换行。
+- **slash 输入**：以 `/` 开头时不作为普通 prompt，而是走 `UiSlashCommand` 解析/执行。v0.1.6 不做候选面板与 Tab 补全；解析失败要保留草稿并显示错误。
 - **动作按钮**：running 时显示 **Stop**（红方块图标）；idle 时显示 **Send ↵**（蓝）。
 - **底部控件行**（本期纳入，决策 3）：
   - **mode 切换**：`auto mode` / `plan mode`，`⇧⇥` 循环；auto=green 点、plan=blue 点。

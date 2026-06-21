@@ -9,6 +9,7 @@ import type {
   UiEventHandler,
   UiPermissionState,
   UiSetSearchApiKeyResult,
+  UiSlashCommandInvocation,
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
@@ -109,6 +110,7 @@ async function waitFor(
 
 class FakeBackend implements UiBackendClient {
   readonly handlers = new Set<UiEventHandler>();
+  readonly executedCommands: UiSlashCommandInvocation[] = [];
   readonly submitted: {
     readonly text: string;
     readonly options?: SubmitPromptOptions;
@@ -131,7 +133,20 @@ class FakeBackend implements UiBackendClient {
   }
 
   listCommands(): ReturnType<UiBackendClient["listCommands"]> {
-    return Promise.resolve({ commands: [], version: "v1" });
+    return Promise.resolve({
+      commands: [
+        {
+          argumentMode: "argv",
+          category: "system",
+          description: "Show backend status",
+          id: "status",
+          path: ["status"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+      ],
+      version: "commands-v1",
+    });
   }
 
   submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void> {
@@ -185,7 +200,29 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(permission);
   }
 
-  executeCommand(): Promise<void> {
+  executeCommand(invocation: UiSlashCommandInvocation): Promise<void> {
+    this.executedCommands.push(invocation);
+    this.emit({
+      command: {
+        clientInvocationId: invocation.clientInvocationId,
+        commandId: invocation.commandId,
+        commandRunId: "command_1",
+        path: invocation.path,
+        surface: invocation.surface,
+        ...(invocation.sessionId === undefined
+          ? {}
+          : { sessionId: invocation.sessionId }),
+      },
+      timestamp: Date.parse(timestamp),
+      type: "command.started",
+    });
+    this.emit({
+      clientInvocationId: invocation.clientInvocationId,
+      commandRunId: "command_1",
+      output: { kind: "text", text: "status ok" },
+      timestamp: Date.parse(timestamp),
+      type: "command.result.delivered",
+    });
     return Promise.resolve();
   }
 
@@ -263,6 +300,28 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
             sessions: [{ id: "session_generated" }],
           },
         },
+      });
+
+      await runtime.client.executeSlashCommand({
+        sessionId: "session_generated",
+        text: "/status",
+      });
+      await waitFor(
+        () =>
+          runtime.store
+            .getSnapshot()
+            .view.commandNotices.some(
+              (notice) =>
+                notice.kind === "success" && notice.text === "status ok",
+            ),
+        "timed out waiting for command notice",
+      );
+      expect(backend.executedCommands).toHaveLength(1);
+      expect(backend.executedCommands[0]).toMatchObject({
+        commandId: "status",
+        path: ["status"],
+        raw: "/status",
+        sessionId: "session_generated",
       });
       await runtime.client.close();
     } finally {

@@ -14,6 +14,7 @@
 | **UC2 发话并接收流式回复** | D3 / D2 |
 | **UC3 处置权限请求** | D3 |
 | **UC4 断线恢复 / 重同步** | D1 / G5 |
+| **UC5 执行最小 slash 命令** | D6 / D2 |
 
 ---
 
@@ -43,6 +44,13 @@
 2. 命中 replay → 补发缺失事件 → 回 `live`。
 3. 命中 `resync-required` → `resyncing` → 重拉 snapshot + 重置 ViewState → 回 `live`。
 
+### UC5 执行最小 slash 命令
+1. 用户在 Composer 输入以 `/` 开头的文本（如 `/status`、`/help`、`/new`）。
+2. web 懒加载/缓存 `GET /v1/commands?surface=tui` 的命令目录，并使用 `ohbaby-sdk` 的 slash parser/resolve 校验。
+3. resolve 成功 → `POST /v1/commands`，带 `clientInvocationId`、`surface:"tui"`、当前 sessionId（如有）。
+4. SSE 推 `command.started` → 显示 running `CommandNotice`；随后 `command.result.delivered` 或 `command.failed` 更新为结果/错误。
+5. 非 slash 输入仍走 UC2 的 prompt 流；不做候选面板、Tab 补全或交互式 command panel。
+
 ---
 
 ## 3. Responsibility Boundaries（责任边界）
@@ -69,5 +77,9 @@
 | UC3 | 待决时断线 | resync 后据新 snapshot 重建队列——该请求可能已被它端处置而消失 |
 | UC4 | `resync-required` | 必须丢弃 ViewState 重建，**绝不静默错位**（核心正确性） |
 | UC4 | 重连退避 | 有上界，不紧循环空转 |
+| UC5 | 命令目录拉取失败 | 不执行命令，显示可关闭错误，draft 保留 |
+| UC5 | 未知/不可用命令 | 不发送到 daemon，显示解析错误 |
+| UC5 | 命令执行失败 | 通过 `CommandNotice` 显示错误，不吞掉 |
+| UC5 | 命令带交互 action | v0.1.6 只展示结果；交互请求属 ND5，后续补 command panel |
 
 > 这些失败点与 [`test.md`](./test.md) 的 Critical Scenarios 一一对应。

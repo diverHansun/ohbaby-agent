@@ -11,6 +11,8 @@ import type {
   UiEventHandler,
   UiPermissionState,
   UiSetSearchApiKeyResult,
+  UiSlashCommandCatalog,
+  UiSlashCommandInvocation,
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
@@ -96,6 +98,10 @@ function setSearchApiKeyResult(): UiSetSearchApiKeyResult {
 class FakeBackend implements UiBackendClient {
   readonly handlers = new Set<UiEventHandler>();
   readonly abortedRunIds: (string | undefined)[] = [];
+  readonly executedCommands: UiSlashCommandInvocation[] = [];
+  readonly listCommandQueries: Parameters<
+    UiBackendClient["listCommands"]
+  >[0][] = [];
   readonly permissionResponses: {
     readonly requestId: string;
     readonly response: Parameters<UiBackendClient["respondPermission"]>[1];
@@ -105,6 +111,29 @@ class FakeBackend implements UiBackendClient {
     readonly options?: SubmitPromptOptions;
   }[] = [];
   onGetSnapshot: (() => Promise<void> | void) | undefined;
+  commandCatalog: UiSlashCommandCatalog = {
+    commands: [
+      {
+        argumentMode: "argv",
+        category: "system",
+        description: "Show backend status",
+        id: "status",
+        path: ["status"],
+        source: "builtin",
+        surfaces: ["tui"],
+      },
+      {
+        argumentMode: "argv",
+        category: "session",
+        description: "Start a new session",
+        id: "new",
+        path: ["new"],
+        source: "builtin",
+        surfaces: ["tui"],
+      },
+    ],
+    version: "commands-v1",
+  };
   permissionState: UiPermissionState;
   submitError: Error | undefined;
 
@@ -139,8 +168,11 @@ class FakeBackend implements UiBackendClient {
     };
   }
 
-  listCommands(): ReturnType<UiBackendClient["listCommands"]> {
-    return Promise.resolve({ commands: [], version: "v1" });
+  listCommands(
+    query: Parameters<UiBackendClient["listCommands"]>[0],
+  ): ReturnType<UiBackendClient["listCommands"]> {
+    this.listCommandQueries.push(query);
+    return Promise.resolve(this.commandCatalog);
   }
 
   submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void> {
@@ -181,7 +213,8 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(this.permissionState);
   }
 
-  executeCommand(): Promise<void> {
+  executeCommand(invocation: UiSlashCommandInvocation): Promise<void> {
+    this.executedCommands.push(invocation);
     return Promise.resolve();
   }
 
@@ -430,6 +463,7 @@ describe("createDaemonServerApp", () => {
       expect(Object.keys(body.paths)).toEqual(
         expect.arrayContaining([
           "/v1/clients",
+          "/v1/commands",
           "/v1/events",
           "/v1/prompts",
           "/v1/snapshot",
@@ -585,6 +619,349 @@ describe("createDaemonServerApp", () => {
           sessionRules: [],
         },
       });
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("lists slash commands for registered web clients", async () => {
+    const backend = new FakeBackend();
+    backend.commandCatalog = {
+      commands: [
+        {
+          argumentMode: "argv",
+          category: "system",
+          description: "Show backend status",
+          id: "status",
+          path: ["status"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "argv",
+          category: "session",
+          description: "Browse sessions",
+          id: "sessions",
+          parentBehavior: "interaction",
+          path: ["sessions"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "argv",
+          category: "session",
+          description: "Compact the current session",
+          id: "compact",
+          path: ["compact"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+      ],
+      version: "commands-v1",
+    };
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request("/v1/commands?surface=tui", {
+        headers: {
+          ...authHeaders(),
+          "x-ohbaby-client-id": "client_web",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        catalog: {
+          commands: [{ id: "status" }],
+          version: "commands-v1",
+        },
+        ok: true,
+      });
+      expect(backend.listCommandQueries).toEqual([{ surface: "tui" }]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it.each([
+    {
+      method: "GET" as const,
+      path: "/v1/commands?surface=tui",
+    },
+    {
+      body: {
+        argv: [],
+        clientInvocationId: "invoke_status",
+        commandId: "status",
+        path: ["status"],
+        raw: "/status",
+        rawArgs: "",
+        surface: "tui",
+      },
+      method: "POST" as const,
+      path: "/v1/commands",
+    },
+  ])(
+    "rejects unauthenticated $method command requests",
+    async ({ body, method, path }) => {
+      const handle = createApp();
+      await handle.start();
+      try {
+        const response = await handle.app.request(path, {
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          headers:
+            body === undefined
+              ? undefined
+              : { "content-type": "application/json" },
+          method,
+        });
+
+        expect(response.status).toBe(401);
+        await expect(response.json()).resolves.toEqual({
+          error: { message: "Unauthorized" },
+          ok: false,
+        });
+      } finally {
+        await handle.dispose();
+      }
+    },
+  );
+
+  it.each([
+    {
+      method: "GET" as const,
+      path: "/v1/commands?surface=tui",
+    },
+    {
+      body: {
+        argv: [],
+        clientInvocationId: "invoke_status",
+        commandId: "status",
+        path: ["status"],
+        raw: "/status",
+        rawArgs: "",
+        surface: "tui",
+      },
+      method: "POST" as const,
+      path: "/v1/commands",
+    },
+  ])(
+    "requires a client id for $method command requests",
+    async ({ body, method, path }) => {
+      const handle = createApp();
+      await handle.start();
+      try {
+        const response = await handle.app.request(path, {
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          headers: {
+            ...authHeaders(),
+            ...(body === undefined
+              ? {}
+              : { "content-type": "application/json" }),
+          },
+          method,
+        });
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toEqual({
+          error: { message: "clientId is required" },
+          ok: false,
+        });
+      } finally {
+        await handle.dispose();
+      }
+    },
+  );
+
+  it.each([
+    {
+      method: "GET" as const,
+      path: "/v1/commands?surface=tui",
+    },
+    {
+      body: {
+        argv: [],
+        clientInvocationId: "invoke_status",
+        commandId: "status",
+        path: ["status"],
+        raw: "/status",
+        rawArgs: "",
+        surface: "tui",
+      },
+      method: "POST" as const,
+      path: "/v1/commands",
+    },
+  ])(
+    "rejects unregistered web clients for $method command requests",
+    async ({ body, method, path }) => {
+      const handle = createApp();
+      await handle.start();
+      try {
+        const response = await handle.app.request(path, {
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          headers: {
+            ...authHeaders(),
+            ...(body === undefined
+              ? {}
+              : { "content-type": "application/json" }),
+            "x-ohbaby-client-id": "client_unknown",
+          },
+          method,
+        });
+
+        expect(response.status).toBe(409);
+        await expect(response.json()).resolves.toEqual({
+          error: { message: "client is not registered" },
+          ok: false,
+        });
+      } finally {
+        await handle.dispose();
+      }
+    },
+  );
+
+  it("executes slash commands through the client view coordinator", async () => {
+    const backend = new FakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request("/v1/commands", {
+        body: JSON.stringify({
+          argv: [],
+          clientInvocationId: "invoke_new",
+          commandId: "new",
+          path: ["new"],
+          raw: "/new",
+          rawArgs: "",
+          surface: "tui",
+        }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+          "x-ohbaby-client-id": "client_web",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(backend.executedCommands).toEqual([
+        {
+          argv: ["--no-reuse-empty-session"],
+          clientInvocationId: "invoke_new",
+          commandId: "new",
+          path: ["new"],
+          raw: "/new --no-reuse-empty-session",
+          rawArgs: "--no-reuse-empty-session",
+          surface: "tui",
+        },
+      ]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("rejects invalid slash command invocations", async () => {
+    const handle = createApp();
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+
+      const response = await handle.app.request("/v1/commands", {
+        body: JSON.stringify({ commandId: "status" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+          "x-ohbaby-client-id": "client_web",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: { message: "command invocation is invalid" },
+        ok: false,
+      });
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("rejects unsupported web slash commands before execution", async () => {
+    const backend = new FakeBackend();
+    backend.commandCatalog = {
+      commands: [
+        {
+          argumentMode: "argv",
+          category: "session",
+          description: "Browse sessions",
+          id: "sessions",
+          parentBehavior: "interaction",
+          path: ["sessions"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+      ],
+      version: "commands-v1",
+    };
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request("/v1/commands", {
+        body: JSON.stringify({
+          argv: [],
+          clientInvocationId: "invoke_sessions",
+          commandId: "sessions",
+          path: ["sessions"],
+          raw: "/sessions",
+          rawArgs: "",
+          surface: "tui",
+        }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+          "x-ohbaby-client-id": "client_web",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: { message: "command is not supported by web passthrough" },
+        ok: false,
+      });
+      expect(backend.executedCommands).toEqual([]);
     } finally {
       await handle.dispose();
     }

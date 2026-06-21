@@ -1,13 +1,4 @@
-import {
-  Bot,
-  Check,
-  ChevronDown,
-  LoaderCircle,
-  Send,
-  Shield,
-  Square,
-  User,
-} from "lucide-react";
+import { Bot, ChevronDown, Send, Square, User } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -17,6 +8,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { ChangeEvent, KeyboardEvent, ReactElement } from "react";
+import type { FocusEvent } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import type {
@@ -28,6 +20,7 @@ import type {
   UiPermissionRequest,
 } from "ohbaby-sdk";
 import type { OhbabyWebRuntime } from "../api/daemon/client.js";
+import type { CommandNotice } from "../api/daemon/wire.js";
 import { MarkdownBlock } from "./MarkdownBlock.js";
 import {
   selectViewModel,
@@ -72,18 +65,40 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
   const clearActionError = useCallback(() => {
     setActionError(null);
   }, []);
-  const showMain = !view.isEmpty;
+  const showMain = !view.isEmpty || view.commandNotices.length > 0;
 
   const runAction = useCallback(
-    async (action: () => Promise<void>): Promise<void> => {
+    async (action: () => Promise<void>): Promise<boolean> => {
       try {
         clearActionError();
         await action();
+        return true;
       } catch (error) {
         setActionError(error instanceof Error ? error.message : String(error));
+        return false;
       }
     },
     [clearActionError],
+  );
+
+  const submitText = useCallback(
+    (text: string): Promise<boolean> =>
+      runAction(() =>
+        text.startsWith("/")
+          ? runtime.client.executeSlashCommand({
+              ...(view.composer.activeSessionId === undefined
+                ? {}
+                : { sessionId: view.composer.activeSessionId }),
+              text,
+            })
+          : runtime.client.submitPrompt({
+              ...(view.composer.activeSessionId === undefined
+                ? {}
+                : { sessionId: view.composer.activeSessionId }),
+              text,
+            }),
+      ),
+    [runAction, runtime.client, view.composer.activeSessionId],
   );
 
   return (
@@ -113,16 +128,7 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
             onSetPermission={(input) => {
               void runAction(() => runtime.client.setPermission(input));
             }}
-            onSubmit={(text) => {
-              void runAction(() =>
-                runtime.client.submitPrompt({
-                  ...(view.composer.activeSessionId === undefined
-                    ? {}
-                    : { sessionId: view.composer.activeSessionId }),
-                  text,
-                }),
-              );
-            }}
+            onSubmit={submitText}
             onStop={() => {
               void runAction(() =>
                 view.composer.activeSessionId === undefined
@@ -146,16 +152,7 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
             onSetPermission={(input) => {
               void runAction(() => runtime.client.setPermission(input));
             }}
-            onSubmit={(text) => {
-              void runAction(() =>
-                runtime.client.submitPrompt({
-                  ...(view.composer.activeSessionId === undefined
-                    ? {}
-                    : { sessionId: view.composer.activeSessionId }),
-                  text,
-                }),
-              );
-            }}
+            onSubmit={submitText}
             status={view.header}
             view={view}
           />
@@ -183,7 +180,7 @@ function EmptyState(props: {
     readonly level?: UiPermissionLevel;
     readonly mode?: UiPermissionMode;
   }) => void;
-  readonly onSubmit: (text: string) => void;
+  readonly onSubmit: (text: string) => Promise<boolean>;
   readonly status: HeaderModel;
   readonly view: ViewModel;
 }): ReactElement {
@@ -294,9 +291,42 @@ function ConversationStream(props: { readonly view: ViewModel }): ReactElement {
         {messages.map((message) => (
           <MessageRow key={message.id} message={message} />
         ))}
+        <CommandNoticeList notices={props.view.commandNotices} />
         {props.view.composer.isRunning ? <ThinkingIndicator /> : null}
       </div>
     </section>
+  );
+}
+
+function CommandNoticeList(props: {
+  readonly notices: readonly CommandNotice[];
+}): ReactElement | null {
+  if (props.notices.length === 0) {
+    return null;
+  }
+  return (
+    <div className="ohb-command-notices">
+      {props.notices.map((notice) => (
+        <article
+          className={`ohb-command-notice ohb-command-${notice.kind}`}
+          key={notice.id}
+        >
+          <div className="ohb-command-label">
+            <span>{notice.kind}</span>
+            <span>
+              {notice.path.length > 0
+                ? `/${notice.path.join(" ")}`
+                : notice.commandId}
+            </span>
+          </div>
+          {notice.markdown ? (
+            <MarkdownBlock text={notice.markdown} />
+          ) : (
+            <pre>{notice.text ?? ""}</pre>
+          )}
+        </article>
+      ))}
+    </div>
   );
 }
 
@@ -382,6 +412,16 @@ function ToolPanel(props: {
 }
 
 function ThinkingIndicator(): ReactElement {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  useEffect(() => {
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1_000);
+    return (): void => {
+      window.clearInterval(timer);
+    };
+  }, []);
   return (
     <div className="ohb-thinking">
       <span aria-hidden="true">
@@ -390,6 +430,8 @@ function ThinkingIndicator(): ReactElement {
         <span />
       </span>
       <span>Thinking</span>
+      <span>· {String(elapsedSeconds)}s</span>
+      <span>· double click esc to interrupt</span>
     </div>
   );
 }
@@ -409,7 +451,6 @@ function PermissionModal(props: {
   return (
     <div className="ohb-permission-layer">
       <section className="ohb-permission-modal" role="dialog" aria-modal="true">
-        <Shield size={18} />
         <div className="ohb-permission-copy">
           <h2>{request.title}</h2>
           <p>{request.description}</p>
@@ -432,7 +473,6 @@ function PermissionModal(props: {
               }}
               type="button"
             >
-              {choice.intent === "allow" ? <Check size={15} /> : null}
               {choice.label}
             </button>
           ))}
@@ -449,21 +489,33 @@ function Composer(props: {
     readonly mode?: UiPermissionMode;
   }) => void;
   readonly onStop: () => void;
-  readonly onSubmit: (text: string) => void;
+  readonly onSubmit: (text: string) => Promise<boolean>;
   readonly view: ViewModel;
 }): ReactElement {
   const [draft, setDraft] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [permissionOpen, setPermissionOpen] = useState(false);
   const lastEscapeAt = useRef(0);
-  const canSend = props.view.composer.canSend && draft.trim().length > 0;
+  const policyRef = useRef<HTMLDivElement | null>(null);
+  const canSend =
+    props.view.composer.canSend && draft.trim().length > 0 && !isSubmitting;
 
   const send = useCallback(() => {
     const text = draft.trim();
     if (!text || !props.view.composer.canSend) {
       return;
     }
-    setDraft("");
-    props.onSubmit(text);
+    setIsSubmitting(true);
+    void props
+      .onSubmit(text)
+      .then((sent) => {
+        if (sent) {
+          setDraft("");
+        }
+      })
+      .finally(() => {
+        setIsSubmitting(false);
+      });
   }, [draft, props]);
 
   const cycleMode = useCallback(() => {
@@ -505,7 +557,7 @@ function Composer(props: {
       <div className="ohb-composer-input">
         <span className="ohb-prompt">&gt;</span>
         <textarea
-          disabled={props.view.composer.disabled}
+          disabled={props.view.composer.disabled || isSubmitting}
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
             setDraft(event.target.value);
           }}
@@ -549,17 +601,35 @@ function Composer(props: {
           <span />
           {props.view.composer.mode} mode
         </button>
-        <div className="ohb-policy-control">
+        <div
+          className="ohb-policy-control"
+          onBlur={(event: FocusEvent<HTMLDivElement>) => {
+            const nextTarget = event.relatedTarget;
+            if (
+              !(nextTarget instanceof Node) ||
+              !event.currentTarget.contains(nextTarget)
+            ) {
+              setPermissionOpen(false);
+            }
+          }}
+          ref={policyRef}
+        >
           <button
             className="ohb-policy-button"
             disabled={props.view.composer.disabled}
             onClick={() => {
               setPermissionOpen((open) => !open);
             }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setPermissionOpen(false);
+              }
+            }}
             title="Permission policy"
             type="button"
           >
-            <Shield size={13} />
+            <span className="ohb-policy-glyph" aria-hidden="true" />
             {props.view.composer.permissionLevel}
             <ChevronDown size={13} />
           </button>
@@ -590,10 +660,7 @@ function Composer(props: {
             </div>
           ) : null}
         </div>
-        <span className="ohb-composer-hint">
-          {props.view.composer.isRunning ? <LoaderCircle size={12} /> : null}
-          {props.view.composer.hint}
-        </span>
+        <span className="ohb-composer-hint">{props.view.composer.hint}</span>
       </div>
     </section>
   );

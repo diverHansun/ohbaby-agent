@@ -10,6 +10,7 @@ import type {
   UiSnapshot,
 } from "ohbaby-sdk";
 import type { ConnectionState, StoreSnapshot } from "../api/daemon/wire.js";
+import type { CommandNotice } from "../api/daemon/wire.js";
 
 export interface HeaderModel {
   readonly connectionKind:
@@ -38,6 +39,7 @@ export interface ComposerModel {
 
 export interface ViewModel {
   readonly activeSession: UiSession | null;
+  readonly commandNotices: readonly CommandNotice[];
   readonly composer: ComposerModel;
   readonly error: string | null;
   readonly header: HeaderModel;
@@ -70,6 +72,7 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
 
   return {
     activeSession,
+    commandNotices: snapshot.view.commandNotices,
     composer: {
       ...(activeRunId === undefined ? {} : { activeRunId }),
       ...(activeSessionId === undefined || activeSessionId === null
@@ -162,7 +165,7 @@ function selectComposerHint(
     return "reload after restarting serve";
   }
   return status.kind === "running" || status.kind === "waiting-for-permission"
-    ? "double esc to stop"
+    ? "double click esc to stop"
     : "enter to send";
 }
 

@@ -4,6 +4,9 @@ import type {
   UiPermissionMode,
   UiPermissionResponse,
   UiPermissionState,
+  UiSlashCommandCatalog,
+  UiSlashCommandInvocation,
+  UiSlashCommandOutput,
   UiSnapshot,
 } from "ohbaby-sdk";
 
@@ -31,8 +34,20 @@ export type ConnectionState =
   | "disconnected";
 
 export interface ViewState {
+  readonly commandNotices: readonly CommandNotice[];
   readonly lastAppliedSeqNum: number;
   readonly snapshot: UiSnapshot | null;
+}
+
+export interface CommandNotice {
+  readonly commandId: string;
+  readonly createdAt: string;
+  readonly id: string;
+  readonly kind: "error" | "running" | "success";
+  readonly markdown?: string;
+  readonly path: readonly string[];
+  readonly sessionId?: string;
+  readonly text?: string;
 }
 
 export interface StoreSnapshot {
@@ -58,6 +73,11 @@ export interface PromptAcceptedResponse {
 }
 
 export interface OkResponse {
+  readonly ok: true;
+}
+
+export interface CommandCatalogResponse {
+  readonly catalog: UiSlashCommandCatalog;
   readonly ok: true;
 }
 
@@ -94,6 +114,9 @@ export interface SetPermissionRequest {
   readonly level?: UiPermissionLevel;
   readonly mode?: UiPermissionMode;
 }
+
+export type ExecuteCommandRequest = UiSlashCommandInvocation;
+export type CommandOutput = UiSlashCommandOutput;
 
 export type PermissionResponseRequest =
   | UiPermissionResponse

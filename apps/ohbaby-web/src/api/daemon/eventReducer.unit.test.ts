@@ -166,8 +166,138 @@ describe("ohbaby-web eventReducer", () => {
     );
 
     expect(state).toEqual({
+      commandNotices: [],
       lastAppliedSeqNum: 1,
       snapshot: null,
     });
+  });
+
+  it("projects slash command lifecycle events into command notices", () => {
+    let state = replaceSnapshot(emptySnapshot(), 0);
+
+    state = reduceUiEvent(
+      state,
+      {
+        command: {
+          clientInvocationId: "invoke_status",
+          commandId: "status",
+          commandRunId: "command_1",
+          path: ["status"],
+          surface: "tui",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.started",
+      },
+      1,
+    );
+
+    expect(state.commandNotices).toMatchObject([
+      {
+        commandId: "status",
+        id: "command_1",
+        kind: "running",
+        path: ["status"],
+      },
+    ]);
+
+    state = reduceUiEvent(
+      state,
+      {
+        clientInvocationId: "invoke_status",
+        commandRunId: "command_1",
+        output: {
+          data: {
+            permission: { level: "default", mode: "auto" },
+            sessionId: "session_1",
+          },
+          kind: "data",
+          subject: "status",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.result.delivered",
+      },
+      2,
+    );
+
+    expect(state.commandNotices).toMatchObject([
+      {
+        commandId: "status",
+        id: "command_1",
+        kind: "success",
+        text: "status\nsession: session_1\npermission: auto · default",
+      },
+    ]);
+  });
+
+  it("projects slash command failures into command notices", () => {
+    const state = reduceUiEvent(
+      replaceSnapshot(emptySnapshot(), 0),
+      {
+        clientInvocationId: "invoke_bad",
+        commandRunId: "command_bad",
+        error: {
+          code: "COMMAND_NOT_FOUND",
+          message: "Unknown command",
+          recoverable: true,
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.failed",
+      },
+      1,
+    );
+
+    expect(state.commandNotices).toEqual([
+      {
+        commandId: "command_bad",
+        createdAt: timestamp,
+        id: "command_bad",
+        kind: "error",
+        path: [],
+        text: "Unknown command",
+      },
+    ]);
+  });
+
+  it("filters unsupported commands from help command notices", () => {
+    const state = reduceUiEvent(
+      replaceSnapshot(emptySnapshot(), 0),
+      {
+        clientInvocationId: "invoke_help",
+        commandRunId: "command_help",
+        output: {
+          data: {
+            commands: [
+              {
+                description: "Show backend status",
+                id: "status",
+                path: ["status"],
+              },
+              {
+                description: "Browse sessions",
+                id: "sessions",
+                path: ["sessions"],
+              },
+              {
+                description: "Compact current session",
+                id: "compact",
+                path: ["compact"],
+              },
+            ],
+          },
+          kind: "data",
+          subject: "help",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.result.delivered",
+      },
+      1,
+    );
+
+    expect(state.commandNotices).toMatchObject([
+      {
+        kind: "success",
+        text: "/status - Show backend status",
+      },
+    ]);
   });
 });

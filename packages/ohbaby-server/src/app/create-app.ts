@@ -6,6 +6,9 @@ import type {
   UiBackendClient,
   UiEvent,
   UiPermissionResponse,
+  UiSlashCommandCatalog,
+  UiSlashCommandInvocation,
+  UiSlashCommandSpec,
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
@@ -38,6 +41,14 @@ const CLIENT_ID_HEADER = "x-ohbaby-client-id";
 const DEFAULT_WEB_STARTUP_INTENT: DaemonStartupIntent = {
   startupSessionMode: { type: "fresh" },
 };
+
+const WEB_PASSTHROUGH_COMMAND_IDS = new Set([
+  "help",
+  "mcps",
+  "new",
+  "skills",
+  "status",
+]);
 
 interface WebAssetsOptions {
   readonly allowTokenInjection?: boolean;
@@ -137,6 +148,16 @@ function asNonEmptyString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function asStringArray(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const items = value.filter(
+    (item): item is string => typeof item === "string",
+  );
+  return items.length === value.length ? items : undefined;
+}
+
 function escapeInlineScriptJson(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
@@ -184,6 +205,93 @@ function permissionResponseFromBody(
       ? { remember: value.remember }
       : {}),
   };
+}
+
+function slashCommandInvocationFromBody(
+  value: Record<string, unknown>,
+): UiSlashCommandInvocation | undefined {
+  const clientInvocationId = asNonEmptyString(value.clientInvocationId);
+  const commandId = asNonEmptyString(value.commandId);
+  const path = asStringArray(value.path);
+  const raw = typeof value.raw === "string" ? value.raw : undefined;
+  const rawArgs = typeof value.rawArgs === "string" ? value.rawArgs : undefined;
+  const argv = asStringArray(value.argv);
+  const surface = asNonEmptyString(value.surface);
+  if (
+    clientInvocationId === undefined ||
+    commandId === undefined ||
+    path === undefined ||
+    raw === undefined ||
+    rawArgs === undefined ||
+    argv === undefined ||
+    surface === undefined
+  ) {
+    return undefined;
+  }
+  const body = typeof value.body === "string" ? value.body : undefined;
+  const sessionId = asNonEmptyString(value.sessionId);
+  const argumentMode =
+    value.argumentMode === "raw" ||
+    value.argumentMode === "argv" ||
+    value.argumentMode === "structured"
+      ? value.argumentMode
+      : undefined;
+  return {
+    argv,
+    commandId,
+    clientInvocationId,
+    path,
+    raw,
+    rawArgs,
+    surface,
+    ...(argumentMode === undefined ? {} : { argumentMode }),
+    ...(body === undefined ? {} : { body }),
+    ...(sessionId === undefined ? {} : { sessionId }),
+  };
+}
+
+function isWebPassthroughCommandSpec(command: UiSlashCommandSpec): boolean {
+  return (
+    WEB_PASSTHROUGH_COMMAND_IDS.has(command.id) &&
+    command.parentBehavior !== "interaction"
+  );
+}
+
+function filterWebPassthroughCommandCatalog(
+  catalog: UiSlashCommandCatalog,
+  surface: string,
+): UiSlashCommandCatalog {
+  return {
+    ...catalog,
+    commands: catalog.commands.filter(
+      (command) =>
+        command.surfaces.includes(surface) &&
+        isWebPassthroughCommandSpec(command),
+    ),
+  };
+}
+
+function isSamePath(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((segment, index) => segment === right[index])
+  );
+}
+
+function supportsWebPassthroughInvocation(
+  catalog: UiSlashCommandCatalog,
+  invocation: UiSlashCommandInvocation,
+): boolean {
+  return catalog.commands.some(
+    (command) =>
+      command.id === invocation.commandId &&
+      command.surfaces.includes(invocation.surface) &&
+      isSamePath(command.path, invocation.path) &&
+      isWebPassthroughCommandSpec(command),
+  );
 }
 
 function scheduleAfterResponse(
@@ -322,6 +430,24 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
             },
           },
           summary: "Subscribe to replayable event stream",
+        },
+      },
+      "/v1/commands": {
+        get: {
+          responses: {
+            "200": {
+              description: "Slash command catalog",
+            },
+          },
+          summary: "List slash commands for a browser client",
+        },
+        post: {
+          responses: {
+            "200": {
+              description: "Command invocation accepted",
+            },
+          },
+          summary: "Execute a slash command invocation",
         },
       },
       "/v1/permissions/{id}": {
@@ -609,6 +735,66 @@ class DaemonServerAppRuntime {
         context.req.raw.signal,
         context.req.header("last-event-id"),
       );
+    });
+
+    this.app.get("/v1/commands", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
+
+      const surface = asNonEmptyString(context.req.query("surface")) ?? "tui";
+      const catalog = filterWebPassthroughCommandCatalog(
+        await this.options.backend.listCommands({ surface }),
+        surface,
+      );
+      return context.json({ catalog, ok: true });
+    });
+
+    this.app.post("/v1/commands", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
+
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok) {
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      }
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      const invocation = slashCommandInvocationFromBody(body);
+      if (invocation === undefined) {
+        return context.json(webErrorBody("command invocation is invalid"), 400);
+      }
+      const catalog = await this.options.backend.listCommands({
+        surface: invocation.surface,
+      });
+      if (!supportsWebPassthroughInvocation(catalog, invocation)) {
+        return context.json(
+          webErrorBody("command is not supported by web passthrough"),
+          400,
+        );
+      }
+
+      await this.options.backend.executeCommand(
+        this.clientViews.prepareCommandInvocation(clientId, invocation),
+      );
+      return context.json({ ok: true });
     });
 
     this.app.post("/v1/prompts", async (context) => {

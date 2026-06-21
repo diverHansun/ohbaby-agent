@@ -1,4 +1,6 @@
 import type {
+  CommandCatalogResponse,
+  ExecuteCommandRequest,
   OhbabyBootstrapConfig,
   OkResponse,
   PermissionResponseRequest,
@@ -64,6 +66,17 @@ export class DaemonHttpClient {
 
   getSnapshot(): Promise<SnapshotResponse> {
     return this.request("/v1/snapshot");
+  }
+
+  listCommands(): Promise<CommandCatalogResponse> {
+    return this.request("/v1/commands?surface=tui");
+  }
+
+  executeCommand(input: ExecuteCommandRequest): Promise<OkResponse> {
+    return this.request("/v1/commands", {
+      body: input,
+      method: "POST",
+    });
   }
 
   submitPrompt(input: SubmitPromptRequest): Promise<PromptAcceptedResponse> {

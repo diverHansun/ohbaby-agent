@@ -12,9 +12,9 @@ web 端内部分三层，数据**单向流动**，依赖方向恒为 `ui → sto
 
 - **连接层 `api/daemon/`**（纯逻辑，无 UI）：对 daemon 讲 `/v1`。子组件：
   - `wire` —— `/v1` 线类型（由 OpenAPI 生成 / 对齐 sdk 类型）。
-  - `http` —— REST 命令封装（建连、发 prompt、审批、中断等）。
+  - `http` —— REST 命令封装（建连、发 prompt、审批、中断、commands passthrough 等）。
   - `events` —— SSE over fetch-stream，含 `Last-Event-ID` 续传与 `resync-required` 处理。
-  - `eventReducer` —— 纯函数 `(event, state) → state`：把 `UiEvent` 投影为 ViewState。
+  - `eventReducer` —— 纯函数 `(event, state) → state`：把 `UiEvent` 投影为 ViewState（含轻量 `CommandNotice`）。
   - `client` —— 门面，把上述四者组装成一个浏览器版 backend 客户端。
 - **状态层 `store/`**：持有投影后的 ViewState 与 ConnectionState，喂给 React（`useSyncExternalStore`）。
 - **视图层 `ui/`**：会话流、输入框、权限弹窗、状态条等组件。
@@ -56,6 +56,7 @@ apps/ohbaby-web/
       Composer.tsx             输入框 + 发/中断 + mode(auto/plan) + 权限策略(default/full-access)
       PermissionModal.tsx      权限模态（slide-up，队列驱动）
       StatusBar.tsx            连接态 / run 状态 / 上下文用量（无诊断行）
+      CommandNotice.tsx         slash 命令结果/错误的轻量投影（非完整命令面板）
 ```
 
 - **对外稳定面**：`client` 门面 + store hooks。
@@ -71,6 +72,7 @@ apps/ohbaby-web/
 - **放弃 SSR / 路由框架**：换取产物极小、同源伺服简单；代价是无服务端渲染（本地工具无所谓）。
 - **选 React（与 CLI 一致）而非更轻的 Preact**：换取团队熟悉度与生态；代价是运行时略大（本地工具可接受）。
 - **typed client 由 OpenAPI 生成而非手写**：换取契约单一来源、不漂移（落 ND4）；代价是多一道生成构建步骤（server 出 `openapi.json` → web prebuild 生成 `wire.ts`）。
+- **slash passthrough 不等于命令面板**：v0.1.6 只把以 `/` 开头的 composer 输入解析为 `UiSlashCommandInvocation` 并经 daemon 执行，结果以 `CommandNotice` 呈现。候选列表、Tab 补全、交互式 command panel 仍属 ND5，避免 UI 范围在收口阶段膨胀。
 - **store 用 `useSyncExternalStore` 手卷而非 Context**：换取高频 SSE 增量下的精准订阅、避免全量重渲；代价是要自己写极小的 subscribe/getSnapshot（约定俗成、量很小）。
 
 > 以上取舍都为后续维护者标注"为什么不能随意改"：尤其单向流 + 非乐观更新是 resync 正确性的结构前提，改动需回到本文与 dfd 重新评估。

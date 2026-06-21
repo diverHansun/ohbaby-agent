@@ -1,4 +1,10 @@
-import type { UiPermissionResponse } from "ohbaby-sdk";
+import {
+  parseSlashCommandInput,
+  resolveSlashCommand,
+  type UiPermissionResponse,
+  type UiSlashCommandCatalog,
+  type UiSlashCommandInvocation,
+} from "ohbaby-sdk";
 import { FetchDaemonEventStream } from "./events.js";
 import { createDaemonHttpClient, DaemonHttpClient } from "./http.js";
 import type {
@@ -12,6 +18,7 @@ import {
   createOhbabyWebStore,
   type OhbabyWebStore,
 } from "../../store/store.js";
+import { filterWebPassthroughCommandCatalog } from "./commands.js";
 
 interface BufferedEvent {
   readonly event: Extract<WebSseEvent, { type: "ui.event" }>["event"];
@@ -22,6 +29,10 @@ export interface OhbabyWebClient {
   abortSession(sessionId: string, runId?: string): Promise<void>;
   close(): Promise<void>;
   connect(): Promise<void>;
+  executeSlashCommand(input: {
+    readonly sessionId?: string;
+    readonly text: string;
+  }): Promise<void>;
   getSnapshot(): StoreSnapshot;
   respondPermission(
     requestId: string,
@@ -44,6 +55,7 @@ class BrowserDaemonClient implements OhbabyWebClient {
   private readonly http: DaemonHttpClient;
   private readonly store: OhbabyWebStore;
   private buffering = false;
+  private commandCatalogPromise: Promise<UiSlashCommandCatalog> | undefined;
   private connectPromise: Promise<void> | undefined;
   private connected = false;
   private resyncPromise: Promise<void> | undefined;
@@ -128,6 +140,44 @@ class BrowserDaemonClient implements OhbabyWebClient {
     await this.http.submitPrompt(input);
   }
 
+  async executeSlashCommand(input: {
+    readonly sessionId?: string;
+    readonly text: string;
+  }): Promise<void> {
+    const catalog = await this.listCommands();
+    const resolved = resolveSlashCommand(
+      catalog,
+      parseSlashCommandInput(input.text),
+      { surface: "tui" },
+    );
+    if (!resolved.ok) {
+      throw new Error(resolved.error.message);
+    }
+    await this.http.executeCommand({
+      argumentMode: resolved.command.argumentMode,
+      argv: resolved.argv,
+      body: resolved.body,
+      clientInvocationId: createClientInvocationId(),
+      commandId: resolved.command.id,
+      path: resolved.path,
+      raw: resolved.raw,
+      rawArgs: resolved.rawArgs,
+      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+      surface: "tui",
+    } satisfies UiSlashCommandInvocation);
+  }
+
+  private async listCommands(): Promise<UiSlashCommandCatalog> {
+    this.commandCatalogPromise ??= this.http
+      .listCommands()
+      .then((response) => filterWebPassthroughCommandCatalog(response.catalog))
+      .catch((error: unknown) => {
+        this.commandCatalogPromise = undefined;
+        throw error;
+      });
+    return this.commandCatalogPromise;
+  }
+
   async respondPermission(
     requestId: string,
     response: UiPermissionResponse,
@@ -209,6 +259,10 @@ class BrowserDaemonClient implements OhbabyWebClient {
     }
     return maxSeqNum;
   }
+}
+
+function createClientInvocationId(): string {
+  return globalThis.crypto.randomUUID();
 }
 
 export function createOhbabyWebRuntime(

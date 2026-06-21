@@ -10,6 +10,7 @@ function store(snapshot: UiSnapshot): StoreSnapshot {
     connectionState: "live",
     error: null,
     view: {
+      commandNotices: [],
       lastAppliedSeqNum: 10,
       snapshot,
     },
@@ -100,5 +101,31 @@ describe("ohbaby-web ui selectors", () => {
     };
 
     expect(messageText(message)).toBe("hello there");
+  });
+
+  it("passes command notices through to the view model", () => {
+    const snapshot = store(baseSnapshot());
+    const view = selectViewModel({
+      ...snapshot,
+      view: {
+        ...snapshot.view,
+        commandNotices: [
+          {
+            commandId: "status",
+            createdAt: timestamp,
+            id: "command_1",
+            kind: "success",
+            path: ["status"],
+            text: "status",
+          },
+        ],
+      },
+    });
+
+    expect(view.commandNotices).toHaveLength(1);
+    expect(view.commandNotices[0]).toMatchObject({
+      commandId: "status",
+      text: "status",
+    });
   });
 });

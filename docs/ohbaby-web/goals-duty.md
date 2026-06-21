@@ -35,6 +35,7 @@
 - **D3 会话交互 UI（v0.1.6 闭环）**：snapshot 首屏、流式消息、发 prompt、权限审批（准/拒，模态 slide-up）、中断 run，以及 composer 的 **mode 切换（auto/plan）** 与 **权限策略切换（default / full-access）**。视图层详细设计见 [`ui/`](./ui/README.md)。
 - **D4 引导接入**：从 daemon 注入的 `window.__OHBABY__` 读取 `token / clientId / baseUrl` 并附带到请求。
 - **D5 纯静态构建产物**：产出可被 daemon 伺服的 `dist`（HTML/JS/CSS/资源）。
+- **D6 最小 slash passthrough**：composer 中以 `/` 开头的输入走既有 `UiSlashCommand` 解析/执行链路，经 `/v1/commands` REST adapter 调用 daemon，并把 `command.*` 事件投影为轻量 `CommandNotice`。本职责只覆盖 web-safe allowlist（`/status`、`/help`、`/new`、`/mcps`、`/skills`）的执行与结果可见；任何 `parentBehavior: "interaction"` 命令必须被过滤/拒绝，不包含完整命令面板。
 
 ---
 
@@ -44,7 +45,7 @@
 - **ND2 不生成/存储/轮换 auth token**：由 daemon 负责；web 只读注入副本、仅存内存（依赖 S-C）。
 - **ND3 不重定义领域语义/业务规则**：会话真相在 `ohbaby-agent` backend；web 只投影 + adapter。
 - **ND4 不定义 `/v1` wire 契约**：契约真相在 server 的 OpenAPI（`/doc`）+ `ohbaby-sdk` 领域类型；web 消费（生成 typed client）。
-- **ND5 v0.1.6 不做**：slash 命令面板、模型切换、compact、多项目界面切换、interaction 请求——后续版本。
+- **ND5 v0.1.6 不做**：完整 slash 命令面板（候选列表、分组、Tab 补全、分页）、模型切换器、compact 交互面板、多项目界面切换、interaction 请求——后续版本。v0.1.6 只做 D6 的最小 slash passthrough。
 - **ND6 不做远程/多用户鉴权、不直连 LAN**：同源本地优先，延续 server 的 N4。
 - **ND7 不为想象中的 app 提前抽共享包**：`api/daemon` 内置于本包；保持干净 seam 即可，YAGNI。
 - **ND8 不管理 daemon 生命周期 / 不 auto-spawn**：假定用户显式 `ohbaby serve`（延续 ADR-001 G4 显式生命周期）。"打开 web" = 跑 `ohbaby serve` + 开浏览器，无隐藏 daemon。

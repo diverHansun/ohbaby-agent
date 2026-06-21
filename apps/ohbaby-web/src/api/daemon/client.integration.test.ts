@@ -129,6 +129,40 @@ describe("ohbaby-web daemon client", () => {
           Response.json({ ok: true, sessionId: "session_1" }, { status: 202 }),
         );
       }
+      if (url.endsWith("/v1/commands?surface=tui")) {
+        return Promise.resolve(
+          Response.json({
+            catalog: {
+              commands: [
+                {
+                  argumentMode: "argv",
+                  category: "system",
+                  description: "Show backend status",
+                  id: "status",
+                  path: ["status"],
+                  source: "builtin",
+                  surfaces: ["tui"],
+                },
+                {
+                  argumentMode: "argv",
+                  category: "session",
+                  description: "Browse sessions",
+                  id: "sessions",
+                  parentBehavior: "interaction",
+                  path: ["sessions"],
+                  source: "builtin",
+                  surfaces: ["tui"],
+                },
+              ],
+              version: "commands-v1",
+            },
+            ok: true,
+          }),
+        );
+      }
+      if (url.endsWith("/v1/commands")) {
+        return Promise.resolve(Response.json({ ok: true }));
+      }
       if (url.endsWith("/v1/permission")) {
         return Promise.resolve(
           Response.json({
@@ -184,6 +218,40 @@ describe("ohbaby-web daemon client", () => {
       method: "PATCH",
       url: "http://127.0.0.1:4096/v1/permission",
     });
+    await runtime.client.executeSlashCommand({
+      sessionId: "session_1",
+      text: "/status",
+    });
+    expect(requests.at(-2)).toMatchObject({
+      method: "GET",
+      url: "http://127.0.0.1:4096/v1/commands?surface=tui",
+    });
+    expect(requests.at(-1)).toMatchObject({
+      method: "POST",
+      url: "http://127.0.0.1:4096/v1/commands",
+    });
+    const commandBody = JSON.parse(requests.at(-1)?.body ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(commandBody).toMatchObject({
+      argv: [],
+      commandId: "status",
+      path: ["status"],
+      raw: "/status",
+      rawArgs: "",
+      sessionId: "session_1",
+      surface: "tui",
+    });
+    expect(commandBody.clientInvocationId).toEqual(expect.any(String));
+    const beforeUnsupported = requests.length;
+    await expect(
+      runtime.client.executeSlashCommand({
+        sessionId: "session_1",
+        text: "/sessions",
+      }),
+    ).rejects.toThrow('Unknown command "/sessions"');
+    expect(requests).toHaveLength(beforeUnsupported);
     sseController?.close();
     await runtime.client.close();
   });

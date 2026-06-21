@@ -1,8 +1,13 @@
 import type { UiEvent, UiMessage, UiSnapshot } from "ohbaby-sdk";
-import type { ViewState } from "./wire.js";
+import { isWebPassthroughCommandId } from "./commands.js";
+import type { CommandNotice, CommandOutput, ViewState } from "./wire.js";
+
+const COMMAND_NOTICE_LIMIT = 8;
+const COMMAND_NOTICE_TEXT_LIMIT = 1_200;
 
 export function createInitialViewState(): ViewState {
   return {
+    commandNotices: [],
     lastAppliedSeqNum: 0,
     snapshot: null,
   };
@@ -13,6 +18,7 @@ export function replaceSnapshot(
   seqNum: number,
 ): ViewState {
   return {
+    commandNotices: [],
     lastAppliedSeqNum: seqNum,
     snapshot,
   };
@@ -29,6 +35,14 @@ export function reduceUiEvent(
   if (event.type === "snapshot.replaced") {
     return replaceSnapshot(event.snapshot, seqNum);
   }
+  const commandNotices = applyCommandEvent(state.commandNotices, event);
+  if (commandNotices !== state.commandNotices) {
+    return {
+      ...state,
+      commandNotices,
+      lastAppliedSeqNum: seqNum,
+    };
+  }
   const snapshot = state.snapshot;
   if (!snapshot) {
     return {
@@ -37,9 +51,204 @@ export function reduceUiEvent(
     };
   }
   return {
+    commandNotices: state.commandNotices,
     lastAppliedSeqNum: seqNum,
     snapshot: applyEventToSnapshot(snapshot, event),
   };
+}
+
+function applyCommandEvent(
+  notices: readonly CommandNotice[],
+  event: UiEvent,
+): readonly CommandNotice[] {
+  switch (event.type) {
+    case "command.started":
+      return upsertCommandNotice(notices, {
+        commandId: event.command.commandId,
+        createdAt: new Date(event.timestamp).toISOString(),
+        id: event.command.commandRunId,
+        kind: "running",
+        path: event.command.path,
+        ...(event.command.sessionId === undefined
+          ? {}
+          : { sessionId: event.command.sessionId }),
+        text: `/${event.command.path.join(" ")} running`,
+      });
+    case "command.result.delivered": {
+      const existing = notices.find(
+        (notice) => notice.id === event.commandRunId,
+      );
+      const content = commandOutputToNoticeContent(event.output);
+      return upsertCommandNotice(notices, {
+        commandId: existing?.commandId ?? event.commandRunId,
+        createdAt:
+          existing?.createdAt ?? new Date(event.timestamp).toISOString(),
+        id: event.commandRunId,
+        kind: "success",
+        path: existing?.path ?? [],
+        ...(existing?.sessionId === undefined
+          ? {}
+          : { sessionId: existing.sessionId }),
+        ...content,
+      });
+    }
+    case "command.failed": {
+      const existing = notices.find(
+        (notice) => notice.id === event.commandRunId,
+      );
+      return upsertCommandNotice(notices, {
+        commandId: existing?.commandId ?? event.commandRunId,
+        createdAt:
+          existing?.createdAt ?? new Date(event.timestamp).toISOString(),
+        id: event.commandRunId,
+        kind: "error",
+        path: existing?.path ?? [],
+        ...(existing?.sessionId === undefined
+          ? {}
+          : { sessionId: existing.sessionId }),
+        text: event.error.message,
+      });
+    }
+    default:
+      return notices;
+  }
+}
+
+function upsertCommandNotice(
+  notices: readonly CommandNotice[],
+  notice: CommandNotice,
+): readonly CommandNotice[] {
+  const withoutExisting = notices.filter(
+    (candidate) => candidate.id !== notice.id,
+  );
+  return [...withoutExisting, notice].slice(-COMMAND_NOTICE_LIMIT);
+}
+
+function commandOutputToNoticeContent(
+  output: Extract<
+    UiEvent,
+    { readonly type: "command.result.delivered" }
+  >["output"],
+): Pick<CommandNotice, "markdown" | "text"> {
+  if (output === undefined) {
+    return { text: "Command completed" };
+  }
+  switch (output.kind) {
+    case "markdown":
+      return { markdown: truncateCommandOutput(output.markdown) };
+    case "text":
+      return { text: truncateCommandOutput(output.text) };
+    case "data":
+      return { text: truncateCommandOutput(formatDataCommandOutput(output)) };
+  }
+}
+
+function formatDataCommandOutput(
+  output: Extract<CommandOutput, { readonly kind: "data" }>,
+): string {
+  switch (output.subject) {
+    case "help":
+      return formatHelpOutput(output.data);
+    case "session.created":
+      return formatSessionCreatedOutput(output.data);
+    case "session.current":
+      return formatKeyValueOutput("session", output.data.sessionId);
+    case "status":
+      return formatStatusOutput(output.data);
+    default:
+      return JSON.stringify(output.data, null, 2);
+  }
+}
+
+function formatHelpOutput(data: Record<string, unknown>): string {
+  const commands = asUnknownArray(data.commands);
+  if (commands.length === 0) {
+    const categories = asUnknownArray(data.categories);
+    const lines = categories.flatMap((category) =>
+      isRecord(category) ? asUnknownArray(category.commands) : [],
+    );
+    return formatCommandList(lines);
+  }
+  return formatCommandList(commands);
+}
+
+function formatCommandList(commands: readonly unknown[]): string {
+  const lines = commands
+    .map((command) => {
+      if (!isRecord(command)) {
+        return "";
+      }
+      const id =
+        typeof command.id === "string"
+          ? command.id
+          : typeof command.commandId === "string"
+            ? command.commandId
+            : undefined;
+      if (id && !isWebPassthroughCommandId(id)) {
+        return "";
+      }
+      const path = asStringArray(command.path);
+      const description =
+        typeof command.description === "string" ? command.description : "";
+      const label = path.length > 0 ? `/${path.join(" ")}` : "/";
+      return `${label}${description ? ` - ${description}` : ""}`;
+    })
+    .filter(Boolean);
+  return lines.length > 0 ? lines.join("\n") : "commands: none";
+}
+
+function formatSessionCreatedOutput(data: Record<string, unknown>): string {
+  const session = isRecord(data.session) ? data.session : undefined;
+  const label =
+    (session && typeof session.title === "string"
+      ? session.title
+      : undefined) ??
+    (session && typeof session.id === "string" ? session.id : undefined);
+  return label ? `new session: ${label}` : JSON.stringify(data, null, 2);
+}
+
+function formatStatusOutput(data: Record<string, unknown>): string {
+  const permission = isRecord(data.permission) ? data.permission : undefined;
+  const sessionId = data.sessionId;
+  const lines = ["status"];
+  if (typeof sessionId === "string") {
+    lines.push(`session: ${sessionId}`);
+  }
+  if (permission) {
+    const mode = typeof permission.mode === "string" ? permission.mode : "auto";
+    const level =
+      typeof permission.level === "string" ? permission.level : "default";
+    lines.push(`permission: ${mode} · ${level}`);
+  }
+  return lines.length > 1 ? lines.join("\n") : JSON.stringify(data, null, 2);
+}
+
+function formatKeyValueOutput(label: string, value: unknown): string {
+  return typeof value === "string"
+    ? `${label}: ${value}`
+    : JSON.stringify(value, null, 2);
+}
+
+function truncateCommandOutput(value: string): string {
+  const normalized = value.trim();
+  if (normalized.length <= COMMAND_NOTICE_TEXT_LIMIT) {
+    return normalized;
+  }
+  return `${normalized.slice(0, COMMAND_NOTICE_TEXT_LIMIT - 3)}...`;
+}
+
+function asStringArray(value: unknown): readonly string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function asUnknownArray(value: unknown): readonly unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function applyEventToSnapshot(
