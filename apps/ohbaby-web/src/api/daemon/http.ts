@@ -44,7 +44,7 @@ export class DaemonHttpClient {
   constructor(options: DaemonHttpClientOptions) {
     this.baseUrl = options.baseUrl;
     this.clientId = options.clientId;
-    this.fetchImpl = options.fetch ?? globalThis.fetch;
+    this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.token = options.token;
   }
 

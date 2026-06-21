@@ -86,6 +86,9 @@ class BrowserDaemonClient implements OhbabyWebClient {
       await this.events.start({
         onConnectionState: (state) => {
           this.store.setConnectionState(state);
+          if (state === "live") {
+            this.store.setError(null);
+          }
         },
         onError: (error) => {
           this.store.setError(error.message);

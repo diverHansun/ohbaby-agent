@@ -188,6 +188,86 @@ describe("ohbaby-web daemon client", () => {
     await runtime.client.close();
   });
 
+  it("binds the native browser fetch implementation when no custom fetch is provided", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: string[] = [];
+    const nativeLikeFetch = function (
+      this: typeof globalThis,
+      input: RequestInfo | URL,
+    ): Promise<Response> {
+      if (this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      const url = urlFromRequestInput(input);
+      calls.push(url);
+      if (url.endsWith("/v1/clients")) {
+        return Promise.resolve(
+          Response.json({ clientId: "client_web", ok: true }),
+        );
+      }
+      if (url.endsWith("/v1/events")) {
+        return Promise.resolve(
+          new Response(
+            createSseStream((controller) => {
+              controller.enqueue(
+                sseFrame({ clientId: "client_web", type: "hello" }),
+              );
+              controller.close();
+            }),
+            { headers: { "content-type": "text/event-stream" } },
+          ),
+        );
+      }
+      if (url.endsWith("/v1/snapshot")) {
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            seqNum: 0,
+            snapshot: {
+              activeSessionId: null,
+              permission: {
+                level: "default",
+                mode: "auto",
+                sessionRules: [],
+              },
+              permissions: [],
+              runs: [],
+              sessions: [],
+              status: { kind: "idle" },
+            },
+          }),
+        );
+      }
+      return Promise.resolve(
+        Response.json({ error: { message: "not found" } }, { status: 404 }),
+      );
+    };
+
+    try {
+      Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        value: nativeLikeFetch,
+      });
+
+      const runtime = createOhbabyWebRuntime({
+        baseUrl: "http://127.0.0.1:4096",
+        clientId: "client_web",
+        token: "token_1",
+      });
+      await runtime.ready;
+      await runtime.client.close();
+
+      expect(calls).toContain("http://127.0.0.1:4096/v1/clients");
+      expect(calls).toContain("http://127.0.0.1:4096/v1/events");
+      expect(calls).toContain("http://127.0.0.1:4096/v1/snapshot");
+    } finally {
+      Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        value: originalFetch,
+      });
+    }
+  });
+
   it("does not advance Last-Event-ID before resync snapshot succeeds", async () => {
     const eventRequestHeaders: Headers[] = [];
     let firstSseController:
@@ -280,6 +360,74 @@ describe("ohbaby-web daemon client", () => {
     expect(eventRequestHeaders[1]?.get("last-event-id")).toBeNull();
     firstSseController?.close();
     secondSseController?.close();
+    await runtime.client.close();
+  });
+
+  it("clears transient stream errors after the SSE connection returns live", async () => {
+    const fetchImpl: typeof fetch = (input) => {
+      const url = urlFromRequestInput(input);
+      if (url.endsWith("/v1/clients")) {
+        return Promise.resolve(
+          Response.json({ clientId: "client_web", ok: true }),
+        );
+      }
+      if (url.endsWith("/v1/events")) {
+        return Promise.resolve(
+          new Response(
+            createSseStream((controller) => {
+              controller.enqueue(
+                sseFrame({ message: "temporary warning", type: "error" }),
+              );
+              controller.enqueue(
+                sseFrame({ clientId: "client_web", type: "hello" }),
+              );
+              controller.close();
+            }),
+            {
+              headers: { "content-type": "text/event-stream" },
+            },
+          ),
+        );
+      }
+      if (url.endsWith("/v1/snapshot")) {
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            seqNum: 0,
+            snapshot: {
+              activeSessionId: null,
+              permission: {
+                level: "default",
+                mode: "auto",
+                sessionRules: [],
+              },
+              permissions: [],
+              runs: [],
+              sessions: [],
+              status: { kind: "idle" },
+            },
+          }),
+        );
+      }
+      return Promise.resolve(
+        Response.json({ error: { message: "not found" } }, { status: 404 }),
+      );
+    };
+
+    const runtime = createOhbabyWebRuntime(
+      {
+        baseUrl: "http://127.0.0.1:4096",
+        clientId: "client_web",
+        token: "token_1",
+      },
+      { fetch: fetchImpl },
+    );
+    await runtime.ready;
+
+    expect(runtime.store.getSnapshot()).toMatchObject({
+      connectionState: "live",
+      error: null,
+    });
     await runtime.client.close();
   });
 });

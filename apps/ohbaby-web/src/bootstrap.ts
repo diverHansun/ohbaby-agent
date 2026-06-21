@@ -3,6 +3,8 @@ import {
   type OhbabyWebRuntime,
 } from "./api/daemon/client.js";
 import type { OhbabyBootstrapConfig } from "./api/daemon/wire.js";
+import { mountBootstrapError, mountOhbabyWebApp } from "./ui/App.js";
+import "./ui/styles.css";
 
 declare global {
   interface Window {
@@ -22,16 +24,22 @@ function readBootstrapConfig(): OhbabyBootstrapConfig {
   return config;
 }
 
-const runtime = createOhbabyWebRuntime(readBootstrapConfig());
-window.__OHBABY_WEB__ = runtime;
-runtime.ready
-  .then(() => {
-    window.dispatchEvent(
-      new CustomEvent("ohbaby:web-ready", { detail: runtime }),
-    );
-  })
-  .catch((error: unknown) => {
-    window.dispatchEvent(
-      new CustomEvent("ohbaby:web-error", { detail: error }),
-    );
-  });
+try {
+  const runtime = createOhbabyWebRuntime(readBootstrapConfig());
+  window.__OHBABY_WEB__ = runtime;
+  mountOhbabyWebApp(runtime);
+  runtime.ready
+    .then(() => {
+      window.dispatchEvent(
+        new CustomEvent("ohbaby:web-ready", { detail: runtime }),
+      );
+    })
+    .catch((error: unknown) => {
+      window.dispatchEvent(
+        new CustomEvent("ohbaby:web-error", { detail: error }),
+      );
+    });
+} catch (error) {
+  mountBootstrapError(error);
+  window.dispatchEvent(new CustomEvent("ohbaby:web-error", { detail: error }));
+}

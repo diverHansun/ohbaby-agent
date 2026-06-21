@@ -10,9 +10,17 @@
     "clean": "rimraf dist coverage"
   },
   "dependencies": {
-    "ohbaby-sdk": "workspace:*"
+    "dompurify": "^3.2.3",
+    "lucide-react": "^0.468.0",
+    "marked": "^15.0.3",
+    "ohbaby-sdk": "workspace:*",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
   },
   "devDependencies": {
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
     "ohbaby-server": "workspace:*",
     "vite": "^5.4.21"
   }
