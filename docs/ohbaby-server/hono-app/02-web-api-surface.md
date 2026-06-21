@@ -91,6 +91,18 @@
 
 ---
 
+## 7. 下游消费者指针：ohbaby-web 的依赖（S-A/S-B/S-C）
+
+> v0.1.6 引入的 web 前端模块设计见 [`../../ohbaby-web/`](../../ohbaby-web/README.md)。其设计对本 web surface 提出三项具体依赖，记此避免暗坑（真正实现仍在本包本期/后续）：
+
+- **S-A**：`GET /v1/snapshot` 须在响应中携带它反映的 **seqNum 基线**（`UiSnapshot` 本身无 seq 字段 → 需包成 `{ snapshot, seqNum }` 之类）。web 据此做"SSE 先开 + 只应用 seq>基线的缓冲事件"，杜绝首屏漏拍/重复。
+- **S-B**：新增 **webAssets 静态路由**伺服 `apps/ohbaby-web/dist`（同源托管，参考 kimi `routes/webAssets.ts`；含路径穿越防护）。归属：本包新 Duty（CLI 只把 dist 路径喂给 server）。
+- **S-C**：向伺服的 `index.html` 注入 `window.__OHBABY__`{token, clientId, baseUrl}，使浏览器免手填 token。归属：本包新 Duty。
+
+> S-B/S-C 是"daemon 同源托管"决策的直接落点；它们在原 delta 清单（00 §2）中未列，属本指针新增。多项目 scope 依赖见 [`04`](./04-multi-project-runtime.md) 末的 S-D 指针。
+
+---
+
 ## 自检
 
 - 每个 REST 端点都对应一个既有 backend 能力？✅ §2。
