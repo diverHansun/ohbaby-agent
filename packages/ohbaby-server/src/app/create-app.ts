@@ -40,6 +40,7 @@ const DEFAULT_WEB_STARTUP_INTENT: DaemonStartupIntent = {
 };
 
 interface WebAssetsOptions {
+  readonly allowTokenInjection?: boolean;
   readonly baseUrl?: string;
   readonly directory: string;
 }
@@ -390,6 +391,7 @@ class DaemonServerAppRuntime {
     number,
     Map<string, UiEvent>
   >();
+  private readonly registeredWebClientIds = new Set<string>();
   private started = false;
   private unsubscribe: UiUnsubscribe | undefined;
 
@@ -443,6 +445,7 @@ class DaemonServerAppRuntime {
     this.disconnectCleanupTimers.clear();
     this.expiredClientIds.clear();
     this.knownClientIds.clear();
+    this.registeredWebClientIds.clear();
     this.clientViews.resetRuntimeState();
     this.replayEventsBySeqNum.clear();
     this.started = false;
@@ -549,6 +552,7 @@ class DaemonServerAppRuntime {
       const snapshot = await this.options.backend.getSnapshot();
       this.clientViews.initializeClient(clientId, snapshot, startupIntent);
       this.knownClientIds.add(clientId);
+      this.registeredWebClientIds.add(clientId);
       this.cancelClientRoutingCleanup(clientId);
 
       return context.json({ clientId, ok: true });
@@ -562,11 +566,15 @@ class DaemonServerAppRuntime {
       if (!clientId) {
         return context.json(webErrorBody("clientId is required"), 400);
       }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
 
+      const seqNum = this.eventBus.latestSeqNum;
       const snapshot = await this.options.backend.getSnapshot();
       return context.json({
         ok: true,
-        seqNum: this.eventBus.latestSeqNum,
+        seqNum,
         snapshot: permissionRouterSnapshotForClient(
           this.permissionRouter,
           this.clientViews.projectSnapshot(clientId, snapshot),
@@ -583,6 +591,9 @@ class DaemonServerAppRuntime {
       if (!clientId) {
         return context.json(webErrorBody("clientId is required"), 400);
       }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
       return this.createSseResponse(
         clientId,
         context.req.raw.signal,
@@ -597,6 +608,9 @@ class DaemonServerAppRuntime {
       const clientId = this.clientIdFromRequest(context);
       if (!clientId) {
         return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
       }
 
       const parsed = await readJsonWithLimit(context.req.raw);
@@ -628,7 +642,12 @@ class DaemonServerAppRuntime {
             : { sessionId: prepared.sessionId }),
           text,
         })
-        .catch(() => undefined);
+        .catch((error: unknown) => {
+          this.writeErrorToClient(
+            clientId,
+            error instanceof Error ? error.message : String(error),
+          );
+        });
 
       return context.json(
         {
@@ -648,6 +667,9 @@ class DaemonServerAppRuntime {
       const clientId = this.clientIdFromRequest(context);
       if (!clientId) {
         return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
       }
       const requestId = context.req.param("id");
       if (!this.permissionRouter.canRespondPermission(requestId, clientId)) {
@@ -678,6 +700,13 @@ class DaemonServerAppRuntime {
       if (!this.isAuthorized(context.req.header("authorization"))) {
         return context.json(webErrorBody("Unauthorized"), 401);
       }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
       const parsed = await readJsonWithLimit(context.req.raw);
       if (!parsed.ok) {
         return context.json(
@@ -686,9 +715,13 @@ class DaemonServerAppRuntime {
         );
       }
       const body = isRecord(parsed.value) ? parsed.value : {};
-      const runId =
-        asNonEmptyString(body.runId) ??
-        (await this.runningRunIdForSession(context.req.param("id")));
+      const runId = await this.runIdForAbort(
+        context.req.param("id"),
+        asNonEmptyString(body.runId),
+      );
+      if (runId === undefined) {
+        return context.json(webErrorBody("No running run for session"), 404);
+      }
       await this.options.backend.abortRun(runId);
       return context.json({ ok: true });
     });
@@ -699,6 +732,10 @@ class DaemonServerAppRuntime {
 
   private isAuthorized(authorization: string | undefined): boolean {
     return isAuthorized(authorization, this.authToken);
+  }
+
+  private isRegisteredWebClient(clientId: string): boolean {
+    return this.registeredWebClientIds.has(clientId);
   }
 
   private clientIdFromRequest(context: {
@@ -713,10 +750,19 @@ class DaemonServerAppRuntime {
     );
   }
 
-  private async runningRunIdForSession(
+  private async runIdForAbort(
     sessionId: string,
+    requestedRunId: string | undefined,
   ): Promise<string | undefined> {
     const snapshot = await this.options.backend.getSnapshot();
+    if (requestedRunId !== undefined) {
+      const requestedRun = snapshot.runs.find(
+        (candidate) => candidate.id === requestedRunId,
+      );
+      return requestedRun?.sessionId === sessionId
+        ? requestedRun.id
+        : undefined;
+    }
     const run = snapshot.runs.find((candidate) => {
       if (candidate.sessionId !== sessionId) {
         return false;
@@ -755,6 +801,11 @@ class DaemonServerAppRuntime {
     const webAssets = this.options.webAssets;
     if (!webAssets) {
       return new Response("Not Found", { status: 404 });
+    }
+    if (webAssets.allowTokenInjection === false) {
+      return new Response("Web assets require a loopback host", {
+        status: 403,
+      });
     }
 
     const pathname = new URL(context.req.raw.url).pathname;
@@ -914,6 +965,7 @@ class DaemonServerAppRuntime {
       this.disconnectCleanupTimers.delete(clientId);
       this.permissionRouter.disconnectClient(clientId);
       this.clientViews.disconnectClient(clientId);
+      this.knownClientIds.delete(clientId);
       this.expiredClientIds.add(clientId);
     }, this.clientDisconnectRetentionMs);
     this.disconnectCleanupTimers.set(clientId, timer);
@@ -1013,6 +1065,14 @@ class DaemonServerAppRuntime {
       ?.get(client.clientId);
     if (routed) {
       client.write({ event: routed, type: "ui.event" }, envelope.seqNum);
+    }
+  }
+
+  private writeErrorToClient(clientId: string, message: string): void {
+    for (const client of Array.from(this.clients)) {
+      if (client.clientId === clientId) {
+        client.write({ message, type: "error" });
+      }
     }
   }
 

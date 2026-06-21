@@ -34,6 +34,19 @@ function emptySnapshot(): UiSnapshot {
   };
 }
 
+function sessionUpdated(): Parameters<UiEventHandler>[0] {
+  return {
+    session: {
+      createdAt: timestamp,
+      id: "session_1",
+      messages: [],
+      title: "Session",
+      updatedAt: timestamp,
+    },
+    type: "session.updated",
+  };
+}
+
 function compactUsage(): UiCompactSessionUsage {
   return {
     contextLimit: 100,
@@ -90,6 +103,8 @@ class FakeBackend implements UiBackendClient {
     readonly text: string;
     readonly options?: SubmitPromptOptions;
   }[] = [];
+  onGetSnapshot: (() => Promise<void> | void) | undefined;
+  submitError: Error | undefined;
 
   constructor(private readonly snapshot: UiSnapshot = emptySnapshot()) {}
 
@@ -99,8 +114,9 @@ class FakeBackend implements UiBackendClient {
     }
   }
 
-  getSnapshot(): Promise<UiSnapshot> {
-    return Promise.resolve(this.snapshot);
+  async getSnapshot(): Promise<UiSnapshot> {
+    await this.onGetSnapshot?.();
+    return this.snapshot;
   }
 
   getContextWindowUsage(): Promise<null> {
@@ -120,6 +136,9 @@ class FakeBackend implements UiBackendClient {
 
   submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void> {
     this.submitted.push({ text, ...(options ? { options } : {}) });
+    if (this.submitError) {
+      return Promise.reject(this.submitError);
+    }
     return Promise.resolve();
   }
 
@@ -208,6 +227,33 @@ async function readSseData(response: Response): Promise<unknown> {
       throw new Error("SSE stream ended before an event arrived");
     }
     buffer += decoder.decode(chunk.value, { stream: true });
+  }
+}
+
+async function readNextSseData(input: {
+  readonly buffer: { value: string };
+  readonly reader: ReadableStreamDefaultReader<Uint8Array>;
+}): Promise<unknown> {
+  const decoder = new TextDecoder();
+  for (;;) {
+    const boundary = input.buffer.value.indexOf("\n\n");
+    if (boundary >= 0) {
+      const frame = input.buffer.value.slice(0, boundary);
+      input.buffer.value = input.buffer.value.slice(boundary + 2);
+      const data = frame
+        .split("\n")
+        .find((line) => line.startsWith("data: "))
+        ?.slice("data: ".length);
+      if (!data) {
+        throw new Error(`SSE frame missing data: ${frame}`);
+      }
+      return JSON.parse(data) as unknown;
+    }
+    const chunk = await input.reader.read();
+    if (chunk.done) {
+      throw new Error("SSE stream ended before an event arrived");
+    }
+    input.buffer.value += decoder.decode(chunk.value, { stream: true });
   }
 }
 
@@ -427,10 +473,75 @@ describe("createDaemonServerApp", () => {
     }
   });
 
+  it("rejects unregistered web clients before exposing a snapshot", async () => {
+    const handle = createApp();
+    await handle.start();
+    try {
+      const response = await handle.app.request("/v1/snapshot", {
+        headers: {
+          ...authHeaders(),
+          "x-ohbaby-client-id": "client_unknown",
+        },
+      });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error: { message: "client is not registered" },
+        ok: false,
+      });
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("uses the pre-snapshot event sequence as the web snapshot baseline", async () => {
+    const backend = new FakeBackend(emptySnapshot());
+    let getSnapshotCalls = 0;
+    backend.onGetSnapshot = (): void => {
+      getSnapshotCalls += 1;
+      if (getSnapshotCalls === 2) {
+        backend.emit(sessionUpdated());
+      }
+    };
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request("/v1/snapshot", {
+        headers: {
+          ...authHeaders(),
+          "x-ohbaby-client-id": "client_web",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        seqNum: 0,
+      });
+    } finally {
+      await handle.dispose();
+    }
+  });
+
   it("serves the web SSE hello event", async () => {
     const handle = createApp();
     await handle.start();
     try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
       const response = await handle.app.request("/v1/events", {
         headers: {
           ...authHeaders(),
@@ -490,6 +601,92 @@ describe("createDaemonServerApp", () => {
     }
   });
 
+  it("surfaces asynchronous web prompt failures to the client event stream", async () => {
+    const backend = new FakeBackend();
+    backend.submitError = new Error("submit failed");
+    const handle = createApp(backend, {
+      createSessionId: () => "session_generated",
+    });
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const eventsResponse = await handle.app.request("/v1/events", {
+        headers: {
+          ...authHeaders(),
+          "x-ohbaby-client-id": "client_web",
+        },
+      });
+      const reader = eventsResponse.body?.getReader();
+      if (!reader) {
+        throw new Error("missing event stream");
+      }
+      const buffer = { value: "" };
+      await expect(readNextSseData({ buffer, reader })).resolves.toEqual({
+        clientId: "client_web",
+        type: "hello",
+      });
+
+      const response = await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({ text: "hello" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+          "x-ohbaby-client-id": "client_web",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(202);
+      await expect(readNextSseData({ buffer, reader })).resolves.toEqual({
+        message: "submit failed",
+        type: "error",
+      });
+      await reader.cancel();
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("does not abort a session when no run belongs to it", async () => {
+    const backend = new FakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request(
+        "/v1/sessions/session_1/abort",
+        {
+          body: JSON.stringify({}),
+          headers: {
+            ...authHeaders(),
+            "content-type": "application/json",
+            "x-ohbaby-client-id": "client_web",
+          },
+          method: "POST",
+        },
+      );
+
+      expect(response.status).toBe(404);
+      expect(backend.abortedRunIds).toEqual([]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
   it("serves web assets with injected bootstrap config", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-web-assets-"));
     await writeFile(
@@ -511,6 +708,29 @@ describe("createDaemonServerApp", () => {
       expect(html).toContain("window.__OHBABY__=");
       expect(html).toContain('"token":"token_1"');
       expect(html).toContain('"startupSessionMode":{"type":"fresh"}');
+    } finally {
+      await handle.dispose();
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("refuses to inject web bootstrap tokens when disabled", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-web-assets-"));
+    await writeFile(
+      join(tempDir, "index.html"),
+      "<!doctype html><html><head></head><body></body></html>",
+      "utf8",
+    );
+    const handle = createApp(new FakeBackend(), {
+      webAssets: { allowTokenInjection: false, directory: tempDir },
+    });
+    await handle.start();
+    try {
+      const response = await handle.app.request("/", {
+        headers: { accept: "text/html" },
+      });
+
+      expect(response.status).toBe(403);
     } finally {
       await handle.dispose();
       await rm(tempDir, { force: true, recursive: true });

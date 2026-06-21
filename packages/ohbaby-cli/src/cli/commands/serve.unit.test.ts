@@ -137,6 +137,26 @@ describe("createServeCommand", () => {
     });
   });
 
+  it("rejects web assets on non-loopback hosts", async () => {
+    const { runtime, startDaemonServer } = createRuntime();
+
+    await expect(
+      runServe(
+        [
+          "serve",
+          "--host",
+          "0.0.0.0",
+          "--web-assets-dir",
+          "apps/ohbaby-web/dist",
+        ],
+        runtime,
+      ),
+    ).rejects.toThrow(
+      "--web-assets-dir can only be used with a loopback --host",
+    );
+    expect(startDaemonServer).not.toHaveBeenCalled();
+  });
+
   it("prints daemon status from the state file", async () => {
     const { readDaemonStatus, runtime, stdout } = createRuntime();
 

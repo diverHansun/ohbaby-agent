@@ -42,6 +42,7 @@ class BrowserDaemonClient implements OhbabyWebClient {
   private readonly http: DaemonHttpClient;
   private readonly store: OhbabyWebStore;
   private buffering = false;
+  private connectPromise: Promise<void> | undefined;
   private connected = false;
   private resyncPromise: Promise<void> | undefined;
   private readonly bufferedEvents: BufferedEvent[] = [];
@@ -59,9 +60,19 @@ class BrowserDaemonClient implements OhbabyWebClient {
   }
 
   async connect(): Promise<void> {
+    if (this.connectPromise) {
+      return this.connectPromise;
+    }
     if (this.connected) {
       return;
     }
+    this.connectPromise = this.doConnect().finally(() => {
+      this.connectPromise = undefined;
+    });
+    return this.connectPromise;
+  }
+
+  private async doConnect(): Promise<void> {
     this.connected = true;
     this.store.setConnectionState("connecting");
     this.store.setError(null);

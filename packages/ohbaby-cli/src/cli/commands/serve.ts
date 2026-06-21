@@ -28,6 +28,15 @@ function normalizeHost(host: ServeArgs["host"]): string {
   return value && value.length > 0 ? value : "127.0.0.1";
 }
 
+function isLoopbackHost(host: string): boolean {
+  return (
+    host === "localhost" ||
+    host === "::1" ||
+    host === "[::1]" ||
+    host.startsWith("127.")
+  );
+}
+
 function formatStatus(
   state: Awaited<ReturnType<CliCommandRuntime["readDaemonStatus"]>>,
 ): string {
@@ -89,13 +98,20 @@ export function createServeCommand(
         return;
       }
 
+      const host = normalizeHost(args.host);
+      if (args.webAssetsDir !== undefined && !isLoopbackHost(host)) {
+        runtime.failUsage(
+          "--web-assets-dir can only be used with a loopback --host",
+        );
+      }
+
       const server = await runtime.startDaemonServer({
         ...(args.authToken === undefined ? {} : { authToken: args.authToken }),
         ...(args.dbPath === undefined ? {} : { dbPath: args.dbPath }),
         ...(args.webAssetsDir === undefined
           ? {}
           : { webAssetsDir: args.webAssetsDir }),
-        host: normalizeHost(args.host),
+        host,
         port: normalizePort(args.port, runtime),
       });
       runtime.stdout.write(`daemon listening on ${server.url}\n`);

@@ -14,6 +14,15 @@ import {
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4096;
 
+function isLoopbackHost(host: string): boolean {
+  return (
+    host === "localhost" ||
+    host === "::1" ||
+    host === "[::1]" ||
+    host.startsWith("127.")
+  );
+}
+
 export interface DaemonHttpServerOptions {
   readonly backend: UiBackendClient;
   readonly authToken?: string;
@@ -67,7 +76,12 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       promptQueue: options.promptQueue,
       ...(options.webAssetsDir === undefined
         ? {}
-        : { webAssets: { directory: options.webAssetsDir } }),
+        : {
+            webAssets: {
+              allowTokenInjection: isLoopbackHost(options.host),
+              directory: options.webAssetsDir,
+            },
+          }),
     });
   }
 

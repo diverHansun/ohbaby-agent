@@ -266,9 +266,6 @@ export class FetchDaemonEventStream implements DaemonEventStream {
     if (event.type === "ui.event" && frame.id !== undefined) {
       this.lastEventId = frame.id;
     }
-    if (event.type === "resync-required") {
-      this.lastEventId = String(event.maxSeqNum);
-    }
     await callbacks.onEvent?.({
       ...(frame.id === undefined ? {} : { id: Number(frame.id) }),
       payload: event,

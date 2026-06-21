@@ -57,10 +57,9 @@ function applyEventToSnapshot(
         sessions: upsertById(snapshot.sessions, event.session),
       };
     case "message.appended":
-      return updateSessionMessages(snapshot, event.sessionId, (messages) => [
-        ...messages,
-        event.message,
-      ]);
+      return updateSessionMessages(snapshot, event.sessionId, (messages) =>
+        upsertById(messages, event.message),
+      );
     case "message.updated":
       return updateSessionMessages(snapshot, event.sessionId, (messages) =>
         upsertById(messages, event.message),
