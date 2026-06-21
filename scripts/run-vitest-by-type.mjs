@@ -14,7 +14,7 @@ if (!TEST_TYPES.has(type)) {
 }
 
 const root = process.cwd();
-const searchRoots = ["packages", "tests"];
+const searchRoots = ["packages", "apps", "tests"];
 const ignoredDirectories = new Set(["node_modules", "dist", "coverage"]);
 const suffixes = [`.${type}.test.ts`, `.${type}.test.tsx`];
 

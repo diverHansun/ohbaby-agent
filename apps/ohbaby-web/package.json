@@ -1,0 +1,19 @@
+{
+  "name": "ohbaby-web",
+  "version": "0.1.6",
+  "private": true,
+  "description": "Browser adapter for the explicit ohbaby daemon",
+  "type": "module",
+  "scripts": {
+    "build": "vite build && tsc -b --force",
+    "typecheck": "tsc -b",
+    "clean": "rimraf dist coverage"
+  },
+  "dependencies": {
+    "ohbaby-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "ohbaby-server": "workspace:*",
+    "vite": "^5.4.21"
+  }
+}

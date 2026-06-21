@@ -12,6 +12,9 @@
       "path": "./packages/ohbaby-server"
     },
     {
+      "path": "./apps/ohbaby-web"
+    },
+    {
       "path": "./packages/ohbaby-cli"
     }
   ]

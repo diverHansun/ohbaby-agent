@@ -1,0 +1,132 @@
+import { describe, expect, it } from "vitest";
+import type { UiSnapshot } from "ohbaby-sdk";
+import {
+  createInitialViewState,
+  reduceUiEvent,
+  replaceSnapshot,
+} from "./eventReducer.js";
+
+const timestamp = "2026-06-12T00:00:00.000Z";
+
+function emptySnapshot(): UiSnapshot {
+  return {
+    activeSessionId: "session_1",
+    permission: {
+      level: "default",
+      mode: "auto",
+      sessionRules: [],
+    },
+    permissions: [],
+    runs: [],
+    sessions: [
+      {
+        createdAt: timestamp,
+        id: "session_1",
+        messages: [],
+        title: "Session",
+        updatedAt: timestamp,
+      },
+    ],
+    status: { kind: "idle" },
+  };
+}
+
+describe("ohbaby-web eventReducer", () => {
+  it("replaces the snapshot and records the sequence baseline", () => {
+    const state = replaceSnapshot(emptySnapshot(), 10);
+
+    expect(state).toMatchObject({
+      lastAppliedSeqNum: 10,
+      snapshot: {
+        activeSessionId: "session_1",
+      },
+    });
+  });
+
+  it("accumulates streaming deltas until a finalized message arrives", () => {
+    let state = replaceSnapshot(emptySnapshot(), 0);
+
+    state = reduceUiEvent(
+      state,
+      {
+        delta: "hel",
+        messageId: "message_1",
+        sessionId: "session_1",
+        type: "message.part.delta",
+      },
+      1,
+    );
+    state = reduceUiEvent(
+      state,
+      {
+        delta: "lo",
+        messageId: "message_1",
+        sessionId: "session_1",
+        type: "message.part.delta",
+      },
+      2,
+    );
+
+    expect(state.snapshot?.sessions[0]?.messages[0]?.parts).toEqual([
+      { text: "hello", type: "text" },
+    ]);
+
+    state = reduceUiEvent(
+      state,
+      {
+        message: {
+          completedAt: timestamp,
+          createdAt: timestamp,
+          id: "message_1",
+          parts: [{ text: "hello!", type: "text" }],
+          role: "assistant",
+          status: "completed",
+        },
+        sessionId: "session_1",
+        type: "message.updated",
+      },
+      3,
+    );
+
+    expect(state.snapshot?.sessions[0]?.messages[0]?.parts).toEqual([
+      { text: "hello!", type: "text" },
+    ]);
+  });
+
+  it("ignores duplicate or older sequence numbers", () => {
+    let state = replaceSnapshot(emptySnapshot(), 5);
+
+    state = reduceUiEvent(
+      state,
+      {
+        session: {
+          createdAt: timestamp,
+          id: "session_2",
+          messages: [],
+          title: "Ignored",
+          updatedAt: timestamp,
+        },
+        type: "session.updated",
+      },
+      5,
+    );
+
+    expect(state.snapshot?.sessions).toHaveLength(1);
+  });
+
+  it("advances the cursor even if no snapshot has loaded yet", () => {
+    const state = reduceUiEvent(
+      createInitialViewState(),
+      {
+        status: { kind: "idle" },
+        type: "runtime.updated",
+      },
+      1,
+    );
+
+    expect(state).toEqual({
+      lastAppliedSeqNum: 1,
+      snapshot: null,
+    });
+  });
+});

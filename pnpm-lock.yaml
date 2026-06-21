@@ -57,6 +57,19 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@24.12.4)
 
+  apps/ohbaby-web:
+    dependencies:
+      ohbaby-sdk:
+        specifier: workspace:*
+        version: link:../../packages/ohbaby-sdk
+    devDependencies:
+      ohbaby-server:
+        specifier: workspace:*
+        version: link:../../packages/ohbaby-server
+      vite:
+        specifier: ^5.4.21
+        version: 5.4.21(@types/node@24.12.4)
+
   packages/ohbaby-agent:
     dependencies:
       '@anthropic-ai/sdk':

@@ -8,6 +8,8 @@ export default defineConfig({
     include: [
       "packages/*/src/**/*.test.ts",
       "packages/*/src/**/*.test.tsx",
+      "apps/*/src/**/*.test.ts",
+      "apps/*/src/**/*.test.tsx",
       "tests/**/*.test.ts",
       "tests/**/*.test.tsx",
     ],
@@ -15,12 +17,19 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],
-      include: ["packages/*/src/**/*.ts", "packages/*/src/**/*.tsx"],
+      include: [
+        "packages/*/src/**/*.ts",
+        "packages/*/src/**/*.tsx",
+        "apps/*/src/**/*.ts",
+        "apps/*/src/**/*.tsx",
+      ],
       exclude: [
         "node_modules/",
         "**/dist/",
         "packages/**/*.test.ts",
         "packages/**/*.test.tsx",
+        "apps/**/*.test.ts",
+        "apps/**/*.test.tsx",
         "packages/**/__tests__/",
         "packages/*/src/index.ts",
       ],
@@ -65,7 +74,10 @@ export default defineConfig({
       },
       {
         find: "ohbaby-server",
-        replacement: resolve(__dirname, "./packages/ohbaby-server/src/index.ts"),
+        replacement: resolve(
+          __dirname,
+          "./packages/ohbaby-server/src/index.ts",
+        ),
       },
     ],
   },
