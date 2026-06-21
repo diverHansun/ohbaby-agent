@@ -27,7 +27,8 @@ interface ParsedSseFrame {
   readonly id?: string;
 }
 
-const RECONNECT_DELAY_MS = 250;
+const INITIAL_RECONNECT_DELAY_MS = 250;
+const MAX_RECONNECT_DELAY_MS = 5_000;
 
 function requestUrl(baseUrl: string, path: string): string {
   if (baseUrl.length === 0) {
@@ -158,12 +159,14 @@ export class FetchDaemonEventStream implements DaemonEventStream {
     },
   ): Promise<void> {
     let firstAttempt = true;
+    let reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
     while (!signal.aborted) {
       callbacks.onConnectionState?.(
         firstAttempt ? "connecting" : "reconnecting",
       );
       try {
         await this.openOnce(callbacks, signal, ready);
+        reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
       } catch (error) {
         if (isAbortError(error)) {
           return;
@@ -174,9 +177,13 @@ export class FetchDaemonEventStream implements DaemonEventStream {
         if (firstAttempt) {
           ready.reject(normalized);
         }
+        reconnectDelayMs = Math.min(
+          reconnectDelayMs * 2,
+          MAX_RECONNECT_DELAY_MS,
+        );
       }
       firstAttempt = false;
-      await delay(RECONNECT_DELAY_MS, signal);
+      await delay(reconnectDelayMs, signal);
     }
   }
 

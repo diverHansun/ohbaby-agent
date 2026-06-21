@@ -3,6 +3,7 @@ import { FetchDaemonEventStream } from "./events.js";
 import { createDaemonHttpClient, DaemonHttpClient } from "./http.js";
 import type {
   OhbabyBootstrapConfig,
+  SetPermissionRequest,
   StoreSnapshot,
   SubmitPromptRequest,
   WebSseEvent,
@@ -26,6 +27,7 @@ export interface OhbabyWebClient {
     requestId: string,
     response: UiPermissionResponse,
   ): Promise<void>;
+  setPermission(input: SetPermissionRequest): Promise<void>;
   submitPrompt(input: SubmitPromptRequest): Promise<void>;
   subscribe(listener: () => void): () => void;
 }
@@ -92,11 +94,7 @@ class BrowserDaemonClient implements OhbabyWebClient {
       });
       const response = await this.http.getSnapshot();
       this.store.replaceSnapshot(response.snapshot, response.seqNum);
-      for (const event of this.bufferedEvents.splice(0)) {
-        if (event.seqNum > response.seqNum) {
-          this.store.applyEvent(event.event, event.seqNum);
-        }
-      }
+      this.applyBufferedEventsAfter(response.seqNum);
       this.buffering = false;
       this.store.setConnectionState("live");
     } catch (error) {
@@ -132,6 +130,10 @@ class BrowserDaemonClient implements OhbabyWebClient {
     response: UiPermissionResponse,
   ): Promise<void> {
     await this.http.respondPermission(requestId, response);
+  }
+
+  async setPermission(input: SetPermissionRequest): Promise<void> {
+    await this.http.setPermission(input);
   }
 
   async abortSession(sessionId: string, runId?: string): Promise<void> {
@@ -175,11 +177,34 @@ class BrowserDaemonClient implements OhbabyWebClient {
   }
 
   private async doResync(lastEventId: number): Promise<void> {
+    const previousBuffering = this.buffering;
+    this.buffering = true;
     this.store.setConnectionState("resyncing");
-    const response = await this.http.getSnapshot();
-    this.store.replaceSnapshot(response.snapshot, response.seqNum);
-    this.events.setLastEventId(Math.max(lastEventId, response.seqNum));
-    this.store.setConnectionState("live");
+    try {
+      const response = await this.http.getSnapshot();
+      this.store.replaceSnapshot(response.snapshot, response.seqNum);
+      const maxBufferedSeqNum = this.applyBufferedEventsAfter(response.seqNum);
+      this.events.setLastEventId(
+        Math.max(lastEventId, response.seqNum, maxBufferedSeqNum),
+      );
+      this.store.setConnectionState("live");
+    } catch (error) {
+      this.bufferedEvents.splice(0);
+      throw error;
+    } finally {
+      this.buffering = previousBuffering;
+    }
+  }
+
+  private applyBufferedEventsAfter(seqNum: number): number {
+    let maxSeqNum = seqNum;
+    for (const event of this.bufferedEvents.splice(0)) {
+      if (event.seqNum > seqNum) {
+        this.store.applyEvent(event.event, event.seqNum);
+        maxSeqNum = Math.max(maxSeqNum, event.seqNum);
+      }
+    }
+    return maxSeqNum;
   }
 }
 

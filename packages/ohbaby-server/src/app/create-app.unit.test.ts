@@ -9,6 +9,7 @@ import type {
   UiCompactSessionUsage,
   UiConnectModelResult,
   UiEventHandler,
+  UiPermissionState,
   UiSetSearchApiKeyResult,
   UiSnapshot,
   UiUnsubscribe,
@@ -104,9 +105,17 @@ class FakeBackend implements UiBackendClient {
     readonly options?: SubmitPromptOptions;
   }[] = [];
   onGetSnapshot: (() => Promise<void> | void) | undefined;
+  permissionState: UiPermissionState;
   submitError: Error | undefined;
 
-  constructor(private readonly snapshot: UiSnapshot = emptySnapshot()) {}
+  constructor(private readonly snapshot: UiSnapshot = emptySnapshot()) {
+    this.permissionState = snapshot.permission ??
+      emptySnapshot().permission ?? {
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
+      };
+  }
 
   emit(event: Parameters<UiEventHandler>[0]): void {
     for (const handler of Array.from(this.handlers)) {
@@ -156,6 +165,20 @@ class FakeBackend implements UiBackendClient {
 
   setSearchApiKey(): ReturnType<UiBackendClient["setSearchApiKey"]> {
     return Promise.resolve(setSearchApiKeyResult());
+  }
+
+  setPermission(
+    input: Parameters<UiBackendClient["setPermission"]>[0],
+  ): ReturnType<UiBackendClient["setPermission"]> {
+    this.permissionState = {
+      ...this.permissionState,
+      ...input,
+    };
+    this.emit({
+      permission: this.permissionState,
+      type: "permission.updated",
+    });
+    return Promise.resolve(this.permissionState);
   }
 
   executeCommand(): Promise<void> {
@@ -494,7 +517,7 @@ describe("createDaemonServerApp", () => {
     }
   });
 
-  it("uses the pre-snapshot event sequence as the web snapshot baseline", async () => {
+  it("uses the post-snapshot event sequence as the web snapshot baseline", async () => {
     const backend = new FakeBackend(emptySnapshot());
     let getSnapshotCalls = 0;
     backend.onGetSnapshot = (): void => {
@@ -523,7 +546,44 @@ describe("createDaemonServerApp", () => {
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toMatchObject({
-        seqNum: 0,
+        seqNum: 1,
+      });
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("updates daemon permission state for registered web clients", async () => {
+    const backend = new FakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request("/v1/permission", {
+        body: JSON.stringify({ level: "full-access", mode: "plan" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+          "x-ohbaby-client-id": "client_web",
+        },
+        method: "PATCH",
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        ok: true,
+        permission: {
+          level: "full-access",
+          mode: "plan",
+          sessionRules: [],
+        },
       });
     } finally {
       await handle.dispose();

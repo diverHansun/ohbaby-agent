@@ -222,6 +222,10 @@ function withStartupRecovery(
       await ready();
       return client.setSearchApiKey(input);
     },
+    async setPermission(input): ReturnType<UiBackendClient["setPermission"]> {
+      await ready();
+      return client.setPermission(input);
+    },
     async getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
       await ready();
       return client.getCurrentModel();

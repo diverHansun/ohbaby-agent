@@ -12,6 +12,7 @@ import type {
   UiEvent,
   UiEventHandler,
   UiMessage,
+  UiPermissionState,
   UiSetSearchApiKeyResult,
   UiSnapshot,
   UiUnsubscribe,
@@ -47,6 +48,14 @@ function emptySnapshot(): UiSnapshot {
     runs: [],
     sessions: [],
     status: { kind: "idle" },
+  };
+}
+
+function defaultPermissionState(): UiPermissionState {
+  return {
+    level: "default",
+    mode: "auto",
+    sessionRules: [],
   };
 }
 
@@ -308,6 +317,21 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(setSearchApiKeyResult());
   }
 
+  setPermission(
+    input: Parameters<UiBackendClient["setPermission"]>[0],
+  ): ReturnType<UiBackendClient["setPermission"]> {
+    this.snapshot = {
+      ...this.snapshot,
+      permission: {
+        ...(this.snapshot.permission ?? defaultPermissionState()),
+        ...input,
+      },
+    };
+    const permission = this.snapshot.permission ?? defaultPermissionState();
+    this.emit({ permission, type: "permission.updated" });
+    return Promise.resolve(permission);
+  }
+
   executeCommand(
     invocation: Parameters<UiBackendClient["executeCommand"]>[0],
   ): Promise<void> {
@@ -361,7 +385,11 @@ async function postRpc(
 ): Promise<Response> {
   return fetch(`${url}/api/rpc`, {
     body: JSON.stringify(body),
-    headers: { "content-type": "application/json", ...authHeaders(), ...headers },
+    headers: {
+      "content-type": "application/json",
+      ...authHeaders(),
+      ...headers,
+    },
     method: "POST",
   });
 }

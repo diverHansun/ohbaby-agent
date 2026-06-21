@@ -1,8 +1,5 @@
 import { SessionRunBusyError } from "ohbaby-agent";
-import type {
-  SubmitPromptOptions,
-  UiBackendClient,
-} from "ohbaby-sdk";
+import type { SubmitPromptOptions, UiBackendClient } from "ohbaby-sdk";
 import {
   parseDaemonStartupIntent,
   type DaemonClientViewCoordinator,
@@ -198,6 +195,10 @@ export async function callDaemonBackend(input: {
     case "setSearchApiKey":
       return backend.setSearchApiKey(
         request.params[0] as Parameters<UiBackendClient["setSearchApiKey"]>[0],
+      );
+    case "setPermission":
+      return backend.setPermission(
+        request.params[0] as Parameters<UiBackendClient["setPermission"]>[0],
       );
     case "executeCommand": {
       const invocation = clientViews.prepareCommandInvocation(

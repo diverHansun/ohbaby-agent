@@ -7,6 +7,7 @@ import type {
   UiConnectModelResult,
   UiEvent,
   UiEventHandler,
+  UiPermissionState,
   UiSetSearchApiKeyResult,
   UiSnapshot,
   UiUnsubscribe,
@@ -35,6 +36,14 @@ function emptySnapshot(): UiSnapshot {
     runs: [],
     sessions: [],
     status: { kind: "idle" },
+  };
+}
+
+function defaultPermissionState(): UiPermissionState {
+  return {
+    level: "default",
+    mode: "auto",
+    sessionRules: [],
   };
 }
 
@@ -142,9 +151,12 @@ class FakeBackend implements UiBackendClient {
     readonly text: string;
     readonly options?: SubmitPromptOptions;
   }[] = [];
+  permissionState: UiPermissionState;
   submitError: Error | undefined;
 
-  constructor(private readonly snapshot: UiSnapshot = emptySnapshot()) {}
+  constructor(private readonly snapshot: UiSnapshot = emptySnapshot()) {
+    this.permissionState = snapshot.permission ?? defaultPermissionState();
+  }
 
   emit(event: UiEvent): void {
     for (const handler of this.handlers) {
@@ -211,6 +223,18 @@ class FakeBackend implements UiBackendClient {
   ): ReturnType<UiBackendClient["setSearchApiKey"]> {
     this.calls.push({ args: [input], method: "setSearchApiKey" });
     return Promise.resolve(setSearchApiKeyResult());
+  }
+
+  setPermission(
+    input: Parameters<UiBackendClient["setPermission"]>[0],
+  ): ReturnType<UiBackendClient["setPermission"]> {
+    this.permissionState = {
+      ...this.permissionState,
+      ...input,
+    };
+    this.calls.push({ args: [input], method: "setPermission" });
+    this.emit({ permission: this.permissionState, type: "permission.updated" });
+    return Promise.resolve(this.permissionState);
   }
 
   executeCommand(
@@ -457,6 +481,10 @@ describe("createRemoteUiBackendClient", () => {
       apiKeyEnv: "TAVILY_API_KEY",
       provider: "tavily" as const,
     };
+    const permissionInput = {
+      level: "full-access" as const,
+      mode: "plan" as const,
+    };
     const invocation = {
       argv: ["now"],
       clientInvocationId: "invoke_1",
@@ -477,6 +505,7 @@ describe("createRemoteUiBackendClient", () => {
       await client.getCurrentModel();
       await client.connectModel(connectInput);
       await client.setSearchApiKey(searchInput);
+      await client.setPermission(permissionInput);
       await client.executeCommand(invocation);
       await client.respondPermission("permission_1", { choiceId: "allow" });
       await client.respondInteraction("interaction_1", {
@@ -499,6 +528,7 @@ describe("createRemoteUiBackendClient", () => {
       { args: [], method: "getCurrentModel" },
       { args: [connectInput], method: "connectModel" },
       { args: [searchInput], method: "setSearchApiKey" },
+      { args: [permissionInput], method: "setPermission" },
       { args: [invocation], method: "executeCommand" },
       {
         args: ["permission_1", { choiceId: "allow" }],

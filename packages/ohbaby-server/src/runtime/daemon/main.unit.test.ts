@@ -54,6 +54,14 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
         searchJsonPath: "search.json",
       }),
     ),
+    setPermission: vi.fn(
+      (input: Parameters<UiBackendClient["setPermission"]>[0]) =>
+        Promise.resolve({
+          level: input.level ?? "default",
+          mode: input.mode ?? "auto",
+          sessionRules: [],
+        }),
+    ),
     dispose,
     executeCommand: vi.fn(() => Promise.resolve()),
     getContextWindowUsage: vi.fn(() => Promise.resolve(null)),

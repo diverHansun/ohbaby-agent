@@ -337,6 +337,16 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
           summary: "Respond to a permission request",
         },
       },
+      "/v1/permission": {
+        patch: {
+          responses: {
+            "200": {
+              description: "Permission state updated",
+            },
+          },
+          summary: "Update daemon permission state",
+        },
+      },
       "/v1/prompts": {
         post: {
           responses: {
@@ -570,8 +580,8 @@ class DaemonServerAppRuntime {
         return context.json(webErrorBody("client is not registered"), 409);
       }
 
-      const seqNum = this.eventBus.latestSeqNum;
       const snapshot = await this.options.backend.getSnapshot();
+      const seqNum = this.eventBus.latestSeqNum;
       return context.json({
         ok: true,
         seqNum,
@@ -658,6 +668,52 @@ class DaemonServerAppRuntime {
         },
         202,
       );
+    });
+
+    this.app.patch("/v1/permission", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
+
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok) {
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      }
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      const mode = body.mode;
+      const level = body.level;
+      if (mode !== undefined && mode !== "auto" && mode !== "plan") {
+        return context.json(webErrorBody("mode must be auto or plan"), 400);
+      }
+      if (
+        level !== undefined &&
+        level !== "default" &&
+        level !== "full-access"
+      ) {
+        return context.json(
+          webErrorBody("level must be default or full-access"),
+          400,
+        );
+      }
+      if (mode === undefined && level === undefined) {
+        return context.json(webErrorBody("mode or level is required"), 400);
+      }
+
+      const permission = await this.options.backend.setPermission({
+        ...(level === undefined ? {} : { level }),
+        ...(mode === undefined ? {} : { mode }),
+      });
+      return context.json({ ok: true, permission });
     });
 
     this.app.post("/v1/permissions/:id", async (context) => {

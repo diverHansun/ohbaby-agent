@@ -17,6 +17,7 @@ import type {
   UiMessage,
   UiNotice,
   UiPermissionResponse,
+  UiPermissionUpdate,
   UiRun,
   UiRunStatus,
   UiSetSearchApiKeyInput,
@@ -1526,6 +1527,16 @@ export function createInProcessUiBackendClient(
       input: UiSetSearchApiKeyInput,
     ): Promise<UiSetSearchApiKeyResult> {
       return setSearchApiKeyInternal(input);
+    },
+
+    setPermission(input: UiPermissionUpdate): Promise<UiPermissionState> {
+      if (input.mode !== undefined) {
+        permissionState.setMode(input.mode);
+      }
+      if (input.level !== undefined) {
+        permissionState.setLevel(input.level);
+      }
+      return Promise.resolve(permissionState.toSnapshot());
     },
 
     getCurrentModel(): Promise<UiCurrentModelConfig | null> {

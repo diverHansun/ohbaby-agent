@@ -3,6 +3,7 @@ export type {
   UiBackendClient,
   UiEventHandler,
   UiListCommandsQuery,
+  UiPermissionUpdate,
   UiUnsubscribe,
 } from "./client.js";
 export type {

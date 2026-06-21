@@ -93,6 +93,47 @@ describe("ohbaby-web eventReducer", () => {
     ]);
   });
 
+  it("removes the anonymous streaming placeholder when the final message uses a stable id", () => {
+    let state = replaceSnapshot(emptySnapshot(), 0);
+
+    state = reduceUiEvent(
+      state,
+      {
+        delta: "draft",
+        sessionId: "session_1",
+        type: "message.part.delta",
+      },
+      1,
+    );
+    expect(
+      state.snapshot?.sessions[0]?.messages.map((message) => message.id),
+    ).toEqual(["streaming:session_1"]);
+
+    state = reduceUiEvent(
+      state,
+      {
+        message: {
+          completedAt: timestamp,
+          createdAt: timestamp,
+          id: "message_1",
+          parts: [{ text: "final", type: "text" }],
+          role: "assistant",
+          status: "completed",
+        },
+        sessionId: "session_1",
+        type: "message.updated",
+      },
+      2,
+    );
+
+    expect(state.snapshot?.sessions[0]?.messages).toMatchObject([
+      {
+        id: "message_1",
+        parts: [{ text: "final", type: "text" }],
+      },
+    ]);
+  });
+
   it("ignores duplicate or older sequence numbers", () => {
     let state = replaceSnapshot(emptySnapshot(), 5);
 

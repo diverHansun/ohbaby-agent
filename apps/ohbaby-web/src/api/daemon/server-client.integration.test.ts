@@ -7,6 +7,7 @@ import type {
   UiConnectModelResult,
   UiEvent,
   UiEventHandler,
+  UiPermissionState,
   UiSetSearchApiKeyResult,
   UiSnapshot,
   UiUnsubscribe,
@@ -166,6 +167,22 @@ class FakeBackend implements UiBackendClient {
 
   setSearchApiKey(): ReturnType<UiBackendClient["setSearchApiKey"]> {
     return Promise.resolve(setSearchApiKeyResult());
+  }
+
+  setPermission(
+    input: Parameters<UiBackendClient["setPermission"]>[0],
+  ): ReturnType<UiBackendClient["setPermission"]> {
+    const permission: UiPermissionState = {
+      ...(this.snapshot.permission ?? {
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
+      }),
+      ...input,
+    };
+    this.snapshot = { ...this.snapshot, permission };
+    this.emit({ permission, type: "permission.updated" });
+    return Promise.resolve(permission);
   }
 
   executeCommand(): Promise<void> {

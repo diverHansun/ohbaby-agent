@@ -2,6 +2,7 @@ import type {
   SubmitPromptOptions,
   UiEventHandler,
   UiListCommandsQuery,
+  UiPermissionUpdate,
   UiUnsubscribe,
 } from "../client.js";
 import type {
@@ -23,7 +24,11 @@ import type {
   UiSetSearchApiKeyInput,
   UiSetSearchApiKeyResult,
 } from "../connect-search.js";
-import type { UiPermissionResponse, UiSnapshot } from "../snapshot.js";
+import type {
+  UiPermissionResponse,
+  UiPermissionState,
+  UiSnapshot,
+} from "../snapshot.js";
 
 export interface CoreAPI {
   getSnapshot(): Promise<UiSnapshot>;
@@ -40,6 +45,7 @@ export interface CoreAPI {
   setSearchApiKey(
     input: UiSetSearchApiKeyInput,
   ): Promise<UiSetSearchApiKeyResult>;
+  setPermission(input: UiPermissionUpdate): Promise<UiPermissionState>;
   executeCommand(invocation: UiSlashCommandInvocation): Promise<void>;
   respondPermission(
     requestId: string,

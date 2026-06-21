@@ -10,6 +10,7 @@ export const DAEMON_RPC_METHODS = [
   "getCurrentModel",
   "connectModel",
   "setSearchApiKey",
+  "setPermission",
   "executeCommand",
   "respondPermission",
   "respondInteraction",

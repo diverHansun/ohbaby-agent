@@ -34,9 +34,13 @@ export function createOhbabyWebStore(): OhbabyWebStore {
 
   return {
     applyEvent(event, seqNum): void {
+      const nextView = reduceUiEvent(snapshot.view, event, seqNum);
+      if (nextView === snapshot.view) {
+        return;
+      }
       publish({
         ...snapshot,
-        view: reduceUiEvent(snapshot.view, event, seqNum),
+        view: nextView,
       });
     },
     getSnapshot(): StoreSnapshot {
@@ -49,9 +53,15 @@ export function createOhbabyWebStore(): OhbabyWebStore {
       });
     },
     setConnectionState(state): void {
+      if (snapshot.connectionState === state) {
+        return;
+      }
       publish({ ...snapshot, connectionState: state });
     },
     setError(error): void {
+      if (snapshot.error === error) {
+        return;
+      }
       publish({ ...snapshot, error });
     },
     subscribe(listener): () => void {

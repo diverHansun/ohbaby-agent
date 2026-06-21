@@ -79,6 +79,9 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
       setSearchApiKey(input): ReturnType<CoreAPI["setSearchApiKey"]> {
         return client.setSearchApiKey(input);
       },
+      setPermission(input): ReturnType<CoreAPI["setPermission"]> {
+        return client.setPermission(input);
+      },
       executeCommand(invocation): ReturnType<CoreAPI["executeCommand"]> {
         return client.executeCommand(invocation);
       },

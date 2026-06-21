@@ -2,8 +2,10 @@ import type {
   OhbabyBootstrapConfig,
   OkResponse,
   PermissionResponseRequest,
+  PermissionStateResponse,
   PromptAcceptedResponse,
   RegisterClientResponse,
+  SetPermissionRequest,
   SnapshotResponse,
   SubmitPromptRequest,
   WebStartupIntent,
@@ -81,6 +83,13 @@ export class DaemonHttpClient {
     });
   }
 
+  setPermission(input: SetPermissionRequest): Promise<PermissionStateResponse> {
+    return this.request("/v1/permission", {
+      body: input,
+      method: "PATCH",
+    });
+  }
+
   abortSession(
     sessionId: string,
     input: { readonly runId?: string } = {},
@@ -95,7 +104,7 @@ export class DaemonHttpClient {
     path: string,
     options: {
       readonly body?: unknown;
-      readonly method?: "GET" | "POST";
+      readonly method?: "GET" | "PATCH" | "POST";
     } = {},
   ): Promise<T> {
     const headers: Record<string, string> = {

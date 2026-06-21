@@ -144,6 +144,13 @@ describe("context window UI contract", () => {
       respondPermission(): ReturnType<CoreAPI["respondPermission"]> {
         return Promise.resolve();
       },
+      setPermission(): ReturnType<CoreAPI["setPermission"]> {
+        return Promise.resolve({
+          level: "default",
+          mode: "auto",
+          sessionRules: [],
+        });
+      },
       submitPrompt(): ReturnType<CoreAPI["submitPrompt"]> {
         return Promise.resolve();
       },

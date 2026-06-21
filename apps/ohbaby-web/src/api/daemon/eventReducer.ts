@@ -62,7 +62,7 @@ function applyEventToSnapshot(
       );
     case "message.updated":
       return updateSessionMessages(snapshot, event.sessionId, (messages) =>
-        upsertById(messages, event.message),
+        finalizeMessage(messages, event.sessionId, event.message),
       );
     case "message.part.delta":
       return updateSessionMessages(snapshot, event.sessionId, (messages) =>
@@ -119,6 +119,19 @@ function applyEventToSnapshot(
       return snapshot;
   }
   return snapshot;
+}
+
+function finalizeMessage(
+  messages: readonly UiMessage[],
+  sessionId: string,
+  message: UiMessage,
+): readonly UiMessage[] {
+  const streamingId = `streaming:${sessionId}`;
+  const prunedMessages =
+    message.id === streamingId
+      ? messages
+      : messages.filter((candidate) => candidate.id !== streamingId);
+  return upsertById(prunedMessages, message);
 }
 
 function upsertById<T extends { readonly id: string }>(

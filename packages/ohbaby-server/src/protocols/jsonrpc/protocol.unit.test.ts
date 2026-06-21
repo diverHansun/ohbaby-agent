@@ -107,6 +107,7 @@ describe("daemon protocol", () => {
       "getCurrentModel",
       "connectModel",
       "setSearchApiKey",
+      "setPermission",
       "executeCommand",
       "respondPermission",
       "respondInteraction",

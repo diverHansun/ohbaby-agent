@@ -201,6 +201,12 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("setSearchApiKey", [input]);
   }
 
+  setPermission(
+    input: Parameters<UiBackendClient["setPermission"]>[0],
+  ): ReturnType<UiBackendClient["setPermission"]> {
+    return this.rpc("setPermission", [input]);
+  }
+
   executeCommand(
     invocation: Parameters<UiBackendClient["executeCommand"]>[0],
   ): ReturnType<UiBackendClient["executeCommand"]> {
@@ -467,6 +473,9 @@ export function createRemoteCoreApiHost(
       },
       setSearchApiKey(input): ReturnType<CoreAPI["setSearchApiKey"]> {
         return client.setSearchApiKey(input);
+      },
+      setPermission(input): ReturnType<CoreAPI["setPermission"]> {
+        return client.setPermission(input);
       },
       executeCommand(invocation): ReturnType<CoreAPI["executeCommand"]> {
         return client.executeCommand(invocation);

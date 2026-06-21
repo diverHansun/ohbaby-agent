@@ -1,4 +1,11 @@
-import type { UiEvent, UiPermissionResponse, UiSnapshot } from "ohbaby-sdk";
+import type {
+  UiEvent,
+  UiPermissionLevel,
+  UiPermissionMode,
+  UiPermissionResponse,
+  UiPermissionState,
+  UiSnapshot,
+} from "ohbaby-sdk";
 
 export interface WebStartupIntent {
   readonly startupSessionMode?: { readonly type: "continue" | "fresh" };
@@ -54,6 +61,11 @@ export interface OkResponse {
   readonly ok: true;
 }
 
+export interface PermissionStateResponse {
+  readonly ok: true;
+  readonly permission: UiPermissionState;
+}
+
 export type WebSseEvent =
   | {
       readonly type: "hello";
@@ -76,6 +88,11 @@ export type WebSseEvent =
 export interface SubmitPromptRequest {
   readonly sessionId?: string;
   readonly text: string;
+}
+
+export interface SetPermissionRequest {
+  readonly level?: UiPermissionLevel;
+  readonly mode?: UiPermissionMode;
 }
 
 export type PermissionResponseRequest =

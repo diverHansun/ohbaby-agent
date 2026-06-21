@@ -20,9 +20,19 @@ import type {
   UiSetSearchApiKeyResult,
 } from "./connect-search.js";
 import type { UiPermissionResponse, UiSnapshot } from "./snapshot.js";
+import type {
+  UiPermissionLevel,
+  UiPermissionMode,
+  UiPermissionState,
+} from "./snapshot.js";
 
 export interface SubmitPromptOptions {
   readonly sessionId?: string;
+}
+
+export interface UiPermissionUpdate {
+  readonly level?: UiPermissionLevel;
+  readonly mode?: UiPermissionMode;
 }
 
 export interface UiListCommandsQuery {
@@ -48,6 +58,7 @@ export interface UiBackendClient {
   setSearchApiKey(
     input: UiSetSearchApiKeyInput,
   ): Promise<UiSetSearchApiKeyResult>;
+  setPermission(input: UiPermissionUpdate): Promise<UiPermissionState>;
   executeCommand(invocation: UiSlashCommandInvocation): Promise<void>;
   respondPermission(
     requestId: string,

@@ -58,6 +58,17 @@ describe("buildCoreAPIImpl", () => {
       listCommands: vi.fn(() => Promise.resolve({ commands: [] })),
       respondInteraction: vi.fn(() => Promise.resolve()),
       respondPermission: vi.fn(() => Promise.resolve()),
+      setPermission: vi.fn(() =>
+        Promise.resolve({ level: "default", mode: "auto", sessionRules: [] }),
+      ),
+      setSearchApiKey: vi.fn(() =>
+        Promise.resolve({
+          apiKeyEnv: "TAVILY_API_KEY",
+          envPath: ".env",
+          provider: "tavily" as const,
+          searchJsonPath: "search.json",
+        }),
+      ),
       submitPrompt,
       subscribeEvents,
     }));
@@ -133,6 +144,17 @@ describe("buildCoreAPIImpl", () => {
         listCommands: vi.fn(() => Promise.resolve({ commands: [] })),
         respondInteraction: vi.fn(() => Promise.resolve()),
         respondPermission: vi.fn(() => Promise.resolve()),
+        setPermission: vi.fn(() =>
+          Promise.resolve({ level: "default", mode: "auto", sessionRules: [] }),
+        ),
+        setSearchApiKey: vi.fn(() =>
+          Promise.resolve({
+            apiKeyEnv: "TAVILY_API_KEY",
+            envPath: ".env",
+            provider: "tavily" as const,
+            searchJsonPath: "search.json",
+          }),
+        ),
         submitPrompt: vi.fn(() => Promise.resolve()),
         subscribeEvents: vi.fn((): (() => void) => () => undefined),
       })),
@@ -165,6 +187,17 @@ describe("buildCoreAPIImpl", () => {
       listCommands: vi.fn(() => Promise.resolve({ commands: [] })),
       respondInteraction: vi.fn(() => Promise.resolve()),
       respondPermission: vi.fn(() => Promise.resolve()),
+      setPermission: vi.fn(() =>
+        Promise.resolve({ level: "default", mode: "auto", sessionRules: [] }),
+      ),
+      setSearchApiKey: vi.fn(() =>
+        Promise.resolve({
+          apiKeyEnv: "TAVILY_API_KEY",
+          envPath: ".env",
+          provider: "tavily" as const,
+          searchJsonPath: "search.json",
+        }),
+      ),
       submitPrompt: vi.fn(() => Promise.resolve()),
       subscribeEvents: vi.fn((): (() => void) => () => undefined),
     }));
@@ -236,6 +269,8 @@ function createPersistentClientMock(): {
   readonly listCommands: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
   readonly respondPermission: ReturnType<typeof vi.fn>;
+  readonly setPermission: ReturnType<typeof vi.fn>;
+  readonly setSearchApiKey: ReturnType<typeof vi.fn>;
   readonly submitPrompt: ReturnType<typeof vi.fn>;
   readonly subscribeEvents: ReturnType<typeof vi.fn>;
 } {
@@ -251,6 +286,17 @@ function createPersistentClientMock(): {
     listCommands: vi.fn(() => Promise.resolve({ commands: [] })),
     respondInteraction: vi.fn(() => Promise.resolve()),
     respondPermission: vi.fn(() => Promise.resolve()),
+    setPermission: vi.fn(() =>
+      Promise.resolve({ level: "default", mode: "auto", sessionRules: [] }),
+    ),
+    setSearchApiKey: vi.fn(() =>
+      Promise.resolve({
+        apiKeyEnv: "TAVILY_API_KEY",
+        envPath: ".env",
+        provider: "tavily" as const,
+        searchJsonPath: "search.json",
+      }),
+    ),
     submitPrompt: vi.fn(() => Promise.resolve()),
     subscribeEvents: vi.fn((): (() => void) => () => undefined),
   };

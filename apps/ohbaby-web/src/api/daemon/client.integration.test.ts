@@ -129,6 +129,18 @@ describe("ohbaby-web daemon client", () => {
           Response.json({ ok: true, sessionId: "session_1" }, { status: 202 }),
         );
       }
+      if (url.endsWith("/v1/permission")) {
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            permission: {
+              level: "full-access",
+              mode: "plan",
+              sessionRules: [],
+            },
+          }),
+        );
+      }
       return Promise.resolve(
         Response.json({ error: { message: "not found" } }, { status: 404 }),
       );
@@ -162,6 +174,16 @@ describe("ohbaby-web daemon client", () => {
     expect(requests.at(-1)?.headers.get("authorization")).toBe(
       "Bearer token_1",
     );
+
+    await runtime.client.setPermission({
+      level: "full-access",
+      mode: "plan",
+    });
+    expect(requests.at(-1)).toMatchObject({
+      body: JSON.stringify({ level: "full-access", mode: "plan" }),
+      method: "PATCH",
+      url: "http://127.0.0.1:4096/v1/permission",
+    });
     sseController?.close();
     await runtime.client.close();
   });

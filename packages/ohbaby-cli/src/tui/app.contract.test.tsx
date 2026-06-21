@@ -3513,6 +3513,7 @@ function createFakeClient(
   readonly listCommands: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
   readonly respondPermission: ReturnType<typeof vi.fn>;
+  readonly setPermission: ReturnType<typeof vi.fn>;
   readonly setSearchApiKey: ReturnType<typeof vi.fn>;
   readonly submitPrompt: ReturnType<typeof vi.fn>;
 } {
@@ -3569,6 +3570,13 @@ function createFakeClient(
     listCommands: vi.fn(() => Promise.resolve(commandCatalog)),
     respondInteraction: vi.fn(() => Promise.resolve()),
     respondPermission: vi.fn(() => Promise.resolve()),
+    setPermission: vi.fn(() =>
+      Promise.resolve({
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
+      } as const),
+    ),
     submitPrompt: vi.fn(() => Promise.resolve()),
     subscribeEvents(handler: TuiEventHandler | UiEventHandler): () => void {
       handlers.add(handler);
