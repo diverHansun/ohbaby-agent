@@ -1,0 +1,4 @@
+# Shell hooks and scripts must use LF; CRLF breaks execution on macOS/Linux
+# (a stray \r becomes part of the command/path, e.g. `pnpm run lint\r`).
+.husky/** text eol=lf
+*.sh text eol=lf
