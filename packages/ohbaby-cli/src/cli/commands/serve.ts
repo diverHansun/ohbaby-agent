@@ -9,6 +9,7 @@ interface ServeArgs extends CliGlobalOptions {
   readonly dbPath?: string;
   readonly host?: string;
   readonly port?: number;
+  readonly webAssetsDir?: string;
 }
 
 function normalizePort(
@@ -68,6 +69,11 @@ export function createServeCommand(
         .option("auth-token", {
           describe: "bearer token required by explicit daemon clients",
           type: "string",
+        })
+        .option("web-assets-dir", {
+          describe:
+            "serve a built ohbaby-web dist directory at the daemon root",
+          type: "string",
         });
     },
     command: "serve [action]",
@@ -86,6 +92,9 @@ export function createServeCommand(
       const server = await runtime.startDaemonServer({
         ...(args.authToken === undefined ? {} : { authToken: args.authToken }),
         ...(args.dbPath === undefined ? {} : { dbPath: args.dbPath }),
+        ...(args.webAssetsDir === undefined
+          ? {}
+          : { webAssetsDir: args.webAssetsDir }),
         host: normalizeHost(args.host),
         port: normalizePort(args.port, runtime),
       });

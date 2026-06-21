@@ -122,6 +122,21 @@ describe("createServeCommand", () => {
     });
   });
 
+  it("passes a web assets directory to the daemon server", async () => {
+    const { runtime, startDaemonServer } = createRuntime();
+
+    await runServe(
+      ["serve", "--web-assets-dir", "apps/ohbaby-web/dist"],
+      runtime,
+    );
+
+    expect(startDaemonServer).toHaveBeenCalledWith({
+      host: "127.0.0.1",
+      port: 4096,
+      webAssetsDir: "apps/ohbaby-web/dist",
+    });
+  });
+
   it("prints daemon status from the state file", async () => {
     const { readDaemonStatus, runtime, stdout } = createRuntime();
 

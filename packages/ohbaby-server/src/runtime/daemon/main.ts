@@ -33,6 +33,7 @@ export interface StartDaemonServerOptions {
   readonly llmClient?: PersistentUiBackendOptions["llmClient"];
   readonly pidFilePath?: string;
   readonly stateFilePath?: string;
+  readonly webAssetsDir?: string;
   readonly workdir?: string;
 }
 
@@ -111,6 +112,7 @@ export async function startDaemonServer(
         onShutdown: () => supervisor.stop(),
         packageVersion,
         port: options.port ?? DEFAULT_PORT,
+        webAssetsDir: options.webAssetsDir,
       });
       return createServerRuntime({
         authToken,

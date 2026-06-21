@@ -1,16 +1,20 @@
 import { randomUUID } from "node:crypto";
-import { Hono } from "hono";
+import { readFile, stat } from "node:fs/promises";
+import { extname, isAbsolute, relative, resolve } from "node:path";
+import { Hono, type Context } from "hono";
 import type {
   UiBackendClient,
   UiEvent,
+  UiPermissionResponse,
+  UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
 import { isAuthorizedDaemonRequest } from "../auth/token.js";
-import { DaemonClientViewCoordinator } from "../coordination/client-view.js";
 import {
-  EventBus,
-  type EventEnvelope,
-} from "../coordination/event-bus.js";
+  DaemonClientViewCoordinator,
+  parseDaemonStartupIntent,
+} from "../coordination/client-view.js";
+import { EventBus, type EventEnvelope } from "../coordination/event-bus.js";
 import { PermissionRouter } from "../coordination/permission-router.js";
 import { DaemonPromptQueue } from "../coordination/prompt-queue.js";
 import {
@@ -24,10 +28,21 @@ import {
 import {
   createDaemonRpcFailure,
   type DaemonSseEvent,
+  type DaemonStartupIntent,
 } from "../protocols/jsonrpc/protocol.js";
 
 const encoder = new TextEncoder();
 const DEFAULT_CLIENT_DISCONNECT_RETENTION_MS = 5_000;
+const CLIENT_ID_HEADER = "x-ohbaby-client-id";
+
+const DEFAULT_WEB_STARTUP_INTENT: DaemonStartupIntent = {
+  startupSessionMode: { type: "fresh" },
+};
+
+interface WebAssetsOptions {
+  readonly baseUrl?: string;
+  readonly directory: string;
+}
 
 interface SseClient {
   readonly clientId: string;
@@ -47,6 +62,7 @@ export interface DaemonServerAppOptions {
   readonly packageVersion?: string;
   readonly permissionRouter?: PermissionRouter;
   readonly promptQueue?: DaemonPromptQueue;
+  readonly webAssets?: WebAssetsOptions;
 }
 
 export interface DaemonServerAppHandle {
@@ -104,6 +120,71 @@ function requestTooLargeBody(): unknown {
   );
 }
 
+function webErrorBody(message: string): unknown {
+  return { error: { message }, ok: false };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function escapeInlineScriptJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
+
+function contentTypeForPath(path: string): string {
+  switch (extname(path).toLowerCase()) {
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".js":
+    case ".mjs":
+      return "text/javascript; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".map":
+      return "application/json; charset=utf-8";
+    case ".svg":
+      return "image/svg+xml";
+    case ".wasm":
+      return "application/wasm";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function permissionRouterSnapshotForClient(
+  permissionRouter: PermissionRouter,
+  snapshot: UiSnapshot,
+  clientId: string,
+): UiSnapshot {
+  return permissionRouter.filterSnapshotForClient(snapshot, clientId);
+}
+
+function permissionResponseFromBody(
+  value: Record<string, unknown>,
+): UiPermissionResponse | undefined {
+  const choiceId = asNonEmptyString(value.choiceId);
+  if (!choiceId) {
+    return undefined;
+  }
+  return {
+    choiceId,
+    ...(typeof value.remember === "boolean"
+      ? { remember: value.remember }
+      : {}),
+  };
+}
+
 function scheduleAfterResponse(
   callback: (() => Promise<void> | void) | undefined,
 ): void {
@@ -129,9 +210,7 @@ type LastEventIdParseResult =
       readonly seqNum: number;
     };
 
-function parseLastEventId(
-  value: string | undefined,
-): LastEventIdParseResult {
+function parseLastEventId(value: string | undefined): LastEventIdParseResult {
   if (value === undefined || value.trim().length === 0) {
     return { kind: "absent" };
   }
@@ -183,6 +262,114 @@ async function readRequestTextWithLimit(request: Request): Promise<
   }
 }
 
+async function readJsonWithLimit(request: Request): Promise<
+  | {
+      readonly ok: true;
+      readonly value: unknown;
+    }
+  | {
+      readonly message: string;
+      readonly ok: false;
+      readonly status: number;
+    }
+> {
+  const body = await readRequestTextWithLimit(request);
+  if (!body.ok) {
+    return {
+      message: "Request body is too large",
+      ok: false,
+      status: 413,
+    };
+  }
+  if (body.body.trim().length === 0) {
+    return { ok: true, value: {} };
+  }
+  try {
+    return { ok: true, value: JSON.parse(body.body) as unknown };
+  } catch {
+    return {
+      message: "Request body must be valid JSON",
+      ok: false,
+      status: 400,
+    };
+  }
+}
+
+function createOpenApiDocument(packageVersion: string | undefined): unknown {
+  return {
+    info: {
+      title: "ohbaby local daemon API",
+      version: packageVersion ?? "0.1.6-dev",
+    },
+    openapi: "3.1.0",
+    paths: {
+      "/v1/clients": {
+        post: {
+          responses: {
+            "200": {
+              description: "Registered browser client",
+            },
+          },
+          summary: "Register a browser client view",
+        },
+      },
+      "/v1/events": {
+        get: {
+          responses: {
+            "200": {
+              description: "SSE stream of daemon events",
+            },
+          },
+          summary: "Subscribe to replayable event stream",
+        },
+      },
+      "/v1/permissions/{id}": {
+        post: {
+          responses: {
+            "200": {
+              description: "Permission response accepted",
+            },
+            "403": {
+              description: "Permission belongs to another client",
+            },
+          },
+          summary: "Respond to a permission request",
+        },
+      },
+      "/v1/prompts": {
+        post: {
+          responses: {
+            "202": {
+              description: "Prompt accepted for asynchronous execution",
+            },
+          },
+          summary: "Submit a prompt",
+        },
+      },
+      "/v1/sessions/{id}/abort": {
+        post: {
+          responses: {
+            "200": {
+              description: "Abort request accepted",
+            },
+          },
+          summary: "Abort a session run",
+        },
+      },
+      "/v1/snapshot": {
+        get: {
+          responses: {
+            "200": {
+              description: "Client snapshot with event sequence baseline",
+            },
+          },
+          summary: "Get current projected snapshot",
+        },
+      },
+    },
+  };
+}
+
 class DaemonServerAppRuntime {
   readonly app = new Hono();
   private readonly clientDisconnectRetentionMs: number;
@@ -199,7 +386,10 @@ class DaemonServerAppRuntime {
   private readonly authToken: string;
   private readonly permissionRouter: PermissionRouter;
   private readonly promptQueue: DaemonPromptQueue;
-  private readonly replayEventsBySeqNum = new Map<number, Map<string, UiEvent>>();
+  private readonly replayEventsBySeqNum = new Map<
+    number,
+    Map<string, UiEvent>
+  >();
   private started = false;
   private unsubscribe: UiUnsubscribe | undefined;
 
@@ -259,6 +449,10 @@ class DaemonServerAppRuntime {
   }
 
   private mountRoutes(): void {
+    this.app.get("/doc", (context) => {
+      return context.json(createOpenApiDocument(this.options.packageVersion));
+    });
+
     this.app.get("/api/health", (context) => {
       if (!this.isAuthorized(context.req.header("authorization"))) {
         return context.json(unauthorizedBody(), 401);
@@ -331,10 +525,306 @@ class DaemonServerAppRuntime {
         context.req.header("last-event-id"),
       );
     });
+
+    this.app.post("/v1/clients", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok) {
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      }
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      const clientId =
+        asNonEmptyString(body.clientId) ??
+        asNonEmptyString(context.req.header(CLIENT_ID_HEADER)) ??
+        randomUUID();
+      const startupIntent = parseDaemonStartupIntent(
+        body.startupIntent ?? DEFAULT_WEB_STARTUP_INTENT,
+      );
+      const snapshot = await this.options.backend.getSnapshot();
+      this.clientViews.initializeClient(clientId, snapshot, startupIntent);
+      this.knownClientIds.add(clientId);
+      this.cancelClientRoutingCleanup(clientId);
+
+      return context.json({ clientId, ok: true });
+    });
+
+    this.app.get("/v1/snapshot", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+
+      const snapshot = await this.options.backend.getSnapshot();
+      return context.json({
+        ok: true,
+        seqNum: this.eventBus.latestSeqNum,
+        snapshot: permissionRouterSnapshotForClient(
+          this.permissionRouter,
+          this.clientViews.projectSnapshot(clientId, snapshot),
+          clientId,
+        ),
+      });
+    });
+
+    this.app.get("/v1/events", (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      return this.createSseResponse(
+        clientId,
+        context.req.raw.signal,
+        context.req.header("last-event-id"),
+      );
+    });
+
+    this.app.post("/v1/prompts", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok) {
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      }
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      const text = asNonEmptyString(body.text);
+      if (!text) {
+        return context.json(webErrorBody("text is required"), 400);
+      }
+      const sessionId = asNonEmptyString(body.sessionId);
+      const prepared = this.clientViews.preparePromptSubmit(
+        clientId,
+        sessionId === undefined ? undefined : { sessionId },
+        this.createSessionId,
+      );
+      void this.promptQueue
+        .enqueue({
+          clientId,
+          ...(prepared.options === undefined
+            ? {}
+            : { options: prepared.options }),
+          ...(prepared.sessionId === undefined
+            ? {}
+            : { sessionId: prepared.sessionId }),
+          text,
+        })
+        .catch(() => undefined);
+
+      return context.json(
+        {
+          ok: true,
+          ...(prepared.sessionId === undefined
+            ? {}
+            : { sessionId: prepared.sessionId }),
+        },
+        202,
+      );
+    });
+
+    this.app.post("/v1/permissions/:id", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      const requestId = context.req.param("id");
+      if (!this.permissionRouter.canRespondPermission(requestId, clientId)) {
+        return context.json(
+          webErrorBody("Permission request is owned by another client"),
+          403,
+        );
+      }
+
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok) {
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      }
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      const responseValue = isRecord(body.response) ? body.response : body;
+      const response = permissionResponseFromBody(responseValue);
+      if (!response) {
+        return context.json(webErrorBody("choiceId is required"), 400);
+      }
+      await this.options.backend.respondPermission(requestId, response);
+      return context.json({ ok: true });
+    });
+
+    this.app.post("/v1/sessions/:id/abort", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok) {
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      }
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      const runId =
+        asNonEmptyString(body.runId) ??
+        (await this.runningRunIdForSession(context.req.param("id")));
+      await this.options.backend.abortRun(runId);
+      return context.json({ ok: true });
+    });
+
+    this.app.get("/", (context) => this.serveWebAsset(context));
+    this.app.get("/*", (context) => this.serveWebAsset(context));
   }
 
   private isAuthorized(authorization: string | undefined): boolean {
     return isAuthorized(authorization, this.authToken);
+  }
+
+  private clientIdFromRequest(context: {
+    readonly req: {
+      header(name: string): string | undefined;
+      query(name: string): string | undefined;
+    };
+  }): string | undefined {
+    return (
+      asNonEmptyString(context.req.header(CLIENT_ID_HEADER)) ??
+      asNonEmptyString(context.req.query("clientId"))
+    );
+  }
+
+  private async runningRunIdForSession(
+    sessionId: string,
+  ): Promise<string | undefined> {
+    const snapshot = await this.options.backend.getSnapshot();
+    const run = snapshot.runs.find((candidate) => {
+      if (candidate.sessionId !== sessionId) {
+        return false;
+      }
+      return (
+        candidate.status.kind === "running" ||
+        candidate.status.kind === "waiting-for-permission"
+      );
+    });
+    if (run) {
+      return run.id;
+    }
+    const status = snapshot.status;
+    if (status.kind === "running") {
+      const activeRun = snapshot.runs.find(
+        (candidate) => candidate.id === status.runId,
+      );
+      return activeRun?.sessionId === sessionId ? activeRun.id : undefined;
+    }
+    if (status.kind === "waiting-for-permission") {
+      const permission = snapshot.permissions.find(
+        (candidate) => candidate.id === status.requestId,
+      );
+      const activeRun =
+        permission === undefined
+          ? undefined
+          : snapshot.runs.find(
+              (candidate) => candidate.id === permission.runId,
+            );
+      return activeRun?.sessionId === sessionId ? activeRun.id : undefined;
+    }
+    return undefined;
+  }
+
+  private async serveWebAsset(context: Context): Promise<Response> {
+    const webAssets = this.options.webAssets;
+    if (!webAssets) {
+      return new Response("Not Found", { status: 404 });
+    }
+
+    const pathname = new URL(context.req.raw.url).pathname;
+    if (
+      pathname.startsWith("/api/") ||
+      pathname.startsWith("/v1/") ||
+      pathname === "/doc"
+    ) {
+      return new Response("Not Found", { status: 404 });
+    }
+
+    const root = resolve(webAssets.directory);
+    const relativePath =
+      pathname === "/"
+        ? "index.html"
+        : decodeURIComponent(pathname.replace(/^\/+/, ""));
+    if (relativePath.includes("\0")) {
+      return new Response("Bad Request", { status: 400 });
+    }
+
+    let filePath = resolve(root, relativePath);
+    const pathRelation = relative(root, filePath);
+    if (pathRelation.startsWith("..") || isAbsolute(pathRelation)) {
+      return new Response("Forbidden", { status: 403 });
+    }
+
+    let fileStat: Awaited<ReturnType<typeof stat>> | undefined;
+    try {
+      fileStat = await stat(filePath);
+    } catch {
+      const acceptsHtml = context.req.header("accept")?.includes("text/html");
+      if (!acceptsHtml || extname(filePath).length > 0) {
+        return new Response("Not Found", { status: 404 });
+      }
+      filePath = resolve(root, "index.html");
+      fileStat = await stat(filePath);
+    }
+    if (fileStat.isDirectory()) {
+      filePath = resolve(filePath, "index.html");
+    }
+
+    let body = await readFile(filePath);
+    const contentType = contentTypeForPath(filePath);
+    if (contentType.startsWith("text/html")) {
+      const bootstrap = {
+        baseUrl: webAssets.baseUrl ?? "",
+        clientId: randomUUID(),
+        startupIntent: DEFAULT_WEB_STARTUP_INTENT,
+        token: this.authToken,
+      };
+      const html = body
+        .toString("utf8")
+        .replace(
+          "</head>",
+          `<script>window.__OHBABY__=${escapeInlineScriptJson(
+            bootstrap,
+          )};</script></head>`,
+        );
+      body = Buffer.from(html, "utf8");
+    }
+
+    return new Response(body, {
+      headers: {
+        "cache-control": contentType.startsWith("text/html")
+          ? "no-store"
+          : "public, max-age=31536000, immutable",
+        "content-type": contentType,
+      },
+      status: 200,
+    });
   }
 
   private createSseResponse(

@@ -21,6 +21,7 @@ export interface CliStartDaemonServerOptions {
   readonly host?: string;
   readonly port?: number;
   readonly dbPath?: string;
+  readonly webAssetsDir?: string;
 }
 
 export interface CliRunningDaemonServer {

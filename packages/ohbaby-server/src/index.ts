@@ -1,4 +1,9 @@
 export {
+  createDaemonServerApp,
+  type DaemonServerAppHandle,
+  type DaemonServerAppOptions,
+} from "./app/create-app.js";
+export {
   createDaemonAuthToken,
   daemonAuthHeader,
   isAuthorizedDaemonRequest,
@@ -19,7 +24,11 @@ export {
   createRemoteUiBackendClient,
 } from "./protocols/jsonrpc/client.js";
 export type { RemoteDaemonClientOptions } from "./protocols/jsonrpc/client.js";
-export { readDaemonStatus, startDaemonServer, stopDaemonFromState } from "./runtime/daemon/main.js";
+export {
+  readDaemonStatus,
+  startDaemonServer,
+  stopDaemonFromState,
+} from "./runtime/daemon/main.js";
 export type {
   RunningDaemonServer,
   StartDaemonServerOptions,

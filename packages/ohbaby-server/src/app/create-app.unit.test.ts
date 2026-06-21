@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type {
   SubmitPromptOptions,
   UiBackendClient,
@@ -78,12 +81,23 @@ function setSearchApiKeyResult(): UiSetSearchApiKeyResult {
 
 class FakeBackend implements UiBackendClient {
   readonly handlers = new Set<UiEventHandler>();
+  readonly abortedRunIds: (string | undefined)[] = [];
+  readonly permissionResponses: {
+    readonly requestId: string;
+    readonly response: Parameters<UiBackendClient["respondPermission"]>[1];
+  }[] = [];
   readonly submitted: {
     readonly text: string;
     readonly options?: SubmitPromptOptions;
   }[] = [];
 
   constructor(private readonly snapshot: UiSnapshot = emptySnapshot()) {}
+
+  emit(event: Parameters<UiEventHandler>[0]): void {
+    for (const handler of Array.from(this.handlers)) {
+      handler(event);
+    }
+  }
 
   getSnapshot(): Promise<UiSnapshot> {
     return Promise.resolve(this.snapshot);
@@ -129,7 +143,14 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve();
   }
 
-  respondPermission(): Promise<void> {
+  respondPermission(
+    requestId: string,
+    response: Parameters<UiBackendClient["respondPermission"]>[1],
+  ): Promise<void> {
+    this.permissionResponses.push({
+      requestId,
+      response,
+    });
     return Promise.resolve();
   }
 
@@ -137,18 +158,21 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve();
   }
 
-  abortRun(): Promise<void> {
+  abortRun(runId?: string): Promise<void> {
+    this.abortedRunIds.push(runId);
     return Promise.resolve();
   }
 }
 
-function createApp(backend = new FakeBackend()): ReturnType<
-  typeof createDaemonServerApp
-> {
+function createApp(
+  backend = new FakeBackend(),
+  options: Partial<Parameters<typeof createDaemonServerApp>[0]> = {},
+): ReturnType<typeof createDaemonServerApp> {
   return createDaemonServerApp({
     authToken,
     backend,
     packageVersion: "0.1.5-test",
+    ...options,
   });
 }
 
@@ -223,7 +247,9 @@ describe("createDaemonServerApp", () => {
         clientDisconnectRetentionMs: -1,
         packageVersion: "0.1.5-test",
       }),
-    ).toThrow("clientDisconnectRetentionMs must be a non-negative finite number");
+    ).toThrow(
+      "clientDisconnectRetentionMs must be a non-negative finite number",
+    );
 
     expect(() =>
       createDaemonServerApp({
@@ -232,7 +258,9 @@ describe("createDaemonServerApp", () => {
         clientDisconnectRetentionMs: Number.POSITIVE_INFINITY,
         packageVersion: "0.1.5-test",
       }),
-    ).toThrow("clientDisconnectRetentionMs must be a non-negative finite number");
+    ).toThrow(
+      "clientDisconnectRetentionMs must be a non-negative finite number",
+    );
   });
 
   it("rejects requests when auth headers are missing", async () => {
@@ -300,9 +328,12 @@ describe("createDaemonServerApp", () => {
     });
     await handle.start();
     try {
-      const response = await handle.app.request("/api/events?clientId=client_a", {
-        headers: authHeaders(),
-      });
+      const response = await handle.app.request(
+        "/api/events?clientId=client_a",
+        {
+          headers: authHeaders(),
+        },
+      );
 
       expect(response.status).toBe(200);
       await expect(readSseData(response)).resolves.toEqual({
@@ -312,6 +343,177 @@ describe("createDaemonServerApp", () => {
       expect(onClientConnected).toHaveBeenCalledWith("client_a");
     } finally {
       await handle.dispose();
+    }
+  });
+
+  it("serves an OpenAPI document for web clients", async () => {
+    const handle = createApp();
+    await handle.start();
+    try {
+      const response = await handle.app.request("/doc");
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        readonly openapi: string;
+        readonly paths: Record<string, unknown>;
+      };
+      expect(body.openapi).toBe("3.1.0");
+      expect(Object.keys(body.paths)).toEqual(
+        expect.arrayContaining([
+          "/v1/clients",
+          "/v1/events",
+          "/v1/prompts",
+          "/v1/snapshot",
+        ]),
+      );
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("registers a web client and returns a projected snapshot with seqNum", async () => {
+    const snapshot = {
+      ...emptySnapshot(),
+      activeSessionId: "session_1",
+      sessions: [
+        {
+          createdAt: timestamp,
+          id: "session_1",
+          messages: [],
+          title: "Session",
+          updatedAt: timestamp,
+        },
+      ],
+    } satisfies UiSnapshot;
+    const handle = createApp(new FakeBackend(snapshot));
+    await handle.start();
+    try {
+      const clientResponse = await handle.app.request("/v1/clients", {
+        body: JSON.stringify({
+          clientId: "client_web",
+          startupIntent: { resumeSessionId: "session_1" },
+        }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+
+      expect(clientResponse.status).toBe(200);
+      await expect(clientResponse.json()).resolves.toEqual({
+        clientId: "client_web",
+        ok: true,
+      });
+
+      const snapshotResponse = await handle.app.request("/v1/snapshot", {
+        headers: {
+          ...authHeaders(),
+          "x-ohbaby-client-id": "client_web",
+        },
+      });
+
+      expect(snapshotResponse.status).toBe(200);
+      await expect(snapshotResponse.json()).resolves.toMatchObject({
+        ok: true,
+        seqNum: 0,
+        snapshot: {
+          activeSessionId: "session_1",
+          sessions: [{ id: "session_1" }],
+        },
+      });
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("serves the web SSE hello event", async () => {
+    const handle = createApp();
+    await handle.start();
+    try {
+      const response = await handle.app.request("/v1/events", {
+        headers: {
+          ...authHeaders(),
+          "x-ohbaby-client-id": "client_web",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      await expect(readSseData(response)).resolves.toEqual({
+        clientId: "client_web",
+        type: "hello",
+      });
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("accepts web prompts asynchronously", async () => {
+    const backend = new FakeBackend();
+    const handle = createApp(backend, {
+      createSessionId: () => "session_generated",
+    });
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({ text: "hello" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+          "x-ohbaby-client-id": "client_web",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toEqual({
+        ok: true,
+        sessionId: "session_generated",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(backend.submitted).toEqual([
+        {
+          options: { sessionId: "session_generated" },
+          text: "hello",
+        },
+      ]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("serves web assets with injected bootstrap config", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-web-assets-"));
+    await writeFile(
+      join(tempDir, "index.html"),
+      "<!doctype html><html><head></head><body></body></html>",
+      "utf8",
+    );
+    const handle = createApp(new FakeBackend(), {
+      webAssets: { directory: tempDir },
+    });
+    await handle.start();
+    try {
+      const response = await handle.app.request("/", {
+        headers: { accept: "text/html" },
+      });
+
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(html).toContain("window.__OHBABY__=");
+      expect(html).toContain('"token":"token_1"');
+      expect(html).toContain('"startupSessionMode":{"type":"fresh"}');
+    } finally {
+      await handle.dispose();
+      await rm(tempDir, { force: true, recursive: true });
     }
   });
 });

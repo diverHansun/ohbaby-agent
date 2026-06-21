@@ -28,6 +28,7 @@ export interface DaemonHttpServerOptions {
   readonly port?: number;
   readonly permissionRouter?: PermissionRouter;
   readonly promptQueue?: DaemonPromptQueue;
+  readonly webAssetsDir?: string;
 }
 
 export interface DaemonHttpServerHandle {
@@ -64,6 +65,9 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       packageVersion: options.packageVersion,
       permissionRouter: options.permissionRouter,
       promptQueue: options.promptQueue,
+      ...(options.webAssetsDir === undefined
+        ? {}
+        : { webAssets: { directory: options.webAssetsDir } }),
     });
   }
 
@@ -126,5 +130,6 @@ export function createDaemonHttpServer(
     permissionRouter: options.permissionRouter ?? new PermissionRouter(),
     port: options.port ?? DEFAULT_PORT,
     promptQueue: options.promptQueue,
+    webAssetsDir: options.webAssetsDir,
   });
 }
