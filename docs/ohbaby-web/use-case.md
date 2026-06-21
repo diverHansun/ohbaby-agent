@@ -33,9 +33,10 @@
 4. 期间用户可随时 `abort`（中断当前 run）。
 
 ### UC3 处置权限请求
-1. SSE 推 `permission.requested` → 入 PendingPermission 队列 → 弹 PermissionDialog。
+1. SSE 推 `permission.requested` → 入 PendingPermission 队列 → **权限模态 slide-up 弹出**（渲染队首；多于一个显示"还有 N 个待处理"）。仅当权限策略为 `default` 时弹出（`full-access` 不弹）。
 2. 用户准/拒 → `POST /v1/permissions/:id`。
-3. `permission.resolved` 回流 → 移除该 PendingPermission。
+3. `permission.resolved` 回流 → 移除该 PendingPermission，模态显示下一个或关闭。
+4. 模态**纯由队列投影**：resync 时 ViewState 重建 → 队列重算 → 模态自动刷新/关闭（该请求可能已被它端处置）。视觉规格见 [`ui/components.md`](./ui/components.md)。
 
 ### UC4 断线恢复 / 重同步
 1. SSE 断 → `reconnecting` → 带 `Last-Event-ID` 重连。

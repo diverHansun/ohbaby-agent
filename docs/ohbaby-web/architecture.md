@@ -52,14 +52,15 @@ apps/ohbaby-web/
     store/
       store.ts          外部 store：subscribe/getSnapshot（喂 useSyncExternalStore）
     ui/
-      ConversationStream.tsx   会话/消息流（含流式渲染 + markdown 消毒）
-      Composer.tsx             输入框（发 prompt / 中断）
-      PermissionDialog.tsx     权限审批弹窗
-      StatusBar.tsx            连接态 / run 状态 / 上下文用量
+      ConversationStream.tsx   会话/消息流（流式渲染 + markdown 消毒 + 工具卡片）
+      Composer.tsx             输入框 + 发/中断 + mode(auto/plan) + 权限策略(default/full-access)
+      PermissionModal.tsx      权限模态（slide-up，队列驱动）
+      StatusBar.tsx            连接态 / run 状态 / 上下文用量（无诊断行）
 ```
 
 - **对外稳定面**：`client` 门面 + store hooks。
 - **内部实现**：`wire` / `http` / `events` / `eventReducer` —— 可在不动 UI 的前提下替换。
+- **视图层详细设计**见 [`ui/`](./ui/README.md)：组件规格、状态可视化、设计 token、最终屏幕参考。三项已锁 UI 决策：StatusBar **不暴露诊断行**（seqNum/clientId/端口属开发者，正确性只经 ConnectionState 五态对用户可见）；权限用**模态 slide-up**；composer 的 **mode/policy 切换纳入 v0.1.6**。
 
 ---
 

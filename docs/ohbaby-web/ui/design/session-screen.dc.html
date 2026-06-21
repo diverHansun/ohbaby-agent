@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #fafafa; }
+  @keyframes ohb-caret { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+  @keyframes ohb-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  @keyframes ohb-wave { 0%, 100% { opacity: .22; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-4px); } }
+  .ohb-stream::-webkit-scrollbar { width: 10px; }
+  .ohb-stream::-webkit-scrollbar-thumb { background: #e4e4e4; border-radius: 6px; border: 3px solid #fafafa; }
+</style>
+</helmet>
+
+<div style="width:100vw; height:100vh; display:flex; flex-direction:column; background:#fafafa; font-family:'IBM Plex Sans',-apple-system,sans-serif; color:#26282d;">
+
+  <!-- ===== header ===== -->
+  <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 24px; border-bottom:1px solid #ececec; flex:none; background:#ffffff;">
+    <div style="display:flex; align-items:center; gap:11px;">
+      <div style="display:grid; grid-template-columns:repeat(2,6px); grid-template-rows:repeat(2,6px); gap:2px;">
+        <div style="background:#c9a23f;"></div><div style="background:#c97e92;"></div><div style="background:#c97e92;"></div><div style="background:#5f86c4;"></div>
+      </div>
+      <span style="font:600 17px/1 'IBM Plex Mono',monospace; letter-spacing:.04em; color:#1f2024;">OHBABY</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:18px;">
+      <div style="display:flex; align-items:center; gap:7px; background:{{ statusBg }}; border:1px solid {{ statusBorder }}; border-radius:20px; padding:5px 12px 5px 10px;">
+        <span style="width:7px; height:7px; border-radius:50%; background:{{ statusDot }}; animation:{{ statusAnim }};"></span>
+        <span style="font:500 12px/1 'IBM Plex Mono',monospace; color:{{ statusTxt }};">{{ statusLabel }}</span>
+      </div>
+      <span style="width:1px; height:16px; background:#e6e6e6;"></span>
+      <span style="font:400 12.5px/1 'IBM Plex Mono',monospace; color:#8a8d94;">glm-5.1</span>
+      <span style="width:1px; height:16px; background:#e6e6e6;"></span>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="width:64px; height:5px; border-radius:3px; background:#ececec; overflow:hidden;"><div style="width:16%; height:100%; background:#5f86c4; border-radius:3px;"></div></div>
+        <span style="font:400 12px/1 'IBM Plex Mono',monospace; color:#aeb2ba;">32k / 200k</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== stream ===== -->
+  <div class="ohb-stream" style="flex:1; overflow-y:auto; padding:32px 0;">
+    <div style="max-width:720px; margin:0 auto; padding:0 24px; display:flex; flex-direction:column; gap:26px;">
+
+      <!-- user -->
+      <div>
+        <div style="font:600 10.5px/1 'IBM Plex Sans',sans-serif; letter-spacing:.13em; text-transform:uppercase; color:#a3a6ad; margin-bottom:9px;">You</div>
+        <div style="font:400 15px/1.62 'IBM Plex Sans',sans-serif; color:#2b2d33;">Wrap <span style="font-family:'IBM Plex Mono',monospace; font-size:13.5px; background:#f1f1f2; padding:1px 5px; border-radius:4px;">GET /v1/snapshot</span> so it returns the seqNum baseline it reflects — web opens SSE first, then applies only events past the baseline.</div>
+      </div>
+
+      <!-- assistant -->
+      <div>
+        <div style="display:flex; align-items:center; gap:7px; margin-bottom:11px;">
+          <span style="width:6px; height:6px; border-radius:50%; background:#c9a23f;"></span>
+          <span style="font:600 10.5px/1 'IBM Plex Sans',sans-serif; letter-spacing:.13em; text-transform:uppercase; color:#a3a6ad;">ohbaby</span>
+        </div>
+        <div style="font:400 15px/1.62 'IBM Plex Sans',sans-serif; color:#2b2d33; margin-bottom:14px;">Let me find where the snapshot response is built.</div>
+
+        <!-- tool: search (collapsible) -->
+        <div style="border:1px solid #ececec; border-radius:8px; background:#fff; margin-bottom:10px; overflow:hidden;">
+          <div onClick="{{ toggleSearch }}" style="display:flex; align-items:center; gap:10px; padding:10px 13px; cursor:pointer; user-select:none;">
+            <span style="font:500 11px/1 'IBM Plex Mono',monospace; color:#5b6bb0; background:#eef0f9; border:1px solid #dde1f1; padding:2px 7px; border-radius:5px;">SEARCH</span>
+            <span style="font:400 13px/1 'IBM Plex Mono',monospace; color:#54565c;">getSnapshot</span>
+            <span style="margin-left:auto; font:400 12px/1 'IBM Plex Mono',monospace; color:#aeb2ba;">7 matches</span>
+            <span style="color:#c2c5cc; font-size:13px; transform:{{ searchChevron }}; transition:transform .15s;">›</span>
+          </div>
+          <sc-if value="{{ expandedSearch }}" hint-placeholder-val="{{ false }}">
+            <div style="border-top:1px solid #f1f1f1; font:400 12.5px/1.85 'IBM Plex Mono',monospace; padding:8px 13px; color:#6b6d73;">
+              <div><span style="color:#5f86c4;">protocols/web/routes/snapshot.ts</span><span style="color:#cfd2d8;">:24</span>  return c.json(snapshot);</div>
+              <div><span style="color:#5f86c4;">coordination/client-view.ts</span><span style="color:#cfd2d8;">:88</span>  getSnapshot(view) {</div>
+              <div><span style="color:#5f86c4;">core/api-host.ts</span><span style="color:#cfd2d8;">:140</span>  async getSnapshot(scope) {</div>
+              <div style="color:#aeb2ba;">+ 4 more in agent/, tests/</div>
+            </div>
+          </sc-if>
+        </div>
+
+        <div style="font:400 15px/1.62 'IBM Plex Sans',sans-serif; color:#2b2d33; margin:14px 0;">It's assembled in the snapshot route — it returns the raw <span style="font-family:'IBM Plex Mono',monospace; font-size:13.5px; color:#7c6cc0;">UiSnapshot</span> with no baseline.</div>
+
+        <!-- tool: read (collapsible) -->
+        <div style="border:1px solid #ececec; border-radius:8px; background:#fff; margin-bottom:10px; overflow:hidden;">
+          <div onClick="{{ toggleRead }}" style="display:flex; align-items:center; gap:10px; padding:10px 13px; cursor:pointer; user-select:none;">
+            <span style="font:500 11px/1 'IBM Plex Mono',monospace; color:#a8842f; background:#f7f1e3; border:1px solid #ece2c9; padding:2px 7px; border-radius:5px;">READ</span>
+            <span style="font:400 13px/1 'IBM Plex Mono',monospace; color:#54565c;">protocols/web/routes/snapshot.ts</span>
+            <span style="margin-left:auto; font:400 12px/1 'IBM Plex Mono',monospace; color:#aeb2ba;">42 lines</span>
+            <span style="color:#c2c5cc; font-size:13px; transform:{{ readChevron }}; transition:transform .15s;">›</span>
+          </div>
+          <sc-if value="{{ expandedRead }}" hint-placeholder-val="{{ false }}">
+            <div style="border-top:1px solid #f1f1f1; font:400 12.5px/1.75 'IBM Plex Mono',monospace; padding:8px 0; color:#6b6d73;">
+              <div style="padding:0 13px;"><span style="display:inline-block; width:30px; color:#cfd2d8;">21</span>const view = c.get('clientView');</div>
+              <div style="padding:0 13px;"><span style="display:inline-block; width:30px; color:#cfd2d8;">22</span>&nbsp;</div>
+              <div style="padding:0 13px;"><span style="display:inline-block; width:30px; color:#cfd2d8;">23</span>const snapshot = await host.getSnapshot(view);</div>
+              <div style="padding:0 13px; background:#f4f6fb;"><span style="display:inline-block; width:30px; color:#cfd2d8;">24</span>return c.json(snapshot);</div>
+              <div style="padding:0 13px;"><span style="display:inline-block; width:30px; color:#cfd2d8;">25</span>});</div>
+            </div>
+          </sc-if>
+        </div>
+
+        <div style="font:400 15px/1.62 'IBM Plex Sans',sans-serif; color:#2b2d33; margin:14px 0;">I'll wrap it as <span style="font-family:'IBM Plex Mono',monospace; font-size:13.5px; background:#f1f1f2; padding:1px 5px; border-radius:4px;">{ snapshot, seqNum }</span> and read the baseline from the event-bus cursor.</div>
+
+        <!-- tool: edit (collapsible) -->
+        <div style="border:1px solid #ececec; border-radius:8px; background:#fff; overflow:hidden;">
+          <div onClick="{{ toggleEdit }}" style="display:flex; align-items:center; gap:10px; padding:10px 13px; cursor:pointer; user-select:none;">
+            <span style="font:500 11px/1 'IBM Plex Mono',monospace; color:#3f7d5c; background:#eef6f1; border:1px solid #d8ebe0; padding:2px 7px; border-radius:5px;">EDIT</span>
+            <span style="font:400 13px/1 'IBM Plex Mono',monospace; color:#54565c;">snapshot.ts</span>
+            <span style="margin-left:auto; display:flex; gap:8px; font:500 12px/1 'IBM Plex Mono',monospace;"><span style="color:#3f9d6b;">+8</span><span style="color:#c4756b;">−2</span></span>
+            <span style="color:#c2c5cc; font-size:13px; transform:{{ editChevron }}; transition:transform .15s;">›</span>
+          </div>
+          <sc-if value="{{ expandedEdit }}" hint-placeholder-val="{{ false }}">
+            <div style="border-top:1px solid #f1f1f1; font:400 12.5px/1.7 'IBM Plex Mono',monospace; padding:8px 0; color:#6b6d73;">
+              <div style="padding:0 13px; color:#9a9da4;"><span style="display:inline-block; width:34px; color:#cfd2d8;">23</span>const snapshot = await host.getSnapshot(view);</div>
+              <div style="padding:0 13px; background:rgba(196,117,107,.08); color:#b23b32;"><span style="display:inline-block; width:34px; color:#dcb3ad;">24</span>−  return c.json(snapshot);</div>
+              <div style="padding:0 13px; background:rgba(63,157,107,.10); color:#2c7a50;"><span style="display:inline-block; width:34px; color:#9ccfb4;">24</span>+  const seq = bus.cursor();</div>
+              <div style="padding:0 13px; background:rgba(63,157,107,.10); color:#2c7a50;"><span style="display:inline-block; width:34px; color:#9ccfb4;">25</span>+  return c.json({ snapshot, seqNum: seq });</div>
+            </div>
+          </sc-if>
+        </div>
+
+        <!-- thinking indicator / finalized line -->
+        <sc-if value="{{ running }}" hint-placeholder-val="{{ true }}">
+          <div style="margin-top:16px; display:flex; align-items:center; gap:11px;">
+            <span style="display:flex; gap:5px;">
+              <span style="width:8px; height:8px; border-radius:2px; background:#c9a23f; animation:ohb-wave 1.2s ease-in-out 0s infinite;"></span>
+              <span style="width:8px; height:8px; border-radius:2px; background:#c97e92; animation:ohb-wave 1.2s ease-in-out .15s infinite;"></span>
+              <span style="width:8px; height:8px; border-radius:2px; background:#5f86c4; animation:ohb-wave 1.2s ease-in-out .3s infinite;"></span>
+            </span>
+            <span style="font:400 14px/1 'IBM Plex Mono',monospace; color:#54565c;">Thinking</span>
+            <span style="font:400 13px/1 'IBM Plex Mono',monospace; color:#9a9da4;">· {{ elapsed }}s</span>
+            <span style="font:400 12.5px/1 'IBM Plex Mono',monospace; color:#aeb2ba;">· double click esc to interrupt</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{ idle }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:14px; font:400 15px/1.62 'IBM Plex Sans',sans-serif; color:#6b6d73;">Run stopped. The pending edit is staged and waiting for your approval below.</div>
+        </sc-if>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== permission ===== -->
+  <sc-if value="{{ showPermission }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:none; padding:0 24px;">
+      <div style="max-width:720px; margin:0 auto;">
+        <div style="border:1px solid #d8e1f0; background:#f5f8ff; border-radius:9px; padding:13px 15px; display:flex; align-items:center; gap:14px;">
+          <div style="flex:1; min-width:0;">
+            <div style="font:500 13.5px/1.3 'IBM Plex Sans',sans-serif; color:#26282d;">Allow ohbaby to edit a file?</div>
+            <div style="font:400 12px/1.3 'IBM Plex Mono',monospace; color:#8a8d94; margin-top:2px;">write · protocols/web/routes/snapshot.ts</div>
+          </div>
+          <div style="display:flex; gap:8px; flex:none;">
+            <button onClick="{{ resolvePerm }}" style="font:500 12.5px/1 'IBM Plex Sans',sans-serif; color:#6b6d73; background:#fff; border:1px solid #e4e4e4; padding:9px 14px; border-radius:7px; cursor:pointer;">Deny</button>
+            <button onClick="{{ resolvePerm }}" style="font:500 12.5px/1 'IBM Plex Sans',sans-serif; color:#fff; background:#5f86c4; border:1px solid #5278bb; padding:9px 16px; border-radius:7px; cursor:pointer;">Approve</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===== composer ===== -->
+  <div style="flex:none; padding:16px 24px 22px;">
+    <div style="max-width:720px; margin:0 auto;">
+      <div style="display:flex; align-items:center; gap:12px; background:#fff; border:1px solid #cdd7e8; border-radius:11px; padding:9px 10px 9px 16px; box-shadow:0 0 0 3px rgba(95,134,196,.08), 0 1px 2px rgba(30,34,44,.04);">
+        <span style="font:600 14px/1 'IBM Plex Mono',monospace; color:#5f86c4;">&gt;</span>
+        <input value="{{ draft }}" onInput="{{ onDraft }}" onKeyDown="{{ onComposerKey }}" placeholder="Message ohbaby…" style="flex:1; border:none; outline:none; background:transparent; font:400 14px/1.4 'IBM Plex Mono',monospace; color:#26282d;" />
+        <sc-if value="{{ running }}" hint-placeholder-val="{{ true }}">
+          <button onClick="{{ stop }}" style="display:flex; align-items:center; gap:7px; font:500 12.5px/1 'IBM Plex Sans',sans-serif; color:#6b6d73; background:#f1f1f2; border:1px solid #e4e4e4; padding:9px 13px; border-radius:8px; cursor:pointer;"><span style="width:9px; height:9px; background:#c4756b; border-radius:2px; display:inline-block;"></span>Stop</button>
+        </sc-if>
+        <sc-if value="{{ idle }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ send }}" style="display:flex; align-items:center; gap:7px; font:500 12.5px/1 'IBM Plex Sans',sans-serif; color:#fff; background:#5f86c4; border:1px solid #5278bb; padding:9px 15px; border-radius:8px; cursor:pointer;">Send <span style="font-family:'IBM Plex Mono',monospace;">↵</span></button>
+        </sc-if>
+      </div>
+      <div style="margin-top:9px; display:flex; align-items:center; gap:9px;">
+        <!-- plan / auto mode -->
+        <button onClick="{{ cycleMode }}" style="display:flex; align-items:center; gap:7px; background:{{ modeBg }}; border:1px solid {{ modeBorder }}; border-radius:7px; padding:6px 9px 6px 10px; cursor:pointer; font:500 11.5px/1 'IBM Plex Mono',monospace; color:{{ modeTxt }};">
+          <span style="width:6px; height:6px; border-radius:50%; background:{{ modeDot }};"></span>
+          {{ modeLabel }}
+          <span style="color:#c2c5cc; font-size:10.5px; letter-spacing:.02em;">⇧⇥</span>
+        </button>
+        <!-- permission policy -->
+        <div style="position:relative;">
+          <button onClick="{{ togglePerm }}" style="display:flex; align-items:center; gap:6px; background:#fff; border:1px solid #e4e4e4; border-radius:7px; padding:6px 9px; cursor:pointer; font:500 11.5px/1 'IBM Plex Mono',monospace; color:#54565c;">
+            <span style="width:11px; height:11px; border:1.4px solid #b6bcc6; border-radius:3px; display:inline-block; position:relative; top:.5px;"></span>
+            {{ permPolicyLabel }}
+            <span style="color:#aeb2ba; font-size:9px; transform:{{ permChevron }};">▾</span>
+          </button>
+          <sc-if value="{{ permOpen }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute; bottom:calc(100% + 7px); left:0; min-width:178px; background:#fff; border:1px solid #e4e4e4; border-radius:9px; box-shadow:0 6px 22px rgba(30,34,44,.12); padding:5px; z-index:10;">
+              <div onClick="{{ selectDefault }}" style="display:flex; align-items:flex-start; gap:8px; padding:8px 9px; border-radius:6px; cursor:pointer; background:{{ defaultRowBg }};">
+                <span style="flex:none; width:13px; color:#5f86c4; font:500 11px/1.3 'IBM Plex Mono',monospace;">{{ defaultCheck }}</span>
+                <div><div style="font:500 12px/1.3 'IBM Plex Mono',monospace; color:#26282d;">default</div><div style="font:400 10.5px/1.3 'IBM Plex Mono',monospace; color:#9a9da4; margin-top:2px;">ask before each action</div></div>
+              </div>
+              <div onClick="{{ selectFull }}" style="display:flex; align-items:flex-start; gap:8px; padding:8px 9px; border-radius:6px; cursor:pointer; background:{{ fullRowBg }};">
+                <span style="flex:none; width:13px; color:#5f86c4; font:500 11px/1.3 'IBM Plex Mono',monospace;">{{ fullCheck }}</span>
+                <div><div style="font:500 12px/1.3 'IBM Plex Mono',monospace; color:#26282d;">full-access</div><div style="font:400 10.5px/1.3 'IBM Plex Mono',monospace; color:#9a9da4; margin-top:2px;">run without prompts</div></div>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+        <span style="flex:1;"></span>
+        <span style="font:400 11.5px/1 'IBM Plex Mono',monospace; color:{{ hintColor }};">{{ composerHint }}</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;connection&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;live&quot;,&quot;connecting&quot;,&quot;reconnecting&quot;,&quot;resyncing&quot;,&quot;disconnected&quot;],&quot;default&quot;:&quot;live&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = {
+    runStatus: 'running',          // 'running' | 'idle'
+    expandedSearch: false,
+    expandedRead: false,
+    expandedEdit: false,
+    draft: '',
+    escArmed: false,
+    permission: true,
+    elapsed: 6,
+    mode: 'auto',                  // 'auto' | 'plan'
+    permPolicy: 'default',         // 'default' | 'full-access'
+    permOpen: false,
+  };
+
+  componentDidMount() {
+    this._onKey = (e) => this.handleKey(e);
+    document.addEventListener('keydown', this._onKey);
+    this._timer = setInterval(() => {
+      if (this.state.runStatus === 'running') this.setState((s) => ({ elapsed: s.elapsed + 1 }));
+    }, 1000);
+  }
+  componentWillUnmount() {
+    document.removeEventListener('keydown', this._onKey);
+    clearTimeout(this._t);
+    clearInterval(this._timer);
+  }
+
+  handleKey(e) {
+    if (e.key === 'Tab' && e.shiftKey) { e.preventDefault(); this.cycleMode(); return; }
+    this.handleEsc(e);
+  }
+  cycleMode() { this.setState((s) => ({ mode: s.mode === 'auto' ? 'plan' : 'auto' })); }
+  togglePerm() { this.setState((s) => ({ permOpen: !s.permOpen })); }
+  selectPolicy(p) { this.setState({ permPolicy: p, permOpen: false }); }
+
+  handleEsc(e) {
+    if (e.key !== 'Escape') return;
+    if (this.state.runStatus !== 'running') return;
+    if (this.state.escArmed) {
+      clearTimeout(this._t);
+      this.setState({ runStatus: 'idle', escArmed: false });
+    } else {
+      this.setState({ escArmed: true });
+      clearTimeout(this._t);
+      this._t = setTimeout(() => this.setState({ escArmed: false }), 700);
+    }
+  }
+
+  stop() {
+    clearTimeout(this._t);
+    this.setState({ runStatus: 'idle', escArmed: false });
+  }
+
+  send() {
+    if (!this.state.draft.trim()) return;
+    this.setState({ runStatus: 'running', draft: '', elapsed: 0 });
+  }
+
+  toggle(key) {
+    this.setState((s) => ({ [key]: !s[key] }));
+  }
+
+  renderVals() {
+    const s = this.state;
+    const connection = this.props.connection ?? 'live';
+
+    let statusLabel, dot, txt, bg, border, anim;
+    const slate = { dot: '#5f86c4', txt: '#4a6ba6', bg: '#eef2f9', border: '#d8e1f0' };
+    const green = { dot: '#3f9d6b', txt: '#3f7d5c', bg: '#eef6f1', border: '#d8ebe0' };
+    const gold  = { dot: '#c9a23f', txt: '#a8842f', bg: '#f7f1e3', border: '#ece2c9' };
+    const red   = { dot: '#c4756b', txt: '#a8554c', bg: '#fbeeec', border: '#f0d6d1' };
+    const pulse = 'ohb-pulse 1.4s ease-in-out infinite';
+
+    if (connection === 'live') {
+      if (s.runStatus === 'running') { statusLabel = 'running'; dot = slate.dot; txt = slate.txt; bg = slate.bg; border = slate.border; anim = pulse; }
+      else { statusLabel = 'idle'; dot = green.dot; txt = green.txt; bg = green.bg; border = green.border; anim = 'none'; }
+    } else if (connection === 'connecting') { statusLabel = 'connecting'; dot = gold.dot; txt = gold.txt; bg = gold.bg; border = gold.border; anim = pulse; }
+    else if (connection === 'reconnecting') { statusLabel = 'reconnecting'; dot = gold.dot; txt = gold.txt; bg = gold.bg; border = gold.border; anim = pulse; }
+    else if (connection === 'resyncing') { statusLabel = 'resyncing'; dot = slate.dot; txt = slate.txt; bg = slate.bg; border = slate.border; anim = pulse; }
+    else { statusLabel = 'disconnected'; dot = red.dot; txt = red.txt; bg = red.bg; border = red.border; anim = 'none'; }
+
+    const running = connection === 'live' && s.runStatus === 'running';
+    const idle = !running;
+
+    let hint;
+    if (s.escArmed) hint = 'press esc again to stop';
+    else if (running) hint = 'double click esc to stop';
+    else hint = '↵ · send';
+
+    return {
+      statusLabel, statusDot: dot, statusTxt: txt, statusBg: bg, statusBorder: border, statusAnim: anim,
+      running, idle,
+      elapsed: s.elapsed,
+      expandedSearch: s.expandedSearch,
+      expandedRead: s.expandedRead,
+      expandedEdit: s.expandedEdit,
+      searchChevron: s.expandedSearch ? 'rotate(90deg)' : 'rotate(0deg)',
+      readChevron: s.expandedRead ? 'rotate(90deg)' : 'rotate(0deg)',
+      editChevron: s.expandedEdit ? 'rotate(90deg)' : 'rotate(0deg)',
+      toggleSearch: () => this.toggle('expandedSearch'),
+      toggleRead: () => this.toggle('expandedRead'),
+      toggleEdit: () => this.toggle('expandedEdit'),
+      draft: s.draft,
+      onDraft: (e) => this.setState({ draft: e.target.value }),
+      onComposerKey: (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); } },
+      send: () => this.send(),
+      stop: () => this.stop(),
+      permission: s.permission,
+      showPermission: s.permission && s.permPolicy === 'default',
+      resolvePerm: () => this.setState({ permission: false }),
+      modeLabel: s.mode === 'auto' ? 'auto mode' : 'plan mode',
+      modeDot: s.mode === 'auto' ? '#3f9d6b' : '#5f86c4',
+      modeBg: s.mode === 'auto' ? '#ffffff' : '#eef2f9',
+      modeBorder: s.mode === 'auto' ? '#e4e4e4' : '#d8e1f0',
+      modeTxt: s.mode === 'auto' ? '#54565c' : '#4a6ba6',
+      cycleMode: () => this.cycleMode(),
+      permPolicyLabel: s.permPolicy,
+      permOpen: s.permOpen,
+      permChevron: s.permOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+      togglePerm: () => this.togglePerm(),
+      selectDefault: () => this.selectPolicy('default'),
+      selectFull: () => this.selectPolicy('full-access'),
+      defaultCheck: s.permPolicy === 'default' ? '✓' : '',
+      fullCheck: s.permPolicy === 'full-access' ? '✓' : '',
+      defaultRowBg: s.permPolicy === 'default' ? '#f4f6fb' : 'transparent',
+      fullRowBg: s.permPolicy === 'full-access' ? '#f4f6fb' : 'transparent',
+      composerHint: hint,
+      hintColor: s.escArmed ? '#c4756b' : '#aeb2ba',
+    };
+  }
+}
+</script>
+</body>
+</html>

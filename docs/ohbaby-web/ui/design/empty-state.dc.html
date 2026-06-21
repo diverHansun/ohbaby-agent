@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #f8f9fb; }
+  @keyframes ohb-caret { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+  @keyframes ohb-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+</style>
+</helmet>
+
+<div style="width:100vw; height:100vh; position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#f8f9fb; font-family:'IBM Plex Sans',-apple-system,sans-serif; color:#26282d;">
+
+  <!-- connection status, top-right -->
+  <div style="position:absolute; top:22px; right:26px; display:flex; align-items:center; gap:7px; background:{{ statusBg }}; border:1px solid {{ statusBorder }}; border-radius:20px; padding:5px 13px 5px 10px;">
+    <span style="width:7px; height:7px; border-radius:50%; background:{{ statusDot }}; animation:{{ statusAnim }};"></span>
+    <span style="font:500 12px/1 'IBM Plex Mono',monospace; color:{{ statusTxt }};">{{ statusLabel }}</span>
+  </div>
+
+  <!-- ===== centered hero ===== -->
+  <div style="display:flex; flex-direction:column; align-items:center; margin-top:-24px;">
+
+    <!-- wordmark -->
+    <div style="font:600 70px/1 'Fredoka',sans-serif; letter-spacing:-.005em; display:flex;">
+      <span style="color:#c9a23f;">oh</span><span style="color:#c97e92;">ba</span><span style="color:#5f86c4;">by</span>
+    </div>
+
+    <!-- session context -->
+    <div style="margin-top:26px; display:flex; align-items:center; gap:12px; font:400 13px/1 'IBM Plex Mono',monospace; color:#8a8d94;">
+      <span style="display:inline-block; width:13px; height:11px; border:1.5px solid #b6bcc6; border-top:none; border-radius:0 0 2px 2px; position:relative; top:1px;"></span>
+      <span style="color:#26282d; font-weight:500;">ohbaby-agent</span>
+      <span style="color:#c9cdd4;">·</span>
+      <span>~/dev/ohbaby-agent</span>
+      <span style="color:#c9cdd4;">·</span>
+      <span>glm-5.1</span>
+    </div>
+
+    <!-- composer -->
+    <div style="margin-top:36px; width:620px; max-width:88vw;">
+      <div style="display:flex; align-items:center; gap:11px; background:#fff; border:1px solid {{ composerBorder }}; border-radius:13px; padding:14px 12px 14px 16px; box-shadow:{{ composerShadow }};">
+        <span style="font:600 14px/1 'IBM Plex Mono',monospace; color:{{ promptColor }};">&gt;</span>
+        <input value="{{ draft }}" onInput="{{ onDraft }}" onKeyDown="{{ onKey }}" disabled="{{ inputDisabled }}" placeholder="{{ placeholder }}" style="flex:1; border:none; outline:none; background:transparent; font:400 14px/1.4 'IBM Plex Mono',monospace; color:#26282d;" />
+        <button onClick="{{ send }}" disabled="{{ sendDisabled }}" style="font:500 12.5px/1 'IBM Plex Sans',sans-serif; color:#fff; background:#5f86c4; border:1px solid #5278bb; padding:9px 15px; border-radius:8px; cursor:{{ sendCursor }}; opacity:{{ sendOpacity }};">Send <span style="font-family:'IBM Plex Mono',monospace;">↵</span></button>
+      </div>
+      <div style="margin-top:11px; text-align:center; font:400 11.5px/1 'IBM Plex Mono',monospace; color:{{ hintColor }};">{{ hint }}</div>
+    </div>
+
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;100%&quot;,&quot;height&quot;:&quot;100%&quot;},&quot;connection&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;live&quot;,&quot;connecting&quot;,&quot;disconnected&quot;],&quot;default&quot;:&quot;live&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { draft: '', launching: false };
+
+  send() {
+    const conn = this.props.connection ?? 'live';
+    if (conn !== 'live' || !this.state.draft.trim()) return;
+    this.setState({ launching: true });
+  }
+
+  renderVals() {
+    const s = this.state;
+    const conn = this.props.connection ?? 'live';
+
+    const green = { dot: '#3f9d6b', txt: '#3f7d5c', bg: '#eef6f1', border: '#d8ebe0' };
+    const blue  = { dot: '#5f86c4', txt: '#4a6ba6', bg: '#eef2f9', border: '#d8e1f0' };
+    const red   = { dot: '#c4756b', txt: '#a8554c', bg: '#fbeeec', border: '#f0d6d1' };
+    const pulse = 'ohb-pulse 1.4s ease-in-out infinite';
+
+    let c, label, anim, placeholder, disabled, hint;
+    if (conn === 'live') {
+      c = green; label = 'live'; anim = 'none';
+      placeholder = 'Message ohbaby…'; disabled = false;
+      hint = s.launching ? 'starting run…' : 'enter to send';
+    } else if (conn === 'connecting') {
+      c = blue; label = 'connecting'; anim = pulse;
+      placeholder = 'connecting to daemon…'; disabled = true;
+      hint = 'opening session — one moment';
+    } else {
+      c = red; label = 'disconnected'; anim = 'none';
+      placeholder = 'daemon unreachable'; disabled = true;
+      hint = 'restart `ohbaby serve`, then reload';
+    }
+
+    const canSend = conn === 'live' && !!s.draft.trim() && !s.launching;
+
+    return {
+      statusLabel: label, statusDot: c.dot, statusTxt: c.txt, statusBg: c.bg, statusBorder: c.border, statusAnim: anim,
+      draft: s.draft,
+      onDraft: (e) => this.setState({ draft: e.target.value }),
+      onKey: (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); } },
+      send: () => this.send(),
+      placeholder,
+      inputDisabled: disabled || s.launching,
+      sendDisabled: !canSend,
+      sendCursor: canSend ? 'pointer' : 'default',
+      sendOpacity: canSend ? 1 : 0.4,
+      promptColor: conn === 'live' ? '#5f86c4' : '#aeb2ba',
+      composerBorder: conn === 'live' ? '#cdd7e8' : '#e6e6e6',
+      composerShadow: conn === 'live' ? '0 0 0 3px rgba(95,134,196,.10), 0 8px 26px rgba(30,34,44,.06)' : '0 1px 2px rgba(30,34,44,.04)',
+      hint,
+      hintColor: conn === 'disconnected' ? '#b08079' : '#aeb2ba',
+    };
+  }
+}
+</script>
+</body>
+</html>

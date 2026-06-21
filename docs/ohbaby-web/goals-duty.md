@@ -32,7 +32,7 @@
 
 - **D1 浏览器 daemon 客户端**：对 daemon 讲 `/v1` REST + SSE（fetch-stream），含 `Last-Event-ID` 续传与 `resync-required` 处理。
 - **D2 事件投影**：把 `UiEvent` 投影为 UI 视图状态（消息流 / run 状态机 / 待审批队列 / 连接态）。
-- **D3 会话交互 UI（v0.1.6 闭环）**：snapshot 首屏、流式消息、发 prompt、权限审批（准/拒）、中断 run。
+- **D3 会话交互 UI（v0.1.6 闭环）**：snapshot 首屏、流式消息、发 prompt、权限审批（准/拒，模态 slide-up）、中断 run，以及 composer 的 **mode 切换（auto/plan）** 与 **权限策略切换（default / full-access）**。视图层详细设计见 [`ui/`](./ui/README.md)。
 - **D4 引导接入**：从 daemon 注入的 `window.__OHBABY__` 读取 `token / clientId / baseUrl` 并附带到请求。
 - **D5 纯静态构建产物**：产出可被 daemon 伺服的 `dist`（HTML/JS/CSS/资源）。
 

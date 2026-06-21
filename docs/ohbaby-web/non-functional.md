@@ -28,6 +28,7 @@
 - **不静默失败**：`401` / `403` / 网络错都要在 UI 可见（状态条 / 通知）。
 - **异步状态可区分**：ConnectionState 五态 + run 的 idle/running/interrupted 必须对用户可见。
 - **输出渲染安全**：agent/工具输出按 **markdown 渲染 + 消毒**（如 DOMPurify）防 XSS；语法高亮（如 shiki）列入暂缓。
+- **诊断信息不进 UI（简洁优先）**：`seqNum / clientId / lastEventId / 端口` 是开发者信息，不在界面呈现；正确性（基线对齐、续传、resync）在内部强制执行，对用户只通过 **ConnectionState 五态** 可见，开发者从 devtools/console/日志查看。见 [`ui/states.md`](./ui/states.md) §5。
 - v0.1.6 可观测性止于"用户可见的状态与错误"——不做指标 / trace 上报。
 
 ---
