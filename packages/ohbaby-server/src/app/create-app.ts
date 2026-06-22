@@ -3,7 +3,9 @@ import { readFile, stat } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import { Hono, type Context } from "hono";
 import {
+  filterWebCommandCatalog,
   filterWebPassthroughCommandCatalog,
+  inferConnectModelInterfaceProvider,
   supportsWebPassthroughCommandInvocation,
   type UiBackendClient,
   type UiEvent,
@@ -140,6 +142,24 @@ function asNonEmptyString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function asPositiveInteger(value: unknown): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isSafeInteger(value) || (value as number) <= 0) {
+    return undefined;
+  }
+  return value as number;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function mutationErrorStatus(error: unknown): 400 | 409 {
+  return errorMessage(error) === "Cannot save while running" ? 409 : 400;
+}
+
 function asStringArray(value: unknown): readonly string[] | undefined {
   if (!Array.isArray(value)) {
     return undefined;
@@ -239,6 +259,52 @@ function slashCommandInvocationFromBody(
     ...(argumentMode === undefined ? {} : { argumentMode }),
     ...(body === undefined ? {} : { body }),
     ...(sessionId === undefined ? {} : { sessionId }),
+  };
+}
+
+function modelConnectInputFromBody(
+  value: Record<string, unknown>,
+): Parameters<UiBackendClient["connectModel"]>[0] | undefined {
+  const provider = asNonEmptyString(value.provider);
+  const baseUrl = asNonEmptyString(value.baseUrl);
+  const apiKeyEnv = asNonEmptyString(value.apiKeyEnv);
+  const apiKey = asNonEmptyString(value.apiKey);
+  const model = asNonEmptyString(value.model);
+  const contextWindowTokens = asPositiveInteger(value.contextWindowTokens);
+  const maxOutputTokens = asPositiveInteger(value.maxOutputTokens);
+  if (
+    provider === undefined ||
+    baseUrl === undefined ||
+    apiKeyEnv === undefined ||
+    model === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    provider,
+    baseUrl,
+    interfaceProvider: inferConnectModelInterfaceProvider(baseUrl),
+    apiKeyEnv,
+    ...(apiKey === undefined ? {} : { apiKey }),
+    model,
+    ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
+    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+  };
+}
+
+function searchApiKeyInputFromBody(
+  value: Record<string, unknown>,
+): Parameters<UiBackendClient["setSearchApiKey"]>[0] | undefined {
+  const provider = asNonEmptyString(value.provider);
+  const apiKeyEnv = asNonEmptyString(value.apiKeyEnv);
+  const apiKey = asNonEmptyString(value.apiKey);
+  if (provider !== undefined && provider !== "tavily") {
+    return undefined;
+  }
+  return {
+    ...(apiKey === undefined ? {} : { apiKey }),
+    ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
+    ...(provider === undefined ? {} : { provider }),
   };
 }
 
@@ -398,6 +464,37 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
           summary: "Execute a slash command invocation",
         },
       },
+      "/v1/model": {
+        get: {
+          responses: {
+            "200": {
+              description: "Current model config without secret values",
+            },
+          },
+          summary: "Get current model config",
+        },
+        post: {
+          responses: {
+            "200": {
+              description: "Model config saved",
+            },
+            "409": {
+              description: "Prompt run is active",
+            },
+          },
+          summary: "Save current model config",
+        },
+      },
+      "/v1/model/context-window-probe": {
+        post: {
+          responses: {
+            "200": {
+              description: "Context window probe result",
+            },
+          },
+          summary: "Probe model context window without saving config",
+        },
+      },
       "/v1/permissions/{id}": {
         post: {
           responses: {
@@ -431,6 +528,19 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
           summary: "Submit a prompt",
         },
       },
+      "/v1/settings/search-api-key": {
+        post: {
+          responses: {
+            "200": {
+              description: "Search API key settings saved",
+            },
+            "409": {
+              description: "Prompt run is active",
+            },
+          },
+          summary: "Save search API key settings",
+        },
+      },
       "/v1/sessions/{id}/abort": {
         post: {
           responses: {
@@ -439,6 +549,26 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
             },
           },
           summary: "Abort a session run",
+        },
+      },
+      "/v1/sessions/{id}/compact": {
+        post: {
+          responses: {
+            "200": {
+              description: "Session compact result",
+            },
+          },
+          summary: "Compact a session",
+        },
+      },
+      "/v1/sessions/{id}/context-window": {
+        get: {
+          responses: {
+            "200": {
+              description: "Session context window usage",
+            },
+          },
+          summary: "Get session context window usage",
         },
       },
       "/v1/snapshot": {
@@ -698,10 +828,16 @@ class DaemonServerAppRuntime {
       }
 
       const surface = asNonEmptyString(context.req.query("surface")) ?? "tui";
-      const catalog = filterWebPassthroughCommandCatalog(
-        await this.options.backend.listCommands({ surface }),
-        { surface },
-      );
+      const backendSurface = surface === "web" ? "tui" : surface;
+      const backendCatalog = await this.options.backend.listCommands({
+        surface: backendSurface,
+      });
+      const catalog =
+        surface === "web"
+          ? filterWebCommandCatalog(backendCatalog, { surface: backendSurface })
+          : filterWebPassthroughCommandCatalog(backendCatalog, {
+              surface: backendSurface,
+            });
       return context.json({ catalog, ok: true });
     });
 
@@ -743,6 +879,183 @@ class DaemonServerAppRuntime {
         this.clientViews.prepareCommandInvocation(clientId, invocation),
       );
       return context.json({ ok: true });
+    });
+
+    this.app.get("/v1/model", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
+
+      const model = await this.options.backend.getCurrentModel();
+      return context.json({ model, ok: true });
+    });
+
+    this.app.post("/v1/model/context-window-probe", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
+
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok) {
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      }
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      const input = modelConnectInputFromBody(body);
+      if (input === undefined) {
+        return context.json(
+          webErrorBody("model connection body is invalid"),
+          400,
+        );
+      }
+      try {
+        const probe = await this.options.backend.probeModelContextWindow(input);
+        return context.json({ ok: true, probe });
+      } catch (error) {
+        return context.json(webErrorBody(errorMessage(error)), 400);
+      }
+    });
+
+    this.app.post("/v1/model", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
+
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok) {
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      }
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      const input = modelConnectInputFromBody(body);
+      if (input === undefined) {
+        return context.json(
+          webErrorBody("model connection body is invalid"),
+          400,
+        );
+      }
+      try {
+        const model = await this.options.backend.connectModel(input);
+        return context.json({ model, ok: true });
+      } catch (error) {
+        return context.json(
+          webErrorBody(errorMessage(error)),
+          mutationErrorStatus(error),
+        );
+      }
+    });
+
+    this.app.post("/v1/settings/search-api-key", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
+
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok) {
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      }
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      const input = searchApiKeyInputFromBody(body);
+      if (input === undefined) {
+        return context.json(
+          webErrorBody("search api key body is invalid"),
+          400,
+        );
+      }
+      try {
+        const search = await this.options.backend.setSearchApiKey(input);
+        return context.json({ ok: true, search });
+      } catch (error) {
+        return context.json(
+          webErrorBody(errorMessage(error)),
+          mutationErrorStatus(error),
+        );
+      }
+    });
+
+    this.app.get("/v1/sessions/:id/context-window", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
+
+      const usage = await this.options.backend.getContextWindowUsage({
+        sessionId: context.req.param("id"),
+      });
+      return context.json({ ok: true, usage });
+    });
+
+    this.app.post("/v1/sessions/:id/compact", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
+
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok) {
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      }
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      const force = typeof body.force === "boolean" ? body.force : undefined;
+      try {
+        const compact = await this.options.backend.compactSession({
+          ...(force === undefined ? {} : { force }),
+          sessionId: context.req.param("id"),
+        });
+        return context.json({ compact, ok: true });
+      } catch (error) {
+        return context.json(webErrorBody(errorMessage(error)), 400);
+      }
     });
 
     this.app.post("/v1/prompts", async (context) => {

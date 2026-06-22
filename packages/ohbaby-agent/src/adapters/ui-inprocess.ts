@@ -90,7 +90,10 @@ import {
   startPermissionEventProjection,
   subscribeAppEventProjectors,
 } from "./app-events/index.js";
-import { applyActiveModelConfig } from "../config/llm/apply-active-model-config.js";
+import {
+  applyActiveModelConfig,
+  probeActiveModelContextWindow,
+} from "../config/llm/apply-active-model-config.js";
 import { loadModelJson } from "../config/llm/loaders.js";
 import { ConfigError } from "../config/llm/types.js";
 import { validateModelJson } from "../config/llm/validation.js";
@@ -1327,6 +1330,12 @@ export function createInProcessUiBackendClient(
     }
   }
 
+  async function probeModelContextWindowInternal(
+    input: Parameters<UiBackendClient["probeModelContextWindow"]>[0],
+  ): ReturnType<UiBackendClient["probeModelContextWindow"]> {
+    return probeActiveModelContextWindow(input);
+  }
+
   async function setSearchApiKeyInternal(
     input: UiSetSearchApiKeyInput,
   ): Promise<UiSetSearchApiKeyResult> {
@@ -1517,6 +1526,12 @@ export function createInProcessUiBackendClient(
       compactOptions?: UiCompactSessionOptions,
     ): Promise<UiCompactSessionResult> {
       return compactSessionInternal(compactOptions);
+    },
+
+    probeModelContextWindow(
+      input: Parameters<UiBackendClient["probeModelContextWindow"]>[0],
+    ): ReturnType<UiBackendClient["probeModelContextWindow"]> {
+      return probeModelContextWindowInternal(input);
     },
 
     connectModel(input: UiConnectModelInput): Promise<UiConnectModelResult> {

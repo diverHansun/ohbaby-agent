@@ -176,6 +176,15 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(null);
   }
 
+  probeModelContextWindow(): ReturnType<
+    UiBackendClient["probeModelContextWindow"]
+  > {
+    return Promise.resolve({
+      contextWindowSource: "default",
+      contextWindowTokens: 128_000,
+    });
+  }
+
   connectModel(): ReturnType<UiBackendClient["connectModel"]> {
     return Promise.resolve(connectModelResult());
   }

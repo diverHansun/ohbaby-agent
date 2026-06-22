@@ -14,6 +14,8 @@ import type {
   UiCurrentModelConfig,
   UiConnectModelInput,
   UiConnectModelResult,
+  UiProbeModelContextWindowInput,
+  UiProbeModelContextWindowResult,
 } from "./connect-model.js";
 import type {
   UiSetSearchApiKeyInput,
@@ -54,6 +56,9 @@ export interface UiBackendClient {
     options?: UiCompactSessionOptions,
   ): Promise<UiCompactSessionResult>;
   getCurrentModel(): Promise<UiCurrentModelConfig | null>;
+  probeModelContextWindow(
+    input: UiProbeModelContextWindowInput,
+  ): Promise<UiProbeModelContextWindowResult>;
   connectModel(input: UiConnectModelInput): Promise<UiConnectModelResult>;
   setSearchApiKey(
     input: UiSetSearchApiKeyInput,

@@ -188,6 +188,12 @@ export async function callDaemonBackend(input: {
       );
     case "getCurrentModel":
       return backend.getCurrentModel();
+    case "probeModelContextWindow":
+      return backend.probeModelContextWindow(
+        request.params[0] as Parameters<
+          UiBackendClient["probeModelContextWindow"]
+        >[0],
+      );
     case "connectModel":
       return backend.connectModel(
         request.params[0] as Parameters<UiBackendClient["connectModel"]>[0],

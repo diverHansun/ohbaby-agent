@@ -105,6 +105,14 @@ describe("context window UI contract", () => {
           saved: true,
         } as const);
       },
+      probeModelContextWindow(): ReturnType<
+        CoreAPI["probeModelContextWindow"]
+      > {
+        return Promise.resolve({
+          contextWindowSource: "default",
+          contextWindowTokens: 128_000,
+        } as const);
+      },
       setSearchApiKey(): ReturnType<CoreAPI["setSearchApiKey"]> {
         return Promise.resolve({
           apiKeyEnv: "TAVILY_API_KEY",

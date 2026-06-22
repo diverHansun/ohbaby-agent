@@ -105,6 +105,7 @@ describe("daemon protocol", () => {
       "submitPrompt",
       "compactSession",
       "getCurrentModel",
+      "probeModelContextWindow",
       "connectModel",
       "setSearchApiKey",
       "setPermission",

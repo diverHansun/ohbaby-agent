@@ -35,3 +35,32 @@ export interface UiCurrentModelConfig {
   readonly contextWindowTokens?: number;
   readonly maxOutputTokens?: number;
 }
+
+export interface UiProbeModelContextWindowInput {
+  readonly provider?: string;
+  readonly baseUrl: string;
+  readonly interfaceProvider: UiConnectModelInterfaceProvider;
+  readonly apiKeyEnv: string;
+  readonly apiKey?: string;
+  readonly model: string;
+  readonly contextWindowTokens?: number;
+  readonly maxOutputTokens?: number;
+}
+
+export interface UiProbeModelContextWindowResult {
+  readonly contextWindowTokens: number;
+  readonly contextWindowSource: "detected" | "user" | "default";
+  readonly warning?: string;
+}
+
+export function inferConnectModelInterfaceProvider(
+  baseUrl: string,
+): UiConnectModelInterfaceProvider {
+  const lower = baseUrl.toLowerCase();
+  return lower.includes("anthropic") ||
+    lower.includes("/api/anthropic") ||
+    lower.endsWith("/anthropic") ||
+    lower.includes("/v1/messages")
+    ? "anthropic"
+    : "openai-compatible";
+}

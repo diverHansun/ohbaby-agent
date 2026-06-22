@@ -16,14 +16,59 @@ export const WEB_PASSTHROUGH_COMMAND_IDS = [
 export type UiWebPassthroughCommandId =
   (typeof WEB_PASSTHROUGH_COMMAND_IDS)[number];
 
+export const WEB_OVERLAY_COMMAND_IDS = [
+  "connect",
+  "connect-search",
+  "compact",
+] as const;
+
+export type UiWebOverlayCommandId = (typeof WEB_OVERLAY_COMMAND_IDS)[number];
+
+export type UiWebCommandExecutionKind = "passthrough" | "overlay";
+
+export type UiWebCommandAction =
+  | "executeCommand"
+  | "connectModel"
+  | "connectSearch"
+  | "compactSession";
+
+export interface UiWebCommandSpec extends UiSlashCommandSpec {
+  readonly action: UiWebCommandAction;
+  readonly executionKind: UiWebCommandExecutionKind;
+}
+
+export interface UiWebCommandCatalog {
+  readonly version: string;
+  readonly commands: readonly UiWebCommandSpec[];
+}
+
 const WEB_PASSTHROUGH_COMMAND_ID_SET: ReadonlySet<string> = new Set(
   WEB_PASSTHROUGH_COMMAND_IDS,
 );
+
+const WEB_OVERLAY_COMMAND_ID_SET: ReadonlySet<string> = new Set(
+  WEB_OVERLAY_COMMAND_IDS,
+);
+
+const WEB_OVERLAY_COMMAND_ACTIONS: ReadonlyMap<
+  UiWebOverlayCommandId,
+  Exclude<UiWebCommandAction, "executeCommand">
+> = new Map([
+  ["connect", "connectModel"],
+  ["connect-search", "connectSearch"],
+  ["compact", "compactSession"],
+]);
 
 export function isWebPassthroughCommandId(
   commandId: string,
 ): commandId is UiWebPassthroughCommandId {
   return WEB_PASSTHROUGH_COMMAND_ID_SET.has(commandId);
+}
+
+export function isWebOverlayCommandId(
+  commandId: string,
+): commandId is UiWebOverlayCommandId {
+  return WEB_OVERLAY_COMMAND_ID_SET.has(commandId);
 }
 
 export function isWebPassthroughCommandSpec(
@@ -33,6 +78,12 @@ export function isWebPassthroughCommandSpec(
     isWebPassthroughCommandId(command.id) &&
     command.parentBehavior !== "interaction"
   );
+}
+
+export function isWebOverlayCommandSpec(
+  command: UiSlashCommandSpec,
+): command is UiSlashCommandSpec & { readonly id: UiWebOverlayCommandId } {
+  return isWebOverlayCommandId(command.id);
 }
 
 function isVisibleOnSurface(
@@ -53,6 +104,41 @@ export function filterWebPassthroughCommandCatalog(
         isVisibleOnSurface(command, options.surface) &&
         isWebPassthroughCommandSpec(command),
     ),
+  };
+}
+
+export function filterWebCommandCatalog(
+  catalog: UiSlashCommandCatalog,
+  options: { readonly surface?: UiSlashCommandSurface } = {},
+): UiWebCommandCatalog {
+  const commands: UiWebCommandSpec[] = [];
+  for (const command of catalog.commands) {
+    if (!isVisibleOnSurface(command, options.surface)) {
+      continue;
+    }
+    if (isWebPassthroughCommandSpec(command)) {
+      commands.push({
+        ...command,
+        action: "executeCommand",
+        executionKind: "passthrough",
+      });
+      continue;
+    }
+    if (isWebOverlayCommandSpec(command)) {
+      const action = WEB_OVERLAY_COMMAND_ACTIONS.get(command.id);
+      if (action === undefined) {
+        continue;
+      }
+      commands.push({
+        ...command,
+        action,
+        executionKind: "overlay",
+      });
+    }
+  }
+  return {
+    version: catalog.version,
+    commands,
   };
 }
 

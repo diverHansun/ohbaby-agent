@@ -46,6 +46,12 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
         saved: true as const,
       }),
     ),
+    probeModelContextWindow: vi.fn(() =>
+      Promise.resolve({
+        contextWindowSource: "default" as const,
+        contextWindowTokens: 128_000,
+      }),
+    ),
     setSearchApiKey: vi.fn(() =>
       Promise.resolve({
         apiKeyEnv: "TAVILY_API_KEY",

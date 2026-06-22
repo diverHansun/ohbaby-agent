@@ -3511,6 +3511,7 @@ function createFakeClient(
   readonly getCurrentModel: ReturnType<typeof vi.fn>;
   readonly getSnapshot: ReturnType<typeof vi.fn>;
   readonly listCommands: ReturnType<typeof vi.fn>;
+  readonly probeModelContextWindow: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
   readonly respondPermission: ReturnType<typeof vi.fn>;
   readonly setPermission: ReturnType<typeof vi.fn>;
@@ -3568,6 +3569,12 @@ function createFakeClient(
     getCurrentModel: vi.fn(() => Promise.resolve(null)),
     getSnapshot: vi.fn(() => Promise.resolve(initialSnapshot)),
     listCommands: vi.fn(() => Promise.resolve(commandCatalog)),
+    probeModelContextWindow: vi.fn(() =>
+      Promise.resolve({
+        contextWindowSource: "default",
+        contextWindowTokens: 128_000,
+      } as const),
+    ),
     respondInteraction: vi.fn(() => Promise.resolve()),
     respondPermission: vi.fn(() => Promise.resolve()),
     setPermission: vi.fn(() =>

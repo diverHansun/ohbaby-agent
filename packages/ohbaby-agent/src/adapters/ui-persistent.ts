@@ -212,6 +212,12 @@ function withStartupRecovery(
       await ready();
       return client.compactSession(compactOptions);
     },
+    async probeModelContextWindow(
+      input,
+    ): ReturnType<UiBackendClient["probeModelContextWindow"]> {
+      await ready();
+      return client.probeModelContextWindow(input);
+    },
     async connectModel(input): ReturnType<UiBackendClient["connectModel"]> {
       await ready();
       return client.connectModel(input);

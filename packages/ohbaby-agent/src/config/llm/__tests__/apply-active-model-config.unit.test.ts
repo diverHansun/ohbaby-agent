@@ -2,7 +2,10 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyActiveModelConfig } from "../apply-active-model-config.js";
+import {
+  applyActiveModelConfig,
+  probeActiveModelContextWindow,
+} from "../apply-active-model-config.js";
 import { _LLMConfigManager as LLMConfigManager } from "../index.js";
 
 describe("applyActiveModelConfig", () => {
@@ -250,6 +253,57 @@ describe("applyActiveModelConfig", () => {
       };
     };
     expect(modelJson.llmParams.contextWindowTokens).toBe(128_000);
+  });
+
+  it("probes context window without writing active config", async () => {
+    const result = await probeActiveModelContextWindow({
+      apiKey: "sk-test-secret",
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      interfaceProvider: "anthropic",
+      model: "anthropic/claude-sonnet-4.6",
+    });
+
+    expect(result).toEqual({
+      contextWindowSource: "detected",
+      contextWindowTokens: 200_000,
+    });
+    expect(JSON.stringify(result)).not.toContain("sk-test-secret");
+    await expect(fs.stat(modelJsonPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("probes context window with the same user and default fallback rules as connect", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
+
+    const userFallback = await probeActiveModelContextWindow({
+      apiKey: "sk-test-secret",
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      contextWindowTokens: 96_000,
+      interfaceProvider: "anthropic",
+      model: "custom-model",
+    });
+    expect(userFallback).toMatchObject({
+      contextWindowSource: "user",
+      contextWindowTokens: 96_000,
+    });
+    expect(userFallback.warning).toMatch(/context window/i);
+
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
+    const defaultFallback = await probeActiveModelContextWindow({
+      apiKey: "sk-test-secret",
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      interfaceProvider: "anthropic",
+      model: "custom-model",
+    });
+    expect(defaultFallback).toMatchObject({
+      contextWindowSource: "default",
+      contextWindowTokens: 128_000,
+    });
+    expect(defaultFallback.warning).toMatch(/context window/i);
   });
 
   it("rejects non-positive user-provided context window tokens before probing or writing", async () => {

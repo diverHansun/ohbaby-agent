@@ -211,6 +211,16 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(null);
   }
 
+  probeModelContextWindow(
+    input: Parameters<UiBackendClient["probeModelContextWindow"]>[0],
+  ): ReturnType<UiBackendClient["probeModelContextWindow"]> {
+    this.calls.push({ args: [input], method: "probeModelContextWindow" });
+    return Promise.resolve({
+      contextWindowSource: "default",
+      contextWindowTokens: 128_000,
+    });
+  }
+
   connectModel(
     input: Parameters<UiBackendClient["connectModel"]>[0],
   ): ReturnType<UiBackendClient["connectModel"]> {
@@ -481,6 +491,13 @@ describe("createRemoteUiBackendClient", () => {
       apiKeyEnv: "TAVILY_API_KEY",
       provider: "tavily" as const,
     };
+    const probeInput = {
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://api.example.com",
+      interfaceProvider: "openai-compatible" as const,
+      model: "example-model",
+      provider: "example",
+    };
     const permissionInput = {
       level: "full-access" as const,
       mode: "plan" as const,
@@ -503,6 +520,7 @@ describe("createRemoteUiBackendClient", () => {
       await client.submitPrompt("hello", { sessionId: "session_1" });
       await client.compactSession(compactOptions);
       await client.getCurrentModel();
+      await client.probeModelContextWindow(probeInput);
       await client.connectModel(connectInput);
       await client.setSearchApiKey(searchInput);
       await client.setPermission(permissionInput);
@@ -526,6 +544,7 @@ describe("createRemoteUiBackendClient", () => {
       },
       { args: [compactOptions], method: "compactSession" },
       { args: [], method: "getCurrentModel" },
+      { args: [probeInput], method: "probeModelContextWindow" },
       { args: [connectInput], method: "connectModel" },
       { args: [searchInput], method: "setSearchApiKey" },
       { args: [permissionInput], method: "setPermission" },

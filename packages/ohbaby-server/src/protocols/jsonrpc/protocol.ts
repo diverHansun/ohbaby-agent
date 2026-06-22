@@ -8,6 +8,7 @@ export const DAEMON_RPC_METHODS = [
   "submitPrompt",
   "compactSession",
   "getCurrentModel",
+  "probeModelContextWindow",
   "connectModel",
   "setSearchApiKey",
   "setPermission",

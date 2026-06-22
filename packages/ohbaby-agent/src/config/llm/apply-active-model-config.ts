@@ -45,6 +45,60 @@ export interface ApplyActiveModelConfigResult {
   readonly warning?: string;
 }
 
+export interface ProbeActiveModelContextWindowInput {
+  readonly provider?: string;
+  readonly baseUrl: string;
+  readonly interfaceProvider: InterfaceProviderKind;
+  readonly apiKeyEnv: string;
+  readonly apiKey?: string;
+  readonly model: string;
+  readonly contextWindowTokens?: number;
+  readonly maxOutputTokens?: number;
+  readonly envPath?: string;
+}
+
+export interface ProbeActiveModelContextWindowResult {
+  readonly contextWindowTokens: number;
+  readonly contextWindowSource: ContextWindowSource;
+  readonly warning?: string;
+}
+
+export async function probeActiveModelContextWindow(
+  input: ProbeActiveModelContextWindowInput,
+): Promise<ProbeActiveModelContextWindowResult> {
+  const model = requireNonEmpty(input.model, "Model name required");
+  const baseUrl = validateBaseUrl(input.baseUrl);
+  const apiKeyEnv = validateApiKeyEnv(input.apiKeyEnv);
+  const interfaceProvider = validateInterfaceProvider(input.interfaceProvider);
+  const contextWindowTokens = validateOptionalPositiveInteger(
+    input.contextWindowTokens,
+    "Context window must be a positive integer",
+  );
+  validateOptionalPositiveInteger(
+    input.maxOutputTokens,
+    "Max output tokens must be a positive integer",
+  );
+  const envPath = input.envPath ?? getGlobalEnvPath();
+
+  const apiKey = await resolveApiKey({
+    apiKey: input.apiKey,
+    apiKeyEnv,
+    envPath,
+  });
+  const probe = await probeContextWindow({
+    apiKey,
+    baseUrl,
+    interfaceProvider,
+    model,
+  });
+
+  return resolveContextWindow({
+    detectedContextWindowTokens: probe.contextWindowTokens,
+    probeWarning: probe.warning,
+    userContextWindowTokens: contextWindowTokens,
+  });
+}
+
 export async function applyActiveModelConfig(
   input: ApplyActiveModelConfigInput,
 ): Promise<ApplyActiveModelConfigResult> {

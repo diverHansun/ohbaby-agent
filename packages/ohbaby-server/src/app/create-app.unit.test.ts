@@ -8,8 +8,10 @@ import type {
   UiCompactSessionResult,
   UiCompactSessionUsage,
   UiConnectModelResult,
+  UiCurrentModelConfig,
   UiEventHandler,
   UiPermissionState,
+  UiProbeModelContextWindowResult,
   UiSetSearchApiKeyResult,
   UiSlashCommandCatalog,
   UiSlashCommandInvocation,
@@ -86,6 +88,24 @@ function connectModelResult(): UiConnectModelResult {
   };
 }
 
+function currentModelConfig(): UiCurrentModelConfig {
+  return {
+    apiKeyEnv: "FAKE_API_KEY",
+    baseUrl: "https://example.invalid/v1",
+    contextWindowTokens: 100,
+    interfaceProvider: "openai-compatible",
+    model: "fake-model",
+    provider: "fake",
+  };
+}
+
+function probeModelContextWindowResult(): UiProbeModelContextWindowResult {
+  return {
+    contextWindowSource: "detected",
+    contextWindowTokens: 100,
+  };
+}
+
 function setSearchApiKeyResult(): UiSetSearchApiKeyResult {
   return {
     apiKeyEnv: "TAVILY_API_KEY",
@@ -99,8 +119,15 @@ class FakeBackend implements UiBackendClient {
   readonly handlers = new Set<UiEventHandler>();
   readonly abortedRunIds: (string | undefined)[] = [];
   readonly executedCommands: UiSlashCommandInvocation[] = [];
+  readonly compactOptions: Parameters<UiBackendClient["compactSession"]>[0][] =
+    [];
+  readonly connectedModels: Parameters<UiBackendClient["connectModel"]>[0][] =
+    [];
   readonly listCommandQueries: Parameters<
     UiBackendClient["listCommands"]
+  >[0][] = [];
+  readonly probedModels: Parameters<
+    UiBackendClient["probeModelContextWindow"]
   >[0][] = [];
   readonly permissionResponses: {
     readonly requestId: string;
@@ -110,6 +137,8 @@ class FakeBackend implements UiBackendClient {
     readonly text: string;
     readonly options?: SubmitPromptOptions;
   }[] = [];
+  readonly searchApiKeys: Parameters<UiBackendClient["setSearchApiKey"]>[0][] =
+    [];
   onGetSnapshot: (() => Promise<void> | void) | undefined;
   commandCatalog: UiSlashCommandCatalog = {
     commands: [
@@ -157,8 +186,17 @@ class FakeBackend implements UiBackendClient {
     return this.snapshot;
   }
 
-  getContextWindowUsage(): Promise<null> {
-    return Promise.resolve(null);
+  getContextWindowUsage(
+    input: Parameters<UiBackendClient["getContextWindowUsage"]>[0],
+  ): ReturnType<UiBackendClient["getContextWindowUsage"]> {
+    return Promise.resolve({
+      contextWindowRatio: 0.01,
+      contextWindowTokens: 100,
+      currentTokens: 1,
+      estimatedAt: timestamp,
+      modelId: "fake-model",
+      sessionId: input.sessionId,
+    });
   }
 
   subscribeEvents(handler: UiEventHandler): UiUnsubscribe {
@@ -183,19 +221,35 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve();
   }
 
-  compactSession(): ReturnType<UiBackendClient["compactSession"]> {
+  compactSession(
+    options?: Parameters<UiBackendClient["compactSession"]>[0],
+  ): ReturnType<UiBackendClient["compactSession"]> {
+    this.compactOptions.push(options);
     return Promise.resolve(compactResult());
   }
 
   getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
-    return Promise.resolve(null);
+    return Promise.resolve(currentModelConfig());
   }
 
-  connectModel(): ReturnType<UiBackendClient["connectModel"]> {
+  probeModelContextWindow(
+    input: Parameters<UiBackendClient["probeModelContextWindow"]>[0],
+  ): ReturnType<UiBackendClient["probeModelContextWindow"]> {
+    this.probedModels.push(input);
+    return Promise.resolve(probeModelContextWindowResult());
+  }
+
+  connectModel(
+    input: Parameters<UiBackendClient["connectModel"]>[0],
+  ): ReturnType<UiBackendClient["connectModel"]> {
+    this.connectedModels.push(input);
     return Promise.resolve(connectModelResult());
   }
 
-  setSearchApiKey(): ReturnType<UiBackendClient["setSearchApiKey"]> {
+  setSearchApiKey(
+    input: Parameters<UiBackendClient["setSearchApiKey"]>[0],
+  ): ReturnType<UiBackendClient["setSearchApiKey"]> {
+    this.searchApiKeys.push(input);
     return Promise.resolve(setSearchApiKeyResult());
   }
 
@@ -691,6 +745,114 @@ describe("createDaemonServerApp", () => {
     }
   });
 
+  it("lists web palette commands with structured overlays for registered web clients", async () => {
+    const backend = new FakeBackend();
+    backend.commandCatalog = {
+      commands: [
+        {
+          argumentMode: "argv",
+          category: "system",
+          description: "Show backend status",
+          id: "status",
+          path: ["status"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "structured",
+          category: "setup",
+          description: "Connect model",
+          id: "connect",
+          parentBehavior: "interaction",
+          path: ["connect"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "structured",
+          category: "setup",
+          description: "Connect search",
+          id: "connect-search",
+          parentBehavior: "interaction",
+          path: ["connect-search"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "argv",
+          category: "session",
+          description: "Compact the current session",
+          id: "compact",
+          path: ["compact"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "argv",
+          category: "session",
+          description: "Browse sessions",
+          id: "sessions",
+          parentBehavior: "interaction",
+          path: ["sessions"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+      ],
+      version: "commands-v1",
+    };
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request("/v1/commands?surface=web", {
+        headers: {
+          ...authHeaders(),
+          "x-ohbaby-client-id": "client_web",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        catalog: {
+          commands: [
+            {
+              action: "executeCommand",
+              executionKind: "passthrough",
+              id: "status",
+            },
+            {
+              action: "connectModel",
+              executionKind: "overlay",
+              id: "connect",
+            },
+            {
+              action: "connectSearch",
+              executionKind: "overlay",
+              id: "connect-search",
+            },
+            {
+              action: "compactSession",
+              executionKind: "overlay",
+              id: "compact",
+            },
+          ],
+          version: "commands-v1",
+        },
+        ok: true,
+      });
+      expect(backend.listCommandQueries).toEqual([{ surface: "tui" }]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
   it.each([
     {
       method: "GET" as const,
@@ -962,6 +1124,253 @@ describe("createDaemonServerApp", () => {
         ok: false,
       });
       expect(backend.executedCommands).toEqual([]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it.each([
+    {
+      commandId: "connect",
+      path: ["connect"],
+      raw: "/connect",
+    },
+    {
+      commandId: "connect-search",
+      path: ["connect-search"],
+      raw: "/connect-search",
+    },
+    {
+      commandId: "compact",
+      path: ["compact"],
+      raw: "/compact",
+    },
+  ])(
+    "rejects overlay slash command $raw through raw passthrough",
+    async (input) => {
+      const backend = new FakeBackend();
+      backend.commandCatalog = {
+        commands: [
+          {
+            argumentMode: "argv",
+            category: "session",
+            description: "Compact the current session",
+            id: "compact",
+            path: ["compact"],
+            source: "builtin",
+            surfaces: ["tui"],
+          },
+          {
+            argumentMode: "structured",
+            category: "setup",
+            description: "Connect model",
+            id: "connect",
+            parentBehavior: "interaction",
+            path: ["connect"],
+            source: "builtin",
+            surfaces: ["tui"],
+          },
+          {
+            argumentMode: "structured",
+            category: "setup",
+            description: "Connect search",
+            id: "connect-search",
+            parentBehavior: "interaction",
+            path: ["connect-search"],
+            source: "builtin",
+            surfaces: ["tui"],
+          },
+        ],
+        version: "commands-v1",
+      };
+      const handle = createApp(backend);
+      await handle.start();
+      try {
+        await handle.app.request("/v1/clients", {
+          body: JSON.stringify({ clientId: "client_web" }),
+          headers: {
+            ...authHeaders(),
+            "content-type": "application/json",
+          },
+          method: "POST",
+        });
+        const response = await handle.app.request("/v1/commands", {
+          body: JSON.stringify({
+            argumentMode: "argv",
+            argv: [],
+            clientInvocationId: `invoke_${input.commandId}`,
+            commandId: input.commandId,
+            path: input.path,
+            raw: input.raw,
+            rawArgs: "",
+            surface: "tui",
+          }),
+          headers: {
+            ...authHeaders(),
+            "content-type": "application/json",
+            "x-ohbaby-client-id": "client_web",
+          },
+          method: "POST",
+        });
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toEqual({
+          error: { message: "command is not supported by web passthrough" },
+          ok: false,
+        });
+        expect(backend.executedCommands).toEqual([]);
+      } finally {
+        await handle.dispose();
+      }
+    },
+  );
+
+  it("serves structured model, search, and compact REST routes", async () => {
+    const backend = new FakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const clientHeaders = {
+        ...authHeaders(),
+        "content-type": "application/json",
+        "x-ohbaby-client-id": "client_web",
+      };
+
+      const modelResponse = await handle.app.request("/v1/model", {
+        headers: clientHeaders,
+      });
+      expect(modelResponse.status).toBe(200);
+      await expect(modelResponse.json()).resolves.toEqual({
+        model: currentModelConfig(),
+        ok: true,
+      });
+
+      const probeResponse = await handle.app.request(
+        "/v1/model/context-window-probe",
+        {
+          body: JSON.stringify({
+            apiKeyEnv: "ANTHROPIC_API_KEY",
+            baseUrl: "https://api.anthropic.com",
+            contextWindowTokens: 96_000,
+            model: "claude-sonnet-4.6",
+            provider: "anthropic",
+          }),
+          headers: clientHeaders,
+          method: "POST",
+        },
+      );
+      expect(probeResponse.status).toBe(200);
+      await expect(probeResponse.json()).resolves.toEqual({
+        ok: true,
+        probe: probeModelContextWindowResult(),
+      });
+      expect(backend.probedModels).toEqual([
+        {
+          apiKeyEnv: "ANTHROPIC_API_KEY",
+          baseUrl: "https://api.anthropic.com",
+          contextWindowTokens: 96_000,
+          interfaceProvider: "anthropic",
+          model: "claude-sonnet-4.6",
+          provider: "anthropic",
+        },
+      ]);
+
+      const connectResponse = await handle.app.request("/v1/model", {
+        body: JSON.stringify({
+          apiKey: "sk-secret",
+          apiKeyEnv: "ZHIPU_API_KEY",
+          baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+          model: "glm-4.7",
+          provider: "zhipu",
+        }),
+        headers: clientHeaders,
+        method: "POST",
+      });
+      expect(connectResponse.status).toBe(200);
+      const connectBody = await connectResponse.json();
+      expect(connectBody).toEqual({
+        model: connectModelResult(),
+        ok: true,
+      });
+      expect(JSON.stringify(connectBody)).not.toContain("sk-secret");
+      expect(backend.connectedModels).toEqual([
+        {
+          apiKey: "sk-secret",
+          apiKeyEnv: "ZHIPU_API_KEY",
+          baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+          interfaceProvider: "openai-compatible",
+          model: "glm-4.7",
+          provider: "zhipu",
+        },
+      ]);
+
+      const searchResponse = await handle.app.request(
+        "/v1/settings/search-api-key",
+        {
+          body: JSON.stringify({
+            apiKey: "tvly-secret",
+            apiKeyEnv: "TAVILY_API_KEY",
+            provider: "tavily",
+          }),
+          headers: clientHeaders,
+          method: "POST",
+        },
+      );
+      expect(searchResponse.status).toBe(200);
+      const searchBody = await searchResponse.json();
+      expect(searchBody).toEqual({
+        ok: true,
+        search: setSearchApiKeyResult(),
+      });
+      expect(JSON.stringify(searchBody)).not.toContain("tvly-secret");
+      expect(backend.searchApiKeys).toEqual([
+        {
+          apiKey: "tvly-secret",
+          apiKeyEnv: "TAVILY_API_KEY",
+          provider: "tavily",
+        },
+      ]);
+
+      const usageResponse = await handle.app.request(
+        "/v1/sessions/session_1/context-window",
+        {
+          headers: clientHeaders,
+        },
+      );
+      expect(usageResponse.status).toBe(200);
+      await expect(usageResponse.json()).resolves.toMatchObject({
+        ok: true,
+        usage: {
+          contextWindowTokens: 100,
+          currentTokens: 1,
+          sessionId: "session_1",
+        },
+      });
+
+      const compactResponse = await handle.app.request(
+        "/v1/sessions/session_1/compact",
+        {
+          body: JSON.stringify({ force: true }),
+          headers: clientHeaders,
+          method: "POST",
+        },
+      );
+      expect(compactResponse.status).toBe(200);
+      await expect(compactResponse.json()).resolves.toEqual({
+        compact: compactResult(),
+        ok: true,
+      });
+      expect(backend.compactOptions).toEqual([
+        { force: true, sessionId: "session_1" },
+      ]);
     } finally {
       await handle.dispose();
     }

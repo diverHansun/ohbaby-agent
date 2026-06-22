@@ -20,7 +20,10 @@ export type {
   UiConnectModelInput,
   UiConnectModelInterfaceProvider,
   UiConnectModelResult,
+  UiProbeModelContextWindowInput,
+  UiProbeModelContextWindowResult,
 } from "./connect-model.js";
+export { inferConnectModelInterfaceProvider } from "./connect-model.js";
 export type {
   UiSearchProvider,
   UiSetSearchApiKeyInput,
@@ -75,7 +78,6 @@ export type {
   UiSlashCommandSpec,
   UiSlashCommandSurface,
 } from "./slash-command/types.js";
-export type { UiWebPassthroughCommandId } from "./slash-command/web-passthrough.js";
 export type {
   UiInteractionKind,
   UiInteractionOption,
@@ -114,11 +116,23 @@ export {
   resolveSlashCommand,
 } from "./slash-command/resolve.js";
 export {
+  filterWebCommandCatalog,
   filterWebPassthroughCommandCatalog,
+  isWebOverlayCommandId,
+  isWebOverlayCommandSpec,
   isWebPassthroughCommandId,
   isWebPassthroughCommandSpec,
   supportsWebPassthroughCommandInvocation,
+  WEB_OVERLAY_COMMAND_IDS,
   WEB_PASSTHROUGH_COMMAND_IDS,
+} from "./slash-command/web-passthrough.js";
+export type {
+  UiWebCommandAction,
+  UiWebCommandCatalog,
+  UiWebCommandExecutionKind,
+  UiWebCommandSpec,
+  UiWebOverlayCommandId,
+  UiWebPassthroughCommandId,
 } from "./slash-command/web-passthrough.js";
 export type { CoreAPI, SDKAPI } from "./rpc/types.js";
 export { createRPC } from "./rpc/proxy.js";

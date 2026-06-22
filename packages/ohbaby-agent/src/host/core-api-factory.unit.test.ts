@@ -46,6 +46,12 @@ describe("buildCoreAPIImpl", () => {
       connectModel,
       executeCommand: vi.fn(() => Promise.resolve()),
       getCurrentModel,
+      probeModelContextWindow: vi.fn(() =>
+        Promise.resolve({
+          contextWindowSource: "default" as const,
+          contextWindowTokens: 128_000,
+        }),
+      ),
       getSnapshot: vi.fn(() =>
         Promise.resolve({
           activeSessionId: null,
@@ -267,6 +273,7 @@ function createPersistentClientMock(): {
   readonly getCurrentModel: ReturnType<typeof vi.fn>;
   readonly getSnapshot: ReturnType<typeof vi.fn>;
   readonly listCommands: ReturnType<typeof vi.fn>;
+  readonly probeModelContextWindow: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
   readonly respondPermission: ReturnType<typeof vi.fn>;
   readonly setPermission: ReturnType<typeof vi.fn>;
@@ -284,6 +291,12 @@ function createPersistentClientMock(): {
     getCurrentModel: vi.fn(() => Promise.resolve(null)),
     getSnapshot: vi.fn(() => Promise.resolve()),
     listCommands: vi.fn(() => Promise.resolve({ commands: [] })),
+    probeModelContextWindow: vi.fn(() =>
+      Promise.resolve({
+        contextWindowSource: "default" as const,
+        contextWindowTokens: 128_000,
+      }),
+    ),
     respondInteraction: vi.fn(() => Promise.resolve()),
     respondPermission: vi.fn(() => Promise.resolve()),
     setPermission: vi.fn(() =>

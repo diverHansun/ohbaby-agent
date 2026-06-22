@@ -4,10 +4,12 @@ import type {
   UiSlashCommandInvocation,
 } from "../index.js";
 import {
+  filterWebCommandCatalog,
   filterWebPassthroughCommandCatalog,
   isWebPassthroughCommandId,
   supportsWebPassthroughCommandInvocation,
   WEB_PASSTHROUGH_COMMAND_IDS,
+  WEB_OVERLAY_COMMAND_IDS,
 } from "../index.js";
 
 const catalog: UiSlashCommandCatalog = {
@@ -46,6 +48,26 @@ const catalog: UiSlashCommandCatalog = {
       description: "Compact session",
       id: "compact",
       path: ["compact"],
+      source: "builtin",
+      surfaces: ["tui"],
+    },
+    {
+      argumentMode: "structured",
+      category: "setup",
+      description: "Connect model",
+      id: "connect",
+      parentBehavior: "interaction",
+      path: ["connect"],
+      source: "builtin",
+      surfaces: ["tui"],
+    },
+    {
+      argumentMode: "structured",
+      category: "setup",
+      description: "Connect search",
+      id: "connect-search",
+      parentBehavior: "interaction",
+      path: ["connect-search"],
       source: "builtin",
       surfaces: ["tui"],
     },
@@ -90,6 +112,17 @@ describe("web slash passthrough helpers", () => {
     expect(isWebPassthroughCommandId("sessions")).toBe(false);
   });
 
+  it("defines structured overlay commands separately from passthrough", () => {
+    expect(WEB_OVERLAY_COMMAND_IDS).toEqual([
+      "connect",
+      "connect-search",
+      "compact",
+    ]);
+    expect(WEB_PASSTHROUGH_COMMAND_IDS).not.toContain("connect");
+    expect(WEB_PASSTHROUGH_COMMAND_IDS).not.toContain("connect-search");
+    expect(WEB_PASSTHROUGH_COMMAND_IDS).not.toContain("compact");
+  });
+
   it("filters catalogs by allowlist, surface, and interaction behavior", () => {
     expect(
       filterWebPassthroughCommandCatalog(catalog, { surface: "tui" }).commands,
@@ -129,5 +162,38 @@ describe("web slash passthrough helpers", () => {
         invocation("status", ["status", "extra"]),
       ),
     ).toBe(false);
+  });
+
+  it("builds a web command palette with passthrough and overlay entries", () => {
+    expect(filterWebCommandCatalog(catalog, { surface: "tui" })).toEqual({
+      commands: [
+        expect.objectContaining({
+          action: "executeCommand",
+          executionKind: "passthrough",
+          id: "status",
+        }),
+        expect.objectContaining({
+          action: "executeCommand",
+          executionKind: "passthrough",
+          id: "new",
+        }),
+        expect.objectContaining({
+          action: "compactSession",
+          executionKind: "overlay",
+          id: "compact",
+        }),
+        expect.objectContaining({
+          action: "connectModel",
+          executionKind: "overlay",
+          id: "connect",
+        }),
+        expect.objectContaining({
+          action: "connectSearch",
+          executionKind: "overlay",
+          id: "connect-search",
+        }),
+      ],
+      version: "commands-v1",
+    });
   });
 });
