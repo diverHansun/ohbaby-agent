@@ -33,7 +33,9 @@ web 只与 daemon 的 `/v1` 面交互（同源）。
 - 发话：`POST /v1/sessions/:id/prompt` → `202 Accepted`（异步，结果经 SSE 回）。
 - 审批：`POST /v1/permissions/:id` → `200`（错主 → `403`）。
 - 中断：`POST /v1/sessions/:id/abort` → `200`（同步）。
-- slash commands：`GET /v1/commands?surface=tui` 拉取 web-safe allowlist 命令目录；composer 输入以 `/` 开头时，web 使用同一目录驱动候选面板、分组、Tab 补全和键盘选择。执行前仍用 `ohbaby-sdk` 的 slash parser/resolve 与 web-safe catalog helper 生成 invocation，再 `POST /v1/commands` 执行；server 对手写请求再次使用同一 SDK helper 校验 allowlist，拒绝 `interaction` 和未接线命令；结果经 `command.*` SSE 事件投影为 `CommandNotice`，只读命令可升级为结构化 modal。收到 `command.catalog.updated` 时，web 使本地 catalog 缓存失效，下次 slash 打开/执行重新拉目录。
+- slash passthrough：`GET /v1/commands?surface=web` 拉取 web palette catalog；`executionKind:"passthrough"` 命令执行前仍用 `ohbaby-sdk` 的 slash parser/resolve 与 web-safe catalog helper 生成 invocation，再 `POST /v1/commands` 执行。server 对手写请求再次使用同一 SDK helper 校验 allowlist，拒绝 `interaction` 与 overlay 命令；结果经 `command.*` SSE 事件投影为 `CommandNotice`，只读命令可升级为结构化 modal。
+- structured slash overlays：同一 catalog 中的 `executionKind:"overlay"` 命令只打开表单；`/connect` 走 `POST /v1/model`，`/connect-search` 走 `POST /v1/settings/search-api-key`，`/compact` 走 `POST /v1/sessions/:id/compact`。这些 mutation 不经 `POST /v1/commands`。
+- 命令目录更新：收到 `command.catalog.updated` 时，web 使本地 catalog 缓存失效，下次 slash 打开/执行重新拉目录。
 
 **⑤ 断线 / 重同步流**：
 - SSE 断 → `reconnecting` → 带 `Last-Event-ID`(= `lastAppliedSeqNum`) 重连 → 命中 replay 则补发 `(id, now]` 事件，回 `live`。
@@ -54,8 +56,14 @@ web 只与 daemon 的 `/v1` 面交互（同源）。
 | `POST /v1/sessions/:id/prompt` | 入队 prompt，结果经 SSE 出 | 异步（202） |
 | `POST /v1/permissions/:id` | 审批应答（归属校验，错主 403） | 同步 |
 | `POST /v1/sessions/:id/abort` | 中止当前 run | 同步 |
-| `GET /v1/commands?surface=tui` | 读取 slash 命令目录（v0.1.6 仅 web-safe UI） | 同步 |
-| `POST /v1/commands` | 执行已解析的 `UiSlashCommandInvocation`，结果经 SSE 出 | 异步 |
+| `GET /v1/commands?surface=web` | 读取 web slash palette（passthrough + overlay metadata） | 同步 |
+| `POST /v1/commands` | 执行已解析的 passthrough `UiSlashCommandInvocation`，结果经 SSE 出 | 异步 |
+| `GET /v1/model` | 读取当前模型配置（不含真实 key） | 同步 |
+| `POST /v1/model/context-window-probe` | 只读探测模型 context window；不写配置、不 reset runtime | 同步 |
+| `POST /v1/model` | 保存当前模型配置并重置 runtime | 同步 |
+| `POST /v1/settings/search-api-key` | 保存 Tavily 搜索 key / env 引用并刷新 search config | 同步 |
+| `GET /v1/sessions/:id/context-window` | 读取当前 session context window 用量 | 同步 |
+| `POST /v1/sessions/:id/compact` | 执行当前 session 压缩 | 同步 |
 
 > 每个端点都对应一个既有 `UiBackendClient` 能力；语义经同一 coordination 与 jsonrpc 对齐，不产生只在 web 才有的行为。
 
@@ -67,7 +75,10 @@ web 只与 daemon 的 `/v1` 面交互（同源）。
 - `submitPrompt(text, sessionId?)` —— 发话（异步）。
 - `respondPermission(requestId, response)` —— 审批。
 - `abortRun(runId?)` —— 中断。
-- `listCommands()` / `executeCommand(invocation)` —— web-safe slash 候选、补全与执行。
+- `listCommands()` / `executeCommand(invocation)` —— web slash 候选、补全与 passthrough 执行。
+- `getCurrentModel()` / `probeModelContextWindow()` / `connectModel()` —— `/connect` overlay 的读取、只读探测与保存。
+- `setSearchApiKey()` —— `/connect-search` overlay 保存。
+- `getContextWindowUsage()` / `compactSession()` —— `/compact` overlay 的 usage 与压缩。
 - `subscribe(listener)` —— 订阅 ViewState/ConnectionState 变化。
 
 ### 3.3 store 接口

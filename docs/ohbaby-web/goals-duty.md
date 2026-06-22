@@ -35,7 +35,7 @@
 - **D3 会话交互 UI（v0.1.6 闭环）**：snapshot 首屏、流式消息、发 prompt、权限审批（准/拒，模态 slide-up）、中断 run，以及 composer 的 **mode 切换（auto/plan）** 与 **权限策略切换（default / full-access）**。视图层详细设计见 [`ui/`](./ui/README.md)。
 - **D4 引导接入**：从 daemon 注入的 `window.__OHBABY__` 读取 `token / clientId / baseUrl` 并附带到请求。
 - **D5 纯静态构建产物**：产出可被 daemon 伺服的 `dist`（HTML/JS/CSS/资源）。
-- **D6 web-safe slash commands UI**：composer 中以 `/` 开头的输入走既有 `UiSlashCommand` 解析/执行链路，经 `/v1/commands` REST adapter 调用 daemon。浏览器提供候选面板、分组、键盘选择、Tab 补全，以及只读命令结果的结构化弹层；命令集合只来自 web-safe allowlist（`/status`、`/help`、`/new`、`/mcps`、`/skills`）。任何 `parentBehavior: "interaction"` 命令、未完成后端接线的命令（如 `/connect`、`/connect-search`、`/compact`）必须被过滤/拒绝。
+- **D6 web slash commands UI**：composer 中以 `/` 开头的输入读取 daemon 的 web palette catalog。`/status`、`/help`、`/new`、`/mcps`、`/skills` 走 web-safe passthrough；`/connect`、`/connect-search`、`/compact` 只打开结构化 overlay 并经专用 REST mutation。任何 `parentBehavior: "interaction"` 命令必须被过滤/拒绝，overlay 命令也不能经 raw `POST /v1/commands` 执行。
 
 ---
 
@@ -45,7 +45,7 @@
 - **ND2 不生成/存储/轮换 auth token**：由 daemon 负责；web 只读注入副本、仅存内存（依赖 S-C）。
 - **ND3 不重定义领域语义/业务规则**：会话真相在 `ohbaby-agent` backend；web 只投影 + adapter。
 - **ND4 不定义 `/v1` wire 契约**：契约真相在 server 的 OpenAPI（`/doc`）+ `ohbaby-sdk` 领域类型；web 消费（生成 typed client）。
-- **ND5 v0.1.6 不做**：未接线命令的交互式表单（`/connect`、`/connect-search`、`/compact`）、模型切换器、多项目界面切换、interaction 请求、分页/高级命令面板——后续版本。v0.1.6 只做 D6 的 web-safe slash commands UI。
+- **ND5 v0.1.6 不做**：完整模型 provider marketplace、大量自动建议、多项目界面切换、interaction 请求、分页/高级命令面板——后续版本。v0.1.6 只做 D6 的 web passthrough + 三个结构化 overlay。
 - **ND6 不做远程/多用户鉴权、不直连 LAN**：同源本地优先，延续 server 的 N4。
 - **ND7 不为想象中的 app 提前抽共享包**：`api/daemon` 内置于本包；保持干净 seam 即可，YAGNI。
 - **ND8 不管理 daemon 生命周期 / 不 auto-spawn**：假定用户显式 `ohbaby serve`（延续 ADR-001 G4 显式生命周期）。"打开 web" = 跑 `ohbaby serve` + 开浏览器，无隐藏 daemon。

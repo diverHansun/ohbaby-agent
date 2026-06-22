@@ -40,7 +40,7 @@
 
 - **重型语法高亮（shiki 等）**：先 markdown+消毒保证安全与基本可读，观感优化后置。
 - **i18n、深度 a11y、移动端适配、多标签页同步、离线**：v0.1.6 不做。
-- **高级 slash command panel**：分页、交互式表单、未接线配置命令（`/connect`、`/connect-search`、`/compact`）后置；v0.1.6 只做 web-safe 候选面板、Tab 补全和只读结果弹层。
+- **高级 slash command panel**：分页、命令历史、多 session 切换和 interaction 请求后置；v0.1.6 做 web-safe passthrough、只读结果弹层，以及 `/connect`、`/connect-search`、`/compact` 三个结构化 overlay。
 - **长会话性能优化（虚拟滚动等）**：先正确，量大再优化，避免过早优化。
 - **远程/多用户鉴权升级**：N4，远程 app 立项再做（ND6）。
 

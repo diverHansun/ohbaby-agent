@@ -72,7 +72,7 @@ apps/ohbaby-web/
 - **放弃 SSR / 路由框架**：换取产物极小、同源伺服简单；代价是无服务端渲染（本地工具无所谓）。
 - **选 React（与 CLI 一致）而非更轻的 Preact**：换取团队熟悉度与生态；代价是运行时略大（本地工具可接受）。
 - **typed client 由 OpenAPI 生成而非手写**：换取契约单一来源、不漂移（落 ND4）；代价是多一道生成构建步骤（server 出 `openapi.json` → web prebuild 生成 `wire.ts`）。
-- **slash UI 只消费 web-safe catalog**：v0.1.6 把以 `/` 开头的 composer 输入解析为 `UiSlashCommandInvocation` 并经 daemon 执行，同时提供候选列表、分组、Tab 补全和只读结果弹层。web-safe allowlist 与过滤谓词由 `ohbaby-sdk` 导出，server 和 web 共用同一份真相；`/connect`、`/connect-search`、`/compact` 等未接线交互式 command panel 仍属 ND5，避免 UI 超前承诺后端能力。
+- **slash UI 消费 web palette catalog**：v0.1.6 把以 `/` 开头的 composer 输入分成两类。web-safe passthrough 命令解析为 `UiSlashCommandInvocation` 并经 daemon 执行；`/connect`、`/connect-search`、`/compact` 打开结构化 overlay 并提交专用 REST。web-safe allowlist 与过滤谓词由 `ohbaby-sdk` 导出，server 和 web 共用同一份真相；interaction 命令仍属后续批次。
 - **store 用 `useSyncExternalStore` 手卷而非 Context**：换取高频 SSE 增量下的精准订阅、避免全量重渲；代价是要自己写极小的 subscribe/getSnapshot（约定俗成、量很小）。
 
 > 以上取舍都为后续维护者标注"为什么不能随意改"：尤其单向流 + 非乐观更新是 resync 正确性的结构前提，改动需回到本文与 dfd 重新评估。

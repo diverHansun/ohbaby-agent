@@ -44,13 +44,14 @@
 2. 命中 replay → 补发缺失事件 → 回 `live`。
 3. 命中 `resync-required` → `resyncing` → 重拉 snapshot + 重置 ViewState → 回 `live`。
 
-### UC5 执行 web-safe slash 命令
-1. 用户在 Composer 输入 `/`，web 懒加载/缓存 `GET /v1/commands?surface=tui` 的命令目录，并使用 `ohbaby-sdk` 的 web-safe helper 过滤。
-2. 候选面板只展示真实返回且 web-safe 的命令（`/status`、`/help`、`/new`、`/mcps`、`/skills`）；`/connect`、`/connect-search`、`/compact` 不出现。
-3. 用户用 `↑/↓` 选择、`Tab` 补全、`Enter` 执行；web 使用 `ohbaby-sdk` 的 slash parser/resolve 再次校验。
-4. resolve 成功 → `POST /v1/commands`，带 `clientInvocationId`、`surface:"tui"`、当前 sessionId（如有）。
-5. SSE 推 `command.started` → 显示 running `CommandNotice`；随后 `command.result.delivered` 或 `command.failed` 更新为结构化只读弹层或安全 fallback notice。
-6. 非 slash 输入仍走 UC2 的 prompt 流。
+### UC5 执行 web slash 命令
+1. 用户在 Composer 输入 `/`，web 懒加载/缓存 `GET /v1/commands?surface=web` 的 palette catalog。
+2. 候选面板展示两类真实返回命令：web-safe passthrough（`/status`、`/help`、`/new`、`/mcps`、`/skills`）与结构化 overlay（`/connect`、`/connect-search`、`/compact`）。
+3. 用户用 `↑/↓` 选择、`Tab` 补全、`Enter` 执行或打开 overlay；web 使用 `ohbaby-sdk` 的 slash parser/resolve 校验 passthrough 命令。
+4. passthrough resolve 成功 → `POST /v1/commands`，带 `clientInvocationId`、`surface:"tui"`、当前 sessionId（如有）。
+5. overlay 命令不经 `POST /v1/commands`：`/connect` 调 model REST，`/connect-search` 调 search key REST，`/compact` 调 context usage + compact REST。
+6. SSE 推 `command.started` → 显示 running `CommandNotice`；随后 `command.result.delivered` 或 `command.failed` 更新为结构化只读弹层或安全 fallback notice。
+7. 非 slash 输入仍走 UC2 的 prompt 流。
 
 ---
 
@@ -82,6 +83,6 @@
 | UC5 | 未知/不可用命令 | 不发送到 daemon，显示解析错误 |
 | UC5 | 命令执行失败 | 通过 `CommandNotice` 显示错误，不吞掉 |
 | UC5 | 命令带交互 action | 不进入候选面板；手写 POST 也被 server 400 拒绝 |
-| UC5 | 未接线命令（connect/compact） | 不进入候选面板，不展示伪表单 |
+| UC5 | overlay 命令被手写 `POST /v1/commands` | server 400 拒绝；UI 正常入口只能打开结构化 overlay |
 
 > 这些失败点与 [`test.md`](./test.md) 的 Critical Scenarios 一一对应。
