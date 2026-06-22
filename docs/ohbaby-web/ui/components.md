@@ -42,7 +42,7 @@
 - **动作按钮**：running 时显示 **Stop**（红方块图标）；idle 时显示 **Send ↵**（蓝）。
 - **底部控件行**（本期纳入，决策 3）：
   - **mode 切换**：`auto mode` / `plan mode`，`⇧⇥` 循环；auto=green 点、plan=blue 点。
-  - **权限策略**：`default`（ask before each action）/ `full-access`（run without prompts），向上弹出的小菜单选择。`full-access` 时**不弹权限模态**。
+  - **权限策略**：`default`（ask before each action）/ `full-access`（run without prompts），与 mode 一样做成轻量单击循环按钮，不使用下拉/上拉菜单。`full-access` 时**不弹权限模态**。
   - **右侧提示**：随状态变化（`↵ · send` / `double click esc to stop` / `press esc again to stop`，armed 时变红）。
 
 ---

@@ -10,7 +10,7 @@
 
 - `/` 输入触发候选面板。
 - 候选按 category 分组，展示命令路径、参数提示、描述和颜色点。
-- 键盘：`↑/↓` 选择，`Tab` 补全，`Enter` 执行，`Esc` 关闭。
+- 键盘：`↑/↓` 逐项选择，`PageUp/PageDown` 分页跳选，`Tab` 补全，`Enter` 执行，`Esc` 关闭。
 - 只读成功结果弹层：`/status`、`/help`、`/mcps`、`/skills`。
 - `/new` 继续作为状态变更命令执行，不弹只读 modal；成功/失败仍可用 notice 表示。
 - running/error notice 保留；无法结构化的成功输出回退为安全文本/markdown notice。
@@ -44,6 +44,8 @@
 
 - 白底，1px 中性描边，12px radius，轻阴影。
 - 行高稳定，选中行浅蓝灰底。
+- 候选行使用固定列宽；描述和参数提示过长时 ellipsis，不反向撑大 composer。
+- 输入区宽度固定在页面布局给定宽度内；completion chip 固定宽度，选择 `/new`、`/skills` 等不同长度命令时不能造成输入框或 Send 按钮位移。
 - category label 小号大写，低对比中性灰。
 - footer 显示：`↑↓ select`、`↵ run`、`⇥ complete`、`esc dismiss`。
 
@@ -53,6 +55,7 @@
 - composer 不能发送时关闭；运行中或等待权限时不拉取/显示/执行 slash 候选，避免 `/new` 等状态变更命令打断 in-flight run。
 - draft 为 `/` 时显示全部 web-safe 候选。
 - draft 为 `/sta` 等局部输入时用 SDK 过滤/匹配可见命令。
+- `PageDown` / `PageUp` 按固定步长跳选，并在首尾 clamp。
 - `Tab` 用当前选中命令补全为完整路径文本，不立即执行。
 - `Enter` 执行当前选中候选；若没有候选，则按普通 slash 解析失败处理，保留草稿并显示错误。
 - 已打开面板收到 `command.catalog.updated` 后重新调用 `OhbabyWebClient.listCommands()`，使用 client 层被事件失效后的最新目录。
@@ -91,8 +94,8 @@
 
 ## 6. Acceptance
 
-- 单测：catalog 暴露给 UI，unsupported 命令不出现；Tab 补全和候选选择可预测。
+- 单测：catalog 暴露给 UI，unsupported 命令不出现；Tab 补全、`PageUp/PageDown` 和候选选择可预测。
 - reducer 测试：`command.result.delivered` 保留 raw output，同时保留原有 text/markdown fallback。
 - 组件测试：输入 `/` 打开面板；`Tab` 补全；`Enter` 执行；只读结果打开 modal；`Esc` 关闭。
 - 组件/集成测试：运行中不打开 slash palette；`command.catalog.updated` 后已打开面板/执行重新拉 catalog。
-- Playwright headless：本地 web 端空态/运行态可见，slash palette 与 `/status` modal 可操作。
+- Playwright headless：本地 web 端空态/运行态可见，slash palette 与 `/status` modal 可操作；输入 `/` 和切换候选时 composer/input/chip 尺寸稳定。

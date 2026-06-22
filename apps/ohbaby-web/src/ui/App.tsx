@@ -8,7 +8,6 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { ChangeEvent, KeyboardEvent, ReactElement } from "react";
-import type { FocusEvent } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import type {
@@ -771,9 +770,7 @@ function Composer(props: {
   );
   const [slashError, setSlashError] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
-  const [permissionOpen, setPermissionOpen] = useState(false);
   const lastEscapeAt = useRef(0);
-  const policyRef = useRef<HTMLDivElement | null>(null);
   const canSend =
     props.view.composer.canSend && draft.trim().length > 0 && !isSubmitting;
   const canUseSlash = props.view.composer.canSend && !isSubmitting;
@@ -852,6 +849,14 @@ function Composer(props: {
     props.onSetPermission({ mode });
   }, [props.onSetPermission, props.view.composer.mode]);
 
+  const cyclePermissionLevel = useCallback(() => {
+    const level =
+      props.view.composer.permissionLevel === "default"
+        ? "full-access"
+        : "default";
+    props.onSetPermission({ level });
+  }, [props.onSetPermission, props.view.composer.permissionLevel]);
+
   const runSlashCommand = useCallback(
     (item: SlashPaletteItem | undefined) => {
       if (!canUseSlash) {
@@ -888,6 +893,16 @@ function Composer(props: {
         if (event.key === "ArrowUp") {
           event.preventDefault();
           setSlashIndex((index) => Math.max(index - 1, 0));
+          return;
+        }
+        if (event.key === "PageDown") {
+          event.preventDefault();
+          setSlashIndex((index) => Math.min(index + 5, slashItems.length - 1));
+          return;
+        }
+        if (event.key === "PageUp") {
+          event.preventDefault();
+          setSlashIndex((index) => Math.max(index - 5, 0));
           return;
         }
         if (event.key === "Tab" && !event.shiftKey) {
@@ -931,6 +946,7 @@ function Composer(props: {
     },
     [
       cycleMode,
+      cyclePermissionLevel,
       draft,
       props.onStop,
       props.view.composer.canStop,
@@ -1019,65 +1035,16 @@ function Composer(props: {
           <span />
           {props.view.composer.mode} mode
         </button>
-        <div
-          className="ohb-policy-control"
-          onBlur={(event: FocusEvent<HTMLDivElement>) => {
-            const nextTarget = event.relatedTarget;
-            if (
-              !(nextTarget instanceof Node) ||
-              !event.currentTarget.contains(nextTarget)
-            ) {
-              setPermissionOpen(false);
-            }
-          }}
-          ref={policyRef}
+        <button
+          className={`ohb-policy-button ohb-policy-${props.view.composer.permissionLevel}`}
+          disabled={props.view.composer.disabled}
+          onClick={cyclePermissionLevel}
+          title="Permission policy"
+          type="button"
         >
-          <button
-            className="ohb-policy-button"
-            disabled={props.view.composer.disabled}
-            onClick={() => {
-              setPermissionOpen((open) => !open);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                setPermissionOpen(false);
-              }
-            }}
-            title="Permission policy"
-            type="button"
-          >
-            <span className="ohb-policy-glyph" aria-hidden="true" />
-            {props.view.composer.permissionLevel}
-            <ChevronDown size={13} />
-          </button>
-          {permissionOpen ? (
-            <div className="ohb-policy-menu">
-              {(["default", "full-access"] as const).map((level) => (
-                <button
-                  className={
-                    props.view.composer.permissionLevel === level
-                      ? "ohb-policy-selected"
-                      : ""
-                  }
-                  key={level}
-                  onClick={() => {
-                    setPermissionOpen(false);
-                    props.onSetPermission({ level });
-                  }}
-                  type="button"
-                >
-                  <span>{level}</span>
-                  <small>
-                    {level === "default"
-                      ? "ask before actions"
-                      : "run without prompts"}
-                  </small>
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
+          <span className="ohb-policy-glyph" aria-hidden="true" />
+          {props.view.composer.permissionLevel}
+        </button>
         <span className="ohb-composer-hint">{props.view.composer.hint}</span>
       </div>
     </section>

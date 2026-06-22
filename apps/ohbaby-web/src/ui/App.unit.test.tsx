@@ -36,6 +36,9 @@ interface FakeRuntime {
     typeof vi.fn<OhbabyWebClient["listCommands"]>
   >;
   readonly runtime: OhbabyWebRuntime;
+  readonly setPermission: ReturnType<
+    typeof vi.fn<OhbabyWebClient["setPermission"]>
+  >;
   readonly store: OhbabyWebStore;
 }
 
@@ -98,6 +101,35 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(slashPaletteText(app.container)).not.toContain("/status");
     expect(slashPaletteText(app.container)).toContain("/skills");
   });
+
+  it("moves slash selection with PageDown and PageUp", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["skills", "status"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashCompletionText(app.container).includes("/skills"));
+
+    await pressTextareaKey(app.container, "PageDown");
+    expect(slashCompletionText(app.container)).toContain("/status");
+
+    await pressTextareaKey(app.container, "PageUp");
+    expect(slashCompletionText(app.container)).toContain("/skills");
+  });
+
+  it("cycles permission policy directly without opening a menu", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+
+    await clickButton(app.container, "Permission policy");
+
+    expect(fake.setPermission).toHaveBeenCalledWith({ level: "full-access" });
+    expect(app.container.querySelector(".ohb-policy-menu")).toBeNull();
+  });
 });
 
 function mountApp(runtime: OhbabyWebRuntime): MountedApp {
@@ -124,6 +156,9 @@ function createFakeRuntime(input: {
   const listCommands = vi.fn<OhbabyWebClient["listCommands"]>(() =>
     Promise.resolve(catalog(["status"])),
   );
+  const setPermission = vi.fn<OhbabyWebClient["setPermission"]>(() =>
+    Promise.resolve(),
+  );
   const client: OhbabyWebClient = {
     abortSession: vi.fn(() => Promise.resolve()),
     close: vi.fn(() => Promise.resolve()),
@@ -132,7 +167,7 @@ function createFakeRuntime(input: {
     getSnapshot: () => store.getSnapshot(),
     listCommands,
     respondPermission: vi.fn(() => Promise.resolve()),
-    setPermission: vi.fn(() => Promise.resolve()),
+    setPermission,
     submitPrompt: vi.fn(() => Promise.resolve()),
     subscribe: (listener) => store.subscribe(listener),
   };
@@ -144,6 +179,7 @@ function createFakeRuntime(input: {
       ready: Promise.resolve(),
       store,
     },
+    setPermission,
     store,
   };
 }
@@ -252,6 +288,40 @@ async function waitFor(
 
 function slashPaletteText(container: ParentNode): string {
   return container.querySelector(".ohb-slash-palette")?.textContent ?? "";
+}
+
+function slashCompletionText(container: ParentNode): string {
+  return container.querySelector(".ohb-slash-completion")?.textContent ?? "";
+}
+
+async function pressTextareaKey(
+  container: ParentNode,
+  key: string,
+): Promise<void> {
+  const textarea = container.querySelector("textarea");
+  if (!(textarea instanceof HTMLTextAreaElement)) {
+    throw new Error("textarea not found");
+  }
+  await act(async () => {
+    textarea.dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, key }),
+    );
+    await Promise.resolve();
+  });
+}
+
+async function clickButton(
+  container: ParentNode,
+  title: string,
+): Promise<void> {
+  const button = container.querySelector(`button[title="${title}"]`);
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error(`button not found: ${title}`);
+  }
+  await act(async () => {
+    button.click();
+    await Promise.resolve();
+  });
 }
 
 function deferred<T>(): {
