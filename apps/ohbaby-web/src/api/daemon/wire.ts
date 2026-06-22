@@ -35,6 +35,7 @@ export type ConnectionState =
 
 export interface ViewState {
   readonly commandNotices: readonly CommandNotice[];
+  readonly commandCatalogVersion: string | null;
   readonly lastAppliedSeqNum: number;
   readonly snapshot: UiSnapshot | null;
 }
@@ -45,6 +46,7 @@ export interface CommandNotice {
   readonly id: string;
   readonly kind: "error" | "running" | "success";
   readonly markdown?: string;
+  readonly output?: CommandOutput;
   readonly path: readonly string[];
   readonly sessionId?: string;
   readonly text?: string;

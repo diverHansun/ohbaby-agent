@@ -34,6 +34,7 @@ export interface OhbabyWebClient {
     readonly text: string;
   }): Promise<void>;
   getSnapshot(): StoreSnapshot;
+  listCommands(): Promise<UiSlashCommandCatalog>;
   respondPermission(
     requestId: string,
     response: UiPermissionResponse,
@@ -167,7 +168,7 @@ class BrowserDaemonClient implements OhbabyWebClient {
     } satisfies UiSlashCommandInvocation);
   }
 
-  private async listCommands(): Promise<UiSlashCommandCatalog> {
+  async listCommands(): Promise<UiSlashCommandCatalog> {
     this.commandCatalogPromise ??= this.http
       .listCommands()
       .then((response) =>

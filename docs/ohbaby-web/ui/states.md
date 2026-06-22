@@ -26,7 +26,7 @@
 - **running**：状态胶囊 `running`(slate,pulse) + 流内三色波点思考指示器（`Thinking · {elapsed}s · double click esc to interrupt`）+ composer 显示 Stop。
 - **idle**：状态胶囊 `idle`(green) + 流内定稿行 + composer 显示 Send。
 - **中断**：double-esc 或 Stop → 转 idle（与 CLI 一致）。
-- **命令 notice**：slash 命令执行中显示 running notice；结果/错误回流后就地更新。notice 是 UI 投影，不改变 run 状态，除非 command 本身通过 backend 产生 session/run 事件。
+- **命令 UI**：slash 命令执行中显示 running notice；错误回流后就地更新；只读成功结果可打开结构化 modal。command UI 是易失投影，不改变 run 状态，除非 command 本身通过 backend 产生 session/run 事件。
 
 ---
 

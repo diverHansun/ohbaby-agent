@@ -1,4 +1,4 @@
-import { Bot, ChevronDown, Send, Square, User } from "lucide-react";
+import { Bot, ChevronDown, Send, Square, User, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -18,6 +18,7 @@ import type {
   UiPermissionLevel,
   UiPermissionMode,
   UiPermissionRequest,
+  UiSlashCommandCatalog,
 } from "ohbaby-sdk";
 import type { OhbabyWebRuntime } from "../api/daemon/client.js";
 import type { CommandNotice } from "../api/daemon/wire.js";
@@ -27,6 +28,20 @@ import {
   type HeaderModel,
   type ViewModel,
 } from "./selectors.js";
+import {
+  commandData,
+  commandDataArray,
+  createCommandResultModel,
+  createSlashPaletteItems,
+  isRecord,
+  outputAsJson,
+  safeHelpCommands,
+  selectedSlashItem,
+  slashCompletionSuffix,
+  statusRows,
+  type CommandResultModel,
+  type SlashPaletteItem,
+} from "./slashCommands.js";
 
 interface AppProps {
   readonly runtime: OhbabyWebRuntime;
@@ -62,6 +77,9 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
   );
   const view = useMemo(() => selectViewModel(storeSnapshot), [storeSnapshot]);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [closedCommandModalIds, setClosedCommandModalIds] = useState<
+    readonly string[]
+  >([]);
   const clearActionError = useCallback(() => {
     setActionError(null);
   }, []);
@@ -100,6 +118,21 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
       ),
     [runAction, runtime.client, view.composer.activeSessionId],
   );
+  const listCommands = useCallback(
+    () => runtime.client.listCommands(),
+    [runtime.client],
+  );
+  const commandModalNotice = useMemo(
+    () =>
+      [...view.commandNotices]
+        .reverse()
+        .find(
+          (notice) =>
+            !closedCommandModalIds.includes(notice.id) &&
+            createCommandResultModel(notice) !== null,
+        ) ?? null,
+    [closedCommandModalIds, view.commandNotices],
+  );
 
   return (
     <main
@@ -125,6 +158,7 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
             permissions={view.pendingPermissions}
           />
           <Composer
+            onListCommands={listCommands}
             onSetPermission={(input) => {
               void runAction(() => runtime.client.setPermission(input));
             }}
@@ -141,6 +175,19 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
             }}
             view={view}
           />
+          {commandModalNotice ? (
+            <CommandResultModal
+              header={view.header}
+              notice={commandModalNotice}
+              onClose={() => {
+                setClosedCommandModalIds((ids) => [
+                  ...ids,
+                  commandModalNotice.id,
+                ]);
+              }}
+              view={view}
+            />
+          ) : null}
         </>
       ) : (
         <>
@@ -149,6 +196,7 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
             onDismiss={clearActionError}
           />
           <EmptyState
+            onListCommands={listCommands}
             onSetPermission={(input) => {
               void runAction(() => runtime.client.setPermission(input));
             }}
@@ -176,6 +224,7 @@ function BootstrapError(props: { readonly error: unknown }): ReactElement {
 }
 
 function EmptyState(props: {
+  readonly onListCommands: () => Promise<UiSlashCommandCatalog>;
   readonly onSetPermission: (input: {
     readonly level?: UiPermissionLevel;
     readonly mode?: UiPermissionMode;
@@ -207,6 +256,7 @@ function EmptyState(props: {
         </div>
         <Composer
           compact
+          onListCommands={props.onListCommands}
           onSetPermission={props.onSetPermission}
           onSubmit={props.onSubmit}
           onStop={() => undefined}
@@ -301,12 +351,15 @@ function ConversationStream(props: { readonly view: ViewModel }): ReactElement {
 function CommandNoticeList(props: {
   readonly notices: readonly CommandNotice[];
 }): ReactElement | null {
-  if (props.notices.length === 0) {
+  const notices = props.notices.filter(
+    (notice) => createCommandResultModel(notice) === null,
+  );
+  if (notices.length === 0) {
     return null;
   }
   return (
     <div className="ohb-command-notices">
-      {props.notices.map((notice) => (
+      {notices.map((notice) => (
         <article
           className={`ohb-command-notice ohb-command-${notice.kind}`}
           key={notice.id}
@@ -326,6 +379,222 @@ function CommandNoticeList(props: {
           )}
         </article>
       ))}
+    </div>
+  );
+}
+
+function CommandResultModal(props: {
+  readonly header: HeaderModel;
+  readonly notice: CommandNotice;
+  readonly onClose: () => void;
+  readonly view: ViewModel;
+}): ReactElement | null {
+  const model = createCommandResultModel(props.notice);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, [props.notice.id]);
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        props.onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return (): void => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [props.onClose]);
+  if (!model) {
+    return null;
+  }
+  return (
+    <div
+      className="ohb-command-modal-layer"
+      onClick={props.onClose}
+      role="presentation"
+    >
+      <section
+        aria-label={model.title}
+        aria-modal="true"
+        className={`ohb-command-modal ohb-command-modal-${model.variant}`}
+        onClick={(event) => {
+          event.stopPropagation();
+        }}
+        role="dialog"
+      >
+        <header className="ohb-command-modal-header">
+          <span>{model.commandLabel}</span>
+          <h2>{model.title}</h2>
+          <button
+            onClick={props.onClose}
+            ref={closeButtonRef}
+            title="Close"
+            type="button"
+          >
+            <X size={16} />
+          </button>
+        </header>
+        <CommandResultBody
+          header={props.header}
+          notice={props.notice}
+          variant={model.variant}
+          view={props.view}
+        />
+      </section>
+    </div>
+  );
+}
+
+function CommandResultBody(props: {
+  readonly header: HeaderModel;
+  readonly notice: CommandNotice;
+  readonly variant: CommandResultModel["variant"];
+  readonly view: ViewModel;
+}): ReactElement {
+  const data = commandData(props.notice);
+  switch (props.variant) {
+    case "status":
+      return (
+        <StatusCommandResult
+          data={data}
+          header={props.header}
+          view={props.view}
+        />
+      );
+    case "help":
+      return <HelpCommandResult data={data} />;
+    case "mcps":
+      return <McpCommandResult data={data} notice={props.notice} />;
+    case "skills":
+      return <SkillsCommandResult data={data} notice={props.notice} />;
+  }
+}
+
+function StatusCommandResult(props: {
+  readonly data: Record<string, unknown> | null;
+  readonly header: HeaderModel;
+  readonly view: ViewModel;
+}): ReactElement {
+  return (
+    <div className="ohb-command-modal-body">
+      <div className="ohb-status-result">
+        {statusRows(props.data, props.header, props.view).map((row) => (
+          <div key={row.label}>
+            <span>{row.label}</span>
+            <span>{row.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HelpCommandResult(props: {
+  readonly data: Record<string, unknown> | null;
+}): ReactElement {
+  const commands = safeHelpCommands(props.data);
+  return (
+    <div className="ohb-command-modal-body ohb-help-result">
+      <section>
+        <h3>Shortcuts</h3>
+        {[
+          ["Double Esc", "Interrupt"],
+          ["Shift+Tab", "Cycle mode"],
+          ["Esc", "Close / Back"],
+          ["Tab", "Complete /cmd"],
+          ["↑ ↓", "Select command"],
+        ].map(([key, label]) => (
+          <div className="ohb-help-row" key={key}>
+            <kbd>{key}</kbd>
+            <span>{label}</span>
+          </div>
+        ))}
+      </section>
+      <section>
+        <h3>Commands</h3>
+        {commands.length > 0 ? (
+          commands.map((command) => (
+            <div className="ohb-help-command" key={String(command.id)}>
+              <span>{formatCommandPath(command)}</span>
+              <span>{stringField(command, "description") ?? ""}</span>
+            </div>
+          ))
+        ) : (
+          <pre>commands: none</pre>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function McpCommandResult(props: {
+  readonly data: Record<string, unknown> | null;
+  readonly notice: CommandNotice;
+}): ReactElement {
+  const servers = commandDataArray(props.data, "servers");
+  if (servers.length === 0) {
+    return <FallbackCommandResult notice={props.notice} />;
+  }
+  return (
+    <div className="ohb-command-modal-body">
+      <div className="ohb-list-result">
+        {servers.map((server, index) =>
+          isRecord(server) ? (
+            <div
+              className={`ohb-list-row ohb-list-${stringField(server, "status") ?? "unknown"}`}
+              key={`${stringField(server, "name") ?? "server"}-${String(index)}`}
+            >
+              <span />
+              <strong>{stringField(server, "name") ?? "server"}</strong>
+              <small>{stringField(server, "status") ?? "unknown"}</small>
+              <em>{mcpServerMeta(server)}</em>
+            </div>
+          ) : null,
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SkillsCommandResult(props: {
+  readonly data: Record<string, unknown> | null;
+  readonly notice: CommandNotice;
+}): ReactElement {
+  const skills = commandDataArray(props.data, "skills");
+  if (skills.length === 0) {
+    return <FallbackCommandResult notice={props.notice} />;
+  }
+  return (
+    <div className="ohb-command-modal-body">
+      <div className="ohb-list-result">
+        {skills.map((skill, index) =>
+          isRecord(skill) ? (
+            <div
+              className="ohb-list-row ohb-list-skill"
+              key={`${stringField(skill, "name") ?? "skill"}-${String(index)}`}
+            >
+              <strong>/{stringField(skill, "name") ?? "skill"}</strong>
+              <span>{stringField(skill, "description") ?? ""}</span>
+              <small>
+                {stringField(skill, "source") ??
+                  stringField(skill, "scope") ??
+                  "skill"}
+              </small>
+            </div>
+          ) : null,
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FallbackCommandResult(props: {
+  readonly notice: CommandNotice;
+}): ReactElement {
+  return (
+    <div className="ohb-command-modal-body">
+      <pre>{outputAsJson(props.notice.output)}</pre>
     </div>
   );
 }
@@ -484,6 +753,7 @@ function PermissionModal(props: {
 
 function Composer(props: {
   readonly compact?: boolean;
+  readonly onListCommands: () => Promise<UiSlashCommandCatalog>;
   readonly onSetPermission: (input: {
     readonly level?: UiPermissionLevel;
     readonly mode?: UiPermissionMode;
@@ -494,11 +764,70 @@ function Composer(props: {
 }): ReactElement {
   const [draft, setDraft] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [slashCatalog, setSlashCatalog] =
+    useState<UiSlashCommandCatalog | null>(null);
+  const [slashDismissedDraft, setSlashDismissedDraft] = useState<string | null>(
+    null,
+  );
+  const [slashError, setSlashError] = useState<string | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
   const [permissionOpen, setPermissionOpen] = useState(false);
   const lastEscapeAt = useRef(0);
   const policyRef = useRef<HTMLDivElement | null>(null);
   const canSend =
     props.view.composer.canSend && draft.trim().length > 0 && !isSubmitting;
+  const canUseSlash = props.view.composer.canSend && !isSubmitting;
+  const slashItems = useMemo(
+    () =>
+      canUseSlash && slashCatalog && draft.startsWith("/")
+        ? createSlashPaletteItems(slashCatalog, draft)
+        : [],
+    [canUseSlash, draft, slashCatalog],
+  );
+  const selectedCommand = selectedSlashItem(slashItems, slashIndex);
+  const completionSuffix = slashCompletionSuffix(selectedCommand, draft);
+  const slashOpen =
+    draft.startsWith("/") &&
+    slashDismissedDraft !== draft &&
+    slashItems.length > 0 &&
+    canUseSlash &&
+    !props.view.composer.disabled;
+
+  useEffect(() => {
+    if (
+      !draft.startsWith("/") ||
+      !canUseSlash ||
+      props.view.composer.disabled
+    ) {
+      return;
+    }
+    let cancelled = false;
+    setSlashCatalog(null);
+    setSlashError(null);
+    props
+      .onListCommands()
+      .then((catalog) => {
+        if (!cancelled) {
+          setSlashCatalog(catalog);
+          setSlashError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setSlashCatalog(null);
+          setSlashError(error instanceof Error ? error.message : String(error));
+        }
+      });
+    return (): void => {
+      cancelled = true;
+    };
+  }, [
+    canUseSlash,
+    draft,
+    props.onListCommands,
+    props.view.commandCatalogVersion,
+    props.view.composer.disabled,
+  ]);
 
   const send = useCallback(() => {
     const text = draft.trim();
@@ -516,15 +845,70 @@ function Composer(props: {
       .finally(() => {
         setIsSubmitting(false);
       });
-  }, [draft, props]);
+  }, [draft, props.onSubmit, props.view.composer.canSend]);
 
   const cycleMode = useCallback(() => {
     const mode = props.view.composer.mode === "auto" ? "plan" : "auto";
     props.onSetPermission({ mode });
-  }, [props]);
+  }, [props.onSetPermission, props.view.composer.mode]);
+
+  const runSlashCommand = useCallback(
+    (item: SlashPaletteItem | undefined) => {
+      if (!canUseSlash) {
+        return;
+      }
+      const commandText = item?.label ?? draft.trim();
+      if (!commandText) {
+        return;
+      }
+      setIsSubmitting(true);
+      void props
+        .onSubmit(commandText)
+        .then((sent) => {
+          if (sent) {
+            setDraft("");
+            setSlashDismissedDraft(null);
+          }
+        })
+        .finally(() => {
+          setIsSubmitting(false);
+        });
+    },
+    [canUseSlash, draft, props.onSubmit],
+  );
 
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (slashOpen) {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          setSlashIndex((index) => Math.min(index + 1, slashItems.length - 1));
+          return;
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          setSlashIndex((index) => Math.max(index - 1, 0));
+          return;
+        }
+        if (event.key === "Tab" && !event.shiftKey) {
+          event.preventDefault();
+          if (selectedCommand) {
+            setDraft(selectedCommand.label);
+            setSlashDismissedDraft(null);
+          }
+          return;
+        }
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          runSlashCommand(selectedCommand);
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setSlashDismissedDraft(draft);
+          return;
+        }
+      }
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
         send();
@@ -545,7 +929,17 @@ function Composer(props: {
         }
       }
     },
-    [cycleMode, props, send],
+    [
+      cycleMode,
+      draft,
+      props.onStop,
+      props.view.composer.canStop,
+      runSlashCommand,
+      selectedCommand,
+      send,
+      slashItems.length,
+      slashOpen,
+    ],
   );
 
   return (
@@ -556,16 +950,37 @@ function Composer(props: {
     >
       <div className="ohb-composer-input">
         <span className="ohb-prompt">&gt;</span>
+        {slashOpen ? (
+          <SlashPalette
+            items={slashItems}
+            onHover={setSlashIndex}
+            onRun={(item) => {
+              runSlashCommand(item);
+            }}
+            placement={props.compact ? "down" : "up"}
+            selectedIndex={slashIndex}
+          />
+        ) : null}
         <textarea
           disabled={props.view.composer.disabled || isSubmitting}
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-            setDraft(event.target.value);
+            const nextDraft = event.target.value;
+            setDraft(nextDraft);
+            setSlashIndex(0);
+            if (nextDraft !== slashDismissedDraft) {
+              setSlashDismissedDraft(null);
+            }
           }}
           onKeyDown={onKeyDown}
           placeholder={composerPlaceholder(props.view)}
           rows={1}
           value={draft}
         />
+        {completionSuffix && selectedCommand ? (
+          <span className="ohb-slash-completion" aria-hidden="true">
+            <span>⇥ {selectedCommand.label}</span>
+          </span>
+        ) : null}
         {props.view.composer.isRunning ? (
           <button
             className="ohb-stop-button"
@@ -591,6 +1006,9 @@ function Composer(props: {
         )}
       </div>
       <div className="ohb-composer-tools">
+        {slashError ? (
+          <span className="ohb-slash-error">{slashError}</span>
+        ) : null}
         <button
           className={`ohb-mode-button ohb-mode-${props.view.composer.mode}`}
           disabled={props.view.composer.disabled}
@@ -664,6 +1082,89 @@ function Composer(props: {
       </div>
     </section>
   );
+}
+
+function SlashPalette(props: {
+  readonly items: readonly SlashPaletteItem[];
+  readonly onHover: (index: number) => void;
+  readonly onRun: (item: SlashPaletteItem) => void;
+  readonly placement: "down" | "up";
+  readonly selectedIndex: number;
+}): ReactElement {
+  return (
+    <div className={`ohb-slash-palette ohb-slash-palette-${props.placement}`}>
+      <div className="ohb-slash-palette-list">
+        {props.items.map((item, index) => (
+          <div key={item.command.id}>
+            {item.showCategory ? (
+              <div className="ohb-slash-category">{item.categoryLabel}</div>
+            ) : null}
+            <button
+              className={
+                index === props.selectedIndex
+                  ? "ohb-slash-row ohb-slash-selected"
+                  : "ohb-slash-row"
+              }
+              onClick={() => {
+                props.onRun(item);
+              }}
+              onMouseEnter={() => {
+                props.onHover(index);
+              }}
+              type="button"
+            >
+              <span className={`ohb-slash-dot ohb-slash-dot-${item.accent}`} />
+              <span>{item.label}</span>
+              {item.argsHint ? <small>{item.argsHint}</small> : null}
+              <em>{item.description}</em>
+            </button>
+          </div>
+        ))}
+      </div>
+      <footer>
+        <span>
+          <b>↑↓</b> select
+        </span>
+        <span>
+          <b>↵</b> run
+        </span>
+        <span>
+          <b>⇥</b> complete
+        </span>
+        <span>
+          <b>esc</b> dismiss
+        </span>
+      </footer>
+    </div>
+  );
+}
+
+function formatCommandPath(command: Record<string, unknown>): string {
+  const path = Array.isArray(command.path)
+    ? command.path.filter(
+        (segment): segment is string => typeof segment === "string",
+      )
+    : [];
+  return path.length > 0 ? `/${path.join(" ")}` : `/${String(command.id)}`;
+}
+
+function stringField(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function mcpServerMeta(server: Record<string, unknown>): string {
+  const error = stringField(server, "error");
+  if (error) {
+    return error;
+  }
+  const toolCount = server.toolCount;
+  return typeof toolCount === "number"
+    ? `${String(toolCount)} ${toolCount === 1 ? "tool" : "tools"}`
+    : "";
 }
 
 function composerPlaceholder(view: ViewModel): string {

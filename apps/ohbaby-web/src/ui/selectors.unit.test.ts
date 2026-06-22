@@ -10,6 +10,7 @@ function store(snapshot: UiSnapshot): StoreSnapshot {
     connectionState: "live",
     error: null,
     view: {
+      commandCatalogVersion: null,
       commandNotices: [],
       lastAppliedSeqNum: 10,
       snapshot,

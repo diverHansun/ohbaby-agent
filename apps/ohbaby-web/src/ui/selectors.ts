@@ -39,6 +39,7 @@ export interface ComposerModel {
 
 export interface ViewModel {
   readonly activeSession: UiSession | null;
+  readonly commandCatalogVersion: string | null;
   readonly commandNotices: readonly CommandNotice[];
   readonly composer: ComposerModel;
   readonly error: string | null;
@@ -72,6 +73,7 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
 
   return {
     activeSession,
+    commandCatalogVersion: snapshot.view.commandCatalogVersion,
     commandNotices: snapshot.view.commandNotices,
     composer: {
       ...(activeRunId === undefined ? {} : { activeRunId }),

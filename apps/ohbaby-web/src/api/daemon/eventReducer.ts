@@ -11,6 +11,7 @@ const COMMAND_NOTICE_TEXT_LIMIT = 1_200;
 
 export function createInitialViewState(): ViewState {
   return {
+    commandCatalogVersion: null,
     commandNotices: [],
     lastAppliedSeqNum: 0,
     snapshot: null,
@@ -22,6 +23,7 @@ export function replaceSnapshot(
   seqNum: number,
 ): ViewState {
   return {
+    commandCatalogVersion: null,
     commandNotices: [],
     lastAppliedSeqNum: seqNum,
     snapshot,
@@ -47,6 +49,13 @@ export function reduceUiEvent(
       lastAppliedSeqNum: seqNum,
     };
   }
+  if (event.type === "command.catalog.updated") {
+    return {
+      ...state,
+      commandCatalogVersion: event.version,
+      lastAppliedSeqNum: seqNum,
+    };
+  }
   const snapshot = state.snapshot;
   if (!snapshot) {
     return {
@@ -55,6 +64,7 @@ export function reduceUiEvent(
     };
   }
   return {
+    commandCatalogVersion: state.commandCatalogVersion,
     commandNotices: state.commandNotices,
     lastAppliedSeqNum: seqNum,
     snapshot: applyEventToSnapshot(snapshot, event),
@@ -133,17 +143,20 @@ function commandOutputToNoticeContent(
     UiEvent,
     { readonly type: "command.result.delivered" }
   >["output"],
-): Pick<CommandNotice, "markdown" | "text"> {
+): Pick<CommandNotice, "markdown" | "output" | "text"> {
   if (output === undefined) {
     return { text: "Command completed" };
   }
   switch (output.kind) {
     case "markdown":
-      return { markdown: truncateCommandOutput(output.markdown) };
+      return { markdown: truncateCommandOutput(output.markdown), output };
     case "text":
-      return { text: truncateCommandOutput(output.text) };
+      return { output, text: truncateCommandOutput(output.text) };
     case "data":
-      return { text: truncateCommandOutput(formatDataCommandOutput(output)) };
+      return {
+        output,
+        text: truncateCommandOutput(formatDataCommandOutput(output)),
+      };
   }
 }
 

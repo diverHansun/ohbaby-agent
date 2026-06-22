@@ -33,7 +33,7 @@ web 只与 daemon 的 `/v1` 面交互（同源）。
 - 发话：`POST /v1/sessions/:id/prompt` → `202 Accepted`（异步，结果经 SSE 回）。
 - 审批：`POST /v1/permissions/:id` → `200`（错主 → `403`）。
 - 中断：`POST /v1/sessions/:id/abort` → `200`（同步）。
-- slash passthrough：`GET /v1/commands?surface=tui` 拉取 web-safe allowlist 命令目录；composer 输入以 `/` 开头时，web 使用 `ohbaby-sdk` 的 slash parser/resolve 与 web-safe catalog helper 生成 invocation，再 `POST /v1/commands` 执行；server 对手写请求再次使用同一 SDK helper 校验 allowlist，拒绝 `interaction` 命令；结果经 `command.*` SSE 事件投影为 `CommandNotice`。收到 `command.catalog.updated` 时，web 使本地 catalog 缓存失效，下次 slash 执行重新拉目录。
+- slash commands：`GET /v1/commands?surface=tui` 拉取 web-safe allowlist 命令目录；composer 输入以 `/` 开头时，web 使用同一目录驱动候选面板、分组、Tab 补全和键盘选择。执行前仍用 `ohbaby-sdk` 的 slash parser/resolve 与 web-safe catalog helper 生成 invocation，再 `POST /v1/commands` 执行；server 对手写请求再次使用同一 SDK helper 校验 allowlist，拒绝 `interaction` 和未接线命令；结果经 `command.*` SSE 事件投影为 `CommandNotice`，只读命令可升级为结构化 modal。收到 `command.catalog.updated` 时，web 使本地 catalog 缓存失效，下次 slash 打开/执行重新拉目录。
 
 **⑤ 断线 / 重同步流**：
 - SSE 断 → `reconnecting` → 带 `Last-Event-ID`(= `lastAppliedSeqNum`) 重连 → 命中 replay 则补发 `(id, now]` 事件，回 `live`。
@@ -54,7 +54,7 @@ web 只与 daemon 的 `/v1` 面交互（同源）。
 | `POST /v1/sessions/:id/prompt` | 入队 prompt，结果经 SSE 出 | 异步（202） |
 | `POST /v1/permissions/:id` | 审批应答（归属校验，错主 403） | 同步 |
 | `POST /v1/sessions/:id/abort` | 中止当前 run | 同步 |
-| `GET /v1/commands?surface=tui` | 读取 slash 命令目录（v0.1.6 仅文本 passthrough） | 同步 |
+| `GET /v1/commands?surface=tui` | 读取 slash 命令目录（v0.1.6 仅 web-safe UI） | 同步 |
 | `POST /v1/commands` | 执行已解析的 `UiSlashCommandInvocation`，结果经 SSE 出 | 异步 |
 
 > 每个端点都对应一个既有 `UiBackendClient` 能力；语义经同一 coordination 与 jsonrpc 对齐，不产生只在 web 才有的行为。
@@ -67,7 +67,7 @@ web 只与 daemon 的 `/v1` 面交互（同源）。
 - `submitPrompt(text, sessionId?)` —— 发话（异步）。
 - `respondPermission(requestId, response)` —— 审批。
 - `abortRun(runId?)` —— 中断。
-- `listCommands()` / `executeCommand(invocation)` —— 最小 slash passthrough。
+- `listCommands()` / `executeCommand(invocation)` —— web-safe slash 候选、补全与执行。
 - `subscribe(listener)` —— 订阅 ViewState/ConnectionState 变化。
 
 ### 3.3 store 接口

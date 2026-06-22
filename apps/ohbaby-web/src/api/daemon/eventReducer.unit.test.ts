@@ -36,10 +36,29 @@ describe("ohbaby-web eventReducer", () => {
     const state = replaceSnapshot(emptySnapshot(), 10);
 
     expect(state).toMatchObject({
+      commandCatalogVersion: null,
       lastAppliedSeqNum: 10,
       snapshot: {
         activeSessionId: "session_1",
       },
+    });
+  });
+
+  it("records command catalog updates for UI refetch", () => {
+    const state = reduceUiEvent(
+      replaceSnapshot(emptySnapshot(), 0),
+      {
+        reason: "test",
+        timestamp: Date.parse(timestamp),
+        type: "command.catalog.updated",
+        version: "commands-v2",
+      },
+      1,
+    );
+
+    expect(state).toMatchObject({
+      commandCatalogVersion: "commands-v2",
+      lastAppliedSeqNum: 1,
     });
   });
 
@@ -166,6 +185,7 @@ describe("ohbaby-web eventReducer", () => {
     );
 
     expect(state).toEqual({
+      commandCatalogVersion: null,
       commandNotices: [],
       lastAppliedSeqNum: 1,
       snapshot: null,
@@ -224,6 +244,14 @@ describe("ohbaby-web eventReducer", () => {
         commandId: "status",
         id: "command_1",
         kind: "success",
+        output: {
+          data: {
+            permission: { level: "default", mode: "auto" },
+            sessionId: "session_1",
+          },
+          kind: "data",
+          subject: "status",
+        },
         text: "status\nsession: session_1\npermission: auto · default",
       },
     ]);

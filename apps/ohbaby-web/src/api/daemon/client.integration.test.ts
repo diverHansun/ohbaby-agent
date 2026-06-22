@@ -242,6 +242,17 @@ describe("ohbaby-web daemon client", () => {
       method: "PATCH",
       url: "http://127.0.0.1:4096/v1/permission",
     });
+
+    const catalog = await (
+      runtime.client as typeof runtime.client & {
+        readonly listCommands: () => Promise<{
+          readonly commands: readonly { readonly id: string }[];
+          readonly version: string;
+        }>;
+      }
+    ).listCommands();
+    expect(catalog.commands.map((command) => command.id)).toEqual(["status"]);
+
     await runtime.client.executeSlashCommand({
       sessionId: "session_1",
       text: "/status",
