@@ -1,10 +1,16 @@
 import type {
   UiEvent,
+  UiCompactSessionResult,
+  UiContextWindowUsage,
+  UiConnectModelResult,
+  UiCurrentModelConfig,
   UiPermissionLevel,
   UiPermissionMode,
   UiPermissionResponse,
   UiPermissionState,
-  UiSlashCommandCatalog,
+  UiProbeModelContextWindowResult,
+  UiSetSearchApiKeyResult,
+  UiWebCommandCatalog,
   UiSlashCommandInvocation,
   UiSlashCommandOutput,
   UiSnapshot,
@@ -79,7 +85,57 @@ export interface OkResponse {
 }
 
 export interface CommandCatalogResponse {
-  readonly catalog: UiSlashCommandCatalog;
+  readonly catalog: UiWebCommandCatalog;
+  readonly ok: true;
+}
+
+export interface CurrentModelResponse {
+  readonly model: UiCurrentModelConfig | null;
+  readonly ok: true;
+}
+
+export interface ModelConnectRequest {
+  readonly provider: string;
+  readonly baseUrl: string;
+  readonly apiKeyEnv: string;
+  readonly apiKey?: string;
+  readonly model: string;
+  readonly contextWindowTokens?: number;
+  readonly maxOutputTokens?: number;
+}
+
+export interface ModelConnectResponse {
+  readonly model: UiConnectModelResult;
+  readonly ok: true;
+}
+
+export interface ModelContextWindowProbeResponse {
+  readonly ok: true;
+  readonly probe: UiProbeModelContextWindowResult;
+}
+
+export interface SearchApiKeyRequest {
+  readonly apiKey?: string;
+  readonly apiKeyEnv?: string;
+  readonly provider?: "tavily";
+}
+
+export interface SearchApiKeyResponse {
+  readonly ok: true;
+  readonly search: UiSetSearchApiKeyResult;
+}
+
+export interface ContextWindowUsageResponse {
+  readonly ok: true;
+  readonly usage: UiContextWindowUsage | null;
+}
+
+export interface CompactSessionRequest {
+  readonly force?: boolean;
+}
+
+export interface CompactSessionResponse {
+  readonly compact: UiCompactSessionResult;
   readonly ok: true;
 }
 

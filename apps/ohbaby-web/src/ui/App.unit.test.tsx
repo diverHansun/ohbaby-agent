@@ -3,9 +3,10 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
+  UiCompactSessionUsage,
   UiRunStatus,
   UiSnapshot,
-  UiSlashCommandCatalog,
+  UiWebCommandCatalog,
 } from "ohbaby-sdk";
 import type {
   OhbabyWebClient,
@@ -29,8 +30,14 @@ interface MountedApp {
 }
 
 interface FakeRuntime {
+  readonly compactSession: ReturnType<
+    typeof vi.fn<OhbabyWebClient["compactSession"]>
+  >;
   readonly executeSlashCommand: ReturnType<
     typeof vi.fn<OhbabyWebClient["executeSlashCommand"]>
+  >;
+  readonly connectModel: ReturnType<
+    typeof vi.fn<OhbabyWebClient["connectModel"]>
   >;
   readonly listCommands: ReturnType<
     typeof vi.fn<OhbabyWebClient["listCommands"]>
@@ -38,6 +45,9 @@ interface FakeRuntime {
   readonly runtime: OhbabyWebRuntime;
   readonly setPermission: ReturnType<
     typeof vi.fn<OhbabyWebClient["setPermission"]>
+  >;
+  readonly setSearchApiKey: ReturnType<
+    typeof vi.fn<OhbabyWebClient["setSearchApiKey"]>
   >;
   readonly store: OhbabyWebStore;
 }
@@ -71,7 +81,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
-    const nextCatalog = deferred<UiSlashCommandCatalog>();
+    const nextCatalog = deferred<UiWebCommandCatalog>();
     fake.listCommands
       .mockResolvedValueOnce(catalog(["status"]))
       .mockReturnValueOnce(nextCatalog.promise);
@@ -130,6 +140,88 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.setPermission).toHaveBeenCalledWith({ level: "full-access" });
     expect(app.container.querySelector(".ohb-policy-menu")).toBeNull();
   });
+
+  it("opens the structured connect overlay from the slash palette", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["connect", "status"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+
+    await setInputValue(app.container, "Provider", "zhipu");
+    await setInputValue(
+      app.container,
+      "Base URL",
+      "https://open.bigmodel.cn/api/paas/v4",
+    );
+    await setInputValue(app.container, "API key env", "ZHIPU_API_KEY");
+    await setInputValue(app.container, "Model", "glm-4.7");
+    await clickButton(app.container, "Save model");
+
+    expect(fake.connectModel).toHaveBeenCalledWith({
+      apiKeyEnv: "ZHIPU_API_KEY",
+      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+      model: "glm-4.7",
+      provider: "zhipu",
+    });
+    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
+  });
+
+  it("opens the structured search overlay from the slash palette", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["connect-search"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() =>
+      slashPaletteText(app.container).includes("/connect-search"),
+    );
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+
+    await setInputValue(app.container, "API key env", "TAVILY_API_KEY");
+    await setInputValue(app.container, "API key", "tvly-test");
+    await clickButton(app.container, "Save search key");
+
+    expect(fake.setSearchApiKey).toHaveBeenCalledWith({
+      apiKey: "tvly-test",
+      apiKeyEnv: "TAVILY_API_KEY",
+      provider: "tavily",
+    });
+    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
+  });
+
+  it("opens the structured compact overlay from the slash palette", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["compact"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/compact"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+    await clickButton(app.container, "Compact session");
+
+    expect(fake.compactSession).toHaveBeenCalledWith("session_1", {
+      force: true,
+    });
+    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
+  });
 });
 
 function mountApp(runtime: OhbabyWebRuntime): MountedApp {
@@ -153,26 +245,78 @@ function createFakeRuntime(input: {
   const executeSlashCommand = vi.fn<OhbabyWebClient["executeSlashCommand"]>(
     () => Promise.resolve(),
   );
+  const connectModel = vi.fn<OhbabyWebClient["connectModel"]>(() =>
+    Promise.resolve({
+      apiKeyEnv: "ZHIPU_API_KEY",
+      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+      contextWindowSource: "default",
+      contextWindowTokens: 128_000,
+      envPath: ".env",
+      interfaceProvider: "openai-compatible",
+      model: "glm-4.7",
+      modelJsonPath: "model.json",
+      provider: "zhipu",
+      saved: true,
+    }),
+  );
   const listCommands = vi.fn<OhbabyWebClient["listCommands"]>(() =>
     Promise.resolve(catalog(["status"])),
   );
   const setPermission = vi.fn<OhbabyWebClient["setPermission"]>(() =>
     Promise.resolve(),
   );
+  const compactSession = vi.fn<OhbabyWebClient["compactSession"]>(() =>
+    Promise.resolve({
+      sessionId: "session_1",
+      status: "compacted",
+      usageAfter: compactUsage(8_000),
+      usageBefore: compactUsage(16_000),
+    }),
+  );
+  const setSearchApiKey = vi.fn<OhbabyWebClient["setSearchApiKey"]>(() =>
+    Promise.resolve({
+      apiKeyEnv: "TAVILY_API_KEY",
+      envPath: ".env",
+      provider: "tavily",
+      searchJsonPath: "search.json",
+    }),
+  );
   const client: OhbabyWebClient = {
     abortSession: vi.fn(() => Promise.resolve()),
     close: vi.fn(() => Promise.resolve()),
+    compactSession,
     connect: vi.fn(() => Promise.resolve()),
+    connectModel,
     executeSlashCommand,
+    getContextWindowUsage: vi.fn(() =>
+      Promise.resolve({
+        contextWindowRatio: 0.125,
+        contextWindowTokens: 128_000,
+        currentTokens: 16_000,
+        estimatedAt: timestamp,
+        modelId: "glm-4.7",
+        sessionId: "session_1",
+      }),
+    ),
+    getCurrentModel: vi.fn(() => Promise.resolve(null)),
     getSnapshot: () => store.getSnapshot(),
     listCommands,
+    probeModelContextWindow: vi.fn(() =>
+      Promise.resolve({
+        contextWindowSource: "default" as const,
+        contextWindowTokens: 128_000,
+      }),
+    ),
     respondPermission: vi.fn(() => Promise.resolve()),
     setPermission,
+    setSearchApiKey,
     submitPrompt: vi.fn(() => Promise.resolve()),
     subscribe: (listener) => store.subscribe(listener),
   };
   return {
+    compactSession,
     executeSlashCommand,
+    connectModel,
     listCommands,
     runtime: {
       client,
@@ -180,6 +324,7 @@ function createFakeRuntime(input: {
       store,
     },
     setPermission,
+    setSearchApiKey,
     store,
   };
 }
@@ -229,19 +374,79 @@ function snapshotWithStatus(status: UiRunStatus): UiSnapshot {
   };
 }
 
-function catalog(ids: readonly ("skills" | "status")[]): UiSlashCommandCatalog {
+function catalog(ids: readonly CatalogId[]): UiWebCommandCatalog {
   return {
     commands: ids.map((id) => ({
-      argumentMode: "argv",
-      category: id === "skills" ? "skill" : "system",
+      action: catalogAction(id),
+      argumentMode: catalogArgumentMode(id),
+      category: catalogCategory(id),
       description:
-        id === "skills" ? "List available skills" : "Show backend status",
+        id === "skills"
+          ? "List available skills"
+          : id === "connect"
+            ? "Connect model"
+            : id === "connect-search"
+              ? "Connect search"
+              : id === "compact"
+                ? "Compact session"
+                : "Show backend status",
+      executionKind:
+        id === "status" || id === "skills" ? "passthrough" : "overlay",
       id,
       path: [id],
       source: "builtin",
       surfaces: ["tui"],
     })),
     version: ids.join("-"),
+  };
+}
+
+type CatalogId = "compact" | "connect" | "connect-search" | "skills" | "status";
+
+function catalogAction(
+  id: CatalogId,
+): UiWebCommandCatalog["commands"][number]["action"] {
+  switch (id) {
+    case "compact":
+      return "compactSession";
+    case "connect":
+      return "connectModel";
+    case "connect-search":
+      return "connectSearch";
+    case "skills":
+    case "status":
+      return "executeCommand";
+  }
+}
+
+function catalogArgumentMode(
+  id: CatalogId,
+): UiWebCommandCatalog["commands"][number]["argumentMode"] {
+  return id === "skills" || id === "status" ? "argv" : "structured";
+}
+
+function catalogCategory(id: CatalogId): string {
+  switch (id) {
+    case "compact":
+      return "session";
+    case "connect":
+    case "connect-search":
+      return "setup";
+    case "skills":
+      return "skill";
+    case "status":
+      return "system";
+  }
+}
+
+function compactUsage(currentTokens: number): UiCompactSessionUsage {
+  return {
+    contextLimit: 128_000,
+    currentTokens,
+    modelId: "glm-4.7",
+    remainingTokens: 128_000 - currentTokens,
+    shouldCompress: false,
+    usageRatio: currentTokens / 128_000,
   };
 }
 
@@ -320,6 +525,36 @@ async function clickButton(
   }
   await act(async () => {
     button.click();
+    await Promise.resolve();
+  });
+}
+
+async function setInputValue(
+  container: ParentNode,
+  labelText: string,
+  value: string,
+): Promise<void> {
+  const labels = Array.from(container.querySelectorAll("label"));
+  const label = labels.find(
+    (candidate) => candidate.querySelector("span")?.textContent === labelText,
+  );
+  const input = label?.querySelector("input");
+  if (!(input instanceof HTMLInputElement)) {
+    throw new Error(`input not found: ${labelText}`);
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  );
+  await act(async () => {
+    if (descriptor?.set) {
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- React controlled inputs need the native input setter in jsdom tests.
+      const setValue = descriptor.set;
+      Reflect.apply(setValue, input, [value]);
+    } else {
+      input.value = value;
+    }
+    input.dispatchEvent(new Event("input", { bubbles: true }));
     await Promise.resolve();
   });
 }

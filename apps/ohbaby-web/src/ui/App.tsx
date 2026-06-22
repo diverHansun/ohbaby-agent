@@ -11,16 +11,30 @@ import type { ChangeEvent, KeyboardEvent, ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import type {
+  UiCompactSessionResult,
+  UiContextWindowUsage,
+  UiConnectModelResult,
+  UiCurrentModelConfig,
   UiMessage,
   UiMessagePart,
   UiPermissionChoice,
   UiPermissionLevel,
   UiPermissionMode,
   UiPermissionRequest,
-  UiSlashCommandCatalog,
+  UiProbeModelContextWindowResult,
+  UiSetSearchApiKeyResult,
+  UiWebCommandCatalog,
 } from "ohbaby-sdk";
-import type { OhbabyWebRuntime } from "../api/daemon/client.js";
+import type {
+  OhbabyWebClient,
+  OhbabyWebRuntime,
+} from "../api/daemon/client.js";
 import type { CommandNotice } from "../api/daemon/wire.js";
+import type {
+  CompactSessionRequest,
+  ModelConnectRequest,
+  SearchApiKeyRequest,
+} from "../api/daemon/wire.js";
 import { MarkdownBlock } from "./MarkdownBlock.js";
 import {
   selectViewModel,
@@ -41,6 +55,13 @@ import {
   type CommandResultModel,
   type SlashPaletteItem,
 } from "./slashCommands.js";
+
+type StructuredOverlayKind = "compact" | "connect" | "connect-search";
+
+interface StructuredOverlayState {
+  readonly commandLabel: string;
+  readonly kind: StructuredOverlayKind;
+}
 
 interface AppProps {
   readonly runtime: OhbabyWebRuntime;
@@ -79,6 +100,8 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
   const [closedCommandModalIds, setClosedCommandModalIds] = useState<
     readonly string[]
   >([]);
+  const [structuredOverlay, setStructuredOverlay] =
+    useState<StructuredOverlayState | null>(null);
   const clearActionError = useCallback(() => {
     setActionError(null);
   }, []);
@@ -121,6 +144,13 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
     () => runtime.client.listCommands(),
     [runtime.client],
   );
+  const openStructuredCommand = useCallback((item: SlashPaletteItem) => {
+    const kind = structuredOverlayKindForAction(item.action);
+    if (!kind) {
+      return;
+    }
+    setStructuredOverlay({ commandLabel: item.label, kind });
+  }, []);
   const commandModalNotice = useMemo(
     () =>
       [...view.commandNotices]
@@ -161,6 +191,7 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
             onSetPermission={(input) => {
               void runAction(() => runtime.client.setPermission(input));
             }}
+            onStructuredCommand={openStructuredCommand}
             onSubmit={submitText}
             onStop={() => {
               void runAction(() =>
@@ -199,12 +230,23 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
             onSetPermission={(input) => {
               void runAction(() => runtime.client.setPermission(input));
             }}
+            onStructuredCommand={openStructuredCommand}
             onSubmit={submitText}
             status={view.header}
             view={view}
           />
         </>
       )}
+      {structuredOverlay ? (
+        <StructuredCommandOverlay
+          client={runtime.client}
+          onClose={() => {
+            setStructuredOverlay(null);
+          }}
+          overlay={structuredOverlay}
+          view={view}
+        />
+      ) : null}
     </main>
   );
 }
@@ -223,11 +265,12 @@ function BootstrapError(props: { readonly error: unknown }): ReactElement {
 }
 
 function EmptyState(props: {
-  readonly onListCommands: () => Promise<UiSlashCommandCatalog>;
+  readonly onListCommands: () => Promise<UiWebCommandCatalog>;
   readonly onSetPermission: (input: {
     readonly level?: UiPermissionLevel;
     readonly mode?: UiPermissionMode;
   }) => void;
+  readonly onStructuredCommand: (item: SlashPaletteItem) => void;
   readonly onSubmit: (text: string) => Promise<boolean>;
   readonly status: HeaderModel;
   readonly view: ViewModel;
@@ -257,6 +300,7 @@ function EmptyState(props: {
           compact
           onListCommands={props.onListCommands}
           onSetPermission={props.onSetPermission}
+          onStructuredCommand={props.onStructuredCommand}
           onSubmit={props.onSubmit}
           onStop={() => undefined}
           view={props.view}
@@ -752,19 +796,21 @@ function PermissionModal(props: {
 
 function Composer(props: {
   readonly compact?: boolean;
-  readonly onListCommands: () => Promise<UiSlashCommandCatalog>;
+  readonly onListCommands: () => Promise<UiWebCommandCatalog>;
   readonly onSetPermission: (input: {
     readonly level?: UiPermissionLevel;
     readonly mode?: UiPermissionMode;
   }) => void;
+  readonly onStructuredCommand: (item: SlashPaletteItem) => void;
   readonly onStop: () => void;
   readonly onSubmit: (text: string) => Promise<boolean>;
   readonly view: ViewModel;
 }): ReactElement {
   const [draft, setDraft] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [slashCatalog, setSlashCatalog] =
-    useState<UiSlashCommandCatalog | null>(null);
+  const [slashCatalog, setSlashCatalog] = useState<UiWebCommandCatalog | null>(
+    null,
+  );
   const [slashDismissedDraft, setSlashDismissedDraft] = useState<string | null>(
     null,
   );
@@ -866,6 +912,13 @@ function Composer(props: {
       if (!commandText) {
         return;
       }
+      if (item?.executionKind === "overlay") {
+        props.onStructuredCommand(item);
+        setDraft("");
+        setSlashDismissedDraft(null);
+        setSlashError(null);
+        return;
+      }
       setIsSubmitting(true);
       void props
         .onSubmit(commandText)
@@ -879,7 +932,7 @@ function Composer(props: {
           setIsSubmitting(false);
         });
     },
-    [canUseSlash, draft, props.onSubmit],
+    [canUseSlash, draft, props.onStructuredCommand, props.onSubmit],
   );
 
   const onKeyDown = useCallback(
@@ -1049,6 +1102,635 @@ function Composer(props: {
       </div>
     </section>
   );
+}
+
+function StructuredCommandOverlay(props: {
+  readonly client: OhbabyWebClient;
+  readonly onClose: () => void;
+  readonly overlay: StructuredOverlayState;
+  readonly view: ViewModel;
+}): ReactElement {
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, [props.overlay.kind]);
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        props.onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return (): void => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [props.onClose]);
+
+  return (
+    <div
+      className="ohb-structured-overlay"
+      onClick={props.onClose}
+      role="presentation"
+    >
+      <section
+        aria-label={structuredOverlayTitle(props.overlay.kind)}
+        aria-modal="true"
+        className="ohb-structured-dialog"
+        onClick={(event) => {
+          event.stopPropagation();
+        }}
+        role="dialog"
+      >
+        <header className="ohb-structured-header">
+          <span>{props.overlay.commandLabel}</span>
+          <h2>{structuredOverlayTitle(props.overlay.kind)}</h2>
+          <button
+            onClick={props.onClose}
+            ref={closeButtonRef}
+            title="Close overlay"
+            type="button"
+          >
+            <X size={16} />
+          </button>
+        </header>
+        {props.overlay.kind === "connect" ? (
+          <ConnectModelOverlayBody client={props.client} />
+        ) : props.overlay.kind === "connect-search" ? (
+          <ConnectSearchOverlayBody client={props.client} />
+        ) : (
+          <CompactOverlayBody client={props.client} view={props.view} />
+        )}
+      </section>
+    </div>
+  );
+}
+
+interface ConnectModelFormState {
+  readonly apiKey: string;
+  readonly apiKeyEnv: string;
+  readonly baseUrl: string;
+  readonly contextWindowTokens: string;
+  readonly maxOutputTokens: string;
+  readonly model: string;
+  readonly provider: string;
+}
+
+function ConnectModelOverlayBody(props: {
+  readonly client: OhbabyWebClient;
+}): ReactElement {
+  const [form, setForm] = useState<ConnectModelFormState>({
+    apiKey: "",
+    apiKeyEnv: "",
+    baseUrl: "",
+    contextWindowTokens: "",
+    maxOutputTokens: "",
+    model: "",
+    provider: "",
+  });
+  const [currentModel, setCurrentModel] = useState<UiCurrentModelConfig | null>(
+    null,
+  );
+  const [probe, setProbe] = useState<UiProbeModelContextWindowResult | null>(
+    null,
+  );
+  const [result, setResult] = useState<UiConnectModelResult | null>(null);
+  const [status, setStatus] = useState<OverlayStatus>({
+    kind: "idle",
+    message: "",
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    void props.client
+      .getCurrentModel()
+      .then((model) => {
+        if (cancelled) {
+          return;
+        }
+        setCurrentModel(model);
+        if (model) {
+          setForm({
+            apiKey: "",
+            apiKeyEnv: model.apiKeyEnv,
+            baseUrl: model.baseUrl,
+            contextWindowTokens:
+              model.contextWindowTokens === undefined
+                ? ""
+                : String(model.contextWindowTokens),
+            maxOutputTokens:
+              model.maxOutputTokens === undefined
+                ? ""
+                : String(model.maxOutputTokens),
+            model: model.model,
+            provider: model.provider,
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setStatus({
+            kind: "error",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      });
+    return (): void => {
+      cancelled = true;
+    };
+  }, [props.client]);
+
+  const update = useCallback(
+    (key: keyof ConnectModelFormState, value: string) => {
+      setForm((previous) => ({ ...previous, [key]: value }));
+    },
+    [],
+  );
+
+  const probeContext = useCallback(() => {
+    void runOverlayAction(
+      setStatus,
+      async () => {
+        const nextProbe = await props.client.probeModelContextWindow(
+          connectModelRequest(form),
+        );
+        setProbe(nextProbe);
+        return `context window ${formatTokenCount(
+          nextProbe.contextWindowTokens,
+        )} · ${nextProbe.contextWindowSource}`;
+      },
+      "Probing model context",
+    );
+  }, [form, props.client]);
+
+  const saveModel = useCallback(() => {
+    void runOverlayAction(
+      setStatus,
+      async () => {
+        const nextResult = await props.client.connectModel(
+          connectModelRequest(form),
+        );
+        setResult(nextResult);
+        setForm((previous) => ({ ...previous, apiKey: "" }));
+        return `saved ${nextResult.provider} · ${nextResult.model}`;
+      },
+      "Saving model",
+    );
+  }, [form, props.client]);
+
+  return (
+    <div className="ohb-structured-body">
+      <p>
+        {currentModel
+          ? `Current model: ${currentModel.provider} · ${currentModel.model}`
+          : "Connect a model provider for browser runs."}
+      </p>
+      <div className="ohb-structured-grid">
+        <TextField
+          label="Provider"
+          onChange={(value) => {
+            update("provider", value);
+          }}
+          placeholder="zhipu"
+          value={form.provider}
+        />
+        <TextField
+          label="Model"
+          onChange={(value) => {
+            update("model", value);
+          }}
+          placeholder="glm-4.7"
+          value={form.model}
+        />
+        <TextField
+          label="Base URL"
+          onChange={(value) => {
+            update("baseUrl", value);
+          }}
+          placeholder="https://open.bigmodel.cn/api/paas/v4"
+          value={form.baseUrl}
+        />
+        <TextField
+          label="API key env"
+          onChange={(value) => {
+            update("apiKeyEnv", value);
+          }}
+          placeholder="ZHIPU_API_KEY"
+          value={form.apiKeyEnv}
+        />
+        <TextField
+          label="API key"
+          onChange={(value) => {
+            update("apiKey", value);
+          }}
+          placeholder="optional, writes to .env"
+          type="password"
+          value={form.apiKey}
+        />
+        <TextField
+          label="Context window"
+          onChange={(value) => {
+            update("contextWindowTokens", value);
+          }}
+          placeholder="auto, default 128000"
+          value={form.contextWindowTokens}
+        />
+        <TextField
+          label="Max output"
+          onChange={(value) => {
+            update("maxOutputTokens", value);
+          }}
+          placeholder="optional"
+          value={form.maxOutputTokens}
+        />
+      </div>
+      <OverlayStatusLine status={status} />
+      {probe ? (
+        <OverlayResult
+          rows={[
+            ["context", formatTokenCount(probe.contextWindowTokens)],
+            ["source", probe.contextWindowSource],
+            ...(probe.warning ? [["warning", probe.warning] as const] : []),
+          ]}
+        />
+      ) : null}
+      {result ? (
+        <OverlayResult
+          rows={[
+            ["provider", result.provider],
+            ["model", result.model],
+            ["interface", result.interfaceProvider],
+            ["context", formatTokenCount(result.contextWindowTokens)],
+            ["source", result.contextWindowSource],
+          ]}
+        />
+      ) : null}
+      <div className="ohb-structured-actions">
+        <button
+          className="ohb-button"
+          onClick={probeContext}
+          title="Probe context"
+          type="button"
+        >
+          Probe context
+        </button>
+        <button
+          className="ohb-button-primary"
+          onClick={saveModel}
+          title="Save model"
+          type="button"
+        >
+          Save model
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ConnectSearchOverlayBody(props: {
+  readonly client: OhbabyWebClient;
+}): ReactElement {
+  const [apiKeyEnv, setApiKeyEnv] = useState("TAVILY_API_KEY");
+  const [apiKey, setApiKey] = useState("");
+  const [result, setResult] = useState<UiSetSearchApiKeyResult | null>(null);
+  const [status, setStatus] = useState<OverlayStatus>({
+    kind: "idle",
+    message: "",
+  });
+
+  const saveSearchKey = useCallback(() => {
+    void runOverlayAction(
+      setStatus,
+      async () => {
+        const input: SearchApiKeyRequest = {
+          apiKeyEnv: trimmedOrUndefined(apiKeyEnv),
+          apiKey: trimmedOrUndefined(apiKey),
+          provider: "tavily",
+        };
+        const nextResult = await props.client.setSearchApiKey(input);
+        setResult(nextResult);
+        setApiKey("");
+        return `saved ${nextResult.provider} key reference`;
+      },
+      "Saving search key",
+    );
+  }, [apiKey, apiKeyEnv, props.client]);
+
+  return (
+    <div className="ohb-structured-body">
+      <p>Connect Tavily search for web-enabled workflows.</p>
+      <div className="ohb-structured-grid">
+        <TextField label="Provider" onChange={() => undefined} value="tavily" />
+        <TextField
+          label="API key env"
+          onChange={setApiKeyEnv}
+          placeholder="TAVILY_API_KEY"
+          value={apiKeyEnv}
+        />
+        <TextField
+          label="API key"
+          onChange={setApiKey}
+          placeholder="optional, writes to .env"
+          type="password"
+          value={apiKey}
+        />
+      </div>
+      <OverlayStatusLine status={status} />
+      {result ? (
+        <OverlayResult
+          rows={[
+            ["provider", result.provider],
+            ["env", result.apiKeyEnv],
+            ["config", result.searchJsonPath],
+          ]}
+        />
+      ) : null}
+      <div className="ohb-structured-actions">
+        <button
+          className="ohb-button-primary"
+          onClick={saveSearchKey}
+          title="Save search key"
+          type="button"
+        >
+          Save search key
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CompactOverlayBody(props: {
+  readonly client: OhbabyWebClient;
+  readonly view: ViewModel;
+}): ReactElement {
+  const sessionId =
+    props.view.composer.activeSessionId ?? props.view.activeSession?.id;
+  const [force, setForce] = useState(true);
+  const [usage, setUsage] = useState<UiContextWindowUsage | null>(null);
+  const [result, setResult] = useState<UiCompactSessionResult | null>(null);
+  const [status, setStatus] = useState<OverlayStatus>({
+    kind: "idle",
+    message: sessionId ? "" : "No active session to compact.",
+  });
+
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+    let cancelled = false;
+    void props.client
+      .getContextWindowUsage(sessionId)
+      .then((nextUsage) => {
+        if (!cancelled) {
+          setUsage(nextUsage);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setStatus({
+            kind: "error",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      });
+    return (): void => {
+      cancelled = true;
+    };
+  }, [props.client, sessionId]);
+
+  const compactSession = useCallback(() => {
+    if (!sessionId) {
+      setStatus({ kind: "error", message: "No active session to compact." });
+      return;
+    }
+    void runOverlayAction(
+      setStatus,
+      async () => {
+        const input: CompactSessionRequest = { force };
+        const nextResult = await props.client.compactSession(sessionId, input);
+        setResult(nextResult);
+        return `compact ${nextResult.status}`;
+      },
+      "Compacting session",
+    );
+  }, [force, props.client, sessionId]);
+
+  return (
+    <div className="ohb-structured-body">
+      <p>
+        {sessionId
+          ? `Compact current session ${sessionId}.`
+          : "Open a session before compacting context."}
+      </p>
+      {usage ? (
+        <OverlayResult
+          rows={[
+            ["model", usage.modelId],
+            ["current", formatTokenCount(usage.currentTokens)],
+            ["limit", formatTokenCount(usage.contextWindowTokens)],
+            ["ratio", `${String(Math.round(usage.contextWindowRatio * 100))}%`],
+          ]}
+        />
+      ) : null}
+      <label className="ohb-structured-check">
+        <input
+          checked={force}
+          onChange={(event) => {
+            setForce(event.target.checked);
+          }}
+          type="checkbox"
+        />
+        force compaction
+      </label>
+      <OverlayStatusLine status={status} />
+      {result ? (
+        <OverlayResult
+          rows={[
+            ["status", result.status],
+            ["before", formatTokenCount(result.usageBefore.currentTokens)],
+            ["after", formatTokenCount(result.usageAfter.currentTokens)],
+            [
+              "saved",
+              result.compression
+                ? formatTokenCount(result.compression.savedTokens)
+                : "none",
+            ],
+            [
+              "pruned",
+              result.prune ? String(result.prune.prunedCount) : "none",
+            ],
+          ]}
+        />
+      ) : null}
+      <div className="ohb-structured-actions">
+        <button
+          className="ohb-button-primary"
+          disabled={!sessionId}
+          onClick={compactSession}
+          title="Compact session"
+          type="button"
+        >
+          Compact session
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TextField(props: {
+  readonly label: string;
+  readonly onChange: (value: string) => void;
+  readonly placeholder?: string;
+  readonly type?: "password" | "text";
+  readonly value: string;
+}): ReactElement {
+  return (
+    <label className="ohb-structured-field">
+      <span>{props.label}</span>
+      <input
+        onChange={(event) => {
+          props.onChange(event.target.value);
+        }}
+        placeholder={props.placeholder}
+        type={props.type ?? "text"}
+        value={props.value}
+      />
+    </label>
+  );
+}
+
+interface OverlayStatus {
+  readonly kind: "busy" | "error" | "idle" | "success";
+  readonly message: string;
+}
+
+function OverlayStatusLine(props: {
+  readonly status: OverlayStatus;
+}): ReactElement | null {
+  if (!props.status.message) {
+    return null;
+  }
+  return (
+    <div
+      className={`ohb-structured-status ohb-structured-${props.status.kind}`}
+    >
+      {props.status.message}
+    </div>
+  );
+}
+
+function OverlayResult(props: {
+  readonly rows: readonly (readonly [string, string])[];
+}): ReactElement {
+  return (
+    <div className="ohb-structured-result">
+      {props.rows.map(([label, value]) => (
+        <div key={label}>
+          <span>{label}</span>
+          <strong>{value}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+async function runOverlayAction(
+  setStatus: (status: OverlayStatus) => void,
+  action: () => Promise<string>,
+  busyMessage: string,
+): Promise<void> {
+  try {
+    setStatus({ kind: "busy", message: busyMessage });
+    const message = await action();
+    setStatus({ kind: "success", message });
+  } catch (error) {
+    setStatus({
+      kind: "error",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function connectModelRequest(form: ConnectModelFormState): ModelConnectRequest {
+  const provider = requiredText(form.provider, "Provider");
+  const baseUrl = requiredText(form.baseUrl, "Base URL");
+  const apiKeyEnv = requiredText(form.apiKeyEnv, "API key env");
+  const model = requiredText(form.model, "Model");
+  const apiKey = trimmedOrUndefined(form.apiKey);
+  const contextWindowTokens = optionalIntegerValue(
+    "contextWindowTokens",
+    form.contextWindowTokens,
+  );
+  const maxOutputTokens = optionalIntegerValue(
+    "maxOutputTokens",
+    form.maxOutputTokens,
+  );
+  return {
+    provider,
+    baseUrl,
+    apiKeyEnv,
+    model,
+    ...(apiKey === undefined ? {} : { apiKey }),
+    ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
+    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+  };
+}
+
+function requiredText(value: string, label: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error(`${label} is required`);
+  }
+  return trimmed;
+}
+
+function trimmedOrUndefined(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function optionalIntegerValue(
+  label: string,
+  value: string,
+): number | undefined {
+  const trimmed = trimmedOrUndefined(value);
+  if (trimmed === undefined) {
+    return undefined;
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function structuredOverlayKindForAction(
+  action: SlashPaletteItem["action"],
+): StructuredOverlayKind | null {
+  switch (action) {
+    case "compactSession":
+      return "compact";
+    case "connectModel":
+      return "connect";
+    case "connectSearch":
+      return "connect-search";
+    case "executeCommand":
+      return null;
+  }
+}
+
+function structuredOverlayTitle(kind: StructuredOverlayKind): string {
+  switch (kind) {
+    case "compact":
+      return "Compact context";
+    case "connect":
+      return "Connect model";
+    case "connect-search":
+      return "Connect search";
+  }
+}
+
+function formatTokenCount(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
 }
 
 function SlashPalette(props: {

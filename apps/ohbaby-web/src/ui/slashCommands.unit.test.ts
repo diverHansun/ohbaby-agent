@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { UiSlashCommandCatalog } from "ohbaby-sdk";
+import type { UiWebCommandCatalog } from "ohbaby-sdk";
 import type { CommandNotice } from "../api/daemon/wire.js";
 import {
   createCommandResultModel,
@@ -9,40 +9,48 @@ import {
   slashCompletionSuffix,
 } from "./slashCommands.js";
 
-function commandCatalog(): UiSlashCommandCatalog {
+function commandCatalog(): UiWebCommandCatalog {
   return {
     commands: [
       {
+        action: "executeCommand",
         argumentMode: "argv",
         category: "system",
         description: "Show backend status",
+        executionKind: "passthrough",
         id: "status",
         path: ["status"],
         source: "builtin",
         surfaces: ["tui"],
       },
       {
+        action: "executeCommand",
         argumentMode: "argv",
         category: "skill",
         description: "List available skills",
+        executionKind: "passthrough",
         id: "skills",
         path: ["skills"],
         source: "builtin",
         surfaces: ["tui"],
       },
       {
+        action: "executeCommand",
         argumentMode: "argv",
         category: "session",
         description: "Create a new session",
+        executionKind: "passthrough",
         id: "new",
         path: ["new"],
         source: "builtin",
         surfaces: ["tui"],
       },
       {
+        action: "compactSession",
         argumentMode: "argv",
         category: "session",
         description: "Compact current session",
+        executionKind: "overlay",
         id: "compact",
         path: ["compact"],
         source: "builtin",
@@ -54,20 +62,21 @@ function commandCatalog(): UiSlashCommandCatalog {
 }
 
 describe("ohbaby-web slash commands UI helpers", () => {
-  it("builds palette rows only from web-safe slash commands", () => {
+  it("builds palette rows from web-safe passthrough and overlay commands", () => {
     const items = createSlashPaletteItems(commandCatalog(), "/");
 
     expect(items.map((item) => item.label)).toEqual([
+      "/compact",
       "/new",
       "/skills",
       "/status",
     ]);
-    expect(items.map((item) => item.label)).not.toContain("/compact");
     expect(items[0]).toMatchObject({
       categoryLabel: "Session",
+      executionKind: "overlay",
       showCategory: true,
     });
-    expect(items[1]).toMatchObject({
+    expect(items[2]).toMatchObject({
       categoryLabel: "Tools",
       showCategory: true,
     });

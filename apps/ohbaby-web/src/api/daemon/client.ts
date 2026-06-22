@@ -2,14 +2,23 @@ import {
   parseSlashCommandInput,
   resolveSlashCommand,
   filterWebPassthroughCommandCatalog,
+  type UiCompactSessionResult,
+  type UiContextWindowUsage,
+  type UiConnectModelResult,
+  type UiCurrentModelConfig,
   type UiPermissionResponse,
-  type UiSlashCommandCatalog,
   type UiSlashCommandInvocation,
+  type UiProbeModelContextWindowResult,
+  type UiSetSearchApiKeyResult,
+  type UiWebCommandCatalog,
 } from "ohbaby-sdk";
 import { FetchDaemonEventStream } from "./events.js";
 import { createDaemonHttpClient, DaemonHttpClient } from "./http.js";
 import type {
   OhbabyBootstrapConfig,
+  CompactSessionRequest,
+  ModelConnectRequest,
+  SearchApiKeyRequest,
   SetPermissionRequest,
   StoreSnapshot,
   SubmitPromptRequest,
@@ -28,18 +37,31 @@ interface BufferedEvent {
 export interface OhbabyWebClient {
   abortSession(sessionId: string, runId?: string): Promise<void>;
   close(): Promise<void>;
+  compactSession(
+    sessionId: string,
+    input?: CompactSessionRequest,
+  ): Promise<UiCompactSessionResult>;
   connect(): Promise<void>;
+  connectModel(input: ModelConnectRequest): Promise<UiConnectModelResult>;
   executeSlashCommand(input: {
     readonly sessionId?: string;
     readonly text: string;
   }): Promise<void>;
+  getContextWindowUsage(
+    sessionId: string,
+  ): Promise<UiContextWindowUsage | null>;
+  getCurrentModel(): Promise<UiCurrentModelConfig | null>;
   getSnapshot(): StoreSnapshot;
-  listCommands(): Promise<UiSlashCommandCatalog>;
+  listCommands(): Promise<UiWebCommandCatalog>;
+  probeModelContextWindow(
+    input: ModelConnectRequest,
+  ): Promise<UiProbeModelContextWindowResult>;
   respondPermission(
     requestId: string,
     response: UiPermissionResponse,
   ): Promise<void>;
   setPermission(input: SetPermissionRequest): Promise<void>;
+  setSearchApiKey(input: SearchApiKeyRequest): Promise<UiSetSearchApiKeyResult>;
   submitPrompt(input: SubmitPromptRequest): Promise<void>;
   subscribe(listener: () => void): () => void;
 }
@@ -56,7 +78,7 @@ class BrowserDaemonClient implements OhbabyWebClient {
   private readonly http: DaemonHttpClient;
   private readonly store: OhbabyWebStore;
   private buffering = false;
-  private commandCatalogPromise: Promise<UiSlashCommandCatalog> | undefined;
+  private commandCatalogPromise: Promise<UiWebCommandCatalog> | undefined;
   private connectPromise: Promise<void> | undefined;
   private connected = false;
   private resyncPromise: Promise<void> | undefined;
@@ -146,8 +168,11 @@ class BrowserDaemonClient implements OhbabyWebClient {
     readonly text: string;
   }): Promise<void> {
     const catalog = await this.listCommands();
+    const passthroughCatalog = filterWebPassthroughCommandCatalog(catalog, {
+      surface: "tui",
+    });
     const resolved = resolveSlashCommand(
-      catalog,
+      passthroughCatalog,
       parseSlashCommandInput(input.text),
       { surface: "tui" },
     );
@@ -168,19 +193,56 @@ class BrowserDaemonClient implements OhbabyWebClient {
     } satisfies UiSlashCommandInvocation);
   }
 
-  async listCommands(): Promise<UiSlashCommandCatalog> {
+  async listCommands(): Promise<UiWebCommandCatalog> {
     this.commandCatalogPromise ??= this.http
       .listCommands()
-      .then((response) =>
-        filterWebPassthroughCommandCatalog(response.catalog, {
-          surface: "tui",
-        }),
-      )
+      .then((response) => response.catalog)
       .catch((error: unknown) => {
         this.commandCatalogPromise = undefined;
         throw error;
       });
     return this.commandCatalogPromise;
+  }
+
+  async getCurrentModel(): Promise<UiCurrentModelConfig | null> {
+    const response = await this.http.getCurrentModel();
+    return response.model;
+  }
+
+  async probeModelContextWindow(
+    input: ModelConnectRequest,
+  ): Promise<UiProbeModelContextWindowResult> {
+    const response = await this.http.probeModelContextWindow(input);
+    return response.probe;
+  }
+
+  async connectModel(
+    input: ModelConnectRequest,
+  ): Promise<UiConnectModelResult> {
+    const response = await this.http.connectModel(input);
+    return response.model;
+  }
+
+  async setSearchApiKey(
+    input: SearchApiKeyRequest,
+  ): Promise<UiSetSearchApiKeyResult> {
+    const response = await this.http.setSearchApiKey(input);
+    return response.search;
+  }
+
+  async getContextWindowUsage(
+    sessionId: string,
+  ): Promise<UiContextWindowUsage | null> {
+    const response = await this.http.getContextWindowUsage(sessionId);
+    return response.usage;
+  }
+
+  async compactSession(
+    sessionId: string,
+    input: CompactSessionRequest = {},
+  ): Promise<UiCompactSessionResult> {
+    const response = await this.http.compactSession(sessionId, input);
+    return response.compact;
   }
 
   async respondPermission(

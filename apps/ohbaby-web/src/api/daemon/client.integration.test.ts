@@ -130,44 +130,40 @@ describe("ohbaby-web daemon client", () => {
           Response.json({ ok: true, sessionId: "session_1" }, { status: 202 }),
         );
       }
-      if (url.endsWith("/v1/commands?surface=tui")) {
+      if (url.endsWith("/v1/commands?surface=web")) {
         const commands =
           commandCatalogVersion === "commands-v1"
             ? [
                 {
+                  action: "executeCommand",
                   argumentMode: "argv",
                   category: "system",
                   description: "Show backend status",
+                  executionKind: "passthrough",
                   id: "status",
                   path: ["status"],
-                  source: "builtin",
-                  surfaces: ["tui"],
-                },
-                {
-                  argumentMode: "argv",
-                  category: "session",
-                  description: "Browse sessions",
-                  id: "sessions",
-                  parentBehavior: "interaction",
-                  path: ["sessions"],
                   source: "builtin",
                   surfaces: ["tui"],
                 },
               ]
             : [
                 {
+                  action: "executeCommand",
                   argumentMode: "argv",
                   category: "system",
                   description: "Show backend status",
+                  executionKind: "passthrough",
                   id: "status",
                   path: ["status"],
                   source: "builtin",
                   surfaces: ["tui"],
                 },
                 {
+                  action: "executeCommand",
                   argumentMode: "argv",
                   category: "system",
                   description: "List skills",
+                  executionKind: "passthrough",
                   id: "skills",
                   path: ["skills"],
                   source: "builtin",
@@ -196,6 +192,94 @@ describe("ohbaby-web daemon client", () => {
               mode: "plan",
               sessionRules: [],
             },
+          }),
+        );
+      }
+      if (url.endsWith("/v1/model") && (init.method ?? "GET") === "GET") {
+        return Promise.resolve(Response.json({ model: null, ok: true }));
+      }
+      if (url.endsWith("/v1/model/context-window-probe")) {
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            probe: {
+              contextWindowSource: "default",
+              contextWindowTokens: 128_000,
+            },
+          }),
+        );
+      }
+      if (url.endsWith("/v1/model") && init.method === "POST") {
+        return Promise.resolve(
+          Response.json({
+            model: {
+              apiKeyEnv: "ZHIPU_API_KEY",
+              baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+              contextWindowSource: "default",
+              contextWindowTokens: 128_000,
+              envPath: ".env",
+              interfaceProvider: "openai-compatible",
+              model: "glm-4.7",
+              modelJsonPath: "model.json",
+              provider: "zhipu",
+              saved: true,
+            },
+            ok: true,
+          }),
+        );
+      }
+      if (url.endsWith("/v1/settings/search-api-key")) {
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            search: {
+              apiKeyEnv: "TAVILY_API_KEY",
+              envPath: ".env",
+              provider: "tavily",
+              searchJsonPath: "search.json",
+            },
+          }),
+        );
+      }
+      if (url.endsWith("/v1/sessions/session_1/context-window")) {
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            usage: {
+              contextWindowRatio: 0.01,
+              contextWindowTokens: 128_000,
+              currentTokens: 1_000,
+              estimatedAt: "2026-06-12T00:00:00.000Z",
+              modelId: "glm-4.7",
+              sessionId: "session_1",
+            },
+          }),
+        );
+      }
+      if (url.endsWith("/v1/sessions/session_1/compact")) {
+        return Promise.resolve(
+          Response.json({
+            compact: {
+              sessionId: "session_1",
+              status: "not-needed",
+              usageAfter: {
+                contextLimit: 128_000,
+                currentTokens: 1_000,
+                modelId: "glm-4.7",
+                remainingTokens: 127_000,
+                shouldCompress: false,
+                usageRatio: 0.01,
+              },
+              usageBefore: {
+                contextLimit: 128_000,
+                currentTokens: 1_000,
+                modelId: "glm-4.7",
+                remainingTokens: 127_000,
+                shouldCompress: false,
+                usageRatio: 0.01,
+              },
+            },
+            ok: true,
           }),
         );
       }
@@ -259,7 +343,7 @@ describe("ohbaby-web daemon client", () => {
     });
     expect(requests.at(-2)).toMatchObject({
       method: "GET",
-      url: "http://127.0.0.1:4096/v1/commands?surface=tui",
+      url: "http://127.0.0.1:4096/v1/commands?surface=web",
     });
     expect(requests.at(-1)).toMatchObject({
       method: "POST",
@@ -308,7 +392,7 @@ describe("ohbaby-web daemon client", () => {
       "timed out waiting for catalog update event",
     );
     const catalogRequestsBeforeRefresh = requests.filter((request) =>
-      request.url.endsWith("/v1/commands?surface=tui"),
+      request.url.endsWith("/v1/commands?surface=web"),
     ).length;
     await runtime.client.executeSlashCommand({
       sessionId: "session_1",
@@ -316,7 +400,7 @@ describe("ohbaby-web daemon client", () => {
     });
     expect(
       requests.filter((request) =>
-        request.url.endsWith("/v1/commands?surface=tui"),
+        request.url.endsWith("/v1/commands?surface=web"),
       ),
     ).toHaveLength(catalogRequestsBeforeRefresh + 1);
     const skillsBody = JSON.parse(requests.at(-1)?.body ?? "{}") as Record<
@@ -329,6 +413,44 @@ describe("ohbaby-web daemon client", () => {
       raw: "/skills",
       sessionId: "session_1",
     });
+
+    await expect(runtime.client.getCurrentModel()).resolves.toBeNull();
+    await expect(
+      runtime.client.probeModelContextWindow({
+        apiKeyEnv: "ZHIPU_API_KEY",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        model: "glm-4.7",
+        provider: "zhipu",
+      }),
+    ).resolves.toMatchObject({ contextWindowTokens: 128_000 });
+    await expect(
+      runtime.client.connectModel({
+        apiKeyEnv: "ZHIPU_API_KEY",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        model: "glm-4.7",
+        provider: "zhipu",
+      }),
+    ).resolves.toMatchObject({ model: "glm-4.7" });
+    await expect(
+      runtime.client.setSearchApiKey({
+        apiKeyEnv: "TAVILY_API_KEY",
+        provider: "tavily",
+      }),
+    ).resolves.toMatchObject({ provider: "tavily" });
+    await expect(
+      runtime.client.getContextWindowUsage("session_1"),
+    ).resolves.toMatchObject({ sessionId: "session_1" });
+    await expect(
+      runtime.client.compactSession("session_1", { force: true }),
+    ).resolves.toMatchObject({ sessionId: "session_1" });
+    expect(requests.slice(-6).map((request) => request.url)).toEqual([
+      "http://127.0.0.1:4096/v1/model",
+      "http://127.0.0.1:4096/v1/model/context-window-probe",
+      "http://127.0.0.1:4096/v1/model",
+      "http://127.0.0.1:4096/v1/settings/search-api-key",
+      "http://127.0.0.1:4096/v1/sessions/session_1/context-window",
+      "http://127.0.0.1:4096/v1/sessions/session_1/compact",
+    ]);
     sseController?.close();
     await runtime.client.close();
   });

@@ -570,6 +570,209 @@ textarea:disabled {
   padding: 16px 18px 18px;
 }
 
+.ohb-structured-overlay {
+  align-items: center;
+  animation: ohb-fade 140ms ease;
+  background: rgba(30, 34, 44, 0.28);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 32px;
+  position: fixed;
+  z-index: 55;
+}
+
+.ohb-structured-dialog {
+  animation: ohb-pop 160ms ease;
+  background: #ffffff;
+  border: 1px solid #ececec;
+  border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(30, 34, 44, 0.28);
+  display: flex;
+  flex-direction: column;
+  max-height: 86vh;
+  max-width: 100%;
+  overflow: hidden;
+  width: 620px;
+}
+
+.ohb-structured-header {
+  align-items: center;
+  border-bottom: 1px solid #f1f1f1;
+  display: flex;
+  flex: none;
+  gap: 11px;
+  padding: 16px 18px;
+}
+
+.ohb-structured-header > span {
+  background: #eef2f9;
+  border: 1px solid #d8e1f0;
+  border-radius: 6px;
+  color: #4a6ba6;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+}
+
+.ohb-structured-header h2 {
+  color: #26282d;
+  font-size: 15px;
+  line-height: 1;
+  margin: 0;
+}
+
+.ohb-structured-header button {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #ececec;
+  border-radius: 7px;
+  color: #8a8d94;
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  margin-left: auto;
+  width: 30px;
+}
+
+.ohb-structured-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 16px 18px 18px;
+}
+
+.ohb-structured-body > p {
+  color: #6b6d73;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.ohb-structured-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ohb-structured-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ohb-structured-field span,
+.ohb-structured-check {
+  color: #8a8d94;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+}
+
+.ohb-structured-field input {
+  background: #ffffff;
+  border: 1px solid #e4e4e4;
+  border-radius: 8px;
+  color: #26282d;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  min-height: 36px;
+  outline: 0;
+  padding: 0 10px;
+}
+
+.ohb-structured-field input:focus {
+  border-color: #cdd7e8;
+  box-shadow: 0 0 0 3px rgba(95, 134, 196, 0.09);
+}
+
+.ohb-structured-check {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.ohb-structured-check input {
+  accent-color: #5f86c4;
+}
+
+.ohb-structured-status {
+  border-radius: 8px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  padding: 9px 11px;
+}
+
+.ohb-structured-idle {
+  background: #f7f7f8;
+  color: #8a8d94;
+}
+
+.ohb-structured-busy {
+  background: #eef2f9;
+  border: 1px solid #d8e1f0;
+  color: #4a6ba6;
+}
+
+.ohb-structured-success {
+  background: #eef6f1;
+  border: 1px solid #d8ebe0;
+  color: #3f7d5c;
+}
+
+.ohb-structured-error {
+  background: #fbeeec;
+  border: 1px solid #f0d6d1;
+  color: #a8554c;
+}
+
+.ohb-structured-result {
+  border: 1px solid #f1f1f1;
+  border-radius: 9px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ohb-structured-result > div {
+  align-items: center;
+  border-bottom: 1px solid #f1f1f1;
+  display: flex;
+  gap: 12px;
+  min-height: 34px;
+  padding: 8px 11px;
+}
+
+.ohb-structured-result > div:last-child {
+  border-bottom: 0;
+}
+
+.ohb-structured-result span {
+  color: #aeb2ba;
+  flex: none;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+  width: 76px;
+}
+
+.ohb-structured-result strong {
+  color: #26282d;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  font-weight: 500;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ohb-structured-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .ohb-status-result {
   display: flex;
   flex-direction: column;
@@ -1268,6 +1471,18 @@ textarea:disabled {
 
   .ohb-permission-actions {
     justify-content: flex-end;
+  }
+
+  .ohb-structured-overlay {
+    padding: 18px;
+  }
+
+  .ohb-structured-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ohb-structured-actions {
+    flex-direction: column;
   }
 
   .ohb-wordmark {

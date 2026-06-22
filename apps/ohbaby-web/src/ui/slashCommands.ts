@@ -1,20 +1,21 @@
 import {
   filterSlashCommandCatalog,
-  filterWebPassthroughCommandCatalog,
   isWebPassthroughCommandId,
-  type UiSlashCommandCatalog,
   type UiSlashCommandOutput,
-  type UiSlashCommandSpec,
+  type UiWebCommandCatalog,
+  type UiWebCommandSpec,
 } from "ohbaby-sdk";
 import type { CommandNotice } from "../api/daemon/wire.js";
 import type { HeaderModel, ViewModel } from "./selectors.js";
 
 export interface SlashPaletteItem {
-  readonly command: UiSlashCommandSpec;
+  readonly command: UiWebCommandSpec;
   readonly accent: "blue" | "gold" | "pink";
+  readonly action: UiWebCommandSpec["action"];
   readonly argsHint: string;
   readonly categoryLabel: string;
   readonly description: string;
+  readonly executionKind: UiWebCommandSpec["executionKind"];
   readonly label: string;
   readonly showCategory: boolean;
 }
@@ -26,6 +27,7 @@ export interface CommandResultModel {
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
+  setup: "Setup",
   skill: "Tools",
   skills: "Tools",
   session: "Session",
@@ -34,6 +36,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 const CATEGORY_ORDER: Record<string, number> = {
+  setup: 10,
   session: 20,
   skill: 30,
   skills: 30,
@@ -42,18 +45,20 @@ const CATEGORY_ORDER: Record<string, number> = {
 };
 
 export function createSlashPaletteItems(
-  catalog: UiSlashCommandCatalog,
+  catalog: UiWebCommandCatalog,
   draft: string,
 ): readonly SlashPaletteItem[] {
   if (!draft.startsWith("/")) {
     return [];
   }
-  const safeCatalog = filterWebPassthroughCommandCatalog(catalog, {
-    surface: "tui",
-  });
-  const commands = filterSlashCommandCatalog(safeCatalog, draft, {
-    surface: "tui",
-  }).sort(compareSlashCommands);
+  const matchedIds = new Set(
+    filterSlashCommandCatalog(catalog, draft, {
+      surface: "tui",
+    }).map((command) => command.id),
+  );
+  const commands = catalog.commands
+    .filter((command) => matchedIds.has(command.id))
+    .sort(compareSlashCommands);
   let previousCategory = "";
   return commands.map((command) => {
     const categoryLabel = CATEGORY_LABELS[command.category] ?? "Command";
@@ -61,10 +66,12 @@ export function createSlashPaletteItems(
     previousCategory = categoryLabel;
     return {
       accent: slashCommandAccent(command.category),
+      action: command.action,
       argsHint: command.argsHint ?? "",
       categoryLabel,
       command,
       description: command.description,
+      executionKind: command.executionKind,
       label: slashCommandLabel(command),
       showCategory,
     };
@@ -88,7 +95,7 @@ export function selectedSlashItem(
   return items[Math.max(0, Math.min(selectedIndex, items.length - 1))];
 }
 
-export function slashCommandLabel(command: UiSlashCommandSpec): string {
+export function slashCommandLabel(command: UiWebCommandSpec): string {
   return `/${command.path.join(" ")}`;
 }
 
@@ -210,8 +217,8 @@ function commandResultModel(
 }
 
 function compareSlashCommands(
-  left: UiSlashCommandSpec,
-  right: UiSlashCommandSpec,
+  left: UiWebCommandSpec,
+  right: UiWebCommandSpec,
 ): number {
   const categoryOrder =
     (CATEGORY_ORDER[left.category] ?? 100) -

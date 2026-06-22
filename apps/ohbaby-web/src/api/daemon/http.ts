@@ -1,12 +1,21 @@
 import type {
+  CompactSessionRequest,
+  CompactSessionResponse,
   CommandCatalogResponse,
+  ContextWindowUsageResponse,
+  CurrentModelResponse,
   ExecuteCommandRequest,
+  ModelConnectRequest,
+  ModelConnectResponse,
+  ModelContextWindowProbeResponse,
   OhbabyBootstrapConfig,
   OkResponse,
   PermissionResponseRequest,
   PermissionStateResponse,
   PromptAcceptedResponse,
   RegisterClientResponse,
+  SearchApiKeyRequest,
+  SearchApiKeyResponse,
   SetPermissionRequest,
   SnapshotResponse,
   SubmitPromptRequest,
@@ -69,7 +78,7 @@ export class DaemonHttpClient {
   }
 
   listCommands(): Promise<CommandCatalogResponse> {
-    return this.request("/v1/commands?surface=tui");
+    return this.request("/v1/commands?surface=web");
   }
 
   executeCommand(input: ExecuteCommandRequest): Promise<OkResponse> {
@@ -101,6 +110,54 @@ export class DaemonHttpClient {
       body: input,
       method: "PATCH",
     });
+  }
+
+  getCurrentModel(): Promise<CurrentModelResponse> {
+    return this.request("/v1/model");
+  }
+
+  probeModelContextWindow(
+    input: ModelConnectRequest,
+  ): Promise<ModelContextWindowProbeResponse> {
+    return this.request("/v1/model/context-window-probe", {
+      body: input,
+      method: "POST",
+    });
+  }
+
+  connectModel(input: ModelConnectRequest): Promise<ModelConnectResponse> {
+    return this.request("/v1/model", {
+      body: input,
+      method: "POST",
+    });
+  }
+
+  setSearchApiKey(input: SearchApiKeyRequest): Promise<SearchApiKeyResponse> {
+    return this.request("/v1/settings/search-api-key", {
+      body: input,
+      method: "POST",
+    });
+  }
+
+  getContextWindowUsage(
+    sessionId: string,
+  ): Promise<ContextWindowUsageResponse> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/context-window`,
+    );
+  }
+
+  compactSession(
+    sessionId: string,
+    input: CompactSessionRequest = {},
+  ): Promise<CompactSessionResponse> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/compact`,
+      {
+        body: input,
+        method: "POST",
+      },
+    );
   }
 
   abortSession(
