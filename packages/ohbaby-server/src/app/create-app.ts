@@ -2,15 +2,15 @@ import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import { Hono, type Context } from "hono";
-import type {
-  UiBackendClient,
-  UiEvent,
-  UiPermissionResponse,
-  UiSlashCommandCatalog,
-  UiSlashCommandInvocation,
-  UiSlashCommandSpec,
-  UiSnapshot,
-  UiUnsubscribe,
+import {
+  filterWebPassthroughCommandCatalog,
+  supportsWebPassthroughCommandInvocation,
+  type UiBackendClient,
+  type UiEvent,
+  type UiPermissionResponse,
+  type UiSlashCommandInvocation,
+  type UiSnapshot,
+  type UiUnsubscribe,
 } from "ohbaby-sdk";
 import { isAuthorizedDaemonRequest } from "../auth/token.js";
 import {
@@ -41,14 +41,6 @@ const CLIENT_ID_HEADER = "x-ohbaby-client-id";
 const DEFAULT_WEB_STARTUP_INTENT: DaemonStartupIntent = {
   startupSessionMode: { type: "fresh" },
 };
-
-const WEB_PASSTHROUGH_COMMAND_IDS = new Set([
-  "help",
-  "mcps",
-  "new",
-  "skills",
-  "status",
-]);
 
 interface WebAssetsOptions {
   readonly allowTokenInjection?: boolean;
@@ -248,50 +240,6 @@ function slashCommandInvocationFromBody(
     ...(body === undefined ? {} : { body }),
     ...(sessionId === undefined ? {} : { sessionId }),
   };
-}
-
-function isWebPassthroughCommandSpec(command: UiSlashCommandSpec): boolean {
-  return (
-    WEB_PASSTHROUGH_COMMAND_IDS.has(command.id) &&
-    command.parentBehavior !== "interaction"
-  );
-}
-
-function filterWebPassthroughCommandCatalog(
-  catalog: UiSlashCommandCatalog,
-  surface: string,
-): UiSlashCommandCatalog {
-  return {
-    ...catalog,
-    commands: catalog.commands.filter(
-      (command) =>
-        command.surfaces.includes(surface) &&
-        isWebPassthroughCommandSpec(command),
-    ),
-  };
-}
-
-function isSamePath(
-  left: readonly string[],
-  right: readonly string[],
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every((segment, index) => segment === right[index])
-  );
-}
-
-function supportsWebPassthroughInvocation(
-  catalog: UiSlashCommandCatalog,
-  invocation: UiSlashCommandInvocation,
-): boolean {
-  return catalog.commands.some(
-    (command) =>
-      command.id === invocation.commandId &&
-      command.surfaces.includes(invocation.surface) &&
-      isSamePath(command.path, invocation.path) &&
-      isWebPassthroughCommandSpec(command),
-  );
 }
 
 function scheduleAfterResponse(
@@ -752,7 +700,7 @@ class DaemonServerAppRuntime {
       const surface = asNonEmptyString(context.req.query("surface")) ?? "tui";
       const catalog = filterWebPassthroughCommandCatalog(
         await this.options.backend.listCommands({ surface }),
-        surface,
+        { surface },
       );
       return context.json({ catalog, ok: true });
     });
@@ -784,7 +732,7 @@ class DaemonServerAppRuntime {
       const catalog = await this.options.backend.listCommands({
         surface: invocation.surface,
       });
-      if (!supportsWebPassthroughInvocation(catalog, invocation)) {
+      if (!supportsWebPassthroughCommandInvocation(catalog, invocation)) {
         return context.json(
           webErrorBody("command is not supported by web passthrough"),
           400,

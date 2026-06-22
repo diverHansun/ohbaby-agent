@@ -1,6 +1,7 @@
 import {
   parseSlashCommandInput,
   resolveSlashCommand,
+  filterWebPassthroughCommandCatalog,
   type UiPermissionResponse,
   type UiSlashCommandCatalog,
   type UiSlashCommandInvocation,
@@ -18,7 +19,6 @@ import {
   createOhbabyWebStore,
   type OhbabyWebStore,
 } from "../../store/store.js";
-import { filterWebPassthroughCommandCatalog } from "./commands.js";
 
 interface BufferedEvent {
   readonly event: Extract<WebSseEvent, { type: "ui.event" }>["event"];
@@ -170,7 +170,11 @@ class BrowserDaemonClient implements OhbabyWebClient {
   private async listCommands(): Promise<UiSlashCommandCatalog> {
     this.commandCatalogPromise ??= this.http
       .listCommands()
-      .then((response) => filterWebPassthroughCommandCatalog(response.catalog))
+      .then((response) =>
+        filterWebPassthroughCommandCatalog(response.catalog, {
+          surface: "tui",
+        }),
+      )
       .catch((error: unknown) => {
         this.commandCatalogPromise = undefined;
         throw error;
@@ -212,6 +216,9 @@ class BrowserDaemonClient implements OhbabyWebClient {
         if (seqNum === undefined || !Number.isSafeInteger(seqNum)) {
           this.store.setError("Daemon event is missing a valid sequence id");
           return;
+        }
+        if (event.event.type === "command.catalog.updated") {
+          this.commandCatalogPromise = undefined;
         }
         if (this.buffering) {
           this.bufferedEvents.push({ event: event.event, seqNum });

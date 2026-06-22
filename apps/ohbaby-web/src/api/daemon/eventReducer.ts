@@ -1,5 +1,9 @@
-import type { UiEvent, UiMessage, UiSnapshot } from "ohbaby-sdk";
-import { isWebPassthroughCommandId } from "./commands.js";
+import {
+  isWebPassthroughCommandId,
+  type UiEvent,
+  type UiMessage,
+  type UiSnapshot,
+} from "ohbaby-sdk";
 import type { CommandNotice, CommandOutput, ViewState } from "./wire.js";
 
 const COMMAND_NOTICE_LIMIT = 8;

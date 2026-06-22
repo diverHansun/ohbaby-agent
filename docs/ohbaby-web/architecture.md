@@ -15,7 +15,7 @@ web 端内部分三层，数据**单向流动**，依赖方向恒为 `ui → sto
   - `http` —— REST 命令封装（建连、发 prompt、审批、中断、commands passthrough 等）。
   - `events` —— SSE over fetch-stream，含 `Last-Event-ID` 续传与 `resync-required` 处理。
   - `eventReducer` —— 纯函数 `(event, state) → state`：把 `UiEvent` 投影为 ViewState（含轻量 `CommandNotice`）。
-  - `client` —— 门面，把上述四者组装成一个浏览器版 backend 客户端。
+  - `client` —— 门面，把上述四者组装成一个浏览器版 backend 客户端；slash passthrough 目录过滤使用 `ohbaby-sdk` 的 web-safe helpers，避免 server/web allowlist 漂移。
 - **状态层 `store/`**：持有投影后的 ViewState 与 ConnectionState，喂给 React（`useSyncExternalStore`）。
 - **视图层 `ui/`**：会话流、输入框、权限弹窗、状态条等组件。
 
@@ -72,7 +72,7 @@ apps/ohbaby-web/
 - **放弃 SSR / 路由框架**：换取产物极小、同源伺服简单；代价是无服务端渲染（本地工具无所谓）。
 - **选 React（与 CLI 一致）而非更轻的 Preact**：换取团队熟悉度与生态；代价是运行时略大（本地工具可接受）。
 - **typed client 由 OpenAPI 生成而非手写**：换取契约单一来源、不漂移（落 ND4）；代价是多一道生成构建步骤（server 出 `openapi.json` → web prebuild 生成 `wire.ts`）。
-- **slash passthrough 不等于命令面板**：v0.1.6 只把以 `/` 开头的 composer 输入解析为 `UiSlashCommandInvocation` 并经 daemon 执行，结果以 `CommandNotice` 呈现。候选列表、Tab 补全、交互式 command panel 仍属 ND5，避免 UI 范围在收口阶段膨胀。
+- **slash passthrough 不等于命令面板**：v0.1.6 只把以 `/` 开头的 composer 输入解析为 `UiSlashCommandInvocation` 并经 daemon 执行，结果以 `CommandNotice` 呈现。web-safe allowlist 与过滤谓词由 `ohbaby-sdk` 导出，server 和 web 共用同一份真相；候选列表、Tab 补全、交互式 command panel 仍属 ND5，避免 UI 范围在收口阶段膨胀。
 - **store 用 `useSyncExternalStore` 手卷而非 Context**：换取高频 SSE 增量下的精准订阅、避免全量重渲；代价是要自己写极小的 subscribe/getSnapshot（约定俗成、量很小）。
 
 > 以上取舍都为后续维护者标注"为什么不能随意改"：尤其单向流 + 非乐观更新是 resync 正确性的结构前提，改动需回到本文与 dfd 重新评估。

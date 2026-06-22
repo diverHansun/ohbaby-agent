@@ -33,7 +33,7 @@ web 只与 daemon 的 `/v1` 面交互（同源）。
 - 发话：`POST /v1/sessions/:id/prompt` → `202 Accepted`（异步，结果经 SSE 回）。
 - 审批：`POST /v1/permissions/:id` → `200`（错主 → `403`）。
 - 中断：`POST /v1/sessions/:id/abort` → `200`（同步）。
-- slash passthrough：`GET /v1/commands?surface=tui` 拉取 web-safe allowlist 命令目录；composer 输入以 `/` 开头时，web 使用 `ohbaby-sdk` 的 slash parser/resolve 生成 invocation，再 `POST /v1/commands` 执行；server 对手写请求再次校验同一 allowlist，拒绝 `interaction` 命令；结果经 `command.*` SSE 事件投影为 `CommandNotice`。
+- slash passthrough：`GET /v1/commands?surface=tui` 拉取 web-safe allowlist 命令目录；composer 输入以 `/` 开头时，web 使用 `ohbaby-sdk` 的 slash parser/resolve 与 web-safe catalog helper 生成 invocation，再 `POST /v1/commands` 执行；server 对手写请求再次使用同一 SDK helper 校验 allowlist，拒绝 `interaction` 命令；结果经 `command.*` SSE 事件投影为 `CommandNotice`。收到 `command.catalog.updated` 时，web 使本地 catalog 缓存失效，下次 slash 执行重新拉目录。
 
 **⑤ 断线 / 重同步流**：
 - SSE 断 → `reconnecting` → 带 `Last-Event-ID`(= `lastAppliedSeqNum`) 重连 → 命中 replay 则补发 `(id, now]` 事件，回 `live`。

@@ -55,6 +55,7 @@ describe("ohbaby-web daemon client", () => {
       readonly url: string;
     }[] = [];
     let sseController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let commandCatalogVersion: "commands-v1" | "commands-v2" = "commands-v1";
 
     const fetchImpl: typeof fetch = (input, init = {}) => {
       const url = urlFromRequestInput(input);
@@ -130,10 +131,9 @@ describe("ohbaby-web daemon client", () => {
         );
       }
       if (url.endsWith("/v1/commands?surface=tui")) {
-        return Promise.resolve(
-          Response.json({
-            catalog: {
-              commands: [
+        const commands =
+          commandCatalogVersion === "commands-v1"
+            ? [
                 {
                   argumentMode: "argv",
                   category: "system",
@@ -153,8 +153,32 @@ describe("ohbaby-web daemon client", () => {
                   source: "builtin",
                   surfaces: ["tui"],
                 },
-              ],
-              version: "commands-v1",
+              ]
+            : [
+                {
+                  argumentMode: "argv",
+                  category: "system",
+                  description: "Show backend status",
+                  id: "status",
+                  path: ["status"],
+                  source: "builtin",
+                  surfaces: ["tui"],
+                },
+                {
+                  argumentMode: "argv",
+                  category: "system",
+                  description: "List skills",
+                  id: "skills",
+                  path: ["skills"],
+                  source: "builtin",
+                  surfaces: ["tui"],
+                },
+              ];
+        return Promise.resolve(
+          Response.json({
+            catalog: {
+              commands,
+              version: commandCatalogVersion,
             },
             ok: true,
           }),
@@ -252,6 +276,48 @@ describe("ohbaby-web daemon client", () => {
       }),
     ).rejects.toThrow('Unknown command "/sessions"');
     expect(requests).toHaveLength(beforeUnsupported);
+    commandCatalogVersion = "commands-v2";
+    expect(sseController).toBeDefined();
+    sseController?.enqueue(
+      sseFrame(
+        {
+          event: {
+            reason: "test",
+            timestamp: Date.parse("2026-06-12T00:00:01.000Z"),
+            type: "command.catalog.updated",
+            version: "commands-v2",
+          },
+          type: "ui.event",
+        },
+        3,
+      ),
+    );
+    await waitFor(
+      () => runtime.store.getSnapshot().view.lastAppliedSeqNum === 3,
+      "timed out waiting for catalog update event",
+    );
+    const catalogRequestsBeforeRefresh = requests.filter((request) =>
+      request.url.endsWith("/v1/commands?surface=tui"),
+    ).length;
+    await runtime.client.executeSlashCommand({
+      sessionId: "session_1",
+      text: "/skills",
+    });
+    expect(
+      requests.filter((request) =>
+        request.url.endsWith("/v1/commands?surface=tui"),
+      ),
+    ).toHaveLength(catalogRequestsBeforeRefresh + 1);
+    const skillsBody = JSON.parse(requests.at(-1)?.body ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(skillsBody).toMatchObject({
+      commandId: "skills",
+      path: ["skills"],
+      raw: "/skills",
+      sessionId: "session_1",
+    });
     sseController?.close();
     await runtime.client.close();
   });

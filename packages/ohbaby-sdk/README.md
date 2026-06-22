@@ -6,6 +6,7 @@ This package owns:
 
 - `UiBackendClient`, snapshots, events, permissions, and interactions
 - slash command parsing and resolution helpers
+- web-safe slash passthrough allowlist/filter helpers shared by server and browser adapters
 - stable DTOs shared by `ohbaby-agent` and the current `ohbaby-cli` interface
 
 It has no runtime workspace dependency. It is part of the npm-facing package graph so
