@@ -2,7 +2,7 @@
   <img src="assets/images/logo.png" alt="ohbaby-agent" width="150">
 </p>
 
-<p align="center">An open-source AI coding agent. The MVP interface is a CLI/TUI for your terminal.</p>
+<p align="center">An open-source AI coding agent with a terminal CLI/TUI and a local web UI.</p>
 
 <p align="center">
   <a href="https://github.com/diverHansun/ohbaby-agent/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/diverHansun/ohbaby-agent/ci.yml?style=flat-square&label=CI&logo=github"></a>
@@ -23,10 +23,10 @@
 
 ---
 
-**ohbaby-agent** is an open-source AI coding agent. In the current MVP, users interact
-with it through a fast [Ink](https://github.com/vadimdemedes/ink)-based CLI/TUI, installed
-from npm as `ohbaby-cli` and launched with the `ohbaby` command. The runtime and SDK are
-kept separate so future web and app interfaces can adapt to the same agent core.
+**ohbaby-agent** is an open-source AI coding agent. Users can interact with it through
+a fast [Ink](https://github.com/vadimdemedes/ink)-based CLI/TUI or a local browser UI,
+both installed from npm as `ohbaby-cli` and launched with the `ohbaby` command. The
+runtime and SDK are kept separate so future app interfaces can adapt to the same agent core.
 
 Bring your own API key from an LLM provider such as OpenAI, Anthropic, or Zhipu,
 then start coding.
@@ -42,7 +42,9 @@ then start coding.
   management, all behind a permission layer.
 - **👥 Subagents** — delegate complex, multi-step work to focused subagents.
 - **💬 CLI/TUI interface** — slash commands, session history, model switching, and live
-  streaming output in the MVP.
+  streaming output in the terminal.
+- **🌐 Local web UI** — `ohbaby serve` starts the explicit local daemon, serves the
+  bundled web assets, and opens a browser for the current project.
 - **🔐 Policy modes & permissions** — `auto` / `default` modes with explicit prompts
   before risky actions.
 
@@ -82,6 +84,29 @@ entered here are persisted to `~/.ohbaby-agent/.env`.
 | Context window / Max output tokens | Optional |
 
 **3. Start coding.** That's it — describe what you want and ohbaby-agent gets to work.
+
+## 🌐 Local Web UI
+
+The npm package includes the built web assets. Start the local daemon and browser UI from
+your project root:
+
+```bash
+ohbaby serve
+```
+
+The command prints and opens the real local URL, for example:
+
+```text
+ohbaby web ready: http://127.0.0.1:4096
+```
+
+Port `4096` is used by default. If that default is already occupied, ohbaby automatically
+chooses an available port and prints the URL to open. Passing an explicit `--port` remains
+strict, so `ohbaby serve --port 4096` fails clearly when that port is in use.
+
+<p align="center">
+  <img src="assets/images/ohbaby-web-v0.1.6.png" alt="ohbaby-agent local web UI" width="760">
+</p>
 
 ## 🔍 Web Search (optional)
 
@@ -130,11 +155,11 @@ pnpm preflight        # format + lint + typecheck + test + build
 
 The repo is a pnpm workspace with four published packages:
 
-- **`ohbaby-cli`** — the MVP CLI/TUI package that installs the `ohbaby` command.
+- **`ohbaby-cli`** — the CLI/TUI and local web package that installs the `ohbaby` command.
 - **`ohbaby-agent`** — the backend runtime: adapters, tools, sessions, policy, MCP, skills.
 - **`ohbaby-server`** — the explicit local server and remote client transport package.
 - **`ohbaby-sdk`** — stable TypeScript contracts shared between the runtime and interfaces
-  such as the current CLI/TUI and future web/app adapters.
+  such as the current CLI/TUI, local web UI, and future app adapters.
 
 ## 📄 License
 
