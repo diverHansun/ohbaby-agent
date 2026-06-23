@@ -289,15 +289,15 @@ class FakeBackend implements UiBackendClient {
     });
     const selectedSessionId = selectedSessionIdFromInvocation(invocation);
     if (selectedSessionId !== undefined) {
-      const session =
-        this.snapshot.sessions.find((item) => item.id === selectedSessionId) ??
-        {
-          createdAt: timestamp,
-          id: selectedSessionId,
-          messages: [],
-          title: "New session",
-          updatedAt: timestamp,
-        };
+      const session = this.snapshot.sessions.find(
+        (item) => item.id === selectedSessionId,
+      ) ?? {
+        createdAt: timestamp,
+        id: selectedSessionId,
+        messages: [],
+        title: "New session",
+        updatedAt: timestamp,
+      };
       this.snapshot = {
         ...this.snapshot,
         activeSessionId: selectedSessionId,
@@ -602,6 +602,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       await runtime.ready;
 
       await runtime.client.createSession();
+      await runtime.client.createSession();
       await runtime.client.selectSession("session_2");
 
       expect(backend.executedCommands).toEqual([
@@ -611,6 +612,13 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
           path: ["new"],
           raw: "/new --no-reuse-empty-session",
           rawArgs: "--no-reuse-empty-session",
+        }),
+        expect.objectContaining({
+          argv: [],
+          commandId: "new",
+          path: ["new"],
+          raw: "/new",
+          rawArgs: "",
         }),
         expect.objectContaining({
           argv: ["--session_id", "session_2"],
@@ -709,7 +717,9 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
         () =>
           runtime.store
             .getSnapshot()
-            .view.snapshot?.sessions.find((session) => session.id === "session_2")
+            .view.snapshot?.sessions.find(
+              (session) => session.id === "session_2",
+            )
             ?.messages.some((message) =>
               message.parts.some(
                 (part) => part.type === "text" && part.text === "pong",

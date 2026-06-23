@@ -1084,6 +1084,65 @@ describe("createDaemonServerApp", () => {
     }
   });
 
+  it("allows repeated web session creation to reuse the active empty session", async () => {
+    const backend = new FakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const first = await handle.app.request("/v1/sessions", {
+        headers: {
+          ...authHeaders(),
+          "x-ohbaby-client-id": "client_web",
+        },
+        method: "POST",
+      });
+      expect(first.status).toBe(200);
+      const firstInvocation = backend.executedCommands[0];
+      expect(firstInvocation).toMatchObject({
+        argv: ["--no-reuse-empty-session"],
+        commandId: "new",
+        rawArgs: "--no-reuse-empty-session",
+      });
+
+      backend.emit({
+        action: {
+          data: { choiceId: "session_web_1" },
+          kind: "session.selected",
+        },
+        clientInvocationId: firstInvocation.clientInvocationId,
+        commandRunId: "command_new_1",
+        timestamp: Date.parse(timestamp),
+        type: "command.result.delivered",
+      });
+
+      const second = await handle.app.request("/v1/sessions", {
+        headers: {
+          ...authHeaders(),
+          "x-ohbaby-client-id": "client_web",
+        },
+        method: "POST",
+      });
+
+      expect(second.status).toBe(200);
+      expect(backend.executedCommands[1]).toMatchObject({
+        argv: [],
+        commandId: "new",
+        raw: "/new",
+        rawArgs: "",
+      });
+    } finally {
+      await handle.dispose();
+    }
+  });
+
   it("selects sessions for registered web clients through a dedicated REST route", async () => {
     const backend = new FakeBackend();
     const handle = createApp(backend);

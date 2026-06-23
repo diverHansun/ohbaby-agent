@@ -269,12 +269,12 @@ function sessionCommandInvocation(
   if (command === "new") {
     return {
       argumentMode: "argv",
-      argv: ["--no-reuse-empty-session"],
+      argv: [],
       clientInvocationId: `web_session_${randomUUID()}`,
       commandId: "new",
       path: ["new"],
-      raw: "/new --no-reuse-empty-session",
-      rawArgs: "--no-reuse-empty-session",
+      raw: "/new",
+      rawArgs: "",
       surface: "tui",
     };
   }
