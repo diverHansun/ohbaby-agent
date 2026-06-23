@@ -4,11 +4,15 @@ import type {
   UiBackendClient,
   UiCompactSessionResult,
   UiCompactSessionUsage,
+  UiConnectModelInput,
   UiConnectModelResult,
+  UiContextWindowUsage,
   UiEvent,
   UiEventHandler,
   UiPermissionState,
+  UiProbeModelContextWindowInput,
   UiSetSearchApiKeyResult,
+  UiSetSearchApiKeyInput,
   UiSlashCommandInvocation,
   UiSnapshot,
   UiUnsubscribe,
@@ -110,7 +114,12 @@ async function waitFor(
 
 class FakeBackend implements UiBackendClient {
   readonly handlers = new Set<UiEventHandler>();
+  readonly compactInputs: Parameters<UiBackendClient["compactSession"]>[0][] =
+    [];
+  readonly connectInputs: UiConnectModelInput[] = [];
   readonly executedCommands: UiSlashCommandInvocation[] = [];
+  readonly probeInputs: UiProbeModelContextWindowInput[] = [];
+  readonly searchInputs: UiSetSearchApiKeyInput[] = [];
   readonly submitted: {
     readonly text: string;
     readonly options?: SubmitPromptOptions;
@@ -121,8 +130,17 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(this.snapshot);
   }
 
-  getContextWindowUsage(): Promise<null> {
-    return Promise.resolve(null);
+  getContextWindowUsage(input: {
+    readonly sessionId: string;
+  }): Promise<UiContextWindowUsage | null> {
+    return Promise.resolve({
+      contextWindowRatio: 0.01,
+      contextWindowTokens: 100,
+      currentTokens: 1,
+      estimatedAt: timestamp,
+      modelId: "fake-model",
+      sessionId: input.sessionId,
+    });
   }
 
   subscribeEvents(handler: UiEventHandler): UiUnsubscribe {
@@ -135,6 +153,33 @@ class FakeBackend implements UiBackendClient {
   listCommands(): ReturnType<UiBackendClient["listCommands"]> {
     return Promise.resolve({
       commands: [
+        {
+          argumentMode: "structured",
+          category: "setup",
+          description: "Connect a model provider",
+          id: "connect",
+          path: ["connect"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "structured",
+          category: "setup",
+          description: "Connect a web search provider",
+          id: "connect-search",
+          path: ["connect-search"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "argv",
+          category: "session",
+          description: "Compact current session",
+          id: "compact",
+          path: ["compact"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
         {
           argumentMode: "argv",
           category: "system",
@@ -168,7 +213,10 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve();
   }
 
-  compactSession(): ReturnType<UiBackendClient["compactSession"]> {
+  compactSession(
+    options?: Parameters<UiBackendClient["compactSession"]>[0],
+  ): ReturnType<UiBackendClient["compactSession"]> {
+    this.compactInputs.push(options);
     return Promise.resolve(compactResult());
   }
 
@@ -176,20 +224,29 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(null);
   }
 
-  probeModelContextWindow(): ReturnType<
+  probeModelContextWindow(
+    input: UiProbeModelContextWindowInput,
+  ): ReturnType<
     UiBackendClient["probeModelContextWindow"]
   > {
+    this.probeInputs.push(input);
     return Promise.resolve({
       contextWindowSource: "default",
       contextWindowTokens: 128_000,
     });
   }
 
-  connectModel(): ReturnType<UiBackendClient["connectModel"]> {
+  connectModel(
+    input: UiConnectModelInput,
+  ): ReturnType<UiBackendClient["connectModel"]> {
+    this.connectInputs.push(input);
     return Promise.resolve(connectModelResult());
   }
 
-  setSearchApiKey(): ReturnType<UiBackendClient["setSearchApiKey"]> {
+  setSearchApiKey(
+    input: UiSetSearchApiKeyInput,
+  ): ReturnType<UiBackendClient["setSearchApiKey"]> {
+    this.searchInputs.push(input);
     return Promise.resolve(setSearchApiKeyResult());
   }
 
@@ -332,6 +389,122 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
         raw: "/status",
         sessionId: "session_generated",
       });
+      await runtime.client.close();
+    } finally {
+      await server.dispose();
+    }
+  });
+
+  it("routes structured web commands through REST and keeps overlay ids out of raw command execution", async () => {
+    const backend = new FakeBackend();
+    const server = createDaemonServerApp({
+      authToken,
+      backend,
+      createSessionId: () => "session_generated",
+      packageVersion: "0.1.6-test",
+    });
+    await server.start();
+    try {
+      const fetchImpl: typeof fetch = (input, init = {}) => {
+        const url = new URL(urlFromRequestInput(input));
+        return Promise.resolve(
+          server.app.request(`${url.pathname}${url.search}`, {
+            body: init.body,
+            headers: init.headers,
+            method: init.method,
+            signal: init.signal,
+          }),
+        );
+      };
+      const config: OhbabyBootstrapConfig = {
+        baseUrl: "http://127.0.0.1:4096",
+        clientId: "client_web",
+        startupIntent: { startupSessionMode: { type: "fresh" } },
+        token: authToken,
+      };
+      const runtime = createOhbabyWebRuntime(config, { fetch: fetchImpl });
+      await runtime.ready;
+
+      const catalog = await runtime.client.listCommands();
+      expect(
+        catalog.commands.map((command) => [
+          command.id,
+          command.action,
+          command.executionKind,
+        ]),
+      ).toEqual([
+        ["connect", "connectModel", "overlay"],
+        ["connect-search", "connectSearch", "overlay"],
+        ["compact", "compactSession", "overlay"],
+        ["status", "executeCommand", "passthrough"],
+      ]);
+
+      await expect(
+        runtime.client.executeSlashCommand({ text: "/connect" }),
+      ).rejects.toThrow();
+      const rawOverlayResponse = await fetchImpl(
+        "http://127.0.0.1:4096/v1/commands",
+        {
+          body: JSON.stringify({
+            argumentMode: "structured",
+            argv: [],
+            clientInvocationId: "manual",
+            commandId: "connect",
+            path: ["connect"],
+            raw: "/connect",
+            rawArgs: "",
+            surface: "tui",
+          }),
+          headers: {
+            authorization: `Bearer ${authToken}`,
+            "content-type": "application/json",
+            "x-ohbaby-client-id": "client_web",
+          },
+          method: "POST",
+        },
+      );
+      expect(rawOverlayResponse.status).toBe(400);
+
+      await runtime.client.probeModelContextWindow({
+        apiKeyEnv: "ZHIPU_API_KEY",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        model: "glm-4.7",
+        provider: "zhipu",
+      });
+      await runtime.client.connectModel({
+        apiKeyEnv: "ZHIPU_API_KEY",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        model: "glm-4.7",
+        provider: "zhipu",
+      });
+      await runtime.client.setSearchApiKey({
+        apiKeyEnv: "TAVILY_API_KEY",
+        provider: "tavily",
+      });
+      await runtime.client.getContextWindowUsage("session_1");
+      await runtime.client.compactSession("session_1", { force: true });
+
+      expect(backend.probeInputs[0]).toMatchObject({
+        apiKeyEnv: "ZHIPU_API_KEY",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        interfaceProvider: "openai-compatible",
+        model: "glm-4.7",
+        provider: "zhipu",
+      });
+      expect(backend.connectInputs[0]).toMatchObject({
+        apiKeyEnv: "ZHIPU_API_KEY",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        interfaceProvider: "openai-compatible",
+        model: "glm-4.7",
+        provider: "zhipu",
+      });
+      expect(backend.searchInputs).toEqual([
+        { apiKeyEnv: "TAVILY_API_KEY", provider: "tavily" },
+      ]);
+      expect(backend.compactInputs).toEqual([
+        { force: true, sessionId: "session_1" },
+      ]);
+      expect(backend.executedCommands).toHaveLength(0);
       await runtime.client.close();
     } finally {
       await server.dispose();
