@@ -3504,6 +3504,7 @@ function createFakeClient(
 ): TerminalClient & {
   readonly emit: (event: TuiEvent) => void;
   readonly abortRun: ReturnType<typeof vi.fn>;
+  readonly archiveSession: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
   readonly connectModel: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
@@ -3522,6 +3523,7 @@ function createFakeClient(
 
   return {
     abortRun: vi.fn(() => Promise.resolve()),
+    archiveSession: vi.fn(() => Promise.resolve()),
     compactSession: vi.fn(() =>
       Promise.resolve({
         sessionId: initialSnapshot.activeSessionId ?? "session_1",

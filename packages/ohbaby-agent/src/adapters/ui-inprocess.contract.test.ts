@@ -4741,6 +4741,132 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
+  it("archives the active persistent session and selects the newest remaining active session", async () => {
+    let nextId = 1;
+    let nowMs = 1_000;
+    const projectRoot = "/repo";
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => `session_${String(nextId++)}`,
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      now: () => nowMs,
+      projectResolver: {
+        fromDirectory() {
+          return {
+            id: "project_1",
+            rootPath: projectRoot,
+          };
+        },
+      },
+      store: createInMemorySessionStore(),
+    });
+    await sessionManager.create(projectRoot, { title: "Active" });
+    nowMs = 2_000;
+    await sessionManager.create(projectRoot, { title: "Remaining" });
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+      messageManager,
+      projectDirectory: projectRoot,
+      sessionManager,
+      stateStore: createPersistentUiStateStore({
+        initialActiveSessionId: "session_1",
+        messageManager,
+        projectRoot,
+        runLedger: createInMemoryRunLedger(),
+        sessionManager,
+      }),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    await (
+      client as unknown as {
+        archiveSession(input: { readonly sessionId: string }): Promise<void>;
+      }
+    ).archiveSession({ sessionId: "session_1" });
+
+    await expect(sessionManager.get("session_1")).resolves.toMatchObject({
+      status: "archived",
+    });
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      activeSessionId: "session_2",
+      sessions: [{ id: "session_2", title: "Remaining" }],
+    });
+    const snapshotEvent = events.find(
+      (event): event is Extract<UiEvent, { type: "snapshot.replaced" }> =>
+        event.type === "snapshot.replaced",
+    );
+    expect(snapshotEvent?.snapshot).toMatchObject({
+      activeSessionId: "session_2",
+      sessions: [{ id: "session_2" }],
+    });
+  });
+
+  it("archives the only active persistent session and clears the active session", async () => {
+    const projectRoot = "/repo";
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => "session_1",
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      now: () => 1_000,
+      projectResolver: {
+        fromDirectory() {
+          return {
+            id: "project_1",
+            rootPath: projectRoot,
+          };
+        },
+      },
+      store: createInMemorySessionStore(),
+    });
+    await sessionManager.create(projectRoot, { title: "Only" });
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+      messageManager,
+      projectDirectory: projectRoot,
+      sessionManager,
+      stateStore: createPersistentUiStateStore({
+        initialActiveSessionId: "session_1",
+        messageManager,
+        projectRoot,
+        runLedger: createInMemoryRunLedger(),
+        sessionManager,
+      }),
+    });
+
+    await (
+      client as unknown as {
+        archiveSession(input: { readonly sessionId: string }): Promise<void>;
+      }
+    ).archiveSession({ sessionId: "session_1" });
+
+    await expect(sessionManager.get("session_1")).resolves.toMatchObject({
+      status: "archived",
+    });
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      activeSessionId: null,
+      sessions: [],
+    });
+  });
+
   it("derives /sessions titles for persisted placeholder sessions from the first user message", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-client-db-"));
     try {

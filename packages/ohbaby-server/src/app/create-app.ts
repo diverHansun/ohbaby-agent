@@ -156,8 +156,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function mutationErrorStatus(error: unknown): 400 | 409 {
-  return errorMessage(error) === "Cannot save while running" ? 409 : 400;
+function mutationErrorStatus(error: unknown): 400 | 404 | 409 {
+  const message = errorMessage(error);
+  if (message.startsWith("Session not found:")) {
+    return 404;
+  }
+  return message === "Cannot save while running" ? 409 : 400;
 }
 
 function asStringArray(value: unknown): readonly string[] | undefined {
@@ -613,6 +617,19 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
             },
           },
           summary: "Select a session",
+        },
+      },
+      "/v1/sessions/{id}/archive": {
+        patch: {
+          responses: {
+            "200": {
+              description: "Session archived",
+            },
+            "404": {
+              description: "Session not found",
+            },
+          },
+          summary: "Archive a session",
         },
       },
       "/v1/sessions/{id}/context-window": {
@@ -1106,6 +1123,33 @@ class DaemonServerAppRuntime {
         ),
       );
       return context.json({ ok: true });
+    });
+
+    this.app.patch("/v1/sessions/:id/archive", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
+      const sessionId = asNonEmptyString(context.req.param("id"));
+      if (!sessionId) {
+        return context.json(webErrorBody("sessionId is required"), 400);
+      }
+
+      try {
+        await this.options.backend.archiveSession({ sessionId });
+        return context.json({ ok: true });
+      } catch (error) {
+        return context.json(
+          webErrorBody(errorMessage(error)),
+          mutationErrorStatus(error),
+        );
+      }
     });
 
     this.app.get("/v1/sessions/:id/context-window", async (context) => {

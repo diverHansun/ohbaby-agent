@@ -721,6 +721,7 @@ describe("runOhbabyCli", () => {
 
 function createCore(): {
   readonly abortRun: ReturnType<typeof vi.fn>;
+  readonly archiveSession: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
   readonly connectModel: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
@@ -737,6 +738,7 @@ function createCore(): {
 } {
   return {
     abortRun: vi.fn(() => Promise.resolve()),
+    archiveSession: vi.fn(() => Promise.resolve()),
     compactSession: vi.fn(() => Promise.resolve()),
     connectModel: vi.fn(() =>
       Promise.resolve({

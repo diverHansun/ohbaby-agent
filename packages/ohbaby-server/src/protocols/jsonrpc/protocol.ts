@@ -7,6 +7,7 @@ export const DAEMON_RPC_METHODS = [
   "listCommands",
   "submitPrompt",
   "compactSession",
+  "archiveSession",
   "getCurrentModel",
   "probeModelContextWindow",
   "connectModel",

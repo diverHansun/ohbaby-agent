@@ -212,6 +212,10 @@ function withStartupRecovery(
       await ready();
       return client.compactSession(compactOptions);
     },
+    async archiveSession(input): ReturnType<UiBackendClient["archiveSession"]> {
+      await ready();
+      return client.archiveSession(input);
+    },
     async probeModelContextWindow(
       input,
     ): ReturnType<UiBackendClient["probeModelContextWindow"]> {

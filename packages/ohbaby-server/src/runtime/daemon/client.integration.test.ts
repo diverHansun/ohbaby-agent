@@ -206,6 +206,13 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(compactResult());
   }
 
+  archiveSession(
+    input: Parameters<UiBackendClient["archiveSession"]>[0],
+  ): ReturnType<UiBackendClient["archiveSession"]> {
+    this.calls.push({ args: [input], method: "archiveSession" });
+    return Promise.resolve();
+  }
+
   getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
     this.calls.push({ args: [], method: "getCurrentModel" });
     return Promise.resolve(null);

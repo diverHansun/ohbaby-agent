@@ -1,5 +1,6 @@
 import type {
   SubmitPromptOptions,
+  UiArchiveSessionInput,
   UiEventHandler,
   UiListCommandsQuery,
   UiPermissionUpdate,
@@ -42,6 +43,7 @@ export interface CoreAPI {
   compactSession(
     options?: UiCompactSessionOptions,
   ): Promise<UiCompactSessionResult>;
+  archiveSession(input: UiArchiveSessionInput): Promise<void>;
   getCurrentModel(): Promise<UiCurrentModelConfig | null>;
   probeModelContextWindow(
     input: UiProbeModelContextWindowInput,

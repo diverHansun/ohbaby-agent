@@ -32,6 +32,10 @@ export interface SubmitPromptOptions {
   readonly sessionId?: string;
 }
 
+export interface UiArchiveSessionInput {
+  readonly sessionId: string;
+}
+
 export interface UiPermissionUpdate {
   readonly level?: UiPermissionLevel;
   readonly mode?: UiPermissionMode;
@@ -55,6 +59,7 @@ export interface UiBackendClient {
   compactSession(
     options?: UiCompactSessionOptions,
   ): Promise<UiCompactSessionResult>;
+  archiveSession(input: UiArchiveSessionInput): Promise<void>;
   getCurrentModel(): Promise<UiCurrentModelConfig | null>;
   probeModelContextWindow(
     input: UiProbeModelContextWindowInput,

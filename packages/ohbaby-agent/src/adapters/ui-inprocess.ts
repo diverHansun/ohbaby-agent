@@ -3,6 +3,7 @@ import path from "node:path";
 import type {
   SubmitPromptOptions,
   UiBackendClient,
+  UiArchiveSessionInput,
   UiCommandCatalog,
   UiCommandInvocation,
   UiCompactSessionOptions,
@@ -846,6 +847,44 @@ export function createInProcessUiBackendClient(
     return { created: true, id: session.id, title: session.title };
   }
 
+  async function archiveSessionInternal(
+    input: UiArchiveSessionInput,
+  ): Promise<void> {
+    const sessionId = input.sessionId.trim();
+    if (sessionId.length === 0) {
+      throw new Error("sessionId is required");
+    }
+    if (!options.sessionManager) {
+      throw new Error("Session archive is not available in this backend");
+    }
+    const snapshot = await stateStore.readSnapshot();
+    const session = await options.sessionManager.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    if (!isPrimarySession(session)) {
+      throw new Error(`Cannot archive subagent session: ${sessionId}`);
+    }
+
+    await options.sessionManager.update(sessionId, { status: "archived" });
+
+    if (snapshot.activeSessionId === sessionId) {
+      const remainingSessions = (
+        await options.sessionManager.listByProjectRoot(session.projectRoot, {
+          status: "active",
+        })
+      )
+        .filter(isPrimarySession)
+        .filter((candidate) =>
+          sameSessionProjectRoot(candidate.projectRoot, session.projectRoot),
+        )
+        .sort(sortCoreSessionsByUpdatedAtDesc);
+      await stateStore.setActiveSessionId(remainingSessions[0]?.id ?? null);
+    }
+
+    await publishSnapshotReplacement();
+  }
+
   async function assertCanUseAsPrimarySession(
     sessionId: string | undefined,
   ): Promise<void> {
@@ -1526,6 +1565,10 @@ export function createInProcessUiBackendClient(
       compactOptions?: UiCompactSessionOptions,
     ): Promise<UiCompactSessionResult> {
       return compactSessionInternal(compactOptions);
+    },
+
+    archiveSession(input: UiArchiveSessionInput): Promise<void> {
+      return archiveSessionInternal(input);
     },
 
     probeModelContextWindow(

@@ -12,10 +12,12 @@
 
 ## File Map
 
-- Modify `packages/ohbaby-agent/src/commands/types.ts`
-  - Add optional `archiveSession(sessionId)` to `CommandSessionProvider`.
+- Modify `packages/ohbaby-sdk/src/client.ts` and `packages/ohbaby-sdk/src/rpc/types.ts`
+  - Add `archiveSession({ sessionId })` to the shared backend contract.
 - Modify `packages/ohbaby-agent/src/adapters/ui-inprocess.ts`
   - Implement archive behavior in the session provider.
+- Modify `packages/ohbaby-server/src/protocols/jsonrpc/*`
+  - Forward `archiveSession` for remote daemon clients.
 - Modify `packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts`
   - Cover archive status updates and active-session fallback.
 - Modify `packages/ohbaby-server/src/app/create-app.ts`
@@ -37,11 +39,12 @@
 
 ## Task 1: Backend Capability
 
-- [ ] Add `archiveSession?(sessionId: string): Promise<void> | void` to `CommandSessionProvider`.
+- [ ] Add `archiveSession(input: { sessionId: string }): Promise<void>` to `UiBackendClient` and `CoreAPI`.
 - [ ] Add a focused contract test that creates two active sessions, archives the current one, and expects active session to move to the newest remaining active session.
 - [ ] Add a focused contract test that archives the only active session and expects active session to become `null`.
 - [ ] Implement archive in `ui-inprocess.ts` by calling `sessionManager.update(sessionId, { status: "archived" })`.
 - [ ] After archiving, publish a snapshot replacement.
+- [ ] Add JSON-RPC forwarding for remote daemon clients.
 - [ ] Run backend contract tests:
 
 ```bash

@@ -135,31 +135,30 @@ function projectSnapshotForClient(
   if (!view) {
     return snapshot;
   }
-  const activeSessionId = view.activeSessionId;
+  const activeSessionId =
+    view.activeSessionId !== undefined &&
+    (view.activeSessionId === null ||
+      snapshot.sessions.some((session) => session.id === view.activeSessionId))
+      ? view.activeSessionId
+      : snapshot.activeSessionId;
   return {
     ...snapshot,
-    ...(activeSessionId === undefined ? {} : { activeSessionId }),
-    ...(activeSessionId === undefined
+    activeSessionId,
+    ...(snapshot.contextWindowUsages === undefined
       ? {}
       : {
-          ...(snapshot.contextWindowUsages === undefined
-            ? {}
-            : {
-                contextWindowUsages: snapshot.contextWindowUsages.filter(
-                  (usage) => usage.sessionId === activeSessionId,
-                ),
-              }),
-          permissions: permissionsForClientSnapshot(snapshot, activeSessionId),
-          runs: snapshot.runs.filter(
-            (run) => run.sessionId === activeSessionId,
+          contextWindowUsages: snapshot.contextWindowUsages.filter(
+            (usage) => usage.sessionId === activeSessionId,
           ),
-          sessions: snapshot.sessions.map((session) =>
-            session.id === activeSessionId
-              ? session
-              : { ...session, messages: [] },
-          ),
-          status: statusForClientSnapshot(snapshot, activeSessionId),
         }),
+    permissions: permissionsForClientSnapshot(snapshot, activeSessionId),
+    runs: snapshot.runs.filter((run) => run.sessionId === activeSessionId),
+    sessions: snapshot.sessions.map((session) =>
+      session.id === activeSessionId
+        ? session
+        : { ...session, messages: [] },
+    ),
+    status: statusForClientSnapshot(snapshot, activeSessionId),
     ...(view.initialPermission === undefined
       ? {}
       : {

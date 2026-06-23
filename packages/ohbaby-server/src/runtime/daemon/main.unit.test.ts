@@ -11,6 +11,7 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
 } {
   return {
     abortRun: vi.fn(() => Promise.resolve()),
+    archiveSession: vi.fn(() => Promise.resolve()),
     compactSession: vi.fn(() =>
       Promise.resolve({
         sessionId: "session_1",

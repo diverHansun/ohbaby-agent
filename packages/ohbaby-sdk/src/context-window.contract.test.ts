@@ -91,6 +91,9 @@ describe("context window UI contract", () => {
           },
         });
       },
+      archiveSession(): ReturnType<CoreAPI["archiveSession"]> {
+        return Promise.resolve();
+      },
       connectModel(): ReturnType<CoreAPI["connectModel"]> {
         return Promise.resolve({
           apiKeyEnv: "ZENMUX_API_KEY",

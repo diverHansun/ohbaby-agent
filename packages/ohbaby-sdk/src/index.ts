@@ -1,5 +1,6 @@
 export type {
   SubmitPromptOptions,
+  UiArchiveSessionInput,
   UiBackendClient,
   UiEventHandler,
   UiListCommandsQuery,

@@ -89,13 +89,13 @@ The server should not call `SessionManager.remove()`. It should update session s
 
 ## Backend Capability
 
-Extend the command/session provider used by `ui-inprocess`:
+Extend the SDK/CoreAPI backend contract:
 
 ```ts
-archiveSession?(sessionId: string): Promise<void> | void;
+archiveSession(input: { readonly sessionId: string }): Promise<void>;
 ```
 
-The implementation should:
+The in-process implementation should:
 
 - Require a valid primary session.
 - Call `sessionManager.update(sessionId, { status: "archived" })` when a session manager is present.
@@ -103,7 +103,7 @@ The implementation should:
 - Set `activeSessionId` to the newest remaining active session when archiving the current active session.
 - Set `activeSessionId` to `null` when no active sessions remain.
 
-This keeps Web REST, Web client, and in-process backend behavior aligned without exposing the feature through CLI slash commands.
+The daemon JSON-RPC adapter should forward the same method for remote clients. This keeps Web REST, Web client, remote daemon clients, and in-process backend behavior aligned without exposing the feature through CLI slash commands.
 
 ## Web Client
 

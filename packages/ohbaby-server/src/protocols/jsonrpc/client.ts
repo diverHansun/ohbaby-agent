@@ -185,6 +185,12 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("compactSession", [options]);
   }
 
+  archiveSession(
+    input: Parameters<UiBackendClient["archiveSession"]>[0],
+  ): ReturnType<UiBackendClient["archiveSession"]> {
+    return this.rpc("archiveSession", [input]);
+  }
+
   getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
     return this.rpc("getCurrentModel", []);
   }
@@ -473,6 +479,9 @@ export function createRemoteCoreApiHost(
       },
       compactSession(compactOptions): ReturnType<CoreAPI["compactSession"]> {
         return client.compactSession(compactOptions);
+      },
+      archiveSession(input): ReturnType<CoreAPI["archiveSession"]> {
+        return client.archiveSession(input);
       },
       probeModelContextWindow(
         input,

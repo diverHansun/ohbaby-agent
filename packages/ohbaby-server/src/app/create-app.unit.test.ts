@@ -118,6 +118,7 @@ function setSearchApiKeyResult(): UiSetSearchApiKeyResult {
 class FakeBackend implements UiBackendClient {
   readonly handlers = new Set<UiEventHandler>();
   readonly abortedRunIds: (string | undefined)[] = [];
+  readonly archivedSessions: string[] = [];
   readonly executedCommands: UiSlashCommandInvocation[] = [];
   readonly compactOptions: Parameters<UiBackendClient["compactSession"]>[0][] =
     [];
@@ -289,6 +290,11 @@ class FakeBackend implements UiBackendClient {
 
   abortRun(runId?: string): Promise<void> {
     this.abortedRunIds.push(runId);
+    return Promise.resolve();
+  }
+
+  archiveSession(input: { readonly sessionId: string }): Promise<void> {
+    this.archivedSessions.push(input.sessionId);
     return Promise.resolve();
   }
 }
@@ -1189,9 +1195,42 @@ describe("createDaemonServerApp", () => {
     }
   });
 
+  it("archives sessions for registered web clients through a dedicated REST route", async () => {
+    const backend = new FakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request(
+        "/v1/sessions/session_2/archive",
+        {
+          headers: {
+            ...authHeaders(),
+            "x-ohbaby-client-id": "client_web",
+          },
+          method: "PATCH",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(backend.archivedSessions).toEqual(["session_2"]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
   it.each([
     { method: "POST" as const, path: "/v1/sessions" },
     { method: "PATCH" as const, path: "/v1/sessions/session_2/select" },
+    { method: "PATCH" as const, path: "/v1/sessions/session_2/archive" },
   ])(
     "rejects unauthenticated $method session route requests",
     async (input) => {
@@ -1216,6 +1255,7 @@ describe("createDaemonServerApp", () => {
   it.each([
     { method: "POST" as const, path: "/v1/sessions" },
     { method: "PATCH" as const, path: "/v1/sessions/session_2/select" },
+    { method: "PATCH" as const, path: "/v1/sessions/session_2/archive" },
   ])(
     "requires a client id for $method session route requests",
     async (input) => {
@@ -1241,6 +1281,7 @@ describe("createDaemonServerApp", () => {
   it.each([
     { method: "POST" as const, path: "/v1/sessions" },
     { method: "PATCH" as const, path: "/v1/sessions/session_2/select" },
+    { method: "PATCH" as const, path: "/v1/sessions/session_2/archive" },
   ])(
     "rejects unregistered web clients for $method session route requests",
     async (input) => {

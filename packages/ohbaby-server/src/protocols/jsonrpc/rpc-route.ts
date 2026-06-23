@@ -186,6 +186,10 @@ export async function callDaemonBackend(input: {
       return backend.compactSession(
         request.params[0] as Parameters<UiBackendClient["compactSession"]>[0],
       );
+    case "archiveSession":
+      return backend.archiveSession(
+        request.params[0] as Parameters<UiBackendClient["archiveSession"]>[0],
+      );
     case "getCurrentModel":
       return backend.getCurrentModel();
     case "probeModelContextWindow":

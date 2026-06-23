@@ -114,6 +114,8 @@ async function waitFor(
 
 class FakeBackend implements UiBackendClient {
   readonly handlers = new Set<UiEventHandler>();
+  readonly archiveInputs: Parameters<UiBackendClient["archiveSession"]>[0][] =
+    [];
   readonly compactInputs: Parameters<UiBackendClient["compactSession"]>[0][] =
     [];
   readonly connectInputs: UiConnectModelInput[] = [];
@@ -224,6 +226,13 @@ class FakeBackend implements UiBackendClient {
   ): ReturnType<UiBackendClient["compactSession"]> {
     this.compactInputs.push(options);
     return Promise.resolve(compactResult());
+  }
+
+  archiveSession(
+    input: Parameters<UiBackendClient["archiveSession"]>[0],
+  ): ReturnType<UiBackendClient["archiveSession"]> {
+    this.archiveInputs.push(input);
+    return Promise.resolve();
   }
 
   getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {

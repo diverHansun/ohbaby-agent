@@ -73,6 +73,9 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
       compactSession(compactOptions): ReturnType<CoreAPI["compactSession"]> {
         return client.compactSession(compactOptions);
       },
+      archiveSession(input): ReturnType<CoreAPI["archiveSession"]> {
+        return client.archiveSession(input);
+      },
       probeModelContextWindow(
         input,
       ): ReturnType<CoreAPI["probeModelContextWindow"]> {
