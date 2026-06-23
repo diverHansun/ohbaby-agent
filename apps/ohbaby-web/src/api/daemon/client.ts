@@ -43,6 +43,7 @@ export interface OhbabyWebClient {
   ): Promise<UiCompactSessionResult>;
   connect(): Promise<void>;
   connectModel(input: ModelConnectRequest): Promise<UiConnectModelResult>;
+  createSession(): Promise<void>;
   executeSlashCommand(input: {
     readonly sessionId?: string;
     readonly text: string;
@@ -60,6 +61,7 @@ export interface OhbabyWebClient {
     requestId: string,
     response: UiPermissionResponse,
   ): Promise<void>;
+  selectSession(sessionId: string): Promise<void>;
   setPermission(input: SetPermissionRequest): Promise<void>;
   setSearchApiKey(input: SearchApiKeyRequest): Promise<UiSetSearchApiKeyResult>;
   submitPrompt(input: SubmitPromptRequest): Promise<void>;
@@ -191,6 +193,14 @@ class BrowserDaemonClient implements OhbabyWebClient {
       ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
       surface: "tui",
     } satisfies UiSlashCommandInvocation);
+  }
+
+  async createSession(): Promise<void> {
+    await this.http.createSession();
+  }
+
+  async selectSession(sessionId: string): Promise<void> {
+    await this.http.selectSession(sessionId);
   }
 
   async listCommands(): Promise<UiWebCommandCatalog> {

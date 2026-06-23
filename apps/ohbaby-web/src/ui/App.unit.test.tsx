@@ -33,6 +33,9 @@ interface FakeRuntime {
   readonly compactSession: ReturnType<
     typeof vi.fn<OhbabyWebClient["compactSession"]>
   >;
+  readonly createSession: ReturnType<
+    typeof vi.fn<OhbabyWebClient["createSession"]>
+  >;
   readonly executeSlashCommand: ReturnType<
     typeof vi.fn<OhbabyWebClient["executeSlashCommand"]>
   >;
@@ -43,6 +46,9 @@ interface FakeRuntime {
     typeof vi.fn<OhbabyWebClient["listCommands"]>
   >;
   readonly runtime: OhbabyWebRuntime;
+  readonly selectSession: ReturnType<
+    typeof vi.fn<OhbabyWebClient["selectSession"]>
+  >;
   readonly setPermission: ReturnType<
     typeof vi.fn<OhbabyWebClient["setPermission"]>
   >;
@@ -156,6 +162,35 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(fake.setPermission).toHaveBeenCalledWith({ level: "full-access" });
     expect(app.container.querySelector(".ohb-policy-menu")).toBeNull();
+  });
+
+  it("creates and selects sessions from the sidebar", async () => {
+    const first = snapshotWithStatus({ kind: "idle" }).sessions[0];
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: "session_1",
+        sessions: [
+          first,
+          {
+            createdAt: timestamp,
+            id: "session_2",
+            messages: [],
+            title: "Session 2",
+            updatedAt: "2026-06-13T00:00:00.000Z",
+          },
+        ],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.querySelector(".ohb-sidebar")).not.toBeNull();
+
+    await clickButton(app.container, "New session");
+    await clickButton(app.container, "Select Session 2");
+
+    expect(fake.createSession).toHaveBeenCalledTimes(1);
+    expect(fake.selectSession).toHaveBeenCalledWith("session_2");
   });
 
   it("opens the structured connect overlay from the slash palette", async () => {
@@ -293,6 +328,12 @@ function createFakeRuntime(input: {
   const executeSlashCommand = vi.fn<OhbabyWebClient["executeSlashCommand"]>(
     () => Promise.resolve(),
   );
+  const createSession = vi.fn<OhbabyWebClient["createSession"]>(() =>
+    Promise.resolve(),
+  );
+  const selectSession = vi.fn<OhbabyWebClient["selectSession"]>(() =>
+    Promise.resolve(),
+  );
   const connectModel = vi.fn<OhbabyWebClient["connectModel"]>(() =>
     Promise.resolve({
       apiKeyEnv: "ZHIPU_API_KEY",
@@ -335,6 +376,7 @@ function createFakeRuntime(input: {
     compactSession,
     connect: vi.fn(() => Promise.resolve()),
     connectModel,
+    createSession,
     executeSlashCommand,
     getContextWindowUsage: vi.fn(() =>
       Promise.resolve({
@@ -356,6 +398,7 @@ function createFakeRuntime(input: {
       }),
     ),
     respondPermission: vi.fn(() => Promise.resolve()),
+    selectSession,
     setPermission,
     setSearchApiKey,
     submitPrompt: vi.fn(() => Promise.resolve()),
@@ -363,14 +406,16 @@ function createFakeRuntime(input: {
   };
   return {
     compactSession,
-    executeSlashCommand,
     connectModel,
+    createSession,
+    executeSlashCommand,
     listCommands,
     runtime: {
       client,
       ready: Promise.resolve(),
       store,
     },
+    selectSession,
     setPermission,
     setSearchApiKey,
     store,

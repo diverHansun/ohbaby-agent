@@ -88,6 +88,21 @@ export class DaemonHttpClient {
     });
   }
 
+  createSession(): Promise<OkResponse> {
+    return this.request("/v1/sessions", {
+      method: "POST",
+    });
+  }
+
+  selectSession(sessionId: string): Promise<OkResponse> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/select`,
+      {
+        method: "PATCH",
+      },
+    );
+  }
+
   submitPrompt(input: SubmitPromptRequest): Promise<PromptAcceptedResponse> {
     return this.request("/v1/prompts", {
       body: input,

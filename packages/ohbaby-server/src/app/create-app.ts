@@ -262,6 +262,37 @@ function slashCommandInvocationFromBody(
   };
 }
 
+function sessionCommandInvocation(
+  command: "new" | "resume",
+  sessionId?: string,
+): UiSlashCommandInvocation {
+  if (command === "new") {
+    return {
+      argumentMode: "argv",
+      argv: ["--no-reuse-empty-session"],
+      clientInvocationId: `web_session_${randomUUID()}`,
+      commandId: "new",
+      path: ["new"],
+      raw: "/new --no-reuse-empty-session",
+      rawArgs: "--no-reuse-empty-session",
+      surface: "tui",
+    };
+  }
+  if (!sessionId) {
+    throw new Error("sessionId is required");
+  }
+  return {
+    argumentMode: "argv",
+    argv: ["--session_id", sessionId],
+    clientInvocationId: `web_session_${randomUUID()}`,
+    commandId: "resume",
+    path: ["resume"],
+    raw: `/resume --session_id ${sessionId}`,
+    rawArgs: `--session_id ${sessionId}`,
+    surface: "tui",
+  };
+}
+
 function modelConnectInputFromBody(
   value: Record<string, unknown>,
 ): Parameters<UiBackendClient["connectModel"]>[0] | undefined {
@@ -531,6 +562,16 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
           summary: "Submit a prompt",
         },
       },
+      "/v1/sessions": {
+        post: {
+          responses: {
+            "200": {
+              description: "Session creation command accepted",
+            },
+          },
+          summary: "Create a new session",
+        },
+      },
       "/v1/settings/search-api-key": {
         post: {
           responses: {
@@ -562,6 +603,16 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
             },
           },
           summary: "Compact a session",
+        },
+      },
+      "/v1/sessions/{id}/select": {
+        patch: {
+          responses: {
+            "200": {
+              description: "Session selection command accepted",
+            },
+          },
+          summary: "Select a session",
         },
       },
       "/v1/sessions/{id}/context-window": {
@@ -1009,6 +1060,52 @@ class DaemonServerAppRuntime {
           mutationErrorStatus(error),
         );
       }
+    });
+
+    this.app.post("/v1/sessions", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
+
+      await this.options.backend.executeCommand(
+        this.clientViews.prepareCommandInvocation(
+          clientId,
+          sessionCommandInvocation("new"),
+        ),
+      );
+      return context.json({ ok: true });
+    });
+
+    this.app.patch("/v1/sessions/:id/select", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.isRegisteredWebClient(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
+      const sessionId = asNonEmptyString(context.req.param("id"));
+      if (!sessionId) {
+        return context.json(webErrorBody("sessionId is required"), 400);
+      }
+
+      await this.options.backend.executeCommand(
+        this.clientViews.prepareCommandInvocation(
+          clientId,
+          sessionCommandInvocation("resume", sessionId),
+        ),
+      );
+      return context.json({ ok: true });
     });
 
     this.app.get("/v1/sessions/:id/context-window", async (context) => {

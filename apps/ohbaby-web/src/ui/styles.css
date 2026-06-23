@@ -109,6 +109,237 @@ textarea:disabled {
   position: relative;
 }
 
+.ohb-app-shell.ohb-app-main,
+.ohb-app-shell.ohb-app-empty {
+  align-items: stretch;
+  flex-direction: row;
+  justify-content: flex-start;
+}
+
+.ohb-app-content {
+  display: flex;
+  flex: 1;
+  min-height: 100vh;
+  min-width: 0;
+  position: relative;
+}
+
+.ohb-app-content-main {
+  background: #fafafa;
+  flex-direction: column;
+}
+
+.ohb-app-content-empty {
+  align-items: center;
+  background: #f8f9fb;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.ohb-sidebar {
+  background: #ffffff;
+  border-right: 1px solid #ececec;
+  color: #26282d;
+  display: flex;
+  flex: 0 0 264px;
+  flex-direction: column;
+  min-height: 100vh;
+  overflow: hidden;
+  width: 264px;
+  z-index: 35;
+}
+
+.ohb-sidebar-collapsed {
+  align-items: center;
+  flex-basis: 56px;
+  padding: 14px 8px;
+  width: 56px;
+}
+
+.ohb-sidebar-header {
+  align-items: center;
+  border-bottom: 1px solid #f1f1f1;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 58px;
+  padding: 14px 14px 14px 16px;
+}
+
+.ohb-sidebar-brand,
+.ohb-sidebar-mini-brand {
+  align-items: center;
+  display: flex;
+}
+
+.ohb-sidebar-brand {
+  gap: 10px;
+}
+
+.ohb-sidebar-brand strong {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.ohb-sidebar-mini-brand {
+  justify-content: center;
+  margin-bottom: 14px;
+  min-height: 30px;
+}
+
+.ohb-sidebar-icon-button,
+.ohb-sidebar-new {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.ohb-sidebar-icon-button {
+  background: #ffffff;
+  border: 1px solid #e4e4e4;
+  border-radius: 8px;
+  color: #8a8d94;
+  height: 32px;
+  width: 32px;
+}
+
+.ohb-sidebar-icon-button:hover,
+.ohb-sidebar-new:hover,
+.ohb-session-row:hover {
+  background: #f7f8fb;
+}
+
+.ohb-sidebar-new {
+  background: #f8f9fb;
+  border: 1px solid #e7e9ee;
+  border-radius: 9px;
+  color: #4f5968;
+  flex: none;
+  gap: 8px;
+  margin: 14px;
+  min-height: 38px;
+  padding: 0 12px;
+}
+
+.ohb-sidebar-new-icon {
+  margin-top: 8px;
+}
+
+.ohb-sidebar-section {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 4px 10px 10px;
+}
+
+.ohb-sidebar-section-title {
+  color: #a3a6ad;
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 8px 8px 7px;
+  text-transform: uppercase;
+}
+
+.ohb-sidebar-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.ohb-session-row {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  color: #54565c;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 7px minmax(0, 1fr) 16px;
+  min-height: 50px;
+  padding: 8px 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.ohb-session-row:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.ohb-session-active {
+  background: #f4f6fb;
+  color: #26282d;
+}
+
+.ohb-session-dot {
+  background: #c9cdd4;
+  border-radius: 50%;
+  height: 7px;
+  width: 7px;
+}
+
+.ohb-session-active .ohb-session-dot {
+  background: #5f86c4;
+}
+
+.ohb-session-running .ohb-session-dot {
+  animation: ohb-pulse 1.4s ease-in-out infinite;
+}
+
+.ohb-session-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ohb-session-copy strong,
+.ohb-session-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ohb-session-copy strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.ohb-session-copy small {
+  color: #a3a6ad;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.ohb-session-row svg {
+  color: #c3c7cf;
+}
+
+.ohb-sidebar-empty {
+  color: #a3a6ad;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  padding: 12px 8px;
+}
+
+.ohb-sidebar-footer {
+  align-items: center;
+  border-top: 1px solid #f1f1f1;
+  color: #a3a6ad;
+  display: flex;
+  flex: none;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
 .ohb-statusbar {
   align-items: center;
   background: #ffffff;
@@ -976,6 +1207,10 @@ textarea:disabled {
   z-index: 30;
 }
 
+.ohb-app-content-main > .ohb-composer {
+  position: absolute;
+}
+
 .ohb-composer-hero {
   margin-top: 36px;
   max-width: min(640px, 88vw);
@@ -1296,6 +1531,10 @@ textarea:disabled {
   z-index: 18;
 }
 
+.ohb-app-content-main .ohb-permission-layer {
+  position: absolute;
+}
+
 .ohb-permission-modal {
   align-items: center;
   animation: ohb-slide-up 160ms ease-out;
@@ -1417,6 +1656,31 @@ textarea:disabled {
 }
 
 @media (max-width: 720px) {
+  .ohb-app-shell.ohb-app-main,
+  .ohb-app-shell.ohb-app-empty {
+    position: relative;
+  }
+
+  .ohb-sidebar-collapsed {
+    flex-basis: 56px;
+    width: 56px;
+  }
+
+  .ohb-sidebar-collapsed + .ohb-app-content {
+    flex: 0 0 calc(100vw - 56px);
+    max-width: calc(100vw - 56px);
+    width: calc(100vw - 56px);
+  }
+
+  .ohb-sidebar:not(.ohb-sidebar-collapsed) {
+    bottom: 0;
+    box-shadow: 18px 0 44px rgba(30, 34, 44, 0.14);
+    left: 0;
+    position: absolute;
+    top: 0;
+    width: min(264px, 84vw);
+  }
+
   .ohb-statusbar {
     align-items: flex-start;
     gap: 14px;
@@ -1439,6 +1703,11 @@ textarea:disabled {
 
   .ohb-composer {
     padding: 14px 14px 18px;
+  }
+
+  .ohb-composer-hero {
+    max-width: 100%;
+    width: 100%;
   }
 
   .ohb-composer-input,
@@ -1492,7 +1761,40 @@ textarea:disabled {
   }
 
   .ohb-wordmark {
-    font-size: 56px;
+    align-self: center;
+    font-size: clamp(36px, 12vw, 50px);
+    max-width: 100%;
+  }
+
+  .ohb-empty-hero {
+    max-width: 100%;
+    padding: 0 14px;
+    width: 100%;
+  }
+
+  .ohb-empty-context {
+    font-size: 11px;
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .ohb-app-content-empty {
+    align-items: stretch;
+  }
+
+  .ohb-empty-hero {
+    align-items: stretch;
+  }
+
+  .ohb-wordmark {
+    align-self: flex-start;
+  }
+
+  .ohb-empty-context {
+    justify-content: flex-start;
+    overflow: hidden;
+    white-space: nowrap;
   }
 }
 

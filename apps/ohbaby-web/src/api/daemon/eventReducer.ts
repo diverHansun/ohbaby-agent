@@ -42,16 +42,10 @@ export function reduceUiEvent(
     return replaceSnapshot(event.snapshot, seqNum);
   }
   const commandNotices = applyCommandEvent(state.commandNotices, event);
-  if (commandNotices !== state.commandNotices) {
-    return {
-      ...state,
-      commandNotices,
-      lastAppliedSeqNum: seqNum,
-    };
-  }
   if (event.type === "command.catalog.updated") {
     return {
       ...state,
+      commandNotices,
       commandCatalogVersion: event.version,
       lastAppliedSeqNum: seqNum,
     };
@@ -60,12 +54,13 @@ export function reduceUiEvent(
   if (!snapshot) {
     return {
       ...state,
+      commandNotices,
       lastAppliedSeqNum: seqNum,
     };
   }
   return {
     commandCatalogVersion: state.commandCatalogVersion,
-    commandNotices: state.commandNotices,
+    commandNotices,
     lastAppliedSeqNum: seqNum,
     snapshot: applyEventToSnapshot(snapshot, event),
   };
@@ -260,6 +255,14 @@ function asStringArray(value: unknown): readonly string[] {
     : [];
 }
 
+function asNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function asUnknownArray(value: unknown): readonly unknown[] {
   return Array.isArray(value) ? value : [];
 }
@@ -337,14 +340,29 @@ function applyEventToSnapshot(
       };
     case "notice.emitted":
     case "command.started":
-    case "command.result.delivered":
     case "command.failed":
     case "command.catalog.updated":
     case "interaction.requested":
     case "interaction.resolved":
       return snapshot;
+    case "command.result.delivered":
+      return applyCommandResultToSnapshot(snapshot, event);
   }
   return snapshot;
+}
+
+function applyCommandResultToSnapshot(
+  snapshot: UiSnapshot,
+  event: Extract<UiEvent, { type: "command.result.delivered" }>,
+): UiSnapshot {
+  if (event.action?.kind !== "session.selected") {
+    return snapshot;
+  }
+  const actionData = isRecord(event.action.data) ? event.action.data : {};
+  const choiceId = asNonEmptyString(actionData.choiceId);
+  return choiceId === undefined
+    ? snapshot
+    : { ...snapshot, activeSessionId: choiceId };
 }
 
 function finalizeMessage(

@@ -1,4 +1,15 @@
-import { Bot, ChevronDown, Send, Square, User, X } from "lucide-react";
+import {
+  Bot,
+  ChevronDown,
+  MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Send,
+  Square,
+  User,
+  X,
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -23,6 +34,7 @@ import type {
   UiPermissionRequest,
   UiProbeModelContextWindowResult,
   UiSetSearchApiKeyResult,
+  UiSession,
   UiWebCommandCatalog,
 } from "ohbaby-sdk";
 import type {
@@ -140,6 +152,18 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
       ),
     [runAction, runtime.client, view.composer.activeSessionId],
   );
+  const createSession = useCallback((): void => {
+    void runAction(() => runtime.client.createSession());
+  }, [runAction, runtime.client]);
+  const selectSession = useCallback(
+    (sessionId: string): void => {
+      if (sessionId === view.activeSession?.id) {
+        return;
+      }
+      void runAction(() => runtime.client.selectSession(sessionId));
+    },
+    [runAction, runtime.client, view.activeSession?.id],
+  );
   const listCommands = useCallback(
     () => runtime.client.listCommands(),
     [runtime.client],
@@ -165,88 +189,101 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
 
   return (
     <main
-      className={showMain ? "ohb-app ohb-app-main" : "ohb-app ohb-app-empty"}
+      className={`ohb-app ohb-app-shell ${
+        showMain ? "ohb-app-main" : "ohb-app-empty"
+      }`}
     >
-      {showMain ? (
-        <>
-          <StatusBar header={view.header} />
-          <ErrorBanner
-            message={actionError ?? view.error}
-            onDismiss={clearActionError}
-          />
-          <ConversationStream view={view} />
-          <PermissionModal
-            disabled={view.composer.disabled}
-            onRespond={(request, choice) => {
-              void runAction(() =>
-                runtime.client.respondPermission(request.id, {
-                  choiceId: choice.id,
-                }),
-              );
-            }}
-            permissions={view.pendingPermissions}
-          />
-          <Composer
-            onListCommands={listCommands}
-            onSetPermission={(input) => {
-              void runAction(() => runtime.client.setPermission(input));
-            }}
-            onStructuredCommand={openStructuredCommand}
-            onSubmit={submitText}
-            onStop={() => {
-              void runAction(() =>
-                view.composer.activeSessionId === undefined
-                  ? Promise.resolve()
-                  : runtime.client.abortSession(
-                      view.composer.activeSessionId,
-                      view.composer.activeRunId,
-                    ),
-              );
-            }}
-            view={view}
-          />
-          {commandModalNotice ? (
-            <CommandResultModal
-              header={view.header}
-              notice={commandModalNotice}
-              onClose={() => {
-                setClosedCommandModalIds((ids) => [
-                  ...ids,
-                  commandModalNotice.id,
-                ]);
+      <SessionSidebar
+        onCreateSession={createSession}
+        onSelectSession={selectSession}
+        view={view}
+      />
+      <div
+        className={`ohb-app-content ${
+          showMain ? "ohb-app-content-main" : "ohb-app-content-empty"
+        }`}
+      >
+        {showMain ? (
+          <>
+            <StatusBar header={view.header} />
+            <ErrorBanner
+              message={actionError ?? view.error}
+              onDismiss={clearActionError}
+            />
+            <ConversationStream view={view} />
+            <PermissionModal
+              disabled={view.composer.disabled}
+              onRespond={(request, choice) => {
+                void runAction(() =>
+                  runtime.client.respondPermission(request.id, {
+                    choiceId: choice.id,
+                  }),
+                );
+              }}
+              permissions={view.pendingPermissions}
+            />
+            <Composer
+              onListCommands={listCommands}
+              onSetPermission={(input) => {
+                void runAction(() => runtime.client.setPermission(input));
+              }}
+              onStructuredCommand={openStructuredCommand}
+              onSubmit={submitText}
+              onStop={() => {
+                void runAction(() =>
+                  view.composer.activeSessionId === undefined
+                    ? Promise.resolve()
+                    : runtime.client.abortSession(
+                        view.composer.activeSessionId,
+                        view.composer.activeRunId,
+                      ),
+                );
               }}
               view={view}
             />
-          ) : null}
-        </>
-      ) : (
-        <>
-          <ErrorBanner
-            message={actionError ?? view.error}
-            onDismiss={clearActionError}
-          />
-          <EmptyState
-            onListCommands={listCommands}
-            onSetPermission={(input) => {
-              void runAction(() => runtime.client.setPermission(input));
+            {commandModalNotice ? (
+              <CommandResultModal
+                header={view.header}
+                notice={commandModalNotice}
+                onClose={() => {
+                  setClosedCommandModalIds((ids) => [
+                    ...ids,
+                    commandModalNotice.id,
+                  ]);
+                }}
+                view={view}
+              />
+            ) : null}
+          </>
+        ) : (
+          <>
+            <ErrorBanner
+              message={actionError ?? view.error}
+              onDismiss={clearActionError}
+            />
+            <EmptyState
+              onListCommands={listCommands}
+              onSetPermission={(input) => {
+                void runAction(() => runtime.client.setPermission(input));
+              }}
+              onStructuredCommand={openStructuredCommand}
+              onSubmit={submitText}
+              status={view.header}
+              view={view}
+            />
+          </>
+        )}
+        {structuredOverlay ? (
+          <StructuredCommandOverlay
+            client={runtime.client}
+            onClose={() => {
+              setStructuredOverlay(null);
             }}
-            onStructuredCommand={openStructuredCommand}
-            onSubmit={submitText}
-            status={view.header}
+            overlay={structuredOverlay}
             view={view}
           />
-        </>
-      )}
-      {structuredOverlay ? (
-        <StructuredCommandOverlay
-          client={runtime.client}
-          onClose={() => {
-            setStructuredOverlay(null);
-          }}
-          overlay={structuredOverlay}
-          view={view}
-        />
-      ) : null}
+        ) : null}
+      </div>
     </main>
   );
 }
@@ -307,6 +344,130 @@ function EmptyState(props: {
         />
       </section>
     </>
+  );
+}
+
+function SessionSidebar(props: {
+  readonly onCreateSession: () => void;
+  readonly onSelectSession: (sessionId: string) => void;
+  readonly view: ViewModel;
+}): ReactElement {
+  const [collapsed, setCollapsed] = useState(isNarrowViewport());
+  const sessions = useMemo(
+    () => sortedSessions(props.view.snapshot?.sessions ?? []),
+    [props.view.snapshot?.sessions],
+  );
+  const activeSessionId = props.view.activeSession?.id;
+
+  if (collapsed) {
+    return (
+      <aside className="ohb-sidebar ohb-sidebar-collapsed">
+        <div className="ohb-sidebar-mini-brand" aria-label="ohbaby">
+          <span className="ohb-logo-grid" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <span />
+          </span>
+        </div>
+        <button
+          className="ohb-sidebar-icon-button"
+          onClick={() => {
+            setCollapsed(false);
+          }}
+          title="Expand sidebar"
+          type="button"
+        >
+          <PanelLeftOpen size={16} />
+        </button>
+        <button
+          className="ohb-sidebar-icon-button ohb-sidebar-new-icon"
+          disabled={props.view.composer.disabled}
+          onClick={props.onCreateSession}
+          title="New session"
+          type="button"
+        >
+          <Plus size={17} />
+        </button>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="ohb-sidebar">
+      <header className="ohb-sidebar-header">
+        <div className="ohb-sidebar-brand" aria-label="ohbaby">
+          <span className="ohb-logo-grid" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <span />
+          </span>
+          <strong>OHBABY</strong>
+        </div>
+        <button
+          className="ohb-sidebar-icon-button"
+          onClick={() => {
+            setCollapsed(true);
+          }}
+          title="Collapse sidebar"
+          type="button"
+        >
+          <PanelLeftClose size={16} />
+        </button>
+      </header>
+      <button
+        className="ohb-sidebar-new"
+        disabled={props.view.composer.disabled}
+        onClick={props.onCreateSession}
+        title="New session"
+        type="button"
+      >
+        <Plus size={15} />
+        <span>New session</span>
+      </button>
+      <section className="ohb-sidebar-section">
+        <div className="ohb-sidebar-section-title">Recent sessions</div>
+        <div className="ohb-sidebar-list">
+          {sessions.length > 0 ? (
+            sessions.map((session) => {
+              const active = session.id === activeSessionId;
+              const running = active && props.view.composer.isRunning;
+              const title = sessionTitle(session);
+              return (
+                <button
+                  className={`ohb-session-row ${
+                    active ? "ohb-session-active" : ""
+                  } ${running ? "ohb-session-running" : ""}`}
+                  aria-current={active ? "page" : undefined}
+                  disabled={props.view.composer.disabled}
+                  key={session.id}
+                  onClick={() => {
+                    if (!active) {
+                      props.onSelectSession(session.id);
+                    }
+                  }}
+                  title={`Select ${title}`}
+                  type="button"
+                >
+                  <span className="ohb-session-dot" />
+                  <span className="ohb-session-copy">
+                    <strong>{title}</strong>
+                    <small>{sessionMeta(session)}</small>
+                  </span>
+                  <MessageSquare size={14} />
+                </button>
+              );
+            })
+          ) : (
+            <div className="ohb-sidebar-empty">No sessions yet</div>
+          )}
+        </div>
+      </section>
+      <footer className="ohb-sidebar-footer">
+        <span>{String(sessions.length)} sessions</span>
+      </footer>
+    </aside>
   );
 }
 
@@ -1585,7 +1746,9 @@ function compactFailureMessage(result: UiCompactSessionResult): string | null {
     return null;
   }
   const error = result.error ?? result.compression?.error;
-  return error ? `compact ${result.status}: ${error}` : `compact ${result.status}`;
+  return error
+    ? `compact ${result.status}: ${error}`
+    : `compact ${result.status}`;
 }
 
 function TextField(props: {
@@ -1743,6 +1906,41 @@ function structuredOverlayTitle(kind: StructuredOverlayKind): string {
 
 function formatTokenCount(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
+}
+
+function sortedSessions(sessions: readonly UiSession[]): readonly UiSession[] {
+  return [...sessions].sort(
+    (left, right) =>
+      Date.parse(right.updatedAt) - Date.parse(left.updatedAt) ||
+      left.id.localeCompare(right.id),
+  );
+}
+
+function isNarrowViewport(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(max-width: 720px)").matches
+  );
+}
+
+function sessionTitle(session: UiSession): string {
+  const trimmed = session.title.trim();
+  return trimmed.length > 0 ? trimmed : "Untitled session";
+}
+
+function sessionMeta(session: UiSession): string {
+  const messageCount = session.messages.length;
+  const date = new Date(session.updatedAt);
+  const dateLabel = Number.isNaN(date.getTime())
+    ? "recent"
+    : new Intl.DateTimeFormat("en-US", {
+        day: "2-digit",
+        month: "short",
+      }).format(date);
+  return `${String(messageCount)} ${
+    messageCount === 1 ? "message" : "messages"
+  } · ${dateLabel}`;
 }
 
 function SlashPalette(props: {

@@ -520,6 +520,8 @@ describe("createDaemonServerApp", () => {
           "/v1/commands",
           "/v1/events",
           "/v1/prompts",
+          "/v1/sessions",
+          "/v1/sessions/{id}/select",
           "/v1/snapshot",
         ]),
       );
@@ -1038,6 +1040,172 @@ describe("createDaemonServerApp", () => {
       await handle.dispose();
     }
   });
+
+  it("creates sessions for registered web clients through a dedicated REST route", async () => {
+    const backend = new FakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request("/v1/sessions", {
+        headers: {
+          ...authHeaders(),
+          "x-ohbaby-client-id": "client_web",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(backend.executedCommands[0]?.clientInvocationId).toMatch(
+        /^web_session_/,
+      );
+      expect(backend.executedCommands).toEqual([
+        {
+          argumentMode: "argv",
+          argv: ["--no-reuse-empty-session"],
+          clientInvocationId: backend.executedCommands[0]?.clientInvocationId,
+          commandId: "new",
+          path: ["new"],
+          raw: "/new --no-reuse-empty-session",
+          rawArgs: "--no-reuse-empty-session",
+          surface: "tui",
+        },
+      ]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("selects sessions for registered web clients through a dedicated REST route", async () => {
+    const backend = new FakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request(
+        "/v1/sessions/session_2/select",
+        {
+          headers: {
+            ...authHeaders(),
+            "x-ohbaby-client-id": "client_web",
+          },
+          method: "PATCH",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(backend.executedCommands[0]?.clientInvocationId).toMatch(
+        /^web_session_/,
+      );
+      expect(backend.executedCommands).toEqual([
+        {
+          argumentMode: "argv",
+          argv: ["--session_id", "session_2"],
+          clientInvocationId: backend.executedCommands[0]?.clientInvocationId,
+          commandId: "resume",
+          path: ["resume"],
+          raw: "/resume --session_id session_2",
+          rawArgs: "--session_id session_2",
+          surface: "tui",
+        },
+      ]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it.each([
+    { method: "POST" as const, path: "/v1/sessions" },
+    { method: "PATCH" as const, path: "/v1/sessions/session_2/select" },
+  ])(
+    "rejects unauthenticated $method session route requests",
+    async (input) => {
+      const handle = createApp();
+      await handle.start();
+      try {
+        const response = await handle.app.request(input.path, {
+          method: input.method,
+        });
+
+        expect(response.status).toBe(401);
+        await expect(response.json()).resolves.toEqual({
+          error: { message: "Unauthorized" },
+          ok: false,
+        });
+      } finally {
+        await handle.dispose();
+      }
+    },
+  );
+
+  it.each([
+    { method: "POST" as const, path: "/v1/sessions" },
+    { method: "PATCH" as const, path: "/v1/sessions/session_2/select" },
+  ])(
+    "requires a client id for $method session route requests",
+    async (input) => {
+      const handle = createApp();
+      await handle.start();
+      try {
+        const response = await handle.app.request(input.path, {
+          headers: authHeaders(),
+          method: input.method,
+        });
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toEqual({
+          error: { message: "clientId is required" },
+          ok: false,
+        });
+      } finally {
+        await handle.dispose();
+      }
+    },
+  );
+
+  it.each([
+    { method: "POST" as const, path: "/v1/sessions" },
+    { method: "PATCH" as const, path: "/v1/sessions/session_2/select" },
+  ])(
+    "rejects unregistered web clients for $method session route requests",
+    async (input) => {
+      const handle = createApp();
+      await handle.start();
+      try {
+        const response = await handle.app.request(input.path, {
+          headers: {
+            ...authHeaders(),
+            "x-ohbaby-client-id": "client_unknown",
+          },
+          method: input.method,
+        });
+
+        expect(response.status).toBe(409);
+        await expect(response.json()).resolves.toEqual({
+          error: { message: "client is not registered" },
+          ok: false,
+        });
+      } finally {
+        await handle.dispose();
+      }
+    },
+  );
 
   it("rejects invalid slash command invocations", async () => {
     const handle = createApp();

@@ -192,6 +192,36 @@ describe("ohbaby-web eventReducer", () => {
     });
   });
 
+  it("records command notices even if no snapshot has loaded yet", () => {
+    const state = reduceUiEvent(
+      createInitialViewState(),
+      {
+        command: {
+          clientInvocationId: "invoke_status",
+          commandId: "status",
+          commandRunId: "command_1",
+          path: ["status"],
+          surface: "tui",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.started",
+      },
+      1,
+    );
+
+    expect(state).toMatchObject({
+      commandNotices: [
+        {
+          commandId: "status",
+          id: "command_1",
+          kind: "running",
+        },
+      ],
+      lastAppliedSeqNum: 1,
+      snapshot: null,
+    });
+  });
+
   it("projects slash command lifecycle events into command notices", () => {
     let state = replaceSnapshot(emptySnapshot(), 0);
 
@@ -253,6 +283,54 @@ describe("ohbaby-web eventReducer", () => {
           subject: "status",
         },
         text: "status\nsession: session_1\npermission: auto · default",
+      },
+    ]);
+  });
+
+  it("switches active session when a command result selects a session", () => {
+    let state = replaceSnapshot(
+      {
+        ...emptySnapshot(),
+        activeSessionId: "session_1",
+        sessions: [
+          ...emptySnapshot().sessions,
+          {
+            createdAt: timestamp,
+            id: "session_2",
+            messages: [],
+            title: "Session 2",
+            updatedAt: timestamp,
+          },
+        ],
+      },
+      0,
+    );
+
+    state = reduceUiEvent(
+      state,
+      {
+        action: {
+          data: { choiceId: "session_2" },
+          kind: "session.selected",
+        },
+        clientInvocationId: "invoke_new",
+        commandRunId: "command_new",
+        output: {
+          data: { sessionId: "session_2" },
+          kind: "data",
+          subject: "session.current",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.result.delivered",
+      },
+      1,
+    );
+
+    expect(state.snapshot?.activeSessionId).toBe("session_2");
+    expect(state.commandNotices).toMatchObject([
+      {
+        id: "command_new",
+        kind: "success",
       },
     ]);
   });

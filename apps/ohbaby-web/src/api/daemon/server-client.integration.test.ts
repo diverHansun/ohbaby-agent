@@ -226,9 +226,7 @@ class FakeBackend implements UiBackendClient {
 
   probeModelContextWindow(
     input: UiProbeModelContextWindowInput,
-  ): ReturnType<
-    UiBackendClient["probeModelContextWindow"]
-  > {
+  ): ReturnType<UiBackendClient["probeModelContextWindow"]> {
     this.probeInputs.push(input);
     return Promise.resolve({
       contextWindowSource: "default",
@@ -505,6 +503,61 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
         { force: true, sessionId: "session_1" },
       ]);
       expect(backend.executedCommands).toHaveLength(0);
+      await runtime.client.close();
+    } finally {
+      await server.dispose();
+    }
+  });
+
+  it("creates and selects sessions through dedicated REST routes", async () => {
+    const backend = new FakeBackend();
+    const server = createDaemonServerApp({
+      authToken,
+      backend,
+      createSessionId: () => "session_generated",
+      packageVersion: "0.1.6-test",
+    });
+    await server.start();
+    try {
+      const fetchImpl: typeof fetch = (input, init = {}) => {
+        const url = new URL(urlFromRequestInput(input));
+        return Promise.resolve(
+          server.app.request(`${url.pathname}${url.search}`, {
+            body: init.body,
+            headers: init.headers,
+            method: init.method,
+            signal: init.signal,
+          }),
+        );
+      };
+      const config: OhbabyBootstrapConfig = {
+        baseUrl: "http://127.0.0.1:4096",
+        clientId: "client_web",
+        startupIntent: { startupSessionMode: { type: "fresh" } },
+        token: authToken,
+      };
+      const runtime = createOhbabyWebRuntime(config, { fetch: fetchImpl });
+      await runtime.ready;
+
+      await runtime.client.createSession();
+      await runtime.client.selectSession("session_2");
+
+      expect(backend.executedCommands).toEqual([
+        expect.objectContaining({
+          argv: ["--no-reuse-empty-session"],
+          commandId: "new",
+          path: ["new"],
+          raw: "/new --no-reuse-empty-session",
+          rawArgs: "--no-reuse-empty-session",
+        }),
+        expect.objectContaining({
+          argv: ["--session_id", "session_2"],
+          commandId: "resume",
+          path: ["resume"],
+          raw: "/resume --session_id session_2",
+          rawArgs: "--session_id session_2",
+        }),
+      ]);
       await runtime.client.close();
     } finally {
       await server.dispose();
