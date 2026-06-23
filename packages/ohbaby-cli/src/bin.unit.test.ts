@@ -2,6 +2,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import type { CliCommandRuntime } from "./cli/commands/types.js";
 
 describe("runOhbabyCli", () => {
   it("recognizes npm symlinked bin entrypoints on Unix-like platforms", async () => {
@@ -676,7 +677,7 @@ describe("runOhbabyCli", () => {
     vi.resetModules();
     const stdout: string[] = [];
     const openUrl = vi.fn(() => Promise.resolve());
-    const startDaemonServer = vi.fn(() =>
+    const startDaemonServer = vi.fn<CliCommandRuntime["startDaemonServer"]>(() =>
       Promise.resolve({
         host: "127.0.0.1",
         port: 4096,
@@ -710,10 +711,12 @@ describe("runOhbabyCli", () => {
         { openUrl },
       ),
     ).resolves.toBe(0);
-    expect(startDaemonServer).toHaveBeenCalledWith({
+    const serveOptions = startDaemonServer.mock.calls.at(0)?.[0];
+    expect(serveOptions).toMatchObject({
       host: "127.0.0.1",
       port: 4096,
     });
+    expect(serveOptions?.webAssetsDir).toMatch(/dist\/web$/u);
     expect(stdout.join("")).toBe("ohbaby web ready: http://127.0.0.1:4096\n");
     expect(openUrl).toHaveBeenCalledWith("http://127.0.0.1:4096");
   });

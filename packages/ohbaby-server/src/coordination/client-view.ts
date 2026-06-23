@@ -10,6 +10,7 @@ import type { DaemonPromptQueueItem } from "./prompt-queue.js";
 interface ClientView {
   activeSessionId?: string | null;
   readonly initialPermission?: DaemonStartupIntent["initialPermission"];
+  pendingSessionId?: string;
 }
 
 export interface PreparedPromptSubmit {
@@ -138,6 +139,7 @@ function projectSnapshotForClient(
   const activeSessionId =
     view.activeSessionId !== undefined &&
     (view.activeSessionId === null ||
+      view.activeSessionId === view.pendingSessionId ||
       snapshot.sessions.some((session) => session.id === view.activeSessionId))
       ? view.activeSessionId
       : snapshot.activeSessionId;
@@ -272,6 +274,7 @@ export class DaemonClientViewCoordinator {
       const sessionId = createSessionId();
       submitOptions = { ...options, sessionId };
       view.activeSessionId = sessionId;
+      view.pendingSessionId = sessionId;
     }
     return {
       ...(submitOptions === undefined ? {} : { options: submitOptions }),
@@ -311,6 +314,11 @@ export class DaemonClientViewCoordinator {
   observeEvent(event: UiEvent): void {
     switch (event.type) {
       case "session.updated":
+        for (const view of this.clientViews.values()) {
+          if (view.pendingSessionId === event.session.id) {
+            view.pendingSessionId = undefined;
+          }
+        }
         return;
       case "command.started": {
         const owner = this.commandOwnersByInvocationId.get(
@@ -541,5 +549,6 @@ export class DaemonClientViewCoordinator {
       return;
     }
     view.activeSessionId = sessionId;
+    view.pendingSessionId = undefined;
   }
 }
