@@ -19,6 +19,10 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return typeof error === "object" && error !== null && "code" in error;
 }
 
+export function isAddressInUseError(error: unknown): boolean {
+  return isNodeError(error) && error.code === "EADDRINUSE";
+}
+
 export async function listenToNodeServer(
   options: NodeListenOptions,
 ): Promise<NodeListenHandle> {

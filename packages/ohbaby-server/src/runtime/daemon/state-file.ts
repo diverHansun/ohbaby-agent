@@ -34,16 +34,30 @@ function parseDaemonState(raw: string): DaemonState | undefined {
   }
 
   return {
+    ...(typeof parsed.authToken === "string"
+      ? { authToken: parsed.authToken }
+      : {}),
+    ...(typeof parsed.error === "string" ? { error: parsed.error } : {}),
+    ...(typeof parsed.host === "string" ? { host: parsed.host } : {}),
+    ...(typeof parsed.idleSince === "number"
+      ? { idleSince: parsed.idleSince }
+      : {}),
+    ...(typeof parsed.packageVersion === "string"
+      ? { packageVersion: parsed.packageVersion }
+      : {}),
+    ...(typeof parsed.pid === "number" ? { pid: parsed.pid } : {}),
+    ...(typeof parsed.pidToken === "string"
+      ? { pidToken: parsed.pidToken }
+      : {}),
+    ...(typeof parsed.port === "number" ? { port: parsed.port } : {}),
+    ...(typeof parsed.scopeRoot === "string" && parsed.scopeRoot.length > 0
+      ? { scopeRoot: parsed.scopeRoot }
+      : {}),
+    ...(typeof parsed.startedAt === "number"
+      ? { startedAt: parsed.startedAt }
+      : {}),
     status: parsed.status,
-    pid: parsed.pid,
-    startedAt: parsed.startedAt,
     updatedAt: parsed.updatedAt,
-    error: parsed.error,
-    host: parsed.host,
-    port: parsed.port,
-    packageVersion: parsed.packageVersion,
-    authToken: parsed.authToken,
-    idleSince: parsed.idleSince,
   };
 }
 

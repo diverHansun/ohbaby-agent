@@ -521,6 +521,55 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 
+  it("keeps simultaneous project roots isolated while sharing one sqlite database", async () => {
+    const directory = await tempDir("ohbaby-persistent-sqlite-scope-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const projectA = join(directory, "project-a");
+      const projectB = join(directory, "project-b");
+      await mkdir(projectA, { recursive: true });
+      await mkdir(projectB, { recursive: true });
+      const clientA = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Project A response", finishReason: "stop" },
+        ]),
+        now: () => new Date(1_000),
+        workdir: projectA,
+      });
+      const clientB = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Project B response", finishReason: "stop" },
+        ]),
+        now: () => new Date(2_000),
+        workdir: projectB,
+      });
+
+      await clientA.submitPrompt("Prompt for project A");
+      await clientB.submitPrompt("Prompt for project B");
+
+      const snapshotA = await clientA.getSnapshot();
+      const snapshotB = await clientB.getSnapshot();
+      const serializedA = JSON.stringify(snapshotA);
+      const serializedB = JSON.stringify(snapshotB);
+
+      expect(snapshotA.activeSessionId).toBeTruthy();
+      expect(snapshotB.activeSessionId).toBeTruthy();
+      expect(snapshotA.activeSessionId).not.toBe(snapshotB.activeSessionId);
+      expect(serializedA).toContain("Prompt for project A");
+      expect(serializedA).not.toContain("Prompt for project B");
+      expect(serializedB).toContain("Prompt for project B");
+      expect(serializedB).not.toContain("Prompt for project A");
+
+      await clientA.dispose();
+      await clientB.dispose();
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("selects the latest primary session for explicit continue startup", async () => {
     const directory = await tempDir("ohbaby-persistent-continue-");
     try {

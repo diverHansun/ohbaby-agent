@@ -1,3 +1,5 @@
+import { dirname, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ArgumentsCamelCase, Argv, CommandModule } from "yargs";
 import type { CliCommandRuntime, CliGlobalOptions } from "./types.js";
 
@@ -12,11 +14,28 @@ interface ServeArgs extends CliGlobalOptions {
   readonly webAssetsDir?: string;
 }
 
+export function resolveBundledWebAssetsDir(
+  moduleUrl = import.meta.url,
+): string {
+  const moduleDir = dirname(fileURLToPath(moduleUrl));
+  const pathParts = moduleDir.split(sep);
+  const distIndex = pathParts.lastIndexOf("dist");
+  if (distIndex >= 0) {
+    return resolve(pathParts.slice(0, distIndex + 1).join(sep), "web");
+  }
+  return resolve(moduleDir, "../../..", "dist", "web");
+}
+
+const BUNDLED_WEB_ASSETS_DIR = resolveBundledWebAssetsDir();
+
 function normalizePort(
   port: ServeArgs["port"],
   runtime: CliCommandRuntime,
-): number {
-  const value = port ?? 4096;
+): number | undefined {
+  if (port === undefined) {
+    return undefined;
+  }
+  const value = port;
   if (!Number.isInteger(value) || value < 0 || value > 65_535) {
     runtime.failUsage("--port must be a TCP port between 0 and 65535");
   }
@@ -37,6 +56,10 @@ function isLoopbackHost(host: string): boolean {
   );
 }
 
+function defaultWebAssetsDirForHost(host: string): string | undefined {
+  return isLoopbackHost(host) ? BUNDLED_WEB_ASSETS_DIR : undefined;
+}
+
 function formatStatus(
   state: Awaited<ReturnType<CliCommandRuntime["readDaemonStatus"]>>,
 ): string {
@@ -44,7 +67,11 @@ function formatStatus(
     return "daemon status: not-running\n";
   }
   const pid = state.pid === undefined ? "" : ` pid=${String(state.pid)}`;
-  return `daemon status: ${state.status}${pid} updatedAt=${String(
+  const url =
+    state.host === undefined || state.port === undefined
+      ? ""
+      : ` url=http://${state.host}:${String(state.port)}`;
+  return `daemon status: ${state.status}${pid}${url} updatedAt=${String(
     state.updatedAt,
   )}\n`;
 }
@@ -62,7 +89,6 @@ export function createServeCommand(
           type: "string",
         })
         .option("port", {
-          default: 4096,
           describe: "daemon HTTP port",
           type: "number",
         })
@@ -105,16 +131,24 @@ export function createServeCommand(
         );
       }
 
+      const port = normalizePort(args.port, runtime);
+      const webAssetsDir =
+        args.webAssetsDir ?? defaultWebAssetsDirForHost(host);
       const server = await runtime.startDaemonServer({
         ...(args.authToken === undefined ? {} : { authToken: args.authToken }),
         ...(args.dbPath === undefined ? {} : { dbPath: args.dbPath }),
-        ...(args.webAssetsDir === undefined
-          ? {}
-          : { webAssetsDir: args.webAssetsDir }),
+        ...(webAssetsDir === undefined ? {} : { webAssetsDir }),
         host,
-        port: normalizePort(args.port, runtime),
+        ...(port === undefined ? {} : { port }),
       });
-      runtime.stdout.write(`daemon listening on ${server.url}\n`);
+      runtime.stdout.write(`ohbaby web ready: ${server.url}\n`);
+      try {
+        await runtime.openUrl(server.url);
+      } catch {
+        runtime.stderr.write(
+          `Could not open browser automatically. Open ${server.url} manually.\n`,
+        );
+      }
     },
   };
 }

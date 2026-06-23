@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
+import { spawn } from "node:child_process";
 import type { Readable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { CoreAPI } from "ohbaby-sdk";
@@ -62,6 +63,7 @@ export interface RunOhbabyCliIo {
 export interface RunOhbabyCliDependencies {
   readonly createCoreHost?: (options: CliGlobalOptions) => CliCoreHostResult;
   readonly loadRuntimeEnvIntoProcessEnv?: () => Promise<void> | void;
+  readonly openUrl?: CliCommandRuntime["openUrl"];
   readonly readDaemonStatus?: CliCommandRuntime["readDaemonStatus"];
   readonly startDaemonServer?: CliCommandRuntime["startDaemonServer"];
   readonly stopDaemonFromState?: CliCommandRuntime["stopDaemonFromState"];
@@ -131,6 +133,28 @@ function optionalRuntimeExport(
 
 function missingRuntimeDependency(name: string): never {
   throw new Error(`CLI runtime dependency ${name} was not initialized`);
+}
+
+async function openUrlWithSystemBrowser(url: string): Promise<void> {
+  const command =
+    process.platform === "darwin"
+      ? "open"
+      : process.platform === "win32"
+        ? "cmd"
+        : "xdg-open";
+  const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
 }
 
 function assertStartupOptions(options: CliGlobalOptions): void {
@@ -283,6 +307,7 @@ export async function runOhbabyCli(
     defaultDependencies?.stopDaemonFromState ??
     ((): ReturnType<CliCommandRuntime["stopDaemonFromState"]> =>
       missingRuntimeDependency("stopDaemonFromState"));
+  const openUrl = dependencies.openUrl ?? openUrlWithSystemBrowser;
 
   if (!createCoreHost || !loadRuntimeEnvIntoProcessEnv) {
     throw new Error("CLI runtime dependencies were not initialized");
@@ -314,6 +339,7 @@ export async function runOhbabyCli(
     isStdinTTY() {
       return stdin.isTTY === true;
     },
+    openUrl,
     readDaemonStatus,
     readStdin() {
       return readStdin(stdin);

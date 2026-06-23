@@ -3,6 +3,7 @@ export type DaemonStatus = "running" | "stopping" | "stopped" | "crashed";
 export interface DaemonState {
   readonly status: DaemonStatus;
   readonly pid?: number;
+  readonly pidToken?: string;
   readonly startedAt?: number;
   readonly updatedAt: number;
   readonly error?: string;
@@ -11,6 +12,7 @@ export interface DaemonState {
   readonly packageVersion?: string;
   readonly authToken?: string;
   readonly idleSince?: number;
+  readonly scopeRoot?: string;
 }
 
 export interface DaemonStateFile {
@@ -40,6 +42,7 @@ export interface DaemonRuntimeHandle {
     readonly port: number;
     readonly authToken?: string;
     readonly packageVersion?: string;
+    readonly scopeRoot?: string;
   };
   start(): Promise<void>;
   stop(): Promise<void>;

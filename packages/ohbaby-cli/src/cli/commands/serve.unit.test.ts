@@ -1,6 +1,8 @@
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import yargs from "yargs/yargs";
-import { createServeCommand } from "./serve.js";
+import { createServeCommand, resolveBundledWebAssetsDir } from "./serve.js";
 import type { CliCommandRuntime } from "./types.js";
 
 type StartDaemonServerMock = ReturnType<
@@ -12,12 +14,14 @@ type ReadDaemonStatusMock = ReturnType<
 type StopDaemonFromStateMock = ReturnType<
   typeof vi.fn<CliCommandRuntime["stopDaemonFromState"]>
 >;
+type OpenUrlMock = ReturnType<typeof vi.fn<CliCommandRuntime["openUrl"]>>;
 
 interface CreatedRuntime {
   readonly runtime: CliCommandRuntime;
   readonly startDaemonServer: StartDaemonServerMock;
   readonly readDaemonStatus: ReadDaemonStatusMock;
   readonly stopDaemonFromState: StopDaemonFromStateMock;
+  readonly openUrl: OpenUrlMock;
   readonly stderr: string[];
   readonly stdout: string[];
 }
@@ -45,6 +49,8 @@ function createRuntime(): CreatedRuntime {
     Promise.resolve({
       host: "127.0.0.1",
       port: 4096,
+      reused: false,
+      scopeRoot: "/repo",
       stop: (): Promise<void> => Promise.resolve(),
       url: "http://127.0.0.1:4096",
     }),
@@ -60,6 +66,7 @@ function createRuntime(): CreatedRuntime {
   const stopDaemonFromState = vi.fn<CliCommandRuntime["stopDaemonFromState"]>(
     () => Promise.resolve("stopped"),
   );
+  const openUrl = vi.fn<CliCommandRuntime["openUrl"]>(() => Promise.resolve());
   const runtime: CliCommandRuntime = {
     createCoreHost: vi.fn(),
     createStdoutRenderer: vi.fn(),
@@ -67,6 +74,7 @@ function createRuntime(): CreatedRuntime {
       throw new Error(message);
     },
     isStdinTTY: (): boolean => true,
+    openUrl,
     readDaemonStatus,
     readStdin: (): Promise<string> => Promise.resolve(""),
     renderTerminalUi: vi.fn(),
@@ -79,6 +87,7 @@ function createRuntime(): CreatedRuntime {
   return {
     readDaemonStatus,
     runtime,
+    openUrl,
     startDaemonServer,
     stderr,
     stdout,
@@ -86,17 +95,77 @@ function createRuntime(): CreatedRuntime {
   };
 }
 
+function firstStartOptions(
+  startDaemonServer: StartDaemonServerMock,
+): Parameters<CliCommandRuntime["startDaemonServer"]>[0] {
+  const call = startDaemonServer.mock.calls.at(0);
+  if (!call) {
+    throw new Error("startDaemonServer was not called");
+  }
+  return call[0];
+}
+
+function expectBundledWebAssetsDir(value: string | undefined): void {
+  expect(value).toEqual(expect.any(String));
+  expect(value).toMatch(/dist\/web$/u);
+}
+
 describe("createServeCommand", () => {
-  it("starts a foreground daemon and prints the listening url", async () => {
-    const { runtime, startDaemonServer, stdout } = createRuntime();
+  it("resolves bundled web assets next to the built CLI bundle", () => {
+    const builtBundleUrl = pathToFileURL(
+      resolve(process.cwd(), "packages", "ohbaby-cli", "dist", "bin.js"),
+    ).href;
+
+    expect(resolveBundledWebAssetsDir(builtBundleUrl)).toBe(
+      resolve(process.cwd(), "packages", "ohbaby-cli", "dist", "web"),
+    );
+  });
+
+  it("starts a foreground daemon, prints the web url, and opens the browser", async () => {
+    const { openUrl, runtime, startDaemonServer, stdout } = createRuntime();
 
     await runServe(["serve", "--port", "4096"], runtime);
 
-    expect(startDaemonServer).toHaveBeenCalledWith({
+    const options = firstStartOptions(startDaemonServer);
+    expect(options).toMatchObject({
       host: "127.0.0.1",
       port: 4096,
     });
-    expect(stdout.join("")).toContain("http://127.0.0.1:4096");
+    expectBundledWebAssetsDir(options.webAssetsDir);
+    expect(stdout.join("")).toBe("ohbaby web ready: http://127.0.0.1:4096\n");
+    expect(openUrl).toHaveBeenCalledWith("http://127.0.0.1:4096");
+  });
+
+  it("passes bundled web assets without a port when the user omitted --port", async () => {
+    const { runtime, startDaemonServer } = createRuntime();
+
+    await runServe(["serve"], runtime);
+
+    const options = firstStartOptions(startDaemonServer);
+    expect(options).toMatchObject({
+      host: "127.0.0.1",
+    });
+    expectBundledWebAssetsDir(options.webAssetsDir);
+  });
+
+  it("does not pass bundled web assets when binding a non-loopback host", async () => {
+    const { runtime, startDaemonServer } = createRuntime();
+
+    await runServe(["serve", "--host", "0.0.0.0"], runtime);
+
+    expect(startDaemonServer).toHaveBeenCalledWith({
+      host: "0.0.0.0",
+    });
+  });
+
+  it("keeps the daemon running when browser opening fails", async () => {
+    const { openUrl, runtime, stderr, stdout } = createRuntime();
+    openUrl.mockRejectedValueOnce(new Error("no browser"));
+
+    await runServe(["serve"], runtime);
+
+    expect(stdout.join("")).toBe("ohbaby web ready: http://127.0.0.1:4096\n");
+    expect(stderr.join("")).toContain("Could not open browser automatically");
   });
 
   it("accepts port 0 so auto-spawned daemons can bind a free port", async () => {
@@ -104,10 +173,12 @@ describe("createServeCommand", () => {
 
     await runServe(["serve", "--port", "0"], runtime);
 
-    expect(startDaemonServer).toHaveBeenCalledWith({
+    const options = firstStartOptions(startDaemonServer);
+    expect(options).toMatchObject({
       host: "127.0.0.1",
       port: 0,
     });
+    expectBundledWebAssetsDir(options.webAssetsDir);
   });
 
   it("passes an explicit auth token to the daemon server", async () => {
@@ -115,11 +186,12 @@ describe("createServeCommand", () => {
 
     await runServe(["serve", "--auth-token", "token_1"], runtime);
 
-    expect(startDaemonServer).toHaveBeenCalledWith({
+    const options = firstStartOptions(startDaemonServer);
+    expect(options).toMatchObject({
       authToken: "token_1",
       host: "127.0.0.1",
-      port: 4096,
     });
+    expectBundledWebAssetsDir(options.webAssetsDir);
   });
 
   it("passes a web assets directory to the daemon server", async () => {
@@ -132,7 +204,6 @@ describe("createServeCommand", () => {
 
     expect(startDaemonServer).toHaveBeenCalledWith({
       host: "127.0.0.1",
-      port: 4096,
       webAssetsDir: "apps/ohbaby-web/dist",
     });
   });

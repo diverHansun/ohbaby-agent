@@ -675,10 +675,13 @@ describe("runOhbabyCli", () => {
   it("starts the serve subcommand through default runtime dependencies", async () => {
     vi.resetModules();
     const stdout: string[] = [];
+    const openUrl = vi.fn(() => Promise.resolve());
     const startDaemonServer = vi.fn(() =>
       Promise.resolve({
         host: "127.0.0.1",
         port: 4096,
+        reused: false,
+        scopeRoot: "/repo",
         stop: vi.fn(() => Promise.resolve()),
         url: "http://127.0.0.1:4096",
       }),
@@ -699,15 +702,20 @@ describe("runOhbabyCli", () => {
     const { runOhbabyCli } = await import("./bin.js");
 
     await expect(
-      runOhbabyCli(["node", "ohbaby", "serve", "--port", "4096"], {
-        stdout: { write: (chunk: string) => stdout.push(chunk) },
-      }),
+      runOhbabyCli(
+        ["node", "ohbaby", "serve", "--port", "4096"],
+        {
+          stdout: { write: (chunk: string) => stdout.push(chunk) },
+        },
+        { openUrl },
+      ),
     ).resolves.toBe(0);
     expect(startDaemonServer).toHaveBeenCalledWith({
       host: "127.0.0.1",
       port: 4096,
     });
-    expect(stdout.join("")).toContain("http://127.0.0.1:4096");
+    expect(stdout.join("")).toBe("ohbaby web ready: http://127.0.0.1:4096\n");
+    expect(openUrl).toHaveBeenCalledWith("http://127.0.0.1:4096");
   });
 });
 

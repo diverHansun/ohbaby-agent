@@ -290,6 +290,9 @@ export class Supervisor {
     await this.stateFile.write({
       status,
       pid: process.pid,
+      ...(this.pidLock?.record?.token === undefined
+        ? {}
+        : { pidToken: this.pidLock.record.token }),
       startedAt: this.startedAt,
       updatedAt: this.now(),
       error,

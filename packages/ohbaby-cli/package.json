@@ -1,6 +1,6 @@
 {
   "name": "ohbaby-cli",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "CLI frontend package for ohbaby-agent",
   "type": "module",
   "engines": {
@@ -25,6 +25,7 @@
     "dist/**/*.js.map",
     "dist/**/*.d.ts",
     "dist/**/*.d.ts.map",
+    "dist/web/**",
     "!dist/**/*.test.d.ts",
     "!dist/**/*.test.d.ts.map",
     "!dist/**/*.unit.test.d.ts",
@@ -37,7 +38,7 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "rimraf dist && tsup && tsc -b --force",
+    "build": "rimraf dist && tsup && tsc -b --force && pnpm --filter ohbaby-web build && node scripts/copy-web-assets.mjs",
     "start": "node dist/bin.js",
     "typecheck": "tsc -b",
     "clean": "rimraf dist coverage"

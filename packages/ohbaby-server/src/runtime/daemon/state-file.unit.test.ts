@@ -25,7 +25,9 @@ describe("JsonDaemonStateFile", () => {
       host: "127.0.0.1",
       packageVersion: "0.1.0",
       pid: 123,
+      pidToken: "pid_token_1",
       port: 4096,
+      scopeRoot: "/tmp/repo",
       startedAt: 1_000,
       status: "running",
       updatedAt: 1_001,
@@ -36,7 +38,9 @@ describe("JsonDaemonStateFile", () => {
       host: "127.0.0.1",
       packageVersion: "0.1.0",
       pid: 123,
+      pidToken: "pid_token_1",
       port: 4096,
+      scopeRoot: "/tmp/repo",
       startedAt: 1_000,
       status: "running",
       updatedAt: 1_001,
@@ -50,7 +54,9 @@ describe("JsonDaemonStateFile", () => {
       "utf8",
     );
 
-    await expect(new JsonDaemonStateFile(statePath).read()).resolves.toBeUndefined();
+    await expect(
+      new JsonDaemonStateFile(statePath).read(),
+    ).resolves.toBeUndefined();
   });
 
   it("keeps lifecycle-only stopped state readable", async () => {

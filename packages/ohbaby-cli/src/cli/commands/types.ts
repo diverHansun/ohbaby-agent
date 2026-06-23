@@ -14,6 +14,9 @@ export interface CliDaemonState {
   readonly startedAt?: number;
   readonly updatedAt: number;
   readonly error?: string;
+  readonly host?: string;
+  readonly port?: number;
+  readonly scopeRoot?: string;
 }
 
 export interface CliStartDaemonServerOptions {
@@ -28,6 +31,8 @@ export interface CliRunningDaemonServer {
   readonly url: string;
   readonly host: string;
   readonly port: number;
+  readonly reused: boolean;
+  readonly scopeRoot: string;
   stop(): Promise<void>;
 }
 
@@ -63,6 +68,7 @@ export interface CliCommandRuntime {
   readonly createStdoutRenderer: typeof createStdoutRenderer;
   readonly failUsage: (message: string) => never;
   readonly isStdinTTY: () => boolean;
+  readonly openUrl: (url: string) => Promise<void>;
   readonly readDaemonStatus: () => Promise<CliDaemonState | undefined>;
   readonly readStdin: () => Promise<string>;
   readonly renderTerminalUi: (options: {

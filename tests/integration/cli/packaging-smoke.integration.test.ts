@@ -521,6 +521,19 @@ function expectNoWorkspaceDependencyRanges(packageJson: PackageJson): void {
   }
 }
 
+function expectCliPackIncludesWebAssets(entry: NpmPackEntry): void {
+  const packedFiles = entry.files?.map((file) => file.path) ?? [];
+  expect(packedFiles).toContain("dist/web/index.html");
+  expect(
+    packedFiles.some((path) => path.startsWith("dist/web/assets/")),
+    "ohbaby-cli package must include built ohbaby-web assets",
+  ).toBe(true);
+  expect(
+    packedFiles.some((path) => path.startsWith("dist/web/types/")),
+    "browser assets should not include TypeScript declaration output",
+  ).toBe(false);
+}
+
 describe("npm packed CLI smoke", () => {
   it("installs the packed ohbaby-cli tarball globally and exposes ohbaby help and version", async () => {
     const tempRoot = await tempDirectory("ohbaby-packaging-smoke-");
@@ -568,6 +581,7 @@ describe("npm packed CLI smoke", () => {
       packDestination,
       packageDirectory: join(repoRoot, "packages", "ohbaby-cli"),
     });
+    expectCliPackIncludesWebAssets(cliPack.entry);
     const cliPackageJson = cliPack.packageJson;
 
     const registry = await startLocalNpmRegistry([
@@ -609,6 +623,9 @@ describe("npm packed CLI smoke", () => {
       prefix,
       "ohbaby-cli",
     );
+    await expect(
+      readFile(join(installedCliPackage, "dist", "web", "index.html"), "utf8"),
+    ).resolves.toContain("<!doctype html>");
     const packageJson = JSON.parse(
       await readFile(
         join(repoRoot, "packages", "ohbaby-cli", "package.json"),
