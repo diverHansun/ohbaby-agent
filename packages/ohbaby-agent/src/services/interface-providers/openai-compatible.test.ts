@@ -216,6 +216,71 @@ describe("openai-compatible provider", () => {
     ]);
   });
 
+  it("should keep OpenAI-compatible reasoning deltas separate from content deltas", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "zhipu",
+      apiKey: "test-key",
+      baseUrl: "https://example.com/v1",
+    });
+    vi.spyOn(provider.client.chat.completions, "create").mockResolvedValue(
+      createChunkStream([
+        createChunk({
+          choices: [
+            {
+              delta: {
+                content: "",
+                reasoning_content: "hidden reasoning",
+              } as unknown as ChatCompletionChunk.Choice["delta"],
+              finish_reason: null,
+              index: 0,
+            },
+          ],
+        }),
+        createChunk({
+          choices: [
+            {
+              delta: { content: "pong" },
+              finish_reason: null,
+              index: 0,
+            },
+          ],
+        }),
+        createChunk({
+          choices: [
+            {
+              delta: {},
+              finish_reason: "stop",
+              index: 0,
+            },
+          ],
+        }),
+      ]) as unknown as Awaited<
+        ReturnType<typeof provider.client.chat.completions.create>
+      >,
+    );
+
+    const stream = await provider.streamChatCompletion({
+      model: "glm-4.7",
+      messages: [{ role: "user", content: "Reply with exactly: pong" }],
+      temperature: 0,
+      maxTokens: 16,
+    });
+    const events: InterfaceProviderStreamEvent[] = [];
+
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { reasoningDelta: "hidden reasoning" },
+      { textDelta: "pong" },
+      {
+        finishReason: "stop",
+        rawFinishReason: "stop",
+      },
+    ]);
+  });
+
   it("should yield token usage from the final usage-only chunk", async () => {
     const provider = createOpenAICompatibleProvider({
       id: "openai",

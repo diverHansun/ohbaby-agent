@@ -109,14 +109,13 @@ export function selectActiveSession(
   if (!snapshot) {
     return null;
   }
-  if (snapshot.activeSessionId) {
-    return (
-      snapshot.sessions.find(
-        (session) => session.id === snapshot.activeSessionId,
-      ) ?? null
-    );
+  if (snapshot.activeSessionId === null) {
+    return null;
   }
-  return snapshot.sessions[0] ?? null;
+  return (
+    snapshot.sessions.find((session) => session.id === snapshot.activeSessionId) ??
+    null
+  );
 }
 
 export function messageText(message: UiMessage): string {

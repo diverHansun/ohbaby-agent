@@ -197,10 +197,12 @@ class BrowserDaemonClient implements OhbabyWebClient {
 
   async createSession(): Promise<void> {
     await this.http.createSession();
+    await this.refreshProjectedSnapshot();
   }
 
   async selectSession(sessionId: string): Promise<void> {
     await this.http.selectSession(sessionId);
+    await this.refreshProjectedSnapshot();
   }
 
   async listCommands(): Promise<UiWebCommandCatalog> {
@@ -307,6 +309,10 @@ class BrowserDaemonClient implements OhbabyWebClient {
       this.resyncPromise = undefined;
     });
     await this.resyncPromise;
+  }
+
+  private async refreshProjectedSnapshot(): Promise<void> {
+    await this.resync(this.store.getSnapshot().view.lastAppliedSeqNum);
   }
 
   private async doResync(lastEventId: number): Promise<void> {

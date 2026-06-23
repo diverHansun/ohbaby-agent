@@ -126,6 +126,12 @@ class FakeBackend implements UiBackendClient {
   }[] = [];
   private snapshot = emptySnapshot();
 
+  constructor(input: { readonly snapshot?: UiSnapshot } = {}) {
+    if (input.snapshot !== undefined) {
+      this.snapshot = input.snapshot;
+    }
+  }
+
   getSnapshot(): Promise<UiSnapshot> {
     return Promise.resolve(this.snapshot);
   }
@@ -266,11 +272,12 @@ class FakeBackend implements UiBackendClient {
 
   executeCommand(invocation: UiSlashCommandInvocation): Promise<void> {
     this.executedCommands.push(invocation);
+    const commandRunId = `command_${String(this.executedCommands.length)}`;
     this.emit({
       command: {
         clientInvocationId: invocation.clientInvocationId,
         commandId: invocation.commandId,
-        commandRunId: "command_1",
+        commandRunId,
         path: invocation.path,
         surface: invocation.surface,
         ...(invocation.sessionId === undefined
@@ -280,9 +287,47 @@ class FakeBackend implements UiBackendClient {
       timestamp: Date.parse(timestamp),
       type: "command.started",
     });
+    const selectedSessionId = selectedSessionIdFromInvocation(invocation);
+    if (selectedSessionId !== undefined) {
+      const session =
+        this.snapshot.sessions.find((item) => item.id === selectedSessionId) ??
+        {
+          createdAt: timestamp,
+          id: selectedSessionId,
+          messages: [],
+          title: "New session",
+          updatedAt: timestamp,
+        };
+      this.snapshot = {
+        ...this.snapshot,
+        activeSessionId: selectedSessionId,
+        sessions: [
+          ...this.snapshot.sessions.filter(
+            (item) => item.id !== selectedSessionId,
+          ),
+          session,
+        ],
+      };
+      this.emit({
+        clientInvocationId: invocation.clientInvocationId,
+        commandRunId,
+        action: {
+          data: { choiceId: selectedSessionId },
+          kind: "session.selected",
+        },
+        output: {
+          data: { sessionId: selectedSessionId },
+          kind: "data",
+          subject: "session.current",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.result.delivered",
+      });
+      return Promise.resolve();
+    }
     this.emit({
       clientInvocationId: invocation.clientInvocationId,
-      commandRunId: "command_1",
+      commandRunId,
       output: { kind: "text", text: "status ok" },
       timestamp: Date.parse(timestamp),
       type: "command.result.delivered",
@@ -307,6 +352,23 @@ class FakeBackend implements UiBackendClient {
       handler(event);
     }
   }
+}
+
+function selectedSessionIdFromInvocation(
+  invocation: UiSlashCommandInvocation,
+): string | undefined {
+  if (invocation.commandId === "new") {
+    return "session_generated";
+  }
+  if (invocation.commandId !== "resume") {
+    return undefined;
+  }
+  const sessionIdIndex = invocation.argv.indexOf("--session_id");
+  const sessionId =
+    sessionIdIndex < 0 ? undefined : invocation.argv[sessionIdIndex + 1];
+  return typeof sessionId === "string" && sessionId.length > 0
+    ? sessionId
+    : undefined;
 }
 
 describe("ohbaby-web with ohbaby-server /v1", () => {
@@ -558,6 +620,106 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
           rawArgs: "--session_id session_2",
         }),
       ]);
+      await runtime.client.close();
+    } finally {
+      await server.dispose();
+    }
+  });
+
+  it("reloads the selected session transcript after sidebar session selection", async () => {
+    const backend = new FakeBackend({
+      snapshot: {
+        ...emptySnapshot(),
+        activeSessionId: "session_1",
+        sessions: [
+          {
+            createdAt: timestamp,
+            id: "session_1",
+            messages: [
+              {
+                createdAt: timestamp,
+                id: "message_1",
+                parts: [{ text: "old session", type: "text" }],
+                role: "user",
+              },
+            ],
+            title: "Old session",
+            updatedAt: timestamp,
+          },
+          {
+            createdAt: timestamp,
+            id: "session_2",
+            messages: [
+              {
+                createdAt: timestamp,
+                id: "message_2",
+                parts: [{ text: "Reply with exactly: pong", type: "text" }],
+                role: "user",
+              },
+              {
+                completedAt: timestamp,
+                createdAt: timestamp,
+                id: "message_3",
+                parts: [{ text: "pong", type: "text" }],
+                role: "assistant",
+                status: "completed",
+              },
+            ],
+            title: "Reply with exactly: pong",
+            updatedAt: timestamp,
+          },
+        ],
+      },
+    });
+    const server = createDaemonServerApp({
+      authToken,
+      backend,
+      createSessionId: () => "session_generated",
+      packageVersion: "0.1.6-test",
+    });
+    await server.start();
+    try {
+      const fetchImpl: typeof fetch = (input, init = {}) => {
+        const url = new URL(urlFromRequestInput(input));
+        return Promise.resolve(
+          server.app.request(`${url.pathname}${url.search}`, {
+            body: init.body,
+            headers: init.headers,
+            method: init.method,
+            signal: init.signal,
+          }),
+        );
+      };
+      const config: OhbabyBootstrapConfig = {
+        baseUrl: "http://127.0.0.1:4096",
+        clientId: "client_web",
+        startupIntent: { startupSessionMode: { type: "fresh" } },
+        token: authToken,
+      };
+      const runtime = createOhbabyWebRuntime(config, { fetch: fetchImpl });
+      await runtime.ready;
+
+      const initialProjectedSession = runtime.store
+        .getSnapshot()
+        .view.snapshot?.sessions.find((session) => session.id === "session_2");
+      expect(initialProjectedSession?.messages).toEqual([]);
+
+      await runtime.client.selectSession("session_2");
+      await waitFor(
+        () =>
+          runtime.store
+            .getSnapshot()
+            .view.snapshot?.sessions.find((session) => session.id === "session_2")
+            ?.messages.some((message) =>
+              message.parts.some(
+                (part) => part.type === "text" && part.text === "pong",
+              ),
+            ) === true,
+        "timed out waiting for selected session transcript",
+      );
+      expect(runtime.store.getSnapshot().view.snapshot).toMatchObject({
+        activeSessionId: "session_2",
+      });
       await runtime.client.close();
     } finally {
       await server.dispose();

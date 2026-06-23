@@ -68,6 +68,19 @@ describe("ohbaby-web ui selectors", () => {
     });
   });
 
+  it("does not treat listed sessions as active when the daemon has no active session", () => {
+    const view = selectViewModel(
+      store({
+        ...baseSnapshot(),
+        activeSessionId: null,
+      }),
+    );
+
+    expect(view.activeSession).toBeNull();
+    expect(view.composer.activeSessionId).toBeUndefined();
+    expect(view.isEmpty).toBe(true);
+  });
+
   it("keeps already pending permissions visible under full-access policy", () => {
     const snapshot = {
       ...baseSnapshot(),

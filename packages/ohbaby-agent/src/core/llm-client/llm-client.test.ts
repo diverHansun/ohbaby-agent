@@ -423,6 +423,27 @@ describe("LLM Client Integration Tests", () => {
       expect(lastResponse.completeMessage.content).toBe("(Empty response)");
     });
 
+    it("should not expose provider reasoning deltas as assistant text", async () => {
+      const events: InterfaceProviderStreamEvent[] = [
+        { reasoningDelta: "hidden reasoning" },
+        { textDelta: "Visible answer" },
+        { finishReason: "stop" },
+      ];
+
+      streamChatCompletionMock.mockResolvedValue(createProviderStream(events));
+
+      const messages = [{ role: "user" as const, content: "test" }];
+      const responses: StreamingResponse[] = [];
+
+      for await (const response of streamChatCompletion(mockClient, messages)) {
+        responses.push(response);
+      }
+
+      expect(
+        responses.map((response) => response.completeMessage.content),
+      ).toEqual(["Visible answer", "Visible answer"]);
+    });
+
     it("should use configuration from client instance", async () => {
       mockClient.config.model = "gpt-4-turbo";
       mockClient.config.temperature = 1.0;

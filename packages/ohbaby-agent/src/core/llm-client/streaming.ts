@@ -242,6 +242,9 @@ export async function* streamChatCompletion(
       // Stream each normalized event from the provider
       for await (const event of stream) {
         const finish = event.finishReason;
+        const hasToolCallDeltas =
+          event.toolCallDeltas !== undefined &&
+          event.toolCallDeltas.length > 0;
 
         // Update finish reason when stream ends
         if (finish) {
@@ -259,6 +262,16 @@ export async function* streamChatCompletion(
         // Accumulate text content
         if (event.textDelta) {
           accumulatedContent += event.textDelta;
+        }
+
+        if (
+          event.reasoningDelta &&
+          !event.textDelta &&
+          !hasToolCallDeltas &&
+          !finish &&
+          !event.tokenUsage
+        ) {
+          continue;
         }
 
         // Accumulate tool call fragments

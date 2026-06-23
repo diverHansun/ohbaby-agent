@@ -26,6 +26,7 @@ export interface InterfaceProviderToolCallDelta {
 
 export interface InterfaceProviderStreamEvent {
   textDelta?: string;
+  reasoningDelta?: string;
   toolCallDeltas?: InterfaceProviderToolCallDelta[];
   finishReason?: InterfaceProviderFinishReason;
   rawFinishReason?: string;

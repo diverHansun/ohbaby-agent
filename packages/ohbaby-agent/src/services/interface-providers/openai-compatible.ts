@@ -57,6 +57,20 @@ function normalizeTokenUsage(
   };
 }
 
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function reasoningDeltaFromChoiceDelta(
+  delta: ChatCompletionChunk.Choice["delta"],
+): string | undefined {
+  const extendedDelta = delta as Record<string, unknown>;
+  return (
+    nonEmptyString(extendedDelta.reasoning_content) ??
+    nonEmptyString(extendedDelta.reasoning)
+  );
+}
+
 function buildRequestParams(
   request: InterfaceProviderRequest,
 ): ChatCompletionCreateParamsStreaming {
@@ -96,7 +110,8 @@ function buildStreamEvent(
       ? mappedToolCallDeltas
       : undefined;
   const event: InterfaceProviderStreamEvent = {
-    textDelta: choice.delta.content ?? undefined,
+    textDelta: nonEmptyString(choice.delta.content),
+    reasoningDelta: reasoningDeltaFromChoiceDelta(choice.delta),
     toolCallDeltas,
     finishReason: mapFinishReason(choice.finish_reason),
     rawFinishReason: choice.finish_reason ?? undefined,
@@ -105,6 +120,7 @@ function buildStreamEvent(
 
   if (
     !event.textDelta &&
+    !event.reasoningDelta &&
     (!event.toolCallDeltas || event.toolCallDeltas.length === 0) &&
     !event.finishReason &&
     !event.tokenUsage
@@ -119,6 +135,7 @@ function isUsageOnlyEvent(event: InterfaceProviderStreamEvent): boolean {
   return (
     event.tokenUsage !== undefined &&
     event.textDelta === undefined &&
+    event.reasoningDelta === undefined &&
     event.finishReason === undefined &&
     event.rawFinishReason === undefined &&
     (event.toolCallDeltas === undefined || event.toolCallDeltas.length === 0)

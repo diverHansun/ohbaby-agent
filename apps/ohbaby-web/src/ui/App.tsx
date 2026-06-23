@@ -453,7 +453,7 @@ function SessionSidebar(props: {
                   <span className="ohb-session-dot" />
                   <span className="ohb-session-copy">
                     <strong>{title}</strong>
-                    <small>{sessionMeta(session)}</small>
+                    <small>{sessionMeta(session, active)}</small>
                   </span>
                   <MessageSquare size={14} />
                 </button>
@@ -1929,7 +1929,7 @@ function sessionTitle(session: UiSession): string {
   return trimmed.length > 0 ? trimmed : "Untitled session";
 }
 
-function sessionMeta(session: UiSession): string {
+function sessionMeta(session: UiSession, active: boolean): string {
   const messageCount = session.messages.length;
   const date = new Date(session.updatedAt);
   const dateLabel = Number.isNaN(date.getTime())
@@ -1938,6 +1938,9 @@ function sessionMeta(session: UiSession): string {
         day: "2-digit",
         month: "short",
       }).format(date);
+  if (!active) {
+    return dateLabel;
+  }
   return `${String(messageCount)} ${
     messageCount === 1 ? "message" : "messages"
   } · ${dateLabel}`;

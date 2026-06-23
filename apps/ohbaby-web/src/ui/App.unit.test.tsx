@@ -185,12 +185,81 @@ describe("OhbabyWebApp slash command interactions", () => {
     const app = mountApp(fake.runtime);
 
     expect(app.container.querySelector(".ohb-sidebar")).not.toBeNull();
+    expect(
+      app.container.querySelector('button[title="Select Session 2"]')
+        ?.textContent,
+    ).not.toContain("0 messages");
 
     await clickButton(app.container, "New session");
     await clickButton(app.container, "Select Session 2");
 
     expect(fake.createSession).toHaveBeenCalledTimes(1);
     expect(fake.selectSession).toHaveBeenCalledWith("session_2");
+  });
+
+  it("selects the first listed sidebar session when no session is active", async () => {
+    const first = snapshotWithStatus({ kind: "idle" }).sessions[0];
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: null,
+        sessions: [first],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    await clickButton(app.container, "Select Session");
+
+    expect(fake.selectSession).toHaveBeenCalledWith("session_1");
+  });
+
+  it("loads the selected sidebar session transcript from an empty active state", async () => {
+    const first = snapshotWithStatus({ kind: "idle" }).sessions[0];
+    const selectedSnapshot: UiSnapshot = {
+      ...snapshotWithStatus({ kind: "idle" }),
+      activeSessionId: "session_1",
+      sessions: [
+        {
+          ...first,
+          messages: [
+            {
+              createdAt: timestamp,
+              id: "message_user",
+              parts: [{ text: "resume this session", type: "text" }],
+              role: "user",
+            },
+            {
+              createdAt: timestamp,
+              id: "message_assistant",
+              parts: [{ text: "loaded transcript", type: "text" }],
+              role: "assistant",
+            },
+          ],
+        },
+      ],
+    };
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: null,
+        sessions: [first],
+      },
+    });
+    fake.selectSession.mockImplementationOnce(() => {
+      fake.store.replaceSnapshot(selectedSnapshot, 2);
+      return Promise.resolve();
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.textContent).not.toContain("loaded transcript");
+
+    await clickButton(app.container, "Select Session");
+
+    await waitFor(() =>
+      app.container.textContent.includes("loaded transcript"),
+    );
+    expect(app.container.textContent).toContain("resume this session");
+    expect(fake.selectSession).toHaveBeenCalledWith("session_1");
   });
 
   it("opens the structured connect overlay from the slash palette", async () => {
