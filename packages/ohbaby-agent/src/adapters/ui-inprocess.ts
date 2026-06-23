@@ -867,6 +867,7 @@ export function createInProcessUiBackendClient(
     }
 
     await options.sessionManager.update(sessionId, { status: "archived" });
+    await stateStore.removeSession?.(sessionId);
 
     if (snapshot.activeSessionId === sessionId) {
       const remainingSessions = (

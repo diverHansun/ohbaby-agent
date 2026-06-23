@@ -4867,6 +4867,108 @@ describe("createInProcessUiBackendClient", () => {
     });
   });
 
+  it("archives injected sessions from the in-memory state store snapshot", async () => {
+    const projectRoot = "/repo";
+    function coreSession(input: {
+      readonly id: string;
+      readonly title: string;
+      readonly updatedAt: number;
+      readonly status?: Session["status"];
+    }): Session {
+      return {
+        agentName: "default",
+        childrenIds: [],
+        createdAt: input.updatedAt,
+        id: input.id,
+        isSubagent: false,
+        projectId: "project_1",
+        projectRoot,
+        stats: { messageCount: 0 },
+        status: input.status ?? "active",
+        title: input.title,
+        updatedAt: input.updatedAt,
+      };
+    }
+    const activeCoreSession = coreSession({
+      id: "session_1",
+      title: "Active",
+      updatedAt: Date.parse("2026-05-13T00:00:00.000Z"),
+    });
+    const remainingCoreSession = coreSession({
+      id: "session_2",
+      title: "Remaining",
+      updatedAt: Date.parse("2026-05-14T00:00:00.000Z"),
+    });
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "session_1",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-13T00:00:00.000Z",
+            id: "session_1",
+            messages: [],
+            projectRoot,
+            title: "Active",
+            updatedAt: "2026-05-13T00:00:00.000Z",
+          },
+          {
+            createdAt: "2026-05-14T00:00:00.000Z",
+            id: "session_2",
+            messages: [],
+            projectRoot,
+            title: "Remaining",
+            updatedAt: "2026-05-14T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([]),
+      projectDirectory: projectRoot,
+      sessionManager: {
+        create() {
+          throw new Error("create should not be called");
+        },
+        findReusableEmptyPrimary() {
+          return Promise.resolve(null);
+        },
+        get(sessionId: string) {
+          if (sessionId === "session_1") {
+            return Promise.resolve(activeCoreSession);
+          }
+          if (sessionId === "session_2") {
+            return Promise.resolve(remainingCoreSession);
+          }
+          return Promise.resolve(null);
+        },
+        listByProject() {
+          return Promise.resolve([]);
+        },
+        listByProjectRoot() {
+          return Promise.resolve([remainingCoreSession]);
+        },
+        update() {
+          return Promise.resolve(
+            coreSession({
+              id: "session_1",
+              status: "archived",
+              title: "Active",
+              updatedAt: Date.parse("2026-05-13T00:00:00.000Z"),
+            }),
+          );
+        },
+      },
+    });
+
+    await client.archiveSession({ sessionId: "session_1" });
+
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      activeSessionId: "session_2",
+      sessions: [{ id: "session_2", title: "Remaining" }],
+    });
+  });
+
   it("derives /sessions titles for persisted placeholder sessions from the first user message", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-client-db-"));
     try {

@@ -12,6 +12,7 @@ export interface UiStateStore {
   readSnapshot(): Promise<UiSnapshot>;
   getSession(sessionId: string): Promise<UiSession | undefined>;
   upsertSession(session: UiSession): Promise<void>;
+  removeSession?(sessionId: string): Promise<void>;
   setActiveSessionId(sessionId: string | null): Promise<void>;
   addRun(run: UiRun): Promise<void>;
   updateRun(run: UiRun): Promise<void>;

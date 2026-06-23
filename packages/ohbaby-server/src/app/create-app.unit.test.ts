@@ -141,6 +141,7 @@ class FakeBackend implements UiBackendClient {
   readonly searchApiKeys: Parameters<UiBackendClient["setSearchApiKey"]>[0][] =
     [];
   onGetSnapshot: (() => Promise<void> | void) | undefined;
+  archiveError: Error | undefined;
   commandCatalog: UiSlashCommandCatalog = {
     commands: [
       {
@@ -294,6 +295,9 @@ class FakeBackend implements UiBackendClient {
   }
 
   archiveSession(input: { readonly sessionId: string }): Promise<void> {
+    if (this.archiveError) {
+      return Promise.reject(this.archiveError);
+    }
     this.archivedSessions.push(input.sessionId);
     return Promise.resolve();
   }
@@ -1222,6 +1226,78 @@ describe("createDaemonServerApp", () => {
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({ ok: true });
       expect(backend.archivedSessions).toEqual(["session_2"]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("returns not found when the archive route targets a missing session", async () => {
+    const backend = new FakeBackend();
+    backend.archiveError = new Error("Session not found: session_missing");
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request(
+        "/v1/sessions/session_missing/archive",
+        {
+          headers: {
+            ...authHeaders(),
+            "x-ohbaby-client-id": "client_web",
+          },
+          method: "PATCH",
+        },
+      );
+
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({
+        error: { message: "Session not found: session_missing" },
+        ok: false,
+      });
+      expect(backend.archivedSessions).toEqual([]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("returns bad request when the archive route rejects the session", async () => {
+    const backend = new FakeBackend();
+    backend.archiveError = new Error("Cannot archive subagent session: child_1");
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request(
+        "/v1/sessions/child_1/archive",
+        {
+          headers: {
+            ...authHeaders(),
+            "x-ohbaby-client-id": "client_web",
+          },
+          method: "PATCH",
+        },
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: { message: "Cannot archive subagent session: child_1" },
+        ok: false,
+      });
+      expect(backend.archivedSessions).toEqual([]);
     } finally {
       await handle.dispose();
     }

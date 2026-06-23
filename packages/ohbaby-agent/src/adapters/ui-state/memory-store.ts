@@ -99,6 +99,16 @@ export function createInMemoryUiStateStore(
       return Promise.resolve();
     },
 
+    removeSession(sessionId: string): Promise<void> {
+      snapshot.sessions = snapshot.sessions.filter(
+        (item) => item.id !== sessionId,
+      );
+      if (snapshot.activeSessionId === sessionId) {
+        snapshot.activeSessionId = null;
+      }
+      return Promise.resolve();
+    },
+
     setActiveSessionId(sessionId: string | null): Promise<void> {
       snapshot.activeSessionId = sessionId;
       return Promise.resolve();

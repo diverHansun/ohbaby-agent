@@ -401,7 +401,7 @@ export function createPersistentUiStateStore(
       options.sessionManager.get(selectedActiveSessionId),
     );
     if (
-      !activeSession ||
+      activeSession?.status !== "active" ||
       !isPrimarySession(activeSession) ||
       !isInCurrentProject(activeSession, projectRoot)
     ) {

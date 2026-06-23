@@ -677,6 +677,45 @@ describe("createPersistentUiStateStore", () => {
     });
   });
 
+  it("does not include an archived active session when it falls outside active recents", async () => {
+    let nextSession = 1;
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => `session_${String(nextSession++)}`,
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      now: createClock(1_000),
+      projectResolver: PROJECT_RESOLVER,
+      store: createDatabaseSessionStore(),
+    });
+    const archived = await sessionManager.create("D:/repo", {
+      title: "Archived active",
+    });
+    await sessionManager.create("D:/repo", {
+      title: "Visible active",
+    });
+    await sessionManager.update(archived.id, { status: "archived" });
+    const store = createPersistentUiStateStore({
+      initialActiveSessionId: archived.id,
+      messageManager,
+      projectRoot: "D:/repo",
+      runLedger: createDatabaseRunLedger(),
+      sessionManager,
+    });
+
+    await expect(store.readSnapshot()).resolves.toMatchObject({
+      activeSessionId: null,
+      sessions: [{ id: "session_2", title: "Visible active" }],
+    });
+  });
+
   it("converts stored tool error JSON into a user-facing SDK tool result error", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),
