@@ -30,6 +30,9 @@ interface MountedApp {
 }
 
 interface FakeRuntime {
+  readonly archiveSession: ReturnType<
+    typeof vi.fn<(sessionId: string) => Promise<void>>
+  >;
   readonly compactSession: ReturnType<
     typeof vi.fn<OhbabyWebClient["compactSession"]>
   >;
@@ -67,6 +70,7 @@ afterEach(() => {
     });
     app.container.remove();
   }
+  vi.restoreAllMocks();
 });
 
 describe("OhbabyWebApp slash command interactions", () => {
@@ -195,6 +199,63 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(fake.createSession).toHaveBeenCalledTimes(1);
     expect(fake.selectSession).toHaveBeenCalledWith("session_2");
+  });
+
+  it("archives sidebar sessions after confirmation without selecting the row", async () => {
+    const first = snapshotWithStatus({ kind: "idle" }).sessions[0];
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: "session_1",
+        sessions: [
+          first,
+          {
+            createdAt: timestamp,
+            id: "session_2",
+            messages: [],
+            title: "Session 2",
+            updatedAt: "2026-06-13T00:00:00.000Z",
+          },
+        ],
+      },
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const app = mountApp(fake.runtime);
+
+    await clickButton(app.container, "Archive Session 2");
+
+    expect(confirm).toHaveBeenCalledWith("Archive this session?");
+    expect(fake.archiveSession).toHaveBeenCalledWith("session_2");
+    expect(fake.selectSession).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it("does not archive sidebar sessions when confirmation is cancelled", async () => {
+    const first = snapshotWithStatus({ kind: "idle" }).sessions[0];
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: "session_1",
+        sessions: [
+          first,
+          {
+            createdAt: timestamp,
+            id: "session_2",
+            messages: [],
+            title: "Session 2",
+            updatedAt: "2026-06-13T00:00:00.000Z",
+          },
+        ],
+      },
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const app = mountApp(fake.runtime);
+
+    await clickButton(app.container, "Archive Session 2");
+
+    expect(fake.archiveSession).not.toHaveBeenCalled();
+    expect(fake.selectSession).not.toHaveBeenCalled();
+    confirm.mockRestore();
   });
 
   it("selects the first listed sidebar session when no session is active", async () => {
@@ -403,6 +464,9 @@ function createFakeRuntime(input: {
   const selectSession = vi.fn<OhbabyWebClient["selectSession"]>(() =>
     Promise.resolve(),
   );
+  const archiveSession = vi.fn<(sessionId: string) => Promise<void>>(() =>
+    Promise.resolve(),
+  );
   const connectModel = vi.fn<OhbabyWebClient["connectModel"]>(() =>
     Promise.resolve({
       apiKeyEnv: "ZHIPU_API_KEY",
@@ -439,8 +503,11 @@ function createFakeRuntime(input: {
       searchJsonPath: "search.json",
     }),
   );
-  const client: OhbabyWebClient = {
+  const client: OhbabyWebClient & {
+    readonly archiveSession: typeof archiveSession;
+  } = {
     abortSession: vi.fn(() => Promise.resolve()),
+    archiveSession,
     close: vi.fn(() => Promise.resolve()),
     compactSession,
     connect: vi.fn(() => Promise.resolve()),
@@ -474,6 +541,7 @@ function createFakeRuntime(input: {
     subscribe: (listener) => store.subscribe(listener),
   };
   return {
+    archiveSession,
     compactSession,
     connectModel,
     createSession,

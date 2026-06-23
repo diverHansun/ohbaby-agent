@@ -103,6 +103,15 @@ export class DaemonHttpClient {
     );
   }
 
+  archiveSession(sessionId: string): Promise<OkResponse> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/archive`,
+      {
+        method: "PATCH",
+      },
+    );
+  }
+
   submitPrompt(input: SubmitPromptRequest): Promise<PromptAcceptedResponse> {
     return this.request("/v1/prompts", {
       body: input,

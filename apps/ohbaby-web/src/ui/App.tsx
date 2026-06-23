@@ -1,7 +1,7 @@
 import {
+  Archive,
   Bot,
   ChevronDown,
-  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -164,6 +164,15 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
     },
     [runAction, runtime.client, view.activeSession?.id],
   );
+  const archiveSession = useCallback(
+    (sessionId: string): void => {
+      if (!window.confirm("Archive this session?")) {
+        return;
+      }
+      void runAction(() => runtime.client.archiveSession(sessionId));
+    },
+    [runAction, runtime.client],
+  );
   const listCommands = useCallback(
     () => runtime.client.listCommands(),
     [runtime.client],
@@ -194,6 +203,7 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
       }`}
     >
       <SessionSidebar
+        onArchiveSession={archiveSession}
         onCreateSession={createSession}
         onSelectSession={selectSession}
         view={view}
@@ -348,6 +358,7 @@ function EmptyState(props: {
 }
 
 function SessionSidebar(props: {
+  readonly onArchiveSession: (sessionId: string) => void;
   readonly onCreateSession: () => void;
   readonly onSelectSession: (sessionId: string) => void;
   readonly view: ViewModel;
@@ -434,29 +445,48 @@ function SessionSidebar(props: {
               const active = session.id === activeSessionId;
               const running = active && props.view.composer.isRunning;
               const title = sessionTitle(session);
+              const disabled = props.view.composer.disabled;
               return (
-                <button
+                <div
                   className={`ohb-session-row ${
                     active ? "ohb-session-active" : ""
-                  } ${running ? "ohb-session-running" : ""}`}
+                  } ${running ? "ohb-session-running" : ""} ${
+                    disabled ? "ohb-session-disabled" : ""
+                  }`}
                   aria-current={active ? "page" : undefined}
-                  disabled={props.view.composer.disabled}
                   key={session.id}
-                  onClick={() => {
-                    if (!active) {
-                      props.onSelectSession(session.id);
-                    }
-                  }}
-                  title={`Select ${title}`}
-                  type="button"
                 >
-                  <span className="ohb-session-dot" />
-                  <span className="ohb-session-copy">
-                    <strong>{title}</strong>
-                    <small>{sessionMeta(session, active)}</small>
-                  </span>
-                  <MessageSquare size={14} />
-                </button>
+                  <button
+                    className="ohb-session-main"
+                    disabled={disabled}
+                    onClick={() => {
+                      if (!active) {
+                        props.onSelectSession(session.id);
+                      }
+                    }}
+                    title={`Select ${title}`}
+                    type="button"
+                  >
+                    <span className="ohb-session-dot" />
+                    <span className="ohb-session-copy">
+                      <strong>{title}</strong>
+                      <small>{sessionMeta(session, active)}</small>
+                    </span>
+                  </button>
+                  <button
+                    aria-label={`Archive ${title}`}
+                    className="ohb-session-archive"
+                    disabled={disabled}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      props.onArchiveSession(session.id);
+                    }}
+                    title={`Archive ${title}`}
+                    type="button"
+                  >
+                    <Archive size={14} />
+                  </button>
+                </div>
               );
             })
           ) : (

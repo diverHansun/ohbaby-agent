@@ -283,6 +283,9 @@ describe("ohbaby-web daemon client", () => {
           }),
         );
       }
+      if (url.endsWith("/v1/sessions/session_1/archive")) {
+        return Promise.resolve(Response.json({ ok: true }));
+      }
       return Promise.resolve(
         Response.json({ error: { message: "not found" } }, { status: 404 }),
       );
@@ -443,13 +446,21 @@ describe("ohbaby-web daemon client", () => {
     await expect(
       runtime.client.compactSession("session_1", { force: true }),
     ).resolves.toMatchObject({ sessionId: "session_1" });
-    expect(requests.slice(-6).map((request) => request.url)).toEqual([
+    await expect(runtime.client.archiveSession("session_1")).resolves.toBeUndefined();
+    expect(requests.slice(-2).map((request) => request.url)).toEqual([
+      "http://127.0.0.1:4096/v1/sessions/session_1/archive",
+      "http://127.0.0.1:4096/v1/snapshot",
+    ]);
+    expect(requests.at(-2)?.method).toBe("PATCH");
+    expect(requests.slice(-8).map((request) => request.url)).toEqual([
       "http://127.0.0.1:4096/v1/model",
       "http://127.0.0.1:4096/v1/model/context-window-probe",
       "http://127.0.0.1:4096/v1/model",
       "http://127.0.0.1:4096/v1/settings/search-api-key",
       "http://127.0.0.1:4096/v1/sessions/session_1/context-window",
       "http://127.0.0.1:4096/v1/sessions/session_1/compact",
+      "http://127.0.0.1:4096/v1/sessions/session_1/archive",
+      "http://127.0.0.1:4096/v1/snapshot",
     ]);
     sseController?.close();
     await runtime.client.close();

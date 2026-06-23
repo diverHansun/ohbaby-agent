@@ -36,6 +36,7 @@ interface BufferedEvent {
 
 export interface OhbabyWebClient {
   abortSession(sessionId: string, runId?: string): Promise<void>;
+  archiveSession(sessionId: string): Promise<void>;
   close(): Promise<void>;
   compactSession(
     sessionId: string,
@@ -202,6 +203,11 @@ class BrowserDaemonClient implements OhbabyWebClient {
 
   async selectSession(sessionId: string): Promise<void> {
     await this.http.selectSession(sessionId);
+    await this.refreshProjectedSnapshot();
+  }
+
+  async archiveSession(sessionId: string): Promise<void> {
+    await this.http.archiveSession(sessionId);
     await this.refreshProjectedSnapshot();
   }
 
