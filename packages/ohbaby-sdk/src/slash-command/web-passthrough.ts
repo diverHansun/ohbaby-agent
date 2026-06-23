@@ -59,6 +59,26 @@ const WEB_OVERLAY_COMMAND_ACTIONS: ReadonlyMap<
   ["compact", "compactSession"],
 ]);
 
+const WEB_PASSTHROUGH_COMMAND_PATHS: ReadonlyMap<
+  UiWebPassthroughCommandId,
+  readonly string[]
+> = new Map([
+  ["help", ["help"]],
+  ["mcps", ["mcps"]],
+  ["new", ["new"]],
+  ["skills", ["skills"]],
+  ["status", ["status"]],
+]);
+
+const WEB_OVERLAY_COMMAND_PATHS: ReadonlyMap<
+  UiWebOverlayCommandId,
+  readonly string[]
+> = new Map([
+  ["connect", ["connect"]],
+  ["connect-search", ["connect-search"]],
+  ["compact", ["compact"]],
+]);
+
 export function isWebPassthroughCommandId(
   commandId: string,
 ): commandId is UiWebPassthroughCommandId {
@@ -74,8 +94,13 @@ export function isWebOverlayCommandId(
 export function isWebPassthroughCommandSpec(
   command: UiSlashCommandSpec,
 ): boolean {
+  if (!isWebPassthroughCommandId(command.id) || command.source !== "builtin") {
+    return false;
+  }
+  const path = WEB_PASSTHROUGH_COMMAND_PATHS.get(command.id);
   return (
-    isWebPassthroughCommandId(command.id) &&
+    path !== undefined &&
+    hasSamePath(command.path, path) &&
     command.parentBehavior !== "interaction"
   );
 }
@@ -83,7 +108,14 @@ export function isWebPassthroughCommandSpec(
 export function isWebOverlayCommandSpec(
   command: UiSlashCommandSpec,
 ): command is UiSlashCommandSpec & { readonly id: UiWebOverlayCommandId } {
-  return isWebOverlayCommandId(command.id);
+  if (!isWebOverlayCommandId(command.id) || command.source !== "builtin") {
+    return false;
+  }
+  const path = WEB_OVERLAY_COMMAND_PATHS.get(command.id);
+  return (
+    path !== undefined &&
+    hasSamePath(command.path, path)
+  );
 }
 
 function isVisibleOnSurface(

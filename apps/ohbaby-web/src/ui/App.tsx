@@ -1508,6 +1508,10 @@ function CompactOverlayBody(props: {
         const input: CompactSessionRequest = { force };
         const nextResult = await props.client.compactSession(sessionId, input);
         setResult(nextResult);
+        const failureMessage = compactFailureMessage(nextResult);
+        if (failureMessage) {
+          throw new Error(failureMessage);
+        }
         return `compact ${nextResult.status}`;
       },
       "Compacting session",
@@ -1574,6 +1578,14 @@ function CompactOverlayBody(props: {
       </div>
     </div>
   );
+}
+
+function compactFailureMessage(result: UiCompactSessionResult): string | null {
+  if (result.status !== "failed" && result.status !== "inflated") {
+    return null;
+  }
+  const error = result.error ?? result.compression?.error;
+  return error ? `compact ${result.status}: ${error}` : `compact ${result.status}`;
 }
 
 function TextField(props: {
@@ -1764,8 +1776,8 @@ function SlashPalette(props: {
             >
               <span className={`ohb-slash-dot ohb-slash-dot-${item.accent}`} />
               <span>{item.label}</span>
-              {item.argsHint ? <small>{item.argsHint}</small> : null}
-              <em>{item.description}</em>
+              <small className="ohb-slash-args">{item.argsHint}</small>
+              <em className="ohb-slash-description">{item.description}</em>
             </button>
           </div>
         ))}

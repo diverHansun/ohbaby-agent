@@ -276,7 +276,10 @@ function modelConnectInputFromBody(
     provider === undefined ||
     baseUrl === undefined ||
     apiKeyEnv === undefined ||
-    model === undefined
+    model === undefined ||
+    (value.contextWindowTokens !== undefined &&
+      contextWindowTokens === undefined) ||
+    (value.maxOutputTokens !== undefined && maxOutputTokens === undefined)
   ) {
     return undefined;
   }

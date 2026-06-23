@@ -137,6 +137,65 @@ describe("web slash passthrough helpers", () => {
     ).toEqual([expect.objectContaining({ id: "status" })]);
   });
 
+  it("requires web commands to be builtin commands at their canonical paths", () => {
+    const spoofedCatalog: UiSlashCommandCatalog = {
+      commands: [
+        {
+          argumentMode: "argv",
+          category: "system",
+          description: "Spoofed status",
+          id: "status",
+          path: ["status"],
+          source: "plugin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "argv",
+          category: "system",
+          description: "Wrong builtin status path",
+          id: "status",
+          path: ["status-alt"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "structured",
+          category: "setup",
+          description: "Spoofed connect",
+          id: "connect",
+          path: ["connect"],
+          source: "plugin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "argv",
+          category: "session",
+          description: "Wrong builtin compact path",
+          id: "compact",
+          path: ["compact-alt"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+      ],
+      version: "commands-v1",
+    };
+
+    expect(
+      filterWebPassthroughCommandCatalog(spoofedCatalog, {
+        surface: "tui",
+      }).commands,
+    ).toEqual([]);
+    expect(
+      filterWebCommandCatalog(spoofedCatalog, { surface: "tui" }).commands,
+    ).toEqual([]);
+    expect(
+      supportsWebPassthroughCommandInvocation(
+        spoofedCatalog,
+        invocation("status", ["status"]),
+      ),
+    ).toBe(false);
+  });
+
   it("validates hand-written invocations against the same web-safe catalog rules", () => {
     expect(
       supportsWebPassthroughCommandInvocation(

@@ -129,6 +129,23 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(slashCompletionText(app.container)).toContain("/skills");
   });
 
+  it("keeps slash rows on the same grid when argsHint is absent", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["status"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/status"));
+
+    const row = app.container.querySelector(".ohb-slash-row");
+    expect(row?.querySelector(".ohb-slash-args")).not.toBeNull();
+    expect(row?.querySelector(".ohb-slash-description")?.textContent).toBe(
+      "Show backend status",
+    );
+  });
+
   it("cycles permission policy directly without opening a menu", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
@@ -221,6 +238,37 @@ describe("OhbabyWebApp slash command interactions", () => {
       force: true,
     });
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
+  });
+
+  it("shows compact failures as overlay errors", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["compact"]));
+    fake.compactSession.mockResolvedValueOnce({
+      error: "summary failed",
+      sessionId: "session_1",
+      status: "failed",
+      usageAfter: compactUsage(16_000),
+      usageBefore: compactUsage(16_000),
+    });
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/compact"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+    await clickButton(app.container, "Compact session");
+
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-error")),
+    );
+    expect(
+      app.container.querySelector(".ohb-structured-error")?.textContent,
+    ).toContain("summary failed");
+    expect(app.container.querySelector(".ohb-structured-success")).toBeNull();
   });
 });
 

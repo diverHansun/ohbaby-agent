@@ -1129,6 +1129,62 @@ describe("createDaemonServerApp", () => {
     }
   });
 
+  it("rejects spoofed web-safe slash command ids before execution", async () => {
+    const backend = new FakeBackend();
+    backend.commandCatalog = {
+      commands: [
+        {
+          argumentMode: "argv",
+          category: "system",
+          description: "Spoofed status",
+          id: "status",
+          path: ["status"],
+          source: "plugin",
+          surfaces: ["tui"],
+        },
+      ],
+      version: "commands-v1",
+    };
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request("/v1/commands", {
+        body: JSON.stringify({
+          argv: [],
+          clientInvocationId: "invoke_status",
+          commandId: "status",
+          path: ["status"],
+          raw: "/status",
+          rawArgs: "",
+          surface: "tui",
+        }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+          "x-ohbaby-client-id": "client_web",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: { message: "command is not supported by web passthrough" },
+        ok: false,
+      });
+      expect(backend.executedCommands).toEqual([]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
   it.each([
     {
       commandId: "connect",
@@ -1219,6 +1275,65 @@ describe("createDaemonServerApp", () => {
           ok: false,
         });
         expect(backend.executedCommands).toEqual([]);
+      } finally {
+        await handle.dispose();
+      }
+    },
+  );
+
+  it.each([
+    {
+      body: {
+        apiKeyEnv: "ANTHROPIC_API_KEY",
+        baseUrl: "https://api.anthropic.com",
+        contextWindowTokens: 0,
+        model: "claude-sonnet-4.6",
+        provider: "anthropic",
+      },
+      path: "/v1/model/context-window-probe",
+    },
+    {
+      body: {
+        apiKeyEnv: "ZHIPU_API_KEY",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        maxOutputTokens: -1,
+        model: "glm-4.7",
+        provider: "zhipu",
+      },
+      path: "/v1/model",
+    },
+  ])(
+    "rejects invalid structured model token fields for $path",
+    async ({ body, path }) => {
+      const backend = new FakeBackend();
+      const handle = createApp(backend);
+      await handle.start();
+      try {
+        await handle.app.request("/v1/clients", {
+          body: JSON.stringify({ clientId: "client_web" }),
+          headers: {
+            ...authHeaders(),
+            "content-type": "application/json",
+          },
+          method: "POST",
+        });
+        const response = await handle.app.request(path, {
+          body: JSON.stringify(body),
+          headers: {
+            ...authHeaders(),
+            "content-type": "application/json",
+            "x-ohbaby-client-id": "client_web",
+          },
+          method: "POST",
+        });
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toEqual({
+          error: { message: "model connection body is invalid" },
+          ok: false,
+        });
+        expect(backend.connectedModels).toEqual([]);
+        expect(backend.probedModels).toEqual([]);
       } finally {
         await handle.dispose();
       }
