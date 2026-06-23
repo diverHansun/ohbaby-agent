@@ -61,7 +61,7 @@ export function createSlashPaletteItems(
     .sort(compareSlashCommands);
   let previousCategory = "";
   return commands.map((command) => {
-    const categoryLabel = CATEGORY_LABELS[command.category] ?? "Command";
+    const categoryLabel = categoryLabelForCommand(command);
     const showCategory = categoryLabel !== previousCategory;
     previousCategory = categoryLabel;
     return {
@@ -221,12 +221,29 @@ function compareSlashCommands(
   right: UiWebCommandSpec,
 ): number {
   const categoryOrder =
-    (CATEGORY_ORDER[left.category] ?? 100) -
-    (CATEGORY_ORDER[right.category] ?? 100);
+    categoryOrderForCommand(left) - categoryOrderForCommand(right);
   if (categoryOrder !== 0) {
     return categoryOrder;
   }
   return slashCommandLabel(left).localeCompare(slashCommandLabel(right));
+}
+
+function categoryLabelForCommand(command: UiWebCommandSpec): string {
+  return isSetupOverlay(command)
+    ? "Setup"
+    : (CATEGORY_LABELS[command.category] ?? "Command");
+}
+
+function categoryOrderForCommand(command: UiWebCommandSpec): number {
+  return isSetupOverlay(command)
+    ? CATEGORY_ORDER.setup
+    : (CATEGORY_ORDER[command.category] ?? 100);
+}
+
+function isSetupOverlay(command: UiWebCommandSpec): boolean {
+  return (
+    command.action === "connectModel" || command.action === "connectSearch"
+  );
 }
 
 function slashCommandAccent(category: string): SlashPaletteItem["accent"] {

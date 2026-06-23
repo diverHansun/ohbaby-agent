@@ -56,6 +56,28 @@ function commandCatalog(): UiWebCommandCatalog {
         source: "builtin",
         surfaces: ["tui"],
       },
+      {
+        action: "connectModel",
+        argumentMode: "argv",
+        category: "model",
+        description: "Connect to an LLM provider",
+        executionKind: "overlay",
+        id: "connect",
+        path: ["connect"],
+        source: "builtin",
+        surfaces: ["tui"],
+      },
+      {
+        action: "connectSearch",
+        argumentMode: "argv",
+        category: "tool",
+        description: "Connect a web search provider",
+        executionKind: "overlay",
+        id: "connect-search",
+        path: ["connect-search"],
+        source: "builtin",
+        surfaces: ["tui"],
+      },
     ],
     version: "commands-v1",
   };
@@ -66,17 +88,24 @@ describe("ohbaby-web slash commands UI helpers", () => {
     const items = createSlashPaletteItems(commandCatalog(), "/");
 
     expect(items.map((item) => item.label)).toEqual([
+      "/connect",
+      "/connect-search",
       "/compact",
       "/new",
       "/skills",
       "/status",
     ]);
     expect(items[0]).toMatchObject({
-      categoryLabel: "Session",
+      categoryLabel: "Setup",
       executionKind: "overlay",
       showCategory: true,
     });
     expect(items[2]).toMatchObject({
+      categoryLabel: "Session",
+      executionKind: "overlay",
+      showCategory: true,
+    });
+    expect(items[4]).toMatchObject({
       categoryLabel: "Tools",
       showCategory: true,
     });
