@@ -21,6 +21,13 @@ describe("web app layout styles", () => {
       "position: absolute",
     ]);
   });
+
+  it("keeps slash command rows aligned across command, args, and description columns", () => {
+    expectCssRule(".ohb-slash-row", [
+      "grid-template-columns: 7px minmax(128px, 144px) minmax(136px, 1fr) minmax(148px, 1fr)",
+    ]);
+    expectCssRule(".ohb-slash-row em", ["text-align: left"]);
+  });
 });
 
 function expectCssRule(selector: string, declarations: readonly string[]): void {

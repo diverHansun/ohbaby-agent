@@ -1339,7 +1339,7 @@ textarea:disabled {
   cursor: pointer;
   display: grid;
   gap: 10px;
-  grid-template-columns: 7px minmax(72px, 96px) minmax(0, 72px) minmax(0, 1fr);
+  grid-template-columns: 7px minmax(128px, 144px) minmax(136px, 1fr) minmax(148px, 1fr);
   min-height: 31px;
   padding: 9px 11px;
   width: 100%;
@@ -1396,7 +1396,7 @@ textarea:disabled {
   font-style: normal;
   min-width: 0;
   overflow: hidden;
-  text-align: right;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
