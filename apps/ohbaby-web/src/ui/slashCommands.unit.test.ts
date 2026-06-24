@@ -26,22 +26,22 @@ function commandCatalog(): UiWebCommandCatalog {
       {
         action: "executeCommand",
         argumentMode: "argv",
-        category: "skill",
-        description: "List available skills",
+        category: "session",
+        description: "Create a new session",
         executionKind: "passthrough",
-        id: "skills",
-        path: ["skills"],
+        id: "new",
+        path: ["new"],
         source: "builtin",
         surfaces: ["tui"],
       },
       {
         action: "executeCommand",
         argumentMode: "argv",
-        category: "session",
-        description: "Create a new session",
+        category: "skill",
+        description: "List available skills",
         executionKind: "passthrough",
-        id: "new",
-        path: ["new"],
+        id: "skills",
+        path: ["skills"],
         source: "builtin",
         surfaces: ["tui"],
       },
@@ -91,10 +91,10 @@ describe("ohbaby-web slash commands UI helpers", () => {
       "/connect",
       "/connect-search",
       "/compact",
-      "/new",
       "/skills",
       "/status",
     ]);
+    expect(items.map((item) => item.label)).not.toContain("/new");
     expect(items[0]).toMatchObject({
       categoryLabel: "Setup",
       executionKind: "overlay",
@@ -105,7 +105,7 @@ describe("ohbaby-web slash commands UI helpers", () => {
       executionKind: "overlay",
       showCategory: true,
     });
-    expect(items[4]).toMatchObject({
+    expect(items[3]).toMatchObject({
       categoryLabel: "Tools",
       showCategory: true,
     });

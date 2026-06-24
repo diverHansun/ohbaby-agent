@@ -8,7 +8,6 @@ import type {
 export const WEB_PASSTHROUGH_COMMAND_IDS = [
   "help",
   "mcps",
-  "new",
   "skills",
   "status",
 ] as const;
@@ -65,7 +64,6 @@ const WEB_PASSTHROUGH_COMMAND_PATHS: ReadonlyMap<
 > = new Map([
   ["help", ["help"]],
   ["mcps", ["mcps"]],
-  ["new", ["new"]],
   ["skills", ["skills"]],
   ["status", ["status"]],
 ]);

@@ -104,11 +104,11 @@ describe("web slash passthrough helpers", () => {
     expect(WEB_PASSTHROUGH_COMMAND_IDS).toEqual([
       "help",
       "mcps",
-      "new",
       "skills",
       "status",
     ]);
     expect(isWebPassthroughCommandId("status")).toBe(true);
+    expect(isWebPassthroughCommandId("new")).toBe(false);
     expect(isWebPassthroughCommandId("sessions")).toBe(false);
   });
 
@@ -128,7 +128,6 @@ describe("web slash passthrough helpers", () => {
       filterWebPassthroughCommandCatalog(catalog, { surface: "tui" }).commands,
     ).toEqual([
       expect.objectContaining({ id: "status" }),
-      expect.objectContaining({ id: "new" }),
     ]);
     expect(
       filterWebPassthroughCommandCatalog(catalog, {
@@ -206,6 +205,12 @@ describe("web slash passthrough helpers", () => {
     expect(
       supportsWebPassthroughCommandInvocation(
         catalog,
+        invocation("new", ["new"]),
+      ),
+    ).toBe(false);
+    expect(
+      supportsWebPassthroughCommandInvocation(
+        catalog,
         invocation("sessions", ["sessions"]),
       ),
     ).toBe(false);
@@ -230,11 +235,6 @@ describe("web slash passthrough helpers", () => {
           action: "executeCommand",
           executionKind: "passthrough",
           id: "status",
-        }),
-        expect.objectContaining({
-          action: "executeCommand",
-          executionKind: "passthrough",
-          id: "new",
         }),
         expect.objectContaining({
           action: "compactSession",

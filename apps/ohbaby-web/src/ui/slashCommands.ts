@@ -51,12 +51,17 @@ export function createSlashPaletteItems(
   if (!draft.startsWith("/")) {
     return [];
   }
+  const paletteCommands = catalog.commands.filter(isWebPaletteCommand);
+  const paletteCatalog: UiWebCommandCatalog = {
+    ...catalog,
+    commands: paletteCommands,
+  };
   const matchedIds = new Set(
-    filterSlashCommandCatalog(catalog, draft, {
+    filterSlashCommandCatalog(paletteCatalog, draft, {
       surface: "tui",
     }).map((command) => command.id),
   );
-  const commands = catalog.commands
+  const commands = paletteCommands
     .filter((command) => matchedIds.has(command.id))
     .sort(compareSlashCommands);
   let previousCategory = "";
@@ -76,6 +81,13 @@ export function createSlashPaletteItems(
       showCategory,
     };
   });
+}
+
+function isWebPaletteCommand(command: UiWebCommandSpec): boolean {
+  return (
+    command.action !== "executeCommand" ||
+    isWebPassthroughCommandId(command.id)
+  );
 }
 
 export function slashCompletionSuffix(

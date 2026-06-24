@@ -1018,10 +1018,10 @@ describe("createDaemonServerApp", () => {
       const response = await handle.app.request("/v1/commands", {
         body: JSON.stringify({
           argv: [],
-          clientInvocationId: "invoke_new",
-          commandId: "new",
-          path: ["new"],
-          raw: "/new",
+          clientInvocationId: "invoke_status",
+          commandId: "status",
+          path: ["status"],
+          raw: "/status",
           rawArgs: "",
           surface: "tui",
         }),
@@ -1037,15 +1037,57 @@ describe("createDaemonServerApp", () => {
       await expect(response.json()).resolves.toEqual({ ok: true });
       expect(backend.executedCommands).toEqual([
         {
-          argv: ["--no-reuse-empty-session"],
-          clientInvocationId: "invoke_new",
-          commandId: "new",
-          path: ["new"],
-          raw: "/new --no-reuse-empty-session",
-          rawArgs: "--no-reuse-empty-session",
+          argv: [],
+          clientInvocationId: "invoke_status",
+          commandId: "status",
+          path: ["status"],
+          raw: "/status",
+          rawArgs: "",
           surface: "tui",
         },
       ]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("rejects /new through the web slash command passthrough route", async () => {
+    const backend = new FakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request("/v1/commands", {
+        body: JSON.stringify({
+          argv: [],
+          clientInvocationId: "invoke_new",
+          commandId: "new",
+          path: ["new"],
+          raw: "/new",
+          rawArgs: "",
+          surface: "tui",
+        }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+          "x-ohbaby-client-id": "client_web",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: { message: "command is not supported by web passthrough" },
+        ok: false,
+      });
+      expect(backend.executedCommands).toEqual([]);
     } finally {
       await handle.dispose();
     }
