@@ -270,6 +270,31 @@ export class RunWorker {
       return;
     }
 
+    if (event.type === "llm:reasoning-delta") {
+      this.publish(scope, "run.llm.reasoning.delta", {
+        runId: this.context.runId,
+        sessionId: this.context.sessionId,
+        timestamp: event.timestamp,
+        step: event.step,
+        messageId: event.messageId,
+        delta: event.delta,
+        content: event.content,
+      });
+      return;
+    }
+
+    if (event.type === "llm:reasoning-end") {
+      this.publish(scope, "run.llm.reasoning.end", {
+        runId: this.context.runId,
+        sessionId: this.context.sessionId,
+        timestamp: event.timestamp,
+        step: event.step,
+        messageId: event.messageId,
+        content: event.content,
+      });
+      return;
+    }
+
     if (event.type === "llm:start") {
       this.publish(
         scope,

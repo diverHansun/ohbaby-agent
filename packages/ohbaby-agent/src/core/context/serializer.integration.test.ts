@@ -174,4 +174,90 @@ describe("serializeForLlm database metadata projection", () => {
       },
     ]);
   });
+
+  it("injects active reasoning only on assistant messages with tool calls", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+      idGenerator: createMessageIds(),
+      now: createClock(),
+    });
+    const toolAssistant = await messageManager.createMessage({
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+    });
+    await messageManager.appendPart(toolAssistant.id, {
+      type: "tool",
+      callId: "call_read",
+      tool: "read_file",
+      state: {
+        status: "completed",
+        input: { path: "README.md" },
+        output: "file contents",
+      },
+    });
+    const textAssistant = await messageManager.createMessage({
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+    });
+    await messageManager.appendPart(textAssistant.id, {
+      type: "text",
+      text: "Done",
+    });
+
+    const history = await messageManager.listBySession("session_1");
+    const withReasoning = serializeForLlm({
+      activeReasoningByMessageId: new Map([
+        [toolAssistant.id, "deep thought"],
+        [textAssistant.id, "unused thought"],
+      ]),
+      history,
+      isSubagent: false,
+      memory: { global: "", project: "", merged: "" },
+      systemPrompt: "",
+    });
+    const withoutReasoning = serializeForLlm({
+      activeReasoningByMessageId: new Map(),
+      history,
+      isSubagent: false,
+      memory: { global: "", project: "", merged: "" },
+      systemPrompt: "",
+    });
+
+    expect(withReasoning[0]).toEqual({
+      role: "assistant",
+      content: null,
+      reasoning_content: "deep thought",
+      tool_calls: [
+        {
+          id: "call_read",
+          type: "function",
+          function: {
+            name: "read_file",
+            arguments: "{\"path\":\"README.md\"}",
+          },
+        },
+      ],
+    });
+    expect(withReasoning[2]).toEqual({
+      role: "assistant",
+      content: "Done",
+    });
+    expect(withoutReasoning[0]).toEqual({
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: "call_read",
+          type: "function",
+          function: {
+            name: "read_file",
+            arguments: "{\"path\":\"README.md\"}",
+          },
+        },
+      ],
+    });
+  });
 });

@@ -206,6 +206,19 @@ export interface StreamingResponse {
   retry?: ProviderRetryEvent;
 
   /**
+   * Reasoning delta emitted by providers that expose a separate thinking
+   * channel. This is intentionally separate from assistant text content.
+   */
+  reasoningDelta?: string;
+
+  /**
+   * Reasoning accumulated for the current model step. Consumers may use this
+   * for live display or same-turn passback, but it must not be treated as
+   * assistant message content.
+   */
+  reasoning?: string;
+
+  /**
    * Token usage statistics for the complete request.
    *
    * Only populated when isComplete === true.

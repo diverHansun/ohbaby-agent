@@ -11,6 +11,7 @@ import type {
 } from "ohbaby-sdk";
 import type { ConnectionState, StoreSnapshot } from "../api/daemon/wire.js";
 import type { CommandNotice } from "../api/daemon/wire.js";
+import type { ReasoningViewState } from "../api/daemon/wire.js";
 
 export interface HeaderModel {
   readonly connectionKind:
@@ -46,6 +47,7 @@ export interface ViewModel {
   readonly header: HeaderModel;
   readonly isEmpty: boolean;
   readonly pendingPermissions: readonly UiPermissionRequest[];
+  readonly reasoningByMessageId: Record<string, ReasoningViewState>;
   readonly snapshot: UiSnapshot | null;
 }
 
@@ -99,6 +101,7 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
     },
     isEmpty: (activeSession?.messages.length ?? 0) === 0,
     pendingPermissions,
+    reasoningByMessageId: snapshot.view.reasoningByMessageId,
     snapshot: daemonSnapshot,
   };
 }

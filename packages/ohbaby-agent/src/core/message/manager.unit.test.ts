@@ -160,7 +160,7 @@ describe("MessageManager", () => {
     expect(events).toEqual([]);
   });
 
-  it("converts text and reasoning parts to provider model messages", async () => {
+  it("does not feed reasoning parts to provider model messages", async () => {
     const manager = createMessageManager({
       bus: createBus(),
       store: createInMemoryMessageStore(),
@@ -214,7 +214,7 @@ describe("MessageManager", () => {
 
     await expect(manager.toModelMessages("session_1")).resolves.toEqual([
       { role: "user", content: "Say hello" },
-      { role: "assistant", content: "brieflyHellofile contents" },
+      { role: "assistant", content: "Hellofile contents" },
     ]);
   });
 

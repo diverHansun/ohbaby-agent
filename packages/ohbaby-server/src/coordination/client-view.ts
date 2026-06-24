@@ -225,6 +225,8 @@ function sessionIdForEvent(event: UiEvent): string | undefined {
     case "message.appended":
     case "message.updated":
     case "message.part.delta":
+    case "message.reasoning.delta":
+    case "message.reasoning.end":
     case "run.interrupted":
       return event.sessionId;
     case "run.updated":

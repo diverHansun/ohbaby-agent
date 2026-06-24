@@ -423,9 +423,10 @@ describe("LLM Client Integration Tests", () => {
       expect(lastResponse.completeMessage.content).toBe("(Empty response)");
     });
 
-    it("should not expose provider reasoning deltas as assistant text", async () => {
+    it("should yield provider reasoning deltas without exposing them as assistant text", async () => {
       const events: InterfaceProviderStreamEvent[] = [
-        { reasoningDelta: "hidden reasoning" },
+        { reasoningDelta: "think " },
+        { reasoningDelta: "more" },
         { textDelta: "Visible answer" },
         { finishReason: "stop" },
       ];
@@ -440,8 +441,33 @@ describe("LLM Client Integration Tests", () => {
       }
 
       expect(
-        responses.map((response) => response.completeMessage.content),
-      ).toEqual(["Visible answer", "Visible answer"]);
+        responses.map((response) => ({
+          content: response.completeMessage.content,
+          reasoning: response.reasoning,
+          reasoningDelta: response.reasoningDelta,
+        })),
+      ).toEqual([
+        {
+          content: "(Empty response)",
+          reasoning: "think ",
+          reasoningDelta: "think ",
+        },
+        {
+          content: "(Empty response)",
+          reasoning: "think more",
+          reasoningDelta: "more",
+        },
+        {
+          content: "Visible answer",
+          reasoning: "think more",
+          reasoningDelta: undefined,
+        },
+        {
+          content: "Visible answer",
+          reasoning: "think more",
+          reasoningDelta: undefined,
+        },
+      ]);
     });
 
     it("should use configuration from client instance", async () => {

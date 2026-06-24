@@ -78,6 +78,7 @@ function buildCompleteMessage(
 
 function buildAbortResponse(input: {
   readonly accumulatedContent: string;
+  readonly accumulatedReasoning: string;
   readonly accumulatedToolCalls: Map<number, AccumulatedToolCall>;
   readonly rawFinishReason: string | undefined;
   readonly tokenUsage: TokenUsage | null;
@@ -102,6 +103,10 @@ function buildAbortResponse(input: {
     completeMessage,
     isComplete: true,
     rawFinishReason: input.rawFinishReason,
+    reasoning:
+      input.accumulatedReasoning === ""
+        ? undefined
+        : input.accumulatedReasoning,
     streamStopReason: "user_aborted",
     tokenUsage: input.tokenUsage ?? undefined,
   };
@@ -220,6 +225,7 @@ export async function* streamChatCompletion(
 
   // Accumulation state - maintained across iterations
   let accumulatedContent = "";
+  let accumulatedReasoning = "";
   const accumulatedToolCalls = new Map<number, AccumulatedToolCall>();
   let finishReason: ChatFinishReason | null = null;
   let rawFinishReason: string | undefined;
@@ -242,9 +248,6 @@ export async function* streamChatCompletion(
       // Stream each normalized event from the provider
       for await (const event of stream) {
         const finish = event.finishReason;
-        const hasToolCallDeltas =
-          event.toolCallDeltas !== undefined &&
-          event.toolCallDeltas.length > 0;
 
         // Update finish reason when stream ends
         if (finish) {
@@ -264,14 +267,8 @@ export async function* streamChatCompletion(
           accumulatedContent += event.textDelta;
         }
 
-        if (
-          event.reasoningDelta &&
-          !event.textDelta &&
-          !hasToolCallDeltas &&
-          !finish &&
-          !event.tokenUsage
-        ) {
-          continue;
+        if (event.reasoningDelta) {
+          accumulatedReasoning += event.reasoningDelta;
         }
 
         // Accumulate tool call fragments
@@ -328,6 +325,9 @@ export async function* streamChatCompletion(
           parsedToolCalls,
           isComplete: finishReason !== null,
           finishReason: finishReason ?? undefined,
+          reasoning:
+            accumulatedReasoning === "" ? undefined : accumulatedReasoning,
+          reasoningDelta: event.reasoningDelta,
           rawFinishReason,
           streamStopReason:
             finishReason === null ? undefined : "provider_finished",
@@ -341,6 +341,8 @@ export async function* streamChatCompletion(
             accumulatedToolCalls,
           ),
           isComplete: true,
+          reasoning:
+            accumulatedReasoning === "" ? undefined : accumulatedReasoning,
           rawFinishReason,
           streamStopReason: "provider_finished",
           tokenUsage: tokenUsage ?? undefined,
@@ -363,6 +365,7 @@ export async function* streamChatCompletion(
         // This allows consumers to save or reuse the partial response
         yield buildAbortResponse({
           accumulatedContent,
+          accumulatedReasoning,
           accumulatedToolCalls,
           rawFinishReason,
           tokenUsage,
@@ -409,6 +412,7 @@ export async function* streamChatCompletion(
         if (sleepError instanceof RetrySleepAbortedError) {
           yield buildAbortResponse({
             accumulatedContent,
+            accumulatedReasoning,
             accumulatedToolCalls,
             rawFinishReason,
             tokenUsage,

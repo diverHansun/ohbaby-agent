@@ -13,6 +13,7 @@ function store(snapshot: UiSnapshot): StoreSnapshot {
       commandCatalogVersion: null,
       commandNotices: [],
       lastAppliedSeqNum: 10,
+      reasoningByMessageId: {},
       snapshot,
     },
   };

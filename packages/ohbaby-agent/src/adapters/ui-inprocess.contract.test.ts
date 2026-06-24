@@ -1166,6 +1166,108 @@ describe("createInProcessUiBackendClient", () => {
     ]);
   });
 
+  it("streams reasoning through UI events without persisting it as message parts", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ohbaby-reasoning-db-"));
+    const bus = createBus();
+
+    try {
+      await initializeGitRepository(directory);
+      initDatabase({ dbPath: join(directory, "agent.db") });
+      const runLedger = createDatabaseRunLedger();
+      const messageManager = createMessageManager({
+        bus,
+        idGenerator: createDeterministicMessageIds(),
+        store: createDatabaseMessageStore(),
+      });
+      const sessionManager = createSessionManager({
+        bus,
+        createSessionId: () => "session_from_db",
+        messageCleaner: {
+          removeMessages(sessionId: string) {
+            return messageManager.removeMessages(sessionId);
+          },
+        },
+        now: () => 1_000,
+        projectResolver: Project,
+        store: createDatabaseSessionStore(),
+      });
+      const client = createInProcessUiBackendClient({
+        bus,
+        llmClient: createFakeLLMClient(
+          [
+            { reasoningDelta: "Checking" },
+            { reasoningDelta: " context" },
+            { textDelta: "Visible answer", finishReason: "stop" },
+          ],
+          { contextWindowTokens: 1_000_000 },
+        ),
+        messageManager,
+        projectDirectory: directory,
+        runLedger,
+        sessionManager,
+        stateStore: createPersistentUiStateStore({
+          messageManager,
+          projectRoot: directory,
+          runLedger,
+          sessionManager,
+        }),
+      });
+      const events: UiEvent[] = [];
+      client.subscribeEvents((event) => {
+        events.push(event);
+      });
+
+      await client.submitPrompt("Show reasoning transiently");
+
+      const reasoningDeltas = events.filter(
+        (
+          event,
+        ): event is Extract<UiEvent, { type: "message.reasoning.delta" }> =>
+          event.type === "message.reasoning.delta",
+      );
+      expect(
+        reasoningDeltas.map((event) => ({
+          content: event.content,
+          delta: event.delta,
+        })),
+      ).toEqual([
+        { content: "Checking", delta: "Checking" },
+        { content: "Checking context", delta: " context" },
+      ]);
+      expect(
+        events.find(
+          (event): event is Extract<
+            UiEvent,
+            { type: "message.reasoning.end" }
+          > => event.type === "message.reasoning.end",
+        ),
+      ).toMatchObject({
+        content: "Checking context",
+        type: "message.reasoning.end",
+      });
+
+      const snapshot = await client.getSnapshot();
+      const assistant = snapshot.sessions[0].messages.find(
+        (message) => message.role === "assistant",
+      );
+      expect(assistant?.parts).toEqual([
+        { type: "text", text: "Visible answer" },
+      ]);
+
+      const persistedMessages = await messageManager.listBySession(
+        snapshot.sessions[0].id,
+      );
+      expect(
+        persistedMessages.flatMap((message) =>
+          message.parts.map((part) => part.type),
+        ),
+      ).toEqual(["text", "text"]);
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("connects a model through a safe structured backend payload", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-connect-"));
     const homeDir = await mkdtemp(join(tmpdir(), "ohbaby-connect-home-"));

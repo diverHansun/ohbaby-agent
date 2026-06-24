@@ -136,6 +136,23 @@ export type LifecycleEvent =
       readonly completeMessage: ChatCompletionMessage;
     }
   | {
+      readonly type: "llm:reasoning-delta";
+      readonly sessionId: string;
+      readonly messageId: string;
+      readonly step?: number;
+      readonly timestamp: number;
+      readonly delta: string;
+      readonly content: string;
+    }
+  | {
+      readonly type: "llm:reasoning-end";
+      readonly sessionId: string;
+      readonly messageId: string;
+      readonly step?: number;
+      readonly timestamp: number;
+      readonly content: string;
+    }
+  | {
       readonly type: "llm:complete";
       readonly sessionId: string;
       readonly step?: number;

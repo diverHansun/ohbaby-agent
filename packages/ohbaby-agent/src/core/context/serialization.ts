@@ -13,8 +13,11 @@ export function serializePart(part: Part): string {
   if (!isActivePart(part)) {
     return "";
   }
-  if (part.type === "text" || part.type === "reasoning") {
+  if (part.type === "text") {
     return part.text;
+  }
+  if (part.type === "reasoning") {
+    return "";
   }
   if (part.state.status === "completed") {
     return part.state.output;

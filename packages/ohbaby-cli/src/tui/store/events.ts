@@ -139,6 +139,34 @@ export function applyTuiEvent(
         ),
       });
 
+    case "message.reasoning.delta":
+      return rebuildFromCollections(state, {
+        sessions: updateSessionMessages(
+          state.sessions,
+          event.sessionId,
+          (messages) =>
+            messages.map((message) =>
+              message.id === event.messageId
+                ? applyReasoningDelta(message, event.delta, event.content)
+                : message,
+            ),
+        ),
+      });
+
+    case "message.reasoning.end":
+      return rebuildFromCollections(state, {
+        sessions: updateSessionMessages(
+          state.sessions,
+          event.sessionId,
+          (messages) =>
+            messages.map((message) =>
+              message.id === event.messageId
+                ? applyReasoningEnd(message, event.content)
+                : message,
+            ),
+        ),
+      });
+
     case "run.updated": {
       const next = rebuildFromCollections(state, {
         runs: upsertById(state.runs, event.run),
@@ -776,6 +804,49 @@ function applyPartDelta(
   };
 }
 
+function applyReasoningDelta(
+  message: UiMessage,
+  delta: string,
+  content: string,
+): UiMessage {
+  const lastIndex = message.parts.length - 1;
+  const lastPart = message.parts.at(lastIndex);
+  if (lastPart?.type === "reasoning") {
+    return {
+      ...message,
+      parts: message.parts.map((part, index) =>
+        index === lastIndex ? { ...part, text: content } : part,
+      ),
+    };
+  }
+
+  return {
+    ...message,
+    parts: [...message.parts, { text: content || delta, type: "reasoning" }],
+  };
+}
+
+function applyReasoningEnd(message: UiMessage, content: string): UiMessage {
+  const lastPart = message.parts.at(-1);
+  const withReasoning =
+    lastPart?.type === "reasoning"
+      ? {
+          ...message,
+          parts: message.parts.map((part, index) =>
+            index === message.parts.length - 1 ? { ...part, text: content } : part,
+          ),
+        }
+      : message;
+  const nextLastPart = withReasoning.parts.at(-1);
+  if (nextLastPart?.type !== "reasoning") {
+    return withReasoning;
+  }
+  return {
+    ...withReasoning,
+    parts: [...withReasoning.parts, { text: "", type: "text" }],
+  };
+}
+
 function resolvePartIndex(
   message: UiMessage,
   partId: string | undefined,
@@ -855,9 +926,7 @@ function findTailTextPartIndex(message: UiMessage): number {
   const lastIndex = message.parts.length - 1;
   const lastPart = message.parts.at(lastIndex);
 
-  return lastPart?.type === "text" || lastPart?.type === "reasoning"
-    ? lastIndex
-    : -1;
+  return lastPart?.type === "text" ? lastIndex : -1;
 }
 
 function formatCommandOutput(output: UiCommandOutput | undefined): string {

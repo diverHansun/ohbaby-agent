@@ -64,6 +64,23 @@ export interface UiMessagePartDeltaEvent {
   readonly timestamp?: number;
 }
 
+export interface UiMessageReasoningDeltaEvent {
+  readonly type: "message.reasoning.delta";
+  readonly sessionId: string;
+  readonly messageId: string;
+  readonly delta: string;
+  readonly content: string;
+  readonly timestamp?: number;
+}
+
+export interface UiMessageReasoningEndEvent {
+  readonly type: "message.reasoning.end";
+  readonly sessionId: string;
+  readonly messageId: string;
+  readonly content: string;
+  readonly timestamp?: number;
+}
+
 export interface UiRunUpdatedEvent {
   readonly type: "run.updated";
   readonly run: UiRun;
@@ -171,6 +188,8 @@ export type UiEvent =
   | UiMessageAppendedEvent
   | UiMessageUpdatedEvent
   | UiMessagePartDeltaEvent
+  | UiMessageReasoningDeltaEvent
+  | UiMessageReasoningEndEvent
   | UiRunUpdatedEvent
   | UiRunInterruptedEvent
   | UiContextWindowUpdatedEvent

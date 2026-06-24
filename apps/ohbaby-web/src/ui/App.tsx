@@ -573,7 +573,11 @@ function ConversationStream(props: { readonly view: ViewModel }): ReactElement {
     <section className="ohb-stream" ref={streamRef}>
       <div className="ohb-stream-inner">
         {messages.map((message) => (
-          <MessageRow key={message.id} message={message} />
+          <MessageRow
+            key={message.id}
+            message={message}
+            reasoning={props.view.reasoningByMessageId[message.id]}
+          />
         ))}
         <CommandNoticeList notices={props.view.commandNotices} />
         {props.view.composer.isRunning ? <ThinkingIndicator /> : null}
@@ -833,7 +837,10 @@ function FallbackCommandResult(props: {
   );
 }
 
-function MessageRow(props: { readonly message: UiMessage }): ReactElement {
+function MessageRow(props: {
+  readonly message: UiMessage;
+  readonly reasoning?: ViewModel["reasoningByMessageId"][string];
+}): ReactElement {
   const isUser = props.message.role === "user";
   const isAssistant = props.message.role === "assistant";
   const label = isUser ? "You" : isAssistant ? "ohbaby" : props.message.role;
@@ -844,6 +851,12 @@ function MessageRow(props: { readonly message: UiMessage }): ReactElement {
         <span>{label}</span>
       </div>
       <div className="ohb-message-body">
+        {props.reasoning ? (
+          <details className="ohb-reasoning" open={!props.reasoning.folded}>
+            <summary>Thought</summary>
+            <pre>{props.reasoning.content}</pre>
+          </details>
+        ) : null}
         {props.message.parts.map((part, index) => (
           <MessagePart
             isStreaming={props.message.status === "streaming"}

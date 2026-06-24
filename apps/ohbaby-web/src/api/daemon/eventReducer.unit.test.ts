@@ -112,6 +112,65 @@ describe("ohbaby-web eventReducer", () => {
     ]);
   });
 
+  it("tracks reasoning as transient state without mutating snapshot message parts", () => {
+    let state = replaceSnapshot(
+      {
+        ...emptySnapshot(),
+        sessions: [
+          {
+            ...emptySnapshot().sessions[0],
+            messages: [
+              {
+                createdAt: timestamp,
+                id: "message_1",
+                parts: [],
+                role: "assistant",
+                status: "streaming",
+              },
+            ],
+          },
+        ],
+      },
+      0,
+    );
+
+    state = reduceUiEvent(
+      state,
+      {
+        content: "thinking",
+        delta: "thinking",
+        messageId: "message_1",
+        sessionId: "session_1",
+        type: "message.reasoning.delta",
+      },
+      1,
+    );
+
+    expect(state.reasoningByMessageId).toEqual({
+      message_1: { content: "thinking", folded: false },
+    });
+    expect(state.snapshot?.sessions[0]?.messages[0]?.parts).toEqual([]);
+
+    state = reduceUiEvent(
+      state,
+      {
+        content: "thinking",
+        messageId: "message_1",
+        sessionId: "session_1",
+        type: "message.reasoning.end",
+      },
+      2,
+    );
+
+    expect(state.reasoningByMessageId).toEqual({
+      message_1: { content: "thinking", folded: true },
+    });
+
+    state = replaceSnapshot(emptySnapshot(), 3);
+
+    expect(state.reasoningByMessageId).toEqual({});
+  });
+
   it("removes the anonymous streaming placeholder when the final message uses a stable id", () => {
     let state = replaceSnapshot(emptySnapshot(), 0);
 
@@ -188,6 +247,7 @@ describe("ohbaby-web eventReducer", () => {
       commandCatalogVersion: null,
       commandNotices: [],
       lastAppliedSeqNum: 1,
+      reasoningByMessageId: {},
       snapshot: null,
     });
   });

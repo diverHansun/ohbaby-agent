@@ -463,6 +463,69 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).not.toContain("legacy reasoning details");
   });
 
+  it("renders live reasoning events and folds them before assistant text", async () => {
+    const baseSnapshot = snapshot();
+    const client = createFakeClient({
+      ...baseSnapshot,
+      sessions: [
+        {
+          ...baseSnapshot.sessions[0],
+          messages: [
+            {
+              createdAt: "2026-05-14T00:00:01.000Z",
+              id: "message_assistant",
+              parts: [],
+              role: "assistant",
+              status: "streaming",
+            },
+          ],
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    client.emit({
+      content: "thinking through it",
+      delta: "thinking through it",
+      messageId: "message_assistant",
+      sessionId: "session_1",
+      type: "message.reasoning.delta",
+    });
+    await flush();
+
+    expect(app.lastFrame()).toContain("thinking through it");
+
+    client.emit({
+      content: "thinking through it",
+      messageId: "message_assistant",
+      sessionId: "session_1",
+      type: "message.reasoning.end",
+    });
+    await flush();
+
+    expect(app.lastFrame()).toContain("Thought");
+    expect(app.lastFrame()).not.toContain("thinking through it");
+
+    client.emit({
+      content: "Visible answer",
+      delta: "Visible answer",
+      messageId: "message_assistant",
+      sessionId: "session_1",
+      type: "message.part.delta",
+    });
+    await waitForFrame(app, (frame) => frame.includes("Visible answer"));
+
+    expect(app.lastFrame()).toContain("Thought");
+    expect(app.lastFrame()).toContain("Visible answer");
+  });
+
   it("renders UI notices from the backend", async () => {
     const client = createFakeClient(snapshot());
     const app = render(

@@ -48,6 +48,7 @@ export function serializeForLlm(input: {
   readonly systemPrompt: string;
   readonly memory: MergedMemory;
   readonly history: readonly MessageWithParts[];
+  readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   readonly isSubagent: boolean;
   readonly onSecurityFinding?: (finding: PromptSecurityFinding) => void;
 }): ChatCompletionMessage[] {
@@ -57,7 +58,10 @@ export function serializeForLlm(input: {
         input.systemPrompt,
         loadMemoryForPrompt(input.memory.merged, input.onSecurityFinding),
       );
-  const messages = serializeHistoryMessages(input.history);
+  const messages = serializeHistoryMessages(
+    input.history,
+    input.activeReasoningByMessageId,
+  );
 
   if (systemPrompt.trim() === "") {
     return messages;
@@ -68,12 +72,16 @@ export function serializeForLlm(input: {
 
 export function serializeHistoryMessages(
   history: readonly MessageWithParts[],
+  activeReasoningByMessageId?: ReadonlyMap<string, string>,
 ): ChatCompletionMessage[] {
-  return history.flatMap(serializeMessageForLlm);
+  return history.flatMap((message) =>
+    serializeMessageForLlm(message, activeReasoningByMessageId),
+  );
 }
 
 function serializeMessageForLlm(
   message: MessageWithParts,
+  activeReasoningByMessageId?: ReadonlyMap<string, string>,
 ): ChatCompletionMessage[] {
   if (message.info.role === "assistant" && message.info.finish === "error") {
     return [];
@@ -98,7 +106,11 @@ function serializeMessageForLlm(
   }
 
   if (message.info.role === "assistant") {
-    return serializeAssistantMessage(message, parts);
+    return serializeAssistantMessage(
+      message,
+      parts,
+      activeReasoningByMessageId,
+    );
   }
 
   const content = textContentFromParts(parts);
@@ -110,8 +122,9 @@ function serializeMessageForLlm(
 }
 
 function serializeAssistantMessage(
-  _message: MessageWithParts,
+  message: MessageWithParts,
   parts: readonly Part[],
+  activeReasoningByMessageId?: ReadonlyMap<string, string>,
 ): ChatCompletionMessage[] {
   const completedToolParts = parts.filter(isCompletedToolPart);
   const content = textContentFromParts(parts);
@@ -120,8 +133,7 @@ function serializeAssistantMessage(
     return content === "" ? [] : [{ role: "assistant", content }];
   }
 
-  return [
-    {
+  const assistantMessage = {
       role: "assistant",
       content: content === "" ? null : content,
       tool_calls: completedToolParts.map((part) => ({
@@ -132,7 +144,18 @@ function serializeAssistantMessage(
           arguments: JSON.stringify(part.state.input),
         },
       })),
-    },
+  } satisfies ChatCompletionMessage;
+  const reasoning = activeReasoningByMessageId?.get(message.info.id);
+  const assistantWithReasoning =
+    reasoning === undefined || reasoning === ""
+      ? assistantMessage
+      : ({
+          ...assistantMessage,
+          reasoning_content: reasoning,
+        } as ChatCompletionMessage);
+
+  return [
+    assistantWithReasoning,
     ...completedToolParts.map((part) => ({
       role: "tool" as const,
       tool_call_id: part.callId,
@@ -146,9 +169,6 @@ function textContentFromParts(parts: readonly Part[]): string {
     .map((part) => {
       if (part.type === "text") {
         return part.ignored ? "" : part.text;
-      }
-      if (part.type === "reasoning") {
-        return part.text;
       }
       return "";
     })

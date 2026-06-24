@@ -371,6 +371,43 @@ export function startRunStreamProjection(
     });
   }
 
+  function handleReasoningDelta(event: StreamBridgeEvent): void {
+    const data = eventData(event);
+    const messageId =
+      typeof data.messageId === "string" ? data.messageId : undefined;
+    if (messageId === undefined) {
+      return;
+    }
+    const content = typeof data.content === "string" ? data.content : "";
+    const delta = typeof data.delta === "string" ? data.delta : content;
+    options.publish({
+      type: "message.reasoning.delta",
+      content,
+      delta,
+      messageId,
+      sessionId: options.sessionId,
+      timestamp:
+        typeof data.timestamp === "number" ? data.timestamp : Date.now(),
+    });
+  }
+
+  function handleReasoningEnd(event: StreamBridgeEvent): void {
+    const data = eventData(event);
+    const messageId =
+      typeof data.messageId === "string" ? data.messageId : undefined;
+    if (messageId === undefined) {
+      return;
+    }
+    options.publish({
+      type: "message.reasoning.end",
+      content: typeof data.content === "string" ? data.content : "",
+      messageId,
+      sessionId: options.sessionId,
+      timestamp:
+        typeof data.timestamp === "number" ? data.timestamp : Date.now(),
+    });
+  }
+
   async function handleToolStart(event: StreamBridgeEvent): Promise<void> {
     const data = eventData(event);
     const callId = typeof data.callId === "string" ? data.callId : "";
@@ -451,6 +488,14 @@ export function startRunStreamProjection(
     }
     if (event.event === "message.part.delta") {
       await handleMessageDelta(event);
+      return;
+    }
+    if (event.event === "run.llm.reasoning.delta") {
+      handleReasoningDelta(event);
+      return;
+    }
+    if (event.event === "run.llm.reasoning.end") {
+      handleReasoningEnd(event);
       return;
     }
     if (event.event === "run.tool.start") {

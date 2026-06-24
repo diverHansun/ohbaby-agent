@@ -201,6 +201,50 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.selectSession).toHaveBeenCalledWith("session_2");
   });
 
+  it("renders transient reasoning for a streaming assistant message", async () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "running", runId: "run_1" }),
+        sessions: [
+          {
+            createdAt: timestamp,
+            id: "session_1",
+            messages: [
+              {
+                createdAt: timestamp,
+                id: "message_assistant",
+                parts: [],
+                role: "assistant",
+                status: "streaming",
+              },
+            ],
+            title: "Session",
+            updatedAt: timestamp,
+          },
+        ],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    await act(async () => {
+      fake.store.applyEvent(
+        {
+          content: "thinking out loud",
+          delta: "thinking out loud",
+          messageId: "message_assistant",
+          sessionId: "session_1",
+          type: "message.reasoning.delta",
+        },
+        2,
+      );
+      await Promise.resolve();
+    });
+
+    expect(app.container.querySelector(".ohb-reasoning")?.textContent).toContain(
+      "thinking out loud",
+    );
+  });
+
   it("archives sidebar sessions after confirmation without selecting the row", async () => {
     const first = snapshotWithStatus({ kind: "idle" }).sessions[0];
     const fake = createFakeRuntime({

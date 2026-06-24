@@ -63,6 +63,38 @@ function lifecycleEventFromStream(
       type: "llm:delta",
     };
   }
+  if (item.event === "run.llm.reasoning.delta") {
+    const content = stringData(data, "content") ?? "";
+    const delta = stringData(data, "delta") ?? "";
+    const messageId = stringData(data, "messageId");
+    if (!messageId) {
+      return undefined;
+    }
+    return {
+      content,
+      delta,
+      messageId,
+      sessionId,
+      step: numberData(data, "step") ?? 0,
+      timestamp,
+      type: "llm:reasoning-delta",
+    };
+  }
+  if (item.event === "run.llm.reasoning.end") {
+    const content = stringData(data, "content") ?? "";
+    const messageId = stringData(data, "messageId");
+    if (!messageId) {
+      return undefined;
+    }
+    return {
+      content,
+      messageId,
+      sessionId,
+      step: numberData(data, "step") ?? 0,
+      timestamp,
+      type: "llm:reasoning-end",
+    };
+  }
   if (item.event === "run.llm.start") {
     return {
       sessionId,

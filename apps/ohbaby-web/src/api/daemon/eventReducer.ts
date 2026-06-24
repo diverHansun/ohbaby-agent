@@ -14,6 +14,7 @@ export function createInitialViewState(): ViewState {
     commandCatalogVersion: null,
     commandNotices: [],
     lastAppliedSeqNum: 0,
+    reasoningByMessageId: {},
     snapshot: null,
   };
 }
@@ -26,6 +27,7 @@ export function replaceSnapshot(
     commandCatalogVersion: null,
     commandNotices: [],
     lastAppliedSeqNum: seqNum,
+    reasoningByMessageId: {},
     snapshot,
   };
 }
@@ -62,7 +64,66 @@ export function reduceUiEvent(
     commandCatalogVersion: state.commandCatalogVersion,
     commandNotices,
     lastAppliedSeqNum: seqNum,
+    reasoningByMessageId: applyReasoningEvent(
+      state.reasoningByMessageId,
+      event,
+    ),
     snapshot: applyEventToSnapshot(snapshot, event),
+  };
+}
+
+function applyReasoningEvent(
+  reasoningByMessageId: ViewState["reasoningByMessageId"],
+  event: UiEvent,
+): ViewState["reasoningByMessageId"] {
+  switch (event.type) {
+    case "message.reasoning.delta":
+      return {
+        ...reasoningByMessageId,
+        [event.messageId]: {
+          content: event.content,
+          folded: false,
+        },
+      };
+    case "message.reasoning.end":
+      return foldReasoning(reasoningByMessageId, event.messageId, event.content);
+    case "message.part.delta":
+      return foldReasoning(reasoningByMessageId, event.messageId);
+    case "message.updated":
+      return foldReasoning(reasoningByMessageId, event.message.id);
+    case "run.updated":
+      return event.run.status.kind === "running" ? reasoningByMessageId : {};
+    case "run.interrupted":
+      return {};
+    default:
+      return reasoningByMessageId;
+  }
+}
+
+function foldReasoning(
+  reasoningByMessageId: ViewState["reasoningByMessageId"],
+  messageId: string | undefined,
+  content?: string,
+): ViewState["reasoningByMessageId"] {
+  if (messageId === undefined) {
+    return reasoningByMessageId;
+  }
+  const hasExisting = Object.prototype.hasOwnProperty.call(
+    reasoningByMessageId,
+    messageId,
+  );
+  if (!hasExisting && content === undefined) {
+    return reasoningByMessageId;
+  }
+  const existingContent = hasExisting
+    ? reasoningByMessageId[messageId].content
+    : "";
+  return {
+    ...reasoningByMessageId,
+    [messageId]: {
+      content: content ?? existingContent,
+      folded: true,
+    },
   };
 }
 

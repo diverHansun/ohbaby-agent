@@ -15,7 +15,7 @@ function partToContent(part: Part): string {
     return part.ignored ? "" : part.text;
   }
   if (part.type === "reasoning") {
-    return part.text;
+    return "";
   }
   if (part.state.status === "completed") {
     return part.state.output;

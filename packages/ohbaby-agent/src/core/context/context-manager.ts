@@ -1179,6 +1179,7 @@ export function createContextManager(
       compressionThreshold,
     );
     const messages = serializeForLlm({
+      activeReasoningByMessageId: input.activeReasoningByMessageId,
       history: finalContext.history,
       isSubagent: input.isSubagent ?? false,
       memory: finalContext.memory,

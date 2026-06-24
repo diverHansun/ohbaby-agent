@@ -364,6 +364,152 @@ describe("Lifecycle.run", () => {
     });
   });
 
+  it("emits reasoning events and passes active reasoning to the next tool-loop prepare", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValueOnce(
+        preparedTurn([{ role: "user", content: "Read README" }]),
+      )
+      .mockResolvedValueOnce(
+        preparedTurn([
+          { role: "user", content: "Read README" },
+          {
+            content: null,
+            role: "assistant",
+            tool_calls: [
+              {
+                function: {
+                  arguments: '{"path":"README.md"}',
+                  name: "read_file",
+                },
+                id: "call_read",
+                type: "function",
+              },
+            ],
+          },
+          {
+            content: "README contents",
+            role: "tool",
+            tool_call_id: "call_read",
+          },
+        ]),
+      );
+    const appendPartSpy = vi.spyOn(messageManager, "appendPart");
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            { reasoningDelta: "think " },
+            { reasoningDelta: "about README" },
+            {
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"path":"README.md"}',
+                  id: "call_read",
+                  index: 0,
+                  name: "read_file",
+                },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+          [{ textDelta: "Done.", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(
+          ({ calls }) =>
+            Promise.resolve(
+              calls.map((call) => ({
+                callId: call.callId,
+                output: "README contents",
+                status: "success" as const,
+              })),
+            ),
+        ),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const emitted: LifecycleEvent[] = [];
+    const loop = lifecycle.run({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_test",
+    });
+    let next = await loop.next();
+    while (!next.done) {
+      emitted.push(next.value);
+      next = await loop.next();
+    }
+
+    const reasoningEvents = emitted.filter(
+      (
+        event,
+      ): event is Extract<
+        LifecycleEvent,
+        { type: "llm:reasoning-delta" | "llm:reasoning-end" }
+      > =>
+        event.type === "llm:reasoning-delta" ||
+        event.type === "llm:reasoning-end",
+    );
+    expect(reasoningEvents).toEqual([
+      {
+        content: "think ",
+        delta: "think ",
+        messageId: "message_1",
+        sessionId: "session_test",
+        step: 1,
+        timestamp: expect.any(Number) as number,
+        type: "llm:reasoning-delta",
+      },
+      {
+        content: "think about README",
+        delta: "about README",
+        messageId: "message_1",
+        sessionId: "session_test",
+        step: 1,
+        timestamp: expect.any(Number) as number,
+        type: "llm:reasoning-delta",
+      },
+      {
+        content: "think about README",
+        messageId: "message_1",
+        sessionId: "session_test",
+        step: 1,
+        timestamp: expect.any(Number) as number,
+        type: "llm:reasoning-end",
+      },
+    ]);
+    expect(appendPartSpy).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ type: "reasoning" }),
+    );
+    expect(prepareTurn).toHaveBeenNthCalledWith(2, {
+      activeReasoningByMessageId: new Map([
+        ["message_1", "think about README"],
+      ]),
+      directory: "D:/repo",
+      isSubagent: undefined,
+      modelId: "fake-model",
+      sessionId: "session_test",
+    });
+    expect(next.value).toMatchObject({
+      finalResponse: "Done.",
+      finishReason: "stop",
+      success: true,
+    });
+  });
+
   it("stops after a turn through the injected turn policy", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const messageManager = createMessageManager({

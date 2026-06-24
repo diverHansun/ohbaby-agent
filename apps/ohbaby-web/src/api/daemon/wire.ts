@@ -43,7 +43,13 @@ export interface ViewState {
   readonly commandNotices: readonly CommandNotice[];
   readonly commandCatalogVersion: string | null;
   readonly lastAppliedSeqNum: number;
+  readonly reasoningByMessageId: Record<string, ReasoningViewState>;
   readonly snapshot: UiSnapshot | null;
+}
+
+export interface ReasoningViewState {
+  readonly content: string;
+  readonly folded: boolean;
 }
 
 export interface CommandNotice {

@@ -49,6 +49,7 @@ interface StepResult {
     { readonly type: "llm:complete" }
   >;
   readonly finalResponse: string;
+  readonly reasoning?: string;
 }
 
 interface ModelStepParams {
@@ -344,6 +345,7 @@ export class Lifecycle {
     let finalResponse = "";
     const allToolCalls: ParsedToolCall[] = [];
     let turnStarted = false;
+    const activeReasoningByMessageId = new Map<string, string>();
 
     for (let step = 1; step <= maxSteps; step += 1) {
       if (params.signal?.aborted) {
@@ -358,6 +360,9 @@ export class Lifecycle {
       }
 
       let prepared = await contextManager.prepareTurn({
+        ...(activeReasoningByMessageId.size === 0
+          ? {}
+          : { activeReasoningByMessageId }),
         directory: params.directory,
         isSubagent: params.isSubagent,
         modelId: params.modelId,
@@ -440,6 +445,9 @@ export class Lifecycle {
         }
 
         prepared = await contextManager.prepareTurn({
+          ...(activeReasoningByMessageId.size === 0
+            ? {}
+            : { activeReasoningByMessageId }),
           directory: params.directory,
           force: true,
           isSubagent: params.isSubagent,
@@ -514,6 +522,13 @@ export class Lifecycle {
       }
       const { assistantMessage, finalEvent } = stepResult;
       finalResponse = stepResult.finalResponse;
+      if (
+        assistantMessage?.role === "assistant" &&
+        stepResult.reasoning !== undefined &&
+        stepResult.reasoning !== ""
+      ) {
+        activeReasoningByMessageId.set(assistantMessage.id, stepResult.reasoning);
+      }
 
       if (!finalEvent) {
         await markAssistantMessageError(
@@ -770,6 +785,8 @@ export class Lifecycle {
       | Extract<LifecycleEvent, { readonly type: "llm:complete" }>
       | undefined;
     let previousContent = "";
+    let previousReasoning = "";
+    let reasoningEnded = false;
     let assistantTextPart: Part | undefined;
 
     yield {
@@ -808,9 +825,39 @@ export class Lifecycle {
           };
           continue;
         }
-        const content = getTextContent(response.completeMessage);
+        if (response.reasoningDelta !== undefined) {
+          const content =
+            response.reasoning ?? `${previousReasoning}${response.reasoningDelta}`;
+          previousReasoning = content;
+          yield {
+            type: "llm:reasoning-delta",
+            content,
+            delta: response.reasoningDelta,
+            messageId: assistantMessage.id,
+            sessionId: params.sessionId,
+            step,
+            timestamp: Date.now(),
+          };
+        }
+        const responseContent = getTextContent(response.completeMessage);
+        const content =
+          response.reasoningDelta !== undefined &&
+          responseContent === "(Empty response)"
+            ? ""
+            : responseContent;
 
         if (content !== "") {
+          if (previousReasoning !== "" && !reasoningEnded) {
+            reasoningEnded = true;
+            yield {
+              type: "llm:reasoning-end",
+              content: previousReasoning,
+              messageId: assistantMessage.id,
+              sessionId: params.sessionId,
+              step,
+              timestamp: Date.now(),
+            };
+          }
           const delta = content.startsWith(previousContent)
             ? content.slice(previousContent.length)
             : content;
@@ -846,6 +893,17 @@ export class Lifecycle {
         }
 
         if (response.isComplete) {
+          if (previousReasoning !== "" && !reasoningEnded) {
+            reasoningEnded = true;
+            yield {
+              type: "llm:reasoning-end",
+              content: previousReasoning,
+              messageId: assistantMessage.id,
+              sessionId: params.sessionId,
+              step,
+              timestamp: Date.now(),
+            };
+          }
           finalEvent = {
             type: "llm:complete",
             completeMessage: response.completeMessage,
@@ -860,6 +918,16 @@ export class Lifecycle {
         }
       }
     } catch (error) {
+      if (previousReasoning !== "" && !reasoningEnded) {
+        yield {
+          type: "llm:reasoning-end",
+          content: previousReasoning,
+          messageId: assistantMessage.id,
+          sessionId: params.sessionId,
+          step,
+          timestamp: Date.now(),
+        };
+      }
       await markAssistantMessageError(
         this.deps.messageManager,
         assistantMessage,
@@ -895,6 +963,7 @@ export class Lifecycle {
       finalResponse: finalEvent
         ? getTextContent(finalEvent.completeMessage)
         : "",
+      reasoning: previousReasoning === "" ? undefined : previousReasoning,
     };
   }
 

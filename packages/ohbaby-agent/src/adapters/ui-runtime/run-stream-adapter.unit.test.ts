@@ -325,6 +325,83 @@ describe("startRunStreamProjection", () => {
     });
   });
 
+  it("publishes reasoning events without mutating message parts", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const stateStore = createInMemoryUiStateStore({
+      activeSessionId: "session_1",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_1",
+          messages: [],
+          title: "Session",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "idle" },
+    });
+    const publish = vi.fn();
+    const projection = startRunStreamProjection({
+      assistantMessageId: "message_assistant",
+      autoStart: false,
+      nextMessageId: () => "message_next",
+      publish,
+      runId: "run_1",
+      sessionId: "session_1",
+      stateStore,
+      streamBridge,
+      timestamp: () => "2026-05-26T00:00:01.000Z",
+    });
+
+    streamBridge.publish("run/run_1", "run.llm.reasoning.delta", {
+      content: "thinking",
+      delta: "thinking",
+      messageId: "message_assistant",
+      runId: "run_1",
+      sessionId: "session_1",
+      timestamp: 1,
+    });
+    streamBridge.publish("run/run_1", "run.llm.reasoning.end", {
+      content: "thinking",
+      messageId: "message_assistant",
+      runId: "run_1",
+      sessionId: "session_1",
+      timestamp: 2,
+    });
+    streamBridge.end("run/run_1");
+
+    projection.start();
+    await projection.done;
+
+    const publishedEvents = publish.mock.calls.map((call): unknown => call[0]);
+    expect(publishedEvents).toEqual([
+      {
+        content: "thinking",
+        delta: "thinking",
+        messageId: "message_assistant",
+        sessionId: "session_1",
+        timestamp: 1,
+        type: "message.reasoning.delta",
+      },
+      {
+        content: "thinking",
+        messageId: "message_assistant",
+        sessionId: "session_1",
+        timestamp: 2,
+        type: "message.reasoning.end",
+      },
+    ]);
+    await expect(stateStore.readSnapshot()).resolves.toMatchObject({
+      sessions: [
+        {
+          messages: [],
+        },
+      ],
+    });
+  });
+
   it("appends text that arrives after a tool result in chronological part order", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const stateStore = createInMemoryUiStateStore({

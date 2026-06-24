@@ -118,6 +118,7 @@ export interface PrepareTurnInput {
   readonly sessionId: string;
   readonly directory: string;
   readonly modelId: string;
+  readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   readonly isSubagent?: boolean;
   readonly force?: boolean;
 }

@@ -66,6 +66,49 @@ describe("createStreamBridgeRunEventSource", () => {
     await expect(iterator.next()).resolves.toMatchObject({ done: true });
   });
 
+  it("translates reasoning events from the run stream", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const source = createStreamBridgeRunEventSource(streamBridge);
+    const iterator = source.subscribeRunEvents("run_1")[Symbol.asyncIterator]();
+
+    streamBridge.publish("run/run_1", "run.llm.reasoning.delta", {
+      content: "think more",
+      delta: "more",
+      messageId: "message_1",
+      sessionId: "session_1",
+      step: 2,
+      timestamp: 123,
+    });
+    streamBridge.publish("run/run_1", "run.llm.reasoning.end", {
+      content: "think more",
+      messageId: "message_1",
+      sessionId: "session_1",
+      step: 2,
+      timestamp: 124,
+    });
+
+    await expect(nextEvent(iterator)).resolves.toEqual({
+      content: "think more",
+      delta: "more",
+      messageId: "message_1",
+      sessionId: "session_1",
+      step: 2,
+      timestamp: 123,
+      type: "llm:reasoning-delta",
+    });
+    await expect(nextEvent(iterator)).resolves.toEqual({
+      content: "think more",
+      messageId: "message_1",
+      sessionId: "session_1",
+      step: 2,
+      timestamp: 124,
+      type: "llm:reasoning-end",
+    });
+
+    streamBridge.end("run/run_1");
+    await expect(iterator.next()).resolves.toMatchObject({ done: true });
+  });
+
   it("translates stream bridge tool events and skips events without a session id", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const source = createStreamBridgeRunEventSource(streamBridge);
