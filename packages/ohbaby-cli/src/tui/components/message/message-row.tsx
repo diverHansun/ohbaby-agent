@@ -8,6 +8,7 @@ import type {
 import type { ReactElement } from "react";
 import { mdToAnsi } from "../../render/markdown.js";
 import { wrapAnsi } from "../../render/wrap.js";
+import type { TuiReasoningViewState } from "../../store/snapshot.js";
 import { useTheme, type Theme } from "../../theme/index.js";
 import { Spinner } from "../spinner.js";
 import {
@@ -23,6 +24,7 @@ export interface MessageRowProps {
   readonly bottomMargin?: number;
   readonly contentWidth: number;
   readonly message: UiMessage;
+  readonly reasoning?: TuiReasoningViewState;
 }
 
 export type PairedMessagePart =
@@ -42,13 +44,19 @@ export function MessageRow({
   bottomMargin = 1,
   contentWidth,
   message,
+  reasoning,
 }: MessageRowProps): ReactElement {
   const theme = useTheme();
   const partWidth = Math.max(
     1,
     contentWidth - (message.role === "user" ? 2 : 0),
   );
-  const renderedParts = renderMessageParts(message, partWidth, theme);
+  const renderedParts = renderMessageParts(
+    message,
+    partWidth,
+    theme,
+    reasoning,
+  );
 
   return (
     <Box flexDirection="column" marginBottom={bottomMargin}>
@@ -152,8 +160,22 @@ export function renderMessageParts(
   message: UiMessage,
   partWidth: number,
   theme: Theme,
+  reasoning?: TuiReasoningViewState,
 ): readonly (RenderedMessagePart | RenderedSpinnerPart)[] {
   const rendered: (RenderedMessagePart | RenderedSpinnerPart)[] = [];
+
+  if (reasoning && message.role === "assistant") {
+    rendered.push({
+      color: theme.reasoning,
+      dimColor: true,
+      indent: 0,
+      index: -1,
+      kind: "text",
+      text: reasoning.folded
+        ? "Thought"
+        : wrapAnsi(reasoning.content, partWidth).join("\n"),
+    });
+  }
 
   for (const part of pairToolCallResult(message.parts)) {
     if (

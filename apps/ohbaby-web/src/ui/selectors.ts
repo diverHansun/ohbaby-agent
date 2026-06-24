@@ -116,8 +116,9 @@ export function selectActiveSession(
     return null;
   }
   return (
-    snapshot.sessions.find((session) => session.id === snapshot.activeSessionId) ??
-    null
+    snapshot.sessions.find(
+      (session) => session.id === snapshot.activeSessionId,
+    ) ?? null
   );
 }
 

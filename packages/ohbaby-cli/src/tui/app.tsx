@@ -30,6 +30,7 @@ import {
 import {
   selectCommittedItems,
   selectLiveMessage,
+  selectLiveReasoning,
 } from "./store/selectors/transcript.js";
 import { createCoalescedTuiEventDispatcher } from "./store/stream-coalescer.js";
 import { ThemeProvider } from "./theme/index.js";
@@ -667,6 +668,7 @@ function TranscriptViewportContainer({
   );
   const committedItems = useTuiStoreSelector(store, selectCommittedItems);
   const liveMessage = useTuiStoreSelector(store, selectLiveMessage);
+  const liveReasoning = useTuiStoreSelector(store, selectLiveReasoning);
   const notices = useTuiStoreSelector(store, (state) => state.notices);
   const runtime = useTuiStoreSelector(store, (state) => state.runtime);
 
@@ -676,6 +678,7 @@ function TranscriptViewportContainer({
       commandNotices={commandNotices}
       committedItems={committedItems}
       liveMessage={liveMessage}
+      liveReasoning={liveReasoning}
       notices={notices}
       runtime={runtime}
     />

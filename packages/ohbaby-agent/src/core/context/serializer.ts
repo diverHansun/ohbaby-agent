@@ -134,16 +134,16 @@ function serializeAssistantMessage(
   }
 
   const assistantMessage = {
-      role: "assistant",
-      content: content === "" ? null : content,
-      tool_calls: completedToolParts.map((part) => ({
-        id: part.callId,
-        type: "function",
-        function: {
-          name: part.tool,
-          arguments: JSON.stringify(part.state.input),
-        },
-      })),
+    role: "assistant",
+    content: content === "" ? null : content,
+    tool_calls: completedToolParts.map((part) => ({
+      id: part.callId,
+      type: "function",
+      function: {
+        name: part.tool,
+        arguments: JSON.stringify(part.state.input),
+      },
+    })),
   } satisfies ChatCompletionMessage;
   const reasoning = activeReasoningByMessageId?.get(message.info.id);
   const assistantWithReasoning =

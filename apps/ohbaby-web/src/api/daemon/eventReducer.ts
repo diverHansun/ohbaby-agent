@@ -86,7 +86,11 @@ function applyReasoningEvent(
         },
       };
     case "message.reasoning.end":
-      return foldReasoning(reasoningByMessageId, event.messageId, event.content);
+      return foldReasoning(
+        reasoningByMessageId,
+        event.messageId,
+        event.content,
+      );
     case "message.part.delta":
       return foldReasoning(reasoningByMessageId, event.messageId);
     case "message.updated":

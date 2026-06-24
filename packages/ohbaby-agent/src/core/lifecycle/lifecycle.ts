@@ -527,7 +527,10 @@ export class Lifecycle {
         stepResult.reasoning !== undefined &&
         stepResult.reasoning !== ""
       ) {
-        activeReasoningByMessageId.set(assistantMessage.id, stepResult.reasoning);
+        activeReasoningByMessageId.set(
+          assistantMessage.id,
+          stepResult.reasoning,
+        );
       }
 
       if (!finalEvent) {
@@ -827,7 +830,8 @@ export class Lifecycle {
         }
         if (response.reasoningDelta !== undefined) {
           const content =
-            response.reasoning ?? `${previousReasoning}${response.reasoningDelta}`;
+            response.reasoning ??
+            `${previousReasoning}${response.reasoningDelta}`;
           previousReasoning = content;
           yield {
             type: "llm:reasoning-delta",
@@ -841,7 +845,8 @@ export class Lifecycle {
         }
         const responseContent = getTextContent(response.completeMessage);
         const content =
-          response.reasoningDelta !== undefined &&
+          previousReasoning !== "" &&
+          previousContent === "" &&
           responseContent === "(Empty response)"
             ? ""
             : responseContent;
@@ -961,7 +966,9 @@ export class Lifecycle {
       assistantMessage,
       finalEvent,
       finalResponse: finalEvent
-        ? getTextContent(finalEvent.completeMessage)
+        ? previousReasoning !== "" && previousContent === ""
+          ? ""
+          : getTextContent(finalEvent.completeMessage)
         : "",
       reasoning: previousReasoning === "" ? undefined : previousReasoning,
     };

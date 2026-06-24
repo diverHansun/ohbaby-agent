@@ -147,7 +147,7 @@ describe("serializeForLlm database metadata projection", () => {
             type: "function",
             function: {
               name: "bash",
-              arguments: "{\"command\":\"false\"}",
+              arguments: '{"command":"false"}',
             },
           },
           {
@@ -155,7 +155,7 @@ describe("serializeForLlm database metadata projection", () => {
             type: "function",
             function: {
               name: "mcp_s6_server_t6_search",
-              arguments: "{\"query\":\"ohbaby\"}",
+              arguments: '{"query":"ohbaby"}',
             },
           },
         ],
@@ -236,7 +236,7 @@ describe("serializeForLlm database metadata projection", () => {
           type: "function",
           function: {
             name: "read_file",
-            arguments: "{\"path\":\"README.md\"}",
+            arguments: '{"path":"README.md"}',
           },
         },
       ],
@@ -254,7 +254,7 @@ describe("serializeForLlm database metadata projection", () => {
           type: "function",
           function: {
             name: "read_file",
-            arguments: "{\"path\":\"README.md\"}",
+            arguments: '{"path":"README.md"}',
           },
         },
       ],

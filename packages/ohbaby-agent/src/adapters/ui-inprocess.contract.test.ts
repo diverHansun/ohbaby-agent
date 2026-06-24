@@ -1236,10 +1236,10 @@ describe("createInProcessUiBackendClient", () => {
       ]);
       expect(
         events.find(
-          (event): event is Extract<
-            UiEvent,
-            { type: "message.reasoning.end" }
-          > => event.type === "message.reasoning.end",
+          (
+            event,
+          ): event is Extract<UiEvent, { type: "message.reasoning.end" }> =>
+            event.type === "message.reasoning.end",
         ),
       ).toMatchObject({
         content: "Checking context",

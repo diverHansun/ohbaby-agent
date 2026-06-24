@@ -270,6 +270,69 @@ describe("TUI store event reducer", () => {
     expect(state.liveMessage?.parts[0]).toMatchObject({ text: "Hello 99" });
   });
 
+  it("tracks reasoning as transient view state without mutating message parts", () => {
+    const committed = userMessage("user_1", "inspect this");
+    const live = assistantMessage("assistant_1", "", {
+      status: "streaming",
+    });
+    let state = createStateFromSnapshot(
+      snapshotWithTranscript({
+        messages: [committed, live],
+        status: { kind: "running", runId: "run_1" },
+      }),
+    );
+
+    state = applyTuiEvent(state, {
+      content: "thinking",
+      delta: "thinking",
+      messageId: "assistant_1",
+      sessionId: "session_1",
+      type: "message.reasoning.delta",
+    });
+
+    expect(state.messages[1].parts).toEqual([]);
+    expect(state.liveMessage?.parts).toEqual([]);
+    expect(state.reasoningByMessageId).toEqual({
+      assistant_1: { content: "thinking", folded: false },
+    });
+
+    state = applyTuiEvent(state, {
+      content: "thinking",
+      messageId: "assistant_1",
+      sessionId: "session_1",
+      type: "message.reasoning.end",
+    });
+
+    expect(state.messages[1].parts).toEqual([]);
+    expect(state.reasoningByMessageId).toEqual({
+      assistant_1: { content: "thinking", folded: true },
+    });
+
+    state = applyTuiEvent(state, {
+      content: "Answer",
+      delta: "Answer",
+      messageId: "assistant_1",
+      sessionId: "session_1",
+      type: "message.part.delta",
+    });
+
+    expect(state.messages[1].parts).toEqual([{ text: "Answer", type: "text" }]);
+    expect(state.reasoningByMessageId).toEqual({
+      assistant_1: { content: "thinking", folded: true },
+    });
+
+    state = applyTuiEvent(state, {
+      status: { kind: "idle" },
+      timestamp: 2,
+      type: "runtime.updated",
+    });
+
+    expect(state.reasoningByMessageId).toEqual({});
+    expect(state.committedItems.at(-1)?.message.parts).toEqual([
+      { text: "Answer", type: "text" },
+    ]);
+  });
+
   it("keeps committed transcript references stable with a large committed transcript", () => {
     const committed = Array.from({ length: 1_000 }, (_, index) =>
       index % 2 === 0

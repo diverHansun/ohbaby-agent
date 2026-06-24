@@ -1,5 +1,9 @@
 import type { UiMessage, UiNotice } from "ohbaby-sdk";
-import type { TuiCommandNotice, TuiStoreState } from "../snapshot.js";
+import type {
+  TuiCommandNotice,
+  TuiReasoningViewState,
+  TuiStoreState,
+} from "../snapshot.js";
 import type { TranscriptItem } from "../transcript.js";
 
 export interface TranscriptSplitSelection {
@@ -23,6 +27,14 @@ export function selectCommittedItems(
 
 export function selectLiveMessage(state: TuiStoreState): UiMessage | null {
   return state.liveMessage;
+}
+
+export function selectLiveReasoning(
+  state: TuiStoreState,
+): TuiReasoningViewState | undefined {
+  return state.liveMessage
+    ? state.reasoningByMessageId[state.liveMessage.id]
+    : undefined;
 }
 
 export function selectTranscriptSplit(

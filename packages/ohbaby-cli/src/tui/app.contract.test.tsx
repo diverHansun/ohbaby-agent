@@ -524,6 +524,16 @@ describe("OhbabyTerminalApp", () => {
 
     expect(app.lastFrame()).toContain("Thought");
     expect(app.lastFrame()).toContain("Visible answer");
+
+    client.emit({
+      status: { kind: "idle" },
+      timestamp: 2,
+      type: "runtime.updated",
+    });
+    await waitForFrame(
+      app,
+      (frame) => frame.includes("Visible answer") && !frame.includes("Thought"),
+    );
   });
 
   it("renders UI notices from the backend", async () => {

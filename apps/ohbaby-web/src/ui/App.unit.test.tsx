@@ -240,9 +240,9 @@ describe("OhbabyWebApp slash command interactions", () => {
       await Promise.resolve();
     });
 
-    expect(app.container.querySelector(".ohb-reasoning")?.textContent).toContain(
-      "thinking out loud",
-    );
+    expect(
+      app.container.querySelector(".ohb-reasoning")?.textContent,
+    ).toContain("thinking out loud");
   });
 
   it("archives sidebar sessions after confirmation without selecting the row", async () => {

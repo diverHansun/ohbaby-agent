@@ -91,6 +91,37 @@ describe("MessageRow", () => {
     });
   });
 
+  it("renders transient reasoning as dim text before assistant content", () => {
+    const theme = createTheme("dark", 3);
+    const message = assistantMessage([
+      { text: "visible answer", type: "text" },
+    ]);
+
+    expect(
+      renderMessageParts(message, 80, theme, {
+        content: "thinking through it",
+        folded: false,
+      })[0],
+    ).toMatchObject({
+      color: theme.reasoning,
+      dimColor: true,
+      kind: "text",
+      text: "thinking through it",
+    });
+
+    expect(
+      renderMessageParts(message, 80, theme, {
+        content: "thinking through it",
+        folded: true,
+      })[0],
+    ).toMatchObject({
+      color: theme.reasoning,
+      dimColor: true,
+      kind: "text",
+      text: "Thought",
+    });
+  });
+
   it("aligns wrapped historical user message lines under the muted gutter", () => {
     const message = userMessage([
       { text: "please inspect the repository now", type: "text" },

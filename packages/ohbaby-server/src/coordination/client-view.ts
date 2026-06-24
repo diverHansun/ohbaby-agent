@@ -156,9 +156,7 @@ function projectSnapshotForClient(
     permissions: permissionsForClientSnapshot(snapshot, activeSessionId),
     runs: snapshot.runs.filter((run) => run.sessionId === activeSessionId),
     sessions: snapshot.sessions.map((session) =>
-      session.id === activeSessionId
-        ? session
-        : { ...session, messages: [] },
+      session.id === activeSessionId ? session : { ...session, messages: [] },
     ),
     status: statusForClientSnapshot(snapshot, activeSessionId),
     ...(view.initialPermission === undefined

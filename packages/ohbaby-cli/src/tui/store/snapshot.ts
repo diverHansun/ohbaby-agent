@@ -43,6 +43,11 @@ export interface TuiCommandNotice {
   readonly text: string;
 }
 
+export interface TuiReasoningViewState {
+  readonly content: string;
+  readonly folded: boolean;
+}
+
 export interface TuiInteractionOption {
   readonly id: string;
   readonly label: string;
@@ -98,6 +103,9 @@ export interface TuiStoreState {
   readonly committedItems: readonly TranscriptItem[];
   readonly committedPartCounts: Readonly<Partial<Record<string, number>>>;
   readonly liveMessage: UiMessage | null;
+  readonly reasoningByMessageId: Readonly<
+    Record<string, TuiReasoningViewState>
+  >;
   readonly contextWindowUsages: readonly UiContextWindowUsage[];
   readonly commandNoticeSequence: number;
   readonly resolvedPermissionIds: readonly string[];

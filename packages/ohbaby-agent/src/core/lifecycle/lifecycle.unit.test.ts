@@ -510,6 +510,60 @@ describe("Lifecycle.run", () => {
     });
   });
 
+  it("does not persist the empty-response placeholder after a reasoning-only stop frame", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValue(preparedTurn([{ role: "user", content: "Think" }]));
+    const appendPartSpy = vi.spyOn(messageManager, "appendPart");
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createSequentialFakeLLMClient(
+        [[{ reasoningDelta: "thinking" }, { finishReason: "stop" }]],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const emitted: LifecycleEvent[] = [];
+    const loop = lifecycle.run({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_test",
+    });
+    let next = await loop.next();
+    while (!next.done) {
+      emitted.push(next.value);
+      next = await loop.next();
+    }
+
+    expect(appendPartSpy).not.toHaveBeenCalled();
+    const messages = await messageManager.listBySession("session_test");
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.info.role).toBe("assistant");
+    expect(messages[0]?.parts).toEqual([]);
+    expect(next.value).toMatchObject({
+      finalResponse: "",
+      finishReason: "stop",
+      success: true,
+    });
+    expect(
+      emitted.some(
+        (event) =>
+          event.type === "llm:delta" && event.content === "(Empty response)",
+      ),
+    ).toBe(false);
+  });
+
   it("stops after a turn through the injected turn policy", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const messageManager = createMessageManager({

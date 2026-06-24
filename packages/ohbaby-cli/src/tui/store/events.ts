@@ -16,6 +16,7 @@ import type {
   TuiCommandNotice,
   TuiEvent,
   TuiInteractionRequest,
+  TuiReasoningViewState,
   TuiRuntimeStatus,
   TuiStore,
   TuiStoreState,
@@ -57,6 +58,7 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
     notices: [],
     permissions: snapshot.permissions,
     permission: snapshot.permission,
+    reasoningByMessageId: {},
     runs: snapshot.runs,
     runtime: snapshot.status,
     sessions: snapshot.sessions,
@@ -96,13 +98,16 @@ export function applyTuiEvent(
     }
 
     case "message.updated":
-      return rebuildFromCollections(state, {
-        sessions: updateSessionMessages(
-          state.sessions,
-          event.sessionId,
-          (messages) => upsertById(messages, event.message),
-        ),
-      });
+      return foldReasoning(
+        rebuildFromCollections(state, {
+          sessions: updateSessionMessages(
+            state.sessions,
+            event.sessionId,
+            (messages) => upsertById(messages, event.message),
+          ),
+        }),
+        event.message.id,
+      );
 
     case "message.part.delta":
       if (
@@ -121,71 +126,62 @@ export function applyTuiEvent(
         });
       }
 
-      return rebuildFromCollections(state, {
-        sessions: updateSessionMessages(
-          state.sessions,
-          event.sessionId,
-          (messages) =>
-            messages.map((message) =>
-              event.messageId !== undefined && message.id === event.messageId
-                ? applyPartDelta(
-                    message,
-                    event.partId,
-                    event.delta,
-                    event.content,
-                  )
-                : message,
-            ),
-        ),
-      });
+      return foldReasoning(
+        rebuildFromCollections(state, {
+          sessions: updateSessionMessages(
+            state.sessions,
+            event.sessionId,
+            (messages) =>
+              messages.map((message) =>
+                event.messageId !== undefined && message.id === event.messageId
+                  ? applyPartDelta(
+                      message,
+                      event.partId,
+                      event.delta,
+                      event.content,
+                    )
+                  : message,
+              ),
+          ),
+        }),
+        event.messageId,
+      );
 
     case "message.reasoning.delta":
-      return rebuildFromCollections(state, {
-        sessions: updateSessionMessages(
-          state.sessions,
-          event.sessionId,
-          (messages) =>
-            messages.map((message) =>
-              message.id === event.messageId
-                ? applyReasoningDelta(message, event.delta, event.content)
-                : message,
-            ),
-        ),
+      return applyReasoningDelta(state, {
+        content: event.content,
+        messageId: event.messageId,
+        sessionId: event.sessionId,
       });
 
     case "message.reasoning.end":
-      return rebuildFromCollections(state, {
-        sessions: updateSessionMessages(
-          state.sessions,
-          event.sessionId,
-          (messages) =>
-            messages.map((message) =>
-              message.id === event.messageId
-                ? applyReasoningEnd(message, event.content)
-                : message,
-            ),
-        ),
-      });
+      return event.sessionId === state.activeSessionId
+        ? foldReasoning(state, event.messageId, event.content)
+        : state;
 
     case "run.updated": {
       const next = rebuildFromCollections(state, {
         runs: upsertById(state.runs, event.run),
         runtime: event.run.status,
       });
+      const withReasoning =
+        event.run.status.kind === "running" ? next : clearReasoning(next);
       return event.run.status.kind === "running" &&
-        event.run.sessionId === next.activeSessionId
-        ? clearEphemeralNotices(clearCommandNotices(next))
-        : next;
+        event.run.sessionId === withReasoning.activeSessionId
+        ? clearEphemeralNotices(clearCommandNotices(withReasoning))
+        : withReasoning;
     }
 
     case "run.interrupted":
       return event.sessionId === state.activeSessionId
-        ? appendCommandNotice(state, {
-            commandId: "run.interrupted",
-            kind: "result",
-            sessionId: event.sessionId,
-            text: "Interrupted",
-          })
+        ? clearReasoning(
+            appendCommandNotice(state, {
+              commandId: "run.interrupted",
+              kind: "result",
+              sessionId: event.sessionId,
+              text: "Interrupted",
+            }),
+          )
         : state;
 
     case "runtime.updated": {
@@ -194,7 +190,7 @@ export function applyTuiEvent(
       });
       return event.status.kind === "running"
         ? clearEphemeralNotices(clearCommandNotices(next))
-        : next;
+        : clearReasoning(next);
     }
 
     case "context.window.updated":
@@ -265,7 +261,9 @@ export function applyTuiEvent(
     }
 
     case "command.result.delivered": {
-      const selectedSessionId = selectedSessionIdFromCommandAction(event.action);
+      const selectedSessionId = selectedSessionIdFromCommandAction(
+        event.action,
+      );
       const next =
         selectedSessionId === undefined
           ? clearCommandRuntime(state, event.commandRunId)
@@ -477,6 +475,7 @@ function preserveLocalQueues(
       : previous.notices,
     permissions,
     permission,
+    reasoningByMessageId: {},
     resolvedPermissionIds: previous.resolvedPermissionIds,
     runs,
     runtime,
@@ -805,46 +804,67 @@ function applyPartDelta(
 }
 
 function applyReasoningDelta(
-  message: UiMessage,
-  delta: string,
-  content: string,
-): UiMessage {
-  const lastIndex = message.parts.length - 1;
-  const lastPart = message.parts.at(lastIndex);
-  if (lastPart?.type === "reasoning") {
-    return {
-      ...message,
-      parts: message.parts.map((part, index) =>
-        index === lastIndex ? { ...part, text: content } : part,
-      ),
-    };
+  state: TuiStoreState,
+  input: {
+    readonly content: string;
+    readonly messageId: string;
+    readonly sessionId: string;
+  },
+): TuiStoreState {
+  if (
+    input.sessionId !== state.activeSessionId ||
+    !state.messages.some((message) => message.id === input.messageId)
+  ) {
+    return state;
   }
 
   return {
-    ...message,
-    parts: [...message.parts, { text: content || delta, type: "reasoning" }],
+    ...state,
+    reasoningByMessageId: {
+      ...state.reasoningByMessageId,
+      [input.messageId]: {
+        content: input.content,
+        folded: false,
+      },
+    },
   };
 }
 
-function applyReasoningEnd(message: UiMessage, content: string): UiMessage {
-  const lastPart = message.parts.at(-1);
-  const withReasoning =
-    lastPart?.type === "reasoning"
-      ? {
-          ...message,
-          parts: message.parts.map((part, index) =>
-            index === message.parts.length - 1 ? { ...part, text: content } : part,
-          ),
-        }
-      : message;
-  const nextLastPart = withReasoning.parts.at(-1);
-  if (nextLastPart?.type !== "reasoning") {
-    return withReasoning;
+function foldReasoning(
+  state: TuiStoreState,
+  messageId: string | undefined,
+  content?: string,
+): TuiStoreState {
+  if (messageId === undefined) {
+    return state;
   }
-  return {
-    ...withReasoning,
-    parts: [...withReasoning.parts, { text: "", type: "text" }],
+  const hasExisting = Object.prototype.hasOwnProperty.call(
+    state.reasoningByMessageId,
+    messageId,
+  );
+  if (!hasExisting && content === undefined) {
+    return state;
+  }
+  const existingContent = hasExisting
+    ? state.reasoningByMessageId[messageId].content
+    : "";
+  const next: TuiReasoningViewState = {
+    content: content ?? existingContent,
+    folded: true,
   };
+  return {
+    ...state,
+    reasoningByMessageId: {
+      ...state.reasoningByMessageId,
+      [messageId]: next,
+    },
+  };
+}
+
+function clearReasoning(state: TuiStoreState): TuiStoreState {
+  return Object.keys(state.reasoningByMessageId).length === 0
+    ? state
+    : { ...state, reasoningByMessageId: {} };
 }
 
 function resolvePartIndex(
