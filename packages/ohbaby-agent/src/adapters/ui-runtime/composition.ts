@@ -24,6 +24,7 @@ import type { PermissionStateStore } from "../../permission/index.js";
 import { createHeuristicTokenCounter } from "../../services/llm-model/index.js";
 import {
   createInMemorySessionManager,
+  SessionEvent,
   type SessionManager,
 } from "../../services/session/index.js";
 import {
@@ -379,6 +380,9 @@ export async function createUiRuntimeComposition(
         provider: options.llmClient.config.provider,
       }),
     });
+  options.bus.subscribe(SessionEvent.Removed, (payload) => {
+    contextManager.disposeSession(payload.sessionId);
+  });
 
   const lifecycle = new Lifecycle({
     contextManager,

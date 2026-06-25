@@ -422,6 +422,13 @@ export function createContextManager(
     turnCompactionCounts.set(sessionId, 0);
   }
 
+  function disposeSession(sessionId: string): void {
+    calibrationFactors.delete(sessionId);
+    maskCutoffs.delete(sessionId);
+    thrashLocks.delete(sessionId);
+    turnCompactionCounts.delete(sessionId);
+  }
+
   function getTurnCompactionCount(sessionId: string): number {
     return turnCompactionCounts.get(sessionId) ?? 0;
   }
@@ -1193,24 +1200,28 @@ export function createContextManager(
       input.directory,
       isSubagent,
     );
-    const unreducedUsage = measureContext({
+    const unreducedMeasurement = measureContext({
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: assembled,
       isSubagent,
       modelId: input.modelId,
-    }).usage;
+    });
+    const unreducedUsage = unreducedMeasurement.usage;
     const reducedBeforeCompaction = reduceContextForModel({
       allowCutoffAdvance: true,
       context: assembled,
       publishEvent: true,
       usage: unreducedUsage,
     });
-    const usageBefore = measureContext({
-      activeReasoningByMessageId: input.activeReasoningByMessageId,
-      context: reducedBeforeCompaction,
-      isSubagent,
-      modelId: input.modelId,
-    }).usage;
+    const usageBefore =
+      reducedBeforeCompaction.history === assembled.history
+        ? unreducedUsage
+        : measureContext({
+            activeReasoningByMessageId: input.activeReasoningByMessageId,
+            context: reducedBeforeCompaction,
+            isSubagent,
+            modelId: input.modelId,
+          }).usage;
     const outcome = await runCompaction({
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       assembled,
@@ -1229,24 +1240,28 @@ export function createContextManager(
       outcome.status === "not-needed" && outcome.prune === undefined
         ? undefined
         : mapOutcomeToCompactResult(outcome);
-    const rawFinalUsage = measureContext({
+    const rawFinalMeasurement = measureContext({
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: finalContext,
       isSubagent,
       modelId: input.modelId,
-    }).usage;
+    });
+    const rawFinalUsage = rawFinalMeasurement.usage;
     const reducedFinalContext = reduceContextForModel({
       allowCutoffAdvance: false,
       context: finalContext,
       publishEvent: true,
       usage: rawFinalUsage,
     });
-    const finalMeasurement = measureContext({
-      activeReasoningByMessageId: input.activeReasoningByMessageId,
-      context: reducedFinalContext,
-      isSubagent,
-      modelId: input.modelId,
-    });
+    const finalMeasurement =
+      reducedFinalContext.history === finalContext.history
+        ? rawFinalMeasurement
+        : measureContext({
+            activeReasoningByMessageId: input.activeReasoningByMessageId,
+            context: reducedFinalContext,
+            isSubagent,
+            modelId: input.modelId,
+          });
     const usage = finalMeasurement.usage;
     const messages = finalMeasurement.messages;
 
@@ -1281,5 +1296,6 @@ export function createContextManager(
     compact,
     prepareTurn,
     resetTurnCompactionCount,
+    disposeSession,
   };
 }

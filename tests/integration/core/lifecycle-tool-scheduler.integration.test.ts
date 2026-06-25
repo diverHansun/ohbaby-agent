@@ -68,6 +68,7 @@ function createContextManagerMock(
   return {
     assemble: vi.fn(),
     compact: vi.fn(),
+    disposeSession: vi.fn(),
     getUsage: vi.fn(),
     prepareTurn,
     resetTurnCompactionCount: vi.fn(),

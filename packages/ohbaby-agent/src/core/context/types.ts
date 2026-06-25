@@ -147,6 +147,7 @@ export interface ContextManager {
   compact(sessionId: string, options: CompactOptions): Promise<CompactResult>;
   prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn>;
   resetTurnCompactionCount(sessionId: string): void;
+  disposeSession(sessionId: string): void;
 }
 
 export interface ContextManagerOptions {

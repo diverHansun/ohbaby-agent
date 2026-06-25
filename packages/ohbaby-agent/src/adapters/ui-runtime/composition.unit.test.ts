@@ -1,9 +1,10 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../../agents/index.js";
 import { createBus } from "../../bus/index.js";
+import type { ContextManager } from "../../core/context/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import type { MessageManager } from "../../core/message/index.js";
 import type {
@@ -14,6 +15,7 @@ import {
   createInMemoryMessageStore,
   createMessageManager,
 } from "../../core/message/index.js";
+import { SessionEvent } from "../../services/session/index.js";
 import { createPermissionState } from "../../permission/index.js";
 import type { Tool } from "../../core/tool-scheduler/index.js";
 import type {
@@ -301,6 +303,39 @@ function mcpTool(name: string, description = "Echo from MCP"): Tool {
 }
 
 describe("createUiRuntimeComposition skill tools", () => {
+  it("disposes context session state when a session is removed", async () => {
+    const bus = createBus();
+    const disposeSession = vi.fn<ContextManager["disposeSession"]>();
+    const contextManager = {
+      assemble: vi.fn<ContextManager["assemble"]>(),
+      compact: vi.fn<ContextManager["compact"]>(),
+      disposeSession,
+      getUsage: vi.fn<ContextManager["getUsage"]>(),
+      prepareTurn: vi.fn<ContextManager["prepareTurn"]>(),
+      resetTurnCompactionCount:
+        vi.fn<ContextManager["resetTurnCompactionCount"]>(),
+      updateCalibrationFactor:
+        vi.fn<ContextManager["updateCalibrationFactor"]>(),
+    } satisfies ContextManager;
+
+    await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      contextManager,
+      llmClient: fakeLlmClient(),
+      messageManager: createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      }),
+      permissionState: createPermissionState({ bus }),
+      workdir: await tempWorkdir(),
+    });
+
+    bus.publish(SessionEvent.Removed, { sessionId: "session_1" });
+
+    expect(disposeSession).toHaveBeenCalledWith("session_1");
+  });
+
   it("lists MCP server summaries from manager status", async () => {
     const bus = createBus();
     const workdir = await tempWorkdir();
