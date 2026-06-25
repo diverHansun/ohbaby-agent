@@ -17,6 +17,9 @@ export const MASK_PROTECTION_TOKENS = 40_000;
 export const PRUNE_PROTECT_TOKENS = 40_000;
 export const PRUNE_MINIMUM_TOKENS = 20_000;
 export const SUMMARY_AGENT_NAME = "context";
+export const THRASH_WINDOW = 2;
+export const THRASH_MIN_SAVINGS_RATIO = 0.1;
+export const THRASH_UNLOCK_DELTA = 0.05;
 
 export interface CompactionThresholds {
   readonly mask: number;

@@ -162,6 +162,9 @@ export interface ContextManagerOptions {
   readonly pruneProtectTokens?: number;
   readonly pruneMinimumTokens?: number;
   readonly summaryAgentName?: string;
+  readonly thrashWindow?: number;
+  readonly thrashMinSavingsRatio?: number;
+  readonly thrashUnlockDelta?: number;
   readonly maskEnabled?: boolean;
   readonly maskConfig?: {
     readonly exemptToolPrefixes?: readonly string[];

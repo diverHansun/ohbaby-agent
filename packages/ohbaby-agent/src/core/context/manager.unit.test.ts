@@ -1217,6 +1217,34 @@ describe("ContextManager", () => {
     expect(
       decideCompactionRung({
         force: false,
+        thrashLocked: true,
+        usage: {
+          contextLimit: 100_000,
+          currentTokens: 98_000,
+          inputBudgetTokens: 100_000,
+          modelId: "large-model",
+          remainingTokens: 2_000,
+          usageRatio: 0.98,
+        },
+      }),
+    ).toBe("none");
+    expect(
+      decideCompactionRung({
+        force: true,
+        thrashLocked: true,
+        usage: {
+          contextLimit: 100_000,
+          currentTokens: 98_000,
+          inputBudgetTokens: 100_000,
+          modelId: "large-model",
+          remainingTokens: 2_000,
+          usageRatio: 0.98,
+        },
+      }),
+    ).toBe("force");
+    expect(
+      decideCompactionRung({
+        force: false,
         usage: {
           contextLimit: 1_000_000,
           currentTokens: 980_000,
@@ -1842,6 +1870,74 @@ describe("ContextManager", () => {
     expect(result.compression?.status).toBe("compressed");
     expect(generateSummary).toHaveBeenCalledTimes(2);
     expect(generateSummary.mock.calls[1][0].prompt).toContain("CRITICAL");
+  });
+
+  it("locks automatic compaction after repeated zero-savings summary attempts", async () => {
+    const messageManager = createMessageManagerFixture();
+    for (const [index, role] of [
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ].entries()) {
+      await addTextMessage(messageManager, {
+        sessionId: "session_1",
+        role: role as "user" | "assistant",
+        text: `${String(index)} ${"long text ".repeat(20)}`,
+      });
+    }
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockResolvedValue("x".repeat(10_000));
+    const { compactSkipped, manager } = createManager({
+      compressionThreshold: 0.5,
+      llmClient: { generateSummary },
+      messageManager,
+    });
+
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    expect(generateSummary).toHaveBeenCalledTimes(4);
+
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(generateSummary).toHaveBeenCalledTimes(4);
+    expect(compactSkipped.at(-1)).toMatchObject({
+      reason: "thrash-locked",
+      sessionId: "session_1",
+    });
+
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    expect(generateSummary).toHaveBeenCalledTimes(6);
+
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "new large input ".repeat(100),
+    });
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    expect(generateSummary).toHaveBeenCalledTimes(8);
   });
 
   it("does not summarize same-pass pruned file paths in compress summaries", async () => {

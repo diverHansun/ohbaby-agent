@@ -5,6 +5,9 @@ import {
   PRUNE_MINIMUM_TOKENS,
   PRUNE_PROTECT_TOKENS,
   SUMMARY_AGENT_NAME,
+  THRASH_MIN_SAVINGS_RATIO,
+  THRASH_UNLOCK_DELTA,
+  THRASH_WINDOW,
 } from "./constants.js";
 import type { CompactionThresholds } from "./constants.js";
 import {
@@ -69,6 +72,7 @@ type CommittableSummaryCandidate = Extract<
 
 interface CompactionRequest {
   readonly assembled: AssembledContext;
+  readonly bypassThrashLock: boolean;
   readonly usageBefore: ContextUsage;
   readonly modelId: string;
   readonly force: boolean;
@@ -76,6 +80,11 @@ interface CompactionRequest {
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   readonly isSubagent: boolean;
   readonly projectForUsage?: (context: AssembledContext) => AssembledContext;
+}
+
+interface ThrashLockEntry {
+  readonly recentSavingsRatios: readonly number[];
+  readonly lockedAtUsageRatio?: number;
 }
 
 interface CompactionOutcome {
@@ -140,9 +149,13 @@ export function decideCompactionRung(input: {
   readonly usage: ContextUsage;
   readonly force: boolean;
   readonly thresholds?: CompactionThresholds;
+  readonly thrashLocked?: boolean;
 }): CompactionRung {
   if (input.force) {
     return "force";
+  }
+  if (input.thrashLocked === true) {
+    return "none";
   }
   const thresholds = input.thresholds ?? DEFAULT_COMPACTION_THRESHOLDS;
   if (
@@ -339,8 +352,13 @@ export function createContextManager(
   const pruneProtectTokens = options.pruneProtectTokens ?? PRUNE_PROTECT_TOKENS;
   const pruneMinimumTokens = options.pruneMinimumTokens ?? PRUNE_MINIMUM_TOKENS;
   const summaryAgentName = options.summaryAgentName ?? SUMMARY_AGENT_NAME;
+  const thrashWindow = options.thrashWindow ?? THRASH_WINDOW;
+  const thrashMinSavingsRatio =
+    options.thrashMinSavingsRatio ?? THRASH_MIN_SAVINGS_RATIO;
+  const thrashUnlockDelta = options.thrashUnlockDelta ?? THRASH_UNLOCK_DELTA;
   const calibrationFactors = new Map<string, number>();
   const maskCutoffs = new Map<string, number>();
+  const thrashLocks = new Map<string, ThrashLockEntry>();
   const maskConfig = createMaskConfig({
     ...options.maskConfig,
     enabled: options.maskEnabled ?? false,
@@ -374,6 +392,52 @@ export function createContextManager(
       CALIBRATION_EMA_ALPHA * clamped +
         (1 - CALIBRATION_EMA_ALPHA) * previous,
     );
+  }
+
+  function resetThrashLock(sessionId: string): void {
+    thrashLocks.delete(sessionId);
+  }
+
+  function isThrashLocked(sessionId: string, usage: ContextUsage): boolean {
+    const state = thrashLocks.get(sessionId);
+    if (state?.lockedAtUsageRatio === undefined) {
+      return false;
+    }
+    if (usage.usageRatio >= state.lockedAtUsageRatio + thrashUnlockDelta) {
+      thrashLocks.delete(sessionId);
+      return false;
+    }
+    return true;
+  }
+
+  function recordThrashSavings(input: {
+    readonly compression: CompressionResult;
+    readonly sessionId: string;
+    readonly usageBefore: ContextUsage;
+  }): void {
+    if (thrashWindow <= 0) {
+      return;
+    }
+    const ratio =
+      input.compression.originalTokens <= 0
+        ? 0
+        : input.compression.savedTokens / input.compression.originalTokens;
+    const previous = thrashLocks.get(input.sessionId);
+    const recentSavingsRatios = [
+      ...(previous?.recentSavingsRatios ?? []),
+      ratio,
+    ].slice(-thrashWindow);
+    const shouldLock =
+      recentSavingsRatios.length >= thrashWindow &&
+      recentSavingsRatios.every(
+        (recentRatio) => recentRatio < thrashMinSavingsRatio,
+      );
+    thrashLocks.set(input.sessionId, {
+      recentSavingsRatios,
+      ...(shouldLock
+        ? { lockedAtUsageRatio: input.usageBefore.usageRatio }
+        : {}),
+    });
   }
 
   function renderForModel(input: {
@@ -855,16 +919,19 @@ export function createContextManager(
   async function runCompaction(
     req: CompactionRequest,
   ): Promise<CompactionOutcome> {
+    const thrashLocked =
+      !req.bypassThrashLock && isThrashLocked(req.sessionId, req.usageBefore);
     const rung = decideCompactionRung({
       force: req.force,
       thresholds: compactionThresholds,
+      thrashLocked,
       usage: req.usageBefore,
     });
 
     if (rung === "none" || rung === "mask") {
       options.bus.publish(ContextEvent.CompactSkipped, {
         sessionId: req.sessionId,
-        reason: "not-needed",
+        reason: thrashLocked ? "thrash-locked" : "not-needed",
         usage: req.usageBefore,
       });
       return {
@@ -918,6 +985,13 @@ export function createContextManager(
       afterPrune.history,
     );
     if (candidate.status !== "candidate") {
+      if (candidate.status === "inflated") {
+        recordThrashSavings({
+          compression: candidate,
+          sessionId: req.sessionId,
+          usageBefore: req.usageBefore,
+        });
+      }
       publishCompactSkippedForCompression({
         compression: candidate,
         sessionId: req.sessionId,
@@ -953,6 +1027,11 @@ export function createContextManager(
     }).usage;
     if (projectedUsage.currentTokens >= usageAfterPrune.currentTokens) {
       const compression = compressionFromRejectedCandidate(candidate);
+      recordThrashSavings({
+        compression,
+        sessionId: req.sessionId,
+        usageBefore: req.usageBefore,
+      });
       options.bus.publish(ContextEvent.CompactSkipped, {
         sessionId: req.sessionId,
         reason: "inflated",
@@ -978,6 +1057,11 @@ export function createContextManager(
       req.sessionId,
       candidate,
     );
+    recordThrashSavings({
+      compression,
+      sessionId: req.sessionId,
+      usageBefore: req.usageBefore,
+    });
     const committedRawHistory = await options.messageManager.listBySession(
       req.sessionId,
     );
@@ -1027,6 +1111,7 @@ export function createContextManager(
     sessionId: string,
     input: CompactOptions,
   ): Promise<CompactResult> {
+    resetThrashLock(sessionId);
     const isSubagent = input.isSubagent ?? false;
     const assembled = await assemble(
       sessionId,
@@ -1040,6 +1125,7 @@ export function createContextManager(
     }).usage;
     const outcome = await runCompaction({
       assembled,
+      bypassThrashLock: true,
       force: input.force === true,
       isSubagent,
       modelId: input.modelId,
@@ -1079,6 +1165,7 @@ export function createContextManager(
     const outcome = await runCompaction({
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       assembled,
+      bypassThrashLock: input.force === true,
       force: input.force === true,
       isSubagent,
       modelId: input.modelId,
