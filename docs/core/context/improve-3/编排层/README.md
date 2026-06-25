@@ -14,7 +14,7 @@ improve-3 分五个子主题，**逐个走"问题分析 → 实施方案 → 验
 |------|--------|------|------|
 | 1 | **编排层去三重** | `improve-3/编排层/` | 已实施（Batch 1） |
 | 2 | usage 估算重构（锚点→标定） | `improve-3/usage-估算/` | 已实施（Batch 2） |
-| 3 | 投影层阶段链（storage→inference） | `improve-3/投影层/` | 设计完成，待实施 |
+| 3 | 投影层阶段链（storage→inference） | `improve-3/投影层/` | 已实施（Batch 3） |
 | 4 | Origin 来源追踪 | `improve-3/origin/` | ADR 已接受，待实施小收口 |
 | 5 | 压缩多策略（升级阶梯+护栏） | `improve-3/压缩多策略/` | 设计完成，待实施 |
 

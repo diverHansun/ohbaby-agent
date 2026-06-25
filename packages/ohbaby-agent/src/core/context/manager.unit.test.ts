@@ -32,6 +32,7 @@ interface ContextFixture {
   readonly compactSkipped: readonly unknown[];
   readonly compressed: readonly unknown[];
   readonly manager: ReturnType<typeof createContextManager>;
+  readonly masked: readonly unknown[];
   readonly memory: MemoryReader;
   readonly pruned: readonly unknown[];
   readonly systemPromptProvider: SystemPromptProvider;
@@ -156,6 +157,8 @@ function createManager(
     readonly llmClient?: ContextLLMClient;
     readonly now?: () => number;
     readonly compressionThreshold?: number;
+    readonly maskEnabled?: boolean;
+    readonly maskConfig?: Parameters<typeof createContextManager>[0]["maskConfig"];
     readonly pruneProtectTokens?: number;
     readonly pruneMinimumTokens?: number;
   } = {},
@@ -163,6 +166,7 @@ function createManager(
   const bus = createBus();
   const compactSkipped: unknown[] = [];
   const compressed: unknown[] = [];
+  const masked: unknown[] = [];
   const pruned: unknown[] = [];
   const memory =
     options.memory ??
@@ -191,6 +195,8 @@ function createManager(
       } satisfies ContextLLMClient),
     now: options.now ?? createClock(),
     compressionThreshold: options.compressionThreshold,
+    maskEnabled: options.maskEnabled,
+    maskConfig: options.maskConfig,
     pruneProtectTokens: options.pruneProtectTokens ?? 10,
     pruneMinimumTokens: options.pruneMinimumTokens ?? 5,
   });
@@ -204,10 +210,14 @@ function createManager(
   bus.subscribe(ContextEvent.Pruned, (payload) => {
     pruned.push(payload);
   });
+  bus.subscribe(ContextEvent.Masked, (payload) => {
+    masked.push(payload);
+  });
 
   return {
     compactSkipped,
     compressed,
+    masked,
     manager,
     memory,
     pruned,
@@ -817,6 +827,163 @@ describe("ContextManager", () => {
     expect(calibrated.usage.currentTokens).toBe(
       Math.round(calibrated.sentHeuristic * 1.5),
     );
+  });
+
+  it("dark ships mask statistics without changing prepared messages by default", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addCompletedToolMessage(messageManager, {
+      sessionId: "session_1",
+      output: "x".repeat(500),
+    });
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "latest",
+    });
+    const { manager, masked } = createManager({
+      compressionThreshold: 10,
+      maskConfig: {
+        minPartTokens: 1,
+        minPrunableTokens: 1,
+        minUsageRatio: 0.1,
+        protectionTokens: 1,
+      },
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 1_000,
+      },
+    });
+
+    const prepared = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(prepared.messages).toContainEqual({
+      content: "x".repeat(500),
+      role: "tool",
+      tool_call_id: "message_1_call",
+    });
+    expect(masked[0]).toMatchObject({
+      enabled: false,
+      maskedPartIds: ["part_1"],
+      sessionId: "session_1",
+    });
+  });
+
+  it("applies mask before usage measurement while keeping tool-call pairing", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addCompletedToolMessage(messageManager, {
+      sessionId: "session_1",
+      output: "x".repeat(500),
+    });
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "latest",
+    });
+    const { manager, masked } = createManager({
+      compressionThreshold: 10,
+      maskConfig: {
+        minPartTokens: 1,
+        minPrunableTokens: 1,
+        minUsageRatio: 0.1,
+        protectionTokens: 1,
+      },
+      maskEnabled: true,
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 1_000,
+      },
+    });
+
+    const prepared = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(prepared.messages).toContainEqual({
+      content: null,
+      role: "assistant",
+      tool_calls: [
+        {
+          function: {
+            arguments: "{}",
+            name: "read_file",
+          },
+          id: "message_1_call",
+          type: "function",
+        },
+      ],
+    });
+    expect(prepared.messages).toContainEqual({
+      content: "[Old tool result cleared (was ~500 tokens)]",
+      role: "tool",
+      tool_call_id: "message_1_call",
+    });
+    expect(prepared.usage.currentTokens).toBeLessThan(700);
+    expect(masked[0]).toMatchObject({
+      enabled: true,
+      maskedPartIds: ["part_1"],
+    });
+  });
+
+  it("lets mask delay prune-summary when reduced usage drops below the threshold", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addCompletedToolMessage(messageManager, {
+      sessionId: "session_1",
+      output: "x".repeat(6_000),
+    });
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "latest",
+    });
+    const generateSummary = vi.fn<ContextLLMClient["generateSummary"]>();
+    const { manager } = createManager({
+      compressionThreshold: 0.5,
+      llmClient: { generateSummary },
+      maskConfig: {
+        minPartTokens: 1,
+        minPrunableTokens: 1,
+        minUsageRatio: 0.5,
+        protectionTokens: 1,
+      },
+      maskEnabled: true,
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getBudget(_modelId, options) {
+          const usedInputTokens = options?.usedInputTokens ?? 0;
+          return {
+            contextWindowTokens: 12_000,
+            inputBudgetTokens: 10_000,
+            maxOutputTokens: 1_000,
+            modelId: "model-a",
+            remainingInputTokens: 10_000 - usedInputTokens,
+            reservedOutputTokens: 1_000,
+            safetyMarginTokens: 1_000,
+            usageRatio: usedInputTokens / 10_000,
+            usedInputTokens,
+          };
+        },
+        getLimit: () => 12_000,
+      },
+    });
+
+    const prepared = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(prepared.compaction).toBeUndefined();
+    expect(prepared.usage.usageRatio).toBeLessThan(0.5);
+    expect(generateSummary).not.toHaveBeenCalled();
   });
 
   it("keeps prepareTurn compaction path to two history reads and one memory load", async () => {

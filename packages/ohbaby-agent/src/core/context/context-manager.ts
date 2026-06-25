@@ -20,6 +20,10 @@ import {
   serializeHistory,
   serializeMessage,
 } from "./serialization.js";
+import {
+  createMaskConfig,
+  reduceForModel,
+} from "./projection.js";
 import { serializeForLlm } from "./serializer.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
 import { estimateWireHeuristic } from "./token-estimation.js";
@@ -71,6 +75,7 @@ interface CompactionRequest {
   readonly sessionId: string;
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   readonly isSubagent: boolean;
+  readonly projectForUsage?: (context: AssembledContext) => AssembledContext;
 }
 
 interface CompactionOutcome {
@@ -328,6 +333,11 @@ export function createContextManager(
   const pruneMinimumTokens = options.pruneMinimumTokens ?? PRUNE_MINIMUM_TOKENS;
   const summaryAgentName = options.summaryAgentName ?? SUMMARY_AGENT_NAME;
   const calibrationFactors = new Map<string, number>();
+  const maskCutoffs = new Map<string, number>();
+  const maskConfig = createMaskConfig({
+    ...options.maskConfig,
+    enabled: options.maskEnabled ?? false,
+  });
 
   function getCalibrationFactor(sessionId: string): number {
     return calibrationFactors.get(sessionId) ?? 1.0;
@@ -405,11 +415,14 @@ export function createContextManager(
       context: input.context,
       isSubagent: input.isSubagent,
     });
-    return { messages, ...measureUsage({
+    return {
       messages,
-      modelId: input.modelId,
-      sessionId: input.context.sessionId,
-    }) };
+      ...measureUsage({
+        messages,
+        modelId: input.modelId,
+        sessionId: input.context.sessionId,
+      }),
+    };
   }
 
   function estimateAssembledTokens(
@@ -454,6 +467,65 @@ export function createContextManager(
       assembledAt: input.assembledAt,
       sessionId: input.sessionId,
     };
+  }
+
+  function withHistory(
+    context: AssembledContext,
+    history: readonly MessageWithParts[],
+  ): AssembledContext {
+    return {
+      ...context,
+      history,
+      estimatedTokens: estimateAssembledTokens(
+        context.systemPrompt,
+        context.memory,
+        history,
+        context.isSubagent,
+      ),
+    };
+  }
+
+  function reduceContextForModel(input: {
+    readonly context: AssembledContext;
+    readonly usage: ContextUsage;
+    readonly allowCutoffAdvance: boolean;
+    readonly publishEvent: boolean;
+  }): AssembledContext {
+    const result = reduceForModel({
+      allowCutoffAdvance: input.allowCutoffAdvance,
+      config: maskConfig,
+      cutoff: maskCutoffs.get(input.context.sessionId) ?? 0,
+      history: input.context.history,
+      sessionId: input.context.sessionId,
+      tokenCounter: options.tokenCounter,
+      usage: input.usage,
+    });
+    if (input.allowCutoffAdvance) {
+      maskCutoffs.set(input.context.sessionId, result.cutoff);
+    }
+    if (input.publishEvent) {
+      options.bus.publish(ContextEvent.Masked, {
+        ...result.event,
+        maskedPartIds: [...result.event.maskedPartIds],
+      });
+    }
+    return withHistory(input.context, result.history);
+  }
+
+  function projectContextForUsage(
+    context: AssembledContext,
+    modelId: string,
+  ): AssembledContext {
+    return reduceContextForModel({
+      allowCutoffAdvance: false,
+      context,
+      publishEvent: false,
+      usage: measureContext({
+        context,
+        isSubagent: context.isSubagent,
+        modelId,
+      }).usage,
+    });
   }
 
   async function assemble(
@@ -846,7 +918,7 @@ export function createContextManager(
     });
     const usageAfterPrune = measureContext({
       activeReasoningByMessageId: req.activeReasoningByMessageId,
-      context: afterPrune,
+      context: req.projectForUsage?.(afterPrune) ?? afterPrune,
       isSubagent: req.isSubagent,
       modelId: req.modelId,
     }).usage;
@@ -903,7 +975,7 @@ export function createContextManager(
     });
     const projectedUsage = measureContext({
       activeReasoningByMessageId: req.activeReasoningByMessageId,
-      context: projectedContext,
+      context: req.projectForUsage?.(projectedContext) ?? projectedContext,
       isSubagent: req.isSubagent,
       modelId: req.modelId,
     }).usage;
@@ -947,10 +1019,13 @@ export function createContextManager(
     });
     const usageAfter = measureContext({
       activeReasoningByMessageId: req.activeReasoningByMessageId,
-      context: committedContext,
+      context: req.projectForUsage?.(committedContext) ?? committedContext,
       isSubagent: req.isSubagent,
       modelId: req.modelId,
     }).usage;
+    if (compression.status === "compressed") {
+      maskCutoffs.set(req.sessionId, 0);
+    }
 
     return {
       status:
@@ -1011,9 +1086,21 @@ export function createContextManager(
       input.directory,
       isSubagent,
     );
-    const usageBefore = measureContext({
+    const unreducedUsage = measureContext({
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: assembled,
+      isSubagent,
+      modelId: input.modelId,
+    }).usage;
+    const reducedBeforeCompaction = reduceContextForModel({
+      allowCutoffAdvance: true,
+      context: assembled,
+      publishEvent: true,
+      usage: unreducedUsage,
+    });
+    const usageBefore = measureContext({
+      activeReasoningByMessageId: input.activeReasoningByMessageId,
+      context: reducedBeforeCompaction,
       isSubagent,
       modelId: input.modelId,
     }).usage;
@@ -1023,6 +1110,8 @@ export function createContextManager(
       force: input.force === true,
       isSubagent,
       modelId: input.modelId,
+      projectForUsage: (context) =>
+        projectContextForUsage(context, input.modelId),
       sessionId: input.sessionId,
       usageBefore,
     });
@@ -1031,9 +1120,21 @@ export function createContextManager(
       outcome.status === "not-needed" && outcome.prune === undefined
         ? undefined
         : mapOutcomeToCompactResult(outcome);
-    const finalMeasurement = measureContext({
+    const rawFinalUsage = measureContext({
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: finalContext,
+      isSubagent,
+      modelId: input.modelId,
+    }).usage;
+    const reducedFinalContext = reduceContextForModel({
+      allowCutoffAdvance: false,
+      context: finalContext,
+      publishEvent: true,
+      usage: rawFinalUsage,
+    });
+    const finalMeasurement = measureContext({
+      activeReasoningByMessageId: input.activeReasoningByMessageId,
+      context: reducedFinalContext,
       isSubagent,
       modelId: input.modelId,
     });

@@ -67,7 +67,7 @@
 | **`maskOldToolOutputs`（mask 阶段）** | 🔵 | 构建时把"老的、体量大的工具输出"换成占位符 `[Old tool result content cleared]`，**不写库、可逆** | 便宜的第一道防线：摘要前先削，省钱又保住动作痕迹 | 00 经济视角 |
 | **占位符 vs 消失** | 🔵概念 | mask 留"我做过此动作"的占位（保留 call+result 配对）；prune 让整对消失 | 保住 agent 不重复已做的工作 | 01 正确性 |
 | **保护窗口 / 豁免清单 / 批量阈值** | 🔵 | 最近一轮 + 尾部 ~40k 不动；`write/edit/skill/subagent` 即使在窗外也不动；可削总量不够就不削 | 只削"可重新获取且确实占地方"的输出 | 03 KISS |
-| **cutoff（单调游标）** | 🔵 | mask 的"已遮罩到第几条"的标记，只增不减，存内存不写库 | 防缓存抖动（前缀稳定，prefix cache 才命中） | 00 性能 · 02 信息隐藏 |
+| **cutoff（单调游标）** | 🔵 | mask 的 exclusive boundary：cutoff 之前可遮罩；`0` 表示无历史进入遮罩范围，只增不减，存内存不写库 | 防缓存抖动（前缀稳定，prefix cache 才命中） | 00 性能 · 02 信息隐藏 |
 | **`partitionSummary` / `isSummaryMessage`** | 🟢 | 把摘要消息挑出来、提到最前；用 `metadata.kind === "context-summary"` 识别 | 摘要要排在历史最前，模型才正确理解 | 01 正确性 |
 | **`projectToolMetadataForModel` / `formatToolResultContentForModel`（白名单投影）** | 🟢 | 工具结果元数据按工具类型只放白名单字段（bash 只留 exitCode、read 只留 mtimeMs…），其余不给模型 | 模型只看必要事实，不泄露内部字段；这是 2.5 的精细体现 | 02 信息隐藏 |
 | **两条兄弟投影（模型投影 / UI 投影）** | 🟢澄清 | message store 有两条独立投影：`serializeForLlm`（给模型）和 `persistent-store.messageToUiMessage`（给 CLI UI），都各自滤 active part | 模型与 UI 解耦，各自决定"展示/发送什么" | 05 分层 |

@@ -161,5 +161,14 @@ export interface ContextManagerOptions {
   readonly pruneProtectTokens?: number;
   readonly pruneMinimumTokens?: number;
   readonly summaryAgentName?: string;
+  readonly maskEnabled?: boolean;
+  readonly maskConfig?: {
+    readonly exemptToolPrefixes?: readonly string[];
+    readonly minPartTokens?: number;
+    readonly minPrunableTokens?: number;
+    readonly minUsageRatio?: number;
+    readonly placeholderPrefix?: string;
+    readonly protectionTokens?: number;
+  };
   readonly onWarning?: (message: string, error?: unknown) => void;
 }

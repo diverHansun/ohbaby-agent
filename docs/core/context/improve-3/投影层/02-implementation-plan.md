@@ -71,7 +71,7 @@ maskEnabled: boolean  // 默认 false
        ([G11](../gaps-and-decisions.md#g11借鉴四项目的-mask-设计)：借鉴 oh-my-pi，占位符本身约 20 token，遮小结果反而变大)
 4. 仅当可遮罩总量 ≥ MASK_MIN_PRUNABLE_TOKENS(默认 ~20k) 才触发(批量阈值)
      → 否则发事件(skippedReason: below-batch)
-5. 计算 nextCutoff = max(cutoffState, 本次可遮罩的最高 index)，单调推进
+5. 计算 nextCutoff = max(cutoffState, 本次可遮罩的最高 index + 1)，用 exclusive boundary 表示"cutoff 之前均可遮罩"，单调推进；因此 reset 为 0 时表示无历史进入遮罩范围
 6. 对 cutoff 之前、可遮罩的 ToolPart，用占位符替换其输出内容:
      '[Old tool result cleared (was ~N tokens)]'
      ([G11](../gaps-and-decisions.md#g11借鉴四项目的-mask-设计)：借鉴 oh-my-pi，带原大小让模型判断丢了多少信息)

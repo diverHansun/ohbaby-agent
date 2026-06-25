@@ -33,6 +33,12 @@ const ContextUsageSchema = z.object({
   modelId: z.string(),
 });
 
+const MaskSkippedReasonSchema = z.union([
+  z.literal("below-threshold"),
+  z.literal("below-batch"),
+  z.literal("all-exempt"),
+]);
+
 export const ContextEvent = {
   Compressed: BusEvent.define(
     "context.compressed",
@@ -67,6 +73,18 @@ export const ContextEvent = {
         z.literal("inflated"),
       ]),
       usage: ContextUsageSchema,
+    }),
+  ),
+  Masked: BusEvent.define(
+    "context.masked",
+    z.object({
+      sessionId: z.string(),
+      enabled: z.boolean(),
+      maskedPartIds: z.array(z.string()),
+      maskedTokens: z.number(),
+      cutoff: z.number(),
+      usageRatio: z.number(),
+      skippedReason: MaskSkippedReasonSchema.optional(),
     }),
   ),
 } as const;

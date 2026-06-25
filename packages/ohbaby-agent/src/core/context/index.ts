@@ -5,6 +5,12 @@ export {
   COMPRESSION_PRESERVE_RATIO,
   COMPRESSION_THRESHOLD,
   KEEP_RECENT_TOKENS,
+  MASK_EXEMPT_TOOL_PREFIXES,
+  MASK_MIN_PART_TOKENS,
+  MASK_MIN_PRUNABLE_TOKENS,
+  MASK_MIN_USAGE_RATIO,
+  MASK_PLACEHOLDER_PREFIX,
+  MASK_PROTECTION_TOKENS,
   PRUNE_MINIMUM_TOKENS,
   PRUNE_PROTECT_TOKENS,
   SUMMARY_AGENT_NAME,
@@ -40,6 +46,13 @@ export {
   formatToolResultContentForModel,
   projectToolMetadataForModel,
 } from "./tool-metadata-projection.js";
+export { createMaskConfig, reduceForModel } from "./projection.js";
+export type {
+  ContextMaskedEventPayload,
+  MaskConfig,
+  MaskSkippedReason,
+  ModelReductionResult,
+} from "./projection.js";
 export type {
   AssembledContext,
   CompactOptions,
