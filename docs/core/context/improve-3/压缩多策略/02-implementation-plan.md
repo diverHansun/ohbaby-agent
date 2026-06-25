@@ -17,24 +17,24 @@ export type CompactionRung = "none" | "mask" | "prune-summary" | "force";
 
 export function decideCompactionRung(input: {
   readonly usage: ContextUsage;
-  readonly historyLength: number;
   readonly force: boolean;
-  readonly thresholds: CompactionThresholds;   // 单一真相，见下
-  readonly thrashLock: ThrashLockState;        // 见 §二
-  readonly compactionCount: number;            // 本 turn 已压缩次数（[G4](../gaps-and-decisions.md#g4每轮压缩计数归属)）
-  readonly maxPerTurn: number;                 // MAX_COMPACTION_PER_TURN
+  readonly thresholds?: CompactionThresholds;  // 单一真相，见下
+  readonly thrashLocked?: boolean;             // 见 §二
+  readonly compactionCount?: number;           // 本 turn 已压缩次数（[G4](../gaps-and-decisions.md#g4每轮压缩计数归属)）
+  readonly maxPerTurn?: number;                // MAX_COMPACTION_PER_TURN
 }): CompactionRung {
   if (input.force) return "force";                                      // overflow 兜底，穿透一切
-  if (input.thrashLock.locked) return "none";                           // 反抖动锁锁定
+  if (input.thrashLocked) return "none";                                // 反抖动锁锁定
+  const thresholds = input.thresholds ?? DEFAULT_COMPACTION_THRESHOLDS;
   const needsSummary =
-    input.usage.usageRatio >= input.thresholds.summary ||                // 0.95
-    input.usage.remainingTokens < input.thresholds.minRemainingInputTokens; // F7-A: 4096
+    input.usage.usageRatio >= thresholds.summary ||                      // 0.95
+    input.usage.remainingTokens < thresholds.minRemainingInputTokens;     // F7-A: 4096
 
   if (needsSummary) {
-    if (input.compactionCount >= input.maxPerTurn) return "mask";       // 每轮上限，降级为 mask
-    return input.historyLength <= 2 ? "mask" : "prune-summary";
+    if ((input.compactionCount ?? 0) >= (input.maxPerTurn ?? Infinity)) return "mask"; // 每轮上限，降级为 mask
+    return "prune-summary";                                             // too-short 由 generateSummaryCandidate 返回 skipped
   }
-  if (input.usage.usageRatio >= input.thresholds.mask) return "mask";   // 0.5
+  if (input.usage.usageRatio >= thresholds.mask) return "mask";         // 0.5
   return "none";
 }
 ```
@@ -116,7 +116,7 @@ export const MAX_COMPACTION_PER_TURN = 2;   // 对齐 kimi 思路，可配
 |------|------|
 | `packages/ohbaby-agent/src/core/context/context-manager.ts` | `decideCompactionRung` 内部加 mask 档 + thrashLock + compactionCount；runCompaction 末尾回填 `recentSavingsRatios`；新增 `resetTurnCompactionCount`（[G4](../gaps-and-decisions.md#g4每轮压缩计数归属)）；rung 驱动 mask/prune-summary 分派 |
 | `packages/ohbaby-agent/src/core/context/constants.ts` | 新增 `CompactionThresholds` 默认值（mask=0.5, summary=0.95, minRemainingInputTokens=4096）、`THRASH_WINDOW` / `THRASH_MIN_SAVINGS_RATIO` / `THRASH_UNLOCK_DELTA` / `MAX_COMPACTION_PER_TURN` |
-| `packages/ohbaby-agent/src/core/context/types.ts` | 新增 `CompactionRung` / `CompactionThresholds` / `ThrashLockState`；`ContextManager` 接口新增 `resetTurnCompactionCount`；`ContextManagerOptions` 可选注入阈值与窗口配置 |
+| `packages/ohbaby-agent/src/core/context/types.ts` | `ContextManager` 接口新增 `resetTurnCompactionCount`；`ContextManagerOptions` 可选注入阈值、反抖动窗口、每轮上限配置 |
 | `packages/ohbaby-agent/src/core/context/events.ts` | `context.compactSkipped` 增加 `reason: "thrash-locked" | "per-turn-cap"`；同步 Zod schema |
 | `packages/ohbaby-agent/src/core/lifecycle/lifecycle.ts` | turn 开始时调 `contextManager.resetTurnCompactionCount(sessionId)`（[G4](../gaps-and-decisions.md#g4每轮压缩计数归属)）；force 路径不变 |
 
@@ -134,7 +134,7 @@ export const MAX_COMPACTION_PER_TURN = 2;   // 对齐 kimi 思路，可配
 | 2 | `decideCompactionRung` + `CompactionThresholds` 单一真相（summary 阈值 0.85→0.95，[G9](../gaps-and-decisions.md#g9prune-summary-阈值-085--095)；F7-A 小硬地板；mask 档接投影层） |
 | 3 | 反抖动锁：状态、滑动窗口、锁/解锁、`compactSkipped(reason:"thrash-locked")` |
 | 4 | 每轮压缩次数上限：lifecycle turn 计数 + 降级 |
-| 5 | （可选）2.4 入口预留：`compress_context` 工具桩（仅转调 `compact(force)`，system-prompt 引导后续） |
+| 5 | 2.4 入口不在本轮实现：`compress_context` 工具桩留到首个真实消费方/提示词设计一起落地 |
 
 ---
 

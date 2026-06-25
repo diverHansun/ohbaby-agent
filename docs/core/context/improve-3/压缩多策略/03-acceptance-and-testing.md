@@ -20,7 +20,7 @@
 
 - 存在 `decideCompactionRung`，返回 `none | mask | prune-summary | force`。
 - `CompactionThresholds`（mask / summary）集中定义于 `constants.ts`，无跨层重复阈值。
-- usage < mask 阈值且剩余预算充足 → `none`；mask ≤ usage < summary → `mask`；usage ≥ summary 且 history>2 → `prune-summary`；usage < summary 但 `remainingInputTokens < 4096` 且 history>2 → `prune-summary`（F7-A 小硬地板）；force → `force`。
+- usage < mask 阈值且剩余预算充足 → `none`；mask ≤ usage < summary → `mask`；usage ≥ summary → `prune-summary`；usage < summary 但 `remainingInputTokens < 4096` → `prune-summary`（F7-A 小硬地板）；force → `force`。too-short 历史由 `generateSummaryCandidate` 返回 skipped，不放在 rung policy 里重复判断。
 - **summary 阈值默认 0.95**（[G9](../gaps-and-decisions.md#g9prune-summary-阈值-085--095)：原 0.85→0.95）——characterization 测试需更新阈值断言。
 - **近上限小硬地板默认 4096**（F7-A）：比例未到 0.95 但剩余输入预算不足 4096 时仍触发 prune-summary。
 - **`force` 仅由 `input.force=true` 触发**（[G10](../gaps-and-decisions.md#g10去除-095-预防性-force)），不从 usage ratio 推导。
@@ -90,6 +90,8 @@ rg -n "interface CompactionStrategy|class .*Strategy|implements CompactionStrate
 ## AC-5 2.4 入口（若本轮预留）
 
 **目标**：compress 暴露给模型仅为触发入口，复用现有 `compact(force)` 与反抖动。
+
+**本轮结论**：不实现/不预留 `compress_context` 工具桩；入口随后续首个真实消费方与 system-prompt 引导共同设计。
 
 **判定**（仅在本轮预留入口时适用）：
 
