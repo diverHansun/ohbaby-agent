@@ -48,7 +48,7 @@ interface CompactionOutcome {
 （外壳已完成 assemble + mask + usageBefore 预算）
 runCompaction(req):
    P1 usageBefore = req.usageBefore                          // 外壳预算好（mask 后），不再自量
-   P2 rung = decideCompactionRung({usage: usageBefore, historyLength, force, thresholds})
+   P2 rung = decideCompactionRung({usage: usageBefore, force, thresholds})
       switch (rung):
         case "none":          发 CompactSkipped(not-needed)，return outcome(not-needed)  // 正常
         case "mask":          return outcome(not-needed)     // 预留：mask 在投影层处理，脊椎不跑

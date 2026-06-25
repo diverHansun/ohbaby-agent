@@ -223,7 +223,6 @@ export type CompactionRung = "none" | "mask" | "prune-summary" | "force";
 
 export function decideCompactionRung(input: {
   readonly usage: ContextUsage;
-  readonly historyLength: number;
   readonly force: boolean;
   readonly thresholds: CompactionThresholds;
 }): CompactionRung {
