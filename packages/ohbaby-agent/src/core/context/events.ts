@@ -30,7 +30,6 @@ const ContextUsageSchema = z.object({
   safetyMarginTokens: z.number().optional(),
   usageRatio: z.number(),
   remainingTokens: z.number(),
-  shouldCompress: z.boolean(),
   modelId: z.string(),
 });
 

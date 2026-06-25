@@ -751,7 +751,6 @@ describe("CommandService", () => {
       currentTokens: 9_000,
       modelId: "fake-model",
       remainingTokens: 119_000,
-      shouldCompress: false,
       usageRatio: 9_000 / 128_000,
     };
     const contextWindowUsage = {
@@ -1296,7 +1295,6 @@ describe("CommandService", () => {
           currentTokens: 24,
           modelId: "fake-model",
           remainingTokens: 76,
-          shouldCompress: false,
           usageRatio: 0.24,
         },
         usageBefore: {
@@ -1304,7 +1302,6 @@ describe("CommandService", () => {
           currentTokens: 92,
           modelId: "fake-model",
           remainingTokens: 8,
-          shouldCompress: true,
           usageRatio: 0.92,
         },
       }),

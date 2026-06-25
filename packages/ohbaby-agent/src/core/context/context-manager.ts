@@ -1,5 +1,5 @@
 import {
-  COMPACTION_RESERVE_TOKENS,
+  COMPACTION_MIN_REMAINING_INPUT_TOKENS,
   COMPRESSION_PRESERVE_RATIO,
   COMPRESSION_THRESHOLD,
   KEEP_RECENT_TOKENS,
@@ -22,7 +22,7 @@ import {
 } from "./serialization.js";
 import { serializeForLlm } from "./serializer.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
-import { estimateContextTokens } from "./token-estimation.js";
+import { estimateWireHeuristic } from "./token-estimation.js";
 import type {
   AssembledContext,
   CompactOptions,
@@ -37,8 +37,13 @@ import type {
   PruneResult,
   TokenCounter,
 } from "./types.js";
-import type { MessageWithParts, Part, PartMetadata } from "../message/index.js";
+import type { ChatCompletionMessage } from "../llm-client/index.js";
+import type { MessageWithParts, Part } from "../message/index.js";
 import type { MergedMemory } from "../memory/index.js";
+
+const CALIBRATION_EMA_ALPHA = 0.5;
+const CALIBRATION_FACTOR_MIN = 0.5;
+const CALIBRATION_FACTOR_MAX = 3.0;
 
 const EMPTY_MEMORY: MergedMemory = { global: "", project: "", merged: "" };
 
@@ -64,6 +69,8 @@ interface CompactionRequest {
   readonly modelId: string;
   readonly force: boolean;
   readonly sessionId: string;
+  readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
+  readonly isSubagent: boolean;
 }
 
 interface CompactionOutcome {
@@ -89,12 +96,10 @@ function tokenCount(
 }
 
 export function getContextUsage(
-  context: Pick<AssembledContext, "estimatedTokens">,
+  currentTokens: number,
   modelId: string,
   tokenCounter: Pick<TokenCounter, "getLimit" | "getBudget">,
-  compressionThreshold = COMPRESSION_THRESHOLD,
 ): ContextUsage {
-  const currentTokens = context.estimatedTokens;
   const budget = tokenCounter.getBudget?.(modelId, {
     usedInputTokens: currentTokens,
   });
@@ -108,7 +113,6 @@ export function getContextUsage(
       remainingTokens: budget.remainingInputTokens,
       reservedOutputTokens: budget.reservedOutputTokens,
       safetyMarginTokens: budget.safetyMarginTokens,
-      shouldCompress: budget.remainingInputTokens < COMPACTION_RESERVE_TOKENS,
       usageRatio: budget.usageRatio,
     };
   }
@@ -121,7 +125,6 @@ export function getContextUsage(
     contextLimit,
     modelId,
     remainingTokens: Math.max(0, contextLimit - currentTokens),
-    shouldCompress: usageRatio >= compressionThreshold,
     usageRatio,
   };
 }
@@ -132,11 +135,19 @@ export function decideCompactionRung(input: {
   readonly usage: ContextUsage;
   readonly historyLength: number;
   readonly force: boolean;
+  readonly summaryThreshold?: number;
+  readonly minRemainingInputTokens?: number;
 }): CompactionRung {
   if (input.force) {
     return "force";
   }
-  if (!input.usage.shouldCompress) {
+  const summaryThreshold = input.summaryThreshold ?? COMPRESSION_THRESHOLD;
+  const minRemainingInputTokens =
+    input.minRemainingInputTokens ?? COMPACTION_MIN_REMAINING_INPUT_TOKENS;
+  if (
+    input.usage.usageRatio < summaryThreshold &&
+    input.usage.remainingTokens >= minRemainingInputTokens
+  ) {
     return "none";
   }
   return "prune-summary";
@@ -292,8 +303,7 @@ function markCompactedParts(
       if (compactedPartIds.has(part.id)) {
         return { ...part, time: { ...part.time, compacted: compactedAt } };
       }
-      const metadata = removeTokenUsageMetadata(part.metadata);
-      return metadata === undefined ? part : { ...part, metadata };
+      return part;
     }),
   }));
 }
@@ -304,16 +314,6 @@ function compactedPartIdsFromHistory(
   return new Set(
     history.flatMap((message) => message.parts.map((part) => part.id)),
   );
-}
-
-function removeTokenUsageMetadata(
-  metadata: PartMetadata | undefined,
-): PartMetadata | undefined {
-  if (metadata?.tokenUsage === undefined) {
-    return undefined;
-  }
-  const { tokenUsage: _tokenUsage, ...retained } = metadata;
-  return retained;
 }
 
 export function createContextManager(
@@ -327,22 +327,111 @@ export function createContextManager(
   const pruneProtectTokens = options.pruneProtectTokens ?? PRUNE_PROTECT_TOKENS;
   const pruneMinimumTokens = options.pruneMinimumTokens ?? PRUNE_MINIMUM_TOKENS;
   const summaryAgentName = options.summaryAgentName ?? SUMMARY_AGENT_NAME;
+  const calibrationFactors = new Map<string, number>();
+
+  function getCalibrationFactor(sessionId: string): number {
+    return calibrationFactors.get(sessionId) ?? 1.0;
+  }
+
+  function updateCalibrationFactor(
+    sessionId: string,
+    realPromptTokens: number,
+    sentHeuristic: number,
+  ): void {
+    if (
+      sentHeuristic <= 0 ||
+      !Number.isFinite(sentHeuristic) ||
+      !Number.isFinite(realPromptTokens)
+    ) {
+      return;
+    }
+    const observed = realPromptTokens / sentHeuristic;
+    const clamped = Math.min(
+      CALIBRATION_FACTOR_MAX,
+      Math.max(CALIBRATION_FACTOR_MIN, observed),
+    );
+    const previous = getCalibrationFactor(sessionId);
+    calibrationFactors.set(
+      sessionId,
+      CALIBRATION_EMA_ALPHA * clamped +
+        (1 - CALIBRATION_EMA_ALPHA) * previous,
+    );
+  }
+
+  function renderForModel(input: {
+    readonly context: AssembledContext;
+    readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
+    readonly isSubagent: boolean;
+  }): ChatCompletionMessage[] {
+    return serializeForLlm({
+      activeReasoningByMessageId: input.activeReasoningByMessageId,
+      history: input.context.history,
+      isSubagent: input.isSubagent,
+      memory: input.context.memory,
+      systemPrompt: input.context.systemPrompt,
+    });
+  }
+
+  function measureUsage(input: {
+    readonly messages: readonly ChatCompletionMessage[];
+    readonly modelId: string;
+    readonly sessionId: string;
+  }): { readonly sentHeuristic: number; readonly usage: ContextUsage } {
+    const sentHeuristic = estimateWireHeuristic(
+      input.messages,
+      options.tokenCounter,
+    );
+    const currentTokens = Math.round(
+      sentHeuristic * getCalibrationFactor(input.sessionId),
+    );
+    return {
+      sentHeuristic,
+      usage: getContextUsage(currentTokens, input.modelId, options.tokenCounter),
+    };
+  }
+
+  function measureContext(input: {
+    readonly context: AssembledContext;
+    readonly modelId: string;
+    readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
+    readonly isSubagent: boolean;
+  }): {
+    readonly messages: readonly ChatCompletionMessage[];
+    readonly sentHeuristic: number;
+    readonly usage: ContextUsage;
+  } {
+    const messages = renderForModel({
+      activeReasoningByMessageId: input.activeReasoningByMessageId,
+      context: input.context,
+      isSubagent: input.isSubagent,
+    });
+    return { messages, ...measureUsage({
+      messages,
+      modelId: input.modelId,
+      sessionId: input.context.sessionId,
+    }) };
+  }
 
   function estimateAssembledTokens(
     systemPrompt: string,
     memory: MergedMemory,
     history: readonly MessageWithParts[],
+    isSubagent: boolean,
   ): number {
-    return (
-      tokenCount(
-        options.tokenCounter,
-        [systemPrompt, memory.merged].filter(Boolean).join("\n\n"),
-      ) + estimateContextTokens(history, options.tokenCounter).tokens
+    return estimateWireHeuristic(
+      serializeForLlm({
+        history,
+        isSubagent,
+        memory,
+        systemPrompt,
+      }),
+      options.tokenCounter,
     );
   }
 
   function assembleFromRawHistory(input: {
     readonly assembledAt: number;
+    readonly isSubagent: boolean;
     readonly memory: MergedMemory;
     readonly rawHistory: readonly MessageWithParts[];
     readonly sessionId: string;
@@ -358,8 +447,10 @@ export function createContextManager(
         input.systemPrompt,
         input.memory,
         history,
+        input.isSubagent,
       ),
       hasSummary: input.rawHistory.some(isSummaryMessage),
+      isSubagent: input.isSubagent,
       assembledAt: input.assembledAt,
       sessionId: input.sessionId,
     };
@@ -389,6 +480,7 @@ export function createContextManager(
       rawHistory,
       sessionId,
       systemPrompt,
+      isSubagent,
     });
   }
 
@@ -451,7 +543,6 @@ export function createContextManager(
       });
       compactedPartIds.add(candidate.part.id);
     }
-    await clearRetainedTokenUsageMetadata(history, compactedPartIds);
 
     const result = {
       prunedCount: prunable.length,
@@ -461,23 +552,6 @@ export function createContextManager(
     };
     options.bus.publish(ContextEvent.Pruned, { sessionId, result });
     return { compactedAt, compactedPartIds, result };
-  }
-
-  async function clearRetainedTokenUsageMetadata(
-    history: readonly MessageWithParts[],
-    compactedPartIds: ReadonlySet<string>,
-  ): Promise<void> {
-    for (const message of history) {
-      for (const part of message.parts) {
-        if (compactedPartIds.has(part.id)) {
-          continue;
-        }
-        const metadata = removeTokenUsageMetadata(part.metadata);
-        if (metadata !== undefined) {
-          await options.messageManager.updatePart(part.id, { metadata });
-        }
-      }
-    }
   }
 
   async function generateSummaryCandidate(
@@ -570,7 +644,6 @@ export function createContextManager(
 
   async function commitSummaryCandidate(
     sessionId: string,
-    rawHistory: readonly MessageWithParts[],
     candidate: CommittableSummaryCandidate,
   ): Promise<CompressionResult> {
     const summary = await options.messageManager.createMessage({
@@ -593,17 +666,6 @@ export function createContextManager(
           await options.messageManager.updatePart(part.id, {
             time: { ...part.time, compacted: compactedAt },
           });
-        }
-      }
-    }
-    for (const message of rawHistory) {
-      for (const part of message.parts) {
-        if (compactedPartIds.has(part.id)) {
-          continue;
-        }
-        const metadata = removeTokenUsageMetadata(part.metadata);
-        if (metadata !== undefined) {
-          await options.messageManager.updatePart(part.id, { metadata });
         }
       }
     }
@@ -658,6 +720,7 @@ export function createContextManager(
 
     return assembleFromRawHistory({
       assembledAt: input.assembled.assembledAt,
+      isSubagent: input.assembled.isSubagent,
       memory: input.assembled.memory,
       rawHistory: projectedHistory,
       sessionId: input.assembled.sessionId,
@@ -747,6 +810,8 @@ export function createContextManager(
     const rung = decideCompactionRung({
       force: req.force,
       historyLength: req.assembled.history.length,
+      minRemainingInputTokens: COMPACTION_MIN_REMAINING_INPUT_TOKENS,
+      summaryThreshold: compressionThreshold,
       usage: req.usageBefore,
     });
 
@@ -773,19 +838,27 @@ export function createContextManager(
     );
     const afterPrune = assembleFromRawHistory({
       assembledAt: now(),
+      isSubagent: req.isSubagent,
       memory: req.assembled.memory,
       rawHistory: historyAfterPrune,
       sessionId: req.sessionId,
       systemPrompt: req.assembled.systemPrompt,
     });
-    const usageAfterPrune = getContextUsage(
-      afterPrune,
-      req.modelId,
-      options.tokenCounter,
-      compressionThreshold,
-    );
+    const usageAfterPrune = measureContext({
+      activeReasoningByMessageId: req.activeReasoningByMessageId,
+      context: afterPrune,
+      isSubagent: req.isSubagent,
+      modelId: req.modelId,
+    }).usage;
 
-    if (rung !== "force" && !usageAfterPrune.shouldCompress) {
+    const afterPruneRung = decideCompactionRung({
+      force: false,
+      historyLength: afterPrune.history.length,
+      minRemainingInputTokens: COMPACTION_MIN_REMAINING_INPUT_TOKENS,
+      summaryThreshold: compressionThreshold,
+      usage: usageAfterPrune,
+    });
+    if (rung !== "force" && afterPruneRung === "none") {
       return {
         status: pruneOutcome.result.prunedCount > 0 ? "pruned" : "not-needed",
         prune: pruneOutcome.result,
@@ -828,12 +901,12 @@ export function createContextManager(
       candidate,
       compactedAt: afterPrune.assembledAt,
     });
-    const projectedUsage = getContextUsage(
-      projectedContext,
-      req.modelId,
-      options.tokenCounter,
-      compressionThreshold,
-    );
+    const projectedUsage = measureContext({
+      activeReasoningByMessageId: req.activeReasoningByMessageId,
+      context: projectedContext,
+      isSubagent: req.isSubagent,
+      modelId: req.modelId,
+    }).usage;
     if (projectedUsage.currentTokens >= usageAfterPrune.currentTokens) {
       const compression = compressionFromRejectedCandidate(candidate);
       options.bus.publish(ContextEvent.CompactSkipped, {
@@ -859,7 +932,6 @@ export function createContextManager(
 
     const compression = await commitSummaryCandidate(
       req.sessionId,
-      afterPrune.history,
       candidate,
     );
     const committedRawHistory = await options.messageManager.listBySession(
@@ -867,17 +939,18 @@ export function createContextManager(
     );
     const committedContext = assembleFromRawHistory({
       assembledAt: now(),
+      isSubagent: req.isSubagent,
       memory: req.assembled.memory,
       rawHistory: committedRawHistory,
       sessionId: req.sessionId,
       systemPrompt: req.assembled.systemPrompt,
     });
-    const usageAfter = getContextUsage(
-      committedContext,
-      req.modelId,
-      options.tokenCounter,
-      compressionThreshold,
-    );
+    const usageAfter = measureContext({
+      activeReasoningByMessageId: req.activeReasoningByMessageId,
+      context: committedContext,
+      isSubagent: req.isSubagent,
+      modelId: req.modelId,
+    }).usage;
 
     return {
       status:
@@ -907,20 +980,21 @@ export function createContextManager(
     sessionId: string,
     input: CompactOptions,
   ): Promise<CompactResult> {
+    const isSubagent = input.isSubagent ?? false;
     const assembled = await assemble(
       sessionId,
       input.directory,
-      input.isSubagent ?? false,
+      isSubagent,
     );
-    const usageBefore = getContextUsage(
-      assembled,
-      input.modelId,
-      options.tokenCounter,
-      compressionThreshold,
-    );
+    const usageBefore = measureContext({
+      context: assembled,
+      isSubagent,
+      modelId: input.modelId,
+    }).usage;
     const outcome = await runCompaction({
       assembled,
       force: input.force === true,
+      isSubagent,
       modelId: input.modelId,
       sessionId,
       usageBefore,
@@ -931,20 +1005,23 @@ export function createContextManager(
 
   async function prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn> {
     const startedAt = now();
+    const isSubagent = input.isSubagent ?? false;
     const assembled = await assemble(
       input.sessionId,
       input.directory,
-      input.isSubagent ?? false,
+      isSubagent,
     );
-    const usageBefore = getContextUsage(
-      assembled,
-      input.modelId,
-      options.tokenCounter,
-      compressionThreshold,
-    );
+    const usageBefore = measureContext({
+      activeReasoningByMessageId: input.activeReasoningByMessageId,
+      context: assembled,
+      isSubagent,
+      modelId: input.modelId,
+    }).usage;
     const outcome = await runCompaction({
+      activeReasoningByMessageId: input.activeReasoningByMessageId,
       assembled,
       force: input.force === true,
+      isSubagent,
       modelId: input.modelId,
       sessionId: input.sessionId,
       usageBefore,
@@ -954,14 +1031,14 @@ export function createContextManager(
       outcome.status === "not-needed" && outcome.prune === undefined
         ? undefined
         : mapOutcomeToCompactResult(outcome);
-    const usage = outcome.usageAfter;
-    const messages = serializeForLlm({
+    const finalMeasurement = measureContext({
       activeReasoningByMessageId: input.activeReasoningByMessageId,
-      history: finalContext.history,
-      isSubagent: input.isSubagent ?? false,
-      memory: finalContext.memory,
-      systemPrompt: finalContext.systemPrompt,
+      context: finalContext,
+      isSubagent,
+      modelId: input.modelId,
     });
+    const usage = finalMeasurement.usage;
+    const messages = finalMeasurement.messages;
 
     options.bus.publish(ContextEvent.TurnPrepared, {
       sessionId: input.sessionId,
@@ -976,6 +1053,7 @@ export function createContextManager(
       compaction,
       hasSummary: finalContext.hasSummary,
       messages,
+      sentHeuristic: finalMeasurement.sentHeuristic,
       usage,
     };
   }
@@ -983,16 +1061,13 @@ export function createContextManager(
   return {
     assemble,
     getUsage(context: AssembledContext, modelId: string): ContextUsage {
-      return getContextUsage(
+      return measureContext({
         context,
+        isSubagent: context.isSubagent,
         modelId,
-        options.tokenCounter,
-        compressionThreshold,
-      );
+      }).usage;
     },
-    shouldCompress(usage: ContextUsage): boolean {
-      return usage.shouldCompress;
-    },
+    updateCalibrationFactor,
     compact,
     prepareTurn,
   };

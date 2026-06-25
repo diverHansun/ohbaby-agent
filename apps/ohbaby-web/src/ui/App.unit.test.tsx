@@ -719,7 +719,6 @@ function compactUsage(currentTokens: number): UiCompactSessionUsage {
     currentTokens,
     modelId: "glm-4.7",
     remainingTokens: 128_000 - currentTokens,
-    shouldCompress: false,
     usageRatio: currentTokens / 128_000,
   };
 }

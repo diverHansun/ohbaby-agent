@@ -12,6 +12,7 @@ import type {
 import {
   ContextEvent,
   createContextManager,
+  decideCompactionRung,
   findCutPoint,
   getContextUsage,
 } from "./index.js";
@@ -25,7 +26,7 @@ import { isActivePart } from "./filters.js";
 import { serializeHistory } from "./serialization.js";
 import { serializeForLlm } from "./serializer.js";
 import { partitionSummary } from "./summary.js";
-import { estimateContextTokens } from "./token-estimation.js";
+import { estimateWireHeuristic } from "./token-estimation.js";
 
 interface ContextFixture {
   readonly compactSkipped: readonly unknown[];
@@ -270,152 +271,45 @@ async function summaryMessageCount(
 }
 
 describe("ContextManager", () => {
-  it("estimates context tokens from serialized history when no provider anchor exists", () => {
-    const history = [
-      messageWithText("user", "one"),
-      messageWithText("assistant", "two"),
+  it("estimates wire heuristic from the full provider payload", () => {
+    const messages = [
+      { role: "system" as const, content: "system prompt" },
+      { role: "user" as const, content: "hello" },
+      { role: "assistant" as const, content: "answer" },
     ];
 
     expect(
-      estimateContextTokens(history, {
+      estimateWireHeuristic(messages, {
         estimateTokens: (content: string) => content.length,
       }),
-    ).toEqual({
-      anchorIndex: -1,
-      anchorTokens: 0,
-      tailTokens: serializeHistory(history).length,
-      tokens: serializeHistory(history).length,
-    });
+    ).toBe(messages.map((message) => JSON.stringify(message)).join("\n").length);
   });
 
-  it("estimates context tokens from the latest provider usage anchor plus tail", () => {
-    const history = [
-      messageWithText("user", "old user"),
-      messageWithText("assistant", "old assistant", {
-        tokenUsage: {
-          promptTokens: 100,
-          completionTokens: 20,
-          totalTokens: 120,
-        },
-      }),
-      messageWithText("user", "tail"),
-    ];
-
-    expect(
-      estimateContextTokens(history, {
-        estimateTokens: (content: string) => content.length,
-      }),
-    ).toEqual({
-      anchorIndex: 1,
-      anchorTokens: 120,
-      tailTokens: "user: tail".length,
-      tokens: 120 + "user: tail".length,
-    });
-  });
-
-  it("skips provider usage anchors older than the latest context summary", () => {
-    const history = [
-      messageWithText(
-        "assistant",
-        "old anchor",
-        {
-          tokenUsage: {
-            promptTokens: 100_000,
-            completionTokens: 13_350,
-            totalTokens: 113_350,
+  it("counts assistant tool calls even when message content is null", () => {
+    const messages = [
+      {
+        content: null,
+        role: "assistant" as const,
+        tool_calls: [
+          {
+            function: {
+              arguments:
+                '{"path":"/a/very/long/path/with/many/chars.ts"}',
+              name: "read_file",
+            },
+            id: "call_read",
+            type: "function" as const,
           },
-        },
-        1_000,
-      ),
-      messageWithText(
-        "assistant",
-        "summary",
-        { kind: "context-summary" },
-        2_000,
-      ),
-      messageWithText("user", "tail", undefined, 3_000),
+        ],
+      },
     ];
 
-    const result = estimateContextTokens(history, {
+    const tokens = estimateWireHeuristic(messages, {
       estimateTokens: (content: string) => content.length,
     });
 
-    expect(result.anchorIndex).toBe(-1);
-    expect(result.tokens).toBe(serializeHistory(history).length);
-  });
-
-  it("skips provider usage anchors before the latest context summary even with the same timestamp", () => {
-    const history = [
-      messageWithText(
-        "assistant",
-        "same millisecond stale anchor",
-        {
-          tokenUsage: {
-            promptTokens: 100_000,
-            completionTokens: 13_350,
-            totalTokens: 113_350,
-          },
-        },
-        2_000,
-      ),
-      messageWithText(
-        "assistant",
-        "summary",
-        { kind: "context-summary" },
-        2_000,
-      ),
-      messageWithText("user", "tail", undefined, 3_000),
-    ];
-
-    const result = estimateContextTokens(history, {
-      estimateTokens: (content: string) => content.length,
-    });
-
-    expect(result.anchorIndex).toBe(-1);
-    expect(result.tokens).toBe(serializeHistory(history).length);
-  });
-
-  it("uses provider usage anchors newer than the latest context summary", () => {
-    const history = [
-      messageWithText(
-        "assistant",
-        "old anchor",
-        {
-          tokenUsage: {
-            promptTokens: 100_000,
-            completionTokens: 13_350,
-            totalTokens: 113_350,
-          },
-        },
-        1_000,
-      ),
-      messageWithText(
-        "assistant",
-        "summary",
-        { kind: "context-summary" },
-        2_000,
-      ),
-      messageWithText(
-        "assistant",
-        "fresh anchor",
-        {
-          tokenUsage: {
-            promptTokens: 5_000,
-            completionTokens: 1_000,
-            totalTokens: 6_000,
-          },
-        },
-        3_000,
-      ),
-      messageWithText("user", "tail", undefined, 4_000),
-    ];
-
-    const result = estimateContextTokens(history, {
-      estimateTokens: (content: string) => content.length,
-    });
-
-    expect(result.anchorIndex).toBe(2);
-    expect(result.anchorTokens).toBe(6_000);
+    expect(tokens).toBeGreaterThan(20);
+    expect(tokens).toBe(JSON.stringify(messages[0]).length);
   });
 
   it("finds a cut point on message boundaries around completed tool parts", () => {
@@ -545,7 +439,13 @@ describe("ContextManager", () => {
       role: "user",
       text: "hello",
     });
-    const { manager } = createManager({ messageManager });
+    const { manager } = createManager({
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 10_000,
+      },
+    });
 
     const context = await manager.assemble("session_1", "D:/repo");
 
@@ -583,7 +483,13 @@ describe("ContextManager", () => {
       },
     });
 
-    const { manager } = createManager({ messageManager });
+    const { manager } = createManager({
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 10_000,
+      },
+    });
     const context = await manager.assemble("session_1", "D:/repo");
     const messages = serializeForLlm({
       history: context.history,
@@ -860,7 +766,13 @@ describe("ContextManager", () => {
       role: "user",
       text: "hello",
     });
-    const { manager } = createManager({ messageManager });
+    const { manager } = createManager({
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 10_000,
+      },
+    });
 
     const prepared = await manager.prepareTurn({
       directory: "D:/repo",
@@ -873,8 +785,38 @@ describe("ContextManager", () => {
       expect.stringContaining("system prompt"),
     );
     expect(prepared.compaction).toBeUndefined();
-    expect(prepared.usage.shouldCompress).toBe(false);
     expect(prepared.hasSummary).toBe(false);
+    expect(prepared.sentHeuristic).toBeGreaterThan(0);
+  });
+
+  it("applies session calibration with EMA when measuring prepared turns", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "hello",
+    });
+    const { manager } = createManager({ messageManager });
+
+    const baseline = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    manager.updateCalibrationFactor(
+      "session_1",
+      baseline.sentHeuristic * 2,
+      baseline.sentHeuristic,
+    );
+    const calibrated = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(calibrated.usage.currentTokens).toBe(
+      Math.round(calibrated.sentHeuristic * 1.5),
+    );
   });
 
   it("keeps prepareTurn compaction path to two history reads and one memory load", async () => {
@@ -986,7 +928,7 @@ describe("ContextManager", () => {
   });
 
   it("calculates context usage with the 85 percent compression threshold", () => {
-    const usage = getContextUsage({ estimatedTokens: 85 }, "model-a", {
+    const usage = getContextUsage(85, "model-a", {
       getLimit: () => 100,
     });
 
@@ -995,14 +937,13 @@ describe("ContextManager", () => {
       contextLimit: 100,
       modelId: "model-a",
       remainingTokens: 15,
-      shouldCompress: true,
       usageRatio: 0.85,
     });
   });
 
   it("uses input token budget rather than the full context window for compression decisions", () => {
     const usage = getContextUsage(
-      { estimatedTokens: 45 },
+      45,
       "model-a",
       {
         getBudget(_modelId, options) {
@@ -1021,7 +962,6 @@ describe("ContextManager", () => {
         },
         getLimit: () => 100,
       },
-      0.85,
     );
 
     expect(usage).toMatchObject({
@@ -1031,54 +971,74 @@ describe("ContextManager", () => {
       remainingTokens: 5,
       reservedOutputTokens: 40,
       safetyMarginTokens: 10,
-      shouldCompress: true,
       usageRatio: 0.9,
     });
   });
 
-  it("uses absolute remaining-token reserve when model budget is available", () => {
+  it("uses a small remaining-input floor when deciding the compaction rung", () => {
     const usage = getContextUsage(
-      { estimatedTokens: 980_000 },
+      96_500,
       "large-model",
       {
         getBudget(_modelId, options) {
           const usedInputTokens = options?.usedInputTokens ?? 0;
-          const inputBudgetTokens = 1_000_000;
+          const inputBudgetTokens = 100_000;
           return {
-            contextWindowTokens: 1_048_576,
+            contextWindowTokens: 128_000,
             inputBudgetTokens,
-            maxOutputTokens: 32_000,
+            maxOutputTokens: 20_000,
             modelId: "large-model",
             remainingInputTokens: inputBudgetTokens - usedInputTokens,
-            reservedOutputTokens: 32_000,
-            safetyMarginTokens: 16_384,
+            reservedOutputTokens: 20_000,
+            safetyMarginTokens: 8_000,
             usageRatio: usedInputTokens / inputBudgetTokens,
             usedInputTokens,
           };
         },
-        getLimit: () => 1_048_576,
+        getLimit: () => 128_000,
       },
-      0.85,
     );
 
-    expect(usage.usageRatio).toBeGreaterThan(0.85);
-    expect(usage.remainingTokens).toBe(20_000);
-    expect(usage.shouldCompress).toBe(false);
+    expect(usage.usageRatio).toBeLessThan(0.97);
+    expect(usage.remainingTokens).toBe(3_500);
+    expect(
+      decideCompactionRung({
+        force: false,
+        historyLength: 4,
+        usage,
+      }),
+    ).toBe("prune-summary");
   });
 
-  it("uses the precomputed context usage decision in shouldCompress", () => {
-    const { manager } = createManager();
-
+  it("keeps compaction decisions on usage ratio when enough budget remains", () => {
     expect(
-      manager.shouldCompress({
+      decideCompactionRung({
+        force: false,
+        historyLength: 4,
+        usage: {
+          contextLimit: 100_000,
+          currentTokens: 70_000,
+          inputBudgetTokens: 100_000,
+          modelId: "large-model",
+          remainingTokens: 30_000,
+          usageRatio: 0.7,
+        },
+      }),
+    ).toBe("none");
+    expect(
+      decideCompactionRung({
+        force: false,
+        historyLength: 4,
+        usage: {
         contextLimit: 1_000_000,
         currentTokens: 980_000,
+          inputBudgetTokens: 1_000_000,
         modelId: "large-model",
         remainingTokens: 20_000,
-        shouldCompress: false,
         usageRatio: 0.98,
+        },
       }),
-    ).toBe(false);
+    ).toBe("prune-summary");
   });
 
   it("does not expose legacy compress or prune APIs", () => {
@@ -1095,7 +1055,13 @@ describe("ContextManager", () => {
       role: "user",
       text: "small",
     });
-    const { compactSkipped, manager } = createManager({ messageManager });
+    const { compactSkipped, manager } = createManager({
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 10_000,
+      },
+    });
 
     await manager.prepareTurn({
       directory: "D:/repo",
@@ -1291,7 +1257,7 @@ describe("ContextManager", () => {
     expect(listBySession).toHaveBeenCalledTimes(1);
   });
 
-  it("clears retained usage anchors when compact resolves through prune only", async () => {
+  it("ignores retained usage metadata when compact resolves through prune only", async () => {
     const messageManager = createMessageManagerFixture();
     const memory: MemoryReader = {
       load: vi.fn().mockResolvedValue({ global: "", project: "", merged: "" }),
@@ -1339,7 +1305,14 @@ describe("ContextManager", () => {
     expect(generateSummary).not.toHaveBeenCalled();
     expect(result.usageAfter.currentTokens).toBeLessThan(100);
     const history = await messageManager.listBySession("session_1");
-    expect(history[1]?.parts[0]?.metadata).toEqual({ keep: true });
+    expect(history[1]?.parts[0]?.metadata).toEqual({
+      keep: true,
+      tokenUsage: {
+        completionTokens: 0,
+        promptTokens: 1_000,
+        totalTokens: 1_000,
+      },
+    });
   });
 
   it("compacts by summarizing older history and re-injecting the summary into assembled context", async () => {
@@ -1449,7 +1422,7 @@ describe("ContextManager", () => {
     expect(summary).not.toContain("<read-files>");
   });
 
-  it("clears stale token usage metadata from retained messages after compaction", async () => {
+  it("retains token usage metadata after compaction because estimation no longer consumes it", async () => {
     const messageManager = createMessageManagerFixture();
     await addTextMessage(messageManager, {
       sessionId: "session_1",
@@ -1498,7 +1471,14 @@ describe("ContextManager", () => {
     const retained = activeHistory.find(
       (message) => message.info.id === "message_4",
     );
-    expect(retained?.parts[0]?.metadata).toEqual({ keep: true });
+    expect(retained?.parts[0]?.metadata).toEqual({
+      keep: true,
+      tokenUsage: {
+        promptTokens: 90_000,
+        completionTokens: 10_000,
+        totalTokens: 100_000,
+      },
+    });
     expect(result.usageAfter.currentTokens).toBeLessThan(
       result.usageBefore.currentTokens,
     );

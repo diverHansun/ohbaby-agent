@@ -30,7 +30,6 @@ describe("buildCoreAPIImpl", () => {
             currentTokens: 1,
             modelId: "fake-model",
             remainingTokens: 99,
-            shouldCompress: false,
             usageRatio: 0.01,
           },
           usageBefore: {
@@ -38,7 +37,6 @@ describe("buildCoreAPIImpl", () => {
             currentTokens: 1,
             modelId: "fake-model",
             remainingTokens: 99,
-            shouldCompress: false,
             usageRatio: 0.01,
           },
         }),

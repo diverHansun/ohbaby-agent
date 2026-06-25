@@ -47,7 +47,6 @@ const SESSION_USAGE: ContextUsage = {
   currentTokens: 120,
   modelId: "fake-model",
   remainingTokens: 99_880,
-  shouldCompress: false,
   usageRatio: 0.0012,
 };
 
@@ -56,6 +55,9 @@ function preparedTurn(messages: PreparedTurn["messages"]): PreparedTurn {
     assembledAt: 1_700_000_000_000,
     hasSummary: false,
     messages,
+    sentHeuristic: messages
+      .map((message) => JSON.stringify(message))
+      .join("\n").length,
     usage: SESSION_USAGE,
   };
 }
@@ -66,11 +68,9 @@ function createContextManagerMock(
   return {
     assemble: vi.fn(),
     compact: vi.fn(),
-    compress: vi.fn(),
     getUsage: vi.fn(),
     prepareTurn,
-    prune: vi.fn(),
-    shouldCompress: vi.fn(),
+    updateCalibrationFactor: vi.fn(),
   };
 }
 

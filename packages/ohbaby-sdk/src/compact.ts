@@ -18,7 +18,6 @@ export interface UiCompactSessionUsage {
   readonly remainingTokens: number;
   readonly reservedOutputTokens?: number;
   readonly safetyMarginTokens?: number;
-  readonly shouldCompress: boolean;
   readonly usageRatio: number;
 }
 

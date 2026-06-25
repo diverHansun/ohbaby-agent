@@ -559,6 +559,13 @@ export class Lifecycle {
       }
 
       usage = addUsage(usage, toUsage(finalEvent.tokenUsage));
+      if (finalEvent.tokenUsage !== undefined) {
+        contextManager.updateCalibrationFactor(
+          params.sessionId,
+          finalEvent.tokenUsage.prompt_tokens,
+          prepared.sentHeuristic,
+        );
+      }
       if (params.signal?.aborted) {
         await markAssistantMessageError(
           this.deps.messageManager,

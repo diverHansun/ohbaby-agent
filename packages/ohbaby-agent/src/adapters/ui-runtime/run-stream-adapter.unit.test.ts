@@ -51,7 +51,6 @@ describe("startRunStreamProjection", () => {
         inputBudgetTokens: 950_000,
         modelId: "deepseek-v4-pro",
         remainingTokens: 911_600,
-        shouldCompress: false,
         usageRatio: 38_400 / 950_000,
       },
     });
@@ -112,7 +111,6 @@ describe("startRunStreamProjection", () => {
         currentTokens: 10_000,
         modelId: "fake-model",
         remainingTokens: 90_000,
-        shouldCompress: false,
         usageRatio: 0.1,
       },
       usageBefore: {
@@ -120,7 +118,6 @@ describe("startRunStreamProjection", () => {
         currentTokens: 92_000,
         modelId: "fake-model",
         remainingTokens: 8_000,
-        shouldCompress: true,
         usageRatio: 0.92,
       },
     };

@@ -21,7 +21,6 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
           currentTokens: 1,
           modelId: "fake-model",
           remainingTokens: 99,
-          shouldCompress: false,
           usageRatio: 0.01,
         },
         usageBefore: {
@@ -29,7 +28,6 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
           currentTokens: 1,
           modelId: "fake-model",
           remainingTokens: 99,
-          shouldCompress: false,
           usageRatio: 0.01,
         },
       }),

@@ -347,7 +347,6 @@ class SessionLifecycle implements RunLifecycle {
         currentTokens: 10,
         modelId: params.modelId,
         remainingTokens: 118,
-        shouldCompress: false,
         usageRatio: 0.08,
       },
     };
@@ -359,7 +358,6 @@ class SessionLifecycle implements RunLifecycle {
           currentTokens: 12,
           modelId: params.modelId,
           remainingTokens: 116,
-          shouldCompress: false,
           usageRatio: 0.09,
         },
         usageBefore: {
@@ -367,7 +365,6 @@ class SessionLifecycle implements RunLifecycle {
           currentTokens: 120,
           modelId: params.modelId,
           remainingTokens: 8,
-          shouldCompress: true,
           usageRatio: 0.94,
         },
       },
@@ -381,7 +378,6 @@ class SessionLifecycle implements RunLifecycle {
         currentTokens: 12,
         modelId: params.modelId,
         remainingTokens: 116,
-        shouldCompress: false,
         usageRatio: 0.09,
       },
     };
@@ -405,7 +401,6 @@ class SessionLifecycle implements RunLifecycle {
         currentTokens: 10,
         modelId: params.modelId,
         remainingTokens: 118,
-        shouldCompress: false,
         usageRatio: 0.08,
       },
     };

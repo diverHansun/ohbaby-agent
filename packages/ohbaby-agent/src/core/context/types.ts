@@ -55,6 +55,7 @@ export interface AssembledContext {
   readonly hasSummary: boolean;
   readonly assembledAt: number;
   readonly sessionId: string;
+  readonly isSubagent: boolean;
 }
 
 export interface ContextUsage {
@@ -65,7 +66,6 @@ export interface ContextUsage {
   readonly safetyMarginTokens?: number;
   readonly usageRatio: number;
   readonly remainingTokens: number;
-  readonly shouldCompress: boolean;
   readonly modelId: string;
 }
 
@@ -129,6 +129,7 @@ export interface PreparedTurn {
   readonly compaction?: CompactResult;
   readonly assembledAt: number;
   readonly hasSummary: boolean;
+  readonly sentHeuristic: number;
 }
 
 export interface ContextManager {
@@ -138,7 +139,11 @@ export interface ContextManager {
     isSubagent?: boolean,
   ): Promise<AssembledContext>;
   getUsage(context: AssembledContext, modelId: string): ContextUsage;
-  shouldCompress(usage: ContextUsage): boolean;
+  updateCalibrationFactor(
+    sessionId: string,
+    realPromptTokens: number,
+    sentHeuristic: number,
+  ): void;
   compact(sessionId: string, options: CompactOptions): Promise<CompactResult>;
   prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn>;
 }
