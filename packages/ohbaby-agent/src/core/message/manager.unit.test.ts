@@ -266,6 +266,38 @@ describe("MessageManager", () => {
       { role: "assistant", content: "recent history" },
     ]);
   });
+
+  it("keeps partial aborted tool output before the abort notice in model messages", async () => {
+    const manager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const assistant = await manager.createMessage({
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+    });
+    await manager.appendPart(assistant.id, {
+      callId: "call_bash",
+      state: {
+        error: "Tool execution aborted by user",
+        input: {},
+        output: "partial stdout before abort",
+        status: "aborted",
+      },
+      tool: "bash",
+      type: "tool",
+    });
+
+    await expect(manager.toModelMessages("session_1")).resolves.toEqual([
+      {
+        content: "partial stdout before abort\n\nTool execution aborted by user",
+        role: "assistant",
+      },
+    ]);
+  });
 });
 
 function createDeterministicIds(): MessageIdGenerator {

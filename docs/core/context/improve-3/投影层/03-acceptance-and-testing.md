@@ -129,6 +129,7 @@ rg -n "time\.compacted|updatePart" packages/ohbaby-agent/src/core/context/projec
 - `maskEnabled=true` 时发事件，`enabled: true`，`maskedPartIds` 填实际被遮的 part id 全列表。
 - 未遮罩任何 part 时仍发事件，`maskedPartIds: []`，`skippedReason` 记录原因。
 - 事件 Zod schema 与 `events.ts` 同步。
+- `prepareTurn` 正常会在压缩前预算和最终发送前各调用一次投影，因此消费者不应把 `context.masked` 事件条数等同于 turn 数。
 
 ```bash
 rg -n "context.masked" packages/ohbaby-agent/src/core/context/events.ts

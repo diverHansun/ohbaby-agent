@@ -15,8 +15,13 @@ function partToContent(part: Part): string {
   if (part.state.status === "completed") {
     return part.state.output;
   }
-  if (part.state.status === "error" || part.state.status === "aborted") {
+  if (part.state.status === "error") {
     return part.state.error;
+  }
+  if (part.state.status === "aborted") {
+    return part.state.output === undefined || part.state.output === ""
+      ? part.state.error
+      : `${part.state.output}\n\n${part.state.error}`;
   }
   if (part.state.status === "running") {
     return part.state.title ?? "";

@@ -988,6 +988,108 @@ describe("ContextManager", () => {
     expect(generateSummary).not.toHaveBeenCalled();
   });
 
+  it("reduces prune-summary attempts across a ten-step tool-output loop when mask is enabled", async () => {
+    function isMaskedEvent(
+      event: unknown,
+    ): event is {
+      readonly enabled: true;
+      readonly maskedPartIds: readonly string[];
+    } {
+      if (typeof event !== "object" || event === null) {
+        return false;
+      }
+      const candidate = event as {
+        readonly enabled?: unknown;
+        readonly maskedPartIds?: unknown;
+      };
+      return (
+        candidate.enabled === true &&
+        Array.isArray(candidate.maskedPartIds) &&
+        candidate.maskedPartIds.every((partId) => typeof partId === "string")
+      );
+    }
+
+    async function runToolLoop(maskEnabled: boolean): Promise<{
+      readonly compactionStatus?: string;
+      readonly masked: readonly unknown[];
+      readonly summaryCalls: number;
+    }> {
+      const messageManager = createMessageManagerFixture();
+      for (let index = 0; index < 10; index += 1) {
+        await addCompletedToolMessage(messageManager, {
+          sessionId: "session_1",
+          output: `tool ${String(index)} output ${"x".repeat(2_000)}`,
+        });
+      }
+      await addTextMessage(messageManager, {
+        sessionId: "session_1",
+        role: "user",
+        text: "continue from the latest result",
+      });
+      const generateSummary = vi
+        .fn<ContextLLMClient["generateSummary"]>()
+        .mockResolvedValue("<state_snapshot>short</state_snapshot>");
+      const { manager, masked } = createManager({
+        compressionThreshold: 0.8,
+        llmClient: { generateSummary },
+        maskConfig: {
+          minPartTokens: 1,
+          minPrunableTokens: 1,
+          minUsageRatio: 0.5,
+          protectionTokens: 1,
+        },
+        maskEnabled,
+        messageManager,
+        pruneMinimumTokens: 1,
+        pruneProtectTokens: 100_000,
+        tokenCounter: {
+          estimateTokens: (content: string) => content.length,
+          getBudget(_modelId, options) {
+            const usedInputTokens = options?.usedInputTokens ?? 0;
+            const inputBudgetTokens = 20_000;
+            return {
+              contextWindowTokens: 24_000,
+              inputBudgetTokens,
+              maxOutputTokens: 2_000,
+              modelId: "model-a",
+              remainingInputTokens: Math.max(
+                0,
+                inputBudgetTokens - usedInputTokens,
+              ),
+              reservedOutputTokens: 2_000,
+              safetyMarginTokens: 2_000,
+              usageRatio: usedInputTokens / inputBudgetTokens,
+              usedInputTokens,
+            };
+          },
+          getLimit: () => 24_000,
+        },
+      });
+
+      const prepared = await manager.prepareTurn({
+        directory: "D:/repo",
+        modelId: "model-a",
+        sessionId: "session_1",
+      });
+
+      return {
+        compactionStatus: prepared.compaction?.status,
+        masked,
+        summaryCalls: generateSummary.mock.calls.length,
+      };
+    }
+
+    const withoutMask = await runToolLoop(false);
+    const withMask = await runToolLoop(true);
+    const maskedEvent = withMask.masked.find(isMaskedEvent);
+
+    expect(withoutMask.summaryCalls).toBe(1);
+    expect(withoutMask.compactionStatus).toBe("compacted");
+    expect(withMask.summaryCalls).toBe(0);
+    expect(withMask.compactionStatus).toBeUndefined();
+    expect(maskedEvent?.maskedPartIds).toContain("part_1");
+  });
+
   it("keeps prepareTurn compaction path to two history reads and one memory load", async () => {
     const messageManager = createMessageManagerFixture();
     const listBySession = vi.spyOn(messageManager, "listBySession");
