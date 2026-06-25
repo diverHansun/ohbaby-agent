@@ -70,6 +70,7 @@ function createContextManagerMock(
     compact: vi.fn(),
     getUsage: vi.fn(),
     prepareTurn,
+    resetTurnCompactionCount: vi.fn(),
     updateCalibrationFactor: vi.fn(),
   };
 }
