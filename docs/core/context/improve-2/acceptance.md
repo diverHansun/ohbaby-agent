@@ -98,6 +98,8 @@ pnpm exec vitest run packages\ohbaby-agent\src\core\context\manager.unit.test.ts
 
 ## AC-5 Origin 追踪（后续阶段）
 
+> 📌 improve-3 重新评估：origin taxonomy **推迟**，本轮仅做 `getMessageOrigin` 收口接缝；完整 taxonomy 待消费方落地时共同设计。见 [`improve-3/origin/README.md`](../improve-3/origin/README.md)。下列后续判定在重启完整 origin 设计时仍适用。
+
 **目标**：新写入的上下文关键内容具备来源信息，旧消息保持兼容。
 
 当前分支不宣称完成 origin 追踪。该 AC 保留为后续阶段验收口径，不能作为 P0 已通过项。

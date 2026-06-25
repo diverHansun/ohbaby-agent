@@ -94,6 +94,8 @@
 
 ### Phase 5：Origin 追踪与文件操作跨压缩累积
 
+> 📌 已重新评估（2026-06-24，improve-3）：**Origin 追踪推迟**——经核验，其消费方（注入/后台/cron/hooks 等消息源）在 ohbaby 尚不存在，现在定 taxonomy 属过早抽象。改为只做 `getMessageOrigin` 收口接缝，taxonomy 待首个消费方（Phase 6 注入系统）落地时共同设计。详见 [`docs/core/context/improve-3/origin/README.md`](../improve-3/origin/README.md)（ADR）。本节"文件操作跨压缩累积"部分不受影响。
+
 **目标**：补足 P1/P2 可观测性和关键状态保留。
 
 **推荐实现方向**：
