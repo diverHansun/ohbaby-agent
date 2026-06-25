@@ -160,8 +160,10 @@ function createManager(
     readonly compressionThreshold?: number;
     readonly maskEnabled?: boolean;
     readonly maskConfig?: Parameters<typeof createContextManager>[0]["maskConfig"];
+    readonly maxCompactionsPerTurn?: number;
     readonly pruneProtectTokens?: number;
     readonly pruneMinimumTokens?: number;
+    readonly thrashWindow?: number;
   } = {},
 ): ContextFixture {
   const bus = createBus();
@@ -198,8 +200,10 @@ function createManager(
     compressionThreshold: options.compressionThreshold,
     maskEnabled: options.maskEnabled,
     maskConfig: options.maskConfig,
+    maxCompactionsPerTurn: options.maxCompactionsPerTurn,
     pruneProtectTokens: options.pruneProtectTokens ?? 10,
     pruneMinimumTokens: options.pruneMinimumTokens ?? 5,
+    thrashWindow: options.thrashWindow,
   });
 
   bus.subscribe(ContextEvent.Compressed, (payload) => {
@@ -1244,6 +1248,36 @@ describe("ContextManager", () => {
     ).toBe("force");
     expect(
       decideCompactionRung({
+        compactionCount: 2,
+        force: false,
+        maxPerTurn: 2,
+        usage: {
+          contextLimit: 100_000,
+          currentTokens: 98_000,
+          inputBudgetTokens: 100_000,
+          modelId: "large-model",
+          remainingTokens: 2_000,
+          usageRatio: 0.98,
+        },
+      }),
+    ).toBe("mask");
+    expect(
+      decideCompactionRung({
+        compactionCount: 2,
+        force: true,
+        maxPerTurn: 2,
+        usage: {
+          contextLimit: 100_000,
+          currentTokens: 98_000,
+          inputBudgetTokens: 100_000,
+          modelId: "large-model",
+          remainingTokens: 2_000,
+          usageRatio: 0.98,
+        },
+      }),
+    ).toBe("force");
+    expect(
+      decideCompactionRung({
         force: false,
         usage: {
           contextLimit: 1_000_000,
@@ -1892,6 +1926,7 @@ describe("ContextManager", () => {
     const { compactSkipped, manager } = createManager({
       compressionThreshold: 0.5,
       llmClient: { generateSummary },
+      maxCompactionsPerTurn: 10,
       messageManager,
     });
 
@@ -1938,6 +1973,65 @@ describe("ContextManager", () => {
       sessionId: "session_1",
     });
     expect(generateSummary).toHaveBeenCalledTimes(8);
+  });
+
+  it("caps automatic prune-summary attempts per turn", async () => {
+    const messageManager = createMessageManagerFixture();
+    for (const [index, role] of [
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ].entries()) {
+      await addTextMessage(messageManager, {
+        sessionId: "session_1",
+        role: role as "user" | "assistant",
+        text: `${String(index)} ${"long text ".repeat(20)}`,
+      });
+    }
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockResolvedValue("x".repeat(10_000));
+    const { compactSkipped, manager } = createManager({
+      compressionThreshold: 0.5,
+      llmClient: { generateSummary },
+      maxCompactionsPerTurn: 2,
+      messageManager,
+      thrashWindow: 0,
+    });
+
+    manager.resetTurnCompactionCount("session_1");
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    expect(generateSummary).toHaveBeenCalledTimes(4);
+
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(generateSummary).toHaveBeenCalledTimes(4);
+    expect(compactSkipped.at(-1)).toMatchObject({
+      reason: "per-turn-cap",
+      sessionId: "session_1",
+    });
+
+    manager.resetTurnCompactionCount("session_1");
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    expect(generateSummary).toHaveBeenCalledTimes(6);
   });
 
   it("does not summarize same-pass pruned file paths in compress summaries", async () => {

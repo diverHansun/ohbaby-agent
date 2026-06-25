@@ -146,6 +146,7 @@ export interface ContextManager {
   ): void;
   compact(sessionId: string, options: CompactOptions): Promise<CompactResult>;
   prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn>;
+  resetTurnCompactionCount(sessionId: string): void;
 }
 
 export interface ContextManagerOptions {
@@ -162,6 +163,7 @@ export interface ContextManagerOptions {
   readonly pruneProtectTokens?: number;
   readonly pruneMinimumTokens?: number;
   readonly summaryAgentName?: string;
+  readonly maxCompactionsPerTurn?: number;
   readonly thrashWindow?: number;
   readonly thrashMinSavingsRatio?: number;
   readonly thrashUnlockDelta?: number;

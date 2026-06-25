@@ -225,12 +225,16 @@ function preparedTurn(
 
 function createContextManagerMock(
   prepareTurn: ContextManager["prepareTurn"],
+  input: {
+    readonly resetTurnCompactionCount?: ContextManager["resetTurnCompactionCount"];
+  } = {},
 ): ContextManager {
   return {
     assemble: vi.fn(),
     compact: vi.fn(),
     getUsage: vi.fn(),
     prepareTurn,
+    resetTurnCompactionCount: input.resetTurnCompactionCount ?? vi.fn(),
     updateCalibrationFactor: vi.fn(),
   };
 }
@@ -295,8 +299,13 @@ describe("Lifecycle.run", () => {
           },
         ]),
     } as unknown as ToolSchedulerInstance;
+    const resetTurnCompactionCount =
+      vi.fn<ContextManager["resetTurnCompactionCount"]>();
+    const contextManager = createContextManagerMock(prepareTurn, {
+      resetTurnCompactionCount,
+    });
     const lifecycle = new Lifecycle({
-      contextManager: createContextManagerMock(prepareTurn),
+      contextManager,
       llmClient: createSequentialFakeLLMClient(
         [
           [
@@ -341,6 +350,8 @@ describe("Lifecycle.run", () => {
       sessionId: "session_test",
     });
     expect(prepareTurn).toHaveBeenCalledTimes(2);
+    expect(resetTurnCompactionCount).toHaveBeenCalledTimes(1);
+    expect(resetTurnCompactionCount).toHaveBeenCalledWith("session_test");
     expect(requests[0]?.messages).toEqual(firstTurnMessages);
     expect(requests[1]?.messages).toEqual(secondStepMessages);
     expect(events).toEqual([

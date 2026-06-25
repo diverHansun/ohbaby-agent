@@ -2,6 +2,7 @@ import {
   COMPRESSION_PRESERVE_RATIO,
   DEFAULT_COMPACTION_THRESHOLDS,
   KEEP_RECENT_TOKENS,
+  MAX_COMPACTION_PER_TURN,
   PRUNE_MINIMUM_TOKENS,
   PRUNE_PROTECT_TOKENS,
   SUMMARY_AGENT_NAME,
@@ -73,6 +74,7 @@ type CommittableSummaryCandidate = Extract<
 interface CompactionRequest {
   readonly assembled: AssembledContext;
   readonly bypassThrashLock: boolean;
+  readonly countTurnCompaction: boolean;
   readonly usageBefore: ContextUsage;
   readonly modelId: string;
   readonly force: boolean;
@@ -147,7 +149,9 @@ export type CompactionRung = "none" | "mask" | "prune-summary" | "force";
 
 export function decideCompactionRung(input: {
   readonly usage: ContextUsage;
+  readonly compactionCount?: number;
   readonly force: boolean;
+  readonly maxPerTurn?: number;
   readonly thresholds?: CompactionThresholds;
   readonly thrashLocked?: boolean;
 }): CompactionRung {
@@ -158,16 +162,29 @@ export function decideCompactionRung(input: {
     return "none";
   }
   const thresholds = input.thresholds ?? DEFAULT_COMPACTION_THRESHOLDS;
-  if (
-    input.usage.usageRatio >= thresholds.summary ||
-    input.usage.remainingTokens < thresholds.minRemainingInputTokens
-  ) {
+  if (needsSummaryCompaction(input.usage, thresholds)) {
+    if (
+      (input.compactionCount ?? 0) >=
+      (input.maxPerTurn ?? Number.POSITIVE_INFINITY)
+    ) {
+      return "mask";
+    }
     return "prune-summary";
   }
   if (input.usage.usageRatio >= thresholds.mask) {
     return "mask";
   }
   return "none";
+}
+
+function needsSummaryCompaction(
+  usage: ContextUsage,
+  thresholds: CompactionThresholds,
+): boolean {
+  return (
+    usage.usageRatio >= thresholds.summary ||
+    usage.remainingTokens < thresholds.minRemainingInputTokens
+  );
 }
 
 function skippedReasonForCompression(
@@ -352,6 +369,8 @@ export function createContextManager(
   const pruneProtectTokens = options.pruneProtectTokens ?? PRUNE_PROTECT_TOKENS;
   const pruneMinimumTokens = options.pruneMinimumTokens ?? PRUNE_MINIMUM_TOKENS;
   const summaryAgentName = options.summaryAgentName ?? SUMMARY_AGENT_NAME;
+  const maxCompactionsPerTurn =
+    options.maxCompactionsPerTurn ?? MAX_COMPACTION_PER_TURN;
   const thrashWindow = options.thrashWindow ?? THRASH_WINDOW;
   const thrashMinSavingsRatio =
     options.thrashMinSavingsRatio ?? THRASH_MIN_SAVINGS_RATIO;
@@ -359,6 +378,7 @@ export function createContextManager(
   const calibrationFactors = new Map<string, number>();
   const maskCutoffs = new Map<string, number>();
   const thrashLocks = new Map<string, ThrashLockEntry>();
+  const turnCompactionCounts = new Map<string, number>();
   const maskConfig = createMaskConfig({
     ...options.maskConfig,
     enabled: options.maskEnabled ?? false,
@@ -396,6 +416,18 @@ export function createContextManager(
 
   function resetThrashLock(sessionId: string): void {
     thrashLocks.delete(sessionId);
+  }
+
+  function resetTurnCompactionCount(sessionId: string): void {
+    turnCompactionCounts.set(sessionId, 0);
+  }
+
+  function getTurnCompactionCount(sessionId: string): number {
+    return turnCompactionCounts.get(sessionId) ?? 0;
+  }
+
+  function incrementTurnCompactionCount(sessionId: string): void {
+    turnCompactionCounts.set(sessionId, getTurnCompactionCount(sessionId) + 1);
   }
 
   function isThrashLocked(sessionId: string, usage: ContextUsage): boolean {
@@ -921,8 +953,16 @@ export function createContextManager(
   ): Promise<CompactionOutcome> {
     const thrashLocked =
       !req.bypassThrashLock && isThrashLocked(req.sessionId, req.usageBefore);
+    const compactionCount = getTurnCompactionCount(req.sessionId);
+    const perTurnCapped =
+      !req.force &&
+      !thrashLocked &&
+      needsSummaryCompaction(req.usageBefore, compactionThresholds) &&
+      compactionCount >= maxCompactionsPerTurn;
     const rung = decideCompactionRung({
+      compactionCount,
       force: req.force,
+      maxPerTurn: maxCompactionsPerTurn,
       thresholds: compactionThresholds,
       thrashLocked,
       usage: req.usageBefore,
@@ -931,7 +971,11 @@ export function createContextManager(
     if (rung === "none" || rung === "mask") {
       options.bus.publish(ContextEvent.CompactSkipped, {
         sessionId: req.sessionId,
-        reason: thrashLocked ? "thrash-locked" : "not-needed",
+        reason: thrashLocked
+          ? "thrash-locked"
+          : perTurnCapped
+            ? "per-turn-cap"
+            : "not-needed",
         usage: req.usageBefore,
       });
       return {
@@ -941,6 +985,10 @@ export function createContextManager(
         usageAfter: req.usageBefore,
         projectedContext: req.assembled,
       };
+    }
+
+    if (req.countTurnCompaction) {
+      incrementTurnCompactionCount(req.sessionId);
     }
 
     const pruneOutcome = await pruneHistory(req.sessionId, req.assembled.history);
@@ -1126,6 +1174,7 @@ export function createContextManager(
     const outcome = await runCompaction({
       assembled,
       bypassThrashLock: true,
+      countTurnCompaction: false,
       force: input.force === true,
       isSubagent,
       modelId: input.modelId,
@@ -1166,6 +1215,7 @@ export function createContextManager(
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       assembled,
       bypassThrashLock: input.force === true,
+      countTurnCompaction: true,
       force: input.force === true,
       isSubagent,
       modelId: input.modelId,
@@ -1230,5 +1280,6 @@ export function createContextManager(
     updateCalibrationFactor,
     compact,
     prepareTurn,
+    resetTurnCompactionCount,
   };
 }

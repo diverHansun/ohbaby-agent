@@ -72,6 +72,7 @@ export const ContextEvent = {
         z.literal("too-short"),
         z.literal("inflated"),
         z.literal("thrash-locked"),
+        z.literal("per-turn-cap"),
       ]),
       usage: ContextUsageSchema,
     }),

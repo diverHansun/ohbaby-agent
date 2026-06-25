@@ -330,6 +330,7 @@ export class Lifecycle {
     config: LifecycleConfig = {},
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
     const contextManager = this.deps.contextManager;
+    contextManager.resetTurnCompactionCount(params.sessionId);
 
     // Clamp so the loop always runs at least one step and `step === maxSteps`
     // is reachable for non-integer overrides; otherwise the loop could exit
