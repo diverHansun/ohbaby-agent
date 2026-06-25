@@ -15,6 +15,7 @@ import type {
   ToolPart,
   ToolState,
 } from "../../core/message/index.js";
+import { isContextSummaryPart } from "../../core/message/index.js";
 import { SUMMARY_AGENT_NAME } from "../../core/context/constants.js";
 import { isActivePart } from "../../core/context/filters.js";
 import type {
@@ -113,10 +114,6 @@ function partToUiParts(part: Part): UiMessagePart[] {
     return [{ text: part.text, type: "reasoning" }];
   }
   return toolPartToUiParts(part);
-}
-
-function isContextSummaryPart(part: Part): boolean {
-  return part.type === "text" && part.metadata?.kind === "context-summary";
 }
 
 export function messageToUiMessage(

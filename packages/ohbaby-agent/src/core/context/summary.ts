@@ -1,10 +1,8 @@
 import type { MessageWithParts } from "../message/index.js";
+import { getMessageOrigin } from "../message/index.js";
 
 export function isSummaryMessage(message: MessageWithParts): boolean {
-  return message.parts.some(
-    (part) =>
-      part.type === "text" && part.metadata?.kind === "context-summary",
-  );
+  return getMessageOrigin(message) === "summary";
 }
 
 export function getSummaryMessages(

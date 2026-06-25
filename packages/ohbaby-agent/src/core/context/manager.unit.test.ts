@@ -3,6 +3,7 @@ import { createBus } from "../../bus/index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,
+  isContextSummaryPart,
 } from "../message/index.js";
 import type {
   MessageIdGenerator,
@@ -25,7 +26,7 @@ import type {
 import { isActivePart } from "./filters.js";
 import { serializeHistory } from "./serialization.js";
 import { serializeForLlm } from "./serializer.js";
-import { partitionSummary } from "./summary.js";
+import { isSummaryMessage, partitionSummary } from "./summary.js";
 import { estimateWireHeuristic } from "./token-estimation.js";
 
 interface ContextFixture {
@@ -275,9 +276,7 @@ async function summaryMessageCount(
   sessionId: string,
 ): Promise<number> {
   const history = await messageManager.listBySession(sessionId);
-  return history.filter((message) =>
-    message.parts.some((part) => part.metadata?.kind === "context-summary"),
-  ).length;
+  return history.filter(isSummaryMessage).length;
 }
 
 describe("ContextManager", () => {
@@ -1875,10 +1874,7 @@ describe("ContextManager", () => {
     const history = await messageManager.listBySession("session_1");
     const summaryPart = history
       .flatMap((message) => message.parts)
-      .find(
-        (part) =>
-          part.type === "text" && part.metadata?.kind === "context-summary",
-      );
+      .find(isContextSummaryPart);
     const summaryText = summaryPart?.type === "text" ? summaryPart.text : "";
 
     expect(summaryText).not.toContain("src/a.ts");
@@ -1937,10 +1933,7 @@ describe("ContextManager", () => {
     const history = await messageManager.listBySession("session_1");
     const summaryPart = history
       .flatMap((message) => message.parts)
-      .find(
-        (part) =>
-          part.type === "text" && part.metadata?.kind === "context-summary",
-      );
+      .find(isContextSummaryPart);
     const summaryText = summaryPart?.type === "text" ? summaryPart.text : "";
 
     expect(summaryText).not.toContain("old-compacted.txt");

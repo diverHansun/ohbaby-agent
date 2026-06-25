@@ -4,7 +4,9 @@ export { MessageEvent } from "./events.js";
 export { createMessageManager } from "./manager.js";
 export { createDatabaseMessageStore } from "./database-store.js";
 export { createInMemoryMessageStore } from "./store.js";
+export { getMessageOrigin, isContextSummaryPart } from "./origin.js";
 export { toModelMessages } from "./converter.js";
+export type { MessageOrigin } from "./origin.js";
 export type {
   AssistantMessage,
   CreateMessageInput,

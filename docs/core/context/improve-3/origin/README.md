@@ -2,7 +2,7 @@
 
 > 类型：架构决策记录（ADR）
 > 日期：2026-06-24
-> 状态：**已接受**
+> 状态：**已实施（Batch 4）**
 > 关联：improve-2 Phase 5（origin 追踪规划）、improve-3/投影层、improve-3/压缩多策略、路线图 2.6（SQLite 查询接口）
 
 ---
@@ -39,20 +39,21 @@ improve-2 Phase 5 与 2026-05-28 分析文档把"消息 origin 追踪"列为 P1 
 唯一立即落地的一步，价值是**封装"来源从哪读"**（DIP），把现在散在 4 处的 `metadata.kind === "context-summary"` 判断收口到一个函数，使将来扩展不波及消费方。
 
 ```ts
-// core/message 或 core/context 内
-export type MessageOrigin = "user" | "assistant" | "tool" | "summary";
+// core/message 内
+export type MessageOrigin = "user" | "assistant" | "system" | "tool" | "summary";
 
 export function getMessageOrigin(message: MessageWithParts): MessageOrigin {
-  if (isSummaryMessage(message)) return "summary";
-  if (message.info.role === "assistant") return "assistant";
+  if (message.parts.some(isContextSummaryPart)) return "summary";
   if (message.parts.some((p) => p.type === "tool")) return "tool";
-  return "user";
+  return message.info.role;
 }
 ```
 
 - **纯派生、零存储改动、零运行时风险**：只从现有字段推导，不新增 schema、不写库。
 - **单一收口点**：投影层、压缩多策略、UI 若需判别来源，统一走 `getMessageOrigin`，不再各自 `metadata?.kind === "context-summary"`。
 - **可演进**：将来引入显式 origin（落 `PartMetadata.origin` 或升级为列）时，只改 `getMessageOrigin` 内部，消费方不动。
+
+> Batch 4 实施注记：`system` 不是新增 taxonomy kind，而是现有 `message.info.role` 的无损透传；`summary` 仍是当前唯一的合成来源，由现有 `metadata.kind === "context-summary"` 派生。
 
 > 范围红线：本轮**不**新增 `injection` / `skill_activation` / `background_task` / `cron_*` / `hook_result` / `retry` / `system_trigger` 等 kind——它们没有产生者，也没有消费者。
 

@@ -15,7 +15,7 @@ improve-3 分五个子主题，**逐个走"问题分析 → 实施方案 → 验
 | 1 | **编排层去三重** | `improve-3/编排层/` | 已实施（Batch 1） |
 | 2 | usage 估算重构（锚点→标定） | `improve-3/usage-估算/` | 已实施（Batch 2） |
 | 3 | 投影层阶段链（storage→inference） | `improve-3/投影层/` | 已实施（Batch 3） |
-| 4 | Origin 来源追踪 | `improve-3/origin/` | ADR 已接受，待实施小收口 |
+| 4 | Origin 来源追踪 | `improve-3/origin/` | 已实施（Batch 4） |
 | 5 | 压缩多策略（升级阶梯+护栏） | `improve-3/压缩多策略/` | 设计完成，待实施 |
 
 五者有依赖：编排层抽出 `runCompaction` 后，usage 估算基于稳定工作集重做 token 口径；投影层 mask 依赖 usage 能看见削减；压缩多策略在 `runCompaction` 与 mask 都落地后挂载护栏。origin 是旁路收口，不阻塞主链。**先做地基（1、2），再做能力（3、5），origin 轻量插入。**
