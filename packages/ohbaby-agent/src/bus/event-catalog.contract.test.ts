@@ -101,7 +101,7 @@ describe("bus event catalog", () => {
 
     expect(actualEvents).toEqual(expected);
     expect(actualCatalog).toEqual(expected);
-    expect(actualCatalog).toHaveLength(29);
+    expect(actualCatalog).toHaveLength(30);
     expect(new Set(actualCatalog).size).toBe(actualCatalog.length);
   });
 

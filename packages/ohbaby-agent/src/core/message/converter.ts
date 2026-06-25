@@ -1,11 +1,6 @@
 import type { ChatCompletionMessage } from "../llm-client/index.js";
 import type { MessageWithParts, Part } from "./types.js";
-
-function isContextSummary(message: MessageWithParts): boolean {
-  return message.parts.some(
-    (part) => part.type === "text" && part.metadata?.kind === "context-summary",
-  );
-}
+import { getMessageOrigin } from "./origin.js";
 
 function partToContent(part: Part): string {
   if (part.time?.compacted !== undefined) {
@@ -20,8 +15,13 @@ function partToContent(part: Part): string {
   if (part.state.status === "completed") {
     return part.state.output;
   }
-  if (part.state.status === "error" || part.state.status === "aborted") {
+  if (part.state.status === "error") {
     return part.state.error;
+  }
+  if (part.state.status === "aborted") {
+    return part.state.output === undefined || part.state.output === ""
+      ? part.state.error
+      : `${part.state.output}\n\n${part.state.error}`;
   }
   if (part.state.status === "running") {
     return part.state.title ?? "";
@@ -32,14 +32,16 @@ function partToContent(part: Part): string {
 function orderMessagesForModel(
   messages: readonly MessageWithParts[],
 ): readonly MessageWithParts[] {
-  const summaries = messages.filter(isContextSummary);
+  const summaries = messages.filter(
+    (message) => getMessageOrigin(message) === "summary",
+  );
   if (summaries.length === 0) {
     return messages;
   }
 
   return [
     ...summaries,
-    ...messages.filter((message) => !isContextSummary(message)),
+    ...messages.filter((message) => getMessageOrigin(message) !== "summary"),
   ];
 }
 

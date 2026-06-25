@@ -39,7 +39,6 @@ function usage(currentTokens: number): ContextUsage {
     currentTokens,
     modelId: "test-model",
     remainingTokens: 128_000 - currentTokens,
-    shouldCompress: false,
     usageRatio: currentTokens / 128_000,
   };
 }

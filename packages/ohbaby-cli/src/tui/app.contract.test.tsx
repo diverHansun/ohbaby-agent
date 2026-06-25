@@ -3606,7 +3606,6 @@ function createFakeClient(
           currentTokens: 1,
           modelId: "fake-model",
           remainingTokens: 99,
-          shouldCompress: false,
           usageRatio: 0.01,
         },
         usageBefore: {
@@ -3614,7 +3613,6 @@ function createFakeClient(
           currentTokens: 1,
           modelId: "fake-model",
           remainingTokens: 99,
-          shouldCompress: false,
           usageRatio: 0.01,
         },
       }),

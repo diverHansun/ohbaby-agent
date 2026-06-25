@@ -23,6 +23,7 @@ Bus is the internal domain event bus. This catalog records scope, required conte
 | context.pruned | Context | session | domain, tests | low | sessionId, result | complete | no | Internal domain event only. |
 | context.turn-prepared | Context | session | domain, tests | medium | sessionId, usage, tookMs | complete | no | Run stream owns user-visible run context events. |
 | context.compact-skipped | Context | session | domain, tests | low | sessionId, reason, usage | complete | no | Internal domain event only. |
+| context.masked | Context | session | domain, tests | medium | sessionId, enabled, maskedPartIds, maskedTokens, cutoff, usageRatio | complete | no | Internal projection telemetry; run stream owns user-visible context updates. |
 | memory.added | Memory | project | domain, tests | low | scope, text | known-gap | no | Project memory lacks directory/projectRoot; keep internal until payload decision. |
 | memory.updated | Memory | project | domain, tests | low | scope, index, newText | known-gap | no | Project memory lacks directory/projectRoot; keep internal until payload decision. |
 | memory.removed | Memory | project | domain, tests | low | scope, index | known-gap | no | Project memory lacks directory/projectRoot; keep internal until payload decision. |

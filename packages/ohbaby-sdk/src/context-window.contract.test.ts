@@ -78,7 +78,6 @@ describe("context window UI contract", () => {
             currentTokens: 40_000,
             modelId: "deepseek-v4-pro",
             remainingTokens: 960_000,
-            shouldCompress: false,
             usageRatio: 0.04,
           },
           usageBefore: {
@@ -86,7 +85,6 @@ describe("context window UI contract", () => {
             currentTokens: 40_000,
             modelId: "deepseek-v4-pro",
             remainingTokens: 960_000,
-            shouldCompress: false,
             usageRatio: 0.04,
           },
         });

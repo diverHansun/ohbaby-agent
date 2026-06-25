@@ -267,7 +267,6 @@ describe("ohbaby-web daemon client", () => {
                 currentTokens: 1_000,
                 modelId: "glm-4.7",
                 remainingTokens: 127_000,
-                shouldCompress: false,
                 usageRatio: 0.01,
               },
               usageBefore: {
@@ -275,7 +274,6 @@ describe("ohbaby-web daemon client", () => {
                 currentTokens: 1_000,
                 modelId: "glm-4.7",
                 remainingTokens: 127_000,
-                shouldCompress: false,
                 usageRatio: 0.01,
               },
             },

@@ -11,7 +11,6 @@ const BASE_USAGE: ContextUsage = {
   inputBudgetTokens: 950_000,
   modelId: "deepseek-v4-pro",
   remainingTokens: 911_600,
-  shouldCompress: false,
   usageRatio: 38_400 / 950_000,
 };
 

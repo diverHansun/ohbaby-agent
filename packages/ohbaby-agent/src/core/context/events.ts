@@ -30,9 +30,14 @@ const ContextUsageSchema = z.object({
   safetyMarginTokens: z.number().optional(),
   usageRatio: z.number(),
   remainingTokens: z.number(),
-  shouldCompress: z.boolean(),
   modelId: z.string(),
 });
+
+const MaskSkippedReasonSchema = z.union([
+  z.literal("below-threshold"),
+  z.literal("below-batch"),
+  z.literal("all-exempt"),
+]);
 
 export const ContextEvent = {
   Compressed: BusEvent.define(
@@ -66,8 +71,22 @@ export const ContextEvent = {
         z.literal("not-needed"),
         z.literal("too-short"),
         z.literal("inflated"),
+        z.literal("thrash-locked"),
+        z.literal("per-turn-cap"),
       ]),
       usage: ContextUsageSchema,
+    }),
+  ),
+  Masked: BusEvent.define(
+    "context.masked",
+    z.object({
+      sessionId: z.string(),
+      enabled: z.boolean(),
+      maskedPartIds: z.array(z.string()),
+      maskedTokens: z.number(),
+      cutoff: z.number(),
+      usageRatio: z.number(),
+      skippedReason: MaskSkippedReasonSchema.optional(),
     }),
   ),
 } as const;

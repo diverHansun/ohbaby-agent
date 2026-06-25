@@ -269,6 +269,25 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
     decision: "Internal domain event only.",
   },
   {
+    event: ContextEvent.Masked,
+    owner: "Context",
+    scope: "session",
+    audience: ["domain", "tests"],
+    frequency: "medium",
+    requiredContext: [
+      "sessionId",
+      "enabled",
+      "maskedPartIds",
+      "maskedTokens",
+      "cutoff",
+      "usageRatio",
+    ],
+    contextStatus: "complete",
+    uiVisible: "no",
+    decision:
+      "Internal projection telemetry; run stream owns user-visible context updates.",
+  },
+  {
     event: MemoryEvent.Added,
     owner: "Memory",
     scope: "project",

@@ -204,33 +204,39 @@ const SESSION_USAGE: ContextUsage = {
   currentTokens: 120,
   modelId: "fake-model",
   remainingTokens: 99_880,
-  shouldCompress: false,
   usageRatio: 0.0012,
 };
 
 function preparedTurn(
   messages: PreparedTurn["messages"],
   usage: ContextUsage = SESSION_USAGE,
+  sentHeuristic = messages
+    .map((message) => JSON.stringify(message))
+    .join("\n").length,
 ): PreparedTurn {
   return {
     assembledAt: 1_700_000_000_000,
     hasSummary: false,
     messages,
+    sentHeuristic,
     usage,
   };
 }
 
 function createContextManagerMock(
   prepareTurn: ContextManager["prepareTurn"],
+  input: {
+    readonly resetTurnCompactionCount?: ContextManager["resetTurnCompactionCount"];
+  } = {},
 ): ContextManager {
   return {
     assemble: vi.fn(),
     compact: vi.fn(),
-    compress: vi.fn(),
+    disposeSession: vi.fn(),
     getUsage: vi.fn(),
     prepareTurn,
-    prune: vi.fn(),
-    shouldCompress: vi.fn(),
+    resetTurnCompactionCount: input.resetTurnCompactionCount ?? vi.fn(),
+    updateCalibrationFactor: vi.fn(),
   };
 }
 
@@ -250,7 +256,6 @@ describe("Lifecycle.run", () => {
     const compressedUsage: ContextUsage = {
       ...SESSION_USAGE,
       remainingTokens: 8_000,
-      shouldCompress: true,
       usageRatio: 0.92,
     };
     const firstTurnMessages: PreparedTurn["messages"] = [
@@ -295,8 +300,13 @@ describe("Lifecycle.run", () => {
           },
         ]),
     } as unknown as ToolSchedulerInstance;
+    const resetTurnCompactionCount =
+      vi.fn<ContextManager["resetTurnCompactionCount"]>();
+    const contextManager = createContextManagerMock(prepareTurn, {
+      resetTurnCompactionCount,
+    });
     const lifecycle = new Lifecycle({
-      contextManager: createContextManagerMock(prepareTurn),
+      contextManager,
       llmClient: createSequentialFakeLLMClient(
         [
           [
@@ -341,6 +351,8 @@ describe("Lifecycle.run", () => {
       sessionId: "session_test",
     });
     expect(prepareTurn).toHaveBeenCalledTimes(2);
+    expect(resetTurnCompactionCount).toHaveBeenCalledTimes(1);
+    expect(resetTurnCompactionCount).toHaveBeenCalledWith("session_test");
     expect(requests[0]?.messages).toEqual(firstTurnMessages);
     expect(requests[1]?.messages).toEqual(secondStepMessages);
     expect(events).toEqual([
@@ -362,6 +374,65 @@ describe("Lifecycle.run", () => {
       finishReason: "stop",
       success: true,
     });
+  });
+
+  it("updates context calibration from provider prompt usage and the prepared heuristic", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValue(
+        preparedTurn([{ role: "user", content: "Calibrate" }], SESSION_USAGE, 321),
+      );
+    const updateCalibrationFactor = vi.fn<
+      ContextManager["updateCalibrationFactor"]
+    >();
+    const contextManager = {
+      ...createContextManagerMock(prepareTurn),
+      updateCalibrationFactor,
+    };
+    const lifecycle = new Lifecycle({
+      contextManager,
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              finishReason: "stop",
+              textDelta: "Done.",
+              tokenUsage: {
+                completion_tokens: 50,
+                prompt_tokens: 456,
+                total_tokens: 506,
+              },
+            },
+          ],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_test",
+      }),
+    );
+
+    expect(updateCalibrationFactor).toHaveBeenCalledWith(
+      "session_test",
+      456,
+      321,
+    );
   });
 
   it("emits reasoning events and passes active reasoning to the next tool-loop prepare", async () => {

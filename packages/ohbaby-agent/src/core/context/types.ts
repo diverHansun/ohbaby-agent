@@ -2,6 +2,7 @@ import type { BusInstance } from "../../bus/index.js";
 import type { ChatCompletionMessage } from "../llm-client/index.js";
 import type { MergedMemory } from "../memory/index.js";
 import type { MessageManager, MessageWithParts } from "../message/index.js";
+import type { CompactionThresholds } from "./constants.js";
 
 export interface MemoryReader {
   load(directory: string): Promise<MergedMemory>;
@@ -51,10 +52,10 @@ export interface AssembledContext {
   readonly systemPrompt: string;
   readonly memory: MergedMemory;
   readonly history: readonly MessageWithParts[];
-  readonly estimatedTokens: number;
   readonly hasSummary: boolean;
   readonly assembledAt: number;
   readonly sessionId: string;
+  readonly isSubagent: boolean;
 }
 
 export interface ContextUsage {
@@ -65,7 +66,6 @@ export interface ContextUsage {
   readonly safetyMarginTokens?: number;
   readonly usageRatio: number;
   readonly remainingTokens: number;
-  readonly shouldCompress: boolean;
   readonly modelId: string;
 }
 
@@ -129,6 +129,7 @@ export interface PreparedTurn {
   readonly compaction?: CompactResult;
   readonly assembledAt: number;
   readonly hasSummary: boolean;
+  readonly sentHeuristic: number;
 }
 
 export interface ContextManager {
@@ -138,15 +139,15 @@ export interface ContextManager {
     isSubagent?: boolean,
   ): Promise<AssembledContext>;
   getUsage(context: AssembledContext, modelId: string): ContextUsage;
-  shouldCompress(usage: ContextUsage): boolean;
-  compress(
+  updateCalibrationFactor(
     sessionId: string,
-    force?: boolean,
-    modelId?: string,
-  ): Promise<CompressionResult>;
+    realPromptTokens: number,
+    sentHeuristic: number,
+  ): void;
   compact(sessionId: string, options: CompactOptions): Promise<CompactResult>;
   prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn>;
-  prune(sessionId: string): Promise<PruneResult>;
+  resetTurnCompactionCount(sessionId: string): void;
+  disposeSession(sessionId: string): void;
 }
 
 export interface ContextManagerOptions {
@@ -157,10 +158,24 @@ export interface ContextManagerOptions {
   readonly tokenCounter: TokenCounter;
   readonly llmClient: ContextLLMClient;
   readonly now?: () => number;
+  readonly compactionThresholds?: Partial<CompactionThresholds>;
   readonly compressionThreshold?: number;
   readonly compressionPreserveRatio?: number;
   readonly pruneProtectTokens?: number;
   readonly pruneMinimumTokens?: number;
   readonly summaryAgentName?: string;
+  readonly maxCompactionsPerTurn?: number;
+  readonly thrashWindow?: number;
+  readonly thrashMinSavingsRatio?: number;
+  readonly thrashUnlockDelta?: number;
+  readonly maskEnabled?: boolean;
+  readonly maskConfig?: {
+    readonly exemptToolPrefixes?: readonly string[];
+    readonly minPartTokens?: number;
+    readonly minPrunableTokens?: number;
+    readonly minUsageRatio?: number;
+    readonly placeholderPrefix?: string;
+    readonly protectionTokens?: number;
+  };
   readonly onWarning?: (message: string, error?: unknown) => void;
 }

@@ -1,10 +1,16 @@
 import { ContextEvent } from "./events.js";
 
 export {
-  COMPACTION_RESERVE_TOKENS,
+  COMPACTION_MIN_REMAINING_INPUT_TOKENS,
   COMPRESSION_PRESERVE_RATIO,
   COMPRESSION_THRESHOLD,
   KEEP_RECENT_TOKENS,
+  MASK_EXEMPT_TOOL_PREFIXES,
+  MASK_MIN_PART_TOKENS,
+  MASK_MIN_PRUNABLE_TOKENS,
+  MASK_MIN_USAGE_RATIO,
+  MASK_PLACEHOLDER_PREFIX,
+  MASK_PROTECTION_TOKENS,
   PRUNE_MINIMUM_TOKENS,
   PRUNE_PROTECT_TOKENS,
   SUMMARY_AGENT_NAME,
@@ -25,11 +31,11 @@ export type {
 } from "./context-window-usage.js";
 export {
   createContextManager,
-  decideCompactAction,
+  decideCompactionRung,
   findCutPoint,
   getContextUsage,
 } from "./context-manager.js";
-export type { ContextCutPoint } from "./context-manager.js";
+export type { CompactionRung, ContextCutPoint } from "./context-manager.js";
 export {
   appendMemoryToSystemPrompt,
   loadMemoryForPrompt,
@@ -40,6 +46,13 @@ export {
   formatToolResultContentForModel,
   projectToolMetadataForModel,
 } from "./tool-metadata-projection.js";
+export { createMaskConfig, reduceForModel } from "./projection.js";
+export type {
+  ContextMaskedEventPayload,
+  MaskConfig,
+  MaskSkippedReason,
+  ModelReductionResult,
+} from "./projection.js";
 export type {
   AssembledContext,
   CompactOptions,

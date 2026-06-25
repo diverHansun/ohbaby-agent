@@ -330,6 +330,7 @@ export class Lifecycle {
     config: LifecycleConfig = {},
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
     const contextManager = this.deps.contextManager;
+    contextManager.resetTurnCompactionCount(params.sessionId);
 
     // Clamp so the loop always runs at least one step and `step === maxSteps`
     // is reachable for non-integer overrides; otherwise the loop could exit
@@ -559,6 +560,13 @@ export class Lifecycle {
       }
 
       usage = addUsage(usage, toUsage(finalEvent.tokenUsage));
+      if (finalEvent.tokenUsage !== undefined) {
+        contextManager.updateCalibrationFactor(
+          params.sessionId,
+          finalEvent.tokenUsage.prompt_tokens,
+          prepared.sentHeuristic,
+        );
+      }
       if (params.signal?.aborted) {
         await markAssistantMessageError(
           this.deps.messageManager,

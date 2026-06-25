@@ -3,6 +3,7 @@ import { createBus } from "../../bus/index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,
+  isContextSummaryPart,
 } from "../message/index.js";
 import type {
   MessageIdGenerator,
@@ -12,6 +13,7 @@ import type {
 import {
   ContextEvent,
   createContextManager,
+  decideCompactionRung,
   findCutPoint,
   getContextUsage,
 } from "./index.js";
@@ -24,13 +26,14 @@ import type {
 import { isActivePart } from "./filters.js";
 import { serializeHistory } from "./serialization.js";
 import { serializeForLlm } from "./serializer.js";
-import { partitionSummary } from "./summary.js";
-import { estimateContextTokens } from "./token-estimation.js";
+import { isSummaryMessage, partitionSummary } from "./summary.js";
+import { estimateWireHeuristic } from "./token-estimation.js";
 
 interface ContextFixture {
   readonly compactSkipped: readonly unknown[];
   readonly compressed: readonly unknown[];
   readonly manager: ReturnType<typeof createContextManager>;
+  readonly masked: readonly unknown[];
   readonly memory: MemoryReader;
   readonly pruned: readonly unknown[];
   readonly systemPromptProvider: SystemPromptProvider;
@@ -155,13 +158,18 @@ function createManager(
     readonly llmClient?: ContextLLMClient;
     readonly now?: () => number;
     readonly compressionThreshold?: number;
+    readonly maskEnabled?: boolean;
+    readonly maskConfig?: Parameters<typeof createContextManager>[0]["maskConfig"];
+    readonly maxCompactionsPerTurn?: number;
     readonly pruneProtectTokens?: number;
     readonly pruneMinimumTokens?: number;
+    readonly thrashWindow?: number;
   } = {},
 ): ContextFixture {
   const bus = createBus();
   const compactSkipped: unknown[] = [];
   const compressed: unknown[] = [];
+  const masked: unknown[] = [];
   const pruned: unknown[] = [];
   const memory =
     options.memory ??
@@ -190,8 +198,12 @@ function createManager(
       } satisfies ContextLLMClient),
     now: options.now ?? createClock(),
     compressionThreshold: options.compressionThreshold,
+    maskEnabled: options.maskEnabled,
+    maskConfig: options.maskConfig,
+    maxCompactionsPerTurn: options.maxCompactionsPerTurn,
     pruneProtectTokens: options.pruneProtectTokens ?? 10,
     pruneMinimumTokens: options.pruneMinimumTokens ?? 5,
+    thrashWindow: options.thrashWindow,
   });
 
   bus.subscribe(ContextEvent.Compressed, (payload) => {
@@ -203,10 +215,14 @@ function createManager(
   bus.subscribe(ContextEvent.Pruned, (payload) => {
     pruned.push(payload);
   });
+  bus.subscribe(ContextEvent.Masked, (payload) => {
+    masked.push(payload);
+  });
 
   return {
     compactSkipped,
     compressed,
+    masked,
     manager,
     memory,
     pruned,
@@ -264,158 +280,49 @@ async function summaryMessageCount(
   sessionId: string,
 ): Promise<number> {
   const history = await messageManager.listBySession(sessionId);
-  return history.filter((message) =>
-    message.parts.some((part) => part.metadata?.kind === "context-summary"),
-  ).length;
+  return history.filter(isSummaryMessage).length;
 }
 
 describe("ContextManager", () => {
-  it("estimates context tokens from serialized history when no provider anchor exists", () => {
-    const history = [
-      messageWithText("user", "one"),
-      messageWithText("assistant", "two"),
+  it("estimates wire heuristic from the full provider payload", () => {
+    const messages = [
+      { role: "system" as const, content: "system prompt" },
+      { role: "user" as const, content: "hello" },
+      { role: "assistant" as const, content: "answer" },
     ];
 
     expect(
-      estimateContextTokens(history, {
+      estimateWireHeuristic(messages, {
         estimateTokens: (content: string) => content.length,
       }),
-    ).toEqual({
-      anchorIndex: -1,
-      anchorTokens: 0,
-      tailTokens: serializeHistory(history).length,
-      tokens: serializeHistory(history).length,
-    });
+    ).toBe(messages.map((message) => JSON.stringify(message)).join("\n").length);
   });
 
-  it("estimates context tokens from the latest provider usage anchor plus tail", () => {
-    const history = [
-      messageWithText("user", "old user"),
-      messageWithText("assistant", "old assistant", {
-        tokenUsage: {
-          promptTokens: 100,
-          completionTokens: 20,
-          totalTokens: 120,
-        },
-      }),
-      messageWithText("user", "tail"),
-    ];
-
-    expect(
-      estimateContextTokens(history, {
-        estimateTokens: (content: string) => content.length,
-      }),
-    ).toEqual({
-      anchorIndex: 1,
-      anchorTokens: 120,
-      tailTokens: "user: tail".length,
-      tokens: 120 + "user: tail".length,
-    });
-  });
-
-  it("skips provider usage anchors older than the latest context summary", () => {
-    const history = [
-      messageWithText(
-        "assistant",
-        "old anchor",
-        {
-          tokenUsage: {
-            promptTokens: 100_000,
-            completionTokens: 13_350,
-            totalTokens: 113_350,
+  it("counts assistant tool calls even when message content is null", () => {
+    const messages = [
+      {
+        content: null,
+        role: "assistant" as const,
+        tool_calls: [
+          {
+            function: {
+              arguments:
+                '{"path":"/a/very/long/path/with/many/chars.ts"}',
+              name: "read_file",
+            },
+            id: "call_read",
+            type: "function" as const,
           },
-        },
-        1_000,
-      ),
-      messageWithText(
-        "assistant",
-        "summary",
-        { kind: "context-summary" },
-        2_000,
-      ),
-      messageWithText("user", "tail", undefined, 3_000),
+        ],
+      },
     ];
 
-    const result = estimateContextTokens(history, {
+    const tokens = estimateWireHeuristic(messages, {
       estimateTokens: (content: string) => content.length,
     });
 
-    expect(result.anchorIndex).toBe(-1);
-    expect(result.tokens).toBe(serializeHistory(history).length);
-  });
-
-  it("skips provider usage anchors before the latest context summary even with the same timestamp", () => {
-    const history = [
-      messageWithText(
-        "assistant",
-        "same millisecond stale anchor",
-        {
-          tokenUsage: {
-            promptTokens: 100_000,
-            completionTokens: 13_350,
-            totalTokens: 113_350,
-          },
-        },
-        2_000,
-      ),
-      messageWithText(
-        "assistant",
-        "summary",
-        { kind: "context-summary" },
-        2_000,
-      ),
-      messageWithText("user", "tail", undefined, 3_000),
-    ];
-
-    const result = estimateContextTokens(history, {
-      estimateTokens: (content: string) => content.length,
-    });
-
-    expect(result.anchorIndex).toBe(-1);
-    expect(result.tokens).toBe(serializeHistory(history).length);
-  });
-
-  it("uses provider usage anchors newer than the latest context summary", () => {
-    const history = [
-      messageWithText(
-        "assistant",
-        "old anchor",
-        {
-          tokenUsage: {
-            promptTokens: 100_000,
-            completionTokens: 13_350,
-            totalTokens: 113_350,
-          },
-        },
-        1_000,
-      ),
-      messageWithText(
-        "assistant",
-        "summary",
-        { kind: "context-summary" },
-        2_000,
-      ),
-      messageWithText(
-        "assistant",
-        "fresh anchor",
-        {
-          tokenUsage: {
-            promptTokens: 5_000,
-            completionTokens: 1_000,
-            totalTokens: 6_000,
-          },
-        },
-        3_000,
-      ),
-      messageWithText("user", "tail", undefined, 4_000),
-    ];
-
-    const result = estimateContextTokens(history, {
-      estimateTokens: (content: string) => content.length,
-    });
-
-    expect(result.anchorIndex).toBe(2);
-    expect(result.anchorTokens).toBe(6_000);
+    expect(tokens).toBeGreaterThan(20);
+    expect(tokens).toBe(JSON.stringify(messages[0]).length);
   });
 
   it("finds a cut point on message boundaries around completed tool parts", () => {
@@ -545,7 +452,13 @@ describe("ContextManager", () => {
       role: "user",
       text: "hello",
     });
-    const { manager } = createManager({ messageManager });
+    const { manager } = createManager({
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 10_000,
+      },
+    });
 
     const context = await manager.assemble("session_1", "D:/repo");
 
@@ -553,7 +466,6 @@ describe("ContextManager", () => {
     expect(context.memory.merged).toContain("global memory");
     expect(context.history).toHaveLength(1);
     expect(context.hasSummary).toBe(false);
-    expect(context.estimatedTokens).toBeGreaterThan(0);
   });
 
   it("serializes tool parts as assistant tool calls followed by tool results", async () => {
@@ -583,7 +495,13 @@ describe("ContextManager", () => {
       },
     });
 
-    const { manager } = createManager({ messageManager });
+    const { manager } = createManager({
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 10_000,
+      },
+    });
     const context = await manager.assemble("session_1", "D:/repo");
     const messages = serializeForLlm({
       history: context.history,
@@ -860,7 +778,13 @@ describe("ContextManager", () => {
       role: "user",
       text: "hello",
     });
-    const { manager } = createManager({ messageManager });
+    const { manager } = createManager({
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 10_000,
+      },
+    });
 
     const prepared = await manager.prepareTurn({
       directory: "D:/repo",
@@ -873,8 +797,329 @@ describe("ContextManager", () => {
       expect.stringContaining("system prompt"),
     );
     expect(prepared.compaction).toBeUndefined();
-    expect(prepared.usage.shouldCompress).toBe(false);
     expect(prepared.hasSummary).toBe(false);
+    expect(prepared.sentHeuristic).toBeGreaterThan(0);
+  });
+
+  it("applies session calibration with EMA when measuring prepared turns", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "hello",
+    });
+    const { manager } = createManager({ messageManager });
+
+    const baseline = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    manager.updateCalibrationFactor(
+      "session_1",
+      baseline.sentHeuristic * 2,
+      baseline.sentHeuristic,
+    );
+    const calibrated = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(calibrated.usage.currentTokens).toBe(
+      Math.round(calibrated.sentHeuristic * 1.5),
+    );
+  });
+
+  it("dark ships mask statistics without changing prepared messages by default", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addCompletedToolMessage(messageManager, {
+      sessionId: "session_1",
+      output: "x".repeat(500),
+    });
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "latest",
+    });
+    const { manager, masked } = createManager({
+      compressionThreshold: 10,
+      maskConfig: {
+        minPartTokens: 1,
+        minPrunableTokens: 1,
+        minUsageRatio: 0.1,
+        protectionTokens: 1,
+      },
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 1_000,
+      },
+    });
+
+    const prepared = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(prepared.messages).toContainEqual({
+      content: "x".repeat(500),
+      role: "tool",
+      tool_call_id: "message_1_call",
+    });
+    expect(masked[0]).toMatchObject({
+      enabled: false,
+      maskedPartIds: ["part_1"],
+      sessionId: "session_1",
+    });
+  });
+
+  it("applies mask before usage measurement while keeping tool-call pairing", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addCompletedToolMessage(messageManager, {
+      sessionId: "session_1",
+      output: "x".repeat(500),
+    });
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "latest",
+    });
+    const { manager, masked } = createManager({
+      compressionThreshold: 10,
+      maskConfig: {
+        minPartTokens: 1,
+        minPrunableTokens: 1,
+        minUsageRatio: 0.1,
+        protectionTokens: 1,
+      },
+      maskEnabled: true,
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 1_000,
+      },
+    });
+
+    const prepared = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(prepared.messages).toContainEqual({
+      content: null,
+      role: "assistant",
+      tool_calls: [
+        {
+          function: {
+            arguments: "{}",
+            name: "read_file",
+          },
+          id: "message_1_call",
+          type: "function",
+        },
+      ],
+    });
+    expect(prepared.messages).toContainEqual({
+      content: "[Old tool result cleared (was ~500 tokens)]",
+      role: "tool",
+      tool_call_id: "message_1_call",
+    });
+    expect(prepared.usage.currentTokens).toBeLessThan(700);
+    expect(masked[0]).toMatchObject({
+      enabled: true,
+      maskedPartIds: ["part_1"],
+    });
+  });
+
+  it("lets mask delay prune-summary when reduced usage drops below the threshold", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addCompletedToolMessage(messageManager, {
+      sessionId: "session_1",
+      output: "x".repeat(6_000),
+    });
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "latest",
+    });
+    const generateSummary = vi.fn<ContextLLMClient["generateSummary"]>();
+    const { manager } = createManager({
+      compressionThreshold: 0.5,
+      llmClient: { generateSummary },
+      maskConfig: {
+        minPartTokens: 1,
+        minPrunableTokens: 1,
+        minUsageRatio: 0.5,
+        protectionTokens: 1,
+      },
+      maskEnabled: true,
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getBudget(_modelId, options) {
+          const usedInputTokens = options?.usedInputTokens ?? 0;
+          return {
+            contextWindowTokens: 12_000,
+            inputBudgetTokens: 10_000,
+            maxOutputTokens: 1_000,
+            modelId: "model-a",
+            remainingInputTokens: 10_000 - usedInputTokens,
+            reservedOutputTokens: 1_000,
+            safetyMarginTokens: 1_000,
+            usageRatio: usedInputTokens / 10_000,
+            usedInputTokens,
+          };
+        },
+        getLimit: () => 12_000,
+      },
+    });
+
+    const prepared = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(prepared.compaction).toBeUndefined();
+    expect(prepared.usage.usageRatio).toBeLessThan(0.5);
+    expect(generateSummary).not.toHaveBeenCalled();
+  });
+
+  it("reduces prune-summary attempts across a ten-step tool-output loop when mask is enabled", async () => {
+    function isMaskedEvent(
+      event: unknown,
+    ): event is {
+      readonly enabled: true;
+      readonly maskedPartIds: readonly string[];
+    } {
+      if (typeof event !== "object" || event === null) {
+        return false;
+      }
+      const candidate = event as {
+        readonly enabled?: unknown;
+        readonly maskedPartIds?: unknown;
+      };
+      return (
+        candidate.enabled === true &&
+        Array.isArray(candidate.maskedPartIds) &&
+        candidate.maskedPartIds.every((partId) => typeof partId === "string")
+      );
+    }
+
+    async function runToolLoop(maskEnabled: boolean): Promise<{
+      readonly compactionStatus?: string;
+      readonly masked: readonly unknown[];
+      readonly summaryCalls: number;
+    }> {
+      const messageManager = createMessageManagerFixture();
+      for (let index = 0; index < 10; index += 1) {
+        await addCompletedToolMessage(messageManager, {
+          sessionId: "session_1",
+          output: `tool ${String(index)} output ${"x".repeat(2_000)}`,
+        });
+      }
+      await addTextMessage(messageManager, {
+        sessionId: "session_1",
+        role: "user",
+        text: "continue from the latest result",
+      });
+      const generateSummary = vi
+        .fn<ContextLLMClient["generateSummary"]>()
+        .mockResolvedValue("<state_snapshot>short</state_snapshot>");
+      const { manager, masked } = createManager({
+        compressionThreshold: 0.8,
+        llmClient: { generateSummary },
+        maskConfig: {
+          minPartTokens: 1,
+          minPrunableTokens: 1,
+          minUsageRatio: 0.5,
+          protectionTokens: 1,
+        },
+        maskEnabled,
+        messageManager,
+        pruneMinimumTokens: 1,
+        pruneProtectTokens: 100_000,
+        tokenCounter: {
+          estimateTokens: (content: string) => content.length,
+          getBudget(_modelId, options) {
+            const usedInputTokens = options?.usedInputTokens ?? 0;
+            const inputBudgetTokens = 20_000;
+            return {
+              contextWindowTokens: 24_000,
+              inputBudgetTokens,
+              maxOutputTokens: 2_000,
+              modelId: "model-a",
+              remainingInputTokens: Math.max(
+                0,
+                inputBudgetTokens - usedInputTokens,
+              ),
+              reservedOutputTokens: 2_000,
+              safetyMarginTokens: 2_000,
+              usageRatio: usedInputTokens / inputBudgetTokens,
+              usedInputTokens,
+            };
+          },
+          getLimit: () => 24_000,
+        },
+      });
+
+      const prepared = await manager.prepareTurn({
+        directory: "D:/repo",
+        modelId: "model-a",
+        sessionId: "session_1",
+      });
+
+      return {
+        compactionStatus: prepared.compaction?.status,
+        masked,
+        summaryCalls: generateSummary.mock.calls.length,
+      };
+    }
+
+    const withoutMask = await runToolLoop(false);
+    const withMask = await runToolLoop(true);
+    const maskedEvent = withMask.masked.find(isMaskedEvent);
+
+    expect(withoutMask.summaryCalls).toBe(1);
+    expect(withoutMask.compactionStatus).toBe("compacted");
+    expect(withMask.summaryCalls).toBe(0);
+    expect(withMask.compactionStatus).toBeUndefined();
+    expect(maskedEvent?.maskedPartIds).toContain("part_1");
+  });
+
+  it("reuses unchanged projection measurements on the mask-off no-compaction path", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "small prompt",
+    });
+    let wireEstimateCalls = 0;
+    const { manager } = createManager({
+      compressionThreshold: 10,
+      maskEnabled: false,
+      messageManager,
+      tokenCounter: {
+        estimateTokens(content: string): number {
+          if (content.startsWith("{")) {
+            wireEstimateCalls += 1;
+          }
+          return content.length;
+        },
+        getLimit: () => 100_000,
+      },
+    });
+
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(wireEstimateCalls).toBe(2);
   });
 
   it("keeps prepareTurn compaction path to two history reads and one memory load", async () => {
@@ -926,6 +1171,39 @@ describe("ContextManager", () => {
     expect(loadMemory).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps prepareTurn prune-only path to one history read", async () => {
+    const messageManager = createMessageManagerFixture();
+    const memory: MemoryReader = {
+      load: vi.fn().mockResolvedValue({ global: "", project: "", merged: "" }),
+    };
+    await addCompletedToolMessage(messageManager, {
+      sessionId: "session_1",
+      output: "x".repeat(80),
+    });
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "small",
+    });
+    const listBySession = vi.spyOn(messageManager, "listBySession");
+    const { manager } = createManager({
+      compressionThreshold: 0.5,
+      memory,
+      messageManager,
+      pruneMinimumTokens: 1,
+      pruneProtectTokens: 0,
+    });
+
+    const prepared = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(prepared.compaction?.status).toBe("pruned");
+    expect(listBySession).toHaveBeenCalledTimes(1);
+  });
+
   it("skips memory for subagent context and degrades to empty memory on load failure", async () => {
     const load = vi.fn().mockRejectedValue(new Error("cannot read memory"));
     const memory: MemoryReader = {
@@ -953,7 +1231,7 @@ describe("ContextManager", () => {
   });
 
   it("calculates context usage with the 85 percent compression threshold", () => {
-    const usage = getContextUsage({ estimatedTokens: 85 }, "model-a", {
+    const usage = getContextUsage(85, "model-a", {
       getLimit: () => 100,
     });
 
@@ -962,14 +1240,13 @@ describe("ContextManager", () => {
       contextLimit: 100,
       modelId: "model-a",
       remainingTokens: 15,
-      shouldCompress: true,
       usageRatio: 0.85,
     });
   });
 
   it("uses input token budget rather than the full context window for compression decisions", () => {
     const usage = getContextUsage(
-      { estimatedTokens: 45 },
+      45,
       "model-a",
       {
         getBudget(_modelId, options) {
@@ -988,7 +1265,6 @@ describe("ContextManager", () => {
         },
         getLimit: () => 100,
       },
-      0.85,
     );
 
     expect(usage).toMatchObject({
@@ -998,54 +1274,178 @@ describe("ContextManager", () => {
       remainingTokens: 5,
       reservedOutputTokens: 40,
       safetyMarginTokens: 10,
-      shouldCompress: true,
       usageRatio: 0.9,
     });
   });
 
-  it("uses absolute remaining-token reserve when model budget is available", () => {
+  it("uses a small remaining-input floor when deciding the compaction rung", () => {
     const usage = getContextUsage(
-      { estimatedTokens: 980_000 },
+      96_500,
       "large-model",
       {
         getBudget(_modelId, options) {
           const usedInputTokens = options?.usedInputTokens ?? 0;
-          const inputBudgetTokens = 1_000_000;
+          const inputBudgetTokens = 100_000;
           return {
-            contextWindowTokens: 1_048_576,
+            contextWindowTokens: 128_000,
             inputBudgetTokens,
-            maxOutputTokens: 32_000,
+            maxOutputTokens: 20_000,
             modelId: "large-model",
             remainingInputTokens: inputBudgetTokens - usedInputTokens,
-            reservedOutputTokens: 32_000,
-            safetyMarginTokens: 16_384,
+            reservedOutputTokens: 20_000,
+            safetyMarginTokens: 8_000,
             usageRatio: usedInputTokens / inputBudgetTokens,
             usedInputTokens,
           };
         },
-        getLimit: () => 1_048_576,
+        getLimit: () => 128_000,
       },
-      0.85,
     );
 
-    expect(usage.usageRatio).toBeGreaterThan(0.85);
-    expect(usage.remainingTokens).toBe(20_000);
-    expect(usage.shouldCompress).toBe(false);
+    expect(usage.usageRatio).toBeLessThan(0.97);
+    expect(usage.remainingTokens).toBe(3_500);
+    expect(
+      decideCompactionRung({
+        force: false,
+        usage,
+      }),
+    ).toBe("prune-summary");
   });
 
-  it("uses the precomputed context usage decision in shouldCompress", () => {
+  it("uses the unified compaction ladder thresholds", () => {
+    expect(
+      decideCompactionRung({
+        force: false,
+        usage: {
+          contextLimit: 100_000,
+          currentTokens: 40_000,
+          inputBudgetTokens: 100_000,
+          modelId: "large-model",
+          remainingTokens: 60_000,
+          usageRatio: 0.4,
+        },
+      }),
+    ).toBe("none");
+    expect(
+      decideCompactionRung({
+        force: false,
+        usage: {
+          contextLimit: 100_000,
+          currentTokens: 70_000,
+          inputBudgetTokens: 100_000,
+          modelId: "large-model",
+          remainingTokens: 30_000,
+          usageRatio: 0.7,
+        },
+      }),
+    ).toBe("mask");
+    expect(
+      decideCompactionRung({
+        force: false,
+        usage: {
+          contextLimit: 100_000,
+          currentTokens: 90_000,
+          inputBudgetTokens: 100_000,
+          modelId: "large-model",
+          remainingTokens: 10_000,
+          usageRatio: 0.9,
+        },
+      }),
+    ).toBe("mask");
+    expect(
+      decideCompactionRung({
+        force: false,
+        thrashLocked: true,
+        usage: {
+          contextLimit: 100_000,
+          currentTokens: 98_000,
+          inputBudgetTokens: 100_000,
+          modelId: "large-model",
+          remainingTokens: 2_000,
+          usageRatio: 0.98,
+        },
+      }),
+    ).toBe("none");
+    expect(
+      decideCompactionRung({
+        force: true,
+        thrashLocked: true,
+        usage: {
+          contextLimit: 100_000,
+          currentTokens: 98_000,
+          inputBudgetTokens: 100_000,
+          modelId: "large-model",
+          remainingTokens: 2_000,
+          usageRatio: 0.98,
+        },
+      }),
+    ).toBe("force");
+    expect(
+      decideCompactionRung({
+        compactionCount: 2,
+        force: false,
+        maxPerTurn: 2,
+        usage: {
+          contextLimit: 100_000,
+          currentTokens: 98_000,
+          inputBudgetTokens: 100_000,
+          modelId: "large-model",
+          remainingTokens: 2_000,
+          usageRatio: 0.98,
+        },
+      }),
+    ).toBe("mask");
+    expect(
+      decideCompactionRung({
+        compactionCount: 2,
+        force: true,
+        maxPerTurn: 2,
+        usage: {
+          contextLimit: 100_000,
+          currentTokens: 98_000,
+          inputBudgetTokens: 100_000,
+          modelId: "large-model",
+          remainingTokens: 2_000,
+          usageRatio: 0.98,
+        },
+      }),
+    ).toBe("force");
+    expect(
+      decideCompactionRung({
+        compactionCount: 2,
+        force: true,
+        maxPerTurn: 0,
+        thrashLocked: true,
+        usage: {
+          contextLimit: 100_000,
+          currentTokens: 98_000,
+          inputBudgetTokens: 100_000,
+          modelId: "large-model",
+          remainingTokens: 2_000,
+          usageRatio: 0.98,
+        },
+      }),
+    ).toBe("force");
+    expect(
+      decideCompactionRung({
+        force: false,
+        usage: {
+          contextLimit: 1_000_000,
+          currentTokens: 980_000,
+          inputBudgetTokens: 1_000_000,
+          modelId: "large-model",
+          remainingTokens: 20_000,
+          usageRatio: 0.98,
+        },
+      }),
+    ).toBe("prune-summary");
+  });
+
+  it("does not expose legacy compress or prune APIs", () => {
     const { manager } = createManager();
 
-    expect(
-      manager.shouldCompress({
-        contextLimit: 1_000_000,
-        currentTokens: 980_000,
-        modelId: "large-model",
-        remainingTokens: 20_000,
-        shouldCompress: false,
-        usageRatio: 0.98,
-      }),
-    ).toBe(false);
+    expect("compress" in manager).toBe(false);
+    expect("prune" in manager).toBe(false);
   });
 
   it("publishes a compact-skipped event when prepareTurn decides no compaction is needed", async () => {
@@ -1055,7 +1455,13 @@ describe("ContextManager", () => {
       role: "user",
       text: "small",
     });
-    const { compactSkipped, manager } = createManager({ messageManager });
+    const { compactSkipped, manager } = createManager({
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 10_000,
+      },
+    });
 
     await manager.prepareTurn({
       directory: "D:/repo",
@@ -1097,7 +1503,13 @@ describe("ContextManager", () => {
     });
     const { manager, pruned } = createManager({ messageManager });
 
-    await expect(manager.prune("session_1")).resolves.toEqual({
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
+
+    expect(result.prune).toEqual({
       freedTokens: 10,
       protectedCount: 1,
       prunedCount: 1,
@@ -1105,7 +1517,7 @@ describe("ContextManager", () => {
     });
 
     const history = await messageManager.listBySession("session_1");
-    expect(history[0]?.parts[0]?.time?.compacted).toBe(1_000);
+    expect(history[0]?.parts[0]?.time?.compacted).toBeDefined();
     expect(history[1]?.parts[0]?.time?.compacted).toBeUndefined();
     expect(pruned).toHaveLength(1);
   });
@@ -1134,15 +1546,20 @@ describe("ContextManager", () => {
     });
     const { compressed, manager } = createManager({ messageManager });
 
-    const result = await manager.compress("session_1", true);
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
 
-    expect(result.status).toBe("compressed");
-    expect(result.summaryMessageId).toBe("message_5");
-    expect(result.savedTokens).toBeGreaterThan(0);
+    expect(result.status).toBe("compacted");
+    expect(result.compression?.summaryMessageId).toBe("message_5");
+    expect(result.compression?.savedTokens).toBeGreaterThan(0);
     const history = await messageManager.listBySession("session_1");
-    expect(history[0]?.parts[0]?.time?.compacted).toBe(1_000);
-    expect(history[1]?.parts[0]?.time?.compacted).toBe(1_000);
-    expect(history[2]?.parts[0]?.time?.compacted).toBe(1_000);
+    const compactedAt = history[0]?.parts[0]?.time?.compacted;
+    expect(compactedAt).toBeDefined();
+    expect(history[1]?.parts[0]?.time?.compacted).toBe(compactedAt);
+    expect(history[2]?.parts[0]?.time?.compacted).toBe(compactedAt);
     expect(history[3]?.parts[0]?.time?.compacted).toBeUndefined();
     expect(history.at(-1)).toMatchObject({
       info: { id: "message_5", role: "assistant" },
@@ -1208,7 +1625,39 @@ describe("ContextManager", () => {
     expect(context.history[0]?.info.role).toBe("user");
   });
 
-  it("clears retained usage anchors when compact resolves through prune only", async () => {
+  it("keeps compact prune-only path to one history read", async () => {
+    const messageManager = createMessageManagerFixture();
+    const memory: MemoryReader = {
+      load: vi.fn().mockResolvedValue({ global: "", project: "", merged: "" }),
+    };
+    await addCompletedToolMessage(messageManager, {
+      sessionId: "session_1",
+      output: "x".repeat(80),
+    });
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "small",
+    });
+    const listBySession = vi.spyOn(messageManager, "listBySession");
+    const { manager } = createManager({
+      compressionThreshold: 0.5,
+      memory,
+      messageManager,
+      pruneMinimumTokens: 1,
+      pruneProtectTokens: 0,
+    });
+
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      modelId: "model-a",
+    });
+
+    expect(result.status).toBe("pruned");
+    expect(listBySession).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores retained usage metadata when compact resolves through prune only", async () => {
     const messageManager = createMessageManagerFixture();
     const memory: MemoryReader = {
       load: vi.fn().mockResolvedValue({ global: "", project: "", merged: "" }),
@@ -1256,7 +1705,14 @@ describe("ContextManager", () => {
     expect(generateSummary).not.toHaveBeenCalled();
     expect(result.usageAfter.currentTokens).toBeLessThan(100);
     const history = await messageManager.listBySession("session_1");
-    expect(history[1]?.parts[0]?.metadata).toEqual({ keep: true });
+    expect(history[1]?.parts[0]?.metadata).toEqual({
+      keep: true,
+      tokenUsage: {
+        completionTokens: 0,
+        promptTokens: 1_000,
+        totalTokens: 1_000,
+      },
+    });
   });
 
   it("compacts by summarizing older history and re-injecting the summary into assembled context", async () => {
@@ -1366,7 +1822,7 @@ describe("ContextManager", () => {
     expect(summary).not.toContain("<read-files>");
   });
 
-  it("clears stale token usage metadata from retained messages after compaction", async () => {
+  it("retains token usage metadata after compaction because estimation no longer consumes it", async () => {
     const messageManager = createMessageManagerFixture();
     await addTextMessage(messageManager, {
       sessionId: "session_1",
@@ -1415,7 +1871,14 @@ describe("ContextManager", () => {
     const retained = activeHistory.find(
       (message) => message.info.id === "message_4",
     );
-    expect(retained?.parts[0]?.metadata).toEqual({ keep: true });
+    expect(retained?.parts[0]?.metadata).toEqual({
+      keep: true,
+      tokenUsage: {
+        promptTokens: 90_000,
+        completionTokens: 10_000,
+        totalTokens: 100_000,
+      },
+    });
     expect(result.usageAfter.currentTokens).toBeLessThan(
       result.usageBefore.currentTokens,
     );
@@ -1541,7 +2004,11 @@ describe("ContextManager", () => {
       messageManager,
     });
 
-    await manager.compress("session_1", true);
+    await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
 
     expect(generateSummary).toHaveBeenCalledTimes(1);
     const summaryInput = generateSummary.mock.calls[0][0];
@@ -1577,11 +2044,202 @@ describe("ContextManager", () => {
       messageManager,
     });
 
-    const result = await manager.compress("session_1", true);
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
 
-    expect(result.status).toBe("compressed");
+    expect(result.status).toBe("compacted");
+    expect(result.compression?.status).toBe("compressed");
     expect(generateSummary).toHaveBeenCalledTimes(2);
     expect(generateSummary.mock.calls[1][0].prompt).toContain("CRITICAL");
+  });
+
+  it("locks automatic compaction after repeated zero-savings summary attempts", async () => {
+    const messageManager = createMessageManagerFixture();
+    for (const [index, role] of [
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ].entries()) {
+      await addTextMessage(messageManager, {
+        sessionId: "session_1",
+        role: role as "user" | "assistant",
+        text: `${String(index)} ${"long text ".repeat(20)}`,
+      });
+    }
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockResolvedValue("x".repeat(10_000));
+    const { compactSkipped, manager } = createManager({
+      compressionThreshold: 0.5,
+      llmClient: { generateSummary },
+      maxCompactionsPerTurn: 10,
+      messageManager,
+    });
+
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    expect(generateSummary).toHaveBeenCalledTimes(4);
+
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(generateSummary).toHaveBeenCalledTimes(4);
+    expect(compactSkipped.at(-1)).toMatchObject({
+      reason: "thrash-locked",
+      sessionId: "session_1",
+    });
+
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    expect(generateSummary).toHaveBeenCalledTimes(6);
+
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "new large input ".repeat(100),
+    });
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    expect(generateSummary).toHaveBeenCalledTimes(8);
+  });
+
+  it("disposes per-session calibration and compaction state", async () => {
+    const messageManager = createMessageManagerFixture();
+    for (const [index, role] of [
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ].entries()) {
+      await addTextMessage(messageManager, {
+        sessionId: "session_1",
+        role: role as "user" | "assistant",
+        text: `${String(index)} ${"long text ".repeat(20)}`,
+      });
+    }
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockResolvedValue("x".repeat(10_000));
+    const { manager } = createManager({
+      compressionThreshold: 0.5,
+      llmClient: { generateSummary },
+      maxCompactionsPerTurn: 10,
+      messageManager,
+    });
+    manager.updateCalibrationFactor("session_1", 300, 100);
+    const context = await manager.assemble("session_1", "D:/repo");
+    const calibratedUsage = manager.getUsage(context, "model-a");
+
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    expect(generateSummary).toHaveBeenCalledTimes(4);
+
+    manager.disposeSession("session_1");
+    const resetUsage = manager.getUsage(context, "model-a");
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(resetUsage.currentTokens).toBeLessThan(
+      calibratedUsage.currentTokens,
+    );
+    expect(generateSummary).toHaveBeenCalledTimes(6);
+  });
+
+  it("caps automatic prune-summary attempts per turn", async () => {
+    const messageManager = createMessageManagerFixture();
+    for (const [index, role] of [
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ].entries()) {
+      await addTextMessage(messageManager, {
+        sessionId: "session_1",
+        role: role as "user" | "assistant",
+        text: `${String(index)} ${"long text ".repeat(20)}`,
+      });
+    }
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockResolvedValue("x".repeat(10_000));
+    const { compactSkipped, manager } = createManager({
+      compressionThreshold: 0.5,
+      llmClient: { generateSummary },
+      maxCompactionsPerTurn: 2,
+      messageManager,
+      thrashWindow: 0,
+    });
+
+    manager.resetTurnCompactionCount("session_1");
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    expect(generateSummary).toHaveBeenCalledTimes(4);
+
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(generateSummary).toHaveBeenCalledTimes(4);
+    expect(compactSkipped.at(-1)).toMatchObject({
+      reason: "per-turn-cap",
+      sessionId: "session_1",
+    });
+
+    manager.resetTurnCompactionCount("session_1");
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    expect(generateSummary).toHaveBeenCalledTimes(6);
   });
 
   it("does not summarize same-pass pruned file paths in compress summaries", async () => {
@@ -1628,14 +2286,15 @@ describe("ContextManager", () => {
       messageManager,
     });
 
-    await manager.compress("session_1", true);
+    await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
     const history = await messageManager.listBySession("session_1");
     const summaryPart = history
       .flatMap((message) => message.parts)
-      .find(
-        (part) =>
-          part.type === "text" && part.metadata?.kind === "context-summary",
-      );
+      .find(isContextSummaryPart);
     const summaryText = summaryPart?.type === "text" ? summaryPart.text : "";
 
     expect(summaryText).not.toContain("src/a.ts");
@@ -1686,14 +2345,15 @@ describe("ContextManager", () => {
       messageManager,
     });
 
-    await manager.compress("session_1", true);
+    await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
     const history = await messageManager.listBySession("session_1");
     const summaryPart = history
       .flatMap((message) => message.parts)
-      .find(
-        (part) =>
-          part.type === "text" && part.metadata?.kind === "context-summary",
-      );
+      .find(isContextSummaryPart);
     const summaryText = summaryPart?.type === "text" ? summaryPart.text : "";
 
     expect(summaryText).not.toContain("old-compacted.txt");
@@ -1714,11 +2374,13 @@ describe("ContextManager", () => {
       messageManager,
     });
 
-    await expect(manager.compress("session_1", false)).resolves.toEqual({
-      status: "skipped",
-      originalTokens: 11,
-      newTokens: 11,
-      savedTokens: 0,
+    await expect(
+      manager.compact("session_1", {
+        directory: "D:/repo",
+        modelId: "model-a",
+      }),
+    ).resolves.toMatchObject({
+      status: "not-needed",
     });
     expect(generateSummary).not.toHaveBeenCalled();
   });
@@ -1732,9 +2394,14 @@ describe("ContextManager", () => {
     });
     const short = createManager({ messageManager: shortHistoryManager });
     await expect(
-      short.manager.compress("session_short", true),
+      short.manager.compact("session_short", {
+        directory: "D:/repo",
+        force: true,
+        modelId: "model-a",
+      }),
     ).resolves.toMatchObject({
-      status: "skipped",
+      compression: { status: "skipped" },
+      status: "not-needed",
     });
 
     const failingMessageManager = createMessageManagerFixture();
@@ -1760,7 +2427,11 @@ describe("ContextManager", () => {
       messageManager: failingMessageManager,
     });
     await expect(
-      failing.manager.compress("session_fail", true),
+      failing.manager.compact("session_fail", {
+        directory: "D:/repo",
+        force: true,
+        modelId: "model-a",
+      }),
     ).resolves.toMatchObject({
       status: "failed",
       error: "llm failed",
@@ -1792,7 +2463,11 @@ describe("ContextManager", () => {
       messageManager: inflatedMessageManager,
     });
     await expect(
-      inflated.manager.compress("session_inflated", true),
+      inflated.manager.compact("session_inflated", {
+        directory: "D:/repo",
+        force: true,
+        modelId: "model-a",
+      }),
     ).resolves.toMatchObject({ status: "inflated" });
     expect(inflated.compactSkipped).toMatchObject([
       {
@@ -1834,7 +2509,13 @@ describe("ContextManager", () => {
       pruneMinimumTokens: 50,
     });
 
-    await expect(manager.prune("session_1")).resolves.toEqual({
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
+
+    expect(result.prune).toEqual({
       freedTokens: 0,
       protectedCount: 1,
       prunedCount: 0,
