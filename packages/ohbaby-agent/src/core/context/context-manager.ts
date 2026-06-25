@@ -1,12 +1,12 @@
 import {
-  COMPACTION_MIN_REMAINING_INPUT_TOKENS,
   COMPRESSION_PRESERVE_RATIO,
-  COMPRESSION_THRESHOLD,
+  DEFAULT_COMPACTION_THRESHOLDS,
   KEEP_RECENT_TOKENS,
   PRUNE_MINIMUM_TOKENS,
   PRUNE_PROTECT_TOKENS,
   SUMMARY_AGENT_NAME,
 } from "./constants.js";
+import type { CompactionThresholds } from "./constants.js";
 import {
   AGGRESSIVE_COMPRESSION_PROMPT,
   COMPRESSION_PROMPT,
@@ -139,22 +139,22 @@ export type CompactionRung = "none" | "mask" | "prune-summary" | "force";
 export function decideCompactionRung(input: {
   readonly usage: ContextUsage;
   readonly force: boolean;
-  readonly summaryThreshold?: number;
-  readonly minRemainingInputTokens?: number;
+  readonly thresholds?: CompactionThresholds;
 }): CompactionRung {
   if (input.force) {
     return "force";
   }
-  const summaryThreshold = input.summaryThreshold ?? COMPRESSION_THRESHOLD;
-  const minRemainingInputTokens =
-    input.minRemainingInputTokens ?? COMPACTION_MIN_REMAINING_INPUT_TOKENS;
+  const thresholds = input.thresholds ?? DEFAULT_COMPACTION_THRESHOLDS;
   if (
-    input.usage.usageRatio < summaryThreshold &&
-    input.usage.remainingTokens >= minRemainingInputTokens
+    input.usage.usageRatio >= thresholds.summary ||
+    input.usage.remainingTokens < thresholds.minRemainingInputTokens
   ) {
-    return "none";
+    return "prune-summary";
   }
-  return "prune-summary";
+  if (input.usage.usageRatio >= thresholds.mask) {
+    return "mask";
+  }
+  return "none";
 }
 
 function skippedReasonForCompression(
@@ -324,8 +324,16 @@ export function createContextManager(
   options: ContextManagerOptions,
 ): ContextManager {
   const now = options.now ?? Date.now;
-  const compressionThreshold =
-    options.compressionThreshold ?? COMPRESSION_THRESHOLD;
+  const compactionThresholds: CompactionThresholds = {
+    ...DEFAULT_COMPACTION_THRESHOLDS,
+    ...options.compactionThresholds,
+    ...(options.compressionThreshold === undefined
+      ? {}
+      : { summary: options.compressionThreshold }),
+    ...(options.maskConfig?.minUsageRatio === undefined
+      ? {}
+      : { mask: options.maskConfig.minUsageRatio }),
+  };
   const compressionPreserveRatio =
     options.compressionPreserveRatio ?? COMPRESSION_PRESERVE_RATIO;
   const pruneProtectTokens = options.pruneProtectTokens ?? PRUNE_PROTECT_TOKENS;
@@ -336,6 +344,7 @@ export function createContextManager(
   const maskConfig = createMaskConfig({
     ...options.maskConfig,
     enabled: options.maskEnabled ?? false,
+    minUsageRatio: compactionThresholds.mask,
   });
 
   function getCalibrationFactor(sessionId: string): number {
@@ -848,8 +857,7 @@ export function createContextManager(
   ): Promise<CompactionOutcome> {
     const rung = decideCompactionRung({
       force: req.force,
-      minRemainingInputTokens: COMPACTION_MIN_REMAINING_INPUT_TOKENS,
-      summaryThreshold: compressionThreshold,
+      thresholds: compactionThresholds,
       usage: req.usageBefore,
     });
 
@@ -891,8 +899,7 @@ export function createContextManager(
 
     const afterPruneRung = decideCompactionRung({
       force: false,
-      minRemainingInputTokens: COMPACTION_MIN_REMAINING_INPUT_TOKENS,
-      summaryThreshold: compressionThreshold,
+      thresholds: compactionThresholds,
       usage: usageAfterPrune,
     });
     if (rung !== "force" && afterPruneRung === "none") {

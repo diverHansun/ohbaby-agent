@@ -1174,7 +1174,20 @@ describe("ContextManager", () => {
     ).toBe("prune-summary");
   });
 
-  it("keeps compaction decisions on usage ratio when enough budget remains", () => {
+  it("uses the unified compaction ladder thresholds", () => {
+    expect(
+      decideCompactionRung({
+        force: false,
+        usage: {
+          contextLimit: 100_000,
+          currentTokens: 40_000,
+          inputBudgetTokens: 100_000,
+          modelId: "large-model",
+          remainingTokens: 60_000,
+          usageRatio: 0.4,
+        },
+      }),
+    ).toBe("none");
     expect(
       decideCompactionRung({
         force: false,
@@ -1187,7 +1200,20 @@ describe("ContextManager", () => {
           usageRatio: 0.7,
         },
       }),
-    ).toBe("none");
+    ).toBe("mask");
+    expect(
+      decideCompactionRung({
+        force: false,
+        usage: {
+          contextLimit: 100_000,
+          currentTokens: 90_000,
+          inputBudgetTokens: 100_000,
+          modelId: "large-model",
+          remainingTokens: 10_000,
+          usageRatio: 0.9,
+        },
+      }),
+    ).toBe("mask");
     expect(
       decideCompactionRung({
         force: false,

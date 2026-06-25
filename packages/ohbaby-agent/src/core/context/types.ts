@@ -2,6 +2,7 @@ import type { BusInstance } from "../../bus/index.js";
 import type { ChatCompletionMessage } from "../llm-client/index.js";
 import type { MergedMemory } from "../memory/index.js";
 import type { MessageManager, MessageWithParts } from "../message/index.js";
+import type { CompactionThresholds } from "./constants.js";
 
 export interface MemoryReader {
   load(directory: string): Promise<MergedMemory>;
@@ -155,6 +156,7 @@ export interface ContextManagerOptions {
   readonly tokenCounter: TokenCounter;
   readonly llmClient: ContextLLMClient;
   readonly now?: () => number;
+  readonly compactionThresholds?: Partial<CompactionThresholds>;
   readonly compressionThreshold?: number;
   readonly compressionPreserveRatio?: number;
   readonly pruneProtectTokens?: number;
