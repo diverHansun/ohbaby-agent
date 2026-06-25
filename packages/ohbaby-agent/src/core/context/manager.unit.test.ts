@@ -462,7 +462,6 @@ describe("ContextManager", () => {
     expect(context.memory.merged).toContain("global memory");
     expect(context.history).toHaveLength(1);
     expect(context.hasSummary).toBe(false);
-    expect(context.estimatedTokens).toBeGreaterThan(0);
   });
 
   it("serializes tool parts as assistant tool calls followed by tool results", async () => {
@@ -1170,7 +1169,6 @@ describe("ContextManager", () => {
     expect(
       decideCompactionRung({
         force: false,
-        historyLength: 4,
         usage,
       }),
     ).toBe("prune-summary");
@@ -1180,7 +1178,6 @@ describe("ContextManager", () => {
     expect(
       decideCompactionRung({
         force: false,
-        historyLength: 4,
         usage: {
           contextLimit: 100_000,
           currentTokens: 70_000,
@@ -1194,14 +1191,13 @@ describe("ContextManager", () => {
     expect(
       decideCompactionRung({
         force: false,
-        historyLength: 4,
         usage: {
-        contextLimit: 1_000_000,
-        currentTokens: 980_000,
+          contextLimit: 1_000_000,
+          currentTokens: 980_000,
           inputBudgetTokens: 1_000_000,
-        modelId: "large-model",
-        remainingTokens: 20_000,
-        usageRatio: 0.98,
+          modelId: "large-model",
+          remainingTokens: 20_000,
+          usageRatio: 0.98,
         },
       }),
     ).toBe("prune-summary");

@@ -51,7 +51,6 @@ export interface AssembledContext {
   readonly systemPrompt: string;
   readonly memory: MergedMemory;
   readonly history: readonly MessageWithParts[];
-  readonly estimatedTokens: number;
   readonly hasSummary: boolean;
   readonly assembledAt: number;
   readonly sessionId: string;

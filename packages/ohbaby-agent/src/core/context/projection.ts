@@ -84,26 +84,25 @@ export function reduceForModel(input: {
     (sum, candidate) => sum + candidate.tokens,
     0,
   );
-  const highestCandidateBoundary = candidates.reduce(
-    (highest, candidate) => Math.max(highest, candidate.messageIndex + 1),
+  const highestCandidateCutoff = candidates.reduce(
+    (highest, candidate) => Math.max(highest, candidate.createdAt),
     -1,
   );
   const skippedReason = skippedReasonForReduction({
     candidateCount: candidates.length,
     candidateTokens,
     config: input.config,
-    cutoff: input.cutoff,
     usage: input.usage,
   });
   const shouldAdvance =
     allowCutoffAdvance &&
     skippedReason === undefined &&
-    highestCandidateBoundary >= 0;
+    highestCandidateCutoff > 0;
   const cutoff = shouldAdvance
-    ? Math.max(input.cutoff, highestCandidateBoundary)
+    ? Math.max(input.cutoff, highestCandidateCutoff)
     : input.cutoff;
   const selected = candidates.filter(
-    (candidate) => candidate.messageIndex < cutoff,
+    (candidate) => candidate.createdAt <= cutoff,
   );
   const event = {
     sessionId: input.sessionId,
@@ -144,6 +143,7 @@ export function reduceForModel(input: {
 }
 
 interface MaskCandidate {
+  readonly createdAt: number;
   readonly messageIndex: number;
   readonly part: ToolPart;
   readonly tokens: number;
@@ -176,7 +176,12 @@ function collectMaskCandidates(input: {
       if (tokens < input.config.minPartTokens) {
         continue;
       }
-      candidates.push({ messageIndex, part, tokens });
+      candidates.push({
+        createdAt: message.info.time.created,
+        messageIndex,
+        part,
+        tokens,
+      });
     }
   });
 
@@ -224,12 +229,8 @@ function skippedReasonForReduction(input: {
   readonly candidateCount: number;
   readonly candidateTokens: number;
   readonly config: MaskConfig;
-  readonly cutoff: number;
   readonly usage: ContextUsage;
 }): MaskSkippedReason | undefined {
-  if (input.cutoff > 0) {
-    return undefined;
-  }
   if (input.usage.usageRatio < input.config.minUsageRatio) {
     return "below-threshold";
   }
@@ -259,7 +260,9 @@ function toolResultContent(part: ToolPart): string | undefined {
     case "error":
       return part.state.error;
     case "aborted":
-      return part.state.output ?? part.state.error;
+      return part.state.output === undefined || part.state.output === ""
+        ? undefined
+        : part.state.output;
     case "pending":
     case "running":
       return undefined;

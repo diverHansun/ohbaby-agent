@@ -71,7 +71,7 @@ maskEnabled: boolean  // 默认 false
        ([G11](../gaps-and-decisions.md#g11借鉴四项目的-mask-设计)：借鉴 oh-my-pi，占位符本身约 20 token，遮小结果反而变大)
 4. 仅当可遮罩总量 ≥ MASK_MIN_PRUNABLE_TOKENS(默认 ~20k) 才触发(批量阈值)
      → 否则发事件(skippedReason: below-batch)
-5. 计算 nextCutoff = max(cutoffState, 本次可遮罩的最高 index + 1)，用 exclusive boundary 表示"cutoff 之前均可遮罩"，单调推进；因此 reset 为 0 时表示无历史进入遮罩范围
+5. 计算 nextCutoff = max(cutoffState, 本次可遮罩消息的最大 `message.info.time.created`)，用 created-time boundary 表示"创建时间不晚于 cutoff 的候选可遮罩"，单调推进；因此 reset 为 0 时表示无历史进入遮罩范围。低于 usage/batch 门槛时只保留已有 cutoff 的遮罩效果，不继续推进边界。
 6. 对 cutoff 之前、可遮罩的 ToolPart，用占位符替换其输出内容:
      '[Old tool result cleared (was ~N tokens)]'
      ([G11](../gaps-and-decisions.md#g11借鉴四项目的-mask-设计)：借鉴 oh-my-pi，带原大小让模型判断丢了多少信息)
@@ -86,7 +86,7 @@ maskEnabled: boolean  // 默认 false
 
 ### 2.3 cutoff 游标
 
-- 类型：`Map<sessionId, number>` 或随 session 生命周期的内存状态，单调（只增）。
+- 类型：`Map<sessionId, number>` 或随 session 生命周期的内存状态，值为 created-time boundary，单调（只增）。
 - **不写库**；跨进程恢复重置为 0，按 usage 重探测。
 - 与编排层永久 prune 的 `time.compacted` **互不写对方状态**：mask 只读 active history、维护自己的 cutoff；prune 仍按原逻辑写 `time.compacted`。
 - **prune-summary 提交后 cutoff 重置为 0**（[G11](../gaps-and-decisions.md#g11借鉴四项目的-mask-设计)：借鉴 kimi `microCompaction.reset()`）——被摘要的历史已消失，旧 cutoff 指向的位置已无意义，归零重新开始。

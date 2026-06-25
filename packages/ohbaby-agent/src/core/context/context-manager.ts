@@ -138,7 +138,6 @@ export type CompactionRung = "none" | "mask" | "prune-summary" | "force";
 
 export function decideCompactionRung(input: {
   readonly usage: ContextUsage;
-  readonly historyLength: number;
   readonly force: boolean;
   readonly summaryThreshold?: number;
   readonly minRemainingInputTokens?: number;
@@ -425,23 +424,6 @@ export function createContextManager(
     };
   }
 
-  function estimateAssembledTokens(
-    systemPrompt: string,
-    memory: MergedMemory,
-    history: readonly MessageWithParts[],
-    isSubagent: boolean,
-  ): number {
-    return estimateWireHeuristic(
-      serializeForLlm({
-        history,
-        isSubagent,
-        memory,
-        systemPrompt,
-      }),
-      options.tokenCounter,
-    );
-  }
-
   function assembleFromRawHistory(input: {
     readonly assembledAt: number;
     readonly isSubagent: boolean;
@@ -456,12 +438,6 @@ export function createContextManager(
       systemPrompt: input.systemPrompt,
       memory: input.memory,
       history,
-      estimatedTokens: estimateAssembledTokens(
-        input.systemPrompt,
-        input.memory,
-        history,
-        input.isSubagent,
-      ),
       hasSummary: input.rawHistory.some(isSummaryMessage),
       isSubagent: input.isSubagent,
       assembledAt: input.assembledAt,
@@ -473,16 +449,7 @@ export function createContextManager(
     context: AssembledContext,
     history: readonly MessageWithParts[],
   ): AssembledContext {
-    return {
-      ...context,
-      history,
-      estimatedTokens: estimateAssembledTokens(
-        context.systemPrompt,
-        context.memory,
-        history,
-        context.isSubagent,
-      ),
-    };
+    return { ...context, history };
   }
 
   function reduceContextForModel(input: {
@@ -881,7 +848,6 @@ export function createContextManager(
   ): Promise<CompactionOutcome> {
     const rung = decideCompactionRung({
       force: req.force,
-      historyLength: req.assembled.history.length,
       minRemainingInputTokens: COMPACTION_MIN_REMAINING_INPUT_TOKENS,
       summaryThreshold: compressionThreshold,
       usage: req.usageBefore,
@@ -925,7 +891,6 @@ export function createContextManager(
 
     const afterPruneRung = decideCompactionRung({
       force: false,
-      historyLength: afterPrune.history.length,
       minRemainingInputTokens: COMPACTION_MIN_REMAINING_INPUT_TOKENS,
       summaryThreshold: compressionThreshold,
       usage: usageAfterPrune,
