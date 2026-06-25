@@ -226,10 +226,8 @@ function createContextManagerMock(
   return {
     assemble: vi.fn(),
     compact: vi.fn(),
-    compress: vi.fn(),
     getUsage: vi.fn(),
     prepareTurn,
-    prune: vi.fn(),
     shouldCompress: vi.fn(),
   };
 }

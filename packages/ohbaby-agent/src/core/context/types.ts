@@ -139,14 +139,8 @@ export interface ContextManager {
   ): Promise<AssembledContext>;
   getUsage(context: AssembledContext, modelId: string): ContextUsage;
   shouldCompress(usage: ContextUsage): boolean;
-  compress(
-    sessionId: string,
-    force?: boolean,
-    modelId?: string,
-  ): Promise<CompressionResult>;
   compact(sessionId: string, options: CompactOptions): Promise<CompactResult>;
   prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn>;
-  prune(sessionId: string): Promise<PruneResult>;
 }
 
 export interface ContextManagerOptions {

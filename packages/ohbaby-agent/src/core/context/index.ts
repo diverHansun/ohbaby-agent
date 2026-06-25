@@ -25,11 +25,11 @@ export type {
 } from "./context-window-usage.js";
 export {
   createContextManager,
-  decideCompactAction,
+  decideCompactionRung,
   findCutPoint,
   getContextUsage,
 } from "./context-manager.js";
-export type { ContextCutPoint } from "./context-manager.js";
+export type { CompactionRung, ContextCutPoint } from "./context-manager.js";
 export {
   appendMemoryToSystemPrompt,
   loadMemoryForPrompt,

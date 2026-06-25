@@ -926,6 +926,39 @@ describe("ContextManager", () => {
     expect(loadMemory).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps prepareTurn prune-only path to one history read", async () => {
+    const messageManager = createMessageManagerFixture();
+    const memory: MemoryReader = {
+      load: vi.fn().mockResolvedValue({ global: "", project: "", merged: "" }),
+    };
+    await addCompletedToolMessage(messageManager, {
+      sessionId: "session_1",
+      output: "x".repeat(80),
+    });
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "small",
+    });
+    const listBySession = vi.spyOn(messageManager, "listBySession");
+    const { manager } = createManager({
+      compressionThreshold: 0.5,
+      memory,
+      messageManager,
+      pruneMinimumTokens: 1,
+      pruneProtectTokens: 0,
+    });
+
+    const prepared = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(prepared.compaction?.status).toBe("pruned");
+    expect(listBySession).toHaveBeenCalledTimes(1);
+  });
+
   it("skips memory for subagent context and degrades to empty memory on load failure", async () => {
     const load = vi.fn().mockRejectedValue(new Error("cannot read memory"));
     const memory: MemoryReader = {
@@ -1048,6 +1081,13 @@ describe("ContextManager", () => {
     ).toBe(false);
   });
 
+  it("does not expose legacy compress or prune APIs", () => {
+    const { manager } = createManager();
+
+    expect("compress" in manager).toBe(false);
+    expect("prune" in manager).toBe(false);
+  });
+
   it("publishes a compact-skipped event when prepareTurn decides no compaction is needed", async () => {
     const messageManager = createMessageManagerFixture();
     await addTextMessage(messageManager, {
@@ -1097,7 +1137,13 @@ describe("ContextManager", () => {
     });
     const { manager, pruned } = createManager({ messageManager });
 
-    await expect(manager.prune("session_1")).resolves.toEqual({
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
+
+    expect(result.prune).toEqual({
       freedTokens: 10,
       protectedCount: 1,
       prunedCount: 1,
@@ -1105,7 +1151,7 @@ describe("ContextManager", () => {
     });
 
     const history = await messageManager.listBySession("session_1");
-    expect(history[0]?.parts[0]?.time?.compacted).toBe(1_000);
+    expect(history[0]?.parts[0]?.time?.compacted).toBeDefined();
     expect(history[1]?.parts[0]?.time?.compacted).toBeUndefined();
     expect(pruned).toHaveLength(1);
   });
@@ -1134,15 +1180,20 @@ describe("ContextManager", () => {
     });
     const { compressed, manager } = createManager({ messageManager });
 
-    const result = await manager.compress("session_1", true);
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
 
-    expect(result.status).toBe("compressed");
-    expect(result.summaryMessageId).toBe("message_5");
-    expect(result.savedTokens).toBeGreaterThan(0);
+    expect(result.status).toBe("compacted");
+    expect(result.compression?.summaryMessageId).toBe("message_5");
+    expect(result.compression?.savedTokens).toBeGreaterThan(0);
     const history = await messageManager.listBySession("session_1");
-    expect(history[0]?.parts[0]?.time?.compacted).toBe(1_000);
-    expect(history[1]?.parts[0]?.time?.compacted).toBe(1_000);
-    expect(history[2]?.parts[0]?.time?.compacted).toBe(1_000);
+    const compactedAt = history[0]?.parts[0]?.time?.compacted;
+    expect(compactedAt).toBeDefined();
+    expect(history[1]?.parts[0]?.time?.compacted).toBe(compactedAt);
+    expect(history[2]?.parts[0]?.time?.compacted).toBe(compactedAt);
     expect(history[3]?.parts[0]?.time?.compacted).toBeUndefined();
     expect(history.at(-1)).toMatchObject({
       info: { id: "message_5", role: "assistant" },
@@ -1206,6 +1257,38 @@ describe("ContextManager", () => {
     const context = await manager.assemble("session_1", "D:/repo");
     expect(context.history).toHaveLength(1);
     expect(context.history[0]?.info.role).toBe("user");
+  });
+
+  it("keeps compact prune-only path to one history read", async () => {
+    const messageManager = createMessageManagerFixture();
+    const memory: MemoryReader = {
+      load: vi.fn().mockResolvedValue({ global: "", project: "", merged: "" }),
+    };
+    await addCompletedToolMessage(messageManager, {
+      sessionId: "session_1",
+      output: "x".repeat(80),
+    });
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "small",
+    });
+    const listBySession = vi.spyOn(messageManager, "listBySession");
+    const { manager } = createManager({
+      compressionThreshold: 0.5,
+      memory,
+      messageManager,
+      pruneMinimumTokens: 1,
+      pruneProtectTokens: 0,
+    });
+
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      modelId: "model-a",
+    });
+
+    expect(result.status).toBe("pruned");
+    expect(listBySession).toHaveBeenCalledTimes(1);
   });
 
   it("clears retained usage anchors when compact resolves through prune only", async () => {
@@ -1541,7 +1624,11 @@ describe("ContextManager", () => {
       messageManager,
     });
 
-    await manager.compress("session_1", true);
+    await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
 
     expect(generateSummary).toHaveBeenCalledTimes(1);
     const summaryInput = generateSummary.mock.calls[0][0];
@@ -1577,9 +1664,14 @@ describe("ContextManager", () => {
       messageManager,
     });
 
-    const result = await manager.compress("session_1", true);
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
 
-    expect(result.status).toBe("compressed");
+    expect(result.status).toBe("compacted");
+    expect(result.compression?.status).toBe("compressed");
     expect(generateSummary).toHaveBeenCalledTimes(2);
     expect(generateSummary.mock.calls[1][0].prompt).toContain("CRITICAL");
   });
@@ -1628,7 +1720,11 @@ describe("ContextManager", () => {
       messageManager,
     });
 
-    await manager.compress("session_1", true);
+    await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
     const history = await messageManager.listBySession("session_1");
     const summaryPart = history
       .flatMap((message) => message.parts)
@@ -1686,7 +1782,11 @@ describe("ContextManager", () => {
       messageManager,
     });
 
-    await manager.compress("session_1", true);
+    await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
     const history = await messageManager.listBySession("session_1");
     const summaryPart = history
       .flatMap((message) => message.parts)
@@ -1714,11 +1814,13 @@ describe("ContextManager", () => {
       messageManager,
     });
 
-    await expect(manager.compress("session_1", false)).resolves.toEqual({
-      status: "skipped",
-      originalTokens: 11,
-      newTokens: 11,
-      savedTokens: 0,
+    await expect(
+      manager.compact("session_1", {
+        directory: "D:/repo",
+        modelId: "model-a",
+      }),
+    ).resolves.toMatchObject({
+      status: "not-needed",
     });
     expect(generateSummary).not.toHaveBeenCalled();
   });
@@ -1732,9 +1834,14 @@ describe("ContextManager", () => {
     });
     const short = createManager({ messageManager: shortHistoryManager });
     await expect(
-      short.manager.compress("session_short", true),
+      short.manager.compact("session_short", {
+        directory: "D:/repo",
+        force: true,
+        modelId: "model-a",
+      }),
     ).resolves.toMatchObject({
-      status: "skipped",
+      compression: { status: "skipped" },
+      status: "not-needed",
     });
 
     const failingMessageManager = createMessageManagerFixture();
@@ -1760,7 +1867,11 @@ describe("ContextManager", () => {
       messageManager: failingMessageManager,
     });
     await expect(
-      failing.manager.compress("session_fail", true),
+      failing.manager.compact("session_fail", {
+        directory: "D:/repo",
+        force: true,
+        modelId: "model-a",
+      }),
     ).resolves.toMatchObject({
       status: "failed",
       error: "llm failed",
@@ -1792,7 +1903,11 @@ describe("ContextManager", () => {
       messageManager: inflatedMessageManager,
     });
     await expect(
-      inflated.manager.compress("session_inflated", true),
+      inflated.manager.compact("session_inflated", {
+        directory: "D:/repo",
+        force: true,
+        modelId: "model-a",
+      }),
     ).resolves.toMatchObject({ status: "inflated" });
     expect(inflated.compactSkipped).toMatchObject([
       {
@@ -1834,7 +1949,13 @@ describe("ContextManager", () => {
       pruneMinimumTokens: 50,
     });
 
-    await expect(manager.prune("session_1")).resolves.toEqual({
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
+
+    expect(result.prune).toEqual({
       freedTokens: 0,
       protectedCount: 1,
       prunedCount: 0,
