@@ -37,6 +37,7 @@ interface ContextFixture {
   readonly memory: MemoryReader;
   readonly pruned: readonly unknown[];
   readonly systemPromptProvider: SystemPromptProvider;
+  readonly turnPrepared: readonly unknown[];
 }
 
 function createMessageIds(): MessageIdGenerator {
@@ -171,6 +172,7 @@ function createManager(
   const compressed: unknown[] = [];
   const masked: unknown[] = [];
   const pruned: unknown[] = [];
+  const turnPrepared: unknown[] = [];
   const memory =
     options.memory ??
     ({
@@ -218,6 +220,9 @@ function createManager(
   bus.subscribe(ContextEvent.Masked, (payload) => {
     masked.push(payload);
   });
+  bus.subscribe(ContextEvent.TurnPrepared, (payload) => {
+    turnPrepared.push(payload);
+  });
 
   return {
     compactSkipped,
@@ -227,6 +232,7 @@ function createManager(
     memory,
     pruned,
     systemPromptProvider,
+    turnPrepared,
   };
 }
 
@@ -831,6 +837,81 @@ describe("ContextManager", () => {
     );
   });
 
+  it("moves calibration toward repeated observations without jumping directly to them", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "hello",
+    });
+    const { manager } = createManager({ messageManager });
+    const baseline = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    for (let index = 0; index < 4; index += 1) {
+      manager.updateCalibrationFactor(
+        "session_1",
+        baseline.sentHeuristic * 2,
+        baseline.sentHeuristic,
+      );
+    }
+    const calibrated = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(calibrated.usage.currentTokens).toBe(
+      Math.round(calibrated.sentHeuristic * 1.9375),
+    );
+  });
+
+  it("clamps calibration observations before applying EMA", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "hello",
+    });
+    const { manager } = createManager({ messageManager });
+    const baseline = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    manager.updateCalibrationFactor(
+      "session_1",
+      baseline.sentHeuristic * 10,
+      baseline.sentHeuristic,
+    );
+    const highClamped = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    manager.updateCalibrationFactor(
+      "session_1",
+      baseline.sentHeuristic * 0.1,
+      baseline.sentHeuristic,
+    );
+    const lowClamped = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(highClamped.usage.currentTokens).toBe(
+      Math.round(highClamped.sentHeuristic * 2),
+    );
+    expect(lowClamped.usage.currentTokens).toBe(
+      Math.round(lowClamped.sentHeuristic * 1.25),
+    );
+  });
+
   it("dark ships mask statistics without changing prepared messages by default", async () => {
     const messageManager = createMessageManagerFixture();
     await addCompletedToolMessage(messageManager, {
@@ -945,7 +1026,9 @@ describe("ContextManager", () => {
       role: "user",
       text: "latest",
     });
-    const generateSummary = vi.fn<ContextLLMClient["generateSummary"]>();
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockResolvedValue("<state_snapshot>short</state_snapshot>");
     const { manager } = createManager({
       compressionThreshold: 0.5,
       llmClient: { generateSummary },
@@ -985,6 +1068,68 @@ describe("ContextManager", () => {
 
     expect(prepared.compaction).toBeUndefined();
     expect(prepared.usage.usageRatio).toBeLessThan(0.5);
+    expect(generateSummary).not.toHaveBeenCalled();
+  });
+
+  it("stops after prune when usage no longer needs prune-summary", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addCompletedToolMessage(messageManager, {
+      sessionId: "session_1",
+      output: "old tool output ".repeat(800),
+    });
+    for (const [index, role] of [
+      "user",
+      "assistant",
+      "user",
+    ].entries()) {
+      await addTextMessage(messageManager, {
+        sessionId: "session_1",
+        role: role as "user" | "assistant",
+        text: `${String(index)} ${"recent text ".repeat(300)}`,
+      });
+    }
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockResolvedValue("<state_snapshot>short</state_snapshot>");
+    const { manager } = createManager({
+      compressionThreshold: 0.8,
+      llmClient: { generateSummary },
+      messageManager,
+      pruneMinimumTokens: 1,
+      pruneProtectTokens: 0,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getBudget(_modelId, options) {
+          const usedInputTokens = options?.usedInputTokens ?? 0;
+          const inputBudgetTokens = 20_000;
+          return {
+            contextWindowTokens: 24_000,
+            inputBudgetTokens,
+            maxOutputTokens: 2_000,
+            modelId: "model-a",
+            remainingInputTokens: Math.max(
+              0,
+              inputBudgetTokens - usedInputTokens,
+            ),
+            reservedOutputTokens: 2_000,
+            safetyMarginTokens: 2_000,
+            usageRatio: usedInputTokens / inputBudgetTokens,
+            usedInputTokens,
+          };
+        },
+        getLimit: () => 24_000,
+      },
+    });
+
+    const prepared = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(prepared.compaction?.status).toBe("pruned");
+    expect(prepared.usage.usageRatio).toBeGreaterThanOrEqual(0.5);
+    expect(prepared.usage.usageRatio).toBeLessThan(0.8);
     expect(generateSummary).not.toHaveBeenCalled();
   });
 
@@ -1473,6 +1618,36 @@ describe("ContextManager", () => {
       {
         reason: "not-needed",
         sessionId: "session_1",
+      },
+    ]);
+  });
+
+  it("publishes turn-prepared usage and compaction status", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "small",
+    });
+    const { manager, turnPrepared } = createManager({
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 10_000,
+      },
+    });
+
+    const prepared = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+
+    expect(turnPrepared).toMatchObject([
+      {
+        sessionId: "session_1",
+        triggeredCompaction: false,
+        usage: prepared.usage,
       },
     ]);
   });
@@ -2180,6 +2355,62 @@ describe("ContextManager", () => {
     expect(resetUsage.currentTokens).toBeLessThan(
       calibratedUsage.currentTokens,
     );
+    expect(generateSummary).toHaveBeenCalledTimes(6);
+  });
+
+  it("counts forced prepareTurn compactions but not manual compact calls", async () => {
+    const messageManager = createMessageManagerFixture();
+    for (const [index, role] of [
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ].entries()) {
+      await addTextMessage(messageManager, {
+        sessionId: "session_1",
+        role: role as "user" | "assistant",
+        text: `${String(index)} ${"long text ".repeat(20)}`,
+      });
+    }
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockResolvedValue("x".repeat(10_000));
+    const { compactSkipped, manager } = createManager({
+      compressionThreshold: 0.5,
+      llmClient: { generateSummary },
+      maxCompactionsPerTurn: 1,
+      messageManager,
+      thrashWindow: 0,
+    });
+
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    expect(generateSummary).toHaveBeenCalledTimes(2);
+    expect(compactSkipped.at(-1)).toMatchObject({
+      reason: "per-turn-cap",
+      sessionId: "session_1",
+    });
+
+    manager.resetTurnCompactionCount("session_1");
+    await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
+    await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
     expect(generateSummary).toHaveBeenCalledTimes(6);
   });
 

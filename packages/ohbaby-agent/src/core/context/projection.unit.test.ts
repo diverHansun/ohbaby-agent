@@ -160,6 +160,28 @@ function textAssistantMessage(id: string, text: string): MessageWithParts {
   };
 }
 
+function reasoningAssistantMessage(id: string, text: string): MessageWithParts {
+  return {
+    info: {
+      agent: "test",
+      id,
+      role: "assistant",
+      sessionId: "session_1",
+      time: { created: 1 },
+    },
+    parts: [
+      {
+        id: `part_${id}`,
+        messageId: id,
+        orderIndex: 0,
+        sessionId: "session_1",
+        text,
+        type: "reasoning",
+      },
+    ],
+  };
+}
+
 describe("reduceForModel", () => {
   it("dark ships masking by reporting candidates without changing history", () => {
     const history = [
@@ -466,6 +488,39 @@ describe("reduceForModel", () => {
 
     expect(result.event).toMatchObject({
       maskedPartIds: [],
+      skippedReason: "below-batch",
+    });
+    expect(result.history).toBe(history);
+  });
+
+  it("does not count reasoning parts as mask candidates", () => {
+    const history = [
+      reasoningAssistantMessage("old_reasoning", "r".repeat(1_000)),
+      assistantToolMessage({
+        id: "old_read",
+        output: "x".repeat(10),
+        tool: "read_file",
+      }),
+      userMessage("latest_user", "new request"),
+    ];
+
+    const result = reduceForModel({
+      config: createMaskConfig({
+        enabled: true,
+        minPartTokens: 1,
+        minPrunableTokens: 100,
+        protectionTokens: 1,
+      }),
+      cutoff: 0,
+      history,
+      sessionId: "session_1",
+      tokenCounter: TOKEN_COUNTER,
+      usage: USAGE,
+    });
+
+    expect(result.event).toMatchObject({
+      maskedPartIds: [],
+      maskedTokens: 0,
       skippedReason: "below-batch",
     });
     expect(result.history).toBe(history);

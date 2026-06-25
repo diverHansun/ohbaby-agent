@@ -1024,7 +1024,7 @@ export function createContextManager(
       thresholds: compactionThresholds,
       usage: usageAfterPrune,
     });
-    if (rung !== "force" && afterPruneRung === "none") {
+    if (rung !== "force" && afterPruneRung !== "prune-summary") {
       return {
         status: pruneOutcome.result.prunedCount > 0 ? "pruned" : "not-needed",
         prune: pruneOutcome.result,
