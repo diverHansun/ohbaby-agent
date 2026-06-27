@@ -1041,6 +1041,20 @@ function ThinkingIndicator(): ReactElement {
   );
 }
 
+function permissionButtonClass(choice: UiPermissionChoice): string {
+  const base = "ohb-perm-btn";
+  if (choice.id === "allow_always") {
+    return `${base} ohb-perm-allow-secondary`;
+  }
+  if (choice.intent === "allow") {
+    return `${base} ohb-perm-allow-primary`;
+  }
+  if (choice.intent === "abort") {
+    return `${base} ohb-perm-abort`;
+  }
+  return `${base} ohb-perm-deny`;
+}
+
 function PermissionModal(props: {
   readonly disabled: boolean;
   readonly onRespond: (
@@ -1068,9 +1082,7 @@ function PermissionModal(props: {
         <div className="ohb-permission-actions">
           {request.choices.map((choice) => (
             <button
-              className={
-                choice.intent === "allow" ? "ohb-button-primary" : "ohb-button"
-              }
+              className={permissionButtonClass(choice)}
               disabled={props.disabled}
               key={choice.id}
               onClick={() => {

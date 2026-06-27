@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   UiCompactSessionUsage,
+  UiPermissionRequest,
   UiRunStatus,
   UiSnapshot,
   UiWebCommandCatalog,
@@ -234,6 +235,29 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(fake.setPermission).toHaveBeenCalledWith({ level: "full-access" });
     expect(app.container.querySelector(".ohb-policy-menu")).toBeNull();
+  });
+
+  it("styles permission choices by their consequence", () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "running", runId: "run_1" }),
+        permissions: [permissionRequest()],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(permissionAction(app.container, "Allow once").className).toBe(
+      "ohb-perm-btn ohb-perm-allow-primary",
+    );
+    expect(permissionAction(app.container, "Always allow").className).toBe(
+      "ohb-perm-btn ohb-perm-allow-secondary",
+    );
+    expect(permissionAction(app.container, "Reject").className).toBe(
+      "ohb-perm-btn ohb-perm-deny",
+    );
+    expect(permissionAction(app.container, "Cancel run").className).toBe(
+      "ohb-perm-btn ohb-perm-abort",
+    );
   });
 
   it("creates and selects sessions from the sidebar", async () => {
@@ -716,6 +740,34 @@ function snapshotWithStatus(status: UiRunStatus): UiSnapshot {
   };
 }
 
+function permissionRequest(): UiPermissionRequest {
+  return {
+    choices: [
+      { id: "allow_once", intent: "allow", label: "Allow once" },
+      { id: "allow_always", intent: "allow", label: "Always allow" },
+      { id: "reject", intent: "deny", label: "Reject" },
+      { id: "cancel", intent: "abort", label: "Cancel run" },
+    ],
+    description: "Run shell command",
+    id: "permission_1",
+    runId: "run_1",
+    title: "Permission required",
+  };
+}
+
+function permissionAction(
+  container: ParentNode,
+  label: string,
+): HTMLButtonElement {
+  const button = Array.from(
+    container.querySelectorAll(".ohb-permission-actions button"),
+  ).find((candidate) => candidate.textContent === label);
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error(`permission action not found: ${label}`);
+  }
+  return button;
+}
+
 function catalog(ids: readonly CatalogId[]): UiWebCommandCatalog {
   return {
     commands: ids.map((id) => ({
@@ -726,14 +778,14 @@ function catalog(ids: readonly CatalogId[]): UiWebCommandCatalog {
         id === "skill.hansun-db"
           ? "Use Hansun knowledge base"
           : id === "skills"
-          ? "List available skills"
-          : id === "connect"
-            ? "Connect model"
-            : id === "connect-search"
-              ? "Connect search"
-              : id === "compact"
-                ? "Compact session"
-                : "Show backend status",
+            ? "List available skills"
+            : id === "connect"
+              ? "Connect model"
+              : id === "connect-search"
+                ? "Connect search"
+                : id === "compact"
+                  ? "Compact session"
+                  : "Show backend status",
       executionKind:
         id === "skill.hansun-db"
           ? "skill"

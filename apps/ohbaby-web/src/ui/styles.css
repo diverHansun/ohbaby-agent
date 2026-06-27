@@ -1365,7 +1365,10 @@ button.ohb-list-row:hover,
   cursor: pointer;
   display: grid;
   gap: 10px;
-  grid-template-columns: 7px minmax(128px, 144px) minmax(136px, 1fr) minmax(148px, 1fr);
+  grid-template-columns: 7px minmax(128px, 144px) minmax(136px, 1fr) minmax(
+      148px,
+      1fr
+    );
   min-height: 31px;
   padding: 9px 11px;
   width: 100%;
@@ -1637,6 +1640,60 @@ button.ohb-list-row:hover,
   display: flex;
   flex: none;
   gap: 8px;
+}
+
+.ohb-perm-btn {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 500;
+  gap: 7px;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 13px;
+}
+
+.ohb-perm-allow-primary {
+  background: #5f86c4;
+  border-color: #5278bb;
+  color: #ffffff;
+}
+
+.ohb-perm-allow-primary:hover {
+  background: #5278bb;
+}
+
+.ohb-perm-allow-secondary {
+  background: #eef2f9;
+  border-color: #d8e1f0;
+  color: #4a6ba6;
+}
+
+.ohb-perm-allow-secondary:hover {
+  background: #e3ebf6;
+}
+
+.ohb-perm-deny {
+  background: #faf3e4;
+  border-color: #ead7ad;
+  color: #8f6f2f;
+}
+
+.ohb-perm-deny:hover {
+  background: #f4ead2;
+}
+
+.ohb-perm-abort {
+  background: rgba(196, 117, 107, 0.16);
+  border-color: #c4756b;
+  color: #a0493d;
+  margin-left: 6px;
+}
+
+.ohb-perm-abort:hover {
+  background: rgba(196, 117, 107, 0.24);
 }
 
 .ohb-empty-status {
