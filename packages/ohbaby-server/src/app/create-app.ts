@@ -7,6 +7,7 @@ import {
   filterWebPassthroughCommandCatalog,
   inferConnectModelInterfaceProvider,
   supportsWebPassthroughCommandInvocation,
+  supportsWebSkillCommandInvocation,
   type UiBackendClient,
   type UiEvent,
   type UiPermissionResponse,
@@ -939,7 +940,10 @@ class DaemonServerAppRuntime {
       const catalog = await this.options.backend.listCommands({
         surface: invocation.surface,
       });
-      if (!supportsWebPassthroughCommandInvocation(catalog, invocation)) {
+      if (
+        !supportsWebPassthroughCommandInvocation(catalog, invocation) &&
+        !supportsWebSkillCommandInvocation(catalog, invocation)
+      ) {
         return context.json(
           webErrorBody("command is not supported by web passthrough"),
           400,

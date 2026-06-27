@@ -196,6 +196,16 @@ class FakeBackend implements UiBackendClient {
           source: "builtin",
           surfaces: ["tui"],
         },
+        {
+          acceptsArguments: true,
+          argumentMode: "raw",
+          category: "skill",
+          description: "Use Hansun knowledge base",
+          id: "skill.hansun-db",
+          path: ["hansun-db"],
+          source: "skill",
+          surfaces: ["tui"],
+        },
       ],
       version: "commands-v1",
     });
@@ -505,6 +515,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
         ["connect-search", "connectSearch", "overlay"],
         ["compact", "compactSession", "overlay"],
         ["status", "executeCommand", "passthrough"],
+        ["skill.hansun-db", "executeCommand", "skill"],
       ]);
 
       await expect(
@@ -532,6 +543,18 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
         },
       );
       expect(rawOverlayResponse.status).toBe(400);
+
+      await runtime.client.executeSlashCommand({
+        text: "/hansun-db 查 X",
+      });
+      expect(backend.executedCommands.at(-1)).toMatchObject({
+        argumentMode: "raw",
+        commandId: "skill.hansun-db",
+        path: ["hansun-db"],
+        raw: "/hansun-db 查 X",
+        rawArgs: "查 X",
+        surface: "tui",
+      });
 
       await runtime.client.probeModelContextWindow({
         apiKeyEnv: "ZHIPU_API_KEY",
@@ -572,7 +595,12 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       expect(backend.compactInputs).toEqual([
         { force: true, sessionId: "session_1" },
       ]);
-      expect(backend.executedCommands).toHaveLength(0);
+      expect(backend.executedCommands).toHaveLength(1);
+      expect(
+        backend.executedCommands.some(
+          (command) => command.commandId === "connect",
+        ),
+      ).toBe(false);
       await runtime.client.close();
     } finally {
       await server.dispose();

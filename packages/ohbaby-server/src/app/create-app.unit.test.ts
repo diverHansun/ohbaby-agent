@@ -703,6 +703,16 @@ describe("createDaemonServerApp", () => {
           surfaces: ["tui"],
         },
         {
+          acceptsArguments: true,
+          argumentMode: "raw",
+          category: "skill",
+          description: "Use Hansun knowledge base",
+          id: "skill.hansun-db",
+          path: ["hansun-db"],
+          source: "skill",
+          surfaces: ["tui"],
+        },
+        {
           argumentMode: "argv",
           category: "session",
           description: "Browse sessions",
@@ -799,6 +809,16 @@ describe("createDaemonServerApp", () => {
           surfaces: ["tui"],
         },
         {
+          acceptsArguments: true,
+          argumentMode: "raw",
+          category: "skill",
+          description: "Use Hansun knowledge base",
+          id: "skill.hansun-db",
+          path: ["hansun-db"],
+          source: "skill",
+          surfaces: ["tui"],
+        },
+        {
           argumentMode: "argv",
           category: "session",
           description: "Browse sessions",
@@ -852,6 +872,12 @@ describe("createDaemonServerApp", () => {
               action: "compactSession",
               executionKind: "overlay",
               id: "compact",
+            },
+            {
+              action: "executeCommand",
+              executionKind: "skill",
+              id: "skill.hansun-db",
+              path: ["hansun-db"],
             },
           ],
           version: "commands-v1",
@@ -1042,6 +1068,72 @@ describe("createDaemonServerApp", () => {
           path: ["status"],
           raw: "/status",
           rawArgs: "",
+          surface: "tui",
+        },
+      ]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("executes skill slash commands through the web command route", async () => {
+    const backend = new FakeBackend();
+    backend.commandCatalog = {
+      commands: [
+        {
+          acceptsArguments: true,
+          argumentMode: "raw",
+          category: "skill",
+          description: "Use Hansun knowledge base",
+          id: "skill.hansun-db",
+          path: ["hansun-db"],
+          source: "skill",
+          surfaces: ["tui"],
+        },
+      ],
+      version: "commands-v1",
+    };
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request("/v1/commands", {
+        body: JSON.stringify({
+          argumentMode: "raw",
+          argv: ["查", "X"],
+          clientInvocationId: "invoke_skill",
+          commandId: "skill.hansun-db",
+          path: ["hansun-db"],
+          raw: "/hansun-db 查 X",
+          rawArgs: "查 X",
+          surface: "tui",
+        }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+          "x-ohbaby-client-id": "client_web",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(backend.executedCommands).toEqual([
+        {
+          argumentMode: "raw",
+          argv: ["查", "X"],
+          clientInvocationId: "invoke_skill",
+          commandId: "skill.hansun-db",
+          path: ["hansun-db"],
+          raw: "/hansun-db 查 X",
+          rawArgs: "查 X",
           surface: "tui",
         },
       ]);

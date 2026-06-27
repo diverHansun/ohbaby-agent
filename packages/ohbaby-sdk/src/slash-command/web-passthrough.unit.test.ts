@@ -7,6 +7,7 @@ import {
   filterWebCommandCatalog,
   filterWebPassthroughCommandCatalog,
   isWebPassthroughCommandId,
+  supportsWebSkillCommandInvocation,
   supportsWebPassthroughCommandInvocation,
   WEB_PASSTHROUGH_COMMAND_IDS,
   WEB_OVERLAY_COMMAND_IDS,
@@ -70,6 +71,16 @@ const catalog: UiSlashCommandCatalog = {
       path: ["connect-search"],
       source: "builtin",
       surfaces: ["tui"],
+    },
+    {
+      acceptsArguments: true,
+      argumentMode: "raw",
+      category: "skill",
+      description: "Use Hansun knowledge base",
+      id: "skill.hansun-db",
+      path: ["hansun-db"],
+      source: "skill",
+      surfaces: ["tui", "headless"],
     },
     {
       argumentMode: "argv",
@@ -251,8 +262,106 @@ describe("web slash passthrough helpers", () => {
           executionKind: "overlay",
           id: "connect-search",
         }),
+        expect.objectContaining({
+          action: "executeCommand",
+          executionKind: "skill",
+          id: "skill.hansun-db",
+          path: ["hansun-db"],
+        }),
       ],
       version: "commands-v1",
     });
+  });
+
+  it("keeps skill commands out of the passthrough allowlist", () => {
+    expect(
+      filterWebPassthroughCommandCatalog(catalog, { surface: "tui" }).commands,
+    ).not.toContainEqual(expect.objectContaining({ id: "skill.hansun-db" }));
+  });
+
+  it("validates web skill invocations against source, path, and surface", () => {
+    expect(
+      supportsWebSkillCommandInvocation(
+        catalog,
+        invocation("skill.hansun-db", ["hansun-db"]),
+      ),
+    ).toBe(true);
+    expect(
+      supportsWebSkillCommandInvocation(
+        catalog,
+        invocation("skill.hansun-db", ["hansun-db", "extra"]),
+      ),
+    ).toBe(false);
+    expect(
+      supportsWebSkillCommandInvocation(
+        catalog,
+        invocation("hansun-db", ["hansun-db"]),
+      ),
+    ).toBe(false);
+    expect(
+      supportsWebSkillCommandInvocation(catalog, {
+        ...invocation("skill.hansun-db", ["hansun-db"]),
+        surface: "remote",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects skill-looking commands that are not user-invocable skill specs", () => {
+    const invalidSkillCatalog: UiSlashCommandCatalog = {
+      commands: [
+        {
+          argumentMode: "raw",
+          category: "skill",
+          description: "Plugin pretending to be a skill",
+          id: "plugin.hansun-db",
+          path: ["plugin-hansun-db"],
+          source: "plugin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "argv",
+          category: "skill",
+          description: "Skill with wrong argument mode",
+          id: "skill.argv-skill",
+          path: ["argv-skill"],
+          source: "skill",
+          surfaces: ["tui"],
+        },
+        {
+          acceptsArguments: true,
+          argumentMode: "raw",
+          category: "skill",
+          description: "Nested skill path",
+          id: "skill.nested",
+          path: ["nested", "skill"],
+          source: "skill",
+          surfaces: ["tui"],
+        },
+      ],
+      version: "commands-v1",
+    };
+
+    expect(
+      filterWebCommandCatalog(invalidSkillCatalog, { surface: "tui" })
+        .commands,
+    ).toEqual([]);
+    expect(
+      supportsWebSkillCommandInvocation(
+        invalidSkillCatalog,
+        invocation("plugin.hansun-db", ["plugin-hansun-db"]),
+      ),
+    ).toBe(false);
+    expect(
+      supportsWebSkillCommandInvocation(
+        invalidSkillCatalog,
+        invocation("skill.argv-skill", ["argv-skill"]),
+      ),
+    ).toBe(false);
+    expect(
+      supportsWebSkillCommandInvocation(
+        invalidSkillCatalog,
+        invocation("skill.nested", ["nested", "skill"]),
+      ),
+    ).toBe(false);
   });
 });

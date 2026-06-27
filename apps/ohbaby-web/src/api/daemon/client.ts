@@ -1,7 +1,6 @@
 import {
   parseSlashCommandInput,
   resolveSlashCommand,
-  filterWebPassthroughCommandCatalog,
   type UiCompactSessionResult,
   type UiContextWindowUsage,
   type UiConnectModelResult,
@@ -171,16 +170,19 @@ class BrowserDaemonClient implements OhbabyWebClient {
     readonly text: string;
   }): Promise<void> {
     const catalog = await this.listCommands();
-    const passthroughCatalog = filterWebPassthroughCommandCatalog(catalog, {
-      surface: "tui",
-    });
     const resolved = resolveSlashCommand(
-      passthroughCatalog,
+      catalog,
       parseSlashCommandInput(input.text),
       { surface: "tui" },
     );
     if (!resolved.ok) {
       throw new Error(resolved.error.message);
+    }
+    const webCommand = catalog.commands.find(
+      (command) => command.id === resolved.command.id,
+    );
+    if (webCommand?.executionKind === "overlay") {
+      throw new Error(`Command "${input.text}" must be opened from the UI`);
     }
     await this.http.executeCommand({
       argumentMode: resolved.command.argumentMode,

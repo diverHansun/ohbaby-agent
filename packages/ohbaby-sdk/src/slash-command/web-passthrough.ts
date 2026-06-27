@@ -23,7 +23,7 @@ export const WEB_OVERLAY_COMMAND_IDS = [
 
 export type UiWebOverlayCommandId = (typeof WEB_OVERLAY_COMMAND_IDS)[number];
 
-export type UiWebCommandExecutionKind = "passthrough" | "overlay";
+export type UiWebCommandExecutionKind = "passthrough" | "overlay" | "skill";
 
 export type UiWebCommandAction =
   | "executeCommand"
@@ -116,6 +116,16 @@ export function isWebOverlayCommandSpec(
   );
 }
 
+export function isWebSkillCommandSpec(command: UiSlashCommandSpec): boolean {
+  return (
+    command.source === "skill" &&
+    command.id.startsWith("skill.") &&
+    command.path.length === 1 &&
+    command.acceptsArguments === true &&
+    command.argumentMode === "raw"
+  );
+}
+
 function isVisibleOnSurface(
   command: UiSlashCommandSpec,
   surface?: UiSlashCommandSurface,
@@ -164,6 +174,14 @@ export function filterWebCommandCatalog(
         action,
         executionKind: "overlay",
       });
+      continue;
+    }
+    if (isWebSkillCommandSpec(command)) {
+      commands.push({
+        ...command,
+        action: "executeCommand",
+        executionKind: "skill",
+      });
     }
   }
   return {
@@ -192,5 +210,18 @@ export function supportsWebPassthroughCommandInvocation(
       isVisibleOnSurface(command, invocation.surface) &&
       hasSamePath(command.path, invocation.path) &&
       isWebPassthroughCommandSpec(command),
+  );
+}
+
+export function supportsWebSkillCommandInvocation(
+  catalog: UiSlashCommandCatalog,
+  invocation: UiSlashCommandInvocation,
+): boolean {
+  return catalog.commands.some(
+    (command) =>
+      command.id === invocation.commandId &&
+      isVisibleOnSurface(command, invocation.surface) &&
+      hasSamePath(command.path, invocation.path) &&
+      isWebSkillCommandSpec(command),
   );
 }

@@ -139,6 +139,74 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(slashCompletionText(app.container)).toContain("/skills");
   });
 
+  it("keeps skill commands out of the top-level slash palette", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["skills", "skill.hansun-db"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/skills"));
+
+    expect(slashPaletteText(app.container)).toContain("/skills");
+    expect(slashPaletteText(app.container)).not.toContain("/hansun-db");
+  });
+
+  it("inserts the selected skill from the skills modal with PageDown and Tab", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+
+    await showSkillsModal(fake, [
+      "skill-1",
+      "skill-2",
+      "skill-3",
+      "skill-4",
+      "skill-5",
+      "hansun-db",
+    ]);
+    await pressWindowKey("PageDown");
+    await pressWindowKey("Tab");
+
+    const textarea = app.container.querySelector("textarea");
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+      throw new Error("textarea not found");
+    }
+    expect(textarea.value).toBe("/hansun-db ");
+    expect(app.container.querySelector(".ohb-command-modal")).toBeNull();
+    expect(document.activeElement).toBe(textarea);
+    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
+  });
+
+  it("inserts a clicked skill from the skills modal", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+
+    await showSkillsModal(fake, ["review", "hansun-db"]);
+    const row = Array.from(
+      app.container.querySelectorAll(".ohb-list-row"),
+    ).find((candidate) => candidate.textContent.includes("/hansun-db"));
+    if (!(row instanceof HTMLElement)) {
+      throw new Error("skill row not found");
+    }
+    await act(async () => {
+      row.click();
+      await Promise.resolve();
+    });
+
+    const textarea = app.container.querySelector("textarea");
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+      throw new Error("textarea not found");
+    }
+    expect(textarea.value).toBe("/hansun-db ");
+    expect(app.container.querySelector(".ohb-command-modal")).toBeNull();
+    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
+  });
+
   it("keeps slash rows on the same grid when argsHint is absent", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
@@ -655,7 +723,9 @@ function catalog(ids: readonly CatalogId[]): UiWebCommandCatalog {
       argumentMode: catalogArgumentMode(id),
       category: catalogCategory(id),
       description:
-        id === "skills"
+        id === "skill.hansun-db"
+          ? "Use Hansun knowledge base"
+          : id === "skills"
           ? "List available skills"
           : id === "connect"
             ? "Connect model"
@@ -665,17 +735,27 @@ function catalog(ids: readonly CatalogId[]): UiWebCommandCatalog {
                 ? "Compact session"
                 : "Show backend status",
       executionKind:
-        id === "status" || id === "skills" ? "passthrough" : "overlay",
+        id === "skill.hansun-db"
+          ? "skill"
+          : id === "status" || id === "skills"
+            ? "passthrough"
+            : "overlay",
       id,
-      path: [id],
-      source: "builtin",
+      path: id === "skill.hansun-db" ? ["hansun-db"] : [id],
+      source: id === "skill.hansun-db" ? "skill" : "builtin",
       surfaces: ["tui"],
     })),
     version: ids.join("-"),
   };
 }
 
-type CatalogId = "compact" | "connect" | "connect-search" | "skills" | "status";
+type CatalogId =
+  | "compact"
+  | "connect"
+  | "connect-search"
+  | "skill.hansun-db"
+  | "skills"
+  | "status";
 
 function catalogAction(
   id: CatalogId,
@@ -687,6 +767,7 @@ function catalogAction(
       return "connectModel";
     case "connect-search":
       return "connectSearch";
+    case "skill.hansun-db":
     case "skills":
     case "status":
       return "executeCommand";
@@ -696,7 +777,11 @@ function catalogAction(
 function catalogArgumentMode(
   id: CatalogId,
 ): UiWebCommandCatalog["commands"][number]["argumentMode"] {
-  return id === "skills" || id === "status" ? "argv" : "structured";
+  return id === "skill.hansun-db"
+    ? "raw"
+    : id === "skills" || id === "status"
+      ? "argv"
+      : "structured";
 }
 
 function catalogCategory(id: CatalogId): string {
@@ -706,11 +791,59 @@ function catalogCategory(id: CatalogId): string {
     case "connect":
     case "connect-search":
       return "setup";
+    case "skill.hansun-db":
     case "skills":
       return "skill";
     case "status":
       return "system";
   }
+}
+
+async function showSkillsModal(
+  fake: FakeRuntime,
+  names: readonly string[],
+): Promise<void> {
+  await act(async () => {
+    fake.store.applyEvent(
+      {
+        command: {
+          clientInvocationId: "invoke_skills",
+          commandId: "skills",
+          commandRunId: "command_skills",
+          path: ["skills"],
+          surface: "tui",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.started",
+      },
+      2,
+    );
+    fake.store.applyEvent(
+      {
+        clientInvocationId: "invoke_skills",
+        commandRunId: "command_skills",
+        output: {
+          data: {
+            skills: names.map((name) => ({
+              description: `Use ${name}`,
+              name,
+              scope: "user",
+              source: "test",
+            })),
+          },
+          kind: "data",
+          subject: "skills",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.result.delivered",
+      },
+      3,
+    );
+    await Promise.resolve();
+  });
+  await waitFor(() =>
+    Boolean(fake.store.getSnapshot().view.commandNotices.length),
+  );
 }
 
 function compactUsage(currentTokens: number): UiCompactSessionUsage {
@@ -784,6 +917,13 @@ async function pressTextareaKey(
     textarea.dispatchEvent(
       new KeyboardEvent("keydown", { bubbles: true, key }),
     );
+    await Promise.resolve();
+  });
+}
+
+async function pressWindowKey(key: string): Promise<void> {
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key }));
     await Promise.resolve();
   });
 }

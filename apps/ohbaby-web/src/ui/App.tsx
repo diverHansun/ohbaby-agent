@@ -75,6 +75,11 @@ interface StructuredOverlayState {
   readonly kind: StructuredOverlayKind;
 }
 
+interface ComposerPrefill {
+  readonly nonce: number;
+  readonly text: string;
+}
+
 interface AppProps {
   readonly runtime: OhbabyWebRuntime;
 }
@@ -114,6 +119,8 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
   >([]);
   const [structuredOverlay, setStructuredOverlay] =
     useState<StructuredOverlayState | null>(null);
+  const [composerPrefill, setComposerPrefill] =
+    useState<ComposerPrefill | null>(null);
   const clearActionError = useCallback(() => {
     setActionError(null);
   }, []);
@@ -233,6 +240,7 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
               permissions={view.pendingPermissions}
             />
             <Composer
+              prefill={composerPrefill}
               onListCommands={listCommands}
               onSetPermission={(input) => {
                 void runAction(() => runtime.client.setPermission(input));
@@ -261,6 +269,16 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
                     commandModalNotice.id,
                   ]);
                 }}
+                onInsertSkill={(text) => {
+                  setComposerPrefill((current) => ({
+                    nonce: (current?.nonce ?? 0) + 1,
+                    text,
+                  }));
+                  setClosedCommandModalIds((ids) => [
+                    ...ids,
+                    commandModalNotice.id,
+                  ]);
+                }}
                 view={view}
               />
             ) : null}
@@ -272,6 +290,7 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
               onDismiss={clearActionError}
             />
             <EmptyState
+              composerPrefill={composerPrefill}
               onListCommands={listCommands}
               onSetPermission={(input) => {
                 void runAction(() => runtime.client.setPermission(input));
@@ -312,6 +331,7 @@ function BootstrapError(props: { readonly error: unknown }): ReactElement {
 }
 
 function EmptyState(props: {
+  readonly composerPrefill: ComposerPrefill | null;
   readonly onListCommands: () => Promise<UiWebCommandCatalog>;
   readonly onSetPermission: (input: {
     readonly level?: UiPermissionLevel;
@@ -345,6 +365,7 @@ function EmptyState(props: {
         </div>
         <Composer
           compact
+          prefill={props.composerPrefill}
           onListCommands={props.onListCommands}
           onSetPermission={props.onSetPermission}
           onStructuredCommand={props.onStructuredCommand}
@@ -625,6 +646,7 @@ function CommandResultModal(props: {
   readonly header: HeaderModel;
   readonly notice: CommandNotice;
   readonly onClose: () => void;
+  readonly onInsertSkill: (text: string) => void;
   readonly view: ViewModel;
 }): ReactElement | null {
   const model = createCommandResultModel(props.notice);
@@ -676,6 +698,7 @@ function CommandResultModal(props: {
         <CommandResultBody
           header={props.header}
           notice={props.notice}
+          onInsertSkill={props.onInsertSkill}
           variant={model.variant}
           view={props.view}
         />
@@ -687,6 +710,7 @@ function CommandResultModal(props: {
 function CommandResultBody(props: {
   readonly header: HeaderModel;
   readonly notice: CommandNotice;
+  readonly onInsertSkill: (text: string) => void;
   readonly variant: CommandResultModel["variant"];
   readonly view: ViewModel;
 }): ReactElement {
@@ -705,7 +729,13 @@ function CommandResultBody(props: {
     case "mcps":
       return <McpCommandResult data={data} notice={props.notice} />;
     case "skills":
-      return <SkillsCommandResult data={data} notice={props.notice} />;
+      return (
+        <SkillsCommandResult
+          data={data}
+          notice={props.notice}
+          onInsertSkill={props.onInsertSkill}
+        />
+      );
   }
 }
 
@@ -798,19 +828,78 @@ function McpCommandResult(props: {
 function SkillsCommandResult(props: {
   readonly data: Record<string, unknown> | null;
   readonly notice: CommandNotice;
+  readonly onInsertSkill: (text: string) => void;
 }): ReactElement {
-  const skills = commandDataArray(props.data, "skills");
+  const skills = commandDataArray(props.data, "skills").filter(
+    (skill): skill is Record<string, unknown> =>
+      isRecord(skill) && stringField(skill, "name") !== undefined,
+  );
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [props.notice.id]);
+  const insertSkill = (skill: Record<string, unknown>): void => {
+    const name = stringField(skill, "name");
+    if (!name) {
+      return;
+    }
+    props.onInsertSkill(`/${name} `);
+  };
+  useEffect(() => {
+    if (skills.length === 0) {
+      return;
+    }
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setSelectedIndex((index) => clampIndex(index + 1, skills.length - 1));
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setSelectedIndex((index) => clampIndex(index - 1, skills.length - 1));
+        return;
+      }
+      if (event.key === "PageDown") {
+        event.preventDefault();
+        setSelectedIndex((index) => clampIndex(index + 5, skills.length - 1));
+        return;
+      }
+      if (event.key === "PageUp") {
+        event.preventDefault();
+        setSelectedIndex((index) => clampIndex(index - 5, skills.length - 1));
+        return;
+      }
+      if (event.key === "Tab" || event.key === "Enter") {
+        event.preventDefault();
+        insertSkill(skills[clampIndex(selectedIndex, skills.length - 1)]);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return (): void => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [props.onInsertSkill, selectedIndex, skills]);
   if (skills.length === 0) {
     return <FallbackCommandResult notice={props.notice} />;
   }
+  const clampedIndex = clampIndex(selectedIndex, skills.length - 1);
   return (
     <div className="ohb-command-modal-body">
       <div className="ohb-list-result">
-        {skills.map((skill, index) =>
-          isRecord(skill) ? (
-            <div
-              className="ohb-list-row ohb-list-skill"
+        {skills.map((skill, index) => {
+          const selected = index === clampedIndex;
+          return (
+            <button
+              aria-selected={selected}
+              className={`ohb-list-row ohb-list-skill ${
+                selected ? "ohb-list-selected" : ""
+              }`}
               key={`${stringField(skill, "name") ?? "skill"}-${String(index)}`}
+              onClick={() => {
+                insertSkill(skill);
+              }}
+              type="button"
             >
               <strong>/{stringField(skill, "name") ?? "skill"}</strong>
               <span>{stringField(skill, "description") ?? ""}</span>
@@ -819,9 +908,9 @@ function SkillsCommandResult(props: {
                   stringField(skill, "scope") ??
                   "skill"}
               </small>
-            </div>
-          ) : null,
-        )}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -1008,6 +1097,7 @@ function Composer(props: {
   readonly onStructuredCommand: (item: SlashPaletteItem) => void;
   readonly onStop: () => void;
   readonly onSubmit: (text: string) => Promise<boolean>;
+  readonly prefill?: ComposerPrefill | null;
   readonly view: ViewModel;
 }): ReactElement {
   const [draft, setDraft] = useState("");
@@ -1020,6 +1110,7 @@ function Composer(props: {
   );
   const [slashError, setSlashError] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const lastEscapeAt = useRef(0);
   const canSend =
     props.view.composer.canSend && draft.trim().length > 0 && !isSubmitting;
@@ -1039,6 +1130,17 @@ function Composer(props: {
     slashItems.length > 0 &&
     canUseSlash &&
     !props.view.composer.disabled;
+
+  useEffect(() => {
+    if (!props.prefill) {
+      return;
+    }
+    setDraft(props.prefill.text);
+    setSlashDismissedDraft(null);
+    setSlashError(null);
+    setSlashIndex(0);
+    textareaRef.current?.focus();
+  }, [props.prefill]);
 
   useEffect(() => {
     if (
@@ -1246,6 +1348,7 @@ function Composer(props: {
           }}
           onKeyDown={onKeyDown}
           placeholder={composerPlaceholder(props.view)}
+          ref={textareaRef}
           rows={1}
           value={draft}
         />
@@ -1792,6 +1895,10 @@ function compactFailureMessage(result: UiCompactSessionResult): string | null {
   return error
     ? `compact ${result.status}: ${error}`
     : `compact ${result.status}`;
+}
+
+function clampIndex(index: number, maxIndex: number): number {
+  return Math.max(0, Math.min(index, maxIndex));
 }
 
 function TextField(props: {

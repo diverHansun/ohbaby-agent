@@ -123,7 +123,9 @@ export {
   isWebOverlayCommandSpec,
   isWebPassthroughCommandId,
   isWebPassthroughCommandSpec,
+  isWebSkillCommandSpec,
   supportsWebPassthroughCommandInvocation,
+  supportsWebSkillCommandInvocation,
   WEB_OVERLAY_COMMAND_IDS,
   WEB_PASSTHROUGH_COMMAND_IDS,
 } from "./slash-command/web-passthrough.js";

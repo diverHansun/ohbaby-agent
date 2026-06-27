@@ -46,6 +46,18 @@ function commandCatalog(): UiWebCommandCatalog {
         surfaces: ["tui"],
       },
       {
+        acceptsArguments: true,
+        action: "executeCommand",
+        argumentMode: "raw",
+        category: "skill",
+        description: "Use Hansun knowledge base",
+        executionKind: "skill",
+        id: "skill.hansun-db",
+        path: ["hansun-db"],
+        source: "skill",
+        surfaces: ["tui"],
+      },
+      {
         action: "compactSession",
         argumentMode: "argv",
         category: "session",
@@ -94,6 +106,7 @@ describe("ohbaby-web slash commands UI helpers", () => {
       "/skills",
       "/status",
     ]);
+    expect(items.map((item) => item.label)).not.toContain("/hansun-db");
     expect(items.map((item) => item.label)).not.toContain("/new");
     expect(items[0]).toMatchObject({
       categoryLabel: "Setup",

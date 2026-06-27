@@ -169,6 +169,18 @@ describe("ohbaby-web daemon client", () => {
                   source: "builtin",
                   surfaces: ["tui"],
                 },
+                {
+                  acceptsArguments: true,
+                  action: "executeCommand",
+                  argumentMode: "raw",
+                  category: "skill",
+                  description: "Use Hansun knowledge base",
+                  executionKind: "skill",
+                  id: "skill.hansun-db",
+                  path: ["hansun-db"],
+                  source: "skill",
+                  surfaces: ["tui"],
+                },
               ];
         return Promise.resolve(
           Response.json({
@@ -413,6 +425,24 @@ describe("ohbaby-web daemon client", () => {
       path: ["skills"],
       raw: "/skills",
       sessionId: "session_1",
+    });
+    await runtime.client.executeSlashCommand({
+      sessionId: "session_1",
+      text: "/hansun-db 查 X",
+    });
+    const skillBody = JSON.parse(requests.at(-1)?.body ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(skillBody).toMatchObject({
+      argumentMode: "raw",
+      argv: ["查", "X"],
+      commandId: "skill.hansun-db",
+      path: ["hansun-db"],
+      raw: "/hansun-db 查 X",
+      rawArgs: "查 X",
+      sessionId: "session_1",
+      surface: "tui",
     });
 
     await expect(runtime.client.getCurrentModel()).resolves.toBeNull();

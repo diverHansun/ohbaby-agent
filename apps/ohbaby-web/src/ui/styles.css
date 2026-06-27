@@ -1139,12 +1139,27 @@ textarea:disabled {
 
 .ohb-list-row {
   align-items: center;
+  background: #ffffff;
   border: 1px solid #ececec;
   border-radius: 9px;
+  color: inherit;
   display: flex;
   gap: 11px;
   min-height: 44px;
   padding: 10px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+button.ohb-list-row {
+  cursor: pointer;
+  font: inherit;
+}
+
+button.ohb-list-row:hover,
+.ohb-list-selected {
+  background: #f4f6fb;
+  border-color: #dce4f2;
 }
 
 .ohb-list-row > span:first-child {
@@ -1172,8 +1187,19 @@ textarea:disabled {
 
 .ohb-list-row strong {
   color: #26282d;
+  flex: none;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 13px;
+}
+
+.ohb-list-skill > span {
+  color: #6b6d73;
+  flex: 1;
+  font-size: 12.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ohb-list-row small {
