@@ -7,6 +7,18 @@ export function nonEmptyApiKey(value: string | undefined): string | undefined {
   return value;
 }
 
+export function firstNonEmptyApiKey(
+  ...values: readonly (string | undefined)[]
+): string | undefined {
+  for (const value of values) {
+    const apiKey = nonEmptyApiKey(value);
+    if (apiKey !== undefined) {
+      return apiKey;
+    }
+  }
+  return undefined;
+}
+
 export function defaultApiKeyEnvForProvider(provider: string): string {
   const normalized = provider
     .trim()

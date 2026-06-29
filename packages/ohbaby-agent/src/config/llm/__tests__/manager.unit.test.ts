@@ -145,7 +145,9 @@ describe("LLMConfigManager", () => {
       vi.mocked(loaders.loadEnvFile).mockResolvedValue({
         OPENAI_API_KEY: "sk-from-env-file",
       });
-      vi.mocked(loaders.loadApiKey).mockReturnValue("sk-from-env-file");
+      vi.mocked(loaders.loadApiKey).mockImplementation(
+        (envVarName, env) => env?.[envVarName],
+      );
 
       const manager = LLMConfigManager.getInstance();
       const config = await manager.load({
@@ -155,6 +157,39 @@ describe("LLMConfigManager", () => {
       });
 
       expect(config.apiKey).toBe("sk-from-env-file");
+      expect(loaders.loadApiKey).toHaveBeenNthCalledWith(
+        1,
+        "OPENAI_API_KEY",
+        {},
+      );
+      expect(loaders.loadApiKey).toHaveBeenNthCalledWith(2, "OPENAI_API_KEY", {
+        OPENAI_API_KEY: "sk-from-env-file",
+      });
+    });
+
+    it("should fall back to envPath values when provided env is empty", async () => {
+      vi.mocked(loaders.loadModelJson).mockResolvedValue(validModelJson);
+      vi.mocked(loaders.loadEnvFile).mockResolvedValue({
+        OPENAI_API_KEY: "sk-from-env-file",
+      });
+      vi.mocked(loaders.loadApiKey).mockImplementation(
+        (envVarName, env) => env?.[envVarName],
+      );
+
+      const manager = LLMConfigManager.getInstance();
+      const config = await manager.load({
+        projectDirectory: "D:/repo",
+        envPath: "D:/repo/.env",
+        env: { OPENAI_API_KEY: "  " },
+      });
+
+      expect(config.apiKey).toBe("sk-from-env-file");
+      expect(loaders.loadApiKey).toHaveBeenNthCalledWith(1, "OPENAI_API_KEY", {
+        OPENAI_API_KEY: "  ",
+      });
+      expect(loaders.loadApiKey).toHaveBeenNthCalledWith(2, "OPENAI_API_KEY", {
+        OPENAI_API_KEY: "sk-from-env-file",
+      });
       expect(loaders.loadApiKey).toHaveBeenCalledWith("OPENAI_API_KEY", {
         OPENAI_API_KEY: "sk-from-env-file",
       });

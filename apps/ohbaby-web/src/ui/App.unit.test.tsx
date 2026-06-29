@@ -492,6 +492,52 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
+  it("shows backend connect warnings after saving from the structured overlay", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["connect"]));
+    fake.connectModel.mockResolvedValueOnce({
+      apiKeyEnv: "ZHIPU_API_KEY",
+      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+      contextWindowSource: "default",
+      contextWindowTokens: 128_000,
+      envPath: ".env",
+      interfaceProvider: "openai-compatible",
+      model: "glm-4.7",
+      modelJsonPath: "model.json",
+      provider: "zhipu",
+      saved: true,
+      warning:
+        "API key env ZHIPU_API_KEY is configured but no value was found.",
+    });
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+
+    await setInputValue(app.container, "Provider", "zhipu");
+    await setInputValue(
+      app.container,
+      "Base URL",
+      "https://open.bigmodel.cn/api/paas/v4",
+    );
+    await setInputValue(app.container, "API key env", "ZHIPU_API_KEY");
+    await setInputValue(app.container, "Model", "glm-4.7");
+    await clickButton(app.container, "Save model");
+
+    await waitFor(() =>
+      app.container.textContent.includes(
+        "API key env ZHIPU_API_KEY is configured but no value was found.",
+      ),
+    );
+    expect(app.container.textContent).toContain("warning");
+  });
+
   it("submits structured connect overlay without API key env", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),

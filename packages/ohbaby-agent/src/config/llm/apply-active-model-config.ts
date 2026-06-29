@@ -10,6 +10,7 @@ import { loadEnvFile } from "./loaders.js";
 import { reloadLLMConfig, setActiveLLMConfig } from "./index.js";
 import {
   defaultApiKeyEnvForProvider,
+  firstNonEmptyApiKey,
   nonEmptyApiKey,
   OPTIONAL_API_KEY_PLACEHOLDER,
 } from "./api-key.js";
@@ -20,6 +21,11 @@ const INTERFACE_PROVIDER_KINDS = new Set<InterfaceProviderKind>([
   "openai-compatible",
   "anthropic",
 ]);
+
+interface ResolvedApiKey {
+  readonly value: string;
+  readonly warning?: string;
+}
 
 export interface ApplyActiveModelConfigInput {
   readonly provider?: string;
@@ -91,17 +97,43 @@ export async function probeActiveModelContextWindow(
     envPath,
   });
   const probe = await probeContextWindow({
-    apiKey,
+    apiKey: apiKey.value,
     baseUrl,
     interfaceProvider,
     model,
   });
 
-  return resolveContextWindow({
-    detectedContextWindowTokens: probe.contextWindowTokens,
-    probeWarning: probe.warning,
-    userContextWindowTokens: contextWindowTokens,
-  });
+  return withWarning(
+    resolveContextWindow({
+      detectedContextWindowTokens: probe.contextWindowTokens,
+      probeWarning: probe.warning,
+      userContextWindowTokens: contextWindowTokens,
+    }),
+    apiKey.warning,
+  );
+}
+
+function withWarning<T extends { readonly warning?: string }>(
+  result: T,
+  warning: string | undefined,
+): T {
+  const combinedWarning = combineWarnings(warning, result.warning);
+  return combinedWarning === undefined
+    ? result
+    : { ...result, warning: combinedWarning };
+}
+
+function combineWarnings(
+  ...warnings: readonly (string | undefined)[]
+): string | undefined {
+  const parts = warnings.filter(
+    (warning): warning is string => warning !== undefined && warning !== "",
+  );
+  return parts.length === 0 ? undefined : parts.join(" ");
+}
+
+function missingApiKeyEnvWarning(apiKeyEnv: string): string {
+  return `API key env ${apiKeyEnv} is configured but no value was found; using a placeholder so the upstream endpoint can decide whether authentication is required.`;
 }
 
 export async function applyActiveModelConfig(
@@ -134,16 +166,19 @@ export async function applyActiveModelConfig(
     envPath,
   });
   const probe = await probeContextWindow({
-    apiKey,
+    apiKey: apiKey.value,
     baseUrl,
     interfaceProvider,
     model,
   });
-  const resolvedContextWindow = resolveContextWindow({
-    detectedContextWindowTokens: probe.contextWindowTokens,
-    probeWarning: probe.warning,
-    userContextWindowTokens: contextWindowTokens,
-  });
+  const resolvedContextWindow = withWarning(
+    resolveContextWindow({
+      detectedContextWindowTokens: probe.contextWindowTokens,
+      probeWarning: probe.warning,
+      userContextWindowTokens: contextWindowTokens,
+    }),
+    apiKey.warning,
+  );
 
   const profile = createModelProfileRegistry({
     defaultProvider: provider,
@@ -306,20 +341,26 @@ async function resolveApiKey(input: {
   readonly apiKey?: string;
   readonly apiKeyEnv?: string;
   readonly envPath: string;
-}): Promise<string> {
+}): Promise<ResolvedApiKey> {
   const explicitApiKey = nonEmptyApiKey(input.apiKey);
   if (explicitApiKey !== undefined) {
-    return explicitApiKey;
+    return { value: explicitApiKey };
   }
   if (input.apiKeyEnv === undefined) {
-    return OPTIONAL_API_KEY_PLACEHOLDER;
+    return { value: OPTIONAL_API_KEY_PLACEHOLDER };
   }
   const envFile: Partial<Record<string, string>> = await loadEnvFile(
     input.envPath,
   );
-  const existing = process.env[input.apiKeyEnv] ?? envFile[input.apiKeyEnv];
-  if (existing === undefined || existing.trim() === "") {
-    return OPTIONAL_API_KEY_PLACEHOLDER;
+  const existing = firstNonEmptyApiKey(
+    process.env[input.apiKeyEnv],
+    envFile[input.apiKeyEnv],
+  );
+  if (existing === undefined) {
+    return {
+      value: OPTIONAL_API_KEY_PLACEHOLDER,
+      warning: missingApiKeyEnvWarning(input.apiKeyEnv),
+    };
   }
-  return existing;
+  return { value: existing };
 }

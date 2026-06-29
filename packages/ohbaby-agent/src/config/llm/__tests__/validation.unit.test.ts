@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { validateModelJson, validateApiKey } from "../validation.js";
+import { validateModelJson } from "../validation.js";
 import { ConfigError } from "../types.js";
 
 describe("validateModelJson", () => {
@@ -375,55 +375,5 @@ describe("validateModelJson", () => {
     expect(() => {
       validateModelJson(config);
     }).not.toThrow();
-  });
-});
-
-describe("validateApiKey", () => {
-  it("should pass for valid API key", () => {
-    expect(() => {
-      validateApiKey("sk-test-123", "OPENAI_API_KEY");
-    }).not.toThrow();
-  });
-
-  it("should throw for undefined API key", () => {
-    expect(() => {
-      validateApiKey(undefined, "OPENAI_API_KEY");
-    }).toThrow(ConfigError);
-    try {
-      validateApiKey(undefined, "OPENAI_API_KEY");
-    } catch (error) {
-      expect((error as ConfigError).code).toBe("MISSING_API_KEY");
-      expect((error as ConfigError).context?.envVarName).toBe("OPENAI_API_KEY");
-    }
-  });
-
-  it("should throw for empty API key", () => {
-    expect(() => {
-      validateApiKey("", "OPENAI_API_KEY");
-    }).toThrow(ConfigError);
-    try {
-      validateApiKey("", "OPENAI_API_KEY");
-    } catch (error) {
-      expect((error as ConfigError).code).toBe("EMPTY_API_KEY");
-    }
-  });
-
-  it("should throw for whitespace-only API key", () => {
-    expect(() => {
-      validateApiKey("   ", "OPENAI_API_KEY");
-    }).toThrow(ConfigError);
-    try {
-      validateApiKey("   ", "OPENAI_API_KEY");
-    } catch (error) {
-      expect((error as ConfigError).code).toBe("EMPTY_API_KEY");
-    }
-  });
-
-  it("should include env var name in error message", () => {
-    try {
-      validateApiKey(undefined, "MY_CUSTOM_KEY");
-    } catch (error) {
-      expect((error as ConfigError).message).toContain("MY_CUSTOM_KEY");
-    }
   });
 });

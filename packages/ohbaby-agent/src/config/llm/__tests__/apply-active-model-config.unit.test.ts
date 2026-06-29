@@ -174,7 +174,114 @@ describe("applyActiveModelConfig", () => {
     );
   });
 
+  it("uses an env file API key when the process env value is empty", async () => {
+    process.env.ZENMUX_API_KEY = "";
+    await fs.mkdir(path.dirname(envPath), { recursive: true });
+    await fs.writeFile(envPath, "ZENMUX_API_KEY=sk-existing\n", "utf-8");
+
+    const result = await applyActiveModelConfig({
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      interfaceProvider: "anthropic",
+      model: "anthropic/claude-sonnet-4.6",
+      modelJsonPath,
+      projectRoot: tempRoot,
+      provider: "zenmux",
+    });
+
+    expect(result.warning).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://zenmux.ai/api/anthropic/v1/models",
+      expect.objectContaining({
+        headers: {
+          "anthropic-version": "2023-06-01",
+          "x-api-key": "sk-existing",
+        },
+      }),
+    );
+    await expect(
+      LLMConfigManager.getInstance().load({
+        envPath,
+        modelJsonPath,
+        projectDirectory: tempRoot,
+      }),
+    ).resolves.toMatchObject({
+      apiKey: "sk-existing",
+      apiKeyEnv: "ZENMUX_API_KEY",
+    });
+  });
+
+  it("probes with an env file API key when the process env value is empty", async () => {
+    process.env.ZENMUX_API_KEY = "";
+    await fs.mkdir(path.dirname(envPath), { recursive: true });
+    await fs.writeFile(envPath, "ZENMUX_API_KEY=sk-existing\n", "utf-8");
+
+    const result = await probeActiveModelContextWindow({
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      interfaceProvider: "anthropic",
+      model: "anthropic/claude-sonnet-4.6",
+      envPath,
+    });
+
+    expect(result).toEqual({
+      contextWindowSource: "detected",
+      contextWindowTokens: 200_000,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://zenmux.ai/api/anthropic/v1/models",
+      expect.objectContaining({
+        headers: {
+          "anthropic-version": "2023-06-01",
+          "x-api-key": "sk-existing",
+        },
+      }),
+    );
+  });
+
+  it("warns when an api key env is configured but no value is available", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response("unauthorized", { status: 401 }),
+    );
+
+    const result = await applyActiveModelConfig({
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      interfaceProvider: "anthropic",
+      model: "anthropic/claude-sonnet-4.6",
+      modelJsonPath,
+      projectRoot: tempRoot,
+      provider: "zenmux",
+    });
+
+    expect(result).toMatchObject({
+      apiKeyEnv: "ZENMUX_API_KEY",
+      contextWindowSource: "default",
+      contextWindowTokens: 128_000,
+      saved: true,
+    });
+    expect(result.warning).toContain(
+      "API key env ZENMUX_API_KEY is configured but no value was found",
+    );
+    expect(result.warning).toMatch(/context window/i);
+    await expect(fs.stat(envPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("saves local-compatible model config without api key metadata or env writes", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              context_length: 65_536,
+              id: "local-model",
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
     const result = await applyActiveModelConfig({
       baseUrl: "http://127.0.0.1:1234/v1",
       interfaceProvider: "openai-compatible",
@@ -193,11 +300,14 @@ describe("applyActiveModelConfig", () => {
 
     expect(result).toMatchObject({
       baseUrl: "http://127.0.0.1:1234/v1",
+      contextWindowSource: "detected",
+      contextWindowTokens: 65_536,
       model: "local-model",
       provider: "lmstudio",
       saved: true,
     });
     expect(result).not.toHaveProperty("apiKeyEnv");
+    expect(result.warning).toBeUndefined();
     expect(modelJson.apiConfig).toEqual({
       baseUrl: "http://127.0.0.1:1234/v1",
       interfaceProvider: "openai-compatible",

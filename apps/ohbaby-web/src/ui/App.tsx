@@ -1680,6 +1680,7 @@ function ConnectModelOverlayBody(props: {
             ["interface", result.interfaceProvider],
             ["context", formatTokenCount(result.contextWindowTokens)],
             ["source", result.contextWindowSource],
+            ...(result.warning ? [["warning", result.warning] as const] : []),
           ]}
         />
       ) : null}

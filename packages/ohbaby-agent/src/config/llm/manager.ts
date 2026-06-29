@@ -7,7 +7,10 @@ import type { LLMConfig, ModelJsonConfig } from "./types.js";
 import { ConfigError } from "./types.js";
 import { loadModelJson, loadApiKey, loadEnvFile } from "./loaders.js";
 import { validateModelJson } from "./validation.js";
-import { nonEmptyApiKey, OPTIONAL_API_KEY_PLACEHOLDER } from "./api-key.js";
+import {
+  firstNonEmptyApiKey,
+  OPTIONAL_API_KEY_PLACEHOLDER,
+} from "./api-key.js";
 import {
   setActiveLLMConfig as writeActiveLLMConfig,
   type SetActiveLLMConfigInput,
@@ -176,12 +179,8 @@ class LLMConfigManager {
       const apiKey =
         apiKeyEnvName === undefined
           ? OPTIONAL_API_KEY_PLACEHOLDER
-          : (nonEmptyApiKey(
-              loadApiKey(apiKeyEnvName, {
-                ...envFileValues,
-                ...options.env,
-              }),
-            ) ?? OPTIONAL_API_KEY_PLACEHOLDER);
+          : (loadConfiguredApiKey(apiKeyEnvName, options.env, envFileValues) ??
+            OPTIONAL_API_KEY_PLACEHOLDER);
 
       // Build final config
       const modelProfiles = resolveModelProfiles(modelJson);
@@ -230,6 +229,18 @@ class LLMConfigManager {
       throw configError;
     }
   }
+}
+
+function loadConfiguredApiKey(
+  envVarName: string,
+  env: NodeJS.ProcessEnv,
+  envFileValues: Record<string, string>,
+): string | undefined {
+  const envValue = firstNonEmptyApiKey(loadApiKey(envVarName, env));
+  if (envValue !== undefined) {
+    return envValue;
+  }
+  return firstNonEmptyApiKey(loadApiKey(envVarName, envFileValues));
 }
 
 export { LLMConfigManager };

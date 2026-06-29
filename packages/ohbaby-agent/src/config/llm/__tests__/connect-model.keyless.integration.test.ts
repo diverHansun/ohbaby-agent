@@ -24,7 +24,7 @@ interface CapturedRequest {
 
 const cleanupPaths: string[] = [];
 const MODEL = "local-model";
-const MARKER = "OHBABY_KEYLESS_E2E_OK";
+const MARKER = "OHBABY_KEYLESS_INTEGRATION_OK";
 
 afterEach(async () => {
   LLMConfigManager.resetInstance();
@@ -36,7 +36,9 @@ afterEach(async () => {
 });
 
 async function tempProjectRoot(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "ohbaby-keyless-e2e-"));
+  const directory = await mkdtemp(
+    join(tmpdir(), "ohbaby-keyless-integration-"),
+  );
   cleanupPaths.push(directory);
   return directory;
 }
@@ -172,7 +174,7 @@ function writeSse(response: ServerResponse, payload: unknown): void {
   response.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
-describe("connectModel keyless local endpoint e2e", () => {
+describe("connectModel keyless local endpoint integration", () => {
   it("saves, reloads, and streams without apiKeyEnv or apiKey", async () => {
     const server = await startKeylessOpenAiServer();
     const projectRoot = await tempProjectRoot();
