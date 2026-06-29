@@ -100,8 +100,8 @@ export interface LLMClientInstance<TClient = unknown> {
     /** Model identifier (e.g., 'gpt-4', 'gpt-4-turbo') */
     model: string;
 
-    /** Environment variable name used for the API key */
-    apiKeyEnv: string;
+    /** Optional environment variable name used for the API key */
+    apiKeyEnv?: string;
 
     /** API base URL */
     baseUrl: string;

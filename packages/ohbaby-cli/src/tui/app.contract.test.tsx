@@ -2754,6 +2754,36 @@ describe("OhbabyTerminalApp", () => {
     app.unmount();
   });
 
+  it("auto-saves /connect without API key env or value", async () => {
+    const client = createFakeClient(snapshot(), connectCommandCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await openConnectForm(app);
+    await submitConnectField(app, "lmstudio");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "http://127.0.0.1:1234/v1");
+    await sendConnectKey(app, "\u001B[B");
+    await sendConnectKey(app, "\u001B[B");
+    await sendConnectKey(app, "\u001B[B");
+    await submitConnectField(app, "local-model");
+
+    await waitForFrame(app, (nextFrame) => nextFrame.includes("saved"));
+
+    expect(client.connectModel).toHaveBeenCalledTimes(1);
+    expect(client.connectModel).toHaveBeenCalledWith({
+      baseUrl: "http://127.0.0.1:1234/v1",
+      interfaceProvider: "openai-compatible",
+      model: "local-model",
+      provider: "lmstudio",
+    });
+    app.unmount();
+  });
+
   it("shows a lightweight /connect probe warning after save", async () => {
     const client = createFakeClient(snapshot(), connectCommandCatalog);
     client.connectModel.mockResolvedValue(
@@ -2804,19 +2834,19 @@ describe("OhbabyTerminalApp", () => {
     await sendConnectKey(app, "\u001B[B");
     await sendConnectKey(app, "\r");
     await sendConnectKey(app, "s");
-    expect(app.lastFrame() ?? "").toMatch(/API key value\s+\*/u);
+    expect(app.lastFrame() ?? "").toMatch(/API key value\s+optional \*/u);
     await sendConnectKey(app, "k");
-    expect(app.lastFrame() ?? "").toMatch(/API key value\s+\*{2}/u);
+    expect(app.lastFrame() ?? "").toMatch(/API key value\s+optional \*{2}/u);
     await sendConnectKey(app, "1");
 
     const typedFrame = app.lastFrame() ?? "";
-    expect(typedFrame).toMatch(/API key value\s+\*{3}/u);
+    expect(typedFrame).toMatch(/API key value\s+optional \*{3}/u);
     expect(typedFrame).not.toContain("sk1");
 
     await sendConnectKey(app, "\b");
     const deletedFrame = app.lastFrame() ?? "";
-    expect(deletedFrame).toMatch(/API key value\s+\*{2}/u);
-    expect(deletedFrame).not.toMatch(/API key value\s+\*{3}/u);
+    expect(deletedFrame).toMatch(/API key value\s+optional \*{2}/u);
+    expect(deletedFrame).not.toMatch(/API key value\s+optional \*{3}/u);
     expect(deletedFrame).not.toContain("sk");
     app.unmount();
   });

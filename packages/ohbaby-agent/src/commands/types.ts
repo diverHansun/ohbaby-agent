@@ -66,7 +66,7 @@ export interface CommandModelSwitchInput {
   readonly provider: string;
   readonly model: string;
   readonly baseUrl: string;
-  readonly apiKeyEnv: string;
+  readonly apiKeyEnv?: string;
   readonly apiKey?: string;
 }
 

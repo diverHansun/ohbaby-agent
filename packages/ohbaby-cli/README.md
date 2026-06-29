@@ -41,7 +41,8 @@ This installs the `ohbaby` command globally.
    ```
 
 2. Type `/connect` in the CLI/TUI to configure your model provider (provider, base URL,
-   API key, model name), then save.
+   model name, and optional API key fields), then save. Local keyless endpoints such as
+   LM Studio can leave the API key fields blank.
 
    <p align="center">
      <img src="https://raw.githubusercontent.com/diverHansun/ohbaby-agent/main/assets/images/connect-providers.png" alt="ohbaby-agent /connect provider setup" width="760">

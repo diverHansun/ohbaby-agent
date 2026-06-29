@@ -611,7 +611,9 @@ export function createInProcessUiBackendClient(
     const client = options.llmClient ?? (await resolveLLMClient());
     return {
       active: true,
-      apiKeyEnv: client.config.apiKeyEnv,
+      ...(client.config.apiKeyEnv === undefined
+        ? {}
+        : { apiKeyEnv: client.config.apiKeyEnv }),
       baseUrl: client.config.baseUrl,
       id: `${client.config.provider}:${client.config.model}`,
       interfaceProvider: client.config.interfaceProvider,
@@ -625,7 +627,9 @@ export function createInProcessUiBackendClient(
     config: LLMClientInstance["config"],
   ): UiCurrentModelConfig {
     return {
-      apiKeyEnv: config.apiKeyEnv,
+      ...(config.apiKeyEnv === undefined
+        ? {}
+        : { apiKeyEnv: config.apiKeyEnv }),
       baseUrl: config.baseUrl,
       ...(config.contextWindowTokens === undefined
         ? {}
@@ -641,7 +645,9 @@ export function createInProcessUiBackendClient(
     modelJson: ModelJsonConfig,
   ): UiCurrentModelConfig {
     return {
-      apiKeyEnv: modelJson.apiConfig.apiKeyEnv,
+      ...(modelJson.apiConfig.apiKeyEnv === undefined
+        ? {}
+        : { apiKeyEnv: modelJson.apiConfig.apiKeyEnv }),
       baseUrl: modelJson.apiConfig.baseUrl,
       ...(modelJson.llmParams.contextWindowTokens === undefined
         ? {}

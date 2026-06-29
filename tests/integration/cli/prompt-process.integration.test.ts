@@ -192,6 +192,67 @@ async function startFakeOpenAiServer(): Promise<{
   };
 }
 
+async function startUnauthorizedOpenAiServer(): Promise<{
+  readonly baseUrl: string;
+  readonly close: () => Promise<void>;
+  readonly requests: CapturedRequest[];
+}> {
+  const requests: CapturedRequest[] = [];
+  const server = createServer(
+    async (request: IncomingMessage, response: ServerResponse) => {
+      if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
+        response.writeHead(404);
+        response.end("not found");
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const rawBody = Buffer.concat(chunks).toString("utf8");
+      requests.push({
+        authorization: request.headers.authorization,
+        body: JSON.parse(rawBody) as Record<string, unknown>,
+        method: request.method,
+        url: request.url,
+      });
+
+      response.writeHead(401, {
+        "content-type": "application/json; charset=utf-8",
+      });
+      response.end(
+        JSON.stringify({
+          error: {
+            message: "unauthorized smoke",
+            type: "invalid_request_error",
+          },
+        }),
+      );
+    },
+  );
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address() as AddressInfo;
+
+  return {
+    baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      }),
+    requests,
+  };
+}
+
 function writeSse(response: ServerResponse, payload: unknown): void {
   response.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
@@ -355,27 +416,47 @@ describe("CLI prompt process smoke", () => {
     }
   });
 
-  it("exits non-zero with a readable error when the configured API key is missing", async () => {
+  it("uses the keyless placeholder and surfaces the upstream auth error when the configured API key is missing", async () => {
+    const server = await startUnauthorizedOpenAiServer();
     const home = await tempHome("ohbaby-cli-missing-key-");
     const dbPath = join(home, "state", "agent.db");
     const missingKeyName = "OHBABY_TEST_MISSING_API_KEY";
     const env = childEnv({ dbPath, home });
     delete env[missingKeyName];
-    await writeModelConfig({
-      apiKeyEnv: missingKeyName,
-      baseUrl: "http://127.0.0.1:9/v1",
-      home,
-    });
+    try {
+      await writeModelConfig({
+        apiKeyEnv: missingKeyName,
+        baseUrl: server.baseUrl,
+        home,
+      });
 
-    const result = await runCliProcess({
-      args: ["run", "hello"],
-      cwd: home,
-      env,
-    });
+      const result = await runCliProcess({
+        args: ["run", "hello"],
+        cwd: home,
+        env,
+      });
 
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain(missingKeyName);
-    expect(result.stderr).toContain("API key");
-    expect(result.stdout).toBe("");
+      expect(result.code).not.toBe(0);
+      expect(result.stderr).not.toContain(missingKeyName);
+      expect(result.stderr).toContain("401");
+      expect(result.stderr).toContain("unauthorized smoke");
+      expect(result.stdout).toBe("");
+      expect(
+        server.requests.every(
+          (request) => request.authorization === "Bearer not-needed",
+        ),
+      ).toBe(true);
+      const mainRequests = server.requests.filter(
+        (request) => !isTitleGenerationRequest(request),
+      );
+      expect(mainRequests).toHaveLength(1);
+      expect(mainRequests[0]).toMatchObject({
+        authorization: "Bearer not-needed",
+        method: "POST",
+        url: "/v1/chat/completions",
+      });
+    } finally {
+      await server.close();
+    }
   });
 });

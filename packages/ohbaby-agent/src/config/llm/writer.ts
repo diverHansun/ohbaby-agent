@@ -6,6 +6,7 @@ import { validateModelJson } from "./validation.js";
 import { writeFileAtomically } from "../secrets/atomic-file.js";
 import { writeEnvSecret } from "../secrets/env-secrets.js";
 import { getGlobalEnvPath } from "../../utils/project-env.js";
+import { defaultApiKeyEnvForProvider, nonEmptyApiKey } from "./api-key.js";
 
 const DEFAULT_TEMPERATURE = 0.7;
 const DEFAULT_MAX_TOKENS = 4096;
@@ -15,7 +16,7 @@ export interface SetActiveLLMConfigInput {
   readonly provider: string;
   readonly model: string;
   readonly baseUrl: string;
-  readonly apiKeyEnv: string;
+  readonly apiKeyEnv?: string;
   readonly apiKey?: string;
   readonly interfaceProvider?: InterfaceProviderKind;
   readonly temperature?: number;
@@ -33,7 +34,7 @@ export interface SetActiveLLMConfigResult {
   readonly provider: string;
   readonly model: string;
   readonly baseUrl: string;
-  readonly apiKeyEnv: string;
+  readonly apiKeyEnv?: string;
   readonly interfaceProvider: InterfaceProviderKind;
   readonly modelJsonPath: string;
   readonly envPath?: string;
@@ -147,7 +148,7 @@ function buildModelJson(
     defaultModel: input.model,
     apiConfig: {
       baseUrl: input.baseUrl,
-      apiKeyEnv: input.apiKeyEnv,
+      ...(input.apiKeyEnv === undefined ? {} : { apiKeyEnv: input.apiKeyEnv }),
       interfaceProvider: input.interfaceProvider ?? DEFAULT_INTERFACE_PROVIDER,
     },
     llmParams: buildLLMParams(input, existing),
@@ -159,11 +160,19 @@ export async function setActiveLLMConfig(
   input: SetActiveLLMConfigInput,
 ): Promise<SetActiveLLMConfigResult> {
   const modelJsonPath = input.modelJsonPath ?? getModelJsonPath();
+  const explicitApiKey = nonEmptyApiKey(input.apiKey);
+  const apiKeyEnv =
+    input.apiKeyEnv ??
+    (explicitApiKey === undefined
+      ? undefined
+      : defaultApiKeyEnvForProvider(input.provider));
+  const normalizedInput =
+    apiKeyEnv === undefined ? input : { ...input, apiKeyEnv };
   const envPath =
     input.envPath ??
-    (input.apiKey === undefined ? undefined : getGlobalEnvPath());
+    (explicitApiKey === undefined ? undefined : getGlobalEnvPath());
   const existing = await readExistingModelJson(modelJsonPath);
-  const modelJson = buildModelJson(input, existing);
+  const modelJson = buildModelJson(normalizedInput, existing);
 
   validateModelJson(modelJson);
   await writeFileAtomically(
@@ -171,15 +180,21 @@ export async function setActiveLLMConfig(
     `${JSON.stringify(modelJson, null, 2)}\n`,
   );
 
-  if (input.apiKey !== undefined && envPath !== undefined) {
-    await writeEnvSecret(envPath, input.apiKeyEnv, input.apiKey);
+  if (
+    explicitApiKey !== undefined &&
+    envPath !== undefined &&
+    apiKeyEnv !== undefined
+  ) {
+    await writeEnvSecret(envPath, apiKeyEnv, explicitApiKey);
   }
 
   return {
     provider: modelJson.provider,
     model: modelJson.defaultModel,
     baseUrl: modelJson.apiConfig.baseUrl,
-    apiKeyEnv: modelJson.apiConfig.apiKeyEnv,
+    ...(modelJson.apiConfig.apiKeyEnv === undefined
+      ? {}
+      : { apiKeyEnv: modelJson.apiConfig.apiKeyEnv }),
     interfaceProvider:
       modelJson.apiConfig.interfaceProvider ?? DEFAULT_INTERFACE_PROVIDER,
     modelJsonPath,

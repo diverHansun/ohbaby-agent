@@ -8,6 +8,11 @@ import {
 } from "./context-window-probe.js";
 import { loadEnvFile } from "./loaders.js";
 import { reloadLLMConfig, setActiveLLMConfig } from "./index.js";
+import {
+  defaultApiKeyEnvForProvider,
+  nonEmptyApiKey,
+  OPTIONAL_API_KEY_PLACEHOLDER,
+} from "./api-key.js";
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
 const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u;
@@ -20,7 +25,7 @@ export interface ApplyActiveModelConfigInput {
   readonly provider?: string;
   readonly baseUrl: string;
   readonly interfaceProvider: InterfaceProviderKind;
-  readonly apiKeyEnv: string;
+  readonly apiKeyEnv?: string;
   readonly apiKey?: string;
   readonly model: string;
   readonly contextWindowTokens?: number;
@@ -34,7 +39,7 @@ export interface ApplyActiveModelConfigResult {
   readonly provider: string;
   readonly baseUrl: string;
   readonly interfaceProvider: InterfaceProviderKind;
-  readonly apiKeyEnv: string;
+  readonly apiKeyEnv?: string;
   readonly model: string;
   readonly contextWindowTokens: number;
   readonly contextWindowSource: ContextWindowSource;
@@ -49,7 +54,7 @@ export interface ProbeActiveModelContextWindowInput {
   readonly provider?: string;
   readonly baseUrl: string;
   readonly interfaceProvider: InterfaceProviderKind;
-  readonly apiKeyEnv: string;
+  readonly apiKeyEnv?: string;
   readonly apiKey?: string;
   readonly model: string;
   readonly contextWindowTokens?: number;
@@ -68,7 +73,7 @@ export async function probeActiveModelContextWindow(
 ): Promise<ProbeActiveModelContextWindowResult> {
   const model = requireNonEmpty(input.model, "Model name required");
   const baseUrl = validateBaseUrl(input.baseUrl);
-  const apiKeyEnv = validateApiKeyEnv(input.apiKeyEnv);
+  const apiKeyEnv = validateOptionalApiKeyEnv(input.apiKeyEnv);
   const interfaceProvider = validateInterfaceProvider(input.interfaceProvider);
   const contextWindowTokens = validateOptionalPositiveInteger(
     input.contextWindowTokens,
@@ -82,7 +87,7 @@ export async function probeActiveModelContextWindow(
 
   const apiKey = await resolveApiKey({
     apiKey: input.apiKey,
-    apiKeyEnv,
+    ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     envPath,
   });
   const probe = await probeContextWindow({
@@ -105,7 +110,13 @@ export async function applyActiveModelConfig(
   const provider = requireNonEmpty(input.provider, "Provider required");
   const model = requireNonEmpty(input.model, "Model name required");
   const baseUrl = validateBaseUrl(input.baseUrl);
-  const apiKeyEnv = validateApiKeyEnv(input.apiKeyEnv);
+  const explicitApiKey = nonEmptyApiKey(input.apiKey);
+  const providedApiKeyEnv = validateOptionalApiKeyEnv(input.apiKeyEnv);
+  const apiKeyEnv =
+    providedApiKeyEnv ??
+    (explicitApiKey === undefined
+      ? undefined
+      : defaultApiKeyEnvForProvider(provider));
   const interfaceProvider = validateInterfaceProvider(input.interfaceProvider);
   const contextWindowTokens = validateOptionalPositiveInteger(
     input.contextWindowTokens,
@@ -119,7 +130,7 @@ export async function applyActiveModelConfig(
 
   const apiKey = await resolveApiKey({
     apiKey: input.apiKey,
-    apiKeyEnv,
+    ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     envPath,
   });
   const probe = await probeContextWindow({
@@ -145,9 +156,9 @@ export async function applyActiveModelConfig(
     provider,
     model,
     baseUrl,
-    apiKeyEnv,
     interfaceProvider,
-    ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+    ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
+    ...(explicitApiKey === undefined ? {} : { apiKey: explicitApiKey }),
     contextWindowTokens: resolvedContextWindow.contextWindowTokens,
     ...(resolvedMaxOutputTokens === undefined
       ? {}
@@ -162,8 +173,8 @@ export async function applyActiveModelConfig(
     envPath,
   });
 
-  if (input.apiKey !== undefined) {
-    process.env[apiKeyEnv] = input.apiKey;
+  if (explicitApiKey !== undefined && apiKeyEnv !== undefined) {
+    process.env[apiKeyEnv] = explicitApiKey;
   }
 
   await reloadLLMConfig({
@@ -176,7 +187,7 @@ export async function applyActiveModelConfig(
     provider,
     baseUrl,
     interfaceProvider,
-    apiKeyEnv,
+    ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     model,
     contextWindowTokens: resolvedContextWindow.contextWindowTokens,
     contextWindowSource: resolvedContextWindow.contextWindowSource,
@@ -258,6 +269,15 @@ function validateApiKeyEnv(value: string): string {
   return trimmed;
 }
 
+function validateOptionalApiKeyEnv(
+  value: string | undefined,
+): string | undefined {
+  if (value === undefined || value.trim() === "") {
+    return undefined;
+  }
+  return validateApiKeyEnv(value);
+}
+
 function validateInterfaceProvider(
   value: InterfaceProviderKind,
 ): InterfaceProviderKind {
@@ -284,20 +304,22 @@ function validateOptionalPositiveInteger(
 
 async function resolveApiKey(input: {
   readonly apiKey?: string;
-  readonly apiKeyEnv: string;
+  readonly apiKeyEnv?: string;
   readonly envPath: string;
 }): Promise<string> {
-  if (input.apiKey !== undefined && input.apiKey.trim() !== "") {
-    return input.apiKey;
+  const explicitApiKey = nonEmptyApiKey(input.apiKey);
+  if (explicitApiKey !== undefined) {
+    return explicitApiKey;
+  }
+  if (input.apiKeyEnv === undefined) {
+    return OPTIONAL_API_KEY_PLACEHOLDER;
   }
   const envFile: Partial<Record<string, string>> = await loadEnvFile(
     input.envPath,
   );
   const existing = process.env[input.apiKeyEnv] ?? envFile[input.apiKeyEnv];
   if (existing === undefined || existing.trim() === "") {
-    throw new ConfigError("API key required", "MISSING_API_KEY", {
-      apiKeyEnv: input.apiKeyEnv,
-    });
+    return OPTIONAL_API_KEY_PLACEHOLDER;
   }
   return existing;
 }

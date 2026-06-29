@@ -128,23 +128,45 @@ describe("config/llm integration", () => {
       });
     });
 
-    it("should throw ConfigError for missing API key", async () => {
+    it("should use the SDK placeholder when configured API key is missing", async () => {
       vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(validModelJson));
       delete process.env.OPENAI_API_KEY;
 
-      await expect(getLLMConfig()).rejects.toThrow(ConfigError);
-      await expect(getLLMConfig()).rejects.toMatchObject({
-        code: "MISSING_API_KEY",
+      await expect(getLLMConfig()).resolves.toMatchObject({
+        apiKey: "not-needed",
+        apiKeyEnv: "OPENAI_API_KEY",
       });
     });
 
-    it("should throw ConfigError for empty API key", async () => {
+    it("should use the SDK placeholder when configured API key is empty", async () => {
       vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(validModelJson));
       process.env.OPENAI_API_KEY = "";
 
-      await expect(getLLMConfig()).rejects.toThrow(ConfigError);
-      await expect(getLLMConfig()).rejects.toMatchObject({
-        code: "EMPTY_API_KEY",
+      await expect(getLLMConfig()).resolves.toMatchObject({
+        apiKey: "not-needed",
+        apiKeyEnv: "OPENAI_API_KEY",
+      });
+    });
+
+    it("should load keyless configuration without apiKeyEnv", async () => {
+      vi.mocked(fs.readFile).mockResolvedValue(
+        JSON.stringify({
+          ...validModelJson,
+          apiConfig: {
+            baseUrl: "http://127.0.0.1:1234/v1",
+            interfaceProvider: "openai-compatible",
+          },
+          defaultModel: "local-model",
+          provider: "lmstudio",
+        }),
+      );
+
+      await expect(getLLMConfig()).resolves.toMatchObject({
+        apiKey: "not-needed",
+        baseUrl: "http://127.0.0.1:1234/v1",
+        interfaceProvider: "openai-compatible",
+        model: "local-model",
+        provider: "lmstudio",
       });
     });
 

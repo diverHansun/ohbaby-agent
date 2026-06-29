@@ -1530,7 +1530,7 @@ function ConnectModelOverlayBody(props: {
         if (model) {
           setForm({
             apiKey: "",
-            apiKeyEnv: model.apiKeyEnv,
+            apiKeyEnv: model.apiKeyEnv ?? "",
             baseUrl: model.baseUrl,
             contextWindowTokens:
               model.contextWindowTokens === undefined
@@ -1633,7 +1633,7 @@ function ConnectModelOverlayBody(props: {
           onChange={(value) => {
             update("apiKeyEnv", value);
           }}
-          placeholder="ZHIPU_API_KEY"
+          placeholder="ZHIPU_API_KEY, or blank for local services"
           value={form.apiKeyEnv}
         />
         <TextField
@@ -1641,7 +1641,7 @@ function ConnectModelOverlayBody(props: {
           onChange={(value) => {
             update("apiKey", value);
           }}
-          placeholder="optional, writes to .env"
+          placeholder="optional, writes to .env when provided"
           type="password"
           value={form.apiKey}
         />
@@ -1990,7 +1990,7 @@ async function runOverlayAction(
 function connectModelRequest(form: ConnectModelFormState): ModelConnectRequest {
   const provider = requiredText(form.provider, "Provider");
   const baseUrl = requiredText(form.baseUrl, "Base URL");
-  const apiKeyEnv = requiredText(form.apiKeyEnv, "API key env");
+  const apiKeyEnv = trimmedOrUndefined(form.apiKeyEnv);
   const model = requiredText(form.model, "Model");
   const apiKey = trimmedOrUndefined(form.apiKey);
   const contextWindowTokens = optionalIntegerValue(
@@ -2004,7 +2004,7 @@ function connectModelRequest(form: ConnectModelFormState): ModelConnectRequest {
   return {
     provider,
     baseUrl,
-    apiKeyEnv,
+    ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     model,
     ...(apiKey === undefined ? {} : { apiKey }),
     ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),

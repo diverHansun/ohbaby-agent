@@ -66,7 +66,9 @@ export async function createLLMClient(
     config: {
       provider: config.provider,
       model: config.model,
-      apiKeyEnv: config.apiKeyEnv,
+      ...(config.apiKeyEnv === undefined
+        ? {}
+        : { apiKeyEnv: config.apiKeyEnv }),
       baseUrl: config.baseUrl,
       interfaceProvider: config.interfaceProvider,
       temperature: config.temperature,

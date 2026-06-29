@@ -9,7 +9,7 @@ interface WrittenModelJson {
   readonly defaultModel: string;
   readonly apiConfig: {
     readonly baseUrl: string;
-    readonly apiKeyEnv: string;
+    readonly apiKeyEnv?: string;
     readonly interfaceProvider?: string;
   };
   readonly llmParams: {
@@ -115,6 +115,35 @@ describe("setActiveLLMConfig", () => {
       envPath: "D:/repo/.env",
     });
     expect(JSON.stringify(result)).not.toContain("sk-secret");
+  });
+
+  it("should omit apiKeyEnv and skip .env writes for keyless endpoints", async () => {
+    const missing = new Error("ENOENT") as NodeJS.ErrnoException;
+    missing.code = "ENOENT";
+    vi.mocked(fs.readFile).mockRejectedValue(missing);
+
+    const result = await setActiveLLMConfig({
+      provider: "lmstudio",
+      model: "local-model",
+      baseUrl: "http://127.0.0.1:1234/v1",
+      modelJsonPath: "D:/repo/.ohbaby-agent/model.json",
+    });
+
+    const modelJsonWrite = findWriteCall((file) => file.includes("model.json"));
+    const modelJson = parseModelJsonWrite(modelJsonWrite);
+
+    expect(modelJson.apiConfig).toEqual({
+      baseUrl: "http://127.0.0.1:1234/v1",
+      interfaceProvider: "openai-compatible",
+    });
+    expect(findWriteCall((file) => file.includes(".env.tmp-"))).toBeUndefined();
+    expect(result).toEqual({
+      provider: "lmstudio",
+      model: "local-model",
+      baseUrl: "http://127.0.0.1:1234/v1",
+      interfaceProvider: "openai-compatible",
+      modelJsonPath: "D:/repo/.ohbaby-agent/model.json",
+    });
   });
 
   it("should preserve existing llmParams and model profiles unless overridden", async () => {

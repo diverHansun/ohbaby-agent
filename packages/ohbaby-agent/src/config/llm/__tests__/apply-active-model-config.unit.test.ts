@@ -16,6 +16,7 @@ describe("applyActiveModelConfig", () => {
   let originalHome: string | undefined;
   let originalUserProfile: string | undefined;
   let originalApiKey: string | undefined;
+  let originalLmStudioApiKey: string | undefined;
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
@@ -26,9 +27,11 @@ describe("applyActiveModelConfig", () => {
     originalHome = process.env.HOME;
     originalUserProfile = process.env.USERPROFILE;
     originalApiKey = process.env.ZENMUX_API_KEY;
+    originalLmStudioApiKey = process.env.LM_STUDIO_API_KEY;
     process.env.HOME = homeRoot;
     process.env.USERPROFILE = homeRoot;
     delete process.env.ZENMUX_API_KEY;
+    delete process.env.LM_STUDIO_API_KEY;
     fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -51,6 +54,7 @@ describe("applyActiveModelConfig", () => {
     restoreEnvValue("HOME", originalHome);
     restoreEnvValue("USERPROFILE", originalUserProfile);
     restoreEnvValue("ZENMUX_API_KEY", originalApiKey);
+    restoreEnvValue("LM_STUDIO_API_KEY", originalLmStudioApiKey);
     LLMConfigManager.resetInstance();
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
@@ -168,6 +172,61 @@ describe("applyActiveModelConfig", () => {
     await expect(fs.readFile(envPath, "utf-8")).resolves.toBe(
       "ZENMUX_API_KEY=sk-existing\n",
     );
+  });
+
+  it("saves local-compatible model config without api key metadata or env writes", async () => {
+    const result = await applyActiveModelConfig({
+      baseUrl: "http://127.0.0.1:1234/v1",
+      interfaceProvider: "openai-compatible",
+      model: "local-model",
+      modelJsonPath,
+      projectRoot: tempRoot,
+      provider: "lmstudio",
+    } as unknown as Parameters<typeof applyActiveModelConfig>[0]);
+
+    const modelJson = JSON.parse(await fs.readFile(modelJsonPath, "utf-8")) as {
+      readonly apiConfig: {
+        readonly apiKeyEnv?: string;
+        readonly baseUrl: string;
+      };
+    };
+
+    expect(result).toMatchObject({
+      baseUrl: "http://127.0.0.1:1234/v1",
+      model: "local-model",
+      provider: "lmstudio",
+      saved: true,
+    });
+    expect(result).not.toHaveProperty("apiKeyEnv");
+    expect(modelJson.apiConfig).toEqual({
+      baseUrl: "http://127.0.0.1:1234/v1",
+      interfaceProvider: "openai-compatible",
+    });
+    await expect(fs.stat(envPath)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:1234/v1/models",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer not-needed" },
+      }),
+    );
+  });
+
+  it("uses a provider-derived api key env when key value is provided without a name", async () => {
+    const result = await applyActiveModelConfig({
+      apiKey: "sk-local-proxy-secret",
+      baseUrl: "http://127.0.0.1:1234/v1",
+      interfaceProvider: "openai-compatible",
+      model: "local-model",
+      modelJsonPath,
+      projectRoot: tempRoot,
+      provider: "lm-studio",
+    } as unknown as Parameters<typeof applyActiveModelConfig>[0]);
+
+    expect(result.apiKeyEnv).toBe("LM_STUDIO_API_KEY");
+    await expect(fs.readFile(envPath, "utf-8")).resolves.toBe(
+      "LM_STUDIO_API_KEY=sk-local-proxy-secret\n",
+    );
+    expect(process.env.LM_STUDIO_API_KEY).toBe("sk-local-proxy-secret");
   });
 
   it("uses detected context window over a user-provided value", async () => {

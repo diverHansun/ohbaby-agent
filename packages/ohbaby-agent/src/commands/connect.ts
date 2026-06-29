@@ -90,7 +90,6 @@ export function parseConnectArgs(
   const required = [
     ["provider", "--provider"],
     ["baseUrl", "--base-url"],
-    ["apiKeyEnv", "--api-key-env"],
     ["model", "--model"],
   ] as const;
   const missing = required
@@ -108,12 +107,7 @@ export function parseConnectArgs(
   const baseUrl = values.baseUrl;
   const apiKeyEnv = values.apiKeyEnv;
   const model = values.model;
-  if (
-    provider === undefined ||
-    baseUrl === undefined ||
-    apiKeyEnv === undefined ||
-    model === undefined
-  ) {
+  if (provider === undefined || baseUrl === undefined || model === undefined) {
     return {
       code: "MISSING_ARGS",
       message: "Missing required /connect arguments",
@@ -142,7 +136,7 @@ export function parseConnectArgs(
   return {
     provider,
     baseUrl,
-    apiKeyEnv,
+    ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     model,
     interfaceProvider,
     ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),

@@ -103,7 +103,7 @@ export interface CurrentModelResponse {
 export interface ModelConnectRequest {
   readonly provider: string;
   readonly baseUrl: string;
-  readonly apiKeyEnv: string;
+  readonly apiKeyEnv?: string;
   readonly apiKey?: string;
   readonly model: string;
   readonly contextWindowTokens?: number;

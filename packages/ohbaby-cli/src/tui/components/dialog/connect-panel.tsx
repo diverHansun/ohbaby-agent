@@ -51,8 +51,8 @@ type SaveState =
 const CONNECT_FIELDS: readonly ConnectField[] = [
   { key: "provider", label: "Provider" },
   { key: "baseUrl", label: "Base URL" },
-  { key: "apiKeyEnv", label: "API key env" },
-  { key: "apiKey", label: "API key value", secret: true },
+  { key: "apiKeyEnv", label: "API key env", optional: true },
+  { key: "apiKey", label: "API key value", optional: true, secret: true },
   { key: "model", label: "Model name" },
   { key: "contextWindowTokens", label: "Context window", optional: true },
   { key: "maxOutputTokens", label: "Max output tokens", optional: true },
@@ -357,9 +357,7 @@ function ConnectStatusLine({
 }
 
 function savedState(warning: string | undefined): SaveState {
-  return warning === undefined
-    ? { kind: "saved" }
-    : { kind: "saved", warning };
+  return warning === undefined ? { kind: "saved" } : { kind: "saved", warning };
 }
 
 function readConnectWarning(result: unknown): string | undefined {
@@ -380,7 +378,7 @@ type PayloadBuildResult =
 function draftFromCurrentModel(current: UiCurrentModelConfig): ConnectDraft {
   return {
     apiKey: "",
-    apiKeyEnv: current.apiKeyEnv,
+    apiKeyEnv: current.apiKeyEnv ?? "",
     baseUrl: current.baseUrl,
     contextWindowTokens:
       current.contextWindowTokens === undefined
@@ -403,7 +401,7 @@ function buildPayload(draft: ConnectDraft): PayloadBuildResult {
   const apiKey = draft.apiKey.trim();
   const model = draft.model.trim();
 
-  if (!provider || !baseUrl || !apiKeyEnv || !model) {
+  if (!provider || !baseUrl || !model) {
     return { kind: "incomplete" };
   }
 
@@ -424,8 +422,8 @@ function buildPayload(draft: ConnectDraft): PayloadBuildResult {
 
   return {
     input: {
-      apiKey: apiKey || undefined,
-      apiKeyEnv,
+      ...(apiKey === "" ? {} : { apiKey }),
+      ...(apiKeyEnv === "" ? {} : { apiKeyEnv }),
       baseUrl,
       contextWindowTokens: contextWindowTokens.value,
       interfaceProvider,

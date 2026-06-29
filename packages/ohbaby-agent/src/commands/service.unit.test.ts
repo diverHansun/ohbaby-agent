@@ -258,6 +258,54 @@ describe("CommandService", () => {
     expect(JSON.stringify(events)).not.toContain("sk-secret");
   });
 
+  it("executes /connect without api key env for keyless endpoints", async () => {
+    const connectModel = vi.fn(() =>
+      Promise.resolve({
+        baseUrl: "http://127.0.0.1:1234/v1",
+        contextWindowSource: "default" as const,
+        contextWindowTokens: 128_000,
+        envPath: "D:/repo/.env",
+        interfaceProvider: "openai-compatible" as const,
+        model: "local-model",
+        modelJsonPath: "D:/home/.ohbaby-agent/model.json",
+        provider: "lmstudio",
+        saved: true as const,
+      }),
+    );
+    const { events, service } = createServiceHarness({ connectModel });
+
+    await service.executeCommand(
+      makeInvocation(
+        "connect",
+        ["connect"],
+        [
+          "--provider",
+          "lmstudio",
+          "--base-url",
+          "http://127.0.0.1:1234/v1",
+          "--model",
+          "local-model",
+        ],
+      ),
+    );
+
+    expect(connectModel).toHaveBeenCalledWith({
+      baseUrl: "http://127.0.0.1:1234/v1",
+      interfaceProvider: "openai-compatible",
+      model: "local-model",
+      provider: "lmstudio",
+    });
+    expect(dataOutputBySubject(events, "model.connected")).toMatchObject({
+      data: {
+        result: {
+          model: "local-model",
+          provider: "lmstudio",
+        },
+      },
+    });
+    expect(JSON.stringify(events)).not.toContain("apiKeyEnv");
+  });
+
   it("infers openai-compatible interface for /connect api/v1 base urls", async () => {
     const connectModel = vi.fn(() =>
       Promise.resolve({

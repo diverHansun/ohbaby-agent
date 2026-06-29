@@ -20,8 +20,8 @@ export interface ModelJsonConfig {
     /** Base URL for the API endpoint */
     baseUrl: string;
 
-    /** Environment variable name containing the API key */
-    apiKeyEnv: string;
+    /** Optional environment variable name containing the API key */
+    apiKeyEnv?: string;
 
     /** API protocol adapter used for this provider */
     interfaceProvider?: InterfaceProviderKind;
@@ -77,8 +77,8 @@ export interface LLMConfig {
   /** Resolved API key value */
   apiKey: string;
 
-  /** Environment variable name containing the API key */
-  apiKeyEnv: string;
+  /** Optional environment variable name containing the API key */
+  apiKeyEnv?: string;
 
   /** API base URL */
   baseUrl: string;

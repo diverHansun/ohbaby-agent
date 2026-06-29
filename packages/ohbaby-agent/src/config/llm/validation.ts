@@ -187,10 +187,18 @@ export function validateModelJson(
       validateBaseUrlValue(apiConfig.baseUrl);
     }
 
-    if (!apiConfig.apiKeyEnv || typeof apiConfig.apiKeyEnv !== "string") {
-      errors.push("apiConfig.apiKeyEnv (string) is required");
-    } else {
-      validateApiKeyEnvValue(apiConfig.apiKeyEnv);
+    if (apiConfig.apiKeyEnv !== undefined) {
+      if (typeof apiConfig.apiKeyEnv !== "string") {
+        errors.push("apiConfig.apiKeyEnv must be a string when provided");
+      } else if (apiConfig.apiKeyEnv.trim() === "") {
+        throw new ConfigError(
+          `Invalid apiConfig.apiKeyEnv: ${formatInvalidValue(apiConfig.apiKeyEnv)}. Must be a valid environment variable name`,
+          "INVALID_FIELD",
+          { value: apiConfig.apiKeyEnv },
+        );
+      } else {
+        validateApiKeyEnvValue(apiConfig.apiKeyEnv);
+      }
     }
 
     validateInterfaceProviderValue(apiConfig.interfaceProvider);

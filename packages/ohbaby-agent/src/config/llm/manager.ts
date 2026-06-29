@@ -6,7 +6,8 @@
 import type { LLMConfig, ModelJsonConfig } from "./types.js";
 import { ConfigError } from "./types.js";
 import { loadModelJson, loadApiKey, loadEnvFile } from "./loaders.js";
-import { validateModelJson, validateApiKey } from "./validation.js";
+import { validateModelJson } from "./validation.js";
+import { nonEmptyApiKey, OPTIONAL_API_KEY_PLACEHOLDER } from "./api-key.js";
 import {
   setActiveLLMConfig as writeActiveLLMConfig,
   type SetActiveLLMConfigInput,
@@ -166,17 +167,21 @@ class LLMConfigManager {
       validateModelJson(rawConfig);
       const modelJson = rawConfig;
 
-      // Load API key from environment
+      // Load API key from environment when configured.
       const apiKeyEnvName = modelJson.apiConfig.apiKeyEnv;
       const envFileValues =
-        options.envPath === undefined ? {} : await loadEnvFile(options.envPath);
-      const apiKey = loadApiKey(apiKeyEnvName, {
-        ...envFileValues,
-        ...options.env,
-      });
-
-      // Validate API key
-      validateApiKey(apiKey, apiKeyEnvName);
+        apiKeyEnvName === undefined || options.envPath === undefined
+          ? {}
+          : await loadEnvFile(options.envPath);
+      const apiKey =
+        apiKeyEnvName === undefined
+          ? OPTIONAL_API_KEY_PLACEHOLDER
+          : (nonEmptyApiKey(
+              loadApiKey(apiKeyEnvName, {
+                ...envFileValues,
+                ...options.env,
+              }),
+            ) ?? OPTIONAL_API_KEY_PLACEHOLDER);
 
       // Build final config
       const modelProfiles = resolveModelProfiles(modelJson);
@@ -184,7 +189,7 @@ class LLMConfigManager {
         provider: modelJson.provider,
         model: modelJson.defaultModel,
         apiKey: apiKey,
-        apiKeyEnv: apiKeyEnvName,
+        ...(apiKeyEnvName === undefined ? {} : { apiKeyEnv: apiKeyEnvName }),
         baseUrl: modelJson.apiConfig.baseUrl,
         interfaceProvider:
           modelJson.apiConfig.interfaceProvider ?? "openai-compatible",

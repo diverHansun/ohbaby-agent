@@ -1402,7 +1402,9 @@ describe("createDaemonServerApp", () => {
 
   it("returns bad request when the archive route rejects the session", async () => {
     const backend = new FakeBackend();
-    backend.archiveError = new Error("Cannot archive subagent session: child_1");
+    backend.archiveError = new Error(
+      "Cannot archive subagent session: child_1",
+    );
     const handle = createApp(backend);
     await handle.start();
     try {
@@ -1816,6 +1818,71 @@ describe("createDaemonServerApp", () => {
       }
     },
   );
+
+  it("accepts structured model connect and probe bodies without apiKeyEnv", async () => {
+    const backend = new FakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const clientHeaders = {
+        ...authHeaders(),
+        "content-type": "application/json",
+        "x-ohbaby-client-id": "client_web",
+      };
+
+      const probeResponse = await handle.app.request(
+        "/v1/model/context-window-probe",
+        {
+          body: JSON.stringify({
+            baseUrl: "http://127.0.0.1:1234/v1",
+            model: "local-model",
+            provider: "lmstudio",
+          }),
+          headers: clientHeaders,
+          method: "POST",
+        },
+      );
+      expect(probeResponse.status).toBe(200);
+
+      const connectResponse = await handle.app.request("/v1/model", {
+        body: JSON.stringify({
+          baseUrl: "http://127.0.0.1:1234/v1",
+          model: "local-model",
+          provider: "lmstudio",
+        }),
+        headers: clientHeaders,
+        method: "POST",
+      });
+      expect(connectResponse.status).toBe(200);
+
+      expect(backend.probedModels).toEqual([
+        {
+          baseUrl: "http://127.0.0.1:1234/v1",
+          interfaceProvider: "openai-compatible",
+          model: "local-model",
+          provider: "lmstudio",
+        },
+      ]);
+      expect(backend.connectedModels).toEqual([
+        {
+          baseUrl: "http://127.0.0.1:1234/v1",
+          interfaceProvider: "openai-compatible",
+          model: "local-model",
+          provider: "lmstudio",
+        },
+      ]);
+    } finally {
+      await handle.dispose();
+    }
+  });
 
   it("serves structured model, search, and compact REST routes", async () => {
     const backend = new FakeBackend();

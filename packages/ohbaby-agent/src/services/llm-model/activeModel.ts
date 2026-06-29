@@ -10,7 +10,7 @@ export interface ActiveModelSummary {
   readonly model: string;
   readonly label: string;
   readonly baseUrl: string;
-  readonly apiKeyEnv: string;
+  readonly apiKeyEnv?: string;
   readonly interfaceProvider: InterfaceProviderKind;
   readonly profile?: ModelProfile;
 }
@@ -29,7 +29,7 @@ export function summarizeActiveModel(config: LLMConfig): ActiveModelSummary {
     model: config.model,
     label,
     baseUrl: config.baseUrl,
-    apiKeyEnv: config.apiKeyEnv,
+    ...(config.apiKeyEnv === undefined ? {} : { apiKeyEnv: config.apiKeyEnv }),
     interfaceProvider: config.interfaceProvider,
     profile,
   };

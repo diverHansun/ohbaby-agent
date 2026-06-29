@@ -492,6 +492,32 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
+  it("submits structured connect overlay without API key env", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["connect"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+
+    await setInputValue(app.container, "Provider", "lmstudio");
+    await setInputValue(app.container, "Base URL", "http://127.0.0.1:1234/v1");
+    await setInputValue(app.container, "Model", "local-model");
+    await clickButton(app.container, "Save model");
+
+    expect(fake.connectModel).toHaveBeenCalledWith({
+      baseUrl: "http://127.0.0.1:1234/v1",
+      model: "local-model",
+      provider: "lmstudio",
+    });
+  });
+
   it("opens the structured search overlay from the slash palette", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),

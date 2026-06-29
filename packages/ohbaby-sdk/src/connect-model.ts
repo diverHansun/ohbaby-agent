@@ -4,7 +4,7 @@ export interface UiConnectModelInput {
   readonly provider: string;
   readonly baseUrl: string;
   readonly interfaceProvider: UiConnectModelInterfaceProvider;
-  readonly apiKeyEnv: string;
+  readonly apiKeyEnv?: string;
   readonly apiKey?: string;
   readonly model: string;
   readonly contextWindowTokens?: number;
@@ -15,7 +15,7 @@ export interface UiConnectModelResult {
   readonly provider: string;
   readonly baseUrl: string;
   readonly interfaceProvider: UiConnectModelInterfaceProvider;
-  readonly apiKeyEnv: string;
+  readonly apiKeyEnv?: string;
   readonly model: string;
   readonly contextWindowTokens: number;
   readonly contextWindowSource: "detected" | "user" | "default";
@@ -30,7 +30,7 @@ export interface UiCurrentModelConfig {
   readonly provider: string;
   readonly baseUrl: string;
   readonly interfaceProvider: UiConnectModelInterfaceProvider;
-  readonly apiKeyEnv: string;
+  readonly apiKeyEnv?: string;
   readonly model: string;
   readonly contextWindowTokens?: number;
   readonly maxOutputTokens?: number;
@@ -40,7 +40,7 @@ export interface UiProbeModelContextWindowInput {
   readonly provider?: string;
   readonly baseUrl: string;
   readonly interfaceProvider: UiConnectModelInterfaceProvider;
-  readonly apiKeyEnv: string;
+  readonly apiKeyEnv?: string;
   readonly apiKey?: string;
   readonly model: string;
   readonly contextWindowTokens?: number;

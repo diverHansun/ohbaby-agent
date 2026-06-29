@@ -148,17 +148,14 @@ describe("validateModelJson", () => {
     }).toThrow(/baseUrl/);
   });
 
-  it("should throw for missing apiConfig.apiKeyEnv", () => {
+  it("should allow missing apiConfig.apiKeyEnv for keyless endpoints", () => {
     const config = {
       ...validConfig,
       apiConfig: { ...validConfig.apiConfig, apiKeyEnv: undefined },
     };
     expect(() => {
       validateModelJson(config);
-    }).toThrow(ConfigError);
-    expect(() => {
-      validateModelJson(config);
-    }).toThrow(/apiKeyEnv/);
+    }).not.toThrow();
   });
 
   it("should reject invalid apiConfig.apiKeyEnv names", () => {

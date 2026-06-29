@@ -67,8 +67,9 @@ ohbaby
 ```
 
 **2. Connect a model.** In the CLI/TUI, type `/connect` to open the provider setup panel,
-fill in your provider, base URL, API key, and model name, then save. Secrets
-entered here are persisted to `~/.ohbaby-agent/.env`.
+fill in your provider, base URL, and model name, then save. API key fields are
+optional for local or keyless endpoints such as LM Studio; secrets entered here
+are persisted to `~/.ohbaby-agent/.env`.
 
 <p align="center">
   <img src="assets/images/connect-providers.png" alt="ohbaby-agent /connect provider setup" width="760">
@@ -78,8 +79,8 @@ entered here are persisted to `~/.ohbaby-agent/.env`.
 | --- | --- |
 | Provider | `openai`, `anthropic`, `zhipu`, … |
 | Base URL | The SDK base URL (no `/chat/completions` suffix) |
-| API key env | Environment variable that holds the key (e.g. `OPENAI_API_KEY`) |
-| API key value | The key itself |
+| API key env | Optional environment variable that holds the key (e.g. `OPENAI_API_KEY`) |
+| API key value | Optional key value; leave blank for keyless local endpoints |
 | Model name | e.g. `gpt-5.5`, `claude-sonnet-4-5`, `glm-5.1`, or your provider's model id |
 | Context window / Max output tokens | Optional |
 

@@ -311,7 +311,6 @@ function modelConnectInputFromBody(
   if (
     provider === undefined ||
     baseUrl === undefined ||
-    apiKeyEnv === undefined ||
     model === undefined ||
     (value.contextWindowTokens !== undefined &&
       contextWindowTokens === undefined) ||
@@ -323,7 +322,7 @@ function modelConnectInputFromBody(
     provider,
     baseUrl,
     interfaceProvider: inferConnectModelInterfaceProvider(baseUrl),
-    apiKeyEnv,
+    ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     ...(apiKey === undefined ? {} : { apiKey }),
     model,
     ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),

@@ -218,13 +218,37 @@ describe("LLMConfigManager", () => {
       expect(config1).toBe(config2);
     });
 
-    it("should throw ConfigError for missing API key", async () => {
+    it("should use an SDK placeholder when configured API key is missing", async () => {
       vi.mocked(loaders.loadModelJson).mockResolvedValue(validModelJson);
       vi.mocked(loaders.loadApiKey).mockReturnValue(undefined);
 
       const manager = LLMConfigManager.getInstance();
 
-      await expect(manager.load()).rejects.toThrow(ConfigError);
+      await expect(manager.load()).resolves.toMatchObject({
+        apiKey: "not-needed",
+        apiKeyEnv: "OPENAI_API_KEY",
+      });
+    });
+
+    it("should load config without apiKeyEnv using an SDK placeholder", async () => {
+      vi.mocked(loaders.loadModelJson).mockResolvedValue({
+        ...validModelJson,
+        apiConfig: {
+          baseUrl: "http://127.0.0.1:1234/v1",
+          interfaceProvider: "openai-compatible",
+        },
+      });
+
+      const manager = LLMConfigManager.getInstance();
+      const config = await manager.load();
+
+      expect(config).toMatchObject({
+        apiKey: "not-needed",
+        baseUrl: "http://127.0.0.1:1234/v1",
+        interfaceProvider: "openai-compatible",
+      });
+      expect(config).not.toHaveProperty("apiKeyEnv");
+      expect(loaders.loadApiKey).not.toHaveBeenCalled();
     });
 
     it("should set lastError on failure", async () => {
