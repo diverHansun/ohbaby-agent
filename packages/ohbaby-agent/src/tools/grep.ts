@@ -25,7 +25,7 @@ export function createGrepTool(): Tool {
   return {
     name: "grep",
     description:
-      "Search text files by regular expression inside the workspace.",
+      "Search text file contents by regular expression in the execution workspace.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {

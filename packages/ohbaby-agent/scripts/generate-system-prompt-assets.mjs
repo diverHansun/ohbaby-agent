@@ -13,6 +13,10 @@ const templates = [
     path: "primary/base.md",
   },
   {
+    exportName: "SUBAGENT_ROLES_GUIDANCE_PROMPT_TEMPLATE",
+    path: "primary/subagent-roles.md",
+  },
+  {
     exportName: "PRIMARY_TASK_AGENT_PROMPT_TEMPLATE",
     path: "primary/tasks/agent.md",
   },

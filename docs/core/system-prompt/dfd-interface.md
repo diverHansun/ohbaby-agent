@@ -38,7 +38,6 @@ SystemPrompt.assemble(options: AssembleOptions): string[]
 - `agentPromptAddon`: 可选代理附加提示。
 - `tools`: 可用工具名。
 - `toolSnippets`: 工具描述片段。
-- `promptGuidelines`: 工具/提示词指导。
 - `customInstructions`: custom instructions，仅 primary 使用。
 
 输出：

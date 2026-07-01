@@ -20,7 +20,7 @@ describe("SystemPrompt", () => {
     });
     const fullPrompt = prompts.join("\n\n");
 
-    expect(fullPrompt).toContain("ohbaby-agent");
+    expect(fullPrompt).toContain("Lychee");
     expect(fullPrompt).toContain("Core Capabilities");
     expect(fullPrompt).toContain("D:/repo");
     expect(fullPrompt).toContain("Git repository: true");
@@ -72,7 +72,7 @@ describe("SystemPrompt", () => {
     });
 
     const fullPrompt = prompts.join("\n\n");
-    expect(fullPrompt).toContain("You are ohbaby-agent");
+    expect(fullPrompt).toContain("You are Lychee");
     expect(fullPrompt).toContain("Task: agent");
     expect(fullPrompt).toContain("<agent_prompt_addon>");
     expect(fullPrompt).toContain("Use extra release-note care.");
@@ -150,10 +150,13 @@ describe("SystemPrompt", () => {
     expect(fullPrompt).toContain("focused exploration agent");
     expect(fullPrompt).toContain("D:/repo");
     expect(fullPrompt).toContain("Git repository: true");
-    expect(fullPrompt).not.toContain("Core Capabilities");
+    expect(fullPrompt).toContain("Core Capabilities");
     expect(fullPrompt).not.toContain("This must not leak");
     expect(fullPrompt).not.toContain("Available tools");
     expect(fullPrompt).not.toContain("Subagent roles for task / agent_open");
+    // Primary identity must not leak into subagent prompts. "Core Capabilities"
+    // is now shared by both bases, so guard with a primary-only sentinel.
+    expect(fullPrompt).not.toContain("You are Lychee, an AI coding assistant");
   });
 
   it("keeps subagent prompt layers in the documented order", () => {
@@ -217,7 +220,7 @@ describe("SystemPrompt", () => {
     const fullPrompt = prompts.join("\n\n");
     expect(fullPrompt).toContain("Task: research");
     expect(fullPrompt).not.toContain("Project-only rule");
-    expect(fullPrompt).not.toContain("You are ohbaby-agent");
+    expect(fullPrompt).not.toContain("You are Lychee");
   });
 
   it("returns builtin agent prompts and undefined for unknown agents", () => {

@@ -2,7 +2,7 @@ import { GENERIC_SUBAGENT_PROMPT } from "./generic.js";
 import { getSubagentTaskPrompt } from "../subagents/tasks.js";
 
 const AGENT_PROMPTS = new Map<string, string>([
-  ["generic", getSubagentTaskPrompt("generic")],
+  ["generic", GENERIC_SUBAGENT_PROMPT],
   ["explore", getSubagentTaskPrompt("explore")],
   ["research", getSubagentTaskPrompt("research")],
 ]);

@@ -23,7 +23,8 @@ import {
 export function createWriteTool(): Tool {
   return {
     name: "write",
-    description: "Write a text file inside the execution workspace.",
+    description:
+      "Write a text file in the execution workspace, creating it or overwriting the existing file's contents.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {

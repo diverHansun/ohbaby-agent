@@ -27,7 +27,7 @@ export function createEditTool(): Tool {
   return {
     name: "edit",
     description:
-      "Replace unique text in the current contents of an existing workspace file. Exact old_string matches are preferred; bounded indentation and whitespace fuzzy matching is used only when exact matching fails. Whitespace fuzzy matching can treat runs of spaces, tabs, and newlines as equivalent inside a candidate, so include enough surrounding context for whitespace-sensitive edits.",
+      "Replace unique text in the current contents of an existing file in the execution workspace. Exact old_string matches are preferred; bounded indentation and whitespace fuzzy matching is used only when exact matching fails. Whitespace fuzzy matching can treat runs of spaces, tabs, and newlines as equivalent inside a candidate, so include enough surrounding context for whitespace-sensitive edits.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {

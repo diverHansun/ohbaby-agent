@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 import { PRIMARY_BASE_PROMPT } from "../prompts/primary/base.js";
+import { SUBAGENT_ROLES_GUIDANCE_PROMPT } from "../prompts/primary/subagent-roles.js";
 import { getPrimaryTaskPrompt } from "../prompts/primary/tasks.js";
 import { SUBAGENT_BASE_PROMPT } from "../prompts/subagents/base.js";
 import { getSubagentTaskPrompt } from "../prompts/subagents/tasks.js";
@@ -21,6 +22,10 @@ describe("system prompt template assets", () => {
     {
       exported: PRIMARY_BASE_PROMPT,
       path: "../prompts/primary/base.md",
+    },
+    {
+      exported: SUBAGENT_ROLES_GUIDANCE_PROMPT,
+      path: "../prompts/primary/subagent-roles.md",
     },
     {
       exported: getPrimaryTaskPrompt("ask"),
@@ -61,4 +66,11 @@ describe("system prompt template assets", () => {
       expect(exported).toBe(assetText);
     },
   );
+
+  it("keeps the {{ROLES}} placeholder in the subagent roles template", () => {
+    // The assembler substitutes {{ROLES}} at runtime; if the asset loses the
+    // placeholder, roles silently stop rendering. Round-trip equality would not
+    // catch that, so assert the placeholder explicitly.
+    expect(SUBAGENT_ROLES_GUIDANCE_PROMPT).toContain("{{ROLES}}");
+  });
 });

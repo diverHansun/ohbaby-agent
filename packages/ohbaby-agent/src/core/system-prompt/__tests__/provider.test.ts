@@ -24,7 +24,7 @@ describe("createSystemPromptProvider", () => {
       isSubagent: false,
     });
 
-    expect(prompt).toContain("ohbaby-agent");
+    expect(prompt).toContain("Lychee");
     expect(prompt).toContain("Project-only rule");
     expect(prompt).toContain("Available tools: read, bash");
   });
@@ -43,7 +43,7 @@ describe("createSystemPromptProvider", () => {
       isSubagent: false,
     });
 
-    expect(prompt).toContain("ohbaby-agent");
+    expect(prompt).toContain("Lychee");
     expect(prompt).toContain("Primary runtime prompt");
     expect(prompt).toContain("Project rule");
   });
@@ -67,7 +67,8 @@ describe("createSystemPromptProvider", () => {
 
     expect(prompt).toContain("exploration");
     expect(prompt).not.toContain("This must not be loaded");
-    expect(prompt).not.toContain("Core Capabilities");
+    expect(prompt).toContain("Core Capabilities");
+    expect(prompt).not.toContain("You are Lychee, an AI coding assistant");
     expect(customInstructionLoader).not.toHaveBeenCalled();
   });
 
@@ -119,7 +120,9 @@ describe("createSystemPromptProvider", () => {
 
     expect(primaryPrompt).toContain("Subagent roles for task / agent_open");
     expect(primaryPrompt).toContain("Omit role to use generic");
-    expect(subagentPrompt).not.toContain("Subagent roles for task / agent_open");
+    expect(subagentPrompt).not.toContain(
+      "Subagent roles for task / agent_open",
+    );
     expect(availableSubagentRolesProvider).toHaveBeenCalledTimes(1);
   });
 

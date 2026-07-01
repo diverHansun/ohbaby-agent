@@ -2,9 +2,9 @@ import type { PromptSecurityFinding } from "./security/index.js";
 
 export type LayerType =
   | "agent"
+  | "base"
   | "custom"
   | "environment"
-  | "identity"
   | "task"
   | "tools";
 
@@ -42,7 +42,6 @@ export interface AssembleOptions {
   readonly environment: EnvironmentInfo;
   readonly customInstructions?: readonly string[];
   readonly onSecurityFinding?: (finding: PromptSecurityFinding) => void;
-  readonly promptGuidelines?: readonly string[];
   readonly taskKind?: PromptTaskKind;
   readonly toolSnippets?: Readonly<Partial<Record<string, string>>>;
   readonly tools?: readonly string[];

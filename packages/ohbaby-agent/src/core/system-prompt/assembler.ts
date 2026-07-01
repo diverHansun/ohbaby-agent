@@ -1,13 +1,14 @@
 import type { SystemPromptProvider } from "../context/index.js";
 import {
   detectEnvironment,
+  generateBasePrompt,
   generateCustomInstructionsPrompt,
   generateEnvironmentPrompt,
-  generateIdentityPrompt,
   generateToolGuidancePrompt,
 } from "./layers/index.js";
 import { getBuiltinAgentPrompt } from "./prompts/agents/index.js";
 import { getPrimaryTaskPrompt } from "./prompts/primary/tasks.js";
+import { SUBAGENT_ROLES_GUIDANCE_PROMPT } from "./prompts/primary/subagent-roles.js";
 import { SUBAGENT_BASE_PROMPT } from "./prompts/subagents/base.js";
 import { getSubagentTaskPrompt } from "./prompts/subagents/tasks.js";
 import { loadCustomInstructions } from "./services/custom-instruction-loader.js";
@@ -63,11 +64,9 @@ export interface SystemPromptProviderOptions {
   readonly toolDetailsProvider?: (input: SystemPromptProviderInput) =>
     | Promise<{
         readonly toolSnippets?: Readonly<Partial<Record<string, string>>>;
-        readonly promptGuidelines?: readonly string[];
       }>
     | {
         readonly toolSnippets?: Readonly<Partial<Record<string, string>>>;
-        readonly promptGuidelines?: readonly string[];
       };
 }
 
@@ -128,18 +127,11 @@ function generateSubagentRolesPrompt(
     const suffix = role.default === true ? " (default)" : "";
     return `- ${role.role}${suffix}: ${role.description}`;
   });
-  return [
-    "<subagent_roles>",
-    "Subagent roles for task / agent_open:",
-    ...roleLines,
-    "",
-    "Omit role to use generic.",
-    'Do not put descriptive names such as "AI Events Researcher" in role.',
-    "Put those in description. Put display names in name.",
-    "description and name are metadata only. If the subagent must follow a persona, scope, constraints, known files, or expected output format, include those details inside prompt.",
-    "build and plan are primary-agent modes, not subagent roles.",
-    "</subagent_roles>",
-  ].join("\n");
+  // Use a function replacer so "$" sequences in role descriptions (e.g. "$&",
+  // "$1") are inserted literally rather than interpreted as replacement patterns.
+  return SUBAGENT_ROLES_GUIDANCE_PROMPT.replace("{{ROLES}}", () =>
+    roleLines.join("\n"),
+  );
 }
 
 function safeToolSnippets(
@@ -181,7 +173,6 @@ export const SystemPrompt = {
       options.onSecurityFinding,
     );
     const toolGuidance = generateToolGuidancePrompt({
-      promptGuidelines: options.promptGuidelines,
       toolSnippets,
       tools: options.tools,
     });
@@ -203,7 +194,7 @@ export const SystemPrompt = {
     }
 
     return compactPrompts([
-      generateIdentityPrompt(),
+      generateBasePrompt(),
       getPrimaryTaskPrompt(resolvePrimaryTaskKind(options.taskKind)),
       generateAgentAddonPrompt(agentPromptAddon),
       generateSubagentRolesPrompt(options.availableSubagentRoles),
@@ -233,8 +224,8 @@ export const SystemPrompt = {
     return generateEnvironmentPrompt({ info, minimal, tools });
   },
 
-  getIdentity(): string {
-    return generateIdentityPrompt();
+  getPrimaryBase(): string {
+    return generateBasePrompt();
   },
 
   loadCustomInstructions,
@@ -295,7 +286,6 @@ export function createSystemPromptProvider(
           environment,
           isSubagent: true,
           onSecurityFinding: options.onSecurityFinding,
-          promptGuidelines: toolDetails.promptGuidelines,
           taskKind,
           toolSnippets: toolDetails.toolSnippets,
           tools,
@@ -318,7 +308,6 @@ export function createSystemPromptProvider(
         environment,
         isSubagent: false,
         onSecurityFinding: options.onSecurityFinding,
-        promptGuidelines: toolDetails.promptGuidelines,
         taskKind,
         toolSnippets: toolDetails.toolSnippets,
         tools,

@@ -293,27 +293,6 @@ export async function createUiRuntimeComposition(
       : "generic";
   }
 
-  function toolPromptGuidelines(toolNames: readonly string[]): string[] {
-    const names = new Set(toolNames);
-    const guidelines: string[] = [];
-    if (
-      names.has("bash") &&
-      (names.has("grep") || names.has("glob") || names.has("list"))
-    ) {
-      guidelines.push(
-        "Prefer read/list/glob/grep tools over bash for file exploration.",
-      );
-    } else if (names.has("bash")) {
-      guidelines.push("Use bash for shell-assisted file and workspace tasks.");
-    }
-    if (names.has("write") || names.has("edit")) {
-      guidelines.push(
-        "Use write/edit only when the current task mode and user request allow workspace changes.",
-      );
-    }
-    return guidelines;
-  }
-
   const systemPromptProvider = createSystemPromptProvider({
     agentNameResolver(input) {
       return resolvePromptAgentName(input);
@@ -343,7 +322,6 @@ export async function createUiRuntimeComposition(
         tools.map((tool) => [tool.name, tool.description]),
       );
       return {
-        promptGuidelines: toolPromptGuidelines(tools.map((tool) => tool.name)),
         toolSnippets,
       };
     },

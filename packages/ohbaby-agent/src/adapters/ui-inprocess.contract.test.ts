@@ -1510,7 +1510,7 @@ describe("createInProcessUiBackendClient", () => {
         typeof requests[0]?.messages[0]?.content === "string"
           ? requests[0].messages[0].content
           : "",
-      ).toContain("ohbaby-agent");
+      ).toContain("Lychee");
       expect(
         typeof requests[0]?.messages[0]?.content === "string"
           ? requests[0].messages[0].content

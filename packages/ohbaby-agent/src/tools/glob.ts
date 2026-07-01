@@ -19,7 +19,7 @@ import {
 export function createGlobTool(): Tool {
   return {
     name: "glob",
-    description: "Find files by glob pattern inside the execution workspace.",
+    description: "Find files by glob pattern in the execution workspace.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {

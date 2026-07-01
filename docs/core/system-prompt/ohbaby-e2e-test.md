@@ -151,7 +151,7 @@ expect(systemPrompt).toContain("<subagent_base>");
 expect(systemPrompt).toContain("<subagent_task>");
 expect(systemPrompt).toContain("<environment>");
 expect(systemPrompt).not.toContain("<custom_instructions>");
-expect(systemPrompt).not.toContain("You are ohbaby-agent");
+expect(systemPrompt).not.toContain("You are Lychee");
 ```
 
 ## Final Acceptance

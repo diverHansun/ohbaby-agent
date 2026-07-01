@@ -2,9 +2,9 @@ export { SystemPrompt, createSystemPromptProvider } from "./assembler.js";
 export { GENERIC_SUBAGENT_PROMPT } from "./prompts/agents/index.js";
 export {
   detectEnvironment,
+  generateBasePrompt,
   generateCustomInstructionsPrompt,
   generateEnvironmentPrompt,
-  generateIdentityPrompt,
 } from "./layers/index.js";
 export {
   CUSTOM_INSTRUCTIONS_FILE_NAME,

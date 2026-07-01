@@ -1,4 +1,4 @@
-export { generateIdentityPrompt } from "./identity.js";
+export { generateBasePrompt } from "./base.js";
 export { detectEnvironment, generateEnvironmentPrompt } from "./environment.js";
 export { generateToolGuidancePrompt } from "./tools.js";
 export { generateCustomInstructionsPrompt } from "./custom.js";

@@ -69,7 +69,7 @@ export function createAgentTaskTools(
   const open: Tool = {
     category: "subagent",
     description:
-      "Start a background subagent task in an isolated child session. Role is optional and defaults to generic. Allowed roles are generic, explore, research. Use name/description for UI metadata only; put behavioral instructions in prompt.",
+      "Start a longer-running, asynchronous background subagent task (writing/editing code, running tests, multi-step investigations). Returns a task_id immediately so you stay in control; follow up with agent_status (poll), agent_eval (send input), or agent_close (cancel). Role is optional and defaults to generic. Allowed roles are generic, explore, research. Use name/description for UI metadata only; put behavioral instructions in prompt.",
     name: "agent_open",
     parametersJsonSchema: {
       additionalProperties: false,

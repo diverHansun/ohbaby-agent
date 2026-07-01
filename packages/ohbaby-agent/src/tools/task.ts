@@ -14,7 +14,7 @@ export function createTaskTool(executor: TaskExecutor): Tool {
   return {
     category: "subagent",
     description:
-      "Run a focused task in an isolated subagent session. Role is optional and defaults to generic. Allowed roles are generic, explore, research. Use name/description for UI metadata only; put behavioral instructions in prompt.",
+      "Run a short, synchronous subagent task (fast search, inspect, return a result) that fits within about 5 minutes. You block until the subagent finishes and hands back its output. Role is optional and defaults to generic. Allowed roles are generic, explore, research. Use name/description for UI metadata only; put behavioral instructions in prompt.",
     name: "task",
     parametersJsonSchema: {
       additionalProperties: false,
