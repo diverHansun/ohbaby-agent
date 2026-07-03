@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { computeBudgetReport, isSafetyCapReached } from "./budget.js";
 
-const usage = (turns: number, tokens = 0, ms = 0) => ({
-  turnsUsed: turns,
+import type { GoalUsage } from "./types.js";
+
+const usage = (turns: number, tokens = 0, ms = 0): GoalUsage => ({
   tokensUsed: tokens,
+  turnsUsed: turns,
   wallClockMs: ms,
 });
 

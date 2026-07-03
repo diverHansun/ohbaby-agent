@@ -179,4 +179,16 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
         WHERE scope = 'global' AND key = 'persistentUiBackendLease';
     `,
   },
+  {
+    version: "007_goal_record",
+    sql: `
+      CREATE TABLE IF NOT EXISTS goal_record (
+        session_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (session_id, seq)
+      );
+    `,
+  },
 ];
