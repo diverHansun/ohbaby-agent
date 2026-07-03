@@ -13,6 +13,7 @@ describe("command catalog", () => {
         "exit",
         "help",
         "connect",
+        "goal",
         "connect-search",
         "models",
         "sessions",

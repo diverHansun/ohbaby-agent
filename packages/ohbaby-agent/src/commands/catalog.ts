@@ -59,6 +59,20 @@ const BUILTIN_COMMANDS: readonly UiCommandSpec[] = [
     title: "Connect Provider",
   },
   {
+    id: "goal",
+    path: ["goal"],
+    aliases: [],
+    acceptsArguments: true,
+    argsHint:
+      "[<objective> | status | pause | resume | cancel | replace <objective> | budget --turns N --tokens N --minutes N]",
+    argumentMode: "argv",
+    category: "session",
+    description: "Create and control a long-running goal",
+    source: "builtin",
+    surfaces: COMMON_SURFACES,
+    title: "Goal",
+  },
+  {
     id: "connect-search",
     path: ["connect-search"],
     aliases: [],

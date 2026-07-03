@@ -23,6 +23,7 @@ import {
 } from "./normalize.js";
 import { handleConnect } from "./connect.js";
 import { handleConnectSearch } from "./connect-search.js";
+import { createGoalCommandHandler } from "./goal.js";
 
 interface BuiltinHandlerHelpers {
   listCommands?(
@@ -38,6 +39,7 @@ const HELP_COMMAND_ORDER = [
   "sessions",
   "new",
   "compact",
+  "goal",
   "permission",
   "mcps",
   "skills",
@@ -627,6 +629,7 @@ export function createBuiltinHandlers(
         return handleConnectSearch(options, invocation.argv, context);
       },
     },
+    createGoalCommandHandler(options),
     {
       id: "models",
       execute(_invocation, context): Promise<void> {
