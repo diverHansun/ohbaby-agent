@@ -20,7 +20,7 @@
 
 ## 二、Operational Constraints（运行约束）
 
-- **串行、不并发**：goal 续跑 Run 串行（interrupt-current 策略下同一时刻至多一个活跃续跑 Run）；goals 不追求并发推进。整个 goal 驱动从宿主看是一段持续 in-flight 的忙碌期。
+- **串行、不并发**：goal 续跑 Run 串行（CLI adapter 的 owner-aware interruption 下同一时刻至多一个活跃续跑 Run）；goals 不追求并发推进。用户插话会先暂停 goal，再执行用户 Run。
 - **提醒开销可忽略**：GoalInjector 每轮重算纯字符串，相对一次模型调用可忽略；不做缓存优化（YAGNI）。提醒作为 user 消息 append 到 history，每轮约 200-500 tokens，旧的可被 compact 压缩。
 - **不稳定外部依赖的方向性约束**：
   - 模型/provider/网络：瞬时超时/provider 错由**继承的 llm-client 重试策略**处理（与正常对话完全一致，`DEFAULT_PROVIDER_RETRY_POLICY` / `maxRetriesPerStep`，尊重 retry-after）；仅当重试**耗尽**或错误**不可重试**才 → pause(`runtime-error`)，不自动恢复，交用户 `/goal resume`。

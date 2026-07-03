@@ -56,7 +56,7 @@ start ┌──────────────┐  预算到顶或安全阀
       ┌──────────────┐   ┌───────────────────────────┐
       │ incrementTurn │─▶│ 渲染续跑提醒(流D)          │
       └──────────────┘   │  首轮 = objective          │
-                         │  后续 = CONTINUATION_PROMPT│
+                         │  后续 = GOAL_CONTINUATION_CORE│
                          │    + progress + budget     │
                          └─────────────┬─────────────┘
                                         ▼ 作为 user 消息
@@ -95,7 +95,7 @@ start ┌──────────────┐  预算到顶或安全阀
 4. 模块内：goals 调用**驱动入口**启动 GoalDriver（进入流 B）。
 5. 输出：向 stream-bridge 发布一次 `goal.updated`（created）快照。
 
-分支：objective 为空 → 拒绝，不建记录。`replace` 语义见流 C 的 replace。
+分支：objective 为空 → 拒绝，不建记录。`CreateGoalInput.replace` 是"已有 goal 时允许新建覆盖"的布尔开关；它不同于 `/goal replace` 路由到的 `replaceObjective`。
 
 ### 流 B：续跑循环（GoalDriver，模块内主循环）
 
@@ -103,7 +103,7 @@ start ┌──────────────┐  预算到顶或安全阀
 
 1. 读 GoalStore 当前态；若 `active` 且（任一已设预算到顶 **或** 未设 turn 预算且续跑轮数达安全阀上限）→ markBlocked → 退出循环。
 2. incrementTurn（追加记录：turn 计数、wall-clock 锚点）。
-3. 渲染续跑提醒文本（流 D）：首轮=objective、后续轮=GOAL_CONTINUATION_PROMPT + 进度 + 预算报告。
+3. 渲染续跑提醒文本（流 D）：首轮=objective、后续轮=GOAL_CONTINUATION_CORE + 进度 + 预算报告。
 4. 起一轮续跑 Run：调用 `run-manager.create(...)`，输入为**续跑提醒文本作为 user 消息**；`waitForCompletion` 等待 `RunCompletion`。该 Run 执行期间，模型可见 goal 工具。token 消耗由 GoalDriver 在 Run 完成后 `recordTokenUsage`。
 5. 依 `RunCompletion.status` 分支（把执行结果翻译成状态迁移）：
    - `succeeded` 且 goal 仍 `active` → 回到步骤 1，续下一轮。
@@ -121,18 +121,19 @@ start ┌──────────────┐  预算到顶或安全阀
 3. 模块内迁移：`UpdateGoal(complete/blocked/active)` / `GetGoal`（只读）/ `SetGoalBudget`（opt-in 设预算）/ `CreateGoal`（prose 自主请求）。
 4. 追加记录 + 发布快照；驱动循环在本轮 Run 完成后（流 B 步骤 5）读到新状态并据此续跑或退出。
 
-约束：`SetGoalBudget` 是 opt-in 的，仅当用户明确要求时模型才调用。`replace` 亦经此类迁移替换 objective。
+约束：`SetGoalBudget` 是 opt-in 的，仅当用户明确要求时模型才调用。`replaceObjective` 亦经此类迁移替换 objective；`CreateGoalInput.replace` 仅表示"创建时允许覆盖已有 goal"。
 
-### 流 D：续跑提醒文本（模块内产出 → 写入持久 history）
+### 流 D：续跑提醒与 light note（模块内产出 → 不同入口消费）
 
-1. GoalDriver 在起续跑 Run 前，调用 GoalInjector 依 GoalStore 当前态渲染提醒文本。
-2. 模块内：GoalInjector 按状态产出——`active`（全量提醒 + 进度 + 预算报告 + 自审指令）/ `paused`·`blocked`（轻提醒）/ 无 goal（空）。以 `<untrusted_objective>` 包裹并转义。
-3. 输出：一段文本，作为续跑 Run 的 **user 消息**经 run-manager.create 输入写入持久 history。
-4. 关键性质：**每轮重新渲染、作为 user 消息 append 到 history**——旧提醒可被 compact 压缩，最新提醒在尾部。进程崩溃后 history 仍承载 goal 上下文。
+1. `active`：GoalDriver 在起续跑 Run 前调用 `renderGoalTurnPrompt`，渲染全量提醒（objective + 进度 + 预算报告 + 自审指令）。
+2. `active` 输出：全量提醒作为续跑 Run 的 **user 消息**经 run-manager.create 输入写入持久 history。
+3. `paused` / `blocked`：普通用户 prompt 提交前，adapter 调用 `renderGoalContextNote`，渲染 light note（说明 goal 存在、不会自动推进、可 `/goal resume`）。
+4. `paused` / `blocked` 输出：light note 只作为本次普通用户 Run 的模型可见前缀；UI transcript 仍展示用户原始输入，不触发 GoalDriver，不自动恢复 goal。
+5. 关键性质：active 续跑提醒**每轮重新渲染、作为 user 消息 append 到 history**——旧提醒可被 compact 压缩，最新提醒在尾部。light note 只补充 paused/blocked goal 的可见性，不承担续跑职责。
 
 ### 流 E：插话中断（不做 auto-resume）
 
-1. goal 续跑期间用户发来普通消息（模块外）→ 宿主以 interrupt-current 起用户 Run → goal 的续跑 Run 被 `cancelled`。
+1. goal 续跑期间用户发来普通消息（模块外）→ CLI in-process adapter 识别当前 in-flight owner 是 `goal`，等待 goal run 注册完成后取消该 run，再启动用户 Run → goal 的续跑 Run 被 `cancelled`。对用户可见语义是 interrupt-current，但实现点在 adapter 边界，而不是给普通 user/user prompt 全局启用 run-manager `interrupt-current`。
 2. 流 B 步骤 5 捕获 `cancelled` → GoalStore pause（`terminalReason: "interrupted"`）→ 退出循环。
 3. 用户的小任务在**同一 session** 中执行，共享 message history。模型能看到 goal 的工作 + 用户的插话。
 4. 用户完成小任务后，自行 `/goal resume` → goal 回 active → GoalDriver 重入续跑循环（回到流 B）。
@@ -157,9 +158,9 @@ start ┌──────────────┐  预算到顶或安全阀
 
 | 逻辑接口 | 输入含义 | 输出含义 | 同步性 | 服务的数据流 |
 |---|---|---|---|---|
-| 生命周期操作（create / status / pause / resume / cancel / replace） | sessionId + objective/criterion/budget（按操作） | 迁移结果 / 当前快照 / 错误 | 同步迁移，create·resume 触发异步驱动 | A, C, E, H |
+| 生命周期操作（create / status / pause / resume / cancel / replaceObjective；命令名为 `/goal replace`） | sessionId + objective/criterion/budget（按操作） | 迁移结果 / 当前快照 / 错误 | 同步迁移，create·resume 触发异步驱动 | A, C, E, H |
 | 驱动启动（ensure-driving） | sessionId | 确保 active goal 有恰一个 driver 在跑（幂等）；由 create 与 `/goal resume` 显式触发，不自动 | 异步 | A, B, UC-4 resume |
-| 注入渲染（render-injection） | sessionId | 本轮续跑提醒文本或"无" | 同步、纯函数 | D |
+| 注入渲染（render-injection） | sessionId + goal snapshot | active 续跑提醒、paused/blocked light note，或"无" | 同步、纯函数 | D |
 | 快照读取（get-snapshot） | sessionId | GoalSnapshot 或 null | 同步 | H |
 | goal 工具（CreateGoal/UpdateGoal/GetGoal/SetGoalBudget） | 工具参数 + ctx.sessionId | 迁移后的快照 / 只读快照 | 同步迁移 | C |
 | 重建与归一（rebuild / normalizeAfterReplay） | sessionId（及记录来源） | 重建后的 store 态 | 异步 | G |
@@ -168,12 +169,12 @@ start ┌──────────────┐  预算到顶或安全阀
 
 | 依赖接口 | goals 期望的语义 | 同步性 | 风险 |
 |---|---|---|---|
-| run-manager `create` + `waitForCompletion` | 起一轮续跑 Run（输入含 user 消息）并返回 `{status, terminalReason}`；并发由 `MultitaskStrategy` 决定，用户插话用 `interrupt-current` | 异步 | 契约需稳定；取消无需区分 cancelReason（所有 cancelled → pause） |
+| run-manager `create` + `waitForCompletion` | 起一轮续跑 Run（输入含 user 消息）并返回 `{status, terminalReason, usage?}`；goal run 被 adapter 取消后以 `cancelled` completion 收敛 | 异步 | 契约需稳定；取消无需区分 cancelReason（所有 cancelled → pause） |
 | core/message（经 run-manager 输入） | 续跑提醒文本作为 user 消息写入持久 history，由现有消息系统持久化、由 context 按既有规则组装与压缩 | 同步写入 | 无新风险，复用现有机制 |
 | services/database | 追加 GoalRecord、按 session 读取重建 | 异步 | schema 演进需兼容重放 |
 | stream-bridge | 发布 goal 快照/变更事件 | 异步、尽力而为 | 观察者缺失不得影响状态权威 |
 
-> 说明：GoalDriver 通过 **run-manager 层**（而非 UI 级 submitPrompt）驱动续跑 Run——续跑轮是"系统发起"而非"用户发起"，不应经过用户 prompt 的会话/标题/promptInFlight 逻辑。整个 goal 驱动从宿主视角是**一段持续 in-flight 的忙碌期**，active 结束时释放。
+> 说明：GoalDriver 的抽象依赖是"提交一轮续跑 Run 并等待 completion"。CLI in-process adapter 目前用内部 submit 边界承接这件事，并以 `owner: "goal"` 与普通用户 prompt 分流，避免标题、UI transcript 与用户 prompt 串扰；其他宿主可直接对接 run-manager，但必须保留同样的 owner-aware interrupt 语义。
 
 ---
 

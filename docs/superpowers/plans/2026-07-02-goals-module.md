@@ -6,6 +6,10 @@
 
 **Architecture:** 纯逻辑核心（store 状态机 / budget 纯函数 / injection 文本渲染 / persistence 追加记录）放 `packages/ohbaby-agent/src/goals/`，GoalDriver 经 `GoalTurnRunner` 端口驱动每轮续跑；适配层（ui-inprocess）用现有 `submitPromptInternal` 实现该端口（续跑提醒作为 user 消息写入 history + TUI 流式渲染免费获得）。设计规格见 `docs/goals/*.md`（7 份，已收敛）。
 
+**2026-07-03 修订:** 本计划后段关于 "`promptInFlight` 守卫无需额外并发处理，用户按 Esc 才是插话中断路径" 的说明已被 `docs/goals/2026-07-03-interrupt-current-light-note.md` 取代。最终行为以 `docs/goals/*` 为准：普通用户 prompt 可中断 active goal run，goal 转 `paused`，用户 run 先执行；paused/blocked goal 需要 light note 注入，恢复仍只有 `/goal resume`。
+
+**2026-07-03 术语同步:** store 内部迁移方法名以 `replaceObjective` 为准；`CreateGoalInput.replace` 仍是"创建时允许覆盖已有 goal"的布尔字段，命令层/backend 的 `replace` 仍表示 `/goal replace` 这个用户命令。
+
 **Tech Stack:** TypeScript (strict, ESM `.js` 后缀 import)、vitest、better-sqlite 风格 `services/database`、现有 tool-scheduler / commands / run-manager 基础设施。
 
 ## Global Constraints
@@ -154,7 +158,7 @@ export const GOAL_SAFETY_CAP_TURNS = 200;
 /** 任一预算维度用量占比达到该阈值时，提醒文本提示模型收敛。 */
 export const GOAL_BUDGET_CONVERGING_RATIO = 0.75;
 
-/** 续跑提醒的自审指令核心（借鉴 kimi GOAL_CONTINUATION_PROMPT）。 */
+/** 续跑提醒的自审指令核心。 */
 export const GOAL_CONTINUATION_CORE = [
   "Continue working toward the active goal.",
   "Keep the self-audit brief. Do not explore unrelated interpretations once the goal can be",
@@ -1856,7 +1860,12 @@ import 增加：`import { GoalService, InMemoryGoalPersistence, type GoalPersist
       promptText: string,
     ): Promise<{ status: "succeeded" | "failed" | "cancelled"; error?: string }> {
       try {
-        const completion = await submitPromptInternal(promptText, { sessionId });
+        await waitForPromptIdle();
+        const completion = await submitPromptInternal(promptText, {
+          owner: "goal",
+          sessionId,
+          suppressGoalContextNote: true,
+        });
         return { status: completion?.status ?? "succeeded" };
       } catch (error) {
         return { error: getErrorMessage(error), status: "failed" };
@@ -1904,7 +1913,7 @@ import 增加：`import { GoalService, InMemoryGoalPersistence, type GoalPersist
 
 注意事项（实现时核对）：
 - `stateStore.readSnapshot()` 的 activeSessionId 字段名以 stateStore 实际类型为准（此文件内已有 `stateStore.setActiveSessionId` 用法，读取侧对应字段照实取）。
-- `promptInFlight` 守卫与 goal 续跑的关系：driver 串行调用 `submitPromptInternal`，每轮之间释放；用户在续跑轮进行中按 Esc → run cancelled → driver pause goal —— 这正是设计中的"插话中断"路径，无需额外并发处理。若 runner 调用时恰有用户 prompt 在跑，`submitPromptInternal` 抛 "A prompt is already running" → runner 返回 failed → goal pause（runtime error），可 `/goal resume`，行为安全。
+- `promptInFlight` 守卫与 goal 续跑的关系（2026-07-03 修订）：adapter 需要区分 prompt owner。用户普通 prompt 遇到 in-flight goal prompt 时，应先取消 goal run、等待原 projection 收敛，再执行用户 prompt；goal 转 `paused(interrupted)`，不要求用户先按 Esc。反向场景中，goal driver 遇到正在执行的用户 prompt 时等待 idle，不抢占用户 run。
 
 - [ ] **Step 4: 类型检查 + 全量单测**
 
