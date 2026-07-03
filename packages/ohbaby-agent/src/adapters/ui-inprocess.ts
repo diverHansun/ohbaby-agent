@@ -38,6 +38,7 @@ import type {
   CommandModelSummary,
   CommandSessionSummary,
 } from "../commands/index.js";
+import { renderGoalContextNote } from "../goals/index.js";
 import type { GoalPersistencePort, GoalTurnOutcome } from "../goals/index.js";
 import { createCommandService } from "../commands/index.js";
 import { createInteractionBroker } from "../runtime/interaction-broker/index.js";
@@ -141,6 +142,13 @@ const EMPTY_SNAPSHOT: UiSnapshot = {
 };
 
 type UiPermissionState = NonNullable<UiSnapshot["permission"]>;
+
+type PromptOwner = "user" | "goal";
+
+type InternalSubmitPromptOptions = SubmitPromptOptions & {
+  readonly owner?: PromptOwner;
+  readonly suppressGoalContextNote?: boolean;
+};
 
 export interface InProcessUiBackendOptions {
   readonly afterPromptSubmitSettled?: () => Promise<void> | void;
@@ -336,7 +344,11 @@ export function createInProcessUiBackendClient(
     nowMs: (): number => Date.now(),
   });
   let promptInFlight = false;
+  let promptInFlightOwner: PromptOwner | undefined;
+  let promptInFlightSessionId: string | undefined;
+  let promptRunReady = false;
   const promptIdleWaiters = new Set<() => void>();
+  const promptRunReadyWaiters = new Set<() => void>();
   let configSaveQueue: Promise<void> = Promise.resolve();
   let skillRegistryPromise: Promise<SkillRegistry> | undefined;
   const pendingPermissionSessions = new Map<string, string>();
@@ -378,7 +390,9 @@ export function createInProcessUiBackendClient(
           try {
             await waitForPromptIdle();
             const completion = await submitPromptInternal(promptText, {
+              owner: "goal",
               sessionId,
+              suppressGoalContextNote: true,
             });
             return goalOutcomeFromRunCompletion(completion);
           } catch (error) {
@@ -1184,14 +1198,16 @@ export function createInProcessUiBackendClient(
 
   async function submitPromptInternal(
     text: string,
-    submitOptions?: SubmitPromptOptions,
+    submitOptions?: InternalSubmitPromptOptions,
   ): Promise<RunCompletion | undefined> {
-    if (promptInFlight) {
-      throw new Error("A prompt is already running");
-    }
+    const owner = submitOptions?.owner ?? "user";
+    await waitForPromptSlot(owner);
     assertStateStoreWritable();
     await options.beforePromptSubmit?.();
     promptInFlight = true;
+    promptInFlightOwner = owner;
+    promptInFlightSessionId = submitOptions?.sessionId;
+    promptRunReady = false;
     const createdAt = timestamp();
     let projection: RunStreamProjection | undefined;
     let submittedSessionId: string | undefined;
@@ -1253,6 +1269,16 @@ export function createInProcessUiBackendClient(
       }
       const resolvedProjectRoot = session.projectRoot ?? baseProjectRoot;
       submittedSessionId = session.id;
+      promptInFlightSessionId = session.id;
+
+      const modelPromptText = await promptTextForModel({
+        owner,
+        runtime,
+        sessionId: session.id,
+        suppressGoalContextNote:
+          submitOptions?.suppressGoalContextNote === true,
+        text,
+      });
 
       const userMessage = createTextMessage({
         id: messageIds.next(),
@@ -1280,7 +1306,7 @@ export function createInProcessUiBackendClient(
       try {
         const result = await runtime.startSession({
           agentName,
-          prompt: text,
+          prompt: modelPromptText,
           projectRoot: resolvedProjectRoot,
           runId,
           sessionId: session.id,
@@ -1325,6 +1351,8 @@ export function createInProcessUiBackendClient(
       }
 
       projection.start();
+      promptRunReady = true;
+      notifyPromptRunReady();
 
       try {
         const completion = await runtime.runManager.waitForCompletion(runId);
@@ -1354,6 +1382,9 @@ export function createInProcessUiBackendClient(
         await syncSessionStatsBestEffort(submittedSessionId);
       }
       promptInFlight = false;
+      promptInFlightOwner = undefined;
+      promptInFlightSessionId = undefined;
+      promptRunReady = false;
       runtimeController.clearActiveRunId();
       try {
         await options.afterPromptSubmitSettled?.();
@@ -1371,6 +1402,50 @@ export function createInProcessUiBackendClient(
     }
   }
 
+  function notifyPromptRunReady(): void {
+    const waiters = [...promptRunReadyWaiters];
+    promptRunReadyWaiters.clear();
+    for (const resolve of waiters) {
+      resolve();
+    }
+  }
+
+  async function waitForPromptSlot(owner: PromptOwner): Promise<void> {
+    for (;;) {
+      if (!promptInFlight) {
+        return;
+      }
+      if (owner === "user" && promptInFlightOwner === "goal") {
+        await interruptGoalPromptInFlight();
+        continue;
+      }
+      if (owner === "goal" && promptInFlightOwner === "user") {
+        await waitForPromptIdle();
+        continue;
+      }
+      throw new Error("A prompt is already running");
+    }
+  }
+
+  async function interruptGoalPromptInFlight(): Promise<void> {
+    const sessionId = promptInFlightSessionId;
+    try {
+      await waitForPromptRunReadyOrIdle();
+      const runId = runtimeController.getActiveRunId();
+      if (runId) {
+        await runtimeController.abortPromptRun(runId);
+      }
+      if (sessionId) {
+        const runtime = await runtimeController.getRuntimeForPrompt();
+        await runtime.goals
+          .pauseGoal(sessionId, "interrupted")
+          .catch(() => undefined);
+      }
+    } finally {
+      await waitForPromptIdle();
+    }
+  }
+
   async function waitForPromptIdle(): Promise<void> {
     if (!promptInFlight) {
       return;
@@ -1378,6 +1453,47 @@ export function createInProcessUiBackendClient(
     await new Promise<void>((resolve) => {
       promptIdleWaiters.add(resolve);
     });
+  }
+
+  async function waitForPromptRunReadyOrIdle(): Promise<void> {
+    if (!promptInFlight || promptRunReady) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const resolveOnce = (): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        promptRunReadyWaiters.delete(resolveOnce);
+        promptIdleWaiters.delete(resolveOnce);
+        resolve();
+      };
+      promptRunReadyWaiters.add(resolveOnce);
+      promptIdleWaiters.add(resolveOnce);
+    });
+  }
+
+  async function promptTextForModel(input: {
+    readonly owner: PromptOwner;
+    readonly runtime: UiRuntimeComposition;
+    readonly sessionId: string;
+    readonly suppressGoalContextNote: boolean;
+    readonly text: string;
+  }): Promise<string> {
+    if (input.owner !== "user" || input.suppressGoalContextNote) {
+      return input.text;
+    }
+    const snapshot = await input.runtime.goals.getSnapshot(input.sessionId);
+    if (snapshot === null) {
+      return input.text;
+    }
+    const note = renderGoalContextNote(snapshot);
+    if (note === undefined) {
+      return input.text;
+    }
+    return `${note}\n\nCurrent user request:\n${input.text}`;
   }
 
   async function connectModelInternal(

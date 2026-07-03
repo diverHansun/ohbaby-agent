@@ -114,9 +114,12 @@ export class GoalService {
     return snapshot;
   }
 
-  async pauseGoal(sessionId: string): Promise<GoalSnapshot> {
+  async pauseGoal(
+    sessionId: string,
+    reason = "Paused by user",
+  ): Promise<GoalSnapshot> {
     const store = await this.storeFor(sessionId);
-    return store.pause("Paused by user", "user");
+    return store.pause(reason, "user");
   }
 
   async cancelGoal(sessionId: string): Promise<void> {

@@ -8,6 +8,7 @@ export { GoalError, type GoalErrorCode } from "./errors.js";
 export {
   escapeUntrustedText,
   formatGoalStatusLines,
+  renderGoalContextNote,
   renderGoalTurnPrompt,
 } from "./injection.js";
 export {

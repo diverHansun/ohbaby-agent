@@ -6,7 +6,7 @@ export const GOAL_SAFETY_CAP_TURNS = 200;
 /** 任一预算维度用量占比达到该阈值时，提醒文本提示模型收敛。 */
 export const GOAL_BUDGET_CONVERGING_RATIO = 0.75;
 
-/** 续跑提醒的自审指令核心（借鉴 kimi GOAL_CONTINUATION_PROMPT）。 */
+/** 续跑提醒的自审指令核心。 */
 export const GOAL_CONTINUATION_CORE = [
   "Continue working toward the active goal.",
   "Keep the self-audit brief. Do not explore unrelated interpretations once the goal can be",

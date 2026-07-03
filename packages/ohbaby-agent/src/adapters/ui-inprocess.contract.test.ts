@@ -35,6 +35,7 @@ import {
 } from "../services/session/index.js";
 import { AgentManager, AgentRegistry } from "../agents/index.js";
 import type { AgentsConfig, SubagentRole } from "../agents/index.js";
+import { InMemoryGoalPersistence } from "../goals/index.js";
 import {
   createDatabaseRunLedger,
   createInMemoryRunLedger,
@@ -347,6 +348,66 @@ function createSequentialFakeLLMClient(
       ...config,
     },
   };
+}
+
+function createInterruptibleGoalLLMClient(
+  requests: InterfaceProviderRequest[],
+  goalStarted: Deferred<undefined>,
+): LLMClientInstance<FakeSdkClient> {
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isTitleGenerationRequest(request)) {
+          return Promise.resolve(createTitleProviderStream(request));
+        }
+        requests.push(request);
+        const lastText = lastRequestMessageText(request);
+        if (lastText.includes("goal mode")) {
+          goalStarted.resolve(undefined);
+          return Promise.resolve(createAbortableProviderStream(request.signal));
+        }
+        return Promise.resolve(
+          createProviderStream([
+            { textDelta: "User prompt handled.", finishReason: "stop" },
+          ]),
+        );
+      },
+      isAbortError(error: unknown): boolean {
+        return error instanceof Error && error.name === "AbortError";
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
+      baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
+class DelayedFirstRuntimeAgentManager extends AgentManager {
+  readonly entered = createDeferred<undefined>();
+  readonly release = createDeferred<undefined>();
+  private calls = 0;
+
+  override async getRuntimeAgent(
+    ...args: Parameters<AgentManager["getRuntimeAgent"]>
+  ): ReturnType<AgentManager["getRuntimeAgent"]> {
+    this.calls += 1;
+    if (this.calls === 1) {
+      this.entered.resolve(undefined);
+      await this.release.promise;
+    }
+    return super.getRuntimeAgent(...args);
+  }
 }
 
 function contentToText(content: unknown): string {
@@ -3961,6 +4022,7 @@ describe("createInProcessUiBackendClient", () => {
     await completed;
 
     expect(requests.length).toBeGreaterThanOrEqual(3);
+    expect(lastRequestMessageText(requests[1])).not.toContain("goal mode");
     expect(lastRequestMessageText(requests[2])).toContain(
       "You are starting work under a goal",
     );
@@ -3976,6 +4038,252 @@ describe("createInProcessUiBackendClient", () => {
       ),
     ).toBe(true);
   });
+
+  it("lets a user prompt interrupt an active goal run and injects a paused light note", async () => {
+    const goalStarted = createDeferred<undefined>();
+    const requests: InterfaceProviderRequest[] = [];
+    const client = createInProcessUiBackendClient({
+      llmClient: createInterruptibleGoalLLMClient(requests, goalStarted),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_goal_interrupt_new_session",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "tui",
+    });
+
+    await client.executeCommand({
+      argv: ["finish", "the", "interruptible", "goal"],
+      clientInvocationId: "inv_goal_interrupt_create",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal finish the interruptible goal",
+      rawArgs: "finish the interruptible goal",
+      surface: "tui",
+    });
+    const goalSessionId = (await client.getSnapshot()).activeSessionId;
+    expect(goalSessionId).not.toBeNull();
+    await goalStarted.promise;
+
+    try {
+      await withTimeout(
+        client.submitPrompt("What is the current progress?", {
+          sessionId: goalSessionId ?? undefined,
+        }),
+        2_000,
+        "user prompt did not run after interrupting the goal",
+      );
+    } finally {
+      await client.abortRun().catch(() => undefined);
+    }
+
+    await client.executeCommand({
+      argv: ["status"],
+      clientInvocationId: "inv_goal_interrupt_status",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal status",
+      rawArgs: "status",
+      surface: "tui",
+    });
+
+    const statusOutput = events.find(
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "command.result.delivered" }> =>
+        event.type === "command.result.delivered" &&
+        event.clientInvocationId === "inv_goal_interrupt_status" &&
+        event.output?.kind === "text",
+    )?.output;
+    expect(statusOutput?.kind).toBe("text");
+    expect(
+      statusOutput?.kind === "text" ? statusOutput.text : "",
+    ).toContain("Status: paused (interrupted)");
+
+    expect(requests).toHaveLength(2);
+    expect(lastRequestMessageText(requests[0])).toContain("goal mode");
+    expect(lastRequestMessageText(requests[1])).toContain("currently paused");
+    expect(lastRequestMessageText(requests[1])).toContain("/goal resume");
+    expect(lastRequestMessageText(requests[1])).toContain(
+      "What is the current progress?",
+    );
+
+    const snapshot = await client.getSnapshot();
+    const userTexts = snapshot.sessions.flatMap((session) =>
+      session.messages.flatMap((message) =>
+        message.role === "user"
+          ? message.parts.flatMap((part) =>
+              part.type === "text" ? [part.text] : [],
+            )
+          : [],
+      ),
+    );
+    expect(userTexts).toContain("What is the current progress?");
+    expect(
+      userTexts.some((text) => text.includes("currently paused")),
+    ).toBe(false);
+  });
+
+  it("waits for a starting goal run to register before interrupting it", async () => {
+    const goalStarted = createDeferred<undefined>();
+    const requests: InterfaceProviderRequest[] = [];
+    const agentManager = new DelayedFirstRuntimeAgentManager();
+    const client = createInProcessUiBackendClient({
+      agentManager,
+      llmClient: createInterruptibleGoalLLMClient(requests, goalStarted),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_goal_starting_interrupt_new_session",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "tui",
+    });
+
+    await client.executeCommand({
+      argv: ["finish", "the", "starting", "goal"],
+      clientInvocationId: "inv_goal_starting_interrupt_create",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal finish the starting goal",
+      rawArgs: "finish the starting goal",
+      surface: "tui",
+    });
+    const goalSessionId = (await client.getSnapshot()).activeSessionId;
+    expect(goalSessionId).not.toBeNull();
+    await agentManager.entered.promise;
+
+    const userPrompt = withTimeout(
+      client.submitPrompt("Interrupt before provider starts", {
+        sessionId: goalSessionId ?? undefined,
+      }),
+      2_000,
+      "user prompt did not run after interrupting a starting goal",
+    );
+    await Promise.resolve();
+    expect(requests).toHaveLength(0);
+    agentManager.release.resolve(undefined);
+    try {
+      await userPrompt;
+    } finally {
+      await client.abortRun().catch(() => undefined);
+    }
+
+    await client.executeCommand({
+      argv: ["status"],
+      clientInvocationId: "inv_goal_starting_interrupt_status",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal status",
+      rawArgs: "status",
+      surface: "tui",
+    });
+    const statusOutput = events.find(
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "command.result.delivered" }> =>
+        event.type === "command.result.delivered" &&
+        event.clientInvocationId === "inv_goal_starting_interrupt_status" &&
+        event.output?.kind === "text",
+    )?.output;
+    expect(statusOutput?.kind).toBe("text");
+    expect(
+      statusOutput?.kind === "text" ? statusOutput.text : "",
+    ).toContain("Status: paused (interrupted)");
+
+    const userRequest = requests.find((request) =>
+      lastRequestMessageText(request).includes("Interrupt before provider starts"),
+    );
+    expect(userRequest).toBeDefined();
+    expect(lastRequestMessageText(userRequest!)).toContain("currently paused");
+    expect(lastRequestMessageText(userRequest!)).toContain("/goal resume");
+  });
+
+  it.each([
+    {
+      reason: "interrupted",
+      status: "paused" as const,
+    },
+    {
+      reason: "needs user input",
+      status: "blocked" as const,
+    },
+  ])(
+    "injects a $status goal light note into ordinary prompts without resuming the goal",
+    async ({ reason, status }) => {
+      const requests: InterfaceProviderRequest[] = [];
+      const goalPersistence = new InMemoryGoalPersistence(() => 1);
+      await goalPersistence.append("session_1", {
+        actor: "user",
+        goalId: `goal_${status}`,
+        objective: `${status} goal objective`,
+        type: "create",
+      });
+      await goalPersistence.append("session_1", {
+        actor: status === "paused" ? "user" : "runtime",
+        goalId: `goal_${status}`,
+        reason,
+        status,
+        type: "update",
+      });
+      const client = createInProcessUiBackendClient({
+        goalPersistence,
+        initialSnapshot: createInitialSnapshotWithTwoSessions(),
+        llmClient: createSequentialFakeLLMClient(
+          [[{ textDelta: "handled", finishReason: "stop" }]],
+          requests,
+        ),
+      });
+
+      await client.submitPrompt(`Discuss the ${status} goal`, {
+        sessionId: "session_1",
+      });
+      await client.executeCommand({
+        argv: ["status"],
+        clientInvocationId: `inv_goal_${status}_light_note_status`,
+        commandId: "goal",
+        path: ["goal"],
+        raw: "/goal status",
+        rawArgs: "status",
+        surface: "tui",
+      });
+
+      expect(requests).toHaveLength(1);
+      const promptText = lastRequestMessageText(requests[0]);
+      expect(promptText).toContain(`currently ${status}`);
+      expect(promptText).toContain(`${status} goal objective`);
+      expect(promptText).toContain("/goal resume");
+      expect(promptText).toContain(`Discuss the ${status} goal`);
+
+      const snapshot = await client.getSnapshot();
+      const userTexts = snapshot.sessions.flatMap((session) =>
+        session.messages.flatMap((message) =>
+          message.role === "user"
+            ? message.parts.flatMap((part) =>
+                part.type === "text" ? [part.text] : [],
+              )
+            : [],
+        ),
+      );
+      expect(userTexts).toContain(`Discuss the ${status} goal`);
+      expect(userTexts.some((text) => text.includes(`currently ${status}`))).toBe(
+        false,
+      );
+    },
+  );
 
   it("lists user-invocable project skills as slash commands", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-skill-command-"));

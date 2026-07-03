@@ -93,27 +93,7 @@ export class GoalStore {
           record.status === "active" ? undefined : record.reason;
       }
     }
-    // 归一化：回放出的 active 不可能仍在被驱动（驱动循环只活在进程内），
-    // 一律降级 paused，绝不让 goal 在无人知情时"自己又跑起来"。
-    const state = store.state;
-    if (state !== undefined) {
-      state.wallClockResumedAt = undefined;
-      if (state.status === "active") {
-        await store.applyUpdate(
-          { reason: RESUME_NORMALIZE_REASON, status: "paused" },
-          "runtime",
-          {
-            kind: "lifecycle",
-            reason: RESUME_NORMALIZE_REASON,
-            status: "paused",
-          },
-        );
-      } else if (state.status === "complete") {
-        // complete 是瞬态，落盘残留说明 clear 没写成，补清。
-        await store.appendRecord({ goalId: state.goalId, type: "clear" });
-        store.state = undefined;
-      }
-    }
+    await store.normalizeAfterReplay();
     return store;
   }
 
@@ -297,6 +277,30 @@ export class GoalStore {
     const snapshot = this.toSnapshot(state);
     this.onChange?.(snapshot, { actor, kind: "lifecycle" });
     return snapshot;
+  }
+
+  /** 恢复归一化：进程内驱动已不存在，active 只能安全降级为 paused。 */
+  private async normalizeAfterReplay(): Promise<void> {
+    const state = this.state;
+    if (state === undefined) return;
+    state.wallClockResumedAt = undefined;
+    if (state.status === "active") {
+      await this.applyUpdate(
+        { reason: RESUME_NORMALIZE_REASON, status: "paused" },
+        "runtime",
+        {
+          kind: "lifecycle",
+          reason: RESUME_NORMALIZE_REASON,
+          status: "paused",
+        },
+      );
+      return;
+    }
+    if (state.status === "complete") {
+      // complete 是瞬态，落盘残留说明 clear 没写成，补清。
+      await this.appendRecord({ goalId: state.goalId, type: "clear" });
+      this.state = undefined;
+    }
   }
 
   private requireState(): GoalState {
