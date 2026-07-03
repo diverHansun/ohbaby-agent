@@ -6,9 +6,11 @@
 
 **Architecture:** 纯逻辑核心（store 状态机 / budget 纯函数 / injection 文本渲染 / persistence 追加记录）放 `packages/ohbaby-agent/src/goals/`，GoalDriver 经 `GoalTurnRunner` 端口驱动每轮续跑；适配层（ui-inprocess）用现有 `submitPromptInternal` 实现该端口（续跑提醒作为 user 消息写入 history + TUI 流式渲染免费获得）。设计规格见 `docs/goals/*.md`（7 份，已收敛）。
 
-**2026-07-03 修订:** 本计划后段关于 "`promptInFlight` 守卫无需额外并发处理，用户按 Esc 才是插话中断路径" 的说明已被 `docs/goals/2026-07-03-interrupt-current-light-note.md` 取代。最终行为以 `docs/goals/*` 为准：普通用户 prompt 可中断 active goal run，goal 转 `paused`，用户 run 先执行；paused/blocked goal 需要 light note 注入，恢复仍只有 `/goal resume`。
+**2026-07-03 修订:** 本计划后段关于 "`promptInFlight` 守卫无需额外并发处理，用户按 Esc 才是插话中断路径" 的说明已被 `docs/goals/2026-07-03-interrupt-current-light-note.md` 取代。最终行为以 `docs/goals/*` 为准：普通用户 prompt 可中断 active goal run，goal 转 `paused`，用户 run 先执行；paused goal 需要 light note 注入，恢复仍只有 `/goal resume`。
 
 **2026-07-03 术语同步:** store 内部迁移方法名以 `replaceObjective` 为准；`CreateGoalInput.replace` 仍是"创建时允许覆盖已有 goal"的布尔字段，命令层/backend 的 `replace` 仍表示 `/goal replace` 这个用户命令。
+
+**2026-07-03 状态契约同步:** `docs/goals/2026-07-03-state-contract-simplification.md` 取代本计划中关于 `blocked` 驻留态与 `terminalReason` 字段的旧描述。当前状态模型为 `active` / `paused` / `complete`(瞬态清除) / `null`，所有原 `blocked` 场景统一为 `paused + pauseReason`。
 
 **Tech Stack:** TypeScript (strict, ESM `.js` 后缀 import)、vitest、better-sqlite 风格 `services/database`、现有 tool-scheduler / commands / run-manager 基础设施。
 
