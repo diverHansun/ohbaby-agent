@@ -249,7 +249,7 @@ export class GoalStore {
   /** 仅 active 时计数；把"模型宣告 complete 的那一轮"也计入统计。 */
   async incrementTurn(): Promise<void> {
     const state = this.state;
-    if (state === undefined || state.status !== "active") return;
+    if (state?.status !== "active") return;
     await this.appendRecord({
       goalId: state.goalId,
       turnsUsed: state.turnsUsed + 1,
@@ -260,7 +260,7 @@ export class GoalStore {
 
   async recordTokenUsage(tokens: number): Promise<void> {
     const state = this.state;
-    if (state === undefined || state.status !== "active" || tokens <= 0) return;
+    if (state?.status !== "active" || tokens <= 0) return;
     await this.appendRecord({
       goalId: state.goalId,
       tokensUsed: state.tokensUsed + tokens,
