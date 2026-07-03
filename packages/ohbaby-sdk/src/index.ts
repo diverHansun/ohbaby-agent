@@ -33,6 +33,7 @@ export type {
 export type {
   UiEvent,
   UiContextWindowUpdatedEvent,
+  UiGoalUpdatedEvent,
   UiMessageAppendedEvent,
   UiMessagePartDeltaEvent,
   UiMessageUpdatedEvent,
@@ -89,6 +90,9 @@ export type {
 export type {
   UiMessage,
   UiMessagePart,
+  UiGoal,
+  UiGoalStatus,
+  UiSessionGoal,
   UiPermissionChoice,
   UiPermissionLevel,
   UiPermissionMode,

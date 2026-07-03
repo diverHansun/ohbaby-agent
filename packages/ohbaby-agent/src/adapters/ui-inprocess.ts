@@ -14,6 +14,7 @@ import type {
   UiCurrentModelConfig,
   UiEvent,
   UiEventHandler,
+  UiGoal,
   UiInteractionResponse,
   UiMessage,
   UiNotice,
@@ -23,6 +24,7 @@ import type {
   UiRunStatus,
   UiSetSearchApiKeyInput,
   UiSetSearchApiKeyResult,
+  UiSessionGoal,
   UiSnapshot,
   UiSession,
 } from "ohbaby-sdk";
@@ -38,8 +40,16 @@ import type {
   CommandModelSummary,
   CommandSessionSummary,
 } from "../commands/index.js";
-import { renderGoalContextNote } from "../goals/index.js";
-import type { GoalPersistencePort, GoalTurnOutcome } from "../goals/index.js";
+import {
+  GoalStore,
+  InMemoryGoalPersistence,
+  renderGoalContextNote,
+} from "../goals/index.js";
+import type {
+  GoalPersistencePort,
+  GoalSnapshot,
+  GoalTurnOutcome,
+} from "../goals/index.js";
 import { createCommandService } from "../commands/index.js";
 import { createInteractionBroker } from "../runtime/interaction-broker/index.js";
 import {
@@ -317,9 +327,15 @@ export function createInProcessUiBackendClient(
       bus,
       store: createInMemoryMessageStore(),
     });
+  const goalPersistence =
+    options.goalPersistence ?? new InMemoryGoalPersistence();
   const interactionBroker = createInteractionBroker({ bus });
   const contextWindowUsage: ContextWindowUsageTracker =
     createContextWindowUsageTracker({ now: timestamp });
+  const uiGoalsBySession = new Map<string, UiGoal>();
+  for (const goal of initialSnapshot.goals ?? []) {
+    uiGoalsBySession.set(goal.sessionId, { ...goal.goal });
+  }
   const sessionIds = createIdFactory(
     "session",
     initialSnapshot.sessions.map((session) => session.id),
@@ -371,11 +387,14 @@ export function createInProcessUiBackendClient(
         ...(runtimeRunIdFactory === undefined
           ? {}
           : { createRunId: runtimeRunIdFactory }),
-        goalPersistence: options.goalPersistence,
+        goalPersistence,
         llmClient,
         messageManager,
         hookExecutor: options.hookExecutor,
         now: () => now().getTime(),
+        onGoalChange: (event) => {
+          publishGoalUpdated(event.sessionId, event.snapshot);
+        },
         onNotice: publishNotice,
         permission,
         permissionState,
@@ -472,6 +491,85 @@ export function createInProcessUiBackendClient(
 
   function publishNotice(notice: NoticeDraft): void {
     eventRouter.publishNotice(notice);
+  }
+
+  function goalSnapshotToUiGoal(snapshot: GoalSnapshot): UiGoal | null {
+    if (snapshot.status !== "active" && snapshot.status !== "paused") {
+      return null;
+    }
+    return {
+      objective: snapshot.objective,
+      ...(snapshot.pauseReason === undefined
+        ? {}
+        : { pauseReason: snapshot.pauseReason }),
+      status: snapshot.status,
+    };
+  }
+
+  function setGoalProjection(
+    sessionId: string,
+    snapshot: GoalSnapshot | null,
+  ): UiGoal | null {
+    const goal = snapshot === null ? null : goalSnapshotToUiGoal(snapshot);
+    if (goal === null) {
+      uiGoalsBySession.delete(sessionId);
+    } else {
+      uiGoalsBySession.set(sessionId, goal);
+    }
+    return goal;
+  }
+
+  function publishGoalUpdated(
+    sessionId: string,
+    snapshot: GoalSnapshot | null,
+  ): void {
+    const goal = setGoalProjection(sessionId, snapshot);
+    publish({
+      goal,
+      sessionId,
+      timestamp: now().getTime(),
+      type: "goal.updated",
+    });
+  }
+
+  function snapshotGoalsFor(
+    sessions: readonly UiSession[],
+  ): readonly UiSessionGoal[] {
+    const sessionIds = new Set(sessions.map((session) => session.id));
+    return Array.from(uiGoalsBySession.entries())
+      .filter(([sessionId]) => sessionIds.has(sessionId))
+      .map((entry) => ({
+        goal: { ...entry[1] },
+        sessionId: entry[0],
+      }));
+  }
+
+  async function syncGoalProjectionsFromSource(
+    sessions: readonly UiSession[],
+  ): Promise<void> {
+    const runtime = await runtimeController
+      .getRuntimeIfStarted()
+      ?.catch(() => undefined);
+    if (runtime !== undefined) {
+      await Promise.all(
+        sessions.map(async (session) => {
+          const snapshot = await runtime.goals.getSnapshot(session.id);
+          setGoalProjection(session.id, snapshot);
+        }),
+      );
+      return;
+    }
+
+    await Promise.all(
+      sessions.map(async (session) => {
+        const store = await GoalStore.rebuild({
+          persistence: goalPersistence,
+          sessionId: session.id,
+          now: () => now().getTime(),
+        });
+        setGoalProjection(session.id, store.getSnapshot());
+      }),
+    );
   }
 
   function publishSnapshotReplacement(): Promise<void> {
@@ -599,9 +697,12 @@ export function createInProcessUiBackendClient(
   async function readSnapshotWithPermission(): Promise<UiSnapshot> {
     const snapshot = await stateStore.readSnapshot();
     const contextWindowUsages = contextWindowUsage.list();
+    await syncGoalProjectionsFromSource(snapshot.sessions);
+    const goals = snapshotGoalsFor(snapshot.sessions);
     return {
       ...snapshot,
       ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
+      ...(goals.length > 0 || snapshot.goals !== undefined ? { goals } : {}),
       permission: currentPermissionState(),
     };
   }
@@ -1489,6 +1590,7 @@ export function createInProcessUiBackendClient(
     if (snapshot === null) {
       return input.text;
     }
+    publishGoalUpdated(input.sessionId, snapshot);
     const note = renderGoalContextNote(snapshot);
     if (note === undefined) {
       return input.text;
@@ -1645,7 +1747,9 @@ export function createInProcessUiBackendClient(
       return (await goalService()).setBudget(sessionId, limits);
     },
     async status(sessionId) {
-      return (await goalService()).getSnapshot(sessionId);
+      const snapshot = await (await goalService()).getSnapshot(sessionId);
+      publishGoalUpdated(sessionId, snapshot);
+      return snapshot;
     },
   };
 

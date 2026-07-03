@@ -382,6 +382,20 @@ function applyEventToSnapshot(
           "sessionId",
         ),
       };
+    case "goal.updated":
+      return {
+        ...snapshot,
+        goals:
+          event.goal === null
+            ? (snapshot.goals ?? []).filter(
+                (goal) => goal.sessionId !== event.sessionId,
+              )
+            : upsertByKey(
+                snapshot.goals ?? [],
+                { goal: event.goal, sessionId: event.sessionId },
+                "sessionId",
+              ),
+      };
     case "permission.requested":
       return {
         ...snapshot,

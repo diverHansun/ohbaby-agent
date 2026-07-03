@@ -49,6 +49,20 @@ export interface UiSnapshot {
   readonly status: UiRunStatus;
   readonly permission?: UiPermissionState;
   readonly contextWindowUsages?: readonly UiContextWindowUsage[];
+  readonly goals?: readonly UiSessionGoal[];
+}
+
+export type UiGoalStatus = "active" | "paused";
+
+export interface UiGoal {
+  readonly status: UiGoalStatus;
+  readonly objective: string;
+  readonly pauseReason?: string;
+}
+
+export interface UiSessionGoal {
+  readonly sessionId: string;
+  readonly goal: UiGoal;
 }
 
 export interface UiSession {

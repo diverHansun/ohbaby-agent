@@ -62,6 +62,46 @@ describe("ohbaby-web eventReducer", () => {
     });
   });
 
+  it("tracks goal updates in the snapshot contract", () => {
+    let state = replaceSnapshot(emptySnapshot(), 0);
+
+    state = reduceUiEvent(
+      state,
+      {
+        goal: {
+          objective: "finish backend contract",
+          pauseReason: "interrupted",
+          status: "paused",
+        },
+        sessionId: "session_1",
+        type: "goal.updated",
+      },
+      1,
+    );
+
+    expect(state.snapshot?.goals).toEqual([
+      expect.objectContaining({
+        goal: expect.objectContaining({
+          objective: "finish backend contract",
+          status: "paused",
+        }),
+        sessionId: "session_1",
+      }),
+    ]);
+
+    state = reduceUiEvent(
+      state,
+      {
+        goal: null,
+        sessionId: "session_1",
+        type: "goal.updated",
+      },
+      2,
+    );
+
+    expect(state.snapshot?.goals).toEqual([]);
+  });
+
   it("accumulates streaming deltas until a finalized message arrives", () => {
     let state = replaceSnapshot(emptySnapshot(), 0);
 

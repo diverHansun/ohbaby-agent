@@ -534,6 +534,39 @@ describe("TUI store event reducer", () => {
     expect(state.contextWindowUsages).toHaveLength(2);
   });
 
+  it("tracks goal updates without rendering them yet", () => {
+    let state = createStateFromSnapshot(snapshot());
+
+    state = applyTuiEvent(state, {
+      goal: {
+        objective: "finish sdk contract",
+        status: "active",
+      },
+      sessionId: "session_1",
+      type: "goal.updated",
+    });
+
+    expect(state.goals).toEqual([
+      expect.objectContaining({
+        goal: expect.objectContaining({
+          objective: "finish sdk contract",
+          status: "active",
+        }),
+        sessionId: "session_1",
+      }),
+    ]);
+    expect(state.snapshot.goals).toEqual(state.goals);
+
+    state = applyTuiEvent(state, {
+      goal: null,
+      sessionId: "session_1",
+      type: "goal.updated",
+    });
+
+    expect(state.goals).toEqual([]);
+    expect(state.snapshot.goals).toBeUndefined();
+  });
+
   it("does not show another session's cached context window usage after session switch", () => {
     const sessionOneUsage = contextWindowUsage("session_1", 38_400);
     let state = createStateFromSnapshot({

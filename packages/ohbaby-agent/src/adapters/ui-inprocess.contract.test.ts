@@ -3984,6 +3984,15 @@ describe("createInProcessUiBackendClient", () => {
     expect(
       goalCommandOutput?.kind === "text" ? goalCommandOutput.text : "",
     ).toContain("Goal started");
+    const goalEvents = events.filter(
+      (event): event is Extract<UiEvent, { type: "goal.updated" }> =>
+        event.type === "goal.updated",
+    );
+    expect(goalEvents[0]?.goal).toMatchObject({
+      objective: "fix all goal tests",
+      status: "active",
+    });
+    expect(goalEvents.at(-1)?.goal).toBeNull();
   });
 
   it("continues a model-created goal after the creating prompt settles", async () => {
@@ -4037,6 +4046,57 @@ describe("createInProcessUiBackendClient", () => {
           ),
       ),
     ).toBe(true);
+  });
+
+  it("projects a persisted active goal as paused on the first snapshot after restart", async () => {
+    const goalPersistence = new InMemoryGoalPersistence(() => 1);
+    await goalPersistence.append("session_1", {
+      actor: "user",
+      goalId: "goal_restart",
+      objective: "recover restart goal",
+      type: "create",
+    });
+    const client = createInProcessUiBackendClient({
+      goalPersistence,
+      initialSnapshot: createInitialSnapshotWithTwoSessions(),
+      llmClient: createSequentialFakeLLMClient([], []),
+    });
+
+    const snapshot = await client.getSnapshot();
+
+    expect(snapshot.goals).toEqual([
+      expect.objectContaining({
+        goal: expect.objectContaining({
+          objective: "recover restart goal",
+          pauseReason: "Paused after agent resume",
+          status: "paused",
+        }),
+        sessionId: "session_1",
+      }),
+    ]);
+  });
+
+  it("does not resurrect stale initial goal snapshot entries after the goal is cleared", async () => {
+    const client = createInProcessUiBackendClient({
+      goalPersistence: new InMemoryGoalPersistence(() => 1),
+      initialSnapshot: {
+        ...createInitialSnapshotWithTwoSessions(),
+        goals: [
+          {
+            goal: {
+              objective: "stale goal",
+              status: "paused",
+            },
+            sessionId: "session_1",
+          },
+        ],
+      },
+      llmClient: createSequentialFakeLLMClient([], []),
+    });
+
+    const snapshot = await client.getSnapshot();
+
+    expect(snapshot.goals).toEqual([]);
   });
 
   it("lets a user prompt interrupt an active goal run and injects a paused light note", async () => {
@@ -4103,9 +4163,9 @@ describe("createInProcessUiBackendClient", () => {
         event.output?.kind === "text",
     )?.output;
     expect(statusOutput?.kind).toBe("text");
-    expect(
-      statusOutput?.kind === "text" ? statusOutput.text : "",
-    ).toContain("Status: paused (interrupted)");
+    expect(statusOutput?.kind === "text" ? statusOutput.text : "").toContain(
+      "Status: paused (interrupted)",
+    );
 
     expect(requests).toHaveLength(2);
     expect(lastRequestMessageText(requests[0])).toContain("goal mode");
@@ -4116,6 +4176,16 @@ describe("createInProcessUiBackendClient", () => {
     );
 
     const snapshot = await client.getSnapshot();
+    expect(snapshot.goals).toEqual([
+      expect.objectContaining({
+        goal: expect.objectContaining({
+          objective: "finish the interruptible goal",
+          pauseReason: "interrupted",
+          status: "paused",
+        }),
+        sessionId: goalSessionId,
+      }),
+    ]);
     const userTexts = snapshot.sessions.flatMap((session) =>
       session.messages.flatMap((message) =>
         message.role === "user"
@@ -4126,9 +4196,9 @@ describe("createInProcessUiBackendClient", () => {
       ),
     );
     expect(userTexts).toContain("What is the current progress?");
-    expect(
-      userTexts.some((text) => text.includes("currently paused")),
-    ).toBe(false);
+    expect(userTexts.some((text) => text.includes("currently paused"))).toBe(
+      false,
+    );
   });
 
   it("waits for a starting goal run to register before interrupting it", async () => {
@@ -4200,12 +4270,14 @@ describe("createInProcessUiBackendClient", () => {
         event.output?.kind === "text",
     )?.output;
     expect(statusOutput?.kind).toBe("text");
-    expect(
-      statusOutput?.kind === "text" ? statusOutput.text : "",
-    ).toContain("Status: paused (interrupted)");
+    expect(statusOutput?.kind === "text" ? statusOutput.text : "").toContain(
+      "Status: paused (interrupted)",
+    );
 
     const userRequest = requests.find((request) =>
-      lastRequestMessageText(request).includes("Interrupt before provider starts"),
+      lastRequestMessageText(request).includes(
+        "Interrupt before provider starts",
+      ),
     );
     expect(userRequest).toBeDefined();
     expect(lastRequestMessageText(userRequest!)).toContain("currently paused");
@@ -4214,29 +4286,31 @@ describe("createInProcessUiBackendClient", () => {
 
   it.each([
     {
+      label: "paused",
       reason: "interrupted",
-      status: "paused" as const,
+      storedStatus: "paused" as const,
     },
     {
+      label: "legacy blocked",
       reason: "needs user input",
-      status: "blocked" as const,
+      storedStatus: "blocked" as const,
     },
   ])(
-    "injects a $status goal light note into ordinary prompts without resuming the goal",
-    async ({ reason, status }) => {
+    "injects a paused goal light note for $label records without resuming the goal",
+    async ({ label, reason, storedStatus }) => {
       const requests: InterfaceProviderRequest[] = [];
       const goalPersistence = new InMemoryGoalPersistence(() => 1);
       await goalPersistence.append("session_1", {
         actor: "user",
-        goalId: `goal_${status}`,
-        objective: `${status} goal objective`,
+        goalId: `goal_${label}`,
+        objective: `${label} goal objective`,
         type: "create",
       });
       await goalPersistence.append("session_1", {
-        actor: status === "paused" ? "user" : "runtime",
-        goalId: `goal_${status}`,
+        actor: storedStatus === "paused" ? "user" : "runtime",
+        goalId: `goal_${label}`,
         reason,
-        status,
+        status: storedStatus,
         type: "update",
       });
       const client = createInProcessUiBackendClient({
@@ -4248,12 +4322,12 @@ describe("createInProcessUiBackendClient", () => {
         ),
       });
 
-      await client.submitPrompt(`Discuss the ${status} goal`, {
+      await client.submitPrompt(`Discuss the ${label} goal`, {
         sessionId: "session_1",
       });
       await client.executeCommand({
         argv: ["status"],
-        clientInvocationId: `inv_goal_${status}_light_note_status`,
+        clientInvocationId: `inv_goal_${label}_light_note_status`,
         commandId: "goal",
         path: ["goal"],
         raw: "/goal status",
@@ -4263,10 +4337,10 @@ describe("createInProcessUiBackendClient", () => {
 
       expect(requests).toHaveLength(1);
       const promptText = lastRequestMessageText(requests[0]);
-      expect(promptText).toContain(`currently ${status}`);
-      expect(promptText).toContain(`${status} goal objective`);
+      expect(promptText).toContain("currently paused");
+      expect(promptText).toContain(`${label} goal objective`);
       expect(promptText).toContain("/goal resume");
-      expect(promptText).toContain(`Discuss the ${status} goal`);
+      expect(promptText).toContain(`Discuss the ${label} goal`);
 
       const snapshot = await client.getSnapshot();
       const userTexts = snapshot.sessions.flatMap((session) =>
@@ -4278,10 +4352,20 @@ describe("createInProcessUiBackendClient", () => {
             : [],
         ),
       );
-      expect(userTexts).toContain(`Discuss the ${status} goal`);
-      expect(userTexts.some((text) => text.includes(`currently ${status}`))).toBe(
+      expect(userTexts).toContain(`Discuss the ${label} goal`);
+      expect(userTexts.some((text) => text.includes("currently paused"))).toBe(
         false,
       );
+      expect(snapshot.goals).toEqual([
+        expect.objectContaining({
+          goal: expect.objectContaining({
+            objective: `${label} goal objective`,
+            pauseReason: reason,
+            status: "paused",
+          }),
+          sessionId: "session_1",
+        }),
+      ]);
     },
   );
 

@@ -46,10 +46,16 @@ export class InProcessRuntimeController {
   }
 
   getRuntime(): Promise<UiRuntimeComposition> {
-    this.runtimePromise ??= this.options.createRuntime().catch((error: unknown) => {
-      this.runtimePromise = undefined;
-      throw error;
-    });
+    this.runtimePromise ??= this.options
+      .createRuntime()
+      .catch((error: unknown) => {
+        this.runtimePromise = undefined;
+        throw error;
+      });
+    return this.runtimePromise;
+  }
+
+  getRuntimeIfStarted(): Promise<UiRuntimeComposition> | undefined {
     return this.runtimePromise;
   }
 
