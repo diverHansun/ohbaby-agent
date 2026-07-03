@@ -61,10 +61,19 @@ async function runGoalCommand(
   invocation: UiCommandInvocation,
   context: CommandRunContext,
 ): Promise<void> {
+  const argv = invocation.argv;
+  const head = argv.at(0);
+  const emitText = (text: string): void => {
+    context.emitOutput({ kind: "text", text });
+  };
   const sessionId = await goals.resolveSessionId(
     invocation.sessionId ?? context.sessionId,
   );
   if (sessionId === undefined) {
+    if (head === undefined || head === "status") {
+      emitText(statusText(null));
+      return;
+    }
     context.fail({
       code: "no_session",
       message: "No active session for goal commands.",
@@ -72,11 +81,6 @@ async function runGoalCommand(
     });
     return;
   }
-  const argv = invocation.argv;
-  const head = argv.at(0);
-  const emitText = (text: string): void => {
-    context.emitOutput({ kind: "text", text });
-  };
 
   if (head === undefined || head === "status") {
     emitText(statusText(await goals.status(sessionId)));

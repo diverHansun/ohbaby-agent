@@ -134,7 +134,26 @@ describe("/goal command handler", () => {
     expect(backend.setBudget).not.toHaveBeenCalled();
   });
 
-  it("fails cleanly without a session", async () => {
+  it("shows an empty status without a session", async () => {
+    const backend = makeBackend({
+      resolveSessionId: vi.fn(() =>
+        Promise.resolve<string | undefined>(undefined),
+      ),
+    });
+    const handler = createGoalCommandHandler({ goals: backend });
+    const { context, failures, outputs } = makeContext();
+    await handler.execute(invoke(["status"]), context);
+    expect(failures).toHaveLength(0);
+    expect(backend.status).not.toHaveBeenCalled();
+    expect(outputs).toEqual([
+      {
+        kind: "text",
+        text: "No goal is currently set.",
+      },
+    ]);
+  });
+
+  it("fails cleanly without a session for mutating commands", async () => {
     const backend = makeBackend({
       resolveSessionId: vi.fn(() =>
         Promise.resolve<string | undefined>(undefined),
@@ -142,8 +161,9 @@ describe("/goal command handler", () => {
     });
     const handler = createGoalCommandHandler({ goals: backend });
     const { context, failures } = makeContext();
-    await handler.execute(invoke(["status"]), context);
+    await handler.execute(invoke(["pause"]), context);
     expect(failures).toHaveLength(1);
+    expect(backend.pause).not.toHaveBeenCalled();
   });
 
   it("fails cleanly when backend missing", async () => {
