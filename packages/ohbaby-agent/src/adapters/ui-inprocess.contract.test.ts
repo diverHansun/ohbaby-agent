@@ -4064,15 +4064,15 @@ describe("createInProcessUiBackendClient", () => {
 
     const snapshot = await client.getSnapshot();
 
-    expect(snapshot.goals).toEqual([
-      expect.objectContaining({
-        goal: expect.objectContaining({
+    expect(snapshot.goals).toMatchObject([
+      {
+        goal: {
           objective: "recover restart goal",
           pauseReason: "Paused after agent resume",
           status: "paused",
-        }),
+        },
         sessionId: "session_1",
-      }),
+      },
     ]);
   });
 
@@ -4176,15 +4176,15 @@ describe("createInProcessUiBackendClient", () => {
     );
 
     const snapshot = await client.getSnapshot();
-    expect(snapshot.goals).toEqual([
-      expect.objectContaining({
-        goal: expect.objectContaining({
+    expect(snapshot.goals).toMatchObject([
+      {
+        goal: {
           objective: "finish the interruptible goal",
           pauseReason: "interrupted",
           status: "paused",
-        }),
+        },
         sessionId: goalSessionId,
-      }),
+      },
     ]);
     const userTexts = snapshot.sessions.flatMap((session) =>
       session.messages.flatMap((message) =>
@@ -4279,9 +4279,11 @@ describe("createInProcessUiBackendClient", () => {
         "Interrupt before provider starts",
       ),
     );
-    expect(userRequest).toBeDefined();
-    expect(lastRequestMessageText(userRequest!)).toContain("currently paused");
-    expect(lastRequestMessageText(userRequest!)).toContain("/goal resume");
+    if (userRequest === undefined) {
+      throw new Error("expected a user request to be captured");
+    }
+    expect(lastRequestMessageText(userRequest)).toContain("currently paused");
+    expect(lastRequestMessageText(userRequest)).toContain("/goal resume");
   });
 
   it.each([
@@ -4356,15 +4358,15 @@ describe("createInProcessUiBackendClient", () => {
       expect(userTexts.some((text) => text.includes("currently paused"))).toBe(
         false,
       );
-      expect(snapshot.goals).toEqual([
-        expect.objectContaining({
-          goal: expect.objectContaining({
+      expect(snapshot.goals).toMatchObject([
+        {
+          goal: {
             objective: `${label} goal objective`,
             pauseReason: reason,
             status: "paused",
-          }),
+          },
           sessionId: "session_1",
-        }),
+        },
       ]);
     },
   );

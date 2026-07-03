@@ -546,14 +546,14 @@ describe("TUI store event reducer", () => {
       type: "goal.updated",
     });
 
-    expect(state.goals).toEqual([
-      expect.objectContaining({
-        goal: expect.objectContaining({
+    expect(state.goals).toMatchObject([
+      {
+        goal: {
           objective: "finish sdk contract",
           status: "active",
-        }),
+        },
         sessionId: "session_1",
-      }),
+      },
     ]);
     expect(state.snapshot.goals).toEqual(state.goals);
 

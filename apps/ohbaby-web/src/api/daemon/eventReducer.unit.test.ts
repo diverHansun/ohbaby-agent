@@ -79,14 +79,14 @@ describe("ohbaby-web eventReducer", () => {
       1,
     );
 
-    expect(state.snapshot?.goals).toEqual([
-      expect.objectContaining({
-        goal: expect.objectContaining({
+    expect(state.snapshot?.goals).toMatchObject([
+      {
+        goal: {
           objective: "finish backend contract",
           status: "paused",
-        }),
+        },
         sessionId: "session_1",
-      }),
+      },
     ]);
 
     state = reduceUiEvent(
