@@ -891,6 +891,46 @@ function skillToolCallEvent(input: {
   };
 }
 
+function goalCreateToolCallEvent(input: {
+  readonly callId: string;
+  readonly objective: string;
+}): InterfaceProviderStreamEvent {
+  return {
+    toolCallDeltas: [
+      {
+        argumentsDelta: JSON.stringify({
+          objective: input.objective,
+        }),
+        id: input.callId,
+        index: 0,
+        name: "CreateGoal",
+      },
+    ],
+    finishReason: "tool_calls",
+  };
+}
+
+function goalUpdateToolCallEvent(input: {
+  readonly callId: string;
+  readonly reason?: string;
+  readonly status: string;
+}): InterfaceProviderStreamEvent {
+  return {
+    toolCallDeltas: [
+      {
+        argumentsDelta: JSON.stringify({
+          ...(input.reason === undefined ? {} : { reason: input.reason }),
+          status: input.status,
+        }),
+        id: input.callId,
+        index: 0,
+        name: "UpdateGoal",
+      },
+    ],
+    finishReason: "tool_calls",
+  };
+}
+
 function waitForUiEvent<T extends UiEvent>(
   client: UiBackendClient,
   predicate: (event: UiEvent) => event is T,
@@ -3790,6 +3830,7 @@ describe("createInProcessUiBackendClient", () => {
         "exit",
         "help",
         "connect",
+        "goal",
         "models",
         "sessions",
         "new",
@@ -3813,6 +3854,127 @@ describe("createInProcessUiBackendClient", () => {
         "permission.full-access",
       ]),
     );
+  });
+
+  it("executes /goal through the in-process command bridge and goal driver", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const client = createInProcessUiBackendClient({
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            goalUpdateToolCallEvent({
+              callId: "call_goal_done",
+              status: "complete",
+            }),
+          ],
+          [{ textDelta: "Goal complete.", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_goal_new_session",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "tui",
+    });
+
+    const completed = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "notice.emitted" }> =>
+        event.type === "notice.emitted" &&
+        event.notice.source === "goals" &&
+        event.notice.message === "Goal completed.",
+      2_000,
+    );
+    await client.executeCommand({
+      argv: ["fix", "all", "goal", "tests"],
+      clientInvocationId: "inv_goal_create",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal fix all goal tests",
+      rawArgs: "fix all goal tests",
+      surface: "tui",
+    });
+    await completed;
+
+    expect(requests[0]?.tools?.map((tool) => tool.function.name)).toEqual(
+      expect.arrayContaining(["GetGoal", "UpdateGoal"]),
+    );
+    expect(lastRequestMessageText(requests[0])).toContain(
+      "You are starting work under a goal",
+    );
+    const goalCommandOutput = events.find(
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "command.result.delivered" }> =>
+        event.type === "command.result.delivered" &&
+        event.clientInvocationId === "inv_goal_create" &&
+        event.output?.kind === "text",
+    )?.output;
+    expect(goalCommandOutput?.kind).toBe("text");
+    expect(
+      goalCommandOutput?.kind === "text" ? goalCommandOutput.text : "",
+    ).toContain("Goal started");
+  });
+
+  it("continues a model-created goal after the creating prompt settles", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const client = createInProcessUiBackendClient({
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            goalCreateToolCallEvent({
+              callId: "call_goal_create",
+              objective: "finish model-created goal",
+            }),
+          ],
+          [{ textDelta: "Goal recorded.", finishReason: "stop" }],
+          [
+            goalUpdateToolCallEvent({
+              callId: "call_goal_done",
+              status: "complete",
+            }),
+          ],
+          [{ textDelta: "Goal complete.", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+
+    const completed = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "notice.emitted" }> =>
+        event.type === "notice.emitted" &&
+        event.notice.source === "goals" &&
+        event.notice.message === "Goal completed.",
+      2_000,
+    );
+    await client.submitPrompt("Create a goal for this work");
+    await completed;
+
+    expect(requests.length).toBeGreaterThanOrEqual(3);
+    expect(lastRequestMessageText(requests[2])).toContain(
+      "You are starting work under a goal",
+    );
+    expect(
+      (await client.getSnapshot()).sessions[0]?.messages.some(
+        (message) =>
+          message.role === "user" &&
+          message.parts.some(
+            (part) =>
+              part.type === "text" &&
+              part.text.includes("finish model-created goal"),
+          ),
+      ),
+    ).toBe(true);
   });
 
   it("lists user-invocable project skills as slash commands", async () => {

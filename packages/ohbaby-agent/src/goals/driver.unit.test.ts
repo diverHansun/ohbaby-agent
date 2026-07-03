@@ -69,6 +69,19 @@ describe("driveGoal", () => {
     );
   });
 
+  it("failed outcome does not demote an already-blocked goal", async () => {
+    const store = await makeActiveStore();
+    const { runner } = scriptedRunner(async (_turn, s) => {
+      await s.markBlocked("needs review", "model");
+      return { error: "late transport error", status: "failed" };
+    }, store);
+
+    await driveGoal({ runner, safetyCapTurns: 200, sessionId: "s1", store });
+
+    expect(store.getSnapshot()?.status).toBe("blocked");
+    expect(store.getSnapshot()?.terminalReason).toBe("needs review");
+  });
+
   it("blocks when a set turn budget is exhausted", async () => {
     const store = await makeActiveStore();
     await store.setBudgetLimits({ turnBudget: 2 }, "user");

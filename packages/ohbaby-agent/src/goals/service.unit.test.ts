@@ -19,7 +19,7 @@ function deferredRunner(): {
       releaseFn();
     },
     runner: {
-      async runTurn(sessionId) {
+      async runTurn(sessionId): Promise<{ readonly status: "cancelled" }> {
         calls.push(sessionId);
         await gate;
         return { status: "cancelled" };
@@ -95,10 +95,26 @@ describe("GoalService", () => {
     await service.whenIdle("s1");
   });
 
+  it("updateGoalFromModel ignores terminal updates after user pause", async () => {
+    const service = new GoalService({
+      persistence: new InMemoryGoalPersistence(),
+    });
+    await service.createGoal("s1", { actor: "user", objective: "a" });
+    await service.pauseGoal("s1");
+
+    const result = await service.updateGoalFromModel("s1", "complete");
+
+    expect(result.snapshot?.status).toBe("paused");
+    expect(result.note).toContain("/goal resume");
+    expect((await service.getSnapshot("s1"))?.status).toBe("paused");
+  });
+
   it("onChange fires for lifecycle transitions", async () => {
     const kinds: string[] = [];
     const service = new GoalService({
-      onChange: (event) => kinds.push(event.change.kind),
+      onChange: (event): void => {
+        kinds.push(event.change.kind);
+      },
       persistence: new InMemoryGoalPersistence(),
     });
     await service.createGoal("s1", { actor: "user", objective: "a" });

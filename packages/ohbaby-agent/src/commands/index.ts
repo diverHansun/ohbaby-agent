@@ -14,6 +14,7 @@ export { createCommandRunContext } from "./run-context.js";
 export { createBuiltinHandlers } from "./builtin.js";
 export { createCommandService } from "./service.js";
 export type {
+  CommandGoalBackend,
   CommandHandler,
   CommandCompactProvider,
   CommandInteractionContext,
@@ -32,4 +33,5 @@ export type {
   CommandSkillSummary,
   CommandToolProvider,
   CommandToolSummary,
+  GoalCommandBudgetLimits,
 } from "./types.js";

@@ -97,6 +97,28 @@ describe("GoalStore state machine", () => {
     await expect(store.cancel("user")).resolves.toBeUndefined();
   });
 
+  it("terminal runtime/model transitions do not overwrite inactive goals", async () => {
+    const { store } = await makeStore();
+    await store.create({ actor: ACTOR, objective: "a" });
+    await store.pause("user stop", "user");
+
+    await store.markBlocked("late block", "model");
+    await store.markComplete("model");
+    expect(store.getSnapshot()).toMatchObject({
+      status: "paused",
+      terminalReason: "user stop",
+    });
+
+    await store.resume("user");
+    await store.markBlocked("needs input", "model");
+    await store.pause("late pause", "runtime");
+    await store.markComplete("model");
+    expect(store.getSnapshot()).toMatchObject({
+      status: "blocked",
+      terminalReason: "needs input",
+    });
+  });
+
   it("incrementTurn and recordTokenUsage only advance while active", async () => {
     const { store } = await makeStore();
     await store.create({ actor: ACTOR, objective: "a" });
@@ -116,6 +138,18 @@ describe("GoalStore state machine", () => {
     await store.setBudgetLimits({ turnBudget: 10 }, "user");
     expect(store.getSnapshot()?.budget.turnBudget).toBe(10);
     expect(store.getSnapshot()?.budgetLimits.turnBudget).toBe(10);
+  });
+
+  it("setBudgetLimits merges partial updates", async () => {
+    const { store } = await makeStore();
+    await store.create({ actor: ACTOR, objective: "a" });
+    await store.setBudgetLimits({ tokenBudget: 1000 }, "user");
+    await store.setBudgetLimits({ turnBudget: 10 }, "user");
+
+    expect(store.getSnapshot()?.budgetLimits).toEqual({
+      tokenBudget: 1000,
+      turnBudget: 10,
+    });
   });
 
   it("replaceObjective swaps the objective in place", async () => {

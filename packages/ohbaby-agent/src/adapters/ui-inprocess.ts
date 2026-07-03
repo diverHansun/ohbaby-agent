@@ -34,9 +34,11 @@ import type {
 } from "../core/llm-client/index.js";
 import { createBus } from "../bus/index.js";
 import type {
+  CommandGoalBackend,
   CommandModelSummary,
   CommandSessionSummary,
 } from "../commands/index.js";
+import type { GoalPersistencePort, GoalTurnOutcome } from "../goals/index.js";
 import { createCommandService } from "../commands/index.js";
 import { createInteractionBroker } from "../runtime/interaction-broker/index.js";
 import {
@@ -72,7 +74,10 @@ import {
   formatSkillToolOutput,
   type SkillLogger,
 } from "../skill/index.js";
-import type { HookExecutor } from "../runtime/run-manager/index.js";
+import type {
+  HookExecutor,
+  RunCompletion,
+} from "../runtime/run-manager/index.js";
 import {
   SessionRunBusyError,
   type RunLedger,
@@ -144,6 +149,7 @@ export interface InProcessUiBackendOptions {
   readonly bus?: BusInstance;
   readonly createAgentTaskId?: () => string;
   readonly createRunId?: () => string;
+  readonly goalPersistence?: GoalPersistencePort;
   readonly hookExecutor?: HookExecutor;
   readonly initialSnapshot?: UiSnapshot;
   readonly llmClient?: LLMClientInstance;
@@ -330,6 +336,7 @@ export function createInProcessUiBackendClient(
     nowMs: (): number => Date.now(),
   });
   let promptInFlight = false;
+  const promptIdleWaiters = new Set<() => void>();
   let configSaveQueue: Promise<void> = Promise.resolve();
   let skillRegistryPromise: Promise<SkillRegistry> | undefined;
   const pendingPermissionSessions = new Map<string, string>();
@@ -343,7 +350,7 @@ export function createInProcessUiBackendClient(
         options.createRunId ??
         (usesPersistentStateStore() ? undefined : (): string => runIds.next());
 
-      return createUiRuntimeComposition({
+      const runtime = await createUiRuntimeComposition({
         agentManager: options.agentManager,
         bus,
         ...(options.createAgentTaskId
@@ -352,6 +359,7 @@ export function createInProcessUiBackendClient(
         ...(runtimeRunIdFactory === undefined
           ? {}
           : { createRunId: runtimeRunIdFactory }),
+        goalPersistence: options.goalPersistence,
         llmClient,
         messageManager,
         hookExecutor: options.hookExecutor,
@@ -365,6 +373,20 @@ export function createInProcessUiBackendClient(
         streamBridge: options.streamBridge,
         workdir: baseProjectRoot,
       });
+      runtime.goals.attachTurnRunner({
+        async runTurn(sessionId, promptText) {
+          try {
+            await waitForPromptIdle();
+            const completion = await submitPromptInternal(promptText, {
+              sessionId,
+            });
+            return goalOutcomeFromRunCompletion(completion);
+          } catch (error) {
+            return { error: getErrorMessage(error), status: "failed" };
+          }
+        },
+      });
+      return runtime;
     },
     publishNotice,
     updateStatus,
@@ -376,7 +398,9 @@ export function createInProcessUiBackendClient(
       return snapshot.activeSessionId;
     },
     retryDelayMs: 250,
-    submitPromptInternal,
+    async submitPromptInternal(text, submitOptions): Promise<void> {
+      await submitPromptInternal(text, submitOptions);
+    },
   });
 
   function usesPersistentStateStore(): boolean {
@@ -1161,7 +1185,7 @@ export function createInProcessUiBackendClient(
   async function submitPromptInternal(
     text: string,
     submitOptions?: SubmitPromptOptions,
-  ): Promise<void> {
+  ): Promise<RunCompletion | undefined> {
     if (promptInFlight) {
       throw new Error("A prompt is already running");
     }
@@ -1307,11 +1331,12 @@ export function createInProcessUiBackendClient(
         await projection.done;
         if (completion.status === "cancelled") {
           // Interruption is a normal user action, not an error.
-          return;
+          return completion;
         }
         if (completion.status !== "succeeded") {
           throw new Error(completion.error ?? `Run ${completion.status}`);
         }
+        return completion;
       } catch (error) {
         await projection.done.catch(() => undefined);
         const snapshot = await stateStore.readSnapshot();
@@ -1330,8 +1355,29 @@ export function createInProcessUiBackendClient(
       }
       promptInFlight = false;
       runtimeController.clearActiveRunId();
-      await options.afterPromptSubmitSettled?.();
+      try {
+        await options.afterPromptSubmitSettled?.();
+      } finally {
+        notifyPromptIdle();
+      }
     }
+  }
+
+  function notifyPromptIdle(): void {
+    const waiters = [...promptIdleWaiters];
+    promptIdleWaiters.clear();
+    for (const resolve of waiters) {
+      resolve();
+    }
+  }
+
+  async function waitForPromptIdle(): Promise<void> {
+    if (!promptInFlight) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      promptIdleWaiters.add(resolve);
+    });
   }
 
   async function connectModelInternal(
@@ -1415,8 +1461,81 @@ export function createInProcessUiBackendClient(
     }
   }
 
+  function goalOutcomeFromRunCompletion(
+    completion: RunCompletion | undefined,
+  ): GoalTurnOutcome {
+    if (completion?.status === "cancelled") {
+      return { status: "cancelled" };
+    }
+    if (completion?.status === "succeeded") {
+      return {
+        status: "succeeded",
+        ...(completion.usage?.totalTokens === undefined
+          ? {}
+          : { tokensUsed: completion.usage.totalTokens }),
+      };
+    }
+    return {
+      error: completion?.error ?? `Run ${completion?.status ?? "failed"}`,
+      status: "failed",
+    };
+  }
+
+  async function resolveGoalSessionId(
+    explicit?: string,
+  ): Promise<string | undefined> {
+    const explicitSessionId = explicit?.trim();
+    if (explicitSessionId) {
+      await assertCanUseAsPrimarySession(explicitSessionId);
+      return explicitSessionId;
+    }
+    const snapshot = await stateStore.readSnapshot();
+    if (!snapshot.activeSessionId) {
+      return undefined;
+    }
+    await assertCanUseAsPrimarySession(snapshot.activeSessionId);
+    return snapshot.activeSessionId;
+  }
+
+  async function goalService(): Promise<UiRuntimeComposition["goals"]> {
+    const runtime = await runtimeController.getRuntimeForPrompt();
+    return runtime.goals;
+  }
+
+  const goalCommandBackend: CommandGoalBackend = {
+    async cancel(sessionId) {
+      await (await goalService()).cancelGoal(sessionId);
+    },
+    async create(sessionId, input) {
+      return (await goalService()).createGoal(sessionId, {
+        actor: "user",
+        objective: input.objective,
+        ...(input.budgetLimits === undefined
+          ? {}
+          : { budgetLimits: input.budgetLimits }),
+      });
+    },
+    async pause(sessionId) {
+      return (await goalService()).pauseGoal(sessionId);
+    },
+    async replace(sessionId, objective) {
+      return (await goalService()).replaceGoal(sessionId, objective);
+    },
+    resolveSessionId: resolveGoalSessionId,
+    async resume(sessionId) {
+      return (await goalService()).resumeGoal(sessionId);
+    },
+    async setBudget(sessionId, limits) {
+      return (await goalService()).setBudget(sessionId, limits);
+    },
+    async status(sessionId) {
+      return (await goalService()).getSnapshot(sessionId);
+    },
+  };
+
   const commandService = createCommandService({
     bus,
+    goals: goalCommandBackend,
     interactionBroker,
     tools: {
       async listTools() {
@@ -1461,7 +1580,9 @@ export function createInProcessUiBackendClient(
         return runtime.listMcpServerSummaries();
       },
     },
-    submitPrompt: submitPromptInternal,
+    async submitPrompt(text, submitOptions): Promise<void> {
+      await submitPromptInternal(text, submitOptions);
+    },
     connectModel: connectModelInternal,
     setSearchApiKey: setSearchApiKeyInternal,
     permission: {

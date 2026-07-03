@@ -26,6 +26,14 @@ const catalog: TuiCommandCatalog = {
       path: ["compact"],
     }),
     command({
+      acceptsArguments: true,
+      argsHint:
+        "[<objective> | status | pause | resume | cancel | budget --turns N]",
+      description: "Create and control a long-running goal",
+      id: "goal",
+      path: ["goal"],
+    }),
+    command({
       description: "Start a new session",
       id: "new",
       path: ["new"],
@@ -100,6 +108,27 @@ describe("slash command runtime", () => {
     ]);
     expect(result.kind === "resolved" ? result.invocation.rawArgs : "").toBe(
       '"session 1"',
+    );
+  });
+
+  it("resolves /goal as an argv command with subcommand args intact", () => {
+    const result = resolveCommand(
+      parseSlashInput("/goal budget --turns 3"),
+      catalog,
+      {
+        sessionId: "session_goal",
+        surface: "tui",
+      },
+    );
+
+    expect(result.kind).toBe("resolved");
+    expect(result.kind === "resolved" ? result.invocation : null).toEqual(
+      expect.objectContaining({
+        argv: ["budget", "--turns", "3"],
+        commandId: "goal",
+        rawArgs: "budget --turns 3",
+        sessionId: "session_goal",
+      }),
     );
   });
 

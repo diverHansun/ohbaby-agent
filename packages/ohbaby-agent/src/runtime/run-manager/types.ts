@@ -58,6 +58,7 @@ export interface RunCompletion {
   readonly status: TerminalRunStatus;
   readonly error?: string;
   readonly terminalReason?: LifecycleResult["terminalReason"];
+  readonly usage?: LifecycleResult["usage"];
 }
 
 export type { SandboxLease };

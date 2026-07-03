@@ -43,13 +43,13 @@ export async function driveGoal(deps: DriveGoalDeps): Promise<void> {
       await store.recordTokenUsage(outcome.tokensUsed);
     }
     if (outcome.status === "cancelled") {
-      if (store.getSnapshot() !== null) {
+      if (store.getSnapshot()?.status === "active") {
         await store.pause("interrupted", "user");
       }
       return;
     }
     if (outcome.status === "failed") {
-      if (store.getSnapshot() !== null) {
+      if (store.getSnapshot()?.status === "active") {
         await store.pause(
           `runtime error: ${outcome.error ?? "unknown"}`,
           "runtime",

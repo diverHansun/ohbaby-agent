@@ -66,7 +66,7 @@ function makeContext(): {
       fail: (error): void => {
         failures.push(error);
       },
-      requestInteraction: () => {
+      requestInteraction: (): never => {
         throw new Error("not used");
       },
       surface: "tui",

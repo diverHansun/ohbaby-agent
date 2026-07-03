@@ -17,6 +17,7 @@ import {
   createDatabaseSessionStore,
   createSessionManager,
 } from "../services/session/index.js";
+import { createSqliteGoalPersistence } from "../goals/index.js";
 import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
 import {
@@ -43,6 +44,7 @@ export interface PersistentUiBackendOptions extends Omit<
   | "afterPromptSubmitSettled"
   | "bus"
   | "beforePromptSubmit"
+  | "goalPersistence"
   | "hookExecutor"
   | "messageManager"
   | "runLedger"
@@ -420,6 +422,7 @@ export function createPersistentUiBackendClient(
         : {}),
       createLLMClient: options.createLLMClient,
       createRunId: options.createRunId,
+      goalPersistence: createSqliteGoalPersistence(db, now),
       hookExecutor,
       initialSnapshot: options.initialSnapshot,
       llmClient: options.llmClient,

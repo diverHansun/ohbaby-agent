@@ -70,6 +70,20 @@ class FakeStdin extends EventEmitter {
 }
 
 describe("skills panel rendering contract", () => {
+  it("renders help command argument hints for /goal", async () => {
+    const app = renderForFrames(panelScene(helpPanel()));
+
+    try {
+      await until(() => (app.lastFrame() ?? "").includes("/goal"));
+      const frame = app.lastFrame() ?? "";
+      expect(frame).toContain(
+        "/goal [<objective> | status | budget --turns N]",
+      );
+    } finally {
+      app.unmount();
+    }
+  });
+
   it("pages with pgdn without falling back to full-screen clears", async () => {
     const stdout = new FakeStdout(80, 24);
     const stdin = new FakeStdin();
@@ -118,9 +132,7 @@ describe("skills panel rendering contract", () => {
     const app = renderForFrames(panelScene(skillsPanel(12)));
 
     try {
-      await until(() =>
-        (app.lastFrame() ?? "").includes("showing 1-10 of 12"),
-      );
+      await until(() => (app.lastFrame() ?? "").includes("showing 1-10 of 12"));
 
       const frame = app.lastFrame() ?? "";
       expect(frame).toContain("skill-with-very-long-name-01");
@@ -198,6 +210,32 @@ function skillsPanel(
       data: { skills: skillsFixture(count) },
       kind: "data",
       subject: "skills",
+    },
+    sessionId: "session_1",
+    status: "ready",
+  };
+}
+
+function helpPanel(): DisplayCommandPanelState {
+  return {
+    clientInvocationId: "inv_help",
+    kind: "help",
+    mode: "display",
+    openedAt: 0,
+    output: {
+      data: {
+        commands: [
+          {
+            acceptsArguments: true,
+            argsHint: "[<objective> | status | budget --turns N]",
+            description: "Create and control a long-running goal",
+            id: "goal",
+            path: ["goal"],
+          },
+        ],
+      },
+      kind: "data",
+      subject: "help",
     },
     sessionId: "session_1",
     status: "ready",

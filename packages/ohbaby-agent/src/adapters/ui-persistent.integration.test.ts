@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { UiRun } from "ohbaby-sdk";
+import type { UiEvent, UiRun } from "ohbaby-sdk";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
@@ -183,6 +183,29 @@ function createProviderAgentTaskEvent(input: {
       },
     ],
   };
+}
+
+function waitForPersistentEvent<T extends UiEvent>(
+  client: ReturnType<typeof createPersistentUiBackendClient>,
+  predicate: (event: UiEvent) => event is T,
+  timeoutMs = 2_000,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const unsubscribeRef: { current?: () => void } = {};
+    const timeout = setTimeout(() => {
+      unsubscribeRef.current?.();
+      reject(new Error("Timed out waiting for UI event"));
+    }, timeoutMs);
+
+    unsubscribeRef.current = client.subscribeEvents((event) => {
+      if (!predicate(event)) {
+        return;
+      }
+      clearTimeout(timeout);
+      unsubscribeRef.current?.();
+      resolve(event);
+    });
+  });
 }
 
 function persistentContentToText(content: unknown): string {
@@ -475,6 +498,89 @@ describe("createPersistentUiBackendClient", () => {
       const snapshot = await restored.getSnapshot();
 
       expect(snapshot.activeSessionId).toBe(firstSessionId);
+    } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("persists goal state through the sqlite-backed persistent client", async () => {
+    const directory = await tempDir("ohbaby-persistent-goal-");
+    try {
+      const dbPath = join(directory, "agent.db");
+      const workdir = join(directory, "workspace");
+      const client = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createSequentialFakeLLMClient([], []),
+        workdir,
+      });
+
+      await client.executeCommand({
+        argv: [],
+        clientInvocationId: "inv_new_goal_session",
+        commandId: "new",
+        path: ["new"],
+        raw: "/new",
+        rawArgs: "",
+        surface: "tui",
+      });
+      const sessionId = (await client.getSnapshot()).activeSessionId;
+      expect(sessionId).toBeTruthy();
+
+      const paused = waitForPersistentEvent(
+        client,
+        (event): event is Extract<UiEvent, { type: "notice.emitted" }> =>
+          event.type === "notice.emitted" &&
+          event.notice.source === "goals" &&
+          event.notice.message.includes("runtime error"),
+      );
+      await client.executeCommand({
+        argv: ["persist", "this", "goal"],
+        clientInvocationId: "inv_goal_persist",
+        commandId: "goal",
+        path: ["goal"],
+        raw: "/goal persist this goal",
+        rawArgs: "persist this goal",
+        sessionId: sessionId ?? undefined,
+        surface: "tui",
+      });
+      await paused;
+      await client.dispose();
+      closeDatabase();
+
+      const restored = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createSequentialFakeLLMClient([], []),
+        workdir,
+      });
+      const events: UiEvent[] = [];
+      restored.subscribeEvents((event) => {
+        events.push(event);
+      });
+      await restored.executeCommand({
+        argv: ["status"],
+        clientInvocationId: "inv_goal_status_restored",
+        commandId: "goal",
+        path: ["goal"],
+        raw: "/goal status",
+        rawArgs: "status",
+        sessionId: sessionId ?? undefined,
+        surface: "tui",
+      });
+
+      const output = events.find(
+        (
+          event,
+        ): event is Extract<UiEvent, { type: "command.result.delivered" }> =>
+          event.type === "command.result.delivered" &&
+          event.clientInvocationId === "inv_goal_status_restored" &&
+          event.output?.kind === "text",
+      )?.output;
+      expect(output?.kind).toBe("text");
+      const text = output?.kind === "text" ? output.text : "";
+      expect(text).toContain("persist this goal");
+      expect(text).toContain("paused");
+      await restored.dispose();
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

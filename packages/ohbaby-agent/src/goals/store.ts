@@ -102,7 +102,11 @@ export class GoalStore {
         await store.applyUpdate(
           { reason: RESUME_NORMALIZE_REASON, status: "paused" },
           "runtime",
-          { kind: "lifecycle", reason: RESUME_NORMALIZE_REASON, status: "paused" },
+          {
+            kind: "lifecycle",
+            reason: RESUME_NORMALIZE_REASON,
+            status: "paused",
+          },
         );
       } else if (state.status === "complete") {
         // complete 是瞬态，落盘残留说明 clear 没写成，补清。
@@ -122,7 +126,10 @@ export class GoalStore {
   async create(input: CreateGoalInput): Promise<GoalSnapshot> {
     const objective = input.objective.trim();
     if (objective.length === 0) {
-      throw new GoalError("invalid_objective", "Goal objective must not be empty.");
+      throw new GoalError(
+        "invalid_objective",
+        "Goal objective must not be empty.",
+      );
     }
     if (objective.length > MAX_GOAL_OBJECTIVE_LENGTH) {
       throw new GoalError(
@@ -180,7 +187,7 @@ export class GoalStore {
 
   async pause(reason: string, actor: GoalActor): Promise<GoalSnapshot> {
     const state = this.requireState();
-    if (state.status === "paused") return this.toSnapshot(state);
+    if (state.status !== "active") return this.toSnapshot(state);
     return this.applyUpdate({ reason, status: "paused" }, actor, {
       actor,
       kind: "lifecycle",
@@ -190,7 +197,8 @@ export class GoalStore {
   }
 
   async markBlocked(reason: string, actor: GoalActor): Promise<GoalSnapshot> {
-    this.requireState();
+    const state = this.requireState();
+    if (state.status !== "active") return this.toSnapshot(state);
     return this.applyUpdate({ reason, status: "blocked" }, actor, {
       actor,
       kind: "lifecycle",
@@ -202,6 +210,7 @@ export class GoalStore {
   /** 宣告成功后立即清除记录——complete 从不作为驻留状态落盘。 */
   async markComplete(actor: GoalActor): Promise<GoalSnapshot> {
     const state = this.requireState();
+    if (state.status !== "active") return this.toSnapshot(state);
     this.foldWallClock(state);
     const finalSnapshot: GoalSnapshot = {
       ...this.toSnapshot(state),
@@ -232,7 +241,10 @@ export class GoalStore {
     const state = this.requireState();
     const trimmed = objective.trim();
     if (trimmed.length === 0 || trimmed.length > MAX_GOAL_OBJECTIVE_LENGTH) {
-      throw new GoalError("invalid_objective", "Invalid replacement objective.");
+      throw new GoalError(
+        "invalid_objective",
+        "Invalid replacement objective.",
+      );
     }
     await this.appendRecord({
       actor,
@@ -274,13 +286,14 @@ export class GoalStore {
     actor: GoalActor,
   ): Promise<GoalSnapshot> {
     const state = this.requireState();
+    const mergedLimits = { ...state.budgetLimits, ...limits };
     await this.appendRecord({
       actor,
-      budgetLimits: limits,
+      budgetLimits: mergedLimits,
       goalId: state.goalId,
       type: "update",
     });
-    state.budgetLimits = limits;
+    state.budgetLimits = mergedLimits;
     const snapshot = this.toSnapshot(state);
     this.onChange?.(snapshot, { actor, kind: "lifecycle" });
     return snapshot;
@@ -289,7 +302,10 @@ export class GoalStore {
   private requireState(): GoalState {
     const state = this.state;
     if (state === undefined) {
-      throw new GoalError("no_goal", "No goal is currently set for this session.");
+      throw new GoalError(
+        "no_goal",
+        "No goal is currently set for this session.",
+      );
     }
     return state;
   }
@@ -336,7 +352,9 @@ export class GoalStore {
 
   private liveWallClockMs(state: GoalState): number {
     if (state.status === "active" && state.wallClockResumedAt !== undefined) {
-      return state.wallClockMs + Math.max(0, this.now() - state.wallClockResumedAt);
+      return (
+        state.wallClockMs + Math.max(0, this.now() - state.wallClockResumedAt)
+      );
     }
     return state.wallClockMs;
   }

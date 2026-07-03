@@ -38,6 +38,11 @@ import {
 } from "../../agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
 import {
+  GoalService,
+  InMemoryGoalPersistence,
+  type GoalPersistencePort,
+} from "../../goals/index.js";
+import {
   getDefaultSkillDirectories,
   getSearchConfig,
   loadSkillConfigLenient,
@@ -120,6 +125,8 @@ export interface UiRuntimeCompositionOptions {
   readonly skillRegistry?: SkillRegistryPort;
   readonly streamBridge?: StreamBridge;
   readonly workdir?: string;
+  /** goal 记录的持久化；缺省用内存实现（与 messageManager 的缺省姿态一致）。 */
+  readonly goalPersistence?: GoalPersistencePort;
 }
 
 export interface McpManagerPort {
@@ -408,8 +415,27 @@ export async function createUiRuntimeComposition(
   });
   const taskExecutor = agentService;
 
+  const goalService = new GoalService({
+    onChange: (event): void => {
+      const status = event.snapshot?.status;
+      options.onNotice?.({
+        level: "info",
+        message:
+          event.change.kind === "completion"
+            ? "Goal completed."
+            : event.snapshot === null
+              ? "Goal cleared."
+              : `Goal ${status ?? "updated"}${event.snapshot.terminalReason ? `: ${event.snapshot.terminalReason}` : ""}`,
+        source: "goals",
+        title: "Goal",
+      });
+    },
+    persistence: options.goalPersistence ?? new InMemoryGoalPersistence(),
+  });
+
   for (const tool of createBuiltinTools({
     agentTaskController,
+    goalBackend: goalService,
     searchProvider: {
       async loadConfig() {
         return toSearchProviderConfig(await getSearchConfig());
@@ -491,6 +517,7 @@ export async function createUiRuntimeComposition(
 
   return {
     agentManager,
+    goals: goalService,
     runLedger,
     runManager,
     streamBridge,

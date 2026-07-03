@@ -681,6 +681,38 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(tools.map((tool) => tool.name)).toContain("mcp_s6_server_t4_echo");
   });
 
+  it("registers goal tools and exposes the goal service", async () => {
+    const bus = createBus();
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      llmClient: fakeLlmClient(),
+      mcpManager: { getAllTools: () => Promise.resolve([]) },
+      messageManager: {} as MessageManager,
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      skillRegistry: createMutableSkillRegistry([]),
+    });
+
+    const tools = await composition.toolScheduler.getAvailableTools();
+    expect(tools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining([
+        "CreateGoal",
+        "GetGoal",
+        "SetGoalBudget",
+        "UpdateGoal",
+      ]),
+    );
+
+    const snapshot = await composition.goals.createGoal("session_goal", {
+      actor: "user",
+      objective: "ship goals",
+    });
+    expect(snapshot.status).toBe("active");
+  });
+
   it("replaces stale MCP tools after the MCP manager changes", async () => {
     const bus = createBus();
     let tools = [mcpTool("mcp_s6_server_t3_old")];

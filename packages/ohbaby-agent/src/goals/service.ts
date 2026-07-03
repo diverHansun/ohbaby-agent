@@ -78,7 +78,14 @@ export class GoalService {
         store,
       });
     })()
-      .catch(() => undefined)
+      .catch(async (error: unknown) => {
+        const store = await this.storeFor(sessionId).catch(() => undefined);
+        if (store?.getSnapshot()?.status === "active") {
+          await store
+            .pause(`runtime error: ${errorMessage(error)}`, "runtime")
+            .catch(() => undefined);
+        }
+      })
       .finally(() => {
         this.driving.delete(sessionId);
       });
@@ -146,8 +153,18 @@ export class GoalService {
     sessionId: string,
     status: GoalStatus,
     reason?: string,
-  ): Promise<{ readonly snapshot: GoalSnapshot | null; readonly note: string }> {
+  ): Promise<{
+    readonly snapshot: GoalSnapshot | null;
+    readonly note: string;
+  }> {
     const store = await this.storeFor(sessionId);
+    const current = store.getSnapshot();
+    if (status !== "active" && current?.status !== "active") {
+      return {
+        note: inactiveGoalNote(current),
+        snapshot: current,
+      };
+    }
     if (status === "complete") {
       await store.markComplete("model");
       return { note: "Goal completed and cleared.", snapshot: null };
@@ -157,22 +174,38 @@ export class GoalService {
         reason ?? "Blocked by model",
         "model",
       );
-      return { note: `Goal blocked: ${snapshot.terminalReason ?? ""}`, snapshot };
+      return {
+        note: `Goal blocked: ${snapshot.terminalReason ?? ""}`,
+        snapshot,
+      };
     }
     if (status === "paused") {
       const snapshot = await store.pause(reason ?? "Paused by model", "model");
-      return { note: `Goal paused: ${snapshot.terminalReason ?? ""}`, snapshot };
+      return {
+        note: `Goal paused: ${snapshot.terminalReason ?? ""}`,
+        snapshot,
+      };
     }
-    const snapshot = store.getSnapshot();
-    if (snapshot === null) {
+    if (current === null) {
       return { note: "No goal is currently set.", snapshot: null };
     }
-    if (snapshot.status === "active") {
-      return { note: "Goal is already active.", snapshot };
+    if (current.status === "active") {
+      return { note: "Goal is already active.", snapshot: current };
     }
     return {
-      note: "Goal is paused. Ask the user to run /goal resume to continue it.",
-      snapshot,
+      note: inactiveGoalNote(current),
+      snapshot: current,
     };
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function inactiveGoalNote(snapshot: GoalSnapshot | null): string {
+  if (snapshot === null) {
+    return "No goal is currently set.";
+  }
+  return `Goal is ${snapshot.status}. Ask the user to run /goal resume to continue it.`;
 }
