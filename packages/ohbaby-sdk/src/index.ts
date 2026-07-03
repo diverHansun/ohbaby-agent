@@ -128,6 +128,7 @@ export {
   isWebPassthroughCommandId,
   isWebPassthroughCommandSpec,
   isWebSkillCommandSpec,
+  supportsWebOverlayCommandInvocation,
   supportsWebPassthroughCommandInvocation,
   supportsWebSkillCommandInvocation,
   WEB_OVERLAY_COMMAND_IDS,

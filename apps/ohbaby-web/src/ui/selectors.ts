@@ -1,5 +1,6 @@
 import type {
   UiContextWindowUsage,
+  UiGoal,
   UiMessage,
   UiPermissionLevel,
   UiPermissionMode,
@@ -39,6 +40,7 @@ export interface ComposerModel {
 }
 
 export interface ViewModel {
+  readonly activeGoal: UiGoal | null;
   readonly activeSession: UiSession | null;
   readonly commandCatalogVersion: string | null;
   readonly commandNotices: readonly CommandNotice[];
@@ -74,6 +76,7 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
         : activeRun?.id;
 
   return {
+    activeGoal: selectActiveGoal(daemonSnapshot, activeSessionId),
     activeSession,
     commandCatalogVersion: snapshot.view.commandCatalogVersion,
     commandNotices: snapshot.view.commandNotices,
@@ -104,6 +107,18 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
     reasoningByMessageId: snapshot.view.reasoningByMessageId,
     snapshot: daemonSnapshot,
   };
+}
+
+function selectActiveGoal(
+  snapshot: UiSnapshot | null,
+  sessionId: string | null | undefined,
+): UiGoal | null {
+  if (!snapshot || sessionId === undefined || sessionId === null) {
+    return null;
+  }
+  return (
+    snapshot.goals?.find((goal) => goal.sessionId === sessionId)?.goal ?? null
+  );
 }
 
 export function selectActiveSession(

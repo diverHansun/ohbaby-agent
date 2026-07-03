@@ -7,6 +7,7 @@ import {
   filterWebCommandCatalog,
   filterWebPassthroughCommandCatalog,
   isWebPassthroughCommandId,
+  supportsWebOverlayCommandInvocation,
   supportsWebSkillCommandInvocation,
   supportsWebPassthroughCommandInvocation,
   WEB_PASSTHROUGH_COMMAND_IDS,
@@ -49,6 +50,16 @@ const catalog: UiSlashCommandCatalog = {
       description: "Compact session",
       id: "compact",
       path: ["compact"],
+      source: "builtin",
+      surfaces: ["tui"],
+    },
+    {
+      acceptsArguments: true,
+      argumentMode: "argv",
+      category: "session",
+      description: "Create and control a long-running goal",
+      id: "goal",
+      path: ["goal"],
       source: "builtin",
       surfaces: ["tui"],
     },
@@ -128,18 +139,18 @@ describe("web slash passthrough helpers", () => {
       "connect",
       "connect-search",
       "compact",
+      "goal",
     ]);
     expect(WEB_PASSTHROUGH_COMMAND_IDS).not.toContain("connect");
     expect(WEB_PASSTHROUGH_COMMAND_IDS).not.toContain("connect-search");
     expect(WEB_PASSTHROUGH_COMMAND_IDS).not.toContain("compact");
+    expect(WEB_PASSTHROUGH_COMMAND_IDS).not.toContain("goal");
   });
 
   it("filters catalogs by allowlist, surface, and interaction behavior", () => {
     expect(
       filterWebPassthroughCommandCatalog(catalog, { surface: "tui" }).commands,
-    ).toEqual([
-      expect.objectContaining({ id: "status" }),
-    ]);
+    ).toEqual([expect.objectContaining({ id: "status" })]);
     expect(
       filterWebPassthroughCommandCatalog(catalog, {
         surface: "headless",
@@ -234,6 +245,12 @@ describe("web slash passthrough helpers", () => {
     expect(
       supportsWebPassthroughCommandInvocation(
         catalog,
+        invocation("goal", ["goal"]),
+      ),
+    ).toBe(false);
+    expect(
+      supportsWebPassthroughCommandInvocation(
+        catalog,
         invocation("status", ["status", "extra"]),
       ),
     ).toBe(false);
@@ -251,6 +268,11 @@ describe("web slash passthrough helpers", () => {
           action: "compactSession",
           executionKind: "overlay",
           id: "compact",
+        }),
+        expect.objectContaining({
+          action: "openGoalPanel",
+          executionKind: "overlay",
+          id: "goal",
         }),
         expect.objectContaining({
           action: "connectModel",
@@ -271,6 +293,39 @@ describe("web slash passthrough helpers", () => {
       ],
       version: "commands-v1",
     });
+  });
+
+  it("validates web overlay invocations against id, path, and surface", () => {
+    expect(
+      supportsWebOverlayCommandInvocation(
+        catalog,
+        invocation("goal", ["goal"]),
+      ),
+    ).toBe(true);
+    expect(
+      supportsWebOverlayCommandInvocation(
+        catalog,
+        invocation("compact", ["compact"]),
+      ),
+    ).toBe(false);
+    expect(
+      supportsWebOverlayCommandInvocation(
+        catalog,
+        invocation("status", ["status"]),
+      ),
+    ).toBe(false);
+    expect(
+      supportsWebOverlayCommandInvocation(
+        catalog,
+        invocation("goal", ["goal", "extra"]),
+      ),
+    ).toBe(false);
+    expect(
+      supportsWebOverlayCommandInvocation(catalog, {
+        ...invocation("goal", ["goal"]),
+        surface: "remote",
+      }),
+    ).toBe(false);
   });
 
   it("keeps skill commands out of the passthrough allowlist", () => {
@@ -342,8 +397,7 @@ describe("web slash passthrough helpers", () => {
     };
 
     expect(
-      filterWebCommandCatalog(invalidSkillCatalog, { surface: "tui" })
-        .commands,
+      filterWebCommandCatalog(invalidSkillCatalog, { surface: "tui" }).commands,
     ).toEqual([]);
     expect(
       supportsWebSkillCommandInvocation(

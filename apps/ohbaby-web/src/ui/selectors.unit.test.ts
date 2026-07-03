@@ -100,6 +100,55 @@ describe("ohbaby-web ui selectors", () => {
     expect(selectViewModel(store(snapshot)).pendingPermissions).toHaveLength(1);
   });
 
+  it("projects the active session goal into the view model", () => {
+    const view = selectViewModel(
+      store({
+        ...baseSnapshot(),
+        goals: [
+          {
+            goal: {
+              objective: "finish goal UI",
+              status: "paused",
+            },
+            sessionId: "session_1",
+          },
+          {
+            goal: {
+              objective: "other session goal",
+              status: "active",
+            },
+            sessionId: "session_2",
+          },
+        ],
+      }),
+    );
+
+    expect(view.activeGoal).toEqual({
+      objective: "finish goal UI",
+      status: "paused",
+    });
+  });
+
+  it("returns no active goal when the snapshot has no goal for the session", () => {
+    expect(selectViewModel(store(baseSnapshot())).activeGoal).toBeNull();
+
+    const otherSessionOnly = selectViewModel(
+      store({
+        ...baseSnapshot(),
+        goals: [
+          {
+            goal: {
+              objective: "other session goal",
+              status: "active",
+            },
+            sessionId: "session_2",
+          },
+        ],
+      }),
+    );
+    expect(otherSessionOnly.activeGoal).toBeNull();
+  });
+
   it("extracts display text from text and reasoning message parts only", () => {
     const message: UiMessage = {
       createdAt: timestamp,

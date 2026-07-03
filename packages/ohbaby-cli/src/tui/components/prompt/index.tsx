@@ -1,5 +1,10 @@
 import { Box, Text, useInput } from "ink";
-import type { CoreAPI, UiCommandInvocation, UiPermissionState } from "ohbaby-sdk";
+import type {
+  CoreAPI,
+  UiCommandInvocation,
+  UiGoal,
+  UiPermissionState,
+} from "ohbaby-sdk";
 import { useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
@@ -34,6 +39,7 @@ export interface PromptProps {
   readonly client: CoreAPI;
   readonly contextWindowUsage?: string;
   readonly disabled: boolean;
+  readonly goalStatus?: UiGoal["status"];
   readonly isRuntimeRunning?: boolean;
   readonly loadCatalog?: () => Promise<TuiCommandCatalog>;
   readonly onCommandPanelOpen?: (input: {
@@ -50,6 +56,7 @@ export function Prompt({
   client,
   contextWindowUsage = "",
   disabled,
+  goalStatus,
   isRuntimeRunning = false,
   loadCatalog,
   onCommandPanelOpen,
@@ -228,6 +235,8 @@ export function Prompt({
     queuedPromptCount,
     runtimeStatusLabel,
   });
+  const goalStatusColor =
+    goalStatus === "active" ? theme.status.accent : theme.status.warning;
 
   return (
     <Box flexDirection="column">
@@ -240,9 +249,19 @@ export function Prompt({
       >
         {renderEditorLines(editor, disabled, theme.cursor)}
       </Box>
-      {dockStatus === "" && contextWindowUsage === "" ? null : (
+      {dockStatus === "" &&
+      contextWindowUsage === "" &&
+      goalStatus === undefined ? null : (
         <Box justifyContent="space-between">
-          <Text dimColor>{dockStatus}</Text>
+          <Box>
+            {goalStatus === undefined ? null : (
+              <Text color={goalStatusColor}>goal {goalStatus}</Text>
+            )}
+            {goalStatus !== undefined && dockStatus !== "" ? (
+              <Text dimColor>{" · "}</Text>
+            ) : null}
+            <Text dimColor>{dockStatus}</Text>
+          </Box>
           {contextWindowUsage === "" ? null : (
             <Text dimColor>{contextWindowUsage}</Text>
           )}

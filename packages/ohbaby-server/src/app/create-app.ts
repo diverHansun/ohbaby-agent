@@ -6,6 +6,7 @@ import {
   filterWebCommandCatalog,
   filterWebPassthroughCommandCatalog,
   inferConnectModelInterfaceProvider,
+  supportsWebOverlayCommandInvocation,
   supportsWebPassthroughCommandInvocation,
   supportsWebSkillCommandInvocation,
   type UiBackendClient,
@@ -941,6 +942,7 @@ class DaemonServerAppRuntime {
       });
       if (
         !supportsWebPassthroughCommandInvocation(catalog, invocation) &&
+        !supportsWebOverlayCommandInvocation(catalog, invocation) &&
         !supportsWebSkillCommandInvocation(catalog, invocation)
       ) {
         return context.json(
