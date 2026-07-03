@@ -14,7 +14,7 @@ export interface DriveGoalDeps {
  * 长任务续跑循环：只在 goal `active` 时推进。
  * 每轮：预算/安全阀判定 → incrementTurn → 渲染提醒作为 user 消息起一轮 Run →
  * 把 RunCompletion 翻译成状态迁移。模型经 UpdateGoal 自审终止；
- * cancelled/failed 分别 pause（恢复只有 /goal resume 一条路，不自动重入）。
+ * cancelled/failed/预算/安全阀都 pause（恢复只有 /goal resume 一条路，不自动重入）。
  */
 export async function driveGoal(deps: DriveGoalDeps): Promise<void> {
   const { runner, safetyCapTurns, sessionId, store } = deps;
@@ -22,11 +22,11 @@ export async function driveGoal(deps: DriveGoalDeps): Promise<void> {
     const snapshot = store.getSnapshot();
     if (snapshot?.status !== "active") return;
     if (snapshot.budget.overBudget) {
-      await store.markBlocked("A configured budget was reached", "runtime");
+      await store.pause("A configured budget was reached", "runtime");
       return;
     }
     if (isSafetyCapReached(snapshot, snapshot.budgetLimits, safetyCapTurns)) {
-      await store.markBlocked(
+      await store.pause(
         "Safety cap reached: too many continuation turns without completion",
         "runtime",
       );
@@ -57,6 +57,6 @@ export async function driveGoal(deps: DriveGoalDeps): Promise<void> {
       }
       return;
     }
-    // succeeded → 回到循环顶部；模型若已 UpdateGoal(complete/blocked)，读态即退出。
+    // succeeded → 回到循环顶部；模型若已 UpdateGoal(complete/paused)，读态即退出。
   }
 }

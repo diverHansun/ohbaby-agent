@@ -1,4 +1,5 @@
-export type GoalStatus = "active" | "paused" | "blocked" | "complete";
+export type GoalStatus = "active" | "paused" | "complete";
+export type GoalStoredStatus = GoalStatus | "blocked";
 export type GoalActor = "user" | "model" | "runtime" | "system";
 
 export interface GoalBudgetLimits {
@@ -38,7 +39,7 @@ export interface GoalSnapshot {
   readonly wallClockMs: number;
   readonly budgetLimits: GoalBudgetLimits;
   readonly budget: GoalBudgetReport;
-  readonly terminalReason?: string;
+  readonly pauseReason?: string;
 }
 
 export type GoalChangeKind = "created" | "lifecycle" | "completion";
@@ -46,7 +47,7 @@ export type GoalChangeKind = "created" | "lifecycle" | "completion";
 export interface GoalChange {
   readonly kind: GoalChangeKind;
   readonly status?: GoalStatus;
-  readonly reason?: string;
+  readonly pauseReason?: string;
   readonly actor?: GoalActor;
 }
 
@@ -58,11 +59,13 @@ export interface GoalRecordData {
   readonly goalId: string;
   readonly objective?: string;
   readonly completionCriterion?: string;
-  readonly status?: GoalStatus;
+  readonly status?: GoalStoredStatus;
   readonly turnsUsed?: number;
   readonly tokensUsed?: number;
   readonly wallClockMs?: number;
   readonly budgetLimits?: GoalBudgetLimits;
+  readonly pauseReason?: string;
+  /** Legacy records used `reason`; replay normalizes it into pauseReason. */
   readonly reason?: string;
   readonly actor?: GoalActor;
 }

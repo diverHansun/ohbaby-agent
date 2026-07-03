@@ -12,11 +12,11 @@ export const GOAL_CONTINUATION_CORE = [
   "Keep the self-audit brief. Do not explore unrelated interpretations once the goal can be",
   "decided. If the objective is simple, already answered, impossible, unsafe, or contradictory,",
   "do not run another goal turn. Explain briefly if useful, then call UpdateGoal with `complete`",
-  "or `blocked` in the same turn. Otherwise, weigh the objective and any completion criteria",
+  "or `paused` in the same turn. Otherwise, weigh the objective and any completion criteria",
   "against the work done so far. Goal mode is iterative: do one coherent slice of work, then",
   "reassess. Call UpdateGoal with `complete` only when all required work is done, any stated",
   "validation has passed, and there is no useful next action. Do not mark complete after only",
   "producing a plan, summary, first pass, or partial result. If an external condition or required",
   "user input prevents progress, or the objective cannot be completed as stated, call UpdateGoal",
-  "with `blocked`.",
+  "with `paused` and a short reason.",
 ].join(" ");

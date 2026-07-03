@@ -19,18 +19,10 @@ export interface GoalToolBackend {
     reason?: string,
   ): Promise<{ readonly snapshot: GoalSnapshot | null; readonly note: string }>;
   getSnapshot(sessionId: string): Promise<GoalSnapshot | null>;
-  setBudget(
-    sessionId: string,
-    limits: GoalBudgetLimits,
-  ): Promise<GoalSnapshot>;
+  setBudget(sessionId: string, limits: GoalBudgetLimits): Promise<GoalSnapshot>;
 }
 
-const GOAL_STATUSES = new Set<GoalStatus>([
-  "active",
-  "blocked",
-  "complete",
-  "paused",
-]);
+const GOAL_STATUSES = new Set<GoalStatus>(["active", "complete", "paused"]);
 
 function requireString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -88,7 +80,8 @@ function createCreateGoalTool(backend: GoalToolBackend): Tool {
           type: "string",
         },
         replace: {
-          description: "Replace the existing goal (requires explicit user intent).",
+          description:
+            "Replace the existing goal (requires explicit user intent).",
           type: "boolean",
         },
       },
@@ -124,18 +117,18 @@ function createUpdateGoalTool(backend: GoalToolBackend): Tool {
     description:
       "Update the current goal's lifecycle status after your self-audit. Call with `complete` " +
       "only when all required work is done and validated — never after just a plan or partial " +
-      "result. Call with `blocked` when the objective cannot proceed (external condition, " +
+      "result. Call with `paused` when the objective cannot proceed (external condition, " +
       "required user input, or an impossible objective). Resuming a paused goal is user-only " +
       "via /goal resume.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {
         reason: {
-          description: "Short human-readable reason (for blocked/paused).",
+          description: "Short human-readable reason (for paused).",
           type: "string",
         },
         status: {
-          enum: ["active", "paused", "blocked", "complete"],
+          enum: ["active", "paused", "complete"],
           type: "string",
         },
       },
@@ -198,7 +191,7 @@ function createSetGoalBudgetTool(backend: GoalToolBackend): Tool {
     description:
       "Record a hard budget for the current goal (turns, tokens, and/or minutes). Call this " +
       "only when the user explicitly states a budget limit — never invent budgets yourself. " +
-      "When the budget is reached the goal blocks (resumable via /goal resume).",
+      "When the budget is reached the goal pauses (resumable via /goal resume).",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {

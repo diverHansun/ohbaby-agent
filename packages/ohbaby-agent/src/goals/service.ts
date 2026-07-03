@@ -150,7 +150,7 @@ export class GoalService {
 
   /**
    * 模型经 UpdateGoal 的唯一杠杆。恢复只有 `/goal resume` 一条路：
-   * 对 paused/blocked 的 goal 传 "active" 不迁移、不起 driver，只返回引导语。
+   * 对 paused 的 goal 传 "active" 不迁移、不起 driver，只返回引导语。
    */
   async updateGoalFromModel(
     sessionId: string,
@@ -172,20 +172,10 @@ export class GoalService {
       await store.markComplete("model");
       return { note: "Goal completed and cleared.", snapshot: null };
     }
-    if (status === "blocked") {
-      const snapshot = await store.markBlocked(
-        reason ?? "Blocked by model",
-        "model",
-      );
-      return {
-        note: `Goal blocked: ${snapshot.terminalReason ?? ""}`,
-        snapshot,
-      };
-    }
     if (status === "paused") {
       const snapshot = await store.pause(reason ?? "Paused by model", "model");
       return {
-        note: `Goal paused: ${snapshot.terminalReason ?? ""}`,
+        note: `Goal paused: ${snapshot.pauseReason ?? ""}`,
         snapshot,
       };
     }

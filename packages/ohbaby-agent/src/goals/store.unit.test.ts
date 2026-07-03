@@ -56,15 +56,15 @@ describe("GoalStore state machine", () => {
     expect(replaced.objective).toBe("b");
   });
 
-  it("pause/resume round-trip clears terminal reason", async () => {
+  it("pause/resume round-trip clears pause reason", async () => {
     const { store } = await makeStore();
     await store.create({ actor: ACTOR, objective: "a" });
     const paused = await store.pause("interrupted", "user");
     expect(paused.status).toBe("paused");
-    expect(paused.terminalReason).toBe("interrupted");
+    expect(paused.pauseReason).toBe("interrupted");
     const resumed = await store.resume("user");
     expect(resumed.status).toBe("active");
-    expect(resumed.terminalReason).toBeUndefined();
+    expect(resumed.pauseReason).toBeUndefined();
   });
 
   it("resume without goal throws no_goal", async () => {
@@ -97,25 +97,24 @@ describe("GoalStore state machine", () => {
     await expect(store.cancel("user")).resolves.toBeUndefined();
   });
 
-  it("terminal runtime/model transitions do not overwrite inactive goals", async () => {
+  it("terminal runtime/model transitions do not overwrite paused goals", async () => {
     const { store } = await makeStore();
     await store.create({ actor: ACTOR, objective: "a" });
     await store.pause("user stop", "user");
 
-    await store.markBlocked("late block", "model");
     await store.markComplete("model");
     expect(store.getSnapshot()).toMatchObject({
       status: "paused",
-      terminalReason: "user stop",
+      pauseReason: "user stop",
     });
 
     await store.resume("user");
-    await store.markBlocked("needs input", "model");
+    await store.pause("needs input", "model");
     await store.pause("late pause", "runtime");
     await store.markComplete("model");
     expect(store.getSnapshot()).toMatchObject({
-      status: "blocked",
-      terminalReason: "needs input",
+      status: "paused",
+      pauseReason: "needs input",
     });
   });
 
@@ -197,7 +196,29 @@ describe("GoalStore rebuild + normalizeAfterReplay", () => {
     const rebuilt = await GoalStore.rebuild({ persistence, sessionId: "s1" });
     const snapshot = rebuilt.getSnapshot();
     expect(snapshot?.status).toBe("paused");
-    expect(snapshot?.terminalReason).toBe("Paused after agent resume");
+    expect(snapshot?.pauseReason).toBe("Paused after agent resume");
+  });
+
+  it("normalizes legacy blocked records to paused with pauseReason", async () => {
+    const persistence = new InMemoryGoalPersistence();
+    await persistence.append("s1", {
+      goalId: "g1",
+      objective: "legacy",
+      type: "create",
+    });
+    await persistence.append("s1", {
+      goalId: "g1",
+      reason: "legacy block",
+      status: "blocked",
+      type: "update",
+    });
+
+    const rebuilt = await GoalStore.rebuild({ persistence, sessionId: "s1" });
+
+    expect(rebuilt.getSnapshot()).toMatchObject({
+      pauseReason: "legacy block",
+      status: "paused",
+    });
   });
 
   it("persistence append failure is surfaced and memory unchanged", async () => {

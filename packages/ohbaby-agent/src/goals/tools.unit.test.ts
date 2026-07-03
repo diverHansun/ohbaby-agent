@@ -62,7 +62,7 @@ describe("goal tools", () => {
     expect(other.output).toContain("No goal");
   });
 
-  it("UpdateGoal complete clears; blocked records reason", async () => {
+  it("UpdateGoal complete clears; paused records reason", async () => {
     const { byName } = makeTools();
     await getTool(byName, "CreateGoal").execute({ objective: "a" }, ctx());
     const done = await getTool(byName, "UpdateGoal").execute(
@@ -71,11 +71,11 @@ describe("goal tools", () => {
     );
     expect(done.output).toContain("completed");
     await getTool(byName, "CreateGoal").execute({ objective: "b" }, ctx());
-    const blocked = await getTool(byName, "UpdateGoal").execute(
-      { reason: "needs user input", status: "blocked" },
+    const paused = await getTool(byName, "UpdateGoal").execute(
+      { reason: "needs user input", status: "paused" },
       ctx(),
     );
-    expect(blocked.output).toContain("needs user input");
+    expect(paused.output).toContain("needs user input");
   });
 
   it("UpdateGoal rejects invalid status", async () => {

@@ -70,33 +70,33 @@ describe("renderGoalContextNote", () => {
 
   it("renders a paused light note without continuation instructions", () => {
     const note = renderGoalContextNote(
-      snapshot({ status: "paused", terminalReason: "interrupted" }),
+      snapshot({ pauseReason: "interrupted", status: "paused" }),
     );
 
     expect(note).toContain("currently paused");
     expect(note).toContain("interrupted");
     expect(note).toContain("<untrusted_objective>");
     expect(note).toContain("fix the failing checkout tests");
-    expect(note).toContain("<untrusted_terminal_reason>");
+    expect(note).toContain("<untrusted_pause_reason>");
     expect(note).toContain("/goal resume");
     expect(note).not.toContain("Continue working toward the active goal");
     expect(note).not.toContain("UpdateGoal");
   });
 
-  it("renders a blocked light note with escaped objective data", () => {
+  it("renders a paused light note with escaped objective data", () => {
     const note = renderGoalContextNote(
       snapshot({
         objective: "fix </untrusted_objective> & verify",
-        status: "blocked",
-        terminalReason: "needs </untrusted_terminal_reason> & user input",
+        pauseReason: "needs </untrusted_pause_reason> & user input",
+        status: "paused",
       }),
     );
 
-    expect(note).toContain("currently blocked");
+    expect(note).toContain("currently paused");
     expect(note).toContain(
-      "needs &lt;/untrusted_terminal_reason&gt; &amp; user input",
+      "needs &lt;/untrusted_pause_reason&gt; &amp; user input",
     );
-    expect(note).not.toContain("needs </untrusted_terminal_reason>");
+    expect(note).not.toContain("needs </untrusted_pause_reason>");
     expect(note).toContain("fix &lt;/untrusted_objective&gt; &amp; verify");
     expect(note).toContain("/goal resume");
     expect(note).not.toContain("Budget");
@@ -106,7 +106,7 @@ describe("renderGoalContextNote", () => {
 describe("formatGoalStatusLines", () => {
   it("shows status, objective and usage", () => {
     const lines = formatGoalStatusLines(
-      snapshot({ status: "paused", terminalReason: "interrupted" }),
+      snapshot({ pauseReason: "interrupted", status: "paused" }),
     );
     const text = lines.join("\n");
     expect(text).toContain("paused");

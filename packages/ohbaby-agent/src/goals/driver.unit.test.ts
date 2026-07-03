@@ -53,7 +53,7 @@ describe("driveGoal", () => {
     const { runner } = scriptedRunner(() => ({ status: "cancelled" }), store);
     await driveGoal({ runner, safetyCapTurns: 200, sessionId: "s1", store });
     expect(store.getSnapshot()?.status).toBe("paused");
-    expect(store.getSnapshot()?.terminalReason).toBe("interrupted");
+    expect(store.getSnapshot()?.pauseReason).toBe("interrupted");
   });
 
   it("failed outcome pauses with runtime error reason", async () => {
@@ -64,25 +64,25 @@ describe("driveGoal", () => {
     );
     await driveGoal({ runner, safetyCapTurns: 200, sessionId: "s1", store });
     expect(store.getSnapshot()?.status).toBe("paused");
-    expect(store.getSnapshot()?.terminalReason).toContain(
+    expect(store.getSnapshot()?.pauseReason).toContain(
       "provider retry exhausted",
     );
   });
 
-  it("failed outcome does not demote an already-blocked goal", async () => {
+  it("failed outcome does not overwrite an already-paused goal", async () => {
     const store = await makeActiveStore();
     const { runner } = scriptedRunner(async (_turn, s) => {
-      await s.markBlocked("needs review", "model");
+      await s.pause("needs review", "model");
       return { error: "late transport error", status: "failed" };
     }, store);
 
     await driveGoal({ runner, safetyCapTurns: 200, sessionId: "s1", store });
 
-    expect(store.getSnapshot()?.status).toBe("blocked");
-    expect(store.getSnapshot()?.terminalReason).toBe("needs review");
+    expect(store.getSnapshot()?.status).toBe("paused");
+    expect(store.getSnapshot()?.pauseReason).toBe("needs review");
   });
 
-  it("blocks when a set turn budget is exhausted", async () => {
+  it("pauses when a set turn budget is exhausted", async () => {
     const store = await makeActiveStore();
     await store.setBudgetLimits({ turnBudget: 2 }, "user");
     const { prompts, runner } = scriptedRunner(
@@ -91,11 +91,11 @@ describe("driveGoal", () => {
     );
     await driveGoal({ runner, safetyCapTurns: 200, sessionId: "s1", store });
     expect(prompts).toHaveLength(2);
-    expect(store.getSnapshot()?.status).toBe("blocked");
-    expect(store.getSnapshot()?.terminalReason).toContain("budget");
+    expect(store.getSnapshot()?.status).toBe("paused");
+    expect(store.getSnapshot()?.pauseReason).toContain("budget");
   });
 
-  it("blocks at safety cap when no turn budget set", async () => {
+  it("pauses at safety cap when no turn budget set", async () => {
     const store = await makeActiveStore();
     const { prompts, runner } = scriptedRunner(
       () => ({ status: "succeeded" }),
@@ -103,8 +103,8 @@ describe("driveGoal", () => {
     );
     await driveGoal({ runner, safetyCapTurns: 3, sessionId: "s1", store });
     expect(prompts).toHaveLength(3);
-    expect(store.getSnapshot()?.status).toBe("blocked");
-    expect(store.getSnapshot()?.terminalReason).toContain("Safety cap");
+    expect(store.getSnapshot()?.status).toBe("paused");
+    expect(store.getSnapshot()?.pauseReason).toContain("Safety cap");
   });
 
   it("records token usage from outcome toward token budget", async () => {
@@ -115,7 +115,7 @@ describe("driveGoal", () => {
       store,
     );
     await driveGoal({ runner, safetyCapTurns: 200, sessionId: "s1", store });
-    expect(store.getSnapshot()?.status).toBe("blocked");
+    expect(store.getSnapshot()?.status).toBe("paused");
     expect(store.getSnapshot()?.tokensUsed).toBeGreaterThanOrEqual(1000);
   });
 });

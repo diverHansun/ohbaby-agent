@@ -83,7 +83,7 @@ export function renderGoalTurnPrompt(
 export function renderGoalContextNote(
   snapshot: GoalSnapshot,
 ): string | undefined {
-  if (snapshot.status !== "paused" && snapshot.status !== "blocked") {
+  if (snapshot.status !== "paused") {
     return undefined;
   }
   const lines: string[] = [
@@ -91,9 +91,9 @@ export function renderGoalContextNote(
     "",
     ...untrustedBlock(snapshot),
   ];
-  if (snapshot.terminalReason !== undefined) {
+  if (snapshot.pauseReason !== undefined) {
     lines.push(
-      `<untrusted_terminal_reason>\n${escapeUntrustedText(snapshot.terminalReason)}\n</untrusted_terminal_reason>`,
+      `<untrusted_pause_reason>\n${escapeUntrustedText(snapshot.pauseReason)}\n</untrusted_pause_reason>`,
     );
   }
   lines.push(
@@ -110,7 +110,7 @@ export function formatGoalStatusLines(
 ): readonly string[] {
   const lines = [
     `Goal: ${snapshot.objective}`,
-    `Status: ${snapshot.status}${snapshot.terminalReason ? ` (${snapshot.terminalReason})` : ""}`,
+    `Status: ${snapshot.status}${snapshot.pauseReason ? ` (${snapshot.pauseReason})` : ""}`,
     `Progress: ${String(snapshot.turnsUsed)} turns, ${String(snapshot.tokensUsed)} tokens, ${formatElapsed(snapshot.wallClockMs)} elapsed.`,
   ];
   lines.push(...budgetLines(snapshot.budget));

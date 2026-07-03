@@ -32,7 +32,7 @@ interface GoalState {
   /** 当前 active 区间的起点（非 active 时为 undefined）。 */
   wallClockResumedAt?: number;
   budgetLimits: GoalBudgetLimits;
-  terminalReason?: string;
+  pauseReason?: string;
 }
 
 const RESUME_NORMALIZE_REASON = "Paused after agent resume";
@@ -88,9 +88,12 @@ export class GoalStore {
         state.budgetLimits = record.budgetLimits;
       }
       if (record.status !== undefined) {
-        state.status = record.status;
-        state.terminalReason =
-          record.status === "active" ? undefined : record.reason;
+        const status = normalizeStoredStatus(record.status);
+        state.status = status;
+        state.pauseReason =
+          status === "active"
+            ? undefined
+            : (record.pauseReason ?? record.reason);
       }
     }
     await store.normalizeAfterReplay();
@@ -165,25 +168,14 @@ export class GoalStore {
     });
   }
 
-  async pause(reason: string, actor: GoalActor): Promise<GoalSnapshot> {
+  async pause(pauseReason: string, actor: GoalActor): Promise<GoalSnapshot> {
     const state = this.requireState();
     if (state.status !== "active") return this.toSnapshot(state);
-    return this.applyUpdate({ reason, status: "paused" }, actor, {
+    return this.applyUpdate({ pauseReason, status: "paused" }, actor, {
       actor,
       kind: "lifecycle",
-      reason,
+      pauseReason,
       status: "paused",
-    });
-  }
-
-  async markBlocked(reason: string, actor: GoalActor): Promise<GoalSnapshot> {
-    const state = this.requireState();
-    if (state.status !== "active") return this.toSnapshot(state);
-    return this.applyUpdate({ reason, status: "blocked" }, actor, {
-      actor,
-      kind: "lifecycle",
-      reason,
-      status: "blocked",
     });
   }
 
@@ -286,11 +278,11 @@ export class GoalStore {
     state.wallClockResumedAt = undefined;
     if (state.status === "active") {
       await this.applyUpdate(
-        { reason: RESUME_NORMALIZE_REASON, status: "paused" },
+        { pauseReason: RESUME_NORMALIZE_REASON, status: "paused" },
         "runtime",
         {
           kind: "lifecycle",
-          reason: RESUME_NORMALIZE_REASON,
+          pauseReason: RESUME_NORMALIZE_REASON,
           status: "paused",
         },
       );
@@ -316,7 +308,7 @@ export class GoalStore {
 
   /** 状态迁移的统一落点：折算 wall-clock → append → 改内存 → 通知。 */
   private async applyUpdate(
-    update: { readonly status: GoalStatus; readonly reason?: string },
+    update: { readonly status: GoalStatus; readonly pauseReason?: string },
     actor: GoalActor,
     change: GoalChange,
   ): Promise<GoalSnapshot> {
@@ -329,12 +321,14 @@ export class GoalStore {
       goalId: state.goalId,
       type: "update",
       wallClockMs: state.wallClockMs,
-      ...(update.reason !== undefined ? { reason: update.reason } : {}),
+      ...(update.pauseReason !== undefined
+        ? { pauseReason: update.pauseReason }
+        : {}),
       status: update.status,
     });
     state.status = update.status;
-    state.terminalReason =
-      update.status === "active" ? undefined : update.reason;
+    state.pauseReason =
+      update.status === "active" ? undefined : update.pauseReason;
     if (update.status === "active") {
       state.wallClockResumedAt = this.now();
     }
@@ -382,8 +376,8 @@ export class GoalStore {
       ...(state.completionCriterion !== undefined
         ? { completionCriterion: state.completionCriterion }
         : {}),
-      ...(state.terminalReason !== undefined
-        ? { terminalReason: state.terminalReason }
+      ...(state.pauseReason !== undefined
+        ? { pauseReason: state.pauseReason }
         : {}),
     };
   }
@@ -391,4 +385,8 @@ export class GoalStore {
   private now(): number {
     return this.deps.now?.() ?? Date.now();
   }
+}
+
+function normalizeStoredStatus(status: GoalStatus | "blocked"): GoalStatus {
+  return status === "blocked" ? "paused" : status;
 }

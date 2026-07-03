@@ -47,7 +47,7 @@ describe("GoalService", () => {
     await service.whenIdle("s1");
   });
 
-  it("resumeGoal after block restarts driving", async () => {
+  it("resumeGoal after automatic pause restarts driving", async () => {
     const outcomes: string[] = [];
     const service = new GoalService({
       persistence: new InMemoryGoalPersistence(),
@@ -61,7 +61,7 @@ describe("GoalService", () => {
     });
     await service.createGoal("s1", { actor: "user", objective: "a" });
     await service.whenIdle("s1");
-    expect((await service.getSnapshot("s1"))?.status).toBe("blocked");
+    expect((await service.getSnapshot("s1"))?.status).toBe("paused");
     await service.resumeGoal("s1");
     await service.whenIdle("s1");
     expect(outcomes.length).toBeGreaterThanOrEqual(1);
