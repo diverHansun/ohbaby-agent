@@ -45,6 +45,7 @@ export interface OhbabyWebClient {
   connectModel(input: ModelConnectRequest): Promise<UiConnectModelResult>;
   createSession(): Promise<void>;
   executeSlashCommand(input: {
+    readonly allowOverlay?: boolean;
     readonly sessionId?: string;
     readonly text: string;
   }): Promise<void>;
@@ -166,6 +167,7 @@ class BrowserDaemonClient implements OhbabyWebClient {
   }
 
   async executeSlashCommand(input: {
+    readonly allowOverlay?: boolean;
     readonly sessionId?: string;
     readonly text: string;
   }): Promise<void> {
@@ -181,7 +183,10 @@ class BrowserDaemonClient implements OhbabyWebClient {
     const webCommand = catalog.commands.find(
       (command) => command.id === resolved.command.id,
     );
-    if (webCommand?.executionKind === "overlay") {
+    if (
+      webCommand?.executionKind === "overlay" &&
+      input.allowOverlay !== true
+    ) {
       throw new Error(`Command "${input.text}" must be opened from the UI`);
     }
     await this.http.executeCommand({

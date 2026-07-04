@@ -14,6 +14,7 @@ import type {
   UiRun,
   UiRunStatus,
   UiSession,
+  UiSessionGoal,
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
@@ -107,6 +108,7 @@ export interface TuiStoreState {
     Record<string, TuiReasoningViewState>
   >;
   readonly contextWindowUsages: readonly UiContextWindowUsage[];
+  readonly goals: readonly UiSessionGoal[];
   readonly commandNoticeSequence: number;
   readonly resolvedPermissionIds: readonly string[];
   readonly catalog: TuiCommandCatalog | null;

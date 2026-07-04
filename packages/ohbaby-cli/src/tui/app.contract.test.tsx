@@ -328,6 +328,74 @@ describe("OhbabyTerminalApp", () => {
     });
   });
 
+  it("renders compact active goal status near the prompt", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      goals: [
+        {
+          goal: {
+            objective: "finish goal UI",
+            status: "active",
+          },
+          sessionId: "session_1",
+        },
+      ],
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+
+    expect(app.lastFrame()).toContain("goal active");
+    expect(app.lastFrame()).not.toContain("finish goal UI");
+  });
+
+  it("renders compact paused goal status near the prompt", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      goals: [
+        {
+          goal: {
+            objective: "finish goal UI",
+            pauseReason: "interrupted",
+            status: "paused",
+          },
+          sessionId: "session_1",
+        },
+      ],
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+
+    expect(app.lastFrame()).toContain("goal paused");
+    expect(app.lastFrame()).not.toContain("interrupted");
+  });
+
+  it("does not render goal status without a goal for the active session", async () => {
+    const client = createFakeClient(snapshot());
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+
+    expect(app.lastFrame()).not.toContain("goal active");
+    expect(app.lastFrame()).not.toContain("goal paused");
+  });
+
   it("keeps cached context window usage and emits a warning notice when refresh fails", async () => {
     const usage = contextWindowUsage();
     const client = {

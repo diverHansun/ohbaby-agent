@@ -21,6 +21,7 @@ import {
 import type { ChangeEvent, KeyboardEvent, ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
+import { parseSlashCommandInput, resolveSlashCommand } from "ohbaby-sdk";
 import type {
   UiCompactSessionResult,
   UiContextWindowUsage,
@@ -62,16 +63,30 @@ import {
   outputAsJson,
   safeHelpCommands,
   selectedSlashItem,
+  slashCommandLabel,
   slashCompletionSuffix,
   statusRows,
   type CommandResultModel,
   type SlashPaletteItem,
 } from "./slashCommands.js";
 
-type StructuredOverlayKind = "compact" | "connect" | "connect-search";
+type StructuredOverlayKind = "compact" | "connect" | "connect-search" | "goal";
+
+type GoalPanelAction = "delete" | "pause" | "resume" | "save" | "view";
+
+interface GoalPanelIntent {
+  readonly action: GoalPanelAction;
+  readonly objectiveDraft?: string;
+}
+
+interface StructuredCommandRequest {
+  readonly item: SlashPaletteItem;
+  readonly text: string;
+}
 
 interface StructuredOverlayState {
   readonly commandLabel: string;
+  readonly goalIntent?: GoalPanelIntent;
   readonly kind: StructuredOverlayKind;
 }
 
@@ -85,6 +100,8 @@ interface AppProps {
 }
 
 let mountedRoot: Root | undefined;
+
+const DEFAULT_GOAL_PANEL_INTENT: GoalPanelIntent = { action: "view" };
 
 export function mountOhbabyWebApp(runtime: OhbabyWebRuntime): void {
   const rootElement = document.getElementById("root");
@@ -140,9 +157,49 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
     [clearActionError],
   );
 
+  const openOverlayForSlashText = useCallback(
+    async (text: string): Promise<boolean> => {
+      let catalog: UiWebCommandCatalog;
+      try {
+        catalog = await runtime.client.listCommands();
+      } catch {
+        return false;
+      }
+      const resolved = resolveSlashCommand(
+        catalog,
+        parseSlashCommandInput(text),
+        { surface: "tui" },
+      );
+      if (!resolved.ok) {
+        return false;
+      }
+      const command = catalog.commands.find(
+        (candidate) => candidate.id === resolved.command.id,
+      );
+      if (command?.executionKind !== "overlay") {
+        return false;
+      }
+      const kind = structuredOverlayKindForAction(command.action);
+      if (!kind) {
+        return false;
+      }
+      setStructuredOverlay({
+        commandLabel: slashCommandLabel(command),
+        ...(kind === "goal"
+          ? { goalIntent: goalPanelIntentFromArgs(resolved.rawArgs) }
+          : {}),
+        kind,
+      });
+      return true;
+    },
+    [runtime.client],
+  );
   const submitText = useCallback(
-    (text: string): Promise<boolean> =>
-      runAction(() =>
+    async (text: string): Promise<boolean> => {
+      if (text.startsWith("/") && (await openOverlayForSlashText(text))) {
+        return true;
+      }
+      return runAction(() =>
         text.startsWith("/")
           ? runtime.client.executeSlashCommand({
               ...(view.composer.activeSessionId === undefined
@@ -156,8 +213,14 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
                 : { sessionId: view.composer.activeSessionId }),
               text,
             }),
-      ),
-    [runAction, runtime.client, view.composer.activeSessionId],
+      );
+    },
+    [
+      openOverlayForSlashText,
+      runAction,
+      runtime.client,
+      view.composer.activeSessionId,
+    ],
   );
   const createSession = useCallback((): void => {
     void runAction(() => runtime.client.createSession());
@@ -184,13 +247,36 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
     () => runtime.client.listCommands(),
     [runtime.client],
   );
-  const openStructuredCommand = useCallback((item: SlashPaletteItem) => {
-    const kind = structuredOverlayKindForAction(item.action);
-    if (!kind) {
-      return;
-    }
-    setStructuredOverlay({ commandLabel: item.label, kind });
+  const openGoalPanel = useCallback((intent?: GoalPanelIntent) => {
+    setStructuredOverlay({
+      commandLabel: "/goal",
+      goalIntent: intent ?? DEFAULT_GOAL_PANEL_INTENT,
+      kind: "goal",
+    });
   }, []);
+  const openStructuredCommand = useCallback(
+    (request: StructuredCommandRequest) => {
+      const { item, text } = request;
+      const kind = structuredOverlayKindForAction(item.action);
+      if (!kind) {
+        return;
+      }
+      setStructuredOverlay({
+        commandLabel: item.label,
+        ...(kind === "goal"
+          ? {
+              goalIntent: goalPanelIntentFromArgs(
+                text.startsWith(item.label)
+                  ? text.slice(item.label.length)
+                  : "",
+              ),
+            }
+          : {}),
+        kind,
+      });
+    },
+    [],
+  );
   const commandModalNotice = useMemo(
     () =>
       [...view.commandNotices]
@@ -222,7 +308,11 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
       >
         {showMain ? (
           <>
-            <StatusBar header={view.header} />
+            <StatusBar
+              activeGoal={view.activeGoal}
+              header={view.header}
+              onOpenGoalPanel={openGoalPanel}
+            />
             <ErrorBanner
               message={actionError ?? view.error}
               onDismiss={clearActionError}
@@ -292,6 +382,7 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
             <EmptyState
               composerPrefill={composerPrefill}
               onListCommands={listCommands}
+              onOpenGoalPanel={openGoalPanel}
               onSetPermission={(input) => {
                 void runAction(() => runtime.client.setPermission(input));
               }}
@@ -333,11 +424,12 @@ function BootstrapError(props: { readonly error: unknown }): ReactElement {
 function EmptyState(props: {
   readonly composerPrefill: ComposerPrefill | null;
   readonly onListCommands: () => Promise<UiWebCommandCatalog>;
+  readonly onOpenGoalPanel: (intent?: GoalPanelIntent) => void;
   readonly onSetPermission: (input: {
     readonly level?: UiPermissionLevel;
     readonly mode?: UiPermissionMode;
   }) => void;
-  readonly onStructuredCommand: (item: SlashPaletteItem) => void;
+  readonly onStructuredCommand: (request: StructuredCommandRequest) => void;
   readonly onSubmit: (text: string) => Promise<boolean>;
   readonly status: HeaderModel;
   readonly view: ViewModel;
@@ -351,6 +443,10 @@ function EmptyState(props: {
     <>
       <div className="ohb-empty-status">
         <StatusPill kind={props.status.connectionKind} />
+        <GoalStatusChip
+          goal={props.view.activeGoal}
+          onOpen={props.onOpenGoalPanel}
+        />
       </div>
       <section className="ohb-empty-hero">
         <div className="ohb-wordmark" aria-label="ohbaby">
@@ -522,7 +618,11 @@ function SessionSidebar(props: {
   );
 }
 
-function StatusBar(props: { readonly header: HeaderModel }): ReactElement {
+function StatusBar(props: {
+  readonly activeGoal: ViewModel["activeGoal"];
+  readonly header: HeaderModel;
+  readonly onOpenGoalPanel: (intent?: GoalPanelIntent) => void;
+}): ReactElement {
   return (
     <header className="ohb-statusbar">
       <div className="ohb-brand" aria-label="ohbaby">
@@ -547,8 +647,34 @@ function StatusBar(props: { readonly header: HeaderModel }): ReactElement {
           </span>
           <span>{props.header.contextLabel}</span>
         </span>
+        <GoalStatusChip
+          goal={props.activeGoal}
+          onOpen={props.onOpenGoalPanel}
+        />
       </div>
     </header>
+  );
+}
+
+function GoalStatusChip(props: {
+  readonly goal: ViewModel["activeGoal"];
+  readonly onOpen: (intent?: GoalPanelIntent) => void;
+}): ReactElement | null {
+  if (!props.goal) {
+    return null;
+  }
+  return (
+    <button
+      className={`ohb-goal-chip ohb-goal-${props.goal.status}`}
+      onClick={() => {
+        props.onOpen(DEFAULT_GOAL_PANEL_INTENT);
+      }}
+      title={props.goal.objective}
+      type="button"
+    >
+      <span />
+      goal {props.goal.status}
+    </button>
   );
 }
 
@@ -1106,7 +1232,7 @@ function Composer(props: {
     readonly level?: UiPermissionLevel;
     readonly mode?: UiPermissionMode;
   }) => void;
-  readonly onStructuredCommand: (item: SlashPaletteItem) => void;
+  readonly onStructuredCommand: (request: StructuredCommandRequest) => void;
   readonly onStop: () => void;
   readonly onSubmit: (text: string) => Promise<boolean>;
   readonly prefill?: ComposerPrefill | null;
@@ -1231,7 +1357,7 @@ function Composer(props: {
         return;
       }
       if (item?.executionKind === "overlay") {
-        props.onStructuredCommand(item);
+        props.onStructuredCommand({ item, text: draft.trim() || item.label });
         setDraft("");
         setSlashDismissedDraft(null);
         setSlashError(null);
@@ -1430,7 +1556,11 @@ function StructuredCommandOverlay(props: {
   readonly view: ViewModel;
 }): ReactElement {
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
+    if (dialogRef.current?.contains(document.activeElement)) {
+      return;
+    }
     closeButtonRef.current?.focus();
   }, [props.overlay.kind]);
   useEffect(() => {
@@ -1458,6 +1588,7 @@ function StructuredCommandOverlay(props: {
         onClick={(event) => {
           event.stopPropagation();
         }}
+        ref={dialogRef}
         role="dialog"
       >
         <header className="ohb-structured-header">
@@ -1476,10 +1607,176 @@ function StructuredCommandOverlay(props: {
           <ConnectModelOverlayBody client={props.client} />
         ) : props.overlay.kind === "connect-search" ? (
           <ConnectSearchOverlayBody client={props.client} />
+        ) : props.overlay.kind === "goal" ? (
+          <GoalOverlayBody
+            client={props.client}
+            intent={props.overlay.goalIntent ?? DEFAULT_GOAL_PANEL_INTENT}
+            view={props.view}
+          />
         ) : (
           <CompactOverlayBody client={props.client} view={props.view} />
         )}
       </section>
+    </div>
+  );
+}
+
+function GoalOverlayBody(props: {
+  readonly client: OhbabyWebClient;
+  readonly intent: GoalPanelIntent;
+  readonly view: ViewModel;
+}): ReactElement {
+  const sessionId =
+    props.view.composer.activeSessionId ?? props.view.activeSession?.id;
+  const activeGoal = props.view.activeGoal;
+  const [objective, setObjective] = useState(
+    props.intent.objectiveDraft ?? activeGoal?.objective ?? "",
+  );
+  const [status, setStatus] = useState<OverlayStatus>({
+    kind: "idle",
+    message: sessionId ? "" : "No active session for goal commands.",
+  });
+
+  useEffect(() => {
+    setObjective(props.intent.objectiveDraft ?? activeGoal?.objective ?? "");
+  }, [activeGoal?.objective, props.intent.objectiveDraft]);
+
+  const runGoalCommand = useCallback(
+    (text: string, busyMessage: string, successMessage: string) => {
+      if (!sessionId) {
+        setStatus({
+          kind: "error",
+          message: "No active session for goal commands.",
+        });
+        return;
+      }
+      void runOverlayAction(
+        setStatus,
+        async () => {
+          await props.client.executeSlashCommand({
+            allowOverlay: true,
+            sessionId,
+            text,
+          });
+          return successMessage;
+        },
+        busyMessage,
+      );
+    },
+    [props.client, sessionId],
+  );
+
+  const saveGoal = useCallback(() => {
+    const trimmed = objective.trim();
+    if (!trimmed) {
+      setStatus({ kind: "error", message: "Goal objective is required." });
+      return;
+    }
+    runGoalCommand(
+      activeGoal ? `/goal replace ${trimmed}` : `/goal ${trimmed}`,
+      activeGoal ? "Saving goal" : "Creating goal",
+      activeGoal ? "goal updated" : "goal created",
+    );
+  }, [activeGoal, objective, runGoalCommand]);
+
+  const pauseGoal = useCallback(() => {
+    runGoalCommand("/goal pause", "Pausing goal", "goal paused");
+  }, [runGoalCommand]);
+
+  const resumeGoal = useCallback(() => {
+    runGoalCommand("/goal resume", "Resuming goal", "goal resumed");
+  }, [runGoalCommand]);
+
+  const deleteGoal = useCallback(() => {
+    runGoalCommand("/goal cancel", "Deleting goal", "goal deleted");
+  }, [runGoalCommand]);
+  const canSaveGoal = Boolean(sessionId) && objective.trim().length > 0;
+
+  return (
+    <div className="ohb-structured-body">
+      {activeGoal ? (
+        <OverlayResult
+          rows={[
+            ["status", activeGoal.status],
+            ["objective", activeGoal.objective],
+            ...(activeGoal.pauseReason
+              ? [["reason", activeGoal.pauseReason] as const]
+              : []),
+          ]}
+        />
+      ) : (
+        <p>No current goal for this session.</p>
+      )}
+      <label className="ohb-structured-field ohb-goal-objective-field">
+        <span>Objective</span>
+        <textarea
+          autoFocus={props.intent.action === "save"}
+          onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+            setObjective(event.target.value);
+          }}
+          placeholder="Describe the goal"
+          rows={4}
+          value={objective}
+        />
+      </label>
+      <OverlayStatusLine status={status} />
+      <div className="ohb-structured-actions ohb-goal-actions">
+        <button
+          autoFocus={props.intent.action === "delete"}
+          className={goalActionButtonClass(
+            props.intent,
+            "delete",
+            "ohb-button",
+          )}
+          data-goal-action="delete"
+          disabled={!sessionId || !activeGoal}
+          onClick={deleteGoal}
+          title="Delete goal"
+          type="button"
+        >
+          Delete goal
+        </button>
+        <button
+          autoFocus={props.intent.action === "pause"}
+          className={goalActionButtonClass(props.intent, "pause", "ohb-button")}
+          data-goal-action="pause"
+          disabled={!sessionId || activeGoal?.status !== "active"}
+          onClick={pauseGoal}
+          title="Pause goal"
+          type="button"
+        >
+          Pause
+        </button>
+        <button
+          autoFocus={props.intent.action === "resume"}
+          className={goalActionButtonClass(
+            props.intent,
+            "resume",
+            "ohb-button",
+          )}
+          data-goal-action="resume"
+          disabled={!sessionId || activeGoal?.status !== "paused"}
+          onClick={resumeGoal}
+          title="Resume goal"
+          type="button"
+        >
+          Resume
+        </button>
+        <button
+          className={goalActionButtonClass(
+            props.intent,
+            "save",
+            "ohb-button-primary",
+          )}
+          data-goal-action="save"
+          disabled={!canSaveGoal}
+          onClick={saveGoal}
+          title="Save goal"
+          type="button"
+        >
+          Save
+        </button>
+      </div>
     </div>
   );
 }
@@ -2053,6 +2350,8 @@ function structuredOverlayKindForAction(
       return "connect-search";
     case "executeCommand":
       return null;
+    case "openGoalPanel":
+      return "goal";
   }
 }
 
@@ -2064,7 +2363,44 @@ function structuredOverlayTitle(kind: StructuredOverlayKind): string {
       return "Connect model";
     case "connect-search":
       return "Connect search";
+    case "goal":
+      return "Goal";
   }
+}
+
+function goalPanelIntentFromArgs(rawArgs: string): GoalPanelIntent {
+  const trimmed = rawArgs.trim();
+  if (!trimmed) {
+    return DEFAULT_GOAL_PANEL_INTENT;
+  }
+  const [command = "", ...rest] = trimmed.split(/\s+/u);
+  switch (command) {
+    case "status":
+      return DEFAULT_GOAL_PANEL_INTENT;
+    case "pause":
+      return { action: "pause" };
+    case "resume":
+      return { action: "resume" };
+    case "cancel":
+      return { action: "delete" };
+    case "replace":
+      return {
+        action: "save",
+        objectiveDraft: rest.join(" "),
+      };
+    default:
+      return { action: "save", objectiveDraft: trimmed };
+  }
+}
+
+function goalActionButtonClass(
+  intent: GoalPanelIntent,
+  action: GoalPanelAction,
+  baseClass: string,
+): string {
+  return intent.action === action
+    ? `${baseClass} ohb-goal-action-highlight`
+    : baseClass;
 }
 
 function formatTokenCount(value: number): string {

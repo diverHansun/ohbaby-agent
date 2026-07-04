@@ -5,6 +5,7 @@ import type {
   UiRunStatus,
   UiSnapshot,
   UiSession,
+  UiSessionGoal,
 } from "ohbaby-sdk";
 import type { UiStateStore } from "./types.js";
 
@@ -14,6 +15,7 @@ interface MutableUiSnapshot {
   runs: UiRun[];
   permissions: UiPermissionRequest[];
   status: UiRunStatus;
+  goals: UiSessionGoal[];
 }
 
 export function cloneMessage(message: UiMessage): UiMessage {
@@ -37,9 +39,17 @@ export function cloneRun(run: UiRun): UiRun {
   };
 }
 
+function cloneGoal(goal: UiSessionGoal): UiSessionGoal {
+  return {
+    ...goal,
+    goal: { ...goal.goal },
+  };
+}
+
 export function cloneSnapshot(
   snapshot: UiSnapshot | MutableUiSnapshot,
 ): UiSnapshot {
+  const goals = snapshot.goals ?? [];
   return {
     sessions: snapshot.sessions.map(cloneSession),
     activeSessionId: snapshot.activeSessionId,
@@ -49,6 +59,7 @@ export function cloneSnapshot(
       choices: permission.choices.map((choice) => ({ ...choice })),
     })),
     status: { ...snapshot.status },
+    ...(goals.length > 0 ? { goals: goals.map(cloneGoal) } : {}),
   };
 }
 
@@ -62,6 +73,7 @@ function toMutableSnapshot(snapshot: UiSnapshot): MutableUiSnapshot {
       choices: permission.choices.map((choice) => ({ ...choice })),
     })),
     status: { ...snapshot.status },
+    goals: (snapshot.goals ?? []).map(cloneGoal),
   };
 }
 

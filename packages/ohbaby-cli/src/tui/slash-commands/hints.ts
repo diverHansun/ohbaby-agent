@@ -4,7 +4,9 @@ export const COMMAND_HINT_LIMIT = 6;
 const COMMAND_HINT_MAX_LENGTH = 72;
 
 export function formatCommandHint(command: TuiCommandSpec): string {
-  return truncateHint(`/${command.path.join(" ")} - ${command.description}`);
+  return truncateHint(
+    `${formatCommandUsage(command)} - ${command.description}`,
+  );
 }
 
 export function formatCommandHints(
@@ -19,4 +21,9 @@ function truncateHint(value: string): string {
   }
 
   return `${value.slice(0, COMMAND_HINT_MAX_LENGTH - 3)}...`;
+}
+
+function formatCommandUsage(command: TuiCommandSpec): string {
+  const path = `/${command.path.join(" ")}`;
+  return command.argsHint ? `${path} ${command.argsHint}` : path;
 }

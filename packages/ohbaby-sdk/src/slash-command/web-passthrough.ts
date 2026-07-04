@@ -19,6 +19,7 @@ export const WEB_OVERLAY_COMMAND_IDS = [
   "connect",
   "connect-search",
   "compact",
+  "goal",
 ] as const;
 
 export type UiWebOverlayCommandId = (typeof WEB_OVERLAY_COMMAND_IDS)[number];
@@ -29,7 +30,8 @@ export type UiWebCommandAction =
   | "executeCommand"
   | "connectModel"
   | "connectSearch"
-  | "compactSession";
+  | "compactSession"
+  | "openGoalPanel";
 
 export interface UiWebCommandSpec extends UiSlashCommandSpec {
   readonly action: UiWebCommandAction;
@@ -56,6 +58,7 @@ const WEB_OVERLAY_COMMAND_ACTIONS: ReadonlyMap<
   ["connect", "connectModel"],
   ["connect-search", "connectSearch"],
   ["compact", "compactSession"],
+  ["goal", "openGoalPanel"],
 ]);
 
 const WEB_PASSTHROUGH_COMMAND_PATHS: ReadonlyMap<
@@ -75,6 +78,7 @@ const WEB_OVERLAY_COMMAND_PATHS: ReadonlyMap<
   ["connect", ["connect"]],
   ["connect-search", ["connect-search"]],
   ["compact", ["compact"]],
+  ["goal", ["goal"]],
 ]);
 
 export function isWebPassthroughCommandId(
@@ -110,10 +114,7 @@ export function isWebOverlayCommandSpec(
     return false;
   }
   const path = WEB_OVERLAY_COMMAND_PATHS.get(command.id);
-  return (
-    path !== undefined &&
-    hasSamePath(command.path, path)
-  );
+  return path !== undefined && hasSamePath(command.path, path);
 }
 
 export function isWebSkillCommandSpec(command: UiSlashCommandSpec): boolean {
@@ -210,6 +211,27 @@ export function supportsWebPassthroughCommandInvocation(
       isVisibleOnSurface(command, invocation.surface) &&
       hasSamePath(command.path, invocation.path) &&
       isWebPassthroughCommandSpec(command),
+  );
+}
+
+// Overlay commands whose panel actions execute the same command id through
+// the raw command API. The other overlays (connect/connect-search/compact)
+// use dedicated RPCs and must stay rejected by /v1/commands.
+const WEB_OVERLAY_EXECUTABLE_COMMAND_IDS: ReadonlySet<string> = new Set([
+  "goal",
+]);
+
+export function supportsWebOverlayCommandInvocation(
+  catalog: UiSlashCommandCatalog,
+  invocation: UiSlashCommandInvocation,
+): boolean {
+  return catalog.commands.some(
+    (command) =>
+      WEB_OVERLAY_EXECUTABLE_COMMAND_IDS.has(command.id) &&
+      command.id === invocation.commandId &&
+      isVisibleOnSurface(command, invocation.surface) &&
+      hasSamePath(command.path, invocation.path) &&
+      isWebOverlayCommandSpec(command),
   );
 }
 

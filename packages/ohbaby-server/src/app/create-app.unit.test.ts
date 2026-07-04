@@ -1760,6 +1760,63 @@ describe("createDaemonServerApp", () => {
     },
   );
 
+  it("executes goal overlay panel invocations through the command API", async () => {
+    const backend = new FakeBackend();
+    backend.commandCatalog = {
+      commands: [
+        {
+          acceptsArguments: true,
+          argumentMode: "argv",
+          category: "session",
+          description: "Create and control a long-running goal",
+          id: "goal",
+          path: ["goal"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+      ],
+      version: "commands-v1",
+    };
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request("/v1/commands", {
+        body: JSON.stringify({
+          argumentMode: "argv",
+          argv: ["pause"],
+          clientInvocationId: "invoke_goal",
+          commandId: "goal",
+          path: ["goal"],
+          raw: "/goal pause",
+          rawArgs: "pause",
+          surface: "tui",
+        }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+          "x-ohbaby-client-id": "client_web",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(backend.executedCommands).toEqual([
+        expect.objectContaining({ commandId: "goal", rawArgs: "pause" }),
+      ]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
   it.each([
     {
       body: {

@@ -20,7 +20,7 @@
 
 ## 二、Operational Constraints（运行约束）
 
-- **串行、不并发**：goal 续跑 Run 串行（interrupt-current 策略下同一时刻至多一个活跃续跑 Run）；goals 不追求并发推进。整个 goal 驱动从宿主看是一段持续 in-flight 的忙碌期。
+- **串行、不并发**：goal 续跑 Run 串行（CLI adapter 的 owner-aware interruption 下同一时刻至多一个活跃续跑 Run）；goals 不追求并发推进。用户插话会先暂停 goal，再执行用户 Run。
 - **提醒开销可忽略**：GoalInjector 每轮重算纯字符串，相对一次模型调用可忽略；不做缓存优化（YAGNI）。提醒作为 user 消息 append 到 history，每轮约 200-500 tokens，旧的可被 compact 压缩。
 - **不稳定外部依赖的方向性约束**：
   - 模型/provider/网络：瞬时超时/provider 错由**继承的 llm-client 重试策略**处理（与正常对话完全一致，`DEFAULT_PROVIDER_RETRY_POLICY` / `maxRetriesPerStep`，尊重 retry-after）；仅当重试**耗尽**或错误**不可重试**才 → pause(`runtime-error`)，不自动恢复，交用户 `/goal resume`。
@@ -43,7 +43,7 @@
 - stream-bridge 快照推送尽力而为——观察者缺失不得影响 GoalStore 的状态权威。
 
 **必须的可观测性：**
-- 每次迁移发布 `goal.updated{snapshot, change}`，状态可清楚区分 `active`/`paused`/`blocked`/`complete` + `terminalReason` + `turnsUsed` + `tokensUsed` + `wallClockMs` + `budgetReport`。
+- 每次迁移发布 `goal.updated{sessionId, goal}`，UI 契约只暴露 `active`/`paused` 驻留状态、objective 与 `pauseReason`。完成或取消发布 `goal: null`，UI 隐藏 goal 状态。
 - 一次 goal 的执行路径可从追加式记录**回溯审计**（谁在何时因何迁移）。
 - 失败必须显性对用户可见（如 runtime-error 的 reason），而非仅记日志。
 - 预算状态可见：`/goal status` 展示各维度用量、剩余量、是否到顶。
@@ -54,7 +54,7 @@
 
 - **不追求 goal 与用户消息真正并发**——换取模型与上下文一致性；代价是插话必然先暂停 goal。
 - **不做 auto-resume**——插话后 goal pause，用户自行 `/goal resume`。放弃"插话办完自动续"的便利，换取简单与可预测；省去队列追踪、cancelReason 区分、自动重入的复杂度（`/goal resume` 仍走幂等的 ensure-driving 启动 driver）。与 kimi/codex 一致。
-- **不区分 PauseCause**——所有 `paused` 同等处理，恢复统一为 `/goal resume`。`terminalReason` 仅供展示，不驱动恢复逻辑分支。避免"五值枚举 × 三恢复路径"的测试矩阵爆炸。
+- **不区分 PauseCause**——所有 `paused` 同等处理，恢复统一为 `/goal resume`。`pauseReason` 仅供展示，不驱动恢复逻辑分支。避免"五值枚举 × 三恢复路径"的测试矩阵爆炸。
 - **预算是 opt-in，不是强制**——不设则无约束（靠安全阀兜底），设了则按维度独立判定。不为不想设预算的用户增加负担，也不禁止想设预算的用户。
 - **安全阀数字写死、不做可调/自适应**——零配置零传参优先；仅作为未设 turn 预算时的兜底。若用户设了 turn 预算，则按用户的来。
 - **不做 `/goal next` 排队、交互式管理面板、master/subagent 多智能体**——明确延后（见 goals-duty Non-Duties），当前不为它们预留除快照字段外的机制。

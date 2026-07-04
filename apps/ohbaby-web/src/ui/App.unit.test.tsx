@@ -613,6 +613,152 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
+  it("opens the structured goal overlay from the slash palette", async () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        goals: [
+          {
+            goal: {
+              objective: "finish goal UI",
+              status: "active",
+            },
+            sessionId: "session_1",
+          },
+        ],
+      },
+    });
+    fake.listCommands.mockResolvedValue(catalog(["goal"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/goal"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+
+    expect(
+      app.container.querySelector(".ohb-structured-dialog")?.textContent,
+    ).toContain("finish goal UI");
+    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
+  });
+
+  it("renders compact goal status without objective copy", () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        goals: [
+          {
+            goal: {
+              objective: "finish goal UI",
+              status: "paused",
+            },
+            sessionId: "session_1",
+          },
+        ],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.textContent).toContain("goal paused");
+    expect(app.container.textContent).not.toContain("finish goal UI");
+  });
+
+  it("opens goal commands as an overlay instead of direct execution", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["goal"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/goal pause");
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+
+    expect(
+      app.container.querySelector('button[data-goal-action="pause"]')
+        ?.className,
+    ).toContain("ohb-goal-action-highlight");
+    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
+  });
+
+  it("executes goal panel actions through the overlay allowance", async () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        goals: [
+          {
+            goal: {
+              objective: "finish goal UI",
+              status: "active",
+            },
+            sessionId: "session_1",
+          },
+        ],
+      },
+    });
+    fake.listCommands.mockResolvedValue(catalog(["goal"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/goal"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+    await clickButton(app.container, "Pause goal");
+
+    expect(fake.executeSlashCommand).toHaveBeenCalledWith({
+      allowOverlay: true,
+      sessionId: "session_1",
+      text: "/goal pause",
+    });
+  });
+
+  it("opens the goal panel when the status chip is clicked", async () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        goals: [
+          {
+            goal: {
+              objective: "finish goal UI",
+              status: "active",
+            },
+            sessionId: "session_1",
+          },
+        ],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    const chip = app.container.querySelector(".ohb-goal-chip");
+    if (!(chip instanceof HTMLButtonElement)) {
+      throw new Error("goal chip not found");
+    }
+    await act(async () => {
+      chip.click();
+      await Promise.resolve();
+    });
+
+    expect(
+      app.container.querySelector(".ohb-structured-dialog")?.textContent,
+    ).toContain("finish goal UI");
+    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
+  });
+
+  it("does not render the goal chip without a goal for the active session", () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.querySelector(".ohb-goal-chip")).toBeNull();
+  });
+
   it("shows compact failures as overlay errors", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
@@ -843,6 +989,7 @@ function permissionAction(
 function catalog(ids: readonly CatalogId[]): UiWebCommandCatalog {
   return {
     commands: ids.map((id) => ({
+      ...(id === "goal" ? { acceptsArguments: true } : {}),
       action: catalogAction(id),
       argumentMode: catalogArgumentMode(id),
       category: catalogCategory(id),
@@ -877,6 +1024,7 @@ type CatalogId =
   | "compact"
   | "connect"
   | "connect-search"
+  | "goal"
   | "skill.hansun-db"
   | "skills"
   | "status";
@@ -891,6 +1039,8 @@ function catalogAction(
       return "connectModel";
     case "connect-search":
       return "connectSearch";
+    case "goal":
+      return "openGoalPanel";
     case "skill.hansun-db":
     case "skills":
     case "status":
@@ -905,12 +1055,15 @@ function catalogArgumentMode(
     ? "raw"
     : id === "skills" || id === "status"
       ? "argv"
-      : "structured";
+      : id === "goal"
+        ? "argv"
+        : "structured";
 }
 
 function catalogCategory(id: CatalogId): string {
   switch (id) {
     case "compact":
+    case "goal":
       return "session";
     case "connect":
     case "connect-search":

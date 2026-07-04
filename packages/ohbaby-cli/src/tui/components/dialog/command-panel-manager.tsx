@@ -278,7 +278,9 @@ function HelpCommand({
 
   return (
     <Text>
-      <Text color={theme.text.headingAccent}>{formatCommandPath(command)}</Text>
+      <Text color={theme.text.headingAccent}>
+        {formatCommandUsage(command)}
+      </Text>
       <Text dimColor> - {getString(command, "description") ?? ""}</Text>
     </Text>
   );
@@ -507,6 +509,12 @@ function formatModelLabel(
 function formatCommandPath(command: Record<string, unknown>): string {
   const path = getStringArray(command, "path");
   return path.length > 0 ? `/${path.join(" ")}` : "/";
+}
+
+function formatCommandUsage(command: Record<string, unknown>): string {
+  const path = formatCommandPath(command);
+  const argsHint = getString(command, "argsHint");
+  return argsHint ? `${path} ${argsHint}` : path;
 }
 
 function formatSkillRow(skill: Record<string, unknown>): string {

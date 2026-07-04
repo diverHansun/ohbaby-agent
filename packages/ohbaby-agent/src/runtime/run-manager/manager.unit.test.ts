@@ -306,6 +306,31 @@ class CompletingLifecycle implements RunLifecycle {
   }
 }
 
+class UsageLifecycle implements RunLifecycle {
+  async *run(
+    params: LifecycleSessionParams,
+  ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
+    await Promise.resolve();
+    yield {
+      type: "llm:start",
+      sessionId: params.sessionId,
+      step: 1,
+      timestamp: 10,
+    };
+
+    return {
+      success: true,
+      finishReason: "stop",
+      finalResponse: "done",
+      usage: {
+        inputTokens: 7,
+        outputTokens: 5,
+        totalTokens: 12,
+      },
+    };
+  }
+}
+
 class FailedResultLifecycle implements RunLifecycle {
   async *run(
     params: LifecycleSessionParams,
@@ -784,6 +809,26 @@ describe("RunManager", () => {
     expect(bridge.endedScopes).toEqual(["run/run_1"]);
     expect(sandboxManager.released).toEqual(["lease_session_1"]);
     expect(manager.list("session_1")).toEqual([]);
+  });
+
+  it("returns lifecycle token usage in run completion", async () => {
+    const { manager } = createManager(new UsageLifecycle());
+
+    const record = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+
+    await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
+      status: "succeeded",
+      usage: {
+        inputTokens: 7,
+        outputTokens: 5,
+        totalTokens: 12,
+      },
+    });
   });
 
   it("forwards maxSteps to the lifecycle", async () => {

@@ -58,10 +58,12 @@ function isActive(record: RunRecord): boolean {
 
 function completionFromResult(result: RunWorkerResult): RunCompletion {
   const terminalReason = result.terminalReason ?? result.result?.terminalReason;
+  const usage = result.result?.usage;
   if (result.status === "succeeded") {
     return {
       status: "succeeded",
       ...(terminalReason === undefined ? {} : { terminalReason }),
+      ...(usage === undefined ? {} : { usage }),
     };
   }
 
@@ -69,6 +71,7 @@ function completionFromResult(result: RunWorkerResult): RunCompletion {
     status: result.status,
     error: result.error,
     ...(terminalReason === undefined ? {} : { terminalReason }),
+    ...(usage === undefined ? {} : { usage }),
   };
 }
 

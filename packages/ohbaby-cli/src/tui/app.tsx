@@ -24,6 +24,7 @@ import { AppShell } from "./layout/app-shell.js";
 import { formatContextWindowUsage } from "./render/usage.js";
 import { createTuiStore } from "./store/events.js";
 import {
+  selectActiveGoal,
   selectActiveContextWindowUsage,
   useTuiStoreSelector,
 } from "./store/selectors.js";
@@ -93,6 +94,7 @@ export function OhbabyTerminalApp({
     store,
     selectActiveContextWindowUsage,
   );
+  const activeGoal = useTuiStoreSelector(store, selectActiveGoal);
   const catalog = useTuiStoreSelector(store, (state) => state.catalog);
   const interactions = useTuiStoreSelector(
     store,
@@ -627,6 +629,7 @@ export function OhbabyTerminalApp({
           catalog={catalog}
           client={client}
           disabled={hasDialog}
+          goalStatus={activeGoal?.status}
           isRuntimeRunning={runtime.kind === "running"}
           loadCatalog={loadCatalog}
           onCommandPanelOpen={openCommandPanel}

@@ -77,6 +77,12 @@ export const schema = {
     fileCount: "file_count",
     createdAt: "created_at",
   }),
+  goalRecord: table("goal_record", {
+    sessionId: "session_id",
+    seq: "seq",
+    createdAt: "created_at",
+    data: "data",
+  }),
   migration: table("migration", {
     version: "version",
     appliedAt: "applied_at",

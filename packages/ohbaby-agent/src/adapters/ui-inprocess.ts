@@ -14,6 +14,7 @@ import type {
   UiCurrentModelConfig,
   UiEvent,
   UiEventHandler,
+  UiGoal,
   UiInteractionResponse,
   UiMessage,
   UiNotice,
@@ -23,6 +24,7 @@ import type {
   UiRunStatus,
   UiSetSearchApiKeyInput,
   UiSetSearchApiKeyResult,
+  UiSessionGoal,
   UiSnapshot,
   UiSession,
 } from "ohbaby-sdk";
@@ -34,9 +36,20 @@ import type {
 } from "../core/llm-client/index.js";
 import { createBus } from "../bus/index.js";
 import type {
+  CommandGoalBackend,
   CommandModelSummary,
   CommandSessionSummary,
 } from "../commands/index.js";
+import {
+  GoalStore,
+  InMemoryGoalPersistence,
+  renderGoalContextNote,
+} from "../goals/index.js";
+import type {
+  GoalPersistencePort,
+  GoalSnapshot,
+  GoalTurnOutcome,
+} from "../goals/index.js";
 import { createCommandService } from "../commands/index.js";
 import { createInteractionBroker } from "../runtime/interaction-broker/index.js";
 import {
@@ -72,7 +85,10 @@ import {
   formatSkillToolOutput,
   type SkillLogger,
 } from "../skill/index.js";
-import type { HookExecutor } from "../runtime/run-manager/index.js";
+import type {
+  HookExecutor,
+  RunCompletion,
+} from "../runtime/run-manager/index.js";
 import {
   SessionRunBusyError,
   type RunLedger,
@@ -137,6 +153,13 @@ const EMPTY_SNAPSHOT: UiSnapshot = {
 
 type UiPermissionState = NonNullable<UiSnapshot["permission"]>;
 
+type PromptOwner = "user" | "goal";
+
+type InternalSubmitPromptOptions = SubmitPromptOptions & {
+  readonly owner?: PromptOwner;
+  readonly suppressGoalContextNote?: boolean;
+};
+
 export interface InProcessUiBackendOptions {
   readonly afterPromptSubmitSettled?: () => Promise<void> | void;
   readonly agentManager?: AgentManager;
@@ -144,6 +167,7 @@ export interface InProcessUiBackendOptions {
   readonly bus?: BusInstance;
   readonly createAgentTaskId?: () => string;
   readonly createRunId?: () => string;
+  readonly goalPersistence?: GoalPersistencePort;
   readonly hookExecutor?: HookExecutor;
   readonly initialSnapshot?: UiSnapshot;
   readonly llmClient?: LLMClientInstance;
@@ -303,9 +327,15 @@ export function createInProcessUiBackendClient(
       bus,
       store: createInMemoryMessageStore(),
     });
+  const goalPersistence =
+    options.goalPersistence ?? new InMemoryGoalPersistence();
   const interactionBroker = createInteractionBroker({ bus });
   const contextWindowUsage: ContextWindowUsageTracker =
     createContextWindowUsageTracker({ now: timestamp });
+  const uiGoalsBySession = new Map<string, UiGoal>();
+  for (const goal of initialSnapshot.goals ?? []) {
+    uiGoalsBySession.set(goal.sessionId, { ...goal.goal });
+  }
   const sessionIds = createIdFactory(
     "session",
     initialSnapshot.sessions.map((session) => session.id),
@@ -330,6 +360,11 @@ export function createInProcessUiBackendClient(
     nowMs: (): number => Date.now(),
   });
   let promptInFlight = false;
+  let promptInFlightOwner: PromptOwner | undefined;
+  let promptInFlightSessionId: string | undefined;
+  let promptRunReady = false;
+  const promptIdleWaiters = new Set<() => void>();
+  const promptRunReadyWaiters = new Set<() => void>();
   let configSaveQueue: Promise<void> = Promise.resolve();
   let skillRegistryPromise: Promise<SkillRegistry> | undefined;
   const pendingPermissionSessions = new Map<string, string>();
@@ -343,7 +378,7 @@ export function createInProcessUiBackendClient(
         options.createRunId ??
         (usesPersistentStateStore() ? undefined : (): string => runIds.next());
 
-      return createUiRuntimeComposition({
+      const runtime = await createUiRuntimeComposition({
         agentManager: options.agentManager,
         bus,
         ...(options.createAgentTaskId
@@ -352,10 +387,14 @@ export function createInProcessUiBackendClient(
         ...(runtimeRunIdFactory === undefined
           ? {}
           : { createRunId: runtimeRunIdFactory }),
+        goalPersistence,
         llmClient,
         messageManager,
         hookExecutor: options.hookExecutor,
         now: () => now().getTime(),
+        onGoalChange: (event) => {
+          publishGoalUpdated(event.sessionId, event.snapshot);
+        },
         onNotice: publishNotice,
         permission,
         permissionState,
@@ -365,6 +404,22 @@ export function createInProcessUiBackendClient(
         streamBridge: options.streamBridge,
         workdir: baseProjectRoot,
       });
+      runtime.goals.attachTurnRunner({
+        async runTurn(sessionId, promptText) {
+          try {
+            await waitForPromptIdle();
+            const completion = await submitPromptInternal(promptText, {
+              owner: "goal",
+              sessionId,
+              suppressGoalContextNote: true,
+            });
+            return goalOutcomeFromRunCompletion(completion);
+          } catch (error) {
+            return { error: getErrorMessage(error), status: "failed" };
+          }
+        },
+      });
+      return runtime;
     },
     publishNotice,
     updateStatus,
@@ -376,7 +431,9 @@ export function createInProcessUiBackendClient(
       return snapshot.activeSessionId;
     },
     retryDelayMs: 250,
-    submitPromptInternal,
+    async submitPromptInternal(text, submitOptions): Promise<void> {
+      await submitPromptInternal(text, submitOptions);
+    },
   });
 
   function usesPersistentStateStore(): boolean {
@@ -434,6 +491,85 @@ export function createInProcessUiBackendClient(
 
   function publishNotice(notice: NoticeDraft): void {
     eventRouter.publishNotice(notice);
+  }
+
+  function goalSnapshotToUiGoal(snapshot: GoalSnapshot): UiGoal | null {
+    if (snapshot.status !== "active" && snapshot.status !== "paused") {
+      return null;
+    }
+    return {
+      objective: snapshot.objective,
+      ...(snapshot.pauseReason === undefined
+        ? {}
+        : { pauseReason: snapshot.pauseReason }),
+      status: snapshot.status,
+    };
+  }
+
+  function setGoalProjection(
+    sessionId: string,
+    snapshot: GoalSnapshot | null,
+  ): UiGoal | null {
+    const goal = snapshot === null ? null : goalSnapshotToUiGoal(snapshot);
+    if (goal === null) {
+      uiGoalsBySession.delete(sessionId);
+    } else {
+      uiGoalsBySession.set(sessionId, goal);
+    }
+    return goal;
+  }
+
+  function publishGoalUpdated(
+    sessionId: string,
+    snapshot: GoalSnapshot | null,
+  ): void {
+    const goal = setGoalProjection(sessionId, snapshot);
+    publish({
+      goal,
+      sessionId,
+      timestamp: now().getTime(),
+      type: "goal.updated",
+    });
+  }
+
+  function snapshotGoalsFor(
+    sessions: readonly UiSession[],
+  ): readonly UiSessionGoal[] {
+    const sessionIds = new Set(sessions.map((session) => session.id));
+    return Array.from(uiGoalsBySession.entries())
+      .filter(([sessionId]) => sessionIds.has(sessionId))
+      .map((entry) => ({
+        goal: { ...entry[1] },
+        sessionId: entry[0],
+      }));
+  }
+
+  async function syncGoalProjectionsFromSource(
+    sessions: readonly UiSession[],
+  ): Promise<void> {
+    const runtime = await runtimeController
+      .getRuntimeIfStarted()
+      ?.catch(() => undefined);
+    if (runtime !== undefined) {
+      await Promise.all(
+        sessions.map(async (session) => {
+          const snapshot = await runtime.goals.getSnapshot(session.id);
+          setGoalProjection(session.id, snapshot);
+        }),
+      );
+      return;
+    }
+
+    await Promise.all(
+      sessions.map(async (session) => {
+        const store = await GoalStore.rebuild({
+          persistence: goalPersistence,
+          sessionId: session.id,
+          now: () => now().getTime(),
+        });
+        setGoalProjection(session.id, store.getSnapshot());
+      }),
+    );
   }
 
   function publishSnapshotReplacement(): Promise<void> {
@@ -561,9 +697,12 @@ export function createInProcessUiBackendClient(
   async function readSnapshotWithPermission(): Promise<UiSnapshot> {
     const snapshot = await stateStore.readSnapshot();
     const contextWindowUsages = contextWindowUsage.list();
+    await syncGoalProjectionsFromSource(snapshot.sessions);
+    const goals = snapshotGoalsFor(snapshot.sessions);
     return {
       ...snapshot,
       ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
+      ...(goals.length > 0 || snapshot.goals !== undefined ? { goals } : {}),
       permission: currentPermissionState(),
     };
   }
@@ -1160,14 +1299,16 @@ export function createInProcessUiBackendClient(
 
   async function submitPromptInternal(
     text: string,
-    submitOptions?: SubmitPromptOptions,
-  ): Promise<void> {
-    if (promptInFlight) {
-      throw new Error("A prompt is already running");
-    }
+    submitOptions?: InternalSubmitPromptOptions,
+  ): Promise<RunCompletion | undefined> {
+    const owner = submitOptions?.owner ?? "user";
+    await waitForPromptSlot(owner);
     assertStateStoreWritable();
     await options.beforePromptSubmit?.();
     promptInFlight = true;
+    promptInFlightOwner = owner;
+    promptInFlightSessionId = submitOptions?.sessionId;
+    promptRunReady = false;
     const createdAt = timestamp();
     let projection: RunStreamProjection | undefined;
     let submittedSessionId: string | undefined;
@@ -1229,6 +1370,16 @@ export function createInProcessUiBackendClient(
       }
       const resolvedProjectRoot = session.projectRoot ?? baseProjectRoot;
       submittedSessionId = session.id;
+      promptInFlightSessionId = session.id;
+
+      const modelPromptText = await promptTextForModel({
+        owner,
+        runtime,
+        sessionId: session.id,
+        suppressGoalContextNote:
+          submitOptions?.suppressGoalContextNote === true,
+        text,
+      });
 
       const userMessage = createTextMessage({
         id: messageIds.next(),
@@ -1256,7 +1407,7 @@ export function createInProcessUiBackendClient(
       try {
         const result = await runtime.startSession({
           agentName,
-          prompt: text,
+          prompt: modelPromptText,
           projectRoot: resolvedProjectRoot,
           runId,
           sessionId: session.id,
@@ -1301,17 +1452,20 @@ export function createInProcessUiBackendClient(
       }
 
       projection.start();
+      promptRunReady = true;
+      notifyPromptRunReady();
 
       try {
         const completion = await runtime.runManager.waitForCompletion(runId);
         await projection.done;
         if (completion.status === "cancelled") {
           // Interruption is a normal user action, not an error.
-          return;
+          return completion;
         }
         if (completion.status !== "succeeded") {
           throw new Error(completion.error ?? `Run ${completion.status}`);
         }
+        return completion;
       } catch (error) {
         await projection.done.catch(() => undefined);
         const snapshot = await stateStore.readSnapshot();
@@ -1329,9 +1483,119 @@ export function createInProcessUiBackendClient(
         await syncSessionStatsBestEffort(submittedSessionId);
       }
       promptInFlight = false;
+      promptInFlightOwner = undefined;
+      promptInFlightSessionId = undefined;
+      promptRunReady = false;
       runtimeController.clearActiveRunId();
-      await options.afterPromptSubmitSettled?.();
+      try {
+        await options.afterPromptSubmitSettled?.();
+      } finally {
+        notifyPromptIdle();
+      }
     }
+  }
+
+  function notifyPromptIdle(): void {
+    const waiters = [...promptIdleWaiters];
+    promptIdleWaiters.clear();
+    for (const resolve of waiters) {
+      resolve();
+    }
+  }
+
+  function notifyPromptRunReady(): void {
+    const waiters = [...promptRunReadyWaiters];
+    promptRunReadyWaiters.clear();
+    for (const resolve of waiters) {
+      resolve();
+    }
+  }
+
+  async function waitForPromptSlot(owner: PromptOwner): Promise<void> {
+    for (;;) {
+      if (!promptInFlight) {
+        return;
+      }
+      if (owner === "user" && promptInFlightOwner === "goal") {
+        await interruptGoalPromptInFlight();
+        continue;
+      }
+      if (owner === "goal" && promptInFlightOwner === "user") {
+        await waitForPromptIdle();
+        continue;
+      }
+      throw new Error("A prompt is already running");
+    }
+  }
+
+  async function interruptGoalPromptInFlight(): Promise<void> {
+    const sessionId = promptInFlightSessionId;
+    try {
+      await waitForPromptRunReadyOrIdle();
+      const runId = runtimeController.getActiveRunId();
+      if (runId) {
+        await runtimeController.abortPromptRun(runId);
+      }
+      if (sessionId) {
+        const runtime = await runtimeController.getRuntimeForPrompt();
+        await runtime.goals
+          .pauseGoal(sessionId, "interrupted")
+          .catch(() => undefined);
+      }
+    } finally {
+      await waitForPromptIdle();
+    }
+  }
+
+  async function waitForPromptIdle(): Promise<void> {
+    if (!promptInFlight) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      promptIdleWaiters.add(resolve);
+    });
+  }
+
+  async function waitForPromptRunReadyOrIdle(): Promise<void> {
+    if (!promptInFlight || promptRunReady) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const resolveOnce = (): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        promptRunReadyWaiters.delete(resolveOnce);
+        promptIdleWaiters.delete(resolveOnce);
+        resolve();
+      };
+      promptRunReadyWaiters.add(resolveOnce);
+      promptIdleWaiters.add(resolveOnce);
+    });
+  }
+
+  async function promptTextForModel(input: {
+    readonly owner: PromptOwner;
+    readonly runtime: UiRuntimeComposition;
+    readonly sessionId: string;
+    readonly suppressGoalContextNote: boolean;
+    readonly text: string;
+  }): Promise<string> {
+    if (input.owner !== "user" || input.suppressGoalContextNote) {
+      return input.text;
+    }
+    const snapshot = await input.runtime.goals.getSnapshot(input.sessionId);
+    if (snapshot === null) {
+      return input.text;
+    }
+    publishGoalUpdated(input.sessionId, snapshot);
+    const note = renderGoalContextNote(snapshot);
+    if (note === undefined) {
+      return input.text;
+    }
+    return `${note}\n\nCurrent user request:\n${input.text}`;
   }
 
   async function connectModelInternal(
@@ -1415,8 +1679,83 @@ export function createInProcessUiBackendClient(
     }
   }
 
+  function goalOutcomeFromRunCompletion(
+    completion: RunCompletion | undefined,
+  ): GoalTurnOutcome {
+    if (completion?.status === "cancelled") {
+      return { status: "cancelled" };
+    }
+    if (completion?.status === "succeeded") {
+      return {
+        status: "succeeded",
+        ...(completion.usage?.totalTokens === undefined
+          ? {}
+          : { tokensUsed: completion.usage.totalTokens }),
+      };
+    }
+    return {
+      error: completion?.error ?? `Run ${completion?.status ?? "failed"}`,
+      status: "failed",
+    };
+  }
+
+  async function resolveGoalSessionId(
+    explicit?: string,
+  ): Promise<string | undefined> {
+    const explicitSessionId = explicit?.trim();
+    if (explicitSessionId) {
+      await assertCanUseAsPrimarySession(explicitSessionId);
+      return explicitSessionId;
+    }
+    const snapshot = await stateStore.readSnapshot();
+    if (!snapshot.activeSessionId) {
+      return undefined;
+    }
+    await assertCanUseAsPrimarySession(snapshot.activeSessionId);
+    return snapshot.activeSessionId;
+  }
+
+  async function goalService(): Promise<UiRuntimeComposition["goals"]> {
+    const runtime = await runtimeController.getRuntimeForPrompt();
+    return runtime.goals;
+  }
+
+  const goalCommandBackend: CommandGoalBackend = {
+    async cancel(sessionId) {
+      await (await goalService()).cancelGoal(sessionId);
+    },
+    async create(sessionId, input) {
+      return (await goalService()).createGoal(sessionId, {
+        actor: "user",
+        objective: input.objective,
+        ...(input.budgetLimits === undefined
+          ? {}
+          : { budgetLimits: input.budgetLimits }),
+      });
+    },
+    async pause(sessionId) {
+      return (await goalService()).pauseGoal(sessionId);
+    },
+    async replace(sessionId, objective) {
+      return (await goalService()).replaceGoal(sessionId, objective);
+    },
+    resolveSessionId: resolveGoalSessionId,
+    async resume(sessionId) {
+      return (await goalService()).resumeGoal(sessionId);
+    },
+    async setBudget(sessionId, limits) {
+      return (await goalService()).setBudget(sessionId, limits);
+    },
+    async status(sessionId) {
+      const snapshot = await (await goalService()).getSnapshot(sessionId);
+      publishGoalUpdated(sessionId, snapshot);
+      return snapshot;
+    },
+  };
+
   const commandService = createCommandService({
     bus,
+    goals: goalCommandBackend,
     interactionBroker,
     tools: {
       async listTools() {
@@ -1461,7 +1800,9 @@ export function createInProcessUiBackendClient(
         return runtime.listMcpServerSummaries();
       },
     },
-    submitPrompt: submitPromptInternal,
+    async submitPrompt(text, submitOptions): Promise<void> {
+      await submitPromptInternal(text, submitOptions);
+    },
     connectModel: connectModelInternal,
     setSearchApiKey: setSearchApiKeyInternal,
     permission: {

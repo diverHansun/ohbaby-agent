@@ -484,6 +484,7 @@ describe("CommandService", () => {
       "sessions",
       "new",
       "compact",
+      "goal",
       "permission",
       "mcps",
       "skills",

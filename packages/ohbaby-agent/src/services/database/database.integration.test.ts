@@ -88,6 +88,7 @@ describe("services/database", () => {
       { version: "004_drop_scheduler_job" },
       { version: "005_snapshot_git_sidecar" },
       { version: "006_run_owner" },
+      { version: "007_goal_record" },
     ]);
   });
 

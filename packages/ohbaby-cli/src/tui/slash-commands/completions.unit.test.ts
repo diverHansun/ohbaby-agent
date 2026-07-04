@@ -6,6 +6,7 @@ import {
   getSlashCompletionPageIndex,
   getSlashCompletionWindow,
 } from "./completions.js";
+import { formatCommandHint } from "./hints.js";
 
 describe("slash command completions", () => {
   it("keeps the full candidate pool separate from the visible hint window", () => {
@@ -64,6 +65,20 @@ describe("slash command completions", () => {
     };
 
     expect(getSlashCompletion("/", catalog, 1)).toBe("/mcps ");
+  });
+
+  it("shows argsHint in slash hints for command families such as /goal", () => {
+    expect(
+      formatCommandHint(
+        command({
+          acceptsArguments: true,
+          argsHint: "[<objective> | status | budget --turns N]",
+          description: "Create and control a long-running goal",
+          id: "goal",
+          path: ["goal"],
+        }),
+      ),
+    ).toContain("/goal [<objective> | status | budget --turns N]");
   });
 });
 

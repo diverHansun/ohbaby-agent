@@ -7,6 +7,7 @@ import type { UiInteractionRequest } from "./interaction.js";
 import type { UiContextWindowUsage } from "./context-window.js";
 import type {
   UiMessage,
+  UiGoal,
   UiPermissionState,
   UiPermissionRequest,
   UiRun,
@@ -97,6 +98,13 @@ export interface UiRunInterruptedEvent {
 export interface UiContextWindowUpdatedEvent {
   readonly type: "context.window.updated";
   readonly usage: UiContextWindowUsage;
+  readonly timestamp?: number;
+}
+
+export interface UiGoalUpdatedEvent {
+  readonly type: "goal.updated";
+  readonly sessionId: string;
+  readonly goal: UiGoal | null;
   readonly timestamp?: number;
 }
 
@@ -193,6 +201,7 @@ export type UiEvent =
   | UiRunUpdatedEvent
   | UiRunInterruptedEvent
   | UiContextWindowUpdatedEvent
+  | UiGoalUpdatedEvent
   | UiPermissionRequestedEvent
   | UiPermissionResolvedEvent
   | UiNoticeEmittedEvent

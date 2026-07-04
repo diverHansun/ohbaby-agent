@@ -81,4 +81,33 @@ describe("UiEvent protocol", () => {
       type: "permission.updated",
     });
   });
+
+  it("represents goal status updates without exposing terminal states", () => {
+    const event: UiEvent = {
+      goal: {
+        objective: "finish the migration",
+        pauseReason: "interrupted",
+        status: "paused",
+      },
+      sessionId: "session_1",
+      timestamp: 6,
+      type: "goal.updated",
+    };
+
+    const cleared: UiEvent = {
+      goal: null,
+      sessionId: "session_1",
+      timestamp: 7,
+      type: "goal.updated",
+    };
+
+    expect(event).toMatchObject({
+      goal: {
+        pauseReason: "interrupted",
+        status: "paused",
+      },
+      type: "goal.updated",
+    });
+    expect(cleared.goal).toBeNull();
+  });
 });

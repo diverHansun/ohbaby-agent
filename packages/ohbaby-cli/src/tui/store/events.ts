@@ -9,6 +9,7 @@ import type {
   UiPermissionRequest,
   UiRun,
   UiSession,
+  UiSessionGoal,
   UiSnapshot,
 } from "ohbaby-sdk";
 import type {
@@ -49,6 +50,7 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
     commandNoticeSequence: 0,
     commandSessionIds: {},
     contextWindowUsages: snapshot.contextWindowUsages ?? [],
+    goals: snapshot.goals ?? [],
     resolvedPermissionIds: [],
     interactions: [],
     committedItems: transcript.committedItems,
@@ -199,6 +201,17 @@ export function applyTuiEvent(
           state.contextWindowUsages,
           event.usage,
         ),
+      });
+
+    case "goal.updated":
+      return rebuildFromCollections(state, {
+        goals:
+          event.goal === null
+            ? state.goals.filter((goal) => goal.sessionId !== event.sessionId)
+            : upsertGoalBySessionId(state.goals, {
+                goal: event.goal,
+                sessionId: event.sessionId,
+              }),
       });
 
     case "permission.requested":
@@ -430,6 +443,7 @@ function preserveLocalQueues(
     next.contextWindowUsages,
     previous.contextWindowUsages,
   );
+  const goals = next.goals;
   const runtime = resolveRuntimeAfterSnapshot(
     previous,
     next,
@@ -443,6 +457,7 @@ function preserveLocalQueues(
     sessions,
     status: runtime,
     ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
+    ...(goals.length > 0 ? { goals } : {}),
     ...(permission === undefined ? {} : { permission }),
   };
   const messages =
@@ -463,6 +478,7 @@ function preserveLocalQueues(
     commandNoticeSequence: previous.commandNoticeSequence,
     commandSessionIds: previous.commandSessionIds,
     contextWindowUsages,
+    goals,
     interactions: previous.interactions,
     committedItems: transcript.committedItems,
     committedPartCounts: transcript.committedPartCounts,
@@ -494,6 +510,7 @@ function rebuildFromCollections(
     readonly permission?: UiPermissionState;
     readonly runtime?: TuiRuntimeStatus;
     readonly contextWindowUsages?: readonly UiContextWindowUsage[];
+    readonly goals?: readonly UiSessionGoal[];
   },
 ): TuiStoreState {
   const activeSessionId =
@@ -507,6 +524,7 @@ function rebuildFromCollections(
   const runtime = patch.runtime ?? state.runtime;
   const contextWindowUsages =
     patch.contextWindowUsages ?? state.contextWindowUsages;
+  const goals = patch.goals ?? state.goals;
   const snapshot: UiSnapshot = {
     activeSessionId,
     permissions,
@@ -514,6 +532,7 @@ function rebuildFromCollections(
     sessions,
     status: runtime,
     ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
+    ...(goals.length > 0 ? { goals } : {}),
     ...(permission === undefined ? {} : { permission }),
   };
   const messages =
@@ -531,6 +550,7 @@ function rebuildFromCollections(
     committedItems: transcript.committedItems,
     committedPartCounts: transcript.committedPartCounts,
     contextWindowUsages,
+    goals,
     liveMessage: transcript.liveMessage,
     messages,
     permissions,
@@ -1277,6 +1297,21 @@ function upsertById<TItem extends { readonly id: string }>(
 
   return items.map((candidate) =>
     candidate.id === item.id ? item : candidate,
+  );
+}
+
+function upsertGoalBySessionId(
+  goals: readonly UiSessionGoal[],
+  goal: UiSessionGoal,
+): readonly UiSessionGoal[] {
+  const index = goals.findIndex(
+    (candidate) => candidate.sessionId === goal.sessionId,
+  );
+  if (index === -1) {
+    return [...goals, goal];
+  }
+  return goals.map((candidate) =>
+    candidate.sessionId === goal.sessionId ? goal : candidate,
   );
 }
 

@@ -16,6 +16,7 @@ import type {
   UiSnapshot,
 } from "ohbaby-sdk";
 import type { BusInstance } from "../bus/index.js";
+import type { GoalSnapshot } from "../goals/index.js";
 import type {
   InteractionBroker,
   InteractionRequestContext,
@@ -159,6 +160,36 @@ export interface CommandHandler {
   ): Promise<void> | void;
 }
 
+/** `/goal` 命令的后端：由适配层桥接到 GoalService。 */
+export interface CommandGoalBackend {
+  readonly create: (
+    sessionId: string,
+    input: {
+      readonly objective: string;
+      readonly budgetLimits?: GoalCommandBudgetLimits;
+    },
+  ) => Promise<GoalSnapshot>;
+  readonly status: (sessionId: string) => Promise<GoalSnapshot | null>;
+  readonly pause: (sessionId: string) => Promise<GoalSnapshot>;
+  readonly resume: (sessionId: string) => Promise<GoalSnapshot>;
+  readonly cancel: (sessionId: string) => Promise<void>;
+  readonly replace: (
+    sessionId: string,
+    objective: string,
+  ) => Promise<GoalSnapshot>;
+  readonly setBudget: (
+    sessionId: string,
+    limits: GoalCommandBudgetLimits,
+  ) => Promise<GoalSnapshot>;
+  readonly resolveSessionId: (explicit?: string) => Promise<string | undefined>;
+}
+
+export interface GoalCommandBudgetLimits {
+  readonly turnBudget?: number;
+  readonly tokenBudget?: number;
+  readonly wallClockBudgetMs?: number;
+}
+
 export interface CommandServiceOptions {
   readonly bus: BusInstance;
   readonly interactionBroker?: Pick<InteractionBroker, "request"> &
@@ -194,6 +225,7 @@ export interface CommandServiceOptions {
   readonly now?: () => number;
   readonly extraCommands?: readonly UiCommandSpec[];
   readonly extraHandlers?: readonly CommandHandler[];
+  readonly goals?: CommandGoalBackend;
 }
 
 export interface CommandService {

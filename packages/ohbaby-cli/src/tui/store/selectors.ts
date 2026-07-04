@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { UiContextWindowUsage } from "ohbaby-sdk";
+import type { UiContextWindowUsage, UiGoal } from "ohbaby-sdk";
 import type {
   TuiInteractionRequest,
   TuiRuntimeStatus,
@@ -38,6 +38,17 @@ export function selectActiveContextWindowUsage(
     state.contextWindowUsages.find(
       (usage) => usage.sessionId === state.activeSessionId,
     ) ?? null
+  );
+}
+
+export function selectActiveGoal(state: TuiStoreState): UiGoal | null {
+  if (!state.activeSessionId) {
+    return null;
+  }
+
+  return (
+    state.goals.find((goal) => goal.sessionId === state.activeSessionId)
+      ?.goal ?? null
   );
 }
 

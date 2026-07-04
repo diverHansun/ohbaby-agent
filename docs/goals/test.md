@@ -9,13 +9,14 @@
 ## 一、Test Scope（测试范围）
 
 **覆盖（goals 自身职责）：**
-- 状态机迁移与合法性：create / resume / pause / markBlocked / markComplete / cancel / replace / incrementTurn / recordTokenUsage / setBudgetLimits 全部经 GoalStore 唯一入口；actor 边界；`complete` 瞬态（宣告即清、从不落盘）；折叠规则。
-- 预算与安全阀：三维预算（turn/token/time）opt-in 设定、到顶 markBlocked、未设 turn 预算时安全阀兜底、BudgetReport 计算与收敛阈值。
+- 状态机迁移与合法性：create / resume / pause / markComplete / cancel / replaceObjective / incrementTurn / recordTokenUsage / setBudgetLimits 全部经 GoalStore 唯一入口；actor 边界；`complete` 瞬态（宣告即清、从不落盘）；折叠规则。
+- 预算与安全阀：三维预算（turn/token/time）opt-in 设定、到顶 pause 并记录 `pauseReason`、未设 turn 预算时安全阀兜底、BudgetReport 计算与收敛阈值。
 - GoalDriver 编排：续跑循环、预算/安全阀判定、`RunCompletion` → 迁移映射、ensure-driving 幂等重入。
-- GoalInjector：按状态三档文本、`<untrusted_objective>` 包裹与转义、每轮重生成、作为 user 消息写入持久 history。
-- GoalPersistence：追加记录、从记录重建、`normalizeAfterReplay`（active→paused 降级、清游离 complete）。
+- GoalInjector：active 全量续跑提醒、paused light note、`<untrusted_objective>` 包裹与转义；active 提醒每轮重生成并作为 user 消息写入持久 history，light note 只作为普通用户 prompt 的模型可见前缀。
+- GoalPersistence：追加/读取记录；GoalStore.rebuild 回放记录并执行 `normalizeAfterReplay`（active→paused 降级、清游离 complete）。
 - goal 工具（CreateGoal / UpdateGoal / GetGoal / SetGoalBudget）经 `sessionId` 触发 store 迁移。
 - GoalSnapshot / GoalChange / GoalBudgetReport 投影内容正确。
+- UI adapter 的 goal prompt owner 分流：用户普通 prompt 可中断 active goal run；goal driver 不抢占正在执行的用户 prompt。
 
 **不覆盖（属其他模块）：**
 - run-manager 的 Run 机制、并发、sandbox、取消实现。
@@ -35,9 +36,9 @@
 | create 有效 objective | 置 `active`，追加 `goal.create`，返回快照 |
 | create 空 objective | 拒绝，不建记录 |
 | markComplete | 发完成事件后**清记录**；重建后无 goal（从不落盘 `complete`） |
-| markBlocked / pause | 置 `blocked` / `paused` 并带 reason，**可恢复** |
+| pause | 置 `paused` 并带 `pauseReason`，**可恢复** |
 | cancel | 丢弃记录，无残留状态；再次 cancel 无副作用 |
-| replace | objective 被替换，保持 goal 身份/生命周期语义一致 |
+| replaceObjective（命令入口为 `/goal replace`） | objective 被替换，保持 goal 身份/生命周期语义一致 |
 | 非法迁移（如对无 goal resume、对 active 再 create 未带 replace） | 明确拒绝或按既定规则处理，不进入不一致态 |
 
 ### 场景组 2：预算与安全阀（unit）
@@ -45,10 +46,10 @@
 | 场景 | 预期结果 |
 |------|---------|
 | 设 token 预算，tokensUsed 未达 | 继续续跑 |
-| 设 token 预算，tokensUsed 达上限 | markBlocked(budget_exhausted)，**可恢复** |
-| 设 turn 预算，turnsUsed 达上限 | markBlocked(budget_exhausted)，**可恢复** |
-| 设 wallClock 预算，wallClockMs 达上限 | markBlocked(budget_exhausted)，**可恢复** |
-| 未设 turn 预算，turnsUsed 达安全阀上限 | markBlocked(safety_cap_reached)，**可恢复** |
+| 设 token 预算，tokensUsed 达上限 | pause(budget_exhausted)，**可恢复** |
+| 设 turn 预算，turnsUsed 达上限 | pause(budget_exhausted)，**可恢复** |
+| 设 wallClock 预算，wallClockMs 达上限 | pause(budget_exhausted)，**可恢复** |
+| 未设 turn 预算，turnsUsed 达安全阀上限 | pause(safety_cap_reached)，**可恢复** |
 | 设了 turn 预算 > 安全阀上限 | 按用户 turn 预算判定，安全阀不生效 |
 | 任一预算用量达 75% | BudgetReport 标记 converging，提醒文本含收敛提示 |
 | 未设任何预算 | 无预算约束，仅安全阀兜底 |
@@ -61,22 +62,24 @@
 |------|---------|
 | succeeded & goal 仍 active | 续下一轮 |
 | succeeded & goal 已清 / 非 active | 退出循环 |
-| cancelled | pause（`terminalReason: "interrupted"`） |
+| cancelled | pause（`pauseReason: "interrupted"`） |
 | failed | pause(`runtime-error`, reason)（failed 已是重试耗尽后的真失败） |
 
-> **不区分 cancelReason。** 所有 cancelled → pause，`terminalReason` 仅供展示。
+> **不区分 cancelReason。** 所有 cancelled → pause，`pauseReason` 仅供展示。
 
 ### 场景组 4：注入（unit + contract）
 
 | 场景 | 预期结果 |
 |------|---------|
 | active | 全量提醒（objective + 进度 + 预算报告 + 自审指令） |
-| paused / blocked | 轻提醒（不催干活、提示可 resume） |
+| paused | 轻提醒（不催干活、提示可 resume） |
 | 无 goal | 空 |
 | objective 含 `<`/`>`/`&` 或伪造 `</untrusted_objective>` | 被转义，无法越出包裹、无法当指令（**防注入，contract 固定**） |
 | 连续两轮 | 各自重新渲染，作为 user 消息 append 到 history；旧提醒可被 compact 压掉 |
 | 有预算时提醒含 BudgetReport | 模型可见剩余量与收敛提示 |
 | 无预算时提醒不含预算行 | 不展示无意义的"unlimited" |
+| 普通用户 prompt 遇到 paused goal | 发给模型的 prompt 含 light note；UI transcript 保持用户原文 |
+| light note | 不含 `GOAL_CONTINUATION_CORE`，不触发自动恢复，只提示 `/goal resume` |
 
 ### 场景组 5：持久化与恢复安全（integration，真实 SQLite）
 
@@ -101,9 +104,12 @@
 | 场景 | 预期结果 |
 |------|---------|
 | goal 续跑中用户发消息 | 续跑 Run cancelled → goal pause；用户消息在同一 session 执行 |
+| goal 续跑中用户发消息 | 不抛 `"A prompt is already running"`，不要求用户先按 Esc |
+| 插话用户消息的模型输入 | 包含 paused light note 和 `/goal resume` 提示，模型知道 goal 存在但不自动续跑 |
 | 用户消息完成后 | goal 保持 paused，**不自动恢复** |
 | 用户 `/goal resume` | goal 回 active，GoalDriver 重入续跑；模型能看到插话期间的增量 |
 | 用户 Esc 中断 | goal pause，**不自动恢复**，需 `/goal resume` |
+| 用户 prompt 正在跑时 goal driver 续跑 | goal driver 等待 prompt idle，不抢占用户 run |
 
 > **无 auto-resume 测试**——所有暂停都需显式恢复。
 
@@ -113,8 +119,8 @@
 
 ### 集成点 1：goals + run-manager（fake provider）—— 续跑走查骨架
 **验证重点**：create → 续跑循环 → RunCompletion 映射 → 终态，以及插话中断 → pause → 显式 resume。
-**方式**：真实 GoalDriver + 真实/可控 run-manager + **fake LLM provider**（可编排每轮返回 complete/blocked/继续、或注入 cancelled/failed）。
-**关注**：首轮输入=objective、后续=CONTINUATION_PROMPT + 进度 + 预算报告；模型经工具改状态后 driver 正确读到并续跑或退出；插话 → pause → 用户 `/goal resume` → 重入续跑。
+**方式**：真实 GoalDriver + 真实/可控 run-manager + **fake LLM provider**（可编排每轮返回 complete/paused/继续、或注入 cancelled/failed）。
+**关注**：首轮输入=objective、后续=GOAL_CONTINUATION_CORE + 进度 + 预算报告；模型经工具改状态后 driver 正确读到并续跑或退出；插话 → pause → 用户 `/goal resume` → 重入续跑。
 
 ### 集成点 2：goals + services/database（真实 SQLite）
 **验证重点**：记录追加、重建、`normalizeAfterReplay` 跨"模拟重启"的正确性。
@@ -143,7 +149,7 @@
 
 **不 mock（integration）：** in-memory SQLite、真实 GoalDriver 编排、真实 messageManager。
 
-**contract 固定：** goal 工具的 I/O 结构、`goal.updated{snapshot, change}` 事件形态、以及**注入转义**（防注入）作为消费者可见契约，单独 `.contract.test.ts`。
+**contract 固定：** goal 工具的 I/O 结构、`goal.updated{sessionId, goal}` 事件形态、以及**注入转义**（防注入）作为消费者可见契约，单独 `.contract.test.ts`。
 
 **可测性要求（重要）：** 安全阀虽对**用户/prompt 不可配置**，但测试需能以**内部构造参数**注入一个低上限，快速命中而不必真跑成千轮。预算同理——测试可注入低预算值快速触发到顶。即"对用户不可配置"≠"对测试不可注入"——安全阀常量与预算值应可在构造期被测试覆盖，但前者不暴露为用户 config，后者经工具/命令设定。
 
