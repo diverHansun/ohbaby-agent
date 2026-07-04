@@ -106,7 +106,7 @@ chooses an available port and prints the URL to open. Passing an explicit `--por
 strict, so `ohbaby serve --port 4096` fails clearly when that port is in use.
 
 <p align="center">
-  <img src="assets/images/ohbaby-web-v0.1.6.png" alt="ohbaby-agent local web UI" width="760">
+  <img src="assets/images/ohbaby-web.png" alt="ohbaby-agent local web UI" width="760">
 </p>
 
 ## 🔍 Web Search (optional)

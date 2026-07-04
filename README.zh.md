@@ -101,7 +101,7 @@ URL。显式传入 `--port` 时仍保持严格语义，所以 `ohbaby serve --po
 被占用时给出清晰失败。
 
 <p align="center">
-  <img src="assets/images/ohbaby-web-v0.1.6.png" alt="ohbaby-agent 本地 Web UI" width="760">
+  <img src="assets/images/ohbaby-web.png" alt="ohbaby-agent 本地 Web UI" width="760">
 </p>
 
 ## 🔍 Web 搜索（可选）

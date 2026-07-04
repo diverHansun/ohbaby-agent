@@ -122,7 +122,7 @@ function invocation(
 }
 
 describe("web slash passthrough helpers", () => {
-  it("defines the v0.1.6 web-safe allowlist", () => {
+  it("defines the current web-safe allowlist", () => {
     expect(WEB_PASSTHROUGH_COMMAND_IDS).toEqual([
       "help",
       "mcps",

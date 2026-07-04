@@ -396,7 +396,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       authToken,
       backend,
       createSessionId: () => "session_generated",
-      packageVersion: "0.1.6-test",
+      packageVersion: "0.1.7-test",
     });
     await server.start();
     try {
@@ -479,7 +479,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       authToken,
       backend,
       createSessionId: () => "session_generated",
-      packageVersion: "0.1.6-test",
+      packageVersion: "0.1.7-test",
     });
     await server.start();
     try {
@@ -613,7 +613,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       authToken,
       backend,
       createSessionId: () => "session_generated",
-      packageVersion: "0.1.6-test",
+      packageVersion: "0.1.7-test",
     });
     await server.start();
     try {
@@ -719,7 +719,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       authToken,
       backend,
       createSessionId: () => "session_generated",
-      packageVersion: "0.1.6-test",
+      packageVersion: "0.1.7-test",
     });
     await server.start();
     try {
