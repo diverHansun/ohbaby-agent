@@ -1,4 +1,9 @@
-export const MAX_GOAL_OBJECTIVE_LENGTH = 4000;
+/**
+ * objective 每轮续跑原文重注入（权威来源是 GoalStore，不是 LLM 复述），
+ * 上限要装得下"自包含的目标 + 对话中已达成的关键约束"；这是天花板不是目标，
+ * 注入成本随长度线性增长（约 1500-2000 tokens/轮 @ 6000 字符）。
+ */
+export const MAX_GOAL_OBJECTIVE_LENGTH = 6000;
 
 /** 不可配置安全阀：未设 turn 预算时的续跑轮上限（不对用户/prompt 暴露）。 */
 export const GOAL_SAFETY_CAP_TURNS = 200;

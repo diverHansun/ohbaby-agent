@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAX_GOAL_OBJECTIVE_LENGTH } from "./constants.js";
 import { GoalError } from "./errors.js";
 import { InMemoryGoalPersistence } from "./persistence.js";
 import { GoalStore } from "./store.js";
@@ -38,7 +39,10 @@ describe("GoalStore state machine", () => {
       store.create({ actor: ACTOR, objective: "  " }),
     ).rejects.toThrow(GoalError);
     await expect(
-      store.create({ actor: ACTOR, objective: "x".repeat(4001) }),
+      store.create({
+        actor: ACTOR,
+        objective: "x".repeat(MAX_GOAL_OBJECTIVE_LENGTH + 1),
+      }),
     ).rejects.toThrow(GoalError);
   });
 

@@ -66,7 +66,12 @@ function createCreateGoalTool(backend: GoalToolBackend): Tool {
       "Create a durable goal the runtime will pursue autonomously across multiple turns. " +
       "Call this only when the user explicitly asks you to work autonomously toward an outcome " +
       "with a checkable end state. Do NOT create goals for greetings, ordinary questions, or " +
-      "vague requests — ask the user for the missing completion criterion first. Use replace: true " +
+      "vague requests — ask the user for the missing completion criterion first. " +
+      "The objective must be self-contained: later turns may only see a compressed summary of " +
+      "this conversation, so fold into the objective every constraint, decision, and rejected " +
+      "direction already agreed here that would change how the work is done. Never reference " +
+      "the conversation itself (no 'as discussed above', 'the approach we chose'). Keep it as " +
+      "short as completeness allows. Use replace: true " +
       "only when the user explicitly wants to abandon the current goal.",
     parametersJsonSchema: {
       additionalProperties: false,
@@ -76,7 +81,9 @@ function createCreateGoalTool(backend: GoalToolBackend): Tool {
           type: "string",
         },
         objective: {
-          description: "What must become true. Keep it concise.",
+          description:
+            "What must become true, written to stand alone without this conversation. " +
+            "Include agreed constraints and decisions; keep it as short as completeness allows.",
           type: "string",
         },
         replace: {
