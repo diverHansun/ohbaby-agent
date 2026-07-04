@@ -181,9 +181,7 @@ export interface CommandGoalBackend {
     sessionId: string,
     limits: GoalCommandBudgetLimits,
   ) => Promise<GoalSnapshot>;
-  readonly resolveSessionId: (
-    explicit?: string,
-  ) => Promise<string | undefined>;
+  readonly resolveSessionId: (explicit?: string) => Promise<string | undefined>;
 }
 
 export interface GoalCommandBudgetLimits {

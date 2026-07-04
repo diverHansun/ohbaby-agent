@@ -1,9 +1,5 @@
 import { GOAL_BUDGET_CONVERGING_RATIO } from "./constants.js";
-import type {
-  GoalBudgetLimits,
-  GoalBudgetReport,
-  GoalUsage,
-} from "./types.js";
+import type { GoalBudgetLimits, GoalBudgetReport, GoalUsage } from "./types.js";
 
 interface DimensionReport {
   readonly limit: number | null;

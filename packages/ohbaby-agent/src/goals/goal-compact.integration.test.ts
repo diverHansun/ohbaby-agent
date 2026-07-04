@@ -236,9 +236,7 @@ describe("goals x compact (integration)", () => {
     );
     expect(reminderParts.length).toBeGreaterThanOrEqual(2);
     expect(reminderParts.some(isCompacted)).toBe(true);
-    const activeReminders = reminderParts.filter(
-      (part) => !isCompacted(part),
-    );
+    const activeReminders = reminderParts.filter((part) => !isCompacted(part));
     expect(activeReminders.length).toBeGreaterThanOrEqual(1);
     const activeParts = parts.filter((part) => !isCompacted(part));
     const lastSummaryIndex = activeParts.findIndex(
