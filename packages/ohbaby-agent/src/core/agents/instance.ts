@@ -25,7 +25,7 @@ class DefaultAgentInstance implements AgentInstance {
     this.contextScope = createAgentContextScope(identity);
   }
 
-  turn(input: AgentTurnInput) {
+  turn(input: AgentTurnInput): ReturnType<AgentInstance["turn"]> {
     return this.runner(this.deps, {
       agentName: this.identity.agentName,
       contextScope: this.contextScope,

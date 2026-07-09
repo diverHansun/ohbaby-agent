@@ -145,7 +145,7 @@ describe("subagent runtime e2e", () => {
       bus,
       createSubagentId: (() => {
         let next = 1;
-        return () => `subagent_e2e_${String(next++)}`;
+        return (): string => `subagent_e2e_${String(next++)}`;
       })(),
       llmClient: fakeLlmClient(requests),
       mcpManager: { getAllTools: () => Promise.resolve([]) },
@@ -154,8 +154,10 @@ describe("subagent runtime e2e", () => {
       sessionManager,
       skillRegistry: new SkillRegistry({
         loader: {
-          loadContent: () => Promise.reject(new Error("No skills loaded")),
-          scan: () => Promise.resolve(new Map()),
+          loadContent: (): Promise<never> =>
+            Promise.reject(new Error("No skills loaded")),
+          scan: (): Promise<Map<string, never>> =>
+            Promise.resolve(new Map<string, never>()),
         },
       }),
       workdir,
