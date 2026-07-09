@@ -7,10 +7,8 @@ import { createListTool } from "./list.js";
 import { createReadTool } from "./read.js";
 import { createWriteTool } from "./write.js";
 import { createTodoTools, InMemoryTodoStore, type TodoStore } from "./todo.js";
-import { createTaskTool } from "./task.js";
-import { createAgentTaskTools } from "./agent-task.js";
+import { createSubagentTools, type SubagentToolHost } from "./subagent.js";
 import { createWebTools, type WebToolsOptions } from "./web.js";
-import type { AgentTaskController, TaskExecutor } from "../agents/index.js";
 import { createGoalTools, type GoalToolBackend } from "../goals/tools.js";
 
 export interface BuiltinToolsOptions {
@@ -18,8 +16,7 @@ export interface BuiltinToolsOptions {
   readonly spawn?: SpawnCommand;
   readonly searchProvider?: WebToolsOptions;
   readonly todoStore?: TodoStore;
-  readonly taskExecutor?: TaskExecutor;
-  readonly agentTaskController?: AgentTaskController;
+  readonly subagentHost?: SubagentToolHost;
   readonly goalBackend?: GoalToolBackend;
 }
 
@@ -36,11 +33,8 @@ export function createBuiltinTools(options: BuiltinToolsOptions = {}): Tool[] {
     ...createWebTools(options.searchProvider),
     createBashTool({ shell: options.shell, spawn: options.spawn }),
   ];
-  if (options.taskExecutor) {
-    tools.push(createTaskTool(options.taskExecutor));
-  }
-  if (options.agentTaskController) {
-    tools.push(...createAgentTaskTools(options.agentTaskController));
+  if (options.subagentHost) {
+    tools.push(...createSubagentTools(options.subagentHost));
   }
   if (options.goalBackend) {
     tools.push(...createGoalTools(options.goalBackend));

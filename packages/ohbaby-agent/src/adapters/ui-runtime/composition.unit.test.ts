@@ -2,7 +2,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentManager } from "../../agents/index.js";
+import {
+  AgentManager,
+  InMemorySubagentInstanceStore,
+  type SubagentInstanceRecord,
+} from "../../agents/index.js";
 import { createBus } from "../../bus/index.js";
 import type { ContextManager } from "../../core/context/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
@@ -303,6 +307,80 @@ function mcpTool(name: string, description = "Echo from MCP"): Tool {
 }
 
 describe("createUiRuntimeComposition skill tools", () => {
+  it("registers the renamed subagent tools without exposing legacy task tools", async () => {
+    const bus = createBus();
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      llmClient: fakeLlmClient(),
+      mcpManager: { getAllTools: () => Promise.resolve([]) },
+      messageManager: createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      }),
+      permissionState: createPermissionState({ bus }),
+      skillRegistry: createMutableSkillRegistry([]),
+      workdir: await tempWorkdir(),
+    });
+
+    const toolNames = (
+      await composition.toolScheduler.getAvailableTools({ agentName: "build" })
+    ).map((tool) => tool.name);
+
+    expect(toolNames).toEqual(
+      expect.arrayContaining([
+        "subagent_run",
+        "subagent_status",
+        "subagent_close",
+      ]),
+    );
+    expect(toolNames).not.toContain("task");
+    expect(toolNames).not.toContain("agent_open");
+    expect(toolNames).not.toContain("agent_eval");
+    expect(toolNames).not.toContain("agent_status");
+    expect(toolNames).not.toContain("agent_close");
+  });
+
+  it("marks active persisted subagents interrupted when runtime starts", async () => {
+    const bus = createBus();
+    const store = new InMemorySubagentInstanceStore();
+    const record: SubagentInstanceRecord = {
+      contextScopeId: "subagent_1",
+      createdAt: 1,
+      initialPrompt: "work",
+      parentSessionId: "session_parent",
+      pendingQueue: [],
+      role: "generic",
+      sessionId: "session_child",
+      status: "running",
+      subagentId: "subagent_1",
+      updatedAt: 1,
+    };
+    await store.create(record);
+
+    await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      llmClient: fakeLlmClient(),
+      mcpManager: { getAllTools: () => Promise.resolve([]) },
+      messageManager: createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      }),
+      permissionState: createPermissionState({ bus }),
+      skillRegistry: createMutableSkillRegistry([]),
+      subagentInstanceStore: store,
+      workdir: await tempWorkdir(),
+    });
+
+    await expect(
+      store.get({
+        parentSessionId: "session_parent",
+        subagentId: "subagent_1",
+      }),
+    ).resolves.toMatchObject({ status: "interrupted" });
+  });
+
   it("disposes context session state when a session is removed", async () => {
     const bus = createBus();
     const disposeSession = vi.fn<ContextManager["disposeSession"]>();
@@ -774,7 +852,7 @@ describe("createUiRuntimeComposition skill tools", () => {
         ? requests[0].messages[0].content
         : "";
     expect(systemContent).toContain("Task: plan");
-    expect(systemContent).toContain("Subagent roles for task / agent_open");
+    expect(systemContent).toContain("Subagent roles for subagent_run");
     expect(systemContent).toContain("generic");
     expect(systemContent).toContain(
       "build and plan are primary-agent modes, not subagent roles",

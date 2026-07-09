@@ -24,10 +24,6 @@ export interface PermissionClassification {
 }
 
 const BUILTIN_CATEGORIES: Partial<Record<string, PermissionToolCategory>> = {
-  agent_close: "subagent",
-  agent_eval: "subagent",
-  agent_open: "subagent",
-  agent_status: "subagent",
   bash: "dangerous",
   edit: "write",
   glob: "readonly",
@@ -35,7 +31,9 @@ const BUILTIN_CATEGORIES: Partial<Record<string, PermissionToolCategory>> = {
   list: "readonly",
   read: "readonly",
   skill: "skill",
-  task: "subagent",
+  subagent_close: "subagent",
+  subagent_run: "subagent",
+  subagent_status: "subagent",
   todo_read: "readonly",
   todo_write: "write",
   web_fetch: "network",
@@ -50,12 +48,9 @@ const MEMORY_WRITE_TOOLS = new Set([
   "memory_remove",
 ]);
 const SUBAGENT_TOOLS = new Set([
-  "task",
-  "agent_open",
-  "agent_eval",
-  "agent_status",
-  "agent_close",
-  "tool/agent-task.ts",
+  "subagent_run",
+  "subagent_status",
+  "subagent_close",
 ]);
 
 function canonicalToolName(toolName: string): string {

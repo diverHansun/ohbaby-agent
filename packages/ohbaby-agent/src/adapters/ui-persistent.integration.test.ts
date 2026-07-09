@@ -146,9 +146,11 @@ function createBlockingLLMClient(input: {
   };
 }
 
-function createProviderTaskEvent(input: {
+function createProviderSubagentRunEvent(input: {
   readonly callId: string;
+  readonly mode?: "foreground" | "background";
   readonly prompt: string;
+  readonly subagentId?: string;
 }): InterfaceProviderStreamEvent {
   return {
     finishReason: "tool_calls",
@@ -156,21 +158,23 @@ function createProviderTaskEvent(input: {
       {
         argumentsDelta: JSON.stringify({
           description: "Persistent child",
+          mode: input.mode,
           prompt: input.prompt,
           role: "explore",
+          subagent_id: input.subagentId,
         }),
         id: input.callId,
         index: 0,
-        name: "task",
+        name: "subagent_run",
       },
     ],
   };
 }
 
-function createProviderAgentTaskEvent(input: {
+function createProviderSubagentControlEvent(input: {
   readonly arguments: Record<string, unknown>;
   readonly callId: string;
-  readonly name: "agent_open" | "agent_status";
+  readonly name: "subagent_run" | "subagent_status";
 }): InterfaceProviderStreamEvent {
   return {
     finishReason: "tool_calls",
@@ -230,7 +234,7 @@ function isPersistentExploreSubagentRequest(
   return JSON.stringify(request.messages).includes("Task: explore");
 }
 
-function createPersistentAgentTaskLLMClient(
+function createPersistentBackgroundSubagentLLMClient(
   requests: InterfaceProviderRequest[],
 ): LLMClientInstance<FakeSdkClient> {
   return {
@@ -256,21 +260,25 @@ function createPersistentAgentTaskLLMClient(
         ) {
           return Promise.resolve(
             createProviderStream([
-              createProviderAgentTaskEvent({
+              createProviderSubagentControlEvent({
                 arguments: {
                   description: "Persistent background child",
+                  mode: "background",
                   prompt: "Inspect persistent background child files",
                   role: "explore",
                 },
-                callId: "call_agent_open",
-                name: "agent_open",
+                callId: "call_subagent_background",
+                name: "subagent_run",
               }),
             ]),
           );
         }
         return Promise.resolve(
           createProviderStream([
-            { textDelta: "parent got background task", finishReason: "stop" },
+            {
+              textDelta: "parent got background subagent",
+              finishReason: "stop",
+            },
           ]),
         );
       },
@@ -886,7 +894,7 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 
-  it("persists task subagent child sessions, transcripts, and run ledger entries", async () => {
+  it("persists foreground subagent child sessions, transcripts, and run ledger entries", async () => {
     const directory = await tempDir("ohbaby-persistent-subagent-");
     try {
       const dbPath = join(directory, "agent.db");
@@ -897,8 +905,8 @@ describe("createPersistentUiBackendClient", () => {
         llmClient: createSequentialFakeLLMClient(
           [
             [
-              createProviderTaskEvent({
-                callId: "call_task",
+              createProviderSubagentRunEvent({
+                callId: "call_subagent_run",
                 prompt: "Inspect persistent child files",
               }),
             ],
@@ -999,16 +1007,16 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 
-  it("persists agent task child sessions, transcripts, and run ledger entries", async () => {
-    const directory = await tempDir("ohbaby-persistent-agent-task-");
+  it("persists background subagent child sessions, transcripts, and run ledger entries", async () => {
+    const directory = await tempDir("ohbaby-persistent-background-subagent-");
     try {
       const dbPath = join(directory, "agent.db");
       const workdir = join(directory, "workspace");
       const requests: InterfaceProviderRequest[] = [];
       const client = createPersistentUiBackendClient({
-        createAgentTaskId: () => "agent_task_1",
+        createSubagentId: () => "subagent_persistent_1",
         dbPath,
-        llmClient: createPersistentAgentTaskLLMClient(requests),
+        llmClient: createPersistentBackgroundSubagentLLMClient(requests),
         workdir,
       });
 
@@ -1111,7 +1119,7 @@ describe("createPersistentUiBackendClient", () => {
         )
         .all(parentSessionId);
       const parentTranscript = JSON.stringify(parentParts);
-      expect(parentTranscript).toContain("agent_task_1");
+      expect(parentTranscript).toContain("subagent_persistent_1");
       expect(parentTranscript).not.toContain("background child persisted");
     } finally {
       closeDatabase();

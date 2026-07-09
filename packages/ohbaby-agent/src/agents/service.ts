@@ -7,19 +7,11 @@ import {
 import type { MessageManager } from "../core/message/index.js";
 import type { ToolSchedulerInstance } from "../core/tool-scheduler/index.js";
 import type { Session, SessionManager } from "../services/session/index.js";
-import { createDeadlineController } from "./deadline.js";
 import { AgentManager } from "./manager.js";
 import type {
   AgentSessionStartResult,
   StartSessionParams,
-  SubagentExecuteParams,
-  SubagentResult,
-  TaskExecutor,
 } from "./types.js";
-
-const DEFAULT_MAX_CONCURRENCY = 3;
-export const SYNC_SUBAGENT_TIMEOUT_MS = 300_000;
-const SYNC_SUBAGENT_TIMEOUT_REASON = "sync subagent timed out";
 
 export interface AgentServiceOptions {
   readonly agentManager: AgentManager;
@@ -30,45 +22,10 @@ export interface AgentServiceOptions {
   readonly sandboxManager?: AgentSandboxEnvironmentManager;
   readonly sessionManager: Pick<SessionManager, "create" | "get">;
   readonly toolScheduler: Pick<ToolSchedulerInstance, "getAvailableTools">;
-  readonly maxConcurrency?: number;
-  readonly now?: () => number;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-export function resolveSyncSubagentTimeout(timeoutMs?: number): number {
-  // Config schema validation lands in a later phase; until then a zero or
-  // negative timeout would make the deadline fire immediately, so fall back
-  // to the default instead of honoring an unusable value.
-  if (
-    timeoutMs === undefined ||
-    !Number.isFinite(timeoutMs) ||
-    timeoutMs <= 0
-  ) {
-    return SYNC_SUBAGENT_TIMEOUT_MS;
-  }
-  return Math.min(timeoutMs, SYNC_SUBAGENT_TIMEOUT_MS);
-}
-
-export class AgentService implements TaskExecutor {
-  private readonly maxConcurrency: number;
-  private readonly now: () => number;
-  private runningCount = 0;
-
-  constructor(private readonly options: AgentServiceOptions) {
-    this.maxConcurrency = options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
-    this.now = options.now ?? Date.now;
-  }
-
-  getConcurrentCount(): number {
-    return this.runningCount;
-  }
-
-  execute(params: SubagentExecuteParams): Promise<SubagentResult> {
-    return this.executeTask(params);
-  }
+export class AgentService {
+  constructor(private readonly options: AgentServiceOptions) {}
 
   async startSession(
     params: StartSessionParams,
@@ -108,160 +65,6 @@ export class AgentService implements TaskExecutor {
       throw new Error("Primary session expected a streaming agent run");
     }
     return result;
-  }
-
-  async executeTask(params: SubagentExecuteParams): Promise<SubagentResult> {
-    if (this.runningCount >= this.maxConcurrency) {
-      throw new Error("Maximum concurrent subagents reached");
-    }
-    this.runningCount += 1;
-    const startedAt = this.now();
-    try {
-      const runtimeAgent = await this.options.agentManager.getRuntimeAgent(
-        params.role,
-        { isSubagent: true },
-      );
-      const session = await this.resolveSession(params);
-      const timeoutMs = resolveSyncSubagentTimeout(runtimeAgent.config.timeout);
-      const deadline = createDeadlineController({
-        parent: params.signal,
-        reason: SYNC_SUBAGENT_TIMEOUT_REASON,
-        timeoutMs,
-      });
-      try {
-        const runPromise = runAgent(
-          {
-            messageManager: this.options.messageManager,
-            runCoordinator: this.options.runCoordinator,
-            sandboxManager: this.options.sandboxManager,
-            toolScheduler: this.options.toolScheduler,
-          },
-          {
-            agentName: params.role,
-            environment: params.environment,
-            initialUserPrompt: params.prompt,
-            maxSteps: runtimeAgent.config.maxSteps,
-            modelId: this.options.modelId,
-            parentSessionId: params.parentSessionId,
-            projectRoot: session.projectRoot,
-            sessionId: session.id,
-            signal: deadline.signal,
-            waitMode: "waitForCompletion",
-          },
-        );
-        void runPromise.catch(() => undefined);
-        const outcome = await Promise.race([
-          runPromise.then((result) => ({ result, type: "result" as const })),
-          deadline.parentAborted.then(() => ({ type: "cancelled" as const })),
-          deadline.timedOut.then(() => ({ type: "timeout" as const })),
-        ]);
-        if (outcome.type === "cancelled") {
-          return {
-            description: params.description,
-            name: params.name,
-            output: "Subagent cancelled.",
-            role: params.role,
-            sessionId: session.id,
-            success: false,
-            summary: {
-              duration: this.now() - startedAt,
-              steps: 0,
-              toolCalls: [],
-            },
-          };
-        }
-        if (outcome.type === "timeout") {
-          return {
-            description: params.description,
-            name: params.name,
-            output: `Subagent timed out after ${String(timeoutMs)}ms. Use resume_session_id to continue.`,
-            role: params.role,
-            sessionId: session.id,
-            success: false,
-            summary: {
-              duration: this.now() - startedAt,
-              steps: 0,
-              toolCalls: [],
-            },
-            timeout: true,
-          };
-        }
-        const result = outcome.result;
-        if (result.mode !== "waitForCompletion") {
-          throw new Error("Task execution expected a completed agent run");
-        }
-        const output = result.success ? result.finalOutput : result.error;
-        return {
-          description: params.description,
-          name: params.name,
-          output,
-          role: params.role,
-          sessionId: session.id,
-          success: result.success,
-          summary: {
-            duration: this.now() - startedAt,
-            steps: result.steps ?? 0,
-            toolCalls: result.toolCalls ?? [],
-          },
-        };
-      } catch (error) {
-        return {
-          description: params.description,
-          name: params.name,
-          output: errorMessage(error),
-          role: params.role,
-          sessionId: session.id,
-          success: false,
-          summary: {
-            duration: this.now() - startedAt,
-            steps: 0,
-            toolCalls: [],
-          },
-        };
-      } finally {
-        deadline.dispose();
-      }
-    } finally {
-      this.runningCount = Math.max(0, this.runningCount - 1);
-    }
-  }
-
-  private async resolveSession(
-    params: SubagentExecuteParams,
-  ): Promise<Session> {
-    if (params.resumeSessionId) {
-      const resumed = await this.options.sessionManager.get(
-        params.resumeSessionId,
-      );
-      if (!resumed) {
-        throw new Error(
-          `Subagent session not found: ${params.resumeSessionId}`,
-        );
-      }
-      if (!resumed.isSubagent || resumed.parentId !== params.parentSessionId) {
-        throw new Error(
-          `Session ${params.resumeSessionId} is not a child of ${params.parentSessionId}`,
-        );
-      }
-      if (resumed.agentName !== params.role) {
-        throw new Error(
-          `Session ${params.resumeSessionId} belongs to agent ${resumed.agentName}, not ${params.role}`,
-        );
-      }
-      return resumed;
-    }
-
-    const parent = await this.options.sessionManager.get(
-      params.parentSessionId,
-    );
-    if (!parent) {
-      throw new Error(`Parent session not found: ${params.parentSessionId}`);
-    }
-    return this.options.sessionManager.create(parent.projectRoot, {
-      agentName: params.role,
-      parentId: parent.id,
-      title: params.description,
-    });
   }
 
   private async resolvePrimarySession(

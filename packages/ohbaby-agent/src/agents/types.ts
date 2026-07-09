@@ -1,6 +1,5 @@
 import type { ToolExecutionEnvironment } from "../core/tool-scheduler/index.js";
 import type { AgentRunResult } from "../core/agents/index.js";
-import type { SubagentRole } from "./roles.js";
 
 export type AgentMode = "primary" | "subagent" | "all";
 export type PermissionValue = "allow" | "deny" | "ask";
@@ -62,39 +61,6 @@ export interface AgentPromptProvider {
   }): Promise<string> | string;
 }
 
-export interface SubagentExecuteParams {
-  readonly role: SubagentRole;
-  readonly name?: string;
-  readonly parentSessionId: string;
-  readonly prompt: string;
-  readonly description?: string;
-  readonly resumeSessionId?: string;
-  readonly signal?: AbortSignal;
-  readonly environment?: ToolExecutionEnvironment;
-}
-
-export interface SubagentToolCallSummary {
-  readonly id: string;
-  readonly tool: string;
-  readonly status: "completed" | "error";
-  readonly title?: string;
-}
-
-export interface SubagentResult {
-  readonly role: SubagentRole;
-  readonly name?: string;
-  readonly description?: string;
-  readonly sessionId: string;
-  readonly success: boolean;
-  readonly output: string;
-  readonly timeout?: boolean;
-  readonly summary: {
-    readonly toolCalls: readonly SubagentToolCallSummary[];
-    readonly steps: number;
-    readonly duration: number;
-  };
-}
-
 export interface StartSessionParams {
   readonly agentName: string;
   readonly sessionId: string;
@@ -111,7 +77,3 @@ export type AgentSessionStartResult = Extract<
   AgentRunResult,
   { readonly mode: "stream" }
 >;
-
-export interface TaskExecutor {
-  execute(params: SubagentExecuteParams): Promise<SubagentResult>;
-}

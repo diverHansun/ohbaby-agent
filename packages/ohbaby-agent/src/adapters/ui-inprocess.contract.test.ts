@@ -487,6 +487,42 @@ function subagentSessionIdFromMessages(
   return undefined;
 }
 
+function subagentIdFromMessages(
+  messages: readonly ChatCompletionMessage[],
+): string | undefined {
+  for (const message of messages) {
+    if (message.role !== "tool" || typeof message.content !== "string") {
+      continue;
+    }
+    try {
+      const payload = JSON.parse(message.content) as {
+        readonly metadata?: {
+          readonly subagent?: {
+            readonly item?: {
+              readonly subagentId?: unknown;
+            };
+          };
+        };
+      };
+      const subagentId = payload.metadata?.subagent?.item?.subagentId;
+      if (typeof subagentId === "string") {
+        return subagentId;
+      }
+    } catch {
+      const metadata = toolMetadataFromContent(message.content);
+      const subagentId = metadata?.subagentId;
+      if (typeof subagentId === "string") {
+        return subagentId;
+      }
+      const match = /^subagent_id:\s*(\S+)/m.exec(message.content);
+      if (match?.[1]) {
+        return match[1];
+      }
+    }
+  }
+  return undefined;
+}
+
 function isExploreSubagentRequest(request: InterfaceProviderRequest): boolean {
   return JSON.stringify(request.messages).includes("Task: explore");
 }
@@ -521,8 +557,8 @@ function createResumableTaskFakeLLMClient(
         if (lastText.includes("Delegate auth exploration")) {
           return Promise.resolve(
             createProviderStream([
-              taskToolCallEvent({
-                callId: "call_task_first",
+              subagentRunToolCallEvent({
+                callId: "call_subagent_first",
                 description: "Explore auth",
                 prompt: "Find auth files",
               }),
@@ -530,30 +566,30 @@ function createResumableTaskFakeLLMClient(
           );
         }
         if (lastText.includes("Continue the same exploration")) {
-          const resumeSessionId =
-            subagentSessionIdFromMessages(request.messages) ??
+          const subagentId =
+            subagentIdFromMessages(request.messages) ??
             lastSubagentSessionId;
-          if (!resumeSessionId) {
+          if (!subagentId) {
             return Promise.reject(
               new Error(
-                "Expected previous subagent session id in parent context",
+                "Expected previous subagent id in parent context",
               ),
             );
           }
           return Promise.resolve(
             createProviderStream([
-              taskToolCallEvent({
-                callId: "call_task_resume",
+              subagentRunToolCallEvent({
+                callId: "call_subagent_resume",
                 description: "Resume auth",
                 prompt: "Use the same child session",
-                resumeSessionId,
+                subagentId,
               }),
             ]),
           );
         }
         if (lastText.includes("child found auth.ts")) {
           lastSubagentSessionId =
-            subagentSessionIdFromMessages(request.messages) ??
+            subagentIdFromMessages(request.messages) ??
             lastSubagentSessionId;
           return Promise.resolve(
             createProviderStream([
@@ -590,7 +626,7 @@ function isGenericSubagentRequest(request: InterfaceProviderRequest): boolean {
   return JSON.stringify(request.messages).includes("Task: generic");
 }
 
-function createAgentTaskFakeLLMClient(
+function createBackgroundSubagentFakeLLMClient(
   requests: InterfaceProviderRequest[],
 ): LLMClientInstance<FakeSdkClient> {
   return {
@@ -619,14 +655,15 @@ function createAgentTaskFakeLLMClient(
         if (lastText.includes("Open a background explorer")) {
           return Promise.resolve(
             createProviderStream([
-              agentTaskToolCallEvent({
+              subagentControlToolCallEvent({
                 arguments: {
                   description: "Background auth exploration",
+                  mode: "background",
                   role: "explore",
                   prompt: "Background first pass",
                 },
-                callId: "call_agent_open",
-                name: "agent_open",
+                callId: "call_subagent_open",
+                name: "subagent_run",
               }),
             ]),
           );
@@ -634,13 +671,14 @@ function createAgentTaskFakeLLMClient(
         if (lastText.includes("Follow up with the background explorer")) {
           return Promise.resolve(
             createProviderStream([
-              agentTaskToolCallEvent({
+              subagentControlToolCallEvent({
                 arguments: {
+                  mode: "background",
                   prompt: "Use the prior child finding",
-                  task_id: "agent_task_1",
+                  subagent_id: "subagent_1",
                 },
-                callId: "call_agent_eval",
-                name: "agent_eval",
+                callId: "call_subagent_followup",
+                name: "subagent_run",
               }),
             ]),
           );
@@ -648,10 +686,10 @@ function createAgentTaskFakeLLMClient(
         if (lastText.includes("Check the background explorer")) {
           return Promise.resolve(
             createProviderStream([
-              agentTaskToolCallEvent({
-                arguments: { task_id: "agent_task_1" },
-                callId: "call_agent_status",
-                name: "agent_status",
+              subagentControlToolCallEvent({
+                arguments: { subagent_id: "subagent_1" },
+                callId: "call_subagent_status",
+                name: "subagent_status",
               }),
             ]),
           );
@@ -659,9 +697,9 @@ function createAgentTaskFakeLLMClient(
 
         const toolCallId = lastRequestToolCallId(request);
         const output =
-          toolCallId === "call_agent_status"
+          toolCallId === "call_subagent_status"
             ? "parent saw status"
-            : toolCallId === "call_agent_eval"
+            : toolCallId === "call_subagent_followup"
               ? "parent queued follow-up"
               : "parent opened background";
         return Promise.resolve(
@@ -740,8 +778,8 @@ function createAbortableSubagentLLMClient(
         if (nextRequest === 1) {
           return Promise.resolve(
             createProviderStream([
-              taskToolCallEvent({
-                callId: "call_task_long",
+              subagentRunToolCallEvent({
+                callId: "call_subagent_long",
                 description: "Long child",
                 prompt: "Run until cancelled",
               }),
@@ -770,7 +808,7 @@ function createAbortableSubagentLLMClient(
   };
 }
 
-function createAbortableAgentTaskLLMClient(
+function createAbortableBackgroundSubagentLLMClient(
   requests: InterfaceProviderRequest[],
   childStarted: Deferred<AbortSignal | undefined>,
 ): LLMClientInstance<FakeSdkClient> {
@@ -795,14 +833,15 @@ function createAbortableAgentTaskLLMClient(
         if (lastText.includes("Open a cancellable background explorer")) {
           return Promise.resolve(
             createProviderStream([
-              agentTaskToolCallEvent({
+              subagentControlToolCallEvent({
                 arguments: {
                   description: "Cancellable background task",
+                  mode: "background",
                   role: "explore",
                   prompt: "Run until explicitly closed",
                 },
-                callId: "call_agent_open_cancellable",
-                name: "agent_open",
+                callId: "call_subagent_open_cancellable",
+                name: "subagent_run",
               }),
             ]),
           );
@@ -810,10 +849,10 @@ function createAbortableAgentTaskLLMClient(
         if (lastText.includes("Close the background explorer")) {
           return Promise.resolve(
             createProviderStream([
-              agentTaskToolCallEvent({
-                arguments: { task_id: "agent_task_1" },
-                callId: "call_agent_close_cancellable",
-                name: "agent_close",
+              subagentControlToolCallEvent({
+                arguments: { subagent_id: "subagent_1" },
+                callId: "call_subagent_close_cancellable",
+                name: "subagent_close",
               }),
             ]),
           );
@@ -865,22 +904,24 @@ function writeToolCallEvent(input: {
   };
 }
 
-function taskToolCallEvent(input: {
+function subagentRunToolCallEvent(input: {
   readonly callId: string;
   readonly description?: string;
+  readonly mode?: "foreground" | "background";
   readonly name?: string;
   readonly omitRole?: boolean;
   readonly prompt: string;
-  readonly resumeSessionId?: string;
   readonly role?: SubagentRole;
+  readonly subagentId?: string;
 }): InterfaceProviderStreamEvent {
   const argumentsPayload: Record<string, unknown> = {
     description: input.description,
+    mode: input.mode,
     name: input.name,
     prompt: input.prompt,
-    resume_session_id: input.resumeSessionId,
+    subagent_id: input.subagentId,
   };
-  if (input.omitRole !== true) {
+  if (input.omitRole !== true && input.subagentId === undefined) {
     argumentsPayload.role = input.role ?? "explore";
   }
   return {
@@ -889,17 +930,17 @@ function taskToolCallEvent(input: {
         argumentsDelta: JSON.stringify(argumentsPayload),
         id: input.callId,
         index: 0,
-        name: "task",
+        name: "subagent_run",
       },
     ],
     finishReason: "tool_calls",
   };
 }
 
-function agentTaskToolCallEvent(input: {
+function subagentControlToolCallEvent(input: {
   readonly arguments: Record<string, unknown>;
   readonly callId: string;
-  readonly name: "agent_open" | "agent_eval" | "agent_status" | "agent_close";
+  readonly name: "subagent_run" | "subagent_status" | "subagent_close";
 }): InterfaceProviderStreamEvent {
   return {
     toolCallDeltas: [
@@ -2140,7 +2181,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("runs task subagents in isolated resumable child sessions with child history", async () => {
+  it("runs foreground subagents in isolated resumable child sessions with child history", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
       llmClient: createResumableTaskFakeLLMClient(requests),
@@ -2176,14 +2217,14 @@ describe("createInProcessUiBackendClient", () => {
     expect(parentToolResultText).toContain("child found auth.ts");
   });
 
-  it("defaults omitted task role to generic and keeps display metadata out of child context", async () => {
+  it("defaults omitted subagent role to generic and keeps display metadata out of child context", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
       llmClient: createSequentialFakeLLMClient(
         [
           [
-            taskToolCallEvent({
-              callId: "call_task_generic",
+            subagentRunToolCallEvent({
+              callId: "call_subagent_generic",
               description: "AI Events Researcher",
               name: "events-scout",
               omitRole: true,
@@ -2220,17 +2261,17 @@ describe("createInProcessUiBackendClient", () => {
     });
   });
 
-  it("returns invalid task resume errors to the parent without creating a child session", async () => {
+  it("returns invalid subagent continuation errors to the parent without creating a child session", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
       llmClient: createSequentialFakeLLMClient(
         [
           [
-            taskToolCallEvent({
-              callId: "call_task_missing_resume",
+            subagentRunToolCallEvent({
+              callId: "call_subagent_missing",
               description: "Resume missing child",
               prompt: "Try to resume a missing child",
-              resumeSessionId: "session_missing_child",
+              subagentId: "subagent_missing_child",
             }),
           ],
           [{ textDelta: "parent saw invalid resume", finishReason: "stop" }],
@@ -2239,19 +2280,19 @@ describe("createInProcessUiBackendClient", () => {
       ),
     });
 
-    await client.submitPrompt("Try an invalid task resume");
+    await client.submitPrompt("Try an invalid subagent continuation");
 
     expect(requests).toHaveLength(2);
     const toolResultMessage = requests[1]?.messages.at(-1);
     expect(toolResultMessage).toMatchObject({
       role: "tool",
-      tool_call_id: "call_task_missing_resume",
+      tool_call_id: "call_subagent_missing",
     });
     expect(
       typeof toolResultMessage?.content === "string"
         ? toolResultMessage.content
         : "",
-    ).toContain("Subagent session not found: session_missing_child");
+    ).toContain("Subagent not found: subagent_missing_child");
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.sessions).toHaveLength(1);
@@ -2259,20 +2300,20 @@ describe("createInProcessUiBackendClient", () => {
     expect(parts).toHaveLength(3);
     expect(parts[0]?.type).toBe("tool-call");
     if (parts[0]?.type !== "tool-call") {
-      throw new Error("expected task tool call part");
+      throw new Error("expected subagent tool call part");
     }
     expect(parts[0].call).toMatchObject({
-      id: "call_task_missing_resume",
-      name: "task",
+      id: "call_subagent_missing",
+      name: "subagent_run",
       status: "failed",
     });
     expect(parts[1]?.type).toBe("tool-result");
     if (parts[1]?.type !== "tool-result") {
-      throw new Error("expected task tool result part");
+      throw new Error("expected subagent tool result part");
     }
-    expect(parts[1].result.callId).toBe("call_task_missing_resume");
+    expect(parts[1].result.callId).toBe("call_subagent_missing");
     expect(parts[1].result.error).toContain(
-      "Subagent session not found: session_missing_child",
+      "Subagent not found: subagent_missing_child",
     );
     expect(parts[2]).toEqual({
       text: "parent saw invalid resume",
@@ -2289,7 +2330,7 @@ describe("createInProcessUiBackendClient", () => {
           description: "Primary test agent",
           mode: "primary",
           name: "main",
-          tools: { include: ["task"] },
+          tools: { include: ["subagent_run"] },
         },
         {
           description: "Configured exploration subagent.",
@@ -2308,8 +2349,8 @@ describe("createInProcessUiBackendClient", () => {
       llmClient: createSequentialFakeLLMClient(
         [
           [
-            taskToolCallEvent({
-              callId: "call_task_configured_child",
+            subagentRunToolCallEvent({
+              callId: "call_subagent_configured_child",
               description: "Explore configured prompt",
               prompt: "Inspect configured child prompt",
             }),
@@ -2329,11 +2370,11 @@ describe("createInProcessUiBackendClient", () => {
     expect(childText).toContain("Use the configured child inspection rubric.");
   });
 
-  it("controls background agent tasks without leaking child transcripts into the parent", async () => {
+  it("controls background subagents without leaking child transcripts into the parent", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
-      createAgentTaskId: () => "agent_task_1",
-      llmClient: createAgentTaskFakeLLMClient(requests),
+      createSubagentId: () => "subagent_1",
+      llmClient: createBackgroundSubagentFakeLLMClient(requests),
     });
 
     await client.submitPrompt("Open a background explorer");
@@ -2374,11 +2415,9 @@ describe("createInProcessUiBackendClient", () => {
       expect(toolNames).toContain("todo_read");
       expect(toolNames).toContain("todo_write");
       expect(toolNames).toContain("write");
-      expect(toolNames).not.toContain("task");
-      expect(toolNames).not.toContain("agent_open");
-      expect(toolNames).not.toContain("agent_eval");
-      expect(toolNames).not.toContain("agent_status");
-      expect(toolNames).not.toContain("agent_close");
+      expect(toolNames).not.toContain("subagent_run");
+      expect(toolNames).not.toContain("subagent_status");
+      expect(toolNames).not.toContain("subagent_close");
     }
 
     const firstChildText = JSON.stringify(childRequests[0]?.messages);
@@ -2398,22 +2437,22 @@ describe("createInProcessUiBackendClient", () => {
       (request) => !isExploreSubagentRequest(request),
     );
     const openToolResultText = JSON.stringify(parentRequests[1]?.messages);
-    expect(openToolResultText).toContain("agent_task_1");
+    expect(openToolResultText).toContain("subagent_1");
     expect(openToolResultText).not.toContain("child first output");
 
     const statusToolResultText = JSON.stringify(
       parentRequests.at(-1)?.messages,
     );
-    expect(statusToolResultText).toContain("agent_task_1");
+    expect(statusToolResultText).toContain("subagent_1");
     expect(statusToolResultText).toContain("child follow-up output");
   });
 
-  it("closes a running background agent task without aborting the parent run", async () => {
+  it("closes a running background subagent without aborting the parent run", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const childStarted = createDeferred<AbortSignal | undefined>();
     const runLedger = createInMemoryRunLedger();
     const client = createInProcessUiBackendClient({
-      createAgentTaskId: () => "agent_task_1",
+      createSubagentId: () => "subagent_1",
       createRunId: (() => {
         let nextRun = 1;
         return (): string => {
@@ -2422,7 +2461,10 @@ describe("createInProcessUiBackendClient", () => {
           return runId;
         };
       })(),
-      llmClient: createAbortableAgentTaskLLMClient(requests, childStarted),
+      llmClient: createAbortableBackgroundSubagentLLMClient(
+        requests,
+        childStarted,
+      ),
       runLedger,
     });
 
@@ -2459,7 +2501,7 @@ describe("createInProcessUiBackendClient", () => {
           description: "Primary test agent",
           mode: "primary",
           name: "main",
-          tools: { include: ["task"] },
+          tools: { include: ["subagent_run"] },
         },
         {
           description: "One-step generic child test agent",
@@ -2477,8 +2519,8 @@ describe("createInProcessUiBackendClient", () => {
       llmClient: createSequentialFakeLLMClient(
         [
           [
-            taskToolCallEvent({
-              callId: "call_task_short",
+            subagentRunToolCallEvent({
+              callId: "call_subagent_short",
               description: "Short max steps",
               prompt: "List once and stop",
               role: "generic",
@@ -2512,7 +2554,7 @@ describe("createInProcessUiBackendClient", () => {
     });
   });
 
-  it("cancels an active task subagent when the parent prompt is aborted", async () => {
+  it("cancels an active foreground subagent when the parent prompt is aborted", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const childStarted = createDeferred<AbortSignal | undefined>();
     const runLedger = createInMemoryRunLedger();

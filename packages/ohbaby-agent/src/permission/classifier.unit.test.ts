@@ -57,11 +57,15 @@ describe("permission classifier", () => {
   });
 
   it("classifies subagent and skill tools", () => {
-    expect(classifyPermissionCall(call("task"))).toMatchObject({
+    expect(classifyPermissionCall(call("subagent_run"))).toMatchObject({
       category: "subagent",
       kind: "subagent",
     });
-    expect(classifyPermissionCall(call("tool/agent-task.ts"))).toMatchObject({
+    expect(classifyPermissionCall(call("subagent_status"))).toMatchObject({
+      category: "subagent",
+      kind: "subagent",
+    });
+    expect(classifyPermissionCall(call("subagent_close"))).toMatchObject({
       category: "subagent",
       kind: "subagent",
     });

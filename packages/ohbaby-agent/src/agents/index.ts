@@ -7,10 +7,11 @@ export {
   planAgent,
   researchAgent,
 } from "./builtin/index.js";
+export { AgentService, type AgentServiceOptions } from "./service.js";
 export {
-  AgentService,
-  type AgentServiceOptions,
-} from "./service.js";
+  SessionSubagentHost,
+  type SessionSubagentHostOptions,
+} from "./subagent-host.js";
 export { AgentManager, toolsConfigToRecord } from "./manager.js";
 export { AgentRegistry } from "./registry.js";
 export {
@@ -21,18 +22,22 @@ export {
   type SubagentRole,
 } from "./roles.js";
 export {
-  AgentTaskManager,
-  InMemoryAgentTaskStore,
-  type AgentTaskCloseResult,
-  type AgentTaskController,
-  type AgentTaskLookupInput,
-  type AgentTaskOpenInput,
-  type AgentTaskRecord,
-  type AgentTaskSendInput,
-  type AgentTaskStatus,
-  type AgentTaskStore,
-  type AgentTaskStoreUpdate,
-} from "./tasks/index.js";
+  DatabaseSubagentInstanceStore,
+  InMemorySubagentInstanceStore,
+  type MarkSubagentsInterruptedInput,
+  type QueuedSubagentInput,
+  type SubagentCloseResult,
+  type SubagentInstanceRecord,
+  type SubagentInstanceStatus,
+  type SubagentInstanceStore,
+  type SubagentInstanceUpdate,
+  type SubagentLookupInput,
+  type SubagentRunInput,
+  type SubagentRunMode,
+  type SubagentRunResult,
+  type SubagentStatusInput,
+  type SubagentStatusResult,
+} from "./subagents/index.js";
 export type {
   AgentConfig,
   AgentMode,
@@ -43,9 +48,5 @@ export type {
   PermissionValue,
   RuntimeAgent,
   StartSessionParams,
-  SubagentExecuteParams,
-  SubagentResult,
-  SubagentToolCallSummary,
-  TaskExecutor,
   ToolsConfig,
 } from "./types.js";

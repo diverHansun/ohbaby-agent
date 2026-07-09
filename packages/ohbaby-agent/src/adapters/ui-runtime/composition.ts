@@ -4,6 +4,7 @@ import type {
   CommandMcpServerSummary,
   CommandToolSummary,
 } from "../../commands/index.js";
+import { createAgentInstanceFactory } from "../../core/agents/index.js";
 import {
   createContextManager,
   type CompactResult,
@@ -31,10 +32,12 @@ import {
   AgentManager,
   type AgentSessionStartResult,
   AgentService,
-  AgentTaskManager,
   DEFAULT_SUBAGENT_ROLE,
+  InMemorySubagentInstanceStore,
+  SessionSubagentHost,
   type StartSessionParams,
   SUBAGENT_ROLES,
+  type SubagentInstanceStore,
 } from "../../agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
 import {
@@ -104,7 +107,7 @@ const DEFAULT_RUN_POLICY: RunDefaultsPolicy = {
 
 export interface UiRuntimeCompositionOptions {
   readonly agentManager?: AgentManager;
-  readonly createAgentTaskId?: () => string;
+  readonly createSubagentId?: () => string;
   readonly bus: BusInstance;
   readonly contextManager?: ContextManager;
   readonly createRunId?: () => string;
@@ -129,6 +132,9 @@ export interface UiRuntimeCompositionOptions {
   /** goal 记录的持久化；缺省用内存实现（与 messageManager 的缺省姿态一致）。 */
   readonly goalPersistence?: GoalPersistencePort;
   readonly onGoalChange?: GoalServiceDeps["onChange"];
+  readonly subagentInstanceStore?: SubagentInstanceStore;
+  readonly subagentOwnerId?: string;
+  readonly subagentOwnerPid?: number;
 }
 
 export interface McpManagerPort {
@@ -392,18 +398,6 @@ export async function createUiRuntimeComposition(
   });
 
   const runEventSource = createStreamBridgeRunEventSource(streamBridge);
-  const agentTaskController = new AgentTaskManager({
-    agentManager,
-    ...(options.createAgentTaskId
-      ? { createTaskId: options.createAgentTaskId }
-      : {}),
-    messageManager: options.messageManager,
-    modelId: options.llmClient.config.model,
-    runCoordinator: runManager,
-    sandboxManager,
-    sessionManager,
-    toolScheduler,
-  });
 
   const agentService = new AgentService({
     agentManager,
@@ -415,7 +409,27 @@ export async function createUiRuntimeComposition(
     sessionManager,
     toolScheduler,
   });
-  const taskExecutor = agentService;
+  const agentInstanceFactory = createAgentInstanceFactory({
+    deps: {
+      messageManager: options.messageManager,
+      runCoordinator: runManager,
+      runEventSource,
+      sandboxManager,
+      toolScheduler,
+    },
+  });
+  const subagentHost = new SessionSubagentHost({
+    agentManager,
+    createSubagentId: options.createSubagentId,
+    instanceFactory: agentInstanceFactory,
+    modelId: options.llmClient.config.model,
+    ownerId: options.subagentOwnerId,
+    ownerPid: options.subagentOwnerPid,
+    sessionManager,
+    store: options.subagentInstanceStore ?? new InMemorySubagentInstanceStore(),
+    now: options.now,
+  });
+  await subagentHost.recoverInterrupted({ recoverUnknownOwner: true });
 
   const goalService = new GoalService({
     onChange: (event): void => {
@@ -437,14 +451,13 @@ export async function createUiRuntimeComposition(
   });
 
   for (const tool of createBuiltinTools({
-    agentTaskController,
     goalBackend: goalService,
     searchProvider: {
       async loadConfig() {
         return toSearchProviderConfig(await getSearchConfig());
       },
     },
-    taskExecutor,
+    subagentHost,
   })) {
     toolScheduler.register(tool);
   }

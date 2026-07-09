@@ -14,7 +14,7 @@ const VALID_PRIMARY_AGENT = {
   maxTokens: 4096,
   tools: {
     include: ["read", "bash"],
-    exclude: ["task"],
+    exclude: ["subagent_run"],
   },
   permission: {
     edit: "ask",

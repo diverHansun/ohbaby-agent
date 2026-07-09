@@ -118,7 +118,7 @@ describe("SystemPrompt", () => {
     });
     const fullPrompt = prompts.join("\n\n");
 
-    expect(fullPrompt).toContain("Subagent roles for task / agent_open");
+    expect(fullPrompt).toContain("Subagent roles for subagent_run");
     expect(fullPrompt).toContain("- generic (default)");
     expect(fullPrompt).toContain("- explore");
     expect(fullPrompt).toContain("- research");
@@ -153,7 +153,7 @@ describe("SystemPrompt", () => {
     expect(fullPrompt).toContain("Core Capabilities");
     expect(fullPrompt).not.toContain("This must not leak");
     expect(fullPrompt).not.toContain("Available tools");
-    expect(fullPrompt).not.toContain("Subagent roles for task / agent_open");
+    expect(fullPrompt).not.toContain("Subagent roles for subagent_run");
     // Primary identity must not leak into subagent prompts. "Core Capabilities"
     // is now shared by both bases, so guard with a primary-only sentinel.
     expect(fullPrompt).not.toContain("You are Lychee, an AI coding assistant");

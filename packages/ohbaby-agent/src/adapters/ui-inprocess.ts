@@ -79,6 +79,7 @@ import {
 import type { PermissionResponse as CorePermissionResponse } from "../permission/index.js";
 import { Project } from "../project/index.js";
 import type { AgentManager } from "../agents/index.js";
+import type { SubagentInstanceStore } from "../agents/index.js";
 import {
   SkillLoader,
   SkillRegistry,
@@ -165,7 +166,7 @@ export interface InProcessUiBackendOptions {
   readonly agentManager?: AgentManager;
   readonly beforePromptSubmit?: () => Promise<void> | void;
   readonly bus?: BusInstance;
-  readonly createAgentTaskId?: () => string;
+  readonly createSubagentId?: () => string;
   readonly createRunId?: () => string;
   readonly goalPersistence?: GoalPersistencePort;
   readonly hookExecutor?: HookExecutor;
@@ -181,6 +182,9 @@ export interface InProcessUiBackendOptions {
   readonly now?: () => Date;
   readonly runLedger?: RunLedger;
   readonly streamBridge?: StreamBridge;
+  readonly subagentInstanceStore?: SubagentInstanceStore;
+  readonly subagentOwnerId?: string;
+  readonly subagentOwnerPid?: number;
   readonly workdir?: string;
 }
 
@@ -381,8 +385,8 @@ export function createInProcessUiBackendClient(
       const runtime = await createUiRuntimeComposition({
         agentManager: options.agentManager,
         bus,
-        ...(options.createAgentTaskId
-          ? { createAgentTaskId: options.createAgentTaskId }
+        ...(options.createSubagentId
+          ? { createSubagentId: options.createSubagentId }
           : {}),
         ...(runtimeRunIdFactory === undefined
           ? {}
@@ -402,6 +406,9 @@ export function createInProcessUiBackendClient(
         sessionManager: options.sessionManager,
         skillRegistry,
         streamBridge: options.streamBridge,
+        subagentInstanceStore: options.subagentInstanceStore,
+        subagentOwnerId: options.subagentOwnerId,
+        subagentOwnerPid: options.subagentOwnerPid,
         workdir: baseProjectRoot,
       });
       runtime.goals.attachTurnRunner({

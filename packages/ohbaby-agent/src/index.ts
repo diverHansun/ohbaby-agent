@@ -81,10 +81,6 @@ export type {
   AgentServiceOptions,
   AgentPromptProvider,
   RuntimeAgent,
-  SubagentExecuteParams,
-  SubagentResult,
-  SubagentToolCallSummary,
-  TaskExecutor,
 } from "./agents/index.js";
 export * from "./core/agents/index.js";
 export * from "./core/system-prompt/index.js";

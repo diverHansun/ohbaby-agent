@@ -193,28 +193,28 @@ function createScheduler(
 }
 
 describe("ToolScheduler", () => {
-  it("uses a longer guard timeout for task without extending other subagent tools", () => {
+  it("uses a longer guard timeout for subagent_run without extending other subagent tools", () => {
     expect(
       timeoutForTool(
         {
-          byTool: { task: 310_000 },
+          byTool: { subagent_run: 310_000 },
           defaultTimeout: 120_000,
         },
-        "task",
+        "subagent_run",
       ),
     ).toBe(310_000);
     expect(
       timeoutForTool(
         {
-          byTool: { task: 310_000 },
+          byTool: { subagent_run: 310_000 },
           defaultTimeout: 120_000,
         },
-        "agent_open",
+        "subagent_status",
       ),
     ).toBe(120_000);
   });
 
-  it("applies the task guard timeout through the actual execution path", async () => {
+  it("applies the subagent_run guard timeout through the actual execution path", async () => {
     vi.useFakeTimers();
     try {
       const started: string[] = [];
@@ -226,22 +226,22 @@ describe("ToolScheduler", () => {
             started.push(context.callId);
             return new Promise<ToolExecutionResult>(() => undefined);
           },
-          name: "task",
+          name: "subagent_run",
         }),
       );
 
       const result = scheduler.execute({
-        callId: "task_1",
+        callId: "subagent_run_1",
         messageId: "message_1",
         params: {},
         sessionId: "session_1",
-        toolName: "task",
+        toolName: "subagent_run",
       });
       await vi.advanceTimersByTimeAsync(0);
-      expect(started).toEqual(["task_1"]);
+      expect(started).toEqual(["subagent_run_1"]);
 
       await vi.advanceTimersByTimeAsync(309_999);
-      expect(scheduler.getStatus("task_1")).toBe("executing");
+      expect(scheduler.getStatus("subagent_run_1")).toBe("executing");
 
       await vi.advanceTimersByTimeAsync(1);
       await expect(result).resolves.toMatchObject({
@@ -253,7 +253,7 @@ describe("ToolScheduler", () => {
     }
   });
 
-  it("keeps the task guard when a caller overrides byTool for another tool", async () => {
+  it("keeps the subagent_run guard when a caller overrides byTool for another tool", async () => {
     vi.useFakeTimers();
     try {
       const { scheduler } = createScheduler({
@@ -263,21 +263,21 @@ describe("ToolScheduler", () => {
         createTool({
           category: "subagent",
           execute: () => new Promise<ToolExecutionResult>(() => undefined),
-          name: "task",
+          name: "subagent_run",
         }),
       );
 
       const result = scheduler.execute({
-        callId: "task_merge_1",
+        callId: "subagent_run_merge_1",
         messageId: "message_1",
         params: {},
         sessionId: "session_1",
-        toolName: "task",
+        toolName: "subagent_run",
       });
       await vi.advanceTimersByTimeAsync(0);
 
       await vi.advanceTimersByTimeAsync(309_999);
-      expect(scheduler.getStatus("task_merge_1")).toBe("executing");
+      expect(scheduler.getStatus("subagent_run_merge_1")).toBe("executing");
 
       await vi.advanceTimersByTimeAsync(1);
       await expect(result).resolves.toMatchObject({
@@ -289,7 +289,7 @@ describe("ToolScheduler", () => {
     }
   });
 
-  it("keeps agent_open on the default scheduler timeout during execution", async () => {
+  it("keeps subagent_status on the default scheduler timeout during execution", async () => {
     vi.useFakeTimers();
     try {
       const started: string[] = [];
@@ -301,22 +301,22 @@ describe("ToolScheduler", () => {
             started.push(context.callId);
             return new Promise<ToolExecutionResult>(() => undefined);
           },
-          name: "agent_open",
+          name: "subagent_status",
         }),
       );
 
       const result = scheduler.execute({
-        callId: "agent_open_1",
+        callId: "subagent_status_1",
         messageId: "message_1",
         params: {},
         sessionId: "session_1",
-        toolName: "agent_open",
+        toolName: "subagent_status",
       });
       await vi.advanceTimersByTimeAsync(0);
-      expect(started).toEqual(["agent_open_1"]);
+      expect(started).toEqual(["subagent_status_1"]);
 
       await vi.advanceTimersByTimeAsync(119_999);
-      expect(scheduler.getStatus("agent_open_1")).toBe("executing");
+      expect(scheduler.getStatus("subagent_status_1")).toBe("executing");
 
       await vi.advanceTimersByTimeAsync(1);
       await expect(result).resolves.toMatchObject({
@@ -334,16 +334,14 @@ describe("ToolScheduler", () => {
         getAgentConfig: (agentName?: string) => ({
           tools:
             agentName === "explore"
-              ? {
-                  edit: true,
-                  read: true,
-                  agent_close: true,
-                  agent_eval: true,
-                  agent_open: true,
-                  agent_status: true,
-                  task: true,
-                  todo_read: true,
-                }
+	              ? {
+	                  edit: true,
+	                  read: true,
+	                  subagent_close: true,
+	                  subagent_run: true,
+	                  subagent_status: true,
+	                  todo_read: true,
+	                }
               : undefined,
         }),
       },
@@ -351,11 +349,9 @@ describe("ToolScheduler", () => {
     for (const tool of [
       { name: "read", category: "readonly" },
       { name: "edit", category: "write" },
-      { name: "task", category: "subagent" },
-      { name: "agent_open", category: "subagent" },
-      { name: "agent_eval", category: "subagent" },
-      { name: "agent_status", category: "subagent" },
-      { name: "agent_close", category: "subagent" },
+      { name: "subagent_run", category: "subagent" },
+      { name: "subagent_status", category: "subagent" },
+      { name: "subagent_close", category: "subagent" },
       { name: "todo_read", category: "memory" },
     ] as const) {
       scheduler.register(createTool(tool));
@@ -1606,7 +1602,7 @@ describe("ToolScheduler", () => {
           started.push(context.callId);
           return blockers[1].promise;
         },
-        name: "task",
+        name: "subagent_run",
       }),
     );
 
@@ -1625,28 +1621,28 @@ describe("ToolScheduler", () => {
       toolName: "memory_add",
     });
     const subagent1 = scheduler.execute({
-      callId: "task_1",
+      callId: "subagent_1",
       messageId: "message_1",
       params: {},
       sessionId: "session_1",
-      toolName: "task",
+      toolName: "subagent_run",
     });
     const subagent2 = scheduler.execute({
-      callId: "task_2",
+      callId: "subagent_2",
       messageId: "message_1",
       params: {},
       sessionId: "session_1",
-      toolName: "task",
+      toolName: "subagent_run",
     });
 
     await vi.waitFor(() => {
       expect(started).toContain("write_1");
       expect(started).toContain("memory_1");
-      expect(started).toContain("task_1");
-      expect(scheduler.getStatus("task_2")).toBe("queued");
+      expect(started).toContain("subagent_1");
+      expect(scheduler.getStatus("subagent_2")).toBe("queued");
     });
 
-    blockers[1].resolve({ output: "task done" });
+    blockers[1].resolve({ output: "subagent done" });
     blockers[0].resolve({ output: "write done" });
 
     await expect(memory).resolves.toMatchObject({ status: "success" });
@@ -1715,7 +1711,7 @@ describe("ToolScheduler", () => {
       { name: "read", category: "readonly" },
       { name: "edit", category: "write" },
       { name: "memory_add", category: "memory" },
-      { name: "task", category: "subagent" },
+      { name: "subagent_run", category: "subagent" },
     ] as const) {
       scheduler.register(
         createTool({
@@ -1773,12 +1769,12 @@ describe("ToolScheduler", () => {
             toolName: "memory_add",
           },
           {
-            callId: "task_1",
-            environment: makeEnvironment("D:/workspace/task"),
+            callId: "subagent_1",
+            environment: makeEnvironment("D:/workspace/subagent"),
             messageId: "message_1",
             params: {},
             sessionId: "session_1",
-            toolName: "task",
+            toolName: "subagent_run",
           },
         ],
       }),
@@ -1786,7 +1782,7 @@ describe("ToolScheduler", () => {
       { output: "read_1:D:/workspace/read", status: "success" },
       { output: "write_1:D:/workspace/write", status: "success" },
       { output: "memory_1:D:/workspace/memory", status: "success" },
-      { output: "task_1:D:/workspace/task", status: "success" },
+      { output: "subagent_1:D:/workspace/subagent", status: "success" },
     ]);
   });
 

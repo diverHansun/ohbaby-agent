@@ -85,9 +85,7 @@ function mergeConfig(
     timeout: {
       ...DEFAULT_TOOL_SCHEDULER_CONFIG.timeout,
       ...input?.timeout,
-      // Merge per-tool overrides instead of replacing them, so a caller that
-      // overrides one tool's timeout does not silently drop the built-in
-      // `task` guard and break the sync-subagent deadline layering.
+      // Merge per-tool overrides instead of replacing built-in tool budgets.
       byTool: {
         ...DEFAULT_TOOL_SCHEDULER_CONFIG.timeout.byTool,
         ...input?.timeout?.byTool,

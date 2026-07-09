@@ -118,11 +118,9 @@ describe("createSystemPromptProvider", () => {
       isSubagent: true,
     });
 
-    expect(primaryPrompt).toContain("Subagent roles for task / agent_open");
+    expect(primaryPrompt).toContain("Subagent roles for subagent_run");
     expect(primaryPrompt).toContain("Omit role to use generic");
-    expect(subagentPrompt).not.toContain(
-      "Subagent roles for task / agent_open",
-    );
+    expect(subagentPrompt).not.toContain("Subagent roles for subagent_run");
     expect(availableSubagentRolesProvider).toHaveBeenCalledTimes(1);
   });
 

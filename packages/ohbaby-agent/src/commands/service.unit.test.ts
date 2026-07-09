@@ -844,7 +844,11 @@ describe("CommandService", () => {
         listTools() {
           return [
             { description: "Shell", name: "bash", source: "builtin" },
-            { description: "Task", name: "task", source: "module" },
+            {
+              description: "Custom module",
+              name: "custom_module_tool",
+              source: "module",
+            },
             { description: "Skill", name: "skill", source: "skill" },
             { description: "GitHub", name: "github", source: "mcp" },
             { description: "Unknown", name: "unknown", source: "other" },

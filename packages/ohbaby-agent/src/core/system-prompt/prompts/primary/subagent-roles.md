@@ -1,5 +1,5 @@
 <subagent_roles>
-Subagent roles for task / agent_open:
+Subagent roles for subagent_run:
 {{ROLES}}
 
 Omit role to use generic.

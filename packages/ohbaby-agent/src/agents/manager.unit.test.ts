@@ -58,13 +58,11 @@ describe("AgentManager", () => {
 
     expect(manager.getAgentToolsConfig("audit")).toEqual({
       "*": false,
-      agent_close: false,
-      agent_eval: false,
-      agent_open: false,
-      agent_status: false,
       grep: true,
       read: true,
-      task: false,
+      subagent_close: false,
+      subagent_run: false,
+      subagent_status: false,
     });
   });
 
@@ -75,28 +73,26 @@ describe("AgentManager", () => {
       mode: "subagent",
       name: "generic",
     });
-    expect(manager.getAgentToolsConfig("generic", { isSubagent: true })).toEqual(
-      {
-        "*": false,
-        agent_close: false,
-        agent_eval: false,
-        agent_open: false,
-        agent_status: false,
-        bash: true,
-        edit: true,
-        glob: true,
-        grep: true,
-        list: true,
-        memory_list: true,
-        read: true,
-        task: false,
-        todo_read: true,
-        todo_write: true,
-        web_fetch: true,
-        web_search: true,
-        write: true,
-      },
-    );
+    expect(
+      manager.getAgentToolsConfig("generic", { isSubagent: true }),
+    ).toEqual({
+      "*": false,
+      bash: true,
+      edit: true,
+      glob: true,
+      grep: true,
+      list: true,
+      memory_list: true,
+      read: true,
+      subagent_close: false,
+      subagent_run: false,
+      subagent_status: false,
+      todo_read: true,
+      todo_write: true,
+      web_fetch: true,
+      web_search: true,
+      write: true,
+    });
   });
 
   it("builds a runtime agent using the injected system prompt provider", async () => {
