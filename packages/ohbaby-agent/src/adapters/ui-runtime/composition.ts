@@ -427,7 +427,7 @@ export async function createUiRuntimeComposition(
     store: options.subagentInstanceStore ?? new InMemorySubagentInstanceStore(),
     now: options.now,
   });
-  await subagentHost.recoverInterrupted({ recoverUnknownOwner: true });
+  await subagentHost.recoverInterrupted();
 
   const goalService = new GoalService({
     onChange: (event): void => {

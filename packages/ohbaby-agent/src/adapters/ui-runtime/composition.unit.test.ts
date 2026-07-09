@@ -341,13 +341,15 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(toolNames).not.toContain("agent_close");
   });
 
-  it("marks active persisted subagents interrupted when runtime starts", async () => {
+  it("marks only owned persisted subagents interrupted when runtime starts", async () => {
     const bus = createBus();
     const store = new InMemorySubagentInstanceStore();
-    const record: SubagentInstanceRecord = {
+    const owned: SubagentInstanceRecord = {
       contextScopeId: "subagent_1",
       createdAt: 1,
       initialPrompt: "work",
+      ownerId: "owner_current",
+      ownerPid: 101,
       parentSessionId: "session_parent",
       pendingQueue: [],
       role: "generic",
@@ -356,7 +358,20 @@ describe("createUiRuntimeComposition skill tools", () => {
       subagentId: "subagent_1",
       updatedAt: 1,
     };
-    await store.create(record);
+    const unknown: SubagentInstanceRecord = {
+      contextScopeId: "subagent_unknown",
+      createdAt: 2,
+      initialPrompt: "unknown",
+      parentSessionId: "session_parent",
+      pendingQueue: [],
+      role: "generic",
+      sessionId: "session_child",
+      status: "running",
+      subagentId: "subagent_unknown",
+      updatedAt: 2,
+    };
+    await store.create(owned);
+    await store.create(unknown);
 
     await createUiRuntimeComposition({
       agentManager: new AgentManager(),
@@ -369,6 +384,8 @@ describe("createUiRuntimeComposition skill tools", () => {
       }),
       permissionState: createPermissionState({ bus }),
       skillRegistry: createMutableSkillRegistry([]),
+      subagentOwnerId: "owner_current",
+      subagentOwnerPid: 101,
       subagentInstanceStore: store,
       workdir: await tempWorkdir(),
     });
@@ -379,6 +396,12 @@ describe("createUiRuntimeComposition skill tools", () => {
         subagentId: "subagent_1",
       }),
     ).resolves.toMatchObject({ status: "interrupted" });
+    await expect(
+      store.get({
+        parentSessionId: "session_parent",
+        subagentId: "subagent_unknown",
+      }),
+    ).resolves.toMatchObject({ status: "running" });
   });
 
   it("disposes context session state when a session is removed", async () => {

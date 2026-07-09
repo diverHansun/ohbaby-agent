@@ -1,6 +1,6 @@
 # core/agents 模块 goals-duty.md
 
-本文档定义 `core/agents` 的目标和职责边界。`core/agents` 是 agents improve-1 新增的 agent 运行底层。
+本文档定义 `core/agents` 的目标和职责边界。`core/agents` 是 agent run 的运行原语层。
 
 ---
 
@@ -8,7 +8,7 @@
 
 一句话说明：`core/agents` 提供一份统一的 agent run 原语，让 primary 和 subagent 最终共享同一套底层执行机制。
 
-improve-1 已落地 subagent 同步 envelope；primary stream envelope 留给 improve-2。
+subagent 已通过 `AgentInstance` 接入该原语；primary root instance 迁移留给后续批次。
 
 ---
 
@@ -25,7 +25,6 @@ improve-1 已落地 subagent 同步 envelope；primary stream envelope 留给 im
 - 绑定取消信号。
 - 等待完成。
 - 提取最终 assistant 输出。
-- 清理 sandbox 环境。
 
 ### G2: 端口化依赖
 
@@ -35,8 +34,8 @@ improve-1 已落地 subagent 同步 envelope；primary stream envelope 留给 im
 
 `AgentRunInput.waitMode` 支持：
 
-- `waitForCompletion`: improve-1 已实现，用于 Task 同步调用和 agent task 每轮执行。
-- `stream`: improve-2 实现，用于 primary 启动路径。
+- `waitForCompletion`: 用于 `subagent_run` 每轮执行。
+- `stream`: 用于 primary 启动路径，后续会随 primary root instance 迁移继续收敛。
 
 ### G4: 输出收口标准化
 
@@ -54,7 +53,6 @@ improve-1 已落地 subagent 同步 envelope；primary stream envelope 留给 im
 | D4 | 将工具定义转换为 OpenAI tools 形态 |
 | D5 | 绑定 `AbortSignal` 到 run cancel |
 | D6 | 从消息历史提取最终 assistant 输出 |
-| D7 | 保证 sandbox environment finally 清理 |
 
 ---
 
@@ -64,8 +62,8 @@ improve-1 已落地 subagent 同步 envelope；primary stream envelope 留给 im
 |------|--------|----------|
 | N1 | agent 配置 catalog | `agents/registry` |
 | N2 | `RuntimeAgent` 解析 | `agents/manager` |
-| N3 | Task 并发控制 | `agents/service` |
-| N4 | 长生命周期 task 状态机 | `agents/tasks` |
+| N3 | subagent 状态机、close、timeout、recover | `agents/subagent-host` |
+| N4 | sandbox lease 创建、workdir ensure、release | `runtime/run-manager` / `sandbox` |
 | N5 | run 基础设施持久化和事件桥接 | `runtime` |
 | N6 | 生命周期 step 执行 | `core/lifecycle` |
 | N7 | 上下文压缩与准备 | `core/context` |

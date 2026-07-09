@@ -14,6 +14,7 @@ export type SubagentInstanceStatus =
 export interface QueuedSubagentInput {
   readonly prompt: string;
   readonly environment?: ToolExecutionEnvironment;
+  readonly timeoutMs?: number;
 }
 
 export interface SubagentInstanceRecord {
@@ -58,6 +59,7 @@ export interface SubagentRunInput {
   readonly name?: string;
   readonly description?: string;
   readonly interrupt?: boolean;
+  readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
   readonly environment?: ToolExecutionEnvironment;
 }

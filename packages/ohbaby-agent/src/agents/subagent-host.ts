@@ -4,6 +4,7 @@ import type {
 } from "../core/agents/index.js";
 import type { ToolExecutionEnvironment } from "../core/tool-scheduler/index.js";
 import type { Session, SessionManager } from "../services/session/index.js";
+import { createDeadlineController } from "./deadline.js";
 import type { AgentManager } from "./manager.js";
 import type { SubagentRole } from "./roles.js";
 import type {
@@ -63,6 +64,20 @@ function successfulOutput(result: AgentRunResult): {
     : { output: result.error, success: false };
 }
 
+function normalizeTimeoutMs(timeoutMs: number | undefined): number | undefined {
+  if (timeoutMs === undefined) {
+    return undefined;
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("subagent timeoutMs must be a positive number");
+  }
+  return Math.trunc(timeoutMs);
+}
+
+function timeoutMessage(timeoutMs: number): string {
+  return `Subagent timed out after ${String(timeoutMs)}ms`;
+}
+
 export class SessionSubagentHost {
   private readonly active = new Map<string, ActiveSubagentState>();
   private readonly parentSessionLocks = new Map<string, Promise<void>>();
@@ -93,6 +108,7 @@ export class SessionSubagentHost {
         input.prompt,
         input.environment,
         input.interrupt === true,
+        input.timeoutMs,
       );
       return {
         item: await this.mustGet(record.parentSessionId, record.subagentId),
@@ -104,6 +120,7 @@ export class SessionSubagentHost {
       input.prompt,
       input.environment,
       input.signal,
+      input.timeoutMs,
     );
     return {
       item,
@@ -190,6 +207,7 @@ export class SessionSubagentHost {
       sessionId: session.id,
       status: "pending",
       subagentId,
+      timeoutMs: input.timeoutMs,
       updatedAt: now,
     };
     await this.options.store.create(record);
@@ -234,6 +252,9 @@ export class SessionSubagentHost {
     if (!record) {
       throw new Error(`Subagent not found: ${input.subagentId}`);
     }
+    if (record.closedAt !== undefined) {
+      throw new Error(`Subagent is closed: ${input.subagentId}`);
+    }
     return record;
   }
 
@@ -276,6 +297,7 @@ export class SessionSubagentHost {
     prompt: string,
     environment?: ToolExecutionEnvironment,
     interrupt = false,
+    timeoutMs?: number,
   ): void {
     const active = this.active.get(record.subagentId);
     if (active?.running) {
@@ -283,7 +305,7 @@ export class SessionSubagentHost {
         active.queue.length = 0;
         active.abortController?.abort("subagent interrupted");
       }
-      active.queue.push({ environment, prompt });
+      active.queue.push({ environment, prompt, timeoutMs });
       void this.options.store.update(record.subagentId, {
         pendingQueue: active.queue,
         updatedAt: this.now(),
@@ -291,7 +313,9 @@ export class SessionSubagentHost {
       return;
     }
     void Promise.resolve().then(() =>
-      this.runTurn(record, prompt, environment).catch(() => undefined),
+      this.runTurn(record, prompt, environment, undefined, timeoutMs).catch(
+        () => undefined,
+      ),
     );
   }
 
@@ -300,7 +324,13 @@ export class SessionSubagentHost {
     prompt: string,
     environment?: ToolExecutionEnvironment,
     signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<SubagentInstanceRecord> {
+    const effectiveTimeoutMs = normalizeTimeoutMs(timeoutMs ?? record.timeoutMs);
+    const deadlineReason =
+      effectiveTimeoutMs === undefined
+        ? undefined
+        : timeoutMessage(effectiveTimeoutMs);
     const runtimeAgent = await this.options.agentManager.getRuntimeAgent(
       record.role,
       { isSubagent: true },
@@ -328,8 +358,31 @@ export class SessionSubagentHost {
       pendingQueue: [],
       startedAt: this.now(),
       status: "running",
+      timeoutMs: effectiveTimeoutMs,
       updatedAt: this.now(),
     });
+    const deadline =
+      effectiveTimeoutMs === undefined || deadlineReason === undefined
+        ? undefined
+        : createDeadlineController({
+            parent: abortController.signal,
+            reason: deadlineReason,
+            timeoutMs: effectiveTimeoutMs,
+          });
+    const turnSignal = deadline?.signal ?? abortController.signal;
+    const timedOut = (): boolean =>
+      deadline !== undefined &&
+      deadlineReason !== undefined &&
+      deadline.signal.aborted &&
+      deadline.signal.reason === deadlineReason;
+    const markTimedOut = (): Promise<SubagentInstanceRecord> =>
+      this.options.store.update(record.subagentId, {
+        completedAt: this.now(),
+        error: deadlineReason,
+        output: deadlineReason,
+        status: "timed_out",
+        updatedAt: this.now(),
+      });
 
     try {
       const session = await this.getSession(record.sessionId);
@@ -347,9 +400,15 @@ export class SessionSubagentHost {
       const result = await instance.turn({
         environment,
         prompt,
-        signal: abortController.signal,
+        signal: turnSignal,
         waitMode: "waitForCompletion",
       });
+      if (active.closed) {
+        return await this.mustGet(record.parentSessionId, record.subagentId);
+      }
+      if (timedOut()) {
+        return await markTimedOut();
+      }
       const { output, success } = successfulOutput(result);
       return await this.options.store.update(record.subagentId, {
         completedAt: this.now(),
@@ -359,6 +418,12 @@ export class SessionSubagentHost {
         updatedAt: this.now(),
       });
     } catch (error) {
+      if (active.closed) {
+        return await this.mustGet(record.parentSessionId, record.subagentId);
+      }
+      if (timedOut()) {
+        return await markTimedOut();
+      }
       return await this.options.store.update(record.subagentId, {
         completedAt: this.now(),
         error: errorMessage(error),
@@ -367,12 +432,19 @@ export class SessionSubagentHost {
         updatedAt: this.now(),
       });
     } finally {
+      deadline?.dispose();
       signal?.removeEventListener("abort", abort);
       active.running = false;
       this.active.delete(record.subagentId);
       const next = active.queue.shift();
       if (!active.closed && next) {
-        this.enqueueOrSchedule(record, next.prompt, next.environment);
+        this.enqueueOrSchedule(
+          record,
+          next.prompt,
+          next.environment,
+          false,
+          next.timeoutMs,
+        );
       }
     }
   }

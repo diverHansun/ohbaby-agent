@@ -1,6 +1,6 @@
 # agent 模块 goals-duty.md
 
-本文档定义 `agents` 服务层在 agents improve-1 后的目标与职责边界。
+本文档定义 `agents` 服务层在 subagent context/instance 化后的目标与职责边界。
 
 ---
 
@@ -11,8 +11,8 @@
 如果没有 `agents`：
 
 - 系统无法集中管理 build、plan、explore、research 等 agent 配置。
-- Task 工具无法按名称解析目标 agent 并创建受控 child session。
-- 长生命周期 agent task 缺少统一的状态机和并发边界。
+- `subagent_run` 无法按名称解析目标 agent 并创建受控 child session。
+- 长生命周期 subagent 缺少统一的状态机、关闭语义和 owner 恢复边界。
 - Policy、System-Prompt、ToolScheduler 无法围绕 agent 描述符形成一致约定。
 
 ---
@@ -27,23 +27,23 @@
 
 `AgentManager.getRuntimeAgent()` 负责把描述符解析为运行时所需信息，包括系统提示词、可用工具、LLM 参数和 maxSteps。
 
-### G3: 受控的 Task envelope
+### G3: 受控的 subagent envelope
 
-`AgentService.executeTask()` 为 Task 工具提供同步调用形态：
+`SessionSubagentHost` 为 `subagent_run/status/close` 工具提供统一调用形态：
 
-- 检查并发上限。
-- 校验目标 agent 不能是纯 primary。
-- 创建或恢复 child session。
-- 调用 `core/agents.runAgent({ waitMode: "waitForCompletion" })`。
-- 将最终 assistant 输出包装成 `SubagentResult`。
+- 校验目标 agent 必须是 subagent role。
+- 复用 parent 下的 child session，但每个 subagent 持有自己的 `contextScopeId`。
+- 通过 `AgentInstance` 调用 `core/agents.runAgent({ waitMode: "waitForCompletion" })`。
+- 将最终 assistant 输出包装成 `SubagentRunResult`。
+- 维护 `cancelled/closedAt/timed_out/interrupted` 等可持久化状态。
 
-### G4: 长生命周期 task 状态机
+### G4: 长生命周期 subagent 状态机
 
-`AgentTaskManager` 负责 open/send/get/close 的多轮任务协议。它只管理状态和排队，不重新实现 run 生命周期。
+`SessionSubagentHost` 负责 background/foreground、排队、interrupt、close 和 status。它只管理状态和排队，不重新实现 run 生命周期。
 
 ### G5: 分层清晰
 
-`agents` 不直接拥有 RunManager 细节，不自行写子代理 user message，不持有旧的 subagent session/message helper。所有“启动 + 等待 + 收口”的运行序列必须委托给 `core/agents.runAgent`。
+`agents` 不直接拥有 RunManager 细节，不自行写子代理 user message，不持有旧的 subagent session/message helper。所有“启动 + 等待 + 收口”的运行序列必须通过 `AgentInstance` 委托给 `core/agents.runAgent`。
 
 ---
 
@@ -54,10 +54,10 @@
 | D1 | 加载、合并、列出 agent 描述符 | `AgentRegistry` |
 | D2 | 提供内置 agent 描述符 | `builtin/*` |
 | D3 | 解析 `RuntimeAgent` | `AgentManager` |
-| D4 | 校验 Task 可调用目标 | `AgentService` |
-| D5 | 创建或恢复 child session | `AgentService` / `AgentTaskManager` 通过 `SessionManager` |
-| D6 | 控制 Task 同步调用并发数 | `AgentService` |
-| D7 | 管理长生命周期 task 状态和队列 | `AgentTaskManager` |
+| D4 | 校验 subagent 可调用目标 | `SessionSubagentHost` / `AgentManager` |
+| D5 | 创建或复用 child session | `SessionSubagentHost` 通过 `SessionManager` |
+| D6 | 创建 `AgentInstance` 和 `contextScopeId` | `SessionSubagentHost` / `AgentInstanceFactory` |
+| D7 | 管理长生命周期 subagent 状态、队列、close、timeout、recover | `SessionSubagentHost` / `SubagentInstanceStore` |
 | D8 | 删除旧 subagent runner/executor API | `agents/index.ts` / package root exports |
 
 ---
@@ -80,7 +80,7 @@
 
 ## 五、设计约束
 
-1. `agents/service.ts` 和 `agents/tasks/manager.ts` 不得绕过 `core/agents.runAgent` 自行编排 run。
+1. `SessionSubagentHost` 不得绕过 `AgentInstance.turn()` 自行编排 run。
 2. `agents` 可以依赖 `core/agents`，但 `core/agents` 不得依赖 `agents`。
 3. `runtime` 不得依赖 `agents` 或 `core/agents`。
 4. improve-1 直接删除 `SubagentExecutor`、`SubagentExecutorOptions`、`createSubagentRunner` 等旧 API。
@@ -97,7 +97,7 @@
 | `core/message` | 依赖 | 读取 child session 输出 |
 | `core/tool-scheduler` | 依赖 | 获取可用于本 agent 的工具定义 |
 | `system-prompt` | 间接依赖 | 通过 `AgentManager` 组装 runtime prompt |
-| `tools/task` | 被依赖 | Task 工具调用 `AgentService.executeTask` |
+| `tools/subagent` | 被依赖 | `subagent_run/status/close` 工具调用 `SessionSubagentHost` |
 | `runtime` | 通过端口间接协作 | 只通过 `AgentRunCoordinator` 端口进入 |
 
 ---

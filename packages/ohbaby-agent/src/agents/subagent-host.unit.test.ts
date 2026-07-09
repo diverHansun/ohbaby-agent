@@ -32,7 +32,15 @@ const child: Session = {
   title: "Subagents",
 };
 
-function createHostFixture() {
+function createHostFixture(): {
+  readonly createInstance: ReturnType<
+    typeof vi.fn<AgentInstanceFactory["create"]>
+  >;
+  readonly host: SessionSubagentHost;
+  readonly sessionCreate: ReturnType<typeof vi.fn>;
+  readonly store: InMemorySubagentInstanceStore;
+  readonly turn: ReturnType<typeof vi.fn<AgentInstance["turn"]>>;
+} {
   const turn = vi.fn<AgentInstance["turn"]>(() =>
     Promise.resolve({
       finalOutput: "subagent output",
@@ -74,13 +82,13 @@ function createHostFixture() {
     },
     createSubagentId: (() => {
       let next = 1;
-      return () => `subagent_${String(next++)}`;
+      return (): string => `subagent_${String(next++)}`;
     })(),
     instanceFactory: { create: createInstance },
     modelId: "fake-model",
     now: (() => {
       let now = 1;
-      return () => now++;
+      return (): number => now++;
     })(),
     sessionManager: { create: sessionCreate, get: sessionGet },
     store,
@@ -126,6 +134,88 @@ describe("SessionSubagentHost", () => {
         waitMode: "waitForCompletion",
       }),
     );
+  });
+
+  it("treats closed subagents as terminal and rejects later turns", async () => {
+    const { host, turn } = createHostFixture();
+
+    const first = await host.run({
+      mode: "foreground",
+      parentSessionId: "parent_1",
+      prompt: "inspect",
+      role: "explore",
+    });
+    const closed = await host.close({
+      parentSessionId: "parent_1",
+      subagentId: first.item.subagentId,
+    });
+
+    expect(typeof closed.item.closedAt).toBe("number");
+    expect(closed.item.status).toBe("cancelled");
+    await expect(
+      host.run({
+        mode: "foreground",
+        parentSessionId: "parent_1",
+        prompt: "try again",
+        subagentId: first.item.subagentId,
+      }),
+    ).rejects.toThrow("Subagent is closed");
+    expect(turn).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks a run timed_out when its deadline aborts the turn", async () => {
+    vi.useFakeTimers();
+    try {
+      const { host, turn } = createHostFixture();
+      turn.mockImplementationOnce(
+        (input) =>
+          new Promise<AgentRunResult>((resolve) => {
+            input.signal?.addEventListener(
+              "abort",
+              () => {
+                resolve({
+                  error: "aborted by deadline",
+                  mode: "waitForCompletion",
+                  sessionId: "child_1",
+                  success: false,
+                });
+              },
+              { once: true },
+            );
+            setTimeout(() => {
+              resolve({
+                finalOutput: "late success",
+                mode: "waitForCompletion",
+                sessionId: "child_1",
+                success: true,
+              });
+            }, 50);
+          }),
+      );
+
+      const running = host.run({
+        mode: "foreground",
+        parentSessionId: "parent_1",
+        prompt: "slow",
+        role: "explore",
+        timeoutMs: 5,
+      });
+      await vi.advanceTimersByTimeAsync(50);
+      const result = await running;
+
+      expect(result).toMatchObject({
+        item: {
+          error: "Subagent timed out after 5ms",
+          output: "Subagent timed out after 5ms",
+          status: "timed_out",
+          timeoutMs: 5,
+        },
+        output: "Subagent timed out after 5ms",
+        success: false,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("lists status as items and marks restarted active subagents interrupted without auto-running", async () => {
