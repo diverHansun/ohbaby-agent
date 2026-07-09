@@ -74,13 +74,15 @@ type ToolSource = 'builtin' | 'module' | 'mcp'
 | bash | dangerous | 执行 Shell 命令 | `tools/bash.ts` |
 | todo_write | write | 写入待办事项列表 | `tools/todo.ts` |
 | todo_read | readonly | 读取待办事项列表 | `tools/todo.ts` |
-| task | subagent | 调用子代理执行任务 | `tools/task.ts` |
+| subagent_run | subagent | 创建或继续子代理实例执行任务 | `tools/subagent.ts` |
+| subagent_status | subagent | 查询当前 parent session 下子代理状态 | `tools/subagent.ts` |
+| subagent_close | subagent | 关闭子代理实例并使其进入终态 | `tools/subagent.ts` |
 | **web_search** | **network** | **语义 Web 搜索** | **`tools/web-search.ts` → `services/search-providers/`** |
 | **web_fetch** | **network** | **抓取 URL 内容并提取** | **`tools/web-fetch.ts` → `services/search-providers/`** |
 
 **注意**：
 - `web_search` / `web_fetch` 是内置工具入口，但执行通过 `services/search-providers/` 调用具体厂商（当前激活 Tavily）
-- `task` 工具是子代理的调用入口，子代理硬编码禁用此工具以防止递归
+- `subagent_run` 是主代理召唤子代理的唯一入口；子代理运行时硬编码禁用 `subagent_run` / `subagent_status` / `subagent_close` 以防止递归召唤
 
 ### D3: 处理输出限制和截断
 
