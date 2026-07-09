@@ -8,7 +8,8 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { acquireCliPackageBuildLock } from "./package-build-lock";
 
 interface CliResult {
   readonly code: number | null;
@@ -33,8 +34,11 @@ const CLI_BIN_PATH = join(
   "dist",
   "bin.js",
 );
+let releasePackageBuildLock: (() => Promise<void>) | undefined;
 
-beforeAll(() => {
+beforeAll(async () => {
+  const lock = await acquireCliPackageBuildLock();
+  releasePackageBuildLock = lock.release;
   const buildArgs = [
     "-r",
     "--filter",
@@ -57,7 +61,12 @@ beforeAll(() => {
     result.status,
     `CLI package build failed\nerror:\n${String(result.error)}\nstdout:\n${String(result.stdout)}\nstderr:\n${String(result.stderr)}`,
   ).toBe(0);
-}, 120_000);
+}, 180_000);
+
+afterAll(async () => {
+  await releasePackageBuildLock?.();
+  releasePackageBuildLock = undefined;
+}, 30_000);
 
 afterEach(async () => {
   for (const directory of cleanupDirectories.splice(0)) {

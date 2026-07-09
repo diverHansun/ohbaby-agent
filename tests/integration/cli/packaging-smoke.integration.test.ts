@@ -10,7 +10,8 @@ import type { AddressInfo } from "node:net";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { acquireCliPackageBuildLock } from "./package-build-lock";
 
 interface CommandResult {
   readonly code: number | null;
@@ -57,6 +58,17 @@ interface LocalRegistryPackage {
 const pinnedRuntimeDependencies = ["ink", "ink-gradient", "react"] as const;
 const repoRoot = process.cwd();
 const cleanupDirectories: string[] = [];
+let releasePackageBuildLock: (() => Promise<void>) | undefined;
+
+beforeAll(async () => {
+  const lock = await acquireCliPackageBuildLock();
+  releasePackageBuildLock = lock.release;
+}, 180_000);
+
+afterAll(async () => {
+  await releasePackageBuildLock?.();
+  releasePackageBuildLock = undefined;
+}, 30_000);
 
 afterEach(async () => {
   for (const directory of cleanupDirectories.splice(0)) {
