@@ -63,7 +63,7 @@ let releasePackageBuildLock: (() => Promise<void>) | undefined;
 beforeAll(async () => {
   const lock = await acquireCliPackageBuildLock();
   releasePackageBuildLock = lock.release;
-}, 180_000);
+}, 420_000);
 
 afterAll(async () => {
   await releasePackageBuildLock?.();

@@ -61,7 +61,7 @@ beforeAll(async () => {
     result.status,
     `CLI package build failed\nerror:\n${String(result.error)}\nstdout:\n${String(result.stdout)}\nstderr:\n${String(result.stderr)}`,
   ).toBe(0);
-}, 180_000);
+}, 420_000);
 
 afterAll(async () => {
   await releasePackageBuildLock?.();

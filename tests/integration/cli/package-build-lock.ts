@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const lockDirectory = join(tmpdir(), "ohbaby-cli-package-build.lock");
-const lockTimeoutMs = 180_000;
+// The lock can be held for an entire packaging smoke file, not only the build
+// command. Keep this above the longest single-file timeout plus one build.
+const lockTimeoutMs = 420_000;
 const retryMs = 100;
-const staleLockMs = 5 * 60_000;
+const staleLockMs = 10 * 60_000;
 
 export async function withCliPackageBuildLock<T>(
   action: () => Promise<T>,
