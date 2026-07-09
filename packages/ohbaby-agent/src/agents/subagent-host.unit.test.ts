@@ -36,6 +36,7 @@ function createHostFixture(): {
   readonly createInstance: ReturnType<
     typeof vi.fn<AgentInstanceFactory["create"]>
   >;
+  readonly getRuntimeAgent: ReturnType<typeof vi.fn>;
   readonly host: SessionSubagentHost;
   readonly sessionCreate: ReturnType<typeof vi.fn>;
   readonly store: InMemorySubagentInstanceStore;
@@ -64,22 +65,21 @@ function createHostFixture(): {
       Promise.resolve(sessions.get(sessionId) ?? null),
   );
   const store = new InMemorySubagentInstanceStore();
+  const getRuntimeAgent = vi.fn(
+    (role: string): Promise<RuntimeAgent> =>
+      Promise.resolve({
+        config: {
+          mode: "subagent" as const,
+          name: role,
+          maxSteps: 5,
+        },
+        isSubagent: true,
+        systemPrompt: "system",
+        tools: {},
+      } satisfies RuntimeAgent),
+  );
   const host = new SessionSubagentHost({
-    agentManager: {
-      getRuntimeAgent: vi.fn(
-        (role: string): Promise<RuntimeAgent> =>
-          Promise.resolve({
-            config: {
-              mode: "subagent" as const,
-              name: role,
-              maxSteps: 5,
-            },
-            isSubagent: true,
-            systemPrompt: "system",
-            tools: {},
-          } satisfies RuntimeAgent),
-      ),
-    },
+    agentManager: { getRuntimeAgent },
     createSubagentId: (() => {
       let next = 1;
       return (): string => `subagent_${String(next++)}`;
@@ -93,7 +93,7 @@ function createHostFixture(): {
     sessionManager: { create: sessionCreate, get: sessionGet },
     store,
   });
-  return { createInstance, host, sessionCreate, store, turn };
+  return { createInstance, getRuntimeAgent, host, sessionCreate, store, turn };
 }
 
 function flushMicrotasks(): Promise<void> {
@@ -207,6 +207,69 @@ describe("SessionSubagentHost", () => {
     ).resolves.toMatchObject({
       items: [expect.objectContaining({ status: "cancelled" })],
     });
+  });
+
+  it("keeps a scheduled background subagent cancelled when close happens before active registration", async () => {
+    const { getRuntimeAgent, host, turn } = createHostFixture();
+    let resolveRuntimeAgent!: () => void;
+    getRuntimeAgent
+      .mockResolvedValueOnce({
+        config: {
+          maxSteps: 5,
+          mode: "subagent",
+          name: "explore",
+        },
+        isSubagent: true,
+        systemPrompt: "system",
+        tools: {},
+      } satisfies RuntimeAgent)
+      .mockImplementationOnce(
+        (role: string) =>
+          new Promise<RuntimeAgent>((resolve) => {
+            resolveRuntimeAgent = (): void => {
+              resolve({
+                config: {
+                  maxSteps: 5,
+                  mode: "subagent",
+                  name: role,
+                },
+                isSubagent: true,
+                systemPrompt: "system",
+                tools: {},
+              });
+            };
+          }),
+      );
+    turn.mockResolvedValueOnce({
+      finalOutput: "late success",
+      mode: "waitForCompletion",
+      sessionId: "child_1",
+      success: true,
+    } satisfies AgentRunResult);
+
+    const created = await host.run({
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "slow background",
+      role: "explore",
+    });
+    await host.close({
+      parentSessionId: "parent_1",
+      subagentId: created.item.subagentId,
+    });
+    resolveRuntimeAgent();
+    await flushMicrotasks();
+
+    const status = await host.status({
+      parentSessionId: "parent_1",
+      subagentId: created.item.subagentId,
+    });
+    expect(status.items[0]).toMatchObject({
+      status: "cancelled",
+    });
+    expect(typeof status.items[0]?.closedAt).toBe("number");
+    expect(status.items[0]?.output).not.toBe("late success");
+    expect(turn).not.toHaveBeenCalled();
   });
 
   it("marks a run timed_out when its deadline aborts the turn", async () => {
@@ -405,6 +468,75 @@ describe("SessionSubagentHost", () => {
 
     complete();
     await flushMicrotasks();
+  });
+
+  it("drains all queued background turns in order", async () => {
+    const { host, turn } = createHostFixture();
+    const completions: (() => void)[] = [];
+    turn.mockImplementation((input) => {
+      return new Promise<AgentRunResult>((resolve) => {
+        completions.push(() => {
+          resolve({
+            finalOutput: `done ${input.prompt}`,
+            mode: "waitForCompletion",
+            sessionId: "child_1",
+            success: true,
+          });
+        });
+      });
+    });
+
+    const first = await host.run({
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "first",
+      role: "explore",
+    });
+    await flushMicrotasks();
+    await host.run({
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "second",
+      subagentId: first.item.subagentId,
+    });
+    await host.run({
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "third",
+      subagentId: first.item.subagentId,
+    });
+
+    expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual(["first"]);
+    completions.shift()?.();
+    await flushMicrotasks();
+    expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual([
+      "first",
+      "second",
+    ]);
+    completions.shift()?.();
+    await flushMicrotasks();
+    expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual([
+      "first",
+      "second",
+      "third",
+    ]);
+    completions.shift()?.();
+    await flushMicrotasks();
+
+    await expect(
+      host.status({
+        parentSessionId: "parent_1",
+        subagentId: first.item.subagentId,
+      }),
+    ).resolves.toMatchObject({
+      items: [
+        expect.objectContaining({
+          output: "done third",
+          pendingQueue: [],
+          status: "completed",
+        }),
+      ],
+    });
   });
 
   it("serializes new subagent creation so concurrent instances share one child session", async () => {

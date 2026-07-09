@@ -313,10 +313,17 @@ export class SessionSubagentHost {
       });
       return;
     }
+    const scheduledActive = this.createActiveState();
+    this.active.set(record.subagentId, scheduledActive);
     void Promise.resolve().then(() =>
-      this.runTurn(record, prompt, environment, undefined, timeoutMs).catch(
-        () => undefined,
-      ),
+      this.runTurn(
+        record,
+        prompt,
+        environment,
+        undefined,
+        timeoutMs,
+        scheduledActive,
+      ).catch(() => undefined),
     );
   }
 
@@ -326,17 +333,29 @@ export class SessionSubagentHost {
     environment?: ToolExecutionEnvironment,
     signal?: AbortSignal,
     timeoutMs?: number,
+    active = this.createActiveState(),
   ): Promise<SubagentInstanceRecord> {
-    const effectiveTimeoutMs = normalizeTimeoutMs(timeoutMs ?? record.timeoutMs);
+    const effectiveTimeoutMs = normalizeTimeoutMs(
+      timeoutMs ?? record.timeoutMs,
+    );
     const deadlineReason =
       effectiveTimeoutMs === undefined
         ? undefined
         : timeoutMessage(effectiveTimeoutMs);
+    this.active.set(record.subagentId, active);
+    active.running = true;
+    if (this.isActiveClosed(active)) {
+      return await this.mustGet(record.parentSessionId, record.subagentId);
+    }
     const runtimeAgent = await this.options.agentManager.getRuntimeAgent(
       record.role,
       { isSubagent: true },
     );
+    if (this.isActiveClosed(active)) {
+      return await this.mustGet(record.parentSessionId, record.subagentId);
+    }
     const abortController = new AbortController();
+    active.abortController = abortController;
     const abort = (): void => {
       abortController.abort(signal?.reason);
     };
@@ -345,29 +364,22 @@ export class SessionSubagentHost {
     } else {
       signal?.addEventListener("abort", abort, { once: true });
     }
-    const active: ActiveSubagentState = {
-      abortController,
-      closed: false,
-      queue: [],
-      running: true,
-    };
-    this.active.set(record.subagentId, active);
     await this.options.store.update(record.subagentId, {
       currentRunId: undefined,
       error: undefined,
       output: undefined,
-      pendingQueue: [],
+      pendingQueue: active.queue,
       startedAt: this.now(),
       status: "running",
       timeoutMs: effectiveTimeoutMs,
       updatedAt: this.now(),
     });
     const deadline =
-      effectiveTimeoutMs === undefined || deadlineReason === undefined
+      effectiveTimeoutMs === undefined
         ? undefined
         : createDeadlineController({
             parent: abortController.signal,
-            reason: deadlineReason,
+            reason: timeoutMessage(effectiveTimeoutMs),
             timeoutMs: effectiveTimeoutMs,
           });
     const turnSignal = deadline?.signal ?? abortController.signal;
@@ -400,7 +412,7 @@ export class SessionSubagentHost {
         signal: turnSignal,
         waitMode: "waitForCompletion",
       });
-      if (active.closed) {
+      if (this.isActiveClosed(active)) {
         return await this.mustGet(record.parentSessionId, record.subagentId);
       }
       if (timedOut()) {
@@ -415,7 +427,7 @@ export class SessionSubagentHost {
         updatedAt: this.now(),
       });
     } catch (error) {
-      if (active.closed) {
+      if (this.isActiveClosed(active)) {
         return await this.mustGet(record.parentSessionId, record.subagentId);
       }
       if (timedOut()) {
@@ -431,18 +443,39 @@ export class SessionSubagentHost {
     } finally {
       deadline?.dispose();
       signal?.removeEventListener("abort", abort);
+      active.abortController = undefined;
       active.running = false;
-      this.active.delete(record.subagentId);
       const next = active.queue.shift();
-      if (!active.closed && next) {
-        this.enqueueOrSchedule(
-          record,
-          next.prompt,
-          next.environment,
-          false,
-          next.timeoutMs,
+      if (!this.isActiveClosed(active) && next !== undefined) {
+        void this.options.store.update(record.subagentId, {
+          pendingQueue: active.queue,
+          updatedAt: this.now(),
+        });
+        void Promise.resolve().then(() =>
+          this.runTurn(
+            record,
+            next.prompt,
+            next.environment,
+            undefined,
+            next.timeoutMs,
+            active,
+          ).catch(() => undefined),
         );
+      } else {
+        this.active.delete(record.subagentId);
       }
     }
+  }
+
+  private createActiveState(): ActiveSubagentState {
+    return {
+      closed: false,
+      queue: [],
+      running: true,
+    };
+  }
+
+  private isActiveClosed(active: ActiveSubagentState): boolean {
+    return active.closed;
   }
 }
