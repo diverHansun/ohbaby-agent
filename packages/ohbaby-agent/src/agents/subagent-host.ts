@@ -90,10 +90,11 @@ export class SessionSubagentHost {
   }
 
   async run(input: SubagentRunInput): Promise<SubagentRunResult> {
+    const timeoutMs = normalizeTimeoutMs(input.timeoutMs);
     const record =
       input.subagentId === undefined
         ? await this.withParentSessionLock(input.parentSessionId, () =>
-            this.createRecord(input),
+            this.createRecord({ ...input, timeoutMs }),
           )
         : await this.getExisting(input);
     const active = this.active.get(record.subagentId);
@@ -108,7 +109,7 @@ export class SessionSubagentHost {
         input.prompt,
         input.environment,
         input.interrupt === true,
-        input.timeoutMs,
+        timeoutMs,
       );
       return {
         item: await this.mustGet(record.parentSessionId, record.subagentId),
@@ -120,7 +121,7 @@ export class SessionSubagentHost {
       input.prompt,
       input.environment,
       input.signal,
-      input.timeoutMs,
+      timeoutMs,
     );
     return {
       item,
@@ -370,11 +371,7 @@ export class SessionSubagentHost {
             timeoutMs: effectiveTimeoutMs,
           });
     const turnSignal = deadline?.signal ?? abortController.signal;
-    const timedOut = (): boolean =>
-      deadline !== undefined &&
-      deadlineReason !== undefined &&
-      deadline.signal.aborted &&
-      deadline.signal.reason === deadlineReason;
+    const timedOut = (): boolean => deadline?.didTimeout() === true;
     const markTimedOut = (): Promise<SubagentInstanceRecord> =>
       this.options.store.update(record.subagentId, {
         completedAt: this.now(),

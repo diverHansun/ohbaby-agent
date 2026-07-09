@@ -875,11 +875,11 @@ describe("RunManager", () => {
 
   it("allows concurrent runs in the same session when context scopes differ", async () => {
     const lifecycle = new BlockingLifecycle();
-    const { manager } = createManager(lifecycle);
+    const { manager, sandboxManager } = createManager(lifecycle);
 
     const first = await manager.create({
       contextScopeId: "subagent_1",
-      directory: "D:/repo",
+      directory: "D:/repo/one",
       isSubagent: true,
       modelId: "fake-model",
       sessionId: "child_1",
@@ -889,13 +889,27 @@ describe("RunManager", () => {
 
     const second = await manager.create({
       contextScopeId: "subagent_2",
-      directory: "D:/repo",
+      directory: "D:/repo/two",
       isSubagent: true,
       modelId: "fake-model",
       sessionId: "child_1",
       triggerSource: "user",
     });
 
+    await vi.waitFor(() => {
+      expect(sandboxManager.acquired).toEqual([
+        {
+          contextScopeId: "subagent_1",
+          sessionId: "child_1",
+          workdir: "D:/repo/one",
+        },
+        {
+          contextScopeId: "subagent_2",
+          sessionId: "child_1",
+          workdir: "D:/repo/two",
+        },
+      ]);
+    });
     expect(manager.list("child_1").map((record) => record.runId)).toEqual([
       first.runId,
       second.runId,
@@ -915,6 +929,10 @@ describe("RunManager", () => {
     await Promise.all([
       manager.waitForCompletion(first.runId),
       manager.waitForCompletion(second.runId),
+    ]);
+    expect(sandboxManager.released).toEqual([
+      "lease_child_1::subagent_1",
+      "lease_child_1::subagent_2",
     ]);
   });
 

@@ -121,4 +121,25 @@ describe("subagent builtin tools", () => {
     });
     expect(statusResult.metadata?.subagentStatus).toEqual({ items: [item] });
   });
+
+  it("passes timeout_ms through subagent_run when provided", async () => {
+    const { host, run } = createHost();
+    const tools = createBuiltinTools({ subagentHost: host });
+
+    await getTool(tools, "subagent_run").execute(
+      {
+        mode: "foreground",
+        prompt: "inspect",
+        role: "explore",
+        timeout_ms: 1_000,
+      },
+      context,
+    );
+
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeoutMs: 1_000,
+      }),
+    );
+  });
 });

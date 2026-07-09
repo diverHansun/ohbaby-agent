@@ -38,6 +38,22 @@ function optionalBoolean(
   return value;
 }
 
+function optionalPositiveInteger(
+  params: Record<string, unknown>,
+  name: string,
+): number | undefined {
+  const value = params[name];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    throw new ToolParameterError(
+      `Expected parameter "${name}" to be a positive integer when provided.`,
+    );
+  }
+  return value;
+}
+
 function runMode(params: Record<string, unknown>): SubagentRunMode {
   const value = params.mode;
   if (value === undefined) {
@@ -121,6 +137,7 @@ export function createSubagentTools(host: SubagentToolHost): readonly Tool[] {
         },
         subagent_id: { type: "string" },
         interrupt: { type: "boolean" },
+        timeout_ms: { minimum: 1, type: "integer" },
       },
       required: ["prompt"],
       type: "object",
@@ -128,6 +145,7 @@ export function createSubagentTools(host: SubagentToolHost): readonly Tool[] {
     source: "builtin",
     async execute(params, context): Promise<ToolExecutionResult> {
       const subagentId = getOptionalNonEmptyStringParam(params, "subagent_id");
+      const timeoutMs = optionalPositiveInteger(params, "timeout_ms");
       const result = await host.run({
         description: getOptionalNonEmptyStringParam(params, "description"),
         environment: context.environment,
@@ -139,6 +157,7 @@ export function createSubagentTools(host: SubagentToolHost): readonly Tool[] {
         role: subagentId === undefined ? subagentRoleParam(params) : undefined,
         signal: context.signal,
         subagentId,
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
       });
       return {
         metadata: { subagent: result },

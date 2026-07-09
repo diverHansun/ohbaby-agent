@@ -250,6 +250,36 @@ describe("SandboxManager", () => {
     await secondLease.release();
   });
 
+  it("escapes scope key parts to avoid delimiter collisions", async () => {
+    const { manager } = createManager();
+
+    const stringSession = await manager.createContext(
+      "child_1::subagent_a",
+      {
+        adapterId: "fake",
+        workdir: "D:/repo/string-session",
+      },
+    );
+    const scopedSession = await manager.createContext(
+      { sessionId: "child_1", contextScopeId: "subagent_a" },
+      {
+        adapterId: "fake",
+        workdir: "D:/repo/scoped-session",
+      },
+    );
+
+    expect(stringSession.scopeKey).toBe("child_1%3A%3Asubagent_a");
+    expect(scopedSession.scopeKey).toBe("child_1::subagent_a");
+    expect(manager.getContext("child_1::subagent_a")).toMatchObject({
+      workdir: path.resolve("D:/repo/string-session"),
+    });
+    expect(
+      manager.getContext({ sessionId: "child_1", contextScopeId: "subagent_a" }),
+    ).toMatchObject({
+      workdir: path.resolve("D:/repo/scoped-session"),
+    });
+  });
+
   it("fails fast when acquiring a missing context", async () => {
     const { manager } = createManager();
 

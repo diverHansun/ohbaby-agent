@@ -1,6 +1,7 @@
 export interface DeadlineController {
   readonly controller: AbortController;
   readonly dispose: () => void;
+  readonly didTimeout: () => boolean;
   readonly parentAborted: Promise<void>;
   readonly signal: AbortSignal;
   readonly timedOut: Promise<void>;
@@ -12,6 +13,7 @@ export function createDeadlineController(input: {
   readonly timeoutMs: number;
 }): DeadlineController {
   const controller = new AbortController();
+  let timedOut = false;
   let resolveTimedOut!: () => void;
   let resolveParentAborted!: () => void;
   const timedOutPromise = new Promise<void>((resolve) => {
@@ -24,6 +26,7 @@ export function createDeadlineController(input: {
     if (controller.signal.aborted) {
       return;
     }
+    timedOut = true;
     controller.abort(input.reason);
     resolveTimedOut();
   }, input.timeoutMs);
@@ -42,6 +45,7 @@ export function createDeadlineController(input: {
 
   return {
     controller,
+    didTimeout: (): boolean => timedOut,
     dispose: (): void => {
       clearTimeout(timeout);
       input.parent?.removeEventListener("abort", abortFromParent);

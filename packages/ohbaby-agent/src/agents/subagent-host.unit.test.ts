@@ -163,6 +163,52 @@ describe("SessionSubagentHost", () => {
     expect(turn).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps a running subagent cancelled when close wins the race", async () => {
+    const { host, turn } = createHostFixture();
+    let resolveTurn!: () => void;
+    turn.mockImplementationOnce(
+      () =>
+        new Promise<AgentRunResult>((resolve) => {
+          resolveTurn = (): void => {
+            resolve({
+              finalOutput: "late success",
+              mode: "waitForCompletion",
+              sessionId: "child_1",
+              success: true,
+            });
+          };
+        }),
+    );
+
+    const running = host.run({
+      mode: "foreground",
+      parentSessionId: "parent_1",
+      prompt: "slow",
+      role: "explore",
+    });
+    await flushMicrotasks();
+    const status = await host.status({ parentSessionId: "parent_1" });
+    const subagentId = status.items[0]?.subagentId;
+    if (!subagentId) {
+      throw new Error("Expected running subagent");
+    }
+
+    await host.close({ parentSessionId: "parent_1", subagentId });
+    resolveTurn();
+    const result = await running;
+
+    expect(result.item).toMatchObject({
+      status: "cancelled",
+      subagentId,
+    });
+    expect(result.success).toBe(false);
+    await expect(
+      host.status({ parentSessionId: "parent_1", subagentId }),
+    ).resolves.toMatchObject({
+      items: [expect.objectContaining({ status: "cancelled" })],
+    });
+  });
+
   it("marks a run timed_out when its deadline aborts the turn", async () => {
     vi.useFakeTimers();
     try {
@@ -216,6 +262,67 @@ describe("SessionSubagentHost", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("does not treat parent aborts as timeout even when reasons collide", async () => {
+    const { host, turn } = createHostFixture();
+    const controller = new AbortController();
+    turn.mockImplementationOnce(
+      (input) =>
+        new Promise<AgentRunResult>((resolve) => {
+          const resolveAbort = (): void => {
+            resolve({
+              error: String(input.signal?.reason ?? "aborted"),
+              mode: "waitForCompletion",
+              sessionId: "child_1",
+              success: false,
+            });
+          };
+          if (input.signal?.aborted) {
+            resolveAbort();
+            return;
+          }
+          input.signal?.addEventListener("abort", resolveAbort, { once: true });
+        }),
+    );
+
+    const running = host.run({
+      mode: "foreground",
+      parentSessionId: "parent_1",
+      prompt: "slow",
+      role: "explore",
+      signal: controller.signal,
+      timeoutMs: 50,
+    });
+    controller.abort("Subagent timed out after 50ms");
+    const result = await running;
+
+    expect(result).toMatchObject({
+      item: {
+        output: "Subagent timed out after 50ms",
+        status: "failed",
+      },
+      output: "Subagent timed out after 50ms",
+      success: false,
+    });
+  });
+
+  it("rejects invalid timeoutMs before creating a subagent record", async () => {
+    const { host, sessionCreate, store, turn } = createHostFixture();
+
+    await expect(
+      host.run({
+        mode: "background",
+        parentSessionId: "parent_1",
+        prompt: "bad timeout",
+        role: "explore",
+        timeoutMs: 0,
+      }),
+    ).rejects.toThrow("subagent timeoutMs must be a positive number");
+
+    await expect(store.listByParent("parent_1")).resolves.toEqual([]);
+    expect(sessionCreate).not.toHaveBeenCalled();
+    expect(turn).not.toHaveBeenCalled();
   });
 
   it("lists status as items and marks restarted active subagents interrupted without auto-running", async () => {

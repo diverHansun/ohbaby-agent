@@ -12,7 +12,7 @@ export function normalizeSandboxScope(
 ): NormalizedSandboxScope {
   if (typeof input === "string") {
     return {
-      scopeKey: input,
+      scopeKey: encodeScopePart(input),
       sessionId: input,
     };
   }
@@ -25,7 +25,12 @@ export function normalizeSandboxScope(
 }
 
 export function sandboxScopeKey(input: SandboxScopeIdentity): string {
+  const encodedSessionId = encodeScopePart(input.sessionId);
   return input.contextScopeId === undefined
-    ? input.sessionId
-    : `${input.sessionId}::${input.contextScopeId}`;
+    ? encodedSessionId
+    : `${encodedSessionId}::${encodeScopePart(input.contextScopeId)}`;
+}
+
+function encodeScopePart(value: string): string {
+  return encodeURIComponent(value);
 }
