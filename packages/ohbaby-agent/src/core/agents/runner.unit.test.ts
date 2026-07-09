@@ -319,6 +319,33 @@ describe("runAgent", () => {
     );
   });
 
+  it("keeps primary runs on the requested project root", async () => {
+    const runCoordinator = createRunCoordinator();
+    const environment = {
+      workdir: "/private/var/folders/project",
+    } as ToolExecutionEnvironment;
+
+    await runAgent(
+      createDeps({
+        runCoordinator: runCoordinator.coordinator,
+      }),
+      baseInput({
+        environment,
+        parentSessionId: undefined,
+        projectRoot: "/var/folders/project",
+        sessionId: "session_primary",
+      }),
+    );
+
+    expect(runCoordinator.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directory: "/var/folders/project",
+        isSubagent: false,
+        sessionId: "session_primary",
+      }),
+    );
+  });
+
   it("uses explicit instance scope for subagent identity and message queries", async () => {
     const messageManager = createMessageManager();
     const runCoordinator = createRunCoordinator();

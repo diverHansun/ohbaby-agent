@@ -143,6 +143,16 @@ function resolveRunScope(input: AgentRunInput): ResolvedRunScope {
   return scope.toRunCreateOptions();
 }
 
+function runDirectory(input: {
+  readonly environmentWorkdir?: string;
+  readonly isSubagent: boolean;
+  readonly projectRoot: string;
+}): string {
+  return input.isSubagent
+    ? (input.environmentWorkdir ?? input.projectRoot)
+    : input.projectRoot;
+}
+
 export async function runAgent(
   deps: AgentRunDeps,
   input: AgentRunInput,
@@ -178,7 +188,11 @@ export async function runAgent(
       ...(scope.contextScopeId === undefined
         ? {}
         : { contextScopeId: scope.contextScopeId }),
-      directory: input.environment?.workdir ?? input.projectRoot,
+      directory: runDirectory({
+        environmentWorkdir: input.environment?.workdir,
+        isSubagent: scope.isSubagent,
+        projectRoot: input.projectRoot,
+      }),
       isSubagent: scope.isSubagent,
       maxSteps: input.maxSteps,
       modelId: input.modelId,
