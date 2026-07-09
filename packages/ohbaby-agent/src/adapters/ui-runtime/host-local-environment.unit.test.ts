@@ -109,10 +109,7 @@ describe("createHostLocalSandboxManager", () => {
     cleanupDirectories.push(workdir);
     const manager = createHostLocalSandboxManager(process.cwd());
 
-    await manager.setSessionEnvironment(
-      "session_1",
-      createHostLocalEnvironment(workdir),
-    );
+    await manager.setSessionWorkdir("session_1", workdir);
     const lease = await manager.acquire("session_1");
 
     expect(lease).toMatchObject({
@@ -126,7 +123,7 @@ describe("createHostLocalSandboxManager", () => {
     });
 
     await manager.release(lease);
-    await manager.setSessionEnvironment("session_1", undefined);
+    await manager.destroyContext("session_1");
   });
 
   it("uses the fallback workdir when no session workdir is configured", async () => {
@@ -138,6 +135,52 @@ describe("createHostLocalSandboxManager", () => {
 
     expect(lease.workdir).toBe(await realpath(workdir));
     await manager.release(lease);
-    await manager.setSessionEnvironment("session_fallback", undefined);
+    await manager.destroyContext("session_fallback");
+  });
+
+  it("keeps scoped child-session workdirs independent", async () => {
+    const firstWorkdir = await mkdtemp(
+      path.join(tmpdir(), "ohbaby-host-local-a-"),
+    );
+    const secondWorkdir = await mkdtemp(
+      path.join(tmpdir(), "ohbaby-host-local-b-"),
+    );
+    cleanupDirectories.push(firstWorkdir, secondWorkdir);
+    const manager = createHostLocalSandboxManager(process.cwd());
+
+    const first = await manager.acquire({
+      contextScopeId: "subagent_a",
+      sessionId: "child_1",
+      workdir: firstWorkdir,
+    });
+    const second = await manager.acquire({
+      contextScopeId: "subagent_b",
+      sessionId: "child_1",
+      workdir: secondWorkdir,
+    });
+
+    expect(first).toMatchObject({
+      contextScopeId: "subagent_a",
+      scopeKey: "child_1::subagent_a",
+      sessionId: "child_1",
+      workdir: await realpath(firstWorkdir),
+    });
+    expect(second).toMatchObject({
+      contextScopeId: "subagent_b",
+      scopeKey: "child_1::subagent_b",
+      sessionId: "child_1",
+      workdir: await realpath(secondWorkdir),
+    });
+
+    await first.release();
+    await manager.destroyContext({
+      contextScopeId: "subagent_a",
+      sessionId: "child_1",
+    });
+
+    expect(second.resolvePath("still-here.txt")).toBe(
+      path.join(await realpath(secondWorkdir), "still-here.txt"),
+    );
+    await second.release();
   });
 });

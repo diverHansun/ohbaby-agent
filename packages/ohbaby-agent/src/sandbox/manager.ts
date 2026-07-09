@@ -11,13 +11,16 @@ import {
   snapshotContext,
 } from "./context.js";
 import { createSandboxLease } from "./lease.js";
+import { normalizeSandboxScope } from "./scope.js";
 import { TrustedRootRegistry } from "./trusted-roots.js";
 import type {
   CreateContextOptions,
+  SandboxAcquireTarget,
   SandboxContext,
   SandboxLease,
   SandboxManagerPort,
   SandboxManagerOptions,
+  SandboxScopeInput,
 } from "./types.js";
 
 const DEFAULT_ADAPTER_ID = "host-local";
@@ -53,14 +56,18 @@ export class SandboxManager implements SandboxManagerPort {
   }
 
   async createContext(
-    sessionId: string,
+    input: SandboxScopeInput,
     options: CreateContextOptions,
   ): Promise<SandboxContext> {
-    if (this.contexts.has(sessionId) || this.pendingCreates.has(sessionId)) {
-      throw new SandboxContextAlreadyExistsError(sessionId);
+    const scope = normalizeSandboxScope(input);
+    if (
+      this.contexts.has(scope.scopeKey) ||
+      this.pendingCreates.has(scope.scopeKey)
+    ) {
+      throw new SandboxContextAlreadyExistsError(scope.scopeKey);
     }
 
-    this.pendingCreates.add(sessionId);
+    this.pendingCreates.add(scope.scopeKey);
     const adapterId = options.adapterId ?? DEFAULT_ADAPTER_ID;
     try {
       const adapter = this.options.adapterRegistry.get(adapterId);
@@ -73,7 +80,9 @@ export class SandboxManager implements SandboxManagerPort {
         );
       }
       const handle = await adapter.create({
-        sessionId,
+        contextScopeId: scope.contextScopeId,
+        scopeKey: scope.scopeKey,
+        sessionId: scope.sessionId,
         workdir: path.resolve(options.workdir),
       });
       const workdir = await canonicalizePathTarget(handle.workdir);
@@ -83,39 +92,43 @@ export class SandboxManager implements SandboxManagerPort {
         adapterId,
         capabilities,
         contextId: this.createContextId(),
+        contextScopeId: scope.contextScopeId,
         createdAt: this.now(),
         handle: { ...handle, workdir },
         leaseCount: 0,
-        sessionId,
+        scopeKey: scope.scopeKey,
+        sessionId: scope.sessionId,
         status: "active",
         trustedRoots: await TrustedRootRegistry.create(workdir),
         waiters: [],
         workdir,
       };
-      this.contexts.set(sessionId, context);
+      this.contexts.set(scope.scopeKey, context);
 
       return snapshotContext(context);
     } finally {
-      this.pendingCreates.delete(sessionId);
+      this.pendingCreates.delete(scope.scopeKey);
     }
   }
 
   async ensureContext(
-    sessionId: string,
+    input: SandboxScopeInput,
     options: CreateContextOptions,
   ): Promise<SandboxContext> {
-    const existing = this.contexts.get(sessionId);
+    const scope = normalizeSandboxScope(input);
+    const existing = this.contexts.get(scope.scopeKey);
     if (existing?.status === "active") {
       return snapshotContext(existing);
     }
 
-    return this.createContext(sessionId, options);
+    return this.createContext(scope, options);
   }
 
-  acquire(sessionId: string): Promise<SandboxLease> {
-    const context = this.contexts.get(sessionId);
+  acquire(input: SandboxAcquireTarget): Promise<SandboxLease> {
+    const scope = normalizeSandboxScope(input);
+    const context = this.contexts.get(scope.scopeKey);
     if (context?.status !== "active") {
-      return Promise.reject(new SandboxContextNotFoundError(sessionId));
+      return Promise.reject(new SandboxContextNotFoundError(scope.scopeKey));
     }
 
     context.leaseCount += 1;
@@ -135,13 +148,15 @@ export class SandboxManager implements SandboxManagerPort {
     await lease.release();
   }
 
-  getContext(sessionId: string): SandboxContext | undefined {
-    const context = this.contexts.get(sessionId);
+  getContext(input: SandboxScopeInput): SandboxContext | undefined {
+    const scope = normalizeSandboxScope(input);
+    const context = this.contexts.get(scope.scopeKey);
     return context ? snapshotContext(context) : undefined;
   }
 
-  async destroyContext(sessionId: string): Promise<void> {
-    const context = this.contexts.get(sessionId);
+  async destroyContext(input: SandboxScopeInput): Promise<void> {
+    const scope = normalizeSandboxScope(input);
+    const context = this.contexts.get(scope.scopeKey);
     if (!context) {
       return;
     }
@@ -158,7 +173,7 @@ export class SandboxManager implements SandboxManagerPort {
         this.leases.delete(leaseId);
       }
     }
-    this.contexts.delete(sessionId);
+    this.contexts.delete(scope.scopeKey);
     await context.adapter.destroy(context.handle);
   }
 

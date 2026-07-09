@@ -405,7 +405,6 @@ export async function createUiRuntimeComposition(
     modelId: options.llmClient.config.model,
     runCoordinator: runManager,
     runEventSource,
-    sandboxManager,
     sessionManager,
     toolScheduler,
   });
@@ -414,7 +413,6 @@ export async function createUiRuntimeComposition(
       messageManager: options.messageManager,
       runCoordinator: runManager,
       runEventSource,
-      sandboxManager,
       toolScheduler,
     },
   });
@@ -552,10 +550,7 @@ export async function createUiRuntimeComposition(
     },
 
     setSessionWorkdir(sessionId, workdir): Promise<void> {
-      return sandboxManager.setSessionEnvironment(
-        sessionId,
-        createHostLocalEnvironment(workdir),
-      );
+      return sandboxManager.setSessionWorkdir(sessionId, workdir);
     },
 
     async ensureSessionRecord(input): Promise<void> {

@@ -6,15 +6,16 @@ import {
   AdapterRegistry,
   HostLocalAdapter,
   SandboxManager,
+  normalizeSandboxScope,
+  type SandboxAcquireTarget,
   type SandboxLease,
   type SandboxManagerPort,
+  type SandboxScopeInput,
 } from "../../sandbox/index.js";
 
 export interface HostLocalSandboxManager extends SandboxManagerPort {
-  setSessionEnvironment(
-    sessionId: string,
-    environment: ToolExecutionEnvironment | undefined,
-  ): Promise<void>;
+  destroyContext(input: SandboxScopeInput): Promise<void>;
+  setSessionWorkdir(sessionId: string, workdir: string): Promise<void>;
 }
 
 function normalizeForBoundary(inputPath: string): string {
@@ -126,62 +127,82 @@ export function createHostLocalSandboxManager(
   registry.register(new HostLocalAdapter());
   const manager = new SandboxManager({ adapterRegistry: registry });
   const operations = new Map<string, Promise<void>>();
+  const sessionWorkdirs = new Map<string, string>();
 
-  function withSessionOperation(
-    sessionId: string,
+  function withOperation(
+    key: string,
     operation: () => Promise<void>,
   ): Promise<void> {
-    const previous = operations.get(sessionId) ?? Promise.resolve();
+    const previous = operations.get(key) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(operation);
     const tracked = current.finally(() => {
-      if (operations.get(sessionId) === tracked) {
-        operations.delete(sessionId);
+      if (operations.get(key) === tracked) {
+        operations.delete(key);
       }
     });
-    operations.set(sessionId, tracked);
+    operations.set(key, tracked);
     return tracked;
   }
 
-  async function ensureSessionWorkdir(
-    sessionId: string,
+  async function waitForSessionOperation(sessionId: string): Promise<void> {
+    const pending = operations.get(sessionId);
+    if (pending) {
+      await pending;
+    }
+  }
+
+  async function ensureScopedWorkdir(
+    input: SandboxScopeInput,
     nextWorkdir: string,
   ): Promise<void> {
-    const resolvedWorkdir = path.resolve(nextWorkdir);
-    const existing = manager.getContext(sessionId);
+    const scope = normalizeSandboxScope(input);
+    const resolvedWorkdir = createHostLocalEnvironment(nextWorkdir).workdir;
+    const existing = manager.getContext(scope);
     if (existing && path.resolve(existing.workdir) !== resolvedWorkdir) {
-      await manager.destroyContext(sessionId);
+      if (existing.leaseCount > 0) {
+        throw new Error(
+          `Cannot change active sandbox workdir for scope: ${scope.scopeKey}`,
+        );
+      }
+      await manager.destroyContext(scope);
     }
-    await manager.ensureContext(sessionId, {
+    await manager.ensureContext(scope, {
       adapterId: "host-local",
       workdir: resolvedWorkdir,
     });
   }
 
-  async function ensureFallback(sessionId: string): Promise<void> {
-    if (manager.getContext(sessionId)) {
-      return;
+  function workdirForAcquire(input: SandboxAcquireTarget): string {
+    if (typeof input !== "string" && input.workdir !== undefined) {
+      return input.workdir;
     }
-    await ensureSessionWorkdir(sessionId, fallbackWorkdir);
+    const scope = normalizeSandboxScope(input);
+    return sessionWorkdirs.get(scope.sessionId) ?? fallbackWorkdir;
   }
 
   return {
-    setSessionEnvironment(sessionId, environment): Promise<void> {
-      return withSessionOperation(sessionId, async () => {
-        if (!environment) {
-          await manager.destroyContext(sessionId);
-          return;
-        }
-        await ensureSessionWorkdir(sessionId, environment.workdir);
+    destroyContext(input): Promise<void> {
+      const scope = normalizeSandboxScope(input);
+      return withOperation(scope.scopeKey, async () => {
+        await manager.destroyContext(scope);
       });
     },
 
-    async acquire(sessionId: string): Promise<SandboxLease> {
-      const pending = operations.get(sessionId);
-      if (pending) {
-        await pending;
-      }
-      await ensureFallback(sessionId);
-      return await manager.acquire(sessionId);
+    setSessionWorkdir(sessionId, workdir): Promise<void> {
+      return withOperation(sessionId, async () => {
+        const environment = createHostLocalEnvironment(workdir);
+        sessionWorkdirs.set(sessionId, environment.workdir);
+        await ensureScopedWorkdir({ sessionId }, environment.workdir);
+      });
+    },
+
+    async acquire(input: SandboxAcquireTarget): Promise<SandboxLease> {
+      const scope = normalizeSandboxScope(input);
+      await waitForSessionOperation(scope.sessionId);
+      await withOperation(scope.scopeKey, async () => {
+        await ensureScopedWorkdir(scope, workdirForAcquire(input));
+      });
+      return await manager.acquire(scope);
     },
 
     release(lease: SandboxLease): Promise<void> {

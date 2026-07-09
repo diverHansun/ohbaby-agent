@@ -60,7 +60,9 @@ export function createSandboxLease(input: {
     adapterId: context.adapterId,
     capabilities: context.capabilities,
     contextId: context.contextId,
+    contextScopeId: context.contextScopeId,
     leaseId: input.leaseId,
+    scopeKey: context.scopeKey,
     sessionId: context.sessionId,
     workdir: context.workdir,
 

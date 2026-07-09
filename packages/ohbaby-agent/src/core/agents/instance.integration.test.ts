@@ -210,8 +210,30 @@ function createToolSchedulerFixture(): ToolSchedulerFixture {
   return { executedCallIds, scheduler };
 }
 
-function sandboxLease(sessionId: string): SandboxLease {
-  const workdir = `/repo/${sessionId}`;
+type SandboxAcquireInput =
+  | string
+  | {
+      readonly contextScopeId?: string;
+      readonly sessionId: string;
+    };
+
+function sandboxInputSessionId(input: SandboxAcquireInput): string {
+  return typeof input === "string" ? input : input.sessionId;
+}
+
+function sandboxInputScopeKey(input: SandboxAcquireInput): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  return input.contextScopeId === undefined
+    ? input.sessionId
+    : `${input.sessionId}::${input.contextScopeId}`;
+}
+
+function sandboxLease(input: SandboxAcquireInput): SandboxLease {
+  const sessionId = sandboxInputSessionId(input);
+  const scopeKey = sandboxInputScopeKey(input);
+  const workdir = `/repo/${scopeKey}`;
   return {
     adapterId: "host-local",
     capabilities: {
@@ -221,8 +243,9 @@ function sandboxLease(sessionId: string): SandboxLease {
       supportsGit: false,
     },
     containsTrustedPath: () => true,
-    contextId: `context_${sessionId}`,
-    leaseId: `lease_${sessionId}`,
+    contextId: `context_${scopeKey}`,
+    contextScopeId: typeof input === "string" ? undefined : input.contextScopeId,
+    leaseId: `lease_${scopeKey}`,
     preflight: () =>
       Promise.resolve({
         commands: [],
@@ -241,6 +264,7 @@ function sandboxLease(sessionId: string): SandboxLease {
     resolvePathForWrite: (inputPath: string) =>
       Promise.resolve(`${workdir}/${inputPath}`),
     sessionId,
+    scopeKey,
     trustPath: (input) => Promise.resolve({ kind: input.kind, path: input.path }),
     trustedRoots: () => [{ kind: "workspace", path: workdir }],
     workdir,
@@ -249,8 +273,8 @@ function sandboxLease(sessionId: string): SandboxLease {
 
 function sandboxManager(): SandboxManager {
   return {
-    acquire(sessionId: string): Promise<SandboxLease> {
-      return Promise.resolve(sandboxLease(sessionId));
+    acquire(input: SandboxAcquireInput): Promise<SandboxLease> {
+      return Promise.resolve(sandboxLease(input));
     },
     release(): Promise<void> {
       return Promise.resolve();

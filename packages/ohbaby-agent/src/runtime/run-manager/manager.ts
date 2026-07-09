@@ -206,7 +206,11 @@ export class RunManager {
     let outcome: RunWorkerResult;
 
     try {
-      const sandboxLease = await sandboxManager.acquire(record.sessionId);
+      const sandboxLease = await sandboxManager.acquire({
+        contextScopeId: record.options.contextScopeId,
+        sessionId: record.sessionId,
+        workdir: record.options.directory,
+      });
       record.sandboxLease = sandboxLease;
       const context: RunContext = {
         agentInstanceId: record.options.agentInstanceId,

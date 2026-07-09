@@ -20,6 +20,5 @@ export type {
   AgentRunInput,
   AgentRunResult,
   AgentRunner,
-  AgentSandboxEnvironmentManager,
   AgentToolCallSummary,
 } from "./types.js";

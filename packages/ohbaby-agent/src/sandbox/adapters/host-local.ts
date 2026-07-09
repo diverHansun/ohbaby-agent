@@ -46,7 +46,11 @@ export class HostLocalAdapter implements SandboxAdapter {
     }
 
     return {
-      metadata: { sessionId: options.sessionId },
+      metadata: {
+        contextScopeId: options.contextScopeId,
+        scopeKey: options.scopeKey,
+        sessionId: options.sessionId,
+      },
       workdir,
     };
   }

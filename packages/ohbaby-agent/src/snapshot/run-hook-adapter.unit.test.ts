@@ -63,6 +63,7 @@ function sandboxLease(input: {
       Promise.resolve(join(input.workdir, inputPath)),
     resolvePathForWrite: (inputPath: string) =>
       Promise.resolve(join(input.workdir, inputPath)),
+    scopeKey: input.sessionId,
     sessionId: input.sessionId,
     trustPath: (trustedPath) =>
       Promise.resolve({ kind: trustedPath.kind, path: trustedPath.path }),

@@ -6,6 +6,7 @@ export {
   SandboxContextNotFoundError,
 } from "./errors.js";
 export { SandboxManager } from "./manager.js";
+export { normalizeSandboxScope, sandboxScopeKey } from "./scope.js";
 export { HostLocalAdapter } from "./adapters/host-local.js";
 export {
   classifySandboxPath,
@@ -32,6 +33,8 @@ export type {
   SandboxAdapter,
   SandboxAdapterHandle,
   SandboxAdapterId,
+  SandboxAcquireInput,
+  SandboxAcquireTarget,
   SandboxCapabilities,
   SandboxContext,
   SandboxContextStatus,
@@ -43,6 +46,9 @@ export type {
   SandboxPathBoundary,
   SandboxPreflightInput,
   SandboxShellAnalysisPreflightInput,
+  SandboxScopeIdentity,
+  SandboxScopeInput,
   TrustPathInput,
 } from "./types.js";
+export type { NormalizedSandboxScope } from "./scope.js";
 export type { TrustedRoot, TrustedRootKind } from "./trusted-roots.js";

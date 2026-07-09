@@ -97,6 +97,8 @@ export interface TrustPathInput {
 }
 
 export interface SandboxCreateOptions {
+  readonly contextScopeId?: string;
+  readonly scopeKey: string;
   readonly sessionId: string;
   readonly workdir: string;
 }
@@ -119,6 +121,8 @@ export interface SandboxAdapter {
 
 export interface SandboxContext {
   readonly contextId: string;
+  readonly contextScopeId?: string;
+  readonly scopeKey: string;
   readonly sessionId: string;
   readonly adapterId: SandboxAdapterId;
   readonly workdir: string;
@@ -130,6 +134,8 @@ export interface SandboxContext {
 
 export interface SandboxLease {
   readonly leaseId: string;
+  readonly contextScopeId?: string;
+  readonly scopeKey: string;
   readonly sessionId: string;
   readonly contextId: string;
   readonly adapterId: SandboxAdapterId;
@@ -146,8 +152,21 @@ export interface SandboxLease {
   release(): Promise<void>;
 }
 
+export interface SandboxScopeIdentity {
+  readonly contextScopeId?: string;
+  readonly sessionId: string;
+}
+
+export interface SandboxAcquireInput extends SandboxScopeIdentity {
+  readonly adapterId?: SandboxAdapterId;
+  readonly workdir?: string;
+}
+
+export type SandboxScopeInput = string | SandboxScopeIdentity;
+export type SandboxAcquireTarget = string | SandboxAcquireInput;
+
 export interface SandboxManagerPort {
-  acquire(sessionId: string): Promise<SandboxLease>;
+  acquire(input: SandboxAcquireTarget): Promise<SandboxLease>;
   release(lease: SandboxLease): Promise<void>;
 }
 

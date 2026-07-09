@@ -100,20 +100,6 @@ function completionError(input: {
   );
 }
 
-function cleanupSessionEnvironment(
-  deps: Pick<AgentRunDeps, "sandboxManager">,
-  sessionId: string,
-): () => Promise<void> {
-  let cleaned = false;
-  return async () => {
-    if (cleaned) {
-      return;
-    }
-    cleaned = true;
-    await deps.sandboxManager?.setSessionEnvironment(sessionId, undefined);
-  };
-}
-
 function preSubscribeRunEvents(input: {
   readonly runEventSource: AgentRunEventSource;
   readonly runId: string;
@@ -171,137 +157,121 @@ export async function runAgent(
     agentName: input.agentName,
     isSubagent: scope.isSubagent,
   });
-  await deps.sandboxManager?.setSessionEnvironment(
-    scope.sessionId,
-    input.environment,
-  );
-  const cleanupEnvironment = cleanupSessionEnvironment(deps, scope.sessionId);
 
+  const userMessageId = await writeInitialUserMessage(deps, {
+    agentName: input.agentName,
+    contextScopeId: scope.contextScopeId,
+    initialUserPrompt: input.initialUserPrompt,
+    sessionId: scope.sessionId,
+  });
+  const preSubscribed =
+    input.waitMode === "stream" && input.runId && runEventSource
+      ? preSubscribeRunEvents({ runEventSource, runId: input.runId })
+      : undefined;
+  let record: Awaited<ReturnType<AgentRunDeps["runCoordinator"]["create"]>>;
   try {
-    const userMessageId = await writeInitialUserMessage(deps, {
-      agentName: input.agentName,
-      contextScopeId: scope.contextScopeId,
-      initialUserPrompt: input.initialUserPrompt,
+    record = await deps.runCoordinator.create({
+      ...(scope.agentInstanceId === undefined
+        ? {}
+        : { agentInstanceId: scope.agentInstanceId }),
+      agent: input.agentName,
+      ...(scope.contextScopeId === undefined
+        ? {}
+        : { contextScopeId: scope.contextScopeId }),
+      directory: input.environment?.workdir ?? input.projectRoot,
+      isSubagent: scope.isSubagent,
+      maxSteps: input.maxSteps,
+      modelId: input.modelId,
+      parentMessageId: userMessageId ?? input.parentMessageId,
+      runId: input.runId,
       sessionId: scope.sessionId,
+      tools: toOpenAiTools(tools),
+      triggerSource: "user",
     });
-    const preSubscribed =
-      input.waitMode === "stream" && input.runId && runEventSource
-        ? preSubscribeRunEvents({ runEventSource, runId: input.runId })
-        : undefined;
-    let record: Awaited<ReturnType<AgentRunDeps["runCoordinator"]["create"]>>;
+  } catch (error) {
+    await preSubscribed?.close();
+    if (userMessageId) {
+      try {
+        await deps.messageManager.removeMessage(userMessageId);
+      } catch {
+        // Preserve the run creation error so callers can still classify busy sessions.
+      }
+    }
+    throw error;
+  }
+  const unbindAbort = bindAgentAbort({
+    cancel: deps.runCoordinator.cancel.bind(deps.runCoordinator),
+    runId: record.runId,
+    signal: input.signal,
+  });
+  if (input.waitMode === "stream") {
     try {
-      record = await deps.runCoordinator.create({
-        ...(scope.agentInstanceId === undefined
-          ? {}
-          : { agentInstanceId: scope.agentInstanceId }),
-        agent: input.agentName,
-        ...(scope.contextScopeId === undefined
-          ? {}
-          : { contextScopeId: scope.contextScopeId }),
-        directory: input.projectRoot,
-        isSubagent: scope.isSubagent,
-        maxSteps: input.maxSteps,
-        modelId: input.modelId,
-        parentMessageId: userMessageId ?? input.parentMessageId,
-        runId: input.runId,
-        sessionId: scope.sessionId,
-        tools: toOpenAiTools(tools),
-        triggerSource: "user",
-      });
+      if (!runEventSource) {
+        throw new Error("Agent run event source is required for stream mode");
+      }
+      if (input.runId && record.runId !== input.runId) {
+        throw new Error(
+          `Agent run coordinator created unexpected run id: ${record.runId}`,
+        );
+      }
+      const events =
+        preSubscribed?.events ?? runEventSource.subscribeRunEvents(record.runId);
+      void deps.runCoordinator
+        .waitForCompletion(record.runId)
+        .finally(() => {
+          unbindAbort();
+        })
+        .catch(() => undefined);
+      return {
+        events,
+        mode: "stream",
+        runId: record.runId,
+        sessionId: record.sessionId,
+      };
     } catch (error) {
       await preSubscribed?.close();
-      if (userMessageId) {
-        try {
-          await deps.messageManager.removeMessage(userMessageId);
-        } catch {
-          // Preserve the run creation error so callers can still classify busy sessions.
-        }
-      }
+      unbindAbort();
       throw error;
     }
-    const unbindAbort = bindAgentAbort({
-      cancel: deps.runCoordinator.cancel.bind(deps.runCoordinator),
-      runId: record.runId,
-      signal: input.signal,
-    });
-    if (input.waitMode === "stream") {
-      try {
-        if (!runEventSource) {
-          throw new Error("Agent run event source is required for stream mode");
-        }
-        if (input.runId && record.runId !== input.runId) {
-          throw new Error(
-            `Agent run coordinator created unexpected run id: ${record.runId}`,
-          );
-        }
-        const events =
-          preSubscribed?.events ??
-          runEventSource.subscribeRunEvents(record.runId);
-        void deps.runCoordinator
-          .waitForCompletion(record.runId)
-          .finally(() => {
-            unbindAbort();
-            void cleanupEnvironment().catch(() => undefined);
-          })
-          .catch(() => undefined);
-        return {
-          events,
-          mode: "stream",
-          runId: record.runId,
-          sessionId: record.sessionId,
-        };
-      } catch (error) {
-        await preSubscribed?.close();
-        unbindAbort();
-        await cleanupEnvironment();
-        throw error;
-      }
-    }
+  }
 
-    try {
-      const completion = await deps.runCoordinator.waitForCompletion(
-        record.runId,
-      );
-      const history =
-        scope.contextScopeId === undefined
-          ? await deps.messageManager.listBySession(scope.sessionId)
-          : await deps.messageManager.listBySession(scope.sessionId, {
-              contextScopeId: scope.contextScopeId,
-            });
-      const finalOutput = extractFinalOutput(history);
-      const success = completion.status === "succeeded";
-      const output = finalOutput !== "" ? finalOutput : completion.error;
-      const base = {
-        mode: "waitForCompletion" as const,
-        runId: record.runId,
-        sessionId: scope.sessionId,
-        steps: 0,
-        toolCalls: [] satisfies readonly AgentToolCallSummary[],
-      };
-      if (success) {
-        return {
-          ...base,
-          finalOutput: output ?? "",
-          finishReason: "stop" as const,
-          success: true,
-        };
-      }
+  try {
+    const completion = await deps.runCoordinator.waitForCompletion(record.runId);
+    const history =
+      scope.contextScopeId === undefined
+        ? await deps.messageManager.listBySession(scope.sessionId)
+        : await deps.messageManager.listBySession(scope.sessionId, {
+            contextScopeId: scope.contextScopeId,
+          });
+    const finalOutput = extractFinalOutput(history);
+    const success = completion.status === "succeeded";
+    const output = finalOutput !== "" ? finalOutput : completion.error;
+    const base = {
+      mode: "waitForCompletion" as const,
+      runId: record.runId,
+      sessionId: scope.sessionId,
+      steps: 0,
+      toolCalls: [] satisfies readonly AgentToolCallSummary[],
+    };
+    if (success) {
       return {
         ...base,
-        error:
-          completionError({
-            completionError: completion.error,
-            signal: input.signal,
-          }) ?? "agent run failed",
-        finishReason: "error" as const,
-        success: false,
+        finalOutput: output ?? "",
+        finishReason: "stop" as const,
+        success: true,
       };
-    } finally {
-      unbindAbort();
-      await cleanupEnvironment();
     }
-  } catch (error) {
-    await cleanupEnvironment();
-    throw error;
+    return {
+      ...base,
+      error:
+        completionError({
+          completionError: completion.error,
+          signal: input.signal,
+        }) ?? "agent run failed",
+      finishReason: "error" as const,
+      success: false,
+    };
+  } finally {
+    unbindAbort();
   }
 }

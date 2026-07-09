@@ -9,6 +9,8 @@ import type { TrustedRootRegistry } from "./trusted-roots.js";
 
 export interface InternalSandboxContext {
   readonly contextId: string;
+  readonly contextScopeId?: string;
+  readonly scopeKey: string;
   readonly sessionId: string;
   readonly adapter: SandboxAdapter;
   readonly adapterId: string;
@@ -35,8 +37,10 @@ export function snapshotContext(
     adapterId: context.adapterId,
     capabilities: context.capabilities,
     contextId: context.contextId,
+    contextScopeId: context.contextScopeId,
     createdAt: context.createdAt,
     leaseCount: context.leaseCount,
+    scopeKey: context.scopeKey,
     sessionId: context.sessionId,
     status: context.status,
     workdir: context.workdir,

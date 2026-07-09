@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   AdapterRegistry,
@@ -166,6 +167,87 @@ describe("SandboxManager", () => {
 
     expect(second).toEqual(first);
     expect(adapter.created).toHaveLength(1);
+  });
+
+  it("keys contexts by session and optional context scope", async () => {
+    const { adapter, manager } = createManager();
+
+    const first = await manager.createContext(
+      { sessionId: "child_1", contextScopeId: "subagent_a" },
+      {
+        adapterId: "fake",
+        workdir: "D:/repo/a",
+      },
+    );
+    const second = await manager.createContext(
+      { sessionId: "child_1", contextScopeId: "subagent_b" },
+      {
+        adapterId: "fake",
+        workdir: "D:/repo/b",
+      },
+    );
+
+    expect(first).toMatchObject({
+      contextScopeId: "subagent_a",
+      scopeKey: "child_1::subagent_a",
+      sessionId: "child_1",
+      workdir: path.resolve("D:/repo/a"),
+    });
+    expect(second).toMatchObject({
+      contextScopeId: "subagent_b",
+      scopeKey: "child_1::subagent_b",
+      sessionId: "child_1",
+      workdir: path.resolve("D:/repo/b"),
+    });
+    expect(adapter.created).toEqual([
+      expect.objectContaining({
+        contextScopeId: "subagent_a",
+        scopeKey: "child_1::subagent_a",
+        sessionId: "child_1",
+      }),
+      expect.objectContaining({
+        contextScopeId: "subagent_b",
+        scopeKey: "child_1::subagent_b",
+        sessionId: "child_1",
+      }),
+    ]);
+
+    const firstLease = await manager.acquire({
+      sessionId: "child_1",
+      contextScopeId: "subagent_a",
+    });
+    const secondLease = await manager.acquire({
+      sessionId: "child_1",
+      contextScopeId: "subagent_b",
+    });
+
+    expect(firstLease).toMatchObject({
+      contextScopeId: "subagent_a",
+      scopeKey: "child_1::subagent_a",
+      workdir: path.resolve("D:/repo/a"),
+    });
+    expect(secondLease).toMatchObject({
+      contextScopeId: "subagent_b",
+      scopeKey: "child_1::subagent_b",
+      workdir: path.resolve("D:/repo/b"),
+    });
+
+    await firstLease.release();
+    await manager.destroyContext({
+      sessionId: "child_1",
+      contextScopeId: "subagent_a",
+    });
+    expect(
+      manager.getContext({ sessionId: "child_1", contextScopeId: "subagent_a" }),
+    ).toBeUndefined();
+    expect(
+      manager.getContext({ sessionId: "child_1", contextScopeId: "subagent_b" }),
+    ).toMatchObject({
+      status: "active",
+      workdir: path.resolve("D:/repo/b"),
+    });
+
+    await secondLease.release();
   });
 
   it("fails fast when acquiring a missing context", async () => {

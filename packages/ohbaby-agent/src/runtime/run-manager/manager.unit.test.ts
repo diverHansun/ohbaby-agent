@@ -54,8 +54,31 @@ function emptyPreflight(): PreflightResult {
   };
 }
 
-function createTestSandboxLease(sessionId: string): SandboxLease {
-  const workdir = `workspace/${sessionId}`;
+type RecordingSandboxAcquireInput =
+  | string
+  | {
+      readonly contextScopeId?: string;
+      readonly sessionId: string;
+      readonly workdir?: string;
+    };
+
+function sandboxInputSessionId(input: RecordingSandboxAcquireInput): string {
+  return typeof input === "string" ? input : input.sessionId;
+}
+
+function sandboxInputScopeKey(input: RecordingSandboxAcquireInput): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  return input.contextScopeId === undefined
+    ? input.sessionId
+    : `${input.sessionId}::${input.contextScopeId}`;
+}
+
+function createTestSandboxLease(input: RecordingSandboxAcquireInput): SandboxLease {
+  const sessionId = sandboxInputSessionId(input);
+  const scopeKey = sandboxInputScopeKey(input);
+  const workdir = `workspace/${scopeKey}`;
 
   return {
     adapterId: "host-local",
@@ -66,8 +89,9 @@ function createTestSandboxLease(sessionId: string): SandboxLease {
       supportsGit: false,
     },
     containsTrustedPath: () => true,
-    contextId: `context_${sessionId}`,
-    leaseId: `lease_${sessionId}`,
+    contextId: `context_${scopeKey}`,
+    contextScopeId: typeof input === "string" ? undefined : input.contextScopeId,
+    leaseId: `lease_${scopeKey}`,
     preflight: () => Promise.resolve(emptyPreflight()),
     release: () => Promise.resolve(),
     resolveCommandContext: () => ({ cwd: workdir, kind: "host-local" }),
@@ -77,6 +101,7 @@ function createTestSandboxLease(sessionId: string): SandboxLease {
     resolvePathForWrite: (inputPath: string) =>
       Promise.resolve(`${workdir}/${inputPath}`),
     sessionId,
+    scopeKey,
     trustPath: (input) =>
       Promise.resolve({ kind: input.kind, path: input.path }),
     trustedRoots: () => [{ kind: "workspace", path: workdir }],
@@ -245,12 +270,12 @@ class ConditionalThrowingHooks implements HookExecutor {
 }
 
 class RecordingSandboxManager implements SandboxManager {
-  readonly acquired: string[] = [];
+  readonly acquired: RecordingSandboxAcquireInput[] = [];
   readonly released: string[] = [];
 
-  acquire(sessionId: string): Promise<SandboxLease> {
-    this.acquired.push(sessionId);
-    return Promise.resolve(createTestSandboxLease(sessionId));
+  acquire(input: RecordingSandboxAcquireInput): Promise<SandboxLease> {
+    this.acquired.push(input);
+    return Promise.resolve(createTestSandboxLease(input));
   }
 
   release(lease: SandboxLease): Promise<void> {
@@ -813,7 +838,7 @@ describe("RunManager", () => {
 
   it("passes context scope identity to lifecycle", async () => {
     const lifecycle = new CompletingLifecycle();
-    const { bridge, manager } = createManager(lifecycle);
+    const { bridge, manager, sandboxManager } = createManager(lifecycle);
 
     const record = await manager.create({
       agentInstanceId: "subagent_1",
@@ -832,6 +857,11 @@ describe("RunManager", () => {
       isSubagent: true,
       modelId: "fake-model",
       sessionId: "child_1",
+    });
+    expect(sandboxManager.acquired[0]).toEqual({
+      contextScopeId: "subagent_1",
+      sessionId: "child_1",
+      workdir: "D:/repo",
     });
     expect(
       bridge.events.find((event) => event.event === "run.llm.start"),

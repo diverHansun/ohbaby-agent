@@ -227,7 +227,6 @@ function createDeps(
     readonly messageManager?: MessageManager;
     readonly runEventSource?: AgentRunEventSource;
     readonly runCoordinator?: AgentRunCoordinator;
-    readonly sandboxManager?: AgentRunDeps["sandboxManager"];
     readonly toolScheduler?: ToolSchedulerInstance;
   } = {},
 ): AgentRunDeps {
@@ -235,7 +234,6 @@ function createDeps(
     messageManager: input.messageManager ?? createMessageManager().manager,
     runEventSource: input.runEventSource,
     runCoordinator: input.runCoordinator ?? createRunCoordinator().coordinator,
-    sandboxManager: input.sandboxManager,
     toolScheduler: input.toolScheduler ?? createToolScheduler(),
   };
 }
@@ -245,9 +243,6 @@ describe("runAgent", () => {
     const messageManager = createMessageManager();
     const runCoordinator = createRunCoordinator();
     const toolScheduler = createToolScheduler();
-    const sandboxManager = {
-      setSessionEnvironment: vi.fn(),
-    };
     const environment = { workdir: "D:/repo" } as ToolExecutionEnvironment;
     const input = baseInput({ environment });
 
@@ -255,7 +250,6 @@ describe("runAgent", () => {
       createDeps({
         messageManager: messageManager.manager,
         runCoordinator: runCoordinator.coordinator,
-        sandboxManager,
         toolScheduler,
       }),
       input,
@@ -292,16 +286,6 @@ describe("runAgent", () => {
     });
     expect(runCoordinator.waitForCompletion).toHaveBeenCalledWith("run_1");
     expect(messageManager.listBySession).toHaveBeenCalledWith("session_child");
-    expect(sandboxManager.setSessionEnvironment).toHaveBeenNthCalledWith(
-      1,
-      "session_child",
-      environment,
-    );
-    expect(sandboxManager.setSessionEnvironment).toHaveBeenNthCalledWith(
-      2,
-      "session_child",
-      undefined,
-    );
     expect(result).toMatchObject({
       finalOutput: "final answer",
       mode: "waitForCompletion",
@@ -463,16 +447,12 @@ describe("runAgent", () => {
         })(),
     );
     const runEventSource: AgentRunEventSource = { subscribeRunEvents };
-    const sandboxManager = {
-      setSessionEnvironment: vi.fn(),
-    };
     const environment = { workdir: "D:/repo" } as ToolExecutionEnvironment;
 
     const result = await runAgent(
       createDeps({
         runCoordinator: runCoordinator.coordinator,
         runEventSource,
-        sandboxManager,
       }),
       baseInput({ environment, waitMode: "stream" }),
     );
@@ -486,22 +466,13 @@ describe("runAgent", () => {
       sessionId: "session_child",
     });
     expect(subscribeRunEvents).toHaveBeenCalledWith("run_1");
-    expect(sandboxManager.setSessionEnvironment).toHaveBeenNthCalledWith(
-      1,
-      "session_child",
-      environment,
+    expect(runCoordinator.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directory: "D:/repo",
+      }),
     );
-    expect(sandboxManager.setSessionEnvironment).toHaveBeenCalledTimes(1);
     await expect(collectAsync(result.events)).resolves.toEqual([event]);
     completion.resolve({ status: "succeeded" });
-    await vi.waitUntil(
-      () => sandboxManager.setSessionEnvironment.mock.calls.length === 2,
-    );
-    expect(sandboxManager.setSessionEnvironment).toHaveBeenNthCalledWith(
-      2,
-      "session_child",
-      undefined,
-    );
   });
 
   it("subscribes before creating a streaming run when the run id is known", async () => {

@@ -2,7 +2,6 @@ import {
   runAgent,
   type AgentRunCoordinator,
   type AgentRunEventSource,
-  type AgentSandboxEnvironmentManager,
 } from "../core/agents/index.js";
 import type { MessageManager } from "../core/message/index.js";
 import type { ToolSchedulerInstance } from "../core/tool-scheduler/index.js";
@@ -19,7 +18,6 @@ export interface AgentServiceOptions {
   readonly modelId: string;
   readonly runCoordinator: AgentRunCoordinator;
   readonly runEventSource?: AgentRunEventSource;
-  readonly sandboxManager?: AgentSandboxEnvironmentManager;
   readonly sessionManager: Pick<SessionManager, "create" | "get">;
   readonly toolScheduler: Pick<ToolSchedulerInstance, "getAvailableTools">;
 }
@@ -45,7 +43,6 @@ export class AgentService {
         messageManager: this.options.messageManager,
         runCoordinator: this.options.runCoordinator,
         runEventSource: this.options.runEventSource,
-        sandboxManager: this.options.sandboxManager,
         toolScheduler: this.options.toolScheduler,
       },
       {

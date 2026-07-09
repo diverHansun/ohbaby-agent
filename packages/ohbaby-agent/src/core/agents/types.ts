@@ -99,19 +99,11 @@ export interface AgentRunCoordinator {
   waitForCompletion(runId: string): Promise<AgentRunCompletion>;
 }
 
-export interface AgentSandboxEnvironmentManager {
-  setSessionEnvironment(
-    sessionId: string,
-    environment: ToolExecutionEnvironment | undefined,
-  ): Promise<void> | void;
-}
-
 export interface AgentRunDeps {
   readonly runCoordinator: AgentRunCoordinator;
   readonly runEventSource?: AgentRunEventSource;
   readonly messageManager: MessageManager;
   readonly toolScheduler: Pick<ToolSchedulerInstance, "getAvailableTools">;
-  readonly sandboxManager?: AgentSandboxEnvironmentManager;
 }
 
 export type AgentRunner = (
