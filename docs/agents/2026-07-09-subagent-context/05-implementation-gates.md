@@ -1,0 +1,71 @@
+# 05 · 实施前决策与检查门禁（agents 服务层视角）
+
+本文把服务层要遵守的决策写成实施门禁。后续编码先对齐这里，再动 host、store、tools。
+
+---
+
+## 一、已经确认的服务层语义
+
+1. 主 agent 只有一个召唤/继续 subagent 的入口：`subagent_run`。
+2. `foreground` 和 `background` 只是等待方式不同，不是两套执行管线。
+3. `subagent_status` 统一返回 `{ items: [...] }`，即使只查一个 `subagent_id` 也走同一种结果形状。
+4. 重启后按 owner 语义把应恢复的 `pending/running` 改成 `interrupted`，不自动续跑，不自动 drain queue。
+5. 显式继续必须调用 `subagent_run({ subagent_id, prompt, mode })`。
+6. 一个 child session 可以有多个 subagent instance；child session 不是 context。
+
+---
+
+## 二、ID 语义门禁
+
+| ID | 含义 | 是否唯一 | 用途 |
+|----|------|----------|------|
+| `session_id` | child session / 线程容器 | session 表内唯一 | message durable 容器、parent 归属 |
+| `subagent_id` | 主 agent 可见的 subagent instance handle | subagent_instance 表内唯一 | run/status/close/continue |
+| `context_scope_id` | context/message 隔离键 | 同一 `session_id` 下唯一 | context prepare/compact、message 读写过滤 |
+
+默认实现可以让 `context_scope_id = subagent_id`，但不要把 `subagent_id` 写成 `session_id` 的别名。
+
+---
+
+## 三、`SessionSubagentHost` 门禁
+
+- 新建 subagent 时：创建或选择 child `session_id`，再创建独立 `subagent_id/context_scope_id`。
+- 继续 subagent 时：按 `subagent_id` 找记录，并校验 `parent_session_id` 属于当前主 agent。
+- 创建 `AgentInstance` 时：传入 `instanceId=subagentId`、`contextScopeId`、`sessionId`、`parentSessionId`。
+- 任何 message/context 调用：不能只传 `sessionId`，必须能带上 `contextScopeId`。
+- background active map 的 key 使用 `subagent_id`，不是 `session_id`。
+- 并发新建 subagent 时：选择/创建 child session 的过程必须按 parent 串行化，避免两个并发请求各自创建一个 child session。
+- 同一 child session 下多个 subagent 并发运行时：run active 判断必须按 `session_id + context_scope_id`，不能只按 `session_id`。
+
+---
+
+## 四、重启语义门禁
+
+“重启后”指进程内存态丢失后重新创建 host/store/controller，例如应用进程重启、服务重新装配、parent 会话首次恢复后台 subagent 状态。
+
+重启恢复只做三件事：
+
+1. 查询 durable store 中 `pending/running` 的 subagent。
+2. 按 `owner_id + owner_pid` 判断恢复边界：当前 owner、同 PID 旧 owner、owner PID 已死、legacy unknown-owner 可标记；活着的其他 owner 不动。
+3. 标记为 `interrupted` 并写 `interrupted_at`。
+4. 让 `subagent_status` 可观测这些 item。
+
+它不做：
+
+- 不自动创建 `AgentInstance`。
+- 不自动调用 `turn()`。
+- 不自动继续 `pending_queue`。
+
+---
+
+## 五、编码前检查
+
+- [ ] builtin registry 中不再暴露 `task`、`agent_open`、`agent_eval`。
+- [ ] `subagent_run` 同时覆盖创建与继续。
+- [ ] `subagent_status` 返回统一 `items[]`。
+- [ ] SQLite `subagent_instance.session_id` 不是 UNIQUE。
+- [ ] SQLite 有 `(session_id, context_scope_id)` 唯一约束。
+- [ ] run ledger 有 `context_scope_id`，并按 `(session_id, context_scope_id)` 判断 active run。
+- [ ] 同一 child session 多 subagent 的 host/store/context 测试先写出来。
+- [ ] owner-aware recovery 测试覆盖当前 owner、同 PID 旧 owner、死 owner、活着的其他 owner。
+- [ ] AC-7 按“两段测试”执行：先基线，后回归。
