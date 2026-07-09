@@ -54,6 +54,7 @@ interface StepResult {
 
 interface ModelStepParams {
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly agent?: string;
   readonly parentMessageId?: string;
   readonly signal?: AbortSignal;
@@ -330,7 +331,14 @@ export class Lifecycle {
     config: LifecycleConfig = {},
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
     const contextManager = this.deps.contextManager;
-    contextManager.resetTurnCompactionCount(params.sessionId);
+    if (params.contextScopeId === undefined) {
+      contextManager.resetTurnCompactionCount(params.sessionId);
+    } else {
+      contextManager.resetTurnCompactionCount(
+        params.sessionId,
+        params.contextScopeId,
+      );
+    }
 
     // Clamp so the loop always runs at least one step and `step === maxSteps`
     // is reachable for non-integer overrides; otherwise the loop could exit
@@ -364,6 +372,9 @@ export class Lifecycle {
         ...(activeReasoningByMessageId.size === 0
           ? {}
           : { activeReasoningByMessageId }),
+        ...(params.contextScopeId === undefined
+          ? {}
+          : { contextScopeId: params.contextScopeId }),
         directory: params.directory,
         isSubagent: params.isSubagent,
         modelId: params.modelId,
@@ -390,6 +401,7 @@ export class Lifecycle {
         yield {
           type: "turn:start",
           compaction: prepared.compaction,
+          contextScopeId: params.contextScopeId,
           hasSummary: prepared.hasSummary,
           sessionId: params.sessionId,
           step,
@@ -398,6 +410,7 @@ export class Lifecycle {
         };
       }
       yield this.createContextPreparedEvent({
+        contextScopeId: params.contextScopeId,
         prepared,
         sessionId: params.sessionId,
         step,
@@ -405,6 +418,7 @@ export class Lifecycle {
 
       const runParams: ModelStepParams = {
         agent: params.agent,
+        contextScopeId: params.contextScopeId,
         environment: params.environment,
         isSubagent: params.isSubagent,
         maxSteps,
@@ -426,6 +440,7 @@ export class Lifecycle {
         if (failure) {
           finalResponse = failure.finalResponse;
           yield this.createTurnEndEvent({
+            contextScopeId: params.contextScopeId,
             finalResponse,
             finishReason: "error",
             prepared,
@@ -449,6 +464,9 @@ export class Lifecycle {
           ...(activeReasoningByMessageId.size === 0
             ? {}
             : { activeReasoningByMessageId }),
+          ...(params.contextScopeId === undefined
+            ? {}
+            : { contextScopeId: params.contextScopeId }),
           directory: params.directory,
           force: true,
           isSubagent: params.isSubagent,
@@ -467,6 +485,7 @@ export class Lifecycle {
         }
         conversationMessages = messagesForStep(prepared.messages, isFinalStep);
         yield this.createContextPreparedEvent({
+          contextScopeId: params.contextScopeId,
           prepared,
           sessionId: params.sessionId,
           step,
@@ -483,6 +502,7 @@ export class Lifecycle {
           if (failure) {
             finalResponse = failure.finalResponse;
             yield this.createTurnEndEvent({
+              contextScopeId: params.contextScopeId,
               finalResponse,
               finishReason: "error",
               prepared,
@@ -505,6 +525,7 @@ export class Lifecycle {
           const overflowMessage =
             "Context overflow after forced compaction retry";
           yield this.createTurnEndEvent({
+            contextScopeId: params.contextScopeId,
             finalResponse: overflowMessage,
             finishReason: "error",
             prepared,
@@ -541,6 +562,7 @@ export class Lifecycle {
           new Error("Lifecycle did not complete successfully"),
         );
         yield this.createTurnEndEvent({
+          contextScopeId: params.contextScopeId,
           finalResponse: "",
           finishReason: "error",
           prepared,
@@ -561,11 +583,20 @@ export class Lifecycle {
 
       usage = addUsage(usage, toUsage(finalEvent.tokenUsage));
       if (finalEvent.tokenUsage !== undefined) {
-        contextManager.updateCalibrationFactor(
-          params.sessionId,
-          finalEvent.tokenUsage.prompt_tokens,
-          prepared.sentHeuristic,
-        );
+        if (params.contextScopeId === undefined) {
+          contextManager.updateCalibrationFactor(
+            params.sessionId,
+            finalEvent.tokenUsage.prompt_tokens,
+            prepared.sentHeuristic,
+          );
+        } else {
+          contextManager.updateCalibrationFactor(
+            params.sessionId,
+            finalEvent.tokenUsage.prompt_tokens,
+            prepared.sentHeuristic,
+            params.contextScopeId,
+          );
+        }
       }
       if (params.signal?.aborted) {
         await markAssistantMessageError(
@@ -574,6 +605,7 @@ export class Lifecycle {
           new Error("Lifecycle aborted"),
         );
         yield this.createTurnEndEvent({
+          contextScopeId: params.contextScopeId,
           finalResponse,
           finishReason: "error",
           prepared,
@@ -601,6 +633,7 @@ export class Lifecycle {
           new Error(MAX_STEPS_FINALIZATION_TOOL_MESSAGE),
         );
         yield this.createTurnEndEvent({
+          contextScopeId: params.contextScopeId,
           finalResponse: MAX_STEPS_FINALIZATION_TOOL_MESSAGE,
           finishReason: "error",
           prepared,
@@ -625,6 +658,7 @@ export class Lifecycle {
             new Error("Model requested tool calls but none were parsed"),
           );
           yield this.createTurnEndEvent({
+            contextScopeId: params.contextScopeId,
             finalResponse: "Model requested tool calls but none were parsed",
             finishReason: "error",
             prepared,
@@ -642,6 +676,7 @@ export class Lifecycle {
         }
 
         const turn = this.createTurnContext({
+          contextScopeId: params.contextScopeId,
           finalResponse,
           finishReason: finalEvent.finishReason ?? "stop",
           prepared,
@@ -673,6 +708,7 @@ export class Lifecycle {
       for (const toolCall of toolCalls) {
         await config.beforeToolCall?.({
           callId: toolCall.id,
+          contextScopeId: params.contextScopeId,
           params: toolCall.arguments,
           sessionId: params.sessionId,
           step,
@@ -685,6 +721,7 @@ export class Lifecycle {
         yield {
           type: "tool:start",
           callId: toolCall.id,
+          contextScopeId: params.contextScopeId,
           params: toolCall.arguments,
           sessionId: params.sessionId,
           step,
@@ -714,6 +751,7 @@ export class Lifecycle {
         );
         await config.afterToolCall?.({
           callId: result.callId,
+          contextScopeId: params.contextScopeId,
           params: toolCall.arguments,
           result,
           sessionId: params.sessionId,
@@ -723,6 +761,7 @@ export class Lifecycle {
         yield {
           type: "tool:result",
           callId: result.callId,
+          contextScopeId: params.contextScopeId,
           params: toolCall.arguments,
           result,
           sessionId: params.sessionId,
@@ -734,6 +773,7 @@ export class Lifecycle {
 
       yield {
         type: "step:complete",
+        contextScopeId: params.contextScopeId,
         finishReason: finalEvent.finishReason,
         sessionId: params.sessionId,
         step,
@@ -743,6 +783,7 @@ export class Lifecycle {
 
       parentMessageId = assistantMessage?.id ?? parentMessageId;
       const turn = this.createTurnContext({
+        contextScopeId: params.contextScopeId,
         finalResponse,
         finishReason: finalEvent.finishReason,
         prepared,
@@ -802,12 +843,16 @@ export class Lifecycle {
 
     yield {
       type: "llm:start",
+      contextScopeId: params.contextScopeId,
       sessionId: params.sessionId,
       step,
       timestamp: Date.now(),
     };
 
     const assistantMessage = await this.deps.messageManager.createMessage({
+      ...(params.contextScopeId === undefined
+        ? {}
+        : { contextScopeId: params.contextScopeId }),
       sessionId: params.sessionId,
       role: "assistant",
       agent: params.agent ?? "default",
@@ -827,6 +872,7 @@ export class Lifecycle {
           yield {
             type: "llm:retrying",
             attempt: response.retry.attempt,
+            contextScopeId: params.contextScopeId,
             delayMs: response.retry.delayMs,
             maxRetries: response.retry.maxRetries,
             reason: response.retry.reason,
@@ -843,6 +889,7 @@ export class Lifecycle {
           previousReasoning = content;
           yield {
             type: "llm:reasoning-delta",
+            contextScopeId: params.contextScopeId,
             content,
             delta: response.reasoningDelta,
             messageId: assistantMessage.id,
@@ -864,6 +911,7 @@ export class Lifecycle {
             reasoningEnded = true;
             yield {
               type: "llm:reasoning-end",
+              contextScopeId: params.contextScopeId,
               content: previousReasoning,
               messageId: assistantMessage.id,
               sessionId: params.sessionId,
@@ -897,6 +945,7 @@ export class Lifecycle {
           yield {
             type: "llm:delta",
             completeMessage: response.completeMessage,
+            contextScopeId: params.contextScopeId,
             content,
             delta,
             sessionId: params.sessionId,
@@ -920,6 +969,7 @@ export class Lifecycle {
           finalEvent = {
             type: "llm:complete",
             completeMessage: response.completeMessage,
+            contextScopeId: params.contextScopeId,
             finishReason: response.finishReason,
             parsedToolCalls: response.parsedToolCalls,
             sessionId: params.sessionId,
@@ -934,6 +984,7 @@ export class Lifecycle {
       if (previousReasoning !== "" && !reasoningEnded) {
         yield {
           type: "llm:reasoning-end",
+          contextScopeId: params.contextScopeId,
           content: previousReasoning,
           messageId: assistantMessage.id,
           sessionId: params.sessionId,
@@ -983,6 +1034,7 @@ export class Lifecycle {
   }
 
   private createTurnContext(input: {
+    readonly contextScopeId?: string;
     readonly finalResponse: string;
     readonly finishReason?: TurnContext["finishReason"];
     readonly prepared: TurnContext["prepared"];
@@ -991,6 +1043,7 @@ export class Lifecycle {
     readonly toolResults?: readonly ToolCallResult[];
   }): TurnContext {
     return {
+      contextScopeId: input.contextScopeId,
       finalResponse: input.finalResponse,
       finishReason: input.finishReason,
       prepared: input.prepared,
@@ -1003,6 +1056,7 @@ export class Lifecycle {
   private createTurnEndEvent(input: TurnContext): LifecycleEvent {
     return {
       type: "turn:end",
+      contextScopeId: input.contextScopeId,
       finishReason: input.finishReason,
       sessionId: input.sessionId,
       step: input.step,
@@ -1013,6 +1067,7 @@ export class Lifecycle {
   }
 
   private createContextPreparedEvent(input: {
+    readonly contextScopeId?: string;
     readonly prepared: PreparedTurn;
     readonly sessionId: string;
     readonly step: number;
@@ -1020,6 +1075,7 @@ export class Lifecycle {
     return {
       type: "context:prepared",
       compaction: input.prepared.compaction,
+      contextScopeId: input.contextScopeId,
       hasSummary: input.prepared.hasSummary,
       sessionId: input.sessionId,
       step: input.step,

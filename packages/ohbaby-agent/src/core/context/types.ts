@@ -55,6 +55,7 @@ export interface AssembledContext {
   readonly hasSummary: boolean;
   readonly assembledAt: number;
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly isSubagent: boolean;
 }
 
@@ -100,6 +101,7 @@ export type CompactStatus =
 
 export interface CompactOptions {
   readonly directory: string;
+  readonly contextScopeId?: string;
   readonly force?: boolean;
   readonly isSubagent?: boolean;
   readonly modelId: string;
@@ -116,6 +118,7 @@ export interface CompactResult {
 
 export interface PrepareTurnInput {
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly directory: string;
   readonly modelId: string;
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
@@ -137,16 +140,18 @@ export interface ContextManager {
     sessionId: string,
     directory: string,
     isSubagent?: boolean,
+    contextScopeId?: string,
   ): Promise<AssembledContext>;
   getUsage(context: AssembledContext, modelId: string): ContextUsage;
   updateCalibrationFactor(
     sessionId: string,
     realPromptTokens: number,
     sentHeuristic: number,
+    contextScopeId?: string,
   ): void;
   compact(sessionId: string, options: CompactOptions): Promise<CompactResult>;
   prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn>;
-  resetTurnCompactionCount(sessionId: string): void;
+  resetTurnCompactionCount(sessionId: string, contextScopeId?: string): void;
   disposeSession(sessionId: string): void;
 }
 

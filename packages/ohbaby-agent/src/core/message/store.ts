@@ -2,6 +2,7 @@ import type {
   Message,
   MessageStore,
   MessageWithParts,
+  MessageScopeFilter,
   Part,
   CreatePartInput,
   UpdateMessagePatch,
@@ -47,6 +48,7 @@ export function createInMemoryMessageStore(): MessageStore {
     ).length;
 
     return {
+      contextScopeId: input.message.contextScopeId,
       id: input.partId,
       messageId: input.message.id,
       sessionId: input.message.sessionId,
@@ -116,9 +118,17 @@ export function createInMemoryMessageStore(): MessageStore {
       return Promise.resolve(clone(updated));
     },
 
-    listBySession(sessionId: string): Promise<MessageWithParts[]> {
+    listBySession(
+      sessionId: string,
+      options?: MessageScopeFilter,
+    ): Promise<MessageWithParts[]> {
       const sessionMessages = Array.from(messages.values())
         .filter((message) => message.sessionId === sessionId)
+        .filter(
+          (message) =>
+            options?.contextScopeId === undefined ||
+            message.contextScopeId === options.contextScopeId,
+        )
         .sort((left, right) => left.time.created - right.time.created);
 
       return Promise.resolve(

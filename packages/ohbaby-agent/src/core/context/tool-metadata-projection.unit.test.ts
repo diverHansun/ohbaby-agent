@@ -5,68 +5,84 @@ import {
 } from "./tool-metadata-projection.js";
 
 describe("tool metadata projection", () => {
-  it("projects subagent role metadata for task results", () => {
+  it("projects subagent_run instance metadata", () => {
     expect(
-      projectToolMetadataForModel("task", {
+      projectToolMetadataForModel("subagent_run", {
         subagent: {
-          agentName: "legacy",
-          description: "AI Events Researcher",
-          name: "events-scout",
-          role: "generic",
-          sessionId: "child_1",
+          item: {
+            contextScopeId: "subagent_1",
+            description: "AI Events Researcher",
+            name: "events-scout",
+            role: "generic",
+            sessionId: "child_1",
+            status: "completed",
+            subagentId: "subagent_1",
+          },
           success: true,
         },
       }),
     ).toEqual({
+      contextScopeId: "subagent_1",
       description: "AI Events Researcher",
       name: "events-scout",
       role: "generic",
       sessionId: "child_1",
+      status: "completed",
+      subagentId: "subagent_1",
       success: true,
     });
   });
 
-  it("projects background agent task role metadata", () => {
+  it("projects subagent_status items", () => {
     expect(
-      projectToolMetadataForModel("agent_open", {
-        agentTask: {
-          description: "Background auth exploration",
-          name: "auth-scout",
-          pendingInputCount: 0,
-          role: "explore",
-          sessionId: "child_1",
-          status: "running",
-          taskId: "task_1",
+      projectToolMetadataForModel("subagent_status", {
+        subagentStatus: {
+          items: [
+            {
+              contextScopeId: "subagent_1",
+              role: "explore",
+              sessionId: "child_1",
+              status: "running",
+              subagentId: "subagent_1",
+            },
+          ],
         },
       }),
     ).toEqual({
-      description: "Background auth exploration",
-      name: "auth-scout",
-      pendingInputCount: 0,
-      role: "explore",
-      sessionId: "child_1",
-      status: "running",
-      taskId: "task_1",
+      items: [
+        {
+          contextScopeId: "subagent_1",
+          role: "explore",
+          sessionId: "child_1",
+          status: "running",
+          subagentId: "subagent_1",
+        },
+      ],
     });
   });
 
-  it("includes role metadata in model-visible tool result content", () => {
+  it("includes subagent metadata in model-visible tool result content", () => {
     expect(
       formatToolResultContentForModel({
         content: "child output",
         metadata: {
           subagent: {
-            description: "AI Events Researcher",
-            name: "events-scout",
-            role: "generic",
-            sessionId: "child_1",
+            item: {
+              contextScopeId: "subagent_1",
+              description: "AI Events Researcher",
+              name: "events-scout",
+              role: "generic",
+              sessionId: "child_1",
+              status: "completed",
+              subagentId: "subagent_1",
+            },
             success: true,
           },
         },
-        tool: "task",
+        tool: "subagent_run",
       }),
     ).toContain(
-      '<tool_metadata>\n{"role":"generic","name":"events-scout","description":"AI Events Researcher","sessionId":"child_1","success":true}\n</tool_metadata>',
+      '<tool_metadata>\n{"subagentId":"subagent_1","sessionId":"child_1","contextScopeId":"subagent_1","role":"generic","name":"events-scout","description":"AI Events Researcher","status":"completed","success":true}\n</tool_metadata>',
     );
   });
 });

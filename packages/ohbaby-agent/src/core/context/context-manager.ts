@@ -24,10 +24,7 @@ import {
   serializeHistory,
   serializeMessage,
 } from "./serialization.js";
-import {
-  createMaskConfig,
-  reduceForModel,
-} from "./projection.js";
+import { createMaskConfig, reduceForModel } from "./projection.js";
 import { serializeForLlm } from "./serializer.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
 import { estimateWireHeuristic } from "./token-estimation.js";
@@ -79,6 +76,7 @@ interface CompactionRequest {
   readonly modelId: string;
   readonly force: boolean;
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   readonly isSubagent: boolean;
   readonly projectForUsage?: (context: AssembledContext) => AssembledContext;
@@ -109,6 +107,12 @@ function tokenCount(
   content: string,
 ): number {
   return Math.max(0, tokenCounter.estimateTokens(content));
+}
+
+function contextStateKey(sessionId: string, contextScopeId?: string): string {
+  return contextScopeId === undefined
+    ? sessionId
+    : `${sessionId}::${contextScopeId}`;
 }
 
 export function getContextUsage(
@@ -385,14 +389,20 @@ export function createContextManager(
     minUsageRatio: compactionThresholds.mask,
   });
 
-  function getCalibrationFactor(sessionId: string): number {
-    return calibrationFactors.get(sessionId) ?? 1.0;
+  function getCalibrationFactor(
+    sessionId: string,
+    contextScopeId?: string,
+  ): number {
+    return (
+      calibrationFactors.get(contextStateKey(sessionId, contextScopeId)) ?? 1.0
+    );
   }
 
   function updateCalibrationFactor(
     sessionId: string,
     realPromptTokens: number,
     sentHeuristic: number,
+    contextScopeId?: string,
   ): void {
     if (
       sentHeuristic <= 0 ||
@@ -406,44 +416,72 @@ export function createContextManager(
       CALIBRATION_FACTOR_MAX,
       Math.max(CALIBRATION_FACTOR_MIN, observed),
     );
-    const previous = getCalibrationFactor(sessionId);
+    const key = contextStateKey(sessionId, contextScopeId);
+    const previous = getCalibrationFactor(sessionId, contextScopeId);
     calibrationFactors.set(
-      sessionId,
-      CALIBRATION_EMA_ALPHA * clamped +
-        (1 - CALIBRATION_EMA_ALPHA) * previous,
+      key,
+      CALIBRATION_EMA_ALPHA * clamped + (1 - CALIBRATION_EMA_ALPHA) * previous,
     );
   }
 
-  function resetThrashLock(sessionId: string): void {
-    thrashLocks.delete(sessionId);
+  function resetThrashLock(sessionId: string, contextScopeId?: string): void {
+    thrashLocks.delete(contextStateKey(sessionId, contextScopeId));
   }
 
-  function resetTurnCompactionCount(sessionId: string): void {
-    turnCompactionCounts.set(sessionId, 0);
+  function resetTurnCompactionCount(
+    sessionId: string,
+    contextScopeId?: string,
+  ): void {
+    turnCompactionCounts.set(contextStateKey(sessionId, contextScopeId), 0);
   }
 
   function disposeSession(sessionId: string): void {
-    calibrationFactors.delete(sessionId);
-    maskCutoffs.delete(sessionId);
-    thrashLocks.delete(sessionId);
-    turnCompactionCounts.delete(sessionId);
+    const prefix = `${sessionId}::`;
+    for (const map of [calibrationFactors, maskCutoffs, turnCompactionCounts]) {
+      for (const key of map.keys()) {
+        if (key === sessionId || key.startsWith(prefix)) {
+          map.delete(key);
+        }
+      }
+    }
+    for (const key of thrashLocks.keys()) {
+      if (key === sessionId || key.startsWith(prefix)) {
+        thrashLocks.delete(key);
+      }
+    }
   }
 
-  function getTurnCompactionCount(sessionId: string): number {
-    return turnCompactionCounts.get(sessionId) ?? 0;
+  function getTurnCompactionCount(
+    sessionId: string,
+    contextScopeId?: string,
+  ): number {
+    return (
+      turnCompactionCounts.get(contextStateKey(sessionId, contextScopeId)) ?? 0
+    );
   }
 
-  function incrementTurnCompactionCount(sessionId: string): void {
-    turnCompactionCounts.set(sessionId, getTurnCompactionCount(sessionId) + 1);
+  function incrementTurnCompactionCount(
+    sessionId: string,
+    contextScopeId?: string,
+  ): void {
+    turnCompactionCounts.set(
+      contextStateKey(sessionId, contextScopeId),
+      getTurnCompactionCount(sessionId, contextScopeId) + 1,
+    );
   }
 
-  function isThrashLocked(sessionId: string, usage: ContextUsage): boolean {
-    const state = thrashLocks.get(sessionId);
+  function isThrashLocked(
+    sessionId: string,
+    usage: ContextUsage,
+    contextScopeId?: string,
+  ): boolean {
+    const key = contextStateKey(sessionId, contextScopeId);
+    const state = thrashLocks.get(key);
     if (state?.lockedAtUsageRatio === undefined) {
       return false;
     }
     if (usage.usageRatio >= state.lockedAtUsageRatio + thrashUnlockDelta) {
-      thrashLocks.delete(sessionId);
+      thrashLocks.delete(key);
       return false;
     }
     return true;
@@ -452,6 +490,7 @@ export function createContextManager(
   function recordThrashSavings(input: {
     readonly compression: CompressionResult;
     readonly sessionId: string;
+    readonly contextScopeId?: string;
     readonly usageBefore: ContextUsage;
   }): void {
     if (thrashWindow <= 0) {
@@ -461,7 +500,8 @@ export function createContextManager(
       input.compression.originalTokens <= 0
         ? 0
         : input.compression.savedTokens / input.compression.originalTokens;
-    const previous = thrashLocks.get(input.sessionId);
+    const key = contextStateKey(input.sessionId, input.contextScopeId);
+    const previous = thrashLocks.get(key);
     const recentSavingsRatios = [
       ...(previous?.recentSavingsRatios ?? []),
       ratio,
@@ -471,7 +511,7 @@ export function createContextManager(
       recentSavingsRatios.every(
         (recentRatio) => recentRatio < thrashMinSavingsRatio,
       );
-    thrashLocks.set(input.sessionId, {
+    thrashLocks.set(key, {
       recentSavingsRatios,
       ...(shouldLock
         ? { lockedAtUsageRatio: input.usageBefore.usageRatio }
@@ -497,17 +537,23 @@ export function createContextManager(
     readonly messages: readonly ChatCompletionMessage[];
     readonly modelId: string;
     readonly sessionId: string;
+    readonly contextScopeId?: string;
   }): { readonly sentHeuristic: number; readonly usage: ContextUsage } {
     const sentHeuristic = estimateWireHeuristic(
       input.messages,
       options.tokenCounter,
     );
     const currentTokens = Math.round(
-      sentHeuristic * getCalibrationFactor(input.sessionId),
+      sentHeuristic *
+        getCalibrationFactor(input.sessionId, input.contextScopeId),
     );
     return {
       sentHeuristic,
-      usage: getContextUsage(currentTokens, input.modelId, options.tokenCounter),
+      usage: getContextUsage(
+        currentTokens,
+        input.modelId,
+        options.tokenCounter,
+      ),
     };
   }
 
@@ -532,6 +578,7 @@ export function createContextManager(
         messages,
         modelId: input.modelId,
         sessionId: input.context.sessionId,
+        contextScopeId: input.context.contextScopeId,
       }),
     };
   }
@@ -542,6 +589,7 @@ export function createContextManager(
     readonly memory: MergedMemory;
     readonly rawHistory: readonly MessageWithParts[];
     readonly sessionId: string;
+    readonly contextScopeId?: string;
     readonly systemPrompt: string;
   }): AssembledContext {
     const history = getActiveHistory(input.rawHistory);
@@ -553,6 +601,7 @@ export function createContextManager(
       hasSummary: input.rawHistory.some(isSummaryMessage),
       isSubagent: input.isSubagent,
       assembledAt: input.assembledAt,
+      contextScopeId: input.contextScopeId,
       sessionId: input.sessionId,
     };
   }
@@ -573,14 +622,23 @@ export function createContextManager(
     const result = reduceForModel({
       allowCutoffAdvance: input.allowCutoffAdvance,
       config: maskConfig,
-      cutoff: maskCutoffs.get(input.context.sessionId) ?? 0,
+      cutoff:
+        maskCutoffs.get(
+          contextStateKey(
+            input.context.sessionId,
+            input.context.contextScopeId,
+          ),
+        ) ?? 0,
       history: input.context.history,
       sessionId: input.context.sessionId,
       tokenCounter: options.tokenCounter,
       usage: input.usage,
     });
     if (input.allowCutoffAdvance) {
-      maskCutoffs.set(input.context.sessionId, result.cutoff);
+      maskCutoffs.set(
+        contextStateKey(input.context.sessionId, input.context.contextScopeId),
+        result.cutoff,
+      );
     }
     if (input.publishEvent) {
       options.bus.publish(ContextEvent.Masked, {
@@ -611,6 +669,7 @@ export function createContextManager(
     sessionId: string,
     directory: string,
     isSubagent = false,
+    contextScopeId?: string,
   ): Promise<AssembledContext> {
     let memory = EMPTY_MEMORY;
     if (!isSubagent) {
@@ -623,10 +682,13 @@ export function createContextManager(
 
     const [systemPrompt, rawHistory] = await Promise.all([
       options.systemPromptProvider.build({ sessionId, directory, isSubagent }),
-      options.messageManager.listBySession(sessionId),
+      contextScopeId === undefined
+        ? options.messageManager.listBySession(sessionId)
+        : options.messageManager.listBySession(sessionId, { contextScopeId }),
     ]);
     return assembleFromRawHistory({
       assembledAt: now(),
+      contextScopeId,
       memory,
       rawHistory,
       sessionId,
@@ -796,8 +858,10 @@ export function createContextManager(
   async function commitSummaryCandidate(
     sessionId: string,
     candidate: CommittableSummaryCandidate,
+    contextScopeId?: string,
   ): Promise<CompressionResult> {
     const summary = await options.messageManager.createMessage({
+      ...(contextScopeId === undefined ? {} : { contextScopeId }),
       sessionId,
       role: "assistant",
       agent: summaryAgentName,
@@ -849,6 +913,7 @@ export function createContextManager(
       {
         info: {
           agent: summaryAgentName,
+          contextScopeId: input.assembled.contextScopeId,
           id: `projected_summary_${String(input.compactedAt)}`,
           role: "assistant" as const,
           sessionId: input.assembled.sessionId,
@@ -858,6 +923,7 @@ export function createContextManager(
           {
             id: `projected_summary_part_${String(input.compactedAt)}`,
             messageId: `projected_summary_${String(input.compactedAt)}`,
+            contextScopeId: input.assembled.contextScopeId,
             metadata: { kind: "context-summary" },
             orderIndex: 0,
             sessionId: input.assembled.sessionId,
@@ -874,6 +940,7 @@ export function createContextManager(
       isSubagent: input.assembled.isSubagent,
       memory: input.assembled.memory,
       rawHistory: projectedHistory,
+      contextScopeId: input.assembled.contextScopeId,
       sessionId: input.assembled.sessionId,
       systemPrompt: input.assembled.systemPrompt,
     });
@@ -959,8 +1026,12 @@ export function createContextManager(
     req: CompactionRequest,
   ): Promise<CompactionOutcome> {
     const thrashLocked =
-      !req.bypassThrashLock && isThrashLocked(req.sessionId, req.usageBefore);
-    const compactionCount = getTurnCompactionCount(req.sessionId);
+      !req.bypassThrashLock &&
+      isThrashLocked(req.sessionId, req.usageBefore, req.contextScopeId);
+    const compactionCount = getTurnCompactionCount(
+      req.sessionId,
+      req.contextScopeId,
+    );
     const perTurnCapped =
       !req.force &&
       !thrashLocked &&
@@ -995,10 +1066,13 @@ export function createContextManager(
     }
 
     if (req.countTurnCompaction) {
-      incrementTurnCompactionCount(req.sessionId);
+      incrementTurnCompactionCount(req.sessionId, req.contextScopeId);
     }
 
-    const pruneOutcome = await pruneHistory(req.sessionId, req.assembled.history);
+    const pruneOutcome = await pruneHistory(
+      req.sessionId,
+      req.assembled.history,
+    );
     const historyAfterPrune = markCompactedParts(
       req.assembled.history,
       pruneOutcome.compactedPartIds,
@@ -1009,6 +1083,7 @@ export function createContextManager(
       isSubagent: req.isSubagent,
       memory: req.assembled.memory,
       rawHistory: historyAfterPrune,
+      contextScopeId: req.contextScopeId,
       sessionId: req.sessionId,
       systemPrompt: req.assembled.systemPrompt,
     });
@@ -1043,6 +1118,7 @@ export function createContextManager(
       if (candidate.status === "inflated") {
         recordThrashSavings({
           compression: candidate,
+          contextScopeId: req.contextScopeId,
           sessionId: req.sessionId,
           usageBefore: req.usageBefore,
         });
@@ -1084,6 +1160,7 @@ export function createContextManager(
       const compression = compressionFromRejectedCandidate(candidate);
       recordThrashSavings({
         compression,
+        contextScopeId: req.contextScopeId,
         sessionId: req.sessionId,
         usageBefore: req.usageBefore,
       });
@@ -1111,20 +1188,26 @@ export function createContextManager(
     const compression = await commitSummaryCandidate(
       req.sessionId,
       candidate,
+      req.contextScopeId,
     );
     recordThrashSavings({
       compression,
+      contextScopeId: req.contextScopeId,
       sessionId: req.sessionId,
       usageBefore: req.usageBefore,
     });
-    const committedRawHistory = await options.messageManager.listBySession(
-      req.sessionId,
-    );
+    const committedRawHistory =
+      req.contextScopeId === undefined
+        ? await options.messageManager.listBySession(req.sessionId)
+        : await options.messageManager.listBySession(req.sessionId, {
+            contextScopeId: req.contextScopeId,
+          });
     const committedContext = assembleFromRawHistory({
       assembledAt: now(),
       isSubagent: req.isSubagent,
       memory: req.assembled.memory,
       rawHistory: committedRawHistory,
+      contextScopeId: req.contextScopeId,
       sessionId: req.sessionId,
       systemPrompt: req.assembled.systemPrompt,
     });
@@ -1135,7 +1218,7 @@ export function createContextManager(
       modelId: req.modelId,
     }).usage;
     if (compression.status === "compressed") {
-      maskCutoffs.set(req.sessionId, 0);
+      maskCutoffs.set(contextStateKey(req.sessionId, req.contextScopeId), 0);
     }
 
     return {
@@ -1166,12 +1249,13 @@ export function createContextManager(
     sessionId: string,
     input: CompactOptions,
   ): Promise<CompactResult> {
-    resetThrashLock(sessionId);
+    resetThrashLock(sessionId, input.contextScopeId);
     const isSubagent = input.isSubagent ?? false;
     const assembled = await assemble(
       sessionId,
       input.directory,
       isSubagent,
+      input.contextScopeId,
     );
     const usageBefore = measureContext({
       context: assembled,
@@ -1182,6 +1266,7 @@ export function createContextManager(
       assembled,
       bypassThrashLock: true,
       countTurnCompaction: false,
+      contextScopeId: input.contextScopeId,
       force: input.force === true,
       isSubagent,
       modelId: input.modelId,
@@ -1199,6 +1284,7 @@ export function createContextManager(
       input.sessionId,
       input.directory,
       isSubagent,
+      input.contextScopeId,
     );
     const unreducedMeasurement = measureContext({
       activeReasoningByMessageId: input.activeReasoningByMessageId,
@@ -1227,6 +1313,7 @@ export function createContextManager(
       assembled,
       bypassThrashLock: input.force === true,
       countTurnCompaction: true,
+      contextScopeId: input.contextScopeId,
       force: input.force === true,
       isSubagent,
       modelId: input.modelId,

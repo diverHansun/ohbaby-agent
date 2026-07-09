@@ -187,6 +187,37 @@ describe("createDatabaseMessageStore", () => {
     ]);
   });
 
+  it("persists and filters context scope through the physical message column", async () => {
+    const store = createDatabaseMessageStore();
+    await store.insertMessage({
+      ...userMessage("message_a"),
+      contextScopeId: "subagent_a",
+    });
+    await store.insertMessage({
+      ...userMessage("message_b"),
+      contextScopeId: "subagent_b",
+    });
+
+    const rows = getDatabase()
+      .prepare<{
+        readonly context_scope_id: string | null;
+        readonly id: string;
+      }>(
+        `SELECT id, context_scope_id
+         FROM ${schema.message.tableName}
+         ORDER BY created_at ASC, rowid ASC`,
+      )
+      .all();
+    expect(rows).toEqual([
+      { context_scope_id: "subagent_a", id: "message_a" },
+      { context_scope_id: "subagent_b", id: "message_b" },
+    ]);
+
+    await expect(
+      store.listBySession("session_1", { contextScopeId: "subagent_b" }),
+    ).resolves.toMatchObject([{ info: { id: "message_b" } }]);
+  });
+
   it("enforces one part order index per message at the database layer", async () => {
     const store = createDatabaseMessageStore();
     await store.insertMessage(userMessage());

@@ -236,6 +236,9 @@ export class RunWorker {
       directory: this.context.directory,
       modelId: this.context.modelId,
       sessionId: this.context.sessionId,
+      ...(this.context.contextScopeId === undefined
+        ? {}
+        : { contextScopeId: this.context.contextScopeId }),
       signal: this.context.abortSignal,
       ...(this.context.agent === undefined
         ? {}
@@ -261,8 +264,7 @@ export class RunWorker {
 
     if (event.type === "llm:delta") {
       this.publish(scope, "message.part.delta", {
-        runId: this.context.runId,
-        sessionId: this.context.sessionId,
+        ...this.streamBase(event),
         timestamp: event.timestamp,
         delta: event.delta,
         content: event.content,
@@ -272,8 +274,7 @@ export class RunWorker {
 
     if (event.type === "llm:reasoning-delta") {
       this.publish(scope, "run.llm.reasoning.delta", {
-        runId: this.context.runId,
-        sessionId: this.context.sessionId,
+        ...this.streamBase(event),
         timestamp: event.timestamp,
         step: event.step,
         messageId: event.messageId,
@@ -285,8 +286,7 @@ export class RunWorker {
 
     if (event.type === "llm:reasoning-end") {
       this.publish(scope, "run.llm.reasoning.end", {
-        runId: this.context.runId,
-        sessionId: this.context.sessionId,
+        ...this.streamBase(event),
         timestamp: event.timestamp,
         step: event.step,
         messageId: event.messageId,
@@ -300,8 +300,7 @@ export class RunWorker {
         scope,
         "run.llm.start",
         withDefined({
-          runId: this.context.runId,
-          sessionId: this.context.sessionId,
+          ...this.streamBase(event),
           timestamp: event.timestamp,
           step: event.step,
         }),
@@ -314,8 +313,7 @@ export class RunWorker {
         scope,
         "run.turn.start",
         withDefined({
-          runId: this.context.runId,
-          sessionId: this.context.sessionId,
+          ...this.streamBase(event),
           timestamp: event.timestamp,
           step: event.step,
           usage: safeJsonValue(event.usage),
@@ -334,8 +332,7 @@ export class RunWorker {
         scope,
         "run.context.prepared",
         withDefined({
-          runId: this.context.runId,
-          sessionId: this.context.sessionId,
+          ...this.streamBase(event),
           timestamp: event.timestamp,
           step: event.step,
           usage: safeJsonValue(event.usage),
@@ -354,8 +351,7 @@ export class RunWorker {
         scope,
         "run.turn.end",
         withDefined({
-          runId: this.context.runId,
-          sessionId: this.context.sessionId,
+          ...this.streamBase(event),
           timestamp: event.timestamp,
           step: event.step,
           usage: safeJsonValue(event.usage),
@@ -374,8 +370,7 @@ export class RunWorker {
         scope,
         "run.llm.complete",
         withDefined({
-          runId: this.context.runId,
-          sessionId: this.context.sessionId,
+          ...this.streamBase(event),
           timestamp: event.timestamp,
           finishReason: event.finishReason,
         }),
@@ -385,8 +380,7 @@ export class RunWorker {
 
     if (event.type === "llm:retrying") {
       this.publish(scope, "run.llm.retrying", {
-        runId: this.context.runId,
-        sessionId: this.context.sessionId,
+        ...this.streamBase(event),
         timestamp: event.timestamp,
         step: event.step,
         attempt: event.attempt,
@@ -399,8 +393,7 @@ export class RunWorker {
 
     if (event.type === "tool:start") {
       this.publish(scope, "run.tool.start", {
-        runId: this.context.runId,
-        sessionId: this.context.sessionId,
+        ...this.streamBase(event),
         timestamp: event.timestamp,
         step: event.step,
         callId: event.callId,
@@ -413,8 +406,7 @@ export class RunWorker {
 
     if (event.type === "tool:result") {
       this.publish(scope, "run.tool.result", {
-        runId: this.context.runId,
-        sessionId: this.context.sessionId,
+        ...this.streamBase(event),
         timestamp: event.timestamp,
         step: event.step,
         callId: event.callId,
@@ -431,8 +423,7 @@ export class RunWorker {
       scope,
       "run.step.complete",
       withDefined({
-        runId: this.context.runId,
-        sessionId: this.context.sessionId,
+        ...this.streamBase(event),
         timestamp: event.timestamp,
         step: event.step,
         finishReason: event.finishReason,
@@ -454,6 +445,14 @@ export class RunWorker {
     } catch {
       // Stream observers must not break lifecycle execution.
     }
+  }
+
+  private streamBase(event: LifecycleEvent): Record<string, unknown> {
+    return withDefined({
+      contextScopeId: event.contextScopeId ?? this.context.contextScopeId,
+      runId: this.context.runId,
+      sessionId: this.context.sessionId,
+    });
   }
 
   private async executeHook(

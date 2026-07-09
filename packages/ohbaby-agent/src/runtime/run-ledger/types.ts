@@ -11,6 +11,7 @@ export type TriggerSource = "user";
 export interface RunLedgerRecord {
   readonly runId: string;
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly triggerSource: TriggerSource;
   readonly status: RunStatus;
   readonly createdAt: number;
@@ -24,6 +25,7 @@ export interface RunLedgerRecord {
 export interface CreatePendingRunLedgerInput {
   readonly runId: string;
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly triggerSource: TriggerSource;
   readonly ownerId?: string;
   readonly ownerPid?: number;

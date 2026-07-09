@@ -15,6 +15,7 @@ export interface PartTime {
 interface MessageBase {
   readonly id: string;
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly role: MessageRole;
   readonly time: MessageTime;
 }
@@ -68,6 +69,7 @@ export interface PartBase {
   readonly id: string;
   readonly messageId: string;
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly orderIndex: number;
   readonly time?: PartTime;
 }
@@ -146,6 +148,7 @@ export interface MessageWithParts {
 export type CreateMessageInput =
   | {
       readonly sessionId: string;
+      readonly contextScopeId?: string;
       readonly role: "user";
       readonly agent: string;
       readonly model?: UserMessage["model"];
@@ -154,6 +157,7 @@ export type CreateMessageInput =
     }
   | {
       readonly sessionId: string;
+      readonly contextScopeId?: string;
       readonly role: "assistant";
       readonly agent: string;
       readonly parentId?: string;
@@ -162,6 +166,7 @@ export type CreateMessageInput =
     }
   | {
       readonly sessionId: string;
+      readonly contextScopeId?: string;
       readonly role: "system";
       readonly kind: SystemMessage["kind"];
       readonly agent?: string;
@@ -191,15 +196,25 @@ export interface MessageIdGenerator {
   partId(): string;
 }
 
+export interface MessageScopeFilter {
+  readonly contextScopeId?: string;
+}
+
 export interface MessageManager {
   createMessage(input: CreateMessageInput): Promise<Message>;
   updateMessage(messageId: string, patch: UpdateMessagePatch): Promise<Message>;
   appendPart(messageId: string, input: CreatePartInput): Promise<Part>;
   updatePart(partId: string, patch: UpdatePartPatch): Promise<Part>;
-  listBySession(sessionId: string): Promise<MessageWithParts[]>;
+  listBySession(
+    sessionId: string,
+    options?: MessageScopeFilter,
+  ): Promise<MessageWithParts[]>;
   removeMessage(messageId: string): Promise<void>;
   removeMessages(sessionId: string): Promise<void>;
-  toModelMessages(sessionId: string): Promise<ChatCompletionMessage[]>;
+  toModelMessages(
+    sessionId: string,
+    options?: MessageScopeFilter,
+  ): Promise<ChatCompletionMessage[]>;
 }
 
 export interface MessageStore {
@@ -217,7 +232,10 @@ export interface MessageStore {
     patch: Omit<UpdatePartPatch, "delta">,
     updatedAt: number,
   ): Promise<Part>;
-  listBySession(sessionId: string): Promise<MessageWithParts[]>;
+  listBySession(
+    sessionId: string,
+    options?: MessageScopeFilter,
+  ): Promise<MessageWithParts[]>;
   deleteMessage(messageId: string): Promise<void>;
   deleteBySession(sessionId: string): Promise<void>;
 }

@@ -210,9 +210,8 @@ const SESSION_USAGE: ContextUsage = {
 function preparedTurn(
   messages: PreparedTurn["messages"],
   usage: ContextUsage = SESSION_USAGE,
-  sentHeuristic = messages
-    .map((message) => JSON.stringify(message))
-    .join("\n").length,
+  sentHeuristic = messages.map((message) => JSON.stringify(message)).join("\n")
+    .length,
 ): PreparedTurn {
   return {
     assembledAt: 1_700_000_000_000,
@@ -387,11 +386,14 @@ describe("Lifecycle.run", () => {
     const prepareTurn = vi
       .fn<ContextManager["prepareTurn"]>()
       .mockResolvedValue(
-        preparedTurn([{ role: "user", content: "Calibrate" }], SESSION_USAGE, 321),
+        preparedTurn(
+          [{ role: "user", content: "Calibrate" }],
+          SESSION_USAGE,
+          321,
+        ),
       );
-    const updateCalibrationFactor = vi.fn<
-      ContextManager["updateCalibrationFactor"]
-    >();
+    const updateCalibrationFactor =
+      vi.fn<ContextManager["updateCalibrationFactor"]>();
     const contextManager = {
       ...createContextManagerMock(prepareTurn),
       updateCalibrationFactor,
@@ -432,6 +434,97 @@ describe("Lifecycle.run", () => {
       "session_test",
       456,
       321,
+    );
+  });
+
+  it("passes context scope through prepare, calibration, and assistant messages", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const createMessageSpy = vi.spyOn(messageManager, "createMessage");
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValue(
+        preparedTurn(
+          [{ role: "user", content: "Scoped turn" }],
+          SESSION_USAGE,
+          42,
+        ),
+      );
+    const resetTurnCompactionCount =
+      vi.fn<ContextManager["resetTurnCompactionCount"]>();
+    const updateCalibrationFactor =
+      vi.fn<ContextManager["updateCalibrationFactor"]>();
+    const contextManager = {
+      ...createContextManagerMock(prepareTurn, {
+        resetTurnCompactionCount,
+      }),
+      updateCalibrationFactor,
+    };
+    const lifecycle = new Lifecycle({
+      contextManager,
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              finishReason: "stop",
+              textDelta: "Done.",
+              tokenUsage: {
+                completion_tokens: 5,
+                prompt_tokens: 50,
+                total_tokens: 55,
+              },
+            },
+          ],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const events = await consumeLifecycleEventObjects(
+      lifecycle.run({
+        contextScopeId: "subagent_1",
+        directory: "D:/repo",
+        isSubagent: true,
+        modelId: "fake-model",
+        sessionId: "child_1",
+      }),
+    );
+
+    expect(resetTurnCompactionCount).toHaveBeenCalledWith(
+      "child_1",
+      "subagent_1",
+    );
+    expect(prepareTurn).toHaveBeenCalledWith({
+      contextScopeId: "subagent_1",
+      directory: "D:/repo",
+      isSubagent: true,
+      modelId: "fake-model",
+      sessionId: "child_1",
+    });
+    expect(createMessageSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contextScopeId: "subagent_1",
+        role: "assistant",
+        sessionId: "child_1",
+      }),
+    );
+    expect(updateCalibrationFactor).toHaveBeenCalledWith(
+      "child_1",
+      50,
+      42,
+      "subagent_1",
+    );
+    expect(events.every((event) => event.contextScopeId === "subagent_1")).toBe(
+      true,
     );
   });
 
@@ -1535,6 +1628,18 @@ async function consumeLifecycleEvents(
   }
 
   return { events, result: next.value };
+}
+
+async function consumeLifecycleEventObjects(
+  loop: AsyncGenerator<LifecycleEvent, LifecycleResult, void>,
+): Promise<readonly LifecycleEvent[]> {
+  const events: LifecycleEvent[] = [];
+  let next = await loop.next();
+  while (!next.done) {
+    events.push(next.value);
+    next = await loop.next();
+  }
+  return events;
 }
 
 function createDeterministicIds(): MessageIdGenerator {

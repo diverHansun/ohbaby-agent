@@ -811,6 +811,83 @@ describe("RunManager", () => {
     expect(manager.list("session_1")).toEqual([]);
   });
 
+  it("passes context scope identity to lifecycle", async () => {
+    const lifecycle = new CompletingLifecycle();
+    const { bridge, manager } = createManager(lifecycle);
+
+    const record = await manager.create({
+      agentInstanceId: "subagent_1",
+      contextScopeId: "subagent_1",
+      directory: "D:/repo",
+      isSubagent: true,
+      modelId: "fake-model",
+      sessionId: "child_1",
+      triggerSource: "user",
+    });
+    await manager.waitForCompletion(record.runId);
+
+    expect(lifecycle.calls[0]).toMatchObject({
+      contextScopeId: "subagent_1",
+      directory: "D:/repo",
+      isSubagent: true,
+      modelId: "fake-model",
+      sessionId: "child_1",
+    });
+    expect(
+      bridge.events.find((event) => event.event === "run.llm.start"),
+    ).toMatchObject({
+      data: {
+        contextScopeId: "subagent_1",
+        sessionId: "child_1",
+      },
+    });
+  });
+
+  it("allows concurrent runs in the same session when context scopes differ", async () => {
+    const lifecycle = new BlockingLifecycle();
+    const { manager } = createManager(lifecycle);
+
+    const first = await manager.create({
+      contextScopeId: "subagent_1",
+      directory: "D:/repo",
+      isSubagent: true,
+      modelId: "fake-model",
+      sessionId: "child_1",
+      triggerSource: "user",
+    });
+    await lifecycle.started.promise;
+
+    const second = await manager.create({
+      contextScopeId: "subagent_2",
+      directory: "D:/repo",
+      isSubagent: true,
+      modelId: "fake-model",
+      sessionId: "child_1",
+      triggerSource: "user",
+    });
+
+    expect(manager.list("child_1").map((record) => record.runId)).toEqual([
+      first.runId,
+      second.runId,
+    ]);
+    await expect(
+      manager.create({
+        contextScopeId: "subagent_1",
+        directory: "D:/repo",
+        isSubagent: true,
+        modelId: "fake-model",
+        sessionId: "child_1",
+        triggerSource: "user",
+      }),
+    ).rejects.toBeInstanceOf(ConcurrencyRejectedError);
+
+    lifecycle.finish.resolve(undefined);
+    await Promise.all([
+      manager.waitForCompletion(first.runId),
+      manager.waitForCompletion(second.runId),
+    ]);
+  });
+
   it("returns lifecycle token usage in run completion", async () => {
     const { manager } = createManager(new UsageLifecycle());
 

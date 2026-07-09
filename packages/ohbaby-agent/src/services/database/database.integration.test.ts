@@ -89,7 +89,131 @@ describe("services/database", () => {
       { version: "005_snapshot_git_sidecar" },
       { version: "006_run_owner" },
       { version: "007_goal_record" },
+      { version: "008_subagent_instance" },
+      { version: "009_run_ledger_context_scope" },
+      { version: "010_message_context_scope" },
+      { version: "011_subagent_instance_owner" },
     ]);
+  });
+
+  it("creates physical message context-scope columns and indexes", async () => {
+    const dbPath = await tempDbPath();
+
+    initDatabase({ dbPath });
+
+    const messageColumns = getDatabase()
+      .prepare<{ name: string }>("PRAGMA table_info(message)")
+      .all()
+      .map((row) => row.name);
+    expect(messageColumns).toEqual(expect.arrayContaining(["context_scope_id"]));
+
+    const indexes = getDatabase()
+      .prepare<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'index'",
+      )
+      .all()
+      .map((row) => row.name);
+    expect(indexes).toContain("idx_message_session_scope_time");
+  });
+
+  it("creates physical subagent owner columns and indexes", async () => {
+    const dbPath = await tempDbPath();
+
+    initDatabase({ dbPath });
+
+    const subagentColumns = getDatabase()
+      .prepare<{ name: string }>("PRAGMA table_info(subagent_instance)")
+      .all()
+      .map((row) => row.name);
+    expect(subagentColumns).toEqual(
+      expect.arrayContaining(["owner_id", "owner_pid"]),
+    );
+
+    const indexes = getDatabase()
+      .prepare<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'index'",
+      )
+      .all()
+      .map((row) => row.name);
+    expect(indexes).toContain("idx_subagent_instance_owner_status");
+  });
+
+  it("creates subagent_instance with per-session context-scope uniqueness", async () => {
+    const dbPath = await tempDbPath();
+    initDatabase({ dbPath });
+
+    const db = getDatabase();
+    expect(
+      db
+        .prepare<{
+          name: string;
+        }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get(schema.subagentInstance.tableName),
+    ).toEqual({ name: schema.subagentInstance.tableName });
+
+    db.prepare(
+      `INSERT INTO ${schema.session.tableName}
+        (id, project_id, project_root, agent, parent_id, title, status, created_at, updated_at, message_count, data)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "child_1",
+      "project_1",
+      "/tmp/project",
+      "explore",
+      "parent_1",
+      "child",
+      "active",
+      1,
+      1,
+      0,
+      "{}",
+    );
+    const insert = db.prepare(
+      `INSERT INTO ${schema.subagentInstance.tableName}
+        (subagent_id, session_id, context_scope_id, parent_session_id, role, initial_prompt, status, pending_queue, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+
+    insert.run(
+      "subagent_a",
+      "child_1",
+      "subagent_a",
+      "parent_1",
+      "explore",
+      "first",
+      "idle",
+      "[]",
+      1,
+      1,
+    );
+    expect(() =>
+      insert.run(
+        "subagent_b",
+        "child_1",
+        "subagent_b",
+        "parent_1",
+        "research",
+        "second",
+        "idle",
+        "[]",
+        2,
+        2,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      insert.run(
+        "subagent_c",
+        "child_1",
+        "subagent_a",
+        "parent_1",
+        "generic",
+        "duplicate scope",
+        "idle",
+        "[]",
+        3,
+        3,
+      ),
+    ).toThrow(/UNIQUE/i);
   });
 
   it("drops legacy scheduler_job tables when upgrading an existing database", async () => {

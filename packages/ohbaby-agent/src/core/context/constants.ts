@@ -5,9 +5,8 @@ export const COMPACTION_MIN_REMAINING_INPUT_TOKENS = 4_096;
 export const MASK_EXEMPT_TOOL_PREFIXES = [
   "write",
   "edit",
-  "task",
   "skill",
-  "agent_",
+  "subagent_",
 ] as const;
 export const MASK_MIN_PART_TOKENS = 50;
 export const MASK_MIN_PRUNABLE_TOKENS = 20_000;

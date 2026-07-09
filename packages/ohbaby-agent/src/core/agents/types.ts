@@ -22,7 +22,11 @@ export interface AgentToolCallSummary {
 
 export interface AgentRunInput {
   readonly sessionId: string;
+  readonly contextScope?: AgentContextScope;
+  readonly agentInstanceId?: string;
+  readonly contextScopeId?: string;
   readonly parentSessionId?: string;
+  readonly isSubagent?: boolean;
   readonly agentName: string;
   readonly projectRoot: string;
   readonly modelId: string;
@@ -67,6 +71,8 @@ export interface AgentRunEventSource {
 export interface AgentRunCreateOptions {
   readonly runId?: string;
   readonly sessionId: string;
+  readonly agentInstanceId?: string;
+  readonly contextScopeId?: string;
   readonly triggerSource: "user";
   readonly agent?: string;
   readonly isSubagent?: boolean;
@@ -112,3 +118,60 @@ export type AgentRunner = (
   deps: AgentRunDeps,
   input: AgentRunInput,
 ) => Promise<AgentRunResult>;
+
+export type AgentInstanceType = "primary" | "sub";
+
+export type AgentWaitMode = "stream" | "waitForCompletion";
+
+export interface AgentInstanceIdentity {
+  readonly instanceId: string;
+  readonly contextScopeId: string;
+  readonly sessionId: string;
+  readonly type: AgentInstanceType;
+  readonly agentName: string;
+  readonly parentSessionId?: string;
+  readonly projectRoot: string;
+  readonly modelId: string;
+  readonly maxSteps?: number;
+}
+
+export interface AgentContextScope {
+  readonly identity: AgentInstanceIdentity;
+  readonly instanceId: string;
+  readonly contextScopeId: string;
+  readonly sessionId: string;
+  readonly isSubagent: boolean;
+  readonly parentSessionId?: string;
+  assertSession(input: {
+    readonly sessionId: string;
+    readonly instanceId?: string;
+    readonly contextScopeId?: string;
+    readonly parentSessionId?: string;
+    readonly agentName?: string;
+  }): void;
+  toRunCreateOptions(): {
+    readonly agentInstanceId: string;
+    readonly contextScopeId: string;
+    readonly sessionId: string;
+    readonly isSubagent: boolean;
+    readonly parentSessionId?: string;
+  };
+}
+
+export interface AgentTurnInput {
+  readonly prompt: string;
+  readonly waitMode: AgentWaitMode;
+  readonly signal?: AbortSignal;
+  readonly environment?: ToolExecutionEnvironment;
+  readonly runId?: string;
+}
+
+export interface AgentInstance {
+  readonly identity: AgentInstanceIdentity;
+  readonly contextScope: AgentContextScope;
+  turn(input: AgentTurnInput): Promise<AgentRunResult>;
+}
+
+export interface AgentInstanceFactory {
+  create(identity: AgentInstanceIdentity): AgentInstance;
+}

@@ -101,18 +101,29 @@ function createMessageManager(
     removeMessage,
     removeMessages: vi.fn((): Promise<void> => Promise.resolve()),
     toModelMessages: vi.fn(() => Promise.resolve([])),
-    updateMessage: vi.fn((): Promise<CoreMessage> => Promise.resolve(userMessage("updated"))),
-    updatePart: vi.fn((): Promise<Part> => Promise.resolve({
-      id: "updated_part",
-      messageId: "updated",
-      orderIndex: 0,
-      sessionId: "session_child",
-      text: "updated",
-      type: "text",
-    })),
+    updateMessage: vi.fn(
+      (): Promise<CoreMessage> => Promise.resolve(userMessage("updated")),
+    ),
+    updatePart: vi.fn(
+      (): Promise<Part> =>
+        Promise.resolve({
+          id: "updated_part",
+          messageId: "updated",
+          orderIndex: 0,
+          sessionId: "session_child",
+          text: "updated",
+          type: "text",
+        }),
+    ),
   };
   return { appendPart, createMessage, listBySession, manager, removeMessage };
 }
+
+type MockToolScheduler = ToolSchedulerInstance & {
+  readonly getAvailableTools: ReturnType<
+    typeof vi.fn<ToolSchedulerInstance["getAvailableTools"]>
+  >;
+};
 
 function createToolScheduler(
   tools: readonly ToolDefinition[] = [
@@ -124,14 +135,17 @@ function createToolScheduler(
       source: "builtin",
     },
   ],
-): ToolSchedulerInstance {
+): MockToolScheduler {
+  const getAvailableTools = vi.fn<ToolSchedulerInstance["getAvailableTools"]>(
+    (): Promise<ToolDefinition[]> => Promise.resolve([...tools]),
+  );
   return {
     cancel: vi.fn(),
     cancelAll: vi.fn(),
     execute: vi.fn(),
     executeBatch: vi.fn(),
     get: vi.fn(),
-    getAvailableTools: vi.fn((): Promise<ToolDefinition[]> => Promise.resolve([...tools])),
+    getAvailableTools,
     getCategory: vi.fn(),
     getPendingCalls: vi.fn(),
     getStatus: vi.fn(),
@@ -194,9 +208,7 @@ function createRunCoordinator(
   };
 }
 
-function baseInput(
-  patch: Partial<AgentRunInput> = {},
-): AgentRunInput {
+function baseInput(patch: Partial<AgentRunInput> = {}): AgentRunInput {
   return {
     agentName: "build",
     initialUserPrompt: "hello",
@@ -210,13 +222,15 @@ function baseInput(
   };
 }
 
-function createDeps(input: {
-  readonly messageManager?: MessageManager;
-  readonly runEventSource?: AgentRunEventSource;
-  readonly runCoordinator?: AgentRunCoordinator;
-  readonly sandboxManager?: AgentRunDeps["sandboxManager"];
-  readonly toolScheduler?: ToolSchedulerInstance;
-} = {}): AgentRunDeps {
+function createDeps(
+  input: {
+    readonly messageManager?: MessageManager;
+    readonly runEventSource?: AgentRunEventSource;
+    readonly runCoordinator?: AgentRunCoordinator;
+    readonly sandboxManager?: AgentRunDeps["sandboxManager"];
+    readonly toolScheduler?: ToolSchedulerInstance;
+  } = {},
+): AgentRunDeps {
   return {
     messageManager: input.messageManager ?? createMessageManager().manager,
     runEventSource: input.runEventSource,
@@ -319,6 +333,47 @@ describe("runAgent", () => {
         parentMessageId: "parent_message",
       }),
     );
+  });
+
+  it("uses explicit instance scope for subagent identity and message queries", async () => {
+    const messageManager = createMessageManager();
+    const runCoordinator = createRunCoordinator();
+    const toolScheduler = createToolScheduler();
+
+    await runAgent(
+      createDeps({
+        messageManager: messageManager.manager,
+        runCoordinator: runCoordinator.coordinator,
+        toolScheduler,
+      }),
+      baseInput({
+        agentInstanceId: "subagent_1",
+        contextScopeId: "subagent_1",
+        isSubagent: true,
+        parentSessionId: undefined,
+      }),
+    );
+
+    expect(messageManager.createMessage).toHaveBeenCalledWith({
+      agent: "build",
+      contextScopeId: "subagent_1",
+      role: "user",
+      sessionId: "session_child",
+    });
+    expect(runCoordinator.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentInstanceId: "subagent_1",
+        contextScopeId: "subagent_1",
+        isSubagent: true,
+      }),
+    );
+    expect(toolScheduler.getAvailableTools).toHaveBeenCalledWith({
+      agentName: "build",
+      isSubagent: true,
+    });
+    expect(messageManager.listBySession).toHaveBeenCalledWith("session_child", {
+      contextScopeId: "subagent_1",
+    });
   });
 
   it("removes the initial user message when run creation fails", async () => {

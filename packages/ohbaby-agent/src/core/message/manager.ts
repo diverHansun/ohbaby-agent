@@ -9,6 +9,7 @@ import type {
   Message,
   MessageIdGenerator,
   MessageManager,
+  MessageScopeFilter,
   MessageStore,
   MessageWithParts,
   Part,
@@ -88,8 +89,11 @@ export function createMessageManager(
     appendPart,
     updatePart,
 
-    listBySession(sessionId: string): Promise<MessageWithParts[]> {
-      return options.store.listBySession(sessionId);
+    listBySession(
+      sessionId: string,
+      filter?: MessageScopeFilter,
+    ): Promise<MessageWithParts[]> {
+      return options.store.listBySession(sessionId, filter);
     },
 
     async removeMessage(messageId: string): Promise<void> {
@@ -112,9 +116,12 @@ export function createMessageManager(
       }
     },
 
-    async toModelMessages(sessionId: string): Promise<ChatCompletionMessage[]> {
+    async toModelMessages(
+      sessionId: string,
+      filter?: MessageScopeFilter,
+    ): Promise<ChatCompletionMessage[]> {
       return convertToModelMessages(
-        await options.store.listBySession(sessionId),
+        await options.store.listBySession(sessionId, filter),
       );
     },
   };

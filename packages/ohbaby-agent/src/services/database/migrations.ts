@@ -191,4 +191,109 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
       );
     `,
   },
+  {
+    version: "008_subagent_instance",
+    sql: `
+      CREATE TABLE IF NOT EXISTS subagent_instance (
+        subagent_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+        context_scope_id TEXT NOT NULL,
+        parent_session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        name TEXT,
+        description TEXT,
+        initial_prompt TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        output TEXT,
+        error TEXT,
+        pending_queue TEXT NOT NULL DEFAULT '[]',
+        current_run_id TEXT,
+        last_run_id TEXT,
+        timeout_ms INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        started_at INTEGER,
+        completed_at INTEGER,
+        interrupted_at INTEGER,
+        closed_at INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_subagent_instance_parent
+        ON subagent_instance(parent_session_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_subagent_instance_status
+        ON subagent_instance(status);
+      CREATE INDEX IF NOT EXISTS idx_subagent_instance_session
+        ON subagent_instance(session_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_subagent_instance_scope
+        ON subagent_instance(session_id, context_scope_id);
+    `,
+  },
+  {
+    version: "009_run_ledger_context_scope",
+    sql: `
+      ALTER TABLE run_ledger ADD COLUMN context_scope_id TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_run_ledger_session_scope_status
+        ON run_ledger(session_id, context_scope_id, status, created_at);
+    `,
+  },
+  {
+    version: "010_message_context_scope",
+    sql: `
+      CREATE TABLE IF NOT EXISTS message (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+        role TEXT NOT NULL,
+        agent TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        data TEXT NOT NULL,
+        UNIQUE (id, session_id)
+      );
+
+      ALTER TABLE message ADD COLUMN context_scope_id TEXT;
+
+      UPDATE message
+        SET context_scope_id = json_extract(data, '$.contextScopeId')
+        WHERE json_valid(data)
+          AND json_extract(data, '$.contextScopeId') IS NOT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_message_session_scope_time
+        ON message(session_id, context_scope_id, created_at);
+    `,
+  },
+  {
+    version: "011_subagent_instance_owner",
+    sql: `
+      CREATE TABLE IF NOT EXISTS subagent_instance (
+        subagent_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+        context_scope_id TEXT NOT NULL,
+        parent_session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        name TEXT,
+        description TEXT,
+        initial_prompt TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        output TEXT,
+        error TEXT,
+        pending_queue TEXT NOT NULL DEFAULT '[]',
+        current_run_id TEXT,
+        last_run_id TEXT,
+        timeout_ms INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        started_at INTEGER,
+        completed_at INTEGER,
+        interrupted_at INTEGER,
+        closed_at INTEGER
+      );
+
+      ALTER TABLE subagent_instance ADD COLUMN owner_id TEXT;
+      ALTER TABLE subagent_instance ADD COLUMN owner_pid INTEGER;
+
+      CREATE INDEX IF NOT EXISTS idx_subagent_instance_owner_status
+        ON subagent_instance(owner_id, owner_pid, status, updated_at);
+    `,
+  },
 ];

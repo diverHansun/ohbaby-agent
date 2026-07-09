@@ -35,6 +35,13 @@ function numberData(
   return typeof value === "number" ? value : undefined;
 }
 
+function scopeData(data: Record<string, unknown>): {
+  readonly contextScopeId?: string;
+} {
+  const contextScopeId = stringData(data, "contextScopeId");
+  return contextScopeId === undefined ? {} : { contextScopeId };
+}
+
 function lifecycleEventFromStream(
   item: Exclude<
     StreamBridgeYield,
@@ -55,6 +62,7 @@ function lifecycleEventFromStream(
     const content = stringData(data, "content") ?? "";
     const delta = stringData(data, "delta") ?? "";
     return {
+      ...scopeData(data),
       completeMessage: { content, role: "assistant" },
       content,
       delta,
@@ -71,6 +79,7 @@ function lifecycleEventFromStream(
       return undefined;
     }
     return {
+      ...scopeData(data),
       content,
       delta,
       messageId,
@@ -87,6 +96,7 @@ function lifecycleEventFromStream(
       return undefined;
     }
     return {
+      ...scopeData(data),
       content,
       messageId,
       sessionId,
@@ -97,6 +107,7 @@ function lifecycleEventFromStream(
   }
   if (item.event === "run.llm.start") {
     return {
+      ...scopeData(data),
       sessionId,
       step: numberData(data, "step") ?? 0,
       timestamp,
@@ -105,6 +116,7 @@ function lifecycleEventFromStream(
   }
   if (item.event === "run.llm.complete") {
     return {
+      ...scopeData(data),
       completeMessage: { content: "", role: "assistant" },
       finishReason: stringData(data, "finishReason") as
         | LlmCompleteEvent["finishReason"]
@@ -116,6 +128,7 @@ function lifecycleEventFromStream(
   }
   if (item.event === "run.llm.retrying") {
     return {
+      ...scopeData(data),
       attempt: numberData(data, "attempt") ?? 0,
       delayMs: numberData(data, "delayMs") ?? 0,
       maxRetries: numberData(data, "maxRetries") ?? 0,
@@ -128,6 +141,7 @@ function lifecycleEventFromStream(
   }
   if (item.event === "run.tool.start") {
     return {
+      ...scopeData(data),
       callId: stringData(data, "callId") ?? "",
       params: objectData(data.params) ?? {},
       sessionId,
@@ -139,6 +153,7 @@ function lifecycleEventFromStream(
   }
   if (item.event === "run.tool.result") {
     return {
+      ...scopeData(data),
       callId: stringData(data, "callId") ?? "",
       params: objectData(data.params) ?? {},
       result: data.result as ToolCallResult,
@@ -151,6 +166,7 @@ function lifecycleEventFromStream(
   }
   if (item.event === "run.turn.start") {
     return {
+      ...scopeData(data),
       compaction: data.compaction as Extract<
         LifecycleEvent,
         { readonly type: "turn:start" }
@@ -168,6 +184,7 @@ function lifecycleEventFromStream(
   }
   if (item.event === "run.context.prepared") {
     return {
+      ...scopeData(data),
       compaction: data.compaction as Extract<
         LifecycleEvent,
         { readonly type: "context:prepared" }
@@ -185,6 +202,7 @@ function lifecycleEventFromStream(
   }
   if (item.event === "run.turn.end") {
     return {
+      ...scopeData(data),
       finishReason: stringData(data, "finishReason") as Extract<
         LifecycleEvent,
         { readonly type: "turn:end" }
@@ -205,6 +223,7 @@ function lifecycleEventFromStream(
   }
   if (item.event === "run.step.complete") {
     return {
+      ...scopeData(data),
       finishReason: stringData(data, "finishReason") as Extract<
         LifecycleEvent,
         { readonly type: "step:complete" }

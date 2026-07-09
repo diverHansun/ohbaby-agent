@@ -179,6 +179,37 @@ describe("InMemoryRunLedger", () => {
     });
   });
 
+  it("allows active runs in one session when context scopes differ", async () => {
+    const ledger = createLedger();
+
+    await ledger.claimPendingRun({
+      contextScopeId: "subagent_1",
+      runId: "run_1",
+      sessionId: "child_1",
+      triggerSource: "user",
+    });
+    await expect(
+      ledger.claimPendingRun({
+        contextScopeId: "subagent_2",
+        runId: "run_2",
+        sessionId: "child_1",
+        triggerSource: "user",
+      }),
+    ).resolves.toMatchObject({
+      contextScopeId: "subagent_2",
+      runId: "run_2",
+      sessionId: "child_1",
+    });
+    await expect(
+      ledger.claimPendingRun({
+        contextScopeId: "subagent_1",
+        runId: "run_3",
+        sessionId: "child_1",
+        triggerSource: "user",
+      }),
+    ).rejects.toBeInstanceOf(SessionRunBusyError);
+  });
+
   it("recovers dead-owner active runs before claiming the same session", async () => {
     const ledger = createInMemoryRunLedger({
       isOwnerAlive: () => false,

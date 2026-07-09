@@ -88,37 +88,66 @@ export function projectToolMetadataForModel(
         "failedCount",
         "truncated",
       ]);
-    case "task": {
+    case "subagent_run": {
       const subagent = nestedMetadata(metadata, "subagent");
-      return subagent === undefined
+      const item =
+        subagent === undefined ? undefined : nestedMetadata(subagent, "item");
+      return subagent === undefined || item === undefined
         ? {}
-        : copyMetadataFields(subagent, [
-            "role",
-            "name",
-            "description",
-            "sessionId",
-            "success",
-            "error",
-          ]);
+        : {
+            ...copyMetadataFields(item, [
+              "subagentId",
+              "sessionId",
+              "contextScopeId",
+              "role",
+              "name",
+              "description",
+              "status",
+              "error",
+            ]),
+            ...copyMetadataFields(subagent, ["success"]),
+          };
     }
-    case "agent_open":
-    case "agent_eval":
-    case "agent_status":
-    case "agent_close": {
-      const agentTask = nestedMetadata(metadata, "agentTask");
-      if (agentTask !== undefined) {
-        return copyMetadataFields(agentTask, [
-          "role",
-          "name",
-          "description",
-          "taskId",
-          "sessionId",
-          "status",
-          "pendingInputCount",
-          "error",
-        ]);
-      }
-      return copyMetadataFields(metadata, ["taskId", "error"]);
+    case "subagent_status": {
+      const status = nestedMetadata(metadata, "subagentStatus");
+      const items = status?.items;
+      return Array.isArray(items)
+        ? {
+            items: items.map((item) =>
+              typeof item === "object" && item !== null && !Array.isArray(item)
+                ? copyMetadataFields(item as ToolMetadata, [
+                    "subagentId",
+                    "sessionId",
+                    "contextScopeId",
+                    "role",
+                    "name",
+                    "description",
+                    "status",
+                    "error",
+                  ])
+                : {},
+            ),
+          }
+        : {};
+    }
+    case "subagent_close": {
+      const close = nestedMetadata(metadata, "subagentClose");
+      const item = close === undefined ? undefined : nestedMetadata(close, "item");
+      return item === undefined
+        ? copyMetadataFields(metadata, ["error"])
+        : {
+            ...copyMetadataFields(close ?? {}, ["previousStatus"]),
+            ...copyMetadataFields(item, [
+              "subagentId",
+              "sessionId",
+              "contextScopeId",
+              "role",
+              "name",
+              "description",
+              "status",
+              "error",
+            ]),
+          };
     }
     default:
       return {};

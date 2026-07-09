@@ -10,6 +10,14 @@ import type {
   AgentToolCallSummary,
 } from "./types.js";
 
+interface ResolvedRunScope {
+  readonly agentInstanceId?: string;
+  readonly contextScopeId?: string;
+  readonly isSubagent: boolean;
+  readonly parentSessionId?: string;
+  readonly sessionId: string;
+}
+
 export function toOpenAiTools(
   definitions: readonly ToolDefinition[],
 ): ChatCompletionCreateParams["tools"] {
@@ -58,7 +66,10 @@ function bindAgentAbort(input: {
 
 async function writeInitialUserMessage(
   deps: Pick<AgentRunDeps, "messageManager">,
-  input: Pick<AgentRunInput, "agentName" | "initialUserPrompt" | "sessionId">,
+  input: Pick<
+    AgentRunInput,
+    "agentName" | "contextScopeId" | "initialUserPrompt" | "sessionId"
+  >,
 ): Promise<string | undefined> {
   if (!input.initialUserPrompt) {
     return undefined;
@@ -66,6 +77,9 @@ async function writeInitialUserMessage(
 
   const message = await deps.messageManager.createMessage({
     agent: input.agentName,
+    ...(input.contextScopeId === undefined
+      ? {}
+      : { contextScopeId: input.contextScopeId }),
     role: "user",
     sessionId: input.sessionId,
   });
@@ -122,6 +136,27 @@ function preSubscribeRunEvents(input: {
   };
 }
 
+function resolveRunScope(input: AgentRunInput): ResolvedRunScope {
+  const scope = input.contextScope;
+  if (scope === undefined) {
+    return {
+      agentInstanceId: input.agentInstanceId,
+      contextScopeId: input.contextScopeId,
+      isSubagent: input.isSubagent ?? input.parentSessionId !== undefined,
+      parentSessionId: input.parentSessionId,
+      sessionId: input.sessionId,
+    };
+  }
+  scope.assertSession({
+    agentName: input.agentName,
+    contextScopeId: input.contextScopeId,
+    instanceId: input.agentInstanceId,
+    parentSessionId: input.parentSessionId,
+    sessionId: input.sessionId,
+  });
+  return scope.toRunCreateOptions();
+}
+
 export async function runAgent(
   deps: AgentRunDeps,
   input: AgentRunInput,
@@ -131,19 +166,24 @@ export async function runAgent(
     throw new Error("Agent run event source is required for stream mode");
   }
 
-  const isSubagent = input.parentSessionId !== undefined;
+  const scope = resolveRunScope(input);
   const tools = await deps.toolScheduler.getAvailableTools({
     agentName: input.agentName,
-    isSubagent,
+    isSubagent: scope.isSubagent,
   });
   await deps.sandboxManager?.setSessionEnvironment(
-    input.sessionId,
+    scope.sessionId,
     input.environment,
   );
-  const cleanupEnvironment = cleanupSessionEnvironment(deps, input.sessionId);
+  const cleanupEnvironment = cleanupSessionEnvironment(deps, scope.sessionId);
 
   try {
-    const userMessageId = await writeInitialUserMessage(deps, input);
+    const userMessageId = await writeInitialUserMessage(deps, {
+      agentName: input.agentName,
+      contextScopeId: scope.contextScopeId,
+      initialUserPrompt: input.initialUserPrompt,
+      sessionId: scope.sessionId,
+    });
     const preSubscribed =
       input.waitMode === "stream" && input.runId && runEventSource
         ? preSubscribeRunEvents({ runEventSource, runId: input.runId })
@@ -151,14 +191,20 @@ export async function runAgent(
     let record: Awaited<ReturnType<AgentRunDeps["runCoordinator"]["create"]>>;
     try {
       record = await deps.runCoordinator.create({
+        ...(scope.agentInstanceId === undefined
+          ? {}
+          : { agentInstanceId: scope.agentInstanceId }),
         agent: input.agentName,
+        ...(scope.contextScopeId === undefined
+          ? {}
+          : { contextScopeId: scope.contextScopeId }),
         directory: input.projectRoot,
-        isSubagent,
+        isSubagent: scope.isSubagent,
         maxSteps: input.maxSteps,
         modelId: input.modelId,
         parentMessageId: userMessageId ?? input.parentMessageId,
         runId: input.runId,
-        sessionId: input.sessionId,
+        sessionId: scope.sessionId,
         tools: toOpenAiTools(tools),
         triggerSource: "user",
       });
@@ -216,15 +262,19 @@ export async function runAgent(
       const completion = await deps.runCoordinator.waitForCompletion(
         record.runId,
       );
-      const finalOutput = extractFinalOutput(
-        await deps.messageManager.listBySession(input.sessionId),
-      );
+      const history =
+        scope.contextScopeId === undefined
+          ? await deps.messageManager.listBySession(scope.sessionId)
+          : await deps.messageManager.listBySession(scope.sessionId, {
+              contextScopeId: scope.contextScopeId,
+            });
+      const finalOutput = extractFinalOutput(history);
       const success = completion.status === "succeeded";
       const output = finalOutput !== "" ? finalOutput : completion.error;
       const base = {
         mode: "waitForCompletion" as const,
         runId: record.runId,
-        sessionId: input.sessionId,
+        sessionId: scope.sessionId,
         steps: 0,
         toolCalls: [] satisfies readonly AgentToolCallSummary[],
       };

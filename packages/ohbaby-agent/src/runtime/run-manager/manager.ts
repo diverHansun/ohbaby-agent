@@ -56,6 +56,15 @@ function isActive(record: RunRecord): boolean {
   return ACTIVE_STATUSES.has(record.status);
 }
 
+function activeKey(input: {
+  readonly contextScopeId?: string;
+  readonly sessionId: string;
+}): string {
+  return input.contextScopeId === undefined
+    ? input.sessionId
+    : `${input.sessionId}::${input.contextScopeId}`;
+}
+
 function completionFromResult(result: RunWorkerResult): RunCompletion {
   const terminalReason = result.terminalReason ?? result.result?.terminalReason;
   const usage = result.result?.usage;
@@ -102,7 +111,10 @@ export class RunManager {
         options.triggerSource,
         options.explicit,
       );
-      const activeRunIds = this.activeRunIds(options.sessionId);
+      const activeRunIds = this.activeRunIds({
+        contextScopeId: options.contextScopeId,
+        sessionId: options.sessionId,
+      });
       if (activeRunIds.length > 0) {
         if (resolved.multitaskStrategy !== "interrupt-current") {
           throw new ConcurrencyRejectedError(options.sessionId, activeRunIds);
@@ -112,6 +124,7 @@ export class RunManager {
 
       const runId = options.runId ?? this.createRunId();
       const ledgerRecord = await this.deps.runLedger.claimPendingRun({
+        contextScopeId: options.contextScopeId,
         runId,
         sessionId: options.sessionId,
         triggerSource: options.triggerSource,
@@ -174,9 +187,8 @@ export class RunManager {
   }
 
   list(sessionId: string): RunRecord[] {
-    return this.activeRunIds(sessionId)
-      .map((runId) => this.recordsById.get(runId))
-      .filter((record): record is ManagedRunRecord => record !== undefined)
+    return Array.from(this.recordsById.values())
+      .filter((record) => record.sessionId === sessionId && isActive(record))
       .map(cloneRunRecord);
   }
 
@@ -197,8 +209,10 @@ export class RunManager {
       const sandboxLease = await sandboxManager.acquire(record.sessionId);
       record.sandboxLease = sandboxLease;
       const context: RunContext = {
+        agentInstanceId: record.options.agentInstanceId,
         runId: record.runId,
         sessionId: record.sessionId,
+        contextScopeId: record.options.contextScopeId,
         triggerSource: record.triggerSource,
         permissionProfileId: record.permissionProfileId,
         sandboxLease,
@@ -337,26 +351,37 @@ export class RunManager {
     await Promise.all(completions);
   }
 
-  private addActive(record: RunRecord): void {
-    const runIds = this.activeBySession.get(record.sessionId) ?? new Set();
+  private addActive(record: ManagedRunRecord): void {
+    const key = activeKey({
+      contextScopeId: record.options.contextScopeId,
+      sessionId: record.sessionId,
+    });
+    const runIds = this.activeBySession.get(key) ?? new Set();
     runIds.add(record.runId);
-    this.activeBySession.set(record.sessionId, runIds);
+    this.activeBySession.set(key, runIds);
   }
 
-  private removeActive(record: RunRecord): void {
-    const runIds = this.activeBySession.get(record.sessionId);
+  private removeActive(record: ManagedRunRecord): void {
+    const key = activeKey({
+      contextScopeId: record.options.contextScopeId,
+      sessionId: record.sessionId,
+    });
+    const runIds = this.activeBySession.get(key);
     if (!runIds) {
       return;
     }
 
     runIds.delete(record.runId);
     if (runIds.size === 0) {
-      this.activeBySession.delete(record.sessionId);
+      this.activeBySession.delete(key);
     }
   }
 
-  private activeRunIds(sessionId: string): string[] {
-    const runIds = Array.from(this.activeBySession.get(sessionId) ?? []);
+  private activeRunIds(input: {
+    readonly contextScopeId?: string;
+    readonly sessionId: string;
+  }): string[] {
+    const runIds = Array.from(this.activeBySession.get(activeKey(input)) ?? []);
     return runIds.filter((runId) => {
       const record = this.recordsById.get(runId);
       return record ? isActive(record) : false;

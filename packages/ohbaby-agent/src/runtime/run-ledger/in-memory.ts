@@ -24,6 +24,16 @@ function cloneRecord(record: RunLedgerRecord): RunLedgerRecord {
   return { ...record };
 }
 
+function sameActiveScope(
+  record: RunLedgerRecord,
+  input: ClaimPendingRunLedgerInput,
+): boolean {
+  return (
+    record.sessionId === input.sessionId &&
+    record.contextScopeId === input.contextScopeId
+  );
+}
+
 function errorToMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -79,7 +89,7 @@ export class InMemoryRunLedger implements RunLedger {
   claimPendingRun(input: ClaimPendingRunLedgerInput): Promise<RunLedgerRecord> {
     return this.withAsyncBoundary(() => {
       const activeRecords = Array.from(this.records.values())
-        .filter((record) => record.sessionId === input.sessionId)
+        .filter((record) => sameActiveScope(record, input))
         .filter((record) => ACTIVE_STATUSES.has(record.status));
       const activeRunIds = activeRecords
         .filter((record) => !this.recoverIfOrphaned(record, false))
@@ -258,6 +268,7 @@ export class InMemoryRunLedger implements RunLedger {
     const record: RunLedgerRecord = {
       runId: input.runId,
       sessionId: input.sessionId,
+      contextScopeId: input.contextScopeId,
       triggerSource: input.triggerSource,
       status: "pending",
       createdAt: this.now(),

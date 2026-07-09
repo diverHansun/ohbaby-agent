@@ -28,6 +28,8 @@ export interface RunDefaultsPolicy {
 export interface CreateRunOptions {
   readonly runId?: string;
   readonly sessionId: string;
+  readonly agentInstanceId?: string;
+  readonly contextScopeId?: string;
   readonly triggerSource: TriggerSource;
   readonly explicit?: Partial<RunDefaults>;
   readonly agent?: string;
@@ -67,6 +69,8 @@ export type SandboxManager = SandboxManagerPort;
 export interface RunContext {
   readonly runId: string;
   readonly sessionId: string;
+  readonly agentInstanceId?: string;
+  readonly contextScopeId?: string;
   readonly triggerSource: TriggerSource;
   readonly permissionProfileId: string;
   readonly sandboxLease: SandboxLease;

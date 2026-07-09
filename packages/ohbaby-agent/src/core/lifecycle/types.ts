@@ -30,6 +30,7 @@ export interface LifecycleDeps {
 
 export interface LifecycleSessionParams {
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly directory: string;
   readonly modelId: string;
   readonly agent?: string;
@@ -43,6 +44,7 @@ export interface LifecycleSessionParams {
 
 export interface TurnContext {
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly step: number;
   readonly prepared: PreparedTurn;
   readonly finishReason?: ChatFinishReason | "error";
@@ -52,6 +54,7 @@ export interface TurnContext {
 
 export interface ToolCallContext {
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly step: number;
   readonly callId: string;
   readonly toolName: string;
@@ -90,6 +93,7 @@ export type LifecycleEvent =
   | {
       readonly type: "turn:start";
       readonly sessionId: string;
+      readonly contextScopeId?: string;
       readonly step: number;
       readonly timestamp: number;
       readonly usage: ContextUsage;
@@ -99,6 +103,7 @@ export type LifecycleEvent =
   | {
       readonly type: "context:prepared";
       readonly sessionId: string;
+      readonly contextScopeId?: string;
       readonly step: number;
       readonly timestamp: number;
       readonly usage: ContextUsage;
@@ -108,6 +113,7 @@ export type LifecycleEvent =
   | {
       readonly type: "turn:end";
       readonly sessionId: string;
+      readonly contextScopeId?: string;
       readonly step: number;
       readonly timestamp: number;
       readonly usage: ContextUsage;
@@ -117,18 +123,21 @@ export type LifecycleEvent =
   | {
       readonly type: "llm:start";
       readonly sessionId: string;
+      readonly contextScopeId?: string;
       readonly step?: number;
       readonly timestamp: number;
     }
   | ({
       readonly type: "llm:retrying";
       readonly sessionId: string;
+      readonly contextScopeId?: string;
       readonly step?: number;
       readonly timestamp: number;
     } & ProviderRetryEvent)
   | {
       readonly type: "llm:delta";
       readonly sessionId: string;
+      readonly contextScopeId?: string;
       readonly step?: number;
       readonly timestamp: number;
       readonly delta: string;
@@ -138,6 +147,7 @@ export type LifecycleEvent =
   | {
       readonly type: "llm:reasoning-delta";
       readonly sessionId: string;
+      readonly contextScopeId?: string;
       readonly messageId: string;
       readonly step?: number;
       readonly timestamp: number;
@@ -147,6 +157,7 @@ export type LifecycleEvent =
   | {
       readonly type: "llm:reasoning-end";
       readonly sessionId: string;
+      readonly contextScopeId?: string;
       readonly messageId: string;
       readonly step?: number;
       readonly timestamp: number;
@@ -155,6 +166,7 @@ export type LifecycleEvent =
   | {
       readonly type: "llm:complete";
       readonly sessionId: string;
+      readonly contextScopeId?: string;
       readonly step?: number;
       readonly timestamp: number;
       readonly finishReason?: ChatFinishReason;
@@ -165,6 +177,7 @@ export type LifecycleEvent =
   | {
       readonly type: "tool:start";
       readonly sessionId: string;
+      readonly contextScopeId?: string;
       readonly step: number;
       readonly timestamp: number;
       readonly callId: string;
@@ -174,6 +187,7 @@ export type LifecycleEvent =
   | {
       readonly type: "tool:result";
       readonly sessionId: string;
+      readonly contextScopeId?: string;
       readonly step: number;
       readonly timestamp: number;
       readonly callId: string;
@@ -184,6 +198,7 @@ export type LifecycleEvent =
   | {
       readonly type: "step:complete";
       readonly sessionId: string;
+      readonly contextScopeId?: string;
       readonly step: number;
       readonly timestamp: number;
       readonly finishReason?: ChatFinishReason;

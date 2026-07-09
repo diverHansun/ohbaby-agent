@@ -105,6 +105,53 @@ describe("MessageManager", () => {
     ]);
   });
 
+  it("filters messages by context scope within the same session", async () => {
+    const manager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const first = await manager.createMessage({
+      agent: "explore",
+      contextScopeId: "subagent_a",
+      role: "user",
+      sessionId: "child_1",
+    });
+    const second = await manager.createMessage({
+      agent: "research",
+      contextScopeId: "subagent_b",
+      role: "user",
+      sessionId: "child_1",
+    });
+    const firstPart = await manager.appendPart(first.id, {
+      text: "A only",
+      type: "text",
+    });
+    await manager.appendPart(second.id, {
+      text: "B only",
+      type: "text",
+    });
+
+    await expect(
+      manager.listBySession("child_1", { contextScopeId: "subagent_a" }),
+    ).resolves.toMatchObject([
+      {
+        info: { contextScopeId: "subagent_a", id: first.id },
+        parts: [
+          {
+            contextScopeId: "subagent_a",
+            id: firstPart.id,
+            text: "A only",
+          },
+        ],
+      },
+    ]);
+    await expect(
+      manager.toModelMessages("child_1", { contextScopeId: "subagent_b" }),
+    ).resolves.toEqual([{ content: "B only", role: "user" }]);
+  });
+
   it("allocates distinct part order indexes during concurrent appends", async () => {
     const manager = createMessageManager({
       bus: createBus(),
@@ -293,7 +340,8 @@ describe("MessageManager", () => {
 
     await expect(manager.toModelMessages("session_1")).resolves.toEqual([
       {
-        content: "partial stdout before abort\n\nTool execution aborted by user",
+        content:
+          "partial stdout before abort\n\nTool execution aborted by user",
         role: "assistant",
       },
     ]);

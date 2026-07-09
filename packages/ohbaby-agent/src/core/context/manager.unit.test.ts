@@ -160,7 +160,9 @@ function createManager(
     readonly now?: () => number;
     readonly compressionThreshold?: number;
     readonly maskEnabled?: boolean;
-    readonly maskConfig?: Parameters<typeof createContextManager>[0]["maskConfig"];
+    readonly maskConfig?: Parameters<
+      typeof createContextManager
+    >[0]["maskConfig"];
     readonly maxCompactionsPerTurn?: number;
     readonly pruneProtectTokens?: number;
     readonly pruneMinimumTokens?: number;
@@ -301,7 +303,9 @@ describe("ContextManager", () => {
       estimateWireHeuristic(messages, {
         estimateTokens: (content: string) => content.length,
       }),
-    ).toBe(messages.map((message) => JSON.stringify(message)).join("\n").length);
+    ).toBe(
+      messages.map((message) => JSON.stringify(message)).join("\n").length,
+    );
   });
 
   it("counts assistant tool calls even when message content is null", () => {
@@ -312,8 +316,7 @@ describe("ContextManager", () => {
         tool_calls: [
           {
             function: {
-              arguments:
-                '{"path":"/a/very/long/path/with/many/chars.ts"}',
+              arguments: '{"path":"/a/very/long/path/with/many/chars.ts"}',
               name: "read_file",
             },
             id: "call_read",
@@ -449,6 +452,42 @@ describe("ContextManager", () => {
       },
       { role: "user", content: "continue" },
     ]);
+  });
+
+  it("prepares only messages in the requested context scope", async () => {
+    const messageManager = createMessageManagerFixture();
+    const scopedA = await messageManager.createMessage({
+      agent: "explore",
+      contextScopeId: "subagent_a",
+      role: "user",
+      sessionId: "child_1",
+    });
+    await messageManager.appendPart(scopedA.id, {
+      text: "A question",
+      type: "text",
+    });
+    const scopedB = await messageManager.createMessage({
+      agent: "research",
+      contextScopeId: "subagent_b",
+      role: "user",
+      sessionId: "child_1",
+    });
+    await messageManager.appendPart(scopedB.id, {
+      text: "B question",
+      type: "text",
+    });
+    const { manager } = createManager({ messageManager });
+
+    const prepared = await manager.prepareTurn({
+      contextScopeId: "subagent_a",
+      directory: "/repo",
+      isSubagent: true,
+      modelId: "fake-model",
+      sessionId: "child_1",
+    });
+
+    expect(JSON.stringify(prepared.messages)).toContain("A question");
+    expect(JSON.stringify(prepared.messages)).not.toContain("B question");
   });
 
   it("assembles system prompt, memory, and message history", async () => {
@@ -1077,11 +1116,7 @@ describe("ContextManager", () => {
       sessionId: "session_1",
       output: "old tool output ".repeat(800),
     });
-    for (const [index, role] of [
-      "user",
-      "assistant",
-      "user",
-    ].entries()) {
+    for (const [index, role] of ["user", "assistant", "user"].entries()) {
       await addTextMessage(messageManager, {
         sessionId: "session_1",
         role: role as "user" | "assistant",
@@ -1134,9 +1169,7 @@ describe("ContextManager", () => {
   });
 
   it("reduces prune-summary attempts across a ten-step tool-output loop when mask is enabled", async () => {
-    function isMaskedEvent(
-      event: unknown,
-    ): event is {
+    function isMaskedEvent(event: unknown): event is {
       readonly enabled: true;
       readonly maskedPartIds: readonly string[];
     } {
@@ -1390,27 +1423,23 @@ describe("ContextManager", () => {
   });
 
   it("uses input token budget rather than the full context window for compression decisions", () => {
-    const usage = getContextUsage(
-      45,
-      "model-a",
-      {
-        getBudget(_modelId, options) {
-          const usedInputTokens = options?.usedInputTokens ?? 0;
-          return {
-            contextWindowTokens: 100,
-            inputBudgetTokens: 50,
-            maxOutputTokens: 40,
-            modelId: "model-a",
-            remainingInputTokens: Math.max(0, 50 - usedInputTokens),
-            reservedOutputTokens: 40,
-            safetyMarginTokens: 10,
-            usageRatio: usedInputTokens / 50,
-            usedInputTokens,
-          };
-        },
-        getLimit: () => 100,
+    const usage = getContextUsage(45, "model-a", {
+      getBudget(_modelId, options) {
+        const usedInputTokens = options?.usedInputTokens ?? 0;
+        return {
+          contextWindowTokens: 100,
+          inputBudgetTokens: 50,
+          maxOutputTokens: 40,
+          modelId: "model-a",
+          remainingInputTokens: Math.max(0, 50 - usedInputTokens),
+          reservedOutputTokens: 40,
+          safetyMarginTokens: 10,
+          usageRatio: usedInputTokens / 50,
+          usedInputTokens,
+        };
       },
-    );
+      getLimit: () => 100,
+    });
 
     expect(usage).toMatchObject({
       contextLimit: 100,
@@ -1424,28 +1453,24 @@ describe("ContextManager", () => {
   });
 
   it("uses a small remaining-input floor when deciding the compaction rung", () => {
-    const usage = getContextUsage(
-      96_500,
-      "large-model",
-      {
-        getBudget(_modelId, options) {
-          const usedInputTokens = options?.usedInputTokens ?? 0;
-          const inputBudgetTokens = 100_000;
-          return {
-            contextWindowTokens: 128_000,
-            inputBudgetTokens,
-            maxOutputTokens: 20_000,
-            modelId: "large-model",
-            remainingInputTokens: inputBudgetTokens - usedInputTokens,
-            reservedOutputTokens: 20_000,
-            safetyMarginTokens: 8_000,
-            usageRatio: usedInputTokens / inputBudgetTokens,
-            usedInputTokens,
-          };
-        },
-        getLimit: () => 128_000,
+    const usage = getContextUsage(96_500, "large-model", {
+      getBudget(_modelId, options) {
+        const usedInputTokens = options?.usedInputTokens ?? 0;
+        const inputBudgetTokens = 100_000;
+        return {
+          contextWindowTokens: 128_000,
+          inputBudgetTokens,
+          maxOutputTokens: 20_000,
+          modelId: "large-model",
+          remainingInputTokens: inputBudgetTokens - usedInputTokens,
+          reservedOutputTokens: 20_000,
+          safetyMarginTokens: 8_000,
+          usageRatio: usedInputTokens / inputBudgetTokens,
+          usedInputTokens,
+        };
       },
-    );
+      getLimit: () => 128_000,
+    });
 
     expect(usage.usageRatio).toBeLessThan(0.97);
     expect(usage.remainingTokens).toBe(3_500);

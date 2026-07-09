@@ -30,6 +30,7 @@ const ORPHANED_OWNER_REASON = "process interrupted before owner exited";
 interface RunLedgerRow {
   readonly run_id: string;
   readonly session_id: string;
+  readonly context_scope_id: string | null;
   readonly trigger: TriggerSource;
   readonly status: RunStatus;
   readonly created_at: number;
@@ -48,6 +49,7 @@ function rowToRecord(row: RunLedgerRow): RunLedgerRecord {
   return {
     runId: row.run_id,
     sessionId: row.session_id,
+    contextScopeId: row.context_scope_id ?? undefined,
     triggerSource: row.trigger,
     status: row.status,
     createdAt: row.created_at,
@@ -152,6 +154,7 @@ export function createDatabaseRunLedger(
     const record: RunLedgerRecord = {
       runId: input.runId,
       sessionId: input.sessionId,
+      contextScopeId: input.contextScopeId,
       triggerSource: input.triggerSource,
       status: "pending",
       createdAt: now(),
@@ -161,12 +164,13 @@ export function createDatabaseRunLedger(
     connection
       .prepare(
         `INSERT INTO ${schema.runLedger.tableName}
-          (run_id, session_id, trigger, status, created_at, owner_id, owner_pid)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          (run_id, session_id, context_scope_id, trigger, status, created_at, owner_id, owner_pid)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.runId,
         record.sessionId,
+        record.contextScopeId ?? null,
         record.triggerSource,
         record.status,
         record.createdAt,
@@ -179,16 +183,27 @@ export function createDatabaseRunLedger(
   function getActiveRowsForSession(
     connection: DatabaseConnection,
     sessionId: string,
+    contextScopeId?: string,
   ): RunLedgerRow[] {
     const statuses = Array.from(ACTIVE_STATUSES);
     const placeholders = statuses.map(() => "?").join(", ");
     return connection
       .prepare<RunLedgerRow>(
         `SELECT * FROM ${schema.runLedger.tableName}
-         WHERE session_id = ? AND status IN (${placeholders})
+         WHERE session_id = ?
+           AND (
+             (? IS NULL AND context_scope_id IS NULL)
+             OR context_scope_id = ?
+           )
+           AND status IN (${placeholders})
          ORDER BY created_at ASC`,
       )
-      .all(sessionId, ...statuses);
+      .all(
+        sessionId,
+        contextScopeId ?? null,
+        contextScopeId ?? null,
+        ...statuses,
+      );
   }
 
   function getActiveRows(connection: DatabaseConnection): RunLedgerRow[] {
@@ -310,7 +325,11 @@ export function createDatabaseRunLedger(
     ): Promise<RunLedgerRecord> {
       return withAsyncBoundary(() => {
         const record = withImmediateTransaction(() => {
-          const activeRows = getActiveRowsForSession(db, input.sessionId);
+          const activeRows = getActiveRowsForSession(
+            db,
+            input.sessionId,
+            input.contextScopeId,
+          );
           recoverOrphanedRows(db, activeRows, false);
           const activeRunIds = activeRows
             .filter((row) => !isOrphaned(row, false))

@@ -9,6 +9,7 @@ import type {
   Message,
   MessageStore,
   MessageWithParts,
+  MessageScopeFilter,
   Part,
   UpdateMessagePatch,
   UpdatePartPatch,
@@ -17,6 +18,7 @@ import type {
 interface MessageRow {
   readonly id: string;
   readonly session_id: string;
+  readonly context_scope_id: string | null;
   readonly role: Message["role"];
   readonly agent: string | null;
   readonly created_at: number;
@@ -73,6 +75,10 @@ function messageAgent(message: Message): string | null {
   return "agent" in message ? (message.agent ?? null) : null;
 }
 
+function messageContextScope(message: Message): string | null {
+  return message.contextScopeId ?? null;
+}
+
 export function createDatabaseMessageStore(
   options: DatabaseMessageStoreOptions = {},
 ): MessageStore {
@@ -121,9 +127,10 @@ export function createDatabaseMessageStore(
     const timestamps = messageTimestamps(message);
     db.prepare(
       `UPDATE ${schema.message.tableName}
-       SET role = ?, agent = ?, created_at = ?, updated_at = ?, data = ?
+       SET context_scope_id = ?, role = ?, agent = ?, created_at = ?, updated_at = ?, data = ?
        WHERE id = ?`,
     ).run(
+      messageContextScope(message),
       message.role,
       messageAgent(message),
       timestamps.createdAt,
@@ -158,11 +165,12 @@ export function createDatabaseMessageStore(
         const timestamps = messageTimestamps(message);
         db.prepare(
           `INSERT INTO ${schema.message.tableName}
-            (id, session_id, role, agent, created_at, updated_at, data)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            (id, session_id, context_scope_id, role, agent, created_at, updated_at, data)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           message.id,
           message.sessionId,
+          messageContextScope(message),
           message.role,
           messageAgent(message),
           timestamps.createdAt,
@@ -207,6 +215,7 @@ export function createDatabaseMessageStore(
             throw new Error(`Message not found: ${input.message.id}`);
           }
           const part = {
+            contextScopeId: input.message.contextScopeId,
             id: input.partId,
             messageId: input.message.id,
             sessionId: input.message.sessionId,
@@ -266,30 +275,49 @@ export function createDatabaseMessageStore(
       );
     },
 
-    listBySession(sessionId: string): Promise<MessageWithParts[]> {
+    listBySession(
+      sessionId: string,
+      options?: MessageScopeFilter,
+    ): Promise<MessageWithParts[]> {
       return withAsyncBoundary(() => {
-        const messageRows = db
-          .prepare<MessageRow>(
-            `SELECT * FROM ${schema.message.tableName}
+        const contextScopeId = options?.contextScopeId;
+        const query =
+          contextScopeId === undefined
+            ? {
+                params: [sessionId],
+                sql: `SELECT * FROM ${schema.message.tableName}
               WHERE session_id = ?
               ORDER BY created_at ASC, rowid ASC`,
-          )
-          .all(sessionId);
-        return messageRows.map((messageRow) => {
-          const parts = db
-            .prepare<PartRow>(
-              `SELECT * FROM ${schema.part.tableName}
-               WHERE message_id = ?
-               ORDER BY order_index ASC`,
-            )
-            .all(messageRow.id)
-            .map(rowToPart)
-            .map(clone);
-          return {
-            info: clone(rowToMessage(messageRow)),
-            parts,
-          };
-        });
+              }
+            : {
+                params: [sessionId, contextScopeId],
+                sql: `SELECT * FROM ${schema.message.tableName}
+              WHERE session_id = ? AND context_scope_id = ?
+              ORDER BY created_at ASC, rowid ASC`,
+              };
+        const messageRows = db
+          .prepare<MessageRow>(query.sql)
+          .all(...query.params);
+        return messageRows
+          .map((messageRow) => ({
+            message: rowToMessage(messageRow),
+            row: messageRow,
+          }))
+          .map(({ message, row }) => {
+            const parts = db
+              .prepare<PartRow>(
+                `SELECT * FROM ${schema.part.tableName}
+                 WHERE message_id = ?
+                 ORDER BY order_index ASC`,
+              )
+              .all(row.id)
+              .map(rowToPart)
+              .map(clone);
+            return {
+              info: clone(message),
+              parts,
+            };
+          });
       });
     },
 

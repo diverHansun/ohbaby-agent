@@ -12,6 +12,7 @@ export function createMessage(input: {
   readonly now: () => number;
 }): Message {
   const base = {
+    contextScopeId: input.data.contextScopeId,
     id: input.idGenerator.messageId(),
     sessionId: input.data.sessionId,
     time: { created: input.now(), updated: input.now() },
@@ -54,6 +55,7 @@ export function createPart(input: {
   readonly orderIndex: number;
 }): Part {
   const base = {
+    contextScopeId: input.message.contextScopeId,
     id: input.idGenerator.partId(),
     messageId: input.message.id,
     sessionId: input.message.sessionId,

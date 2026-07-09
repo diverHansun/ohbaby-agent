@@ -129,6 +129,38 @@ describe("createDatabaseRunLedger", () => {
     });
   });
 
+  it("allows active runs in one session when context scopes differ", async () => {
+    const ledger = createDatabaseRunLedger({ now: createClock() });
+    insertSession("child_1");
+
+    await ledger.claimPendingRun({
+      contextScopeId: "subagent_1",
+      runId: "run_1",
+      sessionId: "child_1",
+      triggerSource: "user",
+    });
+    await expect(
+      ledger.claimPendingRun({
+        contextScopeId: "subagent_2",
+        runId: "run_2",
+        sessionId: "child_1",
+        triggerSource: "user",
+      }),
+    ).resolves.toMatchObject({
+      contextScopeId: "subagent_2",
+      runId: "run_2",
+      sessionId: "child_1",
+    });
+    await expect(
+      ledger.claimPendingRun({
+        contextScopeId: "subagent_1",
+        runId: "run_3",
+        sessionId: "child_1",
+        triggerSource: "user",
+      }),
+    ).rejects.toBeInstanceOf(SessionRunBusyError);
+  });
+
   it("allows only one same-session claim across two database connections", async () => {
     const firstConnection = new NodeSqliteConnection(getDatabase().path);
     const secondConnection = new NodeSqliteConnection(getDatabase().path);
