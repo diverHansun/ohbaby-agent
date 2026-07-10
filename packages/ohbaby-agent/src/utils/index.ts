@@ -3,6 +3,11 @@ export { loadRuntimeEnvIntoProcessEnv } from "./project-env.js";
 export { contains, containsOrEqual, normalizePath, overlaps } from "./paths.js";
 export { lazy, lazyAsync } from "./lazy.js";
 export {
+  isScopedSessionKeyForSession,
+  scopedSessionKey,
+  type ScopedSessionIdentity,
+} from "./scoped-session.js";
+export {
   checkEmptyContent,
   formatWithLineNumbers,
   type FormatOptions,

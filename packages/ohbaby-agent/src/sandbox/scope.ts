@@ -1,7 +1,5 @@
-import type {
-  SandboxScopeIdentity,
-  SandboxScopeInput,
-} from "./types.js";
+import type { SandboxScopeIdentity, SandboxScopeInput } from "./types.js";
+import { scopedSessionKey } from "../utils/scoped-session.js";
 
 export interface NormalizedSandboxScope extends SandboxScopeIdentity {
   readonly scopeKey: string;
@@ -25,10 +23,7 @@ export function normalizeSandboxScope(
 }
 
 export function sandboxScopeKey(input: SandboxScopeIdentity): string {
-  const encodedSessionId = encodeScopePart(input.sessionId);
-  return input.contextScopeId === undefined
-    ? encodedSessionId
-    : `${encodedSessionId}::${encodeScopePart(input.contextScopeId)}`;
+  return scopedSessionKey(input);
 }
 
 function encodeScopePart(value: string): string {

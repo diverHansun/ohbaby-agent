@@ -56,4 +56,5 @@ AC-6 不再写成“现状一定会溢出”。实施时必须拆成两段：
 - [x] `LifecycleEvent` / `RunWorker` stream payload 携带 `contextScopeId`。
 - [x] message 读写路径可按 `sessionId + contextScopeId` 过滤。
 - [x] `RunManager` 与 run ledger 的 active-run key 使用 `sessionId + contextScopeId`。
+- [x] `RunManager`、`ContextManager` 与 sandbox 通过同一个 `scopedSessionKey()` 生成进程内 scope key；不能各自手拼 `sessionId::contextScopeId`。
 - [x] 同一 `sessionId` 下两个不同 `contextScopeId` 的隔离测试已覆盖。

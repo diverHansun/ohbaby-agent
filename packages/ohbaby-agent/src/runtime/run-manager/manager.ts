@@ -1,4 +1,5 @@
 import type { RunLedgerRecord } from "../run-ledger/index.js";
+import { scopedSessionKey } from "../../utils/scoped-session.js";
 import { ConcurrencyRejectedError, RunManagerNotFoundError } from "./errors.js";
 import { mergeRunDefaults } from "./policy.js";
 import type {
@@ -56,15 +57,6 @@ function isActive(record: RunRecord): boolean {
   return ACTIVE_STATUSES.has(record.status);
 }
 
-function activeKey(input: {
-  readonly contextScopeId?: string;
-  readonly sessionId: string;
-}): string {
-  return input.contextScopeId === undefined
-    ? input.sessionId
-    : `${input.sessionId}::${input.contextScopeId}`;
-}
-
 function completionFromResult(result: RunWorkerResult): RunCompletion {
   const terminalReason = result.terminalReason ?? result.result?.terminalReason;
   const usage = result.result?.usage;
@@ -105,7 +97,7 @@ export class RunManager {
   }
 
   async create(options: CreateRunOptions): Promise<RunRecord> {
-    const lockKey = activeKey({
+    const lockKey = scopedSessionKey({
       contextScopeId: options.contextScopeId,
       sessionId: options.sessionId,
     });
@@ -366,7 +358,7 @@ export class RunManager {
   }
 
   private addActive(record: ManagedRunRecord): void {
-    const key = activeKey({
+    const key = scopedSessionKey({
       contextScopeId: record.options.contextScopeId,
       sessionId: record.sessionId,
     });
@@ -376,7 +368,7 @@ export class RunManager {
   }
 
   private removeActive(record: ManagedRunRecord): void {
-    const key = activeKey({
+    const key = scopedSessionKey({
       contextScopeId: record.options.contextScopeId,
       sessionId: record.sessionId,
     });
@@ -395,7 +387,9 @@ export class RunManager {
     readonly contextScopeId?: string;
     readonly sessionId: string;
   }): string[] {
-    const runIds = Array.from(this.activeBySession.get(activeKey(input)) ?? []);
+    const runIds = Array.from(
+      this.activeBySession.get(scopedSessionKey(input)) ?? [],
+    );
     return runIds.filter((runId) => {
       const record = this.recordsById.get(runId);
       return record ? isActive(record) : false;

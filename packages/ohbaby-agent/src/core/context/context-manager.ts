@@ -28,6 +28,10 @@ import { createMaskConfig, reduceForModel } from "./projection.js";
 import { serializeForLlm } from "./serializer.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
 import { estimateWireHeuristic } from "./token-estimation.js";
+import {
+  isScopedSessionKeyForSession,
+  scopedSessionKey,
+} from "../../utils/scoped-session.js";
 import type {
   AssembledContext,
   CompactOptions,
@@ -107,12 +111,6 @@ function tokenCount(
   content: string,
 ): number {
   return Math.max(0, tokenCounter.estimateTokens(content));
-}
-
-function contextStateKey(sessionId: string, contextScopeId?: string): string {
-  return contextScopeId === undefined
-    ? sessionId
-    : `${sessionId}::${contextScopeId}`;
 }
 
 export function getContextUsage(
@@ -394,7 +392,8 @@ export function createContextManager(
     contextScopeId?: string,
   ): number {
     return (
-      calibrationFactors.get(contextStateKey(sessionId, contextScopeId)) ?? 1.0
+      calibrationFactors.get(scopedSessionKey({ sessionId, contextScopeId })) ??
+      1.0
     );
   }
 
@@ -416,7 +415,7 @@ export function createContextManager(
       CALIBRATION_FACTOR_MAX,
       Math.max(CALIBRATION_FACTOR_MIN, observed),
     );
-    const key = contextStateKey(sessionId, contextScopeId);
+    const key = scopedSessionKey({ sessionId, contextScopeId });
     const previous = getCalibrationFactor(sessionId, contextScopeId);
     calibrationFactors.set(
       key,
@@ -425,27 +424,29 @@ export function createContextManager(
   }
 
   function resetThrashLock(sessionId: string, contextScopeId?: string): void {
-    thrashLocks.delete(contextStateKey(sessionId, contextScopeId));
+    thrashLocks.delete(scopedSessionKey({ sessionId, contextScopeId }));
   }
 
   function resetTurnCompactionCount(
     sessionId: string,
     contextScopeId?: string,
   ): void {
-    turnCompactionCounts.set(contextStateKey(sessionId, contextScopeId), 0);
+    turnCompactionCounts.set(
+      scopedSessionKey({ sessionId, contextScopeId }),
+      0,
+    );
   }
 
   function disposeSession(sessionId: string): void {
-    const prefix = `${sessionId}::`;
     for (const map of [calibrationFactors, maskCutoffs, turnCompactionCounts]) {
       for (const key of map.keys()) {
-        if (key === sessionId || key.startsWith(prefix)) {
+        if (isScopedSessionKeyForSession(key, sessionId)) {
           map.delete(key);
         }
       }
     }
     for (const key of thrashLocks.keys()) {
-      if (key === sessionId || key.startsWith(prefix)) {
+      if (isScopedSessionKeyForSession(key, sessionId)) {
         thrashLocks.delete(key);
       }
     }
@@ -456,7 +457,9 @@ export function createContextManager(
     contextScopeId?: string,
   ): number {
     return (
-      turnCompactionCounts.get(contextStateKey(sessionId, contextScopeId)) ?? 0
+      turnCompactionCounts.get(
+        scopedSessionKey({ sessionId, contextScopeId }),
+      ) ?? 0
     );
   }
 
@@ -465,7 +468,7 @@ export function createContextManager(
     contextScopeId?: string,
   ): void {
     turnCompactionCounts.set(
-      contextStateKey(sessionId, contextScopeId),
+      scopedSessionKey({ sessionId, contextScopeId }),
       getTurnCompactionCount(sessionId, contextScopeId) + 1,
     );
   }
@@ -475,7 +478,7 @@ export function createContextManager(
     usage: ContextUsage,
     contextScopeId?: string,
   ): boolean {
-    const key = contextStateKey(sessionId, contextScopeId);
+    const key = scopedSessionKey({ sessionId, contextScopeId });
     const state = thrashLocks.get(key);
     if (state?.lockedAtUsageRatio === undefined) {
       return false;
@@ -500,7 +503,7 @@ export function createContextManager(
       input.compression.originalTokens <= 0
         ? 0
         : input.compression.savedTokens / input.compression.originalTokens;
-    const key = contextStateKey(input.sessionId, input.contextScopeId);
+    const key = scopedSessionKey(input);
     const previous = thrashLocks.get(key);
     const recentSavingsRatios = [
       ...(previous?.recentSavingsRatios ?? []),
@@ -624,10 +627,10 @@ export function createContextManager(
       config: maskConfig,
       cutoff:
         maskCutoffs.get(
-          contextStateKey(
-            input.context.sessionId,
-            input.context.contextScopeId,
-          ),
+          scopedSessionKey({
+            contextScopeId: input.context.contextScopeId,
+            sessionId: input.context.sessionId,
+          }),
         ) ?? 0,
       history: input.context.history,
       sessionId: input.context.sessionId,
@@ -636,7 +639,10 @@ export function createContextManager(
     });
     if (input.allowCutoffAdvance) {
       maskCutoffs.set(
-        contextStateKey(input.context.sessionId, input.context.contextScopeId),
+        scopedSessionKey({
+          contextScopeId: input.context.contextScopeId,
+          sessionId: input.context.sessionId,
+        }),
         result.cutoff,
       );
     }
@@ -1224,7 +1230,13 @@ export function createContextManager(
       modelId: req.modelId,
     }).usage;
     if (compression.status === "compressed") {
-      maskCutoffs.set(contextStateKey(req.sessionId, req.contextScopeId), 0);
+      maskCutoffs.set(
+        scopedSessionKey({
+          contextScopeId: req.contextScopeId,
+          sessionId: req.sessionId,
+        }),
+        0,
+      );
     }
 
     return {
