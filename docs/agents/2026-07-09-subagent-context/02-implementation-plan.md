@@ -214,7 +214,7 @@ CREATE INDEX IF NOT EXISTS idx_subagent_instance_owner_status
 
 claim 必须用一次带前置条件的 store update 同时完成：`pendingQueue` 移除队首、写 `currentInput/currentRunId/status=running/owner`，且仅允许未关闭、当前非 running 的记录认领成功。SQLite 实现使用同一条 `UPDATE ... RETURNING` 返回本次写入的记录，不能在 update 后另做可被并发穿插的 select。这样既不会出现 prompt 已出队但没有 durable in-flight 记录的空窗，也不会让两个 host 同时执行一个 subagent。
 
-新增 prompt 不能读出整条 `pendingQueue` 后再覆盖写回。store 必须提供原子 `appendPendingQueue()`：SQLite 用单条 JSON append `UPDATE ... RETURNING` 追加可序列化输入；host 只有在 append 成功后才把它投影到内存 active queue。host 对同一 `subagentId` 的 append、claim、暂停收口和 close 使用同一临界区，避免本进程内 append 与整队列 claim snapshot 交叉覆盖。当前不是跨进程分布式队列；另一个 runtime 已持有 `running/currentRunId` 时仍明确拒绝新输入。
+新增 prompt 不能读出整条 `pendingQueue` 后再覆盖写回。store 必须提供原子 `appendPendingQueue()`：SQLite 用单条 JSON append `UPDATE ... RETURNING` 追加可序列化输入；host 只有在 append 成功后才把它投影到内存 active queue。host 对同一 `subagentId` 的 append、claim、暂停收口和 close 使用同一临界区，避免本进程内 append 与整队列 claim snapshot 交叉覆盖。这个串行保证仅覆盖同一个 host 实例；当前不是跨进程分布式队列，不能承诺多个 host 同时修改同一实例的严格线性化。另一个 runtime 已持有 `running/currentRunId` 时仍明确拒绝新输入。
 
 run 收口必须调用 `finishRun(subagentId, expectedCurrentRunId, update)` 做 compare-and-set。只有 durable `current_run_id` 仍等于本轮 run id 且记录未 close 时，成功/失败/timeout 才能落库；否则拒绝迟到结果，保证 close 或其他 owner 的新 claim 不被旧 run 覆盖。
 

@@ -758,9 +758,6 @@ export class SessionSubagentHost {
           active.claimCompletion = undefined;
           return;
         }
-        if (this.currentPauseReason(active) !== undefined) {
-          continue;
-        }
         if (!next) {
           active.claimCompletion?.resolve();
           active.claimCompletion = undefined;

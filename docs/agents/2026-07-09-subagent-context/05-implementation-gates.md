@@ -40,7 +40,8 @@
 - 同一 child session 下多个 subagent 并发运行时：run active 判断必须按 `session_id + context_scope_id`，不能只按 `session_id`。
 - sandbox 生命周期必须按 `{ sessionId, contextScopeId? }` lease 管理；释放一个 subagent 的 lease 不得销毁 sibling scope。
 - queue 出队与 `current_input/current_run_id/running/owner` 写入必须由 store 原子 `claim` 完成；run 收口必须按 expected `current_run_id` 做 CAS。
-- 新 prompt 必须由 store 原子 append 到 durable `pending_queue`；不得通过“读内存 queue 后整列覆盖”的方式追加。active queue 只能在 append 成功后更新，并且 append/claim/pause/close 按 `subagent_id` 串行化。
+- 若 parent interrupt 落在 claim 成功、turn 尚未启动之间，必须仍用同一 `finishRun` CAS 收口为 `interrupted` 并清除 `current_input/current_run_id`；不得直接跳过该 turn 而留下无法 resume 的 running 标记。
+- 新 prompt 必须由 store 原子 append 到 durable `pending_queue`；不得通过“读内存 queue 后整列覆盖”的方式追加。active queue 只能在 append 成功后更新，并且 append/claim/pause/close 在同一 host 内按 `subagent_id` 串行化；跨 host 的严格队列线性化不在本批承诺范围。
 - `interrupt:true` 只有在旧 turn 已 settle 时才能自动 drain；不响应 abort 的旧 turn 会使实例暂停为 `interrupted`。同进程内的后续显式 resume 只能追加 durable queue，必须等旧 turn settle 后才 claim 新 run。
 - parent run-tree interrupt 必须令该 parent 下全部 active turn 进入 `interrupted`，保留 queue且不得自动 drain；sibling parent 不受影响。
 - close 的逻辑终态与 sandbox 物理清理分层：host 关实例，composition 等 scoped lease settle 后销毁 context。

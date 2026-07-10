@@ -43,6 +43,7 @@ function createDeferred<T>(): Deferred<T> {
 class ObservableSandboxManager implements HostLocalSandboxManager {
   readonly acquired = new Map<string, SandboxLease>();
   readonly destroyed: string[] = [];
+  readonly destroyedSessions: string[] = [];
   readonly released: string[] = [];
 
   constructor(private readonly delegate: HostLocalSandboxManager) {}
@@ -67,8 +68,9 @@ class ObservableSandboxManager implements HostLocalSandboxManager {
     await this.delegate.destroyContext(input);
   }
 
-  destroySessionContexts(sessionId: string): Promise<void> {
-    return this.delegate.destroySessionContexts(sessionId);
+  async destroySessionContexts(sessionId: string): Promise<void> {
+    this.destroyedSessions.push(sessionId);
+    await this.delegate.destroySessionContexts(sessionId);
   }
 
   dispose(): Promise<void> {
@@ -361,6 +363,7 @@ describe("subagent runtime e2e", () => {
 
       expect(sandboxManager.released).not.toContain(secondScope);
       expect(sandboxManager.destroyed).toEqual([]);
+      expect(sandboxManager.destroyedSessions).toEqual([]);
       const secondLease = sandboxManager.acquired.get(secondScope);
       expect(secondLease?.resolvePath("still-running.txt")).toBe(
         `${workdir}/still-running.txt`,

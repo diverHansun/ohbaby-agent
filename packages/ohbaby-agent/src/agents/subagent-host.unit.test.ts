@@ -8,7 +8,10 @@ import type { ToolExecutionEnvironment } from "../core/tool-scheduler/index.js";
 import type { Session } from "../services/session/index.js";
 import type { RuntimeAgent } from "./types.js";
 import { InMemorySubagentInstanceStore } from "./subagents/in-memory-store.js";
-import type { SubagentInstanceUpdate } from "./subagents/types.js";
+import type {
+  SubagentInstanceRecord,
+  SubagentInstanceUpdate,
+} from "./subagents/types.js";
 import { SessionSubagentHost } from "./subagent-host.js";
 
 const parent: Session = {
@@ -136,6 +139,19 @@ class QueueAppendFailingStore extends InMemorySubagentInstanceStore {
   }
 }
 
+class ClaimHookStore extends InMemorySubagentInstanceStore {
+  onClaim?: () => void;
+
+  override async claim(
+    subagentId: string,
+    update: SubagentInstanceUpdate,
+  ): Promise<SubagentInstanceRecord | null> {
+    const claimed = await super.claim(subagentId, update);
+    this.onClaim?.();
+    return claimed;
+  }
+}
+
 function flushMicrotasks(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -228,6 +244,58 @@ describe("SessionSubagentHost", () => {
         expect.objectContaining({ pendingQueue: [], status: "completed" }),
       ],
     });
+  });
+
+  it("settles an interrupt delivered after a durable claim before starting its turn", async () => {
+    const store = new ClaimHookStore();
+    const { host, turn } = createHostFixture({ store });
+    let interrupted: Promise<readonly SubagentInstanceRecord[]> | undefined;
+    store.onClaim = (): void => {
+      interrupted = host.interruptByParent(
+        "parent_1",
+        "parent interrupted after claim",
+      );
+    };
+
+    const result = await host.run({
+      mode: "foreground",
+      parentSessionId: "parent_1",
+      prompt: "must not start",
+      role: "explore",
+    });
+    if (!interrupted) {
+      throw new Error("Expected the claim hook to interrupt the subagent");
+    }
+    await interrupted;
+
+    expect(turn).not.toHaveBeenCalled();
+    expect(result.item).toMatchObject({
+      currentInput: undefined,
+      currentRunId: undefined,
+      lastRunId: "run_1",
+      status: "interrupted",
+    });
+
+    store.onClaim = undefined;
+    await expect(
+      host.run({
+        mode: "foreground",
+        parentSessionId: "parent_1",
+        prompt: "resume after interruption",
+        subagentId: result.item.subagentId,
+      }),
+    ).resolves.toMatchObject({
+      item: {
+        currentInput: undefined,
+        currentRunId: undefined,
+        lastRunId: "run_2",
+        status: "completed",
+      },
+      success: true,
+    });
+    expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual([
+      "resume after interruption",
+    ]);
   });
 
   it("runs foreground subagents through scoped AgentInstance identity", async () => {
