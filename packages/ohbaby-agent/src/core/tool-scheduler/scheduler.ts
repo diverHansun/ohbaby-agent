@@ -101,6 +101,13 @@ export function timeoutForTool(
   return config.byTool?.[toolName] ?? config.defaultTimeout;
 }
 
+function shouldRetainSlotAfterAbort(
+  signal: AbortSignal,
+  toolSettled: boolean,
+): boolean {
+  return signal.aborted && !toolSettled;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -740,6 +747,7 @@ export function createToolScheduler(
     controller: AbortController,
     environment: ToolExecutionEnvironment | undefined,
     params: Record<string, unknown>,
+    retainSlotUntilSettled: (toolPromise: Promise<unknown>) => void,
   ): Promise<ToolExecutionResult> {
     if (controller.signal.aborted) {
       throw new SchedulerAbortError("cancelled");
@@ -747,6 +755,7 @@ export function createToolScheduler(
     let timedOut = false;
     let timeout: NodeJS.Timeout | undefined;
     let removeAbortListener = (): void => undefined;
+    let toolSettled = false;
     const toolPromise = Promise.resolve(
       tool.execute(params, {
         callId: call.callId,
@@ -755,7 +764,9 @@ export function createToolScheduler(
         sessionId: call.sessionId,
         signal: controller.signal,
       }),
-    );
+    ).finally(() => {
+      toolSettled = true;
+    });
     void toolPromise.catch(() => undefined);
     const abortPromise = new Promise<never>((_resolve, reject) => {
       const onAbort = (): void => {
@@ -765,18 +776,23 @@ export function createToolScheduler(
         controller.signal.removeEventListener("abort", onAbort);
       };
       controller.signal.addEventListener("abort", onAbort, { once: true });
-      timeout = setTimeout(
-        () => {
-          timedOut = true;
-          controller.abort();
-        },
-        timeoutForTool(config.timeout, tool.name),
-      );
+      if (tool.timeoutOwner !== "tool") {
+        timeout = setTimeout(
+          () => {
+            timedOut = true;
+            controller.abort();
+          },
+          timeoutForTool(config.timeout, tool.name),
+        );
+      }
     });
 
     try {
       return await Promise.race([toolPromise, abortPromise]);
     } finally {
+      if (shouldRetainSlotAfterAbort(controller.signal, toolSettled)) {
+        retainSlotUntilSettled(toolPromise);
+      }
       if (timeout) {
         clearTimeout(timeout);
       }
@@ -831,7 +847,10 @@ export function createToolScheduler(
             {
               callId: call.callId,
               toolName: call.toolName,
-              category: call.category,
+              category:
+                call.category === "subagent-control"
+                  ? "subagent"
+                  : call.category,
               params: context.params,
               sessionId: call.sessionId,
               messageId: call.messageId,
@@ -1337,6 +1356,7 @@ export function createToolScheduler(
       return makeCancelledResult(call);
     }
 
+    let deferredRelease: Promise<unknown> | undefined;
     try {
       if (isStopped(call, controller)) {
         return makeCancelledResult(call);
@@ -1360,6 +1380,9 @@ export function createToolScheduler(
         controller,
         environment,
         params,
+        (toolPromise) => {
+          deferredRelease = toolPromise;
+        },
       );
       if (isStopped(call, controller)) {
         return makeCancelledResult(call);
@@ -1388,7 +1411,18 @@ export function createToolScheduler(
         error: createError("ExecutionError", errorMessage(error), error),
       });
     } finally {
-      concurrency.release(call.category);
+      if (deferredRelease) {
+        void deferredRelease.then(
+          () => {
+            concurrency.release(call.category);
+          },
+          () => {
+            concurrency.release(call.category);
+          },
+        );
+      } else {
+        concurrency.release(call.category);
+      }
       if (call.result) {
         bus.publish(ToolSchedulerEvent.ExecutionCompleted, {
           callId: call.callId,

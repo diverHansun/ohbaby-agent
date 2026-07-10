@@ -183,7 +183,7 @@ function withStartupRecovery(
 
   return {
     dispose(): ReturnType<InProcessUiBackendClient["dispose"]> {
-      client.dispose();
+      return client.dispose();
     },
     async getSnapshot(): ReturnType<UiBackendClient["getSnapshot"]> {
       await ready();

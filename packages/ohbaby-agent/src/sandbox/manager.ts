@@ -41,6 +41,8 @@ export class SandboxManager implements SandboxManagerPort {
   private readonly contexts = new Map<string, InternalSandboxContext>();
   private readonly leases = new Map<string, InternalSandboxContext>();
   private readonly pendingCreates = new Set<string>();
+  private readonly pendingCreateSettlements = new Map<string, Promise<void>>();
+  private readonly pendingDestroys = new Map<string, Promise<void>>();
   private readonly drainTimeoutMs: number;
   private readonly now: () => number;
   private readonly createContextId: () => string;
@@ -68,6 +70,11 @@ export class SandboxManager implements SandboxManagerPort {
     }
 
     this.pendingCreates.add(scope.scopeKey);
+    let settleCreate!: () => void;
+    const createSettlement = new Promise<void>((resolve) => {
+      settleCreate = resolve;
+    });
+    this.pendingCreateSettlements.set(scope.scopeKey, createSettlement);
     const adapterId = options.adapterId ?? DEFAULT_ADAPTER_ID;
     try {
       const adapter = this.options.adapterRegistry.get(adapterId);
@@ -108,6 +115,12 @@ export class SandboxManager implements SandboxManagerPort {
       return snapshotContext(context);
     } finally {
       this.pendingCreates.delete(scope.scopeKey);
+      if (
+        this.pendingCreateSettlements.get(scope.scopeKey) === createSettlement
+      ) {
+        this.pendingCreateSettlements.delete(scope.scopeKey);
+      }
+      settleCreate();
     }
   }
 
@@ -154,8 +167,28 @@ export class SandboxManager implements SandboxManagerPort {
     return context ? snapshotContext(context) : undefined;
   }
 
-  async destroyContext(input: SandboxScopeInput): Promise<void> {
+  destroyContext(input: SandboxScopeInput): Promise<void> {
     const scope = normalizeSandboxScope(input);
+    const existing = this.pendingDestroys.get(scope.scopeKey);
+    if (existing) {
+      return existing;
+    }
+    const operation = this.destroyContextAfterCreate(scope);
+    this.pendingDestroys.set(scope.scopeKey, operation);
+    const clear = (): void => {
+      if (this.pendingDestroys.get(scope.scopeKey) === operation) {
+        this.pendingDestroys.delete(scope.scopeKey);
+      }
+    };
+    void operation.then(clear, clear);
+    return operation;
+  }
+
+  private async destroyContextAfterCreate(
+    input: SandboxScopeInput,
+  ): Promise<void> {
+    const scope = normalizeSandboxScope(input);
+    await this.pendingCreateSettlements.get(scope.scopeKey);
     const context = this.contexts.get(scope.scopeKey);
     if (!context) {
       return;

@@ -153,6 +153,29 @@ describe("SandboxManager", () => {
     }
   });
 
+  it("waits for an in-flight create before destroying the same scope", async () => {
+    const registry = new AdapterRegistry();
+    const adapter = new BlockingCreateAdapter();
+    registry.register(adapter);
+    const manager = new SandboxManager({ adapterRegistry: registry });
+
+    const creating = manager.createContext("session_1", {
+      adapterId: "fake",
+      workdir: "D:/repo",
+    });
+    const firstDestroy = manager.destroyContext("session_1");
+    const secondDestroy = manager.destroyContext("session_1");
+    adapter.createGate.resolve({
+      metadata: { sessionId: "session_1" },
+      workdir: "D:/repo",
+    });
+
+    await creating;
+    await Promise.all([firstDestroy, secondDestroy]);
+    expect(adapter.destroyed).toHaveLength(1);
+    expect(manager.getContext("session_1")).toBeUndefined();
+  });
+
   it("ensureContext returns an existing context without creating another adapter handle", async () => {
     const { adapter, manager } = createManager();
 
@@ -238,10 +261,16 @@ describe("SandboxManager", () => {
       contextScopeId: "subagent_a",
     });
     expect(
-      manager.getContext({ sessionId: "child_1", contextScopeId: "subagent_a" }),
+      manager.getContext({
+        sessionId: "child_1",
+        contextScopeId: "subagent_a",
+      }),
     ).toBeUndefined();
     expect(
-      manager.getContext({ sessionId: "child_1", contextScopeId: "subagent_b" }),
+      manager.getContext({
+        sessionId: "child_1",
+        contextScopeId: "subagent_b",
+      }),
     ).toMatchObject({
       status: "active",
       workdir: path.resolve("D:/repo/b"),
@@ -253,13 +282,10 @@ describe("SandboxManager", () => {
   it("escapes scope key parts to avoid delimiter collisions", async () => {
     const { manager } = createManager();
 
-    const stringSession = await manager.createContext(
-      "child_1::subagent_a",
-      {
-        adapterId: "fake",
-        workdir: "D:/repo/string-session",
-      },
-    );
+    const stringSession = await manager.createContext("child_1::subagent_a", {
+      adapterId: "fake",
+      workdir: "D:/repo/string-session",
+    });
     const scopedSession = await manager.createContext(
       { sessionId: "child_1", contextScopeId: "subagent_a" },
       {
@@ -274,7 +300,10 @@ describe("SandboxManager", () => {
       workdir: path.resolve("D:/repo/string-session"),
     });
     expect(
-      manager.getContext({ sessionId: "child_1", contextScopeId: "subagent_a" }),
+      manager.getContext({
+        sessionId: "child_1",
+        contextScopeId: "subagent_a",
+      }),
     ).toMatchObject({
       workdir: path.resolve("D:/repo/scoped-session"),
     });

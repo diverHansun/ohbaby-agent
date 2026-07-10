@@ -25,6 +25,7 @@ function getErrorMessage(error: unknown): string {
 
 export class InProcessRuntimeController {
   private activeRunId: string | undefined;
+  private resetBarrier: Promise<void> = Promise.resolve();
   private runtimePromise: Promise<UiRuntimeComposition> | undefined;
 
   constructor(private readonly options: InProcessRuntimeControllerOptions) {}
@@ -46,21 +47,37 @@ export class InProcessRuntimeController {
   }
 
   getRuntime(): Promise<UiRuntimeComposition> {
-    this.runtimePromise ??= this.options
-      .createRuntime()
+    if (this.runtimePromise) {
+      return this.runtimePromise;
+    }
+    const creation = this.resetBarrier
+      .then(() => this.options.createRuntime())
       .catch((error: unknown) => {
-        this.runtimePromise = undefined;
+        if (this.runtimePromise === creation) {
+          this.runtimePromise = undefined;
+        }
         throw error;
       });
-    return this.runtimePromise;
+    this.runtimePromise = creation;
+    return creation;
   }
 
   getRuntimeIfStarted(): Promise<UiRuntimeComposition> | undefined {
     return this.runtimePromise;
   }
 
-  resetRuntime(): void {
+  resetRuntime(): Promise<void> {
+    const runtimePromise = this.runtimePromise;
     this.runtimePromise = undefined;
+    const operation = this.resetBarrier.then(async () => {
+      if (!runtimePromise) {
+        return;
+      }
+      const runtime = await runtimePromise;
+      await runtime.dispose();
+    });
+    this.resetBarrier = operation.catch(() => undefined);
+    return operation;
   }
 
   async getRuntimeForPrompt(): Promise<UiRuntimeComposition> {

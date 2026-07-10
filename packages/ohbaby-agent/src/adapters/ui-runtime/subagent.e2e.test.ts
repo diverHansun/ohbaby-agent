@@ -53,7 +53,7 @@ function subagentRunEvent(): InterfaceProviderStreamEvent {
           description: "Explore second e2e",
           mode: "foreground",
           prompt: "Find the second e2e target",
-          role: "explore",
+          role: "research",
         }),
         id: "call_subagent_run_2",
         index: 1,
@@ -88,14 +88,14 @@ function fakeLlmClient(
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         requests.push(request);
         const messages = JSON.stringify(request.messages);
+        if (messages.includes("Task: research")) {
+          return Promise.resolve(
+            createProviderStream([
+              { finishReason: "stop", textDelta: "child second result" },
+            ]),
+          );
+        }
         if (messages.includes("Task: explore")) {
-          if (messages.includes("Find the second e2e target")) {
-            return Promise.resolve(
-              createProviderStream([
-                { finishReason: "stop", textDelta: "child second result" },
-              ]),
-            );
-          }
           return Promise.resolve(
             createProviderStream([
               { finishReason: "stop", textDelta: "child first result" },
@@ -122,7 +122,7 @@ function fakeLlmClient(
 }
 
 describe("subagent runtime e2e", () => {
-  it("runs concurrent foreground subagents through isolated instance contexts in one child session", async () => {
+  it("runs different-role foreground subagents through isolated instance contexts in one child session", async () => {
     const bus = createBus();
     const workdir = process.cwd();
     const messageManager = createMessageManager({
@@ -169,9 +169,11 @@ describe("subagent runtime e2e", () => {
       prompt: "Delegate subagent e2e",
       sessionId: "session_parent",
     });
-    await expect(
-      composition.runManager.waitForCompletion(result.runId),
-    ).resolves.toMatchObject({ status: "succeeded" });
+    const completion = await composition.runManager.waitForCompletion(
+      result.runId,
+    );
+    expect(completion.error).toBeUndefined();
+    expect(completion.status).toBe("succeeded");
 
     const parentMessages = await messageManager.listBySession("session_parent");
     const childMessages = await messageManager.listBySession("session_child", {
@@ -210,5 +212,15 @@ describe("subagent runtime e2e", () => {
     );
     expect(scopedOutMessages).toHaveLength(0);
     expect(requests).toHaveLength(4);
+    expect(
+      requests.filter((request) =>
+        JSON.stringify(request.messages).includes("Task: explore"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      requests.filter((request) =>
+        JSON.stringify(request.messages).includes("Task: research"),
+      ),
+    ).toHaveLength(1);
   });
 });

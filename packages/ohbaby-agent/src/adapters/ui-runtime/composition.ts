@@ -278,9 +278,13 @@ export async function createUiRuntimeComposition(
   }
 
   async function resolvePromptAgentName(input: {
+    readonly agentName?: string;
     readonly isSubagent: boolean;
     readonly sessionId: string;
   }): Promise<string> {
+    if (input.agentName) {
+      return input.agentName;
+    }
     const sessionAgentName = (await sessionManager.get(input.sessionId))
       ?.agentName;
     return (
@@ -399,15 +403,6 @@ export async function createUiRuntimeComposition(
 
   const runEventSource = createStreamBridgeRunEventSource(streamBridge);
 
-  const agentService = new AgentService({
-    agentManager,
-    messageManager: options.messageManager,
-    modelId: options.llmClient.config.model,
-    runCoordinator: runManager,
-    runEventSource,
-    sessionManager,
-    toolScheduler,
-  });
   const agentInstanceFactory = createAgentInstanceFactory({
     deps: {
       messageManager: options.messageManager,
@@ -416,9 +411,16 @@ export async function createUiRuntimeComposition(
       toolScheduler,
     },
   });
+  const agentService = new AgentService({
+    agentManager,
+    instanceFactory: agentInstanceFactory,
+    modelId: options.llmClient.config.model,
+    sessionManager,
+  });
   const subagentHost = new SessionSubagentHost({
     agentManager,
     createSubagentId: options.createSubagentId,
+    createRunId: options.createRunId,
     instanceFactory: agentInstanceFactory,
     modelId: options.llmClient.config.model,
     ownerId: options.subagentOwnerId,
@@ -611,6 +613,14 @@ export async function createUiRuntimeComposition(
 
     cancel(runId, reason): void {
       runManager.cancel(runId, reason);
+    },
+
+    async dispose(): Promise<void> {
+      toolScheduler.cancelAll();
+      await Promise.all([
+        subagentHost.dispose(),
+        runManager.cancelAll("runtime disposed"),
+      ]);
     },
   };
 }

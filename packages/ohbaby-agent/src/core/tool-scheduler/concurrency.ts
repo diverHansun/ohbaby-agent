@@ -25,7 +25,7 @@ export class ConcurrencyController {
   constructor(private readonly config: ConcurrencyConfig) {}
 
   canExecute(category: ToolCategory): boolean {
-    if (category === "memory") {
+    if (category === "memory" || category === "subagent-control") {
       return true;
     }
     if (category === "subagent") {

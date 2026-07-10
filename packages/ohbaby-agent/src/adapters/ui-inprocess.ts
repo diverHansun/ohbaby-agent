@@ -189,7 +189,7 @@ export interface InProcessUiBackendOptions {
 }
 
 export interface InProcessUiBackendClient extends UiBackendClient {
-  dispose(): void;
+  dispose(): Promise<void>;
 }
 
 function isSnapshot(
@@ -1638,7 +1638,7 @@ export function createInProcessUiBackendClient(
         ...input,
         projectRoot,
       });
-      runtimeController.resetRuntime();
+      await runtimeController.resetRuntime();
       contextWindowUsage.clear();
       await publishSnapshotReplacement();
       return result;
@@ -1888,9 +1888,10 @@ export function createInProcessUiBackendClient(
     }),
   );
   return {
-    dispose(): void {
+    async dispose(): Promise<void> {
       promptController.close();
       eventRouter.dispose();
+      await runtimeController.resetRuntime();
     },
 
     getSnapshot(): Promise<UiSnapshot> {

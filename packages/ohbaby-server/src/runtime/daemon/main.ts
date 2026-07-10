@@ -25,6 +25,22 @@ import { isAddressInUseError } from "../../transport/node-listen.js";
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4096;
 const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+let activeLocalDaemonDatabases = 0;
+
+function retainLocalDaemonDatabase(): () => void {
+  activeLocalDaemonDatabases += 1;
+  let released = false;
+  return (): void => {
+    if (released) {
+      return;
+    }
+    released = true;
+    activeLocalDaemonDatabases = Math.max(0, activeLocalDaemonDatabases - 1);
+    if (activeLocalDaemonDatabases === 0) {
+      closePersistentUiBackendDatabase();
+    }
+  };
+}
 
 export interface StartDaemonServerOptions {
   readonly host?: string;
@@ -71,6 +87,7 @@ function createServerRuntime(input: {
   readonly authToken: string;
   readonly backend: PersistentUiBackendClient;
   readonly packageVersion: string;
+  readonly releaseDatabase: () => void;
   readonly scopeRoot: string;
   readonly server: DaemonHttpServerHandle;
 }): DaemonRuntimeHandle {
@@ -98,7 +115,7 @@ function createServerRuntime(input: {
             await McpManager.disposeAll();
           }
         } finally {
-          closePersistentUiBackendDatabase();
+          input.releaseDatabase();
         }
       }
     },
@@ -269,6 +286,7 @@ async function startFreshDaemon(input: {
           : { llmClient: input.options.llmClient }),
         workdir: input.options.workdir ?? input.scopeRoot,
       });
+      const releaseDatabase = retainLocalDaemonDatabase();
       server = createDaemonHttpServer({
         authToken: input.authToken,
         backend,
@@ -288,6 +306,7 @@ async function startFreshDaemon(input: {
         authToken: input.authToken,
         backend,
         packageVersion: input.packageVersion,
+        releaseDatabase,
         scopeRoot: input.scopeRoot,
         server,
       });

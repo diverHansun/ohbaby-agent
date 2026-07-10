@@ -105,7 +105,11 @@ export class RunManager {
   }
 
   async create(options: CreateRunOptions): Promise<RunRecord> {
-    return this.withSessionLock(options.sessionId, async () => {
+    const lockKey = activeKey({
+      contextScopeId: options.contextScopeId,
+      sessionId: options.sessionId,
+    });
+    return this.withSessionLock(lockKey, async () => {
       const resolved = mergeRunDefaults(
         this.deps.policy,
         options.triggerSource,
@@ -245,6 +249,12 @@ export class RunManager {
           this.publishRunUpdated(record);
         },
       });
+      if (record.abortController.signal.aborted) {
+        outcome = {
+          status: "cancelled",
+          error: record.cancelReason ?? "run cancelled",
+        };
+      }
     } catch (error) {
       outcome = {
         status: record.abortController.signal.aborted ? "cancelled" : "failed",
@@ -393,16 +403,16 @@ export class RunManager {
   }
 
   private async withSessionLock<T>(
-    sessionId: string,
+    lockKey: string,
     operation: () => Promise<T>,
   ): Promise<T> {
-    const previous = this.sessionLocks.get(sessionId) ?? Promise.resolve();
+    const previous = this.sessionLocks.get(lockKey) ?? Promise.resolve();
     let release!: () => void;
     const current = new Promise<void>((resolve) => {
       release = resolve;
     });
     const chain = previous.catch(() => undefined).then(() => current);
-    this.sessionLocks.set(sessionId, chain);
+    this.sessionLocks.set(lockKey, chain);
 
     await previous.catch(() => undefined);
 
@@ -410,8 +420,8 @@ export class RunManager {
       return await operation();
     } finally {
       release();
-      if (this.sessionLocks.get(sessionId) === chain) {
-        this.sessionLocks.delete(sessionId);
+      if (this.sessionLocks.get(lockKey) === chain) {
+        this.sessionLocks.delete(lockKey);
       }
     }
   }

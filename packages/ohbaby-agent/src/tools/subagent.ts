@@ -92,6 +92,14 @@ function renderStatus(result: SubagentStatusResult): string {
         `session_id: ${item.sessionId}`,
         `context_scope_id: ${item.contextScopeId}`,
         `status: ${item.status}`,
+        item.currentRunId ? `current_run_id: ${item.currentRunId}` : undefined,
+        item.lastRunId ? `last_run_id: ${item.lastRunId}` : undefined,
+        item.pendingQueue.length > 0
+          ? `pending_inputs: ${String(item.pendingQueue.length)}`
+          : undefined,
+        item.currentInput
+          ? `<current_input>\n${item.currentInput.prompt}\n</current_input>`
+          : undefined,
         item.output
           ? `<subagent_output>\n${item.output}\n</subagent_output>`
           : undefined,
@@ -137,12 +145,13 @@ export function createSubagentTools(host: SubagentToolHost): readonly Tool[] {
         },
         subagent_id: { type: "string" },
         interrupt: { type: "boolean" },
-        timeout_ms: { minimum: 1, type: "integer" },
+        timeout_ms: { maximum: 7_200_000, minimum: 1, type: "integer" },
       },
       required: ["prompt"],
       type: "object",
     },
     source: "builtin",
+    timeoutOwner: "tool",
     async execute(params, context): Promise<ToolExecutionResult> {
       const subagentId = getOptionalNonEmptyStringParam(params, "subagent_id");
       const timeoutMs = optionalPositiveInteger(params, "timeout_ms");
@@ -168,7 +177,7 @@ export function createSubagentTools(host: SubagentToolHost): readonly Tool[] {
 
   const status: Tool = {
     annotations: { readOnlyHint: true },
-    category: "subagent",
+    category: "subagent-control",
     description:
       "List subagent statuses for this parent session, or inspect one subagent_id.",
     name: "subagent_status",
@@ -193,7 +202,7 @@ export function createSubagentTools(host: SubagentToolHost): readonly Tool[] {
   };
 
   const close: Tool = {
-    category: "subagent",
+    category: "subagent-control",
     description: "Close or cancel a subagent by subagent_id.",
     name: "subagent_close",
     parametersJsonSchema: {

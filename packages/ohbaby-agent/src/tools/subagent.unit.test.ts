@@ -73,6 +73,19 @@ describe("subagent builtin tools", () => {
     expect(names).not.toEqual(
       expect.arrayContaining(["task", "agent_open", "agent_eval"]),
     );
+    expect(
+      createBuiltinTools({ subagentHost: host }).find(
+        (tool) => tool.name === "subagent_run",
+      )?.timeoutOwner,
+    ).toBe("tool");
+    expect(
+      getTool(createBuiltinTools({ subagentHost: host }), "subagent_status")
+        .category,
+    ).toBe("subagent-control");
+    expect(
+      getTool(createBuiltinTools({ subagentHost: host }), "subagent_close")
+        .category,
+    ).toBe("subagent-control");
   });
 
   it("runs, lists status items, and closes through SessionSubagentHost", async () => {
@@ -141,5 +154,29 @@ describe("subagent builtin tools", () => {
         timeoutMs: 1_000,
       }),
     );
+  });
+
+  it("renders durable in-flight and queued state for interrupted subagents", async () => {
+    const { host, status } = createHost();
+    status.mockResolvedValueOnce({
+      items: [
+        {
+          ...item,
+          currentInput: { prompt: "in-flight prompt" },
+          lastRunId: "run_1",
+          output: undefined,
+          pendingQueue: [{ prompt: "queued prompt" }],
+          status: "interrupted",
+        },
+      ],
+    });
+    const result = await getTool(
+      createBuiltinTools({ subagentHost: host }),
+      "subagent_status",
+    ).execute({}, context);
+
+    expect(result.output).toContain("last_run_id: run_1");
+    expect(result.output).toContain("pending_inputs: 1");
+    expect(result.output).toContain("in-flight prompt");
   });
 });

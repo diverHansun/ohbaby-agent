@@ -48,4 +48,5 @@ export interface UiRuntimeComposition {
     readonly agentName?: string;
   }): Promise<readonly CommandToolSummary[]>;
   cancel(runId: string, reason?: string): void;
+  dispose(): Promise<void>;
 }

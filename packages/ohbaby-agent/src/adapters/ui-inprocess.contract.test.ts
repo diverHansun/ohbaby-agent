@@ -567,13 +567,10 @@ function createResumableTaskFakeLLMClient(
         }
         if (lastText.includes("Continue the same exploration")) {
           const subagentId =
-            subagentIdFromMessages(request.messages) ??
-            lastSubagentSessionId;
+            subagentIdFromMessages(request.messages) ?? lastSubagentSessionId;
           if (!subagentId) {
             return Promise.reject(
-              new Error(
-                "Expected previous subagent id in parent context",
-              ),
+              new Error("Expected previous subagent id in parent context"),
             );
           }
           return Promise.resolve(
@@ -589,8 +586,7 @@ function createResumableTaskFakeLLMClient(
         }
         if (lastText.includes("child found auth.ts")) {
           lastSubagentSessionId =
-            subagentIdFromMessages(request.messages) ??
-            lastSubagentSessionId;
+            subagentIdFromMessages(request.messages) ?? lastSubagentSessionId;
           return Promise.resolve(
             createProviderStream([
               { textDelta: "parent saw child 1", finishReason: "stop" },
@@ -4928,9 +4924,9 @@ describe("createInProcessUiBackendClient", () => {
     ]);
     expect(activeSubscriptions()).toBeGreaterThan(0);
 
-    client.dispose();
+    await client.dispose();
     expect(activeSubscriptions()).toBe(0);
-    client.dispose();
+    await client.dispose();
     expect(activeSubscriptions()).toBe(0);
     events.length = 0;
 
@@ -5925,7 +5921,7 @@ describe("createInProcessUiBackendClient", () => {
       });
       await execution;
     } finally {
-      client?.dispose();
+      await client?.dispose();
       await rm(currentProjectRoot, {
         force: true,
         maxRetries: 5,

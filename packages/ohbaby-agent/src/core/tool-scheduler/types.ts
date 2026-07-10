@@ -16,7 +16,8 @@ export type ToolCategory =
   | "network"
   | "memory"
   | "skill"
-  | "subagent";
+  | "subagent"
+  | "subagent-control";
 
 export type ToolSource = "builtin" | "module" | "skill" | "mcp";
 
@@ -103,6 +104,7 @@ export interface Tool {
   readonly parametersJsonSchema: Record<string, unknown>;
   readonly source: ToolSource;
   readonly category?: ToolCategory;
+  readonly timeoutOwner?: "scheduler" | "tool";
   readonly requireExplicitApproval?: boolean;
   /** @deprecated MCP trust is MCP-local metadata; scheduler uses requireExplicitApproval. */
   readonly isTrusted?: boolean;

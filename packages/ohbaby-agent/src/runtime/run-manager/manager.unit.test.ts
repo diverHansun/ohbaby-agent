@@ -75,7 +75,9 @@ function sandboxInputScopeKey(input: RecordingSandboxAcquireInput): string {
     : `${input.sessionId}::${input.contextScopeId}`;
 }
 
-function createTestSandboxLease(input: RecordingSandboxAcquireInput): SandboxLease {
+function createTestSandboxLease(
+  input: RecordingSandboxAcquireInput,
+): SandboxLease {
   const sessionId = sandboxInputSessionId(input);
   const scopeKey = sandboxInputScopeKey(input);
   const workdir = `workspace/${scopeKey}`;
@@ -90,7 +92,8 @@ function createTestSandboxLease(input: RecordingSandboxAcquireInput): SandboxLea
     },
     containsTrustedPath: () => true,
     contextId: `context_${scopeKey}`,
-    contextScopeId: typeof input === "string" ? undefined : input.contextScopeId,
+    contextScopeId:
+      typeof input === "string" ? undefined : input.contextScopeId,
     leaseId: `lease_${scopeKey}`,
     preflight: () => Promise.resolve(emptyPreflight()),
     release: () => Promise.resolve(),
@@ -479,6 +482,36 @@ class BlockingLifecycle implements RunLifecycle {
     };
     await this.finish.promise;
 
+    return {
+      success: true,
+      finishReason: "stop",
+      finalResponse: "",
+    };
+  }
+}
+
+class FirstScopeBlockingLifecycle implements RunLifecycle {
+  readonly firstFinish = createDeferred<undefined>();
+  readonly started: string[] = [];
+  private firstScopeCalls = 0;
+
+  async *run(
+    params: LifecycleSessionParams,
+  ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
+    const scope = params.contextScopeId ?? params.sessionId;
+    this.started.push(scope);
+    yield {
+      type: "llm:start",
+      sessionId: params.sessionId,
+      step: 1,
+      timestamp: 10,
+    };
+    if (scope === "subagent_1") {
+      this.firstScopeCalls += 1;
+      if (this.firstScopeCalls === 1) {
+        await this.firstFinish.promise;
+      }
+    }
     return {
       success: true,
       finishReason: "stop",
@@ -934,6 +967,57 @@ describe("RunManager", () => {
       "lease_child_1::subagent_1",
       "lease_child_1::subagent_2",
     ]);
+  });
+
+  it("does not let a blocked replacement in one scope lock a sibling scope", async () => {
+    const lifecycle = new FirstScopeBlockingLifecycle();
+    const { manager } = createManager(lifecycle);
+    const first = await manager.create({
+      contextScopeId: "subagent_1",
+      directory: "D:/repo/one",
+      isSubagent: true,
+      modelId: "fake-model",
+      sessionId: "child_1",
+      triggerSource: "user",
+    });
+    await vi.waitFor(() => {
+      expect(lifecycle.started).toContain("subagent_1");
+    });
+
+    const replacement = manager.create({
+      contextScopeId: "subagent_1",
+      directory: "D:/repo/one",
+      explicit: { multitaskStrategy: "interrupt-current" },
+      isSubagent: true,
+      modelId: "fake-model",
+      sessionId: "child_1",
+      triggerSource: "user",
+    });
+    const sibling = await manager.create({
+      contextScopeId: "subagent_2",
+      directory: "D:/repo/two",
+      isSubagent: true,
+      modelId: "fake-model",
+      sessionId: "child_1",
+      triggerSource: "user",
+    });
+    await vi.waitFor(() => {
+      expect(lifecycle.started).toContain("subagent_2");
+    });
+    await expect(manager.waitForCompletion(sibling.runId)).resolves.toEqual({
+      status: "succeeded",
+    });
+
+    lifecycle.firstFinish.resolve(undefined);
+    const next = await replacement;
+    await expect(manager.waitForCompletion(first.runId)).resolves.toMatchObject(
+      {
+        status: "cancelled",
+      },
+    );
+    await expect(manager.waitForCompletion(next.runId)).resolves.toEqual({
+      status: "succeeded",
+    });
   });
 
   it("returns lifecycle token usage in run completion", async () => {

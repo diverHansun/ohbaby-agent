@@ -135,6 +135,7 @@ function createTool(input: {
   readonly parametersJsonSchema?: Tool["parametersJsonSchema"];
   readonly requireExplicitApproval?: Tool["requireExplicitApproval"];
   readonly source?: Tool["source"];
+  readonly timeoutOwner?: Tool["timeoutOwner"];
 }): Tool {
   return {
     category: input.category,
@@ -148,6 +149,7 @@ function createTool(input: {
     parametersJsonSchema: input.parametersJsonSchema ?? {},
     requireExplicitApproval: input.requireExplicitApproval,
     source: input.source ?? "builtin",
+    timeoutOwner: input.timeoutOwner,
   };
 }
 
@@ -193,20 +195,20 @@ function createScheduler(
 }
 
 describe("ToolScheduler", () => {
-  it("uses a longer guard timeout for subagent_run without extending other subagent tools", () => {
+  it("resolves per-tool scheduler timeout overrides", () => {
     expect(
       timeoutForTool(
         {
-          byTool: { subagent_run: 310_000 },
+          byTool: { subagent_run: 7_210_000 },
           defaultTimeout: 120_000,
         },
         "subagent_run",
       ),
-    ).toBe(310_000);
+    ).toBe(7_210_000);
     expect(
       timeoutForTool(
         {
-          byTool: { subagent_run: 310_000 },
+          byTool: { subagent_run: 7_210_000 },
           defaultTimeout: 120_000,
         },
         "subagent_status",
@@ -214,7 +216,7 @@ describe("ToolScheduler", () => {
     ).toBe(120_000);
   });
 
-  it("applies the subagent_run guard timeout through the actual execution path", async () => {
+  it("lets tool-owned deadlines bypass scheduler timeout while preserving cancellation", async () => {
     vi.useFakeTimers();
     try {
       const started: string[] = [];
@@ -227,6 +229,7 @@ describe("ToolScheduler", () => {
             return new Promise<ToolExecutionResult>(() => undefined);
           },
           name: "subagent_run",
+          timeoutOwner: "tool",
         }),
       );
 
@@ -240,49 +243,12 @@ describe("ToolScheduler", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(started).toEqual(["subagent_run_1"]);
 
-      await vi.advanceTimersByTimeAsync(309_999);
+      await vi.advanceTimersByTimeAsync(7_210_000);
       expect(scheduler.getStatus("subagent_run_1")).toBe("executing");
 
-      await vi.advanceTimersByTimeAsync(1);
+      scheduler.cancel("subagent_run_1");
       await expect(result).resolves.toMatchObject({
-        error: { type: "TimeoutError" },
-        status: "error",
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("keeps the subagent_run guard when a caller overrides byTool for another tool", async () => {
-    vi.useFakeTimers();
-    try {
-      const { scheduler } = createScheduler({
-        config: { timeout: { byTool: { custom_tool: 5_000 } } },
-      });
-      scheduler.register(
-        createTool({
-          category: "subagent",
-          execute: () => new Promise<ToolExecutionResult>(() => undefined),
-          name: "subagent_run",
-        }),
-      );
-
-      const result = scheduler.execute({
-        callId: "subagent_run_merge_1",
-        messageId: "message_1",
-        params: {},
-        sessionId: "session_1",
-        toolName: "subagent_run",
-      });
-      await vi.advanceTimersByTimeAsync(0);
-
-      await vi.advanceTimersByTimeAsync(309_999);
-      expect(scheduler.getStatus("subagent_run_merge_1")).toBe("executing");
-
-      await vi.advanceTimersByTimeAsync(1);
-      await expect(result).resolves.toMatchObject({
-        error: { type: "TimeoutError" },
-        status: "error",
+        status: "cancelled",
       });
     } finally {
       vi.useRealTimers();
@@ -334,14 +300,14 @@ describe("ToolScheduler", () => {
         getAgentConfig: (agentName?: string) => ({
           tools:
             agentName === "explore"
-	              ? {
-	                  edit: true,
-	                  read: true,
-	                  subagent_close: true,
-	                  subagent_run: true,
-	                  subagent_status: true,
-	                  todo_read: true,
-	                }
+              ? {
+                  edit: true,
+                  read: true,
+                  subagent_close: true,
+                  subagent_run: true,
+                  subagent_status: true,
+                  todo_read: true,
+                }
               : undefined,
         }),
       },
@@ -350,8 +316,8 @@ describe("ToolScheduler", () => {
       { name: "read", category: "readonly" },
       { name: "edit", category: "write" },
       { name: "subagent_run", category: "subagent" },
-      { name: "subagent_status", category: "subagent" },
-      { name: "subagent_close", category: "subagent" },
+      { name: "subagent_status", category: "subagent-control" },
+      { name: "subagent_close", category: "subagent-control" },
       { name: "todo_read", category: "memory" },
     ] as const) {
       scheduler.register(createTool(tool));
@@ -1567,6 +1533,51 @@ describe("ToolScheduler", () => {
     expect(started).toEqual(["read_1", "write_1"]);
   });
 
+  it("keeps a cancelled non-cooperative write slot until the tool settles", async () => {
+    const firstBlocker = deferred<{ readonly output: string }>();
+    const started: string[] = [];
+    const { scheduler } = createScheduler();
+    scheduler.register(
+      createTool({
+        category: "write",
+        execute: (_params, context) => {
+          started.push(context.callId);
+          return context.callId === "write_1"
+            ? firstBlocker.promise
+            : Promise.resolve({ output: "second done" });
+        },
+        name: "edit",
+      }),
+    );
+
+    const first = scheduler.execute({
+      callId: "write_1",
+      messageId: "message_1",
+      params: {},
+      sessionId: "session_1",
+      toolName: "edit",
+    });
+    const second = scheduler.execute({
+      callId: "write_2",
+      messageId: "message_1",
+      params: {},
+      sessionId: "session_1",
+      toolName: "edit",
+    });
+    await vi.waitFor(() => {
+      expect(started).toEqual(["write_1"]);
+      expect(scheduler.getStatus("write_2")).toBe("queued");
+    });
+
+    scheduler.cancel("write_1");
+    await expect(first).resolves.toMatchObject({ status: "cancelled" });
+    expect(started).toEqual(["write_1"]);
+
+    firstBlocker.resolve({ output: "late first" });
+    await expect(second).resolves.toMatchObject({ status: "success" });
+    expect(started).toEqual(["write_1", "write_2"]);
+  });
+
   it("lets memory tools bypass read/write locks and limits subagent concurrency", async () => {
     const blockers = [
       deferred<{ readonly output: string }>(),
@@ -1649,6 +1660,50 @@ describe("ToolScheduler", () => {
     await expect(subagent1).resolves.toMatchObject({ status: "success" });
     await expect(subagent2).resolves.toMatchObject({ status: "success" });
     await expect(write).resolves.toMatchObject({ status: "success" });
+  });
+
+  it("lets subagent control tools bypass the long-running subagent pool", async () => {
+    const blocker = deferred<{ readonly output: string }>();
+    const { scheduler } = createScheduler({
+      config: { concurrency: { maxSubagentConcurrency: 1 } },
+    });
+    scheduler.register(
+      createTool({
+        category: "subagent",
+        execute: () => blocker.promise,
+        name: "subagent_run",
+      }),
+    );
+    scheduler.register(
+      createTool({
+        category: "subagent-control",
+        execute: () => Promise.resolve({ output: "closed" }),
+        name: "subagent_close",
+      }),
+    );
+
+    const run = scheduler.execute({
+      callId: "subagent_run_1",
+      messageId: "message_1",
+      params: {},
+      sessionId: "session_1",
+      toolName: "subagent_run",
+    });
+    await vi.waitFor(() => {
+      expect(scheduler.getStatus("subagent_run_1")).toBe("executing");
+    });
+    await expect(
+      scheduler.execute({
+        callId: "subagent_close_1",
+        messageId: "message_1",
+        params: {},
+        sessionId: "session_1",
+        toolName: "subagent_close",
+      }),
+    ).resolves.toMatchObject({ output: "closed", status: "success" });
+
+    blocker.resolve({ output: "done" });
+    await expect(run).resolves.toMatchObject({ status: "success" });
   });
 
   it("executes batches in waves while returning results in input order", async () => {
@@ -2745,8 +2800,9 @@ describe("ToolScheduler", () => {
     await expect(executing).resolves.toMatchObject({ status: "cancelled" });
   });
 
-  it("times out non-cooperative tools and releases their slot", async () => {
+  it("times out non-cooperative tools but retains their slot until settlement", async () => {
     const started: string[] = [];
+    const slow = deferred<ToolExecutionResult>();
     const { scheduler } = createScheduler({
       config: { timeout: { defaultTimeout: 10 } },
     });
@@ -2754,7 +2810,7 @@ describe("ToolScheduler", () => {
       createTool({
         execute: (_params, context) => {
           started.push(context.callId);
-          return new Promise<ToolExecutionResult>(() => undefined);
+          return slow.promise;
         },
         name: "slow_write",
       }),
@@ -2782,29 +2838,33 @@ describe("ToolScheduler", () => {
       status: "error",
     });
 
-    await expect(
-      scheduler.execute({
-        callId: "write_2",
-        messageId: "message_1",
-        params: {},
-        sessionId: "session_1",
-        toolName: "edit",
-      }),
-    ).resolves.toMatchObject({
+    const second = scheduler.execute({
+      callId: "write_2",
+      messageId: "message_1",
+      params: {},
+      sessionId: "session_1",
+      toolName: "edit",
+    });
+    await vi.waitFor(() => {
+      expect(scheduler.getStatus("write_2")).toBe("queued");
+    });
+    slow.resolve({ output: "late slow" });
+    await expect(second).resolves.toMatchObject({
       output: "after timeout",
       status: "success",
     });
     expect(started).toEqual(["slow_1", "write_2"]);
   });
 
-  it("cancels non-cooperative executing tools and releases their slot", async () => {
+  it("cancels non-cooperative tools but retains their slot until settlement", async () => {
     const started: string[] = [];
+    const slow = deferred<ToolExecutionResult>();
     const { scheduler } = createScheduler();
     scheduler.register(
       createTool({
         execute: (_params, context) => {
           started.push(context.callId);
-          return new Promise<ToolExecutionResult>(() => undefined);
+          return slow.promise;
         },
         name: "slow_write",
       }),
@@ -2832,15 +2892,18 @@ describe("ToolScheduler", () => {
 
     expect(scheduler.cancel("slow_1")).toBe(true);
     await expect(running).resolves.toMatchObject({ status: "cancelled" });
-    await expect(
-      scheduler.execute({
-        callId: "write_2",
-        messageId: "message_1",
-        params: {},
-        sessionId: "session_1",
-        toolName: "edit",
-      }),
-    ).resolves.toMatchObject({
+    const second = scheduler.execute({
+      callId: "write_2",
+      messageId: "message_1",
+      params: {},
+      sessionId: "session_1",
+      toolName: "edit",
+    });
+    await vi.waitFor(() => {
+      expect(scheduler.getStatus("write_2")).toBe("queued");
+    });
+    slow.resolve({ output: "late slow" });
+    await expect(second).resolves.toMatchObject({
       output: "after cancel",
       status: "success",
     });
