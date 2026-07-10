@@ -1,5 +1,7 @@
 # config/agents 模块 data-model.md
 
+> **状态：部分过时。** 本文中的 agent 配置结构仍可作为历史设计参考；其中 `timeout` 只保留为旧配置字段，不会作为当前 subagent turn 的 runtime deadline。当前 deadline 真相源是 `subagent_run.timeout_ms` 与 `SessionSubagentHost`，默认和上限均为 2 小时；运行模型以 [`../../agents/2026-07-09-subagent-context`](../../agents/2026-07-09-subagent-context/README.md) 为准。
+
 本文档定义 `config/agents` 模块的核心数据类型与概念。
 
 ---
@@ -114,10 +116,11 @@ interface AgentConfig {
   maxSteps?: number
 
   /**
-   * 超时时间（毫秒）
-   * 单次 Step 的最大执行时间
+   * 旧配置字段（毫秒）。
    *
-   * 默认：主代理 300000（5分钟），子代理 180000（3分钟）
+   * 当前 runtime 不读取它作为 subagent turn deadline。应通过
+   * subagent_run.timeout_ms 设置单轮覆盖；未设置时 SessionSubagentHost
+   * 使用 7200000（2 小时）的实例默认值和上限。
    */
   timeout?: number
 
@@ -448,7 +451,7 @@ export type AgentsConfig = z.infer<typeof AgentsConfigSchema>
 | 字段 | 类型 | 必需 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | maxSteps | number | 否 | 主代理50/子代理20 | 最大执行步数 |
-| timeout | number | 否 | 主代理300000/子代理180000 | 超时时间（毫秒） |
+| timeout | number | 否 | 无 runtime 默认值 | 旧配置字段；当前 subagent deadline 由 `subagent_run.timeout_ms`/host 管理 |
 | allowDoomLoop | boolean | 否 | false | 是否允许循环检测 |
 
 ### 4.4 模型参数字段

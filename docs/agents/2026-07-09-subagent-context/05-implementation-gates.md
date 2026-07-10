@@ -12,6 +12,8 @@
 4. 重启后按 owner 语义把应恢复的 `pending/running` 改成 `interrupted`，不自动续跑，不自动 drain queue。
 5. 显式继续必须调用 `subagent_run({ subagent_id, prompt, mode })`。
 6. 一个 child session 可以有多个 subagent instance；child session 不是 context。
+7. 用户中断 primary run 时，以 parent session 为 run-tree 边界中断全部 active subagent；pending queue 保留并暂停。
+8. caller signal 只控制 foreground waiter，不删除已经持久化的 prompt；只有 `subagent_close` 清空 queue。
 
 ---
 
@@ -38,7 +40,9 @@
 - 同一 child session 下多个 subagent 并发运行时：run active 判断必须按 `session_id + context_scope_id`，不能只按 `session_id`。
 - sandbox 生命周期必须按 `{ sessionId, contextScopeId? }` lease 管理；释放一个 subagent 的 lease 不得销毁 sibling scope。
 - queue 出队与 `current_input/current_run_id/running/owner` 写入必须由 store 原子 `claim` 完成；run 收口必须按 expected `current_run_id` 做 CAS。
-- `interrupt:true` 只有在旧 turn 已 settle 时才能自动 drain；不响应 abort 的旧 turn 会使实例暂停为 `interrupted`。
+- `interrupt:true` 只有在旧 turn 已 settle 时才能自动 drain；不响应 abort 的旧 turn 会使实例暂停为 `interrupted`。同进程内的后续显式 resume 只能追加 durable queue，必须等旧 turn settle 后才 claim 新 run。
+- parent run-tree interrupt 必须令该 parent 下全部 active turn 进入 `interrupted`，保留 queue且不得自动 drain；sibling parent 不受影响。
+- close 的逻辑终态与 sandbox 物理清理分层：host 关实例，composition 等 scoped lease settle 后销毁 context。
 - runtime 热重建必须先 dispose 旧 composition，不允许同一进程残留两个 host 争抢同一 durable instance。
 - child session 恢复时必须再次校验 `session.isSubagent` 与 `session.parentId`，不能只信 `subagent_instance.parent_session_id`。
 - status/close 工具本身必须声明 `subagent-control`；builtin category 映射不能被工具对象上的旧 `subagent` 值覆盖。
@@ -52,7 +56,7 @@
 重启恢复只做四件事：
 
 1. 查询 durable store 中 `pending/running` 的 subagent。
-2. 按 `owner_id + owner_pid` 判断恢复边界：当前 owner、同 PID 旧 owner、owner PID 已死、legacy unknown-owner 可标记；活着的其他 owner 不动。
+2. 按 `owner_id + owner_pid` 判断恢复边界：当前 owner、owner PID 已死、显式允许的 legacy unknown-owner 可标记；同 PID 不同 owner与活着的其他 owner不动。
 3. 标记为 `interrupted` 并写 `interrupted_at`；旧 `current_run_id` 转为 `last_run_id` 后清空。
 4. 让 `subagent_status` 可观测这些 item。
 
@@ -76,11 +80,15 @@
 - [x] scoped sandbox 并发与独立释放测试已覆盖。
 - [x] store claim/finish CAS、close 防迟到覆盖测试已覆盖。
 - [x] cooperative/non-cooperative interrupt 两种续排语义已覆盖。
+- [x] non-cooperative turn 后的显式 resume 保留 durable FIFO，并在旧 turn settle 前不启动 replacement。
 - [x] scheduler control-plane 不被 subagent run 并发池阻塞，host 是 deadline 唯一 owner。
 - [x] runtime reset 会 dispose 旧 composition。
 - [x] backend dispose 会 await runtime dispose，replacement 受 reset barrier 保护。
 - [x] foreground pause 保留 durable prompt，跨 owner active admission 明确拒绝。
 - [x] SQLite claim/finish 使用 `UPDATE ... RETURNING`，两种 store 的 update 字段语义一致。
 - [x] child parent 归属、scope lock、非协作写槽与 sandbox create/destroy 竞态测试已覆盖。
-- [x] owner-aware recovery 测试覆盖当前 owner、同 PID 旧 owner、死 owner、活着的其他 owner。
+- [x] owner-aware recovery 测试覆盖当前 owner、死 owner、同 PID 不同 owner、活着的其他 owner。
+- [x] parent `abortRun` 能级联 active foreground/background subagent，queue 保留且不自动 drain。
+- [x] queued foreground caller abort 只解除 waiter，不删除 durable prompt。
+- [x] close/session remove/runtime dispose 的 scoped sandbox cleanup 已接线并覆盖测试。
 - [x] AC-6 按“两段测试”执行：先基线，后回归。

@@ -84,16 +84,19 @@ primary 已进入 `AgentInstance` 边界，但 primary 历史消息仍按 `conte
 
 `interrupt:true` 只取消当前 turn并保留 queue。旧 turn 已 settle 时可继续；旧执行体不响应取消时实例停在 `interrupted`，不得同时启动 replacement。
 
-暂停时，排队 foreground 的调用方会拿到当前失败 item，避免主 agent 死锁；该 prompt 只解除 waiter/signal，仍保留在 durable queue。另一个 runtime 已持有 active run 时，新输入明确失败并要求重试，不做无消费者的跨 owner 追加。
+暂停时，排队 foreground 的调用方会拿到当前失败 item，避免主 agent 死锁；该 prompt 只解除 waiter/signal，仍保留在 durable queue。caller signal 在 claim 前 abort 也只解除 waiter/signal，不删除 durable prompt。另一个 runtime 已持有 active run 时，新输入明确失败并要求重试，不做无消费者的跨 owner 追加。
 
 ### 2.3 status、close 与 runtime reset
 
 ```text
 subagent_status -> 始终返回 { items: [...] }
 subagent_close  -> cancelled + closedAt，清空 queue/currentInput，close 后不可复活
+primary abort   -> interruptRunTree(runId) 取消 primary + parent 下全部 active subagent
+                -> current turn interrupted，pendingQueue 保留，不自动续跑
 backend dispose -> runtimeController.resetRuntime() 串行 barrier
 runtime reset   -> host.dispose() abort active + owner-aware interrupted
                 -> RunManager.cancelAll() 释放 scoped lease
+                -> SandboxManager.dispose() 销毁全部 context
                 -> 创建新 runtime；不自动续跑 pendingQueue
 ```
 
@@ -172,11 +175,13 @@ interface SubagentInstanceStore {
 | 其他 active owner | 明确拒绝新 prompt，不留下 orphan queue |
 | turn 普通失败 | `failed`，保留 background queue，等待显式继续 |
 | host deadline | `timed_out`，不由 scheduler 伪装 |
-| caller/interrupt/runtime dispose | `interrupted`；只有确认旧 turn settle 才可安全自动续排 |
+| caller waiter abort | 解除 waiter/signal，durable prompt 保留；已有 drain 正常完成前序 turn 后可继续，否则等待显式 resume |
+| `interrupt:true` | `interrupted`；只有确认旧 turn settle 才可安全自动续排 |
+| primary run-tree interrupt/runtime dispose | active turn `interrupted`，queue 保留并暂停，不自动续排 |
 | close | `cancelled + closedAt` 终态；迟到 finish CAS 不生效 |
 | 进程恢复 | owner-aware `pending/running -> interrupted`，不创建 AgentInstance，不自动 drain |
 
-当前 owner recovery 假设同一 OS 进程只有一个 active runtime composition。若未来允许同 PID 多 owner，必须增加 owner registry/heartbeat。
+owner recovery 以精确 `ownerId` 或 owner PID 已死为依据；同 PID 不同 owner 不能互相抢占。PID reuse 等更强故障判定留给 owner registry/heartbeat/lease。
 
 取消采用 cooperative contract：同一 scope replacement 必须等旧 lifecycle settle；RunManager 的 lock 只覆盖该 scope，不阻塞 sibling。ToolScheduler 可先向调用方返回 cancelled，但写/危险工具的槽位要等实际 promise settle 才释放。
 

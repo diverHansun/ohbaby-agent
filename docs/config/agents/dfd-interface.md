@@ -1,5 +1,7 @@
 # config/agents 模块 dfd-interface.md
 
+> **状态：部分过时。** 本文曾列出的 config 层 subagent timeout 常量不是当前源码导出，也不是 runtime deadline 真相源。当前 deadline 由 `SessionSubagentHost` 管理，默认与最大值均为 2 小时；调用与恢复语义以 [`../../agents/2026-07-09-subagent-context`](../../agents/2026-07-09-subagent-context/README.md) 为准。
+
 本文档描述 `config/agents` 模块的数据流与对外接口。
 
 ---
@@ -148,20 +150,14 @@ export { AgentConfigSchema } from './types.js'
 export { AgentsConfigSchema } from './types.js'
 ```
 
-### 3.3 常量导出
+### 3.3 运行时 timeout 边界
 
-```typescript
-// 默认值常量
-export const DEFAULT_PRIMARY_MAX_STEPS = 50
-export const DEFAULT_SUBAGENT_MAX_STEPS = 20
-export const DEFAULT_PRIMARY_TIMEOUT = 300000  // 5 分钟
-export const DEFAULT_SUBAGENT_TIMEOUT = 180000 // 3 分钟
+当前 `config/agents` 不导出 primary/subagent 的 runtime timeout 常量。历史文档中的
+`DEFAULT_SUBAGENT_TIMEOUT = 180000` 已失效，不能作为实现或测试依据。
 
-// 配置路径常量
-export const GLOBAL_CONFIG_DIR = '~/.ohbaby-agent/agents'
-export const PROJECT_CONFIG_DIR = '.ohbaby-agent/agents'
-export const CONFIG_FILE_NAME = 'settings.json'
-```
+subagent 的 deadline 只由运行时决定：`subagent_run.timeout_ms` 可为单轮覆盖，
+`SessionSubagentHost` 在未设置时使用 `7200000`（2 小时），并拒绝更大的值。
+配置路径等静态信息应以实际 `config/agents` 源码为准。
 
 ---
 

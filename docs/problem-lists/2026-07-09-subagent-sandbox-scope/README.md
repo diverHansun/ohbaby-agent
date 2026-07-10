@@ -1,18 +1,18 @@
 # Subagent sandbox scope 设计包
 
 > 创建日期：2026-07-09
-> 状态：实施前设计与验收准备
+> 状态：核心修复已实施；本文保留修复前基线与设计依据
 
-本目录记录 subagent context/instance 化之后暴露出的 sandbox 生命周期问题。
+本目录记录 subagent context/instance 化之后暴露出的 sandbox 生命周期问题。下方的旧问题描述是 2026-07-09 的修复前基线，保留它是为了说明为什么不能退回 session-only sandbox。
 
-当前结论：
+当前实现：
 
-- `RunManager`、message、context 已经按 `sessionId + contextScopeId` 隔离。
-- `SandboxManager` 与 `HostLocalSandboxManager` 仍以 `sessionId` 作为唯一 context key。
-- `runAgent` 在 run 结束时还能调用 `setSessionEnvironment(sessionId, undefined)`，从而销毁整个 session sandbox。
-- 因此问题不是“缺少 refcount”，而是 sandbox 的身份维度和销毁权限与 run/context/agent instance 不一致。
+- `RunManager`、message、context、sandbox 都以 `{ sessionId, contextScopeId? }` 为身份边界；primary 没有物理 `contextScopeId`，仍使用 session scope。
+- `RunManager` 负责 acquire/release scoped sandbox lease；单个 run 结束只释放自己的 lease，不销毁 sibling scope。
+- `subagent_close` 等待自己的 run lease settle 后销毁对应 scope；session remove/runtime dispose 批量回收所属 contexts。
+- `runAgent` 不再设置或销毁 session sandbox；因此同一 child session 下的多个 subagent 可以并发而不互拆资源。
 
-本轮只先落文档，后续实现按文档拆批推进。
+修复前的 session-only key、per-run destroy 和相关竞态分析仍在本目录各文档中，必须按“历史基线”阅读。
 
 ## 文档索引
 
@@ -39,4 +39,3 @@
 - subagent handoff summary-continuation 体验增强。
 - container / worktree adapter 新能力。
 - 完整资源回收策略的最终形态。本文档只要求不再 per-run 销毁 session 级 sandbox。
-

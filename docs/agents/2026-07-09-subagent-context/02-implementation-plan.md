@@ -82,9 +82,11 @@ export interface SessionSubagentHost {
 - 继续 subagent：必须有 `subagentId`、`parentSessionId`、`prompt`，`SessionSubagentHost` 校验 parent 归属。
 - `mode` 只决定返回时机，不决定是否创建另一套执行路径。
 - foreground/background prompt 都进入同一 durable FIFO queue。foreground 等待自己的队列项，background 在持久化成功后立即返回。
-- 若当前 turn 正在运行，新的 prompt 一律入队尾；`interrupt:true` 只 abort 当前 turn，不清空既有输入。只有旧 turn 已确认 settle，host 才能在同一 drain 中继续；旧执行体不响应 abort 时状态转为 `interrupted` 并暂停，等待下一次显式 `subagent_run`，避免两个 run 共用同一 scope。
+- 若当前 turn 正在运行，新的 prompt 一律入队尾；`interrupt:true` 只 abort 当前 turn，不清空既有输入。只有旧 turn 已确认 settle，host 才能在同一 drain 中继续；旧执行体不响应 abort 时状态转为 `interrupted` 并暂停。后续显式 `subagent_run` 仍会把新 prompt 入队，但 host 保留仅进程内的 settlement barrier，直到旧 `AgentInstance.turn()` 真正 settle 后才 claim/drain，避免两个 run 共用同一 scope。
 - `failed` / `timed_out` / 普通 `interrupted` 会暂停；只有新的 `subagent_run({ subagent_id, prompt })` 触发恢复，旧 queue 先执行，新 prompt 最后执行。
 - 前序 turn 进入暂停态时，排队中的 foreground 调用不能无限占住主 agent：其 waiter 返回当前失败/中断 item，但 prompt 会去掉进程内 waiter/signal 后继续保留在 durable queue；下次显式继续仍会执行它。
+- caller signal 在 prompt 被 claim 前 abort 时，只表示调用方不再等待：host 必须解除 waiter/signal，但已持久化 prompt 继续留在 durable queue。传输层取消无权删除 durable 输入，只有 `subagent_close` 可以清空 queue。
+- 用户中断 primary run 时，runtime 以该 run 的 `sessionId` 为 parent 边界，中断该 parent 下所有 active subagent turn；当前输入置为 `interrupted`，pending queue 原样保留且不自动 drain。当前数据模型不区分“由哪一次 primary run spawn”，因此这是 parent-session run-tree 语义。
 - 若 durable record 显示另一个 runtime 正在持有 `currentRunId/running`，本 host 明确拒绝新输入并要求稍后重试，不把 prompt 写成无人消费的 pending item。当前不是跨进程分布式队列。
 - `subagent_id` 是主 agent 可见的 agent instance handle，不能等同于 child `session.id`。一个 child session 下可以有多个 subagent instance。
 
@@ -192,7 +194,7 @@ CREATE INDEX IF NOT EXISTS idx_subagent_instance_owner_status
 | `interrupted` | 进程重启或运行中断，必须由主 agent 显式继续 |
 | `cancelled` | 用户显式 close；终态，不可继续 |
 
-重启恢复只把 `pending` / `running` 转成 `interrupted`。`failed` / `timed_out` / `interrupted` 都不自动 drain queue；只有新的 `subagent_run({ subagent_id, prompt })` 会恢复，且新 prompt 入队尾。`close` 是唯一清空 queue 的终态。
+重启恢复或 parent run-tree interrupt 只把受影响的 active turn 转成 `interrupted`。`failed` / `timed_out` / `interrupted` 都不自动 drain queue；只有新的 `subagent_run({ subagent_id, prompt })` 会恢复，且新 prompt 入队尾。`close` 是唯一清空 queue 的终态。
 
 ### 3.3 运行字段语义
 
@@ -256,15 +258,15 @@ export interface SubagentInstanceStore {
 进程启动或 parent 首次访问时：
 
 1. host 调 `recoverInterrupted({ parentSessionId?, ownerId, ownerPid, recoverUnknownOwner })`；composition 启动时会注入当前 backend owner。
-2. store 只处理中断当前 owner、同 PID 旧 owner、owner PID 已死或 legacy unknown-owner 的 `pending/running` 记录；活着的其他 owner 不动。
+2. store 只处理中断当前 `ownerId`、owner PID 已死或显式允许的 legacy unknown-owner `pending/running` 记录；同 PID 不同 owner 默认视为仍活着，不能仅凭 PID 相同抢占。
 3. 被恢复命中的记录置为 `interrupted`，写 `interrupted_at` 与 `updated_at`。
 4. host 不创建新 `AgentInstance`，不自动发起 `turn()`。
 5. 主 agent 可通过 `subagent_status` 看见 `interrupted` item。
 6. 主 agent 如需继续，显式调用 `subagent_run({ subagent_id, prompt, mode })`，host 从该 `subagent_id` 对应的 child session + context scope 重建 instance；若 `pending_queue` 非空，新 prompt 入队尾，先 drain 旧队列。
 
-`pending_queue` 保留用于观测和审计，重启后不自动执行；显式继续才会触发 drain。
+`pending_queue` 保留用于观测和审计，重启后不自动执行；显式继续才会触发 drain。仅进程内的 settlement barrier 不持久化：进程重启意味着旧执行体已经不再属于新 host，恢复流程仍以 durable `interrupted` 记录为准。
 
-当前 owner 判定假设一个 OS 进程内只有一个 active runtime composition。配置热重建必须先 `dispose()` 旧 runtime，取消其 run 并释放 scoped sandbox lease，再创建新 host。若未来允许同一 PID 内多个 backend owner 并存，不能再用“同 PID 旧 owner”作为死亡依据，必须升级为 owner registry/heartbeat。
+配置热重建必须先 `dispose()` 旧 runtime，旧 host 会按精确 `ownerId` 收口自己的 active instance，再创建 replacement。一个 OS 进程内可以有多个 backend owner；owner 恢复不能把“PID 相同”等同于“旧 owner 已死”。若未来需要覆盖 PID reuse 或跨进程无 PID 环境，再升级为 owner registry/heartbeat/lease。
 
 backend/client 顶层 `dispose()` 必须 await runtime controller reset。reset 使用串行 barrier：先等旧 runtime 的 host/RunManager/sandbox 全部 dispose，再允许 `getRuntime()` 创建 replacement；旧 creation 的失败回调只能清理它自己的 promise 引用。
 
@@ -333,7 +335,9 @@ backend/client 顶层 `dispose()` 必须 await runtime controller reset。reset 
 | 创建 host | 注入 `AgentManager`、`AgentInstanceFactory`、message/session/run deps、store |
 | 创建 tools | `createSubagentTools(host)` |
 | primary startSession | 指向 `AgentService.startSession`，内部走 `AgentInstance.turn(stream)`，但不写 primary `contextScopeId` |
-| runtime reset/dispose | 热重建先取消旧 runtime 的 active run、释放 scoped sandbox lease，再替换 composition |
+| primary abort | `interruptRunTree(runId)` 先取得 parent `sessionId`，取消 primary run，并调用 `subagentHost.interruptByParent(sessionId)` |
+| subagent close | host 先写 close 终态；composition 在对应 run lease settle 后销毁 `{sessionId, contextScopeId}` sandbox |
+| runtime reset/dispose | 热重建先取消旧 runtime 的 active run、释放 scoped sandbox lease并销毁全部 sandbox context，再替换 composition |
 
 RunManager 的 create lock 按 `sessionId + contextScopeId?` 建立，而不是只按 session。旧执行体不响应取消时，同一 scope 的 replacement 继续等待，避免副作用重叠；sibling scope 不受该锁阻塞。ToolScheduler 对已取消但仍未 settle 的写/危险工具保留并发槽，底层 promise settle 后才释放。
 
