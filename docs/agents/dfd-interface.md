@@ -1,106 +1,105 @@
-# agent 模块 dfd-interface.md
+# agents 模块 dfd-interface.md
 
-本文档描述 agents improve-1 后的主要数据流与接口。当前重点是 Task 同步 subagent 路径；primary stream 路径仍在 improve-2 规划中。
+本文档描述当前 primary/subagent 的真实数据流与接口。旧 `task`、`agent_open`、`agent_eval`、`AgentService.executeTask`、`AgentTaskManager` 已退役，不是兼容入口。
 
 ---
 
 ## 一、Context & Scope
 
 ```text
-tools/task
-   |
-   v
-agents.AgentService
-   |-- AgentManager
-   |-- services/session
-   |-- core/message
-   |-- core/tool-scheduler
-   v
-core/agents.runAgent
-   |
-   v
-AgentRunCoordinator port
-   |
-   v
-runtime/run-manager
-   |
-   v
-core/lifecycle.runSession
+primary prompt                           subagent_run/status/close
+      |                                           |
+      v                                           v
+AgentService.startSession              SessionSubagentHost
+      |                                  |-- SubagentInstanceStore
+      |                                  |-- SessionManager
+      |                                  `-- AgentInstanceFactory
+      |                                           |
+      `---------------------> AgentInstance <-----'
+                                      |
+                                      v
+                              AgentContextScope
+                                      |
+                                      v
+                              core/agents.runAgent
+                                      |
+                    +-----------------+-----------------+
+                    |                 |                 |
+                    v                 v                 v
+             core/message      core/lifecycle    RunManager
+                                                     |
+                                                     v
+                                           scoped SandboxLease
 ```
 
-交互模块：
+ID 语义：
 
-| 模块 | 交互方式 | 说明 |
-|------|----------|------|
-| `tools/task` | 调用方 | 调用 `AgentService.executeTask()` |
-| `AgentManager` | 被调用 | 解析 `RuntimeAgent` |
-| `services/session` | 被调用 | 创建或恢复 child session |
-| `core/agents` | 被调用 | 执行 agent run 原语 |
-| `core/message` | 被调用 | 写初始 user message、读取最终 assistant 输出 |
-| `core/tool-scheduler` | 被调用 | 获取可用工具定义 |
-| `runtime/run-manager` | 端口实现 | 满足 `AgentRunCoordinator` |
+| ID | 含义 | 隔离/所有权用途 |
+|---|---|---|
+| `sessionId` | primary/child 会话容器 | durable session 与 parent 关系 |
+| `subagentId` | 主 agent 可见的实例 handle | run/status/close/continue |
+| `contextScopeId` | subagent context/message 隔离键 | 与 `sessionId` 共同过滤消息、压缩上下文和申请 sandbox |
+| `runId` | 单次 turn 的运行标识 | ledger、取消、CAS 收口 |
+
+一个 child session 可以承载多个 subagent；`subagentId` 不等于 `sessionId`。当前实现令 subagent 的 `contextScopeId = subagentId`，但两者仍是不同语义。
 
 ---
 
 ## 二、Data Flow
 
-### 2.1 配置加载
+### 2.1 primary prompt
 
 ```text
-1. 应用初始化
-2. AgentRegistry 加载 builtin agent
-3. AgentRegistry 加载用户配置
-4. 后加载配置覆盖同名配置
-5. AgentManager 基于 Registry 对外提供 RuntimeAgent
+1. AgentService.startSession 解析 primary RuntimeAgent
+2. 创建或读取 root Session
+3. AgentInstanceFactory.create({ type: "primary", instanceId: sessionId })
+4. AgentInstance.turn({ waitMode: "stream", prompt })
+5. AgentContextScope 校验 primary identity；当前不生成物理 contextScopeId
+6. runAgent 写消息、构造 prompt、创建 RunManager run 并返回 stream handle
 ```
 
-### 2.2 RuntimeAgent 解析
+primary 已进入 `AgentInstance` 边界，但 primary 历史消息仍按 `context_scope_id IS NULL` 读取。物理 primary scope 是后续迁移，不在当前数据流里假装完成。
+
+### 2.2 创建或继续 subagent
 
 ```text
-1. AgentService 需要执行 agentName
-2. AgentManager.getRuntimeAgent(agentName, { isSubagent: true })
-3. AgentManager 获取 AgentConfig
-4. AgentManager 组装 system prompt、tool config、LLM params、maxSteps
-5. 返回 RuntimeAgent
-```
-
-### 2.3 Task 同步执行
-
-```text
-1. tools/task 收到模型工具调用
-2. AgentService.executeTask(params)
-3. 检查 runningCount < maxConcurrency
-4. 获取 RuntimeAgent 并拒绝 mode === "primary"
-5. 如果 resumeSessionId 存在:
-     SessionManager.get(resumeSessionId)
-     校验 parentId、agentName、isSubagent
-   否则:
-     SessionManager.get(parentSessionId)
-     SessionManager.create(parent.projectRoot, { parentId, agentName, title })
-6. 调用 core/agents.runAgent({
-     waitMode: "waitForCompletion",
-     initialUserPrompt: params.prompt,
-     sessionId: childSession.id,
-     parentSessionId: params.parentSessionId
+1. subagent_run 调 SessionSubagentHost.run
+2. 新建时按 parent 串行选择/创建共享 child Session，并创建独立 SubagentInstanceRecord
+3. 首个 prompt 与 pendingQueue 一起持久化；继续时校验 subagentId 的 parent 归属
+4. foreground/background 都进入同一 durable FIFO queue；mode 只决定调用方是否等待自己的队列项
+5. store.claim 用条件 UPDATE + RETURNING 原子完成：队首 -> currentInput/currentRunId/status=running/owner
+6. Host 创建 AgentInstance({
+     type: "sub",
+     instanceId: subagentId,
+     contextScopeId,
+     sessionId: childSessionId,
+     parentSessionId,
+     agentName: role
    })
-7. runAgent 写入 child user message
-8. runAgent buildPromptMessages(...)
-9. runAgent 获取可用工具并创建 run
-10. runAgent waitForCompletion(runId)
-11. runAgent listBySession(childSession.id) 并提取最终 assistant 文本
-12. AgentService 返回 SubagentResult
+7. AgentInstance.turn(waitForCompletion) 进入 runAgent/lifecycle/context/message
+8. RunManager 按 { sessionId, contextScopeId, workdir } 获取 scoped sandbox lease
+9. store.finishRun(expectedCurrentRunId) 以 CAS 写 completed/failed/timed_out/interrupted
+10. completed 继续 drain；failed/timed_out/interrupted 暂停，等待下一次显式 subagent_run
 ```
 
-### 2.4 长生命周期 task
+`interrupt:true` 只取消当前 turn并保留 queue。旧 turn 已 settle 时可继续；旧执行体不响应取消时实例停在 `interrupted`，不得同时启动 replacement。
+
+暂停时，排队 foreground 的调用方会拿到当前失败 item，避免主 agent 死锁；该 prompt 只解除 waiter/signal，仍保留在 durable queue。另一个 runtime 已持有 active run 时，新输入明确失败并要求重试，不做无消费者的跨 owner 追加。
+
+### 2.3 status、close 与 runtime reset
 
 ```text
-1. agent_open 创建 AgentTaskRecord 和 child session
-2. AgentTaskManager 将首轮 prompt 排入执行
-3. 每一轮 runTurn 调用 core/agents.runAgent
-4. sendInput 在运行中则入队；interrupt=true 时取消当前 run 并优先执行新输入
-5. close 标记 cancelled 并取消当前 run
-6. get 返回 store 中的任务状态和输出
+subagent_status -> 始终返回 { items: [...] }
+subagent_close  -> cancelled + closedAt，清空 queue/currentInput，close 后不可复活
+backend dispose -> runtimeController.resetRuntime() 串行 barrier
+runtime reset   -> host.dispose() abort active + owner-aware interrupted
+                -> RunManager.cancelAll() 释放 scoped lease
+                -> 创建新 runtime；不自动续跑 pendingQueue
 ```
+
+`subagent_status/close` 使用 scheduler control-plane 类别，不与长时间 `subagent_run` 共用容量槽。`subagent_run` 的墙钟 deadline 只由 host 拥有，scheduler 仍负责 caller cancellation。
+
+同一进程启动多个 local daemon 且共享 SQLite 时，数据库关闭采用 daemon runtime 引用计数：每个 backend 先 await 自己的 runtime dispose，只有最后一个 daemon 退出后才关闭共享连接。
 
 ---
 
@@ -109,79 +108,83 @@ core/lifecycle.runSession
 ### 3.1 AgentService
 
 ```typescript
-class AgentService implements TaskExecutor {
-  execute(params: SubagentExecuteParams): Promise<SubagentResult>
-  executeTask(params: SubagentExecuteParams): Promise<SubagentResult>
-  getConcurrentCount(): number
+interface AgentService {
+  startSession(params: StartSessionParams): Promise<AgentSessionStartResult>
 }
 ```
 
-旧 `SubagentExecutor` / `SubagentExecutorOptions` alias 不再导出。内部和外部调用方应直接使用 `AgentService`。
+`AgentService` 只承载 primary 启动入口，不编排 subagent。
 
-### 3.2 core/agents
+### 3.2 SessionSubagentHost
 
 ```typescript
-type AgentRunner = (
-  deps: AgentRunDeps,
-  input: AgentRunInput,
-) => Promise<AgentRunResult>
-
-interface AgentRunInput {
-  sessionId: string
-  parentSessionId?: string
-  agentName: string
-  projectRoot: string
-  initialUserPrompt?: string
-  waitMode: "stream" | "waitForCompletion"
-  buildPromptMessages: AgentPromptMessageBuilder
+interface SessionSubagentHost {
+  run(input: SubagentRunInput): Promise<SubagentRunResult>
+  status(input: SubagentStatusInput): Promise<{ items: SubagentInstanceRecord[] }>
+  close(input: SubagentLookupInput): Promise<SubagentCloseResult>
+  recoverInterrupted(input?: MarkSubagentsInterruptedInput): Promise<SubagentInstanceRecord[]>
+  dispose(): Promise<void>
 }
 ```
 
-improve-1 仅实现 `waitMode: "waitForCompletion"`。`waitMode: "stream"` 的完整行为属于 improve-2。
-
-### 3.3 SessionManager
+### 3.3 SubagentInstanceStore
 
 ```typescript
-interface SessionManager {
-  create(projectDirectory: string, options?: CreateSessionOptions): Promise<Session>
-  get(sessionId: string): Promise<Session | null>
-  ensureRoot(input: EnsureRootSessionInput): Promise<Session>
+interface SubagentInstanceStore {
+  create(record: SubagentInstanceRecord): Promise<void>
+  claim(subagentId: string, update: SubagentInstanceUpdate): Promise<SubagentInstanceRecord | null>
+  finishRun(
+    subagentId: string,
+    currentRunId: string,
+    update: SubagentInstanceUpdate,
+  ): Promise<SubagentInstanceRecord>
+  get(input: SubagentLookupInput): Promise<SubagentInstanceRecord | null>
+  update(subagentId: string, update: SubagentInstanceUpdate): Promise<SubagentInstanceRecord>
+  listByParent(parentSessionId: string): Promise<SubagentInstanceRecord[]>
+  markInterrupted(input?: MarkSubagentsInterruptedInput): Promise<SubagentInstanceRecord[]>
 }
 ```
 
-`ensureRoot` 用于 composition 保证 primary/root session 记录存在，替代旧 `RuntimeSubagentSessionManager.ensureRoot`。
+`claim` 和 `finishRun` 是行为契约，不是普通 update 的别名：前者防双 owner 执行，后者防 close/恢复后迟到结果覆盖新状态。SQLite 必须在同一条条件写语句中 `RETURNING` 结果，不能 update 后再 select。
 
 ---
 
 ## 四、Data Ownership
 
-| 数据 | 创建者 | 所有者 | 说明 |
-|------|--------|--------|------|
-| AgentConfig | `AgentRegistry` | `agents` | 描述符配置 |
-| RuntimeAgent | `AgentManager` | 调用方临时持有 | 运行时解析结果 |
-| root/child Session | `SessionManager` | `services/session` | 父子关系由 session 层维护 |
-| 初始 user message | `core/agents.runAgent` | `core/message` | `AgentService` 不再直接写消息 |
-| RunRecord | `AgentRunCoordinator` | `runtime/run-manager` | `core/agents` 只依赖端口 |
-| 最终输出 | `core/agents.extractFinalOutput` | 调用方消费 | 从 child session assistant 消息中提取 |
+| 数据 | 创建者 | durable 真相源 | 说明 |
+|---|---|---|---|
+| AgentConfig / RuntimeAgent | `AgentRegistry` / `AgentManager` | 配置文件/registry | role、tools、maxSteps |
+| root/child Session | `SessionManager` | session 表 | child 可承载多个 subagent |
+| SubagentInstanceRecord | `SessionSubagentHost` | subagent_instance 表 | 状态、owner、queue、current/last run |
+| message/context history | `core/message` / `core/context` | message 表 | subagent 按 `sessionId + contextScopeId` 过滤 |
+| RunRecord | `RunManager` | run ledger | 每 turn 的运行台账 |
+| SandboxContext | `SandboxManager` | runtime resource | 由 scoped lease 引用；不是 subagent 状态真相源 |
+| 内存 active state | `SessionSubagentHost` | 无 | 只保存 AbortController、foreground waiter、不可序列化 environment |
 
 ---
 
-## 五、Error Handling
+## 五、Error & Recovery
 
 | 场景 | 行为 |
-|------|------|
-| 目标 agent 不存在 | `AgentManager.getRuntimeAgent` 抛错 |
-| 目标 agent 是 pure primary | `AgentService` 抛错并包装失败结果 |
-| parent session 不存在 | `AgentService` 抛错并包装失败结果 |
-| resume session 不存在或不属于 parent | `AgentService` 抛错并包装失败结果 |
-| 并发超限 | `AgentService` 直接抛出 `Maximum concurrent subagents reached` |
-| run 失败 | `AgentService` 返回 `success: false` 和错误文本 |
+|---|---|
+| role/parent/subagent 不存在或归属不匹配 | 明确拒绝，不创建隐式 session |
+| claim 冲突 | 当前 host 不执行该 turn |
+| 其他 active owner | 明确拒绝新 prompt，不留下 orphan queue |
+| turn 普通失败 | `failed`，保留 background queue，等待显式继续 |
+| host deadline | `timed_out`，不由 scheduler 伪装 |
+| caller/interrupt/runtime dispose | `interrupted`；只有确认旧 turn settle 才可安全自动续排 |
+| close | `cancelled + closedAt` 终态；迟到 finish CAS 不生效 |
+| 进程恢复 | owner-aware `pending/running -> interrupted`，不创建 AgentInstance，不自动 drain |
+
+当前 owner recovery 假设同一 OS 进程只有一个 active runtime composition。若未来允许同 PID 多 owner，必须增加 owner registry/heartbeat。
+
+取消采用 cooperative contract：同一 scope replacement 必须等旧 lifecycle settle；RunManager 的 lock 只覆盖该 scope，不阻塞 sibling。ToolScheduler 可先向调用方返回 cancelled，但写/危险工具的槽位要等实际 promise settle 才释放。
 
 ---
 
 ## 六、文档自检
 
-- [x] 数据流和当前代码路径一致。
-- [x] 明确旧 `SubagentExecutor` alias 已删除。
-- [x] 明确 `runAgent` 是执行原语。
-- [x] 明确 primary stream 仍属于 improve-2。
+- [x] 只描述当前 `subagent_run/status/close` 工具面。
+- [x] `SessionSubagentHost` 是 subagent 状态机 owner，`AgentService` 只负责 primary。
+- [x] context/message/sandbox 都显式区分 `sessionId` 与 `contextScopeId`。
+- [x] queue、claim、finish、close、timeout、interrupt、runtime reset 与重启恢复语义完整。

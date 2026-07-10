@@ -16,8 +16,9 @@
 | AC-6 | 两段长任务测试：先跑现状 50+ tool step 基线，再跑改造后同场景，验证多次 `prepareTurn` 且不抛 context overflow | 集成测试 |
 | AC-7 | `AgentInstance.turn()` 不存在绕过 lifecycle 的直连 LLM 路径 | 代码审查 + 依赖断言 |
 | AC-8 | `core/agents` 不 import `src/agents` / `src/adapters` / `src/runtime` 具体实现 | 依赖方向测试/lint |
+| AC-9 | primary `startSession` 通过 `AgentInstance.turn({ waitMode:"stream" })`，但不写 `contextScopeId` | 单测/契约测试 |
 
-> primary stream 等价性不作为本轮 AC。`AgentTurnInput.runId` 与 `AgentInstanceType:"primary"` 仅保留为后续迁移的接口预留。
+> primary 物理 `contextScopeId` 不作为本轮 AC。`AgentInstanceType:"primary"` 已接入执行入口，但 message/context scope 继续保持 NULL，避免切断旧历史。
 
 ---
 
@@ -29,7 +30,7 @@
 - 构造 primary scope：`type:"primary"`、无 `parentSessionId`，断言 `isSubagent=false`。
 - 不变量：
   - subagent 缺 `parentSessionId` 抛错；
-  - primary 带 `parentSessionId` 抛错；
+  - primary 带 `parentSessionId` 或 `contextScopeId` 抛错；
   - `assertSession` 对 instanceId/contextScopeId/sessionId/parentSessionId/agentName 不匹配抛错。
 - 行为：
   - `toRunCreateOptions()` 返回不可被调用方覆盖的身份参数。
@@ -42,6 +43,7 @@
 - **同 session 多 scope 隔离**：两个实例共享同一 `sessionId` 但使用不同 `contextScopeId`，断言 prepare/compact 与 message 查询互不串扰。
 - **取消透传**：`signal` abort 时，断言底层 run cancel 被调用。
 - **身份透传（AC-5）**：断言 `RunManager.create` 收到的 `isSubagent` 来自实例身份，而不是调用方临时推断。
+- **primary stream（AC-9）**：primary instance 走同一 turn boundary，但 `contextScopeId` 为 `undefined`。
 
 ### 2.3 `core/agents/runner.unit.test.ts`（修改）
 
@@ -85,15 +87,16 @@ AC-6 分两段做，不把“现状一定溢出”写死成前提：
 | 既有 `runner.unit.test.ts` / `output.unit.test.ts` | 全绿，不修改断言语义 |
 | `core/lifecycle` 既有测试 | 不受影响（本轮不改 lifecycle 算法） |
 | `core/context` 既有测试 | 不受影响（本轮不改压缩算法） |
-| primary `startSession` | 本轮保持旧路径，后续迁移前契约测试必须单独补充 |
+| primary `startSession` | 走 `AgentInstance.turn(stream)`；必须断言不带 `contextScopeId` |
 
 ---
 
 ## 五、验收清单（Definition of Done）
 
-- [ ] `AgentInstance` / `AgentContextScope` / `AgentInstanceFactory` 实现并导出。
-- [ ] `AgentContextScope` 已包含 assert/toRunCreateOptions 行为，且 `runAgent` 使用该 scope 统一派生 message/context/run 范围。
-- [ ] AC-1 ~ AC-8 全部通过。
-- [ ] 新增单测 + 集成测试并入 CI。
-- [ ] `docs/core/agents/goals-duty.md` 按 02 文档第七节更新。
-- [ ] 与对侧 `agents` 文档的接口契约（`AgentInstanceFactory` 签名、`AgentInstanceIdentity` 字段）一致。
+- [x] `AgentInstance` / `AgentContextScope` / `AgentInstanceFactory` 实现并导出。
+- [x] `AgentContextScope` 已包含 assert/toRunCreateOptions 行为，且 `runAgent` 使用该 scope 统一派生 message/context/run 范围。
+- [x] AC-1 ~ AC-8 全部通过。
+- [x] AC-9 primary 基础 instance 入口通过，且不写 primary `contextScopeId`。
+- [x] 新增单测 + 集成测试并入 CI。
+- [x] `docs/core/agents/goals-duty.md` 按 02 文档第七节更新。
+- [x] 与对侧 `agents` 文档的接口契约（`AgentInstanceFactory` 签名、`AgentInstanceIdentity` 字段）一致。

@@ -47,7 +47,7 @@ export type AgentWaitMode = "stream" | "waitForCompletion";
 
 export interface AgentInstanceIdentity {
   readonly instanceId: string;          // primary 可为 sessionId；sub 为 subagentId
-  readonly contextScopeId: string;      // context/message 隔离键；sub 默认等于 instanceId
+  readonly contextScopeId?: string;     // sub 必须有；primary 当前不写，避免切断旧历史
   readonly sessionId: string;
   readonly type: AgentInstanceType;
   readonly agentName: string;
@@ -62,7 +62,7 @@ export interface AgentTurnInput {
   readonly waitMode: AgentWaitMode;
   readonly signal?: AbortSignal;
   readonly environment?: ToolExecutionEnvironment;
-  readonly runId?: string;             // 为后续 primary stream 迁移预留
+  readonly runId?: string;             // host/service 可提供稳定 run identity
 }
 
 export interface AgentInstance {
@@ -76,7 +76,7 @@ export interface AgentInstance {
 - 多轮：同一 `AgentInstance` 反复 `turn()`，`instanceId/contextScopeId/sessionId` 稳定持有；上层不再每轮重新推断 subagent 身份。
 - `sessionId` 是会话/线程容器；`instanceId` 是 agent 实例身份。subagent 的 `instanceId` 不等于 child `sessionId`，同一 child session 可以包含多个 subagent instance。
 - `contextScopeId` 是 context/message 查询与压缩的隔离键。若实现允许同一 `sessionId` 下多个 subagent，所有 context 读取/写入必须至少按 `sessionId + contextScopeId` 过滤。
-- 本轮优先验收 `type:"sub"` 路径；`type:"primary"` 是后续 primary root instance 迁移的兼容能力，不要求立即替换 `startSession`。
+- 本轮已让 `type:"primary"` 通过 `AgentInstance.turn({ waitMode:"stream" })` 接入 primary `startSession`。primary 暂不携带 `contextScopeId`；primary 物理 scope 与旧消息迁移另批处理。
 
 ### 2.2 `AgentContextScope`
 
@@ -88,7 +88,7 @@ export interface AgentContextScope {
   readonly identity: AgentInstanceIdentity;
 
   readonly instanceId: string;
-  readonly contextScopeId: string;
+  readonly contextScopeId?: string;
   readonly sessionId: string;
   readonly isSubagent: boolean;
   readonly parentSessionId?: string;
@@ -103,7 +103,7 @@ export interface AgentContextScope {
 
   toRunCreateOptions(): {
     readonly agentInstanceId: string;
-    readonly contextScopeId: string;
+    readonly contextScopeId?: string;
     readonly sessionId: string;
     readonly isSubagent: boolean;
     readonly parentSessionId?: string;
@@ -113,9 +113,9 @@ export interface AgentContextScope {
 
 **约束**
 
-- `type:"sub"` 必须有 `parentSessionId`；`type:"primary"` 必须没有。
+- `type:"sub"` 必须有 `parentSessionId` 与 `contextScopeId`；`type:"primary"` 必须没有二者。
 - `isSubagent` 只能由 `identity.type` 推导，不允许调用方覆盖。
-- `toRunCreateOptions()` 始终使用 scope 绑定的 `sessionId`、`contextScopeId`、`instanceId` 与 `isSubagent`。
+- `toRunCreateOptions()` 始终使用 scope 绑定的 `sessionId`、`instanceId` 与 `isSubagent`；只有 subagent 会携带 `contextScopeId`。
 - `runAgent` 消费 `AgentContextScope` 后，所有 message 写入/读取、run 创建、lifecycle prepare/compact 都必须使用这组派生值；禁止在下游重新根据 parent/session 临时推断 subagent scope。
 - `assertSession` 用于从持久化恢复时校验 DB session 与实例身份一致，防止跨 parent/role/context scope 复用。
 - `AgentContextScope` 不持有 `contextManager`，也不直接调用 `prepareTurn` / `compact`。这样可以避免 scope 变成第二个压缩 owner，也避免 `core/context` 与 `core/agents` 互相缠绕。
@@ -186,9 +186,9 @@ export interface AgentInstanceFactory {
 | S3 | 新增 `AgentInstance` + `AgentInstanceFactory`，`turn(waitForCompletion)` 复用 `runAgent` | ✅ 与旧 `runAgent(waitForCompletion)` 等价性测试 |
 | S4 | subagent 长任务 per-step 压缩集成测试 | ✅ |
 | S5 | 导出 + 对侧 `SessionSubagentHost` 装配 | 由对侧 e2e 覆盖 |
-| S6 | 后续：`turn(stream)` 与 primary `startSession` 迁移 | 后续独立阶段 |
+| S6 | `turn(stream)` 与 primary `startSession` 基础迁移；primary 不写 `contextScopeId` | ✅ |
 
-> S6 故意后置。primary stream 是 UI 契约关键路径，不与本轮 subagent context/instance 化混在同一个风险包里。
+> primary root 已接入 `AgentInstance`，但 primary 物理 `contextScopeId` 仍后置。原因是旧 primary 消息目前以 `context_scope_id IS NULL` 存在，直接加 scope 会切断历史上下文。
 
 ---
 
@@ -199,4 +199,4 @@ export interface AgentInstanceFactory {
 - G1 增补：`core/agents` 除 `runAgent` 单轮原语外，提供 `AgentInstance` 作为 subagent **context 运行时 owner**。
 - Duty 新增：`AgentContextScope` 负责实例身份到 context/message/run scope 参数的绑定与校验。
 - Duty 新增：subagent `turn()` 必须经 lifecycle per-step 压缩路径。
-- Non-Duty 明确：spawn/持久化/容量/工具语义属 `agents`；primary stream 迁移属后续阶段。
+- Non-Duty 明确：spawn/持久化/容量/工具语义属 `agents`；primary 物理 scope 与历史消息迁移属后续阶段。

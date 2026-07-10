@@ -1,6 +1,6 @@
 # 04 · 测试与验收标准（agents 服务层视角）
 
-本文定义 `agents` 服务层本轮改造的测试项与验收标准。范围限定为 subagent context/instance 化、工具面收敛与重启 `interrupted` 语义；primary root instance 不作为本轮 AC。
+本文定义 `agents` 服务层本轮改造的测试项与验收标准。范围包括 subagent context/instance 化、单一工具面、durable queue、重启 `interrupted` 语义，以及 primary root 的基础 `AgentInstance` 入口。primary 物理 `contextScopeId` 迁移仍属后续批次。
 
 ---
 
@@ -8,15 +8,16 @@
 
 | 编号 | 验收标准 | 验证方式 |
 |------|----------|----------|
-| AC-1 | `SessionSubagentHost.run(mode:"foreground")` 与旧 `AgentService.executeTask` 语义等价：输出、错误、超时、取消、并发上限、继续同一 `subagent_id` | host 单测 |
-| AC-2 | `SessionSubagentHost.run(mode:"background")` 覆盖旧后台能力：立即返回、排队、interrupt、容量、超时、close | host 单测 |
+| AC-1 | `SessionSubagentHost.run(mode:"foreground")` 支持创建/继续、等待自己的排队轮次，并返回该轮 output/error；`mode` 只决定返回时机 | host 单测 |
+| AC-2 | `SessionSubagentHost.run(mode:"background")` 立即返回；所有新 prompt 进入同一 durable FIFO queue，`interrupt` 不清空旧队列；仅在旧 turn 已 settle 时自动续排 | host 单测 |
 | AC-3 | `DatabaseSubagentInstanceStore` 正确持久化 `subagent_instance`；真实 SQLite 往返与 cascade 正常 | 集成测试 |
 | AC-4 | 重启/恢复时按 owner 语义把当前 owner、同 PID 旧 owner、死 owner 或 legacy unknown-owner 的 `pending/running -> interrupted`，不自动续跑；显式 `subagent_run({ subagent_id })` 后继续同一 subagent instance/context scope | 集成测试 |
 | AC-5 | 工具 registry 只向主 agent 暴露 `subagent_run/status/close`，不再暴露 `task`、`agent_open`、`agent_eval` | 工具契约测试 |
-| AC-6 | foreground 与 background 都通过同一个 child `AgentInstance` 执行，`isSubagent` 由 instance/scope identity 派生；`subagent_id` 不等于 child `session_id` | host + core mock 测试 |
-| AC-7 | 长 subagent 任务采用两段测试：先记录现状基线，再验证改造后多步执行不溢出且不串 scope | 集成测试 |
+| AC-6 | 长 subagent 任务采用两段测试：先记录现状基线，再验证改造后 50+ tool step 多次 prepare/compact、不溢出且不串 scope | 集成测试 |
+| AC-7 | foreground 与 background 都通过同一个 child `AgentInstance` 执行，`isSubagent` 由 instance/scope identity 派生；`subagent_id` 不等于 child `session_id` | host + core mock 测试 |
 | AC-8 | 只剩一套 subagent envelope 编排，不再有 `executeTask` 与后台 manager 两处重复 `runAgent` 编排 | 代码审查 |
-| AC-9 | 依赖方向仍为 `agents -> core/agents`，无反向依赖 | lint/依赖测试 |
+| AC-9 | primary `startSession` 通过 `AgentInstance.turn({ waitMode:"stream" })`，且不写 primary `contextScopeId` | service 单测/契约测试 |
+| AC-10 | 依赖方向仍为 `agents -> core/agents`，无反向依赖 | lint/依赖测试 |
 
 ---
 
@@ -24,19 +25,27 @@
 
 ### 2.1 `agents/subagent-host.unit.test.ts`
 
-- foreground：成功、失败、timeout 文案、取消、并发上限、继续已有 `subagent_id` 时 parent 归属校验。
+- foreground：成功、失败、timeout 文案、取消、继续已有 `subagent_id` 时 parent 归属校验；运行中收到 foreground prompt 时入队并等待自己的轮次。
 - background：立即返回 `pending/running`、完成后 `completed`、失败后 `failed`、timeout 后 `timed_out`。
-- queue：同一 `subagent_id` 的第二轮输入排队；`interrupt` 取消当前 turn 并改跑新 prompt。
-- close：运行中 close 触发 abort 并置 `cancelled`；已完成 close 幂等。
+- queue：首个 prompt 随实例记录原子持久化；claim 用一次写入把队首转为 `currentInput/currentRunId/running`；后续 prompt 追加队尾；`failed/timed_out/interrupted` 暂停，新的 `subagent_run` 才按旧队列到新 prompt 的顺序恢复。
+- foreground pause：前序失败时解除 foreground waiter，但 prompt 仍持久化，显式 resume 后按 FIFO 执行。
+- owner admission：无本地 active state 且 durable record 正在由别的 runtime 执行时明确拒绝，不留下无人消费的 pending prompt；background 只有首次 claim 成功后才返回。
+- interrupt：abort 当前 turn并保留已经排队的输入；合作式退出后继续 drain，旧 turn 不响应 abort 时暂停为 `interrupted`，不得启动 replacement；一次性续排标记不得污染后续失败。
+- close：运行中 close 触发 abort、清空 queue/currentInput、把 current run 转为 last run、完成等待者并置 `cancelled`；close 后不可复活。
+- timeout/owner：单次 timeout 覆盖不修改实例默认值；host 的 hard deadline 能收口不响应 abort 的 turn；scheduler 不另设固定墙钟 guard；每轮原子 claim 都刷新 active owner。
+- CAS：两个 host 只能有一个 claim 成功；close 后旧 run 的迟到 finish 不得覆盖 `cancelled`。
 - identity：创建/恢复 instance 时传入同一个 `subagentId/contextScopeId/sessionId/parentSessionId`、role/name；非法 parent 被拒绝。
 
 ### 2.2 `agents/subagents/database-store.integration.test.ts`
 
 - 使用真实 SQLite 与迁移夹具。
 - `create/get/update/listByParent/markInterrupted` 往返。
+- `claim` 只允许一个 owner 原子认领；`finishRun` 必须匹配 `current_run_id`，并拒绝覆盖 closed 记录。
+- SQLite `claim/finishRun` 用条件 `UPDATE ... RETURNING` 原子返回本次结果；内存/数据库 store 都拒绝 required mutable 字段显式 `undefined`。
 - `markInterrupted` 覆盖 owner 语义：当前 owner 命中、同 PID 旧 owner 命中、死 PID 命中、活着的其他 owner 不命中。
 - `pending_queue` JSON 编解码。
 - 同一 `session_id` 下可创建多个不同 `subagent_id`；`(session_id, context_scope_id)` 唯一。
+- `current_input` JSON 往返；恢复时保留 input、清空 current run 并转存 last run。
 - 删除 child session 后 `subagent_instance` 级联删除。
 - 迁移 `008_subagent_instance` 应用后表与索引存在。
 
@@ -49,8 +58,8 @@
 
 ### 2.4 `agents/service.unit.test.ts`
 
-- 保留 primary `startSession` 当前测试，断言本轮未改 stream 路径。
-- 旧 `executeTask` 用例迁移到 `subagent-host.unit.test.ts`；如果代码保留薄委托，只测委托，不再测重复编排。
+- primary `startSession` 通过同一个 `AgentInstanceFactory` 创建 `type:"primary"` 实例并执行 `turn(stream)`。
+- 断言 `RunManager.create` 不带 primary `contextScopeId`；旧 subagent 编排用例全部迁移到 `subagent-host.unit.test.ts`。
 
 ---
 
@@ -67,13 +76,14 @@
 ### 3.2 同 session 多 subagent 隔离
 
 - 在同一 child session 下创建两个 `subagent_instance`，分别使用不同 `subagent_id/context_scope_id`。
+- 两个实例使用不同 role，断言 system prompt 取当前 run 的 role，不取共享 `Session.agentName`。
 - 分别写入一轮消息并触发 prepare/compact。
 - 断言 A 的 context 不包含 B 的消息，B 的 context 不包含 A 的消息。
 - 断言 `subagent_status` 统一返回 `items[]`，其中两个 item 可按 `subagent_id` 区分。
 
-### 3.3 长任务不溢出（AC-7）
+### 3.3 长任务不溢出（AC-6）
 
-AC-7 拆成两段：
+AC-6 拆成两段：
 
 **阶段 A：现状基线**
 
@@ -98,8 +108,16 @@ AC-7 拆成两段：
 
 ### 3.5 primary 回归
 
-- `adapters/ui-runtime/composition.unit.test.ts` 与 `adapters/ui-inprocess.contract.test.ts` 中 primary stream 契约应保持现状。
-- 本轮不要求 primary root instance 等价测试。
+- `agents/service.unit.test.ts` 断言 primary 通过 `AgentInstance.turn(stream)`，且 run scope 不带 `contextScopeId`。
+- `adapters/ui-runtime/composition.unit.test.ts` 与 `adapters/ui-inprocess.contract.test.ts` 继续验证 primary stream envelope 不变。
+
+### 3.6 scoped sandbox 与 runtime 重建
+
+- 同一 child session 的两个 `contextScopeId` 可以同时 acquire/run；释放 A 的 lease 后 B 的 context 仍然可查询和使用。
+- child session 必须验证 `isSubagent + parentId` 与 durable record 一致；伪造/损坏归属不得进入 turn。
+- runtime 热重建先调用旧 composition 的 `dispose()`；旧 run 被取消且 lease 释放后才能替换 runtime。
+- `subagent_status/close` 使用 control-plane 并发类别，不被长时间运行的 `subagent_run` 占满执行池而饿死。
+- SandboxManager 对同 scope 的 pending create/destroy 去重和串行收口；RunManager 的 scope lock 不阻塞 sibling；取消后的非协作写工具在 settle 前不释放写槽。
 
 ---
 
@@ -111,21 +129,23 @@ AC-7 拆成两段：
 | subagent memory 策略 | 继续不加载 primary memory |
 | `SUBAGENT_DISABLED_TOOLS` | 继续生效 |
 | 描述符子层 | registry/manager/roles/builtin 不做行为性重构 |
-| DB 迁移 | 001 至 007 幂等，新增 008 不破坏旧库升级 |
-| primary stream | 本轮不改变返回 envelope |
+| DB 迁移 | 既有迁移保持幂等；008 建表、011 owner、012 current_input 可从旧库顺序升级 |
+| primary stream | 执行入口改为 `AgentInstance.turn(stream)`，返回 envelope 不变；物理 scope 延后 |
 
 ---
 
 ## 五、验收清单（Definition of Done）
 
-- [ ] `SessionSubagentHost` 实现 `run/status/close/recoverInterrupted`。
-- [ ] `subagent_instance` 表迁移与 schema 定义完成。
-- [ ] `DatabaseSubagentInstanceStore` 实现并通过真实 SQLite 集成测试。
-- [ ] `subagent_run/status/close` 工具接入 builtin registry。
-- [ ] 旧 `task`、`agent_open`、`agent_eval` 不再暴露给主 agent。
-- [ ] 重启后的 `pending/running` 记录置为 `interrupted`，且无自动续跑。
-- [ ] owner-aware recovery 覆盖当前 owner、同 PID 旧 owner、死 owner、活着的其他 owner 四类记录。
-- [ ] foreground/background 都通过同一个 `AgentInstance` 路径执行。
-- [ ] AC-1 至 AC-9 全部通过。
-- [ ] `docs/agents/goals-duty.md` 按 02 文档第七节更新。
-- [ ] 与 `docs/core/agents/2026-07-09-subagent-context` 的接口契约一致。
+- [x] `SessionSubagentHost` 实现 `run/status/close/recoverInterrupted/dispose`。
+- [x] `subagent_instance` 表迁移与 schema 定义完成。
+- [x] `DatabaseSubagentInstanceStore` 实现并通过真实 SQLite 集成测试。
+- [x] `subagent_run/status/close` 工具接入 builtin registry。
+- [x] 旧 `task`、`agent_open`、`agent_eval` 不再暴露给主 agent。
+- [x] 重启后的 `pending/running` 记录置为 `interrupted`，且无自动续跑。
+- [x] owner-aware recovery 覆盖当前 owner、同 PID 旧 owner、死 owner、活着的其他 owner 四类记录。
+- [x] foreground/background 都通过同一个 `AgentInstance` 路径执行。
+- [x] primary `startSession` 已接入 `AgentInstance.turn(stream)`，且不写物理 `contextScopeId`。
+- [x] scoped sandbox、host deadline、queue/CAS、close、runtime dispose 的竞态测试通过。
+- [x] AC-1 至 AC-10 全部通过。
+- [x] `docs/agents/goals-duty.md` 与 `dfd-interface.md` 已更新。
+- [x] 与 `docs/core/agents/2026-07-09-subagent-context` 的接口契约一致。

@@ -1,6 +1,6 @@
 # 02 · 实施方案与改动面（agents 服务层视角）
 
-本文给出 `agents` 服务层的目标结构、`SessionSubagentHost` 设计、持久化方案，以及实施前的文件级改动面。当前决策是：先完成 subagent context/instance 化与工具面收敛，primary root instance 后续单独实施。
+本文给出 `agents` 服务层的目标结构、`SessionSubagentHost` 设计、持久化方案，以及实施前的文件级改动面。当前决策是：完成 subagent context/instance 化与工具面收敛；primary `startSession` 已接入 `AgentInstance.turn(stream)`，但 primary 物理 `contextScopeId` 后续单独实施。
 
 ---
 
@@ -12,16 +12,14 @@ agents/
 ├── manager.ts                               （保留）getRuntimeAgent / 描述符解析
 ├── subagent-host.ts                         （新增）SessionSubagentHost，统一 run/status/close
 ├── subagents/
-│   ├── types.ts                             （新增或由 tasks/types.ts 迁移）SubagentInstanceRecord / Store / Controller
-│   ├── database-store.ts                    （新增）DatabaseSubagentInstanceStore
+│   ├── types.ts                             SubagentInstanceRecord / Store 契约
+│   ├── database-store.ts                    DatabaseSubagentInstanceStore
 │   └── in-memory-store.ts                   （测试/回退）InMemorySubagentInstanceStore
-├── tasks/                                   （过渡期可保留路径）
-│   └── ...                                  旧 AgentTask* 代码迁移或降级为 host 内部实现
-├── service.ts                               （保留 primary startSession 旧路径；executeTask 删除或薄委托）
+├── service.ts                               primary startSession 走 AgentInstance.turn
 └── types.ts                                 （微调）Subagent 相关参数名收敛
 ```
 
-> 实现可以短期沿用 `agents/tasks/*` 目录以降低补丁风险，但领域名和对外契约应改为 `Subagent*`。新文档和新测试以 `SubagentInstance` 命名为准。
+> 旧 `agents/tasks/*`、`AgentTaskManager` 与 `AgentService.executeTask` 已删除；当前实现与测试只使用 `SubagentInstance` / `SessionSubagentHost` 领域名。
 
 ---
 
@@ -72,8 +70,9 @@ export interface SessionSubagentHost {
   status(input: SubagentStatusInput): Promise<SubagentStatusResult>;
   close(input: SubagentLookupInput): Promise<SubagentCloseResult>;
   recoverInterrupted(
-    parentSessionId: string,
+    input?: MarkSubagentsInterruptedInput,
   ): Promise<readonly SubagentInstanceRecord[]>;
+  dispose(): Promise<void>;
 }
 ```
 
@@ -82,6 +81,11 @@ export interface SessionSubagentHost {
 - 新建 subagent：必须有 `role`、`parentSessionId`、`prompt`，不能传 `subagentId`。
 - 继续 subagent：必须有 `subagentId`、`parentSessionId`、`prompt`，`SessionSubagentHost` 校验 parent 归属。
 - `mode` 只决定返回时机，不决定是否创建另一套执行路径。
+- foreground/background prompt 都进入同一 durable FIFO queue。foreground 等待自己的队列项，background 在持久化成功后立即返回。
+- 若当前 turn 正在运行，新的 prompt 一律入队尾；`interrupt:true` 只 abort 当前 turn，不清空既有输入。只有旧 turn 已确认 settle，host 才能在同一 drain 中继续；旧执行体不响应 abort 时状态转为 `interrupted` 并暂停，等待下一次显式 `subagent_run`，避免两个 run 共用同一 scope。
+- `failed` / `timed_out` / 普通 `interrupted` 会暂停；只有新的 `subagent_run({ subagent_id, prompt })` 触发恢复，旧 queue 先执行，新 prompt 最后执行。
+- 前序 turn 进入暂停态时，排队中的 foreground 调用不能无限占住主 agent：其 waiter 返回当前失败/中断 item，但 prompt 会去掉进程内 waiter/signal 后继续保留在 durable queue；下次显式继续仍会执行它。
+- 若 durable record 显示另一个 runtime 正在持有 `currentRunId/running`，本 host 明确拒绝新输入并要求稍后重试，不把 prompt 写成无人消费的 pending item。当前不是跨进程分布式队列。
 - `subagent_id` 是主 agent 可见的 agent instance handle，不能等同于 child `session.id`。一个 child session 下可以有多个 subagent instance。
 
 ### 2.2 内部执行模型
@@ -122,7 +126,7 @@ await instance.turn({
 });
 ```
 
-`AgentContextScope` 负责校验 identity、生成 `runAgent` options、`context` 查询条件与 `message` 写入/读取 scope。压缩执行仍在 lifecycle/context manager 中完成，但每轮 prepare/compact 必须使用同一个 subagent identity 派生出的 `sessionId + contextScopeId`。数据库继续负责 durable session/message。
+`AgentContextScope` 负责校验 identity、生成 `runAgent` options、`context` 查询条件与 `message` 写入/读取 scope。压缩执行仍在 lifecycle/context manager 中完成，但每轮 prepare/compact 必须使用同一个 subagent identity 派生出的 `sessionId + contextScopeId`。当前 run 的 `agentName` 也必须透传给 system prompt provider；共享 child session 的 `Session.agentName` 不能作为 subagent role 真相源。数据库继续负责 durable session/message。
 
 `subagentId` 不等于 child `sessionId`。`subagentId` 是 agent instance handle；`sessionId` 是会话/线程容器。若一个 child session 下存在多个 subagent，message/context 读写必须使用 `sessionId + contextScopeId(subagentId)` 隔离。大白话：child session 像一个文件夹，subagent instance 才是一份具体档案，不能只按文件夹名找内容。
 
@@ -132,7 +136,7 @@ await instance.turn({
 
 ### 3.1 新增 `subagent_instance` 表
 
-迁移文件追加到 `services/database/migrations.ts`。本轮实际拆成基础表与 owner 增量两步：`008_subagent_instance` 建表，`011_subagent_instance_owner` 补 `owner_id/owner_pid` 与 owner 状态索引。
+迁移文件追加到 `services/database/migrations.ts`。本轮实际拆成三步：`008_subagent_instance` 建表，`011_subagent_instance_owner` 补 `owner_id/owner_pid` 与 owner 状态索引，`012_subagent_instance_current_input` 增加 durable in-flight claim。
 
 ```sql
 CREATE TABLE IF NOT EXISTS subagent_instance (
@@ -148,6 +152,7 @@ CREATE TABLE IF NOT EXISTS subagent_instance (
   output             TEXT,
   error              TEXT,
   pending_queue      TEXT NOT NULL DEFAULT '[]',
+  current_input      TEXT,
   current_run_id     TEXT,
   last_run_id        TEXT,
   timeout_ms         INTEGER,
@@ -181,22 +186,52 @@ CREATE INDEX IF NOT EXISTS idx_subagent_instance_owner_status
 |--------|------|
 | `pending` | 已创建或已入队，尚未开始当前 turn |
 | `running` | 当前 turn 正在执行 |
-| `idle` | 实例可继续，当前无运行 turn |
 | `completed` | foreground 或 background 当前任务完成 |
-| `failed` | 当前 turn 失败 |
-| `timed_out` | 当前 turn 超时 |
+| `failed` | 当前 turn 失败；暂停 queue，等待显式继续 |
+| `timed_out` | 当前 turn 超时；暂停 queue，等待显式继续 |
 | `interrupted` | 进程重启或运行中断，必须由主 agent 显式继续 |
-| `cancelled` | 用户或 parent 显式关闭 |
+| `cancelled` | 用户显式 close；终态，不可继续 |
 
-重启恢复只把 `pending` / `running` 转成 `interrupted`。不把它们转成 `idle`，也不自动 drain queue。
+重启恢复只把 `pending` / `running` 转成 `interrupted`。`failed` / `timed_out` / `interrupted` 都不自动 drain queue；只有新的 `subagent_run({ subagent_id, prompt })` 会恢复，且新 prompt 入队尾。`close` 是唯一清空 queue 的终态。
 
-### 3.3 Store
+### 3.3 运行字段语义
+
+| 字段 | 唯一语义 |
+|------|----------|
+| `initialPrompt` | 创建实例时的不可变审计快照，不作为恢复队列的隐式后备 |
+| `pendingQueue` | durable 未开始输入；新建时已包含首个 prompt，只存 `prompt/timeoutMs/workdir` 等可序列化描述 |
+| `currentInput` | 已从 queue claim、正在执行或因进程退出而中断的 durable 输入；与 `currentRunId` 同一次写入 |
+| `currentRunId` | 当前 owner 正在执行的唯一 run；终态或恢复时必须清空 |
+| `lastRunId` | 最近一次已收口 run；重启恢复时接收旧 `currentRunId` |
+| `timeoutMs` | 实例默认 deadline，创建后不被单次输入覆盖；host 默认 2h |
+| `startedAt` | 最近一次 turn 开始时间 |
+| `completedAt` | 最近一次 turn 在本进程内完成/失败/超时/中断的收口时间 |
+| `interruptedAt` | 重启恢复或运行中断的专用时间；不代表自动续跑 |
+| `closedAt` | close 终态时间；存在时任何后续 run 都必须拒绝 |
+| `ownerId/ownerPid` | 最近一次 claim 当前 turn 的运行时 owner；每轮开始时重新认领 |
+
+claim 必须用一次带前置条件的 store update 同时完成：`pendingQueue` 移除队首、写 `currentInput/currentRunId/status=running/owner`，且仅允许未关闭、当前非 running 的记录认领成功。SQLite 实现使用同一条 `UPDATE ... RETURNING` 返回本次写入的记录，不能在 update 后另做可被并发穿插的 select。这样既不会出现 prompt 已出队但没有 durable in-flight 记录的空窗，也不会让两个 host 同时执行一个 subagent。
+
+run 收口必须调用 `finishRun(subagentId, expectedCurrentRunId, update)` 做 compare-and-set。只有 durable `current_run_id` 仍等于本轮 run id 且记录未 close 时，成功/失败/timeout 才能落库；否则拒绝迟到结果，保证 close 或其他 owner 的新 claim 不被旧 run 覆盖。
+
+重启恢复会保留 `currentInput` 用于观测，把旧 `currentRunId` 转存为 `lastRunId` 并清空 `currentRunId`；`pendingQueue` 原样保留。中断的 `currentInput` 不自动重放，避免重复执行已有副作用；新的 `subagent_run` 只触发剩余 pending queue 与新 prompt。`ToolExecutionEnvironment` 含函数，禁止写入 queue；host 只持久化 `workdir`，恢复执行时由 run manager 重新申请 `sessionId + contextScopeId` 对应的 sandbox lease。内存 `active` 只保存 abort controller、等待者和当前进程 environment 等不可持久化调度细节，不是第二份 queue 真相源。
+
+### 3.4 Store
 
 目标 store：
 
 ```typescript
 export interface SubagentInstanceStore {
   create(record: SubagentInstanceRecord): Promise<void>;
+  claim(
+    subagentId: string,
+    update: SubagentInstanceUpdate,
+  ): Promise<SubagentInstanceRecord | null>;
+  finishRun(
+    subagentId: string,
+    currentRunId: string,
+    update: SubagentInstanceUpdate,
+  ): Promise<SubagentInstanceRecord>;
   get(input: SubagentLookupInput): Promise<SubagentInstanceRecord | null>;
   update(subagentId: string, update: SubagentInstanceUpdate): Promise<SubagentInstanceRecord>;
   listByParent(parentSessionId: string): Promise<readonly SubagentInstanceRecord[]>;
@@ -216,7 +251,7 @@ export interface SubagentInstanceStore {
 - `agents/subagents/in-memory-store.ts`：单测与过渡。
 - 旧 `AgentTaskStore` 可在迁移期适配，但最终不应继续暴露 `task` 领域名。
 
-### 3.4 重启语义
+### 3.5 重启语义
 
 进程启动或 parent 首次访问时：
 
@@ -225,9 +260,13 @@ export interface SubagentInstanceStore {
 3. 被恢复命中的记录置为 `interrupted`，写 `interrupted_at` 与 `updated_at`。
 4. host 不创建新 `AgentInstance`，不自动发起 `turn()`。
 5. 主 agent 可通过 `subagent_status` 看见 `interrupted` item。
-6. 主 agent 如需继续，显式调用 `subagent_run({ subagent_id, prompt, mode })`，host 从该 `subagent_id` 对应的 child session + context scope 重建 instance 并追加新 turn。
+6. 主 agent 如需继续，显式调用 `subagent_run({ subagent_id, prompt, mode })`，host 从该 `subagent_id` 对应的 child session + context scope 重建 instance；若 `pending_queue` 非空，新 prompt 入队尾，先 drain 旧队列。
 
-`pending_queue` 保留用于观测和审计，但重启后不自动执行。显式继续时，新 prompt 是新的执行输入；队列是否合并留给后续产品策略。
+`pending_queue` 保留用于观测和审计，重启后不自动执行；显式继续才会触发 drain。
+
+当前 owner 判定假设一个 OS 进程内只有一个 active runtime composition。配置热重建必须先 `dispose()` 旧 runtime，取消其 run 并释放 scoped sandbox lease，再创建新 host。若未来允许同一 PID 内多个 backend owner 并存，不能再用“同 PID 旧 owner”作为死亡依据，必须升级为 owner registry/heartbeat。
+
+backend/client 顶层 `dispose()` 必须 await runtime controller reset。reset 使用串行 barrier：先等旧 runtime 的 host/RunManager/sandbox 全部 dispose，再允许 `getRuntime()` 创建 replacement；旧 creation 的失败回调只能清理它自己的 promise 引用。
 
 ---
 
@@ -257,6 +296,7 @@ export interface SubagentInstanceStore {
 
 - `mode` 默认建议为 `foreground`，由模型显式选择 `background` 跑长任务。
 - `subagent_id` 出现时表示继续既有 child instance，替代旧 `agent_eval`。
+- `subagent_run` 声明 `timeoutOwner:"tool"`：scheduler 负责 caller cancel 和并发 admission，不再另设固定墙钟 guard；真正的 2h/单次 `timeout_ms` deadline 只由 host 判定并写 `timed_out`。
 - 旧 `task`、`agent_open`、`agent_eval` 不再暴露给主 agent。必要时可以保留内部 deprecated adapter 过渡，但 registry 不应向模型展示。
 
 ### 4.2 文件改动
@@ -282,7 +322,7 @@ export interface SubagentInstanceStore {
 | `agents/subagents/database-store.ts` | 新增 | SQLite durable store |
 | `agents/subagents/in-memory-store.ts` | 新增或迁移 | 测试/回退 |
 | `agents/tasks/manager.ts` | 收敛/删除 | 旧后台逻辑迁到 host |
-| `agents/service.ts` | 保留 primary | `startSession` 继续当前 `runAgent(stream)`；`executeTask` 删除或薄委托到 host |
+| `agents/service.ts` | primary instance 入口 | `startSession` 通过 `AgentInstance.turn(stream)`；primary 不带 `contextScopeId`；不再承担 subagent 编排 |
 | `agents/index.ts` | 更新导出 | 导出 host 与 subagent store |
 
 ### 5.2 composition
@@ -292,15 +332,18 @@ export interface SubagentInstanceStore {
 | 创建 store | `new DatabaseSubagentInstanceStore(getDatabase())` |
 | 创建 host | 注入 `AgentManager`、`AgentInstanceFactory`、message/session/run deps、store |
 | 创建 tools | `createSubagentTools(host)` |
-| primary startSession | 本轮仍指向 `AgentService.startSession` 当前实现 |
+| primary startSession | 指向 `AgentService.startSession`，内部走 `AgentInstance.turn(stream)`，但不写 primary `contextScopeId` |
+| runtime reset/dispose | 热重建先取消旧 runtime 的 active run、释放 scoped sandbox lease，再替换 composition |
+
+RunManager 的 create lock 按 `sessionId + contextScopeId?` 建立，而不是只按 session。旧执行体不响应取消时，同一 scope 的 replacement 继续等待，避免副作用重叠；sibling scope 不受该锁阻塞。ToolScheduler 对已取消但仍未 settle 的写/危险工具保留并发槽，底层 promise settle 后才释放。
 
 ### 5.3 primary 暂缓项
 
 以下内容不在本轮 agents 实施中完成：
 
-- `startSession` 切 root `AgentInstance`。
-- UI stream projection 因 root instance 迁移产生的契约调整。
-- primary instance registry。
+- primary 物理 `contextScopeId`。
+- 既有 primary message 的 `context_scope_id` 回填/迁移。
+- UI stream projection 因 primary 物理 scope 迁移产生的契约调整。
 
 这些在 subagent instance/context 基础设施稳定后再单独实施。
 
@@ -315,9 +358,9 @@ export interface SubagentInstanceStore {
 | A2 | `SessionSubagentHost.run/status/close` 后台路径，重启置 `interrupted` | A0,A1 |
 | A3 | foreground 路径吸收 `AgentService.executeTask` 语义 | A2 |
 | A4 | 工具面切到 `subagent_run/status/close`，移除旧工具暴露 | A2,A3 |
-| A5 | composition 装配切换；primary `startSession` 保持旧路径 | A4 |
+| A5 | composition 装配切换；primary `startSession` 走 `AgentInstance.turn(stream)` 但不带 scope | A4 |
 | A6 | e2e：foreground、background、interrupted resume、长任务压缩 | A5 |
-| A7 | 后续阶段：primary root instance | 本轮验收后 |
+| A7 | 后续阶段：primary 物理 `contextScopeId` | 本轮验收后 |
 
 ---
 
@@ -327,6 +370,6 @@ export interface SubagentInstanceStore {
 
 - `SessionSubagentHost` 负责 subagent 生命周期、前后台调度、状态机和工具后端。
 - `SubagentInstanceStore` 负责 durable subagent instance 记录，不负责 message 真相源。
-- `AgentService` 本轮仍负责 primary `startSession`，不承担 subagent foreground 实现。
+- `AgentService` 本轮负责 primary `startSession`，通过 `AgentInstance.turn(stream)` 执行；不承担 subagent foreground 实现。
 - `tools` 只暴露 `subagent_run/status/close` 给主 agent。
-- primary root instance 标注为后续阶段，不写入本轮 duty。
+- primary 物理 `contextScopeId` 标注为后续阶段，不写入本轮 duty。

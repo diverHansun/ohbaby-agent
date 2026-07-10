@@ -14,7 +14,7 @@
 ## 二、已确认决策（贯穿本轮）
 
 1. **`AgentContextScope` 是有行为的对象**：调用方不再手写/推断 `isSubagent`；subagent 身份、父子关系、context/message scope 参数都由实例绑定。
-2. **primary root instance 延后迁移**：本轮先完成 subagent 的 context/instance 化与工具面收敛；primary `startSession` 在基础设施稳定后单独改造。
+2. **primary root instance 基础接入**：primary `startSession` 已走 `AgentInstance.turn(stream)`；primary 物理 `contextScopeId` 与旧消息迁移后续单独改造。
 3. **工具面重新命名**：主 agent 只通过 `subagent_run` 召唤或继续 subagent；辅助工具为 `subagent_status` / `subagent_close`。不再保留 `task` 与 `agent_open` 两套心智模型。
 4. **后台 subagent 重启后不自动续跑**：进程重启按 owner 语义发现应恢复的 `running`/`pending` 时，状态转为 `interrupted`，由主 agent 显式 `subagent_run({ subagent_id, ... })` 继续；活着的其他 owner 不被误中断。
 5. **上下文隔离从 DB 逻辑字段升级为实例隔离**：SQLite `session.parent_id` 仍是持久真相源，但运行时隔离必须由 `AgentInstance + AgentContextScope` 强制保证。
@@ -31,7 +31,8 @@
 | 容量、并发、队列、超时、重启恢复状态机 | ✅ | — |
 | `subagent_instance` 表 + `DatabaseSubagentInstanceStore` | ✅ | — |
 | 工具面（`subagent_run/status/close`） | ✅ | — |
-| primary `startSession` 迁移 | ⏳ 后续阶段 | 提供可复用能力 |
+| primary `startSession` 基础 instance 入口 | ✅（不带 `contextScopeId`） | ✅ |
+| primary 物理 `contextScopeId` 迁移 | ⏳ 后续阶段 | 提供可复用能力 |
 | `AgentInstance` / `AgentContextScope` / 单实例压缩契约 | 消费 | ✅ |
 
 ---

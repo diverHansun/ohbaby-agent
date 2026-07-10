@@ -36,6 +36,12 @@
 - background active map 的 key 使用 `subagent_id`，不是 `session_id`。
 - 并发新建 subagent 时：选择/创建 child session 的过程必须按 parent 串行化，避免两个并发请求各自创建一个 child session。
 - 同一 child session 下多个 subagent 并发运行时：run active 判断必须按 `session_id + context_scope_id`，不能只按 `session_id`。
+- sandbox 生命周期必须按 `{ sessionId, contextScopeId? }` lease 管理；释放一个 subagent 的 lease 不得销毁 sibling scope。
+- queue 出队与 `current_input/current_run_id/running/owner` 写入必须由 store 原子 `claim` 完成；run 收口必须按 expected `current_run_id` 做 CAS。
+- `interrupt:true` 只有在旧 turn 已 settle 时才能自动 drain；不响应 abort 的旧 turn 会使实例暂停为 `interrupted`。
+- runtime 热重建必须先 dispose 旧 composition，不允许同一进程残留两个 host 争抢同一 durable instance。
+- child session 恢复时必须再次校验 `session.isSubagent` 与 `session.parentId`，不能只信 `subagent_instance.parent_session_id`。
+- status/close 工具本身必须声明 `subagent-control`；builtin category 映射不能被工具对象上的旧 `subagent` 值覆盖。
 
 ---
 
@@ -43,11 +49,11 @@
 
 “重启后”指进程内存态丢失后重新创建 host/store/controller，例如应用进程重启、服务重新装配、parent 会话首次恢复后台 subagent 状态。
 
-重启恢复只做三件事：
+重启恢复只做四件事：
 
 1. 查询 durable store 中 `pending/running` 的 subagent。
 2. 按 `owner_id + owner_pid` 判断恢复边界：当前 owner、同 PID 旧 owner、owner PID 已死、legacy unknown-owner 可标记；活着的其他 owner 不动。
-3. 标记为 `interrupted` 并写 `interrupted_at`。
+3. 标记为 `interrupted` 并写 `interrupted_at`；旧 `current_run_id` 转为 `last_run_id` 后清空。
 4. 让 `subagent_status` 可观测这些 item。
 
 它不做：
@@ -60,12 +66,21 @@
 
 ## 五、编码前检查
 
-- [ ] builtin registry 中不再暴露 `task`、`agent_open`、`agent_eval`。
-- [ ] `subagent_run` 同时覆盖创建与继续。
-- [ ] `subagent_status` 返回统一 `items[]`。
-- [ ] SQLite `subagent_instance.session_id` 不是 UNIQUE。
-- [ ] SQLite 有 `(session_id, context_scope_id)` 唯一约束。
-- [ ] run ledger 有 `context_scope_id`，并按 `(session_id, context_scope_id)` 判断 active run。
-- [ ] 同一 child session 多 subagent 的 host/store/context 测试先写出来。
-- [ ] owner-aware recovery 测试覆盖当前 owner、同 PID 旧 owner、死 owner、活着的其他 owner。
-- [ ] AC-7 按“两段测试”执行：先基线，后回归。
+- [x] builtin registry 中不再暴露 `task`、`agent_open`、`agent_eval`。
+- [x] `subagent_run` 同时覆盖创建与继续。
+- [x] `subagent_status` 返回统一 `items[]`。
+- [x] SQLite `subagent_instance.session_id` 不是 UNIQUE。
+- [x] SQLite 有 `(session_id, context_scope_id)` 唯一约束。
+- [x] run ledger 有 `context_scope_id`，并按 `(session_id, context_scope_id)` 判断 active run。
+- [x] 同一 child session 多 subagent 的 host/store/context 测试已覆盖。
+- [x] scoped sandbox 并发与独立释放测试已覆盖。
+- [x] store claim/finish CAS、close 防迟到覆盖测试已覆盖。
+- [x] cooperative/non-cooperative interrupt 两种续排语义已覆盖。
+- [x] scheduler control-plane 不被 subagent run 并发池阻塞，host 是 deadline 唯一 owner。
+- [x] runtime reset 会 dispose 旧 composition。
+- [x] backend dispose 会 await runtime dispose，replacement 受 reset barrier 保护。
+- [x] foreground pause 保留 durable prompt，跨 owner active admission 明确拒绝。
+- [x] SQLite claim/finish 使用 `UPDATE ... RETURNING`，两种 store 的 update 字段语义一致。
+- [x] child parent 归属、scope lock、非协作写槽与 sandbox create/destroy 竞态测试已覆盖。
+- [x] owner-aware recovery 测试覆盖当前 owner、同 PID 旧 owner、死 owner、活着的其他 owner。
+- [x] AC-6 按“两段测试”执行：先基线，后回归。

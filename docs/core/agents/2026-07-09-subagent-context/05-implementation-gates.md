@@ -10,7 +10,7 @@
 2. `sessionId` 是会话/线程容器；`contextScopeId` 才是 context/message 的隔离键。
 3. `subagent_id` 是 subagent instance handle，通常也是该 subagent 的 `contextScopeId`；它不等于 child `session_id`。
 4. 同一个 child session 可以承载多个 subagent instance，因此任何 context/message 查询只按 `sessionId` 过滤都不够。
-5. primary root instance 后置，本轮只把 subagent instance/context scope 路径接上。
+5. primary root 已接入 `AgentInstance.turn(stream)`；primary 物理 `contextScopeId` 与历史消息迁移后置。
 
 ---
 
@@ -49,11 +49,11 @@ AC-6 不再写成“现状一定会溢出”。实施时必须拆成两段：
 
 ## 四、编码前检查
 
-- [ ] `AgentInstanceIdentity` 同时包含 `instanceId`、`contextScopeId`、`sessionId`。
-- [ ] `AgentContextScope` 暴露 `toRunCreateOptions()`；`runAgent` 不再手写散落的 scope 参数，而是优先从 `AgentContextScope` 派生。
-- [ ] `runAgent` 的旧 `parentSessionId !== undefined` 推断只作为兼容 fallback。
-- [ ] lifecycle/context manager 的 prepare 路径可以接收或派生 `contextScopeId`。
-- [ ] `LifecycleEvent` / `RunWorker` stream payload 也带 `contextScopeId`，否则同 child session 下的实时事件仍然串来源。
-- [ ] message 读写路径可以接收或派生 `contextScopeId`。
-- [ ] `RunManager` 与 run ledger 的 active-run 判断使用 `sessionId + contextScopeId`，不能只按 `sessionId` 拒绝。
-- [ ] 同一 `sessionId` 下两个不同 `contextScopeId` 的测试先写出来。
+- [x] `AgentInstanceIdentity` 包含 `instanceId/sessionId`，sub 强制 `contextScopeId`，primary 当前禁止物理 scope。
+- [x] `AgentContextScope` 暴露 `toRunCreateOptions()`；`runAgent` 从 scope 派生稳定参数。
+- [x] `runAgent` 的旧 `parentSessionId !== undefined` 推断只作为兼容 fallback。
+- [x] lifecycle/context manager 的 prepare 路径接收 `contextScopeId`。
+- [x] `LifecycleEvent` / `RunWorker` stream payload 携带 `contextScopeId`。
+- [x] message 读写路径可按 `sessionId + contextScopeId` 过滤。
+- [x] `RunManager` 与 run ledger 的 active-run key 使用 `sessionId + contextScopeId`。
+- [x] 同一 `sessionId` 下两个不同 `contextScopeId` 的隔离测试已覆盖。

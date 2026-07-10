@@ -48,7 +48,7 @@ create()
   └─ 如可立即运行 → startRun(record)
 
 startRun(record)
-  ├─ sandboxManager.acquire(sessionId) → SandboxLease
+  ├─ sandboxManager.acquire({ sessionId, contextScopeId?, workdir }) → scoped SandboxLease
   ├─ profileRegistry.getProfile(record.permissionProfileId) → PermissionProfile
   ├─ new AbortController()（保存在 RunRecord 中）
   ├─ 构造 RunContext { runId, sessionId, sandboxLease, permissionProfile, abortSignal, ... }
