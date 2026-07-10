@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AgentManager,
   InMemorySubagentInstanceStore,
+  SessionSubagentHost,
   type SubagentInstanceRecord,
 } from "../../agents/index.js";
 import { createBus } from "../../bus/index.js";
@@ -21,6 +22,7 @@ import {
 } from "../../core/message/index.js";
 import { SessionEvent } from "../../services/session/index.js";
 import { createPermissionState } from "../../permission/index.js";
+import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
 import type { Tool } from "../../core/tool-scheduler/index.js";
 import type {
   SkillContent,
@@ -449,6 +451,54 @@ describe("createUiRuntimeComposition skill tools", () => {
 
     await composition.dispose();
     expect(disposeSandbox).toHaveBeenCalledTimes(1);
+  });
+
+  it("interrupts a parent subagent tree from durable run identity after manager eviction", async () => {
+    const bus = createBus();
+    const runLedger = createInMemoryRunLedger();
+    const interruptByParent = vi
+      .spyOn(SessionSubagentHost.prototype, "interruptByParent")
+      .mockResolvedValue([]);
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      llmClient: fakeLlmClient(),
+      messageManager: createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      }),
+      permissionState: createPermissionState({ bus }),
+      runLedger,
+      skillRegistry: createMutableSkillRegistry([]),
+      workdir: await tempWorkdir(),
+    });
+    const getRun = vi
+      .spyOn(composition.runManager, "get")
+      .mockReturnValue(undefined);
+    const cancelRun = vi.spyOn(composition.runManager, "cancel");
+
+    try {
+      await runLedger.createPending({
+        runId: "run_evicted",
+        sessionId: "session_parent",
+        triggerSource: "user",
+      });
+
+      await expect(
+        composition.interruptRunTree("run_evicted", "user cancelled"),
+      ).resolves.toBeUndefined();
+
+      expect(cancelRun).not.toHaveBeenCalled();
+      expect(interruptByParent).toHaveBeenCalledWith(
+        "session_parent",
+        "user cancelled",
+      );
+    } finally {
+      getRun.mockRestore();
+      cancelRun.mockRestore();
+      interruptByParent.mockRestore();
+      await composition.dispose();
+    }
   });
 
   it("destroys only the closed subagent sandbox scope", async () => {

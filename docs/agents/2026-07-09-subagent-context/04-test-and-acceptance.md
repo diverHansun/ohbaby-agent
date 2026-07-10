@@ -125,7 +125,7 @@ AC-6 拆成两段：
 ### 3.7 parent run-tree interrupt（AC-11）
 
 - primary 同时启动 foreground 与 background subagent 后保持 run active。
-- 调用 `abortRun(primaryRunId)`，断言 primary 与该 parent 下所有 active child signal 都被 abort。
+- 调用 `abortRun(primaryRunId)`，断言 primary 与该 parent 下所有 active child signal 都被 abort；RunManager 已无该 record、但 run ledger 仍可定位 parent session 时，仍必须中断 child tree。
 - sibling parent 的 subagent 不受影响；当前 child 状态为 `interrupted`，pending queue 原样保留且没有自动续跑。
 - queued foreground caller 的 waiter 结束，但 durable prompt 不从 queue 删除。
 

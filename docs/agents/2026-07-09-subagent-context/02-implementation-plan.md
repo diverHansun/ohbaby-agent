@@ -342,7 +342,7 @@ backend/client 顶层 `dispose()` 必须 await runtime controller reset。reset 
 | 创建 host | 注入 `AgentManager`、`AgentInstanceFactory`、message/session/run deps、store |
 | 创建 tools | `createSubagentTools(host)` |
 | primary startSession | 指向 `AgentService.startSession`，内部走 `AgentInstance.turn(stream)`，但不写 primary `contextScopeId` |
-| primary abort | `interruptRunTree(runId)` 先取得 parent `sessionId`，取消 primary run，并调用 `subagentHost.interruptByParent(sessionId)` |
+| primary abort | `interruptRunTree(runId)` 优先从 RunManager 取得 parent `sessionId` 并取消 primary run；若内存 record 已不存在，则从 durable run ledger 回退取得 `sessionId`。只要能定位 parent，就调用 `subagentHost.interruptByParent(sessionId)`。 |
 | subagent close | host 先写 close 终态；composition 在对应 run lease settle 后销毁 `{sessionId, contextScopeId}` sandbox |
 | runtime reset/dispose | 热重建先取消旧 runtime 的 active run、释放 scoped sandbox lease并销毁全部 sandbox context，再替换 composition |
 

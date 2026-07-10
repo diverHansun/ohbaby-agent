@@ -475,6 +475,25 @@ export async function createUiRuntimeComposition(
   });
   await subagentHost.recoverInterrupted();
 
+  const interruptRunTree = async (
+    runId: string,
+    reason?: string,
+  ): Promise<void> => {
+    const run = runManager.get(runId);
+    const parentSessionId =
+      run?.sessionId ?? (await runLedger.get(runId))?.sessionId;
+    if (run) {
+      runManager.cancel(runId, reason);
+    }
+    if (parentSessionId === undefined) {
+      return;
+    }
+    await subagentHost.interruptByParent(
+      parentSessionId,
+      reason ?? "parent run interrupted",
+    );
+  };
+
   const unsubscribeSessionRemoved = options.bus.subscribe(
     SessionEvent.Removed,
     (payload) => {
@@ -678,16 +697,7 @@ export async function createUiRuntimeComposition(
       }));
     },
 
-    async interruptRunTree(runId, reason): Promise<void> {
-      const run = runManager.get(runId);
-      runManager.cancel(runId, reason);
-      if (run) {
-        await subagentHost.interruptByParent(
-          run.sessionId,
-          reason ?? "parent run interrupted",
-        );
-      }
-    },
+    interruptRunTree,
 
     async dispose(): Promise<void> {
       unsubscribeSessionRemoved();

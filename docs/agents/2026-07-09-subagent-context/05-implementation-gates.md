@@ -43,7 +43,7 @@
 - 若 parent interrupt 落在 claim 成功、turn 尚未启动之间，必须仍用同一 `finishRun` CAS 收口为 `interrupted` 并清除 `current_input/current_run_id`；不得直接跳过该 turn 而留下无法 resume 的 running 标记。
 - 新 prompt 必须由 store 原子 append 到 durable `pending_queue`；不得通过“读内存 queue 后整列覆盖”的方式追加。active queue 只能在 append 成功后更新，并且 append/claim/pause/close 在同一 host 内按 `subagent_id` 串行化；跨 host 的严格队列线性化不在本批承诺范围。
 - `interrupt:true` 只有在旧 turn 已 settle 时才能自动 drain；不响应 abort 的旧 turn 会使实例暂停为 `interrupted`。同进程内的后续显式 resume 只能追加 durable queue，必须等旧 turn settle 后才 claim 新 run。
-- parent run-tree interrupt 必须令该 parent 下全部 active turn 进入 `interrupted`，保留 queue且不得自动 drain；sibling parent 不受影响。
+- parent run-tree interrupt 必须令该 parent 下全部 active turn 进入 `interrupted`，保留 queue且不得自动 drain；sibling parent 不受影响。parent session 优先从 RunManager 的内存 record 定位；record 缺失时必须回退读取 durable run ledger，不能因 cancel 的 NotFound 而跳过子代理中断。
 - close 的逻辑终态与 sandbox 物理清理分层：host 关实例，composition 等 scoped lease settle 后销毁 context。
 - runtime 热重建必须先 dispose 旧 composition，不允许同一进程残留两个 host 争抢同一 durable instance。
 - child session 恢复时必须再次校验 `session.isSubagent` 与 `session.parentId`，不能只信 `subagent_instance.parent_session_id`。

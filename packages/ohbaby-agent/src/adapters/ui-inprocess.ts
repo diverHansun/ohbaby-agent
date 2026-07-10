@@ -1827,18 +1827,6 @@ export function createInProcessUiBackendClient(
         permissionState.setLevel(level);
       },
     },
-    abortRun(runId?: string): void {
-      if (!runId) {
-        void runtimeController.abortPromptRun();
-        interactionBroker.abortAll("aborted");
-        return;
-      }
-      if (runtimeController.isActiveRun(runId)) {
-        void runtimeController.abortPromptRun(runId);
-        return;
-      }
-      commandService.abortCommandRun(runId, "aborted");
-    },
     getStatus(): string {
       return promptInFlight ? "running" : "idle";
     },

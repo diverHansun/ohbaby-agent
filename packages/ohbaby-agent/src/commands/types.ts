@@ -201,7 +201,6 @@ export interface CommandServiceOptions {
   readonly skills?: CommandSkillProvider;
   readonly mcps?: CommandMcpProvider;
   readonly permission?: CommandPermissionProvider;
-  readonly abortRun?: (runId?: string) => Promise<void> | void;
   readonly submitPrompt?: (
     text: string,
     options?: { readonly sessionId?: string },
