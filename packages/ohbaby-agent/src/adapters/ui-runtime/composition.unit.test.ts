@@ -31,6 +31,7 @@ import type {
   SkillSearchDirectory,
 } from "../../skill/index.js";
 import { createUiRuntimeComposition } from "./composition.js";
+import { createHostLocalSandboxManager } from "./host-local-environment.js";
 
 interface FakeSdkClient {
   readonly kind: "fake";
@@ -406,6 +407,12 @@ describe("createUiRuntimeComposition skill tools", () => {
 
   it("disposes context session state when a session is removed", async () => {
     const bus = createBus();
+    const sandboxManager = createHostLocalSandboxManager(await tempWorkdir());
+    const destroySessionContexts = vi.spyOn(
+      sandboxManager,
+      "destroySessionContexts",
+    );
+    const disposeSandbox = vi.spyOn(sandboxManager, "dispose");
     const disposeSession = vi.fn<ContextManager["disposeSession"]>();
     const contextManager = {
       assemble: vi.fn<ContextManager["assemble"]>(),
@@ -419,7 +426,7 @@ describe("createUiRuntimeComposition skill tools", () => {
         vi.fn<ContextManager["updateCalibrationFactor"]>(),
     } satisfies ContextManager;
 
-    await createUiRuntimeComposition({
+    const composition = await createUiRuntimeComposition({
       agentManager: new AgentManager(),
       bus,
       contextManager,
@@ -429,12 +436,80 @@ describe("createUiRuntimeComposition skill tools", () => {
         store: createInMemoryMessageStore(),
       }),
       permissionState: createPermissionState({ bus }),
+      sandboxManager,
       workdir: await tempWorkdir(),
     });
 
     bus.publish(SessionEvent.Removed, { sessionId: "session_1" });
 
     expect(disposeSession).toHaveBeenCalledWith("session_1");
+    await vi.waitFor(() => {
+      expect(destroySessionContexts).toHaveBeenCalledWith("session_1");
+    });
+
+    await composition.dispose();
+    expect(disposeSandbox).toHaveBeenCalledTimes(1);
+  });
+
+  it("destroys only the closed subagent sandbox scope", async () => {
+    const bus = createBus();
+    const workdir = await tempWorkdir();
+    const sandboxManager = createHostLocalSandboxManager(workdir);
+    const destroyContext = vi.spyOn(sandboxManager, "destroyContext");
+    const lease = await sandboxManager.acquire({
+      contextScopeId: "subagent_1",
+      sessionId: "child_1",
+      workdir,
+    });
+    await lease.release();
+    const store = new InMemorySubagentInstanceStore();
+    await store.create({
+      contextScopeId: "subagent_1",
+      createdAt: 1,
+      initialPrompt: "done",
+      parentSessionId: "parent_1",
+      pendingQueue: [],
+      role: "explore",
+      sessionId: "child_1",
+      status: "completed",
+      subagentId: "subagent_1",
+      updatedAt: 1,
+    });
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      llmClient: fakeLlmClient(),
+      messageManager: createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      }),
+      permissionState: createPermissionState({ bus }),
+      sandboxManager,
+      subagentInstanceStore: store,
+      workdir,
+    });
+    const closeTool = composition.toolScheduler.get("subagent_close");
+    if (!closeTool) {
+      throw new Error("subagent_close tool missing");
+    }
+
+    await closeTool.execute(
+      { subagent_id: "subagent_1" },
+      {
+        callId: "close_1",
+        messageId: "message_1",
+        sessionId: "parent_1",
+        signal: new AbortController().signal,
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(destroyContext).toHaveBeenCalledWith({
+        contextScopeId: "subagent_1",
+        sessionId: "child_1",
+      });
+    });
+    await composition.dispose();
   });
 
   it("lists MCP server summaries from manager status", async () => {

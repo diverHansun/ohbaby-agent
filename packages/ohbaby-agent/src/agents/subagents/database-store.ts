@@ -120,9 +120,6 @@ function shouldInterruptActiveOwner(
   if (input.ownerId !== undefined && row.owner_id === input.ownerId) {
     return true;
   }
-  if (input.ownerPid !== undefined && row.owner_pid === input.ownerPid) {
-    return true;
-  }
   if (row.owner_pid === null) {
     return input.recoverUnknownOwner === true;
   }

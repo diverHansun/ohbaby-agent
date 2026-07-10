@@ -88,23 +88,33 @@ describe("InMemorySubagentInstanceStore", () => {
     });
     await store.create({
       ...base,
-      contextScopeId: "other_live_scope",
+      contextScopeId: "same_pid_scope",
       createdAt: 2,
-      initialPrompt: "other live",
-      ownerId: "owner_other_live",
-      ownerPid: 202,
-      subagentId: "subagent_other_live",
+      initialPrompt: "same pid other owner",
+      ownerId: "owner_same_pid",
+      ownerPid: 101,
+      subagentId: "subagent_same_pid",
       updatedAt: 2,
     });
     await store.create({
       ...base,
-      contextScopeId: "dead_scope",
+      contextScopeId: "other_live_scope",
       createdAt: 3,
+      initialPrompt: "other live",
+      ownerId: "owner_other_live",
+      ownerPid: 202,
+      subagentId: "subagent_other_live",
+      updatedAt: 3,
+    });
+    await store.create({
+      ...base,
+      contextScopeId: "dead_scope",
+      createdAt: 4,
       initialPrompt: "dead",
       ownerId: "owner_dead",
       ownerPid: 303,
       subagentId: "subagent_dead",
-      updatedAt: 3,
+      updatedAt: 4,
     });
 
     const interrupted = await store.markInterrupted({
@@ -127,6 +137,10 @@ describe("InMemorySubagentInstanceStore", () => {
           lastRunId: "run_current",
           status: "interrupted",
           subagentId: "subagent_current",
+        }),
+        expect.objectContaining({
+          status: "running",
+          subagentId: "subagent_same_pid",
         }),
         expect.objectContaining({
           status: "running",

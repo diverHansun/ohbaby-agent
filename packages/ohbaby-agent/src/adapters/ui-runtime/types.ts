@@ -47,6 +47,6 @@ export interface UiRuntimeComposition {
   listToolSummaries(input?: {
     readonly agentName?: string;
   }): Promise<readonly CommandToolSummary[]>;
-  cancel(runId: string, reason?: string): void;
+  interruptRunTree(runId: string, reason?: string): Promise<void>;
   dispose(): Promise<void>;
 }

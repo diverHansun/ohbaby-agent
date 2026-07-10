@@ -14,7 +14,9 @@ import {
 } from "../../sandbox/index.js";
 
 export interface HostLocalSandboxManager extends SandboxManagerPort {
+  destroySessionContexts(sessionId: string): Promise<void>;
   destroyContext(input: SandboxScopeInput): Promise<void>;
+  dispose(): Promise<void>;
   setSessionWorkdir(sessionId: string, workdir: string): Promise<void>;
 }
 
@@ -181,6 +183,11 @@ export function createHostLocalSandboxManager(
   }
 
   return {
+    async destroySessionContexts(sessionId): Promise<void> {
+      sessionWorkdirs.delete(sessionId);
+      await manager.destroySessionContexts(sessionId);
+    },
+
     destroyContext(input): Promise<void> {
       const scope = normalizeSandboxScope(input);
       return withOperation(scope.scopeKey, async () => {
@@ -207,6 +214,12 @@ export function createHostLocalSandboxManager(
 
     release(lease: SandboxLease): Promise<void> {
       return manager.release(lease);
+    },
+
+    async dispose(): Promise<void> {
+      await Promise.allSettled([...operations.values()]);
+      sessionWorkdirs.clear();
+      await manager.dispose();
     },
   };
 }

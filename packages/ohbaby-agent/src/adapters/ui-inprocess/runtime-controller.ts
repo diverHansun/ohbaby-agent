@@ -109,7 +109,7 @@ export class InProcessRuntimeController {
   async cancelPromptRun(runId: string): Promise<void> {
     try {
       const runtime = await this.getRuntime();
-      runtime.cancel(runId, "run aborted");
+      await runtime.interruptRunTree(runId, "run aborted");
     } catch {
       // Abort is best-effort; the run may already have completed.
     } finally {

@@ -345,7 +345,6 @@ describe("DatabaseSubagentInstanceStore", () => {
     expect(interrupted.map((record) => record.subagentId).sort()).toEqual([
       "subagent_current",
       "subagent_dead",
-      "subagent_pid_reused",
     ]);
     const records = await store.listByParent("parent_1");
     expect(records).toEqual(
@@ -360,8 +359,7 @@ describe("DatabaseSubagentInstanceStore", () => {
           subagentId: "subagent_current",
         }),
         expect.objectContaining({
-          interruptedAt: 20,
-          status: "interrupted",
+          status: "running",
           subagentId: "subagent_pid_reused",
         }),
         expect.objectContaining({

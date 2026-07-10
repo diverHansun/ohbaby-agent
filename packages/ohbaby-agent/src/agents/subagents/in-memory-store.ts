@@ -35,9 +35,6 @@ function shouldInterruptActiveOwner(
   if (input.ownerId !== undefined && record.ownerId === input.ownerId) {
     return true;
   }
-  if (input.ownerPid !== undefined && record.ownerPid === input.ownerPid) {
-    return true;
-  }
   if (record.ownerPid === undefined) {
     return input.recoverUnknownOwner === true;
   }

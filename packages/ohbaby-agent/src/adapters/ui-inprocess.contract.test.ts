@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { UiBackendClient, UiEvent, UiSnapshot } from "ohbaby-sdk";
 import type {
   InterfaceProviderRequest,
@@ -33,7 +33,11 @@ import {
   createTemporarySessionTitle,
   type Session,
 } from "../services/session/index.js";
-import { AgentManager, AgentRegistry } from "../agents/index.js";
+import {
+  AgentManager,
+  AgentRegistry,
+  InMemorySubagentInstanceStore,
+} from "../agents/index.js";
 import type { AgentsConfig, SubagentRole } from "../agents/index.js";
 import { InMemoryGoalPersistence } from "../goals/index.js";
 import {
@@ -47,6 +51,7 @@ import {
 import { PermissionEvent } from "../permission/index.js";
 import { Project } from "../project/index.js";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
+import { createHostLocalSandboxManager } from "./ui-runtime/host-local-environment.js";
 import {
   createInMemoryUiStateStore,
   createPersistentUiStateStore,
@@ -862,6 +867,64 @@ function createAbortableBackgroundSubagentLLMClient(
             },
           ]),
         );
+      },
+      isAbortError(error: unknown): boolean {
+        return error instanceof Error && error.name === "AbortError";
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
+      baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
+function createAbortableBackgroundRunTreeLLMClient(
+  requests: InterfaceProviderRequest[],
+  childStarted: Deferred<AbortSignal | undefined>,
+  parentContinued: Deferred<AbortSignal | undefined>,
+): LLMClientInstance<FakeSdkClient> {
+  let parentRequests = 0;
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isTitleGenerationRequest(request)) {
+          return Promise.resolve(createTitleProviderStream(request));
+        }
+        requests.push(request);
+        if (isExploreSubagentRequest(request)) {
+          childStarted.resolve(request.signal);
+          return Promise.resolve(createAbortableProviderStream(request.signal));
+        }
+        parentRequests += 1;
+        if (parentRequests === 1) {
+          return Promise.resolve(
+            createProviderStream([
+              subagentControlToolCallEvent({
+                arguments: {
+                  description: "Background run-tree task",
+                  mode: "background",
+                  role: "explore",
+                  prompt: "Run until the parent is interrupted",
+                },
+                callId: "call_subagent_run_tree",
+                name: "subagent_run",
+              }),
+            ]),
+          );
+        }
+        parentContinued.resolve(request.signal);
+        return Promise.resolve(createAbortableProviderStream(request.signal));
       },
       isAbortError(error: unknown): boolean {
         return error instanceof Error && error.name === "AbortError";
@@ -2447,6 +2510,8 @@ describe("createInProcessUiBackendClient", () => {
     const requests: InterfaceProviderRequest[] = [];
     const childStarted = createDeferred<AbortSignal | undefined>();
     const runLedger = createInMemoryRunLedger();
+    const sandboxManager = createHostLocalSandboxManager(process.cwd());
+    const destroyContext = vi.spyOn(sandboxManager, "destroyContext");
     const client = createInProcessUiBackendClient({
       createSubagentId: () => "subagent_1",
       createRunId: (() => {
@@ -2462,6 +2527,7 @@ describe("createInProcessUiBackendClient", () => {
         childStarted,
       ),
       runLedger,
+      sandboxManager,
     });
 
     await client.submitPrompt("Open a cancellable background explorer");
@@ -2479,13 +2545,22 @@ describe("createInProcessUiBackendClient", () => {
     expect(childSignal?.aborted).toBe(true);
     const childRun = await runLedger.get("run_2");
     expect(childRun).toMatchObject({ status: "cancelled" });
-    expect(childRun?.sessionId).toMatch(/^session_/);
+    if (!childRun) {
+      throw new Error("child run missing");
+    }
+    expect(childRun.sessionId).toMatch(/^session_/);
     const closeToolResultText = JSON.stringify(
       requests.filter((request) => !isExploreSubagentRequest(request)).at(-1)
         ?.messages,
     );
     expect(closeToolResultText).toContain("previous_status: running");
     expect(closeToolResultText).toContain("status: cancelled");
+    await vi.waitFor(() => {
+      expect(destroyContext).toHaveBeenCalledWith({
+        contextScopeId: "subagent_1",
+        sessionId: childRun.sessionId,
+      });
+    });
   });
 
   it("applies subagent agent maxSteps through runtime composition", async () => {
@@ -2583,6 +2658,58 @@ describe("createInProcessUiBackendClient", () => {
     const childRun = await runLedger.get("run_2");
     expect(childRun).toMatchObject({ status: "cancelled" });
     expect(childRun?.sessionId).toMatch(/^session_/);
+  });
+
+  it("interrupts an active background subagent when the parent prompt is aborted", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const childStarted = createDeferred<AbortSignal | undefined>();
+    const parentContinued = createDeferred<AbortSignal | undefined>();
+    const runLedger = createInMemoryRunLedger();
+    const subagentStore = new InMemorySubagentInstanceStore();
+    const client = createInProcessUiBackendClient({
+      createSubagentId: () => "subagent_1",
+      createRunId: (() => {
+        let nextRun = 1;
+        return (): string => `run_${String(nextRun++)}`;
+      })(),
+      llmClient: createAbortableBackgroundRunTreeLLMClient(
+        requests,
+        childStarted,
+        parentContinued,
+      ),
+      runLedger,
+      subagentInstanceStore: subagentStore,
+    });
+
+    const run = client.submitPrompt("Open background work and keep reasoning");
+    const childSignal = await withTimeout(
+      childStarted.promise,
+      1_000,
+      "background child did not start",
+    );
+    const parentSignal = await withTimeout(
+      parentContinued.promise,
+      1_000,
+      "parent did not continue after spawning background work",
+    );
+
+    await client.abortRun();
+
+    expect(parentSignal?.aborted).toBe(true);
+    expect(childSignal?.aborted).toBe(true);
+    await expect(
+      withTimeout(run, 1_000, "parent did not abort"),
+    ).resolves.toBeUndefined();
+    await expect(runLedger.get("run_2")).resolves.toMatchObject({
+      status: "cancelled",
+    });
+    await expect(subagentStore.listByParent("session_1")).resolves.toEqual([
+      expect.objectContaining({
+        pendingQueue: [],
+        status: "interrupted",
+        subagentId: "subagent_1",
+      }),
+    ]);
   });
 
   it("continues the LLM loop after allow_once tool permission", async () => {

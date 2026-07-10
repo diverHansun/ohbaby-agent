@@ -6,13 +6,17 @@ import type { NoticeDraft } from "./types.js";
 
 function runtime(
   input: {
-    readonly cancel?: (runId: string, reason?: string) => void;
     readonly dispose?: () => Promise<void>;
+    readonly interruptRunTree?: (
+      runId: string,
+      reason?: string,
+    ) => Promise<void>;
   } = {},
 ): UiRuntimeComposition {
   return {
-    cancel: input.cancel ?? ((): void => undefined),
     dispose: input.dispose ?? ((): Promise<void> => Promise.resolve()),
+    interruptRunTree:
+      input.interruptRunTree ?? ((): Promise<void> => Promise.resolve()),
   } as UiRuntimeComposition;
 }
 
@@ -81,8 +85,9 @@ describe("InProcessRuntimeController", () => {
       createRuntime: (): Promise<UiRuntimeComposition> =>
         Promise.resolve(
           runtime({
-            cancel(runId, reason): void {
+            interruptRunTree(runId, reason): Promise<void> {
               cancelled.push({ reason, runId });
+              return Promise.resolve();
             },
           }),
         ),

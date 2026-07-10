@@ -870,7 +870,7 @@ describe("SessionSubagentHost", () => {
     ]);
   });
 
-  it("removes a queued foreground continuation when its caller aborts", async () => {
+  it("detaches an aborted foreground waiter without deleting its durable prompt", async () => {
     const { host, turn } = createHostFixture();
     let completeFirst!: () => void;
     turn.mockImplementationOnce(
@@ -914,7 +914,10 @@ describe("SessionSubagentHost", () => {
       return status.items[0]?.status === "completed";
     });
 
-    expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual(["first"]);
+    expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual([
+      "first",
+      "cancel me",
+    ]);
     await expect(
       host.status({
         parentSessionId: "parent_1",
@@ -923,6 +926,75 @@ describe("SessionSubagentHost", () => {
     ).resolves.toMatchObject({
       items: [expect.objectContaining({ pendingQueue: [] })],
     });
+  });
+
+  it("interrupts every active subagent under a parent without draining queued prompts", async () => {
+    const { host, turn } = createHostFixture();
+    turn.mockImplementation(
+      (input) =>
+        new Promise<AgentRunResult>((resolve) => {
+          input.signal?.addEventListener(
+            "abort",
+            () => {
+              resolve({
+                error: "parent stopped",
+                mode: "waitForCompletion",
+                sessionId: "child_1",
+                success: false,
+              });
+            },
+            { once: true },
+          );
+        }),
+    );
+
+    const first = await host.run({
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "first active",
+      role: "explore",
+    });
+    const second = await host.run({
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "second active",
+      role: "research",
+    });
+    await host.run({
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "first queued",
+      subagentId: first.item.subagentId,
+    });
+
+    const interrupted = await host.interruptByParent(
+      "parent_1",
+      "parent stopped",
+    );
+
+    expect(interrupted).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pendingQueue: [{ prompt: "first queued" }],
+          status: "interrupted",
+          subagentId: first.item.subagentId,
+        }),
+        expect.objectContaining({
+          pendingQueue: [],
+          status: "interrupted",
+          subagentId: second.item.subagentId,
+        }),
+      ]),
+    );
+    expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual([
+      "first active",
+      "second active",
+    ]);
+    await flushMicrotasks();
+    expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual([
+      "first active",
+      "second active",
+    ]);
   });
 
   it("resolves a queued foreground continuation when close cancels it", async () => {
@@ -1424,6 +1496,178 @@ describe("SessionSubagentHost", () => {
       success: true,
     });
     await flushMicrotasks();
+    expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual(["first"]);
+  });
+
+  it("queues an explicit resume until its interrupted turn settles", async () => {
+    const { host, turn } = createHostFixture();
+    let settleFirst!: (result: AgentRunResult) => void;
+    turn.mockImplementation((input) => {
+      if (input.prompt === "first") {
+        return new Promise<AgentRunResult>((resolve) => {
+          settleFirst = resolve;
+        });
+      }
+      return Promise.resolve({
+        finalOutput: `done ${input.prompt}`,
+        mode: "waitForCompletion",
+        sessionId: "child_1",
+        success: true,
+      } satisfies AgentRunResult);
+    });
+
+    const first = await host.run({
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "first",
+      role: "explore",
+    });
+    await flushMicrotasks();
+    await host.run({
+      interrupt: true,
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "replacement",
+      subagentId: first.item.subagentId,
+    });
+    await vi.waitUntil(async () => {
+      const status = await host.status({
+        parentSessionId: "parent_1",
+        subagentId: first.item.subagentId,
+      });
+      return status.items[0]?.status === "interrupted";
+    });
+
+    const resumed = await host.run({
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "resume",
+      subagentId: first.item.subagentId,
+    });
+
+    expect(resumed.item).toMatchObject({
+      pendingQueue: [{ prompt: "replacement" }, { prompt: "resume" }],
+      status: "interrupted",
+    });
+    expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual(["first"]);
+
+    settleFirst({
+      finalOutput: "late first",
+      mode: "waitForCompletion",
+      sessionId: "child_1",
+      success: true,
+    });
+    await vi.waitUntil(async () => {
+      const status = await host.status({
+        parentSessionId: "parent_1",
+        subagentId: first.item.subagentId,
+      });
+      return status.items[0]?.output === "done resume";
+    });
+
+    expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual([
+      "first",
+      "replacement",
+      "resume",
+    ]);
+  });
+
+  it("interrupts a resume waiting for an earlier non-cooperative turn", async () => {
+    const { host, turn } = createHostFixture();
+    turn.mockImplementation(
+      () =>
+        new Promise<AgentRunResult>(() => {
+          void 0;
+        }),
+    );
+
+    const first = await host.run({
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "first",
+      role: "explore",
+    });
+    await flushMicrotasks();
+    await host.run({
+      interrupt: true,
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "replacement",
+      subagentId: first.item.subagentId,
+    });
+    await vi.waitUntil(async () => {
+      const status = await host.status({
+        parentSessionId: "parent_1",
+        subagentId: first.item.subagentId,
+      });
+      return status.items[0]?.status === "interrupted";
+    });
+    await host.run({
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "resume",
+      subagentId: first.item.subagentId,
+    });
+
+    await expect(
+      host.interruptByParent("parent_1", "parent stopped"),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        pendingQueue: [{ prompt: "replacement" }, { prompt: "resume" }],
+        status: "interrupted",
+        subagentId: first.item.subagentId,
+      }),
+    ]);
+    expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual(["first"]);
+  });
+
+  it("returns cancelled when close wins over a foreground resume settlement barrier", async () => {
+    const { host, turn } = createHostFixture();
+    turn.mockImplementation(
+      () =>
+        new Promise<AgentRunResult>(() => {
+          void 0;
+        }),
+    );
+
+    const first = await host.run({
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "first",
+      role: "explore",
+    });
+    await flushMicrotasks();
+    await host.run({
+      interrupt: true,
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "replacement",
+      subagentId: first.item.subagentId,
+    });
+    await vi.waitUntil(async () => {
+      const status = await host.status({
+        parentSessionId: "parent_1",
+        subagentId: first.item.subagentId,
+      });
+      return status.items[0]?.status === "interrupted";
+    });
+
+    const resumed = host.run({
+      mode: "foreground",
+      parentSessionId: "parent_1",
+      prompt: "resume",
+      subagentId: first.item.subagentId,
+    });
+    await flushMicrotasks();
+    await host.close({
+      parentSessionId: "parent_1",
+      subagentId: first.item.subagentId,
+    });
+
+    await expect(resumed).resolves.toMatchObject({
+      item: { pendingQueue: [], status: "cancelled" },
+      success: false,
+    });
     expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual(["first"]);
   });
 

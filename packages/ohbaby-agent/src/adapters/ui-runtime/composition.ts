@@ -75,6 +75,7 @@ import {
 } from "../../mcp/integration/resource-prompt-tools.js";
 import {
   RunManager,
+  RunManagerNotFoundError,
   type HookExecutor,
   type RunDefaultsPolicy,
 } from "../../runtime/run-manager/index.js";
@@ -85,6 +86,7 @@ import {
 import {
   createHostLocalEnvironment,
   createHostLocalSandboxManager,
+  type HostLocalSandboxManager,
 } from "./host-local-environment.js";
 import {
   createContextSummaryClient,
@@ -124,6 +126,7 @@ export interface UiRuntimeCompositionOptions {
   readonly permission?: PermissionPort;
   readonly permissionState: PermissionStateStore;
   readonly runLedger?: RunLedger;
+  readonly sandboxManager?: HostLocalSandboxManager;
   readonly sessionManager?: Pick<SessionManager, "create" | "get"> &
     Partial<Pick<SessionManager, "ensureRoot">>;
   readonly skillRegistry?: SkillRegistryPort;
@@ -234,7 +237,8 @@ export async function createUiRuntimeComposition(
     permission: options.permission,
     permissionState: options.permissionState,
   });
-  const sandboxManager = createHostLocalSandboxManager(options.workdir);
+  const sandboxManager =
+    options.sandboxManager ?? createHostLocalSandboxManager(options.workdir);
   const sessionManager =
     options.sessionManager ??
     createInMemorySessionManager({
@@ -377,10 +381,6 @@ export async function createUiRuntimeComposition(
         provider: options.llmClient.config.provider,
       }),
     });
-  options.bus.subscribe(SessionEvent.Removed, (payload) => {
-    contextManager.disposeSession(payload.sessionId);
-  });
-
   const lifecycle = new Lifecycle({
     contextManager,
     llmClient: options.llmClient,
@@ -417,6 +417,47 @@ export async function createUiRuntimeComposition(
     modelId: options.llmClient.config.model,
     sessionManager,
   });
+  const pendingSandboxCleanups = new Set<Promise<void>>();
+
+  const trackSandboxCleanup = (operation: Promise<void>): void => {
+    const tracked = operation.catch((error: unknown) => {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unknown sandbox cleanup error";
+      options.onNotice?.({
+        key: `sandbox:cleanup:${message}`,
+        level: "warning",
+        message: `Sandbox cleanup failed: ${message}`,
+        title: "Sandbox warning",
+      });
+    });
+    pendingSandboxCleanups.add(tracked);
+    void tracked.finally(() => {
+      pendingSandboxCleanups.delete(tracked);
+    });
+  };
+
+  const cleanupClosedSubagentScope = async (input: {
+    readonly contextScopeId: string;
+    readonly runId?: string;
+    readonly sessionId: string;
+  }): Promise<void> => {
+    if (input.runId !== undefined) {
+      try {
+        await runManager.waitForCompletion(input.runId);
+      } catch (error) {
+        if (!(error instanceof RunManagerNotFoundError)) {
+          throw error;
+        }
+      }
+    }
+    await sandboxManager.destroyContext({
+      contextScopeId: input.contextScopeId,
+      sessionId: input.sessionId,
+    });
+  };
+
   const subagentHost = new SessionSubagentHost({
     agentManager,
     createSubagentId: options.createSubagentId,
@@ -425,11 +466,37 @@ export async function createUiRuntimeComposition(
     modelId: options.llmClient.config.model,
     ownerId: options.subagentOwnerId,
     ownerPid: options.subagentOwnerPid,
+    onClosed(input): void {
+      trackSandboxCleanup(cleanupClosedSubagentScope(input));
+    },
     sessionManager,
     store: options.subagentInstanceStore ?? new InMemorySubagentInstanceStore(),
     now: options.now,
   });
   await subagentHost.recoverInterrupted();
+
+  const unsubscribeSessionRemoved = options.bus.subscribe(
+    SessionEvent.Removed,
+    (payload) => {
+      contextManager.disposeSession(payload.sessionId);
+      trackSandboxCleanup(
+        (async (): Promise<void> => {
+          await subagentHost.interruptByParent(
+            payload.sessionId,
+            "parent session removed",
+          );
+          const activeRuns = runManager.list(payload.sessionId);
+          for (const run of activeRuns) {
+            runManager.cancel(run.runId, "session removed");
+          }
+          await Promise.all(
+            activeRuns.map((run) => runManager.waitForCompletion(run.runId)),
+          );
+          await sandboxManager.destroySessionContexts(payload.sessionId);
+        })(),
+      );
+    },
+  );
 
   const goalService = new GoalService({
     onChange: (event): void => {
@@ -611,16 +678,28 @@ export async function createUiRuntimeComposition(
       }));
     },
 
-    cancel(runId, reason): void {
+    async interruptRunTree(runId, reason): Promise<void> {
+      const run = runManager.get(runId);
       runManager.cancel(runId, reason);
+      if (run) {
+        await subagentHost.interruptByParent(
+          run.sessionId,
+          reason ?? "parent run interrupted",
+        );
+      }
     },
 
     async dispose(): Promise<void> {
+      unsubscribeSessionRemoved();
       toolScheduler.cancelAll();
       await Promise.all([
         subagentHost.dispose(),
         runManager.cancelAll("runtime disposed"),
       ]);
+      while (pendingSandboxCleanups.size > 0) {
+        await Promise.all([...pendingSandboxCleanups]);
+      }
+      await sandboxManager.dispose();
     },
   };
 }

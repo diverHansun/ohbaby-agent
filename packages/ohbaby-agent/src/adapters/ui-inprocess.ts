@@ -103,6 +103,7 @@ import {
 } from "./ui-state/index.js";
 import type { UiStateStore } from "./ui-state/index.js";
 import { createUiRuntimeComposition } from "./ui-runtime/composition.js";
+import type { HostLocalSandboxManager } from "./ui-runtime/host-local-environment.js";
 import type { UiRuntimeComposition } from "./ui-runtime/types.js";
 import {
   startPermissionEventProjection,
@@ -181,6 +182,7 @@ export interface InProcessUiBackendOptions {
   readonly projectDirectory?: string;
   readonly now?: () => Date;
   readonly runLedger?: RunLedger;
+  readonly sandboxManager?: HostLocalSandboxManager;
   readonly streamBridge?: StreamBridge;
   readonly subagentInstanceStore?: SubagentInstanceStore;
   readonly subagentOwnerId?: string;
@@ -403,6 +405,7 @@ export function createInProcessUiBackendClient(
         permission,
         permissionState,
         runLedger: options.runLedger,
+        sandboxManager: options.sandboxManager,
         sessionManager: options.sessionManager,
         skillRegistry,
         streamBridge: options.streamBridge,

@@ -406,4 +406,60 @@ describe("SandboxManager", () => {
 
     expect(adapter.destroyed).toHaveLength(0);
   });
+
+  it("destroys every scoped context for one session without touching siblings", async () => {
+    const { adapter, manager } = createManager();
+    await manager.createContext("session_1", {
+      adapterId: "fake",
+      workdir: "D:/repo/root",
+    });
+    await manager.createContext(
+      { contextScopeId: "scope_a", sessionId: "session_1" },
+      { adapterId: "fake", workdir: "D:/repo/a" },
+    );
+    await manager.createContext(
+      { contextScopeId: "scope_b", sessionId: "session_2" },
+      { adapterId: "fake", workdir: "D:/repo/b" },
+    );
+
+    await manager.destroySessionContexts("session_1");
+
+    expect(manager.getContext("session_1")).toBeUndefined();
+    expect(
+      manager.getContext({ contextScopeId: "scope_a", sessionId: "session_1" }),
+    ).toBeUndefined();
+    expect(
+      manager.getContext({ contextScopeId: "scope_b", sessionId: "session_2" }),
+    ).toMatchObject({ status: "active" });
+    expect(adapter.destroyed).toHaveLength(2);
+  });
+
+  it("disposes all contexts after pending creation and rejects new work", async () => {
+    const registry = new AdapterRegistry();
+    const adapter = new BlockingCreateAdapter();
+    registry.register(adapter);
+    const manager = new SandboxManager({ adapterRegistry: registry });
+    const creating = manager.createContext("session_1", {
+      adapterId: "fake",
+      workdir: "D:/repo",
+    });
+    const disposing = manager.dispose();
+
+    adapter.createGate.resolve({ workdir: "D:/repo" });
+    await creating;
+    await disposing;
+
+    expect(manager.getContext("session_1")).toBeUndefined();
+    expect(adapter.destroyed).toHaveLength(1);
+    await expect(
+      manager.createContext("session_2", {
+        adapterId: "fake",
+        workdir: "D:/repo/next",
+      }),
+    ).rejects.toThrow("Sandbox manager is disposed");
+    await expect(manager.acquire("session_1")).rejects.toThrow(
+      "Sandbox manager is disposed",
+    );
+    await expect(manager.dispose()).resolves.toBeUndefined();
+  });
 });

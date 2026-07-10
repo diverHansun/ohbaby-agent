@@ -47,6 +47,8 @@ export class SandboxManager implements SandboxManagerPort {
   private readonly now: () => number;
   private readonly createContextId: () => string;
   private readonly createLeaseId: () => string;
+  private disposed = false;
+  private disposePromise: Promise<void> | undefined;
 
   constructor(private readonly options: SandboxManagerOptions) {
     this.drainTimeoutMs = options.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
@@ -61,6 +63,9 @@ export class SandboxManager implements SandboxManagerPort {
     input: SandboxScopeInput,
     options: CreateContextOptions,
   ): Promise<SandboxContext> {
+    if (this.disposed) {
+      throw new Error("Sandbox manager is disposed");
+    }
     const scope = normalizeSandboxScope(input);
     if (
       this.contexts.has(scope.scopeKey) ||
@@ -138,6 +143,9 @@ export class SandboxManager implements SandboxManagerPort {
   }
 
   acquire(input: SandboxAcquireTarget): Promise<SandboxLease> {
+    if (this.disposed) {
+      return Promise.reject(new Error("Sandbox manager is disposed"));
+    }
     const scope = normalizeSandboxScope(input);
     const context = this.contexts.get(scope.scopeKey);
     if (context?.status !== "active") {
@@ -181,6 +189,40 @@ export class SandboxManager implements SandboxManagerPort {
       }
     };
     void operation.then(clear, clear);
+    return operation;
+  }
+
+  async destroySessionContexts(sessionId: string): Promise<void> {
+    await Promise.all([...this.pendingCreateSettlements.values()]);
+    await Promise.all(
+      [...this.contexts.values()]
+        .filter((context) => context.sessionId === sessionId)
+        .map((context) =>
+          this.destroyContext({
+            contextScopeId: context.contextScopeId,
+            sessionId: context.sessionId,
+          }),
+        ),
+    );
+  }
+
+  dispose(): Promise<void> {
+    if (this.disposePromise) {
+      return this.disposePromise;
+    }
+    this.disposed = true;
+    const operation = (async (): Promise<void> => {
+      await Promise.all([...this.pendingCreateSettlements.values()]);
+      await Promise.all(
+        [...this.contexts.values()].map((context) =>
+          this.destroyContext({
+            contextScopeId: context.contextScopeId,
+            sessionId: context.sessionId,
+          }),
+        ),
+      );
+    })();
+    this.disposePromise = operation;
     return operation;
   }
 
