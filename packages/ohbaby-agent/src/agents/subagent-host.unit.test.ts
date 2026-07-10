@@ -123,6 +123,19 @@ class ClaimFailingStore extends InMemorySubagentInstanceStore {
   }
 }
 
+class QueueAppendFailingStore extends InMemorySubagentInstanceStore {
+  override appendPendingQueue(
+    subagentId: string,
+    input: Parameters<InMemorySubagentInstanceStore["appendPendingQueue"]>[1],
+    updatedAt: number,
+  ): ReturnType<InMemorySubagentInstanceStore["appendPendingQueue"]> {
+    void subagentId;
+    void input;
+    void updatedAt;
+    return Promise.reject(new Error("queue persistence failed"));
+  }
+}
+
 function flushMicrotasks(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -158,6 +171,63 @@ describe("SessionSubagentHost", () => {
       }),
     ).rejects.toThrow("claim persistence failed");
     expect(turn).not.toHaveBeenCalled();
+  });
+
+  it("does not retain an in-memory queue entry when durable append fails", async () => {
+    const { host, store, turn } = createHostFixture({
+      store: new QueueAppendFailingStore(),
+    });
+    let completeFirst!: () => void;
+    turn.mockImplementationOnce(
+      () =>
+        new Promise<AgentRunResult>((resolve) => {
+          completeFirst = (): void => {
+            resolve({
+              finalOutput: "first completed",
+              mode: "waitForCompletion",
+              sessionId: "child_1",
+              success: true,
+            });
+          };
+        }),
+    );
+
+    const first = await host.run({
+      mode: "background",
+      parentSessionId: "parent_1",
+      prompt: "first",
+      role: "explore",
+    });
+    await flushMicrotasks();
+
+    await expect(
+      host.run({
+        mode: "background",
+        parentSessionId: "parent_1",
+        prompt: "must not become a ghost task",
+        subagentId: first.item.subagentId,
+      }),
+    ).rejects.toThrow("queue persistence failed");
+
+    completeFirst();
+    await vi.waitUntil(async () => {
+      const item = await store.get({
+        parentSessionId: "parent_1",
+        subagentId: first.item.subagentId,
+      });
+      return item?.status === "completed";
+    });
+    expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual(["first"]);
+    await expect(
+      host.status({
+        parentSessionId: "parent_1",
+        subagentId: first.item.subagentId,
+      }),
+    ).resolves.toMatchObject({
+      items: [
+        expect.objectContaining({ pendingQueue: [], status: "completed" }),
+      ],
+    });
   });
 
   it("runs foreground subagents through scoped AgentInstance identity", async () => {

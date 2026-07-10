@@ -201,7 +201,7 @@ CREATE INDEX IF NOT EXISTS idx_subagent_instance_owner_status
 | 字段 | 唯一语义 |
 |------|----------|
 | `initialPrompt` | 创建实例时的不可变审计快照，不作为恢复队列的隐式后备 |
-| `pendingQueue` | durable 未开始输入；新建时已包含首个 prompt，只存 `prompt/timeoutMs/workdir` 等可序列化描述 |
+| `pendingQueue` | durable 未开始输入的唯一恢复事实来源；新建时已包含首个 prompt，只存 `prompt/timeoutMs/workdir` 等可序列化描述 |
 | `currentInput` | 已从 queue claim、正在执行或因进程退出而中断的 durable 输入；与 `currentRunId` 同一次写入 |
 | `currentRunId` | 当前 owner 正在执行的唯一 run；终态或恢复时必须清空 |
 | `lastRunId` | 最近一次已收口 run；重启恢复时接收旧 `currentRunId` |
@@ -214,9 +214,11 @@ CREATE INDEX IF NOT EXISTS idx_subagent_instance_owner_status
 
 claim 必须用一次带前置条件的 store update 同时完成：`pendingQueue` 移除队首、写 `currentInput/currentRunId/status=running/owner`，且仅允许未关闭、当前非 running 的记录认领成功。SQLite 实现使用同一条 `UPDATE ... RETURNING` 返回本次写入的记录，不能在 update 后另做可被并发穿插的 select。这样既不会出现 prompt 已出队但没有 durable in-flight 记录的空窗，也不会让两个 host 同时执行一个 subagent。
 
+新增 prompt 不能读出整条 `pendingQueue` 后再覆盖写回。store 必须提供原子 `appendPendingQueue()`：SQLite 用单条 JSON append `UPDATE ... RETURNING` 追加可序列化输入；host 只有在 append 成功后才把它投影到内存 active queue。host 对同一 `subagentId` 的 append、claim、暂停收口和 close 使用同一临界区，避免本进程内 append 与整队列 claim snapshot 交叉覆盖。当前不是跨进程分布式队列；另一个 runtime 已持有 `running/currentRunId` 时仍明确拒绝新输入。
+
 run 收口必须调用 `finishRun(subagentId, expectedCurrentRunId, update)` 做 compare-and-set。只有 durable `current_run_id` 仍等于本轮 run id 且记录未 close 时，成功/失败/timeout 才能落库；否则拒绝迟到结果，保证 close 或其他 owner 的新 claim 不被旧 run 覆盖。
 
-重启恢复会保留 `currentInput` 用于观测，把旧 `currentRunId` 转存为 `lastRunId` 并清空 `currentRunId`；`pendingQueue` 原样保留。中断的 `currentInput` 不自动重放，避免重复执行已有副作用；新的 `subagent_run` 只触发剩余 pending queue 与新 prompt。`ToolExecutionEnvironment` 含函数，禁止写入 queue；host 只持久化 `workdir`，恢复执行时由 run manager 重新申请 `sessionId + contextScopeId` 对应的 sandbox lease。内存 `active` 只保存 abort controller、等待者和当前进程 environment 等不可持久化调度细节，不是第二份 queue 真相源。
+重启恢复会保留 `currentInput` 用于观测，把旧 `currentRunId` 转存为 `lastRunId` 并清空 `currentRunId`；`pendingQueue` 原样保留。中断的 `currentInput` 不自动重放，避免重复执行已有副作用；新的 `subagent_run` 只触发剩余 pending queue 与新 prompt。`ToolExecutionEnvironment` 含函数，禁止写入 queue；host 只持久化 `workdir`，恢复执行时由 run manager 重新申请 `sessionId + contextScopeId` 对应的 sandbox lease。内存 `active.queue` 是 durable queue 的当前进程投影，用于附加 `AbortSignal`、foreground waiter 与 environment；它不是恢复或跨 runtime 的事实来源，且必须在 durable 写成功后才更新。
 
 ### 3.4 Store
 
@@ -224,6 +226,11 @@ run 收口必须调用 `finishRun(subagentId, expectedCurrentRunId, update)` 做
 
 ```typescript
 export interface SubagentInstanceStore {
+  appendPendingQueue(
+    subagentId: string,
+    input: QueuedSubagentInput,
+    updatedAt: number,
+  ): Promise<SubagentInstanceRecord | null>;
   create(record: SubagentInstanceRecord): Promise<void>;
   claim(
     subagentId: string,

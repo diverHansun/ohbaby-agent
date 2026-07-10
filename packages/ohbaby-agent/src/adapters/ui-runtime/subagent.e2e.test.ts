@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../../agents/index.js";
 import { createBus } from "../../bus/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
@@ -7,6 +7,10 @@ import {
   createMessageManager,
 } from "../../core/message/index.js";
 import { createPermissionState } from "../../permission/index.js";
+import {
+  normalizeSandboxScope,
+  type SandboxLease,
+} from "../../sandbox/index.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
@@ -14,9 +18,66 @@ import type {
 import { createInMemorySessionManager } from "../../services/session/index.js";
 import { SkillRegistry } from "../../skill/index.js";
 import { createUiRuntimeComposition } from "./composition.js";
+import {
+  createHostLocalSandboxManager,
+  type HostLocalSandboxManager,
+} from "./host-local-environment.js";
 
 interface FakeSdkClient {
   readonly kind: "fake";
+}
+
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  resolve(value: T): void;
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
+
+class ObservableSandboxManager implements HostLocalSandboxManager {
+  readonly acquired = new Map<string, SandboxLease>();
+  readonly destroyed: string[] = [];
+  readonly released: string[] = [];
+
+  constructor(private readonly delegate: HostLocalSandboxManager) {}
+
+  async acquire(
+    input: Parameters<HostLocalSandboxManager["acquire"]>[0],
+  ): Promise<SandboxLease> {
+    const lease = await this.delegate.acquire(input);
+    this.acquired.set(lease.scopeKey, lease);
+    return lease;
+  }
+
+  async release(lease: SandboxLease): Promise<void> {
+    this.released.push(lease.scopeKey);
+    await this.delegate.release(lease);
+  }
+
+  async destroyContext(
+    input: Parameters<HostLocalSandboxManager["destroyContext"]>[0],
+  ): Promise<void> {
+    this.destroyed.push(normalizeSandboxScope(input).scopeKey);
+    await this.delegate.destroyContext(input);
+  }
+
+  destroySessionContexts(sessionId: string): Promise<void> {
+    return this.delegate.destroySessionContexts(sessionId);
+  }
+
+  dispose(): Promise<void> {
+    return this.delegate.dispose();
+  }
+
+  setSessionWorkdir(sessionId: string, workdir: string): Promise<void> {
+    return this.delegate.setSessionWorkdir(sessionId, workdir);
+  }
 }
 
 function createProviderStream(
@@ -65,6 +126,12 @@ function subagentRunEvent(): InterfaceProviderStreamEvent {
 
 function fakeLlmClient(
   requests: InterfaceProviderRequest[],
+  options: {
+    readonly researchGate?: {
+      readonly release: Deferred<void>;
+      readonly started: Deferred<void>;
+    };
+  } = {},
 ): LLMClientInstance<FakeSdkClient> {
   return {
     config: {
@@ -89,6 +156,14 @@ function fakeLlmClient(
         requests.push(request);
         const messages = JSON.stringify(request.messages);
         if (messages.includes("Task: research")) {
+          options.researchGate?.started.resolve(undefined);
+          if (options.researchGate) {
+            return options.researchGate.release.promise.then(() =>
+              createProviderStream([
+                { finishReason: "stop", textDelta: "child second result" },
+              ]),
+            );
+          }
           return Promise.resolve(
             createProviderStream([
               { finishReason: "stop", textDelta: "child second result" },
@@ -222,5 +297,82 @@ describe("subagent runtime e2e", () => {
         JSON.stringify(request.messages).includes("Task: research"),
       ),
     ).toHaveLength(1);
+  });
+
+  it("releases one scoped sandbox lease without disrupting a sibling subagent", async () => {
+    const bus = createBus();
+    const workdir = process.cwd();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const sessionManager = createInMemorySessionManager({
+      bus,
+      createSessionId: () => "session_child",
+      messageCleaner: {
+        removeMessages(sessionId) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      now: () => 1,
+    });
+    const researchGate = {
+      release: createDeferred<undefined>(),
+      started: createDeferred<undefined>(),
+    };
+    const sandboxManager = new ObservableSandboxManager(
+      createHostLocalSandboxManager(workdir),
+    );
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      createSubagentId: (() => {
+        let next = 1;
+        return (): string => `subagent_e2e_${String(next++)}`;
+      })(),
+      llmClient: fakeLlmClient([], { researchGate }),
+      mcpManager: { getAllTools: () => Promise.resolve([]) },
+      messageManager,
+      permissionState: createPermissionState({ bus }),
+      sandboxManager,
+      sessionManager,
+      skillRegistry: new SkillRegistry({
+        loader: {
+          loadContent: (): Promise<never> =>
+            Promise.reject(new Error("No skills loaded")),
+          scan: (): Promise<Map<string, never>> =>
+            Promise.resolve(new Map<string, never>()),
+        },
+      }),
+      workdir,
+    });
+
+    try {
+      const result = await composition.startSession({
+        agentName: "build",
+        projectRoot: workdir,
+        prompt: "Delegate subagent e2e",
+        sessionId: "session_parent",
+      });
+      await researchGate.started.promise;
+      const firstScope = "session_child::subagent_e2e_1";
+      const secondScope = "session_child::subagent_e2e_2";
+      await vi.waitUntil(() => sandboxManager.released.includes(firstScope));
+
+      expect(sandboxManager.released).not.toContain(secondScope);
+      expect(sandboxManager.destroyed).toEqual([]);
+      const secondLease = sandboxManager.acquired.get(secondScope);
+      expect(secondLease?.resolvePath("still-running.txt")).toBe(
+        `${workdir}/still-running.txt`,
+      );
+
+      researchGate.release.resolve(undefined);
+      await expect(
+        composition.runManager.waitForCompletion(result.runId),
+      ).resolves.toMatchObject({ status: "succeeded" });
+    } finally {
+      researchGate.release.resolve(undefined);
+      await composition.dispose();
+    }
   });
 });

@@ -116,6 +116,7 @@ AC-6 拆成两段：
 ### 3.6 scoped sandbox 与 runtime 重建
 
 - 同一 child session 的两个 `contextScopeId` 可以同时 acquire/run；释放 A 的 lease 后 B 的 context 仍然可查询和使用。
+- runtime e2e 必须让 A 先完成而 B 仍保持 active，断言 A 只 release 自己的 scoped lease、没有触发 session/context destroy，并且 B 的 lease 仍可解析 workspace 内路径。
 - child session 必须验证 `isSubagent + parentId` 与 durable record 一致；伪造/损坏归属不得进入 turn。
 - runtime 热重建先调用旧 composition 的 `dispose()`；旧 run 被取消且 lease 释放后才能替换 runtime。
 - `subagent_status/close` 使用 control-plane 并发类别，不被长时间运行的 `subagent_run` 占满执行池而饿死。

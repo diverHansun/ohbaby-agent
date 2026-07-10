@@ -40,6 +40,7 @@
 - 同一 child session 下多个 subagent 并发运行时：run active 判断必须按 `session_id + context_scope_id`，不能只按 `session_id`。
 - sandbox 生命周期必须按 `{ sessionId, contextScopeId? }` lease 管理；释放一个 subagent 的 lease 不得销毁 sibling scope。
 - queue 出队与 `current_input/current_run_id/running/owner` 写入必须由 store 原子 `claim` 完成；run 收口必须按 expected `current_run_id` 做 CAS。
+- 新 prompt 必须由 store 原子 append 到 durable `pending_queue`；不得通过“读内存 queue 后整列覆盖”的方式追加。active queue 只能在 append 成功后更新，并且 append/claim/pause/close 按 `subagent_id` 串行化。
 - `interrupt:true` 只有在旧 turn 已 settle 时才能自动 drain；不响应 abort 的旧 turn 会使实例暂停为 `interrupted`。同进程内的后续显式 resume 只能追加 durable queue，必须等旧 turn settle 后才 claim 新 run。
 - parent run-tree interrupt 必须令该 parent 下全部 active turn 进入 `interrupted`，保留 queue且不得自动 drain；sibling parent 不受影响。
 - close 的逻辑终态与 sandbox 物理清理分层：host 关实例，composition 等 scoped lease settle 后销毁 context。
@@ -86,6 +87,7 @@
 - [x] backend dispose 会 await runtime dispose，replacement 受 reset barrier 保护。
 - [x] foreground pause 保留 durable prompt，跨 owner active admission 明确拒绝。
 - [x] SQLite claim/finish 使用 `UPDATE ... RETURNING`，两种 store 的 update 字段语义一致。
+- [x] durable queue append 采用原子 store 操作；append 失败不会留下内存幽灵任务。
 - [x] child parent 归属、scope lock、非协作写槽与 sandbox create/destroy 竞态测试已覆盖。
 - [x] owner-aware recovery 测试覆盖当前 owner、死 owner、同 PID 不同 owner、活着的其他 owner。
 - [x] parent `abortRun` 能级联 active foreground/background subagent，queue 保留且不自动 drain。

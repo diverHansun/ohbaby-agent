@@ -52,6 +52,40 @@ afterEach(async () => {
 });
 
 describe("DatabaseSubagentInstanceStore", () => {
+  it("atomically appends durable queue entries without replacing prior prompts", async () => {
+    const store = await initFixture();
+    await store.create({
+      contextScopeId: "scope_append",
+      createdAt: 1,
+      initialPrompt: "initial",
+      parentSessionId: "parent_1",
+      pendingQueue: [{ prompt: "initial" }],
+      role: "explore",
+      sessionId: "child_1",
+      status: "pending",
+      subagentId: "subagent_append",
+      updatedAt: 1,
+    });
+
+    await Promise.all(
+      ["second", "third", "fourth"].map((prompt, index) =>
+        store.appendPendingQueue("subagent_append", { prompt }, index + 2),
+      ),
+    );
+
+    await expect(
+      store.get({ parentSessionId: "parent_1", subagentId: "subagent_append" }),
+    ).resolves.toMatchObject({
+      pendingQueue: [
+        { prompt: "initial" },
+        { prompt: "second" },
+        { prompt: "third" },
+        { prompt: "fourth" },
+      ],
+      updatedAt: 4,
+    });
+  });
+
   it("claims only once and prevents late run completion from overwriting close", async () => {
     const store = await initFixture();
     await store.create({

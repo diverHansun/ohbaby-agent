@@ -129,6 +129,15 @@ export interface MarkSubagentsInterruptedInput {
 }
 
 export interface SubagentInstanceStore {
+  /**
+   * Append one recoverable input without replacing the current durable queue.
+   * Returns null when the instance has reached its terminal close state.
+   */
+  appendPendingQueue(
+    subagentId: string,
+    input: QueuedSubagentInput,
+    updatedAt: number,
+  ): Promise<SubagentInstanceRecord | null>;
   create(record: SubagentInstanceRecord): Promise<void>;
   claim(
     subagentId: string,

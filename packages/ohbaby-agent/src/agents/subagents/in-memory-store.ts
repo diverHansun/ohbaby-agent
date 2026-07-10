@@ -49,6 +49,27 @@ export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
     this.isOwnerAlive = options.isOwnerAlive ?? defaultIsOwnerAlive;
   }
 
+  appendPendingQueue(
+    subagentId: string,
+    input: SubagentInstanceRecord["pendingQueue"][number],
+    updatedAt: number,
+  ): Promise<SubagentInstanceRecord | null> {
+    const existing = this.records.get(subagentId);
+    if (!existing) {
+      return Promise.reject(new Error(`Subagent not found: ${subagentId}`));
+    }
+    if (existing.closedAt !== undefined || existing.status === "cancelled") {
+      return Promise.resolve(null);
+    }
+    const updated: SubagentInstanceRecord = {
+      ...existing,
+      pendingQueue: [...existing.pendingQueue, clone(input)],
+      updatedAt,
+    };
+    this.records.set(subagentId, clone(updated));
+    return Promise.resolve(clone(updated));
+  }
+
   create(record: SubagentInstanceRecord): Promise<void> {
     if (this.records.has(record.subagentId)) {
       return Promise.reject(

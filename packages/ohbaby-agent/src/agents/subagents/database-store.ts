@@ -182,6 +182,30 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
     this.isOwnerAlive = options.isOwnerAlive ?? defaultIsOwnerAlive;
   }
 
+  async appendPendingQueue(
+    subagentId: string,
+    input: QueuedSubagentInput,
+    updatedAt: number,
+  ): Promise<SubagentInstanceRecord | null> {
+    await Promise.resolve();
+    const table = schema.subagentInstance;
+    const columns = table.columns;
+    const row = this.db
+      .prepare<SubagentInstanceRow>(
+        `UPDATE ${table.tableName}
+         SET ${columns.pendingQueue} = json_insert(
+               ${columns.pendingQueue}, '$[#]', json(?)
+             ),
+             ${columns.updatedAt} = ?
+         WHERE ${columns.subagentId} = ?
+           AND ${columns.closedAt} IS NULL
+           AND ${columns.status} <> 'cancelled'
+         RETURNING *`,
+      )
+      .get(JSON.stringify(input), updatedAt, subagentId);
+    return row ? rowToRecord(row) : null;
+  }
+
   async create(record: SubagentInstanceRecord): Promise<void> {
     await Promise.resolve();
     const table = schema.subagentInstance;
