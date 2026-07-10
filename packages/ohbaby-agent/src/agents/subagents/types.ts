@@ -4,7 +4,6 @@ import type { SubagentRole } from "../roles.js";
 export type SubagentInstanceStatus =
   | "pending"
   | "running"
-  | "idle"
   | "completed"
   | "failed"
   | "timed_out"
@@ -13,8 +12,8 @@ export type SubagentInstanceStatus =
 
 export interface QueuedSubagentInput {
   readonly prompt: string;
-  readonly environment?: ToolExecutionEnvironment;
   readonly timeoutMs?: number;
+  readonly workdir?: string;
 }
 
 export interface SubagentInstanceRecord {
@@ -30,6 +29,7 @@ export interface SubagentInstanceRecord {
   readonly output?: string;
   readonly error?: string;
   readonly pendingQueue: readonly QueuedSubagentInput[];
+  readonly currentInput?: QueuedSubagentInput;
   readonly currentRunId?: string;
   readonly lastRunId?: string;
   readonly timeoutMs?: number;
@@ -84,16 +84,41 @@ export interface SubagentCloseResult {
   readonly previousStatus: SubagentInstanceStatus;
 }
 
-type MutableSubagentFields = Omit<
+type RequiredMutableSubagentFields = Pick<
   SubagentInstanceRecord,
-  "subagentId" | "createdAt"
+  "status" | "pendingQueue" | "updatedAt"
 >;
 
-export type SubagentInstanceUpdate = {
-  readonly [K in keyof MutableSubagentFields]?:
-    | MutableSubagentFields[K]
+type ClearableMutableSubagentFields = Pick<
+  SubagentInstanceRecord,
+  | "output"
+  | "error"
+  | "currentInput"
+  | "currentRunId"
+  | "lastRunId"
+  | "ownerId"
+  | "ownerPid"
+  | "startedAt"
+  | "completedAt"
+  | "interruptedAt"
+  | "closedAt"
+>;
+
+export type SubagentInstanceUpdate = Partial<RequiredMutableSubagentFields> & {
+  readonly [K in keyof ClearableMutableSubagentFields]?:
+    | ClearableMutableSubagentFields[K]
     | undefined;
 };
+
+export function assertSubagentInstanceUpdate(
+  update: SubagentInstanceUpdate,
+): void {
+  for (const field of ["status", "pendingQueue", "updatedAt"] as const) {
+    if (field in update && update[field] === undefined) {
+      throw new Error(`Subagent update ${field} must not be undefined`);
+    }
+  }
+}
 
 export interface MarkSubagentsInterruptedInput {
   readonly parentSessionId?: string;
@@ -105,6 +130,15 @@ export interface MarkSubagentsInterruptedInput {
 
 export interface SubagentInstanceStore {
   create(record: SubagentInstanceRecord): Promise<void>;
+  claim(
+    subagentId: string,
+    update: SubagentInstanceUpdate,
+  ): Promise<SubagentInstanceRecord | null>;
+  finishRun(
+    subagentId: string,
+    currentRunId: string,
+    update: SubagentInstanceUpdate,
+  ): Promise<SubagentInstanceRecord>;
   get(input: SubagentLookupInput): Promise<SubagentInstanceRecord | null>;
   update(
     subagentId: string,

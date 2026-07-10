@@ -30,6 +30,7 @@ export interface SystemPromptProviderInput {
   readonly sessionId: string;
   readonly directory: string;
   readonly isSubagent: boolean;
+  readonly agentName?: string;
 }
 
 export interface SystemPromptProviderOptions {

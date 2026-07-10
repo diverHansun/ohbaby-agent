@@ -1,9 +1,10 @@
-import type {
-  MarkSubagentsInterruptedInput,
-  SubagentInstanceRecord,
-  SubagentInstanceStore,
-  SubagentInstanceUpdate,
-  SubagentLookupInput,
+import {
+  assertSubagentInstanceUpdate,
+  type MarkSubagentsInterruptedInput,
+  type SubagentInstanceRecord,
+  type SubagentInstanceStore,
+  type SubagentInstanceUpdate,
+  type SubagentLookupInput,
 } from "./types.js";
 
 export interface InMemorySubagentInstanceStoreOptions {
@@ -81,10 +82,53 @@ export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
     return Promise.resolve(clone(record));
   }
 
+  claim(
+    subagentId: string,
+    update: SubagentInstanceUpdate,
+  ): Promise<SubagentInstanceRecord | null> {
+    assertSubagentInstanceUpdate(update);
+    const existing = this.records.get(subagentId);
+    if (!existing) {
+      return Promise.reject(new Error(`Subagent not found: ${subagentId}`));
+    }
+    if (
+      existing.closedAt !== undefined ||
+      existing.status === "running" ||
+      existing.status === "cancelled"
+    ) {
+      return Promise.resolve(null);
+    }
+    const claimed = { ...existing, ...update };
+    this.records.set(subagentId, clone(claimed));
+    return Promise.resolve(clone(claimed));
+  }
+
+  finishRun(
+    subagentId: string,
+    currentRunId: string,
+    update: SubagentInstanceUpdate,
+  ): Promise<SubagentInstanceRecord> {
+    assertSubagentInstanceUpdate(update);
+    const existing = this.records.get(subagentId);
+    if (!existing) {
+      return Promise.reject(new Error(`Subagent not found: ${subagentId}`));
+    }
+    if (
+      existing.closedAt !== undefined ||
+      existing.currentRunId !== currentRunId
+    ) {
+      return Promise.resolve(clone(existing));
+    }
+    const finished = { ...existing, ...update };
+    this.records.set(subagentId, clone(finished));
+    return Promise.resolve(clone(finished));
+  }
+
   update(
     subagentId: string,
     update: SubagentInstanceUpdate,
   ): Promise<SubagentInstanceRecord> {
+    assertSubagentInstanceUpdate(update);
     const existing = this.records.get(subagentId);
     if (!existing) {
       return Promise.reject(new Error(`Subagent not found: ${subagentId}`));
@@ -123,7 +167,13 @@ export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
       ) {
         const updated: SubagentInstanceRecord = {
           ...record,
+          completedAt:
+            record.currentRunId === undefined
+              ? record.completedAt
+              : interruptedAt,
+          currentRunId: undefined,
           interruptedAt,
+          lastRunId: record.currentRunId ?? record.lastRunId,
           status: "interrupted",
           updatedAt: interruptedAt,
         };

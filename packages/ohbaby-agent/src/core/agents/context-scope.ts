@@ -20,7 +20,6 @@ function assertEqual(
 
 function validateIdentity(identity: AgentInstanceIdentity): void {
   assertNonEmpty(identity.instanceId, "instanceId");
-  assertNonEmpty(identity.contextScopeId, "contextScopeId");
   assertNonEmpty(identity.sessionId, "sessionId");
   assertNonEmpty(identity.agentName, "agentName");
   assertNonEmpty(identity.projectRoot, "projectRoot");
@@ -29,8 +28,14 @@ function validateIdentity(identity: AgentInstanceIdentity): void {
   if (identity.type === "sub" && !identity.parentSessionId) {
     throw new Error("sub agent identity requires parentSessionId");
   }
+  if (identity.type === "sub") {
+    assertNonEmpty(identity.contextScopeId ?? "", "contextScopeId");
+  }
   if (identity.type === "primary" && identity.parentSessionId !== undefined) {
     throw new Error("primary agent identity must not include parentSessionId");
+  }
+  if (identity.type === "primary" && identity.contextScopeId !== undefined) {
+    throw new Error("primary agent identity must not include contextScopeId");
   }
 }
 
@@ -69,8 +74,10 @@ export function createAgentContextScope(
     toRunCreateOptions(): ReturnType<AgentContextScope["toRunCreateOptions"]> {
       return {
         agentInstanceId: identity.instanceId,
-        contextScopeId: identity.contextScopeId,
         isSubagent,
+        ...(identity.contextScopeId === undefined
+          ? {}
+          : { contextScopeId: identity.contextScopeId }),
         ...(identity.parentSessionId === undefined
           ? {}
           : { parentSessionId: identity.parentSessionId }),

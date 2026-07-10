@@ -375,6 +375,7 @@ export class Lifecycle {
         ...(params.contextScopeId === undefined
           ? {}
           : { contextScopeId: params.contextScopeId }),
+        agentName: params.agent,
         directory: params.directory,
         isSubagent: params.isSubagent,
         modelId: params.modelId,
@@ -467,6 +468,7 @@ export class Lifecycle {
           ...(params.contextScopeId === undefined
             ? {}
             : { contextScopeId: params.contextScopeId }),
+          agentName: params.agent,
           directory: params.directory,
           force: true,
           isSubagent: params.isSubagent,

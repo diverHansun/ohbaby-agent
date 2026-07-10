@@ -12,6 +12,15 @@ const subIdentity = {
   type: "sub",
 } as const;
 
+const primaryIdentity = {
+  agentName: "build",
+  instanceId: "primary_1",
+  modelId: "fake-model",
+  projectRoot: "/repo",
+  sessionId: "primary_1",
+  type: "primary",
+} as const;
+
 describe("AgentContextScope", () => {
   it("derives stable run scope from subagent identity", () => {
     const scope = createAgentContextScope(subIdentity);
@@ -26,6 +35,18 @@ describe("AgentContextScope", () => {
     });
   });
 
+  it("keeps primary root instances unscoped at the message layer", () => {
+    const scope = createAgentContextScope(primaryIdentity);
+
+    expect(scope.isSubagent).toBe(false);
+    expect(scope.contextScopeId).toBeUndefined();
+    expect(scope.toRunCreateOptions()).toEqual({
+      agentInstanceId: "primary_1",
+      isSubagent: false,
+      sessionId: "primary_1",
+    });
+  });
+
   it("rejects inconsistent identities and restored records", () => {
     expect(() =>
       createAgentContextScope({ ...subIdentity, parentSessionId: undefined }),
@@ -37,6 +58,12 @@ describe("AgentContextScope", () => {
         type: "primary",
       }),
     ).toThrow(/primary/i);
+    expect(() =>
+      createAgentContextScope({
+        ...primaryIdentity,
+        contextScopeId: "primary_scope",
+      }),
+    ).toThrow(/contextScopeId/);
 
     const scope = createAgentContextScope(subIdentity);
     expect(() => {

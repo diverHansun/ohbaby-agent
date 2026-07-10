@@ -189,7 +189,7 @@ export async function runAgent(
         ? {}
         : { contextScopeId: scope.contextScopeId }),
       directory: runDirectory({
-        environmentWorkdir: input.environment?.workdir,
+        environmentWorkdir: input.workdir ?? input.environment?.workdir,
         isSubagent: scope.isSubagent,
         projectRoot: input.projectRoot,
       }),
@@ -229,7 +229,8 @@ export async function runAgent(
         );
       }
       const events =
-        preSubscribed?.events ?? runEventSource.subscribeRunEvents(record.runId);
+        preSubscribed?.events ??
+        runEventSource.subscribeRunEvents(record.runId);
       void deps.runCoordinator
         .waitForCompletion(record.runId)
         .finally(() => {
@@ -250,7 +251,9 @@ export async function runAgent(
   }
 
   try {
-    const completion = await deps.runCoordinator.waitForCompletion(record.runId);
+    const completion = await deps.runCoordinator.waitForCompletion(
+      record.runId,
+    );
     const history =
       scope.contextScopeId === undefined
         ? await deps.messageManager.listBySession(scope.sessionId)

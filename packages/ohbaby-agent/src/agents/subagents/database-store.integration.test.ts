@@ -52,12 +52,70 @@ afterEach(async () => {
 });
 
 describe("DatabaseSubagentInstanceStore", () => {
+  it("claims only once and prevents late run completion from overwriting close", async () => {
+    const store = await initFixture();
+    await store.create({
+      contextScopeId: "scope_claim",
+      createdAt: 1,
+      initialPrompt: "inspect",
+      parentSessionId: "parent_1",
+      pendingQueue: [{ prompt: "inspect" }],
+      role: "explore",
+      sessionId: "child_1",
+      status: "pending",
+      subagentId: "subagent_claim",
+      updatedAt: 1,
+    });
+
+    await expect(
+      store.update("subagent_claim", {
+        pendingQueue: undefined,
+      }),
+    ).rejects.toThrow("pendingQueue must not be undefined");
+
+    await expect(
+      store.claim("subagent_claim", {
+        currentInput: { prompt: "inspect" },
+        currentRunId: "run_1",
+        pendingQueue: [],
+        status: "running",
+        updatedAt: 2,
+      }),
+    ).resolves.toMatchObject({ currentRunId: "run_1", status: "running" });
+    await expect(
+      store.claim("subagent_claim", {
+        currentRunId: "run_2",
+        status: "running",
+        updatedAt: 3,
+      }),
+    ).resolves.toBeNull();
+    await store.update("subagent_claim", {
+      closedAt: 4,
+      currentInput: undefined,
+      currentRunId: undefined,
+      lastRunId: "run_1",
+      status: "cancelled",
+      updatedAt: 4,
+    });
+
+    await expect(
+      store.finishRun("subagent_claim", "run_1", {
+        currentRunId: undefined,
+        lastRunId: "run_1",
+        status: "completed",
+        updatedAt: 5,
+      }),
+    ).resolves.toMatchObject({ closedAt: 4, status: "cancelled" });
+  });
+
   it("stores multiple subagents in one child session and marks active ones interrupted", async () => {
     const store = await initFixture();
 
     await store.create({
       contextScopeId: "subagent_a",
       createdAt: 1,
+      currentInput: { prompt: "in flight", workdir: "/repo" },
+      currentRunId: "run_a",
       initialPrompt: "first",
       parentSessionId: "parent_1",
       pendingQueue: [],
@@ -81,7 +139,11 @@ describe("DatabaseSubagentInstanceStore", () => {
     });
 
     await expect(store.listByParent("parent_1")).resolves.toMatchObject([
-      { contextScopeId: "subagent_a", sessionId: "child_1" },
+      {
+        contextScopeId: "subagent_a",
+        currentInput: { prompt: "in flight", workdir: "/repo" },
+        sessionId: "child_1",
+      },
       { contextScopeId: "subagent_b", sessionId: "child_1" },
     ]);
     await expect(
@@ -99,7 +161,14 @@ describe("DatabaseSubagentInstanceStore", () => {
 
     expect(interrupted).toHaveLength(2);
     await expect(store.listByParent("parent_1")).resolves.toMatchObject([
-      { interruptedAt: 10, status: "interrupted" },
+      {
+        completedAt: 10,
+        currentInput: { prompt: "in flight", workdir: "/repo" },
+        currentRunId: undefined,
+        lastRunId: "run_a",
+        interruptedAt: 10,
+        status: "interrupted",
+      },
       { interruptedAt: 10, status: "interrupted" },
     ]);
   });
@@ -228,6 +297,8 @@ describe("DatabaseSubagentInstanceStore", () => {
       ...base,
       contextScopeId: "current_scope",
       createdAt: 1,
+      currentInput: { prompt: "current owner" },
+      currentRunId: "run_current",
       initialPrompt: "current owner",
       ownerId: "owner_current",
       ownerPid: 101,
@@ -281,6 +352,10 @@ describe("DatabaseSubagentInstanceStore", () => {
       expect.arrayContaining([
         expect.objectContaining({
           interruptedAt: 20,
+          completedAt: 20,
+          currentInput: { prompt: "current owner" },
+          currentRunId: undefined,
+          lastRunId: "run_current",
           status: "interrupted",
           subagentId: "subagent_current",
         }),

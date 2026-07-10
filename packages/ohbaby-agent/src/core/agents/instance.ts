@@ -38,6 +38,7 @@ class DefaultAgentInstance implements AgentInstance {
       signal: input.signal,
       sessionId: this.contextScope.sessionId,
       waitMode: input.waitMode,
+      workdir: input.workdir,
     });
   }
 }

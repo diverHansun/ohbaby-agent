@@ -13,6 +13,7 @@ export interface SystemPromptProvider {
     readonly sessionId: string;
     readonly directory: string;
     readonly isSubagent: boolean;
+    readonly agentName?: string;
   }): Promise<string>;
 }
 
@@ -121,6 +122,7 @@ export interface PrepareTurnInput {
   readonly contextScopeId?: string;
   readonly directory: string;
   readonly modelId: string;
+  readonly agentName?: string;
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   readonly isSubagent?: boolean;
   readonly force?: boolean;
@@ -141,6 +143,7 @@ export interface ContextManager {
     directory: string,
     isSubagent?: boolean,
     contextScopeId?: string,
+    agentName?: string,
   ): Promise<AssembledContext>;
   getUsage(context: AssembledContext, modelId: string): ContextUsage;
   updateCalibrationFactor(

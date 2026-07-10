@@ -2,6 +2,66 @@ import { describe, expect, it } from "vitest";
 import { InMemorySubagentInstanceStore } from "./in-memory-store.js";
 
 describe("InMemorySubagentInstanceStore", () => {
+  it("claims only once and prevents late run completion from overwriting close", async () => {
+    const store = new InMemorySubagentInstanceStore();
+    await store.create({
+      contextScopeId: "scope_1",
+      createdAt: 1,
+      initialPrompt: "inspect",
+      parentSessionId: "parent_1",
+      pendingQueue: [{ prompt: "inspect" }],
+      role: "explore",
+      sessionId: "child_1",
+      status: "pending",
+      subagentId: "subagent_1",
+      updatedAt: 1,
+    });
+
+    expect(() =>
+      store.update("subagent_1", {
+        status: undefined,
+      }),
+    ).toThrow("status must not be undefined");
+
+    await expect(
+      store.claim("subagent_1", {
+        currentInput: { prompt: "inspect" },
+        currentRunId: "run_1",
+        pendingQueue: [],
+        status: "running",
+        updatedAt: 2,
+      }),
+    ).resolves.toMatchObject({ currentRunId: "run_1", status: "running" });
+    await expect(
+      store.claim("subagent_1", {
+        currentRunId: "run_2",
+        status: "running",
+        updatedAt: 3,
+      }),
+    ).resolves.toBeNull();
+    await store.update("subagent_1", {
+      closedAt: 4,
+      currentInput: undefined,
+      currentRunId: undefined,
+      lastRunId: "run_1",
+      status: "cancelled",
+      updatedAt: 4,
+    });
+
+    await expect(
+      store.finishRun("subagent_1", "run_1", {
+        currentRunId: undefined,
+        lastRunId: "run_1",
+        status: "completed",
+        updatedAt: 5,
+      }),
+    ).resolves.toMatchObject({
+      closedAt: 4,
+      lastRunId: "run_1",
+      status: "cancelled",
+    });
+  });
+
   it("uses owner identity and owner pid when recovering interrupted subagents", async () => {
     const store = new InMemorySubagentInstanceStore({
       isOwnerAlive: (pid): boolean => pid === 101 || pid === 202,
@@ -18,6 +78,8 @@ describe("InMemorySubagentInstanceStore", () => {
       ...base,
       contextScopeId: "current_scope",
       createdAt: 1,
+      currentInput: { prompt: "current owner" },
+      currentRunId: "run_current",
       initialPrompt: "current owner",
       ownerId: "owner_current",
       ownerPid: 101,
@@ -59,6 +121,10 @@ describe("InMemorySubagentInstanceStore", () => {
       expect.arrayContaining([
         expect.objectContaining({
           interruptedAt: 20,
+          completedAt: 20,
+          currentInput: { prompt: "current owner" },
+          currentRunId: undefined,
+          lastRunId: "run_current",
           status: "interrupted",
           subagentId: "subagent_current",
         }),

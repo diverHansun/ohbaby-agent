@@ -22,9 +22,33 @@ import type {
 
 interface ActiveSubagentState {
   abortController?: AbortController;
+  claimCompletion?: DeferredClaim;
   closed: boolean;
-  queue: QueuedSubagentInput[];
+  drainPromise?: Promise<void>;
+  drainAfterInterrupt: boolean;
+  lastRunSettled: boolean;
+  queue: ActiveQueuedSubagentInput[];
   running: boolean;
+  stopping: boolean;
+}
+
+interface ActiveQueuedSubagentInput extends QueuedSubagentInput {
+  readonly completion?: DeferredCompletion;
+  readonly environment?: ToolExecutionEnvironment;
+  readonly signal?: AbortSignal;
+  unbindQueueAbort?: () => void;
+}
+
+interface DeferredCompletion {
+  readonly promise: Promise<SubagentInstanceRecord>;
+  reject(error: unknown): void;
+  resolve(record: SubagentInstanceRecord): void;
+}
+
+interface DeferredClaim {
+  readonly promise: Promise<void>;
+  reject(error: unknown): void;
+  resolve(): void;
 }
 
 export interface SessionSubagentHostOptions {
@@ -34,13 +58,23 @@ export interface SessionSubagentHostOptions {
   readonly sessionManager: Pick<SessionManager, "create" | "get">;
   readonly store: SubagentInstanceStore;
   readonly createSubagentId?: () => string;
+  readonly createRunId?: () => string;
   readonly ownerId?: string;
   readonly ownerPid?: number;
   readonly now?: () => number;
 }
 
+const DEFAULT_SUBAGENT_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+const MAX_SUBAGENT_TIMEOUT_MS = DEFAULT_SUBAGENT_TIMEOUT_MS;
+
 function defaultSubagentId(): string {
   return `subagent_${Date.now().toString(36)}_${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+}
+
+function defaultRunId(): string {
+  return `subagent_run_${Date.now().toString(36)}_${Math.random()
     .toString(36)
     .slice(2, 10)}`;
 }
@@ -71,6 +105,9 @@ function normalizeTimeoutMs(timeoutMs: number | undefined): number | undefined {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error("subagent timeoutMs must be a positive number");
   }
+  if (timeoutMs > MAX_SUBAGENT_TIMEOUT_MS) {
+    throw new Error("subagent timeoutMs must not exceed 7200000ms");
+  }
   return Math.trunc(timeoutMs);
 }
 
@@ -78,50 +115,83 @@ function timeoutMessage(timeoutMs: number): string {
   return `Subagent timed out after ${String(timeoutMs)}ms`;
 }
 
+async function waitForTurnOrAbort(
+  turn: Promise<AgentRunResult>,
+  signal: AbortSignal,
+): Promise<
+  | { readonly kind: "aborted" }
+  | { readonly kind: "completed"; readonly result: AgentRunResult }
+> {
+  if (signal.aborted) {
+    return { kind: "aborted" };
+  }
+  let onAbort!: () => void;
+  const aborted = new Promise<{ readonly kind: "aborted" }>((resolve) => {
+    onAbort = (): void => {
+      resolve({ kind: "aborted" });
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([
+      turn.then((result) => ({ kind: "completed" as const, result })),
+      aborted,
+    ]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
 export class SessionSubagentHost {
   private readonly active = new Map<string, ActiveSubagentState>();
   private readonly parentSessionLocks = new Map<string, Promise<void>>();
   private readonly createSubagentId: () => string;
+  private readonly createRunId: () => string;
   private readonly now: () => number;
+  private disposed = false;
 
   constructor(private readonly options: SessionSubagentHostOptions) {
     this.createSubagentId = options.createSubagentId ?? defaultSubagentId;
+    this.createRunId = options.createRunId ?? defaultRunId;
     this.now = options.now ?? Date.now;
   }
 
   async run(input: SubagentRunInput): Promise<SubagentRunResult> {
-    const timeoutMs = normalizeTimeoutMs(input.timeoutMs);
-    const record =
-      input.subagentId === undefined
-        ? await this.withParentSessionLock(input.parentSessionId, () =>
-            this.createRecord({ ...input, timeoutMs }),
-          )
-        : await this.getExisting(input);
-    const active = this.active.get(record.subagentId);
-    if (active?.running && input.mode === "foreground") {
-      throw new Error(
-        `Subagent is already running: ${record.subagentId}. Use background mode to queue input, or interrupt the running turn.`,
-      );
+    if (this.disposed) {
+      throw new Error("Subagent host is disposed");
     }
+    const timeoutMs = normalizeTimeoutMs(input.timeoutMs);
+    const isNew = input.subagentId === undefined;
+    const record = isNew
+      ? await this.withParentSessionLock(input.parentSessionId, () =>
+          this.createRecord({ ...input, timeoutMs }),
+        )
+      : await this.getExisting(input);
     if (input.mode === "background") {
-      this.enqueueOrSchedule(
+      await this.enqueueOrSchedule(
         record,
         input.prompt,
         input.environment,
         input.interrupt === true,
         timeoutMs,
+        false,
+        undefined,
+        isNew,
       );
       return {
         item: await this.mustGet(record.parentSessionId, record.subagentId),
       };
     }
 
-    const item = await this.runTurn(
+    const item = await this.enqueueOrSchedule(
       record,
       input.prompt,
       input.environment,
-      input.signal,
+      input.interrupt === true,
       timeoutMs,
+      true,
+      input.signal,
+      isNew,
     );
     return {
       item,
@@ -147,17 +217,24 @@ export class SessionSubagentHost {
     const item = await this.mustGet(input.parentSessionId, input.subagentId);
     const previousStatus = item.status;
     const active = this.active.get(input.subagentId);
+    const queued = active?.queue.splice(0) ?? [];
     if (active) {
       active.closed = true;
-      active.queue.length = 0;
       active.abortController?.abort("subagent closed");
     }
+    const closedAt = this.now();
     const updated = await this.options.store.update(input.subagentId, {
-      closedAt: this.now(),
+      closedAt,
+      completedAt:
+        item.currentRunId === undefined ? item.completedAt : closedAt,
+      currentInput: undefined,
+      currentRunId: undefined,
+      lastRunId: item.currentRunId ?? item.lastRunId,
       pendingQueue: [],
       status: "cancelled",
-      updatedAt: this.now(),
+      updatedAt: closedAt,
     });
+    this.resolveQueuedCompletions(queued, updated);
     return { item: updated, previousStatus };
   }
 
@@ -170,6 +247,25 @@ export class SessionSubagentHost {
       ownerId: input.ownerId ?? this.options.ownerId,
       ownerPid: input.ownerPid ?? this.options.ownerPid,
     });
+  }
+
+  async dispose(): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    const activeStates = [...this.active.values()];
+    for (const active of activeStates) {
+      active.drainAfterInterrupt = false;
+      active.stopping = true;
+      active.abortController?.abort("subagent host disposed");
+    }
+    await this.markOwnedInterrupted();
+    await Promise.all(
+      activeStates.map(async (active) => {
+        await active.drainPromise?.catch(() => undefined);
+      }),
+    );
   }
 
   private async createRecord(
@@ -191,7 +287,10 @@ export class SessionSubagentHost {
     const session =
       existing.length === 0
         ? await this.createChildSession(parent, input.role, input.description)
-        : await this.getSession(existing[0].sessionId);
+        : await this.getChildSession(
+            existing[0].sessionId,
+            input.parentSessionId,
+          );
     const subagentId = this.createSubagentId();
     const now = this.now();
     const record: SubagentInstanceRecord = {
@@ -203,12 +302,18 @@ export class SessionSubagentHost {
       ownerId: this.options.ownerId,
       ownerPid: this.options.ownerPid,
       parentSessionId: input.parentSessionId,
-      pendingQueue: [],
+      pendingQueue: [
+        {
+          prompt: input.prompt,
+          timeoutMs: input.timeoutMs,
+          workdir: input.environment?.workdir,
+        },
+      ],
       role: input.role,
       sessionId: session.id,
       status: "pending",
       subagentId,
-      timeoutMs: input.timeoutMs,
+      timeoutMs: input.timeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS,
       updatedAt: now,
     };
     await this.options.store.create(record);
@@ -256,6 +361,7 @@ export class SessionSubagentHost {
     if (record.closedAt !== undefined) {
       throw new Error(`Subagent is closed: ${input.subagentId}`);
     }
+    await this.getChildSession(record.sessionId, record.parentSessionId);
     return record;
   }
 
@@ -271,10 +377,18 @@ export class SessionSubagentHost {
     });
   }
 
-  private async getSession(sessionId: string): Promise<Session> {
+  private async getChildSession(
+    sessionId: string,
+    parentSessionId: string,
+  ): Promise<Session> {
     const session = await this.options.sessionManager.get(sessionId);
     if (!session) {
       throw new Error(`Subagent session not found: ${sessionId}`);
+    }
+    if (!session.isSubagent || session.parentId !== parentSessionId) {
+      throw new Error(
+        `Subagent session parent mismatch: ${sessionId} does not belong to ${parentSessionId}`,
+      );
     }
     return session;
   }
@@ -293,87 +407,215 @@ export class SessionSubagentHost {
       });
   }
 
-  private enqueueOrSchedule(
+  private async enqueueOrSchedule(
     record: SubagentInstanceRecord,
     prompt: string,
     environment?: ToolExecutionEnvironment,
     interrupt = false,
     timeoutMs?: number,
-  ): void {
+    waitForEntry = false,
+    signal?: AbortSignal,
+    entryAlreadyQueued = false,
+  ): Promise<SubagentInstanceRecord> {
+    if (this.disposed) {
+      await this.markOwnedInterrupted(record.parentSessionId);
+      throw new Error("Subagent host is disposed");
+    }
+    const completion = waitForEntry
+      ? this.createDeferredCompletion()
+      : undefined;
+    const entry: ActiveQueuedSubagentInput = {
+      completion,
+      environment,
+      prompt,
+      signal,
+      timeoutMs,
+      workdir: environment?.workdir,
+    };
     const active = this.active.get(record.subagentId);
-    if (active?.running) {
-      if (interrupt) {
-        active.queue.length = 0;
+    if (active && !active.closed && !active.stopping) {
+      if (interrupt && active.running) {
+        active.drainAfterInterrupt = true;
         active.abortController?.abort("subagent interrupted");
       }
-      active.queue.push({ environment, prompt, timeoutMs });
-      void this.options.store.update(record.subagentId, {
-        pendingQueue: active.queue,
+      active.queue.push(entry);
+      this.bindQueuedAbort(record, active, entry);
+      await this.options.store.update(record.subagentId, {
+        pendingQueue: this.serializeQueue(active.queue),
         updatedAt: this.now(),
       });
-      return;
+      return await this.awaitCompletionOrGet(
+        record.parentSessionId,
+        record.subagentId,
+        completion,
+      );
     }
-    const scheduledActive = this.createActiveState();
+
+    if (record.status === "running" || record.currentRunId !== undefined) {
+      throw new Error(
+        `Subagent is active under another runtime owner: ${record.subagentId}`,
+      );
+    }
+
+    const pendingQueue = record.pendingQueue.map((item) => ({ ...item }));
+    if (entryAlreadyQueued) {
+      if (pendingQueue.length === 0) {
+        throw new Error(
+          `New subagent is missing its persisted input: ${record.subagentId}`,
+        );
+      }
+      pendingQueue[pendingQueue.length - 1] = entry;
+    } else {
+      pendingQueue.push(entry);
+    }
+    const scheduledActive = this.createActiveState(pendingQueue);
+    const claimCompletion = this.createDeferredClaim();
+    scheduledActive.claimCompletion = claimCompletion;
     this.active.set(record.subagentId, scheduledActive);
-    void Promise.resolve().then(() =>
-      this.runTurn(
-        record,
-        prompt,
-        environment,
-        undefined,
-        timeoutMs,
-        scheduledActive,
-      ).catch(() => undefined),
+    this.bindQueuedAbort(record, scheduledActive, entry);
+    await this.options.store.update(record.subagentId, {
+      pendingQueue: this.serializeQueue(scheduledActive.queue),
+      updatedAt: this.now(),
+    });
+    const drainPromise = Promise.resolve().then(() =>
+      this.drainQueue(record, scheduledActive),
     );
+    scheduledActive.drainPromise = drainPromise;
+    void drainPromise.catch(() => undefined);
+    await claimCompletion.promise;
+    return await this.awaitCompletionOrGet(
+      record.parentSessionId,
+      record.subagentId,
+      completion,
+    );
+  }
+
+  private async drainQueue(
+    record: SubagentInstanceRecord,
+    active: ActiveSubagentState,
+  ): Promise<void> {
+    active.running = true;
+    let inFlight: ActiveQueuedSubagentInput | undefined;
+    try {
+      for (;;) {
+        if (this.isActiveClosed(active) || active.stopping) {
+          active.claimCompletion?.reject(
+            new Error(
+              `Subagent run stopped before claim: ${record.subagentId}`,
+            ),
+          );
+          active.claimCompletion = undefined;
+          return;
+        }
+        const next = active.queue.shift();
+        if (!next) {
+          active.claimCompletion?.resolve();
+          active.claimCompletion = undefined;
+          return;
+        }
+        next.unbindQueueAbort?.();
+        next.unbindQueueAbort = undefined;
+        inFlight = next;
+        const effectiveTimeoutMs = normalizeTimeoutMs(
+          next.timeoutMs ?? record.timeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS,
+        );
+        const runId = this.createRunId();
+        const startedAt = this.now();
+        const claimed = await this.options.store.claim(record.subagentId, {
+          completedAt: undefined,
+          currentInput: this.serializeInput(next),
+          currentRunId: runId,
+          error: undefined,
+          interruptedAt: undefined,
+          output: undefined,
+          ownerId: this.options.ownerId,
+          ownerPid: this.options.ownerPid,
+          pendingQueue: this.serializeQueue(active.queue),
+          startedAt,
+          status: "running",
+          updatedAt: startedAt,
+        });
+        if (!claimed) {
+          throw new Error(`Subagent run claim rejected: ${record.subagentId}`);
+        }
+        active.claimCompletion?.resolve();
+        active.claimCompletion = undefined;
+        const item = await this.runTurn(
+          record,
+          next,
+          active,
+          runId,
+          effectiveTimeoutMs,
+        );
+        next.completion?.resolve(item);
+        inFlight = undefined;
+        const drainAfterInterrupt = active.drainAfterInterrupt;
+        const lastRunSettled = active.lastRunSettled;
+        active.drainAfterInterrupt = false;
+        if (this.isActiveClosed(active)) {
+          return;
+        }
+        if (item.status === "completed") {
+          continue;
+        }
+        if (
+          item.status === "interrupted" &&
+          drainAfterInterrupt &&
+          lastRunSettled
+        ) {
+          continue;
+        }
+        const pausedForeground = this.takePausedForegroundInputs(active);
+        const pausedItem = await this.options.store.update(record.subagentId, {
+          pendingQueue: this.serializeQueue(active.queue),
+          updatedAt: this.now(),
+        });
+        this.resolveQueuedCompletions(pausedForeground, pausedItem);
+        return;
+      }
+    } catch (error) {
+      active.claimCompletion?.reject(error);
+      active.claimCompletion = undefined;
+      inFlight?.unbindQueueAbort?.();
+      inFlight?.completion?.reject(error);
+      for (const queued of active.queue.splice(0)) {
+        queued.unbindQueueAbort?.();
+        queued.completion?.reject(error);
+      }
+      throw error;
+    } finally {
+      active.abortController = undefined;
+      active.running = false;
+      this.active.delete(record.subagentId);
+    }
   }
 
   private async runTurn(
     record: SubagentInstanceRecord,
-    prompt: string,
-    environment?: ToolExecutionEnvironment,
-    signal?: AbortSignal,
-    timeoutMs?: number,
-    active = this.createActiveState(),
+    input: ActiveQueuedSubagentInput,
+    active: ActiveSubagentState,
+    runId: string,
+    effectiveTimeoutMs: number | undefined,
   ): Promise<SubagentInstanceRecord> {
-    const effectiveTimeoutMs = normalizeTimeoutMs(
-      timeoutMs ?? record.timeoutMs,
-    );
     const deadlineReason =
       effectiveTimeoutMs === undefined
         ? undefined
         : timeoutMessage(effectiveTimeoutMs);
     this.active.set(record.subagentId, active);
-    active.running = true;
-    if (this.isActiveClosed(active)) {
-      return await this.mustGet(record.parentSessionId, record.subagentId);
-    }
-    const runtimeAgent = await this.options.agentManager.getRuntimeAgent(
-      record.role,
-      { isSubagent: true },
-    );
-    if (this.isActiveClosed(active)) {
+    if (this.isActiveClosed(active) || active.stopping) {
       return await this.mustGet(record.parentSessionId, record.subagentId);
     }
     const abortController = new AbortController();
     active.abortController = abortController;
+    const parentSignal = input.signal;
     const abort = (): void => {
-      abortController.abort(signal?.reason);
+      abortController.abort(parentSignal?.reason);
     };
-    if (signal?.aborted) {
+    if (parentSignal?.aborted) {
       abort();
     } else {
-      signal?.addEventListener("abort", abort, { once: true });
+      parentSignal?.addEventListener("abort", abort, { once: true });
     }
-    await this.options.store.update(record.subagentId, {
-      currentRunId: undefined,
-      error: undefined,
-      output: undefined,
-      pendingQueue: active.queue,
-      startedAt: this.now(),
-      status: "running",
-      timeoutMs: effectiveTimeoutMs,
-      updatedAt: this.now(),
-    });
     const deadline =
       effectiveTimeoutMs === undefined
         ? undefined
@@ -384,17 +626,44 @@ export class SessionSubagentHost {
           });
     const turnSignal = deadline?.signal ?? abortController.signal;
     const timedOut = (): boolean => deadline?.didTimeout() === true;
+    const interrupted = (): boolean =>
+      abortController.signal.aborted && !timedOut();
     const markTimedOut = (): Promise<SubagentInstanceRecord> =>
-      this.options.store.update(record.subagentId, {
+      this.options.store.finishRun(record.subagentId, runId, {
         completedAt: this.now(),
+        currentInput: undefined,
+        currentRunId: undefined,
         error: deadlineReason,
+        lastRunId: runId,
         output: deadlineReason,
         status: "timed_out",
         updatedAt: this.now(),
       });
+    const markInterrupted = (): Promise<SubagentInstanceRecord> =>
+      this.options.store.finishRun(record.subagentId, runId, {
+        completedAt: this.now(),
+        currentInput: undefined,
+        currentRunId: undefined,
+        error: errorMessage(turnSignal.reason ?? "subagent interrupted"),
+        interruptedAt: this.now(),
+        lastRunId: runId,
+        output: errorMessage(turnSignal.reason ?? "subagent interrupted"),
+        status: "interrupted",
+        updatedAt: this.now(),
+      });
 
     try {
-      const session = await this.getSession(record.sessionId);
+      const runtimeAgent = await this.options.agentManager.getRuntimeAgent(
+        record.role,
+        { isSubagent: true },
+      );
+      if (this.isActiveClosed(active) || this.isActiveStopping(active)) {
+        return await this.mustGet(record.parentSessionId, record.subagentId);
+      }
+      const session = await this.getChildSession(
+        record.sessionId,
+        record.parentSessionId,
+      );
       const instance = this.options.instanceFactory.create({
         agentName: record.role,
         contextScopeId: record.contextScopeId,
@@ -406,22 +675,50 @@ export class SessionSubagentHost {
         sessionId: record.sessionId,
         type: "sub",
       });
-      const result = await instance.turn({
-        environment,
-        prompt,
-        signal: turnSignal,
-        waitMode: "waitForCompletion",
-      });
+      active.lastRunSettled = false;
+      let turnPromise: Promise<AgentRunResult>;
+      try {
+        turnPromise = instance.turn({
+          environment: input.environment,
+          prompt: input.prompt,
+          runId,
+          signal: turnSignal,
+          waitMode: "waitForCompletion",
+          workdir: input.workdir,
+        });
+      } catch (error) {
+        active.lastRunSettled = true;
+        throw error;
+      }
+      void turnPromise.then(
+        () => {
+          active.lastRunSettled = true;
+        },
+        () => {
+          active.lastRunSettled = true;
+        },
+      );
+      const turn = await waitForTurnOrAbort(turnPromise, turnSignal);
       if (this.isActiveClosed(active)) {
         return await this.mustGet(record.parentSessionId, record.subagentId);
       }
       if (timedOut()) {
         return await markTimedOut();
       }
+      if (interrupted()) {
+        return await markInterrupted();
+      }
+      if (turn.kind === "aborted") {
+        return await markInterrupted();
+      }
+      const result = turn.result;
       const { output, success } = successfulOutput(result);
-      return await this.options.store.update(record.subagentId, {
+      return await this.options.store.finishRun(record.subagentId, runId, {
         completedAt: this.now(),
+        currentInput: undefined,
+        currentRunId: undefined,
         error: success ? undefined : output,
+        lastRunId: result.runId ?? runId,
         output,
         status: success ? "completed" : "failed",
         updatedAt: this.now(),
@@ -433,49 +730,209 @@ export class SessionSubagentHost {
       if (timedOut()) {
         return await markTimedOut();
       }
-      return await this.options.store.update(record.subagentId, {
+      if (interrupted()) {
+        return await markInterrupted();
+      }
+      return await this.options.store.finishRun(record.subagentId, runId, {
         completedAt: this.now(),
+        currentInput: undefined,
+        currentRunId: undefined,
         error: errorMessage(error),
+        lastRunId: runId,
         output: errorMessage(error),
         status: "failed",
         updatedAt: this.now(),
       });
     } finally {
       deadline?.dispose();
-      signal?.removeEventListener("abort", abort);
+      parentSignal?.removeEventListener("abort", abort);
       active.abortController = undefined;
-      active.running = false;
-      const next = active.queue.shift();
-      if (!this.isActiveClosed(active) && next !== undefined) {
-        void this.options.store.update(record.subagentId, {
-          pendingQueue: active.queue,
-          updatedAt: this.now(),
-        });
-        void Promise.resolve().then(() =>
-          this.runTurn(
-            record,
-            next.prompt,
-            next.environment,
-            undefined,
-            next.timeoutMs,
-            active,
-          ).catch(() => undefined),
-        );
-      } else {
-        this.active.delete(record.subagentId);
-      }
     }
   }
 
-  private createActiveState(): ActiveSubagentState {
+  private createActiveState(
+    queue: readonly ActiveQueuedSubagentInput[] = [],
+  ): ActiveSubagentState {
     return {
       closed: false,
-      queue: [],
-      running: true,
+      drainAfterInterrupt: false,
+      lastRunSettled: true,
+      queue: [...queue],
+      running: false,
+      stopping: false,
     };
   }
 
   private isActiveClosed(active: ActiveSubagentState): boolean {
     return active.closed;
+  }
+
+  private isActiveStopping(active: ActiveSubagentState): boolean {
+    return active.stopping;
+  }
+
+  private resolveQueuedCompletions(
+    queue: readonly ActiveQueuedSubagentInput[],
+    item: SubagentInstanceRecord,
+  ): void {
+    for (const queued of queue) {
+      queued.unbindQueueAbort?.();
+      queued.completion?.resolve(item);
+    }
+  }
+
+  private takePausedForegroundInputs(
+    active: ActiveSubagentState,
+  ): ActiveQueuedSubagentInput[] {
+    const paused: ActiveQueuedSubagentInput[] = [];
+    const retained: ActiveQueuedSubagentInput[] = [];
+    for (const queued of active.queue) {
+      if (!queued.completion) {
+        retained.push(queued);
+        continue;
+      }
+      queued.unbindQueueAbort?.();
+      queued.unbindQueueAbort = undefined;
+      paused.push(queued);
+      retained.push({
+        ...(queued.environment === undefined
+          ? {}
+          : { environment: queued.environment }),
+        prompt: queued.prompt,
+        ...(queued.timeoutMs === undefined
+          ? {}
+          : { timeoutMs: queued.timeoutMs }),
+        ...(queued.workdir === undefined ? {} : { workdir: queued.workdir }),
+      });
+    }
+    active.queue = retained;
+    return paused;
+  }
+
+  private bindQueuedAbort(
+    record: SubagentInstanceRecord,
+    active: ActiveSubagentState,
+    input: ActiveQueuedSubagentInput,
+  ): void {
+    const signal = input.signal;
+    if (!signal) {
+      return;
+    }
+    const onAbort = (): void => {
+      const index = active.queue.indexOf(input);
+      if (index < 0) {
+        return;
+      }
+      active.queue.splice(index, 1);
+      input.unbindQueueAbort?.();
+      input.unbindQueueAbort = undefined;
+      const reason = errorMessage(
+        signal.reason ?? "queued subagent input cancelled",
+      );
+      const interruptedAt = this.now();
+      const scheduledOnly = !active.running && active.queue.length === 0;
+      void this.options.store
+        .update(record.subagentId, {
+          ...(scheduledOnly
+            ? {
+                completedAt: interruptedAt,
+                error: reason,
+                interruptedAt,
+                output: reason,
+                status: "interrupted" as const,
+              }
+            : {}),
+          pendingQueue: this.serializeQueue(active.queue),
+          updatedAt: interruptedAt,
+        })
+        .then((updated) => {
+          if (scheduledOnly) {
+            input.completion?.resolve(updated);
+            return;
+          }
+          input.completion?.reject(new Error(reason));
+        })
+        .catch((error: unknown) => {
+          input.completion?.reject(error);
+        });
+    };
+    input.unbindQueueAbort = (): void => {
+      signal.removeEventListener("abort", onAbort);
+    };
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
+
+  private serializeQueue(
+    queue: readonly ActiveQueuedSubagentInput[],
+  ): QueuedSubagentInput[] {
+    return queue.map((input) => this.serializeInput(input));
+  }
+
+  private serializeInput(
+    input: ActiveQueuedSubagentInput,
+  ): QueuedSubagentInput {
+    const {
+      completion: _completion,
+      environment,
+      signal: _signal,
+      unbindQueueAbort: _unbindQueueAbort,
+      ...item
+    } = input;
+    return {
+      ...item,
+      workdir: item.workdir ?? environment?.workdir,
+    };
+  }
+
+  private createDeferredCompletion(): DeferredCompletion {
+    let resolve!: (record: SubagentInstanceRecord) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<SubagentInstanceRecord>(
+      (innerResolve, innerReject) => {
+        resolve = innerResolve;
+        reject = innerReject;
+      },
+    );
+    void promise.catch(() => undefined);
+    return { promise, reject, resolve };
+  }
+
+  private createDeferredClaim(): DeferredClaim {
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<void>((innerResolve, innerReject) => {
+      resolve = innerResolve;
+      reject = innerReject;
+    });
+    return { promise, reject, resolve };
+  }
+
+  private markOwnedInterrupted(
+    parentSessionId?: string,
+  ): Promise<readonly SubagentInstanceRecord[]> {
+    return this.options.store.markInterrupted({
+      parentSessionId,
+      interruptedAt: this.now(),
+      ownerId: this.options.ownerId,
+      ownerPid: this.options.ownerPid,
+      recoverUnknownOwner:
+        this.options.ownerId === undefined &&
+        this.options.ownerPid === undefined,
+    });
+  }
+
+  private async awaitCompletionOrGet(
+    parentSessionId: string,
+    subagentId: string,
+    completion: DeferredCompletion | undefined,
+  ): Promise<SubagentInstanceRecord> {
+    if (!completion) {
+      return await this.mustGet(parentSessionId, subagentId);
+    }
+    return await completion.promise;
   }
 }

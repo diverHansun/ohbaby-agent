@@ -35,6 +35,7 @@ export interface AgentRunInput {
   readonly parentMessageId?: string;
   readonly signal?: AbortSignal;
   readonly environment?: ToolExecutionEnvironment;
+  readonly workdir?: string;
   readonly maxSteps?: number;
   readonly waitMode: "stream" | "waitForCompletion";
 }
@@ -117,7 +118,7 @@ export type AgentWaitMode = "stream" | "waitForCompletion";
 
 export interface AgentInstanceIdentity {
   readonly instanceId: string;
-  readonly contextScopeId: string;
+  readonly contextScopeId?: string;
   readonly sessionId: string;
   readonly type: AgentInstanceType;
   readonly agentName: string;
@@ -130,7 +131,7 @@ export interface AgentInstanceIdentity {
 export interface AgentContextScope {
   readonly identity: AgentInstanceIdentity;
   readonly instanceId: string;
-  readonly contextScopeId: string;
+  readonly contextScopeId?: string;
   readonly sessionId: string;
   readonly isSubagent: boolean;
   readonly parentSessionId?: string;
@@ -143,7 +144,7 @@ export interface AgentContextScope {
   }): void;
   toRunCreateOptions(): {
     readonly agentInstanceId: string;
-    readonly contextScopeId: string;
+    readonly contextScopeId?: string;
     readonly sessionId: string;
     readonly isSubagent: boolean;
     readonly parentSessionId?: string;
@@ -156,6 +157,7 @@ export interface AgentTurnInput {
   readonly signal?: AbortSignal;
   readonly environment?: ToolExecutionEnvironment;
   readonly runId?: string;
+  readonly workdir?: string;
 }
 
 export interface AgentInstance {

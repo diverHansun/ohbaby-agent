@@ -1,25 +1,13 @@
-import {
-  runAgent,
-  type AgentRunCoordinator,
-  type AgentRunEventSource,
-} from "../core/agents/index.js";
-import type { MessageManager } from "../core/message/index.js";
-import type { ToolSchedulerInstance } from "../core/tool-scheduler/index.js";
+import type { AgentInstanceFactory } from "../core/agents/index.js";
 import type { Session, SessionManager } from "../services/session/index.js";
 import { AgentManager } from "./manager.js";
-import type {
-  AgentSessionStartResult,
-  StartSessionParams,
-} from "./types.js";
+import type { AgentSessionStartResult, StartSessionParams } from "./types.js";
 
 export interface AgentServiceOptions {
   readonly agentManager: AgentManager;
-  readonly messageManager: MessageManager;
+  readonly instanceFactory: AgentInstanceFactory;
   readonly modelId: string;
-  readonly runCoordinator: AgentRunCoordinator;
-  readonly runEventSource?: AgentRunEventSource;
   readonly sessionManager: Pick<SessionManager, "create" | "get">;
-  readonly toolScheduler: Pick<ToolSchedulerInstance, "getAvailableTools">;
 }
 
 export class AgentService {
@@ -38,26 +26,22 @@ export class AgentService {
       );
     }
     const session = await this.resolvePrimarySession(params);
-    const result = await runAgent(
-      {
-        messageManager: this.options.messageManager,
-        runCoordinator: this.options.runCoordinator,
-        runEventSource: this.options.runEventSource,
-        toolScheduler: this.options.toolScheduler,
-      },
-      {
-        agentName: params.agentName,
-        environment: params.environment,
-        initialUserPrompt: params.prompt,
-        maxSteps: params.maxSteps ?? runtimeAgent.config.maxSteps,
-        modelId: this.options.modelId,
-        projectRoot: session.projectRoot,
-        runId: params.runId,
-        sessionId: session.id,
-        signal: params.signal,
-        waitMode: "stream",
-      },
-    );
+    const instance = this.options.instanceFactory.create({
+      agentName: params.agentName,
+      instanceId: session.id,
+      maxSteps: params.maxSteps ?? runtimeAgent.config.maxSteps,
+      modelId: this.options.modelId,
+      projectRoot: session.projectRoot,
+      sessionId: session.id,
+      type: "primary",
+    });
+    const result = await instance.turn({
+      environment: params.environment,
+      prompt: params.prompt,
+      runId: params.runId,
+      signal: params.signal,
+      waitMode: "stream",
+    });
     if (result.mode !== "stream") {
       throw new Error("Primary session expected a streaming agent run");
     }

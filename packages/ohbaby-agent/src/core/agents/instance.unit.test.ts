@@ -10,6 +10,18 @@ function createDeps(): AgentRunDeps {
   };
 }
 
+function emptyEvents(): AsyncIterable<never> {
+  return {
+    [Symbol.asyncIterator](): AsyncIterator<never> {
+      return {
+        next(): Promise<IteratorResult<never, undefined>> {
+          return Promise.resolve({ done: true, value: undefined });
+        },
+      };
+    },
+  };
+}
+
 describe("AgentInstance", () => {
   it("keeps stable identity and scope across turns", async () => {
     const result: AgentRunResult = {
@@ -51,5 +63,46 @@ describe("AgentInstance", () => {
         sessionId: "child_1",
       }),
     ]);
+  });
+
+  it("runs primary instances through the same turn boundary without a context scope id", async () => {
+    const result: AgentRunResult = {
+      events: emptyEvents(),
+      mode: "stream",
+      runId: "run_primary",
+      sessionId: "primary_1",
+    };
+    const runner = vi.fn<AgentRunner>(() => Promise.resolve(result));
+    const factory = createAgentInstanceFactory({
+      deps: createDeps(),
+      runner,
+    });
+    const instance = factory.create({
+      agentName: "build",
+      instanceId: "primary_1",
+      maxSteps: 12,
+      modelId: "fake-model",
+      projectRoot: "/repo",
+      sessionId: "primary_1",
+      type: "primary",
+    });
+
+    await instance.turn({
+      prompt: "hello",
+      runId: "run_primary",
+      waitMode: "stream",
+    });
+
+    expect(instance.contextScope.contextScopeId).toBeUndefined();
+    expect(runner).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        contextScope: instance.contextScope,
+        initialUserPrompt: "hello",
+        runId: "run_primary",
+        sessionId: "primary_1",
+        waitMode: "stream",
+      }),
+    );
   });
 });

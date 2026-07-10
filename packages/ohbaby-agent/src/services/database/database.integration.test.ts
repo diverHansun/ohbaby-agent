@@ -93,6 +93,7 @@ describe("services/database", () => {
       { version: "009_run_ledger_context_scope" },
       { version: "010_message_context_scope" },
       { version: "011_subagent_instance_owner" },
+      { version: "012_subagent_instance_current_input" },
     ]);
   });
 
@@ -105,7 +106,9 @@ describe("services/database", () => {
       .prepare<{ name: string }>("PRAGMA table_info(message)")
       .all()
       .map((row) => row.name);
-    expect(messageColumns).toEqual(expect.arrayContaining(["context_scope_id"]));
+    expect(messageColumns).toEqual(
+      expect.arrayContaining(["context_scope_id"]),
+    );
 
     const indexes = getDatabase()
       .prepare<{ name: string }>(

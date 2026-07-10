@@ -7,6 +7,7 @@ import type {
   AgentRunCoordinator,
   AgentRunEventSource,
 } from "../core/agents/index.js";
+import { createAgentInstanceFactory } from "../core/agents/index.js";
 import type {
   CoreMessage,
   MessageManager,
@@ -212,12 +213,16 @@ describe("AgentService", () => {
     );
     const service = new AgentService({
       agentManager: await createAgentManager(),
-      messageManager: messages.manager,
+      instanceFactory: createAgentInstanceFactory({
+        deps: {
+          messageManager: messages.manager,
+          runCoordinator: runs.coordinator,
+          runEventSource: { subscribeRunEvents },
+          toolScheduler: createToolScheduler(),
+        },
+      }),
       modelId: "fake-model",
-      runCoordinator: runs.coordinator,
-      runEventSource: { subscribeRunEvents },
       sessionManager,
-      toolScheduler: createToolScheduler(),
     });
 
     const result = await service.startSession({
@@ -258,23 +263,28 @@ describe("AgentService", () => {
         sessionId: "primary_1",
       }),
     );
+    expect(runs.create.mock.calls[0]?.[0]).not.toHaveProperty("contextScopeId");
     expect(subscribeRunEvents).toHaveBeenCalledWith("run_primary");
   });
 
   it("rejects subagent-only agents as primary agents", async () => {
     const service = new AgentService({
       agentManager: await createAgentManager(),
-      messageManager: createMessageManager().manager,
+      instanceFactory: createAgentInstanceFactory({
+        deps: {
+          messageManager: createMessageManager().manager,
+          runCoordinator: createRunCoordinator().coordinator,
+          runEventSource: { subscribeRunEvents: vi.fn() },
+          toolScheduler: createToolScheduler(),
+        },
+      }),
       modelId: "fake-model",
-      runCoordinator: createRunCoordinator().coordinator,
-      runEventSource: { subscribeRunEvents: vi.fn() },
       sessionManager: createSessionManager(),
-      toolScheduler: createToolScheduler(),
     });
 
     await expect(
       service.startSession({
-      agentName: "audit",
+        agentName: "audit",
         prompt: "work",
         projectRoot: "D:/repo",
         sessionId: "primary_1",

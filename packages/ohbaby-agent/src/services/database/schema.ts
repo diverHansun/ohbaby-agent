@@ -98,6 +98,7 @@ export const schema = {
     output: "output",
     error: "error",
     pendingQueue: "pending_queue",
+    currentInput: "current_input",
     currentRunId: "current_run_id",
     lastRunId: "last_run_id",
     timeoutMs: "timeout_ms",

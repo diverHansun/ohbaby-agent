@@ -670,6 +670,7 @@ export function createContextManager(
     directory: string,
     isSubagent = false,
     contextScopeId?: string,
+    agentName?: string,
   ): Promise<AssembledContext> {
     let memory = EMPTY_MEMORY;
     if (!isSubagent) {
@@ -681,7 +682,12 @@ export function createContextManager(
     }
 
     const [systemPrompt, rawHistory] = await Promise.all([
-      options.systemPromptProvider.build({ sessionId, directory, isSubagent }),
+      options.systemPromptProvider.build({
+        agentName,
+        sessionId,
+        directory,
+        isSubagent,
+      }),
       contextScopeId === undefined
         ? options.messageManager.listBySession(sessionId)
         : options.messageManager.listBySession(sessionId, { contextScopeId }),
@@ -1285,6 +1291,7 @@ export function createContextManager(
       input.directory,
       isSubagent,
       input.contextScopeId,
+      input.agentName,
     );
     const unreducedMeasurement = measureContext({
       activeReasoningByMessageId: input.activeReasoningByMessageId,

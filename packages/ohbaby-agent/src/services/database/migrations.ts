@@ -296,4 +296,10 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
         ON subagent_instance(owner_id, owner_pid, status, updated_at);
     `,
   },
+  {
+    version: "012_subagent_instance_current_input",
+    sql: `
+      ALTER TABLE subagent_instance ADD COLUMN current_input TEXT;
+    `,
+  },
 ];

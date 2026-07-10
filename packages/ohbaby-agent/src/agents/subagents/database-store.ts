@@ -5,14 +5,15 @@ import {
   type SqliteValue,
 } from "../../services/database/index.js";
 import type { SubagentRole } from "../roles.js";
-import type {
-  QueuedSubagentInput,
-  MarkSubagentsInterruptedInput,
-  SubagentInstanceRecord,
-  SubagentInstanceStatus,
-  SubagentInstanceStore,
-  SubagentInstanceUpdate,
-  SubagentLookupInput,
+import {
+  assertSubagentInstanceUpdate,
+  type QueuedSubagentInput,
+  type MarkSubagentsInterruptedInput,
+  type SubagentInstanceRecord,
+  type SubagentInstanceStatus,
+  type SubagentInstanceStore,
+  type SubagentInstanceUpdate,
+  type SubagentLookupInput,
 } from "./types.js";
 
 interface SubagentInstanceRow {
@@ -28,6 +29,7 @@ interface SubagentInstanceRow {
   readonly output: string | null;
   readonly error: string | null;
   readonly pending_queue: string;
+  readonly current_input: string | null;
   readonly current_run_id: string | null;
   readonly last_run_id: string | null;
   readonly timeout_ms: number | null;
@@ -59,6 +61,16 @@ function decodeQueue(value: string): readonly QueuedSubagentInput[] {
   return Array.isArray(decoded) ? (decoded as QueuedSubagentInput[]) : [];
 }
 
+function decodeInput(value: string | null): QueuedSubagentInput | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  const decoded = JSON.parse(value) as unknown;
+  return typeof decoded === "object" && decoded !== null
+    ? (decoded as QueuedSubagentInput)
+    : undefined;
+}
+
 function rowToRecord(row: SubagentInstanceRow): SubagentInstanceRecord {
   return {
     subagentId: row.subagent_id,
@@ -73,6 +85,7 @@ function rowToRecord(row: SubagentInstanceRow): SubagentInstanceRecord {
     output: optional(row.output),
     error: optional(row.error),
     pendingQueue: decodeQueue(row.pending_queue),
+    currentInput: decodeInput(row.current_input),
     currentRunId: optional(row.current_run_id),
     lastRunId: optional(row.last_run_id),
     timeoutMs: optional(row.timeout_ms),
@@ -120,38 +133,31 @@ function updateColumns(update: SubagentInstanceUpdate): {
   readonly assignments: string[];
   readonly values: SqliteValue[];
 } {
+  assertSubagentInstanceUpdate(update);
   const table = schema.subagentInstance.columns;
   const pairs: [string, SqliteValue][] = [];
   const add = (column: string, value: SqliteValue): void => {
     pairs.push([column, value]);
   };
 
-  if (update.sessionId !== undefined) add(table.sessionId, update.sessionId);
-  if (update.contextScopeId !== undefined) {
-    add(table.contextScopeId, update.contextScopeId);
-  }
-  if (update.parentSessionId !== undefined) {
-    add(table.parentSessionId, update.parentSessionId);
-  }
-  if (update.role !== undefined) add(table.role, update.role);
-  if ("name" in update) add(table.name, update.name ?? null);
-  if ("description" in update) {
-    add(table.description, update.description ?? null);
-  }
-  if (update.initialPrompt !== undefined) {
-    add(table.initialPrompt, update.initialPrompt);
-  }
   if (update.status !== undefined) add(table.status, update.status);
   if ("output" in update) add(table.output, update.output ?? null);
   if ("error" in update) add(table.error, update.error ?? null);
   if ("pendingQueue" in update) {
     add(table.pendingQueue, encodeQueue(update.pendingQueue ?? []));
   }
+  if ("currentInput" in update) {
+    add(
+      table.currentInput,
+      update.currentInput === undefined
+        ? null
+        : JSON.stringify(update.currentInput),
+    );
+  }
   if ("currentRunId" in update) {
     add(table.currentRunId, update.currentRunId ?? null);
   }
   if ("lastRunId" in update) add(table.lastRunId, update.lastRunId ?? null);
-  if ("timeoutMs" in update) add(table.timeoutMs, update.timeoutMs ?? null);
   if ("ownerId" in update) add(table.ownerId, update.ownerId ?? null);
   if ("ownerPid" in update) add(table.ownerPid, update.ownerPid ?? null);
   if (update.updatedAt !== undefined) add(table.updatedAt, update.updatedAt);
@@ -187,10 +193,10 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
         `INSERT INTO ${table.tableName}
           (subagent_id, session_id, context_scope_id, parent_session_id, role,
            name, description, initial_prompt, status, output, error,
-           pending_queue, current_run_id, last_run_id, timeout_ms, owner_id,
+           pending_queue, current_input, current_run_id, last_run_id, timeout_ms, owner_id,
            owner_pid,
            created_at, updated_at, started_at, completed_at, interrupted_at, closed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.subagentId,
@@ -205,6 +211,9 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
         record.output ?? null,
         record.error ?? null,
         encodeQueue(record.pendingQueue),
+        record.currentInput === undefined
+          ? null
+          : JSON.stringify(record.currentInput),
         record.currentRunId ?? null,
         record.lastRunId ?? null,
         record.timeoutMs ?? null,
@@ -232,6 +241,51 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
     return row ? rowToRecord(row) : null;
   }
 
+  async claim(
+    subagentId: string,
+    update: SubagentInstanceUpdate,
+  ): Promise<SubagentInstanceRecord | null> {
+    await Promise.resolve();
+    const { assignments, values } = updateColumns(update);
+    if (assignments.length === 0) {
+      throw new Error("Subagent claim requires an update");
+    }
+    const row = this.db
+      .prepare<SubagentInstanceRow>(
+        `UPDATE ${schema.subagentInstance.tableName}
+         SET ${assignments.join(", ")}
+         WHERE subagent_id = ?
+           AND closed_at IS NULL
+           AND status NOT IN ('running', 'cancelled')
+         RETURNING *`,
+      )
+      .get(...values, subagentId);
+    return row ? rowToRecord(row) : null;
+  }
+
+  async finishRun(
+    subagentId: string,
+    currentRunId: string,
+    update: SubagentInstanceUpdate,
+  ): Promise<SubagentInstanceRecord> {
+    await Promise.resolve();
+    const { assignments, values } = updateColumns(update);
+    if (assignments.length === 0) {
+      throw new Error("Subagent run finish requires an update");
+    }
+    const row = this.db
+      .prepare<SubagentInstanceRow>(
+        `UPDATE ${schema.subagentInstance.tableName}
+         SET ${assignments.join(", ")}
+         WHERE subagent_id = ?
+           AND closed_at IS NULL
+           AND current_run_id IS ?
+         RETURNING *`,
+      )
+      .get(...values, subagentId, currentRunId);
+    return row ? rowToRecord(row) : await this.getById(subagentId);
+  }
+
   async update(
     subagentId: string,
     update: SubagentInstanceUpdate,
@@ -247,6 +301,11 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
         )
         .run(...values, subagentId);
     }
+    return await this.getById(subagentId);
+  }
+
+  private async getById(subagentId: string): Promise<SubagentInstanceRecord> {
+    await Promise.resolve();
     const row = this.db
       .prepare<SubagentInstanceRow>(
         `SELECT * FROM ${schema.subagentInstance.tableName}
@@ -294,19 +353,47 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
     const rowsToInterrupt = activeRows.filter((row) =>
       shouldInterruptActiveOwner(row, input, this.isOwnerAlive),
     );
+    const interruptedRows: SubagentInstanceRow[] = [];
     for (const row of rowsToInterrupt) {
-      this.db
+      const result = this.db
         .prepare(
           `UPDATE ${schema.subagentInstance.tableName}
-           SET status = 'interrupted', interrupted_at = ?, updated_at = ?
-           WHERE subagent_id = ?`,
+           SET status = 'interrupted',
+               interrupted_at = ?,
+               updated_at = ?,
+               completed_at = CASE
+                 WHEN current_run_id IS NULL THEN completed_at
+                 ELSE ?
+               END,
+               last_run_id = COALESCE(current_run_id, last_run_id),
+               current_run_id = NULL
+           WHERE subagent_id = ?
+             AND status IN ('pending', 'running')
+             AND owner_id IS ?
+             AND owner_pid IS ?
+             AND current_run_id IS ?`,
         )
-        .run(interruptedAt, interruptedAt, row.subagent_id);
+        .run(
+          interruptedAt,
+          interruptedAt,
+          interruptedAt,
+          row.subagent_id,
+          row.owner_id,
+          row.owner_pid,
+          row.current_run_id,
+        );
+      if (result.changes > 0) {
+        interruptedRows.push(row);
+      }
     }
-    return rowsToInterrupt.map((row) =>
+    return interruptedRows.map((row) =>
       rowToRecord({
         ...row,
+        completed_at:
+          row.current_run_id === null ? row.completed_at : interruptedAt,
+        current_run_id: null,
         interrupted_at: interruptedAt,
+        last_run_id: row.current_run_id ?? row.last_run_id,
         status: "interrupted",
         updated_at: interruptedAt,
       }),
