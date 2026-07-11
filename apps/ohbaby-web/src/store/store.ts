@@ -12,6 +12,7 @@ export interface OhbabyWebStore {
   applyEvent(event: UiEvent, seqNum: number): void;
   getSnapshot(): StoreSnapshot;
   replaceSnapshot(snapshot: UiSnapshot, seqNum: number): void;
+  reset(): void;
   setConnectionState(state: ConnectionState): void;
   setError(error: string | null): void;
   subscribe(listener: StoreListener): () => void;
@@ -50,6 +51,13 @@ export function createOhbabyWebStore(): OhbabyWebStore {
       publish({
         ...snapshot,
         view: replaceSnapshot(nextSnapshot, seqNum),
+      });
+    },
+    reset(): void {
+      publish({
+        connectionState: "connecting",
+        error: null,
+        view: createInitialViewState(),
       });
     },
     setConnectionState(state): void {

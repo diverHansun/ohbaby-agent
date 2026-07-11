@@ -15,6 +15,9 @@ type StopDaemonFromStateMock = ReturnType<
   typeof vi.fn<CliCommandRuntime["stopDaemonFromState"]>
 >;
 type OpenUrlMock = ReturnType<typeof vi.fn<CliCommandRuntime["openUrl"]>>;
+type ListDaemonConnectionsMock = ReturnType<
+  typeof vi.fn<NonNullable<CliCommandRuntime["listDaemonConnections"]>>
+>;
 
 interface CreatedRuntime {
   readonly runtime: CliCommandRuntime;
@@ -22,6 +25,7 @@ interface CreatedRuntime {
   readonly readDaemonStatus: ReadDaemonStatusMock;
   readonly stopDaemonFromState: StopDaemonFromStateMock;
   readonly openUrl: OpenUrlMock;
+  readonly listDaemonConnections: ListDaemonConnectionsMock;
   readonly stderr: string[];
   readonly stdout: string[];
 }
@@ -67,6 +71,17 @@ function createRuntime(): CreatedRuntime {
     () => Promise.resolve("stopped"),
   );
   const openUrl = vi.fn<CliCommandRuntime["openUrl"]>(() => Promise.resolve());
+  const listDaemonConnections = vi.fn<
+    NonNullable<CliCommandRuntime["listDaemonConnections"]>
+  >(() =>
+    Promise.resolve([
+      {
+        clientId: "client_web",
+        connectedAt: 42_000,
+        scopeKey: "/repo",
+      },
+    ]),
+  );
   const runtime: CliCommandRuntime = {
     createCoreHost: vi.fn(),
     createStdoutRenderer: vi.fn(),
@@ -74,6 +89,7 @@ function createRuntime(): CreatedRuntime {
       throw new Error(message);
     },
     isStdinTTY: (): boolean => true,
+    listDaemonConnections,
     openUrl,
     readDaemonStatus,
     readStdin: (): Promise<string> => Promise.resolve(""),
@@ -85,6 +101,7 @@ function createRuntime(): CreatedRuntime {
     stopDaemonFromState,
   };
   return {
+    listDaemonConnections,
     readDaemonStatus,
     runtime,
     openUrl,
@@ -245,6 +262,16 @@ describe("createServeCommand", () => {
     await runServe(["serve", "status"], runtime);
 
     expect(stdout.join("")).toContain("not-running");
+  });
+
+  it("prints active daemon connections with serve ps", async () => {
+    const { listDaemonConnections, runtime, stdout } = createRuntime();
+
+    await runServe(["serve", "ps"], runtime);
+
+    expect(listDaemonConnections).toHaveBeenCalledTimes(1);
+    expect(stdout.join("")).toContain("client_web");
+    expect(stdout.join("")).toContain("/repo");
   });
 
   it("stops a daemon from recorded state", async () => {

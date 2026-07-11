@@ -22,6 +22,8 @@ import type {
   StoreSnapshot,
   SubmitPromptRequest,
   WebSseEvent,
+  WorkspaceScopeSummary,
+  WorkspaceSnapshot,
 } from "./wire.js";
 import {
   createOhbabyWebStore,
@@ -55,6 +57,7 @@ export interface OhbabyWebClient {
   getCurrentModel(): Promise<UiCurrentModelConfig | null>;
   getSnapshot(): StoreSnapshot;
   listCommands(): Promise<UiWebCommandCatalog>;
+  listWorkspaceScopes(): Promise<readonly WorkspaceScopeSummary[]>;
   probeModelContextWindow(
     input: ModelConnectRequest,
   ): Promise<UiProbeModelContextWindowResult>;
@@ -73,6 +76,10 @@ export interface OhbabyWebRuntime {
   readonly client: OhbabyWebClient;
   readonly ready: Promise<void>;
   readonly store: OhbabyWebStore;
+  getWorkspaceSnapshot(): WorkspaceSnapshot;
+  refreshWorkspaces(): Promise<void>;
+  subscribeWorkspaces(listener: () => void): () => void;
+  switchWorkspace(directory: string): Promise<void>;
 }
 
 class BrowserDaemonClient implements OhbabyWebClient {
@@ -84,6 +91,7 @@ class BrowserDaemonClient implements OhbabyWebClient {
   private commandCatalogPromise: Promise<UiWebCommandCatalog> | undefined;
   private connectPromise: Promise<void> | undefined;
   private connected = false;
+  private closed = false;
   private resyncPromise: Promise<void> | undefined;
   private readonly bufferedEvents: BufferedEvent[] = [];
 
@@ -113,6 +121,7 @@ class BrowserDaemonClient implements OhbabyWebClient {
   }
 
   private async doConnect(): Promise<void> {
+    this.closed = false;
     this.connected = true;
     this.store.setConnectionState("connecting");
     this.store.setError(null);
@@ -134,6 +143,9 @@ class BrowserDaemonClient implements OhbabyWebClient {
         onEvent: (event) => this.handleSseEvent(event.payload, event.id),
       });
       const response = await this.http.getSnapshot();
+      if (this.isClosed()) {
+        return;
+      }
       this.store.replaceSnapshot(response.snapshot, response.seqNum);
       this.applyBufferedEventsAfter(response.seqNum);
       this.buffering = false;
@@ -149,9 +161,14 @@ class BrowserDaemonClient implements OhbabyWebClient {
   }
 
   async close(): Promise<void> {
+    this.closed = true;
     this.connected = false;
     await this.events.close();
     this.store.setConnectionState("disconnected");
+  }
+
+  private isClosed(): boolean {
+    return this.closed;
   }
 
   getSnapshot(): StoreSnapshot {
@@ -229,6 +246,11 @@ class BrowserDaemonClient implements OhbabyWebClient {
     return this.commandCatalogPromise;
   }
 
+  async listWorkspaceScopes(): Promise<readonly WorkspaceScopeSummary[]> {
+    const response = await this.http.listWorkspaceScopes();
+    return response.scopes;
+  }
+
   async getCurrentModel(): Promise<UiCurrentModelConfig | null> {
     const response = await this.http.getCurrentModel();
     return response.model;
@@ -291,6 +313,9 @@ class BrowserDaemonClient implements OhbabyWebClient {
     event: WebSseEvent,
     seqNum: number | undefined,
   ): Promise<void> {
+    if (this.closed) {
+      return;
+    }
     switch (event.type) {
       case "hello":
         return;
@@ -334,6 +359,9 @@ class BrowserDaemonClient implements OhbabyWebClient {
     this.store.setConnectionState("resyncing");
     try {
       const response = await this.http.getSnapshot();
+      if (this.closed) {
+        return;
+      }
       this.store.replaceSnapshot(response.snapshot, response.seqNum);
       const maxBufferedSeqNum = this.applyBufferedEventsAfter(response.seqNum);
       this.events.setLastEventId(
@@ -364,27 +392,153 @@ function createClientInvocationId(): string {
   return globalThis.crypto.randomUUID();
 }
 
+function createBrowserDaemonClient(input: {
+  readonly config: OhbabyBootstrapConfig;
+  readonly fetch?: typeof fetch;
+  readonly store: OhbabyWebStore;
+}): BrowserDaemonClient {
+  const http = createDaemonHttpClient(input.config, input.fetch);
+  const events = new FetchDaemonEventStream({
+    baseUrl: input.config.baseUrl,
+    clientId: input.config.clientId,
+    directory: input.config.directory,
+    ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
+    token: input.config.token,
+  });
+  return new BrowserDaemonClient({
+    config: input.config,
+    events,
+    http,
+    store: input.store,
+  });
+}
+
+class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
+  readonly store = createOhbabyWebStore();
+  readonly ready: Promise<void>;
+  private activeClient: BrowserDaemonClient;
+  private readonly listeners = new Set<() => void>();
+  private switchPromise: Promise<void> = Promise.resolve();
+  private workspaceSnapshot: WorkspaceSnapshot;
+
+  constructor(
+    private readonly config: OhbabyBootstrapConfig,
+    private readonly fetchImpl: typeof fetch | undefined,
+  ) {
+    const selectedDirectory = config.directory?.trim();
+    if (!selectedDirectory) {
+      throw new Error("Missing workspace directory in daemon bootstrap config");
+    }
+    this.workspaceSnapshot = {
+      scopes: [{ directory: selectedDirectory, loaded: true }],
+      selectedDirectory,
+    };
+    this.activeClient = this.createClient(config);
+    this.ready = this.activeClient.connect();
+  }
+
+  get client(): OhbabyWebClient {
+    return this.activeClient;
+  }
+
+  getWorkspaceSnapshot(): WorkspaceSnapshot {
+    return this.workspaceSnapshot;
+  }
+
+  subscribeWorkspaces(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  async refreshWorkspaces(): Promise<void> {
+    const scopes = await this.activeClient.listWorkspaceScopes();
+    const selectedDirectory = this.workspaceSnapshot.selectedDirectory;
+    const includesSelected = scopes.some(
+      (scope) => scope.directory === selectedDirectory,
+    );
+    this.publishWorkspaceSnapshot({
+      scopes: includesSelected
+        ? scopes
+        : [{ directory: selectedDirectory, loaded: true }, ...scopes],
+      selectedDirectory,
+    });
+  }
+
+  switchWorkspace(directory: string): Promise<void> {
+    const pending = this.switchPromise.then(() =>
+      this.doSwitchWorkspace(directory),
+    );
+    this.switchPromise = pending.catch(() => undefined);
+    return pending;
+  }
+
+  private async doSwitchWorkspace(directory: string): Promise<void> {
+    const selectedDirectory = directory.trim();
+    if (selectedDirectory.length === 0) {
+      throw new Error("Workspace directory cannot be empty");
+    }
+    if (selectedDirectory === this.workspaceSnapshot.selectedDirectory) {
+      return;
+    }
+    const previousDirectory = this.workspaceSnapshot.selectedDirectory;
+    const previousScopes = this.workspaceSnapshot.scopes;
+    const previousClient = this.activeClient;
+    await previousClient.close();
+    this.store.reset();
+    this.activeClient = this.createClient({
+      ...this.config,
+      clientId: globalThis.crypto.randomUUID(),
+      directory: selectedDirectory,
+    });
+    this.publishWorkspaceSnapshot({
+      scopes: this.workspaceSnapshot.scopes.map((scope) =>
+        scope.directory === selectedDirectory
+          ? { ...scope, loaded: true }
+          : scope,
+      ),
+      selectedDirectory,
+    });
+    try {
+      await this.activeClient.connect();
+      await this.refreshWorkspaces();
+    } catch (error) {
+      await this.activeClient.close();
+      this.store.reset();
+      this.activeClient = this.createClient({
+        ...this.config,
+        clientId: globalThis.crypto.randomUUID(),
+        directory: previousDirectory,
+      });
+      this.publishWorkspaceSnapshot({
+        scopes: previousScopes,
+        selectedDirectory: previousDirectory,
+      });
+      await this.activeClient.connect().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private createClient(config: OhbabyBootstrapConfig): BrowserDaemonClient {
+    return createBrowserDaemonClient({
+      config,
+      ...(this.fetchImpl === undefined ? {} : { fetch: this.fetchImpl }),
+      store: this.store,
+    });
+  }
+
+  private publishWorkspaceSnapshot(snapshot: WorkspaceSnapshot): void {
+    this.workspaceSnapshot = snapshot;
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
+}
+
 export function createOhbabyWebRuntime(
   config: OhbabyBootstrapConfig,
   options: { readonly fetch?: typeof fetch } = {},
 ): OhbabyWebRuntime {
-  const store = createOhbabyWebStore();
-  const http = createDaemonHttpClient(config, options.fetch);
-  const events = new FetchDaemonEventStream({
-    baseUrl: config.baseUrl,
-    clientId: config.clientId,
-    ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-    token: config.token,
-  });
-  const client = new BrowserDaemonClient({
-    config,
-    events,
-    http,
-    store,
-  });
-  return {
-    client,
-    ready: client.connect(),
-    store,
-  };
+  return new BrowserOhbabyWebRuntime(config, options.fetch);
 }

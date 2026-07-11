@@ -230,6 +230,41 @@ textarea:disabled {
   margin-top: 8px;
 }
 
+.ohb-workspace-selector {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0 14px 8px;
+}
+
+.ohb-workspace-selector > span {
+  color: #a3a6ad;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.ohb-workspace-selector select {
+  background: #ffffff;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  color: #414751;
+  font-size: 12px;
+  min-height: 34px;
+  padding: 0 8px;
+  width: 100%;
+}
+
+.ohb-workspace-selector small {
+  color: #a3a6ad;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ohb-sidebar-section {
   display: flex;
   flex: 1;

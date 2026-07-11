@@ -21,7 +21,12 @@ function readBootstrapConfig(): OhbabyBootstrapConfig {
   if (!config.token || !config.clientId) {
     throw new Error("Incomplete window.__OHBABY__ daemon bootstrap config");
   }
-  return config;
+  const hintedDirectory = new URLSearchParams(
+    window.location.hash.replace(/^#/, ""),
+  ).get("directory");
+  return hintedDirectory === null || hintedDirectory.trim().length === 0
+    ? config
+    : { ...config, directory: hintedDirectory };
 }
 
 try {

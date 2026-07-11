@@ -43,6 +43,7 @@ import type {
   OhbabyWebRuntime,
 } from "../api/daemon/client.js";
 import type { CommandNotice } from "../api/daemon/wire.js";
+import type { WorkspaceSnapshot } from "../api/daemon/wire.js";
 import type {
   CompactSessionRequest,
   ModelConnectRequest,
@@ -130,6 +131,11 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
     () => runtime.store.getSnapshot(),
   );
   const view = useMemo(() => selectViewModel(storeSnapshot), [storeSnapshot]);
+  const workspace = useSyncExternalStore(
+    (listener) => runtime.subscribeWorkspaces(listener),
+    () => runtime.getWorkspaceSnapshot(),
+    () => runtime.getWorkspaceSnapshot(),
+  );
   const [actionError, setActionError] = useState<string | null>(null);
   const [closedCommandModalIds, setClosedCommandModalIds] = useState<
     readonly string[]
@@ -155,6 +161,17 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
       }
     },
     [clearActionError],
+  );
+  useEffect(() => {
+    void runtime.refreshWorkspaces().catch((error: unknown) => {
+      setActionError(error instanceof Error ? error.message : String(error));
+    });
+  }, [runtime]);
+  const switchWorkspace = useCallback(
+    (directory: string): void => {
+      void runAction(() => runtime.switchWorkspace(directory));
+    },
+    [runAction, runtime],
   );
 
   const openOverlayForSlashText = useCallback(
@@ -299,7 +316,9 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
         onArchiveSession={archiveSession}
         onCreateSession={createSession}
         onSelectSession={selectSession}
+        onSwitchWorkspace={switchWorkspace}
         view={view}
+        workspace={workspace}
       />
       <div
         className={`ohb-app-content ${
@@ -478,7 +497,9 @@ function SessionSidebar(props: {
   readonly onArchiveSession: (sessionId: string) => void;
   readonly onCreateSession: () => void;
   readonly onSelectSession: (sessionId: string) => void;
+  readonly onSwitchWorkspace: (directory: string) => void;
   readonly view: ViewModel;
+  readonly workspace: WorkspaceSnapshot;
 }): ReactElement {
   const [collapsed, setCollapsed] = useState(isNarrowViewport());
   const sessions = useMemo(
@@ -554,6 +575,10 @@ function SessionSidebar(props: {
         <Plus size={15} />
         <span>New session</span>
       </button>
+      <WorkspaceSelector
+        onSelect={props.onSwitchWorkspace}
+        workspace={props.workspace}
+      />
       <section className="ohb-sidebar-section">
         <div className="ohb-sidebar-section-title">Recent sessions</div>
         <div className="ohb-sidebar-list">
@@ -616,6 +641,39 @@ function SessionSidebar(props: {
       </footer>
     </aside>
   );
+}
+
+function WorkspaceSelector(props: {
+  readonly onSelect: (directory: string) => void;
+  readonly workspace: WorkspaceSnapshot;
+}): ReactElement {
+  return (
+    <label className="ohb-workspace-selector">
+      <span>Workspace</span>
+      <select
+        aria-label="Workspace"
+        onChange={(event) => {
+          props.onSelect(event.target.value);
+        }}
+        value={props.workspace.selectedDirectory}
+      >
+        {props.workspace.scopes.map((scope) => (
+          <option key={scope.directory} value={scope.directory}>
+            {workspaceLabel(scope.directory)}
+            {scope.loaded ? " · loaded" : ""}
+          </option>
+        ))}
+      </select>
+      <small title={props.workspace.selectedDirectory}>
+        {props.workspace.selectedDirectory}
+      </small>
+    </label>
+  );
+}
+
+function workspaceLabel(directory: string): string {
+  const segments = directory.split(/[\\/]/u).filter(Boolean);
+  return segments.at(-1) ?? directory;
 }
 
 function StatusBar(props: {

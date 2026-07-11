@@ -3,6 +3,7 @@ import type { ConnectionState, WebSseEvent } from "./wire.js";
 export interface DaemonEventStreamOptions {
   readonly baseUrl: string;
   readonly clientId: string;
+  readonly directory?: string;
   readonly fetch?: typeof fetch;
   readonly token: string;
 }
@@ -88,6 +89,7 @@ function isAbortError(error: unknown): boolean {
 export class FetchDaemonEventStream implements DaemonEventStream {
   private readonly baseUrl: string;
   private readonly clientId: string;
+  private readonly directory: string | undefined;
   private readonly fetchImpl: typeof fetch;
   private readonly token: string;
   private abortController: AbortController | undefined;
@@ -97,6 +99,7 @@ export class FetchDaemonEventStream implements DaemonEventStream {
   constructor(options: DaemonEventStreamOptions) {
     this.baseUrl = options.baseUrl;
     this.clientId = options.clientId;
+    this.directory = options.directory;
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.token = options.token;
   }
@@ -198,6 +201,9 @@ export class FetchDaemonEventStream implements DaemonEventStream {
     const headers: Record<string, string> = {
       accept: "text/event-stream",
       authorization: `Bearer ${this.token}`,
+      ...(this.directory === undefined
+        ? {}
+        : { "x-ohbaby-directory": this.directory }),
       "x-ohbaby-client-id": this.clientId,
     };
     if (this.lastEventId !== undefined) {

@@ -197,12 +197,14 @@ describe("daemon global FIFO", () => {
     const clientA = createRemoteUiBackendClient({
       authToken,
       clientId: "terminal_a",
+      directory: home,
       host: daemon.host,
       port: daemon.port,
     });
     const clientB = createRemoteUiBackendClient({
       authToken,
       clientId: "terminal_b",
+      directory: home,
       host: daemon.host,
       port: daemon.port,
     });

@@ -60,6 +60,9 @@ interface FakeRuntime {
     typeof vi.fn<OhbabyWebClient["setSearchApiKey"]>
   >;
   readonly store: OhbabyWebStore;
+  readonly switchWorkspace: ReturnType<
+    typeof vi.fn<OhbabyWebRuntime["switchWorkspace"]>
+  >;
 }
 
 const mountedApps: MountedApp[] = [];
@@ -291,6 +294,27 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(fake.createSession).toHaveBeenCalledTimes(1);
     expect(fake.selectSession).toHaveBeenCalledWith("session_2");
+  });
+
+  it("switches the selected workspace from the global sidebar selector", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+    const selector = app.container.querySelector(
+      'select[aria-label="Workspace"]',
+    );
+    if (!(selector instanceof HTMLSelectElement)) {
+      throw new Error("workspace selector not found");
+    }
+
+    await act(async () => {
+      selector.value = "/repo-b";
+      selector.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(fake.switchWorkspace).toHaveBeenCalledWith("/repo-b");
   });
 
   it("renders transient reasoning for a streaming assistant message", async () => {
@@ -857,6 +881,16 @@ function createFakeRuntime(input: {
       searchJsonPath: "search.json",
     }),
   );
+  const switchWorkspace = vi.fn<OhbabyWebRuntime["switchWorkspace"]>(() =>
+    Promise.resolve(),
+  );
+  const workspaceSnapshot = {
+    scopes: [
+      { directory: "/repo-a", loaded: true },
+      { directory: "/repo-b", loaded: false },
+    ],
+    selectedDirectory: "/repo-a",
+  } as const;
   const client: OhbabyWebClient & {
     readonly archiveSession: typeof archiveSession;
   } = {
@@ -881,6 +915,12 @@ function createFakeRuntime(input: {
     getCurrentModel: vi.fn(() => Promise.resolve(null)),
     getSnapshot: () => store.getSnapshot(),
     listCommands,
+    listWorkspaceScopes: vi.fn(() =>
+      Promise.resolve([
+        { directory: "/repo-a", loaded: true },
+        { directory: "/repo-b", loaded: false },
+      ]),
+    ),
     probeModelContextWindow: vi.fn(() =>
       Promise.resolve({
         contextWindowSource: "default" as const,
@@ -903,13 +943,18 @@ function createFakeRuntime(input: {
     listCommands,
     runtime: {
       client,
+      getWorkspaceSnapshot: () => workspaceSnapshot,
       ready: Promise.resolve(),
+      refreshWorkspaces: () => Promise.resolve(),
       store,
+      subscribeWorkspaces: () => () => undefined,
+      switchWorkspace,
     },
     selectSession,
     setPermission,
     setSearchApiKey,
     store,
+    switchWorkspace,
   };
 }
 

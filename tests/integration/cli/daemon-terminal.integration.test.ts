@@ -68,6 +68,7 @@ describe("explicit daemon remote terminal flow", () => {
       const firstClient = createRemoteUiBackendClient({
         authToken,
         clientId: "terminal_a",
+        directory: home,
         host: daemon.host,
         port: daemon.port,
       });
@@ -96,6 +97,7 @@ describe("explicit daemon remote terminal flow", () => {
       const secondClient = createRemoteUiBackendClient({
         authToken,
         clientId: "terminal_b",
+        directory: home,
         host: daemon.host,
         port: daemon.port,
       });
@@ -114,6 +116,7 @@ describe("explicit daemon remote terminal flow", () => {
       const continuedClient = createRemoteUiBackendClient({
         authToken,
         clientId: "terminal_c",
+        directory: home,
         host: daemon.host,
         port: daemon.port,
         startupIntent: { startupSessionMode: { type: "continue" } },

@@ -21,6 +21,7 @@ import { EXIT_CODES } from "./cli/exit-codes.js";
 import { readStdin } from "./cli/stdin.js";
 import { createStdoutRenderer } from "./cli/stdout-renderer.js";
 import { getCliPackageVersion } from "./package-version.js";
+import { readServeCoexistenceNotice } from "./serve-awareness.js";
 import { renderTerminalUi } from "./tui/index.js";
 
 const VERSION = getCliPackageVersion();
@@ -62,8 +63,12 @@ export interface RunOhbabyCliIo {
 
 export interface RunOhbabyCliDependencies {
   readonly createCoreHost?: (options: CliGlobalOptions) => CliCoreHostResult;
+  readonly listDaemonConnections?: NonNullable<
+    CliCommandRuntime["listDaemonConnections"]
+  >;
   readonly loadRuntimeEnvIntoProcessEnv?: () => Promise<void> | void;
   readonly openUrl?: CliCommandRuntime["openUrl"];
+  readonly readServeCoexistenceNotice?: () => Promise<string | undefined>;
   readonly readDaemonStatus?: CliCommandRuntime["readDaemonStatus"];
   readonly startDaemonServer?: CliCommandRuntime["startDaemonServer"];
   readonly stopDaemonFromState?: CliCommandRuntime["stopDaemonFromState"];
@@ -80,6 +85,7 @@ interface DaemonStartupIntent {
 
 interface RemoteDaemonClientOptions {
   readonly authToken?: string;
+  readonly directory?: string;
   readonly host?: string;
   readonly port: number;
   readonly startupIntent?: DaemonStartupIntent;
@@ -92,6 +98,7 @@ interface AgentRuntimeModule {
 
 interface ServerRuntimeModule {
   readonly createRemoteCoreApiHost?: unknown;
+  readonly listDaemonConnections?: unknown;
   readonly readDaemonStatus?: unknown;
   readonly startDaemonServer?: unknown;
   readonly stopDaemonFromState?: unknown;
@@ -195,6 +202,7 @@ function remoteHostOptionsFromCliOptions(
     ...(options.remoteAuthToken === undefined
       ? {}
       : { authToken: options.remoteAuthToken }),
+    directory: process.cwd(),
     host: options.remoteHost,
     port: options.remotePort,
     startupIntent: startupIntentFromOptions(options),
@@ -248,6 +256,14 @@ async function loadDefaultDependencies(): Promise<RunOhbabyCliDependencies> {
       return buildCoreAPIImpl(options);
     },
     loadRuntimeEnvIntoProcessEnv,
+    async listDaemonConnections(): Promise<
+      readonly import("./cli/commands/types.js").CliDaemonConnection[]
+    > {
+      const listDaemonConnections = (await requireServerFunction(
+        "listDaemonConnections",
+      )) as NonNullable<CliCommandRuntime["listDaemonConnections"]>;
+      return listDaemonConnections();
+    },
     async readDaemonStatus(): ReturnType<
       CliCommandRuntime["readDaemonStatus"]
     > {
@@ -297,6 +313,9 @@ export async function runOhbabyCli(
     defaultDependencies?.readDaemonStatus ??
     ((): ReturnType<CliCommandRuntime["readDaemonStatus"]> =>
       missingRuntimeDependency("readDaemonStatus"));
+  const listDaemonConnections =
+    dependencies.listDaemonConnections ??
+    defaultDependencies?.listDaemonConnections;
   const startDaemonServer =
     dependencies.startDaemonServer ??
     defaultDependencies?.startDaemonServer ??
@@ -308,6 +327,12 @@ export async function runOhbabyCli(
     ((): ReturnType<CliCommandRuntime["stopDaemonFromState"]> =>
       missingRuntimeDependency("stopDaemonFromState"));
   const openUrl = dependencies.openUrl ?? openUrlWithSystemBrowser;
+  const coexistenceNotice =
+    dependencies.readServeCoexistenceNotice ??
+    (defaultDependencies === undefined
+      ? undefined
+      : (): Promise<string | undefined> =>
+          readServeCoexistenceNotice({ packageVersion: VERSION }));
 
   if (!createCoreHost || !loadRuntimeEnvIntoProcessEnv) {
     throw new Error("CLI runtime dependencies were not initialized");
@@ -339,6 +364,7 @@ export async function runOhbabyCli(
     isStdinTTY() {
       return stdin.isTTY === true;
     },
+    listDaemonConnections,
     openUrl,
     readDaemonStatus,
     readStdin() {
@@ -348,6 +374,16 @@ export async function runOhbabyCli(
     setExitCode(code) {
       exitCode = code;
     },
+    ...(coexistenceNotice === undefined
+      ? {}
+      : {
+          async showServeCoexistenceNotice(): Promise<void> {
+            const notice = await coexistenceNotice();
+            if (notice) {
+              stderr.write(notice);
+            }
+          },
+        }),
     startDaemonServer,
     stderr,
     stdout,

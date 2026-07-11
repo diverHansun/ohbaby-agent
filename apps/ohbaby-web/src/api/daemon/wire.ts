@@ -28,8 +28,24 @@ export interface WebStartupIntent {
 export interface OhbabyBootstrapConfig {
   readonly baseUrl: string;
   readonly clientId: string;
+  readonly directory?: string;
   readonly startupIntent?: WebStartupIntent;
   readonly token: string;
+}
+
+export interface WorkspaceScopeSummary {
+  readonly directory: string;
+  readonly loaded: boolean;
+}
+
+export interface WorkspaceSnapshot {
+  readonly scopes: readonly WorkspaceScopeSummary[];
+  readonly selectedDirectory: string;
+}
+
+export interface WorkspaceScopesResponse {
+  readonly ok: true;
+  readonly scopes: readonly WorkspaceScopeSummary[];
 }
 
 export type ConnectionState =
