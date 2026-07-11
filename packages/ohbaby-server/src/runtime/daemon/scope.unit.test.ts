@@ -15,7 +15,7 @@ describe("resolveDaemonScope", () => {
     );
   });
 
-  it("uses the git root as the serve scope", async () => {
+  it("uses one user-level server registry while retaining the git root", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-scope-git-"));
     cleanupDirs.push(root);
     await mkdir(join(root, ".git"));
@@ -23,15 +23,19 @@ describe("resolveDaemonScope", () => {
     const canonicalRoot = await realpath(root);
 
     const scope = await resolveDaemonScope({
+      homeDirectory: root,
       workdir: join(root, "packages", "app"),
     });
 
     expect(scope.scopeRoot).toBe(canonicalRoot);
     expect(scope.pidFilePath).toBe(
-      join(canonicalRoot, ".ohbaby", "server", "daemon.pid"),
+      join(root, ".ohbaby", "server", "daemon.pid"),
     );
     expect(scope.stateFilePath).toBe(
-      join(canonicalRoot, ".ohbaby", "server", "daemon-state.json"),
+      join(root, ".ohbaby", "server", "daemon-state.json"),
+    );
+    expect(scope.legacyPidFilePath).toBe(
+      join(canonicalRoot, ".ohbaby", "server", "daemon.pid"),
     );
   });
 
@@ -40,10 +44,16 @@ describe("resolveDaemonScope", () => {
     cleanupDirs.push(root);
     const canonicalRoot = await realpath(root);
 
-    const scope = await resolveDaemonScope({ workdir: root });
+    const scope = await resolveDaemonScope({
+      homeDirectory: root,
+      workdir: root,
+    });
 
     expect(scope.scopeRoot).toBe(canonicalRoot);
     expect(scope.stateFilePath).toBe(
+      join(root, ".ohbaby", "server", "daemon-state.json"),
+    );
+    expect(scope.legacyStateFilePath).toBe(
       join(canonicalRoot, ".ohbaby", "server", "daemon-state.json"),
     );
   });

@@ -25,11 +25,24 @@ export {
 } from "./protocols/jsonrpc/client.js";
 export type { RemoteDaemonClientOptions } from "./protocols/jsonrpc/client.js";
 export {
+  listDaemonConnections,
   readDaemonStatus,
   startDaemonServer,
   stopDaemonFromState,
 } from "./runtime/daemon/main.js";
+export {
+  InstanceStore,
+  type DisposableWorkspaceInstance,
+  type InstanceStoreOptions,
+} from "./runtime/instance-store.js";
+export {
+  resolveWorkspaceScope,
+  WorkspaceScopeError,
+  type WorkspaceScopeErrorCode,
+} from "./runtime/workspace-scope.js";
 export type {
+  DaemonConnectionInfo,
+  ListDaemonConnectionsOptions,
   RunningDaemonServer,
   StartDaemonServerOptions,
 } from "./runtime/daemon/main.js";

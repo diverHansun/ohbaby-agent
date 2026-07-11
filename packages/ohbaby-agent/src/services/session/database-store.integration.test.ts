@@ -6,7 +6,10 @@ import { createDatabaseMessageStore } from "../../core/message/index.js";
 import type { CoreMessage } from "../../core/message/index.js";
 import { closeDatabase, initDatabase } from "../database/index.js";
 import { DuplicateSessionError, SessionNotFoundError } from "./errors.js";
-import { createDatabaseSessionStore } from "./database-store.js";
+import {
+  createDatabaseSessionStore,
+  listKnownSessionProjectRoots,
+} from "./database-store.js";
 import type { Session, SessionStore } from "./types.js";
 
 const cleanupPaths: string[] = [];
@@ -160,6 +163,33 @@ describe("createDatabaseSessionStore", () => {
       { id: "new_archived" },
       { id: "same_root_other_project" },
     ]);
+  });
+
+  it("lists distinct known project roots by most recent session", async () => {
+    const store = createDatabaseSessionStore();
+    await store.insert(
+      createSession({
+        id: "repo_old",
+        projectRoot: "D:/repo",
+        updatedAt: 1_000,
+      }),
+    );
+    await store.insert(
+      createSession({
+        id: "other_new",
+        projectRoot: "D:/other",
+        updatedAt: 3_000,
+      }),
+    );
+    await store.insert(
+      createSession({
+        id: "repo_new",
+        projectRoot: "D:\\repo\\",
+        updatedAt: 2_000,
+      }),
+    );
+
+    expect(listKnownSessionProjectRoots()).toEqual(["D:/other", "D:\\repo\\"]);
   });
 
   it("rolls back transaction writes when an operation fails", async () => {

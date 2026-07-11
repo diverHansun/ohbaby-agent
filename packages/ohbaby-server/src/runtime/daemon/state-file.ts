@@ -25,8 +25,6 @@ function parseDaemonState(raw: string): DaemonState | undefined {
       typeof parsed.host !== "string" ||
       parsed.host.length === 0 ||
       !Number.isInteger(parsed.port) ||
-      typeof parsed.packageVersion !== "string" ||
-      parsed.packageVersion.length === 0 ||
       typeof parsed.authToken !== "string" ||
       parsed.authToken.length === 0)
   ) {

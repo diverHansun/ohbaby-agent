@@ -29,6 +29,7 @@ export interface RemoteDaemonClientOptions {
   readonly port: number;
   readonly fetch?: typeof fetch;
   readonly clientId?: string;
+  readonly directory?: string;
   readonly startupIntent?: DaemonStartupIntent;
 }
 
@@ -124,6 +125,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   private readonly authToken: string | undefined;
   private readonly clientId: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly directory: string | undefined;
   private readonly startupIntent: DaemonStartupIntent | undefined;
   private readonly handlers = new Set<UiEventHandler>();
   private abortController: AbortController | undefined;
@@ -134,6 +136,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   constructor(options: RemoteDaemonClientOptions) {
     this.authToken = options.authToken;
     this.clientId = options.clientId ?? randomUUID();
+    this.directory = options.directory;
     this.startupIntent = options.startupIntent ?? DEFAULT_STARTUP_INTENT;
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     if (typeof this.fetchImpl !== "function") {
@@ -447,12 +450,14 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   private requestHeaders(
     headers: Record<string, string>,
   ): Record<string, string> {
-    if (!this.authToken) {
-      return headers;
-    }
     return {
       ...headers,
-      authorization: daemonAuthHeader(this.authToken),
+      ...(this.authToken === undefined
+        ? {}
+        : { authorization: daemonAuthHeader(this.authToken) }),
+      ...(this.directory === undefined
+        ? {}
+        : { "x-ohbaby-directory": this.directory }),
     };
   }
 }

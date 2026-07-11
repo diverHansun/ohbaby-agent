@@ -9,7 +9,10 @@ import {
   InvalidSessionLimitError,
   SessionNotFoundError,
 } from "./errors.js";
-import { sameSessionProjectRoot } from "./project-root.js";
+import {
+  normalizeSessionProjectRoot,
+  sameSessionProjectRoot,
+} from "./project-root.js";
 import type { ListSessionOptions, Session, SessionStore } from "./types.js";
 
 interface SessionRow {
@@ -30,6 +33,33 @@ interface SessionRow {
 interface SessionData {
   readonly childrenIds?: readonly string[];
   readonly isSubagent?: boolean;
+}
+
+interface ProjectRootRow {
+  readonly project_root: string;
+  readonly latest_updated_at: number;
+}
+
+export function listKnownSessionProjectRoots(
+  database: DatabaseConnection = getDatabase(),
+): readonly string[] {
+  const rows = database
+    .prepare<ProjectRootRow>(
+      `SELECT project_root, MAX(updated_at) AS latest_updated_at
+       FROM ${schema.session.tableName}
+       WHERE project_root <> ''
+       GROUP BY project_root
+       ORDER BY latest_updated_at DESC, project_root ASC`,
+    )
+    .all();
+  const projectRoots = new Map<string, string>();
+  for (const row of rows) {
+    const normalized = normalizeSessionProjectRoot(row.project_root);
+    if (!projectRoots.has(normalized)) {
+      projectRoots.set(normalized, row.project_root);
+    }
+  }
+  return [...projectRoots.values()];
 }
 
 interface DatabaseSessionStoreOptions {

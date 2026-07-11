@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   DaemonPromptQueue,
+  InstanceStore,
   PermissionRouter,
   createDaemonAuthToken,
   createRemoteCoreApiHost,
   daemonAuthHeader,
+  listDaemonConnections,
   readDaemonStatus,
+  resolveWorkspaceScope,
   startDaemonServer,
   stopDaemonFromState,
 } from "./index.js";
@@ -15,9 +18,12 @@ describe("ohbaby-server public API", () => {
     expect(createDaemonAuthToken).toBeTypeOf("function");
     expect(daemonAuthHeader).toBeTypeOf("function");
     expect(DaemonPromptQueue).toBeTypeOf("function");
+    expect(InstanceStore).toBeTypeOf("function");
     expect(PermissionRouter).toBeTypeOf("function");
     expect(createRemoteCoreApiHost).toBeTypeOf("function");
+    expect(listDaemonConnections).toBeTypeOf("function");
     expect(readDaemonStatus).toBeTypeOf("function");
+    expect(resolveWorkspaceScope).toBeTypeOf("function");
     expect(startDaemonServer).toBeTypeOf("function");
     expect(stopDaemonFromState).toBeTypeOf("function");
   });

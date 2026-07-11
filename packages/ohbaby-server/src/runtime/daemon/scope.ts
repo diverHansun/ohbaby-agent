@@ -1,14 +1,18 @@
 import { realpath } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { Project } from "ohbaby-agent";
 
 export interface DaemonScope {
+  readonly legacyPidFilePath: string;
+  readonly legacyStateFilePath: string;
   readonly pidFilePath: string;
   readonly scopeRoot: string;
   readonly stateFilePath: string;
 }
 
 export interface ResolveDaemonScopeOptions {
+  readonly homeDirectory?: string;
   readonly workdir?: string;
 }
 
@@ -28,9 +32,16 @@ export async function resolveDaemonScope(
   const scopeRoot = projectRoot
     ? await canonicalDirectory(projectRoot)
     : workdir;
-  const serverDir = join(scopeRoot, ".ohbaby", "server");
+  const serverDir = join(
+    options.homeDirectory ?? homedir(),
+    ".ohbaby",
+    "server",
+  );
+  const legacyServerDir = join(scopeRoot, ".ohbaby", "server");
 
   return {
+    legacyPidFilePath: join(legacyServerDir, "daemon.pid"),
+    legacyStateFilePath: join(legacyServerDir, "daemon-state.json"),
     pidFilePath: join(serverDir, "daemon.pid"),
     scopeRoot,
     stateFilePath: join(serverDir, "daemon-state.json"),

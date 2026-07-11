@@ -5,7 +5,10 @@ export {
   createInMemorySessionManager,
   createSessionManager,
 } from "./manager.js";
-export { createDatabaseSessionStore } from "./database-store.js";
+export {
+  createDatabaseSessionStore,
+  listKnownSessionProjectRoots,
+} from "./database-store.js";
 export { createInMemorySessionStore } from "./store.js";
 export {
   createTemporarySessionTitle,

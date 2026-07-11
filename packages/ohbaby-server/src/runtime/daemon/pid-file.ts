@@ -101,7 +101,7 @@ export class FilePidFile implements DaemonPidFile {
   }
 
   async acquire(): Promise<DaemonPidLock> {
-    await mkdir(dirname(this.path), { recursive: true });
+    await mkdir(dirname(this.path), { mode: 0o700, recursive: true });
 
     const handle = await this.openExclusive();
 
