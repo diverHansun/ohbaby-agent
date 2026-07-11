@@ -8,6 +8,8 @@
 
 ## 1. 当前包真实状态（基线）
 
+> 本节记录进入 Hono 迁移前的历史基线，不是 2026-07-11 的当前实现清单；当前实施状态见本目录 README 顶部。
+
 `packages/ohbaby-server/src`：
 
 ```
@@ -39,7 +41,7 @@ index.ts                            窄导出面（daemon 风味命名）
 | Δ4 | 路由用 **zod schema**，经 `@hono/zod-openapi` 出 `/doc` OpenAPI → web/app typed client | web/app 合约 | [`02`](./02-web-api-surface.md) |
 | Δ5 | 新增 **event-bus**：seqNum + 环形缓冲 + replay；SSE 支持 `Last-Event-ID` | S1 | [`03`](./03-event-replay.md) |
 | Δ6 | token middleware fail-closed 化 + **CORS** middleware（origin 白名单，scope 到 web 路由） | S4 / S2 | [`01`](./01-app-assembly-and-transport.md) |
-| Δ7 | 新增 **InstanceStore（git-root scope）+ 全局单锁 + `x-ohbaby-directory` 路由 + `serve ps`** | 反多后端 | [`04`](./04-multi-project-runtime.md) |
+| Δ7 | 新增 **InstanceStore（git-root scope）+ 用户级 pid/state + fail-closed `x-ohbaby-directory` 路由 + 全局面板 + `serve ps`**；Phase 1 已完整落地并通过发布门 | 反多后端 | [`04`](./04-multi-project-runtime.md) |
 | Δ8 | 把 `server.ts` 的 per-client 视图逻辑**提取到 `coordination/client-view`**，jsonrpc 与 web adapter 共用；建**跨 transport 契约测试** | 消费路径统一 | [`05`](./05-consumption-path-unification.md) |
 | Δ9 | jsonrpc `/api/rpc` + 旧 SSE **降为兼容路由**，挂在同一 Hono app 上 | 平滑过渡 | [`01`](./01-app-assembly-and-transport.md) |
 | Δ10 | 顺手修 S8（fresh-lane 串行）、S9（disconnectClient 待决队列） | backlog 兑现 | [`04`](./04-multi-project-runtime.md) |
@@ -86,7 +88,7 @@ index.ts                            窄导出面（daemon 风味命名）
 | 父目录文档 | 现状 | 本阶段更新 |
 |------|------|-----------|
 | [`../non-functional.md`](../non-functional.md) §4 | 「OpenAPI / 协议文档自动化——未到投资点」列为暂缓 | **改为已激活**：web/app typed client 是真实需求（Δ4），并加指针到 `hono-app/02` |
-| [`../goals-duty.md`](../goals-duty.md) G5 | 「后面只有一个 backend」（全局表述） | **细化**：单写者不变量为「**每 workspace scope 一个 backend**」；多项目由 InstanceStore 隔离，跨 scope 互不共享状态——仍无环、仍单写者（per scope）。加指针到 `hono-app/04` |
+| [`../goals-duty.md`](../goals-duty.md) G5 | 「后面只有一个 backend」（全局表述） | **细化**：serve 内「每 workspace scope 一个 backend/runtime」；TUI+serve 是合法 SQLite 多写进程，同 session 靠 claim；依赖方向仍无环。加指针到 `hono-app/04` |
 | [`../data-model.md`](../data-model.md) | 概念词典无多项目概念 | **新增**：`WorkspaceInstance`、`ServerRegistry`（指针到 `hono-app/04`） |
 | [`../architecture.md`](../architecture.md) §3 文件布局 | 抽象描述 `transport/app.ts` 等 | 加前向指针：「具体装配与 web surface 见 `hono-app/01`、`hono-app/02`」 |
 | [`../README.md`](../README.md) 导航 | 无 hono-app 入口 | 导航表加一行指向 `hono-app/` |

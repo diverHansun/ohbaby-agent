@@ -1,5 +1,7 @@
 # heartbeat 模块 architecture.md
 
+> **2026-07-11 架构修订（优先于下文旧方案）**：Heartbeat 不得是 global serve 进程里唯一的业务状态机。若未来 `/loop` 仍需要 Heartbeat，应将其建模为由 WorkspaceRuntime 管理的 session lane 状态机，身份至少是 `scopeKey + sessionId`；全局 Scheduler 经分发器找到目标 lane。一个 lane 的 active/paused/sleeping/blocked 和 deferred 状态不得影响其他项目或会话。当前 global-single-daemon 批次不实现 Heartbeat，下文“daemon 持有唯一 HeartbeatMachine”的描述为旧方案。
+
 本文档描述 `runtime/heartbeat` 模块的内部结构与设计决策。所有内容均服务于 `goals-duty.md` 中定义的设计目标与职责。
 
 ---

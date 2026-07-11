@@ -1,5 +1,7 @@
 # scheduler 模块 non-functional.md
 
+> **2026-07-11 非功能约束修订（优先于下文旧方案）**：隔离性高于便利性。任何触发、确认、重试和积压必须按 `scopeKey + sessionId + jobId` 关联，不能因一个 workspace/session 的 paused、blocked 或 busy 影响其他 lane。同一 job 忙碌期间最多合并一个 pending trigger；重启恢复不得把 job 路由到当前 cwd 或默认项目。当前批次不实现这些能力。
+
 本文档定义 `runtime/scheduler` 模块在功能之外必须满足的工程约束。
 
 ---

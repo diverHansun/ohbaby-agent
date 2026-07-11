@@ -1,5 +1,7 @@
 # scheduler 模块 dfd-interface.md
 
+> **2026-07-11 接口修订（优先于下文旧方案）**：未来注册接口统一要求 `{ scopeKey, sessionId, ... }`。到期数据流为 `Global Scheduler → ScheduledRunDispatcher → InstanceStore.load(scopeKey) → WorkspaceRuntime → session RunManager`。分发器必须返回 `started | coalesced | rejected` 等明确结果；同一 job 在 session busy 时最多保留一个 pending trigger。不得把 `JobFired` 发布到某个进程共享但没有 scope 隔离的 Heartbeat/Bus。下文把 `sessionId` 写成可选、或直接使用机器级 `Heartbeat.Event.SignalDisposition` 的接口均为旧方案。
+
 本文档描述 `runtime/scheduler` 模块与外部模块之间的数据流与接口契约。
 
 ---

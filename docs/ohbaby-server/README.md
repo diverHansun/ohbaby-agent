@@ -1,6 +1,6 @@
 # ohbaby-server 模块设计
 
-> `packages/ohbaby-server` 的模块级设计文档集。本包是 `docs/problem-lists/server/` 规划中"路线 A"的落地——把 `runtime/daemon/` 的传输/协议/协调按职责抽成独立包，承载 web/app（触发条件：web/app 进入开发）。
+> `packages/ohbaby-server` 的模块级设计文档集。本包是 `docs/problem-lists/server/` 规划中"路线 A"的落地——把 `runtime/daemon/` 的传输/协议/协调按职责抽成独立包，承载 web/app。该路线已经落地；当前全局单 serve 演进以 [`../problem-lists/2026-07-11-global-single-daemon/`](../problem-lists/2026-07-11-global-single-daemon/README.md) 为准。
 >
 > 规划/决策文档在 `docs/problem-lists/server/`（要不要做、走哪条路）；本目录是模块设计（具体怎么建）。
 
@@ -21,7 +21,7 @@
 
 ## 一句话定位
 
-把唯一的 agent backend，通过显式 server 暴露给多前端（CLI/web/未来 app），并把传输/协议/协调连同重协议依赖隔离在 `ohbaby-agent` 之外。默认 CLI 不经过本包。
+把各 workspace 的 agent backend 通过一个显式全局 server 按请求暴露给多前端（CLI-attach/web/未来 app），并把传输/协议/协调连同重协议依赖隔离在 `ohbaby-agent` 之外。默认 CLI 不经过本包。
 
 ## 前置实施步骤（不在本包，但必须先做）
 

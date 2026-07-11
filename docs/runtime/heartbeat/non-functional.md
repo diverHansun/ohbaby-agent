@@ -1,5 +1,7 @@
 # heartbeat 模块 non-functional.md
 
+> **2026-07-11 非功能约束修订（优先于下文旧方案）**：第一优先级增加“lane 隔离”：A 项目/session 的 paused、blocked、sleeping、队列溢出或创建失败，不得改变 B 项目/session 的状态、队列或 disposition。日志和指标必须包含 `scopeKey + sessionId + jobId`。同一 job 的忙碌补偿最多合并一次，避免长期运行 session 造成无界积压。当前批次不实现 Heartbeat。
+
 本文档定义 `runtime/heartbeat` 模块在功能之外必须满足的工程约束。
 
 ---

@@ -1,5 +1,7 @@
 # server: CLI 默认 in-process 与显式 server 规划
 
+> **历史规划，已被部分取代**：本目录用于解释 ADR-001（默认 TUI in-process、server 显式启动）和早期迁包过程。`ohbaby-server` 包已经存在；v0.1.7 全局单 serve、用户级 pid/state、InstanceStore 与 workspace 路由以 [`../2026-07-11-global-single-daemon/`](../2026-07-11-global-single-daemon/README.md) 和 [`../../ohbaby-server/hono-app/04-multi-project-runtime.md`](../../ohbaby-server/hono-app/04-multi-project-runtime.md) 为准。本文不得再用于判断这些能力“尚未迁包/尚未实现”。
+
 > 2026-06-15 更新：本目录的判断已经从“沿用 daemon 承载 web/app”调整为“默认 CLI 回到 in-process，server 作为显式能力存在”。这不是拍脑袋决定，而是基于 `gemini-cli`、`kimi-code`、`claude-code`、`opencode` 的运行时边界复核后形成的判断。
 
 ## 文档导航

@@ -15,11 +15,12 @@
 - slash web 闭环：`GET /v1/commands?surface=web` / `POST /v1/commands`、browser resolve、候选面板/Tab 补全 helper、`command.*` 事件投影为 CommandNotice/结构化只读 modal。
 - 结构化 overlay 闭环：`/connect`、`/connect-search`、`/compact` 从 slash palette 打开 overlay，但提交分别走 model/search/compact REST；覆盖只读 context-window probe、敏感字段不回显、compact usage/result。
 - 起站冒烟：`dist` 能被伺服、页面能起、核心闭环走通。
+- workspace 选择纵切：bootstrap directory / fragment 初始 hint、所有 HTTP+SSE header 一致，以及切换时 client/store/SSE generation 隔离。
 
 **不覆盖**（外部职责）：
 - `/v1` 路由内部、协调、replay 缓冲正确性（属 `ohbaby-server`）。
 - agent run 执行、工具调用、持久化（属 `ohbaby-agent`）。
-- workspace scope 解析与启动锁（属 server/runtime，依赖 S-D）。
+- workspace canonicalization、合法性校验与用户级 pid/state 互斥（属 server/runtime，依赖 S-D）。
 - 组件像素级视觉回归（v0.1.6 不做）。
 
 ---
@@ -47,6 +48,12 @@
 | `/connect` 保存 | `POST /v1/model` 根据 `baseUrl` 推断 interface provider，保存成功后返回不含真实 key 的 current model |
 | `/connect-search` 保存 | `POST /v1/settings/search-api-key` 支持 `.env`/env 解析，成功后不回显 key |
 | `/compact` | 先读 usage，再执行 compact；结果展示 before/after/saved/pruned，失败不丢 overlay 草稿 |
+| 初始 selected directory | 注入 directory 为默认；合法 fragment 可覆盖一次；fragment 不作为 server query fallback |
+| workspace 请求 header | clients/snapshot/events/commands 等 HTTP+SSE 始终携带同一个 `x-ohbaby-directory` |
+| workspace 切换 | 旧 SSE 关闭且旧 generation 事件被丢弃；新 client/snapshot/SSE 全部绑定新 header，无 session/seqNum 串扰 |
+| workspace 400 | 缺失/无效 directory 显示可见错误，不静默回退 cwd/query |
+
+其中 workspace 切换已由 `src/api/daemon/workspace-switch.integration.test.ts` 与 `src/ui/App.unit.test.tsx` 自动化覆盖，并完成 repoA/repoB 真实浏览器切换验收。
 
 ---
 

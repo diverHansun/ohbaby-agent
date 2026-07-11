@@ -1,5 +1,7 @@
 # scheduler 模块 architecture.md
 
+> **2026-07-11 架构修订（优先于下文旧方案）**：本模块尚未在 global-single-daemon 批次实现。未来只允许一个进程级 Scheduler 负责时间计算和 durable job 恢复；每个 job 必须绑定 `scopeKey + sessionId`，到期后经调度分发器调用 `InstanceStore.load(scopeKey)`，再进入目标 session 的执行通道。Scheduler 不持有机器级 Heartbeat，也不直接持有某个 workspace 的 RunManager。目标 session 忙碌时，同一 job 最多合并一个 pending trigger，不能无限排队。下文 `Scheduler → 全局 Heartbeat → RunManager` 与“机器级状态统一阻塞”的描述均视为旧方案，不再作为实现依据。
+
 本文档描述 `runtime/scheduler` 模块的内部结构与设计决策。所有内容均服务于 `goals-duty.md` 中定义的设计目标与职责。
 
 ---

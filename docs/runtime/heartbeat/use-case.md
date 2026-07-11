@@ -1,5 +1,7 @@
 # heartbeat 模块 use-case.md
 
+> **2026-07-11 用例修订（优先于下文旧方案）**：以下状态机用例未来都只能发生在一个明确的 `scopeKey + sessionId` lane 内。全局 Scheduler 先经 ScheduledRunDispatcher/InstanceStore 定位 lane，再做 active/paused/sleeping/blocked 决策；不得让一个机器级 Heartbeat 接收所有项目事件。`/loop` 的创建、暂停、恢复和取消均属于 session。
+
 本文档描述 `runtime/heartbeat` 模块内部如何围绕职责完成关键业务动作。
 
 ---

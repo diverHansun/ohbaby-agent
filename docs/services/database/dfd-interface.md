@@ -13,8 +13,7 @@ database 模块是 ohbaby-agent 系统中结构化数据存储的最底层基础
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │              业务模块（消费层）                                    │
-│  services/session  core/message  runtime/run-ledger              │
-│  snapshot          runtime/scheduler                             │
+│  services/session  core/message  runtime/run-ledger  snapshot    │
 └──────────────────────────┬──────────────────────────────────────┘
                            │ getDatabase() + import { schema }
                            │ withTransaction(fn)
@@ -40,8 +39,9 @@ database 模块是 ohbaby-agent 系统中结构化数据存储的最底层基础
 | `core/message` | 输入（数据读写） | 通过 Drizzle 实例读写 `message` / `part` 表 |
 | `runtime/run-ledger` | 输入（数据读写） | 通过 Drizzle 实例读写 `run_ledger` 表 |
 | `snapshot` | 输入（数据读写） | 通过 Drizzle 实例读写 `snapshot_checkpoint` / `snapshot_patch` 表 |
-| `runtime/scheduler` | 输入（数据读写） | 通过 Drizzle 实例读写 `scheduler_job` 表 |
 | SQLite 文件系统 | 输出 | 通过 `better-sqlite3` 读写 `.db` 文件 |
+
+> `runtime/scheduler` 是未来消费者：当前 `scheduler_job` 已被 migration 004 删除。恢复时必须与 session 级 `/loop`、SchedulerStore 和 `scope_key + session_id` schema 同批落地。
 
 ### 本文档范围
 
@@ -327,7 +327,6 @@ const sessions = db
 | `session` 表行 | services/session | 通过 Drizzle 实例写入 |
 | `message` / `part` 表行 | core/message | 通过 Drizzle 实例写入 |
 | `run_ledger` 表行 | runtime/run-ledger | 通过 Drizzle 实例写入 |
-| `scheduler_job` 表行 | runtime/scheduler | 通过 Drizzle 实例写入 |
 | `snapshot_*` 表行 | snapshot | 通过 Drizzle 实例写入 |
 
 ### 4.2 职责边界
