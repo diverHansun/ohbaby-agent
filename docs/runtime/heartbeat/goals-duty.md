@@ -1,5 +1,7 @@
 # heartbeat 模块 goals-duty.md
 
+> **2026-07-11 目标修订（优先于下文旧方案）**：Heartbeat 的合理边界是“某个 workspace 的某个 session 是否适合接受自动触发”，而不是“整台机器上的 agent 是否可运行”。因此它不是进程级单例；状态和缓冲必须按 `scopeKey + sessionId` 隔离。当前 global-single-daemon 批次不实现该模块，只为后续 session 级 `/loop` 固定边界。
+
 本文档定义 `runtime/heartbeat` 模块的设计目标与职责边界。
 
 ---

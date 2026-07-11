@@ -53,9 +53,9 @@
 - `@hono/zod-openapi` + `/doc`。
 - 门：web 路由契约测试；跨 transport 等价测试（[`05`](./05-consumption-path-unification.md) §3.1）作为漂移回归门；CORS 预检测试。
 
-### M6 · 多项目 runtime + 全局锁 + serve ps（反多后端）
-- `instance/instance-store.ts`（git-root scope，懒加载/回收）、`instance/lock.ts`（全局单锁）、`middleware/workspace.ts`。
-- CLI 层：`serve status/stop/ps` 接全局锁 + `GET /v1/connections`。
+### M6 · 多项目 runtime + 用户级 pid/state + serve ps（反多后端）
+- `runtime/instance-store.ts`（git-root scope，懒加载/统一回收）、`runtime/workspace-scope.ts`（fail-closed 解析）；唯一性沿用 `runtime/daemon/pid-file.ts` + `state-file.ts`，不新增单 lock 文件。
+- CLI 层：`serve status/stop/ps` 接用户级 pid/state + `GET /v1/connections`。
 - 修 S8（lane key）/ S9（断连清待决）。
 - 门：多 scope 隔离测试；并发启动只起一个 server 测试；`ps` 列连接测试。
 

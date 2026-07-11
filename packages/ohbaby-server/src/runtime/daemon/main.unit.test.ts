@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
@@ -183,7 +190,7 @@ describe("startDaemonServer", () => {
     }
   });
 
-  it("uses a default idle timeout for daemon servers", async () => {
+  it("does not configure idle exit for a foreground daemon server", async () => {
     vi.resetModules();
     let capturedIdleTimeoutMs: number | undefined;
     const closePersistentUiBackendDatabase = vi.fn();
@@ -244,7 +251,7 @@ describe("startDaemonServer", () => {
         await rm(tempDir, { force: true, recursive: true });
       }
 
-      expect(capturedIdleTimeoutMs).toBe(15 * 60 * 1000);
+      expect(capturedIdleTimeoutMs).toBeUndefined();
     } finally {
       vi.doUnmock("ohbaby-agent");
       vi.doUnmock("./server.js");
@@ -314,6 +321,7 @@ describe("startDaemonServer", () => {
         host: "127.0.0.1",
         packageVersion: "0.1.0",
         pid: process.pid,
+        pidToken: "pid_token",
         port: 4096,
         scopeRoot,
         status: "running",
@@ -321,11 +329,17 @@ describe("startDaemonServer", () => {
       })}\n`,
       "utf8",
     );
+    await writeFile(
+      join(tempDir, "daemon.pid"),
+      `${JSON.stringify({ pid: process.pid, startedAt: 1, token: "pid_token" })}\n`,
+      "utf8",
+    );
 
     try {
       const { startDaemonServer } = await import("./main.js");
       const daemon = await startDaemonServer({
         healthCheck: () => Promise.resolve(true),
+        packageVersion: "0.1.0",
         pidFilePath: join(tempDir, "daemon.pid"),
         scopeRoot,
         stateFilePath,
@@ -336,9 +350,139 @@ describe("startDaemonServer", () => {
         port: 4096,
         reused: true,
         scopeRoot,
-        url: "http://127.0.0.1:4096",
       });
+      expect(new URL(daemon.url).origin).toBe("http://127.0.0.1:4096");
+      expect(
+        new URLSearchParams(new URL(daemon.url).hash.slice(1)).get("directory"),
+      ).toBe(scopeRoot);
     } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("refuses cross-version reuse without stopping the live server", async () => {
+    vi.resetModules();
+    const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-version-"));
+    const stateFilePath = join(tempDir, "daemon-state.json");
+    const healthCheck = vi.fn(() => Promise.resolve(true));
+    await writeFile(
+      stateFilePath,
+      `${JSON.stringify({
+        authToken: "token_1",
+        host: "127.0.0.1",
+        packageVersion: "0.1.6",
+        pid: process.pid,
+        pidToken: "pid_token",
+        port: 4096,
+        status: "running",
+        updatedAt: Date.now(),
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      join(tempDir, "daemon.pid"),
+      `${JSON.stringify({ pid: process.pid, startedAt: 1, token: "pid_token" })}\n`,
+      "utf8",
+    );
+
+    try {
+      const { startDaemonServer } = await import("./main.js");
+      await expect(
+        startDaemonServer({
+          healthCheck,
+          packageVersion: "0.1.7",
+          pidFilePath: join(tempDir, "daemon.pid"),
+          scopeRoot: join(tempDir, "repo"),
+          stateFilePath,
+        }),
+      ).rejects.toThrow(
+        /version 0\.1\.6.*CLI is version 0\.1\.7.*not stopped automatically/iu,
+      );
+      expect(healthCheck).not.toHaveBeenCalled();
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("treats a live server with missing version metadata as incompatible", async () => {
+    vi.resetModules();
+    const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-version-"));
+    const stateFilePath = join(tempDir, "daemon-state.json");
+    await writeFile(
+      stateFilePath,
+      `${JSON.stringify({
+        authToken: "token_1",
+        host: "127.0.0.1",
+        pid: process.pid,
+        pidToken: "pid_token",
+        port: 4096,
+        status: "running",
+        updatedAt: Date.now(),
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      join(tempDir, "daemon.pid"),
+      `${JSON.stringify({ pid: process.pid, startedAt: 1, token: "pid_token" })}\n`,
+      "utf8",
+    );
+
+    try {
+      const { startDaemonServer } = await import("./main.js");
+      await expect(
+        startDaemonServer({
+          packageVersion: "0.1.7",
+          pidFilePath: join(tempDir, "daemon.pid"),
+          scopeRoot: join(tempDir, "repo"),
+          stateFilePath,
+        }),
+      ).rejects.toThrow(/server version unknown.*CLI is version 0\.1\.7/iu);
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("waits for a live pid owner to publish ready state", async () => {
+    vi.resetModules();
+    const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-readiness-"));
+    const pidFilePath = join(tempDir, "daemon.pid");
+    const stateFilePath = join(tempDir, "daemon-state.json");
+    const scopeRoot = join(tempDir, "repo");
+    await mkdir(scopeRoot);
+    await writeFile(
+      pidFilePath,
+      `${JSON.stringify({ pid: process.pid, startedAt: 1, token: "pid_token" })}\n`,
+      "utf8",
+    );
+    const publishState = setTimeout(() => {
+      void writeFile(
+        stateFilePath,
+        `${JSON.stringify({
+          authToken: "token_1",
+          host: "127.0.0.1",
+          packageVersion: "0.1.7",
+          pid: process.pid,
+          pidToken: "pid_token",
+          port: 4096,
+          status: "running",
+          updatedAt: Date.now(),
+        })}\n`,
+        "utf8",
+      );
+    }, 50);
+
+    try {
+      const { startDaemonServer } = await import("./main.js");
+      const daemon = await startDaemonServer({
+        healthCheck: () => Promise.resolve(true),
+        packageVersion: "0.1.7",
+        pidFilePath,
+        scopeRoot,
+        stateFilePath,
+      });
+      expect(daemon.reused).toBe(true);
+    } finally {
+      clearTimeout(publishState);
       await rm(tempDir, { force: true, recursive: true });
     }
   });
@@ -446,11 +590,17 @@ describe("startDaemonServer", () => {
         host: "127.0.0.1",
         packageVersion: "0.1.0",
         pid: process.pid,
+        pidToken: "pid_token",
         port: 4096,
         scopeRoot,
         status: "running",
         updatedAt: Date.now(),
       })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      join(tempDir, "daemon.pid"),
+      `${JSON.stringify({ pid: process.pid, startedAt: 1, token: "pid_token" })}\n`,
       "utf8",
     );
 
@@ -459,6 +609,7 @@ describe("startDaemonServer", () => {
       await expect(
         startDaemonServer({
           healthCheck: () => Promise.resolve(false),
+          packageVersion: "0.1.0",
           pidFilePath: join(tempDir, "daemon.pid"),
           scopeRoot,
           stateFilePath,
@@ -505,11 +656,137 @@ describe("startDaemonServer", () => {
 
       expect(second.reused).toBe(true);
       expect(second.scopeRoot).toBe(first.scopeRoot);
-      expect(second.url).toBe(first.url);
+      expect(new URL(second.url).origin).toBe(new URL(first.url).origin);
 
       await first.stop();
     } finally {
       vi.doUnmock("ohbaby-agent");
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("reuses one user-level server when started from different repositories", async () => {
+    vi.resetModules();
+    const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-global-"));
+    const repoA = join(tempDir, "repo-a");
+    const repoB = join(tempDir, "repo-b");
+    await mkdir(join(repoA, ".git"), { recursive: true });
+    await mkdir(join(repoB, ".git"), { recursive: true });
+    const disposeAll = vi.fn(() => Promise.resolve());
+    vi.doMock("ohbaby-agent", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("ohbaby-agent")>();
+      return {
+        ...actual,
+        closePersistentUiBackendDatabase: vi.fn(),
+        createPersistentUiBackendClient: vi.fn(() =>
+          createFakeBackend(vi.fn(() => Promise.resolve())),
+        ),
+        getAgentPackageVersion: (): string => "0.1.7",
+        McpManager: { disposeAll },
+      };
+    });
+
+    try {
+      const { startDaemonServer } = await import("./main.js");
+      const first = await startDaemonServer({
+        defaultPort: 0,
+        homeDirectory: tempDir,
+        workdir: repoA,
+      });
+      const second = await startDaemonServer({
+        defaultPort: 0,
+        homeDirectory: tempDir,
+        workdir: repoB,
+      });
+
+      expect(second.reused).toBe(true);
+      expect(new URL(second.url).origin).toBe(new URL(first.url).origin);
+      expect(
+        new URLSearchParams(new URL(second.url).hash.slice(1)).get("directory"),
+      ).toBe(await realpath(repoB));
+      expect(second.scopeRoot).toBe(await realpath(repoB));
+
+      await first.stop();
+    } finally {
+      vi.doUnmock("ohbaby-agent");
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("does not mistake the global daemon for legacy state when the scope is home", async () => {
+    vi.resetModules();
+    const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-home-scope-"));
+    const disposeAll = vi.fn(() => Promise.resolve());
+    vi.doMock("ohbaby-agent", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("ohbaby-agent")>();
+      return {
+        ...actual,
+        closePersistentUiBackendDatabase: vi.fn(),
+        createPersistentUiBackendClient: vi.fn(() =>
+          createFakeBackend(vi.fn(() => Promise.resolve())),
+        ),
+        getAgentPackageVersion: (): string => "0.1.7",
+        McpManager: { disposeAll },
+      };
+    });
+
+    try {
+      const { startDaemonServer } = await import("./main.js");
+      const first = await startDaemonServer({
+        defaultPort: 0,
+        homeDirectory: tempDir,
+        workdir: tempDir,
+      });
+      const second = await startDaemonServer({
+        defaultPort: 0,
+        homeDirectory: tempDir,
+        workdir: tempDir,
+      });
+
+      expect(second.reused).toBe(true);
+      expect(new URL(second.url).origin).toBe(new URL(first.url).origin);
+      expect(second.scopeRoot).toBe(await realpath(tempDir));
+
+      await first.stop();
+    } finally {
+      vi.doUnmock("ohbaby-agent");
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("refuses to start while the current repository has a live legacy daemon", async () => {
+    vi.resetModules();
+    const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-legacy-"));
+    const repo = join(tempDir, "repo");
+    const legacyDir = join(repo, ".ohbaby", "server");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await mkdir(legacyDir, { recursive: true });
+    await writeFile(
+      join(legacyDir, "daemon-state.json"),
+      `${JSON.stringify({
+        authToken: "legacy_token",
+        host: "127.0.0.1",
+        packageVersion: "0.1.6",
+        pid: process.pid,
+        port: 4101,
+        status: "running",
+        updatedAt: Date.now(),
+      })}\n`,
+      "utf8",
+    );
+
+    try {
+      const { startDaemonServer } = await import("./main.js");
+      await expect(
+        startDaemonServer({
+          defaultPort: 0,
+          homeDirectory: tempDir,
+          workdir: repo,
+        }),
+      ).rejects.toThrow(
+        /legacy per-project.*stop it explicitly.*not stopped automatically/iu,
+      );
+    } finally {
       await rm(tempDir, { force: true, recursive: true });
     }
   });
@@ -596,7 +873,7 @@ describe("startDaemonServer", () => {
     }
   });
 
-  it("reads daemon status from the current project-root scope", async () => {
+  it("falls back to the current project legacy state when global state is absent", async () => {
     vi.resetModules();
     const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-status-"));
     const repoA = join(tempDir, "repo-a");
@@ -636,18 +913,58 @@ describe("startDaemonServer", () => {
 
     try {
       const { readDaemonStatus } = await import("./main.js");
-      await expect(readDaemonStatus({ workdir: repoA })).resolves.toMatchObject(
-        {
-          port: 4101,
-          scopeRoot: repoA,
-        },
-      );
-      await expect(readDaemonStatus({ workdir: repoB })).resolves.toMatchObject(
-        {
-          port: 4102,
-          scopeRoot: repoB,
-        },
-      );
+      await expect(
+        readDaemonStatus({ homeDirectory: tempDir, workdir: repoA }),
+      ).resolves.toMatchObject({
+        port: 4101,
+        scopeRoot: repoA,
+      });
+      await expect(
+        readDaemonStatus({ homeDirectory: tempDir, workdir: repoB }),
+      ).resolves.toMatchObject({
+        port: 4102,
+        scopeRoot: repoB,
+      });
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("reads the same global state regardless of the current repository", async () => {
+    vi.resetModules();
+    const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-status-"));
+    const repoA = join(tempDir, "repo-a");
+    const repoB = join(tempDir, "repo-b");
+    const globalDir = join(tempDir, ".ohbaby", "server");
+    await mkdir(join(repoA, ".git"), { recursive: true });
+    await mkdir(join(repoB, ".git"), { recursive: true });
+    await mkdir(globalDir, { recursive: true });
+    await writeFile(
+      join(globalDir, "daemon-state.json"),
+      `${JSON.stringify({
+        authToken: "token_global",
+        host: "127.0.0.1",
+        packageVersion: "0.1.7",
+        pid: 11,
+        port: 4101,
+        status: "running",
+        updatedAt: Date.now(),
+      })}\n`,
+      "utf8",
+    );
+
+    try {
+      const { readDaemonStatus } = await import("./main.js");
+      const first = await readDaemonStatus({
+        homeDirectory: tempDir,
+        workdir: repoA,
+      });
+      const second = await readDaemonStatus({
+        homeDirectory: tempDir,
+        workdir: repoB,
+      });
+      expect(first).toEqual(second);
+      expect(first).toMatchObject({ packageVersion: "0.1.7", port: 4101 });
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }
@@ -706,9 +1023,13 @@ describe("startDaemonServer", () => {
 
     try {
       const { stopDaemonFromState } = await import("./main.js");
-      await expect(stopDaemonFromState({ kill, workdir: repoA })).resolves.toBe(
-        "stopped",
-      );
+      await expect(
+        stopDaemonFromState({
+          homeDirectory: tempDir,
+          kill,
+          workdir: repoA,
+        }),
+      ).resolves.toBe("stopped");
       expect(kill).toHaveBeenCalledTimes(1);
       expect(kill).toHaveBeenCalledWith(111, "SIGTERM");
     } finally {
@@ -747,7 +1068,7 @@ describe("startDaemonServer", () => {
     try {
       const { stopDaemonFromState } = await import("./main.js");
       await expect(
-        stopDaemonFromState({ kill, workdir: repo }),
+        stopDaemonFromState({ homeDirectory: tempDir, kill, workdir: repo }),
       ).rejects.toThrow(/refusing to stop/i);
       expect(kill).not.toHaveBeenCalled();
     } finally {
@@ -755,7 +1076,7 @@ describe("startDaemonServer", () => {
     }
   });
 
-  it("keeps two foreground daemons on different project roots isolated with one sqlite database", async () => {
+  it("keeps explicitly isolated test daemons separated with one sqlite database", async () => {
     vi.resetModules();
     const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-sqlite-"));
     const repoA = join(tempDir, "repo-a");
@@ -792,6 +1113,8 @@ describe("startDaemonServer", () => {
         dbPath,
         defaultPort: 0,
         llmClient: createFakeLLMClient("Project A response"),
+        pidFilePath: join(tempDir, "daemon-a.pid"),
+        stateFilePath: join(tempDir, "daemon-a-state.json"),
         workdir: repoA,
       });
       daemonB = await startDaemonServer({
@@ -799,15 +1122,19 @@ describe("startDaemonServer", () => {
         dbPath,
         defaultPort: daemonA.port,
         llmClient: createFakeLLMClient("Project B response"),
+        pidFilePath: join(tempDir, "daemon-b.pid"),
+        stateFilePath: join(tempDir, "daemon-b-state.json"),
         workdir: repoB,
       });
       clientA = createRemoteUiBackendClient({
         authToken: authTokenA,
+        directory: repoA,
         host: daemonA.host,
         port: daemonA.port,
       });
       clientB = createRemoteUiBackendClient({
         authToken: authTokenB,
+        directory: repoB,
         host: daemonB.host,
         port: daemonB.port,
       });

@@ -83,7 +83,11 @@ describe("createRemoteUiBackendClient", () => {
         }
         const body = JSON.parse(init.body) as Record<string, unknown>;
         const requestUrl =
-          typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+          typeof url === "string"
+            ? url
+            : url instanceof URL
+              ? url.href
+              : url.url;
         requests.push({
           body,
           headers: new Headers(init.headers),
@@ -108,6 +112,7 @@ describe("createRemoteUiBackendClient", () => {
     const client = createRemoteUiBackendClient({
       authToken: "token_1",
       clientId: "client_1",
+      directory: "/repo-a",
       fetch: fetchImpl,
       port: 4096,
     });
@@ -134,6 +139,7 @@ describe("createRemoteUiBackendClient", () => {
       url: "http://127.0.0.1:4096/api/rpc",
     });
     expect(requests[0]?.headers.get("authorization")).toBe("Bearer token_1");
+    expect(requests[0]?.headers.get("x-ohbaby-directory")).toBe("/repo-a");
     expect(requests[1]?.headers.get("authorization")).toBe("Bearer token_1");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
@@ -144,7 +150,11 @@ describe("createRemoteUiBackendClient", () => {
     const fetchImpl = vi.fn(
       (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
         const requestUrl =
-          typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+          typeof url === "string"
+            ? url
+            : url instanceof URL
+              ? url.href
+              : url.url;
         if (requestUrl.includes("/api/rpc")) {
           const body = JSON.parse(requireStringBody(init)) as {
             readonly id: string;
@@ -184,6 +194,7 @@ describe("createRemoteUiBackendClient", () => {
     );
     const client = createRemoteUiBackendClient({
       clientId: "client_1",
+      directory: "/repo-a",
       fetch: fetchImpl,
       port: 4096,
     });
@@ -197,6 +208,7 @@ describe("createRemoteUiBackendClient", () => {
 
     expect(events).toEqual([notice("notice_1"), notice("notice_2")]);
     expect(eventRequestHeaders[0]?.get("last-event-id")).toBeNull();
+    expect(eventRequestHeaders[0]?.get("x-ohbaby-directory")).toBe("/repo-a");
     expect(eventRequestHeaders[1]?.get("last-event-id")).toBe("1");
   });
 
@@ -218,7 +230,11 @@ describe("createRemoteUiBackendClient", () => {
     const fetchImpl = vi.fn(
       (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
         const requestUrl =
-          typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+          typeof url === "string"
+            ? url
+            : url instanceof URL
+              ? url.href
+              : url.url;
         if (requestUrl.includes("/api/rpc")) {
           const body = JSON.parse(requireStringBody(init)) as {
             readonly id: string;

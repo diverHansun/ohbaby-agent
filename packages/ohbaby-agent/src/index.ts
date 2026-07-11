@@ -93,6 +93,10 @@ export * from "./sandbox/index.js";
 export * from "./shell/index.js";
 export * from "./snapshot/index.js";
 export { getAgentPackageVersion } from "./package-version.js";
-export { createSessionIdGenerator } from "./services/session/index.js";
+export {
+  createSessionIdGenerator,
+  listKnownSessionProjectRoots,
+} from "./services/session/index.js";
+export * from "./services/workspace-registry/index.js";
 export * from "./skill/index.js";
 export * from "./utils/index.js";

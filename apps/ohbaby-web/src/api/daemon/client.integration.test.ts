@@ -304,6 +304,7 @@ describe("ohbaby-web daemon client", () => {
     const config: OhbabyBootstrapConfig = {
       baseUrl: "http://127.0.0.1:4096",
       clientId: "client_web",
+      directory: "/repo",
       startupIntent: { startupSessionMode: { type: "fresh" } },
       token: "token_1",
     };
@@ -474,7 +475,9 @@ describe("ohbaby-web daemon client", () => {
     await expect(
       runtime.client.compactSession("session_1", { force: true }),
     ).resolves.toMatchObject({ sessionId: "session_1" });
-    await expect(runtime.client.archiveSession("session_1")).resolves.toBeUndefined();
+    await expect(
+      runtime.client.archiveSession("session_1"),
+    ).resolves.toBeUndefined();
     expect(requests.slice(-2).map((request) => request.url)).toEqual([
       "http://127.0.0.1:4096/v1/sessions/session_1/archive",
       "http://127.0.0.1:4096/v1/snapshot",
@@ -558,6 +561,7 @@ describe("ohbaby-web daemon client", () => {
       const runtime = createOhbabyWebRuntime({
         baseUrl: "http://127.0.0.1:4096",
         clientId: "client_web",
+        directory: "/repo",
         token: "token_1",
       });
       await runtime.ready;
@@ -650,6 +654,7 @@ describe("ohbaby-web daemon client", () => {
       {
         baseUrl: "http://127.0.0.1:4096",
         clientId: "client_web",
+        directory: "/repo",
         token: "token_1",
       },
       { fetch: fetchImpl },
@@ -724,6 +729,7 @@ describe("ohbaby-web daemon client", () => {
       {
         baseUrl: "http://127.0.0.1:4096",
         clientId: "client_web",
+        directory: "/repo",
         token: "token_1",
       },
       { fetch: fetchImpl },

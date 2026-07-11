@@ -156,6 +156,46 @@ describe("runOhbabyCli", () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
+  it("prints a lightweight coexistence notice before starting an in-process terminal", async () => {
+    vi.resetModules();
+    const stderr: string[] = [];
+    const core = createCore();
+    const dispose = vi.fn(() => Promise.resolve());
+    const createCoreHost = vi.fn(() => ({
+      callbacks: { subscribeEvents },
+      core,
+      dispose,
+    }));
+    const subscribeEvents = vi.fn((): (() => void) => () => undefined);
+    const readServeCoexistenceNotice = vi.fn(() =>
+      Promise.resolve("serve is running\n"),
+    );
+    vi.doMock("ohbaby-agent", () => {
+      throw new Error("agent should be loaded only by injected dependencies");
+    });
+    vi.doMock("./tui/index.js", () => ({
+      renderTerminalUi: vi.fn(() => ({
+        waitUntilExit: (): Promise<void> => Promise.resolve(),
+      })),
+    }));
+
+    const { runOhbabyCli } = await import("./bin.js");
+
+    await expect(
+      runOhbabyCli(
+        ["node", "ohbaby"],
+        { stderr: { write: (chunk: string) => stderr.push(chunk) } },
+        {
+          createCoreHost,
+          loadRuntimeEnvIntoProcessEnv: () => Promise.resolve(),
+          readServeCoexistenceNotice,
+        },
+      ),
+    ).resolves.toBe(0);
+    expect(readServeCoexistenceNotice).toHaveBeenCalledTimes(1);
+    expect(stderr.join("")).toContain("serve is running");
+  });
+
   it("rejects the removed --in-process flag", async () => {
     vi.resetModules();
     const stderr: string[] = [];
@@ -339,6 +379,7 @@ describe("runOhbabyCli", () => {
       runOhbabyCli(["node", "ohbaby", "--remote-port", "4096"]),
     ).resolves.toBe(0);
     expect(createRemoteCoreApiHost).toHaveBeenCalledWith({
+      directory: process.cwd(),
       host: "127.0.0.1",
       port: 4096,
       startupIntent: { startupSessionMode: { type: "fresh" } },
@@ -398,6 +439,7 @@ describe("runOhbabyCli", () => {
     ).resolves.toBe(0);
     expect(createRemoteCoreApiHost).toHaveBeenCalledWith({
       authToken: "token_1",
+      directory: process.cwd(),
       host: "127.0.0.1",
       port: 4096,
       startupIntent: {
@@ -677,15 +719,16 @@ describe("runOhbabyCli", () => {
     vi.resetModules();
     const stdout: string[] = [];
     const openUrl = vi.fn(() => Promise.resolve());
-    const startDaemonServer = vi.fn<CliCommandRuntime["startDaemonServer"]>(() =>
-      Promise.resolve({
-        host: "127.0.0.1",
-        port: 4096,
-        reused: false,
-        scopeRoot: "/repo",
-        stop: vi.fn(() => Promise.resolve()),
-        url: "http://127.0.0.1:4096",
-      }),
+    const startDaemonServer = vi.fn<CliCommandRuntime["startDaemonServer"]>(
+      () =>
+        Promise.resolve({
+          host: "127.0.0.1",
+          port: 4096,
+          reused: false,
+          scopeRoot: "/repo",
+          stop: vi.fn(() => Promise.resolve()),
+          url: "http://127.0.0.1:4096",
+        }),
     );
     vi.doMock("ohbaby-agent", () => ({
       buildCoreAPIImpl: vi.fn(),

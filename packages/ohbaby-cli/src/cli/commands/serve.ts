@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { ArgumentsCamelCase, Argv, CommandModule } from "yargs";
 import type { CliCommandRuntime, CliGlobalOptions } from "./types.js";
 
-type ServeAction = "start" | "status" | "stop";
+type ServeAction = "ps" | "start" | "status" | "stop";
 
 interface ServeArgs extends CliGlobalOptions {
   readonly action?: ServeAction;
@@ -71,9 +71,29 @@ function formatStatus(
     state.host === undefined || state.port === undefined
       ? ""
       : ` url=http://${state.host}:${String(state.port)}`;
-  return `daemon status: ${state.status}${pid}${url} updatedAt=${String(
+  const version =
+    state.packageVersion === undefined
+      ? ""
+      : ` version=${state.packageVersion}`;
+  return `daemon status: ${state.status}${pid}${url}${version} updatedAt=${String(
     state.updatedAt,
   )}\n`;
+}
+
+function formatConnections(
+  connections: Awaited<
+    ReturnType<NonNullable<CliCommandRuntime["listDaemonConnections"]>>
+  >,
+): string {
+  if (connections.length === 0) {
+    return "daemon connections: none\n";
+  }
+  return connections
+    .map(
+      (connection) =>
+        `client=${connection.clientId} scope=${connection.scopeKey} connectedAt=${String(connection.connectedAt)}\n`,
+    )
+    .join("");
 }
 
 export function createServeCommand(
@@ -83,7 +103,7 @@ export function createServeCommand(
     builder(yargs: Argv<CliGlobalOptions>): Argv<ServeArgs> {
       return yargs
         .positional("action", {
-          choices: ["start", "status", "stop"] as const,
+          choices: ["ps", "start", "status", "stop"] as const,
           default: "start" as const,
           describe: "daemon action",
           type: "string",
@@ -117,6 +137,15 @@ export function createServeCommand(
       const action = args.action ?? "start";
       if (action === "status") {
         runtime.stdout.write(formatStatus(await runtime.readDaemonStatus()));
+        return;
+      }
+      if (action === "ps") {
+        if (!runtime.listDaemonConnections) {
+          throw new Error("Daemon connection inspection is unavailable");
+        }
+        runtime.stdout.write(
+          formatConnections(await runtime.listDaemonConnections()),
+        );
         return;
       }
       if (action === "stop") {

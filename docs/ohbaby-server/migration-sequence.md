@@ -2,6 +2,8 @@
 
 > 本文把 C1 与 `ohbaby-server` 迁移合并到一个 v0.1.4 release gate 下。它不是代码实现计划的替代品；真正动代码前还需要按此文档写 implementation plan，并逐步测试。
 
+> 后续演进：v0.1.7 已开始从 v0.1.6 per-scope 多端口收敛到用户级单 serve + InstanceStore。该批次的当前契约和实施状态见 [`../problem-lists/2026-07-11-global-single-daemon/`](../problem-lists/2026-07-11-global-single-daemon/README.md)；本文其余内容只描述 v0.1.4 迁包顺序。
+
 ---
 
 ## 1. 总体策略

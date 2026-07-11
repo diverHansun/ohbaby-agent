@@ -28,8 +28,53 @@ export interface WebStartupIntent {
 export interface OhbabyBootstrapConfig {
   readonly baseUrl: string;
   readonly clientId: string;
+  readonly directory?: string;
   readonly startupIntent?: WebStartupIntent;
   readonly token: string;
+}
+
+export interface WorkspaceScopeSummary {
+  readonly available: boolean;
+  readonly directory: string;
+  readonly lastOpenedAt: number;
+  readonly loaded: boolean;
+  readonly position: number;
+}
+
+export interface WorkspaceSnapshot {
+  readonly scopes: readonly WorkspaceScopeSummary[];
+  readonly selectedDirectory: string | null;
+}
+
+export interface WorkspaceScopesResponse {
+  readonly ok: true;
+  readonly scopes: readonly WorkspaceScopeSummary[];
+}
+
+export interface WorkspaceOpenResponse {
+  readonly ok: true;
+  readonly scope: WorkspaceScopeSummary;
+}
+
+export interface DirectoryPickerRoot {
+  readonly directory: string;
+  readonly label: string;
+}
+
+export interface DirectoryPickerEntry {
+  readonly directory: string;
+  readonly name: string;
+}
+
+export interface DirectoryPickerRootsResponse {
+  readonly ok: true;
+  readonly roots: readonly DirectoryPickerRoot[];
+}
+
+export interface DirectoryPickerListResponse {
+  readonly directories: readonly DirectoryPickerEntry[];
+  readonly directory: string;
+  readonly ok: true;
 }
 
 export type ConnectionState =

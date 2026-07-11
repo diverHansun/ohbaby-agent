@@ -15,6 +15,7 @@ export interface CliDaemonState {
   readonly updatedAt: number;
   readonly error?: string;
   readonly host?: string;
+  readonly packageVersion?: string;
   readonly port?: number;
   readonly scopeRoot?: string;
 }
@@ -34,6 +35,12 @@ export interface CliRunningDaemonServer {
   readonly reused: boolean;
   readonly scopeRoot: string;
   stop(): Promise<void>;
+}
+
+export interface CliDaemonConnection {
+  readonly clientId: string;
+  readonly connectedAt: number;
+  readonly scopeKey: string;
 }
 
 export interface CliGlobalOptions {
@@ -68,6 +75,9 @@ export interface CliCommandRuntime {
   readonly createStdoutRenderer: typeof createStdoutRenderer;
   readonly failUsage: (message: string) => never;
   readonly isStdinTTY: () => boolean;
+  readonly listDaemonConnections?: () => Promise<
+    readonly CliDaemonConnection[]
+  >;
   readonly openUrl: (url: string) => Promise<void>;
   readonly readDaemonStatus: () => Promise<CliDaemonState | undefined>;
   readonly readStdin: () => Promise<string>;
@@ -77,6 +87,7 @@ export interface CliCommandRuntime {
     readonly subscribeEvents: (handler: UiEventHandler) => UiUnsubscribe;
   }) => TerminalUiLifecycle;
   readonly setExitCode: (code: number) => void;
+  readonly showServeCoexistenceNotice?: () => Promise<void>;
   readonly startDaemonServer: (
     options: CliStartDaemonServerOptions,
   ) => Promise<CliRunningDaemonServer>;

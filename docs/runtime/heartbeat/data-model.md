@@ -1,5 +1,7 @@
 # heartbeat 模块 data-model.md
 
+> **2026-07-11 数据模型修订（优先于下文旧方案）**：所有 AgentState、WakeSignal、DeferredQueue 和 disposition 都必须带 lane identity：`scopeKey + sessionId`。状态不能只有一个进程级值；队列也必须按 lane 隔离。对于周期 job 的重复到期，优先保存每 job 一个 `pendingTrigger`，而不是把同一 job 多次塞进无界 deferred 队列。当前批次不落库、不迁移 Heartbeat 状态。
+
 本文档定义 `runtime/heartbeat` 模块的核心概念与数据模型，统一认知语言，不冻结实现细节。
 
 ---

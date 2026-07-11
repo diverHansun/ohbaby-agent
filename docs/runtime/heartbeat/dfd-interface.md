@@ -1,5 +1,7 @@
 # heartbeat 模块 dfd-interface.md
 
+> **2026-07-11 接口修订（优先于下文旧方案）**：Heartbeat 若保留，只接收已解析并带 `scopeKey + sessionId` 的 lane-local 信号。全局 Scheduler 不直接调用某个全局 Heartbeat；它调用 ScheduledRunDispatcher，后者通过 InstanceStore 找到目标 WorkspaceRuntime/session lane。所有 disposition 必须回带 `scopeKey + sessionId + jobId`，拒绝隐式 cwd/default-session 路由。
+
 本文档描述 `runtime/heartbeat` 模块与外部模块之间的数据流与接口契约。
 
 ---

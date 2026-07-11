@@ -1,5 +1,7 @@
 # scheduler 模块 use-case.md
 
+> **2026-07-11 用例修订（优先于下文旧方案）**：`/loop` 是 session 级能力，不是全局 loop。创建、暂停、恢复、取消和触发都必须锁定 `scopeKey + sessionId`。全局 Scheduler 只报“这个 job 到时间了”，由分发器加载对应 WorkspaceRuntime 并交给该 session；若该 session 正忙，同一 job 只记一个待补触发。下文经机器级 Heartbeat 统一决策的用例是旧方案。
+
 本文档描述 `runtime/scheduler` 模块内部如何围绕职责完成关键业务动作。
 
 ---

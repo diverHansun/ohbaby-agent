@@ -40,8 +40,9 @@ const rows = db.select().from(schema.session).where(eq(schema.session.status, 'a
 | `run_ledger` | runtime/run-ledger | Run 状态账本 |
 | `snapshot_checkpoint` | snapshot | 检查点元数据与索引 |
 | `snapshot_patch` | snapshot | Patch 元数据（大对象路径指针） |
-| `scheduler_job` | runtime/scheduler | 调度承诺（scheduled/reminder） |
 | `migration` | services/database | 迁移版本记录（自身维护） |
+
+> `scheduler_job` 不在当前 schema：历史表已由 migration `004_drop_scheduler_job` 删除。未来实现 session 级 `/loop` 时，必须与 SchedulerStore 和新 migration 同批恢复，并绑定 `scope_key + session_id`。
 
 **schema 所有权说明**：
 - database 模块拥有 schema **定义**（列名、类型、索引、外键）
@@ -54,7 +55,7 @@ const rows = db.select().from(schema.session).where(eq(schema.session.status, 'a
 对 Schema 的一次**不可变的版本化变更**，以 SQL 文件形式存储在 `migrations/` 目录下。
 
 **关键属性**：
-- 按序号命名，顺序执行：`001_initial.sql` → `002_add_scheduler_job.sql` → ...
+- 按版本顺序执行；当前 migration 定义在 `migrations.ts`。历史 `scheduler_job` 曾被加入，随后由 `004_drop_scheduler_job` 显式删除。
 - Append-Only：一旦文件被提交并执行，不可修改，只能新增文件
 - 每条迁移在事务中执行：全成功或全回滚
 - 执行后记录在 `migration` 表，防止重复执行

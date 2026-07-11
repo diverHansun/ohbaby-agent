@@ -111,6 +111,14 @@ export const schema = {
     interruptedAt: "interrupted_at",
     closedAt: "closed_at",
   }),
+  workspaceRegistry: table("workspace_registry", {
+    scopeKey: "scope_key",
+    visibility: "visibility",
+    position: "position",
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+    lastOpenedAt: "last_opened_at",
+  }),
   migration: table("migration", {
     version: "version",
     appliedAt: "applied_at",

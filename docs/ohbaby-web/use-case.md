@@ -15,6 +15,7 @@
 | **UC3 处置权限请求** | D3 |
 | **UC4 断线恢复 / 重同步** | D1 / G5 |
 | **UC5 执行 web-safe slash 命令** | D6 / D2 |
+| **UC6 切换 selected workspace**（v0.1.7 已完成） | D7 / D4 / D1 / D2 |
 
 ---
 
@@ -53,6 +54,12 @@
 6. SSE 推 `command.started` → 显示 running `CommandNotice`；随后 `command.result.delivered` 或 `command.failed` 更新为结构化只读弹层或安全 fallback notice。
 7. 非 slash 输入仍走 UC2 的 prompt 流。
 
+### UC6 切换 selected workspace（v0.1.7 已完成）
+1. 用户从 known-project 列表选择另一个 directory。
+2. web 停止旧 scope 的 SSE 与未完成连接编排，清空旧 scope 的易失 ViewState/seqNum 游标。
+3. web 用新 directory 重建所有 workspace 请求 header，重新执行 UC1 的 client + SSE + snapshot 流。
+4. server canonicalize/校验 directory；无效 scope 返回结构化 `400`，web 保留当前选择并显示错误，不回退 daemon cwd/query。
+
 ---
 
 ## 3. Responsibility Boundaries（责任边界）
@@ -61,7 +68,7 @@
 
 - **web 负责**：投影（事件→ViewState）、UI 呈现与交互、维护 `lastAppliedSeqNum` 游标、连接态机推进、重连/重拉的客户端编排。
 - **daemon 负责**：会话真相、prompt 队列调度（含跨连接 FIFO）、权限归属校验、SSE replay 缓冲与 resync 信号、workspace scope 解析。
-- **web 绝不做**：自己判定权限归属、补发/重放命令、跨 backend 实例同步状态（ND9）、解析 scope（ND10）。
+- **web 绝不做**：自己判定权限归属、补发/重放命令、跨 backend 实例同步状态（ND9）、canonicalize/校验 scope（ND10）。web 可以选择 directory，但 server 才决定 canonical scope identity。
 
 > controller/service 不在 web 侧膨胀：`http`/`events` 是 adapter，`eventReducer` 是纯投影，编排集中在 `client` 门面，UI 不含会话业务逻辑。
 
@@ -84,5 +91,7 @@
 | UC5 | 命令执行失败 | 通过 `CommandNotice` 显示错误，不吞掉 |
 | UC5 | 命令带交互 action | 不进入候选面板；手写 POST 也被 server 400 拒绝 |
 | UC5 | overlay 命令被手写 `POST /v1/commands` | server 400 拒绝；UI 正常入口只能打开结构化 overlay |
+| UC6 | directory 缺失/不可读/不是目录 | 展示结构化 `400`；不使用 query/cwd 猜测项目 |
+| UC6 | 切换中旧 SSE 仍有事件到达 | 丢弃旧 generation 事件；不得写入新 scope ViewState |
 
 > 这些失败点与 [`test.md`](./test.md) 的 Critical Scenarios 一一对应。

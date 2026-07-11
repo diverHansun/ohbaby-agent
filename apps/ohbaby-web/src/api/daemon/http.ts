@@ -20,11 +20,16 @@ import type {
   SnapshotResponse,
   SubmitPromptRequest,
   WebStartupIntent,
+  WorkspaceScopesResponse,
+  WorkspaceOpenResponse,
+  DirectoryPickerRootsResponse,
+  DirectoryPickerListResponse,
 } from "./wire.js";
 
 export interface DaemonHttpClientOptions {
   readonly baseUrl: string;
   readonly clientId: string;
+  readonly directory?: string;
   readonly fetch?: typeof fetch;
   readonly token: string;
 }
@@ -49,12 +54,14 @@ function isErrorBody(value: unknown): value is ErrorResponseBody {
 export class DaemonHttpClient {
   private readonly baseUrl: string;
   private readonly clientId: string;
+  private readonly directory: string | undefined;
   private readonly fetchImpl: typeof fetch;
   private readonly token: string;
 
   constructor(options: DaemonHttpClientOptions) {
     this.baseUrl = options.baseUrl;
     this.clientId = options.clientId;
+    this.directory = options.directory;
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.token = options.token;
   }
@@ -79,6 +86,42 @@ export class DaemonHttpClient {
 
   listCommands(): Promise<CommandCatalogResponse> {
     return this.request("/v1/commands?surface=web");
+  }
+
+  listWorkspaceScopes(): Promise<WorkspaceScopesResponse> {
+    return this.request("/v1/scopes", { includeDirectory: false });
+  }
+
+  openWorkspace(directory: string): Promise<WorkspaceOpenResponse> {
+    return this.request("/v1/scopes/open", {
+      body: { directory },
+      includeDirectory: false,
+      method: "POST",
+    });
+  }
+
+  hideWorkspace(directory: string): Promise<OkResponse> {
+    return this.request("/v1/scopes/hide", {
+      body: { directory },
+      includeDirectory: false,
+      method: "POST",
+    });
+  }
+
+  listDirectoryPickerRoots(): Promise<DirectoryPickerRootsResponse> {
+    return this.request("/v1/directory-picker/roots", {
+      includeDirectory: false,
+    });
+  }
+
+  listDirectoryPickerEntries(
+    directory: string,
+  ): Promise<DirectoryPickerListResponse> {
+    return this.request("/v1/directory-picker/list", {
+      body: { directory },
+      includeDirectory: false,
+      method: "POST",
+    });
   }
 
   executeCommand(input: ExecuteCommandRequest): Promise<OkResponse> {
@@ -198,12 +241,16 @@ export class DaemonHttpClient {
     path: string,
     options: {
       readonly body?: unknown;
+      readonly includeDirectory?: boolean;
       readonly method?: "GET" | "PATCH" | "POST";
     } = {},
   ): Promise<T> {
     const headers: Record<string, string> = {
       accept: "application/json",
       authorization: `Bearer ${this.token}`,
+      ...(this.directory === undefined || options.includeDirectory === false
+        ? {}
+        : { "x-ohbaby-directory": this.directory }),
       "x-ohbaby-client-id": this.clientId,
     };
     if (options.body !== undefined) {
@@ -235,6 +282,7 @@ export function createDaemonHttpClient(
   return new DaemonHttpClient({
     baseUrl: config.baseUrl,
     clientId: config.clientId,
+    directory: config.directory,
     ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
     token: config.token,
   });

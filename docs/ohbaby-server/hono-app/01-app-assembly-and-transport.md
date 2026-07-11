@@ -4,6 +4,8 @@
 >
 > 前置：[`00-scope-and-deltas.md`](./00-scope-and-deltas.md)（Δ1/Δ2/Δ6/Δ9）、父目录 [`../architecture.md`](../architecture.md)。
 
+> **当前实现注**：per-scope `createDaemonServerApp()` 继续作为单 workspace 的高内聚 app 组合根；`runtime/daemon/server.ts` 在其外层承担全局 workspace dispatcher 与 InstanceStore 路由。下文的拆分树是迁移目标模型，不要求为追求目录形状而重构已工作的边界。
+
 ---
 
 ## 1. 目标文件布局（在现有结构上演进）

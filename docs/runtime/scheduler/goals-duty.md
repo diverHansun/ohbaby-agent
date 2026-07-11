@@ -1,5 +1,7 @@
 # scheduler 模块 goals-duty.md
 
+> **2026-07-11 目标修订（优先于下文旧方案）**：Scheduler 是 global serve 进程里唯一的“闹钟管理员”，只负责何时到期、持久化恢复和重复任务的下一次时间；它不代表一个全局 agent。每个 job 必须归属一个 `scopeKey + sessionId`，到期后经 InstanceStore 路由到对应项目和会话。暂停、blocked、sleeping、busy 都只能影响该 session lane。当前 global-single-daemon 批次仅预留这一边界，不实现 `/loop`、Scheduler、Heartbeat 或空 hook。
+
 本文档定义 `runtime/scheduler` 模块的设计目标与职责边界。
 
 ---

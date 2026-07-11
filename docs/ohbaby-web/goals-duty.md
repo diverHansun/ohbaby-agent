@@ -6,7 +6,7 @@
 
 ## 一句话存在意义
 
-把**唯一的 agent backend**，通过 daemon 的 `/v1` REST+SSE，呈现为浏览器里的交互式 coding-agent 界面。它是 backend 会话状态的**投影与 adapter**——不持有独立事实源，不重定义领域语义，是与 CLI/TUI 并列的"又一个前端消费者"。
+把全局 serve 中**当前 selected workspace 的 agent backend**，通过 `/v1` REST+SSE 呈现为浏览器里的交互式 coding-agent 界面。它是 backend 会话状态的**投影与 adapter**——不持有独立事实源，不重定义领域语义，是与 CLI/TUI 并列的“又一个前端消费者”。
 
 ---
 
@@ -33,9 +33,10 @@
 - **D1 浏览器 daemon 客户端**：对 daemon 讲 `/v1` REST + SSE（fetch-stream），含 `Last-Event-ID` 续传与 `resync-required` 处理。
 - **D2 事件投影**：把 `UiEvent` 投影为 UI 视图状态（消息流 / run 状态机 / 待审批队列 / 连接态）。
 - **D3 会话交互 UI（v0.1.6 闭环）**：snapshot 首屏、流式消息、发 prompt、权限审批（准/拒，模态 slide-up）、中断 run，以及 composer 的 **mode 切换（auto/plan）** 与 **权限策略切换（default / full-access）**。视图层详细设计见 [`ui/`](./ui/README.md)。
-- **D4 引导接入**：从 daemon 注入的 `window.__OHBABY__` 读取 `token / clientId / baseUrl` 并附带到请求。
+- **D4 引导接入与 selected scope 传递**：从 daemon 注入的 `window.__OHBABY__` 读取 `token / clientId / baseUrl / directory`；URL fragment 可覆盖初始 selected directory。所有 workspace HTTP/SSE 请求显式发送 `x-ohbaby-directory`，不得依赖 server cwd/query fallback。
 - **D5 纯静态构建产物**：产出可被 daemon 伺服的 `dist`（HTML/JS/CSS/资源）。
 - **D6 web slash commands UI**：composer 中以 `/` 开头的输入读取 daemon 的 web palette catalog。`/status`、`/help`、`/new`、`/mcps`、`/skills` 走 web-safe passthrough；`/connect`、`/connect-search`、`/compact` 只打开结构化 overlay 并经专用 REST mutation。任何 `parentBehavior: "interaction"` 命令必须被过滤/拒绝，overlay 命令也不能经 raw `POST /v1/commands` 执行。
+- **D7 workspace 列表与切换**：读取全局 daemon 的 known/loaded scopes，展示 selected workspace；切换时关闭旧 SSE、清空旧 scope 投影，并以新 directory 重建 client/snapshot/SSE，禁止旧 generation 写入新 scope。
 
 ---
 
@@ -45,12 +46,12 @@
 - **ND2 不生成/存储/轮换 auth token**：由 daemon 负责；web 只读注入副本、仅存内存（依赖 S-C）。
 - **ND3 不重定义领域语义/业务规则**：会话真相在 `ohbaby-agent` backend；web 只投影 + adapter。
 - **ND4 不定义 `/v1` wire 契约**：契约真相在 server 的 OpenAPI（`/doc`）+ `ohbaby-sdk` 领域类型；web 消费（生成 typed client）。
-- **ND5 v0.1.6 不做**：完整模型 provider marketplace、大量自动建议、多项目界面切换、interaction 请求、分页/高级命令面板——后续版本。v0.1.6 只做 D6 的 web passthrough + 三个结构化 overlay。
+- **ND5 v0.1.6 不做**：完整模型 provider marketplace、大量自动建议、interaction 请求、分页/高级命令面板。v0.1.7 已完成全局面板 runtime 与 OpenCode 风格项目 rail、按需 session sidebar、持久项目管理；实现记录见 [`../problem-lists/2026-07-11-opencode-style-web-navigation/`](../problem-lists/2026-07-11-opencode-style-web-navigation/README.md)。
 - **ND6 不做远程/多用户鉴权、不直连 LAN**：同源本地优先，延续 server 的 N4。
 - **ND7 不为想象中的 app 提前抽共享包**：`api/daemon` 内置于本包；保持干净 seam 即可，YAGNI。
 - **ND8 不管理 daemon 生命周期 / 不 auto-spawn**：假定用户显式 `ohbaby serve`（延续 ADR-001 G4 显式生命周期）。"打开 web" = 跑 `ohbaby serve` + 开浏览器，无隐藏 daemon。
 - **ND9 不与并发 in-process CLI 做同 session live 同步**：两者是独立 backend 实例，跨进程安全由 DB 原子 claim 层保证（防写坏），live 共享需显式 attach（`ohbaby --remote-port`）。
-- **ND10 不解析 / 管理 workspace scope**：web 同源继承伺服它的 daemon 的 scope（被端口钉死）；scope 解析与启动锁是 server/runtime 的职责（依赖 S-D）。
+- **ND10 不 canonicalize workspace scope、不决定 server identity**：web 只管理用户当前 selected directory 并把它作为显式 header 发送；`realpath`、git-root 归一、合法性校验、InstanceStore 与 pid/state ownership 都属于 server/runtime（依赖 S-D）。
 
 ---
 
@@ -58,4 +59,4 @@
 
 - 能否用一句话说明存在意义？✅ 见顶部。
 - 能否清楚回答"不该做什么"？✅ ND1–ND10。
-- 是否存在与其他模块明显重叠的职责？无——伺服资源/token/契约/scope 全部划给 server（ND1/ND2/ND4/ND10），领域语义划给 agent（ND3）。
+- 是否存在与其他模块明显重叠的职责？无——web 只持有 selected directory；资源伺服/token/契约/scope canonicalization 与 identity 划给 server（ND1/ND2/ND4/ND10），领域语义划给 agent（ND3）。

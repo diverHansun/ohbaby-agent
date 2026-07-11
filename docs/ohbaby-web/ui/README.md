@@ -6,7 +6,9 @@
 
 ## 设计源（source of truth）
 
-- **可交互权威源**：claude.ai 设计项目 `ohbaby-agent Web UI设计`
+> **导航目标已实施**：OpenCode 风格项目 rail、默认收起且按需展开的项目 session sidebar 与项目管理交互，以 [`../../problem-lists/2026-07-11-opencode-style-web-navigation/`](../../problem-lists/2026-07-11-opencode-style-web-navigation/README.md) 为 Phase 2 权威。下面的 claude.ai 稿继续作为 **ConversationStream / Composer / PermissionModal / 空态视觉**参考，不再定义全局项目导航外壳。
+
+- **会话区视觉参考**：claude.ai 设计项目 `ohbaby-agent Web UI设计`
   （`https://claude.ai/design/p/7a9234b1-1b61-418c-a510-717646f32be8`）。
 - **仓库内版本固定副本**（只读设计参考，需配 `support.js` + claude.ai 的 x-dc 运行时才能渲染）：
   - [`design/session-screen.dc.html`](./design/session-screen.dc.html) — 主会话屏（最终选定）
@@ -15,12 +17,12 @@
 
 > claude.ai 项目里另有探索板（`Directions` / `Empty Directions` / `Empty Explore` / `Spinner Explore`）——它们是 A/B/C 方案、字体与配色的**推敲过程**，非实现目标，仅作设计 provenance 保留在 claude.ai，不拷入仓库。
 
-## 屏幕清单（最终）
+## 会话区屏幕参考
 
 | 屏幕 | 文件 | 何时出现 |
 |------|------|---------|
-| 主会话屏 | `design/session-screen.dc.html` | 已建连、有会话——header/状态 + 流 + 输入框 |
-| 空态/就绪屏 | `design/empty-state.dc.html` | 首屏未发任何 prompt——居中抬升的输入框，发送后下沉到 dock |
+| 主会话屏 | `design/session-screen.dc.html` | 已建连、有会话——header/状态 + 流 + 输入框；外围导航由 Phase 2 三栏契约覆盖 |
+| 空态/就绪屏 | `design/empty-state.dc.html` | 当前项目无会话或首屏未发 prompt——具体全局/项目空态由 Phase 2 契约补充 |
 
 各状态（连接五态、run 态、空态、错误）的可视映射见 [`states.md`](./states.md)；组件细节见 [`components.md`](./components.md)。
 

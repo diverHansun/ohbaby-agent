@@ -414,6 +414,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       const config: OhbabyBootstrapConfig = {
         baseUrl: "http://127.0.0.1:4096",
         clientId: "client_web",
+        directory: "/repo",
         startupIntent: { startupSessionMode: { type: "fresh" } },
         token: authToken,
       };
@@ -497,6 +498,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       const config: OhbabyBootstrapConfig = {
         baseUrl: "http://127.0.0.1:4096",
         clientId: "client_web",
+        directory: "/repo",
         startupIntent: { startupSessionMode: { type: "fresh" } },
         token: authToken,
       };
@@ -631,6 +633,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       const config: OhbabyBootstrapConfig = {
         baseUrl: "http://127.0.0.1:4096",
         clientId: "client_web",
+        directory: "/repo",
         startupIntent: { startupSessionMode: { type: "fresh" } },
         token: authToken,
       };
@@ -737,6 +740,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       const config: OhbabyBootstrapConfig = {
         baseUrl: "http://127.0.0.1:4096",
         clientId: "client_web",
+        directory: "/repo",
         startupIntent: { startupSessionMode: { type: "fresh" } },
         token: authToken,
       };

@@ -13,13 +13,13 @@ web 只与 daemon 的 `/v1` 面交互（同源）。
 - **入站三个来源**：`window.__OHBABY__`（引导，依赖 S-C）、`/v1` REST 响应、`/v1/events` SSE 流。
 - **出站一个去向**：用户动作 → `/v1` REST 命令。
 
-本文不描述 daemon 内部（路由/协调/replay 属 `ohbaby-server`）。web 同源继承伺服它的 daemon 的 workspace scope，不自行解析（ND10）。
+本文不描述 daemon 内部（路由/协调/replay 属 `ohbaby-server`）。web 管理当前 selected directory，并在每个 workspace HTTP/SSE 请求中显式发送 `x-ohbaby-directory`；它不做 realpath/git-root canonicalization（ND10）。
 
 ---
 
 ## 2. Data Flow Description（数据流描述）
 
-**① 引导流**：页面加载 → `bootstrap.ts` 读 `window.__OHBABY__`{token, clientId, baseUrl} → 构造 `client` 门面。
+**① 引导流**：页面加载 → `bootstrap.ts` 读 `window.__OHBABY__`{token, clientId, baseUrl, directory}，再读取 URL fragment 中的一次性初始 selected hint → 构造带显式 directory 的 `client` 门面。fragment 只在浏览器端消费，server 不接受 query/cwd fallback。
 
 **② 建连 / 首屏流（关键顺序，防漏拍/重复）**：
 1. `POST /v1/clients`（startup intent）→ 拿 clientId。
@@ -90,8 +90,10 @@ web 只与 daemon 的 `/v1` 面交互（同源）。
 ## 4. Data Ownership & Responsibility（数据归属与责任）
 
 - **daemon 拥有**：会话真相（创建/更新 `UiSnapshot` / `UiEvent`）、prompt 队列调度、权限归属校验、SSE replay 环形缓冲、workspace scope 解析。
-- **web 拥有**：ViewState / ConnectionState（派生、易失、**绝不持久化**）、自己的 `lastAppliedSeqNum` 游标。
+- **web 拥有**：ViewState / ConnectionState（派生、易失、**绝不持久化**）、自己的 `lastAppliedSeqNum` 游标与当前 selected directory。
 - **token**：daemon 拥有；web 只读注入副本、仅存内存（ND2）。
 - **跨进程并发**（web daemon 与并发 in-process CLI 同写一份 DB）：由 DB 原子 claim 防写坏；web **不负责** live 双向同步（ND9）——只在下次 snapshot/resync 时反映对端改动。
 
+> 切换 selected directory 时关闭旧 scope SSE、清空旧 scope 派生状态，再以新 header 重建 client + snapshot + SSE；旧 generation 事件不得写入新 scope。该 v0.1.7 切换闭环已落地，并由 `workspace-switch.integration.test.ts` 覆盖。
+>
 > 关键数据流 ②（seqNum 基线对齐）、⑤（reconnect/resync）是 [`test.md`](./test.md) 必须覆盖的正确性流；其依赖的 server 契约见 README 的 S-A/S-D。

@@ -37,7 +37,7 @@
 | `setSearchApiKey` | `POST /v1/settings/search-api-key` | 设置搜索 key |
 | `subscribeEvents` | `GET /v1/events` | **SSE**，带 `Last-Event-ID` replay（见 [`03`](./03-event-replay.md)） |
 
-> `:id` = sessionId。所有端点都经 `x-ohbaby-directory` workspace 中间件解析目标项目（见 [`04`](./04-multi-project-runtime.md)）。
+> `:id` = sessionId。所有 workspace 端点都由全局 dispatcher 读取 `x-ohbaby-directory`、解析目标项目并转发到对应 per-scope app（见 [`04`](./04-multi-project-runtime.md)）。
 
 > **非 backend-capability 的端点**另在它处定义，不在上表（上表只映射 `UiBackendClient` 能力）：`GET /health`（存活探针，[`01`](./01-app-assembly-and-transport.md)）、`GET /doc`（OpenAPI，§4）、`GET /v1/connections`（连接观测，供 `serve ps`，[`04`](./04-multi-project-runtime.md) §5）。
 
@@ -77,7 +77,7 @@
 | 消费者 | `ohbaby --remote-port`、集成测试 | 浏览器、未来 app |
 | 形态 | 单一 POST + method 信封 | 资源化 REST + 状态码 |
 | 事件 | `/api/events` SSE（切到新 event-bus） | `/v1/events` SSE（replay） |
-| 鉴权/项目路由/协调 | **同一套**中间件 + coordination + backend | **同一套** |
+| 鉴权/项目路由/协调 | 同一全局 auth/workspace dispatcher；每 scope 独立 coordination + backend | **同一套** |
 | 文档/类型 | 无（信封手写） | OpenAPI 自动出 |
 
 要点：两者**不是两套服务**，是同一 Hono app 上架在同一 backend 的两个路由组——这是「不产生只在 web 才有的行为」的结构保证（详见 [`05`](./05-consumption-path-unification.md)）。

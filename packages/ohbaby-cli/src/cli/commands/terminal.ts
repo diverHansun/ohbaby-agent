@@ -48,7 +48,8 @@ export function createTerminalCommand(
     builder(yargs: Argv<CliGlobalOptions>): Argv<TerminalArgs> {
       return yargs
         .option("continue", {
-          describe: "resume the latest primary session before starting the terminal UI",
+          describe:
+            "resume the latest primary session before starting the terminal UI",
           type: "boolean",
         })
         .option("resume", {
@@ -77,11 +78,16 @@ export function createTerminalCommand(
       if (resume !== undefined && args.continue === true) {
         runtime.failUsage("--resume and --continue cannot be used together");
       }
+      if (remotePort === undefined) {
+        await runtime.showServeCoexistenceNotice?.();
+      }
       const host = await runtime.createCoreHost({
         ...(args.continue === true ? { continue: true } : {}),
         ...(remotePort === undefined ? { inProcess: true } : {}),
         ...(args.mode === undefined ? {} : { mode: args.mode }),
-        ...(args.permission === undefined ? {} : { permission: args.permission }),
+        ...(args.permission === undefined
+          ? {}
+          : { permission: args.permission }),
         ...(remotePort === undefined
           ? {}
           : {

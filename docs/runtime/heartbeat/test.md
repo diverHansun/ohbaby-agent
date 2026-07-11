@@ -1,5 +1,7 @@
 # heartbeat 模块 test.md
 
+> **2026-07-11 测试修订（优先于下文旧方案）**：未来除状态机分支外，必须测试两个 scope、同 scope 两个 session 的交叉隔离；A lane paused/blocked 时 B lane 仍能触发；信号缺 `scopeKey` 或 `sessionId` 必须拒绝；disposition 必须回到原 job/lane；同一 busy job 最多产生一个 pending trigger。当前 global-single-daemon 批次不新增 Heartbeat 实现测试。
+
 本文档说明如何验证 `runtime/heartbeat` 模块在协作环境中的正确性。
 
 测试分类标准参见 `docs-test/classification.md`，mock 边界规则参见 `docs-test/writing-guide.md`。

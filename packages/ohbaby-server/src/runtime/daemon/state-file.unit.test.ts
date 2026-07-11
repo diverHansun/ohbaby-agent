@@ -59,6 +59,30 @@ describe("JsonDaemonStateFile", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("keeps legacy running state without packageVersion readable for fail-closed reuse", async () => {
+    await writeFile(
+      statePath,
+      `${JSON.stringify({
+        authToken: "token_1",
+        host: "127.0.0.1",
+        pid: 123,
+        port: 4096,
+        status: "running",
+        updatedAt: 1_001,
+      })}\n`,
+      "utf8",
+    );
+
+    await expect(new JsonDaemonStateFile(statePath).read()).resolves.toEqual({
+      authToken: "token_1",
+      host: "127.0.0.1",
+      pid: 123,
+      port: 4096,
+      status: "running",
+      updatedAt: 1_001,
+    });
+  });
+
   it("keeps lifecycle-only stopped state readable", async () => {
     const file = new JsonDaemonStateFile(statePath);
 

@@ -50,6 +50,7 @@ interface WebAssetsOptions {
   readonly allowTokenInjection?: boolean;
   readonly baseUrl?: string;
   readonly directory: string;
+  readonly workspaceDirectory?: string;
 }
 
 interface SseClient {
@@ -1505,6 +1506,9 @@ class DaemonServerAppRuntime {
       const bootstrap = {
         baseUrl: webAssets.baseUrl ?? "",
         clientId: randomUUID(),
+        ...(webAssets.workspaceDirectory === undefined
+          ? {}
+          : { directory: webAssets.workspaceDirectory }),
         startupIntent: DEFAULT_WEB_STARTUP_INTENT,
         token: this.authToken,
       };
