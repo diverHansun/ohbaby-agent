@@ -51,14 +51,11 @@ export function computeBudgetReport(
   };
 }
 
-/** 仅当用户未设 turn 预算时，安全阀才作为兜底生效。 */
+/** 系统绝对安全阀始终生效，不能被显式 turn budget 绕过。 */
 export function isSafetyCapReached(
   usage: GoalUsage,
-  limits: GoalBudgetLimits,
+  _limits: GoalBudgetLimits,
   safetyCapTurns: number,
 ): boolean {
-  if (limits.turnBudget !== undefined && limits.turnBudget > 0) {
-    return false;
-  }
   return usage.turnsUsed >= safetyCapTurns;
 }

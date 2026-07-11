@@ -29,7 +29,7 @@ function budgetLines(report: GoalBudgetReport): string[] {
   }
   if (report.wallClockBudgetMs !== null) {
     parts.push(
-      `time remaining ${formatElapsed(report.remainingWallClockMs ?? 0)}/${formatElapsed(report.wallClockBudgetMs)}`,
+      `active time remaining ${formatElapsed(report.remainingWallClockMs ?? 0)}/${formatElapsed(report.wallClockBudgetMs)}`,
     );
   }
   if (parts.length === 0) return [];

@@ -1,13 +1,14 @@
 import { isSafetyCapReached } from "./budget.js";
 import { renderGoalTurnPrompt } from "./injection.js";
 import type { GoalStore } from "./store.js";
-import type { GoalTurnRunner } from "./types.js";
+import type { GoalActor, GoalTurnRunner } from "./types.js";
 
 export interface DriveGoalDeps {
   readonly store: GoalStore;
   readonly runner: GoalTurnRunner;
   readonly sessionId: string;
   readonly safetyCapTurns: number;
+  readonly pause: (reason: string, actor: GoalActor) => Promise<unknown>;
 }
 
 /**
@@ -17,16 +18,16 @@ export interface DriveGoalDeps {
  * cancelled/failed/预算/安全阀都 pause（恢复只有 /goal resume 一条路，不自动重入）。
  */
 export async function driveGoal(deps: DriveGoalDeps): Promise<void> {
-  const { runner, safetyCapTurns, sessionId, store } = deps;
+  const { pause, runner, safetyCapTurns, sessionId, store } = deps;
   for (;;) {
     const snapshot = store.getSnapshot();
     if (snapshot?.status !== "active") return;
     if (snapshot.budget.overBudget) {
-      await store.pause("A configured budget was reached", "runtime");
+      await pause("A configured budget was reached", "runtime");
       return;
     }
     if (isSafetyCapReached(snapshot, snapshot.budgetLimits, safetyCapTurns)) {
-      await store.pause(
+      await pause(
         "Safety cap reached: too many continuation turns without completion",
         "runtime",
       );
@@ -44,16 +45,13 @@ export async function driveGoal(deps: DriveGoalDeps): Promise<void> {
     }
     if (outcome.status === "cancelled") {
       if (store.getSnapshot()?.status === "active") {
-        await store.pause("interrupted", "user");
+        await pause("interrupted", "user");
       }
       return;
     }
     if (outcome.status === "failed") {
       if (store.getSnapshot()?.status === "active") {
-        await store.pause(
-          `runtime error: ${outcome.error ?? "unknown"}`,
-          "runtime",
-        );
+        await pause(`runtime error: ${outcome.error ?? "unknown"}`, "runtime");
       }
       return;
     }

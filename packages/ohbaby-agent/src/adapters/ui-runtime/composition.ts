@@ -43,6 +43,7 @@ import { createBuiltinTools } from "../../tools/index.js";
 import {
   GoalService,
   InMemoryGoalPersistence,
+  type GoalExecutionControlPort,
   type GoalServiceDeps,
   type GoalPersistencePort,
 } from "../../goals/index.js";
@@ -134,6 +135,7 @@ export interface UiRuntimeCompositionOptions {
   readonly workdir?: string;
   /** goal 记录的持久化；缺省用内存实现（与 messageManager 的缺省姿态一致）。 */
   readonly goalPersistence?: GoalPersistencePort;
+  readonly goalExecutionControl: GoalExecutionControlPort;
   readonly onGoalChange?: GoalServiceDeps["onChange"];
   readonly subagentInstanceStore?: SubagentInstanceStore;
   readonly subagentOwnerId?: string;
@@ -518,6 +520,7 @@ export async function createUiRuntimeComposition(
   );
 
   const goalService = new GoalService({
+    executionControl: options.goalExecutionControl,
     onChange: (event): void => {
       options.onGoalChange?.(event);
       const status = event.snapshot?.status;
@@ -531,6 +534,15 @@ export async function createUiRuntimeComposition(
               : `Goal ${status ?? "updated"}${event.snapshot.pauseReason ? `: ${event.snapshot.pauseReason}` : ""}`,
         source: "goals",
         title: "Goal",
+      });
+    },
+    onError: ({ error, sessionId }): void => {
+      options.onNotice?.({
+        key: `goal:execution:${sessionId}:${formatUnknown(error)}`,
+        level: "error",
+        message: formatUnknown(error),
+        source: "goals",
+        title: "Goal execution control failed",
       });
     },
     persistence: options.goalPersistence ?? new InMemoryGoalPersistence(),
@@ -698,6 +710,12 @@ export async function createUiRuntimeComposition(
     },
 
     interruptRunTree,
+
+    interruptSubagentsByParent(parentSessionId, reason): Promise<void> {
+      return subagentHost
+        .interruptByParent(parentSessionId, reason)
+        .then(() => undefined);
+    },
 
     async dispose(): Promise<void> {
       unsubscribeSessionRemoved();

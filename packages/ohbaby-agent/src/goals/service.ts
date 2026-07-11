@@ -3,8 +3,10 @@ import { driveGoal } from "./driver.js";
 import { GoalStore } from "./store.js";
 import type {
   CreateGoalInput,
+  GoalActor,
   GoalBudgetLimits,
   GoalChange,
+  GoalExecutionControlPort,
   GoalPersistencePort,
   GoalSnapshot,
   GoalStatus,
@@ -17,10 +19,15 @@ export interface GoalServiceDeps {
   readonly createGoalId?: () => string;
   /** 默认 GOAL_SAFETY_CAP_TURNS；仅测试可注入低值，不对用户暴露。 */
   readonly safetyCapTurns?: number;
+  readonly executionControl: GoalExecutionControlPort;
   readonly onChange?: (event: {
     readonly sessionId: string;
     readonly snapshot: GoalSnapshot | null;
     readonly change: GoalChange;
+  }) => void;
+  readonly onError?: (event: {
+    readonly error: unknown;
+    readonly sessionId: string;
   }) => void;
 }
 
@@ -72,6 +79,8 @@ export class GoalService {
     const loop = (async (): Promise<void> => {
       const store = await this.storeFor(sessionId);
       await driveGoal({
+        pause: (reason, actor) =>
+          this.pauseActiveGoal(sessionId, reason, actor),
         runner,
         safetyCapTurns: this.safetyCapTurns,
         sessionId,
@@ -79,11 +88,14 @@ export class GoalService {
       });
     })()
       .catch(async (error: unknown) => {
+        this.deps.onError?.({ error, sessionId });
         const store = await this.storeFor(sessionId).catch(() => undefined);
         if (store?.getSnapshot()?.status === "active") {
-          await store
-            .pause(`runtime error: ${errorMessage(error)}`, "runtime")
-            .catch(() => undefined);
+          await this.pauseActiveGoal(
+            sessionId,
+            `runtime error: ${errorMessage(error)}`,
+            "runtime",
+          ).catch(() => undefined);
         }
       })
       .finally(() => {
@@ -118,13 +130,16 @@ export class GoalService {
     sessionId: string,
     reason = "Paused by user",
   ): Promise<GoalSnapshot> {
-    const store = await this.storeFor(sessionId);
-    return store.pause(reason, "user");
+    return this.pauseActiveGoal(sessionId, reason, "user");
   }
 
   async cancelGoal(sessionId: string): Promise<void> {
     const store = await this.storeFor(sessionId);
+    const wasActive = store.getSnapshot()?.status === "active";
     await store.cancel("user");
+    if (wasActive) {
+      await this.interruptGoalExecution(sessionId, "goal cancelled", true);
+    }
   }
 
   async replaceGoal(
@@ -170,10 +185,15 @@ export class GoalService {
     }
     if (status === "complete") {
       await store.markComplete("model");
+      await this.interruptGoalExecution(sessionId, "goal completed", false);
       return { note: "Goal completed and cleared.", snapshot: null };
     }
     if (status === "paused") {
-      const snapshot = await store.pause(reason ?? "Paused by model", "model");
+      const snapshot = await this.pauseActiveGoal(
+        sessionId,
+        reason ?? "Paused by model",
+        "model",
+      );
       return {
         note: `Goal paused: ${snapshot.pauseReason ?? ""}`,
         snapshot,
@@ -189,6 +209,32 @@ export class GoalService {
       note: inactiveGoalNote(current),
       snapshot: current,
     };
+  }
+
+  private async pauseActiveGoal(
+    sessionId: string,
+    reason: string,
+    actor: GoalActor,
+  ): Promise<GoalSnapshot> {
+    const store = await this.storeFor(sessionId);
+    const wasActive = store.getSnapshot()?.status === "active";
+    const snapshot = await store.pause(reason, actor);
+    if (wasActive) {
+      await this.interruptGoalExecution(sessionId, reason, true);
+    }
+    return snapshot;
+  }
+
+  private async interruptGoalExecution(
+    sessionId: string,
+    reason: string,
+    includePrimary: boolean,
+  ): Promise<void> {
+    await this.deps.executionControl.interruptGoalExecution({
+      includePrimary,
+      reason,
+      sessionId,
+    });
   }
 }
 

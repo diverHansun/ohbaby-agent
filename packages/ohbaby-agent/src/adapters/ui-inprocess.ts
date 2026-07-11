@@ -45,8 +45,10 @@ import {
   InMemoryGoalPersistence,
   renderGoalContextNote,
 } from "../goals/index.js";
+import { executeGoalExecutionInterrupt } from "./goal-execution-control.js";
 import type {
   GoalPersistencePort,
+  GoalExecutionInterruptInput,
   GoalSnapshot,
   GoalTurnOutcome,
 } from "../goals/index.js";
@@ -394,6 +396,7 @@ export function createInProcessUiBackendClient(
           ? {}
           : { createRunId: runtimeRunIdFactory }),
         goalPersistence,
+        goalExecutionControl: { interruptGoalExecution },
         llmClient,
         messageManager,
         hookExecutor: options.hookExecutor,
@@ -1541,20 +1544,37 @@ export function createInProcessUiBackendClient(
   async function interruptGoalPromptInFlight(): Promise<void> {
     const sessionId = promptInFlightSessionId;
     try {
-      await waitForPromptRunReadyOrIdle();
-      const runId = runtimeController.getActiveRunId();
-      if (runId) {
-        await runtimeController.abortPromptRun(runId);
-      }
       if (sessionId) {
         const runtime = await runtimeController.getRuntimeForPrompt();
-        await runtime.goals
-          .pauseGoal(sessionId, "interrupted")
-          .catch(() => undefined);
+        const snapshot = await runtime.goals.getSnapshot(sessionId);
+        if (snapshot?.status === "active") {
+          await runtime.goals.pauseGoal(sessionId, "interrupted");
+        } else {
+          await interruptGoalExecution({
+            includePrimary: true,
+            reason: "interrupted",
+            sessionId,
+          });
+        }
       }
     } finally {
       await waitForPromptIdle();
     }
+  }
+
+  async function interruptGoalExecution(
+    input: GoalExecutionInterruptInput,
+  ): Promise<void> {
+    const runtime = await runtimeController.getRuntimeForPrompt();
+    await executeGoalExecutionInterrupt(input, {
+      abortPromptRun: (runId) => runtimeController.abortPromptRun(runId),
+      activeRunId: () => runtimeController.getActiveRunId(),
+      interruptSubagentsByParent: (sessionId, reason) =>
+        runtime.interruptSubagentsByParent(sessionId, reason),
+      promptOwner: () => promptInFlightOwner,
+      promptSessionId: () => promptInFlightSessionId,
+      waitForPromptRunReadyOrIdle,
+    });
   }
 
   async function waitForPromptIdle(): Promise<void> {
@@ -1738,9 +1758,6 @@ export function createInProcessUiBackendClient(
       return (await goalService()).createGoal(sessionId, {
         actor: "user",
         objective: input.objective,
-        ...(input.budgetLimits === undefined
-          ? {}
-          : { budgetLimits: input.budgetLimits }),
       });
     },
     async pause(sessionId) {
@@ -1752,9 +1769,6 @@ export function createInProcessUiBackendClient(
     resolveSessionId: resolveGoalSessionId,
     async resume(sessionId) {
       return (await goalService()).resumeGoal(sessionId);
-    },
-    async setBudget(sessionId, limits) {
-      return (await goalService()).setBudget(sessionId, limits);
     },
     async status(sessionId) {
       const snapshot = await (await goalService()).getSnapshot(sessionId);

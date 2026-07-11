@@ -166,7 +166,6 @@ export interface CommandGoalBackend {
     sessionId: string,
     input: {
       readonly objective: string;
-      readonly budgetLimits?: GoalCommandBudgetLimits;
     },
   ) => Promise<GoalSnapshot>;
   readonly status: (sessionId: string) => Promise<GoalSnapshot | null>;
@@ -177,17 +176,7 @@ export interface CommandGoalBackend {
     sessionId: string,
     objective: string,
   ) => Promise<GoalSnapshot>;
-  readonly setBudget: (
-    sessionId: string,
-    limits: GoalCommandBudgetLimits,
-  ) => Promise<GoalSnapshot>;
   readonly resolveSessionId: (explicit?: string) => Promise<string | undefined>;
-}
-
-export interface GoalCommandBudgetLimits {
-  readonly turnBudget?: number;
-  readonly tokenBudget?: number;
-  readonly wallClockBudgetMs?: number;
 }
 
 export interface CommandServiceOptions {
