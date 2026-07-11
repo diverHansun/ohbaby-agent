@@ -46,7 +46,7 @@
 - **ND2 不生成/存储/轮换 auth token**：由 daemon 负责；web 只读注入副本、仅存内存（依赖 S-C）。
 - **ND3 不重定义领域语义/业务规则**：会话真相在 `ohbaby-agent` backend；web 只投影 + adapter。
 - **ND4 不定义 `/v1` wire 契约**：契约真相在 server 的 OpenAPI（`/doc`）+ `ohbaby-sdk` 领域类型；web 消费（生成 typed client）。
-- **ND5 v0.1.6 不做**：完整模型 provider marketplace、大量自动建议、多项目界面切换、interaction 请求、分页/高级命令面板。v0.1.7 已完成全局面板的最小 known/loaded/selected/switch 闭环；高级项目管理与视觉体验仍不在本批。
+- **ND5 v0.1.6 不做**：完整模型 provider marketplace、大量自动建议、interaction 请求、分页/高级命令面板。v0.1.7 已完成全局面板 runtime 与 OpenCode 风格项目 rail、按需 session sidebar、持久项目管理；实现记录见 [`../problem-lists/2026-07-11-opencode-style-web-navigation/`](../problem-lists/2026-07-11-opencode-style-web-navigation/README.md)。
 - **ND6 不做远程/多用户鉴权、不直连 LAN**：同源本地优先，延续 server 的 N4。
 - **ND7 不为想象中的 app 提前抽共享包**：`api/daemon` 内置于本包；保持干净 seam 即可，YAGNI。
 - **ND8 不管理 daemon 生命周期 / 不 auto-spawn**：假定用户显式 `ohbaby serve`（延续 ADR-001 G4 显式生命周期）。"打开 web" = 跑 `ohbaby serve` + 开浏览器，无隐藏 daemon。

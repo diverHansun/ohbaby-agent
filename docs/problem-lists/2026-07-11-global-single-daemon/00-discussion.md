@@ -43,7 +43,7 @@
 | 同 session 并发 run | `claimPendingRun`（`BEGIN IMMEDIATE`）→ `SessionRunBusyError` | 已实现 |
 | run 归属与恢复 | `owner_id` / `owner_pid` + `recoverOrphanedRuns` | 已实现；仍需 TUI+serve 集成测试 |
 | 全局 backend lease | `persistentUiBackendLease` 已删除 | 勿恢复 |
-| TUI 启动感知 | 轻量读取用户级 pid/state + health/version 后提示 | 未实现；不得 import server 包 |
+| TUI 启动感知 | 轻量读取用户级 pid/state + health/version 后提示 | 已实现；不 import server 包 |
 | 跨 runtime UX | busy 错误映射为可理解提示 | 待完善 |
 | 未来 `/loop` | Scheduler 只属于 serve；TUI 不注册 durable job | 下批约束 |
 

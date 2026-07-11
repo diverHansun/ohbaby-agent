@@ -49,6 +49,12 @@ interface FakeRuntime {
   readonly listCommands: ReturnType<
     typeof vi.fn<OhbabyWebClient["listCommands"]>
   >;
+  readonly hideWorkspace: ReturnType<
+    typeof vi.fn<OhbabyWebRuntime["hideWorkspace"]>
+  >;
+  readonly openWorkspace: ReturnType<
+    typeof vi.fn<OhbabyWebRuntime["openWorkspace"]>
+  >;
   readonly runtime: OhbabyWebRuntime;
   readonly selectSession: ReturnType<
     typeof vi.fn<OhbabyWebClient["selectSession"]>
@@ -283,6 +289,8 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
 
+    expect(app.container.querySelector(".ohb-sidebar")).toBeNull();
+    await clickButton(app.container, "Expand sessions");
     expect(app.container.querySelector(".ohb-sidebar")).not.toBeNull();
     expect(
       app.container.querySelector('button[title="Select Session 2"]')
@@ -296,25 +304,77 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.selectSession).toHaveBeenCalledWith("session_2");
   });
 
-  it("switches the selected workspace from the global sidebar selector", async () => {
+  it("switches the selected workspace from the project rail", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
     const app = mountApp(fake.runtime);
-    const selector = app.container.querySelector(
-      'select[aria-label="Workspace"]',
+    const project = app.container.querySelector(
+      'button[aria-label="Open repo-b"]',
     );
-    if (!(selector instanceof HTMLSelectElement)) {
-      throw new Error("workspace selector not found");
+    if (!(project instanceof HTMLButtonElement)) {
+      throw new Error("project rail button not found");
     }
 
     await act(async () => {
-      selector.value = "/repo-b";
-      selector.dispatchEvent(new Event("change", { bubbles: true }));
+      project.click();
       await Promise.resolve();
     });
 
     expect(fake.switchWorkspace).toHaveBeenCalledWith("/repo-b");
+  });
+
+  it("removes a project from the rail through its context menu", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+    const project = app.container.querySelector(
+      'button[aria-label="Open repo-b"]',
+    );
+    if (!(project instanceof HTMLButtonElement)) {
+      throw new Error("project rail button not found");
+    }
+
+    await act(async () => {
+      project.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          clientX: 20,
+          clientY: 30,
+        }),
+      );
+      await Promise.resolve();
+    });
+    const remove = Array.from(
+      app.container.querySelectorAll('[role="menuitem"]'),
+    ).find((element) => element.textContent === "从项目栏移除");
+    if (!(remove instanceof HTMLButtonElement)) {
+      throw new Error("remove project action not found");
+    }
+    await act(async () => {
+      remove.click();
+      await Promise.resolve();
+    });
+
+    expect(fake.hideWorkspace).toHaveBeenCalledWith("/repo-b");
+  });
+
+  it("opens the server-backed directory picker from the project rail", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+
+    await clickButton(app.container, "Open project");
+    await waitFor(
+      () => app.container.querySelector('[role="dialog"]') !== null,
+    );
+
+    expect(app.container.querySelector('input[type="text"]')).toBeNull();
+    expect(app.container.textContent).toContain(
+      "Choose a folder from this computer",
+    );
   });
 
   it("renders transient reasoning for a streaming assistant message", async () => {
@@ -382,6 +442,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const app = mountApp(fake.runtime);
 
+    await clickButton(app.container, "Expand sessions");
     await clickButton(app.container, "Archive Session 2");
 
     expect(confirm).toHaveBeenCalledWith("Archive this session?");
@@ -411,6 +472,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     const app = mountApp(fake.runtime);
 
+    await clickButton(app.container, "Expand sessions");
     await clickButton(app.container, "Archive Session 2");
 
     expect(fake.archiveSession).not.toHaveBeenCalled();
@@ -429,6 +491,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
 
+    await clickButton(app.container, "Expand sessions");
     await clickButton(app.container, "Select Session");
 
     expect(fake.selectSession).toHaveBeenCalledWith("session_1");
@@ -474,6 +537,7 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(app.container.textContent).not.toContain("loaded transcript");
 
+    await clickButton(app.container, "Expand sessions");
     await clickButton(app.container, "Select Session");
 
     await waitFor(() =>
@@ -884,10 +948,28 @@ function createFakeRuntime(input: {
   const switchWorkspace = vi.fn<OhbabyWebRuntime["switchWorkspace"]>(() =>
     Promise.resolve(),
   );
+  const hideWorkspace = vi.fn<OhbabyWebRuntime["hideWorkspace"]>(() =>
+    Promise.resolve(),
+  );
+  const openWorkspace = vi.fn<OhbabyWebRuntime["openWorkspace"]>(() =>
+    Promise.resolve(),
+  );
   const workspaceSnapshot = {
     scopes: [
-      { directory: "/repo-a", loaded: true },
-      { directory: "/repo-b", loaded: false },
+      {
+        available: true,
+        directory: "/repo-a",
+        lastOpenedAt: 2,
+        loaded: true,
+        position: 0,
+      },
+      {
+        available: true,
+        directory: "/repo-b",
+        lastOpenedAt: 1,
+        loaded: false,
+        position: 1,
+      },
     ],
     selectedDirectory: "/repo-a",
   } as const;
@@ -917,8 +999,20 @@ function createFakeRuntime(input: {
     listCommands,
     listWorkspaceScopes: vi.fn(() =>
       Promise.resolve([
-        { directory: "/repo-a", loaded: true },
-        { directory: "/repo-b", loaded: false },
+        {
+          available: true,
+          directory: "/repo-a",
+          lastOpenedAt: 2,
+          loaded: true,
+          position: 0,
+        },
+        {
+          available: true,
+          directory: "/repo-b",
+          lastOpenedAt: 1,
+          loaded: false,
+          position: 1,
+        },
       ]),
     ),
     probeModelContextWindow: vi.fn(() =>
@@ -940,9 +1034,20 @@ function createFakeRuntime(input: {
     connectModel,
     createSession,
     executeSlashCommand,
+    hideWorkspace,
     listCommands,
+    openWorkspace,
     runtime: {
       client,
+      hideWorkspace,
+      listDirectoryEntries: (directory) =>
+        Promise.resolve({
+          directories: [{ directory: `${directory}/project`, name: "project" }],
+          directory,
+        }),
+      listDirectoryRoots: () =>
+        Promise.resolve([{ directory: "/Users/test", label: "Home" }]),
+      openWorkspace,
       getWorkspaceSnapshot: () => workspaceSnapshot,
       ready: Promise.resolve(),
       refreshWorkspaces: () => Promise.resolve(),

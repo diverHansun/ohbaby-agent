@@ -265,7 +265,7 @@ known projects 由共享 DB 中的 `project_root` 与当前 InstanceStore 已加
 
 | 阶段 | 内容 |
 |------|------|
-| Phase 2 | 全局面板高级体验、per-scope dispose、App 鉴权与长期资源治理；Phase 1 最小 known/selected/switch、connections/`serve ps` 已完成 |
+| Phase 2 | 全局面板项目导航已拆为独立议题 [`../2026-07-11-opencode-style-web-navigation/`](../2026-07-11-opencode-style-web-navigation/README.md)；per-scope dispose、App 鉴权与长期资源治理仍属其他后续议题。Phase 1 最小 known/selected/switch、connections/`serve ps` 已完成 |
 | Phase 3 | session 级 `/loop`、全局 Scheduler、workspace/session dispatcher、scheduler_job 运行时代码 |
 
 ---

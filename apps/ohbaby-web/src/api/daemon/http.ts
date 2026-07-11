@@ -21,6 +21,9 @@ import type {
   SubmitPromptRequest,
   WebStartupIntent,
   WorkspaceScopesResponse,
+  WorkspaceOpenResponse,
+  DirectoryPickerRootsResponse,
+  DirectoryPickerListResponse,
 } from "./wire.js";
 
 export interface DaemonHttpClientOptions {
@@ -87,6 +90,38 @@ export class DaemonHttpClient {
 
   listWorkspaceScopes(): Promise<WorkspaceScopesResponse> {
     return this.request("/v1/scopes", { includeDirectory: false });
+  }
+
+  openWorkspace(directory: string): Promise<WorkspaceOpenResponse> {
+    return this.request("/v1/scopes/open", {
+      body: { directory },
+      includeDirectory: false,
+      method: "POST",
+    });
+  }
+
+  hideWorkspace(directory: string): Promise<OkResponse> {
+    return this.request("/v1/scopes/hide", {
+      body: { directory },
+      includeDirectory: false,
+      method: "POST",
+    });
+  }
+
+  listDirectoryPickerRoots(): Promise<DirectoryPickerRootsResponse> {
+    return this.request("/v1/directory-picker/roots", {
+      includeDirectory: false,
+    });
+  }
+
+  listDirectoryPickerEntries(
+    directory: string,
+  ): Promise<DirectoryPickerListResponse> {
+    return this.request("/v1/directory-picker/list", {
+      body: { directory },
+      includeDirectory: false,
+      method: "POST",
+    });
   }
 
   executeCommand(input: ExecuteCommandRequest): Promise<OkResponse> {

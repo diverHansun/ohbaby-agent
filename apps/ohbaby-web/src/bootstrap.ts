@@ -24,22 +24,36 @@ function readBootstrapConfig(): OhbabyBootstrapConfig {
   const hintedDirectory = new URLSearchParams(
     window.location.hash.replace(/^#/, ""),
   ).get("directory");
-  return hintedDirectory === null || hintedDirectory.trim().length === 0
-    ? config
-    : { ...config, directory: hintedDirectory };
+  const hintedSession = new URLSearchParams(
+    window.location.hash.replace(/^#/, ""),
+  ).get("session");
+  const directory = hintedDirectory?.trim();
+  return {
+    ...config,
+    ...(directory ? { directory } : { directory: undefined }),
+    ...(hintedSession
+      ? {
+          startupIntent: {
+            ...config.startupIntent,
+            resumeSessionId: hintedSession,
+          },
+        }
+      : {}),
+  };
 }
 
 try {
   const runtime = createOhbabyWebRuntime(readBootstrapConfig());
   window.__OHBABY_WEB__ = runtime;
-  mountOhbabyWebApp(runtime);
   runtime.ready
     .then(() => {
+      mountOhbabyWebApp(runtime);
       window.dispatchEvent(
         new CustomEvent("ohbaby:web-ready", { detail: runtime }),
       );
     })
     .catch((error: unknown) => {
+      mountBootstrapError(error);
       window.dispatchEvent(
         new CustomEvent("ohbaby:web-error", { detail: error }),
       );

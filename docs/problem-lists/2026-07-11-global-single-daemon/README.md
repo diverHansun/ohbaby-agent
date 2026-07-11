@@ -35,3 +35,5 @@
 Phase 1 已完成：用户级 pid/state、跨 repo 复用、启动 readiness 等待、精确版本门禁、一个版本的当前 cwd legacy 检测、foreground 不 idle-exit、Promise 去重 InstanceStore、workspace API fail-closed 路由、per-scope backend/coordination/SSE 隔离，以及 CLI/Web 的显式 directory 透传均已落地。第二次从其他 repo 执行 `serve` 时，通过 URL fragment 给全局面板传递初始 selected project；fragment 只由前端转换为显式 header，不是 server query/cwd fallback。
 
 Phase 1b 发布门也已关闭：全局面板可展示 known/loaded workspace 并切换 selected scope，切换会重建 client/snapshot/SSE；`GET /v1/connections` 与 `ohbaby serve ps` 已提供连接观测；默认 TUI 通过轻量 pid/state + health/version 检查给出 coexistence 提示且不加载 `ohbaby-server`；真实双进程测试证明第二次 `serve` 复用同一 listener；跨进程双写测试证明同 session 仍由 run claim 保证至多一个 active run。自动化与真实浏览器验收记录见 [04-test-and-acceptance.md](./04-test-and-acceptance.md)。
+
+> 后续 Web 产品化批次：Phase 1b 的 `<select>` 只是一条已验收的 workspace runtime 纵切，不再作为目标导航。OpenCode 风格三栏、持久项目 registry、服务端目录弹窗、hide/reopen 与每项目 session 恢复见 [`../2026-07-11-opencode-style-web-navigation/`](../2026-07-11-opencode-style-web-navigation/README.md)。该批次不改变本文已经完成的单 daemon、header、InstanceStore、版本或 legacy 契约。

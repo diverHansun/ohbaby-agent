@@ -24,11 +24,19 @@ import type {
   WebSseEvent,
   WorkspaceScopeSummary,
   WorkspaceSnapshot,
+  DirectoryPickerEntry,
+  DirectoryPickerRoot,
 } from "./wire.js";
 import {
   createOhbabyWebStore,
   type OhbabyWebStore,
 } from "../../store/store.js";
+import {
+  readWebNavigationState,
+  replaceNavigationHash,
+  writeWebNavigationState,
+  type WebNavigationState,
+} from "./navigation-state.js";
 
 interface BufferedEvent {
   readonly event: Extract<WebSseEvent, { type: "ui.event" }>["event"];
@@ -77,6 +85,13 @@ export interface OhbabyWebRuntime {
   readonly ready: Promise<void>;
   readonly store: OhbabyWebStore;
   getWorkspaceSnapshot(): WorkspaceSnapshot;
+  hideWorkspace(directory: string): Promise<void>;
+  listDirectoryEntries(directory: string): Promise<{
+    readonly directories: readonly DirectoryPickerEntry[];
+    readonly directory: string;
+  }>;
+  listDirectoryRoots(): Promise<readonly DirectoryPickerRoot[]>;
+  openWorkspace(directory: string): Promise<void>;
   refreshWorkspaces(): Promise<void>;
   subscribeWorkspaces(listener: () => void): () => void;
   switchWorkspace(directory: string): Promise<void>;
@@ -416,8 +431,12 @@ function createBrowserDaemonClient(input: {
 class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   readonly store = createOhbabyWebStore();
   readonly ready: Promise<void>;
-  private activeClient: BrowserDaemonClient;
+  private activeClient: BrowserDaemonClient | undefined;
+  private readonly globalHttp: DaemonHttpClient;
   private readonly listeners = new Set<() => void>();
+  private controlPlaneAvailable = true;
+  private hasConnectedWorkspace = false;
+  private navigationState: WebNavigationState;
   private switchPromise: Promise<void> = Promise.resolve();
   private workspaceSnapshot: WorkspaceSnapshot;
 
@@ -425,19 +444,25 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     private readonly config: OhbabyBootstrapConfig,
     private readonly fetchImpl: typeof fetch | undefined,
   ) {
-    const selectedDirectory = config.directory?.trim();
-    if (!selectedDirectory) {
-      throw new Error("Missing workspace directory in daemon bootstrap config");
-    }
+    this.globalHttp = createDaemonHttpClient(
+      { ...config, directory: undefined },
+      fetchImpl,
+    );
+    this.navigationState = readWebNavigationState();
     this.workspaceSnapshot = {
-      scopes: [{ directory: selectedDirectory, loaded: true }],
-      selectedDirectory,
+      scopes: [],
+      selectedDirectory: null,
     };
-    this.activeClient = this.createClient(config);
-    this.ready = this.activeClient.connect();
+    this.store.subscribe(() => {
+      this.persistActiveSession();
+    });
+    this.ready = this.initialize();
   }
 
   get client(): OhbabyWebClient {
+    if (!this.activeClient) {
+      throw new Error("No workspace is selected");
+    }
     return this.activeClient;
   }
 
@@ -453,43 +478,93 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   }
 
   async refreshWorkspaces(): Promise<void> {
-    const scopes = await this.activeClient.listWorkspaceScopes();
-    const selectedDirectory = this.workspaceSnapshot.selectedDirectory;
-    const includesSelected = scopes.some(
-      (scope) => scope.directory === selectedDirectory,
-    );
+    const response = await this.globalHttp.listWorkspaceScopes();
+    const scopes = response.scopes;
     this.publishWorkspaceSnapshot({
-      scopes: includesSelected
-        ? scopes
-        : [{ directory: selectedDirectory, loaded: true }, ...scopes],
-      selectedDirectory,
+      scopes,
+      selectedDirectory: this.workspaceSnapshot.selectedDirectory,
     });
   }
 
+  async listDirectoryRoots(): Promise<readonly DirectoryPickerRoot[]> {
+    return (await this.globalHttp.listDirectoryPickerRoots()).roots;
+  }
+
+  async listDirectoryEntries(directory: string): Promise<{
+    readonly directories: readonly DirectoryPickerEntry[];
+    readonly directory: string;
+  }> {
+    const response = await this.globalHttp.listDirectoryPickerEntries(directory);
+    return {
+      directories: response.directories,
+      directory: response.directory,
+    };
+  }
+
+  async openWorkspace(directory: string): Promise<void> {
+    const response = await this.globalHttp.openWorkspace(directory);
+    await this.refreshWorkspaces();
+    await this.queueSwitchWorkspace(response.scope.directory, false);
+  }
+
+  async hideWorkspace(directory: string): Promise<void> {
+    await this.globalHttp.hideWorkspace(directory);
+    const wasSelected = this.workspaceSnapshot.selectedDirectory === directory;
+    await this.refreshWorkspaces();
+    if (!wasSelected) {
+      return;
+    }
+    const next = this.workspaceSnapshot.scopes.find((scope) => scope.available);
+    if (next) {
+      await this.queueSwitchWorkspace(next.directory, false);
+      return;
+    }
+    await this.clearActiveWorkspace();
+  }
+
   switchWorkspace(directory: string): Promise<void> {
+    return this.queueSwitchWorkspace(directory, true);
+  }
+
+  private queueSwitchWorkspace(
+    directory: string,
+    markOpened: boolean,
+  ): Promise<void> {
     const pending = this.switchPromise.then(() =>
-      this.doSwitchWorkspace(directory),
+      this.doSwitchWorkspace(directory, markOpened),
     );
     this.switchPromise = pending.catch(() => undefined);
     return pending;
   }
 
-  private async doSwitchWorkspace(directory: string): Promise<void> {
-    const selectedDirectory = directory.trim();
+  private async doSwitchWorkspace(
+    directory: string,
+    markOpened: boolean,
+  ): Promise<void> {
+    let selectedDirectory = directory.trim();
     if (selectedDirectory.length === 0) {
       throw new Error("Workspace directory cannot be empty");
     }
+    if (markOpened && this.controlPlaneAvailable) {
+      selectedDirectory = (
+        await this.globalHttp.openWorkspace(selectedDirectory)
+      ).scope.directory;
+      await this.refreshWorkspaces();
+    }
     if (selectedDirectory === this.workspaceSnapshot.selectedDirectory) {
+      this.rememberSelectedDirectory(selectedDirectory);
       return;
     }
     const previousDirectory = this.workspaceSnapshot.selectedDirectory;
     const previousScopes = this.workspaceSnapshot.scopes;
     const previousClient = this.activeClient;
-    await previousClient.close();
+    await previousClient?.close();
     this.store.reset();
     this.activeClient = this.createClient({
-      ...this.config,
-      clientId: globalThis.crypto.randomUUID(),
+      ...this.scopedBootstrapConfig(),
+      clientId: this.hasConnectedWorkspace
+        ? globalThis.crypto.randomUUID()
+        : this.config.clientId,
       directory: selectedDirectory,
     });
     this.publishWorkspaceSnapshot({
@@ -502,22 +577,143 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     });
     try {
       await this.activeClient.connect();
-      await this.refreshWorkspaces();
+      this.hasConnectedWorkspace = true;
+      await this.restoreRememberedSession(selectedDirectory);
+      if (this.controlPlaneAvailable) {
+        await this.refreshWorkspaces();
+      }
+      this.rememberSelectedDirectory(selectedDirectory);
     } catch (error) {
       await this.activeClient.close();
       this.store.reset();
-      this.activeClient = this.createClient({
-        ...this.config,
-        clientId: globalThis.crypto.randomUUID(),
-        directory: previousDirectory,
-      });
+      this.activeClient =
+        previousDirectory === null
+          ? undefined
+          : this.createClient({
+              ...this.scopedBootstrapConfig(),
+              clientId: globalThis.crypto.randomUUID(),
+              directory: previousDirectory,
+            });
       this.publishWorkspaceSnapshot({
         scopes: previousScopes,
         selectedDirectory: previousDirectory,
       });
-      await this.activeClient.connect().catch(() => undefined);
+      await this.activeClient?.connect().catch(() => undefined);
       throw error;
     }
+  }
+
+  private async initialize(): Promise<void> {
+    const hintedDirectory = this.config.directory?.trim();
+    try {
+      await this.refreshWorkspaces();
+    } catch (error) {
+      if (!hintedDirectory) {
+        throw error;
+      }
+      this.controlPlaneAvailable = false;
+      this.publishWorkspaceSnapshot({
+        scopes: [
+          {
+            available: true,
+            directory: hintedDirectory,
+            lastOpenedAt: 0,
+            loaded: true,
+            position: 0,
+          },
+        ],
+        selectedDirectory: null,
+      });
+      await this.queueSwitchWorkspace(hintedDirectory, false);
+      return;
+    }
+    let selectedDirectory: string | undefined;
+    if (hintedDirectory) {
+      const visibleHint = this.workspaceSnapshot.scopes.find(
+        (scope) => scope.directory === hintedDirectory && scope.available,
+      );
+      if (visibleHint) {
+        selectedDirectory = visibleHint.directory;
+      } else {
+        selectedDirectory = (
+          await this.globalHttp.openWorkspace(hintedDirectory)
+        ).scope.directory;
+        await this.refreshWorkspaces();
+      }
+    } else {
+      const remembered = this.navigationState.selectedDirectory;
+      selectedDirectory = this.workspaceSnapshot.scopes.find(
+        (scope) => scope.directory === remembered && scope.available,
+      )?.directory;
+      selectedDirectory ??= [...this.workspaceSnapshot.scopes]
+        .filter((scope) => scope.available)
+        .sort(
+          (left, right) =>
+            right.lastOpenedAt - left.lastOpenedAt ||
+            left.position - right.position,
+        )[0]?.directory;
+    }
+    if (selectedDirectory) {
+      await this.queueSwitchWorkspace(selectedDirectory, false);
+    }
+  }
+
+  private async restoreRememberedSession(directory: string): Promise<void> {
+    const sessionId = this.navigationState.sessionByDirectory[directory];
+    const snapshot = this.store.getSnapshot().view.snapshot;
+    if (
+      !sessionId ||
+      snapshot?.activeSessionId === sessionId ||
+      !snapshot?.sessions.some((session) => session.id === sessionId)
+    ) {
+      return;
+    }
+    await this.activeClient?.selectSession(sessionId);
+  }
+
+  private persistActiveSession(): void {
+    const directory = this.workspaceSnapshot.selectedDirectory;
+    const sessionId = this.store.getSnapshot().view.snapshot?.activeSessionId;
+    if (!directory || !sessionId) {
+      return;
+    }
+    this.navigationState = {
+      selectedDirectory: directory,
+      sessionByDirectory: {
+        ...this.navigationState.sessionByDirectory,
+        [directory]: sessionId,
+      },
+    };
+    writeWebNavigationState(this.navigationState);
+    replaceNavigationHash({ directory, sessionId });
+  }
+
+  private rememberSelectedDirectory(directory: string): void {
+    this.navigationState = {
+      ...this.navigationState,
+      selectedDirectory: directory,
+    };
+    writeWebNavigationState(this.navigationState);
+    replaceNavigationHash({
+      directory,
+      sessionId: this.navigationState.sessionByDirectory[directory],
+    });
+  }
+
+  private async clearActiveWorkspace(): Promise<void> {
+    await this.activeClient?.close();
+    this.activeClient = undefined;
+    this.store.reset();
+    this.navigationState = {
+      ...this.navigationState,
+      selectedDirectory: null,
+    };
+    writeWebNavigationState(this.navigationState);
+    replaceNavigationHash({ directory: null });
+    this.publishWorkspaceSnapshot({
+      scopes: this.workspaceSnapshot.scopes,
+      selectedDirectory: null,
+    });
   }
 
   private createClient(config: OhbabyBootstrapConfig): BrowserDaemonClient {
@@ -526,6 +722,14 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       ...(this.fetchImpl === undefined ? {} : { fetch: this.fetchImpl }),
       store: this.store,
     });
+  }
+
+  private scopedBootstrapConfig(): OhbabyBootstrapConfig {
+    if (!this.hasConnectedWorkspace) {
+      return this.config;
+    }
+    const { startupIntent: _startupIntent, ...config } = this.config;
+    return config;
   }
 
   private publishWorkspaceSnapshot(snapshot: WorkspaceSnapshot): void {

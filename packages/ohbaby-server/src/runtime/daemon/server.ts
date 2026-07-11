@@ -1,5 +1,12 @@
+import { access, readdir, realpath, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { homedir } from "node:os";
+import { isAbsolute, parse, resolve } from "node:path";
 import type { UiBackendClient } from "ohbaby-sdk";
-import { createSessionIdGenerator } from "ohbaby-agent";
+import {
+  createSessionIdGenerator,
+  type WorkspaceRegistryStore,
+} from "ohbaby-agent";
 import { Hono, type Context } from "hono";
 import {
   createDaemonServerApp,
@@ -44,6 +51,8 @@ export interface DaemonHttpServerOptions {
     | Promise<readonly string[]>
     | readonly string[];
   readonly now?: () => number;
+  readonly workspaceRegistry?: WorkspaceRegistryStore;
+  readonly directoryPickerHome?: string;
   readonly onClientConnected?: (clientId: string) => void;
   readonly onClientDisconnected?: (clientId: string) => void;
   readonly onShutdown?: () => Promise<void> | void;
@@ -191,6 +200,14 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     }
 
     this.app.get("/v1/scopes", (context) => this.listScopes(context));
+    this.app.post("/v1/scopes/open", (context) => this.openScope(context));
+    this.app.post("/v1/scopes/hide", (context) => this.hideScope(context));
+    this.app.get("/v1/directory-picker/roots", (context) =>
+      this.listDirectoryPickerRoots(context),
+    );
+    this.app.post("/v1/directory-picker/list", (context) =>
+      this.listDirectoryPickerEntries(context),
+    );
     this.app.get("/v1/connections", (context) => this.listConnections(context));
     const dispatch = (context: Context): Promise<Response> =>
       this.dispatchWorkspaceRequest(context);
@@ -253,25 +270,278 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       );
     }
     const loaded = new Set(this.instanceStore?.loadedScopeKeys() ?? []);
-    const candidates = new Set<string>(loaded);
+    const available = new Set<string>(loaded);
     for (const directory of (await this.options.listKnownWorkspaceScopes?.()) ??
       []) {
       try {
-        candidates.add(await resolveWorkspaceScope(directory));
+        available.add(await resolveWorkspaceScope(directory));
       } catch (error) {
         if (!(error instanceof WorkspaceScopeError)) {
           throw error;
         }
       }
     }
-    const scopes = [...candidates]
-      .map((directory) => ({ directory, loaded: loaded.has(directory) }))
-      .sort(
-        (left, right) =>
-          Number(right.loaded) - Number(left.loaded) ||
-          left.directory.localeCompare(right.directory),
-      );
+    const registry = this.options.workspaceRegistry;
+    if (!registry) {
+      const scopes = [...available]
+        .map((directory) => ({ directory, loaded: loaded.has(directory) }))
+        .sort(
+          (left, right) =>
+            Number(right.loaded) - Number(left.loaded) ||
+            left.directory.localeCompare(right.directory),
+        );
+      return context.json({ ok: true, scopes });
+    }
+
+    for (const entry of registry.list()) {
+      if (entry.visibility !== "visible" || available.has(entry.scopeKey)) {
+        continue;
+      }
+      try {
+        const canonical = await resolveWorkspaceScope(entry.scopeKey);
+        if (canonical === entry.scopeKey) {
+          available.add(entry.scopeKey);
+        }
+      } catch (error) {
+        if (!(error instanceof WorkspaceScopeError)) {
+          throw error;
+        }
+      }
+    }
+    registry.ensureDiscovered([...available]);
+    const scopes = registry
+      .list()
+      .filter((entry) => entry.visibility === "visible")
+      .map((entry) => ({
+        available: available.has(entry.scopeKey),
+        directory: entry.scopeKey,
+        lastOpenedAt: entry.lastOpenedAt,
+        loaded: loaded.has(entry.scopeKey),
+        position: entry.position,
+      }));
     return context.json({ ok: true, scopes });
+  }
+
+  private async readDirectoryBody(
+    context: Context,
+  ): Promise<{ readonly directory: string } | Response> {
+    let body: unknown;
+    try {
+      body = await context.req.json();
+    } catch {
+      return context.json(
+        {
+          error: { code: "INVALID_JSON", message: "Expected a JSON body" },
+          ok: false,
+        },
+        400,
+      );
+    }
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !("directory" in body) ||
+      typeof body.directory !== "string" ||
+      body.directory.length === 0
+    ) {
+      return context.json(
+        {
+          error: {
+            code: "INVALID_DIRECTORY",
+            message: "directory must be a non-empty string",
+          },
+          ok: false,
+        },
+        400,
+      );
+    }
+    return { directory: body.directory };
+  }
+
+  private async openScope(context: Context): Promise<Response> {
+    if (!this.isAuthorized(context)) {
+      return context.json(
+        { error: { message: "Unauthorized" }, ok: false },
+        401,
+      );
+    }
+    const input = await this.readDirectoryBody(context);
+    if (input instanceof Response) {
+      return input;
+    }
+    try {
+      const directory = await resolveWorkspaceScope(input.directory);
+      const entry = this.options.workspaceRegistry?.open(directory);
+      return context.json({
+        ok: true,
+        scope: {
+          available: true,
+          directory,
+          lastOpenedAt: entry?.lastOpenedAt ?? this.options.now(),
+          loaded: this.instanceStore?.get(directory) !== undefined,
+          position: entry?.position ?? 0,
+        },
+      });
+    } catch (error) {
+      if (error instanceof WorkspaceScopeError) {
+        return context.json(
+          { error: { code: error.code, message: error.message }, ok: false },
+          400,
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async hideScope(context: Context): Promise<Response> {
+    if (!this.isAuthorized(context)) {
+      return context.json(
+        { error: { message: "Unauthorized" }, ok: false },
+        401,
+      );
+    }
+    const input = await this.readDirectoryBody(context);
+    if (input instanceof Response) {
+      return input;
+    }
+    const registry = this.options.workspaceRegistry;
+    if (registry?.hide(input.directory) !== true) {
+      return context.json(
+        {
+          error: {
+            code: "WORKSPACE_NOT_REGISTERED",
+            message: "Workspace is not registered",
+          },
+          ok: false,
+        },
+        404,
+      );
+    }
+    return context.json({ directory: input.directory, ok: true });
+  }
+
+  private directoryPickerAllowed(): boolean {
+    return isLoopbackHost(this.options.host);
+  }
+
+  private directoryPickerForbidden(context: Context): Response | undefined {
+    if (!this.isAuthorized(context)) {
+      return context.json(
+        { error: { message: "Unauthorized" }, ok: false },
+        401,
+      );
+    }
+    if (!this.directoryPickerAllowed()) {
+      return context.json(
+        {
+          error: {
+            code: "DIRECTORY_PICKER_LOOPBACK_ONLY",
+            message: "Directory browsing is available only on loopback hosts",
+          },
+          ok: false,
+        },
+        403,
+      );
+    }
+    return undefined;
+  }
+
+  private listDirectoryPickerRoots(context: Context): Response {
+    const forbidden = this.directoryPickerForbidden(context);
+    if (forbidden) {
+      return forbidden;
+    }
+    const home = resolve(this.options.directoryPickerHome ?? homedir());
+    const root = parse(home).root;
+    return context.json({
+      ok: true,
+      roots: [
+        { directory: home, label: "Home" },
+        ...(root === home ? [] : [{ directory: root, label: "Filesystem" }]),
+      ],
+    });
+  }
+
+  private async resolveBrowsableDirectory(directory: string): Promise<string> {
+    if (!isAbsolute(directory)) {
+      throw new WorkspaceScopeError(
+        "directory-must-be-absolute",
+        "Directory must be an absolute path",
+      );
+    }
+    const canonical = await realpath(directory);
+    const info = await stat(canonical);
+    if (!info.isDirectory()) {
+      throw new WorkspaceScopeError(
+        "directory-not-directory",
+        "Directory must point to a directory",
+      );
+    }
+    await access(canonical, constants.R_OK);
+    return canonical;
+  }
+
+  private async listDirectoryPickerEntries(context: Context): Promise<Response> {
+    const forbidden = this.directoryPickerForbidden(context);
+    if (forbidden) {
+      return forbidden;
+    }
+    const input = await this.readDirectoryBody(context);
+    if (input instanceof Response) {
+      return input;
+    }
+    try {
+      const directory = await this.resolveBrowsableDirectory(input.directory);
+      const entries = await readdir(directory, { withFileTypes: true });
+      const directories = (
+        await Promise.all(
+          entries
+            .filter((entry) => !entry.name.startsWith("."))
+            .map(async (entry) => {
+              const child = resolve(directory, entry.name);
+              if (entry.isDirectory()) {
+                return { directory: child, name: entry.name };
+              }
+              if (!entry.isSymbolicLink()) {
+                return undefined;
+              }
+              try {
+                return (await stat(child)).isDirectory()
+                  ? { directory: child, name: entry.name }
+                  : undefined;
+              } catch {
+                return undefined;
+              }
+            }),
+        )
+      )
+        .filter(
+          (entry): entry is { readonly directory: string; readonly name: string } =>
+            entry !== undefined,
+        )
+        .sort((left, right) => left.name.localeCompare(right.name));
+      return context.json({ directories, directory, ok: true });
+    } catch (error) {
+      if (
+        error instanceof WorkspaceScopeError ||
+        (error instanceof Error && "code" in error)
+      ) {
+        return context.json(
+          {
+            error: {
+              code:
+                error instanceof WorkspaceScopeError
+                  ? error.code
+                  : "DIRECTORY_NOT_READABLE",
+              message: error.message,
+            },
+            ok: false,
+          },
+          400,
+        );
+      }
+      throw error;
+    }
   }
 
   private listConnections(context: Context): Response {
@@ -377,6 +647,8 @@ export function createDaemonHttpServer(
     eventBufferCapacity: options.eventBufferCapacity,
     host: options.host ?? DEFAULT_HOST,
     listKnownWorkspaceScopes: options.listKnownWorkspaceScopes,
+    workspaceRegistry: options.workspaceRegistry,
+    directoryPickerHome: options.directoryPickerHome,
     now: options.now ?? Date.now,
     onClientConnected: options.onClientConnected,
     onClientDisconnected: options.onClientDisconnected,

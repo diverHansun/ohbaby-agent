@@ -97,5 +97,6 @@ export {
   createSessionIdGenerator,
   listKnownSessionProjectRoots,
 } from "./services/session/index.js";
+export * from "./services/workspace-registry/index.js";
 export * from "./skill/index.js";
 export * from "./utils/index.js";

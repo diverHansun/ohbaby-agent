@@ -2,6 +2,10 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { UiBackendClient } from "ohbaby-sdk";
+import type {
+  WorkspaceRegistryEntry,
+  WorkspaceRegistryStore,
+} from "ohbaby-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { daemonAuthHeader } from "../../auth/token.js";
 import { createDaemonHttpServer, type WorkspaceBackend } from "./server.js";
@@ -20,6 +24,62 @@ function createBackend(dispose = vi.fn()): WorkspaceBackend {
     ),
     subscribeEvents: vi.fn(() => vi.fn()),
   } as unknown as UiBackendClient & { dispose(): void };
+}
+
+function createRegistry(now = (): number => Date.now()): WorkspaceRegistryStore {
+  const entries = new Map<string, WorkspaceRegistryEntry>();
+  return {
+    list: () => [...entries.values()].sort((a, b) => a.position - b.position),
+    ensureDiscovered(
+      scopeKeys: readonly string[],
+    ): readonly WorkspaceRegistryEntry[] {
+      for (const scopeKey of new Set(scopeKeys)) {
+        if (!entries.has(scopeKey)) {
+          const timestamp = now();
+          entries.set(scopeKey, {
+            createdAt: timestamp,
+            lastOpenedAt: timestamp,
+            position: entries.size,
+            scopeKey,
+            updatedAt: timestamp,
+            visibility: "visible",
+          });
+        }
+      }
+      return this.list();
+    },
+    hide(scopeKey: string): boolean {
+      const entry = entries.get(scopeKey);
+      if (!entry) return false;
+      entries.set(scopeKey, {
+        ...entry,
+        updatedAt: now(),
+        visibility: "hidden",
+      });
+      return true;
+    },
+    open(scopeKey: string): WorkspaceRegistryEntry {
+      const timestamp = now();
+      const current = entries.get(scopeKey);
+      const entry: WorkspaceRegistryEntry = current
+        ? {
+            ...current,
+            lastOpenedAt: timestamp,
+            updatedAt: timestamp,
+            visibility: "visible",
+          }
+        : {
+            createdAt: timestamp,
+            lastOpenedAt: timestamp,
+            position: entries.size,
+            scopeKey,
+            updatedAt: timestamp,
+            visibility: "visible",
+          };
+      entries.set(scopeKey, entry);
+      return entry;
+    },
+  };
 }
 
 describe("global daemon workspace routing", () => {
@@ -132,6 +192,7 @@ describe("global daemon workspace routing", () => {
       listKnownWorkspaceScopes: () => [canonicalB, canonicalA, canonicalB],
       port: 0,
       scopeRoot: canonicalA,
+      workspaceRegistry: createRegistry(() => 42_000),
     });
     await server.start();
 
@@ -144,8 +205,20 @@ describe("global daemon workspace routing", () => {
       await expect(initial.json()).resolves.toEqual({
         ok: true,
         scopes: [
-          { directory: canonicalA, loaded: true },
-          { directory: canonicalB, loaded: false },
+          {
+            available: true,
+            directory: canonicalA,
+            lastOpenedAt: 42_000,
+            loaded: true,
+            position: 0,
+          },
+          {
+            available: true,
+            directory: canonicalB,
+            lastOpenedAt: 42_000,
+            loaded: false,
+            position: 1,
+          },
         ],
       });
 
@@ -162,10 +235,132 @@ describe("global daemon workspace routing", () => {
       await expect(afterLoad.json()).resolves.toEqual({
         ok: true,
         scopes: [
-          { directory: canonicalA, loaded: true },
-          { directory: canonicalB, loaded: true },
+          {
+            available: true,
+            directory: canonicalA,
+            lastOpenedAt: 42_000,
+            loaded: true,
+            position: 0,
+          },
+          {
+            available: true,
+            directory: canonicalB,
+            lastOpenedAt: 42_000,
+            loaded: true,
+            position: 1,
+          },
         ],
       });
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("opens, hides, and browses projects through authenticated global routes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ohbaby-global-projects-"));
+    cleanupDirs.push(root);
+    const repo = join(root, "repo");
+    const child = join(root, "child");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await mkdir(child, { recursive: true });
+    await writeFile(join(root, "ignored.txt"), "file", "utf8");
+    const canonicalRepo = await realpath(repo);
+    const canonicalRoot = await realpath(root);
+    const registry = createRegistry(() => 77_000);
+    const server = createDaemonHttpServer({
+      authToken: "token",
+      backend: createBackend(),
+      createWorkspaceBackend: () => createBackend(),
+      directoryPickerHome: root,
+      port: 0,
+      scopeRoot: canonicalRepo,
+      workspaceRegistry: registry,
+    });
+    await server.start();
+    const headers = {
+      authorization: daemonAuthHeader("token"),
+      "content-type": "application/json",
+    };
+
+    try {
+      const roots = await fetch(`${server.url}/v1/directory-picker/roots`, {
+        headers,
+      });
+      expect(roots.status).toBe(200);
+      const rootsBody = (await roots.json()) as {
+        readonly ok: boolean;
+        readonly roots: readonly { readonly directory: string; readonly label: string }[];
+      };
+      expect(rootsBody.ok).toBe(true);
+      expect(rootsBody.roots).toContainEqual({ directory: root, label: "Home" });
+
+      const listed = await fetch(`${server.url}/v1/directory-picker/list`, {
+        body: JSON.stringify({ directory: root }),
+        headers,
+        method: "POST",
+      });
+      await expect(listed.json()).resolves.toMatchObject({
+        directories: [
+          { directory: join(canonicalRoot, "child"), name: "child" },
+          { directory: canonicalRepo, name: "repo" },
+        ],
+        directory: canonicalRoot,
+        ok: true,
+      });
+
+      const opened = await fetch(`${server.url}/v1/scopes/open`, {
+        body: JSON.stringify({ directory: repo }),
+        headers,
+        method: "POST",
+      });
+      expect(opened.status).toBe(200);
+      expect(registry.list()).toContainEqual(
+        expect.objectContaining({
+          scopeKey: canonicalRepo,
+          visibility: "visible",
+        }),
+      );
+
+      const openedEmptyProject = await fetch(`${server.url}/v1/scopes/open`, {
+        body: JSON.stringify({ directory: child }),
+        headers,
+        method: "POST",
+      });
+      expect(openedEmptyProject.status).toBe(200);
+      const withEmptyProject = await fetch(`${server.url}/v1/scopes`, {
+        headers,
+      });
+      const emptyProjectBody = (await withEmptyProject.json()) as {
+        readonly scopes: readonly {
+          readonly available: boolean;
+          readonly directory: string;
+        }[];
+      };
+      expect(emptyProjectBody.scopes).toContainEqual(
+        expect.objectContaining({
+          available: true,
+          directory: await realpath(child),
+        }),
+      );
+
+      const hidden = await fetch(`${server.url}/v1/scopes/hide`, {
+        body: JSON.stringify({ directory: canonicalRepo }),
+        headers,
+        method: "POST",
+      });
+      expect(hidden.status).toBe(200);
+      await fetch(`${server.url}/v1/scopes/hide`, {
+        body: JSON.stringify({ directory: await realpath(child) }),
+        headers,
+        method: "POST",
+      });
+      const scopes = await fetch(`${server.url}/v1/scopes`, { headers });
+      await expect(scopes.json()).resolves.toEqual({ ok: true, scopes: [] });
+
+      const unauthorized = await fetch(
+        `${server.url}/v1/directory-picker/roots`,
+      );
+      expect(unauthorized.status).toBe(401);
     } finally {
       await server.stop();
     }

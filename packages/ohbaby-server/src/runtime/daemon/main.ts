@@ -10,6 +10,7 @@ import {
   type PersistentUiBackendClient,
   type PersistentUiBackendOptions,
 } from "ohbaby-agent";
+import * as AgentRuntime from "ohbaby-agent";
 import { createDaemonAuthToken } from "../../auth/token.js";
 import {
   createDaemonHttpServer,
@@ -42,6 +43,24 @@ function retainLocalDaemonDatabase(): () => void {
       closePersistentUiBackendDatabase();
     }
   };
+}
+
+function createWorkspaceRegistryIfAvailable():
+  | import("ohbaby-agent").WorkspaceRegistryStore
+  | undefined {
+  if (!("createWorkspaceRegistryStore" in AgentRuntime)) {
+    return undefined;
+  }
+  try {
+    return AgentRuntime.createWorkspaceRegistryStore();
+  } catch (error) {
+    // Unit tests may replace the persistent backend with a lightweight fake
+    // that intentionally does not initialize SQLite.
+    if (error instanceof Error && error.name === "DatabaseNotInitializedError") {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 export interface StartDaemonServerOptions {
@@ -343,6 +362,30 @@ async function tryReuseRunningDaemon(input: {
   };
 }
 
+async function restoreWorkspaceInRunningDaemon(input: {
+  readonly scopeRoot: string;
+  readonly stateFile: JsonDaemonStateFile;
+}): Promise<void> {
+  const state = await input.stateFile.read();
+  const url = state === undefined ? undefined : urlFromState(state);
+  if (!url || !state?.authToken) {
+    throw new Error("Global ohbaby server state is incomplete");
+  }
+  const response = await fetch(`${url}/v1/scopes/open`, {
+    body: JSON.stringify({ directory: input.scopeRoot }),
+    headers: {
+      authorization: `Bearer ${state.authToken}`,
+      "content-type": "application/json",
+    },
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Could not restore ${input.scopeRoot} in the global project rail (HTTP ${String(response.status)})`,
+    );
+  }
+}
+
 async function waitForRunningDaemon(
   input: Parameters<typeof tryReuseRunningDaemon>[0],
 ): Promise<RunningDaemonServer> {
@@ -385,12 +428,16 @@ async function startFreshDaemon(input: {
         });
       const backend = createBackend(input.scopeRoot);
       const releaseDatabase = retainLocalDaemonDatabase();
+      const workspaceRegistry = createWorkspaceRegistryIfAvailable();
+      workspaceRegistry?.open(input.scopeRoot);
       server = createDaemonHttpServer({
         authToken: input.authToken,
         backend,
         createWorkspaceBackend: createBackend,
         host: input.options.host ?? DEFAULT_HOST,
         listKnownWorkspaceScopes: () => listKnownSessionProjectRoots(),
+        workspaceRegistry,
+        directoryPickerHome: input.options.homeDirectory,
         onClientConnected: (clientId) => {
           supervisor.clientConnected(clientId);
         },
@@ -435,7 +482,7 @@ async function startFreshDaemon(input: {
       return supervisor.stop();
     },
     get url(): string {
-      return startedServer.url;
+      return urlWithWorkspaceHint(startedServer.url, input.scopeRoot);
     },
   };
 }
@@ -469,10 +516,16 @@ export async function startDaemonServer(
     stateFile,
   });
   if (reusable) {
+    if (options.healthCheck === undefined) {
+      await restoreWorkspaceInRunningDaemon({
+        scopeRoot: scope.scopeRoot,
+        stateFile,
+      });
+    }
     return reusable;
   }
   if (pidRecord !== undefined && isProcessAlive(pidRecord.pid)) {
-    return waitForRunningDaemon({
+    const running = await waitForRunningDaemon({
       explicitHost,
       explicitPort,
       healthCheck,
@@ -483,6 +536,13 @@ export async function startDaemonServer(
       scopeRoot: scope.scopeRoot,
       stateFile,
     });
+    if (options.healthCheck === undefined) {
+      await restoreWorkspaceInRunningDaemon({
+        scopeRoot: scope.scopeRoot,
+        stateFile,
+      });
+    }
+    return running;
   }
 
   const firstPort =

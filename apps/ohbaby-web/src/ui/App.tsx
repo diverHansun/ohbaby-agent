@@ -1,7 +1,11 @@
 import {
   Archive,
   Bot,
+  ChevronLeft,
   ChevronDown,
+  Folder,
+  FolderPlus,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -18,7 +22,12 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { ChangeEvent, KeyboardEvent, ReactElement } from "react";
+import type {
+  ChangeEvent,
+  CSSProperties,
+  KeyboardEvent,
+  ReactElement,
+} from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { parseSlashCommandInput, resolveSlashCommand } from "ohbaby-sdk";
@@ -44,6 +53,10 @@ import type {
 } from "../api/daemon/client.js";
 import type { CommandNotice } from "../api/daemon/wire.js";
 import type { WorkspaceSnapshot } from "../api/daemon/wire.js";
+import type {
+  DirectoryPickerEntry,
+  DirectoryPickerRoot,
+} from "../api/daemon/wire.js";
 import type {
   CompactSessionRequest,
   ModelConnectRequest,
@@ -125,6 +138,19 @@ export function mountBootstrapError(error: unknown): void {
 }
 
 export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
+  const workspace = useSyncExternalStore(
+    (listener) => runtime.subscribeWorkspaces(listener),
+    () => runtime.getWorkspaceSnapshot(),
+    () => runtime.getWorkspaceSnapshot(),
+  );
+  return workspace.selectedDirectory === null ? (
+    <EmptyWorkspaceApp runtime={runtime} workspace={workspace} />
+  ) : (
+    <ConnectedOhbabyWebApp runtime={runtime} />
+  );
+}
+
+function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
   const storeSnapshot = useSyncExternalStore(
     (listener) => runtime.store.subscribe(listener),
     () => runtime.store.getSnapshot(),
@@ -137,6 +163,8 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
     () => runtime.getWorkspaceSnapshot(),
   );
   const [actionError, setActionError] = useState<string | null>(null);
+  const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
+  const [sessionSidebarOpen, setSessionSidebarOpen] = useState(false);
   const [closedCommandModalIds, setClosedCommandModalIds] = useState<
     readonly string[]
   >([]);
@@ -170,6 +198,12 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
   const switchWorkspace = useCallback(
     (directory: string): void => {
       void runAction(() => runtime.switchWorkspace(directory));
+    },
+    [runAction, runtime],
+  );
+  const hideWorkspace = useCallback(
+    (directory: string): void => {
+      void runAction(() => runtime.hideWorkspace(directory));
     },
     [runAction, runtime],
   );
@@ -312,11 +346,23 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
         showMain ? "ohb-app-main" : "ohb-app-empty"
       }`}
     >
+      <ProjectRail
+        onAdd={() => {
+          setDirectoryPickerOpen(true);
+        }}
+        onHide={hideWorkspace}
+        onSelect={switchWorkspace}
+        onToggleSessions={() => {
+          setSessionSidebarOpen((open) => !open);
+        }}
+        sessionsOpen={sessionSidebarOpen}
+        workspace={workspace}
+      />
       <SessionSidebar
+        open={sessionSidebarOpen}
         onArchiveSession={archiveSession}
         onCreateSession={createSession}
         onSelectSession={selectSession}
-        onSwitchWorkspace={switchWorkspace}
         view={view}
         workspace={workspace}
       />
@@ -409,6 +455,7 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
               onSubmit={submitText}
               status={view.header}
               view={view}
+              workspaceDirectory={workspace.selectedDirectory}
             />
           </>
         )}
@@ -423,6 +470,89 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
           />
         ) : null}
       </div>
+      {directoryPickerOpen ? (
+        <DirectoryPickerModal
+          onClose={() => {
+            setDirectoryPickerOpen(false);
+          }}
+          onOpen={async (directory) => {
+            if (await runAction(() => runtime.openWorkspace(directory))) {
+              setDirectoryPickerOpen(false);
+            }
+          }}
+          runtime={runtime}
+        />
+      ) : null}
+    </main>
+  );
+}
+
+function EmptyWorkspaceApp(props: {
+  readonly runtime: OhbabyWebRuntime;
+  readonly workspace: WorkspaceSnapshot;
+}): ReactElement {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = useCallback(async (action: () => Promise<void>) => {
+    try {
+      setError(null);
+      await action();
+      return true;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
+    }
+  }, []);
+  return (
+    <main className="ohb-app ohb-app-shell ohb-app-empty ohb-project-empty">
+      <ProjectRail
+        onAdd={() => {
+          setPickerOpen(true);
+        }}
+        onHide={(directory) => {
+          void run(() => props.runtime.hideWorkspace(directory));
+        }}
+        onSelect={(directory) => {
+          void run(() => props.runtime.switchWorkspace(directory));
+        }}
+        workspace={props.workspace}
+      />
+      <section className="ohb-app-content ohb-app-content-empty">
+        <ErrorBanner
+          message={error}
+          onDismiss={() => {
+            setError(null);
+          }}
+        />
+        <div className="ohb-project-empty-message">
+          <span className="ohb-project-empty-icon">
+            <Folder size={24} />
+          </span>
+          <h1>Open a project to get started</h1>
+          <p>Projects stay in this rail even before they have a session.</p>
+          <button
+            onClick={() => {
+              setPickerOpen(true);
+            }}
+            type="button"
+          >
+            <FolderPlus size={16} /> Open project
+          </button>
+        </div>
+      </section>
+      {pickerOpen ? (
+        <DirectoryPickerModal
+          onClose={() => {
+            setPickerOpen(false);
+          }}
+          onOpen={async (directory) => {
+            if (await run(() => props.runtime.openWorkspace(directory))) {
+              setPickerOpen(false);
+            }
+          }}
+          runtime={props.runtime}
+        />
+      ) : null}
     </main>
   );
 }
@@ -452,10 +582,18 @@ function EmptyState(props: {
   readonly onSubmit: (text: string) => Promise<boolean>;
   readonly status: HeaderModel;
   readonly view: ViewModel;
+  readonly workspaceDirectory: string | null;
 }): ReactElement {
+  const workspaceDirectory = props.workspaceDirectory ?? "";
   const contextLine = [
-    props.view.activeSession?.title ?? "ohbaby-agent",
-    props.view.activeSession?.projectRoot ?? "workspace ready",
+    props.view.activeSession?.title ??
+      (workspaceDirectory
+        ? workspaceLabel(workspaceDirectory)
+        : "ohbaby-agent"),
+    props.view.activeSession?.projectRoot ??
+      (workspaceDirectory
+        ? compactHomePath(workspaceDirectory)
+        : "workspace ready"),
     props.status.modelLabel,
   ];
   return (
@@ -493,77 +631,341 @@ function EmptyState(props: {
   );
 }
 
+function ProjectRail(props: {
+  readonly onAdd: () => void;
+  readonly onHide: (directory: string) => void;
+  readonly onSelect: (directory: string) => void;
+  readonly onToggleSessions?: () => void;
+  readonly sessionsOpen?: boolean;
+  readonly workspace: WorkspaceSnapshot;
+}): ReactElement {
+  const [menu, setMenu] = useState<{
+    readonly directory: string;
+    readonly x: number;
+    readonly y: number;
+  } | null>(null);
+  useEffect((): (() => void) | undefined => {
+    if (!menu) return;
+    const close = (): void => {
+      setMenu(null);
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("blur", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("blur", close);
+    };
+  }, [menu]);
+  return (
+    <nav className="ohb-project-rail" aria-label="Projects">
+      {props.workspace.selectedDirectory && props.onToggleSessions ? (
+        <button
+          aria-expanded={props.sessionsOpen ?? false}
+          aria-label={
+            props.sessionsOpen ? "Collapse sessions" : "Expand sessions"
+          }
+          className="ohb-project-rail-toggle"
+          onClick={props.onToggleSessions}
+          title={props.sessionsOpen ? "Collapse sessions" : "Expand sessions"}
+          type="button"
+        >
+          {props.sessionsOpen ? (
+            <PanelLeftClose size={17} />
+          ) : (
+            <PanelLeftOpen size={17} />
+          )}
+        </button>
+      ) : null}
+      <div className="ohb-project-rail-list">
+        {props.workspace.scopes.map((scope) => {
+          const active = scope.directory === props.workspace.selectedDirectory;
+          const label = workspaceLabel(scope.directory);
+          return (
+            <div className="ohb-project-rail-item" key={scope.directory}>
+              <button
+                aria-current={active ? "page" : undefined}
+                aria-label={`Open ${label}`}
+                className={`ohb-project-glyph ${active ? "is-active" : ""} ${
+                  scope.available ? "" : "is-unavailable"
+                }`}
+                disabled={!scope.available}
+                onClick={() => {
+                  props.onSelect(scope.directory);
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setMenu({
+                    directory: scope.directory,
+                    x: event.clientX,
+                    y: event.clientY,
+                  });
+                }}
+                style={
+                  {
+                    "--project-color": projectColor(scope.directory),
+                  } as CSSProperties
+                }
+                title={
+                  scope.available
+                    ? `${label}\n${scope.directory}`
+                    : `${label} is unavailable`
+                }
+                type="button"
+              >
+                {projectInitial(label)}
+              </button>
+              {active ? (
+                <button
+                  aria-label={`Project actions for ${label}`}
+                  className="ohb-project-actions"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const bounds = event.currentTarget.getBoundingClientRect();
+                    setMenu({
+                      directory: scope.directory,
+                      x: bounds.right + 6,
+                      y: bounds.top,
+                    });
+                  }}
+                  type="button"
+                >
+                  <MoreHorizontal size={13} />
+                </button>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+      <button
+        aria-label="Open project"
+        className="ohb-project-add"
+        onClick={props.onAdd}
+        title="Open project"
+        type="button"
+      >
+        <Plus size={20} />
+      </button>
+      {menu ? (
+        <div
+          className="ohb-project-menu"
+          role="menu"
+          style={{ left: menu.x, top: menu.y }}
+        >
+          <button
+            onClick={() => {
+              props.onHide(menu.directory);
+              setMenu(null);
+            }}
+            role="menuitem"
+            type="button"
+          >
+            从项目栏移除
+          </button>
+        </div>
+      ) : null}
+    </nav>
+  );
+}
+
+function projectInitial(label: string): string {
+  return Array.from(label.trim())[0]?.toLocaleUpperCase() ?? "?";
+}
+
+function projectColor(directory: string): string {
+  let hash = 0;
+  for (const character of directory) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint !== undefined) {
+      hash = (hash * 31 + codePoint) >>> 0;
+    }
+  }
+  return `hsl(${String(hash % 360)} 58% 84%)`;
+}
+
+function DirectoryPickerModal(props: {
+  readonly onClose: () => void;
+  readonly onOpen: (directory: string) => Promise<void>;
+  readonly runtime: OhbabyWebRuntime;
+}): ReactElement {
+  const [roots, setRoots] = useState<readonly DirectoryPickerRoot[]>([]);
+  const [current, setCurrent] = useState("");
+  const [entries, setEntries] = useState<readonly DirectoryPickerEntry[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  const browse = useCallback(
+    async (directory: string): Promise<void> => {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await props.runtime.listDirectoryEntries(directory);
+        setCurrent(response.directory);
+        setEntries(response.directories);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [props.runtime],
+  );
+
+  useEffect((): (() => void) => {
+    let cancelled = false;
+    void props.runtime
+      .listDirectoryRoots()
+      .then(async (nextRoots) => {
+        if (cancelled) return;
+        setRoots(nextRoots);
+        const first = nextRoots[0]?.directory;
+        if (first) await browse(first);
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setLoading(false);
+          setError(cause instanceof Error ? cause.message : String(cause));
+        }
+      });
+    closeRef.current?.focus();
+    return () => {
+      cancelled = true;
+    };
+  }, [browse, props.runtime]);
+
+  const parent = directoryParent(current);
+  return (
+    <div
+      aria-label="Open project"
+      aria-modal="true"
+      className="ohb-directory-overlay"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") props.onClose();
+      }}
+      role="dialog"
+    >
+      <section className="ohb-directory-dialog">
+        <header>
+          <div>
+            <strong>Open project</strong>
+            <small>Choose a folder from this computer</small>
+          </div>
+          <button
+            aria-label="Close"
+            onClick={props.onClose}
+            ref={closeRef}
+            type="button"
+          >
+            <X size={17} />
+          </button>
+        </header>
+        <div className="ohb-directory-roots">
+          {roots.map((root) => (
+            <button
+              key={root.directory}
+              onClick={() => void browse(root.directory)}
+              type="button"
+            >
+              <Folder size={14} /> {root.label}
+            </button>
+          ))}
+        </div>
+        <div className="ohb-directory-path" title={current}>
+          <button
+            aria-label="Go to parent folder"
+            disabled={!parent || loading}
+            onClick={() => parent && void browse(parent)}
+            type="button"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <span>{compactHomePath(current)}</span>
+        </div>
+        {error ? (
+          <div className="ohb-directory-error" role="alert">
+            {error}
+          </div>
+        ) : null}
+        <div className="ohb-directory-list" aria-busy={loading}>
+          {loading ? (
+            <div className="ohb-directory-placeholder">Loading folders…</div>
+          ) : entries.length > 0 ? (
+            entries.map((entry) => (
+              <button
+                key={entry.directory}
+                onDoubleClick={() => void browse(entry.directory)}
+                onClick={() => void browse(entry.directory)}
+                type="button"
+              >
+                <Folder size={16} />
+                <span>{entry.name}</span>
+                <ChevronDown size={14} />
+              </button>
+            ))
+          ) : (
+            <div className="ohb-directory-placeholder">No folders here</div>
+          )}
+        </div>
+        <footer>
+          <button
+            className="ohb-directory-cancel"
+            onClick={props.onClose}
+            type="button"
+          >
+            Cancel
+          </button>
+          <button
+            className="ohb-directory-open"
+            disabled={!current || loading}
+            onClick={() => void props.onOpen(current)}
+            type="button"
+          >
+            Open this folder
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function directoryParent(directory: string): string | null {
+  if (!directory || directory === "/") return null;
+  const normalized = directory.replace(/[\\/]+$/u, "");
+  const index = Math.max(
+    normalized.lastIndexOf("/"),
+    normalized.lastIndexOf("\\"),
+  );
+  if (index < 0) return null;
+  return index === 0 ? "/" : normalized.slice(0, index);
+}
+
 function SessionSidebar(props: {
+  readonly open: boolean;
   readonly onArchiveSession: (sessionId: string) => void;
   readonly onCreateSession: () => void;
   readonly onSelectSession: (sessionId: string) => void;
-  readonly onSwitchWorkspace: (directory: string) => void;
   readonly view: ViewModel;
   readonly workspace: WorkspaceSnapshot;
 }): ReactElement {
-  const [collapsed, setCollapsed] = useState(isNarrowViewport());
   const sessions = useMemo(
     () => sortedSessions(props.view.snapshot?.sessions ?? []),
     [props.view.snapshot?.sessions],
   );
   const activeSessionId = props.view.activeSession?.id;
 
-  if (collapsed) {
-    return (
-      <aside className="ohb-sidebar ohb-sidebar-collapsed">
-        <div className="ohb-sidebar-mini-brand" aria-label="ohbaby">
-          <span className="ohb-logo-grid" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-            <span />
-          </span>
-        </div>
-        <button
-          className="ohb-sidebar-icon-button"
-          onClick={() => {
-            setCollapsed(false);
-          }}
-          title="Expand sidebar"
-          type="button"
-        >
-          <PanelLeftOpen size={16} />
-        </button>
-        <button
-          className="ohb-sidebar-icon-button ohb-sidebar-new-icon"
-          disabled={props.view.composer.disabled}
-          onClick={props.onCreateSession}
-          title="New session"
-          type="button"
-        >
-          <Plus size={17} />
-        </button>
-      </aside>
-    );
-  }
+  if (!props.open) return <></>;
 
   return (
     <aside className="ohb-sidebar">
       <header className="ohb-sidebar-header">
-        <div className="ohb-sidebar-brand" aria-label="ohbaby">
-          <span className="ohb-logo-grid" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-            <span />
-          </span>
-          <strong>OHBABY</strong>
+        <div className="ohb-project-header">
+          <strong>
+            {workspaceLabel(props.workspace.selectedDirectory ?? "")}
+          </strong>
+          <small title={props.workspace.selectedDirectory ?? ""}>
+            {compactHomePath(props.workspace.selectedDirectory ?? "")}
+          </small>
         </div>
-        <button
-          className="ohb-sidebar-icon-button"
-          onClick={() => {
-            setCollapsed(true);
-          }}
-          title="Collapse sidebar"
-          type="button"
-        >
-          <PanelLeftClose size={16} />
-        </button>
       </header>
       <button
         className="ohb-sidebar-new"
@@ -575,10 +977,6 @@ function SessionSidebar(props: {
         <Plus size={15} />
         <span>New session</span>
       </button>
-      <WorkspaceSelector
-        onSelect={props.onSwitchWorkspace}
-        workspace={props.workspace}
-      />
       <section className="ohb-sidebar-section">
         <div className="ohb-sidebar-section-title">Recent sessions</div>
         <div className="ohb-sidebar-list">
@@ -643,37 +1041,18 @@ function SessionSidebar(props: {
   );
 }
 
-function WorkspaceSelector(props: {
-  readonly onSelect: (directory: string) => void;
-  readonly workspace: WorkspaceSnapshot;
-}): ReactElement {
-  return (
-    <label className="ohb-workspace-selector">
-      <span>Workspace</span>
-      <select
-        aria-label="Workspace"
-        onChange={(event) => {
-          props.onSelect(event.target.value);
-        }}
-        value={props.workspace.selectedDirectory}
-      >
-        {props.workspace.scopes.map((scope) => (
-          <option key={scope.directory} value={scope.directory}>
-            {workspaceLabel(scope.directory)}
-            {scope.loaded ? " · loaded" : ""}
-          </option>
-        ))}
-      </select>
-      <small title={props.workspace.selectedDirectory}>
-        {props.workspace.selectedDirectory}
-      </small>
-    </label>
-  );
-}
-
 function workspaceLabel(directory: string): string {
   const segments = directory.split(/[\\/]/u).filter(Boolean);
   return segments.at(-1) ?? directory;
+}
+
+function compactHomePath(directory: string): string {
+  const home = "/Users/";
+  if (directory.startsWith(home)) {
+    const parts = directory.slice(home.length).split("/");
+    return parts.length > 1 ? `~/${parts.slice(1).join("/")}` : "~";
+  }
+  return directory;
 }
 
 function StatusBar(props: {
@@ -2470,14 +2849,6 @@ function sortedSessions(sessions: readonly UiSession[]): readonly UiSession[] {
     (left, right) =>
       Date.parse(right.updatedAt) - Date.parse(left.updatedAt) ||
       left.id.localeCompare(right.id),
-  );
-}
-
-function isNarrowViewport(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(max-width: 720px)").matches
   );
 }
 

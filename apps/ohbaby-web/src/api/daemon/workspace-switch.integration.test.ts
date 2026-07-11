@@ -4,6 +4,22 @@ import { createOhbabyWebRuntime } from "./client.js";
 
 const encoder = new TextEncoder();
 
+function directoryFromBody(body: BodyInit | null | undefined): string {
+  if (typeof body !== "string") {
+    throw new Error("Expected a JSON string body");
+  }
+  const value: unknown = JSON.parse(body);
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("directory" in value) ||
+    typeof value.directory !== "string"
+  ) {
+    throw new Error("Expected a directory body");
+  }
+  return value.directory;
+}
+
 function emptySnapshot(title: string): UiSnapshot {
   return {
     activeSessionId: null,
@@ -38,9 +54,23 @@ describe("ohbaby web workspace switching", () => {
           Response.json({
             ok: true,
             scopes: [
-              { directory: "/repo-a", loaded: true },
-              { directory: "/repo-b", loaded: false },
+              { available: true, directory: "/repo-a", lastOpenedAt: 2, loaded: true, position: 0 },
+              { available: true, directory: "/repo-b", lastOpenedAt: 1, loaded: false, position: 1 },
             ],
+          }),
+        );
+      }
+      if (request.url.endsWith("/v1/scopes/open")) {
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            scope: {
+              available: true,
+              directory: directoryFromBody(init.body),
+              lastOpenedAt: 1,
+              loaded: false,
+              position: 1,
+            },
           }),
         );
       }
@@ -98,8 +128,8 @@ describe("ohbaby web workspace switching", () => {
     await runtime.refreshWorkspaces();
     expect(runtime.getWorkspaceSnapshot()).toEqual({
       scopes: [
-        { directory: "/repo-a", loaded: true },
-        { directory: "/repo-b", loaded: false },
+        { available: true, directory: "/repo-a", lastOpenedAt: 2, loaded: true, position: 0 },
+        { available: true, directory: "/repo-b", lastOpenedAt: 1, loaded: false, position: 1 },
       ],
       selectedDirectory: "/repo-a",
     });
@@ -148,6 +178,20 @@ describe("ohbaby web workspace switching", () => {
         }
         return Promise.resolve(Response.json({ ok: true }));
       }
+      if (request.url.endsWith("/v1/scopes/open")) {
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            scope: {
+              available: true,
+              directory: directoryFromBody(init.body),
+              lastOpenedAt: 1,
+              loaded: false,
+              position: 1,
+            },
+          }),
+        );
+      }
       if (request.url.endsWith("/v1/events")) {
         return Promise.resolve(
           new Response(
@@ -185,8 +229,8 @@ describe("ohbaby web workspace switching", () => {
           Response.json({
             ok: true,
             scopes: [
-              { directory: "/repo-a", loaded: true },
-              { directory: "/repo-b", loaded: false },
+              { available: true, directory: "/repo-a", lastOpenedAt: 2, loaded: true, position: 0 },
+              { available: true, directory: "/repo-b", lastOpenedAt: 1, loaded: false, position: 1 },
             ],
           }),
         );

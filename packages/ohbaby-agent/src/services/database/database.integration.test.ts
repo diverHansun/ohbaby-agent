@@ -94,6 +94,7 @@ describe("services/database", () => {
       { version: "010_message_context_scope" },
       { version: "011_subagent_instance_owner" },
       { version: "012_subagent_instance_current_input" },
+      { version: "013_workspace_registry" },
     ]);
   });
 

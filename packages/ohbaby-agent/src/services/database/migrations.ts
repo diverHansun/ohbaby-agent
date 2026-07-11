@@ -302,4 +302,20 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
       ALTER TABLE subagent_instance ADD COLUMN current_input TEXT;
     `,
   },
+  {
+    version: "013_workspace_registry",
+    sql: `
+      CREATE TABLE IF NOT EXISTS workspace_registry (
+        scope_key TEXT PRIMARY KEY,
+        visibility TEXT NOT NULL CHECK (visibility IN ('visible', 'hidden')),
+        position INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        last_opened_at INTEGER NOT NULL
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_registry_position
+        ON workspace_registry(position);
+    `,
+  },
 ];
