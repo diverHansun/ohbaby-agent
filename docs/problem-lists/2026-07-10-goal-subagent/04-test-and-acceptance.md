@@ -220,7 +220,7 @@
 | T-9 | `service.unit.test.ts` — `interrupts execution only once when an active goal is paused repeatedly` | 首次 pause 后再次进入 pause 路径不会重复 interrupt，也不覆盖原 pauseReason |
 | T-8 | `goal-execution-control.contract.test.ts` — `T-8 interrupts only-background work when there is no primary run` | 无 active primary run 时仍显式调用 `interruptSubagentsByParent`，固化窗间期 fallback |
 | T-12/T-14 | `tools.unit.test.ts` + `budget.unit.test.ts` + `driver.unit.test.ts` | 单维 budget schema、active-time、1000-turn 常量及显式 turn budget 不可绕过均已覆盖 |
-| T-15 | `goal-completion.real.e2e.test.ts` | `OHBABY_GOAL_REAL_EVAL=1` 下使用根 `.env` 的 ZAI provider，验证 status running→completed→UpdateGoal complete→最终回答，且无 SetGoalBudget 发明；2026-07-11 实跑通过 |
+| T-15 | `goal-completion.real.e2e.test.ts` | `OHBABY_GOAL_REAL_EVAL=1` 下使用根 `.env` 的 ZAI provider，验证 status running→completed→下一 model step 的 UpdateGoal complete→最终回答，且无 SetGoalBudget 发明；deterministic guard 明确拒绝同批 status+complete；2026-07-11 实跑通过 |
 
 仍按优先级延期：T-10 persistent 重启完整链路为 P2，不属于 Phase A 的 P0 合并门槛。
 

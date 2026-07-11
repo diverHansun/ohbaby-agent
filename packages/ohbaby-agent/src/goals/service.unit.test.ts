@@ -249,6 +249,22 @@ describe("GoalService", () => {
     await service.whenIdle("s1");
   });
 
+  it("records model as the actor translating an explicit budget", async () => {
+    const actors: (string | undefined)[] = [];
+    const service = new GoalService({
+      executionControl: noOpExecutionControl,
+      onChange: (event): void => {
+        actors.push(event.change.actor);
+      },
+      persistence: new InMemoryGoalPersistence(),
+    });
+    await service.createGoal("s1", { actor: "user", objective: "a" });
+
+    await service.setBudget("s1", { tokenBudget: 1_000 });
+
+    expect(actors.at(-1)).toBe("model");
+  });
+
   it("without runner attached, createGoal still records goal (driving deferred)", async () => {
     const service = new GoalService({
       executionControl: noOpExecutionControl,

@@ -86,7 +86,7 @@
 ## 五、Lifecycle & Ownership（生命周期与归属）
 
 - **创建**：两条入口写同一个 store——用户 `/goal <objective>`（命令直写）或模型 `CreateGoal` 工具。创建即置 `active` 并启动续跑。
-- **更新**：所有迁移经 **GoalStore 唯一入口**。用量由 GoalDriver 在每轮推进时累计（turn 计数、token 消耗、wall-clock 锚点）；预算由 `SetGoalBudget` 工具或命令参数设定；`tokensUsed` 按**累计消耗单调增长**，不因 compact 缩小上下文而回退。
+- **更新**：所有迁移经 **GoalStore 唯一入口**。用量由 GoalDriver 在每轮推进时累计（turn 计数、token 消耗、wall-clock 锚点）；预算只由 main 通过 `SetGoalBudget` 翻译明确限制；`tokensUsed` 按**累计消耗单调增长**，不因 compact 缩小上下文而回退。
 - **失效/清除**：`complete` 宣告后即清记录；`cancel` 直接丢弃。
 - **持久化与重建**：每次迁移追加 GoalRecord，落盘委托 `services/database`；进程重启时由 `GoalStore.rebuild()` 回放记录重建，并对 active 执行 `normalizeAfterReplay` 降级为 `paused`。
 - **归属**：GoalStore 是 goal 状态的唯一拥有者；GoalSnapshot / GoalChange / GoalBudgetReport 是它派生的只读投影，由消费者（命令/注入器/UI）读取，任何人不得绕过 store 改状态。安全阀常量属于 GoalDriver，不在 goal 数据上。

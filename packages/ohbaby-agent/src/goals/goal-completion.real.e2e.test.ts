@@ -112,6 +112,8 @@ runRealEval("goal completion real model eval", () => {
           continue;
         }
 
+        const completedObservedBeforeBatch = observedCompletedSubagent;
+        let completedDeliveredThisBatch = false;
         for (const call of calls) {
           if (call.name === "SetGoalBudget") {
             throw new Error("Model invented a goal budget when no authority specified one.");
@@ -119,7 +121,7 @@ runRealEval("goal completion real model eval", () => {
           if (call.name === "subagent_status") {
             statusCalls += 1;
             const completed = statusCalls >= 2;
-            observedCompletedSubagent ||= completed;
+            completedDeliveredThisBatch ||= completed;
             messages.push({
               content: completed
                 ? "sub_1 status=completed; no delegated execution is running"
@@ -131,7 +133,10 @@ runRealEval("goal completion real model eval", () => {
           }
           if (call.name === "UpdateGoal") {
             if (call.arguments.status === "complete") {
-              expect(observedCompletedSubagent).toBe(true);
+              assertCompletionWasObservedBeforeBatch(
+                completedObservedBeforeBatch,
+                completedDeliveredThisBatch,
+              );
               goalCompleted = true;
               messages.push({
                 content: "Goal completed and cleared. Give the user the final answer now.",
@@ -144,6 +149,7 @@ runRealEval("goal completion real model eval", () => {
           }
           throw new Error(`Unexpected tool call: ${call.name}`);
         }
+        observedCompletedSubagent ||= completedDeliveredThisBatch;
       }
 
       expect(statusCalls).toBeGreaterThanOrEqual(2);
@@ -152,6 +158,27 @@ runRealEval("goal completion real model eval", () => {
     },
     360_000,
   );
+});
+
+describe("goal completion eval ordering guard", () => {
+  it("rejects complete when completed status is delivered in the same tool batch", () => {
+    const completedObservedBeforeBatch = false;
+    const completedDeliveredThisBatch = true;
+
+    expect(() => {
+      assertCompletionWasObservedBeforeBatch(
+        completedObservedBeforeBatch,
+        completedDeliveredThisBatch,
+      );
+    }).toThrow("prior model step");
+    expect(completedDeliveredThisBatch).toBe(true);
+  });
+
+  it("allows complete after a prior model step observed completed status", () => {
+    expect(() => {
+      assertCompletionWasObservedBeforeBatch(true, false);
+    }).not.toThrow();
+  });
 });
 
 function realClient(): LLMClientInstance {
@@ -202,4 +229,15 @@ function messageText(message: ChatCompletionMessageParam): string {
 
 function normalize(value: string): string {
   return value.replace(/[^A-Za-z0-9]/gu, "").toUpperCase();
+}
+
+function assertCompletionWasObservedBeforeBatch(
+  observedBeforeBatch: boolean,
+  deliveredThisBatch: boolean,
+): void {
+  if (!observedBeforeBatch) {
+    throw new Error(
+      `${deliveredThisBatch ? "A completed status delivered in the same tool batch is not yet observed. " : ""}UpdateGoal(complete) requires a completed subagent status observed in a prior model step.`,
+    );
+  }
 }

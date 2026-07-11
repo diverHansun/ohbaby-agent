@@ -155,7 +155,7 @@ export class GoalService {
     limits: GoalBudgetLimits,
   ): Promise<GoalSnapshot> {
     const store = await this.storeFor(sessionId);
-    return store.setBudgetLimits(limits, "user");
+    return store.setBudgetLimits(limits, "model");
   }
 
   async getSnapshot(sessionId: string): Promise<GoalSnapshot | null> {

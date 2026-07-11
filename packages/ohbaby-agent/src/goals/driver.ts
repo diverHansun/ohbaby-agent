@@ -26,7 +26,7 @@ export async function driveGoal(deps: DriveGoalDeps): Promise<void> {
       await pause("A configured budget was reached", "runtime");
       return;
     }
-    if (isSafetyCapReached(snapshot, snapshot.budgetLimits, safetyCapTurns)) {
+    if (isSafetyCapReached(snapshot, safetyCapTurns)) {
       await pause(
         "Safety cap reached: too many continuation turns without completion",
         "runtime",

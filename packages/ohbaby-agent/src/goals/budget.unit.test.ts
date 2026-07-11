@@ -59,13 +59,7 @@ describe("computeBudgetReport", () => {
 
 describe("isSafetyCapReached", () => {
   it("no turn budget: cap applies at threshold", () => {
-    expect(isSafetyCapReached(usage(200), {}, 200)).toBe(true);
-    expect(isSafetyCapReached(usage(199), {}, 200)).toBe(false);
-  });
-
-  it("explicit turn budgets cannot bypass the system safety cap", () => {
-    expect(isSafetyCapReached(usage(200), { turnBudget: 1000 }, 200)).toBe(
-      true,
-    );
+    expect(isSafetyCapReached(usage(200), 200)).toBe(true);
+    expect(isSafetyCapReached(usage(199), 200)).toBe(false);
   });
 });

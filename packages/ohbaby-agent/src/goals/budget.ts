@@ -54,7 +54,6 @@ export function computeBudgetReport(
 /** 系统绝对安全阀始终生效，不能被显式 turn budget 绕过。 */
 export function isSafetyCapReached(
   usage: GoalUsage,
-  _limits: GoalBudgetLimits,
   safetyCapTurns: number,
 ): boolean {
   return usage.turnsUsed >= safetyCapTurns;
