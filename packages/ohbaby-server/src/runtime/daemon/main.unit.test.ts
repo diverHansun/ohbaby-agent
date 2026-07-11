@@ -713,6 +713,47 @@ describe("startDaemonServer", () => {
     }
   });
 
+  it("does not mistake the global daemon for legacy state when the scope is home", async () => {
+    vi.resetModules();
+    const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-home-scope-"));
+    const disposeAll = vi.fn(() => Promise.resolve());
+    vi.doMock("ohbaby-agent", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("ohbaby-agent")>();
+      return {
+        ...actual,
+        closePersistentUiBackendDatabase: vi.fn(),
+        createPersistentUiBackendClient: vi.fn(() =>
+          createFakeBackend(vi.fn(() => Promise.resolve())),
+        ),
+        getAgentPackageVersion: (): string => "0.1.7",
+        McpManager: { disposeAll },
+      };
+    });
+
+    try {
+      const { startDaemonServer } = await import("./main.js");
+      const first = await startDaemonServer({
+        defaultPort: 0,
+        homeDirectory: tempDir,
+        workdir: tempDir,
+      });
+      const second = await startDaemonServer({
+        defaultPort: 0,
+        homeDirectory: tempDir,
+        workdir: tempDir,
+      });
+
+      expect(second.reused).toBe(true);
+      expect(new URL(second.url).origin).toBe(new URL(first.url).origin);
+      expect(second.scopeRoot).toBe(await realpath(tempDir));
+
+      await first.stop();
+    } finally {
+      vi.doUnmock("ohbaby-agent");
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
   it("refuses to start while the current repository has a live legacy daemon", async () => {
     vi.resetModules();
     const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-legacy-"));

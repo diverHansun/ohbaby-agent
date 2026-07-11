@@ -28,15 +28,14 @@ export async function resolveDaemonScope(
   options: ResolveDaemonScopeOptions = {},
 ): Promise<DaemonScope> {
   const workdir = await canonicalDirectory(options.workdir ?? process.cwd());
+  const homeDirectory = await canonicalDirectory(
+    options.homeDirectory ?? homedir(),
+  );
   const projectRoot = await Project.getProjectRoot(workdir);
   const scopeRoot = projectRoot
     ? await canonicalDirectory(projectRoot)
     : workdir;
-  const serverDir = join(
-    options.homeDirectory ?? homedir(),
-    ".ohbaby",
-    "server",
-  );
+  const serverDir = join(homeDirectory, ".ohbaby", "server");
   const legacyServerDir = join(scopeRoot, ".ohbaby", "server");
 
   return {

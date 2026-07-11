@@ -29,10 +29,10 @@ describe("resolveDaemonScope", () => {
 
     expect(scope.scopeRoot).toBe(canonicalRoot);
     expect(scope.pidFilePath).toBe(
-      join(root, ".ohbaby", "server", "daemon.pid"),
+      join(canonicalRoot, ".ohbaby", "server", "daemon.pid"),
     );
     expect(scope.stateFilePath).toBe(
-      join(root, ".ohbaby", "server", "daemon-state.json"),
+      join(canonicalRoot, ".ohbaby", "server", "daemon-state.json"),
     );
     expect(scope.legacyPidFilePath).toBe(
       join(canonicalRoot, ".ohbaby", "server", "daemon.pid"),
@@ -51,7 +51,7 @@ describe("resolveDaemonScope", () => {
 
     expect(scope.scopeRoot).toBe(canonicalRoot);
     expect(scope.stateFilePath).toBe(
-      join(root, ".ohbaby", "server", "daemon-state.json"),
+      join(canonicalRoot, ".ohbaby", "server", "daemon-state.json"),
     );
     expect(scope.legacyStateFilePath).toBe(
       join(canonicalRoot, ".ohbaby", "server", "daemon-state.json"),

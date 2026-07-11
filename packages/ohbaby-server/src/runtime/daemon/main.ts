@@ -271,9 +271,15 @@ async function resolveStartScope(options: StartDaemonServerOptions): Promise<{
     homeDirectory: options.homeDirectory,
     workdir: options.workdir,
   });
+  const legacySharesGlobalState =
+    resolve(scope.legacyStateFilePath) === resolve(scope.stateFilePath);
   return {
-    legacyPidFilePath: scope.legacyPidFilePath,
-    legacyStateFilePath: scope.legacyStateFilePath,
+    legacyPidFilePath: legacySharesGlobalState
+      ? undefined
+      : scope.legacyPidFilePath,
+    legacyStateFilePath: legacySharesGlobalState
+      ? undefined
+      : scope.legacyStateFilePath,
     pidFilePath: options.pidFilePath ?? scope.pidFilePath,
     scopeRoot: options.scopeRoot ?? scope.scopeRoot,
     stateFilePath: options.stateFilePath ?? scope.stateFilePath,
