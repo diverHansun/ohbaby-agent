@@ -13,7 +13,7 @@ goals 的关键业务动作收敛为四个（每个都可追溯到 Duty）：
 | **UC-1 推进目标至终态** | 从 objective 起，跨多轮续跑到模型自判 complete/paused 或预算/安全阀触发 | Duty 1/2/3/4 |
 | **UC-2 让路插话后显式恢复** | 用户插话时停 goal、办用户短期目标、办完用户自行 resume | Duty 1/2 |
 | **UC-3 跨重启重建目标** | 进程重启/`--resume` 后重建 goal 并安全降级 | Duty 1/6 |
-| **UC-4 命令式生命周期控制** | 以 `/goal` 命令查询/暂停/恢复/取消/替换/设预算 | Duty 1/5 |
+| **UC-4 命令式生命周期控制** | 以 `/goal` 命令查询/暂停/恢复/取消/替换；预算只由 main 翻译明确的自然语言限制 | Duty 1/5 |
 
 其余具体场景（模型 prose 创建、Esc、运行时错、预算到顶、安全阀触发、模糊目标）作为下述用例的**分支或失败点**，不单列。
 
@@ -23,10 +23,10 @@ goals 的关键业务动作收敛为四个（每个都可追溯到 Duty）：
 
 ### UC-1 推进目标至终态
 
-1. **接收创建**：命令 `/goal <objective>`（直写 store）或模型 `CreateGoal`（prose 自主请求）传入 objective（可选 criterion、可选预算参数）。空 objective 拒绝。
-2. **建记录并起驱动**：GoalStore create → `active`；若有预算参数则 `setBudgetLimits`；追加 `goal.create` 记录；GoalService 启动 GoalDriver。
+1. **接收创建**：命令 `/goal <objective>`（直写 store）或模型 `CreateGoal`（prose 自主请求）传入 objective（可选 criterion）。空 objective 拒绝。用户在 objective/对话中自然语言声明的预算由 main 另行调用 `SetGoalBudget` 翻译。
+2. **建记录并起驱动**：GoalStore create → `active`；追加 `goal.create` 记录；GoalService 启动 GoalDriver。
 3. **续跑循环**（GoalDriver，每轮）：
-   a. 预算/安全阀判定：任一已设预算到顶 **或** 未设 turn 预算且续跑轮数达安全阀上限 → pause（写入 pauseReason）→ 停。
+   a. 预算/安全阀判定：任一已设 turn/token/active-time 预算到顶 **或** 续跑轮数达 1000-turn 系统绝对上限 → pause（写入 pauseReason）→ 停。
    b. incrementTurn。
    c. 渲染续跑提醒文本（流 D）并作为 user 消息起一轮续跑 Run（首轮输入=objective，后续=GOAL_CONTINUATION_CORE + 进度 + 预算报告）；Run 内模型可调 goal 工具。
    d. 读 `RunCompletion` → 翻译为迁移（见责任边界与失败点）。
@@ -58,7 +58,7 @@ goals 的关键业务动作收敛为四个（每个都可追溯到 Duty）：
 
 ### UC-4 命令式生命周期控制
 
-1. **接收命令**：`/goal status`（读快照）/ `pause` / `resume` / `cancel` / `replace <objective>` / 设预算参数。
+1. **接收命令**：`/goal status`（读快照）/ `pause` / `resume` / `cancel` / `replace <objective>`。不提供 `/goal budget` 参数入口。
 2. **转发迁移**：命令层只解析转发；`/goal replace` 路由到 GoalStore 的 `replaceObjective`，GoalStore 执行对应迁移并校验合法性（如 `resume` 仅对 paused 有意义）。
 3. **输出**：迁移结果 + 快照；`resume` 额外触发 ensure-driving 重入续跑；`cancel` 丢弃记录。
 
@@ -73,7 +73,7 @@ goals 的关键业务动作收敛为四个（每个都可追溯到 Duty）：
 | 状态迁移合法性（谁能停、能否恢复） | **goals（GoalStore）** | 唯一入口，校验 actor 与迁移 |
 | 续跑循环编排、预算/安全阀判定 | **goals（GoalDriver）** | 读 RunCompletion 翻译为迁移 |
 | 续跑提醒 / light note 文本产出 | **goals（GoalInjector）** | active 续跑提醒写入 history；paused light note 作为普通用户 prompt 前缀 |
-| 预算计算与报告 | **goals（budget）** | opt-in，三维独立判定 |
+| 预算计算与报告 | **goals（budget）** | opt-in，turn/token/active-time 三维独立判定；仅接受 main 对明确限制的翻译 |
 | 起 Run / 并发 / sandbox / 取消 | run-manager | goals 只 create + waitForCompletion |
 | 上下文组装、compact | core/context | goals 供 user 消息，位置/压缩归 context |
 | 权限模式 / 工具审批 | permission/policy | goal 循环在既定权限下跑 |
@@ -88,7 +88,7 @@ goals 的关键业务动作收敛为四个（每个都可追溯到 Duty）：
 ## 四、Failure & Decision Points（失败点与决策点）
 
 - **预算到顶（防跑飞）**：任一已设预算维度到顶 → pause(`budget_exhausted`)。**可恢复**——用户 `/goal resume` 再给一批。opt-in，不设则无此维度约束。
-- **安全阀触发（防跑飞兜底）**：未设 turn 预算时，`turnsUsed` 达写死上限 → pause(`safety_cap_reached`)。**可恢复**。这是唯一的自动"天花板"（仅未设 turn 预算时），零配置、零传参。单轮内 step-runaway 由运行时既有 `DEFAULT_MAX_STEPS` 兜住。
+- **安全阀触发（防跑飞兜底）**：`turnsUsed` 达写死的 1000-turn 系统绝对上限 → pause(`safety_cap_reached`)。**可恢复**。它始终存在、不能被显式预算绕过，但不是默认预算，不参与预算式规划。单轮内 step-runaway 由运行时既有 `DEFAULT_MAX_STEPS` 兜住。
 - **续跑 Run 失败（runtime-error）**：瞬时超时/provider 错已由继承的 llm-client 重试策略兜过（同正常对话）；仅当重试**耗尽**或错误**不可重试**时 Run failed → pause(`runtime-error`)，**不自动恢复**，交用户 `/goal resume`。goals 不加自己的重试层。
 - **插话 Run 未干净完成**：用户 Run 失败/取消 → goal 保持 paused，等用户 `/goal resume`。不自动恢复。
 - **恢复的统一性**：所有 paused 的恢复都是 `/goal resume`，不因缘由区分。简单、可预测。
