@@ -4,7 +4,11 @@ import {
   replaceSnapshot,
 } from "../api/daemon/eventReducer.js";
 import type { ConnectionState, StoreSnapshot } from "../api/daemon/wire.js";
-import type { UiEvent, UiSnapshot } from "ohbaby-sdk";
+import type {
+  UiCurrentModelConfig,
+  UiEvent,
+  UiSnapshot,
+} from "ohbaby-sdk";
 
 export type StoreListener = () => void;
 
@@ -14,6 +18,7 @@ export interface OhbabyWebStore {
   replaceSnapshot(snapshot: UiSnapshot, seqNum: number): void;
   reset(): void;
   setConnectionState(state: ConnectionState): void;
+  setCurrentModel(model: UiCurrentModelConfig | null): void;
   setError(error: string | null): void;
   subscribe(listener: StoreListener): () => void;
 }
@@ -21,6 +26,7 @@ export interface OhbabyWebStore {
 export function createOhbabyWebStore(): OhbabyWebStore {
   let snapshot: StoreSnapshot = {
     connectionState: "connecting",
+    currentModel: null,
     error: null,
     view: createInitialViewState(),
   };
@@ -56,6 +62,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
     reset(): void {
       publish({
         connectionState: "connecting",
+        currentModel: null,
         error: null,
         view: createInitialViewState(),
       });
@@ -65,6 +72,12 @@ export function createOhbabyWebStore(): OhbabyWebStore {
         return;
       }
       publish({ ...snapshot, connectionState: state });
+    },
+    setCurrentModel(model): void {
+      if (snapshot.currentModel === model) {
+        return;
+      }
+      publish({ ...snapshot, currentModel: model });
     },
     setError(error): void {
       if (snapshot.error === error) {

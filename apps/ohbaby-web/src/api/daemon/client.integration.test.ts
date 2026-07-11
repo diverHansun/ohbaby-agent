@@ -208,7 +208,17 @@ describe("ohbaby-web daemon client", () => {
         );
       }
       if (url.endsWith("/v1/model") && (init.method ?? "GET") === "GET") {
-        return Promise.resolve(Response.json({ model: null, ok: true }));
+        return Promise.resolve(
+          Response.json({
+            model: {
+              baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+              interfaceProvider: "openai-compatible",
+              model: "glm-4.7",
+              provider: "zhipu",
+            },
+            ok: true,
+          }),
+        );
       }
       if (url.endsWith("/v1/model/context-window-probe")) {
         return Promise.resolve(
@@ -313,6 +323,7 @@ describe("ohbaby-web daemon client", () => {
 
     expect(runtime.store.getSnapshot()).toMatchObject({
       connectionState: "live",
+      currentModel: { model: "glm-4.7", provider: "zhipu" },
       view: {
         lastAppliedSeqNum: 2,
         snapshot: {
@@ -446,7 +457,10 @@ describe("ohbaby-web daemon client", () => {
       surface: "tui",
     });
 
-    await expect(runtime.client.getCurrentModel()).resolves.toBeNull();
+    await expect(runtime.client.getCurrentModel()).resolves.toMatchObject({
+      model: "glm-4.7",
+      provider: "zhipu",
+    });
     await expect(
       runtime.client.probeModelContextWindow({
         apiKeyEnv: "ZHIPU_API_KEY",
@@ -463,6 +477,10 @@ describe("ohbaby-web daemon client", () => {
         provider: "zhipu",
       }),
     ).resolves.toMatchObject({ model: "glm-4.7" });
+    expect(runtime.store.getSnapshot().currentModel).toMatchObject({
+      model: "glm-4.7",
+      provider: "zhipu",
+    });
     await expect(
       runtime.client.setSearchApiKey({
         apiKeyEnv: "TAVILY_API_KEY",
@@ -478,12 +496,13 @@ describe("ohbaby-web daemon client", () => {
     await expect(
       runtime.client.archiveSession("session_1"),
     ).resolves.toBeUndefined();
-    expect(requests.slice(-2).map((request) => request.url)).toEqual([
+    expect(requests.slice(-3).map((request) => request.url)).toEqual([
       "http://127.0.0.1:4096/v1/sessions/session_1/archive",
       "http://127.0.0.1:4096/v1/snapshot",
+      "http://127.0.0.1:4096/v1/model",
     ]);
-    expect(requests.at(-2)?.method).toBe("PATCH");
-    expect(requests.slice(-8).map((request) => request.url)).toEqual([
+    expect(requests.at(-3)?.method).toBe("PATCH");
+    expect(requests.slice(-9).map((request) => request.url)).toEqual([
       "http://127.0.0.1:4096/v1/model",
       "http://127.0.0.1:4096/v1/model/context-window-probe",
       "http://127.0.0.1:4096/v1/model",
@@ -492,6 +511,7 @@ describe("ohbaby-web daemon client", () => {
       "http://127.0.0.1:4096/v1/sessions/session_1/compact",
       "http://127.0.0.1:4096/v1/sessions/session_1/archive",
       "http://127.0.0.1:4096/v1/snapshot",
+      "http://127.0.0.1:4096/v1/model",
     ]);
     sseController?.close();
     await runtime.client.close();
@@ -546,6 +566,9 @@ describe("ohbaby-web daemon client", () => {
             },
           }),
         );
+      }
+      if (url.endsWith("/v1/model")) {
+        return Promise.resolve(Response.json({ model: null, ok: true }));
       }
       return Promise.resolve(
         Response.json({ error: { message: "not found" } }, { status: 404 }),
@@ -645,6 +668,9 @@ describe("ohbaby-web daemon client", () => {
           }),
         );
       }
+      if (url.endsWith("/v1/model")) {
+        return Promise.resolve(Response.json({ model: null, ok: true }));
+      }
       return Promise.resolve(
         Response.json({ error: { message: "not found" } }, { status: 404 }),
       );
@@ -719,6 +745,9 @@ describe("ohbaby-web daemon client", () => {
             },
           }),
         );
+      }
+      if (url.endsWith("/v1/model")) {
+        return Promise.resolve(Response.json({ model: null, ok: true }));
       }
       return Promise.resolve(
         Response.json({ error: { message: "not found" } }, { status: 404 }),

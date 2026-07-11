@@ -86,6 +86,9 @@ describe("ohbaby web workspace switching", () => {
           }),
         );
       }
+      if (request.url.endsWith("/v1/model")) {
+        return Promise.resolve(Response.json({ model: null, ok: true }));
+      }
       if (request.url.endsWith("/v1/events")) {
         return Promise.resolve(
           new Response(
@@ -146,7 +149,7 @@ describe("ohbaby web workspace switching", () => {
     );
     expect(
       repoBRequests.map((request) => new URL(request.url).pathname),
-    ).toEqual(["/v1/clients", "/v1/events", "/v1/snapshot"]);
+    ).toEqual(["/v1/clients", "/v1/events", "/v1/snapshot", "/v1/model"]);
     expect(new Set(repoBRequests.map((request) => request.clientId)).size).toBe(
       1,
     );
@@ -223,6 +226,9 @@ describe("ohbaby web workspace switching", () => {
             snapshot: emptySnapshot("A"),
           }),
         );
+      }
+      if (request.url.endsWith("/v1/model")) {
+        return Promise.resolve(Response.json({ model: null, ok: true }));
       }
       if (request.url.endsWith("/v1/scopes")) {
         return Promise.resolve(

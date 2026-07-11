@@ -111,6 +111,7 @@ export interface CommandNotice {
 
 export interface StoreSnapshot {
   readonly connectionState: ConnectionState;
+  readonly currentModel: UiCurrentModelConfig | null;
   readonly error: string | null;
   readonly view: ViewState;
 }

@@ -162,6 +162,7 @@ class BrowserDaemonClient implements OhbabyWebClient {
         return;
       }
       this.store.replaceSnapshot(response.snapshot, response.seqNum);
+      this.store.setCurrentModel((await this.http.getCurrentModel()).model);
       this.applyBufferedEventsAfter(response.seqNum);
       this.buffering = false;
       this.store.setConnectionState("live");
@@ -282,6 +283,7 @@ class BrowserDaemonClient implements OhbabyWebClient {
     input: ModelConnectRequest,
   ): Promise<UiConnectModelResult> {
     const response = await this.http.connectModel(input);
+    this.store.setCurrentModel(response.model);
     return response.model;
   }
 
@@ -378,6 +380,7 @@ class BrowserDaemonClient implements OhbabyWebClient {
         return;
       }
       this.store.replaceSnapshot(response.snapshot, response.seqNum);
+      this.store.setCurrentModel((await this.http.getCurrentModel()).model);
       const maxBufferedSeqNum = this.applyBufferedEventsAfter(response.seqNum);
       this.events.setLastEventId(
         Math.max(lastEventId, response.seqNum, maxBufferedSeqNum),

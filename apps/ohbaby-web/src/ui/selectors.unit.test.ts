@@ -5,9 +5,13 @@ import { messageText, selectViewModel } from "./selectors.js";
 
 const timestamp = "2026-06-12T00:00:00.000Z";
 
-function store(snapshot: UiSnapshot): StoreSnapshot {
+function store(
+  snapshot: UiSnapshot,
+  currentModel: StoreSnapshot["currentModel"] = null,
+): StoreSnapshot {
   return {
     connectionState: "live",
+    currentModel,
     error: null,
     view: {
       commandCatalogVersion: null,
@@ -66,6 +70,24 @@ describe("ohbaby-web ui selectors", () => {
       canSend: true,
       mode: "auto",
       permissionLevel: "default",
+    });
+  });
+
+  it("uses the connected model before a session has context usage", () => {
+    const snapshot = { ...baseSnapshot(), contextWindowUsages: [] };
+    const view = selectViewModel(
+      store(snapshot, {
+        baseUrl: "https://zenmux.ai/api/anthropic",
+        interfaceProvider: "anthropic",
+        model: "deepseek-v4-pro",
+        provider: "zenmux",
+      }),
+    );
+
+    expect(view.header).toMatchObject({
+      contextLabel: "0 / 0",
+      contextRatio: 0,
+      modelLabel: "deepseek-v4-pro",
     });
   });
 

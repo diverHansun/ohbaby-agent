@@ -100,7 +100,11 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
     error: snapshot.error,
     header: {
       connectionKind: selectConnectionKind(snapshot.connectionState, runStatus),
-      ...selectContextModel(daemonSnapshot, activeSession?.id),
+      ...selectContextModel(
+        daemonSnapshot,
+        activeSession?.id,
+        snapshot.currentModel?.model,
+      ),
     },
     isEmpty: (activeSession?.messages.length ?? 0) === 0,
     pendingPermissions,
@@ -192,13 +196,14 @@ function selectComposerHint(
 function selectContextModel(
   snapshot: UiSnapshot | null,
   sessionId: string | undefined,
+  configuredModel: string | undefined,
 ): Omit<HeaderModel, "connectionKind"> {
   const usage = selectContextUsage(snapshot, sessionId);
   if (!usage) {
     return {
       contextLabel: "0 / 0",
       contextRatio: 0,
-      modelLabel: "model pending",
+      modelLabel: configuredModel ?? "model pending",
     };
   }
   return {
