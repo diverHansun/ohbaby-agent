@@ -9,7 +9,7 @@
 goals 模块由五个子组件构成，围绕"一个 session 恰好一个 goal"这一核心状态展开：
 
 - **GoalStore（聚合根 / 状态机）**：持有单个 goal 的内存态，是所有状态迁移的唯一入口。承载生命周期规则、actor 边界、turn 计数、预算追踪，并能从持久化记录重建。对外只暴露"迁移方法"与"读取快照"，不暴露可变字段。
-- **GoalDriver（编排器）**：长任务续跑循环的拥有者。站在 `runtime/run-manager` **之上**，反复"起一轮续跑 Run → 等待完成 → 据结果驱动一次状态迁移 → 决定是否再来一轮"。它是唯一读取 `RunCompletion` 并把它翻译成 goal 语义的组件，也是预算判定与**不可配置安全阀**（写死的续跑轮上限，仅在未设 turn 预算时作为兜底）的持有者。
+- **GoalDriver（编排器）**：长任务续跑循环的拥有者。站在 `runtime/run-manager` **之上**，反复"起一轮续跑 Run → 等待完成 → 据结果驱动一次状态迁移 → 决定是否再来一轮"。它是唯一读取 `RunCompletion` 并把它翻译成 goal 语义的组件，也是预算判定与**不可配置安全阀**（1000 个 goal continuation turns 的系统绝对上限）的持有者。
 - **GoalInjector（续跑提醒与 light note 渲染）**：把 GoalStore 的当前状态渲染成模型可见文本（纯函数、无副作用），负责 `<untrusted_objective>` 包裹与转义。`active` 时由 GoalDriver 生成全量续跑提醒，并作为续跑 Run 的 user 消息写入持久 history；`paused` 时生成 light note，只作为普通用户 prompt 的模型可见前缀，提示可 `/goal resume`，不触发自动恢复。
 - **goal 工具组（模型接口）**：`CreateGoal` / `UpdateGoal` / `GetGoal` / `SetGoalBudget`。作为 builtin 工具注册，经 `sessionId` 定位到本 session 的 GoalStore 并触发迁移，是"模型自判终止"与"opt-in 预算设置"的落点。
 - **GoalPersistence（持久化投影）**：定义 goal 的记录读写端口与数据库实现，负责 append/list 记录。`GoalStore.rebuild()` 使用这些记录回放状态，并在回放后执行 `normalizeAfterReplay()`（把落盘的 active 降级为 paused）。底层存储委托 `services/database`。
@@ -46,11 +46,17 @@ active 续跑提醒文本是 GoalStore 状态的函数：`active state → text`
 
 ### 5. opt-in 预算 + 不可配置安全阀
 
-预算是 opt-in 的：用户不设则无约束，设了则按 turn/token/time 三维度独立判定。`SetGoalBudget` 工具仅在用户明确要求时由模型调用。预算到顶 → `pause` + `pauseReason`（可恢复，用户可 `/goal resume` 再给一批）。`BudgetReport` 每轮注入到提醒文本中，让模型看到剩余量并主动收敛（75% 阈值时提醒"开始收敛"）。
+预算是 opt-in 的：用户、system 或 developer 未明确声明限制时，不创建产品级预算，agent 按 objective 完成度自主规划；声明后按 turn/token/active-time 三个维度独立判定。用户只用自然语言表达限制，不直接传结构化参数，也不提供 `/goal budget` 子命令；main 仅把明确限制翻译成 `SetGoalBudget(value, unit)`，每次设置一个维度，禁止自行估算或发明预算。时间单位支持 milliseconds/seconds/minutes/hours，统一折算成 `wallClockBudgetMs`，只累计 active pursuit，paused 时间不计。预算在 continuation 边界判定，不承诺精确 deadline。预算到顶 → `pause` + `pauseReason`；`BudgetReport` 每轮注入提醒，达到 75% 时提示收敛。
 
-当用户未设 turn 预算时，一个**写死的续跑轮上限**（安全阀）作为兜底，纯防"模型永不终止"的无限循环。安全阀不对用户/prompt 暴露，不可配置。已在测试中通过构造参数注入低上限来快速命中。
+### 6. 通过 execution-control port 固化跨层停止契约
 
-### 6. 刻意不引入的模式
+GoalService 依赖一个窄的 `GoalExecutionControlPort`：goal 离开 active 后，显式等待 adapter 停止 goal-owned primary 与当时的 active subagents。port 只表达“停止本 goal execution”，不暴露 RunManager/SubagentHost 类型。状态先迁移为 paused/clear，关闭下一轮调度入口，再 await 中断副作用；同步 `onChange` 只做 UI 投影，不承载异步控制。
+
+complete 的正常路径由 main 收敛：全部 subagents 已结束，目标、验证与最终结论均已完成后才调用 complete；工具返回后输出最终回答并结束。若仍有 active subagent，adapter 做 interrupt-only 防御性兜底；不批量 close，不销毁 record/context。
+
+独立于产品预算，系统始终保留一个**写死的 1000-turn 绝对安全阀**，纯防"模型永不终止"的异常循环。它不是默认预算，不进入 BudgetReport、不触发预算式规划或收敛提示，也不能被显式 turn budget 绕过；到顶后 pause，保留 goal 供用户处理。测试可通过内部构造参数注入低上限快速命中，但用户和模型不能配置该值。
+
+### 7. 刻意不引入的模式
 
 - **不引入 PauseCause 枚举与多恢复路径**：所有 `paused` 同等处理，恢复统一为 `/goal resume`。`pauseReason` 仅供 UI 展示与 light note 使用，不驱动恢复逻辑分支。这避免了"五值枚举 × 三恢复路径"的测试矩阵爆炸与维护负担。
 - **不引入 auto-resume**：用户插话打断 goal 后，goal pause；用户完成小任务后自行 `/goal resume`。goal 的 turn 与普通任务的 turn 共享同一 session、同一 message history，不做 context 隔离。简单、可预测、与 kimi/codex 一致。
@@ -91,7 +97,7 @@ src/goals/
 
 - **状态出带（out-of-band）**：goal 结构化状态（status / turnsUsed / tokensUsed / wallClockMs / budgetLimits）存活在可压缩消息历史之外，由 GoalPersistence 记录重建。压缩历史 → 不丢 goal 状态。
 - **提醒在 history 中、每轮重生成**：GoalInjector 每轮渲染提醒文本并作为 user 消息 append 到 history。旧提醒被 compact 压缩掉，最新提醒在尾部——每轮都是新鲜的。即使旧提醒被压掉，GoalStore 状态仍在，下一轮照常重生成。
-- **turn 计数与预算用量单调**：`turnsUsed` / `tokensUsed` / `wallClockMs` 随续跑单调递增，存于 goal 记录、不因 compact 缩小上下文而回退。预算判定因此稳定可判。
+- **三维预算用量单调**：`turnsUsed` / `tokensUsed` / `wallClockMs` 随续跑单调递增，存于 goal 记录、不因 compact 缩小上下文而回退；wall-clock 只累计 active pursuit，并在 continuation 边界参与预算判定。
 
 代价：续跑提醒每轮 append（约 200-500 tokens），长 goal 累积量靠 compact 自然消化。续跑 prompt 必须足够精简，依赖模型从"压缩后的历史 + 最新的续跑提醒"重建工作状态。这是刻意取舍：把鲁棒性放在"状态出带 + 每轮重生成"而非"保住某条历史消息"。
 

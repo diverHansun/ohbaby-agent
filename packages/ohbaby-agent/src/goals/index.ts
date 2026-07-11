@@ -25,6 +25,8 @@ export type {
   GoalBudgetReport,
   GoalChange,
   GoalChangeKind,
+  GoalExecutionControlPort,
+  GoalExecutionInterruptInput,
   GoalPersistencePort,
   GoalRecord,
   GoalRecordData,

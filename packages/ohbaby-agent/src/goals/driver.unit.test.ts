@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { GOAL_SAFETY_CAP_TURNS } from "./constants.js";
 import { driveGoal } from "./driver.js";
 import { InMemoryGoalPersistence } from "./persistence.js";
 import { GoalStore } from "./store.js";
 import type { GoalTurnOutcome, GoalTurnRunner } from "./types.js";
 
-async function makeActiveStore(): Promise<GoalStore> {
+async function makeActiveStore(now?: () => number): Promise<GoalStore> {
   const store = await GoalStore.rebuild({
+    ...(now === undefined ? {} : { now }),
     persistence: new InMemoryGoalPersistence(),
     sessionId: "s1",
   });
@@ -35,13 +37,23 @@ function scriptedRunner(
 }
 
 describe("driveGoal", () => {
+  it("uses a 1000-turn system safety cap", () => {
+    expect(GOAL_SAFETY_CAP_TURNS).toBe(1000);
+  });
+
   it("runs turns until the model completes via store, counting the final turn", async () => {
     const store = await makeActiveStore();
     const { prompts, runner } = scriptedRunner(async (turn, s) => {
       if (turn === 3) await s.markComplete("model");
       return { status: "succeeded" };
     }, store);
-    await driveGoal({ runner, safetyCapTurns: 200, sessionId: "s1", store });
+    await driveGoal({
+      pause: (reason, actor) => store.pause(reason, actor),
+      runner,
+      safetyCapTurns: 200,
+      sessionId: "s1",
+      store,
+    });
     expect(prompts).toHaveLength(3);
     expect(prompts[0]).toContain("You are starting work under a goal");
     expect(prompts[1]).toContain("Continue working toward the active goal.");
@@ -51,7 +63,13 @@ describe("driveGoal", () => {
   it("cancelled outcome pauses the goal with 'interrupted'", async () => {
     const store = await makeActiveStore();
     const { runner } = scriptedRunner(() => ({ status: "cancelled" }), store);
-    await driveGoal({ runner, safetyCapTurns: 200, sessionId: "s1", store });
+    await driveGoal({
+      pause: (reason, actor) => store.pause(reason, actor),
+      runner,
+      safetyCapTurns: 200,
+      sessionId: "s1",
+      store,
+    });
     expect(store.getSnapshot()?.status).toBe("paused");
     expect(store.getSnapshot()?.pauseReason).toBe("interrupted");
   });
@@ -62,7 +80,13 @@ describe("driveGoal", () => {
       () => ({ error: "provider retry exhausted", status: "failed" }),
       store,
     );
-    await driveGoal({ runner, safetyCapTurns: 200, sessionId: "s1", store });
+    await driveGoal({
+      pause: (reason, actor) => store.pause(reason, actor),
+      runner,
+      safetyCapTurns: 200,
+      sessionId: "s1",
+      store,
+    });
     expect(store.getSnapshot()?.status).toBe("paused");
     expect(store.getSnapshot()?.pauseReason).toContain(
       "provider retry exhausted",
@@ -76,7 +100,13 @@ describe("driveGoal", () => {
       return { error: "late transport error", status: "failed" };
     }, store);
 
-    await driveGoal({ runner, safetyCapTurns: 200, sessionId: "s1", store });
+    await driveGoal({
+      pause: (reason, actor) => store.pause(reason, actor),
+      runner,
+      safetyCapTurns: 200,
+      sessionId: "s1",
+      store,
+    });
 
     expect(store.getSnapshot()?.status).toBe("paused");
     expect(store.getSnapshot()?.pauseReason).toBe("needs review");
@@ -89,7 +119,13 @@ describe("driveGoal", () => {
       () => ({ status: "succeeded" }),
       store,
     );
-    await driveGoal({ runner, safetyCapTurns: 200, sessionId: "s1", store });
+    await driveGoal({
+      pause: (reason, actor) => store.pause(reason, actor),
+      runner,
+      safetyCapTurns: 200,
+      sessionId: "s1",
+      store,
+    });
     expect(prompts).toHaveLength(2);
     expect(store.getSnapshot()?.status).toBe("paused");
     expect(store.getSnapshot()?.pauseReason).toContain("budget");
@@ -101,10 +137,59 @@ describe("driveGoal", () => {
       () => ({ status: "succeeded" }),
       store,
     );
-    await driveGoal({ runner, safetyCapTurns: 3, sessionId: "s1", store });
+    await driveGoal({
+      pause: (reason, actor) => store.pause(reason, actor),
+      runner,
+      safetyCapTurns: 3,
+      sessionId: "s1",
+      store,
+    });
     expect(prompts).toHaveLength(3);
     expect(store.getSnapshot()?.status).toBe("paused");
     expect(store.getSnapshot()?.pauseReason).toContain("Safety cap");
+  });
+
+  it("pauses at the system safety cap even when a larger turn budget is set", async () => {
+    const store = await makeActiveStore();
+    await store.setBudgetLimits({ turnBudget: 1000 }, "user");
+    const { prompts, runner } = scriptedRunner(
+      () => ({ status: "succeeded" }),
+      store,
+    );
+    await driveGoal({
+      pause: (reason, actor) => store.pause(reason, actor),
+      runner,
+      safetyCapTurns: 3,
+      sessionId: "s1",
+      store,
+    });
+    expect(prompts).toHaveLength(3);
+    expect(store.getSnapshot()?.pauseReason).toContain("Safety cap");
+  });
+
+  it("enforces active-time budgets at continuation boundaries", async () => {
+    let time = 0;
+    const store = await makeActiveStore(() => time);
+    await store.setBudgetLimits({ wallClockBudgetMs: 1_000 }, "user");
+    const { prompts, runner } = scriptedRunner(() => {
+      time = 1_000;
+      return { status: "succeeded" };
+    }, store);
+
+    await driveGoal({
+      pause: (reason, actor) => store.pause(reason, actor),
+      runner,
+      safetyCapTurns: 1000,
+      sessionId: "s1",
+      store,
+    });
+
+    expect(prompts).toHaveLength(1);
+    expect(store.getSnapshot()).toMatchObject({
+      pauseReason: "A configured budget was reached",
+      status: "paused",
+      wallClockMs: 1_000,
+    });
   });
 
   it("records token usage from outcome toward token budget", async () => {
@@ -114,7 +199,13 @@ describe("driveGoal", () => {
       () => ({ status: "succeeded", tokensUsed: 600 }),
       store,
     );
-    await driveGoal({ runner, safetyCapTurns: 200, sessionId: "s1", store });
+    await driveGoal({
+      pause: (reason, actor) => store.pause(reason, actor),
+      runner,
+      safetyCapTurns: 200,
+      sessionId: "s1",
+      store,
+    });
     expect(store.getSnapshot()?.status).toBe("paused");
     expect(store.getSnapshot()?.tokensUsed).toBeGreaterThanOrEqual(1000);
   });

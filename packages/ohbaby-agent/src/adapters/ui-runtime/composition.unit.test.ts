@@ -32,7 +32,10 @@ import type {
   SkillResourceContent,
   SkillSearchDirectory,
 } from "../../skill/index.js";
-import { createUiRuntimeComposition } from "./composition.js";
+import {
+  createUiRuntimeComposition as createUiRuntimeCompositionImpl,
+  type UiRuntimeCompositionOptions,
+} from "./composition.js";
 import { createHostLocalSandboxManager } from "./host-local-environment.js";
 
 interface FakeSdkClient {
@@ -40,6 +43,26 @@ interface FakeSdkClient {
 }
 
 const cleanupDirectories: string[] = [];
+
+const testGoalExecutionControl = {
+  interruptGoalExecution: (): Promise<void> => Promise.resolve(),
+};
+
+type TestUiRuntimeCompositionOptions = Omit<
+  UiRuntimeCompositionOptions,
+  "goalExecutionControl"
+> &
+  Partial<Pick<UiRuntimeCompositionOptions, "goalExecutionControl">>;
+
+function createUiRuntimeComposition(
+  options: TestUiRuntimeCompositionOptions,
+): ReturnType<typeof createUiRuntimeCompositionImpl> {
+  return createUiRuntimeCompositionImpl({
+    ...options,
+    goalExecutionControl:
+      options.goalExecutionControl ?? testGoalExecutionControl,
+  });
+}
 
 afterEach(async () => {
   for (const directory of cleanupDirectories.splice(0)) {

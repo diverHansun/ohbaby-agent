@@ -178,10 +178,14 @@ interface SubagentInstanceStore {
 | caller waiter abort | 解除 waiter/signal，durable prompt 保留；已有 drain 正常完成前序 turn 后可继续，否则等待显式 resume |
 | `interrupt:true` | `interrupted`；只有确认旧 turn settle 才可安全自动续排 |
 | primary run-tree interrupt/runtime dispose | active turn `interrupted`，queue 保留并暂停，不自动续排 |
+| active goal pause/cancel/runtime pause | adapter 调用当前 daemon 的 `interruptByParent`；active turn `interrupted`，queue/record/context 保留，不 close |
+| goal complete | 正常应已由 main 收敛；若仍 active，adapter interrupt-only 兜底，不 close |
 | close | `cancelled + closedAt` 终态；迟到 finish CAS 不生效 |
 | 进程恢复 | owner-aware `pending/running -> interrupted`，不创建 AgentInstance，不自动 drain |
 
 owner recovery 以精确 `ownerId` 或 owner PID 已死为依据；同 PID 不同 owner 不能互相抢占。PID reuse 等更强故障判定留给 owner registry/heartbeat/lease。
+
+当前 goal cancellation 只作用于当前路径对应的 live daemon。多个路径分别启动 daemon 时，不跨 daemon 请求远程 owner 停止；该能力随未来全局单 daemon 架构统一设计。
 
 取消采用 cooperative contract：同一 scope replacement 必须等旧 lifecycle settle；RunManager 的 lock 只覆盖该 scope，不阻塞 sibling。ToolScheduler 可先向调用方返回 cancelled，但写/危险工具的槽位要等实际 promise settle 才释放。
 

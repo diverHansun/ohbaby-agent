@@ -56,7 +56,7 @@ export class GoalStore {
     for (const record of records) {
       if (record.type === "create") {
         store.state = {
-          budgetLimits: record.budgetLimits ?? {},
+          budgetLimits: normalizeBudgetLimits(record.budgetLimits),
           goalId: record.goalId,
           objective: record.objective ?? "",
           status: "active",
@@ -85,7 +85,7 @@ export class GoalStore {
         state.wallClockMs = record.wallClockMs;
       }
       if (record.budgetLimits !== undefined) {
-        state.budgetLimits = record.budgetLimits;
+        state.budgetLimits = normalizeBudgetLimits(record.budgetLimits);
       }
       if (record.status !== undefined) {
         const status = normalizeStoredStatus(record.status);
@@ -127,6 +127,7 @@ export class GoalStore {
       );
     }
     const goalId = this.deps.createGoalId?.() ?? randomUUID();
+    const budgetLimits = normalizeBudgetLimits(input.budgetLimits);
     const record: GoalRecordData = {
       actor: input.actor,
       goalId,
@@ -135,13 +136,11 @@ export class GoalStore {
       ...(input.completionCriterion !== undefined
         ? { completionCriterion: input.completionCriterion }
         : {}),
-      ...(input.budgetLimits !== undefined
-        ? { budgetLimits: input.budgetLimits }
-        : {}),
+      ...(input.budgetLimits !== undefined ? { budgetLimits } : {}),
     };
     await this.appendRecord(record);
     this.state = {
-      budgetLimits: input.budgetLimits ?? {},
+      budgetLimits,
       goalId,
       objective,
       status: "active",
@@ -258,7 +257,10 @@ export class GoalStore {
     actor: GoalActor,
   ): Promise<GoalSnapshot> {
     const state = this.requireState();
-    const mergedLimits = { ...state.budgetLimits, ...limits };
+    const mergedLimits = normalizeBudgetLimits({
+      ...state.budgetLimits,
+      ...limits,
+    });
     await this.appendRecord({
       actor,
       budgetLimits: mergedLimits,
@@ -385,6 +387,22 @@ export class GoalStore {
   private now(): number {
     return this.deps.now?.() ?? Date.now();
   }
+}
+
+function normalizeBudgetLimits(
+  limits: GoalBudgetLimits | undefined,
+): GoalBudgetLimits {
+  return {
+    ...(limits?.tokenBudget === undefined
+      ? {}
+      : { tokenBudget: limits.tokenBudget }),
+    ...(limits?.turnBudget === undefined
+      ? {}
+      : { turnBudget: limits.turnBudget }),
+    ...(limits?.wallClockBudgetMs === undefined
+      ? {}
+      : { wallClockBudgetMs: limits.wallClockBudgetMs }),
+  };
 }
 
 function normalizeStoredStatus(status: GoalStatus | "blocked"): GoalStatus {

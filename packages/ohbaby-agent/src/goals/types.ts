@@ -95,6 +95,17 @@ export interface GoalTurnRunner {
   runTurn(sessionId: string, promptText: string): Promise<GoalTurnOutcome>;
 }
 
+export interface GoalExecutionInterruptInput {
+  readonly sessionId: string;
+  readonly reason: string;
+  /** Complete lets the current main run finish its final response. */
+  readonly includePrimary: boolean;
+}
+
+export interface GoalExecutionControlPort {
+  interruptGoalExecution(input: GoalExecutionInterruptInput): Promise<void>;
+}
+
 export interface CreateGoalInput {
   readonly objective: string;
   readonly completionCriterion?: string;

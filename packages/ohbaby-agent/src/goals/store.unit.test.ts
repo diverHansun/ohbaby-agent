@@ -180,6 +180,33 @@ describe("GoalStore state machine", () => {
 });
 
 describe("GoalStore rebuild + normalizeAfterReplay", () => {
+  it("replays wall-clock limits and elapsed active time", async () => {
+    const persistence = new InMemoryGoalPersistence();
+    await persistence.append("s1", {
+      budgetLimits: {
+        turnBudget: 10,
+        wallClockBudgetMs: 60_000,
+      },
+      goalId: "g1",
+      objective: "legacy budget",
+      type: "create",
+    });
+    await persistence.append("s1", {
+      goalId: "g1",
+      status: "paused",
+      type: "update",
+      wallClockMs: 12_000,
+    });
+
+    const rebuilt = await GoalStore.rebuild({ persistence, sessionId: "s1" });
+
+    expect(rebuilt.getSnapshot()?.budgetLimits).toEqual({
+      turnBudget: 10,
+      wallClockBudgetMs: 60_000,
+    });
+    expect(rebuilt.getSnapshot()?.wallClockMs).toBe(12_000);
+  });
+
   it("replays records to consistent state including usage and budget", async () => {
     const { persistence, store } = await makeStore();
     await store.create({ actor: ACTOR, objective: "a" });

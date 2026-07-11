@@ -182,7 +182,12 @@ describe("goals x compact (integration)", () => {
     const sessionId = "goal_compact_s1";
     const prompts: string[] = [];
     let compactResult: CompactResult | undefined;
-    const service = new GoalService({ persistence });
+    const service = new GoalService({
+      executionControl: {
+        interruptGoalExecution: (): Promise<void> => Promise.resolve(),
+      },
+      persistence,
+    });
     service.attachTurnRunner(
       createRunner({
         prompts,
@@ -252,7 +257,12 @@ describe("goals x compact (integration)", () => {
   it("keeps goal records and usage counters intact across compact and rebuild", async () => {
     const sessionId = "goal_compact_s2";
     const prompts: string[] = [];
-    const service = new GoalService({ persistence });
+    const service = new GoalService({
+      executionControl: {
+        interruptGoalExecution: (): Promise<void> => Promise.resolve(),
+      },
+      persistence,
+    });
     service.attachTurnRunner(createRunner({ prompts }));
 
     await service.createGoal(sessionId, {
@@ -275,7 +285,12 @@ describe("goals x compact (integration)", () => {
     expect(compactResult.status).toBe("compacted");
 
     // 模拟重启：从同一 SQLite 全新重建。结构化状态出带存储，compact 不回退用量。
-    const rebuilt = new GoalService({ persistence });
+    const rebuilt = new GoalService({
+      executionControl: {
+        interruptGoalExecution: (): Promise<void> => Promise.resolve(),
+      },
+      persistence,
+    });
     const snapshot = await rebuilt.getSnapshot(sessionId);
     expect(snapshot).toMatchObject({
       objective: OBJECTIVE,

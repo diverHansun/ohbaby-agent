@@ -5,8 +5,8 @@
  */
 export const MAX_GOAL_OBJECTIVE_LENGTH = 6000;
 
-/** 不可配置安全阀：未设 turn 预算时的续跑轮上限（不对用户/prompt 暴露）。 */
-export const GOAL_SAFETY_CAP_TURNS = 200;
+/** 不可配置的系统绝对安全阀；不是用户预算，不进入 BudgetReport。 */
+export const GOAL_SAFETY_CAP_TURNS = 1000;
 
 /** 任一预算维度用量占比达到该阈值时，提醒文本提示模型收敛。 */
 export const GOAL_BUDGET_CONVERGING_RATIO = 0.75;

@@ -101,7 +101,7 @@ start ┌──────────────┐  预算到顶或安全阀
 
 每一轮迭代：
 
-1. 读 GoalStore 当前态；若 `active` 且（任一已设预算到顶 **或** 未设 turn 预算且续跑轮数达安全阀上限）→ pause（写入 `pauseReason`）→ 退出循环。
+1. 读 GoalStore 当前态；若 `active` 且（任一已设 turn/token/active-time 预算到顶 **或** 续跑轮数达 1000-turn 系统绝对上限）→ pause（写入 `pauseReason`）→ 退出循环。
 2. incrementTurn（追加记录：turn 计数、wall-clock 锚点）。
 3. 渲染续跑提醒文本（流 D）：首轮=objective、后续轮=GOAL_CONTINUATION_CORE + 进度 + 预算报告。
 4. 起一轮续跑 Run：调用 `run-manager.create(...)`，输入为**续跑提醒文本作为 user 消息**；`waitForCompletion` 等待 `RunCompletion`。该 Run 执行期间，模型可见 goal 工具。token 消耗由 GoalDriver 在 Run 完成后 `recordTokenUsage`。
@@ -158,7 +158,7 @@ start ┌──────────────┐  预算到顶或安全阀
 
 | 逻辑接口 | 输入含义 | 输出含义 | 同步性 | 服务的数据流 |
 |---|---|---|---|---|
-| 生命周期操作（create / status / pause / resume / cancel / replaceObjective；命令名为 `/goal replace`） | sessionId + objective/criterion/budget（按操作） | 迁移结果 / 当前快照 / 错误 | 同步迁移，create·resume 触发异步驱动 | A, C, E, H |
+| 生命周期操作（create / status / pause / resume / cancel / replaceObjective；命令名为 `/goal replace`） | sessionId + objective/criterion（按操作）；预算仅经模型工具翻译 | 迁移结果 / 当前快照 / 错误 | 同步迁移，create·resume 触发异步驱动 | A, C, E, H |
 | 驱动启动（ensure-driving） | sessionId | 确保 active goal 有恰一个 driver 在跑（幂等）；由 create 与 `/goal resume` 显式触发，不自动 | 异步 | A, B, UC-4 resume |
 | 注入渲染（render-injection） | sessionId + goal snapshot | active 续跑提醒、paused light note，或"无" | 同步、纯函数 | D |
 | 快照读取（get-snapshot） | sessionId | GoalSnapshot 或 null | 同步 | H |
@@ -183,7 +183,22 @@ start ┌──────────────┐  预算到顶或安全阀
 - **goal 状态与生命周期**：goals **独占**创建、更新、销毁权。任何模块（命令/工具/驱动）都只能经 GoalStore 唯一入口迁移，不得旁路改状态。
 - **续跑 Run**：run-manager 拥有 Run 的创建、并发、sandbox、取消与台账；goals 只**读**其完成信号并翻译成 goal 迁移，不拥有 Run。
 - **续跑提醒文本**：goals 拥有其**措辞与生成**；写入 history 后，组装位置与压缩由 context 模块按既有规则决定。提醒是持久数据——旧的可被 compact 压缩，最新的在尾部。
-- **续跑轮计数、预算用量与安全阀**：`turnsUsed` / `tokensUsed` / `wallClockMs` 由 GoalDriver 每轮累计（单调，不因 compact 回退），是预算判定与安全阀判定的依据；预算上限由 `SetGoalBudget` 设定；安全阀轮上限是 GoalDriver 的写死常量，不在 goal 数据上、不对外暴露。
+- **续跑轮计数、三维预算与安全阀**：`turnsUsed` / `tokensUsed` / `wallClockMs` 单调累计且不因 compact 回退；time 只累计 active pursuit，paused 时间不计，预算在 continuation 边界判定。安全阀是始终生效的 1000-turn 系统绝对上限，不在 goal 数据上、不进入 BudgetReport、不对外暴露。
+
+### Goal 停止与 subagent 执行流
+
+```text
+active goal -> pause/cancel/runtime pause
+  -> GoalStore 先持久化 paused/clear（阻止下一 continuation）
+  -> GoalExecutionControlPort.interruptGoalExecution(sessionId, reason)
+  -> adapter 仅取消 goal-owned primary run
+  -> SessionSubagentHost.interruptByParent(sessionId)
+  -> active subagent => interrupted；pendingQueue/record/context 保留；不 close
+```
+
+若 goal 已 paused，随后 `/goal cancel` 只清 goal，不重新清扫 session，避免误伤 paused 期间普通 prompt 创建的执行。`/goal resume` 不触达 subagent；main 之后显式决定是否续接。
+
+complete 正常流要求 main 已收敛全部 subagents，并完成目标、验证与最终结论；调用 complete 后输出最终回答并结束。若仍有 active subagent，adapter 执行 interrupt-only safety net，随后 goal 保持 cleared。当前只控制本路径对应的 live daemon，不向其他 daemon 发送远程 cancellation。
 - **持久记录**：services/database 拥有字节存储；goals 拥有 **GoalRecord 的 schema 与重建/归一逻辑**，是唯一能把记录解释成 goal 态的模块。
 - **快照事件**：goals 拥有快照的**内容**；stream-bridge/UI 拥有其**传输与渲染**。
 

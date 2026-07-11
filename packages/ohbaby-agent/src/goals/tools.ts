@@ -9,6 +9,7 @@ import type {
   GoalSnapshot,
   GoalStatus,
 } from "./types.js";
+import { GOAL_SAFETY_CAP_TURNS } from "./constants.js";
 
 /** goal 工具的后端子集；GoalService 天然满足。 */
 export interface GoalToolBackend {
@@ -39,20 +40,71 @@ function optionalString(value: unknown, field: string): string | undefined {
   return value;
 }
 
-function optionalPositiveInt(
-  value: unknown,
-  field: string,
-): number | undefined {
-  if (value === undefined) return undefined;
-  if (
-    typeof value !== "number" ||
-    !Number.isFinite(value) ||
-    !Number.isInteger(value) ||
-    value <= 0
-  ) {
-    throw new Error(`Invalid ${field}: expected a positive integer.`);
+function requirePositiveNumber(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`Invalid ${field}: expected a positive number.`);
   }
   return value;
+}
+
+const MIN_TIME_BUDGET_MS = 1_000;
+const MAX_TIME_BUDGET_MS = 24 * 60 * 60 * 1_000;
+const GOAL_BUDGET_UNITS = [
+  "turns",
+  "tokens",
+  "milliseconds",
+  "seconds",
+  "minutes",
+  "hours",
+] as const;
+type GoalBudgetUnit = (typeof GOAL_BUDGET_UNITS)[number];
+
+function isGoalBudgetUnit(value: unknown): value is GoalBudgetUnit {
+  return (
+    typeof value === "string" &&
+    GOAL_BUDGET_UNITS.includes(value as GoalBudgetUnit)
+  );
+}
+
+function timeBudgetMs(value: number, unit: GoalBudgetUnit): number | undefined {
+  const factor =
+    unit === "milliseconds"
+      ? 1
+      : unit === "seconds"
+        ? 1_000
+        : unit === "minutes"
+          ? 60_000
+          : unit === "hours"
+            ? 3_600_000
+            : undefined;
+  return factor === undefined ? undefined : Math.round(value * factor);
+}
+
+function budgetLimitsFromInput(
+  value: number,
+  unit: GoalBudgetUnit,
+): GoalBudgetLimits {
+  if (unit === "turns") {
+    const turnBudget = Math.max(1, Math.round(value));
+    if (turnBudget > GOAL_SAFETY_CAP_TURNS) {
+      throw new Error(
+        `Invalid turn budget: system safety cap is ${String(GOAL_SAFETY_CAP_TURNS)} turns.`,
+      );
+    }
+    return { turnBudget };
+  }
+  if (unit === "tokens") {
+    return { tokenBudget: Math.max(1, Math.round(value)) };
+  }
+  const wallClockBudgetMs = timeBudgetMs(value, unit);
+  if (
+    wallClockBudgetMs === undefined ||
+    wallClockBudgetMs < MIN_TIME_BUDGET_MS ||
+    wallClockBudgetMs > MAX_TIME_BUDGET_MS
+  ) {
+    throw new Error("Invalid time budget: expected a duration from 1 second to 24 hours.");
+  }
+  return { wallClockBudgetMs };
 }
 
 function truncate(text: string, max = 120): string {
@@ -196,55 +248,35 @@ function createSetGoalBudgetTool(backend: GoalToolBackend): Tool {
   return {
     name: "SetGoalBudget",
     description:
-      "Record a hard budget for the current goal (turns, tokens, and/or minutes). Call this " +
-      "only when the user explicitly states a budget limit — never invent budgets yourself. " +
-      "When the budget is reached the goal pauses (resumable via /goal resume).",
+      "Translate one explicit hard limit from the user, system, or developer into a structured " +
+      "budget for the current goal. Never estimate, infer, recommend, or invent a budget. Set " +
+      "one dimension per call; call again only when another dimension was explicitly stated. " +
+      "Time measures active goal pursuit, excludes paused time, and is enforced at continuation " +
+      "boundaries rather than as an exact deadline. When reached, the goal pauses and remains resumable.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {
-        tokenBudget: {
-          description: "Maximum cumulative tokens.",
-          type: "number",
-        },
-        turnBudget: {
-          description: "Maximum continuation turns.",
-          type: "number",
-        },
-        wallClockBudgetMinutes: {
-          description: "Maximum active wall-clock minutes.",
+        unit: { enum: [...GOAL_BUDGET_UNITS], type: "string" },
+        value: {
+          description: "The positive numeric budget value explicitly stated by an authority.",
+          exclusiveMinimum: 0,
           type: "number",
         },
       },
+      required: ["value", "unit"],
       type: "object",
     },
     source: "builtin",
     category: "memory",
     async execute(params, context): Promise<ToolExecutionResult> {
-      const turnBudget = optionalPositiveInt(params.turnBudget, "turnBudget");
-      const tokenBudget = optionalPositiveInt(
-        params.tokenBudget,
-        "tokenBudget",
-      );
-      const minutes = optionalPositiveInt(
-        params.wallClockBudgetMinutes,
-        "wallClockBudgetMinutes",
-      );
-      if (
-        turnBudget === undefined &&
-        tokenBudget === undefined &&
-        minutes === undefined
-      ) {
-        throw new Error(
-          "SetGoalBudget requires at least one of turnBudget, tokenBudget, wallClockBudgetMinutes.",
-        );
+      const value = requirePositiveNumber(params.value, "value");
+      if (!isGoalBudgetUnit(params.unit)) {
+        throw new Error("Invalid unit for SetGoalBudget.");
       }
-      const snapshot = await backend.setBudget(context.sessionId, {
-        ...(turnBudget !== undefined ? { turnBudget } : {}),
-        ...(tokenBudget !== undefined ? { tokenBudget } : {}),
-        ...(minutes !== undefined
-          ? { wallClockBudgetMs: minutes * 60_000 }
-          : {}),
-      });
+      const snapshot = await backend.setBudget(
+        context.sessionId,
+        budgetLimitsFromInput(value, params.unit),
+      );
       return {
         metadata: { budgetLimits: { ...snapshot.budgetLimits } },
         output: formatGoalStatusLines(snapshot).join("\n"),

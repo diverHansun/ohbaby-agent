@@ -10,7 +10,9 @@
 
 **覆盖（goals 自身职责）：**
 - 状态机迁移与合法性：create / resume / pause / markComplete / cancel / replaceObjective / incrementTurn / recordTokenUsage / setBudgetLimits 全部经 GoalStore 唯一入口；actor 边界；`complete` 瞬态（宣告即清、从不落盘）；折叠规则。
-- 预算与安全阀：三维预算（turn/token/time）opt-in 设定、到顶 pause 并记录 `pauseReason`、未设 turn 预算时安全阀兜底、BudgetReport 计算与收敛阈值。
+- 预算与安全阀：turn/token/active-time 预算 opt-in 设定、到顶 pause 并记录 `pauseReason`、time 排除 paused 区间且只在 continuation 边界判定、1000-turn 系统绝对安全阀始终生效、BudgetReport 计算与收敛阈值。
+- Goal × subagent 停止边界：active goal pause/cancel/runtime pause 时当前 daemon 内执行停止但实例不 close；resume 不自动 drain。
+- complete 顺序：main 收敛 subagents，完成目标、验证与最终结论后 complete；工具返回后输出最终回答并结束；异常 active straggler 被 interrupt-only 兜底。
 - GoalDriver 编排：续跑循环、预算/安全阀判定、`RunCompletion` → 迁移映射、ensure-driving 幂等重入。
 - GoalInjector：active 全量续跑提醒、paused light note、`<untrusted_objective>` 包裹与转义；active 提醒每轮重生成并作为 user 消息写入持久 history，light note 只作为普通用户 prompt 的模型可见前缀。
 - GoalPersistence：追加/读取记录；GoalStore.rebuild 回放记录并执行 `normalizeAfterReplay`（active→paused 降级、清游离 complete）。
@@ -48,9 +50,12 @@
 | 设 token 预算，tokensUsed 未达 | 继续续跑 |
 | 设 token 预算，tokensUsed 达上限 | pause(budget_exhausted)，**可恢复** |
 | 设 turn 预算，turnsUsed 达上限 | pause(budget_exhausted)，**可恢复** |
-| 设 wallClock 预算，wallClockMs 达上限 | pause(budget_exhausted)，**可恢复** |
-| 未设 turn 预算，turnsUsed 达安全阀上限 | pause(safety_cap_reached)，**可恢复** |
-| 设了 turn 预算 > 安全阀上限 | 按用户 turn 预算判定，安全阀不生效 |
+| `/goal budget --turns/--tokens/--minutes` | 明确拒绝并提示在自然语言 objective/请求中声明限制 |
+| main 调 `SetGoalBudget(value, unit)` | 每次只设置一个明确维度；支持 turns/tokens/milliseconds/seconds/minutes/hours |
+| main 未获得用户/system/developer 明确限制 | 不应调用 SetGoalBudget；真实 API eval 验证不自行发明预算 |
+| active-time 达显式上限 | continuation 边界 pause；paused 时间不计，不承诺精确 deadline |
+| turnsUsed 达安全阀上限 | pause(safety_cap_reached)，**可恢复**，无论是否存在显式 turn 预算 |
+| 设了 turn 预算 > 1000 | tool 拒绝，不能突破系统绝对上限 |
 | 任一预算用量达 75% | BudgetReport 标记 converging，提醒文本含收敛提示 |
 | 未设任何预算 | 无预算约束，仅安全阀兜底 |
 | 触发后 `/goal resume` | 回 active 再给一批续跑（预算用量不清零，继续累计） |
@@ -139,23 +144,24 @@
 
 ## 四、Verification Strategy（验证策略）
 
-**主策略：unit（mock 外部依赖）+ 少量 integration（真实 SQLite + fake provider）。**
+**主策略：unit（mock 外部依赖）+ 少量 integration（真实 SQLite + fake provider）+ opt-in 真实模型 eval。**
 
 **Mock 边界（unit）：**
 - run-manager → fake（可配置返回 `RunCompletion`：succeeded / cancelled / failed）。
 - services/database → fake store 或 in-memory。
-- LLM provider → **fake，绝不真实 API**（分类规范硬约束）。
+- 默认测试的 LLM provider → fake；模型服从性使用显式环境开关启用真实 API eval，默认 CI 跳过且绝不输出密钥。
 - 被测对象本身（GoalStore / GoalDriver / GoalInjector / budget）不 mock。
 
 **不 mock（integration）：** in-memory SQLite、真实 GoalDriver 编排、真实 messageManager。
 
 **contract 固定：** goal 工具的 I/O 结构、`goal.updated{sessionId, goal}` 事件形态、以及**注入转义**（防注入）作为消费者可见契约，单独 `.contract.test.ts`。
 
-**可测性要求（重要）：** 安全阀虽对**用户/prompt 不可配置**，但测试需能以**内部构造参数**注入一个低上限，快速命中而不必真跑成千轮。预算同理——测试可注入低预算值快速触发到顶。即"对用户不可配置"≠"对测试不可注入"——安全阀常量与预算值应可在构造期被测试覆盖，但前者不暴露为用户 config，后者经工具/命令设定。
+**可测性要求（重要）：** 安全阀虽对**用户/prompt 不可配置**，但测试需能以**内部构造参数**注入一个低上限，快速命中而不必真跑 1000 轮。预算同理——测试可注入低预算值快速触发到顶。即"对用户不可配置"≠"对测试不可注入"——安全阀常量与预算值应可在构造期被测试覆盖，但前者不暴露为用户 config，后者仅经模型工具翻译明确限制。
 
 **重点关注（不可破坏行为）：**
 - **恢复安全**：重建后绝不自动续跑 active（场景组 5）——最高优先，直接对应 non-functional 的不可接受失败。
 - **防注入**：objective 转义与包裹不可绕过（场景组 4 contract）。
 - **无双 driver**：ensure-driving 幂等（场景组 6）。
 - **无静默失败**：Run failed / 落盘失败必须显性反映到状态与事件，不停在假 active。
-- **预算判定正确**：三维独立、opt-in、到顶 block、安全阀仅未设 turn 预算时兜底（场景组 2）。
+- **预算判定正确**：turn/token/active-time 独立、opt-in、到顶 pause；1000-turn 系统安全阀始终生效且不进入预算报告（场景组 2）。
+- **停止边界正确**：active goal 离场时 primary/subagents 停止且不 close；paused cancel 不误伤普通任务；complete 不遗留 active execution。

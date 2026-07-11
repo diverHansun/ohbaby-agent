@@ -33,5 +33,4 @@ export type {
   CommandSkillSummary,
   CommandToolProvider,
   CommandToolSummary,
-  GoalCommandBudgetLimits,
 } from "./types.js";

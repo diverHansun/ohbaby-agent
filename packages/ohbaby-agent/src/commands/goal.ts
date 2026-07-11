@@ -6,54 +6,11 @@ import type {
   CommandHandler,
   CommandRunContext,
   CommandServiceOptions,
-  GoalCommandBudgetLimits,
 } from "./types.js";
 
 function statusText(snapshot: GoalSnapshot | null): string {
   if (snapshot === null) return "No goal is currently set.";
   return formatGoalStatusLines(snapshot).join("\n");
-}
-
-function parseBudgetFlags(argv: readonly string[]): GoalCommandBudgetLimits {
-  const limits: {
-    turnBudget?: number;
-    tokenBudget?: number;
-    wallClockBudgetMs?: number;
-  } = {};
-  for (let index = 0; index < argv.length; index += 2) {
-    const flag = argv.at(index);
-    const raw = argv.at(index + 1);
-    const value = raw === undefined ? Number.NaN : Number(raw);
-    if (!Number.isInteger(value) || value <= 0) {
-      throw new GoalError(
-        "invalid_transition",
-        `Invalid budget value for ${flag ?? "<missing>"}: expected a positive integer.`,
-      );
-    }
-    switch (flag) {
-      case "--turns":
-        limits.turnBudget = value;
-        break;
-      case "--tokens":
-        limits.tokenBudget = value;
-        break;
-      case "--minutes":
-        limits.wallClockBudgetMs = value * 60_000;
-        break;
-      default:
-        throw new GoalError(
-          "invalid_transition",
-          `Unknown budget flag: ${flag ?? "<missing>"}. Use --turns, --tokens, --minutes.`,
-        );
-    }
-  }
-  if (Object.keys(limits).length === 0) {
-    throw new GoalError(
-      "invalid_transition",
-      "Usage: /goal budget [--turns N] [--tokens N] [--minutes N]",
-    );
-  }
-  return limits;
 }
 
 async function runGoalCommand(
@@ -105,9 +62,10 @@ async function runGoalCommand(
     return;
   }
   if (head === "budget") {
-    const limits = parseBudgetFlags(argv.slice(1));
-    emitText(statusText(await goals.setBudget(sessionId, limits)));
-    return;
+    throw new GoalError(
+      "invalid_transition",
+      "The /goal budget subcommand is not available. State any hard limit in natural language so the main agent can record it.",
+    );
   }
   // 首 token 非保留子命令 → 整段视为 objective 创建 goal
   const objective = argv.join(" ").trim();
