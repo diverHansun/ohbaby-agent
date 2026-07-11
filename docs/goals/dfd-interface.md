@@ -158,7 +158,7 @@ start ┌──────────────┐  预算到顶或安全阀
 
 | 逻辑接口 | 输入含义 | 输出含义 | 同步性 | 服务的数据流 |
 |---|---|---|---|---|
-| 生命周期操作（create / status / pause / resume / cancel / replaceObjective；命令名为 `/goal replace`） | sessionId + objective/criterion/budget（按操作） | 迁移结果 / 当前快照 / 错误 | 同步迁移，create·resume 触发异步驱动 | A, C, E, H |
+| 生命周期操作（create / status / pause / resume / cancel / replaceObjective；命令名为 `/goal replace`） | sessionId + objective/criterion（按操作）；预算仅经模型工具翻译 | 迁移结果 / 当前快照 / 错误 | 同步迁移，create·resume 触发异步驱动 | A, C, E, H |
 | 驱动启动（ensure-driving） | sessionId | 确保 active goal 有恰一个 driver 在跑（幂等）；由 create 与 `/goal resume` 显式触发，不自动 | 异步 | A, B, UC-4 resume |
 | 注入渲染（render-injection） | sessionId + goal snapshot | active 续跑提醒、paused light note，或"无" | 同步、纯函数 | D |
 | 快照读取（get-snapshot） | sessionId | GoalSnapshot 或 null | 同步 | H |

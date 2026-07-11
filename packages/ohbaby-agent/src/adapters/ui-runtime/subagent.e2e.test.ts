@@ -17,7 +17,10 @@ import type {
 } from "../../services/interface-providers/index.js";
 import { createInMemorySessionManager } from "../../services/session/index.js";
 import { SkillRegistry } from "../../skill/index.js";
-import { createUiRuntimeComposition } from "./composition.js";
+import {
+  createUiRuntimeComposition as createUiRuntimeCompositionImpl,
+  type UiRuntimeCompositionOptions,
+} from "./composition.js";
 import {
   createHostLocalSandboxManager,
   type HostLocalSandboxManager,
@@ -30,6 +33,22 @@ interface FakeSdkClient {
 interface Deferred<T> {
   readonly promise: Promise<T>;
   resolve(value: T): void;
+}
+
+type TestUiRuntimeCompositionOptions = Omit<
+  UiRuntimeCompositionOptions,
+  "goalExecutionControl"
+>;
+
+function createUiRuntimeComposition(
+  options: TestUiRuntimeCompositionOptions,
+): ReturnType<typeof createUiRuntimeCompositionImpl> {
+  return createUiRuntimeCompositionImpl({
+    ...options,
+    goalExecutionControl: {
+      interruptGoalExecution: (): Promise<void> => Promise.resolve(),
+    },
+  });
 }
 
 function createDeferred<T>(): Deferred<T> {

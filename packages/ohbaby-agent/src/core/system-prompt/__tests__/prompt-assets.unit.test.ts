@@ -73,4 +73,16 @@ describe("system prompt template assets", () => {
     // catch that, so assert the placeholder explicitly.
     expect(SUBAGENT_ROLES_GUIDANCE_PROMPT).toContain("{{ROLES}}");
   });
+
+  it("requires delegated execution to settle before any main final answer", () => {
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "Before any user-facing final answer, make sure every subagent execution",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "Before calling `UpdateGoal(complete)`",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "After the tool result, give the user the final answer and end the run",
+    );
+  });
 });

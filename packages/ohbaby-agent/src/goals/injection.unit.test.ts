@@ -52,13 +52,17 @@ describe("renderGoalTurnPrompt", () => {
     const usage = { tokensUsed: 0, turnsUsed: 8, wallClockMs: 0 };
     const withBudget = renderGoalTurnPrompt(
       snapshot({
-        budget: computeBudgetReport(usage, { turnBudget: 10 }),
-        budgetLimits: { turnBudget: 10 },
+        budget: computeBudgetReport(usage, {
+          turnBudget: 10,
+          wallClockBudgetMs: 60_000,
+        }),
+        budgetLimits: { turnBudget: 10, wallClockBudgetMs: 60_000 },
         turnsUsed: 8,
       }),
       { isFirstTurn: false },
     );
     expect(withBudget).toContain("Budget");
+    expect(withBudget).toContain("active time remaining 1m00s/1m00s");
     expect(withBudget).toContain("start converging");
   });
 });

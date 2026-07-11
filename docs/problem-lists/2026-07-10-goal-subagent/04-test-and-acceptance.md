@@ -218,6 +218,9 @@
 | T-6 / AC-6 | `ui-inprocess.contract.test.ts` — `interrupts the active goal parent and background child before handling a user prompt` | active goal 的 parent 与 background child 均 abort；goal paused 后用户 prompt 才完成 |
 | AC-4 强断言 | `goal-subagent-lifecycle.integration.test.ts` — `interrupts background work when the runtime safety cap pauses the goal` | safety pause 后 subagent turn 调用次数不增加，pending queue 保留，证明未继续 drain |
 | T-9 | `service.unit.test.ts` — `interrupts execution only once when an active goal is paused repeatedly` | 首次 pause 后再次进入 pause 路径不会重复 interrupt，也不覆盖原 pauseReason |
+| T-8 | `goal-execution-control.contract.test.ts` — `T-8 interrupts only-background work when there is no primary run` | 无 active primary run 时仍显式调用 `interruptSubagentsByParent`，固化窗间期 fallback |
+| T-12/T-14 | `tools.unit.test.ts` + `budget.unit.test.ts` + `driver.unit.test.ts` | 单维 budget schema、active-time、1000-turn 常量及显式 turn budget 不可绕过均已覆盖 |
+| T-15 | `goal-completion.real.e2e.test.ts` | `OHBABY_GOAL_REAL_EVAL=1` 下使用根 `.env` 的 ZAI provider，验证 status running→completed→UpdateGoal complete→最终回答，且无 SetGoalBudget 发明；2026-07-11 实跑通过 |
 
 仍按优先级延期：T-10 persistent 重启完整链路为 P2，不属于 Phase A 的 P0 合并门槛。
 

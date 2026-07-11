@@ -36,6 +36,15 @@ describe("computeBudgetReport", () => {
     expect(report.overBudget).toBe(true);
   });
 
+  it("active-time budget participates in reached and remaining math", () => {
+    const report = computeBudgetReport(usage(1, 100, 60_000), {
+      wallClockBudgetMs: 60_000,
+    });
+    expect(report.wallClockBudgetReached).toBe(true);
+    expect(report.remainingWallClockMs).toBe(0);
+    expect(report.overBudget).toBe(true);
+  });
+
   it("converging at 75% of any set dimension", () => {
     const report = computeBudgetReport(usage(15), { turnBudget: 20 });
     expect(report.converging).toBe(true);
@@ -46,14 +55,6 @@ describe("computeBudgetReport", () => {
     const report = computeBudgetReport(usage(25, 0, 0), { turnBudget: 20 });
     expect(report.remainingTurns).toBe(0);
   });
-
-  it("wall-clock budget reached", () => {
-    const report = computeBudgetReport(usage(1, 0, 120000), {
-      wallClockBudgetMs: 100000,
-    });
-    expect(report.wallClockBudgetReached).toBe(true);
-    expect(report.overBudget).toBe(true);
-  });
 });
 
 describe("isSafetyCapReached", () => {
@@ -62,9 +63,9 @@ describe("isSafetyCapReached", () => {
     expect(isSafetyCapReached(usage(199), {}, 200)).toBe(false);
   });
 
-  it("turn budget set: safety cap never applies (user budget wins)", () => {
-    expect(isSafetyCapReached(usage(500), { turnBudget: 1000 }, 200)).toBe(
-      false,
+  it("explicit turn budgets cannot bypass the system safety cap", () => {
+    expect(isSafetyCapReached(usage(200), { turnBudget: 1000 }, 200)).toBe(
+      true,
     );
   });
 });

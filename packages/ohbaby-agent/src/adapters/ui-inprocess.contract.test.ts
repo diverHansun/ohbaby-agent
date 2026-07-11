@@ -888,6 +888,9 @@ function createAbortableBackgroundRunTreeLLMClient(
   requests: InterfaceProviderRequest[],
   childStarted: Deferred<AbortSignal | undefined>,
   parentContinued: Deferred<AbortSignal | undefined>,
+  options: {
+    readonly completeAfterInterruptedParent?: boolean;
+  } = {},
 ): LLMClientInstance<FakeSdkClient> {
   let parentRequests = 0;
   return {
@@ -923,7 +926,87 @@ function createAbortableBackgroundRunTreeLLMClient(
             ]),
           );
         }
-        parentContinued.resolve(request.signal);
+        if (parentRequests === 2) {
+          parentContinued.resolve(request.signal);
+          return Promise.resolve(createAbortableProviderStream(request.signal));
+        }
+        if (options.completeAfterInterruptedParent === true) {
+          return Promise.resolve(
+            createProviderStream([
+              {
+                textDelta: "User prompt handled after goal interruption.",
+                finishReason: "stop",
+              },
+            ]),
+          );
+        }
+        return Promise.resolve(createAbortableProviderStream(request.signal));
+      },
+      isAbortError(error: unknown): boolean {
+        return error instanceof Error && error.name === "AbortError";
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
+      baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
+function createCrossContinuationBackgroundLLMClient(
+  requests: InterfaceProviderRequest[],
+  childStarted: Deferred<AbortSignal | undefined>,
+  secondTurnStarted: Deferred<AbortSignal | undefined>,
+): LLMClientInstance<FakeSdkClient> {
+  let primaryRequests = 0;
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isTitleGenerationRequest(request)) {
+          return Promise.resolve(createTitleProviderStream(request));
+        }
+        requests.push(request);
+        if (isExploreSubagentRequest(request)) {
+          childStarted.resolve(request.signal);
+          return Promise.resolve(createAbortableProviderStream(request.signal));
+        }
+
+        primaryRequests += 1;
+        if (primaryRequests === 1) {
+          return Promise.resolve(
+            createProviderStream([
+              subagentControlToolCallEvent({
+                arguments: {
+                  description: "Cross-continuation background task",
+                  mode: "background",
+                  role: "explore",
+                  prompt: "Keep running across the next goal continuation",
+                },
+                callId: "call_cross_continuation_background",
+                name: "subagent_run",
+              }),
+            ]),
+          );
+        }
+        if (primaryRequests === 2) {
+          return Promise.resolve(
+            createProviderStream([
+              { textDelta: "Goal turn one finished.", finishReason: "stop" },
+            ]),
+          );
+        }
+
+        secondTurnStarted.resolve(request.signal);
         return Promise.resolve(createAbortableProviderStream(request.signal));
       },
       isAbortError(error: unknown): boolean {
@@ -4364,6 +4447,227 @@ describe("createInProcessUiBackendClient", () => {
     expect(userTexts.some((text) => text.includes("currently paused"))).toBe(
       false,
     );
+  });
+
+  it("lets /goal pause interrupt an active goal background subagent without closing it", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const childStarted = createDeferred<AbortSignal | undefined>();
+    const parentContinued = createDeferred<AbortSignal | undefined>();
+    const subagentStore = new InMemorySubagentInstanceStore();
+    const client = createInProcessUiBackendClient({
+      createSubagentId: () => "subagent_1",
+      llmClient: createAbortableBackgroundRunTreeLLMClient(
+        requests,
+        childStarted,
+        parentContinued,
+      ),
+      subagentInstanceStore: subagentStore,
+    });
+    try {
+      await client.executeCommand({
+        argv: [],
+        clientInvocationId: "inv_goal_pause_new_session",
+        commandId: "new",
+        path: ["new"],
+        raw: "/new",
+        rawArgs: "",
+        surface: "tui",
+      });
+      await client.executeCommand({
+        argv: ["finish", "background", "work"],
+        clientInvocationId: "inv_goal_pause_create",
+        commandId: "goal",
+        path: ["goal"],
+        raw: "/goal finish background work",
+        rawArgs: "finish background work",
+        surface: "tui",
+      });
+      const sessionId = (await client.getSnapshot()).activeSessionId;
+      expect(sessionId).not.toBeNull();
+      const childSignal = await childStarted.promise;
+      const parentSignal = await parentContinued.promise;
+
+      await client.executeCommand({
+        argv: ["pause"],
+        clientInvocationId: "inv_goal_pause_command",
+        commandId: "goal",
+        path: ["goal"],
+        raw: "/goal pause",
+        rawArgs: "pause",
+        sessionId: sessionId ?? undefined,
+        surface: "tui",
+      });
+
+      expect(parentSignal?.aborted).toBe(true);
+      expect(childSignal?.aborted).toBe(true);
+      const subagents = await subagentStore.listByParent(sessionId ?? "");
+      expect(subagents).toEqual([
+        expect.objectContaining({
+          status: "interrupted",
+          subagentId: "subagent_1",
+        }),
+      ]);
+      expect(subagents[0]?.closedAt).toBeUndefined();
+      expect(
+        (await client.getSnapshot()).goals?.find(
+          (entry) => entry.sessionId === sessionId,
+        )?.goal.status,
+      ).toBe("paused");
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it("keeps goal background work running when the next continuation turn starts", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const childStarted = createDeferred<AbortSignal | undefined>();
+    const secondTurnStarted = createDeferred<AbortSignal | undefined>();
+    const subagentStore = new InMemorySubagentInstanceStore();
+    const client = createInProcessUiBackendClient({
+      createSubagentId: () => "subagent_1",
+      llmClient: createCrossContinuationBackgroundLLMClient(
+        requests,
+        childStarted,
+        secondTurnStarted,
+      ),
+      subagentInstanceStore: subagentStore,
+    });
+    try {
+      await client.executeCommand({
+        argv: [],
+        clientInvocationId: "inv_goal_cross_turn_new_session",
+        commandId: "new",
+        path: ["new"],
+        raw: "/new",
+        rawArgs: "",
+        surface: "tui",
+      });
+      await client.executeCommand({
+        argv: ["continue", "background", "work"],
+        clientInvocationId: "inv_goal_cross_turn_create",
+        commandId: "goal",
+        path: ["goal"],
+        raw: "/goal continue background work",
+        rawArgs: "continue background work",
+        surface: "tui",
+      });
+      const sessionId = (await client.getSnapshot()).activeSessionId;
+      expect(sessionId).not.toBeNull();
+      const childSignal = await withTimeout(
+        childStarted.promise,
+        1_000,
+        "background child did not start in goal turn one",
+      );
+      await withTimeout(
+        secondTurnStarted.promise,
+        1_000,
+        "goal continuation turn two did not start",
+      );
+
+      await vi.waitUntil(async () => {
+        const records = await subagentStore.listByParent(sessionId ?? "");
+        return records[0]?.status === "running";
+      });
+      expect(childSignal?.aborted).toBe(false);
+      const subagents = await subagentStore.listByParent(sessionId ?? "");
+      expect(subagents).toEqual([
+        expect.objectContaining({
+          status: "running",
+          subagentId: "subagent_1",
+        }),
+      ]);
+      expect(subagents[0]?.closedAt).toBeUndefined();
+      expect(
+        (await client.getSnapshot()).goals?.find(
+          (entry) => entry.sessionId === sessionId,
+        )?.goal.status,
+      ).toBe("active");
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it("interrupts the active goal parent and background child before handling a user prompt", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const childStarted = createDeferred<AbortSignal | undefined>();
+    const parentContinued = createDeferred<AbortSignal | undefined>();
+    const subagentStore = new InMemorySubagentInstanceStore();
+    const client = createInProcessUiBackendClient({
+      createSubagentId: () => "subagent_1",
+      llmClient: createAbortableBackgroundRunTreeLLMClient(
+        requests,
+        childStarted,
+        parentContinued,
+        { completeAfterInterruptedParent: true },
+      ),
+      subagentInstanceStore: subagentStore,
+    });
+    try {
+      await client.executeCommand({
+        argv: [],
+        clientInvocationId: "inv_goal_user_preempt_new_session",
+        commandId: "new",
+        path: ["new"],
+        raw: "/new",
+        rawArgs: "",
+        surface: "tui",
+      });
+      await client.executeCommand({
+        argv: ["finish", "preemptible", "background", "work"],
+        clientInvocationId: "inv_goal_user_preempt_create",
+        commandId: "goal",
+        path: ["goal"],
+        raw: "/goal finish preemptible background work",
+        rawArgs: "finish preemptible background work",
+        surface: "tui",
+      });
+      const sessionId = (await client.getSnapshot()).activeSessionId;
+      expect(sessionId).not.toBeNull();
+      const childSignal = await withTimeout(
+        childStarted.promise,
+        1_000,
+        "background child did not start before user preemption",
+      );
+      const parentSignal = await withTimeout(
+        parentContinued.promise,
+        1_000,
+        "goal parent did not continue after spawning background work",
+      );
+
+      await withTimeout(
+        client.submitPrompt("Handle this user interruption", {
+          sessionId: sessionId ?? undefined,
+        }),
+        2_000,
+        "user prompt did not run after preempting goal execution",
+      );
+
+      expect(parentSignal?.aborted).toBe(true);
+      expect(childSignal?.aborted).toBe(true);
+      const subagents = await subagentStore.listByParent(sessionId ?? "");
+      expect(subagents).toEqual([
+        expect.objectContaining({
+          status: "interrupted",
+          subagentId: "subagent_1",
+        }),
+      ]);
+      expect(subagents[0]?.closedAt).toBeUndefined();
+      expect(
+        (await client.getSnapshot()).goals?.find(
+          (entry) => entry.sessionId === sessionId,
+        )?.goal,
+      ).toMatchObject({ pauseReason: "interrupted", status: "paused" });
+      const userRequest = requests.at(-1);
+      if (userRequest === undefined) {
+        throw new Error("user prompt request was not captured");
+      }
+      expect(lastRequestMessageText(userRequest)).toContain(
+        "Handle this user interruption",
+      );
+      expect(lastRequestMessageText(userRequest)).toContain("currently paused");
+    } finally {
+      await client.dispose();
+    }
   });
 
   it("waits for a starting goal run to register before interrupting it", async () => {

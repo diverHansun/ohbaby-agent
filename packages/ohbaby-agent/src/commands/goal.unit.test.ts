@@ -30,7 +30,6 @@ function makeBackend(
     replace: vi.fn(() => Promise.resolve(snapshot({ objective: "new obj" }))),
     resolveSessionId: vi.fn(() => Promise.resolve<string | undefined>("s1")),
     resume: vi.fn(() => Promise.resolve(snapshot())),
-    setBudget: vi.fn(() => Promise.resolve(snapshot())),
     status: vi.fn(() => Promise.resolve<GoalSnapshot | null>(snapshot())),
     ...overrides,
   };
@@ -112,26 +111,15 @@ describe("/goal command handler", () => {
     expect(backend.replace).toHaveBeenCalledWith("s1", "new obj");
   });
 
-  it("budget flags parse to limits (minutes → ms)", async () => {
-    const backend = makeBackend();
-    const handler = createGoalCommandHandler({ goals: backend });
-    await handler.execute(
-      invoke(["budget", "--turns", "20", "--minutes", "5"]),
-      makeContext().context,
-    );
-    expect(backend.setBudget).toHaveBeenCalledWith("s1", {
-      turnBudget: 20,
-      wallClockBudgetMs: 300000,
-    });
-  });
-
-  it("budget without flags fails with usage error", async () => {
+  it("rejects the removed budget subcommand and points to natural language", async () => {
     const backend = makeBackend();
     const handler = createGoalCommandHandler({ goals: backend });
     const { context, failures } = makeContext();
-    await handler.execute(invoke(["budget"]), context);
+
+    await handler.execute(invoke(["budget", "--turns", "20"]), context);
+
     expect(failures).toHaveLength(1);
-    expect(backend.setBudget).not.toHaveBeenCalled();
+    expect(JSON.stringify(failures)).toContain("natural language");
   });
 
   it("shows an empty status without a session", async () => {

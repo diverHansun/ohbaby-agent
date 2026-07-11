@@ -27,6 +27,9 @@ function makeTools(): {
   service: GoalService;
 } {
   const service = new GoalService({
+    executionControl: {
+      interruptGoalExecution: (): Promise<void> => Promise.resolve(),
+    },
     persistence: new InMemoryGoalPersistence(),
   });
   const tools = createGoalTools(service);
@@ -88,15 +91,71 @@ describe("goal tools", () => {
     ).rejects.toThrow();
   });
 
-  it("SetGoalBudget converts minutes to ms and reflects in snapshot", async () => {
+  it("SetGoalBudget sets one explicit turn, token, or active-time dimension per call", async () => {
     const { byName, service } = makeTools();
     await getTool(byName, "CreateGoal").execute({ objective: "a" }, ctx());
     await getTool(byName, "SetGoalBudget").execute(
-      { turnBudget: 10, wallClockBudgetMinutes: 2 },
+      { unit: "turns", value: 10 },
+      ctx(),
+    );
+    await getTool(byName, "SetGoalBudget").execute(
+      { unit: "tokens", value: 1000 },
+      ctx(),
+    );
+    await getTool(byName, "SetGoalBudget").execute(
+      { unit: "minutes", value: 5 },
       ctx(),
     );
     const snapshot = await service.getSnapshot("s1");
     expect(snapshot?.budget.turnBudget).toBe(10);
-    expect(snapshot?.budget.wallClockBudgetMs).toBe(120000);
+    expect(snapshot?.budget.tokenBudget).toBe(1000);
+    expect(snapshot?.budget.wallClockBudgetMs).toBe(300_000);
+    expect(
+      getTool(byName, "SetGoalBudget").parametersJsonSchema,
+    ).toMatchObject({
+      properties: {
+        unit: {
+          enum: [
+            "turns",
+            "tokens",
+            "milliseconds",
+            "seconds",
+            "minutes",
+            "hours",
+          ],
+        },
+        value: { type: "number" },
+      },
+      required: ["value", "unit"],
+    });
+  });
+
+  it("SetGoalBudget rejects limits outside system boundaries", async () => {
+    const { byName } = makeTools();
+    await getTool(byName, "CreateGoal").execute({ objective: "a" }, ctx());
+
+    await expect(
+      Promise.resolve(
+        getTool(byName, "SetGoalBudget").execute(
+          { unit: "turns", value: 1001 },
+          ctx(),
+        ),
+      ),
+    ).rejects.toThrow("system safety cap");
+    await expect(
+      Promise.resolve(
+        getTool(byName, "SetGoalBudget").execute(
+          { unit: "milliseconds", value: 999 },
+          ctx(),
+        ),
+      ),
+    ).rejects.toThrow("1 second to 24 hours");
+  });
+
+  it("SetGoalBudget description forbids invented budgets", () => {
+    const { byName } = makeTools();
+    const description = getTool(byName, "SetGoalBudget").description;
+    expect(description).toContain("Never estimate, infer, recommend, or invent");
+    expect(description).toContain("user, system, or developer");
   });
 });
