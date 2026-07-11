@@ -11,6 +11,7 @@ coverage/
 .vscode/
 *.swp
 *.swo
+.pnpm-store/
 
 .claude/
 .codex/
