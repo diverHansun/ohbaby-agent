@@ -7,6 +7,7 @@ import type {
   UiPermissionRequest,
   UiRun,
   UiRunStatus,
+  UiPromptSubmission,
   UiSession,
   UiSnapshot,
 } from "ohbaby-sdk";
@@ -49,6 +50,7 @@ export interface ViewModel {
   readonly header: HeaderModel;
   readonly isEmpty: boolean;
   readonly pendingPermissions: readonly UiPermissionRequest[];
+  readonly queuedPrompts: readonly UiPromptSubmission[];
   readonly reasoningByMessageId: Record<string, ReasoningViewState>;
   readonly snapshot: UiSnapshot | null;
 }
@@ -85,7 +87,7 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
       ...(activeSessionId === undefined || activeSessionId === null
         ? {}
         : { activeSessionId }),
-      canSend: snapshot.connectionState === "live" && !isRunning,
+      canSend: snapshot.connectionState === "live",
       canStop:
         snapshot.connectionState === "live" &&
         isRunning &&
@@ -108,9 +110,26 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
     },
     isEmpty: (activeSession?.messages.length ?? 0) === 0,
     pendingPermissions,
+    queuedPrompts: selectQueuedPrompts(daemonSnapshot, activeSessionId),
     reasoningByMessageId: snapshot.view.reasoningByMessageId,
     snapshot: daemonSnapshot,
   };
+}
+
+function selectQueuedPrompts(
+  snapshot: UiSnapshot | null,
+  sessionId: string | null | undefined,
+): readonly UiPromptSubmission[] {
+  if (!snapshot || !sessionId) return [];
+  return (snapshot.prompts ?? [])
+    .filter(
+      (prompt) => prompt.sessionId === sessionId && prompt.status === "queued",
+    )
+    .sort(
+      (left, right) =>
+        Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
+        left.promptId.localeCompare(right.promptId),
+    );
 }
 
 function selectActiveGoal(

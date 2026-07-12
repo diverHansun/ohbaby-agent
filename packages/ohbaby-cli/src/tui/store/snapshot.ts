@@ -11,6 +11,8 @@ import type {
   UiNotice,
   UiPermissionState,
   UiPermissionRequest,
+  UiPromptQueueClient,
+  UiPromptSubmission,
   UiRun,
   UiRunStatus,
   UiSession,
@@ -82,11 +84,12 @@ export type TuiEvent =
 
 export type TuiEventHandler = (event: TuiEvent) => void;
 
-export type TerminalClient = CoreAPI & {
-  readonly subscribeEvents: (
-    handler: TuiEventHandler | UiEventHandler,
-  ) => UiUnsubscribe;
-};
+export type TerminalClient = CoreAPI &
+  Partial<UiPromptQueueClient> & {
+    readonly subscribeEvents: (
+      handler: TuiEventHandler | UiEventHandler,
+    ) => UiUnsubscribe;
+  };
 
 export interface TuiStoreState {
   readonly snapshot: UiSnapshot;
@@ -96,6 +99,7 @@ export interface TuiStoreState {
   readonly runs: readonly UiRun[];
   readonly permissions: readonly UiPermissionRequest[];
   readonly permission: UiPermissionState | undefined;
+  readonly prompts: readonly UiPromptSubmission[];
   readonly runtime: TuiRuntimeStatus;
   readonly interactions: readonly TuiInteractionRequest[];
   readonly notices: readonly UiNotice[];

@@ -17,6 +17,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -107,6 +108,59 @@ interface StructuredOverlayState {
 interface ComposerPrefill {
   readonly nonce: number;
   readonly text: string;
+}
+
+interface StoredComposerDraft {
+  readonly clientRequestId?: string;
+  readonly pendingText?: string;
+  readonly text: string;
+}
+
+interface QueuedEditState {
+  readonly editLeaseId: string;
+  readonly expiresAt: string;
+  readonly originalDraft: string;
+  readonly originalPendingRequestId?: string;
+  readonly originalPendingText?: string;
+  readonly promptId: string;
+}
+
+interface StoredQueuedEdit extends QueuedEditState {
+  readonly editText: string;
+  readonly lastActivityAt: number;
+}
+
+function composerDraftKey(scopeKey: string): string {
+  return `ohbaby:composer:${scopeKey}`;
+}
+
+function composerLeaseKey(scopeKey: string): string {
+  return `ohbaby:composer-lease:${scopeKey}`;
+}
+
+function readSessionValue(key: string): unknown {
+  try {
+    const value = globalThis.sessionStorage.getItem(key);
+    return value ? (JSON.parse(value) as unknown) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionValue(key: string, value: unknown): void {
+  try {
+    globalThis.sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Draft persistence is a resilience feature; storage denial must not block input.
+  }
+}
+
+function removeSessionValue(key: string): void {
+  try {
+    globalThis.sessionStorage.removeItem(key);
+  } catch {
+    // Ignore storage denial.
+  }
 }
 
 interface AppProps {
@@ -246,27 +300,44 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
     [runtime.client],
   );
   const submitText = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, clientRequestId?: string): Promise<boolean> => {
       if (text.startsWith("/") && (await openOverlayForSlashText(text))) {
         return true;
       }
-      return runAction(() =>
-        text.startsWith("/")
-          ? runtime.client.executeSlashCommand({
-              ...(view.composer.activeSessionId === undefined
-                ? {}
-                : { sessionId: view.composer.activeSessionId }),
-              text,
-            })
-          : runtime.client.submitPrompt({
-              ...(view.composer.activeSessionId === undefined
-                ? {}
-                : { sessionId: view.composer.activeSessionId }),
-              text,
-            }),
-      );
+      if (text.startsWith("/")) {
+        return runAction(() =>
+          runtime.client.executeSlashCommand({
+            ...(view.composer.activeSessionId === undefined
+              ? {}
+              : { sessionId: view.composer.activeSessionId }),
+            text,
+          }),
+        );
+      }
+      try {
+        clearActionError();
+        const requestId = clientRequestId ?? globalThis.crypto.randomUUID();
+        const receipt = await runtime.client.submitPrompt({
+          clientRequestId: requestId,
+          ...(view.composer.activeSessionId === undefined
+            ? {}
+            : { sessionId: view.composer.activeSessionId }),
+          text,
+        });
+        if (receipt.clientRequestId !== requestId) {
+          throw new Error("Prompt receipt did not match this submission");
+        }
+        if (view.composer.activeSessionId === undefined) {
+          await runtime.client.selectSession(receipt.sessionId);
+        }
+        return true;
+      } catch (error) {
+        setActionError(error instanceof Error ? error.message : String(error));
+        return false;
+      }
     },
     [
+      clearActionError,
       openOverlayForSlashText,
       runAction,
       runtime.client,
@@ -395,6 +466,8 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
               permissions={view.pendingPermissions}
             />
             <Composer
+              client={runtime.client}
+              draftScopeKey={`${workspace.selectedDirectory ?? "workspace"}:${view.composer.activeSessionId ?? "new"}`}
               prefill={composerPrefill}
               onListCommands={listCommands}
               onSetPermission={(input) => {
@@ -445,7 +518,9 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
               onDismiss={clearActionError}
             />
             <EmptyState
+              client={runtime.client}
               composerPrefill={composerPrefill}
+              draftScopeKey={`${workspace.selectedDirectory ?? "workspace"}:${view.composer.activeSessionId ?? "new"}`}
               onListCommands={listCommands}
               onOpenGoalPanel={openGoalPanel}
               onSetPermission={(input) => {
@@ -571,7 +646,9 @@ function BootstrapError(props: { readonly error: unknown }): ReactElement {
 }
 
 function EmptyState(props: {
+  readonly client: OhbabyWebClient;
   readonly composerPrefill: ComposerPrefill | null;
+  readonly draftScopeKey: string;
   readonly onListCommands: () => Promise<UiWebCommandCatalog>;
   readonly onOpenGoalPanel: (intent?: GoalPanelIntent) => void;
   readonly onSetPermission: (input: {
@@ -579,7 +656,10 @@ function EmptyState(props: {
     readonly mode?: UiPermissionMode;
   }) => void;
   readonly onStructuredCommand: (request: StructuredCommandRequest) => void;
-  readonly onSubmit: (text: string) => Promise<boolean>;
+  readonly onSubmit: (
+    text: string,
+    clientRequestId?: string,
+  ) => Promise<boolean>;
   readonly status: HeaderModel;
   readonly view: ViewModel;
   readonly workspaceDirectory: string | null;
@@ -617,7 +697,9 @@ function EmptyState(props: {
           ))}
         </div>
         <Composer
+          client={props.client}
           compact
+          draftScopeKey={props.draftScopeKey}
           prefill={props.composerPrefill}
           onListCommands={props.onListCommands}
           onSetPermission={props.onSetPermission}
@@ -1663,7 +1745,9 @@ function PermissionModal(props: {
 }
 
 function Composer(props: {
+  readonly client: OhbabyWebClient;
   readonly compact?: boolean;
+  readonly draftScopeKey: string;
   readonly onListCommands: () => Promise<UiWebCommandCatalog>;
   readonly onSetPermission: (input: {
     readonly level?: UiPermissionLevel;
@@ -1671,12 +1755,22 @@ function Composer(props: {
   }) => void;
   readonly onStructuredCommand: (request: StructuredCommandRequest) => void;
   readonly onStop: () => void;
-  readonly onSubmit: (text: string) => Promise<boolean>;
+  readonly onSubmit: (
+    text: string,
+    clientRequestId?: string,
+  ) => Promise<boolean>;
   readonly prefill?: ComposerPrefill | null;
   readonly view: ViewModel;
 }): ReactElement {
   const [draft, setDraft] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
+  const [pendingText, setPendingText] = useState<string | null>(null);
+  const [queuedEdit, setQueuedEdit] = useState<QueuedEditState | null>(null);
+  const [leaseActivityVersion, setLeaseActivityVersion] = useState(0);
+  const [queueAcquirePending, setQueueAcquirePending] = useState(false);
+  const [queueExpanded, setQueueExpanded] = useState(false);
+  const [queueError, setQueueError] = useState<string | null>(null);
   const [slashCatalog, setSlashCatalog] = useState<UiWebCommandCatalog | null>(
     null,
   );
@@ -1687,9 +1781,16 @@ function Composer(props: {
   const [slashIndex, setSlashIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const lastEscapeAt = useRef(0);
+  const lastLeaseRenewalAt = useRef(0);
+  const leaseRenewalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queueAcquirePendingRef = useRef(false);
+  const queueAcquireGenerationRef = useRef(0);
   const canSend =
     props.view.composer.canSend && draft.trim().length > 0 && !isSubmitting;
   const canUseSlash = props.view.composer.canSend && !isSubmitting;
+  const visibleQueuedPrompts = queueExpanded
+    ? props.view.queuedPrompts
+    : props.view.queuedPrompts.slice(0, 5);
   const slashItems = useMemo(
     () =>
       canUseSlash && slashCatalog && draft.startsWith("/")
@@ -1706,16 +1807,71 @@ function Composer(props: {
     canUseSlash &&
     !props.view.composer.disabled;
 
+  useLayoutEffect(() => {
+    const stored = readSessionValue(
+      composerDraftKey(props.draftScopeKey),
+    ) as StoredComposerDraft | null;
+    setDraft(stored?.text ?? "");
+    setPendingRequestId(stored?.clientRequestId ?? null);
+    setPendingText(stored?.pendingText ?? null);
+    setQueueExpanded(false);
+    queueAcquireGenerationRef.current += 1;
+    queueAcquirePendingRef.current = false;
+    setQueueAcquirePending(false);
+    setQueueError(null);
+    setLeaseActivityVersion(0);
+
+    const storedLease = readSessionValue(
+      composerLeaseKey(props.draftScopeKey),
+    ) as StoredQueuedEdit | null;
+    if (!storedLease) {
+      setQueuedEdit(null);
+      return;
+    }
+    setDraft(storedLease.editText);
+    setQueuedEdit(storedLease);
+    void props.client
+      .renewPromptEditLease(storedLease.promptId, storedLease.editLeaseId)
+      .then((lease) => {
+        lastLeaseRenewalAt.current = Date.now();
+        writeSessionValue(composerLeaseKey(props.draftScopeKey), {
+          ...storedLease,
+          expiresAt: lease.expiresAt,
+        });
+      })
+      .catch(() => {
+        setQueuedEdit(null);
+        removeSessionValue(composerLeaseKey(props.draftScopeKey));
+        writeSessionValue(composerDraftKey(props.draftScopeKey), {
+          text: storedLease.editText,
+        } satisfies StoredComposerDraft);
+        setQueueError(
+          "Queued edit lease expired. Your text is preserved and can be sent as a new prompt.",
+        );
+      });
+  }, [props.client, props.draftScopeKey]);
+
+  useEffect(() => {
+    return (): void => {
+      if (leaseRenewalTimer.current !== null) {
+        globalThis.clearTimeout(leaseRenewalTimer.current);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     if (!props.prefill) {
       return;
     }
     setDraft(props.prefill.text);
+    writeSessionValue(composerDraftKey(props.draftScopeKey), {
+      text: props.prefill.text,
+    } satisfies StoredComposerDraft);
     setSlashDismissedDraft(null);
     setSlashError(null);
     setSlashIndex(0);
     textareaRef.current?.focus();
-  }, [props.prefill]);
+  }, [props.draftScopeKey, props.prefill]);
 
   useEffect(() => {
     if (
@@ -1753,23 +1909,276 @@ function Composer(props: {
     props.view.composer.disabled,
   ]);
 
+  const persistDraft = useCallback(
+    (text: string, requestId?: string, requestText?: string): void => {
+      writeSessionValue(composerDraftKey(props.draftScopeKey), {
+        ...(requestId === undefined ? {} : { clientRequestId: requestId }),
+        ...(requestText === undefined ? {} : { pendingText: requestText }),
+        text,
+      } satisfies StoredComposerDraft);
+    },
+    [props.draftScopeKey],
+  );
+
+  const updateDraft = useCallback(
+    (nextDraft: string): void => {
+      setDraft(nextDraft);
+      const keepPending =
+        pendingRequestId !== null && pendingText === nextDraft.trim();
+      if (!keepPending) {
+        setPendingRequestId(null);
+        setPendingText(null);
+      }
+      persistDraft(
+        nextDraft,
+        keepPending ? pendingRequestId : undefined,
+        keepPending ? pendingText : undefined,
+      );
+      if (queuedEdit) {
+        setLeaseActivityVersion((version) => version + 1);
+        writeSessionValue(composerLeaseKey(props.draftScopeKey), {
+          ...queuedEdit,
+          editText: nextDraft,
+          lastActivityAt: Date.now(),
+        } satisfies StoredQueuedEdit);
+      }
+    },
+    [
+      pendingRequestId,
+      pendingText,
+      persistDraft,
+      props.draftScopeKey,
+      queuedEdit,
+    ],
+  );
+
+  useEffect(() => {
+    if (!queuedEdit || leaseActivityVersion === 0) return;
+    if (leaseRenewalTimer.current !== null) {
+      globalThis.clearTimeout(leaseRenewalTimer.current);
+    }
+    const delay = Math.max(
+      0,
+      20_000 - (Date.now() - lastLeaseRenewalAt.current),
+    );
+    leaseRenewalTimer.current = globalThis.setTimeout(() => {
+      leaseRenewalTimer.current = null;
+      void props.client
+        .renewPromptEditLease(queuedEdit.promptId, queuedEdit.editLeaseId)
+        .then((lease) => {
+          lastLeaseRenewalAt.current = Date.now();
+          writeSessionValue(composerLeaseKey(props.draftScopeKey), {
+            ...queuedEdit,
+            editText: draft,
+            expiresAt: lease.expiresAt,
+            lastActivityAt: Date.now(),
+          } satisfies StoredQueuedEdit);
+        })
+        .catch(() => {
+          setQueuedEdit(null);
+          removeSessionValue(composerLeaseKey(props.draftScopeKey));
+          persistDraft(draft);
+          setQueueError(
+            "Queued edit lease expired. Your text is preserved and can be sent as a new prompt.",
+          );
+        });
+    }, delay);
+    return (): void => {
+      if (leaseRenewalTimer.current !== null) {
+        globalThis.clearTimeout(leaseRenewalTimer.current);
+        leaseRenewalTimer.current = null;
+      }
+    };
+  }, [
+    draft,
+    leaseActivityVersion,
+    persistDraft,
+    props.client,
+    props.draftScopeKey,
+    queuedEdit,
+  ]);
+
+  const beginQueuedEdit = useCallback(
+    (prompt: ViewModel["queuedPrompts"][number]): void => {
+      if (queuedEdit || queueAcquirePendingRef.current) {
+        setQueueError("Finish or cancel the current queued edit first.");
+        return;
+      }
+      setQueueError(null);
+      const acquireGeneration = queueAcquireGenerationRef.current + 1;
+      queueAcquireGenerationRef.current = acquireGeneration;
+      queueAcquirePendingRef.current = true;
+      setQueueAcquirePending(true);
+      void props.client
+        .acquirePromptEditLease(prompt.promptId)
+        .then((lease) => {
+          if (queueAcquireGenerationRef.current !== acquireGeneration) {
+            void props.client
+              .releasePromptEditLease(prompt.promptId, lease.editLeaseId)
+              .catch(() => undefined);
+            return;
+          }
+          const next: QueuedEditState = {
+            editLeaseId: lease.editLeaseId,
+            expiresAt: lease.expiresAt,
+            originalDraft: draft,
+            ...(pendingRequestId === null
+              ? {}
+              : { originalPendingRequestId: pendingRequestId }),
+            ...(pendingText === null
+              ? {}
+              : { originalPendingText: pendingText }),
+            promptId: prompt.promptId,
+          };
+          lastLeaseRenewalAt.current = Date.now();
+          setLeaseActivityVersion(0);
+          setQueuedEdit(next);
+          setDraft(prompt.text);
+          setPendingRequestId(null);
+          setPendingText(null);
+          writeSessionValue(composerLeaseKey(props.draftScopeKey), {
+            ...next,
+            editText: prompt.text,
+            lastActivityAt: Date.now(),
+          } satisfies StoredQueuedEdit);
+          textareaRef.current?.focus();
+        })
+        .catch((error: unknown) => {
+          if (queueAcquireGenerationRef.current === acquireGeneration) {
+            setQueueError(
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        })
+        .finally(() => {
+          if (queueAcquireGenerationRef.current === acquireGeneration) {
+            queueAcquirePendingRef.current = false;
+            setQueueAcquirePending(false);
+          }
+        });
+    },
+    [
+      draft,
+      pendingRequestId,
+      pendingText,
+      props.client,
+      props.draftScopeKey,
+      queuedEdit,
+    ],
+  );
+
+  const finishQueuedEdit = useCallback((): void => {
+    if (!queuedEdit || !draft.trim()) return;
+    setIsSubmitting(true);
+    void props.client
+      .editQueuedPrompt(
+        queuedEdit.promptId,
+        queuedEdit.editLeaseId,
+        draft.trim(),
+      )
+      .then(() => {
+        const restored = queuedEdit.originalDraft;
+        setQueuedEdit(null);
+        setDraft(restored);
+        setPendingRequestId(queuedEdit.originalPendingRequestId ?? null);
+        setPendingText(queuedEdit.originalPendingText ?? null);
+        persistDraft(
+          restored,
+          queuedEdit.originalPendingRequestId,
+          queuedEdit.originalPendingText,
+        );
+        removeSessionValue(composerLeaseKey(props.draftScopeKey));
+      })
+      .catch((error: unknown) => {
+        setQueueError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        setIsSubmitting(false);
+      });
+  }, [draft, persistDraft, props.client, props.draftScopeKey, queuedEdit]);
+
+  const releaseQueuedEdit = useCallback((): void => {
+    if (!queuedEdit) return;
+    const current = queuedEdit;
+    void props.client
+      .releasePromptEditLease(current.promptId, current.editLeaseId)
+      .catch(() => undefined);
+    setQueuedEdit(null);
+    setDraft(current.originalDraft);
+    setPendingRequestId(current.originalPendingRequestId ?? null);
+    setPendingText(current.originalPendingText ?? null);
+    persistDraft(
+      current.originalDraft,
+      current.originalPendingRequestId,
+      current.originalPendingText,
+    );
+    removeSessionValue(composerLeaseKey(props.draftScopeKey));
+  }, [persistDraft, props.client, props.draftScopeKey, queuedEdit]);
+
+  const cancelQueuedPrompt = useCallback(
+    (promptId: string): void => {
+      const editLeaseId =
+        queuedEdit?.promptId === promptId ? queuedEdit.editLeaseId : undefined;
+      void props.client
+        .cancelQueuedPrompt(promptId, editLeaseId)
+        .then(() => {
+          if (queuedEdit?.promptId === promptId) {
+            setQueuedEdit(null);
+            setDraft(queuedEdit.originalDraft);
+            setPendingRequestId(queuedEdit.originalPendingRequestId ?? null);
+            setPendingText(queuedEdit.originalPendingText ?? null);
+            persistDraft(
+              queuedEdit.originalDraft,
+              queuedEdit.originalPendingRequestId,
+              queuedEdit.originalPendingText,
+            );
+            removeSessionValue(composerLeaseKey(props.draftScopeKey));
+          }
+        })
+        .catch((error: unknown) => {
+          setQueueError(error instanceof Error ? error.message : String(error));
+        });
+    },
+    [persistDraft, props.client, props.draftScopeKey, queuedEdit],
+  );
+
   const send = useCallback(() => {
     const text = draft.trim();
     if (!text || !props.view.composer.canSend) {
       return;
     }
+    if (queuedEdit) {
+      finishQueuedEdit();
+      return;
+    }
+    const clientRequestId = pendingRequestId ?? globalThis.crypto.randomUUID();
+    setPendingRequestId(clientRequestId);
+    setPendingText(text);
+    persistDraft(draft, clientRequestId, text);
     setIsSubmitting(true);
     void props
-      .onSubmit(text)
+      .onSubmit(text, clientRequestId)
       .then((sent) => {
         if (sent) {
           setDraft("");
+          setPendingRequestId(null);
+          setPendingText(null);
+          removeSessionValue(composerDraftKey(props.draftScopeKey));
         }
       })
       .finally(() => {
         setIsSubmitting(false);
       });
-  }, [draft, props.onSubmit, props.view.composer.canSend]);
+  }, [
+    draft,
+    finishQueuedEdit,
+    pendingRequestId,
+    persistDraft,
+    props.draftScopeKey,
+    props.onSubmit,
+    props.view.composer.canSend,
+    queuedEdit,
+  ]);
 
   const cycleMode = useCallback(() => {
     const mode = props.view.composer.mode === "auto" ? "plan" : "auto";
@@ -1863,6 +2272,11 @@ function Composer(props: {
         send();
         return;
       }
+      if (event.key === "Escape" && queuedEdit) {
+        event.preventDefault();
+        releaseQueuedEdit();
+        return;
+      }
       if (event.key === "Tab" && event.shiftKey) {
         event.preventDefault();
         cycleMode();
@@ -1884,6 +2298,8 @@ function Composer(props: {
       draft,
       props.onStop,
       props.view.composer.canStop,
+      queuedEdit,
+      releaseQueuedEdit,
       runSlashCommand,
       selectedCommand,
       send,
@@ -1898,6 +2314,65 @@ function Composer(props: {
         props.compact ? "ohb-composer ohb-composer-hero" : "ohb-composer"
       }
     >
+      {props.view.queuedPrompts.length > 0 ? (
+        <section className="ohb-prompt-queue" aria-label="Queued prompts">
+          <div className="ohb-prompt-queue-header">
+            <span>Queued {String(props.view.queuedPrompts.length)}</span>
+            {props.view.queuedPrompts.length > 5 ? (
+              <button
+                onClick={() => {
+                  setQueueExpanded((expanded) => !expanded);
+                }}
+                title={
+                  queueExpanded
+                    ? "Collapse queued prompts"
+                    : "Show all queued prompts"
+                }
+                type="button"
+              >
+                {queueExpanded ? "Show less" : "Show all"}
+              </button>
+            ) : null}
+          </div>
+          <div className="ohb-prompt-queue-items">
+            {visibleQueuedPrompts.map((prompt) => {
+              const editing = queuedEdit?.promptId === prompt.promptId;
+              return (
+                <div
+                  className={`ohb-prompt-queue-item ${editing ? "is-editing" : ""}`}
+                  key={prompt.promptId}
+                >
+                  <button
+                    aria-label={`Edit queued prompt: ${prompt.text}`}
+                    className="ohb-prompt-queue-edit"
+                    disabled={isSubmitting || queueAcquirePending}
+                    onClick={() => {
+                      beginQueuedEdit(prompt);
+                    }}
+                    type="button"
+                  >
+                    <span aria-hidden="true">↳</span>
+                    <span>{prompt.text.replaceAll("\n", " ")}</span>
+                    {editing ? <small>editing</small> : null}
+                  </button>
+                  <button
+                    aria-label={`Cancel queued prompt: ${prompt.text}`}
+                    className="ohb-prompt-queue-cancel"
+                    disabled={isSubmitting || queueAcquirePending}
+                    onClick={() => {
+                      cancelQueuedPrompt(prompt.promptId);
+                    }}
+                    title="Cancel queued prompt"
+                    type="button"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
       <div className="ohb-composer-input">
         <span className="ohb-prompt">&gt;</span>
         {slashOpen ? (
@@ -1915,7 +2390,7 @@ function Composer(props: {
           disabled={props.view.composer.disabled || isSubmitting}
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
             const nextDraft = event.target.value;
-            setDraft(nextDraft);
+            updateDraft(nextDraft);
             setSlashIndex(0);
             if (nextDraft !== slashDismissedDraft) {
               setSlashDismissedDraft(null);
@@ -1943,22 +2418,29 @@ function Composer(props: {
             <Square size={14} />
             <span>Stop</span>
           </button>
-        ) : (
-          <button
-            className="ohb-send-button"
-            disabled={!canSend}
-            onClick={send}
-            title="Send message"
-            type="button"
-          >
-            <Send size={14} />
-            <span>Send</span>
-          </button>
-        )}
+        ) : null}
+        <button
+          className="ohb-send-button"
+          disabled={!canSend}
+          onClick={send}
+          title={queuedEdit ? "Save queued prompt" : "Send message"}
+          type="button"
+        >
+          <Send size={14} />
+          <span>{queuedEdit ? "Save" : "Send"}</span>
+        </button>
       </div>
       <div className="ohb-composer-tools">
         {slashError ? (
           <span className="ohb-slash-error">{slashError}</span>
+        ) : null}
+        {queueError ? (
+          <span className="ohb-slash-error">{queueError}</span>
+        ) : null}
+        {queuedEdit ? (
+          <span className="ohb-composer-hint">
+            Editing queued prompt · Enter save · Esc keep original
+          </span>
         ) : null}
         <button
           className={`ohb-mode-button ohb-mode-${props.view.composer.mode}`}

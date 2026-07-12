@@ -9,6 +9,8 @@ import {
   type UiSlashCommandInvocation,
   type UiProbeModelContextWindowResult,
   type UiSetSearchApiKeyResult,
+  type UiPromptEditLease,
+  type UiPromptSubmission,
   type UiWebCommandCatalog,
 } from "ohbaby-sdk";
 import { FetchDaemonEventStream } from "./events.js";
@@ -26,6 +28,7 @@ import type {
   WorkspaceSnapshot,
   DirectoryPickerEntry,
   DirectoryPickerRoot,
+  PromptAcceptedResponse,
 } from "./wire.js";
 import {
   createOhbabyWebStore,
@@ -76,7 +79,25 @@ export interface OhbabyWebClient {
   selectSession(sessionId: string): Promise<void>;
   setPermission(input: SetPermissionRequest): Promise<void>;
   setSearchApiKey(input: SearchApiKeyRequest): Promise<UiSetSearchApiKeyResult>;
-  submitPrompt(input: SubmitPromptRequest): Promise<void>;
+  submitPrompt(input: SubmitPromptRequest): Promise<PromptAcceptedResponse>;
+  acquirePromptEditLease(promptId: string): Promise<UiPromptEditLease>;
+  renewPromptEditLease(
+    promptId: string,
+    editLeaseId: string,
+  ): Promise<UiPromptEditLease>;
+  releasePromptEditLease(
+    promptId: string,
+    editLeaseId: string,
+  ): Promise<UiPromptSubmission>;
+  editQueuedPrompt(
+    promptId: string,
+    editLeaseId: string,
+    text: string,
+  ): Promise<UiPromptSubmission>;
+  cancelQueuedPrompt(
+    promptId: string,
+    editLeaseId?: string,
+  ): Promise<UiPromptSubmission>;
   subscribe(listener: () => void): () => void;
 }
 
@@ -195,8 +216,45 @@ class BrowserDaemonClient implements OhbabyWebClient {
     return this.store.subscribe(listener);
   }
 
-  async submitPrompt(input: SubmitPromptRequest): Promise<void> {
-    await this.http.submitPrompt(input);
+  async submitPrompt(
+    input: SubmitPromptRequest,
+  ): Promise<PromptAcceptedResponse> {
+    return this.http.submitPrompt(input);
+  }
+
+  async acquirePromptEditLease(promptId: string): Promise<UiPromptEditLease> {
+    return (await this.http.acquirePromptEditLease(promptId)).lease;
+  }
+
+  async renewPromptEditLease(
+    promptId: string,
+    editLeaseId: string,
+  ): Promise<UiPromptEditLease> {
+    return (await this.http.renewPromptEditLease(promptId, editLeaseId)).lease;
+  }
+
+  async releasePromptEditLease(
+    promptId: string,
+    editLeaseId: string,
+  ): Promise<UiPromptSubmission> {
+    return (await this.http.releasePromptEditLease(promptId, editLeaseId))
+      .prompt;
+  }
+
+  async editQueuedPrompt(
+    promptId: string,
+    editLeaseId: string,
+    text: string,
+  ): Promise<UiPromptSubmission> {
+    return (await this.http.editQueuedPrompt(promptId, editLeaseId, text))
+      .prompt;
+  }
+
+  async cancelQueuedPrompt(
+    promptId: string,
+    editLeaseId?: string,
+  ): Promise<UiPromptSubmission> {
+    return (await this.http.cancelQueuedPrompt(promptId, editLeaseId)).prompt;
   }
 
   async executeSlashCommand(input: {
@@ -497,7 +555,8 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     readonly directories: readonly DirectoryPickerEntry[];
     readonly directory: string;
   }> {
-    const response = await this.globalHttp.listDirectoryPickerEntries(directory);
+    const response =
+      await this.globalHttp.listDirectoryPickerEntries(directory);
     return {
       directories: response.directories,
       directory: response.directory,

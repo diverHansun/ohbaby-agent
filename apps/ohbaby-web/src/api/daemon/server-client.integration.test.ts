@@ -421,7 +421,10 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       const runtime = createOhbabyWebRuntime(config, { fetch: fetchImpl });
       await runtime.ready;
 
-      await runtime.client.submitPrompt({ text: "hello" });
+      await runtime.client.submitPrompt({
+        clientRequestId: "request_1",
+        text: "hello",
+      });
 
       await waitFor(
         () =>

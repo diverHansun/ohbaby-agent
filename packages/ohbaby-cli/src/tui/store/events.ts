@@ -7,6 +7,7 @@ import type {
   UiNotice,
   UiPermissionState,
   UiPermissionRequest,
+  UiPromptSubmission,
   UiRun,
   UiSession,
   UiSessionGoal,
@@ -60,6 +61,7 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
     notices: [],
     permissions: snapshot.permissions,
     permission: snapshot.permission,
+    prompts: snapshot.prompts ?? [],
     reasoningByMessageId: {},
     runs: snapshot.runs,
     runtime: snapshot.status,
@@ -82,6 +84,12 @@ export function applyTuiEvent(
     case "session.updated":
       return rebuildFromCollections(state, {
         sessions: upsertById(state.sessions, event.session),
+      });
+
+    case "prompt.submitted":
+    case "prompt.updated":
+      return rebuildFromCollections(state, {
+        prompts: upsertByKey(state.prompts, event.prompt, "promptId"),
       });
 
     case "message.appended": {
@@ -508,6 +516,7 @@ function rebuildFromCollections(
     readonly runs?: readonly UiRun[];
     readonly permissions?: readonly UiPermissionRequest[];
     readonly permission?: UiPermissionState;
+    readonly prompts?: readonly UiPromptSubmission[];
     readonly runtime?: TuiRuntimeStatus;
     readonly contextWindowUsages?: readonly UiContextWindowUsage[];
     readonly goals?: readonly UiSessionGoal[];
@@ -521,6 +530,7 @@ function rebuildFromCollections(
   const runs = patch.runs ?? state.runs;
   const permissions = patch.permissions ?? state.permissions;
   const permission = patch.permission ?? state.permission;
+  const prompts = patch.prompts ?? state.prompts;
   const runtime = patch.runtime ?? state.runtime;
   const contextWindowUsages =
     patch.contextWindowUsages ?? state.contextWindowUsages;
@@ -528,6 +538,7 @@ function rebuildFromCollections(
   const snapshot: UiSnapshot = {
     activeSessionId,
     permissions,
+    prompts,
     runs,
     sessions,
     status: runtime,
@@ -555,6 +566,7 @@ function rebuildFromCollections(
     messages,
     permissions,
     permission,
+    prompts,
     runs,
     runtime,
     sessions,
@@ -1297,6 +1309,18 @@ function upsertById<TItem extends { readonly id: string }>(
 
   return items.map((candidate) =>
     candidate.id === item.id ? item : candidate,
+  );
+}
+
+function upsertByKey<TItem>(
+  items: readonly TItem[],
+  item: TItem,
+  key: keyof TItem,
+): readonly TItem[] {
+  const index = items.findIndex((candidate) => candidate[key] === item[key]);
+  if (index === -1) return [...items, item];
+  return items.map((candidate) =>
+    candidate[key] === item[key] ? item : candidate,
   );
 }
 

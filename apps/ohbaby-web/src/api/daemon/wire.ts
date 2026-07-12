@@ -8,6 +8,9 @@ import type {
   UiPermissionMode,
   UiPermissionResponse,
   UiPermissionState,
+  UiPromptReceipt,
+  UiPromptEditLease,
+  UiPromptSubmission,
   UiProbeModelContextWindowResult,
   UiSetSearchApiKeyResult,
   UiWebCommandCatalog,
@@ -127,9 +130,18 @@ export interface SnapshotResponse {
   readonly snapshot: UiSnapshot;
 }
 
-export interface PromptAcceptedResponse {
+export interface PromptAcceptedResponse extends UiPromptReceipt {
   readonly ok: true;
-  readonly sessionId?: string;
+}
+
+export interface PromptMutationResponse {
+  readonly ok: true;
+  readonly prompt: UiPromptSubmission;
+}
+
+export interface PromptLeaseResponse {
+  readonly lease: UiPromptEditLease;
+  readonly ok: true;
 }
 
 export interface OkResponse {
@@ -216,6 +228,7 @@ export type WebSseEvent =
     };
 
 export interface SubmitPromptRequest {
+  readonly clientRequestId: string;
   readonly sessionId?: string;
   readonly text: string;
 }
