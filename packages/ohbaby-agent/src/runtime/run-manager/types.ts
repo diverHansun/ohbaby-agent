@@ -9,6 +9,7 @@ import type {
   RunStatus,
   TriggerSource,
 } from "../run-ledger/index.js";
+import type { UiPromptError } from "ohbaby-sdk";
 import type { StreamBridge } from "../stream-bridge/index.js";
 
 export type MultitaskStrategy = "reject" | "queue" | "interrupt-current";
@@ -53,12 +54,14 @@ export interface RunRecord {
   readonly startedAt?: number;
   readonly endedAt?: number;
   readonly error?: string;
+  readonly errorData?: UiPromptError;
   readonly terminalReason?: LifecycleResult["terminalReason"];
 }
 
 export interface RunCompletion {
   readonly status: TerminalRunStatus;
   readonly error?: string;
+  readonly errorData?: UiPromptError;
   readonly terminalReason?: LifecycleResult["terminalReason"];
   readonly usage?: LifecycleResult["usage"];
 }
@@ -124,6 +127,7 @@ export interface RunWorkerResult {
   readonly status: "succeeded" | "failed" | "cancelled";
   readonly result?: LifecycleResult;
   readonly error?: string;
+  readonly errorData?: UiPromptError;
   readonly terminalReason?: LifecycleResult["terminalReason"];
 }
 
@@ -148,6 +152,7 @@ export interface ManagedRunRecord extends RunRecord {
   startedAt?: number;
   endedAt?: number;
   error?: string;
+  errorData?: UiPromptError;
   terminalReason?: LifecycleResult["terminalReason"];
 }
 

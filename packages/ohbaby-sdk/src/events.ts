@@ -15,6 +15,7 @@ import type {
   UiSession,
   UiSnapshot,
 } from "./snapshot.js";
+import type { UiPromptSubmission } from "./prompt.js";
 
 export interface UiSnapshotReplacedEvent {
   readonly type: "snapshot.replaced";
@@ -92,6 +93,18 @@ export interface UiRunInterruptedEvent {
   readonly type: "run.interrupted";
   readonly sessionId: string;
   readonly runId: string;
+  readonly timestamp?: number;
+}
+
+export interface UiPromptSubmittedEvent {
+  readonly type: "prompt.submitted";
+  readonly prompt: UiPromptSubmission;
+  readonly timestamp?: number;
+}
+
+export interface UiPromptUpdatedEvent {
+  readonly type: "prompt.updated";
+  readonly prompt: UiPromptSubmission;
   readonly timestamp?: number;
 }
 
@@ -200,6 +213,8 @@ export type UiEvent =
   | UiMessageReasoningEndEvent
   | UiRunUpdatedEvent
   | UiRunInterruptedEvent
+  | UiPromptSubmittedEvent
+  | UiPromptUpdatedEvent
   | UiContextWindowUpdatedEvent
   | UiGoalUpdatedEvent
   | UiPermissionRequestedEvent

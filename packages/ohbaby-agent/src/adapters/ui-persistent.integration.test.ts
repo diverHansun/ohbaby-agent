@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { UiEvent, UiRun } from "ohbaby-sdk";
+import type { UiEvent, UiPromptReceipt, UiRun } from "ohbaby-sdk";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
@@ -146,6 +146,303 @@ function createBlockingLLMClient(input: {
   };
 }
 
+function createConcurrentBlockingLLMClient(input: {
+  readonly release: Promise<undefined>;
+  readonly onStarted: (request: InterfaceProviderRequest) => void;
+}): LLMClientInstance<FakeSdkClient> {
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isSessionTitleGenerationRequest(request)) {
+          return Promise.resolve(
+            createProviderStream([
+              {
+                textDelta: titleTextForSessionTitleRequest(request),
+                finishReason: "stop",
+              },
+            ]),
+          );
+        }
+        input.onStarted(request);
+        return Promise.resolve(
+          (async function* (): AsyncGenerator<
+            InterfaceProviderStreamEvent,
+            void,
+            unknown
+          > {
+            await input.release;
+            yield { textDelta: "done", finishReason: "stop" };
+          })(),
+        );
+      },
+      isAbortError(): boolean {
+        return false;
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
+      baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
+function createFailingLLMClient(
+  error: Error & { readonly status?: number },
+): LLMClientInstance<FakeSdkClient> {
+  const client = createFakeLLMClient([]);
+  return {
+    ...client,
+    provider: {
+      ...client.provider,
+      streamChatCompletion(
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isSessionTitleGenerationRequest(request)) {
+          return Promise.resolve(
+            createProviderStream([
+              { textDelta: "Failure", finishReason: "stop" },
+            ]),
+          );
+        }
+        return Promise.reject(error);
+      },
+    },
+  };
+}
+
+function createConcurrentMixedOutcomeLLMClient(input: {
+  readonly release: Promise<undefined>;
+  readonly blockedStarted: Deferred<undefined>;
+}): LLMClientInstance<FakeSdkClient> {
+  const client = createFakeLLMClient([]);
+  return {
+    ...client,
+    provider: {
+      ...client.provider,
+      streamChatCompletion(
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isSessionTitleGenerationRequest(request)) {
+          return Promise.resolve(
+            createProviderStream([
+              { textDelta: "Concurrent", finishReason: "stop" },
+            ]),
+          );
+        }
+        const text = lastPersistentRequestMessageText(request);
+        if (text.includes("fail")) {
+          return Promise.reject(
+            Object.assign(new Error("Authorization: Bearer secret-token"), {
+              status: 401,
+            }),
+          );
+        }
+        input.blockedStarted.resolve(undefined);
+        return Promise.resolve(
+          (async function* (): AsyncGenerator<
+            InterfaceProviderStreamEvent,
+            void,
+            unknown
+          > {
+            await input.release;
+            yield { textDelta: "done", finishReason: "stop" };
+          })(),
+        );
+      },
+    },
+  };
+}
+
+function createAbortableBlockingLLMClient(input: {
+  readonly release: Promise<undefined>;
+  readonly startedTexts: string[];
+}): LLMClientInstance<FakeSdkClient> {
+  const abortError = Object.assign(new Error("aborted"), {
+    name: "AbortError",
+  });
+  const client = createFakeLLMClient([]);
+  return {
+    ...client,
+    provider: {
+      ...client.provider,
+      isAbortError(error: unknown): boolean {
+        return error === abortError;
+      },
+      streamChatCompletion(
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isSessionTitleGenerationRequest(request)) {
+          return Promise.resolve(
+            createProviderStream([
+              { textDelta: "Abort test", finishReason: "stop" },
+            ]),
+          );
+        }
+        input.startedTexts.push(lastPersistentRequestMessageText(request));
+        return Promise.resolve(
+          (async function* (): AsyncGenerator<
+            InterfaceProviderStreamEvent,
+            void,
+            unknown
+          > {
+            await Promise.race([
+              input.release,
+              new Promise<never>((_resolve, reject) => {
+                request.signal?.addEventListener(
+                  "abort",
+                  () => {
+                    reject(abortError);
+                  },
+                  { once: true },
+                );
+              }),
+            ]);
+            if (request.signal?.aborted) {
+              throw abortError;
+            }
+            yield { textDelta: "done", finishReason: "stop" };
+          })(),
+        );
+      },
+    },
+  };
+}
+
+function createDelayedAbortSettlementLLMClient(input: {
+  readonly abortObserved: Deferred<undefined>;
+  readonly settleAbortedRun: Promise<undefined>;
+  readonly startedTexts: string[];
+}): LLMClientInstance<FakeSdkClient> {
+  const abortError = Object.assign(new Error("aborted"), {
+    name: "AbortError",
+  });
+  const client = createFakeLLMClient([]);
+  return {
+    ...client,
+    provider: {
+      ...client.provider,
+      isAbortError(error: unknown): boolean {
+        return error === abortError;
+      },
+      streamChatCompletion(
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isSessionTitleGenerationRequest(request)) {
+          return Promise.resolve(
+            createProviderStream([
+              { textDelta: "Abort barrier", finishReason: "stop" },
+            ]),
+          );
+        }
+        const text = lastPersistentRequestMessageText(request);
+        input.startedTexts.push(text);
+        if (input.startedTexts.length > 1) {
+          return Promise.resolve(
+            createProviderStream([
+              { textDelta: "continued", finishReason: "stop" },
+            ]),
+          );
+        }
+        return Promise.resolve(
+          (async function* (): AsyncGenerator<
+            InterfaceProviderStreamEvent,
+            void,
+            unknown
+          > {
+            await new Promise<void>((resolve) => {
+              if (request.signal?.aborted) {
+                resolve();
+                return;
+              }
+              request.signal?.addEventListener(
+                "abort",
+                () => {
+                  resolve();
+                },
+                { once: true },
+              );
+            });
+            input.abortObserved.resolve(undefined);
+            await input.settleAbortedRun;
+            yield await Promise.reject<InterfaceProviderStreamEvent>(
+              abortError,
+            );
+          })(),
+        );
+      },
+    },
+  };
+}
+
+function createPermissionSlotLLMClient(input: {
+  readonly onBlockedStarted: () => void;
+  readonly releaseBlocked: Promise<undefined>;
+}): LLMClientInstance<FakeSdkClient> {
+  const client = createFakeLLMClient([]);
+  return {
+    ...client,
+    provider: {
+      ...client.provider,
+      streamChatCompletion(
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isSessionTitleGenerationRequest(request)) {
+          return Promise.resolve(
+            createProviderStream([
+              { textDelta: "Permission wait", finishReason: "stop" },
+            ]),
+          );
+        }
+        if (
+          lastPersistentRequestMessageText(request).includes(
+            "permission prompt 1",
+          )
+        ) {
+          return Promise.resolve(
+            createProviderStream([
+              {
+                finishReason: "tool_calls",
+                toolCallDeltas: [
+                  {
+                    argumentsDelta: JSON.stringify({
+                      content: "permission one",
+                      file_path: "permission-one.txt",
+                    }),
+                    id: "call_permission_one",
+                    index: 0,
+                    name: "write",
+                  },
+                ],
+              },
+            ]),
+          );
+        }
+        input.onBlockedStarted();
+        return Promise.resolve(
+          (async function* (): AsyncGenerator<
+            InterfaceProviderStreamEvent,
+            void,
+            unknown
+          > {
+            await input.releaseBlocked;
+            yield { textDelta: "done", finishReason: "stop" };
+          })(),
+        );
+      },
+    },
+  };
+}
+
 function createProviderSubagentRunEvent(input: {
   readonly callId: string;
   readonly mode?: "foreground" | "background";
@@ -226,6 +523,12 @@ function lastPersistentRequestMessageText(
   request: InterfaceProviderRequest,
 ): string {
   return persistentContentToText(request.messages.at(-1)?.content);
+}
+
+function allPersistentRequestMessageText(
+  request: InterfaceProviderRequest,
+): string {
+  return JSON.stringify(request.messages);
 }
 
 function isPersistentExploreSubagentRequest(
@@ -413,6 +716,410 @@ afterEach(() => {
 });
 
 describe("createPersistentUiBackendClient", () => {
+  it("runs ten sessions through the real backend and admits the eleventh as queued", async () => {
+    const directory = await tempDir("ohbaby-persistent-concurrency-");
+    const release = createDeferred<undefined>();
+    let started = 0;
+    const client = createPersistentUiBackendClient({
+      dbPath: join(directory, "agent.db"),
+      llmClient: createConcurrentBlockingLLMClient({
+        onStarted: () => {
+          started += 1;
+        },
+        release: release.promise,
+      }),
+      workdir: join(directory, "workspace"),
+    });
+    try {
+      const receipts: UiPromptReceipt[] = [];
+      for (let index = 1; index <= 11; index += 1) {
+        receipts.push(
+          await client.submitPromptAccepted(`prompt ${String(index)}`, {
+            sessionId: `session_concurrent_${String(index)}`,
+          }),
+        );
+      }
+
+      await vi.waitFor(() => {
+        expect(started).toBe(10);
+      });
+      const snapshot = await client.getSnapshot();
+      expect(snapshot.prompts).toHaveLength(11);
+      expect(
+        snapshot.prompts?.find(
+          (prompt) => prompt.promptId === receipts[10]?.promptId,
+        ),
+      ).toMatchObject({ status: "queued" });
+
+      release.resolve(undefined);
+      await Promise.all(
+        receipts.map((receipt) => client.waitForPrompt(receipt.promptId)),
+      );
+      expect(started).toBe(11);
+    } finally {
+      release.resolve(undefined);
+      await client.dispose();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps a real backend session FIFO while queued prompts remain editable and cancellable", async () => {
+    const directory = await tempDir("ohbaby-persistent-prompt-fifo-");
+    const release = createDeferred<undefined>();
+    const startedTexts: string[] = [];
+    const client = createPersistentUiBackendClient({
+      dbPath: join(directory, "agent.db"),
+      llmClient: createConcurrentBlockingLLMClient({
+        onStarted: (request) => {
+          startedTexts.push(lastPersistentRequestMessageText(request));
+        },
+        release: release.promise,
+      }),
+      workdir: join(directory, "workspace"),
+    });
+    try {
+      const first = await client.submitPromptAccepted("first", {
+        sessionId: "session_fifo",
+      });
+      await vi.waitFor(() => {
+        expect(startedTexts).toEqual(["first"]);
+      });
+      const second = await client.submitPromptAccepted("second", {
+        sessionId: "session_fifo",
+      });
+      const third = await client.submitPromptAccepted("third", {
+        sessionId: "session_fifo",
+      });
+      const snapshot = await client.getSnapshot();
+      const queuedSecond = snapshot.prompts?.find(
+        (prompt) => prompt.promptId === second.promptId,
+      );
+      const queuedThird = snapshot.prompts?.find(
+        (prompt) => prompt.promptId === third.promptId,
+      );
+      if (!queuedSecond || !queuedThird) {
+        throw new Error("expected queued prompt projections");
+      }
+      const secondLease = await client.acquirePromptEditLease({
+        ownerClientId: "client_test",
+        promptId: second.promptId,
+      });
+      const edited = await client.editQueuedPrompt({
+        editLeaseId: secondLease.editLeaseId,
+        promptId: second.promptId,
+        text: "second edited",
+      });
+      const cancelled = await client.cancelQueuedPrompt({
+        promptId: third.promptId,
+      });
+      expect(edited.text).toBe("second edited");
+      expect(cancelled.status).toBe("cancelled");
+
+      release.resolve(undefined);
+      await Promise.all([
+        client.waitForPrompt(first.promptId),
+        client.waitForPrompt(second.promptId),
+        client.waitForPrompt(third.promptId),
+      ]);
+      expect(startedTexts).toEqual(["first", "second edited"]);
+    } finally {
+      release.resolve(undefined);
+      await client.dispose();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps queued same-session text out of the active model context", async () => {
+    const directory = await tempDir("ohbaby-persistent-context-isolation-");
+    const release = createDeferred<undefined>();
+    const requests: InterfaceProviderRequest[] = [];
+    const client = createPersistentUiBackendClient({
+      dbPath: join(directory, "agent.db"),
+      llmClient: createConcurrentBlockingLLMClient({
+        onStarted: (request) => {
+          requests.push(request);
+        },
+        release: release.promise,
+      }),
+      workdir: join(directory, "workspace"),
+    });
+    try {
+      const first = await client.submitPromptAccepted("active context A only", {
+        sessionId: "session_context_isolation",
+      });
+      await vi.waitFor(() => {
+        expect(requests).toHaveLength(1);
+      });
+      const second = await client.submitPromptAccepted(
+        "queued context B must not leak",
+        { sessionId: "session_context_isolation" },
+      );
+
+      const firstContext = allPersistentRequestMessageText(requests[0]);
+      expect(firstContext).toContain("active context A only");
+      expect(firstContext).not.toContain("queued context B must not leak");
+
+      release.resolve(undefined);
+      await Promise.all([
+        client.waitForPrompt(first.promptId),
+        client.waitForPrompt(second.promptId),
+      ]);
+      expect(requests).toHaveLength(2);
+      const secondContext = allPersistentRequestMessageText(requests[1]);
+      expect(secondContext).toContain("active context A only");
+      expect(secondContext).toContain("queued context B must not leak");
+    } finally {
+      release.resolve(undefined);
+      await client.dispose();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps a permission wait in its active slot and leaves the eleventh queued", async () => {
+    const directory = await tempDir("ohbaby-persistent-permission-slots-");
+    const releaseBlocked = createDeferred<undefined>();
+    let blockedStarted = 0;
+    const client = createPersistentUiBackendClient({
+      dbPath: join(directory, "agent.db"),
+      llmClient: createPermissionSlotLLMClient({
+        onBlockedStarted: () => {
+          blockedStarted += 1;
+        },
+        releaseBlocked: releaseBlocked.promise,
+      }),
+      workdir: join(directory, "workspace"),
+    });
+    try {
+      const receipts: UiPromptReceipt[] = [];
+      for (let index = 1; index <= 11; index += 1) {
+        receipts.push(
+          await client.submitPromptAccepted(
+            `permission prompt ${String(index)}`,
+            { sessionId: `session_permission_${String(index)}` },
+          ),
+        );
+      }
+
+      let snapshot = await client.getSnapshot();
+      await vi.waitFor(async () => {
+        snapshot = await client.getSnapshot();
+        expect(snapshot.permissions).toHaveLength(1);
+        expect(blockedStarted).toBe(9);
+      });
+      expect(
+        snapshot.prompts?.filter((prompt) => prompt.status === "running"),
+      ).toHaveLength(10);
+      const eleventh = snapshot.prompts?.find(
+        (prompt) => prompt.promptId === receipts[10]?.promptId,
+      );
+      expect(eleventh).toMatchObject({ status: "queued" });
+      if (!eleventh) {
+        throw new Error("expected eleventh queued prompt");
+      }
+
+      await client.cancelQueuedPrompt({
+        promptId: eleventh.promptId,
+      });
+      const permission = snapshot.permissions[0];
+      await client.respondPermission(permission.id, { choiceId: "cancel" });
+      releaseBlocked.resolve(undefined);
+      await Promise.all(
+        receipts.map((receipt) => client.waitForPrompt(receipt.promptId)),
+      );
+    } finally {
+      releaseBlocked.resolve(undefined);
+      await client.dispose();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("binds a normalized provider failure to the accepted prompt", async () => {
+    const directory = await tempDir("ohbaby-persistent-prompt-error-");
+    const providerError = Object.assign(new Error("provider unauthorized"), {
+      status: 401,
+    });
+    const client = createPersistentUiBackendClient({
+      dbPath: join(directory, "agent.db"),
+      llmClient: createFailingLLMClient(providerError),
+      workdir: join(directory, "workspace"),
+    });
+    try {
+      const receipt = await client.submitPromptAccepted("fail", {
+        sessionId: "session_provider_error",
+      });
+      const completion = await client.waitForPrompt(receipt.promptId);
+      expect(completion.prompt).toMatchObject({
+        promptId: receipt.promptId,
+        status: "failed",
+        error: {
+          code: "PROVIDER_AUTH",
+          message: "LLM provider authentication failed (HTTP 401)",
+          retryable: false,
+          source: "provider",
+          statusCode: 401,
+        },
+      });
+    } finally {
+      await client.dispose();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps one session's provider failure out of another active session's global status", async () => {
+    const directory = await tempDir("ohbaby-persistent-prompt-isolation-");
+    const release = createDeferred<undefined>();
+    const blockedStarted = createDeferred<undefined>();
+    const client = createPersistentUiBackendClient({
+      dbPath: join(directory, "agent.db"),
+      llmClient: createConcurrentMixedOutcomeLLMClient({
+        blockedStarted,
+        release: release.promise,
+      }),
+      workdir: join(directory, "workspace"),
+    });
+    try {
+      const blocked = await client.submitPromptAccepted("keep running", {
+        sessionId: "session_running",
+      });
+      await blockedStarted.promise;
+      const failed = await client.submitPromptAccepted("please fail", {
+        sessionId: "session_failed",
+      });
+      await expect(
+        client.waitForPrompt(failed.promptId),
+      ).resolves.toMatchObject({
+        prompt: {
+          error: { code: "PROVIDER_AUTH", source: "provider" },
+          status: "failed",
+        },
+      });
+
+      const snapshot = await client.getSnapshot();
+      expect(snapshot.status.kind).not.toBe("error");
+      expect(
+        snapshot.runs.find((run) => run.sessionId === "session_failed")?.status,
+      ).toMatchObject({ kind: "error" });
+
+      release.resolve(undefined);
+      await client.waitForPrompt(blocked.promptId);
+    } finally {
+      release.resolve(undefined);
+      await client.dispose();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("advances the same-session FIFO after the active run is aborted", async () => {
+    const directory = await tempDir("ohbaby-persistent-prompt-abort-");
+    const release = createDeferred<undefined>();
+    const startedTexts: string[] = [];
+    const client = createPersistentUiBackendClient({
+      dbPath: join(directory, "agent.db"),
+      llmClient: createAbortableBlockingLLMClient({
+        release: release.promise,
+        startedTexts,
+      }),
+      workdir: join(directory, "workspace"),
+    });
+    try {
+      const first = await client.submitPromptAccepted("first abortable", {
+        sessionId: "session_abort_fifo",
+      });
+      await vi.waitFor(() => {
+        expect(startedTexts).toEqual(["first abortable"]);
+      });
+      const second = await client.submitPromptAccepted("second after abort", {
+        sessionId: "session_abort_fifo",
+      });
+      const running = (await client.getSnapshot()).prompts?.find(
+        (prompt) => prompt.promptId === first.promptId,
+      );
+      if (!running?.runId) {
+        throw new Error("expected active prompt run id");
+      }
+      await client.abortRun(running.runId);
+      await expect(client.waitForPrompt(first.promptId)).resolves.toMatchObject(
+        {
+          prompt: { status: "cancelled" },
+        },
+      );
+      await vi.waitFor(() => {
+        expect(startedTexts).toEqual(["first abortable", "second after abort"]);
+      });
+      release.resolve(undefined);
+      await expect(
+        client.waitForPrompt(second.promptId),
+      ).resolves.toMatchObject({
+        prompt: { status: "succeeded" },
+      });
+    } finally {
+      release.resolve(undefined);
+      await client.dispose();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("does not advance same-session FIFO until the aborted provider settles", async () => {
+    const directory = await tempDir("ohbaby-persistent-abort-barrier-");
+    const abortObserved = createDeferred<undefined>();
+    const settleAbortedRun = createDeferred<undefined>();
+    const startedTexts: string[] = [];
+    const client = createPersistentUiBackendClient({
+      dbPath: join(directory, "agent.db"),
+      llmClient: createDelayedAbortSettlementLLMClient({
+        abortObserved,
+        settleAbortedRun: settleAbortedRun.promise,
+        startedTexts,
+      }),
+      workdir: join(directory, "workspace"),
+    });
+    try {
+      const first = await client.submitPromptAccepted("first with barrier", {
+        sessionId: "session_abort_barrier",
+      });
+      await vi.waitFor(() => {
+        expect(startedTexts).toEqual(["first with barrier"]);
+      });
+      const second = await client.submitPromptAccepted(
+        "second after settled abort",
+        { sessionId: "session_abort_barrier" },
+      );
+      const running = (await client.getSnapshot()).prompts?.find(
+        (prompt) => prompt.promptId === first.promptId,
+      );
+      if (!running?.runId) {
+        throw new Error("expected active prompt run id");
+      }
+
+      const abort = client.abortRun(running.runId);
+      await abortObserved.promise;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(startedTexts).toEqual(["first with barrier"]);
+      expect(
+        (await client.getSnapshot()).prompts?.find(
+          (prompt) => prompt.promptId === second.promptId,
+        ),
+      ).toMatchObject({ status: "queued" });
+
+      settleAbortedRun.resolve(undefined);
+      await abort;
+      await expect(client.waitForPrompt(first.promptId)).resolves.toMatchObject(
+        { prompt: { status: "cancelled" } },
+      );
+      await expect(
+        client.waitForPrompt(second.promptId),
+      ).resolves.toMatchObject({ prompt: { status: "succeeded" } });
+      expect(startedTexts).toEqual([
+        "first with barrier",
+        "second after settled abort",
+      ]);
+    } finally {
+      settleAbortedRun.resolve(undefined);
+      await client.dispose();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("restores sessions, messages, and runs from the database", async () => {
     const directory = await tempDir("ohbaby-persistent-ui-");
     try {

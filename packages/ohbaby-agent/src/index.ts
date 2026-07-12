@@ -88,6 +88,7 @@ export * from "./core/llm-client/index.js";
 export * from "./mcp/index.js";
 export * from "./project/index.js";
 export * from "./runtime/interaction-broker/index.js";
+export * from "./runtime/prompt-scheduler/index.js";
 export { SessionRunBusyError } from "./runtime/run-ledger/index.js";
 export * from "./sandbox/index.js";
 export * from "./shell/index.js";

@@ -7,6 +7,7 @@ import type {
   UiEvent,
   UiEventHandler,
   UiSnapshot,
+  UiPromptQueueClient,
 } from "ohbaby-sdk";
 import { daemonAuthHeader } from "../../auth/token.js";
 import {
@@ -33,7 +34,7 @@ export interface RemoteDaemonClientOptions {
   readonly startupIntent?: DaemonStartupIntent;
 }
 
-type RemoteUiBackendClient = UiBackendClient & {
+type RemoteUiBackendClient = UiPromptQueueClient & {
   dispose(): Promise<void>;
 };
 
@@ -61,6 +62,29 @@ function parseRpcResponse(value: unknown): DaemonRpcResponse {
       error: {
         message: error.message,
         ...(typeof error.name === "string" ? { name: error.name } : {}),
+        ...(typeof error.code === "string" ? { code: error.code } : {}),
+        ...(error.source === "provider" ||
+        error.source === "runtime" ||
+        error.source === "scheduler" ||
+        error.source === "validation"
+          ? { source: error.source }
+          : {}),
+        ...(typeof error.retryable === "boolean"
+          ? { retryable: error.retryable }
+          : {}),
+        ...(typeof error.providerId === "string"
+          ? { providerId: error.providerId }
+          : {}),
+        ...(typeof error.statusCode === "number"
+          ? { statusCode: error.statusCode }
+          : {}),
+        ...(typeof error.attempts === "number"
+          ? { attempts: error.attempts }
+          : {}),
+        ...(typeof error.limit === "number" ? { limit: error.limit } : {}),
+        ...(typeof error.terminalReason === "string"
+          ? { terminalReason: error.terminalReason }
+          : {}),
       },
       id: value.id,
       ok: false,
@@ -182,6 +206,49 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("submitPrompt", [text, options]);
   }
 
+  submitPromptAccepted(
+    text: string,
+    options?: Parameters<UiPromptQueueClient["submitPromptAccepted"]>[1],
+  ): ReturnType<UiPromptQueueClient["submitPromptAccepted"]> {
+    return this.rpc("submitPromptAccepted", [text, options]);
+  }
+
+  editQueuedPrompt(
+    input: Parameters<UiPromptQueueClient["editQueuedPrompt"]>[0],
+  ): ReturnType<UiPromptQueueClient["editQueuedPrompt"]> {
+    return this.rpc("editQueuedPrompt", [input]);
+  }
+
+  cancelQueuedPrompt(
+    input: Parameters<UiPromptQueueClient["cancelQueuedPrompt"]>[0],
+  ): ReturnType<UiPromptQueueClient["cancelQueuedPrompt"]> {
+    return this.rpc("cancelQueuedPrompt", [input]);
+  }
+
+  acquirePromptEditLease(
+    input: Parameters<UiPromptQueueClient["acquirePromptEditLease"]>[0],
+  ): ReturnType<UiPromptQueueClient["acquirePromptEditLease"]> {
+    return this.rpc("acquirePromptEditLease", [input]);
+  }
+
+  renewPromptEditLease(
+    input: Parameters<UiPromptQueueClient["renewPromptEditLease"]>[0],
+  ): ReturnType<UiPromptQueueClient["renewPromptEditLease"]> {
+    return this.rpc("renewPromptEditLease", [input]);
+  }
+
+  releasePromptEditLease(
+    input: Parameters<UiPromptQueueClient["releasePromptEditLease"]>[0],
+  ): ReturnType<UiPromptQueueClient["releasePromptEditLease"]> {
+    return this.rpc("releasePromptEditLease", [input]);
+  }
+
+  waitForPrompt(
+    promptId: string,
+  ): ReturnType<UiPromptQueueClient["waitForPrompt"]> {
+    return this.rpc("waitForPrompt", [promptId]);
+  }
+
   compactSession(
     options?: Parameters<UiBackendClient["compactSession"]>[0],
   ): ReturnType<UiBackendClient["compactSession"]> {
@@ -294,7 +361,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     }
     const body = parseRpcResponse(responseJson);
     if (!body.ok) {
-      throw new Error(body.error.message);
+      throw Object.assign(new Error(body.error.message), body.error);
     }
     if (!response.ok) {
       throw new Error(

@@ -1,14 +1,22 @@
-import { SessionRunBusyError } from "ohbaby-agent";
-import type { SubmitPromptOptions, UiBackendClient } from "ohbaby-sdk";
+import type {
+  SubmitPromptOptions,
+  UiAcquirePromptEditLeaseInput,
+  UiBackendClient,
+  UiCancelQueuedPromptInput,
+  UiEditQueuedPromptInput,
+  UiReleasePromptEditLeaseInput,
+  UiRenewPromptEditLeaseInput,
+} from "ohbaby-sdk";
 import {
   parseDaemonStartupIntent,
   type DaemonClientViewCoordinator,
 } from "../../coordination/client-view.js";
 import { PermissionRouter } from "../../coordination/permission-router.js";
 import {
-  DaemonPromptQueue,
-  type DaemonPromptQueueItem,
-} from "../../coordination/prompt-queue.js";
+  acceptDaemonPrompt,
+  submitDaemonPrompt,
+  supportsPromptQueue,
+} from "../../coordination/prompt-backend.js";
 import {
   createDaemonRpcFailure,
   createDaemonRpcSuccess,
@@ -56,37 +64,25 @@ function submitPromptOptions(value: unknown): SubmitPromptOptions | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
+  if (
+    typeof value.clientRequestId === "string" &&
+    (value.clientRequestId.trim() === "" ||
+      value.clientRequestId.startsWith("legacy:"))
+  ) {
+    const error = new Error(
+      "clientRequestId must be non-empty and must not use the reserved legacy: prefix",
+    ) as Error & { code: string };
+    error.code = "INVALID_CLIENT_REQUEST_ID";
+    throw error;
+  }
   return {
+    ...(typeof value.clientRequestId === "string"
+      ? { clientRequestId: value.clientRequestId }
+      : {}),
     ...(typeof value.sessionId === "string"
       ? { sessionId: value.sessionId }
       : {}),
   };
-}
-
-export function createDefaultDaemonPromptQueue(
-  backend: UiBackendClient,
-  permissionRouter: PermissionRouter,
-  lifecycle: {
-    readonly onPromptSettled?: (item: DaemonPromptQueueItem) => void;
-    readonly onPromptStarted?: (item: DaemonPromptQueueItem) => void;
-  } = {},
-): DaemonPromptQueue {
-  return new DaemonPromptQueue({
-    isBusyError: (error): boolean => error instanceof SessionRunBusyError,
-    submit: async (item): Promise<void> => {
-      const release = permissionRouter.trackPromptClient(
-        item.clientId,
-        item.sessionId,
-      );
-      lifecycle.onPromptStarted?.(item);
-      try {
-        await backend.submitPrompt(item.text, item.options);
-      } finally {
-        lifecycle.onPromptSettled?.(item);
-        release();
-      }
-    },
-  });
 }
 
 export function parseDaemonRpcBody(body: string): {
@@ -124,17 +120,10 @@ export async function callDaemonBackend(input: {
   readonly clientViews: DaemonClientViewCoordinator;
   readonly createSessionId: () => string;
   readonly permissionRouter: PermissionRouter;
-  readonly promptQueue: DaemonPromptQueue;
   readonly request: DaemonRpcRequest;
 }): Promise<unknown> {
-  const {
-    backend,
-    clientViews,
-    createSessionId,
-    permissionRouter,
-    promptQueue,
-    request,
-  } = input;
+  const { backend, clientViews, createSessionId, permissionRouter, request } =
+    input;
 
   switch (request.method) {
     case "getSnapshot": {
@@ -165,22 +154,138 @@ export async function callDaemonBackend(input: {
       );
     case "submitPrompt": {
       const options = submitPromptOptions(request.params[1]);
-      const prepared = clientViews.preparePromptSubmit(
-        request.clientId,
-        options,
-        createSessionId,
-      );
-      await promptQueue.enqueue({
+      if (supportsPromptQueue(backend)) {
+        const accepted = await acceptDaemonPrompt({
+          backend,
+          clientId: request.clientId,
+          clientViews,
+          createSessionId,
+          options,
+          permissionRouter,
+          text: request.params[0] as string,
+        });
+        const completion = await accepted.completion;
+        if (
+          completion.prompt.status === "failed" ||
+          completion.prompt.status === "interrupted"
+        ) {
+          throw new Error(
+            completion.prompt.error?.message ??
+              `Prompt ${completion.prompt.status}`,
+          );
+        }
+        return undefined;
+      }
+      const submitted = submitDaemonPrompt({
+        backend,
         clientId: request.clientId,
-        ...(prepared.options === undefined
-          ? {}
-          : { options: prepared.options }),
-        ...(prepared.sessionId === undefined
-          ? {}
-          : { sessionId: prepared.sessionId }),
+        clientViews,
+        createSessionId,
+        options,
+        permissionRouter,
         text: request.params[0] as string,
       });
+      await submitted.completion;
       return undefined;
+    }
+    case "submitPromptAccepted": {
+      if (!supportsPromptQueue(backend)) {
+        throw new Error("Durable prompt admission is not supported");
+      }
+      const accepted = await acceptDaemonPrompt({
+        backend,
+        clientId: request.clientId,
+        clientViews,
+        createSessionId,
+        options: submitPromptOptions(request.params[1]),
+        permissionRouter,
+        text: request.params[0] as string,
+      });
+      return accepted.receipt;
+    }
+    case "editQueuedPrompt": {
+      if (!supportsPromptQueue(backend)) {
+        throw new Error("Durable prompt admission is not supported");
+      }
+      const input = request.params[0] as UiEditQueuedPromptInput;
+      if (
+        !clientViews.canAccessPrompt(
+          request.clientId,
+          await backend.getSnapshot(),
+          input.promptId,
+        )
+      ) {
+        throw new DaemonForbiddenError("Prompt belongs to another session");
+      }
+      return backend.editQueuedPrompt(input);
+    }
+    case "cancelQueuedPrompt": {
+      if (!supportsPromptQueue(backend)) {
+        throw new Error("Durable prompt admission is not supported");
+      }
+      const input = request.params[0] as UiCancelQueuedPromptInput;
+      if (
+        !clientViews.canAccessPrompt(
+          request.clientId,
+          await backend.getSnapshot(),
+          input.promptId,
+        )
+      ) {
+        throw new DaemonForbiddenError("Prompt belongs to another session");
+      }
+      return backend.cancelQueuedPrompt(input);
+    }
+    case "acquirePromptEditLease": {
+      if (!supportsPromptQueue(backend)) {
+        throw new Error("Durable prompt admission is not supported");
+      }
+      const input = request.params[0] as UiAcquirePromptEditLeaseInput;
+      if (
+        !clientViews.canAccessPrompt(
+          request.clientId,
+          await backend.getSnapshot(),
+          input.promptId,
+        )
+      ) {
+        throw new DaemonForbiddenError("Prompt belongs to another session");
+      }
+      return backend.acquirePromptEditLease({
+        ...input,
+        ownerClientId: request.clientId,
+      });
+    }
+    case "renewPromptEditLease": {
+      if (!supportsPromptQueue(backend)) {
+        throw new Error("Durable prompt admission is not supported");
+      }
+      const input = request.params[0] as UiRenewPromptEditLeaseInput;
+      return backend.renewPromptEditLease({
+        ...input,
+        ownerClientId: request.clientId,
+      });
+    }
+    case "releasePromptEditLease": {
+      if (!supportsPromptQueue(backend)) {
+        throw new Error("Durable prompt admission is not supported");
+      }
+      const input = request.params[0] as UiReleasePromptEditLeaseInput;
+      return backend.releasePromptEditLease(input);
+    }
+    case "waitForPrompt": {
+      if (!supportsPromptQueue(backend)) {
+        throw new Error("Durable prompt admission is not supported");
+      }
+      const promptId = request.params[0] as string;
+      if (
+        !clientViews.canAccessPrompt(
+          request.clientId,
+          await backend.getSnapshot(),
+          promptId,
+        )
+      ) {
+        throw new DaemonForbiddenError("Prompt belongs to another session");
+      }
+      return backend.waitForPrompt(promptId);
     }
     case "compactSession":
       return backend.compactSession(

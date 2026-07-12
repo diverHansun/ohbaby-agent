@@ -21,6 +21,7 @@ export {
   isRetryableProviderError,
   nextRetryDelayMs,
   parseRetryAfterMs,
+  providerErrorStatus,
   retryReason,
 } from "./retry.js";
 export type { CreateLLMClientOptions } from "./client.js";

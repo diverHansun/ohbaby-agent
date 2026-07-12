@@ -1211,7 +1211,7 @@ describe("createDaemonHttpServer", () => {
     });
   });
 
-  it("queues same-session prompt submissions across clients", async () => {
+  it("does not create a second queue owner for an injected legacy backend", async () => {
     const backend = new FakeBackend();
     backend.holdSubmits = true;
     await withServer(backend, async (url) => {
@@ -1228,25 +1228,17 @@ describe("createDaemonHttpServer", () => {
         params: ["second", { sessionId: "session_1" }],
       });
 
-      await vi.waitUntil(() => backend.submitted.length >= 1);
-      const submittedBeforeRelease = [...backend.submitted];
-      if (backend.submitted.length > 1) {
-        backend.resolveHeldSubmits();
-      }
-      expect(submittedBeforeRelease).toEqual([
+      await vi.waitUntil(() => backend.submitted.length === 2);
+      expect(backend.submitted).toEqual([
         { options: { sessionId: "session_1" }, text: "first" },
+        { options: { sessionId: "session_1" }, text: "second" },
       ]);
 
-      backend.resolveNextSubmit();
-      await expect(first).resolves.toMatchObject({ status: 200 });
-      await vi.waitUntil(() => backend.submitted.length === 2);
-      expect(backend.submitted[1]).toEqual({
-        options: { sessionId: "session_1" },
-        text: "second",
-      });
-
-      backend.resolveNextSubmit();
-      await expect(second).resolves.toMatchObject({ status: 200 });
+      backend.resolveHeldSubmits();
+      await expect(Promise.all([first, second])).resolves.toEqual([
+        expect.objectContaining({ status: 200 }),
+        expect.objectContaining({ status: 200 }),
+      ]);
     });
   });
 

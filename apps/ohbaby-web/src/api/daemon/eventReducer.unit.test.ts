@@ -32,6 +32,38 @@ function emptySnapshot(): UiSnapshot {
 }
 
 describe("ohbaby-web eventReducer", () => {
+  it("upserts prompt submissions and updates by stable prompt id", () => {
+    let state = replaceSnapshot(emptySnapshot(), 0);
+    const prompt = {
+      clientRequestId: "request_1",
+      createdAt: timestamp,
+      promptId: "prompt_1",
+      scopeKey: "/repo",
+      sessionId: "session_1",
+      status: "queued" as const,
+      text: "queued",
+      updatedAt: timestamp,
+      userMessageId: "message_1",
+    };
+    state = reduceUiEvent(state, { prompt, type: "prompt.submitted" }, 1);
+    state = reduceUiEvent(
+      state,
+      {
+        prompt: {
+          ...prompt,
+          status: "starting",
+          updatedAt: "2026-06-12T00:00:01.000Z",
+        },
+        type: "prompt.updated",
+      },
+      2,
+    );
+
+    expect(state.snapshot?.prompts).toEqual([
+      expect.objectContaining({ promptId: "prompt_1", status: "starting" }),
+    ]);
+  });
+
   it("replaces the snapshot and records the sequence baseline", () => {
     const state = replaceSnapshot(emptySnapshot(), 10);
 

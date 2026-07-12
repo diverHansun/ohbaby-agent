@@ -6,6 +6,13 @@ export const DAEMON_RPC_METHODS = [
   "getContextWindowUsage",
   "listCommands",
   "submitPrompt",
+  "submitPromptAccepted",
+  "editQueuedPrompt",
+  "cancelQueuedPrompt",
+  "acquirePromptEditLease",
+  "renewPromptEditLease",
+  "releasePromptEditLease",
+  "waitForPrompt",
   "compactSession",
   "archiveSession",
   "getCurrentModel",
@@ -49,6 +56,14 @@ export type DaemonRpcResponse =
       readonly error: {
         readonly message: string;
         readonly name?: string;
+        readonly code?: string;
+        readonly source?: "provider" | "runtime" | "scheduler" | "validation";
+        readonly retryable?: boolean;
+        readonly providerId?: string;
+        readonly statusCode?: number;
+        readonly attempts?: number;
+        readonly limit?: number;
+        readonly terminalReason?: string;
       };
     };
 
@@ -162,10 +177,36 @@ export function createDaemonRpcFailure(
 ): DaemonRpcResponse {
   const message = error instanceof Error ? error.message : String(error);
   const name = error instanceof Error ? error.name : undefined;
+  const detail = isRecord(error) ? error : {};
+  const source =
+    detail.source === "provider" ||
+    detail.source === "runtime" ||
+    detail.source === "scheduler" ||
+    detail.source === "validation"
+      ? detail.source
+      : undefined;
   return {
     error: {
       message,
       ...(name ? { name } : {}),
+      ...(typeof detail.code === "string" ? { code: detail.code } : {}),
+      ...(source === undefined ? {} : { source }),
+      ...(typeof detail.retryable === "boolean"
+        ? { retryable: detail.retryable }
+        : {}),
+      ...(typeof detail.providerId === "string"
+        ? { providerId: detail.providerId }
+        : {}),
+      ...(typeof detail.statusCode === "number"
+        ? { statusCode: detail.statusCode }
+        : {}),
+      ...(typeof detail.attempts === "number"
+        ? { attempts: detail.attempts }
+        : {}),
+      ...(typeof detail.limit === "number" ? { limit: detail.limit } : {}),
+      ...(typeof detail.terminalReason === "string"
+        ? { terminalReason: detail.terminalReason }
+        : {}),
     },
     id,
     ok: false,

@@ -40,7 +40,7 @@ describe("InProcessRuntimeController", () => {
     expect(createCount).toBe(1);
   });
 
-  it("updates status and publishes a notice when runtime creation fails for a prompt", async (): Promise<void> => {
+  it("keeps runtime creation failure prompt-scoped while publishing a notice", async (): Promise<void> => {
     const statuses: UiRunStatus[] = [];
     const notices: NoticeDraft[] = [];
     const controller = new InProcessRuntimeController({
@@ -60,9 +60,7 @@ describe("InProcessRuntimeController", () => {
       "model missing",
     );
 
-    expect(statuses).toEqual([
-      { kind: "error", message: "model missing", recoverable: true },
-    ]);
+    expect(statuses).toEqual([]);
     expect(notices).toEqual([
       {
         key: "runtime:model missing",
@@ -94,13 +92,38 @@ describe("InProcessRuntimeController", () => {
       publishNotice: (): void => undefined,
       updateStatus: (): Promise<void> => Promise.resolve(),
     });
-    controller.setActiveRunId("run_active");
+    controller.setActiveRunId("run_active", "session_1");
 
     await expect(controller.abortPromptRun("run_other")).resolves.toBe(false);
     await expect(controller.abortPromptRun("run_active")).resolves.toBe(true);
 
     expect(cancelled).toEqual([{ reason: "run aborted", runId: "run_active" }]);
     expect(cleared).toEqual(["run_active"]);
+  });
+
+  it("tracks and aborts active runs independently by session", async () => {
+    const cancelled: string[] = [];
+    const controller = new InProcessRuntimeController({
+      clearPendingPermissionsForRun: (): Promise<void> => Promise.resolve(),
+      createRuntime: (): Promise<UiRuntimeComposition> =>
+        Promise.resolve(
+          runtime({
+            interruptRunTree(runId): Promise<void> {
+              cancelled.push(runId);
+              return Promise.resolve();
+            },
+          }),
+        ),
+      publishNotice: (): void => undefined,
+      updateStatus: (): Promise<void> => Promise.resolve(),
+    });
+    controller.setActiveRunId("run_1", "session_1");
+    controller.setActiveRunId("run_2", "session_2");
+
+    expect(controller.getActiveRunId()).toBeUndefined();
+    expect(controller.getActiveRunId("session_1")).toBe("run_1");
+    await expect(controller.abortPromptRun("run_2")).resolves.toBe(true);
+    expect(cancelled).toEqual(["run_2"]);
   });
 
   it("disposes the old runtime before creating a replacement", async (): Promise<void> => {

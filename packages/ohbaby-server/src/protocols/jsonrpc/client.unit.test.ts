@@ -69,6 +69,144 @@ function requireStringBody(init: RequestInit | undefined): string {
 }
 
 describe("createRemoteUiBackendClient", () => {
+  it("throws remote structured errors with their stable fields intact", async () => {
+    const client = createRemoteUiBackendClient({
+      clientId: "client_1",
+      fetch: () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              error: {
+                code: "QUEUE_FULL",
+                limit: 100,
+                message: "queue full",
+                retryable: true,
+                source: "scheduler",
+              },
+              id: "rpc_failure",
+              ok: false,
+            }),
+            { headers: { "content-type": "application/json" }, status: 200 },
+          ),
+        ),
+      port: 4096,
+      startupIntent: undefined,
+    });
+
+    await expect(client.submitPromptAccepted("overflow")).rejects.toMatchObject(
+      {
+        code: "QUEUE_FULL",
+        limit: 100,
+        retryable: true,
+        source: "scheduler",
+      },
+    );
+  });
+
+  it("uses additive prompt admission and mutation RPC methods", async () => {
+    const methods: string[] = [];
+    const fetchImpl = vi.fn(
+      (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const body = JSON.parse(requireStringBody(init)) as {
+          readonly id: string;
+          readonly method: string;
+        };
+        methods.push(body.method);
+        const prompt = {
+          clientRequestId: "request_1",
+          createdAt: "2026-06-12T00:00:00.000Z",
+          promptId: "prompt_1",
+          scopeKey: "/repo-a",
+          sessionId: "session_1",
+          status: body.method === "cancelQueuedPrompt" ? "cancelled" : "queued",
+          text: "edited",
+          updatedAt: "2026-06-12T00:00:01.000Z",
+          userMessageId: "message_1",
+        } as const;
+        const result =
+          body.method === "submitPromptAccepted"
+            ? {
+                createdAt: prompt.createdAt,
+                clientRequestId: prompt.clientRequestId,
+                promptId: prompt.promptId,
+                sessionId: prompt.sessionId,
+                status: "queued",
+                userMessageId: prompt.userMessageId,
+              }
+            : body.method === "acquirePromptEditLease" ||
+                body.method === "renewPromptEditLease"
+              ? {
+                  editLeaseId: "lease_1",
+                  expiresAt: "2026-06-12T00:01:00.000Z",
+                  ownerClientId: "client_1",
+                  prompt,
+                }
+              : body.method === "waitForPrompt"
+                ? { prompt: { ...prompt, status: "cancelled" } }
+                : body.method === "initializeClient"
+                  ? undefined
+                  : prompt;
+        return Promise.resolve(
+          new Response(JSON.stringify({ id: body.id, ok: true, result }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          }),
+        );
+      },
+    );
+    const client = createRemoteUiBackendClient({
+      clientId: "client_1",
+      fetch: fetchImpl,
+      port: 4096,
+    });
+
+    const receipt = await client.submitPromptAccepted("first", {
+      clientRequestId: "request_1",
+      sessionId: "session_1",
+    });
+    const lease = await client.acquirePromptEditLease({
+      ownerClientId: "client_1",
+      promptId: receipt.promptId,
+    });
+    await client.renewPromptEditLease({
+      editLeaseId: lease.editLeaseId,
+      ownerClientId: "client_1",
+      promptId: receipt.promptId,
+    });
+    await client.releasePromptEditLease({
+      editLeaseId: lease.editLeaseId,
+      promptId: receipt.promptId,
+    });
+    await client.acquirePromptEditLease({
+      ownerClientId: "client_1",
+      promptId: receipt.promptId,
+    });
+    await client.editQueuedPrompt({
+      editLeaseId: "lease_1",
+      promptId: receipt.promptId,
+      text: "edited",
+    });
+    await client.cancelQueuedPrompt({
+      promptId: receipt.promptId,
+    });
+    await expect(client.waitForPrompt(receipt.promptId)).resolves.toMatchObject(
+      {
+        prompt: { promptId: "prompt_1", status: "cancelled" },
+      },
+    );
+    expect(methods).toEqual([
+      "initializeClient",
+      "submitPromptAccepted",
+      "acquirePromptEditLease",
+      "renewPromptEditLease",
+      "releasePromptEditLease",
+      "acquirePromptEditLease",
+      "editQueuedPrompt",
+      "cancelQueuedPrompt",
+      "waitForPrompt",
+    ]);
+  });
+
   it("sends JSON-RPC requests with auth and returns snapshots", async () => {
     const requests: {
       readonly body: Record<string, unknown>;

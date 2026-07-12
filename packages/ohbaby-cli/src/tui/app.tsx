@@ -1,5 +1,5 @@
 import { Text, useApp, useInput, useStdout } from "ink";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type {
   CoreAPI,
@@ -102,6 +102,15 @@ export function OhbabyTerminalApp({
   );
   const permission = useTuiStoreSelector(store, (state) => state.permission);
   const permissions = useTuiStoreSelector(store, (state) => state.permissions);
+  const prompts = useTuiStoreSelector(store, (state) => state.prompts);
+  const queuedPrompts = useMemo(
+    () =>
+      prompts.filter(
+        (prompt) =>
+          prompt.sessionId === activeSessionId && prompt.status === "queued",
+      ),
+    [activeSessionId, prompts],
+  );
   const runtime = useTuiStoreSelector(store, (state) => state.runtime);
   const hasBackendDialog = permissions.length > 0 || interactions.length > 0;
   const hasDialog = hasBackendDialog || commandPanel !== null;
@@ -634,6 +643,7 @@ export function OhbabyTerminalApp({
           loadCatalog={loadCatalog}
           onCommandPanelOpen={openCommandPanel}
           permission={permission}
+          queuedPrompts={queuedPrompts}
           contextWindowUsage={contextWindowUsageLabel}
           runtimeStatusLabel={runtimeStatusLabel}
         />

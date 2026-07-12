@@ -70,6 +70,43 @@ describe("createDatabaseRunLedger", () => {
     });
   });
 
+  it("persists structured failure details and tolerates corrupt legacy data", async () => {
+    const ledger = createDatabaseRunLedger({ now: createClock() });
+    await ledger.createPending({
+      runId: "run_failed",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+    await ledger.markRunning("run_failed");
+    await expect(
+      ledger.markFailed("run_failed", "rate limited", {
+        code: "PROVIDER_HTTP_429",
+        message: "rate limited",
+        retryable: true,
+        source: "provider",
+        statusCode: 429,
+      }),
+    ).resolves.toMatchObject({
+      error: "rate limited",
+      errorData: {
+        code: "PROVIDER_HTTP_429",
+        retryable: true,
+        statusCode: 429,
+      },
+    });
+
+    getDatabase()
+      .prepare(
+        `UPDATE ${schema.runLedger.tableName}
+         SET error_data = 'not-json' WHERE run_id = 'run_failed'`,
+      )
+      .run();
+    await expect(ledger.get("run_failed")).resolves.toMatchObject({
+      error: "rate limited",
+      errorData: undefined,
+    });
+  });
+
   it("rejects duplicate ids, missing records, and invalid transitions", async () => {
     const ledger = createDatabaseRunLedger({ now: createClock() });
     await ledger.createPending({

@@ -332,9 +332,17 @@ describe("ohbaby-web daemon client", () => {
       },
     });
 
-    await runtime.client.submitPrompt({ sessionId: "session_1", text: "hi" });
+    await runtime.client.submitPrompt({
+      clientRequestId: "request_1",
+      sessionId: "session_1",
+      text: "hi",
+    });
     expect(requests.at(-1)).toMatchObject({
-      body: JSON.stringify({ sessionId: "session_1", text: "hi" }),
+      body: JSON.stringify({
+        clientRequestId: "request_1",
+        sessionId: "session_1",
+        text: "hi",
+      }),
       method: "POST",
       url: "http://127.0.0.1:4096/v1/prompts",
     });

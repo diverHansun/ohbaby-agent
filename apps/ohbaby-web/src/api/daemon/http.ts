@@ -13,6 +13,8 @@ import type {
   PermissionResponseRequest,
   PermissionStateResponse,
   PromptAcceptedResponse,
+  PromptLeaseResponse,
+  PromptMutationResponse,
   RegisterClientResponse,
   SearchApiKeyRequest,
   SearchApiKeyResponse,
@@ -162,6 +164,54 @@ export class DaemonHttpClient {
     });
   }
 
+  acquirePromptEditLease(promptId: string): Promise<PromptLeaseResponse> {
+    return this.request(
+      `/v1/prompts/${encodeURIComponent(promptId)}/edit-lease`,
+      { method: "POST" },
+    );
+  }
+
+  renewPromptEditLease(
+    promptId: string,
+    editLeaseId: string,
+  ): Promise<PromptLeaseResponse> {
+    return this.request(
+      `/v1/prompts/${encodeURIComponent(promptId)}/edit-lease`,
+      { body: { editLeaseId }, method: "PATCH" },
+    );
+  }
+
+  releasePromptEditLease(
+    promptId: string,
+    editLeaseId: string,
+  ): Promise<PromptMutationResponse> {
+    return this.request(
+      `/v1/prompts/${encodeURIComponent(promptId)}/edit-lease`,
+      { body: { editLeaseId }, method: "DELETE" },
+    );
+  }
+
+  editQueuedPrompt(
+    promptId: string,
+    editLeaseId: string,
+    text: string,
+  ): Promise<PromptMutationResponse> {
+    return this.request(`/v1/prompts/${encodeURIComponent(promptId)}`, {
+      body: { editLeaseId, text },
+      method: "PATCH",
+    });
+  }
+
+  cancelQueuedPrompt(
+    promptId: string,
+    editLeaseId?: string,
+  ): Promise<PromptMutationResponse> {
+    return this.request(`/v1/prompts/${encodeURIComponent(promptId)}`, {
+      body: editLeaseId === undefined ? {} : { editLeaseId },
+      method: "DELETE",
+    });
+  }
+
   respondPermission(
     requestId: string,
     response: PermissionResponseRequest,
@@ -242,7 +292,7 @@ export class DaemonHttpClient {
     options: {
       readonly body?: unknown;
       readonly includeDirectory?: boolean;
-      readonly method?: "GET" | "PATCH" | "POST";
+      readonly method?: "DELETE" | "GET" | "PATCH" | "POST";
     } = {},
   ): Promise<T> {
     const headers: Record<string, string> = {

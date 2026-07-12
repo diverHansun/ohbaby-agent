@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  DaemonPromptQueue,
   InstanceStore,
   PermissionRouter,
   createDaemonAuthToken,
@@ -17,7 +16,6 @@ describe("ohbaby-server public API", () => {
   it("exports explicit server and remote entrypoints", () => {
     expect(createDaemonAuthToken).toBeTypeOf("function");
     expect(daemonAuthHeader).toBeTypeOf("function");
-    expect(DaemonPromptQueue).toBeTypeOf("function");
     expect(InstanceStore).toBeTypeOf("function");
     expect(PermissionRouter).toBeTypeOf("function");
     expect(createRemoteCoreApiHost).toBeTypeOf("function");

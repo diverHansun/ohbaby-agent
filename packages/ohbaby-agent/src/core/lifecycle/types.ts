@@ -87,7 +87,8 @@ export type AgentTerminalReason =
   | "provider_retry_exhausted"
   | "provider_stream_interrupted"
   | "tool_parse_failure"
-  | "context_overflow";
+  | "context_overflow"
+  | "output_length";
 
 export type LifecycleEvent =
   | {
@@ -210,6 +211,8 @@ export interface LifecycleResult {
   readonly finishReason: ChatFinishReason | "error";
   readonly finalResponse: string;
   readonly terminalReason?: AgentTerminalReason;
+  /** In-memory only; consumers must normalize and redact before persistence. */
+  readonly failureCause?: unknown;
   readonly toolCalls?: readonly ParsedToolCall[];
   readonly usage?: {
     readonly inputTokens: number;

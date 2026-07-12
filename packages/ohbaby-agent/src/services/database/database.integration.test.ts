@@ -16,6 +16,7 @@ import {
   type MigrationDefinition,
   type SyncTransactionCallback,
 } from "./index.js";
+import { INITIAL_MIGRATIONS } from "./migrations.js";
 
 const cleanupPaths: string[] = [];
 
@@ -95,7 +96,76 @@ describe("services/database", () => {
       { version: "011_subagent_instance_owner" },
       { version: "012_subagent_instance_current_input" },
       { version: "013_workspace_registry" },
+      { version: "014_prompt_submission" },
+      { version: "015_prompt_submission_idempotency_lease" },
     ]);
+  });
+
+  it("upgrades a real 014 prompt submission fixture with idempotency and lease columns", async () => {
+    const dbPath = await tempDbPath();
+    const through014 = INITIAL_MIGRATIONS.filter(
+      (migration) => migration.version <= "014_prompt_submission",
+    );
+    initDatabase({ dbPath, migrations: through014 });
+    const db = getDatabase();
+    db.prepare(
+      `INSERT INTO session
+        (id, project_id, project_root, title, status, created_at, updated_at, data)
+       VALUES ('session_legacy', 'project', '/repo', 'Legacy', 'active', 1, 1, '{}')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO prompt_submission
+        (prompt_id, scope_key, session_id, user_message_id, text, status,
+         created_at, updated_at)
+       VALUES ('prompt_legacy', '/repo', 'session_legacy', 'message_legacy',
+               'legacy text', 'queued', 2, 2)`,
+    ).run();
+
+    closeDatabase();
+    initDatabase({ dbPath });
+
+    expect(
+      getDatabase()
+        .prepare<{
+          client_request_id: string;
+          edit_lease_expires_at: number | null;
+          edit_lease_id: string | null;
+          edit_lease_owner_id: string | null;
+        }>(
+          `SELECT client_request_id, edit_lease_id, edit_lease_owner_id,
+                  edit_lease_expires_at
+           FROM prompt_submission WHERE prompt_id = 'prompt_legacy'`,
+        )
+        .get(),
+    ).toEqual({
+      client_request_id: "legacy:prompt_legacy",
+      edit_lease_expires_at: null,
+      edit_lease_id: null,
+      edit_lease_owner_id: null,
+    });
+
+    const legacyInsert = getDatabase().prepare(
+      `INSERT INTO prompt_submission
+        (prompt_id, scope_key, session_id, user_message_id, text, status,
+         created_at, updated_at)
+       VALUES (?, '/repo', 'session_legacy', ?, ?, 'queued', ?, ?)`,
+    );
+    expect(() => {
+      legacyInsert.run(
+        "prompt_rollback_1",
+        "message_rollback_1",
+        "rollback one",
+        3,
+        3,
+      );
+      legacyInsert.run(
+        "prompt_rollback_2",
+        "message_rollback_2",
+        "rollback two",
+        4,
+        4,
+      );
+    }).not.toThrow();
   });
 
   it("creates physical message context-scope columns and indexes", async () => {

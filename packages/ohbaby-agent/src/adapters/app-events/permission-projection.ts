@@ -17,7 +17,7 @@ export type UiPermissionState = NonNullable<UiSnapshot["permission"]>;
 export interface StartPermissionEventProjectionOptions {
   readonly bus: BusInstance;
   readonly currentPermissionState: () => UiPermissionState;
-  readonly getActiveRunId: () => string | undefined;
+  readonly getActiveRunId: (sessionId?: string) => string | undefined;
   readonly now: () => number;
   readonly pendingPermissionSessions: Map<string, string>;
   readonly publish: (event: UiEvent) => void;
@@ -78,7 +78,7 @@ export function startPermissionEventProjection(
           info,
           // Legacy fallback: before run ownership is moved to the bus, no active
           // run stores callId in the request runId field for compatibility only.
-          runId: options.getActiveRunId() ?? info.callId,
+          runId: options.getActiveRunId(info.sessionId) ?? info.callId,
         });
         options.pendingPermissionSessions.set(info.id, info.sessionId);
         await options.stateStore.upsertPermission(request);

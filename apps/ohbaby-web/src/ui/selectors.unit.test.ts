@@ -57,6 +57,34 @@ function baseSnapshot(): UiSnapshot {
 }
 
 describe("ohbaby-web ui selectors", () => {
+  it("selects only queued prompts for the active session", () => {
+    const prompt = {
+      clientRequestId: "request_1",
+      createdAt: timestamp,
+      promptId: "prompt_1",
+      scopeKey: "/repo",
+      sessionId: "session_1",
+      status: "queued" as const,
+      text: "queued",
+      updatedAt: timestamp,
+      userMessageId: "message_1",
+    };
+    const view = selectViewModel(
+      store({
+        ...baseSnapshot(),
+        prompts: [
+          prompt,
+          { ...prompt, promptId: "prompt_2", sessionId: "session_2" },
+          { ...prompt, promptId: "prompt_3", status: "starting" },
+        ],
+      }),
+    );
+
+    expect(view.queuedPrompts.map((item) => item.promptId)).toEqual([
+      "prompt_1",
+    ]);
+  });
+
   it("projects header and composer state from the daemon snapshot", () => {
     const view = selectViewModel(store(baseSnapshot()));
 

@@ -13,6 +13,7 @@ import type {
   RunWorkerResult,
 } from "./types.js";
 import { RunWorker } from "./worker.js";
+import { normalizeRunError } from "./error-detail.js";
 
 const ACTIVE_STATUSES = new Set<RunStatus>(["pending", "running"]);
 
@@ -41,6 +42,7 @@ function cloneRunRecord(record: RunRecord): RunRecord {
     startedAt: record.startedAt,
     endedAt: record.endedAt,
     error: record.error,
+    errorData: record.errorData,
     terminalReason: record.terminalReason,
   };
 }
@@ -71,6 +73,7 @@ function completionFromResult(result: RunWorkerResult): RunCompletion {
   return {
     status: result.status,
     error: result.error,
+    ...(result.errorData === undefined ? {} : { errorData: result.errorData }),
     ...(terminalReason === undefined ? {} : { terminalReason }),
     ...(usage === undefined ? {} : { usage }),
   };
@@ -253,6 +256,9 @@ export class RunManager {
         error: record.abortController.signal.aborted
           ? (record.cancelReason ?? "run cancelled")
           : errorToMessage(error),
+        ...(record.abortController.signal.aborted
+          ? {}
+          : { errorData: normalizeRunError(error) }),
       };
     }
 
@@ -275,6 +281,7 @@ export class RunManager {
       record.status = outcome.status;
       record.endedAt = this.now();
       record.error = outcome.error ?? errorToMessage(error);
+      record.errorData = outcome.errorData;
       record.terminalReason =
         outcome.terminalReason ?? outcome.result?.terminalReason;
     } finally {
@@ -310,6 +317,7 @@ export class RunManager {
     return this.deps.runLedger.markFailed(
       record.runId,
       outcome.error ?? "run failed",
+      outcome.errorData,
     );
   }
 
@@ -321,6 +329,7 @@ export class RunManager {
     record.startedAt = ledgerRecord.startedAt;
     record.endedAt = ledgerRecord.endedAt;
     record.error = ledgerRecord.error;
+    record.errorData = ledgerRecord.errorData;
   }
 
   private publishRunUpdated(record: RunRecord): void {

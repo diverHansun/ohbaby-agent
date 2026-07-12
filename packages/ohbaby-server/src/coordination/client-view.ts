@@ -5,7 +5,7 @@ import type {
   UiSnapshot,
 } from "ohbaby-sdk";
 import type { DaemonStartupIntent } from "../protocols/jsonrpc/protocol.js";
-import type { DaemonPromptQueueItem } from "./prompt-queue.js";
+import type { DaemonPromptItem } from "./prompt-backend.js";
 
 interface ClientView {
   activeSessionId?: string | null;
@@ -106,27 +106,44 @@ function statusForClientSnapshot(
   snapshot: UiSnapshot,
   activeSessionId: string | null,
 ): UiSnapshot["status"] {
-  const status = snapshot.status;
   if (activeSessionId === null) {
     return { kind: "idle" };
   }
-  if (status.kind === "running") {
-    const run = snapshot.runs.find(
-      (candidate) => candidate.id === status.runId,
+  const selectedRuns = snapshot.runs.filter(
+    (run) => run.sessionId === activeSessionId,
+  );
+  if (snapshot.status.kind === "waiting-for-permission") {
+    const requestId = snapshot.status.requestId;
+    const selectedPermission = snapshot.permissions.find(
+      (permission) =>
+        permission.id === requestId &&
+        selectedRuns.some((run) => run.id === permission.runId),
     );
-    return run?.sessionId === activeSessionId ? status : { kind: "idle" };
+    if (selectedPermission) {
+      return snapshot.status;
+    }
   }
-  if (status.kind === "waiting-for-permission") {
-    const permission = snapshot.permissions.find(
-      (candidate) => candidate.id === status.requestId,
-    );
-    const run =
-      permission === undefined
-        ? undefined
-        : snapshot.runs.find((candidate) => candidate.id === permission.runId);
-    return run?.sessionId === activeSessionId ? status : { kind: "idle" };
+  const orderedRuns = [...selectedRuns].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  );
+  const activeRun = orderedRuns.find(
+    (run) =>
+      run.status.kind === "running" ||
+      run.status.kind === "waiting-for-permission",
+  );
+  if (activeRun) {
+    return activeRun.status;
   }
-  return status;
+  const latestRun = orderedRuns.at(0);
+  if (latestRun) {
+    return latestRun.status;
+  }
+  const hasRunScopedError = snapshot.runs.some(
+    (run) => run.status.kind === "error",
+  );
+  return snapshot.status.kind === "error" && !hasRunScopedError
+    ? snapshot.status
+    : { kind: "idle" };
 }
 
 function projectSnapshotForClient(
@@ -154,6 +171,13 @@ function projectSnapshotForClient(
           ),
         }),
     permissions: permissionsForClientSnapshot(snapshot, activeSessionId),
+    ...(snapshot.prompts === undefined
+      ? {}
+      : {
+          prompts: snapshot.prompts.filter(
+            (prompt) => prompt.sessionId === activeSessionId,
+          ),
+        }),
     runs: snapshot.runs.filter((run) => run.sessionId === activeSessionId),
     sessions: snapshot.sessions.map((session) =>
       session.id === activeSessionId ? session : { ...session, messages: [] },
@@ -229,6 +253,9 @@ function sessionIdForEvent(event: UiEvent): string | undefined {
       return event.sessionId;
     case "run.updated":
       return event.run.sessionId;
+    case "prompt.submitted":
+    case "prompt.updated":
+      return event.prompt.sessionId;
     case "context.window.updated":
       return event.usage.sessionId;
     default:
@@ -242,7 +269,8 @@ export class DaemonClientViewCoordinator {
   private readonly commandOwnersByRunId = new Map<string, string>();
   private readonly runOwnersByRunId = new Map<string, string>();
   private readonly runSessionIdsByRunId = new Map<string, string>();
-  private activePrompt: DaemonPromptQueueItem | undefined;
+  private readonly activePromptsBySession = new Map<string, DaemonPromptItem>();
+  private activePrompt: DaemonPromptItem | undefined;
 
   initializeClient(
     clientId: string,
@@ -259,6 +287,19 @@ export class DaemonClientViewCoordinator {
 
   projectSnapshot(clientId: string, snapshot: UiSnapshot): UiSnapshot {
     return projectSnapshotForClient(snapshot, this.clientViews.get(clientId));
+  }
+
+  canAccessPrompt(
+    clientId: string,
+    snapshot: UiSnapshot,
+    promptId: string,
+  ): boolean {
+    return (
+      projectSnapshotForClient(
+        snapshot,
+        this.clientViews.get(clientId),
+      ).prompts?.some((prompt) => prompt.promptId === promptId) === true
+    );
   }
 
   preparePromptSubmit(
@@ -301,13 +342,22 @@ export class DaemonClientViewCoordinator {
     return prepared;
   }
 
-  promptStarted(item: DaemonPromptQueueItem): void {
+  promptStarted(item: DaemonPromptItem): void {
     this.activePrompt = item;
+    if (item.sessionId !== undefined) {
+      this.activePromptsBySession.set(item.sessionId, item);
+    }
   }
 
-  promptSettled(item: DaemonPromptQueueItem): void {
+  promptSettled(item: DaemonPromptItem): void {
     if (this.activePrompt === item) {
       this.activePrompt = undefined;
+    }
+    if (
+      item.sessionId !== undefined &&
+      this.activePromptsBySession.get(item.sessionId) === item
+    ) {
+      this.activePromptsBySession.delete(item.sessionId);
     }
   }
 
@@ -354,12 +404,14 @@ export class DaemonClientViewCoordinator {
       }
       case "run.updated": {
         this.runSessionIdsByRunId.set(event.run.id, event.run.sessionId);
+        const activePrompt =
+          this.activePromptsBySession.get(event.run.sessionId) ??
+          this.activePrompt;
         if (
-          this.activePrompt?.sessionId === event.run.sessionId ||
-          (this.activePrompt?.sessionId === undefined &&
-            this.activePrompt !== undefined)
+          activePrompt?.sessionId === event.run.sessionId ||
+          (activePrompt?.sessionId === undefined && activePrompt !== undefined)
         ) {
-          this.runOwnersByRunId.set(event.run.id, this.activePrompt.clientId);
+          this.runOwnersByRunId.set(event.run.id, activePrompt.clientId);
         }
         if (
           event.run.status.kind !== "running" &&
@@ -442,6 +494,7 @@ export class DaemonClientViewCoordinator {
 
   resetRuntimeState(): void {
     this.activePrompt = undefined;
+    this.activePromptsBySession.clear();
     this.runOwnersByRunId.clear();
     this.runSessionIdsByRunId.clear();
   }

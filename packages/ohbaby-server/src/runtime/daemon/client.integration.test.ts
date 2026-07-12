@@ -542,6 +542,7 @@ describe("createRemoteUiBackendClient", () => {
     expect(backend.calls).toEqual([
       { args: [], method: "getSnapshot" },
       { args: [], method: "getSnapshot" },
+      { args: [], method: "getSnapshot" },
       { args: [contextInput], method: "getContextWindowUsage" },
       { args: [listQuery], method: "listCommands" },
       {

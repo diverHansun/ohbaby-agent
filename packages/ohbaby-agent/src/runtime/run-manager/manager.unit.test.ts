@@ -1366,6 +1366,12 @@ describe("RunManager", () => {
     ).resolves.toEqual({
       status: "failed",
       error: "lifecycle exploded",
+      errorData: {
+        code: "RUNTIME_ERROR",
+        message: "lifecycle exploded",
+        retryable: false,
+        source: "runtime",
+      },
     });
     expect(failing.manager.list("session_1")).toEqual([]);
 
@@ -1403,6 +1409,13 @@ describe("RunManager", () => {
     await expect(manager.waitForCompletion(failed.runId)).resolves.toEqual({
       status: "failed",
       error: "Context overflow after forced compaction retry",
+      errorData: {
+        code: "CONTEXT_OVERFLOW",
+        message: "Context overflow after forced compaction retry",
+        retryable: false,
+        source: "runtime",
+        terminalReason: "context_overflow",
+      },
       terminalReason: "context_overflow",
     });
     expect(

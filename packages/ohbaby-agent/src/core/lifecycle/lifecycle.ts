@@ -3,7 +3,9 @@ import {
   ProviderRetryExhaustedError,
   ProviderStreamInterruptedError,
   ToolCallParseError,
+  isRetryableProviderError,
   streamChatCompletion,
+  providerErrorStatus,
 } from "../llm-client/index.js";
 import type {
   ChatCompletionMessage,
@@ -34,6 +36,8 @@ import type {
 export const DEFAULT_MAX_STEPS = 1000;
 const MAX_STEPS_FINALIZATION_TOOL_MESSAGE =
   "Max steps reached and finalization response still requested tools.";
+const OUTPUT_LENGTH_MESSAGE =
+  "Model output reached the configured token limit before completion.";
 
 interface ResolvedToolCall {
   readonly id: string;
@@ -306,12 +310,38 @@ async function markAssistantMessageError(
   if (message?.role !== "assistant") {
     return;
   }
+  const failure = providerFailure(error);
+  const statusCode = providerErrorStatus(error);
+  const providerMessage =
+    failure?.finalResponse ??
+    (statusCode === 401 || statusCode === 403
+      ? `LLM provider authentication failed (HTTP ${String(statusCode)})`
+      : statusCode === 429
+        ? "LLM provider rate limit was exceeded (HTTP 429)"
+        : undefined);
+  const messageError =
+    statusCode === 401 || statusCode === 403
+      ? {
+          name: "ProviderAuthError" as const,
+          providerId: "unknown",
+          message:
+            providerMessage ?? "LLM provider authentication failed (HTTP 401)",
+        }
+      : providerMessage !== undefined
+        ? {
+            name: "APIError" as const,
+            message: providerMessage,
+            ...(statusCode === undefined ? {} : { statusCode }),
+            isRetryable:
+              failure !== undefined || isRetryableProviderError(error),
+          }
+        : {
+            name: "Unknown" as const,
+            message: getErrorMessage(error),
+          };
   await messageManager.updateMessage(message.id, {
     finish: "error",
-    error: {
-      name: "Unknown",
-      message: getErrorMessage(error),
-    },
+    error: messageError,
     time: {
       ...message.time,
       completed: Date.now(),
@@ -450,6 +480,7 @@ export class Lifecycle {
           });
           return {
             success: false,
+            failureCause: error,
             finishReason: "error",
             finalResponse,
             terminalReason: failure.terminalReason,
@@ -513,6 +544,7 @@ export class Lifecycle {
             });
             return {
               success: false,
+              failureCause: retryError,
               finishReason: "error",
               finalResponse,
               terminalReason: failure.terminalReason,
@@ -619,6 +651,30 @@ export class Lifecycle {
           finishReason: "error",
           finalResponse,
           terminalReason: "cancelled",
+          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+          usage,
+        };
+      }
+
+      if (finalEvent.finishReason === "length") {
+        await markAssistantMessageError(
+          this.deps.messageManager,
+          assistantMessage,
+          new Error(OUTPUT_LENGTH_MESSAGE),
+        );
+        yield this.createTurnEndEvent({
+          contextScopeId: params.contextScopeId,
+          finalResponse: OUTPUT_LENGTH_MESSAGE,
+          finishReason: "error",
+          prepared,
+          sessionId: params.sessionId,
+          step,
+        });
+        return {
+          success: false,
+          finishReason: "error",
+          finalResponse: OUTPUT_LENGTH_MESSAGE,
+          terminalReason: "output_length",
           toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
           usage,
         };

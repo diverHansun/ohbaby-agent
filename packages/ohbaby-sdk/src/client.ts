@@ -27,8 +27,20 @@ import type {
   UiPermissionMode,
   UiPermissionState,
 } from "./snapshot.js";
+import type {
+  UiCancelQueuedPromptInput,
+  UiAcquirePromptEditLeaseInput,
+  UiEditQueuedPromptInput,
+  UiPromptCompletion,
+  UiPromptReceipt,
+  UiPromptEditLease,
+  UiReleasePromptEditLeaseInput,
+  UiRenewPromptEditLeaseInput,
+  UiPromptSubmission,
+} from "./prompt.js";
 
 export interface SubmitPromptOptions {
+  readonly clientRequestId?: string;
   readonly sessionId?: string;
 }
 
@@ -79,4 +91,29 @@ export interface UiBackendClient {
     response: UiInteractionResponse,
   ): Promise<void>;
   abortRun(runId?: string): Promise<void>;
+}
+
+/**
+ * Durable prompt admission is additive while embedded callers retain the
+ * legacy submit-and-wait contract on UiBackendClient.submitPrompt().
+ */
+export interface UiPromptQueueClient extends UiBackendClient {
+  submitPromptAccepted(
+    text: string,
+    options?: SubmitPromptOptions,
+  ): Promise<UiPromptReceipt>;
+  editQueuedPrompt(input: UiEditQueuedPromptInput): Promise<UiPromptSubmission>;
+  cancelQueuedPrompt(
+    input: UiCancelQueuedPromptInput,
+  ): Promise<UiPromptSubmission>;
+  acquirePromptEditLease(
+    input: UiAcquirePromptEditLeaseInput,
+  ): Promise<UiPromptEditLease>;
+  renewPromptEditLease(
+    input: UiRenewPromptEditLeaseInput,
+  ): Promise<UiPromptEditLease>;
+  releasePromptEditLease(
+    input: UiReleasePromptEditLeaseInput,
+  ): Promise<UiPromptSubmission>;
+  waitForPrompt(promptId: string): Promise<UiPromptCompletion>;
 }

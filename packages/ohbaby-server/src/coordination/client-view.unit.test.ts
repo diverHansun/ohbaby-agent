@@ -86,6 +86,30 @@ function snapshotWithSessions(): UiSnapshot {
         title: "Tool permission",
       },
     ],
+    prompts: [
+      {
+        clientRequestId: "request_1",
+        createdAt: timestamp,
+        promptId: "prompt_1",
+        scopeKey: "/repo",
+        sessionId: "session_1",
+        status: "queued",
+        text: "first",
+        updatedAt: timestamp,
+        userMessageId: "prompt_message_1",
+      },
+      {
+        clientRequestId: "request_2",
+        createdAt: timestamp,
+        promptId: "prompt_2",
+        scopeKey: "/repo",
+        sessionId: "session_2",
+        status: "queued",
+        text: "second",
+        updatedAt: timestamp,
+        userMessageId: "prompt_message_2",
+      },
+    ],
     runs: [
       {
         id: "run_1",
@@ -174,9 +198,7 @@ type ExecuteCommandInvocation = Parameters<
   UiBackendClient["executeCommand"]
 >[0];
 
-function commandInvocation(
-  commandId = "status",
-): ExecuteCommandInvocation {
+function commandInvocation(commandId = "status"): ExecuteCommandInvocation {
   return {
     argv: [],
     clientInvocationId: "invoke_1",
@@ -189,6 +211,91 @@ function commandInvocation(
 }
 
 describe("DaemonClientViewCoordinator", () => {
+  it("only grants prompt access within the client's selected session", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    const snapshot = snapshotWithSessions();
+    coordinator.initializeClient("client_1", snapshot, {
+      resumeSessionId: "session_1",
+    });
+
+    expect(coordinator.canAccessPrompt("client_1", snapshot, "prompt_1")).toBe(
+      true,
+    );
+    expect(coordinator.canAccessPrompt("client_1", snapshot, "prompt_2")).toBe(
+      false,
+    );
+  });
+
+  it("does not project a run-scoped error into another selected session", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    const base = snapshotWithSessions();
+    const snapshot: UiSnapshot = {
+      ...base,
+      runs: base.runs.map((run) =>
+        run.sessionId === "session_1"
+          ? {
+              ...run,
+              status: {
+                kind: "error",
+                message: "session 1 failed",
+                recoverable: true,
+              },
+            }
+          : run,
+      ),
+      status: {
+        kind: "error",
+        message: "session 1 failed",
+        recoverable: true,
+      },
+    };
+    coordinator.initializeClient("client_2", snapshot, {
+      resumeSessionId: "session_2",
+    });
+
+    expect(coordinator.projectSnapshot("client_2", snapshot).status).toEqual({
+      kind: "running",
+      runId: "run_2",
+    });
+  });
+
+  it("does not resurrect an older error after the same session later succeeds", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    const base = snapshotWithSessions();
+    const snapshot: UiSnapshot = {
+      ...base,
+      permissions: [],
+      runs: [
+        {
+          id: "run_failed",
+          sessionId: "session_1",
+          startedAt: timestamp,
+          status: {
+            kind: "error",
+            message: "old failure",
+            recoverable: true,
+          },
+          updatedAt: "2026-06-12T00:00:01.000Z",
+        },
+        {
+          id: "run_succeeded",
+          sessionId: "session_1",
+          startedAt: timestamp,
+          status: { kind: "idle" },
+          updatedAt: "2026-06-12T00:00:02.000Z",
+        },
+      ],
+      status: { kind: "idle" },
+    };
+    coordinator.initializeClient("client_1", snapshot, {
+      resumeSessionId: "session_1",
+    });
+
+    expect(coordinator.projectSnapshot("client_1", snapshot).status).toEqual({
+      kind: "idle",
+    });
+  });
+
   it("projects snapshots to the initialized active session", () => {
     const coordinator = new DaemonClientViewCoordinator();
     const snapshot = snapshotWithSessions();
@@ -206,7 +313,10 @@ describe("DaemonClientViewCoordinator", () => {
       runs: [{ id: "run_1" }],
       status: { kind: "running", runId: "run_1" },
       sessions: [
-        { id: "session_1", messages: [textMessage("message_1", "current transcript")] },
+        {
+          id: "session_1",
+          messages: [textMessage("message_1", "current transcript")],
+        },
         { id: "session_2", messages: [] },
       ],
     });
@@ -226,9 +336,9 @@ describe("DaemonClientViewCoordinator", () => {
       startupSessionMode: { type: "continue" },
     });
 
-    expect(coordinator.projectSnapshot("client_a", snapshot).activeSessionId).toBe(
-      "session_newer",
-    );
+    expect(
+      coordinator.projectSnapshot("client_a", snapshot).activeSessionId,
+    ).toBe("session_newer");
   });
 
   it("generates an explicit session for fresh prompt submissions", () => {
@@ -273,7 +383,10 @@ describe("DaemonClientViewCoordinator", () => {
       ),
     ).toEqual(messageAppended("session_1"));
     expect(
-      coordinator.routeEventForClient(messageAppended("session_1"), "client_fresh"),
+      coordinator.routeEventForClient(
+        messageAppended("session_1"),
+        "client_fresh",
+      ),
     ).toBeUndefined();
   });
 
@@ -282,9 +395,9 @@ describe("DaemonClientViewCoordinator", () => {
 
     coordinator.prepareCommandInvocation("client_a", commandInvocation());
 
-    expect(coordinator.routeEventForClient(commandResult(), "client_a")).toEqual(
-      commandResult(),
-    );
+    expect(
+      coordinator.routeEventForClient(commandResult(), "client_a"),
+    ).toEqual(commandResult());
     expect(
       coordinator.routeEventForClient(commandResult(), "client_b"),
     ).toBeUndefined();
@@ -306,15 +419,18 @@ describe("DaemonClientViewCoordinator", () => {
     coordinator.initializeClient("client_b", snapshot, {
       resumeSessionId: "session_1",
     });
-    coordinator.prepareCommandInvocation("client_a", commandInvocation("sessions"));
+    coordinator.prepareCommandInvocation(
+      "client_a",
+      commandInvocation("sessions"),
+    );
     coordinator.observeEvent(commandSessionSelected("session_2"));
 
-    expect(coordinator.projectSnapshot("client_a", snapshot).activeSessionId).toBe(
-      "session_2",
-    );
-    expect(coordinator.projectSnapshot("client_b", snapshot).activeSessionId).toBe(
-      "session_1",
-    );
+    expect(
+      coordinator.projectSnapshot("client_a", snapshot).activeSessionId,
+    ).toBe("session_2");
+    expect(
+      coordinator.projectSnapshot("client_b", snapshot).activeSessionId,
+    ).toBe("session_1");
   });
 
   it("routes runtime updates only to clients that own the run session", () => {

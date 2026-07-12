@@ -349,7 +349,12 @@ export function startRunStreamProjection(
         timestamp: Date.now(),
       });
     }
-    await updateStatus(uiRun.status);
+    if (uiRun.status.kind !== "error") {
+      await updateStatus(uiRun.status);
+    }
+    // A terminal error belongs to the run/session. The owning backend
+    // reconciles the selected runtime status after clearing its active run;
+    // publishing an error here would leak it into every client.
   }
 
   async function handleMessageDelta(event: StreamBridgeEvent): Promise<void> {

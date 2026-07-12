@@ -318,4 +318,55 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
         ON workspace_registry(position);
     `,
   },
+  {
+    version: "014_prompt_submission",
+    sql: `
+      CREATE TABLE IF NOT EXISTS prompt_submission (
+        prompt_id TEXT PRIMARY KEY,
+        scope_key TEXT NOT NULL,
+        session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+        user_message_id TEXT NOT NULL UNIQUE,
+        text TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (
+          status IN (
+            'queued', 'starting', 'running',
+            'succeeded', 'failed', 'cancelled', 'interrupted'
+          )
+        ),
+        run_id TEXT,
+        owner_id TEXT,
+        owner_pid INTEGER,
+        error_data TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        started_at INTEGER,
+        ended_at INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_prompt_submission_scope_status_order
+        ON prompt_submission(scope_key, status, created_at, prompt_id);
+      CREATE INDEX IF NOT EXISTS idx_prompt_submission_session_status_order
+        ON prompt_submission(session_id, status, created_at, prompt_id);
+
+      ALTER TABLE run_ledger ADD COLUMN error_data TEXT;
+    `,
+  },
+  {
+    version: "015_prompt_submission_idempotency_lease",
+    sql: `
+      ALTER TABLE prompt_submission
+        ADD COLUMN client_request_id TEXT NOT NULL DEFAULT '';
+      ALTER TABLE prompt_submission ADD COLUMN edit_lease_id TEXT;
+      ALTER TABLE prompt_submission ADD COLUMN edit_lease_owner_id TEXT;
+      ALTER TABLE prompt_submission ADD COLUMN edit_lease_expires_at INTEGER;
+
+      UPDATE prompt_submission
+      SET client_request_id = 'legacy:' || prompt_id
+      WHERE client_request_id = '';
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_prompt_submission_scope_client_request
+        ON prompt_submission(scope_key, client_request_id)
+        WHERE client_request_id <> '';
+    `,
+  },
 ];

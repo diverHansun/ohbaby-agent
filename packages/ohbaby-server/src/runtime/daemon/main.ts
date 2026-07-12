@@ -23,6 +23,7 @@ import { fetchDaemonHealth, type DaemonHealthCheck } from "./health.js";
 import { resolveDaemonScope } from "./scope.js";
 import type { DaemonRuntimeHandle, DaemonState } from "./types.js";
 import { isAddressInUseError } from "../../transport/node-listen.js";
+import { WorkspaceScopeError } from "../workspace-scope.js";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4096;
@@ -56,7 +57,10 @@ function createWorkspaceRegistryIfAvailable():
   } catch (error) {
     // Unit tests may replace the persistent backend with a lightweight fake
     // that intentionally does not initialize SQLite.
-    if (error instanceof Error && error.name === "DatabaseNotInitializedError") {
+    if (
+      error instanceof Error &&
+      error.name === "DatabaseNotInitializedError"
+    ) {
       return undefined;
     }
     throw error;
@@ -139,8 +143,46 @@ function createServerRuntime(input: {
         scopeRoot: input.scopeRoot,
       };
     },
-    start(): Promise<void> {
-      return input.server.start();
+    async start(): Promise<void> {
+      let queuedScopes: readonly string[] = [];
+      let promptStore:
+        | InstanceType<typeof AgentRuntime.DatabasePromptSubmissionStore>
+        | undefined;
+      if ("DatabasePromptSubmissionStore" in AgentRuntime) {
+        try {
+          promptStore = new AgentRuntime.DatabasePromptSubmissionStore();
+          await promptStore.recoverAllInterrupted();
+          queuedScopes = await promptStore.listScopesWithQueued();
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            error.name !== "DatabaseNotInitializedError"
+          ) {
+            throw error;
+          }
+        }
+      }
+      await input.server.start();
+      for (const scopeKey of queuedScopes) {
+        try {
+          await input.server.loadWorkspaceScopes?.([scopeKey]);
+        } catch (error) {
+          if (
+            error instanceof WorkspaceScopeError &&
+            (error.code === "directory-unavailable" ||
+              error.code === "directory-not-directory")
+          ) {
+            await promptStore?.failQueuedScope(scopeKey, {
+              code: "WORKSPACE_UNAVAILABLE",
+              message: `Queued prompt workspace is unavailable: ${scopeKey}`,
+              retryable: true,
+              source: "runtime",
+            });
+            continue;
+          }
+          throw error;
+        }
+      }
     },
     async stop(): Promise<void> {
       try {

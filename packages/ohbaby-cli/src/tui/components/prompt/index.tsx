@@ -1,9 +1,12 @@
+import { randomUUID } from "node:crypto";
 import { Box, Text, useInput } from "ink";
 import type {
   CoreAPI,
   UiCommandInvocation,
   UiGoal,
   UiPermissionState,
+  UiPromptQueueClient,
+  UiPromptSubmission,
 } from "ohbaby-sdk";
 import { useRef, useState } from "react";
 import type { ReactElement } from "react";
@@ -36,7 +39,7 @@ import {
 export interface PromptProps {
   readonly activeSessionId: string | null;
   readonly catalog: TuiCommandCatalog | null;
-  readonly client: CoreAPI;
+  readonly client: CoreAPI & Partial<UiPromptQueueClient>;
   readonly contextWindowUsage?: string;
   readonly disabled: boolean;
   readonly goalStatus?: UiGoal["status"];
@@ -47,6 +50,7 @@ export interface PromptProps {
     readonly kind: CommandPanelKind;
   }) => void;
   readonly permission?: UiPermissionState;
+  readonly queuedPrompts?: readonly UiPromptSubmission[];
   readonly runtimeStatusLabel?: string;
 }
 
@@ -57,20 +61,27 @@ export function Prompt({
   contextWindowUsage = "",
   disabled,
   goalStatus,
-  isRuntimeRunning = false,
   loadCatalog,
   onCommandPanelOpen,
   permission,
+  queuedPrompts = [],
   runtimeStatusLabel,
 }: PromptProps): ReactElement {
   const theme = useTheme();
   const layout = useTuiLayout();
   const [editor, setEditor] = useState<EditorState>(() => createEditorState());
   const [error, setError] = useState<string | null>(null);
-  const [queuedPromptCount, setQueuedPromptCount] = useState(0);
+  const [queuedEdit, setQueuedEdit] = useState<{
+    readonly editLeaseId: string;
+    readonly originalInput: string;
+    readonly promptId: string;
+  } | null>(null);
+  const [queuedMutationPending, setQueuedMutationPending] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const editorRef = useRef(editor);
-  const pendingPromptSubmissionCountRef = useRef(0);
+  const queuedEditRef = useRef(queuedEdit);
+  const queuedMutationPendingRef = useRef(false);
+  const lastLeaseRenewalAtRef = useRef(0);
   const selectedIndexRef = useRef(0);
 
   const replaceEditor = (nextEditor: EditorState): void => {
@@ -100,14 +111,135 @@ export function Prompt({
     setSelectedIndex(index);
   };
 
+  const replaceQueuedEdit = (next: typeof queuedEdit): void => {
+    queuedEditRef.current = next;
+    setQueuedEdit(next);
+  };
+
+  const replaceQueuedMutationPending = (next: boolean): void => {
+    queuedMutationPendingRef.current = next;
+    setQueuedMutationPending(next);
+  };
+
+  const restoreQueuedEditInput = (): void => {
+    const current = queuedEditRef.current;
+    if (!current) return;
+    replaceInput(current.originalInput);
+    replaceQueuedEdit(null);
+  };
+
+  const renewQueuedEditLease = (): void => {
+    const current = queuedEditRef.current;
+    if (!current || !client.renewPromptEditLease) return;
+    const now = Date.now();
+    if (now - lastLeaseRenewalAtRef.current < 20_000) return;
+    lastLeaseRenewalAtRef.current = now;
+    void client
+      .renewPromptEditLease({
+        editLeaseId: current.editLeaseId,
+        ownerClientId: "tui",
+        promptId: current.promptId,
+      })
+      .catch((caught: unknown) => {
+        replaceQueuedEdit(null);
+        setError(
+          `${formatError(caught)}. Edited text was preserved and can be sent as a new prompt.`,
+        );
+      });
+  };
+
   useInput(
     (value, key) => {
+      if (queuedMutationPendingRef.current) return;
       const currentInput = editorText(editorRef.current);
       const candidates = getSlashCompletionCandidates(currentInput, catalog);
 
+      if (key.meta && key.upArrow) {
+        if (queuedEditRef.current) return;
+        const prompt = queuedPrompts.at(-1);
+        if (!prompt || !client.acquirePromptEditLease) return;
+        setError(null);
+        replaceQueuedMutationPending(true);
+        void client
+          .acquirePromptEditLease({
+            ownerClientId: "tui",
+            promptId: prompt.promptId,
+          })
+          .then((lease) => {
+            replaceQueuedEdit({
+              editLeaseId: lease.editLeaseId,
+              originalInput: currentInput,
+              promptId: prompt.promptId,
+            });
+            lastLeaseRenewalAtRef.current = Date.now();
+            replaceInput(prompt.text);
+          })
+          .catch((caught: unknown) => {
+            setError(formatError(caught));
+          })
+          .finally(() => {
+            replaceQueuedMutationPending(false);
+          });
+        return;
+      }
+
+      const currentQueuedEdit = queuedEditRef.current;
+      if (
+        currentQueuedEdit &&
+        key.ctrl &&
+        (value === "d" || value === "\x04")
+      ) {
+        if (!client.cancelQueuedPrompt) return;
+        replaceQueuedMutationPending(true);
+        void client
+          .cancelQueuedPrompt({
+            editLeaseId: currentQueuedEdit.editLeaseId,
+            promptId: currentQueuedEdit.promptId,
+          })
+          .then(restoreQueuedEditInput)
+          .catch((caught: unknown) => {
+            setError(formatError(caught));
+          })
+          .finally(() => {
+            replaceQueuedMutationPending(false);
+          });
+        return;
+      }
+
+      if (currentQueuedEdit && key.escape) {
+        void client
+          .releasePromptEditLease?.({
+            editLeaseId: currentQueuedEdit.editLeaseId,
+            promptId: currentQueuedEdit.promptId,
+          })
+          .catch(() => undefined);
+        restoreQueuedEditInput();
+        return;
+      }
+
       if (key.return) {
         if (key.shift) {
+          if (currentQueuedEdit) renewQueuedEditLease();
           applyEditor({ type: "newline" });
+          return;
+        }
+
+        if (currentQueuedEdit) {
+          if (!client.editQueuedPrompt || currentInput.trim() === "") return;
+          replaceQueuedMutationPending(true);
+          void client
+            .editQueuedPrompt({
+              editLeaseId: currentQueuedEdit.editLeaseId,
+              promptId: currentQueuedEdit.promptId,
+              text: currentInput.trim(),
+            })
+            .then(restoreQueuedEditInput)
+            .catch((caught: unknown) => {
+              setError(formatError(caught));
+            })
+            .finally(() => {
+              replaceQueuedMutationPending(false);
+            });
           return;
         }
 
@@ -123,14 +255,13 @@ export function Prompt({
           loadCatalog,
           replaceInput,
           setError,
-          isRuntimeRunning,
-          pendingPromptSubmissionCountRef,
-          setQueuedPromptCount,
           selectedIndexRef.current,
           onCommandPanelOpen,
         );
         return;
       }
+
+      if (currentQueuedEdit) renewQueuedEditLease();
 
       if (currentInput.startsWith("/") && candidates.length > 0) {
         if (key.upArrow) {
@@ -232,7 +363,7 @@ export function Prompt({
   const dockStatus = formatDockStatus({
     activeSessionId,
     permission,
-    queuedPromptCount,
+    queuedPromptCount: queuedPrompts.length,
     runtimeStatusLabel,
   });
   const goalStatusColor =
@@ -240,6 +371,21 @@ export function Prompt({
 
   return (
     <Box flexDirection="column">
+      {queuedPrompts.length === 0 ? null : (
+        <Box flexDirection="column" paddingX={1} width={layout.contentWidth}>
+          <Text dimColor>Queued {queuedPrompts.length}</Text>
+          {queuedPrompts.map((prompt) => (
+            <Text
+              dimColor={queuedEdit?.promptId !== prompt.promptId}
+              key={prompt.promptId}
+            >
+              ↳ {prompt.text.replace(/\s+/gu, " ").trim()}
+              {queuedEdit?.promptId === prompt.promptId ? " · editing" : ""}
+            </Text>
+          ))}
+          <Text dimColor>Alt+↑ edit latest · Ctrl+D cancel while editing</Text>
+        </Box>
+      )}
       <Box
         borderColor={theme.border}
         borderStyle="round"
@@ -249,6 +395,13 @@ export function Prompt({
       >
         {renderEditorLines(editor, disabled, theme.cursor)}
       </Box>
+      {queuedEdit ? (
+        <Text dimColor>
+          {queuedMutationPending
+            ? "Updating queued prompt…"
+            : "Enter save · Ctrl+D cancel prompt · Esc keep original"}
+        </Text>
+      ) : null}
       {dockStatus === "" &&
       contextWindowUsage === "" &&
       goalStatus === undefined ? null : (
@@ -376,13 +529,10 @@ async function submitInput(
   input: string,
   activeSessionId: string | null,
   catalog: TuiCommandCatalog | null,
-  client: CoreAPI,
+  client: CoreAPI & Partial<UiPromptQueueClient>,
   loadCatalog: (() => Promise<TuiCommandCatalog>) | undefined,
   replaceInput: (nextInput: string) => void,
   setError: (message: string | null) => void,
-  isRuntimeRunning: boolean,
-  pendingPromptSubmissionCountRef: { current: number },
-  setQueuedPromptCount: (updater: (current: number) => number) => void,
   selectedIndex: number,
   onCommandPanelOpen:
     | ((input: {
@@ -400,27 +550,13 @@ async function submitInput(
   if (!text.startsWith("/")) {
     setError(null);
     replaceInput("");
-    const trackQueuedPrompt =
-      isRuntimeRunning || pendingPromptSubmissionCountRef.current > 0;
-    pendingPromptSubmissionCountRef.current += 1;
-    if (trackQueuedPrompt) {
-      setQueuedPromptCount((current) => current + 1);
-    }
     void client
       .submitPrompt(text, {
+        clientRequestId: randomUUID(),
         sessionId: activeSessionId ?? undefined,
       })
       .catch((caught: unknown) => {
         setError(formatError(caught));
-      })
-      .finally(() => {
-        pendingPromptSubmissionCountRef.current = Math.max(
-          0,
-          pendingPromptSubmissionCountRef.current - 1,
-        );
-        if (trackQueuedPrompt) {
-          setQueuedPromptCount((current) => Math.max(0, current - 1));
-        }
       });
     return;
   }

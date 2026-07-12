@@ -78,3 +78,7 @@
 - Web runtime 已实现启动优先级、canonical hash、每项目最后 session、SSE/client 重绑与失败回滚。
 - 旧 workspace `<select>` 已删除。项目 rail 永久显示导入项目；会话栏默认收起，点击 rail 顶部按钮后才显示当前根目录的 sessions。
 - 真实浏览器在 1280×720 下验证：收起态 rail 62px、主内容 1218px；展开态 sidebar 300px、主内容 918px；两态均无水平溢出，console 无 warning/error。
+
+## 8. 后续 prompt 并发批次
+
+本目录的导航与 workspace/session 选择已经完成。发送后即时显示、composer 上方 queued prompt、同 session FIFO、每 workspace 10 个 active session 和 durable waiting queue 由 [`../2026-07-12-workspace-prompt-concurrency/`](../2026-07-12-workspace-prompt-concurrency/README.md) 负责。后续实现只能在现有三栏与会话选择机制上接线，不得借并发改造退回 workspace `<select>` 或重做本目录已验收的导航范围。

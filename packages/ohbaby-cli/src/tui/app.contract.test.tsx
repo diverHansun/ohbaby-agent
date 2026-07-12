@@ -1107,9 +1107,10 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("\r");
     await flush();
 
-    expect(client.submitPrompt).toHaveBeenCalledWith("hello", {
-      sessionId: "session_1",
-    });
+    expect(client.submitPrompt).toHaveBeenCalledWith(
+      "hello",
+      expect.objectContaining({ sessionId: "session_1" }),
+    );
   });
 
   it("browses prompt history without losing the current draft", async () => {
@@ -1153,9 +1154,10 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("\r");
     await flush();
 
-    expect(client.submitPrompt).toHaveBeenCalledWith("first", {
-      sessionId: "session_1",
-    });
+    expect(client.submitPrompt).toHaveBeenCalledWith(
+      "first",
+      expect.objectContaining({ sessionId: "session_1" }),
+    );
     expect(app.lastFrame()).not.toContain("first");
 
     app.stdin.write("second");
@@ -1163,9 +1165,10 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     await flush();
 
-    expect(client.submitPrompt).toHaveBeenCalledWith("second", {
-      sessionId: "session_1",
-    });
+    expect(client.submitPrompt).toHaveBeenCalledWith(
+      "second",
+      expect.objectContaining({ sessionId: "session_1" }),
+    );
     expect(app.lastFrame()).toContain("A prompt is already running");
   });
 
@@ -1195,14 +1198,43 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     app.stdin.write("follow up");
     app.stdin.write("\r");
+    client.emit({
+      prompt: {
+        clientRequestId: "request_follow_up",
+        createdAt: "2026-05-14T00:00:04.000Z",
+        promptId: "prompt_follow_up",
+        scopeKey: "/repo",
+        sessionId: "session_1",
+        status: "queued",
+        text: "follow up",
+        updatedAt: "2026-05-14T00:00:04.000Z",
+        userMessageId: "message_follow_up",
+      },
+      type: "prompt.submitted",
+    });
     await waitForFrame(app, (frame) => frame.includes("Queued"));
 
-    expect(client.submitPrompt).toHaveBeenCalledWith("follow up", {
-      sessionId: "session_1",
-    });
-    expect(app.lastFrame()).not.toContain("follow up");
+    expect(client.submitPrompt).toHaveBeenCalledWith(
+      "follow up",
+      expect.objectContaining({ sessionId: "session_1" }),
+    );
+    expect(app.lastFrame()).toContain("follow up");
 
     queuedSubmit.resolve(undefined);
+    client.emit({
+      prompt: {
+        clientRequestId: "request_follow_up",
+        createdAt: "2026-05-14T00:00:04.000Z",
+        promptId: "prompt_follow_up",
+        scopeKey: "/repo",
+        sessionId: "session_1",
+        status: "starting",
+        text: "follow up",
+        updatedAt: "2026-05-14T00:00:05.000Z",
+        userMessageId: "message_follow_up",
+      },
+      type: "prompt.updated",
+    });
     await waitForFrame(app, (frame) => !frame.includes("Queued"));
   });
 
@@ -1227,15 +1259,95 @@ describe("OhbabyTerminalApp", () => {
 
     app.stdin.write("second");
     app.stdin.write("\r");
+    client.emit({
+      prompt: {
+        clientRequestId: "request_second",
+        createdAt: "2026-05-14T00:00:04.000Z",
+        promptId: "prompt_second",
+        scopeKey: "/repo",
+        sessionId: "session_1",
+        status: "queued",
+        text: "second",
+        updatedAt: "2026-05-14T00:00:04.000Z",
+        userMessageId: "message_second",
+      },
+      type: "prompt.submitted",
+    });
     await waitForFrame(app, (frame) => frame.includes("Queued"));
 
-    expect(client.submitPrompt).toHaveBeenCalledWith("second", {
-      sessionId: "session_1",
-    });
+    expect(client.submitPrompt).toHaveBeenCalledWith(
+      "second",
+      expect.objectContaining({ sessionId: "session_1" }),
+    );
 
     firstSubmit.resolve(undefined);
     secondSubmit.resolve(undefined);
+    client.emit({
+      prompt: {
+        clientRequestId: "request_second",
+        createdAt: "2026-05-14T00:00:04.000Z",
+        promptId: "prompt_second",
+        scopeKey: "/repo",
+        sessionId: "session_1",
+        status: "starting",
+        text: "second",
+        updatedAt: "2026-05-14T00:00:05.000Z",
+        userMessageId: "message_second",
+      },
+      type: "prompt.updated",
+    });
     await waitForFrame(app, (frame) => !frame.includes("Queued"));
+  });
+
+  it("edits and cancels the latest queued prompt in an explicit key mode", async () => {
+    const prompt = {
+      clientRequestId: "request_queued",
+      createdAt: "2026-05-14T00:00:04.000Z",
+      promptId: "prompt_queued",
+      scopeKey: "/repo",
+      sessionId: "session_1",
+      status: "queued" as const,
+      text: "queued text",
+      updatedAt: "2026-05-14T00:00:04.000Z",
+      userMessageId: "message_queued",
+    };
+    const client = createFakeClient({ ...snapshot(), prompts: [prompt] });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await waitForFrame(app, (frame) => frame.includes("queued text"));
+    app.stdin.write("\u001B[1;3A");
+    app.stdin.write("\u001B[1;3A");
+    await waitForFrame(app, (frame) => frame.includes("editing"));
+    expect(client.acquirePromptEditLease).toHaveBeenCalledWith({
+      ownerClientId: "tui",
+      promptId: "prompt_queued",
+    });
+    expect(client.acquirePromptEditLease).toHaveBeenCalledTimes(1);
+
+    const now = Date.now();
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now + 21_000);
+    app.stdin.write("\u007f");
+    await flush();
+    expect(client.renewPromptEditLease).toHaveBeenCalledWith({
+      editLeaseId: "lease_1",
+      ownerClientId: "tui",
+      promptId: "prompt_queued",
+    });
+    nowSpy.mockRestore();
+
+    app.stdin.write("\u0004");
+    app.stdin.write("\u0004");
+    await flush();
+    expect(client.cancelQueuedPrompt).toHaveBeenCalledWith({
+      editLeaseId: "lease_1",
+      promptId: "prompt_queued",
+    });
+    expect(client.cancelQueuedPrompt).toHaveBeenCalledTimes(1);
   });
 
   it("aborts the active run on Ctrl+C when no dialog is open", async () => {
@@ -3675,10 +3787,13 @@ function createFakeClient(
 ): TerminalClient & {
   readonly emit: (event: TuiEvent) => void;
   readonly abortRun: ReturnType<typeof vi.fn>;
+  readonly acquirePromptEditLease: ReturnType<typeof vi.fn>;
   readonly archiveSession: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
+  readonly cancelQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly connectModel: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
+  readonly editQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly getContextWindowUsage: ReturnType<typeof vi.fn>;
   readonly getCurrentModel: ReturnType<typeof vi.fn>;
   readonly getSnapshot: ReturnType<typeof vi.fn>;
@@ -3686,6 +3801,8 @@ function createFakeClient(
   readonly probeModelContextWindow: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
   readonly respondPermission: ReturnType<typeof vi.fn>;
+  readonly releasePromptEditLease: ReturnType<typeof vi.fn>;
+  readonly renewPromptEditLease: ReturnType<typeof vi.fn>;
   readonly setPermission: ReturnType<typeof vi.fn>;
   readonly setSearchApiKey: ReturnType<typeof vi.fn>;
   readonly submitPrompt: ReturnType<typeof vi.fn>;
@@ -3694,6 +3811,19 @@ function createFakeClient(
 
   return {
     abortRun: vi.fn(() => Promise.resolve()),
+    acquirePromptEditLease: vi.fn((input: { readonly promptId: string }) => {
+      const prompt = initialSnapshot.prompts?.find(
+        (candidate) => candidate.promptId === input.promptId,
+      );
+      return prompt
+        ? Promise.resolve({
+            editLeaseId: "lease_1",
+            expiresAt: "2026-05-14T00:01:00.000Z",
+            ownerClientId: "client_tui",
+            prompt,
+          })
+        : Promise.reject(new Error("prompt not found"));
+    }),
     archiveSession: vi.fn(() => Promise.resolve()),
     compactSession: vi.fn(() =>
       Promise.resolve({
@@ -3715,6 +3845,14 @@ function createFakeClient(
         },
       }),
     ),
+    cancelQueuedPrompt: vi.fn((input: { readonly promptId: string }) => {
+      const prompt = initialSnapshot.prompts?.find(
+        (candidate) => candidate.promptId === input.promptId,
+      );
+      return prompt
+        ? Promise.resolve({ ...prompt, status: "cancelled" as const })
+        : Promise.reject(new Error("prompt not found"));
+    }),
     connectModel: vi.fn(() =>
       Promise.resolve({
         apiKeyEnv: "ZENMUX_API_KEY",
@@ -3735,6 +3873,16 @@ function createFakeClient(
         handler(event);
       }
     },
+    editQueuedPrompt: vi.fn(
+      (input: { readonly promptId: string; readonly text: string }) => {
+        const prompt = initialSnapshot.prompts?.find(
+          (candidate) => candidate.promptId === input.promptId,
+        );
+        return prompt
+          ? Promise.resolve({ ...prompt, text: input.text })
+          : Promise.reject(new Error("prompt not found"));
+      },
+    ),
     executeCommand: vi.fn(() => Promise.resolve()),
     getContextWindowUsage: vi.fn(() => Promise.resolve(null)),
     getCurrentModel: vi.fn(() => Promise.resolve(null)),
@@ -3748,6 +3896,29 @@ function createFakeClient(
     ),
     respondInteraction: vi.fn(() => Promise.resolve()),
     respondPermission: vi.fn(() => Promise.resolve()),
+    releasePromptEditLease: vi.fn((input: { readonly promptId: string }) => {
+      const prompt = initialSnapshot.prompts?.find(
+        (candidate) => candidate.promptId === input.promptId,
+      );
+      return prompt
+        ? Promise.resolve(prompt)
+        : Promise.reject(new Error("prompt not found"));
+    }),
+    renewPromptEditLease: vi.fn(
+      (input: { readonly promptId: string; readonly editLeaseId: string }) => {
+        const prompt = initialSnapshot.prompts?.find(
+          (candidate) => candidate.promptId === input.promptId,
+        );
+        return prompt
+          ? Promise.resolve({
+              editLeaseId: input.editLeaseId,
+              expiresAt: "2026-05-14T00:01:00.000Z",
+              ownerClientId: "client_tui",
+              prompt,
+            })
+          : Promise.reject(new Error("prompt not found"));
+      },
+    ),
     setPermission: vi.fn(() =>
       Promise.resolve({
         level: "default",

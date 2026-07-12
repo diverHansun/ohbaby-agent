@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   UiCompactSessionUsage,
   UiPermissionRequest,
+  UiPromptEditLease,
   UiRunStatus,
   UiSnapshot,
   UiWebCommandCatalog,
@@ -65,6 +66,9 @@ interface FakeRuntime {
   readonly setSearchApiKey: ReturnType<
     typeof vi.fn<OhbabyWebClient["setSearchApiKey"]>
   >;
+  readonly submitPrompt: ReturnType<
+    typeof vi.fn<OhbabyWebClient["submitPrompt"]>
+  >;
   readonly store: OhbabyWebStore;
   readonly switchWorkspace: ReturnType<
     typeof vi.fn<OhbabyWebRuntime["switchWorkspace"]>
@@ -81,13 +85,286 @@ afterEach(() => {
     app.container.remove();
   }
   vi.restoreAllMocks();
+  globalThis.sessionStorage.clear();
 });
 
 describe("OhbabyWebApp slash command interactions", () => {
-  it("does not open or execute the slash palette while the composer cannot send", async () => {
+  it("renders an adaptive queued list and expands after five items", async () => {
+    const prompts = Array.from({ length: 6 }, (_, index) => ({
+      clientRequestId: `request_${String(index)}`,
+      createdAt: new Date(Date.parse(timestamp) + index).toISOString(),
+      promptId: `prompt_${String(index)}`,
+      scopeKey: "/repo-a",
+      sessionId: "session_1",
+      status: "queued" as const,
+      text: `queued ${String(index)}`,
+      updatedAt: timestamp,
+      userMessageId: `message_${String(index)}`,
+    }));
+    const fake = createFakeRuntime({
+      snapshot: { ...snapshotWithStatus({ kind: "idle" }), prompts },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(
+      app.container.querySelectorAll(".ohb-prompt-queue-item"),
+    ).toHaveLength(5);
+    await clickButton(app.container, "Show all queued prompts");
+    expect(
+      app.container.querySelectorAll(".ohb-prompt-queue-item"),
+    ).toHaveLength(6);
+  });
+
+  it("restores a session draft without waiting for snapshot events", () => {
+    globalThis.sessionStorage.setItem(
+      "ohbaby:composer:/repo-a:session_1",
+      JSON.stringify({
+        clientRequestId: "request_pending",
+        pendingText: "restored draft",
+        text: "restored draft",
+      }),
+    );
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+
+    const textarea = app.container.querySelector("textarea");
+    expect(
+      textarea instanceof HTMLTextAreaElement ? textarea.value : null,
+    ).toBe("restored draft");
+  });
+
+  it("selects the receipt session after submitting from an empty project", async () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: null,
+        sessions: [],
+      },
+    });
+    fake.submitPrompt.mockImplementation((input) =>
+      Promise.resolve({
+        clientRequestId: input.clientRequestId,
+        createdAt: timestamp,
+        ok: true,
+        promptId: "prompt_new",
+        sessionId: "session_new",
+        status: "running",
+        userMessageId: "message_new",
+      }),
+    );
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "first prompt");
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() => fake.selectSession.mock.calls.length === 1);
+
+    expect(fake.selectSession).toHaveBeenCalledWith("session_new");
+  });
+
+  it("preserves the draft when the receipt request id does not match", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.submitPrompt.mockResolvedValue({
+      clientRequestId: "different_request",
+      createdAt: timestamp,
+      ok: true,
+      promptId: "prompt_other",
+      sessionId: "session_1",
+      status: "queued",
+      userMessageId: "message_other",
+    });
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "keep this draft");
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      app.container.textContent.includes(
+        "Prompt receipt did not match this submission",
+      ),
+    );
+
+    const textarea = app.container.querySelector("textarea");
+    expect(
+      textarea instanceof HTMLTextAreaElement ? textarea.value : null,
+    ).toBe("keep this draft");
+  });
+
+  it("restores a pending request id after leaving queued-edit mode", async () => {
+    const queuedPrompt = {
+      clientRequestId: "request_queued",
+      createdAt: timestamp,
+      promptId: "prompt_queued",
+      scopeKey: "/repo-a",
+      sessionId: "session_1",
+      status: "queued" as const,
+      text: "queued text",
+      updatedAt: timestamp,
+      userMessageId: "message_queued",
+    };
+    globalThis.sessionStorage.setItem(
+      "ohbaby:composer:/repo-a:session_1",
+      JSON.stringify({
+        clientRequestId: "request_pending",
+        pendingText: "pending draft",
+        text: "pending draft",
+      }),
+    );
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "running", runId: "run_1" }),
+        prompts: [queuedPrompt],
+      },
+    });
+    vi.spyOn(fake.runtime.client, "acquirePromptEditLease").mockResolvedValue({
+      editLeaseId: "lease_1",
+      expiresAt: "2026-07-12T00:01:00.000Z",
+      ownerClientId: "client_web",
+      prompt: queuedPrompt,
+    });
+    vi.spyOn(fake.runtime.client, "releasePromptEditLease").mockResolvedValue(
+      queuedPrompt,
+    );
+    fake.submitPrompt.mockImplementation((input) =>
+      Promise.resolve({
+        clientRequestId: input.clientRequestId,
+        createdAt: timestamp,
+        ok: true,
+        promptId: "prompt_retry",
+        sessionId: "session_1",
+        status: "queued",
+        userMessageId: "message_retry",
+      }),
+    );
+    const app = mountApp(fake.runtime);
+    const editButton = app.container.querySelector(
+      '[aria-label="Edit queued prompt: queued text"]',
+    );
+    if (!(editButton instanceof HTMLButtonElement)) {
+      throw new Error("queued edit button not found");
+    }
+
+    await act(async () => {
+      editButton.click();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      app.container.textContent.includes("Editing queued prompt"),
+    );
+    await pressTextareaKey(app.container, "Escape");
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() => fake.submitPrompt.mock.calls.length === 1);
+
+    expect(fake.submitPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientRequestId: "request_pending",
+        text: "pending draft",
+      }),
+    );
+  });
+
+  it("persists the edit buffer as a draft when reload renewal loses the lease", async () => {
+    globalThis.sessionStorage.setItem(
+      "ohbaby:composer:/repo-a:session_1",
+      JSON.stringify({ text: "older draft" }),
+    );
+    globalThis.sessionStorage.setItem(
+      "ohbaby:composer-lease:/repo-a:session_1",
+      JSON.stringify({
+        editLeaseId: "expired_lease",
+        editText: "preserve edited buffer",
+        expiresAt: "2026-07-12T00:00:00.000Z",
+        lastActivityAt: 1,
+        originalDraft: "older draft",
+        promptId: "prompt_queued",
+      }),
+    );
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    vi.spyOn(fake.runtime.client, "renewPromptEditLease").mockRejectedValue(
+      new Error("lease expired"),
+    );
+    mountApp(fake.runtime);
+
+    await waitFor(() =>
+      Boolean(
+        globalThis.sessionStorage
+          .getItem("ohbaby:composer:/repo-a:session_1")
+          ?.includes("preserve edited buffer"),
+      ),
+    );
+  });
+
+  it("does not acquire a second lease while another queued edit is active", async () => {
+    const prompts = ["one", "two"].map((text, index) => ({
+      clientRequestId: `request_${text}`,
+      createdAt: timestamp,
+      promptId: `prompt_${text}`,
+      scopeKey: "/repo-a",
+      sessionId: "session_1",
+      status: "queued" as const,
+      text,
+      updatedAt: timestamp,
+      userMessageId: `message_${String(index)}`,
+    }));
+    const fake = createFakeRuntime({
+      snapshot: { ...snapshotWithStatus({ kind: "idle" }), prompts },
+    });
+    const firstPrompt = prompts[0];
+    const pendingLease = deferred<UiPromptEditLease>();
+    const acquire = vi
+      .spyOn(fake.runtime.client, "acquirePromptEditLease")
+      .mockReturnValue(pendingLease.promise);
+    const lease = {
+      editLeaseId: "lease_one",
+      expiresAt: "2026-07-12T00:01:00.000Z",
+      ownerClientId: "client_web",
+      prompt: firstPrompt,
+    } satisfies UiPromptEditLease;
+    const app = mountApp(fake.runtime);
+    const editOne = app.container.querySelector(
+      '[aria-label="Edit queued prompt: one"]',
+    );
+    const editTwo = app.container.querySelector(
+      '[aria-label="Edit queued prompt: two"]',
+    );
+    if (
+      !(editOne instanceof HTMLButtonElement) ||
+      !(editTwo instanceof HTMLButtonElement)
+    ) {
+      throw new Error("queued edit buttons not found");
+    }
+
+    await act(async () => {
+      editOne.click();
+      editTwo.click();
+      await Promise.resolve();
+    });
+    expect(acquire).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      pendingLease.resolve(lease);
+      await pendingLease.promise;
+    });
+    await waitFor(() => app.container.textContent.includes("editing"));
+    await act(async () => {
+      editTwo.click();
+      await Promise.resolve();
+    });
+
+    expect(acquire).toHaveBeenCalledTimes(1);
+    expect(app.container.textContent).toContain(
+      "Finish or cancel the current queued edit first.",
+    );
+  });
+
+  it("does not open or execute the slash palette while disconnected", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
     });
+    fake.store.setConnectionState("disconnected");
     fake.listCommands.mockResolvedValue(catalog(["status"]));
     const app = mountApp(fake.runtime);
 
@@ -973,17 +1250,31 @@ function createFakeRuntime(input: {
     ],
     selectedDirectory: "/repo-a",
   } as const;
+  const submitPrompt = vi.fn<OhbabyWebClient["submitPrompt"]>(() =>
+    Promise.resolve({
+      clientRequestId: "request_1",
+      createdAt: "2026-07-12T00:00:00.000Z",
+      ok: true,
+      promptId: "prompt_1",
+      sessionId: "session_1",
+      status: "queued",
+      userMessageId: "message_1",
+    }),
+  );
   const client: OhbabyWebClient & {
     readonly archiveSession: typeof archiveSession;
   } = {
     abortSession: vi.fn(() => Promise.resolve()),
+    acquirePromptEditLease: vi.fn(() => Promise.reject(new Error("unused"))),
     archiveSession,
     close: vi.fn(() => Promise.resolve()),
     compactSession,
+    cancelQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     connect: vi.fn(() => Promise.resolve()),
     connectModel,
     createSession,
     executeSlashCommand,
+    editQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     getContextWindowUsage: vi.fn(() =>
       Promise.resolve({
         contextWindowRatio: 0.125,
@@ -1022,10 +1313,12 @@ function createFakeRuntime(input: {
       }),
     ),
     respondPermission: vi.fn(() => Promise.resolve()),
+    releasePromptEditLease: vi.fn(() => Promise.reject(new Error("unused"))),
+    renewPromptEditLease: vi.fn(() => Promise.reject(new Error("unused"))),
     selectSession,
     setPermission,
     setSearchApiKey,
-    submitPrompt: vi.fn(() => Promise.resolve()),
+    submitPrompt,
     subscribe: (listener) => store.subscribe(listener),
   };
   return {
@@ -1059,6 +1352,7 @@ function createFakeRuntime(input: {
     setPermission,
     setSearchApiKey,
     store,
+    submitPrompt,
     switchWorkspace,
   };
 }

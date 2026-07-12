@@ -1,4 +1,5 @@
 import type { UiContextWindowUsage } from "./context-window.js";
+import type { UiPromptSubmission } from "./prompt.js";
 
 export type UiRunStatus =
   | { readonly kind: "idle" }
@@ -50,6 +51,7 @@ export interface UiSnapshot {
   readonly permission?: UiPermissionState;
   readonly contextWindowUsages?: readonly UiContextWindowUsage[];
   readonly goals?: readonly UiSessionGoal[];
+  readonly prompts?: readonly UiPromptSubmission[];
 }
 
 export type UiGoalStatus = "active" | "paused";

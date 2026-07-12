@@ -350,6 +350,12 @@ function applyEventToSnapshot(
         ...snapshot,
         sessions: upsertById(snapshot.sessions, event.session),
       };
+    case "prompt.submitted":
+    case "prompt.updated":
+      return {
+        ...snapshot,
+        prompts: upsertByKey(snapshot.prompts ?? [], event.prompt, "promptId"),
+      };
     case "message.appended":
       return updateSessionMessages(snapshot, event.sessionId, (messages) =>
         upsertById(messages, event.message),

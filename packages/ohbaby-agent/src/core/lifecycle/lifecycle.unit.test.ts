@@ -437,6 +437,48 @@ describe("Lifecycle.run", () => {
     );
   });
 
+  it("treats provider output length truncation as a structured terminal failure", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(
+        vi
+          .fn<ContextManager["prepareTurn"]>()
+          .mockResolvedValue(
+            preparedTurn([{ role: "user", content: "Answer fully" }]),
+          ),
+      ),
+      llmClient: createSequentialFakeLLMClient(
+        [[{ textDelta: "partial answer", finishReason: "length" }]],
+        [],
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_output_length",
+      }),
+    );
+
+    expect(result).toMatchObject({
+      finalResponse:
+        "Model output reached the configured token limit before completion.",
+      finishReason: "error",
+      success: false,
+      terminalReason: "output_length",
+    });
+  });
+
   it("passes context scope through prepare, calibration, and assistant messages", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const messageManager = createMessageManager({
