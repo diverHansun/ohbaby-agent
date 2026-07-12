@@ -88,6 +88,7 @@ function snapshotWithSessions(): UiSnapshot {
     ],
     prompts: [
       {
+        clientRequestId: "request_1",
         createdAt: timestamp,
         promptId: "prompt_1",
         scopeKey: "/repo",
@@ -98,6 +99,7 @@ function snapshotWithSessions(): UiSnapshot {
         userMessageId: "prompt_message_1",
       },
       {
+        clientRequestId: "request_2",
         createdAt: timestamp,
         promptId: "prompt_2",
         scopeKey: "/repo",

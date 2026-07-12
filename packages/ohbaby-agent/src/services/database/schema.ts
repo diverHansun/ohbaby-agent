@@ -122,6 +122,7 @@ export const schema = {
   }),
   promptSubmission: table("prompt_submission", {
     promptId: "prompt_id",
+    clientRequestId: "client_request_id",
     scopeKey: "scope_key",
     sessionId: "session_id",
     userMessageId: "user_message_id",
@@ -130,6 +131,9 @@ export const schema = {
     runId: "run_id",
     ownerId: "owner_id",
     ownerPid: "owner_pid",
+    editLeaseId: "edit_lease_id",
+    editLeaseOwnerId: "edit_lease_owner_id",
+    editLeaseExpiresAt: "edit_lease_expires_at",
     errorData: "error_data",
     createdAt: "created_at",
     updatedAt: "updated_at",

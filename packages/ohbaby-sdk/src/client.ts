@@ -29,13 +29,18 @@ import type {
 } from "./snapshot.js";
 import type {
   UiCancelQueuedPromptInput,
+  UiAcquirePromptEditLeaseInput,
   UiEditQueuedPromptInput,
   UiPromptCompletion,
   UiPromptReceipt,
+  UiPromptEditLease,
+  UiReleasePromptEditLeaseInput,
+  UiRenewPromptEditLeaseInput,
   UiPromptSubmission,
 } from "./prompt.js";
 
 export interface SubmitPromptOptions {
+  readonly clientRequestId?: string;
   readonly sessionId?: string;
 }
 
@@ -100,6 +105,15 @@ export interface UiPromptQueueClient extends UiBackendClient {
   editQueuedPrompt(input: UiEditQueuedPromptInput): Promise<UiPromptSubmission>;
   cancelQueuedPrompt(
     input: UiCancelQueuedPromptInput,
+  ): Promise<UiPromptSubmission>;
+  acquirePromptEditLease(
+    input: UiAcquirePromptEditLeaseInput,
+  ): Promise<UiPromptEditLease>;
+  renewPromptEditLease(
+    input: UiRenewPromptEditLeaseInput,
+  ): Promise<UiPromptEditLease>;
+  releasePromptEditLease(
+    input: UiReleasePromptEditLeaseInput,
   ): Promise<UiPromptSubmission>;
   waitForPrompt(promptId: string): Promise<UiPromptCompletion>;
 }

@@ -67,7 +67,7 @@ function spawnServe(input: {
         provider: {
           client: { kind: "fake" },
           id: "fake",
-          isAbortError: () => false,
+          isAbortError: (error) => error instanceof Error && error.name === "AbortError",
           kind: "openai-compatible",
           async streamChatCompletion(request) {
             if (JSON.stringify(request.messages).includes("Generate a concise title")) {
@@ -78,6 +78,11 @@ function spawnServe(input: {
             appendFileSync(blockingProvider.startedPath, "started\\n");
             return (async function* () {
               while (!existsSync(blockingProvider.gatePath)) {
+                if (request.signal?.aborted) {
+                  const error = new Error("provider request aborted");
+                  error.name = "AbortError";
+                  throw error;
+                }
                 await delay(10);
               }
               yield { textDelta: "done", finishReason: "stop" };
@@ -274,10 +279,14 @@ describe("global single serve across real processes", () => {
     });
     expect(registered.status).toBe(200);
 
-    const receipts: { readonly promptId: string }[] = [];
+    const receipts: {
+      readonly clientRequestId: string;
+      readonly promptId: string;
+    }[] = [];
     for (let index = 1; index <= 11; index += 1) {
       const response = await fetch(`${origin}/v1/prompts`, {
         body: JSON.stringify({
+          clientRequestId: `process_request_${String(index)}`,
           sessionId: `process_session_${String(index)}`,
           text: `process prompt ${String(index)}`,
         }),
@@ -285,8 +294,28 @@ describe("global single serve across real processes", () => {
         method: "POST",
       });
       expect(response.status).toBe(202);
-      receipts.push((await response.json()) as { promptId: string });
+      const receipt = (await response.json()) as {
+        readonly clientRequestId: string;
+        readonly promptId: string;
+      };
+      expect(receipt.clientRequestId).toBe(`process_request_${String(index)}`);
+      receipts.push(receipt);
     }
+
+    const retried = await fetch(`${origin}/v1/prompts`, {
+      body: JSON.stringify({
+        clientRequestId: "process_request_11",
+        sessionId: "process_session_11",
+        text: "process prompt 11",
+      }),
+      headers,
+      method: "POST",
+    });
+    expect(retried.status).toBe(202);
+    await expect(retried.json()).resolves.toMatchObject({
+      clientRequestId: "process_request_11",
+      promptId: receipts[10]?.promptId,
+    });
 
     await waitForStarted(startedPath, 10);
     const queuedSnapshot = await fetch(`${origin}/v1/snapshot`, { headers });
@@ -294,6 +323,7 @@ describe("global single serve across real processes", () => {
       readonly snapshot: {
         readonly prompts?: readonly {
           readonly promptId: string;
+          readonly clientRequestId: string;
           readonly status: string;
         }[];
       };
@@ -302,7 +332,10 @@ describe("global single serve across real processes", () => {
       queuedBody.snapshot.prompts?.find(
         (prompt) => prompt.promptId === receipts[10]?.promptId,
       ),
-    ).toMatchObject({ status: "queued" });
+    ).toMatchObject({
+      clientRequestId: "process_request_11",
+      status: "queued",
+    });
 
     await writeFile(gatePath, "release", "utf8");
     await waitForStarted(startedPath, 11);
@@ -343,6 +376,7 @@ describe("global single serve across real processes", () => {
     for (let index = 1; index <= 11; index += 1) {
       const response = await fetch(`${firstOrigin}/v1/prompts`, {
         body: JSON.stringify({
+          clientRequestId: `recovery_request_${String(index)}`,
           sessionId: `recovery_session_${String(index)}`,
           text: `recovery prompt ${String(index)}`,
         }),
@@ -462,9 +496,17 @@ describe("global single serve across real processes", () => {
       method: "POST",
     });
     const receipts: { readonly promptId: string }[] = [];
-    for (const text of ["active", "before edit", "cancel me"]) {
+    for (const [index, text] of [
+      "active",
+      "before edit",
+      "cancel me",
+    ].entries()) {
       const response = await fetch(`${firstOrigin}/v1/prompts`, {
-        body: JSON.stringify({ sessionId: "edit_session", text }),
+        body: JSON.stringify({
+          clientRequestId: `edit_request_${String(index)}`,
+          sessionId: "edit_session",
+          text,
+        }),
         headers,
         method: "POST",
       });
@@ -492,11 +534,23 @@ describe("global single serve across real processes", () => {
     if (!editable || !cancellable) {
       throw new Error("Expected queued prompts before process restart");
     }
+    const leaseResponse = await fetch(
+      `${firstOrigin}/v1/prompts/${encodeURIComponent(editable.promptId)}/edit-lease`,
+      {
+        body: JSON.stringify({ ownerClientId: "edit_client" }),
+        headers,
+        method: "POST",
+      },
+    );
+    expect(leaseResponse.status).toBe(200);
+    const leaseBody = (await leaseResponse.json()) as {
+      readonly lease: { readonly editLeaseId: string };
+    };
     const edited = await fetch(
       `${firstOrigin}/v1/prompts/${encodeURIComponent(editable.promptId)}`,
       {
         body: JSON.stringify({
-          expectedUpdatedAt: editable.updatedAt,
+          editLeaseId: leaseBody.lease.editLeaseId,
           text: "after edit",
         }),
         headers,
@@ -507,7 +561,7 @@ describe("global single serve across real processes", () => {
     const cancelled = await fetch(
       `${firstOrigin}/v1/prompts/${encodeURIComponent(cancellable.promptId)}`,
       {
-        body: JSON.stringify({ expectedUpdatedAt: cancellable.updatedAt }),
+        body: JSON.stringify({}),
         headers,
         method: "DELETE",
       },
@@ -598,33 +652,38 @@ describe("global single serve across real processes", () => {
       method: "POST",
     });
     const active = await fetch(`${origin}/v1/prompts`, {
-      body: JSON.stringify({ sessionId: "limit_session", text: "active" }),
+      body: JSON.stringify({
+        clientRequestId: "limit_request_active",
+        sessionId: "limit_session",
+        text: "active",
+      }),
       headers,
       method: "POST",
     });
     expect(active.status).toBe(202);
     await waitForStarted(startedPath, 1);
-    for (let index = 1; index <= 100; index += 1) {
-      const queued = await fetch(`${origin}/v1/prompts`, {
-        body: JSON.stringify({
-          sessionId: "limit_session",
-          text: `queued ${String(index)}`,
-        }),
-        headers,
-        method: "POST",
-      });
-      expect(queued.status).toBe(202);
-    }
-    const overflow = await fetch(`${origin}/v1/prompts`, {
-      body: JSON.stringify({
-        sessionId: "limit_session",
-        text: "queued 101",
+    const admissionResponses = await Promise.all(
+      Array.from({ length: 101 }, async (_unused, zeroBasedIndex) => {
+        const index = zeroBasedIndex + 1;
+        return fetch(`${origin}/v1/prompts`, {
+          body: JSON.stringify({
+            clientRequestId: `limit_request_${String(index)}`,
+            sessionId: "limit_session",
+            text: `queued ${String(index)}`,
+          }),
+          headers,
+          method: "POST",
+        });
       }),
-      headers,
-      method: "POST",
-    });
-    expect(overflow.status).toBe(429);
-    await expect(overflow.json()).resolves.toMatchObject({
+    );
+    expect(
+      admissionResponses.filter((response) => response.status === 202),
+    ).toHaveLength(100);
+    const rejected = admissionResponses.filter(
+      (response) => response.status === 429,
+    );
+    expect(rejected).toHaveLength(1);
+    await expect(rejected[0]?.json()).resolves.toMatchObject({
       error: {
         code: "QUEUE_FULL",
         limit: 100,
@@ -632,8 +691,139 @@ describe("global single serve across real processes", () => {
       },
       ok: false,
     });
+    const database = new NodeSqliteConnection(join(root, "agent.db"));
+    try {
+      const row = database
+        .prepare(
+          `SELECT COUNT(*) AS count
+             FROM prompt_submission
+            WHERE status = 'queued'`,
+        )
+        .get() as { readonly count: number };
+      expect(row.count).toBe(100);
+    } finally {
+      database.close();
+    }
     child.kill("SIGKILL");
     await waitForExit(child);
+  }, 20_000);
+
+  it("preserves queued work across a graceful daemon stop and resumes it after restart", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ohbaby-real-graceful-stop-"));
+    cleanupDirectories.push(root);
+    const repo = join(root, "repo");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    const authToken = "process-graceful-token";
+    const gatePath = join(root, "release");
+    const startedPath = join(root, "started.log");
+    const dbPath = join(root, "agent.db");
+    const common = {
+      authToken,
+      blockingProvider: { gatePath, startedPath },
+      dbPath,
+      homeDirectory: join(root, "home"),
+      workdir: repo,
+    };
+    const firstChild = spawnServe(common);
+    const first = await waitForReady(firstChild);
+    const origin = new URL(first.url).origin;
+    const headers = {
+      authorization: `Bearer ${authToken}`,
+      "content-type": "application/json",
+      "x-ohbaby-client-id": "graceful_client",
+      "x-ohbaby-directory": repo,
+    };
+    await fetch(`${origin}/v1/clients`, {
+      body: JSON.stringify({ clientId: "graceful_client" }),
+      headers,
+      method: "POST",
+    });
+    const receipts: { readonly promptId: string }[] = [];
+    for (const [index, text] of ["active", "queued"].entries()) {
+      const response = await fetch(`${origin}/v1/prompts`, {
+        body: JSON.stringify({
+          clientRequestId: `graceful_request_${String(index)}`,
+          sessionId: "graceful_session",
+          text,
+        }),
+        headers,
+        method: "POST",
+      });
+      expect(response.status).toBe(202);
+      receipts.push((await response.json()) as { readonly promptId: string });
+      if (index === 0) {
+        await waitForStarted(startedPath, 1);
+      }
+    }
+    await waitForStarted(startedPath, 1);
+
+    firstChild.kill("SIGTERM");
+    await waitForExit(firstChild);
+
+    const stoppedDatabase = new NodeSqliteConnection(dbPath);
+    try {
+      const rows = stoppedDatabase
+        .prepare(
+          `SELECT prompt_id, status
+             FROM prompt_submission
+            WHERE prompt_id IN (?, ?)
+            ORDER BY created_at ASC`,
+        )
+        .all(
+          receipts[0]?.promptId,
+          receipts[1]?.promptId,
+        ) as unknown as readonly {
+        readonly prompt_id: string;
+        readonly status: string;
+      }[];
+      expect(rows).toEqual([
+        { prompt_id: receipts[0]?.promptId, status: "running" },
+        { prompt_id: receipts[1]?.promptId, status: "queued" },
+      ]);
+    } finally {
+      stoppedDatabase.close();
+    }
+
+    await writeFile(gatePath, "release", "utf8");
+    const secondChild = spawnServe(common);
+    const second = await waitForReady(secondChild);
+    const secondOrigin = new URL(second.url).origin;
+    await fetch(`${secondOrigin}/v1/clients`, {
+      body: JSON.stringify({
+        clientId: "graceful_client",
+        startupIntent: { resumeSessionId: "graceful_session" },
+      }),
+      headers,
+      method: "POST",
+    });
+    await waitForStarted(startedPath, 2);
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const response = await fetch(`${secondOrigin}/v1/snapshot`, { headers });
+      const body = (await response.json()) as {
+        readonly snapshot: {
+          readonly prompts?: readonly {
+            readonly promptId: string;
+            readonly status: string;
+          }[];
+        };
+      };
+      const queued = body.snapshot.prompts?.find(
+        (prompt) => prompt.promptId === receipts[1]?.promptId,
+      );
+      const active = body.snapshot.prompts?.find(
+        (prompt) => prompt.promptId === receipts[0]?.promptId,
+      );
+      if (active?.status === "interrupted" && queued?.status === "succeeded") {
+        break;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error("Timed out waiting for graceful-stop queue recovery");
+      }
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
+    }
+    secondChild.kill("SIGTERM");
+    await waitForExit(secondChild);
   }, 20_000);
 
   it("keeps provider 429 distinct from local queue-full in a real process", async () => {
@@ -667,6 +857,7 @@ describe("global single serve across real processes", () => {
     });
     const accepted = await fetch(`${origin}/v1/prompts`, {
       body: JSON.stringify({
+        clientRequestId: "provider_request_1",
         sessionId: "provider_session",
         text: "fail with provider 429",
       }),
@@ -748,9 +939,10 @@ describe("global single serve across real processes", () => {
       method: "POST",
     });
     let queuedPromptId = "";
-    for (const text of ["active", "queued"]) {
+    for (const [index, text] of ["active", "queued"].entries()) {
       const response = await fetch(`${origin}/v1/prompts`, {
         body: JSON.stringify({
+          clientRequestId: `unavailable_request_${String(index)}`,
           sessionId: "unavailable_session",
           text,
         }),

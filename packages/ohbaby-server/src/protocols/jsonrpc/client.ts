@@ -225,6 +225,24 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("cancelQueuedPrompt", [input]);
   }
 
+  acquirePromptEditLease(
+    input: Parameters<UiPromptQueueClient["acquirePromptEditLease"]>[0],
+  ): ReturnType<UiPromptQueueClient["acquirePromptEditLease"]> {
+    return this.rpc("acquirePromptEditLease", [input]);
+  }
+
+  renewPromptEditLease(
+    input: Parameters<UiPromptQueueClient["renewPromptEditLease"]>[0],
+  ): ReturnType<UiPromptQueueClient["renewPromptEditLease"]> {
+    return this.rpc("renewPromptEditLease", [input]);
+  }
+
+  releasePromptEditLease(
+    input: Parameters<UiPromptQueueClient["releasePromptEditLease"]>[0],
+  ): ReturnType<UiPromptQueueClient["releasePromptEditLease"]> {
+    return this.rpc("releasePromptEditLease", [input]);
+  }
+
   waitForPrompt(
     promptId: string,
   ): ReturnType<UiPromptQueueClient["waitForPrompt"]> {

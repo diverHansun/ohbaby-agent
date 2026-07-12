@@ -229,6 +229,24 @@ function withStartupRecovery(
       await ready();
       return client.cancelQueuedPrompt(input);
     },
+    async acquirePromptEditLease(
+      input,
+    ): ReturnType<UiPromptQueueClient["acquirePromptEditLease"]> {
+      await ready();
+      return client.acquirePromptEditLease(input);
+    },
+    async renewPromptEditLease(
+      input,
+    ): ReturnType<UiPromptQueueClient["renewPromptEditLease"]> {
+      await ready();
+      return client.renewPromptEditLease(input);
+    },
+    async releasePromptEditLease(
+      input,
+    ): ReturnType<UiPromptQueueClient["releasePromptEditLease"]> {
+      await ready();
+      return client.releasePromptEditLease(input);
+    },
     async waitForPrompt(
       promptId,
     ): ReturnType<UiPromptQueueClient["waitForPrompt"]> {

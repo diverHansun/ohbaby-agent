@@ -38,6 +38,46 @@ export class PromptVersionConflictError extends Error {
   }
 }
 
+export class PromptIdempotencyConflictError extends Error {
+  readonly code = "IDEMPOTENCY_CONFLICT";
+
+  constructor(readonly clientRequestId: string) {
+    super(
+      `Prompt request id was reused with different input: ${clientRequestId}`,
+    );
+    this.name = "PromptIdempotencyConflictError";
+  }
+}
+
+export class InvalidPromptClientRequestIdError extends Error {
+  readonly code = "INVALID_CLIENT_REQUEST_ID";
+
+  constructor(readonly clientRequestId: string) {
+    super(
+      "Prompt clientRequestId must be non-empty and must not use the reserved legacy: prefix",
+    );
+    this.name = "InvalidPromptClientRequestIdError";
+  }
+}
+
+export class PromptEditLeaseHeldError extends Error {
+  readonly code = "PROMPT_EDIT_LEASE_HELD";
+
+  constructor(readonly promptId: string) {
+    super(`Prompt submission is already being edited: ${promptId}`);
+    this.name = "PromptEditLeaseHeldError";
+  }
+}
+
+export class PromptEditLeaseLostError extends Error {
+  readonly code = "PROMPT_EDIT_LEASE_LOST";
+
+  constructor(readonly promptId: string) {
+    super(`Prompt edit lease is no longer valid: ${promptId}`);
+    this.name = "PromptEditLeaseLostError";
+  }
+}
+
 export class InvalidPromptTransitionError extends Error {
   readonly code = "INVALID_PROMPT_TRANSITION";
 

@@ -7,6 +7,7 @@ import type {
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
   UiPromptCompletion,
+  UiPromptEditLease,
   UiPromptError,
   UiPromptReceipt,
   UiPromptSubmission,
@@ -298,6 +299,7 @@ function getErrorMessage(error: unknown): string {
 function promptRecordToUi(record: PromptSubmissionRecord): UiPromptSubmission {
   return {
     promptId: record.promptId,
+    clientRequestId: record.clientRequestId,
     scopeKey: record.scopeKey,
     sessionId: record.sessionId,
     userMessageId: record.userMessageId,
@@ -305,6 +307,11 @@ function promptRecordToUi(record: PromptSubmissionRecord): UiPromptSubmission {
     status: record.status,
     runId: record.runId,
     error: record.error,
+    editLeaseOwnerId: record.editLeaseOwnerId,
+    editLeaseExpiresAt:
+      record.editLeaseExpiresAt === undefined
+        ? undefined
+        : new Date(record.editLeaseExpiresAt).toISOString(),
     createdAt: new Date(record.createdAt).toISOString(),
     updatedAt: new Date(record.updatedAt).toISOString(),
     startedAt:
@@ -658,6 +665,8 @@ export function createInProcessUiBackendClient(
       implicitAdmissionSessionId = undefined;
     }
     const accepted = await promptScheduler.accept({
+      clientRequestId: submitOptions?.clientRequestId,
+      expectedSessionId: submitOptions?.sessionId,
       sessionId:
         submitOptions?.sessionId !== undefined
           ? async (): Promise<string> =>
@@ -676,9 +685,10 @@ export function createInProcessUiBackendClient(
     });
     return {
       promptId: accepted.promptId,
+      clientRequestId: accepted.clientRequestId,
       userMessageId: accepted.userMessageId,
       sessionId: accepted.sessionId,
-      status: "queued",
+      status: accepted.status,
       createdAt: new Date(accepted.createdAt).toISOString(),
     };
   }
@@ -691,14 +701,6 @@ export function createInProcessUiBackendClient(
         await promptScheduler.waitForCompletion(promptId),
       ),
     };
-  }
-
-  function parsePromptVersion(value: string): number {
-    const parsed = Date.parse(value);
-    if (Number.isNaN(parsed)) {
-      throw new RangeError(`Invalid prompt updatedAt: ${value}`);
-    }
-    return parsed;
   }
 
   async function submitPromptAndWait(
@@ -2203,9 +2205,9 @@ export function createInProcessUiBackendClient(
       input: UiEditQueuedPromptInput,
     ): Promise<UiPromptSubmission> {
       return promptRecordToUi(
-        await promptScheduler.editQueued(
+        await promptScheduler.commitEdit(
           input.promptId,
-          parsePromptVersion(input.expectedUpdatedAt),
+          input.editLeaseId,
           input.text,
         ),
       );
@@ -2215,9 +2217,42 @@ export function createInProcessUiBackendClient(
       input: UiCancelQueuedPromptInput,
     ): Promise<UiPromptSubmission> {
       return promptRecordToUi(
-        await promptScheduler.cancelQueued(
+        await promptScheduler.cancelQueued(input.promptId, input.editLeaseId),
+      );
+    },
+
+    async acquirePromptEditLease(input): Promise<UiPromptEditLease> {
+      const lease = await promptScheduler.acquireEditLease(
+        input.promptId,
+        input.ownerClientId,
+      );
+      return {
+        editLeaseId: lease.editLeaseId,
+        ownerClientId: lease.ownerClientId,
+        expiresAt: new Date(lease.expiresAt).toISOString(),
+        prompt: promptRecordToUi(lease.prompt),
+      };
+    },
+
+    async renewPromptEditLease(input): Promise<UiPromptEditLease> {
+      const lease = await promptScheduler.renewEditLease(
+        input.promptId,
+        input.editLeaseId,
+        input.ownerClientId,
+      );
+      return {
+        editLeaseId: lease.editLeaseId,
+        ownerClientId: lease.ownerClientId,
+        expiresAt: new Date(lease.expiresAt).toISOString(),
+        prompt: promptRecordToUi(lease.prompt),
+      };
+    },
+
+    async releasePromptEditLease(input): Promise<UiPromptSubmission> {
+      return promptRecordToUi(
+        await promptScheduler.releaseEditLease(
           input.promptId,
-          parsePromptVersion(input.expectedUpdatedAt),
+          input.editLeaseId,
         ),
       );
     },

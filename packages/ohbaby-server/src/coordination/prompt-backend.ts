@@ -23,6 +23,9 @@ export function supportsPromptQueue(
     typeof candidate.submitPromptAccepted === "function" &&
     typeof candidate.editQueuedPrompt === "function" &&
     typeof candidate.cancelQueuedPrompt === "function" &&
+    typeof candidate.acquirePromptEditLease === "function" &&
+    typeof candidate.renewPromptEditLease === "function" &&
+    typeof candidate.releasePromptEditLease === "function" &&
     typeof candidate.waitForPrompt === "function"
   );
 }

@@ -11,6 +11,7 @@ export type PromptSubmissionStatus =
 
 export interface PromptSubmissionRecord {
   readonly promptId: string;
+  readonly clientRequestId: string;
   readonly scopeKey: string;
   readonly sessionId: string;
   readonly userMessageId: string;
@@ -19,6 +20,9 @@ export interface PromptSubmissionRecord {
   readonly runId?: string;
   readonly ownerId?: string;
   readonly ownerPid?: number;
+  readonly editLeaseId?: string;
+  readonly editLeaseOwnerId?: string;
+  readonly editLeaseExpiresAt?: number;
   readonly error?: UiPromptError;
   readonly createdAt: number;
   readonly updatedAt: number;
@@ -28,11 +32,24 @@ export interface PromptSubmissionRecord {
 
 export interface AcceptPromptSubmissionInput {
   readonly promptId: string;
+  readonly clientRequestId: string;
   readonly scopeKey: string;
   readonly sessionId: string;
   readonly userMessageId: string;
   readonly text: string;
   readonly maxQueuedPrompts: number;
+}
+
+export interface AcceptPromptSubmissionResult {
+  readonly record: PromptSubmissionRecord;
+  readonly inserted: boolean;
+}
+
+export interface PromptEditLease {
+  readonly editLeaseId: string;
+  readonly ownerClientId: string;
+  readonly expiresAt: number;
+  readonly prompt: PromptSubmissionRecord;
 }
 
 export interface FinishPromptSubmissionInput {
@@ -46,16 +63,37 @@ export interface FinishPromptSubmissionInput {
 
 export interface PromptSubmissionStore {
   assertCapacity(scopeKey: string, maxQueuedPrompts: number): Promise<void>;
-  accept(input: AcceptPromptSubmissionInput): Promise<PromptSubmissionRecord>;
+  accept(
+    input: AcceptPromptSubmissionInput,
+  ): Promise<AcceptPromptSubmissionResult>;
   get(promptId: string): Promise<PromptSubmissionRecord | undefined>;
-  editQueued(
+  getByClientRequestId(
+    scopeKey: string,
+    clientRequestId: string,
+  ): Promise<PromptSubmissionRecord | undefined>;
+  acquireEditLease(
     promptId: string,
-    expectedUpdatedAt: number,
+    ownerClientId: string,
+    ttlMs: number,
+  ): Promise<PromptEditLease>;
+  renewEditLease(
+    promptId: string,
+    editLeaseId: string,
+    ownerClientId: string,
+    ttlMs: number,
+  ): Promise<PromptEditLease>;
+  commitEdit(
+    promptId: string,
+    editLeaseId: string,
     text: string,
+  ): Promise<PromptSubmissionRecord>;
+  releaseEditLease(
+    promptId: string,
+    editLeaseId: string,
   ): Promise<PromptSubmissionRecord>;
   cancelQueued(
     promptId: string,
-    expectedUpdatedAt: number,
+    editLeaseId?: string,
   ): Promise<PromptSubmissionRecord>;
   claim(promptId: string): Promise<PromptSubmissionRecord | null>;
   requeueBusy(promptId: string): Promise<PromptSubmissionRecord>;

@@ -1,8 +1,11 @@
 import type {
   SubmitPromptOptions,
+  UiAcquirePromptEditLeaseInput,
   UiBackendClient,
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
+  UiReleasePromptEditLeaseInput,
+  UiRenewPromptEditLeaseInput,
 } from "ohbaby-sdk";
 import {
   parseDaemonStartupIntent,
@@ -61,7 +64,21 @@ function submitPromptOptions(value: unknown): SubmitPromptOptions | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
+  if (
+    typeof value.clientRequestId === "string" &&
+    (value.clientRequestId.trim() === "" ||
+      value.clientRequestId.startsWith("legacy:"))
+  ) {
+    const error = new Error(
+      "clientRequestId must be non-empty and must not use the reserved legacy: prefix",
+    ) as Error & { code: string };
+    error.code = "INVALID_CLIENT_REQUEST_ID";
+    throw error;
+  }
   return {
+    ...(typeof value.clientRequestId === "string"
+      ? { clientRequestId: value.clientRequestId }
+      : {}),
     ...(typeof value.sessionId === "string"
       ? { sessionId: value.sessionId }
       : {}),
@@ -217,6 +234,42 @@ export async function callDaemonBackend(input: {
         throw new DaemonForbiddenError("Prompt belongs to another session");
       }
       return backend.cancelQueuedPrompt(input);
+    }
+    case "acquirePromptEditLease": {
+      if (!supportsPromptQueue(backend)) {
+        throw new Error("Durable prompt admission is not supported");
+      }
+      const input = request.params[0] as UiAcquirePromptEditLeaseInput;
+      if (
+        !clientViews.canAccessPrompt(
+          request.clientId,
+          await backend.getSnapshot(),
+          input.promptId,
+        )
+      ) {
+        throw new DaemonForbiddenError("Prompt belongs to another session");
+      }
+      return backend.acquirePromptEditLease({
+        ...input,
+        ownerClientId: request.clientId,
+      });
+    }
+    case "renewPromptEditLease": {
+      if (!supportsPromptQueue(backend)) {
+        throw new Error("Durable prompt admission is not supported");
+      }
+      const input = request.params[0] as UiRenewPromptEditLeaseInput;
+      return backend.renewPromptEditLease({
+        ...input,
+        ownerClientId: request.clientId,
+      });
+    }
+    case "releasePromptEditLease": {
+      if (!supportsPromptQueue(backend)) {
+        throw new Error("Durable prompt admission is not supported");
+      }
+      const input = request.params[0] as UiReleasePromptEditLeaseInput;
+      return backend.releasePromptEditLease(input);
     }
     case "waitForPrompt": {
       if (!supportsPromptQueue(backend)) {

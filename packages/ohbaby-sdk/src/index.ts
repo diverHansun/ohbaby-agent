@@ -14,8 +14,12 @@ export type {
   UiPromptCompletion,
   UiPromptError,
   UiPromptReceipt,
+  UiPromptEditLease,
   UiPromptSubmission,
   UiPromptSubmissionStatus,
+  UiAcquirePromptEditLeaseInput,
+  UiRenewPromptEditLeaseInput,
+  UiReleasePromptEditLeaseInput,
 } from "./prompt.js";
 export type {
   UiCompactSessionCompressionResult,

@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryPromptSubmissionStore } from "./in-memory-store.js";
-import { PromptSubmissionNotFoundError } from "./errors.js";
+import {
+  InvalidPromptClientRequestIdError,
+  PromptIdempotencyConflictError,
+  PromptSubmissionNotFoundError,
+} from "./errors.js";
 import { WorkspacePromptScheduler } from "./scheduler.js";
 
 function deferred(): {
@@ -15,6 +19,67 @@ function deferred(): {
 }
 
 describe("WorkspacePromptScheduler", () => {
+  it("returns the same accepted prompt for an idempotent retry without republishing", async () => {
+    const gate = deferred();
+    const onSubmitted = vi.fn();
+    const scheduler = new WorkspacePromptScheduler({
+      maxQueuedPrompts: 1,
+      onSubmitted,
+      scopeKey: "/workspace",
+      store: new InMemoryPromptSubmissionStore(),
+      async execute(): Promise<{ status: "succeeded" }> {
+        await gate.promise;
+        return { status: "succeeded" };
+      },
+    });
+    const input = {
+      clientRequestId: "request_1",
+      sessionId: "session_1",
+      text: "hello",
+    } as const;
+    const first = await scheduler.accept(input);
+    const duplicate = await scheduler.accept(input);
+
+    expect(duplicate.promptId).toBe(first.promptId);
+    expect(onSubmitted).toHaveBeenCalledTimes(1);
+    await expect(
+      scheduler.accept({ ...input, text: "different" }),
+    ).rejects.toBeInstanceOf(PromptIdempotencyConflictError);
+    gate.resolve();
+    await scheduler.waitForCompletion(first.promptId);
+  });
+
+  it("rejects reserved request ids and explicit-session idempotency conflicts", async () => {
+    const scheduler = new WorkspacePromptScheduler({
+      scopeKey: "/workspace",
+      store: new InMemoryPromptSubmissionStore(),
+      execute: (): Promise<{ status: "succeeded" }> =>
+        Promise.resolve({ status: "succeeded" }),
+    });
+
+    await expect(
+      scheduler.accept({
+        clientRequestId: "legacy:prompt_old",
+        sessionId: "session_1",
+        text: "legacy collision",
+      }),
+    ).rejects.toBeInstanceOf(InvalidPromptClientRequestIdError);
+    await scheduler.accept({
+      clientRequestId: "request_explicit",
+      expectedSessionId: "session_1",
+      sessionId: () => Promise.resolve("session_1"),
+      text: "same text",
+    });
+    await expect(
+      scheduler.accept({
+        clientRequestId: "request_explicit",
+        expectedSessionId: "session_2",
+        sessionId: () => Promise.resolve("session_2"),
+        text: "same text",
+      }),
+    ).rejects.toBeInstanceOf(PromptIdempotencyConflictError);
+  });
+
   it("does not lose a completion between the durable read and waiter setup", async () => {
     const release = deferred();
     const started = deferred();
@@ -185,15 +250,13 @@ describe("WorkspacePromptScheduler", () => {
     await vi.waitFor(() => {
       expect(executed).toEqual(["A"]);
     });
-    const edited = await scheduler.editQueued(
+    const lease = await scheduler.acquireEditLease(second.promptId, "client_1");
+    const edited = await scheduler.commitEdit(
       second.promptId,
-      second.updatedAt,
+      lease.editLeaseId,
       "B edited",
     );
-    const cancelled = await scheduler.cancelQueued(
-      third.promptId,
-      third.updatedAt,
-    );
+    const cancelled = await scheduler.cancelQueued(third.promptId);
     expect(edited.createdAt).toBe(second.createdAt);
     expect(cancelled.status).toBe("cancelled");
 
@@ -204,5 +267,60 @@ describe("WorkspacePromptScheduler", () => {
     expect(await store.get(third.promptId)).toMatchObject({
       status: "cancelled",
     });
+  });
+
+  it("does not cross a leased lane head while other sessions continue", async () => {
+    const firstGate = deferred();
+    const executed: string[] = [];
+    const scheduler = new WorkspacePromptScheduler({
+      scopeKey: "/workspace",
+      store: new InMemoryPromptSubmissionStore(),
+      async execute(prompt): Promise<{ status: "succeeded" }> {
+        executed.push(prompt.text);
+        if (prompt.text === "A") await firstGate.promise;
+        return { status: "succeeded" };
+      },
+    });
+    const a = await scheduler.accept({ sessionId: "session_1", text: "A" });
+    const b = await scheduler.accept({ sessionId: "session_1", text: "B" });
+    const c = await scheduler.accept({ sessionId: "session_1", text: "C" });
+    const lease = await scheduler.acquireEditLease(b.promptId, "client_1");
+    const d = await scheduler.accept({ sessionId: "session_2", text: "D" });
+
+    await vi.waitFor(() => {
+      expect(executed).toEqual(["A", "D"]);
+    });
+    firstGate.resolve();
+    await scheduler.waitForCompletion(a.promptId);
+    await scheduler.waitForCompletion(d.promptId);
+    expect(executed).toEqual(["A", "D"]);
+
+    await scheduler.releaseEditLease(b.promptId, lease.editLeaseId);
+    await scheduler.waitForCompletion(b.promptId);
+    await scheduler.waitForCompletion(c.promptId);
+    expect(executed).toEqual(["A", "D", "B", "C"]);
+  });
+
+  it("automatically wakes a leased lane when its lease expires", async () => {
+    const firstGate = deferred();
+    const executed: string[] = [];
+    const scheduler = new WorkspacePromptScheduler({
+      scopeKey: "/workspace",
+      store: new InMemoryPromptSubmissionStore(),
+      async execute(prompt): Promise<{ status: "succeeded" }> {
+        executed.push(prompt.text);
+        if (prompt.text === "A") await firstGate.promise;
+        return { status: "succeeded" };
+      },
+    });
+    const a = await scheduler.accept({ sessionId: "session_1", text: "A" });
+    const b = await scheduler.accept({ sessionId: "session_1", text: "B" });
+    await scheduler.acquireEditLease(b.promptId, "client_1", 30);
+
+    firstGate.resolve();
+    await scheduler.waitForCompletion(a.promptId);
+    await scheduler.waitForCompletion(b.promptId);
+
+    expect(executed).toEqual(["A", "B"]);
   });
 });

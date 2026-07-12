@@ -323,7 +323,9 @@ class DurablePromptFakeBackend
       return Promise.reject(this.admissionError);
     }
     const sessionId = options?.sessionId ?? "session_durable";
+    const clientRequestId = options?.clientRequestId ?? "request_1";
     this.prompt = {
+      clientRequestId,
       createdAt: timestamp,
       promptId: "prompt_1",
       scopeKey: "/workspace",
@@ -334,6 +336,7 @@ class DurablePromptFakeBackend
       userMessageId: "message_1",
     };
     return Promise.resolve({
+      clientRequestId,
       createdAt: timestamp,
       promptId: "prompt_1",
       sessionId,
@@ -389,6 +392,43 @@ class DurablePromptFakeBackend
       updatedAt: "2026-06-12T00:00:02.000Z",
     };
     this.resolveCompletion?.({ prompt: this.prompt });
+    return Promise.resolve(this.prompt);
+  }
+
+  acquirePromptEditLease(
+    input: Parameters<UiPromptQueueClient["acquirePromptEditLease"]>[0],
+  ): ReturnType<UiPromptQueueClient["acquirePromptEditLease"]> {
+    if (this.prompt?.promptId !== input.promptId) {
+      return Promise.reject(new Error("prompt not found"));
+    }
+    return Promise.resolve({
+      editLeaseId: "lease_1",
+      expiresAt: "2026-06-12T00:01:00.000Z",
+      ownerClientId: input.ownerClientId,
+      prompt: this.prompt,
+    });
+  }
+
+  renewPromptEditLease(
+    input: Parameters<UiPromptQueueClient["renewPromptEditLease"]>[0],
+  ): ReturnType<UiPromptQueueClient["renewPromptEditLease"]> {
+    if (this.prompt?.promptId !== input.promptId) {
+      return Promise.reject(new Error("prompt not found"));
+    }
+    return Promise.resolve({
+      editLeaseId: input.editLeaseId,
+      expiresAt: "2026-06-12T00:01:00.000Z",
+      ownerClientId: input.ownerClientId,
+      prompt: this.prompt,
+    });
+  }
+
+  releasePromptEditLease(
+    input: Parameters<UiPromptQueueClient["releasePromptEditLease"]>[0],
+  ): ReturnType<UiPromptQueueClient["releasePromptEditLease"]> {
+    if (this.prompt?.promptId !== input.promptId) {
+      return Promise.reject(new Error("prompt not found"));
+    }
     return Promise.resolve(this.prompt);
   }
 
@@ -2237,7 +2277,7 @@ describe("createDaemonServerApp", () => {
         method: "POST",
       });
       const response = await handle.app.request("/v1/prompts", {
-        body: JSON.stringify({ text: "hello" }),
+        body: JSON.stringify({ clientRequestId: "request_1", text: "hello" }),
         headers: {
           ...authHeaders(),
           "content-type": "application/json",
@@ -2281,12 +2321,13 @@ describe("createDaemonServerApp", () => {
         "x-ohbaby-client-id": "client_web",
       };
       const accepted = await handle.app.request("/v1/prompts", {
-        body: JSON.stringify({ text: "first" }),
+        body: JSON.stringify({ clientRequestId: "request_1", text: "first" }),
         headers,
         method: "POST",
       });
       expect(accepted.status).toBe(202);
       await expect(accepted.json()).resolves.toEqual({
+        clientRequestId: "request_1",
         createdAt: timestamp,
         ok: true,
         promptId: "prompt_1",
@@ -2295,9 +2336,53 @@ describe("createDaemonServerApp", () => {
         userMessageId: "message_1",
       });
 
+      const reservedRequest = await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({
+          clientRequestId: "legacy:prompt_1",
+          text: "collision",
+        }),
+        headers,
+        method: "POST",
+      });
+      expect(reservedRequest.status).toBe(400);
+      await expect(reservedRequest.json()).resolves.toMatchObject({
+        error: { code: "INVALID_CLIENT_REQUEST_ID" },
+        ok: false,
+      });
+
+      const leased = await handle.app.request(
+        "/v1/prompts/prompt_1/edit-lease",
+        { headers, method: "POST" },
+      );
+      expect(leased.status).toBe(200);
+
+      const renewed = await handle.app.request(
+        "/v1/prompts/prompt_1/edit-lease",
+        {
+          body: JSON.stringify({ editLeaseId: "lease_1" }),
+          headers,
+          method: "PATCH",
+        },
+      );
+      expect(renewed.status).toBe(200);
+      const released = await handle.app.request(
+        "/v1/prompts/prompt_1/edit-lease",
+        {
+          body: JSON.stringify({ editLeaseId: "lease_1" }),
+          headers,
+          method: "DELETE",
+        },
+      );
+      expect(released.status).toBe(200);
+      const reacquired = await handle.app.request(
+        "/v1/prompts/prompt_1/edit-lease",
+        { headers, method: "POST" },
+      );
+      expect(reacquired.status).toBe(200);
+
       const edited = await handle.app.request("/v1/prompts/prompt_1", {
         body: JSON.stringify({
-          expectedUpdatedAt: timestamp,
+          editLeaseId: "lease_1",
           text: "edited",
         }),
         headers,
@@ -2310,9 +2395,7 @@ describe("createDaemonServerApp", () => {
       });
 
       const cancelled = await handle.app.request("/v1/prompts/prompt_1", {
-        body: JSON.stringify({
-          expectedUpdatedAt: "2026-06-12T00:00:01.000Z",
-        }),
+        body: JSON.stringify({}),
         headers,
         method: "DELETE",
       });
@@ -2359,10 +2442,33 @@ describe("createDaemonServerApp", () => {
         ok: true,
         result: { promptId: "prompt_1", status: "queued" },
       });
+      const reservedRpcRequest = await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          clientId: "rpc_client",
+          id: "rpc_reserved_request",
+          method: "submitPromptAccepted",
+          params: ["collision", { clientRequestId: "legacy:prompt_1" }],
+        }),
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        method: "POST",
+      });
+      expect(reservedRpcRequest.status).toBe(400);
+      await expect(reservedRpcRequest.json()).resolves.toMatchObject({
+        error: { code: "INVALID_CLIENT_REQUEST_ID" },
+        ok: false,
+      });
+      await expect(
+        rpc("acquirePromptEditLease", [
+          { ownerClientId: "rpc_client", promptId: "prompt_1" },
+        ]),
+      ).resolves.toMatchObject({
+        ok: true,
+        result: { editLeaseId: "lease_1", prompt: { promptId: "prompt_1" } },
+      });
       await expect(
         rpc("editQueuedPrompt", [
           {
-            expectedUpdatedAt: timestamp,
+            editLeaseId: "lease_1",
             promptId: "prompt_1",
             text: "edited",
           },
@@ -2373,7 +2479,6 @@ describe("createDaemonServerApp", () => {
       });
       await rpc("cancelQueuedPrompt", [
         {
-          expectedUpdatedAt: "2026-06-12T00:00:01.000Z",
           promptId: "prompt_1",
         },
       ]);
@@ -2429,7 +2534,11 @@ describe("createDaemonServerApp", () => {
         method: "POST",
       });
       const http = await handle.app.request("/v1/prompts", {
-        body: JSON.stringify({ sessionId: "session_1", text: "overflow" }),
+        body: JSON.stringify({
+          clientRequestId: "request_overflow",
+          sessionId: "session_1",
+          text: "overflow",
+        }),
         headers: {
           ...authHeaders(),
           "content-type": "application/json",
@@ -2506,7 +2615,7 @@ describe("createDaemonServerApp", () => {
       });
 
       const response = await handle.app.request("/v1/prompts", {
-        body: JSON.stringify({ text: "hello" }),
+        body: JSON.stringify({ clientRequestId: "request_1", text: "hello" }),
         headers: {
           ...authHeaders(),
           "content-type": "application/json",

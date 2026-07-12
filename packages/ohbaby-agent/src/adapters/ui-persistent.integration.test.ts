@@ -800,13 +800,16 @@ describe("createPersistentUiBackendClient", () => {
       if (!queuedSecond || !queuedThird) {
         throw new Error("expected queued prompt projections");
       }
+      const secondLease = await client.acquirePromptEditLease({
+        ownerClientId: "client_test",
+        promptId: second.promptId,
+      });
       const edited = await client.editQueuedPrompt({
-        expectedUpdatedAt: queuedSecond.updatedAt,
+        editLeaseId: secondLease.editLeaseId,
         promptId: second.promptId,
         text: "second edited",
       });
       const cancelled = await client.cancelQueuedPrompt({
-        expectedUpdatedAt: queuedThird.updatedAt,
         promptId: third.promptId,
       });
       expect(edited.text).toBe("second edited");
@@ -915,7 +918,6 @@ describe("createPersistentUiBackendClient", () => {
       }
 
       await client.cancelQueuedPrompt({
-        expectedUpdatedAt: eleventh.updatedAt,
         promptId: eleventh.promptId,
       });
       const permission = snapshot.permissions[0];

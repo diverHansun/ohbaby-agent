@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { UiPromptError } from "ohbaby-sdk";
 import {
+  InvalidPromptClientRequestIdError,
+  PromptIdempotencyConflictError,
   PromptSchedulerClosedError,
   PromptSubmissionNotFoundError,
 } from "./errors.js";
 import type {
   PromptSubmissionExecutor,
+  PromptEditLease,
   PromptSubmissionRecord,
   PromptSubmissionStore,
 } from "./types.js";
@@ -25,6 +28,8 @@ export interface WorkspacePromptSchedulerOptions {
 }
 
 export interface AcceptWorkspacePromptInput {
+  readonly clientRequestId?: string;
+  readonly expectedSessionId?: string;
   readonly sessionId: string | (() => Promise<string>);
   readonly text: string;
   readonly userMessageId?: string;
@@ -105,6 +110,31 @@ export class WorkspacePromptScheduler {
     });
     await previous;
     try {
+      if (
+        input.clientRequestId !== undefined &&
+        (input.clientRequestId.trim() === "" ||
+          input.clientRequestId.startsWith("legacy:"))
+      ) {
+        throw new InvalidPromptClientRequestIdError(input.clientRequestId);
+      }
+      const clientRequestId = input.clientRequestId ?? randomUUID();
+      const existing = await this.options.store.getByClientRequestId(
+        this.options.scopeKey,
+        clientRequestId,
+      );
+      if (existing) {
+        const expectedSessionId =
+          input.expectedSessionId ??
+          (typeof input.sessionId === "string" ? input.sessionId : undefined);
+        if (
+          existing.text !== input.text ||
+          (expectedSessionId !== undefined &&
+            existing.sessionId !== expectedSessionId)
+        ) {
+          throw new PromptIdempotencyConflictError(clientRequestId);
+        }
+        return existing;
+      }
       await this.options.store.assertCapacity(
         this.options.scopeKey,
         this.maxQueuedPrompts,
@@ -113,7 +143,8 @@ export class WorkspacePromptScheduler {
         typeof input.sessionId === "function"
           ? await input.sessionId()
           : input.sessionId;
-      const prompt = await this.options.store.accept({
+      const accepted = await this.options.store.accept({
+        clientRequestId,
         maxQueuedPrompts: this.maxQueuedPrompts,
         promptId: this.options.createPromptId?.() ?? `prompt_${randomUUID()}`,
         scopeKey: this.options.scopeKey,
@@ -124,7 +155,10 @@ export class WorkspacePromptScheduler {
           this.options.createUserMessageId?.() ??
           `message_${randomUUID()}`,
       });
-      this.options.onSubmitted?.(prompt);
+      const prompt = accepted.record;
+      if (accepted.inserted) {
+        this.options.onSubmitted?.(prompt);
+      }
       this.requestDrain();
       return prompt;
     } finally {
@@ -132,30 +166,76 @@ export class WorkspacePromptScheduler {
     }
   }
 
-  async editQueued(
+  async acquireEditLease(
     promptId: string,
-    expectedUpdatedAt: number,
+    ownerClientId: string,
+    ttlMs = 60_000,
+  ): Promise<PromptEditLease> {
+    this.assertOpen();
+    const lease = await this.options.store.acquireEditLease(
+      promptId,
+      ownerClientId,
+      ttlMs,
+    );
+    this.options.onUpdated?.(lease.prompt);
+    this.requestDrain(Math.max(1, lease.expiresAt - Date.now()));
+    return lease;
+  }
+
+  async renewEditLease(
+    promptId: string,
+    editLeaseId: string,
+    ownerClientId: string,
+    ttlMs = 60_000,
+  ): Promise<PromptEditLease> {
+    this.assertOpen();
+    const lease = await this.options.store.renewEditLease(
+      promptId,
+      editLeaseId,
+      ownerClientId,
+      ttlMs,
+    );
+    this.options.onUpdated?.(lease.prompt);
+    this.requestDrain(Math.max(1, lease.expiresAt - Date.now()));
+    return lease;
+  }
+
+  async commitEdit(
+    promptId: string,
+    editLeaseId: string,
     text: string,
   ): Promise<PromptSubmissionRecord> {
     this.assertOpen();
-    const prompt = await this.options.store.editQueued(
+    const prompt = await this.options.store.commitEdit(
       promptId,
-      expectedUpdatedAt,
+      editLeaseId,
       text,
     );
     this.options.onUpdated?.(prompt);
+    this.requestDrain();
+    return prompt;
+  }
+
+  async releaseEditLease(
+    promptId: string,
+    editLeaseId: string,
+  ): Promise<PromptSubmissionRecord> {
+    this.assertOpen();
+    const prompt = await this.options.store.releaseEditLease(
+      promptId,
+      editLeaseId,
+    );
+    this.options.onUpdated?.(prompt);
+    this.requestDrain();
     return prompt;
   }
 
   async cancelQueued(
     promptId: string,
-    expectedUpdatedAt: number,
+    editLeaseId?: string,
   ): Promise<PromptSubmissionRecord> {
     this.assertOpen();
-    const prompt = await this.options.store.cancelQueued(
-      promptId,
-      expectedUpdatedAt,
-    );
+    const prompt = await this.options.store.cancelQueued(promptId, editLeaseId);
     this.options.onUpdated?.(prompt);
     this.resolveCompletion(prompt);
     this.requestDrain();
@@ -256,16 +336,29 @@ export class WorkspacePromptScheduler {
             this.busySessionsUntil.delete(sessionId);
           }
         }
-        const candidate = queued.find(
+        const laneHeads = new Map<string, PromptSubmissionRecord>();
+        for (const prompt of queued) {
+          if (!laneHeads.has(prompt.sessionId)) {
+            laneHeads.set(prompt.sessionId, prompt);
+          }
+        }
+        const candidate = [...laneHeads.values()].find(
           (prompt) =>
             !this.activeBySession.has(prompt.sessionId) &&
-            !this.busySessionsUntil.has(prompt.sessionId),
+            !this.busySessionsUntil.has(prompt.sessionId) &&
+            (prompt.editLeaseExpiresAt ?? 0) <= now,
         );
         if (!candidate) {
           const nextRetryAt = Math.min(
-            ...queued.flatMap((prompt) => {
+            ...[...laneHeads.values()].flatMap((prompt) => {
               const blockedUntil = this.busySessionsUntil.get(prompt.sessionId);
-              return blockedUntil === undefined ? [] : [blockedUntil];
+              const leaseExpiresAt = prompt.editLeaseExpiresAt;
+              return [
+                ...(blockedUntil === undefined ? [] : [blockedUntil]),
+                ...(leaseExpiresAt === undefined || leaseExpiresAt <= now
+                  ? []
+                  : [leaseExpiresAt]),
+              ];
             }),
           );
           if (Number.isFinite(nextRetryAt)) {

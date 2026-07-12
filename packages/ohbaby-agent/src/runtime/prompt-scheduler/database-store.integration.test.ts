@@ -8,7 +8,12 @@ import {
   initDatabase,
 } from "../../services/database/index.js";
 import { DatabasePromptSubmissionStore } from "./database-store.js";
-import { PromptNotQueuedError, PromptQueueFullError } from "./errors.js";
+import {
+  PromptEditLeaseHeldError,
+  PromptEditLeaseLostError,
+  PromptNotQueuedError,
+  PromptQueueFullError,
+} from "./errors.js";
 
 describe("DatabasePromptSubmissionStore", () => {
   let directory: string;
@@ -37,6 +42,7 @@ describe("DatabasePromptSubmissionStore", () => {
       now: (): number => ++now,
     });
     const first = await store.accept({
+      clientRequestId: "request_1",
       maxQueuedPrompts: 100,
       promptId: "prompt_1",
       scopeKey: "/workspace",
@@ -44,21 +50,26 @@ describe("DatabasePromptSubmissionStore", () => {
       text: "before",
       userMessageId: "message_1",
     });
-    const edited = await store.editQueued(
-      first.promptId,
-      first.updatedAt,
+    const lease = await store.acquireEditLease(
+      first.record.promptId,
+      "client_1",
+      60_000,
+    );
+    const edited = await store.commitEdit(
+      first.record.promptId,
+      lease.editLeaseId,
       "after",
     );
     expect(edited).toMatchObject({ text: "after", status: "queued" });
-    const claimed = await store.claim(first.promptId);
+    const claimed = await store.claim(first.record.promptId);
     expect(claimed?.status).toBe("starting");
     await expect(
-      store.cancelQueued(first.promptId, edited.updatedAt),
+      store.cancelQueued(first.record.promptId),
     ).rejects.toBeInstanceOf(PromptNotQueuedError);
-    await store.markRunning(first.promptId, "run_1");
+    await store.markRunning(first.record.promptId, "run_1");
 
     expect(await store.recoverInterrupted("/workspace")).toBe(1);
-    expect(await store.get(first.promptId)).toMatchObject({
+    expect(await store.get(first.record.promptId)).toMatchObject({
       runId: "run_1",
       status: "interrupted",
       text: "after",
@@ -77,6 +88,7 @@ describe("DatabasePromptSubmissionStore", () => {
       now: (): number => ++now,
     });
     const running = await store.accept({
+      clientRequestId: "request_running",
       maxQueuedPrompts: 100,
       promptId: "prompt_running",
       scopeKey: "/workspace",
@@ -84,9 +96,10 @@ describe("DatabasePromptSubmissionStore", () => {
       text: "running",
       userMessageId: "message_running",
     });
-    await store.claim(running.promptId);
-    await store.markRunning(running.promptId, "run_running");
+    await store.claim(running.record.promptId);
+    await store.markRunning(running.record.promptId, "run_running");
     await store.accept({
+      clientRequestId: "request_queued",
       maxQueuedPrompts: 100,
       promptId: "prompt_queued",
       scopeKey: "/workspace-2",
@@ -102,6 +115,7 @@ describe("DatabasePromptSubmissionStore", () => {
       ownerPid: 42,
     });
     const live = await liveStore.accept({
+      clientRequestId: "request_live",
       maxQueuedPrompts: 100,
       promptId: "prompt_live",
       scopeKey: "/workspace-2",
@@ -109,13 +123,13 @@ describe("DatabasePromptSubmissionStore", () => {
       text: "live",
       userMessageId: "message_live",
     });
-    await liveStore.claim(live.promptId);
+    await liveStore.claim(live.record.promptId);
 
     expect(await liveStore.recoverAllInterrupted()).toBe(1);
-    expect(await store.get(running.promptId)).toMatchObject({
+    expect(await store.get(running.record.promptId)).toMatchObject({
       status: "interrupted",
     });
-    expect(await store.get(live.promptId)).toMatchObject({
+    expect(await store.get(live.record.promptId)).toMatchObject({
       ownerId: "live-owner",
       ownerPid: 42,
       status: "starting",
@@ -131,6 +145,7 @@ describe("DatabasePromptSubmissionStore", () => {
     });
     for (let index = 0; index < 100; index += 1) {
       await store.accept({
+        clientRequestId: `request_${String(index)}`,
         maxQueuedPrompts: 100,
         promptId: `prompt_${String(index)}`,
         scopeKey: "/workspace",
@@ -141,6 +156,7 @@ describe("DatabasePromptSubmissionStore", () => {
     }
     await expect(
       store.accept({
+        clientRequestId: "request_overflow",
         maxQueuedPrompts: 100,
         promptId: "prompt_overflow",
         scopeKey: "/workspace",
@@ -156,6 +172,7 @@ describe("DatabasePromptSubmissionStore", () => {
       now: (): number => ++now,
     });
     const queued = await store.accept({
+      clientRequestId: "request_unavailable",
       maxQueuedPrompts: 100,
       promptId: "prompt_unavailable",
       scopeKey: "/missing-workspace",
@@ -171,9 +188,71 @@ describe("DatabasePromptSubmissionStore", () => {
         source: "runtime",
       }),
     ).resolves.toBe(1);
-    await expect(store.get(queued.promptId)).resolves.toMatchObject({
+    await expect(store.get(queued.record.promptId)).resolves.toMatchObject({
       error: { code: "WORKSPACE_UNAVAILABLE" },
       status: "failed",
     });
+  });
+
+  it("deduplicates requests and persists a renewable edit lease", async () => {
+    const store = new DatabasePromptSubmissionStore({ now: (): number => now });
+    const input = {
+      clientRequestId: "request_idempotent",
+      maxQueuedPrompts: 100,
+      promptId: "prompt_idempotent",
+      scopeKey: "/workspace",
+      sessionId: "session_1",
+      text: "before",
+      userMessageId: "message_idempotent",
+    } as const;
+    const first = await store.accept(input);
+    const duplicate = await store.accept({
+      ...input,
+      promptId: "prompt_duplicate",
+      userMessageId: "message_duplicate",
+    });
+    expect(first.inserted).toBe(true);
+    expect(duplicate).toMatchObject({
+      inserted: false,
+      record: { promptId: "prompt_idempotent" },
+    });
+
+    const lease = await store.acquireEditLease(
+      "prompt_idempotent",
+      "client_1",
+      60,
+    );
+    await expect(store.claim("prompt_idempotent")).resolves.toBeNull();
+    await expect(
+      store.acquireEditLease("prompt_idempotent", "client_2", 60),
+    ).rejects.toBeInstanceOf(PromptEditLeaseHeldError);
+    await expect(
+      store.cancelQueued("prompt_idempotent"),
+    ).rejects.toBeInstanceOf(PromptEditLeaseHeldError);
+    await expect(
+      store.releaseEditLease("prompt_idempotent", "wrong_lease"),
+    ).rejects.toBeInstanceOf(PromptEditLeaseLostError);
+    const renewed = await store.renewEditLease(
+      "prompt_idempotent",
+      lease.editLeaseId,
+      "client_2",
+      60,
+    );
+    expect(renewed.ownerClientId).toBe("client_2");
+    const edited = await store.commitEdit(
+      "prompt_idempotent",
+      lease.editLeaseId,
+      "after",
+    );
+    expect(edited).toMatchObject({ text: "after", editLeaseId: undefined });
+    const expiring = await store.acquireEditLease(
+      "prompt_idempotent",
+      "client_1",
+      60,
+    );
+    now = expiring.expiresAt;
+    await expect(
+      store.commitEdit("prompt_idempotent", expiring.editLeaseId, "too late"),
+    ).rejects.toBeInstanceOf(PromptEditLeaseLostError);
   });
 });

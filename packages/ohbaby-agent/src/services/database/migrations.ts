@@ -351,4 +351,22 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
       ALTER TABLE run_ledger ADD COLUMN error_data TEXT;
     `,
   },
+  {
+    version: "015_prompt_submission_idempotency_lease",
+    sql: `
+      ALTER TABLE prompt_submission
+        ADD COLUMN client_request_id TEXT NOT NULL DEFAULT '';
+      ALTER TABLE prompt_submission ADD COLUMN edit_lease_id TEXT;
+      ALTER TABLE prompt_submission ADD COLUMN edit_lease_owner_id TEXT;
+      ALTER TABLE prompt_submission ADD COLUMN edit_lease_expires_at INTEGER;
+
+      UPDATE prompt_submission
+      SET client_request_id = 'legacy:' || prompt_id
+      WHERE client_request_id = '';
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_prompt_submission_scope_client_request
+        ON prompt_submission(scope_key, client_request_id)
+        WHERE client_request_id <> '';
+    `,
+  },
 ];

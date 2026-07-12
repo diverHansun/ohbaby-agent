@@ -113,6 +113,7 @@ describe("createRemoteUiBackendClient", () => {
         };
         methods.push(body.method);
         const prompt = {
+          clientRequestId: "request_1",
           createdAt: "2026-06-12T00:00:00.000Z",
           promptId: "prompt_1",
           scopeKey: "/repo-a",
@@ -126,16 +127,25 @@ describe("createRemoteUiBackendClient", () => {
           body.method === "submitPromptAccepted"
             ? {
                 createdAt: prompt.createdAt,
+                clientRequestId: prompt.clientRequestId,
                 promptId: prompt.promptId,
                 sessionId: prompt.sessionId,
                 status: "queued",
                 userMessageId: prompt.userMessageId,
               }
-            : body.method === "waitForPrompt"
-              ? { prompt: { ...prompt, status: "cancelled" } }
-              : body.method === "initializeClient"
-                ? undefined
-                : prompt;
+            : body.method === "acquirePromptEditLease" ||
+                body.method === "renewPromptEditLease"
+              ? {
+                  editLeaseId: "lease_1",
+                  expiresAt: "2026-06-12T00:01:00.000Z",
+                  ownerClientId: "client_1",
+                  prompt,
+                }
+              : body.method === "waitForPrompt"
+                ? { prompt: { ...prompt, status: "cancelled" } }
+                : body.method === "initializeClient"
+                  ? undefined
+                  : prompt;
         return Promise.resolve(
           new Response(JSON.stringify({ id: body.id, ok: true, result }), {
             headers: { "content-type": "application/json" },
@@ -151,15 +161,32 @@ describe("createRemoteUiBackendClient", () => {
     });
 
     const receipt = await client.submitPromptAccepted("first", {
+      clientRequestId: "request_1",
       sessionId: "session_1",
     });
+    const lease = await client.acquirePromptEditLease({
+      ownerClientId: "client_1",
+      promptId: receipt.promptId,
+    });
+    await client.renewPromptEditLease({
+      editLeaseId: lease.editLeaseId,
+      ownerClientId: "client_1",
+      promptId: receipt.promptId,
+    });
+    await client.releasePromptEditLease({
+      editLeaseId: lease.editLeaseId,
+      promptId: receipt.promptId,
+    });
+    await client.acquirePromptEditLease({
+      ownerClientId: "client_1",
+      promptId: receipt.promptId,
+    });
     await client.editQueuedPrompt({
-      expectedUpdatedAt: receipt.createdAt,
+      editLeaseId: "lease_1",
       promptId: receipt.promptId,
       text: "edited",
     });
     await client.cancelQueuedPrompt({
-      expectedUpdatedAt: "2026-06-12T00:00:01.000Z",
       promptId: receipt.promptId,
     });
     await expect(client.waitForPrompt(receipt.promptId)).resolves.toMatchObject(
@@ -170,6 +197,10 @@ describe("createRemoteUiBackendClient", () => {
     expect(methods).toEqual([
       "initializeClient",
       "submitPromptAccepted",
+      "acquirePromptEditLease",
+      "renewPromptEditLease",
+      "releasePromptEditLease",
+      "acquirePromptEditLease",
       "editQueuedPrompt",
       "cancelQueuedPrompt",
       "waitForPrompt",

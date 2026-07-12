@@ -21,6 +21,7 @@ export interface UiPromptError {
 
 export interface UiPromptSubmission {
   readonly promptId: string;
+  readonly clientRequestId: string;
   readonly scopeKey: string;
   readonly sessionId: string;
   readonly userMessageId: string;
@@ -28,6 +29,8 @@ export interface UiPromptSubmission {
   readonly status: UiPromptSubmissionStatus;
   readonly runId?: string;
   readonly error?: UiPromptError;
+  readonly editLeaseOwnerId?: string;
+  readonly editLeaseExpiresAt?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly startedAt?: string;
@@ -36,9 +39,10 @@ export interface UiPromptSubmission {
 
 export interface UiPromptReceipt {
   readonly promptId: string;
+  readonly clientRequestId: string;
   readonly userMessageId: string;
   readonly sessionId: string;
-  readonly status: "queued" | "starting" | "running";
+  readonly status: UiPromptSubmissionStatus;
   readonly createdAt: string;
 }
 
@@ -49,10 +53,33 @@ export interface UiPromptCompletion {
 export interface UiEditQueuedPromptInput {
   readonly promptId: string;
   readonly text: string;
-  readonly expectedUpdatedAt: string;
+  readonly editLeaseId: string;
 }
 
 export interface UiCancelQueuedPromptInput {
   readonly promptId: string;
-  readonly expectedUpdatedAt: string;
+  readonly editLeaseId?: string;
+}
+
+export interface UiPromptEditLease {
+  readonly editLeaseId: string;
+  readonly ownerClientId: string;
+  readonly expiresAt: string;
+  readonly prompt: UiPromptSubmission;
+}
+
+export interface UiAcquirePromptEditLeaseInput {
+  readonly promptId: string;
+  readonly ownerClientId: string;
+}
+
+export interface UiRenewPromptEditLeaseInput {
+  readonly promptId: string;
+  readonly editLeaseId: string;
+  readonly ownerClientId: string;
+}
+
+export interface UiReleasePromptEditLeaseInput {
+  readonly promptId: string;
+  readonly editLeaseId: string;
 }

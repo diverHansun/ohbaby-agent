@@ -1,6 +1,11 @@
 /* eslint-disable @typescript-eslint/require-await -- The in-memory store intentionally implements the same async contract as SQLite. */
+import { randomUUID } from "node:crypto";
 import {
+  InvalidPromptClientRequestIdError,
   InvalidPromptTransitionError,
+  PromptEditLeaseHeldError,
+  PromptEditLeaseLostError,
+  PromptIdempotencyConflictError,
   PromptNotQueuedError,
   PromptQueueFullError,
   PromptSubmissionNotFoundError,
@@ -8,7 +13,9 @@ import {
 } from "./errors.js";
 import type {
   AcceptPromptSubmissionInput,
+  AcceptPromptSubmissionResult,
   FinishPromptSubmissionInput,
+  PromptEditLease,
   PromptSubmissionRecord,
   PromptSubmissionStore,
 } from "./types.js";
@@ -34,6 +41,7 @@ function compareOrder(
 export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
   private readonly records = new Map<string, PromptSubmissionRecord>();
   private readonly now: () => number;
+  private lastCreatedAt = 0;
 
   constructor(options: InMemoryPromptSubmissionStoreOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -53,7 +61,27 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
 
   async accept(
     input: AcceptPromptSubmissionInput,
-  ): Promise<PromptSubmissionRecord> {
+  ): Promise<AcceptPromptSubmissionResult> {
+    if (
+      input.clientRequestId.trim() === "" ||
+      input.clientRequestId.startsWith("legacy:")
+    ) {
+      throw new InvalidPromptClientRequestIdError(input.clientRequestId);
+    }
+    const existing = [...this.records.values()].find(
+      (record) =>
+        record.scopeKey === input.scopeKey &&
+        record.clientRequestId === input.clientRequestId,
+    );
+    if (existing) {
+      if (
+        existing.sessionId !== input.sessionId ||
+        existing.text !== input.text
+      ) {
+        throw new PromptIdempotencyConflictError(input.clientRequestId);
+      }
+      return { record: clone(existing), inserted: false };
+    }
     if (this.records.has(input.promptId)) {
       throw new InvalidPromptTransitionError(
         input.promptId,
@@ -61,10 +89,18 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
         "queued",
       );
     }
-    await this.assertCapacity(input.scopeKey, input.maxQueuedPrompts);
-    const at = this.now();
+    const queuedCount = [...this.records.values()].filter(
+      (record) =>
+        record.scopeKey === input.scopeKey && record.status === "queued",
+    ).length;
+    if (queuedCount >= input.maxQueuedPrompts) {
+      throw new PromptQueueFullError(input.scopeKey, input.maxQueuedPrompts);
+    }
+    const at = Math.max(this.now(), this.lastCreatedAt + 1);
+    this.lastCreatedAt = at;
     const record: PromptSubmissionRecord = {
       promptId: input.promptId,
+      clientRequestId: input.clientRequestId,
       scopeKey: input.scopeKey,
       sessionId: input.sessionId,
       userMessageId: input.userMessageId,
@@ -74,7 +110,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       updatedAt: at,
     };
     this.records.set(record.promptId, record);
-    return clone(record);
+    return { record: clone(record), inserted: true };
   }
 
   async get(promptId: string): Promise<PromptSubmissionRecord | undefined> {
@@ -82,28 +118,129 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     return record ? clone(record) : undefined;
   }
 
-  async editQueued(
+  async getByClientRequestId(
+    scopeKey: string,
+    clientRequestId: string,
+  ): Promise<PromptSubmissionRecord | undefined> {
+    const record = [...this.records.values()].find(
+      (candidate) =>
+        candidate.scopeKey === scopeKey &&
+        candidate.clientRequestId === clientRequestId,
+    );
+    return record ? clone(record) : undefined;
+  }
+
+  async acquireEditLease(
     promptId: string,
-    expectedUpdatedAt: number,
+    ownerClientId: string,
+    ttlMs: number,
+  ): Promise<PromptEditLease> {
+    const current = this.require(promptId);
+    this.assertQueued(current);
+    const now = this.now();
+    if (
+      current.editLeaseId !== undefined &&
+      (current.editLeaseExpiresAt ?? 0) > now
+    ) {
+      throw new PromptEditLeaseHeldError(promptId);
+    }
+    const editLeaseId = `lease_${randomUUID()}`;
+    const expiresAt = now + ttlMs;
+    const updated: PromptSubmissionRecord = {
+      ...current,
+      editLeaseId,
+      editLeaseOwnerId: ownerClientId,
+      editLeaseExpiresAt: expiresAt,
+      updatedAt: this.nextTime(current),
+    };
+    this.records.set(promptId, updated);
+    return {
+      editLeaseId,
+      ownerClientId,
+      expiresAt,
+      prompt: clone(updated),
+    };
+  }
+
+  async renewEditLease(
+    promptId: string,
+    editLeaseId: string,
+    ownerClientId: string,
+    ttlMs: number,
+  ): Promise<PromptEditLease> {
+    const current = this.require(promptId);
+    this.assertLease(current, editLeaseId);
+    const expiresAt = this.now() + ttlMs;
+    const updated: PromptSubmissionRecord = {
+      ...current,
+      editLeaseOwnerId: ownerClientId,
+      editLeaseExpiresAt: expiresAt,
+      updatedAt: this.nextTime(current),
+    };
+    this.records.set(promptId, updated);
+    return {
+      editLeaseId,
+      ownerClientId,
+      expiresAt,
+      prompt: clone(updated),
+    };
+  }
+
+  async commitEdit(
+    promptId: string,
+    editLeaseId: string,
     text: string,
   ): Promise<PromptSubmissionRecord> {
     const current = this.require(promptId);
-    this.assertQueuedVersion(current, expectedUpdatedAt);
-    const updated = { ...current, text, updatedAt: this.nextTime(current) };
+    this.assertLease(current, editLeaseId);
+    const updated: PromptSubmissionRecord = {
+      ...current,
+      text,
+      editLeaseId: undefined,
+      editLeaseOwnerId: undefined,
+      editLeaseExpiresAt: undefined,
+      updatedAt: this.nextTime(current),
+    };
+    this.records.set(promptId, updated);
+    return clone(updated);
+  }
+
+  async releaseEditLease(
+    promptId: string,
+    editLeaseId: string,
+  ): Promise<PromptSubmissionRecord> {
+    const current = this.require(promptId);
+    this.assertLease(current, editLeaseId);
+    const updated: PromptSubmissionRecord = {
+      ...current,
+      editLeaseId: undefined,
+      editLeaseOwnerId: undefined,
+      editLeaseExpiresAt: undefined,
+      updatedAt: this.nextTime(current),
+    };
     this.records.set(promptId, updated);
     return clone(updated);
   }
 
   async cancelQueued(
     promptId: string,
-    expectedUpdatedAt: number,
+    editLeaseId?: string,
   ): Promise<PromptSubmissionRecord> {
     const current = this.require(promptId);
-    this.assertQueuedVersion(current, expectedUpdatedAt);
+    this.assertQueued(current);
+    if ((current.editLeaseExpiresAt ?? 0) > this.now()) {
+      if (editLeaseId === undefined) {
+        throw new PromptEditLeaseHeldError(promptId);
+      }
+      this.assertLease(current, editLeaseId);
+    }
     const at = this.nextTime(current);
     const updated: PromptSubmissionRecord = {
       ...current,
       status: "cancelled",
+      editLeaseId: undefined,
+      editLeaseOwnerId: undefined,
+      editLeaseExpiresAt: undefined,
       updatedAt: at,
       endedAt: at,
     };
@@ -116,10 +253,16 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     if (current?.status !== "queued") {
       return null;
     }
+    if ((current.editLeaseExpiresAt ?? 0) > this.now()) {
+      return null;
+    }
     const at = this.nextTime(current);
     const updated: PromptSubmissionRecord = {
       ...current,
       status: "starting",
+      editLeaseId: undefined,
+      editLeaseOwnerId: undefined,
+      editLeaseExpiresAt: undefined,
       updatedAt: at,
       startedAt: at,
     };
@@ -263,15 +406,22 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     return record;
   }
 
-  private assertQueuedVersion(
-    record: PromptSubmissionRecord,
-    expectedUpdatedAt: number,
-  ): void {
+  private assertQueued(record: PromptSubmissionRecord): void {
     if (record.status !== "queued") {
       throw new PromptNotQueuedError(record.promptId);
     }
-    if (record.updatedAt !== expectedUpdatedAt) {
-      throw new PromptVersionConflictError(record.promptId);
+  }
+
+  private assertLease(
+    record: PromptSubmissionRecord,
+    editLeaseId: string,
+  ): void {
+    this.assertQueued(record);
+    if (
+      record.editLeaseId !== editLeaseId ||
+      (record.editLeaseExpiresAt ?? 0) <= this.now()
+    ) {
+      throw new PromptEditLeaseLostError(record.promptId);
     }
   }
 
