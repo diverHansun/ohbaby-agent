@@ -110,6 +110,13 @@ interface ComposerPrefill {
   readonly text: string;
 }
 
+interface PendingPrompt {
+  readonly clientRequestId: string;
+  readonly createdAt: string;
+  readonly sessionId?: string;
+  readonly text: string;
+}
+
 interface StoredComposerDraft {
   readonly clientRequestId?: string;
   readonly pendingText?: string;
@@ -226,10 +233,36 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
     useState<StructuredOverlayState | null>(null);
   const [composerPrefill, setComposerPrefill] =
     useState<ComposerPrefill | null>(null);
+  const [pendingPrompt, setPendingPrompt] = useState<PendingPrompt | null>(
+    null,
+  );
   const clearActionError = useCallback(() => {
     setActionError(null);
   }, []);
   const showMain = !view.isEmpty || view.commandNotices.length > 0;
+  const visiblePendingPrompt =
+    pendingPrompt?.sessionId === undefined ||
+    pendingPrompt.sessionId === view.composer.activeSessionId
+      ? pendingPrompt
+      : null;
+
+  useEffect(() => {
+    if (!pendingPrompt) return;
+    const projected = view.snapshot?.prompts?.find(
+      (prompt) => prompt.clientRequestId === pendingPrompt.clientRequestId,
+    );
+    if (!projected) return;
+    const messageVisible = view.snapshot?.sessions
+      .find((session) => session.id === projected.sessionId)
+      ?.messages.some((message) => message.id === projected.userMessageId);
+    if (
+      projected.status === "queued" ||
+      messageVisible === true ||
+      (projected.status !== "starting" && projected.status !== "running")
+    ) {
+      setPendingPrompt(null);
+    }
+  }, [pendingPrompt, view.snapshot]);
 
   const runAction = useCallback(
     async (action: () => Promise<void>): Promise<boolean> => {
@@ -314,9 +347,17 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
           }),
         );
       }
+      const requestId = clientRequestId ?? globalThis.crypto.randomUUID();
       try {
         clearActionError();
-        const requestId = clientRequestId ?? globalThis.crypto.randomUUID();
+        setPendingPrompt({
+          clientRequestId: requestId,
+          createdAt: new Date().toISOString(),
+          ...(view.composer.activeSessionId === undefined
+            ? {}
+            : { sessionId: view.composer.activeSessionId }),
+          text,
+        });
         const receipt = await runtime.client.submitPrompt({
           clientRequestId: requestId,
           ...(view.composer.activeSessionId === undefined
@@ -332,6 +373,9 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
         }
         return true;
       } catch (error) {
+        setPendingPrompt((current) =>
+          current?.clientRequestId === requestId ? null : current,
+        );
         setActionError(error instanceof Error ? error.message : String(error));
         return false;
       }
@@ -453,7 +497,10 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
               message={actionError ?? view.error}
               onDismiss={clearActionError}
             />
-            <ConversationStream view={view} />
+            <ConversationStream
+              pendingPrompt={visiblePendingPrompt}
+              view={view}
+            />
             <PermissionModal
               disabled={view.composer.disabled}
               onRespond={(request, choice) => {
@@ -528,6 +575,7 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
               }}
               onStructuredCommand={openStructuredCommand}
               onSubmit={submitText}
+              pendingPrompt={visiblePendingPrompt}
               status={view.header}
               view={view}
               workspaceDirectory={workspace.selectedDirectory}
@@ -660,6 +708,7 @@ function EmptyState(props: {
     text: string,
     clientRequestId?: string,
   ) => Promise<boolean>;
+  readonly pendingPrompt: PendingPrompt | null;
   readonly status: HeaderModel;
   readonly view: ViewModel;
   readonly workspaceDirectory: string | null;
@@ -696,6 +745,9 @@ function EmptyState(props: {
             <span key={`${item}-${String(index)}`}>{item}</span>
           ))}
         </div>
+        {props.pendingPrompt ? (
+          <PendingPromptRow prompt={props.pendingPrompt} />
+        ) : null}
         <Composer
           client={props.client}
           compact
@@ -1225,7 +1277,10 @@ function ErrorBanner(props: {
   );
 }
 
-function ConversationStream(props: { readonly view: ViewModel }): ReactElement {
+function ConversationStream(props: {
+  readonly pendingPrompt: PendingPrompt | null;
+  readonly view: ViewModel;
+}): ReactElement {
   const streamRef = useRef<HTMLDivElement | null>(null);
   const messages = props.view.activeSession?.messages ?? [];
   useEffect(() => {
@@ -1233,7 +1288,7 @@ function ConversationStream(props: { readonly view: ViewModel }): ReactElement {
     if (element) {
       element.scrollTop = element.scrollHeight;
     }
-  }, [messages.length, props.view.composer.isRunning]);
+  }, [messages.length, props.pendingPrompt, props.view.composer.isRunning]);
 
   return (
     <section className="ohb-stream" ref={streamRef}>
@@ -1245,8 +1300,15 @@ function ConversationStream(props: { readonly view: ViewModel }): ReactElement {
             reasoning={props.view.reasoningByMessageId[message.id]}
           />
         ))}
+        {props.pendingPrompt ? (
+          <PendingPromptRow prompt={props.pendingPrompt} />
+        ) : null}
         <CommandNoticeList notices={props.view.commandNotices} />
-        {props.view.composer.isRunning ? <ThinkingIndicator /> : null}
+        {props.view.composer.isRunning ? (
+          <ThinkingIndicator
+            startedAt={props.view.composer.activeRunStartedAt}
+          />
+        ) : null}
       </div>
     </section>
   );
@@ -1603,6 +1665,27 @@ function MessageRow(props: {
   );
 }
 
+function PendingPromptRow(props: {
+  readonly prompt: PendingPrompt;
+}): ReactElement {
+  return (
+    <div
+      className="ohb-message-pending"
+      data-client-request-id={props.prompt.clientRequestId}
+    >
+      <MessageRow
+        message={{
+          createdAt: props.prompt.createdAt,
+          id: `pending:${props.prompt.clientRequestId}`,
+          parts: [{ text: props.prompt.text, type: "text" }],
+          role: "user",
+        }}
+      />
+      <span className="ohb-message-pending-label">Sending…</span>
+    </div>
+  );
+}
+
 function MessagePart(props: {
   readonly isStreaming: boolean;
   readonly part: UiMessagePart;
@@ -1661,17 +1744,28 @@ function ToolPanel(props: {
   );
 }
 
-function ThinkingIndicator(): ReactElement {
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+function thinkingElapsedSeconds(startedAt: string | undefined): number {
+  const parsed = startedAt === undefined ? Number.NaN : Date.parse(startedAt);
+  return Number.isFinite(parsed)
+    ? Math.max(0, Math.floor((Date.now() - parsed) / 1_000))
+    : 0;
+}
+
+function ThinkingIndicator(props: {
+  readonly startedAt: string | undefined;
+}): ReactElement {
+  const [elapsedSeconds, setElapsedSeconds] = useState(() =>
+    thinkingElapsedSeconds(props.startedAt),
+  );
   useEffect(() => {
-    const startedAt = Date.now();
+    setElapsedSeconds(thinkingElapsedSeconds(props.startedAt));
     const timer = window.setInterval(() => {
-      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+      setElapsedSeconds(thinkingElapsedSeconds(props.startedAt));
     }, 1_000);
     return (): void => {
       window.clearInterval(timer);
     };
-  }, []);
+  }, [props.startedAt]);
   return (
     <div className="ohb-thinking">
       <span aria-hidden="true">

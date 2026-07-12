@@ -163,6 +163,78 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.selectSession).toHaveBeenCalledWith("session_new");
   });
 
+  it("renders a submitted prompt before the receipt and reconciles it with the queue projection", async () => {
+    const pendingReceipt =
+      deferred<Awaited<ReturnType<OhbabyWebClient["submitPrompt"]>>>();
+    const initialSnapshot = snapshotWithStatus({
+      kind: "running",
+      runId: "run_1",
+    });
+    const fake = createFakeRuntime({ snapshot: initialSnapshot });
+    fake.submitPrompt.mockReturnValue(pendingReceipt.promise);
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "visible immediately");
+    await pressTextareaKey(app.container, "Enter");
+
+    const pending = app.container.querySelector(".ohb-message-pending");
+    expect(pending?.textContent).toContain("visible immediately");
+    expect(pending?.textContent).toContain("Sending…");
+
+    await act(async () => {
+      pendingReceipt.resolve({
+        clientRequestId:
+          fake.submitPrompt.mock.calls[0]?.[0].clientRequestId ?? "",
+        createdAt: timestamp,
+        ok: true,
+        promptId: "prompt_pending",
+        sessionId: "session_1",
+        status: "queued",
+        userMessageId: "message_pending",
+      });
+      await pendingReceipt.promise;
+    });
+    expect(app.container.querySelector(".ohb-message-pending")).not.toBeNull();
+
+    await act(async () => {
+      fake.store.replaceSnapshot(
+        {
+          ...initialSnapshot,
+          prompts: [
+            {
+              clientRequestId:
+                fake.submitPrompt.mock.calls[0]?.[0].clientRequestId ?? "",
+              createdAt: timestamp,
+              promptId: "prompt_pending",
+              scopeKey: "/repo-a",
+              sessionId: "session_1",
+              status: "queued",
+              text: "visible immediately",
+              updatedAt: timestamp,
+              userMessageId: "message_pending",
+            },
+          ],
+        },
+        2,
+      );
+      await Promise.resolve();
+    });
+    expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
+    expect(app.container.textContent).toContain("visible immediately");
+  });
+
+  it("calculates thinking elapsed time from the persisted run start on mount", () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse(timestamp) + 12_000);
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.querySelector(".ohb-thinking")?.textContent).toContain(
+      "· 12s",
+    );
+  });
+
   it("preserves the draft when the receipt request id does not match", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
