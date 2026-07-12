@@ -72,6 +72,27 @@ describe("daemon protocol", () => {
     });
   });
 
+  it("serializes structured scheduler errors without losing their source", () => {
+    const error = Object.assign(new Error("queue full"), {
+      code: "QUEUE_FULL",
+      limit: 100,
+      retryable: true,
+      source: "scheduler" as const,
+    });
+
+    expect(createDaemonRpcFailure("rpc_queue", error)).toMatchObject({
+      error: {
+        code: "QUEUE_FULL",
+        limit: 100,
+        message: "queue full",
+        retryable: true,
+        source: "scheduler",
+      },
+      id: "rpc_queue",
+      ok: false,
+    });
+  });
+
   it("parses supported SSE event envelopes", () => {
     const uiEvent: UiEvent = {
       session: {
@@ -103,6 +124,10 @@ describe("daemon protocol", () => {
       "getContextWindowUsage",
       "listCommands",
       "submitPrompt",
+      "submitPromptAccepted",
+      "editQueuedPrompt",
+      "cancelQueuedPrompt",
+      "waitForPrompt",
       "compactSession",
       "archiveSession",
       "getCurrentModel",

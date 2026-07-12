@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { UiBackendClient } from "ohbaby-sdk";
+import type { UiBackendClient, UiPromptQueueClient } from "ohbaby-sdk";
 import { createBus, type BusInstance } from "../bus/index.js";
 import { DatabaseSubagentInstanceStore } from "../agents/index.js";
 import {
@@ -20,6 +20,7 @@ import {
 } from "../services/session/index.js";
 import { createSqliteGoalPersistence } from "../goals/index.js";
 import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
+import { DatabasePromptSubmissionStore } from "../runtime/prompt-scheduler/index.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
 import {
   createSnapshotHookExecutor,
@@ -62,7 +63,7 @@ export interface PersistentUiBackendOptions extends Omit<
   readonly startupSessionMode?: StartupSessionMode;
 }
 
-export interface PersistentUiBackendClient extends UiBackendClient {
+export interface PersistentUiBackendClient extends UiPromptQueueClient {
   dispose(): Promise<void> | void;
 }
 
@@ -208,6 +209,31 @@ function withStartupRecovery(
     ): ReturnType<UiBackendClient["submitPrompt"]> {
       await ready();
       return client.submitPrompt(text, submitOptions);
+    },
+    async submitPromptAccepted(
+      text,
+      submitOptions,
+    ): ReturnType<UiPromptQueueClient["submitPromptAccepted"]> {
+      await ready();
+      return client.submitPromptAccepted(text, submitOptions);
+    },
+    async editQueuedPrompt(
+      input,
+    ): ReturnType<UiPromptQueueClient["editQueuedPrompt"]> {
+      await ready();
+      return client.editQueuedPrompt(input);
+    },
+    async cancelQueuedPrompt(
+      input,
+    ): ReturnType<UiPromptQueueClient["cancelQueuedPrompt"]> {
+      await ready();
+      return client.cancelQueuedPrompt(input);
+    },
+    async waitForPrompt(
+      promptId,
+    ): ReturnType<UiPromptQueueClient["waitForPrompt"]> {
+      await ready();
+      return client.waitForPrompt(promptId);
     },
     async compactSession(
       compactOptions,
@@ -424,6 +450,7 @@ export function createPersistentUiBackendClient(
         : {}),
       createLLMClient: options.createLLMClient,
       createRunId: options.createRunId,
+      createPromptUserMessageId: () => `message_${randomUUID()}`,
       goalPersistence: createSqliteGoalPersistence(db, now),
       hookExecutor,
       initialSnapshot: options.initialSnapshot,
@@ -431,6 +458,13 @@ export function createPersistentUiBackendClient(
       messageManager,
       now: options.now,
       projectDirectory: options.projectDirectory,
+      promptScopeKey: path.resolve(persistentProjectDirectory(options)),
+      promptSubmissionStore: new DatabasePromptSubmissionStore({
+        db,
+        now,
+        ownerId: backendOwnerId,
+        ownerPid: process.pid,
+      }),
       runLedger,
       sessionManager,
       stateStore,

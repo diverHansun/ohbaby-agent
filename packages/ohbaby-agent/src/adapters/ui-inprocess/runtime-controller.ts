@@ -24,26 +24,50 @@ function getErrorMessage(error: unknown): string {
 }
 
 export class InProcessRuntimeController {
-  private activeRunId: string | undefined;
+  private readonly activeRunSessionById = new Map<string, string>();
+  private readonly activeRunBySession = new Map<string, string>();
   private resetBarrier: Promise<void> = Promise.resolve();
   private runtimePromise: Promise<UiRuntimeComposition> | undefined;
 
   constructor(private readonly options: InProcessRuntimeControllerOptions) {}
 
-  getActiveRunId(): string | undefined {
-    return this.activeRunId;
+  getActiveRunId(sessionId?: string): string | undefined {
+    if (sessionId !== undefined) {
+      return this.activeRunBySession.get(sessionId);
+    }
+    return this.activeRunSessionById.size === 1
+      ? this.activeRunSessionById.keys().next().value
+      : undefined;
   }
 
-  setActiveRunId(runId: string): void {
-    this.activeRunId = runId;
+  activeRunIds(): readonly string[] {
+    return [...this.activeRunSessionById.keys()];
   }
 
-  clearActiveRunId(): void {
-    this.activeRunId = undefined;
+  setActiveRunId(runId: string, sessionId: string): void {
+    const existing = this.activeRunBySession.get(sessionId);
+    if (existing && existing !== runId) {
+      throw new Error(
+        `Session ${sessionId} already has active run ${existing}`,
+      );
+    }
+    this.activeRunBySession.set(sessionId, runId);
+    this.activeRunSessionById.set(runId, sessionId);
+  }
+
+  clearActiveRunId(runId: string): void {
+    const sessionId = this.activeRunSessionById.get(runId);
+    if (!sessionId) {
+      return;
+    }
+    this.activeRunSessionById.delete(runId);
+    if (this.activeRunBySession.get(sessionId) === runId) {
+      this.activeRunBySession.delete(sessionId);
+    }
   }
 
   isActiveRun(runId: string): boolean {
-    return this.activeRunId === runId;
+    return this.activeRunSessionById.has(runId);
   }
 
   getRuntime(): Promise<UiRuntimeComposition> {
@@ -85,11 +109,6 @@ export class InProcessRuntimeController {
       return await this.getRuntime();
     } catch (error) {
       const message = getErrorMessage(error);
-      await this.options.updateStatus({
-        kind: "error",
-        message,
-        recoverable: true,
-      });
       this.options.publishNotice({
         key: `runtime:${message}`,
         level: "error",
@@ -118,8 +137,8 @@ export class InProcessRuntimeController {
   }
 
   async abortPromptRun(runId?: string): Promise<boolean> {
-    const targetRunId = runId ?? this.activeRunId;
-    if (!targetRunId || targetRunId !== this.activeRunId) {
+    const targetRunId = runId ?? this.getActiveRunId();
+    if (!targetRunId || !this.activeRunSessionById.has(targetRunId)) {
       return false;
     }
     await this.cancelPromptRun(targetRunId);

@@ -18,6 +18,7 @@ export interface RunLedgerRecord {
   readonly startedAt?: number;
   readonly endedAt?: number;
   readonly error?: string;
+  readonly errorData?: UiPromptError;
   readonly ownerId?: string;
   readonly ownerPid?: number;
 }
@@ -51,7 +52,11 @@ export interface RunLedger {
   claimPendingRun(input: ClaimPendingRunLedgerInput): Promise<RunLedgerRecord>;
   markRunning(runId: string): Promise<RunLedgerRecord>;
   markSucceeded(runId: string): Promise<RunLedgerRecord>;
-  markFailed(runId: string, error: unknown): Promise<RunLedgerRecord>;
+  markFailed(
+    runId: string,
+    error: unknown,
+    errorData?: UiPromptError,
+  ): Promise<RunLedgerRecord>;
   markCancelled(runId: string, reason?: string): Promise<RunLedgerRecord>;
   markInterrupted(
     options?: MarkInterruptedOptions,
@@ -71,3 +76,4 @@ export interface InMemoryRunLedgerOptions {
   readonly ownerId?: string;
   readonly ownerPid?: number;
 }
+import type { UiPromptError } from "ohbaby-sdk";

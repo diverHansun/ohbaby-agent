@@ -1,6 +1,8 @@
 # terminal-daemon：终端多窗口会话与 Daemon 架构
 
 > 解决 `pnpm start` 多终端窗口下的会话冲突问题，并推进 daemon 架构上线。
+>
+> **历史定位（2026-07-12）**：本目录保留早期问题证据与 run claim/FIFO 意图。其 auto-spawn、默认 TUI attach daemon、内存 daemon 全局 FIFO 和空闲自退终态已被 [`../2026-07-11-global-single-daemon/`](../2026-07-11-global-single-daemon/README.md) 取代；当前默认 TUI 永久 in-process。多 session 真并发、同 session FIFO、durable waiting queue 与即时 receipt 的新权威契约见 [`../2026-07-12-workspace-prompt-concurrency/`](../2026-07-12-workspace-prompt-concurrency/README.md)。若正文冲突，以两个新目录为准。
 
 ## 文档导航
 

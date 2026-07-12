@@ -95,6 +95,7 @@ describe("services/database", () => {
       { version: "011_subagent_instance_owner" },
       { version: "012_subagent_instance_current_input" },
       { version: "013_workspace_registry" },
+      { version: "014_prompt_submission" },
     ]);
   });
 

@@ -11,6 +11,9 @@ import type {
   UiCurrentModelConfig,
   UiEventHandler,
   UiPermissionState,
+  UiPromptCompletion,
+  UiPromptQueueClient,
+  UiPromptSubmission,
   UiProbeModelContextWindowResult,
   UiSetSearchApiKeyResult,
   UiSlashCommandCatalog,
@@ -299,6 +302,103 @@ class FakeBackend implements UiBackendClient {
     }
     this.archivedSessions.push(input.sessionId);
     return Promise.resolve();
+  }
+}
+
+class DurablePromptFakeBackend
+  extends FakeBackend
+  implements UiPromptQueueClient
+{
+  admissionError: Error | undefined;
+  private prompt: UiPromptSubmission | undefined;
+  private resolveCompletion:
+    | ((completion: UiPromptCompletion) => void)
+    | undefined;
+
+  submitPromptAccepted(
+    text: string,
+    options?: SubmitPromptOptions,
+  ): ReturnType<UiPromptQueueClient["submitPromptAccepted"]> {
+    if (this.admissionError) {
+      return Promise.reject(this.admissionError);
+    }
+    const sessionId = options?.sessionId ?? "session_durable";
+    this.prompt = {
+      createdAt: timestamp,
+      promptId: "prompt_1",
+      scopeKey: "/workspace",
+      sessionId,
+      status: "queued",
+      text,
+      updatedAt: timestamp,
+      userMessageId: "message_1",
+    };
+    return Promise.resolve({
+      createdAt: timestamp,
+      promptId: "prompt_1",
+      sessionId,
+      status: "queued",
+      userMessageId: "message_1",
+    });
+  }
+
+  override getSnapshot(): Promise<UiSnapshot> {
+    if (!this.prompt) {
+      return Promise.resolve(emptySnapshot());
+    }
+    return Promise.resolve({
+      ...emptySnapshot(),
+      activeSessionId: this.prompt.sessionId,
+      prompts: [this.prompt],
+      sessions: [
+        {
+          createdAt: timestamp,
+          id: this.prompt.sessionId,
+          messages: [],
+          title: "Durable session",
+          updatedAt: timestamp,
+        },
+      ],
+    });
+  }
+
+  editQueuedPrompt(
+    input: Parameters<UiPromptQueueClient["editQueuedPrompt"]>[0],
+  ): ReturnType<UiPromptQueueClient["editQueuedPrompt"]> {
+    if (this.prompt?.promptId !== input.promptId) {
+      return Promise.reject(new Error("prompt not found"));
+    }
+    this.prompt = {
+      ...this.prompt,
+      text: input.text,
+      updatedAt: "2026-06-12T00:00:01.000Z",
+    };
+    return Promise.resolve(this.prompt);
+  }
+
+  cancelQueuedPrompt(
+    input: Parameters<UiPromptQueueClient["cancelQueuedPrompt"]>[0],
+  ): ReturnType<UiPromptQueueClient["cancelQueuedPrompt"]> {
+    if (this.prompt?.promptId !== input.promptId) {
+      return Promise.reject(new Error("prompt not found"));
+    }
+    this.prompt = {
+      ...this.prompt,
+      endedAt: "2026-06-12T00:00:02.000Z",
+      status: "cancelled",
+      updatedAt: "2026-06-12T00:00:02.000Z",
+    };
+    this.resolveCompletion?.({ prompt: this.prompt });
+    return Promise.resolve(this.prompt);
+  }
+
+  waitForPrompt(): ReturnType<UiPromptQueueClient["waitForPrompt"]> {
+    if (this.prompt?.status === "cancelled") {
+      return Promise.resolve({ prompt: this.prompt });
+    }
+    return new Promise((resolve) => {
+      this.resolveCompletion = resolve;
+    });
   }
 }
 
@@ -2158,6 +2258,216 @@ describe("createDaemonServerApp", () => {
           text: "hello",
         },
       ]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("returns a durable receipt and supports queued edit and cancel", async () => {
+    const backend = new DurablePromptFakeBackend();
+    const handle = createApp(backend, {
+      createSessionId: () => "session_generated",
+    });
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        method: "POST",
+      });
+      const headers = {
+        ...authHeaders(),
+        "content-type": "application/json",
+        "x-ohbaby-client-id": "client_web",
+      };
+      const accepted = await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({ text: "first" }),
+        headers,
+        method: "POST",
+      });
+      expect(accepted.status).toBe(202);
+      await expect(accepted.json()).resolves.toEqual({
+        createdAt: timestamp,
+        ok: true,
+        promptId: "prompt_1",
+        sessionId: "session_generated",
+        status: "queued",
+        userMessageId: "message_1",
+      });
+
+      const edited = await handle.app.request("/v1/prompts/prompt_1", {
+        body: JSON.stringify({
+          expectedUpdatedAt: timestamp,
+          text: "edited",
+        }),
+        headers,
+        method: "PATCH",
+      });
+      expect(edited.status).toBe(200);
+      await expect(edited.json()).resolves.toMatchObject({
+        ok: true,
+        prompt: { status: "queued", text: "edited" },
+      });
+
+      const cancelled = await handle.app.request("/v1/prompts/prompt_1", {
+        body: JSON.stringify({
+          expectedUpdatedAt: "2026-06-12T00:00:01.000Z",
+        }),
+        headers,
+        method: "DELETE",
+      });
+      expect(cancelled.status).toBe(200);
+      await expect(cancelled.json()).resolves.toMatchObject({
+        ok: true,
+        prompt: { status: "cancelled", text: "edited" },
+      });
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("exposes durable prompt admission and mutation through JSON-RPC", async () => {
+    const backend = new DurablePromptFakeBackend();
+    const handle = createApp(backend, {
+      createSessionId: () => "session_generated",
+    });
+    await handle.start();
+    const rpc = async (
+      method: string,
+      params: readonly unknown[],
+    ): Promise<unknown> => {
+      const response = await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          clientId: "rpc_client",
+          id: `rpc_${method}`,
+          method,
+          params,
+        }),
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        method: "POST",
+      });
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    try {
+      await rpc("initializeClient", [
+        { startupSessionMode: { type: "fresh" } },
+      ]);
+      await expect(
+        rpc("submitPromptAccepted", ["first", undefined]),
+      ).resolves.toMatchObject({
+        ok: true,
+        result: { promptId: "prompt_1", status: "queued" },
+      });
+      await expect(
+        rpc("editQueuedPrompt", [
+          {
+            expectedUpdatedAt: timestamp,
+            promptId: "prompt_1",
+            text: "edited",
+          },
+        ]),
+      ).resolves.toMatchObject({
+        ok: true,
+        result: { status: "queued", text: "edited" },
+      });
+      await rpc("cancelQueuedPrompt", [
+        {
+          expectedUpdatedAt: "2026-06-12T00:00:01.000Z",
+          promptId: "prompt_1",
+        },
+      ]);
+      await expect(rpc("waitForPrompt", ["prompt_1"])).resolves.toMatchObject({
+        ok: true,
+        result: { prompt: { status: "cancelled" } },
+      });
+
+      await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          clientId: "rpc_other",
+          id: "rpc_initialize_other",
+          method: "initializeClient",
+          params: [{ startupSessionMode: { type: "fresh" } }],
+        }),
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        method: "POST",
+      });
+      const forbidden = await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          clientId: "rpc_other",
+          id: "rpc_wait_other",
+          method: "waitForPrompt",
+          params: ["prompt_1"],
+        }),
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        method: "POST",
+      });
+      expect(forbidden.status).toBe(403);
+      await expect(forbidden.json()).resolves.toMatchObject({
+        error: { message: "Prompt belongs to another session" },
+        ok: false,
+      });
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("preserves structured queue-full fields over HTTP and JSON-RPC", async () => {
+    const backend = new DurablePromptFakeBackend();
+    backend.admissionError = Object.assign(new Error("queue full"), {
+      code: "QUEUE_FULL",
+      limit: 100,
+      retryable: true,
+      source: "scheduler" as const,
+    });
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "web_queue" }),
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        method: "POST",
+      });
+      const http = await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({ sessionId: "session_1", text: "overflow" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+          "x-ohbaby-client-id": "web_queue",
+        },
+        method: "POST",
+      });
+      expect(http.status).toBe(429);
+      await expect(http.json()).resolves.toMatchObject({
+        error: {
+          code: "QUEUE_FULL",
+          limit: 100,
+          retryable: true,
+          source: "scheduler",
+        },
+        ok: false,
+      });
+
+      const rpc = await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          clientId: "rpc_queue",
+          id: "rpc_queue_full",
+          method: "submitPromptAccepted",
+          params: ["overflow", { sessionId: "session_1" }],
+        }),
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        method: "POST",
+      });
+      expect(rpc.status).toBe(500);
+      await expect(rpc.json()).resolves.toMatchObject({
+        error: {
+          code: "QUEUE_FULL",
+          limit: 100,
+          retryable: true,
+          source: "scheduler",
+        },
+        ok: false,
+      });
     } finally {
       await handle.dispose();
     }

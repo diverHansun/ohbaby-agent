@@ -18,6 +18,10 @@ import type {
   RunWorkerResult,
   RunWorkerStartOptions,
 } from "./types.js";
+import {
+  normalizeLifecycleRunError,
+  normalizeRunError,
+} from "./error-detail.js";
 
 function errorToMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -176,6 +180,15 @@ export class RunWorker {
           status,
           result,
           error,
+          ...(status === "failed"
+            ? {
+                errorData: normalizeLifecycleRunError(
+                  error,
+                  terminalReason,
+                  result.failureCause,
+                ),
+              }
+            : {}),
           ...(terminalReason === undefined ? {} : { terminalReason }),
         };
       }
@@ -202,7 +215,11 @@ export class RunWorker {
         }),
       );
 
-      return { status, error: message };
+      return {
+        status,
+        error: message,
+        ...(status === "failed" ? { errorData: normalizeRunError(error) } : {}),
+      };
     }
   }
 

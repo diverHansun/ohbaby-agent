@@ -2,11 +2,21 @@ export type {
   SubmitPromptOptions,
   UiArchiveSessionInput,
   UiBackendClient,
+  UiPromptQueueClient,
   UiEventHandler,
   UiListCommandsQuery,
   UiPermissionUpdate,
   UiUnsubscribe,
 } from "./client.js";
+export type {
+  UiCancelQueuedPromptInput,
+  UiEditQueuedPromptInput,
+  UiPromptCompletion,
+  UiPromptError,
+  UiPromptReceipt,
+  UiPromptSubmission,
+  UiPromptSubmissionStatus,
+} from "./prompt.js";
 export type {
   UiCompactSessionCompressionResult,
   UiCompactSessionOptions,
@@ -43,6 +53,8 @@ export type {
   UiPermissionRequestedEvent,
   UiPermissionResolvedEvent,
   UiRunInterruptedEvent,
+  UiPromptSubmittedEvent,
+  UiPromptUpdatedEvent,
   UiRunUpdatedEvent,
   UiRuntimeUpdatedEvent,
   UiSnapshotReplacedEvent,

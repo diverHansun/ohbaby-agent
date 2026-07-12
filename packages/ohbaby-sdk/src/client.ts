@@ -27,6 +27,13 @@ import type {
   UiPermissionMode,
   UiPermissionState,
 } from "./snapshot.js";
+import type {
+  UiCancelQueuedPromptInput,
+  UiEditQueuedPromptInput,
+  UiPromptCompletion,
+  UiPromptReceipt,
+  UiPromptSubmission,
+} from "./prompt.js";
 
 export interface SubmitPromptOptions {
   readonly sessionId?: string;
@@ -79,4 +86,20 @@ export interface UiBackendClient {
     response: UiInteractionResponse,
   ): Promise<void>;
   abortRun(runId?: string): Promise<void>;
+}
+
+/**
+ * Durable prompt admission is additive while embedded callers retain the
+ * legacy submit-and-wait contract on UiBackendClient.submitPrompt().
+ */
+export interface UiPromptQueueClient extends UiBackendClient {
+  submitPromptAccepted(
+    text: string,
+    options?: SubmitPromptOptions,
+  ): Promise<UiPromptReceipt>;
+  editQueuedPrompt(input: UiEditQueuedPromptInput): Promise<UiPromptSubmission>;
+  cancelQueuedPrompt(
+    input: UiCancelQueuedPromptInput,
+  ): Promise<UiPromptSubmission>;
+  waitForPrompt(promptId: string): Promise<UiPromptCompletion>;
 }

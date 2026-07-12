@@ -1390,6 +1390,10 @@ describe("createInProcessUiBackendClient", () => {
         .map((event) => event.type),
     ).toEqual([
       "session.updated",
+      "prompt.submitted",
+      "prompt.updated",
+      "prompt.updated",
+      "session.updated",
       "message.appended",
       "runtime.updated",
       "run.updated",
@@ -1400,6 +1404,7 @@ describe("createInProcessUiBackendClient", () => {
       "run.updated",
       "message.updated",
       "runtime.updated",
+      "prompt.updated",
     ]);
 
     const assistantUpdates = events.filter(
@@ -3416,7 +3421,7 @@ describe("createInProcessUiBackendClient", () => {
     ]);
   });
 
-  it("marks the run and app status as error when streaming fails", async () => {
+  it("marks the run but not the workspace-global status as error when streaming fails", async () => {
     const client = createInProcessUiBackendClient({
       llmClient: createRejectingLLMClient(new Error("stream exploded")),
     });
@@ -3426,11 +3431,7 @@ describe("createInProcessUiBackendClient", () => {
     );
 
     const snapshot = await client.getSnapshot();
-    expect(snapshot.status).toEqual({
-      kind: "error",
-      message: "stream exploded",
-      recoverable: true,
-    });
+    expect(snapshot.status).toEqual({ kind: "idle" });
     expect(snapshot.runs[0].status).toEqual({
       kind: "error",
       message: "stream exploded",
@@ -3453,11 +3454,7 @@ describe("createInProcessUiBackendClient", () => {
     );
 
     const snapshot = await client.getSnapshot();
-    expect(snapshot.status).toEqual({
-      kind: "error",
-      message: "OPENAI_API_KEY is not configured",
-      recoverable: true,
-    });
+    expect(snapshot.status).toEqual({ kind: "idle" });
     const noticeEvent = events.find(
       (event): event is Extract<UiEvent, { type: "notice.emitted" }> =>
         event.type === "notice.emitted",
@@ -4014,7 +4011,7 @@ describe("createInProcessUiBackendClient", () => {
     });
   });
 
-  it("does not mutate the SDK snapshot when core message persistence fails before run start", async () => {
+  it("keeps an accepted failed submission without committing a formal user message", async () => {
     const client = createInProcessUiBackendClient({
       messageManager: createRejectingMessageManager(
         new Error("core write failed"),
@@ -4028,16 +4025,18 @@ describe("createInProcessUiBackendClient", () => {
       "core write failed",
     );
 
-    await expect(client.getSnapshot()).resolves.toEqual({
-      activeSessionId: null,
-      sessions: [],
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      activeSessionId: "session_1",
+      sessions: [{ id: "session_1", messages: [] }],
       runs: [],
-      permissions: [],
-      permission: {
-        level: "default",
-        mode: "auto",
-        sessionRules: [],
-      },
+      prompts: [
+        {
+          sessionId: "session_1",
+          status: "failed",
+          text: "Should not persist",
+          error: { code: "RUNTIME_ERROR", message: "core write failed" },
+        },
+      ],
       status: { kind: "idle" },
     });
   });

@@ -110,6 +110,7 @@ export class InMemoryRunLedger implements RunLedger {
           startedAt: this.now(),
           endedAt: undefined,
           error: undefined,
+          errorData: undefined,
         })),
       ),
     );
@@ -123,12 +124,17 @@ export class InMemoryRunLedger implements RunLedger {
           status: "succeeded",
           endedAt: this.now(),
           error: undefined,
+          errorData: undefined,
         })),
       ),
     );
   }
 
-  markFailed(runId: string, error: unknown): Promise<RunLedgerRecord> {
+  markFailed(
+    runId: string,
+    error: unknown,
+    errorData?: RunLedgerRecord["errorData"],
+  ): Promise<RunLedgerRecord> {
     return this.withAsyncBoundary(() =>
       cloneRecord(
         this.transition(runId, "failed", ["pending", "running"], (record) => ({
@@ -136,6 +142,7 @@ export class InMemoryRunLedger implements RunLedger {
           status: "failed",
           endedAt: this.now(),
           error: errorToMessage(error),
+          errorData,
         })),
       ),
     );
@@ -153,6 +160,7 @@ export class InMemoryRunLedger implements RunLedger {
             status: "cancelled",
             endedAt: this.now(),
             error: reason,
+            errorData: undefined,
           }),
         ),
       ),

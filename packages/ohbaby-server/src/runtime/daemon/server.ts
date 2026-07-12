@@ -13,7 +13,6 @@ import {
   type DaemonServerAppHandle,
 } from "../../app/create-app.js";
 import { PermissionRouter } from "../../coordination/permission-router.js";
-import { DaemonPromptQueue } from "../../coordination/prompt-queue.js";
 import {
   listenToNodeServer,
   type NodeListenHandle,
@@ -59,7 +58,6 @@ export interface DaemonHttpServerOptions {
   readonly packageVersion?: string;
   readonly port?: number;
   readonly permissionRouter?: PermissionRouter;
-  readonly promptQueue?: DaemonPromptQueue;
   readonly scopeRoot?: string;
   readonly webAssetsDir?: string;
 }
@@ -74,6 +72,7 @@ export interface DaemonHttpServerHandle {
   readonly url: string;
   start(): Promise<void>;
   stop(): Promise<void>;
+  loadWorkspaceScopes?(scopeKeys: readonly string[]): Promise<void>;
 }
 
 export interface ActiveDaemonConnection {
@@ -143,7 +142,6 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       ...(scopeKey === this.options.scopeRoot
         ? {
             permissionRouter: this.options.permissionRouter,
-            promptQueue: this.options.promptQueue,
           }
         : {}),
       ...(this.options.webAssetsDir === undefined
@@ -481,7 +479,9 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     return canonical;
   }
 
-  private async listDirectoryPickerEntries(context: Context): Promise<Response> {
+  private async listDirectoryPickerEntries(
+    context: Context,
+  ): Promise<Response> {
     const forbidden = this.directoryPickerForbidden(context);
     if (forbidden) {
       return forbidden;
@@ -516,7 +516,9 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         )
       )
         .filter(
-          (entry): entry is { readonly directory: string; readonly name: string } =>
+          (
+            entry,
+          ): entry is { readonly directory: string; readonly name: string } =>
             entry !== undefined,
         )
         .sort((left, right) => left.name.localeCompare(right.name));
@@ -619,6 +621,16 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     this.nodeServer = nodeServer;
   }
 
+  async loadWorkspaceScopes(scopeKeys: readonly string[]): Promise<void> {
+    if (!this.instanceStore) {
+      return;
+    }
+    for (const scopeKey of scopeKeys) {
+      const canonical = await resolveWorkspaceScope(scopeKey);
+      await this.instanceStore.loadScope(canonical);
+    }
+  }
+
   async stop(): Promise<void> {
     try {
       if (this.instanceStore) {
@@ -656,7 +668,6 @@ export function createDaemonHttpServer(
     packageVersion: options.packageVersion,
     permissionRouter: options.permissionRouter ?? new PermissionRouter(),
     port: options.port ?? DEFAULT_PORT,
-    promptQueue: options.promptQueue,
     scopeRoot: options.scopeRoot,
     webAssetsDir: options.webAssetsDir,
   });

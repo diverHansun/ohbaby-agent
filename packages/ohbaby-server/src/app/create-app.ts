@@ -10,6 +10,8 @@ import {
   supportsWebPassthroughCommandInvocation,
   supportsWebSkillCommandInvocation,
   type UiBackendClient,
+  type UiCancelQueuedPromptInput,
+  type UiEditQueuedPromptInput,
   type UiEvent,
   type UiPermissionResponse,
   type UiSlashCommandInvocation,
@@ -23,11 +25,14 @@ import {
 } from "../coordination/client-view.js";
 import { EventBus, type EventEnvelope } from "../coordination/event-bus.js";
 import { PermissionRouter } from "../coordination/permission-router.js";
-import { DaemonPromptQueue } from "../coordination/prompt-queue.js";
+import {
+  acceptDaemonPrompt,
+  submitDaemonPrompt,
+  supportsPromptQueue,
+} from "../coordination/prompt-backend.js";
 import {
   callDaemonBackend,
   createDaemonRpcSuccessResponse,
-  createDefaultDaemonPromptQueue,
   isDaemonForbiddenError,
   MAX_REQUEST_BODY_BYTES,
   parseDaemonRpcBody,
@@ -70,7 +75,6 @@ export interface DaemonServerAppOptions {
   readonly onShutdown?: () => Promise<void> | void;
   readonly packageVersion?: string;
   readonly permissionRouter?: PermissionRouter;
-  readonly promptQueue?: DaemonPromptQueue;
   readonly webAssets?: WebAssetsOptions;
 }
 
@@ -131,6 +135,41 @@ function requestTooLargeBody(): unknown {
 
 function webErrorBody(message: string): unknown {
   return { error: { message }, ok: false };
+}
+
+function promptErrorBody(error: unknown): unknown {
+  const serialized = createDaemonRpcFailure("http", error);
+  if (serialized.ok) {
+    throw new Error("Expected serialized prompt failure");
+  }
+  return {
+    error: {
+      ...serialized.error,
+      code:
+        serialized.error.code ??
+        (error instanceof Error ? error.name : "PROMPT_ERROR"),
+    },
+    ok: false,
+  };
+}
+
+function promptMutationStatus(error: unknown): 400 | 404 | 409 | 429 {
+  const code =
+    isRecord(error) && typeof error.code === "string" ? error.code : undefined;
+  if (code === "QUEUE_FULL") {
+    return 429;
+  }
+  if (code === "PROMPT_NOT_FOUND") {
+    return 404;
+  }
+  if (
+    code === "PROMPT_NOT_QUEUED" ||
+    code === "PROMPT_VERSION_CONFLICT" ||
+    code === "INVALID_PROMPT_TRANSITION"
+  ) {
+    return 409;
+  }
+  return 400;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -568,6 +607,22 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
           summary: "Submit a prompt",
         },
       },
+      "/v1/prompts/{id}": {
+        delete: {
+          responses: {
+            "200": { description: "Queued prompt cancelled" },
+            "409": { description: "Prompt is no longer queued" },
+          },
+          summary: "Cancel a queued prompt",
+        },
+        patch: {
+          responses: {
+            "200": { description: "Queued prompt edited" },
+            "409": { description: "Prompt is no longer queued" },
+          },
+          summary: "Edit a queued prompt",
+        },
+      },
       "/v1/sessions": {
         post: {
           responses: {
@@ -673,7 +728,6 @@ class DaemonServerAppRuntime {
   private readonly knownClientIds = new Set<string>();
   private readonly authToken: string;
   private readonly permissionRouter: PermissionRouter;
-  private readonly promptQueue: DaemonPromptQueue;
   private readonly replayEventsBySeqNum = new Map<
     number,
     Map<string, UiEvent>
@@ -693,20 +747,10 @@ class DaemonServerAppRuntime {
         ? new EventBus()
         : new EventBus({ capacity: options.eventBufferCapacity });
     this.permissionRouter = options.permissionRouter ?? new PermissionRouter();
-    this.promptQueue =
-      options.promptQueue ??
-      createDefaultDaemonPromptQueue(options.backend, this.permissionRouter, {
-        onPromptSettled: (item) => {
-          this.clientViews.promptSettled(item);
-        },
-        onPromptStarted: (item) => {
-          this.clientViews.promptStarted(item);
-        },
-      });
     this.mountRoutes();
   }
 
-  start(): void {
+  async start(): Promise<void> {
     if (this.started) {
       return;
     }
@@ -715,10 +759,19 @@ class DaemonServerAppRuntime {
       this.broadcast(envelope);
     });
     this.started = true;
+    try {
+      // Initial snapshot also activates the durable scheduler so recovered
+      // queued work drains even when no browser reconnects after restart.
+      await this.options.backend.getSnapshot();
+    } catch (error) {
+      this.unsubscribe();
+      this.unsubscribe = undefined;
+      this.started = false;
+      throw error;
+    }
   }
 
   dispose(): void {
-    this.promptQueue.shutdown("daemon stopped");
     this.unsubscribe?.();
     this.unsubscribe = undefined;
 
@@ -784,7 +837,6 @@ class DaemonServerAppRuntime {
           clientViews: this.clientViews,
           createSessionId: this.createSessionId,
           permissionRouter: this.permissionRouter,
-          promptQueue: this.promptQueue,
           request: parsed.request,
         });
         return context.json(
@@ -1233,38 +1285,154 @@ class DaemonServerAppRuntime {
         return context.json(webErrorBody("text is required"), 400);
       }
       const sessionId = asNonEmptyString(body.sessionId);
-      const prepared = this.clientViews.preparePromptSubmit(
-        clientId,
-        sessionId === undefined ? undefined : { sessionId },
-        this.createSessionId,
-      );
-      void this.promptQueue
-        .enqueue({
-          clientId,
-          ...(prepared.options === undefined
-            ? {}
-            : { options: prepared.options }),
-          ...(prepared.sessionId === undefined
-            ? {}
-            : { sessionId: prepared.sessionId }),
-          text,
-        })
-        .catch((error: unknown) => {
-          this.writeErrorToClient(
+      if (supportsPromptQueue(this.options.backend)) {
+        try {
+          const accepted = await acceptDaemonPrompt({
+            backend: this.options.backend,
             clientId,
-            error instanceof Error ? error.message : String(error),
+            clientViews: this.clientViews,
+            createSessionId: this.createSessionId,
+            options: sessionId === undefined ? undefined : { sessionId },
+            permissionRouter: this.permissionRouter,
+            text,
+          });
+          return context.json({ ok: true, ...accepted.receipt }, 202);
+        } catch (error) {
+          return context.json(
+            promptErrorBody(error),
+            promptMutationStatus(error),
           );
-        });
+        }
+      }
+
+      const submitted = submitDaemonPrompt({
+        backend: this.options.backend,
+        clientId,
+        clientViews: this.clientViews,
+        createSessionId: this.createSessionId,
+        options: sessionId === undefined ? undefined : { sessionId },
+        permissionRouter: this.permissionRouter,
+        text,
+      });
+      void submitted.completion.catch((error: unknown) => {
+        this.writeErrorToClient(
+          clientId,
+          error instanceof Error ? error.message : String(error),
+        );
+      });
 
       return context.json(
         {
           ok: true,
-          ...(prepared.sessionId === undefined
+          ...(submitted.item.sessionId === undefined
             ? {}
-            : { sessionId: prepared.sessionId }),
+            : { sessionId: submitted.item.sessionId }),
         },
         202,
       );
+    });
+
+    this.app.patch("/v1/prompts/:id", async (context) => {
+      const authorization = this.authorizePromptMutation(context);
+      if ("response" in authorization) {
+        return authorization.response;
+      }
+      if (!supportsPromptQueue(this.options.backend)) {
+        return context.json(
+          webErrorBody("Durable prompt admission is not supported"),
+          409,
+        );
+      }
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok) {
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      }
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      const text = asNonEmptyString(body.text);
+      const expectedUpdatedAt = asNonEmptyString(body.expectedUpdatedAt);
+      if (!text || !expectedUpdatedAt) {
+        return context.json(
+          webErrorBody("text and expectedUpdatedAt are required"),
+          400,
+        );
+      }
+      try {
+        if (
+          !this.clientViews.canAccessPrompt(
+            authorization.clientId,
+            await this.options.backend.getSnapshot(),
+            context.req.param("id"),
+          )
+        ) {
+          return context.json(
+            webErrorBody("Prompt belongs to another session"),
+            403,
+          );
+        }
+        const prompt = await this.options.backend.editQueuedPrompt({
+          expectedUpdatedAt,
+          promptId: context.req.param("id"),
+          text,
+        } satisfies UiEditQueuedPromptInput);
+        return context.json({ ok: true, prompt });
+      } catch (error) {
+        return context.json(
+          promptErrorBody(error),
+          promptMutationStatus(error),
+        );
+      }
+    });
+
+    this.app.delete("/v1/prompts/:id", async (context) => {
+      const authorization = this.authorizePromptMutation(context);
+      if ("response" in authorization) {
+        return authorization.response;
+      }
+      if (!supportsPromptQueue(this.options.backend)) {
+        return context.json(
+          webErrorBody("Durable prompt admission is not supported"),
+          409,
+        );
+      }
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok) {
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      }
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      const expectedUpdatedAt = asNonEmptyString(body.expectedUpdatedAt);
+      if (!expectedUpdatedAt) {
+        return context.json(webErrorBody("expectedUpdatedAt is required"), 400);
+      }
+      try {
+        if (
+          !this.clientViews.canAccessPrompt(
+            authorization.clientId,
+            await this.options.backend.getSnapshot(),
+            context.req.param("id"),
+          )
+        ) {
+          return context.json(
+            webErrorBody("Prompt belongs to another session"),
+            403,
+          );
+        }
+        const prompt = await this.options.backend.cancelQueuedPrompt({
+          expectedUpdatedAt,
+          promptId: context.req.param("id"),
+        } satisfies UiCancelQueuedPromptInput);
+        return context.json({ ok: true, prompt });
+      } catch (error) {
+        return context.json(
+          promptErrorBody(error),
+          promptMutationStatus(error),
+        );
+      }
     });
 
     this.app.patch("/v1/permission", async (context) => {
@@ -1385,6 +1553,26 @@ class DaemonServerAppRuntime {
 
   private isAuthorized(authorization: string | undefined): boolean {
     return isAuthorized(authorization, this.authToken);
+  }
+
+  private authorizePromptMutation(
+    context: Context,
+  ): { readonly clientId: string } | { readonly response: Response } {
+    if (!this.isAuthorized(context.req.header("authorization"))) {
+      return { response: context.json(webErrorBody("Unauthorized"), 401) };
+    }
+    const clientId = this.clientIdFromRequest(context);
+    if (!clientId) {
+      return {
+        response: context.json(webErrorBody("clientId is required"), 400),
+      };
+    }
+    if (!this.isRegisteredWebClient(clientId)) {
+      return {
+        response: context.json(webErrorBody("client is not registered"), 409),
+      };
+    }
+    return { clientId };
   }
 
   private isRegisteredWebClient(clientId: string): boolean {
@@ -1757,8 +1945,7 @@ export function createDaemonServerApp(
       return Promise.resolve();
     },
     start(): Promise<void> {
-      runtime.start();
-      return Promise.resolve();
+      return runtime.start();
     },
   };
 }

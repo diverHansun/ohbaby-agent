@@ -37,6 +37,7 @@ interface RunLedgerRow {
   readonly started_at: number | null;
   readonly ended_at: number | null;
   readonly error: string | null;
+  readonly error_data: string | null;
   readonly owner_id: string | null;
   readonly owner_pid: number | null;
 }
@@ -56,9 +57,39 @@ function rowToRecord(row: RunLedgerRow): RunLedgerRecord {
     startedAt: row.started_at ?? undefined,
     endedAt: row.ended_at ?? undefined,
     error: row.error ?? undefined,
+    errorData: parseErrorData(row.error_data),
     ownerId: row.owner_id ?? undefined,
     ownerPid: row.owner_pid ?? undefined,
   };
+}
+
+function parseErrorData(value: string | null): RunLedgerRecord["errorData"] {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "code" in parsed &&
+      typeof parsed.code === "string" &&
+      "message" in parsed &&
+      typeof parsed.message === "string" &&
+      "source" in parsed &&
+      (parsed.source === "provider" ||
+        parsed.source === "runtime" ||
+        parsed.source === "scheduler" ||
+        parsed.source === "validation") &&
+      "retryable" in parsed &&
+      typeof parsed.retryable === "boolean"
+    ) {
+      return parsed as RunLedgerRecord["errorData"];
+    }
+  } catch {
+    // Old or corrupt error_data falls back to the legacy error string.
+  }
+  return undefined;
 }
 
 function cloneRecord(record: RunLedgerRecord): RunLedgerRecord {
@@ -290,7 +321,7 @@ export function createDatabaseRunLedger(
     const result = db
       .prepare(
         `UPDATE ${schema.runLedger.tableName}
-       SET status = ?, started_at = ?, ended_at = ?, error = ?
+       SET status = ?, started_at = ?, ended_at = ?, error = ?, error_data = ?
        WHERE run_id = ? AND status IN (${allowedPlaceholders})`,
       )
       .run(
@@ -298,6 +329,7 @@ export function createDatabaseRunLedger(
         next.startedAt ?? null,
         next.endedAt ?? null,
         next.error ?? null,
+        next.errorData === undefined ? null : JSON.stringify(next.errorData),
         runId,
         ...allowedFrom,
       );
@@ -352,6 +384,7 @@ export function createDatabaseRunLedger(
             startedAt: now(),
             endedAt: undefined,
             error: undefined,
+            errorData: undefined,
           })),
         ),
       );
@@ -365,12 +398,17 @@ export function createDatabaseRunLedger(
             status: "succeeded",
             endedAt: now(),
             error: undefined,
+            errorData: undefined,
           })),
         ),
       );
     },
 
-    markFailed(runId: string, error: unknown): Promise<RunLedgerRecord> {
+    markFailed(
+      runId: string,
+      error: unknown,
+      errorData?: RunLedgerRecord["errorData"],
+    ): Promise<RunLedgerRecord> {
       return withAsyncBoundary(() =>
         cloneRecord(
           transition(runId, "failed", ["pending", "running"], (record) => ({
@@ -378,6 +416,7 @@ export function createDatabaseRunLedger(
             status: "failed",
             endedAt: now(),
             error: errorToMessage(error),
+            errorData,
           })),
         ),
       );
@@ -391,6 +430,7 @@ export function createDatabaseRunLedger(
             status: "cancelled",
             endedAt: now(),
             error: reason,
+            errorData: undefined,
           })),
         ),
       );
