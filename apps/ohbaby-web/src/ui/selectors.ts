@@ -30,6 +30,7 @@ export interface HeaderModel {
 
 export interface ComposerModel {
   readonly activeRunId?: string;
+  readonly activeRunStartedAt?: string;
   readonly activeSessionId?: string;
   readonly canSend: boolean;
   readonly canStop: boolean;
@@ -61,8 +62,12 @@ const DEFAULT_PERMISSION_LEVEL: UiPermissionLevel = "default";
 export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
   const daemonSnapshot = snapshot.view.snapshot;
   const activeSession = selectActiveSession(daemonSnapshot);
-  const activeRun = selectActiveRun(daemonSnapshot, activeSession?.id);
   const runStatus = daemonSnapshot?.status ?? { kind: "idle" };
+  const activeRun = selectActiveRun(
+    daemonSnapshot,
+    activeSession?.id,
+    runStatus,
+  );
   const isRunning =
     runStatus.kind === "running" || runStatus.kind === "waiting-for-permission";
   const permission = daemonSnapshot?.permission;
@@ -84,6 +89,9 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
     commandNotices: snapshot.view.commandNotices,
     composer: {
       ...(activeRunId === undefined ? {} : { activeRunId }),
+      ...(activeRun?.startedAt === undefined
+        ? {}
+        : { activeRunStartedAt: activeRun.startedAt }),
       ...(activeSessionId === undefined || activeSessionId === null
         ? {}
         : { activeSessionId }),
@@ -171,11 +179,18 @@ export function messageText(message: UiMessage): string {
 function selectActiveRun(
   snapshot: UiSnapshot | null,
   sessionId: string | undefined,
+  status: UiRunStatus,
 ): UiRun | undefined {
-  return snapshot?.runs.find((run) =>
-    sessionId === undefined
-      ? run.status.kind === "running"
-      : run.sessionId === sessionId,
+  if (status.kind === "running") {
+    return snapshot?.runs.find((run) => run.id === status.runId);
+  }
+  if (status.kind !== "waiting-for-permission") {
+    return undefined;
+  }
+  return snapshot?.runs.find(
+    (run) =>
+      (sessionId === undefined || run.sessionId === sessionId) &&
+      run.status.kind === "waiting-for-permission",
   );
 }
 

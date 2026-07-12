@@ -101,6 +101,35 @@ describe("ohbaby-web ui selectors", () => {
     });
   });
 
+  it("projects the persisted active run start time for elapsed UI", () => {
+    const running = { kind: "running", runId: "run_1" } as const;
+    const view = selectViewModel(
+      store({
+        ...baseSnapshot(),
+        runs: [
+          {
+            id: "run_old",
+            sessionId: "session_1",
+            startedAt: "2026-06-11T00:00:00.000Z",
+            status: { kind: "idle" },
+            updatedAt: "2026-06-11T00:00:01.000Z",
+          },
+          {
+            id: "run_1",
+            sessionId: "session_1",
+            startedAt: timestamp,
+            status: running,
+            updatedAt: timestamp,
+          },
+        ],
+        status: running,
+      }),
+    );
+
+    expect(view.composer.activeRunStartedAt).toBe(timestamp);
+    expect(view.composer.activeRunId).toBe("run_1");
+  });
+
   it("uses the connected model before a session has context usage", () => {
     const snapshot = { ...baseSnapshot(), contextWindowUsages: [] };
     const view = selectViewModel(

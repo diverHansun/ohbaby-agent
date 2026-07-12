@@ -1030,6 +1030,19 @@ textarea:disabled {
   margin: 0 0 12px;
 }
 
+.ohb-message-pending {
+  position: relative;
+}
+
+.ohb-message-pending-label {
+  color: #aeb2ba;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
 .ohb-markdown code {
   background: #f1f1f2;
   border-radius: 4px;
