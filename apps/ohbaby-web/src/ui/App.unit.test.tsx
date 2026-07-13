@@ -206,6 +206,67 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(stream.scrollTop).toBe(1_600);
   });
 
+  it("shows the idle typewriter only while the composer is empty and unfocused", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+    const textarea = app.container.querySelector("textarea");
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+      throw new Error("textarea not found");
+    }
+
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-composer-typewriter")),
+    );
+    expect(textarea.placeholder).toBe("");
+
+    await act(async () => {
+      textarea.focus();
+      await Promise.resolve();
+    });
+    expect(app.container.querySelector(".ohb-composer-typewriter")).toBeNull();
+
+    await act(async () => {
+      textarea.blur();
+      await Promise.resolve();
+    });
+    expect(
+      app.container.querySelector(".ohb-composer-typewriter"),
+    ).not.toBeNull();
+
+    await setTextareaValue(app.container, "a");
+    expect(app.container.querySelector(".ohb-composer-typewriter")).toBeNull();
+  });
+
+  it("keeps static placeholders for running and unavailable composer states", () => {
+    const running = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+    });
+    const runningApp = mountApp(running.runtime);
+    const runningTextarea = runningApp.container.querySelector("textarea");
+    expect(runningTextarea?.getAttribute("placeholder")).toBe(
+      "run in progress",
+    );
+    expect(
+      runningApp.container.querySelector(".ohb-composer-typewriter"),
+    ).toBeNull();
+
+    const unavailable = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+    });
+    unavailable.store.setConnectionState("disconnected");
+    const unavailableApp = mountApp(unavailable.runtime);
+    const unavailableTextarea =
+      unavailableApp.container.querySelector("textarea");
+    expect(unavailableTextarea?.getAttribute("placeholder")).toBe(
+      "daemon unavailable",
+    );
+    expect(
+      unavailableApp.container.querySelector(".ohb-composer-typewriter"),
+    ).toBeNull();
+  });
+
   it("renders all active-session todos and collapses to the current task", async () => {
     const todos = Array.from({ length: 10 }, (_, index) => ({
       content: `task ${String(index + 1)}`,

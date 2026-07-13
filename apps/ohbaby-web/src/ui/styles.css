@@ -2028,7 +2028,33 @@ button.ohb-list-row:hover,
   min-height: 24px;
   min-width: 0;
   outline: 0;
+  position: relative;
   resize: none;
+  z-index: 1;
+}
+
+.ohb-composer-typewriter {
+  align-items: center;
+  color: #aeb8c8;
+  display: flex;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  gap: 1px;
+  left: 40px;
+  pointer-events: none;
+  position: absolute;
+  right: 106px;
+  top: 0;
+  bottom: 0;
+  white-space: nowrap;
+  z-index: 0;
+}
+
+.ohb-composer-typewriter-cursor {
+  animation: ohb-pulse 1s steps(1, end) infinite;
+  background: #5f86c4;
+  display: inline-block;
+  height: 16px;
+  width: 1px;
 }
 
 .ohb-slash-palette {
@@ -2553,6 +2579,10 @@ button.ohb-list-row:hover,
 
   .ohb-composer-input {
     align-items: stretch;
+  }
+
+  .ohb-composer-typewriter {
+    right: 62px;
   }
 
   .ohb-send-button span,

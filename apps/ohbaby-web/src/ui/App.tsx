@@ -86,6 +86,10 @@ import {
   type SlashPaletteItem,
 } from "./slashCommands.js";
 import { isNearBottom, scrollToBottom } from "./streamScroll.js";
+import {
+  COMPOSER_PLACEHOLDER_PHRASES,
+  TypewriterPlaceholder,
+} from "./TypewriterPlaceholder.js";
 
 type StructuredOverlayKind = "compact" | "connect" | "connect-search" | "goal";
 
@@ -2012,6 +2016,7 @@ function Composer(props: {
   const [leaseActivityVersion, setLeaseActivityVersion] = useState(0);
   const [queueAcquirePending, setQueueAcquirePending] = useState(false);
   const [queueExpanded, setQueueExpanded] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
   const [slashCatalog, setSlashCatalog] = useState<UiWebCommandCatalog | null>(
     null,
@@ -2048,6 +2053,12 @@ function Composer(props: {
     slashItems.length > 0 &&
     canUseSlash &&
     !props.view.composer.disabled;
+  const showTypewriterPlaceholder =
+    !isFocused &&
+    draft.length === 0 &&
+    !isSubmitting &&
+    !props.view.composer.disabled &&
+    !props.view.composer.isRunning;
 
   useLayoutEffect(() => {
     const stored = readSessionValue(
@@ -2632,7 +2643,12 @@ function Composer(props: {
             selectedIndex={slashIndex}
           />
         ) : null}
+        <TypewriterPlaceholder
+          active={showTypewriterPlaceholder}
+          phrases={COMPOSER_PLACEHOLDER_PHRASES}
+        />
         <textarea
+          aria-label="Message"
           disabled={props.view.composer.disabled || isSubmitting}
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
             const nextDraft = event.target.value;
@@ -2641,6 +2657,12 @@ function Composer(props: {
             if (nextDraft !== slashDismissedDraft) {
               setSlashDismissedDraft(null);
             }
+          }}
+          onBlur={() => {
+            setIsFocused(false);
+          }}
+          onFocus={() => {
+            setIsFocused(true);
           }}
           onKeyDown={onKeyDown}
           placeholder={composerPlaceholder(props.view)}
@@ -3812,7 +3834,7 @@ function composerPlaceholder(view: ViewModel): string {
   if (view.composer.isRunning) {
     return "run in progress";
   }
-  return "Message ohbaby...";
+  return "";
 }
 
 function toolAccent(name: string): "blue" | "gold" | "green" | "red" {

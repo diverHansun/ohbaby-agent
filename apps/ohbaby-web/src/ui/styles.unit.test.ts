@@ -29,6 +29,18 @@ describe("web app layout styles", () => {
     expectCssRule(".ohb-slash-row em", ["text-align: left"]);
   });
 
+  it("keeps the animated placeholder behind and transparent to pointer input", () => {
+    expectCssRule(".ohb-composer-typewriter", [
+      "pointer-events: none",
+      "position: absolute",
+      "z-index: 0",
+    ]);
+    expectCssRule(".ohb-composer-typewriter-cursor", [
+      "display: inline-block",
+      "width: 1px",
+    ]);
+  });
+
   it("defines isolated permission button consequence styles", () => {
     expectCssRule(".ohb-perm-btn", [
       "align-items: center",
