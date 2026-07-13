@@ -20,11 +20,13 @@ import {
 import { Header } from "./components/header.js";
 import { TranscriptViewport } from "./components/transcript/transcript-viewport.js";
 import { Prompt } from "./components/prompt/index.js";
+import { COMPACT_TODO_LIMIT, TodoPanel } from "./components/todo-panel.js";
 import { AppShell } from "./layout/app-shell.js";
 import { formatContextWindowUsage } from "./render/usage.js";
 import { createTuiStore } from "./store/events.js";
 import {
   selectActiveGoal,
+  selectActiveTodoList,
   selectActiveContextWindowUsage,
   useTuiStoreSelector,
 } from "./store/selectors.js";
@@ -95,6 +97,7 @@ export function OhbabyTerminalApp({
     selectActiveContextWindowUsage,
   );
   const activeGoal = useTuiStoreSelector(store, selectActiveGoal);
+  const activeTodoList = useTuiStoreSelector(store, selectActiveTodoList);
   const catalog = useTuiStoreSelector(store, (state) => state.catalog);
   const interactions = useTuiStoreSelector(
     store,
@@ -120,6 +123,7 @@ export function OhbabyTerminalApp({
   const [escInterruptArmedRunId, setEscInterruptArmedRunId] = useState<
     string | null
   >(null);
+  const [todoExpanded, setTodoExpanded] = useState(false);
   const escInterruptArmedRunIdRef = useRef<string | null>(null);
   const escInterruptTimerRef = useRef<{
     readonly runId: string;
@@ -174,6 +178,10 @@ export function OhbabyTerminalApp({
       disarmEscInterrupt(escInterruptArmedRunId);
     }
   }, [disarmEscInterrupt, escInterruptArmedRunId, permissions.length, runtime]);
+  const todoRunId = runtime.kind === "running" ? runtime.runId : null;
+  useEffect(() => {
+    setTodoExpanded(false);
+  }, [activeSessionId, activeTodoList === null, todoRunId]);
   useEffect(
     () => (): void => {
       if (escInterruptTimerRef.current !== null) {
@@ -320,6 +328,17 @@ export function OhbabyTerminalApp({
   useInput(
     (value, key) => {
       if (commandPanelRef.current !== null) {
+        return;
+      }
+
+      if (
+        !hasDialog &&
+        activeTodoList !== null &&
+        activeTodoList.todos.length > COMPACT_TODO_LIMIT &&
+        key.ctrl &&
+        (value === "t" || value === "\u0014")
+      ) {
+        setTodoExpanded((expanded) => !expanded);
         return;
       }
 
@@ -633,6 +652,7 @@ export function OhbabyTerminalApp({
           panel={hasBackendDialog ? null : commandPanel}
           runtime={runtime}
         />
+        <TodoPanel expanded={todoExpanded} todoList={activeTodoList} />
         <Prompt
           activeSessionId={activeSessionId}
           catalog={catalog}

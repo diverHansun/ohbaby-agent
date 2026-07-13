@@ -5,7 +5,10 @@ import type {
   UiMessage,
   UiSnapshot,
 } from "ohbaby-sdk";
-import { selectActiveContextWindowUsage } from "./selectors.js";
+import {
+  selectActiveContextWindowUsage,
+  selectActiveTodoList,
+} from "./selectors.js";
 import {
   applyTuiEvent,
   createStateFromSnapshot,
@@ -129,6 +132,105 @@ function latestCommandNoticeText(state: TuiStoreState): string | undefined {
 }
 
 describe("TUI store event reducer", () => {
+  it("hydrates and upserts todo projections by session", () => {
+    const initial = createStateFromSnapshot({
+      ...snapshot(),
+      todos: [
+        {
+          sessionId: "session_other",
+          todos: [{ content: "Keep me", status: "pending" }],
+          visible: true,
+        },
+      ],
+    });
+
+    const state = applyTuiEvent(initial, {
+      sessionId: "session_1",
+      timestamp: 1,
+      todos: [{ content: "Implement panel", status: "in_progress" }],
+      type: "todo.updated",
+      visible: true,
+    });
+
+    expect(state.todos).toEqual([
+      {
+        sessionId: "session_other",
+        todos: [{ content: "Keep me", status: "pending" }],
+        visible: true,
+      },
+      {
+        sessionId: "session_1",
+        todos: [{ content: "Implement panel", status: "in_progress" }],
+        visible: true,
+      },
+    ]);
+    expect(selectActiveTodoList(state)?.todos).toEqual([
+      { content: "Implement panel", status: "in_progress" },
+    ]);
+  });
+
+  it("defensively filters legacy todo tool calls and results", () => {
+    const base = snapshot();
+    const state = createStateFromSnapshot({
+      ...base,
+      sessions: [
+        {
+          ...base.sessions[0],
+          messages: [
+            {
+              createdAt: "2026-05-14T00:00:01.000Z",
+              id: "message_todo",
+              parts: [
+                { text: "Visible", type: "text" },
+                {
+                  call: {
+                    id: "call_todo",
+                    input: { todos: [] },
+                    name: "todo_write",
+                    status: "completed",
+                  },
+                  type: "tool-call",
+                },
+                {
+                  result: { callId: "call_todo", output: "No todos." },
+                  type: "tool-result",
+                },
+              ],
+              role: "assistant",
+            },
+            {
+              createdAt: "2026-05-14T00:00:02.000Z",
+              id: "message_todo_only",
+              parts: [
+                {
+                  call: {
+                    id: "call_todo_only",
+                    input: {},
+                    name: "todo_read",
+                    status: "completed",
+                  },
+                  type: "tool-call",
+                },
+              ],
+              role: "assistant",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(state.messages).toEqual([
+      expect.objectContaining({
+        id: "message_todo",
+        parts: [{ text: "Visible", type: "text" }],
+      }),
+    ]);
+    expect(state.committedItems).toHaveLength(1);
+    expect(state.committedItems[0]?.message.parts).toEqual([
+      { text: "Visible", type: "text" },
+    ]);
+  });
+
   it("formats connect command output without exposing internal context window source", () => {
     const state = applyCommandOutput(
       createStateFromSnapshot(snapshot()),

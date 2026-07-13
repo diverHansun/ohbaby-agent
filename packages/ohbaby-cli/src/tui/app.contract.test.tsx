@@ -164,6 +164,70 @@ afterEach(() => {
 });
 
 describe("OhbabyTerminalApp", () => {
+  it("renders compact todos above the prompt and toggles overflow with Ctrl+T", async () => {
+    const todos = Array.from({ length: 10 }, (_, index) => ({
+      content: `todo ${String(index + 1)}`,
+      status: index === 0 ? ("in_progress" as const) : ("pending" as const),
+    }));
+    const client = createFakeClient({
+      ...snapshot(),
+      runs: [
+        {
+          id: "run_1",
+          sessionId: "session_1",
+          startedAt: "2026-05-14T00:00:03.000Z",
+          status: { kind: "running", runId: "run_1" },
+          updatedAt: "2026-05-14T00:00:03.000Z",
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
+      todos: [{ sessionId: "session_1", todos, visible: true }],
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    expect(app.lastFrame()).toContain("todo 5");
+    expect(app.lastFrame()).not.toContain("todo 6");
+    expect(app.lastFrame()).toContain("+5 more · ctrl+t to expand");
+    expect((app.lastFrame() ?? "").indexOf("Tasks")).toBeLessThan(
+      (app.lastFrame() ?? "").indexOf(">"),
+    );
+
+    app.stdin.write("\u0014");
+    await flush();
+    expect(app.lastFrame()).toContain("todo 10");
+    expect(app.lastFrame()).toContain("ctrl+t to collapse");
+
+    app.stdin.write("\u0014");
+    await flush();
+    expect(app.lastFrame()).not.toContain("todo 10");
+
+    client.emit({
+      sessionId: "session_1",
+      todos,
+      type: "todo.updated",
+      visible: false,
+    });
+    await flush();
+    expect(app.lastFrame()).not.toContain("Tasks");
+
+    client.emit({
+      sessionId: "session_1",
+      todos,
+      type: "todo.updated",
+      visible: true,
+    });
+    await flush();
+    expect(app.lastFrame()).toContain("+5 more · ctrl+t to expand");
+    expect(app.lastFrame()).not.toContain("todo 10");
+    app.unmount();
+  });
+
   it("renders an empty-state logo and branded prompt", async () => {
     const client = createFakeClient({
       activeSessionId: null,

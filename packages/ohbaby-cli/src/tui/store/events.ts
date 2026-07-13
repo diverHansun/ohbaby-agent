@@ -11,6 +11,7 @@ import type {
   UiRun,
   UiSession,
   UiSessionGoal,
+  UiSessionTodoList,
   UiSnapshot,
 } from "ohbaby-sdk";
 import type {
@@ -36,7 +37,7 @@ const UI_NOTICE_LIMIT = 10;
 
 export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
   const activeSession = findActiveSession(snapshot);
-  const messages = activeSession?.messages ?? [];
+  const messages = filterHiddenTodoMessages(activeSession?.messages ?? []);
   const transcript = advanceTranscriptCommit(
     undefined,
     messages,
@@ -52,6 +53,7 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
     commandSessionIds: {},
     contextWindowUsages: snapshot.contextWindowUsages ?? [],
     goals: snapshot.goals ?? [],
+    todos: snapshot.todos ?? [],
     resolvedPermissionIds: [],
     interactions: [],
     committedItems: transcript.committedItems,
@@ -220,6 +222,19 @@ export function applyTuiEvent(
                 goal: event.goal,
                 sessionId: event.sessionId,
               }),
+      });
+
+    case "todo.updated":
+      return rebuildFromCollections(state, {
+        todos: upsertByKey(
+          state.todos,
+          {
+            sessionId: event.sessionId,
+            todos: event.todos.map((todo) => ({ ...todo })),
+            visible: event.visible,
+          },
+          "sessionId",
+        ),
       });
 
     case "permission.requested":
@@ -452,6 +467,7 @@ function preserveLocalQueues(
     previous.contextWindowUsages,
   );
   const goals = next.goals;
+  const todos = next.todos;
   const runtime = resolveRuntimeAfterSnapshot(
     previous,
     next,
@@ -466,11 +482,13 @@ function preserveLocalQueues(
     status: runtime,
     ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
     ...(goals.length > 0 ? { goals } : {}),
+    ...(todos.length > 0 ? { todos } : {}),
     ...(permission === undefined ? {} : { permission }),
   };
-  const messages =
+  const messages = filterHiddenTodoMessages(
     sessions.find((session) => session.id === next.activeSessionId)?.messages ??
-    [];
+      [],
+  );
   const transcript = resolveTranscriptState(
     activeSessionChanged ? undefined : previous,
     next.activeSessionId,
@@ -487,6 +505,7 @@ function preserveLocalQueues(
     commandSessionIds: previous.commandSessionIds,
     contextWindowUsages,
     goals,
+    todos,
     interactions: previous.interactions,
     committedItems: transcript.committedItems,
     committedPartCounts: transcript.committedPartCounts,
@@ -520,6 +539,7 @@ function rebuildFromCollections(
     readonly runtime?: TuiRuntimeStatus;
     readonly contextWindowUsages?: readonly UiContextWindowUsage[];
     readonly goals?: readonly UiSessionGoal[];
+    readonly todos?: readonly UiSessionTodoList[];
   },
 ): TuiStoreState {
   const activeSessionId =
@@ -535,6 +555,7 @@ function rebuildFromCollections(
   const contextWindowUsages =
     patch.contextWindowUsages ?? state.contextWindowUsages;
   const goals = patch.goals ?? state.goals;
+  const todos = patch.todos ?? state.todos;
   const snapshot: UiSnapshot = {
     activeSessionId,
     permissions,
@@ -544,10 +565,12 @@ function rebuildFromCollections(
     status: runtime,
     ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
     ...(goals.length > 0 ? { goals } : {}),
+    ...(todos.length > 0 ? { todos } : {}),
     ...(permission === undefined ? {} : { permission }),
   };
-  const messages =
-    sessions.find((session) => session.id === activeSessionId)?.messages ?? [];
+  const messages = filterHiddenTodoMessages(
+    sessions.find((session) => session.id === activeSessionId)?.messages ?? [],
+  );
   const transcript = resolveTranscriptState(
     state,
     activeSessionId,
@@ -562,6 +585,7 @@ function rebuildFromCollections(
     committedPartCounts: transcript.committedPartCounts,
     contextWindowUsages,
     goals,
+    todos,
     liveMessage: transcript.liveMessage,
     messages,
     permissions,
@@ -1482,4 +1506,38 @@ function noticeSessionId(notice: UiNotice): string | undefined {
   }
 
   return undefined;
+}
+
+function filterHiddenTodoMessages(
+  messages: readonly UiMessage[],
+): readonly UiMessage[] {
+  return messages.flatMap((message) => {
+    const hiddenCallIds = new Set(
+      message.parts
+        .filter(
+          (part) =>
+            part.type === "tool-call" &&
+            (part.call.name === "todo_read" || part.call.name === "todo_write"),
+        )
+        .map((part) => (part.type === "tool-call" ? part.call.id : "")),
+    );
+    if (hiddenCallIds.size === 0) {
+      return [message];
+    }
+
+    const parts = message.parts.filter(
+      (part) => !isHiddenTodoPart(part, hiddenCallIds),
+    );
+    return parts.length === 0 ? [] : [{ ...message, parts }];
+  });
+}
+
+function isHiddenTodoPart(
+  part: UiMessagePart,
+  hiddenCallIds: ReadonlySet<string>,
+): boolean {
+  return (
+    (part.type === "tool-call" && hiddenCallIds.has(part.call.id)) ||
+    (part.type === "tool-result" && hiddenCallIds.has(part.result.callId))
+  );
 }

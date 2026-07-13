@@ -1,5 +1,9 @@
 import { useSyncExternalStore } from "react";
-import type { UiContextWindowUsage, UiGoal } from "ohbaby-sdk";
+import type {
+  UiContextWindowUsage,
+  UiGoal,
+  UiSessionTodoList,
+} from "ohbaby-sdk";
 import type {
   TuiInteractionRequest,
   TuiRuntimeStatus,
@@ -50,6 +54,20 @@ export function selectActiveGoal(state: TuiStoreState): UiGoal | null {
     state.goals.find((goal) => goal.sessionId === state.activeSessionId)
       ?.goal ?? null
   );
+}
+
+export function selectActiveTodoList(
+  state: TuiStoreState,
+): UiSessionTodoList | null {
+  if (!state.activeSessionId) {
+    return null;
+  }
+  const todoList = state.todos.find(
+    (candidate) => candidate.sessionId === state.activeSessionId,
+  );
+  return todoList?.visible === true && todoList.todos.length > 0
+    ? todoList
+    : null;
 }
 
 export function selectRuntimeLabel(state: TuiStoreState): string {
