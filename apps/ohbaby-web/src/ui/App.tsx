@@ -85,6 +85,7 @@ import {
   type CommandResultModel,
   type SlashPaletteItem,
 } from "./slashCommands.js";
+import { isNearBottom, scrollToBottom } from "./streamScroll.js";
 
 type StructuredOverlayKind = "compact" | "connect" | "connect-search" | "goal";
 
@@ -1283,18 +1284,102 @@ function ConversationStream(props: {
   readonly view: ViewModel;
 }): ReactElement {
   const streamRef = useRef<HTMLDivElement | null>(null);
+  const streamInnerRef = useRef<HTMLDivElement | null>(null);
+  const stickToBottomRef = useRef(true);
+  const scheduledScrollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messages = props.view.activeSession?.messages ?? [];
   const visibleMessages = filterTodoToolMessages(messages);
+  const activeSessionId = props.view.activeSession?.id ?? null;
+  const lastMessage = visibleMessages.at(-1);
+  const messagesSignature = [
+    visibleMessages.length,
+    lastMessage?.id ?? "",
+    lastMessage?.parts.length ?? 0,
+    lastMessage?.parts
+      .map((part) =>
+        part.type === "text" || part.type === "reasoning"
+          ? `${part.type}:${String(part.text.length)}`
+          : part.type,
+      )
+      .join(",") ?? "",
+  ].join(":");
+
+  const scheduleStickScroll = useCallback(() => {
+    if (!stickToBottomRef.current) {
+      return;
+    }
+    if (scheduledScrollRef.current !== null) {
+      globalThis.clearTimeout(scheduledScrollRef.current);
+    }
+    scheduledScrollRef.current = globalThis.setTimeout(() => {
+      scheduledScrollRef.current = null;
+      if (!stickToBottomRef.current) {
+        return;
+      }
+      const element = streamRef.current;
+      if (element) {
+        scrollToBottom(element);
+      }
+    }, 0);
+  }, []);
+
+  useLayoutEffect(() => {
+    stickToBottomRef.current = true;
+    scheduleStickScroll();
+  }, [activeSessionId, scheduleStickScroll]);
+
+  useLayoutEffect(() => {
+    if (props.pendingPrompt !== null) {
+      stickToBottomRef.current = true;
+    }
+    scheduleStickScroll();
+  }, [
+    messagesSignature,
+    props.pendingPrompt?.clientRequestId,
+    props.pendingPrompt?.text,
+    props.view.composer.isRunning,
+    scheduleStickScroll,
+  ]);
+
   useEffect(() => {
     const element = streamRef.current;
-    if (element) {
-      element.scrollTop = element.scrollHeight;
+    if (!element) {
+      return;
     }
-  }, [messages.length, props.pendingPrompt, props.view.composer.isRunning]);
+    const onScroll = (): void => {
+      stickToBottomRef.current = isNearBottom(element);
+    };
+    element.addEventListener("scroll", onScroll);
+    return (): void => {
+      element.removeEventListener("scroll", onScroll);
+    };
+  }, []);
+
+  useEffect(() => {
+    const inner = streamInnerRef.current;
+    if (!inner || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      scheduleStickScroll();
+    });
+    observer.observe(inner);
+    return (): void => {
+      observer.disconnect();
+    };
+  }, [scheduleStickScroll]);
+
+  useEffect(() => {
+    return (): void => {
+      if (scheduledScrollRef.current !== null) {
+        globalThis.clearTimeout(scheduledScrollRef.current);
+      }
+    };
+  }, []);
 
   return (
     <section className="ohb-stream" ref={streamRef}>
-      <div className="ohb-stream-inner">
+      <div className="ohb-stream-inner" ref={streamInnerRef}>
         {visibleMessages.map((message) => (
           <MessageRow
             key={message.id}

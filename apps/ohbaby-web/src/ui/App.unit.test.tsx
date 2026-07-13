@@ -89,6 +89,123 @@ afterEach(() => {
 });
 
 describe("OhbabyWebApp slash command interactions", () => {
+  it("sticks to growing stream content without taking back an upward scroll", async () => {
+    const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    const app = mountApp(fake.runtime);
+    const stream = app.container.querySelector<HTMLElement>(".ohb-stream");
+    if (!stream) {
+      throw new Error("stream not found");
+    }
+
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_000,
+      scrollTop: 0,
+    });
+    await waitFor(() => stream.scrollTop === 1_000);
+
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_000,
+      scrollTop: 400,
+    });
+    await act(async () => {
+      stream.dispatchEvent(new Event("scroll"));
+      await Promise.resolve();
+    });
+
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_200,
+      scrollTop: 400,
+    });
+    act(() => {
+      fake.store.replaceSnapshot(
+        snapshotWithMessageText(initial, "hello expanded"),
+        2,
+      );
+    });
+    await flushTimers();
+    expect(stream.scrollTop).toBe(400);
+
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_200,
+      scrollTop: 800,
+    });
+    await act(async () => {
+      stream.dispatchEvent(new Event("scroll"));
+      await Promise.resolve();
+    });
+
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_400,
+      scrollTop: 800,
+    });
+    act(() => {
+      fake.store.replaceSnapshot(
+        snapshotWithMessageText(initial, "hello expanded again"),
+        3,
+      );
+    });
+    await flushTimers();
+    expect(stream.scrollTop).toBe(1_400);
+  });
+
+  it("resets stick-to-bottom when the active session changes", async () => {
+    const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    const app = mountApp(fake.runtime);
+    const stream = app.container.querySelector<HTMLElement>(".ohb-stream");
+    if (!stream) {
+      throw new Error("stream not found");
+    }
+
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_000,
+      scrollTop: 400,
+    });
+    await act(async () => {
+      stream.dispatchEvent(new Event("scroll"));
+      await Promise.resolve();
+    });
+
+    const nextSession = {
+      createdAt: timestamp,
+      id: "session_2",
+      messages: [
+        {
+          createdAt: timestamp,
+          id: "message_2",
+          parts: [{ text: "session two", type: "text" as const }],
+          role: "user" as const,
+        },
+      ],
+      title: "Session 2",
+      updatedAt: timestamp,
+    };
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1_600,
+      scrollTop: 400,
+    });
+    act(() => {
+      fake.store.replaceSnapshot(
+        {
+          ...initial,
+          activeSessionId: "session_2",
+          sessions: [...initial.sessions, nextSession],
+        },
+        2,
+      );
+    });
+    await flushTimers();
+    expect(stream.scrollTop).toBe(1_600);
+  });
+
   it("renders all active-session todos and collapses to the current task", async () => {
     const todos = Array.from({ length: 10 }, (_, index) => ({
       content: `task ${String(index + 1)}`,
@@ -1648,6 +1765,45 @@ function snapshotWithStatus(status: UiRunStatus): UiSnapshot {
   };
 }
 
+function snapshotWithMessageText(
+  snapshot: UiSnapshot,
+  text: string,
+): UiSnapshot {
+  return {
+    ...snapshot,
+    sessions: snapshot.sessions.map((session) =>
+      session.id === "session_1"
+        ? {
+            ...session,
+            messages: session.messages.map((message) =>
+              message.id === "message_1"
+                ? {
+                    ...message,
+                    parts: [{ text, type: "text" as const }],
+                  }
+                : message,
+            ),
+          }
+        : session,
+    ),
+  };
+}
+
+function setScrollMetrics(
+  element: HTMLElement,
+  metrics: {
+    readonly clientHeight: number;
+    readonly scrollHeight: number;
+    readonly scrollTop: number;
+  },
+): void {
+  Object.defineProperties(element, {
+    clientHeight: { configurable: true, value: metrics.clientHeight },
+    scrollHeight: { configurable: true, value: metrics.scrollHeight },
+    scrollTop: { configurable: true, value: metrics.scrollTop, writable: true },
+  });
+}
+
 function permissionRequest(): UiPermissionRequest {
   return {
     choices: [
@@ -1862,6 +2018,12 @@ async function waitFor(
     });
   }
   throw new Error("condition was not met before timeout");
+}
+
+async function flushTimers(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  });
 }
 
 function slashPaletteText(container: ParentNode): string {
