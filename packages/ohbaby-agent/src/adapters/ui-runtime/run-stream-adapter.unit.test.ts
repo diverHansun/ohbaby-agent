@@ -489,7 +489,7 @@ describe("startRunStreamProjection", () => {
     ]);
   });
 
-  it("never projects todo tool calls or results into the streaming transcript", async () => {
+  it("never projects internal selector or todo tools into the streaming transcript", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const stateStore = createInMemoryUiStateStore({
       activeSessionId: "session_1",
@@ -526,7 +526,11 @@ describe("startRunStreamProjection", () => {
       sessionId: "session_1",
       timestamp: 1,
     });
-    for (const [index, toolName] of ["todo_read", "todo_write"].entries()) {
+    for (const [index, toolName] of [
+      "select_tools",
+      "todo_read",
+      "todo_write",
+    ].entries()) {
       const callId = `call_todo_${String(index)}`;
       streamBridge.publish("run/run_1", "run.tool.start", {
         callId,

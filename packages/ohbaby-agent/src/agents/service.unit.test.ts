@@ -40,12 +40,7 @@ async function createAgentManager(): Promise<AgentManager> {
     }),
   });
   await registry.initialize();
-  return new AgentManager({
-    registry,
-    systemPromptProvider: {
-      build: ({ agent }) => `system:${agent.name}`,
-    },
-  });
+  return new AgentManager({ registry });
 }
 
 function createSessionManager(): {

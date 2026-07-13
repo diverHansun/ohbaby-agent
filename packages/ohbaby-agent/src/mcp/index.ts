@@ -6,7 +6,27 @@ export {
   McpToolDiscoveryError,
   McpToolExecutionError,
 } from "./errors.js";
-export { adaptMcpTool, transformMcpResult } from "./integration/tool-adapter.js";
+export {
+  adaptMcpTool,
+  transformMcpResult,
+} from "./integration/tool-adapter.js";
+export {
+  admitMcpTool,
+  admitMcpTools,
+  createSelectToolsTool,
+  McpToolMenu,
+  MAX_MCP_TOOL_NAME_CHARS,
+  MAX_MCP_TOOL_SCHEMA_DEPTH,
+  MAX_MCP_TOOLS_PER_SELECTION,
+  MAX_MCP_TOOLS_PER_SESSION,
+} from "./integration/dynamic-tool-menu.js";
+export type {
+  McpToolAdmissionResult,
+  McpToolMenuScope,
+  McpToolRejection,
+  McpToolRejectionReason,
+  McpToolSelection,
+} from "./integration/dynamic-tool-menu.js";
 export {
   createMcpPromptTool,
   createMcpResourceTool,

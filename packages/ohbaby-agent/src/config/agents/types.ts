@@ -110,7 +110,6 @@ export const PermissionConfigSchema = z
       ])
       .optional(),
     web: PermissionValueSchema.optional(),
-    mcp: PermissionValueSchema.optional(),
     externalDirectory: PermissionValueSchema.optional(),
     doomLoop: PermissionValueSchema.optional(),
     critical: CriticalOperationsConfigSchema.optional(),

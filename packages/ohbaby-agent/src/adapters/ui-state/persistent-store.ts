@@ -36,7 +36,11 @@ const DEFAULT_SESSION_LIMIT = 50;
 const ACTIVE_RUN_STATUSES = new Set<RunStatus>(["pending", "running"]);
 const SESSION_TRANSACTION_ACTIVE_MESSAGE = "Session transaction is active";
 const CONTEXT_COMPACTED_TEXT = "Context compacted";
-const HIDDEN_TRANSCRIPT_TOOLS = new Set(["todo_read", "todo_write"]);
+const HIDDEN_TRANSCRIPT_TOOLS = new Set([
+  "select_tools",
+  "todo_read",
+  "todo_write",
+]);
 
 export interface PersistentUiStateStoreOptions {
   readonly sessionManager: Pick<

@@ -169,7 +169,7 @@ describe("TUI store event reducer", () => {
     ]);
   });
 
-  it("defensively filters legacy todo tool calls and results", () => {
+  it("defensively filters internal selector and todo tool calls and results", () => {
     const base = snapshot();
     const state = createStateFromSnapshot({
       ...base,
@@ -182,6 +182,22 @@ describe("TUI store event reducer", () => {
               id: "message_todo",
               parts: [
                 { text: "Visible", type: "text" },
+                {
+                  call: {
+                    id: "call_selector",
+                    input: { tools: ["mcp_s6_server_t4_echo"] },
+                    name: "select_tools",
+                    status: "completed",
+                  },
+                  type: "tool-call",
+                },
+                {
+                  result: {
+                    callId: "call_selector",
+                    output: "Loaded MCP tools: mcp_s6_server_t4_echo.",
+                  },
+                  type: "tool-result",
+                },
                 {
                   call: {
                     id: "call_todo",

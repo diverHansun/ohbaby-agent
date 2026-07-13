@@ -690,6 +690,7 @@ export function createContextManager(
     const [systemPrompt, rawHistory] = await Promise.all([
       options.systemPromptProvider.build({
         agentName,
+        contextScopeId,
         sessionId,
         directory,
         isSubagent,

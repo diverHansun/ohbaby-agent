@@ -10,7 +10,6 @@ export const buildAgent: AgentConfig = {
   permission: {
     bash: { "*": "allow" },
     edit: "allow",
-    mcp: "ask",
     web: "allow",
   },
 };

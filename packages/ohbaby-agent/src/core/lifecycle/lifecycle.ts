@@ -456,7 +456,15 @@ export class Lifecycle {
         parentMessageId,
         sessionId: params.sessionId,
         signal: params.signal,
-        tools: isFinalStep ? [] : params.tools,
+        tools: isFinalStep
+          ? []
+          : ((await this.deps.resolveTools?.({
+              agentName: params.agent,
+              contextScopeId: params.contextScopeId,
+              isSubagent: params.isSubagent,
+              sessionId: params.sessionId,
+              step,
+            })) ?? params.tools),
       };
       let stepResult: StepResult;
       try {

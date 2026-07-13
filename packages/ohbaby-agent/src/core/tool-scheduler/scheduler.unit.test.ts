@@ -156,6 +156,7 @@ function createTool(input: {
 function createScheduler(
   options: {
     readonly agentTools?: ToolSchedulerOptions["agentTools"];
+    readonly accessGuard?: ToolSchedulerOptions["accessGuard"];
     readonly permission?: PermissionPort;
     readonly permissionState?: PermissionStateStore;
     readonly config?: ToolSchedulerOptions["config"];
@@ -167,6 +168,7 @@ function createScheduler(
   const started: string[] = [];
   const completed: string[] = [];
   const scheduler = createToolScheduler({
+    accessGuard: options.accessGuard,
     agentTools: options.agentTools,
     bus,
     config: options.config,
@@ -195,6 +197,34 @@ function createScheduler(
 }
 
 describe("ToolScheduler", () => {
+  it("rejects access-guarded calls before tool execution", async () => {
+    const execute = vi.fn(() => Promise.resolve({ output: "should not run" }));
+    const { scheduler } = createScheduler({
+      accessGuard: ({ tool }) =>
+        tool.source === "mcp" ? "MCP tool must be selected first." : undefined,
+    });
+    scheduler.register(
+      createTool({ execute, name: "mcp_s7_example_t6_search", source: "mcp" }),
+    );
+
+    await expect(
+      scheduler.execute({
+        callId: "guarded_1",
+        messageId: "message_1",
+        params: {},
+        sessionId: "session_1",
+        toolName: "mcp_s7_example_t6_search",
+      }),
+    ).resolves.toMatchObject({
+      error: {
+        message: "MCP tool must be selected first.",
+        type: "PermissionDeniedError",
+      },
+      status: "rejected",
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("resolves per-tool scheduler timeout overrides", () => {
     expect(
       timeoutForTool(

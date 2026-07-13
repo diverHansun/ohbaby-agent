@@ -93,9 +93,7 @@ describe("SystemPrompt", () => {
       environment: ENVIRONMENT,
       isSubagent: false,
       taskKind: "agent",
-      toolSnippets: {
-        read: "Read one text file.",
-      },
+      mcpToolNames: ["mcp_s7_example_t6_search"],
       tools: ["read"],
     });
 
@@ -104,7 +102,7 @@ describe("SystemPrompt", () => {
     expect(prompts[1]).toContain("<primary_task>");
     expect(prompts[2]).toContain("<agent_prompt_addon>");
     expect(prompts[3]).toContain("<subagent_roles>");
-    expect(prompts[4]).toContain("<tool_guidance>");
+    expect(prompts[4]).toContain("<mcp_tools>");
     expect(prompts[5]).toContain("<environment>");
     expect(prompts[6]).toContain("<custom_instructions>");
   });
@@ -174,9 +172,7 @@ describe("SystemPrompt", () => {
       environment: ENVIRONMENT,
       isSubagent: true,
       taskKind: "explore",
-      toolSnippets: {
-        read: "Read one text file.",
-      },
+      mcpToolNames: ["mcp_s7_example_t6_search"],
       tools: ["read"],
     });
 
@@ -184,7 +180,7 @@ describe("SystemPrompt", () => {
     expect(prompts[0]).toContain("<subagent_base>");
     expect(prompts[1]).toContain("<subagent_task>");
     expect(prompts[2]).toContain("<agent_prompt_addon>");
-    expect(prompts[3]).toContain("<tool_guidance>");
+    expect(prompts[3]).toContain("<mcp_tools>");
     expect(prompts[4]).toContain("<environment>");
   });
 

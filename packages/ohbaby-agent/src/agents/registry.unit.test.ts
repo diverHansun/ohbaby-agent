@@ -33,7 +33,7 @@ describe("AgentRegistry", () => {
     });
   });
 
-  it("gives builtin subagents planning, shell, and file editing tools", async () => {
+  it("gives builtin subagents planning, shell, file-editing, and progressive-disclosure tools", async () => {
     const registry = new AgentRegistry({
       configLoader: (): AgentsConfig => ({ agents: {} }),
     });
@@ -47,6 +47,9 @@ describe("AgentRegistry", () => {
         "todo_read",
         "todo_write",
         "write",
+        "select_tools",
+        "skill",
+        "skill_resource",
       ]),
     );
     expect(registry.get("research")?.tools?.include).toEqual(
@@ -56,6 +59,9 @@ describe("AgentRegistry", () => {
         "todo_read",
         "todo_write",
         "write",
+        "select_tools",
+        "skill",
+        "skill_resource",
       ]),
     );
     expect(registry.get("generic")?.tools?.include).toEqual(

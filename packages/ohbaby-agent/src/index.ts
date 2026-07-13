@@ -77,11 +77,7 @@ export {
   researchAgent,
   toolsConfigToRecord,
 } from "./agents/index.js";
-export type {
-  AgentServiceOptions,
-  AgentPromptProvider,
-  RuntimeAgent,
-} from "./agents/index.js";
+export type { AgentServiceOptions, RuntimeAgent } from "./agents/index.js";
 export * from "./core/agents/index.js";
 export * from "./core/system-prompt/index.js";
 export * from "./core/llm-client/index.js";

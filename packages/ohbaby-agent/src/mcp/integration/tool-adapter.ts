@@ -33,8 +33,13 @@ function localToolName(serverName: string, toolName: string): string {
   return `mcp_s${serverLength}_${serverPart}_t${toolLength}_${toolPart}`;
 }
 
-function inferCategory(tool: McpToolDefinition): ToolCategory {
-  return tool.annotations?.readOnlyHint === true ? "readonly" : "write";
+function inferCategory(
+  tool: McpToolDefinition,
+  trusted: boolean,
+): ToolCategory {
+  return trusted && tool.annotations?.readOnlyHint === true
+    ? "readonly"
+    : "write";
 }
 
 function contentBlocks(result: McpCallToolResult): readonly McpContentBlock[] {
@@ -104,7 +109,7 @@ export function adaptMcpTool(
   client: McpClientLike,
 ): McpTool {
   const name = localToolName(client.name, mcpTool.name);
-  const category = inferCategory(mcpTool);
+  const category = inferCategory(mcpTool, client.config.trust);
 
   return {
     annotations: {

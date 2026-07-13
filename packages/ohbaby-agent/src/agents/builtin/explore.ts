@@ -10,7 +10,6 @@ export const exploreAgent: AgentConfig = {
   permission: {
     bash: { "*": "ask" },
     edit: "ask",
-    mcp: "deny",
     web: "deny",
   },
   tools: {
@@ -25,6 +24,9 @@ export const exploreAgent: AgentConfig = {
       "todo_read",
       "todo_write",
       "memory_list",
+      "select_tools",
+      "skill",
+      "skill_resource",
     ],
   },
 };

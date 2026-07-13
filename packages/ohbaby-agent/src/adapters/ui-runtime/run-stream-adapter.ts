@@ -44,7 +44,11 @@ interface ToolResultPayload {
   readonly status: string;
 }
 
-const HIDDEN_TRANSCRIPT_TOOLS = new Set(["todo_read", "todo_write"]);
+const HIDDEN_TRANSCRIPT_TOOLS = new Set([
+  "select_tools",
+  "todo_read",
+  "todo_write",
+]);
 
 type NoticeDraft = Omit<UiNotice, "id" | "createdAt"> & {
   readonly createdAt?: string;

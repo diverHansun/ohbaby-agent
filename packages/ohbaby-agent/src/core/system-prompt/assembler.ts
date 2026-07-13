@@ -4,7 +4,7 @@ import {
   generateBasePrompt,
   generateCustomInstructionsPrompt,
   generateEnvironmentPrompt,
-  generateToolGuidancePrompt,
+  generateMcpToolMenuPrompt,
 } from "./layers/index.js";
 import { getBuiltinAgentPrompt } from "./prompts/agents/index.js";
 import { getPrimaryTaskPrompt } from "./prompts/primary/tasks.js";
@@ -12,11 +12,7 @@ import { SUBAGENT_ROLES_GUIDANCE_PROMPT } from "./prompts/primary/subagent-roles
 import { SUBAGENT_BASE_PROMPT } from "./prompts/subagents/base.js";
 import { getSubagentTaskPrompt } from "./prompts/subagents/tasks.js";
 import { loadCustomInstructions } from "./services/custom-instruction-loader.js";
-import {
-  scanPromptLikeContent,
-  shouldLoadPromptLikeContent,
-  type PromptSecurityFinding,
-} from "./security/index.js";
+import type { PromptSecurityFinding } from "./security/index.js";
 import type {
   AssembleOptions,
   EnvironmentInfo,
@@ -28,6 +24,7 @@ import type {
 
 export interface SystemPromptProviderInput {
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly directory: string;
   readonly isSubagent: boolean;
   readonly agentName?: string;
@@ -53,6 +50,9 @@ export interface SystemPromptProviderOptions {
   readonly toolsProvider?: (
     input: SystemPromptProviderInput,
   ) => Promise<readonly string[]> | readonly string[];
+  readonly mcpToolNamesProvider?: (
+    input: SystemPromptProviderInput,
+  ) => Promise<readonly string[]> | readonly string[];
   readonly taskKindResolver?: (
     input: SystemPromptProviderInput,
     agentName: string,
@@ -62,13 +62,6 @@ export interface SystemPromptProviderOptions {
   ) =>
     | Promise<readonly SubagentRolePromptInfo[]>
     | readonly SubagentRolePromptInfo[];
-  readonly toolDetailsProvider?: (input: SystemPromptProviderInput) =>
-    | Promise<{
-        readonly toolSnippets?: Readonly<Partial<Record<string, string>>>;
-      }>
-    | {
-        readonly toolSnippets?: Readonly<Partial<Record<string, string>>>;
-      };
 }
 
 function assertAssembleOptions(options: AssembleOptions): void {
@@ -85,7 +78,7 @@ function compactPrompts(prompts: readonly string[]): string[] {
 }
 
 function isPrimaryTaskKind(value: unknown): value is PrimaryTaskKind {
-  return value === "ask" || value === "plan" || value === "agent";
+  return value === "plan" || value === "agent";
 }
 
 function isSubagentTaskKind(value: unknown): value is SubagentTaskKind {
@@ -135,47 +128,13 @@ function generateSubagentRolesPrompt(
   );
 }
 
-function safeToolSnippets(
-  toolSnippets: Readonly<Partial<Record<string, string>>> | undefined,
-  onSecurityFinding: ((finding: PromptSecurityFinding) => void) | undefined,
-): Readonly<Partial<Record<string, string>>> | undefined {
-  if (!toolSnippets) {
-    return undefined;
-  }
-
-  const safeEntries: [string, string][] = [];
-  for (const [toolName, snippet] of Object.entries(toolSnippets)) {
-    const trimmed = snippet?.trim();
-    if (!trimmed) {
-      continue;
-    }
-    const scan = scanPromptLikeContent(trimmed, {
-      kind: "tool-description",
-      label: `Tool ${toolName}`,
-    });
-    for (const finding of scan.findings) {
-      onSecurityFinding?.(finding);
-    }
-    if (shouldLoadPromptLikeContent(scan)) {
-      safeEntries.push([toolName, trimmed]);
-    }
-  }
-
-  return Object.fromEntries(safeEntries);
-}
-
 export const SystemPrompt = {
   assemble(options: AssembleOptions): string[] {
     assertAssembleOptions(options);
     const isSubagent = options.isSubagent;
     const agentPromptAddon = options.agentPromptAddon ?? options.agentPrompt;
-    const toolSnippets = safeToolSnippets(
-      options.toolSnippets,
-      options.onSecurityFinding,
-    );
-    const toolGuidance = generateToolGuidancePrompt({
-      toolSnippets,
-      tools: options.tools,
+    const mcpToolMenu = generateMcpToolMenuPrompt({
+      toolNames: options.mcpToolNames,
     });
 
     if (isSubagent) {
@@ -185,7 +144,7 @@ export const SystemPrompt = {
           resolveSubagentTaskKind(options.agentName, options.taskKind),
         ),
         generateAgentAddonPrompt(agentPromptAddon),
-        toolGuidance,
+        mcpToolMenu,
         generateEnvironmentPrompt({
           info: options.environment,
           minimal: true,
@@ -199,7 +158,7 @@ export const SystemPrompt = {
       getPrimaryTaskPrompt(resolvePrimaryTaskKind(options.taskKind)),
       generateAgentAddonPrompt(agentPromptAddon),
       generateSubagentRolesPrompt(options.availableSubagentRoles),
-      toolGuidance,
+      mcpToolMenu,
       generateEnvironmentPrompt({
         info: options.environment,
         minimal: false,
@@ -260,9 +219,9 @@ export function createSystemPromptProvider(
       const [
         availableSubagentRoles,
         environment,
+        mcpToolNames,
         tools,
         taskKind,
-        toolDetails,
       ] = await Promise.all([
         input.isSubagent
           ? []
@@ -270,9 +229,9 @@ export function createSystemPromptProvider(
         options.environmentDetector
           ? options.environmentDetector(input.directory, input)
           : detectEnvironment(input.directory),
+        options.mcpToolNamesProvider?.(input) ?? [],
         options.toolsProvider?.(input) ?? [],
         options.taskKindResolver?.(input, agentName),
-        options.toolDetailsProvider?.(input) ?? {},
       ]);
       const agentPromptAddon = await resolveAgentPromptAddon(
         agentName,
@@ -286,9 +245,8 @@ export function createSystemPromptProvider(
           agentPromptAddon,
           environment,
           isSubagent: true,
-          onSecurityFinding: options.onSecurityFinding,
+          mcpToolNames,
           taskKind,
-          toolSnippets: toolDetails.toolSnippets,
           tools,
         }).join("\n\n");
       }
@@ -308,9 +266,8 @@ export function createSystemPromptProvider(
         customInstructions,
         environment,
         isSubagent: false,
-        onSecurityFinding: options.onSecurityFinding,
+        mcpToolNames,
         taskKind,
-        toolSnippets: toolDetails.toolSnippets,
         tools,
       }).join("\n\n");
     },

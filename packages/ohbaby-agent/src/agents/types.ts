@@ -13,7 +13,6 @@ export interface PermissionConfig {
   readonly edit?: PermissionValue;
   readonly bash?: PermissionValue | Readonly<Record<string, PermissionValue>>;
   readonly web?: PermissionValue;
-  readonly mcp?: PermissionValue;
   readonly externalDirectory?: PermissionValue;
   readonly doomLoop?: PermissionValue;
 }
@@ -50,15 +49,7 @@ export interface AgentsConfig {
 export interface RuntimeAgent {
   readonly config: AgentConfig;
   readonly isSubagent: boolean;
-  readonly systemPrompt: string;
   readonly tools: Record<string, boolean>;
-}
-
-export interface AgentPromptProvider {
-  build(input: {
-    readonly agent: AgentConfig;
-    readonly isSubagent: boolean;
-  }): Promise<string> | string;
 }
 
 export interface StartSessionParams {

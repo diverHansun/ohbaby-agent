@@ -4,7 +4,10 @@ import type {
   CommandMcpServerSummary,
   CommandToolSummary,
 } from "../../commands/index.js";
-import { createAgentInstanceFactory } from "../../core/agents/index.js";
+import {
+  createAgentInstanceFactory,
+  toOpenAiTools,
+} from "../../core/agents/index.js";
 import {
   createContextManager,
   type CompactResult,
@@ -68,7 +71,13 @@ import {
   type SkillRegistryPort,
   type SkillSearchDirectory,
 } from "../../skill/index.js";
-import { McpManager, type McpClientStatus } from "../../mcp/index.js";
+import {
+  admitMcpTools,
+  createSelectToolsTool,
+  McpManager,
+  McpToolMenu,
+  type McpClientStatus,
+} from "../../mcp/index.js";
 import {
   createMcpPromptTool,
   createMcpResourceTool,
@@ -235,7 +244,21 @@ export async function createUiRuntimeComposition(
   const streamBridge =
     options.streamBridge ??
     createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+  const mcpToolMenu = new McpToolMenu();
+  let registeredMcpToolNames = new Set<string>();
   const toolScheduler = createToolScheduler({
+    accessGuard({ request, tool }) {
+      if (tool.source !== "mcp" || !registeredMcpToolNames.has(tool.name)) {
+        return undefined;
+      }
+      const loaded = mcpToolMenu.loadedNames({
+        contextScopeId: request.contextScopeId,
+        sessionId: request.sessionId,
+      });
+      return loaded.has(tool.name)
+        ? undefined
+        : "MCP tool is not loaded. Use select_tools with its exact name first.";
+    },
     agentTools: agentManager,
     bus: options.bus,
     permission: options.permission,
@@ -317,14 +340,50 @@ export async function createUiRuntimeComposition(
   }
 
   async function resolvePromptTools(input: {
+    readonly agentName?: string;
+    readonly contextScopeId?: string;
     readonly isSubagent: boolean;
     readonly sessionId: string;
   }): Promise<ToolDefinition[]> {
     const agentName = await resolvePromptAgentName(input);
-    return await toolScheduler.getAvailableTools({
+    const tools = await toolScheduler.getAvailableTools({
       agentName,
       isSubagent: input.isSubagent,
     });
+    const loadedMcpTools = mcpToolMenu.loadedNames(
+      {
+        contextScopeId: input.contextScopeId,
+        sessionId: input.sessionId,
+      },
+      tools,
+    );
+    return tools.filter(
+      (tool) =>
+        !registeredMcpToolNames.has(tool.name) || loadedMcpTools.has(tool.name),
+    );
+  }
+
+  async function resolveMcpToolNames(input: {
+    readonly agentName?: string;
+    readonly contextScopeId?: string;
+    readonly isSubagent: boolean;
+    readonly sessionId: string;
+  }): Promise<readonly string[]> {
+    const agentName = await resolvePromptAgentName(input);
+    const tools = await toolScheduler.getAvailableTools({
+      agentName,
+      isSubagent: input.isSubagent,
+    });
+    const loadedMcpTools = mcpToolMenu.loadedNames(
+      {
+        contextScopeId: input.contextScopeId,
+        sessionId: input.sessionId,
+      },
+      tools,
+    );
+    return mcpToolMenu
+      .selectableNames(tools)
+      .filter((toolName) => !loadedMcpTools.has(toolName));
   }
 
   function resolveSubagentTaskKind(
@@ -358,19 +417,11 @@ export async function createUiRuntimeComposition(
       }
       return resolveSubagentTaskKind(agentName);
     },
-    async toolDetailsProvider(input) {
-      const tools = await resolvePromptTools(input);
-      const toolSnippets = Object.fromEntries(
-        tools.map((tool) => [tool.name, tool.description]),
-      );
-      return {
-        toolSnippets,
-      };
-    },
     async toolsProvider(input) {
       const tools = await resolvePromptTools(input);
       return tools.map((tool) => tool.name);
     },
+    mcpToolNamesProvider: resolveMcpToolNames,
     onSecurityFinding(finding) {
       options.onNotice?.(noticeFromPromptSecurityFinding(finding));
     },
@@ -404,6 +455,15 @@ export async function createUiRuntimeComposition(
     contextManager,
     llmClient: options.llmClient,
     messageManager: options.messageManager,
+    resolveTools: async (input): Promise<ReturnType<typeof toOpenAiTools>> =>
+      toOpenAiTools(
+        await resolvePromptTools({
+          agentName: input.agentName,
+          contextScopeId: input.contextScopeId,
+          isSubagent: input.isSubagent ?? false,
+          sessionId: input.sessionId,
+        }),
+      ),
     toolScheduler,
   });
 
@@ -521,6 +581,7 @@ export async function createUiRuntimeComposition(
     SessionEvent.Removed,
     (payload) => {
       contextManager.disposeSession(payload.sessionId);
+      mcpToolMenu.disposeSession(payload.sessionId);
       todoService.release(payload.sessionId);
       trackSandboxCleanup(
         (async (): Promise<void> => {
@@ -582,6 +643,7 @@ export async function createUiRuntimeComposition(
   })) {
     toolScheduler.register(tool);
   }
+  toolScheduler.register(createSelectToolsTool(mcpToolMenu));
   const skillLogger = createSkillLogger(options.onNotice);
   const skillRegistry =
     options.skillRegistry ??
@@ -614,19 +676,44 @@ export async function createUiRuntimeComposition(
   const mcpManager: McpManagerPort =
     options.mcpManager ??
     McpManager.getInstance(options.workdir ?? process.cwd());
-  let registeredMcpToolNames = new Set<string>();
+  function clearMcpTools(): void {
+    for (const toolName of registeredMcpToolNames) {
+      toolScheduler.unregister(toolName);
+    }
+    registeredMcpToolNames = new Set();
+    mcpToolMenu.setAvailable([]);
+  }
+
   async function refreshMcpTools(): Promise<void> {
-    const tools = await mcpManager.getAllTools();
-    const nextToolNames = new Set(tools.map((tool) => tool.name));
+    let discoveredTools: readonly Tool[];
+    try {
+      discoveredTools = await mcpManager.getAllTools();
+    } catch (error) {
+      clearMcpTools();
+      throw error;
+    }
+    const admission = admitMcpTools(discoveredTools);
+    const nextToolNames = new Set(admission.accepted.map((tool) => tool.name));
     for (const toolName of registeredMcpToolNames) {
       if (!nextToolNames.has(toolName)) {
         toolScheduler.unregister(toolName);
       }
     }
-    for (const tool of tools) {
+    for (const tool of admission.accepted) {
       toolScheduler.register(tool);
     }
     registeredMcpToolNames = nextToolNames;
+    mcpToolMenu.setAvailable([...nextToolNames]);
+    for (const rejected of admission.rejected) {
+      options.onNotice?.({
+        key: `mcp:tool-rejected:${rejected.name}:${rejected.reason}`,
+        level: "warning",
+        message:
+          "An MCP tool was not loaded because its metadata failed safety checks.",
+        source: "mcp",
+        title: "MCP tool blocked",
+      });
+    }
   }
 
   await refreshMcpTools().catch((error: unknown) => {

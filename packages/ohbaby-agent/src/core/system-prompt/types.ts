@@ -1,15 +1,13 @@
-import type { PromptSecurityFinding } from "./security/index.js";
-
 export type LayerType =
   | "agent"
   | "base"
   | "custom"
   | "environment"
-  | "task"
-  | "tools";
+  | "mcp-tools"
+  | "task";
 
 export type AgentKind = "primary" | "subagent";
-export type PrimaryTaskKind = "ask" | "plan" | "agent";
+export type PrimaryTaskKind = "plan" | "agent";
 export type SubagentTaskKind = "explore" | "research" | "generic";
 export type PromptTaskKind = PrimaryTaskKind | SubagentTaskKind;
 
@@ -17,12 +15,6 @@ export interface SubagentRolePromptInfo {
   readonly role: string;
   readonly description: string;
   readonly default?: boolean;
-}
-
-export interface ToolPromptInfo {
-  readonly name: string;
-  readonly snippet?: string;
-  readonly guidelines?: readonly string[];
 }
 
 export interface EnvironmentInfo {
@@ -41,8 +33,7 @@ export interface AssembleOptions {
   readonly availableSubagentRoles?: readonly SubagentRolePromptInfo[];
   readonly environment: EnvironmentInfo;
   readonly customInstructions?: readonly string[];
-  readonly onSecurityFinding?: (finding: PromptSecurityFinding) => void;
   readonly taskKind?: PromptTaskKind;
-  readonly toolSnippets?: Readonly<Partial<Record<string, string>>>;
+  readonly mcpToolNames?: readonly string[];
   readonly tools?: readonly string[];
 }

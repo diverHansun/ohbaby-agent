@@ -71,6 +71,15 @@ describe("messageToUiMessage", () => {
     expect(messageToUiMessage(message)).toBeUndefined();
   });
 
+  it("omits MCP selector calls and results from a persisted transcript", () => {
+    const message = {
+      ...assistantMessage({ time: { created: 1_000 } }),
+      parts: [todoToolPart("message_1", "select_tools")],
+    };
+
+    expect(messageToUiMessage(message)).toBeUndefined();
+  });
+
   it("retains ordinary content while filtering todo tool parts", () => {
     const message = {
       ...assistantMessage({ time: { created: 1_000 } }),
@@ -118,7 +127,7 @@ function textPart(
 
 function todoToolPart(
   messageId: string,
-  tool: "todo_read" | "todo_write",
+  tool: "select_tools" | "todo_read" | "todo_write",
 ): MessageWithParts["parts"][number] {
   return {
     callId: `${messageId}_call_0`,
@@ -127,7 +136,12 @@ function todoToolPart(
     orderIndex: 1,
     sessionId: "session_1",
     state: {
-      input: tool === "todo_write" ? { todos: [] } : {},
+      input:
+        tool === "todo_write"
+          ? { todos: [] }
+          : tool === "select_tools"
+            ? { tools: ["mcp_s6_server_t4_echo"] }
+            : {},
       output: "No todos.",
       status: "completed",
     },

@@ -1906,7 +1906,7 @@ describe("createInProcessUiBackendClient", () => {
         typeof requests[0]?.messages[0]?.content === "string"
           ? requests[0].messages[0].content
           : "",
-      ).toContain("<tool_guidance>");
+      ).not.toContain("<tool_guidance>");
       expect(requests[0]?.messages.map((message) => message.role)).toEqual([
         "system",
         "user",

@@ -17,7 +17,9 @@ function inferCategory(tool: Tool): ToolCategory {
     return "skill";
   }
   if (tool.source === "mcp") {
-    return tool.annotations?.readOnlyHint === true ? "readonly" : "write";
+    return tool.isTrusted === true && tool.annotations?.readOnlyHint === true
+      ? "readonly"
+      : "write";
   }
 
   return BUILTIN_TOOL_CATEGORIES[tool.name] ?? "write";
@@ -38,6 +40,16 @@ function isEnabledByAgentConfig(
   }
 
   return true;
+}
+
+function isMcpEnabledByAgentConfig(
+  tool: ToolDefinition,
+  tools: Record<string, boolean> | undefined,
+): boolean {
+  if (isEnabledByAgentConfig(tool.name, tools)) {
+    return true;
+  }
+  return tool.source === "mcp" && tools?.select_tools === true;
 }
 
 export function createToolRegistry(): ToolRegistry {
@@ -81,7 +93,7 @@ export function createToolRegistry(): ToolRegistry {
     getAvailableTools(input): ToolDefinition[] {
       return Array.from(tools.values())
         .map(toDefinition)
-        .filter((tool) => isEnabledByAgentConfig(tool.name, input.tools))
+        .filter((tool) => isMcpEnabledByAgentConfig(tool, input.tools))
         .filter(
           (tool) =>
             input.isSubagent !== true ||

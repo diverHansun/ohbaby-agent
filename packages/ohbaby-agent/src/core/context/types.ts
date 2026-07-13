@@ -11,6 +11,7 @@ export interface MemoryReader {
 export interface SystemPromptProvider {
   build(input: {
     readonly sessionId: string;
+    readonly contextScopeId?: string;
     readonly directory: string;
     readonly isSubagent: boolean;
     readonly agentName?: string;

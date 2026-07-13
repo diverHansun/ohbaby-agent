@@ -304,6 +304,7 @@ describe("Lifecycle.run", () => {
     const contextManager = createContextManagerMock(prepareTurn, {
       resetTurnCompactionCount,
     });
+    const resolveTools = vi.fn().mockResolvedValue([]);
     const lifecycle = new Lifecycle({
       contextManager,
       llmClient: createSequentialFakeLLMClient(
@@ -326,6 +327,7 @@ describe("Lifecycle.run", () => {
         requests,
       ),
       messageManager,
+      resolveTools,
       toolScheduler,
     });
 
@@ -352,6 +354,20 @@ describe("Lifecycle.run", () => {
     expect(prepareTurn).toHaveBeenCalledTimes(2);
     expect(resetTurnCompactionCount).toHaveBeenCalledTimes(1);
     expect(resetTurnCompactionCount).toHaveBeenCalledWith("session_test");
+    expect(resolveTools).toHaveBeenNthCalledWith(1, {
+      agentName: undefined,
+      contextScopeId: undefined,
+      isSubagent: undefined,
+      sessionId: "session_test",
+      step: 1,
+    });
+    expect(resolveTools).toHaveBeenNthCalledWith(2, {
+      agentName: undefined,
+      contextScopeId: undefined,
+      isSubagent: undefined,
+      sessionId: "session_test",
+      step: 2,
+    });
     expect(requests[0]?.messages).toEqual(firstTurnMessages);
     expect(requests[1]?.messages).toEqual(secondStepMessages);
     expect(events).toEqual([

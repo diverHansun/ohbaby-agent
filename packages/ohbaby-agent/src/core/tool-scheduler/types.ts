@@ -107,7 +107,7 @@ export interface Tool {
   readonly category?: ToolCategory;
   readonly timeoutOwner?: "scheduler" | "tool";
   readonly requireExplicitApproval?: boolean;
-  /** @deprecated MCP trust is MCP-local metadata; scheduler uses requireExplicitApproval. */
+  /** MCP-local trust metadata used when normalizing MCP tool safety defaults. */
   readonly isTrusted?: boolean;
   readonly mcpServer?: string;
   readonly mcpToolName?: string;
@@ -260,6 +260,10 @@ export interface ToolSchedulerOptions {
     readonly concurrency: Partial<ConcurrencyConfig>;
     readonly timeout: Partial<TimeoutConfig>;
   }>;
+  readonly accessGuard?: (input: {
+    readonly request: ToolCallRequest;
+    readonly tool: Tool;
+  }) => string | undefined | Promise<string | undefined>;
   readonly now?: () => number;
 }
 

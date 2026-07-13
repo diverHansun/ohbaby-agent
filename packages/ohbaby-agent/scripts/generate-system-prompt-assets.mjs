@@ -21,10 +21,6 @@ const templates = [
     path: "primary/tasks/agent.md",
   },
   {
-    exportName: "PRIMARY_TASK_ASK_PROMPT_TEMPLATE",
-    path: "primary/tasks/ask.md",
-  },
-  {
     exportName: "PRIMARY_TASK_PLAN_PROMPT_TEMPLATE",
     path: "primary/tasks/plan.md",
   },

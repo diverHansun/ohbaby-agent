@@ -25,7 +25,21 @@ export interface LifecycleDeps {
   readonly messageManager: MessageManager;
   readonly toolScheduler: ToolSchedulerInstance;
   readonly contextManager: ContextManager;
+  readonly resolveTools?: (
+    input: LifecycleToolResolutionInput,
+  ) =>
+    | Promise<ChatCompletionCreateParams["tools"] | undefined>
+    | ChatCompletionCreateParams["tools"]
+    | undefined;
   readonly generateToolCallId?: () => string;
+}
+
+export interface LifecycleToolResolutionInput {
+  readonly sessionId: string;
+  readonly contextScopeId?: string;
+  readonly agentName?: string;
+  readonly isSubagent?: boolean;
+  readonly step: number;
 }
 
 export interface LifecycleSessionParams {

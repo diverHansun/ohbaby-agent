@@ -15,7 +15,6 @@ export const planAgent: AgentConfig = {
       "ls*": "allow",
     },
     edit: "deny",
-    mcp: "ask",
     web: "allow",
   },
   tools: {
@@ -30,6 +29,8 @@ export const planAgent: AgentConfig = {
       "web_search",
       "memory_list",
       "skill",
+      "skill_resource",
+      "select_tools",
     ],
   },
 };

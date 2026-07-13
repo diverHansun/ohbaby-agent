@@ -1021,6 +1021,98 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(names).not.toContain("mcp_s6_server_t3_old");
   });
 
+  it("clears dynamic MCP tools when discovery cannot be refreshed", async () => {
+    const bus = createBus();
+    const toolName = "mcp_s6_server_t4_echo";
+    const notices: { readonly key?: string; readonly title: string }[] = [];
+    const listeners = new Set<() => void | Promise<void>>();
+    const refreshState: { error?: Error } = {};
+    const mcpManager: FakeMcpManager = {
+      getAllTools: () =>
+        refreshState.error
+          ? Promise.reject(refreshState.error)
+          : Promise.resolve([mcpTool(toolName)]),
+      onChange(listener) {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    };
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      llmClient: fakeLlmClient(),
+      mcpManager,
+      messageManager: {} as MessageManager,
+      onNotice: (notice): void => {
+        notices.push(notice);
+      },
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      skillRegistry: createMutableSkillRegistry([]),
+    });
+
+    refreshState.error = new Error("MCP discovery unavailable");
+    for (const listener of listeners) {
+      void listener();
+    }
+
+    await vi.waitFor(async () => {
+      expect(
+        (await composition.toolScheduler.getAvailableTools()).map(
+          (tool) => tool.name,
+        ),
+      ).not.toContain(toolName);
+    });
+    expect(
+      notices.some((notice) => notice.title === "MCP tool refresh failed"),
+    ).toBe(true);
+  });
+
+  it("keeps MCP resource and prompt utilities outside the dynamic tool menu", async () => {
+    const bus = createBus();
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      llmClient: fakeLlmClient(),
+      mcpManager: {
+        getAllTools: () => Promise.resolve([]),
+        getPrompt: () =>
+          Promise.resolve({
+            messages: [{ content: "A server prompt", role: "user" }],
+          }),
+        readResource: () =>
+          Promise.resolve({
+            contents: [{ text: "A server resource", uri: "memory://guide" }],
+          }),
+      },
+      messageManager: {} as MessageManager,
+      permission: { ask: () => "once" },
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      skillRegistry: createMutableSkillRegistry([]),
+    });
+
+    await expect(
+      composition.toolScheduler.execute({
+        agentName: "build",
+        callId: "resource_1",
+        messageId: "message_1",
+        params: { server: "server", uri: "memory://guide" },
+        sessionId: "session_1",
+        toolName: "mcp_resource",
+      }),
+    ).resolves.toMatchObject({
+      output: "A server resource",
+      status: "success",
+    });
+  });
+
   it("passes current permission mode into primary system prompts", async () => {
     const { composition, requests, workdir } =
       await createPromptCompositionForTest({
@@ -1048,7 +1140,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     );
   });
 
-  it("omits unsafe MCP tool descriptions from the system prompt", async () => {
+  it("fails closed for unsafe MCP metadata before prompt or execution registration", async () => {
     const notices: { readonly key?: string; readonly title: string }[] = [];
     const { composition, requests, workdir } =
       await createPromptCompositionForTest({
@@ -1074,12 +1166,148 @@ describe("createUiRuntimeComposition skill tools", () => {
       typeof requests[0]?.messages[0]?.content === "string"
         ? requests[0].messages[0].content
         : "";
-    expect(systemContent).toContain("mcp_s6_server_t4_bad");
+    expect(systemContent).not.toContain("mcp_s6_server_t4_bad");
     expect(systemContent).not.toContain("Ignore previous instructions");
     const notice = notices.find(
-      (candidate) =>
-        candidate.key?.includes("ignore_previous_instructions") === true,
+      (candidate) => candidate.key?.includes("mcp:tool-rejected") === true,
     );
-    expect(notice?.title).toBe("Tool description skipped");
+    expect(notice?.title).toBe("MCP tool blocked");
+    expect(
+      (await composition.toolScheduler.getAvailableTools()).map(
+        (tool) => tool.name,
+      ),
+    ).not.toContain("mcp_s6_server_t4_bad");
+  });
+
+  it("announces unloaded MCP names, then exposes schemas only after selection", async () => {
+    const toolName = "mcp_s6_server_t4_echo";
+    const { composition, requests, workdir } =
+      await createPromptCompositionForTest({
+        mcpTools: [mcpTool(toolName, "A detailed MCP description")],
+        policyMode: "agent",
+      });
+
+    const first = await composition.startSession({
+      agentName: "build",
+      projectRoot: workdir,
+      prompt: "Use the MCP tool",
+      sessionId: "session_mcp_menu",
+    });
+    await composition.runManager.waitForCompletion(first.runId);
+
+    const initialContent = requests[0]?.messages[0]?.content;
+    const initialSystem =
+      typeof initialContent === "string" ? initialContent : "";
+    const initialToolNames =
+      requests[0]?.tools?.map((tool) => tool.function.name) ?? [];
+    expect(initialSystem).toContain(`- ${toolName}`);
+    expect(initialSystem).not.toContain("A detailed MCP description");
+    expect(initialToolNames).toContain("select_tools");
+    expect(initialToolNames).not.toContain(toolName);
+
+    await expect(
+      composition.toolScheduler.execute({
+        agentName: "build",
+        callId: "unloaded_mcp",
+        messageId: "message_1",
+        params: {},
+        sessionId: "session_mcp_menu",
+        toolName,
+      }),
+    ).resolves.toMatchObject({ status: "rejected" });
+
+    await composition.toolScheduler.execute({
+      agentName: "build",
+      callId: "select_mcp",
+      messageId: "message_1",
+      params: { tools: [toolName] },
+      sessionId: "session_mcp_menu",
+      toolName: "select_tools",
+    });
+
+    const second = await composition.startSession({
+      agentName: "build",
+      projectRoot: workdir,
+      prompt: "Use the selected MCP tool",
+      sessionId: "session_mcp_menu",
+    });
+    await composition.runManager.waitForCompletion(second.runId);
+
+    const selectedTool = requests[1]?.tools?.find(
+      (tool) => tool.function.name === toolName,
+    );
+    const selectedContent = requests[1]?.messages[0]?.content;
+    const selectedSystem =
+      typeof selectedContent === "string" ? selectedContent : "";
+    expect(selectedSystem).not.toContain("<mcp_tools>");
+    expect(selectedTool?.function.description).toBe(
+      "MCP tool loaded on demand. Use its schema to perform the requested operation.",
+    );
+  });
+
+  it("keeps select_tools available without announcing or exposing MCP schemas when none exist", async () => {
+    const { composition, requests, workdir } =
+      await createPromptCompositionForTest({ policyMode: "agent" });
+
+    const result = await composition.startSession({
+      agentName: "build",
+      projectRoot: workdir,
+      prompt: "Work without MCP tools",
+      sessionId: "session_without_mcp",
+    });
+    await composition.runManager.waitForCompletion(result.runId);
+
+    const systemContent = requests[0]?.messages[0]?.content;
+    const systemPrompt = typeof systemContent === "string" ? systemContent : "";
+    const toolNames =
+      requests[0]?.tools?.map((tool) => tool.function.name) ?? [];
+
+    expect(systemPrompt).not.toContain("<mcp_tools>");
+    expect(toolNames).toContain("select_tools");
+    expect(toolNames.some((name) => name.startsWith("mcp_"))).toBe(false);
+  });
+
+  it("keeps selected MCP schemas after session compaction", async () => {
+    const toolName = "mcp_s6_server_t4_echo";
+    const { composition, requests, workdir } =
+      await createPromptCompositionForTest({
+        mcpTools: [mcpTool(toolName)],
+        policyMode: "agent",
+      });
+
+    const first = await composition.startSession({
+      agentName: "build",
+      projectRoot: workdir,
+      prompt: "Prepare MCP work",
+      sessionId: "session_compaction_mcp",
+    });
+    await composition.runManager.waitForCompletion(first.runId);
+    await composition.toolScheduler.execute({
+      agentName: "build",
+      callId: "select_before_compaction",
+      messageId: "message_1",
+      params: { tools: [toolName] },
+      sessionId: "session_compaction_mcp",
+      toolName: "select_tools",
+    });
+
+    await composition.compactSession({
+      force: true,
+      projectRoot: workdir,
+      sessionId: "session_compaction_mcp",
+    });
+
+    const second = await composition.startSession({
+      agentName: "build",
+      projectRoot: workdir,
+      prompt: "Continue MCP work",
+      sessionId: "session_compaction_mcp",
+    });
+    await composition.runManager.waitForCompletion(second.runId);
+
+    const latestRequest = requests.at(-1);
+    expect(latestRequest?.tools?.map((tool) => tool.function.name)).toContain(
+      toolName,
+    );
   });
 });

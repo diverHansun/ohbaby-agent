@@ -11,7 +11,6 @@ export const genericAgent: AgentConfig = {
   permission: {
     bash: { "*": "ask" },
     edit: "ask",
-    mcp: "ask",
     web: "allow",
   },
   tools: {
@@ -28,6 +27,9 @@ export const genericAgent: AgentConfig = {
       "web_fetch",
       "web_search",
       "memory_list",
+      "select_tools",
+      "skill",
+      "skill_resource",
     ],
   },
 };

@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { AgentManager } from "./manager.js";
 import { AgentRegistry } from "./registry.js";
-import type { AgentPromptProvider, AgentsConfig } from "./types.js";
+import type { AgentsConfig } from "./types.js";
 
 async function createManager(): Promise<AgentManager> {
   const registry = new AgentRegistry({
@@ -23,12 +23,7 @@ async function createManager(): Promise<AgentManager> {
     }),
   });
   await registry.initialize();
-  const build: AgentPromptProvider["build"] = ({ agent }) =>
-    `system:${agent.name}`;
-  return new AgentManager({
-    registry,
-    systemPromptProvider: { build },
-  });
+  return new AgentManager({ registry });
 }
 
 describe("AgentManager", () => {
@@ -84,6 +79,9 @@ describe("AgentManager", () => {
       list: true,
       memory_list: true,
       read: true,
+      select_tools: true,
+      skill: true,
+      skill_resource: true,
       subagent_close: false,
       subagent_run: false,
       subagent_status: false,
@@ -93,60 +91,6 @@ describe("AgentManager", () => {
       web_search: true,
       write: true,
     });
-  });
-
-  it("builds a runtime agent using the injected system prompt provider", async () => {
-    const build = vi.fn<AgentPromptProvider["build"]>(
-      ({ agent, isSubagent }) => `${agent.name}:${String(isSubagent)}`,
-    );
-    const provider: AgentPromptProvider = {
-      build,
-    };
-    const registry = new AgentRegistry({
-      configLoader: (): AgentsConfig => ({ agents: {} }),
-    });
-    await registry.initialize();
-    const manager = new AgentManager({
-      registry,
-      systemPromptProvider: provider,
-    });
-
-    await expect(manager.getRuntimeAgent("explore")).resolves.toMatchObject({
-      config: { name: "explore" },
-      isSubagent: true,
-      systemPrompt: "explore:true",
-    });
-    expect(build).toHaveBeenCalledOnce();
-    const buildInput = build.mock.calls[0][0];
-    expect(buildInput.agent.name).toBe("explore");
-    expect(buildInput.isSubagent).toBe(true);
-  });
-
-  it("uses default system prompts for builtin subagents", async () => {
-    const registry = new AgentRegistry({
-      configLoader: (): AgentsConfig => ({ agents: {} }),
-    });
-    await registry.initialize();
-    const manager = new AgentManager({ registry });
-
-    const runtimeAgent = await manager.getRuntimeAgent("explore");
-
-    expect(runtimeAgent.systemPrompt).toContain("Task: explore");
-    expect(runtimeAgent.systemPrompt).toContain("Code exploration task");
-  });
-
-  it("does not apply subagent task prompts to primary agents with matching names", async () => {
-    const registry = new AgentRegistry({
-      configLoader: (): AgentsConfig => ({ agents: {} }),
-    });
-    await registry.initialize();
-    const manager = new AgentManager({ registry });
-
-    const runtimeAgent = await manager.getRuntimeAgent("plan");
-
-    expect(runtimeAgent.isSubagent).toBe(false);
-    expect(runtimeAgent.systemPrompt).not.toContain("<subagent_task>");
-    expect(runtimeAgent.systemPrompt).not.toContain("Task: plan");
   });
 
   it("rejects primary agents when requested as subagents", async () => {
@@ -163,54 +107,5 @@ describe("AgentManager", () => {
         /primary agents|subagent roles|generic, explore, research/i,
       );
     }
-  });
-
-  it("uses custom subagent descriptions when no explicit prompt exists", async () => {
-    const registry = new AgentRegistry({
-      configLoader: (): AgentsConfig => ({
-        agents: {
-          audit: {
-            description: "Audit code for release risks.",
-            mode: "subagent",
-            name: "audit",
-          },
-        },
-      }),
-    });
-    await registry.initialize();
-    const manager = new AgentManager({ registry });
-
-    const runtimeAgent = await manager.getRuntimeAgent("audit");
-
-    expect(runtimeAgent.systemPrompt).toContain(
-      "Audit code for release risks.",
-    );
-  });
-
-  it("treats configured prompts as add-ons for custom subagents", async () => {
-    const registry = new AgentRegistry({
-      configLoader: (): AgentsConfig => ({
-        agents: {
-          audit: {
-            description: "Audit code for release risks.",
-            mode: "subagent",
-            name: "audit",
-            prompt: "Focus on release blockers.",
-          },
-        },
-      }),
-    });
-    await registry.initialize();
-    const manager = new AgentManager({ registry });
-
-    const runtimeAgent = await manager.getRuntimeAgent("audit");
-
-    expect(runtimeAgent.systemPrompt).toContain("<subagent_base>");
-    expect(runtimeAgent.systemPrompt).toContain("Task: generic");
-    expect(runtimeAgent.systemPrompt).toContain(
-      "Role: Audit code for release risks.",
-    );
-    expect(runtimeAgent.systemPrompt).toContain("<agent_prompt_addon>");
-    expect(runtimeAgent.systemPrompt).toContain("Focus on release blockers.");
   });
 });

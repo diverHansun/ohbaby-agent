@@ -10,7 +10,6 @@ export const researchAgent: AgentConfig = {
   permission: {
     bash: { "*": "ask" },
     edit: "ask",
-    mcp: "ask",
     web: "allow",
   },
   tools: {
@@ -27,6 +26,9 @@ export const researchAgent: AgentConfig = {
       "web_fetch",
       "web_search",
       "memory_list",
+      "select_tools",
+      "skill",
+      "skill_resource",
     ],
   },
 };

@@ -1474,12 +1474,16 @@ export function createToolScheduler(
 
   async function isToolAvailableForRequest(
     request: ToolCallRequest,
+    tool: Tool,
   ): Promise<boolean> {
     const agentConfig = await options.agentTools?.getAgentConfig(
       request.agentName,
     );
     const tools = normalizeAgentToolsConfig(agentConfig?.tools);
-    if (!isEnabledByAgentConfig(request.toolName, tools)) {
+    if (
+      !isEnabledByAgentConfig(request.toolName, tools) &&
+      !(tool.source === "mcp" && tools?.select_tools === true)
+    ) {
       return false;
     }
     return (
@@ -1665,7 +1669,7 @@ export function createToolScheduler(
         }),
       };
     }
-    if (!(await isToolAvailableForRequest(request))) {
+    if (!(await isToolAvailableForRequest(request, tool))) {
       const call = createCall(request, category);
       transition(call, "rejected");
       return {
@@ -1674,6 +1678,16 @@ export function createToolScheduler(
             "PermissionDeniedError",
             `Tool not available for agent: ${request.toolName}`,
           ),
+        }),
+      };
+    }
+    const accessDenied = await options.accessGuard?.({ request, tool });
+    if (accessDenied) {
+      const call = createCall(request, category);
+      transition(call, "rejected");
+      return {
+        result: makeResult(call, "rejected", {
+          error: createError("PermissionDeniedError", accessDenied),
         }),
       };
     }

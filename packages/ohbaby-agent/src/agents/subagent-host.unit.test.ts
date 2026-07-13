@@ -87,7 +87,6 @@ function createHostFixture(
           maxSteps: 5,
         },
         isSubagent: true,
-        systemPrompt: "system",
         tools: {},
       } satisfies RuntimeAgent),
   );
@@ -571,7 +570,6 @@ describe("SessionSubagentHost", () => {
           name: "explore",
         },
         isSubagent: true,
-        systemPrompt: "system",
         tools: {},
       } satisfies RuntimeAgent)
       .mockImplementationOnce(
@@ -585,7 +583,6 @@ describe("SessionSubagentHost", () => {
                   name: role,
                 },
                 isSubagent: true,
-                systemPrompt: "system",
                 tools: {},
               });
             };
@@ -901,7 +898,6 @@ describe("SessionSubagentHost", () => {
     releaseAgent({
       config: { maxSteps: 5, mode: "subagent", name: "explore" },
       isSubagent: true,
-      systemPrompt: "system",
       tools: {},
     });
 

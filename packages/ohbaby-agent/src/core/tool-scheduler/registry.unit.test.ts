@@ -22,6 +22,7 @@ describe("ToolRegistry", () => {
     registry.register(
       createTool({
         annotations: { readOnlyHint: true },
+        isTrusted: true,
         name: "mcp_read",
         source: "mcp",
       }),
@@ -45,6 +46,21 @@ describe("ToolRegistry", () => {
         }),
       ]),
     );
+  });
+
+  it("does not trust MCP read-only hints from an untrusted server", () => {
+    const registry = createToolRegistry();
+
+    registry.register(
+      createTool({
+        annotations: { readOnlyHint: true },
+        isTrusted: false,
+        name: "mcp_untrusted_read",
+        source: "mcp",
+      }),
+    );
+
+    expect(registry.getCategory("mcp_untrusted_read")).toBe("write");
   });
 
   it("lists the same tools across permission modes while honoring agent config and subagent restrictions", () => {

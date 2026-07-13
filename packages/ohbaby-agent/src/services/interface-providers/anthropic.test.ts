@@ -339,4 +339,75 @@ describe("anthropic provider", () => {
       },
     ]);
   });
+
+  it("converts newly resolved tool sets on successive requests", async () => {
+    const provider = createAnthropicProvider({
+      id: "anthropic",
+      apiKey: "test-key",
+      baseUrl: "https://api.anthropic.com",
+    });
+    const stream = vi
+      .spyOn(provider.client.messages, "stream")
+      .mockImplementation(() =>
+        createRawStream([
+          {
+            type: "message_delta",
+            delta: {
+              container: null,
+              stop_reason: "end_turn",
+              stop_details: null,
+              stop_sequence: null,
+            },
+            usage: {
+              input_tokens: 1,
+              output_tokens: 1,
+              cache_creation_input_tokens: null,
+              cache_read_input_tokens: null,
+              server_tool_use: null,
+            },
+          },
+        ]),
+      );
+    const selectTools = {
+      type: "function" as const,
+      function: {
+        name: "select_tools",
+        description: "Load an MCP tool.",
+        parameters: { type: "object", properties: {} },
+      },
+    };
+    const selectedMcpTool = {
+      type: "function" as const,
+      function: {
+        name: "mcp_s7_example_t6_search",
+        description: "MCP tool loaded on demand.",
+        parameters: { type: "object", properties: {} },
+      },
+    };
+    const baseRequest = {
+      maxTokens: 32,
+      messages: [{ role: "user" as const, content: "Continue" }],
+      model: "claude-3-5-haiku-latest",
+      temperature: 0,
+    };
+
+    for (const tools of [[selectTools], [selectTools, selectedMcpTool]]) {
+      const result = await provider.streamChatCompletion({
+        ...baseRequest,
+        tools,
+      });
+      for await (const _event of result) {
+        // Exhaust the stream so each request completes before inspecting calls.
+      }
+    }
+
+    expect(stream).toHaveBeenCalledTimes(2);
+    expect(stream.mock.calls[0]?.[0].tools?.map((tool) => tool.name)).toEqual([
+      "select_tools",
+    ]);
+    expect(stream.mock.calls[1]?.[0].tools?.map((tool) => tool.name)).toEqual([
+      "select_tools",
+      "mcp_s7_example_t6_search",
+    ]);
+  });
 });

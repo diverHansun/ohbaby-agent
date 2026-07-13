@@ -1508,6 +1508,12 @@ function noticeSessionId(notice: UiNotice): string | undefined {
   return undefined;
 }
 
+const HIDDEN_TRANSCRIPT_TOOLS = new Set([
+  "select_tools",
+  "todo_read",
+  "todo_write",
+]);
+
 function filterHiddenTodoMessages(
   messages: readonly UiMessage[],
 ): readonly UiMessage[] {
@@ -1517,7 +1523,7 @@ function filterHiddenTodoMessages(
       .filter(
         (part) =>
           part.type === "tool-call" &&
-          (part.call.name === "todo_read" || part.call.name === "todo_write"),
+          HIDDEN_TRANSCRIPT_TOOLS.has(part.call.name),
       )
       .map((part) => (part.type === "tool-call" ? part.call.id : "")),
   );

@@ -83,6 +83,7 @@ describe("adaptMcpTool", () => {
 
     expect((tool as { readonly isTrusted: boolean }).isTrusted).toBe(false);
     expect(tool.requireExplicitApproval).toBe(true);
+    expect(tool.category).toBe("write");
   });
 
   it("defaults MCP tools without readOnlyHint to write category", () => {

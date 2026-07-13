@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../../agents/index.js";
 import { createBus } from "../../bus/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
+import type { Tool } from "../../core/tool-scheduler/index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -145,15 +146,35 @@ function subagentRunEvent(): InterfaceProviderStreamEvent {
   };
 }
 
+function toolCallEvent(
+  name: string,
+  argumentsValue: Record<string, unknown>,
+  id: string,
+): InterfaceProviderStreamEvent {
+  return {
+    finishReason: "tool_calls",
+    toolCallDeltas: [
+      {
+        argumentsDelta: JSON.stringify(argumentsValue),
+        id,
+        index: 0,
+        name,
+      },
+    ],
+  };
+}
+
 function fakeLlmClient(
   requests: InterfaceProviderRequest[],
   options: {
+    readonly exploreMcpToolName?: string;
     readonly researchGate?: {
       readonly release: Deferred<void>;
       readonly started: Deferred<void>;
     };
   } = {},
 ): LLMClientInstance<FakeSdkClient> {
+  let exploreMcpStep = 0;
   return {
     config: {
       apiKeyEnv: "FAKE_API_KEY",
@@ -192,6 +213,32 @@ function fakeLlmClient(
           );
         }
         if (messages.includes("Task: explore")) {
+          if (options.exploreMcpToolName) {
+            if (exploreMcpStep === 0) {
+              exploreMcpStep += 1;
+              return Promise.resolve(
+                createProviderStream([
+                  toolCallEvent(
+                    "select_tools",
+                    { tools: [options.exploreMcpToolName] },
+                    "call_select_tools",
+                  ),
+                ]),
+              );
+            }
+            if (exploreMcpStep === 1) {
+              exploreMcpStep += 1;
+              return Promise.resolve(
+                createProviderStream([
+                  toolCallEvent(
+                    options.exploreMcpToolName,
+                    {},
+                    "call_mcp_search",
+                  ),
+                ]),
+              );
+            }
+          }
           return Promise.resolve(
             createProviderStream([
               { finishReason: "stop", textDelta: "child first result" },
@@ -318,6 +365,95 @@ describe("subagent runtime e2e", () => {
         JSON.stringify(request.messages).includes("Task: research"),
       ),
     ).toHaveLength(1);
+  });
+
+  it("lets an explore subagent load and execute an admitted MCP tool", async () => {
+    const bus = createBus();
+    const workdir = process.cwd();
+    const toolName = "mcp_s7_example_t6_search";
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const requests: InterfaceProviderRequest[] = [];
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      createSubagentId: (() => {
+        let next = 1;
+        return (): string => `subagent_e2e_${String(next++)}`;
+      })(),
+      llmClient: fakeLlmClient(requests, { exploreMcpToolName: toolName }),
+      mcpManager: {
+        getAllTools: () =>
+          Promise.resolve([
+            {
+              category: "readonly",
+              description: "Search the connected MCP server.",
+              execute: (): { output: string } => ({
+                output: "MCP search result",
+              }),
+              isTrusted: true,
+              name: toolName,
+              parametersJsonSchema: { properties: {}, type: "object" },
+              source: "mcp",
+            } satisfies Tool,
+          ]),
+      },
+      messageManager,
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      sessionManager: createInMemorySessionManager({
+        bus,
+        createSessionId: () => "session_child",
+        messageCleaner: {
+          removeMessages(sessionId) {
+            return messageManager.removeMessages(sessionId);
+          },
+        },
+        now: () => 1,
+      }),
+      skillRegistry: new SkillRegistry({
+        loader: {
+          loadContent: (): Promise<never> =>
+            Promise.reject(new Error("No skills loaded")),
+          scan: (): Promise<Map<string, never>> =>
+            Promise.resolve(new Map<string, never>()),
+        },
+      }),
+      workdir,
+    });
+
+    const result = await composition.startSession({
+      agentName: "build",
+      projectRoot: workdir,
+      prompt: "Delegate subagent e2e",
+      sessionId: "session_parent",
+    });
+    await expect(
+      composition.runManager.waitForCompletion(result.runId),
+    ).resolves.toMatchObject({ status: "succeeded" });
+
+    const exploreRequests = requests.filter((request) =>
+      JSON.stringify(request.messages).includes("Task: explore"),
+    );
+    const firstToolNames =
+      exploreRequests[0]?.tools?.map((tool) => tool.function.name) ?? [];
+    const selectedToolNames =
+      exploreRequests[1]?.tools?.map((tool) => tool.function.name) ?? [];
+
+    expect(firstToolNames).toContain("select_tools");
+    expect(firstToolNames).not.toContain(toolName);
+    expect(selectedToolNames).toContain(toolName);
+    expect(
+      JSON.stringify(
+        await messageManager.listBySession("session_child", {
+          contextScopeId: "subagent_e2e_1",
+        }),
+      ),
+    ).toContain("MCP search result");
   });
 
   it("releases one scoped sandbox lease without disrupting a sibling subagent", async () => {

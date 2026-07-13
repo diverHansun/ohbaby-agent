@@ -41,7 +41,6 @@ export {
 export type {
   AgentConfig,
   AgentMode,
-  AgentPromptProvider,
   AgentSessionStartResult,
   AgentsConfig,
   PermissionConfig,

@@ -1,6 +1,6 @@
 export { generateBasePrompt } from "./base.js";
 export { detectEnvironment, generateEnvironmentPrompt } from "./environment.js";
-export { generateToolGuidancePrompt } from "./tools.js";
+export { generateMcpToolMenuPrompt } from "./mcp-tools.js";
 export { generateCustomInstructionsPrompt } from "./custom.js";
 export {
   CUSTOM_INSTRUCTIONS_FILE_NAME,
@@ -17,5 +17,5 @@ export type {
   EnvironmentDetectionOptions,
   GenerateEnvironmentPromptOptions,
 } from "./environment.js";
-export type { GenerateToolGuidancePromptOptions } from "./tools.js";
+export type { GenerateMcpToolMenuPromptOptions } from "./mcp-tools.js";
 export type { CustomInstructionLoadOptions } from "../services/custom-instruction-loader.js";

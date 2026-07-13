@@ -23,7 +23,6 @@ const VALID_PRIMARY_AGENT = {
       "*": "ask",
     },
     web: "allow",
-    mcp: "ask",
     externalDirectory: "ask",
     doomLoop: "deny",
     critical: {
