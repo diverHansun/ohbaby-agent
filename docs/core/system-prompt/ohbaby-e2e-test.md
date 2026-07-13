@@ -2,7 +2,7 @@
 
 ## Goal
 
-Verify that the final system prompt sent through the runtime data flow has the expected primary/subagent identity, task contract, tool guidance, environment, and custom-instruction boundaries.
+Verify that the final system prompt sent through the runtime data flow has the expected primary/subagent identity, task contract, MCP exact-name menu, environment, and custom-instruction boundaries.
 
 ## Scope
 
@@ -30,10 +30,10 @@ Primary prompt:
 
 ```text
 primary base identity
-+ primary task contract: plan | agent at runtime; ask remains a static supported template
++ primary task contract: plan | agent
 + optional agent prompt add-on
 + optional subagent role guidance
-+ tool guidance
++ optional MCP exact-name menu for admitted, unloaded tools
 + full environment
 + custom instructions
 + memory appended by runtime prompt-context
@@ -45,7 +45,7 @@ Subagent prompt:
 subagent base identity
 + subagent task contract: explore | research | generic
 + optional agent prompt add-on
-+ tool guidance
++ optional MCP exact-name menu for admitted, unloaded tools
 + minimal environment
 ```
 
@@ -66,8 +66,7 @@ pnpm vitest run packages/ohbaby-agent/src/core/system-prompt packages/ohbaby-age
 
 Expected:
 
-- primary `ask`, `plan`, and `agent` static task contracts remain independently testable
-- normal runtime resolves primary prompts to `plan` or `agent`
+- primary `plan` and `agent` task contracts remain independently testable
 - subagent `explore`, `research`, and `generic` task contracts appear in assembled prompts
 - configured `AgentConfig.prompt` appears inside an add-on block
 - configured `AgentConfig.prompt` does not replace default base/task prompt text
@@ -140,10 +139,12 @@ Do not print full system prompts during real-provider runs. If a test needs to i
 ```typescript
 expect(systemPrompt).toContain("<primary_task>");
 expect(systemPrompt).toContain("<environment>");
-expect(systemPrompt).toContain("<tool_guidance>");
+expect(systemPrompt).not.toContain("<tool_guidance>");
 expect(systemPrompt).not.toContain("ZAI_API_KEY");
 expect(systemPrompt).not.toMatch(/OPENAI_API_KEY\s*=/);
 ```
+
+When an admitted MCP tool remains unloaded, additionally assert the menu contains its exact local name and fixed instructions, but not its server-supplied description or schema.
 
 For subagents:
 

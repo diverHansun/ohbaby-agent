@@ -11,7 +11,8 @@
 - 证明 agent prompt addon 不替换默认 identity/task。
 - 证明 primary 的 Todo 行为策略位于 base，Plan Agent 同时具备 Todo 读写工具。
 - 证明 subagent 不加载 primary custom instructions。
-- 证明 unsafe tool snippets/custom instructions 会被过滤或上报。
+- 证明 system prompt 只公告 MCP 的精确本地名和固定说明，不复读 description 或 schema。
+- 证明 MCP 工具的动态披露、准入和按 session/context scope 的 loaded 状态均 fail-closed。
 - 证明 `.md` 模板、生成的 TS 快照、源码运行、tsc、tsup 保持一致。
 
 ---
@@ -20,11 +21,10 @@
 
 | 测试文件 | 覆盖内容 |
 | --- | --- |
-| `__tests__/assembler.test.ts` | primary/subagent 组装、task kind、addon、层顺序 |
+| `__tests__/assembler.test.ts` | primary/subagent 组装、task kind、addon、层顺序与 MCP 精确名称公告 |
 | `__tests__/provider.test.ts` | `createSystemPromptProvider()` 适配流程 |
 | `__tests__/prompt-assets.unit.test.ts` | `.md` 模板存在、非空、导出等价 |
 | `__tests__/public-api.unit.test.ts` | 公共 API 不暴露内部 wrapper |
-| `__tests__/tools.test.ts` | tool guidance 条件渲染 |
 | `__tests__/custom.test.ts` | custom instruction 加载、fallback、截断、错误处理 |
 | `__tests__/environment.test.ts` | environment 渲染 |
 | `security/prompt-security.unit.test.ts` | prompt-like 内容扫描 |
@@ -35,18 +35,18 @@
 
 ### 3.1 primary 层顺序
 
-输入包含 `agentPromptAddon`、`availableSubagentRoles`、`toolSnippets`、`customInstructions` 时，应输出：
+输入包含 `agentPromptAddon`、`availableSubagentRoles`、`mcpToolNames`、`customInstructions` 时，应输出：
 
 ```text
-base -> primary_task -> agent_prompt_addon -> subagent_roles -> tool_guidance -> environment -> custom_instructions
+base -> primary_task -> agent_prompt_addon -> subagent_roles -> mcp_tools -> environment -> custom_instructions
 ```
 
 ### 3.2 subagent 层顺序
 
-输入包含 `agentPromptAddon` 和 `toolSnippets` 时，应输出：
+输入包含 `agentPromptAddon` 和 `mcpToolNames` 时，应输出：
 
 ```text
-subagent_base -> subagent_task -> agent_prompt_addon -> tool_guidance -> environment
+subagent_base -> subagent_task -> agent_prompt_addon -> mcp_tools -> environment
 ```
 
 ### 3.3 模板资产
@@ -54,7 +54,6 @@ subagent_base -> subagent_task -> agent_prompt_addon -> tool_guidance -> environ
 每个静态模板必须有对应 `.md` 文件：
 
 - `prompts/primary/base.md`
-- `prompts/primary/tasks/ask.md`
 - `prompts/primary/tasks/plan.md`
 - `prompts/primary/tasks/agent.md`
 - `prompts/subagents/base.md`
@@ -88,8 +87,9 @@ pnpm exec vitest run tests/integration/cli/prompt-process.integration.test.ts
 - 删除 `generateAgentPrompt` 公共导出后，公共 API 测试应确保它不再暴露。
 - 删除死类型后，代码与文档都不应把层元数据结果描述为正式返回模型。
 - `.md` 模板迁移不得改变现有 prompt 内容。
-- `tool_guidance` 是条件层，没有 snippets 时可为空。
-- 子代理 prompt 可以包含工具指导，但不包含 primary custom instructions。
+- `mcp_tools` 是条件层；只有当前 session/context scope 仍未加载的安全 MCP 工具才会出现。
+- `mcp_tools` 不得包含 MCP 的 description、schema、server 返回值或其他未信任文本。
+- 子代理 prompt 可以包含 MCP 公告，但不包含 primary custom instructions。
 
 ---
 

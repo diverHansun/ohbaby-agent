@@ -38,7 +38,7 @@ SystemPrompt.assemble(options: AssembleOptions): string[]
 - `agentPromptAddon`: 可选代理附加提示。
 - `availableSubagentRoles`: 可选子代理角色列表，仅 primary 使用。
 - `tools`: 可用工具名。
-- `toolSnippets`: 工具描述片段。
+- `mcpToolNames`: 已准入、尚未在当前 session/context scope 加载的 MCP 精确本地名。
 - `customInstructions`: custom instructions，仅 primary 使用。
 
 输出：
@@ -54,7 +54,7 @@ createSystemPromptProvider(options?: SystemPromptProviderOptions): SystemPromptP
 数据流：
 
 1. 解析 agent name。
-2. 并发获取 environment、tools、taskKind、toolDetails 和可用 subagent roles。
+2. 并发获取 environment、tools、taskKind、MCP 工具名和可用 subagent roles。
 3. 获取 agent prompt addon。
 4. primary 分支加载 custom instructions。
 5. 调用 `SystemPrompt.assemble()`。
@@ -86,7 +86,7 @@ input
   -> render primary task from prompts/primary/tasks/*.md
   -> wrap agent addon
   -> render subagent roles when roles exist
-  -> render tool guidance when snippets exist
+  -> render MCP exact-name menu when unloaded admitted tools exist
   -> render full environment
   -> render custom instructions
   -> compact empty layers
@@ -102,7 +102,7 @@ input
   -> render subagent base from prompts/subagents/base.md
   -> render subagent task from prompts/subagents/tasks/*.md
   -> wrap agent addon
-  -> render tool guidance when snippets exist
+  -> render MCP exact-name menu when unloaded admitted tools exist
   -> render minimal environment
   -> compact empty layers
 ```
@@ -113,11 +113,11 @@ subagent 不加载 primary custom instructions。
 
 ## 五、安全流
 
-tool snippets 与 custom instructions 都可能来自外部配置或文件：
+custom instructions 与 MCP metadata 都可能来自外部来源：
 
-- `toolSnippets` 在 assembler 中通过 `scanPromptLikeContent()` 过滤。
 - custom instructions 在 loader 中扫描、截断并上报 warning/finding。
-- 可疑内容不会被直接注入为未标记的系统指令。
+- MCP 工具在注册前检查名称、description、schema 的 JSON 结构、深度、大小和 prompt-like 内容；失败即拒绝。
+- system prompt 仅接收已准入的精确本地名和固定说明，description/schema 只在显式 `select_tools` 后作为原生工具定义下发。
 
 ---
 
@@ -126,7 +126,7 @@ tool snippets 与 custom instructions 都可能来自外部配置或文件：
 | 输入来源 | 进入点 | 说明 |
 | --- | --- | --- |
 | agents | `agentNameResolver`, `agentPromptResolver`, `availableSubagentRolesProvider` | 提供 agent 名称、addon 和 primary 可委派角色 |
-| ui-runtime | `taskKindResolver`, `toolsProvider`, `toolDetailsProvider` | 提供 mode/tool 上下文 |
+| ui-runtime | `taskKindResolver`, `toolsProvider`, `mcpToolNamesProvider` | 提供 mode/tool 上下文 |
 | filesystem | `loadCustomInstructions()` | 读取 custom instruction 文件 |
 | environment | `detectEnvironment()` | 读取 cwd、platform、date、git 状态 |
 

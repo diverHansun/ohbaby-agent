@@ -477,7 +477,6 @@ export type AgentsConfig = z.infer<typeof AgentsConfigSchema>
 | permission.edit | PermissionValue | 否 | 文件编辑权限 |
 | permission.bash | PermissionValue 或 Record | 否 | Bash 命令权限 |
 | permission.web | PermissionValue | 否 | Web 请求权限 |
-| permission.mcp | PermissionValue | 否 | MCP 工具权限 |
 | permission.externalDirectory | PermissionValue | 否 | 外部目录访问权限 |
 | permission.doomLoop | PermissionValue | 否 | Doom loop 权限 |
 | permission.critical | CriticalOperationsConfig | 否 | 关键操作配置 |

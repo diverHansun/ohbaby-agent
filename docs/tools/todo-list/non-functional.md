@@ -35,7 +35,7 @@
 
 - Todo 使用策略只在 primary base 保存一份，不复制到两个工具 description。
 - 工具 description 保持为短接口说明，字段约束由 schema 表达。
-- 全局 `<tool_guidance>` 与 Provider 原生工具定义的去重属于独立优化，本批不改变所有工具的提示行为。
+- 工具 description 与 schema 仅通过 Provider 原生工具定义发送，不再经 system prompt 重复注入。
 
 ## 三、可靠性
 

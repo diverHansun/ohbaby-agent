@@ -16,7 +16,7 @@ prompt layer 是一个独立的 system prompt 片段。`SystemPrompt.assemble()`
 
 ### Runtime Layer
 
-runtime layer 由代码根据当前输入渲染，例如 environment、tools、custom instructions、agent addon。
+runtime layer 由代码根据当前输入渲染，例如 environment、MCP 工具菜单、custom instructions、agent addon。
 
 ---
 
@@ -30,8 +30,8 @@ export type LayerType =
   | "base"
   | "custom"
   | "environment"
-  | "task"
-  | "tools";
+  | "mcp-tools"
+  | "task";
 ```
 
 `LayerType` 用于描述概念层，不驱动运行时排序。
@@ -45,7 +45,7 @@ export type AgentKind = "primary" | "subagent";
 ### Task Kind
 
 ```ts
-export type PrimaryTaskKind = "ask" | "plan" | "agent";
+export type PrimaryTaskKind = "plan" | "agent";
 export type SubagentTaskKind = "explore" | "research" | "generic";
 export type PromptTaskKind = PrimaryTaskKind | SubagentTaskKind;
 ```
@@ -73,9 +73,8 @@ export interface AssembleOptions {
   readonly availableSubagentRoles?: readonly SubagentRolePromptInfo[];
   readonly environment: EnvironmentInfo;
   readonly customInstructions?: readonly string[];
-  readonly onSecurityFinding?: (finding: PromptSecurityFinding) => void;
   readonly taskKind?: PromptTaskKind;
-  readonly toolSnippets?: Readonly<Partial<Record<string, string>>>;
+  readonly mcpToolNames?: readonly string[];
   readonly tools?: readonly string[];
 }
 ```
@@ -85,6 +84,7 @@ export interface AssembleOptions {
 ```ts
 export interface SystemPromptProviderInput {
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly directory: string;
   readonly isSubagent: boolean;
   readonly agentName?: string;
@@ -102,7 +102,7 @@ export interface SystemPromptProviderInput {
 - `toolsProvider`
 - `taskKindResolver`
 - `availableSubagentRolesProvider`
-- `toolDetailsProvider`
+- `mcpToolNamesProvider`
 - `onWarning`
 - `onSecurityFinding`
 
@@ -125,7 +125,6 @@ string[]
 | 模板 | 文件 | 说明 |
 | --- | --- | --- |
 | primary base | `prompts/primary/base.md` | primary identity 与基础行为 |
-| primary ask | `prompts/primary/tasks/ask.md` | ask 任务契约 |
 | primary plan | `prompts/primary/tasks/plan.md` | plan 任务契约 |
 | primary agent | `prompts/primary/tasks/agent.md` | agent 任务契约 |
 | subagent base | `prompts/subagents/base.md` | subagent 基础约束 |
