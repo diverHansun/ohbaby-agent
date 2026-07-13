@@ -190,17 +190,24 @@ const TaskParams = z.object({
 ### 3.9 todo 工具
 
 ```typescript
+const TodoContent = z.string().trim().min(1).refine(
+  (value) => Array.from(value).length <= 100,
+  '任务内容最多 100 个 Unicode 字符',
+)
+
 const TodoItem = z.object({
-  id: z.string().describe('唯一标识符'),
-  content: z.string().describe('任务内容'),
-  status: z.enum(['pending', 'in_progress', 'completed', 'cancelled']),
-  priority: z.enum(['high', 'medium', 'low']).describe('优先级'),
-})
+  content: TodoContent.describe('任务内容'),
+  status: z.enum(['pending', 'in_progress', 'completed']),
+}).strict()
 
 const TodoWriteParams = z.object({
-  todos: z.array(TodoItem).describe('待办事项列表'),
-})
+  todos: z.array(TodoItem).max(10).describe('完整待办事项列表'),
+}).strict()
+
+const TodoReadParams = z.object({}).strict()
 ```
+
+Todo 不定义 `id` 或 `priority`；数组顺序即执行顺序，允许多个 `in_progress`。Unicode 长度按 code point 计算，避免把一个常见 emoji 计成两个 UTF-16 code unit；组合字素归一化不属于当前版本。详见 [`todo-list/data-model.md`](./todo-list/data-model.md)。
 
 ---
 

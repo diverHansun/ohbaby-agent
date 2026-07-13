@@ -427,10 +427,12 @@ const result = await ReadTool.execute(
 {
   todos: Array<{
     content: string
-    status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+    status: 'pending' | 'in_progress' | 'completed'
   }>
 }
 ```
+
+`todos` 最多 10 项；每项 `content` trim 后非空且最多 100 个 Unicode 字符。数组整体替换当前 session/context scope 的列表，`[]` 表示显式清空。
 
 **todo_read 参数**：无
 
@@ -439,12 +441,16 @@ const result = await ReadTool.execute(
 {
   content: string        // 格式化的待办列表
   metadata: {
-    totalCount: number
-    pendingCount: number
-    completedCount: number
+    count: number
+    todos: Array<{
+      content: string
+      status: 'pending' | 'in_progress' | 'completed'
+    }>
   }
 }
 ```
+
+`todo_read` 不产生更新事件；发生实际变化的成功 `todo_write` 通过 `UiSnapshot.todos` / `todo.updated` 向 Web/TUI 投影完整列表。两个工具的 call/result 不进入正常 transcript，底层消息历史仍保留以供 Agent 和恢复使用。详见 [`todo-list/dfd-interface.md`](./todo-list/dfd-interface.md)。
 
 ---
 

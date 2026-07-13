@@ -262,12 +262,24 @@
 **场景 33：写入待办事项**
 - 前置条件：无
 - 操作：调用 todo_write({ todos: [...] })
-- 预期结果：返回格式化的待办列表
+- 预期结果：原子替换当前 session 列表并返回格式化结果；最多 10 项、单项最多 100 个 Unicode 字符、允许多个 in_progress
 
 **场景 34：读取待办事项**
 - 前置条件：已写入待办
 - 操作：调用 todo_read({})
-- 预期结果：返回当前待办列表
+- 预期结果：返回当前 scope 待办列表，不修改状态、不发布更新事件
+
+**场景 35：恢复与清空边界**
+- 前置条件：历史中同时存在成功、失败和空数组 todo_write
+- 操作：resume session 后读取 Todo
+- 预期结果：只恢复最后一次成功完成写入；成功空数组保持为空，不复活旧值
+
+**场景 36：Todo UI 与 transcript**
+- 前置条件：run 中写入 10 项 Todo
+- 操作：分别使用 Web 和 TUI 消费 snapshot/event
+- 预期结果：Web 全量限高滚动；TUI 紧凑 5 项并可 Ctrl+T 展开；两个工具均不进入 transcript
+
+Todo 的完整自动化与真实浏览器/TUI 进程验收见 [`todo-list/test.md`](./todo-list/test.md) 与 [`todo-list/improve-1/04-test-and-acceptance.md`](./todo-list/improve-1/04-test-and-acceptance.md)。
 
 ---
 

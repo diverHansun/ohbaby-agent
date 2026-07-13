@@ -81,6 +81,7 @@ type ToolSource = 'builtin' | 'module' | 'mcp'
 | **web_fetch** | **network** | **抓取 URL 内容并提取** | **`tools/web-fetch.ts` → `services/search-providers/`** |
 
 **注意**：
+- Todo 保留 `todo_write` / `todo_read` 双工具；每项只有 `content` 与三态 `status`，完整契约与 UI 生命周期见 [`todo-list/`](./todo-list/goals-duty.md)。
 - `web_search` / `web_fetch` 是内置工具入口，但执行通过 `services/search-providers/` 调用具体厂商（当前激活 Tavily）
 - `subagent_run` 是主代理召唤子代理的唯一入口；子代理运行时硬编码禁用 `subagent_run` / `subagent_status` / `subagent_close` 以防止递归召唤
 

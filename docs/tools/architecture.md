@@ -318,11 +318,14 @@ metadata: mtimeMs, sizeBytes, encoding, lineEnding, hasMore, nextOffset
 #### todo_write / todo_read
 
 ```
-输入: todos 数组 (包含 id, content, status, priority)
-输出: 任务列表
-状态: pending, in_progress, completed, cancelled
-优先级: high, medium, low
+todo_write 输入: 完整 todos 数组，每项仅含 content、status
+todo_read 输入: 空对象
+输出: 当前 session/context scope 的完整任务列表
+状态: pending, in_progress, completed
+约束: 最多 10 项，单项 content 最多 100 个 Unicode 字符
 ```
+
+数组顺序表达执行顺序和隐式优先级；允许多个 `in_progress`。运行时按 session 隔离，消息历史中最后一次成功 `todo_write` 是恢复事实源，Web/TUI 只消费正式 snapshot/event。详见 [`todo-list/architecture.md`](./todo-list/architecture.md)。
 
 ---
 
