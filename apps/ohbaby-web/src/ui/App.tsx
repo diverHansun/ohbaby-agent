@@ -1284,6 +1284,7 @@ function ConversationStream(props: {
 }): ReactElement {
   const streamRef = useRef<HTMLDivElement | null>(null);
   const messages = props.view.activeSession?.messages ?? [];
+  const visibleMessages = filterTodoToolMessages(messages);
   useEffect(() => {
     const element = streamRef.current;
     if (element) {
@@ -1294,7 +1295,7 @@ function ConversationStream(props: {
   return (
     <section className="ohb-stream" ref={streamRef}>
       <div className="ohb-stream-inner">
-        {messages.map((message) => (
+        {visibleMessages.map((message) => (
           <MessageRow
             key={message.id}
             message={message}
@@ -1696,6 +1697,35 @@ function filterTodoToolParts(
         (part.type === "tool-result" && hiddenCallIds.has(part.result.callId))
       ),
   );
+}
+
+function filterTodoToolMessages(
+  messages: readonly UiMessage[],
+): readonly UiMessage[] {
+  const hiddenCallIds = new Set(
+    messages
+      .flatMap((message) => message.parts)
+      .filter(
+        (part) =>
+          part.type === "tool-call" &&
+          (part.call.name === "todo_read" || part.call.name === "todo_write"),
+      )
+      .map((part) => (part.type === "tool-call" ? part.call.id : "")),
+  );
+  if (hiddenCallIds.size === 0) {
+    return messages;
+  }
+
+  return messages.flatMap((message) => {
+    const parts = message.parts.filter(
+      (part) =>
+        !(
+          (part.type === "tool-call" && hiddenCallIds.has(part.call.id)) ||
+          (part.type === "tool-result" && hiddenCallIds.has(part.result.callId))
+        ),
+    );
+    return parts.length === 0 ? [] : [{ ...message, parts }];
+  });
 }
 
 function PendingPromptRow(props: {
@@ -2609,7 +2639,12 @@ function TodoDock(props: {
         <span>Tasks</span>
         <span>{String(props.todoList.todos.length)}</span>
       </header>
-      <div className="ohb-todo-items" role="list">
+      <div
+        aria-label="Todo items"
+        className="ohb-todo-items"
+        role="list"
+        tabIndex={0}
+      >
         {props.todoList.todos.map((todo, index) => (
           <div
             aria-label={`${todoStatusLabel(todo.status)}: ${todo.content}`}

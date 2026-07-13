@@ -1,9 +1,14 @@
 import type { MessageWithParts } from "../core/message/index.js";
+import type { MessageScopeFilter } from "../core/message/types.js";
 import type {
   Tool,
   ToolExecutionResult,
 } from "../core/tool-scheduler/index.js";
 import { ToolParameterError } from "./utils/params.js";
+import {
+  isScopedSessionKeyForSession,
+  scopedSessionKey,
+} from "../utils/scoped-session.js";
 
 export const MAX_TODO_ITEMS = 10;
 export const MAX_TODO_CONTENT_LENGTH = 100;
@@ -21,19 +26,27 @@ export interface TodoWriteResult {
 }
 
 export interface TodoStore {
-  read(sessionId: string): Promise<readonly TodoItem[]> | readonly TodoItem[];
+  read(
+    sessionId: string,
+    contextScopeId?: string,
+  ): Promise<readonly TodoItem[]> | readonly TodoItem[];
   write(
     sessionId: string,
     todos: readonly TodoItem[],
+    contextScopeId?: string,
   ): Promise<TodoWriteResult> | TodoWriteResult;
 }
 
 export interface TodoWriteEvent extends TodoWriteResult {
   readonly sessionId: string;
+  readonly contextScopeId?: string;
 }
 
 export interface TodoHistorySource {
-  listBySession(sessionId: string): Promise<readonly MessageWithParts[]>;
+  listBySession(
+    sessionId: string,
+    options?: MessageScopeFilter,
+  ): Promise<readonly MessageWithParts[]>;
 }
 
 export interface TodoServiceOptions {
@@ -53,61 +66,115 @@ export class TodoService implements TodoStore {
   private readonly loadedBySession = new Map<string, readonly TodoItem[]>();
   private readonly loadingBySession = new Map<
     string,
-    Promise<readonly TodoItem[]>
+    {
+      readonly promise: Promise<readonly TodoItem[]>;
+      readonly token: object;
+    }
   >();
+  private readonly cancelledLoads = new WeakSet<object>();
 
   constructor(private readonly options: TodoServiceOptions = {}) {}
 
-  async read(sessionId: string): Promise<readonly TodoItem[]> {
-    const loaded = this.loadedBySession.get(sessionId);
+  async read(
+    sessionId: string,
+    contextScopeId?: string,
+  ): Promise<readonly TodoItem[]> {
+    const key = scopedSessionKey({ contextScopeId, sessionId });
+    const loaded = this.loadedBySession.get(key);
     if (loaded !== undefined) {
       return cloneTodos(loaded);
     }
 
-    let loading = this.loadingBySession.get(sessionId);
+    let loading = this.loadingBySession.get(key);
     if (loading === undefined) {
-      loading = this.loadFromHistory(sessionId);
-      this.loadingBySession.set(sessionId, loading);
+      const token = {};
+      loading = {
+        promise: this.loadFromHistory(sessionId, contextScopeId, token),
+        token,
+      };
+      this.loadingBySession.set(key, loading);
     }
 
     try {
-      return cloneTodos(await loading);
+      return cloneTodos(await loading.promise);
     } finally {
-      if (this.loadingBySession.get(sessionId) === loading) {
-        this.loadingBySession.delete(sessionId);
+      if (this.loadingBySession.get(key) === loading) {
+        this.loadingBySession.delete(key);
       }
     }
   }
 
-  write(sessionId: string, todos: readonly TodoItem[]): TodoWriteResult {
+  write(
+    sessionId: string,
+    todos: readonly TodoItem[],
+    contextScopeId?: string,
+  ): TodoWriteResult {
+    const key = scopedSessionKey({ contextScopeId, sessionId });
     const next = cloneTodos(todos);
-    const previous = this.loadedBySession.get(sessionId);
+    const previous = this.loadedBySession.get(key);
     const changed = previous === undefined || !todosEqual(previous, next);
-    this.loadedBySession.set(sessionId, next);
+    this.loadedBySession.set(key, next);
 
     const result = { changed, todos: cloneTodos(next) };
-    this.options.onWrite?.({ ...result, sessionId });
+    this.options.onWrite?.({
+      ...result,
+      ...(contextScopeId === undefined ? {} : { contextScopeId }),
+      sessionId,
+    });
     return result;
   }
 
   release(sessionId: string): void {
-    this.loadedBySession.delete(sessionId);
-    this.loadingBySession.delete(sessionId);
+    for (const [key, loading] of this.loadingBySession) {
+      if (isScopedSessionKeyForSession(key, sessionId)) {
+        this.cancelledLoads.add(loading.token);
+        this.loadingBySession.delete(key);
+      }
+    }
+    for (const key of this.loadedBySession.keys()) {
+      if (isScopedSessionKeyForSession(key, sessionId)) {
+        this.loadedBySession.delete(key);
+      }
+    }
+  }
+
+  releaseScope(sessionId: string, contextScopeId?: string): void {
+    const key = scopedSessionKey({ contextScopeId, sessionId });
+    const loading = this.loadingBySession.get(key);
+    if (loading) {
+      this.cancelledLoads.add(loading.token);
+      this.loadingBySession.delete(key);
+    }
+    this.loadedBySession.delete(key);
   }
 
   dispose(): void {
+    for (const loading of this.loadingBySession.values()) {
+      this.cancelledLoads.add(loading.token);
+    }
     this.loadedBySession.clear();
     this.loadingBySession.clear();
   }
 
   private async loadFromHistory(
     sessionId: string,
+    contextScopeId: string | undefined,
+    token: object,
   ): Promise<readonly TodoItem[]> {
+    const key = scopedSessionKey({ contextScopeId, sessionId });
     let todos: readonly TodoItem[] = [];
     if (this.options.history) {
       try {
+        const messages = await this.options.history.listBySession(
+          sessionId,
+          contextScopeId === undefined ? undefined : { contextScopeId },
+        );
         todos = recoverTodosFromMessages(
-          await this.options.history.listBySession(sessionId),
+          contextScopeId === undefined
+            ? messages.filter(
+                (message) => message.info.contextScopeId === undefined,
+              )
+            : messages,
           this.options.onWarning,
         );
       } catch (error) {
@@ -118,12 +185,15 @@ export class TodoService implements TodoStore {
       }
     }
 
-    const existing = this.loadedBySession.get(sessionId);
+    if (this.cancelledLoads.has(token)) {
+      return [];
+    }
+    const existing = this.loadedBySession.get(key);
     if (existing !== undefined) {
       return existing;
     }
     const recovered = cloneTodos(todos);
-    this.loadedBySession.set(sessionId, recovered);
+    this.loadedBySession.set(key, recovered);
     return recovered;
   }
 }
@@ -272,7 +342,7 @@ function createTodoReadTool(store: TodoStore): Tool {
     category: "readonly",
     annotations: { readOnlyHint: true },
     async execute(_params, context): Promise<ToolExecutionResult> {
-      const todos = await store.read(context.sessionId);
+      const todos = await store.read(context.sessionId, context.contextScopeId);
       return { output: renderTodos(todos), metadata: todoMetadata(todos) };
     },
   };
@@ -314,7 +384,11 @@ function createTodoWriteTool(store: TodoStore): Tool {
     category: "write",
     async execute(params, context): Promise<ToolExecutionResult> {
       const todos = parseTodos(params);
-      const result = await store.write(context.sessionId, todos);
+      const result = await store.write(
+        context.sessionId,
+        todos,
+        context.contextScopeId,
+      );
       return {
         output: renderTodos(result.todos),
         metadata: todoMetadata(result.todos),

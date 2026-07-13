@@ -46,7 +46,7 @@ Agent tool call
 对应问题：P-03、P-04。
 
 - 由 UI runtime composition 创建并持有单一 TodoService，再注入工具集合。
-- 服务按 `sessionId` 隔离列表，子 Agent session 自然隔离。
+- 服务按 `sessionId + contextScopeId` 隔离列表；共享 child session 的多个子 Agent 仍互不覆盖。
 - 为 session 建立 `unloaded` / `loaded` 两态，`loaded + []` 不再触发历史回扫。
 - 首次读写或 resume 入口按项目消息模型从后向前匹配 `todo_write` call 与成功 result。
 - 跳过失败、拒绝、取消、不完整或参数不合法的候选，命中最后一次成功写后停止。

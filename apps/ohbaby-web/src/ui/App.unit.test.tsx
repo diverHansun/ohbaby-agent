@@ -126,7 +126,10 @@ describe("OhbabyWebApp slash command interactions", () => {
     );
     expect(app.container.textContent).not.toContain("not active");
     const dock = app.container.querySelector(".ohb-todo-dock");
+    const scrollRegion = app.container.querySelector(".ohb-todo-items");
     const composerInput = app.container.querySelector(".ohb-composer-input");
+    expect(scrollRegion?.getAttribute("aria-label")).toBe("Todo items");
+    expect(scrollRegion?.getAttribute("tabindex")).toBe("0");
     expect(
       Boolean(
         dock &&
@@ -215,6 +218,20 @@ describe("OhbabyWebApp slash command interactions", () => {
                 ],
                 role: "assistant",
               },
+              {
+                createdAt: timestamp,
+                id: "message_split_result",
+                parts: [
+                  {
+                    result: {
+                      callId: "call_todo_only",
+                      output: "Hidden split result",
+                    },
+                    type: "tool-result",
+                  },
+                ],
+                role: "tool",
+              },
             ],
           },
         ],
@@ -226,6 +243,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.textContent).not.toContain("todo_read");
     expect(app.container.textContent).not.toContain("todo_write");
     expect(app.container.textContent).not.toContain("No todos.");
+    expect(app.container.textContent).not.toContain("Hidden split result");
     expect(app.container.querySelectorAll(".ohb-tool-panel")).toHaveLength(0);
     expect(app.container.querySelectorAll(".ohb-message")).toHaveLength(1);
   });

@@ -27,8 +27,9 @@
 
 ### 内存
 
-- 每个 session 只保存当前列表和 loaded 状态，不保存版本历史。
+- 每个 session/context scope 只保存当前列表和 loaded 状态，不保存版本历史。
 - session 从 runtime 释放时清除对应投影。
+- 子 Agent context 关闭时释放对应 scope 缓存，不等待整个 child session 删除。
 
 ## 三、可靠性
 

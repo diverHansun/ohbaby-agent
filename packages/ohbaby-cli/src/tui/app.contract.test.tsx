@@ -203,6 +203,23 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("todo 10");
     expect(app.lastFrame()).toContain("ctrl+t to collapse");
 
+    client.emit({
+      request: {
+        choices: [{ id: "allow", intent: "allow", label: "Allow" }],
+        description: "Run command",
+        id: "permission_1",
+        runId: "run_1",
+        title: "Permission",
+      },
+      type: "permission.requested",
+    });
+    await flush();
+    expect(app.lastFrame()).toContain("todo 10");
+    expect(app.lastFrame()).toContain("ctrl+t to collapse");
+
+    client.emit({ requestId: "permission_1", type: "permission.resolved" });
+    await flush();
+
     app.stdin.write("\u0014");
     await flush();
     expect(app.lastFrame()).not.toContain("todo 10");

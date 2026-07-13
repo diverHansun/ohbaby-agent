@@ -781,6 +781,16 @@ describe("Lifecycle.run", () => {
     const prepareTurn = vi
       .fn<ContextManager["prepareTurn"]>()
       .mockResolvedValue(preparedTurn([{ role: "user", content: "Continue" }]));
+    const executeBatch = vi.fn<ToolSchedulerInstance["executeBatch"]>(
+      ({ calls }) =>
+        Promise.resolve(
+          calls.map((call) => ({
+            callId: call.callId,
+            output: "ok",
+            status: "success" as const,
+          })),
+        ),
+    );
     const lifecycle = new Lifecycle({
       contextManager: createContextManagerMock(prepareTurn),
       llmClient: createSequentialFakeLLMClient(
@@ -816,20 +826,13 @@ describe("Lifecycle.run", () => {
       ),
       messageManager,
       toolScheduler: {
-        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(
-          ({ calls }) =>
-            Promise.resolve(
-              calls.map((call) => ({
-                callId: call.callId,
-                output: "ok",
-                status: "success" as const,
-              })),
-            ),
-        ),
+        executeBatch,
       } as unknown as ToolSchedulerInstance,
     });
     const params: LifecycleSessionParams = {
+      contextScopeId: "subagent_1",
       directory: "D:/repo",
+      isSubagent: true,
       modelId: "fake-model",
       sessionId: "session_test",
     };
@@ -843,6 +846,10 @@ describe("Lifecycle.run", () => {
     expect(requests).toHaveLength(2);
     expect(events.filter((event) => event === "turn:start")).toHaveLength(1);
     expect(events.filter((event) => event === "turn:end")).toHaveLength(1);
+    expect(executeBatch.mock.calls.flatMap(([batch]) => batch.calls)).toEqual([
+      expect.objectContaining({ contextScopeId: "subagent_1" }),
+      expect.objectContaining({ contextScopeId: "subagent_1" }),
+    ]);
     expect(result).toMatchObject({
       finishReason: "tool_calls",
       success: true,

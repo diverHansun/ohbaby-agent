@@ -214,6 +214,20 @@ describe("TUI store event reducer", () => {
               ],
               role: "assistant",
             },
+            {
+              createdAt: "2026-05-14T00:00:03.000Z",
+              id: "message_split_result",
+              parts: [
+                {
+                  result: {
+                    callId: "call_todo_only",
+                    output: "Hidden split result",
+                  },
+                  type: "tool-result",
+                },
+              ],
+              role: "tool",
+            },
           ],
         },
       ],

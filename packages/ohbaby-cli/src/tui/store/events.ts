@@ -1511,20 +1511,21 @@ function noticeSessionId(notice: UiNotice): string | undefined {
 function filterHiddenTodoMessages(
   messages: readonly UiMessage[],
 ): readonly UiMessage[] {
-  return messages.flatMap((message) => {
-    const hiddenCallIds = new Set(
-      message.parts
-        .filter(
-          (part) =>
-            part.type === "tool-call" &&
-            (part.call.name === "todo_read" || part.call.name === "todo_write"),
-        )
-        .map((part) => (part.type === "tool-call" ? part.call.id : "")),
-    );
-    if (hiddenCallIds.size === 0) {
-      return [message];
-    }
+  const hiddenCallIds = new Set(
+    messages
+      .flatMap((message) => message.parts)
+      .filter(
+        (part) =>
+          part.type === "tool-call" &&
+          (part.call.name === "todo_read" || part.call.name === "todo_write"),
+      )
+      .map((part) => (part.type === "tool-call" ? part.call.id : "")),
+  );
+  if (hiddenCallIds.size === 0) {
+    return messages;
+  }
 
+  return messages.flatMap((message) => {
     const parts = message.parts.filter(
       (part) => !isHiddenTodoPart(part, hiddenCallIds),
     );

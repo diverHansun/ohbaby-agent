@@ -839,6 +839,9 @@ export function createInProcessUiBackendClient(
   }
 
   function publishTodoWrite(event: TodoWriteEvent): void {
+    if (event.contextScopeId !== undefined) {
+      return;
+    }
     publishTodoProjection({
       sessionId: event.sessionId,
       todos: event.todos,
@@ -1815,6 +1818,9 @@ export function createInProcessUiBackendClient(
         contextWindowUsage,
         nextMessageId: () => messageIds.next(),
         onNotice: publishNotice,
+        onBeforeTerminalRun: () => {
+          hideTodoAfterRun(session.id);
+        },
         publish,
         runId,
         sessionId: session.id,

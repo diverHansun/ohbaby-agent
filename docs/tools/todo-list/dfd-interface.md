@@ -41,7 +41,7 @@ Web/TUI 不直接访问 TodoService 或 session history。
 **行为**：
 
 1. 完整校验输入。
-2. 原子替换 `context.sessionId` 的列表。
+2. 原子替换 `context.sessionId + context.contextScopeId` 的列表。
 3. `[]` 表示显式清空。
 4. 相同列表可返回成功但不发布重复更新事件。
 
@@ -53,24 +53,24 @@ Web/TUI 不直接访问 TodoService 或 session history。
 
 **参数**：空对象，不接受额外字段。
 
-**行为**：返回 `context.sessionId` 当前完整列表；若尚未加载，先执行一次懒恢复；不改变列表，不发布 `todo.updated`。
+**行为**：返回 `context.sessionId + context.contextScopeId` 当前完整列表；若尚未加载，先执行一次懒恢复；不改变列表，不发布 `todo.updated`。
 
 **输出**：Agent 可读列表和结构化 `count/todos` metadata，同样不进入正常 UI transcript。
 
 ## 三、TodoService 内部接口语义
 
-### `read(sessionId)`
+### `read(sessionId, contextScopeId?)`
 
 - 返回防御性副本。
 - unloaded 时可调用注入的 history recovery port，完成后转为 loaded。
 
-### `replace(sessionId, todos)`
+### `replace(sessionId, todos, contextScopeId?)`
 
 - 调用者必须传入已验证完整数组，服务仍保持不可变复制边界。
 - 返回 `{ todos, todosChanged }` 或等价结果。
 - UI projection 同时比较列表和 `visible`；只有完整投影不变时才不重复发事件。
 
-### `recover(sessionId, messages)`
+### `recover(sessionId, contextScopeId?, messages)`
 
 - 从后向前检查 `todo_write`。
 - 必须同时存在匹配 callId 的成功完成 result。
@@ -80,7 +80,11 @@ Web/TUI 不直接访问 TodoService 或 session history。
 
 ### `release(sessionId)`
 
-session 真正从 runtime 释放时清理内存投影。不得因一次 run 结束而释放或清空。
+session 真正从 runtime 释放时清理该 session 的主 context 与全部子 context 内存状态。不得因一次 run 结束而释放或清空。
+
+### `releaseScope(sessionId, contextScopeId)`
+
+子 Agent context 关闭时只清理该 scope 的内存状态，不影响同一 child session 的其他 context。
 
 ## 四、UI 契约
 
@@ -107,7 +111,7 @@ interface UiTodoUpdatedEvent {
 }
 ```
 
-事件是完整替换而不是 patch。客户端只替换匹配 sessionId 的投影；列表相同但可见性变化仍属于有效更新。事件断线后使用新 snapshot 覆盖本地结果。
+事件是完整替换而不是 patch。只有主 context 写入才形成 UI 投影；子 Agent context 写入不发布 `todo.updated`，也不进入 `UiSnapshot.todos`。客户端只替换匹配 sessionId 的主投影；列表相同但可见性变化仍属于有效更新。事件断线后使用新 snapshot 覆盖本地结果。
 
 ### 可见性转换
 

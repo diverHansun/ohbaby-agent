@@ -9,7 +9,7 @@
 ### 覆盖
 
 - `todo_read` / `todo_write` schema、输出和读写分类。
-- TodoService 的原子替换、session 隔离、重复写抑制和 loaded 状态。
+- TodoService 的原子替换、session/context scope 隔离、重复写抑制和 loaded 状态。
 - 从消息历史恢复最后一次成功 write transaction。
 - `UiSnapshot.todos`、`todo.updated`、run 可见性投影和 reducer。
 - Web TodoDock 与 TUI TodoPanel 的布局、顺序、容量和生命周期。
@@ -50,7 +50,7 @@
 
 ### CS5：session 隔离
 
-- 主 session、另一主 session、子 Agent session 分别维护列表。
+- 主 session、另一主 session、同一 child session 的不同 context scope 分别维护列表。
 - active main session selector 不聚合子 Agent Todo。
 
 ### CS6：snapshot/event 一致性

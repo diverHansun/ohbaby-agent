@@ -2418,6 +2418,20 @@ describe("createInProcessUiBackendClient", () => {
         event.type === "todo.updated",
     );
     expect(todoEvents.map((event) => event.visible)).toEqual([true, false]);
+    const hideIndex = events.findIndex(
+      (event) => event.type === "todo.updated" && !event.visible,
+    );
+    const idleIndex = events.findIndex(
+      (event) =>
+        event.type === "runtime.updated" && event.status.kind === "idle",
+    );
+    const terminalRunIndex = events.findIndex(
+      (event) =>
+        event.type === "run.updated" && event.run.status.kind === "idle",
+    );
+    expect(hideIndex).toBeGreaterThanOrEqual(0);
+    expect(terminalRunIndex).toBeGreaterThan(hideIndex);
+    expect(idleIndex).toBeGreaterThan(hideIndex);
   });
 
   it("hides an explicitly cleared todo list before the run ends", async () => {

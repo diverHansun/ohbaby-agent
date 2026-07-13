@@ -22,7 +22,7 @@
 | A-07 | 内容 101 Unicode 字符、空串、纯空白 | 整次拒绝，旧状态不变 |
 | A-08 | `cancelled` 或额外 `id/priority` | schema/解析拒绝 |
 | A-09 | 当前投影已可见时重复写相同完整列表 | 调用成功，不重复发 `todo.updated` |
-| A-10 | 两个 session 或主/子 session | 相互隔离，不汇总 |
+| A-10 | 两个 session 或同一 child session 的不同 context scope | 相互隔离，不汇总 |
 | A-11 | 返回 metadata 防御性复制 | 外部修改不污染 store |
 
 Unicode 长度应以 JavaScript 可见码点为准，测试至少包含 emoji，避免仅用 UTF-16 code unit 造成明显误差；组合字素的进一步归一化不在 v1 范围。

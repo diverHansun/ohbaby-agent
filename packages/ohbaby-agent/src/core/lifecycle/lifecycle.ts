@@ -1199,6 +1199,7 @@ export class Lifecycle {
       `${input.params.sessionId}:assistant:${String(input.step)}`;
     const requests: ToolCallRequest[] = input.toolCalls.map((toolCall) => ({
       callId: toolCall.id,
+      contextScopeId: input.params.contextScopeId,
       environment: input.params.environment,
       agentName: input.params.agent,
       isSubagent: input.params.isSubagent,

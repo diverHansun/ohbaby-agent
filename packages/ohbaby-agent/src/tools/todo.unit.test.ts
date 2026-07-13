@@ -13,9 +13,13 @@ import {
   type TodoItem,
 } from "./todo.js";
 
-function createContext(sessionId: string): ToolExecutionContext {
+function createContext(
+  sessionId: string,
+  contextScopeId?: string,
+): ToolExecutionContext {
   return {
     callId: "call_1",
+    ...(contextScopeId === undefined ? {} : { contextScopeId }),
     messageId: "message_1",
     sessionId,
     signal: new AbortController().signal,
@@ -49,6 +53,7 @@ function createToolRunner(store = new TodoService()): {
 
 function toolMessage(input: {
   readonly callId: string;
+  readonly contextScopeId?: string;
   readonly state:
     | {
         readonly status: "completed";
@@ -69,6 +74,9 @@ function toolMessage(input: {
   return {
     info: {
       agent: "build",
+      ...(input.contextScopeId === undefined
+        ? {}
+        : { contextScopeId: input.contextScopeId }),
       id: `message_${input.callId}`,
       role: "assistant",
       sessionId: "session_1",
@@ -77,6 +85,9 @@ function toolMessage(input: {
     parts: [
       {
         callId: input.callId,
+        ...(input.contextScopeId === undefined
+          ? {}
+          : { contextScopeId: input.contextScopeId }),
         id: `part_${input.callId}`,
         messageId: `message_${input.callId}`,
         orderIndex: 0,
@@ -111,6 +122,40 @@ describe("todo builtin tools", () => {
     expect(sameSession.output).toContain("[pending] Run tests");
     expect(sameSession.metadata).toMatchObject({ count: 3 });
     expect(otherSession.output).toBe("No todos.");
+  });
+
+  it("isolates todo lists by context scope within one session", async () => {
+    const onWrite = vi.fn();
+    const runner = createToolRunner(new TodoService({ onWrite }));
+
+    await runner.run(
+      "todo_write",
+      { todos: [{ content: "Child A", status: "in_progress" }] },
+      createContext("session_1", "scope_a"),
+    );
+    await runner.run(
+      "todo_write",
+      { todos: [{ content: "Child B", status: "pending" }] },
+      createContext("session_1", "scope_b"),
+    );
+
+    expect(
+      (await runner.run("todo_read", {}, createContext("session_1", "scope_a")))
+        .output,
+    ).toContain("Child A");
+    expect(
+      (await runner.run("todo_read", {}, createContext("session_1", "scope_b")))
+        .output,
+    ).toContain("Child B");
+    expect((await runner.run("todo_read", {})).output).toBe("No todos.");
+    expect(onWrite).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ contextScopeId: "scope_a" }),
+    );
+    expect(onWrite).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ contextScopeId: "scope_b" }),
+    );
   });
 
   it("trims content and accepts the 10 item and 100 code-point boundaries", async () => {
@@ -239,6 +284,45 @@ describe("todo builtin tools", () => {
 });
 
 describe("todo history recovery", () => {
+  it("recovers primary and child context histories independently", async () => {
+    const primary = toolMessage({
+      callId: "primary",
+      state: {
+        input: { todos: [{ content: "Primary", status: "pending" }] },
+        output: "ok",
+        status: "completed",
+      },
+    });
+    const child = toolMessage({
+      callId: "child",
+      contextScopeId: "scope_a",
+      state: {
+        input: { todos: [{ content: "Child", status: "in_progress" }] },
+        output: "ok",
+        status: "completed",
+      },
+    });
+    const history = {
+      listBySession: vi.fn(
+        (_sessionId: string, options?: { readonly contextScopeId?: string }) =>
+          Promise.resolve(
+            options?.contextScopeId === "scope_a" ? [child] : [primary, child],
+          ),
+      ),
+    };
+    const service = new TodoService({ history });
+
+    await expect(service.read("session_1")).resolves.toEqual([
+      { content: "Primary", status: "pending" },
+    ]);
+    await expect(service.read("session_1", "scope_a")).resolves.toEqual([
+      { content: "Child", status: "in_progress" },
+    ]);
+    expect(history.listBySession).toHaveBeenNthCalledWith(2, "session_1", {
+      contextScopeId: "scope_a",
+    });
+  });
+
   it("recovers the latest completed write and skips later failed writes", () => {
     const messages = [
       toolMessage({
@@ -341,6 +425,90 @@ describe("todo history recovery", () => {
     ]);
     await expect(service.read("session_1")).resolves.toEqual([
       { content: "New", status: "in_progress" },
+    ]);
+  });
+
+  it("does not repopulate a released session from an in-flight recovery", async () => {
+    let resolveFirstHistory!: (messages: readonly MessageWithParts[]) => void;
+    const history = {
+      listBySession: vi
+        .fn()
+        .mockImplementationOnce(
+          (): Promise<readonly MessageWithParts[]> =>
+            new Promise((resolve) => {
+              resolveFirstHistory = resolve;
+            }),
+        )
+        .mockResolvedValueOnce([
+          toolMessage({
+            callId: "fresh",
+            state: {
+              input: { todos: [{ content: "Fresh", status: "pending" }] },
+              output: "ok",
+              status: "completed",
+            },
+          }),
+        ]),
+    };
+    const service = new TodoService({ history });
+
+    const staleRead = service.read("session_1");
+    service.release("session_1");
+    resolveFirstHistory([
+      toolMessage({
+        callId: "stale",
+        state: {
+          input: { todos: [{ content: "Stale", status: "pending" }] },
+          output: "ok",
+          status: "completed",
+        },
+      }),
+    ]);
+
+    await expect(staleRead).resolves.toEqual([]);
+    await expect(service.read("session_1")).resolves.toEqual([
+      { content: "Fresh", status: "pending" },
+    ]);
+    expect(history.listBySession).toHaveBeenCalledTimes(2);
+  });
+
+  it("releases all context scopes for a session", async () => {
+    const service = new TodoService();
+    service.write("session_1", [{ content: "Primary", status: "pending" }]);
+    service.write(
+      "session_1",
+      [{ content: "Child", status: "pending" }],
+      "scope_a",
+    );
+
+    service.release("session_1");
+
+    await expect(service.read("session_1")).resolves.toEqual([]);
+    await expect(service.read("session_1", "scope_a")).resolves.toEqual([]);
+  });
+
+  it("releases one context scope without disrupting its siblings", async () => {
+    const service = new TodoService();
+    service.write("session_1", [{ content: "Primary", status: "pending" }]);
+    service.write(
+      "session_1",
+      [{ content: "Child A", status: "pending" }],
+      "scope_a",
+    );
+    service.write(
+      "session_1",
+      [{ content: "Child B", status: "pending" }],
+      "scope_b",
+    );
+
+    service.releaseScope("session_1", "scope_a");
+
+    await expect(service.read("session_1", "scope_a")).resolves.toEqual([]);
+    await expect(service.read("session_1")).resolves.toEqual([
+      { content: "Primary", status: "pending" },
+    ]);
+    await expect(service.read("session_1", "scope_b")).resolves.toEqual([
+      { content: "Child B", status: "pending" },
     ]);
   });
 });

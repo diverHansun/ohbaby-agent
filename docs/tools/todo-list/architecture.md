@@ -12,7 +12,7 @@
 
 ### 2. Session TodoService
 
-按 `sessionId` 维护当前不可变 Todo 数组，并提供读取、原子替换、懒恢复和变化订阅。服务生命周期由 UI runtime composition 持有，不由每次工具创建临时 store。
+按 `sessionId + contextScopeId` 维护当前不可变 Todo 数组，并提供读取、原子替换、懒恢复和变化订阅。主 context 的 `contextScopeId` 为空；服务生命周期由 UI runtime composition 持有，不由每次工具创建临时 store。
 
 ### 3. History Recovery Adapter
 
@@ -29,7 +29,7 @@ Web/TUI 只接收 snapshot/event，按 active main session 选择列表并渲染
 ## 二、核心数据路径
 
 ```text
-todo_write ── validate ──> TodoService.replace(sessionId, todos)
+todo_write ── validate ──> TodoService.replace(sessionId, contextScopeId, todos)
                                   |
                                   ├─ return todosChanged
                                   └─ UI projection checks visibility too
@@ -37,7 +37,7 @@ todo_write ── validate ──> TodoService.replace(sessionId, todos)
                                              ├─ projection unchanged: no event
                                              └─ projection changed: todo.updated
 
-todo_read ─────────────────> TodoService.read(sessionId)
+todo_read ─────────────────> TodoService.read(sessionId, contextScopeId)
                                   |
                                   └─ unloaded: recover once from messages
 
@@ -56,7 +56,7 @@ run lifecycle ─────────────> UI projection visibility
 ### 2. Persistent Fact + Runtime Projection
 
 - 持久事实：最后一次成功 `todo_write` 工具事务。
-- 运行时事实投影：TodoService 中按 session 保存的当前数组。
+- 运行时事实投影：TodoService 中按 session/context scope 保存的当前数组。
 - UI 投影：完整数组加临时 `visible`。
 
 该分层避免新增存储，同时保证客户端不依赖消息格式。

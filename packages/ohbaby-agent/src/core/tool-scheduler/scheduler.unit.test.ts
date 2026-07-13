@@ -2992,6 +2992,30 @@ describe("ToolScheduler", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("passes the context scope through to tool execution", async () => {
+    const execute = vi.fn(
+      (_params: Record<string, unknown>, context: ToolExecutionContext) =>
+        Promise.resolve({ output: context.contextScopeId }),
+    );
+    const { scheduler } = createScheduler();
+    scheduler.register(createTool({ execute, name: "scoped_read" }));
+
+    await expect(
+      scheduler.execute({
+        callId: "scoped_1",
+        contextScopeId: "subagent_1",
+        messageId: "message_1",
+        params: {},
+        sessionId: "session_1",
+        toolName: "scoped_read",
+      }),
+    ).resolves.toMatchObject({ output: "subagent_1", status: "success" });
+    expect(execute).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ contextScopeId: "subagent_1" }),
+    );
+  });
+
   it("honors request abort signals before permission evaluation and while queued", async () => {
     const blocker = deferred<ToolExecutionResult>();
     const execute = vi.fn((_params, context: ToolExecutionContext) => {

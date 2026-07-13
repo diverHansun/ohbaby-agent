@@ -1755,7 +1755,7 @@ button.ohb-list-row:hover,
 
 .ohb-todo-dock > header {
   align-items: center;
-  color: #8a8d94;
+  color: #676a70;
   display: flex;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 10px;
@@ -1783,6 +1783,11 @@ button.ohb-list-row:hover,
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+.ohb-todo-items:focus-visible {
+  outline: 2px solid #6f91c8;
+  outline-offset: 2px;
 }
 
 .ohb-todo-items::-webkit-scrollbar {
@@ -1829,7 +1834,7 @@ button.ohb-list-row:hover,
 }
 
 .ohb-todo-completed {
-  color: #a3a6ad;
+  color: #6f7278;
 }
 
 .ohb-todo-completed > span:last-child {

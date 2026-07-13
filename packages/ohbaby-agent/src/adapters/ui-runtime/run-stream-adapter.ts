@@ -56,6 +56,7 @@ export interface RunStreamProjectionOptions {
   readonly contextWindowUsage?: ContextWindowUsageTracker;
   readonly nextMessageId: () => string;
   readonly onNotice?: (notice: NoticeDraft) => void;
+  readonly onBeforeTerminalRun?: () => Promise<void> | void;
   readonly publish: PublishUiEvent;
   readonly runId: string;
   readonly sessionId: string;
@@ -204,6 +205,7 @@ export function startRunStreamProjection(
   let rejectDone!: (error: unknown) => void;
   let started = false;
   let stopped = false;
+  let terminalRunStarted = false;
   const hiddenToolCallIds = new Set<string>();
   const done = new Promise<void>((resolve, reject) => {
     resolveDone = resolve;
@@ -338,6 +340,11 @@ export function startRunStreamProjection(
       return;
     }
 
+    if (!terminalRunStarted) {
+      terminalRunStarted = true;
+      await options.onBeforeTerminalRun?.();
+    }
+
     await upsertRun(uiRun);
     options.publish({ type: "run.updated", run: cloneRun(uiRun) });
     await completeAssistantMessage(
@@ -442,13 +449,15 @@ export function startRunStreamProjection(
   async function handleToolResult(event: StreamBridgeEvent): Promise<void> {
     const data = eventData(event);
     const callId = typeof data.callId === "string" ? data.callId : "";
+    const toolName = typeof data.toolName === "string" ? data.toolName : "";
     const result = isRecord(data.result)
       ? (data.result as unknown as ToolResultPayload)
       : undefined;
     if (callId === "" || !result) {
       return;
     }
-    if (hiddenToolCallIds.delete(callId)) {
+    const wasHiddenAtStart = hiddenToolCallIds.delete(callId);
+    if (HIDDEN_TRANSCRIPT_TOOLS.has(toolName) || wasHiddenAtStart) {
       return;
     }
 

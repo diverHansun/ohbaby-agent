@@ -565,6 +565,16 @@ describe("createUiRuntimeComposition skill tools", () => {
     if (!closeTool) {
       throw new Error("subagent_close tool missing");
     }
+    composition.todos.write(
+      "child_1",
+      [{ content: "Closed child", status: "pending" }],
+      "subagent_1",
+    );
+    composition.todos.write(
+      "child_1",
+      [{ content: "Sibling child", status: "pending" }],
+      "subagent_2",
+    );
 
     await closeTool.execute(
       { subagent_id: "subagent_1" },
@@ -582,6 +592,14 @@ describe("createUiRuntimeComposition skill tools", () => {
         sessionId: "child_1",
       });
     });
+    await vi.waitFor(async () => {
+      await expect(
+        composition.todos.read("child_1", "subagent_1"),
+      ).resolves.toEqual([]);
+    });
+    await expect(
+      composition.todos.read("child_1", "subagent_2"),
+    ).resolves.toEqual([{ content: "Sibling child", status: "pending" }]);
     await composition.dispose();
   });
 

@@ -178,7 +178,13 @@ export function OhbabyTerminalApp({
       disarmEscInterrupt(escInterruptArmedRunId);
     }
   }, [disarmEscInterrupt, escInterruptArmedRunId, permissions.length, runtime]);
-  const todoRunId = runtime.kind === "running" ? runtime.runId : null;
+  const todoRunId =
+    runtime.kind === "running"
+      ? runtime.runId
+      : runtime.kind === "waiting-for-permission"
+        ? (permissions.find((request) => request.id === runtime.requestId)
+            ?.runId ?? null)
+        : null;
   useEffect(() => {
     setTodoExpanded(false);
   }, [activeSessionId, activeTodoList === null, todoRunId]);

@@ -88,6 +88,7 @@ export interface ToolExecutionEnvironment {
 export interface ToolExecutionContext {
   readonly signal: AbortSignal;
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly messageId: string;
   readonly callId: string;
   readonly environment?: ToolExecutionEnvironment;
@@ -132,6 +133,7 @@ export interface ToolCallRequest {
   readonly toolName: string;
   readonly params: Record<string, unknown>;
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly messageId: string;
   readonly agentName?: string;
   readonly isSubagent?: boolean;
@@ -157,6 +159,7 @@ export interface ToolCall {
   readonly toolName: string;
   readonly params: Record<string, unknown>;
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly messageId: string;
   readonly category: ToolCategory;
   status: ToolCallStatus;

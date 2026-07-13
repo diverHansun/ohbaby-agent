@@ -93,7 +93,7 @@
 | FP2 | 历史候选损坏 | 跳过候选并 warning，不崩溃 |
 | FP3 | snapshot 缺少 todos | 客户端按空处理 |
 | FP4 | 事件断线/乱序 | snapshot resync 覆盖本地状态 |
-| FP5 | 子 Agent 更新 Todo | 只更新子 session 投影，不进入主 Dock |
+| FP5 | 子 Agent 更新 Todo | 只更新其 context scope 事实，不发布主 UI 投影，不进入主 Dock |
 | DP1 | 全部完成是否立刻隐藏 | 否；当前 run 保持，run 结束隐藏 |
 | DP2 | 相同列表是否发事件 | 否；成功但抑制重复事件 |
 | DP3 | UI 是否可编辑 | 否；通过自然语言让 Agent 重写 |

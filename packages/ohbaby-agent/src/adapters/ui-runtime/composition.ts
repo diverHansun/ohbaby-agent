@@ -462,19 +462,23 @@ export async function createUiRuntimeComposition(
     readonly runId?: string;
     readonly sessionId: string;
   }): Promise<void> => {
-    if (input.runId !== undefined) {
-      try {
-        await runManager.waitForCompletion(input.runId);
-      } catch (error) {
-        if (!(error instanceof RunManagerNotFoundError)) {
-          throw error;
+    try {
+      if (input.runId !== undefined) {
+        try {
+          await runManager.waitForCompletion(input.runId);
+        } catch (error) {
+          if (!(error instanceof RunManagerNotFoundError)) {
+            throw error;
+          }
         }
       }
+      await sandboxManager.destroyContext({
+        contextScopeId: input.contextScopeId,
+        sessionId: input.sessionId,
+      });
+    } finally {
+      todoService.releaseScope(input.sessionId, input.contextScopeId);
     }
-    await sandboxManager.destroyContext({
-      contextScopeId: input.contextScopeId,
-      sessionId: input.sessionId,
-    });
   };
 
   const subagentHost = new SessionSubagentHost({

@@ -665,6 +665,7 @@ export function createToolScheduler(
       toolName: request.toolName,
       params: request.params,
       sessionId: request.sessionId,
+      contextScopeId: request.contextScopeId,
       messageId: request.messageId,
       category,
       status: "pending",
@@ -759,6 +760,7 @@ export function createToolScheduler(
     const toolPromise = Promise.resolve(
       tool.execute(params, {
         callId: call.callId,
+        contextScopeId: call.contextScopeId,
         environment,
         messageId: call.messageId,
         sessionId: call.sessionId,
