@@ -14,6 +14,7 @@
 - `UiSnapshot.todos`、`todo.updated`、run 可见性投影和 reducer。
 - Web TodoDock 与 TUI TodoPanel 的布局、顺序、容量和生命周期。
 - 两个工具在 streaming、持久 snapshot 和失败路径中均不进入 transcript。
+- 默认权限下 `todo_write` 直接执行，不产生权限弹窗；文件和命令写权限不受影响。
 - 真实浏览器和真实 TUI 进程验收。
 
 ### 不覆盖

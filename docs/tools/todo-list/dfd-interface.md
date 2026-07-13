@@ -23,7 +23,7 @@ Web/TUI 不直接访问 TodoService 或 session history。
 
 ### `todo_write`
 
-**分类**：write。
+**分类**：ToolScheduler 中为 write，保证与同 session 的写波次串行；权限层视为 session 内部状态更新并默认放行，不弹出外部写权限确认。
 
 **参数**：
 

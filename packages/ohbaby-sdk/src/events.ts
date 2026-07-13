@@ -13,6 +13,7 @@ import type {
   UiRun,
   UiRunStatus,
   UiSession,
+  UiTodoItem,
   UiSnapshot,
 } from "./snapshot.js";
 import type { UiPromptSubmission } from "./prompt.js";
@@ -121,6 +122,14 @@ export interface UiGoalUpdatedEvent {
   readonly timestamp?: number;
 }
 
+export interface UiTodoUpdatedEvent {
+  readonly type: "todo.updated";
+  readonly sessionId: string;
+  readonly todos: readonly UiTodoItem[];
+  readonly visible: boolean;
+  readonly timestamp?: number;
+}
+
 export interface UiPermissionRequestedEvent {
   readonly type: "permission.requested";
   readonly request: UiPermissionRequest;
@@ -217,6 +226,7 @@ export type UiEvent =
   | UiPromptUpdatedEvent
   | UiContextWindowUpdatedEvent
   | UiGoalUpdatedEvent
+  | UiTodoUpdatedEvent
   | UiPermissionRequestedEvent
   | UiPermissionResolvedEvent
   | UiNoticeEmittedEvent

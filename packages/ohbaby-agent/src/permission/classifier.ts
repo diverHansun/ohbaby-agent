@@ -92,6 +92,9 @@ export function classifyPermissionCall(
   if (MEMORY_WRITE_TOOLS.has(toolName)) {
     return { category: "memory", kind: "memory-write" };
   }
+  if (toolName === "todo_write") {
+    return { category: "write", kind: "memory-write" };
+  }
   if (SUBAGENT_TOOLS.has(toolName) || call.category === "subagent") {
     return { category: "subagent", kind: "subagent" };
   }

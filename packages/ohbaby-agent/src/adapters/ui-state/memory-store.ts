@@ -6,6 +6,7 @@ import type {
   UiSnapshot,
   UiSession,
   UiSessionGoal,
+  UiSessionTodoList,
 } from "ohbaby-sdk";
 import type { UiStateStore } from "./types.js";
 
@@ -16,6 +17,7 @@ interface MutableUiSnapshot {
   permissions: UiPermissionRequest[];
   status: UiRunStatus;
   goals: UiSessionGoal[];
+  todos: UiSessionTodoList[];
 }
 
 export function cloneMessage(message: UiMessage): UiMessage {
@@ -46,10 +48,18 @@ function cloneGoal(goal: UiSessionGoal): UiSessionGoal {
   };
 }
 
+function cloneTodoList(todoList: UiSessionTodoList): UiSessionTodoList {
+  return {
+    ...todoList,
+    todos: todoList.todos.map((todo) => ({ ...todo })),
+  };
+}
+
 export function cloneSnapshot(
   snapshot: UiSnapshot | MutableUiSnapshot,
 ): UiSnapshot {
   const goals = snapshot.goals ?? [];
+  const todos = snapshot.todos ?? [];
   return {
     sessions: snapshot.sessions.map(cloneSession),
     activeSessionId: snapshot.activeSessionId,
@@ -60,6 +70,7 @@ export function cloneSnapshot(
     })),
     status: { ...snapshot.status },
     ...(goals.length > 0 ? { goals: goals.map(cloneGoal) } : {}),
+    ...(todos.length > 0 ? { todos: todos.map(cloneTodoList) } : {}),
   };
 }
 
@@ -74,6 +85,7 @@ function toMutableSnapshot(snapshot: UiSnapshot): MutableUiSnapshot {
     })),
     status: { ...snapshot.status },
     goals: (snapshot.goals ?? []).map(cloneGoal),
+    todos: (snapshot.todos ?? []).map(cloneTodoList),
   };
 }
 

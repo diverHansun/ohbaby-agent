@@ -48,6 +48,7 @@ export type {
   UiEvent,
   UiContextWindowUpdatedEvent,
   UiGoalUpdatedEvent,
+  UiTodoUpdatedEvent,
   UiMessageAppendedEvent,
   UiMessagePartDeltaEvent,
   UiMessageUpdatedEvent,
@@ -125,6 +126,9 @@ export type {
   UiSnapshot,
   UiToolCall,
   UiToolResult,
+  UiTodoItem,
+  UiTodoStatus,
+  UiSessionTodoList,
 } from "./snapshot.js";
 export {
   parseSlashCommandInput,

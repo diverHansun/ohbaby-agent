@@ -52,6 +52,20 @@ export interface UiSnapshot {
   readonly contextWindowUsages?: readonly UiContextWindowUsage[];
   readonly goals?: readonly UiSessionGoal[];
   readonly prompts?: readonly UiPromptSubmission[];
+  readonly todos?: readonly UiSessionTodoList[];
+}
+
+export type UiTodoStatus = "pending" | "in_progress" | "completed";
+
+export interface UiTodoItem {
+  readonly content: string;
+  readonly status: UiTodoStatus;
+}
+
+export interface UiSessionTodoList {
+  readonly sessionId: string;
+  readonly todos: readonly UiTodoItem[];
+  readonly visible: boolean;
 }
 
 export type UiGoalStatus = "active" | "paused";

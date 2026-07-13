@@ -44,6 +44,8 @@ interface ToolResultPayload {
   readonly status: string;
 }
 
+const HIDDEN_TRANSCRIPT_TOOLS = new Set(["todo_read", "todo_write"]);
+
 type NoticeDraft = Omit<UiNotice, "id" | "createdAt"> & {
   readonly createdAt?: string;
 };
@@ -202,6 +204,7 @@ export function startRunStreamProjection(
   let rejectDone!: (error: unknown) => void;
   let started = false;
   let stopped = false;
+  const hiddenToolCallIds = new Set<string>();
   const done = new Promise<void>((resolve, reject) => {
     resolveDone = resolve;
     rejectDone = reject;
@@ -421,6 +424,10 @@ export function startRunStreamProjection(
     if (callId === "" || toolName === "") {
       return;
     }
+    if (HIDDEN_TRANSCRIPT_TOOLS.has(toolName)) {
+      hiddenToolCallIds.add(callId);
+      return;
+    }
 
     await updateAssistant((message) =>
       appendToolCall({
@@ -439,6 +446,9 @@ export function startRunStreamProjection(
       ? (data.result as unknown as ToolResultPayload)
       : undefined;
     if (callId === "" || !result) {
+      return;
+    }
+    if (hiddenToolCallIds.delete(callId)) {
       return;
     }
 

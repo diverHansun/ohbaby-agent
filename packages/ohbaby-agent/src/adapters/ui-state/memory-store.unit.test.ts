@@ -33,6 +33,33 @@ describe("createInMemoryUiStateStore", () => {
     });
   });
 
+  it("clones nested todo items", async () => {
+    const store = createInMemoryUiStateStore({
+      ...BASE_SNAPSHOT,
+      todos: [
+        {
+          sessionId: "session_1",
+          todos: [{ content: "Original", status: "in_progress" }],
+          visible: true,
+        },
+      ],
+    });
+
+    const snapshot = await store.readSnapshot();
+    const mutableSnapshot = snapshot as unknown as {
+      todos: { todos: { content: string }[] }[];
+    };
+    mutableSnapshot.todos[0].todos[0].content = "Mutated by caller";
+
+    await expect(store.readSnapshot()).resolves.toMatchObject({
+      todos: [
+        {
+          todos: [{ content: "Original", status: "in_progress" }],
+        },
+      ],
+    });
+  });
+
   it("stores session, run, active session, and status through async methods", async () => {
     const store = createInMemoryUiStateStore(BASE_SNAPSHOT);
 

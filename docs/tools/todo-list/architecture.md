@@ -97,6 +97,8 @@ packages/ohbaby-agent/src/tools/
 
 读写意图清楚，沿用现有 registry 和 ToolScheduler 分类；代价是多一个工具定义，但避免“省略参数代表读取”的歧义。
 
+`todo_write` 在 ToolScheduler 中仍是 write，以保留写波次串行化；它只修改 session 内部清单，不触碰文件、命令或外部系统，因此权限分类按内部状态更新默认放行，避免每次进度更新阻塞 run。
+
 ### 无 id 的整体替换
 
 UI key 不再拥有领域级稳定身份，但 Todo 是短列表且整体替换；渲染 key 属于客户端实现细节，不值得扩充 Agent 契约。

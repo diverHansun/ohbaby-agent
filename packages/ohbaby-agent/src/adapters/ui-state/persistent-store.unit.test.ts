@@ -61,6 +61,29 @@ describe("messageToUiMessage", () => {
     expect(uiMessage?.finishReason).toBeUndefined();
     expect(uiMessage?.status).toBeUndefined();
   });
+
+  it("omits todo tool calls and results from a persisted transcript", () => {
+    const message = {
+      ...assistantMessage({ time: { created: 1_000 } }),
+      parts: [todoToolPart("message_1", "todo_write")],
+    };
+
+    expect(messageToUiMessage(message)).toBeUndefined();
+  });
+
+  it("retains ordinary content while filtering todo tool parts", () => {
+    const message = {
+      ...assistantMessage({ time: { created: 1_000 } }),
+      parts: [
+        textPart("message_1", "Working on it."),
+        todoToolPart("message_1", "todo_read"),
+      ],
+    };
+
+    expect(messageToUiMessage(message)?.parts).toEqual([
+      { text: "Working on it.", type: "text" },
+    ]);
+  });
 });
 
 function assistantMessage(
@@ -90,5 +113,25 @@ function textPart(
     sessionId: "session_1",
     text,
     type: "text",
+  };
+}
+
+function todoToolPart(
+  messageId: string,
+  tool: "todo_read" | "todo_write",
+): MessageWithParts["parts"][number] {
+  return {
+    callId: `${messageId}_call_0`,
+    id: `${messageId}_part_1`,
+    messageId,
+    orderIndex: 1,
+    sessionId: "session_1",
+    state: {
+      input: tool === "todo_write" ? { todos: [] } : {},
+      output: "No todos.",
+      status: "completed",
+    },
+    tool,
+    type: "tool",
   };
 }

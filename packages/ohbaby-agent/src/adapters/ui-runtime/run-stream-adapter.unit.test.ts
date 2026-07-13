@@ -489,6 +489,74 @@ describe("startRunStreamProjection", () => {
     ]);
   });
 
+  it("never projects todo tool calls or results into the streaming transcript", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const stateStore = createInMemoryUiStateStore({
+      activeSessionId: "session_1",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_1",
+          messages: [],
+          title: "Session",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "idle" },
+    });
+    const publish = vi.fn();
+    const projection = startRunStreamProjection({
+      assistantMessageId: "message_assistant",
+      autoStart: false,
+      nextMessageId: () => "message_next",
+      publish,
+      runId: "run_1",
+      sessionId: "session_1",
+      stateStore,
+      streamBridge,
+      timestamp: () => "2026-05-26T00:00:01.000Z",
+    });
+
+    streamBridge.publish("run/run_1", "message.part.delta", {
+      content: "Working.",
+      delta: "Working.",
+      runId: "run_1",
+      sessionId: "session_1",
+      timestamp: 1,
+    });
+    for (const [index, toolName] of ["todo_read", "todo_write"].entries()) {
+      const callId = `call_todo_${String(index)}`;
+      streamBridge.publish("run/run_1", "run.tool.start", {
+        callId,
+        params: toolName === "todo_write" ? { todos: [] } : {},
+        runId: "run_1",
+        sessionId: "session_1",
+        timestamp: index * 2 + 2,
+        toolName,
+      });
+      streamBridge.publish("run/run_1", "run.tool.result", {
+        callId,
+        result: { output: "No todos.", status: "success" },
+        runId: "run_1",
+        sessionId: "session_1",
+        timestamp: index * 2 + 3,
+      });
+    }
+    streamBridge.end("run/run_1");
+
+    projection.start();
+    await projection.done;
+
+    const snapshot = await stateStore.readSnapshot();
+    expect(snapshot.sessions[0]?.messages[0]?.parts).toEqual([
+      { text: "Working.", type: "text" },
+    ]);
+    const publishedEvents = publish.mock.calls.map((call): unknown => call[0]);
+    expect(JSON.stringify(publishedEvents)).not.toContain('"tool-call"');
+  });
+
   it("treats a cancelled run as an interruption and completes partial output", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const stateStore = createInMemoryUiStateStore({

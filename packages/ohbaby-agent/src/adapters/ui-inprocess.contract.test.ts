@@ -1175,6 +1175,83 @@ function goalUpdateToolCallEvent(input: {
   };
 }
 
+function todoWriteToolCallEvent(input: {
+  readonly callId: string;
+  readonly todos: readonly {
+    readonly content: string;
+    readonly status: "pending" | "in_progress" | "completed";
+  }[];
+}): InterfaceProviderStreamEvent {
+  return {
+    toolCallDeltas: [
+      {
+        argumentsDelta: JSON.stringify({ todos: input.todos }),
+        id: input.callId,
+        index: 0,
+        name: "todo_write",
+      },
+    ],
+    finishReason: "tool_calls",
+  };
+}
+
+function createBlockingAfterTodoWritesLLMClient(input: {
+  readonly finalStarted: Deferred<undefined>;
+  readonly releaseFinal: Promise<undefined>;
+  readonly toolCalls: readonly InterfaceProviderStreamEvent[];
+}): LLMClientInstance<FakeSdkClient> {
+  let nextResponse = 0;
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isTitleGenerationRequest(request)) {
+          return Promise.resolve(createTitleProviderStream(request));
+        }
+        const responseIndex = nextResponse;
+        nextResponse += 1;
+        if (responseIndex < input.toolCalls.length) {
+          return Promise.resolve(
+            createProviderStream(
+              input.toolCalls.slice(responseIndex, responseIndex + 1),
+            ),
+          );
+        }
+        if (responseIndex === input.toolCalls.length) {
+          return Promise.resolve(
+            (async function* (): AsyncGenerator<
+              InterfaceProviderStreamEvent,
+              void,
+              unknown
+            > {
+              input.finalStarted.resolve(undefined);
+              await input.releaseFinal;
+              yield { textDelta: "Done.", finishReason: "stop" };
+            })(),
+          );
+        }
+        return Promise.reject(new Error("No fake LLM response configured"));
+      },
+      isAbortError(): boolean {
+        return false;
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
+      baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
 function waitForUiEvent<T extends UiEvent>(
   client: UiBackendClient,
   predicate: (event: UiEvent) => event is T,
@@ -1223,6 +1300,26 @@ function withTimeout<T>(
       },
     );
   });
+}
+
+async function waitForFinalResponseStart(
+  finalStarted: Deferred<undefined>,
+  submission: Promise<unknown>,
+): Promise<void> {
+  await withTimeout(
+    Promise.race([
+      finalStarted.promise,
+      submission.then(
+        () => Promise.reject(new Error("run ended before final response")),
+        (error: unknown) =>
+          Promise.reject(
+            error instanceof Error ? error : new Error(String(error)),
+          ),
+      ),
+    ]),
+    1_000,
+    "final response did not start",
+  );
 }
 
 function createRejectingLLMClient(
@@ -2250,6 +2347,256 @@ describe("createInProcessUiBackendClient", () => {
       parts[1]?.type === "tool-result" ? parts[1].result.output : "",
     ).toContain("builtin.ts");
     expect(parts[2]).toEqual({ type: "text", text: "Listed." });
+  });
+
+  it("keeps completed todos visible through the run and hides them at run end", async () => {
+    const finalStarted = createDeferred<undefined>();
+    const releaseFinal = createDeferred<undefined>();
+    const completedTodos = [
+      { content: "Implement TodoDock", status: "completed" as const },
+      { content: "Implement TodoPanel", status: "completed" as const },
+    ];
+    const client = createInProcessUiBackendClient({
+      llmClient: createBlockingAfterTodoWritesLLMClient({
+        finalStarted,
+        releaseFinal: releaseFinal.promise,
+        toolCalls: [
+          todoWriteToolCallEvent({
+            callId: "call_todo_completed",
+            todos: completedTodos,
+          }),
+          todoWriteToolCallEvent({
+            callId: "call_todo_same",
+            todos: completedTodos,
+          }),
+        ],
+      }),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    const submission = client.submitPrompt("Finish both tasks");
+    await waitForFinalResponseStart(finalStarted, submission);
+
+    const duringRun = await client.getSnapshot();
+    expect(duringRun.status.kind).toBe("running");
+    expect(duringRun.todos).toEqual([
+      {
+        sessionId: duringRun.activeSessionId,
+        todos: completedTodos,
+        visible: true,
+      },
+    ]);
+    const transcriptParts = duringRun.sessions.flatMap((session) =>
+      session.messages.flatMap((message) => message.parts),
+    );
+    expect(
+      transcriptParts.some(
+        (part) => part.type === "tool-call" || part.type === "tool-result",
+      ),
+    ).toBe(false);
+    expect(events.filter((event) => event.type === "todo.updated")).toEqual([
+      expect.objectContaining({ todos: completedTodos, visible: true }),
+    ]);
+
+    releaseFinal.resolve(undefined);
+    await submission;
+
+    const afterRun = await client.getSnapshot();
+    expect(afterRun.status).toEqual({ kind: "idle" });
+    expect(afterRun.todos).toEqual([
+      {
+        sessionId: afterRun.activeSessionId,
+        todos: completedTodos,
+        visible: false,
+      },
+    ]);
+    const todoEvents = events.filter(
+      (event): event is Extract<UiEvent, { readonly type: "todo.updated" }> =>
+        event.type === "todo.updated",
+    );
+    expect(todoEvents.map((event) => event.visible)).toEqual([true, false]);
+  });
+
+  it("hides an explicitly cleared todo list before the run ends", async () => {
+    const finalStarted = createDeferred<undefined>();
+    const releaseFinal = createDeferred<undefined>();
+    const client = createInProcessUiBackendClient({
+      llmClient: createBlockingAfterTodoWritesLLMClient({
+        finalStarted,
+        releaseFinal: releaseFinal.promise,
+        toolCalls: [
+          todoWriteToolCallEvent({
+            callId: "call_todo_nonempty",
+            todos: [{ content: "Temporary task", status: "in_progress" }],
+          }),
+          todoWriteToolCallEvent({
+            callId: "call_todo_clear",
+            todos: [],
+          }),
+        ],
+      }),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    const submission = client.submitPrompt("Create then clear tasks");
+    await waitForFinalResponseStart(finalStarted, submission);
+
+    const duringRun = await client.getSnapshot();
+    expect(duringRun.status.kind).toBe("running");
+    expect(duringRun.todos).toEqual([
+      {
+        sessionId: duringRun.activeSessionId,
+        todos: [],
+        visible: false,
+      },
+    ]);
+    const todoEvents = events.filter(
+      (event): event is Extract<UiEvent, { readonly type: "todo.updated" }> =>
+        event.type === "todo.updated",
+    );
+    expect(
+      todoEvents.map((event) => ({
+        todos: event.todos,
+        visible: event.visible,
+      })),
+    ).toEqual([
+      {
+        todos: [{ content: "Temporary task", status: "in_progress" }],
+        visible: true,
+      },
+      { todos: [], visible: false },
+    ]);
+
+    releaseFinal.resolve(undefined);
+    await submission;
+  });
+
+  it("recovers the last todo write hidden and reveals unfinished work on the next run", async () => {
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const recoveredTodos = [
+      { content: "Resume implementation", status: "in_progress" as const },
+      { content: "Run verification", status: "pending" as const },
+    ];
+    const assistant = await messageManager.createMessage({
+      agent: "default",
+      role: "assistant",
+      sessionId: "session_1",
+    });
+    await messageManager.appendPart(assistant.id, {
+      callId: "call_todo_recovered",
+      state: {
+        input: { todos: recoveredTodos },
+        output: "Recovered todos",
+        status: "completed",
+      },
+      tool: "todo_write",
+      type: "tool",
+    });
+    const projectRoot = process.cwd();
+    const sessionStore = createInMemorySessionStore();
+    await sessionStore.insert({
+      agentName: "default",
+      childrenIds: [],
+      createdAt: 1,
+      id: "session_1",
+      isSubagent: false,
+      projectId: "project:todo-recovery",
+      projectRoot,
+      stats: { messageCount: 1 },
+      status: "active",
+      title: "Existing",
+      updatedAt: 1,
+    });
+    const sessionManager = createSessionManager({
+      bus,
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      projectResolver: {
+        fromDirectory() {
+          return { id: "project:todo-recovery", rootPath: projectRoot };
+        },
+      },
+      store: sessionStore,
+    });
+    const finalStarted = createDeferred<undefined>();
+    const releaseFinal = createDeferred<undefined>();
+    const client = createInProcessUiBackendClient({
+      bus,
+      initialSnapshot: {
+        activeSessionId: "session_1",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_1",
+            messages: [],
+            projectRoot,
+            title: "Existing",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createBlockingAfterTodoWritesLLMClient({
+        finalStarted,
+        releaseFinal: releaseFinal.promise,
+        toolCalls: [],
+      }),
+      messageManager,
+      projectDirectory: projectRoot,
+      sessionManager,
+    });
+
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      todos: [
+        {
+          sessionId: "session_1",
+          todos: recoveredTodos,
+          visible: false,
+        },
+      ],
+    });
+
+    const submission = client.submitPrompt("Continue", {
+      sessionId: "session_1",
+    });
+    await waitForFinalResponseStart(finalStarted, submission);
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      status: { kind: "running" },
+      todos: [
+        {
+          sessionId: "session_1",
+          todos: recoveredTodos,
+          visible: true,
+        },
+      ],
+    });
+
+    releaseFinal.resolve(undefined);
+    await submission;
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      todos: [
+        {
+          sessionId: "session_1",
+          todos: recoveredTodos,
+          visible: false,
+        },
+      ],
+    });
   });
 
   it("registers project skills as a module tool and returns loaded skill content", async () => {

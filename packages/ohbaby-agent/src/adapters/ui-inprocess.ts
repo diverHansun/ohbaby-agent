@@ -33,6 +33,7 @@ import type {
   UiSetSearchApiKeyInput,
   UiSetSearchApiKeyResult,
   UiSessionGoal,
+  UiSessionTodoList,
   UiSnapshot,
   UiSession,
 } from "ohbaby-sdk";
@@ -90,6 +91,11 @@ import type { PermissionResponse as CorePermissionResponse } from "../permission
 import { Project } from "../project/index.js";
 import type { AgentManager } from "../agents/index.js";
 import type { SubagentInstanceStore } from "../agents/index.js";
+import {
+  recoverTodosFromMessages,
+  type TodoService,
+  type TodoWriteEvent,
+} from "../tools/todo.js";
 import {
   SkillLoader,
   SkillRegistry,
@@ -408,6 +414,10 @@ export function createInProcessUiBackendClient(
   for (const goal of initialSnapshot.goals ?? []) {
     uiGoalsBySession.set(goal.sessionId, { ...goal.goal });
   }
+  const uiTodosBySession = new Map<string, UiSessionTodoList>();
+  for (const todoList of initialSnapshot.todos ?? []) {
+    uiTodosBySession.set(todoList.sessionId, cloneTodoList(todoList));
+  }
   const sessionIds = createIdFactory(
     "session",
     initialSnapshot.sessions.map((session) => session.id),
@@ -467,6 +477,7 @@ export function createInProcessUiBackendClient(
         onGoalChange: (event) => {
           publishGoalUpdated(event.sessionId, event.snapshot);
         },
+        onTodoWrite: publishTodoWrite,
         onNotice: publishNotice,
         permission,
         permissionState,
@@ -779,6 +790,142 @@ export function createInProcessUiBackendClient(
       }));
   }
 
+  function cloneTodoList(todoList: UiSessionTodoList): UiSessionTodoList {
+    return {
+      ...todoList,
+      todos: todoList.todos.map((todo) => ({ ...todo })),
+    };
+  }
+
+  function todoListsEqual(
+    left: UiSessionTodoList,
+    right: UiSessionTodoList,
+  ): boolean {
+    return (
+      left.sessionId === right.sessionId &&
+      left.visible === right.visible &&
+      left.todos.length === right.todos.length &&
+      left.todos.every(
+        (todo, index) =>
+          todo.content === right.todos[index]?.content &&
+          todo.status === right.todos[index]?.status,
+      )
+    );
+  }
+
+  function setTodoProjection(todoList: UiSessionTodoList): {
+    readonly changed: boolean;
+    readonly todoList: UiSessionTodoList;
+  } {
+    const next = cloneTodoList(todoList);
+    const previous = uiTodosBySession.get(next.sessionId);
+    const changed = previous === undefined || !todoListsEqual(previous, next);
+    uiTodosBySession.set(next.sessionId, next);
+    return { changed, todoList: cloneTodoList(next) };
+  }
+
+  function publishTodoProjection(todoList: UiSessionTodoList): void {
+    const result = setTodoProjection(todoList);
+    if (!result.changed) {
+      return;
+    }
+    publish({
+      sessionId: result.todoList.sessionId,
+      timestamp: now().getTime(),
+      todos: result.todoList.todos,
+      type: "todo.updated",
+      visible: result.todoList.visible,
+    });
+  }
+
+  function publishTodoWrite(event: TodoWriteEvent): void {
+    publishTodoProjection({
+      sessionId: event.sessionId,
+      todos: event.todos,
+      visible: event.todos.length > 0,
+    });
+  }
+
+  function snapshotTodosFor(
+    sessions: readonly UiSession[],
+  ): readonly UiSessionTodoList[] {
+    const sessionIds = new Set(sessions.map((session) => session.id));
+    return Array.from(uiTodosBySession.values())
+      .filter((todoList) => sessionIds.has(todoList.sessionId))
+      .map(cloneTodoList);
+  }
+
+  async function syncTodoProjectionsFromSource(
+    sessions: readonly UiSession[],
+  ): Promise<void> {
+    const runtime = await runtimeController
+      .getRuntimeIfStarted()
+      ?.catch(() => undefined);
+    await Promise.all(
+      sessions.map(async (session) => {
+        if (uiTodosBySession.has(session.id)) {
+          return;
+        }
+        let todos: UiSessionTodoList["todos"];
+        if (runtime !== undefined) {
+          todos = await runtime.todos.read(session.id);
+        } else {
+          try {
+            todos = recoverTodosFromMessages(
+              await messageManager.listBySession(session.id),
+              (message, error) => {
+                publishNotice({
+                  key: `todo:recovery:${session.id}:${message}`,
+                  level: "warning",
+                  message:
+                    error instanceof Error
+                      ? `${message}: ${error.message}`
+                      : message,
+                  source: "todo",
+                  title: "Todo recovery warning",
+                });
+              },
+            );
+          } catch (error) {
+            publishNotice({
+              key: `todo:recovery:${session.id}:${getErrorMessage(error)}`,
+              level: "warning",
+              message: `Todo history could not be loaded: ${getErrorMessage(error)}`,
+              source: "todo",
+              title: "Todo recovery warning",
+            });
+            todos = [];
+          }
+        }
+        if (!uiTodosBySession.has(session.id)) {
+          setTodoProjection({ sessionId: session.id, todos, visible: false });
+        }
+      }),
+    );
+  }
+
+  async function showTodoForRun(
+    sessionId: string,
+    todoService: TodoService,
+  ): Promise<void> {
+    const todos = await todoService.read(sessionId);
+    const visible = todos.some((todo) => todo.status !== "completed");
+    const previous = uiTodosBySession.get(sessionId);
+    if (!visible && previous === undefined && todos.length === 0) {
+      setTodoProjection({ sessionId, todos, visible: false });
+      return;
+    }
+    publishTodoProjection({ sessionId, todos, visible });
+  }
+
+  function hideTodoAfterRun(sessionId: string): void {
+    const current = uiTodosBySession.get(sessionId);
+    if (!current?.visible) {
+      return;
+    }
+    publishTodoProjection({ ...current, visible: false });
+  }
+
   async function syncGoalProjectionsFromSource(
     sessions: readonly UiSession[],
   ): Promise<void> {
@@ -942,7 +1089,9 @@ export function createInProcessUiBackendClient(
     const prompts = (await promptScheduler.listVisible()).map(promptRecordToUi);
     const contextWindowUsages = contextWindowUsage.list();
     await syncGoalProjectionsFromSource(snapshot.sessions);
+    await syncTodoProjectionsFromSource(snapshot.sessions);
     const goals = snapshotGoalsFor(snapshot.sessions);
+    const todos = snapshotTodosFor(snapshot.sessions);
     return {
       ...snapshot,
       ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
@@ -950,6 +1099,7 @@ export function createInProcessUiBackendClient(
       ...(prompts.length > 0 || snapshot.prompts !== undefined
         ? { prompts }
         : {}),
+      ...(todos.length > 0 || snapshot.todos !== undefined ? { todos } : {}),
       permission: currentPermissionState(),
     };
   }
@@ -1260,6 +1410,7 @@ export function createInProcessUiBackendClient(
 
     await options.sessionManager.update(sessionId, { status: "archived" });
     await stateStore.removeSession?.(sessionId);
+    uiTodosBySession.delete(sessionId);
 
     if (snapshot.activeSessionId === sessionId) {
       const remainingSessions = (
@@ -1656,6 +1807,7 @@ export function createInProcessUiBackendClient(
       submittedRunId = runId;
       const assistantMessageId = messageIds.next();
       runtimeController.setActiveRunId(runId, session.id);
+      await showTodoForRun(session.id, runtime.todos);
       activePrompt.runId = runId;
       projection = runtimeController.startRunStreamProjection({
         assistantMessageId,
@@ -1753,6 +1905,9 @@ export function createInProcessUiBackendClient(
         throw error;
       }
     } finally {
+      if (submittedSessionId) {
+        hideTodoAfterRun(submittedSessionId);
+      }
       if (submittedSessionId) {
         await syncSessionStatsBestEffort(submittedSessionId);
       }

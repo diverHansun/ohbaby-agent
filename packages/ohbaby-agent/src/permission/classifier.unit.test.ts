@@ -18,6 +18,15 @@ function call(
 }
 
 describe("permission classifier", () => {
+  it("treats todo_write as an internal state update", () => {
+    expect(
+      classifyPermissionCall(call("todo_write", { todos: [] }, "write")),
+    ).toEqual({
+      category: "write",
+      kind: "memory-write",
+    });
+  });
+
   it("classifies ordinary tool names and built-in categories", () => {
     expect(classifyPermissionCall(call("read"))).toMatchObject({
       category: "readonly",
