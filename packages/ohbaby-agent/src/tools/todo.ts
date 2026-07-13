@@ -1,46 +1,151 @@
+import type { MessageWithParts } from "../core/message/index.js";
 import type {
   Tool,
   ToolExecutionResult,
 } from "../core/tool-scheduler/index.js";
 import { ToolParameterError } from "./utils/params.js";
 
-export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
-export type TodoPriority = "high" | "medium" | "low";
+export const MAX_TODO_ITEMS = 10;
+export const MAX_TODO_CONTENT_LENGTH = 100;
+
+export type TodoStatus = "pending" | "in_progress" | "completed";
 
 export interface TodoItem {
-  readonly id: string;
   readonly content: string;
   readonly status: TodoStatus;
-  readonly priority?: TodoPriority;
+}
+
+export interface TodoWriteResult {
+  readonly changed: boolean;
+  readonly todos: readonly TodoItem[];
 }
 
 export interface TodoStore {
-  read(sessionId: string): readonly TodoItem[];
-  write(sessionId: string, todos: readonly TodoItem[]): void;
+  read(sessionId: string): Promise<readonly TodoItem[]> | readonly TodoItem[];
+  write(
+    sessionId: string,
+    todos: readonly TodoItem[],
+  ): Promise<TodoWriteResult> | TodoWriteResult;
+}
+
+export interface TodoWriteEvent extends TodoWriteResult {
+  readonly sessionId: string;
+}
+
+export interface TodoHistorySource {
+  listBySession(sessionId: string): Promise<readonly MessageWithParts[]>;
+}
+
+export interface TodoServiceOptions {
+  readonly history?: TodoHistorySource;
+  readonly onWarning?: (message: string, error?: unknown) => void;
+  readonly onWrite?: (event: TodoWriteEvent) => void;
 }
 
 const TODO_STATUSES = new Set<TodoStatus>([
-  "cancelled",
   "completed",
   "in_progress",
   "pending",
 ]);
-const TODO_PRIORITIES = new Set<TodoPriority>(["high", "medium", "low"]);
+const TODO_ITEM_FIELDS = new Set(["content", "status"]);
 
-export class InMemoryTodoStore implements TodoStore {
-  private readonly bySession = new Map<string, readonly TodoItem[]>();
+export class TodoService implements TodoStore {
+  private readonly loadedBySession = new Map<string, readonly TodoItem[]>();
+  private readonly loadingBySession = new Map<
+    string,
+    Promise<readonly TodoItem[]>
+  >();
 
-  read(sessionId: string): readonly TodoItem[] {
-    return cloneTodos(this.bySession.get(sessionId) ?? []);
+  constructor(private readonly options: TodoServiceOptions = {}) {}
+
+  async read(sessionId: string): Promise<readonly TodoItem[]> {
+    const loaded = this.loadedBySession.get(sessionId);
+    if (loaded !== undefined) {
+      return cloneTodos(loaded);
+    }
+
+    let loading = this.loadingBySession.get(sessionId);
+    if (loading === undefined) {
+      loading = this.loadFromHistory(sessionId);
+      this.loadingBySession.set(sessionId, loading);
+    }
+
+    try {
+      return cloneTodos(await loading);
+    } finally {
+      if (this.loadingBySession.get(sessionId) === loading) {
+        this.loadingBySession.delete(sessionId);
+      }
+    }
   }
 
-  write(sessionId: string, todos: readonly TodoItem[]): void {
-    this.bySession.set(sessionId, cloneTodos(todos));
+  write(sessionId: string, todos: readonly TodoItem[]): TodoWriteResult {
+    const next = cloneTodos(todos);
+    const previous = this.loadedBySession.get(sessionId);
+    const changed = previous === undefined || !todosEqual(previous, next);
+    this.loadedBySession.set(sessionId, next);
+
+    const result = { changed, todos: cloneTodos(next) };
+    this.options.onWrite?.({ ...result, sessionId });
+    return result;
+  }
+
+  release(sessionId: string): void {
+    this.loadedBySession.delete(sessionId);
+    this.loadingBySession.delete(sessionId);
+  }
+
+  dispose(): void {
+    this.loadedBySession.clear();
+    this.loadingBySession.clear();
+  }
+
+  private async loadFromHistory(
+    sessionId: string,
+  ): Promise<readonly TodoItem[]> {
+    let todos: readonly TodoItem[] = [];
+    if (this.options.history) {
+      try {
+        todos = recoverTodosFromMessages(
+          await this.options.history.listBySession(sessionId),
+          this.options.onWarning,
+        );
+      } catch (error) {
+        this.options.onWarning?.(
+          `Todo history could not be loaded for session ${sessionId}`,
+          error,
+        );
+      }
+    }
+
+    const existing = this.loadedBySession.get(sessionId);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const recovered = cloneTodos(todos);
+    this.loadedBySession.set(sessionId, recovered);
+    return recovered;
   }
 }
 
+export class InMemoryTodoStore extends TodoService {}
+
 function cloneTodos(todos: readonly TodoItem[]): readonly TodoItem[] {
   return todos.map((todo) => ({ ...todo }));
+}
+
+function todosEqual(
+  left: readonly TodoItem[],
+  right: readonly TodoItem[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (todo, index) =>
+        todo.content === right[index]?.content &&
+        todo.status === right[index]?.status,
+    )
+  );
 }
 
 function assertTodoStatus(value: unknown): asserts value is TodoStatus {
@@ -49,59 +154,108 @@ function assertTodoStatus(value: unknown): asserts value is TodoStatus {
   }
 }
 
-function assertTodoPriority(value: unknown): asserts value is TodoPriority {
-  if (
-    typeof value !== "string" ||
-    !TODO_PRIORITIES.has(value as TodoPriority)
-  ) {
-    throw new ToolParameterError(`Invalid todo priority: ${String(value)}`);
-  }
+function unicodeLength(value: string): number {
+  return Array.from(value).length;
 }
 
-function parseTodos(params: Record<string, unknown>): readonly TodoItem[] {
-  const value = params.todos;
+function parseTodoItem(value: unknown, index: number): TodoItem {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new ToolParameterError(
+      `Expected todo at index ${String(index)} to be an object.`,
+    );
+  }
+  const record = value as Record<string, unknown>;
+  const extraField = Object.keys(record).find(
+    (field) => !TODO_ITEM_FIELDS.has(field),
+  );
+  if (extraField !== undefined) {
+    throw new ToolParameterError(
+      `Unexpected field "${extraField}" in todo at index ${String(index)}.`,
+    );
+  }
+
+  const content =
+    typeof record.content === "string" ? record.content.trim() : "";
+  if (content === "") {
+    throw new ToolParameterError(
+      `Expected todo at index ${String(index)} to have non-empty content.`,
+    );
+  }
+  if (unicodeLength(content) > MAX_TODO_CONTENT_LENGTH) {
+    throw new ToolParameterError(
+      `Todo content at index ${String(index)} exceeds ${String(MAX_TODO_CONTENT_LENGTH)} Unicode characters.`,
+    );
+  }
+  assertTodoStatus(record.status);
+
+  return { content, status: record.status };
+}
+
+function parseTodoArray(value: unknown): readonly TodoItem[] {
   if (!Array.isArray(value)) {
     throw new ToolParameterError('Expected parameter "todos" to be an array.');
   }
+  if (value.length > MAX_TODO_ITEMS) {
+    throw new ToolParameterError(
+      `Todo list exceeds the maximum of ${String(MAX_TODO_ITEMS)} items.`,
+    );
+  }
+  return value.map(parseTodoItem);
+}
 
-  return value.map((item, index): TodoItem => {
-    if (typeof item !== "object" || item === null) {
-      throw new ToolParameterError(
-        `Expected todo at index ${String(index)} to be an object.`,
-      );
-    }
-    const record = item as Record<string, unknown>;
-    const { content, id, priority, status } = record;
-    if (typeof id !== "string" || id.trim() === "") {
-      throw new ToolParameterError(
-        `Expected todo at index ${String(index)} to have an id.`,
-      );
-    }
-    if (typeof content !== "string" || content.trim() === "") {
-      throw new ToolParameterError(
-        `Expected todo at index ${String(index)} to have non-empty content.`,
-      );
-    }
-    assertTodoStatus(status);
-    if (priority !== undefined) {
-      assertTodoPriority(priority);
-    }
+function parseTodos(params: Record<string, unknown>): readonly TodoItem[] {
+  const extraField = Object.keys(params).find((field) => field !== "todos");
+  if (extraField !== undefined) {
+    throw new ToolParameterError(`Unexpected parameter "${extraField}".`);
+  }
+  return parseTodoArray(params.todos);
+}
 
-    return { content, id, priority, status };
-  });
+export function recoverTodosFromMessages(
+  messages: readonly MessageWithParts[],
+  onWarning?: (message: string, error?: unknown) => void,
+): readonly TodoItem[] {
+  for (
+    let messageIndex = messages.length - 1;
+    messageIndex >= 0;
+    messageIndex -= 1
+  ) {
+    const message = messages[messageIndex];
+    for (
+      let partIndex = message.parts.length - 1;
+      partIndex >= 0;
+      partIndex -= 1
+    ) {
+      const part = message.parts[partIndex];
+      if (
+        part.type !== "tool" ||
+        part.tool !== "todo_write" ||
+        part.state.status !== "completed"
+      ) {
+        continue;
+      }
+      try {
+        return parseTodos(part.state.input);
+      } catch (error) {
+        onWarning?.(
+          `Ignoring invalid completed todo_write call ${part.callId} during recovery`,
+          error,
+        );
+      }
+    }
+  }
+  return [];
 }
 
 function renderTodos(todos: readonly TodoItem[]): string {
   if (todos.length === 0) {
     return "No todos.";
   }
+  return todos.map((todo) => `[${todo.status}] ${todo.content}`).join("\n");
+}
 
-  return todos
-    .map((todo) => {
-      const priority = todo.priority ?? "medium";
-      return `[${todo.status}] (${priority}) ${todo.id}: ${todo.content}`;
-    })
-    .join("\n");
+function todoMetadata(todos: readonly TodoItem[]): Record<string, unknown> {
+  return { count: todos.length, todos: cloneTodos(todos) };
 }
 
 function createTodoReadTool(store: TodoStore): Tool {
@@ -115,14 +269,11 @@ function createTodoReadTool(store: TodoStore): Tool {
       type: "object",
     },
     source: "builtin",
-    category: "memory",
+    category: "readonly",
     annotations: { readOnlyHint: true },
-    execute(_params, context): ToolExecutionResult {
-      const todos = store.read(context.sessionId);
-      return {
-        output: renderTodos(todos),
-        metadata: { count: todos.length, todos: cloneTodos(todos) },
-      };
+    async execute(_params, context): Promise<ToolExecutionResult> {
+      const todos = await store.read(context.sessionId);
+      return { output: renderTodos(todos), metadata: todoMetadata(todos) };
     },
   };
 }
@@ -131,7 +282,7 @@ function createTodoWriteTool(store: TodoStore): Tool {
   return {
     name: "todo_write",
     description:
-      "Create or replace the current session-scoped todo list. Use this for complex, multi-step tasks; keep exactly one item in_progress, mark items completed promptly, and skip it for trivial one-step work.",
+      "Create or replace the current session-scoped todo list for complex, multi-step work. Keep at most 10 concise items in execution order, update statuses promptly, and use an empty list to clear it.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {
@@ -139,17 +290,20 @@ function createTodoWriteTool(store: TodoStore): Tool {
           items: {
             additionalProperties: false,
             properties: {
-              content: { type: "string" },
-              id: { type: "string" },
-              priority: { enum: ["high", "medium", "low"], type: "string" },
+              content: {
+                description:
+                  "Concise task content, at most 100 Unicode characters.",
+                type: "string",
+              },
               status: {
-                enum: ["pending", "in_progress", "completed", "cancelled"],
+                enum: ["pending", "in_progress", "completed"],
                 type: "string",
               },
             },
-            required: ["id", "content", "status"],
+            required: ["content", "status"],
             type: "object",
           },
+          maxItems: MAX_TODO_ITEMS,
           type: "array",
         },
       },
@@ -157,13 +311,13 @@ function createTodoWriteTool(store: TodoStore): Tool {
       type: "object",
     },
     source: "builtin",
-    category: "memory",
-    execute(params, context): ToolExecutionResult {
+    category: "write",
+    async execute(params, context): Promise<ToolExecutionResult> {
       const todos = parseTodos(params);
-      store.write(context.sessionId, todos);
+      const result = await store.write(context.sessionId, todos);
       return {
-        output: renderTodos(todos),
-        metadata: { count: todos.length, todos: cloneTodos(todos) },
+        output: renderTodos(result.todos),
+        metadata: todoMetadata(result.todos),
       };
     },
   };

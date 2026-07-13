@@ -40,6 +40,7 @@ import {
   type SubagentInstanceStore,
 } from "../../agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
+import { TodoService, type TodoWriteEvent } from "../../tools/todo.js";
 import {
   GoalService,
   InMemoryGoalPersistence,
@@ -137,6 +138,7 @@ export interface UiRuntimeCompositionOptions {
   readonly goalPersistence?: GoalPersistencePort;
   readonly goalExecutionControl: GoalExecutionControlPort;
   readonly onGoalChange?: GoalServiceDeps["onChange"];
+  readonly onTodoWrite?: (event: TodoWriteEvent) => void;
   readonly subagentInstanceStore?: SubagentInstanceStore;
   readonly subagentOwnerId?: string;
   readonly subagentOwnerPid?: number;
@@ -248,6 +250,21 @@ export async function createUiRuntimeComposition(
       messageCleaner: options.messageManager,
       now: options.now,
     });
+  const todoService = new TodoService({
+    history: options.messageManager,
+    onWarning(message, error): void {
+      const detail =
+        error instanceof Error ? `${message}: ${error.message}` : message;
+      options.onNotice?.({
+        key: `todo:recovery:${detail}`,
+        level: "warning",
+        message: detail,
+        source: "todo",
+        title: "Todo recovery warning",
+      });
+    },
+    onWrite: options.onTodoWrite,
+  });
 
   async function ensureRootSession(input: {
     readonly agentName: string;
@@ -500,6 +517,7 @@ export async function createUiRuntimeComposition(
     SessionEvent.Removed,
     (payload) => {
       contextManager.disposeSession(payload.sessionId);
+      todoService.release(payload.sessionId);
       trackSandboxCleanup(
         (async (): Promise<void> => {
           await subagentHost.interruptByParent(
@@ -556,6 +574,7 @@ export async function createUiRuntimeComposition(
       },
     },
     subagentHost,
+    todoStore: todoService,
   })) {
     toolScheduler.register(tool);
   }
@@ -632,6 +651,7 @@ export async function createUiRuntimeComposition(
   return {
     agentManager,
     goals: goalService,
+    todos: todoService,
     runLedger,
     runManager,
     streamBridge,
@@ -719,6 +739,7 @@ export async function createUiRuntimeComposition(
 
     async dispose(): Promise<void> {
       unsubscribeSessionRemoved();
+      todoService.dispose();
       toolScheduler.cancelAll();
       await Promise.all([
         subagentHost.dispose(),
