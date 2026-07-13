@@ -1,4 +1,4 @@
-﻿import { render } from "ink-testing-library";
+﻿import { render as renderInk } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   UiCommandInvocation,
@@ -146,6 +146,25 @@ const connectSearchCommandCatalog: TuiCommandCatalog = {
 };
 
 const previousNoAnimation = process.env.OHBABY_TUI_NO_ANIM;
+const mountedApps = new Set<ReturnType<typeof renderInk>>();
+
+function render(
+  tree: Parameters<typeof renderInk>[0],
+): ReturnType<typeof renderInk> {
+  const instance = renderInk(tree);
+  const app = {
+    ...instance,
+    unmount(): void {
+      if (!mountedApps.delete(app)) {
+        return;
+      }
+      instance.unmount();
+      instance.cleanup();
+    },
+  };
+  mountedApps.add(app);
+  return app;
+}
 
 beforeEach(() => {
   // Disable spinner/shimmer intervals: these content-level contract tests do not
@@ -155,6 +174,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const app of [...mountedApps]) {
+    app.unmount();
+  }
   vi.restoreAllMocks();
   if (previousNoAnimation === undefined) {
     delete process.env.OHBABY_TUI_NO_ANIM;
