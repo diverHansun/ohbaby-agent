@@ -89,7 +89,7 @@ afterEach(() => {
 });
 
 describe("OhbabyWebApp slash command interactions", () => {
-  it("renders all active-session todos in array order above the composer", () => {
+  it("renders all active-session todos and collapses to the current task", async () => {
     const todos = Array.from({ length: 10 }, (_, index) => ({
       content: `task ${String(index + 1)}`,
       status:
@@ -130,6 +130,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     const composerInput = app.container.querySelector(".ohb-composer-input");
     expect(scrollRegion?.getAttribute("aria-label")).toBe("Todo items");
     expect(scrollRegion?.getAttribute("tabindex")).toBe("0");
+    expect(app.container.textContent).toContain("1/10 completed");
     expect(
       Boolean(
         dock &&
@@ -138,6 +139,20 @@ describe("OhbabyWebApp slash command interactions", () => {
           Node.DOCUMENT_POSITION_FOLLOWING,
       ),
     ).toBe(true);
+
+    await clickButton(app.container, "Collapse todo list");
+    expect(
+      app.container
+        .querySelector(".ohb-todo-toggle")
+        ?.getAttribute("aria-expanded"),
+    ).toBe("false");
+    expect(app.container.querySelectorAll(".ohb-todo-item")).toHaveLength(1);
+    expect(app.container.querySelector(".ohb-todo-item")?.textContent).toBe(
+      "●task 2",
+    );
+
+    await clickButton(app.container, "Expand todo list");
+    expect(app.container.querySelectorAll(".ohb-todo-item")).toHaveLength(10);
   });
 
   it("hides the todo dock from todo.updated without clearing its projection", () => {

@@ -1754,25 +1754,66 @@ button.ohb-list-row:hover,
 }
 
 .ohb-todo-dock > header {
+  display: block;
+}
+
+.ohb-todo-toggle {
   align-items: center;
+  background: transparent;
+  border: 0;
   color: #676a70;
-  display: flex;
+  cursor: pointer;
+  display: grid;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
+  grid-template-columns: auto 1fr auto;
+  padding: 0 5px 6px;
+  text-align: left;
+  width: 100%;
+}
+
+.ohb-todo-toggle:focus-visible {
+  border-radius: 5px;
+  outline: 2px solid #6f91c8;
+  outline-offset: 2px;
+}
+
+.ohb-todo-title {
   font-size: 10px;
   font-weight: 600;
-  justify-content: space-between;
   letter-spacing: 0.08em;
-  padding: 0 5px 6px;
   text-transform: uppercase;
 }
 
-.ohb-todo-dock > header span:last-child {
+.ohb-todo-progress {
   background: #f1f4f9;
   border-radius: 999px;
   color: #6b6d73;
-  min-width: 20px;
+  font-size: 10px;
+  justify-self: end;
   padding: 2px 6px;
-  text-align: center;
+}
+
+.ohb-todo-chevron {
+  margin-left: 7px;
+  transition: transform 120ms ease;
+}
+
+.ohb-todo-dock-collapsed .ohb-todo-chevron {
+  transform: rotate(-90deg);
+}
+
+.ohb-todo-dock-collapsed .ohb-todo-toggle {
+  padding-bottom: 4px;
+}
+
+.ohb-todo-preview {
+  overflow: hidden;
+}
+
+.ohb-todo-preview .ohb-todo-item > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ohb-todo-items {

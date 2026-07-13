@@ -106,6 +106,7 @@ Agent tool call
 - selector 只选当前 active main session 的 Todo 投影。
 - 在 composer stack 上方渲染只读 TodoDock，不插入 transcript。
 - 显示后端允许的全部最多 10 项，容器限制最大高度并 `overflow-y: auto`。
+- 默认展开并支持用户折叠；头部显示 `completed/total` 摘要，折叠态预览首个进行中、否则首个待处理、最后回退到最近完成项。
 - 用状态图标、文字样式表达完成度，DOM 顺序严格跟随数组顺序。
 - `visible=false`、空数组、无 active session 或 run 结束时隐藏。
 - 重连/`snapshot.replaced` 后完全按 snapshot 恢复。

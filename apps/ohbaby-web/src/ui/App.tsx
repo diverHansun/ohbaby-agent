@@ -2471,7 +2471,10 @@ function Composer(props: {
         props.compact ? "ohb-composer ohb-composer-hero" : "ohb-composer"
       }
     >
-      <TodoDock todoList={props.view.activeTodoList} />
+      <TodoDock
+        key={props.view.activeTodoList?.sessionId ?? "hidden"}
+        todoList={props.view.activeTodoList}
+      />
       {props.view.queuedPrompts.length > 0 ? (
         <section className="ohb-prompt-queue" aria-label="Queued prompts">
           <div className="ohb-prompt-queue-header">
@@ -2629,37 +2632,98 @@ function Composer(props: {
 function TodoDock(props: {
   readonly todoList: ViewModel["activeTodoList"];
 }): ReactElement | null {
+  const [expanded, setExpanded] = useState(true);
+
   if (!props.todoList) {
     return null;
   }
 
+  const completedCount = props.todoList.todos.filter(
+    (todo) => todo.status === "completed",
+  ).length;
+  const preview = selectTodoDockPreview(props.todoList.todos);
+
   return (
-    <section aria-label="Todo list" className="ohb-todo-dock">
+    <section
+      aria-label="Todo list"
+      className={`ohb-todo-dock ${expanded ? "ohb-todo-dock-expanded" : "ohb-todo-dock-collapsed"}`}
+    >
       <header>
-        <span>Tasks</span>
-        <span>{String(props.todoList.todos.length)}</span>
+        <button
+          aria-controls="ohb-todo-items"
+          aria-expanded={expanded}
+          className="ohb-todo-toggle"
+          onClick={() => {
+            setExpanded((current) => !current);
+          }}
+          title={expanded ? "Collapse todo list" : "Expand todo list"}
+          type="button"
+        >
+          <span className="ohb-todo-title">Tasks</span>
+          <span className="ohb-todo-progress">
+            {String(completedCount)}/{String(props.todoList.todos.length)}{" "}
+            completed
+          </span>
+          <ChevronDown
+            aria-hidden="true"
+            className="ohb-todo-chevron"
+            size={14}
+          />
+        </button>
       </header>
-      <div
-        aria-label="Todo items"
-        className="ohb-todo-items"
-        role="list"
-        tabIndex={0}
-      >
-        {props.todoList.todos.map((todo, index) => (
-          <div
-            aria-label={`${todoStatusLabel(todo.status)}: ${todo.content}`}
-            className={`ohb-todo-item ohb-todo-${todo.status}`}
-            key={`${String(index)}:${todo.content}`}
-            role="listitem"
-          >
-            <span aria-hidden="true" className="ohb-todo-marker">
-              {todoStatusMarker(todo.status)}
-            </span>
-            <span>{todo.content}</span>
-          </div>
-        ))}
-      </div>
+      {expanded ? (
+        <div
+          aria-label="Todo items"
+          className="ohb-todo-items"
+          id="ohb-todo-items"
+          role="list"
+          tabIndex={0}
+        >
+          {props.todoList.todos.map((todo, index) => (
+            <TodoDockItem
+              key={`${String(index)}:${todo.content}`}
+              todo={todo}
+            />
+          ))}
+        </div>
+      ) : (
+        <div
+          aria-label="Current todo"
+          className="ohb-todo-preview"
+          id="ohb-todo-items"
+          role="list"
+        >
+          {preview ? <TodoDockItem todo={preview} /> : null}
+        </div>
+      )}
     </section>
+  );
+}
+
+function TodoDockItem(props: {
+  readonly todo: NonNullable<ViewModel["activeTodoList"]>["todos"][number];
+}): ReactElement {
+  return (
+    <div
+      aria-label={`${todoStatusLabel(props.todo.status)}: ${props.todo.content}`}
+      className={`ohb-todo-item ohb-todo-${props.todo.status}`}
+      role="listitem"
+    >
+      <span aria-hidden="true" className="ohb-todo-marker">
+        {todoStatusMarker(props.todo.status)}
+      </span>
+      <span>{props.todo.content}</span>
+    </div>
+  );
+}
+
+function selectTodoDockPreview(
+  todos: NonNullable<ViewModel["activeTodoList"]>["todos"],
+): NonNullable<ViewModel["activeTodoList"]>["todos"][number] | undefined {
+  return (
+    todos.find((todo) => todo.status === "in_progress") ??
+    todos.find((todo) => todo.status === "pending") ??
+    todos.at(-1)
   );
 }
 

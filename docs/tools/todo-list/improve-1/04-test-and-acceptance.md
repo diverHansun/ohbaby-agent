@@ -74,6 +74,7 @@ Unicode 长度应以 JavaScript 可见码点为准，测试至少包含 emoji，
 | E-04 | active session 切换 | 只显示目标 session Todo |
 | E-05 | lifecycle | running 显示、run end 隐藏、清空立即隐藏 |
 | E-06 | snapshot replacement | 重连后无须扫描 transcript 即恢复正确面板 |
+| E-07 | 折叠/展开 | 头部显示完成摘要；折叠态只预览当前任务，展开后恢复全部项目 |
 
 ### F. TUI 组件与集成测试
 
