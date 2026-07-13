@@ -402,6 +402,19 @@ function applyEventToSnapshot(
                 "sessionId",
               ),
       };
+    case "todo.updated":
+      return {
+        ...snapshot,
+        todos: upsertByKey(
+          snapshot.todos ?? [],
+          {
+            sessionId: event.sessionId,
+            todos: event.todos.map((todo) => ({ ...todo })),
+            visible: event.visible,
+          },
+          "sessionId",
+        ),
+      };
     case "permission.requested":
       return {
         ...snapshot,

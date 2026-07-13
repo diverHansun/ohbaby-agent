@@ -46,6 +46,7 @@ import type {
   UiProbeModelContextWindowResult,
   UiSetSearchApiKeyResult,
   UiSession,
+  UiTodoStatus,
   UiWebCommandCatalog,
 } from "ohbaby-sdk";
 import type {
@@ -484,7 +485,7 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
       <div
         className={`ohb-app-content ${
           showMain ? "ohb-app-content-main" : "ohb-app-content-empty"
-        }`}
+        } ${view.activeTodoList ? "ohb-app-content-has-todos" : ""}`}
       >
         {showMain ? (
           <>
@@ -1636,10 +1637,18 @@ function FallbackCommandResult(props: {
 function MessageRow(props: {
   readonly message: UiMessage;
   readonly reasoning?: ViewModel["reasoningByMessageId"][string];
-}): ReactElement {
+}): ReactElement | null {
   const isUser = props.message.role === "user";
   const isAssistant = props.message.role === "assistant";
   const label = isUser ? "You" : isAssistant ? "ohbaby" : props.message.role;
+  const visibleParts = filterTodoToolParts(props.message.parts);
+  if (
+    props.reasoning === undefined &&
+    props.message.parts.length > 0 &&
+    visibleParts.length === 0
+  ) {
+    return null;
+  }
   return (
     <article className={`ohb-message ohb-message-${props.message.role}`}>
       <div className="ohb-message-label">
@@ -1653,7 +1662,7 @@ function MessageRow(props: {
             <pre>{props.reasoning.content}</pre>
           </details>
         ) : null}
-        {props.message.parts.map((part, index) => (
+        {visibleParts.map((part, index) => (
           <MessagePart
             isStreaming={props.message.status === "streaming"}
             key={`${props.message.id}-${String(index)}`}
@@ -1662,6 +1671,30 @@ function MessageRow(props: {
         ))}
       </div>
     </article>
+  );
+}
+
+function filterTodoToolParts(
+  parts: readonly UiMessagePart[],
+): readonly UiMessagePart[] {
+  const hiddenCallIds = new Set(
+    parts
+      .filter(
+        (part) =>
+          part.type === "tool-call" &&
+          (part.call.name === "todo_read" || part.call.name === "todo_write"),
+      )
+      .map((part) => (part.type === "tool-call" ? part.call.id : "")),
+  );
+  if (hiddenCallIds.size === 0) {
+    return parts;
+  }
+  return parts.filter(
+    (part) =>
+      !(
+        (part.type === "tool-call" && hiddenCallIds.has(part.call.id)) ||
+        (part.type === "tool-result" && hiddenCallIds.has(part.result.callId))
+      ),
   );
 }
 
@@ -2408,6 +2441,7 @@ function Composer(props: {
         props.compact ? "ohb-composer ohb-composer-hero" : "ohb-composer"
       }
     >
+      <TodoDock todoList={props.view.activeTodoList} />
       {props.view.queuedPrompts.length > 0 ? (
         <section className="ohb-prompt-queue" aria-label="Queued prompts">
           <div className="ohb-prompt-queue-header">
@@ -2560,6 +2594,60 @@ function Composer(props: {
       </div>
     </section>
   );
+}
+
+function TodoDock(props: {
+  readonly todoList: ViewModel["activeTodoList"];
+}): ReactElement | null {
+  if (!props.todoList) {
+    return null;
+  }
+
+  return (
+    <section aria-label="Todo list" className="ohb-todo-dock">
+      <header>
+        <span>Tasks</span>
+        <span>{String(props.todoList.todos.length)}</span>
+      </header>
+      <div className="ohb-todo-items" role="list">
+        {props.todoList.todos.map((todo, index) => (
+          <div
+            aria-label={`${todoStatusLabel(todo.status)}: ${todo.content}`}
+            className={`ohb-todo-item ohb-todo-${todo.status}`}
+            key={`${String(index)}:${todo.content}`}
+            role="listitem"
+          >
+            <span aria-hidden="true" className="ohb-todo-marker">
+              {todoStatusMarker(todo.status)}
+            </span>
+            <span>{todo.content}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function todoStatusLabel(status: UiTodoStatus): string {
+  switch (status) {
+    case "pending":
+      return "Pending";
+    case "in_progress":
+      return "In progress";
+    case "completed":
+      return "Completed";
+  }
+}
+
+function todoStatusMarker(status: UiTodoStatus): string {
+  switch (status) {
+    case "pending":
+      return "○";
+    case "in_progress":
+      return "●";
+    case "completed":
+      return "✓";
+  }
 }
 
 function StructuredCommandOverlay(props: {

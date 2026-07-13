@@ -1742,6 +1742,109 @@ button.ohb-list-row:hover,
   z-index: 10;
 }
 
+.ohb-todo-dock {
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid #e4e9f2;
+  border-radius: 10px;
+  box-shadow: 0 4px 18px rgba(30, 34, 44, 0.07);
+  margin: 0 auto 8px;
+  max-width: 690px;
+  padding: 8px 9px 9px;
+  width: calc(100% - 30px);
+}
+
+.ohb-todo-dock > header {
+  align-items: center;
+  color: #8a8d94;
+  display: flex;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  justify-content: space-between;
+  letter-spacing: 0.08em;
+  padding: 0 5px 6px;
+  text-transform: uppercase;
+}
+
+.ohb-todo-dock > header span:last-child {
+  background: #f1f4f9;
+  border-radius: 999px;
+  color: #6b6d73;
+  min-width: 20px;
+  padding: 2px 6px;
+  text-align: center;
+}
+
+.ohb-todo-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 176px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.ohb-todo-items::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ohb-todo-items::-webkit-scrollbar-thumb {
+  background: #dfe4ec;
+  border: 2px solid #ffffff;
+  border-radius: 5px;
+}
+
+.ohb-todo-item {
+  align-items: flex-start;
+  border-radius: 6px;
+  color: #54565c;
+  display: flex;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  gap: 8px;
+  line-height: 1.45;
+  min-width: 0;
+  padding: 5px 7px;
+}
+
+.ohb-todo-marker {
+  flex: none;
+  font-weight: 700;
+  text-align: center;
+  width: 13px;
+}
+
+.ohb-todo-pending .ohb-todo-marker {
+  color: #a3a6ad;
+}
+
+.ohb-todo-in_progress {
+  background: #f3f7fd;
+  color: #344d75;
+}
+
+.ohb-todo-in_progress .ohb-todo-marker {
+  color: #5f86c4;
+}
+
+.ohb-todo-completed {
+  color: #a3a6ad;
+}
+
+.ohb-todo-completed > span:last-child {
+  text-decoration: line-through;
+  text-decoration-color: #c2c5ca;
+}
+
+.ohb-todo-completed .ohb-todo-marker {
+  color: #6f9a76;
+}
+
+.ohb-app-content-has-todos .ohb-stream {
+  padding-bottom: 350px;
+}
+
 .ohb-prompt-queue {
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid #e4e9f2;
@@ -2383,6 +2486,10 @@ button.ohb-list-row:hover,
     padding-bottom: 176px;
   }
 
+  .ohb-app-content-has-todos .ohb-stream {
+    padding-bottom: 370px;
+  }
+
   .ohb-composer {
     padding: 14px 14px 18px;
   }
@@ -2393,7 +2500,8 @@ button.ohb-list-row:hover,
   }
 
   .ohb-composer-input,
-  .ohb-composer-tools {
+  .ohb-composer-tools,
+  .ohb-todo-dock {
     max-width: none;
   }
 

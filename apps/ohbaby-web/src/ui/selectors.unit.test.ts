@@ -228,6 +228,43 @@ describe("ohbaby-web ui selectors", () => {
     expect(otherSessionOnly.activeGoal).toBeNull();
   });
 
+  it("selects only a visible non-empty todo list for the active session", () => {
+    const visible = selectViewModel(
+      store({
+        ...baseSnapshot(),
+        todos: [
+          {
+            sessionId: "session_2",
+            todos: [{ content: "Other", status: "pending" }],
+            visible: true,
+          },
+          {
+            sessionId: "session_1",
+            todos: [{ content: "Active", status: "in_progress" }],
+            visible: true,
+          },
+        ],
+      }),
+    );
+    const hidden = selectViewModel(
+      store({
+        ...baseSnapshot(),
+        todos: [
+          {
+            sessionId: "session_1",
+            todos: [{ content: "Done", status: "completed" }],
+            visible: false,
+          },
+        ],
+      }),
+    );
+
+    expect(visible.activeTodoList?.todos).toEqual([
+      { content: "Active", status: "in_progress" },
+    ]);
+    expect(hidden.activeTodoList).toBeNull();
+  });
+
   it("extracts display text from text and reasoning message parts only", () => {
     const message: UiMessage = {
       createdAt: timestamp,

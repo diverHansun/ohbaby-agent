@@ -134,6 +134,58 @@ describe("ohbaby-web eventReducer", () => {
     expect(state.snapshot?.goals).toEqual([]);
   });
 
+  it("upserts todo projections by session without changing other sessions", () => {
+    let state = replaceSnapshot(
+      {
+        ...emptySnapshot(),
+        todos: [
+          {
+            sessionId: "session_other",
+            todos: [{ content: "Keep me", status: "pending" }],
+            visible: true,
+          },
+        ],
+      },
+      0,
+    );
+
+    state = reduceUiEvent(
+      state,
+      {
+        sessionId: "session_1",
+        timestamp: 1,
+        todos: [{ content: "Implement dock", status: "in_progress" }],
+        type: "todo.updated",
+        visible: true,
+      },
+      1,
+    );
+    state = reduceUiEvent(
+      state,
+      {
+        sessionId: "session_1",
+        timestamp: 2,
+        todos: [{ content: "Implement dock", status: "completed" }],
+        type: "todo.updated",
+        visible: false,
+      },
+      2,
+    );
+
+    expect(state.snapshot?.todos).toEqual([
+      {
+        sessionId: "session_other",
+        todos: [{ content: "Keep me", status: "pending" }],
+        visible: true,
+      },
+      {
+        sessionId: "session_1",
+        todos: [{ content: "Implement dock", status: "completed" }],
+        visible: false,
+      },
+    ]);
+  });
+
   it("accumulates streaming deltas until a finalized message arrives", () => {
     let state = replaceSnapshot(emptySnapshot(), 0);
 

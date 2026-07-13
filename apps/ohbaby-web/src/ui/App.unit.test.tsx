@@ -89,6 +89,147 @@ afterEach(() => {
 });
 
 describe("OhbabyWebApp slash command interactions", () => {
+  it("renders all active-session todos in array order above the composer", () => {
+    const todos = Array.from({ length: 10 }, (_, index) => ({
+      content: `task ${String(index + 1)}`,
+      status:
+        index === 0
+          ? ("completed" as const)
+          : index === 1
+            ? ("in_progress" as const)
+            : ("pending" as const),
+    }));
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "running", runId: "run_1" }),
+        todos: [
+          {
+            sessionId: "session_other",
+            todos: [{ content: "not active", status: "pending" }],
+            visible: true,
+          },
+          { sessionId: "session_1", todos, visible: true },
+        ],
+      },
+    });
+    const app = mountApp(fake.runtime);
+    const items = Array.from(
+      app.container.querySelectorAll<HTMLElement>(".ohb-todo-item"),
+    );
+
+    expect(items).toHaveLength(10);
+    expect(items.map((item) => item.textContent)).toEqual(
+      todos.map(
+        (todo) =>
+          `${todo.status === "completed" ? "✓" : todo.status === "in_progress" ? "●" : "○"}${todo.content}`,
+      ),
+    );
+    expect(app.container.textContent).not.toContain("not active");
+    const dock = app.container.querySelector(".ohb-todo-dock");
+    const composerInput = app.container.querySelector(".ohb-composer-input");
+    expect(
+      Boolean(
+        dock &&
+        composerInput &&
+        dock.compareDocumentPosition(composerInput) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
+  });
+
+  it("hides the todo dock from todo.updated without clearing its projection", () => {
+    const todos = [{ content: "Finish UI", status: "in_progress" as const }];
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "running", runId: "run_1" }),
+        todos: [{ sessionId: "session_1", todos, visible: true }],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.querySelector(".ohb-todo-dock")).not.toBeNull();
+    act(() => {
+      fake.store.applyEvent(
+        {
+          sessionId: "session_1",
+          todos,
+          type: "todo.updated",
+          visible: false,
+        },
+        2,
+      );
+    });
+    expect(app.container.querySelector(".ohb-todo-dock")).toBeNull();
+    expect(fake.store.getSnapshot().view.snapshot?.todos).toEqual([
+      { sessionId: "session_1", todos, visible: false },
+    ]);
+  });
+
+  it("defensively filters legacy todo tool parts from the transcript", () => {
+    const base = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...base,
+        sessions: [
+          {
+            ...base.sessions[0],
+            messages: [
+              {
+                createdAt: timestamp,
+                id: "message_todo_only",
+                parts: [
+                  {
+                    call: {
+                      id: "call_todo_only",
+                      input: { todos: [] },
+                      name: "todo_write",
+                      status: "completed",
+                    },
+                    type: "tool-call",
+                  },
+                  {
+                    result: { callId: "call_todo_only", output: "No todos." },
+                    type: "tool-result",
+                  },
+                ],
+                role: "assistant",
+              },
+              {
+                createdAt: timestamp,
+                id: "message_mixed",
+                parts: [
+                  { text: "Visible answer", type: "text" },
+                  {
+                    call: {
+                      id: "call_todo_mixed",
+                      input: {},
+                      name: "todo_read",
+                      status: "completed",
+                    },
+                    type: "tool-call",
+                  },
+                  {
+                    result: { callId: "call_todo_mixed", output: "No todos." },
+                    type: "tool-result",
+                  },
+                ],
+                role: "assistant",
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.textContent).toContain("Visible answer");
+    expect(app.container.textContent).not.toContain("todo_read");
+    expect(app.container.textContent).not.toContain("todo_write");
+    expect(app.container.textContent).not.toContain("No todos.");
+    expect(app.container.querySelectorAll(".ohb-tool-panel")).toHaveLength(0);
+    expect(app.container.querySelectorAll(".ohb-message")).toHaveLength(1);
+  });
+
   it("renders an adaptive queued list and expands after five items", async () => {
     const prompts = Array.from({ length: 6 }, (_, index) => ({
       clientRequestId: `request_${String(index)}`,

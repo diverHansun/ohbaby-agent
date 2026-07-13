@@ -9,6 +9,7 @@ import type {
   UiRunStatus,
   UiPromptSubmission,
   UiSession,
+  UiSessionTodoList,
   UiSnapshot,
 } from "ohbaby-sdk";
 import type { ConnectionState, StoreSnapshot } from "../api/daemon/wire.js";
@@ -44,6 +45,7 @@ export interface ComposerModel {
 export interface ViewModel {
   readonly activeGoal: UiGoal | null;
   readonly activeSession: UiSession | null;
+  readonly activeTodoList: UiSessionTodoList | null;
   readonly commandCatalogVersion: string | null;
   readonly commandNotices: readonly CommandNotice[];
   readonly composer: ComposerModel;
@@ -85,6 +87,7 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
   return {
     activeGoal: selectActiveGoal(daemonSnapshot, activeSessionId),
     activeSession,
+    activeTodoList: selectActiveTodoList(daemonSnapshot, activeSessionId),
     commandCatalogVersion: snapshot.view.commandCatalogVersion,
     commandNotices: snapshot.view.commandNotices,
     composer: {
@@ -122,6 +125,19 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
     reasoningByMessageId: snapshot.view.reasoningByMessageId,
     snapshot: daemonSnapshot,
   };
+}
+
+export function selectActiveTodoList(
+  snapshot: UiSnapshot | null,
+  sessionId: string | null | undefined,
+): UiSessionTodoList | null {
+  if (!snapshot || !sessionId) return null;
+  const todoList = (snapshot.todos ?? []).find(
+    (candidate) => candidate.sessionId === sessionId,
+  );
+  return todoList?.visible === true && todoList.todos.length > 0
+    ? todoList
+    : null;
 }
 
 function selectQueuedPrompts(
