@@ -281,6 +281,17 @@ describe("todo builtin tools", () => {
       "write",
     );
   });
+
+  it("keeps tool descriptions limited to interface semantics", () => {
+    const tools = createTodoTools();
+
+    expect(tools.find((tool) => tool.name === "todo_read")?.description).toBe(
+      "Read the current session-scoped todo list.",
+    );
+    expect(tools.find((tool) => tool.name === "todo_write")?.description).toBe(
+      "Replace the current session-scoped todo list with a complete ordered list. Maximum 10 items; an empty list clears it.",
+    );
+  });
 });
 
 describe("todo history recovery", () => {

@@ -25,6 +25,7 @@ export const planAgent: AgentConfig = {
       "glob",
       "grep",
       "todo_read",
+      "todo_write",
       "web_fetch",
       "web_search",
       "memory_list",

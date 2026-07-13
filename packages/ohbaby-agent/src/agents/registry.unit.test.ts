@@ -63,6 +63,18 @@ describe("AgentRegistry", () => {
     );
   });
 
+  it("lets the plan agent read and update session todos", async () => {
+    const registry = new AgentRegistry({
+      configLoader: (): AgentsConfig => ({ agents: {} }),
+    });
+
+    await registry.initialize();
+
+    expect(registry.get("plan")?.tools?.include).toEqual(
+      expect.arrayContaining(["todo_read", "todo_write"]),
+    );
+  });
+
   it("fully replaces same-name builtin agents and merges different names", async () => {
     const registry = new AgentRegistry({
       configLoader: (): AgentsConfig => ({

@@ -331,8 +331,7 @@ function todoMetadata(todos: readonly TodoItem[]): Record<string, unknown> {
 function createTodoReadTool(store: TodoStore): Tool {
   return {
     name: "todo_read",
-    description:
-      "Read the current session-scoped todo list. Todo lists are isolated per primary or child session.",
+    description: "Read the current session-scoped todo list.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {},
@@ -352,7 +351,7 @@ function createTodoWriteTool(store: TodoStore): Tool {
   return {
     name: "todo_write",
     description:
-      "Create or replace the current session-scoped todo list for complex, multi-step work. Keep at most 10 concise items in execution order, update statuses promptly, and use an empty list to clear it.",
+      "Replace the current session-scoped todo list with a complete ordered list. Maximum 10 items; an empty list clears it.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {

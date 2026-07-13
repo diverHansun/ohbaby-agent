@@ -82,6 +82,13 @@ describe("SystemPrompt", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "build",
       agentPromptAddon: "Primary addon.",
+      availableSubagentRoles: [
+        {
+          default: true,
+          description: "Default general-purpose subagent",
+          role: "generic",
+        },
+      ],
       customInstructions: ["Project rule."],
       environment: ENVIRONMENT,
       isSubagent: false,
@@ -92,13 +99,14 @@ describe("SystemPrompt", () => {
       tools: ["read"],
     });
 
-    expect(prompts).toHaveLength(6);
+    expect(prompts).toHaveLength(7);
     expect(prompts[0]).toContain("# Identity");
     expect(prompts[1]).toContain("<primary_task>");
     expect(prompts[2]).toContain("<agent_prompt_addon>");
-    expect(prompts[3]).toContain("<tool_guidance>");
-    expect(prompts[4]).toContain("<environment>");
-    expect(prompts[5]).toContain("<custom_instructions>");
+    expect(prompts[3]).toContain("<subagent_roles>");
+    expect(prompts[4]).toContain("<tool_guidance>");
+    expect(prompts[5]).toContain("<environment>");
+    expect(prompts[6]).toContain("<custom_instructions>");
   });
 
   it("adds subagent role guidance to primary prompts", () => {

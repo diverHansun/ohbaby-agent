@@ -85,4 +85,38 @@ describe("system prompt template assets", () => {
       "After the tool result, give the user the final answer and end the run",
     );
   });
+
+  it("keeps Todo activation and lifecycle policy in the primary base prompt", () => {
+    expect(PRIMARY_BASE_PROMPT).toContain("## Todo tracking");
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "Use the todo list for complex work with multiple meaningful stages, dependencies, or extended investigation",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "Skip it for simple questions, trivial edits, and one-step tasks",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "Create a list after you understand the task well enough",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "Read the current list before revising an existing plan",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "Preserve still-valid items and their execution order",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "Update the list at meaningful milestones or when scope changes, not after every command",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "Multiple items may be `in_progress`",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "Mark an item `completed` only after its relevant verification succeeds",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "Do not clear the list merely because a run ends",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "use an empty list only for an explicit reset or an abandoned or superseded plan",
+    );
+  });
 });
