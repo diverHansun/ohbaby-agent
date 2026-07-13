@@ -65,6 +65,7 @@ import type {
   SearchApiKeyRequest,
 } from "../api/daemon/wire.js";
 import { MarkdownBlock } from "./MarkdownBlock.js";
+import { isImeComposing } from "./ime.js";
 import {
   selectViewModel,
   type HeaderModel,
@@ -2480,6 +2481,9 @@ function Composer(props: {
 
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (isImeComposing(event)) {
+        return;
+      }
       if (slashOpen) {
         if (event.key === "ArrowDown") {
           event.preventDefault();

@@ -267,6 +267,48 @@ describe("OhbabyWebApp slash command interactions", () => {
     ).toBeNull();
   });
 
+  it("does not send or prevent default while an IME is composing", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "hello");
+
+    const composingEnter = await pressComposingTextareaKey(
+      app.container,
+      "Enter",
+    );
+    expect(fake.submitPrompt).not.toHaveBeenCalled();
+    expect(composingEnter.defaultPrevented).toBe(false);
+
+    const legacyComposingEnter = await pressComposingTextareaKey(
+      app.container,
+      "Enter",
+      229,
+    );
+    expect(fake.submitPrompt).not.toHaveBeenCalled();
+    expect(legacyComposingEnter.defaultPrevented).toBe(false);
+  });
+
+  it("does not execute a slash command while an IME is composing", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["status"]));
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "/");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-slash-palette")),
+    );
+
+    const composingEnter = await pressComposingTextareaKey(
+      app.container,
+      "Enter",
+    );
+    expect(fake.submitPrompt).not.toHaveBeenCalled();
+    expect(composingEnter.defaultPrevented).toBe(false);
+  });
+
   it("renders all active-session todos and collapses to the current task", async () => {
     const todos = Array.from({ length: 10 }, (_, index) => ({
       content: `task ${String(index + 1)}`,
@@ -2109,6 +2151,31 @@ async function pressTextareaKey(
     );
     await Promise.resolve();
   });
+}
+
+async function pressComposingTextareaKey(
+  container: ParentNode,
+  key: string,
+  keyCode = 0,
+): Promise<globalThis.KeyboardEvent> {
+  const textarea = container.querySelector("textarea");
+  if (!(textarea instanceof HTMLTextAreaElement)) {
+    throw new Error("textarea not found");
+  }
+  const event = new KeyboardEvent("keydown", { bubbles: true, key });
+  Object.defineProperty(event, "isComposing", {
+    configurable: true,
+    value: true,
+  });
+  Object.defineProperty(event, "keyCode", {
+    configurable: true,
+    value: keyCode,
+  });
+  await act(async () => {
+    textarea.dispatchEvent(event);
+    await Promise.resolve();
+  });
+  return event;
 }
 
 async function pressWindowKey(key: string): Promise<void> {
