@@ -27,9 +27,9 @@ runtime layer 由代码根据当前输入渲染，例如 environment、tools、c
 ```ts
 export type LayerType =
   | "agent"
+  | "base"
   | "custom"
   | "environment"
-  | "identity"
   | "task"
   | "tools";
 ```
@@ -46,7 +46,7 @@ export type AgentKind = "primary" | "subagent";
 
 ```ts
 export type PrimaryTaskKind = "ask" | "plan" | "agent";
-export type SubagentTaskKind = "explore" | "research" | "plan" | "generic";
+export type SubagentTaskKind = "explore" | "research" | "generic";
 export type PromptTaskKind = PrimaryTaskKind | SubagentTaskKind;
 ```
 
@@ -70,6 +70,7 @@ export interface AssembleOptions {
   readonly agentPrompt?: string;
   readonly agentPromptAddon?: string;
   readonly isSubagent: boolean;
+  readonly availableSubagentRoles?: readonly SubagentRolePromptInfo[];
   readonly environment: EnvironmentInfo;
   readonly customInstructions?: readonly string[];
   readonly onSecurityFinding?: (finding: PromptSecurityFinding) => void;
@@ -86,6 +87,7 @@ export interface SystemPromptProviderInput {
   readonly sessionId: string;
   readonly directory: string;
   readonly isSubagent: boolean;
+  readonly agentName?: string;
 }
 ```
 
@@ -99,6 +101,7 @@ export interface SystemPromptProviderInput {
 - `environmentDetector`
 - `toolsProvider`
 - `taskKindResolver`
+- `availableSubagentRolesProvider`
 - `toolDetailsProvider`
 - `onWarning`
 - `onSecurityFinding`
@@ -128,7 +131,6 @@ string[]
 | subagent base | `prompts/subagents/base.md` | subagent 基础约束 |
 | subagent explore | `prompts/subagents/tasks/explore.md` | explore 任务契约 |
 | subagent research | `prompts/subagents/tasks/research.md` | research 任务契约 |
-| subagent plan | `prompts/subagents/tasks/plan.md` | plan 子任务契约 |
 | subagent generic | `prompts/subagents/tasks/generic.md` | generic 子任务契约 |
 
 `prompts/agents/generic.ts` 是兼容导出，复用 generic subagent task，不维护第二份重复模板。

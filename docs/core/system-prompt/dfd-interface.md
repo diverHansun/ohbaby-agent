@@ -36,6 +36,7 @@ SystemPrompt.assemble(options: AssembleOptions): string[]
 - `environment`: 当前运行环境。
 - `taskKind`: 可选任务类型。
 - `agentPromptAddon`: 可选代理附加提示。
+- `availableSubagentRoles`: 可选子代理角色列表，仅 primary 使用。
 - `tools`: 可用工具名。
 - `toolSnippets`: 工具描述片段。
 - `customInstructions`: custom instructions，仅 primary 使用。
@@ -53,7 +54,7 @@ createSystemPromptProvider(options?: SystemPromptProviderOptions): SystemPromptP
 数据流：
 
 1. 解析 agent name。
-2. 并发获取 environment、tools、taskKind、toolDetails。
+2. 并发获取 environment、tools、taskKind、toolDetails 和可用 subagent roles。
 3. 获取 agent prompt addon。
 4. primary 分支加载 custom instructions。
 5. 调用 `SystemPrompt.assemble()`。
@@ -81,10 +82,11 @@ SystemPrompt.loadCustomInstructions(options): Promise<readonly string[]>
 ```text
 input
   -> resolve primary task kind (default: agent)
-  -> render identity from prompts/primary/base.md
+  -> render base from prompts/primary/base.md
   -> render primary task from prompts/primary/tasks/*.md
   -> wrap agent addon
-  -> render tool guidance when snippets/guidelines exist
+  -> render subagent roles when roles exist
+  -> render tool guidance when snippets exist
   -> render full environment
   -> render custom instructions
   -> compact empty layers
@@ -100,7 +102,7 @@ input
   -> render subagent base from prompts/subagents/base.md
   -> render subagent task from prompts/subagents/tasks/*.md
   -> wrap agent addon
-  -> render tool guidance when snippets/guidelines exist
+  -> render tool guidance when snippets exist
   -> render minimal environment
   -> compact empty layers
 ```
@@ -123,7 +125,7 @@ tool snippets 与 custom instructions 都可能来自外部配置或文件：
 
 | 输入来源 | 进入点 | 说明 |
 | --- | --- | --- |
-| agents | `agentNameResolver`, `agentPromptResolver` | 提供 agent 名称和 addon |
+| agents | `agentNameResolver`, `agentPromptResolver`, `availableSubagentRolesProvider` | 提供 agent 名称、addon 和 primary 可委派角色 |
 | ui-runtime | `taskKindResolver`, `toolsProvider`, `toolDetailsProvider` | 提供 mode/tool 上下文 |
 | filesystem | `loadCustomInstructions()` | 读取 custom instruction 文件 |
 | environment | `detectEnvironment()` | 读取 cwd、platform、date、git 状态 |

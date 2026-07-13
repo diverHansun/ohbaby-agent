@@ -15,11 +15,12 @@
 - Web TodoDock 与 TUI TodoPanel 的布局、顺序、容量和生命周期。
 - 两个工具在 streaming、持久 snapshot 和失败路径中均不进入 transcript。
 - 默认权限下 `todo_write` 直接执行，不产生权限弹窗；文件和命令写权限不受影响。
+- primary base 包含 Todo 启用与生命周期策略；Plan Agent 同时具备 Todo 读写工具。
 - 真实浏览器和真实 TUI 进程验收。
 
 ### 不覆盖
 
-- 模型在所有任务中何时应主动使用 Todo 的质量评测。
+- 跨模型、跨 Provider 的 Todo 主动调用率质量评测；本版本只做确定性的 Prompt 内容和工具可用性测试。
 - Todo 专用持久化、跨 session 汇总或 UI 编辑，因为这些不属于本版本。
 - 参考项目的像素级复刻。
 
@@ -85,6 +86,12 @@
 - 有溢出时 `Ctrl+T` 展开/收起到最多 10 项。
 - 隐藏、session 切换后展开态重置。
 
+### CS11：Agent Prompt 与工具能力
+
+- primary base 对复杂任务、简单任务、创建时机、更新节奏、多 `in_progress`、完成验证和清空生命周期有确定性断言。
+- Plan Agent 同时注册 `todo_read` 与 `todo_write`。
+- 两个工具 description 只包含接口语义；状态和字段边界由 schema 断言。
+
 ## 三、测试层级与位置
 
 | 层级 | 现有基础 | Todo 增量 |
@@ -115,7 +122,7 @@
 
 ## 六、完成后的自检
 
-- [x] D1–D6 均有测试场景。
+- [x] D1–D7 均有测试场景。
 - [x] 测试不再排除 Web/TUI 或真实 E2E。
 - [x] 失败事务、空数组、重复写和重连均有明确断言。
 - [x] 自动化测试与人工控制的真实进程验收边界清楚。

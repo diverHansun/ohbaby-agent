@@ -30,8 +30,9 @@ Primary prompt:
 
 ```text
 primary base identity
-+ primary task contract: ask | plan | agent
++ primary task contract: plan | agent at runtime; ask remains a static supported template
 + optional agent prompt add-on
++ optional subagent role guidance
 + tool guidance
 + full environment
 + custom instructions
@@ -42,7 +43,7 @@ Subagent prompt:
 
 ```text
 subagent base identity
-+ subagent task contract: explore | research | plan | generic
++ subagent task contract: explore | research | generic
 + optional agent prompt add-on
 + tool guidance
 + minimal environment
@@ -65,8 +66,9 @@ pnpm vitest run packages/ohbaby-agent/src/core/system-prompt packages/ohbaby-age
 
 Expected:
 
-- primary `ask`, `plan`, and `agent` task contracts appear in assembled prompts
-- subagent `explore`, `research`, `plan`, and `generic` task contracts appear in assembled prompts
+- primary `ask`, `plan`, and `agent` static task contracts remain independently testable
+- normal runtime resolves primary prompts to `plan` or `agent`
+- subagent `explore`, `research`, and `generic` task contracts appear in assembled prompts
 - configured `AgentConfig.prompt` appears inside an add-on block
 - configured `AgentConfig.prompt` does not replace default base/task prompt text
 - subagent prompts omit custom instructions
@@ -79,11 +81,10 @@ pnpm vitest run packages/ohbaby-agent/src/adapters/ui-runtime/composition.unit.t
 
 Expected:
 
-- `/mode ask` or policy mode `ask` reaches the first system message as `Task: ask`
 - `/mode plan` or policy mode `plan` reaches the first system message as `Task: plan`
 - `agent` mode reaches the first system message as `Task: agent`
-- subagent session prompt uses the resolved child agent name as task kind when it is `explore`, `research`, or `plan`
-- unknown subagent names fall back to `Task: generic`
+- subagent session prompt uses the resolved child agent name as task kind when it is `explore` or `research`
+- generic and unknown subagent names resolve to `Task: generic`
 
 ## Real API Key Rules
 
