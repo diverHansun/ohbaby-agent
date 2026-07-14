@@ -36,18 +36,21 @@ describe("DirectoryBrowser", () => {
     ]);
   });
 
-  it("uses the filesystem root outside Windows", async () => {
-    const stat = vi.fn();
-    const browser = createDirectoryBrowser({
-      platform: "linux",
-      stat,
-    });
+  it.each(["linux", "darwin"] as const)(
+    "uses the filesystem root on %s",
+    async (platform) => {
+      const stat = vi.fn();
+      const browser = createDirectoryBrowser({
+        platform,
+        stat,
+      });
 
-    await expect(browser.listRoots()).resolves.toEqual([
-      { directory: "/", name: "/" },
-    ]);
-    expect(stat).not.toHaveBeenCalled();
-  });
+      await expect(browser.listRoots()).resolves.toEqual([
+        { directory: "/", name: "/" },
+      ]);
+      expect(stat).not.toHaveBeenCalled();
+    },
+  );
 
   it("returns sorted direct child directories and the server-calculated parent", async () => {
     const browser = createDirectoryBrowser({

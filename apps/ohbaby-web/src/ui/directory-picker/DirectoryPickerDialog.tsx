@@ -38,6 +38,16 @@ function nextBreadcrumbs(
     : [listing];
 }
 
+function breadcrumbLabel(listing: DirectoryPickerListResponse): string {
+  if (listing.parent === null) {
+    return listing.directory;
+  }
+  const segment = listing.directory
+    .slice(listing.parent.length)
+    .replace(/^[/\\]+/u, "");
+  return segment.length > 0 ? segment : listing.directory;
+}
+
 export function DirectoryPickerDialog(props: {
   readonly directoryPicker: DirectoryPickerApi;
   readonly onClose: () => void;
@@ -214,7 +224,7 @@ export function DirectoryPickerDialog(props: {
                       onClick={() => void loadDirectory(item.directory)}
                       type="button"
                     >
-                      {item.directory}
+                      {breadcrumbLabel(item)}
                     </button>
                   </span>
                 ))}

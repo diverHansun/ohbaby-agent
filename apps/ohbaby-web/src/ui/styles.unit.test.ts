@@ -99,6 +99,11 @@ describe("web app layout styles", () => {
       "overflow-y: auto",
     ]);
     expectCssRule(".ohb-directory-picker-list", ["display: grid", "gap: 4px"]);
+    expectCssRule(".ohb-directory-picker-breadcrumb", [
+      "overflow-x: auto",
+      "white-space: nowrap",
+    ]);
+    expectCssRule(".ohb-directory-picker-breadcrumb span", ["flex: 0 0 auto"]);
   });
 });
 
