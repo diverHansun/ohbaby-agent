@@ -1,6 +1,7 @@
 # scheduler 模块 data-model.md
 
-> **2026-07-11 数据模型修订（优先于下文旧方案）**：未来所有可执行 job（ScheduledJob、Reminder、FollowUp）都必须携带非空 `scopeKey + sessionId`；`sessionId` 不再可选。`scopeKey` 是 canonical git root 或 canonical directory。durable job 以每个 job 最多一个 `pendingTrigger` 表达 busy 合并。Reminder 的确认来自目标 session 调度分发结果，而不是机器级 Heartbeat。当前 global-single-daemon 批次不创建或迁移 `scheduler_job` 表，下文表结构只是未来候选设计。
+> **2026-07-13 修订（优先）**：Loop 任务字段与 pending/coalesce/pause/stale 语义以 [`docs/loop/data-model.md`](../../loop/data-model.md) 为准。本文件侧重闹钟行与 `nextFireTime`；与 loop 冲突时改本文件或删除过时段落。  
+> **2026-07-11 数据模型修订**：job 必须绑定 `scopeKey + sessionId`；当前批次若尚未建表，与 Loop 实现同批 migration。下文若仍写机器级 Heartbeat 确认 Reminder，视为过时。
 
 本文档定义 `runtime/scheduler` 模块的核心概念与数据模型，统一认知语言，不冻结实现细节。
 

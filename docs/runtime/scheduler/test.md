@@ -1,6 +1,7 @@
 # scheduler 模块 test.md
 
-> **2026-07-11 测试修订（优先于下文旧方案）**：未来测试必须增加多 workspace/session 隔离、`scopeKey + sessionId` 必填、重启恢复后仍路由原 session、同一 job busy 时最多合并一次，以及 A lane paused/blocked 不影响 B lane。不得以 cwd/query fallback 作为测试默认 scope。当前 global-single-daemon 批次不运行或新增 Scheduler 实现测试。
+> **2026-07-13 修订（优先）**：门控/产品行为测试见 [`docs/loop/test.md`](../../loop/test.md)。本文件侧重堆、tick、持久化恢复、假时钟。  
+> **2026-07-11 修订**：多 scope/session 隔离与必填身份仍适用。
 
 本文档说明如何验证 `runtime/scheduler` 模块在协作环境中的正确性。
 
