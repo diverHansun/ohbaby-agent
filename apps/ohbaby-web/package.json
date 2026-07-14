@@ -1,6 +1,6 @@
 {
   "name": "ohbaby-web",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "description": "Browser adapter for the explicit ohbaby daemon",
   "type": "module",

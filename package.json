@@ -1,6 +1,6 @@
 {
   "name": "ohbaby-agent-workspace",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Workspace for ohbaby-agent, ohbaby-sdk, and ohbaby-cli",
   "private": true,
   "type": "module",
