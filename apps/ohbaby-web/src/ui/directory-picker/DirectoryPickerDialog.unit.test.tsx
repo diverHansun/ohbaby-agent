@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { DirectoryPickerListResponse } from "../../api/daemon/wire.js";
 import {
   DirectoryPickerDialog,
   type DirectoryPickerApi,
@@ -65,6 +66,14 @@ async function click(button: HTMLButtonElement): Promise<void> {
   });
 }
 
+function breadcrumbLabels(container: HTMLDivElement): readonly string[] {
+  return [
+    ...container.querySelectorAll<HTMLButtonElement>(
+      '[aria-label="Directory breadcrumb"] button',
+    ),
+  ].map((button) => button.textContent.trim());
+}
+
 function directoryPicker(): DirectoryPickerApi & {
   readonly getDirectoryPickerRoots: ReturnType<
     typeof vi.fn<DirectoryPickerApi["getDirectoryPickerRoots"]>
@@ -102,6 +111,42 @@ function directoryPicker(): DirectoryPickerApi & {
   return { getDirectoryPickerRoots, listDirectoryPicker };
 }
 
+function macDirectoryPicker(): DirectoryPickerApi {
+  const listings: Readonly<
+    Partial<Record<string, DirectoryPickerListResponse>>
+  > = {
+    "/": {
+      children: [{ directory: "/Users", name: "Users" }],
+      directory: "/",
+      ok: true,
+      parent: null,
+    },
+    "/Users": {
+      children: [{ directory: "/Users/hansun025", name: "hansun025" }],
+      directory: "/Users",
+      ok: true,
+      parent: "/",
+    },
+    "/Users/hansun025": {
+      children: [],
+      directory: "/Users/hansun025",
+      ok: true,
+      parent: "/Users",
+    },
+  };
+  return {
+    getDirectoryPickerRoots: () =>
+      Promise.resolve({ ok: true, roots: [{ directory: "/", name: "/" }] }),
+    listDirectoryPicker: (directory): Promise<DirectoryPickerListResponse> => {
+      const listing = listings[directory];
+      if (!listing) {
+        return Promise.reject(new Error("Unexpected directory"));
+      }
+      return Promise.resolve(listing);
+    },
+  };
+}
+
 describe("DirectoryPickerDialog", () => {
   it("loads roots and navigates into a child directory", async () => {
     const picker = directoryPicker();
@@ -124,7 +169,12 @@ describe("DirectoryPickerDialog", () => {
       throw new Error("child button not found");
     }
     await click(child);
-    await waitFor(() => container.textContent.includes("C:\\Projects"));
+    await waitFor(() => breadcrumbLabels(container).includes("Projects"));
+    expect(breadcrumbLabels(container)).toEqual([
+      "Locations",
+      "C:\\",
+      "Projects",
+    ]);
     expect(picker.listDirectoryPicker).toHaveBeenCalledWith("C:\\");
     expect(picker.listDirectoryPicker).toHaveBeenCalledWith("C:\\Projects");
   });
@@ -149,7 +199,7 @@ describe("DirectoryPickerDialog", () => {
       throw new Error("child button not found");
     }
     await click(child);
-    await waitFor(() => container.textContent.includes("C:\\Projects"));
+    await waitFor(() => breadcrumbLabels(container).includes("Projects"));
 
     const back = [...container.querySelectorAll("button")].find(
       (button) => button.textContent.trim() === "Back",
@@ -160,6 +210,29 @@ describe("DirectoryPickerDialog", () => {
     await click(back);
     await waitFor(() => picker.listDirectoryPicker.mock.calls.length === 3);
     expect(picker.listDirectoryPicker).toHaveBeenLastCalledWith("C:\\");
+  });
+
+  it("uses compact segment labels for a macOS POSIX breadcrumb", async () => {
+    const container = mount({ directoryPicker: macDirectoryPicker() });
+    await waitFor(() => container.textContent.includes("/"));
+
+    for (const name of ["/", "Users", "hansun025"]) {
+      const button = [...container.querySelectorAll("button")].find(
+        (candidate) => candidate.textContent.trim() === name,
+      );
+      if (!button) {
+        throw new Error(`${name} button not found`);
+      }
+      await click(button);
+    }
+
+    await waitFor(() => breadcrumbLabels(container).length === 4);
+    expect(breadcrumbLabels(container)).toEqual([
+      "Locations",
+      "/",
+      "Users",
+      "hansun025",
+    ]);
   });
 
   it("returns to the root locations from the breadcrumb", async () => {
