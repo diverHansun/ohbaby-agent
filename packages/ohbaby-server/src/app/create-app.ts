@@ -507,7 +507,7 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
   return {
     info: {
       title: "ohbaby local daemon API",
-      version: packageVersion ?? "0.1.7-dev",
+      version: packageVersion ?? "0.1.8-dev",
     },
     openapi: "3.1.0",
     paths: {
