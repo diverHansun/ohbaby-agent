@@ -124,7 +124,7 @@ function firstStartOptions(
 
 function expectBundledWebAssetsDir(value: string | undefined): void {
   expect(value).toEqual(expect.any(String));
-  expect(value).toMatch(/dist\/web$/u);
+  expect(value).toMatch(/dist[\\/]web$/u);
 }
 
 describe("createServeCommand", () => {

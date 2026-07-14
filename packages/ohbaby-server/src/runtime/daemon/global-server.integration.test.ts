@@ -8,6 +8,10 @@ import type {
 } from "ohbaby-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { daemonAuthHeader } from "../../auth/token.js";
+import {
+  DirectoryBrowserError,
+  type DirectoryBrowser,
+} from "../directory-browser.js";
 import { createDaemonHttpServer, type WorkspaceBackend } from "./server.js";
 
 function createBackend(dispose = vi.fn()): WorkspaceBackend {
@@ -104,11 +108,12 @@ describe("global daemon workspace routing", () => {
     await mkdir(join(repoA, ".git"), { recursive: true });
     await mkdir(join(repoB, ".git"), { recursive: true });
     await writeFile(file, "file", "utf8");
+    const canonicalRepoB = await realpath(repoB);
     const backendA = createBackend();
     const disposeB = vi.fn();
     const backendB = createBackend(disposeB);
     const createWorkspaceBackend = vi.fn((scopeKey: string) => {
-      if (scopeKey !== join(root, "repo-b") && !scopeKey.endsWith("/repo-b")) {
+      if (scopeKey !== canonicalRepoB) {
         throw new Error(`unexpected scope: ${scopeKey}`);
       }
       return backendB;
@@ -258,7 +263,7 @@ describe("global daemon workspace routing", () => {
     }
   });
 
-  it("opens, hides, and picks projects through authenticated global routes", async () => {
+  it("opens and hides projects through authenticated global routes", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-global-projects-"));
     cleanupDirs.push(root);
     const repo = join(root, "repo");
@@ -267,15 +272,10 @@ describe("global daemon workspace routing", () => {
     await mkdir(child, { recursive: true });
     const canonicalRepo = await realpath(repo);
     const registry = createRegistry(() => 77_000);
-    const pickDirectory = vi
-      .fn<() => Promise<string | undefined>>()
-      .mockResolvedValueOnce(repo)
-      .mockResolvedValueOnce(undefined);
     const server = createDaemonHttpServer({
       authToken: "token",
       backend: createBackend(),
       createWorkspaceBackend: () => createBackend(),
-      nativeDirectoryPicker: { pickDirectory },
       port: 0,
       scopeRoot: canonicalRepo,
       workspaceRegistry: registry,
@@ -287,33 +287,6 @@ describe("global daemon workspace routing", () => {
     };
 
     try {
-      const picked = await fetch(`${server.url}/v1/scopes/open-picker`, {
-        headers,
-        method: "POST",
-      });
-      expect(picked.status).toBe(200);
-      await expect(picked.json()).resolves.toMatchObject({
-        cancelled: false,
-        ok: true,
-        scope: { directory: canonicalRepo },
-      });
-      expect(pickDirectory).toHaveBeenCalledTimes(1);
-      expect(registry.list()).toContainEqual(
-        expect.objectContaining({
-          scopeKey: canonicalRepo,
-          visibility: "visible",
-        }),
-      );
-
-      const cancelled = await fetch(`${server.url}/v1/scopes/open-picker`, {
-        headers,
-        method: "POST",
-      });
-      await expect(cancelled.json()).resolves.toEqual({
-        cancelled: true,
-        ok: true,
-      });
-
       const openedEmptyProject = await fetch(`${server.url}/v1/scopes/open`, {
         body: JSON.stringify({ directory: child }),
         headers,
@@ -350,7 +323,8 @@ describe("global daemon workspace routing", () => {
       const scopes = await fetch(`${server.url}/v1/scopes`, { headers });
       await expect(scopes.json()).resolves.toEqual({ ok: true, scopes: [] });
 
-      const unauthorized = await fetch(`${server.url}/v1/scopes/open-picker`, {
+      const unauthorized = await fetch(`${server.url}/v1/scopes/open`, {
+        body: JSON.stringify({ directory: child }),
         method: "POST",
       });
       expect(unauthorized.status).toBe(401);
@@ -359,35 +333,28 @@ describe("global daemon workspace routing", () => {
     }
   });
 
-  it("serializes native picker requests and keeps the picker loopback-only", async () => {
+  it("provides authenticated loopback-only directory metadata routes", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-global-picker-safety-"));
     cleanupDirs.push(root);
     const repo = join(root, "repo");
     await mkdir(join(repo, ".git"), { recursive: true });
     const canonicalRepo = await realpath(repo);
-    let releasePicker: (() => void) | undefined;
-    let pickerStarted: (() => void) | undefined;
-    const started = new Promise<void>((resolve) => {
-      pickerStarted = resolve;
-    });
-    const pickDirectory = vi.fn(
-      () =>
-        new Promise<string | undefined>((resolve) => {
-          releasePicker = (): void => {
-            resolve(undefined);
-          };
-        }),
+    const listRoots = vi.fn<DirectoryBrowser["listRoots"]>(() =>
+      Promise.resolve([{ directory: "/", name: "/" }]),
     );
+    const list = vi.fn<DirectoryBrowser["list"]>(() =>
+      Promise.resolve({
+        children: [{ directory: "/projects", name: "projects" }],
+        directory: "/",
+        parent: null,
+      }),
+    );
+    const directoryBrowser: DirectoryBrowser = { list, listRoots };
     const server = createDaemonHttpServer({
       authToken: "token",
       backend: createBackend(),
       createWorkspaceBackend: () => createBackend(),
-      nativeDirectoryPicker: {
-        pickDirectory: async () => {
-          pickerStarted?.();
-          return pickDirectory();
-        },
-      },
+      directoryBrowser,
       port: 0,
       scopeRoot: canonicalRepo,
     });
@@ -398,51 +365,110 @@ describe("global daemon workspace routing", () => {
     };
 
     try {
-      const first = fetch(`${server.url}/v1/scopes/open-picker`, {
+      const unauthorized = await fetch(
+        `${server.url}/v1/directory-picker/roots`,
+      );
+      expect(unauthorized.status).toBe(401);
+      expect(listRoots).not.toHaveBeenCalled();
+
+      const unauthorizedListing = await fetch(
+        `${server.url}/v1/directory-picker/list`,
+        {
+          body: JSON.stringify({ directory: "/" }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+      );
+      expect(unauthorizedListing.status).toBe(401);
+      expect(list).not.toHaveBeenCalled();
+
+      const roots = await fetch(`${server.url}/v1/directory-picker/roots`, {
+        headers,
+      });
+      expect(roots.status).toBe(200);
+      await expect(roots.json()).resolves.toEqual({
+        ok: true,
+        roots: [{ directory: "/", name: "/" }],
+      });
+
+      list.mockRejectedValueOnce(
+        new DirectoryBrowserError(
+          "DIRECTORY_NOT_READABLE",
+          "Directory cannot be read",
+        ),
+      );
+      const unreadable = await fetch(`${server.url}/v1/directory-picker/list`, {
+        body: JSON.stringify({ directory: "/" }),
         headers,
         method: "POST",
       });
-      await started;
-      const busy = await fetch(`${server.url}/v1/scopes/open-picker`, {
-        headers,
-        method: "POST",
-      });
-      expect(busy.status).toBe(409);
-      await expect(busy.json()).resolves.toMatchObject({
-        error: { code: "DIRECTORY_PICKER_BUSY" },
+      expect(unreadable.status).toBe(400);
+      await expect(unreadable.json()).resolves.toEqual({
+        error: {
+          code: "DIRECTORY_NOT_READABLE",
+          message: "Directory cannot be read",
+        },
         ok: false,
       });
-      releasePicker?.();
-      await expect(first).resolves.toHaveProperty("status", 200);
+
+      const listing = await fetch(`${server.url}/v1/directory-picker/list`, {
+        body: JSON.stringify({ directory: "/" }),
+        headers,
+        method: "POST",
+      });
+      expect(listing.status).toBe(200);
+      await expect(listing.json()).resolves.toEqual({
+        children: [{ directory: "/projects", name: "projects" }],
+        directory: "/",
+        ok: true,
+        parent: null,
+      });
+      expect(list).toHaveBeenCalledWith("/");
+
+      const removedPicker = await fetch(`${server.url}/v1/scopes/open-picker`, {
+        headers,
+        method: "POST",
+      });
+      expect(removedPicker.status).not.toBe(200);
     } finally {
       await server.stop();
     }
 
-    const nonLoopbackPicker = vi.fn<() => Promise<string | undefined>>();
     const nonLoopback = createDaemonHttpServer({
       authToken: "token",
       backend: createBackend(),
       createWorkspaceBackend: () => createBackend(),
+      directoryBrowser,
       host: "0.0.0.0",
-      nativeDirectoryPicker: { pickDirectory: nonLoopbackPicker },
       port: 0,
       scopeRoot: canonicalRepo,
     });
     await nonLoopback.start();
     try {
       const response = await fetch(
-        `http://127.0.0.1:${String(nonLoopback.port)}/v1/scopes/open-picker`,
-        { headers, method: "POST" },
+        `http://127.0.0.1:${String(nonLoopback.port)}/v1/directory-picker/roots`,
+        { headers },
       );
       expect(response.status).toBe(403);
       await expect(response.json()).resolves.toMatchObject({
-        error: { code: "DIRECTORY_PICKER_LOOPBACK_ONLY" },
+        error: { code: "DIRECTORY_BROWSER_LOOPBACK_ONLY" },
         ok: false,
       });
-      expect(nonLoopbackPicker).not.toHaveBeenCalled();
+      expect(listRoots).toHaveBeenCalledTimes(1);
+      const listing = await fetch(
+        `http://127.0.0.1:${String(nonLoopback.port)}/v1/directory-picker/list`,
+        {
+          body: JSON.stringify({ directory: "/" }),
+          headers,
+          method: "POST",
+        },
+      );
+      expect(listing.status).toBe(403);
+      expect(list).toHaveBeenCalledTimes(2);
     } finally {
       await nonLoopback.stop();
     }
+
   });
 
   it("reports active SSE connections with their workspace scope", async () => {

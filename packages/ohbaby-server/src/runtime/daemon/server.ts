@@ -1,4 +1,4 @@
-import type { UiBackendClient } from "ohbaby-sdk";
+import { isLoopbackHost, type UiBackendClient } from "ohbaby-sdk";
 import {
   createSessionIdGenerator,
   type WorkspaceRegistryStore,
@@ -15,10 +15,10 @@ import {
 } from "../../transport/node-listen.js";
 import { InstanceStore } from "../instance-store.js";
 import {
-  createNativeDirectoryPicker,
-  NativeDirectoryPickerError,
-  type NativeDirectoryPicker,
-} from "../native-directory-picker.js";
+  createDirectoryBrowser,
+  DirectoryBrowserError,
+  type DirectoryBrowser,
+} from "../directory-browser.js";
 import {
   resolveWorkspaceScope,
   WorkspaceScopeError,
@@ -28,15 +28,6 @@ import { isAuthorizedDaemonRequest } from "../../auth/token.js";
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4096;
 
-function isLoopbackHost(host: string): boolean {
-  return (
-    host === "localhost" ||
-    host === "::1" ||
-    host === "[::1]" ||
-    host.startsWith("127.")
-  );
-}
-
 export interface DaemonHttpServerOptions {
   readonly backend: WorkspaceBackend;
   readonly authToken?: string;
@@ -45,13 +36,13 @@ export interface DaemonHttpServerOptions {
   readonly createWorkspaceBackend?: (
     scopeKey: string,
   ) => Promise<WorkspaceBackend> | WorkspaceBackend;
+  readonly directoryBrowser?: DirectoryBrowser;
   readonly eventBufferCapacity?: number;
   readonly host?: string;
   readonly listKnownWorkspaceScopes?: () =>
     | Promise<readonly string[]>
     | readonly string[];
   readonly now?: () => number;
-  readonly nativeDirectoryPicker?: NativeDirectoryPicker;
   readonly workspaceRegistry?: WorkspaceRegistryStore;
   readonly onClientConnected?: (clientId: string) => void;
   readonly onClientDisconnected?: (clientId: string) => void;
@@ -84,11 +75,11 @@ export interface ActiveDaemonConnection {
 
 type NormalizedDaemonHttpServerOptions = Omit<
   DaemonHttpServerOptions,
-  "createSessionId" | "host" | "nativeDirectoryPicker" | "now" | "port"
+  "createSessionId" | "directoryBrowser" | "host" | "now" | "port"
 > & {
   readonly createSessionId: () => string;
+  readonly directoryBrowser: DirectoryBrowser;
   readonly host: string;
-  readonly nativeDirectoryPicker: NativeDirectoryPicker;
   readonly now: () => number;
   readonly port: number;
 };
@@ -108,7 +99,6 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     string,
     ActiveDaemonConnection & { readonly count: number }
   >();
-  private nativeDirectoryPickerActive = false;
   private nodeServer: NodeListenHandle | undefined;
 
   constructor(private readonly options: NormalizedDaemonHttpServerOptions) {
@@ -202,10 +192,13 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
 
     this.app.get("/v1/scopes", (context) => this.listScopes(context));
     this.app.post("/v1/scopes/open", (context) => this.openScope(context));
-    this.app.post("/v1/scopes/open-picker", (context) =>
-      this.openScopeFromPicker(context),
-    );
     this.app.post("/v1/scopes/hide", (context) => this.hideScope(context));
+    this.app.get("/v1/directory-picker/roots", (context) =>
+      this.listDirectoryPickerRoots(context),
+    );
+    this.app.post("/v1/directory-picker/list", (context) =>
+      this.listDirectoryPickerDirectory(context),
+    );
     this.app.get("/v1/connections", (context) => this.listConnections(context));
     const dispatch = (context: Context): Promise<Response> =>
       this.dispatchWorkspaceRequest(context);
@@ -400,44 +393,64 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     }
   }
 
-  private async openScopeFromPicker(context: Context): Promise<Response> {
-    const forbidden = this.directoryPickerForbidden(context);
+  private async listDirectoryPickerRoots(context: Context): Promise<Response> {
+    const forbidden = this.directoryBrowserForbidden(context);
     if (forbidden) {
       return forbidden;
     }
-    if (this.nativeDirectoryPickerActive) {
-      return context.json(
-        {
-          error: {
-            code: "DIRECTORY_PICKER_BUSY",
-            message: "A system directory picker is already open",
-          },
-          ok: false,
-        },
-        409,
-      );
+    return context.json({
+      ok: true,
+      roots: await this.options.directoryBrowser.listRoots(),
+    });
+  }
+
+  private async listDirectoryPickerDirectory(
+    context: Context,
+  ): Promise<Response> {
+    const forbidden = this.directoryBrowserForbidden(context);
+    if (forbidden) {
+      return forbidden;
     }
-    this.nativeDirectoryPickerActive = true;
+    const input = await this.readDirectoryBody(context);
+    if (input instanceof Response) {
+      return input;
+    }
     try {
-      const directory =
-        await this.options.nativeDirectoryPicker.pickDirectory();
-      if (directory === undefined) {
-        return context.json({ cancelled: true, ok: true });
-      }
-      return await this.openScopeDirectory(context, directory, {
-        cancelled: false,
+      return context.json({
+        ok: true,
+        ...(await this.options.directoryBrowser.list(input.directory)),
       });
     } catch (error) {
-      if (error instanceof NativeDirectoryPickerError) {
+      if (error instanceof DirectoryBrowserError) {
         return context.json(
           { error: { code: error.code, message: error.message }, ok: false },
-          error.code === "DIRECTORY_PICKER_UNSUPPORTED" ? 501 : 500,
+          400,
         );
       }
       throw error;
-    } finally {
-      this.nativeDirectoryPickerActive = false;
     }
+  }
+
+  private directoryBrowserForbidden(context: Context): Response | undefined {
+    if (!this.isAuthorized(context)) {
+      return context.json(
+        { error: { message: "Unauthorized" }, ok: false },
+        401,
+      );
+    }
+    if (!isLoopbackHost(this.options.host)) {
+      return context.json(
+        {
+          error: {
+            code: "DIRECTORY_BROWSER_LOOPBACK_ONLY",
+            message: "Directory browsing is available only on loopback hosts",
+          },
+          ok: false,
+        },
+        403,
+      );
+    }
+    return undefined;
   }
 
   private async hideScope(context: Context): Promise<Response> {
@@ -465,33 +478,6 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       );
     }
     return context.json({ directory: input.directory, ok: true });
-  }
-
-  private directoryPickerAllowed(): boolean {
-    return isLoopbackHost(this.options.host);
-  }
-
-  private directoryPickerForbidden(context: Context): Response | undefined {
-    if (!this.isAuthorized(context)) {
-      return context.json(
-        { error: { message: "Unauthorized" }, ok: false },
-        401,
-      );
-    }
-    if (!this.directoryPickerAllowed()) {
-      return context.json(
-        {
-          error: {
-            code: "DIRECTORY_PICKER_LOOPBACK_ONLY",
-            message:
-              "System directory picking is available only on loopback hosts",
-          },
-          ok: false,
-        },
-        403,
-      );
-    }
-    return undefined;
   }
 
   private listConnections(context: Context): Response {
@@ -604,11 +590,10 @@ export function createDaemonHttpServer(
     clientDisconnectRetentionMs: options.clientDisconnectRetentionMs,
     createSessionId: options.createSessionId ?? createSessionIdGenerator(),
     createWorkspaceBackend: options.createWorkspaceBackend,
+    directoryBrowser: options.directoryBrowser ?? createDirectoryBrowser(),
     eventBufferCapacity: options.eventBufferCapacity,
     host: options.host ?? DEFAULT_HOST,
     listKnownWorkspaceScopes: options.listKnownWorkspaceScopes,
-    nativeDirectoryPicker:
-      options.nativeDirectoryPicker ?? createNativeDirectoryPicker(),
     workspaceRegistry: options.workspaceRegistry,
     now: options.now ?? Date.now,
     onClientConnected: options.onClientConnected,

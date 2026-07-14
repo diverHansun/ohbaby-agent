@@ -1,5 +1,6 @@
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isLoopbackHost } from "ohbaby-sdk";
 import type { ArgumentsCamelCase, Argv, CommandModule } from "yargs";
 import type { CliCommandRuntime, CliGlobalOptions } from "./types.js";
 
@@ -45,15 +46,6 @@ function normalizePort(
 function normalizeHost(host: ServeArgs["host"]): string {
   const value = host?.trim();
   return value && value.length > 0 ? value : "127.0.0.1";
-}
-
-function isLoopbackHost(host: string): boolean {
-  return (
-    host === "localhost" ||
-    host === "::1" ||
-    host === "[::1]" ||
-    host.startsWith("127.")
-  );
 }
 
 function defaultWebAssetsDirForHost(host: string): string | undefined {

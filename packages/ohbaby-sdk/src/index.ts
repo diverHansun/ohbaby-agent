@@ -164,3 +164,4 @@ export type {
 } from "./slash-command/web-passthrough.js";
 export type { CoreAPI, SDKAPI } from "./rpc/types.js";
 export { createRPC } from "./rpc/proxy.js";
+export { isLoopbackHost } from "./loopback-host.js";
