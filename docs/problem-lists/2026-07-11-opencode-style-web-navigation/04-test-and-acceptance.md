@@ -1,5 +1,10 @@
 # 4. 测试与验收标准
 
+> **2026-07-14 supersession**：目录选择验收不再包含浏览器枚举 Home 或
+> `directory-picker roots/list`。当前覆盖 macOS/Windows/Linux 命令适配、取消、
+> Linux fallback、loopback/Bearer 门、并发互斥，以及
+> `POST /v1/scopes/open-picker` 对 workspace 打开和 Web 切换的闭环。
+
 ## 4.1 测试基线与分类
 
 仓库当前使用 Vitest，测试以 `*.unit.test.ts(x)`、`*.contract.test.ts(x)`、`*.integration.test.ts(x)`、`*.smoke.test.ts(x)` 分类，默认 co-located；根脚本 `scripts/run-vitest-by-type.mjs` 按后缀执行。本议题遵循现有规则，不另建第二套 server 测试树。
@@ -27,8 +32,8 @@
 | A8 | concurrent position | integration | 并发新增无 position 冲突或丢项目；沿用 busy retry |
 | A9 | auth | integration | scopes open/hide 与 picker 无 token 均 401 |
 | A10 | picker loopback | unit/integration | loopback 可用；非 loopback 明确 403，且不泄露目录 |
-| A11 | directory-only | integration | listing 只含目录；普通文件、不可读项、破损链接不让整个请求失败 |
-| A12 | picker path validation | integration | 相对路径、不存在、文件路径返回结构化 400；无 cwd fallback |
+| A11 | native picker result | unit/integration | 取消不改变 workspace；系统所选目录只在 server 侧处理，浏览器不枚举文件或目录 |
+| A12 | picker scope validation | integration | 系统返回的不存在路径或文件路径经 `resolveWorkspaceScope()` 返回结构化 400；无 cwd fallback |
 | A13 | Git/non-Git selection | integration | open 子目录 canonicalize 到 Git root；非 Git 返回 canonical directory |
 | A14 | hide 无副作用 | integration | session 行数、run 状态、InstanceStore loaded 状态均不因 hide 改变 |
 | A15 | serve 主动恢复 hidden | unit/真实进程 integration | 新启动和复用 server 都在返回 URL 前 open 当前 canonical cwd；即使 browser open 失败，registry 仍 visible |
@@ -37,7 +42,7 @@
 
 - `packages/ohbaby-agent/src/services/workspace-registry/database-store.unit.test.ts`
 - `packages/ohbaby-agent/src/services/database/database.integration.test.ts`
-- `packages/ohbaby-server/src/runtime/directory-picker.unit.test.ts`
+- `packages/ohbaby-server/src/runtime/native-directory-picker.unit.test.ts`
 - `packages/ohbaby-server/src/runtime/daemon/global-server.integration.test.ts`
 
 ## 4.3 Phase B：Web navigation runtime
@@ -79,8 +84,8 @@
 | C6 | right click/remove | component | contextmenu 打开；“从项目栏移除”调用 hide，不调用 archive/delete |
 | C7 | keyboard menu | component | 不用右键也能打开同一 action；Escape 关闭并恢复 focus |
 | C8 | new session | component | 在 selected scope 调 createSession；null project 时 disabled/引导添加项目 |
-| C9 | directory dialog | component | `+` 打开；无路径 input；breadcrumb/parent/list/select/loading/error/empty 都可见 |
-| C10 | dialog focus | component/browser | focus trap、Escape、关闭后 focus 回 `+` |
+| C9 | system directory picker | component/integration | `+` 调用 runtime 的系统选择动作；页面不出现路径 input、目录树或 Web dialog |
+| C10 | picker cancellation | integration | 系统选择取消后当前 workspace 不刷新、不切换，且页面不显示错误 |
 | C11 | unavailable project | component | entry 保留并有警告；点击失败有可见错误；仍能 remove |
 | C12 | sidebar collapse | component/browser | 默认零宽收起；展开按钮位于 rail 顶部；rail 始终保留，conversation 可用，展开后只显示当前项目 sessions |
 | C13 | empty global/project | component | 无 visible project 与有 project 无 session 是两种明确空态 |
@@ -111,8 +116,8 @@
 | ID | 操作 | 预期 |
 |----|------|------|
 | PW1 | 从 repo-a 执行 serve 打开页面 | rail 选中 A；第二栏路径是 repo-a；A 的 last/recent session 恢复 |
-| PW2 | 点击 `+` | 打开目录 dialog；没有路径输入；可从 Home 逐层进入 repo-empty |
-| PW3 | 选择 repo-empty | rail 新增且选中；无 session 仍保留项目；显示项目空态 |
+| PW2 | 点击 `+` | 打开当前 OS 的原生文件夹选择器；页面本身不出现路径输入或 Web 目录 dialog |
+| PW3 | 在原生选择器中选择 repo-empty | rail 新增且选中；无 session 仍保留项目；显示项目空态 |
 | PW4 | 新建 session | session 出现在 repo-empty 第二栏；切到 A 后不出现 |
 | PW5 | 切 A/B/empty | 每次路径、sessions、conversation 一致；浏览器 console 无 stale generation 错误 |
 | PW6 | 刷新页面 | 当前项目与该项目最后 session 恢复；URL hash 同步 |
@@ -121,8 +126,8 @@
 | PW9 | 从 hidden repo-b 再执行 serve | 同一 origin 打开；B 自动恢复 rail 并选中，恢复 B last session |
 | PW10 | 选择 Git 子目录 | rail 只有 Git root 一个项目，不出现子目录重复项 |
 | PW11 | 使目录暂时不可用后刷新 | entry 不消失，显示 unavailable，可从菜单移除 |
-| PW12 | 折叠第二栏并调整窄宽度 | rail、dialog、Composer 仍可操作，无水平页面溢出遮挡主动作 |
-| PW13 | 键盘操作 | Tab 可达 rail/`+`/menu/session/composer；Escape 正确关闭 menu/dialog |
+| PW12 | 折叠第二栏并调整窄宽度 | rail、`+`、Composer 仍可操作，无水平页面溢出遮挡主动作 |
+| PW13 | 键盘操作 | Tab 可达 rail/`+`/menu/session/composer；页面 menu 正确响应 Escape，原生 picker 由 OS 负责键盘行为 |
 | PW14 | 运行中的 session 切项目/隐藏 | run 不被 stop；切回后 snapshot 展示真实运行状态 |
 
 ### 4.5.3 视觉检查
@@ -153,8 +158,8 @@
 | 攻击面 | 典型失败 | 防御/验收 | 残余风险 |
 |--------|----------|-----------|----------|
 | session discovery vs hidden | remove 后立即复活 | A4/B10/B11 | 手工 DB 修改不在产品保证内 |
-| directory picker | LAN 用户枚举 Home | A9/A10/A11 + 非 loopback 禁用 | 获得 token 的本机用户仍可看目录名，符合本地 daemon 信任边界 |
-| path race/symlink | list 后目标消失或换指向 | A12/A13/B14；open 时重新 realpath | 文件系统在 connect 后仍可变化，按已有 runtime 错误处理 |
+| directory picker | LAN 触发本机系统选择器 | A9/A10/A11 + 非 loopback 禁用；无 roots/list | 本机 loopback + token 用户仍可打开 OS 对话框，符合本地 daemon 信任边界 |
+| path race/symlink | 选择后目标消失或换指向 | A12/A13/B14；open 时重新 realpath | 文件系统在 connect 后仍可变化，按已有 runtime 错误处理 |
 | startup precedence | 旧 local preference 压过新 cwd | B2/B3/B4/B13 | 用户手改 hash 可触发可见 400，不静默猜测 |
 | cross-scope session | B 的 sessionId 发给 A | B5/B6/C5/PW5 | session ID 碰撞仍由 backend scope/claim 契约防护 |
 | hide active project | 意外停止 run/丢选择 | A14/B11/B12/PW14 | 用户主动切走后短时间看不到后台进度，属已知 UX |
@@ -167,6 +172,7 @@
 ```bash
 # 针对性
 pnpm exec vitest run packages/ohbaby-agent/src/services/workspace-registry
+pnpm exec vitest run packages/ohbaby-server/src/runtime/native-directory-picker.unit.test.ts
 pnpm exec vitest run packages/ohbaby-server/src/runtime/daemon/global-server.integration.test.ts
 pnpm exec vitest run apps/ohbaby-web/src/api/daemon/workspace-switch.integration.test.ts
 pnpm exec vitest run apps/ohbaby-web/src/ui
@@ -191,7 +197,7 @@ pnpm --filter ohbaby-web build
 - [x] hidden 项目不会被 session/loaded discovery 自动恢复。
 - [x] hidden 项目从对应 cwd 再次 `ohbaby serve` 会恢复并选中。
 - [x] browser 自动打开失败时，单独执行的 `ohbaby serve` 仍已把 hidden 项目恢复为 visible。
-- [x] directory picker 只在 loopback、Bearer 鉴权后列目录；无路径输入和文件内容。
+- [x] system directory picker 只在 loopback、Bearer 鉴权后调用；无路径输入、Web 目录树或文件内容读取。
 - [x] serve cwd hint > local preference > registry fallback 的优先级有自动测试。
 - [x] 每项目 last session 恢复且不会跨 scope select。
 - [x] 三层导航 UI 完成，旧 workspace `<select>` 与样式已删除；会话栏默认零宽收起。
@@ -207,5 +213,12 @@ pnpm --filter ohbaby-web build
 - 自动化最终全量复跑：unit 193 files / 1556 tests，contract 10 files / 201 tests，integration 40 files / 246 tests，全部通过；integration 包含耗时 112.48s 的 npm packed CLI 安装 smoke。
 - 静态检查：workspace `typecheck`、`lint`、Web build、全 workspace build 与 CLI 内嵌 Web assets build 通过。
 - 真实进程：隔离 HOME + 临时 DB，以 `--port 0` 启动 foreground daemon，实际端口 61634。
-- Playwright：验证 62px rail 默认态、300px sessions 展开态、目录弹窗无路径输入、无 session 项目导入、新建 session、A/B 会话隔离、hash/session 刷新恢复、右键隐藏、hidden cwd 再次 `serve` 恢复；页面无水平溢出，console warning/error 为空。
+- Playwright：验证 62px rail 默认态、300px sessions 展开态、无路径输入/Web 目录 dialog、无 session 项目导入、新建 session、A/B 会话隔离、hash/session 刷新恢复、右键隐藏、hidden cwd 再次 `serve` 恢复；页面无水平溢出，console warning/error 为空。
 - 尚未声称完成：不可用目录视觉、Git 子目录 dedupe、运行中 run 隐藏/切换和完整键盘 focus trap 的真浏览器矩阵，保留为后续强化项，不阻塞本批已确认的产品闭环。
+
+## 4.11 2026-07-14 系统目录选择 supersession 执行记录
+
+- 删除 Web `DirectoryPickerModal` 与 `GET/POST /v1/directory-picker/*`；新增 `native-directory-picker.ts` 与 `POST /v1/scopes/open-picker`。
+- 自动化：`native-directory-picker.unit.test.ts`、`global-server.integration.test.ts`（open/cancel/auth/busy/loopback）、`workspace-switch.integration.test.ts`（取消不切换 / 选择后切换）、`App.unit.test.tsx`（C9 无 Web dialog）共 64 tests 通过。
+- Playwright（`127.0.0.1:4097`，临时 DB）：页面无 `role=dialog` / 路径树；`Open project` → `POST /v1/scopes/open-picker`；mock 取消保持 URL/项目；真实点击拉起 macOS `osascript choose folder`；并发二次点击返回 409 `DIRECTORY_PICKER_BUSY` 并在 UI 展示错误。
+- OS 原生对话框本身（访达确认选择/取消）仍由人工在目标平台点验；自动化不声称控制 OS sheet。

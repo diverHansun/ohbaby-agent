@@ -2,13 +2,20 @@
 
 > 状态：**Phase A–D 已实施；自动化与真实 daemon + Playwright 核心闭环已通过（2026-07-11）。**
 >
+> **2026-07-14 补充（优先）**：旧的 Web 自绘目录浏览器和
+> `GET /v1/directory-picker/roots`、`POST /v1/directory-picker/list` 已删除。
+> `Open project` 现在由 loopback daemon 调用系统原生“选择文件夹”：macOS
+> 使用访达文件夹对话框、Windows 使用 `FolderBrowserDialog`（可跨盘符）、Linux 使用
+> `zenity` 或 `kdialog`。当前接口与验收以
+> `POST /v1/scopes/open-picker` 及其 `cancelled` 结果为准。
+>
 > 本目录既是全局单 daemon 完成后的 Web Phase 2 实施契约，也是本批实现与验收记录。
 
 ## 1. 议题
 
 现有 Web 已经具备全局单 daemon、多 workspace 路由和安全切换能力，但界面仍是技术验证版本：workspace 被压进会话侧栏里的 `<select>`，没有 OpenCode 式的“项目栏 → 项目会话栏 → 对话面板”信息架构，也没有可持久导入、隐藏和恢复项目的产品闭环。
 
-本批在**保留已有 workspace runtime 与 SSE 隔离机制**的前提下，重做 Web 导航外壳，并补齐它真正需要的少量服务端能力：持久化 workspace registry 和受保护的服务端目录浏览 API。
+本批在**保留已有 workspace runtime 与 SSE 隔离机制**的前提下，重做 Web 导航外壳，并补齐它真正需要的少量服务端能力：持久化 workspace registry 和受保护的系统目录选择 API。
 
 ## 2. 文档地图
 
@@ -26,7 +33,7 @@
 
 - OpenCode 风格三层导航：项目 rail、按需展开的当前项目/会话侧栏、对话面板。会话栏默认零宽收起，展开按钮固定在项目 rail 顶部。
 - 项目根目录首字母入口、选中态、完整路径提示和稳定顺序。
-- `+` 打开服务端目录浏览弹窗；不提供路径输入框。
+- `+` 打开当前系统的原生目录选择器；不提供路径输入框或 Web 目录树。
 - 导入项目持久化；即使没有 session，重启后也继续显示。
 - 项目右键/更多菜单“从项目栏移除”；不删除 session、不删除文件、不停止 runtime。
 - hidden tombstone 覆盖 session 历史自动发现，防止项目被移除后立即重新出现。
@@ -44,7 +51,7 @@
 - 删除项目目录、删除或批量归档 session。
 - per-scope runtime 自动 dispose；隐藏项目不等于卸载 runtime。
 - TUI attach serve、默认 CLI 改走 daemon。
-- LAN/CORS/App 鉴权设计；目录浏览能力在非 loopback host 上必须禁用。
+- LAN/CORS/App 鉴权设计；系统目录选择能力在非 loopback host 上必须禁用。
 - 像素级照搬 OpenCode、完整移动端重设计、重型截图基线系统。
 - `/loop`、Scheduler、Heartbeat、`scheduler_job`。
 
@@ -67,13 +74,13 @@
 1. [x] 用户审阅并确认本目录 00–04。
 2. [x] 按 02 完成 registry、全局 API、Web runtime 与导航 UI。
 3. [x] 按 04 完成 unit / contract / integration、typecheck、lint 与 build 回归。
-4. [x] 启动隔离 HOME、临时 DB 和真实 foreground daemon，使用 Playwright 验证目录弹窗、无 session 导入、项目/会话切换、隐藏与 `serve` 恢复、收起/展开布局。
+4. [x] 启动隔离 HOME、临时 DB 和真实 foreground daemon，使用 Playwright 验证系统目录选择入口（无 Web 目录 dialog）、无 session 导入、项目/会话切换、隐藏与 `serve` 恢复、收起/展开布局；2026-07-14 另验证真实 osascript picker 与 `DIRECTORY_PICKER_BUSY`。
 5. [ ] 独立实现审查会话按 02/04 出具最终验收结论。
 
 ## 7. 实施结果摘要
 
 - `workspace_registry` migration/store 已成为项目栏可见性真相源；hidden tombstone 不会被 session 历史自动冲掉。
-- daemon 提供鉴权的 scopes open/hide 与 loopback-only 目录浏览 API；目录弹窗只列文件夹，不读取文件内容、不提供路径输入。
+- daemon 提供鉴权的 scopes open/hide 与 loopback-only 系统目录选择 API；浏览器不会再枚举或读取本机目录，所选路径仍会经 `resolveWorkspaceScope()` 校验。
 - `ohbaby serve` 的 cwd 会显式 reopen hidden 项目；复用既有 daemon 时也在返回 URL 前完成恢复。
 - Web runtime 已实现启动优先级、canonical hash、每项目最后 session、SSE/client 重绑与失败回滚。
 - 旧 workspace `<select>` 已删除。项目 rail 永久显示导入项目；会话栏默认收起，点击 rail 顶部按钮后才显示当前根目录的 sessions。

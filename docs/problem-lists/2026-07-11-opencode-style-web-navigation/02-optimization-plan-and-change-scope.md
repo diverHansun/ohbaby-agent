@@ -1,6 +1,11 @@
 # 2. 优化方案与改动面
 
 > 本文是实施契约。2026-07-11 已按 Phase A–D 落地；经用户确认，会话侧栏最终采用“默认零宽收起、rail 顶部按钮展开”的呈现。
+>
+> **2026-07-14 supersession**：本文关于 `directory-picker roots/list`、
+> `DirectoryPickerDialog` 与 Web 目录枚举的细节已废止。目录选择改为
+> `POST /v1/scopes/open-picker`：daemon 在 loopback + Bearer 鉴权后调用系统
+> 原生文件夹选择器，并将取消或 canonical scope 作为单个响应返回。
 
 ## 2.1 目标架构
 
@@ -20,7 +25,7 @@ Global daemon               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ Global routes (no workspace header)                             │
 │  ├─ scopes list/open/hide                                       │
-│  └─ directory-picker roots/list (loopback only)                 │
+│  └─ scopes/open-picker (loopback only → OS folder dialog)       │
 │                                                                 │
 │ Workspace dispatcher (x-ohbaby-directory required)              │
 │  └─ existing InstanceStore → per-scope app/backend/SSE          │
@@ -51,8 +56,8 @@ Shared SQLite               ▼
 | 导航结构 | 固定 project rail + project sessions + conversation | 正确表达项目→session→内容层级 | 更漂亮的下拉框、单栏折叠树 | 桌面宽度占用增加，需要响应式降级 |
 | 项目持久化 | 现有共享 SQLite 新表 | 跨 daemon/浏览器一致，沿用备份/迁移机制 | localStorage、独立 JSON | 增加 additive migration 和小型 store |
 | 移除语义 | visible/hidden tombstone | session 不删且项目不会被历史重新发现 | 删除 registry row | 需要合并 discovered/loaded 时执行优先级 |
-| 目录选择 | daemon 目录浏览 API + Web dialog | Web 能选择 server 可访问绝对目录，跨 OS | 路径输入、browser file handle、macOS 原生调用 | 需要敏感 API、focus/dialog 状态和安全门 |
-| 目录安全 | Bearer + loopback-only + directories-only | 最小化本机路径泄漏 | 仅靠 CORS/token | 显式 LAN serve 时该功能不可用 |
+| 目录选择 | daemon 调用 OS 原生文件夹选择器 | 返回 server 可访问的绝对目录，覆盖 macOS/Windows/Linux | 路径输入、browser file handle、Web 目录树 | 需要平台适配和原生 dialog 生命周期管理 |
+| 目录安全 | Bearer + loopback-only + 无路径树 | 浏览器不再读取本机目录；选择结果仍经 server 校验 | 仅靠 CORS/token | 显式 LAN serve 时该功能不可用 |
 | 当前选择持久化 | versioned localStorage | UI 偏好不污染 backend truth | server 全局 active session | 不同浏览器不会共享最后选中 session（这是刻意的） |
 | URL | `directory` + 可选 `session` hash | 可复现、serve hint 优先、刷新可恢复 | 只存内存 | 必须处理 stale/跨 scope session hint |
 | UI 拆分 | 只拆导航边界 | 缓解神文件且控制范围 | 全量重写 App/样式系统 | 旧 `App.tsx` 仍较大，后续再按真实痛点演进 |
@@ -200,37 +205,21 @@ Content-Type: application/json
 - 不 delete session，不归档，不停止 run，不 dispose InstanceStore。
 - 404 表示项目未登记；400 表示输入不合法；401 表示未授权。
 
-### 2.4.4 目录浏览
+### 2.4.4 系统目录选择
 
 ```http
-GET /v1/directory-picker/roots
-POST /v1/directory-picker/list
-
-{ "directory": "/absolute/current-directory" }
-```
-
-`roots` 至少返回用户 Home 与 filesystem root。`list` 返回：
-
-```ts
-interface DirectoryListing {
-  readonly currentDirectory: string;
-  readonly parentDirectory: string | null;
-  readonly directories: readonly {
-    readonly directory: string;
-    readonly name: string;
-  }[];
-}
+POST /v1/scopes/open-picker
 ```
 
 安全与行为：
 
 - `isAuthorized()` 失败返回 401。
-- server host 非 loopback 时返回 403 `directory-picker-unavailable`。
-- 只列可导航目录；不返回文件、不读取文件内容。
-- 目录名排序稳定；单个无权限/破损 symlink 不得让整个 listing 500。
-- current directory 必须绝对、存在、可读且为目录；否则结构化 400。
-- picker list 不执行 Git root canonicalization；只有最终 `scopes/open` 决定 scope identity。
-- 不接受 cwd/query fallback，不根据 Web asset 路径猜目录。
+- server host 非 loopback 时返回 403 `DIRECTORY_PICKER_LOOPBACK_ONLY`。
+- macOS 通过 AppleScript、Windows 通过 PowerShell `FolderBrowserDialog`、Linux 通过 `zenity` 后备 `kdialog` 调用原生文件夹选择器。
+- 用户取消返回 `{ ok: true, cancelled: true }`；选择成功返回 `{ ok: true, cancelled: false, scope }`。
+- 选中的路径必须经 `resolveWorkspaceScope()` canonicalize；文件、失效路径或不可访问路径返回结构化 400。
+- 原生 chooser 同时只允许一个；并发请求返回 409 `DIRECTORY_PICKER_BUSY`。
+- 浏览器从不枚举目录、接收目录树或提交任意路径。
 
 ## 2.5 Web runtime 与导航状态
 
@@ -240,7 +229,7 @@ interface DirectoryListing {
 
 - 全局 scopes/picker 请求显式 `includeDirectory: false`。
 - workspace snapshot/events/commands 继续带 selected `x-ohbaby-directory`。
-- 增加 `openWorkspace`、`hideWorkspace`、`listDirectoryRoots`、`listDirectories` 门面。
+- 增加 `openWorkspace`、`openWorkspaceFromSystemPicker`、`hideWorkspace` 门面。
 - rail 点击、picker 选择和 startup hint 都先走 `openWorkspace`，由 server 更新 `last_opened_at` 并返回 canonical key，再调用现有内部 switch；普通 `GET /v1/scopes` 不产生打开副作用。
 - 不让 React 组件直接拼 fetch、token 或 header。
 
@@ -324,7 +313,6 @@ apps/ohbaby-web/src/ui/
   App.tsx                         # 保留顶层业务编排、Conversation/overlay
   shell/AppShell.tsx              # 三栏布局与响应式壳
   projects/ProjectRail.tsx        # 项目 glyph、选中态、+、context menu
-  projects/DirectoryPickerDialog.tsx
   sessions/SessionSidebar.tsx     # 当前项目 header + session list
   navigation.css                  # 新导航样式
 ```
@@ -339,7 +327,7 @@ apps/ohbaby-web/src/ui/
 - selected 使用边框 + 背景双重信号，不只靠颜色。
 - tooltip/accessible name 包含 basename 与完整路径。
 - 新项目追加到稳定 position；本批无拖拽。
-- `+` 打开 directory dialog。
+- `+` 调用系统原生目录选择器。
 - pointer contextmenu 和键盘/`…` 菜单共享同一 action model。
 
 ### 2.6.3 Project/Session sidebar
@@ -351,14 +339,12 @@ apps/ohbaby-web/src/ui/
 - 保留 archive 行为，但“从项目栏移除”不能复用 Archive 文案或图标。
 - 侧栏允许折叠；折叠不影响 project rail。
 
-### 2.6.4 DirectoryPickerDialog
+### 2.6.4 SystemDirectoryPicker
 
-- modal 打开时 focus 进入 dialog，Escape 关闭并返回 `+`。
-- breadcrumb、返回父目录、Home/roots、当前目录子目录列表、“选择当前文件夹”。
-- 不显示/提供路径输入框。
-- loading、empty、permission denied、directory disappeared、non-loopback unavailable 都有明确状态。
-- 单击目录进入；选择按钮才调用 `scopes/open`，避免浏览过程中污染 registry。
-- open 成功后关闭 dialog、选中/恢复 rail 项并执行 workspace switch。
+- Web 端不渲染 modal、breadcrumb、路径输入或目录树；`+` 直接请求 `scopes/open-picker`。
+- 取消后保持当前 workspace，不刷新、不切换，也不显示错误。
+- 成功后刷新 rail、选中 canonical scope 并执行既有 workspace switch。
+- 原生 dialog 的 focus、键盘、权限提示和路径导航由 OS 管理；Web 仅展示服务端返回的可解释错误。
 
 ### 2.6.5 Conversation pane
 
@@ -370,13 +356,13 @@ apps/ohbaby-web/src/ui/
 
 - 桌面：rail + session sidebar + conversation。
 - 中窄宽度：rail 保留，session sidebar 可折叠为 drawer/隐藏态。
-- 本批不承诺完整手机产品重设计，但 720px 以下不得让 rail、dialog 或 Composer 无法操作。
+- 本批不承诺完整手机产品重设计，但 720px 以下不得让 rail、`+` 或 Composer 无法操作。
 
 ## 2.7 分阶段实施
 
 ### Phase A：registry 与全局 API
 
-目标：先让项目持久可见、可隐藏、可显式恢复，并能安全浏览目录。
+目标：先让项目持久可见、可隐藏、可显式恢复，并能安全调用系统目录选择器。
 
 改动：
 
@@ -386,7 +372,7 @@ apps/ohbaby-web/src/ui/
 - `packages/ohbaby-agent/src/index.ts`
 - `packages/ohbaby-server/src/runtime/daemon/server.ts`
 - `packages/ohbaby-server/src/runtime/daemon/main.ts`
-- 新增 `packages/ohbaby-server/src/runtime/directory-picker.ts`（或等价职责文件）
+- 新增 `packages/ohbaby-server/src/runtime/native-directory-picker.ts`
 - 对应 unit/integration tests。
 
 DoD：04 中 A 系列测试通过；旧 `/v1/scopes`、workspace dispatch、版本/legacy 测试不回归。
@@ -408,7 +394,7 @@ DoD：04 中 B 系列通过；旧 SSE generation 隔离与 fail-closed rollback 
 
 ### Phase C：三栏 UI
 
-目标：替换 `<select>`，完成 rail、project sessions、dialog 和 remove/restore 交互。项目 rail 始终存在；会话栏默认不占宽度，点击 rail 顶部按钮后展开并只显示 selected project 的 sessions。
+目标：替换 `<select>`，完成 rail、project sessions、系统目录选择入口和 remove/restore 交互。项目 rail 始终存在；会话栏默认不占宽度，点击 rail 顶部按钮后展开并只显示 selected project 的 sessions。
 
 改动：
 
@@ -442,7 +428,7 @@ DoD：04 发布门全部满足，用户再进行实现审查。
 |---------|------|------|-----------|
 | `packages/ohbaby-agent/src/services/database` | migration 013 schema | migrations/schema | 无破坏性 migration |
 | `packages/ohbaby-agent/src/services/workspace-registry` | store/types/tests | — | — |
-| `packages/ohbaby-server/src/runtime` | directory picker helper/tests | daemon server/main wiring | 旧 scopes callback 由 registry 合并替代 |
+| `packages/ohbaby-server/src/runtime` | native directory picker helper/tests | daemon server/main wiring | 旧 Web directory listing 由原生选择器替代 |
 | `apps/ohbaby-web/src/navigation` | preferences、selection helpers/tests | — | — |
 | `apps/ohbaby-web/src/api/daemon` | 新 DTO/方法/集成测 | runtime startup/open/hide | 不删除 workspace switch 隔离 |
 | `apps/ohbaby-web/src/ui` | shell/rail/dialog/sidebar/CSS/tests | App orchestration | `WorkspaceSelector` 与旧 selector CSS |
@@ -463,7 +449,7 @@ DoD：04 发布门全部满足，用户再进行实现审查。
 | 风险 | 防护 | 回滚 |
 |------|------|------|
 | hidden 被 session discovery 覆盖 | store 明确 `ensureDiscovered` 不改 hidden；集成测 | UI 可暂时只读 registry，表数据保留 |
-| directory picker 泄漏本机目录 | loopback gate + Bearer + dirs-only + 无文件内容 | 禁用 picker routes，不影响手工 serve/historical projects |
+| system directory picker 被非本机调用 | loopback gate + Bearer + 单实例互斥；浏览器不接触路径树 | 禁用 picker route，不影响手工 serve/historical projects |
 | startup hint 与 local preference 打架 | 固定优先级与纯函数测试 | 保留 hash directory，关闭 session/local restore |
 | hide 当前项目造成断连 | 有 fallback 先 switch 后 hide；唯一项目进入 null state | hide 失败不改变 selection；可 `open` 恢复 |
 | registry position 并发冲突 | SQLite transaction + unique index + busy retry | 重试；不做 silent overwrite |
@@ -486,7 +472,7 @@ DoD：04 发布门全部满足，用户再进行实现审查。
 
 ## 2.12 与 00 对齐
 
-- 服务端目录弹窗、无路径输入：已覆盖。
+- 系统原生目录选择（`scopes/open-picker`）、无路径输入/Web 目录树：已覆盖。
 - 无 session 项目永久显示：registry visible 已覆盖。
 - 右键移除但不删 session：hidden tombstone 已覆盖。
 - hidden 项目被 `ohbaby serve` 显式恢复：startup `scopes/open` 已覆盖。
@@ -500,7 +486,7 @@ DoD：04 发布门全部满足，用户再进行实现审查。
 |---------|---------|---------|
 | P1 项目/session 层级错误 | §2.1、§2.6 三栏 shell | C1–C5、PW1/PW5 |
 | P2 无持久 registry | §2.3 migration/store | A1–A3 |
-| P3 无服务端目录浏览 | §2.4.4、§2.6.4 | A9–A13、C9/C10、PW2/PW3 |
+| P3 无系统目录选择 | §2.4.4、§2.6.4 | A9–A13、C9/C10、PW2/PW3 |
 | P4 无导航恢复模型 | §2.5.2–§2.5.4 | B1–B7、PW1/PW6/PW9 |
 | P5 App/CSS 神文件 | §2.6.1、Phase C | C1/C14 + review |
 | P6 remove 后被历史复活 | §2.3 hidden tombstone、§2.4.3 | A4/A5/A14、B10–B13、PW7–PW9 |

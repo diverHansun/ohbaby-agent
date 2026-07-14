@@ -52,7 +52,7 @@
 
 | OpenCode 做法 | ohbaby 适配 | 原因 |
 |---------------|-------------|------|
-| 原生系统目录选择器 | daemon 目录浏览 API + Web dialog | 浏览器 directory handle 不能提供 daemon 可访问的绝对路径 |
+| 原生系统目录选择器 | daemon 调用系统选择器；Web 只处理结果 | 浏览器 directory handle 不能提供 daemon 可访问的绝对路径 |
 | Desktop 本地项目存储 | 共享 SQLite registry | ohbaby 面板由全局 daemon 服务，多个浏览器应看到同一可见项目集 |
 | Desktop 当前窗口状态 | URL hint + localStorage per-client preference | `ohbaby serve` cwd 必须优先，同时不能让多个 Web client 争 active session |
 | 项目删除/关闭交互 | “从项目栏移除”= hidden tombstone | session 与文件继续保留，且历史 discovery 不得自动复活 |
@@ -86,7 +86,7 @@
 ## 3.7 对实施方案的直接影响
 
 1. OpenCode 项目 rail → `ProjectRail` 与三栏 `AppShell`。
-2. 原生 picker 的产品语义 → Web `DirectoryPickerDialog`，但使用 daemon 目录 API。
+2. 原生 picker 的产品语义 → daemon 调用 OS 原生目录选择器，Web 只请求并接收取消/选中结果。
 3. 项目是第一等实体 → SQLite `workspace_registry`，不再只从 session 反推。
 4. project/session 两层选择 → server visible/hidden 与 browser last-session 分离。
 5. 稳定空间记忆 → registry `position`，不按 `last_opened_at` 每次跳动。

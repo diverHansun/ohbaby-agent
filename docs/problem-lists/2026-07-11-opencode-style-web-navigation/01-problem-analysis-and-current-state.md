@@ -10,11 +10,11 @@
 |----|----------|----------|----------|
 | P1 | workspace 被放进会话侧栏的 `<select>` | 无法一眼看出有哪些项目，项目与 session 层级混乱 | 一个 `SessionSidebar` 同时承担品牌、项目选择和 session 导航，职责不内聚 |
 | P2 | known scopes 只来自 session 历史与 loaded runtime | 无 session 的新导入项目无法跨 daemon 重启保留 | 没有持久 registry，也没有 visible/hidden tombstone |
-| P3 | 没有服务端目录浏览 API | Web 的 `+` 无法完成“选择本机项目根目录” | 浏览器目录 handle 不能替代 daemon 所需的绝对路径 |
+| P3 | 没有服务端系统目录选择入口 | Web 的 `+` 无法完成“选择本机项目根目录” | 浏览器目录 handle 不能替代 daemon 所需的绝对路径 |
 | P4 | 启动 hint 只读一次，没有完整导航恢复模型 | 刷新、切回项目、直接打开 URL 的体验不稳定 | 没有 per-project last session、hash 同步和明确优先级 |
 | P5 | `App.tsx` 与 `styles.css` 已成为神文件 | 改导航容易误伤命令、权限、Composer | 2619 行 TSX + 2035 行 CSS，导航继续堆入会放大偶然复杂度 |
 | P6 | “从项目栏移除”缺少可表达的数据状态 | 项目会因历史 session 立即重新出现 | `GET /v1/scopes` 对 session roots 和 loaded scopes 只做并集 |
-| P7 | 现有测试证明“能切 workspace”，未证明目标产品闭环 | 临时 `<select>` 通过测试也不代表三栏可用 | 缺目录弹窗、隐藏/恢复、启动优先级和真实浏览器交互覆盖 |
+| P7 | 现有测试证明“能切 workspace”，未证明目标产品闭环 | 临时 `<select>` 通过测试也不代表三栏可用 | 缺系统目录选择、隐藏/恢复、启动优先级和真实浏览器交互覆盖 |
 | P8 | 旧 UI 文档仍把 claude.ai 单屏稿与最小 selector 当目标 | 继续开发时会出现两个 source of truth | `docs/ohbaby-web/ui/*` 与本轮 OpenCode 三栏目标发生漂移 |
 
 ## 1.2 已经正确、不得回退的基线
@@ -50,7 +50,7 @@ P1–P8 的解决方案必须建立在这些能力之上，不能通过整体 re
 
 - 项目导航是全局 Web shell 职责，不应是 session sidebar 中的一个表单字段（P1）。
 - 持久项目 registry 是 server/共享 DB 职责，不应塞进 React localStorage；但 selected project/session 是 UI 偏好，也不应写成 backend 会话真相。当前文档没有把这两个“持久化”分开（P2/P4）。
-- 服务端目录浏览属于本地 daemon 的受保护基础设施，不属于 agent 领域，也不能由浏览器自行猜路径（P3）。
+- 系统目录选择属于本地 daemon 的受保护基础设施，不属于 agent 领域，也不能由浏览器自行猜路径（P3）。**2026-07-14**：已落地为 OS 原生选择器 + `scopes/open-picker`，不再做 Web 目录枚举。
 
 ## 1.4 architecture 诊断
 
@@ -149,11 +149,11 @@ interface WorkspaceSnapshot {
 2. **隐藏项目**：context menu → registry hidden → rail 移除 → fallback project；session 和 runtime 不变。
 3. **显式恢复**：`ohbaby serve` hash 或 picker 重新选择 → registry visible → selected。
 4. **导航恢复**：hash/local preference → 校验 visible scope → connect → 恢复 session。
-5. **目录浏览**：浏览器不能直接给 daemon 绝对路径，当前 server 无 roots/list-directories 契约（P3）。
+5. **目录选择**：浏览器不能直接给 daemon 绝对路径。~~早期设想 roots/list-directories~~（已废止）。**2026-07-14**：改为 `POST /v1/scopes/open-picker`，由 daemon 调 OS 原生文件夹选择器返回绝对路径；浏览器不再枚举本机目录。
 
 ### 安全缺口
 
-目录枚举比普通 workspace API 更敏感：它能暴露本机目录名称。如果只依赖“将来可能正确配置的 CORS”，风险不可接受。当前 server 默认 loopback 且有 token，但新 API 仍需显式执行 loopback gate、Bearer 鉴权、目录-only 返回和错误收敛。
+~~目录枚举比普通 workspace API 更敏感：它能暴露本机目录名称。~~ **2026-07-14 更新**：Web 侧已不再枚举目录树；残余风险集中在 loopback daemon 弹出系统选择器本身。仍必须显式执行 loopback gate、Bearer 鉴权；选择结果经 `resolveWorkspaceScope()` 校验，取消不得改变 workspace。
 
 ## 1.7 use-case 诊断
 
@@ -175,7 +175,7 @@ interface WorkspaceSnapshot {
 
 ### 安全
 
-- 新目录浏览 API 必须只允许 loopback、必须鉴权、不得返回文件内容或读取文件。
+- 系统目录选择 API 必须只允许 loopback、必须鉴权；Web 不得接收目录树、文件内容或任意路径输入。
 - open 继续调用 `resolveWorkspaceScope()`，不得在 UI 或 registry store 复制 canonicalization。
 - hide 只能操作已知 canonical scope key，不把任意用户字符串当删除条件。
 
