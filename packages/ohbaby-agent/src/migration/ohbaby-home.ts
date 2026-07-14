@@ -2,6 +2,7 @@ import { constants as fsConstants } from "node:fs";
 import {
   copyFile,
   cp,
+  chmod,
   lstat,
   mkdir,
   open,
@@ -36,6 +37,7 @@ const DATA_MARKER_FILE = ".migrated-from-ohbaby-agent-data.json";
 const SKIP_MARKER_FILE = ".skip-auto-migrate";
 const LOCK_RETRY_MS = 25;
 const LOCK_RETRY_LIMIT = 200;
+const IGNORED_CONFIG_ENTRY_NAMES = new Set([".DS_Store"]);
 
 export interface OhbabyMigrationOptions extends OhbabyPathOptions {
   readonly projectDirectory?: string;
@@ -377,6 +379,10 @@ async function migrateConfigTree(
   const entries = await readdir(sourceRoot, { withFileTypes: true });
   for (const entry of entries) {
     const sourcePath = path.join(sourceRoot, entry.name);
+    if (IGNORED_CONFIG_ENTRY_NAMES.has(entry.name)) {
+      report.skipped.push(sourcePath);
+      continue;
+    }
     const relativePath = path.relative(sourceBase, sourcePath);
     const targetRelativePath =
       relativePath === "skill"
@@ -464,6 +470,9 @@ async function migrateOneConfigRoot(
     return;
   }
   await mkdir(targetRoot, { mode: 0o700, recursive: true });
+  if ((options.platform ?? process.platform) !== "win32") {
+    await chmod(targetRoot, 0o700);
+  }
   await withMigrationLock(
     path.join(targetRoot, ".ohbaby-agent-migration.lock"),
     () =>
