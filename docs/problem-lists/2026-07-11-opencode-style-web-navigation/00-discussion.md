@@ -29,10 +29,10 @@
 | 第一栏 | 显示项目根目录 basename 的首字母；当前项目有明确选中态 |
 | 第二栏 | 显示当前项目名、缩短后的根目录路径、新建会话按钮和该项目 sessions |
 | 第三栏 | 沿用现有对话流、权限、命令和 Composer 能力 |
-| `+` | 打开**服务端目录浏览弹窗**；不提供手工路径输入 |
+| `+` | 打开**系统原生文件夹选择器**（macOS 访达 / Windows 文件夹对话框 / Linux zenity|kdialog）；不提供手工路径输入或 Web 目录树 |
 | 导入持久性 | 新导入项目即使没有 session，也永久显示在项目栏 |
 | 移除项目 | 右键或 `…` 菜单“从项目栏移除”；不删除 session，不删除文件 |
-| 恢复项目 | hidden 项目再次被 `ohbaby serve` 显式打开，或在目录弹窗中再次选择时，自动恢复项目栏入口 |
+| 恢复项目 | hidden 项目再次被 `ohbaby serve` 显式打开，或在系统选择器中再次选择时，自动恢复项目栏入口 |
 | 项目切换 | 切换项目后，第二栏只呈现该 scope 的 sessions；不得出现跨 scope 串扰 |
 | session 恢复 | 切回项目时恢复该项目最后选中的 session |
 | 借鉴范围 | 只学习 OpenCode 的三栏导航；不做顶部搜索、设置、Review |
@@ -66,16 +66,19 @@
 - 从项目栏移除只修改导航可见性；不触发 session 删除、归档或 InstanceStore dispose。
 - 目录缺失或不可读时不静默删 registry；rail 保留不可用状态，用户可移除或修复路径。
 
-## 5. 已确认：服务端目录弹窗
+## 5. 已确认：系统原生目录选择
+
+> **2026-07-14 supersession**：不再使用 Web 弹窗枚举目录；改为 daemon 调 OS 原生文件夹选择器。
 
 - 普通浏览器不能像 Electron/OpenCode Desktop 一样可靠取得 server 可访问的绝对路径，因此不使用 `<input webkitdirectory>` 冒充本机项目选择器。
-- Web 弹窗通过 daemon API 枚举**目录**，不返回文件内容。
-- 默认从当前用户 Home 开始，可导航父目录和其他可达目录。
+- `Open project` / rail `+` 请求 `POST /v1/scopes/open-picker`；页面不渲染 modal、breadcrumb、路径输入或目录树。
+- macOS 使用访达 `choose folder`；Windows 使用 PowerShell `FolderBrowserDialog`（`-STA`，可跨盘符）；Linux 优先 `zenity`，回退 `kdialog`。
+- 用户取消返回 `{ cancelled: true }`，不改变 workspace；成功路径仍经 `resolveWorkspaceScope()` canonicalize。
 - 选择 Git 仓库内子目录时仍 canonicalize 为 Git root；非 Git 使用 canonical directory。
 - 重复选择同一 canonical root 时去重并直接选中。
-- 目录枚举和 open/hide API 都必须 Bearer 鉴权。
-- 目录枚举只允许 loopback host；非 loopback serve 返回明确禁用错误，不把本机目录浏览能力暴露到 LAN。
-- 目录在“列出 → 选择”之间消失时，open 继续 fail-closed，不回退 cwd/query。
+- open-picker / open / hide 都必须 Bearer 鉴权。
+- 系统目录选择只允许 loopback host；非 loopback serve 返回明确禁用错误，不把本机选择器能力暴露到 LAN。
+- 并发二次 open-picker 返回 409 `DIRECTORY_PICKER_BUSY`；选择结果在 open 时 fail-closed，不回退 cwd/query。
 
 ## 6. 已确认：选择性撤销旧前端
 
@@ -108,4 +111,4 @@
 
 - 全局单 daemon 的进程、版本、legacy、路由与 fail-closed 决策继续以 [`../2026-07-11-global-single-daemon/`](../2026-07-11-global-single-daemon/README.md) 为准。
 - Web 的 REST/SSE、状态投影、权限与命令职责继续以 [`../../ohbaby-web/`](../../ohbaby-web/README.md) 为准。
-- 本目录只接管 Web Phase 2 的项目导航、registry、目录浏览和浏览器验收。
+- 本目录只接管 Web Phase 2 的项目导航、registry、系统目录选择和浏览器验收。
