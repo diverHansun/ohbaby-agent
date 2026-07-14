@@ -28,11 +28,13 @@ goals 的关键业务动作收敛为四个（每个都可追溯到 Duty）：
 3. **续跑循环**（GoalDriver，每轮）：
    a. 预算/安全阀判定：任一已设 turn/token/active-time 预算到顶 **或** 续跑轮数达 1000-turn 系统绝对上限 → pause（写入 pauseReason）→ 停。
    b. incrementTurn。
-   c. 渲染续跑提醒文本（流 D）并作为 user 消息起一轮续跑 Run（首轮输入=objective，后续=GOAL_CONTINUATION_CORE + 进度 + 预算报告）；Run 内模型可调 goal 工具。
+   c. 渲染续跑提醒文本（流 D）并作为 user 消息起一轮续跑 Run（首轮输入=objective，后续=GOAL_CONTINUATION_CORE + 进度 + 预算报告）；Run 内模型可调 goal/Todo 工具。复杂多阶段 Goal 可建立并维护跨 continuation 的 Todo 里程碑，简单 Goal 不强制创建。
    d. 读 `RunCompletion` → 翻译为迁移（见责任边界与失败点）。
 4. **自判终止**：模型在某轮调 `UpdateGoal('complete')`（成功，宣告即清，**完成总结就在这一轮里，不额外加轮**）或 `UpdateGoal('paused', reason)`（判不可能/需输入）。
 5. **预算/安全阀终止**：任一已设预算到顶或安全阀触发 → pause（可恢复）。
 6. **输出**：每次迁移追加记录 + 发布快照；complete 额外发完成消息后清记录。
+
+> complete 顺序：若本 Goal 使用了 Todo，模型先对账清单与验证结果，再确保所有 subagent execution 非 running，然后调用 `UpdateGoal(complete)`，最后输出用户回答。Todo 不是第二权威，runtime 不因 pending item 拒绝 complete。
 
 > 分支——**模糊目标**：不做强制澄清轮；objective 直接建 goal，模型在首轮自审后若判"已答/不可能/矛盾"即 `complete`/`paused`，不空跑。
 > 分支——**预算收敛**：当任一预算用量达 75% 时，续跑提醒中标记"approaching budget limit, start converging"，模型据此主动收尾。
@@ -41,8 +43,8 @@ goals 的关键业务动作收敛为四个（每个都可追溯到 Duty）：
 
 1. **插话中断**：goal `active` 续跑期间用户发来普通消息。CLI in-process adapter 以 owner-aware interruption 让用户 Run 优先：先取消当前 goal Run，再起用户 Run。对用户可见语义是 interrupt-current；具体实现不要求 run-manager 对普通 user/user prompt 启用全局 `interrupt-current`。
 2. **停 goal（不删）**：GoalDriver 捕获 cancelled → pause（`pauseReason: "interrupted"`）。goal 完整保留。
-3. **办用户短期目标**：模型处理用户消息；与 goal 的工作在**同一 session、同一 message history** 中，模型能看到 goal 的进展 + 用户的插话。若用户连发多条，队列逐条办完。
-4. **用户显式恢复**：用户完成小任务后，自行 `/goal resume` → goal 回 active → GoalDriver 重入续跑循环（回到 UC-1）。
+3. **办用户短期目标**：模型处理用户消息；与 goal 的工作在**同一 session、同一 message history** 中，模型能看到 goal 的进展 + 用户的插话。普通任务使用 ordinary Todo scope，不读取或覆盖 paused Goal 的清单。若用户连发多条，队列逐条办完。
+4. **用户显式恢复**：用户完成小任务后，自行 `/goal resume` → goal 回 active → GoalDriver 重入续跑循环（回到 UC-1），Todo projection 重新选择该 Goal 原有 scope。
 
 > **不自动恢复。** 用户始终知道自己打断了 goal，知道自己要恢复。简单、可预测。
 > **不做 context 隔离。** goal 的 turn 与普通任务的 turn 共享同一 session，模型在 resume 时能看到插话期间的增量，无需重复。
@@ -63,6 +65,7 @@ goals 的关键业务动作收敛为四个（每个都可追溯到 Duty）：
 3. **输出**：迁移结果 + 快照；`resume` 额外触发 ensure-driving 重入续跑；`cancel` 丢弃记录。
 
 > 恢复路径统一：**只有 `/goal resume` 一条路。** 不自动恢复、不模型据意图恢复。任何 paused 的 goal，用户敲 `/goal resume` 即可确定性恢复。
+> Identity：`/goal replace` 是同一 goalId 上的 objective 变更，模型应立即重写不再适用的 Todo；模型工具 `CreateGoal({replace:true})` 则创建新 goalId。若它发生在运行中的旧 Goal turn，当前 run 的 Todo lease 仍属于旧 goalId，下一 continuation 才选择新 scope。
 
 ---
 
@@ -78,6 +81,7 @@ goals 的关键业务动作收敛为四个（每个都可追溯到 Duty）：
 | 上下文组装、compact | core/context | goals 供 user 消息，位置/压缩归 context |
 | 权限模式 / 工具审批 | permission/policy | goal 循环在既定权限下跑 |
 | 完成/阻塞判定、预算设置 | **模型**（经工具落到 goals） | goals 只记录模型声明的迁移，不替模型判断内容 |
+| Todo scope 与 UI 投影 | todo-list + adapter | adapter 用 run-start goalId 冻结 scope；goals 不读取 Todo，不以 Todo 状态拒绝 complete |
 | 记录落盘 / 字节存储 | services/database | services 只存取记录；GoalStore 定义回放与归一化逻辑 |
 | CLI/Web 渲染 | UI 层 | goals 只发快照 |
 

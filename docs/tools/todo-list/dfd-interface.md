@@ -41,11 +41,11 @@ Web/TUI 不直接访问 TodoService 或 session history。
 **行为**：
 
 1. 完整校验输入。
-2. 原子替换 `context.sessionId + context.contextScopeId` 的列表。
+2. 原子替换 runtime 为当前调用解析出的 `sessionId + contextScopeId? + internal workScopeId?` 列表；公开参数不接受 scope。
 3. `[]` 表示显式清空。
 4. 相同列表可返回成功但不发布重复更新事件。
 
-**输出**：Agent 可读的当前列表，以及供内部调用方使用的结构化 `count/todos` metadata。输出不进入正常 UI transcript。
+**输出**：Agent 可读的当前列表，以及供内部调用方使用的结构化 `count/todos/internalWorkScopeId?` metadata。内部 scope 不进入工具参数或 UI payload；输出不进入正常 UI transcript。
 
 ### `todo_read`
 
@@ -53,27 +53,28 @@ Web/TUI 不直接访问 TodoService 或 session history。
 
 **参数**：空对象，不接受额外字段。
 
-**行为**：返回 `context.sessionId + context.contextScopeId` 当前完整列表；若尚未加载，先执行一次懒恢复；不改变列表，不发布 `todo.updated`。
+**行为**：返回 runtime 为当前调用解析出的完整列表；若尚未加载，先执行一次 scope-aware 懒恢复；不改变列表，不发布 `todo.updated`。
 
 **输出**：Agent 可读列表和结构化 `count/todos` metadata，同样不进入正常 UI transcript。
 
 ## 三、TodoService 内部接口语义
 
-### `read(sessionId, contextScopeId?)`
+### `read(sessionId, contextScopeId?, workScopeId?)`
 
 - 返回防御性副本。
 - unloaded 时可调用注入的 history recovery port，完成后转为 loaded。
 
-### `replace(sessionId, todos, contextScopeId?)`
+### `replace(sessionId, todos, contextScopeId?, workScopeId?)`
 
 - 调用者必须传入已验证完整数组，服务仍保持不可变复制边界。
 - 返回 `{ todos, todosChanged }` 或等价结果。
 - UI projection 同时比较列表和 `visible`；只有完整投影不变时才不重复发事件。
 
-### `recover(sessionId, contextScopeId?, messages)`
+### `recover(sessionId, contextScopeId?, workScopeId?, messages)`
 
 - 从后向前检查 `todo_write`。
 - 必须同时存在匹配 callId 的成功完成 result。
+- result metadata 的 `internalWorkScopeId` 必须与目标 workload scope 一致；缺少 metadata 只匹配 ordinary。
 - 失败、拒绝、取消、pending/running 或损坏参数均跳过。
 - 命中第一个有效候选即停止；有效 `[]` 也停止。
 - 无候选或无法读取历史时降级为 loaded + []，恢复错误写 warning，但不使 resume 失败。
@@ -123,6 +124,8 @@ interface UiTodoUpdatedEvent {
 | run 结束 | 保留 | false |
 | 新 run 开始且有未完成项 | 保留 | true |
 | 新 run 开始且全 completed/空 | 保留 | false |
+
+Goal 模式覆盖上表的 run-end 规则：active Goal 的同一 workload scope 在相邻 continuation 间不隐藏，非空列表（含全 completed）保持可见供 complete 前对账；pause/cancel/complete 或 identity 切换时才切走。UI 仍只看到每个 session 的单一当前投影，事件不携带 `goalId`/scope。
 
 ## 五、Transcript 数据流
 

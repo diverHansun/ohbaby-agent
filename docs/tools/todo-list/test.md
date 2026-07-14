@@ -16,6 +16,7 @@
 - 两个工具在 streaming、持久 snapshot 和失败路径中均不进入 transcript。
 - 默认权限下 `todo_write` 直接执行，不产生权限弹窗；文件和命令写权限不受影响。
 - primary base 包含 Todo 启用与生命周期策略；Plan Agent 同时具备 Todo 读写工具。
+- Goal workload scope 与 ordinary/context scope 隔离；active Goal 跨 continuation 可见，pause→ordinary→resume 正确切换，complete 前只有 prompt 软对账而无 runtime gate。
 - 真实浏览器和真实 TUI 进程验收。
 
 ### 不覆盖
@@ -52,6 +53,15 @@
 ### CS5：session 隔离
 
 - 主 session、另一主 session、同一 child session 的不同 context scope 分别维护列表。
+- 同一主 session 的 ordinary、`goal:<goalId>` 和替换后的新 goalId 分别维护列表；子 Agent 不继承 parent Goal scope。
+
+### CS5a：Goal 生命周期与 lease
+
+- Goal run start 获取明确 goalId 对应的冻结 lease；缺少 goalId 显性失败，不降级 ordinary。
+- active Goal 的非空列表跨 continuation 不闪烁；pause 后 ordinary 写入不污染 Goal，resume 恢复原列表。
+- `CreateGoal({replace:true})` 中途换 identity 时当前 run 仍写旧 scope，下一 continuation 读新 scope。
+- complete 前模型 prompt 要求 reconcile，但 GoalService 不读取 TodoStore、pending Todo 不阻止 complete。
+- rebuild 同时存在 ordinary/Goal 历史时，按 `internalWorkScopeId` 选择；旧无 metadata 只恢复 ordinary。
 - active main session selector 不聚合子 Agent Todo。
 
 ### CS6：snapshot/event 一致性

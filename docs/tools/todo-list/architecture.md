@@ -12,11 +12,11 @@
 
 ### 2. Session TodoService
 
-按 `sessionId + contextScopeId` 维护当前不可变 Todo 数组，并提供读取、原子替换、懒恢复和变化订阅。主 context 的 `contextScopeId` 为空；服务生命周期由 UI runtime composition 持有，不由每次工具创建临时 store。
+按 `sessionId + contextScopeId? + workScopeId?` 维护当前不可变 Todo 数组，并提供读取、原子替换、懒恢复和变化订阅。主 context 的 `contextScopeId` 为空；ordinary 的 `workScopeId` 为空，Goal 使用内部 `goal:<goalId>`。若存在 `contextScopeId`，它优先决定子 Agent 隔离，忽略 parent workload scope。服务生命周期由 UI runtime composition 持有，不由每次工具创建临时 store。
 
 ### 3. History Recovery Adapter
 
-读取现有 session/message 历史，从后向前匹配 `todo_write` call 与对应成功 result，只恢复最后一次成功完成的完整数组。
+读取现有 session/message 历史，从后向前匹配 workload metadata 一致的 `todo_write` call 与对应成功 result，只恢复最后一次成功完成的完整数组。无 metadata 的旧事务只匹配 ordinary。
 
 ### 4. UI Projection Adapter
 
@@ -28,12 +28,16 @@ Web/TUI 只接收 snapshot/event，按 active main session 选择列表并渲染
 
 ### 6. Prompt Policy Integration
 
-primary `base.md` 定义 Todo 的稳定工作策略；工具 description 与 schema 仅通过原生工具定义发送，用于定义调用接口。Plan Agent 与普通 primary Agent 都可读写 Todo，因此共享 base 不会产生“提示要求调用但工具不可用”的能力缺口。当前不新增 Todo 专用动态 prompt layer。
+primary `base.md` 定义 Todo 的稳定工作策略和 Goal complete 前软对账；Goal continuation reminder 重申复杂 Goal 的跨轮维护。工具 description 与 schema 仅通过原生工具定义发送，用于定义调用接口。Plan Agent 与普通 primary Agent 都可读写 Todo，因此共享 base 不会产生“提示要求调用但工具不可用”的能力缺口。当前不新增 Todo 专用动态 prompt layer。
+
+### 7. Run-start Workload Lease
+
+adapter 在 Goal run 开始时用 driver 明确传入的 `goalId` 获取 Todo scope lease，并在 run settlement 后释放。lease 在本 run 内冻结：`UpdateGoal(complete)` 清 store 或 `CreateGoal({replace:true})` 创建新 identity，都不能改变当前 run 的 Todo ownership。Goal owner 缺少 goalId 是运行时不变量失败，不降级 ordinary。
 
 ## 二、核心数据路径
 
 ```text
-todo_write ── validate ──> TodoService.replace(sessionId, contextScopeId, todos)
+todo_write ── validate ──> TodoService.replace(sessionId, contextScopeId, workScopeId, todos)
                                   |
                                   ├─ return todosChanged
                                   └─ UI projection checks visibility too
@@ -41,7 +45,7 @@ todo_write ── validate ──> TodoService.replace(sessionId, contextScopeId
                                              ├─ projection unchanged: no event
                                              └─ projection changed: todo.updated
 
-todo_read ─────────────────> TodoService.read(sessionId, contextScopeId)
+todo_read ─────────────────> TodoService.read(sessionId, contextScopeId, workScopeId)
                                   |
                                   └─ unloaded: recover once from messages
 
@@ -50,6 +54,8 @@ run lifecycle ─────────────> UI projection visibility
                                   ├─ UiSnapshot
                                   └─ todo.updated
 ```
+
+Goal continuation 的 `workScopeId` 由 Todo-specific registry 注入，不扩散到通用 `ToolExecutionContext`，也不进入 provider-visible schema。
 
 ## 三、关键设计模式
 

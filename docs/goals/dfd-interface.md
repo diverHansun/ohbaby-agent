@@ -104,7 +104,7 @@ start ┌──────────────┐  预算到顶或安全阀
 1. 读 GoalStore 当前态；若 `active` 且（任一已设 turn/token/active-time 预算到顶 **或** 续跑轮数达 1000-turn 系统绝对上限）→ pause（写入 `pauseReason`）→ 退出循环。
 2. incrementTurn（追加记录：turn 计数、wall-clock 锚点）。
 3. 渲染续跑提醒文本（流 D）：首轮=objective、后续轮=GOAL_CONTINUATION_CORE + 进度 + 预算报告。
-4. 起一轮续跑 Run：调用 `run-manager.create(...)`，输入为**续跑提醒文本作为 user 消息**；`waitForCompletion` 等待 `RunCompletion`。该 Run 执行期间，模型可见 goal 工具。token 消耗由 GoalDriver 在 Run 完成后 `recordTokenUsage`。
+4. 起一轮续跑 Run：调用 runner 时同时传入**续跑提醒文本**与本轮开始时的 `goalId`；adapter 用该 identity 冻结内部 Todo workload lease，再由 `run-manager.create(...)` 将提醒作为 user 消息执行。`waitForCompletion` 等待 `RunCompletion`。该 Run 执行期间，模型可见 goal/Todo 工具。token 消耗由 GoalDriver 在 Run 完成后 `recordTokenUsage`。
 5. 依 `RunCompletion.status` 分支（把执行结果翻译成状态迁移）：
    - `succeeded` 且 goal 仍 `active` → 回到步骤 1，续下一轮。
    - `succeeded` 但 goal 已清（complete）或非 active（模型经流 C 改了状态）→ 退出循环。
@@ -114,6 +114,8 @@ start ┌──────────────┐  预算到顶或安全阀
 
 一条不变量：**只有 `active` 才推进**；循环退出即意味着 goal 进入 paused、complete 或 null 之一。
 
+另一条不变量：goal-owned Run 必须携带明确 `goalId`；缺失是 adapter 运行时错误，不可静默降级 ordinary。run-start lease 在本 Run settlement 前不变，因此 complete 清 store 或模型中途 `CreateGoal({replace:true})` 都不会重定向本 Run 后续 Todo 调用。
+
 ### 流 C：模型自判与调整（工具，模块内迁移）
 
 1. 某轮 Run 执行中，模型调用 goal 工具（模块外 tool-scheduler 调度）。
@@ -121,7 +123,7 @@ start ┌──────────────┐  预算到顶或安全阀
 3. 模块内迁移：`UpdateGoal(complete/paused/active)` / `GetGoal`（只读）/ `SetGoalBudget`（opt-in 设预算）/ `CreateGoal`（prose 自主请求）。
 4. 追加记录 + 发布快照；驱动循环在本轮 Run 完成后（流 B 步骤 5）读到新状态并据此续跑或退出。
 
-约束：`SetGoalBudget` 是 opt-in 的，仅当用户明确要求时模型才调用。`replaceObjective` 亦经此类迁移替换 objective；`CreateGoalInput.replace` 仅表示"创建时允许覆盖已有 goal"。
+约束：`SetGoalBudget` 是 opt-in 的，仅当用户明确要求时模型才调用。`replaceObjective` 在同一 goal identity 上替换 objective；`CreateGoalInput.replace` 表示“创建新的 goal identity 覆盖已有 goal”。Todo 对账由 prompt 约束模型，UpdateGoal/GoalService 不读取 TodoStore、不设 hard gate。
 
 ### 流 D：续跑提醒与 light note（模块内产出 → 不同入口消费）
 
@@ -135,8 +137,8 @@ start ┌──────────────┐  预算到顶或安全阀
 
 1. goal 续跑期间用户发来普通消息（模块外）→ CLI in-process adapter 识别当前 in-flight owner 是 `goal`，等待 goal run 注册完成后取消该 run，再启动用户 Run → goal 的续跑 Run 被 `cancelled`。对用户可见语义是 interrupt-current，但实现点在 adapter 边界，而不是给普通 user/user prompt 全局启用 run-manager `interrupt-current`。
 2. 流 B 步骤 5 捕获 `cancelled` → GoalStore pause（`pauseReason: "interrupted"`）→ 退出循环。
-3. 用户的小任务在**同一 session** 中执行，共享 message history。模型能看到 goal 的工作 + 用户的插话。
-4. 用户完成小任务后，自行 `/goal resume` → goal 回 active → GoalDriver 重入续跑循环（回到流 B）。
+3. 用户的小任务在**同一 session** 中执行，共享 message history，但 Todo 选择 ordinary workload scope，paused Goal 清单保留且不投影。
+4. 用户完成小任务后，自行 `/goal resume` → goal 回 active → GoalDriver 重入续跑循环（回到流 B），adapter 重新选择 `goal:<goalId>` scope。
 
 **不自动恢复。** 不追踪队列状态，不区分 cancelReason，driver **不自动重入**——只由 `/goal resume` 显式触发（该启动仍走 ensure-driving，幂等）。简单、可预测。
 
@@ -170,6 +172,7 @@ start ┌──────────────┐  预算到顶或安全阀
 | 依赖接口 | goals 期望的语义 | 同步性 | 风险 |
 |---|---|---|---|
 | run-manager `create` + `waitForCompletion` | 起一轮续跑 Run（输入含 user 消息）并返回 `{status, terminalReason, usage?}`；goal run 被 adapter 取消后以 `cancelled` completion 收敛 | 异步 | 契约需稳定；取消无需区分 cancelReason（所有 cancelled → pause，写入 `pauseReason`） |
+| adapter Todo scope lease | 接收 goal-owned run 的明确 goalId，冻结为 `goal:<goalId>` 直至 run settlement；只投影当前 workload | 异步 run 生命周期 | 缺失 goalId 必须显性失败；内部 scope 不得进入公开工具/UI schema |
 | core/message（经 run-manager 输入） | 续跑提醒文本作为 user 消息写入持久 history，由现有消息系统持久化、由 context 按既有规则组装与压缩 | 同步写入 | 无新风险，复用现有机制 |
 | services/database | 追加 GoalRecord、按 session 读取重建 | 异步 | schema 演进需兼容重放 |
 | stream-bridge | 发布 goal 快照/变更事件 | 异步、尽力而为 | 观察者缺失不得影响状态权威 |
