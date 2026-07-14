@@ -2,12 +2,13 @@
 
 > 状态：**Phase A–D 已实施；自动化与真实 daemon + Playwright 核心闭环已通过（2026-07-11）。**
 >
-> **2026-07-14 补充（优先）**：旧的 Web 自绘目录浏览器和
-> `GET /v1/directory-picker/roots`、`POST /v1/directory-picker/list` 已删除。
-> `Open project` 现在由 loopback daemon 调用系统原生“选择文件夹”：macOS
-> 使用访达文件夹对话框、Windows 使用 `FolderBrowserDialog`（可跨盘符）、Linux 使用
-> `zenity` 或 `kdialog`。当前接口与验收以
-> `POST /v1/scopes/open-picker` 及其 `cancelled` 结果为准。
+> **2026-07-14 superseded（优先）**：本目录中关于系统原生目录选择器、
+> `POST /v1/scopes/open-picker` 及其 `cancelled` 结果的结论已经被
+> [`../2026-07-14-web-directory-picker/`](../2026-07-14-web-directory-picker/README.md)
+> 取代。当前实现为 Bearer + loopback 保护的
+> `GET /v1/directory-picker/roots` 与 `POST /v1/directory-picker/list`，页面内目录树
+> 选择后仍调用既有 `POST /v1/scopes/open`。本目录其余项目 rail、registry、SSE
+> 切换和 URL 恢复结论继续有效。
 >
 > 本目录既是全局单 daemon 完成后的 Web Phase 2 实施契约，也是本批实现与验收记录。
 
