@@ -2,18 +2,24 @@ import type { MessageWithParts } from "../core/message/index.js";
 import type { MessageScopeFilter } from "../core/message/types.js";
 import type {
   Tool,
+  ToolExecutionContext,
   ToolExecutionResult,
 } from "../core/tool-scheduler/index.js";
 import { ToolParameterError } from "./utils/params.js";
-import {
-  isScopedSessionKeyForSession,
-  scopedSessionKey,
-} from "../utils/scoped-session.js";
 
 export const MAX_TODO_ITEMS = 10;
 export const MAX_TODO_CONTENT_LENGTH = 100;
 
 export type TodoStatus = "pending" | "in_progress" | "completed";
+export type TodoWorkScopeId = `goal:${string}`;
+
+export function goalTodoWorkScopeId(goalId: string): TodoWorkScopeId {
+  const normalized = goalId.trim();
+  if (normalized === "") {
+    throw new Error("Goal-owned Todo scope requires a non-empty goalId.");
+  }
+  return `goal:${normalized}`;
+}
 
 export interface TodoItem {
   readonly content: string;
@@ -29,17 +35,72 @@ export interface TodoStore {
   read(
     sessionId: string,
     contextScopeId?: string,
+    workScopeId?: TodoWorkScopeId,
   ): Promise<readonly TodoItem[]> | readonly TodoItem[];
   write(
     sessionId: string,
     todos: readonly TodoItem[],
     contextScopeId?: string,
+    workScopeId?: TodoWorkScopeId,
   ): Promise<TodoWriteResult> | TodoWriteResult;
 }
 
 export interface TodoWriteEvent extends TodoWriteResult {
   readonly sessionId: string;
   readonly contextScopeId?: string;
+  readonly workScopeId?: TodoWorkScopeId;
+}
+
+export interface TodoWorkScopeLease {
+  readonly workScopeId?: TodoWorkScopeId;
+  release(): void;
+}
+
+export class TodoWorkScopeRegistry {
+  private readonly activeBySession = new Map<
+    string,
+    { readonly token: object; readonly workScopeId?: TodoWorkScopeId }
+  >();
+
+  acquire(
+    sessionId: string,
+    workScopeId?: TodoWorkScopeId,
+  ): TodoWorkScopeLease {
+    const token = {};
+    this.activeBySession.set(sessionId, {
+      token,
+      ...(workScopeId === undefined ? {} : { workScopeId }),
+    });
+    let released = false;
+    return {
+      ...(workScopeId === undefined ? {} : { workScopeId }),
+      release: (): void => {
+        if (released) return;
+        released = true;
+        if (this.activeBySession.get(sessionId)?.token === token) {
+          this.activeBySession.delete(sessionId);
+        }
+      },
+    };
+  }
+
+  resolve(sessionId: string): TodoWorkScopeId | undefined {
+    return this.activeBySession.get(sessionId)?.workScopeId;
+  }
+
+  release(sessionId: string): void {
+    this.activeBySession.delete(sessionId);
+  }
+
+  dispose(): void {
+    this.activeBySession.clear();
+  }
+}
+
+export interface TodoToolOptions {
+  readonly resolveWorkScopeId?: (
+    context: ToolExecutionContext,
+  ) => TodoWorkScopeId | undefined;
 }
 
 export interface TodoHistorySource {
@@ -61,6 +122,38 @@ const TODO_STATUSES = new Set<TodoStatus>([
   "pending",
 ]);
 const TODO_ITEM_FIELDS = new Set(["content", "status"]);
+const TODO_WORK_SCOPE_METADATA_KEY = "internalWorkScopeId";
+
+function encodeKeyPart(value: string): string {
+  return encodeURIComponent(value);
+}
+
+function todoScopeKey(input: {
+  readonly sessionId: string;
+  readonly contextScopeId?: string;
+  readonly workScopeId?: TodoWorkScopeId;
+}): string {
+  const contextScopeId =
+    input.contextScopeId === undefined
+      ? "-"
+      : encodeKeyPart(input.contextScopeId);
+  const workScopeId =
+    input.contextScopeId !== undefined || input.workScopeId === undefined
+      ? "-"
+      : encodeKeyPart(input.workScopeId);
+  return `todo:${encodeKeyPart(input.sessionId)}::context:${contextScopeId}::work:${workScopeId}`;
+}
+
+function todoSessionKeyPrefix(sessionId: string): string {
+  return `todo:${encodeKeyPart(sessionId)}::`;
+}
+
+function effectiveWorkScopeId(
+  contextScopeId: string | undefined,
+  workScopeId: TodoWorkScopeId | undefined,
+): TodoWorkScopeId | undefined {
+  return contextScopeId === undefined ? workScopeId : undefined;
+}
 
 export class TodoService implements TodoStore {
   private readonly loadedBySession = new Map<string, readonly TodoItem[]>();
@@ -78,8 +171,17 @@ export class TodoService implements TodoStore {
   async read(
     sessionId: string,
     contextScopeId?: string,
+    workScopeId?: TodoWorkScopeId,
   ): Promise<readonly TodoItem[]> {
-    const key = scopedSessionKey({ contextScopeId, sessionId });
+    const effectiveWorkScope = effectiveWorkScopeId(
+      contextScopeId,
+      workScopeId,
+    );
+    const key = todoScopeKey({
+      contextScopeId,
+      sessionId,
+      workScopeId: effectiveWorkScope,
+    });
     const loaded = this.loadedBySession.get(key);
     if (loaded !== undefined) {
       return cloneTodos(loaded);
@@ -89,7 +191,12 @@ export class TodoService implements TodoStore {
     if (loading === undefined) {
       const token = {};
       loading = {
-        promise: this.loadFromHistory(sessionId, contextScopeId, token),
+        promise: this.loadFromHistory(
+          sessionId,
+          contextScopeId,
+          effectiveWorkScope,
+          token,
+        ),
         token,
       };
       this.loadingBySession.set(key, loading);
@@ -108,8 +215,17 @@ export class TodoService implements TodoStore {
     sessionId: string,
     todos: readonly TodoItem[],
     contextScopeId?: string,
+    workScopeId?: TodoWorkScopeId,
   ): TodoWriteResult {
-    const key = scopedSessionKey({ contextScopeId, sessionId });
+    const effectiveWorkScope = effectiveWorkScopeId(
+      contextScopeId,
+      workScopeId,
+    );
+    const key = todoScopeKey({
+      contextScopeId,
+      sessionId,
+      workScopeId: effectiveWorkScope,
+    });
     const next = cloneTodos(todos);
     const previous = this.loadedBySession.get(key);
     const changed = previous === undefined || !todosEqual(previous, next);
@@ -120,26 +236,38 @@ export class TodoService implements TodoStore {
       ...result,
       ...(contextScopeId === undefined ? {} : { contextScopeId }),
       sessionId,
+      ...(effectiveWorkScope === undefined
+        ? {}
+        : { workScopeId: effectiveWorkScope }),
     });
     return result;
   }
 
   release(sessionId: string): void {
+    const prefix = todoSessionKeyPrefix(sessionId);
     for (const [key, loading] of this.loadingBySession) {
-      if (isScopedSessionKeyForSession(key, sessionId)) {
+      if (key.startsWith(prefix)) {
         this.cancelledLoads.add(loading.token);
         this.loadingBySession.delete(key);
       }
     }
     for (const key of this.loadedBySession.keys()) {
-      if (isScopedSessionKeyForSession(key, sessionId)) {
+      if (key.startsWith(prefix)) {
         this.loadedBySession.delete(key);
       }
     }
   }
 
-  releaseScope(sessionId: string, contextScopeId?: string): void {
-    const key = scopedSessionKey({ contextScopeId, sessionId });
+  releaseScope(
+    sessionId: string,
+    contextScopeId?: string,
+    workScopeId?: TodoWorkScopeId,
+  ): void {
+    const key = todoScopeKey({
+      contextScopeId,
+      sessionId,
+      workScopeId: effectiveWorkScopeId(contextScopeId, workScopeId),
+    });
     const loading = this.loadingBySession.get(key);
     if (loading) {
       this.cancelledLoads.add(loading.token);
@@ -159,9 +287,10 @@ export class TodoService implements TodoStore {
   private async loadFromHistory(
     sessionId: string,
     contextScopeId: string | undefined,
+    workScopeId: TodoWorkScopeId | undefined,
     token: object,
   ): Promise<readonly TodoItem[]> {
-    const key = scopedSessionKey({ contextScopeId, sessionId });
+    const key = todoScopeKey({ contextScopeId, sessionId, workScopeId });
     let todos: readonly TodoItem[] = [];
     if (this.options.history) {
       try {
@@ -176,6 +305,7 @@ export class TodoService implements TodoStore {
               )
             : messages,
           this.options.onWarning,
+          workScopeId,
         );
       } catch (error) {
         this.options.onWarning?.(
@@ -284,6 +414,7 @@ function parseTodos(params: Record<string, unknown>): readonly TodoItem[] {
 export function recoverTodosFromMessages(
   messages: readonly MessageWithParts[],
   onWarning?: (message: string, error?: unknown) => void,
+  workScopeId?: TodoWorkScopeId,
 ): readonly TodoItem[] {
   for (
     let messageIndex = messages.length - 1;
@@ -305,6 +436,12 @@ export function recoverTodosFromMessages(
         continue;
       }
       try {
+        const recoveredWorkScopeId = todoWorkScopeIdFromMetadata(
+          part.state.metadata,
+        );
+        if (recoveredWorkScopeId !== workScopeId) {
+          continue;
+        }
         return parseTodos(part.state.input);
       } catch (error) {
         onWarning?.(
@@ -317,6 +454,21 @@ export function recoverTodosFromMessages(
   return [];
 }
 
+function todoWorkScopeIdFromMetadata(
+  metadata: Record<string, unknown> | undefined,
+): TodoWorkScopeId | undefined {
+  const value = metadata?.[TODO_WORK_SCOPE_METADATA_KEY];
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "string" ||
+    !value.startsWith("goal:") ||
+    value.length === "goal:".length
+  ) {
+    throw new Error("Invalid Todo workload scope metadata.");
+  }
+  return value as TodoWorkScopeId;
+}
+
 function renderTodos(todos: readonly TodoItem[]): string {
   if (todos.length === 0) {
     return "No todos.";
@@ -324,14 +476,31 @@ function renderTodos(todos: readonly TodoItem[]): string {
   return todos.map((todo) => `[${todo.status}] ${todo.content}`).join("\n");
 }
 
-function todoMetadata(todos: readonly TodoItem[]): Record<string, unknown> {
-  return { count: todos.length, todos: cloneTodos(todos) };
+function todoMetadata(
+  todos: readonly TodoItem[],
+  workScopeId?: TodoWorkScopeId,
+): Record<string, unknown> {
+  return {
+    count: todos.length,
+    todos: cloneTodos(todos),
+    ...(workScopeId === undefined
+      ? {}
+      : { [TODO_WORK_SCOPE_METADATA_KEY]: workScopeId }),
+  };
 }
 
-function createTodoReadTool(store: TodoStore): Tool {
+function resolveToolWorkScopeId(
+  context: ToolExecutionContext,
+  options: TodoToolOptions,
+): TodoWorkScopeId | undefined {
+  if (context.contextScopeId !== undefined) return undefined;
+  return options.resolveWorkScopeId?.(context);
+}
+
+function createTodoReadTool(store: TodoStore, options: TodoToolOptions): Tool {
   return {
     name: "todo_read",
-    description: "Read the current session-scoped todo list.",
+    description: "Read the todo list for the current task.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {},
@@ -341,17 +510,25 @@ function createTodoReadTool(store: TodoStore): Tool {
     category: "readonly",
     annotations: { readOnlyHint: true },
     async execute(_params, context): Promise<ToolExecutionResult> {
-      const todos = await store.read(context.sessionId, context.contextScopeId);
-      return { output: renderTodos(todos), metadata: todoMetadata(todos) };
+      const workScopeId = resolveToolWorkScopeId(context, options);
+      const todos = await store.read(
+        context.sessionId,
+        context.contextScopeId,
+        workScopeId,
+      );
+      return {
+        output: renderTodos(todos),
+        metadata: todoMetadata(todos, workScopeId),
+      };
     },
   };
 }
 
-function createTodoWriteTool(store: TodoStore): Tool {
+function createTodoWriteTool(store: TodoStore, options: TodoToolOptions): Tool {
   return {
     name: "todo_write",
     description:
-      "Replace the current session-scoped todo list with a complete ordered list. Maximum 10 items; an empty list clears it.",
+      "Replace the todo list for the current task with a complete ordered list. Maximum 10 items; an empty list clears it.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {
@@ -383,14 +560,16 @@ function createTodoWriteTool(store: TodoStore): Tool {
     category: "write",
     async execute(params, context): Promise<ToolExecutionResult> {
       const todos = parseTodos(params);
+      const workScopeId = resolveToolWorkScopeId(context, options);
       const result = await store.write(
         context.sessionId,
         todos,
         context.contextScopeId,
+        workScopeId,
       );
       return {
         output: renderTodos(result.todos),
-        metadata: todoMetadata(result.todos),
+        metadata: todoMetadata(result.todos, workScopeId),
       };
     },
   };
@@ -398,6 +577,10 @@ function createTodoWriteTool(store: TodoStore): Tool {
 
 export function createTodoTools(
   store: TodoStore = new InMemoryTodoStore(),
+  options: TodoToolOptions = {},
 ): Tool[] {
-  return [createTodoReadTool(store), createTodoWriteTool(store)];
+  return [
+    createTodoReadTool(store, options),
+    createTodoWriteTool(store, options),
+  ];
 }

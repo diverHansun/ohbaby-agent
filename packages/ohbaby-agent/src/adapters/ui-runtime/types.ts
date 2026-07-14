@@ -11,7 +11,7 @@ import type {
   StartSessionParams,
 } from "../../agents/index.js";
 import type { GoalService } from "../../goals/index.js";
-import type { TodoService } from "../../tools/todo.js";
+import type { TodoService, TodoWorkScopeRegistry } from "../../tools/todo.js";
 import type { RunLedger } from "../../runtime/run-ledger/index.js";
 import type { RunManager } from "../../runtime/run-manager/index.js";
 import type { StreamBridge } from "../../runtime/stream-bridge/index.js";
@@ -22,6 +22,7 @@ export interface UiRuntimeComposition {
   readonly agentManager: AgentManager;
   readonly goals: GoalService;
   readonly todos: TodoService;
+  readonly todoWorkScopes: TodoWorkScopeRegistry;
   readonly runLedger: RunLedger;
   readonly runManager: RunManager;
   readonly streamBridge: StreamBridge;

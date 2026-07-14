@@ -92,8 +92,11 @@ import { Project } from "../project/index.js";
 import type { AgentManager } from "../agents/index.js";
 import type { SubagentInstanceStore } from "../agents/index.js";
 import {
+  goalTodoWorkScopeId,
   recoverTodosFromMessages,
   type TodoService,
+  type TodoWorkScopeId,
+  type TodoWorkScopeLease,
   type TodoWriteEvent,
 } from "../tools/todo.js";
 import {
@@ -180,6 +183,7 @@ type PromptOwner = "user" | "goal";
 
 type InternalSubmitPromptOptions = SubmitPromptOptions & {
   readonly owner?: PromptOwner;
+  readonly goalId?: string;
   readonly suppressGoalContextNote?: boolean;
   readonly reservedUserMessageId?: string;
   readonly onRunStarted?: (runId: string) => Promise<void>;
@@ -198,6 +202,8 @@ class RunCompletionFailureError extends Error {
 interface ActivePromptState {
   readonly owner: PromptOwner;
   readonly sessionId: string;
+  readonly goalId?: string;
+  readonly todoWorkScopeId?: TodoWorkScopeId;
   runId?: string;
   runReady: boolean;
 }
@@ -411,10 +417,15 @@ export function createInProcessUiBackendClient(
   const contextWindowUsage: ContextWindowUsageTracker =
     createContextWindowUsageTracker({ now: timestamp });
   const uiGoalsBySession = new Map<string, UiGoal>();
+  const goalSnapshotsBySession = new Map<string, GoalSnapshot>();
   for (const goal of initialSnapshot.goals ?? []) {
     uiGoalsBySession.set(goal.sessionId, { ...goal.goal });
   }
   const uiTodosBySession = new Map<string, UiSessionTodoList>();
+  const todoProjectionScopesBySession = new Map<
+    string,
+    TodoWorkScopeId | undefined
+  >();
   for (const todoList of initialSnapshot.todos ?? []) {
     uiTodosBySession.set(todoList.sessionId, cloneTodoList(todoList));
   }
@@ -492,10 +503,11 @@ export function createInProcessUiBackendClient(
         workdir: baseProjectRoot,
       });
       runtime.goals.attachTurnRunner({
-        async runTurn(sessionId, promptText) {
+        async runTurn(sessionId, promptText, goalId) {
           try {
             await waitForPromptIdle(sessionId);
             const completion = await submitPromptInternal(promptText, {
+              goalId,
               owner: "goal",
               sessionId,
               suppressGoalContextNote: true,
@@ -756,6 +768,11 @@ export function createInProcessUiBackendClient(
     sessionId: string,
     snapshot: GoalSnapshot | null,
   ): UiGoal | null {
+    if (snapshot === null || snapshot.status === "complete") {
+      goalSnapshotsBySession.delete(sessionId);
+    } else {
+      goalSnapshotsBySession.set(sessionId, snapshot);
+    }
     const goal = snapshot === null ? null : goalSnapshotToUiGoal(snapshot);
     if (goal === null) {
       uiGoalsBySession.delete(sessionId);
@@ -813,7 +830,10 @@ export function createInProcessUiBackendClient(
     );
   }
 
-  function setTodoProjection(todoList: UiSessionTodoList): {
+  function setTodoProjection(
+    todoList: UiSessionTodoList,
+    workScopeId?: TodoWorkScopeId,
+  ): {
     readonly changed: boolean;
     readonly todoList: UiSessionTodoList;
   } {
@@ -821,11 +841,15 @@ export function createInProcessUiBackendClient(
     const previous = uiTodosBySession.get(next.sessionId);
     const changed = previous === undefined || !todoListsEqual(previous, next);
     uiTodosBySession.set(next.sessionId, next);
+    todoProjectionScopesBySession.set(next.sessionId, workScopeId);
     return { changed, todoList: cloneTodoList(next) };
   }
 
-  function publishTodoProjection(todoList: UiSessionTodoList): void {
-    const result = setTodoProjection(todoList);
+  function publishTodoProjection(
+    todoList: UiSessionTodoList,
+    workScopeId?: TodoWorkScopeId,
+  ): void {
+    const result = setTodoProjection(todoList, workScopeId);
     if (!result.changed) {
       return;
     }
@@ -842,11 +866,27 @@ export function createInProcessUiBackendClient(
     if (event.contextScopeId !== undefined) {
       return;
     }
-    publishTodoProjection({
-      sessionId: event.sessionId,
-      todos: event.todos,
-      visible: event.todos.length > 0,
-    });
+    const activePrompt = activePromptsBySession.get(event.sessionId);
+    if (
+      activePrompt === undefined ||
+      activePrompt.todoWorkScopeId !== event.workScopeId
+    ) {
+      return;
+    }
+    if (activePrompt.owner === "goal") {
+      const goal = goalSnapshotsBySession.get(event.sessionId);
+      if (goal?.status !== "active" || goal.goalId !== activePrompt.goalId) {
+        return;
+      }
+    }
+    publishTodoProjection(
+      {
+        sessionId: event.sessionId,
+        todos: event.todos,
+        visible: event.todos.length > 0,
+      },
+      event.workScopeId,
+    );
   }
 
   function snapshotTodosFor(
@@ -866,12 +906,17 @@ export function createInProcessUiBackendClient(
       ?.catch(() => undefined);
     await Promise.all(
       sessions.map(async (session) => {
-        if (uiTodosBySession.has(session.id)) {
-          return;
-        }
+        const activePrompt = activePromptsBySession.get(session.id);
+        const goal = goalSnapshotsBySession.get(session.id);
+        const workScopeId =
+          activePrompt !== undefined
+            ? activePrompt.todoWorkScopeId
+            : goal?.status === "active"
+              ? goalTodoWorkScopeId(goal.goalId)
+              : undefined;
         let todos: UiSessionTodoList["todos"];
         if (runtime !== undefined) {
-          todos = await runtime.todos.read(session.id);
+          todos = await runtime.todos.read(session.id, undefined, workScopeId);
         } else {
           try {
             todos = recoverTodosFromMessages(
@@ -888,6 +933,7 @@ export function createInProcessUiBackendClient(
                   title: "Todo recovery warning",
                 });
               },
+              workScopeId,
             );
           } catch (error) {
             publishNotice({
@@ -900,9 +946,26 @@ export function createInProcessUiBackendClient(
             todos = [];
           }
         }
-        if (!uiTodosBySession.has(session.id)) {
-          setTodoProjection({ sessionId: session.id, todos, visible: false });
-        }
+        const current = uiTodosBySession.get(session.id);
+        const currentScope = todoProjectionScopesBySession.get(session.id);
+        const visible =
+          activePrompt !== undefined &&
+          current !== undefined &&
+          currentScope === workScopeId
+            ? current.visible
+            : activePrompt !== undefined
+              ? workScopeId === undefined
+                ? todos.some((todo) => todo.status !== "completed")
+                : todos.length > 0
+              : workScopeId !== undefined && todos.length > 0;
+        setTodoProjection(
+          {
+            sessionId: session.id,
+            todos,
+            visible,
+          },
+          workScopeId,
+        );
       }),
     );
   }
@@ -910,15 +973,19 @@ export function createInProcessUiBackendClient(
   async function showTodoForRun(
     sessionId: string,
     todoService: TodoService,
+    workScopeId?: TodoWorkScopeId,
   ): Promise<void> {
-    const todos = await todoService.read(sessionId);
-    const visible = todos.some((todo) => todo.status !== "completed");
+    const todos = await todoService.read(sessionId, undefined, workScopeId);
+    const visible =
+      workScopeId === undefined
+        ? todos.some((todo) => todo.status !== "completed")
+        : todos.length > 0;
     const previous = uiTodosBySession.get(sessionId);
     if (!visible && previous === undefined && todos.length === 0) {
-      setTodoProjection({ sessionId, todos, visible: false });
+      setTodoProjection({ sessionId, todos, visible: false }, workScopeId);
       return;
     }
-    publishTodoProjection({ sessionId, todos, visible });
+    publishTodoProjection({ sessionId, todos, visible }, workScopeId);
   }
 
   function hideTodoAfterRun(sessionId: string): void {
@@ -926,7 +993,39 @@ export function createInProcessUiBackendClient(
     if (!current?.visible) {
       return;
     }
-    publishTodoProjection({ ...current, visible: false });
+    publishTodoProjection(
+      { ...current, visible: false },
+      todoProjectionScopesBySession.get(sessionId),
+    );
+  }
+
+  function shouldKeepTodoVisibleAfterRun(
+    activePrompt: ActivePromptState,
+  ): boolean {
+    if (activePrompt.owner !== "goal" || activePrompt.goalId === undefined) {
+      return false;
+    }
+    const goal = goalSnapshotsBySession.get(activePrompt.sessionId);
+    return goal?.status === "active" && goal.goalId === activePrompt.goalId;
+  }
+
+  async function refreshTodoProjectionAfterRun(
+    sessionId: string,
+    runtime: UiRuntimeComposition,
+  ): Promise<void> {
+    const goal = await runtime.goals.getSnapshot(sessionId);
+    setGoalProjection(sessionId, goal);
+    const workScopeId =
+      goal?.status === "active" ? goalTodoWorkScopeId(goal.goalId) : undefined;
+    const todos = await runtime.todos.read(sessionId, undefined, workScopeId);
+    publishTodoProjection(
+      {
+        sessionId,
+        todos,
+        visible: workScopeId !== undefined && todos.length > 0,
+      },
+      workScopeId,
+    );
   }
 
   async function syncGoalProjectionsFromSource(
@@ -1413,7 +1512,10 @@ export function createInProcessUiBackendClient(
 
     await options.sessionManager.update(sessionId, { status: "archived" });
     await stateStore.removeSession?.(sessionId);
+    goalSnapshotsBySession.delete(sessionId);
+    uiGoalsBySession.delete(sessionId);
     uiTodosBySession.delete(sessionId);
+    todoProjectionScopesBySession.delete(sessionId);
 
     if (snapshot.activeSessionId === sessionId) {
       const remainingSessions = (
@@ -1703,6 +1805,21 @@ export function createInProcessUiBackendClient(
     submitOptions?: InternalSubmitPromptOptions,
   ): Promise<RunCompletion | undefined> {
     const owner = submitOptions?.owner ?? "user";
+    let todoWorkScopeId: TodoWorkScopeId | undefined;
+    if (owner === "goal") {
+      if (submitOptions?.goalId === undefined) {
+        const message = "Goal-owned prompt is missing its goalId.";
+        publishNotice({
+          key: "goal:missing-run-identity",
+          level: "error",
+          message,
+          source: "goals",
+          title: "Goal execution invariant failed",
+        });
+        throw new Error(message);
+      }
+      todoWorkScopeId = goalTodoWorkScopeId(submitOptions.goalId);
+    }
     let promptSessionId = submitOptions?.sessionId ?? `pending_${randomUUID()}`;
     await waitForPromptSlot(owner, promptSessionId);
     assertStateStoreWritable();
@@ -1710,18 +1827,25 @@ export function createInProcessUiBackendClient(
     let activePrompt: ActivePromptState = {
       owner,
       sessionId: promptSessionId,
+      ...(submitOptions?.goalId === undefined
+        ? {}
+        : { goalId: submitOptions.goalId }),
+      ...(todoWorkScopeId === undefined ? {} : { todoWorkScopeId }),
       runReady: false,
     };
     activePromptsBySession.set(promptSessionId, activePrompt);
     const createdAt = timestamp();
     let projection: RunStreamProjection | undefined;
+    let promptRuntime: UiRuntimeComposition | undefined;
     let submittedSessionId: string | undefined;
     let submittedRunId: string | undefined;
+    let todoWorkScopeLease: TodoWorkScopeLease | undefined;
 
     try {
       await assertCanUseAsPrimarySession(submitOptions?.sessionId);
       await reserveIdsFromState();
       const runtime = await runtimeController.getRuntimeForPrompt();
+      promptRuntime = runtime;
       const agentName = runtime.agentManager.getDefault();
       const baseProjectRoot = await resolveProjectRoot();
       const temporaryTitle = createTemporarySessionTitle(text);
@@ -1810,7 +1934,11 @@ export function createInProcessUiBackendClient(
       submittedRunId = runId;
       const assistantMessageId = messageIds.next();
       runtimeController.setActiveRunId(runId, session.id);
-      await showTodoForRun(session.id, runtime.todos);
+      todoWorkScopeLease = runtime.todoWorkScopes.acquire(
+        session.id,
+        todoWorkScopeId,
+      );
+      await showTodoForRun(session.id, runtime.todos, todoWorkScopeId);
       activePrompt.runId = runId;
       projection = runtimeController.startRunStreamProjection({
         assistantMessageId,
@@ -1819,7 +1947,9 @@ export function createInProcessUiBackendClient(
         nextMessageId: () => messageIds.next(),
         onNotice: publishNotice,
         onBeforeTerminalRun: () => {
-          hideTodoAfterRun(session.id);
+          if (!shouldKeepTodoVisibleAfterRun(activePrompt)) {
+            hideTodoAfterRun(session.id);
+          }
         },
         publish,
         runId,
@@ -1911,8 +2041,22 @@ export function createInProcessUiBackendClient(
         throw error;
       }
     } finally {
-      if (submittedSessionId) {
-        hideTodoAfterRun(submittedSessionId);
+      todoWorkScopeLease?.release();
+      if (submittedSessionId && promptRuntime) {
+        const projectionSessionId = submittedSessionId;
+        await refreshTodoProjectionAfterRun(
+          projectionSessionId,
+          promptRuntime,
+        ).catch((error: unknown) => {
+          hideTodoAfterRun(projectionSessionId);
+          publishNotice({
+            key: `todo:projection:${projectionSessionId}:${getErrorMessage(error)}`,
+            level: "warning",
+            message: `Todo projection could not be refreshed: ${getErrorMessage(error)}`,
+            source: "todo",
+            title: "Todo projection warning",
+          });
+        });
       }
       if (submittedSessionId) {
         await syncSessionStatsBestEffort(submittedSessionId);

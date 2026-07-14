@@ -39,7 +39,7 @@ export async function driveGoal(deps: DriveGoalDeps): Promise<void> {
     const prompt = renderGoalTurnPrompt(current, {
       isFirstTurn: current.turnsUsed === 1,
     });
-    const outcome = await runner.runTurn(sessionId, prompt);
+    const outcome = await runner.runTurn(sessionId, prompt, current.goalId);
     if (outcome.tokensUsed !== undefined && outcome.tokensUsed > 0) {
       await store.recordTokenUsage(outcome.tokensUsed);
     }

@@ -43,7 +43,11 @@ import {
   type SubagentInstanceStore,
 } from "../../agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
-import { TodoService, type TodoWriteEvent } from "../../tools/todo.js";
+import {
+  TodoService,
+  TodoWorkScopeRegistry,
+  type TodoWriteEvent,
+} from "../../tools/todo.js";
 import {
   GoalService,
   InMemoryGoalPersistence,
@@ -288,6 +292,7 @@ export async function createUiRuntimeComposition(
     },
     onWrite: options.onTodoWrite,
   });
+  const todoWorkScopes = new TodoWorkScopeRegistry();
 
   async function ensureRootSession(input: {
     readonly agentName: string;
@@ -583,6 +588,7 @@ export async function createUiRuntimeComposition(
       contextManager.disposeSession(payload.sessionId);
       mcpToolMenu.disposeSession(payload.sessionId);
       todoService.release(payload.sessionId);
+      todoWorkScopes.release(payload.sessionId);
       trackSandboxCleanup(
         (async (): Promise<void> => {
           await subagentHost.interruptByParent(
@@ -640,6 +646,10 @@ export async function createUiRuntimeComposition(
     },
     subagentHost,
     todoStore: todoService,
+    todoToolOptions: {
+      resolveWorkScopeId: (context) =>
+        todoWorkScopes.resolve(context.sessionId),
+    },
   })) {
     toolScheduler.register(tool);
   }
@@ -747,6 +757,7 @@ export async function createUiRuntimeComposition(
     runManager,
     streamBridge,
     toolScheduler,
+    todoWorkScopes,
 
     reserveRunId,
 
@@ -831,6 +842,7 @@ export async function createUiRuntimeComposition(
     async dispose(): Promise<void> {
       unsubscribeSessionRemoved();
       todoService.dispose();
+      todoWorkScopes.dispose();
       toolScheduler.cancelAll();
       await Promise.all([
         subagentHost.dispose(),

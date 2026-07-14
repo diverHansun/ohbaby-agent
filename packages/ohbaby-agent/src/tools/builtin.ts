@@ -6,7 +6,12 @@ import { createGrepTool } from "./grep.js";
 import { createListTool } from "./list.js";
 import { createReadTool } from "./read.js";
 import { createWriteTool } from "./write.js";
-import { createTodoTools, InMemoryTodoStore, type TodoStore } from "./todo.js";
+import {
+  createTodoTools,
+  InMemoryTodoStore,
+  type TodoStore,
+  type TodoToolOptions,
+} from "./todo.js";
 import { createSubagentTools, type SubagentToolHost } from "./subagent.js";
 import { createWebTools, type WebToolsOptions } from "./web.js";
 import { createGoalTools, type GoalToolBackend } from "../goals/tools.js";
@@ -16,6 +21,7 @@ export interface BuiltinToolsOptions {
   readonly spawn?: SpawnCommand;
   readonly searchProvider?: WebToolsOptions;
   readonly todoStore?: TodoStore;
+  readonly todoToolOptions?: TodoToolOptions;
   readonly subagentHost?: SubagentToolHost;
   readonly goalBackend?: GoalToolBackend;
 }
@@ -29,7 +35,7 @@ export function createBuiltinTools(options: BuiltinToolsOptions = {}): Tool[] {
     createGrepTool(),
     createWriteTool(),
     createEditTool(),
-    ...createTodoTools(todoStore),
+    ...createTodoTools(todoStore, options.todoToolOptions),
     ...createWebTools(options.searchProvider),
     createBashTool({ shell: options.shell, spawn: options.spawn }),
   ];

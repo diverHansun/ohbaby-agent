@@ -8,7 +8,9 @@ import {
   MAX_TODO_CONTENT_LENGTH,
   MAX_TODO_ITEMS,
   TodoService,
+  TodoWorkScopeRegistry,
   createTodoTools,
+  goalTodoWorkScopeId,
   recoverTodosFromMessages,
   type TodoItem,
 } from "./todo.js";
@@ -58,6 +60,7 @@ function toolMessage(input: {
     | {
         readonly status: "completed";
         readonly input: Record<string, unknown>;
+        readonly metadata?: Record<string, unknown>;
         readonly output: string;
       }
     | {
@@ -156,6 +159,90 @@ describe("todo builtin tools", () => {
       2,
       expect.objectContaining({ contextScopeId: "scope_b" }),
     );
+  });
+
+  it("isolates ordinary and goal-owned todo lists without exposing scope parameters", async () => {
+    const onWrite = vi.fn();
+    const store = new TodoService({ onWrite });
+    const scopes = new TodoWorkScopeRegistry();
+    const tools = createTodoTools(store, {
+      resolveWorkScopeId: (context) => scopes.resolve(context.sessionId),
+    });
+    const run = async (
+      name: string,
+      params: Record<string, unknown>,
+    ): Promise<ToolExecutionResult> => {
+      const tool = tools.find((candidate) => candidate.name === name);
+      if (!tool) throw new Error(`Tool not found in test: ${name}`);
+      return await tool.execute(params, createContext("session_1"));
+    };
+
+    const ordinaryLease = scopes.acquire("session_1");
+    await run("todo_write", {
+      todos: [{ content: "Ordinary", status: "pending" }],
+    });
+    ordinaryLease.release();
+
+    const goalScope = goalTodoWorkScopeId("goal_a");
+    const goalLease = scopes.acquire("session_1", goalScope);
+    const goalWrite = await run("todo_write", {
+      todos: [{ content: "Goal A", status: "in_progress" }],
+    });
+    expect((await run("todo_read", {})).output).toContain("Goal A");
+    expect(goalWrite.metadata).toMatchObject({
+      internalWorkScopeId: goalScope,
+    });
+    goalLease.release();
+
+    const nextOrdinaryLease = scopes.acquire("session_1");
+    expect((await run("todo_read", {})).output).toContain("Ordinary");
+    nextOrdinaryLease.release();
+    expect(onWrite).toHaveBeenLastCalledWith(
+      expect.objectContaining({ workScopeId: goalScope }),
+    );
+    expect(
+      tools.find((tool) => tool.name === "todo_write")?.parametersJsonSchema,
+    ).not.toHaveProperty("properties.goalId");
+    expect(
+      tools.find((tool) => tool.name === "todo_write")?.parametersJsonSchema,
+    ).not.toHaveProperty("properties.workScopeId");
+  });
+
+  it("keeps subagent context scope isolated from an active goal scope", async () => {
+    const store = new TodoService();
+    const scopes = new TodoWorkScopeRegistry();
+    const goalScope = goalTodoWorkScopeId("goal_a");
+    const lease = scopes.acquire("session_1", goalScope);
+    const tools = createTodoTools(store, {
+      resolveWorkScopeId: (context) => scopes.resolve(context.sessionId),
+    });
+    const write = tools.find((tool) => tool.name === "todo_write");
+    if (!write) throw new Error("todo_write missing");
+
+    await write.execute(
+      { todos: [{ content: "Child", status: "pending" }] },
+      createContext("session_1", "subagent_1"),
+    );
+
+    await expect(store.read("session_1", "subagent_1")).resolves.toEqual([
+      { content: "Child", status: "pending" },
+    ]);
+    await expect(
+      store.read("session_1", undefined, goalScope),
+    ).resolves.toEqual([]);
+    lease.release();
+  });
+
+  it("does not let an older lease release a newer binding", () => {
+    const scopes = new TodoWorkScopeRegistry();
+    const first = scopes.acquire("session_1", goalTodoWorkScopeId("goal_a"));
+    const secondScope = goalTodoWorkScopeId("goal_b");
+    const second = scopes.acquire("session_1", secondScope);
+
+    first.release();
+    expect(scopes.resolve("session_1")).toBe(secondScope);
+    second.release();
+    expect(scopes.resolve("session_1")).toBeUndefined();
   });
 
   it("trims content and accepts the 10 item and 100 code-point boundaries", async () => {
@@ -286,10 +373,10 @@ describe("todo builtin tools", () => {
     const tools = createTodoTools();
 
     expect(tools.find((tool) => tool.name === "todo_read")?.description).toBe(
-      "Read the current session-scoped todo list.",
+      "Read the todo list for the current task.",
     );
     expect(tools.find((tool) => tool.name === "todo_write")?.description).toBe(
-      "Replace the current session-scoped todo list with a complete ordered list. Maximum 10 items; an empty list clears it.",
+      "Replace the todo list for the current task with a complete ordered list. Maximum 10 items; an empty list clears it.",
     );
   });
 });
@@ -357,6 +444,57 @@ describe("todo history recovery", () => {
     expect(recoverTodosFromMessages(messages)).toEqual([
       { content: "Keep", status: "in_progress" },
     ]);
+  });
+
+  it("recovers ordinary and goal histories independently by result metadata", () => {
+    const goalScope = goalTodoWorkScopeId("goal_a");
+    const messages = [
+      toolMessage({
+        callId: "ordinary",
+        state: {
+          input: { todos: [{ content: "Ordinary", status: "pending" }] },
+          output: "ok",
+          status: "completed",
+        },
+      }),
+      toolMessage({
+        callId: "goal",
+        state: {
+          input: { todos: [{ content: "Goal A", status: "in_progress" }] },
+          metadata: { internalWorkScopeId: goalScope },
+          output: "ok",
+          status: "completed",
+        },
+      }),
+    ];
+
+    expect(recoverTodosFromMessages(messages)).toEqual([
+      { content: "Ordinary", status: "pending" },
+    ]);
+    expect(recoverTodosFromMessages(messages, undefined, goalScope)).toEqual([
+      { content: "Goal A", status: "in_progress" },
+    ]);
+  });
+
+  it("does not assign legacy unscoped history to a goal", () => {
+    const messages = [
+      toolMessage({
+        callId: "legacy",
+        state: {
+          input: { todos: [{ content: "Legacy", status: "pending" }] },
+          output: "ok",
+          status: "completed",
+        },
+      }),
+    ];
+
+    expect(
+      recoverTodosFromMessages(
+        messages,
+        undefined,
+        goalTodoWorkScopeId("goal_a"),
+      ),
+    ).toEqual([]);
   });
 
   it("treats a completed empty write as the final fact", () => {

@@ -92,7 +92,11 @@ export interface GoalTurnOutcome {
 
 /** 适配层实现：把提醒文本作为 user 消息起一轮 Run 并等待完成。 */
 export interface GoalTurnRunner {
-  runTurn(sessionId: string, promptText: string): Promise<GoalTurnOutcome>;
+  runTurn(
+    sessionId: string,
+    promptText: string,
+    goalId: string,
+  ): Promise<GoalTurnOutcome>;
 }
 
 export interface GoalExecutionInterruptInput {

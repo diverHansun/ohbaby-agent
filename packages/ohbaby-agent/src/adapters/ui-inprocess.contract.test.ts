@@ -1138,12 +1138,14 @@ function skillToolCallEvent(input: {
 function goalCreateToolCallEvent(input: {
   readonly callId: string;
   readonly objective: string;
+  readonly replace?: boolean;
 }): InterfaceProviderStreamEvent {
   return {
     toolCallDeltas: [
       {
         argumentsDelta: JSON.stringify({
           objective: input.objective,
+          ...(input.replace === undefined ? {} : { replace: input.replace }),
         }),
         id: input.callId,
         index: 0,
@@ -1238,6 +1240,165 @@ function createBlockingAfterTodoWritesLLMClient(input: {
       },
       isAbortError(): boolean {
         return false;
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
+      baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
+interface ControlledFakeResponse {
+  readonly events: readonly InterfaceProviderStreamEvent[];
+  readonly release?: Promise<undefined>;
+  readonly started?: Deferred<undefined>;
+}
+
+function createControlledSequentialFakeLLMClient(
+  responses: readonly ControlledFakeResponse[],
+  requests: InterfaceProviderRequest[],
+): LLMClientInstance<FakeSdkClient> {
+  let nextResponse = 0;
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isTitleGenerationRequest(request)) {
+          return Promise.resolve(createTitleProviderStream(request));
+        }
+        const response = responses.at(nextResponse);
+        nextResponse += 1;
+        if (response === undefined) {
+          return Promise.reject(new Error("No fake LLM response configured"));
+        }
+        requests.push(request);
+        return Promise.resolve(
+          (async function* (): AsyncGenerator<
+            InterfaceProviderStreamEvent,
+            void,
+            unknown
+          > {
+            response.started?.resolve(undefined);
+            await response.release;
+            for (const event of response.events) {
+              yield event;
+            }
+          })(),
+        );
+      },
+      isAbortError(error: unknown): boolean {
+        return error instanceof Error && error.name === "AbortError";
+      },
+    },
+    config: {
+      provider: "fake",
+      model: "fake-model",
+      apiKeyEnv: "FAKE_API_KEY",
+      baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
+      temperature: 0,
+      maxTokens: 128,
+    },
+  };
+}
+
+function createPauseResumeTodoLLMClient(input: {
+  readonly goalBlocked: Deferred<undefined>;
+  readonly goalTodos: readonly {
+    readonly content: string;
+    readonly status: "pending" | "in_progress" | "completed";
+  }[];
+  readonly ordinaryTodos: readonly {
+    readonly content: string;
+    readonly status: "pending" | "in_progress" | "completed";
+  }[];
+  readonly requests: InterfaceProviderRequest[];
+  readonly resumeRelease: Promise<undefined>;
+  readonly resumeStarted: Deferred<undefined>;
+}): LLMClientInstance<FakeSdkClient> {
+  let nextResponse = 0;
+  return {
+    provider: {
+      id: "fake",
+      kind: "openai-compatible",
+      client: { kind: "fake" },
+      streamChatCompletion(
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isTitleGenerationRequest(request)) {
+          return Promise.resolve(createTitleProviderStream(request));
+        }
+        input.requests.push(request);
+        const responseIndex = nextResponse;
+        nextResponse += 1;
+        if (responseIndex === 0) {
+          return Promise.resolve(
+            createProviderStream([
+              todoWriteToolCallEvent({
+                callId: "call_goal_todo",
+                todos: input.goalTodos,
+              }),
+            ]),
+          );
+        }
+        if (responseIndex === 1) {
+          input.goalBlocked.resolve(undefined);
+          return Promise.resolve(createAbortableProviderStream(request.signal));
+        }
+        if (responseIndex === 2) {
+          return Promise.resolve(
+            createProviderStream([
+              todoWriteToolCallEvent({
+                callId: "call_ordinary_todo",
+                todos: input.ordinaryTodos,
+              }),
+            ]),
+          );
+        }
+        if (responseIndex === 3) {
+          return Promise.resolve(
+            createProviderStream([
+              { textDelta: "Ordinary task handled.", finishReason: "stop" },
+            ]),
+          );
+        }
+        if (responseIndex === 4) {
+          return Promise.resolve(
+            (async function* (): AsyncGenerator<
+              InterfaceProviderStreamEvent,
+              void,
+              unknown
+            > {
+              input.resumeStarted.resolve(undefined);
+              await input.resumeRelease;
+              yield goalUpdateToolCallEvent({
+                callId: "call_goal_complete_after_resume",
+                status: "complete",
+              });
+            })(),
+          );
+        }
+        if (responseIndex === 5) {
+          return Promise.resolve(
+            createProviderStream([
+              { textDelta: "Goal complete.", finishReason: "stop" },
+            ]),
+          );
+        }
+        return Promise.reject(new Error("No fake LLM response configured"));
+      },
+      isAbortError(error: unknown): boolean {
+        return error instanceof Error && error.name === "AbortError";
       },
     },
     config: {
@@ -2310,6 +2471,10 @@ describe("createInProcessUiBackendClient", () => {
         requests,
       ),
     });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
 
     await client.submitPrompt("List the tools folder");
 
@@ -2611,6 +2776,168 @@ describe("createInProcessUiBackendClient", () => {
         },
       ],
     });
+  });
+
+  it("rebuilds ordinary and Goal Todo projections from their internal workload scopes", async () => {
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const ordinaryTodos = [
+      { content: "Ordinary recovered task", status: "pending" as const },
+    ];
+    const goalTodos = [
+      { content: "Goal recovered task", status: "in_progress" as const },
+    ];
+    const assistant = await messageManager.createMessage({
+      agent: "default",
+      role: "assistant",
+      sessionId: "session_1",
+    });
+    await messageManager.appendPart(assistant.id, {
+      callId: "call_todo_recovered_ordinary",
+      state: {
+        input: { todos: ordinaryTodos },
+        output: "Recovered ordinary todos",
+        status: "completed",
+      },
+      tool: "todo_write",
+      type: "tool",
+    });
+    await messageManager.appendPart(assistant.id, {
+      callId: "call_todo_recovered_goal",
+      state: {
+        input: { todos: goalTodos },
+        metadata: { internalWorkScopeId: "goal:goal_todo_rebuild" },
+        output: "Recovered Goal todos",
+        status: "completed",
+      },
+      tool: "todo_write",
+      type: "tool",
+    });
+    const projectRoot = process.cwd();
+    const sessionStore = createInMemorySessionStore();
+    await sessionStore.insert({
+      agentName: "default",
+      childrenIds: [],
+      createdAt: 1,
+      id: "session_1",
+      isSubagent: false,
+      projectId: "project:todo-goal-rebuild",
+      projectRoot,
+      stats: { messageCount: 1 },
+      status: "active",
+      title: "Existing Goal Todo",
+      updatedAt: 1,
+    });
+    const sessionManager = createSessionManager({
+      bus,
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      projectResolver: {
+        fromDirectory() {
+          return {
+            id: "project:todo-goal-rebuild",
+            rootPath: projectRoot,
+          };
+        },
+      },
+      store: sessionStore,
+    });
+    const goalPersistence = new InMemoryGoalPersistence(() => 1);
+    await goalPersistence.append("session_1", {
+      actor: "user",
+      goalId: "goal_todo_rebuild",
+      objective: "resume recovered Goal Todo",
+      type: "create",
+    });
+    const goalRunStarted = createDeferred<undefined>();
+    const releaseGoalRun = createDeferred<undefined>();
+    const requests: InterfaceProviderRequest[] = [];
+    const client = createInProcessUiBackendClient({
+      bus,
+      goalPersistence,
+      initialSnapshot: {
+        activeSessionId: "session_1",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-07-14T00:00:00.000Z",
+            id: "session_1",
+            messages: [],
+            projectRoot,
+            title: "Existing Goal Todo",
+            updatedAt: "2026-07-14T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createControlledSequentialFakeLLMClient(
+        [
+          {
+            events: [
+              goalUpdateToolCallEvent({
+                callId: "call_rebuilt_goal_complete",
+                status: "complete",
+              }),
+            ],
+            release: releaseGoalRun.promise,
+            started: goalRunStarted,
+          },
+          {
+            events: [
+              { textDelta: "Recovered Goal done.", finishReason: "stop" },
+            ],
+          },
+        ],
+        requests,
+      ),
+      messageManager,
+      projectDirectory: projectRoot,
+      sessionManager,
+    });
+
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      goals: [{ goal: { status: "paused" } }],
+      todos: [{ todos: ordinaryTodos, visible: false }],
+    });
+
+    const completed = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "notice.emitted" }> =>
+        event.type === "notice.emitted" &&
+        event.notice.source === "goals" &&
+        event.notice.message === "Goal completed.",
+      2_000,
+    );
+    await client.executeCommand({
+      argv: ["resume"],
+      clientInvocationId: "inv_goal_todo_rebuild_resume",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal resume",
+      rawArgs: "resume",
+      sessionId: "session_1",
+      surface: "tui",
+    });
+    await withTimeout(
+      goalRunStarted.promise,
+      1_000,
+      "rebuilt Goal continuation did not start",
+    );
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      goals: [{ goal: { status: "active" } }],
+      todos: [{ todos: goalTodos, visible: true }],
+    });
+
+    releaseGoalRun.resolve(undefined);
+    await completed;
+    await vi.waitUntil(() => requests.length === 2);
   });
 
   it("registers project skills as a module tool and returns loaded skill content", async () => {
@@ -4601,6 +4928,290 @@ describe("createInProcessUiBackendClient", () => {
       status: "active",
     });
     expect(goalEvents.at(-1)?.goal).toBeNull();
+  });
+
+  it("keeps a goal Todo projection visible across continuation turns", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const secondTurnStarted = createDeferred<undefined>();
+    const releaseSecondTurn = createDeferred<undefined>();
+    const goalTodos = [
+      { content: "Implement scoped Todo", status: "completed" as const },
+      { content: "Verify continuation", status: "in_progress" as const },
+    ];
+    const client = createInProcessUiBackendClient({
+      llmClient: createControlledSequentialFakeLLMClient(
+        [
+          {
+            events: [
+              todoWriteToolCallEvent({
+                callId: "call_goal_todo_cross_turn",
+                todos: goalTodos,
+              }),
+            ],
+          },
+          { events: [{ textDelta: "Turn one done.", finishReason: "stop" }] },
+          {
+            events: [
+              goalUpdateToolCallEvent({
+                callId: "call_goal_todo_done",
+                status: "complete",
+              }),
+            ],
+            release: releaseSecondTurn.promise,
+            started: secondTurnStarted,
+          },
+          { events: [{ textDelta: "Goal complete.", finishReason: "stop" }] },
+        ],
+        requests,
+      ),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+    const completed = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "notice.emitted" }> =>
+        event.type === "notice.emitted" &&
+        event.notice.source === "goals" &&
+        event.notice.message === "Goal completed.",
+      2_000,
+    );
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_goal_todo_cross_turn_new",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "tui",
+    });
+    await client.executeCommand({
+      argv: ["coordinate", "a", "long", "task"],
+      clientInvocationId: "inv_goal_todo_cross_turn_create",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal coordinate a long task",
+      rawArgs: "coordinate a long task",
+      surface: "tui",
+    });
+    await withTimeout(
+      secondTurnStarted.promise,
+      1_000,
+      "second goal continuation did not start",
+    );
+
+    const duringSecondTurn = await client.getSnapshot();
+    expect(duringSecondTurn.todos).toEqual([
+      {
+        sessionId: duringSecondTurn.activeSessionId,
+        todos: goalTodos,
+        visible: true,
+      },
+    ]);
+    expect(
+      events
+        .filter(
+          (event): event is Extract<UiEvent, { type: "todo.updated" }> =>
+            event.type === "todo.updated",
+        )
+        .map((event) => event.visible),
+    ).toEqual([true]);
+
+    releaseSecondTurn.resolve(undefined);
+    await completed;
+    await vi.waitUntil(() => requests.length === 4);
+    const completedSnapshot = await client.getSnapshot();
+    expect(completedSnapshot.goals ?? []).toEqual([]);
+    expect(completedSnapshot.todos).toMatchObject([
+      { todos: [], visible: false },
+    ]);
+    expect(requests).toHaveLength(4);
+  });
+
+  it("freezes the Todo lease to the old Goal when CreateGoal replaces it mid-run", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const replacementTurnStarted = createDeferred<undefined>();
+    const releaseReplacementTurn = createDeferred<undefined>();
+    const oldGoalTodos = [
+      { content: "Settle old goal run", status: "completed" as const },
+    ];
+    const client = createInProcessUiBackendClient({
+      llmClient: createControlledSequentialFakeLLMClient(
+        [
+          {
+            events: [
+              goalCreateToolCallEvent({
+                callId: "call_replace_goal_mid_run",
+                objective: "replacement goal",
+                replace: true,
+              }),
+            ],
+          },
+          {
+            events: [
+              todoWriteToolCallEvent({
+                callId: "call_old_goal_todo_after_replace",
+                todos: oldGoalTodos,
+              }),
+            ],
+          },
+          { events: [{ textDelta: "Old run settled.", finishReason: "stop" }] },
+          {
+            events: [
+              goalUpdateToolCallEvent({
+                callId: "call_replacement_goal_done",
+                status: "complete",
+              }),
+            ],
+            release: releaseReplacementTurn.promise,
+            started: replacementTurnStarted,
+          },
+          {
+            events: [{ textDelta: "Replacement done.", finishReason: "stop" }],
+          },
+        ],
+        requests,
+      ),
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+    const completed = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "notice.emitted" }> =>
+        event.type === "notice.emitted" &&
+        event.notice.source === "goals" &&
+        event.notice.message === "Goal completed.",
+      2_000,
+    );
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_goal_replace_lease_new",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "tui",
+    });
+    await client.executeCommand({
+      argv: ["original", "goal"],
+      clientInvocationId: "inv_goal_replace_lease_create",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal original goal",
+      rawArgs: "original goal",
+      surface: "tui",
+    });
+    await withTimeout(
+      replacementTurnStarted.promise,
+      1_000,
+      "replacement Goal continuation did not start",
+    );
+
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      goals: [{ goal: { objective: "replacement goal", status: "active" } }],
+      todos: [{ todos: [], visible: false }],
+    });
+    expect(
+      events.some(
+        (event) =>
+          event.type === "todo.updated" &&
+          event.todos.some((todo) => todo.content === "Settle old goal run"),
+      ),
+    ).toBe(false);
+    releaseReplacementTurn.resolve(undefined);
+    await completed;
+    await vi.waitUntil(() => requests.length === 5);
+  });
+
+  it("isolates paused Goal Todos from ordinary work and restores them on resume", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const goalBlocked = createDeferred<undefined>();
+    const resumeStarted = createDeferred<undefined>();
+    const resumeRelease = createDeferred<undefined>();
+    const goalTodos = [
+      { content: "Continue durable goal", status: "in_progress" as const },
+    ];
+    const ordinaryTodos = [
+      { content: "Answer interruption", status: "completed" as const },
+    ];
+    const client = createInProcessUiBackendClient({
+      llmClient: createPauseResumeTodoLLMClient({
+        goalBlocked,
+        goalTodos,
+        ordinaryTodos,
+        requests,
+        resumeRelease: resumeRelease.promise,
+        resumeStarted,
+      }),
+    });
+    const completed = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "notice.emitted" }> =>
+        event.type === "notice.emitted" &&
+        event.notice.source === "goals" &&
+        event.notice.message === "Goal completed.",
+      2_000,
+    );
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_goal_todo_resume_new",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "tui",
+    });
+    await client.executeCommand({
+      argv: ["preserve", "goal", "todos"],
+      clientInvocationId: "inv_goal_todo_resume_create",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal preserve goal todos",
+      rawArgs: "preserve goal todos",
+      surface: "tui",
+    });
+    await withTimeout(goalBlocked.promise, 1_000, "Goal run did not block");
+    const sessionId = (await client.getSnapshot()).activeSessionId;
+    expect(sessionId).not.toBeNull();
+
+    await client.submitPrompt("Handle an ordinary interruption", {
+      sessionId: sessionId ?? undefined,
+    });
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      goals: [{ goal: { status: "paused" } }],
+      todos: [{ todos: ordinaryTodos, visible: false }],
+    });
+
+    await client.executeCommand({
+      argv: ["resume"],
+      clientInvocationId: "inv_goal_todo_resume_command",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal resume",
+      rawArgs: "resume",
+      sessionId: sessionId ?? undefined,
+      surface: "tui",
+    });
+    await withTimeout(
+      resumeStarted.promise,
+      1_000,
+      "resumed Goal continuation did not start",
+    );
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      goals: [{ goal: { status: "active" } }],
+      todos: [{ todos: goalTodos, visible: true }],
+    });
+
+    resumeRelease.resolve(undefined);
+    await completed;
+    await vi.waitUntil(() => requests.length === 6);
+    expect(requests).toHaveLength(6);
   });
 
   it("continues a model-created goal after the creating prompt settles", async () => {

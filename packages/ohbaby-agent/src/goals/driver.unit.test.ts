@@ -21,14 +21,17 @@ function scriptedRunner(
     store: GoalStore,
   ) => Promise<GoalTurnOutcome> | GoalTurnOutcome,
   store: GoalStore,
-): { runner: GoalTurnRunner; prompts: string[] } {
+): { runner: GoalTurnRunner; prompts: string[]; goalIds: string[] } {
   const prompts: string[] = [];
+  const goalIds: string[] = [];
   let turn = 0;
   return {
     prompts,
+    goalIds,
     runner: {
-      async runTurn(_sessionId, promptText): Promise<GoalTurnOutcome> {
+      async runTurn(_sessionId, promptText, goalId): Promise<GoalTurnOutcome> {
         prompts.push(promptText);
+        goalIds.push(goalId);
         turn += 1;
         return script(turn, store);
       },
@@ -43,7 +46,7 @@ describe("driveGoal", () => {
 
   it("runs turns until the model completes via store, counting the final turn", async () => {
     const store = await makeActiveStore();
-    const { prompts, runner } = scriptedRunner(async (turn, s) => {
+    const { goalIds, prompts, runner } = scriptedRunner(async (turn, s) => {
       if (turn === 3) await s.markComplete("model");
       return { status: "succeeded" };
     }, store);
@@ -55,6 +58,8 @@ describe("driveGoal", () => {
       store,
     });
     expect(prompts).toHaveLength(3);
+    expect(goalIds).toEqual(Array.from({ length: 3 }, () => goalIds[0]));
+    expect(goalIds[0]).toBeTruthy();
     expect(prompts[0]).toContain("You are starting work under a goal");
     expect(prompts[1]).toContain("Continue working toward the active goal.");
     expect(store.getSnapshot()).toBeNull();
