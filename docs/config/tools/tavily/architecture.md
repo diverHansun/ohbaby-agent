@@ -8,7 +8,7 @@
 
 ### 模块定位
 
-Tavily 配置加载器是 ohbaby-agent config 模块的一部分，负责加载和管理 Tavily 工具的配置文件。遵循 XDG 标准配置方案。
+Tavily 配置加载器是 ohbaby-agent config 模块的一部分，负责加载和管理 Tavily 工具的配置文件。用户级配置统一使用 `OHBABY_HOME`（默认 `~/.ohbaby`）。
 
 ### 模块结构
 
@@ -46,8 +46,8 @@ src/config/tools/tavily/
 │  ┌────────────────────────┐    ┌────────────────────────┐               │
 │  │    Project Level       │    │      User Level         │               │
 │  │                        │    │                         │               │
-│  │  {project}/            │    │  ~/.config/ohbaby-agent/   │               │
-│  │    .ohbaby-agent/         │    │    tools/               │               │
+│  │  {project}/            │    │  ~/.ohbaby/   │               │
+│  │    .ohbaby/         │    │    tools/               │               │
 │  │      tools/            │    │      tavily.yaml        │               │
 │  │        tavily.yaml     │    │      ...                │               │
 │  │                        │    │                         │               │
@@ -420,9 +420,9 @@ function mergeConfig(
 
 | 级别 | 路径 | 环境变量 |
 |------|------|----------|
-| 项目级 | `{project}/.ohbaby-agent/tools/tavily.yaml` | - |
-| 用户级 (Linux/Mac) | `~/.config/ohbaby-agent/tools/tavily.yaml` | `$XDG_CONFIG_HOME` |
-| 用户级 (Windows) | `%APPDATA%/ohbaby-agent/tools/tavily.yaml` | `%APPDATA%` |
+| 项目级 | `{project}/.ohbaby/tools/tavily.yaml` | - |
+| 用户级 (Linux/Mac) | `~/.ohbaby/tools/tavily.yaml` | `$OHBABY_HOME` |
+| 用户级 (Windows) | `%USERPROFILE%/.ohbaby/tools/tavily.yaml` | `%OHBABY_HOME%` |
 
 ### 4.2 优先级
 
@@ -435,19 +435,11 @@ function mergeConfig(
 
 ```typescript
 function resolveUserConfigDir(): string {
-  // Windows
-  if (process.platform === 'win32') {
-    return path.join(process.env.APPDATA || '', 'ohbaby-agent', 'tools')
-  }
-
-  // Linux/Mac (XDG)
-  const xdgConfigHome = process.env.XDG_CONFIG_HOME ||
-    path.join(os.homedir(), '.config')
-  return path.join(xdgConfigHome, 'ohbaby-agent', 'tools')
+  return path.join(resolveOhbabyHome(), 'tools')
 }
 
 function resolveProjectConfigPath(projectRoot: string): string {
-  return path.join(projectRoot, '.ohbaby-agent', 'tools', 'tavily.yaml')
+  return path.join(projectRoot, '.ohbaby', 'tools', 'tavily.yaml')
 }
 ```
 
@@ -464,7 +456,7 @@ function resolveProjectConfigPath(projectRoot: string): string {
 │     │                                                                    │
 │     ▼                                                                    │
 │  2. 检查用户级配置是否存在                                                │
-│     ~/.config/ohbaby-agent/tools/tavily.yaml                                │
+│     ~/.ohbaby/tools/tavily.yaml                                │
 │     │                                                                    │
 │     ├── 存在 --> 加载并合并                                              │
 │     │   config = merge(config, userConfig)                               │
@@ -473,7 +465,7 @@ function resolveProjectConfigPath(projectRoot: string): string {
 │     │                                                                    │
 │     ▼                                                                    │
 │  3. 检查项目级配置是否存在                                                │
-│     {project}/.ohbaby-agent/tools/tavily.yaml                               │
+│     {project}/.ohbaby/tools/tavily.yaml                               │
 │     │                                                                    │
 │     ├── 存在 --> 加载并合并（覆盖用户级）                                 │
 │     │   config = merge(config, projectConfig)                            │
@@ -597,7 +589,7 @@ class ConfigValidationError extends Error {
 ## 九、文档自检
 
 - [x] 架构服务于配置加载需求
-- [x] XDG 标准配置路径清晰
+- [x] OHBABY_HOME 配置路径清晰
 - [x] 优先级规则明确
 - [x] 与其他模块集成点明确
 - [x] 错误处理策略完整

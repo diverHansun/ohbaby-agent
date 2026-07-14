@@ -108,7 +108,7 @@
 
 ### 集成点 1：PluginManager + 临时文件系统（集成测试）
 
-**验证重点**：LocalPath install() 直接记录原始 pluginRoot；cache source install() 将插件复制到 `~/.ohbaby-agent/plugins/cache/<name>/<version>/`；enable() 后 ContributionBuilder 能从真实目录扫描到组件；uninstall() 后 cache 目录标记为孤儿
+**验证重点**：LocalPath install() 直接记录原始 pluginRoot；cache source install() 将插件复制到 `~/.ohbaby/plugins/cache/<name>/<version>/`；enable() 后 ContributionBuilder 能从真实目录扫描到组件；uninstall() 后 cache 目录标记为孤儿
 
 **方式**：使用 OS tmp 目录创建 fixture 插件目录（含 plugin.json + skills/ + hooks.json）；stub PluginDispatchTargets（记录调用）；分别断言 LocalPath 原始目录引用、cache 路径结构和 Registry 最终状态
 

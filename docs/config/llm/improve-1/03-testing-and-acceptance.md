@@ -58,7 +58,7 @@
 
 ```text
 temp-home/
-└── .ohbaby-agent/
+└── .ohbaby/
     ├── model.json
     └── .env
 ```
@@ -159,6 +159,6 @@ pnpm vitest run packages/ohbaby-agent/src/config/llm/__tests__/llm-config.e2e.te
 - [ ] 显式 API key 能写入 `.env`。
 - [ ] 未显式 API key 时能从 `env` 或 `envPath` 读取。
 - [ ] 写入使用 atomic write。
-- [ ] 测试不污染真实 `~/.ohbaby-agent/model.json`。
+- [ ] 测试不污染真实 `~/.ohbaby/model.json`。
 - [ ] e2e 使用真实 `.env` key 时不打印 key。
 

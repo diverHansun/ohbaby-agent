@@ -64,7 +64,7 @@ Memory 模块只负责文件的读写和管理：
 ### D1: 记忆文件加载
 
 加载全局和项目级的记忆内容：
-- 从 XDG 配置目录读取全局 OHBABY.md
+- 从 OHBABY_HOME（默认 `~/.ohbaby`）读取全局 OHBABY.md
 - 从项目根目录向上查找 OHBABY.md
 - 合并两层内容并添加来源标记
 - 返回原始 Markdown 文本

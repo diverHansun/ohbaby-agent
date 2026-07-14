@@ -317,7 +317,7 @@ export async function runExitCleanup(): Promise<void>
 关键设计：
 ```typescript
 export class ProjectPaths {
-  static readonly CONFIG_DIR = '.ohbaby-agent'
+  static readonly CONFIG_DIR = '.ohbaby'
   static getGlobalConfigPath(): string
   static getPermissionsPath(cwd?: string): string
   static getMCPConfigPath(cwd?: string): string
@@ -662,7 +662,7 @@ await Log.init({
 })
 
 // 日志文件路径
-// ~/.ohbaby-agent/logs/2024-01-15T103000.log
+// ~/.ohbaby/logs/2024-01-15T103000.log
 ```
 
 ### 5.3 日志清理策略

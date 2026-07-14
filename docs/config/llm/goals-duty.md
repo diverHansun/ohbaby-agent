@@ -15,8 +15,8 @@
 ## 职责
 
 1. 从配置文件加载 LLM 配置
-   - 从 `~/.ohbaby-agent/model.json` 读取模型和API配置
-   - MVP 不实现 `.ohbaby-agent.local/model.json` 本地覆盖，避免文档与运行时行为不一致
+   - 从 `~/.ohbaby/model.json` 读取模型和API配置
+   - MVP 不实现 `.ohbaby.local/model.json` 本地覆盖，避免文档与运行时行为不一致
 
 2. 从环境变量加载 API Key
    - 父进程环境变量优先；缺失时解析当前项目 `.env` 作为补充

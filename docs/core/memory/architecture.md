@@ -48,12 +48,12 @@ Memory 模块采用**简单文件管理架构**，无持久化中间层，直接
 
 | 类型 | 路径 | 说明 |
 |------|------|------|
-| 全局记忆 | `~/.ohbaby-agent/OHBABY.md` (Linux/macOS) | XDG 配置目录 |
-| 全局记忆 | `%APPDATA%/ohbaby-agent/OHBABY.md` (Windows) | Windows 应用数据目录 |
+| 全局记忆 | `~/.ohbaby/OHBABY.md` (Linux/macOS) | 用户配置根 |
+| 全局记忆 | `%USERPROFILE%\.ohbaby\OHBABY.md` (Windows) | 用户配置根 |
 | 项目记忆 | `{projectRoot}/OHBABY.md` | 项目根目录，与 `.gitignore` 同级 |
 
 **设计说明**：
-- 项目级 OHBABY.md 放在项目根目录（而非 `.ohbaby-agent/` 内）
+- 项目级 OHBABY.md 放在项目根目录（而非 `.ohbaby/` 内）
 - 这样设计使 OHBABY.md 更易被用户发现和编辑
 - 便于加入版本控制与团队共享
 
@@ -187,7 +187,7 @@ async function load(directory: string): Promise<MergedMemory>
 
 2. 加载全局记忆
    ├─> 获取全局路径：getGlobalMemoryPath()
-   │   └─> XDG 配置目录 + OHBABY.md
+   │   └─> OHBABY_HOME（默认 ~/.ohbaby）+ OHBABY.md
    └─> 读取文件内容（不存在则返回空字符串）
 
 3. 加载项目记忆
@@ -312,16 +312,12 @@ async function listEntries(
 
 ```typescript
 function getGlobalMemoryPath(): string {
-  // XDG 标准目录
-  const configDir = process.platform === 'win32'
-    ? path.join(process.env.APPDATA || '', 'ohbaby-agent')
-    : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'ohbaby-agent')
-  
-  return path.join(configDir, 'OHBABY.md')
+  return path.join(resolveOhbabyHome(), 'OHBABY.md')
 }
 
-// Linux/macOS: ~/.config/ohbaby-agent/OHBABY.md
-// Windows: %APPDATA%/ohbaby-agent/OHBABY.md
+// Linux/macOS: ~/.ohbaby/OHBABY.md
+// Windows: %USERPROFILE%\.ohbaby\OHBABY.md
+// OHBABY_HOME 是可选的绝对路径，表示完整配置根
 ```
 
 ### 5.2 项目路径查找（向上查找）

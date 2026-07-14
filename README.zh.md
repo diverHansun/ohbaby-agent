@@ -65,7 +65,7 @@ ohbaby
 
 **2. 配置模型。** 在 CLI/TUI 里输入 `/connect` 打开 provider 配置面板，填入 provider、
 base URL、模型名后保存即可。API key 相关字段对 LM Studio 等本地/无鉴权 endpoint
-是可选的；如果输入密钥，它会持久化到 `~/.ohbaby-agent/.env`。
+是可选的；如果输入密钥，它会持久化到 `~/.ohbaby/.env`。
 
 <p align="center">
   <img src="assets/images/connect-providers.png" alt="ohbaby-agent /connect 模型配置" width="760">
@@ -108,12 +108,12 @@ URL。显式传入 `--port` 时仍保持严格语义，所以 `ohbaby serve --po
 
 想启用 Web 搜索工具，先去 [Tavily](https://tavily.com) 申请一个免费 API Key，然后在
 CLI/TUI 里输入 `/connect-search` 并填入 Key。ohbaby-agent 会把它作为
-`TAVILY_API_KEY` 保存到 `~/.ohbaby-agent/.env`，并且只把搜索元数据写入
-`~/.ohbaby-agent/tools/search.json`。
+`TAVILY_API_KEY` 保存到 `~/.ohbaby/.env`，并且只把搜索元数据写入
+`~/.ohbaby/tools/search.json`。
 
 你也可以手动把 Key 写进 `.env` 文件：
 
-- `~/.ohbaby-agent/.env`（全局），或
+- `~/.ohbaby/.env`（全局），或
 - `<你的项目>/.env`（项目）
 
 ```dotenv
@@ -124,9 +124,26 @@ TAVILY_API_KEY=tvly-...
 
 ## 🧩 MCP 与 Skills
 
-MCP server 可以按全局或项目维度配置在 `.ohbaby-agent/mcp/` 下。Skills 会从
+MCP server 可以按全局或项目维度配置在 `.ohbaby/mcp/` 下。Skills 会从
 ohbaby-agent 兼容的 skill 目录中发现，并作为 slash 命令出现在 CLI/TUI 中。用 `/mcps`
 查看已连接的 MCP server，用 `/skills` 查看可用 skill。
+
+## ⚙️ 配置与数据目录
+
+`OHBABY_HOME` 是可选的**完整配置根绝对路径**。macOS/Linux 默认
+`~/.ohbaby`，Windows 默认 `%USERPROFILE%\.ohbaby`。全局模型、密钥、MCP、
+skills、agents、tools、memory 与 daemon 状态都位于该根下；项目级配置位于
+`<project>/.ohbaby`。
+
+运行数据继续使用平台数据目录：
+
+- Linux：`${XDG_DATA_HOME:-~/.local/share}/ohbaby`
+- macOS：`~/Library/Application Support/ohbaby`
+- Windows：`%LOCALAPPDATA%\ohbaby`
+
+首次启动时，ohbaby 会把旧 `.ohbaby-agent` 配置与 `ohbaby-agent` 数据复制到新位置，
+且不删除旧源。发生冲突时新路径优先；旧路径只读兼容保留一个 minor 版本。若检测到
+live daemon，SQLite 迁移会安全停止并提示；请先执行 `ohbaby serve stop` 后重试。
 
 ## 📚 文档
 

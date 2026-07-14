@@ -273,7 +273,7 @@ interface SkillToolResult {
 ```
 ## Skill: code-review
 
-**Base directory**: /path/to/.ohbaby-agent/skill/code-review
+**Base directory**: /path/to/.ohbaby/skills/code-review
 
 # Code Review Guidelines
 
@@ -284,7 +284,7 @@ interface SkillToolResult {
 ```
 ## Skill: xlsx
 
-**Base directory**: /path/to/.ohbaby-agent/skill/xlsx
+**Base directory**: /path/to/.ohbaby/skills/xlsx
 
 **Available files**:
 - read-xlsx.ts

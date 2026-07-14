@@ -133,8 +133,8 @@ class ExaClient {
 **职责**：管理 Exa 工具配置
 
 **配置来源优先级**：
-1. 项目级别：`{project}/.ohbaby-agent/tools/exa.yaml`
-2. 用户级别：`~/.config/ohbaby-agent/tools/exa.yaml`
+1. 项目级别：`{project}/.ohbaby/tools/exa.yaml`
+2. 用户级别：`~/.ohbaby/tools/exa.yaml`
 
 **配置项**：
 

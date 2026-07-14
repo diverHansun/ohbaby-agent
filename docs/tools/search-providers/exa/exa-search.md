@@ -295,8 +295,8 @@ Best practices for deploying machine learning models...
 ### 配置文件位置
 
 ```
-项目级：{project}/.ohbaby-agent/tools/exa.yaml
-用户级：~/.config/ohbaby-agent/tools/exa.yaml
+项目级：{project}/.ohbaby/tools/exa.yaml
+用户级：~/.ohbaby/tools/exa.yaml
 ```
 
 ### 相关配置项

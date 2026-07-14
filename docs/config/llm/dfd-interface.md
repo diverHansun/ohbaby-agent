@@ -4,7 +4,7 @@
 
 本模块与以下外部模块交互：
 
-- **文件系统**：读取 `~/.ohbaby-agent/model.json` 和当前项目 `.env`
+- **文件系统**：读取 `~/.ohbaby/model.json` 和当前项目 `.env`
 - **环境变量**：根据 `model.json` 中的 `apiKeyEnv` 读取 API Key
 - **llm-client 模块**：消费本模块提供的 LLMConfig
 - **command 模块**：接收热重载触发命令
@@ -24,7 +24,7 @@ config/llm 检查内存缓存
   ├─ 缓存存在 → 返回
   └─ 缓存不存在 → 执行加载流程
     ↓
-  读取 ~/.ohbaby-agent/model.json
+  读取 ~/.ohbaby/model.json
     ↓
   解析 JSON，得到 ModelJsonConfig
     ↓

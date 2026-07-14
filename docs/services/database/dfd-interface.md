@@ -221,7 +221,7 @@ runtime/daemon             database 模块            SQLite 文件
 **输入**：
 ```typescript
 options?: {
-  dbPath?: string  // 覆盖默认路径（默认：XDG 基础路径下的 ohbaby-agent.db）
+  dbPath?: string  // 覆盖默认路径（默认：平台数据目录 ohbaby/ohbaby.db）
 }
 // 环境变量 OHBABY_DB_PATH 优先于 options.dbPath
 ```

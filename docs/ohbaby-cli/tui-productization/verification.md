@@ -35,7 +35,7 @@ TAVILY_API_KEY=... \
 pnpm vitest run tests/smoke/tui-real-provider.smoke.test.tsx --testTimeout=360000
 ```
 
-The real TUI smoke writes a temporary `~/.ohbaby-agent/model.json`, uses the
+The real TUI smoke writes a temporary `~/.ohbaby/model.json`, uses the
 Zhipu OpenAI-compatible base URL, renders `OhbabyTerminalApp`, submits through
 the TUI prompt, and verifies the backend returns to idle. The Tavily variant
 also switches to ask mode from the TUI and verifies a completed `web_search`

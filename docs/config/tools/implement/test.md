@@ -4,7 +4,7 @@
 
 **覆盖的职责**：
 
-- 从 `~/.ohbaby-agent/tools/search.json` 加载配置
+- 从 `~/.ohbaby/tools/search.json` 加载配置
 - Zod schema 校验（字段类型、枚举值、数字范围）
 - 从 `process.env` 读取 API Key（根据 `apiKeyEnv` 字段）
 - 文件不存在时回退到默认 schema
@@ -41,7 +41,7 @@
 | 文件存在且 JSON 合法 | 临时目录写入完整 search.json | 返回原始解析对象 |
 | 文件不存在 | 不创建 search.json | 返回 `null`（loader 层用 null 表示"无文件"，manager 负责回退到默认 schema） |
 | 文件存在但 JSON 非法 | 写入 `{` | 抛 `SearchConfigError(INVALID_JSON)`，包含路径 |
-| getSearchJsonPath() | — | 返回 `<homedir>/.ohbaby-agent/tools/search.json` |
+| getSearchJsonPath() | — | 返回 `<homedir>/.ohbaby/tools/search.json` |
 
 ### Validation（validation.unit.test.ts）
 

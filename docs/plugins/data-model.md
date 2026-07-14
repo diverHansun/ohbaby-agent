@@ -45,9 +45,9 @@ type PluginSettingsJson = Record<string, unknown>
 ```typescript
 /** 安装作用域 */
 type PluginScope =
-  | 'user'     // ~/.ohbaby-agent/settings.json，用户级，跨项目可用
-  | 'project'  // .ohbaby-agent/settings.json，项目级，随仓库共享
-  | 'local'    // .ohbaby-agent/settings.local.json，本地覆盖，不入 git
+  | 'user'     // ~/.ohbaby/settings.json，用户级，跨项目可用
+  | 'project'  // .ohbaby/settings.json，项目级，随仓库共享
+  | 'local'    // .ohbaby/settings.local.json，本地覆盖，不入 git
   | 'managed'  // 由管理员通过 managed settings 写入，只读
 
 /** 插件生命周期状态 */
@@ -79,7 +79,7 @@ interface InstalledCacheSource {
   type: 'cache'
   pluginId: PluginId
   version: string
-  cachePath: AbsolutePath  // ~/.ohbaby-agent/plugins/cache/<name>/<version>/
+  cachePath: AbsolutePath  // ~/.ohbaby/plugins/cache/<name>/<version>/
 }
 
 /**

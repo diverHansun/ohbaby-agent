@@ -86,7 +86,7 @@
 ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
 │      .env        │     │ Project Config   │     │  User Config     │
 │                  │     │                  │     │                  │
-│  EXA_API_KEY=xxx │     │ .ohbaby-agent/      │     │ ~/.config/       │
+│  EXA_API_KEY=xxx │     │ .ohbaby/      │     │ ~/.config/       │
 │                  │     │   tools/exa.yaml │     │   ohbaby-agent/     │
 │                  │     │                  │     │   tools/exa.yaml │
 └────────┬─────────┘     └────────┬─────────┘     └────────┬─────────┘

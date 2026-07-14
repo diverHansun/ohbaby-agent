@@ -47,8 +47,8 @@
 ### D1: 加载配置文件
 
 从指定路径加载 Agent 配置文件：
-- 全局配置：`~/.ohbaby-agent/agents/settings.json`
-- 项目配置：`{project}/.ohbaby-agent/agents/settings.json`
+- 全局配置：`~/.ohbaby/agents/settings.json`
+- 项目配置：`{project}/.ohbaby/agents/settings.json`
 
 ### D2: 验证配置格式
 

@@ -179,37 +179,37 @@ describe('Path Resolution', () => {
   })
 
   describe('resolveUserConfigDir', () => {
-    it('should use APPDATA on Windows', () => {
+    it('should use the Windows user home .ohbaby directory', () => {
       Object.defineProperty(process, 'platform', { value: 'win32' })
-      process.env.APPDATA = 'C:\\Users\\Test\\AppData\\Roaming'
+      process.env.USERPROFILE = 'C:\\Users\\Test'
 
       const path = resolveUserConfigDir()
-      expect(path).toContain('ohbaby-agent')
+      expect(path).toContain('.ohbaby')
       expect(path).toContain('tools')
     })
 
-    it('should use XDG_CONFIG_HOME on Linux', () => {
+    it('should treat OHBABY_HOME as the complete config root', () => {
       Object.defineProperty(process, 'platform', { value: 'linux' })
-      process.env.XDG_CONFIG_HOME = '/home/test/.config'
+      process.env.OHBABY_HOME = '/home/test/custom-ohbaby'
 
       const path = resolveUserConfigDir()
-      expect(path).toBe('/home/test/.config/ohbaby-agent/tools')
+      expect(path).toBe('/home/test/custom-ohbaby/tools')
     })
 
-    it('should fallback to ~/.config on Linux', () => {
+    it('should fallback to ~/.ohbaby on Linux', () => {
       Object.defineProperty(process, 'platform', { value: 'linux' })
-      delete process.env.XDG_CONFIG_HOME
+      delete process.env.OHBABY_HOME
       process.env.HOME = '/home/test'
 
       const path = resolveUserConfigDir()
-      expect(path).toContain('.config/ohbaby-agent/tools')
+      expect(path).toContain('.ohbaby/tools')
     })
   })
 
   describe('resolveProjectConfigPath', () => {
     it('should return correct project config path', () => {
       const path = resolveProjectConfigPath('/project/root')
-      expect(path).toBe('/project/root/.ohbaby-agent/tools/exa.yaml')
+      expect(path).toBe('/project/root/.ohbaby/tools/exa.yaml')
     })
   })
 })
@@ -261,7 +261,7 @@ exa:
     default_num_results: 5
 `
       vi.mocked(fs.access).mockImplementation(async (p) => {
-        if (String(p).includes('.ohbaby-agent')) return
+        if (String(p).includes('.ohbaby')) return
         throw new Error('ENOENT')
       })
       vi.mocked(fs.readFile).mockResolvedValue(projectConfig)
@@ -286,7 +286,7 @@ exa:
 `
       vi.mocked(fs.access).mockResolvedValue(undefined)
       vi.mocked(fs.readFile).mockImplementation(async (p) => {
-        if (String(p).includes('.ohbaby-agent')) return projectConfig
+        if (String(p).includes('.ohbaby')) return projectConfig
         return userConfig
       })
       process.env.EXA_API_KEY = 'test-key'
@@ -375,13 +375,13 @@ exa:
   describe('getPathInfo', () => {
     it('should return correct path info', async () => {
       vi.mocked(fs.access).mockImplementation(async (p) => {
-        if (String(p).includes('.ohbaby-agent')) return
+        if (String(p).includes('.ohbaby')) return
         throw new Error('ENOENT')
       })
 
       const info = await loader.getPathInfo()
 
-      expect(info.projectPath).toContain('.ohbaby-agent/tools/exa.yaml')
+      expect(info.projectPath).toContain('.ohbaby/tools/exa.yaml')
       expect(info.projectExists).toBe(true)
       expect(info.userExists).toBe(false)
     })

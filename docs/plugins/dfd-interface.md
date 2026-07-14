@@ -84,7 +84,7 @@ SourceResolver.resolve(source)
     ▼
 Installer.install(resolvedSource, scope)
     LocalPath 场景：    验证目录存在，跳过复制
-    MarketplaceRef：    复制到 ~/.ohbaby-agent/plugins/cache/<name>/<version>/
+    MarketplaceRef：    复制到 ~/.ohbaby/plugins/cache/<name>/<version>/
     → pluginRoot: AbsolutePath（cache 路径或原始路径）
     │
     ▼
@@ -118,7 +118,7 @@ ManifestLoader.load(record.pluginRoot)
 ContributionBuilder.build(record.pluginRoot, manifest, userConfigValues)
     - 扫描各组件目录，验证路径存在
     - 替换 ${CLAUDE_PLUGIN_ROOT} → record.pluginRoot
-    - 替换 ${CLAUDE_PLUGIN_DATA} → ~/.ohbaby-agent/plugins/data/<id>/
+    - 替换 ${CLAUDE_PLUGIN_DATA} → ~/.ohbaby/plugins/data/<id>/
     - 替换 ${user_config.*} → userConfigValues 中的值
     → PluginContribution
     │

@@ -84,9 +84,9 @@ type StorageLocation = string & { readonly _brand: 'StorageLocation' }
 PathResolver 负责将 `StorageKey` 解析为 `StorageLocation`：
 
 ```
-StorageRoot = ~/.local/share/ohbaby-agent/storage
+StorageRoot = ~/.local/share/ohbaby/storage
 key         = ["snapshot", "patches", "ckpt_1", "patch_1"]
-location    = ~/.local/share/ohbaby-agent/storage/snapshot/patches/ckpt_1/patch_1.diff
+location    = ~/.local/share/ohbaby/storage/snapshot/patches/ckpt_1/patch_1.diff
 ```
 
 实际扩展名可由调用方通过 key 约定或 `writeText/writeBytes/writeJson` 的 options 指定。PathResolver 必须验证解析结果仍位于 StorageRoot 内。

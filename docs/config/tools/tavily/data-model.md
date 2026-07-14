@@ -9,7 +9,7 @@
 ### 1.1 tavily.yaml 文件格式
 
 ```yaml
-# .ohbaby-agent/tools/tavily.yaml 或 ~/.config/ohbaby-agent/tools/tavily.yaml
+# .ohbaby/tools/tavily.yaml 或 ~/.ohbaby/tools/tavily.yaml
 
 tavily:
   # API 端点（可选，默认官方端点）
@@ -320,7 +320,7 @@ export const CONFIG_FILE_NAME = 'tavily.yaml'
 /**
  * 项目配置相对路径
  */
-export const PROJECT_CONFIG_PATH = '.ohbaby-agent/tools/tavily.yaml'
+export const PROJECT_CONFIG_PATH = '.ohbaby/tools/tavily.yaml'
 
 /**
  * 用户配置目录名

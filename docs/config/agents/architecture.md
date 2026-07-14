@@ -28,10 +28,10 @@ config/agents/
 1. loadAgentConfig() 被调用
    |
    v
-2. 加载全局配置文件 (~/.ohbaby-agent/agents/settings.json)
+2. 加载全局配置文件 (~/.ohbaby/agents/settings.json)
    |
    v
-3. 加载项目配置文件 ({project}/.ohbaby-agent/agents/settings.json)
+3. 加载项目配置文件 ({project}/.ohbaby/agents/settings.json)
    |
    v
 4. 合并配置（项目覆盖全局）
@@ -243,7 +243,7 @@ ConfigValidationError: Invalid agent configuration
   Path: agents.build.maxSteps
   Expected: number
   Received: string ("fifty")
-  File: /Users/xxx/.ohbaby-agent/agents/settings.json
+  File: /Users/xxx/.ohbaby/agents/settings.json
 ```
 
 ---

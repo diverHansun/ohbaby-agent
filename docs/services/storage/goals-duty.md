@@ -41,10 +41,10 @@
 
 ### G4: 跨平台兼容
 
-遵循 XDG Base Directory 规范，在不同操作系统上自动选择合适的存储路径：
-- Linux: `~/.local/share/ohbaby-agent/`
-- macOS: `~/Library/Application Support/ohbaby-agent/`
-- Windows: `%APPDATA%/ohbaby-agent/`
+遵循平台数据目录约定，在不同操作系统上自动选择合适的存储路径：
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/ohbaby/`
+- macOS: `~/Library/Application Support/ohbaby/`
+- Windows: `%LOCALAPPDATA%\ohbaby\`
 
 ### G5: 简单可靠
 

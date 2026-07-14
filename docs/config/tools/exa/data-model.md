@@ -9,7 +9,7 @@
 ### 1.1 exa.yaml 文件格式
 
 ```yaml
-# .ohbaby-agent/tools/exa.yaml 或 ~/.config/ohbaby-agent/tools/exa.yaml
+# .ohbaby/tools/exa.yaml 或 ~/.ohbaby/tools/exa.yaml
 
 exa:
   # API 端点（可选，默认官方端点）
@@ -274,7 +274,7 @@ export const CONFIG_FILE_NAME = 'exa.yaml'
 /**
  * 项目配置相对路径
  */
-export const PROJECT_CONFIG_PATH = '.ohbaby-agent/tools/exa.yaml'
+export const PROJECT_CONFIG_PATH = '.ohbaby/tools/exa.yaml'
 
 /**
  * 用户配置目录名

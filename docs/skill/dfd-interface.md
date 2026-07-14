@@ -65,8 +65,8 @@
 
 ```
 1. [外部] Config 模块提供配置目录列表（按优先级）
-   ├── 项目目录: .ohbaby-agent/skill/
-   └── 全局目录: ~/.config/ohbaby-agent/skill/
+   ├── 项目目录: .ohbaby/skills/
+   └── 全局目录: ~/.ohbaby/skills/
 
 2. [内部] SkillLoader 扫描目录
    └── Glob 模式: **/SKILL.md
@@ -341,8 +341,8 @@ async function buildDescription(): Promise<string> {
 
 ```typescript
 function getGlobalConfigDir(): string
-// Linux/macOS: ~/.config/ohbaby-agent/
-// Windows: %APPDATA%/ohbaby-agent/
+// Linux/macOS: ~/.ohbaby/
+// Windows: %USERPROFILE%/.ohbaby/
 ```
 
 #### Config.getProjectConfigDir()
@@ -351,7 +351,7 @@ function getGlobalConfigDir(): string
 
 ```typescript
 function getProjectConfigDir(): string | undefined
-// 返回: {projectRoot}/.ohbaby-agent/ 或 undefined
+// 返回: {projectRoot}/.ohbaby/ 或 undefined
 ```
 
 ---

@@ -69,7 +69,7 @@ ohbaby
 **2. Connect a model.** In the CLI/TUI, type `/connect` to open the provider setup panel,
 fill in your provider, base URL, and model name, then save. API key fields are
 optional for local or keyless endpoints such as LM Studio; secrets entered here
-are persisted to `~/.ohbaby-agent/.env`.
+are persisted to `~/.ohbaby/.env`.
 
 <p align="center">
   <img src="assets/images/connect-providers.png" alt="ohbaby-agent /connect provider setup" width="760">
@@ -114,12 +114,12 @@ strict, so `ohbaby serve --port 4096` fails clearly when that port is in use.
 To enable the web search tool, get a free API key from
 [Tavily](https://tavily.com), then type `/connect-search` in the CLI/TUI and
 enter the key. ohbaby-agent saves it as `TAVILY_API_KEY` in
-`~/.ohbaby-agent/.env` and keeps only search metadata in
-`~/.ohbaby-agent/tools/search.json`.
+`~/.ohbaby/.env` and keeps only search metadata in
+`~/.ohbaby/tools/search.json`.
 
 You can also set the key manually in a `.env` file:
 
-- `~/.ohbaby-agent/.env` (global), or
+- `~/.ohbaby/.env` (global), or
 - `<your-project>/.env` (project)
 
 ```dotenv
@@ -131,10 +131,30 @@ precedence over the global one.
 
 ## 🧩 MCP & Skills
 
-MCP servers can be configured globally or per project under `.ohbaby-agent/mcp/`.
+MCP servers can be configured globally or per project under `.ohbaby/mcp/`.
 Skills are discovered from ohbaby-agent-compatible skill directories and exposed as slash
 commands. Use `/mcps` to inspect connected MCP servers and `/skills` to list available
 skills.
+
+## ⚙️ Configuration and data locations
+
+`OHBABY_HOME` is an optional **absolute path to the complete configuration
+root**. Its default is `~/.ohbaby` on macOS/Linux and
+`%USERPROFILE%\.ohbaby` on Windows. Global model, secret, MCP, skill, agent,
+tool, memory, and daemon-state files live below this root; project-scoped
+configuration lives below `<project>/.ohbaby`.
+
+Runtime data remains in the platform data directory:
+
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/ohbaby`
+- macOS: `~/Library/Application Support/ohbaby`
+- Windows: `%LOCALAPPDATA%\ohbaby`
+
+On first start, ohbaby copies legacy `.ohbaby-agent` configuration and
+`ohbaby-agent` data into the new locations without deleting the source. New
+paths win on conflicts, while legacy reads remain supported for one minor
+release. SQLite migration stops with an actionable error if a live daemon is
+detected; run `ohbaby serve stop` before retrying.
 
 ## 📚 Documentation
 

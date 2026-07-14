@@ -6,7 +6,7 @@
 
 ## 1. 背景
 
-当前 `config/llm` 已经能读取 `~/.ohbaby-agent/model.json`，解析出一个可供 `core/llm-client` 使用的 `LLMConfig`。但它仍然是只读配置模块：
+当前 `config/llm` 已经能读取 `~/.ohbaby/model.json`，解析出一个可供 `core/llm-client` 使用的 `LLMConfig`。但它仍然是只读配置模块：
 
 - 用户需要手工编辑 `model.json`。
 - 模块没有写回默认模型、baseUrl、apiKeyEnv 或 API key 的能力。
@@ -30,7 +30,7 @@ packages/ohbaby-agent/src/config/llm/
 
 当前能力：
 
-- `loadModelJson()` 固定读取 `~/.ohbaby-agent/model.json`。
+- `loadModelJson()` 固定读取 `~/.ohbaby/model.json`。
 - `loadApiKey()` 只从 `process.env` 读取。
 - `LLMConfigManager` 按 `projectDirectory` 做缓存。
 - `reloadLLMConfig()` 可清缓存并重读。

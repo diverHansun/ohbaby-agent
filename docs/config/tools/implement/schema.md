@@ -2,7 +2,7 @@
 
 ## 文件位置
 
-- **绝对路径**：`~/.ohbaby-agent/tools/search.json`
+- **绝对路径**：`~/.ohbaby/tools/search.json`
 - **存在性**：可选。文件不存在 → 模块返回内建默认配置，不报错
 - **格式**：UTF-8 编码、严格 JSON（不接受 JSONC / 注释）
 

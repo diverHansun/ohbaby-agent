@@ -75,7 +75,7 @@ describe('TavilyConfigLoader', () => {
     it('应该正确加载项目级配置', async () => {
       // Given
       mockFs.exists.mockImplementation(path =>
-        Promise.resolve(path.includes('.ohbaby-agent'))
+        Promise.resolve(path.includes('.ohbaby'))
       )
       mockFs.read.mockResolvedValue({
         tavily: {
@@ -201,7 +201,7 @@ describe('TavilyConfigLoader', () => {
       const pathInfo = loader.getPathInfo()
 
       // Then
-      expect(pathInfo.projectPath).toContain('.ohbaby-agent/tools/tavily.yaml')
+      expect(pathInfo.projectPath).toContain('.ohbaby/tools/tavily.yaml')
       expect(pathInfo.userPath).toContain('ohbaby-agent/tools/tavily.yaml')
     })
   })
@@ -385,42 +385,42 @@ describe('Default Config', () => {
 ```typescript
 describe('Path Resolution', () => {
   describe('resolveUserConfigDir', () => {
-    it('在 Windows 上应该使用 APPDATA', () => {
+    it('在 Windows 上应该使用用户 home 下的 .ohbaby', () => {
       // Given
       vi.stubGlobal('process', { platform: 'win32' })
-      vi.stubEnv('APPDATA', 'C:\\Users\\Test\\AppData\\Roaming')
+      mockOs.homedir.mockReturnValue('C:\\Users\\Test')
 
       // When
       const result = resolveUserConfigDir()
 
       // Then
-      expect(result).toContain('AppData')
-      expect(result).toContain('ohbaby-agent')
+      expect(result).toContain('.ohbaby')
+      expect(result).toContain('tools')
     })
 
-    it('在 Linux 上应该使用 XDG_CONFIG_HOME', () => {
+    it('应该把 OHBABY_HOME 作为完整配置根', () => {
       // Given
       vi.stubGlobal('process', { platform: 'linux' })
-      vi.stubEnv('XDG_CONFIG_HOME', '/custom/config')
+      vi.stubEnv('OHBABY_HOME', '/custom/config-root')
 
       // When
       const result = resolveUserConfigDir()
 
       // Then
-      expect(result).toBe('/custom/config/ohbaby-agent/tools')
+      expect(result).toBe('/custom/config-root/tools')
     })
 
-    it('当 XDG_CONFIG_HOME 未设置时应该使用 ~/.config', () => {
+    it('当 OHBABY_HOME 未设置时应该使用 ~/.ohbaby', () => {
       // Given
       vi.stubGlobal('process', { platform: 'linux' })
-      delete process.env.XDG_CONFIG_HOME
+      delete process.env.OHBABY_HOME
       mockOs.homedir.mockReturnValue('/home/user')
 
       // When
       const result = resolveUserConfigDir()
 
       // Then
-      expect(result).toBe('/home/user/.config/ohbaby-agent/tools')
+      expect(result).toBe('/home/user/.ohbaby/tools')
     })
   })
 
@@ -430,7 +430,7 @@ describe('Path Resolution', () => {
       const result = resolveProjectConfigPath('/my/project')
 
       // Then
-      expect(result).toBe('/my/project/.ohbaby-agent/tools/tavily.yaml')
+      expect(result).toBe('/my/project/.ohbaby/tools/tavily.yaml')
     })
   })
 })
@@ -458,7 +458,7 @@ describe('TavilyConfigLoader Integration', () => {
 
   it('应该从真实文件加载配置', async () => {
     // Given
-    const configDir = path.join(tempDir, '.ohbaby-agent', 'tools')
+    const configDir = path.join(tempDir, '.ohbaby', 'tools')
     await fs.mkdir(configDir, { recursive: true })
     await fs.writeFile(
       path.join(configDir, 'tavily.yaml'),
@@ -477,7 +477,7 @@ describe('TavilyConfigLoader Integration', () => {
 
   it('应该正确合并多级配置', async () => {
     // Given - 创建项目级配置
-    const projectConfigDir = path.join(tempDir, '.ohbaby-agent', 'tools')
+    const projectConfigDir = path.join(tempDir, '.ohbaby', 'tools')
     await fs.mkdir(projectConfigDir, { recursive: true })
     await fs.writeFile(
       path.join(projectConfigDir, 'tavily.yaml'),

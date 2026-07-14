@@ -29,8 +29,8 @@ loadMcpConfig({
 
 默认路径：
 
-- 全局：`~/.ohbaby-agent/mcp/settings.json`
-- 项目：`<project>/.ohbaby-agent/mcp/settings.json`
+- 全局：`~/.ohbaby/mcp/settings.json`
+- 项目：`<project>/.ohbaby/mcp/settings.json`
 
 项目配置按 server name 完全覆盖全局同名配置。
 

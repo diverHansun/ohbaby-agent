@@ -399,10 +399,10 @@ export const DEFAULT_MCP_TRUST = false
 ### 8.2 配置文件路径
 
 ```typescript
-export const GLOBAL_MCP_CONFIG_DIR = '~/.ohbaby-agent/mcp'
+export const GLOBAL_MCP_CONFIG_DIR = '~/.ohbaby/mcp'
 export const GLOBAL_MCP_CONFIG_FILE = 'settings.json'
 
-export const PROJECT_MCP_CONFIG_DIR = '.ohbaby-agent/mcp'
+export const PROJECT_MCP_CONFIG_DIR = '.ohbaby/mcp'
 export const PROJECT_MCP_CONFIG_FILE = 'settings.json'
 ```
 

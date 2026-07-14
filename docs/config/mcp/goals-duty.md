@@ -36,8 +36,8 @@
 ### 2. 从配置文件加载MCP配置
 
 从以下位置按优先级加载配置：
-- 全局配置：`~/.ohbaby-agent/mcp/settings.json`
-- 项目配置：`{project}/.ohbaby-agent/mcp/settings.json`
+- 全局配置：`~/.ohbaby/mcp/settings.json`
+- 项目配置：`{project}/.ohbaby/mcp/settings.json`
 
 ### 3. 合并多层级配置
 

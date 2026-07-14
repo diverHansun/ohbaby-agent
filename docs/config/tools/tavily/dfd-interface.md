@@ -21,11 +21,11 @@
 │                         Path Resolution                                  │
 │                                                                          │
 │  1. 解析项目配置路径                                                      │
-│     projectPath = {projectRoot}/.ohbaby-agent/tools/tavily.yaml             │
+│     projectPath = {projectRoot}/.ohbaby/tools/tavily.yaml             │
 │                                                                          │
 │  2. 解析用户配置路径                                                      │
-│     Windows: %APPDATA%/ohbaby-agent/tools/tavily.yaml                       │
-│     Linux/Mac: ~/.config/ohbaby-agent/tools/tavily.yaml                     │
+│     Windows: %USERPROFILE%/.ohbaby/tools/tavily.yaml                       │
+│     Linux/Mac: ~/.ohbaby/tools/tavily.yaml                     │
 │                                                                          │
 └─────────────────────────────────┬────────────────────────────────────────┘
                                   │
@@ -46,7 +46,7 @@
 │             │ merge                                                      │
 │             ▼                                                            │
 │  ┌─────────────────────┐      ┌─────────────────────┐                   │
-│  │  项目级配置          │ <--  │  .ohbaby-agent/tools/  │                   │
+│  │  项目级配置          │ <--  │  .ohbaby/tools/  │                   │
 │  │  (如果存在)          │      │  tavily.yaml        │                   │
 │  └──────────┬──────────┘      └─────────────────────┘                   │
 │             │ merge                                                      │

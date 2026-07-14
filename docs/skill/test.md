@@ -41,7 +41,7 @@
 
 **前置条件**：
 ```
-.ohbaby-agent/skill/code-review/SKILL.md
+.ohbaby/skills/code-review/SKILL.md
 ---
 name: code-review
 description: Code review guidelines
@@ -57,7 +57,7 @@ description: Code review guidelines
 
 **前置条件**：
 ```
-.ohbaby-agent/skill/
+.ohbaby/skills/
 ├── code-review/SKILL.md
 ├── commit/SKILL.md
 └── nested/deep/SKILL.md
@@ -181,11 +181,11 @@ name: missing-desc
 
 **前置条件**：
 ```
-~/.config/ohbaby-agent/skill/code-review/SKILL.md
+~/.ohbaby/skills/code-review/SKILL.md
   name: code-review
   description: Global version
 
-.ohbaby-agent/skill/code-review/SKILL.md
+.ohbaby/skills/code-review/SKILL.md
   name: code-review
   description: Project version
 ```
@@ -202,7 +202,7 @@ name: missing-desc
 
 **前置条件**：
 ```
-.ohbaby-agent/skill/code-review/
+.ohbaby/skills/code-review/
 └── SKILL.md
 ```
 
@@ -228,7 +228,7 @@ name: missing-desc
 
 **前置条件**：
 ```
-.ohbaby-agent/skill/xlsx/
+.ohbaby/skills/xlsx/
 ├── SKILL.md
 ├── read-xlsx.ts
 └── write-xlsx.ts
@@ -248,7 +248,7 @@ name: missing-desc
 
 **前置条件**：
 ```
-.ohbaby-agent/skill/project-generator/
+.ohbaby/skills/project-generator/
 ├── SKILL.md
 ├── generate.ts
 └── templates/
@@ -269,7 +269,7 @@ name: missing-desc
 
 **前置条件**：
 ```
-.ohbaby-agent/skill/test-skill/
+.ohbaby/skills/test-skill/
 ├── SKILL.md
 ├── script.ts
 └── .hidden-file
@@ -283,7 +283,7 @@ name: missing-desc
 
 **前置条件**：
 ```
-.ohbaby-agent/skill/test-skill/
+.ohbaby/skills/test-skill/
 ├── SKILL.md
 ├── script.ts
 └── empty-dir/
@@ -336,8 +336,8 @@ description: Minimal skill without optional fields
 
 **前置条件**：
 ```
-~/.config/ohbaby-agent/skill/global-skill/SKILL.md
-.ohbaby-agent/skill/project-skill/SKILL.md
+~/.ohbaby/skills/global-skill/SKILL.md
+.ohbaby/skills/project-skill/SKILL.md
 ```
 
 **预期结果**：
@@ -465,7 +465,7 @@ Skill C: userInvocable: true, disableModelInvocation: false
 | 测试点 | 验证内容 |
 |--------|----------|
 | 获取全局配置目录 | 正确获取 XDG 标准目录 |
-| 获取项目配置目录 | 正确识别 .ohbaby-agent 目录 |
+| 获取项目配置目录 | 正确识别 .ohbaby 目录 |
 | 目录不存在时 | 不抛出异常，返回空列表 |
 
 ### 3.2 与 Commands 模块集成（用户路径）

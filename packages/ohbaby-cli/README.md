@@ -54,9 +54,9 @@ Supports OpenAI, Anthropic/Claude, and any OpenAI-compatible endpoint (Zhipu/GLM
 DeepSeek, Qwen/DashScope, …).
 
 **Web search (optional):** get a free [Tavily](https://tavily.com) API key and add
-`TAVILY_API_KEY=tvly-...` to `~/.ohbaby-agent/.env` or your project's `.env`.
+`TAVILY_API_KEY=tvly-...` to `~/.ohbaby/.env` or your project's `.env`.
 
-**MCP & Skills:** configure MCP servers globally or per project under `.ohbaby-agent/mcp/`.
+**MCP & Skills:** configure MCP servers globally or per project under `.ohbaby/mcp/`.
 Skills are discovered from ohbaby-agent-compatible skill directories and exposed as slash commands.
 
 ## Documentation

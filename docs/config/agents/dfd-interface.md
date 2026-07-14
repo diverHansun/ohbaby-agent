@@ -52,8 +52,8 @@ agents 模块（业务层）
    |
    v
 2. config/agents 模块确定配置文件路径
-   - 全局：~/.ohbaby-agent/agents/settings.json
-   - 项目：{project}/.ohbaby-agent/agents/settings.json
+   - 全局：~/.ohbaby/agents/settings.json
+   - 项目：{project}/.ohbaby/agents/settings.json
    |
    v
 3. 从文件系统读取全局配置文件
@@ -332,7 +332,7 @@ agents 模块
 
 ### 6.1 全局配置
 
-路径：`~/.ohbaby-agent/agents/settings.json`
+路径：`~/.ohbaby/agents/settings.json`
 
 用途：
 - 用户级别的默认 Agent 配置
@@ -357,7 +357,7 @@ agents 模块
 
 ### 6.2 项目配置
 
-路径：`{project}/.ohbaby-agent/agents/settings.json`
+路径：`{project}/.ohbaby/agents/settings.json`
 
 用途：
 - 项目特定的 Agent 配置

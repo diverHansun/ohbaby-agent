@@ -34,7 +34,7 @@ GitSnapshotEngine implements DiffEngine (替换 ShadowDiffEngine)
 
 ```
 <storageRoot>/../snapshot-git/<workdirHash>
-# 例 (win32): %APPDATA%/ohbaby-agent/snapshot-git/<sha1(workdir).slice(0,16)>
+# 例 (win32): %LOCALAPPDATA%/ohbaby/snapshot-git/<sha1(workdir).slice(0,16)>
 ```
 
 - `workdirHash`：`sha1(workdir)` 前 16 hex，避免长路径与字符问题（对齐 opencode `Hash.fast(worktree)`）。

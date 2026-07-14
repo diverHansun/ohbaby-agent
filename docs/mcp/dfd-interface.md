@@ -23,8 +23,8 @@ createUiRuntimeComposition()
      ensureInitialized()
         │
         ├─ loadMcpConfig()
-        │    ├─ ~/.ohbaby-agent/mcp/settings.json
-        │    └─ <project>/.ohbaby-agent/mcp/settings.json
+        │    ├─ ~/.ohbaby/mcp/settings.json
+        │    └─ <project>/.ohbaby/mcp/settings.json
         │
         ├─ merge plugin server registrations
         │    └─ manual config wins on same server name

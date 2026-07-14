@@ -32,7 +32,7 @@
 
 | 项 | 取值 | 理由 |
 | --- | --- | --- |
-| 配置文件路径 | `~/.ohbaby-agent/tools/search.json` | 采用 opencode 风格的分离组织；tools 配置集中在 `tools/` 目录下 |
+| 配置文件路径 | `~/.ohbaby/tools/search.json` | 采用 opencode 风格的分离组织；tools 配置集中在 `tools/` 目录下 |
 | API Key 存储方式 | 仅声明 `apiKeyEnv` 字段，key 本身不入文件 | 沿用 `model.json` 约定；配置文件可入 git |
 | `.env` 加载方式 | bin 入口一次性灌入 `process.env`（opencode 模式） | 解决 pnpm filter 切换 cwd 导致 `.env` 找不到的根因；统一全局唯一来源 |
 | 项目根目录定位 | 向上查找 `pnpm-workspace.yaml` | 适配 monorepo 启动场景 |
@@ -44,7 +44,7 @@
 **配置（可选，仅当需要覆盖默认值时）**：
 
 ```jsonc
-// ~/.ohbaby-agent/tools/search.json
+// ~/.ohbaby/tools/search.json
 {
   "provider": "tavily",
   "apiKeyEnv": "TAVILY_API_KEY",

@@ -125,7 +125,7 @@ Memory.load(directory)
     │        │
     │        └──► return { id: 'abc123...', rootPath: '/path/to/project', vcs: 'git' }
     │
-    └──► 读取 '/path/to/project/.ohbaby-agent/OHBABY.md'
+    └──► 读取 '/path/to/project/.ohbaby/OHBABY.md'
 ```
 
 ---
@@ -363,7 +363,7 @@ async function loadProjectMemory(directory: string): Promise<string | null> {
   const project = await Project.fromDirectory(directory)
   
   // 构建 OHBABY.md 路径
-  const memoryPath = path.join(project.rootPath, '.ohbaby-agent', 'OHBABY.md')
+  const memoryPath = path.join(project.rootPath, '.ohbaby', 'OHBABY.md')
   
   try {
     return await fs.readFile(memoryPath, 'utf-8')

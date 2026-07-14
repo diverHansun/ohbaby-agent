@@ -145,8 +145,8 @@ class SkillRegistry {
 **扫描流程**：
 ```
 1. 获取配置目录列表
-   ├── Config.getUserConfigDir() → ~/.config/ohbaby-agent/ (scope: 'user')
-   └── Config.getProjectConfigDir() → .ohbaby-agent/ (scope: 'project')
+   ├── Config.getUserConfigDir() → ~/.ohbaby/ (scope: 'user')
+   └── Config.getProjectConfigDir() → .ohbaby/ (scope: 'project')
 
 2. 对每个目录执行 Glob 扫描
    └── pattern: skill/**/SKILL.md

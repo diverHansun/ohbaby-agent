@@ -4,7 +4,7 @@
 
 本模块与以下外部要素交互：
 
-- **文件系统**：读取 `~/.ohbaby-agent/tools/search.json`
+- **文件系统**：读取 `~/.ohbaby/tools/search.json`
 - **环境变量**：根据 `apiKeyEnv` 字段读取 `process.env` 中的 API Key
 - **`services/search-providers/`**：把解析后的 `SearchConfig` 适配为 provider 工厂的入参
 - **`tools/builtin.ts` / `composition.ts`**：消费 `getSearchConfig()` 的结果
@@ -34,7 +34,7 @@ config/tools/search Manager 检查内存缓存
   ├─ 缓存存在 → 返回
   └─ 缓存不存在 → 执行加载
     ↓
-  尝试读 ~/.ohbaby-agent/tools/search.json
+  尝试读 ~/.ohbaby/tools/search.json
     ├─ 文件不存在 → 使用内建默认 schema 对象
     └─ 文件存在 → 读 + JSON.parse
         ↓
@@ -115,7 +115,7 @@ function getSearchConfig(
 | 字段 | 类型 | 用途 |
 | --- | --- | --- |
 | `env` | `NodeJS.ProcessEnv` | 测试场景下注入环境变量；默认 `process.env` |
-| `searchJsonPath` | `string` | 覆盖配置文件路径；默认 `~/.ohbaby-agent/tools/search.json` |
+| `searchJsonPath` | `string` | 覆盖配置文件路径；默认 `~/.ohbaby/tools/search.json` |
 
 ### `reloadSearchConfig(options?)`
 
