@@ -53,11 +53,14 @@ interface FakeRuntime {
   readonly hideWorkspace: ReturnType<
     typeof vi.fn<OhbabyWebRuntime["hideWorkspace"]>
   >;
+  readonly getDirectoryPickerRoots: ReturnType<
+    typeof vi.fn<OhbabyWebRuntime["getDirectoryPickerRoots"]>
+  >;
+  readonly listDirectoryPicker: ReturnType<
+    typeof vi.fn<OhbabyWebRuntime["listDirectoryPicker"]>
+  >;
   readonly openWorkspace: ReturnType<
     typeof vi.fn<OhbabyWebRuntime["openWorkspace"]>
-  >;
-  readonly openWorkspaceFromSystemPicker: ReturnType<
-    typeof vi.fn<OhbabyWebRuntime["openWorkspaceFromSystemPicker"]>
   >;
   readonly runtime: OhbabyWebRuntime;
   readonly selectSession: ReturnType<
@@ -1106,7 +1109,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.hideWorkspace).toHaveBeenCalledWith("/repo-b");
   });
 
-  it("opens the system directory picker from the project rail", async () => {
+  it("opens the web directory picker from the project rail", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
@@ -1114,8 +1117,95 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     await clickButton(app.container, "Open project");
 
-    expect(fake.openWorkspaceFromSystemPicker).toHaveBeenCalledTimes(1);
-    expect(app.container.querySelector('[role="dialog"]')).toBeNull();
+    await waitFor(
+      () =>
+        app.container
+          .querySelector('[role="dialog"]')
+          ?.textContent.includes("C:\\") === true,
+    );
+    expect(fake.getDirectoryPickerRoots).toHaveBeenCalledTimes(1);
+    expect(fake.openWorkspace).not.toHaveBeenCalled();
+    const root = [...app.container.querySelectorAll("button")].find((button) =>
+      button.textContent.includes("C:\\"),
+    );
+    if (!root) {
+      throw new Error("directory root not found");
+    }
+    await act(async () => {
+      root.click();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      Boolean(
+        [...app.container.querySelectorAll("button")].find(
+          (button) => button.textContent === "Choose this folder",
+        ),
+      ),
+    );
+    const choose = [...app.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Choose this folder",
+    );
+    if (!choose) {
+      throw new Error("choose directory button not found");
+    }
+    await act(async () => {
+      choose.click();
+      await Promise.resolve();
+    });
+
+    expect(fake.openWorkspace).toHaveBeenCalledWith("C:\\");
+  });
+
+  it("keeps the directory picker open when opening a directory fails", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.openWorkspace.mockRejectedValueOnce(new Error("Scope unavailable"));
+    const app = mountApp(fake.runtime);
+
+    await clickButton(app.container, "Open project");
+    await waitFor(
+      () =>
+        app.container
+          .querySelector('[role="dialog"]')
+          ?.textContent.includes("C:\\") === true,
+    );
+    const root = [...app.container.querySelectorAll("button")].find((button) =>
+      button.textContent.includes("C:\\"),
+    );
+    if (!root) {
+      throw new Error("directory root not found");
+    }
+    await act(async () => {
+      root.click();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      Boolean(
+        [...app.container.querySelectorAll("button")].find(
+          (button) => button.textContent === "Choose this folder",
+        ),
+      ),
+    );
+    const choose = [...app.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Choose this folder",
+    );
+    if (!choose) {
+      throw new Error("choose directory button not found");
+    }
+    await act(async () => {
+      choose.click();
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      Boolean(
+        app.container.querySelector('[role="alert"]')?.textContent.includes(
+          "Scope unavailable",
+        ),
+      ),
+    );
+    expect(app.container.querySelector('[role="dialog"]')).not.toBeNull();
   });
 
   it("renders transient reasoning for a streaming assistant message", async () => {
@@ -1695,9 +1785,23 @@ function createFakeRuntime(input: {
   const openWorkspace = vi.fn<OhbabyWebRuntime["openWorkspace"]>(() =>
     Promise.resolve(),
   );
-  const openWorkspaceFromSystemPicker = vi.fn<
-    OhbabyWebRuntime["openWorkspaceFromSystemPicker"]
-  >(() => Promise.resolve());
+  const getDirectoryPickerRoots = vi.fn<
+    OhbabyWebRuntime["getDirectoryPickerRoots"]
+  >(() =>
+    Promise.resolve({
+      ok: true,
+      roots: [{ directory: "C:\\", name: "C:\\" }],
+    }),
+  );
+  const listDirectoryPicker = vi.fn<OhbabyWebRuntime["listDirectoryPicker"]>(
+    (directory) =>
+      Promise.resolve({
+        children: [],
+        directory,
+        ok: true,
+        parent: null,
+      }),
+  );
   const workspaceSnapshot = {
     scopes: [
       {
@@ -1794,15 +1898,17 @@ function createFakeRuntime(input: {
     connectModel,
     createSession,
     executeSlashCommand,
+    getDirectoryPickerRoots,
     hideWorkspace,
     listCommands,
+    listDirectoryPicker,
     openWorkspace,
-    openWorkspaceFromSystemPicker,
     runtime: {
       client,
+      getDirectoryPickerRoots,
       hideWorkspace,
+      listDirectoryPicker,
       openWorkspace,
-      openWorkspaceFromSystemPicker,
       getWorkspaceSnapshot: () => workspaceSnapshot,
       ready: Promise.resolve(),
       refreshWorkspaces: () => Promise.resolve(),

@@ -16,6 +16,8 @@ import {
 import { FetchDaemonEventStream } from "./events.js";
 import { createDaemonHttpClient, DaemonHttpClient } from "./http.js";
 import type {
+  DirectoryPickerListResponse,
+  DirectoryPickerRootsResponse,
   OhbabyBootstrapConfig,
   CompactSessionRequest,
   ModelConnectRequest,
@@ -104,9 +106,10 @@ export interface OhbabyWebRuntime {
   readonly ready: Promise<void>;
   readonly store: OhbabyWebStore;
   getWorkspaceSnapshot(): WorkspaceSnapshot;
+  getDirectoryPickerRoots(): Promise<DirectoryPickerRootsResponse>;
   hideWorkspace(directory: string): Promise<void>;
+  listDirectoryPicker(directory: string): Promise<DirectoryPickerListResponse>;
   openWorkspace(directory: string): Promise<void>;
-  openWorkspaceFromSystemPicker(): Promise<void>;
   refreshWorkspaces(): Promise<void>;
   subscribeWorkspaces(listener: () => void): () => void;
   switchWorkspace(directory: string): Promise<void>;
@@ -547,13 +550,12 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     await this.queueSwitchWorkspace(response.scope.directory, false);
   }
 
-  async openWorkspaceFromSystemPicker(): Promise<void> {
-    const response = await this.globalHttp.openWorkspaceFromSystemPicker();
-    if (response.cancelled) {
-      return;
-    }
-    await this.refreshWorkspaces();
-    await this.queueSwitchWorkspace(response.scope.directory, false);
+  getDirectoryPickerRoots(): Promise<DirectoryPickerRootsResponse> {
+    return this.globalHttp.getDirectoryPickerRoots();
+  }
+
+  listDirectoryPicker(directory: string): Promise<DirectoryPickerListResponse> {
+    return this.globalHttp.listDirectoryPicker(directory);
   }
 
   async hideWorkspace(directory: string): Promise<void> {

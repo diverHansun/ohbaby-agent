@@ -59,14 +59,27 @@ export interface WorkspaceOpenResponse {
   readonly scope: WorkspaceScopeSummary;
 }
 
-export type WorkspaceOpenPickerResponse =
-  | {
-      readonly cancelled: true;
-      readonly ok: true;
-    }
-  | (WorkspaceOpenResponse & {
-      readonly cancelled: false;
-    });
+export interface DirectoryPickerRoot {
+  readonly directory: string;
+  readonly name: string;
+}
+
+export interface DirectoryPickerRootsResponse {
+  readonly ok: true;
+  readonly roots: readonly DirectoryPickerRoot[];
+}
+
+export interface DirectoryPickerEntry {
+  readonly directory: string;
+  readonly name: string;
+}
+
+export interface DirectoryPickerListResponse {
+  readonly children: readonly DirectoryPickerEntry[];
+  readonly directory: string;
+  readonly ok: true;
+  readonly parent: string | null;
+}
 
 export type ConnectionState =
   | "connecting"

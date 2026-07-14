@@ -12,7 +12,18 @@ const EMPTY_STATE: WebNavigationState = {
 
 function storage(): Storage | undefined {
   try {
-    return globalThis.localStorage;
+    const candidate: unknown = globalThis.localStorage;
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      !("getItem" in candidate) ||
+      !("setItem" in candidate) ||
+      typeof candidate.getItem !== "function" ||
+      typeof candidate.setItem !== "function"
+    ) {
+      return undefined;
+    }
+    return candidate as Storage;
   } catch {
     return undefined;
   }

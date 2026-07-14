@@ -48,4 +48,22 @@ describe("web navigation state", () => {
     replaceNavigationHash({ directory: "/repo/a", sessionId: "session-a" });
     expect(location.hash).toBe("#directory=%2Frepo%2Fa&session=session-a");
   });
+
+  it("treats an unavailable Node localStorage implementation as empty storage", () => {
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {},
+    });
+
+    expect(readWebNavigationState()).toEqual({
+      selectedDirectory: null,
+      sessionByDirectory: {},
+    });
+    expect(() => {
+      writeWebNavigationState({
+        selectedDirectory: "/repo/a",
+        sessionByDirectory: {},
+      });
+    }).not.toThrow();
+  });
 });

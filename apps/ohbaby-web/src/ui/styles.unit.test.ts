@@ -82,6 +82,24 @@ describe("web app layout styles", () => {
       "background: rgba(196, 117, 107, 0.24)",
     ]);
   });
+
+  it("keeps the directory picker contained as a modal with a scrollable directory list", () => {
+    expectCssRule(".ohb-directory-picker-layer", [
+      "inset: 0",
+      "position: fixed",
+      "z-index: 60",
+    ]);
+    expectCssRule(".ohb-directory-picker-dialog", [
+      "max-height: 84vh",
+      "overflow: hidden",
+      "width: 640px",
+    ]);
+    expectCssRule(".ohb-directory-picker-body", [
+      "min-height: 220px",
+      "overflow-y: auto",
+    ]);
+    expectCssRule(".ohb-directory-picker-list", ["display: grid", "gap: 4px"]);
+  });
 });
 
 function expectCssRule(

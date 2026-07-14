@@ -303,9 +303,9 @@ describe("ohbaby web workspace switching", () => {
     await runtime.client.close();
   });
 
-  it("keeps cancellation local and switches only after a system picker opens a workspace", async () => {
+  it("browses directories without switching workspaces until a directory is opened", async () => {
     const requests: Request[] = [];
-    let pickerResult: "cancelled" | "selected" = "cancelled";
+    let workspaceOpened = false;
     const fetchImpl: typeof fetch = (input, init = {}) => {
       const request = new Request(input, init);
       requests.push(request);
@@ -314,53 +314,66 @@ describe("ohbaby web workspace switching", () => {
         return Promise.resolve(
           Response.json({
             ok: true,
-            scopes:
-              pickerResult === "selected"
-                ? [
-                    {
-                      available: true,
-                      directory: "/repo-a",
-                      lastOpenedAt: 2,
-                      loaded: true,
-                      position: 0,
-                    },
-                    {
-                      available: true,
-                      directory: "/repo-b",
-                      lastOpenedAt: 1,
-                      loaded: false,
-                      position: 1,
-                    },
-                  ]
-                : [
-                    {
-                      available: true,
-                      directory: "/repo-a",
-                      lastOpenedAt: 2,
-                      loaded: true,
-                      position: 0,
-                    },
-                  ],
-          }),
-        );
-      }
-      if (request.url.endsWith("/v1/scopes/open-picker")) {
-        return Promise.resolve(
-          Response.json(
-            pickerResult === "cancelled"
-              ? { cancelled: true, ok: true }
-              : {
-                  cancelled: false,
-                  ok: true,
-                  scope: {
+            scopes: workspaceOpened
+              ? [
+                  {
+                    available: true,
+                    directory: "/repo-a",
+                    lastOpenedAt: 2,
+                    loaded: true,
+                    position: 0,
+                  },
+                  {
                     available: true,
                     directory: "/repo-b",
                     lastOpenedAt: 1,
                     loaded: false,
                     position: 1,
                   },
-                },
-          ),
+                ]
+              : [
+                  {
+                    available: true,
+                    directory: "/repo-a",
+                    lastOpenedAt: 2,
+                    loaded: true,
+                    position: 0,
+                  },
+                ],
+          }),
+        );
+      }
+      if (request.url.endsWith("/v1/directory-picker/roots")) {
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            roots: [{ directory: "/", name: "/" }],
+          }),
+        );
+      }
+      if (request.url.endsWith("/v1/directory-picker/list")) {
+        return Promise.resolve(
+          Response.json({
+            children: [{ directory: "/repo-b", name: "repo-b" }],
+            directory: "/",
+            ok: true,
+            parent: null,
+          }),
+        );
+      }
+      if (request.url.endsWith("/v1/scopes/open")) {
+        workspaceOpened = true;
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            scope: {
+              available: true,
+              directory: "/repo-b",
+              lastOpenedAt: 1,
+              loaded: false,
+              position: 1,
+            },
+          }),
         );
       }
       if (request.url.endsWith("/v1/clients")) {
@@ -414,23 +427,35 @@ describe("ohbaby web workspace switching", () => {
     );
     await runtime.ready;
 
-    const beforeCancel = requests.length;
-    await runtime.openWorkspaceFromSystemPicker();
-
+    const beforeBrowse = requests.length;
+    await expect(runtime.getDirectoryPickerRoots()).resolves.toEqual({
+      ok: true,
+      roots: [{ directory: "/", name: "/" }],
+    });
+    await expect(runtime.listDirectoryPicker("/")).resolves.toEqual({
+      children: [{ directory: "/repo-b", name: "repo-b" }],
+      directory: "/",
+      ok: true,
+      parent: null,
+    });
     expect(runtime.getWorkspaceSnapshot().selectedDirectory).toBe("/repo-a");
     expect(
       requests
-        .slice(beforeCancel)
+        .slice(beforeBrowse)
         .map((request) => new URL(request.url).pathname),
-    ).toEqual(["/v1/scopes/open-picker"]);
+    ).toEqual(["/v1/directory-picker/roots", "/v1/directory-picker/list"]);
+    expect(
+      requests
+        .slice(beforeBrowse)
+        .every((request) => !request.headers.has("x-ohbaby-directory")),
+    ).toBe(true);
 
-    pickerResult = "selected";
     const beforeSelection = requests.length;
-    await runtime.openWorkspaceFromSystemPicker();
+    await runtime.openWorkspace("/repo-b");
 
-    const pickerRequest = requests.slice(beforeSelection)[0];
-    expect(new URL(pickerRequest.url).pathname).toBe("/v1/scopes/open-picker");
-    expect(pickerRequest.headers.has("x-ohbaby-directory")).toBe(false);
+    const openRequest = requests.slice(beforeSelection)[0];
+    expect(new URL(openRequest.url).pathname).toBe("/v1/scopes/open");
+    expect(openRequest.headers.has("x-ohbaby-directory")).toBe(false);
     expect(runtime.getWorkspaceSnapshot().selectedDirectory).toBe("/repo-b");
     expect(runtime.store.getSnapshot().view.snapshot?.sessions[0]?.title).toBe(
       "B",

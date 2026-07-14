@@ -60,6 +60,7 @@ import type {
   SearchApiKeyRequest,
 } from "../api/daemon/wire.js";
 import { MarkdownBlock } from "./MarkdownBlock.js";
+import { DirectoryPickerDialog } from "./directory-picker/DirectoryPickerDialog.js";
 import { isImeComposing } from "./ime.js";
 import {
   selectViewModel,
@@ -226,6 +227,7 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
     () => runtime.getWorkspaceSnapshot(),
   );
   const [actionError, setActionError] = useState<string | null>(null);
+  const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(false);
   const [closedCommandModalIds, setClosedCommandModalIds] = useState<
     readonly string[]
@@ -295,9 +297,18 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
     },
     [runAction, runtime],
   );
-  const openWorkspaceFromSystemPicker = useCallback((): void => {
-    void runAction(() => runtime.openWorkspaceFromSystemPicker());
-  }, [runAction, runtime]);
+  const openDirectoryPicker = useCallback((): void => {
+    clearActionError();
+    setDirectoryPickerOpen(true);
+  }, [clearActionError]);
+  const selectDirectory = useCallback(
+    async (directory: string): Promise<void> => {
+      if (await runAction(() => runtime.openWorkspace(directory))) {
+        setDirectoryPickerOpen(false);
+      }
+    },
+    [runAction, runtime],
+  );
 
   const openOverlayForSlashText = useCallback(
     async (text: string): Promise<boolean> => {
@@ -466,7 +477,7 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
       }`}
     >
       <ProjectRail
-        onAdd={openWorkspaceFromSystemPicker}
+        onAdd={openDirectoryPicker}
         onHide={hideWorkspace}
         onSelect={switchWorkspace}
         onToggleSessions={() => {
@@ -594,6 +605,15 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
             view={view}
           />
         ) : null}
+        {directoryPickerOpen ? (
+          <DirectoryPickerDialog
+            directoryPicker={runtime}
+            onClose={() => {
+              setDirectoryPickerOpen(false);
+            }}
+            onSelect={selectDirectory}
+          />
+        ) : null}
       </div>
     </main>
   );
@@ -603,6 +623,7 @@ function EmptyWorkspaceApp(props: {
   readonly runtime: OhbabyWebRuntime;
   readonly workspace: WorkspaceSnapshot;
 }): ReactElement {
+  const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const run = useCallback(async (action: () => Promise<void>) => {
     try {
@@ -614,13 +635,22 @@ function EmptyWorkspaceApp(props: {
       return false;
     }
   }, []);
-  const openWorkspaceFromSystemPicker = useCallback((): void => {
-    void run(() => props.runtime.openWorkspaceFromSystemPicker());
-  }, [props.runtime, run]);
+  const openDirectoryPicker = useCallback((): void => {
+    setError(null);
+    setDirectoryPickerOpen(true);
+  }, []);
+  const selectDirectory = useCallback(
+    async (directory: string): Promise<void> => {
+      if (await run(() => props.runtime.openWorkspace(directory))) {
+        setDirectoryPickerOpen(false);
+      }
+    },
+    [props.runtime, run],
+  );
   return (
     <main className="ohb-app ohb-app-shell ohb-app-empty ohb-project-empty">
       <ProjectRail
-        onAdd={openWorkspaceFromSystemPicker}
+        onAdd={openDirectoryPicker}
         onHide={(directory) => {
           void run(() => props.runtime.hideWorkspace(directory));
         }}
@@ -642,11 +672,20 @@ function EmptyWorkspaceApp(props: {
           </span>
           <h1>Open a project to get started</h1>
           <p>Projects stay in this rail even before they have a session.</p>
-          <button onClick={openWorkspaceFromSystemPicker} type="button">
+          <button onClick={openDirectoryPicker} type="button">
             <FolderPlus size={16} /> Open project
           </button>
         </div>
       </section>
+      {directoryPickerOpen ? (
+        <DirectoryPickerDialog
+          directoryPicker={props.runtime}
+          onClose={() => {
+            setDirectoryPickerOpen(false);
+          }}
+          onSelect={selectDirectory}
+        />
+      ) : null}
     </main>
   );
 }
