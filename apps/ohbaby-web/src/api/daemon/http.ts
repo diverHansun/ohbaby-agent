@@ -27,6 +27,7 @@ import type {
   WorkspaceScopesResponse,
   WorkspaceOpenResponse,
 } from "./wire.js";
+import { workspaceDirectoryHeaders } from "ohbaby-sdk";
 
 export interface DaemonHttpClientOptions {
   readonly baseUrl: string;
@@ -298,7 +299,7 @@ export class DaemonHttpClient {
       authorization: `Bearer ${this.token}`,
       ...(this.directory === undefined || options.includeDirectory === false
         ? {}
-        : { "x-ohbaby-directory": this.directory }),
+        : workspaceDirectoryHeaders(this.directory)),
       "x-ohbaby-client-id": this.clientId,
     };
     if (options.body !== undefined) {

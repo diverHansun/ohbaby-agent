@@ -20,6 +20,13 @@ function directoryFromBody(body: BodyInit | null | undefined): string {
   return value.directory;
 }
 
+function directoryFromScopeHeader(request: Request): string {
+  const directory = request.headers.get("x-ohbaby-directory") ?? "";
+  return request.headers.get("x-ohbaby-directory-encoding") === "percent-utf8"
+    ? decodeURIComponent(directory)
+    : directory;
+}
+
 function emptySnapshot(title: string): UiSnapshot {
   return {
     activeSessionId: null,
@@ -46,7 +53,9 @@ describe("ohbaby web workspace switching", () => {
     const abortedDirectories: string[] = [];
     const fetchImpl: typeof fetch = (input, init = {}) => {
       const request = new Request(input, init);
-      const directory = request.headers.get("x-ohbaby-directory") ?? undefined;
+      const directory = request.headers.has("x-ohbaby-directory")
+        ? directoryFromScopeHeader(request)
+        : undefined;
       const clientId = request.headers.get("x-ohbaby-client-id") ?? undefined;
       requests.push({ clientId, directory, url: request.url });
       if (request.url.endsWith("/v1/scopes")) {
@@ -186,7 +195,7 @@ describe("ohbaby web workspace switching", () => {
     const clientDirectories: string[] = [];
     const fetchImpl: typeof fetch = (input, init = {}) => {
       const request = new Request(input, init);
-      const directory = request.headers.get("x-ohbaby-directory") ?? "";
+      const directory = directoryFromScopeHeader(request);
       if (request.url.endsWith("/v1/clients")) {
         clientDirectories.push(directory);
         if (directory === "/repo-b") {
@@ -305,11 +314,12 @@ describe("ohbaby web workspace switching", () => {
 
   it("browses directories without switching workspaces until a directory is opened", async () => {
     const requests: Request[] = [];
+    const unicodeDirectory = "D:\\Upan\\books\\learning materials\\李笑来作品集";
     let workspaceOpened = false;
     const fetchImpl: typeof fetch = (input, init = {}) => {
       const request = new Request(input, init);
       requests.push(request);
-      const directory = request.headers.get("x-ohbaby-directory") ?? "";
+      const directory = directoryFromScopeHeader(request);
       if (request.url.endsWith("/v1/scopes")) {
         return Promise.resolve(
           Response.json({
@@ -325,7 +335,7 @@ describe("ohbaby web workspace switching", () => {
                   },
                   {
                     available: true,
-                    directory: "/repo-b",
+                    directory: unicodeDirectory,
                     lastOpenedAt: 1,
                     loaded: false,
                     position: 1,
@@ -368,7 +378,7 @@ describe("ohbaby web workspace switching", () => {
             ok: true,
             scope: {
               available: true,
-              directory: "/repo-b",
+              directory: directoryFromBody(init.body),
               lastOpenedAt: 1,
               loaded: false,
               position: 1,
@@ -407,7 +417,7 @@ describe("ohbaby web workspace switching", () => {
           Response.json({
             ok: true,
             seqNum: 0,
-            snapshot: emptySnapshot(directory === "/repo-b" ? "B" : "A"),
+            snapshot: emptySnapshot(directory === unicodeDirectory ? "B" : "A"),
           }),
         );
       }
@@ -451,12 +461,26 @@ describe("ohbaby web workspace switching", () => {
     ).toBe(true);
 
     const beforeSelection = requests.length;
-    await runtime.openWorkspace("/repo-b");
+    await runtime.openWorkspace(unicodeDirectory);
 
     const openRequest = requests.slice(beforeSelection)[0];
     expect(new URL(openRequest.url).pathname).toBe("/v1/scopes/open");
     expect(openRequest.headers.has("x-ohbaby-directory")).toBe(false);
-    expect(runtime.getWorkspaceSnapshot().selectedDirectory).toBe("/repo-b");
+    const scopedRequests = requests
+      .slice(beforeSelection)
+      .filter((request) => request.headers.has("x-ohbaby-directory"));
+    expect(scopedRequests.length).toBeGreaterThan(0);
+    for (const request of scopedRequests) {
+      expect(request.headers.get("x-ohbaby-directory")).toBe(
+        encodeURIComponent(unicodeDirectory),
+      );
+      expect(request.headers.get("x-ohbaby-directory-encoding")).toBe(
+        "percent-utf8",
+      );
+    }
+    expect(runtime.getWorkspaceSnapshot().selectedDirectory).toBe(
+      unicodeDirectory,
+    );
     expect(runtime.store.getSnapshot().view.snapshot?.sessions[0]?.title).toBe(
       "B",
     );

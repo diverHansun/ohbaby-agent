@@ -183,6 +183,70 @@ describe("global daemon workspace routing", () => {
     expect(disposeB).toHaveBeenCalledTimes(1);
   });
 
+  it("decodes marked percent-encoded workspace headers without breaking legacy ASCII callers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ohbaby-unicode-scope-"));
+    cleanupDirs.push(root);
+    const asciiRepo = join(root, "ascii-repo");
+    const unicodeRepo = join(root, "李笑来作品集");
+    await mkdir(join(asciiRepo, ".git"), { recursive: true });
+    await mkdir(join(unicodeRepo, ".git"), { recursive: true });
+    const canonicalAsciiRepo = await realpath(asciiRepo);
+    const canonicalUnicodeRepo = await realpath(unicodeRepo);
+    const createWorkspaceBackend = vi.fn(() => createBackend());
+    const server = createDaemonHttpServer({
+      authToken: "token",
+      backend: createBackend(),
+      createWorkspaceBackend,
+      port: 0,
+      scopeRoot: canonicalAsciiRepo,
+    });
+    await server.start();
+    const headers = {
+      authorization: daemonAuthHeader("token"),
+      "content-type": "application/json",
+    };
+
+    try {
+      const legacy = await fetch(`${server.url}/v1/clients`, {
+        body: JSON.stringify({ clientId: "legacy_client" }),
+        headers: { ...headers, "x-ohbaby-directory": canonicalAsciiRepo },
+        method: "POST",
+      });
+      expect(legacy.status).toBe(200);
+
+      const unicode = await fetch(`${server.url}/v1/clients`, {
+        body: JSON.stringify({ clientId: "unicode_client" }),
+        headers: {
+          ...headers,
+          "x-ohbaby-directory": encodeURIComponent(canonicalUnicodeRepo),
+          "x-ohbaby-directory-encoding": "percent-utf8",
+        },
+        method: "POST",
+      });
+      expect(unicode.status).toBe(200);
+      expect(createWorkspaceBackend).toHaveBeenCalledWith(
+        canonicalUnicodeRepo,
+      );
+
+      const malformed = await fetch(`${server.url}/v1/clients`, {
+        body: JSON.stringify({ clientId: "malformed_client" }),
+        headers: {
+          ...headers,
+          "x-ohbaby-directory": "%E0%A4%A",
+          "x-ohbaby-directory-encoding": "percent-utf8",
+        },
+        method: "POST",
+      });
+      expect(malformed.status).toBe(400);
+      await expect(malformed.json()).resolves.toMatchObject({
+        error: { code: "INVALID_DIRECTORY" },
+        ok: false,
+      });
+    } finally {
+      await server.stop();
+    }
+  });
+
   it("lists known and loaded workspace scopes without a workspace header", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-global-scopes-"));
     cleanupDirs.push(root);

@@ -39,6 +39,12 @@ export type {
   UiProbeModelContextWindowResult,
 } from "./connect-model.js";
 export { inferConnectModelInterfaceProvider } from "./connect-model.js";
+export {
+  WORKSPACE_DIRECTORY_ENCODING_HEADER,
+  WORKSPACE_DIRECTORY_ENCODING_PERCENT_UTF8,
+  WORKSPACE_DIRECTORY_HEADER,
+  workspaceDirectoryHeaders,
+} from "./workspace-directory-header.js";
 export type {
   UiSearchProvider,
   UiSetSearchApiKeyInput,

@@ -1,4 +1,10 @@
-import { isLoopbackHost, type UiBackendClient } from "ohbaby-sdk";
+import {
+  isLoopbackHost,
+  WORKSPACE_DIRECTORY_ENCODING_HEADER,
+  WORKSPACE_DIRECTORY_ENCODING_PERCENT_UTF8,
+  WORKSPACE_DIRECTORY_HEADER,
+  type UiBackendClient,
+} from "ohbaby-sdk";
 import {
   createSessionIdGenerator,
   type WorkspaceRegistryStore,
@@ -502,7 +508,10 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
   }
 
   private async dispatchWorkspaceRequest(context: Context): Promise<Response> {
-    const directory = context.req.header("x-ohbaby-directory") ?? "";
+    const directory = this.workspaceDirectoryFromRequest(context);
+    if (directory instanceof Response) {
+      return directory;
+    }
     try {
       const instance = await this.instanceStore?.load(directory);
       if (!instance) {
@@ -517,6 +526,30 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         );
       }
       throw error;
+    }
+  }
+
+  private workspaceDirectoryFromRequest(context: Context): string | Response {
+    const directory = context.req.header(WORKSPACE_DIRECTORY_HEADER) ?? "";
+    if (
+      context.req.header(WORKSPACE_DIRECTORY_ENCODING_HEADER) !==
+      WORKSPACE_DIRECTORY_ENCODING_PERCENT_UTF8
+    ) {
+      return directory;
+    }
+    try {
+      return decodeURIComponent(directory);
+    } catch {
+      return context.json(
+        {
+          error: {
+            code: "INVALID_DIRECTORY",
+            message: "x-ohbaby-directory percent encoding is invalid",
+          },
+          ok: false,
+        },
+        400,
+      );
     }
   }
 

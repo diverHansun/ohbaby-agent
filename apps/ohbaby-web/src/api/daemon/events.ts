@@ -1,4 +1,5 @@
 import type { ConnectionState, WebSseEvent } from "./wire.js";
+import { workspaceDirectoryHeaders } from "ohbaby-sdk";
 
 export interface DaemonEventStreamOptions {
   readonly baseUrl: string;
@@ -201,9 +202,7 @@ export class FetchDaemonEventStream implements DaemonEventStream {
     const headers: Record<string, string> = {
       accept: "text/event-stream",
       authorization: `Bearer ${this.token}`,
-      ...(this.directory === undefined
-        ? {}
-        : { "x-ohbaby-directory": this.directory }),
+      ...workspaceDirectoryHeaders(this.directory),
       "x-ohbaby-client-id": this.clientId,
     };
     if (this.lastEventId !== undefined) {

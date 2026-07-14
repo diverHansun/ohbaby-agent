@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { CoreApiHost } from "ohbaby-agent";
+import { workspaceDirectoryHeaders } from "ohbaby-sdk";
 import type {
   CoreAPI,
   SDKAPI,
@@ -522,9 +523,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
       ...(this.authToken === undefined
         ? {}
         : { authorization: daemonAuthHeader(this.authToken) }),
-      ...(this.directory === undefined
-        ? {}
-        : { "x-ohbaby-directory": this.directory }),
+      ...workspaceDirectoryHeaders(this.directory),
     };
   }
 }

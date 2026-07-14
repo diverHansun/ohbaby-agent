@@ -277,9 +277,58 @@ describe("createRemoteUiBackendClient", () => {
       url: "http://127.0.0.1:4096/api/rpc",
     });
     expect(requests[0]?.headers.get("authorization")).toBe("Bearer token_1");
-    expect(requests[0]?.headers.get("x-ohbaby-directory")).toBe("/repo-a");
+    expect(requests[0]?.headers.get("x-ohbaby-directory")).toBe(
+      "%2Frepo-a",
+    );
+    expect(
+      requests[0]?.headers.get("x-ohbaby-directory-encoding"),
+    ).toBe("percent-utf8");
     expect(requests[1]?.headers.get("authorization")).toBe("Bearer token_1");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("encodes Unicode workspace directories before sending RPC headers", async () => {
+    const unicodeDirectory = "D:\\Upan\\books\\learning materials\\李笑来作品集";
+    const headers: Headers[] = [];
+    const fetchImpl = vi.fn(
+      (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const request = new Request(input, init);
+        headers.push(request.headers);
+        const body = JSON.parse(requireStringBody(init)) as {
+          readonly id: string;
+          readonly method: string;
+        };
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              id: body.id,
+              ok: true,
+              result: body.method === "getSnapshot" ? emptySnapshot() : null,
+            }),
+            { headers: { "content-type": "application/json" } },
+          ),
+        );
+      },
+    );
+    const client = createRemoteUiBackendClient({
+      clientId: "unicode_client",
+      directory: unicodeDirectory,
+      fetch: fetchImpl,
+      port: 4096,
+    });
+
+    await expect(client.getSnapshot()).resolves.toEqual(emptySnapshot());
+
+    expect(headers).toHaveLength(2);
+    for (const requestHeaders of headers) {
+      expect(requestHeaders.get("x-ohbaby-directory")).toBe(
+        encodeURIComponent(unicodeDirectory),
+      );
+      expect(requestHeaders.get("x-ohbaby-directory-encoding")).toBe(
+        "percent-utf8",
+      );
+    }
+    await client.dispose();
   });
 
   it("reconnects SSE streams with the last received event id", async () => {
@@ -346,7 +395,12 @@ describe("createRemoteUiBackendClient", () => {
 
     expect(events).toEqual([notice("notice_1"), notice("notice_2")]);
     expect(eventRequestHeaders[0]?.get("last-event-id")).toBeNull();
-    expect(eventRequestHeaders[0]?.get("x-ohbaby-directory")).toBe("/repo-a");
+    expect(eventRequestHeaders[0]?.get("x-ohbaby-directory")).toBe(
+      "%2Frepo-a",
+    );
+    expect(
+      eventRequestHeaders[0]?.get("x-ohbaby-directory-encoding"),
+    ).toBe("percent-utf8");
     expect(eventRequestHeaders[1]?.get("last-event-id")).toBe("1");
   });
 
