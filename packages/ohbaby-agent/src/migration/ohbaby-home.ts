@@ -366,8 +366,8 @@ async function migrateMcpFile(
 
 async function migrateConfigTree(
   sourceRoot: string,
-  targetRoot: string,
   sourceBase: string,
+  targetBase: string,
   report: MutableMigrationReport,
   options: OhbabyMigrationOptions,
 ): Promise<void> {
@@ -377,7 +377,14 @@ async function migrateConfigTree(
   const entries = await readdir(sourceRoot, { withFileTypes: true });
   for (const entry of entries) {
     const sourcePath = path.join(sourceRoot, entry.name);
-    const targetPath = path.join(targetRoot, entry.name);
+    const relativePath = path.relative(sourceBase, sourcePath);
+    const targetRelativePath =
+      relativePath === "skill"
+        ? "skills"
+        : relativePath.startsWith(`skill${path.sep}`)
+          ? path.join("skills", relativePath.slice("skill".length + 1))
+          : relativePath;
+    const targetPath = path.join(targetBase, targetRelativePath);
     if (entry.isSymbolicLink()) {
       report.skipped.push(sourcePath);
       warn(options, `Skipped legacy configuration symlink: ${sourcePath}`);
@@ -386,8 +393,8 @@ async function migrateConfigTree(
     if (entry.isDirectory()) {
       await migrateConfigTree(
         sourcePath,
-        targetPath,
         sourceBase,
+        targetBase,
         report,
         options,
       );
@@ -397,7 +404,6 @@ async function migrateConfigTree(
       report.skipped.push(sourcePath);
       continue;
     }
-    const relativePath = path.relative(sourceBase, sourcePath);
     if (relativePath === ".env") {
       await migrateEnvFile(sourcePath, targetPath, report);
       continue;
@@ -461,7 +467,7 @@ async function migrateOneConfigRoot(
   await withMigrationLock(
     path.join(targetRoot, ".ohbaby-agent-migration.lock"),
     () =>
-      migrateConfigTree(sourceRoot, targetRoot, sourceRoot, report, options),
+      migrateConfigTree(sourceRoot, sourceRoot, targetRoot, report, options),
   );
 }
 

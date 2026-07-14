@@ -62,6 +62,10 @@ describe("ohbaby home migration", () => {
     await writeJson(path.join(legacyHome, "model.json"), {
       source: "legacy",
     });
+    await writeFile(
+      path.join(legacyHome, "skill", "legacy-skill", "SKILL.md"),
+      "# Legacy skill\n",
+    );
     await writeJson(path.join(targetHome, "model.json"), { source: "new" });
     await writeFile(
       path.join(xdgConfigHome, "ohbaby-agent", "OHBABY.md"),
@@ -103,6 +107,15 @@ describe("ohbaby home migration", () => {
     await expect(
       fs.readFile(path.join(targetHome, "OHBABY.md"), "utf8"),
     ).resolves.toBe("legacy global memory\n");
+    await expect(
+      fs.readFile(
+        path.join(targetHome, "skills", "legacy-skill", "SKILL.md"),
+        "utf8",
+      ),
+    ).resolves.toBe("# Legacy skill\n");
+    await expect(
+      fs.access(path.join(targetHome, "skill", "legacy-skill", "SKILL.md")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
     await expect(
       fs.readFile(path.join(targetProject, ".env"), "utf8"),
     ).resolves.toContain("PROJECT_LEGACY_ONLY=yes");
