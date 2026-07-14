@@ -1,7 +1,3 @@
-import { access, readdir, realpath, stat } from "node:fs/promises";
-import { constants } from "node:fs";
-import { homedir } from "node:os";
-import { isAbsolute, parse, resolve } from "node:path";
 import type { UiBackendClient } from "ohbaby-sdk";
 import {
   createSessionIdGenerator,
@@ -18,6 +14,11 @@ import {
   type NodeListenHandle,
 } from "../../transport/node-listen.js";
 import { InstanceStore } from "../instance-store.js";
+import {
+  createNativeDirectoryPicker,
+  NativeDirectoryPickerError,
+  type NativeDirectoryPicker,
+} from "../native-directory-picker.js";
 import {
   resolveWorkspaceScope,
   WorkspaceScopeError,
@@ -50,8 +51,8 @@ export interface DaemonHttpServerOptions {
     | Promise<readonly string[]>
     | readonly string[];
   readonly now?: () => number;
+  readonly nativeDirectoryPicker?: NativeDirectoryPicker;
   readonly workspaceRegistry?: WorkspaceRegistryStore;
-  readonly directoryPickerHome?: string;
   readonly onClientConnected?: (clientId: string) => void;
   readonly onClientDisconnected?: (clientId: string) => void;
   readonly onShutdown?: () => Promise<void> | void;
@@ -83,10 +84,11 @@ export interface ActiveDaemonConnection {
 
 type NormalizedDaemonHttpServerOptions = Omit<
   DaemonHttpServerOptions,
-  "createSessionId" | "host" | "now" | "port"
+  "createSessionId" | "host" | "nativeDirectoryPicker" | "now" | "port"
 > & {
   readonly createSessionId: () => string;
   readonly host: string;
+  readonly nativeDirectoryPicker: NativeDirectoryPicker;
   readonly now: () => number;
   readonly port: number;
 };
@@ -106,6 +108,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     string,
     ActiveDaemonConnection & { readonly count: number }
   >();
+  private nativeDirectoryPickerActive = false;
   private nodeServer: NodeListenHandle | undefined;
 
   constructor(private readonly options: NormalizedDaemonHttpServerOptions) {
@@ -199,13 +202,10 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
 
     this.app.get("/v1/scopes", (context) => this.listScopes(context));
     this.app.post("/v1/scopes/open", (context) => this.openScope(context));
+    this.app.post("/v1/scopes/open-picker", (context) =>
+      this.openScopeFromPicker(context),
+    );
     this.app.post("/v1/scopes/hide", (context) => this.hideScope(context));
-    this.app.get("/v1/directory-picker/roots", (context) =>
-      this.listDirectoryPickerRoots(context),
-    );
-    this.app.post("/v1/directory-picker/list", (context) =>
-      this.listDirectoryPickerEntries(context),
-    );
     this.app.get("/v1/connections", (context) => this.listConnections(context));
     const dispatch = (context: Context): Promise<Response> =>
       this.dispatchWorkspaceRequest(context);
@@ -367,10 +367,19 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     if (input instanceof Response) {
       return input;
     }
+    return this.openScopeDirectory(context, input.directory);
+  }
+
+  private async openScopeDirectory(
+    context: Context,
+    requestedDirectory: string,
+    options: { readonly cancelled?: false } = {},
+  ): Promise<Response> {
     try {
-      const directory = await resolveWorkspaceScope(input.directory);
+      const directory = await resolveWorkspaceScope(requestedDirectory);
       const entry = this.options.workspaceRegistry?.open(directory);
       return context.json({
+        ...options,
         ok: true,
         scope: {
           available: true,
@@ -388,6 +397,46 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         );
       }
       throw error;
+    }
+  }
+
+  private async openScopeFromPicker(context: Context): Promise<Response> {
+    const forbidden = this.directoryPickerForbidden(context);
+    if (forbidden) {
+      return forbidden;
+    }
+    if (this.nativeDirectoryPickerActive) {
+      return context.json(
+        {
+          error: {
+            code: "DIRECTORY_PICKER_BUSY",
+            message: "A system directory picker is already open",
+          },
+          ok: false,
+        },
+        409,
+      );
+    }
+    this.nativeDirectoryPickerActive = true;
+    try {
+      const directory =
+        await this.options.nativeDirectoryPicker.pickDirectory();
+      if (directory === undefined) {
+        return context.json({ cancelled: true, ok: true });
+      }
+      return await this.openScopeDirectory(context, directory, {
+        cancelled: false,
+      });
+    } catch (error) {
+      if (error instanceof NativeDirectoryPickerError) {
+        return context.json(
+          { error: { code: error.code, message: error.message }, ok: false },
+          error.code === "DIRECTORY_PICKER_UNSUPPORTED" ? 501 : 500,
+        );
+      }
+      throw error;
+    } finally {
+      this.nativeDirectoryPickerActive = false;
     }
   }
 
@@ -434,7 +483,8 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         {
           error: {
             code: "DIRECTORY_PICKER_LOOPBACK_ONLY",
-            message: "Directory browsing is available only on loopback hosts",
+            message:
+              "System directory picking is available only on loopback hosts",
           },
           ok: false,
         },
@@ -442,108 +492,6 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       );
     }
     return undefined;
-  }
-
-  private listDirectoryPickerRoots(context: Context): Response {
-    const forbidden = this.directoryPickerForbidden(context);
-    if (forbidden) {
-      return forbidden;
-    }
-    const home = resolve(this.options.directoryPickerHome ?? homedir());
-    const root = parse(home).root;
-    return context.json({
-      ok: true,
-      roots: [
-        { directory: home, label: "Home" },
-        ...(root === home ? [] : [{ directory: root, label: "Filesystem" }]),
-      ],
-    });
-  }
-
-  private async resolveBrowsableDirectory(directory: string): Promise<string> {
-    if (!isAbsolute(directory)) {
-      throw new WorkspaceScopeError(
-        "directory-must-be-absolute",
-        "Directory must be an absolute path",
-      );
-    }
-    const canonical = await realpath(directory);
-    const info = await stat(canonical);
-    if (!info.isDirectory()) {
-      throw new WorkspaceScopeError(
-        "directory-not-directory",
-        "Directory must point to a directory",
-      );
-    }
-    await access(canonical, constants.R_OK);
-    return canonical;
-  }
-
-  private async listDirectoryPickerEntries(
-    context: Context,
-  ): Promise<Response> {
-    const forbidden = this.directoryPickerForbidden(context);
-    if (forbidden) {
-      return forbidden;
-    }
-    const input = await this.readDirectoryBody(context);
-    if (input instanceof Response) {
-      return input;
-    }
-    try {
-      const directory = await this.resolveBrowsableDirectory(input.directory);
-      const entries = await readdir(directory, { withFileTypes: true });
-      const directories = (
-        await Promise.all(
-          entries
-            .filter((entry) => !entry.name.startsWith("."))
-            .map(async (entry) => {
-              const child = resolve(directory, entry.name);
-              if (entry.isDirectory()) {
-                return { directory: child, name: entry.name };
-              }
-              if (!entry.isSymbolicLink()) {
-                return undefined;
-              }
-              try {
-                return (await stat(child)).isDirectory()
-                  ? { directory: child, name: entry.name }
-                  : undefined;
-              } catch {
-                return undefined;
-              }
-            }),
-        )
-      )
-        .filter(
-          (
-            entry,
-          ): entry is { readonly directory: string; readonly name: string } =>
-            entry !== undefined,
-        )
-        .sort((left, right) => left.name.localeCompare(right.name));
-      return context.json({ directories, directory, ok: true });
-    } catch (error) {
-      if (
-        error instanceof WorkspaceScopeError ||
-        (error instanceof Error && "code" in error)
-      ) {
-        return context.json(
-          {
-            error: {
-              code:
-                error instanceof WorkspaceScopeError
-                  ? error.code
-                  : "DIRECTORY_NOT_READABLE",
-              message: error.message,
-            },
-            ok: false,
-          },
-          400,
-        );
-      }
-      throw error;
-    }
   }
 
   private listConnections(context: Context): Response {
@@ -659,8 +607,9 @@ export function createDaemonHttpServer(
     eventBufferCapacity: options.eventBufferCapacity,
     host: options.host ?? DEFAULT_HOST,
     listKnownWorkspaceScopes: options.listKnownWorkspaceScopes,
+    nativeDirectoryPicker:
+      options.nativeDirectoryPicker ?? createNativeDirectoryPicker(),
     workspaceRegistry: options.workspaceRegistry,
-    directoryPickerHome: options.directoryPickerHome,
     now: options.now ?? Date.now,
     onClientConnected: options.onClientConnected,
     onClientDisconnected: options.onClientDisconnected,

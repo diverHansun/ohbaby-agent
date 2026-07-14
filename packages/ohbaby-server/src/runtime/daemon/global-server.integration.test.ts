@@ -26,7 +26,9 @@ function createBackend(dispose = vi.fn()): WorkspaceBackend {
   } as unknown as UiBackendClient & { dispose(): void };
 }
 
-function createRegistry(now = (): number => Date.now()): WorkspaceRegistryStore {
+function createRegistry(
+  now = (): number => Date.now(),
+): WorkspaceRegistryStore {
   const entries = new Map<string, WorkspaceRegistryEntry>();
   return {
     list: () => [...entries.values()].sort((a, b) => a.position - b.position),
@@ -256,22 +258,24 @@ describe("global daemon workspace routing", () => {
     }
   });
 
-  it("opens, hides, and browses projects through authenticated global routes", async () => {
+  it("opens, hides, and picks projects through authenticated global routes", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-global-projects-"));
     cleanupDirs.push(root);
     const repo = join(root, "repo");
     const child = join(root, "child");
     await mkdir(join(repo, ".git"), { recursive: true });
     await mkdir(child, { recursive: true });
-    await writeFile(join(root, "ignored.txt"), "file", "utf8");
     const canonicalRepo = await realpath(repo);
-    const canonicalRoot = await realpath(root);
     const registry = createRegistry(() => 77_000);
+    const pickDirectory = vi
+      .fn<() => Promise<string | undefined>>()
+      .mockResolvedValueOnce(repo)
+      .mockResolvedValueOnce(undefined);
     const server = createDaemonHttpServer({
       authToken: "token",
       backend: createBackend(),
       createWorkspaceBackend: () => createBackend(),
-      directoryPickerHome: root,
+      nativeDirectoryPicker: { pickDirectory },
       port: 0,
       scopeRoot: canonicalRepo,
       workspaceRegistry: registry,
@@ -283,43 +287,32 @@ describe("global daemon workspace routing", () => {
     };
 
     try {
-      const roots = await fetch(`${server.url}/v1/directory-picker/roots`, {
-        headers,
-      });
-      expect(roots.status).toBe(200);
-      const rootsBody = (await roots.json()) as {
-        readonly ok: boolean;
-        readonly roots: readonly { readonly directory: string; readonly label: string }[];
-      };
-      expect(rootsBody.ok).toBe(true);
-      expect(rootsBody.roots).toContainEqual({ directory: root, label: "Home" });
-
-      const listed = await fetch(`${server.url}/v1/directory-picker/list`, {
-        body: JSON.stringify({ directory: root }),
+      const picked = await fetch(`${server.url}/v1/scopes/open-picker`, {
         headers,
         method: "POST",
       });
-      await expect(listed.json()).resolves.toMatchObject({
-        directories: [
-          { directory: join(canonicalRoot, "child"), name: "child" },
-          { directory: canonicalRepo, name: "repo" },
-        ],
-        directory: canonicalRoot,
+      expect(picked.status).toBe(200);
+      await expect(picked.json()).resolves.toMatchObject({
+        cancelled: false,
         ok: true,
+        scope: { directory: canonicalRepo },
       });
-
-      const opened = await fetch(`${server.url}/v1/scopes/open`, {
-        body: JSON.stringify({ directory: repo }),
-        headers,
-        method: "POST",
-      });
-      expect(opened.status).toBe(200);
+      expect(pickDirectory).toHaveBeenCalledTimes(1);
       expect(registry.list()).toContainEqual(
         expect.objectContaining({
           scopeKey: canonicalRepo,
           visibility: "visible",
         }),
       );
+
+      const cancelled = await fetch(`${server.url}/v1/scopes/open-picker`, {
+        headers,
+        method: "POST",
+      });
+      await expect(cancelled.json()).resolves.toEqual({
+        cancelled: true,
+        ok: true,
+      });
 
       const openedEmptyProject = await fetch(`${server.url}/v1/scopes/open`, {
         body: JSON.stringify({ directory: child }),
@@ -357,12 +350,98 @@ describe("global daemon workspace routing", () => {
       const scopes = await fetch(`${server.url}/v1/scopes`, { headers });
       await expect(scopes.json()).resolves.toEqual({ ok: true, scopes: [] });
 
-      const unauthorized = await fetch(
-        `${server.url}/v1/directory-picker/roots`,
-      );
+      const unauthorized = await fetch(`${server.url}/v1/scopes/open-picker`, {
+        method: "POST",
+      });
       expect(unauthorized.status).toBe(401);
     } finally {
       await server.stop();
+    }
+  });
+
+  it("serializes native picker requests and keeps the picker loopback-only", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ohbaby-global-picker-safety-"));
+    cleanupDirs.push(root);
+    const repo = join(root, "repo");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    const canonicalRepo = await realpath(repo);
+    let releasePicker: (() => void) | undefined;
+    let pickerStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      pickerStarted = resolve;
+    });
+    const pickDirectory = vi.fn(
+      () =>
+        new Promise<string | undefined>((resolve) => {
+          releasePicker = (): void => {
+            resolve(undefined);
+          };
+        }),
+    );
+    const server = createDaemonHttpServer({
+      authToken: "token",
+      backend: createBackend(),
+      createWorkspaceBackend: () => createBackend(),
+      nativeDirectoryPicker: {
+        pickDirectory: async () => {
+          pickerStarted?.();
+          return pickDirectory();
+        },
+      },
+      port: 0,
+      scopeRoot: canonicalRepo,
+    });
+    await server.start();
+    const headers = {
+      authorization: daemonAuthHeader("token"),
+      "content-type": "application/json",
+    };
+
+    try {
+      const first = fetch(`${server.url}/v1/scopes/open-picker`, {
+        headers,
+        method: "POST",
+      });
+      await started;
+      const busy = await fetch(`${server.url}/v1/scopes/open-picker`, {
+        headers,
+        method: "POST",
+      });
+      expect(busy.status).toBe(409);
+      await expect(busy.json()).resolves.toMatchObject({
+        error: { code: "DIRECTORY_PICKER_BUSY" },
+        ok: false,
+      });
+      releasePicker?.();
+      await expect(first).resolves.toHaveProperty("status", 200);
+    } finally {
+      await server.stop();
+    }
+
+    const nonLoopbackPicker = vi.fn<() => Promise<string | undefined>>();
+    const nonLoopback = createDaemonHttpServer({
+      authToken: "token",
+      backend: createBackend(),
+      createWorkspaceBackend: () => createBackend(),
+      host: "0.0.0.0",
+      nativeDirectoryPicker: { pickDirectory: nonLoopbackPicker },
+      port: 0,
+      scopeRoot: canonicalRepo,
+    });
+    await nonLoopback.start();
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${String(nonLoopback.port)}/v1/scopes/open-picker`,
+        { headers, method: "POST" },
+      );
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "DIRECTORY_PICKER_LOOPBACK_ONLY" },
+        ok: false,
+      });
+      expect(nonLoopbackPicker).not.toHaveBeenCalled();
+    } finally {
+      await nonLoopback.stop();
     }
   });
 

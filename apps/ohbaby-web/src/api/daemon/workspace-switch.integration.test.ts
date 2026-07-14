@@ -54,8 +54,20 @@ describe("ohbaby web workspace switching", () => {
           Response.json({
             ok: true,
             scopes: [
-              { available: true, directory: "/repo-a", lastOpenedAt: 2, loaded: true, position: 0 },
-              { available: true, directory: "/repo-b", lastOpenedAt: 1, loaded: false, position: 1 },
+              {
+                available: true,
+                directory: "/repo-a",
+                lastOpenedAt: 2,
+                loaded: true,
+                position: 0,
+              },
+              {
+                available: true,
+                directory: "/repo-b",
+                lastOpenedAt: 1,
+                loaded: false,
+                position: 1,
+              },
             ],
           }),
         );
@@ -131,8 +143,20 @@ describe("ohbaby web workspace switching", () => {
     await runtime.refreshWorkspaces();
     expect(runtime.getWorkspaceSnapshot()).toEqual({
       scopes: [
-        { available: true, directory: "/repo-a", lastOpenedAt: 2, loaded: true, position: 0 },
-        { available: true, directory: "/repo-b", lastOpenedAt: 1, loaded: false, position: 1 },
+        {
+          available: true,
+          directory: "/repo-a",
+          lastOpenedAt: 2,
+          loaded: true,
+          position: 0,
+        },
+        {
+          available: true,
+          directory: "/repo-b",
+          lastOpenedAt: 1,
+          loaded: false,
+          position: 1,
+        },
       ],
       selectedDirectory: "/repo-a",
     });
@@ -235,8 +259,20 @@ describe("ohbaby web workspace switching", () => {
           Response.json({
             ok: true,
             scopes: [
-              { available: true, directory: "/repo-a", lastOpenedAt: 2, loaded: true, position: 0 },
-              { available: true, directory: "/repo-b", lastOpenedAt: 1, loaded: false, position: 1 },
+              {
+                available: true,
+                directory: "/repo-a",
+                lastOpenedAt: 2,
+                loaded: true,
+                position: 0,
+              },
+              {
+                available: true,
+                directory: "/repo-b",
+                lastOpenedAt: 1,
+                loaded: false,
+                position: 1,
+              },
             ],
           }),
         );
@@ -264,6 +300,141 @@ describe("ohbaby web workspace switching", () => {
       "A",
     );
     expect(clientDirectories).toEqual(["/repo-a", "/repo-b", "/repo-a"]);
+    await runtime.client.close();
+  });
+
+  it("keeps cancellation local and switches only after a system picker opens a workspace", async () => {
+    const requests: Request[] = [];
+    let pickerResult: "cancelled" | "selected" = "cancelled";
+    const fetchImpl: typeof fetch = (input, init = {}) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      const directory = request.headers.get("x-ohbaby-directory") ?? "";
+      if (request.url.endsWith("/v1/scopes")) {
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            scopes:
+              pickerResult === "selected"
+                ? [
+                    {
+                      available: true,
+                      directory: "/repo-a",
+                      lastOpenedAt: 2,
+                      loaded: true,
+                      position: 0,
+                    },
+                    {
+                      available: true,
+                      directory: "/repo-b",
+                      lastOpenedAt: 1,
+                      loaded: false,
+                      position: 1,
+                    },
+                  ]
+                : [
+                    {
+                      available: true,
+                      directory: "/repo-a",
+                      lastOpenedAt: 2,
+                      loaded: true,
+                      position: 0,
+                    },
+                  ],
+          }),
+        );
+      }
+      if (request.url.endsWith("/v1/scopes/open-picker")) {
+        return Promise.resolve(
+          Response.json(
+            pickerResult === "cancelled"
+              ? { cancelled: true, ok: true }
+              : {
+                  cancelled: false,
+                  ok: true,
+                  scope: {
+                    available: true,
+                    directory: "/repo-b",
+                    lastOpenedAt: 1,
+                    loaded: false,
+                    position: 1,
+                  },
+                },
+          ),
+        );
+      }
+      if (request.url.endsWith("/v1/clients")) {
+        return Promise.resolve(Response.json({ ok: true }));
+      }
+      if (request.url.endsWith("/v1/events")) {
+        return Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller): void {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({ type: "hello" })}\n\n`,
+                  ),
+                );
+                request.signal.addEventListener(
+                  "abort",
+                  (): void => {
+                    controller.close();
+                  },
+                  { once: true },
+                );
+              },
+            }),
+            { headers: { "content-type": "text/event-stream" } },
+          ),
+        );
+      }
+      if (request.url.endsWith("/v1/snapshot")) {
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            seqNum: 0,
+            snapshot: emptySnapshot(directory === "/repo-b" ? "B" : "A"),
+          }),
+        );
+      }
+      if (request.url.endsWith("/v1/model")) {
+        return Promise.resolve(Response.json({ model: null, ok: true }));
+      }
+      throw new Error(`Unexpected request: ${request.url}`);
+    };
+    const runtime = createOhbabyWebRuntime(
+      {
+        baseUrl: "http://127.0.0.1:4096",
+        clientId: "client-a",
+        directory: "/repo-a",
+        token: "token",
+      },
+      { fetch: fetchImpl },
+    );
+    await runtime.ready;
+
+    const beforeCancel = requests.length;
+    await runtime.openWorkspaceFromSystemPicker();
+
+    expect(runtime.getWorkspaceSnapshot().selectedDirectory).toBe("/repo-a");
+    expect(
+      requests
+        .slice(beforeCancel)
+        .map((request) => new URL(request.url).pathname),
+    ).toEqual(["/v1/scopes/open-picker"]);
+
+    pickerResult = "selected";
+    const beforeSelection = requests.length;
+    await runtime.openWorkspaceFromSystemPicker();
+
+    const pickerRequest = requests.slice(beforeSelection)[0];
+    expect(new URL(pickerRequest.url).pathname).toBe("/v1/scopes/open-picker");
+    expect(pickerRequest.headers.has("x-ohbaby-directory")).toBe(false);
+    expect(runtime.getWorkspaceSnapshot().selectedDirectory).toBe("/repo-b");
+    expect(runtime.store.getSnapshot().view.snapshot?.sessions[0]?.title).toBe(
+      "B",
+    );
     await runtime.client.close();
   });
 });

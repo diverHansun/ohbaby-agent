@@ -1,7 +1,6 @@
 import {
   Archive,
   Bot,
-  ChevronLeft,
   ChevronDown,
   Folder,
   FolderPlus,
@@ -55,10 +54,6 @@ import type {
 } from "../api/daemon/client.js";
 import type { CommandNotice } from "../api/daemon/wire.js";
 import type { WorkspaceSnapshot } from "../api/daemon/wire.js";
-import type {
-  DirectoryPickerEntry,
-  DirectoryPickerRoot,
-} from "../api/daemon/wire.js";
 import type {
   CompactSessionRequest,
   ModelConnectRequest,
@@ -231,7 +226,6 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
     () => runtime.getWorkspaceSnapshot(),
   );
   const [actionError, setActionError] = useState<string | null>(null);
-  const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(false);
   const [closedCommandModalIds, setClosedCommandModalIds] = useState<
     readonly string[]
@@ -301,6 +295,9 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
     },
     [runAction, runtime],
   );
+  const openWorkspaceFromSystemPicker = useCallback((): void => {
+    void runAction(() => runtime.openWorkspaceFromSystemPicker());
+  }, [runAction, runtime]);
 
   const openOverlayForSlashText = useCallback(
     async (text: string): Promise<boolean> => {
@@ -469,9 +466,7 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
       }`}
     >
       <ProjectRail
-        onAdd={() => {
-          setDirectoryPickerOpen(true);
-        }}
+        onAdd={openWorkspaceFromSystemPicker}
         onHide={hideWorkspace}
         onSelect={switchWorkspace}
         onToggleSessions={() => {
@@ -600,19 +595,6 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
           />
         ) : null}
       </div>
-      {directoryPickerOpen ? (
-        <DirectoryPickerModal
-          onClose={() => {
-            setDirectoryPickerOpen(false);
-          }}
-          onOpen={async (directory) => {
-            if (await runAction(() => runtime.openWorkspace(directory))) {
-              setDirectoryPickerOpen(false);
-            }
-          }}
-          runtime={runtime}
-        />
-      ) : null}
     </main>
   );
 }
@@ -621,7 +603,6 @@ function EmptyWorkspaceApp(props: {
   readonly runtime: OhbabyWebRuntime;
   readonly workspace: WorkspaceSnapshot;
 }): ReactElement {
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const run = useCallback(async (action: () => Promise<void>) => {
     try {
@@ -633,12 +614,13 @@ function EmptyWorkspaceApp(props: {
       return false;
     }
   }, []);
+  const openWorkspaceFromSystemPicker = useCallback((): void => {
+    void run(() => props.runtime.openWorkspaceFromSystemPicker());
+  }, [props.runtime, run]);
   return (
     <main className="ohb-app ohb-app-shell ohb-app-empty ohb-project-empty">
       <ProjectRail
-        onAdd={() => {
-          setPickerOpen(true);
-        }}
+        onAdd={openWorkspaceFromSystemPicker}
         onHide={(directory) => {
           void run(() => props.runtime.hideWorkspace(directory));
         }}
@@ -660,29 +642,11 @@ function EmptyWorkspaceApp(props: {
           </span>
           <h1>Open a project to get started</h1>
           <p>Projects stay in this rail even before they have a session.</p>
-          <button
-            onClick={() => {
-              setPickerOpen(true);
-            }}
-            type="button"
-          >
+          <button onClick={openWorkspaceFromSystemPicker} type="button">
             <FolderPlus size={16} /> Open project
           </button>
         </div>
       </section>
-      {pickerOpen ? (
-        <DirectoryPickerModal
-          onClose={() => {
-            setPickerOpen(false);
-          }}
-          onOpen={async (directory) => {
-            if (await run(() => props.runtime.openWorkspace(directory))) {
-              setPickerOpen(false);
-            }
-          }}
-          runtime={props.runtime}
-        />
-      ) : null}
     </main>
   );
 }
@@ -921,163 +885,6 @@ function projectColor(directory: string): string {
     }
   }
   return `hsl(${String(hash % 360)} 58% 84%)`;
-}
-
-function DirectoryPickerModal(props: {
-  readonly onClose: () => void;
-  readonly onOpen: (directory: string) => Promise<void>;
-  readonly runtime: OhbabyWebRuntime;
-}): ReactElement {
-  const [roots, setRoots] = useState<readonly DirectoryPickerRoot[]>([]);
-  const [current, setCurrent] = useState("");
-  const [entries, setEntries] = useState<readonly DirectoryPickerEntry[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const closeRef = useRef<HTMLButtonElement>(null);
-
-  const browse = useCallback(
-    async (directory: string): Promise<void> => {
-      setLoading(true);
-      setError(null);
-      try {
-        const response = await props.runtime.listDirectoryEntries(directory);
-        setCurrent(response.directory);
-        setEntries(response.directories);
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [props.runtime],
-  );
-
-  useEffect((): (() => void) => {
-    let cancelled = false;
-    void props.runtime
-      .listDirectoryRoots()
-      .then(async (nextRoots) => {
-        if (cancelled) return;
-        setRoots(nextRoots);
-        const first = nextRoots[0]?.directory;
-        if (first) await browse(first);
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) {
-          setLoading(false);
-          setError(cause instanceof Error ? cause.message : String(cause));
-        }
-      });
-    closeRef.current?.focus();
-    return () => {
-      cancelled = true;
-    };
-  }, [browse, props.runtime]);
-
-  const parent = directoryParent(current);
-  return (
-    <div
-      aria-label="Open project"
-      aria-modal="true"
-      className="ohb-directory-overlay"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") props.onClose();
-      }}
-      role="dialog"
-    >
-      <section className="ohb-directory-dialog">
-        <header>
-          <div>
-            <strong>Open project</strong>
-            <small>Choose a folder from this computer</small>
-          </div>
-          <button
-            aria-label="Close"
-            onClick={props.onClose}
-            ref={closeRef}
-            type="button"
-          >
-            <X size={17} />
-          </button>
-        </header>
-        <div className="ohb-directory-roots">
-          {roots.map((root) => (
-            <button
-              key={root.directory}
-              onClick={() => void browse(root.directory)}
-              type="button"
-            >
-              <Folder size={14} /> {root.label}
-            </button>
-          ))}
-        </div>
-        <div className="ohb-directory-path" title={current}>
-          <button
-            aria-label="Go to parent folder"
-            disabled={!parent || loading}
-            onClick={() => parent && void browse(parent)}
-            type="button"
-          >
-            <ChevronLeft size={16} />
-          </button>
-          <span>{compactHomePath(current)}</span>
-        </div>
-        {error ? (
-          <div className="ohb-directory-error" role="alert">
-            {error}
-          </div>
-        ) : null}
-        <div className="ohb-directory-list" aria-busy={loading}>
-          {loading ? (
-            <div className="ohb-directory-placeholder">Loading folders…</div>
-          ) : entries.length > 0 ? (
-            entries.map((entry) => (
-              <button
-                key={entry.directory}
-                onDoubleClick={() => void browse(entry.directory)}
-                onClick={() => void browse(entry.directory)}
-                type="button"
-              >
-                <Folder size={16} />
-                <span>{entry.name}</span>
-                <ChevronDown size={14} />
-              </button>
-            ))
-          ) : (
-            <div className="ohb-directory-placeholder">No folders here</div>
-          )}
-        </div>
-        <footer>
-          <button
-            className="ohb-directory-cancel"
-            onClick={props.onClose}
-            type="button"
-          >
-            Cancel
-          </button>
-          <button
-            className="ohb-directory-open"
-            disabled={!current || loading}
-            onClick={() => void props.onOpen(current)}
-            type="button"
-          >
-            Open this folder
-          </button>
-        </footer>
-      </section>
-    </div>
-  );
-}
-
-function directoryParent(directory: string): string | null {
-  if (!directory || directory === "/") return null;
-  const normalized = directory.replace(/[\\/]+$/u, "");
-  const index = Math.max(
-    normalized.lastIndexOf("/"),
-    normalized.lastIndexOf("\\"),
-  );
-  if (index < 0) return null;
-  return index === 0 ? "/" : normalized.slice(0, index);
 }
 
 function SessionSidebar(props: {

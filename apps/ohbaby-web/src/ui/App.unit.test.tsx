@@ -56,6 +56,9 @@ interface FakeRuntime {
   readonly openWorkspace: ReturnType<
     typeof vi.fn<OhbabyWebRuntime["openWorkspace"]>
   >;
+  readonly openWorkspaceFromSystemPicker: ReturnType<
+    typeof vi.fn<OhbabyWebRuntime["openWorkspaceFromSystemPicker"]>
+  >;
   readonly runtime: OhbabyWebRuntime;
   readonly selectSession: ReturnType<
     typeof vi.fn<OhbabyWebClient["selectSession"]>
@@ -1103,21 +1106,16 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.hideWorkspace).toHaveBeenCalledWith("/repo-b");
   });
 
-  it("opens the server-backed directory picker from the project rail", async () => {
+  it("opens the system directory picker from the project rail", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
     const app = mountApp(fake.runtime);
 
     await clickButton(app.container, "Open project");
-    await waitFor(
-      () => app.container.querySelector('[role="dialog"]') !== null,
-    );
 
-    expect(app.container.querySelector('input[type="text"]')).toBeNull();
-    expect(app.container.textContent).toContain(
-      "Choose a folder from this computer",
-    );
+    expect(fake.openWorkspaceFromSystemPicker).toHaveBeenCalledTimes(1);
+    expect(app.container.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it("renders transient reasoning for a streaming assistant message", async () => {
@@ -1697,6 +1695,9 @@ function createFakeRuntime(input: {
   const openWorkspace = vi.fn<OhbabyWebRuntime["openWorkspace"]>(() =>
     Promise.resolve(),
   );
+  const openWorkspaceFromSystemPicker = vi.fn<
+    OhbabyWebRuntime["openWorkspaceFromSystemPicker"]
+  >(() => Promise.resolve());
   const workspaceSnapshot = {
     scopes: [
       {
@@ -1796,17 +1797,12 @@ function createFakeRuntime(input: {
     hideWorkspace,
     listCommands,
     openWorkspace,
+    openWorkspaceFromSystemPicker,
     runtime: {
       client,
       hideWorkspace,
-      listDirectoryEntries: (directory) =>
-        Promise.resolve({
-          directories: [{ directory: `${directory}/project`, name: "project" }],
-          directory,
-        }),
-      listDirectoryRoots: () =>
-        Promise.resolve([{ directory: "/Users/test", label: "Home" }]),
       openWorkspace,
+      openWorkspaceFromSystemPicker,
       getWorkspaceSnapshot: () => workspaceSnapshot,
       ready: Promise.resolve(),
       refreshWorkspaces: () => Promise.resolve(),

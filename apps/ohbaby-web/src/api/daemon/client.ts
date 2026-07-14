@@ -26,8 +26,6 @@ import type {
   WebSseEvent,
   WorkspaceScopeSummary,
   WorkspaceSnapshot,
-  DirectoryPickerEntry,
-  DirectoryPickerRoot,
   PromptAcceptedResponse,
 } from "./wire.js";
 import {
@@ -107,12 +105,8 @@ export interface OhbabyWebRuntime {
   readonly store: OhbabyWebStore;
   getWorkspaceSnapshot(): WorkspaceSnapshot;
   hideWorkspace(directory: string): Promise<void>;
-  listDirectoryEntries(directory: string): Promise<{
-    readonly directories: readonly DirectoryPickerEntry[];
-    readonly directory: string;
-  }>;
-  listDirectoryRoots(): Promise<readonly DirectoryPickerRoot[]>;
   openWorkspace(directory: string): Promise<void>;
+  openWorkspaceFromSystemPicker(): Promise<void>;
   refreshWorkspaces(): Promise<void>;
   subscribeWorkspaces(listener: () => void): () => void;
   switchWorkspace(directory: string): Promise<void>;
@@ -547,24 +541,17 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     });
   }
 
-  async listDirectoryRoots(): Promise<readonly DirectoryPickerRoot[]> {
-    return (await this.globalHttp.listDirectoryPickerRoots()).roots;
-  }
-
-  async listDirectoryEntries(directory: string): Promise<{
-    readonly directories: readonly DirectoryPickerEntry[];
-    readonly directory: string;
-  }> {
-    const response =
-      await this.globalHttp.listDirectoryPickerEntries(directory);
-    return {
-      directories: response.directories,
-      directory: response.directory,
-    };
-  }
-
   async openWorkspace(directory: string): Promise<void> {
     const response = await this.globalHttp.openWorkspace(directory);
+    await this.refreshWorkspaces();
+    await this.queueSwitchWorkspace(response.scope.directory, false);
+  }
+
+  async openWorkspaceFromSystemPicker(): Promise<void> {
+    const response = await this.globalHttp.openWorkspaceFromSystemPicker();
+    if (response.cancelled) {
+      return;
+    }
     await this.refreshWorkspaces();
     await this.queueSwitchWorkspace(response.scope.directory, false);
   }

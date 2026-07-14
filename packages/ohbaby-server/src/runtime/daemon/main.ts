@@ -485,7 +485,6 @@ async function startFreshDaemon(input: {
         host: input.options.host ?? DEFAULT_HOST,
         listKnownWorkspaceScopes: () => listKnownSessionProjectRoots(),
         workspaceRegistry,
-        directoryPickerHome: input.options.homeDirectory,
         onClientConnected: (clientId) => {
           supervisor.clientConnected(clientId);
         },

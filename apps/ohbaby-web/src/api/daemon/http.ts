@@ -24,8 +24,7 @@ import type {
   WebStartupIntent,
   WorkspaceScopesResponse,
   WorkspaceOpenResponse,
-  DirectoryPickerRootsResponse,
-  DirectoryPickerListResponse,
+  WorkspaceOpenPickerResponse,
 } from "./wire.js";
 
 export interface DaemonHttpClientOptions {
@@ -110,17 +109,8 @@ export class DaemonHttpClient {
     });
   }
 
-  listDirectoryPickerRoots(): Promise<DirectoryPickerRootsResponse> {
-    return this.request("/v1/directory-picker/roots", {
-      includeDirectory: false,
-    });
-  }
-
-  listDirectoryPickerEntries(
-    directory: string,
-  ): Promise<DirectoryPickerListResponse> {
-    return this.request("/v1/directory-picker/list", {
-      body: { directory },
+  openWorkspaceFromSystemPicker(): Promise<WorkspaceOpenPickerResponse> {
+    return this.request("/v1/scopes/open-picker", {
       includeDirectory: false,
       method: "POST",
     });
