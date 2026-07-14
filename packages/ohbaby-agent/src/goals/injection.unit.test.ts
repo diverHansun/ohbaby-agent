@@ -35,6 +35,12 @@ describe("renderGoalTurnPrompt", () => {
       isFirstTurn: false,
     });
     expect(prompt).toContain("Continue working toward the active goal.");
+    expect(prompt).toContain(
+      "use and maintain a Todo list of meaningful milestones across continuation turns",
+    );
+    expect(prompt).toContain(
+      "reconcile it before completion without treating it as a runtime gate",
+    );
     expect(prompt).toContain("3");
   });
 

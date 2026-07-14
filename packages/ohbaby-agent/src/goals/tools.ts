@@ -102,7 +102,9 @@ function budgetLimitsFromInput(
     wallClockBudgetMs < MIN_TIME_BUDGET_MS ||
     wallClockBudgetMs > MAX_TIME_BUDGET_MS
   ) {
-    throw new Error("Invalid time budget: expected a duration from 1 second to 24 hours.");
+    throw new Error(
+      "Invalid time budget: expected a duration from 1 second to 24 hours.",
+    );
   }
   return { wallClockBudgetMs };
 }
@@ -123,8 +125,9 @@ function createCreateGoalTool(backend: GoalToolBackend): Tool {
       "this conversation, so fold into the objective every constraint, decision, and rejected " +
       "direction already agreed here that would change how the work is done. Never reference " +
       "the conversation itself (no 'as discussed above', 'the approach we chose'). Keep it as " +
-      "short as completeness allows. Use replace: true " +
-      "only when the user explicitly wants to abandon the current goal.",
+      "short as completeness allows. Use replace: true only when the user explicitly wants to " +
+      "abandon the current goal. Replacement creates a new goal identity; do not assume the old " +
+      "Goal's Todo list carries into the replacement.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {
@@ -178,7 +181,8 @@ function createUpdateGoalTool(backend: GoalToolBackend): Tool {
       "only when all required work is done and validated — never after just a plan or partial " +
       "result. Call with `paused` when the objective cannot proceed (external condition, " +
       "required user input, or an impossible objective). Resuming a paused goal is user-only " +
-      "via /goal resume.",
+      "via /goal resume. If you used Todo for this Goal, reconcile it before completion, but do " +
+      "not treat Todo state as a runtime completion gate.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {
@@ -258,7 +262,8 @@ function createSetGoalBudgetTool(backend: GoalToolBackend): Tool {
       properties: {
         unit: { enum: [...GOAL_BUDGET_UNITS], type: "string" },
         value: {
-          description: "The positive numeric budget value explicitly stated by an authority.",
+          description:
+            "The positive numeric budget value explicitly stated by an authority.",
           exclusiveMinimum: 0,
           type: "number",
         },

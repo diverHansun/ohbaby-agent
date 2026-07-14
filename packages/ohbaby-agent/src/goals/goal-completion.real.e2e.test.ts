@@ -57,10 +57,67 @@ const tools: ChatCompletionTool[] = [
       parameters: {
         additionalProperties: false,
         properties: {
-          unit: { enum: ["turns", "tokens", "minutes"], type: "string" },
+          unit: {
+            enum: [
+              "turns",
+              "tokens",
+              "milliseconds",
+              "seconds",
+              "minutes",
+              "hours",
+            ],
+            type: "string",
+          },
           value: { exclusiveMinimum: 0, type: "number" },
         },
         required: ["value", "unit"],
+        type: "object",
+      },
+    },
+    type: "function",
+  },
+];
+
+const todoTools: ChatCompletionTool[] = [
+  ...tools,
+  {
+    function: {
+      description: "Read the todo list for the current task.",
+      name: "todo_read",
+      parameters: {
+        additionalProperties: false,
+        properties: {},
+        type: "object",
+      },
+    },
+    type: "function",
+  },
+  {
+    function: {
+      description:
+        "Replace the todo list for the current task with a complete ordered list. Maximum 10 items; an empty list clears it.",
+      name: "todo_write",
+      parameters: {
+        additionalProperties: false,
+        properties: {
+          todos: {
+            items: {
+              additionalProperties: false,
+              properties: {
+                content: { type: "string" },
+                status: {
+                  enum: ["pending", "in_progress", "completed"],
+                  type: "string",
+                },
+              },
+              required: ["content", "status"],
+              type: "object",
+            },
+            maxItems: 10,
+            type: "array",
+          },
+        },
+        required: ["todos"],
         type: "object",
       },
     },
@@ -73,91 +130,222 @@ runRealEval("goal completion real model eval", () => {
     loadDotenv({ path: path.join(process.cwd(), ".env") });
   });
 
-  it(
-    "waits for delegated execution, completes the goal, then gives the final answer without inventing a budget",
-    async () => {
-      const client = realClient();
-      const messages: ChatCompletionMessageParam[] = [
-        { content: PRIMARY_BASE_PROMPT, role: "system" },
-        {
-          content: [
-            "You are in an active goal continuation. The objective and verification are finished,",
-            "but delegated subagent sub_1 is still running and may mutate the workspace.",
-            "No user, system, or developer message specified any budget.",
-            "Follow the system lifecycle rules using the available tools. Once the subagent is",
-            `non-running and the goal is complete, end with a concise final answer containing ${FINAL_MARKER}.`,
-          ].join(" "),
+  it("waits for delegated execution, completes the goal, then gives the final answer without inventing a budget", async () => {
+    const client = realClient();
+    const messages: ChatCompletionMessageParam[] = [
+      { content: PRIMARY_BASE_PROMPT, role: "system" },
+      {
+        content: [
+          "You are in an active goal continuation. The objective and verification are finished,",
+          "but delegated subagent sub_1 is still running and may mutate the workspace.",
+          "No user, system, or developer message specified any budget.",
+          "Follow the system lifecycle rules using the available tools. Once the subagent is",
+          `non-running and the goal is complete, end with a concise final answer containing ${FINAL_MARKER}.`,
+        ].join(" "),
+        role: "user",
+      },
+    ];
+    let observedCompletedSubagent = false;
+    let statusCalls = 0;
+    let goalCompleted = false;
+    let finalText = "";
+
+    for (let step = 0; step < 8; step += 1) {
+      const response = await completeResponse(client, messages);
+      messages.push(response.completeMessage);
+      const calls = response.parsedToolCalls ?? [];
+
+      if (calls.length === 0) {
+        if (goalCompleted) {
+          finalText = messageText(response.completeMessage);
+          break;
+        }
+        messages.push({
+          content:
+            "Continue the active goal and use the lifecycle tools required by the system prompt.",
           role: "user",
-        },
-      ];
-      let observedCompletedSubagent = false;
-      let statusCalls = 0;
-      let goalCompleted = false;
-      let finalText = "";
+        });
+        continue;
+      }
 
-      for (let step = 0; step < 8; step += 1) {
-        const response = await completeResponse(client, messages);
-        messages.push(response.completeMessage);
-        const calls = response.parsedToolCalls ?? [];
-
-        if (calls.length === 0) {
-          if (goalCompleted) {
-            finalText = messageText(response.completeMessage);
-            break;
-          }
+      const completedObservedBeforeBatch = observedCompletedSubagent;
+      let completedDeliveredThisBatch = false;
+      for (const call of calls) {
+        if (call.name === "SetGoalBudget") {
+          throw new Error(
+            "Model invented a goal budget when no authority specified one.",
+          );
+        }
+        if (call.name === "subagent_status") {
+          statusCalls += 1;
+          const completed = statusCalls >= 2;
+          completedDeliveredThisBatch ||= completed;
           messages.push({
-            content: "Continue the active goal and use the lifecycle tools required by the system prompt.",
-            role: "user",
+            content: completed
+              ? "sub_1 status=completed; no delegated execution is running"
+              : "sub_1 status=running; it may still mutate the workspace; check again before completing",
+            role: "tool",
+            tool_call_id: call.id,
           });
           continue;
         }
-
-        const completedObservedBeforeBatch = observedCompletedSubagent;
-        let completedDeliveredThisBatch = false;
-        for (const call of calls) {
-          if (call.name === "SetGoalBudget") {
-            throw new Error("Model invented a goal budget when no authority specified one.");
-          }
-          if (call.name === "subagent_status") {
-            statusCalls += 1;
-            const completed = statusCalls >= 2;
-            completedDeliveredThisBatch ||= completed;
+        if (call.name === "UpdateGoal") {
+          if (call.arguments.status === "complete") {
+            assertCompletionWasObservedBeforeBatch(
+              completedObservedBeforeBatch,
+              completedDeliveredThisBatch,
+            );
+            goalCompleted = true;
             messages.push({
-              content: completed
-                ? "sub_1 status=completed; no delegated execution is running"
-                : "sub_1 status=running; it may still mutate the workspace; check again before completing",
+              content:
+                "Goal completed and cleared. Give the user the final answer now.",
               role: "tool",
               tool_call_id: call.id,
             });
             continue;
           }
-          if (call.name === "UpdateGoal") {
-            if (call.arguments.status === "complete") {
-              assertCompletionWasObservedBeforeBatch(
-                completedObservedBeforeBatch,
-                completedDeliveredThisBatch,
-              );
-              goalCompleted = true;
-              messages.push({
-                content: "Goal completed and cleared. Give the user the final answer now.",
-                role: "tool",
-                tool_call_id: call.id,
-              });
-              continue;
-            }
-            throw new Error(`Unexpected UpdateGoal status: ${String(call.arguments.status)}`);
-          }
-          throw new Error(`Unexpected tool call: ${call.name}`);
+          throw new Error(
+            `Unexpected UpdateGoal status: ${String(call.arguments.status)}`,
+          );
         }
-        observedCompletedSubagent ||= completedDeliveredThisBatch;
+        throw new Error(`Unexpected tool call: ${call.name}`);
+      }
+      observedCompletedSubagent ||= completedDeliveredThisBatch;
+    }
+
+    expect(statusCalls).toBeGreaterThanOrEqual(2);
+    expect(goalCompleted).toBe(true);
+    expect(normalize(finalText)).toContain(normalize(FINAL_MARKER));
+  }, 360_000);
+
+  it("reconciles a complex Goal Todo before completing and then answers", async () => {
+    const client = realClient();
+    const marker = "OHBABY_GOAL_TODO_RECONCILE_OK";
+    const currentTodos = [
+      { content: "Implement workload scope", status: "completed" },
+      { content: "Preserve continuation UI", status: "completed" },
+      { content: "Run final verification", status: "in_progress" },
+      { content: "Review completion order", status: "pending" },
+    ];
+    const messages: ChatCompletionMessageParam[] = [
+      { content: PRIMARY_BASE_PROMPT, role: "system" },
+      {
+        content: [
+          "You are in an active continuation for a complex Goal that already uses Todo.",
+          "All implementation and final verification have now succeeded, no subagent is running,",
+          "and there is no useful next action. The stored Todo may still be stale.",
+          "No authority specified a budget. Follow the Goal/Todo lifecycle using the tools.",
+          `After completing the Goal, give a concise final answer containing ${marker}.`,
+        ].join(" "),
+        role: "user",
+      },
+    ];
+    let todoRead = false;
+    let todoReconciled = false;
+    let goalCompleted = false;
+    let finalText = "";
+
+    for (let step = 0; step < 8; step += 1) {
+      const response = await completeResponse(client, messages, todoTools);
+      messages.push(response.completeMessage);
+      const calls = response.parsedToolCalls ?? [];
+      if (calls.length === 0) {
+        if (goalCompleted) {
+          finalText = messageText(response.completeMessage);
+          break;
+        }
+        messages.push({
+          content:
+            "Continue the active Goal and use the Todo/lifecycle tools required by the system prompt.",
+          role: "user",
+        });
+        continue;
       }
 
-      expect(statusCalls).toBeGreaterThanOrEqual(2);
-      expect(goalCompleted).toBe(true);
-      expect(normalize(finalText)).toContain(normalize(FINAL_MARKER));
-    },
-    360_000,
-  );
+      const reconciledBeforeBatch = todoReconciled;
+      for (const call of calls) {
+        if (call.name === "SetGoalBudget") {
+          throw new Error(
+            "Model invented a Goal budget during Todo reconciliation.",
+          );
+        }
+        if (call.name === "subagent_status") {
+          messages.push({
+            content: "No delegated subagent execution is running.",
+            role: "tool",
+            tool_call_id: call.id,
+          });
+          continue;
+        }
+        if (call.name === "todo_read") {
+          todoRead = true;
+          messages.push({
+            content: currentTodos
+              .map((todo) => `[${todo.status}] ${todo.content}`)
+              .join("\n"),
+            role: "tool",
+            tool_call_id: call.id,
+          });
+          continue;
+        }
+        if (call.name === "todo_write") {
+          if (!todoRead) {
+            throw new Error(
+              "Model rewrote an existing Goal Todo without reading it first.",
+            );
+          }
+          const nextTodos = call.arguments.todos;
+          if (
+            !Array.isArray(nextTodos) ||
+            nextTodos.length < 3 ||
+            nextTodos.length > 6 ||
+            nextTodos.some(
+              (todo) =>
+                typeof todo !== "object" ||
+                todo === null ||
+                (todo as { readonly status?: unknown }).status !== "completed",
+            )
+          ) {
+            throw new Error(
+              "Model did not reconcile the Goal Todo to completed milestones.",
+            );
+          }
+          todoReconciled = true;
+          messages.push({
+            content: "Goal Todo reconciled; all milestones are completed.",
+            role: "tool",
+            tool_call_id: call.id,
+          });
+          continue;
+        }
+        if (call.name === "UpdateGoal") {
+          if (call.arguments.status !== "complete") {
+            throw new Error(
+              `Unexpected UpdateGoal status: ${String(call.arguments.status)}`,
+            );
+          }
+          if (!reconciledBeforeBatch) {
+            throw new Error(
+              "UpdateGoal(complete) was called before a prior model step reconciled Todo.",
+            );
+          }
+          goalCompleted = true;
+          messages.push({
+            content: "Goal completed and cleared. Give the final answer now.",
+            role: "tool",
+            tool_call_id: call.id,
+          });
+          continue;
+        }
+        throw new Error(`Unexpected tool call: ${call.name}`);
+      }
+    }
+
+    expect(todoRead).toBe(true);
+    expect(todoReconciled).toBe(true);
+    expect(goalCompleted).toBe(true);
+    expect(normalize(finalText)).toContain(normalize(marker));
+  }, 360_000);
 });
 
 describe("goal completion eval ordering guard", () => {
@@ -208,11 +396,12 @@ function realClient(): LLMClientInstance {
 async function completeResponse(
   client: LLMClientInstance,
   messages: ChatCompletionMessageParam[],
+  availableTools: ChatCompletionTool[] = tools,
 ): Promise<StreamingResponse> {
   let completed: StreamingResponse | undefined;
   for await (const response of streamChatCompletion(client, messages, {
     maxTokens: 2_048,
-    tools,
+    tools: availableTools,
   })) {
     if (response.isComplete) completed = response;
   }

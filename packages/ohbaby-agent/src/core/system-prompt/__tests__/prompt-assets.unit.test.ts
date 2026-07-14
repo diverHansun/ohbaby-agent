@@ -122,5 +122,18 @@ describe("system prompt template assets", () => {
     expect(PRIMARY_BASE_PROMPT).toContain(
       "use an empty list only for an explicit reset or an abandoned or superseded plan",
     );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "A Todo list used during Goal mode belongs to that Goal and persists across its continuation turns",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "When a Goal is replaced or its objective changes materially",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "If you used a Todo list for the Goal, reconcile it before calling `UpdateGoal(complete)`",
+    );
+    expect(PRIMARY_BASE_PROMPT).toContain(
+      "Todo is a progress aid, not a runtime completion gate",
+    );
+    expect(PRIMARY_BASE_PROMPT).not.toContain("goal:<goalId>");
   });
 });
