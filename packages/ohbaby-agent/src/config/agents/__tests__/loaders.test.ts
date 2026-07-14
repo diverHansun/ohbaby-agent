@@ -43,14 +43,14 @@ describe("config/agents loaders", () => {
     globalPath = path.join(
       tempDir,
       "home",
-      ".ohbaby-agent",
+      ".ohbaby",
       "agents",
       "settings.json",
     );
     projectPath = path.join(
       tempDir,
       "repo",
-      ".ohbaby-agent",
+      ".ohbaby",
       "agents",
       "settings.json",
     );
@@ -62,10 +62,10 @@ describe("config/agents loaders", () => {
 
   it("resolves default global and project settings.json paths", () => {
     expect(getGlobalAgentsConfigPath("D:/home")).toBe(
-      path.join("D:/home", ".ohbaby-agent", "agents", "settings.json"),
+      path.join("D:/home", ".ohbaby", "agents", "settings.json"),
     );
     expect(getProjectAgentsConfigPath("D:/repo")).toBe(
-      path.join("D:/repo", ".ohbaby-agent", "agents", "settings.json"),
+      path.join("D:/repo", ".ohbaby", "agents", "settings.json"),
     );
   });
 

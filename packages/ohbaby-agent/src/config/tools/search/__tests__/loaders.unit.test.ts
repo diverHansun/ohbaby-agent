@@ -19,7 +19,7 @@ describe("config/tools/search loaders", () => {
     searchJsonPath = path.join(
       tempDir,
       "home",
-      ".ohbaby-agent",
+      ".ohbaby",
       "tools",
       "search.json",
     );
@@ -31,7 +31,7 @@ describe("config/tools/search loaders", () => {
 
   it("resolves the global tools/search.json path", () => {
     expect(getSearchJsonPath("D:/home")).toBe(
-      path.join("D:/home", ".ohbaby-agent", "tools", "search.json"),
+      path.join("D:/home", ".ohbaby", "tools", "search.json"),
     );
   });
 

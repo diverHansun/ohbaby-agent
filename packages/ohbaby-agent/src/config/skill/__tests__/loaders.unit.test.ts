@@ -32,14 +32,14 @@ describe("config/skill loaders", () => {
     globalPath = path.join(
       tempDir,
       "home",
-      ".ohbaby-agent",
+      ".ohbaby",
       "skills",
       "settings.json",
     );
     projectPath = path.join(
       tempDir,
       "repo",
-      ".ohbaby-agent",
+      ".ohbaby",
       "skills",
       "settings.json",
     );
@@ -51,10 +51,10 @@ describe("config/skill loaders", () => {
 
   it("resolves default global and project settings.json paths", () => {
     expect(getGlobalSkillConfigPath("D:/home")).toBe(
-      path.join("D:/home", ".ohbaby-agent", "skills", "settings.json"),
+      path.join("D:/home", ".ohbaby", "skills", "settings.json"),
     );
     expect(getProjectSkillConfigPath("D:/repo")).toBe(
-      path.join("D:/repo", ".ohbaby-agent", "skills", "settings.json"),
+      path.join("D:/repo", ".ohbaby", "skills", "settings.json"),
     );
   });
 

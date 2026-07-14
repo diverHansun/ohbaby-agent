@@ -134,9 +134,9 @@ describe("CommandService", () => {
     const setSearchApiKey = vi.fn(() =>
       Promise.resolve({
         apiKeyEnv: "CUSTOM_TAVILY_KEY",
-        envPath: "D:/home/.ohbaby-agent/.env",
+        envPath: "D:/home/.ohbaby/.env",
         provider: "tavily" as const,
-        searchJsonPath: "D:/home/.ohbaby-agent/tools/search.json",
+        searchJsonPath: "D:/home/.ohbaby/tools/search.json",
       }),
     );
     const { events, service } = createServiceHarness({ setSearchApiKey });
@@ -209,7 +209,7 @@ describe("CommandService", () => {
         interfaceProvider: "anthropic" as const,
         maxOutputTokens: 8192,
         model: "anthropic/claude-sonnet-4.6",
-        modelJsonPath: "D:/home/.ohbaby-agent/model.json",
+        modelJsonPath: "D:/home/.ohbaby/model.json",
         provider: "zenmux",
         saved: true as const,
       }),
@@ -267,7 +267,7 @@ describe("CommandService", () => {
         envPath: "D:/repo/.env",
         interfaceProvider: "openai-compatible" as const,
         model: "local-model",
-        modelJsonPath: "D:/home/.ohbaby-agent/model.json",
+        modelJsonPath: "D:/home/.ohbaby/model.json",
         provider: "lmstudio",
         saved: true as const,
       }),
@@ -316,7 +316,7 @@ describe("CommandService", () => {
         envPath: "D:/repo/.env",
         interfaceProvider: "openai-compatible" as const,
         model: "kimi-k2.6",
-        modelJsonPath: "D:/home/.ohbaby-agent/model.json",
+        modelJsonPath: "D:/home/.ohbaby/model.json",
         provider: "zenmux",
         saved: true as const,
       }),
@@ -359,7 +359,7 @@ describe("CommandService", () => {
         envPath: "D:/repo/.env",
         interfaceProvider: "anthropic" as const,
         model: "claude-sonnet-4.6",
-        modelJsonPath: "D:/home/.ohbaby-agent/model.json",
+        modelJsonPath: "D:/home/.ohbaby/model.json",
         provider: "anthropic",
         saved: true as const,
       }),

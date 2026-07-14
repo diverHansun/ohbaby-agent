@@ -20,13 +20,8 @@ describe("setSearchApiKey", () => {
     tempHome = await fs.mkdtemp(
       path.join(os.tmpdir(), "ohbaby-search-writer-"),
     );
-    envPath = path.join(tempHome, ".ohbaby-agent", ".env");
-    searchJsonPath = path.join(
-      tempHome,
-      ".ohbaby-agent",
-      "tools",
-      "search.json",
-    );
+    envPath = path.join(tempHome, ".ohbaby", ".env");
+    searchJsonPath = path.join(tempHome, ".ohbaby", "tools", "search.json");
     originalTavilyKey = process.env.TAVILY_API_KEY;
     originalCustomKey = process.env.CUSTOM_TAVILY_KEY;
     delete process.env.TAVILY_API_KEY;

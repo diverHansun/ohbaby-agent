@@ -1847,8 +1847,8 @@ describe("createInProcessUiBackendClient", () => {
         provider: "zenmux",
       });
 
-      const modelJsonPath = join(homeDir, ".ohbaby-agent", "model.json");
-      const globalEnvPath = join(homeDir, ".ohbaby-agent", ".env");
+      const modelJsonPath = join(homeDir, ".ohbaby", "model.json");
+      const globalEnvPath = join(homeDir, ".ohbaby", ".env");
       expect(result).toEqual({
         apiKeyEnv: "ZENMUX_API_KEY",
         baseUrl: "https://zenmux.example/v1",
@@ -1917,12 +1917,12 @@ describe("createInProcessUiBackendClient", () => {
     const homeDir = await mkdtemp(join(tmpdir(), "ohbaby-current-model-home-"));
     const previousHome = process.env.HOME;
     const previousUserProfile = process.env.USERPROFILE;
-    const modelJsonPath = join(homeDir, ".ohbaby-agent", "model.json");
+    const modelJsonPath = join(homeDir, ".ohbaby", "model.json");
 
     try {
       process.env.HOME = homeDir;
       process.env.USERPROFILE = homeDir;
-      await mkdir(join(homeDir, ".ohbaby-agent"), { recursive: true });
+      await mkdir(join(homeDir, ".ohbaby"), { recursive: true });
       await writeFile(
         modelJsonPath,
         JSON.stringify({
@@ -2943,12 +2943,7 @@ describe("createInProcessUiBackendClient", () => {
   it("registers project skills as a module tool and returns loaded skill content", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-skill-project-"));
     try {
-      const skillDir = join(
-        projectRoot,
-        ".ohbaby-agent",
-        "skill",
-        "code-review",
-      );
+      const skillDir = join(projectRoot, ".ohbaby", "skill", "code-review");
       await mkdir(skillDir, { recursive: true });
       await writeFile(
         join(skillDir, "SKILL.md"),
@@ -5814,11 +5809,11 @@ describe("createInProcessUiBackendClient", () => {
   it("lists user-invocable project skills as slash commands", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-skill-command-"));
     try {
-      await mkdir(join(projectRoot, ".ohbaby-agent", "skill", "code-review"), {
+      await mkdir(join(projectRoot, ".ohbaby", "skill", "code-review"), {
         recursive: true,
       });
       await writeFile(
-        join(projectRoot, ".ohbaby-agent", "skill", "code-review", "SKILL.md"),
+        join(projectRoot, ".ohbaby", "skill", "code-review", "SKILL.md"),
         [
           "---",
           "name: code-review",
@@ -5829,11 +5824,11 @@ describe("createInProcessUiBackendClient", () => {
         ].join("\n"),
         "utf8",
       );
-      await mkdir(join(projectRoot, ".ohbaby-agent", "skill", "internal"), {
+      await mkdir(join(projectRoot, ".ohbaby", "skill", "internal"), {
         recursive: true,
       });
       await writeFile(
-        join(projectRoot, ".ohbaby-agent", "skill", "internal", "SKILL.md"),
+        join(projectRoot, ".ohbaby", "skill", "internal", "SKILL.md"),
         [
           "---",
           "name: internal",
@@ -5919,12 +5914,7 @@ describe("createInProcessUiBackendClient", () => {
       await initializeGitRepository(projectRoot);
       const childDirectory = join(projectRoot, "packages", "app");
       await mkdir(childDirectory, { recursive: true });
-      const skillDir = join(
-        projectRoot,
-        ".ohbaby-agent",
-        "skill",
-        "root-review",
-      );
+      const skillDir = join(projectRoot, ".ohbaby", "skill", "root-review");
       await mkdir(skillDir, { recursive: true });
       await writeFile(
         join(skillDir, "SKILL.md"),
@@ -5962,7 +5952,7 @@ describe("createInProcessUiBackendClient", () => {
   it("publishes a warning notice when invalid skills are skipped", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-skill-warning-"));
     try {
-      const skillDir = join(projectRoot, ".ohbaby-agent", "skill", "invalid");
+      const skillDir = join(projectRoot, ".ohbaby", "skill", "invalid");
       await mkdir(skillDir, { recursive: true });
       await writeFile(
         join(skillDir, "SKILL.md"),
@@ -6016,11 +6006,11 @@ describe("createInProcessUiBackendClient", () => {
         ].join("\n"),
         "utf8",
       );
-      await mkdir(join(projectRoot, ".ohbaby-agent", "skill", "review"), {
+      await mkdir(join(projectRoot, ".ohbaby", "skill", "review"), {
         recursive: true,
       });
       await writeFile(
-        join(projectRoot, ".ohbaby-agent", "skill", "review", "SKILL.md"),
+        join(projectRoot, ".ohbaby", "skill", "review", "SKILL.md"),
         [
           "---",
           "name: code-review",
@@ -6067,12 +6057,7 @@ describe("createInProcessUiBackendClient", () => {
   it("submits skill command content together with the user request", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-skill-submit-"));
     try {
-      const skillDir = join(
-        projectRoot,
-        ".ohbaby-agent",
-        "skill",
-        "code-review",
-      );
+      const skillDir = join(projectRoot, ".ohbaby", "skill", "code-review");
       await mkdir(skillDir, { recursive: true });
       await writeFile(
         join(skillDir, "SKILL.md"),

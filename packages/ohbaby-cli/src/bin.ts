@@ -94,6 +94,7 @@ interface RemoteDaemonClientOptions {
 interface AgentRuntimeModule {
   readonly buildCoreAPIImpl?: unknown;
   readonly loadRuntimeEnvIntoProcessEnv?: unknown;
+  readonly migrateOhbabyData?: unknown;
 }
 
 interface ServerRuntimeModule {
@@ -223,6 +224,14 @@ async function loadDefaultDependencies(): Promise<RunOhbabyCliDependencies> {
     "loadRuntimeEnvIntoProcessEnv",
     AGENT_RUNTIME_MODULE,
   ) as () => Promise<void> | void;
+  const migrateOhbabyDataExport = optionalRuntimeExport(
+    runtimeModule as Record<string, unknown>,
+    "migrateOhbabyData",
+  );
+  const migrateOhbabyData =
+    typeof migrateOhbabyDataExport === "function"
+      ? (migrateOhbabyDataExport as () => Promise<void> | void)
+      : undefined;
 
   let serverRuntimePromise: Promise<ServerRuntimeModule> | undefined;
   const loadServerRuntimeModule = (): Promise<ServerRuntimeModule> => {
@@ -252,6 +261,9 @@ async function loadDefaultDependencies(): Promise<RunOhbabyCliDependencies> {
           remoteOptions: RemoteDaemonClientOptions,
         ) => CliCoreHost | Promise<CliCoreHost>;
         return createRemoteCoreApiHost(remoteOptions);
+      }
+      if (migrateOhbabyData !== undefined) {
+        await migrateOhbabyData();
       }
       return buildCoreAPIImpl(options);
     },

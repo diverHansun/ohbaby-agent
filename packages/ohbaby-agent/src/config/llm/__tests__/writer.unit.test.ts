@@ -77,7 +77,7 @@ describe("setActiveLLMConfig", () => {
       apiKey: "sk-secret",
       temperature: 0.2,
       maxTokens: 2048,
-      modelJsonPath: "D:/repo/.ohbaby-agent/model.json",
+      modelJsonPath: "D:/repo/.ohbaby/model.json",
       envPath: "D:/repo/.env",
     });
 
@@ -111,7 +111,7 @@ describe("setActiveLLMConfig", () => {
       baseUrl: "https://open.bigmodel.cn/api/paas/v4",
       apiKeyEnv: "ZHIPU_API_KEY",
       interfaceProvider: "openai-compatible",
-      modelJsonPath: "D:/repo/.ohbaby-agent/model.json",
+      modelJsonPath: "D:/repo/.ohbaby/model.json",
       envPath: "D:/repo/.env",
     });
     expect(JSON.stringify(result)).not.toContain("sk-secret");
@@ -126,7 +126,7 @@ describe("setActiveLLMConfig", () => {
       provider: "lmstudio",
       model: "local-model",
       baseUrl: "http://127.0.0.1:1234/v1",
-      modelJsonPath: "D:/repo/.ohbaby-agent/model.json",
+      modelJsonPath: "D:/repo/.ohbaby/model.json",
     });
 
     const modelJsonWrite = findWriteCall((file) => file.includes("model.json"));
@@ -142,7 +142,7 @@ describe("setActiveLLMConfig", () => {
       model: "local-model",
       baseUrl: "http://127.0.0.1:1234/v1",
       interfaceProvider: "openai-compatible",
-      modelJsonPath: "D:/repo/.ohbaby-agent/model.json",
+      modelJsonPath: "D:/repo/.ohbaby/model.json",
     });
   });
 
@@ -183,7 +183,7 @@ describe("setActiveLLMConfig", () => {
       model: "qwen-plus",
       baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
       apiKeyEnv: "DASHSCOPE_API_KEY",
-      modelJsonPath: "D:/repo/.ohbaby-agent/model.json",
+      modelJsonPath: "D:/repo/.ohbaby/model.json",
       envPath: "D:/repo/.env",
     });
 
@@ -243,7 +243,7 @@ describe("setActiveLLMConfig", () => {
       maxOutputTokens: 8192,
       maxTokens: 8192,
       updateActiveModelProfile: true,
-      modelJsonPath: "D:/repo/.ohbaby-agent/model.json",
+      modelJsonPath: "D:/repo/.ohbaby/model.json",
     });
 
     const modelJsonWrite = findWriteCall((file) => file.includes("model.json"));
@@ -309,7 +309,7 @@ describe("setActiveLLMConfig", () => {
       baseUrl: "https://example.com/v1",
       apiKeyEnv: "CUSTOM_API_KEY",
       clearContextWindowTokens: true,
-      modelJsonPath: "D:/repo/.ohbaby-agent/model.json",
+      modelJsonPath: "D:/repo/.ohbaby/model.json",
     });
 
     const modelJsonWrite = findWriteCall((file) => file.includes("model.json"));

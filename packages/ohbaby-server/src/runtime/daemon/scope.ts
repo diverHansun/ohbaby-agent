@@ -1,7 +1,6 @@
 import { realpath } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { Project } from "ohbaby-agent";
+import { Project, resolveOhbabyHome } from "ohbaby-agent";
 
 export interface DaemonScope {
   readonly legacyPidFilePath: string;
@@ -24,18 +23,35 @@ async function canonicalDirectory(path: string): Promise<string> {
   }
 }
 
+async function canonicalPath(inputPath: string): Promise<string> {
+  const missingSegments: string[] = [];
+  let candidate = resolve(inputPath);
+  for (;;) {
+    try {
+      return join(await realpath(candidate), ...missingSegments.reverse());
+    } catch {
+      const parent = resolve(candidate, "..");
+      if (parent === candidate) {
+        return resolve(inputPath);
+      }
+      missingSegments.push(candidate.slice(parent.length + 1));
+      candidate = parent;
+    }
+  }
+}
+
 export async function resolveDaemonScope(
   options: ResolveDaemonScopeOptions = {},
 ): Promise<DaemonScope> {
   const workdir = await canonicalDirectory(options.workdir ?? process.cwd());
-  const homeDirectory = await canonicalDirectory(
-    options.homeDirectory ?? homedir(),
-  );
   const projectRoot = await Project.getProjectRoot(workdir);
   const scopeRoot = projectRoot
     ? await canonicalDirectory(projectRoot)
     : workdir;
-  const serverDir = join(homeDirectory, ".ohbaby", "server");
+  const configHome = await canonicalPath(
+    resolveOhbabyHome({ homeDirectory: options.homeDirectory }),
+  );
+  const serverDir = join(configHome, "server");
   const legacyServerDir = join(scopeRoot, ".ohbaby", "server");
 
   return {

@@ -14,7 +14,7 @@ describe("custom instruction loader service", () => {
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-prompt-"));
     projectPath = path.join(tempDir, "repo", "OHBABY.md");
-    globalPath = path.join(tempDir, "home", ".ohbaby-agent", "OHBABY.md");
+    globalPath = path.join(tempDir, "home", ".ohbaby", "OHBABY.md");
   });
 
   afterEach(async () => {
@@ -41,11 +41,11 @@ describe("custom instruction loader service", () => {
     expect(onSecurityFinding).not.toHaveBeenCalled();
   });
 
-  it("falls back to .ohbaby-agent/OHBABY.md when project root instructions are absent", async () => {
+  it("falls back to .ohbaby/OHBABY.md when project root instructions are absent", async () => {
     const projectDirectory = path.join(tempDir, "repo");
     const configProjectPath = path.join(
       projectDirectory,
-      ".ohbaby-agent",
+      ".ohbaby",
       "OHBABY.md",
     );
     await fs.mkdir(path.dirname(configProjectPath), { recursive: true });
@@ -62,12 +62,7 @@ describe("custom instruction loader service", () => {
   it("uses AGENTS.md and CLAUDE.md as lower priority fallbacks", async () => {
     const projectDirectory = path.join(tempDir, "repo");
     const projectAgentsPath = path.join(projectDirectory, "AGENTS.md");
-    const globalClaudePath = path.join(
-      tempDir,
-      "home",
-      ".ohbaby-agent",
-      "CLAUDE.md",
-    );
+    const globalClaudePath = path.join(tempDir, "home", ".ohbaby", "CLAUDE.md");
     await fs.mkdir(projectDirectory, { recursive: true });
     await fs.mkdir(path.dirname(globalClaudePath), { recursive: true });
     await fs.writeFile(projectAgentsPath, "# Agents", "utf8");

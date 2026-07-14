@@ -414,7 +414,7 @@ function sanitizeError(error: unknown, secret?: string): string {
 
 function formatEnvPath(envPath: string): string {
   const normalized = envPath.replace(/\\/gu, "/");
-  const marker = ".ohbaby-agent/";
+  const marker = ".ohbaby/";
   const index = normalized.lastIndexOf(marker);
   return index === -1 ? normalized : `~/${normalized.slice(index)}`;
 }

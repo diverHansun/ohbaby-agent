@@ -39,12 +39,12 @@ describe("SkillLoader", () => {
       XDG_CONFIG_HOME: xdgConfigDirectory,
     });
 
-    expect(directory).toBe(path.join(homeDirectory, ".ohbaby-agent", "skill"));
+    expect(directory).toBe(path.join(homeDirectory, ".ohbaby", "skill"));
   });
 
   it("discovers SKILL.md directories, applies defaults, and lets project skills override user skills", async () => {
     const userDir = path.join(tempDir, "user", "skill");
-    const projectDir = path.join(tempDir, "project", ".ohbaby-agent", "skill");
+    const projectDir = path.join(tempDir, "project", ".ohbaby", "skill");
     await writeFile(
       path.join(userDir, "review", "SKILL.md"),
       skillFile("name: code-review\ndescription: User review guidance"),
@@ -102,7 +102,7 @@ describe("SkillLoader", () => {
   });
 
   it("skips invalid files without stopping the scan", async () => {
-    const skillDir = path.join(tempDir, "project", ".ohbaby-agent", "skill");
+    const skillDir = path.join(tempDir, "project", ".ohbaby", "skill");
     await writeFile(
       path.join(skillDir, "valid", "SKILL.md"),
       skillFile("name: valid-skill\ndescription: A valid skill"),
@@ -137,7 +137,7 @@ describe("SkillLoader", () => {
   });
 
   it("requires non-empty markdown instructions after frontmatter", async () => {
-    const skillDir = path.join(tempDir, "project", ".ohbaby-agent", "skill");
+    const skillDir = path.join(tempDir, "project", ".ohbaby", "skill");
     await writeFile(
       path.join(skillDir, "empty", "SKILL.md"),
       skillFile("name: empty-skill\ndescription: Empty body", "   \n\t"),
@@ -160,7 +160,7 @@ describe("SkillLoader", () => {
   });
 
   it("preserves standard metadata and warns about invalid optional fields without skipping", async () => {
-    const skillDir = path.join(tempDir, "project", ".ohbaby-agent", "skill");
+    const skillDir = path.join(tempDir, "project", ".ohbaby", "skill");
     await writeFile(
       path.join(skillDir, "standard", "SKILL.md"),
       skillFile(`name: standard-skill
@@ -237,13 +237,7 @@ metadata: wrong`),
       skillFile("name: agent-skill\ndescription: Agents compatible skill"),
     );
     await writeFile(
-      path.join(
-        projectRoot,
-        ".ohbaby-agent",
-        "skills",
-        "native-skill",
-        "SKILL.md",
-      ),
+      path.join(projectRoot, ".ohbaby", "skills", "native-skill", "SKILL.md"),
       skillFile("name: native-skill\ndescription: Native plural skill"),
     );
     await writeFile(
@@ -251,7 +245,7 @@ metadata: wrong`),
       skillFile("name: shared-skill\ndescription: Codex shared"),
     );
     await writeFile(
-      path.join(projectRoot, ".ohbaby-agent", "skill", "shared", "SKILL.md"),
+      path.join(projectRoot, ".ohbaby", "skill", "shared", "SKILL.md"),
       skillFile("name: shared-skill\ndescription: Project native shared"),
     );
 
@@ -292,7 +286,7 @@ metadata: wrong`),
   });
 
   it("loads markdown content and lists non-hidden helper files with portable paths", async () => {
-    const skillDir = path.join(tempDir, "project", ".ohbaby-agent", "skill");
+    const skillDir = path.join(tempDir, "project", ".ohbaby", "skill");
     const baseDir = path.join(skillDir, "xlsx");
     await writeFile(
       path.join(baseDir, "SKILL.md"),
@@ -318,7 +312,7 @@ metadata: wrong`),
   });
 
   it("reads helper resources only from inside the skill directory", async () => {
-    const skillDir = path.join(tempDir, "project", ".ohbaby-agent", "skill");
+    const skillDir = path.join(tempDir, "project", ".ohbaby", "skill");
     const baseDir = path.join(skillDir, "docs");
     await writeFile(
       path.join(baseDir, "SKILL.md"),
@@ -372,7 +366,7 @@ metadata: wrong`),
   });
 
   it("does not follow symlinked directories while discovering skills", async () => {
-    const skillDir = path.join(tempDir, "project", ".ohbaby-agent", "skill");
+    const skillDir = path.join(tempDir, "project", ".ohbaby", "skill");
     const externalDir = path.join(tempDir, "outside-skill");
     await writeFile(
       path.join(externalDir, "SKILL.md"),

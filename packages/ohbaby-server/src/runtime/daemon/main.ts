@@ -592,6 +592,15 @@ export async function startDaemonServer(
     return running;
   }
 
+  if ("migrateOhbabyData" in AgentRuntime) {
+    await AgentRuntime.migrateOhbabyData({
+      ...(options.homeDirectory === undefined
+        ? {}
+        : { homeDirectory: options.homeDirectory }),
+      projectDirectory: scope.scopeRoot,
+    });
+  }
+
   const firstPort =
     explicitPort || (await isPortAvailable(requestedHost, requestedPort))
       ? requestedPort

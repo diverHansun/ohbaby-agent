@@ -13,7 +13,7 @@ describe("buildCoreAPIImpl", () => {
         envPath: "D:/repo/.env",
         interfaceProvider: "anthropic" as const,
         model: "anthropic/claude-sonnet-4.6",
-        modelJsonPath: "D:/home/.ohbaby-agent/model.json",
+        modelJsonPath: "D:/home/.ohbaby/model.json",
         provider: "zenmux",
         saved: true as const,
       }),

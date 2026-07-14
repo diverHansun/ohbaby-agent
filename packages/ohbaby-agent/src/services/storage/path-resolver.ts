@@ -1,35 +1,14 @@
 import { mkdir } from "node:fs/promises";
-import { homedir, platform } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { resolveOhbabyDataRoot } from "../../paths/index.js";
 import { InvalidStorageKeyError } from "./errors.js";
 import type { StorageKey } from "./types.js";
-
-const APP_DIR_NAME = "ohbaby-agent";
 
 function defaultStorageRoot(): string {
   if (process.env.OHBABY_STORAGE_ROOT) {
     return process.env.OHBABY_STORAGE_ROOT;
   }
-  if (process.env.XDG_DATA_HOME) {
-    return join(process.env.XDG_DATA_HOME, APP_DIR_NAME, "storage");
-  }
-  if (platform() === "darwin") {
-    return join(
-      homedir(),
-      "Library",
-      "Application Support",
-      APP_DIR_NAME,
-      "storage",
-    );
-  }
-  if (platform() === "win32") {
-    return join(
-      process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"),
-      APP_DIR_NAME,
-      "storage",
-    );
-  }
-  return join(homedir(), ".local", "share", APP_DIR_NAME, "storage");
+  return join(resolveOhbabyDataRoot(), "storage");
 }
 
 export class PathResolver {

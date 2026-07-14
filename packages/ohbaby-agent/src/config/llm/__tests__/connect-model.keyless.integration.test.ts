@@ -178,13 +178,8 @@ describe("connectModel keyless local endpoint integration", () => {
   it("saves, reloads, and streams without apiKeyEnv or apiKey", async () => {
     const server = await startKeylessOpenAiServer();
     const projectRoot = await tempProjectRoot();
-    const modelJsonPath = join(
-      projectRoot,
-      "home",
-      ".ohbaby-agent",
-      "model.json",
-    );
-    const envPath = join(projectRoot, "home", ".ohbaby-agent", ".env");
+    const modelJsonPath = join(projectRoot, "home", ".ohbaby", "model.json");
+    const envPath = join(projectRoot, "home", ".ohbaby", ".env");
 
     try {
       const result = await applyActiveModelConfig({

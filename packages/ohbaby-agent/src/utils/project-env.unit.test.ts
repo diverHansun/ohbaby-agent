@@ -24,7 +24,7 @@ describe("project env loading", () => {
 
   it("resolves global and project .env paths", () => {
     expect(getGlobalEnvPath("D:/home")).toBe(
-      path.join("D:/home", ".ohbaby-agent", ".env"),
+      path.join("D:/home", ".ohbaby", ".env"),
     );
     expect(getProjectEnvPath("D:/repo")).toBe(path.join("D:/repo", ".env"));
   });
@@ -33,13 +33,13 @@ describe("project env loading", () => {
     const homeDirectory = path.join(tempRoot, "home");
     const repoRoot = path.join(tempRoot, "repo");
     const childDirectory = path.join(repoRoot, "packages", "app");
-    await fs.mkdir(path.join(homeDirectory, ".ohbaby-agent"), {
+    await fs.mkdir(path.join(homeDirectory, ".ohbaby"), {
       recursive: true,
     });
     await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
     await fs.mkdir(childDirectory, { recursive: true });
     await fs.writeFile(
-      path.join(homeDirectory, ".ohbaby-agent", ".env"),
+      path.join(homeDirectory, ".ohbaby", ".env"),
       [
         "GLOBAL_ONLY=from-global",
         "PROJECT_OVERRIDE=from-global",
@@ -66,7 +66,7 @@ describe("project env loading", () => {
     });
 
     expect(result).toEqual({
-      globalEnvPath: path.join(homeDirectory, ".ohbaby-agent", ".env"),
+      globalEnvPath: path.join(homeDirectory, ".ohbaby", ".env"),
       projectEnvPath: path.join(repoRoot, ".env"),
       projectRoot: repoRoot,
     });
@@ -74,5 +74,41 @@ describe("project env loading", () => {
     expect(process.env.PROJECT_ONLY).toBe("from-project");
     expect(process.env.PROJECT_OVERRIDE).toBe("from-project");
     expect(process.env.SHELL_KEY).toBe("from-shell");
+  });
+
+  it("migrates legacy global and project configuration before loading global env", async () => {
+    const homeDirectory = path.join(tempRoot, "migration-home");
+    const repoRoot = path.join(tempRoot, "migration-repo");
+    await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
+    await fs.mkdir(path.join(homeDirectory, ".ohbaby-agent"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(homeDirectory, ".ohbaby-agent", ".env"),
+      "MIGRATED_GLOBAL_ENV=yes\n",
+      "utf8",
+    );
+    await fs.mkdir(path.join(repoRoot, ".ohbaby-agent", "mcp"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(repoRoot, ".ohbaby-agent", "mcp", "settings.json"),
+      '{"mcpServers":{}}\n',
+      "utf8",
+    );
+    delete process.env.MIGRATED_GLOBAL_ENV;
+
+    await loadRuntimeEnvIntoProcessEnv({
+      homeDirectory,
+      projectDirectory: repoRoot,
+    });
+
+    expect(process.env.MIGRATED_GLOBAL_ENV).toBe("yes");
+    await expect(
+      fs.access(path.join(homeDirectory, ".ohbaby", ".env")),
+    ).resolves.toBeUndefined();
+    await expect(
+      fs.access(path.join(repoRoot, ".ohbaby", "mcp", "settings.json")),
+    ).resolves.toBeUndefined();
   });
 });

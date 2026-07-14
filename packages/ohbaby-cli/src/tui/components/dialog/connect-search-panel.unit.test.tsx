@@ -27,9 +27,9 @@ describe("ConnectSearchPanel", () => {
     await until(() => (app.lastFrame() ?? "").includes("saving"));
     save.resolve({
       apiKeyEnv: "TAVILY_API_KEY",
-      envPath: "D:/home/.ohbaby-agent/.env",
+      envPath: "D:/home/.ohbaby/.env",
       provider: "tavily",
-      searchJsonPath: "D:/home/.ohbaby-agent/tools/search.json",
+      searchJsonPath: "D:/home/.ohbaby/tools/search.json",
     });
     await until(() => !(app.lastFrame() ?? "").includes("saving"));
 

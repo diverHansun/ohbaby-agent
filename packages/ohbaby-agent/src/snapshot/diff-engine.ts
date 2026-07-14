@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, mkdir } from "node:fs/promises";
-import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { resolveOhbabyDataRoot } from "../paths/index.js";
 import {
   GitCommandError,
   GitNotAvailableError,
@@ -16,7 +16,6 @@ import {
 } from "./types.js";
 
 const execFileAsync = promisify(execFile);
-const APP_DIR_NAME = "ohbaby-agent";
 const CORE_CONFIG = [
   "-c",
   "core.longpaths=true",
@@ -71,19 +70,7 @@ function defaultSnapshotRoot(): string {
   if (process.env.OHBABY_STORAGE_ROOT) {
     return dirname(resolve(process.env.OHBABY_STORAGE_ROOT));
   }
-  if (process.env.XDG_DATA_HOME) {
-    return join(process.env.XDG_DATA_HOME, APP_DIR_NAME);
-  }
-  if (platform() === "darwin") {
-    return join(homedir(), "Library", "Application Support", APP_DIR_NAME);
-  }
-  if (platform() === "win32") {
-    return join(
-      process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"),
-      APP_DIR_NAME,
-    );
-  }
-  return join(homedir(), ".local", "share", APP_DIR_NAME);
+  return resolveOhbabyDataRoot();
 }
 
 function workdirHash(workdir: string): string {
@@ -172,11 +159,7 @@ export class GitSnapshotEngine implements DiffEngine {
     return this.locked(state, async () => {
       const commit = await this.captureCommit(state, checkpoint.checkpointId);
       const files = await this.diffCommits(state, pre, commit);
-      await this.updateRef(
-        state,
-        postRef(checkpoint.checkpointId),
-        commit,
-      );
+      await this.updateRef(state, postRef(checkpoint.checkpointId), commit);
       return {
         files,
         summary: summarize(files),

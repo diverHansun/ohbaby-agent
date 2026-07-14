@@ -39,7 +39,8 @@ function spawnServe(input: {
     readonly message: string;
     readonly status: number;
   };
-  readonly dbPath: string;
+  readonly dataHome?: string;
+  readonly dbPath?: string;
   readonly homeDirectory: string;
   readonly workdir: string;
 }): ChildProcessWithoutNullStreams {
@@ -133,6 +134,9 @@ function spawnServe(input: {
   const child = spawn(process.execPath, ["--import", "tsx", "--eval", script], {
     env: {
       ...process.env,
+      ...(input.dataHome === undefined
+        ? {}
+        : { XDG_DATA_HOME: input.dataHome }),
       OHBABY_TEST_INPUT: JSON.stringify(input),
     },
     stdio: ["pipe", "pipe", "pipe"],
@@ -217,6 +221,48 @@ async function waitForStarted(path: string, count: number): Promise<void> {
 }
 
 describe("global single serve across real processes", () => {
+  it("migrates legacy platform data before a direct server start opens SQLite", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ohbaby-real-data-migrate-"));
+    cleanupDirectories.push(root);
+    const repo = join(root, "repo");
+    const dataHome = join(root, "data");
+    const legacyDataRoot = join(dataHome, "ohbaby-agent");
+    const legacyDatabasePath = join(legacyDataRoot, "ohbaby-agent.db");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await mkdir(legacyDataRoot, { recursive: true });
+    const legacyDatabase = new NodeSqliteConnection(legacyDatabasePath);
+    legacyDatabase.exec("CREATE TABLE migration_probe (value TEXT NOT NULL)");
+    legacyDatabase.exec(
+      "INSERT INTO migration_probe (value) VALUES ('preserved')",
+    );
+    legacyDatabase.close();
+
+    const child = spawnServe({
+      dataHome,
+      homeDirectory: join(root, "home"),
+      workdir: repo,
+    });
+    await waitForReady(child);
+
+    const migratedDatabase = new NodeSqliteConnection(
+      join(dataHome, "ohbaby", "ohbaby.db"),
+    );
+    try {
+      expect(
+        migratedDatabase
+          .prepare<{
+            readonly value: string;
+          }>("SELECT value FROM migration_probe")
+          .get()?.value,
+      ).toBe("preserved");
+    } finally {
+      migratedDatabase.close();
+    }
+    await expect(readFile(legacyDatabasePath)).resolves.toBeInstanceOf(Buffer);
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }, 20_000);
+
   it("reuses the first listener when started from another repository", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-real-global-serve-"));
     cleanupDirectories.push(root);

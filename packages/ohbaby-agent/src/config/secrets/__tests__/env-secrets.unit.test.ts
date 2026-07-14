@@ -10,7 +10,7 @@ describe("writeGlobalEnvSecret", () => {
 
   beforeEach(async () => {
     tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-secrets-"));
-    envPath = path.join(tempHome, ".ohbaby-agent", ".env");
+    envPath = path.join(tempHome, ".ohbaby", ".env");
   });
 
   afterEach(async () => {

@@ -1,6 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createBus } from "../../bus/index.js";
+import {
+  resolveLegacyGlobalMemoryPath,
+  resolveLegacyOhbabyHome,
+  resolveReadPathWithLegacy,
+} from "../../paths/index.js";
 import { MEMORY_FILENAME } from "./constants.js";
 import { MemoryEvent } from "./events.js";
 import {
@@ -98,7 +103,18 @@ export function createMemoryManager(
   const bus = options.bus ?? createBus();
   const projectResolver = options.projectResolver ?? FALLBACK_PROJECT_RESOLVER;
   const globalMemoryPath = options.globalMemoryPath ?? getGlobalMemoryPath();
+  const legacyGlobalMemoryPaths =
+    options.globalMemoryPath === undefined
+      ? [
+          path.join(resolveLegacyOhbabyHome(), MEMORY_FILENAME),
+          resolveLegacyGlobalMemoryPath(),
+        ]
+      : [];
   const now = options.now ?? ((): Date => new Date());
+
+  async function resolveGlobalReadPath(): Promise<string> {
+    return resolveReadPathWithLegacy(globalMemoryPath, legacyGlobalMemoryPaths);
+  }
 
   async function getProjectInfo(directory: string): Promise<ProjectInfo> {
     return projectResolver.fromDirectory(directory);
@@ -134,7 +150,7 @@ export function createMemoryManager(
     directory: string | undefined,
   ): Promise<string> {
     if (scope === "global") {
-      return readUtf8File(globalMemoryPath, options.onWarning);
+      return readUtf8File(await resolveGlobalReadPath(), options.onWarning);
     }
 
     const projectDirectory = requireProjectDirectory(scope, directory);
@@ -151,8 +167,9 @@ export function createMemoryManager(
         directory,
         project.rootPath,
       );
+      const globalReadPath = await resolveGlobalReadPath();
       const [globalContent, projectContent] = await Promise.all([
-        readUtf8File(globalMemoryPath, options.onWarning),
+        readUtf8File(globalReadPath, options.onWarning),
         readUtf8File(projectMemoryPath, options.onWarning),
       ]);
 
@@ -161,7 +178,7 @@ export function createMemoryManager(
         project: projectContent,
         merged: mergeMemory({
           globalContent,
-          globalPath: globalMemoryPath,
+          globalPath: globalReadPath,
           projectContent,
           projectPath: projectMemoryPath,
         }),
@@ -170,7 +187,10 @@ export function createMemoryManager(
 
     async add(input: AddMemoryInput): Promise<void> {
       const filePath = await resolveWritePath(input.scope, input.directory);
-      const currentContent = await readUtf8File(filePath, options.onWarning);
+      const currentContent = await readUtf8File(
+        input.scope === "global" ? await resolveGlobalReadPath() : filePath,
+        options.onWarning,
+      );
       await writeUtf8File(
         filePath,
         computeAddedMemoryContent(
@@ -187,7 +207,10 @@ export function createMemoryManager(
 
     async update(input: UpdateMemoryInput): Promise<void> {
       const filePath = await resolveWritePath(input.scope, input.directory);
-      const currentContent = await readUtf8File(filePath, options.onWarning);
+      const currentContent = await readUtf8File(
+        input.scope === "global" ? await resolveGlobalReadPath() : filePath,
+        options.onWarning,
+      );
       await writeUtf8File(
         filePath,
         updateMemoryEntry(currentContent, input.index, input.newText),
@@ -201,7 +224,10 @@ export function createMemoryManager(
 
     async remove(input: RemoveMemoryInput): Promise<void> {
       const filePath = await resolveWritePath(input.scope, input.directory);
-      const currentContent = await readUtf8File(filePath, options.onWarning);
+      const currentContent = await readUtf8File(
+        input.scope === "global" ? await resolveGlobalReadPath() : filePath,
+        options.onWarning,
+      );
       await writeUtf8File(
         filePath,
         removeMemoryEntry(currentContent, input.index),

@@ -30,7 +30,7 @@ export type {
 /**
  * Get LLM configuration.
  *
- * On first call, loads configuration from ~/.ohbaby-agent/model.json
+ * On first call, loads configuration from ~/.ohbaby/model.json
  * and reads API key from environment variable specified in the config.
  * Subsequent calls return cached configuration.
  *

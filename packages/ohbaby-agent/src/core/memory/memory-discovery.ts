@@ -1,15 +1,13 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-import { CONFIG_DIR_NAME, MEMORY_FILENAME } from "./constants.js";
+import {
+  resolveOhbabyHome,
+  type OhbabyPathOptions,
+} from "../../paths/index.js";
+import { MEMORY_FILENAME } from "./constants.js";
 
-export function getGlobalMemoryPath(): string {
-  const configRoot =
-    process.platform === "win32"
-      ? (process.env.APPDATA ?? os.homedir())
-      : (process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"));
-
-  return path.join(configRoot, CONFIG_DIR_NAME, MEMORY_FILENAME);
+export function getGlobalMemoryPath(options: OhbabyPathOptions = {}): string {
+  return path.join(resolveOhbabyHome(options), MEMORY_FILENAME);
 }
 
 export async function findProjectMemoryPath(

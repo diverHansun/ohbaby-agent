@@ -28,20 +28,8 @@ describe("config/mcp loaders", () => {
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-mcp-"));
-    globalPath = path.join(
-      tempDir,
-      "home",
-      ".ohbaby-agent",
-      "mcp",
-      "settings.json",
-    );
-    projectPath = path.join(
-      tempDir,
-      "repo",
-      ".ohbaby-agent",
-      "mcp",
-      "settings.json",
-    );
+    globalPath = path.join(tempDir, "home", ".ohbaby", "mcp", "settings.json");
+    projectPath = path.join(tempDir, "repo", ".ohbaby", "mcp", "settings.json");
   });
 
   afterEach(async () => {
@@ -50,10 +38,10 @@ describe("config/mcp loaders", () => {
 
   it("resolves default global and project settings.json paths", () => {
     expect(getGlobalMcpConfigPath("D:/home")).toBe(
-      path.join("D:/home", ".ohbaby-agent", "mcp", "settings.json"),
+      path.join("D:/home", ".ohbaby", "mcp", "settings.json"),
     );
     expect(getProjectMcpConfigPath("D:/repo")).toBe(
-      path.join("D:/repo", ".ohbaby-agent", "mcp", "settings.json"),
+      path.join("D:/repo", ".ohbaby", "mcp", "settings.json"),
     );
   });
 
@@ -134,6 +122,49 @@ describe("config/mcp loaders", () => {
         },
       },
     });
+  });
+
+  it("reads legacy global and project paths only when new paths are absent", async () => {
+    const homeDirectory = path.join(tempDir, "legacy-home");
+    const projectDirectory = path.join(tempDir, "legacy-project");
+    await writeJson(
+      path.join(homeDirectory, ".ohbaby-agent", "mcp", "settings.json"),
+      {
+        mcpServers: {
+          legacyGlobal: { command: "legacy-global" },
+        },
+      },
+    );
+    await writeJson(
+      path.join(projectDirectory, ".ohbaby-agent", "mcp", "settings.json"),
+      {
+        mcpServers: {
+          legacyProject: { command: "legacy-project" },
+        },
+      },
+    );
+
+    await expect(
+      loadMcpConfig({ homeDirectory, projectDirectory }),
+    ).resolves.toMatchObject({
+      mcpServers: {
+        legacyGlobal: { command: "legacy-global" },
+        legacyProject: { command: "legacy-project" },
+      },
+    });
+
+    await writeJson(
+      path.join(homeDirectory, ".ohbaby", "mcp", "settings.json"),
+      {
+        mcpServers: {
+          newGlobal: { command: "new-global" },
+        },
+      },
+    );
+    const config = await loadMcpConfig({ homeDirectory, projectDirectory });
+    expect(config.mcpServers.newGlobal).toBeDefined();
+    expect(config.mcpServers.legacyGlobal).toBeUndefined();
+    expect(config.mcpServers.legacyProject).toBeDefined();
   });
 
   it("exposes full replacement merge as a pure helper", () => {

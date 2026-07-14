@@ -1,6 +1,13 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
+import {
+  OHBABY_DIR_NAME,
+  resolveLegacyGlobalMemoryPath,
+  resolveLegacyOhbabyHome,
+  resolveLegacyProjectOhbabyRoot,
+  resolveOhbabyHome,
+  resolveProjectOhbabyRoot,
+} from "../../../paths/index.js";
 
 import {
   scanPromptLikeContent,
@@ -18,8 +25,8 @@ export const CUSTOM_INSTRUCTIONS_FALLBACK_FILE_NAMES = [
   "AGENTS.md",
   "CLAUDE.md",
 ] as const;
-export const PROJECT_CUSTOM_CONFIG_DIR = ".ohbaby-agent";
-export const GLOBAL_CUSTOM_CONFIG_DIR = ".ohbaby-agent";
+export const PROJECT_CUSTOM_CONFIG_DIR = OHBABY_DIR_NAME;
+export const GLOBAL_CUSTOM_CONFIG_DIR = OHBABY_DIR_NAME;
 export const MAX_CUSTOM_INSTRUCTION_CHARS = 50 * 1024;
 
 export interface CustomInstructionLoadOptions {
@@ -54,18 +61,16 @@ export function getProjectConfigCustomInstructionsPath(
   projectDirectory = process.cwd(),
 ): string {
   return path.join(
-    projectDirectory,
-    PROJECT_CUSTOM_CONFIG_DIR,
+    resolveProjectOhbabyRoot(projectDirectory),
     CUSTOM_INSTRUCTIONS_FILE_NAME,
   );
 }
 
 export function getGlobalCustomInstructionsPath(
-  homeDirectory = os.homedir(),
+  homeDirectory?: string,
 ): string {
   return path.join(
-    homeDirectory,
-    GLOBAL_CUSTOM_CONFIG_DIR,
+    resolveOhbabyHome({ homeDirectory }),
     CUSTOM_INSTRUCTIONS_FILE_NAME,
   );
 }
@@ -153,7 +158,12 @@ async function loadProjectInstructions(
   }
 
   return readFirstInstructionFile(
-    getCandidatePaths(path.join(projectDirectory, PROJECT_CUSTOM_CONFIG_DIR)),
+    [
+      ...getCandidatePaths(
+        path.join(projectDirectory, PROJECT_CUSTOM_CONFIG_DIR),
+      ),
+      ...getCandidatePaths(resolveLegacyProjectOhbabyRoot(projectDirectory)),
+    ],
     options,
   );
 }
@@ -167,9 +177,25 @@ export async function loadCustomInstructions(
   const globalPaths =
     options.globalPath !== undefined
       ? [globalPath]
-      : getCandidatePaths(
-          path.dirname(getGlobalCustomInstructionsPath(options.homeDirectory)),
-        );
+      : [
+          ...getCandidatePaths(
+            path.dirname(
+              getGlobalCustomInstructionsPath(options.homeDirectory),
+            ),
+          ),
+          ...getCandidatePaths(
+            resolveLegacyOhbabyHome({
+              ...(options.homeDirectory === undefined
+                ? {}
+                : { homeDirectory: options.homeDirectory }),
+            }),
+          ),
+          resolveLegacyGlobalMemoryPath({
+            ...(options.homeDirectory === undefined
+              ? {}
+              : { homeDirectory: options.homeDirectory }),
+          }),
+        ];
   const instructions = await Promise.all([
     loadProjectInstructions(options),
     readFirstInstructionFile(globalPaths, options),

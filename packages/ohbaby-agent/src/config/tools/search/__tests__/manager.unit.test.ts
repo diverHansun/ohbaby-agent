@@ -23,7 +23,7 @@ describe("SearchConfigManager", () => {
   beforeEach(async () => {
     SearchConfigManager.resetInstance();
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-search-"));
-    searchJsonPath = path.join(tempDir, ".ohbaby-agent", "tools", "search.json");
+    searchJsonPath = path.join(tempDir, ".ohbaby", "tools", "search.json");
     env = { TAVILY_API_KEY: "tvly-test-key" };
   });
 

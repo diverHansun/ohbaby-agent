@@ -867,11 +867,11 @@ describe("createUiRuntimeComposition skill tools", () => {
       ].join("\n"),
       "utf8",
     );
-    await mkdir(path.join(workdir, ".ohbaby-agent", "skill", "configured"), {
+    await mkdir(path.join(workdir, ".ohbaby", "skill", "configured"), {
       recursive: true,
     });
     await writeFile(
-      path.join(workdir, ".ohbaby-agent", "skill", "configured", "SKILL.md"),
+      path.join(workdir, ".ohbaby", "skill", "configured", "SKILL.md"),
       [
         "---",
         "name: configured-skill",
@@ -883,11 +883,11 @@ describe("createUiRuntimeComposition skill tools", () => {
       ].join("\n"),
       "utf8",
     );
-    await mkdir(path.join(workdir, ".ohbaby-agent", "skills"), {
+    await mkdir(path.join(workdir, ".ohbaby", "skills"), {
       recursive: true,
     });
     await writeFile(
-      path.join(workdir, ".ohbaby-agent", "skills", "settings.json"),
+      path.join(workdir, ".ohbaby", "skills", "settings.json"),
       JSON.stringify({
         directories: [
           {

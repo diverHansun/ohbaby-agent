@@ -66,11 +66,13 @@ describe("runOhbabyCli", () => {
       dispose,
     }));
     const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
+    const migrateOhbabyData = vi.fn(() => Promise.resolve());
     const waitUntilExit = vi.fn(() => Promise.resolve());
     const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
     vi.doMock("ohbaby-agent", () => ({
       buildCoreAPIImpl,
       loadRuntimeEnvIntoProcessEnv,
+      migrateOhbabyData,
     }));
     vi.doMock("ohbaby-server", () => {
       throw new Error(
@@ -85,6 +87,12 @@ describe("runOhbabyCli", () => {
 
     await expect(runOhbabyCli(["node", "ohbaby"])).resolves.toBe(0);
     expect(loadRuntimeEnvIntoProcessEnv).toHaveBeenCalledTimes(1);
+    expect(migrateOhbabyData).toHaveBeenCalledTimes(1);
+    expect(
+      migrateOhbabyData.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(
+      buildCoreAPIImpl.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
     expect(buildCoreAPIImpl).toHaveBeenCalledWith({
       inProcess: true,
     });

@@ -2,6 +2,14 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  OHBABY_DIR_NAME,
+  resolveLegacyOhbabyHome,
+  resolveLegacyProjectOhbabyRoot,
+  resolveOhbabyHome,
+  resolveProjectOhbabyRoot,
+  resolveReadPathWithLegacy,
+} from "../../paths/index.js";
+import {
   SkillConfigAccessError,
   SkillConfigParseError,
   SkillConfigSchema,
@@ -9,7 +17,7 @@ import {
 } from "./types.js";
 import type { SkillConfig, SkillDirectoryConfig } from "./types.js";
 
-export const OHBABY_CONFIG_DIR_NAME = ".ohbaby-agent";
+export const OHBABY_CONFIG_DIR_NAME = OHBABY_DIR_NAME;
 export const SKILL_CONFIG_DIR_NAME = "skills";
 export const SKILL_CONFIG_FILE_NAME = "settings.json";
 export const SKILL_DIR_NAME = "skill";
@@ -44,8 +52,7 @@ export interface LoadSkillConfigFromPathOptions {
   readonly relativeDirectoryBase?: string;
 }
 
-export interface LoadSkillConfigLenientOptions
-  extends LoadSkillConfigOptions {
+export interface LoadSkillConfigLenientOptions extends LoadSkillConfigOptions {
   readonly onWarning?: (
     error:
       | SkillConfigAccessError
@@ -54,12 +61,9 @@ export interface LoadSkillConfigLenientOptions
   ) => void;
 }
 
-export function getGlobalSkillConfigPath(
-  homeDirectory = os.homedir(),
-): string {
+export function getGlobalSkillConfigPath(homeDirectory?: string): string {
   return path.join(
-    homeDirectory,
-    OHBABY_CONFIG_DIR_NAME,
+    resolveOhbabyHome({ homeDirectory }),
     SKILL_CONFIG_DIR_NAME,
     SKILL_CONFIG_FILE_NAME,
   );
@@ -69,32 +73,58 @@ export function getProjectSkillConfigPath(
   projectDirectory = process.cwd(),
 ): string {
   return path.join(
-    projectDirectory,
-    OHBABY_CONFIG_DIR_NAME,
+    resolveProjectOhbabyRoot(projectDirectory),
+    SKILL_CONFIG_DIR_NAME,
+    SKILL_CONFIG_FILE_NAME,
+  );
+}
+
+function getLegacyGlobalSkillConfigPath(homeDirectory?: string): string {
+  return path.join(
+    resolveLegacyOhbabyHome({ homeDirectory }),
+    SKILL_CONFIG_DIR_NAME,
+    SKILL_CONFIG_FILE_NAME,
+  );
+}
+
+function getLegacyProjectSkillConfigPath(
+  projectDirectory = process.cwd(),
+): string {
+  return path.join(
+    resolveLegacyProjectOhbabyRoot(projectDirectory),
     SKILL_CONFIG_DIR_NAME,
     SKILL_CONFIG_FILE_NAME,
   );
 }
 
 export function getGlobalSkillDirectory(
-  homeDirectory = os.homedir(),
-  _environment?: Readonly<Record<string, string | undefined>>,
+  homeDirectory?: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
 ): string {
-  return path.join(homeDirectory, OHBABY_CONFIG_DIR_NAME, SKILL_DIR_NAME);
+  return path.join(
+    resolveOhbabyHome({ environment, homeDirectory }),
+    SKILL_DIR_NAME,
+  );
 }
 
-function getGlobalSkillsDirectory(homeDirectory = os.homedir()): string {
-  return path.join(homeDirectory, OHBABY_CONFIG_DIR_NAME, SKILLS_DIR_NAME);
+function getGlobalSkillsDirectory(
+  homeDirectory?: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  return path.join(
+    resolveOhbabyHome({ environment, homeDirectory }),
+    SKILLS_DIR_NAME,
+  );
 }
 
 export function getProjectSkillDirectory(
   projectDirectory = process.cwd(),
 ): string {
-  return path.join(projectDirectory, OHBABY_CONFIG_DIR_NAME, SKILL_DIR_NAME);
+  return path.join(resolveProjectOhbabyRoot(projectDirectory), SKILL_DIR_NAME);
 }
 
 function getProjectSkillsDirectory(projectDirectory = process.cwd()): string {
-  return path.join(projectDirectory, OHBABY_CONFIG_DIR_NAME, SKILLS_DIR_NAME);
+  return path.join(resolveProjectOhbabyRoot(projectDirectory), SKILLS_DIR_NAME);
 }
 
 function getCodexHomeSkillsDirectory(
@@ -138,13 +168,13 @@ export function getDefaultSkillDirectories(
       source: "agents-compatible",
     },
     {
-      path: getGlobalSkillsDirectory(homeDirectory),
+      path: getGlobalSkillsDirectory(input.homeDirectory, environment),
       priority: PRIORITY["user-native"],
       scope: "user",
       source: "user-native",
     },
     {
-      path: getGlobalSkillDirectory(homeDirectory),
+      path: getGlobalSkillDirectory(input.homeDirectory, environment),
       priority: PRIORITY["user-native"],
       scope: "user",
       source: "user-native",
@@ -268,9 +298,17 @@ export async function loadSkillConfig(
   options: LoadSkillConfigOptions = {},
 ): Promise<SkillConfig> {
   const globalPath =
-    options.globalPath ?? getGlobalSkillConfigPath(options.homeDirectory);
+    options.globalPath ??
+    (await resolveReadPathWithLegacy(
+      getGlobalSkillConfigPath(options.homeDirectory),
+      [getLegacyGlobalSkillConfigPath(options.homeDirectory)],
+    ));
   const projectPath =
-    options.projectPath ?? getProjectSkillConfigPath(options.projectDirectory);
+    options.projectPath ??
+    (await resolveReadPathWithLegacy(
+      getProjectSkillConfigPath(options.projectDirectory),
+      [getLegacyProjectSkillConfigPath(options.projectDirectory)],
+    ));
   const [globalConfig, projectConfig] = await Promise.all([
     loadSkillConfigFromPath(globalPath, {
       defaultDirectoryPriority: GLOBAL_SKILL_CONFIG_DIRECTORY_PRIORITY,
@@ -308,9 +346,17 @@ export async function loadSkillConfigLenient(
   options: LoadSkillConfigLenientOptions = {},
 ): Promise<SkillConfig> {
   const globalPath =
-    options.globalPath ?? getGlobalSkillConfigPath(options.homeDirectory);
+    options.globalPath ??
+    (await resolveReadPathWithLegacy(
+      getGlobalSkillConfigPath(options.homeDirectory),
+      [getLegacyGlobalSkillConfigPath(options.homeDirectory)],
+    ));
   const projectPath =
-    options.projectPath ?? getProjectSkillConfigPath(options.projectDirectory);
+    options.projectPath ??
+    (await resolveReadPathWithLegacy(
+      getProjectSkillConfigPath(options.projectDirectory),
+      [getLegacyProjectSkillConfigPath(options.projectDirectory)],
+    ));
   const [globalConfig, projectConfig] = await Promise.all([
     loadSkillConfigFromPathLenient(globalPath, {
       defaultDirectoryPriority: GLOBAL_SKILL_CONFIG_DIRECTORY_PRIORITY,

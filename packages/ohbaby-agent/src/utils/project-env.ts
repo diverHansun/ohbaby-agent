@@ -1,9 +1,10 @@
 import path from "node:path";
-import os from "node:os";
 import { config as loadDotenv } from "dotenv";
+import { migrateOhbabyConfig } from "../migration/index.js";
+import { OHBABY_DIR_NAME, resolveOhbabyHome } from "../paths/index.js";
 import { Project } from "../project/index.js";
 
-export const OHBABY_CONFIG_DIR_NAME = ".ohbaby-agent";
+export const OHBABY_CONFIG_DIR_NAME = OHBABY_DIR_NAME;
 export const ENV_FILE_NAME = ".env";
 
 export interface LoadRuntimeEnvOptions {
@@ -17,8 +18,8 @@ export interface LoadRuntimeEnvResult {
   readonly projectRoot: string;
 }
 
-export function getGlobalEnvPath(homeDirectory = os.homedir()): string {
-  return path.join(homeDirectory, OHBABY_CONFIG_DIR_NAME, ENV_FILE_NAME);
+export function getGlobalEnvPath(homeDirectory?: string): string {
+  return path.join(resolveOhbabyHome({ homeDirectory }), ENV_FILE_NAME);
 }
 
 export function getProjectEnvPath(projectDirectory = process.cwd()): string {
@@ -33,9 +34,15 @@ export async function loadRuntimeEnvIntoProcessEnv(
     (await Project.getProjectRoot(projectDirectory)) ??
     path.resolve(projectDirectory);
   const projectEnvPath = getProjectEnvPath(projectRoot);
-  const globalEnvPath = getGlobalEnvPath(options.homeDirectory);
 
   loadDotenv({ path: projectEnvPath, override: false });
+  await migrateOhbabyConfig({
+    ...(options.homeDirectory === undefined
+      ? {}
+      : { homeDirectory: options.homeDirectory }),
+    projectDirectory: projectRoot,
+  });
+  const globalEnvPath = getGlobalEnvPath(options.homeDirectory);
   loadDotenv({ path: globalEnvPath, override: false });
 
   return { globalEnvPath, projectEnvPath, projectRoot };

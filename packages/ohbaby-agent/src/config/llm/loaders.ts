@@ -5,13 +5,15 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import * as os from "node:os";
+import {
+  resolveLegacyOhbabyHome,
+  resolveOhbabyHome,
+  resolveReadPathWithLegacy,
+} from "../../paths/index.js";
 import { ConfigError } from "./types.js";
 import { parseEnvFile } from "./env-file.js";
 
 /** Directory name for ohbaby-agent configuration */
-const CONFIG_DIR_NAME = ".ohbaby-agent";
-
 /** Configuration file name */
 const MODEL_JSON_NAME = "model.json";
 
@@ -21,11 +23,14 @@ export interface LoadModelJsonOptions {
 
 /**
  * Get the path to the global model.json configuration file.
- * Location: ~/.ohbaby-agent/model.json
+ * Location: ~/.ohbaby/model.json
  */
-export function getModelJsonPath(): string {
-  const homeDir = os.homedir();
-  return path.join(homeDir, CONFIG_DIR_NAME, MODEL_JSON_NAME);
+export function getModelJsonPath(homeDirectory?: string): string {
+  return path.join(resolveOhbabyHome({ homeDirectory }), MODEL_JSON_NAME);
+}
+
+function getLegacyModelJsonPath(homeDirectory?: string): string {
+  return path.join(resolveLegacyOhbabyHome({ homeDirectory }), MODEL_JSON_NAME);
 }
 
 /**
@@ -35,7 +40,11 @@ export function getModelJsonPath(): string {
 export async function loadModelJson(
   options: LoadModelJsonOptions = {},
 ): Promise<unknown> {
-  const configPath = options.modelJsonPath ?? getModelJsonPath();
+  const configPath =
+    options.modelJsonPath ??
+    (await resolveReadPathWithLegacy(getModelJsonPath(), [
+      getLegacyModelJsonPath(),
+    ]));
 
   let content: string;
   try {
@@ -43,7 +52,7 @@ export async function loadModelJson(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new ConfigError(
-        `Configuration file not found: ${configPath}. Create ~/.ohbaby-agent/model.json before starting ohbaby-agent.`,
+        `Configuration file not found: ${configPath}. Create ~/.ohbaby/model.json before starting ohbaby-agent.`,
         "FILE_NOT_FOUND",
         { path: configPath },
       );

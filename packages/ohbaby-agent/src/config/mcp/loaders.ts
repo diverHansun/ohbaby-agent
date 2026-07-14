@@ -1,6 +1,13 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
+import {
+  OHBABY_DIR_NAME,
+  resolveLegacyOhbabyHome,
+  resolveLegacyProjectOhbabyRoot,
+  resolveOhbabyHome,
+  resolveProjectOhbabyRoot,
+  resolveReadPathWithLegacy,
+} from "../../paths/index.js";
 import {
   McpConfigAccessError,
   McpConfigParseError,
@@ -11,7 +18,7 @@ import type { McpServersConfig } from "./types.js";
 
 export const MCP_CONFIG_DIR_NAME = "mcp";
 export const MCP_CONFIG_FILE_NAME = "settings.json";
-export const OHBABY_CONFIG_DIR_NAME = ".ohbaby-agent";
+export const OHBABY_CONFIG_DIR_NAME = OHBABY_DIR_NAME;
 
 const EMPTY_CONFIG: McpServersConfig = { mcpServers: {} };
 const UTF8_BOM = "\uFEFF";
@@ -23,10 +30,9 @@ export interface LoadMcpConfigOptions {
   readonly projectDirectory?: string;
 }
 
-export function getGlobalMcpConfigPath(homeDirectory = os.homedir()): string {
+export function getGlobalMcpConfigPath(homeDirectory?: string): string {
   return path.join(
-    homeDirectory,
-    OHBABY_CONFIG_DIR_NAME,
+    resolveOhbabyHome({ homeDirectory }),
     MCP_CONFIG_DIR_NAME,
     MCP_CONFIG_FILE_NAME,
   );
@@ -36,8 +42,25 @@ export function getProjectMcpConfigPath(
   projectDirectory = process.cwd(),
 ): string {
   return path.join(
-    projectDirectory,
-    OHBABY_CONFIG_DIR_NAME,
+    resolveProjectOhbabyRoot(projectDirectory),
+    MCP_CONFIG_DIR_NAME,
+    MCP_CONFIG_FILE_NAME,
+  );
+}
+
+function getLegacyGlobalMcpConfigPath(homeDirectory?: string): string {
+  return path.join(
+    resolveLegacyOhbabyHome({ homeDirectory }),
+    MCP_CONFIG_DIR_NAME,
+    MCP_CONFIG_FILE_NAME,
+  );
+}
+
+function getLegacyProjectMcpConfigPath(
+  projectDirectory = process.cwd(),
+): string {
+  return path.join(
+    resolveLegacyProjectOhbabyRoot(projectDirectory),
     MCP_CONFIG_DIR_NAME,
     MCP_CONFIG_FILE_NAME,
   );
@@ -95,9 +118,17 @@ export async function loadMcpConfig(
   options: LoadMcpConfigOptions = {},
 ): Promise<McpServersConfig> {
   const globalPath =
-    options.globalPath ?? getGlobalMcpConfigPath(options.homeDirectory);
+    options.globalPath ??
+    (await resolveReadPathWithLegacy(
+      getGlobalMcpConfigPath(options.homeDirectory),
+      [getLegacyGlobalMcpConfigPath(options.homeDirectory)],
+    ));
   const projectPath =
-    options.projectPath ?? getProjectMcpConfigPath(options.projectDirectory);
+    options.projectPath ??
+    (await resolveReadPathWithLegacy(
+      getProjectMcpConfigPath(options.projectDirectory),
+      [getLegacyProjectMcpConfigPath(options.projectDirectory)],
+    ));
   const [globalConfig, projectConfig] = await Promise.all([
     loadMcpConfigFromPath(globalPath),
     loadMcpConfigFromPath(projectPath),
