@@ -312,178 +312,185 @@ describe("ohbaby web workspace switching", () => {
     await runtime.client.close();
   });
 
-  it("browses directories without switching workspaces until a directory is opened", async () => {
-    const requests: Request[] = [];
-    const unicodeDirectory = "D:\\Upan\\books\\learning materials\\李笑来作品集";
-    let workspaceOpened = false;
-    const fetchImpl: typeof fetch = (input, init = {}) => {
-      const request = new Request(input, init);
-      requests.push(request);
-      const directory = directoryFromScopeHeader(request);
-      if (request.url.endsWith("/v1/scopes")) {
-        return Promise.resolve(
-          Response.json({
-            ok: true,
-            scopes: workspaceOpened
-              ? [
-                  {
-                    available: true,
-                    directory: "/repo-a",
-                    lastOpenedAt: 2,
-                    loaded: true,
-                    position: 0,
-                  },
-                  {
-                    available: true,
-                    directory: unicodeDirectory,
-                    lastOpenedAt: 1,
-                    loaded: false,
-                    position: 1,
-                  },
-                ]
-              : [
-                  {
-                    available: true,
-                    directory: "/repo-a",
-                    lastOpenedAt: 2,
-                    loaded: true,
-                    position: 0,
-                  },
-                ],
-          }),
-        );
-      }
-      if (request.url.endsWith("/v1/directory-picker/roots")) {
-        return Promise.resolve(
-          Response.json({
-            ok: true,
-            roots: [{ directory: "/", name: "/" }],
-          }),
-        );
-      }
-      if (request.url.endsWith("/v1/directory-picker/list")) {
-        return Promise.resolve(
-          Response.json({
-            children: [{ directory: "/repo-b", name: "repo-b" }],
-            directory: "/",
-            ok: true,
-            parent: null,
-          }),
-        );
-      }
-      if (request.url.endsWith("/v1/scopes/open")) {
-        workspaceOpened = true;
-        return Promise.resolve(
-          Response.json({
-            ok: true,
-            scope: {
-              available: true,
-              directory: directoryFromBody(init.body),
-              lastOpenedAt: 1,
-              loaded: false,
-              position: 1,
-            },
-          }),
-        );
-      }
-      if (request.url.endsWith("/v1/clients")) {
-        return Promise.resolve(Response.json({ ok: true }));
-      }
-      if (request.url.endsWith("/v1/events")) {
-        return Promise.resolve(
-          new Response(
-            new ReadableStream<Uint8Array>({
-              start(controller): void {
-                controller.enqueue(
-                  encoder.encode(
-                    `data: ${JSON.stringify({ type: "hello" })}\n\n`,
-                  ),
-                );
-                request.signal.addEventListener(
-                  "abort",
-                  (): void => {
-                    controller.close();
-                  },
-                  { once: true },
-                );
+  it.each([
+    ["Windows", "D:\\Upan\\books\\learning materials\\作品集"],
+    ["macOS", "/Users/hansun025/Documents/学习资料/作品集"],
+  ] as const)(
+    "browses directories without switching workspaces until a %s Unicode path is opened",
+    async (_platform, unicodeDirectory) => {
+      const requests: Request[] = [];
+      let workspaceOpened = false;
+      const fetchImpl: typeof fetch = (input, init = {}) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        const directory = directoryFromScopeHeader(request);
+        if (request.url.endsWith("/v1/scopes")) {
+          return Promise.resolve(
+            Response.json({
+              ok: true,
+              scopes: workspaceOpened
+                ? [
+                    {
+                      available: true,
+                      directory: "/repo-a",
+                      lastOpenedAt: 2,
+                      loaded: true,
+                      position: 0,
+                    },
+                    {
+                      available: true,
+                      directory: unicodeDirectory,
+                      lastOpenedAt: 1,
+                      loaded: false,
+                      position: 1,
+                    },
+                  ]
+                : [
+                    {
+                      available: true,
+                      directory: "/repo-a",
+                      lastOpenedAt: 2,
+                      loaded: true,
+                      position: 0,
+                    },
+                  ],
+            }),
+          );
+        }
+        if (request.url.endsWith("/v1/directory-picker/roots")) {
+          return Promise.resolve(
+            Response.json({
+              ok: true,
+              roots: [{ directory: "/", name: "/" }],
+            }),
+          );
+        }
+        if (request.url.endsWith("/v1/directory-picker/list")) {
+          return Promise.resolve(
+            Response.json({
+              children: [{ directory: "/repo-b", name: "repo-b" }],
+              directory: "/",
+              ok: true,
+              parent: null,
+            }),
+          );
+        }
+        if (request.url.endsWith("/v1/scopes/open")) {
+          workspaceOpened = true;
+          return Promise.resolve(
+            Response.json({
+              ok: true,
+              scope: {
+                available: true,
+                directory: directoryFromBody(init.body),
+                lastOpenedAt: 1,
+                loaded: false,
+                position: 1,
               },
             }),
-            { headers: { "content-type": "text/event-stream" } },
-          ),
+          );
+        }
+        if (request.url.endsWith("/v1/clients")) {
+          return Promise.resolve(Response.json({ ok: true }));
+        }
+        if (request.url.endsWith("/v1/events")) {
+          return Promise.resolve(
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller): void {
+                  controller.enqueue(
+                    encoder.encode(
+                      `data: ${JSON.stringify({ type: "hello" })}\n\n`,
+                    ),
+                  );
+                  request.signal.addEventListener(
+                    "abort",
+                    (): void => {
+                      controller.close();
+                    },
+                    { once: true },
+                  );
+                },
+              }),
+              { headers: { "content-type": "text/event-stream" } },
+            ),
+          );
+        }
+        if (request.url.endsWith("/v1/snapshot")) {
+          return Promise.resolve(
+            Response.json({
+              ok: true,
+              seqNum: 0,
+              snapshot: emptySnapshot(
+                directory === unicodeDirectory ? "B" : "A",
+              ),
+            }),
+          );
+        }
+        if (request.url.endsWith("/v1/model")) {
+          return Promise.resolve(Response.json({ model: null, ok: true }));
+        }
+        throw new Error(`Unexpected request: ${request.url}`);
+      };
+      const runtime = createOhbabyWebRuntime(
+        {
+          baseUrl: "http://127.0.0.1:4096",
+          clientId: "client-a",
+          directory: "/repo-a",
+          token: "token",
+        },
+        { fetch: fetchImpl },
+      );
+      await runtime.ready;
+
+      const beforeBrowse = requests.length;
+      await expect(runtime.getDirectoryPickerRoots()).resolves.toEqual({
+        ok: true,
+        roots: [{ directory: "/", name: "/" }],
+      });
+      await expect(runtime.listDirectoryPicker("/")).resolves.toEqual({
+        children: [{ directory: "/repo-b", name: "repo-b" }],
+        directory: "/",
+        ok: true,
+        parent: null,
+      });
+      expect(runtime.getWorkspaceSnapshot().selectedDirectory).toBe("/repo-a");
+      expect(
+        requests
+          .slice(beforeBrowse)
+          .map((request) => new URL(request.url).pathname),
+      ).toEqual(["/v1/directory-picker/roots", "/v1/directory-picker/list"]);
+      expect(
+        requests
+          .slice(beforeBrowse)
+          .every((request) => !request.headers.has("x-ohbaby-directory")),
+      ).toBe(true);
+
+      const beforeSelection = requests.length;
+      await runtime.openWorkspace(unicodeDirectory);
+
+      const openRequest = requests.slice(beforeSelection)[0];
+      expect(new URL(openRequest.url).pathname).toBe("/v1/scopes/open");
+      expect(openRequest.headers.has("x-ohbaby-directory")).toBe(false);
+      const scopedRequests = requests
+        .slice(beforeSelection)
+        .filter((request) => request.headers.has("x-ohbaby-directory"));
+      expect(scopedRequests.length).toBeGreaterThan(0);
+      for (const request of scopedRequests) {
+        expect(request.headers.get("x-ohbaby-directory")).toBe(
+          encodeURIComponent(unicodeDirectory),
+        );
+        expect(request.headers.get("x-ohbaby-directory-encoding")).toBe(
+          "percent-utf8",
         );
       }
-      if (request.url.endsWith("/v1/snapshot")) {
-        return Promise.resolve(
-          Response.json({
-            ok: true,
-            seqNum: 0,
-            snapshot: emptySnapshot(directory === unicodeDirectory ? "B" : "A"),
-          }),
-        );
-      }
-      if (request.url.endsWith("/v1/model")) {
-        return Promise.resolve(Response.json({ model: null, ok: true }));
-      }
-      throw new Error(`Unexpected request: ${request.url}`);
-    };
-    const runtime = createOhbabyWebRuntime(
-      {
-        baseUrl: "http://127.0.0.1:4096",
-        clientId: "client-a",
-        directory: "/repo-a",
-        token: "token",
-      },
-      { fetch: fetchImpl },
-    );
-    await runtime.ready;
-
-    const beforeBrowse = requests.length;
-    await expect(runtime.getDirectoryPickerRoots()).resolves.toEqual({
-      ok: true,
-      roots: [{ directory: "/", name: "/" }],
-    });
-    await expect(runtime.listDirectoryPicker("/")).resolves.toEqual({
-      children: [{ directory: "/repo-b", name: "repo-b" }],
-      directory: "/",
-      ok: true,
-      parent: null,
-    });
-    expect(runtime.getWorkspaceSnapshot().selectedDirectory).toBe("/repo-a");
-    expect(
-      requests
-        .slice(beforeBrowse)
-        .map((request) => new URL(request.url).pathname),
-    ).toEqual(["/v1/directory-picker/roots", "/v1/directory-picker/list"]);
-    expect(
-      requests
-        .slice(beforeBrowse)
-        .every((request) => !request.headers.has("x-ohbaby-directory")),
-    ).toBe(true);
-
-    const beforeSelection = requests.length;
-    await runtime.openWorkspace(unicodeDirectory);
-
-    const openRequest = requests.slice(beforeSelection)[0];
-    expect(new URL(openRequest.url).pathname).toBe("/v1/scopes/open");
-    expect(openRequest.headers.has("x-ohbaby-directory")).toBe(false);
-    const scopedRequests = requests
-      .slice(beforeSelection)
-      .filter((request) => request.headers.has("x-ohbaby-directory"));
-    expect(scopedRequests.length).toBeGreaterThan(0);
-    for (const request of scopedRequests) {
-      expect(request.headers.get("x-ohbaby-directory")).toBe(
-        encodeURIComponent(unicodeDirectory),
+      expect(runtime.getWorkspaceSnapshot().selectedDirectory).toBe(
+        unicodeDirectory,
       );
-      expect(request.headers.get("x-ohbaby-directory-encoding")).toBe(
-        "percent-utf8",
-      );
-    }
-    expect(runtime.getWorkspaceSnapshot().selectedDirectory).toBe(
-      unicodeDirectory,
-    );
-    expect(runtime.store.getSnapshot().view.snapshot?.sessions[0]?.title).toBe(
-      "B",
-    );
-    await runtime.client.close();
-  });
+      expect(
+        runtime.store.getSnapshot().view.snapshot?.sessions[0]?.title,
+      ).toBe("B");
+      await runtime.client.close();
+    },
+  );
 });

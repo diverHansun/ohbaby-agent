@@ -38,7 +38,7 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "rimraf dist && tsup && tsc -b --force && pnpm --filter ohbaby-web build && node scripts/copy-web-assets.mjs",
+    "build": "pnpm -r --filter \"ohbaby-cli^...\" --sort build && rimraf dist && tsup && tsc -b --force && pnpm --filter ohbaby-web build && node scripts/copy-web-assets.mjs",
     "start": "node dist/bin.js",
     "typecheck": "tsc -b",
     "clean": "rimraf dist coverage"
