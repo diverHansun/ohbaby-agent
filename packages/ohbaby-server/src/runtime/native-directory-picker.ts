@@ -48,19 +48,32 @@ const MACOS_PICK_DIRECTORY_SCRIPT = [
   "end try",
 ].join("\n");
 
+// FolderBrowserDialog hangs invisibly when Node spawns PowerShell with
+// windowsHide/CREATE_NO_WINDOW. Shell.Application.BrowseForFolder still
+// surfaces a visible Explorer folder dialog in that configuration.
 const WINDOWS_PICK_DIRECTORY_SCRIPT = [
-  "Add-Type -AssemblyName System.Windows.Forms",
-  "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
-  '$dialog.Description = "Open project"',
-  "$dialog.ShowNewFolderButton = $false",
-  "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {",
-  "  [Console]::Out.Write($dialog.SelectedPath)",
+  "$shell = New-Object -ComObject Shell.Application",
+  '$folder = $shell.BrowseForFolder(0, "Open project", 0)',
+  "if ($folder -ne $null) {",
+  "  [Console]::Out.Write($folder.Self.Path)",
   "}",
 ].join("\n");
 
+function encodePowerShellCommand(script: string): string {
+  return Buffer.from(script, "utf16le").toString("base64");
+}
+
 function normalizeSelection(stdout: string): string | undefined {
   const directory = stdout.trim();
-  return directory.length === 0 ? undefined : directory;
+  if (directory.length === 0) {
+    return undefined;
+  }
+  // BrowseForFolder may append a trailing separator for ordinary folders.
+  // Keep "/" and Windows drive roots (e.g. "C:\") intact.
+  if (directory === "/" || /^[A-Za-z]:\\$/.test(directory)) {
+    return directory;
+  }
+  return directory.replace(/[/\\]+$/, "");
 }
 
 function failureFor(
@@ -169,8 +182,8 @@ export function createNativeDirectoryPicker(
           args: [
             "-NoProfile",
             "-STA",
-            "-Command",
-            WINDOWS_PICK_DIRECTORY_SCRIPT,
+            "-EncodedCommand",
+            encodePowerShellCommand(WINDOWS_PICK_DIRECTORY_SCRIPT),
           ],
           command: "powershell.exe",
         };

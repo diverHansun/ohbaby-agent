@@ -53,12 +53,12 @@ describe("createNativeDirectoryPicker", () => {
     } satisfies Partial<NativeDirectoryPickerError>);
   });
 
-  it("uses a single-threaded Windows folder dialog", async () => {
+  it("uses Shell.Application BrowseForFolder on Windows", async () => {
     const run = vi.fn<NativeDirectoryPickerCommandRunner>(() =>
       Promise.resolve({
         exitCode: 0,
         stderr: "",
-        stdout: "D:\\Projects\\ohbaby",
+        stdout: "D:\\Projects\\ohbaby\\",
       }),
     );
     const picker = createNativeDirectoryPicker({
@@ -70,7 +70,35 @@ describe("createNativeDirectoryPicker", () => {
     const [command] = run.mock.calls[0];
     expect(command.command).toBe("powershell.exe");
     expect(command.args).toContain("-STA");
-    expect(command.args.at(-1)).toContain("FolderBrowserDialog");
+    expect(command.args).toContain("-EncodedCommand");
+    const encoded = command.args.at(-1);
+    expect(encoded).toEqual(expect.any(String));
+    if (typeof encoded !== "string") {
+      throw new Error("expected EncodedCommand payload");
+    }
+    const decoded = Buffer.from(encoded, "base64").toString("utf16le");
+    expect(decoded).toContain("Shell.Application");
+    expect(decoded).toContain("BrowseForFolder");
+  });
+
+  it("treats an empty Windows result as cancellation", async () => {
+    const picker = createNativeDirectoryPicker({
+      commandRunner: () =>
+        Promise.resolve({ exitCode: 0, stderr: "", stdout: "" }),
+      platform: "win32",
+    });
+
+    await expect(picker.pickDirectory()).resolves.toBeUndefined();
+  });
+
+  it("preserves Windows drive-root selections", async () => {
+    const picker = createNativeDirectoryPicker({
+      commandRunner: () =>
+        Promise.resolve({ exitCode: 0, stderr: "", stdout: "C:\\" }),
+      platform: "win32",
+    });
+
+    await expect(picker.pickDirectory()).resolves.toBe("C:\\");
   });
 
   it("falls back from zenity to kdialog on Linux", async () => {
