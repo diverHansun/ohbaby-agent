@@ -96,17 +96,6 @@ function platformDataBase(
   input: ReturnType<typeof context>,
   legacy: boolean,
 ): string {
-  const xdgDataHome = input.environment.XDG_DATA_HOME?.trim();
-  if (xdgDataHome) {
-    return xdgDataHome;
-  }
-  if (input.platform === "darwin") {
-    return input.path.join(
-      input.homeDirectory,
-      "Library",
-      "Application Support",
-    );
-  }
   if (input.platform === "win32") {
     if (legacy) {
       return nonEmptyOr(
@@ -117,6 +106,17 @@ function platformDataBase(
     return nonEmptyOr(
       input.environment.LOCALAPPDATA,
       input.path.join(input.homeDirectory, "AppData", "Local"),
+    );
+  }
+  const xdgDataHome = input.environment.XDG_DATA_HOME?.trim();
+  if (xdgDataHome) {
+    return xdgDataHome;
+  }
+  if (input.platform === "darwin") {
+    return input.path.join(
+      input.homeDirectory,
+      "Library",
+      "Application Support",
     );
   }
   return input.path.join(input.homeDirectory, ".local", "share");

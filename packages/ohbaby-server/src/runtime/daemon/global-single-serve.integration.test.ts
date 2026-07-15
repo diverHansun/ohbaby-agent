@@ -131,14 +131,21 @@ function spawnServe(input: {
       });
     }
   `;
+  const childEnvironment: NodeJS.ProcessEnv = {
+    ...process.env,
+    OHBABY_TEST_INPUT: JSON.stringify(input),
+  };
+  if (input.dataHome !== undefined) {
+    if (process.platform === "win32") {
+      childEnvironment.APPDATA = input.dataHome;
+      childEnvironment.LOCALAPPDATA = input.dataHome;
+      delete childEnvironment.XDG_DATA_HOME;
+    } else {
+      childEnvironment.XDG_DATA_HOME = input.dataHome;
+    }
+  }
   const child = spawn(process.execPath, ["--import", "tsx", "--eval", script], {
-    env: {
-      ...process.env,
-      ...(input.dataHome === undefined
-        ? {}
-        : { XDG_DATA_HOME: input.dataHome }),
-      OHBABY_TEST_INPUT: JSON.stringify(input),
-    },
+    env: childEnvironment,
     stdio: ["pipe", "pipe", "pipe"],
   });
   children.push(child);

@@ -2,6 +2,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  resolveLegacyOhbabyDataRoot,
+  resolveOhbabyDataRoot,
+} from "../paths/index.js";
 import { migrateOhbabyConfig, migrateOhbabyData } from "./ohbaby-home.js";
 
 async function writeFile(filePath: string, content: string): Promise<void> {
@@ -120,7 +124,9 @@ describe("ohbaby home migration", () => {
     await expect(
       fs.access(path.join(targetHome, ".DS_Store")),
     ).rejects.toMatchObject({ code: "ENOENT" });
-    expect((await fs.stat(targetHome)).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") {
+      expect((await fs.stat(targetHome)).mode & 0o777).toBe(0o700);
+    }
     await expect(
       fs.readFile(path.join(targetProject, ".env"), "utf8"),
     ).resolves.toContain("PROJECT_LEGACY_ONLY=yes");
@@ -165,8 +171,13 @@ describe("ohbaby home migration", () => {
   });
 
   it("migrates the database, WAL, SHM, and data tree as one retained-source copy", async () => {
-    const legacyDataRoot = path.join(xdgDataHome, "ohbaby-agent");
-    const targetDataRoot = path.join(xdgDataHome, "ohbaby");
+    const options = {
+      environment: { XDG_DATA_HOME: xdgDataHome },
+      homeDirectory,
+      platform: "linux" as const,
+    };
+    const legacyDataRoot = resolveLegacyOhbabyDataRoot(options);
+    const targetDataRoot = resolveOhbabyDataRoot(options);
     await writeFile(path.join(legacyDataRoot, "ohbaby-agent.db"), "database");
     await writeFile(
       path.join(legacyDataRoot, "ohbaby-agent.db-wal"),
@@ -178,11 +189,7 @@ describe("ohbaby home migration", () => {
     );
     await writeFile(path.join(legacyDataRoot, "storage", "blob"), "blob");
 
-    const report = await migrateOhbabyData({
-      environment: { XDG_DATA_HOME: xdgDataHome },
-      homeDirectory,
-      platform: "linux",
-    });
+    const report = await migrateOhbabyData(options);
 
     expect(report.copied).toContain(targetDataRoot);
     await expect(
@@ -297,15 +304,15 @@ describe("ohbaby home migration", () => {
   });
 
   it("serializes concurrent first starts and ignores an abandoned temp tree", async () => {
-    const legacyDataRoot = path.join(xdgDataHome, "ohbaby-agent");
-    const targetDataRoot = path.join(xdgDataHome, "ohbaby");
-    await writeFile(path.join(legacyDataRoot, "ohbaby-agent.db"), "database");
-    await writeFile(`${targetDataRoot}.migrating-abandoned/partial`, "partial");
     const options = {
       environment: { XDG_DATA_HOME: xdgDataHome },
       homeDirectory,
       platform: "linux" as const,
     };
+    const legacyDataRoot = resolveLegacyOhbabyDataRoot(options);
+    const targetDataRoot = resolveOhbabyDataRoot(options);
+    await writeFile(path.join(legacyDataRoot, "ohbaby-agent.db"), "database");
+    await writeFile(`${targetDataRoot}.migrating-abandoned/partial`, "partial");
 
     const reports = await Promise.all([
       migrateOhbabyData(options),
@@ -322,4 +329,91 @@ describe("ohbaby home migration", () => {
       legacyDataRoot,
     );
   });
+
+  it.runIf(process.platform === "win32")(
+    "migrates Windows configuration into the user and project .ohbaby roots",
+    async () => {
+      const legacyHome = path.join(homeDirectory, ".ohbaby-agent");
+      const targetHome = path.join(homeDirectory, ".ohbaby");
+      const legacyProject = path.join(projectDirectory, ".ohbaby-agent");
+      const targetProject = path.join(projectDirectory, ".ohbaby");
+      await writeJson(path.join(legacyHome, "model.json"), {
+        provider: "legacy-windows",
+      });
+      await writeFile(path.join(legacyProject, ".env"), "PROJECT_ONLY=yes\n");
+
+      const report = await migrateOhbabyConfig({
+        environment: {},
+        homeDirectory,
+        platform: "win32",
+        projectDirectory,
+      });
+
+      await expect(
+        fs.readFile(path.join(targetHome, "model.json"), "utf8"),
+      ).resolves.toContain("legacy-windows");
+      await expect(
+        fs.readFile(path.join(targetProject, ".env"), "utf8"),
+      ).resolves.toContain("PROJECT_ONLY=yes");
+      expect(report.copied).toContain(path.join(targetHome, "model.json"));
+      expect(report.copied).toContain(path.join(targetProject, ".env"));
+    },
+  );
+
+  it.runIf(process.platform === "win32")(
+    "migrates Windows data from Roaming to LocalAppData as one retained-source copy",
+    async () => {
+      const roaming = path.join(tempRoot, "AppData", "Roaming");
+      const local = path.join(tempRoot, "AppData", "Local");
+      const options = {
+        environment: {
+          APPDATA: roaming,
+          LOCALAPPDATA: local,
+          XDG_DATA_HOME: path.join(tempRoot, "xdg-data-must-not-win"),
+        },
+        homeDirectory,
+        platform: "win32" as const,
+        projectDirectory,
+      };
+      const legacyDataRoot = resolveLegacyOhbabyDataRoot(options);
+      const targetDataRoot = resolveOhbabyDataRoot(options);
+      await writeFile(
+        path.join(legacyDataRoot, "ohbaby-agent.db"),
+        "windows-database",
+      );
+      await writeFile(
+        path.join(legacyDataRoot, "ohbaby-agent.db-wal"),
+        "windows-wal",
+      );
+      await writeFile(
+        path.join(legacyDataRoot, "ohbaby-agent.db-shm"),
+        "windows-shm",
+      );
+      await writeFile(
+        path.join(legacyDataRoot, "storage", "blob"),
+        "windows-blob",
+      );
+
+      const report = await migrateOhbabyData(options);
+
+      expect(targetDataRoot).toBe(path.join(local, "ohbaby"));
+      expect(legacyDataRoot).toBe(path.join(roaming, "ohbaby-agent"));
+      expect(report.copied).toContain(targetDataRoot);
+      await expect(
+        fs.readFile(path.join(targetDataRoot, "ohbaby.db"), "utf8"),
+      ).resolves.toBe("windows-database");
+      await expect(
+        fs.readFile(path.join(targetDataRoot, "ohbaby.db-wal"), "utf8"),
+      ).resolves.toBe("windows-wal");
+      await expect(
+        fs.readFile(path.join(targetDataRoot, "ohbaby.db-shm"), "utf8"),
+      ).resolves.toBe("windows-shm");
+      await expect(
+        fs.readFile(path.join(targetDataRoot, "storage", "blob"), "utf8"),
+      ).resolves.toBe("windows-blob");
+      await expect(
+        fs.access(path.join(legacyDataRoot, "ohbaby-agent.db")),
+      ).resolves.toBeUndefined();
+    },
+  );
 });

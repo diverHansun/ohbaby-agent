@@ -80,6 +80,7 @@ describe("ohbaby path resolution", () => {
       environment: {
         APPDATA: "C:\\Users\\tester\\AppData\\Roaming",
         LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local",
+        XDG_DATA_HOME: "Z:\\xdg-data",
       },
       homeDirectory: "C:\\Users\\tester",
       platform: "win32" as const,

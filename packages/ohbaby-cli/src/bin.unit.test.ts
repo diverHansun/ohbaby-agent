@@ -1,5 +1,5 @@
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { CliCommandRuntime } from "./cli/commands/types.js";
@@ -767,7 +767,9 @@ describe("runOhbabyCli", () => {
       host: "127.0.0.1",
       port: 4096,
     });
-    expect(serveOptions?.webAssetsDir).toMatch(/dist\/web$/u);
+    const webAssetsDir = serveOptions?.webAssetsDir ?? "";
+    expect(basename(webAssetsDir)).toBe("web");
+    expect(basename(dirname(webAssetsDir))).toBe("dist");
     expect(stdout.join("")).toBe("ohbaby web ready: http://127.0.0.1:4096\n");
     expect(openUrl).toHaveBeenCalledWith("http://127.0.0.1:4096");
   });
