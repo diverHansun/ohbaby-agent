@@ -1200,9 +1200,9 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     await waitFor(() =>
       Boolean(
-        app.container.querySelector('[role="alert"]')?.textContent.includes(
-          "Scope unavailable",
-        ),
+        app.container
+          .querySelector('[role="alert"]')
+          ?.textContent.includes("Scope unavailable"),
       ),
     );
     expect(app.container.querySelector('[role="dialog"]')).not.toBeNull();
@@ -1409,6 +1409,36 @@ describe("OhbabyWebApp slash command interactions", () => {
       provider: "zhipu",
     });
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
+  });
+
+  it("uses provider-neutral guidance for an empty model configuration", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["connect"]));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+
+    expect(
+      Array.from(
+        app.container.querySelectorAll(".ohb-structured-grid input"),
+      ).map((input) => input.getAttribute("placeholder")),
+    ).toEqual([
+      "Enter provider name",
+      "Enter model identifier",
+      "Enter provider API base URL",
+      "Enter API key environment variable name",
+      "Optional; saved to .env when provided",
+      "Optional; auto-detected when blank",
+      "Optional; uses provider default when blank",
+    ]);
+    expect(app.container.textContent).not.toMatch(/zhipu|glm-4\.7|bigmodel/i);
   });
 
   it("shows backend connect warnings after saving from the structured overlay", async () => {

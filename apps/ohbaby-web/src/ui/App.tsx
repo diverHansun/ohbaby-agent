@@ -3063,7 +3063,7 @@ function ConnectModelOverlayBody(props: {
           onChange={(value) => {
             update("provider", value);
           }}
-          placeholder="zhipu"
+          placeholder="Enter provider name"
           value={form.provider}
         />
         <TextField
@@ -3071,7 +3071,7 @@ function ConnectModelOverlayBody(props: {
           onChange={(value) => {
             update("model", value);
           }}
-          placeholder="glm-4.7"
+          placeholder="Enter model identifier"
           value={form.model}
         />
         <TextField
@@ -3079,7 +3079,7 @@ function ConnectModelOverlayBody(props: {
           onChange={(value) => {
             update("baseUrl", value);
           }}
-          placeholder="https://open.bigmodel.cn/api/paas/v4"
+          placeholder="Enter provider API base URL"
           value={form.baseUrl}
         />
         <TextField
@@ -3087,7 +3087,7 @@ function ConnectModelOverlayBody(props: {
           onChange={(value) => {
             update("apiKeyEnv", value);
           }}
-          placeholder="ZHIPU_API_KEY, or blank for local services"
+          placeholder="Enter API key environment variable name"
           value={form.apiKeyEnv}
         />
         <TextField
@@ -3095,7 +3095,7 @@ function ConnectModelOverlayBody(props: {
           onChange={(value) => {
             update("apiKey", value);
           }}
-          placeholder="optional, writes to .env when provided"
+          placeholder="Optional; saved to .env when provided"
           type="password"
           value={form.apiKey}
         />
@@ -3104,7 +3104,7 @@ function ConnectModelOverlayBody(props: {
           onChange={(value) => {
             update("contextWindowTokens", value);
           }}
-          placeholder="auto, default 128000"
+          placeholder="Optional; auto-detected when blank"
           value={form.contextWindowTokens}
         />
         <TextField
@@ -3112,7 +3112,7 @@ function ConnectModelOverlayBody(props: {
           onChange={(value) => {
             update("maxOutputTokens", value);
           }}
-          placeholder="optional"
+          placeholder="Optional; uses provider default when blank"
           value={form.maxOutputTokens}
         />
       </div>
