@@ -197,6 +197,119 @@ describe("McpManager", () => {
     ]);
   });
 
+  it("does not cache an in-flight tool list after a newer list_changed revision", async () => {
+    const staleGate = createDeferred();
+    const listeners = new Set<(serverName: string) => void | Promise<void>>();
+    let listCalls = 0;
+    let tools: readonly McpToolDefinition[] = [
+      { inputSchema: { type: "object" }, name: "initial" },
+    ];
+    const client: McpClientLike = {
+      ...createFakeClient({ name: "server" }),
+      listTools: async () => {
+        listCalls += 1;
+        const snapshot = tools;
+        if (listCalls === 2) {
+          await staleGate.promise;
+        }
+        return snapshot;
+      },
+      onToolsChanged(listener) {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    };
+    const manager = new McpManager("workspace-a", {
+      createClient: (): McpClientLike => client,
+      loadConfig: (): Promise<McpServersConfig> =>
+        Promise.resolve({
+          mcpServers: {
+            server: {
+              args: [],
+              command: "mock",
+              enabled: true,
+              timeout: 5000,
+              trust: false,
+              type: "stdio",
+            },
+          },
+        }),
+    });
+    await manager.getAllTools();
+
+    tools = [{ inputSchema: { type: "object" }, name: "stale" }];
+    for (const listener of listeners) {
+      void listener("server");
+    }
+    const refresh = manager.getAllTools();
+    await vi.waitFor(() => {
+      expect(listCalls).toBe(2);
+    });
+    tools = [{ inputSchema: { type: "object" }, name: "latest" }];
+    for (const listener of listeners) {
+      void listener("server");
+    }
+    staleGate.resolve();
+
+    await expect(refresh).resolves.toEqual([
+      expect.objectContaining({ name: "mcp_s6_server_t6_latest" }),
+    ]);
+    await expect(manager.getAllTools()).resolves.toEqual([
+      expect.objectContaining({ name: "mcp_s6_server_t6_latest" }),
+    ]);
+  });
+
+  it("returns a tool snapshot after bounded retries during repeated list changes", async () => {
+    const listeners = new Set<(serverName: string) => void | Promise<void>>();
+    let listCalls = 0;
+    const client: McpClientLike = {
+      ...createFakeClient({ name: "server" }),
+      listTools(): Promise<readonly McpToolDefinition[]> {
+        listCalls += 1;
+        if (listCalls <= 3) {
+          for (const listener of listeners) {
+            void listener("server");
+          }
+        }
+        return Promise.resolve([
+          {
+            inputSchema: { type: "object" },
+            name: `version_${String(listCalls)}`,
+          },
+        ]);
+      },
+      onToolsChanged(listener) {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    };
+    const manager = new McpManager("workspace-a", {
+      createClient: (): McpClientLike => client,
+      loadConfig: (): Promise<McpServersConfig> =>
+        Promise.resolve({
+          mcpServers: {
+            server: {
+              args: [],
+              command: "mock",
+              enabled: true,
+              timeout: 5000,
+              trust: false,
+              type: "stdio",
+            },
+          },
+        }),
+    });
+
+    await expect(manager.getAllTools()).resolves.toEqual([
+      expect.objectContaining({ mcpToolName: "version_2" }),
+    ]);
+    expect(listCalls).toBe(2);
+  });
+
   it("isolates failing servers and reports status for disabled and failed entries", async () => {
     const manager = new McpManager("workspace-a", {
       createClient: (name: string): McpClientLike =>

@@ -28,6 +28,45 @@ function nestedMetadata(
   return value as ToolMetadata;
 }
 
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function mcpSelectionMetadata(metadata: ToolMetadata): ToolMetadata {
+  const selection = nestedMetadata(metadata, "mcpSelection");
+  if (selection === undefined) {
+    return {};
+  }
+  const candidates = Array.isArray(selection.candidates)
+    ? selection.candidates.flatMap((candidate) => {
+        if (
+          typeof candidate !== "object" ||
+          candidate === null ||
+          Array.isArray(candidate)
+        ) {
+          return [];
+        }
+        const value = candidate as ToolMetadata;
+        return typeof value.name === "string" &&
+          typeof value.score === "number" &&
+          Number.isFinite(value.score)
+          ? [{ name: value.name, score: value.score }]
+          : [];
+      })
+    : [];
+  return {
+    mcpSelection: {
+      alreadyLoaded: stringArray(selection.alreadyLoaded),
+      candidates,
+      limitReached: stringArray(selection.limitReached),
+      loaded: stringArray(selection.loaded),
+      unknown: stringArray(selection.unknown),
+    },
+  };
+}
+
 export function projectToolMetadataForModel(
   tool: string,
   metadata?: ToolMetadata,
@@ -47,6 +86,8 @@ export function projectToolMetadataForModel(
   }
 
   switch (tool) {
+    case "select_tools":
+      return mcpSelectionMetadata(metadata);
     case "bash":
       return copyMetadataFields(metadata, ["exitCode", "signal", "truncated"]);
     case "read":
@@ -132,7 +173,8 @@ export function projectToolMetadataForModel(
     }
     case "subagent_close": {
       const close = nestedMetadata(metadata, "subagentClose");
-      const item = close === undefined ? undefined : nestedMetadata(close, "item");
+      const item =
+        close === undefined ? undefined : nestedMetadata(close, "item");
       return item === undefined
         ? copyMetadataFields(metadata, ["error"])
         : {

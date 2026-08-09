@@ -26,6 +26,10 @@ MCP 工具在适配时通过 `annotations.readOnlyHint` 推断 ToolCategory（`t
 
 每个工作区拥有独立的MCP配置和客户端实例，不同工作区的MCP服务器互不影响。
 
+### 6. 渐进披露与可检索发现
+
+运行时只向模型公告 admitted MCP 的本地名称。`select_tools` 同时支持精确加载和 BM25 query；query 默认只返回 `{name, score}`，显式 `load:true` 才把排名候选加入当前 session/context scope 的 callable schema。
+
 ---
 
 ## 二、Duties（职责）
@@ -45,7 +49,9 @@ MCP 工具在适配时通过 `annotations.readOnlyHint` 推断 ToolCategory（`t
 - 调用MCP协议的listTools接口发现工具
 - 将MCP工具定义转换为ohbaby-agent的Tool接口
 - 根据配置过滤工具（includeTools、excludeTools）
-- 为每个MCP工具生成唯一的名称（serverName_toolName格式）
+- 为每个MCP工具生成长度前缀、可逆转义的唯一 local name
+- 对 admitted/available 工具建立只读内存检索语料：`localName + server + tool + 准入前 description`
+- 保持原始 description 只用于索引；模型可见工具 description 使用安全固定文案
 
 ### 3. 工具执行转发
 
@@ -97,9 +103,9 @@ MCP工具的注册到ToolScheduler.registry由初始化流程或tool-scheduler�
 
 当前 MCP 模块提供 `mcp_resource` / `mcp_prompt` 两个只读 access tools，用于读取 MCP resources 和 prompts。资源、Prompt 的协议调用由 MCP client/manager 负责；tool-scheduler 只看到普通 `Tool`，并通过 `requireExplicitApproval` 处理显式确认。
 
-### 7. 不负责动态工具更新
+### 7. 不负责统一跨源发现
 
-阶段1-2不监听ToolListChangedNotification，工具列表在初始化时确定。
+Builtin 常驻，MCP 使用本模块的 deferred menu + BM25，Skill 使用独立 catalog/exact load。mcp 模块不把三类工具合并为统一索引，也不把发现职责放进 ToolScheduler。
 
 ---
 

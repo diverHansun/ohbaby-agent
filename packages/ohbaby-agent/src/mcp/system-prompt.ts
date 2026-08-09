@@ -4,7 +4,8 @@ export interface GenerateMcpToolMenuPromptOptions {
 
 const FIXED_INSTRUCTIONS = [
   "These MCP tools are available but unloaded.",
-  "Use select_tools with exact names to load at most 8 tools for this session/context scope.",
+  "Use select_tools to search available MCP tools by query, or load exact names, for this session/context scope.",
+  "Search is read-only by default; set load=true only when the ranked candidates should be loaded.",
   "Only loaded MCP tools receive callable schemas.",
 ];
 

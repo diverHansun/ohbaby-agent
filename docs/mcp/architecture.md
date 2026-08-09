@@ -22,6 +22,7 @@
 ```
 mcp/
 ├── index.ts
+├── system-prompt.ts  # MCP 自有的 deferred menu 公告片段
 ├── types.ts
 │
 ├── core/
@@ -31,6 +32,8 @@ mcp/
 │
 ├── integration/
 │   ├── tool-adapter.ts             # MCP tool -> Tool
+│   ├── dynamic-tool-menu.ts        # admit、scope loaded 集、select_tools
+│   ├── mcp-tool-search.ts          # MCP-only BM25 corpus/index
 │   └── resource-prompt-tools.ts    # mcp_resource / mcp_prompt MCP access tools
 │
 └── __tests__/
@@ -95,9 +98,21 @@ mcp/
 
 1. 注册内置工具
 2. 注册 SkillTool / SkillResourceTool
-3. 通过 `McpManager.getAllTools()` 注册 MCP tools
+3. 通过 `McpManager.getAllTools()` 获取 MCP tools，执行 admit，并从同一快照更新 registry、menu 与 search corpus
 4. 注册 `mcp_resource` / `mcp_prompt` MCP access tools
 5. 订阅 `McpManager.onChange()`，在 MCP tools 变化时替换旧 MCP tools
+
+MCP 公告文案由 `mcp/system-prompt.ts` 生成，再通过 core system-prompt 的通用 `runtimePromptsProvider` 注入。core 不认识 MCP 字段或文案，避免领域逻辑落入通用 `layers/`，也避免 core 反向依赖 mcp。
+
+MCP refresh 由单一串行/合并 runner 执行。刷新期间的新 change 递增 revision 并触发下一轮；旧 revision 的异步结果不能提交。最新刷新失败时 registry、menu、corpus 一起清空，避免三份状态分叉。
+
+### 2.4 Dynamic Tool Menu 与 Search
+
+- ToolScheduler 可注册全部 admitted MCP 工具，但 access guard 只允许当前 scope 已加载的名称执行。
+- system prompt 仅公告未加载 local name，不暴露原始 description/schema。
+- `select_tools({tools})` 保持精确加载兼容；`select_tools({query, limit?, load?})` 对 admitted MCP corpus 做 BM25。
+- query 默认 `load:false`，候选只含 `{name, score}`；精确 local name 固定 rank 1 / score 1，fuzzy score 位于 `[0,1)`。
+- Builtin 与 Skill 不进入 MCP 索引。
 
 MCP adapter 将配置中的 `trust` 映射到通用 Tool 字段：`trust: false` → `requireExplicitApproval: true`，`trust: true` → `requireExplicitApproval: false`。ToolScheduler 只消费 `requireExplicitApproval`，不直接消费 MCP-local `isTrusted`。`mcp_resource` / `mcp_prompt` 作为跨 server 访问入口固定设置 `requireExplicitApproval: true`，避免绕过确认。
 
@@ -153,3 +168,4 @@ await McpManager.deregisterPlugin(pluginId)
 - manager unit：懒加载、错误隔离、plugin registration、resources/prompts 聚合
 - integration：使用官方 SDK InMemoryTransport 验证真实 MCP tool call
 - runtime composition：验证 MCP tools 注入 ToolScheduler，并在变更时替换旧工具
+- dynamic menu/search：验证 exact 兼容、BM25 排名、参数矩阵、scope 上限、description 不泄露与 refresh latest-wins

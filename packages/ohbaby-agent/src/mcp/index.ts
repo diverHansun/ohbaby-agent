@@ -1,5 +1,7 @@
 export { McpClient } from "./core/client.js";
 export { McpManager } from "./core/manager.js";
+export { generateMcpToolMenuPrompt } from "./system-prompt.js";
+export type { GenerateMcpToolMenuPromptOptions } from "./system-prompt.js";
 export { createTransport } from "./core/transport.js";
 export {
   McpConnectionError,

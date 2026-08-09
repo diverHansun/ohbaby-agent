@@ -30,6 +30,10 @@ MCP协议的底层通信机制，支持Stdio、HTTP、SSE三种方式。
 
 本质：抽象接口，由MCP SDK提供实现。
 
+### 1.5 MCP Tool Menu / Search Corpus
+
+`McpToolMenu` 保存 admitted local name 与按 `sessionId + contextScopeId` 隔离的 loaded 集。`McpToolSearch` 是同一 available 快照派生的只读内存 BM25 索引；文档字段为 localName、mcpServer、mcpToolName、准入前原始 description。
+
 ---
 
 ## 二、Data Types（数据类型）
@@ -148,6 +152,22 @@ interface ToolOutput {
   }
 }
 ```
+
+`select_tools` 的局部 metadata 契约为：
+
+```typescript
+{
+  mcpSelection: {
+    candidates: Array<{ name: string; score: number }>
+    loaded: string[]
+    alreadyLoaded: string[]
+    limitReached: string[]
+    unknown: string[]
+  }
+}
+```
+
+`candidates` 不含 description。精确 query 的命中项 score 为 `1`；其余归一化到 `[0, 1)`，按 score 降序、name 升序稳定排列。
 
 ---
 

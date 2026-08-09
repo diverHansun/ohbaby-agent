@@ -42,6 +42,17 @@ interface FakeSdkClient {
   readonly kind: "fake";
 }
 
+function deferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
 const cleanupDirectories: string[] = [];
 
 const testGoalExecutionControl = {
@@ -321,11 +332,19 @@ async function createPromptCompositionForTest(input: {
   return { composition, requests, workdir };
 }
 
-function mcpTool(name: string, description = "Echo from MCP"): Tool {
+function mcpTool(
+  name: string,
+  description = "Echo from MCP",
+): Tool & {
+  readonly mcpServer: string;
+  readonly mcpToolName: string;
+} {
   return {
     category: "readonly",
     description,
     execute: () => ({ output: "echo" }),
+    mcpServer: "server",
+    mcpToolName: name.split("_").at(-1) ?? name,
     name,
     parametersJsonSchema: { properties: {}, type: "object" },
     source: "mcp",
@@ -1021,6 +1040,58 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(names).not.toContain("mcp_s6_server_t3_old");
   });
 
+  it("coalesces concurrent MCP refreshes and prevents stale results from replacing the latest snapshot", async () => {
+    const bus = createBus();
+    const staleRefresh = deferred<readonly Tool[]>();
+    const listeners = new Set<() => void | Promise<void>>();
+    let calls = 0;
+    const mcpManager: FakeMcpManager = {
+      getAllTools() {
+        calls += 1;
+        if (calls === 1) {
+          return Promise.resolve([mcpTool("mcp_s6_server_t7_initial")]);
+        }
+        if (calls === 2) {
+          return staleRefresh.promise;
+        }
+        return Promise.resolve([mcpTool("mcp_s6_server_t6_latest")]);
+      },
+      onChange(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      llmClient: fakeLlmClient(),
+      mcpManager,
+      messageManager: {} as MessageManager,
+      permissionState: createPermissionState({ bus }),
+      skillRegistry: createMutableSkillRegistry([]),
+    });
+
+    for (const listener of listeners) {
+      void listener();
+    }
+    await vi.waitFor(() => {
+      expect(calls).toBe(2);
+    });
+    for (const listener of listeners) {
+      void listener();
+    }
+    staleRefresh.resolve([mcpTool("mcp_s6_server_t5_stale")]);
+
+    await vi.waitFor(async () => {
+      const names = (await composition.toolScheduler.getAvailableTools()).map(
+        (tool) => tool.name,
+      );
+      expect(names).toContain("mcp_s6_server_t6_latest");
+      expect(names).not.toContain("mcp_s6_server_t5_stale");
+    });
+    expect(calls).toBe(3);
+  });
+
   it("clears dynamic MCP tools when discovery cannot be refreshed", async () => {
     const bus = createBus();
     const toolName = "mcp_s6_server_t4_echo";
@@ -1067,9 +1138,11 @@ describe("createUiRuntimeComposition skill tools", () => {
         ),
       ).not.toContain(toolName);
     });
-    expect(
-      notices.some((notice) => notice.title === "MCP tool refresh failed"),
-    ).toBe(true);
+    await vi.waitFor(() => {
+      expect(
+        notices.some((notice) => notice.title === "MCP tool refresh failed"),
+      ).toBe(true);
+    });
   });
 
   it("keeps MCP resource and prompt utilities outside the dynamic tool menu", async () => {
@@ -1201,6 +1274,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     const initialToolNames =
       requests[0]?.tools?.map((tool) => tool.function.name) ?? [];
     expect(initialSystem).toContain(`- ${toolName}`);
+    expect(initialSystem).toContain("search available MCP tools by query");
     expect(initialSystem).not.toContain("A detailed MCP description");
     expect(initialToolNames).toContain("select_tools");
     expect(initialToolNames).not.toContain(toolName);
@@ -1216,13 +1290,16 @@ describe("createUiRuntimeComposition skill tools", () => {
       }),
     ).resolves.toMatchObject({ status: "rejected" });
 
-    await composition.toolScheduler.execute({
+    const loadResult = await composition.toolScheduler.execute({
       agentName: "build",
       callId: "select_mcp",
       messageId: "message_1",
       params: { tools: [toolName] },
       sessionId: "session_mcp_menu",
       toolName: "select_tools",
+    });
+    expect(loadResult.metadata?.mcpSelection).toMatchObject({
+      loaded: [toolName],
     });
 
     const second = await composition.startSession({
@@ -1242,6 +1319,71 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(selectedSystem).not.toContain("<mcp_tools>");
     expect(selectedTool?.function.description).toBe(
       "MCP tool loaded on demand. Use its schema to perform the requested operation.",
+    );
+  });
+
+  it("searches admitted MCP descriptions and loads a ranked candidate only when requested", async () => {
+    const toolName = "mcp_s6_server_t4_echo";
+    const { composition, requests, workdir } =
+      await createPromptCompositionForTest({
+        mcpTools: [mcpTool(toolName, "Look up repository release notes")],
+        policyMode: "agent",
+      });
+
+    const searchResult = await composition.toolScheduler.execute({
+      agentName: "build",
+      callId: "search_mcp",
+      messageId: "message_1",
+      params: { query: "repository release" },
+      sessionId: "session_search_mcp",
+      toolName: "select_tools",
+    });
+
+    const searchSelection = searchResult.metadata?.mcpSelection as
+      | {
+          readonly candidates: readonly {
+            readonly name: string;
+            readonly score: number;
+          }[];
+          readonly loaded: readonly string[];
+        }
+      | undefined;
+    expect(
+      searchSelection?.candidates.map((candidate) => candidate.name),
+    ).toEqual([toolName]);
+    expect(typeof searchSelection?.candidates[0]?.score).toBe("number");
+    expect(searchSelection?.loaded).toEqual([]);
+    await expect(
+      composition.toolScheduler.execute({
+        agentName: "build",
+        callId: "still_unloaded",
+        messageId: "message_1",
+        params: {},
+        sessionId: "session_search_mcp",
+        toolName,
+      }),
+    ).resolves.toMatchObject({ status: "rejected" });
+
+    const queryLoadResult = await composition.toolScheduler.execute({
+      agentName: "build",
+      callId: "load_search_result",
+      messageId: "message_1",
+      params: { load: true, query: "repository release" },
+      sessionId: "session_search_mcp",
+      toolName: "select_tools",
+    });
+    expect(queryLoadResult.metadata?.mcpSelection).toMatchObject({
+      loaded: [toolName],
+    });
+    const run = await composition.startSession({
+      agentName: "build",
+      projectRoot: workdir,
+      prompt: "Use the searched MCP tool",
+      sessionId: "session_search_mcp",
+    });
+    await composition.runManager.waitForCompletion(run.runId);
+    expect(requests.at(-1)?.tools?.map((tool) => tool.function.name)).toContain(
+      toolName,
     );
   });
 

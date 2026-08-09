@@ -78,6 +78,7 @@ import {
 import {
   admitMcpTools,
   createSelectToolsTool,
+  generateMcpToolMenuPrompt,
   McpManager,
   McpToolMenu,
   type McpClientStatus,
@@ -261,7 +262,7 @@ export async function createUiRuntimeComposition(
       });
       return loaded.has(tool.name)
         ? undefined
-        : "MCP tool is not loaded. Use select_tools with its exact name first.";
+        : "MCP tool is not loaded. Use select_tools to search or load it first.";
     },
     agentTools: agentManager,
     bus: options.bus,
@@ -426,7 +427,13 @@ export async function createUiRuntimeComposition(
       const tools = await resolvePromptTools(input);
       return tools.map((tool) => tool.name);
     },
-    mcpToolNamesProvider: resolveMcpToolNames,
+    async runtimePromptsProvider(input) {
+      return [
+        generateMcpToolMenuPrompt({
+          toolNames: await resolveMcpToolNames(input),
+        }),
+      ];
+    },
     onSecurityFinding(finding) {
       options.onNotice?.(noticeFromPromptSecurityFinding(finding));
     },
@@ -686,6 +693,8 @@ export async function createUiRuntimeComposition(
   const mcpManager: McpManagerPort =
     options.mcpManager ??
     McpManager.getInstance(options.workdir ?? process.cwd());
+  let mcpRefreshRevision = 0;
+  let mcpRefreshRunner: Promise<void> | undefined;
   function clearMcpTools(): void {
     for (const toolName of registeredMcpToolNames) {
       toolScheduler.unregister(toolName);
@@ -694,14 +703,7 @@ export async function createUiRuntimeComposition(
     mcpToolMenu.setAvailable([]);
   }
 
-  async function refreshMcpTools(): Promise<void> {
-    let discoveredTools: readonly Tool[];
-    try {
-      discoveredTools = await mcpManager.getAllTools();
-    } catch (error) {
-      clearMcpTools();
-      throw error;
-    }
+  function commitMcpTools(discoveredTools: readonly Tool[]): void {
     const admission = admitMcpTools(discoveredTools);
     const nextToolNames = new Set(admission.accepted.map((tool) => tool.name));
     for (const toolName of registeredMcpToolNames) {
@@ -713,7 +715,29 @@ export async function createUiRuntimeComposition(
       toolScheduler.register(tool);
     }
     registeredMcpToolNames = nextToolNames;
-    mcpToolMenu.setAvailable([...nextToolNames]);
+    mcpToolMenu.setAvailable(
+      [...nextToolNames],
+      discoveredTools
+        .filter((tool) => nextToolNames.has(tool.name))
+        .map((tool) => {
+          const mcpFields = tool as Tool & {
+            readonly mcpServer?: unknown;
+            readonly mcpToolName?: unknown;
+          };
+          return {
+            description: tool.description,
+            localName: tool.name,
+            mcpServer:
+              typeof mcpFields.mcpServer === "string"
+                ? mcpFields.mcpServer
+                : "",
+            mcpToolName:
+              typeof mcpFields.mcpToolName === "string"
+                ? mcpFields.mcpToolName
+                : "",
+          };
+        }),
+    );
     for (const rejected of admission.rejected) {
       options.onNotice?.({
         key: `mcp:tool-rejected:${rejected.name}:${rejected.reason}`,
@@ -724,6 +748,37 @@ export async function createUiRuntimeComposition(
         title: "MCP tool blocked",
       });
     }
+  }
+
+  function refreshMcpTools(): Promise<void> {
+    mcpRefreshRevision += 1;
+    if (mcpRefreshRunner !== undefined) {
+      return mcpRefreshRunner;
+    }
+    mcpRefreshRunner = (async (): Promise<void> => {
+      let completedRevision = 0;
+      while (completedRevision < mcpRefreshRevision) {
+        const revision = mcpRefreshRevision;
+        let discoveredTools: readonly Tool[];
+        try {
+          discoveredTools = await mcpManager.getAllTools();
+        } catch (error) {
+          if (revision !== mcpRefreshRevision) {
+            completedRevision = revision;
+            continue;
+          }
+          clearMcpTools();
+          throw error;
+        }
+        if (revision === mcpRefreshRevision) {
+          commitMcpTools(discoveredTools);
+        }
+        completedRevision = revision;
+      }
+    })().finally(() => {
+      mcpRefreshRunner = undefined;
+    });
+    return mcpRefreshRunner;
   }
 
   await refreshMcpTools().catch((error: unknown) => {

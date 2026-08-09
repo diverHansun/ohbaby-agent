@@ -3,7 +3,7 @@ export type LayerType =
   | "base"
   | "custom"
   | "environment"
-  | "mcp-tools"
+  | "runtime"
   | "task";
 
 export type AgentKind = "primary" | "subagent";
@@ -34,6 +34,6 @@ export interface AssembleOptions {
   readonly environment: EnvironmentInfo;
   readonly customInstructions?: readonly string[];
   readonly taskKind?: PromptTaskKind;
-  readonly mcpToolNames?: readonly string[];
+  readonly runtimePrompts?: readonly string[];
   readonly tools?: readonly string[];
 }

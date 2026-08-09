@@ -15,14 +15,16 @@
 - 正确处理各种错误情况
 - 多工作区隔离正常工作
 - 懒加载机制正常工作
+- MCP deferred menu 的 exact 兼容、BM25 搜索、显式 load 与 scope 隔离正常工作
+- 并发 refresh 保持 latest-wins，registry/menu/corpus 不分叉
 
 ### 1.2 测试层次
 
 | 测试类型 | 覆盖范围 | 工具 |
 |---------|---------|------|
-| 单元测试 | 单个类/函数（McpClient、adaptMcpTool） | Jest + Mock |
-| 集成测试 | McpManager完整流程 | Jest + 真实MCP服务器 |
-| E2E测试 | 与tool-scheduler集成 | Jest + 端到端场景 |
+| 单元测试 | 单个类/函数（McpClient、adaptMcpTool、McpToolSearch、McpToolMenu） | Vitest |
+| 集成测试 | McpManager 与 runtime composition 完整流程 | Vitest + 受控 fake/官方 InMemoryTransport |
+| E2E测试 | 与 tool-scheduler / system prompt 集成 | Vitest + 端到端场景 |
 
 ---
 

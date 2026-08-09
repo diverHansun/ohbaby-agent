@@ -4,7 +4,6 @@ import {
   generateBasePrompt,
   generateCustomInstructionsPrompt,
   generateEnvironmentPrompt,
-  generateMcpToolMenuPrompt,
 } from "./layers/index.js";
 import { getBuiltinAgentPrompt } from "./prompts/agents/index.js";
 import { getPrimaryTaskPrompt } from "./prompts/primary/tasks.js";
@@ -50,7 +49,7 @@ export interface SystemPromptProviderOptions {
   readonly toolsProvider?: (
     input: SystemPromptProviderInput,
   ) => Promise<readonly string[]> | readonly string[];
-  readonly mcpToolNamesProvider?: (
+  readonly runtimePromptsProvider?: (
     input: SystemPromptProviderInput,
   ) => Promise<readonly string[]> | readonly string[];
   readonly taskKindResolver?: (
@@ -133,9 +132,7 @@ export const SystemPrompt = {
     assertAssembleOptions(options);
     const isSubagent = options.isSubagent;
     const agentPromptAddon = options.agentPromptAddon ?? options.agentPrompt;
-    const mcpToolMenu = generateMcpToolMenuPrompt({
-      toolNames: options.mcpToolNames,
-    });
+    const runtimePrompts = options.runtimePrompts ?? [];
 
     if (isSubagent) {
       return compactPrompts([
@@ -144,7 +141,7 @@ export const SystemPrompt = {
           resolveSubagentTaskKind(options.agentName, options.taskKind),
         ),
         generateAgentAddonPrompt(agentPromptAddon),
-        mcpToolMenu,
+        ...runtimePrompts,
         generateEnvironmentPrompt({
           info: options.environment,
           minimal: true,
@@ -158,7 +155,7 @@ export const SystemPrompt = {
       getPrimaryTaskPrompt(resolvePrimaryTaskKind(options.taskKind)),
       generateAgentAddonPrompt(agentPromptAddon),
       generateSubagentRolesPrompt(options.availableSubagentRoles),
-      mcpToolMenu,
+      ...runtimePrompts,
       generateEnvironmentPrompt({
         info: options.environment,
         minimal: false,
@@ -219,7 +216,7 @@ export function createSystemPromptProvider(
       const [
         availableSubagentRoles,
         environment,
-        mcpToolNames,
+        runtimePrompts,
         tools,
         taskKind,
       ] = await Promise.all([
@@ -229,7 +226,7 @@ export function createSystemPromptProvider(
         options.environmentDetector
           ? options.environmentDetector(input.directory, input)
           : detectEnvironment(input.directory),
-        options.mcpToolNamesProvider?.(input) ?? [],
+        options.runtimePromptsProvider?.(input) ?? [],
         options.toolsProvider?.(input) ?? [],
         options.taskKindResolver?.(input, agentName),
       ]);
@@ -245,7 +242,7 @@ export function createSystemPromptProvider(
           agentPromptAddon,
           environment,
           isSubagent: true,
-          mcpToolNames,
+          runtimePrompts,
           taskKind,
           tools,
         }).join("\n\n");
@@ -266,7 +263,7 @@ export function createSystemPromptProvider(
         customInstructions,
         environment,
         isSubagent: false,
-        mcpToolNames,
+        runtimePrompts,
         taskKind,
         tools,
       }).join("\n\n");

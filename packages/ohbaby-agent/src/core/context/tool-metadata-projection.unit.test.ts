@@ -5,6 +5,29 @@ import {
 } from "./tool-metadata-projection.js";
 
 describe("tool metadata projection", () => {
+  it("projects the local select_tools MCP selection contract", () => {
+    expect(
+      projectToolMetadataForModel("select_tools", {
+        ignored: "secret",
+        mcpSelection: {
+          alreadyLoaded: ["mcp_already"],
+          candidates: [{ name: "mcp_search", score: 0.75 }],
+          ignored: "secret",
+          limitReached: [],
+          loaded: ["mcp_search"],
+          unknown: [],
+        },
+      }),
+    ).toEqual({
+      mcpSelection: {
+        alreadyLoaded: ["mcp_already"],
+        candidates: [{ name: "mcp_search", score: 0.75 }],
+        limitReached: [],
+        loaded: ["mcp_search"],
+        unknown: [],
+      },
+    });
+  });
   it("projects subagent_run instance metadata", () => {
     expect(
       projectToolMetadataForModel("subagent_run", {

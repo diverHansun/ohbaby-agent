@@ -5,6 +5,11 @@ import type {
   ToolExecutionContext,
   ToolExecutionResult,
 } from "../../core/tool-scheduler/index.js";
+import {
+  McpToolSearch,
+  type McpToolSearchDocument,
+  type McpToolSearchResult,
+} from "./mcp-tool-search.js";
 
 export const MAX_MCP_TOOL_DESCRIPTION_CHARS = 2_048;
 export const MAX_MCP_TOOL_NAME_CHARS = 256;
@@ -16,7 +21,7 @@ export const MAX_MCP_TOOLS_PER_SESSION = 8;
 const FIXED_MCP_TOOL_DESCRIPTION =
   "MCP tool loaded on demand. Use its schema to perform the requested operation.";
 const SELECT_TOOLS_DESCRIPTION =
-  "Load up to 8 exact MCP tool names for this session/context scope.";
+  "Load exact MCP tool names, or search available MCP tools by query. Search does not load unless load is true.";
 const SAFE_LOCAL_MCP_TOOL_NAME = /^mcp_[A-Za-z0-9_-]+$/u;
 
 export type McpToolRejectionReason =
@@ -200,9 +205,18 @@ function uniqueNames(value: readonly string[]): string[] {
 export class McpToolMenu {
   private available = new Set<string>();
   private readonly loadedByScope = new Map<string, Set<string>>();
+  private searchIndex = new McpToolSearch([]);
 
-  setAvailable(names: readonly string[]): void {
+  setAvailable(
+    names: readonly string[],
+    searchDocuments: readonly McpToolSearchDocument[] = [],
+  ): void {
     this.available = new Set(uniqueNames(names));
+    this.searchIndex = new McpToolSearch(
+      searchDocuments.filter((document) =>
+        this.available.has(document.localName),
+      ),
+    );
     for (const loaded of this.loadedByScope.values()) {
       for (const name of loaded) {
         if (!this.available.has(name)) {
@@ -210,6 +224,10 @@ export class McpToolMenu {
         }
       }
     }
+  }
+
+  search(query: string, limit: number): McpToolSearchResult[] {
+    return this.searchIndex.search(query, limit);
   }
 
   selectableNames(candidates?: readonly ToolDefinition[]): string[] {
@@ -291,6 +309,67 @@ function requestedToolNames(params: Record<string, unknown>): string[] {
   return value as string[];
 }
 
+const DEFAULT_MCP_TOOL_SEARCH_LIMIT = 5;
+
+type SelectToolsRequest =
+  | { readonly kind: "exact"; readonly tools: readonly string[] }
+  | {
+      readonly kind: "query";
+      readonly limit: number;
+      readonly load: boolean;
+      readonly query: string;
+    };
+
+function hasOwn(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function selectToolsRequest(
+  params: Record<string, unknown>,
+): SelectToolsRequest {
+  const hasTools = hasOwn(params, "tools");
+  const hasQuery = hasOwn(params, "query");
+  const hasLoad = hasOwn(params, "load");
+  const hasLimit = hasOwn(params, "limit");
+  if (hasTools) {
+    if (hasQuery || hasLoad || hasLimit) {
+      throw new Error(
+        "select_tools tools cannot be combined with query, load, or limit.",
+      );
+    }
+    return { kind: "exact", tools: requestedToolNames(params) };
+  }
+  if (!hasQuery) {
+    throw new Error("select_tools requires either tools or a query.");
+  }
+  if (typeof params.query !== "string" || params.query.trim() === "") {
+    throw new Error("select_tools query must be a non-empty string.");
+  }
+  if (hasLoad && typeof params.load !== "boolean") {
+    throw new Error("select_tools load must be a boolean.");
+  }
+  const limit = params.limit ?? DEFAULT_MCP_TOOL_SEARCH_LIMIT;
+  if (
+    !Number.isInteger(limit) ||
+    (limit as number) < 1 ||
+    (limit as number) > MAX_MCP_TOOLS_PER_SELECTION
+  ) {
+    throw new Error(
+      `select_tools limit must be an integer from 1 to ${String(MAX_MCP_TOOLS_PER_SELECTION)}.`,
+    );
+  }
+  return {
+    kind: "query",
+    limit: limit as number,
+    load: params.load === true,
+    query: params.query.trim(),
+  };
+}
+
+function emptySelection(): McpToolSelection {
+  return { alreadyLoaded: [], limitReached: [], loaded: [], unknown: [] };
+}
+
 function selectionOutput(selection: McpToolSelection): string {
   const lines: string[] = [];
   if (selection.loaded.length > 0) {
@@ -325,8 +404,14 @@ export function createSelectToolsTool(menu: McpToolMenu): Tool {
           minItems: 1,
           type: "array",
         },
+        query: { minLength: 1, type: "string" },
+        limit: {
+          maximum: MAX_MCP_TOOLS_PER_SELECTION,
+          minimum: 1,
+          type: "integer",
+        },
+        load: { type: "boolean" },
       },
-      required: ["tools"],
       type: "object",
     },
     source: "builtin",
@@ -334,14 +419,48 @@ export function createSelectToolsTool(menu: McpToolMenu): Tool {
       params: Record<string, unknown>,
       context: ToolExecutionContext,
     ): ToolExecutionResult {
-      const selection = menu.select(
-        {
-          contextScopeId: context.contextScopeId,
-          sessionId: context.sessionId,
+      const request = selectToolsRequest(params);
+      const scope = {
+        contextScopeId: context.contextScopeId,
+        sessionId: context.sessionId,
+      };
+      const candidates =
+        request.kind === "query"
+          ? menu.search(request.query, request.limit)
+          : [];
+      const selection =
+        request.kind === "exact"
+          ? menu.select(scope, request.tools)
+          : request.load
+            ? menu.select(
+                scope,
+                candidates.map((candidate) => candidate.name),
+              )
+            : emptySelection();
+      const candidateOutput =
+        request.kind !== "query"
+          ? ""
+          : candidates.length === 0
+            ? "No matching MCP tools found."
+            : `MCP tool candidates: ${candidates
+                .map(
+                  (candidate) =>
+                    `${candidate.name} (${candidate.score.toFixed(4)})`,
+                )
+                .join(", ")}.`;
+      const selectionSummary =
+        request.kind === "exact" || request.load
+          ? selectionOutput(selection)
+          : "";
+      const output = [candidateOutput, selectionSummary]
+        .filter((line) => line !== "")
+        .join("\n");
+      return {
+        metadata: {
+          mcpSelection: { candidates, ...selection },
         },
-        requestedToolNames(params),
-      );
-      return { output: selectionOutput(selection) };
+        output,
+      };
     },
   };
 }

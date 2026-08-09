@@ -195,9 +195,165 @@ describe("MCP dynamic tool menu", () => {
         },
       ),
     ).toEqual({
+      metadata: {
+        mcpSelection: {
+          alreadyLoaded: [],
+          candidates: [],
+          limitReached: [],
+          loaded: [toolName],
+          unknown: ["mcp_s7_example_t7_missing"],
+        },
+      },
       output:
         "Loaded MCP tools: mcp_s7_example_t6_search.\nUnavailable MCP tools: mcp_s7_example_t7_missing.",
     });
+  });
+
+  it("searches without loading by default and returns only ranked names and scores", async () => {
+    const menu = new McpToolMenu();
+    const repositoryTool = "mcp_s6_github_t6_search";
+    const calendarTool = "mcp_s8_calendar_t4_read";
+    menu.setAvailable(
+      [repositoryTool, calendarTool],
+      [
+        {
+          description: "Search repository issues and pull requests.",
+          localName: repositoryTool,
+          mcpServer: "github",
+          mcpToolName: "search",
+        },
+        {
+          description: "Read calendar events.",
+          localName: calendarTool,
+          mcpServer: "calendar",
+          mcpToolName: "read",
+        },
+      ],
+    );
+    const tool = createSelectToolsTool(menu);
+
+    const candidates = menu.search("repository issues", 5);
+    const result = await tool.execute(
+      { query: "repository issues" },
+      {
+        callId: "call_search",
+        messageId: "message_1",
+        sessionId: "session_1",
+        signal: new AbortController().signal,
+      },
+    );
+
+    expect(result).toMatchObject({
+      metadata: {
+        mcpSelection: {
+          alreadyLoaded: [],
+          candidates,
+          limitReached: [],
+          loaded: [],
+          unknown: [],
+        },
+      },
+    });
+    expect(menu.loadedNames({ sessionId: "session_1" })).toEqual(new Set());
+    expect(candidates.map((candidate) => candidate.name)).toEqual([
+      repositoryTool,
+    ]);
+    expect(typeof candidates[0]?.score).toBe("number");
+    expect(result.output).toBe(
+      `MCP tool candidates: ${repositoryTool} (${candidates[0]?.score.toFixed(4)}).`,
+    );
+    expect(JSON.stringify(result)).not.toContain("Search repository");
+  });
+
+  it("returns a successful empty search result without a loading message", async () => {
+    const menu = new McpToolMenu();
+    menu.setAvailable([]);
+
+    const result = await createSelectToolsTool(menu).execute(
+      { query: "missing" },
+      {
+        callId: "call_empty_search",
+        messageId: "message_1",
+        sessionId: "session_1",
+        signal: new AbortController().signal,
+      },
+    );
+    expect(result).toMatchObject({
+      metadata: {
+        mcpSelection: {
+          candidates: [],
+          loaded: [],
+        },
+      },
+      output: "No matching MCP tools found.",
+    });
+  });
+
+  it("loads query candidates in ranking order when load is true", async () => {
+    const menu = new McpToolMenu();
+    const exactTool = "mcp_s6_github_t6_search";
+    const relatedTool = "mcp_s6_gitlab_t6_search";
+    menu.setAvailable(
+      [relatedTool, exactTool],
+      [
+        {
+          description: "Search source repositories.",
+          localName: relatedTool,
+          mcpServer: "gitlab",
+          mcpToolName: "search",
+        },
+        {
+          description: "Search repository issues.",
+          localName: exactTool,
+          mcpServer: "github",
+          mcpToolName: "search",
+        },
+      ],
+    );
+
+    const candidates = menu.search(exactTool, 5);
+    const result = await createSelectToolsTool(menu).execute(
+      { load: true, query: exactTool },
+      {
+        callId: "call_load_search",
+        messageId: "message_1",
+        sessionId: "session_1",
+        signal: new AbortController().signal,
+      },
+    );
+
+    expect(result.metadata?.mcpSelection).toMatchObject({
+      candidates,
+      loaded: [exactTool, relatedTool],
+    });
+    expect(candidates[0]).toEqual({ name: exactTool, score: 1 });
+    expect(candidates[1]?.name).toBe(relatedTool);
+    expect(candidates[1]?.score).toBeLessThan(1);
+  });
+
+  it("rejects every unsupported select_tools parameter combination", () => {
+    const tool = createSelectToolsTool(new McpToolMenu());
+    const context = {
+      callId: "call_invalid",
+      messageId: "message_1",
+      sessionId: "session_1",
+      signal: new AbortController().signal,
+    };
+
+    for (const params of [
+      {},
+      { tools: [] },
+      { query: " " },
+      { load: false },
+      { limit: 2 },
+      { tools: ["mcp_s1_a_t1_b"], query: "search" },
+      { tools: ["mcp_s1_a_t1_b"], load: false },
+      { tools: ["mcp_s1_a_t1_b"], limit: 1 },
+      { query: "search", limit: 0 },
+      { query: "search", limit: 9 },
+    ]) {
+      expect(() => tool.execute(params, context)).toThrow(/select_tools/);
+    }
   });
 
   it("keeps the session/context scope selection limit atomic across concurrent requests", async () => {

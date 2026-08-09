@@ -41,7 +41,10 @@ createUiRuntimeComposition()
         │    └─ install tools/list_changed handler
         │
         └─ adaptMcpTool()
-             └─ ToolScheduler.register()
+             └─ admitMcpTools()
+                  ├─ ToolScheduler.register()  # 执行注册
+                  ├─ McpToolMenu.setAvailable() # scope 点菜
+                  └─ McpToolSearch              # 原始 desc 仅入索引
 ```
 
 If a server fails to connect, the manager records failed status and continues with the other servers.
@@ -72,6 +75,16 @@ ToolScheduler
 ```
 
 Tool result content supports text, image, audio, embedded resource, resource link, and `structuredContent` metadata.
+
+模型调用 MCP 工具前先经过发现/加载：
+
+```text
+select_tools({query, limit?, load:false}) -> candidates [{name, score}]
+select_tools({query, limit?, load:true})  -> 同一排名依次 menu.select
+select_tools({tools:[exact names]})       -> 精确 menu.select（兼容路径）
+```
+
+只有 loaded 集中的 MCP 工具能通过 runtime access guard。搜索结果和模型可见 metadata 均不包含 server 原始 description。
 
 ### 1.3 Resource / Prompt Flow
 
@@ -122,9 +135,9 @@ McpManager
         │
         ▼
 Runtime composition
-  ├─ calls getAllTools()
-  ├─ unregisters stale MCP tool names
-  └─ registers fresh MCP tools
+  ├─ 串行/合并 refresh，revision latest-wins
+  ├─ calls getAllTools() + admit
+  └─ 同快照更新 registry / menu / search corpus
 ```
 
 ---
@@ -186,6 +199,10 @@ class McpManager {
 | `mcp_prompt` | `readonly` | Get a specific prompt from a connected MCP server |
 
 Both tools use `source: "mcp"` and `requireExplicitApproval: true`, so the generic explicit-approval path protects resource and prompt reads. Server-provided executable tools still carry MCP-local `isTrusted` metadata, but scheduler consumes only `requireExplicitApproval`.
+
+### 2.4 `select_tools`
+
+`tools` 只能单独出现；`query` 可搭配 `limit`（1–8，默认 5）和 `load`（默认 false）。空对象、空 tools、空白 query、`tools+query/load/limit`、以及无 query 的 load/limit 均报错。query 无命中是成功空结果。
 
 ---
 

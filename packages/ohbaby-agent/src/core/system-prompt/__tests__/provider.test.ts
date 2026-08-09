@@ -123,13 +123,13 @@ describe("createSystemPromptProvider", () => {
     expect(availableSubagentRolesProvider).toHaveBeenCalledTimes(1);
   });
 
-  it("announces unloaded MCP tools by exact name without tool descriptions", async () => {
+  it("includes runtime-owned prompt fragments without knowing their domain", async () => {
     const provider = createSystemPromptProvider({
       customInstructionLoader: vi.fn().mockResolvedValue([]),
       environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
-      mcpToolNamesProvider: vi
+      runtimePromptsProvider: vi
         .fn()
-        .mockResolvedValue(["mcp_s7_example_t6_search"]),
+        .mockResolvedValue(["<runtime_prompt>MCP menu</runtime_prompt>"]),
       toolsProvider: vi.fn().mockResolvedValue(["mcp_bad", "read"]),
     });
 
@@ -139,9 +139,6 @@ describe("createSystemPromptProvider", () => {
       isSubagent: false,
     });
 
-    expect(prompt).toContain("<mcp_tools>");
-    expect(prompt).toContain("- mcp_s7_example_t6_search");
-    expect(prompt).toContain("Use select_tools with exact names");
-    expect(prompt).not.toContain("MCP tool metadata failed");
+    expect(prompt).toContain("<runtime_prompt>MCP menu</runtime_prompt>");
   });
 });

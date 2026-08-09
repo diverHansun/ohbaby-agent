@@ -99,39 +99,48 @@ export class McpManager {
   }
 
   async getAllTools(): Promise<readonly McpTool[]> {
-    const generation = this.generation;
-    await this.ensureInitialized();
-    if (generation !== this.generation) {
-      return this.getAllTools();
-    }
-    if (this.tools) {
-      return this.tools;
-    }
-
-    const tools: McpTool[] = [];
-    for (const [serverName, client] of this.clients) {
-      try {
-        const config = this.serverConfigs.get(serverName) ?? client.config;
-        const definitions = await client.listTools();
-        for (const tool of definitions) {
-          if (shouldIncludeTool(tool, config)) {
-            tools.push(adaptMcpTool(tool, client));
+    let latestTools: readonly McpTool[] = [];
+    let listAttempts = 0;
+    for (
+      let generationChecks = 0;
+      generationChecks < 3 && listAttempts < 2;
+      generationChecks += 1
+    ) {
+      const generation = this.generation;
+      await this.ensureInitialized();
+      if (generation !== this.generation) {
+        continue;
+      }
+      if (this.tools) {
+        return this.tools;
+      }
+      listAttempts += 1;
+      const tools: McpTool[] = [];
+      for (const [serverName, client] of this.clients) {
+        try {
+          const config = this.serverConfigs.get(serverName) ?? client.config;
+          const definitions = await client.listTools();
+          for (const tool of definitions) {
+            if (shouldIncludeTool(tool, config)) {
+              tools.push(adaptMcpTool(tool, client));
+            }
           }
+          this.statuses.set(serverName, client.getStatus());
+        } catch (error) {
+          this.statuses.set(serverName, {
+            error: errorMessage(error),
+            status: "failed",
+          });
+          this.onError(error);
         }
-        this.statuses.set(serverName, client.getStatus());
-      } catch (error) {
-        this.statuses.set(serverName, {
-          error: errorMessage(error),
-          status: "failed",
-        });
-        this.onError(error);
+      }
+      latestTools = tools;
+      if (generation === this.generation) {
+        this.tools = tools;
+        return tools;
       }
     }
-
-    if (generation === this.generation) {
-      this.tools = tools;
-    }
-    return tools;
+    return latestTools;
   }
 
   async executeTool(
@@ -402,6 +411,7 @@ export class McpManager {
     if (this.clients.get(serverName) !== client) {
       return;
     }
+    this.generation += 1;
     this.tools = null;
     this.statuses.set(serverName, client.getStatus());
     this.notifyChanged();
