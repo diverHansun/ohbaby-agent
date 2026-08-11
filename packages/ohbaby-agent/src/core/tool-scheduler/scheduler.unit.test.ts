@@ -1232,6 +1232,7 @@ describe("ToolScheduler", () => {
         expect(spawn).toHaveBeenCalledTimes(1);
       });
       child.emit("exit", 0, null);
+      child.emit("close", 0, null);
 
       await expect(resultPromise).resolves.toMatchObject({
         status: "success",
@@ -1891,6 +1892,7 @@ describe("ToolScheduler", () => {
           queueMicrotask(() => {
             child.stdout.emit("data", Buffer.from("ran\n"));
             child.emit("exit", 0, null);
+            child.emit("close", 0, null);
           });
           return child as unknown as ChildProcess;
         },

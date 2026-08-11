@@ -21,6 +21,8 @@ export const exploreAgent: AgentConfig = {
       "write",
       "edit",
       "bash",
+      "task_output",
+      "task_kill",
       "todo_read",
       "todo_write",
       "memory_list",

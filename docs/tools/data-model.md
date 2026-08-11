@@ -170,11 +170,14 @@ const ListParams = z.object({
 ```typescript
 const BashParams = z.object({
   command: z.string().describe('要执行的 Shell 命令'),
-  description: z.string().describe('命令的简短描述'),
-  timeout: z.number().optional().describe('超时时间（毫秒）'),
-  workdir: z.string().optional().describe('工作目录'),
+  timeout: z.number().int().min(1).max(600000).optional()
+    .describe('job 最大生命周期（毫秒）；前后台一致，到点进入 timed_out'),
+  run_in_background: z.boolean().optional()
+    .describe('是否立即返回 job_id；默认 false'),
 })
 ```
+
+`task_output` 使用 `job_id`、`block?`、`wait_ms?`；`wait_ms` 只限制本次读取等待，不修改 job 生命周期，当前 tool 被取消时本次 block 立即结束。`task_kill` 使用 `job_id`，运行中 job 进入 `cancelled`，与自动 `timed_out` 区分。Shell metadata 在 spawn 失败时可附 `error`；Registry 最多保留 100 个 job，按完成顺序优先淘汰最早进入终态的 job。
 
 ### 3.8 task 工具
 
@@ -270,8 +273,11 @@ interface EditMetadata extends BaseMetadata {
 **bash 工具**：
 ```typescript
 interface BashMetadata extends BaseMetadata {
-  exitCode: number           // 退出码
-  command: string            // 执行的命令
+  jobId: string              // job 逻辑 id
+  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out'
+  truncated: boolean
+  exitCode?: number | null    // 终态字段
+  signal?: string | null      // 终态字段
 }
 ```
 
@@ -294,8 +300,8 @@ interface ToolLimits {
     maxLineLength: number    // 默认 2000
   }
   bash: {
-    maxOutputLength: number  // 默认 30000
-    defaultTimeout: number   // 默认 120000 (2分钟)
+    maxOutputLength: number  // 默认约 32000 字符，内存尾部
+    defaultTimeout: number   // 默认 120000 (2分钟)，job 生命周期
   }
   glob: {
     maxResults: number       // 默认 100

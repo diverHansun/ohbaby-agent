@@ -113,9 +113,9 @@ bash.exe: C:\Program Files\Git\bin\bash.exe
 
 MVP 阶段不支持用户自定义 shell 路径的配置项。自动检测逻辑覆盖绝大多数场景。
 
-### N6: 不支持后台进程管理
+### N6: 不在 shell 模块维护后台 Job 表
 
-后台运行的 shell 进程管理（如果需要）由其他模块负责。
+后台运行的 shell job 由 tools 层的 `ShellJobRegistry` 在进程内维护；本模块仍只提供 shell 检测、spawn 所需能力与 `killTree` 进程树清理原语。
 
 ### N7: 不负责命令解析
 

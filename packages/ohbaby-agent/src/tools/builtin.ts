@@ -15,6 +15,12 @@ import {
 import { createSubagentTools, type SubagentToolHost } from "./subagent.js";
 import { createWebTools, type WebToolsOptions } from "./web.js";
 import { createGoalTools, type GoalToolBackend } from "../goals/tools.js";
+import {
+  createTaskKillTool,
+  createTaskOutputTool,
+  ShellJobRegistry,
+} from "./shell-job-registry.js";
+import { Shell } from "../shell/index.js";
 
 export interface BuiltinToolsOptions {
   readonly shell?: BashShell;
@@ -24,10 +30,17 @@ export interface BuiltinToolsOptions {
   readonly todoToolOptions?: TodoToolOptions;
   readonly subagentHost?: SubagentToolHost;
   readonly goalBackend?: GoalToolBackend;
+  readonly shellJobRegistry?: ShellJobRegistry;
 }
 
 export function createBuiltinTools(options: BuiltinToolsOptions = {}): Tool[] {
   const todoStore = options.todoStore ?? new InMemoryTodoStore();
+  const shellJobRegistry =
+    options.shellJobRegistry ??
+    new ShellJobRegistry({
+      killTree: (child): Promise<void> | void =>
+        (options.shell ?? Shell).killTree(child),
+    });
   const tools = [
     createReadTool(),
     createListTool(),
@@ -37,7 +50,13 @@ export function createBuiltinTools(options: BuiltinToolsOptions = {}): Tool[] {
     createEditTool(),
     ...createTodoTools(todoStore, options.todoToolOptions),
     ...createWebTools(options.searchProvider),
-    createBashTool({ shell: options.shell, spawn: options.spawn }),
+    createBashTool({
+      registry: shellJobRegistry,
+      shell: options.shell,
+      spawn: options.spawn,
+    }),
+    createTaskOutputTool(shellJobRegistry),
+    createTaskKillTool(shellJobRegistry),
   ];
   if (options.subagentHost) {
     tools.push(...createSubagentTools(options.subagentHost));

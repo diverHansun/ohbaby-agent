@@ -328,32 +328,37 @@ const result = await ReadTool.execute(
 
 **名称**：`bash`
 
-**描述**：执行 Shell 命令
+**描述**：执行 Shell 命令；`timeout` 是前后台 shell job 的最大生命周期
 
 **参数**：
 ```typescript
 {
   command: string        // 必需，命令
-  description: string    // 必需，命令描述
-  timeout?: number       // 可选，超时（毫秒）
-  workdir?: string       // 可选，工作目录
+  timeout?: number       // 可选，job 生命周期（毫秒），默认 120000，上限 600000
+  run_in_background?: boolean // 可选，默认 false
 }
 ```
 
 **返回**：
 ```typescript
 {
-  content: string        // 命令输出
+  output: string         // 命令输出；后台为当前尾部快照
   metadata: {
-    exitCode: number
-    truncated?: boolean
+    jobId: string
+    status: 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out'
+    truncated: boolean
+    exitCode?: number | null
+    signal?: string | null
+    error?: string
   }
 }
 ```
 
+`task_output({ job_id, block?, wait_ms? })` 返回同样的 `output + metadata`；`wait_ms` 只限制本次 block 等待，turn abort 会提前取消本次读取但不终止 job。`task_kill({ job_id })` 将运行中 job 置为 `cancelled`，对已终态调用保持原状态；killTree 后 child 仍不 close 时最多等待 1 秒再收口。v1 不落盘、不返回 `outputPath`，也不提供 cursor/offset；Registry 最多保留 100 个 job，超限时按完成顺序淘汰最早进入终态的 job。
+
 **错误场景**：
-- TimeoutError：执行超时
-- ExecutionError：命令执行失败
+- `timed_out`：job 生命周期到点并由 registry 自动终止
+- `failed`：命令以非零退出或启动失败
 
 ---
 

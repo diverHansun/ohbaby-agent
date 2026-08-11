@@ -92,6 +92,7 @@ describe("bash tool scheduler integration", () => {
         queueMicrotask(() => {
           child.stdout.emit("data", "scheduler-ok\n");
           child.emit("exit", 0, null);
+          child.emit("close", 0, null);
         });
         return child as unknown as ChildProcess;
       },
@@ -123,6 +124,7 @@ describe("bash tool scheduler integration", () => {
       ) => {
         queueMicrotask(() => {
           child.emit("exit", 0, null);
+          child.emit("close", 0, null);
         });
         return child as unknown as ChildProcess;
       },
@@ -150,6 +152,7 @@ describe("bash tool scheduler integration", () => {
       ) => {
         queueMicrotask(() => {
           child.emit("exit", 0, null);
+          child.emit("close", 0, null);
         });
         return child as unknown as ChildProcess;
       },
@@ -181,6 +184,7 @@ describe("bash tool scheduler integration", () => {
       ) => {
         queueMicrotask(() => {
           child.emit("exit", 0, null);
+          child.emit("close", 0, null);
         });
         return child as unknown as ChildProcess;
       },

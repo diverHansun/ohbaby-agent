@@ -15,16 +15,19 @@ import {
 } from "../shell/index.js";
 import { parseCommand } from "../utils/index.js";
 import { resolveCommandContext } from "./utils/context.js";
-import { DEFAULT_OUTPUT_TOKEN_LIMIT, truncateOutput } from "./utils/output.js";
+import {
+  DEFAULT_SHELL_JOB_TIMEOUT_MS,
+  MAX_SHELL_JOB_TIMEOUT_MS,
+  ShellJobRegistry,
+} from "./shell-job-registry.js";
 import {
   getNumberParam,
   getStringParam,
   ToolParameterError,
 } from "./utils/params.js";
 
-const DEFAULT_TIMEOUT_MS = 120_000;
-const MAX_TIMEOUT_MS = 600_000;
-const OUTPUT_CAPTURE_CHAR_LIMIT = DEFAULT_OUTPUT_TOKEN_LIMIT * 4 + 1;
+const DEFAULT_TIMEOUT_MS = DEFAULT_SHELL_JOB_TIMEOUT_MS;
+const MAX_TIMEOUT_MS = MAX_SHELL_JOB_TIMEOUT_MS;
 
 export interface BashShell {
   acceptable(): string;
@@ -40,6 +43,7 @@ export type SpawnCommand = (
 export interface BashToolOptions {
   readonly shell?: BashShell;
   readonly spawn?: SpawnCommand;
+  readonly registry?: ShellJobRegistry;
 }
 
 function spawnProcess(
@@ -48,44 +52,6 @@ function spawnProcess(
   options: SpawnOptionsWithoutStdio,
 ): ChildProcess {
   return nodeSpawn(file, [...args], options);
-}
-
-function commandOutput(
-  stdout: string,
-  stderr: string,
-  streamTruncated: boolean,
-): { readonly output: string; readonly truncated: boolean } {
-  const output = [stdout.trimEnd(), stderr.trimEnd()]
-    .filter((part) => part.length > 0)
-    .join("\n");
-  const baseOutput = output || "Command completed with no output.";
-  const rendered = truncateOutput(baseOutput);
-  return {
-    output: rendered,
-    truncated: streamTruncated || rendered !== baseOutput,
-  };
-}
-
-function chunkToString(chunk: unknown): string {
-  return Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
-}
-
-function appendLimitedOutput(
-  current: string,
-  chunk: string,
-): { readonly output: string; readonly truncated: boolean } {
-  if (current.length >= OUTPUT_CAPTURE_CHAR_LIMIT) {
-    return { output: current, truncated: true };
-  }
-  const next = current + chunk;
-  if (next.length <= OUTPUT_CAPTURE_CHAR_LIMIT) {
-    return { output: next, truncated: false };
-  }
-
-  return {
-    output: next.slice(0, OUTPUT_CAPTURE_CHAR_LIMIT),
-    truncated: true,
-  };
 }
 
 function stateEnvironment(input: {
@@ -117,10 +83,16 @@ function shouldDetach(): boolean {
 export function createBashTool(options: BashToolOptions = {}): Tool {
   const shell = options.shell ?? Shell;
   const spawn = options.spawn ?? spawnProcess;
+  const registry =
+    options.registry ??
+    new ShellJobRegistry({
+      killTree: (child): Promise<void> | void => shell.killTree(child),
+    });
 
   return {
     name: "bash",
-    description: "Run a shell command in the execution workspace.",
+    description:
+      "Run a shell command in the execution workspace. Set run_in_background=true to return a job_id immediately. timeout is the maximum lifetime of the shell job for both foreground and background commands; the default is 120000ms and the maximum is 600000ms.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {
@@ -130,12 +102,14 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
           minimum: 1,
           type: "integer",
         },
+        run_in_background: { default: false, type: "boolean" },
       },
       required: ["command"],
       type: "object",
     },
     source: "builtin",
     category: "dangerous",
+    timeoutOwner: "tool",
     async execute(params, context): Promise<ToolExecutionResult> {
       const command = getStringParam(params, "command");
       const timeout = getNumberParam(params, "timeout", {
@@ -144,6 +118,12 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
         max: MAX_TIMEOUT_MS,
         min: 1,
       });
+      const runInBackground = params.run_in_background ?? false;
+      if (typeof runInBackground !== "boolean") {
+        throw new ToolParameterError(
+          'Expected parameter "run_in_background" to be a boolean.',
+        );
+      }
       const parsed = parseCommand(command);
       if (parsed.hasError) {
         throw new ToolParameterError(
@@ -185,85 +165,39 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
       });
       child.stdin?.end();
 
-      return await new Promise<ToolExecutionResult>((resolve, reject) => {
-        let stdout = "";
-        let stderr = "";
-        let settled = false;
-        let streamTruncated = false;
-        const timeoutId = setTimeout(() => {
-          rejectAfterKill(
-            new Error(`Command timed out after ${String(timeout)}ms.`),
-          );
-        }, timeout);
-
-        function cleanup(): void {
-          clearTimeout(timeoutId);
-          context.signal.removeEventListener("abort", abortHandler);
-        }
-
-        function rejectAfterKill(error: Error): void {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          cleanup();
-          void Promise.resolve()
-            .then(() => shell.killTree(child))
-            .catch(() => undefined)
-            .then(() => {
-              reject(error);
-            });
-        }
-
-        function abortHandler(): void {
-          rejectAfterKill(new Error("Command was cancelled."));
-        }
-
-        child.stdout?.on("data", (chunk: unknown) => {
-          const next = appendLimitedOutput(stdout, chunkToString(chunk));
-          stdout = next.output;
-          streamTruncated ||= next.truncated;
-        });
-        child.stderr?.on("data", (chunk: unknown) => {
-          const next = appendLimitedOutput(stderr, chunkToString(chunk));
-          stderr = next.output;
-          streamTruncated ||= next.truncated;
-        });
-        child.once("error", (error) => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          cleanup();
-          reject(error);
-        });
-        child.once("exit", (exitCode, signal) => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          cleanup();
-          const rendered = commandOutput(stdout, stderr, streamTruncated);
-          resolve({
-            output: rendered.output,
-            metadata: {
-              cdTargets: preflight.cdTargets,
-              cwd: commandContext.cwd,
-              exitCode,
-              paths: parsed.details.flatMap((detail) => [...detail.paths]),
-              pid: child.pid,
-              resolvedPaths: preflight.resolvedPaths,
-              roots: parsed.roots,
-              shell: shellPath,
-              shellKind,
-              signal,
-              truncated: rendered.truncated,
-            },
-          });
-        });
-
-        context.signal.addEventListener("abort", abortHandler, { once: true });
+      const snapshot = registry.start({
+        captureMode: runInBackground ? "tail" : "head",
+        child,
+        metadata: {
+          cdTargets: preflight.cdTargets,
+          cwd: commandContext.cwd,
+          paths: parsed.details.flatMap((detail) => [...detail.paths]),
+          pid: child.pid,
+          resolvedPaths: preflight.resolvedPaths,
+          roots: parsed.roots,
+          shell: shellPath,
+          shellKind,
+        },
+        sessionId: context.sessionId,
+        timeoutMs: timeout,
       });
+      if (runInBackground) {
+        return { metadata: snapshot.metadata, output: snapshot.output };
+      }
+
+      const abortHandler = (): void => {
+        void registry.kill(snapshot.jobId, context.sessionId);
+      };
+      context.signal.addEventListener("abort", abortHandler, { once: true });
+      try {
+        const result = await registry.waitForTerminal(
+          snapshot.jobId,
+          context.sessionId,
+        );
+        return { metadata: result.metadata, output: result.output };
+      } finally {
+        context.signal.removeEventListener("abort", abortHandler);
+      }
     },
   };
 }

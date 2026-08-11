@@ -85,12 +85,23 @@ describe("AgentManager", () => {
       subagent_close: false,
       subagent_run: false,
       subagent_status: false,
+      task_kill: true,
+      task_output: true,
       todo_read: true,
       todo_write: true,
       web_fetch: true,
       web_search: true,
       write: true,
     });
+    for (const role of ["explore", "research"] as const) {
+      expect(
+        manager.getAgentToolsConfig(role, { isSubagent: true }),
+      ).toMatchObject({
+        bash: true,
+        task_kill: true,
+        task_output: true,
+      });
+    }
   });
 
   it("rejects primary agents when requested as subagents", async () => {

@@ -181,10 +181,10 @@ metadata: mtimeMs, sizeBytes, encoding, lineEnding, hasMore, nextOffset
 #### bash（Shell 命令）
 
 ```
-输入: command, timeout?, workdir?, description
-输出: 命令输出、退出码
-限制: 30,000 字符输出，2 分钟超时
-特殊: 跨平台 Shell 选择、进程树终止
+输入: command, timeout?, run_in_background?
+输出: `output` + 工具专属 metadata；后台返回 `jobId/status/truncated`
+限制: 有上限的内存尾部输出；job 生命周期默认 120 秒、上限 600 秒
+特殊: 跨平台 Shell 选择、`ShellJobRegistry`、进程树终止
 ```
 
 **bash 工具执行流程**：
@@ -201,7 +201,7 @@ metadata: mtimeMs, sizeBytes, encoding, lineEnding, hasMore, nextOffset
    └── 匹配 Agent 配置的 bash 权限模式                 │
    |                                                  │
    v                                                  │
-3. Permission.ask() ──────────────────────────────┤ [特殊：bash 工具自行调用]
+3. ToolScheduler 统一执行 Permission.ask()         │ [bash 命令级 preflight 在此链路内]
    |                                                  │
    v                                                  │
 4. Shell.acceptable() 获取 shell 路径                 │
@@ -210,10 +210,10 @@ metadata: mtimeMs, sizeBytes, encoding, lineEnding, hasMore, nextOffset
 5. 执行命令（spawn）                                   │
    |                                                  │
    v                                                  │
-6. 超时/取消时调用 Shell.killTree() 清理进程           │
+6. Registry 在 timeout/取消时调用 Shell.killTree() 清理进程 │
    |                                                  │
    v                                                  │
-7. 返回输出和退出码                                    │
+7. 返回输出和状态；终态带 exitCode/signal               │
 ───────────────────────────────────────────────────────┘
 ```
 
@@ -231,8 +231,8 @@ metadata: mtimeMs, sizeBytes, encoding, lineEnding, hasMore, nextOffset
 | 职责 | 负责方 | 说明 |
 |------|--------|------|
 | 工具级权限检查 | ToolScheduler | 检查 bash 工具是否被禁用 |
-| 命令级权限检查 | bash 工具 | 解析命令内容后检查 |
-| 调用 Permission.ask() | bash 工具 | 工具自行调用，非 ToolScheduler |
+| 命令级权限检查 | ToolScheduler + bash preflight | spawn 前完成命令级检查 |
+| 调用 Permission.ask() | ToolScheduler | bash 与其他工具共用调度器权限链 |
 | 执行命令 | bash 工具 | 权限通过后执行 |
 
 ### 4.4 子代理工具
@@ -393,7 +393,7 @@ edit 工具使用多种替换策略，按优先级尝试：
 | FileNotFoundError | 文件不存在 | 返回错误信息 |
 | PermissionDeniedError | 无文件权限 | 返回错误信息 |
 | BinaryFileError | 尝试读取二进制 | 拒绝并提示 |
-| TimeoutError | 命令超时 | 终止并返回已有输出 |
+| timed_out | shell job 生命周期到点 | Registry 杀进程树并返回已有输出 |
 | InvalidParameterError | 参数无效 | 由 Zod 自动处理 |
 
 ### 7.2 错误返回格式

@@ -56,6 +56,26 @@ describe("tool metadata projection", () => {
     });
   });
 
+  it("projects only the shell job fields for task tools", () => {
+    expect(
+      projectToolMetadataForModel("task_output", {
+        cwd: "/workspace",
+        exitCode: null,
+        jobId: "job_1",
+        pid: 42,
+        signal: "SIGTERM",
+        status: "timed_out",
+        truncated: true,
+      }),
+    ).toEqual({
+      exitCode: null,
+      jobId: "job_1",
+      signal: "SIGTERM",
+      status: "timed_out",
+      truncated: true,
+    });
+  });
+
   it("projects subagent_status items", () => {
     expect(
       projectToolMetadataForModel("subagent_status", {

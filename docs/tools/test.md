@@ -208,22 +208,22 @@
 - 操作：调用 list({ ignore: ['node_modules'] })
 - 预期结果：不包含 node_modules
 
-### 2.7 bash 工具
+### 2.7 bash / shell job 工具
 
 **场景 24：执行简单命令**
 - 前置条件：无
-- 操作：调用 bash({ command: 'echo hello', description: 'test' })
-- 预期结果：返回 "hello"，exitCode = 0
+- 操作：调用 bash({ command: 'echo hello' })
+- 预期结果：返回 "hello"，metadata.status = 'completed'，exitCode = 0
 
 **场景 25：命令执行失败**
 - 前置条件：无
-- 操作：调用 bash({ command: 'exit 1', description: 'test' })
-- 预期结果：exitCode = 1
+- 操作：调用 bash({ command: 'exit 1' })
+- 预期结果：metadata.status = 'failed'，exitCode = 1
 
 **场景 26：命令超时**
 - 前置条件：无
-- 操作：调用 bash({ command: 'sleep 10', description: 'test', timeout: 1000 })
-- 预期结果：返回 TimeoutError
+- 操作：调用 bash({ command: 'sleep 10', timeout: 1000 })
+- 预期结果：metadata.status = 'timed_out'，终止后带 exitCode/signal
 
 **场景 27：输出超出限制**
 - 前置条件：无
@@ -234,6 +234,12 @@
 - 前置条件：无
 - 操作：执行命令后立即 signal.abort()
 - 预期结果：命令被终止
+
+**场景 28b：后台 job 观测与取消**
+- 前置条件：无
+- 操作：调用 bash({ command: 'sleep 5', run_in_background: true })，再调用 task_output({ job_id, block: true, wait_ms: 100 }) 或 task_kill({ job_id })
+- 预期结果：后台启动立即返回；`task_output` 返回尾部快照；主动终止为 `cancelled`；v1 只使用有上限的内存缓冲，不返回 outputPath
+- 回归：block 期间 abort 立即结束读取但不杀 job；spawn error 保留 message；前台 stdout/stderr 仍按旧顺序拼装；child 不 close 时 1 秒兜底；超过 100 个终态 job 时淘汰最早项
 
 ### 2.8 web_fetch 工具
 

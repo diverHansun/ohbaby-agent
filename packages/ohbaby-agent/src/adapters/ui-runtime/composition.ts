@@ -25,6 +25,7 @@ import {
   type ToolDefinition,
 } from "../../core/tool-scheduler/index.js";
 import type { PermissionStateStore } from "../../permission/index.js";
+import { Shell } from "../../shell/index.js";
 import { createHeuristicTokenCounter } from "../../services/llm-model/index.js";
 import {
   createInMemorySessionManager,
@@ -43,6 +44,7 @@ import {
   type SubagentInstanceStore,
 } from "../../agents/index.js";
 import { createBuiltinTools } from "../../tools/index.js";
+import { ShellJobRegistry } from "../../tools/shell-job-registry.js";
 import {
   TodoService,
   TodoWorkScopeRegistry,
@@ -294,6 +296,9 @@ export async function createUiRuntimeComposition(
     onWrite: options.onTodoWrite,
   });
   const todoWorkScopes = new TodoWorkScopeRegistry();
+  const shellJobRegistry = new ShellJobRegistry({
+    killTree: (child): Promise<void> | void => Shell.killTree(child),
+  });
 
   async function ensureRootSession(input: {
     readonly agentName: string;
@@ -652,6 +657,7 @@ export async function createUiRuntimeComposition(
       },
     },
     subagentHost,
+    shellJobRegistry,
     todoStore: todoService,
     todoToolOptions: {
       resolveWorkScopeId: (context) =>
@@ -900,6 +906,7 @@ export async function createUiRuntimeComposition(
       todoWorkScopes.dispose();
       toolScheduler.cancelAll();
       await Promise.all([
+        shellJobRegistry.dispose(),
         subagentHost.dispose(),
         runManager.cancelAll("runtime disposed"),
       ]);

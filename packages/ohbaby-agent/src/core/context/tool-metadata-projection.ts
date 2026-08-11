@@ -89,7 +89,22 @@ export function projectToolMetadataForModel(
     case "select_tools":
       return mcpSelectionMetadata(metadata);
     case "bash":
-      return copyMetadataFields(metadata, ["exitCode", "signal", "truncated"]);
+      return copyMetadataFields(metadata, [
+        "jobId",
+        "status",
+        "exitCode",
+        "signal",
+        "truncated",
+      ]);
+    case "task_output":
+    case "task_kill":
+      return copyMetadataFields(metadata, [
+        "jobId",
+        "status",
+        "truncated",
+        "exitCode",
+        "signal",
+      ]);
     case "read":
       return copyMetadataFields(metadata, [
         "path",

@@ -21,6 +21,19 @@ class FakeChildProcess extends EventEmitter {
   readonly stdin = { end: vi.fn() };
   readonly stdout = new EventEmitter();
   readonly stderr = new EventEmitter();
+
+  override emit(eventName: string | symbol, ...args: unknown[]): boolean {
+    const emitted = super.emit(eventName, ...args);
+    if (eventName === "exit") {
+      super.emit("close", ...args);
+    }
+    return emitted;
+  }
+
+  emitExit(exitCode: number | null, signal: NodeJS.Signals | null): void {
+    super.emit("exit", exitCode, signal);
+    super.emit("close", exitCode, signal);
+  }
 }
 
 function createContext(
@@ -97,6 +110,21 @@ async function waitForSpawn(spawn: ReturnType<typeof vi.fn>): Promise<void> {
 }
 
 describe("bash builtin tool", () => {
+  it("lets the tool own the foreground/background lifecycle timeout", () => {
+    const bash = getBashTool({
+      shell: {
+        acceptable: () => "/bin/bash",
+        killTree: vi.fn(),
+      },
+      spawn: vi.fn(),
+    });
+
+    expect(bash.timeoutOwner).toBe("tool");
+    expect(bash.parametersJsonSchema.properties).toMatchObject({
+      run_in_background: { type: "boolean" },
+    });
+  });
+
   it("executes commands with shell and command context cwd/env", async () => {
     const child = new FakeChildProcess();
     const spawn = vi.fn<SpawnCommand>(
@@ -163,6 +191,58 @@ describe("bash builtin tool", () => {
     expect(spawn.mock.calls[0]?.[2].cwd).toBe("D:/workspace/env");
     expect(spawn.mock.calls[0]?.[2].env?.FROM_ENVIRONMENT).toBe("yes");
     expect(result.output).toContain("hello");
+  });
+
+  it("preserves spawn error details in the failed result", async () => {
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
+    const bash = getBashTool({
+      shell: {
+        acceptable: () => "/bin/bash",
+        killTree: vi.fn(),
+      },
+      spawn,
+    });
+
+    const resultPromise = bash.execute(
+      { command: "missing-command" },
+      createContext(),
+    );
+    await waitForSpawn(spawn);
+    child.emit("error", new Error("spawn missing-command ENOENT"));
+    child.emit("close", -2, null);
+
+    const result = await resultPromise;
+    expect(result.metadata).toMatchObject({
+      error: "spawn missing-command ENOENT",
+      status: "failed",
+    });
+    expect(result.output).toContain("spawn missing-command ENOENT");
+  });
+
+  it("keeps foreground stdout before stderr regardless of chunk timing", async () => {
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
+    const bash = getBashTool({
+      shell: {
+        acceptable: () => "/bin/bash",
+        killTree: vi.fn(),
+      },
+      spawn,
+    });
+
+    const resultPromise = bash.execute(
+      { command: "mixed-output" },
+      createContext(),
+    );
+    await waitForSpawn(spawn);
+    child.stderr.emit("data", "stderr\n");
+    child.stdout.emit("data", "stdout\n");
+    child.emit("exit", 0, null);
+
+    await expect(resultPromise).resolves.toMatchObject({
+      output: "stdout\nstderr",
+    });
   });
 
   it("rejects unsupported shell syntax before spawning", async () => {
@@ -479,9 +559,37 @@ describe("bash builtin tool", () => {
     expect(result.metadata).toMatchObject({ truncated: true });
   });
 
+  it("returns a background job immediately with the lifecycle contract", async () => {
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
+    const bash = getBashTool({
+      shell: {
+        acceptable: () => "/bin/bash",
+        killTree: vi.fn(),
+      },
+      spawn,
+    });
+
+    const result = await bash.execute(
+      { command: "npm run dev", run_in_background: true, timeout: 300_000 },
+      createContext(),
+    );
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(typeof result.metadata?.jobId).toBe("string");
+    expect(result.metadata).toMatchObject({
+      status: "running",
+      truncated: false,
+    });
+    child.emit("exit", 0, null);
+  });
+
   it("kills the process tree on timeout", async () => {
     const child = new FakeChildProcess();
-    const killTree = vi.fn(() => Promise.resolve());
+    const killTree = vi.fn(() => {
+      child.emit("exit", null, "SIGTERM");
+      return Promise.resolve();
+    });
     const bash = getBashTool({
       shell: {
         acceptable: () => "/bin/bash",
@@ -490,15 +598,24 @@ describe("bash builtin tool", () => {
       spawn: vi.fn(() => child as unknown as ChildProcess),
     });
 
-    await expect(
-      bash.execute({ command: "sleep 10", timeout: 1 }, createContext()),
-    ).rejects.toThrow("timed out");
+    const result = await bash.execute(
+      { command: "sleep 10", timeout: 1 },
+      createContext(),
+    );
+    expect(result.metadata).toMatchObject({
+      exitCode: null,
+      signal: "SIGTERM",
+      status: "timed_out",
+    });
     expect(killTree).toHaveBeenCalledWith(child);
   });
 
   it("rejects with the command error even if process cleanup fails", async () => {
     const child = new FakeChildProcess();
-    const killTree = vi.fn(() => Promise.reject(new Error("cleanup failed")));
+    const killTree = vi.fn(() => {
+      child.emit("exit", null, "SIGTERM");
+      return Promise.reject(new Error("cleanup failed"));
+    });
     const bash = getBashTool({
       shell: {
         acceptable: () => "/bin/bash",
@@ -507,16 +624,21 @@ describe("bash builtin tool", () => {
       spawn: vi.fn(() => child as unknown as ChildProcess),
     });
 
-    await expect(
-      bash.execute({ command: "sleep 10", timeout: 1 }, createContext()),
-    ).rejects.toThrow("timed out");
+    const result = await bash.execute(
+      { command: "sleep 10", timeout: 1 },
+      createContext(),
+    );
+    expect(result.metadata).toMatchObject({ status: "timed_out" });
     expect(killTree).toHaveBeenCalledWith(child);
   });
 
   it("kills the process tree on abort", async () => {
     const child = new FakeChildProcess();
     const abort = new AbortController();
-    const killTree = vi.fn(() => Promise.resolve());
+    const killTree = vi.fn(() => {
+      child.emit("exit", null, "SIGTERM");
+      return Promise.resolve();
+    });
     const spawn = vi.fn(() => child as unknown as ChildProcess);
     const bash = getBashTool({
       shell: {
@@ -532,8 +654,13 @@ describe("bash builtin tool", () => {
     );
     await waitForSpawn(spawn);
     abort.abort();
-
-    await expect(resultPromise).rejects.toThrow("cancelled");
+    await expect(resultPromise).resolves.toMatchObject({
+      metadata: {
+        exitCode: null,
+        signal: "SIGTERM",
+        status: "cancelled",
+      },
+    });
     expect(killTree).toHaveBeenCalledWith(child);
   });
 });
