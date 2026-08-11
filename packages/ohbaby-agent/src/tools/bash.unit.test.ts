@@ -13,7 +13,7 @@ import type {
 } from "../core/tool-scheduler/index.js";
 import type { CommandContext } from "../sandbox/index.js";
 import type { Tool } from "../core/tool-scheduler/index.js";
-import type { SpawnCommand } from "./bash.js";
+import { createBashTool, type SpawnCommand } from "./bash.js";
 import { createBuiltinTools } from "./index.js";
 
 class FakeChildProcess extends EventEmitter {
@@ -258,6 +258,40 @@ describe("bash builtin tool", () => {
     await expect(
       bash.execute({ command: "echo $(rm -rf /tmp)" }, createContext()),
     ).rejects.toThrow("Unsupported shell syntax");
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("does not spawn when cancellation arrives during preflight", async () => {
+    const abort = new AbortController();
+    let releasePreflight!: () => void;
+    const preflightGate = new Promise<void>((resolve) => {
+      releasePreflight = resolve;
+    });
+    const preflight = vi.fn(async () => {
+      await preflightGate;
+      return { cdTargets: [], resolvedPaths: [] };
+    });
+    const spawn = vi.fn<SpawnCommand>();
+    const bash = createBashTool({
+      preflight,
+      shell: {
+        acceptable: () => "/bin/bash",
+        killTree: vi.fn(),
+      },
+      spawn,
+    });
+
+    const execution = bash.execute(
+      { command: "echo hello", run_in_background: true },
+      createContext({ signal: abort.signal }),
+    );
+    await vi.waitFor(() => {
+      expect(preflight).toHaveBeenCalledTimes(1);
+    });
+    abort.abort();
+    releasePreflight();
+
+    await expect(execution).rejects.toThrow("cancelled");
     expect(spawn).not.toHaveBeenCalled();
   });
 

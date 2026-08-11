@@ -23,7 +23,9 @@ import {
 import { SessionEvent } from "../../services/session/index.js";
 import { createPermissionState } from "../../permission/index.js";
 import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
+import type { RunCompletion } from "../../runtime/run-manager/index.js";
 import type { Tool } from "../../core/tool-scheduler/index.js";
+import { ShellJobRegistry } from "../../tools/shell-job-registry.js";
 import type {
   SkillContent,
   SkillInfo,
@@ -76,6 +78,7 @@ function createUiRuntimeComposition(
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const directory of cleanupDirectories.splice(0)) {
     await rm(directory, { force: true, recursive: true });
   }
@@ -457,6 +460,32 @@ describe("createUiRuntimeComposition skill tools", () => {
       "destroySessionContexts",
     );
     const disposeSandbox = vi.spyOn(sandboxManager, "dispose");
+    const disposeShellSession = vi.spyOn(
+      ShellJobRegistry.prototype,
+      "disposeSession",
+    );
+    const disposeShellScope = vi.spyOn(
+      ShellJobRegistry.prototype,
+      "disposeScope",
+    );
+    const inactiveSubagent = {
+      contextScopeId: "subagent_1",
+      createdAt: 1,
+      initialPrompt: "work",
+      parentSessionId: "session_1",
+      pendingQueue: [],
+      role: "explore",
+      sessionId: "child_1",
+      status: "completed",
+      subagentId: "subagent_1",
+      updatedAt: 1,
+    } satisfies SubagentInstanceRecord;
+    const subagentStore = new InMemorySubagentInstanceStore();
+    await subagentStore.create(inactiveSubagent);
+    const subagentCleanupGate = deferred<readonly SubagentInstanceRecord[]>();
+    const interruptByParent = vi
+      .spyOn(SessionSubagentHost.prototype, "interruptByParent")
+      .mockReturnValue(subagentCleanupGate.promise);
     const disposeSession = vi.fn<ContextManager["disposeSession"]>();
     const contextManager = {
       assemble: vi.fn<ContextManager["assemble"]>(),
@@ -481,6 +510,7 @@ describe("createUiRuntimeComposition skill tools", () => {
       }),
       permissionState: createPermissionState({ bus }),
       sandboxManager,
+      subagentInstanceStore: subagentStore,
       workdir: await tempWorkdir(),
     });
 
@@ -488,8 +518,20 @@ describe("createUiRuntimeComposition skill tools", () => {
 
     expect(disposeSession).toHaveBeenCalledWith("session_1");
     await vi.waitFor(() => {
+      expect(interruptByParent).toHaveBeenCalledWith(
+        "session_1",
+        "parent session removed",
+      );
+    });
+    const disposedBeforeSubagentsSettled =
+      disposeShellSession.mock.calls.length > 0;
+    subagentCleanupGate.resolve([]);
+    await vi.waitFor(() => {
+      expect(disposeShellSession).toHaveBeenCalledWith("session_1");
+      expect(disposeShellScope).toHaveBeenCalledWith("child_1", "subagent_1");
       expect(destroySessionContexts).toHaveBeenCalledWith("session_1");
     });
+    expect(disposedBeforeSubagentsSettled).toBe(false);
 
     await composition.dispose();
     expect(disposeSandbox).toHaveBeenCalledTimes(1);
@@ -548,6 +590,10 @@ describe("createUiRuntimeComposition skill tools", () => {
     const workdir = await tempWorkdir();
     const sandboxManager = createHostLocalSandboxManager(workdir);
     const destroyContext = vi.spyOn(sandboxManager, "destroyContext");
+    const disposeShellScope = vi.spyOn(
+      ShellJobRegistry.prototype,
+      "disposeScope",
+    );
     const lease = await sandboxManager.acquire({
       contextScopeId: "subagent_1",
       sessionId: "child_1",
@@ -563,7 +609,8 @@ describe("createUiRuntimeComposition skill tools", () => {
       pendingQueue: [],
       role: "explore",
       sessionId: "child_1",
-      status: "completed",
+      currentRunId: "run_child_1",
+      status: "running",
       subagentId: "subagent_1",
       updatedAt: 1,
     });
@@ -580,6 +627,10 @@ describe("createUiRuntimeComposition skill tools", () => {
       subagentInstanceStore: store,
       workdir,
     });
+    const runCompletionGate = deferred<RunCompletion>();
+    const waitForCompletion = vi
+      .spyOn(composition.runManager, "waitForCompletion")
+      .mockReturnValue(runCompletionGate.promise);
     const closeTool = composition.toolScheduler.get("subagent_close");
     if (!closeTool) {
       throw new Error("subagent_close tool missing");
@@ -606,11 +657,18 @@ describe("createUiRuntimeComposition skill tools", () => {
     );
 
     await vi.waitFor(() => {
+      expect(waitForCompletion).toHaveBeenCalledWith("run_child_1");
+    });
+    const disposedBeforeRunSettled = disposeShellScope.mock.calls.length > 0;
+    runCompletionGate.resolve({ status: "cancelled" });
+    await vi.waitFor(() => {
+      expect(disposeShellScope).toHaveBeenCalledWith("child_1", "subagent_1");
       expect(destroyContext).toHaveBeenCalledWith({
         contextScopeId: "subagent_1",
         sessionId: "child_1",
       });
     });
+    expect(disposedBeforeRunSettled).toBe(false);
     await vi.waitFor(async () => {
       await expect(
         composition.todos.read("child_1", "subagent_1"),

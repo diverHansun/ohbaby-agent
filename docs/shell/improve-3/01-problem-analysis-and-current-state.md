@@ -124,7 +124,7 @@ ToolScheduler.prepareCall
 - 新：`ShellJobRegistry`（建议 `tools/` 或 `shell/jobs/`）
 - 新：`task_output` / `task_kill` 工具
 - `composition` / `createBuiltinTools` 注册
-- runtime dispose 钩子（`composition.dispose` 层，与 `toolScheduler.cancelAll` 同层；session manager 无独立 dispose）：清理未结束 job
+- runtime 全局 dispose，以及 `SessionEvent.Removed` / subagent scope 关闭钩子：按 runtime 或 session 粒度清理未结束 job
 - 文档：`docs/tools/*`、`docs/shell/goals-duty.md` N6
 
 ---
@@ -134,6 +134,7 @@ ToolScheduler.prepareCall
 - 后台要解决的是 **控制流不阻塞**，不是分布式任务系统 → 进程内表足够（YAGNI）。
 - Subagent 与 shell job **域不同**；硬合并工具面是偶复杂度 → 本批分工具、可共用薄 registry 接口。
 - bash 与可 block task_output 分别自管各自的等待边界，才能消除 scheduler 默认墙钟带来的偶然复杂度。
+- `readOnlyHint` 描述副作用，不应等同于占用文件读取并发槽；长时间 block 的 task_output 必须走控制类并发语义。
 
 ---
 
@@ -165,3 +166,5 @@ ToolScheduler.prepareCall
 | S11 | bash 与 task_output 同名 `timeout` 实际含义不同 | bash 保留兼容字段；新 task_output 使用 `wait_ms` |
 | S12 | 结果字段只有描述没有落点 | 固定 `output + metadata`；不把 JSON 塞入 output，也不提前定义全局响应信封 |
 | S13 | 先写逻辑终态会拿不到稳定退出信息 | 先认领终止原因，wait for child close 后一次性写 status/exitCode/signal |
+| S14 | session 删除后后台 job 成为孤儿 | Registry 提供 session/scope 两级清理；先停稳所属 run，parent 删除再从持久 store 枚举全部 child scopes；bash 在异步 preflight 后、spawn 前复查取消 |
+| S15 | block task_output 占满只读并发槽 | 保留只读副作用标记，但调度按控制类工具豁免文件读取槽 |

@@ -130,6 +130,30 @@ describe("MCP dynamic tool menu", () => {
     expect(menu.loadedNames({ sessionId: "session_2" })).toEqual(new Set());
   });
 
+  it("disposes every tool scope owned by one session", () => {
+    const menu = new McpToolMenu();
+    const toolName = "mcp_s7_example_t6_search";
+    menu.setAvailable([toolName]);
+    menu.select({ sessionId: "session_1" }, [toolName]);
+    menu.select({ contextScopeId: "subagent_1", sessionId: "session_1" }, [
+      toolName,
+    ]);
+    menu.select({ sessionId: "session_2" }, [toolName]);
+
+    menu.disposeSession("session_1");
+
+    expect(menu.loadedNames({ sessionId: "session_1" })).toEqual(new Set());
+    expect(
+      menu.loadedNames({
+        contextScopeId: "subagent_1",
+        sessionId: "session_1",
+      }),
+    ).toEqual(new Set());
+    expect(menu.loadedNames({ sessionId: "session_2" })).toEqual(
+      new Set([toolName]),
+    );
+  });
+
   it("applies the eight-tool limit independently to each session/context scope", () => {
     const menu = new McpToolMenu();
     const toolNames = Array.from(

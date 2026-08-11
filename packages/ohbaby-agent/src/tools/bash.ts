@@ -41,6 +41,7 @@ export type SpawnCommand = (
 ) => ChildProcess;
 
 export interface BashToolOptions {
+  readonly preflight?: typeof preflightShellCommand;
   readonly shell?: BashShell;
   readonly spawn?: SpawnCommand;
   readonly registry?: ShellJobRegistry;
@@ -80,7 +81,14 @@ function shouldDetach(): boolean {
   return process.platform !== "win32";
 }
 
+function throwIfCancelled(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw new Error("Command was cancelled.");
+  }
+}
+
 export function createBashTool(options: BashToolOptions = {}): Tool {
+  const runPreflight = options.preflight ?? preflightShellCommand;
   const shell = options.shell ?? Shell;
   const spawn = options.spawn ?? spawnProcess;
   const registry =
@@ -130,19 +138,18 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
           "Unsupported shell syntax in bash command.",
         );
       }
-      if (context.signal.aborted) {
-        throw new Error("Command was cancelled.");
-      }
+      throwIfCancelled(context.signal);
 
       const commandContext = resolveCommandContext(context);
       const shellPath = shell.acceptable();
       const shellKind = detectShellKind(shellPath);
-      const preflight = await preflightShellCommand({
+      const preflight = await runPreflight({
         command,
         cwd: commandContext.cwd,
         parsed,
         shellKind,
       });
+      throwIfCancelled(context.signal);
       const args = shellArgs(shellPath, command);
       const commandPrefix = commandContext.commandPrefix ?? [];
       const spawnFile = commandPrefix[0] ?? shellPath;
@@ -168,6 +175,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
       const snapshot = registry.start({
         captureMode: runInBackground ? "tail" : "head",
         child,
+        contextScopeId: context.contextScopeId,
         metadata: {
           cdTargets: preflight.cdTargets,
           cwd: commandContext.cwd,
@@ -186,13 +194,18 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
       }
 
       const abortHandler = (): void => {
-        void registry.kill(snapshot.jobId, context.sessionId);
+        void registry.kill(
+          snapshot.jobId,
+          context.sessionId,
+          context.contextScopeId,
+        );
       };
       context.signal.addEventListener("abort", abortHandler, { once: true });
       try {
         const result = await registry.waitForTerminal(
           snapshot.jobId,
           context.sessionId,
+          context.contextScopeId,
         );
         return { metadata: result.metadata, output: result.output };
       } finally {

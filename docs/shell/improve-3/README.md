@@ -20,6 +20,7 @@
 5. 修复 bash 与 ToolScheduler 的 **双超时** 归属（bash 与可 block 的 `task_output` 均为 `timeoutOwner: "tool"`）；`timeout` 为 job 生命周期，到点 → `timed_out`
 6. bash-enabled subagent 同时获得 `task_output/task_kill`；阻塞读取响应 turn abort
 7. 终止等待 child close 最多 1 秒；Registry 最多保留 100 个 job
+8. 主 session 删除与 subagent scope 关闭时先停稳 producer，再分别按 session/context scope 回收 job（含 inactive child scopes）；bash preflight 后复查取消；`task_output` 不占文件读取并发槽
 
 ## 2. 文档地图
 
@@ -37,7 +38,9 @@
 
 - `bash`：`run_in_background`；前台路径保留；`timeout` 为 fg/bg 通用的 job 最大生命周期
 - 进程内 `ShellJobRegistry`：id / status / pid / 有上限的内存输出 / abort；到点自动 `killTree`；终态保留有界
+- Registry 生命周期接入主 session 删除、subagent scope 关闭与 runtime 全局 dispose；scope 清理不影响共享 child session 的兄弟 subagent
 - builtin：`task_output`（`wait_ms` 等待、尾部快照）、`task_kill`（kill≡stop；主动终态 `cancelled`）；结果沿用 `output + metadata`，不引入全局响应信封
+- `task_output` 保持只读副作用语义，但使用控制类调度豁免，不占 `read/glob/grep` 的并发槽
 - bash 与可 block 的 `task_output` 使用 `timeoutOwner: "tool"`，消除与 scheduler 默认 120s 冲突；bg 到点自动 `timed_out`
 - 沿用现有 bash permission / sandbox / preflight / `killTree`
 - 同步漂移的 `docs/tools/*`、`docs/shell/*` 中与本批冲突的表述

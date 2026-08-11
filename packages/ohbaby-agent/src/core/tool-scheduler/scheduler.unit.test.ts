@@ -11,6 +11,10 @@ import { createHostLocalEnvironment } from "../../adapters/ui-runtime/host-local
 import { createBus, type BusInstance } from "../../bus/index.js";
 import type { SpawnCommand } from "../../tools/bash.js";
 import { createBuiltinTools } from "../../tools/index.js";
+import {
+  createTaskOutputTool,
+  ShellJobRegistry,
+} from "../../tools/shell-job-registry.js";
 import type { PreflightResult } from "../../sandbox/index.js";
 import {
   createPermissionState,
@@ -1735,6 +1739,64 @@ describe("ToolScheduler", () => {
 
     blocker.resolve({ output: "done" });
     await expect(run).resolves.toMatchObject({ status: "success" });
+  });
+
+  it("lets task_output bypass the file-read concurrency limit", async () => {
+    const child = new FakeChildProcess();
+    const registry = new ShellJobRegistry({
+      createJobId: (): string => "job_1",
+      killTree: vi.fn(),
+    });
+    const job = registry.start({
+      child: child as unknown as ChildProcess,
+      sessionId: "session_1",
+      timeoutMs: 1_000_000,
+    });
+    const { scheduler } = createScheduler({
+      config: { concurrency: { maxReadConcurrency: 1 } },
+    });
+    scheduler.register(
+      createTool({
+        category: "readonly",
+        name: "read",
+      }),
+    );
+    const taskOutputTool = createTaskOutputTool(registry);
+    scheduler.register(taskOutputTool);
+    expect(taskOutputTool.annotations).toMatchObject({ readOnlyHint: true });
+    await expect(
+      scheduler
+        .getAvailableTools({ isSubagent: true })
+        .then((tools) => tools.map((tool) => tool.name)),
+    ).resolves.toContain("task_output");
+
+    const output = scheduler.execute({
+      callId: "task_output_1",
+      messageId: "message_1",
+      params: { block: true, job_id: job.jobId, wait_ms: 600_000 },
+      sessionId: "session_1",
+      toolName: "task_output",
+    });
+    await vi.waitFor(() => {
+      expect(scheduler.getStatus("task_output_1")).toBe("executing");
+    });
+    const read = scheduler.execute({
+      callId: "read_1",
+      messageId: "message_1",
+      params: {},
+      sessionId: "session_1",
+      toolName: "read",
+    });
+    await vi.waitFor(() => {
+      expect(["queued", "success"]).toContain(scheduler.getStatus("read_1"));
+    });
+    const readStatusWhileTaskOutputIsBlocked = scheduler.getStatus("read_1");
+
+    child.emit("exit", 0, null);
+    child.emit("close", 0, null);
+    await Promise.all([read, output]);
+
+    expect(readStatusWhileTaskOutputIsBlocked).toBe("success");
   });
 
   it("executes batches in waves while returning results in input order", async () => {

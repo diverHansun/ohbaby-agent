@@ -283,10 +283,7 @@ export class McpToolMenu {
 
   disposeSession(sessionId: string): void {
     for (const key of this.loadedByScope.keys()) {
-      if (
-        key === `${sessionId}\u0000` ||
-        key.startsWith(`${sessionId}\u0000`)
-      ) {
+      if (key.startsWith(`${sessionId}\u0000`)) {
         this.loadedByScope.delete(key);
       }
     }

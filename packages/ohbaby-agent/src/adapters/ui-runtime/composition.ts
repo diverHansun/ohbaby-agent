@@ -513,24 +513,24 @@ export async function createUiRuntimeComposition(
     modelId: options.llmClient.config.model,
     sessionManager,
   });
-  const pendingSandboxCleanups = new Set<Promise<void>>();
+  const pendingLifecycleCleanups = new Set<Promise<void>>();
 
-  const trackSandboxCleanup = (operation: Promise<void>): void => {
+  const trackLifecycleCleanup = (operation: Promise<void>): void => {
     const tracked = operation.catch((error: unknown) => {
       const message =
         error instanceof Error
           ? error.message
-          : "Unknown sandbox cleanup error";
+          : "Unknown session cleanup error";
       options.onNotice?.({
-        key: `sandbox:cleanup:${message}`,
+        key: `session:cleanup:${message}`,
         level: "warning",
-        message: `Sandbox cleanup failed: ${message}`,
-        title: "Sandbox warning",
+        message: `Session cleanup failed: ${message}`,
+        title: "Session cleanup warning",
       });
     });
-    pendingSandboxCleanups.add(tracked);
+    pendingLifecycleCleanups.add(tracked);
     void tracked.finally(() => {
-      pendingSandboxCleanups.delete(tracked);
+      pendingLifecycleCleanups.delete(tracked);
     });
   };
 
@@ -549,6 +549,10 @@ export async function createUiRuntimeComposition(
           }
         }
       }
+      await shellJobRegistry.disposeScope(
+        input.sessionId,
+        input.contextScopeId,
+      );
       await sandboxManager.destroyContext({
         contextScopeId: input.contextScopeId,
         sessionId: input.sessionId,
@@ -558,6 +562,8 @@ export async function createUiRuntimeComposition(
     }
   };
 
+  const subagentInstanceStore =
+    options.subagentInstanceStore ?? new InMemorySubagentInstanceStore();
   const subagentHost = new SessionSubagentHost({
     agentManager,
     createSubagentId: options.createSubagentId,
@@ -567,10 +573,10 @@ export async function createUiRuntimeComposition(
     ownerId: options.subagentOwnerId,
     ownerPid: options.subagentOwnerPid,
     onClosed(input): void {
-      trackSandboxCleanup(cleanupClosedSubagentScope(input));
+      trackLifecycleCleanup(cleanupClosedSubagentScope(input));
     },
     sessionManager,
-    store: options.subagentInstanceStore ?? new InMemorySubagentInstanceStore(),
+    store: subagentInstanceStore,
     now: options.now,
   });
   await subagentHost.recoverInterrupted();
@@ -601,19 +607,31 @@ export async function createUiRuntimeComposition(
       mcpToolMenu.disposeSession(payload.sessionId);
       todoService.release(payload.sessionId);
       todoWorkScopes.release(payload.sessionId);
-      trackSandboxCleanup(
+      trackLifecycleCleanup(
         (async (): Promise<void> => {
-          await subagentHost.interruptByParent(
-            payload.sessionId,
-            "parent session removed",
-          );
           const activeRuns = runManager.list(payload.sessionId);
           for (const run of activeRuns) {
             runManager.cancel(run.runId, "session removed");
           }
-          await Promise.all(
-            activeRuns.map((run) => runManager.waitForCompletion(run.runId)),
+          await Promise.all([
+            subagentHost.interruptByParent(
+              payload.sessionId,
+              "parent session removed",
+            ),
+            ...activeRuns.map((run) => runManager.waitForCompletion(run.runId)),
+          ]);
+          const subagentRecords = await subagentInstanceStore.listByParent(
+            payload.sessionId,
           );
+          await Promise.all([
+            shellJobRegistry.disposeSession(payload.sessionId),
+            ...subagentRecords.map((record) =>
+              shellJobRegistry.disposeScope(
+                record.sessionId,
+                record.contextScopeId,
+              ),
+            ),
+          ]);
           await sandboxManager.destroySessionContexts(payload.sessionId);
         })(),
       );
@@ -910,8 +928,8 @@ export async function createUiRuntimeComposition(
         subagentHost.dispose(),
         runManager.cancelAll("runtime disposed"),
       ]);
-      while (pendingSandboxCleanups.size > 0) {
-        await Promise.all([...pendingSandboxCleanups]);
+      while (pendingLifecycleCleanups.size > 0) {
+        await Promise.all([...pendingLifecycleCleanups]);
       }
       await sandboxManager.dispose();
     },

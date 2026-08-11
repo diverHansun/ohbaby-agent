@@ -21,7 +21,10 @@
 | T-P1b | 前台短命令 | 回归 | 输出/退出码与改前一致 | 1 |
 | T-B1 | `run_in_background:true` | 单测 | 立即返回 `output` 与 `metadata.jobId/status/truncated`；进程仍在跑 | 2 |
 | T-B2 | bg 启动前 permission deny | 集成 | 不 spawn / 不登记 | 2 |
-| T-B3 | session dispose | 单测 | 未结束 job 被 killTree | 2 |
+| T-B2b | 异步 preflight 中取消 turn/session | 单测（gated preflight） | preflight 返回后不得 spawn 或登记 job | 2 |
+| T-B3a | registry session dispose | 单测 | 目标 session 的 running job 被 killTree，全部所属记录移除；其它 session 不受影响 | 2 |
+| T-B3b | 主 session 删除 | 集成 | 先 interrupt/cancel 并等待所属 producer 停稳，再从持久 store 清理 parent session 与全部 child scopes；completed/inactive subagent 也覆盖 | 2 |
+| T-B3c | subagent scope 关闭 | 单测/集成 | 等当前 run 停稳后只清理该 context scope；共享 child session 的兄弟 scope/job 不受影响 | 2 |
 | T-B4 | 前台缺省 bg | 回归 | 仍 await | 2 |
 | T-B5 | bg + 短 `timeout`，命令运行超过该时长 | 单测 | Registry **自动** `killTree`；`task_output` 读到 `status: timed_out`；无需模型调 `task_kill` | 2 |
 | T-B6 | bg + 未传 `timeout` | 单测（fake timer） | 使用默认值（120_000 ms），行为与 T-B5 等价，只是到点更晚 | 2 |
@@ -36,6 +39,7 @@
 | T-O8 | 尾部截断 | 单测 | 早期输出被环形缓冲丢弃时，metadata `truncated:true`；未截断时为 false | 2/3 |
 | T-O9 | metadata 模型投影 | 集成 | `task_output/task_kill` 的白名单字段经 `tool_metadata` 送达模型；非白名单字段不泄露 | 3 |
 | T-O10 | block 中取消当前 turn | 单测 | 本次等待立即取消；job 仍为 running，不触发 killTree | 3 |
+| T-O11 | 文件读取槽已满时调用 task_output | 调度器单测 | task_output 仍可执行，不占用、不等待 `maxReadConcurrency`；`readOnlyHint` 保持 true | 3 |
 | T-K1 | kill running | 单测 | 进程树退出；`output` 为当前尾部快照；状态 **`cancelled`**（不是 `timed_out`）；close 后必带 exitCode/signal | 3 |
 | T-K2 | kill 已 `completed`/`failed`/`cancelled` | 单测 | **不**再 killTree；返回该既有终态 | 3 |
 | T-K3 | kill≡stop 文档 | 文档 | README/工具 description 写明同义；主动终态名为 `cancelled` | 4 |
@@ -96,7 +100,7 @@
 | bg 绕过 permission | 启动前同一链 | 实现漏接 → T-B2 必过 |
 | kill 杀错进程 | 只杀登记 pid 树 | pid 复用窗口极小但存在 → 逻辑 id + 启动世代 |
 | 无限 block | `wait_ms` 必填或默认上限 | 模型传极大 `wait_ms` → 设硬上限 |
-| dispose 未调导致孤儿 | 钩子 + 进程退出钩子 | daemon 化仍不做，接受父死子可能残留的 OS 现实并文档化 |
+| session 删除后 job 成为孤儿 | 先停 producer，再由主 session 删除、subagent scope 关闭、runtime 全局 dispose 三层钩子回收 | daemon 化仍不做，接受宿主进程被强杀时 OS 子进程可能残留的现实 |
 | 模型故意/无意传超大 `timeout`（如数天）让 bg 变相长期存活 | 复用现有 `MAX_TIMEOUT_MS`（600_000 ms）作硬上限，不因 bg 放宽 | 硬上限内仍可运行 10 分钟，需配合 session 生命周期整体评估是否足够 |
 | Registry 定时器与手动 `task_kill` 竞态（几乎同时触发） | 状态机「先到先得」；已终态不可二次改写 | 极端并发下时序依赖单测覆盖 |
 | 把尾部快照误当增量游标 | 无 cursor API；description 写清 | 真增量需求另开批次 |

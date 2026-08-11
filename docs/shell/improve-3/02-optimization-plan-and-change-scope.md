@@ -41,6 +41,8 @@ task_kill(job_id)
 
 进程内 `ShellJobRegistry`：`Map<jobId, JobState>`，归属 session；每个 job 持有一个基于 `timeout` 的到期定时器（fg/bg 共用），定时器在 child `close` 或 registry 兜底落终态前保持有效，单独收到 `exit` 不提前清除。Registry 最多保留 100 个 job，超限时按进入终态的顺序淘汰最早完成的 job，running job 不淘汰。**不**写入 subagent SQLite schema。
 
+Registry 同时提供两级回收：主 session 删除时使用 `disposeSession(sessionId)` 清理 parent，并从持久 subagent store 枚举全部 child records（包含 completed/inactive）逐个执行 `disposeScope(sessionId, contextScopeId)`；共享 child session 中的单个 subagent 关闭时也使用 scope 清理。两条链路都必须先取消/等待所属 run 停稳，再终止并移除对应 running/terminal 记录，防止清理快照之后又登记新 job；bash 自身也在异步 preflight 返回后、spawn 前再次检查 AbortSignal。scope 清理不得影响兄弟 subagent。全局 runtime dispose 仍负责最后兜底。
+
 终态原因必须由一个同步的「终止原因归属」转换原子认领：`timeout`、`task_kill`、dispose 与子进程自然 exit 同时到达时，**先成功认领的一方**决定最终原因。若原因需要 killTree，registry 先记内部终止原因、再等待子进程 close；最多等待 1 秒，仍未 close 时以 `exitCode/signal = null` 收口。该内部标记不新增模型可见 `terminating` 状态。
 
 ---
@@ -61,6 +63,7 @@ task_kill(job_id)
 | 终态退出字段 | 终态必带 `exitCode: number|null` 和 `signal: string|null` | close 正常到达时保留完整信息；1s 兜底时明确为 null | 可选字段或只给文本 | 无 close 时无法恢复退出信息 |
 | Permission | 启动时走前台 bash 全路径；output/kill 只校验 job 归属 | 00 | bg 降低权限 | — |
 | timeoutOwner | bash 与可 block 的 `task_output` = `"tool"` | bash 自管 job 生命周期；task_output 自管最长 600s 的 `wait_ms`，均不被 scheduler 默认 120s 抢先中断 | 只改 scheduler 默认 | 新工具须自带等待上限 |
+| task_output 并发 | `readOnlyHint:true`；调度复用控制类并发豁免，不占 `maxReadConcurrency` | 副作用分类与容量分类分离；最多 600s 的 block 不堵塞 read/glob/grep | 继续按 readonly 排队；新增专用并发池 | 复用既有控制类别，避免新增配置面 |
 | List 工具 | **本批不做** `task_list` | 减工具；output 未知 id 报错即可 | Kimi 三件套含 List | 发现 job 靠返回值/历史 |
 | 完成通知 | 本批不做 | 00 非必须 | Claude 自动通知 | 模型需主动 output |
 | Subagent | generic/explore/research 若包含 bash，也必须包含 `task_output/task_kill` | 工具能力闭包；避免启动后台 job 后无法观测/终止 | 禁止 subagent bg | include 增加两个名称 |
@@ -86,13 +89,13 @@ task_kill(job_id)
   - 新 registry 模块（建议 `packages/ohbaby-agent/src/tools/shell-job-registry.ts` 或 `shell/jobs/`），内部维护 job 状态机（`running → completed|failed|cancelled|timed_out`）、到期定时器与不可见的 terminationRequested 原因归属；终态仅在 child close 后写入
   - `bash.ts` 分支；fg 路径的现有 timeout-kill 逻辑收编进 registry（统一实现，避免两套定时器代码）；`createBuiltinTools` / composition 注入 registry
   - 输出：内存尾部缓冲；`truncated: true` 表示当前 output 因上限省略了更早输出；v1 不写文件、不返回 `outputPath`
-  - runtime dispose 钩子（`composition.dispose` 层，与 `cancelAll` 同层；session 无独立 dispose）：对 `running` job 杀树并标 `cancelled`
+  - 全局 runtime dispose 兜底；`SessionEvent.Removed` 先取消/等待 parent run 与 active subagent，再从持久 store 枚举并清理 parent session 及全部 child scopes；subagent `onClosed` 先等待当前 run，再执行 `disposeScope(sessionId, contextScopeId)`。bash 在异步 preflight 后、spawn 前复查取消。各清理路径均对所属 `running` job 杀树并标 `cancelled`，随后移除所属记录
 - **DoD**：bg 启动不 await 进程结束；`timeout` 到点自动 kill 且终态为 `timed_out`；无 cursor API；无磁盘输出协议；前台路径回归绿；permission 仍在 execute 前触发。
 
 ### Phase 3 — `task_output` + `task_kill`
 
 - **目标**：可非阻塞取尾部快照；可 block+`wait_ms` 等终态；可主动 kill（终态 `cancelled`）；已终态幂等。
-- **改动**：新工具文件；注册为 builtin；`task_output` 声明 `timeoutOwner: "tool"` 并由自身落实 `wait_ms`；归属校验（仅 parent session 的 job）；在 `tool-metadata-projection.ts` 为 `task_output/task_kill` 增加白名单，令模型看见局部 metadata。
+- **改动**：新工具文件；注册为 builtin；`task_output` 声明 `timeoutOwner: "tool"` 并由自身落实 `wait_ms`，调度时不占文件读取并发槽；归属校验（session 与 context scope 均须匹配）；在 `tool-metadata-projection.ts` 为 `task_output/task_kill` 增加白名单，令模型看见局部 metadata。
 - **DoD**：04 场景 T-O* / T-K* 通过；running kill → `cancelled`；对 `timed_out`/`completed`/… 再 kill **不**改状态、**不**再 killTree。
 
 ### Phase 4 — 文档同步
@@ -112,7 +115,7 @@ task_kill(job_id)
 | `src/core/context/tool-metadata-projection.ts` | — | task_output/task_kill metadata 白名单 | — | 复用既有逐工具投影，不创建全局 envelope |
 | `src/tools/builtin.ts` / composition | 注册 | — | — | 注入 |
 | `src/shell/process.ts` | — | 复用 killTree | — | 尽量不改 |
-| session/runtime dispose | — | 钩子 | — | 防泄漏 |
+| session/subagent/runtime dispose | — | session、context scope 与全局钩子 | — | 防泄漏且隔离兄弟 subagent |
 | `docs/tools/*`、`docs/shell/goals-duty.md` | — | 同步 | — | Phase 4 |
 
 ---
@@ -180,6 +183,8 @@ task_kill(job_id)
 | 误把尾部快照当成「只返回未读增量」 | description 写清「当前尾部快照」；无 cursor | 产品误解 → 后续再议真增量 |
 | 同名 timeout 被误解为改写 job 生命周期 | task_output 仅接受 `wait_ms`；工具 description 明确“只等本次读取” | T-O3/T-D2 |
 | metadata 未投影给模型 | 为 task_output/task_kill 显式添加逐工具白名单 | metadata projection 单测/集成 |
+| session 删除后后台 job 失去调用入口 | 先停稳生产者，再按主 session 或 subagent context scope 清理 registry | T-B3a/T-B3b/T-B3c |
+| block task_output 占满只读并发槽 | 控制类调度语义直接豁免 read 槽；`readOnlyHint` 保持不变 | T-O11 |
 
 ---
 

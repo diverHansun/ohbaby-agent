@@ -40,8 +40,10 @@
 | `task_output` v1 | 每次以现有 `ToolExecutionResult.output` 返回**有上限的输出尾部快照**；`metadata` 固定带 `jobId/status/truncated`；**不**引入 cursor/offset，**不**维护隐藏消费位置 |
 | 输出持久化 | **本批不落盘**；只保留有上限的内存尾部缓冲，删除 `metadata.outputPath` 契约 |
 | Job 保留 | Registry 最多保留 **100** 个 job；超限时按**进入终态的顺序**淘汰最早完成的 job，running job 不淘汰 |
+| Session/scope 清理 | 主 session 收到 `SessionEvent.Removed` 时，在所属 run/subagent 停稳后清理 parent session，并从持久 store 枚举、清理全部 child scopes（含已完成/非 active）；单个 subagent 关闭时，在该 run 停稳后调用 `disposeScope(sessionId, contextScopeId)`。scope 清理不得影响共享 child session 的兄弟 scope |
 | 终止收口 | `killTree` 后最多等待 child `close` **1 秒**；仍未 close 时按已认领原因落终态，避免 `task_kill` / timeout / dispose 永久挂起 |
 | 取消等待 | `task_output(block:true)` 监听当前 tool 的 AbortSignal；取消只结束本次读取，不 kill、不改 job 状态 |
+| 读取并发 | `task_output` 的 `readOnlyHint` 仍表示无副作用；调度时按控制类工具豁免文件读取并发槽，长 block 不得堵住 `read/glob/grep` |
 | 终态退出字段 | `completed/failed/cancelled/timed_out` 必带 `metadata.exitCode` 与 `metadata.signal`（不适用的一项为 `null`）；运行中不带这两个字段 |
 | `task_kill` 幂等 | 已是 `completed`/`failed`/`cancelled`/`timed_out` → **不再** `killTree`，直接返回该既有终态；仅对 `running` 杀进程并标 `cancelled` |
 | 竞态归属 | timeout / 手动 kill / dispose 与自然 exit 先原子认领**终止原因**；实际子进程退出后再写终态与 exit 字段。`terminating` 只是 registry 内部标记，不新增模型可见状态 |
@@ -105,5 +107,6 @@
 | 2026-08-10 本会话（第六轮） | v1 不落盘、不返回 `outputPath`；`ShellJobRegistry` 只维护有上限的内存尾部缓冲，后续如需日志文件另开议题 |
 | 2026-08-11 评审修补 | bash-enabled subagent 同时获得 `task_output/task_kill`；保留 spawn error；前台恢复 stdout 后 stderr；终止 close 等待有 1s 兜底；终态 job 表上限 100 |
 | 2026-08-11 合并前复核 | child `exit` 不提前取消生命周期定时器，必须等 `close` 才自然落终态；终态淘汰按完成顺序而非创建顺序 |
+| 2026-08-11 生命周期复核 | session 删除与 subagent scope 关闭均先停稳生产者再回收所属 shell job；parent 删除覆盖 inactive child scopes；bash 在异步 preflight 后再次检查取消；subagent 按 context scope 隔离兄弟任务；`task_output` 不占文件读取并发槽；删除两处不可达/重复条件 |
 | 2026-08-09 本会话（第四轮） | 三批次分别实施、测试并提交：MCP → Shell → Memory；Shell registry 命名定为 `ShellJobRegistry`；`memory_*` 虚假 LLM 工具契约移入独立 memory problem-list，统一工具响应信封继续延期 |
 | 2026-08-09 本会话（第五轮） | bash 保持 `timeout`（job 生命周期）；`task_output` 改用 `wait_ms`（本次 block 等待）。Shell 结果使用既有 `output + metadata`：尾部文本在 output，状态与退出字段在工具专属 metadata；终态在子进程退出后才落定 |

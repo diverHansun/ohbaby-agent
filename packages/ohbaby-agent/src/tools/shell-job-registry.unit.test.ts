@@ -33,9 +33,13 @@ class FakeChild extends EventEmitter {
   }
 }
 
-function context(sessionId = "session_1"): ToolExecutionContext {
+function context(
+  sessionId = "session_1",
+  contextScopeId?: string,
+): ToolExecutionContext {
   return {
     callId: "call_1",
+    ...(contextScopeId === undefined ? {} : { contextScopeId }),
     messageId: "message_1",
     sessionId,
     signal: new AbortController().signal,
@@ -46,10 +50,13 @@ function startJob(
   registry: ShellJobRegistry,
   child: FakeChild,
   timeoutMs = 1_000,
+  sessionId = "session_1",
+  contextScopeId?: string,
 ): ShellJobSnapshot {
   return registry.start({
     child: child as unknown as ChildProcess,
-    sessionId: "session_1",
+    ...(contextScopeId === undefined ? {} : { contextScopeId }),
+    sessionId,
     timeoutMs,
   });
 }
@@ -126,6 +133,104 @@ describe("ShellJobRegistry", () => {
 
     expect(killTree).toHaveBeenCalledTimes(1);
     expect(registry.get(started.jobId, "session_1").status).toBe("cancelled");
+  });
+
+  it("disposes only jobs owned by the removed session", async () => {
+    const removedSessionChild = new FakeChild();
+    const removedTerminalChild = new FakeChild();
+    const retainedSessionChild = new FakeChild();
+    let nextJobId = 0;
+    const killTree = vi.fn((child: ChildProcess): void => {
+      (child as unknown as FakeChild).emit("close", null, "SIGTERM");
+    });
+    const registry = new ShellJobRegistry({
+      createJobId: (): string => `job_${String(++nextJobId)}`,
+      killTree,
+    });
+    const removedSessionJob = startJob(
+      registry,
+      removedSessionChild,
+      1_000_000,
+      "session_removed",
+    );
+    const retainedSessionJob = startJob(
+      registry,
+      retainedSessionChild,
+      1_000_000,
+      "session_retained",
+    );
+    const removedTerminalJob = startJob(
+      registry,
+      removedTerminalChild,
+      1_000_000,
+      "session_removed",
+    );
+    removedTerminalChild.emitExit(0, null);
+
+    try {
+      await registry.disposeSession("session_removed");
+
+      expect(() =>
+        registry.get(removedSessionJob.jobId, "session_removed"),
+      ).toThrow("Unknown shell job");
+      expect(() =>
+        registry.get(removedTerminalJob.jobId, "session_removed"),
+      ).toThrow("Unknown shell job");
+      expect(
+        registry.get(retainedSessionJob.jobId, "session_retained").status,
+      ).toBe("running");
+      expect(killTree).toHaveBeenCalledTimes(1);
+    } finally {
+      retainedSessionChild.emitExit(0, null);
+    }
+  });
+
+  it("disposes one subagent scope without affecting a sibling scope", async () => {
+    const closedScopeChild = new FakeChild();
+    const siblingScopeChild = new FakeChild();
+    let nextJobId = 0;
+    const killTree = vi.fn((child: ChildProcess): void => {
+      (child as unknown as FakeChild).emit("close", null, "SIGTERM");
+    });
+    const registry = new ShellJobRegistry({
+      createJobId: (): string => `job_${String(++nextJobId)}`,
+      killTree,
+    });
+    const closedScopeJob = startJob(
+      registry,
+      closedScopeChild,
+      1_000_000,
+      "child_session",
+      "subagent_1",
+    );
+    const siblingScopeJob = startJob(
+      registry,
+      siblingScopeChild,
+      1_000_000,
+      "child_session",
+      "subagent_2",
+    );
+
+    try {
+      await registry.disposeScope("child_session", "subagent_1");
+
+      expect(() =>
+        registry.get(closedScopeJob.jobId, "child_session", "subagent_1"),
+      ).toThrow("Unknown shell job");
+      expect(
+        registry.get(siblingScopeJob.jobId, "child_session", "subagent_2")
+          .status,
+      ).toBe("running");
+      await expect(
+        createTaskOutputTool(registry).execute(
+          { job_id: siblingScopeJob.jobId },
+          context("child_session", "subagent_1"),
+        ),
+      ).rejects.toThrow("not owned");
+      expect(killTree).toHaveBeenCalledTimes(1);
+    } finally {
+      siblingScopeChild.emitExit(0, null);
+    }
   });
 
   it("automatically marks a job timed_out", async () => {

@@ -30,6 +30,7 @@ type TerminationReason = "cancelled" | "timed_out";
 export interface ShellJobStartInput {
   readonly child: ChildProcess;
   readonly captureMode?: "head" | "tail";
+  readonly contextScopeId?: string;
   readonly sessionId: string;
   readonly timeoutMs: number;
   readonly metadata?: Readonly<Record<string, unknown>>;
@@ -53,6 +54,7 @@ export interface ShellJobRegistryOptions {
 interface ShellJob {
   readonly child: ChildProcess;
   readonly captureMode: "head" | "tail";
+  readonly contextScopeId?: string;
   readonly jobId: string;
   readonly metadata: Readonly<Record<string, unknown>>;
   readonly sessionId: string;
@@ -167,6 +169,7 @@ export class ShellJobRegistry {
     const job: ShellJob = {
       child: input.child,
       captureMode: input.captureMode ?? "tail",
+      contextScopeId: input.contextScopeId,
       jobId: this.createJobId(),
       metadata: input.metadata ?? {},
       output: "",
@@ -230,15 +233,20 @@ export class ShellJobRegistry {
     return this.snapshot(job);
   }
 
-  get(jobId: string, sessionId: string): ShellJobSnapshot {
-    return this.snapshot(this.getOwnedJob(jobId, sessionId));
+  get(
+    jobId: string,
+    sessionId: string,
+    contextScopeId?: string,
+  ): ShellJobSnapshot {
+    return this.snapshot(this.getOwnedJob(jobId, sessionId, contextScopeId));
   }
 
   async waitForTerminal(
     jobId: string,
     sessionId: string,
+    contextScopeId?: string,
   ): Promise<ShellJobSnapshot> {
-    const job = this.getOwnedJob(jobId, sessionId);
+    const job = this.getOwnedJob(jobId, sessionId, contextScopeId);
     if (!isTerminal(job.status)) {
       await job.terminal;
     }
@@ -253,8 +261,9 @@ export class ShellJobRegistry {
       readonly signal?: AbortSignal;
       readonly waitMs: number;
     },
+    contextScopeId?: string,
   ): Promise<ShellJobSnapshot> {
-    const job = this.getOwnedJob(jobId, sessionId);
+    const job = this.getOwnedJob(jobId, sessionId, contextScopeId);
     if (input.block && !isTerminal(job.status)) {
       if (input.signal?.aborted) {
         throw new Error("Task output wait was cancelled.");
@@ -289,12 +298,49 @@ export class ShellJobRegistry {
     return this.snapshot(job);
   }
 
-  async kill(jobId: string, sessionId: string): Promise<ShellJobSnapshot> {
-    const job = this.getOwnedJob(jobId, sessionId);
+  async kill(
+    jobId: string,
+    sessionId: string,
+    contextScopeId?: string,
+  ): Promise<ShellJobSnapshot> {
+    const job = this.getOwnedJob(jobId, sessionId, contextScopeId);
     if (!isTerminal(job.status)) {
       await this.terminate(job, "cancelled");
     }
     return this.snapshot(job);
+  }
+
+  async disposeSession(sessionId: string): Promise<void> {
+    const ownedJobs = [...this.jobs.values()].filter(
+      (job) => job.sessionId === sessionId,
+    );
+    await this.disposeJobs(ownedJobs);
+  }
+
+  async disposeScope(sessionId: string, contextScopeId: string): Promise<void> {
+    const ownedJobs = [...this.jobs.values()].filter(
+      (job) =>
+        job.sessionId === sessionId && job.contextScopeId === contextScopeId,
+    );
+    await this.disposeJobs(ownedJobs);
+  }
+
+  private async disposeJobs(ownedJobs: readonly ShellJob[]): Promise<void> {
+    await Promise.all(
+      ownedJobs
+        .filter((job) => !isTerminal(job.status))
+        .map((job) => this.terminate(job, "cancelled")),
+    );
+
+    const ownedJobIds = new Set(ownedJobs.map((job) => job.jobId));
+    for (const jobId of ownedJobIds) {
+      this.jobs.delete(jobId);
+    }
+    for (let index = this.terminalJobIds.length - 1; index >= 0; index -= 1) {
+      if (ownedJobIds.has(this.terminalJobIds[index] ?? "")) {
+        this.terminalJobIds.splice(index, 1);
+      }
+    }
   }
 
   async dispose(): Promise<void> {
@@ -304,14 +350,18 @@ export class ShellJobRegistry {
     await Promise.all(active.map((job) => this.terminate(job, "cancelled")));
   }
 
-  private getOwnedJob(jobId: string, sessionId: string): ShellJob {
+  private getOwnedJob(
+    jobId: string,
+    sessionId: string,
+    contextScopeId?: string,
+  ): ShellJob {
     const job = this.jobs.get(jobId);
     if (!job) {
       throw new ToolParameterError(`Unknown shell job "${jobId}".`);
     }
-    if (job.sessionId !== sessionId) {
+    if (job.sessionId !== sessionId || job.contextScopeId !== contextScopeId) {
       throw new ToolParameterError(
-        `Shell job "${jobId}" is not owned by this session.`,
+        `Shell job "${jobId}" is not owned by this session/context scope.`,
       );
     }
     return job;
@@ -409,10 +459,7 @@ export class ShellJobRegistry {
       return job.terminal;
     }
     job.terminationStarted = true;
-    job.terminationReason ??= reason;
-    if (job.terminationReason !== reason) {
-      return job.terminal;
-    }
+    job.terminationReason = reason;
     try {
       await this.killTree(job.child);
     } catch {
@@ -432,7 +479,7 @@ function snapshotResult(snapshot: ShellJobSnapshot): ToolExecutionResult {
 export function createTaskOutputTool(registry: ShellJobRegistry): Tool {
   return {
     annotations: { readOnlyHint: true },
-    category: "readonly",
+    category: "subagent-control",
     description:
       "Read a shell job's current bounded tail-output snapshot. With block=true, wait up to wait_ms for the job to finish; wait_ms only limits this read and never changes the bash job timeout.",
     name: "task_output",
@@ -471,6 +518,7 @@ export function createTaskOutputTool(registry: ShellJobRegistry): Tool {
           getRequiredNonEmptyStringParam(params, "job_id"),
           context.sessionId,
           { block, signal: context.signal, waitMs },
+          context.contextScopeId,
         ),
       );
     },
@@ -496,6 +544,7 @@ export function createTaskKillTool(registry: ShellJobRegistry): Tool {
         await registry.kill(
           getRequiredNonEmptyStringParam(params, "job_id"),
           context.sessionId,
+          context.contextScopeId,
         ),
       );
     },
