@@ -1,5 +1,7 @@
 # Agents Role Contract Implementation Plan
 
+> 历史设计记录：其中的 `memory_list` 示例已被第 3 批 ghost contract 清理替代，不代表当前 agent 工具配置。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the ambiguous `agent_name` subagent contract with a bounded optional `role`, reserved built-in subagent roles (`generic` / `explore` / `research`), and metadata-only `name` / `description` fields.

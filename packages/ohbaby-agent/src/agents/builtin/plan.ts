@@ -27,7 +27,6 @@ export const planAgent: AgentConfig = {
       "todo_write",
       "web_fetch",
       "web_search",
-      "memory_list",
       "skill",
       "skill_resource",
       "select_tools",

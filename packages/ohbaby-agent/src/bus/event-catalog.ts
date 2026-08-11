@@ -1,6 +1,5 @@
 import { CommandsEvent } from "../commands/events.js";
 import { ContextEvent } from "../core/context/events.js";
-import { MemoryEvent } from "../core/memory/events.js";
 import { MessageEvent } from "../core/message/events.js";
 import { ToolSchedulerEvent } from "../core/tool-scheduler/events.js";
 import { PermissionEvent } from "../permission/events.js";
@@ -40,7 +39,6 @@ export const allBusEvents = [
   ...eventDefinitions(PermissionEvent),
   ...eventDefinitions(MessageEvent),
   ...eventDefinitions(ContextEvent),
-  ...eventDefinitions(MemoryEvent),
   ...eventDefinitions(ToolSchedulerEvent),
   ...eventDefinitions(SessionEvent),
 ] as const;
@@ -286,53 +284,6 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
     uiVisible: "no",
     decision:
       "Internal projection telemetry; run stream owns user-visible context updates.",
-  },
-  {
-    event: MemoryEvent.Added,
-    owner: "Memory",
-    scope: "project",
-    audience: ["domain", "tests"],
-    frequency: "low",
-    requiredContext: ["scope", "text"],
-    contextStatus: "known-gap",
-    uiVisible: "no",
-    decision:
-      "Project memory lacks directory/projectRoot; keep internal until payload decision.",
-  },
-  {
-    event: MemoryEvent.Updated,
-    owner: "Memory",
-    scope: "project",
-    audience: ["domain", "tests"],
-    frequency: "low",
-    requiredContext: ["scope", "index", "newText"],
-    contextStatus: "known-gap",
-    uiVisible: "no",
-    decision:
-      "Project memory lacks directory/projectRoot; keep internal until payload decision.",
-  },
-  {
-    event: MemoryEvent.Removed,
-    owner: "Memory",
-    scope: "project",
-    audience: ["domain", "tests"],
-    frequency: "low",
-    requiredContext: ["scope", "index"],
-    contextStatus: "known-gap",
-    uiVisible: "no",
-    decision:
-      "Project memory lacks directory/projectRoot; keep internal until payload decision.",
-  },
-  {
-    event: MemoryEvent.Refreshed,
-    owner: "Memory",
-    scope: "project",
-    audience: ["domain", "tests"],
-    frequency: "low",
-    requiredContext: ["directory", "memory"],
-    contextStatus: "complete",
-    uiVisible: "no",
-    decision: "Internal domain event only.",
   },
   {
     event: ToolSchedulerEvent.StatusChanged,

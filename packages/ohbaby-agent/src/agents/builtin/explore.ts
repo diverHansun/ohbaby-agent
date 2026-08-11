@@ -25,7 +25,6 @@ export const exploreAgent: AgentConfig = {
       "task_kill",
       "todo_read",
       "todo_write",
-      "memory_list",
       "select_tools",
       "skill",
       "skill_resource",

@@ -1,5 +1,7 @@
 # improve-1 · 设计方案与参考对齐
 
+> 历史设计记录：其中的 `memory_list` 示例已被第 3 批 ghost contract 清理替代，不代表当前 agent 工具配置。
+
 > 配套文档：[01-问题分析](./01-problem-analysis.md)、[03-测试与验收](./03-test-and-acceptance.md)、[04-实施计划](./04-implementation-plan.md)。
 >
 > 本文档记录最终设计决策：`role` 可选且受控，默认 `generic`；`name` 与 `description` 是元数据；`generic` / `explore` / `research` 是系统保留内置子代理身份。

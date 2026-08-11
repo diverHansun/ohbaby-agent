@@ -1,5 +1,7 @@
 # context improve-2 文档集
 
+> 历史设计记录：当前长期记忆实现名为 `MemoryLoader`，只读加载 `OHBABY.md`；memory_* 主动工具不属于当前运行契约。
+
 本目录是 `core/context/` 模块第二轮架构优化的完整文档集。在 improve-1 修复了算法层与契约层问题、agents improve-2 完成 primary/subagent 底层统一之后，context improve-2 聚焦**长会话韧性**和**上下文可观测性**。
 
 > 状态：实施中。当前分支已完成 P0：per-step context 准备、overflow recovery、tool raw metadata 持久化与 serializer 中央白名单投影；P1/P2 项仍按后续阶段分批推进。
@@ -45,7 +47,7 @@ ohbaby-agent 的三层记忆架构骨架已完整且方向正确：
 ```
 短期记忆 (MessageManager + Part) ✅
 中期记忆 (ContextManager + Lifecycle) ✅ improve-1 加固
-长期记忆 (MemoryManager + OHBABY.md) ✅
+长期记忆 (MemoryLoader + OHBABY.md，只读加载) ✅
 
 工程深度缺口：
 ├── 事件溯源 (Record/Replay) ❌ → P1
@@ -82,7 +84,7 @@ context 模块在本轮改造中需要与以下模块协作。首批开发建议
 |---------|------|:---:|
 | `core/lifecycle` | Per-step 压缩触发点；溢出恢复重试；LLM 调用时动态传递 completion budget | 是（内部流程，非破坏性 API） |
 | `core/message` | tool part 持久化 raw metadata；`MessageWithParts.info` 或 `PartMetadata` 增加 origin/来源信息 | 是（向后兼容字段新增） |
-| `core/memory` | 不变（memory 模块保持现有 API） | 否 |
+| `core/memory` | 提供 `MemoryLoader` 只读加载器；不提供 LLM memory_* 工具 | 否（以第 3 批 Memory 文档为准） |
 | `core/system-prompt` | 不变 | 否 |
 | `services/llm-model` | 不变（tokenCounter 现有 API 已足够） | 否 |
 | `services/session` | 不变 | 否 |

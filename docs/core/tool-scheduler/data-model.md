@@ -16,7 +16,7 @@
 | write | 写入操作 | 串行执行 | write, edit；MCP工具（readOnlyHint=false/未设置） |
 | dangerous | 危险操作 | 串行执行 | bash |
 | network | 网络操作 | 可并行（最多5个） | web_fetch, web_search（内置工具，背后走 search-providers） |
-| memory | 记忆操作 | 可并行（不受读写锁限制） | memory_list, memory_add, memory_update, memory_remove |
+| memory | 目标/内部状态操作 | 可并行（不受读写锁限制） | goals 工具（显式声明 `category: "memory"`） |
 | skill | 技能加载与技能资源读取 | 可并行（最多5个） | skill, skill_resource |
 | subagent | 子代理操作 | 可并行（最多3个，独立计数器） | task |
 
@@ -29,7 +29,7 @@
 | 来源 | 代码位置 | 说明 | 注册时机 |
 |------|----------|------|----------|
 | builtin | `src/tools/` | 内置工具（含 web_search / web_fetch） | 启动时静态注册 |
-| module | 各模块内部 | 模块自带工具（如 Memory Tools） | 模块初始化时注册 |
+| module | 各模块内部 | 模块自带工具（当前无 memory LLM adapter） | 模块初始化时注册 |
 | skill | `src/skill/` | 技能系统工具（skill / skill_resource） | runtime composition 注册并在 skill registry 变化时刷新 |
 | mcp | 运行时动态 | MCP 服务器提供的工具 | 运行时发现注册 |
 
@@ -278,13 +278,8 @@ const CORE_TOOL_CATEGORIES: Record<string, ToolCategory> = {
 模块内置工具在模块初始化时注册：
 
 ```typescript
-// Memory 模块注册的工具
-const MEMORY_TOOL_CATEGORIES: Record<string, ToolCategory> = {
-  'memory_list': 'memory',
-  'memory_add': 'memory',
-  'memory_update': 'memory',
-  'memory_remove': 'memory',
-}
+// memory 是通用调度类别；由 goals 等真实工具显式声明，
+// 不再通过 ghost memory_* 名称推断。
 ```
 
 ### 3.3 Network Tools 类别映射（内置工具的子集）
@@ -427,7 +422,7 @@ function canExecute(
 
 `subagent` 和 `memory` 类别不参与 wave 分组。在 `executeBatch()` 中它们被提前分离，直接启动执行（与 wave 并行），不阻塞也不被 wave 阻塞。
 
-- **memory**：无副作用，始终可执行，不经过 CC 层准入
+- **memory**：用于显式声明该类别的内部/目标工具，不经过 CC 层准入
 - **subagent**：可能长时间运行，放入 wave 会阻塞后续 wave 。但仍经过 CC 层准入检查（`canExecute`），保持 maxSubagent = 3 的硬上限
 
 ```
@@ -435,7 +430,7 @@ executeBatch 示例（LLM 返回 6 个工具调用）：
 
   分离步骤：
     [task_agent_1]  → subagent, 立即启动（CC 检查 subagentCount<3）
-    [memory_list]   → memory,   立即启动（无需 CC 检查）
+    [goal_update]   → memory,   立即启动（无需 CC 检查）
 
   剩余进入 wave 分组：
     Wave1: [read_file_A, read_file_B, web_search_C]  → 可并行

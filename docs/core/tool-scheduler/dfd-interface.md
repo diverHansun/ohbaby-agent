@@ -199,9 +199,9 @@ executeBatch([call_A, call_B, call_C, call_D, call_E, call_F])
 
 ```
 memory 和 subagent 不参与 wave 分组，在 policy 检查通过后立即执行：
-  executeBatch([memory_add, task_research, write_file, read_file])
+  executeBatch([goal_update, task_research, write_file, read_file])
     │
-    ├─ memory_add    → 立即执行，不等 wave 分组
+    ├─ goal_update   → memory 类别，立即执行，不等 wave 分组
     ├─ task_research → 立即启动，受独立计数器约束
     ├─ read_file     → Wave 1
     └─ write_file    → Wave 2（等 Wave 1 完成）

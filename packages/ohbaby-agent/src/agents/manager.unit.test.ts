@@ -77,7 +77,6 @@ describe("AgentManager", () => {
       glob: true,
       grep: true,
       list: true,
-      memory_list: true,
       read: true,
       select_tools: true,
       skill: true,

@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CommandsEvent } from "../commands/events.js";
 import { ContextEvent } from "../core/context/events.js";
-import { MemoryEvent } from "../core/memory/events.js";
 import { MessageEvent } from "../core/message/events.js";
 import { ToolSchedulerEvent } from "../core/tool-scheduler/events.js";
 import { PermissionEvent } from "../permission/events.js";
@@ -42,7 +41,6 @@ function expectedBusEvents(): readonly BusEventDefinition[] {
     ...eventDefinitions(PermissionEvent),
     ...eventDefinitions(MessageEvent),
     ...eventDefinitions(ContextEvent),
-    ...eventDefinitions(MemoryEvent),
     ...eventDefinitions(ToolSchedulerEvent),
     ...eventDefinitions(SessionEvent),
   ];
@@ -101,7 +99,7 @@ describe("bus event catalog", () => {
 
     expect(actualEvents).toEqual(expected);
     expect(actualCatalog).toEqual(expected);
-    expect(actualCatalog).toHaveLength(30);
+    expect(actualCatalog).toHaveLength(26);
     expect(new Set(actualCatalog).size).toBe(actualCatalog.length);
   });
 
@@ -158,20 +156,13 @@ describe("bus event catalog", () => {
     );
 
     expect(knownGaps.map((entry) => entry.event.type).sort()).toEqual([
-      "memory.added",
-      "memory.removed",
-      "memory.updated",
       "tool-scheduler.execution-completed",
       "tool-scheduler.execution-started",
       "tool-scheduler.status-changed",
     ]);
 
     for (const entry of knownGaps) {
-      if (entry.owner === "Memory") {
-        expect(entry.decision).toContain("lacks directory/projectRoot");
-      } else {
-        expect(entry.decision).toContain("Missing runId/sessionId/messageId");
-      }
+      expect(entry.decision).toContain("Missing runId/sessionId/messageId");
     }
   });
 

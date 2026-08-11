@@ -1,5 +1,7 @@
 # context improve-2 问题分析
 
+> 历史设计记录：其中的 MemoryManager/memory_* 描述已被第 3 批 MemoryLoader 方案替代；当前 Memory 只读供 Context 加载。
+
 本文档分析 `core/context/` 模块在 improve-1 完成后的剩余设计空间，结合 kimi-code 与 pi 的工程实践，以及 Agent 三层记忆系统架构参考文档，定义本轮优化方向。
 
 **核心观点**：ohbaby-agent 的三层记忆架构骨架已完整且方向正确（improve-1 修复了算法层与契约层问题，agents improve-2 已统一 primary/subagent 的 agent 执行入口），context improve-2 聚焦**长会话韧性**——让 `prepareTurn` 不只在 turn 开始时正确，也能支撑单轮内长 tool 链、溢出恢复与可观测性。

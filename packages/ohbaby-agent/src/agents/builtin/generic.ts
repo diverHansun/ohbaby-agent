@@ -28,7 +28,6 @@ export const genericAgent: AgentConfig = {
       "todo_write",
       "web_fetch",
       "web_search",
-      "memory_list",
       "select_tools",
       "skill",
       "skill_resource",

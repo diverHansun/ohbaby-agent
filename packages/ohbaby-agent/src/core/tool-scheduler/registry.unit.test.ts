@@ -17,7 +17,7 @@ describe("ToolRegistry", () => {
     const registry = createToolRegistry();
 
     registry.register(createTool({ name: "read" }));
-    registry.register(createTool({ name: "memory_add", source: "module" }));
+    registry.register(createTool({ name: "module_probe", source: "module" }));
     registry.register(createTool({ name: "skill", source: "skill" }));
     registry.register(
       createTool({
@@ -32,7 +32,7 @@ describe("ToolRegistry", () => {
 
     expect(registry.get("read")?.name).toBe("read");
     expect(registry.getCategory("read")).toBe("readonly");
-    expect(registry.getCategory("memory_add")).toBe("memory");
+    expect(registry.getCategory("module_probe")).toBe("write");
     expect(registry.getCategory("skill")).toBe("skill");
     expect(registry.getCategory("mcp_read")).toBe("readonly");
     expect(registry.getCategory("mcp_write")).toBe("write");
@@ -74,7 +74,7 @@ describe("ToolRegistry", () => {
       "read",
       "edit",
       "web_search",
-      "memory_add",
+      "goal_update",
       "subagent_run",
       "subagent_status",
       "subagent_close",
@@ -98,7 +98,7 @@ describe("ToolRegistry", () => {
     ).toEqual([
       "read",
       "edit",
-      "memory_add",
+      "goal_update",
       "subagent_run",
       "subagent_status",
       "subagent_close",
@@ -116,7 +116,7 @@ describe("ToolRegistry", () => {
       "read",
       "edit",
       "web_search",
-      "memory_add",
+      "goal_update",
       "todo_read",
       "todo_write",
     ]);

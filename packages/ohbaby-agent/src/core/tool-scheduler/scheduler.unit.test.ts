@@ -375,7 +375,7 @@ describe("ToolScheduler", () => {
       { name: "read", category: "readonly" },
       { name: "edit", category: "write" },
       { name: "web_search", category: "network" },
-      { name: "memory_add", category: "memory" },
+      { name: "goal_update", category: "memory" },
     ] as const) {
       scheduler.register(createTool(tool));
     }
@@ -1634,7 +1634,7 @@ describe("ToolScheduler", () => {
           started.push(context.callId);
           return Promise.resolve({ output: "remembered" });
         },
-        name: "memory_add",
+        name: "goal_update",
       }),
     );
     scheduler.register(
@@ -1660,7 +1660,7 @@ describe("ToolScheduler", () => {
       messageId: "message_1",
       params: {},
       sessionId: "session_1",
-      toolName: "memory_add",
+      toolName: "goal_update",
     });
     const subagent1 = scheduler.execute({
       callId: "subagent_1",
@@ -1742,7 +1742,7 @@ describe("ToolScheduler", () => {
     const { scheduler } = createScheduler({
       config: { concurrency: { maxSubagentConcurrency: 1 } },
     });
-    for (const toolName of ["read", "edit", "memory_add"]) {
+    for (const toolName of ["read", "edit", "goal_update"]) {
       scheduler.register(
         createTool({
           execute: (_params, context) => {
@@ -1776,7 +1776,7 @@ describe("ToolScheduler", () => {
             messageId: "message_1",
             params: {},
             sessionId: "session_1",
-            toolName: "memory_add",
+            toolName: "goal_update",
           },
         ],
       }),
@@ -1796,7 +1796,7 @@ describe("ToolScheduler", () => {
     for (const tool of [
       { name: "read", category: "readonly" },
       { name: "edit", category: "write" },
-      { name: "memory_add", category: "memory" },
+      { name: "goal_update", category: "memory" },
       { name: "subagent_run", category: "subagent" },
     ] as const) {
       scheduler.register(
@@ -1852,7 +1852,7 @@ describe("ToolScheduler", () => {
             messageId: "message_1",
             params: {},
             sessionId: "session_1",
-            toolName: "memory_add",
+            toolName: "goal_update",
           },
           {
             callId: "subagent_1",

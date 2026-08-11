@@ -7,7 +7,6 @@ export type PermissionCallKind =
   | "write"
   | "dangerous"
   | "network"
-  | "memory-read"
   | "memory-write"
   | "sensitive"
   | "skill"
@@ -41,12 +40,6 @@ const BUILTIN_CATEGORIES: Partial<Record<string, PermissionToolCategory>> = {
   write: "write",
 };
 
-const MEMORY_READ_TOOLS = new Set(["memory_read", "memory_list"]);
-const MEMORY_WRITE_TOOLS = new Set([
-  "memory_add",
-  "memory_update",
-  "memory_remove",
-]);
 const SUBAGENT_TOOLS = new Set([
   "subagent_run",
   "subagent_status",
@@ -86,12 +79,6 @@ export function classifyPermissionCall(
     };
   }
 
-  if (MEMORY_READ_TOOLS.has(toolName)) {
-    return { category: "memory", kind: "memory-read" };
-  }
-  if (MEMORY_WRITE_TOOLS.has(toolName)) {
-    return { category: "memory", kind: "memory-write" };
-  }
   if (toolName === "todo_write") {
     return { category: "write", kind: "memory-write" };
   }

@@ -79,7 +79,6 @@ function evaluateLevelFallback(
   switch (classification.kind) {
     case "readonly":
     case "network":
-    case "memory-read":
     case "memory-write":
     case "subagent":
       return allow();

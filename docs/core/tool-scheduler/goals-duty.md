@@ -55,7 +55,7 @@ ToolScheduler 负责管理四种来源的工具：
 │     └── source: 'builtin'                                   │
 │                                                             │
 │  2. Module-Owned Tools（模块注册）                           │
-│     └── Memory.registerTools(scheduler)                     │
+│     └── 无 memory_* LLM 工具注册；MemoryLoader 只供 Context 使用 │
 │     └── source: 'module'                                    │
 │                                                             │
 │  3. Skill Tools（技能系统注册）                              │
@@ -204,7 +204,7 @@ interface ToolExecutionContext {
 | Permission | `src/permission/` | 依赖 | 请求用户确认 |
 | Built-in Tools | `src/tools/` | 依赖 | 调用所有内置工具实现（含 web_search / web_fetch） |
 | search-providers | `src/services/search-providers/` | 间接依赖 | `web_search` / `web_fetch` 工具内部使用，调度器不直接接触 |
-| Memory | `src/core/memory/` | 依赖 | 注册 Memory Tools |
+| Memory | `src/core/memory/` | 依赖 | 提供 MemoryLoader 给 Context，不向 Scheduler 注册工具 |
 | Skill | `src/skill/` | 依赖 | 注册 SkillTool，加载用户定义的技能 |
 | MCP | `src/mcp/` | 依赖 | 注册 MCP 工具 |
 | Bus | `src/bus/` | 依赖 | 发布状态变化事件 |

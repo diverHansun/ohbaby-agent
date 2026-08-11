@@ -1,5 +1,7 @@
 # Permission 重构验收与测试标准（已决策版）
 
+> 历史设计记录：其中的 `memory_*` 条目描述旧 ghost 契约，不代表当前运行时。当前 Memory 仅由 `MemoryLoader` 供 Context 只读加载，permission 不再为 memory_* 提供专用分类。
+
 本文档定义后续代码实施的验收门槛。所有测试必须验证真实行为，禁止只验证 mock 自己。本文使用 UTF-8 编码。
 
 ---

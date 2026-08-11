@@ -440,7 +440,7 @@ const ExploreAgent: AgentConfig = {
   maxSteps: 15,
   timeout: 180000,
   tools: {
-    include: ['glob', 'grep', 'read', 'memory_list']
+    include: ['glob', 'grep', 'read']
   },
   permission: {
     edit: 'deny',
@@ -462,7 +462,7 @@ const ResearchAgent: AgentConfig = {
   maxSteps: 30,
   timeout: 180000,
   tools: {
-    include: ['webfetch', 'websearch', 'glob', 'grep', 'read', 'write', 'memory_list', 'memory_add', 'memory_update', 'memory_remove']
+    include: ['webfetch', 'websearch', 'glob', 'grep', 'read', 'write']
   },
   permission: {
     edit: 'allow',

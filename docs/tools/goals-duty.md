@@ -17,7 +17,7 @@ ohbaby-agent 的工具按"来源"分三类，本模块（`tools`）覆盖前者�
 | 来源 | 位置 | 说明 |
 |---|---|---|
 | **内置工具（built-in）** | `src/tools/` | 本模块负责。包括文件、shell、agent、网络等 |
-| **模块自带工具（module-owned）** | 各模块内部，如 `src/core/memory/memory-tools.ts` | 与模块紧耦合，由对应模块声明并向调度器注册 |
+| **模块自带工具（module-owned）** | 各模块内部，如 skill/MCP integration | 与模块紧耦合，由对应模块声明并向调度器注册；MemoryLoader 不属于 LLM 工具 |
 | **MCP 工具（mcp）** | 运行时动态注册 | 通过 MCP 协议发现，由用户配置 |
 
 `docs/skill/` 描述的 Skill 工具属于"模块自带工具"中的一种，由 skill 模块负责。

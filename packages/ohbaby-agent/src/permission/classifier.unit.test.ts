@@ -42,27 +42,19 @@ describe("permission classifier", () => {
     });
   });
 
-  it("splits memory read and write semantics without expanding the top-level enum", () => {
-    expect(classifyPermissionCall(call("memory_read"))).toMatchObject({
-      category: "memory",
-      kind: "memory-read",
-    });
-    expect(classifyPermissionCall(call("memory_list"))).toMatchObject({
-      category: "memory",
-      kind: "memory-read",
-    });
-    expect(classifyPermissionCall(call("memory_add"))).toMatchObject({
-      category: "memory",
-      kind: "memory-write",
-    });
-    expect(classifyPermissionCall(call("memory_update"))).toMatchObject({
-      category: "memory",
-      kind: "memory-write",
-    });
-    expect(classifyPermissionCall(call("memory_remove"))).toMatchObject({
-      category: "memory",
-      kind: "memory-write",
-    });
+  it("does not preserve ghost memory tool classifications", () => {
+    for (const toolName of [
+      "memory_read",
+      "memory_list",
+      "memory_add",
+      "memory_update",
+      "memory_remove",
+    ]) {
+      expect(classifyPermissionCall(call(toolName))).toMatchObject({
+        category: "write",
+        kind: "write",
+      });
+    }
   });
 
   it("classifies subagent and skill tools", () => {
