@@ -221,6 +221,91 @@ describe("WorkspacePromptScheduler", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("returns the receipt when close happens after durable acceptance", async () => {
+    const store = new InMemoryPromptSubmissionStore();
+    const acceptCommitted = deferred();
+    const releaseAccept = deferred();
+    const originalAccept = store.accept.bind(store);
+    vi.spyOn(store, "accept").mockImplementation(async (input) => {
+      const accepted = await originalAccept(input);
+      acceptCommitted.resolve();
+      await releaseAccept.promise;
+      return accepted;
+    });
+    const execute = vi.fn(() =>
+      Promise.resolve({ status: "succeeded" as const }),
+    );
+    const scheduler = new WorkspacePromptScheduler({
+      execute,
+      scopeKey: "/workspace",
+      store,
+    });
+
+    const accepting = scheduler.accept({
+      sessionId: "session_1",
+      text: "durably accepted before close",
+    });
+    await acceptCommitted.promise;
+    scheduler.close();
+    releaseAccept.resolve();
+
+    const accepted = await accepting;
+    await expect(store.get(accepted.promptId)).resolves.toMatchObject({
+      status: "queued",
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("returns the receipt when a scheduler fault happens after durable acceptance", async () => {
+    const store = new InMemoryPromptSubmissionStore();
+    const firstStarted = deferred();
+    const finishFirst = deferred();
+    const secondCommitted = deferred();
+    const releaseSecondAccept = deferred();
+    const storageError = new Error("terminal storage unavailable");
+    const originalAccept = store.accept.bind(store);
+    vi.spyOn(store, "accept").mockImplementation(async (input) => {
+      const accepted = await originalAccept(input);
+      if (input.text === "accepted before fault") {
+        secondCommitted.resolve();
+        await releaseSecondAccept.promise;
+      }
+      return accepted;
+    });
+    vi.spyOn(store, "finish").mockRejectedValueOnce(storageError);
+    const execute = vi.fn(async () => {
+      firstStarted.resolve();
+      await finishFirst.promise;
+      return { status: "succeeded" as const };
+    });
+    const scheduler = new WorkspacePromptScheduler({
+      execute,
+      scopeKey: "/workspace",
+      store,
+    });
+    const first = await scheduler.accept({
+      sessionId: "session_1",
+      text: "trigger scheduler fault",
+    });
+    await firstStarted.promise;
+
+    const accepting = scheduler.accept({
+      sessionId: "session_2",
+      text: "accepted before fault",
+    });
+    await secondCommitted.promise;
+    const firstCompletion = scheduler.waitForCompletion(first.promptId);
+    finishFirst.resolve();
+    await expect(firstCompletion).rejects.toBe(storageError);
+    releaseSecondAccept.resolve();
+
+    const accepted = await accepting;
+    await expect(store.get(accepted.promptId)).resolves.toMatchObject({
+      status: "queued",
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
   it("does not claim queued work after close wins an in-flight queue read", async () => {
     const store = new InMemoryPromptSubmissionStore();
     const listStarted = deferred();

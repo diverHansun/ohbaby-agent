@@ -201,6 +201,37 @@ function commandResultDelivered(): UiEvent {
   };
 }
 
+function commandStarted(): Extract<UiEvent, { type: "command.started" }> {
+  return {
+    command: {
+      clientInvocationId: "invoke_1",
+      commandId: "status",
+      commandRunId: "command_1",
+      path: ["status"],
+      surface: "web",
+    },
+    timestamp: Date.parse(timestamp),
+    type: "command.started",
+  };
+}
+
+function interactionRequested(): Extract<
+  UiEvent,
+  { type: "interaction.requested" }
+> {
+  return {
+    request: {
+      clientInvocationId: "invoke_1",
+      commandRunId: "command_1",
+      interactionId: "interaction_1",
+      kind: "confirm",
+      subject: "permission",
+    },
+    timestamp: Date.parse(timestamp),
+    type: "interaction.requested",
+  };
+}
+
 function commandSessionSelected(sessionId: string): UiEvent {
   return {
     action: {
@@ -239,6 +270,10 @@ class FakeBackend implements UiBackendClient {
   readonly permissionResponses: {
     readonly requestId: string;
     readonly response: Parameters<UiBackendClient["respondPermission"]>[1];
+  }[] = [];
+  readonly interactionResponses: {
+    readonly interactionId: string;
+    readonly response: Parameters<UiBackendClient["respondInteraction"]>[1];
   }[] = [];
   readonly submitted: {
     readonly text: string;
@@ -439,7 +474,11 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve();
   }
 
-  respondInteraction(): Promise<void> {
+  respondInteraction(
+    interactionId: string,
+    response: Parameters<UiBackendClient["respondInteraction"]>[1],
+  ): Promise<void> {
+    this.interactionResponses.push({ interactionId, response });
     return Promise.resolve();
   }
 
@@ -1095,6 +1134,62 @@ describe("createDaemonHttpServer", () => {
         expect(response.status).toBe(200);
       },
       { clientDisconnectRetentionMs: 10 },
+    );
+  });
+
+  it("preserves interaction ownership across a reconnect within retention", async () => {
+    const backend = new FakeBackend();
+    await withServer(
+      backend,
+      async (url) => {
+        const stream = await fetchEvents(url, "client_a");
+        const reader = createSseFrameReader(stream);
+        await reader.read();
+
+        const invoked = await postRpc(url, {
+          clientId: "client_a",
+          id: "rpc_command",
+          method: "executeCommand",
+          params: [
+            {
+              argv: [],
+              clientInvocationId: "invoke_1",
+              commandId: "status",
+              path: ["status"],
+              raw: "/status",
+              rawArgs: "",
+              surface: "web",
+            },
+          ],
+        });
+        expect(invoked.status).toBe(200);
+        backend.emit(commandStarted());
+        backend.emit(interactionRequested());
+
+        await reader.cancel();
+        const resumed = await fetchEvents(url, "client_a");
+        const resumedReader = createSseFrameReader(resumed);
+        await expect(resumedReader.read()).resolves.toMatchObject({
+          data: { clientId: "client_a", type: "hello" },
+        });
+
+        const response = await postRpc(url, {
+          clientId: "client_a",
+          id: "rpc_interaction",
+          method: "respondInteraction",
+          params: ["interaction_1", { kind: "accepted", value: true }],
+        });
+
+        expect(response.status).toBe(200);
+        expect(backend.interactionResponses).toEqual([
+          {
+            interactionId: "interaction_1",
+            response: { kind: "accepted", value: true },
+          },
+        ]);
+        await resumedReader.cancel();
+      },
+      { clientDisconnectRetentionMs: 100 },
     );
   });
 

@@ -205,7 +205,9 @@ function interactionRequested(): Extract<
   };
 }
 
-function interactionResolved(): Extract<
+function interactionResolved(
+  status: "accepted" | "cancelled" = "accepted",
+): Extract<
   UiEvent,
   { type: "interaction.resolved" }
 > {
@@ -213,7 +215,7 @@ function interactionResolved(): Extract<
     clientInvocationId: "invoke_1",
     commandRunId: "command_1",
     interactionId: "interaction_1",
-    status: "accepted",
+    status,
     timestamp: Date.parse(timestamp),
     type: "interaction.resolved",
   };
@@ -595,6 +597,71 @@ describe("DaemonClientViewCoordinator", () => {
         "interaction_1",
         "client_a",
         () => "claim_2",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("clears interaction ownership for cancelled terminal events", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    coordinator.prepareCommandInvocation("client_a", commandInvocation());
+    coordinator.observeEvent(commandStarted());
+    coordinator.observeEvent(interactionRequested());
+
+    coordinator.observeEvent(interactionResolved("cancelled"));
+
+    expect(
+      coordinator.claimInteractionResponse(
+        "interaction_1",
+        "client_a",
+        () => "claim_after_abort_or_timeout",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("does not restore a claim after client removal wins the race", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    coordinator.prepareCommandInvocation("client_a", commandInvocation());
+    coordinator.observeEvent(commandStarted());
+    coordinator.observeEvent(interactionRequested());
+    const claim = coordinator.claimInteractionResponse(
+      "interaction_1",
+      "client_a",
+      () => "claim_1",
+    );
+    if (claim === undefined) {
+      throw new Error("expected interaction claim");
+    }
+
+    coordinator.disconnectClient("client_a");
+
+    expect(
+      coordinator.releaseInteractionClaim(
+        "interaction_1",
+        claim.claimToken,
+      ),
+    ).toBe(false);
+    expect(
+      coordinator.claimInteractionResponse(
+        "interaction_1",
+        "client_a",
+        () => "claim_2",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("clears interaction ownership when runtime state resets on shutdown", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    coordinator.prepareCommandInvocation("client_a", commandInvocation());
+    coordinator.observeEvent(commandStarted());
+    coordinator.observeEvent(interactionRequested());
+
+    coordinator.resetRuntimeState();
+
+    expect(
+      coordinator.claimInteractionResponse(
+        "interaction_1",
+        "client_a",
+        () => "claim_after_shutdown",
       ),
     ).toBeUndefined();
   });

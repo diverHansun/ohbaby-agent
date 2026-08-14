@@ -166,7 +166,10 @@ export class WorkspacePromptScheduler {
           this.options.createUserMessageId?.() ??
           `message_${randomUUID()}`,
       });
-      this.assertOpen();
+      // Durable acceptance is the admission linearization point. Once the
+      // store commits, the caller must receive the receipt even if close or a
+      // scheduler fault wins before this continuation resumes; otherwise a
+      // queued prompt could survive without any caller knowing its promptId.
       const prompt = accepted.record;
       if (accepted.inserted) {
         this.options.onSubmitted?.(prompt);
