@@ -14,6 +14,17 @@ interface DemoCallbacks {
   readonly subscribeEvents: (handler: (value: string) => void) => () => void;
 }
 
+interface PromptWaitAPI {
+  readonly submitPromptAndWait: (
+    text: string,
+    options?: { readonly sessionId?: string; readonly signal?: AbortSignal },
+  ) => Promise<string>;
+  readonly waitForPrompt: (
+    promptId: string,
+    options?: { readonly signal?: AbortSignal },
+  ) => Promise<string>;
+}
+
 describe("createRPC", () => {
   it("serializes calls and results across the boundary", async () => {
     const rpc = createRPC<DemoAPI>();
@@ -123,4 +134,58 @@ describe("createRPC", () => {
       name: "AbortError",
     });
   });
+
+  it.each(["waitForPrompt", "submitPromptAndWait"] as const)(
+    "passes the nested signal out of band so %s cleans its backend waiter",
+    async (method) => {
+      const rpc = createRPC<PromptWaitAPI>();
+      let backendAborted = false;
+      let receivedSessionId: string | undefined;
+      const waitForAbort = (
+        signal: AbortSignal | undefined,
+      ): Promise<string> =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              backendAborted = true;
+              const error = new Error("backend waiter aborted");
+              error.name = "AbortError";
+              reject(error);
+            },
+            { once: true },
+          );
+        });
+      rpc.connectImpl({
+        submitPromptAndWait(_text, options) {
+          receivedSessionId = options?.sessionId;
+          return waitForAbort(options?.signal);
+        },
+        waitForPrompt(_promptId, options) {
+          return waitForAbort(options?.signal);
+        },
+      });
+      const proxy = rpc.createProxy({});
+      const controller = new AbortController();
+
+      const pending =
+        method === "waitForPrompt"
+          ? proxy.waitForPrompt("prompt_1", { signal: controller.signal })
+          : proxy.submitPromptAndWait("hello", {
+              sessionId: "session_1",
+              signal: controller.signal,
+            });
+      const rejection = expect(pending).rejects.toMatchObject({
+        name: "AbortError",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      controller.abort();
+
+      await rejection;
+      expect(backendAborted).toBe(true);
+      if (method === "submitPromptAndWait") {
+        expect(receivedSessionId).toBe("session_1");
+      }
+    },
+  );
 });

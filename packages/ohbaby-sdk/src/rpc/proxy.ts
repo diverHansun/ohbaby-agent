@@ -5,6 +5,10 @@ interface SerializedError {
 }
 
 const CALLBACK_KEYS = new Set<PropertyKey>(["subscribeEvents"]);
+const NESTED_SIGNAL_METHODS = new Set<PropertyKey>([
+  "submitPromptAndWait",
+  "waitForPrompt",
+]);
 
 function boundaryDelay(): Promise<void> {
   return new Promise((resolve) => {
@@ -58,8 +62,42 @@ function firstAbortSignal(values: readonly unknown[]): AbortSignal | undefined {
   return values.find(isAbortSignal);
 }
 
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function stripAbortSignals(values: readonly unknown[]): readonly unknown[] {
   return values.map((value) => (isAbortSignal(value) ? undefined : value));
+}
+
+interface ExtractedCallSignal {
+  readonly args: readonly unknown[];
+  readonly nestedOptionsIndex?: number;
+  readonly signal?: AbortSignal;
+}
+
+function extractCallSignal(
+  methodName: PropertyKey,
+  args: readonly unknown[],
+): ExtractedCallSignal {
+  if (NESTED_SIGNAL_METHODS.has(methodName)) {
+    const options = args[1];
+    if (isRecord(options) && isAbortSignal(options.signal)) {
+      const { signal, ...serializableOptions } = options;
+      const serializableArgs = [...args];
+      serializableArgs[1] = serializableOptions;
+      return {
+        args: serializableArgs,
+        nestedOptionsIndex: 1,
+        signal,
+      };
+    }
+  }
+  const signal = firstAbortSignal(args);
+  return {
+    args: stripAbortSignals(args),
+    ...(signal === undefined ? {} : { signal }),
+  };
 }
 
 function jsonClone<T>(value: T): T {
@@ -74,17 +112,30 @@ async function cloneAcrossBoundary<T>(value: T): Promise<T> {
   return jsonClone(value);
 }
 
-function abortPromise(signal: AbortSignal): Promise<never> {
+function raceWithAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) {
     return Promise.reject(abortError());
   }
 
-  return new Promise((_, reject) => {
+  return new Promise((resolve, reject) => {
     const onAbort = (): void => {
-      signal.removeEventListener("abort", onAbort);
+      cleanup();
       reject(abortError());
     };
+    const cleanup = (): void => {
+      signal.removeEventListener("abort", onAbort);
+    };
     signal.addEventListener("abort", onAbort, { once: true });
+    void work.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
   });
 }
 
@@ -109,13 +160,26 @@ export function createRPC<API extends object>(): {
       throw new Error(`RPC method not found: ${String(methodName)}`);
     }
 
-    const signal = firstAbortSignal(args);
+    const extracted = extractCallSignal(methodName, args);
+    const { signal } = extracted;
     if (signal?.aborted) {
       throw abortError();
     }
 
     const work = (async (): Promise<unknown> => {
-      const clonedArgs = await cloneAcrossBoundary(stripAbortSignals(args));
+      const clonedArgs = [
+        ...(await cloneAcrossBoundary(extracted.args)),
+      ];
+      if (
+        signal !== undefined &&
+        extracted.nestedOptionsIndex !== undefined
+      ) {
+        const clonedOptions = clonedArgs[extracted.nestedOptionsIndex];
+        clonedArgs[extracted.nestedOptionsIndex] = {
+          ...(isRecord(clonedOptions) ? clonedOptions : {}),
+          signal,
+        };
+      }
       try {
         return await cloneAcrossBoundary(
           await (method as (...input: readonly unknown[]) => unknown)(
@@ -129,9 +193,7 @@ export function createRPC<API extends object>(): {
       }
     })();
 
-    return signal === undefined
-      ? work
-      : Promise.race([work, abortPromise(signal)]);
+    return signal === undefined ? work : raceWithAbort(work, signal);
   }
 
   return {
