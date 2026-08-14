@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility bridge */
 import { randomUUID } from "node:crypto";
 import { Box, Text, useInput } from "ink";
 import type {

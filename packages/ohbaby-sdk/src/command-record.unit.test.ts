@@ -7,11 +7,19 @@ import {
   type UiCommandRecorder,
 } from "./command-record.js";
 
-function fixedDependencies(records: UiCommandRecord[]) {
+function fixedDependencies(records: UiCommandRecord[]): {
+  readonly createOperationId: () => string;
+  readonly now: () => Date;
+  readonly recorder: UiCommandRecorder;
+} {
   return {
-    createOperationId: () => "operation_1",
-    now: () => new Date("2026-08-14T00:00:00.000Z"),
-    recorder: { record: (record: UiCommandRecord) => records.push(record) },
+    createOperationId: (): string => "operation_1",
+    now: (): Date => new Date("2026-08-14T00:00:00.000Z"),
+    recorder: {
+      record(record: UiCommandRecord): void {
+        records.push(record);
+      },
+    },
   };
 }
 

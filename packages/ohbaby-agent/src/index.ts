@@ -9,6 +9,16 @@ export type {
   PersistentUiBackendOptions,
 } from "./adapters/ui-persistent.js";
 export { buildCoreAPIImpl } from "./host/core-api-factory.js";
+export {
+  createStructuredUiCommandRecorder,
+  type StructuredUiCommandRecorder,
+  type StructuredUiCommandRecorderOptions,
+} from "./host/command-recorder.js";
+export {
+  createUiCommandGateway,
+  type RecordedUiBackendClient,
+  type UiCommandGatewayOptions,
+} from "./host/ui-command-gateway.js";
 export type {
   CoreApiFactoryOptions,
   CoreApiHost,

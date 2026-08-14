@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility bridge */
 import type { ArgumentsCamelCase, Argv, CommandModule } from "yargs";
 import type { CliCommandRuntime, CliGlobalOptions } from "./types.js";
 

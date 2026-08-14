@@ -1,17 +1,64 @@
-import type { CoreAPI, SDKAPI, UiSnapshot } from "ohbaby-sdk";
+import type {
+  CoreAPI,
+  SDKAPI,
+  UiCommandObservationDiagnostic,
+  UiCommandRecorder,
+  UiSnapshot,
+} from "ohbaby-sdk";
 /* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility bridge */
 import {
   closePersistentUiBackendDatabase,
   createPersistentUiBackendClient,
 } from "../adapters/ui-persistent.js";
 import { McpManager } from "../mcp/index.js";
+import {
+  createStructuredUiCommandRecorder,
+  type StructuredUiCommandRecorder,
+} from "./command-recorder.js";
+import { createUiCommandGateway } from "./ui-command-gateway.js";
 
 export interface CoreApiFactoryOptions {
+  readonly commandRecorder?: UiCommandRecorder | false;
   readonly continue?: boolean;
   readonly inProcess?: boolean;
   readonly mode?: "plan" | "auto";
   readonly permission?: "default" | "full-access";
   readonly resume?: string;
+}
+
+const NOOP_COMMAND_RECORDER: UiCommandRecorder = {
+  record(): void {
+    return;
+  },
+};
+
+function reportCommandObservationFailure(
+  diagnostic: UiCommandObservationDiagnostic,
+): void {
+  const name =
+    diagnostic.error instanceof Error && diagnostic.error.name.length > 0
+      ? diagnostic.error.name
+      : "Error";
+  process.stderr.write(
+    `${JSON.stringify({ name, stage: diagnostic.stage, type: "ui.command.observation.failure" })}\n`,
+  );
+}
+
+function commandRecorderFromOptions(options: CoreApiFactoryOptions): {
+  readonly recorder: UiCommandRecorder;
+  readonly structured?: StructuredUiCommandRecorder;
+} {
+  if (options.commandRecorder === false) {
+    return { recorder: NOOP_COMMAND_RECORDER };
+  }
+  if (options.commandRecorder !== undefined) {
+    return { recorder: options.commandRecorder };
+  }
+  if (process.env.NODE_ENV === "test") {
+    return { recorder: NOOP_COMMAND_RECORDER };
+  }
+  const structured = createStructuredUiCommandRecorder();
+  return { recorder: structured, structured };
 }
 
 export interface CoreApiHost {
@@ -51,7 +98,7 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
   assertStartupOptions(options);
 
   const initialSnapshot = initialSnapshotFromOptions(options);
-  const client = createPersistentUiBackendClient({
+  const rawClient = createPersistentUiBackendClient({
     ...(initialSnapshot === undefined ? {} : { initialSnapshot }),
     ...(options.continue === true
       ? { startupSessionMode: { type: "continue" as const } }
@@ -60,11 +107,17 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
       ? {}
       : { resumeSessionId: options.resume }),
   });
+  const commandRecording = commandRecorderFromOptions(options);
+  const client = createUiCommandGateway(rawClient, {
+    entryPoint: "agent-host",
+    onDiagnostic: reportCommandObservationFailure,
+    recorder: commandRecording.recorder,
+  });
 
   return {
     callbacks: {
       subscribeEvents(handler): ReturnType<SDKAPI["subscribeEvents"]> {
-        return client.subscribeEvents(handler);
+        return rawClient.subscribeEvents(handler);
       },
     },
     core: {
@@ -127,7 +180,8 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
     async dispose(): Promise<void> {
       try {
         try {
-          await client.dispose();
+          await rawClient.dispose();
+          await commandRecording.structured?.flush();
         } finally {
           await McpManager.disposeAll();
         }

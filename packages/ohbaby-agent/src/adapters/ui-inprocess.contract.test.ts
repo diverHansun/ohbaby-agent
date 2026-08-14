@@ -5,7 +5,13 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
-import type { UiBackendClient, UiEvent, UiSnapshot } from "ohbaby-sdk";
+import type {
+  UiBackendClient,
+  UiCommandRecord,
+  UiEvent,
+  UiSnapshot,
+} from "ohbaby-sdk";
+import { createUiCommandGateway } from "../host/ui-command-gateway.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
@@ -6075,12 +6081,17 @@ describe("createInProcessUiBackendClient", () => {
         "utf8",
       );
       const requests: InterfaceProviderRequest[] = [];
-      const client = createInProcessUiBackendClient({
+      const rawClient = createInProcessUiBackendClient({
         llmClient: createSequentialFakeLLMClient(
           [[{ textDelta: "Reviewed.", finishReason: "stop" }]],
           requests,
         ),
         workdir: projectRoot,
+      });
+      const records: UiCommandRecord[] = [];
+      const client = createUiCommandGateway(rawClient, {
+        entryPoint: "agent-host",
+        recorder: { record: (record) => records.push(record) },
       });
 
       await client.executeCommand({
@@ -6097,6 +6108,10 @@ describe("createInProcessUiBackendClient", () => {
       expect(promptText).toContain("# Code Review");
       expect(promptText).toContain("Check behavior and tests.");
       expect(promptText).toContain("check src/app.ts");
+      expect(records.map((record) => record.method)).toEqual([
+        "executeCommand",
+        "executeCommand",
+      ]);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

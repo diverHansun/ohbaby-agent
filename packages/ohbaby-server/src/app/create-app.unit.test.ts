@@ -8,6 +8,7 @@ import type {
   UiBackendClient,
   UiCompactSessionResult,
   UiCompactSessionUsage,
+  UiCommandRecord,
   UiConnectModelResult,
   UiCurrentModelConfig,
   UiEventHandler,
@@ -735,6 +736,58 @@ describe("createDaemonServerApp", () => {
     }
   });
 
+  it("records one JSON-RPC primitive with transport correlation", async () => {
+    const records: UiCommandRecord[] = [];
+    const handle = createApp(new FakeBackend(), {
+      commandRecorder: { record: (record) => records.push(record) },
+    });
+    await handle.start();
+    try {
+      const response = await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          clientId: "client_rpc",
+          id: "rpc_submit_1",
+          method: "submitPromptAccepted",
+          params: [
+            "private prompt",
+            { clientRequestId: "request_1", sessionId: "session_1" },
+          ],
+        }),
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(200);
+      expect(records).toMatchObject([
+        {
+          correlation: {
+            clientId: "client_rpc",
+            clientRequestId: "request_1",
+            sessionId: "session_1",
+            transportRequestId: "rpc_submit_1",
+          },
+          entryPoint: "server-rpc",
+          method: "submitPromptAccepted",
+          phase: "started",
+        },
+        {
+          correlation: {
+            clientId: "client_rpc",
+            promptId: "prompt_fake_1",
+            transportRequestId: "rpc_submit_1",
+          },
+          entryPoint: "server-rpc",
+          method: "submitPromptAccepted",
+          outcome: { kind: "returned" },
+          phase: "completed",
+        },
+      ]);
+      expect(JSON.stringify(records)).not.toContain("private prompt");
+    } finally {
+      await handle.dispose();
+    }
+  });
+
   it("allows only the owning RPC client to claim an interaction response", async () => {
     const backend = new FakeBackend();
     const handle = createApp(backend);
@@ -1090,7 +1143,10 @@ describe("createDaemonServerApp", () => {
 
   it("updates daemon permission state for registered web clients", async () => {
     const backend = new FakeBackend();
-    const handle = createApp(backend);
+    const records: UiCommandRecord[] = [];
+    const handle = createApp(backend, {
+      commandRecorder: { record: (record) => records.push(record) },
+    });
     await handle.start();
     try {
       await handle.app.request("/v1/clients", {
@@ -1120,6 +1176,21 @@ describe("createDaemonServerApp", () => {
           sessionRules: [],
         },
       });
+      expect(records).toMatchObject([
+        {
+          correlation: { clientId: "client_web" },
+          entryPoint: "server-rest",
+          method: "setPermission",
+          phase: "started",
+        },
+        {
+          correlation: { clientId: "client_web" },
+          entryPoint: "server-rest",
+          method: "setPermission",
+          outcome: { kind: "returned" },
+          phase: "completed",
+        },
+      ]);
     } finally {
       await handle.dispose();
     }

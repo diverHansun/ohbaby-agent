@@ -1,10 +1,39 @@
 import { describe, expect, it, vi } from "vitest";
+/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
+import type { UiCommandRecord } from "ohbaby-sdk";
 
 describe("buildCoreAPIImpl", () => {
   it("builds CoreAPI and callback adapters from the persistent backend", async () => {
     vi.resetModules();
     const unsubscribe = vi.fn();
     const submitPrompt = vi.fn(() => Promise.resolve());
+    const submitPromptAccepted = vi.fn(() =>
+      Promise.resolve({
+        clientRequestId: "request_1",
+        createdAt: "2026-08-14T00:00:00.000Z",
+        promptId: "prompt_1",
+        sessionId: "session_1",
+        status: "queued" as const,
+        userMessageId: "message_1",
+      }),
+    );
+    const waitForPrompt = vi.fn(() =>
+      Promise.resolve({
+        prompt: {
+          clientRequestId: "request_1",
+          createdAt: "2026-08-14T00:00:00.000Z",
+          endedAt: "2026-08-14T00:00:01.000Z",
+          promptId: "prompt_1",
+          scopeKey: "/workspace",
+          sessionId: "session_1",
+          status: "succeeded" as const,
+          text: "hello",
+          updatedAt: "2026-08-14T00:00:01.000Z",
+          userMessageId: "message_1",
+        },
+      }),
+    );
+    const records: UiCommandRecord[] = [];
     const getCurrentModel = vi.fn(() => Promise.resolve(null));
     const connectModel = vi.fn(() =>
       Promise.resolve({
@@ -74,7 +103,9 @@ describe("buildCoreAPIImpl", () => {
         }),
       ),
       submitPrompt,
+      submitPromptAccepted,
       subscribeEvents,
+      waitForPrompt,
     }));
     vi.doMock("../adapters/ui-persistent.js", () => ({
       closePersistentUiBackendDatabase: vi.fn(),
@@ -90,6 +121,7 @@ describe("buildCoreAPIImpl", () => {
       inProcess: true,
       mode: "plan",
       permission: "full-access",
+      commandRecorder: { record: (record) => records.push(record) },
     });
     await api.core.submitPrompt("hello");
     await api.core.getCurrentModel();
@@ -117,7 +149,17 @@ describe("buildCoreAPIImpl", () => {
         status: { kind: "idle" },
       },
     });
-    expect(submitPrompt).toHaveBeenCalledWith("hello", undefined);
+    expect(submitPrompt).not.toHaveBeenCalled();
+    expect(submitPromptAccepted).toHaveBeenCalledWith("hello", {});
+    expect(waitForPrompt).toHaveBeenCalledWith("prompt_1", {
+      signal: undefined,
+    });
+    expect(records.map((record) => record.method)).toEqual([
+      "submitPromptAccepted",
+      "submitPromptAccepted",
+      "connectModel",
+      "connectModel",
+    ]);
     expect(getCurrentModel).toHaveBeenCalledTimes(1);
     expect(connectModel).toHaveBeenCalledWith({
       apiKeyEnv: "ZENMUX_API_KEY",

@@ -18,7 +18,15 @@ import {
   type UiSlashCommandInvocation,
   type UiSnapshot,
   type UiUnsubscribe,
+  type UiCommandObservationDiagnostic,
+  type UiCommandCorrelation,
+  type UiCommandRecorder,
 } from "ohbaby-sdk";
+import {
+  createStructuredUiCommandRecorder,
+  createUiCommandGateway,
+  type StructuredUiCommandRecorder,
+} from "ohbaby-agent";
 import { isAuthorizedDaemonRequest } from "../auth/token.js";
 import {
   DaemonClientViewCoordinator,
@@ -71,6 +79,7 @@ export interface DaemonServerAppOptions {
   readonly backend: UiBackendClient;
   readonly authToken?: string;
   readonly clientDisconnectRetentionMs?: number;
+  readonly commandRecorder?: UiCommandRecorder | false;
   readonly createSessionId?: () => string;
   readonly eventBufferCapacity?: number;
   readonly onClientConnected?: (clientId: string) => void;
@@ -79,6 +88,24 @@ export interface DaemonServerAppOptions {
   readonly packageVersion?: string;
   readonly permissionRouter?: PermissionRouter;
   readonly webAssets?: WebAssetsOptions;
+}
+
+const NOOP_COMMAND_RECORDER: UiCommandRecorder = {
+  record(): void {
+    return;
+  },
+};
+
+function reportCommandObservationFailure(
+  diagnostic: UiCommandObservationDiagnostic,
+): void {
+  const name =
+    diagnostic.error instanceof Error && diagnostic.error.name.length > 0
+      ? diagnostic.error.name
+      : "Error";
+  process.stderr.write(
+    `${JSON.stringify({ name, stage: diagnostic.stage, type: "ui.command.observation.failure" })}\n`,
+  );
 }
 
 export interface DaemonServerAppHandle {
@@ -722,6 +749,8 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
 class DaemonServerAppRuntime {
   readonly app = new Hono();
   private readonly clientDisconnectRetentionMs: number;
+  private readonly commandRecorder: UiCommandRecorder;
+  private readonly structuredCommandRecorder: StructuredUiCommandRecorder | undefined;
   private readonly clientViews = new DaemonClientViewCoordinator();
   private readonly clients = new Set<SseClient>();
   private readonly createSessionId: () => string;
@@ -748,6 +777,20 @@ class DaemonServerAppRuntime {
       options.clientDisconnectRetentionMs,
     );
     this.createSessionId = options.createSessionId ?? randomUUID;
+    if (options.commandRecorder === false || process.env.NODE_ENV === "test") {
+      this.commandRecorder =
+        options.commandRecorder === false
+          ? NOOP_COMMAND_RECORDER
+          : (options.commandRecorder ?? NOOP_COMMAND_RECORDER);
+      this.structuredCommandRecorder = undefined;
+    } else if (options.commandRecorder !== undefined) {
+      this.commandRecorder = options.commandRecorder;
+      this.structuredCommandRecorder = undefined;
+    } else {
+      const recorder = createStructuredUiCommandRecorder();
+      this.commandRecorder = recorder;
+      this.structuredCommandRecorder = recorder;
+    }
     this.eventBus =
       options.eventBufferCapacity === undefined
         ? new EventBus()
@@ -777,7 +820,7 @@ class DaemonServerAppRuntime {
     }
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
     this.unsubscribe?.();
     this.unsubscribe = undefined;
 
@@ -795,6 +838,19 @@ class DaemonServerAppRuntime {
     this.clientViews.resetRuntimeState();
     this.replayEventsBySeqNum.clear();
     this.started = false;
+    await this.structuredCommandRecorder?.flush();
+  }
+
+  private commandBackend(
+    entryPoint: "server-rest" | "server-rpc",
+    correlation: UiCommandCorrelation,
+  ): UiBackendClient {
+    return createUiCommandGateway(this.options.backend, {
+      correlation,
+      entryPoint,
+      onDiagnostic: reportCommandObservationFailure,
+      recorder: this.commandRecorder,
+    });
   }
 
   private mountRoutes(): void {
@@ -839,7 +895,10 @@ class DaemonServerAppRuntime {
 
       try {
         const result = await callDaemonBackend({
-          backend: this.options.backend,
+          backend: this.commandBackend("server-rpc", {
+            clientId: parsed.request.clientId,
+            transportRequestId: parsed.request.id,
+          }),
           clientViews: this.clientViews,
           createSessionId: this.createSessionId,
           permissionRouter: this.permissionRouter,
@@ -1015,7 +1074,7 @@ class DaemonServerAppRuntime {
         );
       }
 
-      await this.options.backend.executeCommand(
+      await this.commandBackend("server-rest", { clientId }).executeCommand(
         this.clientViews.prepareCommandInvocation(clientId, invocation),
       );
       return context.json({ ok: true });
@@ -1100,7 +1159,9 @@ class DaemonServerAppRuntime {
         );
       }
       try {
-        const model = await this.options.backend.connectModel(input);
+        const model = await this.commandBackend("server-rest", {
+          clientId,
+        }).connectModel(input);
         return context.json({ model, ok: true });
       } catch (error) {
         return context.json(
@@ -1138,7 +1199,9 @@ class DaemonServerAppRuntime {
         );
       }
       try {
-        const search = await this.options.backend.setSearchApiKey(input);
+        const search = await this.commandBackend("server-rest", {
+          clientId,
+        }).setSearchApiKey(input);
         return context.json({ ok: true, search });
       } catch (error) {
         return context.json(
@@ -1160,7 +1223,7 @@ class DaemonServerAppRuntime {
         return context.json(webErrorBody("client is not registered"), 409);
       }
 
-      await this.options.backend.executeCommand(
+      await this.commandBackend("server-rest", { clientId }).executeCommand(
         this.clientViews.prepareCommandInvocation(
           clientId,
           sessionCommandInvocation("new"),
@@ -1185,7 +1248,7 @@ class DaemonServerAppRuntime {
         return context.json(webErrorBody("sessionId is required"), 400);
       }
 
-      await this.options.backend.executeCommand(
+      await this.commandBackend("server-rest", { clientId }).executeCommand(
         this.clientViews.prepareCommandInvocation(
           clientId,
           sessionCommandInvocation("resume", sessionId),
@@ -1211,7 +1274,9 @@ class DaemonServerAppRuntime {
       }
 
       try {
-        await this.options.backend.archiveSession({ sessionId });
+        await this.commandBackend("server-rest", { clientId }).archiveSession({
+          sessionId,
+        });
         return context.json({ ok: true });
       } catch (error) {
         return context.json(
@@ -1261,7 +1326,9 @@ class DaemonServerAppRuntime {
       const body = isRecord(parsed.value) ? parsed.value : {};
       const force = typeof body.force === "boolean" ? body.force : undefined;
       try {
-        const compact = await this.options.backend.compactSession({
+        const compact = await this.commandBackend("server-rest", {
+          clientId,
+        }).compactSession({
           ...(force === undefined ? {} : { force }),
           sessionId: context.req.param("id"),
         });
@@ -1310,10 +1377,11 @@ class DaemonServerAppRuntime {
           400,
         );
       }
-      if (supportsPromptQueue(this.options.backend)) {
+      const commandBackend = this.commandBackend("server-rest", { clientId });
+      if (supportsPromptQueue(commandBackend)) {
         try {
           const accepted = await acceptDaemonPrompt({
-            backend: this.options.backend,
+            backend: commandBackend,
             clientId,
             clientViews: this.clientViews,
             createSessionId: this.createSessionId,
@@ -1334,7 +1402,7 @@ class DaemonServerAppRuntime {
       }
 
       const submitted = submitDaemonPrompt({
-        backend: this.options.backend,
+        backend: commandBackend,
         clientId,
         clientViews: this.clientViews,
         createSessionId: this.createSessionId,
@@ -1400,7 +1468,9 @@ class DaemonServerAppRuntime {
             403,
           );
         }
-        const prompt = await this.options.backend.editQueuedPrompt({
+        const prompt = await this.commandBackend("server-rest", {
+          clientId: authorization.clientId,
+        }).editQueuedPrompt({
           editLeaseId,
           promptId: context.req.param("id"),
           text,
@@ -1447,7 +1517,9 @@ class DaemonServerAppRuntime {
             403,
           );
         }
-        const prompt = await this.options.backend.cancelQueuedPrompt({
+        const prompt = await this.commandBackend("server-rest", {
+          clientId: authorization.clientId,
+        }).cancelQueuedPrompt({
           ...(editLeaseId === undefined ? {} : { editLeaseId }),
           promptId: context.req.param("id"),
         } satisfies UiCancelQueuedPromptInput);
@@ -1483,7 +1555,9 @@ class DaemonServerAppRuntime {
           );
         }
         const lease = await acquirePromptEditLeaseForClient(
-          this.options.backend,
+          this.commandBackend("server-rest", {
+            clientId: authorization.clientId,
+          }),
           { promptId: context.req.param("id") },
           authorization.clientId,
         );
@@ -1519,7 +1593,9 @@ class DaemonServerAppRuntime {
       }
       try {
         const lease = await renewPromptEditLeaseForClient(
-          this.options.backend,
+          this.commandBackend("server-rest", {
+            clientId: authorization.clientId,
+          }),
           { editLeaseId, promptId: context.req.param("id") },
           authorization.clientId,
         );
@@ -1554,7 +1630,9 @@ class DaemonServerAppRuntime {
         return context.json(webErrorBody("editLeaseId is required"), 400);
       }
       try {
-        const prompt = await this.options.backend.releasePromptEditLease({
+        const prompt = await this.commandBackend("server-rest", {
+          clientId: authorization.clientId,
+        }).releasePromptEditLease({
           editLeaseId,
           promptId: context.req.param("id"),
         } satisfies UiReleasePromptEditLeaseInput);
@@ -1606,7 +1684,9 @@ class DaemonServerAppRuntime {
         return context.json(webErrorBody("mode or level is required"), 400);
       }
 
-      const permission = await this.options.backend.setPermission({
+      const permission = await this.commandBackend("server-rest", {
+        clientId,
+      }).setPermission({
         ...(level === undefined ? {} : { level }),
         ...(mode === undefined ? {} : { mode }),
       });
@@ -1645,7 +1725,9 @@ class DaemonServerAppRuntime {
       if (!response) {
         return context.json(webErrorBody("choiceId is required"), 400);
       }
-      await this.options.backend.respondPermission(requestId, response);
+      await this.commandBackend("server-rest", {
+        clientId,
+      }).respondPermission(requestId, response);
       return context.json({ ok: true });
     });
 
@@ -1675,7 +1757,7 @@ class DaemonServerAppRuntime {
       if (runId === undefined) {
         return context.json(webErrorBody("No running run for session"), 404);
       }
-      await this.options.backend.abortRun(runId);
+      await this.commandBackend("server-rest", { clientId }).abortRun(runId);
       return context.json({ ok: true });
     });
 
@@ -2073,8 +2155,7 @@ export function createDaemonServerApp(
   return {
     app: runtime.app,
     dispose(): Promise<void> {
-      runtime.dispose();
-      return Promise.resolve();
+      return runtime.dispose();
     },
     start(): Promise<void> {
       return runtime.start();
