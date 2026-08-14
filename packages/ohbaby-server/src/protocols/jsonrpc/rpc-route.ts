@@ -13,7 +13,9 @@ import {
 } from "../../coordination/client-view.js";
 import { PermissionRouter } from "../../coordination/permission-router.js";
 import {
+  acquirePromptEditLeaseForClient,
   acceptDaemonPrompt,
+  renewPromptEditLeaseForClient,
   submitDaemonPrompt,
   supportsPromptQueue,
 } from "../../coordination/prompt-backend.js";
@@ -246,20 +248,18 @@ export async function callDaemonBackend(input: {
       ) {
         throw new DaemonForbiddenError("Prompt belongs to another session");
       }
-      return backend.acquirePromptEditLease({
-        ...input,
-        ownerClientId: request.clientId,
-      });
+      return acquirePromptEditLeaseForClient(
+        backend,
+        input,
+        request.clientId,
+      );
     }
     case "renewPromptEditLease": {
       if (!supportsPromptQueue(backend)) {
         throw new Error("Durable prompt admission is not supported");
       }
       const input = request.params[0] as UiRenewPromptEditLeaseInput;
-      return backend.renewPromptEditLease({
-        ...input,
-        ownerClientId: request.clientId,
-      });
+      return renewPromptEditLeaseForClient(backend, input, request.clientId);
     }
     case "releasePromptEditLease": {
       if (!supportsPromptQueue(backend)) {

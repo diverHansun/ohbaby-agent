@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility bridge */
 import path from "node:path";
 import type { UiBackendClient, UiPromptQueueClient } from "ohbaby-sdk";
 import { createBus, type BusInstance } from "../bus/index.js";
@@ -34,6 +35,7 @@ import { createInProcessUiBackendClient } from "./ui-inprocess.js";
 import type {
   InProcessUiBackendClient,
   InProcessUiBackendOptions,
+  UiPromptQueueExecutionPort,
 } from "./ui-inprocess.js";
 import { createPersistentUiStateStore } from "./ui-state/index.js";
 import {
@@ -63,7 +65,9 @@ export interface PersistentUiBackendOptions extends Omit<
   readonly startupSessionMode?: StartupSessionMode;
 }
 
-export interface PersistentUiBackendClient extends UiPromptQueueClient {
+export interface PersistentUiBackendClient
+  extends UiPromptQueueClient,
+    UiPromptQueueExecutionPort {
   dispose(): Promise<void> | void;
 }
 
@@ -217,6 +221,13 @@ function withStartupRecovery(
       await ready();
       return client.submitPromptAccepted(text, submitOptions);
     },
+    async submitPromptAndWait(
+      text,
+      submitOptions,
+    ): ReturnType<UiBackendClient["submitPromptAndWait"]> {
+      await ready();
+      return client.submitPromptAndWait(text, submitOptions);
+    },
     async editQueuedPrompt(
       input,
     ): ReturnType<UiPromptQueueClient["editQueuedPrompt"]> {
@@ -235,11 +246,28 @@ function withStartupRecovery(
       await ready();
       return client.acquirePromptEditLease(input);
     },
+    async acquirePromptEditLeaseForOwner(
+      input,
+      trustedOwnerClientId,
+    ): ReturnType<UiPromptQueueExecutionPort["acquirePromptEditLeaseForOwner"]> {
+      await ready();
+      return client.acquirePromptEditLeaseForOwner(
+        input,
+        trustedOwnerClientId,
+      );
+    },
     async renewPromptEditLease(
       input,
     ): ReturnType<UiPromptQueueClient["renewPromptEditLease"]> {
       await ready();
       return client.renewPromptEditLease(input);
+    },
+    async renewPromptEditLeaseForOwner(
+      input,
+      trustedOwnerClientId,
+    ): ReturnType<UiPromptQueueExecutionPort["renewPromptEditLeaseForOwner"]> {
+      await ready();
+      return client.renewPromptEditLeaseForOwner(input, trustedOwnerClientId);
     },
     async releasePromptEditLease(
       input,
@@ -249,9 +277,10 @@ function withStartupRecovery(
     },
     async waitForPrompt(
       promptId,
+      waitOptions,
     ): ReturnType<UiPromptQueueClient["waitForPrompt"]> {
       await ready();
-      return client.waitForPrompt(promptId);
+      return client.waitForPrompt(promptId, waitOptions);
     },
     async compactSession(
       compactOptions,
@@ -477,6 +506,7 @@ export function createPersistentUiBackendClient(
       now: options.now,
       projectDirectory: options.projectDirectory,
       promptScopeKey: path.resolve(persistentProjectDirectory(options)),
+      promptQueueOwnerClientId: backendOwnerId,
       promptSubmissionStore: new DatabasePromptSubmissionStore({
         db,
         now,

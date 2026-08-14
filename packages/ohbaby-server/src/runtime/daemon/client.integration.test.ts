@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import type {
   SubmitPromptOptions,
   UiBackendClient,
@@ -141,6 +142,11 @@ async function eventuallyEmit(
 }
 
 class FakeBackend implements UiBackendClient {
+  private nextPromptId = 0;
+  private readonly promptCompletions = new Map<
+    string,
+    ReturnType<UiBackendClient["waitForPrompt"]>
+  >();
   readonly calls: {
     readonly method: string;
     readonly args: readonly unknown[];
@@ -196,6 +202,80 @@ class FakeBackend implements UiBackendClient {
     this.calls.push({ args: [text, options], method: "submitPrompt" });
     this.submitted.push({ text, ...(options ? { options } : {}) });
     return Promise.resolve();
+  }
+
+  submitPromptAccepted(
+    text: string,
+    options?: SubmitPromptOptions,
+  ): ReturnType<UiBackendClient["submitPromptAccepted"]> {
+    const promptId = `prompt_fake_${String(++this.nextPromptId)}`;
+    const sessionId = options?.sessionId ?? "session_fake";
+    const completion = this.submitPrompt(text, options).then(() => ({
+      prompt: {
+        clientRequestId: options?.clientRequestId ?? `request_${promptId}`,
+        createdAt: timestamp,
+        endedAt: timestamp,
+        promptId,
+        scopeKey: "/workspace",
+        sessionId,
+        status: "succeeded" as const,
+        text,
+        updatedAt: timestamp,
+        userMessageId: `message_${promptId}`,
+      },
+    }));
+    this.promptCompletions.set(promptId, completion);
+    return Promise.resolve({
+      clientRequestId: options?.clientRequestId ?? `request_${promptId}`,
+      createdAt: timestamp,
+      promptId,
+      sessionId,
+      status: "queued",
+      userMessageId: `message_${promptId}`,
+    });
+  }
+
+  async submitPromptAndWait(
+    text: string,
+    options?: Parameters<UiBackendClient["submitPromptAndWait"]>[1],
+  ): ReturnType<UiBackendClient["submitPromptAndWait"]> {
+    const receipt = await this.submitPromptAccepted(text, options);
+    return this.waitForPrompt(receipt.promptId);
+  }
+
+  waitForPrompt(
+    promptId: string,
+  ): ReturnType<UiBackendClient["waitForPrompt"]> {
+    return (
+      this.promptCompletions.get(promptId) ??
+      Promise.reject(new Error(`Unknown prompt: ${promptId}`))
+    );
+  }
+
+  editQueuedPrompt(): ReturnType<UiBackendClient["editQueuedPrompt"]> {
+    return Promise.reject(new Error("No queued prompt in fake backend"));
+  }
+
+  cancelQueuedPrompt(): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {
+    return Promise.reject(new Error("No queued prompt in fake backend"));
+  }
+
+  acquirePromptEditLease(): ReturnType<
+    UiBackendClient["acquirePromptEditLease"]
+  > {
+    return Promise.reject(new Error("No queued prompt in fake backend"));
+  }
+
+  renewPromptEditLease(): ReturnType<
+    UiBackendClient["renewPromptEditLease"]
+  > {
+    return Promise.reject(new Error("No queued prompt in fake backend"));
+  }
+
+  releasePromptEditLease(): ReturnType<
+    UiBackendClient["releasePromptEditLease"]
+  > {
+    return Promise.reject(new Error("No queued prompt in fake backend"));
   }
 
   compactSession(

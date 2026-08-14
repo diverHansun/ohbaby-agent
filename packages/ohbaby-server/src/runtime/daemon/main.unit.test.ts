@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import {
   mkdir,
   mkdtemp,
@@ -91,7 +92,64 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
     listCommands: vi.fn(() => Promise.resolve({ commands: [], version: "v1" })),
     respondInteraction: vi.fn(() => Promise.resolve()),
     respondPermission: vi.fn(() => Promise.resolve()),
+    submitPromptAccepted: vi.fn(() =>
+      Promise.resolve({
+        clientRequestId: "request_fake",
+        createdAt: "2026-08-14T00:00:00.000Z",
+        promptId: "prompt_fake",
+        sessionId: "session_fake",
+        status: "queued" as const,
+        userMessageId: "message_fake",
+      }),
+    ),
+    submitPromptAndWait: vi.fn(() =>
+      Promise.resolve({
+        prompt: {
+          clientRequestId: "request_fake",
+          createdAt: "2026-08-14T00:00:00.000Z",
+          endedAt: "2026-08-14T00:00:01.000Z",
+          promptId: "prompt_fake",
+          scopeKey: "/workspace",
+          sessionId: "session_fake",
+          status: "succeeded" as const,
+          text: "",
+          updatedAt: "2026-08-14T00:00:01.000Z",
+          userMessageId: "message_fake",
+        },
+      }),
+    ),
     submitPrompt: vi.fn(() => Promise.resolve()),
+    waitForPrompt: vi.fn(() =>
+      Promise.resolve({
+        prompt: {
+          clientRequestId: "request_fake",
+          createdAt: "2026-08-14T00:00:00.000Z",
+          endedAt: "2026-08-14T00:00:01.000Z",
+          promptId: "prompt_fake",
+          scopeKey: "/workspace",
+          sessionId: "session_fake",
+          status: "succeeded" as const,
+          text: "",
+          updatedAt: "2026-08-14T00:00:01.000Z",
+          userMessageId: "message_fake",
+        },
+      }),
+    ),
+    editQueuedPrompt: vi.fn(() =>
+      Promise.reject(new Error("No queued prompt in fake backend")),
+    ),
+    cancelQueuedPrompt: vi.fn(() =>
+      Promise.reject(new Error("No queued prompt in fake backend")),
+    ),
+    acquirePromptEditLease: vi.fn(() =>
+      Promise.reject(new Error("No queued prompt in fake backend")),
+    ),
+    renewPromptEditLease: vi.fn(() =>
+      Promise.reject(new Error("No queued prompt in fake backend")),
+    ),
+    releasePromptEditLease: vi.fn(() =>
+      Promise.reject(new Error("No queued prompt in fake backend")),
+    ),
     subscribeEvents: vi.fn(() => vi.fn()),
   };
 }

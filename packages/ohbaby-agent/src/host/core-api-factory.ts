@@ -1,4 +1,5 @@
 import type { CoreAPI, SDKAPI, UiSnapshot } from "ohbaby-sdk";
+/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility bridge */
 import {
   closePersistentUiBackendDatabase,
   createPersistentUiBackendClient,

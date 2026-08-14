@@ -137,7 +137,6 @@ export function Prompt({
     void client
       .renewPromptEditLease({
         editLeaseId: current.editLeaseId,
-        ownerClientId: "tui",
         promptId: current.promptId,
       })
       .catch((caught: unknown) => {
@@ -162,7 +161,6 @@ export function Prompt({
         replaceQueuedMutationPending(true);
         void client
           .acquirePromptEditLease({
-            ownerClientId: "tui",
             promptId: prompt.promptId,
           })
           .then((lease) => {

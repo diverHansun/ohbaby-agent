@@ -1,4 +1,5 @@
 export { createInProcessUiBackendClient } from "./adapters/ui-inprocess.js";
+export type { UiPromptQueueExecutionPort } from "./adapters/ui-inprocess.js";
 export {
   closePersistentUiBackendDatabase,
   createPersistentUiBackendClient,

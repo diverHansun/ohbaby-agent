@@ -10,12 +10,10 @@ import {
   supportsWebPassthroughCommandInvocation,
   supportsWebSkillCommandInvocation,
   type UiBackendClient,
-  type UiAcquirePromptEditLeaseInput,
   type UiCancelQueuedPromptInput,
   type UiEditQueuedPromptInput,
   type UiEvent,
   type UiReleasePromptEditLeaseInput,
-  type UiRenewPromptEditLeaseInput,
   type UiPermissionResponse,
   type UiSlashCommandInvocation,
   type UiSnapshot,
@@ -29,7 +27,9 @@ import {
 import { EventBus, type EventEnvelope } from "../coordination/event-bus.js";
 import { PermissionRouter } from "../coordination/permission-router.js";
 import {
+  acquirePromptEditLeaseForClient,
   acceptDaemonPrompt,
+  renewPromptEditLeaseForClient,
   submitDaemonPrompt,
   supportsPromptQueue,
 } from "../coordination/prompt-backend.js";
@@ -1482,10 +1482,11 @@ class DaemonServerAppRuntime {
             403,
           );
         }
-        const lease = await this.options.backend.acquirePromptEditLease({
-          ownerClientId: authorization.clientId,
-          promptId: context.req.param("id"),
-        } satisfies UiAcquirePromptEditLeaseInput);
+        const lease = await acquirePromptEditLeaseForClient(
+          this.options.backend,
+          { promptId: context.req.param("id") },
+          authorization.clientId,
+        );
         return context.json({ lease, ok: true });
       } catch (error) {
         return context.json(
@@ -1517,11 +1518,11 @@ class DaemonServerAppRuntime {
         return context.json(webErrorBody("editLeaseId is required"), 400);
       }
       try {
-        const lease = await this.options.backend.renewPromptEditLease({
-          editLeaseId,
-          ownerClientId: authorization.clientId,
-          promptId: context.req.param("id"),
-        } satisfies UiRenewPromptEditLeaseInput);
+        const lease = await renewPromptEditLeaseForClient(
+          this.options.backend,
+          { editLeaseId, promptId: context.req.param("id") },
+          authorization.clientId,
+        );
         return context.json({ lease, ok: true });
       } catch (error) {
         return context.json(

@@ -1,5 +1,9 @@
 export type {
   SubmitPromptOptions,
+  UiCommandClient,
+  UiPromptCommandClient,
+  UiPromptQueueCommandClient,
+  UiQueryClient,
   UiSubmitPromptAndWaitOptions,
   UiWaitForPromptOptions,
   UiArchiveSessionInput,

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -119,6 +120,12 @@ function setSearchApiKeyResult(): UiSetSearchApiKeyResult {
 }
 
 class FakeBackend implements UiBackendClient {
+  admissionError: Error | undefined;
+  private nextPromptId = 0;
+  private readonly promptCompletions = new Map<
+    string,
+    ReturnType<UiBackendClient["waitForPrompt"]>
+  >();
   readonly handlers = new Set<UiEventHandler>();
   readonly abortedRunIds: (string | undefined)[] = [];
   readonly archivedSessions: string[] = [];
@@ -226,6 +233,93 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve();
   }
 
+  submitPromptAccepted(
+    text: string,
+    options?: SubmitPromptOptions,
+  ): ReturnType<UiBackendClient["submitPromptAccepted"]> {
+    if (this.admissionError) {
+      return Promise.reject(this.admissionError);
+    }
+    const promptId = `prompt_fake_${String(++this.nextPromptId)}`;
+    const sessionId = options?.sessionId ?? "session_fake";
+    const completion = this.submitPrompt(text, options).then(() => ({
+      prompt: {
+        clientRequestId: options?.clientRequestId ?? `request_${promptId}`,
+        createdAt: timestamp,
+        endedAt: timestamp,
+        promptId,
+        scopeKey: "/workspace",
+        sessionId,
+        status: "succeeded" as const,
+        text,
+        updatedAt: timestamp,
+        userMessageId: `message_${promptId}`,
+      },
+    }));
+    this.promptCompletions.set(promptId, completion);
+    return Promise.resolve({
+      clientRequestId: options?.clientRequestId ?? `request_${promptId}`,
+      createdAt: timestamp,
+      promptId,
+      sessionId,
+      status: "queued",
+      userMessageId: `message_${promptId}`,
+    });
+  }
+
+  async submitPromptAndWait(
+    text: string,
+    options?: Parameters<UiBackendClient["submitPromptAndWait"]>[1],
+  ): ReturnType<UiBackendClient["submitPromptAndWait"]> {
+    const receipt = await this.submitPromptAccepted(text, options);
+    return this.waitForPrompt(receipt.promptId);
+  }
+
+  waitForPrompt(
+    promptId: string,
+  ): ReturnType<UiBackendClient["waitForPrompt"]> {
+    return (
+      this.promptCompletions.get(promptId) ??
+      Promise.reject(new Error(`Unknown prompt: ${promptId}`))
+    );
+  }
+
+  editQueuedPrompt(
+    _input: Parameters<UiBackendClient["editQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["editQueuedPrompt"]> {
+    return Promise.reject(new Error("No queued prompt in fake backend"));
+  }
+
+  cancelQueuedPrompt(
+    _input: Parameters<UiBackendClient["cancelQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {
+    return Promise.reject(new Error("No queued prompt in fake backend"));
+  }
+
+  acquirePromptEditLease(
+    _input: Parameters<UiBackendClient["acquirePromptEditLease"]>[0],
+  ): ReturnType<
+    UiBackendClient["acquirePromptEditLease"]
+  > {
+    return Promise.reject(new Error("No queued prompt in fake backend"));
+  }
+
+  renewPromptEditLease(
+    _input: Parameters<UiBackendClient["renewPromptEditLease"]>[0],
+  ): ReturnType<
+    UiBackendClient["renewPromptEditLease"]
+  > {
+    return Promise.reject(new Error("No queued prompt in fake backend"));
+  }
+
+  releasePromptEditLease(
+    _input: Parameters<UiBackendClient["releasePromptEditLease"]>[0],
+  ): ReturnType<
+    UiBackendClient["releasePromptEditLease"]
+  > {
+    return Promise.reject(new Error("No queued prompt in fake backend"));
+  }
+
   compactSession(
     options?: Parameters<UiBackendClient["compactSession"]>[0],
   ): ReturnType<UiBackendClient["compactSession"]> {
@@ -310,14 +404,13 @@ class DurablePromptFakeBackend
   extends FakeBackend
   implements UiPromptQueueClient
 {
-  admissionError: Error | undefined;
   private prompt: UiPromptSubmission | undefined;
   private completedPrompt: UiCompletedPromptSubmission | undefined;
   private resolveCompletion:
     | ((completion: UiPromptCompletion) => void)
     | undefined;
 
-  submitPromptAccepted(
+  override submitPromptAccepted(
     text: string,
     options?: SubmitPromptOptions,
   ): ReturnType<UiPromptQueueClient["submitPromptAccepted"]> {
@@ -367,7 +460,7 @@ class DurablePromptFakeBackend
     });
   }
 
-  editQueuedPrompt(
+  override editQueuedPrompt(
     input: Parameters<UiPromptQueueClient["editQueuedPrompt"]>[0],
   ): ReturnType<UiPromptQueueClient["editQueuedPrompt"]> {
     if (this.prompt?.promptId !== input.promptId) {
@@ -381,7 +474,7 @@ class DurablePromptFakeBackend
     return Promise.resolve(this.prompt);
   }
 
-  cancelQueuedPrompt(
+  override cancelQueuedPrompt(
     input: Parameters<UiPromptQueueClient["cancelQueuedPrompt"]>[0],
   ): ReturnType<UiPromptQueueClient["cancelQueuedPrompt"]> {
     if (this.prompt?.promptId !== input.promptId) {
@@ -409,7 +502,7 @@ class DurablePromptFakeBackend
     return Promise.resolve(this.prompt);
   }
 
-  acquirePromptEditLease(
+  override acquirePromptEditLease(
     input: Parameters<UiPromptQueueClient["acquirePromptEditLease"]>[0],
   ): ReturnType<UiPromptQueueClient["acquirePromptEditLease"]> {
     if (this.prompt?.promptId !== input.promptId) {
@@ -418,12 +511,12 @@ class DurablePromptFakeBackend
     return Promise.resolve({
       editLeaseId: "lease_1",
       expiresAt: "2026-06-12T00:01:00.000Z",
-      ownerClientId: input.ownerClientId,
+      ownerClientId: "fake_client",
       prompt: this.prompt,
     });
   }
 
-  renewPromptEditLease(
+  override renewPromptEditLease(
     input: Parameters<UiPromptQueueClient["renewPromptEditLease"]>[0],
   ): ReturnType<UiPromptQueueClient["renewPromptEditLease"]> {
     if (this.prompt?.promptId !== input.promptId) {
@@ -432,12 +525,32 @@ class DurablePromptFakeBackend
     return Promise.resolve({
       editLeaseId: input.editLeaseId,
       expiresAt: "2026-06-12T00:01:00.000Z",
-      ownerClientId: input.ownerClientId,
+      ownerClientId: "fake_client",
       prompt: this.prompt,
     });
   }
 
-  releasePromptEditLease(
+  acquirePromptEditLeaseForOwner(
+    input: Parameters<UiPromptQueueClient["acquirePromptEditLease"]>[0],
+    trustedOwnerClientId: string,
+  ): ReturnType<UiPromptQueueClient["acquirePromptEditLease"]> {
+    return this.acquirePromptEditLease(input).then((lease) => ({
+      ...lease,
+      ownerClientId: trustedOwnerClientId,
+    }));
+  }
+
+  renewPromptEditLeaseForOwner(
+    input: Parameters<UiPromptQueueClient["renewPromptEditLease"]>[0],
+    trustedOwnerClientId: string,
+  ): ReturnType<UiPromptQueueClient["renewPromptEditLease"]> {
+    return this.renewPromptEditLease(input).then((lease) => ({
+      ...lease,
+      ownerClientId: trustedOwnerClientId,
+    }));
+  }
+
+  override releasePromptEditLease(
     input: Parameters<UiPromptQueueClient["releasePromptEditLease"]>[0],
   ): ReturnType<UiPromptQueueClient["releasePromptEditLease"]> {
     if (this.prompt?.promptId !== input.promptId) {
@@ -446,7 +559,9 @@ class DurablePromptFakeBackend
     return Promise.resolve(this.prompt);
   }
 
-  waitForPrompt(): ReturnType<UiPromptQueueClient["waitForPrompt"]> {
+  override waitForPrompt(): ReturnType<
+    UiPromptQueueClient["waitForPrompt"]
+  > {
     if (this.completedPrompt) {
       return Promise.resolve({ prompt: this.completedPrompt });
     }
@@ -500,33 +615,6 @@ async function readSseData(response: Response): Promise<unknown> {
       throw new Error("SSE stream ended before an event arrived");
     }
     buffer += decoder.decode(chunk.value, { stream: true });
-  }
-}
-
-async function readNextSseData(input: {
-  readonly buffer: { value: string };
-  readonly reader: ReadableStreamDefaultReader<Uint8Array>;
-}): Promise<unknown> {
-  const decoder = new TextDecoder();
-  for (;;) {
-    const boundary = input.buffer.value.indexOf("\n\n");
-    if (boundary >= 0) {
-      const frame = input.buffer.value.slice(0, boundary);
-      input.buffer.value = input.buffer.value.slice(boundary + 2);
-      const data = frame
-        .split("\n")
-        .find((line) => line.startsWith("data: "))
-        ?.slice("data: ".length);
-      if (!data) {
-        throw new Error(`SSE frame missing data: ${frame}`);
-      }
-      return JSON.parse(data) as unknown;
-    }
-    const chunk = await input.reader.read();
-    if (chunk.done) {
-      throw new Error("SSE stream ended before an event arrived");
-    }
-    input.buffer.value += decoder.decode(chunk.value, { stream: true });
   }
 }
 
@@ -2302,13 +2390,21 @@ describe("createDaemonServerApp", () => {
 
       expect(response.status).toBe(202);
       await expect(response.json()).resolves.toEqual({
+        clientRequestId: "request_1",
+        createdAt: timestamp,
         ok: true,
+        promptId: "prompt_fake_1",
         sessionId: "session_generated",
+        status: "queued",
+        userMessageId: "message_prompt_fake_1",
       });
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(backend.submitted).toEqual([
         {
-          options: { sessionId: "session_generated" },
+          options: {
+            clientRequestId: "request_1",
+            sessionId: "session_generated",
+          },
           text: "hello",
         },
       ]);
@@ -2473,7 +2569,7 @@ describe("createDaemonServerApp", () => {
       });
       await expect(
         rpc("acquirePromptEditLease", [
-          { ownerClientId: "rpc_client", promptId: "prompt_1" },
+          { promptId: "prompt_1" },
         ]),
       ).resolves.toMatchObject({
         ok: true,
@@ -2596,9 +2692,9 @@ describe("createDaemonServerApp", () => {
     }
   });
 
-  it("surfaces asynchronous web prompt failures to the client event stream", async () => {
+  it("returns prompt admission failures before issuing a receipt", async () => {
     const backend = new FakeBackend();
-    backend.submitError = new Error("submit failed");
+    backend.admissionError = new Error("admission failed");
     const handle = createApp(backend, {
       createSessionId: () => "session_generated",
     });
@@ -2612,22 +2708,6 @@ describe("createDaemonServerApp", () => {
         },
         method: "POST",
       });
-      const eventsResponse = await handle.app.request("/v1/events", {
-        headers: {
-          ...authHeaders(),
-          "x-ohbaby-client-id": "client_web",
-        },
-      });
-      const reader = eventsResponse.body?.getReader();
-      if (!reader) {
-        throw new Error("missing event stream");
-      }
-      const buffer = { value: "" };
-      await expect(readNextSseData({ buffer, reader })).resolves.toEqual({
-        clientId: "client_web",
-        type: "hello",
-      });
-
       const response = await handle.app.request("/v1/prompts", {
         body: JSON.stringify({ clientRequestId: "request_1", text: "hello" }),
         headers: {
@@ -2638,12 +2718,11 @@ describe("createDaemonServerApp", () => {
         method: "POST",
       });
 
-      expect(response.status).toBe(202);
-      await expect(readNextSseData({ buffer, reader })).resolves.toEqual({
-        message: "submit failed",
-        type: "error",
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { message: "admission failed" },
+        ok: false,
       });
-      await reader.cancel();
     } finally {
       await handle.dispose();
     }

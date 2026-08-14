@@ -1,9 +1,13 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { submitPromptAndWait as composeSubmitPromptAndWait } from "ohbaby-sdk";
 import type {
   SubmitPromptOptions,
+  UiSubmitPromptAndWaitOptions,
+  UiWaitForPromptOptions,
   UiBackendClient,
   UiPromptQueueClient,
+  UiAcquirePromptEditLeaseInput,
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
   UiPromptCompletion,
@@ -11,6 +15,7 @@ import type {
   UiPromptError,
   UiPromptReceipt,
   UiPromptSubmission,
+  UiRenewPromptEditLeaseInput,
   UiArchiveSessionInput,
   UiCommandCatalog,
   UiCommandInvocation,
@@ -232,6 +237,7 @@ export interface InProcessUiBackendOptions {
   readonly projectDirectory?: string;
   readonly promptScopeKey?: string;
   readonly promptSubmissionStore?: PromptSubmissionStore;
+  readonly promptQueueOwnerClientId?: string;
   readonly now?: () => Date;
   readonly runLedger?: RunLedger;
   readonly sandboxManager?: HostLocalSandboxManager;
@@ -242,7 +248,20 @@ export interface InProcessUiBackendOptions {
   readonly workdir?: string;
 }
 
-export interface InProcessUiBackendClient extends UiPromptQueueClient {
+export interface UiPromptQueueExecutionPort {
+  acquirePromptEditLeaseForOwner(
+    input: UiAcquirePromptEditLeaseInput,
+    trustedOwnerClientId: string,
+  ): Promise<UiPromptEditLease>;
+  renewPromptEditLeaseForOwner(
+    input: UiRenewPromptEditLeaseInput,
+    trustedOwnerClientId: string,
+  ): Promise<UiPromptEditLease>;
+}
+
+export interface InProcessUiBackendClient
+  extends UiPromptQueueClient,
+    UiPromptQueueExecutionPort {
   dispose(): Promise<void>;
 }
 
@@ -426,6 +445,8 @@ export function createInProcessUiBackendClient(
     }),
     nowMs: (): number => Date.now(),
   });
+  const promptQueueOwnerClientId =
+    options.promptQueueOwnerClientId ?? `inprocess_${randomUUID()}`;
   const activePromptsBySession = new Map<string, ActivePromptState>();
   const acceptedNewSessionIds = new Set<string>();
   let implicitAdmissionSessionId: string | undefined;
@@ -692,20 +713,34 @@ export function createInProcessUiBackendClient(
 
   async function waitForPromptInternal(
     promptId: string,
+    waitOptions?: UiWaitForPromptOptions,
   ): Promise<UiPromptCompletion> {
     return {
       prompt: promptRecordToCompletion(
-        await promptScheduler.waitForCompletion(promptId),
+        await promptScheduler.waitForCompletion(promptId, waitOptions),
       ),
     };
   }
 
-  async function submitPromptAndWait(
+  function submitPromptAndWaitInternal(
+    text: string,
+    submitOptions?: UiSubmitPromptAndWaitOptions,
+  ): Promise<UiPromptCompletion> {
+    return composeSubmitPromptAndWait(
+      {
+        submitPromptAccepted: submitPromptAcceptedInternal,
+        waitForPrompt: waitForPromptInternal,
+      },
+      text,
+      submitOptions,
+    );
+  }
+
+  async function submitPromptLegacy(
     text: string,
     submitOptions?: SubmitPromptOptions,
   ): Promise<void> {
-    const receipt = await submitPromptAcceptedInternal(text, submitOptions);
-    const completion = await waitForPromptInternal(receipt.promptId);
+    const completion = await submitPromptAndWaitInternal(text, submitOptions);
     if (
       completion.prompt.status === "failed" ||
       completion.prompt.status === "interrupted"
@@ -2372,7 +2407,7 @@ export function createInProcessUiBackendClient(
       },
     },
     async submitPrompt(text, submitOptions): Promise<void> {
-      await submitPromptAndWait(text, submitOptions);
+      await submitPromptLegacy(text, submitOptions);
     },
     connectModel: connectModelInternal,
     setSearchApiKey: setSearchApiKeyInternal,
@@ -2467,7 +2502,14 @@ export function createInProcessUiBackendClient(
       text: string,
       submitOptions?: SubmitPromptOptions,
     ): Promise<void> {
-      return submitPromptAndWait(text, submitOptions);
+      return submitPromptLegacy(text, submitOptions);
+    },
+
+    submitPromptAndWait(
+      text: string,
+      submitOptions?: UiSubmitPromptAndWaitOptions,
+    ): Promise<UiPromptCompletion> {
+      return submitPromptAndWaitInternal(text, submitOptions);
     },
 
     submitPromptAccepted(
@@ -2498,9 +2540,19 @@ export function createInProcessUiBackendClient(
     },
 
     async acquirePromptEditLease(input): Promise<UiPromptEditLease> {
+      return this.acquirePromptEditLeaseForOwner(
+        input,
+        promptQueueOwnerClientId,
+      );
+    },
+
+    async acquirePromptEditLeaseForOwner(
+      input,
+      trustedOwnerClientId,
+    ): Promise<UiPromptEditLease> {
       const lease = await promptScheduler.acquireEditLease(
         input.promptId,
-        input.ownerClientId,
+        trustedOwnerClientId,
       );
       return {
         editLeaseId: lease.editLeaseId,
@@ -2511,10 +2563,17 @@ export function createInProcessUiBackendClient(
     },
 
     async renewPromptEditLease(input): Promise<UiPromptEditLease> {
+      return this.renewPromptEditLeaseForOwner(input, promptQueueOwnerClientId);
+    },
+
+    async renewPromptEditLeaseForOwner(
+      input,
+      trustedOwnerClientId,
+    ): Promise<UiPromptEditLease> {
       const lease = await promptScheduler.renewEditLease(
         input.promptId,
         input.editLeaseId,
-        input.ownerClientId,
+        trustedOwnerClientId,
       );
       return {
         editLeaseId: lease.editLeaseId,
@@ -2533,8 +2592,11 @@ export function createInProcessUiBackendClient(
       );
     },
 
-    waitForPrompt(promptId: string): Promise<UiPromptCompletion> {
-      return waitForPromptInternal(promptId);
+    waitForPrompt(
+      promptId: string,
+      waitOptions?: UiWaitForPromptOptions,
+    ): Promise<UiPromptCompletion> {
+      return waitForPromptInternal(promptId, waitOptions);
     },
 
     compactSession(

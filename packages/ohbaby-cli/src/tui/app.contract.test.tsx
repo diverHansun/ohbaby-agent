@@ -1,4 +1,5 @@
 ﻿import { render as renderInk } from "ink-testing-library";
+/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   UiCommandInvocation,
@@ -1427,7 +1428,6 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("\u001B[1;3A");
     await waitForFrame(app, (frame) => frame.includes("editing"));
     expect(client.acquirePromptEditLease).toHaveBeenCalledWith({
-      ownerClientId: "tui",
       promptId: "prompt_queued",
     });
     expect(client.acquirePromptEditLease).toHaveBeenCalledTimes(1);
@@ -1438,7 +1438,6 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     expect(client.renewPromptEditLease).toHaveBeenCalledWith({
       editLeaseId: "lease_1",
-      ownerClientId: "tui",
       promptId: "prompt_queued",
     });
     nowSpy.mockRestore();

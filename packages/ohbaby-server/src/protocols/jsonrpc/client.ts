@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
+/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility bridge */
 import type { CoreApiHost } from "ohbaby-agent";
-import { workspaceDirectoryHeaders } from "ohbaby-sdk";
+import {
+  submitPromptAndWait as composeSubmitPromptAndWait,
+  workspaceDirectoryHeaders,
+} from "ohbaby-sdk";
 import type {
   CoreAPI,
   SDKAPI,
@@ -214,6 +218,13 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("submitPromptAccepted", [text, options]);
   }
 
+  submitPromptAndWait(
+    text: string,
+    options?: Parameters<UiBackendClient["submitPromptAndWait"]>[1],
+  ): ReturnType<UiBackendClient["submitPromptAndWait"]> {
+    return composeSubmitPromptAndWait(this, text, options);
+  }
+
   editQueuedPrompt(
     input: Parameters<UiPromptQueueClient["editQueuedPrompt"]>[0],
   ): ReturnType<UiPromptQueueClient["editQueuedPrompt"]> {
@@ -246,8 +257,9 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
 
   waitForPrompt(
     promptId: string,
+    options?: Parameters<UiBackendClient["waitForPrompt"]>[1],
   ): ReturnType<UiPromptQueueClient["waitForPrompt"]> {
-    return this.rpc("waitForPrompt", [promptId]);
+    return this.rpc("waitForPrompt", [promptId], { signal: options?.signal });
   }
 
   compactSession(
@@ -326,7 +338,10 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   private async rpc<T>(
     method: DaemonRpcMethod,
     params: readonly unknown[],
-    options: { readonly skipInitialize?: boolean } = {},
+    options: {
+      readonly signal?: AbortSignal;
+      readonly skipInitialize?: boolean;
+    } = {},
   ): Promise<T> {
     if (options.skipInitialize !== true) {
       await this.ensureInitialized();
@@ -343,6 +358,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
         body: JSON.stringify(request),
         headers: this.requestHeaders({ "content-type": "application/json" }),
         method: "POST",
+        signal: options.signal,
       });
     } catch (error) {
       throw daemonConnectionError(method, error);

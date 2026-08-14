@@ -100,13 +100,11 @@ export interface UiPromptEditLease {
 
 export interface UiAcquirePromptEditLeaseInput {
   readonly promptId: string;
-  readonly ownerClientId: string;
 }
 
 export interface UiRenewPromptEditLeaseInput {
   readonly promptId: string;
   readonly editLeaseId: string;
-  readonly ownerClientId: string;
 }
 
 export interface UiReleasePromptEditLeaseInput {

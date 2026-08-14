@@ -165,12 +165,10 @@ describe("createRemoteUiBackendClient", () => {
       sessionId: "session_1",
     });
     const lease = await client.acquirePromptEditLease({
-      ownerClientId: "client_1",
       promptId: receipt.promptId,
     });
     await client.renewPromptEditLease({
       editLeaseId: lease.editLeaseId,
-      ownerClientId: "client_1",
       promptId: receipt.promptId,
     });
     await client.releasePromptEditLease({
@@ -178,7 +176,6 @@ describe("createRemoteUiBackendClient", () => {
       promptId: receipt.promptId,
     });
     await client.acquirePromptEditLease({
-      ownerClientId: "client_1",
       promptId: receipt.promptId,
     });
     await client.editQueuedPrompt({

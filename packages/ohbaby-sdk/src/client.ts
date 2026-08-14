@@ -87,22 +87,57 @@ export interface UiListCommandsQuery {
 export type UiEventHandler = (event: UiEvent) => void;
 export type UiUnsubscribe = () => void;
 
-export interface UiBackendClient {
+export interface UiQueryClient {
   getSnapshot(): Promise<UiSnapshot>;
   getContextWindowUsage(input: {
     readonly sessionId: string;
   }): Promise<UiContextWindowUsage | null>;
   subscribeEvents(handler: UiEventHandler): UiUnsubscribe;
   listCommands(query: UiListCommandsQuery): Promise<UiSlashCommandCatalog>;
-  submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void>;
-  compactSession(
-    options?: UiCompactSessionOptions,
-  ): Promise<UiCompactSessionResult>;
-  archiveSession(input: UiArchiveSessionInput): Promise<void>;
+  waitForPrompt(
+    promptId: string,
+    options?: UiWaitForPromptOptions,
+  ): Promise<UiPromptCompletion>;
   getCurrentModel(): Promise<UiCurrentModelConfig | null>;
   probeModelContextWindow(
     input: UiProbeModelContextWindowInput,
   ): Promise<UiProbeModelContextWindowResult>;
+}
+
+export interface UiPromptCommandClient {
+  submitPromptAccepted(
+    text: string,
+    options?: SubmitPromptOptions,
+  ): Promise<UiPromptReceipt>;
+  submitPromptAndWait(
+    text: string,
+    options?: UiSubmitPromptAndWaitOptions,
+  ): Promise<UiPromptCompletion>;
+}
+
+export interface UiPromptQueueCommandClient {
+  editQueuedPrompt(input: UiEditQueuedPromptInput): Promise<UiPromptSubmission>;
+  cancelQueuedPrompt(
+    input: UiCancelQueuedPromptInput,
+  ): Promise<UiPromptSubmission>;
+  acquirePromptEditLease(
+    input: UiAcquirePromptEditLeaseInput,
+  ): Promise<UiPromptEditLease>;
+  renewPromptEditLease(
+    input: UiRenewPromptEditLeaseInput,
+  ): Promise<UiPromptEditLease>;
+  releasePromptEditLease(
+    input: UiReleasePromptEditLeaseInput,
+  ): Promise<UiPromptSubmission>;
+}
+
+export interface UiCommandClient
+  extends UiPromptCommandClient,
+    UiPromptQueueCommandClient {
+  compactSession(
+    options?: UiCompactSessionOptions,
+  ): Promise<UiCompactSessionResult>;
+  archiveSession(input: UiArchiveSessionInput): Promise<void>;
   connectModel(input: UiConnectModelInput): Promise<UiConnectModelResult>;
   setSearchApiKey(
     input: UiSetSearchApiKeyInput,
@@ -121,26 +156,15 @@ export interface UiBackendClient {
 }
 
 /**
- * Durable prompt admission is additive while embedded callers retain the
- * legacy submit-and-wait contract on UiBackendClient.submitPrompt().
+ * Complete production backend capability. Queue management is mandatory.
  */
-export interface UiPromptQueueClient extends UiBackendClient {
-  submitPromptAccepted(
-    text: string,
-    options?: SubmitPromptOptions,
-  ): Promise<UiPromptReceipt>;
-  editQueuedPrompt(input: UiEditQueuedPromptInput): Promise<UiPromptSubmission>;
-  cancelQueuedPrompt(
-    input: UiCancelQueuedPromptInput,
-  ): Promise<UiPromptSubmission>;
-  acquirePromptEditLease(
-    input: UiAcquirePromptEditLeaseInput,
-  ): Promise<UiPromptEditLease>;
-  renewPromptEditLease(
-    input: UiRenewPromptEditLeaseInput,
-  ): Promise<UiPromptEditLease>;
-  releasePromptEditLease(
-    input: UiReleasePromptEditLeaseInput,
-  ): Promise<UiPromptSubmission>;
-  waitForPrompt(promptId: string): Promise<UiPromptCompletion>;
+export interface UiBackendClient extends UiQueryClient, UiCommandClient {
+  /**
+   * @deprecated Use submitPromptAccepted, waitForPrompt, or
+   * submitPromptAndWait according to the required lifecycle point.
+   */
+  submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void>;
 }
+
+/** Improve-1 compatibility alias; use the narrow capability interfaces. */
+export type UiPromptQueueClient = UiBackendClient;

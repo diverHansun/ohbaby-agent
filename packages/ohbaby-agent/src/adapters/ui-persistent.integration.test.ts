@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -801,7 +802,6 @@ describe("createPersistentUiBackendClient", () => {
         throw new Error("expected queued prompt projections");
       }
       const secondLease = await client.acquirePromptEditLease({
-        ownerClientId: "client_test",
         promptId: second.promptId,
       });
       const edited = await client.editQueuedPrompt({
@@ -1002,6 +1002,49 @@ describe("createPersistentUiBackendClient", () => {
 
       release.resolve(undefined);
       await client.waitForPrompt(blocked.promptId);
+    } finally {
+      release.resolve(undefined);
+      await client.dispose();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("aborts one prompt waiter without cancelling the accepted prompt", async () => {
+    const directory = await tempDir("ohbaby-persistent-wait-abort-");
+    const release = createDeferred<undefined>();
+    const startedTexts: string[] = [];
+    const client = createPersistentUiBackendClient({
+      dbPath: join(directory, "agent.db"),
+      llmClient: createAbortableBlockingLLMClient({
+        release: release.promise,
+        startedTexts,
+      }),
+      workdir: join(directory, "workspace"),
+    });
+    try {
+      const receipt = await client.submitPromptAccepted("keep processing", {
+        sessionId: "session_wait_abort",
+      });
+      await vi.waitFor(() => {
+        expect(startedTexts).toEqual(["keep processing"]);
+      });
+
+      const controller = new AbortController();
+      const abortedWait = client.waitForPrompt(receipt.promptId, {
+        signal: controller.signal,
+      });
+      controller.abort();
+
+      await expect(abortedWait).rejects.toMatchObject({
+        code: "PROMPT_WAIT_ABORTED",
+      });
+
+      release.resolve(undefined);
+      await expect(client.waitForPrompt(receipt.promptId)).resolves.toMatchObject(
+        {
+          prompt: { promptId: receipt.promptId, status: "succeeded" },
+        },
+      );
     } finally {
       release.resolve(undefined);
       await client.dispose();

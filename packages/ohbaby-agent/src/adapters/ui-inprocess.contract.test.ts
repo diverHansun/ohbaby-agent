@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

@@ -1,10 +1,15 @@
+/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility bridge */
 import type {
   SubmitPromptOptions,
+  UiAcquirePromptEditLeaseInput,
   UiBackendClient,
   UiPromptCompletion,
+  UiPromptEditLease,
   UiPromptQueueClient,
   UiPromptReceipt,
+  UiRenewPromptEditLeaseInput,
 } from "ohbaby-sdk";
+import type { UiPromptQueueExecutionPort } from "ohbaby-agent";
 import type { DaemonClientViewCoordinator } from "./client-view.js";
 import type { PermissionRouter } from "./permission-router.js";
 
@@ -28,6 +33,38 @@ export function supportsPromptQueue(
     typeof candidate.releasePromptEditLease === "function" &&
     typeof candidate.waitForPrompt === "function"
   );
+}
+
+function trustedQueueExecutionPort(
+  backend: UiBackendClient,
+): UiPromptQueueExecutionPort | undefined {
+  const candidate = backend as Partial<UiPromptQueueExecutionPort>;
+  return typeof candidate.acquirePromptEditLeaseForOwner === "function" &&
+    typeof candidate.renewPromptEditLeaseForOwner === "function"
+    ? (candidate as UiPromptQueueExecutionPort)
+    : undefined;
+}
+
+export function acquirePromptEditLeaseForClient(
+  backend: UiBackendClient,
+  input: UiAcquirePromptEditLeaseInput,
+  trustedClientId: string,
+): Promise<UiPromptEditLease> {
+  const executionPort = trustedQueueExecutionPort(backend);
+  return executionPort
+    ? executionPort.acquirePromptEditLeaseForOwner(input, trustedClientId)
+    : backend.acquirePromptEditLease(input);
+}
+
+export function renewPromptEditLeaseForClient(
+  backend: UiBackendClient,
+  input: UiRenewPromptEditLeaseInput,
+  trustedClientId: string,
+): Promise<UiPromptEditLease> {
+  const executionPort = trustedQueueExecutionPort(backend);
+  return executionPort
+    ? executionPort.renewPromptEditLeaseForOwner(input, trustedClientId)
+    : backend.renewPromptEditLease(input);
 }
 
 export interface AcceptedDaemonPrompt {
