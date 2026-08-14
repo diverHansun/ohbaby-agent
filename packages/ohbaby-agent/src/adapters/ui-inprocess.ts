@@ -77,6 +77,10 @@ import type {
 } from "../core/message/index.js";
 import type { Session as CoreSession } from "../services/session/index.js";
 import {
+  promptRecordToCompletion,
+  promptRecordToUi,
+} from "./ui-inprocess/prompt-mapper.js";
+import {
   createTemporarySessionTitle,
   generateSessionTitle,
   isDefaultSessionTitle,
@@ -117,7 +121,6 @@ import type { StreamBridge } from "../runtime/stream-bridge/index.js";
 import {
   InMemoryPromptSubmissionStore,
   WorkspacePromptScheduler,
-  type PromptSubmissionRecord,
   type PromptSubmissionStore,
 } from "../runtime/prompt-scheduler/index.js";
 import {
@@ -306,35 +309,6 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
-}
-
-function promptRecordToUi(record: PromptSubmissionRecord): UiPromptSubmission {
-  return {
-    promptId: record.promptId,
-    clientRequestId: record.clientRequestId,
-    scopeKey: record.scopeKey,
-    sessionId: record.sessionId,
-    userMessageId: record.userMessageId,
-    text: record.text,
-    status: record.status,
-    runId: record.runId,
-    error: record.error,
-    editLeaseOwnerId: record.editLeaseOwnerId,
-    editLeaseExpiresAt:
-      record.editLeaseExpiresAt === undefined
-        ? undefined
-        : new Date(record.editLeaseExpiresAt).toISOString(),
-    createdAt: new Date(record.createdAt).toISOString(),
-    updatedAt: new Date(record.updatedAt).toISOString(),
-    startedAt:
-      record.startedAt === undefined
-        ? undefined
-        : new Date(record.startedAt).toISOString(),
-    endedAt:
-      record.endedAt === undefined
-        ? undefined
-        : new Date(record.endedAt).toISOString(),
-  };
 }
 
 function createTextMessage(input: {
@@ -720,7 +694,7 @@ export function createInProcessUiBackendClient(
     promptId: string,
   ): Promise<UiPromptCompletion> {
     return {
-      prompt: promptRecordToUi(
+      prompt: promptRecordToCompletion(
         await promptScheduler.waitForCompletion(promptId),
       ),
     };
@@ -736,10 +710,7 @@ export function createInProcessUiBackendClient(
       completion.prompt.status === "failed" ||
       completion.prompt.status === "interrupted"
     ) {
-      throw new Error(
-        completion.prompt.error?.message ??
-          `Prompt ${completion.prompt.status}`,
-      );
+      throw new Error(completion.prompt.error.message);
     }
   }
 

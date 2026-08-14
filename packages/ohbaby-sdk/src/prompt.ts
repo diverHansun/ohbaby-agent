@@ -37,6 +37,36 @@ export interface UiPromptSubmission {
   readonly endedAt?: string;
 }
 
+export type UiPromptTerminalStatus = Extract<
+  UiPromptSubmissionStatus,
+  "succeeded" | "failed" | "cancelled" | "interrupted"
+>;
+
+type UiCompletedPromptBase = Omit<
+  UiPromptSubmission,
+  "status" | "endedAt" | "error"
+> & {
+  readonly endedAt: string;
+};
+
+export type UiCompletedPromptSubmission =
+  | (UiCompletedPromptBase & {
+      readonly status: "succeeded";
+      readonly error?: never;
+    })
+  | (UiCompletedPromptBase & {
+      readonly status: "failed";
+      readonly error: UiPromptError;
+    })
+  | (UiCompletedPromptBase & {
+      readonly status: "cancelled";
+      readonly error?: never;
+    })
+  | (UiCompletedPromptBase & {
+      readonly status: "interrupted";
+      readonly error: UiPromptError;
+    });
+
 export interface UiPromptReceipt {
   readonly promptId: string;
   readonly clientRequestId: string;
@@ -47,7 +77,7 @@ export interface UiPromptReceipt {
 }
 
 export interface UiPromptCompletion {
-  readonly prompt: UiPromptSubmission;
+  readonly prompt: UiCompletedPromptSubmission;
 }
 
 export interface UiEditQueuedPromptInput {

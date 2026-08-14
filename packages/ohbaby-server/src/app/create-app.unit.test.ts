@@ -12,6 +12,7 @@ import type {
   UiEventHandler,
   UiPermissionState,
   UiPromptCompletion,
+  UiCompletedPromptSubmission,
   UiPromptQueueClient,
   UiPromptSubmission,
   UiProbeModelContextWindowResult,
@@ -311,6 +312,7 @@ class DurablePromptFakeBackend
 {
   admissionError: Error | undefined;
   private prompt: UiPromptSubmission | undefined;
+  private completedPrompt: UiCompletedPromptSubmission | undefined;
   private resolveCompletion:
     | ((completion: UiPromptCompletion) => void)
     | undefined;
@@ -391,7 +393,19 @@ class DurablePromptFakeBackend
       status: "cancelled",
       updatedAt: "2026-06-12T00:00:02.000Z",
     };
-    this.resolveCompletion?.({ prompt: this.prompt });
+    this.completedPrompt = {
+      clientRequestId: this.prompt.clientRequestId,
+      createdAt: this.prompt.createdAt,
+      endedAt: "2026-06-12T00:00:02.000Z",
+      promptId: this.prompt.promptId,
+      scopeKey: this.prompt.scopeKey,
+      sessionId: this.prompt.sessionId,
+      status: "cancelled",
+      text: this.prompt.text,
+      updatedAt: "2026-06-12T00:00:02.000Z",
+      userMessageId: this.prompt.userMessageId,
+    };
+    this.resolveCompletion?.({ prompt: this.completedPrompt });
     return Promise.resolve(this.prompt);
   }
 
@@ -433,8 +447,8 @@ class DurablePromptFakeBackend
   }
 
   waitForPrompt(): ReturnType<UiPromptQueueClient["waitForPrompt"]> {
-    if (this.prompt?.status === "cancelled") {
-      return Promise.resolve({ prompt: this.prompt });
+    if (this.completedPrompt) {
+      return Promise.resolve({ prompt: this.completedPrompt });
     }
     return new Promise((resolve) => {
       this.resolveCompletion = resolve;

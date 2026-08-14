@@ -169,10 +169,7 @@ export async function callDaemonBackend(input: {
           completion.prompt.status === "failed" ||
           completion.prompt.status === "interrupted"
         ) {
-          throw new Error(
-            completion.prompt.error?.message ??
-              `Prompt ${completion.prompt.status}`,
-          );
+          throw new Error(completion.prompt.error.message);
         }
         return undefined;
       }

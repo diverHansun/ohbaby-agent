@@ -1,5 +1,7 @@
 export type {
   SubmitPromptOptions,
+  UiSubmitPromptAndWaitOptions,
+  UiWaitForPromptOptions,
   UiArchiveSessionInput,
   UiBackendClient,
   UiPromptQueueClient,
@@ -8,15 +10,18 @@ export type {
   UiPermissionUpdate,
   UiUnsubscribe,
 } from "./client.js";
+export { submitPromptAndWait } from "./client.js";
 export type {
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
   UiPromptCompletion,
+  UiCompletedPromptSubmission,
   UiPromptError,
   UiPromptReceipt,
   UiPromptEditLease,
   UiPromptSubmission,
   UiPromptSubmissionStatus,
+  UiPromptTerminalStatus,
   UiAcquirePromptEditLeaseInput,
   UiRenewPromptEditLeaseInput,
   UiReleasePromptEditLeaseInput,

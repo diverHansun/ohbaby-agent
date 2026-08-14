@@ -44,6 +44,33 @@ export interface SubmitPromptOptions {
   readonly sessionId?: string;
 }
 
+export interface UiWaitForPromptOptions {
+  readonly signal?: AbortSignal;
+}
+
+export interface UiSubmitPromptAndWaitOptions extends SubmitPromptOptions {
+  readonly signal?: AbortSignal;
+}
+
+export async function submitPromptAndWait(
+  client: {
+    submitPromptAccepted(
+      text: string,
+      options?: SubmitPromptOptions,
+    ): Promise<UiPromptReceipt>;
+    waitForPrompt(
+      promptId: string,
+      options?: UiWaitForPromptOptions,
+    ): Promise<UiPromptCompletion>;
+  },
+  text: string,
+  options?: UiSubmitPromptAndWaitOptions,
+): Promise<UiPromptCompletion> {
+  const { signal, ...submitOptions } = options ?? {};
+  const receipt = await client.submitPromptAccepted(text, submitOptions);
+  return client.waitForPrompt(receipt.promptId, { signal });
+}
+
 export interface UiArchiveSessionInput {
   readonly sessionId: string;
 }
