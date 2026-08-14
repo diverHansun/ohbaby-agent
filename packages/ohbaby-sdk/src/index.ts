@@ -15,6 +15,22 @@ export type {
   UiUnsubscribe,
 } from "./client.js";
 export { submitPromptAndWait } from "./client.js";
+export {
+  buildUiCommandDetails,
+  executeRecordedUiCommand,
+  summarizeUiCommandError,
+} from "./command-record.js";
+export type {
+  ExecuteRecordedUiCommandOptions,
+  UiCommandCorrelation,
+  UiCommandDetails,
+  UiCommandEntryPoint,
+  UiCommandErrorSummary,
+  UiCommandMethod,
+  UiCommandObservationDiagnostic,
+  UiCommandRecord,
+  UiCommandRecorder,
+} from "./command-record.js";
 export type {
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
