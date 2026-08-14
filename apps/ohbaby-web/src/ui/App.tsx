@@ -56,9 +56,7 @@ import type {
 import type { OhbabyWebRuntime } from "../api/daemon/client.js";
 import type { CommandNotice } from "../api/daemon/wire.js";
 import type { WorkspaceSnapshot } from "../api/daemon/wire.js";
-import type {
-  SearchApiKeyRequest,
-} from "../api/daemon/wire.js";
+import type { SearchApiKeyRequest } from "../api/daemon/wire.js";
 import { MarkdownBlock } from "./MarkdownBlock.js";
 import { DirectoryPickerDialog } from "./directory-picker/DirectoryPickerDialog.js";
 import { isImeComposing } from "./ime.js";
@@ -428,10 +426,7 @@ function ConnectedOhbabyWebApp({
     },
     [runAction, runtime],
   );
-  const listCommands = useCallback(
-    () => runtime.listWebCommands(),
-    [runtime],
-  );
+  const listCommands = useCallback(() => runtime.listWebCommands(), [runtime]);
   const openGoalPanel = useCallback((intent?: GoalPanelIntent) => {
     setStructuredOverlay({
       commandLabel: "/goal",

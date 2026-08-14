@@ -14,6 +14,7 @@ import type {
   UiPromptReceipt,
   UiPromptSubmission,
   UiRenewPromptEditLeaseInput,
+  UiReleasePromptEditLeaseInput,
   UiArchiveSessionInput,
   UiCommandCatalog,
   UiCommandInvocation,
@@ -239,6 +240,14 @@ export interface InProcessUiBackendOptions {
 }
 
 export interface UiPromptQueueExecutionPort {
+  editQueuedPromptForOwner(
+    input: UiEditQueuedPromptInput,
+    trustedOwnerClientId: string,
+  ): Promise<UiPromptSubmission>;
+  cancelQueuedPromptForOwner(
+    input: UiCancelQueuedPromptInput,
+    trustedOwnerClientId: string,
+  ): Promise<UiPromptSubmission>;
   acquirePromptEditLeaseForOwner(
     input: UiAcquirePromptEditLeaseInput,
     trustedOwnerClientId: string,
@@ -247,6 +256,10 @@ export interface UiPromptQueueExecutionPort {
     input: UiRenewPromptEditLeaseInput,
     trustedOwnerClientId: string,
   ): Promise<UiPromptEditLease>;
+  releasePromptEditLeaseForOwner(
+    input: UiReleasePromptEditLeaseInput,
+    trustedOwnerClientId: string,
+  ): Promise<UiPromptSubmission>;
 }
 
 export interface InProcessUiBackendClient
@@ -2470,11 +2483,19 @@ export function createInProcessUiBackendClient(
     async editQueuedPrompt(
       input: UiEditQueuedPromptInput,
     ): Promise<UiPromptSubmission> {
+      return this.editQueuedPromptForOwner(input, promptQueueOwnerClientId);
+    },
+
+    async editQueuedPromptForOwner(
+      input: UiEditQueuedPromptInput,
+      trustedOwnerClientId: string,
+    ): Promise<UiPromptSubmission> {
       return promptRecordToUi(
         await promptScheduler.commitEdit(
           input.promptId,
           input.editLeaseId,
           input.text,
+          trustedOwnerClientId,
         ),
       );
     },
@@ -2482,8 +2503,19 @@ export function createInProcessUiBackendClient(
     async cancelQueuedPrompt(
       input: UiCancelQueuedPromptInput,
     ): Promise<UiPromptSubmission> {
+      return this.cancelQueuedPromptForOwner(input, promptQueueOwnerClientId);
+    },
+
+    async cancelQueuedPromptForOwner(
+      input: UiCancelQueuedPromptInput,
+      trustedOwnerClientId: string,
+    ): Promise<UiPromptSubmission> {
       return promptRecordToUi(
-        await promptScheduler.cancelQueued(input.promptId, input.editLeaseId),
+        await promptScheduler.cancelQueued(
+          input.promptId,
+          input.editLeaseId,
+          trustedOwnerClientId,
+        ),
       );
     },
 
@@ -2532,10 +2564,21 @@ export function createInProcessUiBackendClient(
     },
 
     async releasePromptEditLease(input): Promise<UiPromptSubmission> {
+      return this.releasePromptEditLeaseForOwner(
+        input,
+        promptQueueOwnerClientId,
+      );
+    },
+
+    async releasePromptEditLeaseForOwner(
+      input,
+      trustedOwnerClientId,
+    ): Promise<UiPromptSubmission> {
       return promptRecordToUi(
         await promptScheduler.releaseEditLease(
           input.promptId,
           input.editLeaseId,
+          trustedOwnerClientId,
         ),
       );
     },

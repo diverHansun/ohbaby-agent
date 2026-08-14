@@ -169,7 +169,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     ttlMs: number,
   ): Promise<PromptEditLease> {
     const current = this.require(promptId);
-    this.assertLease(current, editLeaseId);
+    this.assertLease(current, editLeaseId, ownerClientId);
     const expiresAt = this.now() + ttlMs;
     const updated: PromptSubmissionRecord = {
       ...current,
@@ -190,9 +190,10 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     promptId: string,
     editLeaseId: string,
     text: string,
+    ownerClientId?: string,
   ): Promise<PromptSubmissionRecord> {
     const current = this.require(promptId);
-    this.assertLease(current, editLeaseId);
+    this.assertLease(current, editLeaseId, ownerClientId);
     const updated: PromptSubmissionRecord = {
       ...current,
       text,
@@ -208,9 +209,10 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
   async releaseEditLease(
     promptId: string,
     editLeaseId: string,
+    ownerClientId?: string,
   ): Promise<PromptSubmissionRecord> {
     const current = this.require(promptId);
-    this.assertLease(current, editLeaseId);
+    this.assertLease(current, editLeaseId, ownerClientId);
     const updated: PromptSubmissionRecord = {
       ...current,
       editLeaseId: undefined,
@@ -225,6 +227,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
   async cancelQueued(
     promptId: string,
     editLeaseId?: string,
+    ownerClientId?: string,
   ): Promise<PromptSubmissionRecord> {
     const current = this.require(promptId);
     this.assertQueued(current);
@@ -232,7 +235,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       if (editLeaseId === undefined) {
         throw new PromptEditLeaseHeldError(promptId);
       }
-      this.assertLease(current, editLeaseId);
+      this.assertLease(current, editLeaseId, ownerClientId);
     }
     const at = this.nextTime(current);
     const updated: PromptSubmissionRecord = {
@@ -415,10 +418,13 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
   private assertLease(
     record: PromptSubmissionRecord,
     editLeaseId: string,
+    ownerClientId?: string,
   ): void {
     this.assertQueued(record);
     if (
       record.editLeaseId !== editLeaseId ||
+      (ownerClientId !== undefined &&
+        record.editLeaseOwnerId !== ownerClientId) ||
       (record.editLeaseExpiresAt ?? 0) <= this.now()
     ) {
       throw new PromptEditLeaseLostError(record.promptId);

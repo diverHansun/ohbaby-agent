@@ -576,10 +576,7 @@ export class DaemonClientViewCoordinator {
     return { claimToken };
   }
 
-  releaseInteractionClaim(
-    interactionId: string,
-    claimToken: string,
-  ): boolean {
+  releaseInteractionClaim(interactionId: string, claimToken: string): boolean {
     const state = this.interactionResponseStates.get(interactionId);
     if (state?.kind !== "claimed" || state.claimToken !== claimToken) {
       return false;
@@ -591,10 +588,7 @@ export class DaemonClientViewCoordinator {
     return true;
   }
 
-  consumeInteractionClaim(
-    interactionId: string,
-    claimToken: string,
-  ): boolean {
+  consumeInteractionClaim(interactionId: string, claimToken: string): boolean {
     const state = this.interactionResponseStates.get(interactionId);
     if (state?.kind !== "claimed" || state.claimToken !== claimToken) {
       return false;

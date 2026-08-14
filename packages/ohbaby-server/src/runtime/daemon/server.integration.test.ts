@@ -283,6 +283,8 @@ class FakeBackend implements UiBackendClient {
   >[0][] = [];
   emitOnSubmit = true;
   holdSubmits = false;
+  lastWaitSignal: AbortSignal | undefined;
+  waitAbortObserved = false;
   subscribeError: Error | undefined;
   private readonly submitResolvers: (() => void)[] = [];
 
@@ -346,6 +348,23 @@ class FakeBackend implements UiBackendClient {
   ): ReturnType<UiBackendClient["submitPromptAccepted"]> {
     const promptId = `prompt_fake_${String(++this.nextPromptId)}`;
     const sessionId = options?.sessionId ?? "session_fake";
+    this.snapshot = {
+      ...this.snapshot,
+      prompts: [
+        ...(this.snapshot.prompts ?? []),
+        {
+          clientRequestId: options?.clientRequestId ?? `request_${promptId}`,
+          createdAt: timestamp,
+          promptId,
+          scopeKey: "/workspace",
+          sessionId,
+          status: "queued",
+          text,
+          updatedAt: timestamp,
+          userMessageId: `message_${promptId}`,
+        },
+      ],
+    };
     const completion = this.performPrompt(text, options).then(() => ({
       prompt: {
         clientRequestId: options?.clientRequestId ?? `request_${promptId}`,
@@ -381,11 +400,24 @@ class FakeBackend implements UiBackendClient {
 
   waitForPrompt(
     promptId: string,
+    options?: Parameters<UiBackendClient["waitForPrompt"]>[1],
   ): ReturnType<UiBackendClient["waitForPrompt"]> {
-    return (
+    const completion =
       this.promptCompletions.get(promptId) ??
-      Promise.reject(new Error(`Unknown prompt: ${promptId}`))
-    );
+      Promise.reject(new Error(`Unknown prompt: ${promptId}`));
+    if (!options?.signal) return completion;
+    this.lastWaitSignal = options.signal;
+    return Promise.race([
+      completion,
+      new Promise<never>((_resolve, reject) => {
+        const abort = (): void => {
+          this.waitAbortObserved = true;
+          reject(new DOMException("wait aborted", "AbortError"));
+        };
+        if (options.signal?.aborted) abort();
+        else options.signal?.addEventListener("abort", abort, { once: true });
+      }),
+    ]);
   }
 
   editQueuedPrompt(): ReturnType<UiBackendClient["editQueuedPrompt"]> {
@@ -402,9 +434,7 @@ class FakeBackend implements UiBackendClient {
     return Promise.reject(new Error("No queued prompt in fake backend"));
   }
 
-  renewPromptEditLease(): ReturnType<
-    UiBackendClient["renewPromptEditLease"]
-  > {
+  renewPromptEditLease(): ReturnType<UiBackendClient["renewPromptEditLease"]> {
     return Promise.reject(new Error("No queued prompt in fake backend"));
   }
 
@@ -412,6 +442,34 @@ class FakeBackend implements UiBackendClient {
     UiBackendClient["releasePromptEditLease"]
   > {
     return Promise.reject(new Error("No queued prompt in fake backend"));
+  }
+
+  editQueuedPromptForOwner(): ReturnType<UiBackendClient["editQueuedPrompt"]> {
+    return this.editQueuedPrompt();
+  }
+
+  cancelQueuedPromptForOwner(): ReturnType<
+    UiBackendClient["cancelQueuedPrompt"]
+  > {
+    return this.cancelQueuedPrompt();
+  }
+
+  acquirePromptEditLeaseForOwner(): ReturnType<
+    UiBackendClient["acquirePromptEditLease"]
+  > {
+    return this.acquirePromptEditLease();
+  }
+
+  renewPromptEditLeaseForOwner(): ReturnType<
+    UiBackendClient["renewPromptEditLease"]
+  > {
+    return this.renewPromptEditLease();
+  }
+
+  releasePromptEditLeaseForOwner(): ReturnType<
+    UiBackendClient["releasePromptEditLease"]
+  > {
+    return this.releasePromptEditLease();
   }
 
   compactSession(): ReturnType<UiBackendClient["compactSession"]> {
@@ -855,6 +913,57 @@ describe("createDaemonHttpServer", () => {
         result: snapshot,
       });
     });
+  });
+
+  it("settles a pending JSON-RPC prompt waiter before server shutdown", async () => {
+    const backend = new FakeBackend();
+    backend.holdSubmits = true;
+    const server = createDaemonHttpServer({
+      authToken,
+      backend,
+      host: "127.0.0.1",
+      port: 0,
+    });
+    await server.start();
+    try {
+      await postRpc(server.url, {
+        clientId: "client_1",
+        id: "rpc_initialize",
+        method: "initializeClient",
+        params: [{ startupSessionMode: { type: "fresh" } }],
+      });
+      const accepted = await postRpc(server.url, {
+        clientId: "client_1",
+        id: "rpc_submit",
+        method: "submitPromptAccepted",
+        params: ["hello", { sessionId: "session_1" }],
+      });
+      expect(accepted.status).toBe(200);
+      const receipt = (await accepted.json()) as {
+        result: { promptId: string };
+      };
+      const waiting = postRpc(server.url, {
+        clientId: "client_1",
+        id: "rpc_wait",
+        method: "waitForPrompt",
+        params: [receipt.result.promptId],
+      });
+      await vi.waitUntil(() => backend.lastWaitSignal !== undefined);
+
+      await Promise.race([
+        server.stop(),
+        delay(3_000).then(() => {
+          throw new Error("server shutdown timed out");
+        }),
+      ]);
+      await expect(
+        waiting.catch((error: unknown) => error),
+      ).resolves.toBeDefined();
+      expect(backend.waitAbortObserved).toBe(true);
+      expect(backend.submitted).toHaveLength(1);
+    } finally {
+      await server.stop();
+    }
   });
 
   it("returns a structured failure for invalid rpc requests", async () => {

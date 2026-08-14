@@ -84,9 +84,7 @@ describe("context window UI contract", () => {
     };
 
     const core = {
-      acquirePromptEditLease(): ReturnType<
-        CoreAPI["acquirePromptEditLease"]
-      > {
+      acquirePromptEditLease(): ReturnType<CoreAPI["acquirePromptEditLease"]> {
         return Promise.reject(new Error("No queued prompt"));
       },
       abortRun(): ReturnType<CoreAPI["abortRun"]> {
@@ -182,9 +180,7 @@ describe("context window UI contract", () => {
       respondPermission(): ReturnType<CoreAPI["respondPermission"]> {
         return Promise.resolve();
       },
-      releasePromptEditLease(): ReturnType<
-        CoreAPI["releasePromptEditLease"]
-      > {
+      releasePromptEditLease(): ReturnType<CoreAPI["releasePromptEditLease"]> {
         return Promise.reject(new Error("No queued prompt"));
       },
       renewPromptEditLease(): ReturnType<CoreAPI["renewPromptEditLease"]> {

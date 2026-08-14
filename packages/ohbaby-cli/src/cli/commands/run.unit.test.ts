@@ -103,9 +103,9 @@ describe("createRunCommand", () => {
     );
     const command = createRunCommand(runtime);
 
-    await expect(
-      command.handler({ prompt: ["hello"] } as never),
-    ).rejects.toBe(transportError);
+    await expect(command.handler({ prompt: ["hello"] } as never)).rejects.toBe(
+      transportError,
+    );
     expect(runtime.setExitCode).not.toHaveBeenCalled();
     expect(runtime.host.dispose).toHaveBeenCalledOnce();
   });
@@ -157,7 +157,9 @@ function createRuntime(
       listCommands: vi.fn(() => Promise.resolve({ commands: [] })),
       respondInteraction: vi.fn(() => Promise.resolve()),
       respondPermission: vi.fn(() => Promise.resolve()),
-      submitPromptAndWait: vi.fn(() => Promise.resolve(completion("succeeded"))),
+      submitPromptAndWait: vi.fn(() =>
+        Promise.resolve(completion("succeeded")),
+      ),
     },
     dispose: vi.fn(() => Promise.resolve()),
   } as unknown as CliCoreHost;

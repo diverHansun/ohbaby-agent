@@ -67,6 +67,7 @@ class BrowserDaemonClient implements UiBackendClient {
   private readonly http: DaemonHttpClient;
   private readonly store: OhbabyWebStore;
   private readonly eventHandlers = new Set<UiEventHandler>();
+  private readonly lifecycleController = new AbortController();
   private buffering = false;
   private readonly commandCatalogPromises = new Map<
     string,
@@ -91,6 +92,9 @@ class BrowserDaemonClient implements UiBackendClient {
   }
 
   async connect(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
     if (this.connectPromise) {
       return this.connectPromise;
     }
@@ -104,14 +108,17 @@ class BrowserDaemonClient implements UiBackendClient {
   }
 
   private async doConnect(): Promise<void> {
-    this.closed = false;
     this.connected = true;
     this.store.setConnectionState("connecting");
     this.store.setError(null);
     try {
-      await this.http.registerClient({
-        startupIntent: this.config.startupIntent,
-      });
+      await this.http.registerClient(
+        {
+          startupIntent: this.config.startupIntent,
+        },
+        { signal: this.lifecycleController.signal },
+      );
+      if (this.isClosed()) return;
       this.buffering = true;
       await this.events.start({
         onConnectionState: (state) => {
@@ -127,7 +134,10 @@ class BrowserDaemonClient implements UiBackendClient {
         },
         onEvent: (event) => this.handleSseEvent(event.payload, event.id),
       });
-      const response = await this.http.getSnapshot();
+      if (this.isClosed()) return;
+      const response = await this.http.getSnapshot({
+        signal: this.lifecycleController.signal,
+      });
       if (this.isClosed()) {
         return;
       }
@@ -136,7 +146,11 @@ class BrowserDaemonClient implements UiBackendClient {
         response.seqNum,
         "snapshot-barrier",
       );
-      const model = (await this.http.getCurrentModel()).model;
+      const model = (
+        await this.http.getCurrentModel({
+          signal: this.lifecycleController.signal,
+        })
+      ).model;
       if (this.isClosed()) return;
       this.store.setCurrentModel(model);
       const maxBufferedSeqNum = this.applyBufferedEventsAfter(response.seqNum);
@@ -158,6 +172,7 @@ class BrowserDaemonClient implements UiBackendClient {
   async close(): Promise<void> {
     this.closed = true;
     this.connected = false;
+    this.lifecycleController.abort();
     await this.events.close();
     this.store.setConnectionState("disconnected");
   }
@@ -216,10 +231,7 @@ class BrowserDaemonClient implements UiBackendClient {
     input: Parameters<UiBackendClient["renewPromptEditLease"]>[0],
   ): ReturnType<UiBackendClient["renewPromptEditLease"]> {
     return (
-      await this.http.renewPromptEditLease(
-        input.promptId,
-        input.editLeaseId,
-      )
+      await this.http.renewPromptEditLease(input.promptId, input.editLeaseId)
     ).lease;
   }
 
@@ -227,10 +239,7 @@ class BrowserDaemonClient implements UiBackendClient {
     input: Parameters<UiBackendClient["releasePromptEditLease"]>[0],
   ): ReturnType<UiBackendClient["releasePromptEditLease"]> {
     return (
-      await this.http.releasePromptEditLease(
-        input.promptId,
-        input.editLeaseId,
-      )
+      await this.http.releasePromptEditLease(input.promptId, input.editLeaseId)
     ).prompt;
   }
 
@@ -271,7 +280,9 @@ class BrowserDaemonClient implements UiBackendClient {
   }
 
   listWebCommandsForRuntime(): Promise<UiWebCommandCatalog> {
-    return this.listCommands({ surface: "web" }) as Promise<UiWebCommandCatalog>;
+    return this.listCommands({
+      surface: "web",
+    }) as Promise<UiWebCommandCatalog>;
   }
 
   async getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
@@ -312,7 +323,8 @@ class BrowserDaemonClient implements UiBackendClient {
     options: Parameters<UiBackendClient["compactSession"]>[0] = {},
   ): ReturnType<UiBackendClient["compactSession"]> {
     const sessionId =
-      options.sessionId ?? this.store.getSnapshot().view.snapshot?.activeSessionId;
+      options.sessionId ??
+      this.store.getSnapshot().view.snapshot?.activeSessionId;
     if (!sessionId) {
       throw new Error("No session is selected");
     }
@@ -365,9 +377,7 @@ class BrowserDaemonClient implements UiBackendClient {
     return (await this.http.setPermission(input)).permission;
   }
 
-  async abortRun(
-    runId?: string,
-  ): ReturnType<UiBackendClient["abortRun"]> {
+  async abortRun(runId?: string): ReturnType<UiBackendClient["abortRun"]> {
     const snapshot = this.store.getSnapshot().view.snapshot;
     const sessionId =
       (runId === undefined
@@ -399,12 +409,13 @@ class BrowserDaemonClient implements UiBackendClient {
         await this.resync(event.maxSeqNum);
         return;
       case "ui.event": {
-        if (seqNum === undefined || !Number.isSafeInteger(seqNum)) {
+        if (
+          seqNum === undefined ||
+          !Number.isSafeInteger(seqNum) ||
+          seqNum < 0
+        ) {
           this.store.setError("Daemon event is missing a valid sequence id");
           return;
-        }
-        if (event.event.type === "command.catalog.updated") {
-          this.commandCatalogPromises.clear();
         }
         if (this.buffering) {
           this.bufferedEvents.push({ event: event.event, seqNum });
@@ -432,8 +443,11 @@ class BrowserDaemonClient implements UiBackendClient {
     const previousBuffering = this.buffering;
     this.buffering = true;
     this.store.setConnectionState("resyncing");
+    let committedSeqNum = this.store.getSnapshot().view.lastAppliedSeqNum;
     try {
-      const response = await this.http.getSnapshot();
+      const response = await this.http.getSnapshot({
+        signal: this.lifecycleController.signal,
+      });
       if (this.closed) {
         return;
       }
@@ -442,20 +456,30 @@ class BrowserDaemonClient implements UiBackendClient {
         response.seqNum,
         "snapshot-barrier",
       );
-      const model = (await this.http.getCurrentModel()).model;
-      if (this.isClosed()) return;
-      this.store.setCurrentModel(model);
       const maxBufferedSeqNum = this.applyBufferedEventsAfter(response.seqNum);
+      committedSeqNum = Math.max(response.seqNum, maxBufferedSeqNum);
       this.events.setLastEventId(
         Math.max(lastEventId, response.seqNum, maxBufferedSeqNum),
       );
-      this.store.setConnectionState("live");
     } catch (error) {
-      this.bufferedEvents.splice(0);
+      // The SSE remains open for imperative resyncs. Preserve every frame that
+      // arrived during the failed snapshot request and advance only to data
+      // that the reducer actually committed.
+      const maxBufferedSeqNum = this.applyBufferedEventsAfter(committedSeqNum);
+      this.events.setLastEventId(Math.max(committedSeqNum, maxBufferedSeqNum));
+      if (!this.isClosed()) this.store.setConnectionState("live");
       throw error;
     } finally {
       this.buffering = previousBuffering;
     }
+    this.store.setConnectionState("live");
+    const model = (
+      await this.http.getCurrentModel({
+        signal: this.lifecycleController.signal,
+      })
+    ).model;
+    if (this.isClosed()) return;
+    this.store.setCurrentModel(model);
   }
 
   private applyBufferedEventsAfter(seqNum: number): number {
@@ -475,6 +499,9 @@ class BrowserDaemonClient implements UiBackendClient {
     source: "incremental" | "snapshot-barrier",
   ): boolean {
     if (!this.store.applyEvent(event, seqNum, source)) return false;
+    if (event.type === "command.catalog.updated") {
+      this.commandCatalogPromises.clear();
+    }
     let subscriberFailed = false;
     for (const handler of Array.from(this.eventHandlers)) {
       try {
@@ -522,6 +549,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   private readonly globalHttp: DaemonHttpClient;
   private readonly listeners = new Set<() => void>();
   private controlPlaneAvailable = true;
+  private disposed = false;
   private hasConnectedWorkspace = false;
   private navigationState: WebNavigationState;
   private switchPromise: Promise<void> = Promise.resolve();
@@ -555,6 +583,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
     await this.activeClient?.close();
     this.activeClient = undefined;
   }
@@ -681,6 +710,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     directory: string,
     markOpened: boolean,
   ): Promise<void> {
+    if (this.isDisposed()) return;
     let selectedDirectory = directory.trim();
     if (selectedDirectory.length === 0) {
       throw new Error("Workspace directory cannot be empty");
@@ -700,13 +730,14 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     const previousClient = this.activeClient;
     await previousClient?.close();
     this.store.reset();
-    this.activeClient = this.createClient({
+    const nextClient = this.createClient({
       ...this.scopedBootstrapConfig(),
       clientId: this.hasConnectedWorkspace
         ? globalThis.crypto.randomUUID()
         : this.config.clientId,
       directory: selectedDirectory,
     });
+    this.activeClient = nextClient;
     this.publishWorkspaceSnapshot({
       scopes: this.workspaceSnapshot.scopes.map((scope) =>
         scope.directory === selectedDirectory
@@ -716,7 +747,12 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       selectedDirectory,
     });
     try {
-      await this.activeClient.connect();
+      await nextClient.connect();
+      if (this.isDisposed()) {
+        await nextClient.close();
+        if (this.activeClient === nextClient) this.activeClient = undefined;
+        return;
+      }
       this.hasConnectedWorkspace = true;
       await this.restoreRememberedSession(selectedDirectory);
       if (this.controlPlaneAvailable) {
@@ -724,7 +760,11 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       }
       this.rememberSelectedDirectory(selectedDirectory);
     } catch (error) {
-      await this.activeClient.close();
+      await nextClient.close();
+      if (this.isDisposed()) {
+        if (this.activeClient === nextClient) this.activeClient = undefined;
+        return;
+      }
       this.store.reset();
       this.activeClient =
         previousDirectory === null
@@ -796,6 +836,10 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     if (selectedDirectory) {
       await this.queueSwitchWorkspace(selectedDirectory, false);
     }
+  }
+
+  private isDisposed(): boolean {
+    return this.disposed;
   }
 
   private async restoreRememberedSession(directory: string): Promise<void> {

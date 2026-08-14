@@ -7,6 +7,7 @@ import {
 } from "ohbaby-sdk";
 import {
   createSessionIdGenerator,
+  type UiPromptQueueExecutionPort,
   type WorkspaceRegistryStore,
 } from "ohbaby-agent";
 import { Hono, type Context } from "hono";
@@ -60,9 +61,10 @@ export interface DaemonHttpServerOptions {
   readonly webAssetsDir?: string;
 }
 
-export type WorkspaceBackend = UiBackendClient & {
-  dispose?(): Promise<void> | void;
-};
+export type WorkspaceBackend = UiBackendClient &
+  UiPromptQueueExecutionPort & {
+    dispose?(): Promise<void> | void;
+  };
 
 export interface DaemonHttpServerHandle {
   readonly host: string;
@@ -121,7 +123,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
   }
 
   private createApp(
-    backend: UiBackendClient,
+    backend: WorkspaceBackend,
     scopeKey: string | undefined,
   ): DaemonServerAppHandle {
     return createDaemonServerApp({

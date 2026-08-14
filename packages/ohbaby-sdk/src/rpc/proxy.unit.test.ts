@@ -141,9 +141,7 @@ describe("createRPC", () => {
       const rpc = createRPC<PromptWaitAPI>();
       let backendAborted = false;
       let receivedSessionId: string | undefined;
-      const waitForAbort = (
-        signal: AbortSignal | undefined,
-      ): Promise<string> =>
+      const waitForAbort = (signal: AbortSignal | undefined): Promise<string> =>
         new Promise((_resolve, reject) => {
           signal?.addEventListener(
             "abort",

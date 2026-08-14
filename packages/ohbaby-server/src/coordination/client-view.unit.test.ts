@@ -207,10 +207,7 @@ function interactionRequested(): Extract<
 
 function interactionResolved(
   status: "accepted" | "cancelled" = "accepted",
-): Extract<
-  UiEvent,
-  { type: "interaction.resolved" }
-> {
+): Extract<UiEvent, { type: "interaction.resolved" }> {
   return {
     clientInvocationId: "invoke_1",
     commandRunId: "command_1",
@@ -588,14 +585,11 @@ describe("DaemonClientViewCoordinator", () => {
       throw new Error("expected interaction claim");
     }
 
+    expect(coordinator.releaseInteractionClaim("interaction_1", "wrong")).toBe(
+      false,
+    );
     expect(
-      coordinator.releaseInteractionClaim("interaction_1", "wrong"),
-    ).toBe(false);
-    expect(
-      coordinator.releaseInteractionClaim(
-        "interaction_1",
-        claim.claimToken,
-      ),
+      coordinator.releaseInteractionClaim("interaction_1", claim.claimToken),
     ).toBe(true);
     expect(
       coordinator.claimInteractionResponse(
@@ -623,10 +617,7 @@ describe("DaemonClientViewCoordinator", () => {
     coordinator.observeEvent(interactionResolved());
 
     expect(
-      coordinator.releaseInteractionClaim(
-        "interaction_1",
-        claim.claimToken,
-      ),
+      coordinator.releaseInteractionClaim("interaction_1", claim.claimToken),
     ).toBe(false);
     expect(
       coordinator.claimInteractionResponse(
@@ -671,10 +662,7 @@ describe("DaemonClientViewCoordinator", () => {
     coordinator.disconnectClient("client_a");
 
     expect(
-      coordinator.releaseInteractionClaim(
-        "interaction_1",
-        claim.claimToken,
-      ),
+      coordinator.releaseInteractionClaim("interaction_1", claim.claimToken),
     ).toBe(false);
     expect(
       coordinator.claimInteractionResponse(

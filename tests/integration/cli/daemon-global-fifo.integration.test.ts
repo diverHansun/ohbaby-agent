@@ -101,7 +101,9 @@ function titleTextForSessionTitleRequest(
   const marker = "First user message:\n";
   const markerIndex = content.indexOf(marker);
   return createTemporarySessionTitle(
-    markerIndex < 0 ? "Fake session" : content.slice(markerIndex + marker.length),
+    markerIndex < 0
+      ? "Fake session"
+      : content.slice(markerIndex + marker.length),
   );
 }
 
@@ -154,7 +156,9 @@ function createBlockingFifoLlmClient(input: {
         }
         input.runOrder.push("seed");
         return Promise.resolve(
-          createProviderStream([{ textDelta: "seed done", finishReason: "stop" }]),
+          createProviderStream([
+            { textDelta: "seed done", finishReason: "stop" },
+          ]),
         );
       },
       isAbortError(error: unknown): boolean {
@@ -216,9 +220,13 @@ describe("daemon global FIFO", () => {
         throw new Error("expected seeded session");
       }
 
-      const first = clientA.submitPromptAndWait("first blocking", { sessionId });
+      const first = clientA.submitPromptAndWait("first blocking", {
+        sessionId,
+      });
       await firstStarted.promise;
-      const second = clientB.submitPromptAndWait("second queued", { sessionId });
+      const second = clientB.submitPromptAndWait("second queued", {
+        sessionId,
+      });
       const beforeAbort = await Promise.race([
         secondStarted.promise.then(() => "started" as const),
         new Promise<"pending">((resolve) => {

@@ -219,12 +219,14 @@ export class WorkspacePromptScheduler {
     promptId: string,
     editLeaseId: string,
     text: string,
+    ownerClientId?: string,
   ): Promise<PromptSubmissionRecord> {
     this.assertOpen();
     const prompt = await this.options.store.commitEdit(
       promptId,
       editLeaseId,
       text,
+      ownerClientId,
     );
     this.options.onUpdated?.(prompt);
     this.requestDrain();
@@ -234,11 +236,13 @@ export class WorkspacePromptScheduler {
   async releaseEditLease(
     promptId: string,
     editLeaseId: string,
+    ownerClientId?: string,
   ): Promise<PromptSubmissionRecord> {
     this.assertOpen();
     const prompt = await this.options.store.releaseEditLease(
       promptId,
       editLeaseId,
+      ownerClientId,
     );
     this.options.onUpdated?.(prompt);
     this.requestDrain();
@@ -248,9 +252,14 @@ export class WorkspacePromptScheduler {
   async cancelQueued(
     promptId: string,
     editLeaseId?: string,
+    ownerClientId?: string,
   ): Promise<PromptSubmissionRecord> {
     this.assertOpen();
-    const prompt = await this.options.store.cancelQueued(promptId, editLeaseId);
+    const prompt = await this.options.store.cancelQueued(
+      promptId,
+      editLeaseId,
+      ownerClientId,
+    );
     this.options.onUpdated?.(prompt);
     this.resolveCompletion(prompt);
     this.requestDrain();

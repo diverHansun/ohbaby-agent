@@ -1042,11 +1042,11 @@ describe("createPersistentUiBackendClient", () => {
       });
 
       release.resolve(undefined);
-      await expect(client.waitForPrompt(receipt.promptId)).resolves.toMatchObject(
-        {
-          prompt: { promptId: receipt.promptId, status: "succeeded" },
-        },
-      );
+      await expect(
+        client.waitForPrompt(receipt.promptId),
+      ).resolves.toMatchObject({
+        prompt: { promptId: receipt.promptId, status: "succeeded" },
+      });
     } finally {
       release.resolve(undefined);
       await client.dispose();

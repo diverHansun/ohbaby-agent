@@ -107,17 +107,24 @@ describe("InMemoryPromptSubmissionStore", () => {
     await expect(
       store.releaseEditLease("prompt_1", "wrong_lease"),
     ).rejects.toBeInstanceOf(PromptEditLeaseLostError);
+    await expect(
+      store.renewEditLease("prompt_1", lease.editLeaseId, "client_2", 60),
+    ).rejects.toBeInstanceOf(PromptEditLeaseLostError);
+    await expect(
+      store.commitEdit("prompt_1", lease.editLeaseId, "stolen", "client_2"),
+    ).rejects.toBeInstanceOf(PromptEditLeaseLostError);
     const renewed = await store.renewEditLease(
       "prompt_1",
       lease.editLeaseId,
-      "client_2",
+      "client_1",
       60,
     );
-    expect(renewed.ownerClientId).toBe("client_2");
+    expect(renewed.ownerClientId).toBe("client_1");
     const edited = await store.commitEdit(
       "prompt_1",
       lease.editLeaseId,
       "after",
+      "client_1",
     );
     expect(edited).toMatchObject({ text: "after", editLeaseId: undefined });
 

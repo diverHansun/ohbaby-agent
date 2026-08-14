@@ -232,17 +232,33 @@ describe("DatabasePromptSubmissionStore", () => {
     await expect(
       store.releaseEditLease("prompt_idempotent", "wrong_lease"),
     ).rejects.toBeInstanceOf(PromptEditLeaseLostError);
+    await expect(
+      store.renewEditLease(
+        "prompt_idempotent",
+        lease.editLeaseId,
+        "client_2",
+        60,
+      ),
+    ).rejects.toBeInstanceOf(PromptEditLeaseLostError);
+    await expect(
+      store.releaseEditLease(
+        "prompt_idempotent",
+        lease.editLeaseId,
+        "client_2",
+      ),
+    ).rejects.toBeInstanceOf(PromptEditLeaseLostError);
     const renewed = await store.renewEditLease(
       "prompt_idempotent",
       lease.editLeaseId,
-      "client_2",
+      "client_1",
       60,
     );
-    expect(renewed.ownerClientId).toBe("client_2");
+    expect(renewed.ownerClientId).toBe("client_1");
     const edited = await store.commitEdit(
       "prompt_idempotent",
       lease.editLeaseId,
       "after",
+      "client_1",
     );
     expect(edited).toMatchObject({ text: "after", editLeaseId: undefined });
     const expiring = await store.acquireEditLease(

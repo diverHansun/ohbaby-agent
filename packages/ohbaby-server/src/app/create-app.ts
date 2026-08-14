@@ -26,6 +26,7 @@ import {
   createStructuredUiCommandRecorder,
   createUiCommandGateway,
   type StructuredUiCommandRecorder,
+  type UiPromptQueueExecutionPort,
 } from "ohbaby-agent";
 import { isAuthorizedDaemonRequest } from "../auth/token.js";
 import {
@@ -38,6 +39,9 @@ import { PermissionRouter } from "../coordination/permission-router.js";
 import {
   acquirePromptEditLeaseForClient,
   acceptDaemonPrompt,
+  cancelQueuedPromptForClient,
+  editQueuedPromptForClient,
+  releasePromptEditLeaseForClient,
   renewPromptEditLeaseForClient,
 } from "../coordination/prompt-backend.js";
 import {
@@ -75,7 +79,7 @@ interface SseClient {
 }
 
 export interface DaemonServerAppOptions {
-  readonly backend: UiBackendClient;
+  readonly backend: UiBackendClient & UiPromptQueueExecutionPort;
   readonly authToken?: string;
   readonly clientDisconnectRetentionMs?: number;
   readonly commandRecorder?: UiCommandRecorder | false;
@@ -769,7 +773,9 @@ class DaemonServerAppRuntime {
   readonly app = new Hono();
   private readonly clientDisconnectRetentionMs: number;
   private readonly commandRecorder: UiCommandRecorder;
-  private readonly structuredCommandRecorder: StructuredUiCommandRecorder | undefined;
+  private readonly structuredCommandRecorder:
+    | StructuredUiCommandRecorder
+    | undefined;
   private readonly clientViews = new DaemonClientViewCoordinator();
   private readonly clients = new Set<SseClient>();
   private readonly createSessionId: () => string;
@@ -787,6 +793,7 @@ class DaemonServerAppRuntime {
     Map<string, UiEvent>
   >();
   private readonly registeredWebClientIds = new Set<string>();
+  private readonly waitControllers = new Set<AbortController>();
   private started = false;
   private unsubscribe: UiUnsubscribe | undefined;
 
@@ -840,6 +847,8 @@ class DaemonServerAppRuntime {
   }
 
   async dispose(): Promise<void> {
+    for (const controller of this.waitControllers) controller.abort();
+    this.waitControllers.clear();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
 
@@ -863,13 +872,35 @@ class DaemonServerAppRuntime {
   private commandBackend(
     entryPoint: "server-rest" | "server-rpc",
     correlation: UiCommandCorrelation,
-  ): UiBackendClient {
+  ): UiBackendClient & UiPromptQueueExecutionPort {
     return createUiCommandGateway(this.options.backend, {
       correlation,
       entryPoint,
       onDiagnostic: reportCommandObservationFailure,
       recorder: this.commandRecorder,
     });
+  }
+
+  private async waitForPrompt(
+    backend: UiBackendClient,
+    promptId: string,
+    requestSignal: AbortSignal,
+  ): Promise<Awaited<ReturnType<UiBackendClient["waitForPrompt"]>>> {
+    const controller = new AbortController();
+    const abort = (): void => {
+      controller.abort();
+    };
+    if (requestSignal.aborted) controller.abort();
+    requestSignal.addEventListener("abort", abort, { once: true });
+    this.waitControllers.add(controller);
+    try {
+      return await backend.waitForPrompt(promptId, {
+        signal: controller.signal,
+      });
+    } finally {
+      requestSignal.removeEventListener("abort", abort);
+      this.waitControllers.delete(controller);
+    }
   }
 
   private mountRoutes(): void {
@@ -913,19 +944,32 @@ class DaemonServerAppRuntime {
       }
 
       try {
-        const result = await callDaemonBackend({
-          backend: this.commandBackend("server-rpc", {
-            clientId: parsed.request.clientId,
-            transportRequestId: parsed.request.id,
-          }),
-          clientViews: this.clientViews,
-          createSessionId: this.createSessionId,
-          permissionRouter: this.permissionRouter,
-          request: parsed.request,
-        });
-        return context.json(
-          createDaemonRpcSuccessResponse(parsed.request, result),
-        );
+        const controller = new AbortController();
+        const abort = (): void => {
+          controller.abort();
+        };
+        if (context.req.raw.signal.aborted) controller.abort();
+        context.req.raw.signal.addEventListener("abort", abort, { once: true });
+        this.waitControllers.add(controller);
+        try {
+          const result = await callDaemonBackend({
+            backend: this.commandBackend("server-rpc", {
+              clientId: parsed.request.clientId,
+              transportRequestId: parsed.request.id,
+            }),
+            clientViews: this.clientViews,
+            createSessionId: this.createSessionId,
+            permissionRouter: this.permissionRouter,
+            request: parsed.request,
+            signal: controller.signal,
+          });
+          return context.json(
+            createDaemonRpcSuccessResponse(parsed.request, result),
+          );
+        } finally {
+          context.req.raw.signal.removeEventListener("abort", abort);
+          this.waitControllers.delete(controller);
+        }
       } catch (error) {
         const status = isDaemonForbiddenError(error)
           ? 403
@@ -1453,13 +1497,17 @@ class DaemonServerAppRuntime {
             403,
           );
         }
-        const prompt = await this.commandBackend("server-rest", {
-          clientId: authorization.clientId,
-        }).editQueuedPrompt({
-          editLeaseId,
-          promptId: context.req.param("id"),
-          text,
-        } satisfies UiEditQueuedPromptInput);
+        const prompt = await editQueuedPromptForClient(
+          this.commandBackend("server-rest", {
+            clientId: authorization.clientId,
+          }),
+          {
+            editLeaseId,
+            promptId: context.req.param("id"),
+            text,
+          } satisfies UiEditQueuedPromptInput,
+          authorization.clientId,
+        );
         return context.json({ ok: true, prompt });
       } catch (error) {
         return context.json(
@@ -1488,9 +1536,11 @@ class DaemonServerAppRuntime {
             403,
           );
         }
-        const completion = await this.options.backend.waitForPrompt(promptId, {
-          signal: context.req.raw.signal,
-        });
+        const completion = await this.waitForPrompt(
+          this.options.backend,
+          promptId,
+          context.req.raw.signal,
+        );
         return context.json({ completion, ok: true });
       } catch (error) {
         return context.json(
@@ -1527,12 +1577,16 @@ class DaemonServerAppRuntime {
             403,
           );
         }
-        const prompt = await this.commandBackend("server-rest", {
-          clientId: authorization.clientId,
-        }).cancelQueuedPrompt({
-          ...(editLeaseId === undefined ? {} : { editLeaseId }),
-          promptId: context.req.param("id"),
-        } satisfies UiCancelQueuedPromptInput);
+        const prompt = await cancelQueuedPromptForClient(
+          this.commandBackend("server-rest", {
+            clientId: authorization.clientId,
+          }),
+          {
+            ...(editLeaseId === undefined ? {} : { editLeaseId }),
+            promptId: context.req.param("id"),
+          } satisfies UiCancelQueuedPromptInput,
+          authorization.clientId,
+        );
         return context.json({ ok: true, prompt });
       } catch (error) {
         return context.json(
@@ -1622,12 +1676,16 @@ class DaemonServerAppRuntime {
         return context.json(webErrorBody("editLeaseId is required"), 400);
       }
       try {
-        const prompt = await this.commandBackend("server-rest", {
-          clientId: authorization.clientId,
-        }).releasePromptEditLease({
-          editLeaseId,
-          promptId: context.req.param("id"),
-        } satisfies UiReleasePromptEditLeaseInput);
+        const prompt = await releasePromptEditLeaseForClient(
+          this.commandBackend("server-rest", {
+            clientId: authorization.clientId,
+          }),
+          {
+            editLeaseId,
+            promptId: context.req.param("id"),
+          } satisfies UiReleasePromptEditLeaseInput,
+          authorization.clientId,
+        );
         return context.json({ ok: true, prompt });
       } catch (error) {
         return context.json(

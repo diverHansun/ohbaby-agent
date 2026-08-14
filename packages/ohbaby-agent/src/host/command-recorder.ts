@@ -29,22 +29,20 @@ function defaultDiagnostic(error: unknown): void {
   );
 }
 
-class BoundedStructuredUiCommandRecorder
-  implements StructuredUiCommandRecorder
-{
+class BoundedStructuredUiCommandRecorder implements StructuredUiCommandRecorder {
   private readonly capacity: number;
   private readonly onDiagnostic: (error: unknown) => void;
   private readonly queue: UiCommandRecord[] = [];
-  private readonly sink: (
-    record: UiCommandRecord,
-  ) => Promise<void> | void;
+  private readonly sink: (record: UiCommandRecord) => Promise<void> | void;
   private flushPromise: Promise<void> | undefined;
   private flushScheduled = false;
 
   constructor(options: StructuredUiCommandRecorderOptions) {
     const capacity = options.capacity ?? DEFAULT_CAPACITY;
     if (!Number.isSafeInteger(capacity) || capacity < 1) {
-      throw new TypeError("UI command recorder capacity must be a positive integer");
+      throw new TypeError(
+        "UI command recorder capacity must be a positive integer",
+      );
     }
     this.capacity = capacity;
     this.onDiagnostic = options.onDiagnostic ?? defaultDiagnostic;

@@ -64,6 +64,9 @@ export async function listenToNodeServer(
           }
           resolve();
         });
+        // App disposal has already settled long-lived waiters and SSE streams.
+        // Do not let an HTTP keep-alive socket keep daemon shutdown pending.
+        startedServer.closeAllConnections();
       });
     },
     url: `http://${options.host}:${String(currentPort)}`,

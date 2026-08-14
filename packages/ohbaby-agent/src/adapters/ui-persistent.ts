@@ -65,8 +65,7 @@ export interface PersistentUiBackendOptions extends Omit<
 }
 
 export interface PersistentUiBackendClient
-  extends UiBackendClient,
-    UiPromptQueueExecutionPort {
+  extends UiBackendClient, UiPromptQueueExecutionPort {
   dispose(): Promise<void> | void;
 }
 
@@ -226,11 +225,25 @@ function withStartupRecovery(
       await ready();
       return client.editQueuedPrompt(input);
     },
+    async editQueuedPromptForOwner(
+      input,
+      trustedOwnerClientId,
+    ): ReturnType<UiPromptQueueExecutionPort["editQueuedPromptForOwner"]> {
+      await ready();
+      return client.editQueuedPromptForOwner(input, trustedOwnerClientId);
+    },
     async cancelQueuedPrompt(
       input,
     ): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {
       await ready();
       return client.cancelQueuedPrompt(input);
+    },
+    async cancelQueuedPromptForOwner(
+      input,
+      trustedOwnerClientId,
+    ): ReturnType<UiPromptQueueExecutionPort["cancelQueuedPromptForOwner"]> {
+      await ready();
+      return client.cancelQueuedPromptForOwner(input, trustedOwnerClientId);
     },
     async acquirePromptEditLease(
       input,
@@ -241,12 +254,11 @@ function withStartupRecovery(
     async acquirePromptEditLeaseForOwner(
       input,
       trustedOwnerClientId,
-    ): ReturnType<UiPromptQueueExecutionPort["acquirePromptEditLeaseForOwner"]> {
+    ): ReturnType<
+      UiPromptQueueExecutionPort["acquirePromptEditLeaseForOwner"]
+    > {
       await ready();
-      return client.acquirePromptEditLeaseForOwner(
-        input,
-        trustedOwnerClientId,
-      );
+      return client.acquirePromptEditLeaseForOwner(input, trustedOwnerClientId);
     },
     async renewPromptEditLease(
       input,
@@ -266,6 +278,15 @@ function withStartupRecovery(
     ): ReturnType<UiBackendClient["releasePromptEditLease"]> {
       await ready();
       return client.releasePromptEditLease(input);
+    },
+    async releasePromptEditLeaseForOwner(
+      input,
+      trustedOwnerClientId,
+    ): ReturnType<
+      UiPromptQueueExecutionPort["releasePromptEditLeaseForOwner"]
+    > {
+      await ready();
+      return client.releasePromptEditLeaseForOwner(input, trustedOwnerClientId);
     },
     async waitForPrompt(
       promptId,

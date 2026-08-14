@@ -1,7 +1,6 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { UiBackendClient } from "ohbaby-sdk";
 import type {
   WorkspaceRegistryEntry,
   WorkspaceRegistryStore,
@@ -27,7 +26,7 @@ function createBackend(dispose = vi.fn()): WorkspaceBackend {
       }),
     ),
     subscribeEvents: vi.fn(() => vi.fn()),
-  } as unknown as UiBackendClient & { dispose(): void };
+  } as unknown as WorkspaceBackend;
 }
 
 function createRegistry(
@@ -224,9 +223,7 @@ describe("global daemon workspace routing", () => {
         method: "POST",
       });
       expect(unicode.status).toBe(200);
-      expect(createWorkspaceBackend).toHaveBeenCalledWith(
-        canonicalUnicodeRepo,
-      );
+      expect(createWorkspaceBackend).toHaveBeenCalledWith(canonicalUnicodeRepo);
 
       const malformed = await fetch(`${server.url}/v1/clients`, {
         body: JSON.stringify({ clientId: "malformed_client" }),
@@ -532,7 +529,6 @@ describe("global daemon workspace routing", () => {
     } finally {
       await nonLoopback.stop();
     }
-
   });
 
   it("reports active SSE connections with their workspace scope", async () => {

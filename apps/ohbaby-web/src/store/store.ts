@@ -4,11 +4,7 @@ import {
   replaceSnapshot,
 } from "../api/daemon/eventReducer.js";
 import type { ConnectionState, StoreSnapshot } from "../api/daemon/wire.js";
-import type {
-  UiCurrentModelConfig,
-  UiEvent,
-  UiSnapshot,
-} from "ohbaby-sdk";
+import type { UiCurrentModelConfig, UiEvent, UiSnapshot } from "ohbaby-sdk";
 
 export type StoreListener = () => void;
 export type UiEventSource = "incremental" | "snapshot-barrier";

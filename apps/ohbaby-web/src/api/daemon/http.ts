@@ -29,10 +29,7 @@ import type {
   WorkspaceOpenResponse,
 } from "./wire.js";
 import { workspaceDirectoryHeaders } from "ohbaby-sdk";
-import type {
-  UiInteractionResponse,
-  UiSlashCommandSurface,
-} from "ohbaby-sdk";
+import type { UiInteractionResponse, UiSlashCommandSurface } from "ohbaby-sdk";
 
 export interface DaemonHttpClientOptions {
   readonly baseUrl: string;
@@ -74,9 +71,12 @@ export class DaemonHttpClient {
     this.token = options.token;
   }
 
-  registerClient(input: {
-    readonly startupIntent?: WebStartupIntent;
-  }): Promise<RegisterClientResponse> {
+  registerClient(
+    input: {
+      readonly startupIntent?: WebStartupIntent;
+    },
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<RegisterClientResponse> {
     return this.request("/v1/clients", {
       body: {
         clientId: this.clientId,
@@ -85,17 +85,20 @@ export class DaemonHttpClient {
           : { startupIntent: input.startupIntent }),
       },
       method: "POST",
+      signal: options.signal,
     });
   }
 
-  getSnapshot(): Promise<SnapshotResponse> {
-    return this.request("/v1/snapshot");
+  getSnapshot(
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<SnapshotResponse> {
+    return this.request("/v1/snapshot", { signal: options.signal });
   }
 
-  listCommands(surface: UiSlashCommandSurface): Promise<CommandCatalogResponse> {
-    return this.request(
-      `/v1/commands?surface=${encodeURIComponent(surface)}`,
-    );
+  listCommands(
+    surface: UiSlashCommandSurface,
+  ): Promise<CommandCatalogResponse> {
+    return this.request(`/v1/commands?surface=${encodeURIComponent(surface)}`);
   }
 
   listWorkspaceScopes(): Promise<WorkspaceScopesResponse> {
@@ -257,8 +260,10 @@ export class DaemonHttpClient {
     });
   }
 
-  getCurrentModel(): Promise<CurrentModelResponse> {
-    return this.request("/v1/model");
+  getCurrentModel(
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<CurrentModelResponse> {
+    return this.request("/v1/model", { signal: options.signal });
   }
 
   probeModelContextWindow(

@@ -319,6 +319,41 @@ class FakeBackend implements UiBackendClient {
     return Promise.reject(new Error("No queued prompt in fake backend"));
   }
 
+  editQueuedPromptForOwner(
+    input: Parameters<UiBackendClient["editQueuedPrompt"]>[0],
+    _trustedOwnerClientId: string,
+  ): ReturnType<UiBackendClient["editQueuedPrompt"]> {
+    return this.editQueuedPrompt(input);
+  }
+
+  cancelQueuedPromptForOwner(
+    input: Parameters<UiBackendClient["cancelQueuedPrompt"]>[0],
+    _trustedOwnerClientId: string,
+  ): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {
+    return this.cancelQueuedPrompt(input);
+  }
+
+  acquirePromptEditLeaseForOwner(
+    input: Parameters<UiBackendClient["acquirePromptEditLease"]>[0],
+    _trustedOwnerClientId: string,
+  ): ReturnType<UiBackendClient["acquirePromptEditLease"]> {
+    return this.acquirePromptEditLease(input);
+  }
+
+  renewPromptEditLeaseForOwner(
+    input: Parameters<UiBackendClient["renewPromptEditLease"]>[0],
+    _trustedOwnerClientId: string,
+  ): ReturnType<UiBackendClient["renewPromptEditLease"]> {
+    return this.renewPromptEditLease(input);
+  }
+
+  releasePromptEditLeaseForOwner(
+    input: Parameters<UiBackendClient["releasePromptEditLease"]>[0],
+    _trustedOwnerClientId: string,
+  ): ReturnType<UiBackendClient["releasePromptEditLease"]> {
+    return this.releasePromptEditLease(input);
+  }
+
   compactSession(
     options?: Parameters<UiBackendClient["compactSession"]>[0],
   ): ReturnType<UiBackendClient["compactSession"]> {
@@ -406,16 +441,14 @@ class FakeBackend implements UiBackendClient {
   }
 }
 
-class DurablePromptFakeBackend
-  extends FakeBackend
-  implements UiBackendClient
-{
+class DurablePromptFakeBackend extends FakeBackend implements UiBackendClient {
   private prompt: UiPromptSubmission | undefined;
   private completedPrompt: UiCompletedPromptSubmission | undefined;
   private resolveCompletion:
     | ((completion: UiPromptCompletion) => void)
     | undefined;
   lastWaitSignal: AbortSignal | undefined;
+  readonly trustedQueueOwners: string[] = [];
   waitAbortObserved = false;
 
   override submitPromptAccepted(
@@ -560,20 +593,22 @@ class DurablePromptFakeBackend
     });
   }
 
-  acquirePromptEditLeaseForOwner(
+  override acquirePromptEditLeaseForOwner(
     input: Parameters<UiBackendClient["acquirePromptEditLease"]>[0],
     trustedOwnerClientId: string,
   ): ReturnType<UiBackendClient["acquirePromptEditLease"]> {
+    this.trustedQueueOwners.push(trustedOwnerClientId);
     return this.acquirePromptEditLease(input).then((lease) => ({
       ...lease,
       ownerClientId: trustedOwnerClientId,
     }));
   }
 
-  renewPromptEditLeaseForOwner(
+  override renewPromptEditLeaseForOwner(
     input: Parameters<UiBackendClient["renewPromptEditLease"]>[0],
     trustedOwnerClientId: string,
   ): ReturnType<UiBackendClient["renewPromptEditLease"]> {
+    this.trustedQueueOwners.push(trustedOwnerClientId);
     return this.renewPromptEditLease(input).then((lease) => ({
       ...lease,
       ownerClientId: trustedOwnerClientId,
@@ -587,6 +622,30 @@ class DurablePromptFakeBackend
       return Promise.reject(new Error("prompt not found"));
     }
     return Promise.resolve(this.prompt);
+  }
+
+  override editQueuedPromptForOwner(
+    input: Parameters<UiBackendClient["editQueuedPrompt"]>[0],
+    trustedOwnerClientId: string,
+  ): ReturnType<UiBackendClient["editQueuedPrompt"]> {
+    this.trustedQueueOwners.push(trustedOwnerClientId);
+    return this.editQueuedPrompt(input);
+  }
+
+  override cancelQueuedPromptForOwner(
+    input: Parameters<UiBackendClient["cancelQueuedPrompt"]>[0],
+    trustedOwnerClientId: string,
+  ): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {
+    this.trustedQueueOwners.push(trustedOwnerClientId);
+    return this.cancelQueuedPrompt(input);
+  }
+
+  override releasePromptEditLeaseForOwner(
+    input: Parameters<UiBackendClient["releasePromptEditLease"]>[0],
+    trustedOwnerClientId: string,
+  ): ReturnType<UiBackendClient["releasePromptEditLease"]> {
+    this.trustedQueueOwners.push(trustedOwnerClientId);
+    return this.releasePromptEditLease(input);
   }
 
   override waitForPrompt(
@@ -2827,7 +2886,10 @@ describe("createDaemonServerApp", () => {
       const renewed = await handle.app.request(
         "/v1/prompts/prompt_1/edit-lease",
         {
-          body: JSON.stringify({ editLeaseId: "lease_1" }),
+          body: JSON.stringify({
+            editLeaseId: "lease_1",
+            ownerClientId: "spoofed_client",
+          }),
           headers,
           method: "PATCH",
         },
@@ -2836,7 +2898,10 @@ describe("createDaemonServerApp", () => {
       const released = await handle.app.request(
         "/v1/prompts/prompt_1/edit-lease",
         {
-          body: JSON.stringify({ editLeaseId: "lease_1" }),
+          body: JSON.stringify({
+            editLeaseId: "lease_1",
+            ownerClientId: "spoofed_client",
+          }),
           headers,
           method: "DELETE",
         },
@@ -2851,6 +2916,7 @@ describe("createDaemonServerApp", () => {
       const edited = await handle.app.request("/v1/prompts/prompt_1", {
         body: JSON.stringify({
           editLeaseId: "lease_1",
+          ownerClientId: "spoofed_client",
           text: "edited",
         }),
         headers,
@@ -2863,7 +2929,7 @@ describe("createDaemonServerApp", () => {
       });
 
       const cancelled = await handle.app.request("/v1/prompts/prompt_1", {
-        body: JSON.stringify({}),
+        body: JSON.stringify({ ownerClientId: "spoofed_client" }),
         headers,
         method: "DELETE",
       });
@@ -2872,6 +2938,9 @@ describe("createDaemonServerApp", () => {
         ok: true,
         prompt: { status: "cancelled", text: "edited" },
       });
+      expect(backend.trustedQueueOwners).toEqual(
+        Array.from({ length: 6 }, () => "client_web"),
+      );
     } finally {
       await handle.dispose();
     }
@@ -2983,69 +3052,67 @@ describe("createDaemonServerApp", () => {
     }
   });
 
-  it.each([
-    "succeeded",
-    "failed",
-    "cancelled",
-    "interrupted",
-  ] as const)("returns %s from the registered REST prompt wait route", async (status) => {
-    const backend = new DurablePromptFakeBackend();
-    const handle = createApp(backend);
-    await handle.start();
-    const headers = {
-      ...authHeaders(),
-      "content-type": "application/json",
-      "x-ohbaby-client-id": "client_web",
-    };
-    try {
-      await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
-        headers,
-        method: "POST",
-      });
-      const accepted = await handle.app.request("/v1/prompts", {
-        body: JSON.stringify({
-          clientRequestId: "request_1",
-          sessionId: "session_1",
-          text: "hello",
-        }),
-        headers,
-        method: "POST",
-      });
-      expect(accepted.status).toBe(202);
-      backend.complete(status);
-
-      const response = await handle.app.request(
-        "/v1/prompts/prompt_1/completion",
-        { headers },
-      );
-
-      expect(response.status).toBe(200);
-      const body = (await response.json()) as {
-        readonly completion: UiPromptCompletion;
-        readonly ok: true;
+  it.each(["succeeded", "failed", "cancelled", "interrupted"] as const)(
+    "returns %s from the registered REST prompt wait route",
+    async (status) => {
+      const backend = new DurablePromptFakeBackend();
+      const handle = createApp(backend);
+      await handle.start();
+      const headers = {
+        ...authHeaders(),
+        "content-type": "application/json",
+        "x-ohbaby-client-id": "client_web",
       };
-      expect(body.ok).toBe(true);
-      expect(body.completion.prompt).toMatchObject({
-        endedAt: "2026-06-12T00:00:02.000Z",
-        status,
-      });
-      if (
-        body.completion.prompt.status === "failed" ||
-        body.completion.prompt.status === "interrupted"
-      ) {
-        expect(body.completion.prompt.error.code).toBe(
-          body.completion.prompt.status === "failed"
-            ? "PROVIDER_FAILED"
-            : "PROCESS_INTERRUPTED",
+      try {
+        await handle.app.request("/v1/clients", {
+          body: JSON.stringify({ clientId: "client_web" }),
+          headers,
+          method: "POST",
+        });
+        const accepted = await handle.app.request("/v1/prompts", {
+          body: JSON.stringify({
+            clientRequestId: "request_1",
+            sessionId: "session_1",
+            text: "hello",
+          }),
+          headers,
+          method: "POST",
+        });
+        expect(accepted.status).toBe(202);
+        backend.complete(status);
+
+        const response = await handle.app.request(
+          "/v1/prompts/prompt_1/completion",
+          { headers },
         );
-      } else {
-        expect(body.completion.prompt.error).toBeUndefined();
+
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as {
+          readonly completion: UiPromptCompletion;
+          readonly ok: true;
+        };
+        expect(body.ok).toBe(true);
+        expect(body.completion.prompt).toMatchObject({
+          endedAt: "2026-06-12T00:00:02.000Z",
+          status,
+        });
+        if (
+          body.completion.prompt.status === "failed" ||
+          body.completion.prompt.status === "interrupted"
+        ) {
+          expect(body.completion.prompt.error.code).toBe(
+            body.completion.prompt.status === "failed"
+              ? "PROVIDER_FAILED"
+              : "PROCESS_INTERRUPTED",
+          );
+        } else {
+          expect(body.completion.prompt.error).toBeUndefined();
+        }
+      } finally {
+        await handle.dispose();
       }
-    } finally {
-      await handle.dispose();
-    }
-  });
+    },
+  );
 
   it("rejects unknown and foreign REST prompt waits without revealing ownership", async () => {
     const backend = new DurablePromptFakeBackend();
@@ -3144,6 +3211,58 @@ describe("createDaemonServerApp", () => {
         completion: { prompt: { status: "succeeded" } },
         ok: true,
       });
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("forwards JSON-RPC transport cancellation only to the prompt waiter", async () => {
+    const backend = new DurablePromptFakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    const headers = {
+      ...authHeaders(),
+      "content-type": "application/json",
+      "x-ohbaby-client-id": "client_web",
+    };
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers,
+        method: "POST",
+      });
+      await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({
+          clientRequestId: "request_1",
+          sessionId: "session_1",
+          text: "hello",
+        }),
+        headers,
+        method: "POST",
+      });
+
+      const controller = new AbortController();
+      const waiting = handle.app.request(
+        new Request("http://localhost/api/rpc", {
+          body: JSON.stringify({
+            clientId: "client_web",
+            id: "rpc_wait",
+            method: "waitForPrompt",
+            params: ["prompt_1"],
+          }),
+          headers,
+          method: "POST",
+          signal: controller.signal,
+        }),
+      );
+      await vi.waitUntil(() => backend.lastWaitSignal !== undefined);
+      controller.abort();
+      await waiting;
+
+      expect(backend.waitAbortObserved).toBe(true);
+      expect((await backend.getSnapshot()).prompts).toMatchObject([
+        { promptId: "prompt_1", status: "queued" },
+      ]);
     } finally {
       await handle.dispose();
     }

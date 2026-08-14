@@ -156,7 +156,8 @@ describe("TUI main chain with real in-process backend", () => {
     app.stdin.write("\u0003");
     const abortedFrame = await waitForFrame(
       app,
-      (frame) => frame.includes("Interrupted") && !frame.includes("Permission:"),
+      (frame) =>
+        frame.includes("Interrupted") && !frame.includes("Permission:"),
     );
     expect(abortedFrame).toContain("Interrupted");
     expect(abortedFrame).not.toContain("error: run aborted");

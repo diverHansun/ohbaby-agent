@@ -2272,7 +2272,9 @@ describe("createInProcessUiBackendClient", () => {
       events.push(event);
     });
 
-    await client.submitPromptAndWait("fresh prompt", { sessionId: "session_1" });
+    await client.submitPromptAndWait("fresh prompt", {
+      sessionId: "session_1",
+    });
 
     expect(requests).toHaveLength(2);
     const mainRequestText = JSON.stringify(requests[1]?.messages);
@@ -3458,7 +3460,9 @@ describe("createInProcessUiBackendClient", () => {
       subagentInstanceStore: subagentStore,
     });
 
-    const run = client.submitPromptAndWait("Open background work and keep reasoning");
+    const run = client.submitPromptAndWait(
+      "Open background work and keep reasoning",
+    );
     const childSignal = await withTimeout(
       childStarted.promise,
       1_000,
@@ -3852,7 +3856,9 @@ describe("createInProcessUiBackendClient", () => {
       ).toBe(true);
       expect(requests).toHaveLength(1);
 
-      await client.submitPromptAndWait("Can I continue?", { sessionId: "session_1" });
+      await client.submitPromptAndWait("Can I continue?", {
+        sessionId: "session_1",
+      });
 
       snapshot = await client.getSnapshot();
       expect(snapshot.status).toEqual({ kind: "idle" });
@@ -4125,7 +4131,9 @@ describe("createInProcessUiBackendClient", () => {
       llmClient: createRejectingLLMClient(new Error("stream exploded")),
     });
 
-    await expect(client.submitPromptAndWait("Say hello")).resolves.toMatchObject({
+    await expect(
+      client.submitPromptAndWait("Say hello"),
+    ).resolves.toMatchObject({
       prompt: {
         error: {
           code: "RUNTIME_ERROR",
@@ -4155,7 +4163,9 @@ describe("createInProcessUiBackendClient", () => {
       events.push(event);
     });
 
-    await expect(client.submitPromptAndWait("Say hello")).resolves.toMatchObject({
+    await expect(
+      client.submitPromptAndWait("Say hello"),
+    ).resolves.toMatchObject({
       prompt: {
         error: {
           code: "RUNTIME_ERROR",
@@ -4243,7 +4253,9 @@ describe("createInProcessUiBackendClient", () => {
       ]),
     });
 
-    await client.submitPromptAndWait("Continue here", { sessionId: "session_2" });
+    await client.submitPromptAndWait("Continue here", {
+      sessionId: "session_2",
+    });
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.activeSessionId).toBe("session_2");
@@ -4407,7 +4419,9 @@ describe("createInProcessUiBackendClient", () => {
       ]),
     });
 
-    await client.submitPromptAndWait("Custom session", { sessionId: "session_1" });
+    await client.submitPromptAndWait("Custom session", {
+      sessionId: "session_1",
+    });
     await client.submitPromptAndWait("Automatic session");
 
     const snapshot = await client.getSnapshot();
@@ -4627,9 +4641,12 @@ describe("createInProcessUiBackendClient", () => {
       sessionManager,
     });
 
-    await client.submitPromptAndWait("This first message must not rename manually", {
-      sessionId: "session_1",
-    });
+    await client.submitPromptAndWait(
+      "This first message must not rename manually",
+      {
+        sessionId: "session_1",
+      },
+    );
 
     await expect(sessionManager.get("session_1")).resolves.toMatchObject({
       title: "Manual empty title",
@@ -7711,9 +7728,9 @@ describe("createInProcessUiBackendClient", () => {
         }),
       });
 
-      await expect(client.submitPromptAndWait("Should fail clearly")).rejects.toThrow(
-        /requires injected sessionManager and messageManager/i,
-      );
+      await expect(
+        client.submitPromptAndWait("Should fail clearly"),
+      ).rejects.toThrow(/requires injected sessionManager and messageManager/i);
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

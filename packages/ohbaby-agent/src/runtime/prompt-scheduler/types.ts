@@ -99,14 +99,17 @@ export interface PromptSubmissionStore {
     promptId: string,
     editLeaseId: string,
     text: string,
+    ownerClientId?: string,
   ): Promise<PromptSubmissionRecord>;
   releaseEditLease(
     promptId: string,
     editLeaseId: string,
+    ownerClientId?: string,
   ): Promise<PromptSubmissionRecord>;
   cancelQueued(
     promptId: string,
     editLeaseId?: string,
+    ownerClientId?: string,
   ): Promise<PromptSubmissionRecord>;
   claim(promptId: string): Promise<PromptSubmissionRecord | null>;
   requeueBusy(promptId: string): Promise<PromptSubmissionRecord>;

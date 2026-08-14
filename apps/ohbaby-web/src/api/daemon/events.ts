@@ -138,6 +138,9 @@ export class FetchDaemonEventStream implements DaemonEventStream {
         }
       },
     }).finally(() => {
+      // Closing while the first request is still opening must also settle
+      // start(); otherwise a caller waiting for connect() can hang forever.
+      resolveReady();
       if (this.abortController === controller) {
         this.abortController = undefined;
       }
@@ -275,8 +278,15 @@ export class FetchDaemonEventStream implements DaemonEventStream {
       callbacks.onConnectionState?.("live");
       ready.resolve();
     }
+    const id = frame.id?.trim();
+    const parsedId =
+      id === undefined || id.length === 0 ? undefined : Number(id);
     await callbacks.onEvent?.({
-      ...(frame.id === undefined ? {} : { id: Number(frame.id) }),
+      ...(parsedId === undefined ||
+      !Number.isSafeInteger(parsedId) ||
+      parsedId < 0
+        ? {}
+        : { id: parsedId }),
       payload: event,
     });
   }

@@ -5,7 +5,6 @@ import {
   workspaceDirectoryHeaders,
 } from "ohbaby-sdk";
 import type {
-  CoreAPI,
   SDKAPI,
   UiBackendClient,
   UiEvent,
@@ -551,101 +550,7 @@ export function createRemoteCoreApiHost(
         return client.subscribeEvents(handler);
       },
     },
-    core: {
-      acquirePromptEditLease(
-        input,
-      ): ReturnType<CoreAPI["acquirePromptEditLease"]> {
-        return client.acquirePromptEditLease(input);
-      },
-      abortRun(runId): ReturnType<CoreAPI["abortRun"]> {
-        return client.abortRun(runId);
-      },
-      compactSession(compactOptions): ReturnType<CoreAPI["compactSession"]> {
-        return client.compactSession(compactOptions);
-      },
-      archiveSession(input): ReturnType<CoreAPI["archiveSession"]> {
-        return client.archiveSession(input);
-      },
-      cancelQueuedPrompt(
-        input,
-      ): ReturnType<CoreAPI["cancelQueuedPrompt"]> {
-        return client.cancelQueuedPrompt(input);
-      },
-      probeModelContextWindow(
-        input,
-      ): ReturnType<CoreAPI["probeModelContextWindow"]> {
-        return client.probeModelContextWindow(input);
-      },
-      connectModel(input): ReturnType<CoreAPI["connectModel"]> {
-        return client.connectModel(input);
-      },
-      setSearchApiKey(input): ReturnType<CoreAPI["setSearchApiKey"]> {
-        return client.setSearchApiKey(input);
-      },
-      setPermission(input): ReturnType<CoreAPI["setPermission"]> {
-        return client.setPermission(input);
-      },
-      executeCommand(invocation): ReturnType<CoreAPI["executeCommand"]> {
-        return client.executeCommand(invocation);
-      },
-      editQueuedPrompt(input): ReturnType<CoreAPI["editQueuedPrompt"]> {
-        return client.editQueuedPrompt(input);
-      },
-      getSnapshot(): ReturnType<CoreAPI["getSnapshot"]> {
-        return client.getSnapshot();
-      },
-      getContextWindowUsage(
-        input,
-      ): ReturnType<CoreAPI["getContextWindowUsage"]> {
-        return client.getContextWindowUsage(input);
-      },
-      getCurrentModel(): ReturnType<CoreAPI["getCurrentModel"]> {
-        return client.getCurrentModel();
-      },
-      listCommands(query): ReturnType<CoreAPI["listCommands"]> {
-        return client.listCommands(query);
-      },
-      respondInteraction(
-        interactionId,
-        response,
-      ): ReturnType<CoreAPI["respondInteraction"]> {
-        return client.respondInteraction(interactionId, response);
-      },
-      respondPermission(
-        requestId,
-        response,
-      ): ReturnType<CoreAPI["respondPermission"]> {
-        return client.respondPermission(requestId, response);
-      },
-      releasePromptEditLease(
-        input,
-      ): ReturnType<CoreAPI["releasePromptEditLease"]> {
-        return client.releasePromptEditLease(input);
-      },
-      renewPromptEditLease(
-        input,
-      ): ReturnType<CoreAPI["renewPromptEditLease"]> {
-        return client.renewPromptEditLease(input);
-      },
-      submitPromptAccepted(
-        text,
-        submitOptions,
-      ): ReturnType<CoreAPI["submitPromptAccepted"]> {
-        return client.submitPromptAccepted(text, submitOptions);
-      },
-      submitPromptAndWait(
-        text,
-        submitOptions,
-      ): ReturnType<CoreAPI["submitPromptAndWait"]> {
-        return client.submitPromptAndWait(text, submitOptions);
-      },
-      waitForPrompt(
-        promptId,
-        waitOptions,
-      ): ReturnType<CoreAPI["waitForPrompt"]> {
-        return client.waitForPrompt(promptId, waitOptions);
-      },
-    },
+    core: client,
     dispose(): Promise<void> {
       return client.dispose();
     },

@@ -43,19 +43,17 @@ function completedPrompt(
 }
 
 describe("prompt completion contract", () => {
-  it.each([
-    "succeeded",
-    "failed",
-    "cancelled",
-    "interrupted",
-  ] as const)("represents %s as a completed prompt", (status) => {
-    const prompt = completedPrompt(status);
+  it.each(["succeeded", "failed", "cancelled", "interrupted"] as const)(
+    "represents %s as a completed prompt",
+    (status) => {
+      const prompt = completedPrompt(status);
 
-    expect(prompt.status).toBe(status);
-    expect(prompt.endedAt).toBe("2026-08-14T00:00:02.000Z");
-    expect("answer" in prompt).toBe(false);
-    expect("messages" in prompt).toBe(false);
-  });
+      expect(prompt.status).toBe(status);
+      expect(prompt.endedAt).toBe("2026-08-14T00:00:02.000Z");
+      expect("answer" in prompt).toBe(false);
+      expect("messages" in prompt).toBe(false);
+    },
+  );
 
   it("composes accepted and wait without turning a failed outcome into a rejection", async () => {
     const receipt: UiPromptReceipt = {

@@ -167,13 +167,8 @@ export function createRPC<API extends object>(): {
     }
 
     const work = (async (): Promise<unknown> => {
-      const clonedArgs = [
-        ...(await cloneAcrossBoundary(extracted.args)),
-      ];
-      if (
-        signal !== undefined &&
-        extracted.nestedOptionsIndex !== undefined
-      ) {
+      const clonedArgs = [...(await cloneAcrossBoundary(extracted.args))];
+      if (signal !== undefined && extracted.nestedOptionsIndex !== undefined) {
         const clonedOptions = clonedArgs[extracted.nestedOptionsIndex];
         clonedArgs[extracted.nestedOptionsIndex] = {
           ...(isRecord(clonedOptions) ? clonedOptions : {}),

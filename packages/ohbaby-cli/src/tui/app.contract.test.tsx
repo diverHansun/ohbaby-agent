@@ -1257,7 +1257,9 @@ describe("OhbabyTerminalApp", () => {
   it("clears submitted prompts immediately and surfaces concurrent submit errors", async () => {
     const client = createFakeClient(snapshot());
     client.submitPromptAccepted
-      .mockImplementationOnce(() => new Promise<UiPromptReceipt>(() => undefined))
+      .mockImplementationOnce(
+        () => new Promise<UiPromptReceipt>(() => undefined),
+      )
       .mockRejectedValueOnce(new Error("A prompt is already running"));
     const app = render(
       <OhbabyTerminalApp

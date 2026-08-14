@@ -600,7 +600,8 @@ describe("OhbabyWebApp slash command interactions", () => {
           prompts: [
             {
               clientRequestId:
-                fake.submitPromptAccepted.mock.calls[0]?.[1]?.clientRequestId ?? "",
+                fake.submitPromptAccepted.mock.calls[0]?.[1]?.clientRequestId ??
+                "",
               createdAt: timestamp,
               promptId: "prompt_pending",
               scopeKey: "/repo-a",
@@ -1853,15 +1854,16 @@ function createFakeRuntime(input: {
     ],
     selectedDirectory: "/repo-a",
   } as const;
-  const submitPromptAccepted = vi.fn<UiBackendClient["submitPromptAccepted"]>(() =>
-    Promise.resolve({
-      clientRequestId: "request_1",
-      createdAt: "2026-07-12T00:00:00.000Z",
-      promptId: "prompt_1",
-      sessionId: "session_1",
-      status: "queued",
-      userMessageId: "message_1",
-    }),
+  const submitPromptAccepted = vi.fn<UiBackendClient["submitPromptAccepted"]>(
+    () =>
+      Promise.resolve({
+        clientRequestId: "request_1",
+        createdAt: "2026-07-12T00:00:00.000Z",
+        promptId: "prompt_1",
+        sessionId: "session_1",
+        status: "queued",
+        userMessageId: "message_1",
+      }),
   );
   const client: UiBackendClient = {
     abortRun: vi.fn(() => Promise.resolve()),

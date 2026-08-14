@@ -284,7 +284,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
   ): Promise<PromptEditLease> {
     return this.transaction((db) => {
       const current = this.requireFrom(db, promptId);
-      this.assertLease(current, editLeaseId);
+      this.assertLease(current, editLeaseId, ownerClientId);
       const expiresAt = this.now() + ttlMs;
       const result = db
         .prepare(
@@ -292,7 +292,8 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
            SET edit_lease_owner_id = ?, edit_lease_expires_at = ?,
                updated_at = ?
            WHERE prompt_id = ? AND status = 'queued'
-             AND edit_lease_id = ? AND edit_lease_expires_at > ?`,
+             AND edit_lease_id = ? AND edit_lease_owner_id = ?
+             AND edit_lease_expires_at > ?`,
         )
         .run(
           ownerClientId,
@@ -300,6 +301,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
           this.nextTime(current),
           promptId,
           editLeaseId,
+          ownerClientId,
           this.now(),
         );
       if (result.changes !== 1) {
@@ -318,47 +320,77 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
     promptId: string,
     editLeaseId: string,
     text: string,
+    ownerClientId?: string,
   ): Promise<PromptSubmissionRecord> {
-    return this.updateWithLease(promptId, editLeaseId, (db, current) => {
-      const result = db
-        .prepare(
-          `UPDATE ${this.tableName}
+    return this.updateWithLease(
+      promptId,
+      editLeaseId,
+      ownerClientId,
+      (db, current) => {
+        const result = db
+          .prepare(
+            `UPDATE ${this.tableName}
            SET text = ?, edit_lease_id = NULL,
                edit_lease_owner_id = NULL, edit_lease_expires_at = NULL,
                updated_at = ?
            WHERE prompt_id = ? AND status = 'queued'
-             AND edit_lease_id = ? AND edit_lease_expires_at > ?`,
-        )
-        .run(text, this.nextTime(current), promptId, editLeaseId, this.now());
-      if (result.changes !== 1) {
-        throw new PromptEditLeaseLostError(promptId);
-      }
-    });
+             AND edit_lease_id = ? AND edit_lease_expires_at > ?
+             AND (? IS NULL OR edit_lease_owner_id = ?)`,
+          )
+          .run(
+            text,
+            this.nextTime(current),
+            promptId,
+            editLeaseId,
+            this.now(),
+            ownerClientId ?? null,
+            ownerClientId ?? null,
+          );
+        if (result.changes !== 1) {
+          throw new PromptEditLeaseLostError(promptId);
+        }
+      },
+    );
   }
 
   async releaseEditLease(
     promptId: string,
     editLeaseId: string,
+    ownerClientId?: string,
   ): Promise<PromptSubmissionRecord> {
-    return this.updateWithLease(promptId, editLeaseId, (db, current) => {
-      const result = db
-        .prepare(
-          `UPDATE ${this.tableName}
+    return this.updateWithLease(
+      promptId,
+      editLeaseId,
+      ownerClientId,
+      (db, current) => {
+        const result = db
+          .prepare(
+            `UPDATE ${this.tableName}
            SET edit_lease_id = NULL, edit_lease_owner_id = NULL,
                edit_lease_expires_at = NULL, updated_at = ?
            WHERE prompt_id = ? AND status = 'queued'
-             AND edit_lease_id = ? AND edit_lease_expires_at > ?`,
-        )
-        .run(this.nextTime(current), promptId, editLeaseId, this.now());
-      if (result.changes !== 1) {
-        throw new PromptEditLeaseLostError(promptId);
-      }
-    });
+             AND edit_lease_id = ? AND edit_lease_expires_at > ?
+             AND (? IS NULL OR edit_lease_owner_id = ?)`,
+          )
+          .run(
+            this.nextTime(current),
+            promptId,
+            editLeaseId,
+            this.now(),
+            ownerClientId ?? null,
+            ownerClientId ?? null,
+          );
+        if (result.changes !== 1) {
+          throw new PromptEditLeaseLostError(promptId);
+        }
+      },
+    );
   }
 
   async cancelQueued(
     promptId: string,
     editLeaseId?: string,
+    ownerClientId?: string,
   ): Promise<PromptSubmissionRecord> {
     return this.transaction((db) => {
       const current = this.requireFrom(db, promptId);
@@ -368,7 +400,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         if (editLeaseId === undefined) {
           throw new PromptEditLeaseHeldError(promptId);
         }
-        this.assertLease(current, editLeaseId);
+        this.assertLease(current, editLeaseId, ownerClientId);
       }
       const at = this.nextTime(current);
       const result = db
@@ -379,9 +411,18 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
                edit_lease_expires_at = NULL
            WHERE prompt_id = ? AND status = 'queued'
              AND (edit_lease_id IS NULL OR edit_lease_expires_at <= ?
-                  OR edit_lease_id = ?)`,
+                  OR (edit_lease_id = ?
+                      AND (? IS NULL OR edit_lease_owner_id = ?)))`,
         )
-        .run(at, at, promptId, now, editLeaseId ?? null);
+        .run(
+          at,
+          at,
+          promptId,
+          now,
+          editLeaseId ?? null,
+          ownerClientId ?? null,
+          ownerClientId ?? null,
+        );
       if (result.changes !== 1) {
         throw new PromptEditLeaseLostError(promptId);
       }
@@ -671,10 +712,13 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
   private assertLease(
     record: PromptSubmissionRecord,
     editLeaseId: string,
+    ownerClientId?: string,
   ): void {
     this.assertQueued(record);
     if (
       record.editLeaseId !== editLeaseId ||
+      (ownerClientId !== undefined &&
+        record.editLeaseOwnerId !== ownerClientId) ||
       (record.editLeaseExpiresAt ?? 0) <= this.now()
     ) {
       throw new PromptEditLeaseLostError(record.promptId);
@@ -684,11 +728,12 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
   private updateWithLease(
     promptId: string,
     editLeaseId: string,
+    ownerClientId: string | undefined,
     update: (db: DatabaseConnection, current: PromptSubmissionRecord) => void,
   ): PromptSubmissionRecord {
     return this.transaction((db) => {
       const current = this.requireFrom(db, promptId);
-      this.assertLease(current, editLeaseId);
+      this.assertLease(current, editLeaseId, ownerClientId);
       update(db, current);
       return this.requireFrom(db, promptId);
     });

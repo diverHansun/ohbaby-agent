@@ -12,7 +12,6 @@ import type {
   UiPromptCompletion,
   UiSubmitPromptAndWaitOptions,
 } from "ohbaby-sdk";
-import type { UiPromptQueueExecutionPort } from "../adapters/ui-inprocess.js";
 
 export interface UiCommandGatewayOptions {
   readonly entryPoint: UiCommandEntryPoint;
@@ -23,8 +22,9 @@ export interface UiCommandGatewayOptions {
   readonly onDiagnostic?: (diagnostic: UiCommandObservationDiagnostic) => void;
 }
 
-export type RecordedUiBackendClient = UiBackendClient &
-  Partial<UiPromptQueueExecutionPort>;
+export type RecordedUiBackendClient<
+  TClient extends UiBackendClient = UiBackendClient,
+> = TClient;
 
 const RECORDED_METHODS = new Set<UiCommandMethod>([
   "submitPromptAccepted",
@@ -45,8 +45,11 @@ const RECORDED_METHODS = new Set<UiCommandMethod>([
 ]);
 
 const TRUSTED_QUEUE_METHODS = new Map<PropertyKey, UiCommandMethod>([
+  ["editQueuedPromptForOwner", "editQueuedPrompt"],
+  ["cancelQueuedPromptForOwner", "cancelQueuedPrompt"],
   ["acquirePromptEditLeaseForOwner", "acquirePromptEditLease"],
   ["renewPromptEditLeaseForOwner", "renewPromptEditLease"],
+  ["releasePromptEditLeaseForOwner", "releasePromptEditLease"],
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -147,11 +150,11 @@ function returnedCorrelation(result: unknown): UiCommandCorrelation {
   };
 }
 
-export function createUiCommandGateway(
-  client: UiBackendClient,
+export function createUiCommandGateway<TClient extends UiBackendClient>(
+  client: TClient,
   options: UiCommandGatewayOptions,
-): RecordedUiBackendClient {
-  const handler: ProxyHandler<UiBackendClient> = {
+): RecordedUiBackendClient<TClient> {
+  const handler: ProxyHandler<TClient> = {
     get(target, property, receiver): unknown {
       if (property === "submitPromptAndWait") {
         return (
@@ -202,6 +205,6 @@ export function createUiCommandGateway(
       };
     },
   };
-  const gateway: RecordedUiBackendClient = new Proxy(client, handler);
+  const gateway: RecordedUiBackendClient<TClient> = new Proxy(client, handler);
   return gateway;
 }

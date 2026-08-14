@@ -297,9 +297,7 @@ class FakeBackend implements UiBackendClient {
     return Promise.reject(new Error("No queued prompt in fake backend"));
   }
 
-  renewPromptEditLease(): ReturnType<
-    UiBackendClient["renewPromptEditLease"]
-  > {
+  renewPromptEditLease(): ReturnType<UiBackendClient["renewPromptEditLease"]> {
     return Promise.reject(new Error("No queued prompt in fake backend"));
   }
 
@@ -307,6 +305,36 @@ class FakeBackend implements UiBackendClient {
     UiBackendClient["releasePromptEditLease"]
   > {
     return Promise.reject(new Error("No queued prompt in fake backend"));
+  }
+
+  editQueuedPromptForOwner(
+    _input: Parameters<UiBackendClient["editQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["editQueuedPrompt"]> {
+    return this.editQueuedPrompt();
+  }
+
+  cancelQueuedPromptForOwner(
+    _input: Parameters<UiBackendClient["cancelQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {
+    return this.cancelQueuedPrompt();
+  }
+
+  acquirePromptEditLeaseForOwner(
+    _input: Parameters<UiBackendClient["acquirePromptEditLease"]>[0],
+  ): ReturnType<UiBackendClient["acquirePromptEditLease"]> {
+    return this.acquirePromptEditLease();
+  }
+
+  renewPromptEditLeaseForOwner(
+    _input: Parameters<UiBackendClient["renewPromptEditLease"]>[0],
+  ): ReturnType<UiBackendClient["renewPromptEditLease"]> {
+    return this.renewPromptEditLease();
+  }
+
+  releasePromptEditLeaseForOwner(
+    _input: Parameters<UiBackendClient["releasePromptEditLease"]>[0],
+  ): ReturnType<UiBackendClient["releasePromptEditLease"]> {
+    return this.releasePromptEditLease();
   }
 
   compactSession(

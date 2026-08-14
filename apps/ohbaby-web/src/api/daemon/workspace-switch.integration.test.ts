@@ -4,6 +4,14 @@ import { createOhbabyWebRuntime } from "./client.js";
 
 const encoder = new TextEncoder();
 
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > 1_000) throw new Error("Timed out");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 function directoryFromBody(body: BodyInit | null | undefined): string {
   if (typeof body !== "string") {
     throw new Error("Expected a JSON string body");
@@ -47,6 +55,207 @@ function emptySnapshot(title: string): UiSnapshot {
 }
 
 describe("ohbaby web workspace switching", () => {
+  it("does not open SSE after disposal wins a pending client registration", async () => {
+    let registrationStarted = false;
+    let releaseRegistration: (() => void) | undefined;
+    const registration = new Promise<void>((resolve) => {
+      releaseRegistration = resolve;
+    });
+    let sseOpened = 0;
+    const fetchImpl: typeof fetch = async (input, init = {}) => {
+      const request = new Request(input, init);
+      if (request.url.endsWith("/v1/scopes")) {
+        return Response.json({
+          ok: true,
+          scopes: [
+            {
+              available: true,
+              directory: "/repo-a",
+              lastOpenedAt: 1,
+              loaded: true,
+              position: 0,
+            },
+          ],
+        });
+      }
+      if (request.url.endsWith("/v1/clients")) {
+        registrationStarted = true;
+        await Promise.race([
+          registration,
+          new Promise<never>((_resolve, reject) => {
+            const abort = (): void => {
+              reject(new DOMException("registration aborted", "AbortError"));
+            };
+            if (request.signal.aborted) abort();
+            else
+              request.signal.addEventListener("abort", abort, { once: true });
+          }),
+        ]);
+        return Response.json({ ok: true });
+      }
+      if (request.url.endsWith("/v1/events")) {
+        sseOpened += 1;
+        return new Response(new ReadableStream<Uint8Array>(), {
+          headers: { "content-type": "text/event-stream" },
+        });
+      }
+      throw new Error(`Unexpected request: ${request.url}`);
+    };
+    const runtime = createOhbabyWebRuntime(
+      {
+        baseUrl: "http://127.0.0.1:4096",
+        clientId: "client-a",
+        directory: "/repo-a",
+        token: "token",
+      },
+      { fetch: fetchImpl },
+    );
+
+    await waitFor(() => registrationStarted);
+    await runtime.dispose();
+    await runtime.ready;
+
+    expect(sseOpened).toBe(0);
+    expect(runtime.client).toBeNull();
+    expect(runtime.store.getSnapshot().connectionState).toBe("disconnected");
+    releaseRegistration?.();
+  });
+
+  it("ignores a delayed resync from the previous workspace generation", async () => {
+    let oldResyncStarted = false;
+    let resolveOldResync: ((response: Response) => void) | undefined;
+    const oldResync = new Promise<Response>((resolve) => {
+      resolveOldResync = resolve;
+    });
+    let repoASnapshots = 0;
+    const fetchImpl: typeof fetch = (input, init = {}) => {
+      const request = new Request(input, init);
+      const directory = request.headers.has("x-ohbaby-directory")
+        ? directoryFromScopeHeader(request)
+        : undefined;
+      if (request.url.endsWith("/v1/scopes")) {
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            scopes: [
+              {
+                available: true,
+                directory: "/repo-a",
+                lastOpenedAt: 2,
+                loaded: true,
+                position: 0,
+              },
+              {
+                available: true,
+                directory: "/repo-b",
+                lastOpenedAt: 1,
+                loaded: true,
+                position: 1,
+              },
+            ],
+          }),
+        );
+      }
+      if (request.url.endsWith("/v1/scopes/open")) {
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            scope: {
+              available: true,
+              directory: directoryFromBody(init.body),
+              lastOpenedAt: 3,
+              loaded: true,
+              position: 0,
+            },
+          }),
+        );
+      }
+      if (request.url.endsWith("/v1/clients")) {
+        return Promise.resolve(Response.json({ ok: true }));
+      }
+      if (request.url.endsWith("/v1/events")) {
+        return Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller): void {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({ clientId: "client-a", type: "hello" })}\n\n`,
+                  ),
+                );
+                request.signal.addEventListener(
+                  "abort",
+                  (): void => {
+                    controller.close();
+                  },
+                  { once: true },
+                );
+              },
+            }),
+            { headers: { "content-type": "text/event-stream" } },
+          ),
+        );
+      }
+      if (request.url.endsWith("/v1/snapshot")) {
+        if (directory === "/repo-a") {
+          repoASnapshots += 1;
+          if (repoASnapshots === 2) {
+            oldResyncStarted = true;
+            return oldResync;
+          }
+          return Promise.resolve(
+            Response.json({
+              ok: true,
+              seqNum: 0,
+              snapshot: emptySnapshot("A"),
+            }),
+          );
+        }
+        return Promise.resolve(
+          Response.json({ ok: true, seqNum: 0, snapshot: emptySnapshot("B") }),
+        );
+      }
+      if (request.url.endsWith("/v1/model")) {
+        return Promise.resolve(Response.json({ model: null, ok: true }));
+      }
+      if (
+        request.url.includes("/v1/sessions/") &&
+        request.url.endsWith("/select")
+      ) {
+        return Promise.resolve(Response.json({ ok: true }));
+      }
+      throw new Error(`Unexpected request: ${request.url}`);
+    };
+    const runtime = createOhbabyWebRuntime(
+      {
+        baseUrl: "http://127.0.0.1:4096",
+        clientId: "client-a",
+        directory: "/repo-a",
+        token: "token",
+      },
+      { fetch: fetchImpl },
+    );
+    await runtime.ready;
+
+    const selecting = runtime.selectSession("session-A");
+    await waitFor(() => oldResyncStarted);
+    await runtime.switchWorkspace("/repo-b");
+    resolveOldResync?.(
+      Response.json({
+        ok: true,
+        seqNum: 99,
+        snapshot: emptySnapshot("STALE-A"),
+      }),
+    );
+    await selecting;
+
+    expect(runtime.getWorkspaceSnapshot().selectedDirectory).toBe("/repo-b");
+    expect(runtime.store.getSnapshot().view.snapshot?.sessions[0]?.title).toBe(
+      "B",
+    );
+    await runtime.dispose();
+  });
+
   it("represents an empty workspace selection with a null client", async () => {
     const fetchImpl: typeof fetch = (input) => {
       const request = new Request(input);

@@ -132,8 +132,7 @@ export interface UiPromptQueueCommandClient {
 }
 
 export interface UiCommandClient
-  extends UiPromptCommandClient,
-    UiPromptQueueCommandClient {
+  extends UiPromptCommandClient, UiPromptQueueCommandClient {
   compactSession(
     options?: UiCompactSessionOptions,
   ): Promise<UiCompactSessionResult>;

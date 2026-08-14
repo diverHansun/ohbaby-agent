@@ -490,6 +490,10 @@ describe("ohbaby-web daemon client", () => {
       "timed out waiting for catalog update event",
     );
     expect(delivered).toEqual(["command.catalog.updated"]);
+    await client.listCommands({ surface: "web" });
+    const catalogRequestsAfterCommittedRefresh = requests.filter((request) =>
+      request.url.endsWith("/v1/commands?surface=web"),
+    ).length;
     sseController?.enqueue(
       sseFrame(
         {
@@ -506,9 +510,12 @@ describe("ohbaby-web daemon client", () => {
     );
     await delay(20);
     expect(delivered).toEqual(["command.catalog.updated"]);
-    const catalogRequestsBeforeRefresh = requests.filter((request) =>
-      request.url.endsWith("/v1/commands?surface=web"),
-    ).length;
+    await client.listCommands({ surface: "web" });
+    expect(
+      requests.filter((request) =>
+        request.url.endsWith("/v1/commands?surface=web"),
+      ),
+    ).toHaveLength(catalogRequestsAfterCommittedRefresh);
     await runtime.executeSlashCommand({
       sessionId: "session_1",
       text: "/skills",
@@ -517,7 +524,7 @@ describe("ohbaby-web daemon client", () => {
       requests.filter((request) =>
         request.url.endsWith("/v1/commands?surface=web"),
       ),
-    ).toHaveLength(catalogRequestsBeforeRefresh + 1);
+    ).toHaveLength(catalogRequestsAfterCommittedRefresh);
     const skillsBody = JSON.parse(requests.at(-1)?.body ?? "{}") as Record<
       string,
       unknown
@@ -789,6 +796,181 @@ describe("ohbaby-web daemon client", () => {
     expect(eventRequestHeaders[1]?.get("last-event-id")).toBe("0");
     firstSseController?.close();
     secondSseController?.close();
+    await runtime.dispose();
+  });
+
+  it("replays buffered SSE events when an imperative snapshot resync fails", async () => {
+    let sseController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let catalogRequests = 0;
+    let failModelRefresh = false;
+    let snapshotRequests = 0;
+    let resolveFailedSnapshot: ((response: Response) => void) | undefined;
+    const failedSnapshot = new Promise<Response>((resolve) => {
+      resolveFailedSnapshot = resolve;
+    });
+    const fetchImpl: typeof fetch = (input) => {
+      const url = urlFromRequestInput(input);
+      if (url.endsWith("/v1/scopes")) {
+        return Promise.resolve(Response.json({}, { status: 404 }));
+      }
+      if (url.endsWith("/v1/clients")) {
+        return Promise.resolve(Response.json({ ok: true }));
+      }
+      if (url.endsWith("/v1/events")) {
+        return Promise.resolve(
+          new Response(
+            createSseStream((controller) => {
+              sseController = controller;
+              controller.enqueue(
+                sseFrame({ clientId: "client_web", type: "hello" }),
+              );
+            }),
+            { headers: { "content-type": "text/event-stream" } },
+          ),
+        );
+      }
+      if (url.endsWith("/v1/snapshot")) {
+        snapshotRequests += 1;
+        if (snapshotRequests === 2) return failedSnapshot;
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            seqNum: 0,
+            snapshot: {
+              activeSessionId: "session_1",
+              permission: {
+                level: "default",
+                mode: "auto",
+                sessionRules: [],
+              },
+              permissions: [],
+              runs: [],
+              sessions: [
+                {
+                  createdAt: "2026-06-12T00:00:00.000Z",
+                  id: "session_1",
+                  messages: [],
+                  title: "before",
+                  updatedAt: "2026-06-12T00:00:00.000Z",
+                },
+              ],
+              status: { kind: "idle" },
+            },
+          }),
+        );
+      }
+      if (url.endsWith("/v1/model")) {
+        if (failModelRefresh) {
+          failModelRefresh = false;
+          return Promise.resolve(
+            Response.json(
+              { error: { message: "model failed" } },
+              { status: 500 },
+            ),
+          );
+        }
+        return Promise.resolve(Response.json({ model: null, ok: true }));
+      }
+      if (url.endsWith("/v1/commands?surface=web")) {
+        catalogRequests += 1;
+        return Promise.resolve(
+          Response.json({
+            catalog: { commands: [], version: `v${String(catalogRequests)}` },
+            ok: true,
+          }),
+        );
+      }
+      if (url.endsWith("/v1/sessions/session_1/select")) {
+        return Promise.resolve(Response.json({ ok: true }));
+      }
+      return Promise.resolve(Response.json({}, { status: 404 }));
+    };
+    const runtime = createOhbabyWebRuntime(
+      {
+        baseUrl: "http://127.0.0.1:4096",
+        clientId: "client_web",
+        directory: "/repo",
+        token: "token_1",
+      },
+      { fetch: fetchImpl },
+    );
+    await runtime.ready;
+    const client = runtime.client;
+    if (!client) throw new Error("Expected active client");
+    await expect(
+      client.listCommands({ surface: "web" }),
+    ).resolves.toMatchObject({ version: "v1" });
+
+    const selecting = runtime.selectSession("session_1");
+    await waitFor(() => snapshotRequests === 2, "snapshot did not start");
+    sseController?.enqueue(
+      sseFrame(
+        {
+          event: {
+            reason: "buffered",
+            timestamp: Date.parse("2026-06-12T00:00:01.000Z"),
+            type: "command.catalog.updated",
+            version: "v2",
+          },
+          type: "ui.event",
+        },
+        1,
+      ),
+    );
+    sseController?.enqueue(
+      sseFrame(
+        {
+          event: {
+            session: {
+              createdAt: "2026-06-12T00:00:00.000Z",
+              id: "session_1",
+              messages: [],
+              title: "buffered",
+              updatedAt: "2026-06-12T00:00:01.000Z",
+            },
+            type: "session.updated",
+          },
+          type: "ui.event",
+        },
+        2,
+      ),
+    );
+    resolveFailedSnapshot?.(
+      Response.json({ error: { message: "snapshot failed" } }, { status: 500 }),
+    );
+    await expect(selecting).rejects.toThrow("snapshot failed");
+    sseController?.enqueue(
+      sseFrame(
+        {
+          event: { status: { kind: "idle" }, type: "runtime.updated" },
+          type: "ui.event",
+        },
+        3,
+      ),
+    );
+    await waitFor(
+      () => runtime.store.getSnapshot().view.lastAppliedSeqNum === 3,
+      "events did not resume",
+    );
+    await expect(
+      client.listCommands({ surface: "web" }),
+    ).resolves.toMatchObject({ version: "v2" });
+
+    expect(runtime.store.getSnapshot()).toMatchObject({
+      connectionState: "live",
+      view: {
+        commandCatalogVersion: "v2",
+        lastAppliedSeqNum: 3,
+        snapshot: { sessions: [{ id: "session_1", title: "buffered" }] },
+      },
+    });
+    expect(catalogRequests).toBe(2);
+    failModelRefresh = true;
+    await expect(runtime.selectSession("session_1")).rejects.toThrow(
+      "model failed",
+    );
+    expect(runtime.store.getSnapshot().connectionState).toBe("live");
+    sseController?.close();
     await runtime.dispose();
   });
 

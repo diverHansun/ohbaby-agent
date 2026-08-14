@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { UiCommandRecord } from "ohbaby-sdk";
 import { createStructuredUiCommandRecorder } from "./command-recorder.js";
 
-function record(operationId: string, phase: "started" | "completed"): UiCommandRecord {
+function record(
+  operationId: string,
+  phase: "started" | "completed",
+): UiCommandRecord {
   const base = {
     correlation: {},
     entryPoint: "agent-host" as const,
@@ -30,18 +33,16 @@ describe("createStructuredUiCommandRecorder", () => {
     recorder.record(record("operation_1", "completed"));
     await recorder.flush();
 
-    expect(delivered).toEqual([
-      "operation_1:started",
-      "operation_1:completed",
-    ]);
+    expect(delivered).toEqual(["operation_1:started", "operation_1:completed"]);
   });
 
   it("rejects synchronously when its bounded intake is full", () => {
     const recorder = createStructuredUiCommandRecorder({
       capacity: 1,
-      sink: () => new Promise<void>(() => {
-        // Intentionally never settles to exercise the bounded intake.
-      }),
+      sink: () =>
+        new Promise<void>(() => {
+          // Intentionally never settles to exercise the bounded intake.
+        }),
     });
 
     recorder.record(record("operation_1", "started"));

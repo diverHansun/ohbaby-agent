@@ -6,6 +6,10 @@ import type {
   UiPromptEditLease,
   UiPromptReceipt,
   UiRenewPromptEditLeaseInput,
+  UiEditQueuedPromptInput,
+  UiCancelQueuedPromptInput,
+  UiReleasePromptEditLeaseInput,
+  UiPromptSubmission,
 } from "ohbaby-sdk";
 import type { UiPromptQueueExecutionPort } from "ohbaby-agent";
 import type { DaemonClientViewCoordinator } from "./client-view.js";
@@ -18,36 +22,44 @@ export interface DaemonPromptItem {
   readonly options?: SubmitPromptOptions;
 }
 
-function trustedQueueExecutionPort(
-  backend: UiBackendClient,
-): UiPromptQueueExecutionPort | undefined {
-  const candidate = backend as Partial<UiPromptQueueExecutionPort>;
-  return typeof candidate.acquirePromptEditLeaseForOwner === "function" &&
-    typeof candidate.renewPromptEditLeaseForOwner === "function"
-    ? (candidate as UiPromptQueueExecutionPort)
-    : undefined;
-}
-
 export function acquirePromptEditLeaseForClient(
-  backend: UiBackendClient,
+  backend: UiBackendClient & UiPromptQueueExecutionPort,
   input: UiAcquirePromptEditLeaseInput,
   trustedClientId: string,
 ): Promise<UiPromptEditLease> {
-  const executionPort = trustedQueueExecutionPort(backend);
-  return executionPort
-    ? executionPort.acquirePromptEditLeaseForOwner(input, trustedClientId)
-    : backend.acquirePromptEditLease(input);
+  return backend.acquirePromptEditLeaseForOwner(input, trustedClientId);
 }
 
 export function renewPromptEditLeaseForClient(
-  backend: UiBackendClient,
+  backend: UiBackendClient & UiPromptQueueExecutionPort,
   input: UiRenewPromptEditLeaseInput,
   trustedClientId: string,
 ): Promise<UiPromptEditLease> {
-  const executionPort = trustedQueueExecutionPort(backend);
-  return executionPort
-    ? executionPort.renewPromptEditLeaseForOwner(input, trustedClientId)
-    : backend.renewPromptEditLease(input);
+  return backend.renewPromptEditLeaseForOwner(input, trustedClientId);
+}
+
+export function editQueuedPromptForClient(
+  backend: UiBackendClient & UiPromptQueueExecutionPort,
+  input: UiEditQueuedPromptInput,
+  trustedClientId: string,
+): Promise<UiPromptSubmission> {
+  return backend.editQueuedPromptForOwner(input, trustedClientId);
+}
+
+export function cancelQueuedPromptForClient(
+  backend: UiBackendClient & UiPromptQueueExecutionPort,
+  input: UiCancelQueuedPromptInput,
+  trustedClientId: string,
+): Promise<UiPromptSubmission> {
+  return backend.cancelQueuedPromptForOwner(input, trustedClientId);
+}
+
+export function releasePromptEditLeaseForClient(
+  backend: UiBackendClient & UiPromptQueueExecutionPort,
+  input: UiReleasePromptEditLeaseInput,
+  trustedClientId: string,
+): Promise<UiPromptSubmission> {
+  return backend.releasePromptEditLeaseForOwner(input, trustedClientId);
 }
 
 export interface AcceptedDaemonPrompt {

@@ -7,6 +7,7 @@ import type {
   UiReleasePromptEditLeaseInput,
   UiRenewPromptEditLeaseInput,
 } from "ohbaby-sdk";
+import type { UiPromptQueueExecutionPort } from "ohbaby-agent";
 import {
   DaemonForbiddenError,
   isDaemonForbiddenError,
@@ -18,6 +19,9 @@ import { PermissionRouter } from "../../coordination/permission-router.js";
 import {
   acquirePromptEditLeaseForClient,
   acceptDaemonPrompt,
+  cancelQueuedPromptForClient,
+  editQueuedPromptForClient,
+  releasePromptEditLeaseForClient,
   renewPromptEditLeaseForClient,
 } from "../../coordination/prompt-backend.js";
 import {
@@ -108,11 +112,12 @@ export function parseDaemonRpcBody(body: string): {
 }
 
 export async function callDaemonBackend(input: {
-  readonly backend: UiBackendClient;
+  readonly backend: UiBackendClient & UiPromptQueueExecutionPort;
   readonly clientViews: DaemonClientViewCoordinator;
   readonly createSessionId: () => string;
   readonly permissionRouter: PermissionRouter;
   readonly request: DaemonRpcRequest;
+  readonly signal?: AbortSignal;
 }): Promise<unknown> {
   const { backend, clientViews, createSessionId, permissionRouter, request } =
     input;
@@ -167,7 +172,7 @@ export async function callDaemonBackend(input: {
       ) {
         throw new DaemonForbiddenError("Prompt belongs to another session");
       }
-      return backend.editQueuedPrompt(input);
+      return editQueuedPromptForClient(backend, input, request.clientId);
     }
     case "cancelQueuedPrompt": {
       const input = request.params[0] as UiCancelQueuedPromptInput;
@@ -180,7 +185,7 @@ export async function callDaemonBackend(input: {
       ) {
         throw new DaemonForbiddenError("Prompt belongs to another session");
       }
-      return backend.cancelQueuedPrompt(input);
+      return cancelQueuedPromptForClient(backend, input, request.clientId);
     }
     case "acquirePromptEditLease": {
       const input = request.params[0] as UiAcquirePromptEditLeaseInput;
@@ -193,11 +198,7 @@ export async function callDaemonBackend(input: {
       ) {
         throw new DaemonForbiddenError("Prompt belongs to another session");
       }
-      return acquirePromptEditLeaseForClient(
-        backend,
-        input,
-        request.clientId,
-      );
+      return acquirePromptEditLeaseForClient(backend, input, request.clientId);
     }
     case "renewPromptEditLease": {
       const input = request.params[0] as UiRenewPromptEditLeaseInput;
@@ -205,7 +206,7 @@ export async function callDaemonBackend(input: {
     }
     case "releasePromptEditLease": {
       const input = request.params[0] as UiReleasePromptEditLeaseInput;
-      return backend.releasePromptEditLease(input);
+      return releasePromptEditLeaseForClient(backend, input, request.clientId);
     }
     case "waitForPrompt": {
       const promptId = request.params[0] as string;
@@ -218,7 +219,9 @@ export async function callDaemonBackend(input: {
       ) {
         throw new DaemonForbiddenError("Prompt belongs to another session");
       }
-      return backend.waitForPrompt(promptId);
+      return backend.waitForPrompt(promptId, {
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      });
     }
     case "compactSession":
       return backend.compactSession(
