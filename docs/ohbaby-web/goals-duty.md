@@ -30,7 +30,7 @@
 
 ## Duties（职责）
 
-- **D1 浏览器 daemon 客户端**：对 daemon 讲 `/v1` REST + SSE（fetch-stream），含 `Last-Event-ID` 续传与 `resync-required` 处理。
+- **D1 浏览器 daemon 客户端**：一个 `BrowserDaemonClient` 直接实现 SDK `UiBackendClient`，对 daemon 讲 `/v1` REST + 一条逻辑 SSE（fetch-stream），含 `Last-Event-ID` 续传与 `resync-required` 处理。
 - **D2 事件投影**：把 `UiEvent` 投影为 UI 视图状态（消息流 / run 状态机 / 待审批队列 / 连接态）。
 - **D3 会话交互 UI（v0.1.6 闭环）**：snapshot 首屏、流式消息、发 prompt、权限审批（准/拒，模态 slide-up）、中断 run，以及 composer 的 **mode 切换（auto/plan）** 与 **权限策略切换（default / full-access）**。视图层详细设计见 [`ui/`](./ui/README.md)。
 - **D4 引导接入与 selected scope 传递**：从 daemon 注入的 `window.__OHBABY__` 读取 `token / clientId / baseUrl / directory`；URL fragment 可覆盖初始 selected directory。所有 workspace HTTP/SSE 请求显式发送 `x-ohbaby-directory`，不得依赖 server cwd/query fallback。
@@ -45,7 +45,7 @@
 - **ND1 不伺服自身静态资源**：由 `ohbaby-server` 的 webAssets 路由负责（依赖 S-B）。
 - **ND2 不生成/存储/轮换 auth token**：由 daemon 负责；web 只读注入副本、仅存内存（依赖 S-C）。
 - **ND3 不重定义领域语义/业务规则**：会话真相在 `ohbaby-agent` backend；web 只投影 + adapter。
-- **ND4 不定义 `/v1` wire 契约**：契约真相在 server 的 OpenAPI（`/doc`）+ `ohbaby-sdk` 领域类型；web 消费（生成 typed client）。
+- **ND4 不重定义业务合同**：契约真相在 `ohbaby-sdk`；Web 只在私有 `wire/http` 层描述 `/v1` wrapper，再投影成 SDK DTO。当前不额外建设 OpenAPI 生成 client。
 - **ND5 v0.1.6 不做**：完整模型 provider marketplace、大量自动建议、interaction 请求、分页/高级命令面板。v0.1.7 已完成全局面板 runtime 与 OpenCode 风格项目 rail、按需 session sidebar、持久项目管理；实现记录见 [`../problem-lists/2026-07-11-opencode-style-web-navigation/`](../problem-lists/2026-07-11-opencode-style-web-navigation/README.md)。
 - **ND6 不做远程/多用户鉴权、不直连 LAN**：同源本地优先，延续 server 的 N4。
 - **ND7 不为想象中的 app 提前抽共享包**：`api/daemon` 内置于本包；保持干净 seam 即可，YAGNI。

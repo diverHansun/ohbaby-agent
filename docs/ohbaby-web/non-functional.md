@@ -19,7 +19,7 @@
 - 同源、localhost 优先；不引入会显著增重的依赖。
 - 单次 SSE 增量渲染不得阻塞输入框交互（发话/中断随时可点）。
 - reconnect 退避有上界，不得无限紧循环空转。
-- 构建依赖 server 的 `openapi.json`（生成 `wire.ts`）——构建期接线，不在运行时引入对 server 源码的依赖。
+- 构建不依赖 OpenAPI 生成物。业务合同由 `UiBackendClient` 类型检查，内部 `wire.ts` 只描述手写 REST wrapper；Server 的 `/doc` 仅供信息查看。
 
 ---
 

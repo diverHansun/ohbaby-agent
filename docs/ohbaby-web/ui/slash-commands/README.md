@@ -26,7 +26,7 @@
 ## 2. Catalog Contract
 
 - UI 不硬编码可执行命令集合。
-- `OhbabyWebClient.listCommands()` 返回 `UiWebCommandCatalog`，其中每个命令带 `executionKind` 与 `action`。
+- `OhbabyWebRuntime.listWebCommands()` 通过当前 `UiBackendClient.listCommands({surface:"web"})` 返回 `UiWebCommandCatalog`，其中每个命令带 `executionKind` 与 `action`。
 - 浏览器执行前仍调用 `resolveSlashCommand(catalog, parseSlashCommandInput(text), { surface: "tui" })`。
 - server 仍在 `POST /v1/commands` 再次用同一 SDK helper 校验 passthrough invocation。
 - overlay 命令不进入 passthrough allowlist，手写 `POST /v1/commands` 必须被拒绝。
@@ -59,7 +59,7 @@
 - `PageDown` / `PageUp` 按固定步长跳选，并在首尾 clamp。
 - `Tab` 用当前选中命令补全为完整路径文本，不立即执行。
 - `Enter` 执行当前选中候选；若没有候选，则按普通 slash 解析失败处理，保留草稿并显示错误。
-- 已打开面板收到 `command.catalog.updated` 后重新调用 `OhbabyWebClient.listCommands()`，使用 client 层被事件失效后的最新目录。
+- 已打开面板收到 `command.catalog.updated` 后重新调用 `OhbabyWebRuntime.listWebCommands()`；底层 `BrowserDaemonClient` 已清空 catalog cache，仍复用同一 SSE 数据流。
 
 ---
 

@@ -14,8 +14,8 @@
 |------|------|
 | `hono` | app + 路由 + 中间件 |
 | `@hono/node-server` | `ohbaby serve` 监听（Node 适配） |
-| `@hono/zod-openapi` | zod 路由 + OpenAPI 生成（见 [`02`](./02-web-api-surface.md)） |
-| `zod` | schema 校验（若 workspace 已有则复用版本） |
+| `@hono/zod-openapi` | 未采用；当前不为内部 Browser client 建 OpenAPI 生成链 |
+| `zod` | 未因本 surface 新增；当前 route 使用显式校验 |
 
 > 守 G2：这些依赖**只进 `ohbaby-server`**，绝不进 `ohbaby-agent`。默认 CLI 直连路径不引入它们（ADR-001）。
 
@@ -47,10 +47,10 @@
 - sdk 增 `ConnectionState` + remote client 重连感知。
 - 门：replay 单测（窗内补发 / 窗外 resync）；断线重连集成测试。
 
-### M5 · CORS + web REST/SSE + OpenAPI（解 S2，铺 web/app）
+### M5 · CORS + web REST/SSE（已落地；OpenAPI 未采用）
 - `middleware/cors.ts`（仅挂 web 路由）。
-- `protocols/web/routes.ts` + `schemas.ts`（[`02`](./02-web-api-surface.md)），**复用 client-view + event-bus**。
-- `@hono/zod-openapi` + `/doc`。
+- Hono app 中的 `/v1` routes **复用 client-view + event-bus**，业务 DTO 对齐 SDK。
+- 没有引入 `@hono/zod-openapi` 或生成 client；`GET /doc` 是手写信息性 OpenAPI 3.1。Browser client 直接实现 SDK 合同。
 - 门：web 路由契约测试；跨 transport 等价测试（[`05`](./05-consumption-path-unification.md) §3.1）作为漂移回归门；CORS 预检测试。
 
 ### M6 · 多项目 runtime + 用户级 pid/state + serve ps（反多后端）

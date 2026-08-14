@@ -22,16 +22,16 @@
 ## 2. Main Flow Description（主流程描述）
 
 ### UC1 启动会话并渲染首屏
-1. `bootstrap.ts` 读 `window.__OHBABY__` → 构造 `client`。
+1. `bootstrap.ts` 读 `window.__OHBABY__` → 构造 `OhbabyWebRuntime`；runtime 为 selected workspace 建立唯一 `BrowserDaemonClient`。
 2. `POST /v1/clients`（startup intent）→ clientId。
 3. **先开** SSE 并缓冲事件 → 收 `hello` → `connecting`。
 4. `GET /v1/snapshot`（含 seqNum 基线）→ 投影初始 ViewState。
 5. 应用缓冲中 seq>基线 的事件 → `live`。
 
 ### UC2 发话并接收流式回复
-1. 用户在 Composer 输入 → `POST /v1/sessions/:id/prompt` → `202`。
+1. 用户在 Composer 输入 → `runtime.client.submitPromptAccepted(...)` → `POST /v1/prompts` → `202` + receipt；UI 不等待模型完成。
 2. SSE 推 `message.part.delta` → 累积成 StreamingMessage（流式渲染）。
-3. `message.updated` 定稿 → 并入消息序列；`run.updated` 收束 runStatus。
+3. `message.updated` 定稿 → 并入消息序列；Prompt 四终态事件收束状态。完整回答在事件/snapshot 中，不进入 completion。
 4. 期间用户可随时 `abort`（中断当前 run）。
 
 ### UC3 处置权限请求
@@ -43,7 +43,7 @@
 ### UC4 断线恢复 / 重同步
 1. SSE 断 → `reconnecting` → 带 `Last-Event-ID` 重连。
 2. 命中 replay → 补发缺失事件 → 回 `live`。
-3. 命中 `resync-required` → `resyncing` → 重拉 snapshot + 重置 ViewState → 回 `live`。
+3. 命中 `resync-required` → `resyncing` → 重拉 snapshot，经统一 `snapshot.replaced` barrier 更新 store 和 subscriber → 回 `live`。
 
 ### UC5 执行 web slash 命令
 1. 用户在 Composer 输入 `/`，web 懒加载/缓存 `GET /v1/commands?surface=web` 的 palette catalog。
@@ -56,8 +56,8 @@
 
 ### UC6 切换 selected workspace（v0.1.7 已完成）
 1. 用户从 known-project 列表选择另一个 directory。
-2. web 停止旧 scope 的 SSE 与未完成连接编排，清空旧 scope 的易失 ViewState/seqNum 游标。
-3. web 用新 directory 重建所有 workspace 请求 header，重新执行 UC1 的 client + SSE + snapshot 流。
+2. runtime 先令旧 scope client 失效并关闭其 SSE，清空旧 scope 的易失 ViewState/seqNum 游标。
+3. runtime 用新 directory 创建替代 client，重新执行 UC1 的单 client + 单 SSE + snapshot 流。
 4. server canonicalize/校验 directory；无效 scope 返回结构化 `400`，web 保留当前选择并显示错误，不回退 daemon cwd/query。
 
 ---
@@ -70,7 +70,7 @@
 - **daemon 负责**：会话真相、prompt 队列调度（含跨连接 FIFO）、权限归属校验、SSE replay 缓冲与 resync 信号、workspace scope 解析。
 - **web 绝不做**：自己判定权限归属、补发/重放命令、跨 backend 实例同步状态（ND9）、canonicalize/校验 scope（ND10）。web 可以选择 directory，但 server 才决定 canonical scope identity。
 
-> controller/service 不在 web 侧膨胀：`http`/`events` 是 adapter，`eventReducer` 是纯投影，编排集中在 `client` 门面，UI 不含会话业务逻辑。
+> controller/service 不在 web 侧膨胀：`http`/`events` 是 adapter，`eventReducer` 是纯投影，workspace/session/slash 编排集中在 runtime façade，业务能力由 SDK client 承担，UI 不含会话业务逻辑。
 
 ---
 
@@ -80,7 +80,7 @@
 |------|------------|-------------|
 | UC1 | token 失效 → `401` | 进 `disconnected`，提示"重启 `ohbaby serve` / 重新打开" |
 | UC1 | clients/snapshot 请求失败 | 停在 `connecting`，可重试，不静默 |
-| UC2 | `202` 后链路中断（run 进行中） | **不自动重放 prompt**（对齐 server N3）；据 ConnectionState 提示用户重提 |
+| UC2 | `202` 后链路中断（run 进行中） | **不自动重复提交**；恢复后可用 receipt 的 `promptId` 查询终态 |
 | UC2 | abort 与 run 自然结束竞态 | 以 `run.updated` 为准，UI 不抢先标记终态 |
 | UC3 | 审批错主 → `403` | 提示"该审批属于另一连接"，不误标为已处置 |
 | UC3 | 待决时断线 | resync 后据新 snapshot 重建队列——该请求可能已被它端处置而消失 |

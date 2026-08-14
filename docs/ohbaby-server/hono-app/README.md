@@ -1,10 +1,10 @@
 # ohbaby-server · hono-app（web/app 适配阶段设计）
 
-> 本目录是 `packages/ohbaby-server` 的**第二阶段**模块设计：把已抽出的手写 Node `http` server（`runtime/daemon/server.ts`）转换为 **Hono app**，并铺好 web/app 客户端所需的 REST + SSE surface、OpenAPI/SDK、SSE replay、多项目 runtime 与消费路径统一。
+> 本目录是 `packages/ohbaby-server` 的**第二阶段**模块设计：把已抽出的手写 Node `http` server（`runtime/daemon/server.ts`）转换为 **Hono app**，并铺好 web/app 客户端所需的 REST + SSE surface、信息性 OpenAPI、SSE replay、多项目 runtime 与消费路径统一。
 >
 > 触发条件：`docs/problem-lists/server/04` 的「触发点 A」（引入第一个重协议依赖 Hono）已成立，且 web/app 端进入设计。
 
-> **实施状态（2026-07-11）**：Hono app、REST/SSE、OpenAPI、用户级 pid/state、InstanceStore、fail-closed workspace 路由、全局面板 known/loaded/switch、真实双进程/双写发布门与 `serve ps` 均已落地。下文中的“当前包真实状态”“目标文件布局”保留为迁移设计基线，实际状态以本提示、[`04`](./04-multi-project-runtime.md) 和全局单 serve 文档为准。
+> **实施状态（2026-08-14）**：Hono app、REST/SSE、手写信息性 `/doc`、用户级 pid/state、InstanceStore、fail-closed workspace 路由、全局面板 known/loaded/switch、真实双进程/双写发布门与 `serve ps` 均已落地。没有 `@hono/zod-openapi` 或 OpenAPI 生成 client。下文中的“当前包真实状态”“目标文件布局”保留为迁移设计基线。
 
 ---
 
@@ -20,7 +20,7 @@
 | `architecture.md` | **复用 + 具体化**；端口-适配器 + Hono 的抽象结构在此落成具体装配（`01`） |
 | `data-model.md` | **复用 + 扩展**；新增 `WorkspaceInstance` / `ServerRegistry` 概念（见 `04`） |
 | `dfd-interface.md` | **复用**；流 A–D 不变，本阶段补足 web 形态的具体端点 |
-| `non-functional.md` | **修订一处**：§4 暂缓的 OpenAPI 在本阶段**重新激活**（web/app typed client 已成真实需求） |
+| `non-functional.md` | **修订一处**：保留手写信息性 `/doc`，生成链仍暂缓 |
 | `migration-sequence.md` | **续写**；本阶段是其 S2 注记中「后续 web/app 适配」的兑现 |
 
 > 原则：父目录是仍然成立部分的**单一事实源**，本目录只写**新增/细化/修订**，不复制粘贴。凡与父目录冲突处，在 [`00-scope-and-deltas.md`](./00-scope-and-deltas.md) 显式列出并给出指针更新。
@@ -33,7 +33,7 @@
 |------|------|
 | [`00-scope-and-deltas.md`](./00-scope-and-deltas.md) | 相对当前包状态的 delta 清单；**核心架构决策 ADR（默认 CLI 走直连）**；对父目录的指针更新 |
 | [`01-app-assembly-and-transport.md`](./01-app-assembly-and-transport.md) | `create-app` 装配、中间件管线与次序、可注入 `app.fetch`、`@hono/node-server` listen + 优雅关闭、jsonrpc 兼容路由 |
-| [`02-web-api-surface.md`](./02-web-api-surface.md) | 浏览器/app 用的 REST 端点 + SSE 端点 + zod schema + `@hono/zod-openapi`→OpenAPI/SDK |
+| [`02-web-api-surface.md`](./02-web-api-surface.md) | 浏览器/app 用的 REST/SSE 端点、手写信息性 `/doc` 与 SDK 合同边界 |
 | [`03-event-replay.md`](./03-event-replay.md) | event-bus：seqNum + 环形缓冲 + replay；`Last-Event-ID` 语义；sdk 增 `ConnectionState` |
 | [`04-multi-project-runtime.md`](./04-multi-project-runtime.md) | InstanceStore（git-root scope）、用户级 pid/state、`x-ohbaby-directory` workspace 路由、`serve ps`、反多后端、G5 细化 |
 | [`05-consumption-path-unification.md`](./05-consumption-path-unification.md) | **本阶段新增步骤**：在契约层统一直连/server 两条消费路径，避免行为漂移 |

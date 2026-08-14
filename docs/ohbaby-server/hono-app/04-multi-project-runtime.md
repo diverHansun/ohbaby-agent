@@ -47,7 +47,7 @@ ohbaby 采两者之合：**opencode 的请求级 workspace 路由 + kimi 的全�
 - `ohbaby serve` 启动时**不绑** cwd（对齐 opencode `instance:false`）；它是个多项目宿主。
 - web/app 端在每个 workspace 请求与 SSE 连接带 `x-ohbaby-directory`；header 缺失或路径非法返回 400，生产环境不回退 query/cwd。
 - jsonrpc `/api/rpc`、`/v1/events` 一律经同一中间件解析 scope。
-- `/api/health`、`/api/shutdown`、`/doc` 与静态资源是全局路由，不要求 workspace header。
+- `/api/health`、`/api/shutdown` 与静态资源是全局路由，不要求 workspace header。per-scope app 的 `GET /doc` 返回手写信息性 OpenAPI；经全局 dispatcher 访问时遵循该 dispatcher 的 workspace 解析规则。
 
 ### scope 规则（落实用户选择：git-root 感知）
 

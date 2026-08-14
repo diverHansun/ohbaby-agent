@@ -12,6 +12,8 @@
 - 连接层纯逻辑：`events` SSE 解析 / `Last-Event-ID` 游标 / `resync` 处理；`eventReducer` 投影；ConnectionState 五态迁移；`bootstrap` 解析注入。
 - web ↔ `/v1` 契约：daemon 客户端讲对 `/v1`、行为符合 `UiBackendClient` 语义。
 - 串联：`client` + `store` + `eventReducer` 消费模拟 SSE 流 → ViewState 正确（UC1–4）。
+- SDK client 合同：`BrowserDaemonClient` 直接满足 `UiBackendClient`；Prompt receipt/wait/composition、必选 queue lease 与 interaction REST 映射均返回 SDK DTO。
+- 单一事件数据流：多个 SDK subscriber 共享一个 fetch-stream；store 先更新、subscriber 后观察，任一 listener 异常不阻断其余观察者。
 - slash web 闭环：`GET /v1/commands?surface=web` / `POST /v1/commands`、browser resolve、候选面板/Tab 补全 helper、`command.*` 事件投影为 CommandNotice/结构化只读 modal。
 - 结构化 overlay 闭环：`/connect`、`/connect-search`、`/compact` 从 slash palette 打开 overlay，但提交分别走 model/search/compact REST；覆盖只读 context-window probe、敏感字段不回显、compact usage/result。
 - 起站冒烟：`dist` 能被伺服、页面能起、核心闭环走通。
@@ -32,9 +34,14 @@
 | 流式增量累积 | 多个 `message.part.delta` 顺序累积成正确 StreamingMessage，`message.updated` 定稿不错位 |
 | **SSE 先开 + snapshot 基线** | 只应用 seq>基线的缓冲事件，无漏拍、无重复 |
 | **`resync-required`** | 丢弃 ViewState → 重拉 snapshot → 回 live，绝不静默错位（核心正确性） |
+| 单一逻辑 SSE | 同一 workspace 多个 SDK subscriber 仍只有一个 stream；每个有效 `UiEvent` 只解包、投影一次 |
+| snapshot barrier | 初始 seq=0 与本地 same-seq refresh 可应用；来自 SSE 的 same-seq/旧事件必须被拒绝且不通知 subscriber |
+| subscriber/listener 隔离 | 一个 SDK subscriber 或 store listener 抛错，不阻断其他 listener、store 或连接 |
+| Prompt 三种能力 | accepted 立即回 receipt；wait 返回严格四终态；andWait 只组合二者 |
+| 无活动 workspace | `runtime.client === null`，页面进入 empty state，不由 getter 抛错 |
 | reconnect 退避有界 | 断线重连不紧循环空转 |
 | 权限错主 403 | UI 提示，且不误标为已处置 |
-| prompt 202 后断线 | 不自动重发，提示用户重提（对齐 N3） |
+| prompt 202 后断线 | 不自动重复提交；已有 `promptId` 可在恢复后查询终态 |
 | 401 token 失效 | 全局可见，进 `disconnected`，不静默 |
 | 输出消毒 | 恶意 markdown/HTML 经 sanitize 后不执行脚本 |
 | slash 解析失败 | 不调用 `/v1/commands`，显示错误且 draft 不丢 |

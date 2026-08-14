@@ -15,7 +15,7 @@ web 端是 daemon 会话状态的**投影与 adapter**，不持有独立事实�
 | 文档 | 职责 |
 |------|------|
 | [`goals-duty.md`](./goals-duty.md) | 目标 / 职责 / 非职责——边界声明，最重要 |
-| [`architecture.md`](./architecture.md) | 三层单向流；门面模式；技术栈与权衡 |
+| [`architecture.md`](./architecture.md) | SDK client + runtime façade + store 的单向流；技术栈与权衡 |
 | [`data-model.md`](./data-model.md) | web 独有概念（ConnectionState 五态机、ViewState、StreamingMessage、PendingPermission） |
 | [`dfd-interface.md`](./dfd-interface.md) | 数据流（引导/建连/事件/命令/重同步）+ 接口语义 |
 | [`use-case.md`](./use-case.md) | 四个用例的编排与失败点 |
@@ -39,7 +39,7 @@ web 端是 daemon 会话状态的**投影与 adapter**，不持有独立事实�
 |------|------|
 | 托管 | daemon **同源伺服**静态产物 + 注入 `window.__OHBABY__`（无 CORS、token 不手填） |
 | 技术栈 | React + Vite，纯静态 SPA；不上 SSR/路由框架 |
-| typed client | 从 server `/doc` OpenAPI **生成** wire 类型 |
+| typed client | `BrowserDaemonClient implements UiBackendClient`；SDK 是业务合同权威，wire wrapper 仅在内部 HTTP helper |
 | 状态管理 | `useSyncExternalStore` 手卷外部 store（零依赖、精准订阅） |
 | 事件传输 | SSE over **fetch-stream**（非 EventSource，可带 Authorization header + Last-Event-ID） |
 | 初始同步 | **SSE 先开 + snapshot 带 seqNum**，只应用 seq>基线的缓冲事件 |
@@ -65,4 +65,4 @@ v0.1.6 真正新增的只有 **web** 这一个；另两种模式已存在。
 - **S-C**：向 `index.html` 注入 `window.__OHBABY__`（token/clientId/baseUrl）。
 - **S-D**：**git-root scope** + 用户级 `daemon.pid` / `daemon-state.json`（pid 探活 / stale takeover / 精确版本握手）；workspace `/v1` 请求必须显式携带 `x-ohbaby-directory`，由 server canonicalize 后路由到 per-scope runtime。
 
-`/v1` REST 面与 OpenAPI `/doc` 本身是 server 既有规划（`hono-app/02` 的 Δ3/Δ4），待建。
+`/v1` REST/SSE 面已经落地。Server 提供手写信息性 `GET /doc`，但没有 OpenAPI 生成 client 链；跨端一致性由 SDK 类型、transport contract/integration 与真实进程 E2E 保证。

@@ -1,6 +1,6 @@
 # ohbaby-web · Skill Invocation
 
-> web 端 skill 的发现与执行规格。CLI 在顶层 `/` 浮层即可看到并选中每个 skill；web 刻意不在浮层 flood 全部 skill，改由 `/skills` 结果弹窗统一管理：弹窗内键盘导航选中、`Tab` 把 `/skill-name` 落入 composer，再按 `Enter` 真正执行。执行复用 daemon 既有的 skill 命令路径（`executeSkillCommand` → 加载 skill prompt → `submitPrompt`），与 CLI 同源。
+> web 端 skill 的发现与执行规格。CLI 在顶层 `/` 浮层即可看到并选中每个 skill；web 刻意不在浮层 flood 全部 skill，改由 `/skills` 结果弹窗统一管理：弹窗内键盘导航选中、`Tab` 把 `/skill-name` 落入 composer，再按 `Enter` 真正执行。执行复用 daemon 既有的 skill 命令路径（`executeSkillCommand` → 加载 skill prompt → `submitPromptAndWait` 端口），与 CLI 同源。
 
 ---
 
@@ -10,7 +10,7 @@
 
 - **执行链路（Layer 1）**：让 `/skill-name` 能在 web 被解析并执行。
   - skill 命令以 `executionKind:"skill"` 进入 `GET /v1/commands?surface=web` 的 catalog，**仅供浏览器 resolve**。
-  - `OhbabyWebClient.executeSlashCommand` 对「passthrough ∪ skill」目录 resolve `/skill-name`，发出 `skill.<name>` invocation。
+  - `OhbabyWebRuntime.executeSlashCommand` 对「passthrough ∪ skill」目录 resolve `/skill-name`，再由当前 SDK client 发出 `skill.<name>` invocation。
   - `POST /v1/commands` 在既有 passthrough 校验之外，新增放行 skill 命令 invocation。
 - **发现/插入 UI（Layer 2）**：把 `/skills` 只读结果弹窗改成键盘可导航。
   - `↑/↓`、`PageUp/PageDown` 在 skill 列表中选中，首尾 clamp。
@@ -37,7 +37,7 @@
   - `source:"skill"`；
   - `acceptsArguments:true`、`argumentMode:"raw"`；
   - `surfaces:["tui","stdout","headless"]`。
-- 同一个文件里的 `executeSkillCommand` 已经能加载 skill prompt，并在有 `submitPrompt` 时把 prompt 注入当前 session。因此执行能力已经存在。
+- 同一个文件里的 `executeSkillCommand` 已经能加载 skill prompt，并通过注入的 `submitPromptAndWait` 端口把 prompt 注入当前 session。因此执行能力已经存在。
 - CLI/TUI 的顶层 `/` 补全走 `packages/ohbaby-cli/src/tui/slash-commands/runtime.ts` 的完整 command catalog；`filterSdkCommandCatalog` 不会主动排除 `source:"skill"`，所以 skill 会像普通 slash command 一样出现并可执行。
 - Web catalog 入口在 `packages/ohbaby-server/src/app/create-app.ts`：
   - `GET /v1/commands?surface=web` 先向 backend 要 `surface:"tui"` 的 catalog；
@@ -81,7 +81,7 @@
 
 - 新增 SDK helper `supportsWebSkillCommandInvocation(catalog, invocation)`：在 daemon 全量 catalog（`surface:"tui"`）中校验该命令存在、surface 可见、path 一致、`source === "skill"`。
 - `POST /v1/commands` 网关改为：`supportsWebPassthroughCommandInvocation(...) || supportsWebSkillCommandInvocation(...)` 才放行，其余维持拒绝。
-- 放行后照常 `backend.executeCommand(...)` → daemon 命中 `executeSkillCommand`：加载 skill prompt、`submitPrompt` 注入当前 session、发出 `skill.submitted` action。web 通过既有事件流看到 prompt 进入会话、agent 开始响应，无需 web 专属渲染。
+- 放行后照常 `backend.executeCommand(...)` → daemon 命中 `executeSkillCommand`：加载 skill prompt、经 raw backend 的 `submitPromptAndWait` 端口注入当前 session、发出 `skill.submitted` action。外层只记录一次 `executeCommand` 原子写，不为内部 prompt 重复记账；web 通过既有事件流看到 prompt 进入会话、agent 开始响应。
 
 ---
 
@@ -133,7 +133,7 @@
   → submitText("/hansun-db …") → executeSlashCommand
   → resolve（passthrough ∪ skill）成功 → POST /v1/commands { commandId:"skill.hansun-db", surface:"tui", rawArgs }
   → 服务端 supportsWebSkillCommandInvocation 放行
-  → backend.executeCommand → executeSkillCommand → 加载 prompt → submitPrompt
+  → backend.executeCommand → executeSkillCommand → 加载 prompt → submitPromptAndWait(raw backend)
   → 事件流：prompt 进入会话，agent 开始响应
 ```
 

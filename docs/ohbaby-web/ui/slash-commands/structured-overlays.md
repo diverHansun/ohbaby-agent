@@ -25,7 +25,7 @@
 本批不做：
 
 - 不把 `/connect`、`/connect-search`、`/compact` 加入 `WEB_PASSTHROUGH_COMMAND_IDS`。
-- 不接 `POST /v1/interactions/:id`，也不开放 `parentBehavior:"interaction"` 命令。
+- `respondInteraction` REST 能力已经由 `POST /v1/interactions/:id/respond` 补齐，但本 overlay 批次仍不把 `parentBehavior:"interaction"` 命令加入 palette。
 - 不做 `/connect` provider 大量 preset、内置自动推荐或完整 provider marketplace。
 - 不做 `/connect-search` 除 Tavily 以外的搜索 provider。
 

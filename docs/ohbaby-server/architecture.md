@@ -37,6 +37,10 @@
 
 依赖方向恒为 `protocols → coordination → CoreApiHost(sdk 契约)`，无环（G5）。`ohbaby-server` 只依赖 `ohbaby-agent` 拿 `createPersistentUiBackendClient` + `ohbaby-sdk` 契约类型；`ohbaby-agent` 不反向依赖 `ohbaby-server`。
 
+`CoreApiHost`/`CoreAPI` 若保留名称，只能是从 SDK 权威能力派生的 RPC seam，不再手抄一份 client 方法表。REST 与 JSON-RPC gateway 注入 raw backend；它们分别是 `server-rest`、`server-rpc` 写操作的唯一 `UiCommandRecord` owner，Agent 内部与 browser client 不重复记账。
+
+Prompt transport 只有两个 primitive：接单 `submitPromptAccepted` 与查询 `waitForPrompt`。便利方法 `submitPromptAndWait` 由 client 组合，因此 server 没有同义的第三条执行路径。生产 backend 的 queue edit/cancel/lease 为必选能力。
+
 ---
 
 ## 2. Design Pattern & Rationale（设计模式与理由）
@@ -69,43 +73,33 @@
 
 ## 3. Module Structure & File Layout（模块结构与文件组织）
 
-> 下面是抽包阶段的结构。**`server.ts`→Hono 的具体装配、web REST+SSE surface、多项目 runtime 的细化布局见 [`hono-app/01`](./hono-app/01-app-assembly-and-transport.md) 与 [`hono-app/02`](./hono-app/02-web-api-surface.md)、[`hono-app/04`](./hono-app/04-multi-project-runtime.md)**——当前包仍是保守迁移后的手写 http，尚未落 Hono。
+> 下面是当前实现结构。Hono app、REST/RPC/SSE、多项目 runtime 的细节分别见 [`hono-app/01`](./hono-app/01-app-assembly-and-transport.md)、[`hono-app/02`](./hono-app/02-web-api-surface.md) 与 [`hono-app/04`](./hono-app/04-multi-project-runtime.md)。
 
 ```
 packages/ohbaby-server/src/
-├── index.ts                  对外窄导出面：startServer + remote client + 必要类型
-│
-├── transport/
-│   ├── app.ts                组 Hono app：挂路由 + 套中间件
-│   └── node-server.ts        @hono/node-server 绑定监听 + 优雅关闭
-│
-├── protocols/
-│   ├── jsonrpc/
-│   │   ├── protocol.ts       (从 daemon/protocol.ts 移) 信封 + 校验
-│   │   ├── rpc-handler.ts    (由 daemon/server.ts 拆) /api/rpc 处理
-│   │   └── client.ts         (从 daemon/client.ts 移) remote UiBackendClient
-│   └── web/
-│       └── routes.ts         (新) 浏览器 REST + SSE 路由
-│
+├── index.ts                    对外窄导出面：daemon lifecycle、remote client、必要类型
+├── app/create-app.ts           Hono app；装配 REST、RPC、SSE、静态资源与 gateway
+├── transport/node-listen.ts    绑定 Node 端口与优雅关闭
+├── protocols/jsonrpc/
+│   ├── protocol.ts             SDK 派生的 method/params 信封与校验
+│   ├── rpc-route.ts            /api/rpc adapter
+│   └── client.ts               remote UiBackendClient
 ├── coordination/
-│   ├── prompt-queue.ts       (从 daemon 移；顺修 S8 fresh-lane)
-│   ├── permission-router.ts  (从 daemon 移；顺修 S9 断连待决)
-│   └── event-bus.ts          (新) seqNum + 环形缓冲 + replay (S1)
-│
-├── auth/
-│   ├── token.ts              (从 daemon/auth.ts 移) fail-closed + 常量时间比较 (S4)
-│   └── cors.ts               (新) origin 白名单中间件 (S2)
-│
-└── lifecycle/
-    ├── foreground.ts         (主路径) 前台启动/Ctrl+C 停止
-    ├── server-main.ts        (从 daemon/main.ts 拆) server 装配组合根
-    └── detached/             (降级抽屉，N6) supervisor / pid-file / state-file / spawn
+│   ├── prompt-backend.ts       Prompt 接单/owner 协调
+│   ├── client-view.ts          per-client snapshot/event 投影
+│   ├── permission-router.ts    permission/interaction owner 路由
+│   └── event-bus.ts            seqNum + 环形缓冲 + replay
+├── auth/token.ts               Bearer token 校验与脱敏
+└── runtime/
+    ├── daemon/                 start/stop/supervisor/pid/state/真实进程测试
+    ├── instance-store.ts       per-workspace runtime
+    └── workspace-scope.ts      scope canonicalization 与校验
 ```
 
 - **对外稳定接口**：仅 `index.ts`（`startServer` + remote client）。其余为内部实现。
-- **命名体现角色**：`transport` / `protocols` / `coordination` / `auth` / `lifecycle` 是职责名，不是技术名。
+- **命名体现角色**：`app` / `transport` / `protocols` / `coordination` / `auth` / `runtime` 是职责名，不是重复业务层。
 - **协议 seam（不建空目录）**：未来 ACP/A2A 各为 `protocols/` 下新增一个兄弟目录，架在同一 `CoreApiHost` 上即可。本期不建空壳（N4/YAGNI），仅在此记录扩展位。
-- **不迁入**：`daemon/bootstrap.ts`、`daemon/app-events.ts` 先审计（S7），废弃则删。`host/core-api-factory.ts` 留在 `ohbaby-agent`（N2）。
+- `host/core-api-factory.ts` 留在 `ohbaby-agent`；Server 直接向持久 backend 注入 transport gateway，不经 Agent host factory，避免双记。
 
 ---
 
@@ -117,7 +111,7 @@ packages/ohbaby-server/src/
 | A2（UiEvent 直发 + replay） | A1（现在抽领域事件投影层） | ACP/A2A 接入时要回头补投影一次；换来当前不为想象未来付费 |
 | foreground 主路径、detached 降级 | 把 detached 当一等能力一起做 | 后台常驻能力暂不打磨；换来避开 daemon 最复杂、bug 最多的部分 |
 | `core-api-factory` 留在 agent | 随 04 移入 server/host | server 不掌管"选 local/remote"；换来默认 CLI 彻底不依赖 server 包 |
-| 端口-适配器分层 | 单文件按 if 分发（现状） | 多几个目录/文件；换来新增协议时核心零改动 |
+| 端口-适配器分层 | 单文件按 if 分发 | 多几个目录/文件；换来新增协议时核心零改动 |
 | 窄导出面（只 `index.ts`） | 直接导出深路径 | 需维护一层 re-export；换来调用方不耦合内部结构 |
 
 ### 后续维护者须知（为什么不能随意改）

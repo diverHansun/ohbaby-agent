@@ -2,7 +2,7 @@
 
 > 前置条件：[`improve-1`](../improve-1/) 已按其验收门通过。
 > 本轮性质：在底层合同稳定后迁移 CLI/TUI/Web/Server，并删除旧双轨。
-> 状态：实施前规划完成并已独立审查；不代表代码已经完成。
+> 状态：完成；实现、全量测试、构建、真实进程 E2E、独立代码审查与文档一致性审计均已通过。实际证据见 [`05-implementation-acceptance.md`](./05-implementation-acceptance.md)。
 
 ## 本轮目标
 

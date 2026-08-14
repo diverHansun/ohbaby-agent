@@ -14,7 +14,7 @@
 packages/ohbaby-server/src/
 ├── app/
 │   ├── create-app.ts         (新) 组装 Hono app：挂中间件 + 各 protocols 路由；返回 { app, dispose }
-│   └── openapi.ts            (新) @hono/zod-openapi 注册（见 02）
+│   └── create-app.ts         手写信息性 OpenAPI 3.1 `/doc`
 ├── transport/
 │   ├── in-process.ts         (新) 给 app.fetch 包一层友好句柄（web/app + 测试用，不开端口）
 │   └── node-listen.ts        (新) @hono/node-server 绑定监听 + 优雅关闭 + 端口回退
@@ -61,7 +61,7 @@ createServerApp(deps): { app: Hono; dispose: () => Promise<void> }
 3. web 路由组（带 cors + auth + workspace 中间件）—— 见 [`02`](./02-web-api-surface.md)。
 4. jsonrpc 兼容路由组（带 auth + workspace 中间件）—— §5。
 5. event SSE 端点（带 auth + workspace + replay）—— 见 [`03`](./03-event-replay.md)。
-6. OpenAPI `/doc` —— 见 [`02`](./02-web-api-surface.md)。
+6. `GET /doc`：由 `create-app.ts` 手写的信息性 OpenAPI 3.1；当前没有 zod/生成 client 链。
 
 `create-app` **只返回 app + dispose**，对「在不在端口上跑」一无所知。这是 Δ2 的关键：同一个 app 既能被 `app.fetch(req)` 直接调，也能被 `node-listen` 挂到端口。
 

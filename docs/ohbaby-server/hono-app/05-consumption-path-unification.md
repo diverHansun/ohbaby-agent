@@ -66,7 +66,7 @@ transports = [
   inproc:   调 app.fetch / app.request（P2 形态，不开端口）
 ]
 for each transport:
-  initializeClient(fresh) ; submitPrompt("hi") ; collect events ; getSnapshot
+  initializeClient(fresh) ; submitPromptAccepted("hi") ; waitForPrompt(promptId) ; collect events ; getSnapshot
 assert: 两 transport 下，单客户端可观察序列等价
   （消息、run 状态机、审批往返、最终 snapshot 一致；
     seqNum 单调；无 P2 独有的领域差异）

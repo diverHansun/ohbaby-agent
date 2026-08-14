@@ -27,9 +27,10 @@
 1. 前端发出 RPC 请求（jsonrpc 信封 / web REST），进入 transport（Hono）。
 2. auth 中间件校验 AuthToken；失败即拒（fail-closed），流终止。
 3. CORS 中间件按 origin 白名单放行（web 跨 origin）。
-4. protocols 适配器解析信封 → 调用 `CoreApiHost` 对应方法。
-5. 若是 prompt run，先经 coordination/prompt-queue 入对应 PromptLane（FIFO）。
-6. backend 执行，结果沿原路返回前端。
+4. protocols 适配器解析信封 → 调用由 SDK 能力派生的 `CoreApiHost` 对应方法。
+5. 原子写操作在外部 gateway 生成 `operationId`，记录脱敏的 started/completed；recorder fail-open，raw backend 不重复记录。
+6. Prompt 接单经 scheduler 持久化并返回 receipt；按 `promptId` 的 wait 只等待严格终态，不重复执行也不重复记录。
+7. backend 执行，结果沿原路返回前端；四种业务终态正常返回，技术故障走 transport error。
 
 ### 流 B：事件订阅 + replay（backend → 前端，含断线补发）
 1. 前端建立 SSE 连接，可携带 `Last-Event-ID`（= 上次 cursor）。
@@ -63,6 +64,8 @@
 
 - 接口都能在 §2 数据流中找到落点（无悬空接口）。
 - remote client 与 in-process 共享 `ohbaby-sdk` 的 `UiBackendClient` 契约——这是"协议中性"（G3）与 attach 复用（D5）的关键。
+- JSON-RPC 和 REST 都只运输 `submitPromptAccepted` 与 `waitForPrompt` primitive；`submitPromptAndWait` 在 client 侧组合，不存在第三条 server 执行路径。旧 `submitPrompt` method 已删除。
+- queue edit/cancel/lease 是生产 backend 必选能力，不通过运行时 feature detect 或 legacy fallback 降级。
 - 建议给 sdk 增补 `ConnectionState`（connected/reconnecting/closed），让前端能感知重连（流 B 配套，记入跨模块检查）。
 
 ---
