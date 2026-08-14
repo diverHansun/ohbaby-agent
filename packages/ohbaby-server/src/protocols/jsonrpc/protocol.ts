@@ -5,7 +5,6 @@ export const DAEMON_RPC_METHODS = [
   "initializeClient",
   "getContextWindowUsage",
   "listCommands",
-  "submitPrompt",
   "submitPromptAccepted",
   "editQueuedPrompt",
   "cancelQueuedPrompt",

@@ -9,6 +9,7 @@ import type {
   UiEvent,
   UiEventHandler,
   UiPermissionState,
+  UiPromptSubmission,
   UiSetSearchApiKeyResult,
   UiSnapshot,
   UiUnsubscribe,
@@ -159,7 +160,7 @@ class FakeBackend implements UiBackendClient {
   permissionState: UiPermissionState;
   submitError: Error | undefined;
 
-  constructor(private readonly snapshot: UiSnapshot = emptySnapshot()) {
+  constructor(private snapshot: UiSnapshot = emptySnapshot()) {
     this.permissionState = snapshot.permission ?? defaultPermissionState();
   }
 
@@ -210,8 +211,23 @@ class FakeBackend implements UiBackendClient {
   ): ReturnType<UiBackendClient["submitPromptAccepted"]> {
     const promptId = `prompt_fake_${String(++this.nextPromptId)}`;
     const sessionId = options?.sessionId ?? "session_fake";
-    const completion = this.submitPrompt(text, options).then(() => ({
-      prompt: {
+    const queued: UiPromptSubmission = {
+      clientRequestId: options?.clientRequestId ?? `request_${promptId}`,
+      createdAt: timestamp,
+      promptId,
+      scopeKey: "/workspace",
+      sessionId,
+      status: "queued",
+      text,
+      updatedAt: timestamp,
+      userMessageId: `message_${promptId}`,
+    };
+    this.snapshot = {
+      ...this.snapshot,
+      prompts: [...(this.snapshot.prompts ?? []), queued],
+    };
+    const completion = this.submitPrompt(text, options).then(() => {
+      const completed = {
         clientRequestId: options?.clientRequestId ?? `request_${promptId}`,
         createdAt: timestamp,
         endedAt: timestamp,
@@ -222,8 +238,15 @@ class FakeBackend implements UiBackendClient {
         text,
         updatedAt: timestamp,
         userMessageId: `message_${promptId}`,
-      },
-    }));
+      };
+      this.snapshot = {
+        ...this.snapshot,
+        prompts: (this.snapshot.prompts ?? []).map((prompt) =>
+          prompt.promptId === promptId ? completed : prompt,
+        ),
+      };
+      return { prompt: completed };
+    });
     this.promptCompletions.set(promptId, completion);
     return Promise.resolve({
       clientRequestId: options?.clientRequestId ?? `request_${promptId}`,
@@ -440,7 +463,9 @@ describe("createRemoteUiBackendClient", () => {
     const backend = new FakeBackend();
 
     await withRemoteClient(backend, async (client) => {
-      await client.submitPrompt("hello daemon", { sessionId: "session_1" });
+      await client.submitPromptAndWait("hello daemon", {
+        sessionId: "session_1",
+      });
 
       expect(backend.submitted).toEqual([
         {
@@ -461,7 +486,7 @@ describe("createRemoteUiBackendClient", () => {
     await withRemoteClient(
       backend,
       async (client) => {
-        await client.submitPrompt("resume target");
+        await client.submitPromptAndWait("resume target");
 
         expect(backend.submitted).toEqual([
           {
@@ -525,7 +550,9 @@ describe("createRemoteUiBackendClient", () => {
     await withRemoteClient(
       backend,
       async (client) => {
-        await client.submitPrompt("authenticated", { sessionId: "session_1" });
+        await client.submitPromptAndWait("authenticated", {
+          sessionId: "session_1",
+        });
         const eventPromise = new Promise<UiEvent>((resolve) => {
           client.subscribeEvents(resolve);
         });
@@ -603,7 +630,7 @@ describe("createRemoteUiBackendClient", () => {
       await client.getSnapshot();
       await client.getContextWindowUsage(contextInput);
       await client.listCommands(listQuery);
-      await client.submitPrompt("hello", { sessionId: "session_1" });
+      await client.submitPromptAndWait("hello", { sessionId: "session_1" });
       await client.compactSession(compactOptions);
       await client.getCurrentModel();
       await client.probeModelContextWindow(probeInput);
@@ -652,6 +679,7 @@ describe("createRemoteUiBackendClient", () => {
         args: ["hello", { sessionId: "session_1" }],
         method: "submitPrompt",
       },
+      { args: [], method: "getSnapshot" },
       { args: [compactOptions], method: "compactSession" },
       { args: [], method: "getCurrentModel" },
       { args: [probeInput], method: "probeModelContextWindow" },
@@ -715,7 +743,7 @@ describe("createRemoteUiBackendClient", () => {
     backend.submitError = new Error("backend exploded");
 
     await withRemoteClient(backend, async (client) => {
-      await expect(client.submitPrompt("boom")).rejects.toThrow(
+      await expect(client.submitPromptAndWait("boom")).rejects.toThrow(
         "backend exploded",
       );
     });

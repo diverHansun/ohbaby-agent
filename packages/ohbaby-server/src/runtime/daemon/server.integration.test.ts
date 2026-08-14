@@ -1054,7 +1054,7 @@ describe("createDaemonHttpServer", () => {
         submitted = postRpc(url, {
           clientId: "client_a",
           id: "rpc_prompt",
-          method: "submitPrompt",
+          method: "submitPromptAccepted",
           params: ["hello", { sessionId: "session_1" }],
         });
         await vi.waitUntil(() => backend.submitted.length === 1);
@@ -1117,7 +1117,7 @@ describe("createDaemonHttpServer", () => {
         const submit = await postRpc(url, {
           clientId: "client_a",
           id: "rpc_prompt",
-          method: "submitPrompt",
+          method: "submitPromptAccepted",
           params: ["hello", { sessionId: "session_1" }],
         });
         expect(submit.status).toBe(200);
@@ -1352,7 +1352,7 @@ describe("createDaemonHttpServer", () => {
       const response = await postRpc(url, {
         clientId: "client_a",
         id: "rpc_prompt",
-        method: "submitPrompt",
+        method: "submitPromptAccepted",
         params: ["hello"],
       });
       expect(response.status).toBe(200);
@@ -1401,13 +1401,13 @@ describe("createDaemonHttpServer", () => {
       const first = postRpc(url, {
         clientId: "client_a",
         id: "rpc_first",
-        method: "submitPrompt",
+        method: "submitPromptAccepted",
         params: ["first", { sessionId: "session_a" }],
       });
       const second = postRpc(url, {
         clientId: "client_b",
         id: "rpc_second",
-        method: "submitPrompt",
+        method: "submitPromptAccepted",
         params: ["second", { sessionId: "session_b" }],
       });
       await vi.waitUntil(() => backend.submitted.length === 2);
@@ -1443,20 +1443,20 @@ describe("createDaemonHttpServer", () => {
     });
   });
 
-  it("does not create a second queue owner for an injected legacy backend", async () => {
+  it("routes concurrent accepted prompts without a second queue owner", async () => {
     const backend = new FakeBackend();
     backend.holdSubmits = true;
     await withServer(backend, async (url) => {
       const first = postRpc(url, {
         clientId: "client_a",
         id: "rpc_first",
-        method: "submitPrompt",
+        method: "submitPromptAccepted",
         params: ["first", { sessionId: "session_1" }],
       });
       const second = postRpc(url, {
         clientId: "client_b",
         id: "rpc_second",
-        method: "submitPrompt",
+        method: "submitPromptAccepted",
         params: ["second", { sessionId: "session_1" }],
       });
 
@@ -1532,7 +1532,7 @@ describe("createDaemonHttpServer", () => {
       const submitted = await postRpc(url, {
         clientId: "client_a",
         id: "rpc_prompt",
-        method: "submitPrompt",
+        method: "submitPromptAccepted",
         params: ["hello"],
       });
       expect(submitted.status).toBe(200);
@@ -1959,7 +1959,7 @@ describe("createDaemonHttpServer", () => {
         const submitted = postRpc(url, {
           clientId: "client_a",
           id: "rpc_prompt",
-          method: "submitPrompt",
+          method: "submitPromptAccepted",
           params: ["hello"],
         });
         try {
@@ -2219,7 +2219,7 @@ describe("createDaemonHttpServer", () => {
       const submit = await postRpc(url, {
         clientId: "client_a",
         id: "rpc_prompt",
-        method: "submitPrompt",
+        method: "submitPromptAccepted",
         params: ["hello", { sessionId: "session_1" }],
       });
       expect(submit.status).toBe(200);
@@ -2260,7 +2260,7 @@ describe("createDaemonHttpServer", () => {
         JSON.stringify({
           clientId: "client_a",
           id: "rpc_utf8",
-          method: "submitPrompt",
+          method: "submitPromptAccepted",
           params: ["你好 daemon", { sessionId: "session_1" }],
         }),
         "utf8",

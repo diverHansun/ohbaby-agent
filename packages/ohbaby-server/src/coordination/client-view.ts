@@ -33,6 +33,19 @@ export interface InteractionResponseClaim {
   readonly claimToken: string;
 }
 
+export class DaemonForbiddenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DaemonForbiddenError";
+  }
+}
+
+export function isDaemonForbiddenError(
+  error: unknown,
+): error is DaemonForbiddenError {
+  return error instanceof DaemonForbiddenError;
+}
+
 export interface PreparedPromptSubmit {
   readonly options?: SubmitPromptOptions;
   readonly sessionId?: string;
@@ -177,6 +190,9 @@ function projectSnapshotForClient(
     view.activeSessionId !== undefined &&
     (view.activeSessionId === null ||
       view.activeSessionId === view.pendingSessionId ||
+      snapshot.prompts?.some(
+        (prompt) => prompt.sessionId === view.activeSessionId,
+      ) === true ||
       snapshot.sessions.some((session) => session.id === view.activeSessionId))
       ? view.activeSessionId
       : snapshot.activeSessionId;
@@ -704,5 +720,43 @@ export class DaemonClientViewCoordinator {
     }
     view.activeSessionId = sessionId;
     view.pendingSessionId = undefined;
+  }
+}
+
+export async function respondInteractionForClient(input: {
+  readonly backend: UiBackendClient;
+  readonly clientId: string;
+  readonly clientViews: DaemonClientViewCoordinator;
+  readonly interactionId: string;
+  readonly response: Parameters<UiBackendClient["respondInteraction"]>[1];
+}): Promise<void> {
+  const claim = input.clientViews.claimInteractionResponse(
+    input.interactionId,
+    input.clientId,
+  );
+  if (claim === undefined) {
+    throw new DaemonForbiddenError(
+      "Interaction is unknown, already answered, or owned by another client",
+    );
+  }
+  try {
+    await input.backend.respondInteraction(input.interactionId, input.response);
+    input.clientViews.consumeInteractionClaim(
+      input.interactionId,
+      claim.claimToken,
+    );
+  } catch (error) {
+    if (isRecord(error) && error.code === "INVALID_INTERACTION_RESPONSE") {
+      input.clientViews.releaseInteractionClaim(
+        input.interactionId,
+        claim.claimToken,
+      );
+    } else {
+      input.clientViews.consumeInteractionClaim(
+        input.interactionId,
+        claim.claimToken,
+      );
+    }
+    throw error;
   }
 }

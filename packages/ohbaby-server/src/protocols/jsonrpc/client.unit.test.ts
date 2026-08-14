@@ -191,6 +191,14 @@ describe("createRemoteUiBackendClient", () => {
         prompt: { promptId: "prompt_1", status: "cancelled" },
       },
     );
+    await expect(
+      client.submitPromptAndWait("composed", {
+        clientRequestId: "request_2",
+        sessionId: "session_1",
+      }),
+    ).resolves.toMatchObject({
+      prompt: { promptId: "prompt_1", status: "cancelled" },
+    });
     expect(methods).toEqual([
       "initializeClient",
       "submitPromptAccepted",
@@ -200,6 +208,8 @@ describe("createRemoteUiBackendClient", () => {
       "acquirePromptEditLease",
       "editQueuedPrompt",
       "cancelQueuedPrompt",
+      "waitForPrompt",
+      "submitPromptAccepted",
       "waitForPrompt",
     ]);
   });

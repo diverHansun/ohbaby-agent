@@ -17,6 +17,7 @@ import type {
   UiCompletedPromptSubmission,
   UiPromptQueueClient,
   UiPromptSubmission,
+  UiPromptTerminalStatus,
   UiProbeModelContextWindowResult,
   UiSetSearchApiKeyResult,
   UiSlashCommandCatalog,
@@ -416,6 +417,8 @@ class DurablePromptFakeBackend
   private resolveCompletion:
     | ((completion: UiPromptCompletion) => void)
     | undefined;
+  lastWaitSignal: AbortSignal | undefined;
+  waitAbortObserved = false;
 
   override submitPromptAccepted(
     text: string,
@@ -487,26 +490,48 @@ class DurablePromptFakeBackend
     if (this.prompt?.promptId !== input.promptId) {
       return Promise.reject(new Error("prompt not found"));
     }
-    this.prompt = {
+    this.complete("cancelled");
+    return Promise.resolve(this.prompt);
+  }
+
+  complete(status: UiPromptTerminalStatus): void {
+    if (!this.prompt) {
+      throw new Error("prompt not accepted");
+    }
+    const base = {
       ...this.prompt,
       endedAt: "2026-06-12T00:00:02.000Z",
-      status: "cancelled",
       updatedAt: "2026-06-12T00:00:02.000Z",
     };
-    this.completedPrompt = {
-      clientRequestId: this.prompt.clientRequestId,
-      createdAt: this.prompt.createdAt,
-      endedAt: "2026-06-12T00:00:02.000Z",
-      promptId: this.prompt.promptId,
-      scopeKey: this.prompt.scopeKey,
-      sessionId: this.prompt.sessionId,
-      status: "cancelled",
-      text: this.prompt.text,
-      updatedAt: "2026-06-12T00:00:02.000Z",
-      userMessageId: this.prompt.userMessageId,
-    };
-    this.resolveCompletion?.({ prompt: this.completedPrompt });
-    return Promise.resolve(this.prompt);
+    const completed: UiCompletedPromptSubmission =
+      status === "failed"
+        ? {
+            ...base,
+            error: {
+              code: "PROVIDER_FAILED",
+              message: "provider failed",
+              retryable: true,
+              source: "provider",
+            },
+            status,
+          }
+        : status === "interrupted"
+          ? {
+              ...base,
+              error: {
+                code: "PROCESS_INTERRUPTED",
+                message: "run interrupted",
+                retryable: false,
+                source: "runtime",
+              },
+              status,
+            }
+          : status === "succeeded"
+            ? { ...base, error: undefined, status }
+            : { ...base, error: undefined, status: "cancelled" };
+    this.completedPrompt = completed;
+    this.prompt = completed;
+    this.resolveCompletion?.({ prompt: completed });
   }
 
   override acquirePromptEditLease(
@@ -566,12 +591,27 @@ class DurablePromptFakeBackend
     return Promise.resolve(this.prompt);
   }
 
-  override waitForPrompt(): ReturnType<UiPromptQueueClient["waitForPrompt"]> {
+  override waitForPrompt(
+    _promptId: string,
+    options?: Parameters<UiPromptQueueClient["waitForPrompt"]>[1],
+  ): ReturnType<UiPromptQueueClient["waitForPrompt"]> {
     if (this.completedPrompt) {
       return Promise.resolve({ prompt: this.completedPrompt });
     }
-    return new Promise((resolve) => {
+    this.lastWaitSignal = options?.signal;
+    return new Promise((resolve, reject) => {
       this.resolveCompletion = resolve;
+      const signal = options?.signal;
+      if (!signal) return;
+      const abort = (): void => {
+        this.waitAbortObserved = true;
+        reject(new DOMException("The prompt wait was aborted", "AbortError"));
+      };
+      if (signal.aborted) {
+        abort();
+        return;
+      }
+      signal.addEventListener("abort", abort, { once: true });
     });
   }
 }
@@ -2940,6 +2980,280 @@ describe("createDaemonServerApp", () => {
         error: { message: "Prompt belongs to another session" },
         ok: false,
       });
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it.each([
+    "succeeded",
+    "failed",
+    "cancelled",
+    "interrupted",
+  ] as const)("returns %s from the registered REST prompt wait route", async (status) => {
+    const backend = new DurablePromptFakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    const headers = {
+      ...authHeaders(),
+      "content-type": "application/json",
+      "x-ohbaby-client-id": "client_web",
+    };
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers,
+        method: "POST",
+      });
+      const accepted = await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({
+          clientRequestId: "request_1",
+          sessionId: "session_1",
+          text: "hello",
+        }),
+        headers,
+        method: "POST",
+      });
+      expect(accepted.status).toBe(202);
+      backend.complete(status);
+
+      const response = await handle.app.request(
+        "/v1/prompts/prompt_1/completion",
+        { headers },
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        readonly completion: UiPromptCompletion;
+        readonly ok: true;
+      };
+      expect(body.ok).toBe(true);
+      expect(body.completion.prompt).toMatchObject({
+        endedAt: "2026-06-12T00:00:02.000Z",
+        status,
+      });
+      if (
+        body.completion.prompt.status === "failed" ||
+        body.completion.prompt.status === "interrupted"
+      ) {
+        expect(body.completion.prompt.error.code).toBe(
+          body.completion.prompt.status === "failed"
+            ? "PROVIDER_FAILED"
+            : "PROCESS_INTERRUPTED",
+        );
+      } else {
+        expect(body.completion.prompt.error).toBeUndefined();
+      }
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("rejects unknown and foreign REST prompt waits without revealing ownership", async () => {
+    const backend = new DurablePromptFakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    const headersFor = (clientId: string): Record<string, string> => ({
+      ...authHeaders(),
+      "content-type": "application/json",
+      "x-ohbaby-client-id": clientId,
+    });
+    try {
+      for (const clientId of ["client_a", "client_b"]) {
+        await handle.app.request("/v1/clients", {
+          body: JSON.stringify({ clientId }),
+          headers: headersFor(clientId),
+          method: "POST",
+        });
+      }
+      await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({
+          clientRequestId: "request_1",
+          sessionId: "session_1",
+          text: "hello",
+        }),
+        headers: headersFor("client_a"),
+        method: "POST",
+      });
+
+      const unknown = await handle.app.request(
+        "/v1/prompts/prompt_missing/completion",
+        { headers: headersFor("client_a") },
+      );
+      const foreign = await handle.app.request(
+        "/v1/prompts/prompt_1/completion",
+        { headers: headersFor("client_b") },
+      );
+
+      expect(unknown.status).toBe(403);
+      expect(foreign.status).toBe(403);
+      await expect(unknown.json()).resolves.toEqual(
+        await foreign.clone().json(),
+      );
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("forwards REST wait cancellation without cancelling the accepted prompt", async () => {
+    const backend = new DurablePromptFakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    const headers = {
+      ...authHeaders(),
+      "content-type": "application/json",
+      "x-ohbaby-client-id": "client_web",
+    };
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers,
+        method: "POST",
+      });
+      await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({
+          clientRequestId: "request_1",
+          sessionId: "session_1",
+          text: "hello",
+        }),
+        headers,
+        method: "POST",
+      });
+
+      const controller = new AbortController();
+      const waiting = handle.app.request(
+        new Request("http://localhost/v1/prompts/prompt_1/completion", {
+          headers,
+          signal: controller.signal,
+        }),
+      );
+      await vi.waitUntil(() => backend.lastWaitSignal !== undefined);
+      controller.abort();
+      await waiting;
+
+      expect(backend.waitAbortObserved).toBe(true);
+      expect((await backend.getSnapshot()).prompts).toMatchObject([
+        { promptId: "prompt_1", status: "queued" },
+      ]);
+
+      backend.complete("succeeded");
+      const completed = await handle.app.request(
+        "/v1/prompts/prompt_1/completion",
+        { headers },
+      );
+      expect(completed.status).toBe(200);
+      await expect(completed.json()).resolves.toMatchObject({
+        completion: { prompt: { status: "succeeded" } },
+        ok: true,
+      });
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("routes REST interaction responses through the shared owner claim", async () => {
+    const backend = new FakeBackend();
+    const records: UiCommandRecord[] = [];
+    const handle = createApp(backend, {
+      commandRecorder: { record: (record) => records.push(record) },
+    });
+    await handle.start();
+    const headers = {
+      ...authHeaders(),
+      "content-type": "application/json",
+      "x-ohbaby-client-id": "client_web",
+    };
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers,
+        method: "POST",
+      });
+      await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          clientId: "client_web",
+          id: "rpc_execute",
+          method: "executeCommand",
+          params: [
+            {
+              argv: [],
+              clientInvocationId: "invoke_1",
+              commandId: "status",
+              path: ["status"],
+              raw: "/status",
+              rawArgs: "",
+              surface: "web",
+            },
+          ],
+        }),
+        headers,
+        method: "POST",
+      });
+      backend.emit({
+        command: {
+          clientInvocationId: "invoke_1",
+          commandId: "status",
+          commandRunId: "command_1",
+          path: ["status"],
+          surface: "web",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.started",
+      });
+      backend.emit({
+        request: {
+          clientInvocationId: "invoke_1",
+          commandRunId: "command_1",
+          interactionId: "interaction_1",
+          kind: "confirm",
+          subject: "permission",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "interaction.requested",
+      });
+      records.length = 0;
+
+      const unknown = await handle.app.request(
+        "/v1/interactions/interaction_missing/respond",
+        {
+          body: JSON.stringify({
+            response: { kind: "accepted", value: true },
+          }),
+          headers,
+          method: "POST",
+        },
+      );
+      expect(unknown.status).toBe(403);
+      expect(records).toEqual([]);
+
+      const response = await handle.app.request(
+        "/v1/interactions/interaction_1/respond",
+        {
+          body: JSON.stringify({
+            response: { kind: "accepted", value: true },
+          }),
+          headers,
+          method: "POST",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(backend.interactionResponses).toEqual([
+        {
+          interactionId: "interaction_1",
+          response: { kind: "accepted", value: true },
+        },
+      ]);
+      expect(
+        records.filter((record) => record.method === "respondInteraction"),
+      ).toMatchObject([
+        { entryPoint: "server-rest", phase: "started" },
+        {
+          entryPoint: "server-rest",
+          outcome: { kind: "returned" },
+          phase: "completed",
+        },
+      ]);
     } finally {
       await handle.dispose();
     }

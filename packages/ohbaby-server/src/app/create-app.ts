@@ -31,6 +31,7 @@ import { isAuthorizedDaemonRequest } from "../auth/token.js";
 import {
   DaemonClientViewCoordinator,
   parseDaemonStartupIntent,
+  respondInteractionForClient,
 } from "../coordination/client-view.js";
 import { EventBus, type EventEnvelope } from "../coordination/event-bus.js";
 import { PermissionRouter } from "../coordination/permission-router.js";
@@ -38,8 +39,6 @@ import {
   acquirePromptEditLeaseForClient,
   acceptDaemonPrompt,
   renewPromptEditLeaseForClient,
-  submitDaemonPrompt,
-  supportsPromptQueue,
 } from "../coordination/prompt-backend.js";
 import {
   callDaemonBackend,
@@ -654,6 +653,26 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
             "409": { description: "Prompt is no longer queued" },
           },
           summary: "Edit a queued prompt",
+        },
+      },
+      "/v1/prompts/{id}/completion": {
+        get: {
+          responses: {
+            "200": { description: "Prompt terminal completion" },
+            "403": { description: "Prompt is unavailable to this client" },
+          },
+          summary: "Wait for a prompt to reach a terminal state",
+        },
+      },
+      "/v1/interactions/{id}/respond": {
+        post: {
+          responses: {
+            "200": { description: "Interaction response accepted" },
+            "403": {
+              description: "Interaction is unavailable to this client",
+            },
+          },
+          summary: "Respond to an interaction owned by a browser client",
         },
       },
       "/v1/sessions": {
@@ -1378,66 +1397,32 @@ class DaemonServerAppRuntime {
         );
       }
       const commandBackend = this.commandBackend("server-rest", { clientId });
-      if (supportsPromptQueue(commandBackend)) {
-        try {
-          const accepted = await acceptDaemonPrompt({
-            backend: commandBackend,
-            clientId,
-            clientViews: this.clientViews,
-            createSessionId: this.createSessionId,
-            options: {
-              clientRequestId,
-              ...(sessionId === undefined ? {} : { sessionId }),
-            },
-            permissionRouter: this.permissionRouter,
-            text,
-          });
-          return context.json({ ok: true, ...accepted.receipt }, 202);
-        } catch (error) {
-          return context.json(
-            promptErrorBody(error),
-            promptMutationStatus(error),
-          );
-        }
-      }
-
-      const submitted = submitDaemonPrompt({
-        backend: commandBackend,
-        clientId,
-        clientViews: this.clientViews,
-        createSessionId: this.createSessionId,
-        options: sessionId === undefined ? undefined : { sessionId },
-        permissionRouter: this.permissionRouter,
-        text,
-      });
-      void submitted.completion.catch((error: unknown) => {
-        this.writeErrorToClient(
+      try {
+        const accepted = await acceptDaemonPrompt({
+          backend: commandBackend,
           clientId,
-          error instanceof Error ? error.message : String(error),
+          clientViews: this.clientViews,
+          createSessionId: this.createSessionId,
+          options: {
+            clientRequestId,
+            ...(sessionId === undefined ? {} : { sessionId }),
+          },
+          permissionRouter: this.permissionRouter,
+          text,
+        });
+        return context.json({ ok: true, ...accepted.receipt }, 202);
+      } catch (error) {
+        return context.json(
+          promptErrorBody(error),
+          promptMutationStatus(error),
         );
-      });
-
-      return context.json(
-        {
-          ok: true,
-          ...(submitted.item.sessionId === undefined
-            ? {}
-            : { sessionId: submitted.item.sessionId }),
-        },
-        202,
-      );
+      }
     });
 
     this.app.patch("/v1/prompts/:id", async (context) => {
       const authorization = this.authorizePromptMutation(context);
       if ("response" in authorization) {
         return authorization.response;
-      }
-      if (!supportsPromptQueue(this.options.backend)) {
-        return context.json(
-          webErrorBody("Durable prompt admission is not supported"),
-          409,
-        );
       }
       const parsed = await readJsonWithLimit(context.req.raw);
       if (!parsed.ok) {
@@ -1484,16 +1469,41 @@ class DaemonServerAppRuntime {
       }
     });
 
-    this.app.delete("/v1/prompts/:id", async (context) => {
+    this.app.get("/v1/prompts/:id/completion", async (context) => {
       const authorization = this.authorizePromptMutation(context);
       if ("response" in authorization) {
         return authorization.response;
       }
-      if (!supportsPromptQueue(this.options.backend)) {
+      const promptId = context.req.param("id");
+      try {
+        if (
+          !this.clientViews.canAccessPrompt(
+            authorization.clientId,
+            await this.options.backend.getSnapshot(),
+            promptId,
+          )
+        ) {
+          return context.json(
+            webErrorBody("Prompt is unavailable to this client"),
+            403,
+          );
+        }
+        const completion = await this.options.backend.waitForPrompt(promptId, {
+          signal: context.req.raw.signal,
+        });
+        return context.json({ completion, ok: true });
+      } catch (error) {
         return context.json(
-          webErrorBody("Durable prompt admission is not supported"),
-          409,
+          promptErrorBody(error),
+          promptMutationStatus(error),
         );
+      }
+    });
+
+    this.app.delete("/v1/prompts/:id", async (context) => {
+      const authorization = this.authorizePromptMutation(context);
+      if ("response" in authorization) {
+        return authorization.response;
       }
       const parsed = await readJsonWithLimit(context.req.raw);
       if (!parsed.ok) {
@@ -1535,12 +1545,6 @@ class DaemonServerAppRuntime {
     this.app.post("/v1/prompts/:id/edit-lease", async (context) => {
       const authorization = this.authorizePromptMutation(context);
       if ("response" in authorization) return authorization.response;
-      if (!supportsPromptQueue(this.options.backend)) {
-        return context.json(
-          webErrorBody("Durable prompt admission is not supported"),
-          409,
-        );
-      }
       try {
         if (
           !this.clientViews.canAccessPrompt(
@@ -1573,12 +1577,6 @@ class DaemonServerAppRuntime {
     this.app.patch("/v1/prompts/:id/edit-lease", async (context) => {
       const authorization = this.authorizePromptMutation(context);
       if ("response" in authorization) return authorization.response;
-      if (!supportsPromptQueue(this.options.backend)) {
-        return context.json(
-          webErrorBody("Durable prompt admission is not supported"),
-          409,
-        );
-      }
       const parsed = await readJsonWithLimit(context.req.raw);
       if (!parsed.ok) {
         return context.json(
@@ -1611,12 +1609,6 @@ class DaemonServerAppRuntime {
     this.app.delete("/v1/prompts/:id/edit-lease", async (context) => {
       const authorization = this.authorizePromptMutation(context);
       if ("response" in authorization) return authorization.response;
-      if (!supportsPromptQueue(this.options.backend)) {
-        return context.json(
-          webErrorBody("Durable prompt admission is not supported"),
-          409,
-        );
-      }
       const parsed = await readJsonWithLimit(context.req.raw);
       if (!parsed.ok) {
         return context.json(
@@ -1641,6 +1633,43 @@ class DaemonServerAppRuntime {
         return context.json(
           promptErrorBody(error),
           promptMutationStatus(error),
+        );
+      }
+    });
+
+    this.app.post("/v1/interactions/:id/respond", async (context) => {
+      const authorization = this.authorizePromptMutation(context);
+      if ("response" in authorization) {
+        return authorization.response;
+      }
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok) {
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      }
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      if (!isRecord(body.response)) {
+        return context.json(webErrorBody("response is required"), 400);
+      }
+      try {
+        await respondInteractionForClient({
+          backend: this.commandBackend("server-rest", {
+            clientId: authorization.clientId,
+          }),
+          clientId: authorization.clientId,
+          clientViews: this.clientViews,
+          interactionId: context.req.param("id"),
+          response: body.response as Parameters<
+            UiBackendClient["respondInteraction"]
+          >[1],
+        });
+        return context.json({ ok: true });
+      } catch (error) {
+        return context.json(
+          webErrorBody(errorMessage(error)),
+          isDaemonForbiddenError(error) ? 403 : mutationErrorStatus(error),
         );
       }
     });
@@ -2137,14 +2166,6 @@ class DaemonServerAppRuntime {
       ?.get(client.clientId);
     if (routed) {
       client.write({ event: routed, type: "ui.event" }, envelope.seqNum);
-    }
-  }
-
-  private writeErrorToClient(clientId: string, message: string): void {
-    for (const client of Array.from(this.clients)) {
-      if (client.clientId === clientId) {
-        client.write({ message, type: "error" });
-      }
     }
   }
 

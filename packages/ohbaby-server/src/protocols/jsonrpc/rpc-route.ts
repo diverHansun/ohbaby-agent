@@ -8,7 +8,10 @@ import type {
   UiRenewPromptEditLeaseInput,
 } from "ohbaby-sdk";
 import {
+  DaemonForbiddenError,
+  isDaemonForbiddenError,
   parseDaemonStartupIntent,
+  respondInteractionForClient,
   type DaemonClientViewCoordinator,
 } from "../../coordination/client-view.js";
 import { PermissionRouter } from "../../coordination/permission-router.js";
@@ -16,8 +19,6 @@ import {
   acquirePromptEditLeaseForClient,
   acceptDaemonPrompt,
   renewPromptEditLeaseForClient,
-  submitDaemonPrompt,
-  supportsPromptQueue,
 } from "../../coordination/prompt-backend.js";
 import {
   createDaemonRpcFailure,
@@ -33,25 +34,10 @@ type ExecuteCommandInvocation = Parameters<
   UiBackendClient["executeCommand"]
 >[0];
 
-export class DaemonForbiddenError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "DaemonForbiddenError";
-  }
-}
-
-export function isDaemonForbiddenError(
-  error: unknown,
-): error is DaemonForbiddenError {
-  return error instanceof DaemonForbiddenError;
-}
+export { DaemonForbiddenError, isDaemonForbiddenError };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isUnconsumedInteractionValidationError(error: unknown): boolean {
-  return isRecord(error) && error.code === "INVALID_INTERACTION_RESPONSE";
 }
 
 function requestIdFromBody(body: unknown): string {
@@ -158,43 +144,7 @@ export async function callDaemonBackend(input: {
       return backend.listCommands(
         request.params[0] as Parameters<UiBackendClient["listCommands"]>[0],
       );
-    case "submitPrompt": {
-      const options = submitPromptOptions(request.params[1]);
-      if (supportsPromptQueue(backend)) {
-        const accepted = await acceptDaemonPrompt({
-          backend,
-          clientId: request.clientId,
-          clientViews,
-          createSessionId,
-          options,
-          permissionRouter,
-          text: request.params[0] as string,
-        });
-        const completion = await accepted.completion;
-        if (
-          completion.prompt.status === "failed" ||
-          completion.prompt.status === "interrupted"
-        ) {
-          throw new Error(completion.prompt.error.message);
-        }
-        return undefined;
-      }
-      const submitted = submitDaemonPrompt({
-        backend,
-        clientId: request.clientId,
-        clientViews,
-        createSessionId,
-        options,
-        permissionRouter,
-        text: request.params[0] as string,
-      });
-      await submitted.completion;
-      return undefined;
-    }
     case "submitPromptAccepted": {
-      if (!supportsPromptQueue(backend)) {
-        throw new Error("Durable prompt admission is not supported");
-      }
       const accepted = await acceptDaemonPrompt({
         backend,
         clientId: request.clientId,
@@ -207,9 +157,6 @@ export async function callDaemonBackend(input: {
       return accepted.receipt;
     }
     case "editQueuedPrompt": {
-      if (!supportsPromptQueue(backend)) {
-        throw new Error("Durable prompt admission is not supported");
-      }
       const input = request.params[0] as UiEditQueuedPromptInput;
       if (
         !clientViews.canAccessPrompt(
@@ -223,9 +170,6 @@ export async function callDaemonBackend(input: {
       return backend.editQueuedPrompt(input);
     }
     case "cancelQueuedPrompt": {
-      if (!supportsPromptQueue(backend)) {
-        throw new Error("Durable prompt admission is not supported");
-      }
       const input = request.params[0] as UiCancelQueuedPromptInput;
       if (
         !clientViews.canAccessPrompt(
@@ -239,9 +183,6 @@ export async function callDaemonBackend(input: {
       return backend.cancelQueuedPrompt(input);
     }
     case "acquirePromptEditLease": {
-      if (!supportsPromptQueue(backend)) {
-        throw new Error("Durable prompt admission is not supported");
-      }
       const input = request.params[0] as UiAcquirePromptEditLeaseInput;
       if (
         !clientViews.canAccessPrompt(
@@ -259,23 +200,14 @@ export async function callDaemonBackend(input: {
       );
     }
     case "renewPromptEditLease": {
-      if (!supportsPromptQueue(backend)) {
-        throw new Error("Durable prompt admission is not supported");
-      }
       const input = request.params[0] as UiRenewPromptEditLeaseInput;
       return renewPromptEditLeaseForClient(backend, input, request.clientId);
     }
     case "releasePromptEditLease": {
-      if (!supportsPromptQueue(backend)) {
-        throw new Error("Durable prompt admission is not supported");
-      }
       const input = request.params[0] as UiReleasePromptEditLeaseInput;
       return backend.releasePromptEditLease(input);
     }
     case "waitForPrompt": {
-      if (!supportsPromptQueue(backend)) {
-        throw new Error("Durable prompt admission is not supported");
-      }
       const promptId = request.params[0] as string;
       if (
         !clientViews.canAccessPrompt(
@@ -342,38 +274,16 @@ export async function callDaemonBackend(input: {
       );
     case "respondInteraction": {
       const interactionId = request.params[0] as string;
-      const claim = clientViews.claimInteractionResponse(
+      await respondInteractionForClient({
+        backend,
+        clientId: request.clientId,
+        clientViews,
         interactionId,
-        request.clientId,
-      );
-      if (claim === undefined) {
-        throw new DaemonForbiddenError(
-          "Interaction is unknown, already answered, or owned by another client",
-        );
-      }
-      try {
-        await backend.respondInteraction(
-          interactionId,
-          request.params[1] as Parameters<
-            UiBackendClient["respondInteraction"]
-          >[1],
-        );
-        clientViews.consumeInteractionClaim(interactionId, claim.claimToken);
-        return undefined;
-      } catch (error) {
-        if (isUnconsumedInteractionValidationError(error)) {
-          clientViews.releaseInteractionClaim(
-            interactionId,
-            claim.claimToken,
-          );
-        } else {
-          clientViews.consumeInteractionClaim(
-            interactionId,
-            claim.claimToken,
-          );
-        }
-        throw error;
-      }
+        response: request.params[1] as Parameters<
+          UiBackendClient["respondInteraction"]
+        >[1],
+      });
+      return undefined;
     }
     case "abortRun":
       return backend.abortRun(request.params[0] as string | undefined);

@@ -409,6 +409,42 @@ describe("DaemonClientViewCoordinator", () => {
     ).toBe("session_generated");
   });
 
+  it("keeps an explicitly submitted prompt visible before its session appears", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    coordinator.initializeClient("client_a", emptySnapshot(), {
+      startupSessionMode: { type: "fresh" },
+    });
+    coordinator.preparePromptSubmit(
+      "client_a",
+      { sessionId: "session_explicit" },
+      () => "unused",
+    );
+    const snapshot = {
+      ...emptySnapshot(),
+      prompts: [
+        {
+          clientRequestId: "request_1",
+          createdAt: timestamp,
+          promptId: "prompt_1",
+          scopeKey: "/repo",
+          sessionId: "session_explicit",
+          status: "queued" as const,
+          text: "hello",
+          updatedAt: timestamp,
+          userMessageId: "message_1",
+        },
+      ],
+    };
+
+    expect(coordinator.projectSnapshot("client_a", snapshot)).toMatchObject({
+      activeSessionId: "session_explicit",
+      prompts: [{ promptId: "prompt_1" }],
+    });
+    expect(coordinator.canAccessPrompt("client_a", snapshot, "prompt_1")).toBe(
+      true,
+    );
+  });
+
   it("filters session scoped events outside a client view", () => {
     const coordinator = new DaemonClientViewCoordinator();
     const snapshot = {

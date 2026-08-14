@@ -208,7 +208,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     text: string,
     options?: Parameters<UiBackendClient["submitPrompt"]>[1],
   ): ReturnType<UiBackendClient["submitPrompt"]> {
-    return this.rpc("submitPrompt", [text, options]);
+    return this.submitPromptAndWait(text, options).then(() => undefined);
   }
 
   submitPromptAccepted(

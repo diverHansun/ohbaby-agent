@@ -1,11 +1,9 @@
-/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility bridge */
 import type {
   SubmitPromptOptions,
   UiAcquirePromptEditLeaseInput,
   UiBackendClient,
   UiPromptCompletion,
   UiPromptEditLease,
-  UiPromptQueueClient,
   UiPromptReceipt,
   UiRenewPromptEditLeaseInput,
 } from "ohbaby-sdk";
@@ -18,21 +16,6 @@ export interface DaemonPromptItem {
   readonly sessionId?: string;
   readonly text: string;
   readonly options?: SubmitPromptOptions;
-}
-
-export function supportsPromptQueue(
-  backend: UiBackendClient,
-): backend is UiPromptQueueClient {
-  const candidate = backend as Partial<UiPromptQueueClient>;
-  return (
-    typeof candidate.submitPromptAccepted === "function" &&
-    typeof candidate.editQueuedPrompt === "function" &&
-    typeof candidate.cancelQueuedPrompt === "function" &&
-    typeof candidate.acquirePromptEditLease === "function" &&
-    typeof candidate.renewPromptEditLease === "function" &&
-    typeof candidate.releasePromptEditLease === "function" &&
-    typeof candidate.waitForPrompt === "function"
-  );
 }
 
 function trustedQueueExecutionPort(
@@ -70,11 +53,6 @@ export function renewPromptEditLeaseForClient(
 export interface AcceptedDaemonPrompt {
   readonly completion: Promise<UiPromptCompletion>;
   readonly receipt: UiPromptReceipt;
-}
-
-export interface SubmittedDaemonPrompt {
-  readonly completion: Promise<void>;
-  readonly item: DaemonPromptItem;
 }
 
 function beginPromptOwnership(input: {
@@ -116,35 +94,12 @@ function beginPromptOwnership(input: {
 }
 
 /**
- * Compatibility path for injected/test backends that predate durable prompt
- * admission. It deliberately performs no scheduling: production backends use
- * WorkspacePromptScheduler as the only queue owner.
- */
-export function submitDaemonPrompt(input: {
-  readonly backend: UiBackendClient;
-  readonly clientId: string;
-  readonly clientViews: DaemonClientViewCoordinator;
-  readonly createSessionId: () => string;
-  readonly options?: SubmitPromptOptions;
-  readonly permissionRouter: PermissionRouter;
-  readonly text: string;
-}): SubmittedDaemonPrompt {
-  const started = beginPromptOwnership(input);
-  const completion = Promise.resolve()
-    .then(() =>
-      input.backend.submitPrompt(started.item.text, started.item.options),
-    )
-    .finally(started.release);
-  return { completion, item: started.item };
-}
-
-/**
  * Establish routing ownership before admission because a newly accepted
  * prompt may start synchronously and emit run/permission events before the
  * receipt is returned to the caller.
  */
 export async function acceptDaemonPrompt(input: {
-  readonly backend: UiPromptQueueClient;
+  readonly backend: UiBackendClient;
   readonly clientId: string;
   readonly clientViews: DaemonClientViewCoordinator;
   readonly createSessionId: () => string;

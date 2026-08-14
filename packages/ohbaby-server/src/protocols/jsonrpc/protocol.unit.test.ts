@@ -123,7 +123,6 @@ describe("daemon protocol", () => {
       "initializeClient",
       "getContextWindowUsage",
       "listCommands",
-      "submitPrompt",
       "submitPromptAccepted",
       "editQueuedPrompt",
       "cancelQueuedPrompt",
