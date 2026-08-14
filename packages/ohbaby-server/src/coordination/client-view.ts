@@ -522,12 +522,16 @@ export class DaemonClientViewCoordinator {
   }
 
   afterEventBroadcast(event: UiEvent): void {
+    // A command may deliver multiple result events, so only an explicit
+    // failure is terminal here. Successful ownership is released during
+    // client routing cleanup until the event contract gains a completion signal.
     if (event.type === "command.failed") {
       this.forgetCommandOwner(event);
     }
   }
 
-  disconnectClient(clientId: string): void {
+  disconnectClient(clientId: string): readonly string[] {
+    const interactionIds: string[] = [];
     for (const [invocationId, owner] of this.commandOwnersByInvocationId) {
       if (owner === clientId) {
         this.commandOwnersByInvocationId.delete(invocationId);
@@ -545,9 +549,13 @@ export class DaemonClientViewCoordinator {
     }
     for (const [interactionId, state] of this.interactionResponseStates) {
       if (state.ownerClientId === clientId) {
+        if (state.kind !== "consumed") {
+          interactionIds.push(interactionId);
+        }
         this.interactionResponseStates.delete(interactionId);
       }
     }
+    return interactionIds;
   }
 
   resetRuntimeState(): void {

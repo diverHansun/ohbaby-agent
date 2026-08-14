@@ -120,6 +120,7 @@ class FakeBackend implements UiBackendClient {
   readonly handlers = new Set<UiEventHandler>();
   readonly archiveInputs: Parameters<UiBackendClient["archiveSession"]>[0][] =
     [];
+  readonly abortedRunIds: string[] = [];
   readonly compactInputs: Parameters<UiBackendClient["compactSession"]>[0][] =
     [];
   readonly connectInputs: UiConnectModelInput[] = [];
@@ -468,7 +469,8 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve();
   }
 
-  abortRun(): Promise<void> {
+  abortRun(runId: string): Promise<void> {
+    this.abortedRunIds.push(runId);
     return Promise.resolve();
   }
 
@@ -497,6 +499,105 @@ function selectedSessionIdFromInvocation(
 }
 
 describe("ohbaby-web with ohbaby-server /v1", () => {
+  it("resolves abort targets at the web runtime boundary", async () => {
+    const backend = new FakeBackend({
+      snapshot: {
+        ...emptySnapshot(),
+        activeSessionId: "session_1",
+        runs: [
+          {
+            id: "run_1",
+            sessionId: "session_1",
+            startedAt: timestamp,
+            status: { kind: "running", runId: "run_1" },
+            updatedAt: timestamp,
+          },
+          {
+            id: "run_2",
+            sessionId: "session_2",
+            startedAt: timestamp,
+            status: { kind: "running", runId: "run_2" },
+            updatedAt: timestamp,
+          },
+        ],
+        sessions: [
+          {
+            createdAt: timestamp,
+            id: "session_1",
+            messages: [],
+            title: "Session 1",
+            updatedAt: timestamp,
+          },
+          {
+            createdAt: timestamp,
+            id: "session_2",
+            messages: [],
+            title: "Session 2",
+            updatedAt: timestamp,
+          },
+        ],
+        status: { kind: "running", runId: "run_1" },
+      },
+    });
+    const server = createDaemonServerApp({
+      authToken,
+      backend,
+      packageVersion: "0.1.7-test",
+    });
+    await server.start();
+    try {
+      const fetchImpl: typeof fetch = (input, init = {}) => {
+        const url = new URL(urlFromRequestInput(input));
+        return Promise.resolve(
+          server.app.request(`${url.pathname}${url.search}`, {
+            body: init.body,
+            headers: init.headers,
+            method: init.method,
+            signal: init.signal,
+          }),
+        );
+      };
+      const runtime = createOhbabyWebRuntime(
+        {
+          baseUrl: "http://127.0.0.1:4096",
+          clientId: "client_web",
+          directory: "/repo",
+          startupIntent: { resumeSessionId: "session_1" },
+          token: authToken,
+        },
+        { fetch: fetchImpl },
+      );
+      await runtime.ready;
+
+      await expect(
+        runtime.abortSession("session_1", "run_1"),
+      ).resolves.toBeUndefined();
+      expect(backend.abortedRunIds).toEqual(["run_1"]);
+
+      await expect(runtime.abortSession("session_2", "run_1")).rejects.toThrow(
+        "does not belong to session",
+      );
+      expect(backend.abortedRunIds).toEqual(["run_1"]);
+
+      await runtime.selectSession("session_2");
+      await expect(
+        runtime.abortSession("session_2", "run_2"),
+      ).resolves.toBeUndefined();
+      expect(backend.abortedRunIds).toEqual(["run_1", "run_2"]);
+
+      await expect(
+        runtime.abortSession("session_without_run"),
+      ).resolves.toBeUndefined();
+      await expect(
+        runtime.abortSession("session_2", "run_unknown"),
+      ).resolves.toBeUndefined();
+      expect(backend.abortedRunIds).toEqual(["run_1", "run_2"]);
+      await runtime.dispose();
+    } finally {
+      await server.dispose();
+    }
+  });
+
   it("connects through app.request and consumes prompt events", async () => {
     const backend = new FakeBackend();
     const server = createDaemonServerApp({

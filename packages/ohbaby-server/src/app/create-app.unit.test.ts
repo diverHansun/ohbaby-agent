@@ -24,6 +24,10 @@ import type {
   UiUnsubscribe,
 } from "ohbaby-sdk";
 import { daemonAuthHeader } from "../auth/token.js";
+import {
+  createInProcessUiBackendClient,
+  type PersistentUiBackendOptions,
+} from "ohbaby-agent";
 import { createDaemonServerApp } from "./create-app.js";
 
 const timestamp = "2026-06-12T00:00:00.000Z";
@@ -119,6 +123,49 @@ function setSearchApiKeyResult(): UiSetSearchApiKeyResult {
   };
 }
 
+function createOneShotLlmClient(
+  text: string,
+): NonNullable<PersistentUiBackendOptions["llmClient"]> {
+  return {
+    config: {
+      apiKeyEnv: "FAKE_API_KEY",
+      baseUrl: "https://example.invalid/v1",
+      interfaceProvider: "openai-compatible",
+      maxTokens: 128,
+      model: "fake-model",
+      provider: "fake",
+      temperature: 0,
+    },
+    provider: {
+      client: { kind: "fake" },
+      id: "fake",
+      isAbortError(): boolean {
+        return false;
+      },
+      kind: "openai-compatible",
+      streamChatCompletion(): Promise<
+        AsyncIterable<{
+          readonly finishReason: "stop";
+          readonly textDelta: string;
+        }>
+      > {
+        return Promise.resolve(
+          (async function* (): AsyncGenerator<
+            { readonly finishReason: "stop"; readonly textDelta: string },
+            void,
+            unknown
+          > {
+            yield await Promise.resolve({
+              finishReason: "stop",
+              textDelta: text,
+            });
+          })(),
+        );
+      },
+    },
+  };
+}
+
 class FakeBackend implements UiBackendClient {
   admissionError: Error | undefined;
   private nextPromptId = 0;
@@ -127,7 +174,7 @@ class FakeBackend implements UiBackendClient {
     ReturnType<UiBackendClient["waitForPrompt"]>
   >();
   readonly handlers = new Set<UiEventHandler>();
-  readonly abortedRunIds: (string | undefined)[] = [];
+  readonly abortedRunIds: string[] = [];
   readonly archivedSessions: string[] = [];
   readonly executedCommands: UiSlashCommandInvocation[] = [];
   readonly compactOptions: Parameters<UiBackendClient["compactSession"]>[0][] =
@@ -427,7 +474,7 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve();
   }
 
-  abortRun(runId?: string): Promise<void> {
+  abortRun(runId: string): Promise<void> {
     this.abortedRunIds.push(runId);
     return Promise.resolve();
   }
@@ -674,7 +721,9 @@ class DurablePromptFakeBackend extends FakeBackend implements UiBackendClient {
 }
 
 function createApp(
-  backend = new FakeBackend(),
+  backend: Parameters<
+    typeof createDaemonServerApp
+  >[0]["backend"] = new FakeBackend(),
   options: Partial<Parameters<typeof createDaemonServerApp>[0]> = {},
 ): ReturnType<typeof createDaemonServerApp> {
   return createDaemonServerApp({
@@ -877,14 +926,98 @@ describe("createDaemonServerApp", () => {
     }
   });
 
+  it("records a REST prompt exactly once at the server boundary with a raw Agent backend", async () => {
+    const rawBackend = createInProcessUiBackendClient({
+      initialSnapshot: {
+        ...emptySnapshot(),
+        activeSessionId: "session_1",
+        sessions: [
+          {
+            createdAt: timestamp,
+            id: "session_1",
+            messages: [],
+            title: "Session",
+            updatedAt: timestamp,
+          },
+        ],
+      },
+      llmClient: createOneShotLlmClient("done"),
+      now: () => new Date(timestamp),
+    });
+    const records: UiCommandRecord[] = [];
+    const handle = createApp(rawBackend, {
+      commandRecorder: { record: (record) => records.push(record) },
+    });
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({
+          clientId: "client_web",
+          startupIntent: { resumeSessionId: "session_1" },
+        }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({
+          clientRequestId: "request_1",
+          sessionId: "session_1",
+          text: "private prompt",
+        }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+          "x-ohbaby-client-id": "client_web",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(202);
+      const body = (await response.json()) as { readonly promptId: string };
+      await expect(
+        rawBackend.waitForPrompt(body.promptId),
+      ).resolves.toMatchObject({ prompt: { status: "succeeded" } });
+      expect(records).toHaveLength(2);
+      expect(
+        records.map((record) => [
+          record.entryPoint,
+          record.method,
+          record.phase,
+        ]),
+      ).toEqual([
+        ["server-rest", "submitPromptAccepted", "started"],
+        ["server-rest", "submitPromptAccepted", "completed"],
+      ]);
+      expect(records[0]?.operationId).toBe(records[1]?.operationId);
+      expect(records[1]).toMatchObject({
+        correlation: {
+          clientId: "client_web",
+          clientRequestId: "request_1",
+          promptId: body.promptId,
+          sessionId: "session_1",
+        },
+        outcome: { kind: "returned" },
+      });
+      expect(JSON.stringify(records)).not.toContain("private prompt");
+    } finally {
+      await handle.dispose();
+      await rawBackend.dispose();
+    }
+  });
+
   it("keeps REST and RPC writes successful when the recorder fails", async () => {
     const stderr = vi
       .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
+    const recorderError = new Error("recorder unavailable");
+    recorderError.name = "secret-recorder-name";
     const handle = createApp(new FakeBackend(), {
       commandRecorder: {
         record(): never {
-          throw new Error("recorder unavailable");
+          throw recorderError;
         },
       },
     });
@@ -919,6 +1052,9 @@ describe("createDaemonServerApp", () => {
       expect(rest.status).toBe(200);
       expect(stderr).toHaveBeenCalledWith(
         expect.stringContaining('"type":"ui.command.observation.failure"'),
+      );
+      expect(stderr.mock.calls.flat().join("\n")).not.toContain(
+        "secret-recorder-name",
       );
     } finally {
       await handle.dispose();
@@ -3216,6 +3352,52 @@ describe("createDaemonServerApp", () => {
     }
   });
 
+  it("settles a REST prompt wait on server shutdown without cancelling the prompt", async () => {
+    const backend = new DurablePromptFakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    const headers = {
+      ...authHeaders(),
+      "content-type": "application/json",
+      "x-ohbaby-client-id": "client_web",
+    };
+    let disposed = false;
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers,
+        method: "POST",
+      });
+      await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({
+          clientRequestId: "request_1",
+          sessionId: "session_1",
+          text: "hello",
+        }),
+        headers,
+        method: "POST",
+      });
+
+      const waiting = handle.app.request("/v1/prompts/prompt_1/completion", {
+        headers,
+      });
+      await vi.waitUntil(() => backend.lastWaitSignal !== undefined);
+      await handle.dispose();
+      disposed = true;
+      const response = await waiting;
+
+      expect(response.status).not.toBe(200);
+      expect(backend.waitAbortObserved).toBe(true);
+      expect((await backend.getSnapshot()).prompts).toMatchObject([
+        { promptId: "prompt_1", status: "queued" },
+      ]);
+    } finally {
+      if (!disposed) {
+        await handle.dispose();
+      }
+    }
+  });
+
   it("forwards JSON-RPC transport cancellation only to the prompt waiter", async () => {
     const backend = new DurablePromptFakeBackend();
     const handle = createApp(backend);
@@ -3477,7 +3659,7 @@ describe("createDaemonServerApp", () => {
     }
   });
 
-  it("does not abort a session when no run belongs to it", async () => {
+  it("treats a session without an active run as an idempotent abort", async () => {
     const backend = new FakeBackend();
     const handle = createApp(backend);
     await handle.start();
@@ -3503,7 +3685,254 @@ describe("createDaemonServerApp", () => {
         },
       );
 
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(backend.abortedRunIds).toEqual([]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("does not abort a completed run", async () => {
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      activeSessionId: "session_1",
+      runs: [
+        {
+          id: "run_completed",
+          sessionId: "session_1",
+          startedAt: timestamp,
+          status: { kind: "idle" },
+          updatedAt: timestamp,
+        },
+      ],
+    });
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request(
+        "/v1/sessions/session_1/abort",
+        {
+          body: JSON.stringify({ runId: "run_completed" }),
+          headers: {
+            ...authHeaders(),
+            "content-type": "application/json",
+            "x-ohbaby-client-id": "client_web",
+          },
+          method: "POST",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(backend.abortedRunIds).toEqual([]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("treats an unknown runId as an idempotent abort", async () => {
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      activeSessionId: "session_1",
+      runs: [
+        {
+          id: "run_1",
+          sessionId: "session_1",
+          startedAt: timestamp,
+          status: { kind: "running", runId: "run_1" },
+          updatedAt: timestamp,
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
+    });
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request(
+        "/v1/sessions/session_1/abort",
+        {
+          body: JSON.stringify({ runId: "run_unknown" }),
+          headers: {
+            ...authHeaders(),
+            "content-type": "application/json",
+            "x-ohbaby-client-id": "client_web",
+          },
+          method: "POST",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(backend.abortedRunIds).toEqual([]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("aborts a second session run when global status points at another run", async () => {
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      activeSessionId: "session_1",
+      runs: [
+        {
+          id: "run_1",
+          sessionId: "session_1",
+          startedAt: timestamp,
+          status: { kind: "running", runId: "run_1" },
+          updatedAt: timestamp,
+        },
+        {
+          id: "run_2",
+          sessionId: "session_2",
+          startedAt: timestamp,
+          status: { kind: "running", runId: "run_2" },
+          updatedAt: timestamp,
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
+    });
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+
+      const response = await handle.app.request(
+        "/v1/sessions/session_2/abort",
+        {
+          body: JSON.stringify({ runId: "run_2" }),
+          headers: {
+            ...authHeaders(),
+            "content-type": "application/json",
+            "x-ohbaby-client-id": "client_web",
+          },
+          method: "POST",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(backend.abortedRunIds).toEqual(["run_2"]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it.each([
+    { body: [], label: "an array body" },
+    { body: null, label: "a null body" },
+    { body: { runId: null }, label: "a null runId" },
+    { body: { runId: 42 }, label: "a numeric runId" },
+    { body: { runId: "   " }, label: "a blank runId" },
+  ])("rejects $label without aborting the active run", async ({ body }) => {
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      activeSessionId: "session_1",
+      runs: [
+        {
+          id: "run_1",
+          sessionId: "session_1",
+          startedAt: timestamp,
+          status: { kind: "running", runId: "run_1" },
+          updatedAt: timestamp,
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
+    });
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+
+      const response = await handle.app.request(
+        "/v1/sessions/session_1/abort",
+        {
+          body: JSON.stringify(body),
+          headers: {
+            ...authHeaders(),
+            "content-type": "application/json",
+            "x-ohbaby-client-id": "client_web",
+          },
+          method: "POST",
+        },
+      );
+
+      expect(response.status).toBe(400);
+      expect(backend.abortedRunIds).toEqual([]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("rejects an abort when the requested run belongs to another session", async () => {
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      activeSessionId: "session_2",
+      runs: [
+        {
+          id: "run_2",
+          sessionId: "session_2",
+          startedAt: timestamp,
+          status: { kind: "running", runId: "run_2" },
+          updatedAt: timestamp,
+        },
+      ],
+      status: { kind: "running", runId: "run_2" },
+    });
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      const response = await handle.app.request(
+        "/v1/sessions/session_1/abort",
+        {
+          body: JSON.stringify({ runId: "run_2" }),
+          headers: {
+            ...authHeaders(),
+            "content-type": "application/json",
+            "x-ohbaby-client-id": "client_web",
+          },
+          method: "POST",
+        },
+      );
+
+      expect(response.status).toBe(409);
       expect(backend.abortedRunIds).toEqual([]);
     } finally {
       await handle.dispose();

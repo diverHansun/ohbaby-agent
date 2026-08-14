@@ -58,18 +58,28 @@ describe("createOhbabyWebStore", () => {
   it("isolates a throwing store listener from later observers", () => {
     const store = createOhbabyWebStore();
     const observed = vi.fn();
+    const observationDiagnostic = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     store.subscribe(() => {
       throw new Error("observer failed");
     });
     store.subscribe(observed);
 
-    expect(
-      store.applyEvent(
-        { snapshot: snapshot("safe"), type: "snapshot.replaced" },
-        0,
-        "snapshot-barrier",
-      ),
-    ).toBe(true);
-    expect(observed).toHaveBeenCalledTimes(1);
+    try {
+      expect(
+        store.applyEvent(
+          { snapshot: snapshot("safe"), type: "snapshot.replaced" },
+          0,
+          "snapshot-barrier",
+        ),
+      ).toBe(true);
+      expect(observed).toHaveBeenCalledTimes(1);
+      expect(observationDiagnostic).toHaveBeenCalledWith(
+        '{"stage":"store-listener","type":"ui.observation.failure"}',
+      );
+    } finally {
+      observationDiagnostic.mockRestore();
+    }
   });
 });

@@ -102,12 +102,68 @@ const NOOP_COMMAND_RECORDER: UiCommandRecorder = {
 function reportCommandObservationFailure(
   diagnostic: UiCommandObservationDiagnostic,
 ): void {
-  const name =
-    diagnostic.error instanceof Error && diagnostic.error.name.length > 0
-      ? diagnostic.error.name
-      : "Error";
+  const name = diagnostic.error instanceof Error ? "Error" : "NonError";
   process.stderr.write(
     `${JSON.stringify({ name, stage: diagnostic.stage, type: "ui.command.observation.failure" })}\n`,
+  );
+}
+
+function reportInteractionCleanupFailure(): void {
+  process.stderr.write(
+    `${JSON.stringify({ type: "ui.interaction.cleanup.failure" })}\n`,
+  );
+}
+
+function activeSnapshotRunForSession(
+  snapshot: UiSnapshot,
+  sessionId: string,
+): UiSnapshot["runs"][number] | undefined {
+  const status = snapshot.status;
+  if (status.kind === "running") {
+    const run = snapshot.runs.find(
+      (candidate) => candidate.id === status.runId,
+    );
+    if (run?.sessionId === sessionId) {
+      return run;
+    }
+  }
+  if (status.kind === "waiting-for-permission") {
+    const permission = snapshot.permissions.find(
+      (candidate) => candidate.id === status.requestId,
+    );
+    const run = snapshot.runs.find(
+      (candidate) => candidate.id === permission?.runId,
+    );
+    if (run?.sessionId === sessionId) {
+      return run;
+    }
+  }
+  return snapshot.runs.find(
+    (candidate) =>
+      candidate.sessionId === sessionId &&
+      (candidate.status.kind === "running" ||
+        candidate.status.kind === "waiting-for-permission"),
+  );
+}
+
+function isAbortableSnapshotRun(snapshot: UiSnapshot, runId: string): boolean {
+  const status = snapshot.status;
+  if (status.kind === "running" && status.runId === runId) {
+    return true;
+  }
+  if (
+    status.kind === "waiting-for-permission" &&
+    snapshot.permissions.some(
+      (permission) =>
+        permission.id === status.requestId && permission.runId === runId,
+    )
+  ) {
+    return true;
+  }
+  const run = snapshot.runs.find((candidate) => candidate.id === runId);
+  return (
+    run?.status.kind === "running" ||
+    run?.status.kind === "waiting-for-permission"
   );
 }
 
@@ -1836,15 +1892,33 @@ class DaemonServerAppRuntime {
           parsed.status as 400 | 413,
         );
       }
-      const body = isRecord(parsed.value) ? parsed.value : {};
-      const runId = await this.runIdForAbort(
-        context.req.param("id"),
-        asNonEmptyString(body.runId),
-      );
-      if (runId === undefined) {
-        return context.json(webErrorBody("No running run for session"), 404);
+      if (!isRecord(parsed.value)) {
+        return context.json(webErrorBody("request body must be an object"), 400);
       }
-      await this.commandBackend("server-rest", { clientId }).abortRun(runId);
+      const body = parsed.value;
+      const hasRunId = Object.hasOwn(body, "runId");
+      const requestedRunId = asNonEmptyString(body.runId);
+      if (hasRunId && requestedRunId === undefined) {
+        return context.json(
+          webErrorBody("runId must be a non-empty string"),
+          400,
+        );
+      }
+      const resolution = await this.resolveRunForAbort(
+        context.req.param("id"),
+        requestedRunId,
+      );
+      if (resolution.kind === "session-mismatch") {
+        return context.json(
+          webErrorBody("Run does not belong to the requested session"),
+          409,
+        );
+      }
+      if (resolution.kind === "abort") {
+        await this.commandBackend("server-rest", { clientId }).abortRun(
+          resolution.runId,
+        );
+      }
       return context.json({ ok: true });
     });
 
@@ -1892,51 +1966,34 @@ class DaemonServerAppRuntime {
     );
   }
 
-  private async runIdForAbort(
+  private async resolveRunForAbort(
     sessionId: string,
     requestedRunId: string | undefined,
-  ): Promise<string | undefined> {
+  ): Promise<
+    | { readonly kind: "abort"; readonly runId: string }
+    | { readonly kind: "no-op" }
+    | { readonly kind: "session-mismatch" }
+  > {
     const snapshot = await this.options.backend.getSnapshot();
     if (requestedRunId !== undefined) {
       const requestedRun = snapshot.runs.find(
         (candidate) => candidate.id === requestedRunId,
       );
-      return requestedRun?.sessionId === sessionId
-        ? requestedRun.id
-        : undefined;
-    }
-    const run = snapshot.runs.find((candidate) => {
-      if (candidate.sessionId !== sessionId) {
-        return false;
+      if (!requestedRun) {
+        return { kind: "no-op" };
       }
-      return (
-        candidate.status.kind === "running" ||
-        candidate.status.kind === "waiting-for-permission"
-      );
-    });
-    if (run) {
-      return run.id;
+      if (requestedRun.sessionId !== sessionId) {
+        return { kind: "session-mismatch" };
+      }
+      return isAbortableSnapshotRun(snapshot, requestedRun.id)
+        ? { kind: "abort", runId: requestedRun.id }
+        : { kind: "no-op" };
     }
-    const status = snapshot.status;
-    if (status.kind === "running") {
-      const activeRun = snapshot.runs.find(
-        (candidate) => candidate.id === status.runId,
-      );
-      return activeRun?.sessionId === sessionId ? activeRun.id : undefined;
+    const run = activeSnapshotRunForSession(snapshot, sessionId);
+    if (!run) {
+      return { kind: "no-op" };
     }
-    if (status.kind === "waiting-for-permission") {
-      const permission = snapshot.permissions.find(
-        (candidate) => candidate.id === status.requestId,
-      );
-      const activeRun =
-        permission === undefined
-          ? undefined
-          : snapshot.runs.find(
-              (candidate) => candidate.id === permission.runId,
-            );
-      return activeRun?.sessionId === sessionId ? activeRun.id : undefined;
-    }
-    return undefined;
+    return { kind: "abort", runId: run.id };
   }
 
   private async serveWebAsset(context: Context): Promise<Response> {
@@ -2123,11 +2180,32 @@ class DaemonServerAppRuntime {
         return;
       }
       this.permissionRouter.disconnectClient(clientId);
-      this.clientViews.disconnectClient(clientId);
+      const interactionIds = this.clientViews.disconnectClient(clientId);
       this.knownClientIds.delete(clientId);
       this.expiredClientIds.add(clientId);
+      this.cancelRemovedClientInteractions(interactionIds);
     }, this.clientDisconnectRetentionMs);
     this.disconnectCleanupTimers.set(clientId, timer);
+  }
+
+  private cancelRemovedClientInteractions(
+    interactionIds: readonly string[],
+  ): void {
+    for (const interactionId of interactionIds) {
+      void this.options.backend
+        .respondInteraction(interactionId, {
+          kind: "cancelled",
+          reason: "client-disconnected",
+        })
+        .catch((error: unknown) => {
+          if (
+            !isRecord(error) ||
+            error.code !== "INTERACTION_NOT_FOUND"
+          ) {
+            reportInteractionCleanupFailure();
+          }
+        });
+    }
   }
 
   private replayMissedEvents(

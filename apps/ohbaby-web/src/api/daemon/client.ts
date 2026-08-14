@@ -7,6 +7,7 @@ import {
   type UiEventHandler,
   type UiPromptCompletion,
   type UiPromptReceipt,
+  type UiSnapshot,
   type UiUnsubscribe,
   type UiSlashCommandInvocation,
   type UiWebCommandCatalog,
@@ -34,6 +35,16 @@ import {
 interface BufferedEvent {
   readonly event: Extract<WebSseEvent, { type: "ui.event" }>["event"];
   readonly seqNum: number;
+}
+
+function reportEventSubscriberFailure(): void {
+  try {
+    globalThis.console.error(
+      '{"stage":"event-subscriber","type":"ui.observation.failure"}',
+    );
+  } catch {
+    // Diagnostics are fail-open and must not affect event delivery.
+  }
 }
 
 export interface OhbabyWebRuntime {
@@ -377,19 +388,13 @@ class BrowserDaemonClient implements UiBackendClient {
     return (await this.http.setPermission(input)).permission;
   }
 
-  async abortRun(runId?: string): ReturnType<UiBackendClient["abortRun"]> {
+  async abortRun(runId: string): ReturnType<UiBackendClient["abortRun"]> {
     const snapshot = this.store.getSnapshot().view.snapshot;
-    const sessionId =
-      (runId === undefined
-        ? snapshot?.activeSessionId
-        : snapshot?.runs.find((run) => run.id === runId)?.sessionId) ??
-      undefined;
+    const sessionId = snapshot?.runs.find((run) => run.id === runId)?.sessionId;
     if (!sessionId) {
-      throw new Error("No session is available for the requested run");
+      return;
     }
-    await this.http.abortSession(sessionId, {
-      ...(runId === undefined ? {} : { runId }),
-    });
+    await this.http.abortSession(sessionId, { runId });
   }
 
   private async handleSseEvent(
@@ -511,7 +516,7 @@ class BrowserDaemonClient implements UiBackendClient {
       }
     }
     if (subscriberFailed) {
-      this.store.setError("A UI event subscriber failed");
+      reportEventSubscriberFailure();
     }
     return true;
   }
@@ -519,6 +524,58 @@ class BrowserDaemonClient implements UiBackendClient {
 
 function createClientInvocationId(): string {
   return globalThis.crypto.randomUUID();
+}
+
+function activeRunForSession(
+  snapshot: UiSnapshot,
+  sessionId: string,
+): UiSnapshot["runs"][number] | undefined {
+  const status = snapshot.status;
+  if (status.kind === "running") {
+    const run = snapshot.runs.find(
+      (candidate) => candidate.id === status.runId,
+    );
+    if (run?.sessionId === sessionId) {
+      return run;
+    }
+  }
+  if (status.kind === "waiting-for-permission") {
+    const request = snapshot.permissions.find(
+      (candidate) => candidate.id === status.requestId,
+    );
+    const run = snapshot.runs.find(
+      (candidate) => candidate.id === request?.runId,
+    );
+    if (run?.sessionId === sessionId) {
+      return run;
+    }
+  }
+  return snapshot.runs.find(
+    (candidate) =>
+      candidate.sessionId === sessionId &&
+      (candidate.status.kind === "running" ||
+        candidate.status.kind === "waiting-for-permission"),
+  );
+}
+
+function isAbortableRun(snapshot: UiSnapshot, runId: string): boolean {
+  const status = snapshot.status;
+  if (status.kind === "running" && status.runId === runId) {
+    return true;
+  }
+  if (
+    status.kind === "waiting-for-permission" &&
+    snapshot.permissions.some(
+      (request) => request.id === status.requestId && request.runId === runId,
+    )
+  ) {
+    return true;
+  }
+  const run = snapshot.runs.find((candidate) => candidate.id === runId);
+  return (
+    run?.status.kind === "running" ||
+    run?.status.kind === "waiting-for-permission"
+  );
 }
 
 function createBrowserDaemonClient(input: {
@@ -596,8 +653,25 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     await this.requireActiveClient().archiveSession({ sessionId });
   }
 
-  async abortSession(_sessionId: string, runId?: string): Promise<void> {
-    await this.requireActiveClient().abortRun(runId);
+  async abortSession(sessionId: string, runId?: string): Promise<void> {
+    const snapshot = this.store.getSnapshot().view.snapshot;
+    if (!snapshot) {
+      return;
+    }
+    const run =
+      runId === undefined
+        ? activeRunForSession(snapshot, sessionId)
+        : snapshot.runs.find((candidate) => candidate.id === runId);
+    if (!run) {
+      return;
+    }
+    if (run.sessionId !== sessionId) {
+      throw new Error(`Run ${run.id} does not belong to session ${sessionId}`);
+    }
+    if (!isAbortableRun(snapshot, run.id)) {
+      return;
+    }
+    await this.requireActiveClient().abortRun(run.id);
   }
 
   async executeSlashCommand(input: {

@@ -659,7 +659,9 @@ describe("DaemonClientViewCoordinator", () => {
       throw new Error("expected interaction claim");
     }
 
-    coordinator.disconnectClient("client_a");
+    expect(coordinator.disconnectClient("client_a")).toEqual([
+      "interaction_1",
+    ]);
 
     expect(
       coordinator.releaseInteractionClaim("interaction_1", claim.claimToken),
@@ -671,6 +673,27 @@ describe("DaemonClientViewCoordinator", () => {
         () => "claim_2",
       ),
     ).toBeUndefined();
+  });
+
+  it("retains the client projection when routing owners are disconnected", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    const snapshot = snapshotWithSessions();
+    coordinator.initializeClient("client_a", snapshot, {
+      resumeSessionId: "session_2",
+    });
+
+    coordinator.disconnectClient("client_a");
+
+    expect(coordinator.projectSnapshot("client_a", snapshot)).toMatchObject({
+      activeSessionId: "session_2",
+      sessions: [
+        { id: "session_1", messages: [] },
+        {
+          id: "session_2",
+          messages: [textMessage("message_2", "hidden transcript")],
+        },
+      ],
+    });
   });
 
   it("clears interaction ownership when runtime state resets on shutdown", () => {

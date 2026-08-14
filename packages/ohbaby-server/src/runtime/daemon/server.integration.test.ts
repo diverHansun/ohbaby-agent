@@ -22,6 +22,7 @@ import {
   type DaemonHttpServerOptions,
 } from "./server.js";
 import { daemonAuthHeader } from "../../auth/token.js";
+import { createInProcessUiBackendClient } from "ohbaby-agent";
 
 const timestamp = "2026-06-12T00:00:00.000Z";
 const authToken = "token_1";
@@ -539,13 +540,13 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve();
   }
 
-  abortRun(): Promise<void> {
+  abortRun(_runId: string): Promise<void> {
     return Promise.resolve();
   }
 }
 
 async function withServer<T>(
-  backend: FakeBackend,
+  backend: DaemonHttpServerOptions["backend"],
   callback: (url: string) => Promise<T>,
   options: Partial<
     Omit<DaemonHttpServerOptions, "backend" | "host" | "port">
@@ -1301,6 +1302,118 @@ describe("createDaemonHttpServer", () => {
     );
   });
 
+  it("cancels an owned interaction after client routing retention expires", async () => {
+    const backend = new FakeBackend();
+    await withServer(
+      backend,
+      async (url) => {
+        const stream = await fetchEvents(url, "client_a");
+        const reader = createSseFrameReader(stream);
+        await reader.read();
+
+        const invoked = await postRpc(url, {
+          clientId: "client_a",
+          id: "rpc_command",
+          method: "executeCommand",
+          params: [
+            {
+              argv: [],
+              clientInvocationId: "invoke_1",
+              commandId: "status",
+              path: ["status"],
+              raw: "/status",
+              rawArgs: "",
+              surface: "web",
+            },
+          ],
+        });
+        expect(invoked.status).toBe(200);
+        backend.emit(commandStarted());
+        backend.emit(interactionRequested());
+
+        await reader.cancel();
+        await delay(30);
+
+        expect(backend.interactionResponses).toEqual([
+          {
+            interactionId: "interaction_1",
+            response: {
+              kind: "cancelled",
+              reason: "client-disconnected",
+            },
+          },
+        ]);
+      },
+      { clientDisconnectRetentionMs: 10 },
+    );
+  });
+
+  it("settles a real command interaction after client routing retention expires", async () => {
+    const backend = createInProcessUiBackendClient({
+      initialSnapshot: {
+        ...emptySnapshot(),
+        activeSessionId: "session_1",
+        sessions: [
+          sessionWithMessages("session_1", []),
+          sessionWithMessages("session_2", []),
+        ],
+      },
+    });
+    const events: UiEvent[] = [];
+    const unsubscribe = backend.subscribeEvents((event) => {
+      events.push(event);
+    });
+    try {
+      await withServer(
+        backend,
+        async (url) => {
+          const stream = await fetchEvents(url, "client_a");
+          const reader = createSseFrameReader(stream);
+          await reader.read();
+
+          const invoked = postRpc(url, {
+            clientId: "client_a",
+            id: "rpc_command",
+            method: "executeCommand",
+            params: [
+              {
+                argv: [],
+                clientInvocationId: "invoke_real_interaction",
+                commandId: "sessions",
+                path: ["sessions"],
+                raw: "/sessions",
+                rawArgs: "",
+                sessionId: "session_1",
+                surface: "tui",
+              },
+            ],
+          });
+          await vi.waitUntil(
+            () => events.some((event) => event.type === "interaction.requested"),
+            { timeout: 1_000 },
+          );
+
+          await reader.cancel();
+
+          await expect(invoked).resolves.toMatchObject({ status: 200 });
+          await vi.waitUntil(
+            () =>
+              events.some(
+                (event) =>
+                  event.type === "interaction.resolved" &&
+                  event.status === "cancelled",
+              ),
+            { timeout: 1_000 },
+          );
+        },
+        { clientDisconnectRetentionMs: 10 },
+      );
+    } finally {
+      unsubscribe();
+      await backend.dispose();
+    }
+  });
+
   it("does not expire interaction ownership when an older overlapping connection disconnects", async () => {
     const backend = new FakeBackend();
     await withServer(
@@ -1359,10 +1472,25 @@ describe("createDaemonHttpServer", () => {
   });
 
   it("signals resync when a client reconnects after routing retention expires", async () => {
-    const backend = new FakeBackend();
+    const visibleMessage = textMessage("message_visible", "visible transcript");
+    const hiddenMessage = textMessage("message_hidden", "hidden transcript");
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      activeSessionId: "session_1",
+      sessions: [
+        sessionWithMessages("session_1", [hiddenMessage]),
+        sessionWithMessages("session_2", [visibleMessage]),
+      ],
+    });
     await withServer(
       backend,
       async (url) => {
+        await postRpc(url, {
+          clientId: "client_a",
+          id: "rpc_init_a",
+          method: "initializeClient",
+          params: [{ resumeSessionId: "session_2" }],
+        });
         const stream = await fetchEvents(url, "client_a");
         const reader = createSseFrameReader(stream);
         await reader.read();
@@ -1385,6 +1513,24 @@ describe("createDaemonHttpServer", () => {
             type: "resync-required",
           },
           event: "resync-required",
+        });
+
+        const snapshot = await postRpc(url, {
+          clientId: "client_a",
+          id: "rpc_snapshot",
+          method: "getSnapshot",
+          params: [],
+        });
+        await expect(snapshot.json()).resolves.toMatchObject({
+          id: "rpc_snapshot",
+          ok: true,
+          result: {
+            activeSessionId: "session_2",
+            sessions: [
+              { id: "session_1", messages: [] },
+              { id: "session_2", messages: [visibleMessage] },
+            ],
+          },
         });
         await resumedReader.cancel();
       },

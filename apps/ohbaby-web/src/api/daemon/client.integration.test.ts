@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createOhbabyWebRuntime } from "./client.js";
 import type { OhbabyBootstrapConfig, WebSseEvent } from "./wire.js";
 
@@ -461,6 +461,10 @@ describe("ohbaby-web daemon client", () => {
     commandCatalogVersion = "commands-v2";
     expect(sseController).toBeDefined();
     const delivered: string[] = [];
+    const observationDiagnostic = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    runtime.store.setError("transport error must survive");
     client.subscribeEvents(() => {
       throw new Error("observer failed");
     });
@@ -485,11 +489,21 @@ describe("ohbaby-web daemon client", () => {
         3,
       ),
     );
-    await waitFor(
-      () => runtime.store.getSnapshot().view.lastAppliedSeqNum === 3,
-      "timed out waiting for catalog update event",
-    );
-    expect(delivered).toEqual(["command.catalog.updated"]);
+    try {
+      await waitFor(
+        () => runtime.store.getSnapshot().view.lastAppliedSeqNum === 3,
+        "timed out waiting for catalog update event",
+      );
+      expect(delivered).toEqual(["command.catalog.updated"]);
+      expect(runtime.store.getSnapshot().error).toBe(
+        "transport error must survive",
+      );
+      expect(observationDiagnostic).toHaveBeenCalledWith(
+        '{"stage":"event-subscriber","type":"ui.observation.failure"}',
+      );
+    } finally {
+      observationDiagnostic.mockRestore();
+    }
     await client.listCommands({ surface: "web" });
     const catalogRequestsAfterCommittedRefresh = requests.filter((request) =>
       request.url.endsWith("/v1/commands?surface=web"),
@@ -1043,6 +1057,115 @@ describe("ohbaby-web daemon client", () => {
       connectionState: "live",
       error: null,
     });
+    await runtime.dispose();
+  });
+
+  it("keeps transport controls and invalid sequences out of UiEvent subscribers", async () => {
+    let sseController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let snapshotRequests = 0;
+    const snapshot = {
+      activeSessionId: null,
+      permission: {
+        level: "default",
+        mode: "auto",
+        sessionRules: [],
+      },
+      permissions: [],
+      runs: [],
+      sessions: [],
+      status: { kind: "idle" },
+    } as const;
+    const fetchImpl: typeof fetch = (input) => {
+      const url = urlFromRequestInput(input);
+      if (url.endsWith("/v1/clients")) {
+        return Promise.resolve(
+          Response.json({ clientId: "client_web", ok: true }),
+        );
+      }
+      if (url.endsWith("/v1/events")) {
+        return Promise.resolve(
+          new Response(
+            createSseStream((controller) => {
+              sseController = controller;
+              controller.enqueue(
+                sseFrame({ clientId: "client_web", type: "hello" }),
+              );
+            }),
+            { headers: { "content-type": "text/event-stream" } },
+          ),
+        );
+      }
+      if (url.endsWith("/v1/snapshot")) {
+        snapshotRequests += 1;
+        return Promise.resolve(
+          Response.json({ ok: true, seqNum: 0, snapshot }),
+        );
+      }
+      if (url.endsWith("/v1/model")) {
+        return Promise.resolve(Response.json({ model: null, ok: true }));
+      }
+      return Promise.resolve(
+        Response.json({ error: { message: "not found" } }, { status: 404 }),
+      );
+    };
+    const runtime = createOhbabyWebRuntime(
+      {
+        baseUrl: "http://127.0.0.1:4096",
+        clientId: "client_web",
+        directory: "/repo",
+        startupIntent: { startupSessionMode: { type: "fresh" } },
+        token: "token_1",
+      },
+      { fetch: fetchImpl },
+    );
+    await runtime.ready;
+    const client = runtime.client;
+    if (!client) throw new Error("Expected an active browser client");
+    const delivered: string[] = [];
+    client.subscribeEvents((event) => {
+      delivered.push(event.type);
+    });
+
+    sseController?.enqueue(sseFrame({ clientId: "client_web", type: "hello" }));
+    sseController?.enqueue(
+      sseFrame({ message: "transport warning", type: "error" }),
+    );
+    sseController?.enqueue(
+      sseFrame({
+        event: { status: { kind: "idle" }, type: "runtime.updated" },
+        type: "ui.event",
+      }),
+    );
+    sseController?.enqueue(
+      sseFrame(
+        {
+          event: { status: { kind: "idle" }, type: "runtime.updated" },
+          type: "ui.event",
+        },
+        -1,
+      ),
+    );
+    await waitFor(
+      () =>
+        runtime.store.getSnapshot().error ===
+        "Daemon event is missing a valid sequence id",
+      "timed out waiting for invalid sequence diagnostic",
+    );
+
+    expect(delivered).toEqual([]);
+    expect(runtime.store.getSnapshot().view.lastAppliedSeqNum).toBe(0);
+
+    sseController?.enqueue(
+      sseFrame({ maxSeqNum: 0, minSeqNum: 0, type: "resync-required" }),
+    );
+    await waitFor(
+      () => snapshotRequests === 2 && delivered.length === 1,
+      "timed out waiting for the local resync barrier",
+    );
+    expect(delivered).toEqual(["snapshot.replaced"]);
+    expect(runtime.store.getSnapshot().view.lastAppliedSeqNum).toBe(0);
+
+    sseController?.close();
     await runtime.dispose();
   });
 });

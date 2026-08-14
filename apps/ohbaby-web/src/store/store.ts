@@ -31,11 +31,21 @@ export function createOhbabyWebStore(): OhbabyWebStore {
 
   function publish(next: StoreSnapshot): void {
     snapshot = next;
+    let listenerFailed = false;
     for (const listener of Array.from(listeners)) {
       try {
         listener();
       } catch {
-        // Observation failures must not interrupt state publication.
+        listenerFailed = true;
+      }
+    }
+    if (listenerFailed) {
+      try {
+        globalThis.console.error(
+          '{"stage":"store-listener","type":"ui.observation.failure"}',
+        );
+      } catch {
+        // Diagnostics are fail-open and must not affect state publication.
       }
     }
   }
