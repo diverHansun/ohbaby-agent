@@ -696,7 +696,8 @@ describe("runOhbabyCli", () => {
     await expect(
       runOhbabyCli(["node", "ohbaby", "run", "hello", "world"]),
     ).resolves.toBe(0);
-    expect(core.submitPrompt).toHaveBeenCalledWith("hello world");
+    expect(core.submitPromptAndWait).toHaveBeenCalledWith("hello world");
+    expect(core.submitPrompt).not.toHaveBeenCalled();
     expect(subscribeEvents).toHaveBeenCalledTimes(1);
     expect(unsubscribe).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
@@ -777,10 +778,13 @@ describe("runOhbabyCli", () => {
 });
 
 function createCore(): {
+  readonly acquirePromptEditLease: ReturnType<typeof vi.fn>;
   readonly abortRun: ReturnType<typeof vi.fn>;
   readonly archiveSession: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
   readonly connectModel: ReturnType<typeof vi.fn>;
+  readonly cancelQueuedPrompt: ReturnType<typeof vi.fn>;
+  readonly editQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
   readonly getContextWindowUsage: ReturnType<typeof vi.fn>;
   readonly getCurrentModel: ReturnType<typeof vi.fn>;
@@ -789,6 +793,8 @@ function createCore(): {
   readonly probeModelContextWindow: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
   readonly respondPermission: ReturnType<typeof vi.fn>;
+  readonly releasePromptEditLease: ReturnType<typeof vi.fn>;
+  readonly renewPromptEditLease: ReturnType<typeof vi.fn>;
   readonly setPermission: ReturnType<typeof vi.fn>;
   readonly setSearchApiKey: ReturnType<typeof vi.fn>;
   readonly submitPrompt: ReturnType<typeof vi.fn>;
@@ -796,9 +802,19 @@ function createCore(): {
   readonly submitPromptAndWait: ReturnType<typeof vi.fn>;
   readonly waitForPrompt: ReturnType<typeof vi.fn>;
 } {
+  const prompt = promptCompletion().prompt;
   return {
+    acquirePromptEditLease: vi.fn(() =>
+      Promise.resolve({
+        editLeaseId: "lease_1",
+        expiresAt: "2026-08-14T00:01:00.000Z",
+        ownerClientId: "client_1",
+        prompt,
+      }),
+    ),
     abortRun: vi.fn(() => Promise.resolve()),
     archiveSession: vi.fn(() => Promise.resolve()),
+    cancelQueuedPrompt: vi.fn(() => Promise.resolve(prompt)),
     compactSession: vi.fn(() => Promise.resolve()),
     connectModel: vi.fn(() =>
       Promise.resolve({
@@ -821,6 +837,7 @@ function createCore(): {
       } as const),
     ),
     executeCommand: vi.fn(() => Promise.resolve()),
+    editQueuedPrompt: vi.fn(() => Promise.resolve(prompt)),
     getContextWindowUsage: vi.fn(() => Promise.resolve(null)),
     getCurrentModel: vi.fn(() => Promise.resolve(null)),
     getSnapshot: vi.fn(() => Promise.resolve()),
@@ -833,6 +850,15 @@ function createCore(): {
     ),
     respondInteraction: vi.fn(() => Promise.resolve()),
     respondPermission: vi.fn(() => Promise.resolve()),
+    releasePromptEditLease: vi.fn(() => Promise.resolve(prompt)),
+    renewPromptEditLease: vi.fn(() =>
+      Promise.resolve({
+        editLeaseId: "lease_1",
+        expiresAt: "2026-08-14T00:01:00.000Z",
+        ownerClientId: "client_1",
+        prompt,
+      }),
+    ),
     setPermission: vi.fn(() =>
       Promise.resolve({
         level: "default",

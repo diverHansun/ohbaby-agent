@@ -121,6 +121,11 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
       },
     },
     core: {
+      acquirePromptEditLease(
+        input,
+      ): ReturnType<CoreAPI["acquirePromptEditLease"]> {
+        return client.acquirePromptEditLease(input);
+      },
       abortRun(runId): ReturnType<CoreAPI["abortRun"]> {
         return client.abortRun(runId);
       },
@@ -129,6 +134,11 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
       },
       archiveSession(input): ReturnType<CoreAPI["archiveSession"]> {
         return client.archiveSession(input);
+      },
+      cancelQueuedPrompt(
+        input,
+      ): ReturnType<CoreAPI["cancelQueuedPrompt"]> {
+        return client.cancelQueuedPrompt(input);
       },
       probeModelContextWindow(
         input,
@@ -146,6 +156,9 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
       },
       executeCommand(invocation): ReturnType<CoreAPI["executeCommand"]> {
         return client.executeCommand(invocation);
+      },
+      editQueuedPrompt(input): ReturnType<CoreAPI["editQueuedPrompt"]> {
+        return client.editQueuedPrompt(input);
       },
       getSnapshot(): ReturnType<CoreAPI["getSnapshot"]> {
         return client.getSnapshot();
@@ -172,6 +185,16 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
         response,
       ): ReturnType<CoreAPI["respondPermission"]> {
         return client.respondPermission(requestId, response);
+      },
+      releasePromptEditLease(
+        input,
+      ): ReturnType<CoreAPI["releasePromptEditLease"]> {
+        return client.releasePromptEditLease(input);
+      },
+      renewPromptEditLease(
+        input,
+      ): ReturnType<CoreAPI["renewPromptEditLease"]> {
+        return client.renewPromptEditLease(input);
       },
       submitPrompt(text, submitOptions): ReturnType<CoreAPI["submitPrompt"]> {
         return client.submitPrompt(text, submitOptions);

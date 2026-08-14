@@ -1,17 +1,16 @@
 import type {
   CoreAPI,
+  SDKAPI,
   UiCommandCatalog,
   UiCommandInvocation,
   UiCommandSpec,
   UiContextWindowUsage,
-  UiEvent as SdkUiEvent,
-  UiEventHandler,
+  UiEvent,
   UiInteractionKind,
   UiMessage,
   UiNotice,
   UiPermissionState,
   UiPermissionRequest,
-  UiPromptQueueClient,
   UiPromptSubmission,
   UiRun,
   UiRunStatus,
@@ -19,7 +18,6 @@ import type {
   UiSessionGoal,
   UiSessionTodoList,
   UiSnapshot,
-  UiUnsubscribe,
 } from "ohbaby-sdk";
 import type { TranscriptItem } from "./transcript.js";
 
@@ -70,27 +68,7 @@ export interface TuiInteractionRequest {
   readonly options?: readonly TuiInteractionOption[];
 }
 
-export type TuiEvent =
-  | SdkUiEvent
-  | {
-      readonly type: "message.part.delta";
-      readonly sessionId: string;
-      readonly messageId: string;
-      readonly partId?: string;
-      readonly delta: string;
-      readonly content?: string;
-      readonly timestamp?: number;
-    }
-  | { readonly type: "snapshot.replaced"; readonly snapshot: UiSnapshot };
-
-export type TuiEventHandler = (event: TuiEvent) => void;
-
-export type TerminalClient = CoreAPI &
-  Partial<UiPromptQueueClient> & {
-    readonly subscribeEvents: (
-      handler: TuiEventHandler | UiEventHandler,
-    ) => UiUnsubscribe;
-  };
+export type TerminalClient = CoreAPI & SDKAPI;
 
 export interface TuiStoreState {
   readonly snapshot: UiSnapshot;
@@ -123,8 +101,8 @@ export interface TuiStoreState {
 
 export interface TuiStore {
   readonly getState: () => TuiStoreState;
-  readonly dispatch: (event: TuiEvent) => void;
-  readonly dispatchMany: (events: readonly TuiEvent[]) => void;
+  readonly dispatch: (event: UiEvent) => void;
+  readonly dispatchMany: (events: readonly UiEvent[]) => void;
   readonly replaceSnapshot: (snapshot: UiSnapshot) => void;
   readonly setCatalog: (catalog: TuiCommandCatalog) => void;
   readonly subscribe: (listener: () => void) => () => void;

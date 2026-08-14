@@ -561,6 +561,11 @@ export function createRemoteCoreApiHost(
       },
     },
     core: {
+      acquirePromptEditLease(
+        input,
+      ): ReturnType<CoreAPI["acquirePromptEditLease"]> {
+        return client.acquirePromptEditLease(input);
+      },
       abortRun(runId): ReturnType<CoreAPI["abortRun"]> {
         return client.abortRun(runId);
       },
@@ -569,6 +574,11 @@ export function createRemoteCoreApiHost(
       },
       archiveSession(input): ReturnType<CoreAPI["archiveSession"]> {
         return client.archiveSession(input);
+      },
+      cancelQueuedPrompt(
+        input,
+      ): ReturnType<CoreAPI["cancelQueuedPrompt"]> {
+        return client.cancelQueuedPrompt(input);
       },
       probeModelContextWindow(
         input,
@@ -586,6 +596,9 @@ export function createRemoteCoreApiHost(
       },
       executeCommand(invocation): ReturnType<CoreAPI["executeCommand"]> {
         return client.executeCommand(invocation);
+      },
+      editQueuedPrompt(input): ReturnType<CoreAPI["editQueuedPrompt"]> {
+        return client.editQueuedPrompt(input);
       },
       getSnapshot(): ReturnType<CoreAPI["getSnapshot"]> {
         return client.getSnapshot();
@@ -612,6 +625,16 @@ export function createRemoteCoreApiHost(
         response,
       ): ReturnType<CoreAPI["respondPermission"]> {
         return client.respondPermission(requestId, response);
+      },
+      releasePromptEditLease(
+        input,
+      ): ReturnType<CoreAPI["releasePromptEditLease"]> {
+        return client.releasePromptEditLease(input);
+      },
+      renewPromptEditLease(
+        input,
+      ): ReturnType<CoreAPI["renewPromptEditLease"]> {
+        return client.renewPromptEditLease(input);
       },
       submitPrompt(text, submitOptions): ReturnType<CoreAPI["submitPrompt"]> {
         return client.submitPrompt(text, submitOptions);

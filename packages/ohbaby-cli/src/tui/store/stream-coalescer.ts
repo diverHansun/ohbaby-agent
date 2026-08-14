@@ -1,20 +1,20 @@
-import type { TuiEvent } from "./snapshot.js";
+import type { UiEvent } from "ohbaby-sdk";
 
 export const STREAMING_UI_FLUSH_MS = 50;
 
 export interface CoalescedTuiEventDispatcher {
-  readonly dispatch: (event: TuiEvent) => void;
+  readonly dispatch: (event: UiEvent) => void;
   readonly dispose: () => void;
 }
 
 export function createCoalescedTuiEventDispatcher(
-  dispatchBatch: (events: readonly TuiEvent[]) => void,
+  dispatchBatch: (events: readonly UiEvent[]) => void,
   options: { readonly flushMs?: number } = {},
 ): CoalescedTuiEventDispatcher {
   const flushMs = options.flushMs ?? STREAMING_UI_FLUSH_MS;
   const pendingDeltas = new Map<
     string,
-    Extract<TuiEvent, { type: "message.part.delta" }>
+    Extract<UiEvent, { type: "message.part.delta" }>
   >();
   let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -25,7 +25,7 @@ export function createCoalescedTuiEventDispatcher(
     }
   };
 
-  const flush = (): readonly TuiEvent[] => {
+  const flush = (): readonly UiEvent[] => {
     clearTimer();
     if (pendingDeltas.size === 0) {
       return [];
@@ -72,15 +72,15 @@ export function createCoalescedTuiEventDispatcher(
 }
 
 function deltaKey(
-  event: Extract<TuiEvent, { type: "message.part.delta" }>,
+  event: Extract<UiEvent, { type: "message.part.delta" }>,
 ): string {
   return [event.sessionId, event.messageId, event.partId ?? ""].join("\u0000");
 }
 
 function mergeDelta(
-  previous: Extract<TuiEvent, { type: "message.part.delta" }>,
-  next: Extract<TuiEvent, { type: "message.part.delta" }>,
-): Extract<TuiEvent, { type: "message.part.delta" }> {
+  previous: Extract<UiEvent, { type: "message.part.delta" }>,
+  next: Extract<UiEvent, { type: "message.part.delta" }>,
+): Extract<UiEvent, { type: "message.part.delta" }> {
   return {
     ...next,
     content:

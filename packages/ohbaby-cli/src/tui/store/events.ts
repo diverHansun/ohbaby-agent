@@ -1,6 +1,7 @@
 import type {
   UiCommandOutput,
   UiContextWindowUsage,
+  UiEvent,
   UiInteractionRequest,
   UiMessage,
   UiMessagePart,
@@ -17,7 +18,6 @@ import type {
 import type {
   TuiCommandCatalog,
   TuiCommandNotice,
-  TuiEvent,
   TuiInteractionRequest,
   TuiReasoningViewState,
   TuiRuntimeStatus,
@@ -74,7 +74,7 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
 
 export function applyTuiEvent(
   state: TuiStoreState,
-  event: TuiEvent,
+  event: UiEvent,
 ): TuiStoreState {
   switch (event.type) {
     case "snapshot.replaced":
@@ -369,7 +369,7 @@ export function applyTuiEvent(
 }
 
 function selectedSessionIdFromCommandAction(
-  action: Extract<TuiEvent, { type: "command.result.delivered" }>["action"],
+  action: Extract<UiEvent, { type: "command.result.delivered" }>["action"],
 ): string | undefined {
   if (action?.kind !== "session.selected" || !isRecord(action.data)) {
     return undefined;

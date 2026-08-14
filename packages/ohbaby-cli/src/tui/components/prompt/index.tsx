@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility bridge */
 import { randomUUID } from "node:crypto";
 import { Box, Text, useInput } from "ink";
 import type {
@@ -6,7 +5,6 @@ import type {
   UiCommandInvocation,
   UiGoal,
   UiPermissionState,
-  UiPromptQueueClient,
   UiPromptSubmission,
 } from "ohbaby-sdk";
 import { useRef, useState } from "react";
@@ -40,7 +38,7 @@ import {
 export interface PromptProps {
   readonly activeSessionId: string | null;
   readonly catalog: TuiCommandCatalog | null;
-  readonly client: CoreAPI & Partial<UiPromptQueueClient>;
+  readonly client: CoreAPI;
   readonly contextWindowUsage?: string;
   readonly disabled: boolean;
   readonly goalStatus?: UiGoal["status"];
@@ -131,7 +129,7 @@ export function Prompt({
 
   const renewQueuedEditLease = (): void => {
     const current = queuedEditRef.current;
-    if (!current || !client.renewPromptEditLease) return;
+    if (!current) return;
     const now = Date.now();
     if (now - lastLeaseRenewalAtRef.current < 20_000) return;
     lastLeaseRenewalAtRef.current = now;
@@ -157,7 +155,7 @@ export function Prompt({
       if (key.meta && key.upArrow) {
         if (queuedEditRef.current) return;
         const prompt = queuedPrompts.at(-1);
-        if (!prompt || !client.acquirePromptEditLease) return;
+        if (!prompt) return;
         setError(null);
         replaceQueuedMutationPending(true);
         void client
@@ -188,7 +186,6 @@ export function Prompt({
         key.ctrl &&
         (value === "d" || value === "\x04")
       ) {
-        if (!client.cancelQueuedPrompt) return;
         replaceQueuedMutationPending(true);
         void client
           .cancelQueuedPrompt({
@@ -207,7 +204,7 @@ export function Prompt({
 
       if (currentQueuedEdit && key.escape) {
         void client
-          .releasePromptEditLease?.({
+          .releasePromptEditLease({
             editLeaseId: currentQueuedEdit.editLeaseId,
             promptId: currentQueuedEdit.promptId,
           })
@@ -224,7 +221,7 @@ export function Prompt({
         }
 
         if (currentQueuedEdit) {
-          if (!client.editQueuedPrompt || currentInput.trim() === "") return;
+          if (currentInput.trim() === "") return;
           replaceQueuedMutationPending(true);
           void client
             .editQueuedPrompt({
@@ -528,7 +525,7 @@ async function submitInput(
   input: string,
   activeSessionId: string | null,
   catalog: TuiCommandCatalog | null,
-  client: CoreAPI & Partial<UiPromptQueueClient>,
+  client: CoreAPI,
   loadCatalog: (() => Promise<TuiCommandCatalog>) | undefined,
   replaceInput: (nextInput: string) => void,
   setError: (message: string | null) => void,
@@ -550,7 +547,7 @@ async function submitInput(
     setError(null);
     replaceInput("");
     void client
-      .submitPrompt(text, {
+      .submitPromptAccepted(text, {
         clientRequestId: randomUUID(),
         sessionId: activeSessionId ?? undefined,
       })

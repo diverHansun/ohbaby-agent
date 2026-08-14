@@ -1,5 +1,6 @@
-/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility bridge */
 import type { ArgumentsCamelCase, Argv, CommandModule } from "yargs";
+import type { UiPromptCompletion } from "ohbaby-sdk";
+import { EXIT_CODES } from "../exit-codes.js";
 import type { CliCommandRuntime, CliGlobalOptions } from "./types.js";
 
 interface RunArgs extends CliGlobalOptions {
@@ -33,6 +34,28 @@ async function resolvePrompt(
   return pipedPrompt;
 }
 
+function applyCompletionExitPolicy(
+  completion: UiPromptCompletion,
+  runtime: CliCommandRuntime,
+): void {
+  const prompt = completion.prompt;
+  switch (prompt.status) {
+    case "succeeded":
+      return;
+    case "cancelled":
+      runtime.stderr.write("prompt cancelled\n");
+      runtime.setExitCode(EXIT_CODES.failure);
+      return;
+    case "failed":
+      runtime.stderr.write(`${prompt.error.code}: ${prompt.error.message}\n`);
+      runtime.setExitCode(EXIT_CODES.failure);
+      return;
+    case "interrupted":
+      runtime.stderr.write(`${prompt.error.code}: ${prompt.error.message}\n`);
+      runtime.setExitCode(EXIT_CODES.interrupted);
+  }
+}
+
 export function createRunCommand(
   runtime: CliCommandRuntime,
 ): CommandModule<CliGlobalOptions, RunArgs> {
@@ -59,7 +82,8 @@ export function createRunCommand(
       });
 
       try {
-        await host.core.submitPrompt(prompt);
+        const completion = await host.core.submitPromptAndWait(prompt);
+        applyCompletionExitPolicy(completion, runtime);
       } finally {
         unsubscribe();
         await host.dispose();

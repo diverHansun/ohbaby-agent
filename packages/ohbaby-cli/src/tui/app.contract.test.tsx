@@ -1,12 +1,13 @@
 ﻿import { render as renderInk } from "ink-testing-library";
-/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   UiCommandInvocation,
   UiConnectModelResult,
   UiContextWindowUsage,
+  UiEvent,
   UiEventHandler,
   UiPromptCompletion,
+  UiPromptReceipt,
   UiSetSearchApiKeyResult,
   UiSnapshot,
 } from "ohbaby-sdk";
@@ -20,8 +21,6 @@ import type {
   TerminalClient,
   TuiCommandCatalog,
   TuiCommandSpec,
-  TuiEvent,
-  TuiEventHandler,
 } from "./store/snapshot.js";
 
 function snapshot(): UiSnapshot {
@@ -46,6 +45,17 @@ function snapshot(): UiSnapshot {
       },
     ],
     status: { kind: "idle" },
+  };
+}
+
+function promptReceipt(promptId = "prompt_tui"): UiPromptReceipt {
+  return {
+    clientRequestId: `request_${promptId}`,
+    createdAt: "2026-08-14T00:00:00.000Z",
+    promptId,
+    sessionId: "session_1",
+    status: "queued",
+    userMessageId: `message_${promptId}`,
   };
 }
 
@@ -1212,10 +1222,12 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("\r");
     await flush();
 
-    expect(client.submitPrompt).toHaveBeenCalledWith(
+    expect(client.submitPromptAccepted).toHaveBeenCalledWith(
       "hello",
       expect.objectContaining({ sessionId: "session_1" }),
     );
+    expect(client.waitForPrompt).not.toHaveBeenCalled();
+    expect(client.submitPromptAndWait).not.toHaveBeenCalled();
   });
 
   it("browses prompt history without losing the current draft", async () => {
@@ -1244,8 +1256,8 @@ describe("OhbabyTerminalApp", () => {
 
   it("clears submitted prompts immediately and surfaces concurrent submit errors", async () => {
     const client = createFakeClient(snapshot());
-    client.submitPrompt
-      .mockImplementationOnce(() => new Promise<void>(() => undefined))
+    client.submitPromptAccepted
+      .mockImplementationOnce(() => new Promise<UiPromptReceipt>(() => undefined))
       .mockRejectedValueOnce(new Error("A prompt is already running"));
     const app = render(
       <OhbabyTerminalApp
@@ -1259,7 +1271,7 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("\r");
     await flush();
 
-    expect(client.submitPrompt).toHaveBeenCalledWith(
+    expect(client.submitPromptAccepted).toHaveBeenCalledWith(
       "first",
       expect.objectContaining({ sessionId: "session_1" }),
     );
@@ -1270,7 +1282,7 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     await flush();
 
-    expect(client.submitPrompt).toHaveBeenCalledWith(
+    expect(client.submitPromptAccepted).toHaveBeenCalledWith(
       "second",
       expect.objectContaining({ sessionId: "session_1" }),
     );
@@ -1278,7 +1290,7 @@ describe("OhbabyTerminalApp", () => {
   });
 
   it("shows queued state for prompts submitted while a run is active", async () => {
-    const queuedSubmit = createDeferred<undefined>();
+    const queuedSubmit = createDeferred<UiPromptReceipt>();
     const client = createFakeClient({
       ...snapshot(),
       runs: [
@@ -1292,7 +1304,7 @@ describe("OhbabyTerminalApp", () => {
       ],
       status: { kind: "running", runId: "run_1" },
     });
-    client.submitPrompt.mockReturnValueOnce(queuedSubmit.promise);
+    client.submitPromptAccepted.mockReturnValueOnce(queuedSubmit.promise);
     const app = render(
       <OhbabyTerminalApp
         client={client}
@@ -1319,13 +1331,13 @@ describe("OhbabyTerminalApp", () => {
     });
     await waitForFrame(app, (frame) => frame.includes("Queued"));
 
-    expect(client.submitPrompt).toHaveBeenCalledWith(
+    expect(client.submitPromptAccepted).toHaveBeenCalledWith(
       "follow up",
       expect.objectContaining({ sessionId: "session_1" }),
     );
     expect(app.lastFrame()).toContain("follow up");
 
-    queuedSubmit.resolve(undefined);
+    queuedSubmit.resolve(promptReceipt("prompt_follow_up"));
     client.emit({
       prompt: {
         clientRequestId: "request_follow_up",
@@ -1344,10 +1356,10 @@ describe("OhbabyTerminalApp", () => {
   });
 
   it("shows queued state for a rapid second prompt before runtime events arrive", async () => {
-    const firstSubmit = createDeferred<undefined>();
-    const secondSubmit = createDeferred<undefined>();
+    const firstSubmit = createDeferred<UiPromptReceipt>();
+    const secondSubmit = createDeferred<UiPromptReceipt>();
     const client = createFakeClient(snapshot());
-    client.submitPrompt
+    client.submitPromptAccepted
       .mockReturnValueOnce(firstSubmit.promise)
       .mockReturnValueOnce(secondSubmit.promise);
     const app = render(
@@ -1380,13 +1392,13 @@ describe("OhbabyTerminalApp", () => {
     });
     await waitForFrame(app, (frame) => frame.includes("Queued"));
 
-    expect(client.submitPrompt).toHaveBeenCalledWith(
+    expect(client.submitPromptAccepted).toHaveBeenCalledWith(
       "second",
       expect.objectContaining({ sessionId: "session_1" }),
     );
 
-    firstSubmit.resolve(undefined);
-    secondSubmit.resolve(undefined);
+    firstSubmit.resolve(promptReceipt("prompt_first"));
+    secondSubmit.resolve(promptReceipt("prompt_second"));
     client.emit({
       prompt: {
         clientRequestId: "request_second",
@@ -3888,7 +3900,7 @@ function createFakeClient(
   initialSnapshot: UiSnapshot,
   commandCatalog: TuiCommandCatalog = catalog,
 ): TerminalClient & {
-  readonly emit: (event: TuiEvent) => void;
+  readonly emit: (event: UiEvent) => void;
   readonly abortRun: ReturnType<typeof vi.fn>;
   readonly acquirePromptEditLease: ReturnType<typeof vi.fn>;
   readonly archiveSession: ReturnType<typeof vi.fn>;
@@ -3913,7 +3925,7 @@ function createFakeClient(
   readonly submitPromptAndWait: ReturnType<typeof vi.fn>;
   readonly waitForPrompt: ReturnType<typeof vi.fn>;
 } {
-  const handlers = new Set<TuiEventHandler>();
+  const handlers = new Set<UiEventHandler>();
 
   return {
     abortRun: vi.fn(() => Promise.resolve()),
@@ -4049,7 +4061,7 @@ function createFakeClient(
     waitForPrompt: vi.fn(() =>
       Promise.resolve(promptCompletionForFakeClient(initialSnapshot)),
     ),
-    subscribeEvents(handler: TuiEventHandler | UiEventHandler): () => void {
+    subscribeEvents(handler: UiEventHandler): () => void {
       handlers.add(handler);
       return () => {
         handlers.delete(handler);

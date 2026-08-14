@@ -1,27 +1,7 @@
 import type { UiBackendClient, UiQueryClient } from "../client.js";
 
-type CoreApiMethod =
-  | "getSnapshot"
-  | "getContextWindowUsage"
-  | "listCommands"
-  | "submitPrompt"
-  | "submitPromptAccepted"
-  | "submitPromptAndWait"
-  | "waitForPrompt"
-  | "compactSession"
-  | "archiveSession"
-  | "getCurrentModel"
-  | "probeModelContextWindow"
-  | "connectModel"
-  | "setSearchApiKey"
-  | "setPermission"
-  | "executeCommand"
-  | "respondPermission"
-  | "respondInteraction"
-  | "abortRun";
+/** Fake-RPC forward seam: the backend contract without its reverse event port. */
+export type CoreAPI = Omit<UiBackendClient, "subscribeEvents">;
 
-/** Improve-1 fake-RPC forward seam, derived from the authoritative backend. */
-export type CoreAPI = Pick<UiBackendClient, CoreApiMethod>;
-
-/** Improve-1 fake-RPC callback seam, derived from the authoritative query API. */
+/** Fake-RPC callback seam, derived from the authoritative query API. */
 export type SDKAPI = Pick<UiQueryClient, "subscribeEvents">;

@@ -5,6 +5,7 @@ import type {
   CoreAPI,
   UiCommandInvocation,
   UiCommandOutput,
+  UiEvent,
   UiEventHandler,
   UiSnapshot,
   UiUnsubscribe,
@@ -39,7 +40,6 @@ import { createCoalescedTuiEventDispatcher } from "./store/stream-coalescer.js";
 import { ThemeProvider } from "./theme/index.js";
 import type {
   TuiCommandCatalog,
-  TuiEvent,
   TuiStore,
   TuiRuntimeStatus,
 } from "./store/snapshot.js";
@@ -261,7 +261,7 @@ export function OhbabyTerminalApp({
     [activeSessionId, setActiveCommandPanel],
   );
   const consumeCommandPanelEvent = useCallback(
-    (tuiEvent: TuiEvent): boolean => {
+    (tuiEvent: UiEvent): boolean => {
       if (
         tuiEvent.type === "command.started" &&
         displayPanelKindForCommandId(tuiEvent.command.commandId) !== null
@@ -468,7 +468,7 @@ export function OhbabyTerminalApp({
       store.dispatchMany(events);
     });
 
-    const unsubscribe = subscribeEvents((tuiEvent: TuiEvent) => {
+    const unsubscribe = subscribeEvents((tuiEvent: UiEvent) => {
       if (consumeCommandPanelEvent(tuiEvent)) {
         return;
       }
@@ -756,7 +756,7 @@ function createEmptySnapshot(): UiSnapshot {
   };
 }
 
-function isNewSessionSelectionEvent(tuiEvent: TuiEvent): boolean {
+function isNewSessionSelectionEvent(tuiEvent: UiEvent): boolean {
   if (
     tuiEvent.type !== "command.result.delivered" ||
     tuiEvent.action?.kind !== "session.selected"
@@ -768,7 +768,7 @@ function isNewSessionSelectionEvent(tuiEvent: TuiEvent): boolean {
 }
 
 function selectedExistingSessionIdFromEvent(
-  tuiEvent: TuiEvent,
+  tuiEvent: UiEvent,
 ): string | undefined {
   if (
     tuiEvent.type !== "command.result.delivered" ||
@@ -786,7 +786,7 @@ function selectedExistingSessionIdFromEvent(
     : undefined;
 }
 
-function commandResultWithoutSessionSelection(tuiEvent: TuiEvent): TuiEvent {
+function commandResultWithoutSessionSelection(tuiEvent: UiEvent): UiEvent {
   if (
     tuiEvent.type !== "command.result.delivered" ||
     tuiEvent.action?.kind !== "session.selected"

@@ -84,6 +84,11 @@ describe("context window UI contract", () => {
     };
 
     const core = {
+      acquirePromptEditLease(): ReturnType<
+        CoreAPI["acquirePromptEditLease"]
+      > {
+        return Promise.reject(new Error("No queued prompt"));
+      },
       abortRun(): ReturnType<CoreAPI["abortRun"]> {
         return Promise.resolve();
       },
@@ -109,6 +114,9 @@ describe("context window UI contract", () => {
       },
       archiveSession(): ReturnType<CoreAPI["archiveSession"]> {
         return Promise.resolve();
+      },
+      cancelQueuedPrompt(): ReturnType<CoreAPI["cancelQueuedPrompt"]> {
+        return Promise.reject(new Error("No queued prompt"));
       },
       connectModel(): ReturnType<CoreAPI["connectModel"]> {
         return Promise.resolve({
@@ -143,6 +151,9 @@ describe("context window UI contract", () => {
       executeCommand(): ReturnType<CoreAPI["executeCommand"]> {
         return Promise.resolve();
       },
+      editQueuedPrompt(): ReturnType<CoreAPI["editQueuedPrompt"]> {
+        return Promise.reject(new Error("No queued prompt"));
+      },
       getContextWindowUsage(input: {
         readonly sessionId: string;
       }): ReturnType<CoreAPI["getContextWindowUsage"]> {
@@ -170,6 +181,14 @@ describe("context window UI contract", () => {
       },
       respondPermission(): ReturnType<CoreAPI["respondPermission"]> {
         return Promise.resolve();
+      },
+      releasePromptEditLease(): ReturnType<
+        CoreAPI["releasePromptEditLease"]
+      > {
+        return Promise.reject(new Error("No queued prompt"));
+      },
+      renewPromptEditLease(): ReturnType<CoreAPI["renewPromptEditLease"]> {
+        return Promise.reject(new Error("No queued prompt"));
       },
       setPermission(): ReturnType<CoreAPI["setPermission"]> {
         return Promise.resolve({
