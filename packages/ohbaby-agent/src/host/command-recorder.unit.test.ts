@@ -65,4 +65,30 @@ describe("createStructuredUiCommandRecorder", () => {
     await expect(recorder.flush()).resolves.toBeUndefined();
     expect(diagnostic).toHaveBeenCalledTimes(1);
   });
+
+  it("does not expose caller-controlled error names in default diagnostics", async () => {
+    const writes: string[] = [];
+    const write = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk): boolean => {
+        writes.push(String(chunk));
+        return true;
+      });
+    const error = new Error("sink failed");
+    error.name = "caller-secret-name";
+
+    try {
+      const recorder = createStructuredUiCommandRecorder({
+        sink: () => Promise.reject(error),
+      });
+
+      recorder.record(record("operation_1", "started"));
+      await recorder.flush();
+
+      expect(writes.join("\n")).toContain('"name":"Error"');
+      expect(writes.join("\n")).not.toContain("caller-secret-name");
+    } finally {
+      write.mockRestore();
+    }
+  });
 });

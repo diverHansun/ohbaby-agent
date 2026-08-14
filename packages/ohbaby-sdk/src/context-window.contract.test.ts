@@ -87,7 +87,7 @@ describe("context window UI contract", () => {
       acquirePromptEditLease(): ReturnType<CoreAPI["acquirePromptEditLease"]> {
         return Promise.reject(new Error("No queued prompt"));
       },
-      abortRun(): ReturnType<CoreAPI["abortRun"]> {
+      abortRun(_runId: string): ReturnType<CoreAPI["abortRun"]> {
         return Promise.resolve();
       },
       compactSession(): ReturnType<CoreAPI["compactSession"]> {

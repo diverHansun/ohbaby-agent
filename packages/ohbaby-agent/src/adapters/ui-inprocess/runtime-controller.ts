@@ -129,19 +129,16 @@ export class InProcessRuntimeController {
     try {
       const runtime = await this.getRuntime();
       await runtime.interruptRunTree(runId, "run aborted");
-    } catch {
-      // Abort is best-effort; the run may already have completed.
     } finally {
       await this.options.clearPendingPermissionsForRun(runId);
     }
   }
 
-  async abortPromptRun(runId?: string): Promise<boolean> {
-    const targetRunId = runId ?? this.getActiveRunId();
-    if (!targetRunId || !this.activeRunSessionById.has(targetRunId)) {
+  async abortPromptRun(runId: string): Promise<boolean> {
+    if (!this.activeRunSessionById.has(runId)) {
       return false;
     }
-    await this.cancelPromptRun(targetRunId);
+    await this.cancelPromptRun(runId);
     return true;
   }
 }

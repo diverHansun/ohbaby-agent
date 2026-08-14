@@ -51,6 +51,24 @@ describe("daemon protocol", () => {
     ).toThrow("Unsupported daemon rpc method");
   });
 
+  it("requires a non-empty UiRun id for abortRun", () => {
+    const request = {
+      clientId: "client_1",
+      id: "rpc_abort",
+      method: "abortRun",
+    } as const;
+
+    expect(() => parseDaemonRpcRequest({ ...request, params: [] })).toThrow(
+      "abortRun requires a non-empty runId",
+    );
+    expect(() => parseDaemonRpcRequest({ ...request, params: ["  "] })).toThrow(
+      "abortRun requires a non-empty runId",
+    );
+    expect(
+      parseDaemonRpcRequest({ ...request, params: ["run_1"] }),
+    ).toMatchObject({ method: "abortRun", params: ["run_1"] });
+  });
+
   it("round-trips success and failure responses through JSON", () => {
     const success = createDaemonRpcSuccess("rpc_1", {
       activeSessionId: null,

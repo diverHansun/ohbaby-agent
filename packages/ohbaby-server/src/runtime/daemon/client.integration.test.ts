@@ -410,7 +410,7 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve();
   }
 
-  abortRun(runId?: string): Promise<void> {
+  abortRun(runId: string): Promise<void> {
     this.calls.push({ args: [runId], method: "abortRun" });
     return Promise.resolve();
   }

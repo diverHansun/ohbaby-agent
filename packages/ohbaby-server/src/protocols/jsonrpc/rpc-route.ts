@@ -289,7 +289,7 @@ export async function callDaemonBackend(input: {
       return undefined;
     }
     case "abortRun":
-      return backend.abortRun(request.params[0] as string | undefined);
+      return backend.abortRun(request.params[0] as string);
   }
 }
 

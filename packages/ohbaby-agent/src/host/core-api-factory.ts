@@ -34,10 +34,7 @@ const NOOP_COMMAND_RECORDER: UiCommandRecorder = {
 function reportCommandObservationFailure(
   diagnostic: UiCommandObservationDiagnostic,
 ): void {
-  const name =
-    diagnostic.error instanceof Error && diagnostic.error.name.length > 0
-      ? diagnostic.error.name
-      : "Error";
+  const name = diagnostic.error instanceof Error ? "Error" : "NonError";
   process.stderr.write(
     `${JSON.stringify({ name, stage: diagnostic.stage, type: "ui.command.observation.failure" })}\n`,
   );

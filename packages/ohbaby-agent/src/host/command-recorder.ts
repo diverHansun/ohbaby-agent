@@ -22,8 +22,7 @@ function defaultSink(record: UiCommandRecord): void {
 }
 
 function defaultDiagnostic(error: unknown): void {
-  const name =
-    error instanceof Error && error.name.length > 0 ? error.name : "Error";
+  const name = error instanceof Error ? "Error" : "NonError";
   process.stderr.write(
     `${JSON.stringify({ name, type: "ui.command.recorder.failure" })}\n`,
   );

@@ -1933,6 +1933,7 @@ export function createInProcessUiBackendClient(
         timestamp,
       });
 
+      let startedRuntimeRunId: string | undefined;
       try {
         const result = await runtime.startSession({
           agentName,
@@ -1942,6 +1943,7 @@ export function createInProcessUiBackendClient(
           sessionId: session.id,
           title: session.title,
         });
+        startedRuntimeRunId = result.runId;
         if (result.runId !== runId) {
           throw new Error(
             `Agent service created unexpected run id: ${result.runId}`,
@@ -1949,7 +1951,19 @@ export function createInProcessUiBackendClient(
         }
         await submitOptions?.onRunStarted?.(runId);
       } catch (error) {
-        await projection.stop();
+        try {
+          if (startedRuntimeRunId !== undefined) {
+            await Promise.allSettled([
+              runtime.interruptRunTree(
+                startedRuntimeRunId,
+                "prompt start handshake failed",
+              ),
+              runtime.runManager.waitForCompletion(startedRuntimeRunId),
+            ]);
+          }
+        } finally {
+          await projection.stop();
+        }
         throw error;
       }
 
@@ -2446,6 +2460,7 @@ export function createInProcessUiBackendClient(
   return {
     async dispose(): Promise<void> {
       promptScheduler.close();
+      interactionBroker.abortAll("daemon-stopping");
       eventRouter.dispose();
       await runtimeController.resetRuntime();
     },
@@ -2670,15 +2685,8 @@ export function createInProcessUiBackendClient(
       return interactionBroker.respond(interactionId, response);
     },
 
-    async abortRun(runId?: string): Promise<void> {
-      if (!runId) {
-        await runtimeController.abortPromptRun();
-        interactionBroker.abortAll("aborted");
-      } else if (runtimeController.isActiveRun(runId)) {
-        await runtimeController.abortPromptRun(runId);
-      } else {
-        commandService.abortCommandRun(runId, "aborted");
-      }
+    async abortRun(runId: string): Promise<void> {
+      await runtimeController.abortPromptRun(runId);
     },
   };
 }

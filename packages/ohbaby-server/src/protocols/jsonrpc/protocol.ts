@@ -150,6 +150,12 @@ export function parseDaemonRpcRequest(value: unknown): DaemonRpcRequest {
   if (!Array.isArray(params)) {
     throw new TypeError("Daemon rpc params must be an array");
   }
+  if (
+    method === "abortRun" &&
+    (typeof params[0] !== "string" || params[0].trim().length === 0)
+  ) {
+    throw new TypeError("abortRun requires a non-empty runId");
+  }
 
   return {
     clientId,

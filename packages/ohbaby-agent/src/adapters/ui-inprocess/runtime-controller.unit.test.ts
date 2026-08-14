@@ -2,6 +2,15 @@ import type { UiRunStatus } from "ohbaby-sdk";
 import { describe, expect, it } from "vitest";
 import type { UiRuntimeComposition } from "../ui-runtime/types.js";
 import { InProcessRuntimeController } from "./runtime-controller.js";
+
+function assertAbortPromptRunRequiresRunId(
+  controller: InProcessRuntimeController,
+): void {
+  // @ts-expect-error Run identity is required; abort must never guess a target.
+  void controller.abortPromptRun();
+}
+
+void assertAbortPromptRunRequiresRunId;
 import type { NoticeDraft } from "./types.js";
 
 function runtime(
@@ -124,6 +133,32 @@ describe("InProcessRuntimeController", () => {
     expect(controller.getActiveRunId("session_1")).toBe("run_1");
     await expect(controller.abortPromptRun("run_2")).resolves.toBe(true);
     expect(cancelled).toEqual(["run_2"]);
+  });
+
+  it("rejects a real interrupt failure while still clearing pending permissions", async () => {
+    const cleared: string[] = [];
+    const controller = new InProcessRuntimeController({
+      clearPendingPermissionsForRun(runId): Promise<void> {
+        cleared.push(runId);
+        return Promise.resolve();
+      },
+      createRuntime: (): Promise<UiRuntimeComposition> =>
+        Promise.resolve(
+          runtime({
+            interruptRunTree(): Promise<void> {
+              return Promise.reject(new Error("interrupt transport failed"));
+            },
+          }),
+        ),
+      publishNotice: (): void => undefined,
+      updateStatus: (): Promise<void> => Promise.resolve(),
+    });
+    controller.setActiveRunId("run_active", "session_1");
+
+    await expect(controller.abortPromptRun("run_active")).rejects.toThrow(
+      "interrupt transport failed",
+    );
+    expect(cleared).toEqual(["run_active"]);
   });
 
   it("disposes the old runtime before creating a replacement", async (): Promise<void> => {

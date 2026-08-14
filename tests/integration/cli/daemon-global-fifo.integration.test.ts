@@ -237,7 +237,11 @@ describe("daemon global FIFO", () => {
       ]);
       expect(beforeAbort).toBe("pending");
 
-      await clientA.abortRun();
+      const activeSnapshot = await clientA.getSnapshot();
+      if (activeSnapshot.status.kind !== "running") {
+        throw new Error("expected first prompt run to be active");
+      }
+      await clientA.abortRun(activeSnapshot.status.runId);
       await first.catch(() => undefined);
       await secondStarted.promise;
       await second;

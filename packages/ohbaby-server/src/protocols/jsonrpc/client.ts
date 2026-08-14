@@ -312,7 +312,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("respondInteraction", [interactionId, response]);
   }
 
-  abortRun(runId?: string): ReturnType<UiBackendClient["abortRun"]> {
+  abortRun(runId: string): ReturnType<UiBackendClient["abortRun"]> {
     return this.rpc("abortRun", [runId]);
   }
 

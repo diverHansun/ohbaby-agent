@@ -151,7 +151,7 @@ export interface UiCommandClient
     interactionId: string,
     response: UiInteractionResponse,
   ): Promise<void>;
-  abortRun(runId?: string): Promise<void>;
+  abortRun(runId: string): Promise<void>;
 }
 
 /**

@@ -9,6 +9,13 @@ import type {
 
 type HasKey<T, Key extends PropertyKey> = Key extends keyof T ? true : false;
 
+function assertAbortRunRequiresUiRunId(client: UiCommandClient): void {
+  // @ts-expect-error A public abort must identify one concrete UiRun.
+  void client.abortRun();
+}
+
+void assertAbortRunRequiresUiRunId;
+
 describe("UI client capability contract", () => {
   it("keeps prompt submission, waiting, and queue editing in distinct capabilities", () => {
     const boundaries: readonly [

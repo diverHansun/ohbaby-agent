@@ -327,6 +327,62 @@ describe("buildCoreAPIImpl", () => {
     expect(createPersistentUiBackendClient).toHaveBeenCalledWith({});
     await expect(host.dispose()).resolves.toBeUndefined();
   });
+
+  it("uses a fixed diagnostic when an Agent host recorder fails", async () => {
+    vi.resetModules();
+    const stderr = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    const recorderError = new Error("recorder unavailable");
+    recorderError.name = "private-recorder-name";
+    const dispose = vi.fn(() => Promise.resolve());
+    const createPersistentUiBackendClient = vi.fn(() => ({
+      dispose,
+      submitPromptAccepted: vi.fn(() =>
+        Promise.resolve({
+          clientRequestId: "request_1",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          promptId: "prompt_1",
+          sessionId: "session_1",
+          status: "queued" as const,
+          userMessageId: "message_1",
+        }),
+      ),
+      subscribeEvents: vi.fn(() => vi.fn()),
+    }));
+    vi.doMock("../adapters/ui-persistent.js", () => ({
+      closePersistentUiBackendDatabase: vi.fn(),
+      createPersistentUiBackendClient,
+    }));
+    vi.doMock("../mcp/index.js", () => ({
+      McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
+    }));
+
+    try {
+      const { buildCoreAPIImpl } = await import("./core-api-factory.js");
+      const api = await buildCoreAPIImpl({
+        commandRecorder: {
+          record(): never {
+            throw recorderError;
+          },
+        },
+      });
+
+      await expect(
+        api.core.submitPromptAccepted("private prompt"),
+      ).resolves.toMatchObject({ promptId: "prompt_1" });
+      expect(stderr).toHaveBeenCalledWith(
+        expect.stringContaining('"type":"ui.command.observation.failure"'),
+      );
+      expect(stderr.mock.calls.flat().join("\n")).not.toContain(
+        "private-recorder-name",
+      );
+      await api.dispose();
+      expect(dispose).toHaveBeenCalledOnce();
+    } finally {
+      stderr.mockRestore();
+    }
+  });
 });
 
 function createPersistentClientMock(): {

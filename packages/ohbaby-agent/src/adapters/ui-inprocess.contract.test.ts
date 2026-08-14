@@ -56,6 +56,7 @@ import {
 } from "../runtime/run-ledger/index.js";
 import { PermissionEvent } from "../permission/index.js";
 import { Project } from "../project/index.js";
+import { InMemoryPromptSubmissionStore } from "../runtime/prompt-scheduler/index.js";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
 import { createHostLocalSandboxManager } from "./ui-runtime/host-local-environment.js";
 import {
@@ -1467,6 +1468,22 @@ function withTimeout<T>(
       },
     );
   });
+}
+
+async function abortActiveRun(client: UiBackendClient): Promise<void> {
+  const snapshot = await client.getSnapshot();
+  const status = snapshot.status;
+  const runId =
+    status.kind === "running"
+      ? status.runId
+      : status.kind === "waiting-for-permission"
+        ? snapshot.permissions.find(
+            (request) => request.id === status.requestId,
+          )?.runId
+        : undefined;
+  if (runId !== undefined) {
+    await client.abortRun(runId);
+  }
 }
 
 async function waitForFinalResponseStart(
@@ -3428,7 +3445,7 @@ describe("createInProcessUiBackendClient", () => {
       "child subagent did not start",
     );
 
-    await client.abortRun();
+    await client.abortRun("run_1");
 
     expect(childSignal?.aborted).toBe(true);
     await expect(
@@ -3474,7 +3491,7 @@ describe("createInProcessUiBackendClient", () => {
       "parent did not continue after spawning background work",
     );
 
-    await client.abortRun();
+    await client.abortRun("run_1");
 
     expect(parentSignal?.aborted).toBe(true);
     expect(childSignal?.aborted).toBe(true);
@@ -4780,6 +4797,50 @@ describe("createInProcessUiBackendClient", () => {
     });
   });
 
+  it("interrupts a started run when persisting its running state fails", async () => {
+    const storageError = new Error("running state unavailable");
+    const store = new InMemoryPromptSubmissionStore();
+    vi.spyOn(store, "markRunning").mockRejectedValue(storageError);
+    const runLedger = createInMemoryRunLedger();
+    let providerSignal: AbortSignal | undefined;
+    const baseClient = createFakeLLMClient([]);
+    const client = createInProcessUiBackendClient({
+      createRunId: () => "run_persistence_failure",
+      llmClient: {
+        ...baseClient,
+        provider: {
+          ...baseClient.provider,
+          isAbortError: (error: unknown): boolean =>
+            error instanceof Error && error.name === "AbortError",
+          streamChatCompletion(
+            request: InterfaceProviderRequest,
+          ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+            if (isTitleGenerationRequest(request)) {
+              return Promise.resolve(createTitleProviderStream(request));
+            }
+            if (!request.signal) {
+              throw new Error("expected the prompt run to have an abort signal");
+            }
+            providerSignal = request.signal;
+            return Promise.resolve(
+              createAbortableProviderStream(request.signal),
+            );
+          },
+        },
+      },
+      promptSubmissionStore: store,
+      runLedger,
+    });
+
+    const completion = client.submitPromptAndWait("persist running state");
+    await expect(completion).rejects.toBe(storageError);
+    await expect(runLedger.get("run_persistence_failure")).resolves.toMatchObject(
+      { status: "cancelled" },
+    );
+    expect(providerSignal?.aborted ?? true).toBe(true);
+    await client.dispose();
+  });
+
   it("isolates UI event handler errors from prompt execution", async () => {
     const client = createInProcessUiBackendClient({
       llmClient: createFakeLLMClient([
@@ -5411,7 +5472,7 @@ describe("createInProcessUiBackendClient", () => {
         "user prompt did not run after interrupting the goal",
       );
     } finally {
-      await client.abortRun().catch(() => undefined);
+      await abortActiveRun(client).catch(() => undefined);
     }
 
     await client.executeCommand({
@@ -5740,7 +5801,7 @@ describe("createInProcessUiBackendClient", () => {
     try {
       await userPrompt;
     } finally {
-      await client.abortRun().catch(() => undefined);
+      await abortActiveRun(client).catch(() => undefined);
     }
 
     await client.executeCommand({
@@ -7804,7 +7865,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(snapshotEvent?.snapshot.activeSessionId).toBe("session_2");
   });
 
-  it("silently aborts pending session interactions by command run id", async () => {
+  it("does not interpret a command run id as a prompt run id", async () => {
     const client = createInProcessUiBackendClient({
       initialSnapshot: createInitialSnapshotWithTwoSessions(),
       llmClient: createFakeLLMClient([]),
@@ -7833,6 +7894,19 @@ describe("createInProcessUiBackendClient", () => {
     await interaction;
 
     await client.abortRun("command_1");
+    expect(events).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          interactionId: "interaction_1",
+          type: "interaction.resolved",
+        }),
+      ]),
+    );
+
+    await client.respondInteraction("interaction_1", {
+      kind: "cancelled",
+      reason: "user cancelled the interaction",
+    });
     await execution;
 
     expect(events).toEqual(
@@ -7840,6 +7914,7 @@ describe("createInProcessUiBackendClient", () => {
         expect.objectContaining({
           clientInvocationId: "inv_session",
           commandRunId: "command_1",
+          status: "cancelled",
           type: "interaction.resolved",
         }),
       ]),
@@ -7852,6 +7927,44 @@ describe("createInProcessUiBackendClient", () => {
         }),
       ]),
     );
+  });
+
+  it("settles pending command interactions when the backend is disposed", async () => {
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: createInitialSnapshotWithTwoSessions(),
+      llmClient: createFakeLLMClient([]),
+    });
+    const interaction = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "interaction.requested" }> =>
+        event.type === "interaction.requested",
+    );
+    const resolved = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "interaction.resolved" }> =>
+        event.type === "interaction.resolved",
+    );
+    const execution = client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_dispose",
+      commandId: "sessions",
+      path: ["sessions"],
+      raw: "/sessions",
+      rawArgs: "",
+      sessionId: "session_1",
+      surface: "tui",
+    });
+    await interaction;
+
+    await client.dispose();
+
+    await expect(
+      withTimeout(execution, 250, "command interaction remained pending"),
+    ).resolves.toBeUndefined();
+    await expect(resolved).resolves.toMatchObject({
+      status: "cancelled",
+      type: "interaction.resolved",
+    });
   });
 });
 

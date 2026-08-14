@@ -29,6 +29,22 @@ interface SubmitWithPermissionApprovalOptions {
   readonly timeoutMs?: number;
 }
 
+async function abortActiveRun(client: RealUiClient): Promise<void> {
+  const snapshot = await client.getSnapshot();
+  const status = snapshot.status;
+  const runId =
+    status.kind === "running"
+      ? status.runId
+      : status.kind === "waiting-for-permission"
+        ? snapshot.permissions.find(
+            (request) => request.id === status.requestId,
+          )?.runId
+        : undefined;
+  if (runId !== undefined) {
+    await client.abortRun(runId);
+  }
+}
+
 afterEach(async () => {
   closeDatabase();
   LLMConfigManager.resetInstance();
@@ -216,7 +232,7 @@ async function submitPromptApprovingPermissions(
           parentSessionId: options.parentSessionId,
         });
       } catch (error) {
-        await client.abortRun().catch(() => undefined);
+        await abortActiveRun(client).catch(() => undefined);
         throw error;
       }
       answered.add(request.id);
@@ -228,7 +244,7 @@ async function submitPromptApprovingPermissions(
 
   if (!settled) {
     const snapshot = await client.getSnapshot();
-    await client.abortRun().catch(() => undefined);
+    await abortActiveRun(client).catch(() => undefined);
     throw new Error(
       `Timed out waiting for real prompt. Pending permissions: ${snapshot.permissions
         .map((request) => request.title)
@@ -504,7 +520,7 @@ describe("real provider TUI smoke", () => {
         expect(interruptedFrame).toContain("Interrupted");
         expect(interruptedFrame).not.toContain("error: run aborted");
       } finally {
-        await client.abortRun().catch(() => undefined);
+        await abortActiveRun(client).catch(() => undefined);
         app.unmount();
       }
     },

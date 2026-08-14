@@ -214,6 +214,83 @@ describe("createRemoteUiBackendClient", () => {
     ]);
   });
 
+  it("aborts only the wait step after submitPromptAndWait is accepted", async () => {
+    const controller = new AbortController();
+    const methods: string[] = [];
+    const requestSignals = new Map<string, AbortSignal | null | undefined>();
+    let resolveWaitStarted: (() => void) | undefined;
+    const waitStarted = new Promise<void>((resolve) => {
+      resolveWaitStarted = resolve;
+    });
+    const fetchImpl = vi.fn(
+      (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const body = JSON.parse(requireStringBody(init)) as {
+          readonly id: string;
+          readonly method: string;
+        };
+        methods.push(body.method);
+        requestSignals.set(body.method, init?.signal);
+        if (body.method === "waitForPrompt") {
+          resolveWaitStarted?.();
+          return new Promise<Response>((_resolve, reject) => {
+            const rejectAbort = (): void => {
+              reject(new DOMException("wait aborted", "AbortError"));
+            };
+            if (init?.signal?.aborted === true) {
+              rejectAbort();
+              return;
+            }
+            init?.signal?.addEventListener("abort", rejectAbort, {
+              once: true,
+            });
+          });
+        }
+        const result =
+          body.method === "submitPromptAccepted"
+            ? {
+                clientRequestId: "request_1",
+                createdAt: "2026-06-12T00:00:00.000Z",
+                promptId: "prompt_1",
+                sessionId: "session_1",
+                status: "queued",
+                userMessageId: "message_1",
+              }
+            : undefined;
+        return Promise.resolve(
+          new Response(JSON.stringify({ id: body.id, ok: true, result }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          }),
+        );
+      },
+    );
+    const client = createRemoteUiBackendClient({
+      clientId: "client_1",
+      fetch: fetchImpl,
+      port: 4096,
+    });
+
+    const completion = client.submitPromptAndWait("accepted first", {
+      clientRequestId: "request_1",
+      sessionId: "session_1",
+      signal: controller.signal,
+    });
+    await waitStarted;
+
+    expect(methods).toEqual([
+      "initializeClient",
+      "submitPromptAccepted",
+      "waitForPrompt",
+    ]);
+    expect(requestSignals.get("submitPromptAccepted")).toBeUndefined();
+    expect(requestSignals.get("waitForPrompt")).toBe(controller.signal);
+
+    controller.abort();
+    await expect(completion).rejects.toThrow(
+      "Daemon connection failed while running waitForPrompt",
+    );
+  });
+
   it("sends JSON-RPC requests with auth and returns snapshots", async () => {
     const requests: {
       readonly body: Record<string, unknown>;
