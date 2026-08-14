@@ -174,6 +174,51 @@ function commandSessionSelected(
   };
 }
 
+function commandStarted(): Extract<UiEvent, { type: "command.started" }> {
+  return {
+    command: {
+      clientInvocationId: "invoke_1",
+      commandId: "status",
+      commandRunId: "command_1",
+      path: ["status"],
+      surface: "tui",
+    },
+    timestamp: Date.parse(timestamp),
+    type: "command.started",
+  };
+}
+
+function interactionRequested(): Extract<
+  UiEvent,
+  { type: "interaction.requested" }
+> {
+  return {
+    request: {
+      clientInvocationId: "invoke_1",
+      commandRunId: "command_1",
+      interactionId: "interaction_1",
+      kind: "confirm",
+      subject: "permission",
+    },
+    timestamp: Date.parse(timestamp),
+    type: "interaction.requested",
+  };
+}
+
+function interactionResolved(): Extract<
+  UiEvent,
+  { type: "interaction.resolved" }
+> {
+  return {
+    clientInvocationId: "invoke_1",
+    commandRunId: "command_1",
+    interactionId: "interaction_1",
+    status: "accepted",
+    timestamp: Date.parse(timestamp),
+    type: "interaction.resolved",
+  };
+}
+
 function runUpdated(runId: string, sessionId: string): UiEvent {
   return {
     run: {
@@ -459,6 +504,98 @@ describe("DaemonClientViewCoordinator", () => {
     ).toEqual(runtimeRunning("run_1"));
     expect(
       coordinator.routeEventForClient(runtimeRunning("run_1"), "client_fresh"),
+    ).toBeUndefined();
+  });
+
+  it("atomically claims an interaction only for its command owner", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    coordinator.prepareCommandInvocation("client_a", commandInvocation());
+    coordinator.observeEvent(commandStarted());
+    coordinator.observeEvent(interactionRequested());
+
+    expect(
+      coordinator.claimInteractionResponse(
+        "interaction_1",
+        "client_b",
+        () => "claim_wrong",
+      ),
+    ).toBeUndefined();
+    expect(
+      coordinator.claimInteractionResponse(
+        "interaction_1",
+        "client_a",
+        () => "claim_1",
+      ),
+    ).toEqual({ claimToken: "claim_1" });
+    expect(
+      coordinator.claimInteractionResponse(
+        "interaction_1",
+        "client_a",
+        () => "claim_2",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("rolls back only the matching live interaction claim", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    coordinator.prepareCommandInvocation("client_a", commandInvocation());
+    coordinator.observeEvent(commandStarted());
+    coordinator.observeEvent(interactionRequested());
+    const claim = coordinator.claimInteractionResponse(
+      "interaction_1",
+      "client_a",
+      () => "claim_1",
+    );
+    if (claim === undefined) {
+      throw new Error("expected interaction claim");
+    }
+
+    expect(
+      coordinator.releaseInteractionClaim("interaction_1", "wrong"),
+    ).toBe(false);
+    expect(
+      coordinator.releaseInteractionClaim(
+        "interaction_1",
+        claim.claimToken,
+      ),
+    ).toBe(true);
+    expect(
+      coordinator.claimInteractionResponse(
+        "interaction_1",
+        "client_a",
+        () => "claim_2",
+      ),
+    ).toEqual({ claimToken: "claim_2" });
+  });
+
+  it("does not restore a claim after the interaction resolved", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    coordinator.prepareCommandInvocation("client_a", commandInvocation());
+    coordinator.observeEvent(commandStarted());
+    coordinator.observeEvent(interactionRequested());
+    const claim = coordinator.claimInteractionResponse(
+      "interaction_1",
+      "client_a",
+      () => "claim_1",
+    );
+    if (claim === undefined) {
+      throw new Error("expected interaction claim");
+    }
+
+    coordinator.observeEvent(interactionResolved());
+
+    expect(
+      coordinator.releaseInteractionClaim(
+        "interaction_1",
+        claim.claimToken,
+      ),
+    ).toBe(false);
+    expect(
+      coordinator.claimInteractionResponse(
+        "interaction_1",
+        "client_a",
+        () => "claim_2",
+      ),
     ).toBeUndefined();
   });
 });

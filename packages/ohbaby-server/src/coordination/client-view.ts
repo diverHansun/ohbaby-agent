@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   SubmitPromptOptions,
   UiBackendClient,
@@ -11,6 +12,25 @@ interface ClientView {
   activeSessionId?: string | null;
   readonly initialPermission?: DaemonStartupIntent["initialPermission"];
   pendingSessionId?: string;
+}
+
+type InteractionResponseState =
+  | {
+      readonly kind: "owned";
+      readonly ownerClientId: string;
+    }
+  | {
+      readonly claimToken: string;
+      readonly kind: "claimed";
+      readonly ownerClientId: string;
+    }
+  | {
+      readonly kind: "consumed";
+      readonly ownerClientId: string;
+    };
+
+export interface InteractionResponseClaim {
+  readonly claimToken: string;
 }
 
 export interface PreparedPromptSubmit {
@@ -267,6 +287,10 @@ export class DaemonClientViewCoordinator {
   private readonly clientViews = new Map<string, ClientView>();
   private readonly commandOwnersByInvocationId = new Map<string, string>();
   private readonly commandOwnersByRunId = new Map<string, string>();
+  private readonly interactionResponseStates = new Map<
+    string,
+    InteractionResponseState
+  >();
   private readonly runOwnersByRunId = new Map<string, string>();
   private readonly runSessionIdsByRunId = new Map<string, string>();
   private readonly activePromptsBySession = new Map<string, DaemonPromptItem>();
@@ -391,6 +415,19 @@ export class DaemonClientViewCoordinator {
       }
       case "command.failed":
         return;
+      case "interaction.requested": {
+        const ownerClientId = this.interactionOwnerForEvent(event);
+        if (ownerClientId !== undefined) {
+          this.interactionResponseStates.set(event.request.interactionId, {
+            kind: "owned",
+            ownerClientId,
+          });
+        }
+        return;
+      }
+      case "interaction.resolved":
+        this.interactionResponseStates.delete(event.interactionId);
+        return;
       case "runtime.updated": {
         const runId =
           event.status.kind === "running" ? event.status.runId : undefined;
@@ -490,6 +527,11 @@ export class DaemonClientViewCoordinator {
         this.runOwnersByRunId.delete(runId);
       }
     }
+    for (const [interactionId, state] of this.interactionResponseStates) {
+      if (state.ownerClientId === clientId) {
+        this.interactionResponseStates.delete(interactionId);
+      }
+    }
   }
 
   resetRuntimeState(): void {
@@ -497,6 +539,55 @@ export class DaemonClientViewCoordinator {
     this.activePromptsBySession.clear();
     this.runOwnersByRunId.clear();
     this.runSessionIdsByRunId.clear();
+    this.interactionResponseStates.clear();
+  }
+
+  claimInteractionResponse(
+    interactionId: string,
+    clientId: string,
+    createClaimToken: () => string = randomUUID,
+  ): InteractionResponseClaim | undefined {
+    const state = this.interactionResponseStates.get(interactionId);
+    if (state?.kind !== "owned" || state.ownerClientId !== clientId) {
+      return undefined;
+    }
+    const claimToken = createClaimToken();
+    this.interactionResponseStates.set(interactionId, {
+      claimToken,
+      kind: "claimed",
+      ownerClientId: state.ownerClientId,
+    });
+    return { claimToken };
+  }
+
+  releaseInteractionClaim(
+    interactionId: string,
+    claimToken: string,
+  ): boolean {
+    const state = this.interactionResponseStates.get(interactionId);
+    if (state?.kind !== "claimed" || state.claimToken !== claimToken) {
+      return false;
+    }
+    this.interactionResponseStates.set(interactionId, {
+      kind: "owned",
+      ownerClientId: state.ownerClientId,
+    });
+    return true;
+  }
+
+  consumeInteractionClaim(
+    interactionId: string,
+    claimToken: string,
+  ): boolean {
+    const state = this.interactionResponseStates.get(interactionId);
+    if (state?.kind !== "claimed" || state.claimToken !== claimToken) {
+      return false;
+    }
+    this.interactionResponseStates.set(interactionId, {
+      kind: "consumed",
+      ownerClientId: state.ownerClientId,
+    });
+    return true;
   }
 
   private commandEventBelongsToClient(
@@ -558,6 +649,16 @@ export class DaemonClientViewCoordinator {
     >,
     clientId: string,
   ): boolean {
+    const owner = this.interactionOwnerForEvent(event);
+    return owner === undefined || owner === clientId;
+  }
+
+  private interactionOwnerForEvent(
+    event: Extract<
+      UiEvent,
+      { type: "interaction.requested" | "interaction.resolved" }
+    >,
+  ): string | undefined {
     const clientInvocationId =
       event.type === "interaction.requested"
         ? event.request.clientInvocationId
@@ -566,12 +667,12 @@ export class DaemonClientViewCoordinator {
       event.type === "interaction.requested"
         ? event.request.commandRunId
         : event.commandRunId;
-    const owner =
+    return (
       (clientInvocationId === undefined
         ? undefined
         : this.commandOwnersByInvocationId.get(clientInvocationId)) ??
-      this.commandOwnersByRunId.get(commandRunId);
-    return owner === undefined || owner === clientId;
+      this.commandOwnersByRunId.get(commandRunId)
+    );
   }
 
   private commandOwnerForEvent(

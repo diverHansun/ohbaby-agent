@@ -50,6 +50,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isUnconsumedInteractionValidationError(error: unknown): boolean {
+  return isRecord(error) && error.code === "INVALID_INTERACTION_RESPONSE";
+}
+
 function requestIdFromBody(body: unknown): string {
   if (
     typeof body === "object" &&
@@ -336,13 +340,41 @@ export async function callDaemonBackend(input: {
           UiBackendClient["respondPermission"]
         >[1],
       );
-    case "respondInteraction":
-      return backend.respondInteraction(
-        request.params[0] as string,
-        request.params[1] as Parameters<
-          UiBackendClient["respondInteraction"]
-        >[1],
+    case "respondInteraction": {
+      const interactionId = request.params[0] as string;
+      const claim = clientViews.claimInteractionResponse(
+        interactionId,
+        request.clientId,
       );
+      if (claim === undefined) {
+        throw new DaemonForbiddenError(
+          "Interaction is unknown, already answered, or owned by another client",
+        );
+      }
+      try {
+        await backend.respondInteraction(
+          interactionId,
+          request.params[1] as Parameters<
+            UiBackendClient["respondInteraction"]
+          >[1],
+        );
+        clientViews.consumeInteractionClaim(interactionId, claim.claimToken);
+        return undefined;
+      } catch (error) {
+        if (isUnconsumedInteractionValidationError(error)) {
+          clientViews.releaseInteractionClaim(
+            interactionId,
+            claim.claimToken,
+          );
+        } else {
+          clientViews.consumeInteractionClaim(
+            interactionId,
+            claim.claimToken,
+          );
+        }
+        throw error;
+      }
+    }
     case "abortRun":
       return backend.abortRun(request.params[0] as string | undefined);
   }

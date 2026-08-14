@@ -611,6 +611,29 @@ describe("createRemoteUiBackendClient", () => {
       await client.setSearchApiKey(searchInput);
       await client.setPermission(permissionInput);
       await client.executeCommand(invocation);
+      backend.emit({
+        command: {
+          clientInvocationId: invocation.clientInvocationId,
+          commandId: invocation.commandId,
+          commandRunId: "command_1",
+          path: invocation.path,
+          sessionId: invocation.sessionId,
+          surface: invocation.surface,
+        },
+        timestamp: Date.now(),
+        type: "command.started",
+      });
+      backend.emit({
+        request: {
+          clientInvocationId: invocation.clientInvocationId,
+          commandRunId: "command_1",
+          interactionId: "interaction_1",
+          kind: "select-one",
+          subject: "model",
+        },
+        timestamp: Date.now(),
+        type: "interaction.requested",
+      });
       await client.respondPermission("permission_1", { choiceId: "allow" });
       await client.respondInteraction("interaction_1", {
         choiceId: "choice_1",

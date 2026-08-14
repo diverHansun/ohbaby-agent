@@ -144,6 +144,10 @@ class FakeBackend implements UiBackendClient {
     readonly requestId: string;
     readonly response: Parameters<UiBackendClient["respondPermission"]>[1];
   }[] = [];
+  readonly interactionResponses: {
+    readonly interactionId: string;
+    readonly response: Parameters<UiBackendClient["respondInteraction"]>[1];
+  }[] = [];
   readonly submitted: {
     readonly text: string;
     readonly options?: SubmitPromptOptions;
@@ -152,6 +156,7 @@ class FakeBackend implements UiBackendClient {
     [];
   onGetSnapshot: (() => Promise<void> | void) | undefined;
   archiveError: Error | undefined;
+  interactionError: Error | undefined;
   commandCatalog: UiSlashCommandCatalog = {
     commands: [
       {
@@ -382,7 +387,14 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve();
   }
 
-  respondInteraction(): Promise<void> {
+  respondInteraction(
+    interactionId: string,
+    response: Parameters<UiBackendClient["respondInteraction"]>[1],
+  ): Promise<void> {
+    this.interactionResponses.push({ interactionId, response });
+    if (this.interactionError !== undefined) {
+      return Promise.reject(this.interactionError);
+    }
     return Promise.resolve();
   }
 
@@ -718,6 +730,188 @@ describe("createDaemonServerApp", () => {
         ok: true,
         result: snapshot,
       });
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("allows only the owning RPC client to claim an interaction response", async () => {
+    const backend = new FakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    const rpc = (
+      clientId: string,
+      id: string,
+      method: string,
+      params: readonly unknown[],
+    ): Promise<Response> =>
+      Promise.resolve(handle.app.request("/api/rpc", {
+        body: JSON.stringify({ clientId, id, method, params }),
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        method: "POST",
+      }));
+    try {
+      await rpc("client_a", "rpc_execute", "executeCommand", [
+        {
+          argv: [],
+          clientInvocationId: "invoke_1",
+          commandId: "status",
+          path: ["status"],
+          raw: "/status",
+          rawArgs: "",
+          surface: "web",
+        },
+      ]);
+      backend.emit({
+        command: {
+          clientInvocationId: "invoke_1",
+          commandId: "status",
+          commandRunId: "command_1",
+          path: ["status"],
+          surface: "web",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.started",
+      });
+      backend.emit({
+        request: {
+          clientInvocationId: "invoke_1",
+          commandRunId: "command_1",
+          interactionId: "interaction_1",
+          kind: "confirm",
+          subject: "permission",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "interaction.requested",
+      });
+
+      const unknown = await rpc(
+        "client_a",
+        "rpc_unknown",
+        "respondInteraction",
+        ["interaction_missing", { kind: "accepted", value: true }],
+      );
+      expect(unknown.status).toBe(403);
+      const foreign = await rpc(
+        "client_b",
+        "rpc_foreign",
+        "respondInteraction",
+        ["interaction_1", { kind: "accepted", value: true }],
+      );
+      expect(foreign.status).toBe(403);
+
+      const [first, duplicate] = await Promise.all([
+        rpc("client_a", "rpc_first", "respondInteraction", [
+          "interaction_1",
+          { kind: "accepted", value: true },
+        ]),
+        rpc("client_a", "rpc_duplicate", "respondInteraction", [
+          "interaction_1",
+          { kind: "accepted", value: true },
+        ]),
+      ]);
+
+      expect([first.status, duplicate.status].sort()).toEqual([200, 403]);
+      expect(backend.interactionResponses).toEqual([
+        {
+          interactionId: "interaction_1",
+          response: { kind: "accepted", value: true },
+        },
+      ]);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("releases an interaction claim only after a known validation failure", async () => {
+    const backend = new FakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    const rpc = (
+      id: string,
+      interactionId = "interaction_1",
+    ): Promise<Response> =>
+      Promise.resolve(handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          clientId: "client_a",
+          id,
+          method: "respondInteraction",
+          params: [interactionId, { kind: "accepted" }],
+        }),
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        method: "POST",
+      }));
+    try {
+      await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          clientId: "client_a",
+          id: "rpc_execute",
+          method: "executeCommand",
+          params: [
+            {
+              argv: [],
+              clientInvocationId: "invoke_1",
+              commandId: "status",
+              path: ["status"],
+              raw: "/status",
+              rawArgs: "",
+              surface: "web",
+            },
+          ],
+        }),
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        method: "POST",
+      });
+      backend.emit({
+        command: {
+          clientInvocationId: "invoke_1",
+          commandId: "status",
+          commandRunId: "command_1",
+          path: ["status"],
+          surface: "web",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.started",
+      });
+      backend.emit({
+        request: {
+          clientInvocationId: "invoke_1",
+          commandRunId: "command_1",
+          interactionId: "interaction_1",
+          kind: "confirm",
+          subject: "permission",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "interaction.requested",
+      });
+      backend.interactionError = Object.assign(new Error("invalid response"), {
+        code: "INVALID_INTERACTION_RESPONSE",
+      });
+
+      expect((await rpc("rpc_invalid")).status).toBe(500);
+      backend.interactionError = undefined;
+      expect((await rpc("rpc_retry")).status).toBe(200);
+
+      backend.emit({
+        request: {
+          clientInvocationId: "invoke_1",
+          commandRunId: "command_1",
+          interactionId: "interaction_2",
+          kind: "confirm",
+          subject: "permission",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "interaction.requested",
+      });
+      backend.interactionError = new Error("unknown consumption state");
+      expect((await rpc("rpc_unknown_failure", "interaction_2")).status).toBe(
+        500,
+      );
+      backend.interactionError = undefined;
+      expect((await rpc("rpc_unsafe_retry", "interaction_2")).status).toBe(
+        403,
+      );
+      expect(backend.interactionResponses).toHaveLength(3);
     } finally {
       await handle.dispose();
     }
