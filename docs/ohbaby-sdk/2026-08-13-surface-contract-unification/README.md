@@ -1,7 +1,7 @@
 # 前端契约统一与命令记录
 
-> 状态：improve-1 与 improve-2 均已完成；全量测试、构建、真实进程 E2E、独立代码审查与文档一致性审计均已通过
-> 日期：2026-08-14
+> 状态：两轮代码与收尾补强已实施，自动化与真实进程 E2E 通过；最终独立复审结论见各轮 `05`。
+> 日期：2026-08-15
 > 目标：用一份 SDK 权威合同服务 TUI、CLI、Web 与远程 daemon，同时建立不重复、可脱敏的写操作记录。
 
 本议题按依赖方向分为两轮，而不是把每个问题拆成一个 `improve-N`：
@@ -15,7 +15,7 @@
 
 | 轮次 | README | 讨论 | 现状与问题 | 优化方案 | 参考项目 | 测试与验收 |
 |------|--------|------|------------|----------|----------|------------|
-| improve-1 | [README](./improve-1/README.md) | [00](./improve-1/00-discussion.md) | [01](./improve-1/01-problem-analysis-and-current-state.md) | [02](./improve-1/02-optimization-plan-and-change-scope.md) | [03](./improve-1/03-reference-projects.md) | [04](./improve-1/04-test-and-acceptance.md) |
+| improve-1 | [README](./improve-1/README.md) | [00](./improve-1/00-discussion.md) | [01](./improve-1/01-problem-analysis-and-current-state.md) | [02](./improve-1/02-optimization-plan-and-change-scope.md) | [03](./improve-1/03-reference-projects.md) | [04](./improve-1/04-test-and-acceptance.md) · [05 验收](./improve-1/05-implementation-acceptance.md) |
 | improve-2 | [README](./improve-2/README.md) | [00](./improve-2/00-discussion.md) | [01](./improve-2/01-problem-analysis-and-current-state.md) | [02](./improve-2/02-optimization-plan-and-change-scope.md) | [03](./improve-2/03-reference-projects.md) | [04](./improve-2/04-test-and-acceptance.md) · [05 验收](./improve-2/05-implementation-acceptance.md) |
 
 原始讨论材料保留在 [`improve-1/raw.md`](./improve-1/raw.md)。其中包含早期假设和已被代码调研推翻的方案；实施不得直接以 `raw.md` 为契约。

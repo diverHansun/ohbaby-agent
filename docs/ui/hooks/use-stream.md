@@ -1,5 +1,7 @@
 # useStream — SDK 事件聚合订阅器
 
+> 文档状态：历史/目标设计。当前订阅与 store 投影由 TUI `app.tsx` 和 `store/` 完成；见 [../README.md](../README.md)。
+
 本文档定义 useStream 的职责、订阅事件和 TuiStore 更新规则。
 
 useStream 是 SDK 事件到 TuiStore 的唯一管道。它订阅 `client.subscribeEvents()`，将每个 SDK 事件 dispatch 到 TuiStore reducer，并在必要时调用 AppActions 更新 UI 控制状态。
@@ -15,7 +17,7 @@ useStream 是 SDK 事件到 TuiStore 的唯一管道。它订阅 `client.subscri
 - 处理 `stream.gap` 事件，执行 reconcile 协议。
 
 **不做的事**：
-- 不调用 `UiBackendClient` 的写方法（submitPrompt/executeCommand/respond* 由其他 hooks 负责）。
+- 不调用 `UiBackendClient` 的写方法（submitPromptAccepted/executeCommand/respond* 由其他 hooks 负责）。
 - 不处理 dialog 入队（permission/interaction 入队由 usePermission/useInteraction 负责）。
 - 不处理 catalog 刷新（由 useCatalog 负责）。
 
@@ -166,7 +168,7 @@ function useStream(client: UiBackendClient): void {
 | useCatalog | useStream 标记 `catalogInvalidation`，useCatalog 观察后调用 `listCommands` |
 | usePermission | useStream 把 `permission.requested` 写入 TuiStore；usePermission 从 TuiStore 读取并入队 dialog |
 | useInteraction | 同上，处理 `interaction.requested` |
-| useInput | useStream 不被 useInput 调用；useInput 触发的 submitPrompt/executeCommand 的结果通过 SDK 事件回流到 useStream |
+| useInput | useStream 不被 useInput 调用；useInput 触发 submitPromptAccepted/executeCommand，接单后的状态通过 SDK 事件回流到 useStream |
 
 ---
 

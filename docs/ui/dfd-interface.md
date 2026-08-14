@@ -1,5 +1,7 @@
 # ui 模块 dfd-interface.md
 
+> 文档状态：概念数据流。当前实现入口和历史页面使用规则见 [README.md](./README.md)。
+
 本文档描述 `ui` 模块与外部模块的数据流和接口定义。
 
 ---
@@ -17,7 +19,7 @@ renderTerminalUi({ client })
    ├─ getSnapshot()
    ├─ listCommands({ surface: "tui" })
    ├─ subscribeEvents()
-   ├─ submitPrompt()
+   ├─ submitPromptAccepted()
    ├─ executeCommand()
    └─ respondPermission/respondInteraction()
 ```
@@ -40,8 +42,8 @@ renderTerminalUi({ client })
 
 1. 用户输入普通文本。
 2. TUI 判断不是 slash command。
-3. TUI 调用 `submitPrompt(text, { sessionId })`。
-4. Backend 通过 message/run/runtime events 回流。
+3. TUI 调用 `submitPromptAccepted(text, { sessionId })` 并取得接单回执，不等待运行结束。
+4. Backend 通过 prompt/message/run/runtime events 回流开始状态和四种业务终态。
 5. TUI reducer 更新 store，组件重新渲染。
 
 ### 2.3 Slash command
@@ -92,11 +94,11 @@ renderTerminalUi({ client })
 | `getSnapshot()` | 首屏状态 |
 | `listCommands()` | 命令 catalog |
 | `subscribeEvents()` | 增量事件 |
-| `submitPrompt()` | 提交普通 prompt |
+| `submitPromptAccepted()` | 提交普通 prompt，接单即返回 |
 | `executeCommand()` | 提交 resolved command |
 | `respondPermission()` | 权限响应 |
 | `respondInteraction()` | interaction 响应 |
-| `abortRun()` | 中断运行 |
+| `abortRun(runId)` | 按 `UiRun.id` 中断运行；不用于取消 interaction |
 
 ---
 

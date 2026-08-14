@@ -1,5 +1,7 @@
 # ChatView 对话视图
 
+> 文档状态：历史/目标 View 设计，不代表当前存在 `ChatView` 文件。当前组件拓扑见 [../README.md](../README.md)。
+
 ## 一、职责
 
 ChatView 是应用的核心视图，负责渲染对话消息列表。用户与 AI 的交互内容在此展示，包括用户消息、AI 响应、工具调用结果等。
@@ -45,7 +47,7 @@ MessageList 组件属于 `components/message/` 目录，不在 ChatView 内实�
 
 当消息数量为零时（从 HomeView 刚跳转过来、消息尚未生成的极短暂过渡期），显示简单的占位提示文字。
 
-EmptyState 是轻量的内联展示元素，不读取 backend。它在当前会话没有消息时显示；useInput 提交普通 prompt 后会调用 `client.submitPrompt()`，消息通过 SDK event 回流到 TuiStore 后自动消失。
+EmptyState 是轻量的内联展示元素，不读取 backend。它在当前会话没有消息时显示；useInput 提交普通 prompt 后会调用 `client.submitPromptAccepted()`，接单后的消息与终态通过 SDK event 回流到 TuiStore，EmptyState 随消息到达自动消失。TUI 不为每次提交再调用 `waitForPrompt()`。
 
 ## 四、数据驱动
 

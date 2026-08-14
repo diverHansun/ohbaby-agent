@@ -116,7 +116,7 @@ phase=started
 phase=completed, outcome=returned | threw
 ```
 
-`returned` 表示方法正常返回。若 `submitPromptAndWait` 返回 `{ status: "failed" }`，Prompt 业务失败但方法仍是 `returned`，不能误记为传输异常。
+`returned` 表示方法正常返回。若 `submitPromptAndWait` 返回 `{ prompt: { status: "failed", ... } }`，Prompt 业务失败但方法仍是 `returned`，不能误记为传输异常。
 
 ### 7.2 安全与故障策略
 

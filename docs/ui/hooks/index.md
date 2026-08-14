@@ -1,5 +1,7 @@
 # Hooks 概述
 
+> 文档状态：历史/目标 Hook 拆分，不代表当前源码存在这些 Hook。当前 TUI 主要编排位于 `packages/ohbaby-cli/src/tui/app.tsx`；见 [../README.md](../README.md)。
+
 本文档描述 ui 模块的 Hook 架构设计，定义 Hook 分层、调用规范和设计约束。
 
 ---
@@ -57,8 +59,8 @@ Hook 封装交互逻辑，是组件树与 SDK/TuiStore/AppState 之间的桥梁�
 | useCatalog | App.tsx | SDK `listCommands` + TuiStore.catalogInvalidation | TuiStore.catalog |
 | usePermission | App.tsx | TuiStore.permissions | AppState.dialog 队列 |
 | useInteraction | App.tsx | TuiStore.pending.interactions | AppState.dialog 队列 |
-| useInput | Prompt 组件 | TuiStore.catalog/runtime + AppState.view | `client.submitPrompt/executeCommand` + AppActions.navigateTo |
-| useKeyboard | App.tsx | AppState + TuiStore.pending/runs | `client.abortRun/executeCommand` + AppActions |
+| useInput | Prompt 组件 | TuiStore.catalog/runtime + AppState.view | `client.submitPromptAccepted/executeCommand` + AppActions.navigateTo |
+| useKeyboard | App.tsx | AppState + TuiStore.pending/runs | `client.abortRun(runId)/executeCommand` + AppActions |
 | useHistory | Prompt 组件 | 无 | 无 |
 | useAutoScroll | MessageList 组件 | TuiStore.messages.length | 无 |
 

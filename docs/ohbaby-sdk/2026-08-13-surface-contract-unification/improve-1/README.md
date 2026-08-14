@@ -1,7 +1,7 @@
 # improve-1 · 底层契约与命令记录基础
 
-> 状态：已通过代码、测试、真实进程 E2E 与独立审查
-> 日期：2026-08-14
+> 状态：已实施并关闭首次审查欠账；自动化、真实进程 E2E 与独立复审证据见 [05-implementation-acceptance.md](./05-implementation-acceptance.md)。
+> 日期：2026-08-15
 > 前置：无
 > 后续：[`../improve-2/`](../improve-2/)
 

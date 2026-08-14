@@ -1,5 +1,7 @@
 # Prompt — 输入框组件概述
 
+> 文档状态：概念组件说明。实际 Prompt 结构与行为以 `packages/ohbaby-cli/src/tui/components/prompt/`、`app.tsx` 和 [../../README.md](../../README.md) 为准。
+
 ## 一、定位
 
 Prompt 是用户与应用交互的主要入口，负责文本输入、slash command 提交、普通 prompt 提交、历史导航和 inline 自动补全。它固定在 DefaultLayout 底部（StatusBar 上方），是用户最频繁交互的组件。
@@ -31,7 +33,7 @@ Prompt 不自行实现文本缓冲区。基础文本编辑功能依赖 Ink 的 T
 | 输入格式 | 处理路径 |
 |---|---|
 | 能被 `parseSlashInput()` 识别并 `resolveCommand()` 成功 | `client.executeCommand(invocation)` |
-| 普通文本 | `client.submitPrompt(text, { sessionId })` |
+| 普通文本 | `client.submitPromptAccepted(text, { sessionId })`；只等待接单回执，后续状态走事件流 |
 | slash resolve 失败 | 本地显示错误和 suggestion，不调用 backend |
 
 Prompt 本身不直接调用 lifecycle、commands 或 cli/commands 模块。

@@ -1,5 +1,7 @@
 # useInput — 输入处理 Hook
 
+> 文档状态：历史/目标设计。当前输入分流直接在 TUI 实现中编排；请从 [../README.md](../README.md) 进入源码与合同测试。
+
 本文档定义 useInput 的职责、接口和命令分流逻辑。
 
 useInput 处理用户在 Prompt 组件中提交的输入，通过 SDK parser/resolver 分流到 slash command 或普通 prompt 路径。
@@ -12,7 +14,7 @@ useInput 处理用户在 Prompt 组件中提交的输入，通过 SDK parser/res
 - 使用 SDK `parseSlashInput()` 判断是否为 slash command。
 - 使用 SDK `resolveCommand()` 基于 TuiStore catalog 做 exact match。
 - 匹配成功时调用 `client.executeCommand(invocation)`。
-- 普通文本时调用 `client.submitPrompt(text, { sessionId })`。
+- 普通文本时调用 `client.submitPromptAccepted(text, { sessionId })`；只等待接单回执，最终状态由事件流驱动。
 - 提供 Tab 自动补全建议（基于 SDK `filterCommandCatalog()`）。
 
 **不做的事**：
@@ -85,7 +87,7 @@ async function handleSubmit(text: string): Promise<void> {
     }
   } else {
     if (viewState.current === 'home') navigateTo('chat')
-    client.submitPrompt(trimmed, { sessionId: activeSessionId })
+    client.submitPromptAccepted(trimmed, { sessionId: activeSessionId })
     addToHistory(trimmed)
   }
 }
@@ -97,12 +99,12 @@ async function handleSubmit(text: string): Promise<void> {
 |---|---|
 | 以 `/` 开头且 resolve 成功 | `client.executeCommand(invocation)` |
 | 以 `/` 开头但 resolve 失败 | 本地显示错误 + suggestion |
-| 其他非空文本 | `client.submitPrompt(text)` |
+| 其他非空文本 | `client.submitPromptAccepted(text, { sessionId })` |
 | 空或纯空白 | 忽略 |
 
 ### Loading 状态说明
 
-useInput 提交 prompt/command 后**不主动调用 setLoading**。Loading 状态由 useStream 在收到 `run.updated` 或 `command.started` 事件后派生。这避免了"提交后立刻显示 loading，但 backend 还没开始执行"的闪烁问题。
+useInput 提交 prompt/command 后**不主动调用 setLoading**，也不调用 `waitForPrompt()`。`submitPromptAccepted()` resolve 只表示 backend 已接单；Loading 和四种业务终态均由 useStream 收到后续事件后投影。这避免了把“接单成功”误当成“运行完成”。
 
 ---
 
@@ -184,7 +186,7 @@ Hints 不调用 backend，纯本地 catalog 查询。
 
 | 依赖 | 类型 | 用途 |
 |---|---|---|
-| `UiBackendClient` | 参数 | `submitPrompt()`, `executeCommand()` |
+| `UiBackendClient` | 参数 | `submitPromptAccepted()`, `executeCommand()` |
 | `parseSlashInput` | SDK 函数 | 词法解析 |
 | `resolveCommand` | SDK 函数 | catalog exact match |
 | `filterCommandCatalog` | SDK 函数 | 补全和 hints |
@@ -201,7 +203,7 @@ Hints 不调用 backend，纯本地 catalog 查询。
 | Hook | 关系 |
 |---|---|
 | useHistory | 同级，同在 Prompt 中。useInput 提交时调用 addToHistory |
-| useStream | 间接。useInput 触发 submitPrompt/executeCommand，结果通过 SDK 事件回流到 useStream |
+| useStream | 间接。useInput 触发 submitPromptAccepted/executeCommand，后续状态通过 SDK 事件回流到 useStream |
 | useCatalog | useInput 读取 catalog，useCatalog 负责加载和刷新 |
 | useKeyboard | 互不调用。useKeyboard 处理全局快捷键，useInput 处理 Prompt 输入 |
 

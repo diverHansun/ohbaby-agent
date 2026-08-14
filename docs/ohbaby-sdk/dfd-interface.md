@@ -84,7 +84,7 @@ ohbaby-agent adapter
 | `executeCommand(invocation)` | Command 提交 | 提交已解析命令 |
 | `respondPermission(id, response)` | Permission 回填 | 响应权限请求 |
 | `respondInteraction(id, response)` | Interaction 回填 | 响应语义化交互 |
-| `abortRun(runId?)` | 用户中断 | 请求中断运行 |
+| `abortRun(runId)` | 用户中断 | 按明确的 `UiRun.id` 中断运行；不用于取消 interaction |
 
 ### Parser / Resolver
 

@@ -1,5 +1,7 @@
 # ui 模块 architecture.md
 
+> 文档状态：历史/目标设计稿。当前文件拓扑与行为入口见 [README.md](./README.md)；本文只保留架构意图，不作为现有 Hook/View 清单。
+
 本文档描述 `ui` 模块的内部结构与设计决策。所有内容均服务于 `goals-duty.md` 中定义的职责边界。
 
 ---
@@ -32,11 +34,11 @@ UiBackendClient
 ```
 
 UI 对 backend 的写操作都通过 `UiBackendClient`：
-- `submitPrompt()`
+- `submitPromptAccepted()`（接单即返回；TUI 的最终状态由事件流驱动）
 - `executeCommand()`
 - `respondPermission()`
 - `respondInteraction()`
-- `abortRun()`
+- `abortRun(runId)`（参数必须是 `UiRun.id`）
 
 ---
 

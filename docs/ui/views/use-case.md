@@ -1,5 +1,7 @@
 # Views 用例说明
 
+> 文档状态：历史/目标路由用例，不代表当前存在 `Router`、`HomeView` 或这些跳转。当前实现入口见 [../README.md](../README.md)。
+
 ## 一、用例概览
 
 视图层的核心职责是：**在 Router 的驱动下，将正确的内容区域组件渲染到屏幕上，并对视图切换事件正确响应。**
@@ -40,10 +42,10 @@
 
 **流程**：
 1. 用户在 Prompt 输入框中键入内容，按 Enter 提交
-2. `useInput` hook 检测到非命令普通 prompt，调用 `client.submitPrompt()`
+2. `useInput` hook 检测到非命令普通 prompt，调用 `client.submitPromptAccepted()`；Promise 只等待接单回执，不等待模型运行结束
 3. `useInput` 同时调用 `navigateTo('chat')`，将 `view.current` 置为 `'chat'`、`view.previous` 置为 `'home'`
 4. Router 切换渲染 `<ChatView />`
-5. SDK 开始异步返回响应，`message.appended` 到达，ChatView 中 MessageList 显示首条消息；EmptyState 消失
+5. SDK 通过独立事件流返回后续状态；`message.appended` 到达后，ChatView 中 MessageList 显示首条消息，EmptyState 消失
 
 **输入**：用户输入文本；**输出**：ChatView 可见，消息列表开始渲染。
 

@@ -1,75 +1,146 @@
-# 5. improve-1 实施验收
+# 5. 实施验收文档（improve-1）
 
-> 日期：2026-08-14
-> 状态：已完成；代码、自动化测试、构建、真实进程 E2E 与两轮独立审查均通过
+> 验收日期：2026-08-15
+> 验收对象：规划提交 `a06f603` 之后的 improve-1 实现，以及基线 `e9d5c7d` 之上的收尾补强
+> 当前结论：**通过**。合同、数据流、记录所有权和故障语义均有实现与自动化证据；独立复审结果在 5.7 记录。
 
-## 5.1 实际落地
+## 5.1 本轮最终合同
 
-1. `UiPromptCompletion.prompt` 现在只能是四种 `UiCompletedPromptSubmission` 终态；四种终态都有 `endedAt`，只有 `failed`、`interrupted` 带结构化错误。
-2. `submitPromptAccepted`、`waitForPrompt` 成为基础能力；`submitPromptAndWait` 只调用前两者。旧 `submitPrompt` 仅作为 improve-1 迁移桥保留并标记弃用。
-3. client 合同拆为 Query、Prompt Command、Prompt Queue Command 与完整 backend；生产 backend 的队列能力为必选。
-4. scheduler 在 close、fault、等待中止和终态持久化竞态下都会确定 settle waiter，不再悬空。
-5. interaction 建立 owner、claim、consume 与条件回滚边界，未知、越权、重复响应在 backend 调用前被拒绝。
-6. SDK 定义 `UiCommandRecord`、`UiCommandRecorder`、脱敏 builder 与 fail-open helper；Agent/Server 提供有界、保序的结构化 recorder。
-7. Agent host、Server REST、Server RPC 是三个入口各自的唯一记录 gateway；raw backend、`waitForPrompt`、`submitPromptAndWait` 和 skill 内部接单不重复记录。
-8. `CoreAPI`、`SDKAPI` 改为从 SDK 权威能力派生，减少手抄接口漂移。
+### Prompt 数据结构与三种能力
 
-## 5.2 自动化验收证据
+| 能力 | resolve | reject |
+|------|---------|--------|
+| `submitPromptAccepted` | backend 完成持久接单后返回 `UiPromptReceipt` | 接单校验、权限、传输或存储失败 |
+| `waitForPrompt` | 返回严格终态的 `UiPromptCompletion` | 查询、权限、传输、存储或等待中止 |
+| `submitPromptAndWait` | 与 `waitForPrompt` 相同 | 与上述两步相同 |
 
-| 闸门 | 结果 | 证据 |
-|------|------|------|
-| 全仓测试 | 通过 | 275 个测试文件通过、3 个跳过；2369 个测试通过、13 个真实外部依赖测试跳过 |
-| 构建 | 通过 | SDK、Agent、Server、CLI、Web 全部构建成功 |
-| Prompt 数据与生命周期（T1-T10） | 通过 | SDK contract 和 mapper 覆盖四终态、字段不变量、非终态拒绝与 answer 分流；in-process、persistent 和 remote 按共享管线与各自关键路径分层覆盖 |
-| 等待、关闭与恢复（T11-T15f） | 通过 | scheduler close/fault/abort、终态持久化失败和 finish/close/abort 竞态均确定 settle；durable accept 成功后即使 close/fault 抢先仍返回 receipt；真实 daemon 恢复后同一 `promptId` 得到 `interrupted` |
-| 接口与兼容（T16-T20a） | 通过 | Query、Command、Queue 与完整 backend 类型边界通过 typecheck/contract；CoreAPI/SDKAPI 派生；旧 submit 兼容行为和可信 queue identity 有回归测试 |
-| ID、脱敏与 fail-open（T21-T30b） | 通过 | operationId/领域 ID 分离、branded details builder、固定错误白名单、纯字母数字 secret、慢/失败 sink 和 observation 依赖异常均有对抗测试 |
-| 记录所有权与 interaction（T31-T40） | 通过 | 三 gateway、组合方法与真实 skill 路径去重；REST/RPC/in-process fail-open；interaction owner/claim/条件回滚、终态/client removal/shutdown 清理和短暂重连均有行为测试 |
+`submitPromptAndWait` 的唯一实现是 `submitPromptAccepted + waitForPrompt`。它不是第三条执行路径；`signal` 只传给 wait，已经接单的 Prompt 不回滚。
 
-全仓测试在非 `CI` 的真实终端语义下运行，并通过临时 Corepack shim 固定嵌套打包测试使用仓库声明的 pnpm 9。`CI=true` 时只有两个既有 Ink flicker 用例因 Ink 的 CI 渲染模式超时；相同用例在正常终端和全量回归中通过，未通过放宽断言规避。
+`UiPromptCompletion` 继续作为公开完成结果，满足以下不变量：
 
-补充的关键真实路径证据不是 mock 自证：
+- 只允许 `succeeded`、`failed`、`cancelled`、`interrupted` 四种终态；
+- `endedAt` 必须存在；
+- `failed`、`interrupted` 必须带结构化 error；
+- `succeeded`、`cancelled` 不带 error；
+- 四种业务终态都 resolve，不把业务失败伪装成普通异常；
+- Completion 不承载完整回答内容，回答仍由 message/event 数据流提供。
 
-1. fake-RPC 的等待中止测试经正式 `CoreAPI` factory 转发，证明 `AbortSignal` 不会在本地 RPC seam 丢失；
-2. skill 去重测试创建真实临时 skill 文件，经 in-process backend 执行真实 `executeCommand -> skill -> prompt` 链，只记录外层原子命令；
-3. server REST/RPC fail-open 测试使用会抛错的 recorder，业务写操作仍成功；
-4. daemon 恢复测试杀死执行进程，重启后由正式 remote client 使用原 `promptId` 得到带结构化错误的 `interrupted`。
+### Scheduler 数据流
 
-## 5.3 真实进程 E2E
+```text
+accept -> store.accept（线性化点）-> receipt
+                                -> FIFO execute
+                                -> store.finish(terminal)
+wait(promptId) -------------------------------> completion
+```
 
-验收脚本实际启动随机端口 daemon，使用临时 SQLite、临时 workspace 和内存 fake LLM，再由正式 remote client 通过 HTTP JSON-RPC 完成：
+- `store.accept` 成功后，即使 close/fault 紧接发生，调用方仍得到 receipt，不产生“已入库但调用方以为失败”的幽灵 Prompt。
+- close/fault 会 settle 当前 waiter；未来 wait 也得到同一关闭或故障结果。
+- wait 的 `AbortSignal` 只移除该 waiter，不取消 Prompt，也不影响其他 waiter。
+- completion、wait abort、close 三方竞争只允许一个结算者获胜。
 
-1. `/api/health` 鉴权探测成功；
-2. `submitPromptAccepted` 返回 `clientRequestId`、`promptId`、`sessionId`、`userMessageId`；
-3. `waitForPrompt(promptId)` 返回 `succeeded`，`endedAt` 必有且无 `error`；
-4. 完整回答在 snapshot 数据流中可见，不进入 completion；
-5. server-rpc 只输出同一 `operationId` 的 started/completed 各一条，completed 补充 `promptId`，details 仅有长度和布尔元数据；两次记录分别 fail-open，不承诺 sink 故障时强行成对；
-6. client、daemon 和临时目录均在结束时关闭或清理。
+### 命令记录数据流
 
-## 5.4 仍保留到 improve-2 的工作
+```text
+具名原子写方法
+  -> Agent host gateway 或 Server REST/RPC gateway（唯一所有者）
+     -> UiCommandRecord.started
+     -> raw backend
+     -> UiCommandRecord.completed
+```
 
-- 删除旧 `submitPrompt` 及旧 RPC method，迁移 CLI/TUI/Web 所有调用点。
-- 删除 `UiPromptQueueClient` 旧聚合名和 `supportsPromptQueue` 等兼容探测。
-- 落地 BrowserDaemonClient + browser façade，补齐 Web wait/interaction REST，并统一单一逻辑 SSE 数据流。
-- 消除 Web `StoreSnapshot` 与 SDK `UiSnapshot` 的 `getSnapshot` 同名冲突。
-- 清理 TUI 重复事件知识和逐方法 forwarding wrapper。
+- `operationId` 表示一次后端原子写操作；现有领域 ID 各司其职，通过 `correlation` 汇总。
+- 记录合同是 `UiCommandRecord`，只记录 `started/completed`；`submitPromptAndWait` 这类组合方法不重复记账。
+- `details` 按方法白名单脱敏，默认不保存原始 params、Prompt 文本或密钥。
+- started/completed 各自 fail-open，并复用同一 `operationId`；诊断不回显 sink 提供的敏感 error name。
+- SDK 定义记录合同、recorder 端口、方法级脱敏 builder 和无 I/O 的 best-effort 包装能力；Agent/Server 提供实际 recorder/sink。`UiCommandRecord` 不是 HTTP/JSON-RPC 传输信封。
 
-这些项目没有被 improve-1 的兼容桥伪装成“已经完成”，必须在 improve-2 重新执行全量测试、构建、真实进程 E2E 和独立审查。
+## 5.2 规划与实际差异
 
-## 5.5 独立审查
+| 差异 | 最终选择 | 判断 |
+|------|----------|------|
+| runtime mapper 位于 Agent 而非 SDK | SDK 保持纯合同，Agent 映射运行时状态 | 可接受，避免 SDK 依赖运行时知识 |
+| Server 没有复制 recorder gateway | 复用 Agent 导出的 `createUiCommandGateway` | 优于复制，保持一个记录实现 |
+| improve-1 中 `CoreAPI` 仍出现手列方法 | improve-2 再收成从权威接口派生的 `Omit` | 符合两轮依赖顺序 |
+| 未拆“只读调用方”专用 façade | 只拆接口边界，不为拆分本身加框架 | 符合 YAGNI |
 
-首轮代码审查与文档一致性检查均未发现 Critical，但提出了以下 Important/文档准确性问题，已在继续 improve-2 前处理：
+未越界建设公开 `Op`、审计数据库、全事件 `operationId`、完整 params 留存或新的 transport。
 
-1. executor 的 `interrupted` 曾被压成 `failed`：改为严格判别联合，并保持旧 `submitPrompt` 兼容桥的历史 reject 行为；
-2. scheduler 在异步 accept/list/claim 与 close 竞争时仍可能接纳或遗留工作：增加阶段后关闭检查，并在 claim 被 close 抢先时 requeue；
-3. fake-RPC signal 用例未经过正式 `CoreAPI` seam：补上 factory 级测试；
-4. 记录中的错误名/错误码和公开 details helper 仍有绕过脱敏的空间：改成固定白名单和 branded details，只允许 SDK 方法级 builder 构造；
-5. fail-open、interaction 记录边界和 daemon 恢复的验收证据不够直接：补上真实路径测试；
-6. 文档把 recorder helper 全称为纯函数、写错 `slash-command/` 目录，并把 started/completed 描述为无条件成对：均按实际实现修正。
-7. 第二轮复审发现 durable accept 已提交后仍可能因 close/fault 向调用方 reject：把持久化成功明确为 admission 线性化点，并补 close/fault 两个竞态测试。
-8. 第二轮文档审查发现 interaction 清理与终态竞态证据未完整落证：补 cancelled 终态、client removal、shutdown、条件回滚败给终态，以及 retention 窗内重连的行为测试。
-9. 最终复核发现同 clientId 新旧 SSE 重叠时，旧连接后断可能误启动 owner 清理：断连和 timer 到期都检查是否仍有同 clientId 活连接，并补“新连接先连、旧连接后断、跨过 retention 仍可响应”的集成测试。
+## 5.3 审查发现与关闭轨迹
 
-审查中另有“skill 去重仅由 mock 覆盖”的意见，经核对不成立：仓库已有真实 in-process skill 文件与 fake LLM 的完整链路测试，并明确断言只有 `executeCommand` 的两条记录。因此未为同一行为再造重复测试。
+早期独立审查曾发现以下可复现缺口，均在进入最终验收前关闭：
 
-第二轮只读复审没有 Critical；提出的 durable accept Important 和 interaction 验收证据缺口均已修复。修复后重新执行全仓回归、全量构建与真实 daemon E2E，均通过，因此 improve-1 可以进入 improve-2。
+1. scheduler 在 durable accept 后 close/fault 可能拒绝 receipt；现以 `store.accept` 成功为线性化点并补竞态测试。
+2. scheduler close、fault、completion 与 waiter abort 的结算证据过弱；现拆成三个明确 winner 测试，并覆盖 executor failure + terminal persist failure 后的 future accept/wait。
+3. Server 的 lease 能力曾允许 feature-detect fallback，owner 校验不原子；现 composition root 要求 owner-aware port，store/SQL 按 lease 与 owner 原子校验。
+4. JSON-RPC wait 的 HTTP abort 曾未传到 backend waiter；现只把可信 transport signal 传给 wait，且 server shutdown 也能中止 waiter。
+5. skill 内部复用公开 gateway 曾可能二次记录；现只注入 raw `submitPromptAndWaitInternal`。
+6. fail-open 诊断曾回显 recorder 自定义 error name；现只输出固定错误分类。
+7. Prompt 已启动后若队列持久化 running 状态失败，曾只停 projection 而未等待真实 run 终止；现补偿会取消运行树并等待该 `UiRun` 进入 `cancelled`，原始存储错误仍作为技术失败 reject。
+
+## 5.4 自动化与真实进程证据
+
+### 定向合同测试
+
+最终收尾命令：
+
+```bash
+pnpm exec vitest run \
+  packages/ohbaby-agent/src/runtime/prompt-scheduler/scheduler.unit.test.ts \
+  packages/ohbaby-server/src/protocols/jsonrpc/client.unit.test.ts \
+  packages/ohbaby-server/src/app/create-app.unit.test.ts \
+  apps/ohbaby-web/src/api/daemon/server-client.integration.test.ts
+```
+
+结果：4 files、114 tests passed。它覆盖 persist-fault 后续入口、andWait 只中止 wait、unknown run no-op、多 session run 解析和 REST 非法输入。
+
+### 全仓与静态检查
+
+- `pnpm run typecheck`：通过。
+- `pnpm run lint`：通过。
+- `pnpm run build`：5 个 workspace package/app 构建通过。
+- 首次 `pnpm exec vitest run --passWithNoTests`：274 files passed、3 skipped、2 个资源超时失败；2415 tests passed、13 skipped。失败分别是 child serve 10s 启动超时与 packaging 内部 build 120s 超时；两个失败用例串行隔离复验均通过。
+- 第二次全仓只剩 packaging build 120s 超时；第三次在 packaging 通过后暴露 TUI `connectModel` 轮询 1s 的高负载超时，隔离复验通过。
+- 测试基础设施只延长失败判定窗口：packaging 子进程 build 120s → 180s（整体测试仍为 240s）；`waitForConnectModelCount` 1s → 5s。没有跳过测试、减少断言或修改产品 debounce。
+- 最终 `pnpm exec vitest run --passWithNoTests`：**276 files passed、3 skipped；2420 tests passed、13 skipped**，单次 clean run 通过。此前失败轨迹仍保留在本文，而不是被最终绿灯覆盖。
+
+### improve-1 真实进程 E2E
+
+```bash
+pnpm exec vitest run \
+  packages/ohbaby-server/src/runtime/daemon/global-single-serve.integration.test.ts \
+  -t "recovers queued work but marks active work interrupted after a real daemon crash|preserves queued work across a graceful daemon stop and resumes it after restart"
+```
+
+结果：真实子进程 crash recovery 与 graceful restart 两条均通过（2 passed、7 skipped）。验证 durable queue、active interrupted、queued resume，而非只验证 fake store。
+
+## 5.5 关键验收项
+
+| 验收重点 | 结果 |
+|----------|------|
+| Completion 严格四终态与条件 error | 通过 |
+| 三种 Prompt 方法且 andWait 只组合 | 通过 |
+| scheduler close/fault 不悬挂 waiter | 通过 |
+| durable accept 不产生幽灵 Prompt | 通过 |
+| completion/abort/close 只 settle 一次 | 通过 |
+| wait abort 不取消 Prompt | 通过 |
+| owner-aware lease 原子校验 | 通过 |
+| REST/RPC/Agent host 三入口唯一记录 | 通过 |
+| skill 内部调用不双记 | 通过 |
+| details 脱敏与 recorder fail-open | 通过 |
+| Prompt 启动握手失败不遗留后台 run | 通过 |
+| 真实 daemon crash/graceful 恢复 | 通过 |
+
+## 5.6 SWE 评估
+
+本轮增加的是语义边界和可验证性，不是新的抽象层：保留具名业务方法；记录层只做统一命名、关联和脱敏；组合方法不重复执行或记录；Server 复用 gateway 而非复制。Web/Server 只在各自 façade 边界保留少量领域解析，没有为了两处调用引入跨包策略框架。
+
+当前没有已知 Critical 或 Important 残余。全仓首次运行的两个资源超时已隔离复验通过，但仍作为 CI 运行预算信号保留，不宣称它们从未发生。
+
+## 5.7 独立复审
+
+第一轮最终复审发现 0 Critical、2 Important、2 Minor。两项 Important（启动握手失败遗留 run、默认 recorder 诊断回显自定义 error name）均以先失败后通过的回归测试关闭。两项 Minor 经扩大回归证明都不能按原建议处理：`command.result.delivered` 可重复出现，并非成功终态；SSE retention 后会直接 resync 而不重新 initialize，故必须保留 `clientViews` 投影，只清 interaction/command/run owner。
+
+第二轮代码复审进一步发现删除 retained `clientViews` 会破坏 SSE 自动重连后的 snapshot 投影隔离；该改动已撤回，并补协调器与真实 daemon 的 retention/resync 正向测试。最终只读代码复审结论为 **0 Critical、0 Important、1 Minor**，允许提交与合并。唯一 Minor 是成功命令缺少显式 `command.completed`，owner 会保留到客户端路由清理；提前清理会破坏多结果语义，已作为后续合同债务公开记录。
+
+最终文档复审为 **0 Critical、0 Important、0 substantive Minor**；其唯一流程性 Minor 是本段曾为待回填占位，现已关闭。复审已核对代码、04 矩阵、本 05 证据与最终 **276 files / 2420 tests** clean run。
