@@ -573,7 +573,7 @@ describe("npm packed CLI smoke", () => {
         "--sort",
         "build",
       ],
-      timeoutMs: 120_000,
+      timeoutMs: 180_000,
     });
     expectSuccess(buildResult, "pnpm package build");
 

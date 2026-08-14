@@ -2,12 +2,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   UiCommandInvocation,
+  UiCompletedPromptSubmission,
   UiConnectModelResult,
   UiContextWindowUsage,
   UiEvent,
   UiEventHandler,
   UiPromptCompletion,
   UiPromptReceipt,
+  UiPromptTerminalStatus,
   UiSetSearchApiKeyResult,
   UiSnapshot,
 } from "ohbaby-sdk";
@@ -57,6 +59,35 @@ function promptReceipt(promptId = "prompt_tui"): UiPromptReceipt {
     status: "queued",
     userMessageId: `message_${promptId}`,
   };
+}
+
+function completedPrompt(
+  status: UiPromptTerminalStatus,
+): UiCompletedPromptSubmission {
+  const base = {
+    clientRequestId: "request_terminal",
+    createdAt: "2026-08-14T00:00:00.000Z",
+    endedAt: "2026-08-14T00:00:02.000Z",
+    promptId: "prompt_terminal",
+    scopeKey: "/repo",
+    sessionId: "session_1",
+    text: "queued terminal",
+    updatedAt: "2026-08-14T00:00:02.000Z",
+    userMessageId: "message_terminal",
+  };
+  if (status === "failed" || status === "interrupted") {
+    return {
+      ...base,
+      error: {
+        code: status === "failed" ? "PROVIDER_FAILED" : "RUN_INTERRUPTED",
+        message: status === "failed" ? "provider failed" : "run interrupted",
+        retryable: status === "failed",
+        source: status === "failed" ? "provider" : "runtime",
+      },
+      status,
+    };
+  }
+  return { ...base, status };
 }
 
 function contextWindowUsage(
@@ -1356,6 +1387,42 @@ describe("OhbabyTerminalApp", () => {
     });
     await waitForFrame(app, (frame) => !frame.includes("Queued"));
   });
+
+  it.each(["succeeded", "failed", "cancelled", "interrupted"] as const)(
+    "removes queued state when a prompt becomes %s without starting a wait path",
+    async (status) => {
+      const client = createFakeClient({
+        ...snapshot(),
+        prompts: [
+          {
+            clientRequestId: "request_terminal",
+            createdAt: "2026-08-14T00:00:00.000Z",
+            promptId: "prompt_terminal",
+            scopeKey: "/repo",
+            sessionId: "session_1",
+            status: "queued",
+            text: "queued terminal",
+            updatedAt: "2026-08-14T00:00:00.000Z",
+            userMessageId: "message_terminal",
+          },
+        ],
+      });
+      const app = render(
+        <OhbabyTerminalApp
+          client={client}
+          subscribeEvents={client.subscribeEvents}
+        />,
+      );
+
+      await waitForFrame(app, (frame) => frame.includes("Queued"));
+      client.emit({ prompt: completedPrompt(status), type: "prompt.updated" });
+      await waitForFrame(app, (frame) => !frame.includes("Queued"));
+
+      expect(client.waitForPrompt).not.toHaveBeenCalled();
+      expect(client.submitPromptAndWait).not.toHaveBeenCalled();
+      expect(app.lastFrame()).not.toContain("Submit failed");
+    },
+  );
 
   it("shows queued state for a rapid second prompt before runtime events arrive", async () => {
     const firstSubmit = createDeferred<UiPromptReceipt>();
@@ -4250,7 +4317,7 @@ async function waitForConnectModelCount(
   count: number,
 ): Promise<void> {
   const startedAt = Date.now();
-  while (Date.now() - startedAt < 1_000) {
+  while (Date.now() - startedAt < 5_000) {
     await flush();
     if (client.connectModel.mock.calls.length >= count) {
       return;

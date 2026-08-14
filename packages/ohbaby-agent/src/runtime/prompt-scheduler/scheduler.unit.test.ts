@@ -411,6 +411,106 @@ describe("WorkspacePromptScheduler", () => {
     await expect(surviving).resolves.toMatchObject({ status: "succeeded" });
   });
 
+  it("keeps the completed result when completion wins before wait abort and close", async () => {
+    const gate = deferred();
+    const started = deferred();
+    const scheduler = new WorkspacePromptScheduler({
+      scopeKey: "/workspace",
+      store: new InMemoryPromptSubmissionStore(),
+      async execute(): Promise<{ status: "succeeded" }> {
+        started.resolve();
+        await gate.promise;
+        return { status: "succeeded" };
+      },
+    });
+    const accepted = await scheduler.accept({
+      sessionId: "session_1",
+      text: "three-way waiter race",
+    });
+    await started.promise;
+    const controller = new AbortController();
+    const waiting = scheduler.waitForCompletion(accepted.promptId, {
+      signal: controller.signal,
+    });
+
+    gate.resolve();
+    await expect(waiting).resolves.toMatchObject({ status: "succeeded" });
+    controller.abort();
+    scheduler.close();
+
+    expect(scheduler.activeCount()).toBe(0);
+    await expect(
+      scheduler.waitForCompletion(accepted.promptId),
+    ).rejects.toBeInstanceOf(PromptSchedulerClosedError);
+  });
+
+  it("aborts only the waiter when wait abort wins before completion and close", async () => {
+    const gate = deferred();
+    const started = deferred();
+    const scheduler = new WorkspacePromptScheduler({
+      scopeKey: "/workspace",
+      store: new InMemoryPromptSubmissionStore(),
+      async execute(): Promise<{ status: "succeeded" }> {
+        started.resolve();
+        await gate.promise;
+        return { status: "succeeded" };
+      },
+    });
+    const accepted = await scheduler.accept({
+      sessionId: "session_1",
+      text: "wait abort wins",
+    });
+    await started.promise;
+    const controller = new AbortController();
+    const waiting = scheduler.waitForCompletion(accepted.promptId, {
+      signal: controller.signal,
+    });
+
+    controller.abort();
+    await expect(waiting).rejects.toBeInstanceOf(PromptWaitAbortedError);
+    const surviving = scheduler.waitForCompletion(accepted.promptId);
+    gate.resolve();
+
+    await expect(surviving).resolves.toMatchObject({ status: "succeeded" });
+    expect(scheduler.activeCount()).toBe(0);
+    scheduler.close();
+  });
+
+  it("rejects pending and future waiters when close wins before abort and completion", async () => {
+    const gate = deferred();
+    const started = deferred();
+    const scheduler = new WorkspacePromptScheduler({
+      scopeKey: "/workspace",
+      store: new InMemoryPromptSubmissionStore(),
+      async execute(): Promise<{ status: "succeeded" }> {
+        started.resolve();
+        await gate.promise;
+        return { status: "succeeded" };
+      },
+    });
+    const accepted = await scheduler.accept({
+      sessionId: "session_1",
+      text: "scheduler close wins",
+    });
+    await started.promise;
+    const controller = new AbortController();
+    const waiting = scheduler.waitForCompletion(accepted.promptId, {
+      signal: controller.signal,
+    });
+
+    scheduler.close();
+    await expect(waiting).rejects.toBeInstanceOf(PromptSchedulerClosedError);
+    controller.abort();
+    gate.resolve();
+
+    await vi.waitFor(() => {
+      expect(scheduler.activeCount()).toBe(0);
+    });
+    await expect(
+      scheduler.waitForCompletion(accepted.promptId),
+    ).rejects.toBeInstanceOf(PromptSchedulerClosedError);
+  });
+
   it("faults on terminal persistence failure without retrying it as a business failure", async () => {
     const store = new InMemoryPromptSubmissionStore();
     const storageError = new Error("terminal write unavailable");
@@ -435,6 +535,9 @@ describe("WorkspacePromptScheduler", () => {
     await expect(
       scheduler.accept({ sessionId: "session_2", text: "after fault" }),
     ).rejects.toBe(storageError);
+    await expect(scheduler.waitForCompletion(accepted.promptId)).rejects.toBe(
+      storageError,
+    );
   });
 
   it("faults when persisting an executor failure also fails", async () => {
@@ -458,6 +561,12 @@ describe("WorkspacePromptScheduler", () => {
 
     expect(outcome).toEqual({ error: storageError, kind: "rejected" });
     expect(finish).toHaveBeenCalledOnce();
+    await expect(
+      scheduler.accept({ sessionId: "session_2", text: "after fault" }),
+    ).rejects.toBe(storageError);
+    await expect(scheduler.waitForCompletion(accepted.promptId)).rejects.toBe(
+      storageError,
+    );
   });
 
   it("preserves an interrupted executor result as a resolved business terminal", async () => {
