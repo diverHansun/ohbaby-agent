@@ -52,14 +52,27 @@ export interface PromptEditLease {
   readonly prompt: PromptSubmissionRecord;
 }
 
-export interface FinishPromptSubmissionInput {
-  readonly status: Extract<
-    PromptSubmissionStatus,
-    "succeeded" | "failed" | "cancelled" | "interrupted"
-  >;
+type PromptTerminalResult =
+  | {
+      readonly status: "succeeded";
+      readonly error?: never;
+    }
+  | {
+      readonly status: "failed";
+      readonly error: UiPromptError;
+    }
+  | {
+      readonly status: "cancelled";
+      readonly error?: never;
+    }
+  | {
+      readonly status: "interrupted";
+      readonly error: UiPromptError;
+    };
+
+export type FinishPromptSubmissionInput = PromptTerminalResult & {
   readonly expectedRunId?: string;
-  readonly error?: UiPromptError;
-}
+};
 
 export interface PromptSubmissionStore {
   assertCapacity(scopeKey: string, maxQueuedPrompts: number): Promise<void>;
@@ -112,10 +125,7 @@ export interface PromptExecutionControls {
   markRunning(runId: string): Promise<void>;
 }
 
-export interface PromptExecutionResult {
-  readonly status: "succeeded" | "failed" | "cancelled" | "interrupted";
-  readonly error?: UiPromptError;
-}
+export type PromptExecutionResult = PromptTerminalResult;
 
 export type PromptSubmissionExecutor = (
   prompt: PromptSubmissionRecord,

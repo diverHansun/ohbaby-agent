@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 /* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
-import type { UiCommandRecord } from "ohbaby-sdk";
+import { createRPC, type CoreAPI, type UiCommandRecord } from "ohbaby-sdk";
 
 describe("buildCoreAPIImpl", () => {
   it("builds CoreAPI and callback adapters from the persistent backend", async () => {
@@ -17,21 +17,36 @@ describe("buildCoreAPIImpl", () => {
         userMessageId: "message_1",
       }),
     );
-    const waitForPrompt = vi.fn(() =>
-      Promise.resolve({
-        prompt: {
-          clientRequestId: "request_1",
-          createdAt: "2026-08-14T00:00:00.000Z",
-          endedAt: "2026-08-14T00:00:01.000Z",
-          promptId: "prompt_1",
-          scopeKey: "/workspace",
-          sessionId: "session_1",
-          status: "succeeded" as const,
-          text: "hello",
-          updatedAt: "2026-08-14T00:00:01.000Z",
-          userMessageId: "message_1",
-        },
-      }),
+    const waitForPrompt = vi.fn(
+      (_promptId: string, options?: { readonly signal?: AbortSignal }) => {
+        if (options?.signal) {
+          return new Promise<never>((_resolve, reject) => {
+            options.signal?.addEventListener(
+              "abort",
+              () => {
+                const error = new Error("backend waiter aborted");
+                error.name = "AbortError";
+                reject(error);
+              },
+              { once: true },
+            );
+          });
+        }
+        return Promise.resolve({
+          prompt: {
+            clientRequestId: "request_1",
+            createdAt: "2026-08-14T00:00:00.000Z",
+            endedAt: "2026-08-14T00:00:01.000Z",
+            promptId: "prompt_1",
+            scopeKey: "/workspace",
+            sessionId: "session_1",
+            status: "succeeded" as const,
+            text: "hello",
+            updatedAt: "2026-08-14T00:00:01.000Z",
+            userMessageId: "message_1",
+          },
+        });
+      },
     );
     const records: UiCommandRecord[] = [];
     const getCurrentModel = vi.fn(() => Promise.resolve(null));
@@ -170,6 +185,23 @@ describe("buildCoreAPIImpl", () => {
     });
     expect(subscribeEvents).toHaveBeenCalledWith(handler);
     expect(result).toBe(unsubscribe);
+
+    const rpc = createRPC<CoreAPI>();
+    rpc.connectImpl(api.core);
+    const proxy = rpc.createProxy(api.callbacks);
+    for (const method of ["waitForPrompt", "submitPromptAndWait"] as const) {
+      const controller = new AbortController();
+      const pending =
+        method === "waitForPrompt"
+          ? proxy.waitForPrompt("prompt_1", { signal: controller.signal })
+          : proxy.submitPromptAndWait("hello over real CoreAPI seam", {
+              clientRequestId: "request_rpc_abort",
+              signal: controller.signal,
+            });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    }
   });
 
   it("disposes MCP and persistent database resources", async () => {

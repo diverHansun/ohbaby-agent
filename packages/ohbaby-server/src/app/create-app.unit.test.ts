@@ -304,25 +304,19 @@ class FakeBackend implements UiBackendClient {
 
   acquirePromptEditLease(
     _input: Parameters<UiBackendClient["acquirePromptEditLease"]>[0],
-  ): ReturnType<
-    UiBackendClient["acquirePromptEditLease"]
-  > {
+  ): ReturnType<UiBackendClient["acquirePromptEditLease"]> {
     return Promise.reject(new Error("No queued prompt in fake backend"));
   }
 
   renewPromptEditLease(
     _input: Parameters<UiBackendClient["renewPromptEditLease"]>[0],
-  ): ReturnType<
-    UiBackendClient["renewPromptEditLease"]
-  > {
+  ): ReturnType<UiBackendClient["renewPromptEditLease"]> {
     return Promise.reject(new Error("No queued prompt in fake backend"));
   }
 
   releasePromptEditLease(
     _input: Parameters<UiBackendClient["releasePromptEditLease"]>[0],
-  ): ReturnType<
-    UiBackendClient["releasePromptEditLease"]
-  > {
+  ): ReturnType<UiBackendClient["releasePromptEditLease"]> {
     return Promise.reject(new Error("No queued prompt in fake backend"));
   }
 
@@ -572,9 +566,7 @@ class DurablePromptFakeBackend
     return Promise.resolve(this.prompt);
   }
 
-  override waitForPrompt(): ReturnType<
-    UiPromptQueueClient["waitForPrompt"]
-  > {
+  override waitForPrompt(): ReturnType<UiPromptQueueClient["waitForPrompt"]> {
     if (this.completedPrompt) {
       return Promise.resolve({ prompt: this.completedPrompt });
     }
@@ -788,9 +780,61 @@ describe("createDaemonServerApp", () => {
     }
   });
 
+  it("keeps REST and RPC writes successful when the recorder fails", async () => {
+    const stderr = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    const handle = createApp(new FakeBackend(), {
+      commandRecorder: {
+        record(): never {
+          throw new Error("recorder unavailable");
+        },
+      },
+    });
+    await handle.start();
+    try {
+      const rpc = await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          clientId: "client_rpc",
+          id: "rpc_fail_open",
+          method: "submitPromptAccepted",
+          params: ["private prompt", { clientRequestId: "request_1" }],
+        }),
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        method: "POST",
+      });
+      expect(rpc.status).toBe(200);
+
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        method: "POST",
+      });
+      const rest = await handle.app.request("/v1/permission", {
+        body: JSON.stringify({ level: "full-access", mode: "plan" }),
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+          "x-ohbaby-client-id": "client_web",
+        },
+        method: "PATCH",
+      });
+      expect(rest.status).toBe(200);
+      expect(stderr).toHaveBeenCalledWith(
+        expect.stringContaining('"type":"ui.command.observation.failure"'),
+      );
+    } finally {
+      await handle.dispose();
+      stderr.mockRestore();
+    }
+  });
+
   it("allows only the owning RPC client to claim an interaction response", async () => {
     const backend = new FakeBackend();
-    const handle = createApp(backend);
+    const records: UiCommandRecord[] = [];
+    const handle = createApp(backend, {
+      commandRecorder: { record: (record) => records.push(record) },
+    });
     await handle.start();
     const rpc = (
       clientId: string,
@@ -798,11 +842,13 @@ describe("createDaemonServerApp", () => {
       method: string,
       params: readonly unknown[],
     ): Promise<Response> =>
-      Promise.resolve(handle.app.request("/api/rpc", {
-        body: JSON.stringify({ clientId, id, method, params }),
-        headers: { ...authHeaders(), "content-type": "application/json" },
-        method: "POST",
-      }));
+      Promise.resolve(
+        handle.app.request("/api/rpc", {
+          body: JSON.stringify({ clientId, id, method, params }),
+          headers: { ...authHeaders(), "content-type": "application/json" },
+          method: "POST",
+        }),
+      );
     try {
       await rpc("client_a", "rpc_execute", "executeCommand", [
         {
@@ -852,6 +898,9 @@ describe("createDaemonServerApp", () => {
         ["interaction_1", { kind: "accepted", value: true }],
       );
       expect(foreign.status).toBe(403);
+      expect(
+        records.filter((record) => record.method === "respondInteraction"),
+      ).toEqual([]);
 
       const [first, duplicate] = await Promise.all([
         rpc("client_a", "rpc_first", "respondInteraction", [
@@ -871,6 +920,12 @@ describe("createDaemonServerApp", () => {
           response: { kind: "accepted", value: true },
         },
       ]);
+      expect(
+        records.filter((record) => record.method === "respondInteraction"),
+      ).toMatchObject([
+        { phase: "started" },
+        { outcome: { kind: "returned" }, phase: "completed" },
+      ]);
     } finally {
       await handle.dispose();
     }
@@ -884,16 +939,18 @@ describe("createDaemonServerApp", () => {
       id: string,
       interactionId = "interaction_1",
     ): Promise<Response> =>
-      Promise.resolve(handle.app.request("/api/rpc", {
-        body: JSON.stringify({
-          clientId: "client_a",
-          id,
-          method: "respondInteraction",
-          params: [interactionId, { kind: "accepted" }],
+      Promise.resolve(
+        handle.app.request("/api/rpc", {
+          body: JSON.stringify({
+            clientId: "client_a",
+            id,
+            method: "respondInteraction",
+            params: [interactionId, { kind: "accepted" }],
+          }),
+          headers: { ...authHeaders(), "content-type": "application/json" },
+          method: "POST",
         }),
-        headers: { ...authHeaders(), "content-type": "application/json" },
-        method: "POST",
-      }));
+      );
     try {
       await handle.app.request("/api/rpc", {
         body: JSON.stringify({
@@ -961,9 +1018,7 @@ describe("createDaemonServerApp", () => {
         500,
       );
       backend.interactionError = undefined;
-      expect((await rpc("rpc_unsafe_retry", "interaction_2")).status).toBe(
-        403,
-      );
+      expect((await rpc("rpc_unsafe_retry", "interaction_2")).status).toBe(403);
       expect(backend.interactionResponses).toHaveLength(3);
     } finally {
       await handle.dispose();
@@ -2833,9 +2888,7 @@ describe("createDaemonServerApp", () => {
         ok: false,
       });
       await expect(
-        rpc("acquirePromptEditLease", [
-          { promptId: "prompt_1" },
-        ]),
+        rpc("acquirePromptEditLease", [{ promptId: "prompt_1" }]),
       ).resolves.toMatchObject({
         ok: true,
         result: { editLeaseId: "lease_1", prompt: { promptId: "prompt_1" } },

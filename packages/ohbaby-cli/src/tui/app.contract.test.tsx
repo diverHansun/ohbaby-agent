@@ -6,6 +6,7 @@ import type {
   UiConnectModelResult,
   UiContextWindowUsage,
   UiEventHandler,
+  UiPromptCompletion,
   UiSetSearchApiKeyResult,
   UiSnapshot,
 } from "ohbaby-sdk";
@@ -3908,6 +3909,9 @@ function createFakeClient(
   readonly setPermission: ReturnType<typeof vi.fn>;
   readonly setSearchApiKey: ReturnType<typeof vi.fn>;
   readonly submitPrompt: ReturnType<typeof vi.fn>;
+  readonly submitPromptAccepted: ReturnType<typeof vi.fn>;
+  readonly submitPromptAndWait: ReturnType<typeof vi.fn>;
+  readonly waitForPrompt: ReturnType<typeof vi.fn>;
 } {
   const handlers = new Set<TuiEventHandler>();
 
@@ -4029,11 +4033,46 @@ function createFakeClient(
       } as const),
     ),
     submitPrompt: vi.fn(() => Promise.resolve()),
+    submitPromptAccepted: vi.fn(() =>
+      Promise.resolve({
+        clientRequestId: "request_tui",
+        createdAt: "2026-08-14T00:00:00.000Z",
+        promptId: "prompt_tui",
+        sessionId: initialSnapshot.activeSessionId ?? "session_1",
+        status: "queued" as const,
+        userMessageId: "message_tui",
+      }),
+    ),
+    submitPromptAndWait: vi.fn(() =>
+      Promise.resolve(promptCompletionForFakeClient(initialSnapshot)),
+    ),
+    waitForPrompt: vi.fn(() =>
+      Promise.resolve(promptCompletionForFakeClient(initialSnapshot)),
+    ),
     subscribeEvents(handler: TuiEventHandler | UiEventHandler): () => void {
       handlers.add(handler);
       return () => {
         handlers.delete(handler);
       };
+    },
+  };
+}
+
+function promptCompletionForFakeClient(
+  initialSnapshot: UiSnapshot,
+): UiPromptCompletion {
+  return {
+    prompt: {
+      clientRequestId: "request_tui",
+      createdAt: "2026-08-14T00:00:00.000Z",
+      endedAt: "2026-08-14T00:00:01.000Z",
+      promptId: "prompt_tui",
+      scopeKey: "/workspace",
+      sessionId: initialSnapshot.activeSessionId ?? "session_1",
+      status: "succeeded" as const,
+      text: "hello",
+      updatedAt: "2026-08-14T00:00:01.000Z",
+      userMessageId: "message_tui",
     },
   };
 }

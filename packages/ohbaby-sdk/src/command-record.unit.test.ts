@@ -5,7 +5,12 @@ import {
   summarizeUiCommandError,
   type UiCommandRecord,
   type UiCommandRecorder,
+  type UiCommandDetails,
 } from "./command-record.js";
+
+// @ts-expect-error Details are branded and must come from the SDK allowlist builder.
+const unsafeDetails: UiCommandDetails = { apiKey: "secret" };
+void unsafeDetails;
 
 function fixedDependencies(records: UiCommandRecord[]): {
   readonly createOperationId: () => string;
@@ -167,7 +172,7 @@ describe("executeRecordedUiCommand", () => {
     expect(phases).toEqual(["started", "completed"]);
   });
 
-  it("isolates operation id, clock, details, and result-correlation failures", async () => {
+  it("isolates operation id, clock, and result-correlation failures", async () => {
     const diagnostic = vi.fn();
     const recorder = { record: vi.fn() };
 
@@ -175,9 +180,6 @@ describe("executeRecordedUiCommand", () => {
       executeRecordedUiCommand({
         correlateResult: () => {
           throw new Error("correlation failed");
-        },
-        createDetails: () => {
-          throw new Error("details failed");
         },
         createOperationId: () => {
           throw new Error("id failed");
@@ -194,6 +196,33 @@ describe("executeRecordedUiCommand", () => {
     ).resolves.toBe(42);
     expect(recorder.record).not.toHaveBeenCalled();
     expect(diagnostic).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails open when hostile arguments break the SDK-owned details builder", async () => {
+    const diagnostic = vi.fn();
+    const records: UiCommandRecord[] = [];
+    const hostileArgs = new Proxy([] as unknown[], {
+      get(): never {
+        throw new Error("hostile argument getter");
+      },
+    });
+
+    await expect(
+      executeRecordedUiCommand({
+        ...fixedDependencies(records),
+        args: hostileArgs,
+        entryPoint: "server-rpc",
+        execute: () => Promise.resolve("business result"),
+        method: "submitPromptAccepted",
+        onDiagnostic: diagnostic,
+      }),
+    ).resolves.toBe("business result");
+    expect(records).toHaveLength(2);
+    expect(records.every((record) => record.details === undefined)).toBe(true);
+    expect(diagnostic).toHaveBeenCalledOnce();
+    expect(diagnostic).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: "details" }),
+    );
   });
 });
 
@@ -250,6 +279,18 @@ describe("UI command record redaction", () => {
     });
 
     expect(summary).toEqual({
+      message: "Command execution failed",
+      name: "Error",
+    });
+  });
+
+  it("does not treat alphanumeric secret-shaped names or codes as safe", () => {
+    expect(
+      summarizeUiCommandError({
+        code: "AKIAIOSFODNN7EXAMPLE",
+        name: "SecretToken",
+      }),
+    ).toEqual({
       message: "Command execution failed",
       name: "Error",
     });

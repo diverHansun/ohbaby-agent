@@ -3,6 +3,32 @@ import type {
   UiPromptSubmission,
 } from "ohbaby-sdk";
 import type { PromptSubmissionRecord } from "../../runtime/prompt-scheduler/index.js";
+import type { PromptExecutionResult } from "../../runtime/prompt-scheduler/index.js";
+import type { RunCompletion } from "../../runtime/run-manager/index.js";
+
+export function runCompletionToPromptExecutionResult(
+  completion: RunCompletion | undefined,
+): PromptExecutionResult {
+  if (completion === undefined || completion.status === "succeeded") {
+    return { status: "succeeded" };
+  }
+  if (completion.status === "cancelled") {
+    return { status: "cancelled" };
+  }
+  const status = completion.status;
+  return {
+    error: completion.errorData ?? {
+      code: status === "interrupted" ? "RUN_INTERRUPTED" : "RUN_FAILED",
+      message: completion.error ?? `Run ${status}`,
+      retryable: status === "interrupted",
+      source: "runtime",
+      ...(completion.terminalReason === undefined
+        ? {}
+        : { terminalReason: completion.terminalReason }),
+    },
+    status,
+  };
+}
 
 export function promptRecordToUi(
   record: PromptSubmissionRecord,

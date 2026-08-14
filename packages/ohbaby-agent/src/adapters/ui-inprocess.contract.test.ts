@@ -6117,6 +6117,43 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
+  it("keeps a real in-process prompt successful when agent-host recording fails", async () => {
+    const rawClient = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([
+        { textDelta: "fail-open answer", finishReason: "stop" },
+      ]),
+    });
+    const diagnostic = vi.fn();
+    const client = createUiCommandGateway(rawClient, {
+      entryPoint: "agent-host",
+      onDiagnostic: diagnostic,
+      recorder: {
+        record(): never {
+          throw new Error("recorder unavailable");
+        },
+      },
+    });
+    try {
+      const receipt = await client.submitPromptAccepted("fail open");
+      await expect(
+        client.waitForPrompt(receipt.promptId),
+      ).resolves.toMatchObject({
+        prompt: { status: "succeeded" },
+      });
+      expect(diagnostic).toHaveBeenCalledOnce();
+      const snapshot = await rawClient.getSnapshot();
+      const answerParts = snapshot.sessions.flatMap((session) =>
+        session.messages.flatMap((message) => message.parts),
+      );
+      expect(answerParts).toContainEqual({
+        text: "fail-open answer",
+        type: "text",
+      });
+    } finally {
+      await rawClient.dispose();
+    }
+  });
+
   it("exposes permission state in SDK snapshots", async () => {
     const client = createInProcessUiBackendClient({
       llmClient: createFakeLLMClient([]),

@@ -616,6 +616,24 @@ export function createRemoteCoreApiHost(
       submitPrompt(text, submitOptions): ReturnType<CoreAPI["submitPrompt"]> {
         return client.submitPrompt(text, submitOptions);
       },
+      submitPromptAccepted(
+        text,
+        submitOptions,
+      ): ReturnType<CoreAPI["submitPromptAccepted"]> {
+        return client.submitPromptAccepted(text, submitOptions);
+      },
+      submitPromptAndWait(
+        text,
+        submitOptions,
+      ): ReturnType<CoreAPI["submitPromptAndWait"]> {
+        return client.submitPromptAndWait(text, submitOptions);
+      },
+      waitForPrompt(
+        promptId,
+        waitOptions,
+      ): ReturnType<CoreAPI["waitForPrompt"]> {
+        return client.waitForPrompt(promptId, waitOptions);
+      },
     },
     dispose(): Promise<void> {
       return client.dispose();

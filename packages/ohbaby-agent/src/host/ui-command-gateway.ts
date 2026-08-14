@@ -1,5 +1,4 @@
 import {
-  buildUiCommandDetails,
   executeRecordedUiCommand,
   submitPromptAndWait as composeSubmitPromptAndWait,
 } from "ohbaby-sdk";
@@ -55,7 +54,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function objectAt(args: readonly unknown[], index: number): Record<string, unknown> {
+function objectAt(
+  args: readonly unknown[],
+  index: number,
+): Record<string, unknown> {
   const value = args[index];
   return isRecord(value) ? value : {};
 }
@@ -212,10 +214,9 @@ export function createUiCommandGateway(
               ? {}
               : { clientId: trustedOwnerClientId }),
           },
-          createDetails: () => buildUiCommandDetails(method, args),
+          args,
           entryPoint: options.entryPoint,
-          execute: () =>
-            Reflect.apply(value, target, args) as unknown,
+          execute: () => Reflect.apply(value, target, args) as unknown,
           method,
           recorder: options.recorder,
         });

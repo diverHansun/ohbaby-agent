@@ -15,10 +15,7 @@ export type UiCommandMethod =
   | "respondInteraction"
   | "abortRun";
 
-export type UiCommandEntryPoint =
-  | "agent-host"
-  | "server-rest"
-  | "server-rpc";
+export type UiCommandEntryPoint = "agent-host" | "server-rest" | "server-rpc";
 
 export interface UiCommandCorrelation {
   readonly transportRequestId?: string;
@@ -33,9 +30,13 @@ export interface UiCommandCorrelation {
   readonly interactionId?: string;
 }
 
+declare const uiCommandDetailsBrand: unique symbol;
+
 export type UiCommandDetails = Readonly<
   Record<string, boolean | number | string>
->;
+> & {
+  readonly [uiCommandDetailsBrand]: true;
+};
 
 export interface UiCommandErrorSummary {
   readonly code?: string;
@@ -85,9 +86,10 @@ export interface ExecuteRecordedUiCommandOptions<Result> {
   readonly entryPoint: UiCommandEntryPoint;
   readonly recorder: UiCommandRecorder;
   readonly execute: () => Promise<Result> | Result;
+  /** Method arguments are reduced through the SDK-owned allowlist builder. */
+  readonly args?: readonly unknown[];
   readonly correlation?: UiCommandCorrelation;
   readonly correlateResult?: (result: Result) => UiCommandCorrelation;
-  readonly createDetails?: () => UiCommandDetails | undefined;
   readonly createOperationId?: () => string;
   readonly now?: () => Date;
   readonly onDiagnostic?: (diagnostic: UiCommandObservationDiagnostic) => void;
@@ -97,7 +99,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function objectAt(args: readonly unknown[], index: number): Record<string, unknown> {
+function objectAt(
+  args: readonly unknown[],
+  index: number,
+): Record<string, unknown> {
   const value = args[index];
   return isRecord(value) ? value : {};
 }
@@ -105,6 +110,12 @@ function objectAt(args: readonly unknown[], index: number): Record<string, unkno
 function stringAt(args: readonly unknown[], index: number): string | undefined {
   const value = args[index];
   return typeof value === "string" ? value : undefined;
+}
+
+function redactedDetails(
+  value: Readonly<Record<string, boolean | number | string>>,
+): UiCommandDetails {
+  return value as UiCommandDetails;
 }
 
 export function buildUiCommandDetails(
@@ -115,64 +126,67 @@ export function buildUiCommandDetails(
     case "submitPromptAccepted": {
       const text = stringAt(args, 0) ?? "";
       const options = objectAt(args, 1);
-      return {
+      return redactedDetails({
         hasClientRequestId: typeof options.clientRequestId === "string",
         hasExplicitSessionId: typeof options.sessionId === "string",
         textLength: text.length,
-      };
+      });
     }
     case "editQueuedPrompt": {
       const input = objectAt(args, 0);
-      return {
+      return redactedDetails({
         textLength: typeof input.text === "string" ? input.text.length : 0,
-      };
+      });
     }
     case "compactSession": {
       const input = objectAt(args, 0);
-      return {
+      return redactedDetails({
         force: input.force === true,
         hasExplicitSessionId: typeof input.sessionId === "string",
-      };
+      });
     }
     case "connectModel": {
       const input = objectAt(args, 0);
       const interfaceProvider = input.interfaceProvider;
-      return {
+      return redactedDetails({
         hasApiKey: typeof input.apiKey === "string",
-        hasExplicitContextWindow:
-          typeof input.contextWindowTokens === "number",
+        hasExplicitContextWindow: typeof input.contextWindowTokens === "number",
         ...(interfaceProvider === "anthropic" ||
         interfaceProvider === "openai-compatible"
           ? { interfaceProvider }
           : {}),
-      };
+      });
     }
     case "setSearchApiKey": {
       const input = objectAt(args, 0);
-      return { hasApiKey: typeof input.apiKey === "string" };
+      return redactedDetails({
+        hasApiKey: typeof input.apiKey === "string",
+      });
     }
     case "setPermission": {
       const input = objectAt(args, 0);
-      return {
+      return redactedDetails({
         hasLevel: typeof input.level === "string",
         hasMode: typeof input.mode === "string",
-      };
+      });
     }
     case "executeCommand": {
       const input = objectAt(args, 0);
-      return {
+      return redactedDetails({
         argumentCount: Array.isArray(input.argv) ? input.argv.length : 0,
         hasSessionId: typeof input.sessionId === "string",
-      };
+      });
     }
     case "respondInteraction": {
       const response = objectAt(args, 1);
       return response.kind === "accepted" || response.kind === "cancelled"
-        ? { responseKind: response.kind }
+        ? redactedDetails({ responseKind: response.kind })
         : undefined;
     }
     case "abortRun":
-      return { hasExplicitRunId: typeof args[0] === "string" };
+      return redactedDetails({
+        hasExplicitRunId: typeof args[0] === "string",
+      });
     case "acquirePromptEditLease":
     case "archiveSession":
     case "cancelQueuedPrompt":
@@ -183,18 +197,16 @@ export function buildUiCommandDetails(
   }
 }
 
-export function summarizeUiCommandError(
-  error: unknown,
-): UiCommandErrorSummary {
+export function summarizeUiCommandError(error: unknown): UiCommandErrorSummary {
   const record = isRecord(error) ? error : {};
   const rawName = record.name;
   const rawCode = record.code;
   const name =
-    typeof rawName === "string" && /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(rawName)
+    typeof rawName === "string" && SAFE_ERROR_NAMES.has(rawName)
       ? rawName
       : "Error";
   const code =
-    typeof rawCode === "string" && /^[A-Z0-9_.-]{1,64}$/.test(rawCode)
+    typeof rawCode === "string" && SAFE_ERROR_CODES.has(rawCode)
       ? rawCode
       : undefined;
   return {
@@ -203,6 +215,27 @@ export function summarizeUiCommandError(
     name,
   };
 }
+
+const SAFE_ERROR_NAMES = new Set([
+  "AbortError",
+  "Error",
+  "RangeError",
+  "TypeError",
+]);
+
+const SAFE_ERROR_CODES = new Set([
+  "ABORT_ERR",
+  "CONFLICT",
+  "FORBIDDEN",
+  "INVALID_ARGS",
+  "NOT_FOUND",
+  "PROVIDER_API",
+  "PROVIDER_AUTH",
+  "PROVIDER_RETRY_EXHAUSTED",
+  "PROVIDER_STREAM_INTERRUPTED",
+  "QUEUE_FULL",
+  "UNAUTHORIZED",
+]);
 
 export async function executeRecordedUiCommand<Result>(
   options: ExecuteRecordedUiCommandOptions<Result>,
@@ -236,13 +269,14 @@ export async function executeRecordedUiCommand<Result>(
 
   const operationId = observe(
     "operation-id",
-    options.createOperationId ??
-      ((): string => globalThis.crypto.randomUUID()),
+    options.createOperationId ?? ((): string => globalThis.crypto.randomUUID()),
   );
   const details =
-    options.createDetails === undefined
+    options.args === undefined
       ? undefined
-      : observe("details", options.createDetails);
+      : observe("details", () =>
+          buildUiCommandDetails(options.method, options.args ?? []),
+        );
   const baseCorrelation = options.correlation ?? {};
   const now = options.now ?? ((): Date => new Date());
 

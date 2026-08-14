@@ -3,6 +3,7 @@ import type { PromptSubmissionRecord } from "../../runtime/prompt-scheduler/inde
 import {
   promptRecordToCompletion,
   promptRecordToUi,
+  runCompletionToPromptExecutionResult,
 } from "./prompt-mapper.js";
 
 function promptRecord(
@@ -78,7 +79,9 @@ describe("prompt record mapper", () => {
 
   it("rejects failed and interrupted records without structured errors", () => {
     expect(() =>
-      promptRecordToCompletion(promptRecord({ error: undefined, status: "failed" })),
+      promptRecordToCompletion(
+        promptRecord({ error: undefined, status: "failed" }),
+      ),
     ).toThrow("has no structured error");
   });
 
@@ -96,5 +99,55 @@ describe("prompt record mapper", () => {
         }),
       ),
     ).toThrow("must not carry an error");
+  });
+
+  it("preserves interrupted run completion as a structured prompt result", () => {
+    expect(
+      runCompletionToPromptExecutionResult({
+        error: "daemon owner disappeared",
+        errorData: {
+          code: "RUN_OWNER_LOST",
+          message: "run owner disappeared",
+          retryable: true,
+          source: "scheduler",
+        },
+        status: "interrupted",
+      }),
+    ).toEqual({
+      error: {
+        code: "RUN_OWNER_LOST",
+        message: "run owner disappeared",
+        retryable: true,
+        source: "scheduler",
+      },
+      status: "interrupted",
+    });
+  });
+
+  it("creates required structured errors for failed and interrupted fallbacks", () => {
+    expect(
+      runCompletionToPromptExecutionResult({
+        error: "provider failed",
+        status: "failed",
+      }),
+    ).toMatchObject({
+      error: { code: "RUN_FAILED", message: "provider failed" },
+      status: "failed",
+    });
+    expect(
+      runCompletionToPromptExecutionResult({ status: "interrupted" }),
+    ).toMatchObject({
+      error: { code: "RUN_INTERRUPTED", message: "Run interrupted" },
+      status: "interrupted",
+    });
+  });
+
+  it("keeps succeeded and cancelled prompt results free of errors", () => {
+    expect(
+      runCompletionToPromptExecutionResult({ status: "succeeded" }),
+    ).toEqual({ status: "succeeded" });
+    expect(
+      runCompletionToPromptExecutionResult({ status: "cancelled" }),
+    ).toEqual({ status: "cancelled" });
   });
 });

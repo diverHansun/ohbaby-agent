@@ -71,10 +71,7 @@ function runtimeError(error: unknown): UiPromptError {
 
 export class WorkspacePromptScheduler {
   private readonly activeBySession = new Map<string, string>();
-  private readonly completionWaiters = new Map<
-    string,
-    Set<CompletionWaiter>
-  >();
+  private readonly completionWaiters = new Map<string, Set<CompletionWaiter>>();
   private readonly busySessionsUntil = new Map<string, number>();
   private readonly maxActiveSessions: number;
   private readonly maxQueuedPrompts: number;
@@ -120,6 +117,7 @@ export class WorkspacePromptScheduler {
     });
     await previous;
     try {
+      this.assertOpen();
       if (
         input.clientRequestId !== undefined &&
         (input.clientRequestId.trim() === "" ||
@@ -132,6 +130,7 @@ export class WorkspacePromptScheduler {
         this.options.scopeKey,
         clientRequestId,
       );
+      this.assertOpen();
       if (existing) {
         const expectedSessionId =
           input.expectedSessionId ??
@@ -149,10 +148,12 @@ export class WorkspacePromptScheduler {
         this.options.scopeKey,
         this.maxQueuedPrompts,
       );
+      this.assertOpen();
       const sessionId =
         typeof input.sessionId === "function"
           ? await input.sessionId()
           : input.sessionId;
+      this.assertOpen();
       const accepted = await this.options.store.accept({
         clientRequestId,
         maxQueuedPrompts: this.maxQueuedPrompts,
@@ -165,6 +166,7 @@ export class WorkspacePromptScheduler {
           this.options.createUserMessageId?.() ??
           `message_${randomUUID()}`,
       });
+      this.assertOpen();
       const prompt = accepted.record;
       if (accepted.inserted) {
         this.options.onSubmitted?.(prompt);
@@ -284,7 +286,9 @@ export class WorkspacePromptScheduler {
             new PromptWaitAbortedError(promptId),
           );
         };
-        options.signal.addEventListener("abort", waiter.onAbort, { once: true });
+        options.signal.addEventListener("abort", waiter.onAbort, {
+          once: true,
+        });
       }
       waiters.add(waiter);
       this.completionWaiters.set(promptId, waiters);
@@ -379,6 +383,9 @@ export class WorkspacePromptScheduler {
         const queued = await this.options.store.listQueued(
           this.options.scopeKey,
         );
+        if (this.isClosed()) {
+          break;
+        }
         const now = Date.now();
         for (const [sessionId, blockedUntil] of this.busySessionsUntil) {
           if (blockedUntil <= now) {
@@ -418,6 +425,15 @@ export class WorkspacePromptScheduler {
         const claimed = await this.options.store.claim(candidate.promptId);
         if (!claimed) {
           continue;
+        }
+        if (this.isClosed()) {
+          try {
+            await this.options.store.requeueBusy(claimed.promptId);
+          } catch {
+            // Startup recovery will reconcile a claim that cannot be requeued
+            // after the scheduler has already entered its terminal state.
+          }
+          break;
         }
         this.activeBySession.set(claimed.sessionId, claimed.promptId);
         this.options.onUpdated?.(claimed);
@@ -464,7 +480,9 @@ export class WorkspacePromptScheduler {
         }
         if (this.options.isBusyError?.(error) && runId === undefined) {
           try {
-            const queued = await this.options.store.requeueBusy(prompt.promptId);
+            const queued = await this.options.store.requeueBusy(
+              prompt.promptId,
+            );
             this.options.onUpdated?.(queued);
             this.busySessionsUntil.set(
               prompt.sessionId,
@@ -492,9 +510,8 @@ export class WorkspacePromptScheduler {
 
       try {
         const finished = await this.options.store.finish(prompt.promptId, {
-          status: result.status,
+          ...result,
           expectedRunId: runId,
-          error: result.error,
         });
         this.options.onUpdated?.(finished);
         this.resolveCompletion(finished);

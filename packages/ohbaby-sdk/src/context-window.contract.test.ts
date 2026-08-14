@@ -4,8 +4,26 @@ import type {
   UiContextWindowUsage,
   UiEvent,
   UiMessage,
+  UiPromptCompletion,
   UiSnapshot,
 } from "./index.js";
+
+function promptCompletion(): UiPromptCompletion {
+  return {
+    prompt: {
+      clientRequestId: "request_1",
+      createdAt: "2026-08-14T00:00:00.000Z",
+      endedAt: "2026-08-14T00:00:01.000Z",
+      promptId: "prompt_1",
+      scopeKey: "/workspace",
+      sessionId: "session_1",
+      status: "succeeded",
+      text: "hello",
+      updatedAt: "2026-08-14T00:00:01.000Z",
+      userMessageId: "message_1",
+    },
+  };
+}
 
 describe("context window UI contract", () => {
   it("represents session scoped context window usage in snapshots and events", () => {
@@ -162,6 +180,22 @@ describe("context window UI contract", () => {
       },
       submitPrompt(): ReturnType<CoreAPI["submitPrompt"]> {
         return Promise.resolve();
+      },
+      submitPromptAccepted(): ReturnType<CoreAPI["submitPromptAccepted"]> {
+        return Promise.resolve({
+          clientRequestId: "request_1",
+          createdAt: "2026-08-14T00:00:00.000Z",
+          promptId: "prompt_1",
+          sessionId: "session_1",
+          status: "queued",
+          userMessageId: "message_1",
+        });
+      },
+      submitPromptAndWait(): ReturnType<CoreAPI["submitPromptAndWait"]> {
+        return Promise.resolve(promptCompletion());
+      },
+      waitForPrompt(): ReturnType<CoreAPI["waitForPrompt"]> {
+        return Promise.resolve(promptCompletion());
       },
     } satisfies CoreAPI;
 

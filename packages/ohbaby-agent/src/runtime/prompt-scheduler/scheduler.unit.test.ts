@@ -9,13 +9,15 @@ import {
 } from "./errors.js";
 import { WorkspacePromptScheduler } from "./scheduler.js";
 
-function deferred(): {
-  readonly promise: Promise<void>;
-  resolve(): void;
+function deferred<T = void>(): {
+  readonly promise: Promise<T>;
+  resolve(value?: T): void;
 } {
-  let resolve!: () => void;
-  const promise = new Promise<void>((done) => {
-    resolve = done;
+  let resolve!: (value?: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = (value): void => {
+      done(value as T);
+    };
   });
   return { promise, resolve };
 }
@@ -182,6 +184,114 @@ describe("WorkspacePromptScheduler", () => {
     gate.resolve();
   });
 
+  it("does not finish accepting after close wins an in-flight lookup", async () => {
+    const store = new InMemoryPromptSubmissionStore();
+    const lookupStarted = deferred();
+    const releaseLookup = deferred();
+    const originalLookup = store.getByClientRequestId.bind(store);
+    vi.spyOn(store, "getByClientRequestId").mockImplementation(
+      async (scopeKey, clientRequestId) => {
+        lookupStarted.resolve();
+        await releaseLookup.promise;
+        return originalLookup(scopeKey, clientRequestId);
+      },
+    );
+    const execute = vi.fn(() =>
+      Promise.resolve({ status: "succeeded" as const }),
+    );
+    const scheduler = new WorkspacePromptScheduler({
+      execute,
+      scopeKey: "/workspace",
+      store,
+    });
+
+    const accepting = scheduler.accept({
+      clientRequestId: "request_close_lookup",
+      sessionId: "session_1",
+      text: "close during lookup",
+    });
+    await lookupStarted.promise;
+    scheduler.close();
+    releaseLookup.resolve();
+
+    await expect(accepting).rejects.toBeInstanceOf(PromptSchedulerClosedError);
+    expect(execute).not.toHaveBeenCalled();
+    await expect(
+      originalLookup("/workspace", "request_close_lookup"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not claim queued work after close wins an in-flight queue read", async () => {
+    const store = new InMemoryPromptSubmissionStore();
+    const listStarted = deferred();
+    const releaseList = deferred();
+    const originalList = store.listQueued.bind(store);
+    vi.spyOn(store, "listQueued").mockImplementation(async (scopeKey) => {
+      listStarted.resolve();
+      await releaseList.promise;
+      return originalList(scopeKey);
+    });
+    const execute = vi.fn(() =>
+      Promise.resolve({ status: "succeeded" as const }),
+    );
+    const scheduler = new WorkspacePromptScheduler({
+      execute,
+      scopeKey: "/workspace",
+      store,
+    });
+    const accepted = await scheduler.accept({
+      sessionId: "session_1",
+      text: "stay queued after close",
+    });
+    await listStarted.promise;
+
+    scheduler.close();
+    releaseList.resolve();
+
+    await vi.waitFor(async () => {
+      expect(await store.get(accepted.promptId)).toMatchObject({
+        status: "queued",
+      });
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("requeues a claim when close wins the in-flight claim", async () => {
+    const store = new InMemoryPromptSubmissionStore();
+    const claimFinished = deferred();
+    const releaseClaim = deferred();
+    const originalClaim = store.claim.bind(store);
+    vi.spyOn(store, "claim").mockImplementation(async (promptId) => {
+      const claimed = await originalClaim(promptId);
+      claimFinished.resolve();
+      await releaseClaim.promise;
+      return claimed;
+    });
+    const execute = vi.fn(() =>
+      Promise.resolve({ status: "succeeded" as const }),
+    );
+    const scheduler = new WorkspacePromptScheduler({
+      execute,
+      scopeKey: "/workspace",
+      store,
+    });
+    const accepted = await scheduler.accept({
+      sessionId: "session_1",
+      text: "requeue claimed work",
+    });
+    await claimFinished.promise;
+
+    scheduler.close();
+    releaseClaim.resolve();
+
+    await vi.waitFor(async () => {
+      expect(await store.get(accepted.promptId)).toMatchObject({
+        status: "queued",
+      });
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("aborts only the selected waiter without cancelling the prompt", async () => {
     const gate = deferred();
     const started = deferred();
@@ -263,6 +373,43 @@ describe("WorkspacePromptScheduler", () => {
 
     expect(outcome).toEqual({ error: storageError, kind: "rejected" });
     expect(finish).toHaveBeenCalledOnce();
+  });
+
+  it("preserves an interrupted executor result as a resolved business terminal", async () => {
+    const scheduler = new WorkspacePromptScheduler({
+      scopeKey: "/workspace",
+      store: new InMemoryPromptSubmissionStore(),
+      execute: (): Promise<{
+        readonly error: {
+          readonly code: string;
+          readonly message: string;
+          readonly retryable: boolean;
+          readonly source: "runtime";
+        };
+        readonly status: "interrupted";
+      }> =>
+        Promise.resolve({
+          error: {
+            code: "PROCESS_INTERRUPTED",
+            message: "process owner disappeared",
+            retryable: true,
+            source: "runtime" as const,
+          },
+          status: "interrupted" as const,
+        }),
+    });
+    const accepted = await scheduler.accept({
+      sessionId: "session_1",
+      text: "interrupt me",
+    });
+
+    const completion = await scheduler.waitForCompletion(accepted.promptId);
+    expect(completion.status).toBe("interrupted");
+    expect(completion.endedAt).toBeTypeOf("number");
+    expect(completion.error).toMatchObject({
+      code: "PROCESS_INTERRUPTED",
+      source: "runtime",
+    });
   });
 
   it("backs off a busy session without a hot retry loop", async () => {

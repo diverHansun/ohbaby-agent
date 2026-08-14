@@ -12,7 +12,6 @@ import type {
   UiEditQueuedPromptInput,
   UiPromptCompletion,
   UiPromptEditLease,
-  UiPromptError,
   UiPromptReceipt,
   UiPromptSubmission,
   UiRenewPromptEditLeaseInput,
@@ -84,6 +83,7 @@ import type { Session as CoreSession } from "../services/session/index.js";
 import {
   promptRecordToCompletion,
   promptRecordToUi,
+  runCompletionToPromptExecutionResult,
 } from "./ui-inprocess/prompt-mapper.js";
 import {
   createTemporarySessionTitle,
@@ -126,6 +126,7 @@ import type { StreamBridge } from "../runtime/stream-bridge/index.js";
 import {
   InMemoryPromptSubmissionStore,
   WorkspacePromptScheduler,
+  type PromptExecutionResult,
   type PromptSubmissionStore,
 } from "../runtime/prompt-scheduler/index.js";
 import {
@@ -197,16 +198,6 @@ type InternalSubmitPromptOptions = SubmitPromptOptions & {
   readonly onRunStarted?: (runId: string) => Promise<void>;
 };
 
-class RunCompletionFailureError extends Error {
-  constructor(
-    message: string,
-    readonly promptError: UiPromptError | undefined,
-  ) {
-    super(message);
-    this.name = "RunCompletionFailureError";
-  }
-}
-
 interface ActivePromptState {
   readonly owner: PromptOwner;
   readonly sessionId: string;
@@ -260,8 +251,7 @@ export interface UiPromptQueueExecutionPort {
 }
 
 export interface InProcessUiBackendClient
-  extends UiPromptQueueClient,
-    UiPromptQueueExecutionPort {
+  extends UiPromptQueueClient, UiPromptQueueExecutionPort {
   dispose(): Promise<void>;
 }
 
@@ -540,35 +530,14 @@ export function createInProcessUiBackendClient(
         timestamp: Date.now(),
       });
     },
-    async execute(
-      prompt,
-      controls,
-    ): Promise<{
-      readonly status: "succeeded" | "failed" | "cancelled" | "interrupted";
-      readonly error?: UiPromptError;
-    }> {
+    async execute(prompt, controls): Promise<PromptExecutionResult> {
       const completion = await submitPromptInternal(prompt.text, {
         owner: "user",
         sessionId: prompt.sessionId,
         reservedUserMessageId: prompt.userMessageId,
         onRunStarted: (runId) => controls.markRunning(runId),
       });
-      if (!completion || completion.status === "succeeded") {
-        return { status: "succeeded" };
-      }
-      if (completion.status === "cancelled") {
-        return { status: "cancelled" };
-      }
-      return {
-        status: "failed",
-        error: {
-          code: "RUN_FAILED",
-          message: completion.error ?? `Run ${completion.status}`,
-          source: "runtime",
-          retryable: false,
-          terminalReason: completion.terminalReason,
-        },
-      };
+      return runCompletionToPromptExecutionResult(completion);
     },
   });
 
@@ -2020,15 +1989,15 @@ export function createInProcessUiBackendClient(
       try {
         const completion = await runtime.runManager.waitForCompletion(runId);
         await projection.done;
-        if (completion.status === "cancelled") {
-          // Interruption is a normal user action, not an error.
-          return completion;
-        }
-        if (completion.status !== "succeeded") {
-          throw new RunCompletionFailureError(
-            completion.error ?? `Run ${completion.status}`,
-            completion.errorData,
-          );
+        if (
+          completion.status === "failed" ||
+          completion.status === "interrupted"
+        ) {
+          if (submittedRunId) {
+            runtimeController.clearActiveRunId(submittedRunId);
+            submittedRunId = undefined;
+          }
+          await reconcileRuntimeStatus();
         }
         return completion;
       } catch (error) {

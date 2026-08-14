@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { NodeSqliteConnection } from "../../../../ohbaby-agent/src/services/database/connection.js";
+import { createRemoteUiBackendClient } from "../../protocols/jsonrpc/client.js";
 
 interface ChildReady {
   readonly pid: number;
@@ -425,6 +426,7 @@ describe("global single serve across real processes", () => {
       headers,
       method: "POST",
     });
+    let activePromptId = "";
     let queuedPromptId = "";
     for (let index = 1; index <= 11; index += 1) {
       const response = await fetch(`${firstOrigin}/v1/prompts`, {
@@ -437,6 +439,9 @@ describe("global single serve across real processes", () => {
         method: "POST",
       });
       const receipt = (await response.json()) as { readonly promptId: string };
+      if (index === 1) {
+        activePromptId = receipt.promptId;
+      }
       if (index === 11) {
         queuedPromptId = receipt.promptId;
       }
@@ -514,6 +519,28 @@ describe("global single serve across real processes", () => {
     expect(statuses.filter((status) => status === "interrupted")).toHaveLength(
       10,
     );
+
+    const endpoint = new URL(second.url);
+    const recoveredClient = createRemoteUiBackendClient({
+      authToken,
+      clientId: "recovery_client",
+      directory: repo,
+      host: endpoint.hostname,
+      port: Number(endpoint.port),
+      startupIntent: { resumeSessionId: "recovery_session_1" },
+    });
+    try {
+      const completion = await recoveredClient.waitForPrompt(activePromptId);
+      expect(completion.prompt.promptId).toBe(activePromptId);
+      expect(completion.prompt.status).toBe("interrupted");
+      expect(completion.prompt.endedAt).toBeTypeOf("string");
+      expect(completion.prompt.error).toMatchObject({
+        code: "PROCESS_INTERRUPTED",
+        source: "runtime",
+      });
+    } finally {
+      await recoveredClient.dispose();
+    }
 
     secondChild.kill("SIGTERM");
     await waitForExit(secondChild);

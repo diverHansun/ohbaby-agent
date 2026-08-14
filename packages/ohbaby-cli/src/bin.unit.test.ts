@@ -2,6 +2,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import type { UiPromptCompletion } from "ohbaby-sdk";
 import type { CliCommandRuntime } from "./cli/commands/types.js";
 
 describe("runOhbabyCli", () => {
@@ -791,6 +792,9 @@ function createCore(): {
   readonly setPermission: ReturnType<typeof vi.fn>;
   readonly setSearchApiKey: ReturnType<typeof vi.fn>;
   readonly submitPrompt: ReturnType<typeof vi.fn>;
+  readonly submitPromptAccepted: ReturnType<typeof vi.fn>;
+  readonly submitPromptAndWait: ReturnType<typeof vi.fn>;
+  readonly waitForPrompt: ReturnType<typeof vi.fn>;
 } {
   return {
     abortRun: vi.fn(() => Promise.resolve()),
@@ -837,5 +841,34 @@ function createCore(): {
       } as const),
     ),
     submitPrompt: vi.fn(() => Promise.resolve()),
+    submitPromptAccepted: vi.fn(() =>
+      Promise.resolve({
+        clientRequestId: "request_1",
+        createdAt: "2026-08-14T00:00:00.000Z",
+        promptId: "prompt_1",
+        sessionId: "session_1",
+        status: "queued" as const,
+        userMessageId: "message_1",
+      }),
+    ),
+    submitPromptAndWait: vi.fn(() => Promise.resolve(promptCompletion())),
+    waitForPrompt: vi.fn(() => Promise.resolve(promptCompletion())),
+  };
+}
+
+function promptCompletion(): UiPromptCompletion {
+  return {
+    prompt: {
+      clientRequestId: "request_1",
+      createdAt: "2026-08-14T00:00:00.000Z",
+      endedAt: "2026-08-14T00:00:01.000Z",
+      promptId: "prompt_1",
+      scopeKey: "/workspace",
+      sessionId: "session_1",
+      status: "succeeded" as const,
+      text: "hello",
+      updatedAt: "2026-08-14T00:00:01.000Z",
+      userMessageId: "message_1",
+    },
   };
 }
