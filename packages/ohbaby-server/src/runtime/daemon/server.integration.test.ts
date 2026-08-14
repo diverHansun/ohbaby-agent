@@ -1193,6 +1193,63 @@ describe("createDaemonHttpServer", () => {
     );
   });
 
+  it("does not expire interaction ownership when an older overlapping connection disconnects", async () => {
+    const backend = new FakeBackend();
+    await withServer(
+      backend,
+      async (url) => {
+        const first = await fetchEvents(url, "client_a");
+        const firstReader = createSseFrameReader(first);
+        await firstReader.read();
+
+        const invoked = await postRpc(url, {
+          clientId: "client_a",
+          id: "rpc_command",
+          method: "executeCommand",
+          params: [
+            {
+              argv: [],
+              clientInvocationId: "invoke_1",
+              commandId: "status",
+              path: ["status"],
+              raw: "/status",
+              rawArgs: "",
+              surface: "web",
+            },
+          ],
+        });
+        expect(invoked.status).toBe(200);
+        backend.emit(commandStarted());
+        backend.emit(interactionRequested());
+
+        const second = await fetchEvents(url, "client_a");
+        const secondReader = createSseFrameReader(second);
+        await expect(secondReader.read()).resolves.toMatchObject({
+          data: { clientId: "client_a", type: "hello" },
+        });
+        await firstReader.cancel();
+        await delay(30);
+
+        const response = await postRpc(url, {
+          clientId: "client_a",
+          id: "rpc_interaction",
+          method: "respondInteraction",
+          params: ["interaction_1", { kind: "accepted", value: true }],
+        });
+
+        expect(response.status).toBe(200);
+        expect(backend.interactionResponses).toEqual([
+          {
+            interactionId: "interaction_1",
+            response: { kind: "accepted", value: true },
+          },
+        ]);
+        await secondReader.cancel();
+      },
+      { clientDisconnectRetentionMs: 10 },
+    );
+  });
+
   it("signals resync when a client reconnects after routing retention expires", async () => {
     const backend = new FakeBackend();
     await withServer(

@@ -2004,8 +2004,19 @@ class DaemonServerAppRuntime {
       return;
     }
     client.close();
-    this.scheduleClientRoutingCleanup(client.clientId);
+    if (!this.hasConnectedClient(client.clientId)) {
+      this.scheduleClientRoutingCleanup(client.clientId);
+    }
     this.options.onClientDisconnected?.(client.clientId);
+  }
+
+  private hasConnectedClient(clientId: string): boolean {
+    for (const client of this.clients) {
+      if (client.clientId === clientId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private cancelClientRoutingCleanup(clientId: string): void {
@@ -2021,6 +2032,9 @@ class DaemonServerAppRuntime {
     this.cancelClientRoutingCleanup(clientId);
     const timer = setTimeout(() => {
       this.disconnectCleanupTimers.delete(clientId);
+      if (this.hasConnectedClient(clientId)) {
+        return;
+      }
       this.permissionRouter.disconnectClient(clientId);
       this.clientViews.disconnectClient(clientId);
       this.knownClientIds.delete(clientId);
