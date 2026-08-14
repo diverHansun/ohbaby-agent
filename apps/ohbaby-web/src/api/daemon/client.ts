@@ -1,16 +1,14 @@
 import {
   parseSlashCommandInput,
   resolveSlashCommand,
-  type UiCompactSessionResult,
-  type UiContextWindowUsage,
-  type UiConnectModelResult,
-  type UiCurrentModelConfig,
-  type UiPermissionResponse,
+  submitPromptAndWait as composeSubmitPromptAndWait,
+  type SubmitPromptOptions,
+  type UiBackendClient,
+  type UiEventHandler,
+  type UiPromptCompletion,
+  type UiPromptReceipt,
+  type UiUnsubscribe,
   type UiSlashCommandInvocation,
-  type UiProbeModelContextWindowResult,
-  type UiSetSearchApiKeyResult,
-  type UiPromptEditLease,
-  type UiPromptSubmission,
   type UiWebCommandCatalog,
 } from "ohbaby-sdk";
 import { FetchDaemonEventStream } from "./events.js";
@@ -19,16 +17,8 @@ import type {
   DirectoryPickerListResponse,
   DirectoryPickerRootsResponse,
   OhbabyBootstrapConfig,
-  CompactSessionRequest,
-  ModelConnectRequest,
-  SearchApiKeyRequest,
-  SetPermissionRequest,
-  StoreSnapshot,
-  SubmitPromptRequest,
   WebSseEvent,
-  WorkspaceScopeSummary,
   WorkspaceSnapshot,
-  PromptAcceptedResponse,
 } from "./wire.js";
 import {
   createOhbabyWebStore,
@@ -46,82 +36,42 @@ interface BufferedEvent {
   readonly seqNum: number;
 }
 
-export interface OhbabyWebClient {
+export interface OhbabyWebRuntime {
+  readonly client: UiBackendClient | null;
+  readonly ready: Promise<void>;
+  readonly store: OhbabyWebStore;
   abortSession(sessionId: string, runId?: string): Promise<void>;
   archiveSession(sessionId: string): Promise<void>;
-  close(): Promise<void>;
-  compactSession(
-    sessionId: string,
-    input?: CompactSessionRequest,
-  ): Promise<UiCompactSessionResult>;
-  connect(): Promise<void>;
-  connectModel(input: ModelConnectRequest): Promise<UiConnectModelResult>;
   createSession(): Promise<void>;
+  dispose(): Promise<void>;
   executeSlashCommand(input: {
     readonly allowOverlay?: boolean;
     readonly sessionId?: string;
     readonly text: string;
   }): Promise<void>;
-  getContextWindowUsage(
-    sessionId: string,
-  ): Promise<UiContextWindowUsage | null>;
-  getCurrentModel(): Promise<UiCurrentModelConfig | null>;
-  getSnapshot(): StoreSnapshot;
-  listCommands(): Promise<UiWebCommandCatalog>;
-  listWorkspaceScopes(): Promise<readonly WorkspaceScopeSummary[]>;
-  probeModelContextWindow(
-    input: ModelConnectRequest,
-  ): Promise<UiProbeModelContextWindowResult>;
-  respondPermission(
-    requestId: string,
-    response: UiPermissionResponse,
-  ): Promise<void>;
-  selectSession(sessionId: string): Promise<void>;
-  setPermission(input: SetPermissionRequest): Promise<void>;
-  setSearchApiKey(input: SearchApiKeyRequest): Promise<UiSetSearchApiKeyResult>;
-  submitPrompt(input: SubmitPromptRequest): Promise<PromptAcceptedResponse>;
-  acquirePromptEditLease(promptId: string): Promise<UiPromptEditLease>;
-  renewPromptEditLease(
-    promptId: string,
-    editLeaseId: string,
-  ): Promise<UiPromptEditLease>;
-  releasePromptEditLease(
-    promptId: string,
-    editLeaseId: string,
-  ): Promise<UiPromptSubmission>;
-  editQueuedPrompt(
-    promptId: string,
-    editLeaseId: string,
-    text: string,
-  ): Promise<UiPromptSubmission>;
-  cancelQueuedPrompt(
-    promptId: string,
-    editLeaseId?: string,
-  ): Promise<UiPromptSubmission>;
-  subscribe(listener: () => void): () => void;
-}
-
-export interface OhbabyWebRuntime {
-  readonly client: OhbabyWebClient;
-  readonly ready: Promise<void>;
-  readonly store: OhbabyWebStore;
   getWorkspaceSnapshot(): WorkspaceSnapshot;
   getDirectoryPickerRoots(): Promise<DirectoryPickerRootsResponse>;
   hideWorkspace(directory: string): Promise<void>;
   listDirectoryPicker(directory: string): Promise<DirectoryPickerListResponse>;
+  listWebCommands(): Promise<UiWebCommandCatalog>;
   openWorkspace(directory: string): Promise<void>;
   refreshWorkspaces(): Promise<void>;
+  selectSession(sessionId: string): Promise<void>;
   subscribeWorkspaces(listener: () => void): () => void;
   switchWorkspace(directory: string): Promise<void>;
 }
 
-class BrowserDaemonClient implements OhbabyWebClient {
+class BrowserDaemonClient implements UiBackendClient {
   private readonly config: OhbabyBootstrapConfig;
   private readonly events: FetchDaemonEventStream;
   private readonly http: DaemonHttpClient;
   private readonly store: OhbabyWebStore;
+  private readonly eventHandlers = new Set<UiEventHandler>();
   private buffering = false;
-  private commandCatalogPromise: Promise<UiWebCommandCatalog> | undefined;
+  private readonly commandCatalogPromises = new Map<
+    string,
+    Promise<UiWebCommandCatalog>
+  >();
   private connectPromise: Promise<void> | undefined;
   private connected = false;
   private closed = false;
@@ -165,12 +115,14 @@ class BrowserDaemonClient implements OhbabyWebClient {
       this.buffering = true;
       await this.events.start({
         onConnectionState: (state) => {
+          if (this.closed) return;
           this.store.setConnectionState(state);
           if (state === "live") {
             this.store.setError(null);
           }
         },
         onError: (error) => {
+          if (this.closed) return;
           this.store.setError(error.message);
         },
         onEvent: (event) => this.handleSseEvent(event.payload, event.id),
@@ -179,16 +131,25 @@ class BrowserDaemonClient implements OhbabyWebClient {
       if (this.isClosed()) {
         return;
       }
-      this.store.replaceSnapshot(response.snapshot, response.seqNum);
-      this.store.setCurrentModel((await this.http.getCurrentModel()).model);
-      this.applyBufferedEventsAfter(response.seqNum);
+      this.dispatchUiEvent(
+        { snapshot: response.snapshot, type: "snapshot.replaced" },
+        response.seqNum,
+        "snapshot-barrier",
+      );
+      const model = (await this.http.getCurrentModel()).model;
+      if (this.isClosed()) return;
+      this.store.setCurrentModel(model);
+      const maxBufferedSeqNum = this.applyBufferedEventsAfter(response.seqNum);
+      this.events.setLastEventId(maxBufferedSeqNum);
       this.buffering = false;
       this.store.setConnectionState("live");
     } catch (error) {
       this.connected = false;
-      const message = error instanceof Error ? error.message : String(error);
-      this.store.setError(message);
-      this.store.setConnectionState("disconnected");
+      if (!this.isClosed()) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.store.setError(message);
+        this.store.setConnectionState("disconnected");
+      }
       await this.events.close();
       throw error;
     }
@@ -205,177 +166,217 @@ class BrowserDaemonClient implements OhbabyWebClient {
     return this.closed;
   }
 
-  getSnapshot(): StoreSnapshot {
-    return this.store.getSnapshot();
+  async getSnapshot(): ReturnType<UiBackendClient["getSnapshot"]> {
+    return (await this.http.getSnapshot()).snapshot;
   }
 
-  subscribe(listener: () => void): () => void {
-    return this.store.subscribe(listener);
+  subscribeEvents(handler: UiEventHandler): UiUnsubscribe {
+    this.eventHandlers.add(handler);
+    return () => {
+      this.eventHandlers.delete(handler);
+    };
   }
 
-  async submitPrompt(
-    input: SubmitPromptRequest,
-  ): Promise<PromptAcceptedResponse> {
-    return this.http.submitPrompt(input);
+  async submitPromptAccepted(
+    text: string,
+    options?: SubmitPromptOptions,
+  ): Promise<UiPromptReceipt> {
+    const { ok: _ok, ...receipt } = await this.http.submitPromptAccepted({
+      clientRequestId:
+        options?.clientRequestId ?? globalThis.crypto.randomUUID(),
+      ...(options?.sessionId === undefined
+        ? {}
+        : { sessionId: options.sessionId }),
+      text,
+    });
+    return receipt;
   }
 
-  async acquirePromptEditLease(promptId: string): Promise<UiPromptEditLease> {
-    return (await this.http.acquirePromptEditLease(promptId)).lease;
+  submitPromptAndWait(
+    text: string,
+    options?: Parameters<UiBackendClient["submitPromptAndWait"]>[1],
+  ): Promise<UiPromptCompletion> {
+    return composeSubmitPromptAndWait(this, text, options);
+  }
+
+  async waitForPrompt(
+    promptId: string,
+    options?: Parameters<UiBackendClient["waitForPrompt"]>[1],
+  ): ReturnType<UiBackendClient["waitForPrompt"]> {
+    return (await this.http.waitForPrompt(promptId, options)).completion;
+  }
+
+  async acquirePromptEditLease(
+    input: Parameters<UiBackendClient["acquirePromptEditLease"]>[0],
+  ): ReturnType<UiBackendClient["acquirePromptEditLease"]> {
+    return (await this.http.acquirePromptEditLease(input.promptId)).lease;
   }
 
   async renewPromptEditLease(
-    promptId: string,
-    editLeaseId: string,
-  ): Promise<UiPromptEditLease> {
-    return (await this.http.renewPromptEditLease(promptId, editLeaseId)).lease;
+    input: Parameters<UiBackendClient["renewPromptEditLease"]>[0],
+  ): ReturnType<UiBackendClient["renewPromptEditLease"]> {
+    return (
+      await this.http.renewPromptEditLease(
+        input.promptId,
+        input.editLeaseId,
+      )
+    ).lease;
   }
 
   async releasePromptEditLease(
-    promptId: string,
-    editLeaseId: string,
-  ): Promise<UiPromptSubmission> {
-    return (await this.http.releasePromptEditLease(promptId, editLeaseId))
-      .prompt;
+    input: Parameters<UiBackendClient["releasePromptEditLease"]>[0],
+  ): ReturnType<UiBackendClient["releasePromptEditLease"]> {
+    return (
+      await this.http.releasePromptEditLease(
+        input.promptId,
+        input.editLeaseId,
+      )
+    ).prompt;
   }
 
   async editQueuedPrompt(
-    promptId: string,
-    editLeaseId: string,
-    text: string,
-  ): Promise<UiPromptSubmission> {
-    return (await this.http.editQueuedPrompt(promptId, editLeaseId, text))
-      .prompt;
+    input: Parameters<UiBackendClient["editQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["editQueuedPrompt"]> {
+    return (
+      await this.http.editQueuedPrompt(
+        input.promptId,
+        input.editLeaseId,
+        input.text,
+      )
+    ).prompt;
   }
 
   async cancelQueuedPrompt(
-    promptId: string,
-    editLeaseId?: string,
-  ): Promise<UiPromptSubmission> {
-    return (await this.http.cancelQueuedPrompt(promptId, editLeaseId)).prompt;
+    input: Parameters<UiBackendClient["cancelQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {
+    return (
+      await this.http.cancelQueuedPrompt(input.promptId, input.editLeaseId)
+    ).prompt;
   }
 
-  async executeSlashCommand(input: {
-    readonly allowOverlay?: boolean;
-    readonly sessionId?: string;
-    readonly text: string;
-  }): Promise<void> {
-    const catalog = await this.listCommands();
-    const resolved = resolveSlashCommand(
-      catalog,
-      parseSlashCommandInput(input.text),
-      { surface: "tui" },
-    );
-    if (!resolved.ok) {
-      throw new Error(resolved.error.message);
-    }
-    const webCommand = catalog.commands.find(
-      (command) => command.id === resolved.command.id,
-    );
-    if (
-      webCommand?.executionKind === "overlay" &&
-      input.allowOverlay !== true
-    ) {
-      throw new Error(`Command "${input.text}" must be opened from the UI`);
-    }
-    await this.http.executeCommand({
-      argumentMode: resolved.command.argumentMode,
-      argv: resolved.argv,
-      body: resolved.body,
-      clientInvocationId: createClientInvocationId(),
-      commandId: resolved.command.id,
-      path: resolved.path,
-      raw: resolved.raw,
-      rawArgs: resolved.rawArgs,
-      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
-      surface: "tui",
-    } satisfies UiSlashCommandInvocation);
-  }
-
-  async createSession(): Promise<void> {
-    await this.http.createSession();
-    await this.refreshProjectedSnapshot();
-  }
-
-  async selectSession(sessionId: string): Promise<void> {
-    await this.http.selectSession(sessionId);
-    await this.refreshProjectedSnapshot();
-  }
-
-  async archiveSession(sessionId: string): Promise<void> {
-    await this.http.archiveSession(sessionId);
-    await this.refreshProjectedSnapshot();
-  }
-
-  async listCommands(): Promise<UiWebCommandCatalog> {
-    this.commandCatalogPromise ??= this.http
-      .listCommands()
+  async listCommands(
+    query: Parameters<UiBackendClient["listCommands"]>[0],
+  ): ReturnType<UiBackendClient["listCommands"]> {
+    const cached = this.commandCatalogPromises.get(query.surface);
+    if (cached) return cached;
+    const promise = this.http
+      .listCommands(query.surface)
       .then((response) => response.catalog)
       .catch((error: unknown) => {
-        this.commandCatalogPromise = undefined;
+        this.commandCatalogPromises.delete(query.surface);
         throw error;
       });
-    return this.commandCatalogPromise;
+    this.commandCatalogPromises.set(query.surface, promise);
+    return promise;
   }
 
-  async listWorkspaceScopes(): Promise<readonly WorkspaceScopeSummary[]> {
-    const response = await this.http.listWorkspaceScopes();
-    return response.scopes;
+  listWebCommandsForRuntime(): Promise<UiWebCommandCatalog> {
+    return this.listCommands({ surface: "web" }) as Promise<UiWebCommandCatalog>;
   }
 
-  async getCurrentModel(): Promise<UiCurrentModelConfig | null> {
+  async getCurrentModel(): ReturnType<UiBackendClient["getCurrentModel"]> {
     const response = await this.http.getCurrentModel();
     return response.model;
   }
 
   async probeModelContextWindow(
-    input: ModelConnectRequest,
-  ): Promise<UiProbeModelContextWindowResult> {
+    input: Parameters<UiBackendClient["probeModelContextWindow"]>[0],
+  ): ReturnType<UiBackendClient["probeModelContextWindow"]> {
     const response = await this.http.probeModelContextWindow(input);
     return response.probe;
   }
 
   async connectModel(
-    input: ModelConnectRequest,
-  ): Promise<UiConnectModelResult> {
+    input: Parameters<UiBackendClient["connectModel"]>[0],
+  ): ReturnType<UiBackendClient["connectModel"]> {
     const response = await this.http.connectModel(input);
     this.store.setCurrentModel(response.model);
     return response.model;
   }
 
   async setSearchApiKey(
-    input: SearchApiKeyRequest,
-  ): Promise<UiSetSearchApiKeyResult> {
+    input: Parameters<UiBackendClient["setSearchApiKey"]>[0],
+  ): ReturnType<UiBackendClient["setSearchApiKey"]> {
     const response = await this.http.setSearchApiKey(input);
     return response.search;
   }
 
   async getContextWindowUsage(
-    sessionId: string,
-  ): Promise<UiContextWindowUsage | null> {
-    const response = await this.http.getContextWindowUsage(sessionId);
+    input: Parameters<UiBackendClient["getContextWindowUsage"]>[0],
+  ): ReturnType<UiBackendClient["getContextWindowUsage"]> {
+    const response = await this.http.getContextWindowUsage(input.sessionId);
     return response.usage;
   }
 
   async compactSession(
-    sessionId: string,
-    input: CompactSessionRequest = {},
-  ): Promise<UiCompactSessionResult> {
-    const response = await this.http.compactSession(sessionId, input);
+    options: Parameters<UiBackendClient["compactSession"]>[0] = {},
+  ): ReturnType<UiBackendClient["compactSession"]> {
+    const sessionId =
+      options.sessionId ?? this.store.getSnapshot().view.snapshot?.activeSessionId;
+    if (!sessionId) {
+      throw new Error("No session is selected");
+    }
+    const response = await this.http.compactSession(sessionId, {
+      ...(options.force === undefined ? {} : { force: options.force }),
+    });
     return response.compact;
+  }
+
+  async archiveSession(
+    input: Parameters<UiBackendClient["archiveSession"]>[0],
+  ): ReturnType<UiBackendClient["archiveSession"]> {
+    await this.http.archiveSession(input.sessionId);
+    await this.refreshProjectedSnapshot();
+  }
+
+  async createSessionForRuntime(): Promise<void> {
+    await this.http.createSession();
+    await this.refreshProjectedSnapshot();
+  }
+
+  async selectSessionForRuntime(sessionId: string): Promise<void> {
+    await this.http.selectSession(sessionId);
+    await this.refreshProjectedSnapshot();
+  }
+
+  async executeCommand(
+    invocation: Parameters<UiBackendClient["executeCommand"]>[0],
+  ): ReturnType<UiBackendClient["executeCommand"]> {
+    await this.http.executeCommand(invocation);
   }
 
   async respondPermission(
     requestId: string,
-    response: UiPermissionResponse,
-  ): Promise<void> {
+    response: Parameters<UiBackendClient["respondPermission"]>[1],
+  ): ReturnType<UiBackendClient["respondPermission"]> {
     await this.http.respondPermission(requestId, response);
   }
 
-  async setPermission(input: SetPermissionRequest): Promise<void> {
-    await this.http.setPermission(input);
+  async respondInteraction(
+    interactionId: string,
+    response: Parameters<UiBackendClient["respondInteraction"]>[1],
+  ): ReturnType<UiBackendClient["respondInteraction"]> {
+    await this.http.respondInteraction(interactionId, response);
   }
 
-  async abortSession(sessionId: string, runId?: string): Promise<void> {
+  async setPermission(
+    input: Parameters<UiBackendClient["setPermission"]>[0],
+  ): ReturnType<UiBackendClient["setPermission"]> {
+    return (await this.http.setPermission(input)).permission;
+  }
+
+  async abortRun(
+    runId?: string,
+  ): ReturnType<UiBackendClient["abortRun"]> {
+    const snapshot = this.store.getSnapshot().view.snapshot;
+    const sessionId =
+      (runId === undefined
+        ? snapshot?.activeSessionId
+        : snapshot?.runs.find((run) => run.id === runId)?.sessionId) ??
+      undefined;
+    if (!sessionId) {
+      throw new Error("No session is available for the requested run");
+    }
     await this.http.abortSession(sessionId, {
       ...(runId === undefined ? {} : { runId }),
     });
@@ -403,13 +404,15 @@ class BrowserDaemonClient implements OhbabyWebClient {
           return;
         }
         if (event.event.type === "command.catalog.updated") {
-          this.commandCatalogPromise = undefined;
+          this.commandCatalogPromises.clear();
         }
         if (this.buffering) {
           this.bufferedEvents.push({ event: event.event, seqNum });
           return;
         }
-        this.store.applyEvent(event.event, seqNum);
+        if (this.dispatchUiEvent(event.event, seqNum, "incremental")) {
+          this.events.setLastEventId(seqNum);
+        }
       }
     }
   }
@@ -434,8 +437,14 @@ class BrowserDaemonClient implements OhbabyWebClient {
       if (this.closed) {
         return;
       }
-      this.store.replaceSnapshot(response.snapshot, response.seqNum);
-      this.store.setCurrentModel((await this.http.getCurrentModel()).model);
+      this.dispatchUiEvent(
+        { snapshot: response.snapshot, type: "snapshot.replaced" },
+        response.seqNum,
+        "snapshot-barrier",
+      );
+      const model = (await this.http.getCurrentModel()).model;
+      if (this.isClosed()) return;
+      this.store.setCurrentModel(model);
       const maxBufferedSeqNum = this.applyBufferedEventsAfter(response.seqNum);
       this.events.setLastEventId(
         Math.max(lastEventId, response.seqNum, maxBufferedSeqNum),
@@ -453,11 +462,31 @@ class BrowserDaemonClient implements OhbabyWebClient {
     let maxSeqNum = seqNum;
     for (const event of this.bufferedEvents.splice(0)) {
       if (event.seqNum > seqNum) {
-        this.store.applyEvent(event.event, event.seqNum);
+        this.dispatchUiEvent(event.event, event.seqNum, "incremental");
         maxSeqNum = Math.max(maxSeqNum, event.seqNum);
       }
     }
     return maxSeqNum;
+  }
+
+  private dispatchUiEvent(
+    event: Parameters<UiEventHandler>[0],
+    seqNum: number,
+    source: "incremental" | "snapshot-barrier",
+  ): boolean {
+    if (!this.store.applyEvent(event, seqNum, source)) return false;
+    let subscriberFailed = false;
+    for (const handler of Array.from(this.eventHandlers)) {
+      try {
+        handler(event);
+      } catch {
+        subscriberFailed = true;
+      }
+    }
+    if (subscriberFailed) {
+      this.store.setError("A UI event subscriber failed");
+    }
+    return true;
   }
 }
 
@@ -517,11 +546,67 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     this.ready = this.initialize();
   }
 
-  get client(): OhbabyWebClient {
-    if (!this.activeClient) {
-      throw new Error("No workspace is selected");
+  get client(): UiBackendClient | null {
+    return this.activeClient ?? null;
+  }
+
+  async createSession(): Promise<void> {
+    await this.requireActiveClient().createSessionForRuntime();
+  }
+
+  async dispose(): Promise<void> {
+    await this.activeClient?.close();
+    this.activeClient = undefined;
+  }
+
+  async selectSession(sessionId: string): Promise<void> {
+    await this.requireActiveClient().selectSessionForRuntime(sessionId);
+  }
+
+  async archiveSession(sessionId: string): Promise<void> {
+    await this.requireActiveClient().archiveSession({ sessionId });
+  }
+
+  async abortSession(_sessionId: string, runId?: string): Promise<void> {
+    await this.requireActiveClient().abortRun(runId);
+  }
+
+  async executeSlashCommand(input: {
+    readonly allowOverlay?: boolean;
+    readonly sessionId?: string;
+    readonly text: string;
+  }): Promise<void> {
+    const client = this.requireActiveClient();
+    const catalog = await client.listWebCommandsForRuntime();
+    const resolved = resolveSlashCommand(
+      catalog,
+      parseSlashCommandInput(input.text),
+      { surface: "tui" },
+    );
+    if (!resolved.ok) {
+      throw new Error(resolved.error.message);
     }
-    return this.activeClient;
+    const webCommand = catalog.commands.find(
+      (command) => command.id === resolved.command.id,
+    );
+    if (
+      webCommand?.executionKind === "overlay" &&
+      input.allowOverlay !== true
+    ) {
+      throw new Error(`Command "${input.text}" must be opened from the UI`);
+    }
+    await client.executeCommand({
+      argumentMode: resolved.command.argumentMode,
+      argv: resolved.argv,
+      body: resolved.body,
+      clientInvocationId: createClientInvocationId(),
+      commandId: resolved.command.id,
+      path: resolved.path,
+      raw: resolved.raw,
+      rawArgs: resolved.rawArgs,
+      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+      surface: "tui",
+    } satisfies UiSlashCommandInvocation);
   }
 
   getWorkspaceSnapshot(): WorkspaceSnapshot {
@@ -556,6 +641,10 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
 
   listDirectoryPicker(directory: string): Promise<DirectoryPickerListResponse> {
     return this.globalHttp.listDirectoryPicker(directory);
+  }
+
+  listWebCommands(): Promise<UiWebCommandCatalog> {
+    return this.requireActiveClient().listWebCommandsForRuntime();
   }
 
   async hideWorkspace(directory: string): Promise<void> {
@@ -719,7 +808,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     ) {
       return;
     }
-    await this.activeClient?.selectSession(sessionId);
+    await this.activeClient?.selectSessionForRuntime(sessionId);
   }
 
   private persistActiveSession(): void {
@@ -773,6 +862,13 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       ...(this.fetchImpl === undefined ? {} : { fetch: this.fetchImpl }),
       store: this.store,
     });
+  }
+
+  private requireActiveClient(): BrowserDaemonClient {
+    if (!this.activeClient) {
+      throw new Error("No workspace is selected");
+    }
+    return this.activeClient;
   }
 
   private scopedBootstrapConfig(): OhbabyBootstrapConfig {

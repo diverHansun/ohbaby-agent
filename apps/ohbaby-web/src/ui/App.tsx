@@ -30,8 +30,13 @@ import type {
 } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { parseSlashCommandInput, resolveSlashCommand } from "ohbaby-sdk";
+import {
+  inferConnectModelInterfaceProvider,
+  parseSlashCommandInput,
+  resolveSlashCommand,
+} from "ohbaby-sdk";
 import type {
+  UiBackendClient,
   UiCompactSessionResult,
   UiContextWindowUsage,
   UiConnectModelResult,
@@ -48,15 +53,10 @@ import type {
   UiTodoStatus,
   UiWebCommandCatalog,
 } from "ohbaby-sdk";
-import type {
-  OhbabyWebClient,
-  OhbabyWebRuntime,
-} from "../api/daemon/client.js";
+import type { OhbabyWebRuntime } from "../api/daemon/client.js";
 import type { CommandNotice } from "../api/daemon/wire.js";
 import type { WorkspaceSnapshot } from "../api/daemon/wire.js";
 import type {
-  CompactSessionRequest,
-  ModelConnectRequest,
   SearchApiKeyRequest,
 } from "../api/daemon/wire.js";
 import { MarkdownBlock } from "./MarkdownBlock.js";
@@ -207,14 +207,18 @@ export function OhbabyWebApp({ runtime }: AppProps): ReactElement {
     () => runtime.getWorkspaceSnapshot(),
     () => runtime.getWorkspaceSnapshot(),
   );
-  return workspace.selectedDirectory === null ? (
+  const client = runtime.client;
+  return workspace.selectedDirectory === null || client === null ? (
     <EmptyWorkspaceApp runtime={runtime} workspace={workspace} />
   ) : (
-    <ConnectedOhbabyWebApp runtime={runtime} />
+    <ConnectedOhbabyWebApp client={client} runtime={runtime} />
   );
 }
 
-function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
+function ConnectedOhbabyWebApp({
+  client,
+  runtime,
+}: AppProps & { readonly client: UiBackendClient }): ReactElement {
   const storeSnapshot = useSyncExternalStore(
     (listener) => runtime.store.subscribe(listener),
     () => runtime.store.getSnapshot(),
@@ -314,7 +318,7 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
     async (text: string): Promise<boolean> => {
       let catalog: UiWebCommandCatalog;
       try {
-        catalog = await runtime.client.listCommands();
+        catalog = await runtime.listWebCommands();
       } catch {
         return false;
       }
@@ -345,7 +349,7 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
       });
       return true;
     },
-    [runtime.client],
+    [runtime],
   );
   const submitText = useCallback(
     async (text: string, clientRequestId?: string): Promise<boolean> => {
@@ -354,7 +358,7 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
       }
       if (text.startsWith("/")) {
         return runAction(() =>
-          runtime.client.executeSlashCommand({
+          runtime.executeSlashCommand({
             ...(view.composer.activeSessionId === undefined
               ? {}
               : { sessionId: view.composer.activeSessionId }),
@@ -373,18 +377,17 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
             : { sessionId: view.composer.activeSessionId }),
           text,
         });
-        const receipt = await runtime.client.submitPrompt({
+        const receipt = await client.submitPromptAccepted(text, {
           clientRequestId: requestId,
           ...(view.composer.activeSessionId === undefined
             ? {}
             : { sessionId: view.composer.activeSessionId }),
-          text,
         });
         if (receipt.clientRequestId !== requestId) {
           throw new Error("Prompt receipt did not match this submission");
         }
         if (view.composer.activeSessionId === undefined) {
-          await runtime.client.selectSession(receipt.sessionId);
+          await runtime.selectSession(receipt.sessionId);
         }
         return true;
       } catch (error) {
@@ -399,34 +402,35 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
       clearActionError,
       openOverlayForSlashText,
       runAction,
-      runtime.client,
+      client,
+      runtime,
       view.composer.activeSessionId,
     ],
   );
   const createSession = useCallback((): void => {
-    void runAction(() => runtime.client.createSession());
-  }, [runAction, runtime.client]);
+    void runAction(() => runtime.createSession());
+  }, [runAction, runtime]);
   const selectSession = useCallback(
     (sessionId: string): void => {
       if (sessionId === view.activeSession?.id) {
         return;
       }
-      void runAction(() => runtime.client.selectSession(sessionId));
+      void runAction(() => runtime.selectSession(sessionId));
     },
-    [runAction, runtime.client, view.activeSession?.id],
+    [runAction, runtime, view.activeSession?.id],
   );
   const archiveSession = useCallback(
     (sessionId: string): void => {
       if (!window.confirm("Archive this session?")) {
         return;
       }
-      void runAction(() => runtime.client.archiveSession(sessionId));
+      void runAction(() => runtime.archiveSession(sessionId));
     },
-    [runAction, runtime.client],
+    [runAction, runtime],
   );
   const listCommands = useCallback(
-    () => runtime.client.listCommands(),
-    [runtime.client],
+    () => runtime.listWebCommands(),
+    [runtime],
   );
   const openGoalPanel = useCallback((intent?: GoalPanelIntent) => {
     setStructuredOverlay({
@@ -518,7 +522,7 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
               disabled={view.composer.disabled}
               onRespond={(request, choice) => {
                 void runAction(() =>
-                  runtime.client.respondPermission(request.id, {
+                  client.respondPermission(request.id, {
                     choiceId: choice.id,
                   }),
                 );
@@ -526,12 +530,14 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
               permissions={view.pendingPermissions}
             />
             <Composer
-              client={runtime.client}
+              client={client}
               draftScopeKey={`${workspace.selectedDirectory ?? "workspace"}:${view.composer.activeSessionId ?? "new"}`}
               prefill={composerPrefill}
               onListCommands={listCommands}
               onSetPermission={(input) => {
-                void runAction(() => runtime.client.setPermission(input));
+                void runAction(async () => {
+                  await client.setPermission(input);
+                });
               }}
               onStructuredCommand={openStructuredCommand}
               onSubmit={submitText}
@@ -539,7 +545,7 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
                 void runAction(() =>
                   view.composer.activeSessionId === undefined
                     ? Promise.resolve()
-                    : runtime.client.abortSession(
+                    : runtime.abortSession(
                         view.composer.activeSessionId,
                         view.composer.activeRunId,
                       ),
@@ -578,13 +584,15 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
               onDismiss={clearActionError}
             />
             <EmptyState
-              client={runtime.client}
+              client={client}
               composerPrefill={composerPrefill}
               draftScopeKey={`${workspace.selectedDirectory ?? "workspace"}:${view.composer.activeSessionId ?? "new"}`}
               onListCommands={listCommands}
               onOpenGoalPanel={openGoalPanel}
               onSetPermission={(input) => {
-                void runAction(() => runtime.client.setPermission(input));
+                void runAction(async () => {
+                  await client.setPermission(input);
+                });
               }}
               onStructuredCommand={openStructuredCommand}
               onSubmit={submitText}
@@ -597,7 +605,10 @@ function ConnectedOhbabyWebApp({ runtime }: AppProps): ReactElement {
         )}
         {structuredOverlay ? (
           <StructuredCommandOverlay
-            client={runtime.client}
+            client={client}
+            onExecuteSlashCommand={(input) =>
+              runtime.executeSlashCommand(input)
+            }
             onClose={() => {
               setStructuredOverlay(null);
             }}
@@ -704,7 +715,7 @@ function BootstrapError(props: { readonly error: unknown }): ReactElement {
 }
 
 function EmptyState(props: {
-  readonly client: OhbabyWebClient;
+  readonly client: UiBackendClient;
   readonly composerPrefill: ComposerPrefill | null;
   readonly draftScopeKey: string;
   readonly onListCommands: () => Promise<UiWebCommandCatalog>;
@@ -1838,7 +1849,7 @@ function PermissionModal(props: {
 }
 
 function Composer(props: {
-  readonly client: OhbabyWebClient;
+  readonly client: UiBackendClient;
   readonly compact?: boolean;
   readonly draftScopeKey: string;
   readonly onListCommands: () => Promise<UiWebCommandCatalog>;
@@ -1931,7 +1942,10 @@ function Composer(props: {
     setDraft(storedLease.editText);
     setQueuedEdit(storedLease);
     void props.client
-      .renewPromptEditLease(storedLease.promptId, storedLease.editLeaseId)
+      .renewPromptEditLease({
+        editLeaseId: storedLease.editLeaseId,
+        promptId: storedLease.promptId,
+      })
       .then((lease) => {
         lastLeaseRenewalAt.current = Date.now();
         writeSessionValue(composerLeaseKey(props.draftScopeKey), {
@@ -2064,7 +2078,10 @@ function Composer(props: {
     leaseRenewalTimer.current = globalThis.setTimeout(() => {
       leaseRenewalTimer.current = null;
       void props.client
-        .renewPromptEditLease(queuedEdit.promptId, queuedEdit.editLeaseId)
+        .renewPromptEditLease({
+          editLeaseId: queuedEdit.editLeaseId,
+          promptId: queuedEdit.promptId,
+        })
         .then((lease) => {
           lastLeaseRenewalAt.current = Date.now();
           writeSessionValue(composerLeaseKey(props.draftScopeKey), {
@@ -2110,11 +2127,14 @@ function Composer(props: {
       queueAcquirePendingRef.current = true;
       setQueueAcquirePending(true);
       void props.client
-        .acquirePromptEditLease(prompt.promptId)
+        .acquirePromptEditLease({ promptId: prompt.promptId })
         .then((lease) => {
           if (queueAcquireGenerationRef.current !== acquireGeneration) {
             void props.client
-              .releasePromptEditLease(prompt.promptId, lease.editLeaseId)
+              .releasePromptEditLease({
+                editLeaseId: lease.editLeaseId,
+                promptId: prompt.promptId,
+              })
               .catch(() => undefined);
             return;
           }
@@ -2171,11 +2191,11 @@ function Composer(props: {
     if (!queuedEdit || !draft.trim()) return;
     setIsSubmitting(true);
     void props.client
-      .editQueuedPrompt(
-        queuedEdit.promptId,
-        queuedEdit.editLeaseId,
-        draft.trim(),
-      )
+      .editQueuedPrompt({
+        editLeaseId: queuedEdit.editLeaseId,
+        promptId: queuedEdit.promptId,
+        text: draft.trim(),
+      })
       .then(() => {
         const restored = queuedEdit.originalDraft;
         setQueuedEdit(null);
@@ -2201,7 +2221,10 @@ function Composer(props: {
     if (!queuedEdit) return;
     const current = queuedEdit;
     void props.client
-      .releasePromptEditLease(current.promptId, current.editLeaseId)
+      .releasePromptEditLease({
+        editLeaseId: current.editLeaseId,
+        promptId: current.promptId,
+      })
       .catch(() => undefined);
     setQueuedEdit(null);
     setDraft(current.originalDraft);
@@ -2220,7 +2243,10 @@ function Composer(props: {
       const editLeaseId =
         queuedEdit?.promptId === promptId ? queuedEdit.editLeaseId : undefined;
       void props.client
-        .cancelQueuedPrompt(promptId, editLeaseId)
+        .cancelQueuedPrompt({
+          ...(editLeaseId === undefined ? {} : { editLeaseId }),
+          promptId,
+        })
         .then(() => {
           if (queuedEdit?.promptId === promptId) {
             setQueuedEdit(null);
@@ -2707,8 +2733,9 @@ function todoStatusMarker(status: UiTodoStatus): string {
 }
 
 function StructuredCommandOverlay(props: {
-  readonly client: OhbabyWebClient;
+  readonly client: UiBackendClient;
   readonly onClose: () => void;
+  readonly onExecuteSlashCommand: OhbabyWebRuntime["executeSlashCommand"];
   readonly overlay: StructuredOverlayState;
   readonly view: ViewModel;
 }): ReactElement {
@@ -2766,8 +2793,8 @@ function StructuredCommandOverlay(props: {
           <ConnectSearchOverlayBody client={props.client} />
         ) : props.overlay.kind === "goal" ? (
           <GoalOverlayBody
-            client={props.client}
             intent={props.overlay.goalIntent ?? DEFAULT_GOAL_PANEL_INTENT}
+            onExecuteSlashCommand={props.onExecuteSlashCommand}
             view={props.view}
           />
         ) : (
@@ -2779,8 +2806,8 @@ function StructuredCommandOverlay(props: {
 }
 
 function GoalOverlayBody(props: {
-  readonly client: OhbabyWebClient;
   readonly intent: GoalPanelIntent;
+  readonly onExecuteSlashCommand: OhbabyWebRuntime["executeSlashCommand"];
   readonly view: ViewModel;
 }): ReactElement {
   const sessionId =
@@ -2810,7 +2837,7 @@ function GoalOverlayBody(props: {
       void runOverlayAction(
         setStatus,
         async () => {
-          await props.client.executeSlashCommand({
+          await props.onExecuteSlashCommand({
             allowOverlay: true,
             sessionId,
             text,
@@ -2820,7 +2847,7 @@ function GoalOverlayBody(props: {
         busyMessage,
       );
     },
-    [props.client, sessionId],
+    [props.onExecuteSlashCommand, sessionId],
   );
 
   const saveGoal = useCallback(() => {
@@ -2949,7 +2976,7 @@ interface ConnectModelFormState {
 }
 
 function ConnectModelOverlayBody(props: {
-  readonly client: OhbabyWebClient;
+  readonly client: UiBackendClient;
 }): ReactElement {
   const [form, setForm] = useState<ConnectModelFormState>({
     apiKey: "",
@@ -3161,7 +3188,7 @@ function ConnectModelOverlayBody(props: {
 }
 
 function ConnectSearchOverlayBody(props: {
-  readonly client: OhbabyWebClient;
+  readonly client: UiBackendClient;
 }): ReactElement {
   const [apiKeyEnv, setApiKeyEnv] = useState("TAVILY_API_KEY");
   const [apiKey, setApiKey] = useState("");
@@ -3233,7 +3260,7 @@ function ConnectSearchOverlayBody(props: {
 }
 
 function CompactOverlayBody(props: {
-  readonly client: OhbabyWebClient;
+  readonly client: UiBackendClient;
   readonly view: ViewModel;
 }): ReactElement {
   const sessionId =
@@ -3252,7 +3279,7 @@ function CompactOverlayBody(props: {
     }
     let cancelled = false;
     void props.client
-      .getContextWindowUsage(sessionId)
+      .getContextWindowUsage({ sessionId })
       .then((nextUsage) => {
         if (!cancelled) {
           setUsage(nextUsage);
@@ -3279,8 +3306,10 @@ function CompactOverlayBody(props: {
     void runOverlayAction(
       setStatus,
       async () => {
-        const input: CompactSessionRequest = { force };
-        const nextResult = await props.client.compactSession(sessionId, input);
+        const nextResult = await props.client.compactSession({
+          force,
+          sessionId,
+        });
         setResult(nextResult);
         const failureMessage = compactFailureMessage(nextResult);
         if (failureMessage) {
@@ -3442,7 +3471,9 @@ async function runOverlayAction(
   }
 }
 
-function connectModelRequest(form: ConnectModelFormState): ModelConnectRequest {
+function connectModelRequest(
+  form: ConnectModelFormState,
+): Parameters<UiBackendClient["connectModel"]>[0] {
   const provider = requiredText(form.provider, "Provider");
   const baseUrl = requiredText(form.baseUrl, "Base URL");
   const apiKeyEnv = trimmedOrUndefined(form.apiKeyEnv);
@@ -3459,6 +3490,7 @@ function connectModelRequest(form: ConnectModelFormState): ModelConnectRequest {
   return {
     provider,
     baseUrl,
+    interfaceProvider: inferConnectModelInterfaceProvider(baseUrl),
     ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     model,
     ...(apiKey === undefined ? {} : { apiKey }),

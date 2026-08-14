@@ -83,7 +83,9 @@ describe("TUI main chain with real in-process backend", () => {
     });
     const client: TerminalClient = {
       ...realClient,
-      submitPrompt: vi.fn(realClient.submitPrompt.bind(realClient)),
+      submitPromptAccepted: vi.fn(
+        realClient.submitPromptAccepted.bind(realClient),
+      ),
     };
     const app = render(
       <OhbabyTerminalApp
@@ -99,7 +101,7 @@ describe("TUI main chain with real in-process backend", () => {
 
     app.stdin.write("busy submit");
     await flush();
-    expect(client.submitPrompt).toHaveBeenCalledTimes(1);
+    expect(client.submitPromptAccepted).toHaveBeenCalledTimes(1);
 
     app.stdin.write("\r");
 
@@ -119,7 +121,7 @@ describe("TUI main chain with real in-process backend", () => {
     );
 
     expect(secondFrame).toContain("auto · default · session_1");
-    expect(client.submitPrompt).toHaveBeenCalledTimes(2);
+    expect(client.submitPromptAccepted).toHaveBeenCalledTimes(2);
     app.unmount();
   });
 

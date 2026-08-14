@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -1647,7 +1646,7 @@ describe("createInProcessUiBackendClient", () => {
       events.push(event);
     });
 
-    await client.submitPrompt("Say hello");
+    await client.submitPromptAndWait("Say hello");
 
     expect(
       events
@@ -1771,7 +1770,7 @@ describe("createInProcessUiBackendClient", () => {
         events.push(event);
       });
 
-      await client.submitPrompt("Show reasoning transiently");
+      await client.submitPromptAndWait("Show reasoning transiently");
 
       const reasoningDeltas = events.filter(
         (
@@ -1991,7 +1990,7 @@ describe("createInProcessUiBackendClient", () => {
       (event): event is Extract<UiEvent, { type: "runtime.updated" }> =>
         event.type === "runtime.updated" && event.status.kind === "running",
     );
-    const prompt = client.submitPrompt("block");
+    const prompt = client.submitPromptAndWait("block");
 
     await running;
     await expect(
@@ -2055,7 +2054,7 @@ describe("createInProcessUiBackendClient", () => {
         workdir: directory,
       });
 
-      await client.submitPrompt("Use the prompt stack");
+      await client.submitPromptAndWait("Use the prompt stack");
 
       expect(requests[0]?.messages[0]).toMatchObject({
         role: "system",
@@ -2110,7 +2109,7 @@ describe("createInProcessUiBackendClient", () => {
         rawArgs: "",
         surface: "tui",
       });
-      await client.submitPrompt("Plan this task");
+      await client.submitPromptAndWait("Plan this task");
 
       const systemContent =
         typeof requests[0]?.messages[0]?.content === "string"
@@ -2152,7 +2151,7 @@ describe("createInProcessUiBackendClient", () => {
         workdir: directory,
       });
 
-      await client.submitPrompt("Use configured primary prompt");
+      await client.submitPromptAndWait("Use configured primary prompt");
 
       const systemContent =
         typeof requests[0]?.messages[0]?.content === "string"
@@ -2189,7 +2188,7 @@ describe("createInProcessUiBackendClient", () => {
         events.push(event);
       });
 
-      await client.submitPrompt("Use project context safely");
+      await client.submitPromptAndWait("Use project context safely");
 
       const systemContent =
         typeof requests[0]?.messages[0]?.content === "string"
@@ -2273,7 +2272,7 @@ describe("createInProcessUiBackendClient", () => {
       events.push(event);
     });
 
-    await client.submitPrompt("fresh prompt", { sessionId: "session_1" });
+    await client.submitPromptAndWait("fresh prompt", { sessionId: "session_1" });
 
     expect(requests).toHaveLength(2);
     const mainRequestText = JSON.stringify(requests[1]?.messages);
@@ -2483,7 +2482,7 @@ describe("createInProcessUiBackendClient", () => {
       events.push(event);
     });
 
-    await client.submitPrompt("List the tools folder");
+    await client.submitPromptAndWait("List the tools folder");
 
     expect(
       requests[0]?.tools?.some((tool) => tool.function.name === "list"),
@@ -2549,7 +2548,7 @@ describe("createInProcessUiBackendClient", () => {
       events.push(event);
     });
 
-    const submission = client.submitPrompt("Finish both tasks");
+    const submission = client.submitPromptAndWait("Finish both tasks");
     await waitForFinalResponseStart(finalStarted, submission);
 
     const duringRun = await client.getSnapshot();
@@ -2630,7 +2629,7 @@ describe("createInProcessUiBackendClient", () => {
       events.push(event);
     });
 
-    const submission = client.submitPrompt("Create then clear tasks");
+    const submission = client.submitPromptAndWait("Create then clear tasks");
     await waitForFinalResponseStart(finalStarted, submission);
 
     const duringRun = await client.getSnapshot();
@@ -2757,7 +2756,7 @@ describe("createInProcessUiBackendClient", () => {
       ],
     });
 
-    const submission = client.submitPrompt("Continue", {
+    const submission = client.submitPromptAndWait("Continue", {
       sessionId: "session_1",
     });
     await waitForFinalResponseStart(finalStarted, submission);
@@ -2989,7 +2988,7 @@ describe("createInProcessUiBackendClient", () => {
           event.type === "permission.requested",
       );
 
-      const run = client.submitPrompt("Use the project review skill");
+      const run = client.submitPromptAndWait("Use the project review skill");
       const permissionEvent = await permission;
       expect(permissionEvent.request).toMatchObject({
         title: "Skill requires confirmation: code-review",
@@ -3024,8 +3023,8 @@ describe("createInProcessUiBackendClient", () => {
       llmClient: createResumableTaskFakeLLMClient(requests),
     });
 
-    await client.submitPrompt("Delegate auth exploration");
-    await client.submitPrompt("Continue the same exploration", {
+    await client.submitPromptAndWait("Delegate auth exploration");
+    await client.submitPromptAndWait("Continue the same exploration", {
       sessionId: "session_1",
     });
 
@@ -3075,7 +3074,7 @@ describe("createInProcessUiBackendClient", () => {
       ),
     });
 
-    await client.submitPrompt("Delegate event research");
+    await client.submitPromptAndWait("Delegate event research");
 
     expect(requests).toHaveLength(3);
     const childText = JSON.stringify(requests[1]?.messages);
@@ -3117,7 +3116,7 @@ describe("createInProcessUiBackendClient", () => {
       ),
     });
 
-    await client.submitPrompt("Try an invalid subagent continuation");
+    await client.submitPromptAndWait("Try an invalid subagent continuation");
 
     expect(requests).toHaveLength(2);
     const toolResultMessage = requests[1]?.messages.at(-1);
@@ -3199,7 +3198,7 @@ describe("createInProcessUiBackendClient", () => {
       ),
     });
 
-    await client.submitPrompt("Delegate with configured child prompt");
+    await client.submitPromptAndWait("Delegate with configured child prompt");
 
     const childText = JSON.stringify(requests[1]?.messages);
     expect(childText).toContain("Task: explore");
@@ -3214,7 +3213,7 @@ describe("createInProcessUiBackendClient", () => {
       llmClient: createBackgroundSubagentFakeLLMClient(requests),
     });
 
-    await client.submitPrompt("Open a background explorer");
+    await client.submitPromptAndWait("Open a background explorer");
     await withTimeout(
       (async (): Promise<void> => {
         while (requests.filter(isExploreSubagentRequest).length < 1) {
@@ -3224,7 +3223,7 @@ describe("createInProcessUiBackendClient", () => {
       1_000,
       "background child did not start",
     );
-    await client.submitPrompt("Follow up with the background explorer", {
+    await client.submitPromptAndWait("Follow up with the background explorer", {
       sessionId: "session_1",
     });
     await withTimeout(
@@ -3236,7 +3235,7 @@ describe("createInProcessUiBackendClient", () => {
       1_000,
       "background child did not resume",
     );
-    await client.submitPrompt("Check the background explorer", {
+    await client.submitPromptAndWait("Check the background explorer", {
       sessionId: "session_1",
     });
 
@@ -3308,7 +3307,7 @@ describe("createInProcessUiBackendClient", () => {
       sandboxManager,
     });
 
-    await client.submitPrompt("Open a cancellable background explorer");
+    await client.submitPromptAndWait("Open a cancellable background explorer");
     const childSignal = await withTimeout(
       childStarted.promise,
       1_000,
@@ -3316,7 +3315,7 @@ describe("createInProcessUiBackendClient", () => {
     );
     expect(childSignal?.aborted).toBe(false);
 
-    await client.submitPrompt("Close the background explorer", {
+    await client.submitPromptAndWait("Close the background explorer", {
       sessionId: "session_1",
     });
 
@@ -3387,7 +3386,7 @@ describe("createInProcessUiBackendClient", () => {
       ),
     });
 
-    await client.submitPrompt("Delegate to a one step child");
+    await client.submitPromptAndWait("Delegate to a one step child");
 
     expect(requests).toHaveLength(3);
     const parentToolMessage = requests[2]?.messages.at(-1);
@@ -3420,7 +3419,7 @@ describe("createInProcessUiBackendClient", () => {
       runLedger,
     });
 
-    const run = client.submitPrompt("Delegate long work");
+    const run = client.submitPromptAndWait("Delegate long work");
     const childSignal = await withTimeout(
       childStarted.promise,
       1_000,
@@ -3432,7 +3431,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(childSignal?.aborted).toBe(true);
     await expect(
       withTimeout(run, 1_000, "parent did not abort"),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ prompt: { status: "cancelled" } });
     const childRun = await runLedger.get("run_2");
     expect(childRun).toMatchObject({ status: "cancelled" });
     expect(childRun?.sessionId).toMatch(/^session_/);
@@ -3459,7 +3458,7 @@ describe("createInProcessUiBackendClient", () => {
       subagentInstanceStore: subagentStore,
     });
 
-    const run = client.submitPrompt("Open background work and keep reasoning");
+    const run = client.submitPromptAndWait("Open background work and keep reasoning");
     const childSignal = await withTimeout(
       childStarted.promise,
       1_000,
@@ -3477,7 +3476,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(childSignal?.aborted).toBe(true);
     await expect(
       withTimeout(run, 1_000, "parent did not abort"),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ prompt: { status: "cancelled" } });
     await expect(runLedger.get("run_2")).resolves.toMatchObject({
       status: "cancelled",
     });
@@ -3522,7 +3521,7 @@ describe("createInProcessUiBackendClient", () => {
         (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
           event.type === "permission.requested",
       );
-      const run = client.submitPrompt("Write a note");
+      const run = client.submitPromptAndWait("Write a note");
       const permissionEvent = await permission;
 
       expect(permissionEvent.request).toMatchObject({
@@ -3611,7 +3610,7 @@ describe("createInProcessUiBackendClient", () => {
         (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
           event.type === "permission.requested",
       );
-      const run = client.submitPrompt("Try a rejected write");
+      const run = client.submitPromptAndWait("Try a rejected write");
       const permissionEvent = await permission;
 
       await client.respondPermission(permissionEvent.request.id, {
@@ -3697,7 +3696,7 @@ describe("createInProcessUiBackendClient", () => {
         (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
           event.type === "permission.requested",
       );
-      const run = client.submitPrompt("Write two files");
+      const run = client.submitPromptAndWait("Write two files");
       const permissionEvent = await permission;
 
       await client.respondPermission(permissionEvent.request.id, {
@@ -3778,7 +3777,7 @@ describe("createInProcessUiBackendClient", () => {
         (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
           event.type === "permission.requested",
       );
-      const run = client.submitPrompt("Write outside the workspace");
+      const run = client.submitPromptAndWait("Write outside the workspace");
       const permissionEvent = await permission;
 
       expect(
@@ -3831,7 +3830,7 @@ describe("createInProcessUiBackendClient", () => {
         (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
           event.type === "permission.requested",
       );
-      const run = client.submitPrompt("Cancel this write");
+      const run = client.submitPromptAndWait("Cancel this write");
       const permissionEvent = await permission;
 
       await client.respondPermission(permissionEvent.request.id, {
@@ -3839,7 +3838,7 @@ describe("createInProcessUiBackendClient", () => {
       });
       await expect(
         withTimeout(run, 1_000, "run did not abort"),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject({ prompt: { status: "cancelled" } });
 
       let snapshot = await client.getSnapshot();
       expect(snapshot.permissions).toEqual([]);
@@ -3853,7 +3852,7 @@ describe("createInProcessUiBackendClient", () => {
       ).toBe(true);
       expect(requests).toHaveLength(1);
 
-      await client.submitPrompt("Can I continue?", { sessionId: "session_1" });
+      await client.submitPromptAndWait("Can I continue?", { sessionId: "session_1" });
 
       snapshot = await client.getSnapshot();
       expect(snapshot.status).toEqual({ kind: "idle" });
@@ -3897,9 +3896,9 @@ describe("createInProcessUiBackendClient", () => {
         (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
           event.type === "permission.requested",
       );
-      const run = client.submitPrompt("Abort this write");
+      const run = client.submitPromptAndWait("Abort this write");
       const permissionEvent = await permission;
-      const queuedRun = client.submitPrompt("Continue after abort", {
+      const queuedRun = client.submitPromptAndWait("Continue after abort", {
         sessionId: "session_1",
       });
 
@@ -3909,10 +3908,10 @@ describe("createInProcessUiBackendClient", () => {
       await client.abortRun(permissionEvent.request.runId);
       await expect(
         withTimeout(run, 1_000, "run did not abort"),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject({ prompt: { status: "cancelled" } });
       await expect(
         withTimeout(queuedRun, 1_000, "queued run did not continue"),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject({ prompt: { status: "succeeded" } });
 
       let snapshot = await client.getSnapshot();
       expect(snapshot.permissions).toEqual([]);
@@ -3960,7 +3959,7 @@ describe("createInProcessUiBackendClient", () => {
       events.push(event);
     });
 
-    await client.submitPrompt("Use the runtime manager");
+    await client.submitPromptAndWait("Use the runtime manager");
 
     expect(runLedger.calls).toEqual([
       "claimPendingRun",
@@ -4001,8 +4000,18 @@ describe("createInProcessUiBackendClient", () => {
     });
 
     await expect(
-      client.submitPrompt("Trigger a malformed tool call"),
-    ).rejects.toThrow("Model requested tool calls but none were parsed");
+      client.submitPromptAndWait("Trigger a malformed tool call"),
+    ).resolves.toMatchObject({
+      prompt: {
+        error: {
+          code: "TOOL_PARSE_FAILURE",
+          message: "Model requested tool calls but none were parsed",
+          source: "runtime",
+          terminalReason: "tool_parse_failure",
+        },
+        status: "failed",
+      },
+    });
 
     const runUpdates = events.filter(
       (event): event is Extract<UiEvent, { type: "run.updated" }> =>
@@ -4055,7 +4064,7 @@ describe("createInProcessUiBackendClient", () => {
       ),
     });
 
-    await client.submitPrompt("Which tools are available?");
+    await client.submitPromptAndWait("Which tools are available?");
 
     expect(requests[0]?.tools?.map((tool) => tool.function.name)).toEqual([
       "read",
@@ -4094,8 +4103,8 @@ describe("createInProcessUiBackendClient", () => {
       ),
     });
 
-    await client.submitPrompt("First", { sessionId: "session_1" });
-    await client.submitPrompt("Second", { sessionId: "session_1" });
+    await client.submitPromptAndWait("First", { sessionId: "session_1" });
+    await client.submitPromptAndWait("Second", { sessionId: "session_1" });
 
     const snapshot = await client.getSnapshot();
     expect(
@@ -4116,9 +4125,16 @@ describe("createInProcessUiBackendClient", () => {
       llmClient: createRejectingLLMClient(new Error("stream exploded")),
     });
 
-    await expect(client.submitPrompt("Say hello")).rejects.toThrow(
-      "stream exploded",
-    );
+    await expect(client.submitPromptAndWait("Say hello")).resolves.toMatchObject({
+      prompt: {
+        error: {
+          code: "RUNTIME_ERROR",
+          message: "stream exploded",
+          source: "runtime",
+        },
+        status: "failed",
+      },
+    });
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.status).toEqual({ kind: "idle" });
@@ -4139,9 +4155,16 @@ describe("createInProcessUiBackendClient", () => {
       events.push(event);
     });
 
-    await expect(client.submitPrompt("Say hello")).rejects.toThrow(
-      "OPENAI_API_KEY is not configured",
-    );
+    await expect(client.submitPromptAndWait("Say hello")).resolves.toMatchObject({
+      prompt: {
+        error: {
+          code: "RUNTIME_ERROR",
+          message: "OPENAI_API_KEY is not configured",
+          source: "runtime",
+        },
+        status: "failed",
+      },
+    });
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.status).toEqual({ kind: "idle" });
@@ -4220,7 +4243,7 @@ describe("createInProcessUiBackendClient", () => {
       ]),
     });
 
-    await client.submitPrompt("Continue here", { sessionId: "session_2" });
+    await client.submitPromptAndWait("Continue here", { sessionId: "session_2" });
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.activeSessionId).toBe("session_2");
@@ -4252,7 +4275,7 @@ describe("createInProcessUiBackendClient", () => {
       ]),
     });
 
-    await client.submitPrompt("Use the active empty session");
+    await client.submitPromptAndWait("Use the active empty session");
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.activeSessionId).toBe("session_empty");
@@ -4302,7 +4325,7 @@ describe("createInProcessUiBackendClient", () => {
       ]),
     });
 
-    await client.submitPrompt("Create a new session instead");
+    await client.submitPromptAndWait("Create a new session instead");
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.activeSessionId).toBe("session_1");
@@ -4361,7 +4384,7 @@ describe("createInProcessUiBackendClient", () => {
       ]),
     });
 
-    await client.submitPrompt("New session");
+    await client.submitPromptAndWait("New session");
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.sessions.map((session) => session.id)).toEqual([
@@ -4384,8 +4407,8 @@ describe("createInProcessUiBackendClient", () => {
       ]),
     });
 
-    await client.submitPrompt("Custom session", { sessionId: "session_1" });
-    await client.submitPrompt("Automatic session");
+    await client.submitPromptAndWait("Custom session", { sessionId: "session_1" });
+    await client.submitPromptAndWait("Automatic session");
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.sessions.map((session) => session.id)).toEqual([
@@ -4408,7 +4431,7 @@ describe("createInProcessUiBackendClient", () => {
       ]),
     });
 
-    await client.submitPrompt("Use core message");
+    await client.submitPromptAndWait("Use core message");
 
     await expect(
       messageManager.listBySession("session_1"),
@@ -4461,7 +4484,7 @@ describe("createInProcessUiBackendClient", () => {
       sessionManager,
     });
 
-    await client.submitPrompt(
+    await client.submitPromptAndWait(
       "Please fix sessions OPENAI_API_KEY=sk-secret-value",
     );
     await withTimeout(
@@ -4539,7 +4562,7 @@ describe("createInProcessUiBackendClient", () => {
       surface: "tui",
     });
     const activeSessionId = (await client.getSnapshot()).activeSessionId;
-    await client.submitPrompt("First prompt after slash new", {
+    await client.submitPromptAndWait("First prompt after slash new", {
       sessionId: activeSessionId ?? undefined,
     });
     await withTimeout(
@@ -4604,7 +4627,7 @@ describe("createInProcessUiBackendClient", () => {
       sessionManager,
     });
 
-    await client.submitPrompt("This first message must not rename manually", {
+    await client.submitPromptAndWait("This first message must not rename manually", {
       sessionId: "session_1",
     });
 
@@ -4643,7 +4666,7 @@ describe("createInProcessUiBackendClient", () => {
       sessionManager,
     });
 
-    await client.submitPrompt("Keep manual title safe");
+    await client.submitPromptAndWait("Keep manual title safe");
     await withTimeout(
       controlled.titleStarted.promise,
       250,
@@ -4665,7 +4688,7 @@ describe("createInProcessUiBackendClient", () => {
       llmClient: controlled.client,
     });
 
-    await client.submitPrompt("Name the in-memory session");
+    await client.submitPromptAndWait("Name the in-memory session");
     await withTimeout(
       controlled.titleStarted.promise,
       250,
@@ -4711,9 +4734,18 @@ describe("createInProcessUiBackendClient", () => {
       ]),
     });
 
-    await expect(client.submitPrompt("Should not persist")).rejects.toThrow(
-      "core write failed",
-    );
+    await expect(
+      client.submitPromptAndWait("Should not persist"),
+    ).resolves.toMatchObject({
+      prompt: {
+        error: {
+          code: "RUNTIME_ERROR",
+          message: "core write failed",
+          source: "runtime",
+        },
+        status: "failed",
+      },
+    });
 
     await expect(client.getSnapshot()).resolves.toMatchObject({
       activeSessionId: "session_1",
@@ -4741,7 +4773,7 @@ describe("createInProcessUiBackendClient", () => {
       throw new Error("handler failed");
     });
 
-    await client.submitPrompt("Ignore handler failures");
+    await client.submitPromptAndWait("Ignore handler failures");
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.status).toEqual({ kind: "idle" });
@@ -4789,9 +4821,9 @@ describe("createInProcessUiBackendClient", () => {
       },
     });
 
-    const first = client.submitPrompt("First");
+    const first = client.submitPromptAndWait("First");
     await vi.waitUntil(() => mainPrompts.length === 1);
-    const second = client.submitPrompt("Second");
+    const second = client.submitPromptAndWait("Second");
 
     await Promise.resolve();
     expect(mainPrompts).toEqual(["First"]);
@@ -5182,7 +5214,7 @@ describe("createInProcessUiBackendClient", () => {
     const sessionId = (await client.getSnapshot()).activeSessionId;
     expect(sessionId).not.toBeNull();
 
-    await client.submitPrompt("Handle an ordinary interruption", {
+    await client.submitPromptAndWait("Handle an ordinary interruption", {
       sessionId: sessionId ?? undefined,
     });
     await expect(client.getSnapshot()).resolves.toMatchObject({
@@ -5248,7 +5280,7 @@ describe("createInProcessUiBackendClient", () => {
         event.notice.message === "Goal completed.",
       2_000,
     );
-    await client.submitPrompt("Create a goal for this work");
+    await client.submitPromptAndWait("Create a goal for this work");
     await completed;
 
     expect(requests.length).toBeGreaterThanOrEqual(3);
@@ -5355,7 +5387,7 @@ describe("createInProcessUiBackendClient", () => {
 
     try {
       await withTimeout(
-        client.submitPrompt("What is the current progress?", {
+        client.submitPromptAndWait("What is the current progress?", {
           sessionId: goalSessionId ?? undefined,
         }),
         2_000,
@@ -5608,7 +5640,7 @@ describe("createInProcessUiBackendClient", () => {
       );
 
       await withTimeout(
-        client.submitPrompt("Handle this user interruption", {
+        client.submitPromptAndWait("Handle this user interruption", {
           sessionId: sessionId ?? undefined,
         }),
         2_000,
@@ -5679,7 +5711,7 @@ describe("createInProcessUiBackendClient", () => {
     await agentManager.entered.promise;
 
     const userPrompt = withTimeout(
-      client.submitPrompt("Interrupt before provider starts", {
+      client.submitPromptAndWait("Interrupt before provider starts", {
         sessionId: goalSessionId ?? undefined,
       }),
       2_000,
@@ -5766,7 +5798,7 @@ describe("createInProcessUiBackendClient", () => {
         ),
       });
 
-      await client.submitPrompt(`Discuss the ${label} goal`, {
+      await client.submitPromptAndWait(`Discuss the ${label} goal`, {
         sessionId: "session_1",
       });
       await client.executeCommand({
@@ -7620,7 +7652,7 @@ describe("createInProcessUiBackendClient", () => {
         }),
       });
 
-      await client.submitPrompt("Create another run");
+      await client.submitPromptAndWait("Create another run");
 
       await expect(runLedger.get("run_1")).resolves.toMatchObject({
         runId: "run_1",
@@ -7679,7 +7711,7 @@ describe("createInProcessUiBackendClient", () => {
         }),
       });
 
-      await expect(client.submitPrompt("Should fail clearly")).rejects.toThrow(
+      await expect(client.submitPromptAndWait("Should fail clearly")).rejects.toThrow(
         /requires injected sessionManager and messageManager/i,
       );
     } finally {

@@ -1,12 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import { createRPC, type CoreAPI, type UiCommandRecord } from "ohbaby-sdk";
 
 describe("buildCoreAPIImpl", () => {
   it("builds CoreAPI and callback adapters from the persistent backend", async () => {
     vi.resetModules();
     const unsubscribe = vi.fn();
-    const submitPrompt = vi.fn(() => Promise.resolve());
     const submitPromptAccepted = vi.fn(() =>
       Promise.resolve({
         clientRequestId: "request_1",
@@ -117,7 +115,6 @@ describe("buildCoreAPIImpl", () => {
           searchJsonPath: "search.json",
         }),
       ),
-      submitPrompt,
       submitPromptAccepted,
       subscribeEvents,
       waitForPrompt,
@@ -138,7 +135,7 @@ describe("buildCoreAPIImpl", () => {
       permission: "full-access",
       commandRecorder: { record: (record) => records.push(record) },
     });
-    await api.core.submitPrompt("hello");
+    await api.core.submitPromptAndWait("hello");
     await api.core.getCurrentModel();
     await api.core.connectModel({
       apiKeyEnv: "ZENMUX_API_KEY",
@@ -164,7 +161,6 @@ describe("buildCoreAPIImpl", () => {
         status: { kind: "idle" },
       },
     });
-    expect(submitPrompt).not.toHaveBeenCalled();
     expect(submitPromptAccepted).toHaveBeenCalledWith("hello", {});
     expect(waitForPrompt).toHaveBeenCalledWith("prompt_1", {
       signal: undefined,
@@ -233,7 +229,6 @@ describe("buildCoreAPIImpl", () => {
             searchJsonPath: "search.json",
           }),
         ),
-        submitPrompt: vi.fn(() => Promise.resolve()),
         subscribeEvents: vi.fn((): (() => void) => () => undefined),
       })),
     }));
@@ -276,7 +271,6 @@ describe("buildCoreAPIImpl", () => {
           searchJsonPath: "search.json",
         }),
       ),
-      submitPrompt: vi.fn(() => Promise.resolve()),
       subscribeEvents: vi.fn((): (() => void) => () => undefined),
     }));
     vi.doMock("../adapters/ui-persistent.js", () => ({
@@ -350,7 +344,6 @@ function createPersistentClientMock(): {
   readonly respondPermission: ReturnType<typeof vi.fn>;
   readonly setPermission: ReturnType<typeof vi.fn>;
   readonly setSearchApiKey: ReturnType<typeof vi.fn>;
-  readonly submitPrompt: ReturnType<typeof vi.fn>;
   readonly subscribeEvents: ReturnType<typeof vi.fn>;
 } {
   return {
@@ -382,7 +375,6 @@ function createPersistentClientMock(): {
         searchJsonPath: "search.json",
       }),
     ),
-    submitPrompt: vi.fn(() => Promise.resolve()),
     subscribeEvents: vi.fn((): (() => void) => () => undefined),
   };
 }

@@ -158,13 +158,4 @@ export interface UiCommandClient
 /**
  * Complete production backend capability. Queue management is mandatory.
  */
-export interface UiBackendClient extends UiQueryClient, UiCommandClient {
-  /**
-   * @deprecated Use submitPromptAccepted, waitForPrompt, or
-   * submitPromptAndWait according to the required lifecycle point.
-   */
-  submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void>;
-}
-
-/** Improve-1 compatibility alias; use the narrow capability interfaces. */
-export type UiPromptQueueClient = UiBackendClient;
+export interface UiBackendClient extends UiQueryClient, UiCommandClient {}

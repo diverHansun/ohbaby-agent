@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
+  UiBackendClient,
   UiCompactSessionUsage,
   UiPermissionRequest,
   UiPromptEditLease,
@@ -10,10 +11,7 @@ import type {
   UiSnapshot,
   UiWebCommandCatalog,
 } from "ohbaby-sdk";
-import type {
-  OhbabyWebClient,
-  OhbabyWebRuntime,
-} from "../api/daemon/client.js";
+import type { OhbabyWebRuntime } from "../api/daemon/client.js";
 import { createOhbabyWebStore } from "../store/store.js";
 import type { OhbabyWebStore } from "../store/store.js";
 import { OhbabyWebApp } from "./App.js";
@@ -32,23 +30,24 @@ interface MountedApp {
 }
 
 interface FakeRuntime {
+  readonly client: UiBackendClient;
   readonly archiveSession: ReturnType<
     typeof vi.fn<(sessionId: string) => Promise<void>>
   >;
   readonly compactSession: ReturnType<
-    typeof vi.fn<OhbabyWebClient["compactSession"]>
+    typeof vi.fn<UiBackendClient["compactSession"]>
   >;
   readonly createSession: ReturnType<
-    typeof vi.fn<OhbabyWebClient["createSession"]>
+    typeof vi.fn<OhbabyWebRuntime["createSession"]>
   >;
   readonly executeSlashCommand: ReturnType<
-    typeof vi.fn<OhbabyWebClient["executeSlashCommand"]>
+    typeof vi.fn<OhbabyWebRuntime["executeSlashCommand"]>
   >;
   readonly connectModel: ReturnType<
-    typeof vi.fn<OhbabyWebClient["connectModel"]>
+    typeof vi.fn<UiBackendClient["connectModel"]>
   >;
   readonly listCommands: ReturnType<
-    typeof vi.fn<OhbabyWebClient["listCommands"]>
+    typeof vi.fn<OhbabyWebRuntime["listWebCommands"]>
   >;
   readonly hideWorkspace: ReturnType<
     typeof vi.fn<OhbabyWebRuntime["hideWorkspace"]>
@@ -64,16 +63,16 @@ interface FakeRuntime {
   >;
   readonly runtime: OhbabyWebRuntime;
   readonly selectSession: ReturnType<
-    typeof vi.fn<OhbabyWebClient["selectSession"]>
+    typeof vi.fn<OhbabyWebRuntime["selectSession"]>
   >;
   readonly setPermission: ReturnType<
-    typeof vi.fn<OhbabyWebClient["setPermission"]>
+    typeof vi.fn<UiBackendClient["setPermission"]>
   >;
   readonly setSearchApiKey: ReturnType<
-    typeof vi.fn<OhbabyWebClient["setSearchApiKey"]>
+    typeof vi.fn<UiBackendClient["setSearchApiKey"]>
   >;
-  readonly submitPrompt: ReturnType<
-    typeof vi.fn<OhbabyWebClient["submitPrompt"]>
+  readonly submitPromptAccepted: ReturnType<
+    typeof vi.fn<UiBackendClient["submitPromptAccepted"]>
   >;
   readonly store: OhbabyWebStore;
   readonly switchWorkspace: ReturnType<
@@ -284,7 +283,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       app.container,
       "Enter",
     );
-    expect(fake.submitPrompt).not.toHaveBeenCalled();
+    expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
     expect(composingEnter.defaultPrevented).toBe(false);
 
     const legacyComposingEnter = await pressComposingTextareaKey(
@@ -292,7 +291,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       "Enter",
       229,
     );
-    expect(fake.submitPrompt).not.toHaveBeenCalled();
+    expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
     expect(legacyComposingEnter.defaultPrevented).toBe(false);
   });
 
@@ -311,7 +310,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       app.container,
       "Enter",
     );
-    expect(fake.submitPrompt).not.toHaveBeenCalled();
+    expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
     expect(composingEnter.defaultPrevented).toBe(false);
   });
 
@@ -543,14 +542,13 @@ describe("OhbabyWebApp slash command interactions", () => {
         sessions: [],
       },
     });
-    fake.submitPrompt.mockImplementation((input) =>
+    fake.submitPromptAccepted.mockImplementation((_text, options) =>
       Promise.resolve({
-        clientRequestId: input.clientRequestId,
+        clientRequestId: options?.clientRequestId ?? "request_generated",
         createdAt: timestamp,
-        ok: true,
         promptId: "prompt_new",
         sessionId: "session_new",
-        status: "running",
+        status: "queued",
         userMessageId: "message_new",
       }),
     );
@@ -565,13 +563,13 @@ describe("OhbabyWebApp slash command interactions", () => {
 
   it("renders a submitted prompt before the receipt and reconciles it with the queue projection", async () => {
     const pendingReceipt =
-      deferred<Awaited<ReturnType<OhbabyWebClient["submitPrompt"]>>>();
+      deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
     const initialSnapshot = snapshotWithStatus({
       kind: "running",
       runId: "run_1",
     });
     const fake = createFakeRuntime({ snapshot: initialSnapshot });
-    fake.submitPrompt.mockReturnValue(pendingReceipt.promise);
+    fake.submitPromptAccepted.mockReturnValue(pendingReceipt.promise);
     const app = mountApp(fake.runtime);
 
     await setTextareaValue(app.container, "visible immediately");
@@ -584,9 +582,8 @@ describe("OhbabyWebApp slash command interactions", () => {
     await act(async () => {
       pendingReceipt.resolve({
         clientRequestId:
-          fake.submitPrompt.mock.calls[0]?.[0].clientRequestId ?? "",
+          fake.submitPromptAccepted.mock.calls[0]?.[1]?.clientRequestId ?? "",
         createdAt: timestamp,
-        ok: true,
         promptId: "prompt_pending",
         sessionId: "session_1",
         status: "queued",
@@ -603,7 +600,7 @@ describe("OhbabyWebApp slash command interactions", () => {
           prompts: [
             {
               clientRequestId:
-                fake.submitPrompt.mock.calls[0]?.[0].clientRequestId ?? "",
+                fake.submitPromptAccepted.mock.calls[0]?.[1]?.clientRequestId ?? "",
               createdAt: timestamp,
               promptId: "prompt_pending",
               scopeKey: "/repo-a",
@@ -639,10 +636,9 @@ describe("OhbabyWebApp slash command interactions", () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
-    fake.submitPrompt.mockResolvedValue({
+    fake.submitPromptAccepted.mockResolvedValue({
       clientRequestId: "different_request",
       createdAt: timestamp,
-      ok: true,
       promptId: "prompt_other",
       sessionId: "session_1",
       status: "queued",
@@ -690,20 +686,19 @@ describe("OhbabyWebApp slash command interactions", () => {
         prompts: [queuedPrompt],
       },
     });
-    vi.spyOn(fake.runtime.client, "acquirePromptEditLease").mockResolvedValue({
+    vi.spyOn(fake.client, "acquirePromptEditLease").mockResolvedValue({
       editLeaseId: "lease_1",
       expiresAt: "2026-07-12T00:01:00.000Z",
       ownerClientId: "client_web",
       prompt: queuedPrompt,
     });
-    vi.spyOn(fake.runtime.client, "releasePromptEditLease").mockResolvedValue(
+    vi.spyOn(fake.client, "releasePromptEditLease").mockResolvedValue(
       queuedPrompt,
     );
-    fake.submitPrompt.mockImplementation((input) =>
+    fake.submitPromptAccepted.mockImplementation((_text, options) =>
       Promise.resolve({
-        clientRequestId: input.clientRequestId,
+        clientRequestId: options?.clientRequestId ?? "request_generated",
         createdAt: timestamp,
-        ok: true,
         promptId: "prompt_retry",
         sessionId: "session_1",
         status: "queued",
@@ -727,12 +722,12 @@ describe("OhbabyWebApp slash command interactions", () => {
     );
     await pressTextareaKey(app.container, "Escape");
     await pressTextareaKey(app.container, "Enter");
-    await waitFor(() => fake.submitPrompt.mock.calls.length === 1);
+    await waitFor(() => fake.submitPromptAccepted.mock.calls.length === 1);
 
-    expect(fake.submitPrompt).toHaveBeenCalledWith(
+    expect(fake.submitPromptAccepted).toHaveBeenCalledWith(
+      "pending draft",
       expect.objectContaining({
         clientRequestId: "request_pending",
-        text: "pending draft",
       }),
     );
   });
@@ -756,7 +751,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
-    vi.spyOn(fake.runtime.client, "renewPromptEditLease").mockRejectedValue(
+    vi.spyOn(fake.client, "renewPromptEditLease").mockRejectedValue(
       new Error("lease expired"),
     );
     mountApp(fake.runtime);
@@ -788,7 +783,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     const firstPrompt = prompts[0];
     const pendingLease = deferred<UiPromptEditLease>();
     const acquire = vi
-      .spyOn(fake.runtime.client, "acquirePromptEditLease")
+      .spyOn(fake.client, "acquirePromptEditLease")
       .mockReturnValue(pendingLease.promise);
     const lease = {
       editLeaseId: "lease_one",
@@ -1405,6 +1400,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.connectModel).toHaveBeenCalledWith({
       apiKeyEnv: "ZHIPU_API_KEY",
       baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+      interfaceProvider: "openai-compatible",
       model: "glm-4.7",
       provider: "zhipu",
     });
@@ -1508,6 +1504,7 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(fake.connectModel).toHaveBeenCalledWith({
       baseUrl: "http://127.0.0.1:1234/v1",
+      interfaceProvider: "openai-compatible",
       model: "local-model",
       provider: "lmstudio",
     });
@@ -1556,8 +1553,9 @@ describe("OhbabyWebApp slash command interactions", () => {
     );
     await clickButton(app.container, "Compact session");
 
-    expect(fake.compactSession).toHaveBeenCalledWith("session_1", {
+    expect(fake.compactSession).toHaveBeenCalledWith({
       force: true,
+      sessionId: "session_1",
     });
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
@@ -1758,19 +1756,19 @@ function createFakeRuntime(input: {
   const store = createOhbabyWebStore();
   store.replaceSnapshot(input.snapshot, 1);
   store.setConnectionState("live");
-  const executeSlashCommand = vi.fn<OhbabyWebClient["executeSlashCommand"]>(
+  const executeSlashCommand = vi.fn<OhbabyWebRuntime["executeSlashCommand"]>(
     () => Promise.resolve(),
   );
-  const createSession = vi.fn<OhbabyWebClient["createSession"]>(() =>
+  const createSession = vi.fn<OhbabyWebRuntime["createSession"]>(() =>
     Promise.resolve(),
   );
-  const selectSession = vi.fn<OhbabyWebClient["selectSession"]>(() =>
+  const selectSession = vi.fn<OhbabyWebRuntime["selectSession"]>(() =>
     Promise.resolve(),
   );
   const archiveSession = vi.fn<(sessionId: string) => Promise<void>>(() =>
     Promise.resolve(),
   );
-  const connectModel = vi.fn<OhbabyWebClient["connectModel"]>(() =>
+  const connectModel = vi.fn<UiBackendClient["connectModel"]>(() =>
     Promise.resolve({
       apiKeyEnv: "ZHIPU_API_KEY",
       baseUrl: "https://open.bigmodel.cn/api/paas/v4",
@@ -1784,13 +1782,17 @@ function createFakeRuntime(input: {
       saved: true,
     }),
   );
-  const listCommands = vi.fn<OhbabyWebClient["listCommands"]>(() =>
+  const listCommands = vi.fn<OhbabyWebRuntime["listWebCommands"]>(() =>
     Promise.resolve(catalog(["status"])),
   );
-  const setPermission = vi.fn<OhbabyWebClient["setPermission"]>(() =>
-    Promise.resolve(),
+  const setPermission = vi.fn<UiBackendClient["setPermission"]>(() =>
+    Promise.resolve({
+      level: "default",
+      mode: "auto",
+      sessionRules: [],
+    }),
   );
-  const compactSession = vi.fn<OhbabyWebClient["compactSession"]>(() =>
+  const compactSession = vi.fn<UiBackendClient["compactSession"]>(() =>
     Promise.resolve({
       sessionId: "session_1",
       status: "compacted",
@@ -1798,7 +1800,7 @@ function createFakeRuntime(input: {
       usageBefore: compactUsage(16_000),
     }),
   );
-  const setSearchApiKey = vi.fn<OhbabyWebClient["setSearchApiKey"]>(() =>
+  const setSearchApiKey = vi.fn<UiBackendClient["setSearchApiKey"]>(() =>
     Promise.resolve({
       apiKeyEnv: "TAVILY_API_KEY",
       envPath: ".env",
@@ -1851,30 +1853,24 @@ function createFakeRuntime(input: {
     ],
     selectedDirectory: "/repo-a",
   } as const;
-  const submitPrompt = vi.fn<OhbabyWebClient["submitPrompt"]>(() =>
+  const submitPromptAccepted = vi.fn<UiBackendClient["submitPromptAccepted"]>(() =>
     Promise.resolve({
       clientRequestId: "request_1",
       createdAt: "2026-07-12T00:00:00.000Z",
-      ok: true,
       promptId: "prompt_1",
       sessionId: "session_1",
       status: "queued",
       userMessageId: "message_1",
     }),
   );
-  const client: OhbabyWebClient & {
-    readonly archiveSession: typeof archiveSession;
-  } = {
-    abortSession: vi.fn(() => Promise.resolve()),
+  const client: UiBackendClient = {
+    abortRun: vi.fn(() => Promise.resolve()),
     acquirePromptEditLease: vi.fn(() => Promise.reject(new Error("unused"))),
-    archiveSession,
-    close: vi.fn(() => Promise.resolve()),
+    archiveSession: vi.fn(() => Promise.resolve()),
     compactSession,
     cancelQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
-    connect: vi.fn(() => Promise.resolve()),
     connectModel,
-    createSession,
-    executeSlashCommand,
+    executeCommand: vi.fn(() => Promise.resolve()),
     editQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     getContextWindowUsage: vi.fn(() =>
       Promise.resolve({
@@ -1887,26 +1883,8 @@ function createFakeRuntime(input: {
       }),
     ),
     getCurrentModel: vi.fn(() => Promise.resolve(null)),
-    getSnapshot: () => store.getSnapshot(),
-    listCommands,
-    listWorkspaceScopes: vi.fn(() =>
-      Promise.resolve([
-        {
-          available: true,
-          directory: "/repo-a",
-          lastOpenedAt: 2,
-          loaded: true,
-          position: 0,
-        },
-        {
-          available: true,
-          directory: "/repo-b",
-          lastOpenedAt: 1,
-          loaded: false,
-          position: 1,
-        },
-      ]),
-    ),
+    getSnapshot: () => Promise.resolve(input.snapshot),
+    listCommands: () => listCommands(),
     probeModelContextWindow: vi.fn(() =>
       Promise.resolve({
         contextWindowSource: "default" as const,
@@ -1914,16 +1892,49 @@ function createFakeRuntime(input: {
       }),
     ),
     respondPermission: vi.fn(() => Promise.resolve()),
+    respondInteraction: vi.fn(() => Promise.resolve()),
     releasePromptEditLease: vi.fn(() => Promise.reject(new Error("unused"))),
     renewPromptEditLease: vi.fn(() => Promise.reject(new Error("unused"))),
-    selectSession,
     setPermission,
     setSearchApiKey,
-    submitPrompt,
-    subscribe: (listener) => store.subscribe(listener),
+    submitPromptAccepted: submitPromptAccepted,
+    submitPromptAndWait: vi.fn<UiBackendClient["submitPromptAndWait"]>(() =>
+      Promise.resolve({
+        prompt: {
+          clientRequestId: "request_1",
+          createdAt: timestamp,
+          endedAt: timestamp,
+          promptId: "prompt_1",
+          scopeKey: "/repo-a",
+          sessionId: "session_1",
+          status: "succeeded",
+          text: "done",
+          updatedAt: timestamp,
+          userMessageId: "message_1",
+        },
+      }),
+    ),
+    subscribeEvents: () => () => undefined,
+    waitForPrompt: vi.fn<UiBackendClient["waitForPrompt"]>(() =>
+      Promise.resolve({
+        prompt: {
+          clientRequestId: "request_1",
+          createdAt: timestamp,
+          endedAt: timestamp,
+          promptId: "prompt_1",
+          scopeKey: "/repo-a",
+          sessionId: "session_1",
+          status: "succeeded",
+          text: "done",
+          updatedAt: timestamp,
+          userMessageId: "message_1",
+        },
+      }),
+    ),
   };
   return {
     archiveSession,
+    client,
     compactSession,
     connectModel,
     createSession,
@@ -1934,14 +1945,21 @@ function createFakeRuntime(input: {
     listDirectoryPicker,
     openWorkspace,
     runtime: {
+      abortSession: vi.fn(() => Promise.resolve()),
+      archiveSession,
       client,
+      createSession,
+      dispose: vi.fn(() => Promise.resolve()),
+      executeSlashCommand,
       getDirectoryPickerRoots,
       hideWorkspace,
       listDirectoryPicker,
+      listWebCommands: listCommands,
       openWorkspace,
       getWorkspaceSnapshot: () => workspaceSnapshot,
       ready: Promise.resolve(),
       refreshWorkspaces: () => Promise.resolve(),
+      selectSession,
       store,
       subscribeWorkspaces: () => () => undefined,
       switchWorkspace,
@@ -1950,7 +1968,7 @@ function createFakeRuntime(input: {
     setPermission,
     setSearchApiKey,
     store,
-    submitPrompt,
+    submitPromptAccepted,
     switchWorkspace,
   };
 }

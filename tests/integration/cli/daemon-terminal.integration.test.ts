@@ -78,7 +78,7 @@ describe("explicit daemon remote terminal flow", () => {
 
       try {
         await delay(25);
-        await firstClient.submitPrompt("hello daemon");
+        await firstClient.submitPromptAndWait("hello daemon");
         await waitUntil(() => JSON.stringify(events).includes("daemon reply"));
       } finally {
         unsubscribe();

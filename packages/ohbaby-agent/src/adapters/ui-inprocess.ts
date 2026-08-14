@@ -6,7 +6,6 @@ import type {
   UiSubmitPromptAndWaitOptions,
   UiWaitForPromptOptions,
   UiBackendClient,
-  UiPromptQueueClient,
   UiAcquirePromptEditLeaseInput,
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
@@ -251,7 +250,7 @@ export interface UiPromptQueueExecutionPort {
 }
 
 export interface InProcessUiBackendClient
-  extends UiPromptQueueClient, UiPromptQueueExecutionPort {
+  extends UiBackendClient, UiPromptQueueExecutionPort {
   dispose(): Promise<void>;
 }
 
@@ -703,19 +702,6 @@ export function createInProcessUiBackendClient(
       text,
       submitOptions,
     );
-  }
-
-  async function submitPromptLegacy(
-    text: string,
-    submitOptions?: SubmitPromptOptions,
-  ): Promise<void> {
-    const completion = await submitPromptAndWaitInternal(text, submitOptions);
-    if (
-      completion.prompt.status === "failed" ||
-      completion.prompt.status === "interrupted"
-    ) {
-      throw new Error(completion.prompt.error.message);
-    }
   }
 
   function publish(event: UiEvent): void {
@@ -2375,8 +2361,8 @@ export function createInProcessUiBackendClient(
         return runtime.listMcpServerSummaries();
       },
     },
-    async submitPrompt(text, submitOptions): Promise<void> {
-      await submitPromptLegacy(text, submitOptions);
+    submitPromptAndWait(text, submitOptions) {
+      return submitPromptAndWaitInternal(text, submitOptions);
     },
     connectModel: connectModelInternal,
     setSearchApiKey: setSearchApiKeyInternal,
@@ -2465,13 +2451,6 @@ export function createInProcessUiBackendClient(
 
     listCommands(query): Promise<UiCommandCatalog> {
       return commandService.listCommands(query);
-    },
-
-    submitPrompt(
-      text: string,
-      submitOptions?: SubmitPromptOptions,
-    ): Promise<void> {
-      return submitPromptLegacy(text, submitOptions);
     },
 
     submitPromptAndWait(

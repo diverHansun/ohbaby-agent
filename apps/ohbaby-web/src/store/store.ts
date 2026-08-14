@@ -11,9 +11,10 @@ import type {
 } from "ohbaby-sdk";
 
 export type StoreListener = () => void;
+export type UiEventSource = "incremental" | "snapshot-barrier";
 
 export interface OhbabyWebStore {
-  applyEvent(event: UiEvent, seqNum: number): void;
+  applyEvent(event: UiEvent, seqNum: number, source?: UiEventSource): boolean;
   getSnapshot(): StoreSnapshot;
   replaceSnapshot(snapshot: UiSnapshot, seqNum: number): void;
   reset(): void;
@@ -35,20 +36,30 @@ export function createOhbabyWebStore(): OhbabyWebStore {
   function publish(next: StoreSnapshot): void {
     snapshot = next;
     for (const listener of Array.from(listeners)) {
-      listener();
+      try {
+        listener();
+      } catch {
+        // Observation failures must not interrupt state publication.
+      }
     }
   }
 
   return {
-    applyEvent(event, seqNum): void {
-      const nextView = reduceUiEvent(snapshot.view, event, seqNum);
+    applyEvent(event, seqNum, source = "incremental"): boolean {
+      const nextView =
+        source === "snapshot-barrier" && event.type === "snapshot.replaced"
+          ? seqNum < snapshot.view.lastAppliedSeqNum
+            ? snapshot.view
+            : replaceSnapshot(event.snapshot, seqNum)
+          : reduceUiEvent(snapshot.view, event, seqNum);
       if (nextView === snapshot.view) {
-        return;
+        return false;
       }
       publish({
         ...snapshot,
         view: nextView,
       });
+      return true;
     },
     getSnapshot(): StoreSnapshot {
       return snapshot;

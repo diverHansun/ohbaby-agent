@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import type {
   SubmitPromptOptions,
   UiBackendClient,
@@ -196,11 +195,11 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve({ commands: [], version: "v1" });
   }
 
-  submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void> {
+  performPrompt(text: string, options?: SubmitPromptOptions): Promise<void> {
     if (this.submitError) {
       return Promise.reject(this.submitError);
     }
-    this.calls.push({ args: [text, options], method: "submitPrompt" });
+    this.calls.push({ args: [text, options], method: "submitPromptAccepted" });
     this.submitted.push({ text, ...(options ? { options } : {}) });
     return Promise.resolve();
   }
@@ -226,7 +225,7 @@ class FakeBackend implements UiBackendClient {
       ...this.snapshot,
       prompts: [...(this.snapshot.prompts ?? []), queued],
     };
-    const completion = this.submitPrompt(text, options).then(() => {
+    const completion = this.performPrompt(text, options).then(() => {
       const completed = {
         clientRequestId: options?.clientRequestId ?? `request_${promptId}`,
         createdAt: timestamp,
@@ -677,7 +676,7 @@ describe("createRemoteUiBackendClient", () => {
       { args: [listQuery], method: "listCommands" },
       {
         args: ["hello", { sessionId: "session_1" }],
-        method: "submitPrompt",
+        method: "submitPromptAccepted",
       },
       { args: [], method: "getSnapshot" },
       { args: [compactOptions], method: "compactSession" },

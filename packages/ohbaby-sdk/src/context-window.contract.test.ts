@@ -197,9 +197,6 @@ describe("context window UI contract", () => {
           sessionRules: [],
         });
       },
-      submitPrompt(): ReturnType<CoreAPI["submitPrompt"]> {
-        return Promise.resolve();
-      },
       submitPromptAccepted(): ReturnType<CoreAPI["submitPromptAccepted"]> {
         return Promise.resolve({
           clientRequestId: "request_1",

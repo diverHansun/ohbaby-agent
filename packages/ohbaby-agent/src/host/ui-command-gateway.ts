@@ -3,7 +3,6 @@ import {
   submitPromptAndWait as composeSubmitPromptAndWait,
 } from "ohbaby-sdk";
 import type {
-  SubmitPromptOptions,
   UiBackendClient,
   UiCommandCorrelation,
   UiCommandEntryPoint,
@@ -148,15 +147,6 @@ function returnedCorrelation(result: unknown): UiCommandCorrelation {
   };
 }
 
-function legacyCompletion(completion: UiPromptCompletion): void {
-  if (
-    completion.prompt.status === "failed" ||
-    completion.prompt.status === "interrupted"
-  ) {
-    throw new Error(completion.prompt.error.message);
-  }
-}
-
 export function createUiCommandGateway(
   client: UiBackendClient,
   options: UiCommandGatewayOptions,
@@ -170,17 +160,6 @@ export function createUiCommandGateway(
         ): Promise<UiPromptCompletion> =>
           composeSubmitPromptAndWait(gateway, text, submitOptions);
       }
-      if (property === "submitPrompt") {
-        return async (
-          text: string,
-          submitOptions?: SubmitPromptOptions,
-        ): Promise<void> => {
-          legacyCompletion(
-            await composeSubmitPromptAndWait(gateway, text, submitOptions),
-          );
-        };
-      }
-
       const trustedMethod = TRUSTED_QUEUE_METHODS.get(property);
       const method =
         trustedMethod ??

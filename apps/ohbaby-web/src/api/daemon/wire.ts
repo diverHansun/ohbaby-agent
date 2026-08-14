@@ -8,6 +8,7 @@ import type {
   UiPermissionMode,
   UiPermissionResponse,
   UiPermissionState,
+  UiPromptCompletion,
   UiPromptReceipt,
   UiPromptEditLease,
   UiPromptSubmission,
@@ -135,6 +136,11 @@ export interface PromptAcceptedResponse extends UiPromptReceipt {
   readonly ok: true;
 }
 
+export interface PromptCompletionResponse {
+  readonly completion: UiPromptCompletion;
+  readonly ok: true;
+}
+
 export interface PromptMutationResponse {
   readonly ok: true;
   readonly prompt: UiPromptSubmission;
@@ -160,8 +166,9 @@ export interface CurrentModelResponse {
 }
 
 export interface ModelConnectRequest {
-  readonly provider: string;
+  readonly provider?: string;
   readonly baseUrl: string;
+  readonly interfaceProvider?: "openai-compatible" | "anthropic";
   readonly apiKeyEnv?: string;
   readonly apiKey?: string;
   readonly model: string;

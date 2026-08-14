@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import type {
   SubmitPromptOptions,
   UiBackendClient,
@@ -217,7 +216,7 @@ class FakeBackend implements UiBackendClient {
     });
   }
 
-  submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void> {
+  performPrompt(text: string, options?: SubmitPromptOptions): Promise<void> {
     this.submitted.push({ text, ...(options ? { options } : {}) });
     const sessionId = options?.sessionId ?? "session_1";
     const session = {
@@ -242,7 +241,7 @@ class FakeBackend implements UiBackendClient {
   ): ReturnType<UiBackendClient["submitPromptAccepted"]> {
     const promptId = `prompt_fake_${String(++this.nextPromptId)}`;
     const sessionId = options?.sessionId ?? "session_fake";
-    const completion = this.submitPrompt(text, options).then(() => ({
+    const completion = this.performPrompt(text, options).then(() => ({
       prompt: {
         clientRequestId: options?.clientRequestId ?? `request_${promptId}`,
         createdAt: timestamp,
@@ -500,10 +499,11 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       };
       const runtime = createOhbabyWebRuntime(config, { fetch: fetchImpl });
       await runtime.ready;
+      const client = runtime.client;
+      if (!client) throw new Error("Expected an active browser client");
 
-      await runtime.client.submitPrompt({
+      await client.submitPromptAccepted("hello", {
         clientRequestId: "request_1",
-        text: "hello",
       });
 
       await waitFor(
@@ -533,7 +533,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
         },
       });
 
-      await runtime.client.executeSlashCommand({
+      await runtime.executeSlashCommand({
         sessionId: "session_generated",
         text: "/status",
       });
@@ -554,7 +554,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
         raw: "/status",
         sessionId: "session_generated",
       });
-      await runtime.client.close();
+      await runtime.dispose();
     } finally {
       await server.dispose();
     }
@@ -590,8 +590,10 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       };
       const runtime = createOhbabyWebRuntime(config, { fetch: fetchImpl });
       await runtime.ready;
+      const client = runtime.client;
+      if (!client) throw new Error("Expected an active browser client");
 
-      const catalog = await runtime.client.listCommands();
+      const catalog = await runtime.listWebCommands();
       expect(
         catalog.commands.map((command) => [
           command.id,
@@ -607,7 +609,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       ]);
 
       await expect(
-        runtime.client.executeSlashCommand({ text: "/connect" }),
+        runtime.executeSlashCommand({ text: "/connect" }),
       ).rejects.toThrow();
       const rawOverlayResponse = await fetchImpl(
         "http://127.0.0.1:4096/v1/commands",
@@ -632,7 +634,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       );
       expect(rawOverlayResponse.status).toBe(400);
 
-      await runtime.client.executeSlashCommand({
+      await runtime.executeSlashCommand({
         text: "/hansun-db 查 X",
       });
       expect(backend.executedCommands.at(-1)).toMatchObject({
@@ -644,24 +646,26 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
         surface: "tui",
       });
 
-      await runtime.client.probeModelContextWindow({
+      await client.probeModelContextWindow({
         apiKeyEnv: "ZHIPU_API_KEY",
         baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        interfaceProvider: "openai-compatible",
         model: "glm-4.7",
         provider: "zhipu",
       });
-      await runtime.client.connectModel({
+      await client.connectModel({
         apiKeyEnv: "ZHIPU_API_KEY",
         baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        interfaceProvider: "openai-compatible",
         model: "glm-4.7",
         provider: "zhipu",
       });
-      await runtime.client.setSearchApiKey({
+      await client.setSearchApiKey({
         apiKeyEnv: "TAVILY_API_KEY",
         provider: "tavily",
       });
-      await runtime.client.getContextWindowUsage("session_1");
-      await runtime.client.compactSession("session_1", { force: true });
+      await client.getContextWindowUsage({ sessionId: "session_1" });
+      await client.compactSession({ force: true, sessionId: "session_1" });
 
       expect(backend.probeInputs[0]).toMatchObject({
         apiKeyEnv: "ZHIPU_API_KEY",
@@ -689,7 +693,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
           (command) => command.commandId === "connect",
         ),
       ).toBe(false);
-      await runtime.client.close();
+      await runtime.dispose();
     } finally {
       await server.dispose();
     }
@@ -726,9 +730,9 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       const runtime = createOhbabyWebRuntime(config, { fetch: fetchImpl });
       await runtime.ready;
 
-      await runtime.client.createSession();
-      await runtime.client.createSession();
-      await runtime.client.selectSession("session_2");
+      await runtime.createSession();
+      await runtime.createSession();
+      await runtime.selectSession("session_2");
 
       expect(backend.executedCommands).toEqual([
         expect.objectContaining({
@@ -753,7 +757,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
           rawArgs: "--session_id session_2",
         }),
       ]);
-      await runtime.client.close();
+      await runtime.dispose();
     } finally {
       await server.dispose();
     }
@@ -838,7 +842,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
         .view.snapshot?.sessions.find((session) => session.id === "session_2");
       expect(initialProjectedSession?.messages).toEqual([]);
 
-      await runtime.client.selectSession("session_2");
+      await runtime.selectSession("session_2");
       await waitFor(
         () =>
           runtime.store
@@ -856,7 +860,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       expect(runtime.store.getSnapshot().view.snapshot).toMatchObject({
         activeSessionId: "session_2",
       });
-      await runtime.client.close();
+      await runtime.dispose();
     } finally {
       await server.dispose();
     }

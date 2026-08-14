@@ -1,5 +1,4 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +17,10 @@ import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
 import type { SnapshotService } from "../snapshot/index.js";
 import { createTemporarySessionTitle } from "../services/session/index.js";
-import { createPersistentUiBackendClient } from "./ui-persistent.js";
+import {
+  createPersistentUiBackendClient,
+  type PersistentUiBackendClient,
+} from "./ui-persistent.js";
 
 interface FakeSdkClient {
   readonly kind: "fake";
@@ -1178,7 +1180,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir,
       });
 
-      await client.submitPrompt("Remember this");
+      await client.submitPromptAndWait("Remember this");
       const sessionId = (await client.getSnapshot()).activeSessionId;
       const sessionStats = getDatabase()
         .prepare<{
@@ -1238,9 +1240,9 @@ describe("createPersistentUiBackendClient", () => {
         workdir,
       });
 
-      await client.submitPrompt("First session");
+      await client.submitPromptAndWait("First session");
       const firstSessionId = (await client.getSnapshot()).activeSessionId;
-      await client.submitPrompt("Second session");
+      await client.submitPromptAndWait("Second session");
       const secondSessionId = (await client.getSnapshot()).activeSessionId;
 
       expect(firstSessionId).toBeTruthy();
@@ -1362,7 +1364,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir: otherWorkdir,
       });
 
-      await otherClient.submitPrompt("Other project session");
+      await otherClient.submitPromptAndWait("Other project session");
       const otherSessionId = (await otherClient.getSnapshot()).activeSessionId;
       expect(otherSessionId).toBeTruthy();
       await otherClient.dispose();
@@ -1410,8 +1412,8 @@ describe("createPersistentUiBackendClient", () => {
         workdir: projectB,
       });
 
-      await clientA.submitPrompt("Prompt for project A");
-      await clientB.submitPrompt("Prompt for project B");
+      await clientA.submitPromptAndWait("Prompt for project A");
+      await clientB.submitPromptAndWait("Prompt for project B");
 
       const snapshotA = await clientA.getSnapshot();
       const snapshotB = await clientB.getSnapshot();
@@ -1451,9 +1453,9 @@ describe("createPersistentUiBackendClient", () => {
         workdir,
       });
 
-      await client.submitPrompt("First session");
+      await client.submitPromptAndWait("First session");
       const firstSessionId = (await client.getSnapshot()).activeSessionId;
-      await client.submitPrompt("Second session");
+      await client.submitPromptAndWait("Second session");
       const secondSessionId = (await client.getSnapshot()).activeSessionId;
 
       expect(firstSessionId).toBeTruthy();
@@ -1492,7 +1494,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir: currentWorkdir,
       });
 
-      await currentClient.submitPrompt("Current project session");
+      await currentClient.submitPromptAndWait("Current project session");
       const currentSessionId = (await currentClient.getSnapshot())
         .activeSessionId;
       expect(currentSessionId).toBeTruthy();
@@ -1508,7 +1510,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir: otherWorkdir,
       });
 
-      await otherClient.submitPrompt("Other project session");
+      await otherClient.submitPromptAndWait("Other project session");
       const otherSessionId = (await otherClient.getSnapshot()).activeSessionId;
       expect(otherSessionId).toBeTruthy();
       expect(otherSessionId).not.toBe(currentSessionId);
@@ -1548,7 +1550,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir,
       });
 
-      await client.submitPrompt("Primary session");
+      await client.submitPromptAndWait("Primary session");
       const primarySessionId = (await client.getSnapshot()).activeSessionId;
       if (!primarySessionId) {
         throw new Error("expected primary session");
@@ -1668,7 +1670,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir,
       });
 
-      await client.submitPrompt("Delegate persistent child work");
+      await client.submitPromptAndWait("Delegate persistent child work");
       const parentSessionId = (await client.getSnapshot()).activeSessionId;
       if (!parentSessionId) {
         throw new Error("expected parent session");
@@ -1720,7 +1722,7 @@ describe("createPersistentUiBackendClient", () => {
         restoredSnapshot.sessions.some((session) => session.id === childId),
       ).toBe(false);
       await expect(
-        restored.submitPrompt("Should not run as primary", {
+        restored.submitPromptAndWait("Should not run as primary", {
           sessionId: childId,
         }),
       ).rejects.toThrow("Cannot submit a primary prompt to subagent session");
@@ -1770,7 +1772,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir,
       });
 
-      await client.submitPrompt("Open persistent background child");
+      await client.submitPromptAndWait("Open persistent background child");
       const parentSessionId = (await client.getSnapshot()).activeSessionId;
       if (!parentSessionId) {
         throw new Error("expected parent session");
@@ -1841,7 +1843,7 @@ describe("createPersistentUiBackendClient", () => {
         restoredSnapshot.sessions.some((session) => session.id === childId),
       ).toBe(false);
       await expect(
-        restored.submitPrompt("Should not run as primary", {
+        restored.submitPromptAndWait("Should not run as primary", {
           sessionId: childId,
         }),
       ).rejects.toThrow("Cannot submit a primary prompt to subagent session");
@@ -1890,7 +1892,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir,
       });
 
-      await client.submitPrompt("Seed session");
+      await client.submitPromptAndWait("Seed session");
       const seededSnapshot = await client.getSnapshot();
       const sessionId = seededSnapshot.activeSessionId;
       if (!sessionId) {
@@ -1946,7 +1948,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir,
       });
 
-      await client.submitPrompt("Seed session");
+      await client.submitPromptAndWait("Seed session");
       const sessionId = (await client.getSnapshot()).activeSessionId;
       if (!sessionId) {
         throw new Error("expected seeded prompt to create an active session");
@@ -1991,7 +1993,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir,
       });
 
-      await client.submitPrompt("Seed session");
+      await client.submitPromptAndWait("Seed session");
       const seededSnapshot = await client.getSnapshot();
       const sessionId = seededSnapshot.activeSessionId;
       if (!sessionId) {
@@ -2046,7 +2048,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir,
       });
 
-      await owner.submitPrompt("Seed session");
+      await owner.submitPromptAndWait("Seed session");
       const seededSnapshot = await owner.getSnapshot();
       const sessionId = seededSnapshot.activeSessionId;
       if (!sessionId) {
@@ -2101,7 +2103,9 @@ describe("createPersistentUiBackendClient", () => {
     let secondBackend:
       | ReturnType<typeof createPersistentUiBackendClient>
       | undefined;
-    let firstRun: Promise<void> | undefined;
+    let firstRun:
+      | ReturnType<PersistentUiBackendClient["submitPromptAndWait"]>
+      | undefined;
     try {
       const dbPath = join(directory, "agent.db");
       const workdir = join(directory, "workspace");
@@ -2122,7 +2126,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir,
       });
 
-      firstRun = firstBackend.submitPrompt("Keep first window running");
+      firstRun = firstBackend.submitPromptAndWait("Keep first window running");
       await withTimeout(
         firstStarted.promise,
         1_000,
@@ -2131,11 +2135,11 @@ describe("createPersistentUiBackendClient", () => {
 
       await expect(
         withTimeout(
-          secondBackend.submitPrompt("Run in another fresh window"),
+          secondBackend.submitPromptAndWait("Run in another fresh window"),
           1_000,
           "second backend was blocked by another session's active run",
         ),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject({ prompt: { status: "succeeded" } });
 
       const secondSnapshot = await secondBackend.getSnapshot();
       expect(secondSnapshot.activeSessionId).toBeDefined();
@@ -2178,7 +2182,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir,
       });
 
-      await owner.submitPrompt("Seed session");
+      await owner.submitPromptAndWait("Seed session");
       const ownerSnapshot = await owner.getSnapshot();
       const ownerSessionId = ownerSnapshot.activeSessionId;
       if (!ownerSessionId) {
@@ -2204,7 +2208,7 @@ describe("createPersistentUiBackendClient", () => {
         ]),
         workdir,
       });
-      const queuedPrompt = contender.submitPrompt("Run after owner", {
+      const queuedPrompt = contender.submitPromptAndWait("Run after owner", {
         sessionId: ownerSessionId,
       });
       const earlyResult = await Promise.race([
@@ -2249,7 +2253,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir,
       });
 
-      await owner.submitPrompt("Seed session");
+      await owner.submitPromptAndWait("Seed session");
       const ownerSnapshot = await owner.getSnapshot();
       const ownerSessionId = ownerSnapshot.activeSessionId;
       if (!ownerSessionId) {
@@ -2277,13 +2281,13 @@ describe("createPersistentUiBackendClient", () => {
       });
       await expect(
         withTimeout(
-          contender.submitPrompt("Run after owner death", {
+          contender.submitPromptAndWait("Run after owner death", {
             sessionId: ownerSessionId,
           }),
           1_000,
           "dead-owner prompt was not recovered before submission",
         ),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject({ prompt: { status: "succeeded" } });
 
       const contenderSnapshot = await contender.getSnapshot();
       const staleRun = requireRun(contenderSnapshot.runs, "run_owner_stale");
@@ -2318,7 +2322,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir: directory,
       });
 
-      await client.submitPrompt("Run without snapshot");
+      await client.submitPromptAndWait("Run without snapshot");
 
       expect(track).not.toHaveBeenCalled();
       expect(capture).not.toHaveBeenCalled();
@@ -2369,7 +2373,7 @@ describe("createPersistentUiBackendClient", () => {
         workdir: directory,
       });
 
-      await client.submitPrompt("Run with snapshot");
+      await client.submitPromptAndWait("Run with snapshot");
 
       expect(track).toHaveBeenCalledTimes(1);
       expect(capture).toHaveBeenCalledTimes(1);

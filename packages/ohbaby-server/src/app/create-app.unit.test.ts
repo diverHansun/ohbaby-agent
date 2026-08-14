@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -15,7 +14,6 @@ import type {
   UiPermissionState,
   UiPromptCompletion,
   UiCompletedPromptSubmission,
-  UiPromptQueueClient,
   UiPromptSubmission,
   UiPromptTerminalStatus,
   UiProbeModelContextWindowResult,
@@ -232,7 +230,7 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(this.commandCatalog);
   }
 
-  submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void> {
+  performPrompt(text: string, options?: SubmitPromptOptions): Promise<void> {
     this.submitted.push({ text, ...(options ? { options } : {}) });
     if (this.submitError) {
       return Promise.reject(this.submitError);
@@ -249,7 +247,7 @@ class FakeBackend implements UiBackendClient {
     }
     const promptId = `prompt_fake_${String(++this.nextPromptId)}`;
     const sessionId = options?.sessionId ?? "session_fake";
-    const completion = this.submitPrompt(text, options).then(() => ({
+    const completion = this.performPrompt(text, options).then(() => ({
       prompt: {
         clientRequestId: options?.clientRequestId ?? `request_${promptId}`,
         createdAt: timestamp,
@@ -410,7 +408,7 @@ class FakeBackend implements UiBackendClient {
 
 class DurablePromptFakeBackend
   extends FakeBackend
-  implements UiPromptQueueClient
+  implements UiBackendClient
 {
   private prompt: UiPromptSubmission | undefined;
   private completedPrompt: UiCompletedPromptSubmission | undefined;
@@ -423,7 +421,7 @@ class DurablePromptFakeBackend
   override submitPromptAccepted(
     text: string,
     options?: SubmitPromptOptions,
-  ): ReturnType<UiPromptQueueClient["submitPromptAccepted"]> {
+  ): ReturnType<UiBackendClient["submitPromptAccepted"]> {
     if (this.admissionError) {
       return Promise.reject(this.admissionError);
     }
@@ -471,8 +469,8 @@ class DurablePromptFakeBackend
   }
 
   override editQueuedPrompt(
-    input: Parameters<UiPromptQueueClient["editQueuedPrompt"]>[0],
-  ): ReturnType<UiPromptQueueClient["editQueuedPrompt"]> {
+    input: Parameters<UiBackendClient["editQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["editQueuedPrompt"]> {
     if (this.prompt?.promptId !== input.promptId) {
       return Promise.reject(new Error("prompt not found"));
     }
@@ -485,8 +483,8 @@ class DurablePromptFakeBackend
   }
 
   override cancelQueuedPrompt(
-    input: Parameters<UiPromptQueueClient["cancelQueuedPrompt"]>[0],
-  ): ReturnType<UiPromptQueueClient["cancelQueuedPrompt"]> {
+    input: Parameters<UiBackendClient["cancelQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {
     if (this.prompt?.promptId !== input.promptId) {
       return Promise.reject(new Error("prompt not found"));
     }
@@ -535,8 +533,8 @@ class DurablePromptFakeBackend
   }
 
   override acquirePromptEditLease(
-    input: Parameters<UiPromptQueueClient["acquirePromptEditLease"]>[0],
-  ): ReturnType<UiPromptQueueClient["acquirePromptEditLease"]> {
+    input: Parameters<UiBackendClient["acquirePromptEditLease"]>[0],
+  ): ReturnType<UiBackendClient["acquirePromptEditLease"]> {
     if (this.prompt?.promptId !== input.promptId) {
       return Promise.reject(new Error("prompt not found"));
     }
@@ -549,8 +547,8 @@ class DurablePromptFakeBackend
   }
 
   override renewPromptEditLease(
-    input: Parameters<UiPromptQueueClient["renewPromptEditLease"]>[0],
-  ): ReturnType<UiPromptQueueClient["renewPromptEditLease"]> {
+    input: Parameters<UiBackendClient["renewPromptEditLease"]>[0],
+  ): ReturnType<UiBackendClient["renewPromptEditLease"]> {
     if (this.prompt?.promptId !== input.promptId) {
       return Promise.reject(new Error("prompt not found"));
     }
@@ -563,9 +561,9 @@ class DurablePromptFakeBackend
   }
 
   acquirePromptEditLeaseForOwner(
-    input: Parameters<UiPromptQueueClient["acquirePromptEditLease"]>[0],
+    input: Parameters<UiBackendClient["acquirePromptEditLease"]>[0],
     trustedOwnerClientId: string,
-  ): ReturnType<UiPromptQueueClient["acquirePromptEditLease"]> {
+  ): ReturnType<UiBackendClient["acquirePromptEditLease"]> {
     return this.acquirePromptEditLease(input).then((lease) => ({
       ...lease,
       ownerClientId: trustedOwnerClientId,
@@ -573,9 +571,9 @@ class DurablePromptFakeBackend
   }
 
   renewPromptEditLeaseForOwner(
-    input: Parameters<UiPromptQueueClient["renewPromptEditLease"]>[0],
+    input: Parameters<UiBackendClient["renewPromptEditLease"]>[0],
     trustedOwnerClientId: string,
-  ): ReturnType<UiPromptQueueClient["renewPromptEditLease"]> {
+  ): ReturnType<UiBackendClient["renewPromptEditLease"]> {
     return this.renewPromptEditLease(input).then((lease) => ({
       ...lease,
       ownerClientId: trustedOwnerClientId,
@@ -583,8 +581,8 @@ class DurablePromptFakeBackend
   }
 
   override releasePromptEditLease(
-    input: Parameters<UiPromptQueueClient["releasePromptEditLease"]>[0],
-  ): ReturnType<UiPromptQueueClient["releasePromptEditLease"]> {
+    input: Parameters<UiBackendClient["releasePromptEditLease"]>[0],
+  ): ReturnType<UiBackendClient["releasePromptEditLease"]> {
     if (this.prompt?.promptId !== input.promptId) {
       return Promise.reject(new Error("prompt not found"));
     }
@@ -593,8 +591,8 @@ class DurablePromptFakeBackend
 
   override waitForPrompt(
     _promptId: string,
-    options?: Parameters<UiPromptQueueClient["waitForPrompt"]>[1],
-  ): ReturnType<UiPromptQueueClient["waitForPrompt"]> {
+    options?: Parameters<UiBackendClient["waitForPrompt"]>[1],
+  ): ReturnType<UiBackendClient["waitForPrompt"]> {
     if (this.completedPrompt) {
       return Promise.resolve({ prompt: this.completedPrompt });
     }

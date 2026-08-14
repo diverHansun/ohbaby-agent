@@ -11,6 +11,7 @@ import type {
   UiConnectModelResult,
   UiContextWindowUsage,
   UiInteractionResponse,
+  UiPromptCompletion,
   UiSetSearchApiKeyInput,
   UiSetSearchApiKeyResult,
   UiSnapshot,
@@ -190,10 +191,10 @@ export interface CommandServiceOptions {
   readonly skills?: CommandSkillProvider;
   readonly mcps?: CommandMcpProvider;
   readonly permission?: CommandPermissionProvider;
-  readonly submitPrompt?: (
+  readonly submitPromptAndWait?: (
     text: string,
     options?: { readonly sessionId?: string },
-  ) => Promise<void> | void;
+  ) => Promise<UiPromptCompletion> | UiPromptCompletion;
   readonly connectModel?: (
     input: UiConnectModelInput,
   ) => Promise<UiConnectModelResult> | UiConnectModelResult;

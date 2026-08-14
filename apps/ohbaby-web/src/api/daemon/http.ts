@@ -15,6 +15,7 @@ import type {
   PermissionResponseRequest,
   PermissionStateResponse,
   PromptAcceptedResponse,
+  PromptCompletionResponse,
   PromptLeaseResponse,
   PromptMutationResponse,
   RegisterClientResponse,
@@ -28,6 +29,10 @@ import type {
   WorkspaceOpenResponse,
 } from "./wire.js";
 import { workspaceDirectoryHeaders } from "ohbaby-sdk";
+import type {
+  UiInteractionResponse,
+  UiSlashCommandSurface,
+} from "ohbaby-sdk";
 
 export interface DaemonHttpClientOptions {
   readonly baseUrl: string;
@@ -87,8 +92,10 @@ export class DaemonHttpClient {
     return this.request("/v1/snapshot");
   }
 
-  listCommands(): Promise<CommandCatalogResponse> {
-    return this.request("/v1/commands?surface=web");
+  listCommands(surface: UiSlashCommandSurface): Promise<CommandCatalogResponse> {
+    return this.request(
+      `/v1/commands?surface=${encodeURIComponent(surface)}`,
+    );
   }
 
   listWorkspaceScopes(): Promise<WorkspaceScopesResponse> {
@@ -156,11 +163,23 @@ export class DaemonHttpClient {
     );
   }
 
-  submitPrompt(input: SubmitPromptRequest): Promise<PromptAcceptedResponse> {
+  submitPromptAccepted(
+    input: SubmitPromptRequest,
+  ): Promise<PromptAcceptedResponse> {
     return this.request("/v1/prompts", {
       body: input,
       method: "POST",
     });
+  }
+
+  waitForPrompt(
+    promptId: string,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<PromptCompletionResponse> {
+    return this.request(
+      `/v1/prompts/${encodeURIComponent(promptId)}/completion`,
+      { signal: options.signal },
+    );
   }
 
   acquirePromptEditLease(promptId: string): Promise<PromptLeaseResponse> {
@@ -219,6 +238,16 @@ export class DaemonHttpClient {
       body: response,
       method: "POST",
     });
+  }
+
+  respondInteraction(
+    interactionId: string,
+    response: UiInteractionResponse,
+  ): Promise<OkResponse> {
+    return this.request(
+      `/v1/interactions/${encodeURIComponent(interactionId)}/respond`,
+      { body: { response }, method: "POST" },
+    );
   }
 
   setPermission(input: SetPermissionRequest): Promise<PermissionStateResponse> {
@@ -292,6 +321,7 @@ export class DaemonHttpClient {
       readonly body?: unknown;
       readonly includeDirectory?: boolean;
       readonly method?: "DELETE" | "GET" | "PATCH" | "POST";
+      readonly signal?: AbortSignal;
     } = {},
   ): Promise<T> {
     const headers: Record<string, string> = {
@@ -311,6 +341,7 @@ export class DaemonHttpClient {
         options.body === undefined ? undefined : JSON.stringify(options.body),
       headers,
       method: options.method ?? "GET",
+      signal: options.signal,
     });
     const value = (await response.json()) as unknown;
     if (!response.ok) {

@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -169,7 +168,7 @@ describeIfApiKey("snapshot API-backed E2E", () => {
       }
     });
 
-    await client.submitPrompt(
+    await client.submitPromptAndWait(
       [
         "This is an automated E2E test.",
         `Use the write tool to create ${TARGET_FILE} with exactly this content:`,

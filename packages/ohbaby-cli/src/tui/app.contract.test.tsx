@@ -3920,7 +3920,6 @@ function createFakeClient(
   readonly renewPromptEditLease: ReturnType<typeof vi.fn>;
   readonly setPermission: ReturnType<typeof vi.fn>;
   readonly setSearchApiKey: ReturnType<typeof vi.fn>;
-  readonly submitPrompt: ReturnType<typeof vi.fn>;
   readonly submitPromptAccepted: ReturnType<typeof vi.fn>;
   readonly submitPromptAndWait: ReturnType<typeof vi.fn>;
   readonly waitForPrompt: ReturnType<typeof vi.fn>;
@@ -4044,7 +4043,6 @@ function createFakeClient(
         sessionRules: [],
       } as const),
     ),
-    submitPrompt: vi.fn(() => Promise.resolve()),
     submitPromptAccepted: vi.fn(() =>
       Promise.resolve({
         clientRequestId: "request_tui",

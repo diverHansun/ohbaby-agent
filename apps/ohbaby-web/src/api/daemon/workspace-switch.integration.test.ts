@@ -47,6 +47,34 @@ function emptySnapshot(title: string): UiSnapshot {
 }
 
 describe("ohbaby web workspace switching", () => {
+  it("represents an empty workspace selection with a null client", async () => {
+    const fetchImpl: typeof fetch = (input) => {
+      const request = new Request(input);
+      if (request.url.endsWith("/v1/scopes")) {
+        return Promise.resolve(Response.json({ ok: true, scopes: [] }));
+      }
+      throw new Error(`Unexpected request: ${request.url}`);
+    };
+    const runtime = createOhbabyWebRuntime(
+      {
+        baseUrl: "http://127.0.0.1:4096",
+        clientId: "client-a",
+        token: "token",
+      },
+      { fetch: fetchImpl },
+    );
+
+    await runtime.ready;
+
+    expect(runtime.client).toBeNull();
+    expect(runtime.getWorkspaceSnapshot()).toEqual({
+      scopes: [],
+      selectedDirectory: null,
+    });
+    expect(runtime.store.getSnapshot().view.snapshot).toBeNull();
+    await runtime.dispose();
+  });
+
   it("closes the old SSE generation and rebinds HTTP and SSE to the new directory", async () => {
     const requests: { clientId?: string; directory?: string; url: string }[] =
       [];
@@ -188,7 +216,7 @@ describe("ohbaby web workspace switching", () => {
     );
     expect(repoBRequests[0]?.clientId).not.toBe("client-a");
 
-    await runtime.client.close();
+    await runtime.dispose();
   });
 
   it("restores the previous workspace when the target fails closed", async () => {
@@ -309,7 +337,7 @@ describe("ohbaby web workspace switching", () => {
       "A",
     );
     expect(clientDirectories).toEqual(["/repo-a", "/repo-b", "/repo-a"]);
-    await runtime.client.close();
+    await runtime.dispose();
   });
 
   it.each([
@@ -490,7 +518,7 @@ describe("ohbaby web workspace switching", () => {
       expect(
         runtime.store.getSnapshot().view.snapshot?.sessions[0]?.title,
       ).toBe("B");
-      await runtime.client.close();
+      await runtime.dispose();
     },
   );
 });

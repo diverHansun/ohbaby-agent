@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
-/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility bridge */
 import path from "node:path";
-import type { UiBackendClient, UiPromptQueueClient } from "ohbaby-sdk";
+import type { UiBackendClient } from "ohbaby-sdk";
 import { createBus, type BusInstance } from "../bus/index.js";
 import { DatabaseSubagentInstanceStore } from "../agents/index.js";
 import {
@@ -66,7 +65,7 @@ export interface PersistentUiBackendOptions extends Omit<
 }
 
 export interface PersistentUiBackendClient
-  extends UiPromptQueueClient,
+  extends UiBackendClient,
     UiPromptQueueExecutionPort {
   dispose(): Promise<void> | void;
 }
@@ -207,17 +206,10 @@ function withStartupRecovery(
       await ready();
       return client.listCommands(query);
     },
-    async submitPrompt(
-      text,
-      submitOptions,
-    ): ReturnType<UiBackendClient["submitPrompt"]> {
-      await ready();
-      return client.submitPrompt(text, submitOptions);
-    },
     async submitPromptAccepted(
       text,
       submitOptions,
-    ): ReturnType<UiPromptQueueClient["submitPromptAccepted"]> {
+    ): ReturnType<UiBackendClient["submitPromptAccepted"]> {
       await ready();
       return client.submitPromptAccepted(text, submitOptions);
     },
@@ -230,19 +222,19 @@ function withStartupRecovery(
     },
     async editQueuedPrompt(
       input,
-    ): ReturnType<UiPromptQueueClient["editQueuedPrompt"]> {
+    ): ReturnType<UiBackendClient["editQueuedPrompt"]> {
       await ready();
       return client.editQueuedPrompt(input);
     },
     async cancelQueuedPrompt(
       input,
-    ): ReturnType<UiPromptQueueClient["cancelQueuedPrompt"]> {
+    ): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {
       await ready();
       return client.cancelQueuedPrompt(input);
     },
     async acquirePromptEditLease(
       input,
-    ): ReturnType<UiPromptQueueClient["acquirePromptEditLease"]> {
+    ): ReturnType<UiBackendClient["acquirePromptEditLease"]> {
       await ready();
       return client.acquirePromptEditLease(input);
     },
@@ -258,7 +250,7 @@ function withStartupRecovery(
     },
     async renewPromptEditLease(
       input,
-    ): ReturnType<UiPromptQueueClient["renewPromptEditLease"]> {
+    ): ReturnType<UiBackendClient["renewPromptEditLease"]> {
       await ready();
       return client.renewPromptEditLease(input);
     },
@@ -271,14 +263,14 @@ function withStartupRecovery(
     },
     async releasePromptEditLease(
       input,
-    ): ReturnType<UiPromptQueueClient["releasePromptEditLease"]> {
+    ): ReturnType<UiBackendClient["releasePromptEditLease"]> {
       await ready();
       return client.releasePromptEditLease(input);
     },
     async waitForPrompt(
       promptId,
       waitOptions,
-    ): ReturnType<UiPromptQueueClient["waitForPrompt"]> {
+    ): ReturnType<UiBackendClient["waitForPrompt"]> {
       await ready();
       return client.waitForPrompt(promptId, waitOptions);
     },

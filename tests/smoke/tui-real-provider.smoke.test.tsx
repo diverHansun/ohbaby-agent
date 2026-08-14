@@ -20,7 +20,7 @@ import {
 const cleanupDirectories: string[] = [];
 
 type RealUiClient = ReturnType<typeof createPersistentUiBackendClient>;
-type RealSubmitOptions = Parameters<RealUiClient["submitPrompt"]>[1];
+type RealSubmitOptions = Parameters<RealUiClient["submitPromptAndWait"]>[1];
 
 interface SubmitWithPermissionApprovalOptions {
   readonly allowedPermissionPatterns: ReadonlySet<string>;
@@ -186,7 +186,7 @@ async function submitPromptApprovingPermissions(
   prompt: string,
   options: SubmitWithPermissionApprovalOptions,
 ): Promise<void> {
-  const run = client.submitPrompt(prompt, options.submitOptions);
+  const run = client.submitPromptAndWait(prompt, options.submitOptions);
   const answered = new Set<string>();
   const startedAt = Date.now();
   const timeoutMs = options.timeoutMs ?? 300_000;
@@ -618,7 +618,7 @@ describe("real provider TUI smoke", () => {
           "utf8",
         );
 
-        await client.submitPrompt(
+        await client.submitPromptAndWait(
           [
             "Call the task tool exactly once with role explore.",
             "Ask the child to inspect subagent-target-a.txt and subagent-target-b.txt.",
@@ -643,7 +643,7 @@ describe("real provider TUI smoke", () => {
           throw new Error("real model did not create a subagent child session");
         }
 
-        await client.submitPrompt(
+        await client.submitPromptAndWait(
           [
             "Call the task tool exactly once with role explore.",
             `Use resume_session_id ${child.id}.`,
@@ -670,7 +670,7 @@ describe("real provider TUI smoke", () => {
           "gamma background agent task marker",
           "utf8",
         );
-        await client.submitPrompt(
+        await client.submitPromptAndWait(
           [
             "Call the agent_open tool exactly once with role explore.",
             "Ask the child to inspect agent-task-target-c.txt and remember the gamma marker.",
@@ -693,7 +693,7 @@ describe("real provider TUI smoke", () => {
           () => sessionMessageCount(agentTaskChildId) >= 2,
         );
 
-        await client.submitPrompt(
+        await client.submitPromptAndWait(
           [
             `Call the agent_eval tool exactly once with task_id ${agentTaskId}.`,
             "Ask the child to use its prior child history and restate the gamma marker in one concise finding.",
@@ -705,14 +705,14 @@ describe("real provider TUI smoke", () => {
           () => sessionMessageCount(agentTaskChildId) >= 4,
         );
 
-        await client.submitPrompt(
+        await client.submitPromptAndWait(
           [
             `Call the agent_status tool exactly once with task_id ${agentTaskId}.`,
             "After agent_status returns, answer with the exact token OHBABY_REAL_AGENT_STATUS_OK.",
           ].join(" "),
           { sessionId: parentSessionId },
         );
-        await client.submitPrompt(
+        await client.submitPromptAndWait(
           [
             `Call the agent_close tool exactly once with task_id ${agentTaskId}.`,
             "After agent_close returns, answer with the exact token OHBABY_REAL_AGENT_CLOSE_OK.",
@@ -745,7 +745,7 @@ describe("real provider TUI smoke", () => {
           "utf8",
         );
 
-        await client.submitPrompt(
+        await client.submitPromptAndWait(
           [
             "Call the task tool exactly once.",
             "Do not include role in the task arguments.",
@@ -785,7 +785,7 @@ describe("real provider TUI smoke", () => {
           "utf8",
         );
 
-        await client.submitPrompt(
+        await client.submitPromptAndWait(
           [
             "Call the agent_open tool exactly once.",
             "Do not include role in the agent_open arguments.",

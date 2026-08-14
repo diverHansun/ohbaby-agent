@@ -160,7 +160,6 @@ describe("runOhbabyCli", () => {
         | undefined
     )?.(handler);
     expect(subscribeEvents).toHaveBeenCalledWith(handler);
-    expect(core.submitPrompt).not.toHaveBeenCalled();
     expect(waitUntilExit).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
   });
@@ -697,7 +696,6 @@ describe("runOhbabyCli", () => {
       runOhbabyCli(["node", "ohbaby", "run", "hello", "world"]),
     ).resolves.toBe(0);
     expect(core.submitPromptAndWait).toHaveBeenCalledWith("hello world");
-    expect(core.submitPrompt).not.toHaveBeenCalled();
     expect(subscribeEvents).toHaveBeenCalledTimes(1);
     expect(unsubscribe).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
@@ -797,7 +795,6 @@ function createCore(): {
   readonly renewPromptEditLease: ReturnType<typeof vi.fn>;
   readonly setPermission: ReturnType<typeof vi.fn>;
   readonly setSearchApiKey: ReturnType<typeof vi.fn>;
-  readonly submitPrompt: ReturnType<typeof vi.fn>;
   readonly submitPromptAccepted: ReturnType<typeof vi.fn>;
   readonly submitPromptAndWait: ReturnType<typeof vi.fn>;
   readonly waitForPrompt: ReturnType<typeof vi.fn>;
@@ -866,7 +863,6 @@ function createCore(): {
         sessionRules: [],
       } as const),
     ),
-    submitPrompt: vi.fn(() => Promise.resolve()),
     submitPromptAccepted: vi.fn(() =>
       Promise.resolve({
         clientRequestId: "request_1",

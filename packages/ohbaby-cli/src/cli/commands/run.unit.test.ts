@@ -157,7 +157,6 @@ function createRuntime(
       listCommands: vi.fn(() => Promise.resolve({ commands: [] })),
       respondInteraction: vi.fn(() => Promise.resolve()),
       respondPermission: vi.fn(() => Promise.resolve()),
-      submitPrompt: vi.fn(() => Promise.resolve()),
       submitPromptAndWait: vi.fn(() => Promise.resolve(completion("succeeded"))),
     },
     dispose: vi.fn(() => Promise.resolve()),

@@ -125,11 +125,25 @@ async function executeSkillCommand(
     await options.skills.loadPrompt(skillName),
     invocation.rawArgs,
   );
-  if (!options.submitPrompt) {
+  if (!options.submitPromptAndWait) {
     context.emitOutput({ kind: "markdown", markdown: prompt });
     return;
   }
-  await options.submitPrompt(prompt, { sessionId: invocation.sessionId });
+  const completion = await options.submitPromptAndWait(prompt, {
+    sessionId: invocation.sessionId,
+  });
+  if (completion.prompt.status !== "succeeded") {
+    context.fail({
+      code: `SKILL_PROMPT_${completion.prompt.status.toUpperCase()}`,
+      message:
+        completion.prompt.status === "failed" ||
+        completion.prompt.status === "interrupted"
+          ? completion.prompt.error.message
+          : "Skill prompt was cancelled",
+      recoverable: completion.prompt.status !== "interrupted",
+    });
+    return;
+  }
   context.emitAction({
     kind: "skill.submitted",
     data: { skill: skillName },

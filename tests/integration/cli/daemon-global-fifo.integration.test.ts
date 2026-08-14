@@ -210,15 +210,15 @@ describe("daemon global FIFO", () => {
     });
 
     try {
-      await clientA.submitPrompt("seed session");
+      await clientA.submitPromptAndWait("seed session");
       const sessionId = (await clientA.getSnapshot()).activeSessionId;
       if (!sessionId) {
         throw new Error("expected seeded session");
       }
 
-      const first = clientA.submitPrompt("first blocking", { sessionId });
+      const first = clientA.submitPromptAndWait("first blocking", { sessionId });
       await firstStarted.promise;
-      const second = clientB.submitPrompt("second queued", { sessionId });
+      const second = clientB.submitPromptAndWait("second queued", { sessionId });
       const beforeAbort = await Promise.race([
         secondStarted.promise.then(() => "started" as const),
         new Promise<"pending">((resolve) => {

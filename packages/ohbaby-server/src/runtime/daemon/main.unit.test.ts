@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import {
   mkdir,
   mkdtemp,
@@ -118,7 +117,6 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
         },
       }),
     ),
-    submitPrompt: vi.fn(() => Promise.resolve()),
     waitForPrompt: vi.fn(() =>
       Promise.resolve({
         prompt: {
@@ -1197,8 +1195,8 @@ describe("startDaemonServer", () => {
         port: daemonB.port,
       });
 
-      await clientA.submitPrompt("Prompt for project A");
-      await clientB.submitPrompt("Prompt for project B");
+      await clientA.submitPromptAndWait("Prompt for project A");
+      await clientB.submitPromptAndWait("Prompt for project B");
 
       const snapshotA = await clientA.getSnapshot();
       const snapshotB = await clientB.getSnapshot();

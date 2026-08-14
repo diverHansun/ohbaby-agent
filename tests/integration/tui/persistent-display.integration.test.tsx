@@ -124,7 +124,7 @@ describe("TUI persistent backend display", () => {
       ]),
       workdir,
     });
-    await client.submitPrompt("Remember this");
+    await client.submitPromptAndWait("Remember this");
     closeDatabase();
 
     const restored = createPersistentUiBackendClient({
@@ -166,7 +166,7 @@ describe("TUI persistent backend display", () => {
       ]),
       workdir,
     });
-    await client.submitPrompt("Seed session");
+    await client.submitPromptAndWait("Seed session");
     const seededSnapshot = await client.getSnapshot();
     const sessionId = seededSnapshot.activeSessionId;
     if (!sessionId) {
@@ -238,10 +238,10 @@ describe("TUI persistent backend display", () => {
       workdir,
     });
 
-    await setupClient.submitPrompt("Alpha prompt", {
+    await setupClient.submitPromptAndWait("Alpha prompt", {
       sessionId: "session_alpha",
     });
-    await setupClient.submitPrompt("Beta prompt", {
+    await setupClient.submitPromptAndWait("Beta prompt", {
       sessionId: "session_beta",
     });
     closeDatabase();
@@ -309,7 +309,7 @@ describe("TUI persistent backend display", () => {
     });
 
     for (let index = 1; index <= 8; index += 1) {
-      await setupClient.submitPrompt(`Prompt ${String(index)}`, {
+      await setupClient.submitPromptAndWait(`Prompt ${String(index)}`, {
         sessionId: `session_${String(index)}`,
       });
     }
@@ -367,7 +367,7 @@ describe("TUI persistent backend display", () => {
       workdir: originalWorkdir,
     });
 
-    await setupClient.submitPrompt("Alpha prompt", {
+    await setupClient.submitPromptAndWait("Alpha prompt", {
       sessionId: "session_alpha",
     });
     await setupClient.dispose();

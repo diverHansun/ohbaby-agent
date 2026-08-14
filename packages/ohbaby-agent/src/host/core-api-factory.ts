@@ -5,7 +5,6 @@ import type {
   UiCommandRecorder,
   UiSnapshot,
 } from "ohbaby-sdk";
-/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility bridge */
 import {
   closePersistentUiBackendDatabase,
   createPersistentUiBackendClient,
@@ -195,9 +194,6 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
         input,
       ): ReturnType<CoreAPI["renewPromptEditLease"]> {
         return client.renewPromptEditLease(input);
-      },
-      submitPrompt(text, submitOptions): ReturnType<CoreAPI["submitPrompt"]> {
-        return client.submitPrompt(text, submitOptions);
       },
       submitPromptAccepted(
         text,

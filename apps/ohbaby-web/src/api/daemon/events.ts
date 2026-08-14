@@ -275,9 +275,6 @@ export class FetchDaemonEventStream implements DaemonEventStream {
       callbacks.onConnectionState?.("live");
       ready.resolve();
     }
-    if (event.type === "ui.event" && frame.id !== undefined) {
-      this.lastEventId = frame.id;
-    }
     await callbacks.onEvent?.({
       ...(frame.id === undefined ? {} : { id: Number(frame.id) }),
       payload: event,

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-deprecated -- improve-1 compatibility coverage */
 import {
   request as httpRequest,
   createServer as createHttpServer,
@@ -327,7 +326,7 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve({ commands: [], version: "v1" });
   }
 
-  submitPrompt(text: string, options?: SubmitPromptOptions): Promise<void> {
+  performPrompt(text: string, options?: SubmitPromptOptions): Promise<void> {
     this.submitted.push({ text, ...(options ? { options } : {}) });
     if (this.emitOnSubmit) {
       this.emit(runUpdated("run_1", options?.sessionId));
@@ -347,7 +346,7 @@ class FakeBackend implements UiBackendClient {
   ): ReturnType<UiBackendClient["submitPromptAccepted"]> {
     const promptId = `prompt_fake_${String(++this.nextPromptId)}`;
     const sessionId = options?.sessionId ?? "session_fake";
-    const completion = this.submitPrompt(text, options).then(() => ({
+    const completion = this.performPrompt(text, options).then(() => ({
       prompt: {
         clientRequestId: options?.clientRequestId ?? `request_${promptId}`,
         createdAt: timestamp,

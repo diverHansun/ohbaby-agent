@@ -127,8 +127,43 @@ describe("ohbaby-web daemon client", () => {
       }
       if (url.endsWith("/v1/prompts")) {
         return Promise.resolve(
-          Response.json({ ok: true, sessionId: "session_1" }, { status: 202 }),
+          Response.json(
+            {
+              clientRequestId: "request_1",
+              createdAt: "2026-06-12T00:00:00.000Z",
+              ok: true,
+              promptId: "prompt_1",
+              sessionId: "session_1",
+              status: "queued",
+              userMessageId: "message_1",
+            },
+            { status: 202 },
+          ),
         );
+      }
+      if (url.endsWith("/v1/prompts/prompt_1/completion")) {
+        return Promise.resolve(
+          Response.json({
+            completion: {
+              prompt: {
+                clientRequestId: "request_1",
+                createdAt: "2026-06-12T00:00:00.000Z",
+                endedAt: "2026-06-12T00:00:01.000Z",
+                promptId: "prompt_1",
+                scopeKey: "/repo",
+                sessionId: "session_1",
+                status: "succeeded",
+                text: "hi",
+                updatedAt: "2026-06-12T00:00:01.000Z",
+                userMessageId: "message_1",
+              },
+            },
+            ok: true,
+          }),
+        );
+      }
+      if (url.endsWith("/v1/interactions/interaction_1/respond")) {
+        return Promise.resolve(Response.json({ ok: true }));
       }
       if (url.endsWith("/v1/commands?surface=web")) {
         const commands =
@@ -320,6 +355,8 @@ describe("ohbaby-web daemon client", () => {
     };
     const runtime = createOhbabyWebRuntime(config, { fetch: fetchImpl });
     await runtime.ready;
+    const client = runtime.client;
+    if (!client) throw new Error("Expected an active browser client");
 
     expect(runtime.store.getSnapshot()).toMatchObject({
       connectionState: "live",
@@ -332,10 +369,17 @@ describe("ohbaby-web daemon client", () => {
       },
     });
 
-    await runtime.client.submitPrompt({
+    const receipt = await client.submitPromptAccepted("hi", {
       clientRequestId: "request_1",
       sessionId: "session_1",
-      text: "hi",
+    });
+    expect(receipt).toEqual({
+      clientRequestId: "request_1",
+      createdAt: "2026-06-12T00:00:00.000Z",
+      promptId: "prompt_1",
+      sessionId: "session_1",
+      status: "queued",
+      userMessageId: "message_1",
     });
     expect(requests.at(-1)).toMatchObject({
       body: JSON.stringify({
@@ -349,8 +393,25 @@ describe("ohbaby-web daemon client", () => {
     expect(requests.at(-1)?.headers.get("authorization")).toBe(
       "Bearer token_1",
     );
+    await expect(client.waitForPrompt(receipt.promptId)).resolves.toMatchObject(
+      { prompt: { status: "succeeded" } },
+    );
+    await client.respondInteraction("interaction_1", {
+      choiceId: "choice_1",
+      kind: "accepted",
+    });
+    expect(requests.at(-1)).toMatchObject({
+      body: JSON.stringify({
+        response: { choiceId: "choice_1", kind: "accepted" },
+      }),
+      method: "POST",
+      url: "http://127.0.0.1:4096/v1/interactions/interaction_1/respond",
+    });
+    await expect(client.getSnapshot()).resolves.toMatchObject({
+      activeSessionId: "session_1",
+    });
 
-    await runtime.client.setPermission({
+    await client.setPermission({
       level: "full-access",
       mode: "plan",
     });
@@ -360,17 +421,10 @@ describe("ohbaby-web daemon client", () => {
       url: "http://127.0.0.1:4096/v1/permission",
     });
 
-    const catalog = await (
-      runtime.client as typeof runtime.client & {
-        readonly listCommands: () => Promise<{
-          readonly commands: readonly { readonly id: string }[];
-          readonly version: string;
-        }>;
-      }
-    ).listCommands();
+    const catalog = await runtime.listWebCommands();
     expect(catalog.commands.map((command) => command.id)).toEqual(["status"]);
 
-    await runtime.client.executeSlashCommand({
+    await runtime.executeSlashCommand({
       sessionId: "session_1",
       text: "/status",
     });
@@ -398,7 +452,7 @@ describe("ohbaby-web daemon client", () => {
     expect(commandBody.clientInvocationId).toEqual(expect.any(String));
     const beforeUnsupported = requests.length;
     await expect(
-      runtime.client.executeSlashCommand({
+      runtime.executeSlashCommand({
         sessionId: "session_1",
         text: "/sessions",
       }),
@@ -406,6 +460,17 @@ describe("ohbaby-web daemon client", () => {
     expect(requests).toHaveLength(beforeUnsupported);
     commandCatalogVersion = "commands-v2";
     expect(sseController).toBeDefined();
+    const delivered: string[] = [];
+    client.subscribeEvents(() => {
+      throw new Error("observer failed");
+    });
+    client.subscribeEvents((event) => {
+      expect(runtime.store.getSnapshot().view.lastAppliedSeqNum).toBe(3);
+      delivered.push(event.type);
+    });
+    expect(
+      requests.filter((request) => request.url.endsWith("/v1/events")),
+    ).toHaveLength(1);
     sseController?.enqueue(
       sseFrame(
         {
@@ -424,10 +489,27 @@ describe("ohbaby-web daemon client", () => {
       () => runtime.store.getSnapshot().view.lastAppliedSeqNum === 3,
       "timed out waiting for catalog update event",
     );
+    expect(delivered).toEqual(["command.catalog.updated"]);
+    sseController?.enqueue(
+      sseFrame(
+        {
+          event: {
+            reason: "duplicate",
+            timestamp: Date.parse("2026-06-12T00:00:02.000Z"),
+            type: "command.catalog.updated",
+            version: "commands-v2",
+          },
+          type: "ui.event",
+        },
+        3,
+      ),
+    );
+    await delay(20);
+    expect(delivered).toEqual(["command.catalog.updated"]);
     const catalogRequestsBeforeRefresh = requests.filter((request) =>
       request.url.endsWith("/v1/commands?surface=web"),
     ).length;
-    await runtime.client.executeSlashCommand({
+    await runtime.executeSlashCommand({
       sessionId: "session_1",
       text: "/skills",
     });
@@ -446,7 +528,7 @@ describe("ohbaby-web daemon client", () => {
       raw: "/skills",
       sessionId: "session_1",
     });
-    await runtime.client.executeSlashCommand({
+    await runtime.executeSlashCommand({
       sessionId: "session_1",
       text: "/hansun-db 查 X",
     });
@@ -465,22 +547,24 @@ describe("ohbaby-web daemon client", () => {
       surface: "tui",
     });
 
-    await expect(runtime.client.getCurrentModel()).resolves.toMatchObject({
+    await expect(client.getCurrentModel()).resolves.toMatchObject({
       model: "glm-4.7",
       provider: "zhipu",
     });
     await expect(
-      runtime.client.probeModelContextWindow({
+      client.probeModelContextWindow({
         apiKeyEnv: "ZHIPU_API_KEY",
         baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        interfaceProvider: "openai-compatible",
         model: "glm-4.7",
         provider: "zhipu",
       }),
     ).resolves.toMatchObject({ contextWindowTokens: 128_000 });
     await expect(
-      runtime.client.connectModel({
+      client.connectModel({
         apiKeyEnv: "ZHIPU_API_KEY",
         baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        interfaceProvider: "openai-compatible",
         model: "glm-4.7",
         provider: "zhipu",
       }),
@@ -490,19 +574,19 @@ describe("ohbaby-web daemon client", () => {
       provider: "zhipu",
     });
     await expect(
-      runtime.client.setSearchApiKey({
+      client.setSearchApiKey({
         apiKeyEnv: "TAVILY_API_KEY",
         provider: "tavily",
       }),
     ).resolves.toMatchObject({ provider: "tavily" });
     await expect(
-      runtime.client.getContextWindowUsage("session_1"),
+      client.getContextWindowUsage({ sessionId: "session_1" }),
     ).resolves.toMatchObject({ sessionId: "session_1" });
     await expect(
-      runtime.client.compactSession("session_1", { force: true }),
+      client.compactSession({ force: true, sessionId: "session_1" }),
     ).resolves.toMatchObject({ sessionId: "session_1" });
     await expect(
-      runtime.client.archiveSession("session_1"),
+      client.archiveSession({ sessionId: "session_1" }),
     ).resolves.toBeUndefined();
     expect(requests.slice(-3).map((request) => request.url)).toEqual([
       "http://127.0.0.1:4096/v1/sessions/session_1/archive",
@@ -522,7 +606,7 @@ describe("ohbaby-web daemon client", () => {
       "http://127.0.0.1:4096/v1/model",
     ]);
     sseController?.close();
-    await runtime.client.close();
+    await runtime.dispose();
   });
 
   it("binds the native browser fetch implementation when no custom fetch is provided", async () => {
@@ -596,7 +680,7 @@ describe("ohbaby-web daemon client", () => {
         token: "token_1",
       });
       await runtime.ready;
-      await runtime.client.close();
+      await runtime.dispose();
 
       expect(calls).toContain("http://127.0.0.1:4096/v1/clients");
       expect(calls).toContain("http://127.0.0.1:4096/v1/events");
@@ -609,7 +693,7 @@ describe("ohbaby-web daemon client", () => {
     }
   });
 
-  it("does not advance Last-Event-ID before resync snapshot succeeds", async () => {
+  it("does not advance Last-Event-ID beyond the committed resync snapshot", async () => {
     const eventRequestHeaders: Headers[] = [];
     let firstSseController:
       | ReadableStreamDefaultController<Uint8Array>
@@ -702,10 +786,10 @@ describe("ohbaby-web daemon client", () => {
       () => eventRequestHeaders.length >= 2,
       "timed out waiting for SSE reconnect",
     );
-    expect(eventRequestHeaders[1]?.get("last-event-id")).toBeNull();
+    expect(eventRequestHeaders[1]?.get("last-event-id")).toBe("0");
     firstSseController?.close();
     secondSseController?.close();
-    await runtime.client.close();
+    await runtime.dispose();
   });
 
   it("clears transient stream errors after the SSE connection returns live", async () => {
@@ -777,6 +861,6 @@ describe("ohbaby-web daemon client", () => {
       connectionState: "live",
       error: null,
     });
-    await runtime.client.close();
+    await runtime.dispose();
   });
 });
