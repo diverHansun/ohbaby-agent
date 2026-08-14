@@ -14,6 +14,9 @@
 | UiCommandSpec | backend 下发的命令目录项 |
 | UiCommandInvocation | UI 提交给 backend 的命令调用 |
 | UiInteractionRequest | backend 请求 UI 完成的语义化交互 |
+| UiPromptReceipt | prompt 已被可靠接单的回执，不代表执行完成 |
+| UiCompletedPromptSubmission | 只允许 succeeded / failed / cancelled / interrupted 的终态实体 |
+| UiCommandRecord | 一次外部原子写的 started/completed 记录事实，不是运输信封 |
 
 ---
 
@@ -26,6 +29,9 @@
 | UiCommandSpec | Value Object | catalog 中的命令描述 |
 | UiCommandInvocation | Value Object | 一次命令提交 |
 | UiInteractionRequest | Entity-like DTO | 具有 `interactionId`，需要后续 response |
+| UiPromptReceipt | Value Object | 关联 clientRequestId、promptId、sessionId 和 userMessageId |
+| UiCompletedPromptSubmission | Entity snapshot | endedAt 必有；failed/interrupted 必有结构化 error |
+| UiCommandRecord | Value Object | 同 operationId 的两个 phase，details 只来自方法级白名单 |
 
 SDK 本身不管理这些对象的生命周期。生命周期归 backend 或 UI 本地 store。
 
@@ -87,6 +93,14 @@ Backend 不指定 `ModelDialog` 之类 UI 组件名，只描述交互语义。
 | `command.*` | `command.started`, `command.result.delivered`, `command.catalog.updated` |
 | `interaction.*` | `interaction.requested`, `interaction.resolved` |
 
+### 3.5 Prompt 终态
+
+`UiPromptCompletion` 只包装 `UiCompletedPromptSubmission`，不承载完整回答正文。`succeeded`、`cancelled` 不带 error；`failed`、`interrupted` 必须带 `UiPromptError`；四种状态都带 `endedAt`。
+
+### 3.6 写操作记录与 ID
+
+`operationId` 只代表一次 gateway 原子写。`clientRequestId`、`promptId`、`sessionId`、`runId`、`commandRunId`、`permissionRequestId`、`interactionId` 和 transport request id 继续各司其职，通过 `UiCommandCorrelation` 汇总，不互相替代，也不给所有 `UiEvent` 强加 operationId。
+
 ---
 
 ## 四、Lifecycle & Ownership（生命周期与归属）
@@ -98,6 +112,7 @@ Backend 不指定 `ModelDialog` 之类 UI 组件名，只描述交互语义。
 | UiCommandInvocation | UI surface | - | backend 消费 |
 | UiInteractionRequest | backend command runtime | backend command runtime | UI 通过 response 完成 |
 | UiEvent | backend adapter | - | UI 订阅并更新本地状态 |
+| UiCommandRecord | Agent/Server 外部 gateway | recorder sink | SDK 定义记录合同、recorder 端口、方法级脱敏 builder 与 fail-open helper |
 
 ---
 

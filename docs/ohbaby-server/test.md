@@ -12,6 +12,8 @@
 - 传输与路由（auth/CORS 中间件生效、jsonrpc/web 路由可达）。
 - 协议适配（信封解析、RPC 请求-响应正确）。
 - 多客户端协调（事件打号、SSE replay、审批路由、prompt FIFO）。
+- interaction owner/claim（未知、越权和重复在 backend 前拒绝；终态与失败回滚只允许一个获胜）。
+- REST/RPC command gateway 的单次、脱敏、fail-open 记录。
 - remote client ↔ server 契约一致性。
 - foreground 生命周期（启动打印 address/token、Ctrl+C 优雅关闭）。
 
@@ -34,6 +36,8 @@
 | CORS 白名单 | 白名单内 origin 放行，非白名单预检被拒 |
 | 审批路由 | 审批事件只投发起方 client，不广播给其他 client |
 | prompt FIFO | 同 session 多 prompt 严格按序执行 |
+| interaction claim | 只有 owner 可原子回答一次；仅明确未消费的校验失败可条件回滚 |
+| command recording | 正常 sink 下 REST/RPC 每个原子写各产生一条 started/completed；两阶段分别 best-effort，复用 operationId；未授权请求和组合方法不重复记账 |
 | 优雅关闭 | Ctrl+C 后端口释放、连接收尾、无残留 |
 
 ---

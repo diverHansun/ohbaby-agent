@@ -1,6 +1,6 @@
 # 1. 问题基线与当前实施状态
 
-> 时间口径：2026-08-13 工作区、improve-1 尚未实施的代码。本文同时描述 improve-1 完成后 improve-2 仍需处理的采用 gap，不把目标写成现状。
+> 时间口径：2026-08-14，improve-1 已通过验收与独立审查。本文描述 improve-2 仍需处理的 surface 采用 gap。
 
 ## 1.1 本轮核心问题
 
@@ -13,7 +13,7 @@
 | P5 | 初始/resync snapshot 直接写 store，而 SSE `ui.event` 走另一分支 | SDK subscriber 与 UI store 可能看见不同顺序或漏掉 snapshot replacement |
 | P6 | Web REST 尚未覆盖 `waitForPrompt`、`respondInteraction` 等完整 backend 能力 | BrowserDaemonClient 无法实现必选 `UiBackendClient` |
 | P7 | Server 仍用 `supportsPromptQueue()` 与旧 `submitPrompt` fallback | improve-1 的必选队列能力没有真正进入生产边界 |
-| P8 | `CoreAPI`/`SDKAPI` 手抄方法、TUI `TuiEvent`、`Partial<UiPromptQueueClient>` 保留重复知识 | SDK 变化仍需手工多点同步，删除旧 API 时容易漏调用点 |
+| P8 | `CoreAPI`/`SDKAPI` 已改为 derived alias，但逐方法 runtime wrapper、TUI `TuiEvent`、`Partial<UiPromptQueueClient>` 仍保留重复知识 | 删除旧 API 时仍容易漏调用点 |
 | P9 | improve-1 落地后，多入口迁移仍可能绕过或再套一层 gateway | Server 与 Agent 包会出现重复记录或完全漏记；这是采用风险，不是当前代码里已有双记 |
 | P10 | 权威文档仍可能描述旧方法/事件模型 | 代码收口后下一次改造仍从错误前提开始 |
 
@@ -124,7 +124,7 @@ JSON-RPC 已有 `submitPromptAccepted`、queue 方法、`waitForPrompt` 和 `res
 
 ### 记录所有权
 
-当前代码里还没有 `UiCommandRecorder`；双记不是现状 bug，是 improve-1 接入 gateway 之后、improve-2 改 composition 时必须复验的风险。
+improve-1 已建立 `UiCommandRecorder`、有界结构化 recorder，以及 Agent host / Server REST / Server RPC 三个唯一 gateway。当前测试证明 raw backend 和 skill 内部接单不自记；improve-2 改 composition 时仍必须复验，防止新 façade 绕过或叠加 gateway。
 
 daemon Server 持有的是 raw backend；本地 CLI/TUI 才通过 Agent host façade。若在 raw backend 自记，REST/RPC 会在 Server gateway 后再次记录。目标必须从 composition root 验证：
 

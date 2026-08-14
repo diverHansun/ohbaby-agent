@@ -36,10 +36,11 @@ ohbaby-agent adapter
 ### 2.2 Prompt 提交
 
 1. UI 收集用户输入。
-2. UI 调用 `submitPrompt(text, options)`。
-3. Backend adapter 接收请求并启动 run。
-4. Backend 通过事件发布 run、message、runtime 增量。
-5. UI 根据事件更新本地 store 并渲染。
+2. UI 调用 `submitPromptAccepted(text, options)`，接单成功后立即获得 `UiPromptReceipt` 和 `promptId`。
+3. Backend adapter 持久化接单并按 session FIFO 调度 run。
+4. Backend 通过单一 `UiEvent` 流发布 prompt、run、message、runtime 增量。
+5. 需要明确终态的调用方使用 `waitForPrompt(promptId, { signal? })`；四种业务终态均 resolve `UiPromptCompletion`。
+6. 只想一次调用完成上述两步的调用方使用 `submitPromptAndWait`；它只是 accepted + wait 的共享组合，不是第三条执行路径。
 
 ### 2.3 Slash command 提交
 
@@ -69,14 +70,17 @@ ohbaby-agent adapter
 
 ## 三、Interface Definition（接口定义）
 
-### UiBackendClient
+### Client 能力
 
 | 接口 | 数据流位置 | 语义 |
 |------|------------|------|
 | `getSnapshot()` | 初始连接 | 获取 UI 首屏状态 |
 | `subscribeEvents(handler)` | 所有异步回流 | 订阅 SDK 事件 |
 | `listCommands(query)` | 初始连接 / catalog 更新 | 获取指定 surface 的命令目录 |
-| `submitPrompt(text, options)` | Prompt 提交 | 提交用户 prompt |
+| `submitPromptAccepted(text, options)` | Prompt 接单 | 接受并持久化后立即返回 receipt |
+| `waitForPrompt(promptId, options)` | Prompt 查询 | 等待严格的四种终态；signal 只中止等待 |
+| `submitPromptAndWait(text, options)` | Prompt 便利组合 | 唯一实现为 accepted + wait |
+| queue edit/cancel/lease | Prompt 队列写 | 编辑、取消和并发租约，生产 backend 必选 |
 | `executeCommand(invocation)` | Command 提交 | 提交已解析命令 |
 | `respondPermission(id, response)` | Permission 回填 | 响应权限请求 |
 | `respondInteraction(id, response)` | Interaction 回填 | 响应语义化交互 |
@@ -102,6 +106,7 @@ ohbaby-agent adapter
 | Resolved command | SDK resolver | 按 catalog 做确定匹配 |
 | Command result event | backend adapter | 将 command 输出转为 SDK 事件 |
 | Interaction response | UI surface | 只表达用户选择，不执行业务 |
+| UiCommandRecord | 最外层 Agent/Server gateway | 对 started/completed 分别 best-effort 提交并复用 operationId；raw backend 不记录 |
 
 ---
 
@@ -113,6 +118,8 @@ ohbaby-agent adapter
 | Ambiguous alias | Backend catalog 构建失败，不下发歧义 alias |
 | Invalid args | Backend command 发布 `command.failed`，code 为 `INVALID_ARGS` |
 | Interaction canceled | UI 调用 `respondInteraction` 表示 cancel，backend 决定取消或降级 |
+| Prompt failed/cancelled/interrupted | 作为 `UiPromptCompletion` 正常 resolve；failed/interrupted 带结构化 error |
+| wait 被中止或存储/传输失败 | Promise reject；不改写已接单 prompt 的业务终态 |
 
 ---
 

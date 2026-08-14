@@ -1,7 +1,7 @@
 # 前端契约统一与命令记录
 
-> 状态：两轮规划已完成一致性检查与独立审查，待用户确认后进入实施会话
-> 日期：2026-08-13
+> 状态：improve-1 已通过验收与独立审查；improve-2 尚未实施
+> 日期：2026-08-14
 > 目标：用一份 SDK 权威合同服务 TUI、CLI、Web 与远程 daemon，同时建立不重复、可脱敏的写操作记录。
 
 本议题按依赖方向分为两轮，而不是把每个问题拆成一个 `improve-N`：
@@ -20,4 +20,4 @@
 
 原始讨论材料保留在 [`improve-1/raw.md`](./improve-1/raw.md)。其中包含早期假设和已被代码调研推翻的方案；实施不得直接以 `raw.md` 为契约。
 
-每轮实施完成后另开验收会话，分别产出 `improve-1/05-implementation-acceptance.md` 与 `improve-2/05-implementation-acceptance.md`。本规划会话不修改应用代码。
+每轮实施完成后分别产出 `improve-1/05-implementation-acceptance.md` 与 `improve-2/05-implementation-acceptance.md`，记录实际改动、自动化测试、真实进程 E2E、独立审查和残余风险。

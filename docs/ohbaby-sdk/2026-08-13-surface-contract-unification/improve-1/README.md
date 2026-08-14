@@ -1,7 +1,7 @@
 # improve-1 · 底层契约与命令记录基础
 
-> 状态：规划完成，已通过跨文档一致性检查与独立审查
-> 日期：2026-08-13
+> 状态：已通过代码、测试、真实进程 E2E 与独立审查
+> 日期：2026-08-14
 > 前置：无
 > 后续：[`../improve-2/`](../improve-2/)
 
@@ -29,7 +29,7 @@
 | [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 本轮实施阶段、API 目标形状、迁移桥和文件改动面 |
 | [03-reference-projects.md](./03-reference-projects.md) | Codex、OpenCode、Kimi、Kun、SpeedClaw 的选择性借鉴 |
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 类型、生命周期、记录去重、fail-open 与跨 transport 验收 |
-| `05-implementation-acceptance.md` | 实施完成后由验收会话生成，本规划期不存在 |
+| [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 实际改动、测试、真实进程 E2E、独立审查与残余风险 |
 
 推荐阅读顺序：`00 → 01 → 02 → 03 → 04`。实施以 `02 + 04` 为执行契约；若与 `00` 冲突，先修文档，不得自行解释。
 
@@ -65,7 +65,7 @@
 - `UiPromptCompletion` 在类型和运行时都只包含终态；
 - 四种业务终态 resolve，技术性等待失败 reject；
 - 所有生产 backend 实现基本 Prompt 与队列管理能力；
-- 一次外部原子写只产生一对 `started/completed` 记录；
+- 正常 recorder sink 下，一次外部原子写各产生一条 `started/completed`，两阶段分别 best-effort 并复用同一 `operationId`；
 - recorder 故障不改变业务结果，并能产生有界诊断；
 - Prompt 文本、API key 等敏感值不进入默认记录；
 - 单元、契约、集成测试和 typecheck 全部通过。

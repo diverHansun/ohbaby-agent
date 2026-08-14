@@ -25,13 +25,15 @@
 └─────────────────────┘          └─────────────────────┘
 ```
 
-SDK 内部由三类能力组成：
+SDK 内部由五类能力组成：
 
 | 组件 | 职责 |
 |------|------|
 | DTO layer | 定义 snapshot、event、command、interaction 等传输结构 |
 | Command grammar | 提供 slash command 词法解析和 argv 切分 |
 | Catalog resolver | 基于 backend catalog 做匹配、alias 解析和补全过滤 |
+| Client contracts | Query、Prompt Command、Queue Command 与完整 backend 能力组合 |
+| Observation contract | `UiCommandRecord`、recorder 端口、脱敏 builder 与 fail-open helper |
 
 ---
 
@@ -55,16 +57,24 @@ Slash command 解析拆成纯词法解析和 catalog resolver。
 - Resolver 只消费 backend 下发的 catalog。
 - 补全和执行可以共享同一解析结果，但执行仍要求 exact catalog match。
 
-### 3. Event-Only Result Flow
+### 3. Explicit Prompt Lifecycle + Event Stream
 
-Client 方法提交请求后返回 `Promise<void>`，业务结果通过事件回流。
+事件流负责连续增量；Prompt 方法负责表达调用方需要等待到哪个生命周期点：
+
+- `submitPromptAccepted`：可靠接单后返回 receipt；
+- `waitForPrompt`：按 promptId 等待严格终态；
+- `submitPromptAndWait`：前两者的唯一组合实现。
 
 **理由**：
-- 与 permission/interaction 的异步等待模型一致。
-- 避免同步返回、pending token 和事件混用。
-- UI hook 只需要处理一种数据回流模型。
+- Web 可接单即返回，CLI 可等待完成后退出。
+- 不用同一个方法名承载两个 Promise resolve 时机。
+- completion 只描述状态和结构化错误，完整回答仍从 snapshot/event 数据流读取。
 
-### 4. 未使用的模式
+### 4. Thin Named Gateway + Uniform Record
+
+业务代码继续调用具名方法；Agent/Server 最外层 gateway 为原子写生成统一 `UiCommandRecord`。record 不是 RPC envelope，raw backend 不自记，组合方法和 skill 内部再写也不重复记账。
+
+### 5. 未使用的模式
 
 **未使用 zod schema 执行**：schema 校验留给 backend command。SDK 不应承载 plugin/MCP/user command 的业务 schema。
 
@@ -80,9 +90,11 @@ Client 方法提交请求后返回 `Promise<void>`，业务结果通过事件回
 packages/ohbaby-sdk/src/
 ├── index.ts                 # 对外出口
 ├── client.ts                # UiBackendClient 契约
+├── prompt.ts                # receipt、队列实体与严格终态
+├── command-record.ts        # 记录合同、脱敏与 fail-open helper
 ├── events.ts                # UiEvent union 与事件命名
 ├── snapshot.ts              # UiSnapshot / runtime state
-├── command/
+├── slash-command/
 │   ├── types.ts             # UiCommandSpec / invocation / result metadata
 │   ├── parse.ts             # parseSlashInput()
 │   └── resolve.ts           # resolveCommand(), filterCommandCatalog()
@@ -92,6 +104,10 @@ packages/ohbaby-sdk/src/
 ### 对外稳定接口
 
 - `UiBackendClient`
+- `UiQueryClient` / `UiCommandClient`
+- `UiPromptCommandClient` / `UiPromptQueueCommandClient`
+- `UiPromptReceipt` / `UiPromptCompletion`
+- `UiCommandRecord` / `UiCommandRecorder`
 - `UiEvent`
 - `UiSnapshot`
 - `UiCommandSpec`
