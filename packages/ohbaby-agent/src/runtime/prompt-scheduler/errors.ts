@@ -99,3 +99,12 @@ export class PromptSchedulerClosedError extends Error {
     this.name = "PromptSchedulerClosedError";
   }
 }
+
+export class PromptWaitAbortedError extends Error {
+  readonly code = "PROMPT_WAIT_ABORTED";
+
+  constructor(readonly promptId: string) {
+    super(`Waiting for prompt was aborted: ${promptId}`);
+    this.name = "PromptWaitAbortedError";
+  }
+}

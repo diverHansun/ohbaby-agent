@@ -5,6 +5,7 @@ import {
   PromptIdempotencyConflictError,
   PromptSchedulerClosedError,
   PromptSubmissionNotFoundError,
+  PromptWaitAbortedError,
 } from "./errors.js";
 import type {
   PromptSubmissionExecutor,
@@ -42,6 +43,14 @@ const TERMINAL_STATUSES = new Set([
   "interrupted",
 ]);
 
+interface CompletionWaiter {
+  readonly reject: (error: Error) => void;
+  readonly resolve: (prompt: PromptSubmissionRecord) => void;
+  readonly signal?: AbortSignal;
+  onAbort?: () => void;
+  settled: boolean;
+}
+
 function runtimeError(error: unknown): UiPromptError {
   if (
     typeof error === "object" &&
@@ -64,12 +73,13 @@ export class WorkspacePromptScheduler {
   private readonly activeBySession = new Map<string, string>();
   private readonly completionWaiters = new Map<
     string,
-    Set<(prompt: PromptSubmissionRecord) => void>
+    Set<CompletionWaiter>
   >();
   private readonly busySessionsUntil = new Map<string, number>();
   private readonly maxActiveSessions: number;
   private readonly maxQueuedPrompts: number;
   private closed = false;
+  private terminalError: Error | undefined;
   private draining = false;
   private drainAgain = false;
   private initialized = false;
@@ -250,28 +260,59 @@ export class WorkspacePromptScheduler {
     return this.options.store.listVisible(this.options.scopeKey);
   }
 
-  async waitForCompletion(promptId: string): Promise<PromptSubmissionRecord> {
+  async waitForCompletion(
+    promptId: string,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<PromptSubmissionRecord> {
+    this.assertOpen();
+    if (options.signal?.aborted) {
+      throw new PromptWaitAbortedError(promptId);
+    }
     return new Promise((resolve, reject) => {
       const waiters = this.completionWaiters.get(promptId) ?? new Set();
-      waiters.add(resolve);
+      const waiter: CompletionWaiter = {
+        reject,
+        resolve,
+        settled: false,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      };
+      if (options.signal) {
+        waiter.onAbort = (): void => {
+          this.rejectCompletionWaiter(
+            promptId,
+            waiter,
+            new PromptWaitAbortedError(promptId),
+          );
+        };
+        options.signal.addEventListener("abort", waiter.onAbort, { once: true });
+      }
+      waiters.add(waiter);
       this.completionWaiters.set(promptId, waiters);
 
       void this.options.store
         .get(promptId)
         .then((current) => {
+          if (waiter.settled) {
+            return;
+          }
           if (!current) {
-            this.removeCompletionWaiter(promptId, resolve);
-            reject(new PromptSubmissionNotFoundError(promptId));
+            this.rejectCompletionWaiter(
+              promptId,
+              waiter,
+              new PromptSubmissionNotFoundError(promptId),
+            );
             return;
           }
           if (TERMINAL_STATUSES.has(current.status)) {
-            this.removeCompletionWaiter(promptId, resolve);
-            resolve(current);
+            this.resolveCompletionWaiter(promptId, waiter, current);
           }
         })
         .catch((error: unknown) => {
-          this.removeCompletionWaiter(promptId, resolve);
-          reject(error instanceof Error ? error : new Error(String(error)));
+          this.rejectCompletionWaiter(
+            promptId,
+            waiter,
+            error instanceof Error ? error : new Error(String(error)),
+          );
         });
     });
   }
@@ -290,12 +331,18 @@ export class WorkspacePromptScheduler {
   }
 
   close(): void {
+    if (this.closed) {
+      return;
+    }
+    const error = new PromptSchedulerClosedError();
     this.closed = true;
+    this.terminalError = error;
+    this.rejectAllCompletionWaiters(error);
   }
 
   private assertOpen(): void {
     if (this.closed) {
-      throw new PromptSchedulerClosedError();
+      throw this.terminalError ?? new PromptSchedulerClosedError();
     }
   }
 
@@ -313,7 +360,9 @@ export class WorkspacePromptScheduler {
       this.drainAgain = true;
       return;
     }
-    void this.drain();
+    void this.drain().catch((error: unknown) => {
+      this.fault(error);
+    });
   }
 
   private async drain(): Promise<void> {
@@ -388,45 +437,69 @@ export class WorkspacePromptScheduler {
 
   private async executeClaimed(prompt: PromptSubmissionRecord): Promise<void> {
     let runId: string | undefined;
+    let runningPersistenceError: Error | undefined;
     try {
-      const result = await this.options.execute(prompt, {
-        markRunning: async (nextRunId): Promise<void> => {
-          const running = await this.options.store.markRunning(
-            prompt.promptId,
-            nextRunId,
-          );
-          runId = nextRunId;
-          this.options.onUpdated?.(running);
-        },
-      });
-      const finished = await this.options.store.finish(prompt.promptId, {
-        status: result.status,
-        expectedRunId: runId,
-        error: result.error,
-      });
-      this.options.onUpdated?.(finished);
-      this.resolveCompletion(finished);
-    } catch (error) {
-      if (this.options.isBusyError?.(error) && runId === undefined) {
-        const queued = await this.options.store.requeueBusy(prompt.promptId);
-        this.options.onUpdated?.(queued);
-        this.busySessionsUntil.set(
-          prompt.sessionId,
-          Date.now() + (this.options.busyRetryDelayMs ?? 250),
-        );
-      } else {
+      let result;
+      try {
+        result = await this.options.execute(prompt, {
+          markRunning: async (nextRunId): Promise<void> => {
+            try {
+              const running = await this.options.store.markRunning(
+                prompt.promptId,
+                nextRunId,
+              );
+              runId = nextRunId;
+              this.options.onUpdated?.(running);
+            } catch (error) {
+              runningPersistenceError =
+                error instanceof Error ? error : new Error(String(error));
+              throw runningPersistenceError;
+            }
+          },
+        });
+      } catch (error) {
+        if (runningPersistenceError) {
+          this.fault(runningPersistenceError);
+          return;
+        }
+        if (this.options.isBusyError?.(error) && runId === undefined) {
+          try {
+            const queued = await this.options.store.requeueBusy(prompt.promptId);
+            this.options.onUpdated?.(queued);
+            this.busySessionsUntil.set(
+              prompt.sessionId,
+              Date.now() + (this.options.busyRetryDelayMs ?? 250),
+            );
+          } catch (storageError) {
+            this.fault(storageError);
+          }
+          return;
+        }
         this.busySessionsUntil.delete(prompt.sessionId);
-        const failed = await this.options.store
-          .finish(prompt.promptId, {
+        try {
+          const failed = await this.options.store.finish(prompt.promptId, {
             status: "failed",
             expectedRunId: runId,
             error: runtimeError(error),
-          })
-          .catch(() => undefined);
-        if (failed) {
+          });
           this.options.onUpdated?.(failed);
           this.resolveCompletion(failed);
+        } catch (storageError) {
+          this.fault(storageError);
         }
+        return;
+      }
+
+      try {
+        const finished = await this.options.store.finish(prompt.promptId, {
+          status: result.status,
+          expectedRunId: runId,
+          error: result.error,
+        });
+        this.options.onUpdated?.(finished);
+        this.resolveCompletion(finished);
+      } catch (storageError) {
+        this.fault(storageError);
       }
     } finally {
       if (this.activeBySession.get(prompt.sessionId) === prompt.promptId) {
@@ -442,22 +515,69 @@ export class WorkspacePromptScheduler {
       return;
     }
     this.completionWaiters.delete(prompt.promptId);
-    for (const resolve of waiters) {
-      resolve(prompt);
+    for (const waiter of waiters) {
+      this.resolveCompletionWaiter(prompt.promptId, waiter, prompt);
     }
   }
 
-  private removeCompletionWaiter(
+  private resolveCompletionWaiter(
     promptId: string,
-    resolve: (prompt: PromptSubmissionRecord) => void,
+    waiter: CompletionWaiter,
+    prompt: PromptSubmissionRecord,
   ): void {
-    const waiters = this.completionWaiters.get(promptId);
-    if (!waiters) {
+    this.settleCompletionWaiter(promptId, waiter, () => {
+      waiter.resolve(prompt);
+    });
+  }
+
+  private rejectCompletionWaiter(
+    promptId: string,
+    waiter: CompletionWaiter,
+    error: Error,
+  ): void {
+    this.settleCompletionWaiter(promptId, waiter, () => {
+      waiter.reject(error);
+    });
+  }
+
+  private settleCompletionWaiter(
+    promptId: string,
+    waiter: CompletionWaiter,
+    settle: () => void,
+  ): void {
+    if (waiter.settled) {
       return;
     }
-    waiters.delete(resolve);
-    if (waiters.size === 0) {
-      this.completionWaiters.delete(promptId);
+    waiter.settled = true;
+    const waiters = this.completionWaiters.get(promptId);
+    if (waiters) {
+      waiters.delete(waiter);
+      if (waiters.size === 0) {
+        this.completionWaiters.delete(promptId);
+      }
     }
+    if (waiter.signal && waiter.onAbort) {
+      waiter.signal.removeEventListener("abort", waiter.onAbort);
+    }
+    settle();
+  }
+
+  private rejectAllCompletionWaiters(error: Error): void {
+    for (const [promptId, waiters] of this.completionWaiters) {
+      for (const waiter of waiters) {
+        this.rejectCompletionWaiter(promptId, waiter, error);
+      }
+    }
+  }
+
+  private fault(error: unknown): void {
+    if (this.closed) {
+      return;
+    }
+    const normalized =
+      error instanceof Error ? error : new Error(String(error));
+    this.closed = true;
+    this.terminalError = normalized;
+    this.rejectAllCompletionWaiters(normalized);
   }
 }
