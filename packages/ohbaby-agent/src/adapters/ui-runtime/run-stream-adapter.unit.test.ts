@@ -489,6 +489,166 @@ describe("startRunStreamProjection", () => {
     ]);
   });
 
+  it("projects successful scheduler results with failed terminal metadata as failed", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const stateStore = createInMemoryUiStateStore({
+      activeSessionId: "session_1",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_1",
+          messages: [],
+          title: "Session",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "idle" },
+    });
+    const projection = startRunStreamProjection({
+      assistantMessageId: "message_assistant",
+      autoStart: false,
+      nextMessageId: () => "message_next",
+      publish: vi.fn(),
+      runId: "run_1",
+      sessionId: "session_1",
+      stateStore,
+      streamBridge,
+      timestamp: () => "2026-05-26T00:00:01.000Z",
+    });
+
+    for (const [index, metadata] of [
+      { exitCode: null, status: "failed" },
+      { exitCode: null, status: "timed_out" },
+      { exitCode: null, status: "cancelled" },
+      { exitCode: 1 },
+    ].entries()) {
+      const callId = `call_bash_${String(index)}`;
+      streamBridge.publish("run/run_1", "run.tool.start", {
+        callId,
+        params: { command: "sleep 10" },
+        toolName: "bash",
+      });
+      streamBridge.publish("run/run_1", "run.tool.result", {
+        callId,
+        result: {
+          metadata,
+          output: index === 0 ? "stderr text" : "partial output",
+          status: "success",
+        },
+        toolName: "bash",
+      });
+    }
+    streamBridge.publish("run/run_1", "run.tool.start", {
+      callId: "call_list_error",
+      params: { path: "/private" },
+      toolName: "list",
+    });
+    streamBridge.publish("run/run_1", "run.tool.result", {
+      callId: "call_list_error",
+      result: {
+        error: { message: "permission denied" },
+        status: "error",
+      },
+      toolName: "list",
+    });
+    streamBridge.end("run/run_1");
+
+    projection.start();
+    await projection.done;
+
+    const parts = (await stateStore.readSnapshot()).sessions[0]?.messages[0]
+      ?.parts;
+    expect(parts).toEqual([
+      {
+        call: {
+          id: "call_bash_0",
+          input: { command: "sleep 10" },
+          name: "bash",
+          status: "failed",
+        },
+        type: "tool-call",
+      },
+      {
+        result: {
+          callId: "call_bash_0",
+          error: "failed",
+          output: "stderr text",
+        },
+        type: "tool-result",
+      },
+      {
+        call: {
+          id: "call_bash_1",
+          input: { command: "sleep 10" },
+          name: "bash",
+          status: "failed",
+        },
+        type: "tool-call",
+      },
+      {
+        result: {
+          callId: "call_bash_1",
+          error: "timed out",
+          output: "partial output",
+        },
+        type: "tool-result",
+      },
+      {
+        call: {
+          id: "call_bash_2",
+          input: { command: "sleep 10" },
+          name: "bash",
+          status: "failed",
+        },
+        type: "tool-call",
+      },
+      {
+        result: {
+          callId: "call_bash_2",
+          error: "cancelled",
+          output: "partial output",
+        },
+        type: "tool-result",
+      },
+      {
+        call: {
+          id: "call_bash_3",
+          input: { command: "sleep 10" },
+          name: "bash",
+          status: "failed",
+        },
+        type: "tool-call",
+      },
+      {
+        result: {
+          callId: "call_bash_3",
+          error: "exit code 1",
+          output: "partial output",
+        },
+        type: "tool-result",
+      },
+      {
+        call: {
+          id: "call_list_error",
+          input: { path: "/private" },
+          name: "list",
+          status: "failed",
+        },
+        type: "tool-call",
+      },
+      {
+        result: {
+          callId: "call_list_error",
+          error: "permission denied",
+          output: "",
+        },
+        type: "tool-result",
+      },
+    ]);
+  });
+
   it("never projects internal selector or todo tools into the streaming transcript", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const stateStore = createInMemoryUiStateStore({

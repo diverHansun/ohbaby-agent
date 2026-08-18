@@ -30,6 +30,7 @@ import {
   type SessionManager,
 } from "../../services/session/index.js";
 import { cloneSnapshot } from "./memory-store.js";
+import { projectToolUiOutcome } from "./tool-ui-outcome.js";
 import type { UiStateStore } from "./types.js";
 
 const DEFAULT_SESSION_LIMIT = 50;
@@ -64,10 +65,7 @@ function toIsoString(timestamp: number): string {
 }
 
 function toolCallStatus(state: ToolState): UiToolCall["status"] {
-  if (state.status === "error" || state.status === "aborted") {
-    return "failed";
-  }
-  return state.status;
+  return toolStateOutcome(state).status;
 }
 
 function toolInput(state: ToolState): Record<string, unknown> {
@@ -75,26 +73,40 @@ function toolInput(state: ToolState): Record<string, unknown> {
 }
 
 function toolResultPart(part: ToolPart): UiMessagePart | undefined {
-  if (part.state.status === "completed") {
-    return {
-      result: {
-        callId: part.callId,
-        output: part.state.output,
-      },
-      type: "tool-result",
-    };
+  if (part.state.status === "pending" || part.state.status === "running") {
+    return undefined;
   }
-  if (part.state.status === "error" || part.state.status === "aborted") {
-    return {
-      result: {
-        callId: part.callId,
-        error: displayToolError(part.state.error),
-        output: "",
-      },
-      type: "tool-result",
-    };
-  }
-  return undefined;
+  const outcome = toolStateOutcome(part.state);
+  const output =
+    part.state.status === "completed"
+      ? part.state.output
+      : part.state.status === "aborted"
+        ? (part.state.output ?? "")
+        : "";
+  return {
+    result: {
+      callId: part.callId,
+      ...(outcome.error === undefined ? {} : { error: outcome.error }),
+      output,
+    },
+    type: "tool-result",
+  };
+}
+
+function toolStateOutcome(
+  state: ToolState,
+): ReturnType<typeof projectToolUiOutcome> {
+  return projectToolUiOutcome({
+    ...(state.status === "error" || state.status === "aborted"
+      ? { error: displayToolError(state.error) }
+      : {}),
+    ...(state.status === "completed" ||
+    state.status === "error" ||
+    state.status === "aborted"
+      ? { metadata: state.metadata }
+      : {}),
+    status: state.status,
+  });
 }
 
 function toolPartToUiParts(part: ToolPart): UiMessagePart[] {

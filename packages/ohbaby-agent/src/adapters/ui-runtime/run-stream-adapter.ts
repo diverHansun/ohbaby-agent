@@ -5,7 +5,6 @@ import type {
   UiRun,
   UiRunStatus,
   UiSession,
-  UiToolCall,
 } from "ohbaby-sdk";
 import type {
   CompactResult,
@@ -14,6 +13,7 @@ import type {
 } from "../../core/context/index.js";
 import type { UiStateStore } from "../ui-state/index.js";
 import { cloneMessage, cloneRun } from "../ui-state/index.js";
+import { projectToolUiOutcome } from "../ui-state/tool-ui-outcome.js";
 import { noticeFromCompactResult } from "./prompt-context.js";
 import {
   END_SENTINEL,
@@ -40,6 +40,7 @@ interface ToolResultPayload {
   readonly error?: {
     readonly message?: string;
   };
+  readonly metadata?: Record<string, unknown>;
   readonly output?: string;
   readonly status: string;
 }
@@ -161,8 +162,11 @@ function appendToolResult(input: {
   readonly message: UiMessage;
   readonly result: ToolResultPayload;
 }): UiMessage {
-  const status: UiToolCall["status"] =
-    input.result.status === "success" ? "completed" : "failed";
+  const outcome = projectToolUiOutcome({
+    error: input.result.error?.message,
+    metadata: input.result.metadata,
+    status: input.result.status,
+  });
   return {
     ...input.message,
     parts: [
@@ -172,7 +176,7 @@ function appendToolResult(input: {
               ...part,
               call: {
                 ...part.call,
-                status,
+                status: outcome.status,
               },
             }
           : part,
@@ -181,7 +185,7 @@ function appendToolResult(input: {
         type: "tool-result",
         result: {
           callId: input.callId,
-          error: input.result.error?.message,
+          error: outcome.error,
           output: input.result.output ?? "",
         },
       },
