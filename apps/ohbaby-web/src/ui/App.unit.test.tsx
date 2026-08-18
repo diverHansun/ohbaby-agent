@@ -659,6 +659,160 @@ describe("OhbabyWebApp slash command interactions", () => {
     ).toHaveLength(1);
   });
 
+  it("keeps a follow-up queued while the first prompt is starting before a run appears", async () => {
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    fake.submitPromptAccepted.mockImplementation((text, options) =>
+      Promise.resolve({
+        clientRequestId: options?.clientRequestId ?? "request_missing",
+        createdAt: timestamp,
+        promptId:
+          text === "first starting prompt"
+            ? "prompt_starting"
+            : "prompt_follow_up",
+        sessionId: "session_1",
+        status: "queued",
+        userMessageId:
+          text === "first starting prompt"
+            ? "message_starting"
+            : "message_follow_up",
+      }),
+    );
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "first starting prompt");
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() => fake.submitPromptAccepted.mock.calls.length === 1);
+    const firstRequestId =
+      fake.submitPromptAccepted.mock.calls[0]?.[1]?.clientRequestId ?? "";
+    act(() => {
+      fake.store.replaceSnapshot(
+        {
+          ...initial,
+          prompts: [
+            promptSubmission({
+              clientRequestId: firstRequestId,
+              promptId: "prompt_starting",
+              status: "starting",
+              text: "first starting prompt",
+              userMessageId: "message_starting",
+            }),
+          ],
+        },
+        2,
+      );
+    });
+    await flushTimers();
+
+    await setTextareaValue(app.container, "follow-up during starting");
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() => fake.submitPromptAccepted.mock.calls.length === 2);
+    const secondRequestId =
+      fake.submitPromptAccepted.mock.calls[1]?.[1]?.clientRequestId ?? "";
+    act(() => {
+      fake.store.replaceSnapshot(
+        {
+          ...initial,
+          prompts: [
+            promptSubmission({
+              clientRequestId: firstRequestId,
+              promptId: "prompt_starting",
+              status: "starting",
+              text: "first starting prompt",
+              userMessageId: "message_starting",
+            }),
+            promptSubmission({
+              clientRequestId: secondRequestId,
+              promptId: "prompt_follow_up",
+              status: "queued",
+              text: "follow-up during starting",
+              userMessageId: "message_follow_up",
+            }),
+          ],
+        },
+        3,
+      );
+    });
+    await flushTimers();
+
+    expect(app.container.querySelectorAll(".ohb-message-pending")).toHaveLength(
+      1,
+    );
+    expect(
+      app.container.querySelectorAll(".ohb-prompt-queue-item"),
+    ).toHaveLength(1);
+    expect(
+      app.container.textContent.match(/follow-up during starting/gu),
+    ).toHaveLength(1);
+  });
+
+  it("does not project a pending existing-session prompt into the new-session scope", async () => {
+    const admission =
+      deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    fake.submitPromptAccepted.mockReturnValue(admission.promise);
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "belongs to session one");
+    await pressTextareaKey(app.container, "Enter");
+    act(() => {
+      fake.store.replaceSnapshot(
+        {
+          ...initial,
+          activeSessionId: null,
+        },
+        2,
+      );
+    });
+
+    expect(app.container.textContent).not.toContain("belongs to session one");
+    expect(app.container.querySelector(".ohb-thinking")).toBeNull();
+    expect(
+      app.container
+        .querySelector(".ohb-send-button")
+        ?.getAttribute("aria-busy"),
+    ).toBe("false");
+    await setTextareaValue(app.container, "new-session submission");
+    await pressTextareaKey(app.container, "Enter");
+    expect(fake.submitPromptAccepted).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not project a pending new-session prompt into a historical session", async () => {
+    const admission =
+      deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+    const initial = {
+      ...snapshotWithStatus({ kind: "idle" }),
+      activeSessionId: null,
+    };
+    const fake = createFakeRuntime({ snapshot: initial });
+    fake.submitPromptAccepted.mockReturnValue(admission.promise);
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "belongs to a new session");
+    await pressTextareaKey(app.container, "Enter");
+    act(() => {
+      fake.store.replaceSnapshot(
+        {
+          ...initial,
+          activeSessionId: "session_1",
+        },
+        2,
+      );
+    });
+
+    expect(app.container.textContent).not.toContain("belongs to a new session");
+    expect(app.container.querySelector(".ohb-thinking")).toBeNull();
+    expect(
+      app.container
+        .querySelector(".ohb-send-button")
+        ?.getAttribute("aria-busy"),
+    ).toBe("false");
+    await setTextareaValue(app.container, "historical-session submission");
+    await pressTextareaKey(app.container, "Enter");
+    expect(fake.submitPromptAccepted).toHaveBeenCalledTimes(2);
+  });
+
   it("stops admission at the receipt while session selection is still pending", async () => {
     const selection = deferred<undefined>();
     const fake = createFakeRuntime({
@@ -819,6 +973,98 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.textContent).toContain("runtime could not start");
     expect(app.container.querySelector('[role="alert"]')).not.toBeNull();
     expect(app.container.querySelector(".ohb-thinking")).toBeNull();
+  });
+
+  it("shows an interrupted prompt inline after reload", () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        prompts: [
+          promptSubmission({
+            error: {
+              code: "interrupted",
+              message: "run was interrupted",
+              retryable: true,
+              source: "runtime",
+            },
+            status: "interrupted",
+          }),
+        ],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.textContent).toContain("server projected prompt");
+    expect(app.container.textContent).toContain("run was interrupted");
+    expect(app.container.querySelector(".ohb-thinking")).toBeNull();
+  });
+
+  it("does not retain a cancelled prompt projection after reload", () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        prompts: [promptSubmission({ status: "cancelled" })],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.textContent).not.toContain("server projected prompt");
+    expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
+    expect(app.container.querySelector(".ohb-thinking")).toBeNull();
+  });
+
+  it("does not retain a succeeded prompt when no formal row is present", () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        prompts: [promptSubmission({ status: "succeeded" })],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.textContent).not.toContain("server projected prompt");
+    expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
+    expect(app.container.querySelector(".ohb-thinking")).toBeNull();
+  });
+
+  it("orders an earlier terminal projection before later formal messages", () => {
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...initial,
+        prompts: [
+          promptSubmission({
+            createdAt: "2026-06-12T00:00:01.000Z",
+            error: {
+              code: "runtime_failed",
+              message: "earlier failure",
+              retryable: true,
+              source: "runtime",
+            },
+            status: "failed",
+            text: "earlier failed prompt",
+          }),
+        ],
+        sessions: initial.sessions.map((session) => ({
+          ...session,
+          messages: [
+            {
+              createdAt: "2026-06-12T00:00:02.000Z",
+              id: "message_later",
+              parts: [{ text: "later formal message", type: "text" }],
+              role: "user",
+            },
+          ],
+        })),
+      },
+    });
+    const app = mountApp(fake.runtime);
+    const timelineText =
+      app.container.querySelector(".ohb-stream-inner")?.textContent ?? "";
+
+    expect(timelineText.indexOf("earlier failed prompt")).toBeLessThan(
+      timelineText.indexOf("later formal message"),
+    );
   });
 
   it("keeps an idle first prompt visible when queued arrives before its receipt", async () => {

@@ -57,6 +57,8 @@ pnpm --filter ohbaby-cli build
 | T-B8 | `starting → queued` busy requeue | unit | provisional row和 startup Thinking 退出；Queue 显示该 prompt；无 formal row | P7 |
 | T-B9 | active run 时再发 | unit | 新 prompt 不插 conversation optimistic；HTTP 期间按钮有反馈，server queued 后只在 Queue | P3 P7 |
 | T-B9a | local 未观察到 starting，但 snapshot 显示其它 active run + matching queued | unit | 仍按 Queue 呈现，不因丢失中间事件残留 conversation row | P7 P10 |
+| T-B9b | 当前 prompt 已 `starting`、live run 尚未出现时提交 follow-up | unit | follow-up 仍判为 Queue placement；conversation 与 Queue 不重复显示 | P7 P10 |
+| T-B9c | admission pending 时在 existing session 与 new-session scope 间切换 | unit | local row 与 startup Thinking 只留在提交起点/receipt 目标 session，不跨 session 串线 | P3 P10 |
 | T-B10 | 短时间连续提交 | unit | keyed attempts 不互相覆盖；最多一个 conversation candidate，其余按 Queue placement | P3 P10 |
 | T-B11 | HTTP reject，draft 仍空 | unit | matching attempt 移除、spinner/Thinking 停止、旧文本恢复 | P5 |
 | T-B12 | HTTP reject，用户已输入新 draft | unit | 新 draft 不被旧文本覆盖 | P5 |
@@ -69,6 +71,7 @@ pnpm --filter ohbaby-cli build
 | T-B16 | spinner / reduced motion | unit/manual | 约 1 秒一圈；`aria-busy` 正确；reduced-motion 不持续旋转 | P5 |
 | T-B17 | 跟滚 | unit/manual | local row/Thinking 出现时沿用 sticky-to-bottom；用户已上滚时不强拉 | P1 |
 | T-B18 | reload 时没有 local attempts | unit/integration | starting/running 独立重建 provisional；failed/interrupted 独立重建 user row + inline error | P6 P9 P10 |
+| T-B19 | 较早 terminal provisional 后已有较新 formal messages，再 reload | unit | formal 与 provisional 按 `createdAt` 进入同一时间线，旧失败不会被追加到底部 | P8 P10 |
 
 ### Phase C：真实浏览器与回归
 

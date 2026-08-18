@@ -116,6 +116,7 @@ interface ComposerPrefill {
 interface LocalPromptAttempt {
   readonly clientRequestId: string;
   readonly createdAt: string;
+  readonly originSessionId: string | null;
   readonly placement: "conversation" | "queue";
   readonly submittedSessionId?: string;
   readonly text: string;
@@ -216,14 +217,32 @@ function hasLiveRunForSession(
   );
 }
 
+function hasActiveTurnForSession(
+  snapshot: ViewModel["snapshot"],
+  sessionId: string | undefined,
+): boolean {
+  if (!snapshot || !sessionId) return false;
+  return (
+    hasLiveRunForSession(snapshot, sessionId) ||
+    (snapshot.prompts ?? []).some(
+      (prompt) =>
+        prompt.sessionId === sessionId &&
+        (prompt.status === "starting" || prompt.status === "running"),
+    )
+  );
+}
+
 function localAttemptSessionMatches(
   attempt: LocalPromptAttempt,
   activeSessionId: string | undefined,
 ): boolean {
+  if (activeSessionId === undefined) {
+    return attempt.originSessionId === null;
+  }
   return (
-    activeSessionId === undefined ||
-    attempt.submittedSessionId === undefined ||
-    attempt.submittedSessionId === activeSessionId
+    attempt.submittedSessionId === activeSessionId ||
+    (attempt.submittedSessionId === undefined &&
+      attempt.originSessionId === activeSessionId)
   );
 }
 
@@ -242,7 +261,10 @@ function selectPromptProjection(input: {
   const prompts = (input.view.snapshot?.prompts ?? []).filter(
     (prompt) => prompt.sessionId === activeSessionId,
   );
-  const hasLiveRun = hasLiveRunForSession(input.view.snapshot, activeSessionId);
+  const hasActiveTurn = hasActiveTurnForSession(
+    input.view.snapshot,
+    activeSessionId,
+  );
   const serverRows = prompts.flatMap((prompt): PromptProjectionModel[] => {
     if (formalMessageIds.has(prompt.userMessageId)) return [];
     if (prompt.status === "starting" || prompt.status === "running") {
@@ -296,7 +318,7 @@ function selectPromptProjection(input: {
         return [];
       }
       if (matchingPrompt) {
-        if (matchingPrompt.status !== "queued" || hasLiveRun) {
+        if (matchingPrompt.status !== "queued" || hasActiveTurn) {
           return [];
         }
       }
@@ -328,7 +350,7 @@ function selectPromptProjection(input: {
           matchingPrompt.status === "failed" ||
           matchingPrompt.status === "cancelled" ||
           matchingPrompt.status === "interrupted" ||
-          (matchingPrompt.status === "queued" && hasLiveRun))
+          (matchingPrompt.status === "queued" && hasActiveTurn))
       ) {
         return [];
       }
@@ -416,7 +438,9 @@ function ConnectedOhbabyWebApp({
     [localPromptAttempts, view],
   );
   const isPromptAdmitting = localPromptAttempts.some(
-    (attempt) => attempt.userMessageId === undefined,
+    (attempt) =>
+      attempt.userMessageId === undefined &&
+      localAttemptSessionMatches(attempt, view.composer.activeSessionId),
   );
   const showMain =
     !view.isEmpty ||
@@ -563,7 +587,7 @@ function ConnectedOhbabyWebApp({
       const submittedSessionId = view.composer.activeSessionId;
       const placement =
         submittedSessionId !== undefined &&
-        (hasLiveRunForSession(view.snapshot, submittedSessionId) ||
+        (hasActiveTurnForSession(view.snapshot, submittedSessionId) ||
           localPromptAttempts.some(
             (attempt) =>
               attempt.placement === "conversation" &&
@@ -580,6 +604,7 @@ function ConnectedOhbabyWebApp({
           {
             clientRequestId: requestId,
             createdAt: new Date().toISOString(),
+            originSessionId: submittedSessionId ?? null,
             placement,
             ...(submittedSessionId === undefined ? {} : { submittedSessionId }),
             text,
@@ -1340,6 +1365,25 @@ function ConversationStream(props: {
   const scheduledScrollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messages = props.view.activeSession?.messages ?? [];
   const visibleMessages = filterTodoToolMessages(messages);
+  const timelineItems = [
+    ...visibleMessages.map((message, index) => ({
+      createdAt: message.createdAt,
+      index,
+      kind: "message" as const,
+      message,
+    })),
+    ...props.promptRows.map((row, index) => ({
+      createdAt: row.createdAt,
+      index,
+      kind: "prompt" as const,
+      row,
+    })),
+  ].sort((left, right) => {
+    const createdAtOrder = left.createdAt.localeCompare(right.createdAt);
+    if (createdAtOrder !== 0) return createdAtOrder;
+    if (left.kind !== right.kind) return left.kind === "message" ? -1 : 1;
+    return left.index - right.index;
+  });
   const activeSessionId = props.view.activeSession?.id ?? null;
   const lastMessage = visibleMessages.at(-1);
   const messagesSignature = [
@@ -1431,16 +1475,17 @@ function ConversationStream(props: {
   return (
     <section className="ohb-stream" ref={streamRef}>
       <div className="ohb-stream-inner" ref={streamInnerRef}>
-        {visibleMessages.map((message) => (
-          <MessageRow
-            key={message.id}
-            message={message}
-            reasoning={props.view.reasoningByMessageId[message.id]}
-          />
-        ))}
-        {props.promptRows.map((row) => (
-          <PromptProjectionRow key={row.id} row={row} />
-        ))}
+        {timelineItems.map((item) =>
+          item.kind === "message" ? (
+            <MessageRow
+              key={`message:${item.message.id}`}
+              message={item.message}
+              reasoning={props.view.reasoningByMessageId[item.message.id]}
+            />
+          ) : (
+            <PromptProjectionRow key={`prompt:${item.row.id}`} row={item.row} />
+          ),
+        )}
         <CommandNoticeList notices={props.view.commandNotices} />
         {props.view.composer.isRunning ? (
           <ThinkingIndicator

@@ -44,6 +44,9 @@
 | prompt 失败恢复 | receipt 前失败仅在当前 draft 为空时恢复；accepted failed/interrupted 保留 submission 用户行并内联错误 |
 | prompt reload projection | 无 local state 时，starting/running/failed/interrupted 仍可由 snapshot 独立重建 |
 | active run follow-up | admission 有按钮反馈，但不插 conversation optimistic 行；queued 后只出现在 Queue |
+| starting-window follow-up | 首轮已有 `starting`、run 尚未出现时，follow-up 仍只进入 Queue，不重复投影到 conversation |
+| pending session isolation | admission pending 期间切换 existing/new session，local row 与 startup Thinking 不得串到另一会话 |
+| mixed timeline ordering | 较早的 failed/interrupted provisional 与后续 formal message 按 `createdAt` 合并排序；reload 后顺序不变 |
 | 无活动 workspace | `runtime.client === null`，页面进入 empty state，不由 getter 抛错 |
 | reconnect 退避有界 | 断线重连不紧循环空转 |
 | 权限错主 403 | UI 提示，且不误标为已处置 |
