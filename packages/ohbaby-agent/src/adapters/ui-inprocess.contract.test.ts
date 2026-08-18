@@ -1650,6 +1650,42 @@ class RecordingRunLedger implements RunLedger {
 }
 
 describe("createInProcessUiBackendClient", () => {
+  it("keeps the receipt, formal UI message, and core user message on one id", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicMessageIds(),
+    });
+    const client = createInProcessUiBackendClient({
+      createPromptUserMessageId: () => "message_reserved",
+      llmClient: createFakeLLMClient([
+        { textDelta: "Hello", finishReason: "stop" },
+      ]),
+      messageManager,
+    });
+
+    try {
+      const receipt = await client.submitPromptAccepted("Say hello", {
+        clientRequestId: "client_request_1",
+      });
+      await client.waitForPrompt(receipt.promptId);
+
+      const snapshot = await client.getSnapshot();
+      const formalUserMessage = snapshot.sessions
+        .find((session) => session.id === receipt.sessionId)
+        ?.messages.find((message) => message.role === "user");
+      const coreUserMessage = (
+        await messageManager.listBySession(receipt.sessionId)
+      ).find((message) => message.info.role === "user");
+
+      expect(receipt.userMessageId).toBe("message_reserved");
+      expect(formalUserMessage?.id).toBe(receipt.userMessageId);
+      expect(coreUserMessage?.info.id).toBe(receipt.userMessageId);
+    } finally {
+      await client.dispose();
+    }
+  });
+
   it("submits a prompt and publishes streaming message updates", async () => {
     const client = createInProcessUiBackendClient({
       llmClient: createFakeLLMClient(

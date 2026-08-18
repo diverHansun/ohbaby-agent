@@ -53,6 +53,53 @@ describe("MessageManager", () => {
     expect(events).toEqual([{ info: message }]);
   });
 
+  it("uses a preallocated message id without consuming a generated id", async () => {
+    const manager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+
+    const reserved = await manager.createMessage({
+      agent: "default",
+      id: "message_reserved",
+      role: "user",
+      sessionId: "session_1",
+    });
+    const generated = await manager.createMessage({
+      agent: "default",
+      role: "assistant",
+      sessionId: "session_1",
+    });
+
+    expect(reserved.id).toBe("message_reserved");
+    expect(generated.id).toBe("message_1");
+  });
+
+  it("skips generated ids that were already preallocated", async () => {
+    const manager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+
+    await manager.createMessage({
+      agent: "default",
+      id: "message_1",
+      role: "user",
+      sessionId: "session_1",
+    });
+    const generated = await manager.createMessage({
+      agent: "default",
+      role: "assistant",
+      sessionId: "session_1",
+    });
+
+    expect(generated.id).toBe("message_2");
+  });
+
   it("appends and updates ordered parts while publishing part update events", async () => {
     const bus = createBus();
     const manager = createMessageManager({

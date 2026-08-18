@@ -31,6 +31,7 @@ export interface AgentRunInput {
   readonly projectRoot: string;
   readonly modelId: string;
   readonly runId?: string;
+  readonly initialUserMessageId?: string;
   readonly initialUserPrompt?: string;
   readonly parentMessageId?: string;
   readonly signal?: AbortSignal;
@@ -152,6 +153,7 @@ export interface AgentContextScope {
 }
 
 export interface AgentTurnInput {
+  readonly initialUserMessageId?: string;
   readonly prompt: string;
   readonly waitMode: AgentWaitMode;
   readonly signal?: AbortSignal;

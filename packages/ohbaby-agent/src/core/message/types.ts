@@ -145,7 +145,7 @@ export interface MessageWithParts {
   readonly parts: readonly Part[];
 }
 
-export type CreateMessageInput =
+export type CreateMessageInput = { readonly id?: string } & (
   | {
       readonly sessionId: string;
       readonly contextScopeId?: string;
@@ -170,7 +170,8 @@ export type CreateMessageInput =
       readonly role: "system";
       readonly kind: SystemMessage["kind"];
       readonly agent?: string;
-    };
+    }
+);
 
 export type UpdateMessagePatch = Partial<
   Pick<AssistantMessage, "finish" | "error"> & {

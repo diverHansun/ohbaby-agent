@@ -13,7 +13,7 @@ export function createMessage(input: {
 }): Message {
   const base = {
     contextScopeId: input.data.contextScopeId,
-    id: input.idGenerator.messageId(),
+    id: input.data.id ?? input.idGenerator.messageId(),
     sessionId: input.data.sessionId,
     time: { created: input.now(), updated: input.now() },
   } as const;

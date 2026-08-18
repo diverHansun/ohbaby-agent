@@ -222,6 +222,7 @@ describe("AgentService", () => {
 
     const result = await service.startSession({
       agentName: "build",
+      initialUserMessageId: "message_reserved",
       prompt: "Say hello",
       projectRoot: "D:/repo",
       sessionId: "primary_1",
@@ -240,6 +241,7 @@ describe("AgentService", () => {
     });
     expect(messages.createMessage).toHaveBeenCalledWith({
       agent: "build",
+      id: "message_reserved",
       role: "user",
       sessionId: "primary_1",
     });

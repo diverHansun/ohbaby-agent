@@ -30,11 +30,16 @@ export function createMessageManager(
 ): MessageManager {
   const idGenerator = options.idGenerator ?? createMessageIdGenerator();
   const now = options.now ?? Date.now;
+  const allocatedMessageIds = new Set<string>();
 
   async function createMessageRecord(
     input: CreateMessageInput,
   ): Promise<Message> {
-    const message = createMessage({ data: input, idGenerator, now });
+    let message = createMessage({ data: input, idGenerator, now });
+    while (input.id === undefined && allocatedMessageIds.has(message.id)) {
+      message = createMessage({ data: input, idGenerator, now });
+    }
+    allocatedMessageIds.add(message.id);
     await options.store.insertMessage(message);
     options.bus.publish(MessageEvent.Updated, { info: message });
     return message;

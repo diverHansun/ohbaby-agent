@@ -88,6 +88,7 @@ describe("AgentInstance", () => {
     });
 
     await instance.turn({
+      initialUserMessageId: "message_reserved",
       prompt: "hello",
       runId: "run_primary",
       waitMode: "stream",
@@ -98,6 +99,7 @@ describe("AgentInstance", () => {
       expect.anything(),
       expect.objectContaining({
         contextScope: instance.contextScope,
+        initialUserMessageId: "message_reserved",
         initialUserPrompt: "hello",
         runId: "run_primary",
         sessionId: "primary_1",

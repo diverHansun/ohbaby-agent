@@ -68,7 +68,11 @@ async function writeInitialUserMessage(
   deps: Pick<AgentRunDeps, "messageManager">,
   input: Pick<
     AgentRunInput,
-    "agentName" | "contextScopeId" | "initialUserPrompt" | "sessionId"
+    | "agentName"
+    | "contextScopeId"
+    | "initialUserMessageId"
+    | "initialUserPrompt"
+    | "sessionId"
   >,
 ): Promise<string | undefined> {
   if (!input.initialUserPrompt) {
@@ -77,6 +81,9 @@ async function writeInitialUserMessage(
 
   const message = await deps.messageManager.createMessage({
     agent: input.agentName,
+    ...(input.initialUserMessageId === undefined
+      ? {}
+      : { id: input.initialUserMessageId }),
     ...(input.contextScopeId === undefined
       ? {}
       : { contextScopeId: input.contextScopeId }),
@@ -171,6 +178,7 @@ export async function runAgent(
   const userMessageId = await writeInitialUserMessage(deps, {
     agentName: input.agentName,
     contextScopeId: scope.contextScopeId,
+    initialUserMessageId: input.initialUserMessageId,
     initialUserPrompt: input.initialUserPrompt,
     sessionId: scope.sessionId,
   });

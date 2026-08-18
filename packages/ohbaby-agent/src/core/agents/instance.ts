@@ -30,6 +30,7 @@ class DefaultAgentInstance implements AgentInstance {
       agentName: this.identity.agentName,
       contextScope: this.contextScope,
       environment: input.environment,
+      initialUserMessageId: input.initialUserMessageId,
       initialUserPrompt: input.prompt,
       maxSteps: this.identity.maxSteps,
       modelId: this.identity.modelId,

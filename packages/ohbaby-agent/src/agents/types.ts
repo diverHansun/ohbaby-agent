@@ -54,6 +54,7 @@ export interface RuntimeAgent {
 
 export interface StartSessionParams {
   readonly agentName: string;
+  readonly initialUserMessageId?: string;
   readonly sessionId: string;
   readonly projectRoot: string;
   readonly prompt: string;

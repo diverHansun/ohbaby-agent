@@ -1937,6 +1937,7 @@ export function createInProcessUiBackendClient(
       try {
         const result = await runtime.startSession({
           agentName,
+          initialUserMessageId: userMessage.id,
           prompt: modelPromptText,
           projectRoot: resolvedProjectRoot,
           runId,

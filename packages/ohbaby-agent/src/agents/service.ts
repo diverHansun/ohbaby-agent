@@ -37,6 +37,7 @@ export class AgentService {
     });
     const result = await instance.turn({
       environment: params.environment,
+      initialUserMessageId: params.initialUserMessageId,
       prompt: params.prompt,
       runId: params.runId,
       signal: params.signal,

@@ -88,7 +88,8 @@ function createMessageManager(
     },
   );
   const createMessage = vi.fn<MessageManager["createMessage"]>(
-    (): Promise<CoreMessage> => Promise.resolve(userMessage("user_1")),
+    (input): Promise<CoreMessage> =>
+      Promise.resolve(userMessage(input.id ?? "user_1")),
   );
   const listBySession = vi.fn<MessageManager["listBySession"]>(
     (): Promise<MessageWithParts[]> => Promise.resolve([...messages]),
@@ -294,6 +295,22 @@ describe("runAgent", () => {
     });
   });
 
+  it("uses the preallocated id for the initial user message", async () => {
+    const messageManager = createMessageManager();
+
+    await runAgent(
+      createDeps({ messageManager: messageManager.manager }),
+      baseInput({ initialUserMessageId: "message_reserved" }),
+    );
+
+    expect(messageManager.createMessage).toHaveBeenCalledWith({
+      agent: "build",
+      id: "message_reserved",
+      role: "user",
+      sessionId: "session_child",
+    });
+  });
+
   it("uses an explicit parent message id when no initial prompt is provided", async () => {
     const messageManager = createMessageManager();
     const runCoordinator = createRunCoordinator();
@@ -409,6 +426,50 @@ describe("runAgent", () => {
     expect(messageManager.removeMessage).toHaveBeenCalledWith("user_1");
     expect(runCoordinator.waitForCompletion).not.toHaveBeenCalled();
     expect(messageManager.listBySession).not.toHaveBeenCalled();
+  });
+
+  it("can retry a busy run with the same preallocated user message id", async () => {
+    const messageManager = createMessageManager();
+    const runCoordinator = createRunCoordinator();
+    runCoordinator.create.mockRejectedValueOnce(
+      new SessionRunBusyError("session_child", ["run_active"]),
+    );
+    const input = baseInput({ initialUserMessageId: "message_reserved" });
+
+    await expect(
+      runAgent(
+        createDeps({
+          messageManager: messageManager.manager,
+          runCoordinator: runCoordinator.coordinator,
+        }),
+        input,
+      ),
+    ).rejects.toBeInstanceOf(SessionRunBusyError);
+    await expect(
+      runAgent(
+        createDeps({
+          messageManager: messageManager.manager,
+          runCoordinator: runCoordinator.coordinator,
+        }),
+        input,
+      ),
+    ).resolves.toMatchObject({ success: true });
+
+    expect(messageManager.createMessage).toHaveBeenNthCalledWith(1, {
+      agent: "build",
+      id: "message_reserved",
+      role: "user",
+      sessionId: "session_child",
+    });
+    expect(messageManager.createMessage).toHaveBeenNthCalledWith(2, {
+      agent: "build",
+      id: "message_reserved",
+      role: "user",
+      sessionId: "session_child",
+    });
+    expect(messageManager.removeMessage).toHaveBeenCalledWith(
+      "message_reserved",
+    );
   });
 
   it("preserves the run creation error when initial user message cleanup fails", async () => {
