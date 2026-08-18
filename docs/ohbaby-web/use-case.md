@@ -32,7 +32,7 @@
 1. 用户按 Enter 后，Composer 同帧清空草稿；Web 记录 keyed local attempt，并立即显示用户行、startup Thinking 与 admission spinner，不等待 HTTP 或 runtime 热身。
 2. `runtime.client.submitPromptAccepted(...)` → `POST /v1/prompts` → `202` + receipt。receipt 是受理线性化点：Web 记录服务端 `userMessageId` 并停止 admission spinner；首次会话的 `selectSession` 独立进行，不延长或回滚受理状态。
 3. 展示按 `formal UiMessage > starting/running UiPromptSubmission > local attempt` 在同一 render 中接管；正式消息与 run 可乱序到达，但同一 prompt 始终最多一条用户行、一个 Thinking。active run 的 follow-up 不插入 conversation，只进入现有 Queue。
-4. SSE 推 `message.part.delta` → 累积成 StreamingMessage（流式渲染）。`message.updated` 定稿 → 并入消息序列；Prompt 四终态事件收束状态。完整回答在事件/snapshot 中，不进入 completion。
+4. snapshot / `message.appended` 先建立 StreamingMessage；SSE 的 `message.part.delta` 再按稳定 messageId 更新它，并保持 text / tool call / tool result / 后续 text 的 producer 顺序。缺 id 或找不到目标的 delta 静默丢弃内容但推进 seq；`message.updated` 以权威完整 parts 定稿。工具 call/result 按 call id 合为一张卡，失败终态或失败 metadata 均显示为 failed；短失败自动展开一次。Prompt 四终态事件收束状态，完整回答在事件/snapshot 中，不进入 completion。
 5. 只有 live run 可 `abort`；startup Thinking 不伪造可取消的 run handle。
 
 ### UC3 处置权限请求

@@ -932,7 +932,18 @@ textarea:disabled {
   padding: 2px 7px;
 }
 
-.ohb-tool-panel button span:nth-child(2) {
+.ohb-tool-summary {
+  color: #73767d;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ohb-tool-meta {
   color: #aeb2ba;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 12px;

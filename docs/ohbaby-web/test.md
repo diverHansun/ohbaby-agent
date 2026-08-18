@@ -31,7 +31,10 @@
 
 | 场景 | 预期结果 |
 |------|---------|
-| 流式增量累积 | 多个 `message.part.delta` 顺序累积成正确 StreamingMessage，`message.updated` 定稿不错位 |
+| 流式增量累积 | snapshot / `message.appended` 先建立消息；多个 `message.part.delta` 保持 preamble → tool → result → conclusion 顺序，`message.updated` 定稿不错位 |
+| 孤立 delta | 缺少 messageId 或目标消息不存在时不创建匿名消息、不覆盖旧 text，但 seq 游标继续前进 |
+| 工具失败一致性 | live 与 snapshot 共用终态投影；`failed` / `timed_out` / `cancelled` / 非零 exitCode 均显示 failed，保留 output 与可读错误摘要 |
+| 工具单卡配对 | call/result 按 call id 合为一张卡；稳定 key 不随 part 重排串状态；短失败只自动展开一次，标题不暴露 call id |
 | **SSE 先开 + snapshot 基线** | 只应用 seq>基线的缓冲事件，无漏拍、无重复 |
 | **`resync-required`** | 丢弃 ViewState → 重拉 snapshot → 回 live，绝不静默错位（核心正确性） |
 | 单一逻辑 SSE | 同一 workspace 多个 SDK subscriber 仍只有一个 stream；每个有效 `UiEvent` 只解包、投影一次 |

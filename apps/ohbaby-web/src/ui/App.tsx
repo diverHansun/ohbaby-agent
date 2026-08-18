@@ -83,6 +83,7 @@ import {
   type SlashPaletteItem,
 } from "./slashCommands.js";
 import { isNearBottom, scrollToBottom } from "./streamScroll.js";
+import { OrphanToolResultCard, pairToolParts, ToolCard } from "./tool-card.js";
 import {
   COMPOSER_PLACEHOLDER_PHRASES,
   TypewriterPlaceholder,
@@ -1830,6 +1831,7 @@ function MessageRow(props: {
   const isAssistant = props.message.role === "assistant";
   const label = isUser ? "You" : isAssistant ? "ohbaby" : props.message.role;
   const visibleParts = filterTodoToolParts(props.message.parts);
+  const pairedParts = pairToolParts(visibleParts);
   if (
     props.reasoning === undefined &&
     props.message.parts.length > 0 &&
@@ -1850,16 +1852,55 @@ function MessageRow(props: {
             <pre>{props.reasoning.content}</pre>
           </details>
         ) : null}
-        {visibleParts.map((part, index) => (
-          <MessagePart
-            isStreaming={props.message.status === "streaming"}
-            key={`${props.message.id}-${String(index)}`}
-            part={part}
-          />
-        ))}
+        {pairedParts.map((entry) => {
+          if (entry.kind === "tool") {
+            return (
+              <ToolCard
+                call={entry.call}
+                key={`${props.message.id}-tool-${entry.call.id}`}
+                result={entry.result}
+              />
+            );
+          }
+          if (entry.kind === "orphan-result") {
+            return (
+              <OrphanToolResultCard
+                key={`${props.message.id}-orphan-result-${entry.result.callId}`}
+                result={entry.result}
+              />
+            );
+          }
+          return (
+            <MessagePart
+              isStreaming={props.message.status === "streaming"}
+              key={`${props.message.id}-${messagePartKey(
+                visibleParts,
+                entry.sourceIndex,
+              )}`}
+              part={entry.part}
+            />
+          );
+        })}
       </div>
     </article>
   );
+}
+
+function messagePartKey(
+  parts: readonly UiMessagePart[],
+  index: number,
+): string {
+  const part = parts[index];
+  if (part.type === "tool-call") {
+    return `tool-call-${part.call.id}`;
+  }
+  if (part.type === "tool-result") {
+    return `tool-result-${part.result.callId}`;
+  }
+  const typeIndex = parts
+    .slice(0, index)
+    .filter((candidate) => candidate.type === part.type).length;
+  return `${part.type}-${String(typeIndex)}`;
 }
 
 function filterTodoToolParts(
@@ -1958,48 +1999,10 @@ function MessagePart(props: {
     case "reasoning":
       return <pre className="ohb-reasoning">{props.part.text}</pre>;
     case "tool-call":
-      return (
-        <ToolPanel
-          accent={toolAccent(props.part.call.name)}
-          body={JSON.stringify(props.part.call.input, null, 2)}
-          meta={props.part.call.status}
-          title={props.part.call.name}
-        />
-      );
+      return <ToolCard call={props.part.call} result={undefined} />;
     case "tool-result":
-      return (
-        <ToolPanel
-          accent={props.part.result.error ? "red" : "green"}
-          body={props.part.result.output}
-          meta={props.part.result.error ?? "result"}
-          title={`result ${props.part.result.callId}`}
-        />
-      );
+      return <OrphanToolResultCard result={props.part.result} />;
   }
-}
-
-function ToolPanel(props: {
-  readonly accent: "blue" | "gold" | "green" | "red";
-  readonly body: string;
-  readonly meta: string;
-  readonly title: string;
-}): ReactElement {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className={`ohb-tool-panel ohb-tool-${props.accent}`}>
-      <button
-        onClick={() => {
-          setOpen((value) => !value);
-        }}
-        type="button"
-      >
-        <span>{props.title}</span>
-        <span>{props.meta}</span>
-        <ChevronDown className={open ? "ohb-chevron-open" : ""} size={16} />
-      </button>
-      {open ? <pre>{props.body}</pre> : null}
-    </div>
-  );
 }
 
 function thinkingElapsedSeconds(startedAt: string | undefined): number {
@@ -3990,20 +3993,6 @@ function composerPlaceholder(view: ViewModel): string {
     return "run in progress";
   }
   return "";
-}
-
-function toolAccent(name: string): "blue" | "gold" | "green" | "red" {
-  const lowered = name.toLowerCase();
-  if (lowered.includes("read")) {
-    return "gold";
-  }
-  if (lowered.includes("edit") || lowered.includes("write")) {
-    return "green";
-  }
-  if (lowered.includes("error")) {
-    return "red";
-  }
-  return "blue";
 }
 
 export function visibleMessageText(message: UiMessage): string {

@@ -489,6 +489,120 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelectorAll(".ohb-message")).toHaveLength(1);
   });
 
+  it("keeps an expanded tool panel attached to its call when parts reorder", async () => {
+    const base = snapshotWithStatus({ kind: "idle" });
+    const toolA = {
+      call: {
+        id: "call_a",
+        input: { path: "a.txt" },
+        name: "tool_a",
+        status: "completed" as const,
+      },
+      type: "tool-call" as const,
+    };
+    const toolB = {
+      call: {
+        id: "call_b",
+        input: { path: "b.txt" },
+        name: "tool_b",
+        status: "completed" as const,
+      },
+      type: "tool-call" as const,
+    };
+    const withParts = (
+      parts: readonly (typeof toolA | typeof toolB)[],
+    ): UiSnapshot => ({
+      ...base,
+      sessions: [
+        {
+          ...base.sessions[0],
+          messages: [
+            {
+              createdAt: timestamp,
+              id: "message_tools",
+              parts,
+              role: "assistant" as const,
+            },
+          ],
+        },
+      ],
+    });
+    const fake = createFakeRuntime({ snapshot: withParts([toolA, toolB]) });
+    const app = mountApp(fake.runtime);
+    const panelByTitle = (title: string): HTMLElement => {
+      const panel = Array.from(
+        app.container.querySelectorAll<HTMLElement>(".ohb-tool-panel"),
+      ).find((candidate) =>
+        candidate.querySelector("button")?.textContent.includes(title),
+      );
+      if (!panel) throw new Error(`tool panel not found: ${title}`);
+      return panel;
+    };
+
+    await act(async () => {
+      panelByTitle("tool_a").querySelector("button")?.click();
+      await Promise.resolve();
+    });
+    expect(
+      panelByTitle("tool_a").querySelector("pre")?.textContent ?? "",
+    ).toContain("a.txt");
+
+    act(() => {
+      fake.store.replaceSnapshot(withParts([toolB, toolA]), 2);
+    });
+
+    expect(
+      panelByTitle("tool_a").querySelector("pre")?.textContent ?? "",
+    ).toContain("a.txt");
+    expect(panelByTitle("tool_b").querySelector("pre")).toBeNull();
+  });
+
+  it("renders a paired failed call and result as one expanded card", () => {
+    const base = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...base,
+        sessions: [
+          {
+            ...base.sessions[0],
+            messages: [
+              {
+                createdAt: timestamp,
+                id: "message_failed_tool",
+                parts: [
+                  {
+                    call: {
+                      id: "call_bash",
+                      input: { command: "false" },
+                      name: "bash",
+                      status: "failed",
+                    },
+                    type: "tool-call",
+                  },
+                  {
+                    result: {
+                      callId: "call_bash",
+                      error: "exit code 1",
+                      output: "stderr text",
+                    },
+                    type: "tool-result",
+                  },
+                ],
+                role: "assistant",
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.querySelectorAll(".ohb-tool-panel")).toHaveLength(1);
+    expect(app.container.textContent).toContain("failed");
+    expect(app.container.textContent).toContain("stderr text");
+    expect(app.container.textContent).not.toContain("call_bash");
+  });
+
   it("renders an adaptive queued list and expands after five items", async () => {
     const prompts = Array.from({ length: 6 }, (_, index) => ({
       clientRequestId: `request_${String(index)}`,

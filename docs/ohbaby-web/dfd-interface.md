@@ -27,7 +27,9 @@ web 只与 daemon 的 `/v1` 面交互（同源）。
 3. `GET /v1/snapshot` → 响应携带它反映的 **seqNum 基线**（依赖 S-A）→ client 本地构造一次 `snapshot.replaced` barrier，经统一分发投影为初始 ViewState，置 `lastAppliedSeqNum = 基线`。
 4. 把缓冲事件中 **seq > 基线** 的部分按序应用，丢弃 seq ≤ 基线的（已含在 snapshot 内）→ 进入 `live`。
 
-**③ 事件流（异步、事件驱动）**：一条 SSE 推送 transport frame → `events.ts` 解包一次 → `BrowserDaemonClient.dispatchUiEvent` → store 校验 seq 并先投影 → SDK subscribers 后通知 → UI 重渲染。多个 subscriber 共享同一 SSE，不会各建连接。`message.part.delta` 累积成 StreamingMessage，直到 `message.updated` 定稿。
+**③ 事件流（异步、事件驱动）**：一条 SSE 推送 transport frame → `events.ts` 解包一次 → `BrowserDaemonClient.dispatchUiEvent` → store 校验 seq 并先投影 → SDK subscribers 后通知 → UI 重渲染。多个 subscriber 共享同一 SSE，不会各建连接。StreamingMessage 必须先由 snapshot / `message.appended` 建立；`message.part.delta` 只按 messageId 更新已有消息，并在 tool part 之后追加新的 text part，直到 `message.updated` 定稿。缺少 messageId 或目标消息时静默丢弃该 delta 内容但推进 seq，避免制造无身份消息；恢复仍由 replay/resync 负责。
+
+工具结果投影在 live stream 与持久化 snapshot 两条路径共用同一终态规则：scheduler/state 的错误终态，以及 metadata 中的 `failed` / `timed_out` / `cancelled` 或非零 `exitCode`，均折叠为 UI `failed`。Web 再按 call id 配对 call/result，只渲染一张工具卡。
 
 **④ 命令流（出站）**：
 - 发话：UI 调 `runtime.client.submitPromptAccepted(text, options)` → `POST /v1/prompts` → `202 Accepted` + `UiPromptReceipt`；最终状态经 SSE 投影。需要显式等待的调用方可按 `promptId` 调 `GET /v1/prompts/:id/completion`，或使用只组合 accepted + wait 的 `submitPromptAndWait`。

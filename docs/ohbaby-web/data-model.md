@@ -10,7 +10,7 @@
 
 - **ViewState** —— store 持有的、从 snapshot + 事件投影出的 UI 状态。是 `eventReducer` 的输出，UI 的唯一读取源。
 - **ConnectionState** —— web 对"浏览器↔daemon 链路"的视角。daemon 没有这个概念，是 web 独有的连接态机。
-- **StreamingMessage** —— 一条尚在流式到达、未定稿的 assistant 消息：`message.part.delta` 不断累积进它，直到 `message.updated` 定稿。
+- **StreamingMessage** —— 一条已由 snapshot / `message.appended` 建立、尚未定稿的 assistant 消息：后续 `message.part.delta` 只更新这条已有消息，直到 `message.updated` 定稿。
 - **PendingPermission** —— 本连接待用户处置的权限请求 + 归属信息。
 - **CommandNotice** —— slash 命令事件的轻量 UI 投影。它只展示命令 started/result/failed 的状态、输出或错误，不进入会话消息历史，不持久化。
 
@@ -46,8 +46,10 @@
 
 ### StreamingMessage
 - `messageId` —— 在途消息标识。
-- `parts` —— 已累积的片段（按 partId/顺序拼接）。
+- `parts` —— 按 producer 顺序累积的片段；delta 只续写尾部 text，否则追加新的 text part，不能跨 tool part 覆盖前文。
 - `finalized` —— 是否已收到 `message.updated` 定稿。
+
+工具调用的 Web 卡片是 `tool-call.call.id` 与 `tool-result.callId` 的派生配对视图，不是独立持久化实体。同一调用只渲染一张卡；稳定 key 使用 call id，但 call id 不作为用户可见标题。
 
 ### PendingPermission
 - `requestId` —— 权限请求标识。
@@ -65,8 +67,8 @@
 
 ## 4. Lifecycle & Ownership（生命周期与归属）
 
-- **创建**：ViewState 在首屏由 `GET /v1/snapshot` 投影产生；StreamingMessage 在首个 `message.part.delta` 创建；PendingPermission 在 `permission.requested` 入队；ConnectionState 在 bootstrap 建连时进入 `connecting`。
-- **更新**：均由 `eventReducer` 依据 SSE 事件推进；`lastAppliedSeqNum` 单调前进。CommandNotice 由 `command.started` / `command.result.delivered` / `command.failed` 推进。
+- **创建**：ViewState 在首屏由 `GET /v1/snapshot` 投影产生；StreamingMessage 由 snapshot 或 `message.appended` 建立，不能由孤立 delta 猜测创建；PendingPermission 在 `permission.requested` 入队；ConnectionState 在 bootstrap 建连时进入 `connecting`。
+- **更新**：均由 `eventReducer` 依据 SSE 事件推进；`lastAppliedSeqNum` 单调前进。`message.part.delta` 缺少稳定 messageId 或找不到目标消息时静默丢弃内容，但仍推进 seq 游标，等待既有 replay/resync 机制恢复权威状态。CommandNotice 由 `command.started` / `command.result.delivered` / `command.failed` 推进。
 - **失效/销毁**：StreamingMessage 在 `message.updated` 定稿后并入消息序列；PendingPermission 在用户应答或 `resyncing` 重建后移除；CommandNotice 在新 prompt/run 或达到保留上限时清理；整个 ViewState 在 `resyncing` 时被**整体丢弃重建**。
 - **归属**：以上概念**全部由 store 拥有、易失、绝不持久化**（落 G1）。daemon 拥有会话真相与 replay 缓冲；web 仅拥有自己的投影游标 `lastAppliedSeqNum` 与连接态。
 
