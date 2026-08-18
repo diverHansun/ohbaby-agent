@@ -7,6 +7,7 @@ import type {
   UiCompactSessionUsage,
   UiPermissionRequest,
   UiPromptEditLease,
+  UiPromptSubmission,
   UiRunStatus,
   UiSnapshot,
   UiWebCommandCatalog,
@@ -561,7 +562,37 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.selectSession).toHaveBeenCalledWith("session_new");
   });
 
-  it("renders a submitted prompt before the receipt and reconciles it with the queue projection", async () => {
+  it("commits the first prompt and startup feedback before admission resolves", async () => {
+    const pendingReceipt =
+      deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: null,
+        sessions: [],
+      },
+    });
+    fake.submitPromptAccepted.mockReturnValue(pendingReceipt.promise);
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "visible on the next frame");
+    await pressTextareaKey(app.container, "Enter");
+
+    expect(app.container.querySelector(".ohb-app")?.className).toContain(
+      "ohb-app-main",
+    );
+    expect(app.container.querySelector("textarea")?.textContent).toBe("");
+    expect(textareaValue(app.container)).toBe("");
+    expect(app.container.textContent).toContain("visible on the next frame");
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(
+      app.container
+        .querySelector('.ohb-send-button[title="Send message"]')
+        ?.getAttribute("aria-busy"),
+    ).toBe("true");
+  });
+
+  it("keeps an active-run follow-up in the queue instead of the conversation", async () => {
     const pendingReceipt =
       deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
     const initialSnapshot = snapshotWithStatus({
@@ -575,9 +606,13 @@ describe("OhbabyWebApp slash command interactions", () => {
     await setTextareaValue(app.container, "visible immediately");
     await pressTextareaKey(app.container, "Enter");
 
-    const pending = app.container.querySelector(".ohb-message-pending");
-    expect(pending?.textContent).toContain("visible immediately");
-    expect(pending?.textContent).toContain("Sending…");
+    expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
+    expect(textareaValue(app.container)).toBe("");
+    expect(
+      app.container
+        .querySelector(".ohb-send-button")
+        ?.getAttribute("aria-busy"),
+    ).toBe("true");
 
     await act(async () => {
       pendingReceipt.resolve({
@@ -591,7 +626,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       });
       await pendingReceipt.promise;
     });
-    expect(app.container.querySelector(".ohb-message-pending")).not.toBeNull();
+    expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
 
     await act(async () => {
       fake.store.replaceSnapshot(
@@ -619,6 +654,400 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
     expect(app.container.textContent).toContain("visible immediately");
+    expect(
+      app.container.querySelectorAll(".ohb-prompt-queue-item"),
+    ).toHaveLength(1);
+  });
+
+  it("stops admission at the receipt while session selection is still pending", async () => {
+    const selection = deferred<undefined>();
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: null,
+        sessions: [],
+      },
+    });
+    fake.selectSession.mockReturnValue(selection.promise);
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "accepted before navigation");
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() => fake.selectSession.mock.calls.length === 1);
+
+    expect(
+      app.container
+        .querySelector(".ohb-send-button")
+        ?.getAttribute("aria-busy"),
+    ).toBe("false");
+    expect(
+      app.container
+        .querySelector(".ohb-message-pending")
+        ?.getAttribute("data-user-message-id"),
+    ).toBe("message_1");
+    expect(app.container.textContent).toContain("accepted before navigation");
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+  });
+
+  it("restores a rejected prompt only when the user has not typed a new draft", async () => {
+    const admission =
+      deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.submitPromptAccepted.mockReturnValue(admission.promise);
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "restore me");
+    await pressTextareaKey(app.container, "Enter");
+    await setTextareaValue(app.container, "new draft");
+    await act(async () => {
+      admission.reject(new Error("admission failed"));
+      await admission.promise.catch(() => undefined);
+    });
+
+    expect(textareaValue(app.container)).toBe("new draft");
+    expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
+    expect(app.container.textContent).toContain("admission failed");
+  });
+
+  it("restores the submitted text when admission fails before new input", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.submitPromptAccepted.mockRejectedValue(new Error("offline"));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "restore after reject");
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() => app.container.textContent.includes("offline"));
+
+    expect(textareaValue(app.container)).toBe("restore after reject");
+    expect(app.container.querySelector(".ohb-thinking")).toBeNull();
+  });
+
+  it("rebuilds a starting prompt and startup thinking from the server snapshot", () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        prompts: [promptSubmission({ status: "starting" })],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.textContent).toContain("server projected prompt");
+    expect(app.container.querySelectorAll(".ohb-message-pending")).toHaveLength(
+      1,
+    );
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(app.container.textContent).toContain("starting agent");
+  });
+
+  it("lets the formal message take over without ending startup thinking", () => {
+    const snapshot = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshot,
+        prompts: [promptSubmission({ status: "starting" })],
+        sessions: snapshot.sessions.map((session) => ({
+          ...session,
+          messages: [
+            {
+              createdAt: timestamp,
+              id: "message_projected",
+              parts: [{ text: "server projected prompt", type: "text" }],
+              role: "user",
+            },
+          ],
+        })),
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
+    expect(app.container.querySelectorAll(".ohb-message-user")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+  });
+
+  it("moves a busy starting projection back to the queue", async () => {
+    const starting = {
+      ...snapshotWithStatus({ kind: "idle" }),
+      prompts: [promptSubmission({ status: "starting" })],
+    };
+    const fake = createFakeRuntime({ snapshot: starting });
+    const app = mountApp(fake.runtime);
+    expect(app.container.querySelector(".ohb-message-pending")).not.toBeNull();
+
+    act(() => {
+      fake.store.replaceSnapshot(
+        {
+          ...starting,
+          prompts: [promptSubmission({ status: "queued" })],
+        },
+        2,
+      );
+    });
+    await flushTimers();
+
+    expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
+    expect(app.container.querySelector(".ohb-thinking")).toBeNull();
+    expect(
+      app.container.querySelectorAll(".ohb-prompt-queue-item"),
+    ).toHaveLength(1);
+  });
+
+  it("shows an accepted terminal failure inline after reload", () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        prompts: [
+          promptSubmission({
+            error: {
+              code: "runtime_failed",
+              message: "runtime could not start",
+              retryable: true,
+              source: "runtime",
+            },
+            status: "failed",
+          }),
+        ],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.textContent).toContain("server projected prompt");
+    expect(app.container.textContent).toContain("runtime could not start");
+    expect(app.container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(app.container.querySelector(".ohb-thinking")).toBeNull();
+  });
+
+  it("keeps an idle first prompt visible when queued arrives before its receipt", async () => {
+    const receipt =
+      deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    fake.submitPromptAccepted.mockReturnValue(receipt.promise);
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "queued before receipt");
+    await pressTextareaKey(app.container, "Enter");
+    const clientRequestId =
+      fake.submitPromptAccepted.mock.calls[0]?.[1]?.clientRequestId ?? "";
+    act(() => {
+      fake.store.replaceSnapshot(
+        {
+          ...initial,
+          prompts: [
+            promptSubmission({
+              clientRequestId,
+              status: "queued",
+              text: "queued before receipt",
+            }),
+          ],
+        },
+        2,
+      );
+    });
+
+    expect(app.container.textContent).toContain("queued before receipt");
+    expect(app.container.querySelectorAll(".ohb-message-pending")).toHaveLength(
+      1,
+    );
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(
+      app.container
+        .querySelector(".ohb-send-button")
+        ?.getAttribute("aria-busy"),
+    ).toBe("true");
+  });
+
+  it("deduplicates a formal message that arrives with starting before the receipt", async () => {
+    const receipt =
+      deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    fake.submitPromptAccepted.mockReturnValue(receipt.promise);
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "formal before receipt");
+    await pressTextareaKey(app.container, "Enter");
+    const clientRequestId =
+      fake.submitPromptAccepted.mock.calls[0]?.[1]?.clientRequestId ?? "";
+    act(() => {
+      fake.store.replaceSnapshot(
+        {
+          ...initial,
+          prompts: [
+            promptSubmission({
+              clientRequestId,
+              status: "starting",
+              text: "formal before receipt",
+            }),
+          ],
+          sessions: initial.sessions.map((session) => ({
+            ...session,
+            messages: [
+              {
+                createdAt: timestamp,
+                id: "message_projected",
+                parts: [{ text: "formal before receipt", type: "text" }],
+                role: "user",
+              },
+            ],
+          })),
+        },
+        2,
+      );
+    });
+
+    expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
+    expect(app.container.querySelectorAll(".ohb-message-user")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(
+      app.container
+        .querySelector(".ohb-send-button")
+        ?.getAttribute("aria-busy"),
+    ).toBe("true");
+  });
+
+  it("shows one provisional row and one run thinking card when running precedes formal", async () => {
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const running: UiSnapshot = {
+      ...initial,
+      prompts: [promptSubmission({ status: "running" })],
+      runs: [
+        {
+          id: "run_projected",
+          sessionId: "session_1",
+          startedAt: timestamp,
+          status: { kind: "running", runId: "run_projected" },
+          updatedAt: timestamp,
+        },
+      ],
+      status: { kind: "running", runId: "run_projected" },
+    };
+    const fake = createFakeRuntime({ snapshot: running });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.querySelectorAll(".ohb-message-pending")).toHaveLength(
+      1,
+    );
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(app.container.textContent).toContain(
+      "double click esc to interrupt",
+    );
+
+    act(() => {
+      fake.store.replaceSnapshot(
+        {
+          ...running,
+          sessions: running.sessions.map((session) => ({
+            ...session,
+            messages: [
+              {
+                createdAt: timestamp,
+                id: "message_projected",
+                parts: [{ text: "server projected prompt", type: "text" }],
+                role: "user",
+              },
+            ],
+          })),
+        },
+        2,
+      );
+    });
+    await flushTimers();
+
+    expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
+    expect(app.container.querySelectorAll(".ohb-message-user")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+  });
+
+  it("keeps keyed consecutive submissions in conversation and queue placements", async () => {
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    fake.submitPromptAccepted.mockImplementation((text, options) =>
+      Promise.resolve({
+        clientRequestId: options?.clientRequestId ?? "request_missing",
+        createdAt: timestamp,
+        promptId: text === "first" ? "prompt_first" : "prompt_second",
+        sessionId: "session_1",
+        status: "queued",
+        userMessageId: text === "first" ? "message_first" : "message_second",
+      }),
+    );
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "first");
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() => fake.submitPromptAccepted.mock.calls.length === 1);
+    await setTextareaValue(app.container, "second");
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() => fake.submitPromptAccepted.mock.calls.length === 2);
+    const firstRequestId =
+      fake.submitPromptAccepted.mock.calls[0]?.[1]?.clientRequestId ?? "";
+    const secondRequestId =
+      fake.submitPromptAccepted.mock.calls[1]?.[1]?.clientRequestId ?? "";
+    act(() => {
+      fake.store.replaceSnapshot(
+        {
+          ...initial,
+          prompts: [
+            promptSubmission({
+              clientRequestId: firstRequestId,
+              promptId: "prompt_first",
+              status: "starting",
+              text: "first",
+              userMessageId: "message_first",
+            }),
+            promptSubmission({
+              clientRequestId: secondRequestId,
+              promptId: "prompt_second",
+              status: "queued",
+              text: "second",
+              userMessageId: "message_second",
+            }),
+          ],
+        },
+        2,
+      );
+    });
+    await flushTimers();
+
+    expect(app.container.querySelectorAll(".ohb-message-pending")).toHaveLength(
+      1,
+    );
+    expect(app.container.textContent).toContain("first");
+    expect(
+      app.container.querySelectorAll(".ohb-prompt-queue-item"),
+    ).toHaveLength(1);
+    expect(app.container.textContent).toContain("second");
+  });
+
+  it("keeps an accepted prompt when selecting its session fails", async () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: null,
+        sessions: [],
+      },
+    });
+    fake.selectSession.mockRejectedValue(new Error("navigation failed"));
+    const app = mountApp(fake.runtime);
+
+    await setTextareaValue(app.container, "accepted despite navigation");
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      app.container.textContent.includes("navigation failed"),
+    );
+
+    expect(app.container.textContent).toContain("accepted despite navigation");
+    expect(
+      app.container
+        .querySelector(".ohb-message-pending")
+        ?.getAttribute("data-user-message-id"),
+    ).toBe("message_1");
+    expect(textareaValue(app.container)).toBe("");
   });
 
   it("calculates thinking elapsed time from the persisted run start on mount", () => {
@@ -1855,9 +2284,9 @@ function createFakeRuntime(input: {
     selectedDirectory: "/repo-a",
   } as const;
   const submitPromptAccepted = vi.fn<UiBackendClient["submitPromptAccepted"]>(
-    () =>
+    (_text, options) =>
       Promise.resolve({
-        clientRequestId: "request_1",
+        clientRequestId: options?.clientRequestId ?? "request_1",
         createdAt: "2026-07-12T00:00:00.000Z",
         promptId: "prompt_1",
         sessionId: "session_1",
@@ -2017,6 +2446,23 @@ function snapshotWithStatus(status: UiRunStatus): UiSnapshot {
       },
     ],
     status,
+  };
+}
+
+function promptSubmission(
+  patch: Partial<UiPromptSubmission> = {},
+): UiPromptSubmission {
+  return {
+    clientRequestId: "request_projected",
+    createdAt: timestamp,
+    promptId: "prompt_projected",
+    scopeKey: "/repo-a",
+    sessionId: "session_1",
+    status: "queued",
+    text: "server projected prompt",
+    updatedAt: timestamp,
+    userMessageId: "message_projected",
+    ...patch,
   };
 }
 
@@ -2259,6 +2705,14 @@ async function setTextareaValue(
   });
 }
 
+function textareaValue(container: ParentNode): string {
+  const textarea = container.querySelector("textarea");
+  if (!(textarea instanceof HTMLTextAreaElement)) {
+    throw new Error("textarea not found");
+  }
+  return textarea.value;
+}
+
 async function waitFor(
   predicate: () => boolean,
   timeoutMs = 1_000,
@@ -2384,10 +2838,13 @@ async function setInputValue(
 function deferred<T>(): {
   readonly promise: Promise<T>;
   readonly resolve: (value: T) => void;
+  readonly reject: (error: unknown) => void;
 } {
   let resolvePromise: (value: T) => void = () => undefined;
-  const promise = new Promise<T>((resolve) => {
+  let rejectPromise: (error: unknown) => void = () => undefined;
+  const promise = new Promise<T>((resolve, reject) => {
     resolvePromise = resolve;
+    rejectPromise = reject;
   });
-  return { promise, resolve: resolvePromise };
+  return { promise, reject: rejectPromise, resolve: resolvePromise };
 }

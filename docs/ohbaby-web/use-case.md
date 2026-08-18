@@ -29,10 +29,11 @@
 5. 应用缓冲中 seq>基线 的事件 → `live`。
 
 ### UC2 发话并接收流式回复
-1. 用户在 Composer 输入 → `runtime.client.submitPromptAccepted(...)` → `POST /v1/prompts` → `202` + receipt；UI 不等待模型完成。
-2. SSE 推 `message.part.delta` → 累积成 StreamingMessage（流式渲染）。
-3. `message.updated` 定稿 → 并入消息序列；Prompt 四终态事件收束状态。完整回答在事件/snapshot 中，不进入 completion。
-4. 期间用户可随时 `abort`（中断当前 run）。
+1. 用户按 Enter 后，Composer 同帧清空草稿；Web 记录 keyed local attempt，并立即显示用户行、startup Thinking 与 admission spinner，不等待 HTTP 或 runtime 热身。
+2. `runtime.client.submitPromptAccepted(...)` → `POST /v1/prompts` → `202` + receipt。receipt 是受理线性化点：Web 记录服务端 `userMessageId` 并停止 admission spinner；首次会话的 `selectSession` 独立进行，不延长或回滚受理状态。
+3. 展示按 `formal UiMessage > starting/running UiPromptSubmission > local attempt` 在同一 render 中接管；正式消息与 run 可乱序到达，但同一 prompt 始终最多一条用户行、一个 Thinking。active run 的 follow-up 不插入 conversation，只进入现有 Queue。
+4. SSE 推 `message.part.delta` → 累积成 StreamingMessage（流式渲染）。`message.updated` 定稿 → 并入消息序列；Prompt 四终态事件收束状态。完整回答在事件/snapshot 中，不进入 completion。
+5. 只有 live run 可 `abort`；startup Thinking 不伪造可取消的 run handle。
 
 ### UC3 处置权限请求
 1. SSE 推 `permission.requested` → 入 PendingPermission 队列 → **权限模态 slide-up 弹出**（渲染队首；多于一个显示"还有 N 个待处理"）。仅当权限策略为 `default` 时弹出（`full-access` 不弹）。
@@ -81,6 +82,10 @@
 | UC1 | token 失效 → `401` | 进 `disconnected`，提示"重启 `ohbaby serve` / 重新打开" |
 | UC1 | clients/snapshot 请求失败 | 停在 `connecting`，可重试，不静默 |
 | UC2 | `202` 后链路中断（run 进行中） | **不自动重复提交**；恢复后可用 receipt 的 `promptId` 查询终态 |
+| UC2 | receipt 前 HTTP 拒绝 | 删除对应 local attempt；当前草稿仍空才恢复旧文本，不覆盖用户已输入的新草稿 |
+| UC2 | receipt 后 session 选择失败 | 保留 accepted 用户行与 Thinking，只显示独立导航错误，不恢复旧草稿或诱导重复发送 |
+| UC2 | starting 因 session busy 回 queued | provisional 行与 startup Thinking 退出，现有 Queue 接管；不伪造正式消息 |
+| UC2 | failed/interrupted 早于正式消息 | 由持久化 submission 重建用户行并内联错误；刷新后仍可见 |
 | UC2 | abort 与 run 自然结束竞态 | 以 `run.updated` 为准，UI 不抢先标记终态 |
 | UC3 | 审批错主 → `403` | 提示"该审批属于另一连接"，不误标为已处置 |
 | UC3 | 待决时断线 | resync 后据新 snapshot 重建队列——该请求可能已被它端处置而消失 |

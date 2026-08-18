@@ -38,6 +38,12 @@
 | snapshot barrier | 初始 seq=0 与本地 same-seq refresh 可应用；来自 SSE 的 same-seq/旧事件必须被拒绝且不通知 subscriber |
 | subscriber/listener 隔离 | 一个 SDK subscriber 或 store listener 抛错，不阻断其他 listener、store 或连接 |
 | Prompt 三种能力 | accepted 立即回 receipt；wait 返回严格四终态；andWait 只组合二者 |
+| prompt 首帧反馈 | Enter 后下一帧草稿已空，主布局已有 local 用户行、一个 startup Thinking，Send 仅在 HTTP admission 期间旋转 |
+| prompt 展示接管 | formal message > starting/running submission > local attempt；receipt/SSE/message/run 乱序时无双行、无空窗、Thinking 不重复 |
+| prompt busy 回退 | `starting → queued` 后 provisional/ startup Thinking 退出，prompt 只在 Queue；不出现正式消息假象 |
+| prompt 失败恢复 | receipt 前失败仅在当前 draft 为空时恢复；accepted failed/interrupted 保留 submission 用户行并内联错误 |
+| prompt reload projection | 无 local state 时，starting/running/failed/interrupted 仍可由 snapshot 独立重建 |
+| active run follow-up | admission 有按钮反馈，但不插 conversation optimistic 行；queued 后只出现在 Queue |
 | 无活动 workspace | `runtime.client === null`，页面进入 empty state，不由 getter 抛错 |
 | reconnect 退避有界 | 断线重连不紧循环空转 |
 | 权限错主 403 | UI 提示，且不误标为已处置 |

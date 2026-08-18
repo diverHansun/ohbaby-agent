@@ -874,6 +874,14 @@ textarea:disabled {
   top: 0;
 }
 
+.ohb-message-prompt-error-text {
+  color: #a8554c;
+  display: block;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  margin: -10px 24px 0;
+}
+
 .ohb-markdown code {
   background: #f1f1f2;
   border-radius: 4px;
@@ -2273,6 +2281,16 @@ button.ohb-list-row:hover,
   background: #5f86c4;
   border: 1px solid #5278bb;
   color: #ffffff;
+}
+
+.ohb-send-spinner {
+  animation: ohb-spin 1s linear infinite;
+}
+
+@keyframes ohb-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .ohb-stop-button,

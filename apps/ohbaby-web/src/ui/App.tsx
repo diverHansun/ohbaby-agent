@@ -4,6 +4,7 @@ import {
   ChevronDown,
   Folder,
   FolderPlus,
+  LoaderCircle,
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
@@ -47,6 +48,7 @@ import type {
   UiPermissionLevel,
   UiPermissionMode,
   UiPermissionRequest,
+  UiPromptSubmission,
   UiProbeModelContextWindowResult,
   UiSetSearchApiKeyResult,
   UiSession,
@@ -111,10 +113,21 @@ interface ComposerPrefill {
   readonly text: string;
 }
 
-interface PendingPrompt {
+interface LocalPromptAttempt {
   readonly clientRequestId: string;
   readonly createdAt: string;
-  readonly sessionId?: string;
+  readonly placement: "conversation" | "queue";
+  readonly submittedSessionId?: string;
+  readonly text: string;
+  readonly userMessageId?: string;
+}
+
+interface PromptProjectionModel {
+  readonly clientRequestId: string;
+  readonly createdAt: string;
+  readonly error?: string;
+  readonly id: string;
+  readonly label: string;
   readonly text: string;
 }
 
@@ -179,6 +192,160 @@ let mountedRoot: Root | undefined;
 
 const DEFAULT_GOAL_PANEL_INTENT: GoalPanelIntent = { action: "view" };
 
+function promptMatchesAttempt(
+  prompt: UiPromptSubmission,
+  attempt: LocalPromptAttempt,
+): boolean {
+  return (
+    prompt.clientRequestId === attempt.clientRequestId ||
+    (attempt.userMessageId !== undefined &&
+      prompt.userMessageId === attempt.userMessageId)
+  );
+}
+
+function hasLiveRunForSession(
+  snapshot: ViewModel["snapshot"],
+  sessionId: string | undefined,
+): boolean {
+  if (!snapshot || !sessionId) return false;
+  return snapshot.runs.some(
+    (run) =>
+      run.sessionId === sessionId &&
+      (run.status.kind === "running" ||
+        run.status.kind === "waiting-for-permission"),
+  );
+}
+
+function localAttemptSessionMatches(
+  attempt: LocalPromptAttempt,
+  activeSessionId: string | undefined,
+): boolean {
+  return (
+    activeSessionId === undefined ||
+    attempt.submittedSessionId === undefined ||
+    attempt.submittedSessionId === activeSessionId
+  );
+}
+
+function selectPromptProjection(input: {
+  readonly attempts: readonly LocalPromptAttempt[];
+  readonly view: ViewModel;
+}): {
+  readonly rows: readonly PromptProjectionModel[];
+  readonly startupThinkingAt?: string;
+} {
+  const activeSessionId = input.view.composer.activeSessionId;
+  const activeSession = input.view.activeSession;
+  const formalMessageIds = new Set(
+    activeSession?.messages.map((message) => message.id) ?? [],
+  );
+  const prompts = (input.view.snapshot?.prompts ?? []).filter(
+    (prompt) => prompt.sessionId === activeSessionId,
+  );
+  const hasLiveRun = hasLiveRunForSession(input.view.snapshot, activeSessionId);
+  const serverRows = prompts.flatMap((prompt): PromptProjectionModel[] => {
+    if (formalMessageIds.has(prompt.userMessageId)) return [];
+    if (prompt.status === "starting" || prompt.status === "running") {
+      return [
+        {
+          clientRequestId: prompt.clientRequestId,
+          createdAt: prompt.createdAt,
+          id: prompt.userMessageId,
+          label: "Starting…",
+          text: prompt.text,
+        },
+      ];
+    }
+    if (prompt.status === "failed" || prompt.status === "interrupted") {
+      return [
+        {
+          clientRequestId: prompt.clientRequestId,
+          createdAt: prompt.createdAt,
+          error:
+            prompt.error?.message ??
+            (prompt.status === "failed"
+              ? "Prompt failed before the run started."
+              : "Prompt was interrupted before completion."),
+          id: prompt.userMessageId,
+          label: prompt.status === "failed" ? "Failed" : "Interrupted",
+          text: prompt.text,
+        },
+      ];
+    }
+    return [];
+  });
+  const serverRequestIds = new Set(
+    serverRows.map((row) => row.clientRequestId),
+  );
+  const serverMessageIds = new Set(serverRows.map((row) => row.id));
+  const visibleAttempts = input.attempts.filter((attempt) =>
+    localAttemptSessionMatches(attempt, activeSessionId),
+  );
+  const localRows = visibleAttempts.flatMap(
+    (attempt): PromptProjectionModel[] => {
+      if (attempt.placement !== "conversation") return [];
+      const matchingPrompt = prompts.find((prompt) =>
+        promptMatchesAttempt(prompt, attempt),
+      );
+      if (
+        serverRequestIds.has(attempt.clientRequestId) ||
+        (attempt.userMessageId !== undefined &&
+          (formalMessageIds.has(attempt.userMessageId) ||
+            serverMessageIds.has(attempt.userMessageId)))
+      ) {
+        return [];
+      }
+      if (matchingPrompt) {
+        if (matchingPrompt.status !== "queued" || hasLiveRun) {
+          return [];
+        }
+      }
+      return [
+        {
+          clientRequestId: attempt.clientRequestId,
+          createdAt: attempt.createdAt,
+          id: attempt.userMessageId ?? `pending:${attempt.clientRequestId}`,
+          label: attempt.userMessageId === undefined ? "Sending…" : "Starting…",
+          text: attempt.text,
+        },
+      ];
+    },
+  );
+  const startupCandidates = [
+    ...prompts
+      .filter(
+        (prompt) => prompt.status === "starting" || prompt.status === "running",
+      )
+      .map((prompt) => prompt.startedAt ?? prompt.createdAt),
+    ...visibleAttempts.flatMap((attempt): string[] => {
+      if (attempt.placement !== "conversation") return [];
+      const matchingPrompt = prompts.find((prompt) =>
+        promptMatchesAttempt(prompt, attempt),
+      );
+      if (
+        matchingPrompt &&
+        (matchingPrompt.status === "succeeded" ||
+          matchingPrompt.status === "failed" ||
+          matchingPrompt.status === "cancelled" ||
+          matchingPrompt.status === "interrupted" ||
+          (matchingPrompt.status === "queued" && hasLiveRun))
+      ) {
+        return [];
+      }
+      return [attempt.createdAt];
+    }),
+  ].sort();
+  const startupThinkingAt = startupCandidates[0];
+  return {
+    rows: [...serverRows, ...localRows].sort(
+      (left, right) =>
+        Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
+        left.id.localeCompare(right.id),
+    ),
+    ...(startupCandidates.length === 0 ? {} : { startupThinkingAt }),
+  };
+}
+
 export function mountOhbabyWebApp(runtime: OhbabyWebRuntime): void {
   const rootElement = document.getElementById("root");
   if (!rootElement) {
@@ -238,36 +405,64 @@ function ConnectedOhbabyWebApp({
     useState<StructuredOverlayState | null>(null);
   const [composerPrefill, setComposerPrefill] =
     useState<ComposerPrefill | null>(null);
-  const [pendingPrompt, setPendingPrompt] = useState<PendingPrompt | null>(
-    null,
-  );
+  const [localPromptAttempts, setLocalPromptAttempts] = useState<
+    readonly LocalPromptAttempt[]
+  >([]);
   const clearActionError = useCallback(() => {
     setActionError(null);
   }, []);
-  const showMain = !view.isEmpty || view.commandNotices.length > 0;
-  const visiblePendingPrompt =
-    pendingPrompt?.sessionId === undefined ||
-    pendingPrompt.sessionId === view.composer.activeSessionId
-      ? pendingPrompt
-      : null;
+  const promptProjection = useMemo(
+    () => selectPromptProjection({ attempts: localPromptAttempts, view }),
+    [localPromptAttempts, view],
+  );
+  const isPromptAdmitting = localPromptAttempts.some(
+    (attempt) => attempt.userMessageId === undefined,
+  );
+  const showMain =
+    !view.isEmpty ||
+    view.commandNotices.length > 0 ||
+    promptProjection.rows.length > 0 ||
+    promptProjection.startupThinkingAt !== undefined;
 
   useEffect(() => {
-    if (!pendingPrompt) return;
-    const projected = view.snapshot?.prompts?.find(
-      (prompt) => prompt.clientRequestId === pendingPrompt.clientRequestId,
-    );
-    if (!projected) return;
-    const messageVisible = view.snapshot?.sessions
-      .find((session) => session.id === projected.sessionId)
-      ?.messages.some((message) => message.id === projected.userMessageId);
-    if (
-      projected.status === "queued" ||
-      messageVisible === true ||
-      (projected.status !== "starting" && projected.status !== "running")
-    ) {
-      setPendingPrompt(null);
-    }
-  }, [pendingPrompt, view.snapshot]);
+    setLocalPromptAttempts((attempts) => {
+      const next = attempts.filter((attempt) => {
+        if (attempt.userMessageId === undefined) return true;
+        const matchingPrompt = view.snapshot?.prompts?.find((prompt) =>
+          promptMatchesAttempt(prompt, attempt),
+        );
+        const sessionId =
+          attempt.submittedSessionId ?? matchingPrompt?.sessionId;
+        const formalVisible = view.snapshot?.sessions
+          .find((session) => session.id === sessionId)
+          ?.messages.some((message) => message.id === attempt.userMessageId);
+        if (matchingPrompt) {
+          if (
+            matchingPrompt.status === "starting" ||
+            matchingPrompt.status === "running" ||
+            matchingPrompt.status === "succeeded" ||
+            matchingPrompt.status === "failed" ||
+            matchingPrompt.status === "cancelled" ||
+            matchingPrompt.status === "interrupted"
+          ) {
+            return false;
+          }
+          if (
+            attempt.placement === "queue" ||
+            hasLiveRunForSession(view.snapshot, sessionId)
+          ) {
+            return false;
+          }
+        }
+        return !(
+          formalVisible === true &&
+          (matchingPrompt !== undefined ||
+            hasLiveRunForSession(view.snapshot, sessionId))
+        );
+      });
+      return next.length === attempts.length ? attempts : next;
+    });
+  }, [view.snapshot]);
 
   const runAction = useCallback(
     async (action: () => Promise<void>): Promise<boolean> => {
@@ -365,32 +560,66 @@ function ConnectedOhbabyWebApp({
         );
       }
       const requestId = clientRequestId ?? globalThis.crypto.randomUUID();
+      const submittedSessionId = view.composer.activeSessionId;
+      const placement =
+        submittedSessionId !== undefined &&
+        (hasLiveRunForSession(view.snapshot, submittedSessionId) ||
+          localPromptAttempts.some(
+            (attempt) =>
+              attempt.placement === "conversation" &&
+              localAttemptSessionMatches(attempt, submittedSessionId),
+          ))
+          ? "queue"
+          : "conversation";
       try {
         clearActionError();
-        setPendingPrompt({
-          clientRequestId: requestId,
-          createdAt: new Date().toISOString(),
-          ...(view.composer.activeSessionId === undefined
-            ? {}
-            : { sessionId: view.composer.activeSessionId }),
-          text,
-        });
+        setLocalPromptAttempts((attempts) => [
+          ...attempts.filter(
+            (attempt) => attempt.clientRequestId !== requestId,
+          ),
+          {
+            clientRequestId: requestId,
+            createdAt: new Date().toISOString(),
+            placement,
+            ...(submittedSessionId === undefined ? {} : { submittedSessionId }),
+            text,
+          },
+        ]);
         const receipt = await client.submitPromptAccepted(text, {
           clientRequestId: requestId,
-          ...(view.composer.activeSessionId === undefined
+          ...(submittedSessionId === undefined
             ? {}
-            : { sessionId: view.composer.activeSessionId }),
+            : { sessionId: submittedSessionId }),
         });
         if (receipt.clientRequestId !== requestId) {
           throw new Error("Prompt receipt did not match this submission");
         }
-        if (view.composer.activeSessionId === undefined) {
-          await runtime.selectSession(receipt.sessionId);
+        setLocalPromptAttempts((attempts) =>
+          attempts.map((attempt) =>
+            attempt.clientRequestId === requestId
+              ? {
+                  ...attempt,
+                  submittedSessionId: receipt.sessionId,
+                  userMessageId: receipt.userMessageId,
+                }
+              : attempt,
+          ),
+        );
+        if (submittedSessionId === undefined) {
+          void runtime
+            .selectSession(receipt.sessionId)
+            .catch((error: unknown) => {
+              setActionError(
+                `Prompt accepted, but the session could not be opened: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              );
+            });
         }
         return true;
       } catch (error) {
-        setPendingPrompt((current) =>
-          current?.clientRequestId === requestId ? null : current,
+        setLocalPromptAttempts((attempts) =>
+          attempts.filter((attempt) => attempt.clientRequestId !== requestId),
         );
         setActionError(error instanceof Error ? error.message : String(error));
         return false;
@@ -401,8 +630,10 @@ function ConnectedOhbabyWebApp({
       openOverlayForSlashText,
       runAction,
       client,
+      localPromptAttempts,
       runtime,
       view.composer.activeSessionId,
+      view.snapshot,
     ],
   );
   const createSession = useCallback((): void => {
@@ -510,7 +741,8 @@ function ConnectedOhbabyWebApp({
               onDismiss={clearActionError}
             />
             <ConversationStream
-              pendingPrompt={visiblePendingPrompt}
+              promptRows={promptProjection.rows}
+              startupThinkingAt={promptProjection.startupThinkingAt}
               view={view}
             />
             <PermissionModal
@@ -523,30 +755,6 @@ function ConnectedOhbabyWebApp({
                 );
               }}
               permissions={view.pendingPermissions}
-            />
-            <Composer
-              client={client}
-              draftScopeKey={`${workspace.selectedDirectory ?? "workspace"}:${view.composer.activeSessionId ?? "new"}`}
-              prefill={composerPrefill}
-              onListCommands={listCommands}
-              onSetPermission={(input) => {
-                void runAction(async () => {
-                  await client.setPermission(input);
-                });
-              }}
-              onStructuredCommand={openStructuredCommand}
-              onSubmit={submitText}
-              onStop={() => {
-                void runAction(() =>
-                  view.composer.activeSessionId === undefined
-                    ? Promise.resolve()
-                    : runtime.abortSession(
-                        view.composer.activeSessionId,
-                        view.composer.activeRunId,
-                      ),
-                );
-              }}
-              view={view}
             />
             {commandModalNotice ? (
               <CommandResultModal
@@ -579,25 +787,39 @@ function ConnectedOhbabyWebApp({
               onDismiss={clearActionError}
             />
             <EmptyState
-              client={client}
-              composerPrefill={composerPrefill}
-              draftScopeKey={`${workspace.selectedDirectory ?? "workspace"}:${view.composer.activeSessionId ?? "new"}`}
-              onListCommands={listCommands}
               onOpenGoalPanel={openGoalPanel}
-              onSetPermission={(input) => {
-                void runAction(async () => {
-                  await client.setPermission(input);
-                });
-              }}
-              onStructuredCommand={openStructuredCommand}
-              onSubmit={submitText}
-              pendingPrompt={visiblePendingPrompt}
               status={view.header}
               view={view}
               workspaceDirectory={workspace.selectedDirectory}
             />
           </>
         )}
+        <Composer
+          client={client}
+          compact={!showMain}
+          draftScopeKey={`${workspace.selectedDirectory ?? "workspace"}:${view.composer.activeSessionId ?? "new"}`}
+          isPromptAdmitting={isPromptAdmitting}
+          prefill={composerPrefill}
+          onListCommands={listCommands}
+          onSetPermission={(input) => {
+            void runAction(async () => {
+              await client.setPermission(input);
+            });
+          }}
+          onStructuredCommand={openStructuredCommand}
+          onSubmit={submitText}
+          onStop={() => {
+            void runAction(() =>
+              view.composer.activeSessionId === undefined
+                ? Promise.resolve()
+                : runtime.abortSession(
+                    view.composer.activeSessionId,
+                    view.composer.activeRunId,
+                  ),
+            );
+          }}
+          view={view}
+        />
         {structuredOverlay ? (
           <StructuredCommandOverlay
             client={client}
@@ -710,21 +932,7 @@ function BootstrapError(props: { readonly error: unknown }): ReactElement {
 }
 
 function EmptyState(props: {
-  readonly client: UiBackendClient;
-  readonly composerPrefill: ComposerPrefill | null;
-  readonly draftScopeKey: string;
-  readonly onListCommands: () => Promise<UiWebCommandCatalog>;
   readonly onOpenGoalPanel: (intent?: GoalPanelIntent) => void;
-  readonly onSetPermission: (input: {
-    readonly level?: UiPermissionLevel;
-    readonly mode?: UiPermissionMode;
-  }) => void;
-  readonly onStructuredCommand: (request: StructuredCommandRequest) => void;
-  readonly onSubmit: (
-    text: string,
-    clientRequestId?: string,
-  ) => Promise<boolean>;
-  readonly pendingPrompt: PendingPrompt | null;
   readonly status: HeaderModel;
   readonly view: ViewModel;
   readonly workspaceDirectory: string | null;
@@ -761,21 +969,6 @@ function EmptyState(props: {
             <span key={`${item}-${String(index)}`}>{item}</span>
           ))}
         </div>
-        {props.pendingPrompt ? (
-          <PendingPromptRow prompt={props.pendingPrompt} />
-        ) : null}
-        <Composer
-          client={props.client}
-          compact
-          draftScopeKey={props.draftScopeKey}
-          prefill={props.composerPrefill}
-          onListCommands={props.onListCommands}
-          onSetPermission={props.onSetPermission}
-          onStructuredCommand={props.onStructuredCommand}
-          onSubmit={props.onSubmit}
-          onStop={() => undefined}
-          view={props.view}
-        />
       </section>
     </>
   );
@@ -1137,7 +1330,8 @@ function ErrorBanner(props: {
 }
 
 function ConversationStream(props: {
-  readonly pendingPrompt: PendingPrompt | null;
+  readonly promptRows: readonly PromptProjectionModel[];
+  readonly startupThinkingAt?: string;
   readonly view: ViewModel;
 }): ReactElement {
   const streamRef = useRef<HTMLDivElement | null>(null);
@@ -1186,14 +1380,14 @@ function ConversationStream(props: {
   }, [activeSessionId, scheduleStickScroll]);
 
   useLayoutEffect(() => {
-    if (props.pendingPrompt !== null) {
+    if (props.promptRows.length > 0) {
       stickToBottomRef.current = true;
     }
     scheduleStickScroll();
   }, [
     messagesSignature,
-    props.pendingPrompt?.clientRequestId,
-    props.pendingPrompt?.text,
+    props.promptRows.map((row) => `${row.id}:${row.label}`).join(","),
+    props.startupThinkingAt,
     props.view.composer.isRunning,
     scheduleStickScroll,
   ]);
@@ -1244,13 +1438,19 @@ function ConversationStream(props: {
             reasoning={props.view.reasoningByMessageId[message.id]}
           />
         ))}
-        {props.pendingPrompt ? (
-          <PendingPromptRow prompt={props.pendingPrompt} />
-        ) : null}
+        {props.promptRows.map((row) => (
+          <PromptProjectionRow key={row.id} row={row} />
+        ))}
         <CommandNoticeList notices={props.view.commandNotices} />
         {props.view.composer.isRunning ? (
           <ThinkingIndicator
+            canInterrupt
             startedAt={props.view.composer.activeRunStartedAt}
+          />
+        ) : props.startupThinkingAt !== undefined ? (
+          <ThinkingIndicator
+            canInterrupt={false}
+            startedAt={props.startupThinkingAt}
           />
         ) : null}
       </div>
@@ -1670,23 +1870,31 @@ function filterTodoToolMessages(
   });
 }
 
-function PendingPromptRow(props: {
-  readonly prompt: PendingPrompt;
+function PromptProjectionRow(props: {
+  readonly row: PromptProjectionModel;
 }): ReactElement {
   return (
     <div
-      className="ohb-message-pending"
-      data-client-request-id={props.prompt.clientRequestId}
+      className={`ohb-message-pending ${
+        props.row.error === undefined ? "" : "ohb-message-prompt-error"
+      }`}
+      data-client-request-id={props.row.clientRequestId}
+      data-user-message-id={props.row.id}
     >
       <MessageRow
         message={{
-          createdAt: props.prompt.createdAt,
-          id: `pending:${props.prompt.clientRequestId}`,
-          parts: [{ text: props.prompt.text, type: "text" }],
+          createdAt: props.row.createdAt,
+          id: props.row.id,
+          parts: [{ text: props.row.text, type: "text" }],
           role: "user",
         }}
       />
-      <span className="ohb-message-pending-label">Sending…</span>
+      <span className="ohb-message-pending-label">{props.row.label}</span>
+      {props.row.error === undefined ? null : (
+        <span className="ohb-message-prompt-error-text" role="alert">
+          {props.row.error}
+        </span>
+      )}
     </div>
   );
 }
@@ -1757,6 +1965,7 @@ function thinkingElapsedSeconds(startedAt: string | undefined): number {
 }
 
 function ThinkingIndicator(props: {
+  readonly canInterrupt: boolean;
   readonly startedAt: string | undefined;
 }): ReactElement {
   const [elapsedSeconds, setElapsedSeconds] = useState(() =>
@@ -1780,7 +1989,11 @@ function ThinkingIndicator(props: {
       </span>
       <span>Thinking</span>
       <span>· {String(elapsedSeconds)}s</span>
-      <span>· double click esc to interrupt</span>
+      {props.canInterrupt ? (
+        <span>· double click esc to interrupt</span>
+      ) : (
+        <span>· starting agent</span>
+      )}
     </div>
   );
 }
@@ -1847,6 +2060,7 @@ function Composer(props: {
   readonly client: UiBackendClient;
   readonly compact?: boolean;
   readonly draftScopeKey: string;
+  readonly isPromptAdmitting: boolean;
   readonly onListCommands: () => Promise<UiWebCommandCatalog>;
   readonly onSetPermission: (input: {
     readonly level?: UiPermissionLevel;
@@ -1880,14 +2094,19 @@ function Composer(props: {
   const [slashError, setSlashError] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const draftRef = useRef("");
   const lastEscapeAt = useRef(0);
   const lastLeaseRenewalAt = useRef(0);
   const leaseRenewalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queueAcquirePendingRef = useRef(false);
   const queueAcquireGenerationRef = useRef(0);
   const canSend =
-    props.view.composer.canSend && draft.trim().length > 0 && !isSubmitting;
-  const canUseSlash = props.view.composer.canSend && !isSubmitting;
+    props.view.composer.canSend &&
+    draft.trim().length > 0 &&
+    !isSubmitting &&
+    !props.isPromptAdmitting;
+  const canUseSlash =
+    props.view.composer.canSend && !isSubmitting && !props.isPromptAdmitting;
   const visibleQueuedPrompts = queueExpanded
     ? props.view.queuedPrompts
     : props.view.queuedPrompts.slice(0, 5);
@@ -2031,6 +2250,7 @@ function Composer(props: {
 
   const updateDraft = useCallback(
     (nextDraft: string): void => {
+      draftRef.current = nextDraft;
       setDraft(nextDraft);
       const keepPending =
         pendingRequestId !== null && pendingText === nextDraft.trim();
@@ -2265,7 +2485,7 @@ function Composer(props: {
 
   const send = useCallback(() => {
     const text = draft.trim();
-    if (!text || !props.view.composer.canSend) {
+    if (!text || !canSend) {
       return;
     }
     if (queuedEdit) {
@@ -2275,29 +2495,33 @@ function Composer(props: {
     const clientRequestId = pendingRequestId ?? globalThis.crypto.randomUUID();
     setPendingRequestId(clientRequestId);
     setPendingText(text);
-    persistDraft(draft, clientRequestId, text);
-    setIsSubmitting(true);
-    void props
-      .onSubmit(text, clientRequestId)
-      .then((sent) => {
-        if (sent) {
-          setDraft("");
-          setPendingRequestId(null);
-          setPendingText(null);
+    draftRef.current = "";
+    setDraft("");
+    persistDraft("", clientRequestId, text);
+    void props.onSubmit(text, clientRequestId).then((sent) => {
+      setPendingRequestId(null);
+      setPendingText(null);
+      if (sent) {
+        if (draftRef.current.length === 0) {
           removeSessionValue(composerDraftKey(props.draftScopeKey));
+        } else {
+          persistDraft(draftRef.current);
         }
-      })
-      .finally(() => {
-        setIsSubmitting(false);
-      });
+        return;
+      }
+      const restored = draftRef.current.length === 0 ? text : draftRef.current;
+      draftRef.current = restored;
+      setDraft(restored);
+      persistDraft(restored);
+    });
   }, [
+    canSend,
     draft,
     finishQueuedEdit,
     pendingRequestId,
     persistDraft,
     props.draftScopeKey,
     props.onSubmit,
-    props.view.composer.canSend,
     queuedEdit,
   ]);
 
@@ -2559,13 +2783,22 @@ function Composer(props: {
           </button>
         ) : null}
         <button
+          aria-busy={props.isPromptAdmitting}
           className="ohb-send-button"
           disabled={!canSend}
           onClick={send}
           title={queuedEdit ? "Save queued prompt" : "Send message"}
           type="button"
         >
-          <Send size={14} />
+          {props.isPromptAdmitting ? (
+            <LoaderCircle
+              aria-hidden="true"
+              className="ohb-send-spinner"
+              size={14}
+            />
+          ) : (
+            <Send size={14} />
+          )}
           <span>{queuedEdit ? "Save" : "Send"}</span>
         </button>
       </div>
