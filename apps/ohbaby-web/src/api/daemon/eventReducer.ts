@@ -514,26 +514,20 @@ function applyMessageDelta(
   messages: readonly UiMessage[],
   event: Extract<UiEvent, { type: "message.part.delta" }>,
 ): readonly UiMessage[] {
-  const messageId = event.messageId ?? `streaming:${event.sessionId}`;
+  const messageId = event.messageId;
+  if (messageId === undefined) {
+    return messages;
+  }
   const index = messages.findIndex((message) => message.id === messageId);
-  const current =
-    index >= 0
-      ? messages[index]
-      : ({
-          createdAt: new Date(event.timestamp ?? Date.now()).toISOString(),
-          id: messageId,
-          parts: [],
-          role: "assistant",
-          status: "streaming",
-        } satisfies UiMessage);
+  if (index < 0) {
+    return messages;
+  }
+  const current = messages[index];
   const nextMessage = {
     ...current,
     parts: upsertTextPart(current.parts, event.delta, event.content),
     status: "streaming" as const,
   };
-  if (index < 0) {
-    return [...messages, nextMessage];
-  }
   return [
     ...messages.slice(0, index),
     nextMessage,
@@ -546,19 +540,13 @@ function upsertTextPart(
   delta: string,
   content: string | undefined,
 ): UiMessage["parts"] {
-  let index = -1;
-  for (let candidate = parts.length - 1; candidate >= 0; candidate -= 1) {
-    if (parts[candidate]?.type === "text") {
-      index = candidate;
-      break;
-    }
+  if (parts.length === 0) {
+    return [{ text: content ?? delta, type: "text" }];
   }
-  if (index < 0) {
-    return [...parts, { text: content ?? delta, type: "text" }];
-  }
+  const index = parts.length - 1;
   const part = parts[index];
   if (part.type !== "text") {
-    return parts;
+    return [...parts, { text: content ?? delta, type: "text" }];
   }
   return [
     ...parts.slice(0, index),

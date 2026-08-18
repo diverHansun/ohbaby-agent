@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { UiSnapshot } from "ohbaby-sdk";
+import type { UiMessagePart, UiSnapshot } from "ohbaby-sdk";
 import {
   createInitialViewState,
   reduceUiEvent,
@@ -192,12 +192,27 @@ describe("ohbaby-web eventReducer", () => {
     state = reduceUiEvent(
       state,
       {
+        message: {
+          createdAt: timestamp,
+          id: "message_1",
+          parts: [],
+          role: "assistant",
+          status: "streaming",
+        },
+        sessionId: "session_1",
+        type: "message.appended",
+      },
+      1,
+    );
+    state = reduceUiEvent(
+      state,
+      {
         delta: "hel",
         messageId: "message_1",
         sessionId: "session_1",
         type: "message.part.delta",
       },
-      1,
+      2,
     );
     state = reduceUiEvent(
       state,
@@ -207,7 +222,7 @@ describe("ohbaby-web eventReducer", () => {
         sessionId: "session_1",
         type: "message.part.delta",
       },
-      2,
+      3,
     );
 
     expect(state.snapshot?.sessions[0]?.messages[0]?.parts).toEqual([
@@ -228,7 +243,7 @@ describe("ohbaby-web eventReducer", () => {
         sessionId: "session_1",
         type: "message.updated",
       },
-      3,
+      4,
     );
 
     expect(state.snapshot?.sessions[0]?.messages[0]?.parts).toEqual([
@@ -295,21 +310,97 @@ describe("ohbaby-web eventReducer", () => {
     expect(state.reasoningByMessageId).toEqual({});
   });
 
-  it("removes the anonymous streaming placeholder when the final message uses a stable id", () => {
+  it("keeps preamble, tool, and conclusion in producer order", () => {
     let state = replaceSnapshot(emptySnapshot(), 0);
 
     state = reduceUiEvent(
       state,
       {
-        delta: "draft",
+        message: {
+          createdAt: timestamp,
+          id: "message_1",
+          parts: [],
+          role: "assistant",
+          status: "streaming",
+        },
         sessionId: "session_1",
-        type: "message.part.delta",
+        type: "message.appended",
       },
       1,
     );
-    expect(
-      state.snapshot?.sessions[0]?.messages.map((message) => message.id),
-    ).toEqual(["streaming:session_1"]);
+    state = reduceUiEvent(
+      state,
+      {
+        content: "I will inspect it.",
+        delta: "I will inspect it.",
+        messageId: "message_1",
+        sessionId: "session_1",
+        type: "message.part.delta",
+      },
+      2,
+    );
+    state = reduceUiEvent(
+      state,
+      {
+        message: {
+          createdAt: timestamp,
+          id: "message_1",
+          parts: [
+            { text: "I will inspect it.", type: "text" },
+            {
+              call: {
+                id: "call_read",
+                input: { file_path: "README.md" },
+                name: "read",
+                status: "completed",
+              },
+              type: "tool-call",
+            },
+            {
+              result: {
+                callId: "call_read",
+                output: "README content",
+              },
+              type: "tool-result",
+            },
+          ],
+          role: "assistant",
+          status: "streaming",
+        },
+        sessionId: "session_1",
+        type: "message.updated",
+      },
+      3,
+    );
+    state = reduceUiEvent(
+      state,
+      {
+        content: "Done.",
+        delta: "Done.",
+        messageId: "message_1",
+        sessionId: "session_1",
+        type: "message.part.delta",
+      },
+      4,
+    );
+
+    expect(state.snapshot?.sessions[0]?.messages[0]?.parts).toEqual([
+      { text: "I will inspect it.", type: "text" },
+      {
+        call: {
+          id: "call_read",
+          input: { file_path: "README.md" },
+          name: "read",
+          status: "completed",
+        },
+        type: "tool-call",
+      },
+      {
+        result: { callId: "call_read", output: "README content" },
+        type: "tool-result",
+      },
+      { text: "Done.", type: "text" },
+    ]);
 
     state = reduceUiEvent(
       state,
@@ -318,22 +409,233 @@ describe("ohbaby-web eventReducer", () => {
           completedAt: timestamp,
           createdAt: timestamp,
           id: "message_1",
-          parts: [{ text: "final", type: "text" }],
+          parts: [
+            { text: "I will inspect it.", type: "text" },
+            {
+              call: {
+                id: "call_read",
+                input: { file_path: "README.md" },
+                name: "read",
+                status: "completed",
+              },
+              type: "tool-call",
+            },
+            {
+              result: {
+                callId: "call_read",
+                output: "README content",
+              },
+              type: "tool-result",
+            },
+            { text: "Done.", type: "text" },
+          ],
           role: "assistant",
           status: "completed",
         },
         sessionId: "session_1",
         type: "message.updated",
       },
+      5,
+    );
+
+    expect(state.snapshot?.sessions[0]?.messages[0]?.parts).toEqual([
+      { text: "I will inspect it.", type: "text" },
+      expect.objectContaining({ type: "tool-call" }),
+      expect.objectContaining({ type: "tool-result" }),
+      { text: "Done.", type: "text" },
+    ]);
+  });
+
+  it("appends a conclusion after a tool-only snapshot", () => {
+    let state = replaceSnapshot(emptySnapshot(), 0);
+
+    state = reduceUiEvent(
+      state,
+      {
+        message: {
+          createdAt: timestamp,
+          id: "message_1",
+          parts: [
+            {
+              call: {
+                id: "call_read",
+                input: { file_path: "README.md" },
+                name: "read",
+                status: "completed",
+              },
+              type: "tool-call",
+            },
+            {
+              result: { callId: "call_read", output: "README content" },
+              type: "tool-result",
+            },
+          ],
+          role: "assistant",
+          status: "streaming",
+        },
+        sessionId: "session_1",
+        type: "message.appended",
+      },
+      1,
+    );
+    state = reduceUiEvent(
+      state,
+      {
+        delta: "Done.",
+        messageId: "message_1",
+        sessionId: "session_1",
+        type: "message.part.delta",
+      },
       2,
     );
 
-    expect(state.snapshot?.sessions[0]?.messages).toMatchObject([
-      {
-        id: "message_1",
-        parts: [{ text: "final", type: "text" }],
-      },
+    expect(state.snapshot?.sessions[0]?.messages[0]?.parts).toEqual([
+      expect.objectContaining({ type: "tool-call" }),
+      expect.objectContaining({ type: "tool-result" }),
+      { text: "Done.", type: "text" },
     ]);
+  });
+
+  it("keeps earlier text intact across two rounds of tools", () => {
+    let state = replaceSnapshot(emptySnapshot(), 0);
+    const toolParts = (callId: string): readonly UiMessagePart[] => [
+      {
+        call: {
+          id: callId,
+          input: { path: `${callId}.txt` },
+          name: "read",
+          status: "completed" as const,
+        },
+        type: "tool-call" as const,
+      },
+      {
+        result: { callId, output: `${callId} output` },
+        type: "tool-result" as const,
+      },
+    ];
+
+    state = reduceUiEvent(
+      state,
+      {
+        message: {
+          createdAt: timestamp,
+          id: "message_1",
+          parts: [],
+          role: "assistant",
+          status: "streaming",
+        },
+        sessionId: "session_1",
+        type: "message.appended",
+      },
+      1,
+    );
+    state = reduceUiEvent(
+      state,
+      {
+        content: "Preamble.",
+        delta: "Preamble.",
+        messageId: "message_1",
+        sessionId: "session_1",
+        type: "message.part.delta",
+      },
+      2,
+    );
+    state = reduceUiEvent(
+      state,
+      {
+        message: {
+          createdAt: timestamp,
+          id: "message_1",
+          parts: [{ text: "Preamble.", type: "text" }, ...toolParts("call_1")],
+          role: "assistant",
+          status: "streaming",
+        },
+        sessionId: "session_1",
+        type: "message.updated",
+      },
+      3,
+    );
+    state = reduceUiEvent(
+      state,
+      {
+        content: "Between tools.",
+        delta: "Between tools.",
+        messageId: "message_1",
+        sessionId: "session_1",
+        type: "message.part.delta",
+      },
+      4,
+    );
+    state = reduceUiEvent(
+      state,
+      {
+        message: {
+          createdAt: timestamp,
+          id: "message_1",
+          parts: [
+            { text: "Preamble.", type: "text" },
+            ...toolParts("call_1"),
+            { text: "Between tools.", type: "text" },
+            ...toolParts("call_2"),
+          ],
+          role: "assistant",
+          status: "streaming",
+        },
+        sessionId: "session_1",
+        type: "message.updated",
+      },
+      5,
+    );
+    state = reduceUiEvent(
+      state,
+      {
+        content: "Conclusion.",
+        delta: "Conclusion.",
+        messageId: "message_1",
+        sessionId: "session_1",
+        type: "message.part.delta",
+      },
+      6,
+    );
+
+    expect(state.snapshot?.sessions[0]?.messages[0]?.parts).toEqual([
+      { text: "Preamble.", type: "text" },
+      ...toolParts("call_1"),
+      { text: "Between tools.", type: "text" },
+      ...toolParts("call_2"),
+      { text: "Conclusion.", type: "text" },
+    ]);
+  });
+
+  it("drops a delta without a message id while advancing the cursor", () => {
+    const state = reduceUiEvent(
+      replaceSnapshot(emptySnapshot(), 0),
+      {
+        delta: "orphan",
+        sessionId: "session_1",
+        type: "message.part.delta",
+      },
+      1,
+    );
+
+    expect(state.snapshot?.sessions[0]?.messages).toEqual([]);
+    expect(state.lastAppliedSeqNum).toBe(1);
+  });
+
+  it("drops a delta for a missing stable message while advancing the cursor", () => {
+    const state = reduceUiEvent(
+      replaceSnapshot(emptySnapshot(), 0),
+      {
+        delta: "orphan",
+        messageId: "message_missing",
+        sessionId: "session_1",
+        type: "message.part.delta",
+      },
+      1,
+    );
+
+    expect(state.snapshot?.sessions[0]?.messages).toEqual([]);
+    expect(state.lastAppliedSeqNum).toBe(1);
   });
 
   it("ignores duplicate or older sequence numbers", () => {
