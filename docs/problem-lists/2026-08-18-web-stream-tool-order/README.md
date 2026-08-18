@@ -1,6 +1,6 @@
 # Web 工具卡片流式时序（parts 顺序乱跳）
 
-> 状态：**代码实施与自动化验收完成，待肉眼验收。** 详见 [`05-implementation-acceptance.md`](./05-implementation-acceptance.md)。  
+> 状态：**代码实施、自动化与 Web E2E 验收完成。** 详见 [`05-implementation-acceptance.md`](./05-implementation-acceptance.md)。
 > 实施 git 分支（与失败呈现共用）：`codex/web-tool-transcript`。  
 > **本分支上先做本议题的全部 commit，再做** [`../2026-08-18-web-tool-failure-presentation/`](../2026-08-18-web-tool-failure-presentation/README.md)。
 
@@ -58,5 +58,5 @@ Web 对话在「前言 → 工具 → 结论」时，流式过程中工具卡片
 
 1. [x] 用户审阅并确认本目录 00–04。
 2. [x] 按 02 完成 Phase A（记账规则）、B（幽灵消息）、C（key）。
-3. [ ] 按 04 完成验收：自动化已通过，真实浏览器肉眼项待执行。
-4. [ ] 独立验收会话对照 02/04 出具结论（可选）；写入 `05-implementation-acceptance.md`。
+3. [x] 按 04 完成主要验收：自动化与「前言 → 工具 → 结论」Web E2E 已通过。
+4. [x] 独立验收会话对照 02/04 出具结论并写入 `05-implementation-acceptance.md`。

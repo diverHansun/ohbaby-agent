@@ -1,6 +1,6 @@
 # Web 工具失败呈现（一张卡 + bash UI `failed`）
 
-> 状态：**代码实施与自动化验收完成，待肉眼验收。** 详见 [`05-implementation-acceptance.md`](./05-implementation-acceptance.md)。  
+> 状态：**代码实施、自动化与 Web E2E 验收完成；TUI 复核待补充。** 详见 [`05-implementation-acceptance.md`](./05-implementation-acceptance.md)。
 > 实施 git 分支（与流式时序共用）：`codex/web-tool-transcript`。  
 > **必须先完成** [`../2026-08-18-web-stream-tool-order/`](../2026-08-18-web-stream-tool-order/README.md) **的全部 commit**，再做本议题。
 
@@ -58,5 +58,5 @@
 1. [x] 用户审阅并确认本目录 00–04。
 2. [x] 流式时序 problem-list 的 02/04 已在同一分支落地。
 3. [x] 按 02 完成 Phase A（投影）、B（配对卡片）、C（短错误展开）。
-4. [ ] 按 04 完成验收：自动化已通过，真实浏览器/TUI 肉眼项待执行。
-5. [ ] 独立验收会话对照 02/04 出具结论（可选）；写入 `05-implementation-acceptance.md`。
+4. [x] 按 04 完成主要验收：自动化与 `bash false` Web E2E 已通过；TUI 复核待补充。
+5. [x] 独立验收会话对照 02/04 出具结论并写入 `05-implementation-acceptance.md`。
