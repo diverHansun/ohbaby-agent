@@ -114,7 +114,7 @@ factor   = 0.5 * clamp(observed) + 0.5 * previous
 
 **静态查询与手动 compact（现状）**
 
-- `adapters/ui-runtime/composition.ts` 的 `getContextUsage` 只组装 messages，再调用 `contextManager.getUsage(assembled, model)`；它没有 agent/step/final-step 输入，也不会 `resolveTools`。
+- `adapters/ui-runtime/composition.ts` 的 `getContextUsage` 组装 messages，再调用 `contextManager.getUsage(assembled, model)`；它没有 agent/step/final-step 输入，也不会物化或传入本 step 的 provider tool schemas。组装 system prompt 时可能读取工具名称，但那仍只是 message 文本，不等于 schema 计量。
 - 同文件的 `compactSession` 调用 `contextManager.compact(...)`；`CompactOptions` 没有 agentName/tools，因此手动压缩前后的 `usageBefore` / `usageAfter` 同样是 messages-only。
 - 若在这两个入口里临时调用动态工具注册表，不仅要扩展 API，还可能引入 MCP/skill 解析副作用和与实时 step 不同的工具集合。当前需求不足以支撑这项复杂度，所以 improve-4 明确接受粗估。
 
@@ -167,7 +167,7 @@ factor   = 0.5 * clamp(observed) + 0.5 * previous
 
 - 无「messages + tools 的 heuristic vs 仅 messages」契约测试
 - 无「Lifecycle 先 tools 再 prepareTurn」的集成时序测试
-- 无明确保护「`getContextUsage` / 手动 compact 本批不得隐式 resolveTools」的边界测试
+- 无明确保护「`getContextUsage` / 手动 compact 本批不得隐式扩展为 provider tool-schema-aware API」的边界测试
 - 无「自动压缩实际档位确定后、prune 前，Lifecycle 能向外发出过程事件」的测试；尤其没有纯 prune、`none/mask` 不误报和 overflow force 的时序覆盖
 - （后续批次）无 breakdown 字段/SDK 契约 — 本批不补
 

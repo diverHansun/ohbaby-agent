@@ -1,6 +1,6 @@
 # context improve-4 · tool schema 计量、自动压缩过程态
 
-> 状态：实施中（任务 A/B 已编码，待全量验收与审查）
+> 状态：实施完成，自动化验收通过，待用户最终审查
 > 日期：2026-08-21
 > 基线：`main` @ `e59107b`
 > 落点：`docs/core/context/improve-4/`
@@ -19,7 +19,7 @@
 **Out-of-scope**
 
 - **占用监测 / 三类 UI**：不加 `system / tools / messages` breakdown 字段，不改 TUI/Web 占用展示形态（现有 `38K / 1M (4%)` 总量条保留）。后续批次；分类若做，已锁定 KISS 三类 + `~`（见 00）。
-- **静态查询与手动 compact 的 tools 估算**：`composition.getContextUsage` 与手动 `compactSession` 本批保持 messages-only 粗估，不为它们解析动态 tools，也不扩展公开 API。这不是 improve-5/cache 的内容；它必须在后续 context 占用监测与 UI 实施前先优化。
+- **静态查询与手动 compact 的 tools 估算**：`composition.getContextUsage` 与手动 `compactSession` 本批保持 messages-only 粗估，不为它们额外物化或传入 provider tool schemas，也不扩展公开 API。既有 system prompt 组装中的工具名称不是 schema 计量。这不是 improve-5/cache 的内容；它必须在后续 context 占用监测与 UI 实施前先优化。
 - **Prompt cache**：不新增 cache 字段，不启用 cache policy，不统计命中率/成本，也不预测命中。作为独立 [improve-5](../improve-5/README.md) 继续设计。
 - 长期记忆主动工具 / hooks 注入（方向 4，后续 `docs/core/memory/improve-2/`）
 - pi 式 `session_before_compact` hooks
@@ -48,10 +48,10 @@
 |------|------|
 | [00-discussion.md](./00-discussion.md) | 已确认决策与边界 |
 | [01-problem-analysis-and-current-state.md](./01-problem-analysis-and-current-state.md) | 现状、代码锚点、问题分类 |
-| [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 分阶段改动面（交给后续实施会话） |
+| [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 分阶段改动面与实施契约 |
 | [03-reference-projects.md](./03-reference-projects.md) | Claude Code / Codex / dsh / Kimi / OpenCode / pi 借鉴与明确不抄 |
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 风险导向验收 |
-| `05-implementation-acceptance.md` | 实施完成后由验收模式写入（规划期不存在） |
+| [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 实施事实、差异、测试证据与 SWE 验收 |
 
 推荐阅读：00 → 01 → 02 → 03 → 04。实施以 **02 + 04** 为准，完成事实与验证结果写入 05。
 

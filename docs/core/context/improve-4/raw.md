@@ -408,7 +408,7 @@ detail: <user_visible_high_level_summary>
 <response>
 # Context & Memory 模块调研笔记
 
-> 调研范围：`packages/ohbaby-agent/src/core/context/` 与 `packages/ohbaby-agent/src/core/memory/` 
+> 调研范围：`packages/ohbaby-agent/src/core/context/` 与 `packages/ohbaby-agent/src/core/memory/`
 > 仓库中无 `agent-loop` / `core/loop` 目录；实际 agent 循环在 `core/lifecycle/lifecycle.ts` 的 `Lifecycle.run()`。
 
 ---
@@ -938,7 +938,7 @@ Pi 是 TypeScript monorepo，上下文压缩以 LLM 摘要为核心（非分阶�
 
 ### 1.1 核心触发逻辑与阈值
 
-**触发判断函数**：`shouldCompact()` 
+**触发判断函数**：`shouldCompact()`
 **文件**：`/Users/hansunwork26/workspace/projects/code-cli/pi/packages/coding-agent/src/core/compaction/compaction.ts`
 
 ```235:238:/Users/hansunwork26/workspace/projects/code-cli/pi/packages/coding-agent/src/core/compaction/compaction.ts

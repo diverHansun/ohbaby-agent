@@ -11,7 +11,7 @@
 | 层 | 覆盖 |
 |----|------|
 | 单测 | `estimateWireHeuristic` 含 tools；所有重测路径保留 tools；`onCompactionStarted` 仅在实际自动 compact 档位确定后、prune 前调用；纯 prune/summary 调用，`none/mask` 不调用 |
-| 单测（回归） | `getContextUsage` / 手动 compact 不触发工具解析且仍为 messages-only；`noticeFromCompactResult` 成功静默；校准 EMA 仍用 `sentHeuristic`；总量格式 `38K / 1M (4%)` 仍能渲染 |
+| 单测（回归） | `getContextUsage` / 手动 compact 不获得 provider tool schemas、API 仍为 messages-only；`noticeFromCompactResult` 成功静默；校准 EMA 仍用 `sentHeuristic`；总量格式 `38K / 1M (4%)` 仍能渲染 |
 | 集成 | Lifecycle：resolveTools 在 prepareTurn 之前；final step tools 为空时 sentHeuristic 不含 schema；自动压缩时 `context:compacting` 出现在 `context:prepared` 之前（含普通路径与 overflow `force` 路径） |
 | 合同 | `run.context.compacting` 映射存在；`UiContextWindowUsage` **仍无** breakdown 字段 |
 | 手工 | TUI/Web 总量条仍在、数字在有 tools 的会话里应合理上升；自动压缩时 spinner 变成 `Compacting...`，对话区不新增摘要消息；占用条布局不变 |
@@ -30,7 +30,7 @@
 | TC-5 | 失败/inflated compact | 单测 | 仍发 warning；文案不含误导性 token 箭头（保持现契约） | 任务 B / P2 |
 | TC-9 | Bus 仍发布、UI 不订阅 | 单测 | manager 测试仍能收到 ContextEvent；生产 adapter 不 import subscribe ContextEvent | 任务 B / P2 |
 | TC-10 | compact 过程态 | 单测+集成+UI 合同 | 手动 `/compact` 仍显示 `Compacting...`；自动压缩：实际档位确定后、首次 prune mutation 前 Lifecycle 已 `yield context:compacting`；纯 prune 与 summary 各只开始一次，`none/mask` 不误报，overflow force 同样触发；worker 发出 `run.context.compacting`；`context:prepared` 清回普通 running，run 终态兜底；UI 只改运行状态标题；**transcript 不新增**摘要模型消息；**不**发成功 notice | 任务 B / P2 |
-| TC-11 | 静态查询/手动 compact 的本批边界 | 单测+合同 | `composition.getContextUsage`、`compactSession` 不调用 `resolveTools`，公开参数不增加 agent/step/tools；其 usage 保持 messages-only。文档明确这只是粗估，并登记为占用监测/UI 的实施前置 | 任务 A / P1 |
+| TC-11 | 静态查询/手动 compact 的本批边界 | 单测+合同 | `composition.getContextUsage`、`compactSession` 不向 ContextManager 传 provider tool schemas，公开参数不增加 agent/step/tools；其 usage 保持 messages-only。既有 system prompt 工具名称不等于 schema 计量。文档明确这只是粗估，并登记为占用监测/UI 的实施前置 | 任务 A / P1 |
 
 未编号、**本批不做**：原 TC-6/TC-7（breakdown 字段与三类展示）。后续占用 UI 批次再立。
 
@@ -39,7 +39,7 @@
 ## 4.3 集成边界
 
 - **Lifecycle ↔ ContextManager**：`prepareTurn` 的 tools 必须与随后 `streamChatCompletion` 的 tools 同一引用/同一序列化结果。
-- **Composition ↔ ContextManager（静态/手动）**：`getContextUsage` 与手动 `compactSession` 本批不获得动态 tools；不得用任务 A 的实时契约推断它们也已精确。
+- **Composition ↔ ContextManager（静态/手动）**：`getContextUsage` 与手动 `compactSession` 本批不获得 provider tool schemas；不得用任务 A 的实时契约推断它们也已精确。
 - **Lifecycle ↔ UI（过程事件）**：`context:compacting` 必须在整个实际自动 compact 尚未完成时到达前端，包括纯 prune。实现必须在 generator **函数体**里 yield（`Promise.race` 或拆步）；不得在 `onCompactionStarted` 回调里 `yield`。
 - **Provider ↔ 校准**：保持 improve-3 的现有 usage 契约；本批只确保 heuristic 分母包含实际发送的 tools。
 - **SDK ↔ TUI/Web**：占用对象仍是总量；展示层不依赖不存在的 `breakdown`。
@@ -53,7 +53,7 @@
 - `sentHeuristic` 仍随 `PreparedTurn` 带出，Lifecycle **不**对 messages 重新 heuristic。
 - 成功 compact 默认不 notice（`prompt-context.unit.test.ts`）。
 - 手动 `/compact` 的 `Compacting...` spinner 仍在。
-- `getContextUsage` / 手动 compact 仍不解析 tools、不扩 agent/step/tools 参数；其粗估限制有文档说明。
+- `getContextUsage` / 手动 compact 仍不物化或传入 provider tool schemas、不扩 agent/step/tools 参数；既有 system prompt 工具名称文本不等于 schema 计量；其粗估限制有文档说明。
 - 占用条仍是总量格式，无三类行。
 - Memory 仍只读注入；subagent 仍不 load memory；无 memory hooks。
 - SQLite schema 无强制 migration。
@@ -89,4 +89,4 @@
 6. **以为 `onCompactionStarted` 回调里可以直接 yield。** 禁止。测的是「`context:compacting` 先于 `context:prepared` 出现」，不是回调签名本身；同 tick 完成也不能丢事件。
 9. **把开始点放到 `generateSummary` 前。** 禁止。那会漏掉纯 prune；开始点必须在实际档位确定后、prune 前，`none/mask` 不发。
 7. **把记忆 hooks 塞进 compact 前后。** 禁止。方向 4 另批。
-8. **为了“全局一致”让静态查询或手动 compact 临时 resolveTools。** 禁止。它们缺少真实 step 上下文，可能产生副作用或测到错误工具集；先保留明确粗估，在占用监测/UI 批次建立完整输入契约。
+8. **为了“全局一致”让静态查询或手动 compact 临时物化 provider tool schemas。** 禁止。它们缺少真实 step 上下文，可能测到错误工具集；先保留明确粗估，在占用监测/UI 批次建立完整输入契约。

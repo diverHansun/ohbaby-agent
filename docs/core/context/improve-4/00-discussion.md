@@ -24,7 +24,7 @@ Prompt cache、长期记忆（LLM 主动搜 / hooks）和占用三类监测/展�
 | 占用测量入口 | 继续 improve-3 F9：`measureUsage` / `measureContext` 为占用数字的单一入口 |
 | 工具 schema | 必须进入占用**测量**（让现有总量条和压缩阈值可信），否则校准因子会把这块系统性误差吞掉 |
 | 任务 A 的计量边界 | **只修实时 Lifecycle 每一步请求**：测量与发送复用同一份已解析 tools，包括 final step 的 `[]` 与 overflow force retry |
-| `getContextUsage` | 本批保持 messages-only 粗估；不为静态查询解析动态 tools，不扩展其公开参数 |
+| `getContextUsage` | 本批保持 messages-only 粗估；不额外物化/传入 provider tool schemas，不扩展其公开参数；既有 system prompt 工具名称仍属于 message 内容 |
 | 手动 compact 估算 | 本批保持 messages-only 粗估；`compactSession` / `ContextManager.compact` 不为工具上下文扩参 |
 | 后续前置条件 | 上述两条粗估必须在「context 占用监测与 UI」实施前优化；该事项属于后续占用批次，**不属于 improve-5/cache** |
 | 占用三类 UI | **本批不做**。现有总量条保留。后续若做：KISS 三类 + `~`（学 dsh），不在本批加字段 |

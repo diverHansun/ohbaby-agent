@@ -46,7 +46,7 @@ UiContextWindowUsage { currentTokens, ... }   // 仍是总量；无 breakdown
 |--------|------|------|------------|------|
 | 计数单一来源 | 算法=`estimateTokensForText`；占用入口=`measureUsage` | 已符合 goals-duty D2；improve-3 F9 | 再写一套 tokenizer；合并 mask 与 occupancy 为一个函数 | mask 仍用 domain 文本估 part，需在注释/文档写清「不是占用账」 |
 | 工具谁解析 | Lifecycle 解析后传入 `prepareTurn` | ContextManager 不依赖 tool registry（SRP） | ContextManager 自己 resolveTools | Lifecycle 时序要改：tools 在压缩决策之前 |
-| 静态/手动估算 | `getContextUsage` 与手动 compact 本批保持 messages-only | 两者缺少实时 agent/step/tools 上下文；避免扩 API 和触发动态解析副作用（KISS/YAGNI） | 本批让所有入口都 resolveTools | 同一产品暂有两档精度；须在占用监测/UI 前偿还 |
+| 静态/手动估算 | `getContextUsage` 与手动 compact 本批保持 messages-only，不传 provider tool schemas | 两者缺少实时 agent/step/tools 上下文；避免扩 API 和物化错误的 step schema（KISS/YAGNI） | 本批让所有入口都获得 schema | 同一产品暂有两档精度；须在占用监测/UI 前偿还 |
 | provider cache usage | **本批不改** | 接口形状与服务端 cache 语义是不同维度；另立 improve-5 | 在本批预埋 cache 字段 | 暂不提供 cache 统计/成本估算 |
 | factor 持久化 | **不写库**（00 已锁） | 重启后 1.0 起、随本进程 usage 重新生成 | `app_state` 一行 | 首轮未校准 |
 | Bus ContextEvent | **不新增生产订阅** | 避免双通道；权威在 Lifecycle | UI 直接 subscribe Bus | mask dark ship 仍无生产观察；可后续加日志订阅，不阻塞本批 |
@@ -72,7 +72,7 @@ UiContextWindowUsage { currentTokens, ... }   // 仍是总量；无 breakdown
 3. `measureUsage` / `estimateWireHeuristic`：在 messages 之外加上 `JSON.stringify(tools)`（空数组则 0）。`sentHeuristic` 必须含 tools，否则 F1「分母钉死发出去的那份」再次被打破。
 4. prune、summary candidate、projected context、final prepared context 的每一次重测都必须携带同一份 tools；overflow force retry 复用本 step 已解析的 tools，不再次 resolve。
 5. `updateCalibrationFactor` 的 usage 语义与 EMA α=0.5 **本阶段不改**，避免把 cache 设计混入 tool schema 修复。
-6. `composition.getContextUsage`、`composition.compactSession` 与 `ContextManager.compact` **保持现状**：不解析 tools、不扩展公开参数，估算明确为 messages-only。任务 A 不宣称修准这两条路径。
+6. `composition.getContextUsage`、`composition.compactSession` 与 `ContextManager.compact` **保持现状**：不为这些入口物化或传入 provider tool schemas、不扩展公开参数，估算明确为 messages-only。既有 system prompt 中的工具名称文本不等于 schema 计量。任务 A 不宣称修准这两条路径。
 7. **禁止**本阶段扩展 cache usage、给 `ContextUsage` / SDK 加 `breakdown` 字段或修改占用展示文案。
 
 **DoD**：见 04 场景 TC-1、TC-8、TC-11。
@@ -115,7 +115,7 @@ UiContextWindowUsage { currentTokens, ... }   // 仍是总量；无 breakdown
 | `core/context` | 无 breakdown 类型 | `token-estimation.ts`、`context-manager.ts`（tools 计入 heuristic；`onCompactionStarted`） | 无 | 回调位于非 `none/mask` 档位确定后、prune 前；不删 ContextEvent；不扩展占用分类字段 |
 | `core/lifecycle` | `context:compacting` 事件类型 | `lifecycle.ts`：先 tools 再 prepareTurn；对 compacting **信号** `yield`（Promise.race 或拆步，禁止回调内 yield） | 无 | 解开「await 包住整个 compact 过程」 |
 | `runtime/run-manager` | 映射 `run.context.compacting` | `worker.ts`、stream-bridge 类型 | 无 | 与 `run.context.prepared` 并列 |
-| `adapters/ui-runtime` | 自动压缩 in-progress 事件投影到现有 spinner | 不改成功 notice 政策；`composition.getContextUsage` / `compactSession` 的 messages-only 行为不变 | 无 | 不解析动态 tools，不扩这两个入口的 API，不把摘要写入 transcript |
+| `adapters/ui-runtime` | 自动压缩 in-progress 事件投影到现有 spinner | 不改成功 notice 政策；`composition.getContextUsage` / `compactSession` 的 messages-only 行为不变 | 无 | 不向这两个入口传 provider tool schemas，不扩 API，不把摘要写入 transcript |
 | `ohbaby-sdk` | 无 | **无**（`UiContextWindowUsage` 不加 breakdown） | 无 | 总量契约不变 |
 | `ohbaby-cli` TUI | 无 | 无需产品代码改动；既有 WorkingSpinner 已读取 runtime title | 无 | **不改** `render/usage.ts` 展示形态 |
 | `apps/ohbaby-web` | 无 | 状态 pill 在 live running 时读取既有 `UiRunStatus.title` | 无 | **不改** SDK 状态结构与用量展示组件形态 |
