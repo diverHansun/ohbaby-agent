@@ -1,6 +1,6 @@
 # context improve-4 · tool schema 计量、自动压缩过程态
 
-> 状态：实施完成，自动化验收通过，待用户最终审查
+> 状态：实施完成，二次审查发现的跨会话状态归属缺口已修复，自动化验收通过；待用户最终手工审查。详见 05。
 > 日期：2026-08-21
 > 基线：`main` @ `e59107b`
 > 落点：`docs/core/context/improve-4/`
@@ -36,7 +36,7 @@
 |------|------|
 | [improve-3](../improve-3/README.md) | 权威前序。标定估算、`measureUsage`、`sentHeuristic` 已实施。本批不回退该方案。 |
 | [improve-3/usage-估算](../improve-3/usage-估算/README.md) | D3：factor **不写库**。本批已确认维持；重启后 factor 从 1.0 起，随首次 API usage **重新生成**，不是从磁盘同步。 |
-| [problem-lists/compact/05](../../../problem-lists/compact/05-compact-result-and-notice-ui-design.md) | 手动 compact 的 `Compacting...` spinner、成功不粘 notice：与本批 00 一致。自动压缩 in-progress 仍缺，见 01/02 任务 B。 |
+| [problem-lists/compact/05](../../../problem-lists/compact/05-compact-result-and-notice-ui-design.md) | 手动 compact 的 `Compacting...` spinner、成功不粘 notice：与本批 00 一致。自动压缩 in-progress 在规划时仍缺，由本批任务 B 补齐，现已实施。 |
 | [goals-duty.md](../goals-duty.md) | D2 已规定 context 调用 tokenCounting 模块；G2 仍写 85% 阈值，与代码 0.95 不一致（本批在 01 记录，不在此改阈值）。 |
 | [memory/improve-1](../../memory/improve-1/README.md) | 记忆已收缩为只读 Loader。本批不恢复 ghost `memory_*`，也不做 hooks。 |
 

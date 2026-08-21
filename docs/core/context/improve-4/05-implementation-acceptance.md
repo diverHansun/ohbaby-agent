@@ -1,51 +1,51 @@
 # 5. 实施验收文档
 
-> 撰写时机：实施完成后，按 `plan-code-improvement` 验收模式独立检查后撰写
+> 撰写时机：实施完成后，由规划会话的验收模式独立检查后撰写。
+> 2026-08-21 经二次独立审查发现跨会话状态归属缺口；随后完成修复、回归与再次验收。
 
 ## 5.1 元信息
 
 | 项 | 值 |
 |----|----|
 | 议题 / 批次 | context improve-4：实时 Lifecycle tool schema 计量 + 自动压缩过程态 |
-| 规划文档版本（commit / 日期） | `b408e57` / 2026-08-21 |
-| 实施范围（commit 范围 / 时间段） | 基线 `e59107b`，代码实现 `45f6b1f`、`6e5cd82`、评审修正 `a6a283f` |
+| 规划文档版本 | 工作区 00–04（实施边界提交 `b408e57`，其后有验收修订） |
+| 实施范围 | 基线 `e59107b`；任务 A `45f6b1f`；任务 B `6e5cd82`；并发隔离 `a6a283f`；跨会话状态归属修复 `d56ee99` |
 | 验收日期 | 2026-08-21 |
-| 结论 | **通过**：任务 A/B、边界回归和完整自动化测试矩阵均通过；真实 provider/UI 手工观察留给最终审查，不阻断本次代码验收。 |
+| 结论 | **通过（自动化）**：任务 A/B、跨会话状态归属、边界回归和完整自动化矩阵均通过。真实 provider 下的 TUI/Web 手工观察留给用户最终审查，不阻断代码验收。 |
 
 ## 5.2 实施概况（对照 02）
 
-| 02 条目 | 状态 | 实际实施摘要 | 证据（文件 / commit / 测试） |
-|---------|------|--------------|------------------------------|
-| Phase 1 / 任务 A：实时请求计量含 tools | 完成 | Lifecycle 在每一步先解析 tools；同一份 tools 交给 `prepareTurn`、所有压缩后重测、overflow retry 和 provider send。final step 统一为 `[]`。 | `45f6b1f`；`context-manager.ts`、`token-estimation.ts`、`lifecycle.ts`；TC-1、TC-8 |
-| Phase 1 边界：静态查询/手动 compact 保持粗估 | 完成 | 未给 `getContextUsage`、`compactSession` 或公开 API 增加 agent/step/tools 参数，也未为这两条路径物化 provider tool schemas。 | `composition.unit.test.ts`；TC-11；SDK/API diff |
-| Phase 2 / 任务 B：自动压缩开始信号 | 完成 | `runCompaction` 在非 `none/mask` 档位确定后、任何 prune/summary 之前调用回调；纯 prune、普通 summary 和 overflow force 均覆盖。 | `6e5cd82`；`context-manager.ts`、`lifecycle.ts`；TC-10 |
-| Phase 2：Lifecycle → worker → UI 状态 | 完成 | Lifecycle 用局部 Promise signal 在 generator 内先发 `context:compacting`；worker/stream source 映射为 `run.context.compacting`；adapter 投影到现有 `UiRunStatus.title`；Web 读取 title，TUI 复用既有能力。 | `6e5cd82`；worker/source/adapter/Web 测试 |
-| Phase 2：结束、失败与并发隔离 | 完成（评审后加固） | `context:prepared` 清除标题；失败由 run 终态兜底。状态写入和清理仅作用于当前前台 session、同一 run，并且不会清掉同 run 的更新标题。 | `a6a283f`；adapter 单测与 in-process 合同测试 |
-| Out-of-scope 防线 | 完成 | 未增加 cache accounting、breakdown、memory hooks、Bus UI 订阅、DB migration、精确 tokenizer 或新依赖。cache 仅在 improve-5 文档中独立登记。 | diff/rg 审查；`pnpm-lock.yaml`、SDK、TUI usage、tokenCounting 均无实现改动 |
+| 02 条目 | 状态 | 实际实施摘要 | 证据 |
+|---------|------|--------------|------|
+| Phase 1 / 任务 A：实时请求计量含 tools | **完成** | Lifecycle 每步先 `resolveTools`；同一份 tools 交给 `prepareTurn`、所有压缩后重测、overflow retry 和 provider send。final step 为 `[]`。 | `lifecycle.ts`、`context-manager.ts`、`token-estimation.ts`；TC-1、TC-8 |
+| Phase 1 边界：静态/手动保持粗估 | **完成（有意）** | `getContextUsage` / `compactSession` / `ContextManager.compact` 不传 provider tool schemas、不扩公开参数，继续 messages-only 粗估。 | `composition.unit.test.ts`；TC-11 |
+| Phase 2 / 任务 B：开始信号 | **完成** | 非 `none/mask` 档位确定后、`pruneHistory` 前调用 `onCompactionStarted`；纯 prune、summary、overflow force 均覆盖。 | `context-manager.ts` `runCompaction`；TC-10 |
+| Phase 2：Lifecycle → worker → UI | **完成** | generator 在函数体内 yield `context:compacting`；worker 映射 `run.context.compacting`；adapter 写既有 `UiRunStatus.title`；Web/TUI 读取 title。 | Lifecycle / worker / stream source / adapter / Web selector 测试 |
+| Phase 2：结束、失败与跨会话归属 | **完成** | 同会话 prepared 清标题、失败由终态兜底；显式切换会话时按新 active session 重算全局 runtime status；后台 run 的 running/terminal 记录继续发布，但不再覆盖前台全局 status/reasoning；没有 active session 时保持 idle。 | `ui-inprocess.ts`、`run-stream-adapter.ts`、Web/TUI reducer；跨会话 contract + adapter unit |
+| Out-of-scope 防线 | **完成** | 未改 cache usage、breakdown、memory hooks、Bus UI 订阅、DB、`tokenCounting.ts`、SDK 占用结构和 TUI usage 展示。 | diff / rg |
+| 相邻文档 | **已授权** | `improve-5` 仅登记后续 cache 批次；`raw.md` 保留讨论原料，无对应产品代码。 | 文档 diff |
 
-## 5.3 规划 vs 实际差异（基础指标对账）
+## 5.3 规划 vs 实际差异
 
-| 维度 | 规划方案 | 实际实施 | 差异原因 | 影响评估 |
-|------|----------|----------|----------|----------|
-| 数据结构 | `PrepareTurnInput.tools`、`onCompactionStarted`；Lifecycle/stream 增加过程事件 | 与规划一致；未给 `ContextUsage` / SDK 增加 breakdown/cache 字段 | 无 | 向后兼容，改动集中在已有数据流 |
-| 数据流 | step-local tools 同时用于测量与发送；回调用 signal 唤醒 generator | 与规划一致；并增加 active session + runId + title 三重 UI 清理守卫 | 独立代码审查发现后台 session 可能污染全局状态、旧 clear 可能覆盖新标题 | 只加局部保护条件，没有引入全局状态机；降低并发串扰风险 |
-| 协议/接口 | 新增内部 `context:compacting` / `run.context.compacting`；公开 usage 结构不变 | 与规划一致 | 无 | 内部事件向后兼容；无 SDK schema 迁移 |
-| 文件/包结构 | 修改 context、lifecycle、run worker、UI adapter、Web；TUI 无需产品代码 | 与规划一致；测试覆盖扩展到 composition 和完整 in-process 失败路径 | 评审要求把边界与终态清理变成可执行契约 | 无新增模块、依赖或抽象层 |
-| 错误处理/边界行为 | `none/mask` 不发；成功 prepared 清理，失败由终态兜底 | 与规划一致；明确后台 session 不改前台状态，也不清除更新后的运行标题 | 多 session 并发下需要所有权隔离 | 行为更严格，未改变压缩结果语义 |
-| 依赖变更 | 无 | 无 | 无 | 无供应链与构建风险 |
+| 维度 | 规划方案（02） | 实际实施 | 差异原因 | 影响评估 |
+|------|----------------|----------|----------|----------|
+| 数据结构 | `PrepareTurnInput.tools`、`onCompactionStarted`、Lifecycle 过程事件 | 与规划一致；无 breakdown/cache 字段 | 无 | 向后兼容 |
+| tools 数据流 | 测量与发送使用同一 tools 快照 | 与规划一致 | 无 | 实时占用不再漏 tool schemas |
+| 过程事件 | ContextManager signal → Lifecycle yield → worker → UI title | 与规划一致 | 无 | 不新增 Bus UI 通道或 transcript 消息 |
+| StreamBridge | 新过程事件映射 | 事件名原本就是开放 `string`；新增 producer/consumer mapping，无需中央枚举 | 既有协议形态 | 无运行差异 |
+| 跨会话状态 | prepared/终态清理，后台不污染前台 | 验收时补充显式 active-session transition reconcile、原子 active-session status 条件写，以及 Web/TUI 对后台 `run.updated` / `run.interrupted` 的归属过滤 | 首次实现只覆盖“事件一开始就在后台”，未覆盖“前台显示后切走”、并发切换和 per-run 事件的消费侧 | 修复后 backend snapshot 与实时 Web/TUI 均保持当前选中会话状态；`activeSessionId=null` 明确为 idle，不扩 SDK |
+| 依赖/存储 | 无新增 | 无新增 | 无 | 无 migration、无回滚负担 |
 
-实施语义没有偏移：**自动 compact 的“开始”是整个实际自动压缩操作已经开始**。具体开始点是非 `none/mask` 档位确定后、首次 prune mutation 前；不是摘要模型调用开始。
+自动 compact 的“开始”语义没有偏移：整个实际自动压缩操作已经开始——档位已确定、首次 prune 尚未执行；不是摘要模型调用开始。
 
-## 5.4 实施理由与注意事项
+## 5.4 实施理由与维护注意事项
 
-- Lifecycle 已经拥有 agent、step、final-step 与工具解析上下文，因此由它一次解析 tools，再向 ContextManager 和 provider 下传，符合 SRP；没有为一个字段引入完整 `StepContext` 或 canonical envelope。
-- ContextManager 只消费 provider-ready tools，不依赖 tool registry/MCP/skill 系统；tools 只进入现有 wire heuristic，不复制 `tokenCounting.ts` 算法。
-- Promise signal 是 generator 与内部 Promise 之间最小的时序桥。状态仍以现有 run stream 为权威，不增加 Bus → UI 第二通道，也不增加全局 compact 状态机。
-- UI 过程态复用 `UiRunStatus.title`。自动压缩摘要仍是内部上下文产物，不写 transcript；成功仍不发持久 notice。
-- `getContextUsage` 与手动 compact 本批仍是 messages-only 粗估。更精确地说：这两个入口不物化/传入 provider tool schemas；现有 system prompt 组装仍可能把工具**名称文本**写入 messages，这不等于 schema 计量。必须在后续 context 占用监测/UI 实施前完成它们的输入契约优化，且不要混入 improve-5 cache accounting。
-- Prompt cache 字段、启用策略、命中率、价格与成本估算仍完全属于 [improve-5](../improve-5/README.md)。本批没有提前钉死 `prompt_tokens` 的 cache 语义。
-- 校准 factor 仍跨 step 使用；工具集突变后会有一次 EMA 滞后，现有 overflow force 是安全兜底。本批不调整 EMA 或持久化策略。
-- system prompt 的工具名称与 Lifecycle 的 provider schema 由现有不同入口获得；若运行中 registry 极短暂变化，名称文本和 schema 快照理论上可能不同。实时测量与 provider send 仍严格共用同一 schema，故不阻断本批；若未来建立统一 request context，可一并消除该残余。
+- Lifecycle 拥有 step/tools 上下文，一次解析后下传 ContextManager 与 provider；ContextManager 不依赖 tool registry，符合 SRP。
+- token 密度算法仍由 `estimateTokensForText` 提供，占用信封仍由 context 组装；没有把 provider 请求形状下沉到 `tokenCounting.ts`。
+- `getContextUsage` 与手动 compact 继续 messages-only 是 00/02 锁定的本批边界。它们必须在后续 context 占用监测/UI 实施前优化，不混入 improve-5 cache。
+- 当前 heuristic 只按 ASCII/非 ASCII 字符权重计数；JSON key 重排不改变字符集合，因此本批不做 canonical JSON。计量与发送继续使用同一 tools 对象。
+- 摘要按 improve-3 写入 synthetic `context-summary` assistant part，并在 UI reload 时投影成 `Context compacted` 边界；improve-4 新增的 progress 事件本身不 append 消息、不暴露摘要正文、不发成功 notice。
+- `UiRunStatus` 仍是 workspace 级“当前选中会话状态”。显式会话迁移会按新会话重算，run stream 通过 store 内部原子条件写防止切换竞态；Web/TUI 也只让 active session 的 per-run 事件改变全局 runtime。后台 run 不持久化并重放 `Compacting...` 这种瞬时标题，重新切回时允许保守显示普通 `Working`。这是本批避免 per-session 状态模型的 KISS 取舍。
 
 ## 5.5 实施成果（对照 04）
 
@@ -53,73 +53,76 @@
 
 | 验收 ID | 结果 | 证据 |
 |---------|------|------|
-| TC-1：同 messages，有/无 tools | 通过 | `includes tool schemas in the wire heuristic and ignores empty tools`；`includes tool schemas in prepared heuristic and current usage`；压缩后重测直接对账 `sentHeuristic` |
-| TC-8：final maxSteps | 通过 | `uses the final maxSteps model step for text-only finalization`、`fails when the final maxSteps finalization step still requests a tool`：测量与请求都得到 `tools: []` |
-| TC-4：成功 prune/compact | 通过 | `does not emit notices for successful compact results`；`does not emit persistent notices for successful context compaction`；prepared usage 继续更新总量 tracker |
-| TC-5：失败/inflated compact | 通过 | `emits compact warnings without token deltas for failed and inflated results` |
-| TC-9：Bus 非 UI 通道 | 通过 | ContextManager 既有事件测试仍通过；生产 adapter 未订阅 `ContextEvent`；过程态走 run stream |
-| TC-10：完整 compact 过程态 | 通过 | 覆盖纯 prune、普通 summary、`none/mask`、同 tick、overflow force、worker/source 映射、Web title、前台 session/run 隔离、新标题保护与 prepare 失败终态清理；无 transcript summary / 成功 notice |
-| TC-11：静态/手动边界 | 通过 | `keeps provider tool schemas out of static usage and manual compaction`；公开 API/SDK diff 无 agent/step/tools/breakdown 增量 |
+| TC-1 有/无 tools | **通过** | wire heuristic、prepared heuristic/current usage 均覆盖 tools 与空数组 |
+| TC-8 final maxSteps | **通过** | final step 的 prepare/send 共用局部 `tools=[]`；失败路径同时断言两端，成功路径断言 provider request |
+| TC-11 静态/手动边界 | **通过** | `keeps provider tool schemas out of static usage and manual compaction` |
+| TC-4 成功静默 + 占用更新 | **通过** | manager 验证压缩后 usage；adapter 验证 prepared usage 进入 tracker；成功 notice 保持静默 |
+| TC-5 失败/inflated warning | **通过** | warning 文案与既有行为保持 |
+| TC-9 Bus 非 UI 通道 | **通过** | manager 保留 Bus 发布；生产 adapter 不订阅 `ContextEvent` |
+| TC-10 过程态 | **通过** | prune 前 signal、none/mask、纯 prune、summary、force、worker/source、prepared/失败清理、Web/TUI title、后台隔离、切换竞态和消费侧跨会话归属均有自动化证据 |
 
-完整验证结果：
+完整矩阵（跨会话修复后）：
 
 | 命令 | 结果 |
 |------|------|
-| `pnpm run test:unit` | 213 files passed；1903 passed，2 skipped |
-| `pnpm run test:integration` | 42 files passed；287 passed |
-| `pnpm run test:contract` | 12 files passed；226 passed |
-| `pnpm run typecheck` | 通过 |
-| `pnpm run lint` | 通过 |
-| 定向 context/UI 合同测试 | 4 files；200 passed |
+| `pnpm run test:unit` | 213 files；**1907 passed，2 skipped** |
+| `pnpm run test:integration` | 42 files；**287 passed** |
+| `pnpm run test:contract` | 12 files；**229 passed** |
+| `pnpm run typecheck` | **通过** |
+| `pnpm run lint` | **通过** |
 
-回归/边界检查：
+跨会话合同按 red → green 验证：修复前“切到空闲 B”“切到运行中 B”两项均失败；修复后两项通过，并额外验证 A 后台终态不会把仍在运行的 B 改成 idle、旧 session reconcile 不会覆盖新选择，以及归档唯一运行中会话后 `activeSessionId=null` / `status=idle`。
 
-- `tokenCounting.ts` 算法、TUI 总量格式、SDK `UiContextWindowUsage`、memory 模块、DB schema 与 lockfile 均未改。
-- Web 只让 live/running 的既有 title 进入状态 pill；没有增加 context breakdown UI。
-- cache 相关生产实现无 diff；improve-5 只承接后续讨论文档。
-- 真实 provider 下的 token 数字变化和 TUI/Web 视觉过程态尚未做人工观察；自动化已经覆盖数据流、状态投影和完整 in-process 失败路径，最终审查时可作为非阻断 smoke 再确认。
+未自动化的最终观察：使用真实 provider 在 TUI/Web 确认有 tools 时总量合理上升、自动压缩时出现 spinner，并手工切换一次会话。该项需要真实运行条件，不阻断本次代码验收。
 
-### 5.5.2 独立审查与修正
+### 5.5.2 二次审查发现与关闭
 
-本批完成后进行了三路独立审查：代码/SWE、文档边界、测试与数据流。确认并修复的事项如下：
-
-| 发现 | 处理 |
-|------|------|
-| 后台 session 的 compact 事件可能覆盖前台全局运行状态 | adapter 增加 active session + runId 所有权检查，并加回归测试 |
-| `context:prepared` 可能清掉同一 run 后续阶段的新标题 | 只在当前标题仍为 `Compacting...` 时清理，并加回归测试 |
-| 真实 ContextManager 的 tools 计量、压缩后重测、普通 summary 开始点证据不够直接 | 增加直接单测，固定 `sentHeuristic/currentTokens` 与回调时序 |
-| prepare 失败后的 UI 清理只有成功终态替代用例 | 增加完整 in-process 失败合同测试 |
-| TC-11 容易被误解为“完全不解析工具” | 文档与 composition 测试改为精确约束：不物化/传入 provider tool schemas；保留既有 system prompt 工具名称文本 |
-| README 尚未进入验收完成态 | 本文档与 README 状态在最终文档提交中补齐 |
+| 发现 | 原严重性 | 处理结果 |
+|------|----------|----------|
+| A 已显示 `Compacting...` 后切到 B，A prepared 因归属守卫不再清全局标题 | P2 | **已关闭**：UI 导航设置 active session 后调用既有 `reconcileRuntimeStatus()`；覆盖 B 空闲与 B 运行中 |
+| A 后台终态仍可能把 B 的全局状态写成 idle | P2（同一归属问题的后半段） | **已关闭**：run 记录照常更新；adapter 只为 active session 发布 global status，Web/TUI 也不再把后台 `run.updated` 当成全局状态 |
+| active-session 检查与 status 写入之间存在 TOCTOU 窗口 | P2 并发风险 | **已关闭**：条件检查与 status 更新收进 `UiStateStore.updateStatusForActiveSession` 同一同步临界段，并有受控交错测试 |
+| `activeSessionId=null` 被无参 active-run 查询误解为“任意唯一 run” | P2 状态语义 | **已关闭**：null 明确不解析 active run；归档唯一运行中会话合同断言 workspace idle |
+| 后台 run 终态清空 Web 前台 reasoning | P2 消费侧归属 | **已关闭**：Web 与 TUI 均只允许 active session 的 terminal/interrupted 事件清理前台 reasoning |
+| `getContextUsage` / 手动 compact 不计 tools | 非缺陷 | 维持 00/02 边界，登记为占用监测/UI 前置 |
+| JSON key 顺序、`Promise.race` 无 latch | 非当前缺陷 | 当前 heuristic 与同 tick 测试均不支持扩大设计；不新增 canonicalizer/latch |
+| synthetic summary 出现在持久 transcript | 非缺陷 | improve-3 的压缩边界；progress 通道没有新增原始摘要消息 |
 
 ### 5.5.3 SWE 层面评估（聚焦改动面）
 
-结论：改动保持了小而明确的数据流，没有引入不必要的模块、持久化、依赖或泛化协议；评审发现的状态所有权问题已在当前批次关闭。
+结论：改动保持了原有分层，没有用新状态机掩盖所有权问题。显式会话迁移路径复用“选择会话 + 重算 runtime status”的内部 helper；stream projection 仍负责 run/message 投影，但通过 state store 原子条件写确保只有 active session 能更新 workspace-global status。Web/TUI 将 per-run 集合更新与全局 runtime 更新分开处理。
 
-| 发现 | 严重性 | SWE 依据 | 建议 / 状态 |
-|------|--------|----------|-------------|
-| Lifecycle 成为 step tools 的单一编排者 | 正向 | SRP、Information Expert；避免 ContextManager 反向依赖工具系统 | 保持现状 |
-| compact signal 使用局部 Promise bridge | 正向 | KISS/YAGNI；满足 async generator 时序而不建全局状态机 | 保持同 tick 与失败测试 |
-| UI 状态是 workspace 全局投影，必须验证所有权 | 已关闭（原 P2） | 并发隔离、状态机所有权；旧事件不得覆盖新状态 | 已加 session/run/title 守卫 |
-| 静态/手动入口与实时入口有两档精度 | 已知后续项 | 契约必须反映调用方可获得的信息，避免伪造 step context | 占用监测/UI 前优化；不在 improve-4/improve-5 混做 |
-| cache 与 prompt usage 语义未统一 | 已知后续项 | 不在缺少 provider 语义时提前固化字段 | improve-5 独立设计 |
-
-架构框架 4 复查：本批是进程内数据流与内部流事件扩展，无网络重试、幂等写入、鉴权或 DB migration 新要求；取消/异常由现有 run 终态收敛，旧/后台事件通过所有权检查降级为 no-op。
+| 发现 | 评价 | SWE 依据 | 状态 |
+|------|------|----------|------|
+| Lifecycle 作为 step/tools 单一编排者 | 正向 | SRP / Information Expert | 保持 |
+| ContextManager 不解析 registry、tokenCounting 不理解请求信封 | 正向 | DIP / 关注点分离 | 保持 |
+| compact progress 使用局部 Promise signal | 正向 | KISS / YAGNI | 不引入 hooks 或全局压缩状态机 |
+| active session 迁移原先只改 ID、不重算全局 status | 已修 P2 | 状态所有权 / 最小惊讶原则 | 显式 UI 迁移 helper + 合同测试 |
+| 条件检查与写入原先分成两个 await | 已修 P2 | 并发正确性 / TOCTOU | store 内原子条件更新 + 可控交错测试 |
+| 后台 run 终态原先能覆盖前台 status | 已修 P2 | 信息隐藏 / 并发隔离 | adapter 与 Web/TUI 均分开处理 run 记录和 workspace status |
+| null active session 原先可能投影唯一后台 run | 已修 P2 | 空值语义 / 最小惊讶原则 | null 显式解析为无 active run + 归档合同 |
+| 未建立 per-session progress 状态 | 合理取舍 | KISS / 错误抽象护栏 | 当前需求不值得扩 SDK/store/selectors |
 
 ## 5.6 重要文件修改清单
 
 | 文件 | 修改摘要 | 类型 |
 |------|----------|------|
-| [context-manager.ts](../../../../packages/ohbaby-agent/src/core/context/context-manager.ts) | tools 进入所有实时 usage 重测；实际 compact 档位开始回调 | 修改 |
-| [token-estimation.ts](../../../../packages/ohbaby-agent/src/core/context/token-estimation.ts) | wire heuristic 纳入非空 tools JSON | 修改 |
-| [context/types.ts](../../../../packages/ohbaby-agent/src/core/context/types.ts) | `PrepareTurnInput` 增加内部可选字段 | 修改 |
-| [lifecycle.ts](../../../../packages/ohbaby-agent/src/core/lifecycle/lifecycle.ts) | step-local tools 快照、overflow 复用、compacting signal/yield | 修改 |
-| [lifecycle/types.ts](../../../../packages/ohbaby-agent/src/core/lifecycle/types.ts) | 增加内部 lifecycle 过程事件 | 修改 |
-| [worker.ts](../../../../packages/ohbaby-agent/src/runtime/run-manager/worker.ts) | 映射 `run.context.compacting` | 修改 |
-| [run-stream-adapter.ts](../../../../packages/ohbaby-agent/src/adapters/ui-runtime/run-stream-adapter.ts) | UI 过程态投影、清理与 session/run 所有权守卫 | 修改 |
+| [context-manager.ts](../../../../packages/ohbaby-agent/src/core/context/context-manager.ts) | 实时重测带 tools；实际档位开始回调 | 修改 |
+| [token-estimation.ts](../../../../packages/ohbaby-agent/src/core/context/token-estimation.ts) | 非空 tools JSON 进入 heuristic | 修改 |
+| [context/types.ts](../../../../packages/ohbaby-agent/src/core/context/types.ts) | `PrepareTurnInput.tools` / `onCompactionStarted` | 修改 |
+| [lifecycle.ts](../../../../packages/ohbaby-agent/src/core/lifecycle/lifecycle.ts) | 先解析 tools；`prepareTurnWithProgress` race/yield | 修改 |
+| [worker.ts](../../../../packages/ohbaby-agent/src/runtime/run-manager/worker.ts) | `run.context.compacting` 映射 | 修改 |
+| [run-stream-adapter.ts](../../../../packages/ohbaby-agent/src/adapters/ui-runtime/run-stream-adapter.ts) | 自动压缩标题与 active-session status 写入守卫 | 修改 |
+| [ui-inprocess.ts](../../../../packages/ohbaby-agent/src/adapters/ui-inprocess.ts) | active session 迁移后统一 reconcile runtime status | 修改 |
+| [ui-state/types.ts](../../../../packages/ohbaby-agent/src/adapters/ui-state/types.ts) | 内部原子 active-session status 更新契约 | 修改 |
 | [stream-bridge-run-event-source.ts](../../../../packages/ohbaby-agent/src/adapters/ui-runtime/stream-bridge-run-event-source.ts) | 过程事件 round-trip | 修改 |
-| [selectors.ts](../../../../apps/ohbaby-web/src/ui/selectors.ts) | live/running 时读取既有运行标题 | 修改 |
-| [manager.unit.test.ts](../../../../packages/ohbaby-agent/src/core/context/manager.unit.test.ts) | tool 计量、重测和 compact 开始语义 | 修改 |
-| [lifecycle.unit.test.ts](../../../../packages/ohbaby-agent/src/core/lifecycle/lifecycle.unit.test.ts) | 同一 tools、final step、overflow 与完整过程态 | 修改 |
-| [run-stream-adapter.unit.test.ts](../../../../packages/ohbaby-agent/src/adapters/ui-runtime/run-stream-adapter.unit.test.ts) | 状态投影、并发隔离、成功静默 | 修改 |
-| [ui-inprocess.contract.test.ts](../../../../packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts) | prepare 失败后的终态清理合同 | 修改 |
+| [selectors.ts](../../../../apps/ohbaby-web/src/ui/selectors.ts) | live/running 时读取既有 title | 修改 |
+| [eventReducer.ts](../../../../apps/ohbaby-web/src/api/daemon/eventReducer.ts) | 后台 per-run 事件不覆盖 Web 全局 runtime/reasoning | 修改 |
+| [events.ts](../../../../packages/ohbaby-cli/src/tui/store/events.ts) | 后台 per-run 事件不覆盖 TUI runtime/reasoning | 修改 |
+| 相关 `*.unit.test.ts` / contract | tasks A/B、失败清理、后台隔离、切换竞态、null 归档与跨会话回归 | 修改 |
+
+## 5.7 后续事项
+
+1. 用户最终审查时完成真实 provider + TUI/Web 手工观察，尤其是压缩中切换会话。
+2. 在 context 占用监测/UI 实施前，先优化 `getContextUsage` 与手动 compact 的 messages-only 粗估。
+3. cache 字段、命中率与成本统计继续在 improve-5 单独设计；不回填到 improve-4。
