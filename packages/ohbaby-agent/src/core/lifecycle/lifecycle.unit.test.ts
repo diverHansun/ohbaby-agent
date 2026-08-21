@@ -244,6 +244,66 @@ describe("Lifecycle.run", () => {
     expect(DEFAULT_MAX_STEPS).toBe(1000);
   });
 
+  it("emits compacting while the complete automatic compaction is still running", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    let resolvePrepared: ((value: PreparedTurn) => void) | undefined;
+    const prepareTurn = vi.fn<ContextManager["prepareTurn"]>((input) => {
+      input.onCompactionStarted?.();
+      return new Promise<PreparedTurn>((resolve) => {
+        resolvePrepared = resolve;
+      });
+    });
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createSequentialFakeLLMClient(
+        [[{ textDelta: "Done.", finishReason: "stop" }]],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    const loop = lifecycle.run({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_test",
+    });
+
+    const first = await loop.next();
+
+    expect(first).toMatchObject({
+      done: false,
+      value: {
+        sessionId: "session_test",
+        step: 1,
+        type: "context:compacting",
+      },
+    });
+    expect(resolvePrepared).toBeDefined();
+    resolvePrepared?.(
+      preparedTurn([{ role: "user", content: "Compacted context" }]),
+    );
+    const { events, result } = await consumeLifecycleEvents(loop);
+
+    expect(events).toEqual([
+      "turn:start",
+      "context:prepared",
+      "llm:start",
+      "llm:delta",
+      "llm:complete",
+      "turn:end",
+    ]);
+    expect(requests).toHaveLength(1);
+    expect(result).toMatchObject({ success: true });
+  });
+
   it("prepares context before every model step and uses prepared messages as the step source", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const messageManager = createMessageManager({
@@ -348,20 +408,26 @@ describe("Lifecycle.run", () => {
       }),
     );
 
-    expect(prepareTurn).toHaveBeenNthCalledWith(1, {
-      directory: "D:/repo",
-      isSubagent: undefined,
-      modelId: "fake-model",
-      sessionId: "session_test",
-      tools: resolvedTools,
-    });
-    expect(prepareTurn).toHaveBeenNthCalledWith(2, {
-      directory: "D:/repo",
-      isSubagent: undefined,
-      modelId: "fake-model",
-      sessionId: "session_test",
-      tools: resolvedTools,
-    });
+    expect(prepareTurn).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        directory: "D:/repo",
+        isSubagent: undefined,
+        modelId: "fake-model",
+        sessionId: "session_test",
+        tools: resolvedTools,
+      }),
+    );
+    expect(prepareTurn).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        directory: "D:/repo",
+        isSubagent: undefined,
+        modelId: "fake-model",
+        sessionId: "session_test",
+        tools: resolvedTools,
+      }),
+    );
     expect(prepareTurn).toHaveBeenCalledTimes(2);
     expect(resetTurnCompactionCount).toHaveBeenCalledTimes(1);
     expect(resetTurnCompactionCount).toHaveBeenCalledWith("session_test");
@@ -577,13 +643,15 @@ describe("Lifecycle.run", () => {
       "child_1",
       "subagent_1",
     );
-    expect(prepareTurn).toHaveBeenCalledWith({
-      contextScopeId: "subagent_1",
-      directory: "D:/repo",
-      isSubagent: true,
-      modelId: "fake-model",
-      sessionId: "child_1",
-    });
+    expect(prepareTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contextScopeId: "subagent_1",
+        directory: "D:/repo",
+        isSubagent: true,
+        modelId: "fake-model",
+        sessionId: "child_1",
+      }),
+    );
     expect(createMessageSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         contextScopeId: "subagent_1",
@@ -732,15 +800,18 @@ describe("Lifecycle.run", () => {
       expect.any(String),
       expect.objectContaining({ type: "reasoning" }),
     );
-    expect(prepareTurn).toHaveBeenNthCalledWith(2, {
-      activeReasoningByMessageId: new Map([
-        ["message_1", "think about README"],
-      ]),
-      directory: "D:/repo",
-      isSubagent: undefined,
-      modelId: "fake-model",
-      sessionId: "session_test",
-    });
+    expect(prepareTurn).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        activeReasoningByMessageId: new Map([
+          ["message_1", "think about README"],
+        ]),
+        directory: "D:/repo",
+        isSubagent: undefined,
+        modelId: "fake-model",
+        sessionId: "session_test",
+      }),
+    );
     expect(next.value).toMatchObject({
       finalResponse: "Done.",
       finishReason: "stop",
@@ -1367,7 +1438,10 @@ describe("Lifecycle.run", () => {
     const prepareTurn = vi
       .fn<ContextManager["prepareTurn"]>()
       .mockResolvedValueOnce(preparedTurn(initialMessages))
-      .mockResolvedValueOnce(preparedTurn(forcedMessages));
+      .mockImplementationOnce((input) => {
+        input.onCompactionStarted?.();
+        return Promise.resolve(preparedTurn(forcedMessages));
+      });
     const overflowError = Object.assign(
       new Error("maximum context length exceeded"),
       { code: "context_length_exceeded" },
@@ -1404,21 +1478,27 @@ describe("Lifecycle.run", () => {
       }),
     );
 
-    expect(prepareTurn).toHaveBeenNthCalledWith(1, {
-      directory: "D:/repo",
-      isSubagent: undefined,
-      modelId: "fake-model",
-      sessionId: "session_test",
-      tools: resolvedTools,
-    });
-    expect(prepareTurn).toHaveBeenNthCalledWith(2, {
-      directory: "D:/repo",
-      force: true,
-      isSubagent: undefined,
-      modelId: "fake-model",
-      sessionId: "session_test",
-      tools: resolvedTools,
-    });
+    expect(prepareTurn).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        directory: "D:/repo",
+        isSubagent: undefined,
+        modelId: "fake-model",
+        sessionId: "session_test",
+        tools: resolvedTools,
+      }),
+    );
+    expect(prepareTurn).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        directory: "D:/repo",
+        force: true,
+        isSubagent: undefined,
+        modelId: "fake-model",
+        sessionId: "session_test",
+        tools: resolvedTools,
+      }),
+    );
     expect(resolveTools).toHaveBeenCalledTimes(1);
     expect(prepareTurn.mock.calls[0]?.[0].tools).toBe(resolvedTools);
     expect(prepareTurn.mock.calls[1]?.[0].tools).toBe(resolvedTools);
@@ -1431,6 +1511,7 @@ describe("Lifecycle.run", () => {
       "turn:start",
       "context:prepared",
       "llm:start",
+      "context:compacting",
       "context:prepared",
       "llm:start",
       "llm:delta",

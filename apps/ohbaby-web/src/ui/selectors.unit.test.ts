@@ -93,11 +93,30 @@ describe("ohbaby-web ui selectors", () => {
       contextLabel: "50k / 200k",
       contextRatio: 0.25,
       modelLabel: "glm-5.1",
+      statusLabel: "idle",
     });
     expect(view.composer).toMatchObject({
       canSend: true,
       mode: "auto",
       permissionLevel: "default",
+    });
+  });
+
+  it("projects a running status title into the header label", () => {
+    const view = selectViewModel(
+      store({
+        ...baseSnapshot(),
+        status: {
+          kind: "running",
+          runId: "run_1",
+          title: "Compacting...",
+        },
+      }),
+    );
+
+    expect(view.header).toMatchObject({
+      connectionKind: "running",
+      statusLabel: "Compacting...",
     });
   });
 

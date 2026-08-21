@@ -325,7 +325,7 @@ describe("ContextManager", () => {
       },
     ];
     const tokenCounter = {
-      estimateTokens: (content: string) => content.length,
+      estimateTokens: (content: string): number => content.length,
     };
     const messagesOnly = estimateWireHeuristic(messages, tokenCounter);
 
@@ -860,9 +860,11 @@ describe("ContextManager", () => {
       },
     });
 
+    const onCompactionStarted = vi.fn();
     const prepared = await manager.prepareTurn({
       directory: "D:/repo",
       modelId: "model-a",
+      onCompactionStarted,
       sessionId: "session_1",
     });
 
@@ -873,6 +875,7 @@ describe("ContextManager", () => {
     expect(prepared.compaction).toBeUndefined();
     expect(prepared.hasSummary).toBe(false);
     expect(prepared.sentHeuristic).toBeGreaterThan(0);
+    expect(onCompactionStarted).not.toHaveBeenCalled();
   });
 
   it("applies session calibration with EMA when measuring prepared turns", async () => {
@@ -1128,14 +1131,17 @@ describe("ContextManager", () => {
       },
     });
 
+    const onCompactionStarted = vi.fn();
     const prepared = await manager.prepareTurn({
       directory: "D:/repo",
       modelId: "model-a",
+      onCompactionStarted,
       sessionId: "session_1",
     });
 
     expect(prepared.compaction).toBeUndefined();
     expect(prepared.usage.usageRatio).toBeLessThan(0.5);
+    expect(onCompactionStarted).not.toHaveBeenCalled();
     expect(generateSummary).not.toHaveBeenCalled();
   });
 
@@ -1155,6 +1161,8 @@ describe("ContextManager", () => {
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
       .mockResolvedValue("<state_snapshot>short</state_snapshot>");
+    const updatePart = vi.spyOn(messageManager, "updatePart");
+    const onCompactionStarted = vi.fn();
     const { manager } = createManager({
       compressionThreshold: 0.8,
       llmClient: { generateSummary },
@@ -1188,12 +1196,18 @@ describe("ContextManager", () => {
     const prepared = await manager.prepareTurn({
       directory: "D:/repo",
       modelId: "model-a",
+      onCompactionStarted,
       sessionId: "session_1",
     });
 
     expect(prepared.compaction?.status).toBe("pruned");
     expect(prepared.usage.usageRatio).toBeGreaterThanOrEqual(0.5);
     expect(prepared.usage.usageRatio).toBeLessThan(0.8);
+    expect(onCompactionStarted).toHaveBeenCalledTimes(1);
+    expect(updatePart).toHaveBeenCalled();
+    expect(onCompactionStarted.mock.invocationCallOrder[0]).toBeLessThan(
+      updatePart.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
     expect(generateSummary).not.toHaveBeenCalled();
   });
 
@@ -1366,16 +1380,19 @@ describe("ContextManager", () => {
       messageManager,
     });
 
+    const onCompactionStarted = vi.fn();
     const prepared = await manager.prepareTurn({
       directory: "D:/repo",
       force: true,
       modelId: "model-a",
+      onCompactionStarted,
       sessionId: "session_1",
     });
 
     expect(prepared.compaction?.status).toBe("compacted");
     expect(listBySession).toHaveBeenCalledTimes(2);
     expect(loadMemory).toHaveBeenCalledTimes(1);
+    expect(onCompactionStarted).toHaveBeenCalledTimes(1);
   });
 
   it("keeps prepareTurn prune-only path to one history read", async () => {

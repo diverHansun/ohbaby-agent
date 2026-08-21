@@ -14,6 +14,30 @@ async function nextEvent(
 }
 
 describe("createStreamBridgeRunEventSource", () => {
+  it("translates automatic compaction progress events from the run stream", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const source = createStreamBridgeRunEventSource(streamBridge);
+    const iterator = source.subscribeRunEvents("run_1")[Symbol.asyncIterator]();
+
+    streamBridge.publish("run/run_1", "run.context.compacting", {
+      contextScopeId: "subagent_1",
+      sessionId: "session_1",
+      step: 2,
+      timestamp: 123,
+    });
+
+    await expect(nextEvent(iterator)).resolves.toEqual({
+      contextScopeId: "subagent_1",
+      sessionId: "session_1",
+      step: 2,
+      timestamp: 123,
+      type: "context:compacting",
+    });
+
+    streamBridge.end("run/run_1");
+    await expect(iterator.next()).resolves.toMatchObject({ done: true });
+  });
+
   it("translates llm start events from the run stream", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const source = createStreamBridgeRunEventSource(streamBridge);

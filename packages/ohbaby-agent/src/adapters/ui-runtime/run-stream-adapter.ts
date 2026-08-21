@@ -214,6 +214,7 @@ export function startRunStreamProjection(
   let started = false;
   let stopped = false;
   let terminalRunStarted = false;
+  let contextCompacting = false;
   const hiddenToolCallIds = new Set<string>();
   const done = new Promise<void>((resolve, reject) => {
     resolveDone = resolve;
@@ -513,6 +514,23 @@ export function startRunStreamProjection(
     });
   }
 
+  async function handleContextCompacting(): Promise<void> {
+    contextCompacting = true;
+    await updateStatus({
+      kind: "running",
+      runId: options.runId,
+      title: "Compacting...",
+    });
+  }
+
+  async function clearContextCompacting(): Promise<void> {
+    if (!contextCompacting) {
+      return;
+    }
+    contextCompacting = false;
+    await updateStatus({ kind: "running", runId: options.runId });
+  }
+
   async function handleEvent(event: StreamBridgeEvent): Promise<void> {
     if (event.event === "run.updated") {
       await handleRunUpdated(event);
@@ -538,7 +556,12 @@ export function startRunStreamProjection(
       await handleToolResult(event);
       return;
     }
+    if (event.event === "run.context.compacting") {
+      await handleContextCompacting();
+      return;
+    }
     if (event.event === "run.context.prepared") {
+      await clearContextCompacting();
       handleContextWindowUsage(event);
       handleContextCompaction(event);
     }

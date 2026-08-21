@@ -78,6 +78,7 @@ interface CompactionRequest {
   readonly countTurnCompaction: boolean;
   readonly usageBefore: ContextUsage;
   readonly modelId: string;
+  readonly onCompactionStarted?: () => void;
   readonly tools?: PrepareTurnInput["tools"];
   readonly force: boolean;
   readonly sessionId: string;
@@ -1085,6 +1086,8 @@ export function createContextManager(
       };
     }
 
+    req.onCompactionStarted?.();
+
     if (req.countTurnCompaction) {
       incrementTurnCompactionCount(req.sessionId, req.contextScopeId);
     }
@@ -1349,6 +1352,7 @@ export function createContextManager(
       force: input.force === true,
       isSubagent,
       modelId: input.modelId,
+      onCompactionStarted: input.onCompactionStarted,
       projectForUsage: (context) =>
         projectContextForUsage(context, input.modelId, input.tools),
       sessionId: input.sessionId,

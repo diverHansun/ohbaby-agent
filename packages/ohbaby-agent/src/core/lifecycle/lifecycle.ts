@@ -12,7 +12,7 @@ import type {
   ParsedToolCall,
   TokenUsage,
 } from "../llm-client/index.js";
-import type { PreparedTurn } from "../context/index.js";
+import type { PreparedTurn, PrepareTurnInput } from "../context/index.js";
 import type {
   CoreMessage,
   MessageManager,
@@ -408,7 +408,7 @@ export class Lifecycle {
             sessionId: params.sessionId,
             step,
           })) ?? params.tools);
-      let prepared = await contextManager.prepareTurn({
+      let prepared = yield* this.prepareTurnWithProgress({
         ...(activeReasoningByMessageId.size === 0
           ? {}
           : { activeReasoningByMessageId }),
@@ -420,6 +420,7 @@ export class Lifecycle {
         isSubagent: params.isSubagent,
         modelId: params.modelId,
         sessionId: params.sessionId,
+        step,
         ...(tools === undefined ? {} : { tools }),
       });
       if (params.signal?.aborted) {
@@ -502,7 +503,7 @@ export class Lifecycle {
           throw error;
         }
 
-        prepared = await contextManager.prepareTurn({
+        prepared = yield* this.prepareTurnWithProgress({
           ...(activeReasoningByMessageId.size === 0
             ? {}
             : { activeReasoningByMessageId }),
@@ -515,6 +516,7 @@ export class Lifecycle {
           isSubagent: params.isSubagent,
           modelId: params.modelId,
           sessionId: params.sessionId,
+          step,
           ...(tools === undefined ? {} : { tools }),
         });
         if (params.signal?.aborted) {
@@ -1151,6 +1153,37 @@ export class Lifecycle {
       timestamp: Date.now(),
       usage: input.prepared.usage,
     };
+  }
+
+  private async *prepareTurnWithProgress(
+    input: PrepareTurnInput & { readonly step: number },
+  ): AsyncGenerator<LifecycleEvent, PreparedTurn, void> {
+    const { step, ...prepareInput } = input;
+    let notifyCompactionStarted: () => void = () => undefined;
+    const compactionStarted = new Promise<void>((resolve) => {
+      notifyCompactionStarted = resolve;
+    });
+    const prepared = this.deps.contextManager.prepareTurn({
+      ...prepareInput,
+      onCompactionStarted: notifyCompactionStarted,
+    });
+    const first = await Promise.race([
+      compactionStarted.then(() => ({ kind: "compacting" as const })),
+      prepared.then((value) => ({ kind: "prepared" as const, value })),
+    ]);
+
+    if (first.kind === "prepared") {
+      return first.value;
+    }
+
+    yield {
+      type: "context:compacting",
+      contextScopeId: input.contextScopeId,
+      sessionId: input.sessionId,
+      step,
+      timestamp: Date.now(),
+    };
+    return prepared;
   }
 
   private async appendToolParts(

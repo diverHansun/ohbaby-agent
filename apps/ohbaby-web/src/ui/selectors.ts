@@ -24,6 +24,7 @@ export interface HeaderModel {
     | "reconnecting"
     | "resyncing"
     | "disconnected";
+  readonly statusLabel: string;
   readonly contextLabel: string;
   readonly contextRatio: number;
   readonly modelLabel: string;
@@ -113,6 +114,7 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
     error: snapshot.error,
     header: {
       connectionKind: selectConnectionKind(snapshot.connectionState, runStatus),
+      statusLabel: selectStatusLabel(snapshot.connectionState, runStatus),
       ...selectContextModel(
         daemonSnapshot,
         activeSession?.id,
@@ -243,11 +245,25 @@ function selectComposerHint(
     : "enter to send";
 }
 
+function selectStatusLabel(
+  connectionState: ConnectionState,
+  status: UiRunStatus,
+): string {
+  if (
+    connectionState === "live" &&
+    status.kind === "running" &&
+    status.title !== undefined
+  ) {
+    return status.title;
+  }
+  return selectConnectionKind(connectionState, status);
+}
+
 function selectContextModel(
   snapshot: UiSnapshot | null,
   sessionId: string | undefined,
   configuredModel: string | undefined,
-): Omit<HeaderModel, "connectionKind"> {
+): Omit<HeaderModel, "connectionKind" | "statusLabel"> {
   const usage = selectContextUsage(snapshot, sessionId);
   if (!usage) {
     return {

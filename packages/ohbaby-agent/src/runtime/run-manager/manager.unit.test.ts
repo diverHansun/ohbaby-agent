@@ -404,6 +404,12 @@ class SessionLifecycle implements RunLifecycle {
       },
     };
     yield {
+      sessionId: params.sessionId,
+      step: 1,
+      timestamp: 6,
+      type: "context:compacting",
+    };
+    yield {
       compaction: {
         status: "compacted",
         usageAfter: {
@@ -424,7 +430,7 @@ class SessionLifecycle implements RunLifecycle {
       hasSummary: true,
       sessionId: params.sessionId,
       step: 1,
-      timestamp: 6,
+      timestamp: 7,
       type: "context:prepared",
       usage: {
         contextLimit: 128,
@@ -789,6 +795,7 @@ describe("RunManager", () => {
       "run.updated",
       "run.updated",
       "run.turn.start",
+      "run.context.compacting",
       "run.context.prepared",
       "message.part.delta",
       "run.turn.end",

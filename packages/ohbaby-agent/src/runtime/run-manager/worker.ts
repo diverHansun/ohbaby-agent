@@ -344,6 +344,19 @@ export class RunWorker {
       return;
     }
 
+    if (event.type === "context:compacting") {
+      this.publish(
+        scope,
+        "run.context.compacting",
+        withDefined({
+          ...this.streamBase(event),
+          timestamp: event.timestamp,
+          step: event.step,
+        }),
+      );
+      return;
+    }
+
     if (event.type === "context:prepared") {
       this.publish(
         scope,

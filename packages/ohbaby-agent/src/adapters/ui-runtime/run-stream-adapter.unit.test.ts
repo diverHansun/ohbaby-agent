@@ -5,6 +5,128 @@ import { createInMemoryUiStateStore } from "../ui-state/index.js";
 import { startRunStreamProjection } from "./run-stream-adapter.js";
 
 describe("startRunStreamProjection", () => {
+  it("shows automatic compaction progress until context preparation completes", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const stateStore = createInMemoryUiStateStore({
+      activeSessionId: "session_1",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_1",
+          messages: [],
+          title: "Session",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "idle" },
+    });
+    const publish = vi.fn();
+    const projection = startRunStreamProjection({
+      assistantMessageId: "message_assistant",
+      autoStart: false,
+      nextMessageId: () => "message_next",
+      publish,
+      runId: "run_1",
+      sessionId: "session_1",
+      stateStore,
+      streamBridge,
+      timestamp: () => "2026-05-26T00:00:01.000Z",
+    });
+
+    streamBridge.publish("run/run_1", "run.context.compacting", {
+      runId: "run_1",
+      sessionId: "session_1",
+      step: 1,
+      timestamp: 2,
+    });
+    streamBridge.publish("run/run_1", "run.context.prepared", {
+      hasSummary: false,
+      runId: "run_1",
+      sessionId: "session_1",
+      step: 1,
+      timestamp: 3,
+    });
+    streamBridge.end("run/run_1");
+
+    projection.start();
+    await projection.done;
+
+    expect(publish).toHaveBeenNthCalledWith(1, {
+      status: {
+        kind: "running",
+        runId: "run_1",
+        title: "Compacting...",
+      },
+      timestamp: expect.any(Number) as number,
+      type: "runtime.updated",
+    });
+    expect(publish).toHaveBeenNthCalledWith(2, {
+      status: { kind: "running", runId: "run_1" },
+      timestamp: expect.any(Number) as number,
+      type: "runtime.updated",
+    });
+    await expect(stateStore.readSnapshot()).resolves.toMatchObject({
+      status: { kind: "running", runId: "run_1" },
+    });
+  });
+
+  it("lets terminal run state clear compaction progress after an early exit", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const stateStore = createInMemoryUiStateStore({
+      activeSessionId: "session_1",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_1",
+          messages: [],
+          title: "Session",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "idle" },
+    });
+    const projection = startRunStreamProjection({
+      assistantMessageId: "message_assistant",
+      autoStart: false,
+      nextMessageId: () => "message_next",
+      publish: vi.fn(),
+      runId: "run_1",
+      sessionId: "session_1",
+      stateStore,
+      streamBridge,
+      timestamp: () => "2026-05-26T00:00:01.000Z",
+    });
+
+    streamBridge.publish("run/run_1", "run.context.compacting", {
+      runId: "run_1",
+      sessionId: "session_1",
+      step: 1,
+      timestamp: 2,
+    });
+    streamBridge.publish("run/run_1", "run.updated", {
+      run: {
+        createdAt: 1,
+        endedAt: 3,
+        runId: "run_1",
+        sessionId: "session_1",
+        startedAt: 2,
+        status: "succeeded",
+      },
+    });
+    streamBridge.end("run/run_1");
+
+    projection.start();
+    await projection.done;
+
+    await expect(stateStore.readSnapshot()).resolves.toMatchObject({
+      status: { kind: "idle" },
+    });
+  });
+
   it("publishes context window usage from context prepared events", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const stateStore = createInMemoryUiStateStore({

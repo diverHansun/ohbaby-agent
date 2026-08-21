@@ -978,7 +978,10 @@ function EmptyState(props: {
   return (
     <>
       <div className="ohb-empty-status">
-        <StatusPill kind={props.status.connectionKind} />
+        <StatusPill
+          kind={props.status.connectionKind}
+          label={props.status.statusLabel}
+        />
         <GoalStatusChip
           goal={props.view.activeGoal}
           onOpen={props.onOpenGoalPanel}
@@ -1284,7 +1287,10 @@ function StatusBar(props: {
         <span>OHBABY</span>
       </div>
       <div className="ohb-statusbar-meta">
-        <StatusPill kind={props.header.connectionKind} />
+        <StatusPill
+          kind={props.header.connectionKind}
+          label={props.header.statusLabel}
+        />
         <span className="ohb-divider" />
         <span className="ohb-model">{props.header.modelLabel}</span>
         <span className="ohb-divider" />
@@ -1329,11 +1335,12 @@ function GoalStatusChip(props: {
 
 function StatusPill(props: {
   readonly kind: HeaderModel["connectionKind"];
+  readonly label?: string;
 }): ReactElement {
   return (
     <span className={`ohb-status-pill ohb-status-${props.kind}`}>
       <span />
-      {props.kind}
+      {props.label ?? props.kind}
     </span>
   );
 }

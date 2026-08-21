@@ -126,6 +126,8 @@ export interface PrepareTurnInput {
   readonly modelId: string;
   readonly agentName?: string;
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
+  /** Fires once after an actual automatic compaction rung is selected, before history mutation. */
+  readonly onCompactionStarted?: () => void;
   readonly tools?: ChatCompletionCreateParams["tools"];
   readonly isSubagent?: boolean;
   readonly force?: boolean;

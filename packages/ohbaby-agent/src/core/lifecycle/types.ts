@@ -116,6 +116,13 @@ export type LifecycleEvent =
       readonly hasSummary: boolean;
     }
   | {
+      readonly type: "context:compacting";
+      readonly sessionId: string;
+      readonly contextScopeId?: string;
+      readonly step: number;
+      readonly timestamp: number;
+    }
+  | {
       readonly type: "context:prepared";
       readonly sessionId: string;
       readonly contextScopeId?: string;

@@ -182,6 +182,15 @@ function lifecycleEventFromStream(
       >["usage"],
     };
   }
+  if (item.event === "run.context.compacting") {
+    return {
+      ...scopeData(data),
+      sessionId,
+      step: numberData(data, "step") ?? 0,
+      timestamp,
+      type: "context:compacting",
+    };
+  }
   if (item.event === "run.context.prepared") {
     return {
       ...scopeData(data),
