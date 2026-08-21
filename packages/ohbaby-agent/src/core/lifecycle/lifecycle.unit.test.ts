@@ -304,7 +304,16 @@ describe("Lifecycle.run", () => {
     const contextManager = createContextManagerMock(prepareTurn, {
       resetTurnCompactionCount,
     });
-    const resolveTools = vi.fn().mockResolvedValue([]);
+    const resolvedTools = [
+      {
+        function: {
+          name: "read_file",
+          parameters: { type: "object" },
+        },
+        type: "function" as const,
+      },
+    ];
+    const resolveTools = vi.fn().mockResolvedValue(resolvedTools);
     const lifecycle = new Lifecycle({
       contextManager,
       llmClient: createSequentialFakeLLMClient(
@@ -344,12 +353,14 @@ describe("Lifecycle.run", () => {
       isSubagent: undefined,
       modelId: "fake-model",
       sessionId: "session_test",
+      tools: resolvedTools,
     });
     expect(prepareTurn).toHaveBeenNthCalledWith(2, {
       directory: "D:/repo",
       isSubagent: undefined,
       modelId: "fake-model",
       sessionId: "session_test",
+      tools: resolvedTools,
     });
     expect(prepareTurn).toHaveBeenCalledTimes(2);
     expect(resetTurnCompactionCount).toHaveBeenCalledTimes(1);
@@ -368,6 +379,11 @@ describe("Lifecycle.run", () => {
       sessionId: "session_test",
       step: 2,
     });
+    expect(resolveTools.mock.invocationCallOrder[0]).toBeLessThan(
+      prepareTurn.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(prepareTurn.mock.calls[0]?.[0].tools).toBe(resolvedTools);
+    expect(requests[0]?.tools).toBe(resolvedTools);
     expect(requests[0]?.messages).toEqual(firstTurnMessages);
     expect(requests[1]?.messages).toEqual(secondStepMessages);
     expect(events).toEqual([
@@ -993,6 +1009,7 @@ describe("Lifecycle.run", () => {
       .mockResolvedValue(
         preparedTurn([{ role: "user", content: "Finish within one step" }]),
       );
+    const resolveTools = vi.fn();
     const lifecycle = new Lifecycle({
       contextManager: createContextManagerMock(prepareTurn),
       llmClient: createSequentialFakeLLMClient(
@@ -1014,6 +1031,7 @@ describe("Lifecycle.run", () => {
         requests,
       ),
       messageManager,
+      resolveTools,
       toolScheduler: {
         executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
       } as unknown as ToolSchedulerInstance,
@@ -1039,6 +1057,10 @@ describe("Lifecycle.run", () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]?.tools).toEqual([]);
+    expect(resolveTools).not.toHaveBeenCalled();
+    expect(prepareTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ tools: [] }),
+    );
     expect(result).toMatchObject({
       finishReason: "error",
       success: false,
@@ -1350,6 +1372,16 @@ describe("Lifecycle.run", () => {
       new Error("maximum context length exceeded"),
       { code: "context_length_exceeded" },
     );
+    const resolvedTools = [
+      {
+        function: {
+          name: "read_file",
+          parameters: { type: "object" },
+        },
+        type: "function" as const,
+      },
+    ];
+    const resolveTools = vi.fn().mockResolvedValue(resolvedTools);
     const lifecycle = new Lifecycle({
       contextManager: createContextManagerMock(prepareTurn),
       llmClient: createFailThenSucceedLLMClient({
@@ -1358,6 +1390,7 @@ describe("Lifecycle.run", () => {
         requests,
       }),
       messageManager,
+      resolveTools,
       toolScheduler: {
         executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
       } as unknown as ToolSchedulerInstance,
@@ -1376,6 +1409,7 @@ describe("Lifecycle.run", () => {
       isSubagent: undefined,
       modelId: "fake-model",
       sessionId: "session_test",
+      tools: resolvedTools,
     });
     expect(prepareTurn).toHaveBeenNthCalledWith(2, {
       directory: "D:/repo",
@@ -1383,8 +1417,14 @@ describe("Lifecycle.run", () => {
       isSubagent: undefined,
       modelId: "fake-model",
       sessionId: "session_test",
+      tools: resolvedTools,
     });
+    expect(resolveTools).toHaveBeenCalledTimes(1);
+    expect(prepareTurn.mock.calls[0]?.[0].tools).toBe(resolvedTools);
+    expect(prepareTurn.mock.calls[1]?.[0].tools).toBe(resolvedTools);
     expect(requests).toHaveLength(2);
+    expect(requests[0]?.tools).toBe(resolvedTools);
+    expect(requests[1]?.tools).toBe(resolvedTools);
     expect(requests[0]?.messages).toEqual(initialMessages);
     expect(requests[1]?.messages).toEqual(forcedMessages);
     expect(events).toEqual([

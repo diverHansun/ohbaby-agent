@@ -78,6 +78,7 @@ interface CompactionRequest {
   readonly countTurnCompaction: boolean;
   readonly usageBefore: ContextUsage;
   readonly modelId: string;
+  readonly tools?: PrepareTurnInput["tools"];
   readonly force: boolean;
   readonly sessionId: string;
   readonly contextScopeId?: string;
@@ -541,10 +542,12 @@ export function createContextManager(
     readonly modelId: string;
     readonly sessionId: string;
     readonly contextScopeId?: string;
+    readonly tools?: PrepareTurnInput["tools"];
   }): { readonly sentHeuristic: number; readonly usage: ContextUsage } {
     const sentHeuristic = estimateWireHeuristic(
       input.messages,
       options.tokenCounter,
+      input.tools,
     );
     const currentTokens = Math.round(
       sentHeuristic *
@@ -565,6 +568,7 @@ export function createContextManager(
     readonly modelId: string;
     readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
     readonly isSubagent: boolean;
+    readonly tools?: PrepareTurnInput["tools"];
   }): {
     readonly messages: readonly ChatCompletionMessage[];
     readonly sentHeuristic: number;
@@ -582,6 +586,7 @@ export function createContextManager(
         modelId: input.modelId,
         sessionId: input.context.sessionId,
         contextScopeId: input.context.contextScopeId,
+        tools: input.tools,
       }),
     };
   }
@@ -658,6 +663,7 @@ export function createContextManager(
   function projectContextForUsage(
     context: AssembledContext,
     modelId: string,
+    tools?: PrepareTurnInput["tools"],
   ): AssembledContext {
     return reduceContextForModel({
       allowCutoffAdvance: false,
@@ -667,6 +673,7 @@ export function createContextManager(
         context,
         isSubagent: context.isSubagent,
         modelId,
+        tools,
       }).usage,
     });
   }
@@ -1105,6 +1112,7 @@ export function createContextManager(
       context: req.projectForUsage?.(afterPrune) ?? afterPrune,
       isSubagent: req.isSubagent,
       modelId: req.modelId,
+      tools: req.tools,
     }).usage;
 
     const afterPruneRung = decideCompactionRung({
@@ -1168,6 +1176,7 @@ export function createContextManager(
       context: req.projectForUsage?.(projectedContext) ?? projectedContext,
       isSubagent: req.isSubagent,
       modelId: req.modelId,
+      tools: req.tools,
     }).usage;
     if (projectedUsage.currentTokens >= usageAfterPrune.currentTokens) {
       const compression = compressionFromRejectedCandidate(candidate);
@@ -1229,6 +1238,7 @@ export function createContextManager(
       context: req.projectForUsage?.(committedContext) ?? committedContext,
       isSubagent: req.isSubagent,
       modelId: req.modelId,
+      tools: req.tools,
     }).usage;
     if (compression.status === "compressed") {
       maskCutoffs.set(
@@ -1311,6 +1321,7 @@ export function createContextManager(
       context: assembled,
       isSubagent,
       modelId: input.modelId,
+      tools: input.tools,
     });
     const unreducedUsage = unreducedMeasurement.usage;
     const reducedBeforeCompaction = reduceContextForModel({
@@ -1327,6 +1338,7 @@ export function createContextManager(
             context: reducedBeforeCompaction,
             isSubagent,
             modelId: input.modelId,
+            tools: input.tools,
           }).usage;
     const outcome = await runCompaction({
       activeReasoningByMessageId: input.activeReasoningByMessageId,
@@ -1338,8 +1350,9 @@ export function createContextManager(
       isSubagent,
       modelId: input.modelId,
       projectForUsage: (context) =>
-        projectContextForUsage(context, input.modelId),
+        projectContextForUsage(context, input.modelId, input.tools),
       sessionId: input.sessionId,
+      tools: input.tools,
       usageBefore,
     });
     const finalContext = outcome.projectedContext;
@@ -1352,6 +1365,7 @@ export function createContextManager(
       context: finalContext,
       isSubagent,
       modelId: input.modelId,
+      tools: input.tools,
     });
     const rawFinalUsage = rawFinalMeasurement.usage;
     const reducedFinalContext = reduceContextForModel({
@@ -1368,6 +1382,7 @@ export function createContextManager(
             context: reducedFinalContext,
             isSubagent,
             modelId: input.modelId,
+            tools: input.tools,
           });
     const usage = finalMeasurement.usage;
     const messages = finalMeasurement.messages;

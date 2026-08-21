@@ -308,6 +308,35 @@ describe("ContextManager", () => {
     );
   });
 
+  it("includes tool schemas in the wire heuristic and ignores empty tools", () => {
+    const messages = [{ role: "user" as const, content: "hello" }];
+    const tools = [
+      {
+        function: {
+          description: "Read a file",
+          name: "read_file",
+          parameters: {
+            properties: { path: { type: "string" } },
+            required: ["path"],
+            type: "object",
+          },
+        },
+        type: "function" as const,
+      },
+    ];
+    const tokenCounter = {
+      estimateTokens: (content: string) => content.length,
+    };
+    const messagesOnly = estimateWireHeuristic(messages, tokenCounter);
+
+    expect(estimateWireHeuristic(messages, tokenCounter, [])).toBe(
+      messagesOnly,
+    );
+    expect(estimateWireHeuristic(messages, tokenCounter, tools)).toBe(
+      messagesOnly + 1 + JSON.stringify(tools).length,
+    );
+  });
+
   it("counts assistant tool calls even when message content is null", () => {
     const messages = [
       {

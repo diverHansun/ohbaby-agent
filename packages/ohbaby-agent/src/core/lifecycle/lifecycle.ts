@@ -398,6 +398,16 @@ export class Lifecycle {
         };
       }
 
+      const isFinalStep = step === maxSteps;
+      const tools = isFinalStep
+        ? []
+        : ((await this.deps.resolveTools?.({
+            agentName: params.agent,
+            contextScopeId: params.contextScopeId,
+            isSubagent: params.isSubagent,
+            sessionId: params.sessionId,
+            step,
+          })) ?? params.tools);
       let prepared = await contextManager.prepareTurn({
         ...(activeReasoningByMessageId.size === 0
           ? {}
@@ -410,6 +420,7 @@ export class Lifecycle {
         isSubagent: params.isSubagent,
         modelId: params.modelId,
         sessionId: params.sessionId,
+        ...(tools === undefined ? {} : { tools }),
       });
       if (params.signal?.aborted) {
         return {
@@ -421,7 +432,6 @@ export class Lifecycle {
           usage,
         };
       }
-      const isFinalStep = step === maxSteps;
       let conversationMessages = messagesForStep(
         prepared.messages,
         isFinalStep,
@@ -456,15 +466,7 @@ export class Lifecycle {
         parentMessageId,
         sessionId: params.sessionId,
         signal: params.signal,
-        tools: isFinalStep
-          ? []
-          : ((await this.deps.resolveTools?.({
-              agentName: params.agent,
-              contextScopeId: params.contextScopeId,
-              isSubagent: params.isSubagent,
-              sessionId: params.sessionId,
-              step,
-            })) ?? params.tools),
+        tools,
       };
       let stepResult: StepResult;
       try {
@@ -513,6 +515,7 @@ export class Lifecycle {
           isSubagent: params.isSubagent,
           modelId: params.modelId,
           sessionId: params.sessionId,
+          ...(tools === undefined ? {} : { tools }),
         });
         if (params.signal?.aborted) {
           return {

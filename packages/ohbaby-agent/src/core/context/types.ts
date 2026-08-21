@@ -1,4 +1,5 @@
 import type { BusInstance } from "../../bus/index.js";
+import type { ChatCompletionCreateParams } from "openai/resources/chat/completions/completions";
 import type { ChatCompletionMessage } from "../llm-client/index.js";
 import type { MergedMemory } from "../memory/index.js";
 import type { MessageManager, MessageWithParts } from "../message/index.js";
@@ -125,6 +126,7 @@ export interface PrepareTurnInput {
   readonly modelId: string;
   readonly agentName?: string;
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
+  readonly tools?: ChatCompletionCreateParams["tools"];
   readonly isSubagent?: boolean;
   readonly force?: boolean;
 }
