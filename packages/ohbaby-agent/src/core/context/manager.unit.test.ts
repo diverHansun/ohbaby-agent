@@ -337,6 +337,48 @@ describe("ContextManager", () => {
     );
   });
 
+  it("includes tool schemas in prepared heuristic and current usage", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "hello",
+    });
+    const { manager } = createManager({
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 10_000,
+      },
+    });
+    const tools = [
+      {
+        function: {
+          name: "read_file",
+          parameters: { type: "object" },
+        },
+        type: "function" as const,
+      },
+    ];
+
+    const messagesOnly = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+    });
+    const withTools = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+      tools,
+    });
+
+    expect(withTools.sentHeuristic).toBeGreaterThan(messagesOnly.sentHeuristic);
+    expect(withTools.usage.currentTokens).toBeGreaterThan(
+      messagesOnly.usage.currentTokens,
+    );
+  });
+
   it("counts assistant tool calls even when message content is null", () => {
     const messages = [
       {
@@ -1163,34 +1205,47 @@ describe("ContextManager", () => {
       .mockResolvedValue("<state_snapshot>short</state_snapshot>");
     const updatePart = vi.spyOn(messageManager, "updatePart");
     const onCompactionStarted = vi.fn();
+    const tokenCounter = {
+      estimateTokens: (content: string): number => content.length,
+      getBudget(
+        _modelId: string,
+        options?: Parameters<NonNullable<TokenCounter["getBudget"]>>[1],
+      ): ReturnType<NonNullable<TokenCounter["getBudget"]>> {
+        const usedInputTokens = options?.usedInputTokens ?? 0;
+        const inputBudgetTokens = 20_000;
+        return {
+          contextWindowTokens: 24_000,
+          inputBudgetTokens,
+          maxOutputTokens: 2_000,
+          modelId: "model-a",
+          remainingInputTokens: Math.max(
+            0,
+            inputBudgetTokens - usedInputTokens,
+          ),
+          reservedOutputTokens: 2_000,
+          safetyMarginTokens: 2_000,
+          usageRatio: usedInputTokens / inputBudgetTokens,
+          usedInputTokens,
+        };
+      },
+      getLimit: (): number => 24_000,
+    } satisfies TokenCounter;
+    const tools = [
+      {
+        function: {
+          name: "read_file",
+          parameters: { type: "object" },
+        },
+        type: "function" as const,
+      },
+    ];
     const { manager } = createManager({
       compressionThreshold: 0.8,
       llmClient: { generateSummary },
       messageManager,
       pruneMinimumTokens: 1,
       pruneProtectTokens: 0,
-      tokenCounter: {
-        estimateTokens: (content: string) => content.length,
-        getBudget(_modelId, options) {
-          const usedInputTokens = options?.usedInputTokens ?? 0;
-          const inputBudgetTokens = 20_000;
-          return {
-            contextWindowTokens: 24_000,
-            inputBudgetTokens,
-            maxOutputTokens: 2_000,
-            modelId: "model-a",
-            remainingInputTokens: Math.max(
-              0,
-              inputBudgetTokens - usedInputTokens,
-            ),
-            reservedOutputTokens: 2_000,
-            safetyMarginTokens: 2_000,
-            usageRatio: usedInputTokens / inputBudgetTokens,
-            usedInputTokens,
-          };
-        },
-        getLimit: () => 24_000,
-      },
+      tokenCounter,
     });
 
     const prepared = await manager.prepareTurn({
@@ -1198,11 +1253,18 @@ describe("ContextManager", () => {
       modelId: "model-a",
       onCompactionStarted,
       sessionId: "session_1",
+      tools,
     });
 
     expect(prepared.compaction?.status).toBe("pruned");
     expect(prepared.usage.usageRatio).toBeGreaterThanOrEqual(0.5);
     expect(prepared.usage.usageRatio).toBeLessThan(0.8);
+    expect(prepared.sentHeuristic).toBe(
+      estimateWireHeuristic(prepared.messages, tokenCounter, tools),
+    );
+    expect(prepared.sentHeuristic).toBeGreaterThan(
+      estimateWireHeuristic(prepared.messages, tokenCounter),
+    );
     expect(onCompactionStarted).toHaveBeenCalledTimes(1);
     expect(updatePart).toHaveBeenCalled();
     expect(onCompactionStarted.mock.invocationCallOrder[0]).toBeLessThan(
@@ -1393,6 +1455,45 @@ describe("ContextManager", () => {
     expect(listBySession).toHaveBeenCalledTimes(2);
     expect(loadMemory).toHaveBeenCalledTimes(1);
     expect(onCompactionStarted).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts ordinary automatic compaction before generating its summary", async () => {
+    const messageManager = createMessageManagerFixture();
+    for (const [index, role] of [
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ].entries()) {
+      await addTextMessage(messageManager, {
+        sessionId: "session_1",
+        role: role as "user" | "assistant",
+        text: `${String(index)} ${"long text ".repeat(30)}`,
+      });
+    }
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockResolvedValue("## Goal\nshort");
+    const onCompactionStarted = vi.fn();
+    const { manager } = createManager({
+      compressionThreshold: 0.5,
+      llmClient: { generateSummary },
+      messageManager,
+    });
+
+    const prepared = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      onCompactionStarted,
+      sessionId: "session_1",
+    });
+
+    expect(prepared.compaction?.status).toBe("compacted");
+    expect(onCompactionStarted).toHaveBeenCalledTimes(1);
+    expect(generateSummary).toHaveBeenCalledTimes(1);
+    expect(onCompactionStarted.mock.invocationCallOrder[0]).toBeLessThan(
+      generateSummary.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
   });
 
   it("keeps prepareTurn prune-only path to one history read", async () => {

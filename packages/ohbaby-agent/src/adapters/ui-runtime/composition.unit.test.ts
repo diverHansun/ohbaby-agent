@@ -537,6 +537,68 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(disposeSandbox).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps provider tool schemas out of static usage and manual compaction", async () => {
+    const bus = createBus();
+    const usage = {
+      contextLimit: 10_000,
+      currentTokens: 100,
+      modelId: "fake-model",
+      remainingTokens: 9_900,
+      usageRatio: 0.01,
+    };
+    const assemble = vi
+      .fn<ContextManager["assemble"]>()
+      .mockResolvedValue({} as Awaited<ReturnType<ContextManager["assemble"]>>);
+    const compact = vi.fn<ContextManager["compact"]>().mockResolvedValue({
+      status: "not-needed",
+      usageAfter: usage,
+      usageBefore: usage,
+    });
+    const getUsage = vi.fn<ContextManager["getUsage"]>().mockReturnValue(usage);
+    const contextManager = {
+      assemble,
+      compact,
+      disposeSession: vi.fn<ContextManager["disposeSession"]>(),
+      getUsage,
+      prepareTurn: vi.fn<ContextManager["prepareTurn"]>(),
+      resetTurnCompactionCount:
+        vi.fn<ContextManager["resetTurnCompactionCount"]>(),
+      updateCalibrationFactor:
+        vi.fn<ContextManager["updateCalibrationFactor"]>(),
+    } satisfies ContextManager;
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      contextManager,
+      llmClient: fakeLlmClient(),
+      messageManager: createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      }),
+      permissionState: createPermissionState({ bus }),
+      skillRegistry: createMutableSkillRegistry([]),
+      workdir: await tempWorkdir(),
+    });
+    await composition.getContextUsage({
+      projectRoot: "D:/repo",
+      sessionId: "session_1",
+    });
+    await composition.compactSession({
+      force: true,
+      projectRoot: "D:/repo",
+      sessionId: "session_1",
+    });
+
+    expect(assemble).toHaveBeenCalledWith("session_1", "D:/repo");
+    expect(getUsage).toHaveBeenCalledWith(expect.anything(), "fake-model");
+    expect(compact).toHaveBeenCalledWith("session_1", {
+      directory: "D:/repo",
+      force: true,
+      isSubagent: false,
+      modelId: "fake-model",
+    });
+  });
+
   it("interrupts a parent subagent tree from durable run identity after manager eviction", async () => {
     const bus = createBus();
     const runLedger = createInMemoryRunLedger();

@@ -50,6 +50,7 @@ const HIDDEN_TRANSCRIPT_TOOLS = new Set([
   "todo_read",
   "todo_write",
 ]);
+const COMPACTION_STATUS_TITLE = "Compacting...";
 
 type NoticeDraft = Omit<UiNotice, "id" | "createdAt"> & {
   readonly createdAt?: string;
@@ -515,11 +516,19 @@ export function startRunStreamProjection(
   }
 
   async function handleContextCompacting(): Promise<void> {
+    const snapshot = await options.stateStore.readSnapshot();
+    if (
+      snapshot.activeSessionId !== options.sessionId ||
+      snapshot.status.kind !== "running" ||
+      snapshot.status.runId !== options.runId
+    ) {
+      return;
+    }
     contextCompacting = true;
     await updateStatus({
       kind: "running",
       runId: options.runId,
-      title: "Compacting...",
+      title: COMPACTION_STATUS_TITLE,
     });
   }
 
@@ -528,6 +537,15 @@ export function startRunStreamProjection(
       return;
     }
     contextCompacting = false;
+    const snapshot = await options.stateStore.readSnapshot();
+    if (
+      snapshot.activeSessionId !== options.sessionId ||
+      snapshot.status.kind !== "running" ||
+      snapshot.status.runId !== options.runId ||
+      snapshot.status.title !== COMPACTION_STATUS_TITLE
+    ) {
+      return;
+    }
     await updateStatus({ kind: "running", runId: options.runId });
   }
 

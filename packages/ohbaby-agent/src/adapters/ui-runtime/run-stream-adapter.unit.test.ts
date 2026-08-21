@@ -20,7 +20,7 @@ describe("startRunStreamProjection", () => {
           updatedAt: "2026-05-26T00:00:00.000Z",
         },
       ],
-      status: { kind: "idle" },
+      status: { kind: "running", runId: "run_1" },
     });
     const publish = vi.fn();
     const projection = startRunStreamProjection({
@@ -87,7 +87,7 @@ describe("startRunStreamProjection", () => {
           updatedAt: "2026-05-26T00:00:00.000Z",
         },
       ],
-      status: { kind: "idle" },
+      status: { kind: "running", runId: "run_1" },
     });
     const projection = startRunStreamProjection({
       assistantMessageId: "message_assistant",
@@ -124,6 +124,135 @@ describe("startRunStreamProjection", () => {
 
     await expect(stateStore.readSnapshot()).resolves.toMatchObject({
       status: { kind: "idle" },
+    });
+  });
+
+  it("does not show compaction progress for a background session", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const stateStore = createInMemoryUiStateStore({
+      activeSessionId: "session_active",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_active",
+          messages: [],
+          title: "Active session",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_background",
+          messages: [],
+          title: "Background session",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "running", runId: "run_active" },
+    });
+    const publish = vi.fn();
+    const projection = startRunStreamProjection({
+      assistantMessageId: "message_assistant",
+      autoStart: false,
+      nextMessageId: () => "message_next",
+      publish,
+      runId: "run_background",
+      sessionId: "session_background",
+      stateStore,
+      streamBridge,
+      timestamp: () => "2026-05-26T00:00:01.000Z",
+    });
+
+    streamBridge.publish("run/run_background", "run.context.compacting", {
+      runId: "run_background",
+      sessionId: "session_background",
+      step: 1,
+      timestamp: 2,
+    });
+    streamBridge.publish("run/run_background", "run.context.prepared", {
+      hasSummary: false,
+      runId: "run_background",
+      sessionId: "session_background",
+      step: 1,
+      timestamp: 3,
+    });
+    streamBridge.end("run/run_background");
+
+    projection.start();
+    await projection.done;
+
+    expect(publish).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "runtime.updated" }),
+    );
+    await expect(stateStore.readSnapshot()).resolves.toMatchObject({
+      status: { kind: "running", runId: "run_active" },
+    });
+  });
+
+  it("does not clear a newer status title when compaction completes", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const stateStore = createInMemoryUiStateStore({
+      activeSessionId: "session_1",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_1",
+          messages: [],
+          title: "Session",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
+    });
+    const projection = startRunStreamProjection({
+      assistantMessageId: "message_assistant",
+      autoStart: false,
+      nextMessageId: () => "message_next",
+      publish: vi.fn(),
+      runId: "run_1",
+      sessionId: "session_1",
+      stateStore,
+      streamBridge,
+      timestamp: () => "2026-05-26T00:00:01.000Z",
+    });
+
+    streamBridge.publish("run/run_1", "run.context.compacting", {
+      runId: "run_1",
+      sessionId: "session_1",
+      step: 1,
+      timestamp: 2,
+    });
+    projection.start();
+    await vi.waitFor(async () => {
+      await expect(stateStore.readSnapshot()).resolves.toMatchObject({
+        status: { title: "Compacting..." },
+      });
+    });
+    await stateStore.setStatus({
+      kind: "running",
+      runId: "run_1",
+      title: "Waiting for another phase",
+    });
+    streamBridge.publish("run/run_1", "run.context.prepared", {
+      hasSummary: false,
+      runId: "run_1",
+      sessionId: "session_1",
+      step: 1,
+      timestamp: 3,
+    });
+    streamBridge.end("run/run_1");
+
+    await projection.done;
+
+    await expect(stateStore.readSnapshot()).resolves.toMatchObject({
+      status: {
+        kind: "running",
+        runId: "run_1",
+        title: "Waiting for another phase",
+      },
     });
   });
 

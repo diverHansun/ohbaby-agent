@@ -4206,6 +4206,67 @@ describe("createInProcessUiBackendClient", () => {
     });
   });
 
+  it("clears automatic compaction progress when context preparation fails", async () => {
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    for (const [index, role] of [
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ].entries()) {
+      await addCoreTextMessage(messageManager, {
+        role: role as "assistant" | "user",
+        sessionId: "session_1",
+        text: `${String(index)} ${"large context ".repeat(100)}`,
+      });
+    }
+    const createCoreMessage = messageManager.createMessage.bind(messageManager);
+    vi.spyOn(messageManager, "createMessage").mockImplementation(
+      (input): ReturnType<MessageManager["createMessage"]> => {
+        if (input.agent === "context") {
+          return Promise.reject(new Error("context preparation failed"));
+        }
+        return createCoreMessage(input);
+      },
+    );
+    const client = createInProcessUiBackendClient({
+      bus,
+      initialSnapshot: createInitialSnapshotWithTwoSessions(),
+      llmClient: createFakeLLMClient(
+        [{ textDelta: "## Goal\nshort", finishReason: "stop" }],
+        { contextWindowTokens: 1_000 },
+      ),
+      messageManager,
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    await expect(
+      client.submitPromptAndWait("Continue after a large context", {
+        sessionId: "session_1",
+      }),
+    ).resolves.toMatchObject({
+      prompt: { status: "failed" },
+    });
+
+    expect(
+      events.some(
+        (event) =>
+          event.type === "runtime.updated" &&
+          event.status.kind === "running" &&
+          event.status.title === "Compacting...",
+      ),
+    ).toBe(true);
+    const snapshot = await client.getSnapshot();
+    expect(snapshot.status).toEqual({ kind: "idle" });
+  });
+
   it("publishes a visible runtime error when provider configuration fails", async () => {
     const client = createInProcessUiBackendClient({
       createLLMClient: () =>
