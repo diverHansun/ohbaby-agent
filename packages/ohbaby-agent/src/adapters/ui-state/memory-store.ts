@@ -180,5 +180,20 @@ export function createInMemoryUiStateStore(
       snapshot.status = { ...status };
       return Promise.resolve();
     },
+
+    updateStatusForActiveSession(
+      sessionId: string | null,
+      updater: (status: UiRunStatus) => UiRunStatus | undefined,
+    ): UiRunStatus | undefined {
+      if (snapshot.activeSessionId !== sessionId) {
+        return undefined;
+      }
+      const updated = updater({ ...snapshot.status });
+      if (updated === undefined) {
+        return undefined;
+      }
+      snapshot.status = { ...updated };
+      return { ...updated };
+    },
   };
 }

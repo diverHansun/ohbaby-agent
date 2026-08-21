@@ -539,5 +539,20 @@ export function createPersistentUiStateStore(
       mutable.status = { ...status };
       return Promise.resolve();
     },
+
+    updateStatusForActiveSession(
+      sessionId: string | null,
+      updater: (status: UiRunStatus) => UiRunStatus | undefined,
+    ): UiRunStatus | undefined {
+      if (activeSessionId !== sessionId) {
+        return undefined;
+      }
+      const updated = updater({ ...mutable.status });
+      if (updated === undefined) {
+        return undefined;
+      }
+      mutable.status = { ...updated };
+      return { ...updated };
+    },
   };
 }

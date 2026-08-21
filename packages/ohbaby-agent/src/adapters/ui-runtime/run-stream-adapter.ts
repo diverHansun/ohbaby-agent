@@ -222,13 +222,22 @@ export function startRunStreamProjection(
     rejectDone = reject;
   });
 
-  async function updateStatus(status: UiRunStatus): Promise<void> {
-    await options.stateStore.setStatus(status);
+  function updateStatusForActiveSession(
+    updater: (status: UiRunStatus) => UiRunStatus | undefined,
+  ): UiRunStatus | undefined {
+    const status = options.stateStore.updateStatusForActiveSession(
+      options.sessionId,
+      updater,
+    );
+    if (status === undefined) {
+      return undefined;
+    }
     options.publish({
       type: "runtime.updated",
       status,
       timestamp: Date.now(),
     });
+    return status;
   }
 
   async function upsertRun(run: UiRun): Promise<void> {
@@ -344,7 +353,7 @@ export function startRunStreamProjection(
 
     const uiRun = toUiRun(record);
     if (record.status === "running") {
-      await updateStatus(uiRun.status);
+      updateStatusForActiveSession(() => uiRun.status);
       await upsertRun(uiRun);
       options.publish({ type: "run.updated", run: cloneRun(uiRun) });
       return;
@@ -370,7 +379,7 @@ export function startRunStreamProjection(
       });
     }
     if (uiRun.status.kind !== "error") {
-      await updateStatus(uiRun.status);
+      updateStatusForActiveSession(() => uiRun.status);
     }
     // A terminal error belongs to the run/session. The owning backend
     // reconciles the selected runtime status after clearing its active run;
@@ -515,38 +524,31 @@ export function startRunStreamProjection(
     });
   }
 
-  async function handleContextCompacting(): Promise<void> {
-    const snapshot = await options.stateStore.readSnapshot();
-    if (
-      snapshot.activeSessionId !== options.sessionId ||
-      snapshot.status.kind !== "running" ||
-      snapshot.status.runId !== options.runId
-    ) {
-      return;
-    }
-    contextCompacting = true;
-    await updateStatus({
-      kind: "running",
-      runId: options.runId,
-      title: COMPACTION_STATUS_TITLE,
-    });
+  function handleContextCompacting(): void {
+    const updated = updateStatusForActiveSession((status) =>
+      status.kind === "running" && status.runId === options.runId
+        ? {
+            kind: "running",
+            runId: options.runId,
+            title: COMPACTION_STATUS_TITLE,
+          }
+        : undefined,
+    );
+    contextCompacting = updated !== undefined;
   }
 
-  async function clearContextCompacting(): Promise<void> {
+  function clearContextCompacting(): void {
     if (!contextCompacting) {
       return;
     }
+    updateStatusForActiveSession((status) =>
+      status.kind === "running" &&
+      status.runId === options.runId &&
+      status.title === COMPACTION_STATUS_TITLE
+        ? { kind: "running", runId: options.runId }
+        : undefined,
+    );
     contextCompacting = false;
-    const snapshot = await options.stateStore.readSnapshot();
-    if (
-      snapshot.activeSessionId !== options.sessionId ||
-      snapshot.status.kind !== "running" ||
-      snapshot.status.runId !== options.runId ||
-      snapshot.status.title !== COMPACTION_STATUS_TITLE
-    ) {
-      return;
-    }
-    await updateStatus({ kind: "running", runId: options.runId });
   }
 
   async function handleEvent(event: StreamBridgeEvent): Promise<void> {
@@ -575,11 +577,11 @@ export function startRunStreamProjection(
       return;
     }
     if (event.event === "run.context.compacting") {
-      await handleContextCompacting();
+      handleContextCompacting();
       return;
     }
     if (event.event === "run.context.prepared") {
-      await clearContextCompacting();
+      clearContextCompacting();
       handleContextWindowUsage(event);
       handleContextCompaction(event);
     }

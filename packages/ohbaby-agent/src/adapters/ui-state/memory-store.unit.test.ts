@@ -87,4 +87,33 @@ describe("createInMemoryUiStateStore", () => {
       status: { kind: "running", runId: "run_1" },
     });
   });
+
+  it("updates status only while the expected session is active", async () => {
+    const store = createInMemoryUiStateStore({
+      ...BASE_SNAPSHOT,
+      activeSessionId: "session_1",
+      status: { kind: "running", runId: "run_1" },
+    });
+
+    expect(
+      store.updateStatusForActiveSession("session_2", () => ({
+        kind: "idle",
+      })),
+    ).toBeUndefined();
+    await expect(store.readSnapshot()).resolves.toMatchObject({
+      status: { kind: "running", runId: "run_1" },
+    });
+
+    expect(
+      store.updateStatusForActiveSession("session_1", (status) =>
+        status.kind === "running"
+          ? { ...status, title: "Compacting..." }
+          : undefined,
+      ),
+    ).toEqual({
+      kind: "running",
+      runId: "run_1",
+      title: "Compacting...",
+    });
+  });
 });

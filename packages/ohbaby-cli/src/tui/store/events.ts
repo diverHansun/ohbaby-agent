@@ -172,14 +172,17 @@ export function applyTuiEvent(
         : state;
 
     case "run.updated": {
+      const isActiveSession = event.run.sessionId === state.activeSessionId;
       const next = rebuildFromCollections(state, {
         runs: upsertById(state.runs, event.run),
-        runtime: event.run.status,
+        ...(isActiveSession ? { runtime: event.run.status } : {}),
       });
+      if (!isActiveSession) {
+        return next;
+      }
       const withReasoning =
         event.run.status.kind === "running" ? next : clearReasoning(next);
-      return event.run.status.kind === "running" &&
-        event.run.sessionId === withReasoning.activeSessionId
+      return event.run.status.kind === "running"
         ? clearEphemeralNotices(clearCommandNotices(withReasoning))
         : withReasoning;
     }

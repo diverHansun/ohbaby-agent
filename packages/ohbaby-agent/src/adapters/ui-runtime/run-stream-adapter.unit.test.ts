@@ -127,7 +127,7 @@ describe("startRunStreamProjection", () => {
     });
   });
 
-  it("does not show compaction progress for a background session", async () => {
+  it("does not project run status from a background session", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const stateStore = createInMemoryUiStateStore({
       activeSessionId: "session_active",
@@ -177,6 +177,16 @@ describe("startRunStreamProjection", () => {
       step: 1,
       timestamp: 3,
     });
+    streamBridge.publish("run/run_background", "run.updated", {
+      run: {
+        createdAt: 1,
+        endedAt: 4,
+        runId: "run_background",
+        sessionId: "session_background",
+        startedAt: 2,
+        status: "succeeded",
+      },
+    });
     streamBridge.end("run/run_background");
 
     projection.start();
@@ -187,6 +197,82 @@ describe("startRunStreamProjection", () => {
     );
     await expect(stateStore.readSnapshot()).resolves.toMatchObject({
       status: { kind: "running", runId: "run_active" },
+    });
+  });
+
+  it("checks active-session ownership at the conditional status write", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const baseStateStore = createInMemoryUiStateStore({
+      activeSessionId: "session_1",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_1",
+          messages: [],
+          title: "First",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_2",
+          messages: [],
+          title: "Second",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
+    });
+    const stateStore = {
+      ...baseStateStore,
+      updateStatusForActiveSession(
+        ...args: Parameters<
+          typeof baseStateStore.updateStatusForActiveSession
+        >
+      ): ReturnType<typeof baseStateStore.updateStatusForActiveSession> {
+        void baseStateStore.setActiveSessionId("session_2");
+        void baseStateStore.setStatus({ kind: "running", runId: "run_2" });
+        return baseStateStore.updateStatusForActiveSession(...args);
+      },
+    };
+    const publish = vi.fn();
+    const projection = startRunStreamProjection({
+      assistantMessageId: "message_assistant",
+      autoStart: false,
+      nextMessageId: () => "message_next",
+      publish,
+      runId: "run_1",
+      sessionId: "session_1",
+      stateStore,
+      streamBridge,
+      timestamp: () => "2026-05-26T00:00:01.000Z",
+    });
+
+    streamBridge.publish("run/run_1", "run.context.compacting", {
+      runId: "run_1",
+      sessionId: "session_1",
+      step: 1,
+      timestamp: 2,
+    });
+    projection.start();
+    streamBridge.publish("run/run_1", "run.context.prepared", {
+      hasSummary: false,
+      runId: "run_1",
+      sessionId: "session_1",
+      step: 1,
+      timestamp: 3,
+    });
+    streamBridge.end("run/run_1");
+
+    await projection.done;
+
+    expect(publish).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "runtime.updated" }),
+    );
+    await expect(baseStateStore.readSnapshot()).resolves.toMatchObject({
+      activeSessionId: "session_2",
+      status: { kind: "running", runId: "run_2" },
     });
   });
 

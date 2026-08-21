@@ -1443,6 +1443,22 @@ function waitForUiEvent<T extends UiEvent>(
   });
 }
 
+function selectSessionThroughResumeCommand(
+  client: UiBackendClient,
+  sessionId: string,
+  clientInvocationId: string,
+): Promise<void> {
+  return client.executeCommand({
+    argv: ["--session_id", sessionId],
+    clientInvocationId,
+    commandId: "resume",
+    path: ["resume"],
+    raw: `/resume --session_id ${sessionId}`,
+    rawArgs: `--session_id ${sessionId}`,
+    surface: "tui",
+  });
+}
+
 async function flushAsyncProjection(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -1577,6 +1593,51 @@ async function addCoreTextMessage(
     text: input.text,
     type: "text",
   });
+}
+
+async function createBlockedAutoCompactionContext(): Promise<{
+  readonly bus: BusInstance;
+  readonly messageManager: MessageManager;
+  readonly releaseCompaction: Deferred<undefined>;
+  readonly summaryMessageStarted: Deferred<undefined>;
+}> {
+  const bus = createBus();
+  const messageManager = createMessageManager({
+    bus,
+    store: createInMemoryMessageStore(),
+  });
+  for (const [index, role] of [
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+  ].entries()) {
+    await addCoreTextMessage(messageManager, {
+      role: role as "assistant" | "user",
+      sessionId: "session_1",
+      text: `${String(index)} ${"large context ".repeat(100)}`,
+    });
+  }
+
+  const releaseCompaction = createDeferred<undefined>();
+  const summaryMessageStarted = createDeferred<undefined>();
+  const createCoreMessage = messageManager.createMessage.bind(messageManager);
+  vi.spyOn(messageManager, "createMessage").mockImplementation(
+    async (input): ReturnType<MessageManager["createMessage"]> => {
+      if (input.agent === "context") {
+        summaryMessageStarted.resolve(undefined);
+        await releaseCompaction.promise;
+      }
+      return createCoreMessage(input);
+    },
+  );
+
+  return {
+    bus,
+    messageManager,
+    releaseCompaction,
+    summaryMessageStarted,
+  };
 }
 
 class RecordingRunLedger implements RunLedger {
@@ -4265,6 +4326,198 @@ describe("createInProcessUiBackendClient", () => {
     ).toBe(true);
     const snapshot = await client.getSnapshot();
     expect(snapshot.status).toEqual({ kind: "idle" });
+  });
+
+  it("reconciles compaction progress when switching to an idle session", async () => {
+    const {
+      bus,
+      messageManager,
+      releaseCompaction,
+      summaryMessageStarted,
+    } = await createBlockedAutoCompactionContext();
+    const client = createInProcessUiBackendClient({
+      bus,
+      initialSnapshot: createInitialSnapshotWithTwoSessions(),
+      llmClient: createFakeLLMClient(
+        [{ textDelta: "## Goal\nshort", finishReason: "stop" }],
+        { contextWindowTokens: 1_000 },
+      ),
+      messageManager,
+    });
+    const compacting = waitForUiEvent(
+      client,
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "runtime.updated" }> =>
+        event.type === "runtime.updated" &&
+        event.status.kind === "running" &&
+        event.status.title === "Compacting...",
+    );
+    const submission = client.submitPromptAndWait(
+      "Continue after a large context",
+      { sessionId: "session_1" },
+    );
+
+    try {
+      await Promise.all([compacting, summaryMessageStarted.promise]);
+      await selectSessionThroughResumeCommand(
+        client,
+        "session_2",
+        "inv_resume_during_compaction",
+      );
+
+      const snapshot = await client.getSnapshot();
+      expect(snapshot.activeSessionId).toBe("session_2");
+      expect(snapshot.status).toEqual({ kind: "idle" });
+    } finally {
+      releaseCompaction.resolve(undefined);
+      await submission;
+    }
+  });
+
+  it("does not let a stale session selection overwrite a newer active status", async () => {
+    const baseStateStore = createInMemoryUiStateStore({
+      ...createInitialSnapshotWithTwoSessions(),
+      activeSessionId: "session_2",
+      status: { kind: "running", runId: "run_newer" },
+    });
+    let changedSelection = false;
+    const stateStore: UiStateStore = {
+      ...baseStateStore,
+      updateStatusForActiveSession(
+        ...args: Parameters<
+          typeof baseStateStore.updateStatusForActiveSession
+        >
+      ): ReturnType<typeof baseStateStore.updateStatusForActiveSession> {
+        if (!changedSelection && args[0] === "session_1") {
+          changedSelection = true;
+          void baseStateStore.setActiveSessionId("session_2");
+          void baseStateStore.setStatus({
+            kind: "running",
+            runId: "run_newer",
+          });
+        }
+        return baseStateStore.updateStatusForActiveSession(...args);
+      },
+    };
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+      stateStore,
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    await selectSessionThroughResumeCommand(
+      client,
+      "session_1",
+      "inv_resume_stale_reconcile",
+    );
+
+    const snapshot = await client.getSnapshot();
+    expect(snapshot.activeSessionId).toBe("session_2");
+    expect(snapshot.status).toEqual({
+      kind: "running",
+      runId: "run_newer",
+    });
+    expect(events).not.toContainEqual({
+      type: "runtime.updated",
+      status: { kind: "idle" },
+      timestamp: expect.any(Number) as number,
+    });
+  });
+
+  it("reconciles compaction progress when switching to a running session", async () => {
+    const {
+      bus,
+      messageManager,
+      releaseCompaction,
+      summaryMessageStarted,
+    } = await createBlockedAutoCompactionContext();
+    const backgroundStarted = createDeferred<undefined>();
+    const baseClient = createInterruptibleGoalLLMClient(
+      [],
+      backgroundStarted,
+    );
+    const llmClient: LLMClientInstance<FakeSdkClient> = {
+      ...baseClient,
+      config: { ...baseClient.config, contextWindowTokens: 1_000 },
+    };
+    const client = createInProcessUiBackendClient({
+      bus,
+      initialSnapshot: createInitialSnapshotWithTwoSessions(),
+      llmClient,
+      messageManager,
+    });
+    const backgroundRunning = waitForUiEvent(
+      client,
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "runtime.updated" }> =>
+        event.type === "runtime.updated" && event.status.kind === "running",
+    );
+    const backgroundSubmission = client.submitPromptAndWait(
+      "Keep goal mode running in session two",
+      { sessionId: "session_2" },
+    );
+    const [backgroundRunEvent] = await Promise.all([
+      backgroundRunning,
+      backgroundStarted.promise,
+    ]);
+    if (backgroundRunEvent.status.kind !== "running") {
+      throw new Error("Expected session_2 to be running");
+    }
+    const backgroundRunId = backgroundRunEvent.status.runId;
+
+    await selectSessionThroughResumeCommand(
+      client,
+      "session_1",
+      "inv_resume_session_one",
+    );
+    const compacting = waitForUiEvent(
+      client,
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "runtime.updated" }> =>
+        event.type === "runtime.updated" &&
+        event.status.kind === "running" &&
+        event.status.title === "Compacting...",
+    );
+    const foregroundSubmission = client.submitPromptAndWait(
+      "Continue after a large context",
+      { sessionId: "session_1" },
+    );
+
+    try {
+      await Promise.all([compacting, summaryMessageStarted.promise]);
+      await selectSessionThroughResumeCommand(
+        client,
+        "session_2",
+        "inv_resume_running_session",
+      );
+
+      const snapshot = await client.getSnapshot();
+      expect(snapshot.activeSessionId).toBe("session_2");
+      expect(snapshot.status).toEqual({
+        kind: "running",
+        runId: backgroundRunId,
+      });
+
+      releaseCompaction.resolve(undefined);
+      await foregroundSubmission;
+
+      const afterForegroundCompletion = await client.getSnapshot();
+      expect(afterForegroundCompletion.activeSessionId).toBe("session_2");
+      expect(afterForegroundCompletion.status).toEqual({
+        kind: "running",
+        runId: backgroundRunId,
+      });
+    } finally {
+      releaseCompaction.resolve(undefined);
+      await client.abortRun(backgroundRunId);
+      await Promise.all([foregroundSubmission, backgroundSubmission]);
+    }
   });
 
   it("publishes a visible runtime error when provider configuration fails", async () => {
@@ -7156,7 +7409,7 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("archives the only active persistent session and clears the active session", async () => {
-    const projectRoot = "/repo";
+    const projectRoot = process.cwd();
     const messageManager = createMessageManager({
       bus: createBus(),
       store: createInMemoryMessageStore(),
@@ -7181,8 +7434,9 @@ describe("createInProcessUiBackendClient", () => {
       store: createInMemorySessionStore(),
     });
     await sessionManager.create(projectRoot, { title: "Only" });
+    const runStarted = createDeferred<undefined>();
     const client = createInProcessUiBackendClient({
-      llmClient: createFakeLLMClient([]),
+      llmClient: createInterruptibleGoalLLMClient([], runStarted),
       messageManager,
       projectDirectory: projectRoot,
       sessionManager,
@@ -7194,20 +7448,41 @@ describe("createInProcessUiBackendClient", () => {
         sessionManager,
       }),
     });
-
-    await (
-      client as unknown as {
-        archiveSession(input: { readonly sessionId: string }): Promise<void>;
-      }
-    ).archiveSession({ sessionId: "session_1" });
-
-    await expect(sessionManager.get("session_1")).resolves.toMatchObject({
-      status: "archived",
+    const running = waitForUiEvent(
+      client,
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "runtime.updated" }> =>
+        event.type === "runtime.updated" && event.status.kind === "running",
+      5_000,
+    );
+    const submission = client.submitPromptAndWait("Keep goal mode running", {
+      sessionId: "session_1",
     });
-    await expect(client.getSnapshot()).resolves.toMatchObject({
-      activeSessionId: null,
-      sessions: [],
-    });
+    const [runningEvent] = await Promise.all([running, runStarted.promise]);
+    if (runningEvent.status.kind !== "running") {
+      throw new Error("Expected the archived session run to be active");
+    }
+
+    try {
+      await (
+        client as unknown as {
+          archiveSession(input: { readonly sessionId: string }): Promise<void>;
+        }
+      ).archiveSession({ sessionId: "session_1" });
+
+      await expect(sessionManager.get("session_1")).resolves.toMatchObject({
+        status: "archived",
+      });
+      await expect(client.getSnapshot()).resolves.toMatchObject({
+        activeSessionId: null,
+        sessions: [],
+        status: { kind: "idle" },
+      });
+    } finally {
+      await client.abortRun(runningEvent.status.runId);
+      await submission;
+    }
   });
 
   it("archives injected sessions from the in-memory state store snapshot", async () => {

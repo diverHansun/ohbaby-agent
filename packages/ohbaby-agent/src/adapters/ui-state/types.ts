@@ -19,4 +19,8 @@ export interface UiStateStore {
   upsertPermission(request: UiPermissionRequest): Promise<void>;
   removePermission(requestId: string): Promise<void>;
   setStatus(status: UiRunStatus): Promise<void>;
+  updateStatusForActiveSession(
+    sessionId: string | null,
+    updater: (status: UiRunStatus) => UiRunStatus | undefined,
+  ): UiRunStatus | undefined;
 }

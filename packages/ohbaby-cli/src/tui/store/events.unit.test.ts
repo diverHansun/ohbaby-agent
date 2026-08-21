@@ -1304,6 +1304,39 @@ describe("TUI store event reducer", () => {
     expect(state.commandNotices).toHaveLength(1);
   });
 
+  it("keeps active runtime and reasoning when a background run completes", () => {
+    let state = createStateFromSnapshot({
+      ...snapshot(),
+      status: { kind: "running", runId: "run_1" },
+    });
+    state = applyTuiEvent(state, {
+      content: "thinking",
+      delta: "thinking",
+      messageId: "message_1",
+      sessionId: "session_1",
+      type: "message.reasoning.delta",
+    });
+
+    state = applyTuiEvent(state, {
+      run: {
+        id: "run_2",
+        sessionId: "session_2",
+        startedAt: "2026-05-14T00:00:03.000Z",
+        status: { kind: "idle" },
+        updatedAt: "2026-05-14T00:00:03.000Z",
+      },
+      type: "run.updated",
+    });
+
+    expect(state.runs).toEqual([
+      expect.objectContaining({ id: "run_2", sessionId: "session_2" }),
+    ]);
+    expect(state.runtime).toEqual({ kind: "running", runId: "run_1" });
+    expect(state.reasoningByMessageId).toEqual({
+      message_1: { content: "thinking", folded: false },
+    });
+  });
+
   it("drops late command notices that belong to another session", () => {
     let state = createStateFromSnapshot(snapshot());
 

@@ -1097,10 +1097,18 @@ export function createInProcessUiBackendClient(
     publish({ type: "run.updated", run: cloneRun(updatedRun) });
   }
 
-  async function reconcileRuntimeStatus(): Promise<UiRunStatus> {
+  async function reconcileRuntimeStatus(
+    expectedSessionId?: string | null,
+  ): Promise<UiRunStatus> {
     const snapshot = await stateStore.readSnapshot();
-    const selectedSessionId = snapshot.activeSessionId ?? undefined;
-    const activeRunId = runtimeController.getActiveRunId(selectedSessionId);
+    const selectedSessionId =
+      expectedSessionId === undefined
+        ? snapshot.activeSessionId
+        : expectedSessionId;
+    const activeRunId =
+      selectedSessionId === null
+        ? undefined
+        : runtimeController.getActiveRunId(selectedSessionId);
     const selectedPermission = snapshot.permissions.find(
       (request) => request.runId === activeRunId,
     );
@@ -1122,8 +1130,26 @@ export function createInProcessUiBackendClient(
     if (activeRunId) {
       await updateActiveRunStatus(status, activeRunId);
     }
-    await updateStatus(status);
-    return status;
+    const updated = stateStore.updateStatusForActiveSession(
+      selectedSessionId,
+      () => status,
+    );
+    if (updated) {
+      publish({
+        type: "runtime.updated",
+        status: updated,
+        timestamp: Date.now(),
+      });
+      return updated;
+    }
+    return (await stateStore.readSnapshot()).status;
+  }
+
+  async function setActiveSessionAndReconcileStatus(
+    sessionId: string | null,
+  ): Promise<void> {
+    await stateStore.setActiveSessionId(sessionId);
+    await reconcileRuntimeStatus(sessionId);
   }
 
   async function clearPendingPermissionsForRun(
@@ -1395,7 +1421,7 @@ export function createInProcessUiBackendClient(
   }): Promise<CommandSessionSummary> {
     sessionIds.reserve(input.session.id);
     await upsertSession(input.session);
-    await stateStore.setActiveSessionId(input.session.id);
+    await setActiveSessionAndReconcileStatus(input.session.id);
     if (input.publishUpdate) {
       publish({
         type: "session.updated",
@@ -1458,7 +1484,7 @@ export function createInProcessUiBackendClient(
 
     sessionIds.reserve(session.id);
     await upsertSession(session);
-    await stateStore.setActiveSessionId(session.id);
+    await setActiveSessionAndReconcileStatus(session.id);
     publish({ type: "session.updated", session: cloneSession(session) });
     await publishSnapshotReplacement();
 
@@ -1502,7 +1528,9 @@ export function createInProcessUiBackendClient(
           sameSessionProjectRoot(candidate.projectRoot, session.projectRoot),
         )
         .sort(sortCoreSessionsByUpdatedAtDesc);
-      await stateStore.setActiveSessionId(remainingSessions[0]?.id ?? null);
+      await setActiveSessionAndReconcileStatus(
+        remainingSessions[0]?.id ?? null,
+      );
     }
 
     await publishSnapshotReplacement();
@@ -2367,7 +2395,7 @@ export function createInProcessUiBackendClient(
         if (!session) {
           throw new Error(`Session not found: ${sessionId}`);
         }
-        await stateStore.setActiveSessionId(sessionId);
+        await setActiveSessionAndReconcileStatus(sessionId);
         await publishSnapshotReplacement();
       },
     },

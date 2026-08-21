@@ -67,6 +67,7 @@ export function reduceUiEvent(
     reasoningByMessageId: applyReasoningEvent(
       state.reasoningByMessageId,
       event,
+      snapshot.activeSessionId,
     ),
     snapshot: applyEventToSnapshot(snapshot, event),
   };
@@ -75,6 +76,7 @@ export function reduceUiEvent(
 function applyReasoningEvent(
   reasoningByMessageId: ViewState["reasoningByMessageId"],
   event: UiEvent,
+  activeSessionId: string | null,
 ): ViewState["reasoningByMessageId"] {
   switch (event.type) {
     case "message.reasoning.delta":
@@ -96,9 +98,12 @@ function applyReasoningEvent(
     case "message.updated":
       return foldReasoning(reasoningByMessageId, event.message.id);
     case "run.updated":
+      if (event.run.sessionId !== activeSessionId) {
+        return reasoningByMessageId;
+      }
       return event.run.status.kind === "running" ? reasoningByMessageId : {};
     case "run.interrupted":
-      return {};
+      return event.sessionId === activeSessionId ? {} : reasoningByMessageId;
     default:
       return reasoningByMessageId;
   }
@@ -368,17 +373,19 @@ function applyEventToSnapshot(
       return updateSessionMessages(snapshot, event.sessionId, (messages) =>
         applyMessageDelta(messages, event),
       );
-    case "run.updated":
-      return {
+    case "run.updated": {
+      const updated = {
         ...snapshot,
         runs: upsertById(snapshot.runs, event.run),
-        status: event.run.status,
       };
+      return event.run.sessionId === snapshot.activeSessionId
+        ? { ...updated, status: event.run.status }
+        : updated;
+    }
     case "run.interrupted":
-      return {
-        ...snapshot,
-        status: { kind: "idle" },
-      };
+      return event.sessionId === snapshot.activeSessionId
+        ? { ...snapshot, status: { kind: "idle" } }
+        : snapshot;
     case "context.window.updated":
       return {
         ...snapshot,

@@ -678,6 +678,74 @@ describe("ohbaby-web eventReducer", () => {
     });
   });
 
+  it("keeps active runtime status when a background run updates", () => {
+    let state = replaceSnapshot(
+      {
+        ...emptySnapshot(),
+        sessions: [
+          ...emptySnapshot().sessions,
+          {
+            createdAt: timestamp,
+            id: "session_2",
+            messages: [],
+            title: "Background",
+            updatedAt: timestamp,
+          },
+        ],
+        status: { kind: "running", runId: "run_1" },
+      },
+      0,
+    );
+
+    state = reduceUiEvent(
+      state,
+      {
+        content: "active reasoning",
+        delta: "active reasoning",
+        messageId: "message_active",
+        sessionId: "session_1",
+        type: "message.reasoning.delta",
+      },
+      1,
+    );
+
+    state = reduceUiEvent(
+      state,
+      {
+        run: {
+          id: "run_2",
+          sessionId: "session_2",
+          startedAt: timestamp,
+          status: { kind: "idle" },
+          updatedAt: timestamp,
+        },
+        type: "run.updated",
+      },
+      2,
+    );
+    state = reduceUiEvent(
+      state,
+      {
+        runId: "run_2",
+        sessionId: "session_2",
+        timestamp: 2,
+        type: "run.interrupted",
+      },
+      3,
+    );
+
+    expect(state.snapshot?.runs).toEqual([
+      expect.objectContaining({ id: "run_2", sessionId: "session_2" }),
+    ]);
+    expect(state.snapshot?.status).toEqual({
+      kind: "running",
+      runId: "run_1",
+    });
+    expect(state.reasoningByMessageId).toEqual({
+      message_active: { content: "active reasoning", folded: false },
+    });
+  });
+
   it("records command notices even if no snapshot has loaded yet", () => {
     const state = reduceUiEvent(
       createInitialViewState(),
