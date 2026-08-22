@@ -1,6 +1,6 @@
 # context improve-4.1 · tools-aware 计量与主代理静态/手动闭环
 
-> 状态：规划复审已完成，等待用户审查；实施以 **02 + 04** 为准。
+> 状态：实施与自动化验收完成；详见 **05**。
 > 日期：2026-08-22
 > 规划基线：`main@6436c15`
 > 实施分支：`codex/context-improve-4-1`
@@ -84,12 +84,12 @@ improve-4 已让实时 Lifecycle 把 tool schema 纳入 `sentHeuristic`，但以
 | [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 分阶段实施契约与改动面 |
 | [03-reference-projects.md](./03-reference-projects.md) | pi / opencode / kimi-code 的 adopt/adapt/reject |
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 单测、集成测试、回归与审查门 |
-| `05-implementation-acceptance.md` | 实施完成后由验收模式写入 |
+| [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 实施结果、测试矩阵与独立审查结论 |
 
-阅读顺序：README → 00 → 01 → 02 → 03 → 04。
+阅读顺序：README → 00 → 01 → 02 → 03 → 04 → 05。
 
 ---
 
 ## 6. 实施入口
 
-用户审查通过后，在现有临时分支 `codex/context-improve-4-1` 上按 [02](./02-optimization-plan-and-change-scope.md) 分批实施、按 [04](./04-test-and-acceptance.md) 验证。本规划轮只修订文档，不写业务代码。
+已在临时分支 `codex/context-improve-4-1` 上按 [02](./02-optimization-plan-and-change-scope.md) 分批实施、按 [04](./04-test-and-acceptance.md) 验证。当前未合并到 `main`，也未推送远程仓库。

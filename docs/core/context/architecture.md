@@ -144,7 +144,7 @@ resolved tool definitions
 **实现方式**：
 ```typescript
 // context-compressor.ts
-const COMPRESSION_THRESHOLD = 0.85      // 触发阈值
+const COMPRESSION_THRESHOLD = 0.95      // 触发阈值
 const PRESERVE_THRESHOLD = 0.3          // 保留比例
 
 // 未来可扩展为配置或策略对象
