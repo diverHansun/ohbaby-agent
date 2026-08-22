@@ -23,7 +23,6 @@ import type {
   InteractionRequestContext,
   InteractionRequestInput,
 } from "../runtime/interaction-broker/index.js";
-import type { ContextUsage } from "../core/context/index.js";
 import type { InterfaceProviderKind } from "../config/llm/types.js";
 
 export interface CommandToolSummary {
@@ -203,9 +202,6 @@ export interface CommandServiceOptions {
   ) => Promise<UiSetSearchApiKeyResult> | UiSetSearchApiKeyResult;
   readonly exit?: () => Promise<void> | void;
   readonly getStatus?: () => string;
-  readonly getContextUsage?: (input: {
-    readonly sessionId?: string;
-  }) => Promise<ContextUsage | null> | ContextUsage | null;
   readonly getContextWindowUsage?: (input: {
     readonly sessionId: string;
   }) => Promise<UiContextWindowUsage | null> | UiContextWindowUsage | null;

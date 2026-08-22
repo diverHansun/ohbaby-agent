@@ -2518,12 +2518,33 @@ describe("createInProcessUiBackendClient", () => {
       ),
       messageManager,
     });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
 
     const result = await client.compactSession({ sessionId: "session_1" });
 
     expect(result.status).toBe("compacted");
     expect(result.sessionId).toBe("session_1");
     expect(requests).toHaveLength(1);
+    const expectedWindowUsage = {
+      contextWindowRatio:
+        result.usageAfter.currentTokens / result.usageAfter.contextLimit,
+      contextWindowTokens: result.usageAfter.contextLimit,
+      currentTokens: result.usageAfter.currentTokens,
+      modelId: result.usageAfter.modelId,
+      sessionId: "session_1",
+    };
+    await expect(
+      client.getContextWindowUsage({ sessionId: "session_1" }),
+    ).resolves.toMatchObject(expectedWindowUsage);
+    const manualWindowEvents = events.filter(
+      (event): event is Extract<UiEvent, { type: "context.window.updated" }> =>
+        event.type === "context.window.updated",
+    );
+    expect(manualWindowEvents).toHaveLength(1);
+    expect(manualWindowEvents[0]?.usage).toMatchObject(expectedWindowUsage);
     await expect(messageManager.listBySession("session_1")).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -2627,6 +2648,40 @@ describe("createInProcessUiBackendClient", () => {
       sessionId: "session_1",
       status: "compacted",
     });
+    const windowEvents = events.filter(
+      (event): event is Extract<UiEvent, { type: "context.window.updated" }> =>
+        event.type === "context.window.updated",
+    );
+    expect(windowEvents).toHaveLength(1);
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_status_after_compact",
+      commandId: "status",
+      path: ["status"],
+      raw: "/status",
+      rawArgs: "",
+      sessionId: "session_1",
+      surface: "tui",
+    });
+    const statusEvent = events.findLast(
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "command.result.delivered" }> =>
+        event.type === "command.result.delivered" &&
+        event.output?.kind === "data" &&
+        event.output.subject === "status",
+    );
+    expect(statusEvent?.output).toMatchObject({
+      data: {
+        contextWindow: windowEvents[0]?.usage,
+      },
+      kind: "data",
+      subject: "status",
+    });
+    if (statusEvent?.output?.kind === "data") {
+      expect(statusEvent.output.data).not.toHaveProperty("context");
+    }
   });
 
   it("executes builtin tool calls through the in-process lifecycle scheduler", async () => {

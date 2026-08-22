@@ -795,13 +795,6 @@ describe("CommandService", () => {
   });
 
   it("aggregates extended backend status fields", async () => {
-    const contextUsage = {
-      contextLimit: 128_000,
-      currentTokens: 9_000,
-      modelId: "fake-model",
-      remainingTokens: 119_000,
-      usageRatio: 9_000 / 128_000,
-    };
     const contextWindowUsage = {
       contextWindowRatio: 0.0384,
       contextWindowTokens: 1_000_000,
@@ -813,9 +806,6 @@ describe("CommandService", () => {
     const getContextWindowUsage = vi.fn(() => contextWindowUsage);
     const { events, service } = createServiceHarness({
       getContextWindowUsage,
-      getContextUsage() {
-        return contextUsage;
-      },
       getProjectRoot() {
         return "D:/Projects/app";
       },
@@ -862,9 +852,10 @@ describe("CommandService", () => {
     expect(getContextWindowUsage).toHaveBeenCalledWith({
       sessionId: "session_1",
     });
-    expect(dataOutputFrom(events.at(-1))).toMatchObject({
+    const statusOutput = dataOutputFrom(events.at(-1));
+    expect(statusOutput?.data).not.toHaveProperty("context");
+    expect(statusOutput).toMatchObject({
       data: {
-        context: contextUsage,
         contextWindow: contextWindowUsage,
         mcps: {
           connected: 1,
@@ -899,9 +890,10 @@ describe("CommandService", () => {
 
     await service.executeCommand(makeInvocation("status", ["status"]));
 
-    expect(dataOutputFrom(events.at(-1))).toMatchObject({
+    const statusOutput = dataOutputFrom(events.at(-1));
+    expect(statusOutput?.data).not.toHaveProperty("context");
+    expect(statusOutput).toMatchObject({
       data: {
-        context: null,
         mcps: {
           connected: 0,
           disabled: 0,

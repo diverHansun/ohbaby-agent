@@ -1760,6 +1760,13 @@ export function createInProcessUiBackendClient(
       projectRoot: target.projectRoot,
       sessionId: target.sessionId,
     });
+    const usage = contextWindowUsage.updateFromContextUsage(
+      target.sessionId,
+      result.usageAfter,
+    );
+    if (usage) {
+      publish({ type: "context.window.updated", usage });
+    }
 
     return {
       ...result,
@@ -2436,20 +2443,6 @@ export function createInProcessUiBackendClient(
     },
     getContextWindowUsage(input) {
       return getContextWindowUsageInternal(input);
-    },
-    async getContextUsage(input) {
-      if (!input.sessionId) {
-        return null;
-      }
-      try {
-        const runtime = await runtimeController.getRuntime();
-        return await runtime.getContextUsage({
-          projectRoot: await resolveProjectRoot(),
-          sessionId: input.sessionId,
-        });
-      } catch {
-        return null;
-      }
     },
     getProjectRoot: resolveProjectRoot,
   });

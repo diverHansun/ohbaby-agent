@@ -240,28 +240,18 @@ async function handleStatus(
   context: CommandRunContext,
 ): Promise<void> {
   const permission = currentPermissionState(options);
-  const [
-    models,
-    model,
-    tools,
-    skills,
-    mcpServers,
-    contextUsage,
-    contextWindow,
-    projectRoot,
-  ] = await Promise.all([
-    listModels(options),
-    currentModel(options),
-    options.tools?.listTools() ?? [],
-    listSkills(options),
-    listMcpServers(options),
-    options.getContextUsage?.({ sessionId: invocation.sessionId }) ?? null,
-    getStatusContextWindowUsage(options, invocation.sessionId),
-    options.getProjectRoot?.() ?? null,
-  ]);
+  const [models, model, tools, skills, mcpServers, contextWindow, projectRoot] =
+    await Promise.all([
+      listModels(options),
+      currentModel(options),
+      options.tools?.listTools() ?? [],
+      listSkills(options),
+      listMcpServers(options),
+      getStatusContextWindowUsage(options, invocation.sessionId),
+      options.getProjectRoot?.() ?? null,
+    ]);
   context.emitOutput(
     dataOutput("status", {
-      context: contextUsage,
       contextWindow,
       mcps: summarizeMcpServers(mcpServers),
       model,

@@ -111,6 +111,13 @@ resolved tool definitions
 - 公开 context-window 查询没有 `contextScopeId` 身份，因此 child session 返回 unavailable，不从 session-only tracker 或静态 fallback 构造伪精确数值。
 - 手动 compact 只允许 primary session；不通过客户端参数接收 `isSubagent`、agentName 或 scope。
 
+### 主代理 window projection 单源
+
+- UI 与 `/status` 只消费 `UiContextWindowUsage`（`contextWindow`），不再并行查询或返回旧 `ContextUsage` 的 `context` 字段。
+- 实时请求由 run-stream projection 把 `ContextUsage` 写入 session tracker，并发布 `context.window.updated`。
+- 手动 compact 由 ui-inprocess 使用 `result.usageAfter` 更新同一 tracker，并发布同一事件；随后 `/status` cache-first 读取该快照，不重复静态组装。
+- tracker 是主代理 UI projection，不是子代理 scope 观测 API；子代理占用继续只存在于 ContextManager/Lifecycle 的内部自动保护链路。
+
 ---
 
 ## 二、Design Pattern & Rationale（设计模式与理由）
