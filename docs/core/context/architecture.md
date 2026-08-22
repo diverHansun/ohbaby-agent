@@ -144,7 +144,7 @@ resolved tool definitions
 **实现方式**：
 ```typescript
 // context-compressor.ts
-const COMPRESSION_THRESHOLD = 0.95      // 触发阈值
+const COMPRESSION_THRESHOLD = 0.95      // 当前实现；85% 产品目标待压缩闭环审查
 const PRESERVE_THRESHOLD = 0.3          // 保留比例
 
 // 未来可扩展为配置或策略对象
@@ -215,7 +215,9 @@ src/core/context/
 
 ### 约束 1: 固定阈值 vs 可配置阈值
 
-**当前选择**：使用固定阈值（95% 触发，30% 保留）
+**当前实现**：使用固定阈值（95% 触发，30% 保留）
+
+> **未决差异**：`goals-duty.md` 的 G2、D3 与约束仍将 85% 定义为产品目标，当前代码则按 95% 触发。本文如实记录当前实现，不以代码现状反向改写产品目标；两者应在下一轮 context 压缩闭环审查中正式决策。
 
 **代价**：
 - 不同场景无法调整策略
@@ -300,7 +302,7 @@ Context.compress(sessionId, force)
     │
     ├─2─► 判断是否需要压缩
     │         ├─► force = true：强制压缩
-    │         └─► usage >= 95%：自动触发
+    │         └─► usage >= 95%：自动触发（当前实现）
     │
     ├─3─► Context.prune(sessionId)
     │         └─► 先执行 Prune，释放空间
