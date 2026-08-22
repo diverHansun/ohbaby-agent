@@ -27,6 +27,7 @@ export interface SystemPromptProviderInput {
   readonly directory: string;
   readonly isSubagent: boolean;
   readonly agentName?: string;
+  readonly toolNames: readonly string[];
 }
 
 export interface SystemPromptProviderOptions {
@@ -46,9 +47,6 @@ export interface SystemPromptProviderOptions {
   ) => Promise<EnvironmentInfo> | EnvironmentInfo;
   readonly onWarning?: (message: string, error?: unknown) => void;
   readonly onSecurityFinding?: (finding: PromptSecurityFinding) => void;
-  readonly toolsProvider?: (
-    input: SystemPromptProviderInput,
-  ) => Promise<readonly string[]> | readonly string[];
   readonly runtimePromptsProvider?: (
     input: SystemPromptProviderInput,
   ) => Promise<readonly string[]> | readonly string[];
@@ -213,23 +211,17 @@ export function createSystemPromptProvider(
   return {
     async build(input: SystemPromptProviderInput): Promise<string> {
       const agentName = await resolveAgentName(input, options);
-      const [
-        availableSubagentRoles,
-        environment,
-        runtimePrompts,
-        tools,
-        taskKind,
-      ] = await Promise.all([
-        input.isSubagent
-          ? []
-          : (options.availableSubagentRolesProvider?.(input) ?? []),
-        options.environmentDetector
-          ? options.environmentDetector(input.directory, input)
-          : detectEnvironment(input.directory),
-        options.runtimePromptsProvider?.(input) ?? [],
-        options.toolsProvider?.(input) ?? [],
-        options.taskKindResolver?.(input, agentName),
-      ]);
+      const [availableSubagentRoles, environment, runtimePrompts, taskKind] =
+        await Promise.all([
+          input.isSubagent
+            ? []
+            : (options.availableSubagentRolesProvider?.(input) ?? []),
+          options.environmentDetector
+            ? options.environmentDetector(input.directory, input)
+            : detectEnvironment(input.directory),
+          options.runtimePromptsProvider?.(input) ?? [],
+          options.taskKindResolver?.(input, agentName),
+        ]);
       const agentPromptAddon = await resolveAgentPromptAddon(
         agentName,
         input,
@@ -244,7 +236,7 @@ export function createSystemPromptProvider(
           isSubagent: true,
           runtimePrompts,
           taskKind,
-          tools,
+          tools: input.toolNames,
         }).join("\n\n");
       }
 
@@ -265,7 +257,7 @@ export function createSystemPromptProvider(
         isSubagent: false,
         runtimePrompts,
         taskKind,
-        tools,
+        tools: input.toolNames,
       }).join("\n\n");
     },
   };

@@ -537,7 +537,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(disposeSandbox).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps provider tool schemas out of static usage and manual compaction", async () => {
+  it("passes explicit empty tool inputs on the pre-resolution static paths", async () => {
     const bus = createBus();
     const usage = {
       contextLimit: 10_000,
@@ -546,9 +546,12 @@ describe("createUiRuntimeComposition skill tools", () => {
       remainingTokens: 9_900,
       usageRatio: 0.01,
     };
+    const assembledContext = {} as Awaited<
+      ReturnType<ContextManager["assemble"]>
+    >;
     const assemble = vi
       .fn<ContextManager["assemble"]>()
-      .mockResolvedValue({} as Awaited<ReturnType<ContextManager["assemble"]>>);
+      .mockResolvedValue(assembledContext);
     const compact = vi.fn<ContextManager["compact"]>().mockResolvedValue({
       status: "not-needed",
       usageAfter: usage,
@@ -589,13 +592,22 @@ describe("createUiRuntimeComposition skill tools", () => {
       sessionId: "session_1",
     });
 
-    expect(assemble).toHaveBeenCalledWith("session_1", "D:/repo");
-    expect(getUsage).toHaveBeenCalledWith(expect.anything(), "fake-model");
+    expect(assemble).toHaveBeenCalledWith("session_1", "D:/repo", {
+      isSubagent: false,
+      toolNames: [],
+    });
+    expect(getUsage).toHaveBeenCalledWith({
+      context: assembledContext,
+      modelId: "fake-model",
+      tools: undefined,
+    });
     expect(compact).toHaveBeenCalledWith("session_1", {
       directory: "D:/repo",
       force: true,
       isSubagent: false,
       modelId: "fake-model",
+      toolNames: [],
+      tools: undefined,
     });
   });
 

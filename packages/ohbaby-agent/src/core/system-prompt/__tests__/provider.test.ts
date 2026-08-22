@@ -14,13 +14,13 @@ describe("createSystemPromptProvider", () => {
     const provider = createSystemPromptProvider({
       environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
       customInstructionLoader: vi.fn().mockResolvedValue(["Project-only rule"]),
-      toolsProvider: vi.fn().mockResolvedValue(["read", "bash"]),
     });
 
     const prompt = await provider.build({
       sessionId: "session_1",
       directory: "D:/repo",
       isSubagent: false,
+      toolNames: ["read", "bash"],
     });
 
     expect(prompt).toContain("Lychee");
@@ -40,6 +40,7 @@ describe("createSystemPromptProvider", () => {
       sessionId: "session_1",
       directory: "D:/repo",
       isSubagent: false,
+      toolNames: [],
     });
 
     expect(prompt).toContain("Lychee");
@@ -55,13 +56,13 @@ describe("createSystemPromptProvider", () => {
       agentNameResolver: vi.fn().mockResolvedValue("explore"),
       environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
       customInstructionLoader,
-      toolsProvider: vi.fn().mockResolvedValue(["read"]),
     });
 
     const prompt = await provider.build({
       sessionId: "session_2",
       directory: "D:/repo",
       isSubagent: true,
+      toolNames: ["read"],
     });
 
     expect(prompt).toContain("exploration");
@@ -75,13 +76,13 @@ describe("createSystemPromptProvider", () => {
     const provider = createSystemPromptProvider({
       environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
       taskKindResolver: vi.fn().mockResolvedValue("plan"),
-      toolsProvider: vi.fn().mockResolvedValue(["read", "grep"]),
     });
 
     const prompt = await provider.build({
       sessionId: "session_1",
       directory: "D:/repo",
       isSubagent: false,
+      toolNames: ["read", "grep"],
     });
 
     expect(prompt).toContain("Task: plan");
@@ -110,11 +111,13 @@ describe("createSystemPromptProvider", () => {
       sessionId: "session_primary",
       directory: "D:/repo",
       isSubagent: false,
+      toolNames: [],
     });
     const subagentPrompt = await provider.build({
       sessionId: "session_child",
       directory: "D:/repo",
       isSubagent: true,
+      toolNames: [],
     });
 
     expect(primaryPrompt).toContain("Subagent roles for subagent_run");
@@ -130,13 +133,13 @@ describe("createSystemPromptProvider", () => {
       runtimePromptsProvider: vi
         .fn()
         .mockResolvedValue(["<runtime_prompt>MCP menu</runtime_prompt>"]),
-      toolsProvider: vi.fn().mockResolvedValue(["mcp_bad", "read"]),
     });
 
     const prompt = await provider.build({
       sessionId: "session_1",
       directory: "D:/repo",
       isSubagent: false,
+      toolNames: ["mcp_bad", "read"],
     });
 
     expect(prompt).toContain("<runtime_prompt>MCP menu</runtime_prompt>");

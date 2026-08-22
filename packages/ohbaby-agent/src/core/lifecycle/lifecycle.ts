@@ -206,6 +206,12 @@ function messagesForStep(
     : [...messages];
 }
 
+function toolNamesFromSchemas(
+  tools: LifecycleSessionParams["tools"],
+): readonly string[] {
+  return (tools ?? []).map((tool) => tool.function.name);
+}
+
 function normalizeToolCalls(
   toolCalls: readonly ParsedToolCall[],
   generateToolCallId: () => string,
@@ -399,15 +405,16 @@ export class Lifecycle {
       }
 
       const isFinalStep = step === maxSteps;
-      const tools = isFinalStep
-        ? []
-        : ((await this.deps.resolveTools?.({
-            agentName: params.agent,
-            contextScopeId: params.contextScopeId,
-            isSubagent: params.isSubagent,
-            sessionId: params.sessionId,
-            step,
-          })) ?? params.tools);
+      const resolvedTools =
+        (await this.deps.resolveTools?.({
+          agentName: params.agent,
+          contextScopeId: params.contextScopeId,
+          isSubagent: params.isSubagent,
+          sessionId: params.sessionId,
+          step,
+        })) ?? params.tools;
+      const toolNames = toolNamesFromSchemas(resolvedTools);
+      const tools = isFinalStep ? [] : resolvedTools;
       let prepared = yield* this.prepareTurnWithProgress({
         ...(activeReasoningByMessageId.size === 0
           ? {}
@@ -421,7 +428,8 @@ export class Lifecycle {
         modelId: params.modelId,
         sessionId: params.sessionId,
         step,
-        ...(tools === undefined ? {} : { tools }),
+        toolNames,
+        tools,
       });
       if (params.signal?.aborted) {
         return {
@@ -517,7 +525,8 @@ export class Lifecycle {
           modelId: params.modelId,
           sessionId: params.sessionId,
           step,
-          ...(tools === undefined ? {} : { tools }),
+          toolNames,
+          tools,
         });
         if (params.signal?.aborted) {
           return {

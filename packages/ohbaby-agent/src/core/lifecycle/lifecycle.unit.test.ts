@@ -415,6 +415,7 @@ describe("Lifecycle.run", () => {
         isSubagent: undefined,
         modelId: "fake-model",
         sessionId: "session_test",
+        toolNames: ["read_file"],
         tools: resolvedTools,
       }),
     );
@@ -425,6 +426,7 @@ describe("Lifecycle.run", () => {
         isSubagent: undefined,
         modelId: "fake-model",
         sessionId: "session_test",
+        toolNames: ["read_file"],
         tools: resolvedTools,
       }),
     );
@@ -1128,9 +1130,9 @@ describe("Lifecycle.run", () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]?.tools).toEqual([]);
-    expect(resolveTools).not.toHaveBeenCalled();
+    expect(resolveTools).toHaveBeenCalledOnce();
     expect(prepareTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ tools: [] }),
+      expect.objectContaining({ toolNames: ["read_file"], tools: [] }),
     );
     expect(result).toMatchObject({
       finishReason: "error",

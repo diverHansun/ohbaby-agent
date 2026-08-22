@@ -18,8 +18,11 @@ import {
   getContextUsage,
 } from "./index.js";
 import type {
+  CompactOptions,
+  ContextManager,
   ContextLLMClient,
   MemoryReader,
+  PrepareTurnInput,
   SystemPromptProvider,
   TokenCounter,
 } from "./types.js";
@@ -29,10 +32,24 @@ import { serializeForLlm } from "./serializer.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
 import { estimateWireHeuristic } from "./token-estimation.js";
 
+type WithDefaultToolInput<
+  T extends { readonly toolNames: readonly string[]; readonly tools: unknown },
+> = Omit<T, "toolNames" | "tools"> & Partial<Pick<T, "toolNames" | "tools">>;
+
+type FixtureContextManager = Omit<ContextManager, "compact" | "prepareTurn"> & {
+  compact(
+    sessionId: string,
+    options: WithDefaultToolInput<CompactOptions>,
+  ): ReturnType<ContextManager["compact"]>;
+  prepareTurn(
+    input: WithDefaultToolInput<PrepareTurnInput>,
+  ): ReturnType<ContextManager["prepareTurn"]>;
+};
+
 interface ContextFixture {
   readonly compactSkipped: readonly unknown[];
   readonly compressed: readonly unknown[];
-  readonly manager: ReturnType<typeof createContextManager>;
+  readonly manager: FixtureContextManager;
   readonly masked: readonly unknown[];
   readonly memory: MemoryReader;
   readonly pruned: readonly unknown[];
@@ -187,7 +204,7 @@ function createManager(
   const systemPromptProvider: SystemPromptProvider = {
     build: vi.fn().mockResolvedValue("system prompt"),
   };
-  const manager = createContextManager({
+  const contextManager = createContextManager({
     bus,
     memory,
     messageManager: options.messageManager ?? createMessageManagerFixture(),
@@ -209,6 +226,23 @@ function createManager(
     pruneMinimumTokens: options.pruneMinimumTokens ?? 5,
     thrashWindow: options.thrashWindow,
   });
+  const manager: FixtureContextManager = {
+    ...contextManager,
+    compact(sessionId, input) {
+      return contextManager.compact(sessionId, {
+        toolNames: [],
+        tools: undefined,
+        ...input,
+      });
+    },
+    prepareTurn(input) {
+      return contextManager.prepareTurn({
+        toolNames: [],
+        tools: undefined,
+        ...input,
+      });
+    },
+  };
 
   bus.subscribe(ContextEvent.Compressed, (payload) => {
     compressed.push(payload);
@@ -365,17 +399,36 @@ describe("ContextManager", () => {
       directory: "D:/repo",
       modelId: "model-a",
       sessionId: "session_1",
+      toolNames: [],
+      tools: undefined,
     });
     const withTools = await manager.prepareTurn({
       directory: "D:/repo",
       modelId: "model-a",
       sessionId: "session_1",
+      toolNames: ["read_file"],
       tools,
     });
 
     expect(withTools.sentHeuristic).toBeGreaterThan(messagesOnly.sentHeuristic);
     expect(withTools.usage.currentTokens).toBeGreaterThan(
       messagesOnly.usage.currentTokens,
+    );
+
+    manager.updateCalibrationFactor(
+      "session_1",
+      withTools.sentHeuristic * 2,
+      withTools.sentHeuristic,
+    );
+    const calibrated = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+      toolNames: ["read_file"],
+      tools,
+    });
+    expect(calibrated.usage.currentTokens).toBe(
+      Math.round(calibrated.sentHeuristic * 1.5),
     );
   });
 
@@ -576,7 +629,10 @@ describe("ContextManager", () => {
       },
     });
 
-    const context = await manager.assemble("session_1", "D:/repo");
+    const context = await manager.assemble("session_1", "D:/repo", {
+      isSubagent: false,
+      toolNames: [],
+    });
 
     expect(context.systemPrompt).toBe("system prompt");
     expect(context.memory.merged).toContain("global memory");
@@ -618,7 +674,10 @@ describe("ContextManager", () => {
         getLimit: () => 10_000,
       },
     });
-    const context = await manager.assemble("session_1", "D:/repo");
+    const context = await manager.assemble("session_1", "D:/repo", {
+      isSubagent: false,
+      toolNames: [],
+    });
     const messages = serializeForLlm({
       history: context.history,
       isSubagent: false,
@@ -1537,16 +1596,18 @@ describe("ContextManager", () => {
     const { manager } = createManager({ memory });
 
     await expect(
-      manager.assemble("session_1", "D:/repo"),
+      manager.assemble("session_1", "D:/repo", {
+        isSubagent: false,
+        toolNames: [],
+      }),
     ).resolves.toMatchObject({
       memory: { global: "", project: "", merged: "" },
     });
 
-    const subagentContext = await manager.assemble(
-      "session_1",
-      "D:/repo",
-      true,
-    );
+    const subagentContext = await manager.assemble("session_1", "D:/repo", {
+      isSubagent: true,
+      toolNames: [],
+    });
     expect(subagentContext.memory).toEqual({
       global: "",
       project: "",
@@ -1824,6 +1885,68 @@ describe("ContextManager", () => {
     ]);
   });
 
+  it("keeps the same tool schemas in manual compact measurements", async () => {
+    const messageManager = createMessageManagerFixture();
+    for (const [index, role] of ["user", "assistant", "user"].entries()) {
+      await addTextMessage(messageManager, {
+        role: role as "user" | "assistant",
+        sessionId: "session_1",
+        text: `${String(index)} ${"long context ".repeat(40)}`,
+      });
+    }
+    const estimateTokens = vi.fn((content: string) => content.length);
+    const { manager } = createManager({
+      messageManager,
+      tokenCounter: {
+        estimateTokens,
+        getLimit: () => 100_000,
+      },
+    });
+    const tools = [
+      {
+        function: {
+          name: "read_file",
+          parameters: { type: "object" },
+        },
+        type: "function" as const,
+      },
+    ];
+    const beforeContext = await manager.assemble("session_1", "D:/repo", {
+      isSubagent: false,
+      toolNames: ["read_file"],
+    });
+    const expectedBefore = manager.getUsage({
+      context: beforeContext,
+      modelId: "model-a",
+      tools,
+    });
+
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+      toolNames: ["read_file"],
+      tools,
+    });
+    const afterContext = await manager.assemble("session_1", "D:/repo", {
+      isSubagent: false,
+      toolNames: ["read_file"],
+    });
+    const expectedAfter = manager.getUsage({
+      context: afterContext,
+      modelId: "model-a",
+      tools,
+    });
+
+    expect(result.usageBefore).toEqual(expectedBefore);
+    expect(result.usageAfter).toEqual(expectedAfter);
+    expect(
+      estimateTokens.mock.calls.filter(([content]) =>
+        content.includes('"name":"read_file"'),
+      ).length,
+    ).toBeGreaterThanOrEqual(4);
+  });
+
   it("prunes old completed tool output while protecting recent output", async () => {
     const messageManager = createMessageManagerFixture();
     const oldMessage = await messageManager.createMessage({
@@ -1920,7 +2043,10 @@ describe("ContextManager", () => {
       ],
     });
     await expect(
-      manager.assemble("session_1", "D:/repo"),
+      manager.assemble("session_1", "D:/repo", {
+        isSubagent: false,
+        toolNames: [],
+      }),
     ).resolves.toMatchObject({
       hasSummary: true,
       history: [{ info: { id: "message_5" } }, { info: { id: "message_4" } }],
@@ -1967,7 +2093,10 @@ describe("ContextManager", () => {
     expect(result.usageAfter.currentTokens).toBeLessThan(
       result.usageBefore.currentTokens,
     );
-    const context = await manager.assemble("session_1", "D:/repo");
+    const context = await manager.assemble("session_1", "D:/repo", {
+      isSubagent: false,
+      toolNames: [],
+    });
     expect(context.history).toHaveLength(1);
     expect(context.history[0]?.info.role).toBe("user");
   });
@@ -2094,7 +2223,10 @@ describe("ContextManager", () => {
 
     expect(result.status).toBe("compacted");
     expect(result.compression?.summaryMessageId).toBe("message_5");
-    const context = await manager.assemble("session_1", "D:/repo");
+    const context = await manager.assemble("session_1", "D:/repo", {
+      isSubagent: false,
+      toolNames: [],
+    });
     expect(context.hasSummary).toBe(true);
     expect(context.history).toMatchObject([
       {
@@ -2213,8 +2345,12 @@ describe("ContextManager", () => {
     });
 
     expect(result.status).toBe("compacted");
-    const activeHistory = (await manager.assemble("session_1", "D:/repo"))
-      .history;
+    const activeHistory = (
+      await manager.assemble("session_1", "D:/repo", {
+        isSubagent: false,
+        toolNames: [],
+      })
+    ).history;
     const retained = activeHistory.find(
       (message) => message.info.id === "message_4",
     );
@@ -2496,8 +2632,15 @@ describe("ContextManager", () => {
       messageManager,
     });
     manager.updateCalibrationFactor("session_1", 300, 100);
-    const context = await manager.assemble("session_1", "D:/repo");
-    const calibratedUsage = manager.getUsage(context, "model-a");
+    const context = await manager.assemble("session_1", "D:/repo", {
+      isSubagent: false,
+      toolNames: [],
+    });
+    const calibratedUsage = manager.getUsage({
+      context,
+      modelId: "model-a",
+      tools: undefined,
+    });
 
     await manager.prepareTurn({
       directory: "D:/repo",
@@ -2517,7 +2660,11 @@ describe("ContextManager", () => {
     expect(generateSummary).toHaveBeenCalledTimes(4);
 
     manager.disposeSession("session_1");
-    const resetUsage = manager.getUsage(context, "model-a");
+    const resetUsage = manager.getUsage({
+      context,
+      modelId: "model-a",
+      tools: undefined,
+    });
     await manager.prepareTurn({
       directory: "D:/repo",
       modelId: "model-a",

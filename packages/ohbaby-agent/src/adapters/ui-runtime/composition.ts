@@ -428,10 +428,6 @@ export async function createUiRuntimeComposition(
       }
       return resolveSubagentTaskKind(agentName);
     },
-    async toolsProvider(input) {
-      const tools = await resolvePromptTools(input);
-      return tools.map((tool) => tool.name);
-    },
     async runtimePromptsProvider(input) {
       return [
         generateMcpToolMenuPrompt({
@@ -869,6 +865,8 @@ export async function createUiRuntimeComposition(
         force: input.force ?? true,
         isSubagent: input.isSubagent ?? false,
         modelId: options.llmClient.config.model,
+        toolNames: [],
+        tools: undefined,
       });
       const notice = noticeFromCompactResult(input.sessionId, result);
       if (notice) {
@@ -881,8 +879,13 @@ export async function createUiRuntimeComposition(
       const assembled = await contextManager.assemble(
         input.sessionId,
         input.projectRoot,
+        { isSubagent: false, toolNames: [] },
       );
-      return contextManager.getUsage(assembled, options.llmClient.config.model);
+      return contextManager.getUsage({
+        context: assembled,
+        modelId: options.llmClient.config.model,
+        tools: undefined,
+      });
     },
 
     async listMcpServerSummaries(): Promise<

@@ -198,6 +198,8 @@ describe("goals x compact (integration)", () => {
               directory: dir,
               force: true,
               modelId: "test-model",
+              toolNames: [],
+              tools: undefined,
             });
           }
           if (turn === 4) {
@@ -281,6 +283,8 @@ describe("goals x compact (integration)", () => {
       directory: dir,
       force: true,
       modelId: "test-model",
+      toolNames: [],
+      tools: undefined,
     });
     expect(compactResult.status).toBe("compacted");
 

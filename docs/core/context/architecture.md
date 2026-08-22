@@ -18,6 +18,7 @@ context 模块采用**功能分离架构**，将不同职责分配到独立的�
 │ 职责：                                                           │
 │ - 提供统一的上下文管理 API                                        │
 │ - 协调各子组件完成组装、压缩、Prune                               │
+│ - 按实际 request messages + tool schemas 统一测量占用              │
 │                                                                  │
 │   ┌──────────────────────────────────────────────────────┐      │
 │   │ ContextAssembler（上下文组装器）                      │      │
@@ -84,6 +85,24 @@ ContextCompressor
 ContextPruner
     └── Message 模块（依赖）
 ```
+
+### 请求期工具与计量边界
+
+工具定义属于单次请求，而不是 `AssembledContext` 的会话级内容。运行编排层先解析一次完整工具集合，再派生两种数据：
+
+```text
+resolved tool definitions
+  ├─ toolNames ───────────────→ SystemPromptProvider.build
+  └─ requestTools
+       ├─→ ContextMeasurementPayload { messages, tools }
+       └─→ provider request
+```
+
+- Lifecycle 负责实时请求的解析；static/manual 路径由 composition 负责解析。
+- ContextManager 只消费 names/schemas 数据，不依赖 ToolScheduler 或 MCP registry。
+- `ContextMeasurementPayload.tools` 属性必须显式存在，值可以为 `undefined` 或 `[]`。
+- final step 仍先从完整集合派生 `toolNames`，随后将计量与 provider request 的 schemas 置为 `[]`，保持最终步不可调用工具。
+- calibration factor 作用于同一份 `messages + tools` wire heuristic，不对 tool schemas 做第二次加算。
 
 ---
 
@@ -238,7 +257,7 @@ src/core/context/
 ### 5.1 上下文组装流程
 
 ```
-Context.assemble(sessionId, directory)
+Context.assemble(sessionId, directory, { isSubagent, toolNames, ... })
     │
     ├─1─► Memory.load(directory)
     │         └─► 获取全局 + 项目记忆
@@ -253,6 +272,8 @@ Context.assemble(sessionId, directory)
     │
     └─5─► 返回 AssembledContext
 ```
+
+`AssembledContext` 不保存 tools 或 toolNames；调用方在每次请求期将组装结果与当次 schemas 合成为 measurement payload。
 
 ### 5.2 压缩流程
 

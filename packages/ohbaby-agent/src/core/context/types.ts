@@ -16,6 +16,7 @@ export interface SystemPromptProvider {
     readonly directory: string;
     readonly isSubagent: boolean;
     readonly agentName?: string;
+    readonly toolNames: readonly string[];
   }): Promise<string>;
 }
 
@@ -62,6 +63,18 @@ export interface AssembledContext {
   readonly isSubagent: boolean;
 }
 
+export interface ContextAssemblyOptions {
+  readonly agentName?: string;
+  readonly contextScopeId?: string;
+  readonly isSubagent: boolean;
+  readonly toolNames: readonly string[];
+}
+
+export interface ContextMeasurementPayload {
+  readonly messages: readonly ChatCompletionMessage[];
+  readonly tools: ChatCompletionCreateParams["tools"];
+}
+
 export interface ContextUsage {
   readonly currentTokens: number;
   readonly contextLimit: number;
@@ -103,11 +116,14 @@ export type CompactStatus =
   | "inflated";
 
 export interface CompactOptions {
+  readonly agentName?: string;
   readonly directory: string;
   readonly contextScopeId?: string;
   readonly force?: boolean;
   readonly isSubagent?: boolean;
   readonly modelId: string;
+  readonly toolNames: readonly string[];
+  readonly tools: ChatCompletionCreateParams["tools"];
 }
 
 export interface CompactResult {
@@ -128,7 +144,8 @@ export interface PrepareTurnInput {
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   /** Fires once after an actual automatic compaction rung is selected, before history mutation. */
   readonly onCompactionStarted?: () => void;
-  readonly tools?: ChatCompletionCreateParams["tools"];
+  readonly toolNames: readonly string[];
+  readonly tools: ChatCompletionCreateParams["tools"];
   readonly isSubagent?: boolean;
   readonly force?: boolean;
 }
@@ -146,11 +163,13 @@ export interface ContextManager {
   assemble(
     sessionId: string,
     directory: string,
-    isSubagent?: boolean,
-    contextScopeId?: string,
-    agentName?: string,
+    options: ContextAssemblyOptions,
   ): Promise<AssembledContext>;
-  getUsage(context: AssembledContext, modelId: string): ContextUsage;
+  getUsage(input: {
+    readonly context: AssembledContext;
+    readonly modelId: string;
+    readonly tools: ChatCompletionCreateParams["tools"];
+  }): ContextUsage;
   updateCalibrationFactor(
     sessionId: string,
     realPromptTokens: number,

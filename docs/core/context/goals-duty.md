@@ -67,11 +67,15 @@
 ### D2: Token 使用量计算
 
 调用 tokenCounting 模块计算当前上下文的 token 使用情况：
-- 估算组装后的上下文 token 数
+- 将组装结果序列化为实际 provider messages
+- 按当次请求的 `messages + tool schemas` 估算 wire payload；不重复单算 system prompt 或 tools
 - 与模型的 context limit 对比
+- 对同一 wire heuristic 应用 session/scope calibration factor
 - 返回使用率和剩余空间
 
-**核心接口**：`Context.getUsage(assembledContext, model): ContextUsage`
+**核心接口**：`Context.getUsage({ context, modelId, tools }): ContextUsage`
+
+Context 只消费已解析的 schemas 数据，不负责访问 ToolScheduler、MCP registry 或 provider transport。
 
 ### D3: 自动压缩触发
 

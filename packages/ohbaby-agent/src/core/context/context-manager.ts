@@ -38,8 +38,10 @@ import type {
   CompactResult,
   CompactStatus,
   CompressionResult,
+  ContextAssemblyOptions,
   ContextManager,
   ContextManagerOptions,
+  ContextMeasurementPayload,
   ContextUsage,
   PreparedTurn,
   PrepareTurnInput,
@@ -79,7 +81,7 @@ interface CompactionRequest {
   readonly usageBefore: ContextUsage;
   readonly modelId: string;
   readonly onCompactionStarted?: () => void;
-  readonly tools?: PrepareTurnInput["tools"];
+  readonly tools: PrepareTurnInput["tools"];
   readonly force: boolean;
   readonly sessionId: string;
   readonly contextScopeId?: string;
@@ -538,17 +540,18 @@ export function createContextManager(
     });
   }
 
-  function measureUsage(input: {
-    readonly messages: readonly ChatCompletionMessage[];
-    readonly modelId: string;
-    readonly sessionId: string;
-    readonly contextScopeId?: string;
-    readonly tools?: PrepareTurnInput["tools"];
-  }): { readonly sentHeuristic: number; readonly usage: ContextUsage } {
+  function measureUsage(
+    payload: ContextMeasurementPayload,
+    input: {
+      readonly modelId: string;
+      readonly sessionId: string;
+      readonly contextScopeId?: string;
+    },
+  ): { readonly sentHeuristic: number; readonly usage: ContextUsage } {
     const sentHeuristic = estimateWireHeuristic(
-      input.messages,
+      payload.messages,
       options.tokenCounter,
-      input.tools,
+      payload.tools,
     );
     const currentTokens = Math.round(
       sentHeuristic *
@@ -569,7 +572,7 @@ export function createContextManager(
     readonly modelId: string;
     readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
     readonly isSubagent: boolean;
-    readonly tools?: PrepareTurnInput["tools"];
+    readonly tools: PrepareTurnInput["tools"];
   }): {
     readonly messages: readonly ChatCompletionMessage[];
     readonly sentHeuristic: number;
@@ -582,13 +585,14 @@ export function createContextManager(
     });
     return {
       messages,
-      ...measureUsage({
-        messages,
-        modelId: input.modelId,
-        sessionId: input.context.sessionId,
-        contextScopeId: input.context.contextScopeId,
-        tools: input.tools,
-      }),
+      ...measureUsage(
+        { messages, tools: input.tools },
+        {
+          modelId: input.modelId,
+          sessionId: input.context.sessionId,
+          contextScopeId: input.context.contextScopeId,
+        },
+      ),
     };
   }
 
@@ -664,7 +668,7 @@ export function createContextManager(
   function projectContextForUsage(
     context: AssembledContext,
     modelId: string,
-    tools?: PrepareTurnInput["tools"],
+    tools: PrepareTurnInput["tools"],
   ): AssembledContext {
     return reduceContextForModel({
       allowCutoffAdvance: false,
@@ -682,12 +686,10 @@ export function createContextManager(
   async function assemble(
     sessionId: string,
     directory: string,
-    isSubagent = false,
-    contextScopeId?: string,
-    agentName?: string,
+    input: ContextAssemblyOptions,
   ): Promise<AssembledContext> {
     let memory = EMPTY_MEMORY;
-    if (!isSubagent) {
+    if (!input.isSubagent) {
       try {
         memory = await options.memory.load(directory);
       } catch (error) {
@@ -697,24 +699,27 @@ export function createContextManager(
 
     const [systemPrompt, rawHistory] = await Promise.all([
       options.systemPromptProvider.build({
-        agentName,
-        contextScopeId,
+        agentName: input.agentName,
+        contextScopeId: input.contextScopeId,
         sessionId,
         directory,
-        isSubagent,
+        isSubagent: input.isSubagent,
+        toolNames: input.toolNames,
       }),
-      contextScopeId === undefined
+      input.contextScopeId === undefined
         ? options.messageManager.listBySession(sessionId)
-        : options.messageManager.listBySession(sessionId, { contextScopeId }),
+        : options.messageManager.listBySession(sessionId, {
+            contextScopeId: input.contextScopeId,
+          }),
     ]);
     return assembleFromRawHistory({
       assembledAt: now(),
-      contextScopeId,
+      contextScopeId: input.contextScopeId,
       memory,
       rawHistory,
       sessionId,
       systemPrompt,
-      isSubagent,
+      isSubagent: input.isSubagent,
     });
   }
 
@@ -1283,16 +1288,17 @@ export function createContextManager(
   ): Promise<CompactResult> {
     resetThrashLock(sessionId, input.contextScopeId);
     const isSubagent = input.isSubagent ?? false;
-    const assembled = await assemble(
-      sessionId,
-      input.directory,
+    const assembled = await assemble(sessionId, input.directory, {
+      agentName: input.agentName,
+      contextScopeId: input.contextScopeId,
       isSubagent,
-      input.contextScopeId,
-    );
+      toolNames: input.toolNames,
+    });
     const usageBefore = measureContext({
       context: assembled,
       isSubagent,
       modelId: input.modelId,
+      tools: input.tools,
     }).usage;
     const outcome = await runCompaction({
       assembled,
@@ -1303,6 +1309,7 @@ export function createContextManager(
       isSubagent,
       modelId: input.modelId,
       sessionId,
+      tools: input.tools,
       usageBefore,
     });
 
@@ -1312,13 +1319,12 @@ export function createContextManager(
   async function prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn> {
     const startedAt = now();
     const isSubagent = input.isSubagent ?? false;
-    const assembled = await assemble(
-      input.sessionId,
-      input.directory,
+    const assembled = await assemble(input.sessionId, input.directory, {
+      agentName: input.agentName,
+      contextScopeId: input.contextScopeId,
       isSubagent,
-      input.contextScopeId,
-      input.agentName,
-    );
+      toolNames: input.toolNames,
+    });
     const unreducedMeasurement = measureContext({
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: assembled,
@@ -1411,11 +1417,12 @@ export function createContextManager(
 
   return {
     assemble,
-    getUsage(context: AssembledContext, modelId: string): ContextUsage {
+    getUsage(input): ContextUsage {
       return measureContext({
-        context,
-        isSubagent: context.isSubagent,
-        modelId,
+        context: input.context,
+        isSubagent: input.context.isSubagent,
+        modelId: input.modelId,
+        tools: input.tools,
       }).usage;
     },
     updateCalibrationFactor,
