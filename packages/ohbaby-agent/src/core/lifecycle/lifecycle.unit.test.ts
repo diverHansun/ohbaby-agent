@@ -233,7 +233,15 @@ function createContextManagerMock(
     compact: vi.fn(),
     disposeSession: vi.fn(),
     getUsage: vi.fn(),
-    prepareTurn,
+    async prepareTurn(input): Promise<PreparedTurn> {
+      const prepared = await prepareTurn(input);
+      return input.additionalMessages === undefined
+        ? prepared
+        : {
+            ...prepared,
+            messages: [...prepared.messages, ...input.additionalMessages],
+          };
+    },
     resetTurnCompactionCount: input.resetTurnCompactionCount ?? vi.fn(),
     updateCalibrationFactor: vi.fn(),
   };
@@ -1061,6 +1069,21 @@ describe("Lifecycle.run", () => {
         "Maximum lifecycle steps reached",
       ) as string,
     });
+    expect(prepareTurn).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        additionalMessages: [
+          expect.objectContaining({
+            role: "system",
+            content: expect.stringContaining(
+              "Maximum lifecycle steps reached",
+            ) as string,
+          }),
+        ],
+        toolNames: ["read_file"],
+        tools: [],
+      }),
+    );
     expect(result).toMatchObject({
       finalResponse: "Summary after limit.",
       finishReason: "stop",

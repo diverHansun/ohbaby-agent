@@ -102,6 +102,7 @@ resolved tool definitions
 - ContextManager 只消费 names/schemas 数据，不依赖 ToolScheduler 或 MCP registry。
 - `ContextMeasurementPayload.tools` 属性必须显式存在，值可以为 `undefined` 或 `[]`。
 - final step 仍先从完整集合派生 `toolNames`，随后将计量与 provider request 的 schemas 置为 `[]`，保持最终步不可调用工具。
+- finalization 等仅请求期消息在 `prepareTurn` 前显式传入，参与所有阈值/压缩重测并随 `PreparedTurn.messages` 发送，但不持久化到 history。
 - calibration factor 作用于同一份 `messages + tools` wire heuristic，不对 tool schemas 做第二次加算。
 
 ### Primary static/manual 与 subagent runtime 边界
@@ -214,7 +215,7 @@ src/core/context/
 
 ### 约束 1: 固定阈值 vs 可配置阈值
 
-**当前选择**：使用固定阈值（85% 触发，30% 保留）
+**当前选择**：使用固定阈值（95% 触发，30% 保留）
 
 **代价**：
 - 不同场景无法调整策略
@@ -299,7 +300,7 @@ Context.compress(sessionId, force)
     │
     ├─2─► 判断是否需要压缩
     │         ├─► force = true：强制压缩
-    │         └─► usage >= 85%：自动触发
+    │         └─► usage >= 95%：自动触发
     │
     ├─3─► Context.prune(sessionId)
     │         └─► 先执行 Prune，释放空间

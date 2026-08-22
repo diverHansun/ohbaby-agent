@@ -399,7 +399,7 @@ describe("ContextManager", () => {
       directory: "D:/repo",
       modelId: "model-a",
       sessionId: "session_1",
-      toolNames: [],
+      toolNames: ["read_file"],
       tools: undefined,
     });
     const withTools = await manager.prepareTurn({
@@ -410,6 +410,7 @@ describe("ContextManager", () => {
       tools,
     });
 
+    expect(withTools.messages).toEqual(messagesOnly.messages);
     expect(withTools.sentHeuristic).toBeGreaterThan(messagesOnly.sentHeuristic);
     expect(withTools.usage.currentTokens).toBeGreaterThan(
       messagesOnly.usage.currentTokens,
@@ -430,6 +431,42 @@ describe("ContextManager", () => {
     expect(calibrated.usage.currentTokens).toBe(
       Math.round(calibrated.sentHeuristic * 1.5),
     );
+  });
+
+  it("includes ephemeral provider messages in prepared measurement without persisting them", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "finish the work",
+    });
+    const tokenCounter = {
+      estimateTokens: (content: string): number => content.length,
+      getLimit: (): number => 10_000,
+    } satisfies TokenCounter;
+    const { manager } = createManager({ messageManager, tokenCounter });
+    const finalizationMessage = {
+      content: "Summarize the completed work without calling tools.",
+      role: "system" as const,
+    };
+
+    const prepared = await manager.prepareTurn({
+      additionalMessages: [finalizationMessage],
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+      toolNames: [],
+      tools: [],
+    });
+
+    expect(prepared.messages.at(-1)).toEqual(finalizationMessage);
+    expect(prepared.sentHeuristic).toBe(
+      estimateWireHeuristic(prepared.messages, tokenCounter, []),
+    );
+    expect(prepared.usage.currentTokens).toBe(prepared.sentHeuristic);
+    expect(
+      JSON.stringify(await messageManager.listBySession("session_1")),
+    ).not.toContain(finalizationMessage.content);
   });
 
   it("counts assistant tool calls even when message content is null", () => {
@@ -1966,16 +2003,6 @@ describe("ContextManager", () => {
         type: "function" as const,
       },
     ];
-    const beforeContext = await manager.assemble("session_1", "D:/repo", {
-      isSubagent: false,
-      toolNames: ["read_file"],
-    });
-    const expectedBefore = manager.getUsage({
-      context: beforeContext,
-      modelId: "model-a",
-      tools,
-    });
-
     const result = await manager.compact("session_1", {
       directory: "D:/repo",
       force: true,
@@ -1983,23 +2010,20 @@ describe("ContextManager", () => {
       toolNames: ["read_file"],
       tools,
     });
-    const afterContext = await manager.assemble("session_1", "D:/repo", {
-      isSubagent: false,
-      toolNames: ["read_file"],
-    });
-    const expectedAfter = manager.getUsage({
-      context: afterContext,
-      modelId: "model-a",
-      tools,
-    });
 
-    expect(result.usageBefore).toEqual(expectedBefore);
-    expect(result.usageAfter).toEqual(expectedAfter);
+    const schemaMeasurements = estimateTokens.mock.calls.filter(([content]) =>
+      content.includes('"name":"read_file"'),
+    );
+    expect(result.status).toBe("compacted");
+    expect(result.usageAfter.currentTokens).toBeLessThan(
+      result.usageBefore.currentTokens,
+    );
+    expect(schemaMeasurements).toHaveLength(4);
     expect(
-      estimateTokens.mock.calls.filter(([content]) =>
-        content.includes('"name":"read_file"'),
-      ).length,
-    ).toBeGreaterThanOrEqual(4);
+      schemaMeasurements.every(([content]) =>
+        content.endsWith(JSON.stringify(tools)),
+      ),
+    ).toBe(true);
   });
 
   it("prunes old completed tool output while protecting recent output", async () => {

@@ -133,6 +133,10 @@ describe("context improve-4.1 integration", () => {
       systemPromptProvider,
       tokenCounter,
     });
+    const updateCalibrationFactor = vi.spyOn(
+      contextManager,
+      "updateCalibrationFactor",
+    );
     const resolvedTools = [
       {
         function: {
@@ -150,7 +154,17 @@ describe("context improve-4.1 integration", () => {
       llmClient: fakeLlmClient({
         batches: [
           [{ finishReason: "stop", textDelta: "regular" }],
-          [{ finishReason: "stop", textDelta: "final" }],
+          [
+            {
+              finishReason: "stop",
+              textDelta: "final",
+              tokenUsage: {
+                completion_tokens: 10,
+                prompt_tokens: 777,
+                total_tokens: 787,
+              },
+            },
+          ],
         ],
         requests,
       }),
@@ -194,11 +208,12 @@ describe("context improve-4.1 integration", () => {
       "Available tools: read_file",
     );
     expect(final.usages[0]?.currentTokens).toBe(
-      estimateWireHeuristic(
-        requests[1]?.messages.slice(0, -1) ?? [],
-        tokenCounter,
-        [],
-      ),
+      estimateWireHeuristic(requests[1]?.messages ?? [], tokenCounter, []),
+    );
+    expect(updateCalibrationFactor).toHaveBeenCalledWith(
+      "session_final",
+      777,
+      estimateWireHeuristic(requests[1]?.messages ?? [], tokenCounter, []),
     );
   });
 
@@ -257,7 +272,19 @@ describe("context improve-4.1 integration", () => {
     const events: UiEvent[] = [];
     client.subscribeEvents((event) => events.push(event));
 
+    const staticUsage = await client.getContextWindowUsage({
+      sessionId: "session_1",
+    });
     const compact = await client.compactSession({ sessionId: "session_1" });
+    const postCompactMessage = await messageManager.createMessage({
+      agent: "build",
+      role: "user",
+      sessionId: "session_1",
+    });
+    await messageManager.appendPart(postCompactMessage.id, {
+      text: "new unmeasured history ".repeat(1_000),
+      type: "text",
+    });
     await client.executeCommand({
       argv: [],
       clientInvocationId: "status_after_compact",
@@ -282,6 +309,14 @@ describe("context improve-4.1 integration", () => {
     );
 
     expect(compact.status).toBe("compacted");
+    expect(staticUsage).toMatchObject({
+      contextWindowTokens: compact.usageBefore.contextLimit,
+      currentTokens: compact.usageBefore.currentTokens,
+      modelId: compact.usageBefore.modelId,
+    });
+    expect(compact.usageAfter.currentTokens).toBeLessThan(
+      compact.usageBefore.currentTokens,
+    );
     expect(windowEvent?.usage.currentTokens).toBe(
       compact.usageAfter.currentTokens,
     );

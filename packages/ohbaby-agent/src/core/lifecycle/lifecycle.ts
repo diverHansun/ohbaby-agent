@@ -197,15 +197,6 @@ function buildMaxStepsFinalizationMessage(): ChatCompletionMessage {
   };
 }
 
-function messagesForStep(
-  messages: readonly ChatCompletionMessage[],
-  isFinalStep: boolean,
-): ChatCompletionMessage[] {
-  return isFinalStep
-    ? [...messages, buildMaxStepsFinalizationMessage()]
-    : [...messages];
-}
-
 function toolNamesFromSchemas(
   tools: LifecycleSessionParams["tools"],
 ): readonly string[] {
@@ -415,7 +406,11 @@ export class Lifecycle {
         })) ?? params.tools;
       const toolNames = toolNamesFromSchemas(resolvedTools);
       const tools = isFinalStep ? [] : resolvedTools;
+      const additionalMessages = isFinalStep
+        ? [buildMaxStepsFinalizationMessage()]
+        : undefined;
       let prepared = yield* this.prepareTurnWithProgress({
+        ...(additionalMessages === undefined ? {} : { additionalMessages }),
         ...(activeReasoningByMessageId.size === 0
           ? {}
           : { activeReasoningByMessageId }),
@@ -441,10 +436,7 @@ export class Lifecycle {
           usage,
         };
       }
-      let conversationMessages = messagesForStep(
-        prepared.messages,
-        isFinalStep,
-      );
+      let conversationMessages = [...prepared.messages];
 
       if (!turnStarted) {
         turnStarted = true;
@@ -512,6 +504,7 @@ export class Lifecycle {
         }
 
         prepared = yield* this.prepareTurnWithProgress({
+          ...(additionalMessages === undefined ? {} : { additionalMessages }),
           ...(activeReasoningByMessageId.size === 0
             ? {}
             : { activeReasoningByMessageId }),
@@ -538,7 +531,7 @@ export class Lifecycle {
             usage,
           };
         }
-        conversationMessages = messagesForStep(prepared.messages, isFinalStep);
+        conversationMessages = [...prepared.messages];
         yield this.createContextPreparedEvent({
           contextScopeId: params.contextScopeId,
           prepared,

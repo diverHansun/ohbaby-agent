@@ -75,6 +75,7 @@ type CommittableSummaryCandidate = Extract<
 >;
 
 interface CompactionRequest {
+  readonly additionalMessages?: readonly ChatCompletionMessage[];
   readonly assembled: AssembledContext;
   readonly bypassThrashLock: boolean;
   readonly countTurnCompaction: boolean;
@@ -527,17 +528,21 @@ export function createContextManager(
   }
 
   function renderForModel(input: {
+    readonly additionalMessages?: readonly ChatCompletionMessage[];
     readonly context: AssembledContext;
     readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
     readonly isSubagent: boolean;
   }): ChatCompletionMessage[] {
-    return serializeForLlm({
+    const messages = serializeForLlm({
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       history: input.context.history,
       isSubagent: input.isSubagent,
       memory: input.context.memory,
       systemPrompt: input.context.systemPrompt,
     });
+    return input.additionalMessages === undefined
+      ? messages
+      : [...messages, ...input.additionalMessages];
   }
 
   function measureUsage(
@@ -568,6 +573,7 @@ export function createContextManager(
   }
 
   function measureContext(input: {
+    readonly additionalMessages?: readonly ChatCompletionMessage[];
     readonly context: AssembledContext;
     readonly modelId: string;
     readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
@@ -579,6 +585,7 @@ export function createContextManager(
     readonly usage: ContextUsage;
   } {
     const messages = renderForModel({
+      additionalMessages: input.additionalMessages,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: input.context,
       isSubagent: input.isSubagent,
@@ -669,12 +676,14 @@ export function createContextManager(
     context: AssembledContext,
     modelId: string,
     tools: PrepareTurnInput["tools"],
+    additionalMessages?: readonly ChatCompletionMessage[],
   ): AssembledContext {
     return reduceContextForModel({
       allowCutoffAdvance: false,
       context,
       publishEvent: false,
       usage: measureContext({
+        additionalMessages,
         context,
         isSubagent: context.isSubagent,
         modelId,
@@ -1116,6 +1125,7 @@ export function createContextManager(
       systemPrompt: req.assembled.systemPrompt,
     });
     const usageAfterPrune = measureContext({
+      additionalMessages: req.additionalMessages,
       activeReasoningByMessageId: req.activeReasoningByMessageId,
       context: req.projectForUsage?.(afterPrune) ?? afterPrune,
       isSubagent: req.isSubagent,
@@ -1180,6 +1190,7 @@ export function createContextManager(
       compactedAt: afterPrune.assembledAt,
     });
     const projectedUsage = measureContext({
+      additionalMessages: req.additionalMessages,
       activeReasoningByMessageId: req.activeReasoningByMessageId,
       context: req.projectForUsage?.(projectedContext) ?? projectedContext,
       isSubagent: req.isSubagent,
@@ -1242,6 +1253,7 @@ export function createContextManager(
       systemPrompt: req.assembled.systemPrompt,
     });
     const usageAfter = measureContext({
+      additionalMessages: req.additionalMessages,
       activeReasoningByMessageId: req.activeReasoningByMessageId,
       context: req.projectForUsage?.(committedContext) ?? committedContext,
       isSubagent: req.isSubagent,
@@ -1326,6 +1338,7 @@ export function createContextManager(
       toolNames: input.toolNames,
     });
     const unreducedMeasurement = measureContext({
+      additionalMessages: input.additionalMessages,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: assembled,
       isSubagent,
@@ -1343,6 +1356,7 @@ export function createContextManager(
       reducedBeforeCompaction.history === assembled.history
         ? unreducedUsage
         : measureContext({
+            additionalMessages: input.additionalMessages,
             activeReasoningByMessageId: input.activeReasoningByMessageId,
             context: reducedBeforeCompaction,
             isSubagent,
@@ -1350,6 +1364,7 @@ export function createContextManager(
             tools: input.tools,
           }).usage;
     const outcome = await runCompaction({
+      additionalMessages: input.additionalMessages,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       assembled,
       bypassThrashLock: input.force === true,
@@ -1360,7 +1375,12 @@ export function createContextManager(
       modelId: input.modelId,
       onCompactionStarted: input.onCompactionStarted,
       projectForUsage: (context) =>
-        projectContextForUsage(context, input.modelId, input.tools),
+        projectContextForUsage(
+          context,
+          input.modelId,
+          input.tools,
+          input.additionalMessages,
+        ),
       sessionId: input.sessionId,
       tools: input.tools,
       usageBefore,
@@ -1371,6 +1391,7 @@ export function createContextManager(
         ? undefined
         : mapOutcomeToCompactResult(outcome);
     const rawFinalMeasurement = measureContext({
+      additionalMessages: input.additionalMessages,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: finalContext,
       isSubagent,
@@ -1388,6 +1409,7 @@ export function createContextManager(
       reducedFinalContext.history === finalContext.history
         ? rawFinalMeasurement
         : measureContext({
+            additionalMessages: input.additionalMessages,
             activeReasoningByMessageId: input.activeReasoningByMessageId,
             context: reducedFinalContext,
             isSubagent,

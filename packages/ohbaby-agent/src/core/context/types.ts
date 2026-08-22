@@ -144,6 +144,8 @@ export interface PrepareTurnInput {
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   /** Fires once after an actual automatic compaction rung is selected, before history mutation. */
   readonly onCompactionStarted?: () => void;
+  /** Ephemeral provider messages included in measurement and sending, but never persisted. */
+  readonly additionalMessages?: readonly ChatCompletionMessage[];
   readonly toolNames: readonly string[];
   readonly tools: ChatCompletionCreateParams["tools"];
   readonly isSubagent?: boolean;

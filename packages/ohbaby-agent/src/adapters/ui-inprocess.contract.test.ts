@@ -2157,6 +2157,19 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("returns unavailable for subagent context window usage before cache or runtime fallback", async () => {
+    const primarySession: Session = {
+      agentName: "build",
+      childrenIds: [],
+      createdAt: 1,
+      id: "session_child",
+      isSubagent: false,
+      projectId: "project_1",
+      projectRoot: "D:/repo",
+      stats: { messageCount: 1 },
+      status: "active",
+      title: "Primary before role change",
+      updatedAt: 1,
+    };
     const childSession: Session = {
       agentName: "explore",
       childrenIds: [],
@@ -2171,21 +2184,12 @@ describe("createInProcessUiBackendClient", () => {
       title: "Child",
       updatedAt: 1,
     };
+    let currentCoreSession = primarySession;
     const createClient = vi.fn(() => Promise.resolve(createFakeLLMClient([])));
     const client = createInProcessUiBackendClient({
       createLLMClient: createClient,
       initialSnapshot: {
         activeSessionId: "session_child",
-        contextWindowUsages: [
-          {
-            contextWindowRatio: 0.5,
-            contextWindowTokens: 1_000,
-            currentTokens: 500,
-            estimatedAt: "2026-08-22T00:00:00.000Z",
-            modelId: "stale-child-model",
-            sessionId: "session_child",
-          },
-        ],
         permissions: [],
         runs: [],
         sessions: [
@@ -2201,18 +2205,22 @@ describe("createInProcessUiBackendClient", () => {
         status: { kind: "idle" },
       },
       sessionManager: {
-        create: () => Promise.resolve(childSession),
-        get: () => Promise.resolve(childSession),
-        listByProject: () => Promise.resolve([childSession]),
-        listByProjectRoot: () => Promise.resolve([childSession]),
-        update: () => Promise.resolve(childSession),
+        create: () => Promise.resolve(currentCoreSession),
+        get: () => Promise.resolve(currentCoreSession),
+        listByProject: () => Promise.resolve([currentCoreSession]),
+        listByProjectRoot: () => Promise.resolve([currentCoreSession]),
+        update: () => Promise.resolve(currentCoreSession),
       },
     });
 
     await expect(
       client.getContextWindowUsage({ sessionId: "session_child" }),
+    ).resolves.not.toBeNull();
+    currentCoreSession = childSession;
+    await expect(
+      client.getContextWindowUsage({ sessionId: "session_child" }),
     ).resolves.toBeNull();
-    expect(createClient).not.toHaveBeenCalled();
+    expect(createClient).toHaveBeenCalledOnce();
   });
 
   it("prepends a runtime system prompt to model requests without storing it in UI history", async () => {
