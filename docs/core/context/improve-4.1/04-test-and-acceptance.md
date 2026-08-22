@@ -1,115 +1,211 @@
 # 4. 测试与验收标准
 
-项目无独立 `test-blueprint.md`。沿用 vitest：`*.unit.test.ts` / `*.contract.test.ts`。context 模块文档 `docs/core/context/test.md` 的 85% 阈值已过期，本批不修订该文件（与 G2 gap 同批不修）。
-
-**合同翻转（针对 improve-4 TC-11）：** improve-4 曾要求静态/手动路径保持 messages-only。本批实施后，那条合同必须改掉，否则旧测试会把正确行为判失败。见 TC-10。
+> 本文是 improve-4.1 的发布门。项目没有独立 `test-blueprint.md`，沿用现有 Vitest 分类：co-located `*.unit.test.ts` / `*.contract.test.ts`，跨模块测试放 `tests/integration/`。测试围绕真实数据流与回归风险，不以覆盖率数字代替验收。
 
 ---
 
 ## 4.1 测试范围
 
-| 层 | 覆盖什么 | 不覆盖 |
+| 层 | 覆盖内容 | 不覆盖 |
 |----|----------|--------|
-| 单测 | `getUsage`/`compact` 含 tools；factor 同量纲；assemble options；prompt 收 `toolNames` 且生产路径不拉 registry；composition 静态/手动传入 schema 与 session 身份 | tokenCounting 算法本身；压缩策略是否该换阈值 |
-| 合同 | `/status` 占用字段同源；`getContextWindowUsage` 回落走含 tools 的静态计算 | HTTP 协议新增字段 |
-| 集成 | 不强制新开 daemon e2e。Lifecycle 实时路径回归：含 tools 的 prepareTurn **不变坏** | 真实 provider；cache 命中 |
-| 手工 | 冷启动 `/status` 与跑过一轮后的占用条；主会话 `/compact` 后数字下降 | 子代理占用 UI（无入口） |
-
-发布门命令（实施时以仓库脚本为准）：
-
-```
-pnpm test -- packages/ohbaby-agent/src/core/context
-pnpm test -- packages/ohbaby-agent/src/core/system-prompt
-pnpm test -- packages/ohbaby-agent/src/adapters/ui-runtime/composition.unit.test.ts
-pnpm test -- packages/ohbaby-agent/src/commands/service.unit.test.ts
-pnpm test -- packages/ohbaby-agent/src/core/lifecycle/lifecycle.unit.test.ts
-```
-
-相关文件全绿，且 4.5 的 rg 守卫通过。
+| 单元 | measurement payload、factor、compact 重测、prompt names、Lifecycle final step、composition primary 边界、status 单源、tracker 更新 | tokenizer 算法替换、压缩策略优劣 |
+| 合同 | status data shape、context-window nullable 行为、compact 后 event/snapshot | 新 HTTP/SDK 字段 |
+| 集成 | tools resolve → prompt/measure/send；primary static/manual；subagent scoped auto compact；`/compact → /status` | 真实 provider、cache 命中 |
+| 手工 smoke | 主代理冷启动 status、对话后占用、手动 compact 后下降 | 子代理 UI（明确不存在） |
+| 对抗性审查 | 重复计量、scope 丢失、隐藏双源、范围膨胀 | improve-5 与后续压缩策略评审 |
 
 ---
 
-## 4.2 关键场景与用例
+## 4.2 关键场景
 
-| ID | 场景 | 类型 | 验证点 | 对应 02 Phase |
-|----|------|------|--------|----------------|
-| TC-1 | 同一 assembled messages，传入非空 tools vs 不传 | 单测 `manager.unit.test.ts` | `getUsage(..., tools)` 的 `currentTokens` **严格大于** `getUsage` 不传 tools；`compact({ tools })` 的 `usageBefore` 同样 | Phase 1 / P1 |
-| TC-2 | 共用 factor 同量纲 | 单测 | 与现有单测同构：`updateCalibrationFactor(session, 300, 100)`，prev=1、α=0.5 → factor=**2**（`0.5×3 + 0.5×1`）。启发式含 tools 为 H 时，`currentTokens === round(H × factor)`；**不是** `round(H × factor) + H_tools` | Phase 1 / P2 |
-| TC-3 | prompt 只消费名字 | 单测 `provider.test.ts` | `build({ toolNames: ["read","bash"] })` 使 prompt 含这些名；**不**调用 `toolsProvider`。composition 生产装配不传 `toolsProvider` | Phase 1 / P5 |
-| TC-4 | 子代理会话静态查询 | 单测 `composition.unit.test.ts` | session `isSubagent: true`, `agentName: "explore"` 时，`assemble` options 含这两项；memory loader **不被**调用（沿用 assemble 既有行为） | Phase 2 / P3 |
-| TC-5 | 主会话静态查询默认身份 | 单测 | 无 session 或 `isSubagent: false` 时不把主会话当子代理；`resolvePromptTools` 的 `isSubagent` 为 false | Phase 2 |
-| TC-6 | `/status` 不再二次现算 | 单测 `commands/service.unit.test.ts` | `getContextWindowUsage` 被调用；`getContextUsage` **不被**独立调用，或若仍输出 `context` 字段则与 window 的 `currentTokens` 相等 | Phase 3 / P4 |
-| TC-7 | tracker 命中时 `/status` 与占用条同数 | 单测或合同 | tracker 预置 `{ currentTokens: 38400, ... }` 时，status 的 `contextWindow.currentTokens === 38400`，不回落静态 | Phase 3 |
-| TC-8 | 空 tools / 缺省 tools | 单测 | `tools=[]` 与不传 tools 的 heuristic 相等（与 improve-4 `estimateWireHeuristic` 既有行为一致） | Phase 1 |
-| TC-9 | 手动 compact 把 tools 传入内部重测 | 单测 `manager.unit.test.ts` | **直接**断言 `compact({ tools })` 的 `usageBefore` 含 schema，且 prune/投影后的重测仍带**同一份** `tools`。禁止只靠 prepareTurn 间接覆盖 | Phase 1 / P6 |
-| TC-10 | **翻转 improve-4 TC-11** | 单测 | `composition.getContextUsage` **不再**断言 `assemble(sessionId, dir)` 两参数完事；改为断言传入 tools 且 assemble 走 options。旧「不向 ContextManager 传 schema」断言删除 | Phase 1 / P7 |
-| TC-11 | 实时路径未回退 | 单测 `lifecycle.unit.test.ts` | `resolveTools` 仍在 `prepareTurn` 之前；final step **schema** `tools=[]` 仍成立 | 回归 |
-| TC-12 | HTTP 身份不可由客户端伪造 | 合同/代码 | `getContextWindowUsage` 请求参数仍只有 `sessionId`；rg 公开协议无 `isSubagent` | Phase 2 / U3 |
-| TC-13 | final step prompt 仍含工具名 | 单测 `lifecycle.unit.test.ts` | `isFinalStep` 时 `prepareTurn` 的 `tools` 为空数组，但 `toolNames` 非空且与本轮已解析定义一致；`systemPromptProvider.build` 收到这些名字 | Phase 1 / F1-F2 |
-
-未编号、**本批不做故无验收项**：breakdown 字段、cache usage、压缩阈值、子代理占用 UI、`ContextUsage.tokens = null`。
+| ID | 场景 | 类型 | 验证点 | 对应 Phase |
+|----|------|------|--------|------------|
+| TC-1 | 同一 messages，非空 schemas vs 空 schemas | unit · context manager | 非空 tools 的 `currentTokens` 严格更大；`ContextMeasurementPayload.tools` 必须显式存在 | 1 |
+| TC-2 | factor 与 tools 同量纲 | unit | `currentTokens = round(estimate(messages+tools) × factor)`；不得再加一次 tool estimate | 1 |
+| TC-3 | system prompt 只消费 names | unit · system prompt | `build({ toolNames })` 生成既有工具列表；代码中不存在 `toolsProvider` 回落 | 1 |
+| TC-4 | 非最终 step | unit · lifecycle | resolved tools 同时派生 prompt names、measurement schemas、provider schemas；三者集合一致 | 1 |
+| TC-5 | 最终 step | unit · lifecycle | `resolveTools` 仍调用；`toolNames` 非空；measurement/provider `tools=[]`；不执行工具调用 | 1 |
+| TC-6 | subagent scope calibration 隔离 | unit · context manager | 同 child session 的 scope A/B 使用各自 factor，不回退为 session-only | 回归 |
+| TC-7 | subagent 自动压缩 | integration | 同 child session 两个 scope 的 history 不串；超阈值 scope 只压自己的上下文，另一个 scope 不受影响 | 回归 |
+| TC-8 | manual compact 全程含 schemas | unit | `usageBefore`、prune 后投影、summary 后重测使用同一 tools；不是只在入口算一次 | 1 |
+| TC-9 | primary static 自定义 agent | unit · composition | 从 primary Session 取得 agentName；同一次 `resolvePromptTools` 的 names 给 assemble、schemas 给 getUsage | 2 |
+| TC-10 | child session 静态查询不可用 | unit/contract | 在读取 tracker 前识别 `isSubagent`，返回 `null`；即使 child tracker 有值也不得泄漏 sibling-last-writer 数字 | 2 |
+| TC-11 | 公开协议不接收 subagent identity | contract/rg | context-window 参数仍只有 sessionId；无 client-supplied agentName/scope/isSubagent | 2 |
+| TC-12 | status 只输出 window | unit · commands | 只调用 `getContextWindowUsage`；data 无 `context`；`CommandServiceOptions` 无 `getContextUsage` | 3 |
+| TC-13 | tracker hit 不回落 static | unit/contract | 预置 primary tracker 时 status 返回相同值，runtime.getContextUsage 不调用 | 3 |
+| TC-14 | manual compact 更新 tracker | unit/contract · ui-inprocess | compact 成功后 tracker 的 currentTokens/model/limit 来自 `usageAfter` | 3 |
+| TC-15 | manual compact 发布 window event | contract/integration | 发布一次 `context.window.updated`，payload 与 tracker 相同；随后 `/status` 读取该值 | 3 |
+| TC-16 | 范围守卫 | rg/review | 无 cache/breakdown/scope UI 字段；threshold、prune、summary 策略无改动 | 全部 |
 
 ---
 
-## 4.3 集成边界
+## 4.3 集成测试设计
 
-- **composition ↔ ContextManager**：tools 由 composition 解析，ContextManager 只计量。测试里 ContextManager 用传入的 tools JSON，不 mock registry。
-- **composition ↔ SessionManager**：身份只从 `sessionManager.get` 读。测试用 in-memory session。
-- **composition ↔ SystemPromptProvider**：`toolNames` 与 schema 来自同一次 `resolvePromptTools`。禁止 prompt 再调 `getAvailableTools`。
-- **commands ↔ tracker**：`/status` 占用权威 = `getContextWindowUsage` = tracker 优先。
-- **Lifecycle ↔ ContextManager**：计量时序不改（仍先 resolve 再 prepareTurn）；须透传 `toolNames`。TC-11 守 schema 为空；TC-13 守 prompt 名字非空。
+### I-1 Lifecycle 工具数据流
+
+扩展 `tests/integration/core/lifecycle-tool-scheduler.integration.test.ts`：
+
+1. scheduler 返回确定的两个工具。
+2. 非最终 step 断言 prompt names、prepared measurement schemas、provider request schemas 一致。
+3. 最终 step 断言 scheduler 仍解析 names，但 provider schemas 为空。
+4. provider fake 返回 prompt token usage，断言 calibration 分母来自同一 prepared payload。
+
+### I-2 primary static/manual 闭环
+
+新增或扩展 context integration 用例：
+
+1. 创建 primary Session 和若干 history。
+2. scheduler 返回固定 schemas。
+3. tracker 为空时查询 context window，断言静态值包含 schemas。
+4. 执行 manual compact，fake summary client 返回更短 summary。
+5. 断言 `usageAfter < usageBefore`。
+6. 再执行 status，断言读取 `usageAfter`，且不再调用 static calculator。
+
+### I-3 subagent scoped automatic compaction
+
+使用同一个 child session 建立两个 `contextScopeId`：
+
+1. scope A 写入足以触发自动压缩的 history，scope B 写入可辨识的小 history。
+2. 以不同 role/agentName 调用实时 `prepareTurn`。
+3. 断言 A 的 measurement/compaction 只读取 A。
+4. 断言 B history、factor、compact state 未被 A 污染。
+5. 不调用任何 UI/static context-window API；该测试验证的是内部运行保护。
 
 ---
 
 ## 4.4 回归清单
 
-- improve-4 实时：非 final step 含 tools，final step 空 tools，prune/投影重测透传 tools。
-- improve-3：`measureUsage` 仍是唯一占用入口；校准 EMA α=0.5、clamp `[0.5, 3.0]`、不写库。
-- mask 默认仍关闭。
-- 压缩阈值仍 0.95（不「顺便」改成文档里的 85%）。
-- 成功 compact 默认不发 notice。
-- `AssembledContext` 仍无 tools 字段。
-- Memory：子代理仍不 load；主会话仍只读注入。
+- improve-4 非最终 step 仍把 tools 算入 measurement 和实际请求。
+- final step 仍不向 provider 暴露 callable tools，也不执行 tool calls。
+- `measureUsage` 仍是唯一 occupancy 算法入口。
+- EMA α、clamp、session+scope key 与进程内生命周期不变。
+- `AssembledContext` 仍无 tools。
+- primary 仍加载 memory；subagent 仍不加载 memory。
+- subagent history 仍按 `contextScopeId` 隔离。
+- manual compact 仍受 primary-session guard。
+- threshold 仍为 0.95；不改 prune/summary/mask 策略。
+- status panel 与现有占用条继续消费 `contextWindow`。
+- SDK `UiContextWindowUsage` 与 `UiCompactSessionResult` shape 不变。
 - SQLite schema 无 migration。
-- SDK `UiContextWindowUsage` 无 breakdown / cache 字段。
-- `assertCanUseAsPrimarySession` 仍阻止对子代理会话提交主 prompt / 手动 compact 命令（计量允许查询，命令规则不动）。
 
 ---
 
-## 4.5 验收标准（发布门）
+## 4.5 发布门
 
-| 项 | 标准 | 如何验证 |
-|----|------|----------|
-| 静态含 tools | 有 schema 时静态 `currentTokens` > 仅 messages | TC-1、TC-10 |
-| 不双计 | 无「heuristic 后再加一遍 tools」的实现 | TC-2 + 读 `measureUsage` |
-| prompt 依赖方向 | 生产 `createSystemPromptProvider` 无 `toolsProvider` | TC-3 + `rg toolsProvider composition.ts` |
-| 子代理测得对 | 静态查询把 `isSubagent`/`agentName` 传入 assemble | TC-4 |
-| `/status` 单源 | 不并行调两套算法 | TC-6、TC-7 |
-| 实时未回退 | Lifecycle 合同仍绿；final step schema 空、prompt 名非空 | TC-11、TC-13 |
-| 协议未膨胀 | 公开 API 无身份字段、无 breakdown | TC-12 + rg |
-| 文档同步 | `architecture.md` 写明计量对象是信封 | 读 diff |
+### 快速反馈（每个 commit）
 
-rg 守卫（实施验收时跑）：
-
-```
-rg "breakdown" packages/ohbaby-sdk/src/context-window.ts
-rg "prompt_tokens_cached|cache_read" packages/ohbaby-agent/src/core/context
-rg "toolsProvider" packages/ohbaby-agent/src/adapters/ui-runtime/composition.ts
+```bash
+pnpm test -- packages/ohbaby-agent/src/core/context/manager.unit.test.ts
+pnpm test -- packages/ohbaby-agent/src/core/system-prompt/__tests__/assembler.test.ts
+pnpm test -- packages/ohbaby-agent/src/core/lifecycle/lifecycle.unit.test.ts
+pnpm test -- packages/ohbaby-agent/src/adapters/ui-runtime/composition.unit.test.ts
+pnpm test -- packages/ohbaby-agent/src/commands/service.unit.test.ts
+pnpm test -- packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts
+pnpm run typecheck
 ```
 
-前两项应无新增；第三项生产装配应为零命中（测试夹具除外）。
+测试文件名若在实施中发现与当前仓库实际命名不同，以现有文件为准修正文档/命令，不创建重复测试套件。
+
+### 集成门
+
+```bash
+pnpm run test:integration
+```
+
+必须包含 I-1、I-2、I-3；不允许只跑 unit 后宣称完成集成验收。
+
+### 最终门
+
+```bash
+pnpm run preflight
+```
+
+若全量 preflight 暴露与本批无关的既有失败，必须记录：命令、失败测试、是否能在未改代码的 main 基线复现；不得静默忽略。
 
 ---
 
-## 4.6 对抗性审查要点
+## 4.6 手工 smoke
 
-1. **旧 TC-11 把本批正确行为判失败。** 防御：Phase 1 同一 PR 改 `composition.unit.test.ts`（TC-10）。残余：其它包若复制了「messages-only」注释，搜 `messages-only` 清掉。
-2. **照抄 pi 的 `systemPrompt` 字段导致 system 计两遍。** 防御：`RequestPayload` 只有 `messages`+`tools`；TC-1 的 messages 已含 system 角色。残余：有人把 `systemPrompt` 字符串再 `estimateTokens` 一次——code review 拦。
-3. **final step 从空 schema 推导 toolNames，prompt 丢掉工具列表。** 防御：`tools` 与 `toolNames` 拆开（02 决策表）；TC-13。
-4. **ContextManager 为了「方便」自己去 resolve tools。** 防御：SRP 与 rg `toolScheduler` inside `core/context/`。禁止。
-5. **静态路径用 final step 空 tools，占用条比对话中突然变小。** 防御：00/02 已锁「非最后一步完整 tools」。测试用非空 tools。
-6. **把 `isSubagent` 加到 HTTP 让客户端说了算。** 防御：TC-12。身份只信 Session。
-7. **`/status` 只删了 `getContextUsage` 调用，tracker 未命中时回落仍 messages-only。** 防御：Phase 1 必须先于 Phase 3；TC-7 之外要有「tracker 空 → 回落值已含 tools」的单测（可附在 TC-1 的 composition 级）。
-8. **assemble 改 options 漏改 `prepareTurn` 内部调用，实时路径静默丢 `agentName`。** 防御：TypeScript + TC-11 + 搜 `assemble(`。
-9. **为对齐口径顺手加 breakdown 或 cache 字段。** 禁止。无验收项。
-10. **拆除 `assertCanUseAsPrimarySession` 以便「测子代理 compact」。** 禁止。那是产品规则；计量测试走 `contextManager.compact` 单测即可。
+只验证主代理：
+
+1. 新建/打开一个 tracker 无值的主 session，执行 `/status`，确认返回 contextWindow 且无旧 `context` 字段。
+2. 运行一轮含工具的对话，确认 status 与占用条相同。
+3. 制造足够 history，执行 `/compact`。
+4. compact 成功后不再运行 LLM，直接执行 `/status`；数值应等于 compact result 的 `usageAfter`，且小于 `usageBefore`。
+5. 不要求、也不新增子代理占用展示。
+
+---
+
+## 4.7 rg/静态守卫
+
+```bash
+rg "toolsProvider" packages/ohbaby-agent/src
+rg "RequestPayload" packages/ohbaby-agent/src/core/context
+rg "prompt_tokens_cached|cache_read|cache_write" packages/ohbaby-agent/src/core/context
+rg "breakdown" packages/ohbaby-sdk/src
+rg "contextScopeId|isSubagent|agentName" packages/ohbaby-sdk/src/context-window.ts
+rg "getContextUsage" packages/ohbaby-agent/src/commands
+```
+
+期望：
+
+- production 与测试中均不再存在 system prompt `toolsProvider` API。
+- context 模块不新增通用 `RequestPayload`；使用窄语义名称。
+- 无新增 cache/breakdown/public subagent identity。
+- commands 不保留 status 专用的 `getContextUsage` 双源。
+
+---
+
+## 4.8 子代理审查门
+
+代码、unit、contract、integration 和 typecheck 全绿后，再启动独立只读子代理审查；正式文档仍由主代理维护。
+
+### Reviewer A — correctness / data flow
+
+重点核对：
+
+- names、measurement schemas、provider schemas 是否来自同一 resolved set
+- final-step 顺序是否保持 prompt names 与 outbound-empty
+- manual compact 是否所有重测都带 schemas
+- child session 是否可能从 cache/static 泄漏错误占用
+- subagent auto compact 是否确实 scope-aware
+
+### Reviewer B — SWE / scope / tests
+
+重点核对：
+
+- 是否出现新的 transport/measurement 双抽象
+- ContextManager 是否反向依赖 registry
+- 是否混入 cache、breakdown、阈值或压缩策略
+- status 双数据源是否彻底删除
+- 测试是否测行为而非只锁实现细节
+
+审查 finding 按 critical/major/minor 分类，必须带文件/符号证据。critical/major 修复后重跑相关测试与最终门；minor 若不修，需在验收说明中记录理由。
+
+---
+
+## 4.9 对抗性审查
+
+| 攻击面 | 防御 | 残余风险 |
+|--------|------|----------|
+| messages 已含 system，却又单独估 system | measurement payload 只有 messages/tools；TC-1/2 | review 需检查无额外 `estimateTokens(systemPrompt)` |
+| final step 从空 schemas 推导 names | 先 resolve，再清 outbound；TC-5 | scheduler 解析延迟需观察但非架构 blocker |
+| child tracker 命中绕过 primary 检查 | 检查必须发生在 `tracker.get` 前；TC-10 | 内存仍可能存 child last-writer，但不对外展示 |
+| manual compact 只在 usageBefore 带 tools | TC-8 检查所有投影/summary 重测 | 新增重测路径时需延续 payload |
+| compact 返回正确但 tracker/event 旧 | TC-14/15 + I-2 | 工具菜单变化仍等下一次 prepare/static refresh |
+| 删除 status 字段但隐藏消费者存在 | 全仓搜索 + command contract tests | 外部非仓库消费者无法静态发现；该变化已获用户批准 |
+| 借 4.1 顺便“优化”压缩策略 | TC-16、diff review、双 reviewer | 下一批必须重新从数据结构/数据流规划 |
+| unit 全绿但真实模块接线错误 | I-1/I-2/I-3 + preflight | 不使用真实 provider，provider-specific 误差留给后续 telemetry |
+
+---
+
+## 4.10 验收结论标准
+
+只有同时满足以下条件才可宣称 improve-4.1 完成：
+
+1. TC-1 至 TC-16 全部有自动化或明确 smoke 证据。
+2. unit、contract、integration、typecheck、lint/format/build 对应的 `preflight` 通过。
+3. 两名子代理 reviewer 无未处理 critical/major finding。
+4. commit 按 02 §2.9 分批且每批可解释、可回退。
+5. diff 不包含 cache、压缩策略、breakdown/UI、memory 或存储迁移。
+6. 验收模式对照 02/04 产出 `05-implementation-acceptance.md`。

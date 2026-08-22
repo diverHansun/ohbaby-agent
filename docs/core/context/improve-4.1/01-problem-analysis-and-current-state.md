@@ -1,265 +1,301 @@
 # 1. 问题基线与当前实施状态
 
-> 时间口径：分析时仓库 `HEAD` @ `84006096`（improve-4 任务 A/B 已合入，含 `45f6b1f` / `6e5cd82` / `a6a283f` / `d56ee99`）。improve-4.1 **尚未实施**；下文全部是现状，不是目标态。
+> 时间口径：规划复审基于 `main@6436c15`；业务代码与最初 `84006096` 基线之间无 4.1 实施变更。当前仅 improve-4.1 文档已存在，本文描述的代码问题均尚未修复。
 
 ---
 
-## 1.1 问题陈述
+## 1.1 承重问题
 
-1. **静态占用与手动 compact 仍是 messages-only。** 实时 Lifecycle 已把 tool schema 算进 `estimateWireHeuristic`（`token-estimation.ts:11-12`），但 `ContextManager.getUsage`（`context-manager.ts:1414-1419`）和 `compact()`（`1280-1296`）都不传 `tools`。`composition.getContextUsage` / `compactSession` 也没有解析 schema。
-2. **两条路径共用一个 EMA 因子，静态路径因此被 improve-4 拉偏。** `updateCalibrationFactor` 的分母是实时路径的 `sentHeuristic`（现已含 tools）；静态路径拿同一份 factor 去乘一份不含 tools 的启发式。这不是「两档精度」，是口径不一致经共用因子放大。机理见 §1.3.3 / §1.7 U7。
-3. **会话身份在静态路径上丢失。** `assemble()` 需要 `isSubagent` / `contextScopeId` / `agentName` 才能正确加载记忆、过滤消息、构建 prompt。`composition.getContextUsage` 只传 `sessionId` + `projectRoot`（`composition.ts:880-886`）。子代理会话若走到这条路径，会按主 agent 口径组装。
-4. **`/status` 并行取了两份占用。** `handleStatus` 同时调用 `getContextUsage`（静态现算）和 `getContextWindowUsage`（tracker 优先）（`builtin.ts:258-259`）。TUI 占用条和 `/status` 的 Context 行实际展示的是后者；前者作为 `context` 字段仍被塞进载荷，冷启动回落仍走 messages-only。
-5. **工具解析与计量的依赖方向反了。** `SystemPromptProvider` 经 `toolsProvider` 自己拉注册表拿**工具名**（`assembler.ts:49-51, composition.ts:431-434`）；占用计量却拿不到同一轮解析出的 **schema**。解析发生了一次，schema 被丢掉了。
+1. **静态查询与手动 compact 漏 tool schemas。** 实时 `prepareTurn` 已把 tools 传给每次 measurement；`ContextManager.getUsage` 和 `compact()` 仍调用没有 tools 的 `measureContext`（`core/context/context-manager.ts:1280-1296, 1414-1419`）。
+2. **共享 calibration factor 放大了输入不一致。** 实时分母已是 `messages + tools`，静态分母仍只有 messages；两条路径却读取同一个 scoped factor。
+3. **现有规划错误地把 Session 当成完整 subagent identity。** 多个 subagent record 共享一个 child session，每个实例才持有独立 `contextScopeId` 和 `role`（`agents/subagent-host.ts:353-402`）。只读 Session 无法静态恢复某个实例。
+4. **`/status` 仍并行查询两份占用。** `handleStatus` 同时调用 `getContextUsage` 与 `getContextWindowUsage`，分别输出 `context` 和 `contextWindow`（`commands/builtin.ts:237-265`）。
+5. **手动 compact 后 tracker 保留旧值。** `compactSessionInternal` 返回 `usageAfter`，但没有更新 `ContextWindowUsageTracker` 或发布 `context.window.updated`（`adapters/ui-inprocess.ts:1749-1764`）。
+6. **prompt 通过侧通道拉取工具名。** `SystemPromptProviderOptions.toolsProvider` 让 prompt 构建主动查询 registry，而 measurement 拿不到同一次解析的 schemas（`core/system-prompt/assembler.ts:24-54`、`adapters/ui-runtime/composition.ts:408-445`）。
+7. **最终 step 会绕过工具解析。** Lifecycle 在 `step === maxSteps` 时直接设 `tools=[]`，不调用 `resolveTools`（`core/lifecycle/lifecycle.ts:401-410`）。移除 prompt 的 `toolsProvider` 后若不调整时序，最终 step 的 prompt 会丢失当前工具名。
+8. **“请求载荷层”的旧命名与真实发送边界冲突。** 真正的 `InterfaceProviderRequest` 已包含 model、messages、temperature、maxTokens、tools 和 signal（`services/interface-providers/types.ts:36-43`）；context 内再定义通用 `RequestPayload` 会形成两个自称真实请求的类型。
 
 ---
 
 ## 1.2 已确认的产品/技术分界
 
-见 [00-discussion.md](./00-discussion.md)。本批偿还 improve-4 遗留的静态/手动 tools 计量，统一占用口径，让任何 agent 被同一套逻辑正确测量。不做 cache、不做 breakdown UI、不改压缩策略。
+```text
+主代理
+  实时 run        → scoped/runtime measurement → 自动压缩
+  冷启动查询      → primary static measurement → contextWindow
+  用户 /compact   → primary manual measurement → tracker refresh
+  /status         → contextWindow only
 
+子代理
+  实时 run        → sessionId + contextScopeId + agentName
+                  → scoped measurement → 自动压缩
+  静态/API/UI     → 本批不提供
 ```
-实时 Lifecycle          resolveTools → prepareTurn({ tools }) → heuristic(messages+tools)×factor
-静态 getContextUsage    assemble() → getUsage() → heuristic(messages)×同一 factor     ← 缺口
-手动 compact            assemble() → measureContext(无 tools) → 同一套压缩决策         ← 缺口
-```
+
+重要区别：
+
+- **机制层统一**：主/子代理实时运行共用 ContextManager 的 measurement、prune 和 compaction。
+- **产品入口不统一**：面向用户的静态查询、手动 compact、status 和未来 UI 只服务主代理。
+
+这不是把子代理变成“二等实现”，而是避免在缺少 scope identity 时制造虚假精确度。
 
 ---
 
-## 1.3 context 模块现状
+## 1.3 context 模块现状诊断
 
 ### 1.3.1 goals-duty
 
-文档 `docs/core/context/goals-duty.md`：
-
-| 文档说 | 代码做 | gap |
-|--------|--------|-----|
-| D1 组装源：Memory + SystemPrompt + History | `assemble()` 确实只这三项（`context-manager.ts:682-718`）；tools 不进 `AssembledContext` | **与 00 路子三一致，不是缺口。** D1 不必把 schema 列成组装源 |
-| D1 子代理：不加载 Memory、专属 prompt、消息隔离 | `assemble(..., isSubagent=true)` 跳过 memory（`690-696`）；prompt 走 `isSubagent` | 静态路径**不传**这个参数，D1 的隔离在查询入口失效 |
-| D2：调用 tokenCounting 计算 usage | `measureUsage` → `estimateWireHeuristic` → `tokenCounter.estimateTokens` | D2 没写「计量对象是发给模型的完整载荷」。实时路径已是载荷，静态路径仍是会话组装结果 |
-| G2 / D3 阈值 85% | 代码 `COMPRESSION_THRESHOLD = 0.95` | 既有 gap，本批只记录不修（00 §7） |
-| G3 `/compact` | `composition.compactSession` → `contextManager.compact` | 手动路径的占用决策不含 tools，可能少压或误判档位 |
+| 文档/职责 | 代码现状 | gap |
+|-----------|----------|-----|
+| D1：Memory + SystemPrompt + History 组装为 `AssembledContext` | `assemble()` 只组装这三类数据（`context-manager.ts:682-718`） | 无；tools 不应加入会话级组装结果 |
+| 子代理不加载 Memory、按 scope 过滤 history | `assemble(..., isSubagent, contextScopeId, agentName)` 支持该语义 | 实时调用正确；无 scope 的静态调用不能代表具体子代理 |
+| D2：计算 context usage | `measureUsage` 是单一入口，底层 `estimateWireHeuristic` 已支持 tools | public/static/manual 调用点没有完整提供 measurement payload |
+| G3：手动 `/compact` | UI 已限制为 primary session | core manual measurement 漏 tools；完成后 UI tracker 不刷新 |
+| G2：85% 阈值 | 实现仍是 `COMPRESSION_THRESHOLD = 0.95` | 既有 gap；不在 4.1 修 |
 
 ### 1.3.2 architecture
 
-分层仍然清楚，improve-4 没有把它弄乱：
+当前层次本身合理：
 
-| 层 | 位置 | 现状 |
+| 层 | 位置 | 职责 |
 |----|------|------|
-| 算法 | `services/llm-model/tokenCounting.ts` | ASCII 0.25 / 非 ASCII 1.3。本批不动 |
-| wire 启发式 | `core/context/token-estimation.ts` | 已能吃 `tools`；调用方不传就当没有 |
-| 占用入口 | `measureUsage` / `measureContext` | 唯一入口（improve-3 D11）。`tools?` 已在签名上，**静态调用点没填** |
-| 会话组装 | `AssembledContext` | 跨轮、不含 tools。语义正确 |
-| 请求发出 | `Lifecycle` → `streamChatCompletion` | 实时路径已是「messages + tools」；这个信封在类型上没有名字 |
-| 校准 | `lifecycle.ts:634-646` → `updateCalibrationFactor` | 分母 = `prepared.sentHeuristic`（含该 step 的 tools） |
+| token heuristic | `services/llm-model/tokenCounting.ts` | 文本字符启发式；本批不动 |
+| wire estimation | `core/context/token-estimation.ts` | 估算 serialized messages 与 tools JSON |
+| context assembly | `core/context/context-manager.ts` | memory/prompt/history 组装与投影 |
+| runtime orchestration | `core/lifecycle/lifecycle.ts` | 每 step 解析工具、prepare、send、回归 factor |
+| composition | `adapters/ui-runtime/composition.ts` | 连接 session、tools、prompt、ContextManager |
+| UI occupancy cache | `core/context/context-window-usage.ts` | session-keyed 的主代理展示投影 |
 
-**架构缺口不是「少一个模块」，是「发给模型的那份东西」没有一等公民类型。** 实时路径用 `PrepareTurnInput.tools` 临时塞；静态路径没有等价物。00 称之为请求载荷层。
+问题不是少一个新组件，而是边界表达不诚实：
 
-需要立刻澄清的一点，避免 02 抄 pi 抄出双计：
-
-> ohbaby 的 `serializeForLlm`（`serializer.ts:47-70`）已经把 `systemPrompt + memory` 折进 `messages[0]`（`role: "system"`）。计量函数吃的是这份 `ChatCompletionMessage[]`。因此载荷层在 ohbaby 里的自然形状是 **`{ messages, tools }`**——system prompt 已经在 messages 里，**不应再单独复制一份 `systemPrompt` 字段**。pi 的 `Context` 三分法来自它的 messages 不含 system；照搬会把 system 计两遍。
-
-SWE：这是关注点分离（02 章），不是再造一个包。载荷是「这一次要发出去的信封」，会话上下文是「跨轮组装结果」。二者本来就该分开；现在缺的是给信封一个名字，并让所有计量走信封。
-
-`SystemPromptProvider` 的依赖方向是现状里真正的架构问题：prompt 模块经 `toolsProvider` 拉工具注册表（`assembler.ts:49-51`），而计量层拿不到 schema。三家参考项目的 registry 解析都在调用方（[03 §3.2 C](./03-reference-projects.md)）。
+- `measureUsage` 实际需要 request-shaped 的 `messages + tools`。
+- `InterfaceProviderRequest` 才是 transport request。
+- 因此 4.1 需要的是窄语义 `ContextMeasurementPayload`，不是新建第二套 provider request abstraction。
 
 ### 1.3.3 data-model
 
-**`AssembledContext`**（`types.ts:54-63`）：`systemPrompt` / `memory` / `history` / `isSubagent` / `sessionId` / `contextScopeId?`。无 tools。保持不变是 00 已确认决策。
+#### `AssembledContext`
 
-**`ContextUsage`**（`types.ts:65-74`）：只有总量。无 breakdown。本批不加字段。
+包含 system prompt、memory、history、session identity 与可选 scope。它描述“待投影的会话上下文”，不应持有每 step 变化的 tool schemas。
 
-**`PrepareTurnInput.tools`**（`types.ts:131`）：实时路径专用可选字段。`CompactOptions`（`105-111`）**没有** `tools`、也没有 `agentName`。所以 `compact()` 即使想传也传不进。
+#### `ContextMeasurementPayload`（目标缺口）
 
-**校准状态**：`calibrationFactors: Map<string, number>`，键为 `sessionId` + `contextScopeId`，进程内，clamp `[0.5, 3.0]`，EMA α=`0.5`（`context-manager.ts:53-55, 402-425`）。不写库。默认 `1.0`。
+当前 `measureUsage` 用散落字段隐式表达：
 
-**U7 结论（本批唯一可能推翻方案的技术风险，此处给出诊断）：**
-
-公式是：
-
-```
-sentHeuristic = estimateWireHeuristic(messages, tools?)
-currentTokens = round(sentHeuristic × factor)
-factor_next   = 0.5 × clamp(prompt_tokens / sentHeuristic) + 0.5 × factor_prev
+```ts
+messages
+tools?
 ```
 
-improve-4 之后，实时路径的分子（provider `prompt_tokens`）和分母（`sentHeuristic`）**同时含**该 step 的 tools。factor 收敛的是「启发式 vs 真实 tokenizer」的比值，不是「用来补 tools 缺口的系数」。
+`tools` 可选导致静态/手动调用者能无意识漏传。目标类型应要求调用点**显式承认** tools，即使值是 `undefined` 或 `[]`。
 
-静态路径现状：分母是 `H_messages`，乘的却是按 `H_messages+tools` 校准出来的 factor → 系统性少算约 `H_tools / H_full` 这一截。
+#### calibration identity
 
-把 tools 纳入静态分母之后：两边同量纲，都是「wire JSON 启发式 × tokenizer 校准」。**不会重复计数。**
+`calibrationFactors` 已按 `sessionId + contextScopeId` 取 key。实时子代理传 scope 时正确；静态省略 scope 会读取 session 级 factor，不能代表任何一个共享 child-session 中的 subagent 实例。
 
-pi 的「有 usage 锚点时只补新增工具」（[03 D2](./03-reference-projects.md)）针对的是**另一类算法**：以 provider usage 为基数再往上加增量。ohbaby 从不把真实 usage 当基数，只拿它回归 factor。把 pi 的条件计入搬过来，才会真正重复计数。
+#### subagent identity
 
-> **U7 关闭：方案成立。** 本批采用全量启发式含 tools + 共用 factor。不引入第二套 factor，不引入锚点增量。factor 的实际数值无需在规划期实测；同量纲由公式保证。量级验证放到 04 的单测（含 tools 的 heuristic × 已知 factor）。
+`SubagentInstanceRecord` 持有：
 
-**`Session`**（`services/session/types.ts:10-23`）已有 `isSubagent` 和 `agentName`，**没有** `contextScopeId`。`contextScopeId` 是一次 run 内的消息过滤键，不是会话字段。静态「查这个 session 现在多重」的合理默认是不带 scope、列出该 session 全部消息。子代理隔离靠独立 `sessionId` + `isSubagent`，不靠编造 scope。
+- `sessionId`：多个兄弟实例可以相同
+- `contextScopeId`：实例级隔离键
+- `role`：实际 agent prompt/tool 选择身份
+
+`Session.agentName` 只对应 child session 创建时的角色。旧规划所称“从 Session 读取 agentName 即可静态测准”与数据模型冲突。
+
+#### tracker identity
+
+`ContextWindowUsageTracker` 以单个 `sessionId` 为 key（`context-window-usage.ts:43-76`），没有 scope。这个模型适合未来的主代理 UI，但不能扩写为子代理实例监控模型。
 
 ### 1.3.4 dfd-interface
 
-**实时占用（已修好）**
+#### 实时主/子代理（当前基本正确）
 
-```
-Lifecycle
-  tools = isFinalStep ? [] : resolveTools(...)     // lifecycle.ts:401-410
-  prepareTurn({ tools, isSubagent, agentName, contextScopeId })
-    assemble(..., isSubagent, contextScopeId, agentName)
-    measureContext({ tools })                      // 含 prune/投影后的每一次重测
-  streamChatCompletion(messages, tools)
-  updateCalibrationFactor(prompt_tokens, sentHeuristic)
-  context:prepared.usage → tracker.updateFromContextUsage   // run-stream-adapter.ts:514
-```
-
-> **现状 vs 4.1 接线陷阱**：今日 prompt 工具名走 `toolsProvider`（`composition.ts`），与 final step `tools=[]` **无关**。4.1 去掉生产 `toolsProvider` 后，`tools`（schema，final 可空）与 `toolNames`（prompt 名字，final **仍非空**）必须拆开传入 `prepareTurn` / `assemble`。禁止从空 schema 推导 names。
-
-**静态占用（缺口）**
-
-```
-/status 或 HTTP GET /v1/sessions/:id/context-window
-  getContextWindowUsageInternal                    // ui-inprocess.ts:1784
-    tracker.get(sessionId) 命中 → 返回（含 tools 的旧实时值）
-    未命中 → runtime.getContextUsage({ sessionId, projectRoot })
-                composition.assemble(sessionId, projectRoot)   // 三参数全默认
-                getUsage(assembled)                            // 无 tools
+```text
+Lifecycle.resolveTools
+  → prepareTurn({
+      sessionId,
+      contextScopeId?,
+      agentName,
+      tools
+    })
+  → assemble(scope-aware)
+  → measureContext(messages + tools)
+  → reduce / prune / automatic compact / remeasure
+  → provider send(messages + same outbound tools)
+  → provider prompt_tokens / sentHeuristic
+  → updateCalibrationFactor(sessionId, contextScopeId)
 ```
 
-**手动 compact（缺口）**
+`prepareTurn` 的初次、prune 后和 compact 后重测均已透传 tools（`context-manager.ts:1312-1390`）。4.1 应保护这条链，而不是重写自动压缩。
 
-```
-/compact 或 POST /v1/sessions/:id/compact
-  assertCanUseAsPrimarySession                     // 挡住子代理当主会话 compact
-  composition.compactSession({ isSubagent: false })
-    compact() assemble(..., isSubagent, contextScopeId)  // 不传 agentName
-    measureContext({ 无 tools })
-    runCompaction({ 无 tools })                    // 内部重测同样丢 tools
+#### 主代理静态查询（当前缺 tools）
+
+```text
+getContextWindowUsageInternal
+  → tracker.get(sessionId)
+  → miss: runtime.getContextUsage
+  → composition.assemble(sessionId, projectRoot)
+  → contextManager.getUsage(assembled, model) // no tools
 ```
 
-**`/status` 双取**
+静态入口只有 sessionId，适合 primary session。对 child session 继续执行会聚合 sibling scopes，因此必须在 UI/API adapter 截止。
 
+#### 主代理手动 compact（当前漏 tools 且 tracker stale）
+
+```text
+assertCanUseAsPrimarySession
+  → runtime.compactSession
+  → contextManager.compact
+  → measureContext(no tools)
+  → CompactResult.usageAfter
+  → return                              // tracker 未更新
 ```
+
+#### `/status`（当前双源）
+
+```text
 handleStatus
-  getContextUsage({ sessionId })           // 静态，写入载荷字段 `context`
-  getContextWindowUsage({ sessionId })     // tracker 优先，写入 `contextWindow`
+  ├─ getContextUsage       → context
+  └─ getContextWindowUsage → contextWindow
 ```
 
-TUI `renderStatusPanel` / `StatusPanel` **只展示 `contextWindow`**（`status-panel.ts:54-57`，`command-panel-manager.tsx:222-236`）。占用条读 snapshot 里的 tracker。所以「同屏两个数字」在 TUI 上主要发生在：tracker 未命中（两边都回落到 messages-only），或有消费者去读未被展示的 `context` 字段。载荷里同时带着两份不同口径的数，本身就是口径分叉。
+TUI 只消费 `contextWindow`。旧 `context` 没有继续存在的生产理由，也不能从 `UiContextWindowUsage` 无损恢复完整 `ContextUsage`。
 
 ### 1.3.5 use-case
 
-| 用例 | 现状 | 阻碍 |
-|------|------|------|
-| 主会话跑一轮对话后看占用条 | tracker 有值，含 tools | 可用 |
-| 冷启动 / 从未跑过 LLM 就 `/status` | tracker 空，回落静态 messages-only | 少算 tools；冷启动时 factor=1.0，偏差就是 tools 那截 |
-| `/compact` | 按 messages-only 决定是否 prune/summary | 真实发出去还要带 schema，可能该压没压 |
-| 子代理自己的占用被查询（HTTP `getContextWindowUsage` **没有**主会话守卫） | 按主 agent 装记忆 + 默认 prompt | 测到的不是子代理上下文 |
-| 主 agent 看子代理结果 | 子代理只回摘要，本批不改 | 已符合 00 §4 |
-
-手动 compact 的 UI 入口有 `assertCanUseAsPrimarySession`（`ui-inprocess.ts:1731`），所以「子代理被手动 compact」在产品路径上接近零。查询路径（HTTP / `/status`）没有这道守卫。00 要求正确传参而不是加守卫：查询应当能测对，而不是被拒绝。
+| 用例 | 当前行为 | 正确目标 |
+|------|----------|----------|
+| 主代理 run 后查看占用 | tracker 来自 `context:prepared`，含 tools | 保持 |
+| 主代理冷启动 `/status` | 静态 messages-only | 含完整 tools 的 primary static measurement |
+| 主代理手动 `/compact` | 决策漏 tools；完成后 tracker stale | 全程同一 tools；`usageAfter` 刷新 tracker/event |
+| 子代理自动压缩 | 实时按 scope 组装/计量 | 保持并补回归测试 |
+| 查询 child session context window | tracker/session 聚合语义不可靠 | 返回 null/不可用，不进入 status/UI |
+| 主代理读取子代理结果 | 只回传最终摘要 | 保持；与占用 UI 无关 |
 
 ### 1.3.6 non-functional
 
-| 属性 | 现状 | 本批风险 |
-|------|------|----------|
-| 静态路径延迟 | `assemble` 已调用 `systemPromptProvider.build` → `toolsProvider` → `resolvePromptTools`（`getAvailableTools` + `mcpToolMenu.loadedNames`） | `loadedNames` 是读已加载集合，不新建 MCP 连接（`dynamic-tool-menu.ts:246`）。**U4 关闭：再拿一次 schema 的增量成本是 `toOpenAiTools` 的纯转换，不是二次 MCP 握手。** 正确做法是解析一次、名字给 prompt、schema 给计量，调用次数从「隐式 1 次丢 schema」变成「显式 1 次两用」 |
-| 校准稳定性 | 共用 factor | 静态纳入 tools 后应更稳，而不是更晃（U7） |
-| 可观测性 | 无 tools 占比 | 本批不加 breakdown |
+| 属性 | 判断 |
+|------|------|
+| 正确性 | 最高风险是 schema 漏计、scope identity 丢失与 compact 后旧缓存 |
+| 延迟 | 静态/手动路径解析一次工具定义，并同时派生 names/schemas；不新增 MCP 握手 |
+| 可维护性 | measurement payload 命名必须与 transport request 区分；否则形成错误抽象 |
+| 可观测性 | 4.1 只保证已有主代理总量一致，不新增 breakdown |
+| 安全/权限 | 客户端不得传 `isSubagent`、`agentName` 或 scope 来伪造身份 |
+| 回滚 | 全部为进程内 TypeScript 与文档，无存储迁移；各阶段可独立 revert |
 
 ### 1.3.7 test
 
-项目无独立 `test-blueprint.md`；context 模块有 `docs/core/context/test.md`（仍写 85% 阈值，部分过期）。
+现有优势：
 
-| 已覆盖 | 缺口 |
-|--------|------|
-| `estimateWireHeuristic` 含/不含 tools（`manager.unit.test.ts:330-335`） | 静态 `getUsage` **没有**「传入 tools 则变大」的用例 |
-| `prepareTurn` 把 tools 算进 `sentHeuristic`（同文件 ~1262） | `compact()` 带 tools 的计量 / 档位决策无测试 |
-| Lifecycle 先 `resolveTools` 再 `prepareTurn`（`lifecycle.unit.test.ts`） | `composition.getContextUsage` 断言的是 `assemble(sessionId, dir)` 两参数（`composition.unit.test.ts:592`）——把错误传参写进了合同 |
-| `/status` 同时拿到 `context` 和 `contextWindow`（`commands/service.unit.test.ts:862-868`） | 没有「两字段必须同口径」的断言；当前合同把分叉固化了 |
-| 子代理 `assemble(..., true)` 不加载 memory（`manager.unit.test.ts:1545`） | 没有从 `Session.isSubagent` 自动传到 `getContextUsage` 的测试 |
-| tracker `updateFromContextUsage` | 没有「`/status` 命中 tracker 时不再走静态现算」 |
+- `estimateWireHeuristic` 已有 tools 有/无用例。
+- `prepareTurn` 已覆盖 tools 参与 `sentHeuristic`。
+- scoped calibration 已有不同 `contextScopeId` 的隔离测试。
+- Lifecycle 已覆盖非最终 step 先解析 tools 再 prepare。
 
-高风险未覆盖：共用 factor 下「静态漏 tools」的数值偏差；手动 compact 因漏 tools 选错档位。
+真实缺口：
+
+- static `getUsage` / manual `compact` 没有 schemas 用例。
+- 最终 step 当前断言“不调用 resolveTools”，与新的 prompt push 数据流冲突。
+- `/status` 测试把 `context + contextWindow` 双字段写成合同。
+- `compactSessionInternal` 没有“usageAfter 更新 tracker/event”的合同测试。
+- 没有“child session 不提供静态/UI context window”的测试。
+- 没有把“子代理 scope measurement 继续驱动自动压缩”作为 4.1 回归门。
+
+项目没有独立 `test-blueprint.md`；本批沿用现有 Vitest co-located unit/contract 与 `tests/integration/` 约定。
 
 ---
 
-## 1.4 相邻模块（只记与本批相交的截面）
+## 1.4 相邻模块截面
 
 ### system-prompt
 
-`createSystemPromptProvider` 用 `toolsProvider` 拉**名字**拼进 prompt（`assembler.ts:230`）。这是 prompt 需要的，不是 schema。接口要把「谁解析」从 provider 内部改到调用方；provider 继续只消费名字。
+`SystemPromptProvider` 应只消费显式 `toolNames`。删除 `toolsProvider` 是依赖方向修正，不改变 prompt 文案。
 
 ### lifecycle
 
-保持「解析 tools 的人是 Lifecycle，ContextManager 不碰 registry」。静态路径的解析人应是 **composition**（它已经有 `resolvePromptTools`），不是 ContextManager。SRP 与实时路径一致。
+当前最终 step 先清空 schemas 再决定是否解析。目标时序应变为：
 
-计量时序不改（仍先 resolve 再 `prepareTurn`），但 Lifecycle **必须**向 `prepareTurn` 透传 `toolNames`：schema 可在 final step 置空，名字不能。
+```text
+resolvedTools = resolveTools(...)
+toolNames = names(resolvedTools)
+requestTools = isFinalStep ? [] : resolvedTools
+prepareTurn(toolNames, requestTools)
+send(requestTools)
+```
 
-### session
+这保持“最终 step 不允许工具调用”，同时保持今天 prompt 仍能看到工具名的行为。
 
-`Session.isSubagent` / `Session.agentName` 是静态路径补参的权威来源。composition 已有 `sessionManager`。不必把这两个字段扩到 HTTP 协议。
+### composition
 
-### commands / TUI / Web
+静态/手动 primary 路径在这里解析 tools，因为 composition 已拥有 scheduler、MCP menu、agent 和 ContextManager。ContextManager 不应反向依赖 registry。
 
-占用展示权威是 `UiContextWindowUsage` + tracker。`ContextUsage` 是领域测量结果，经 `contextUsageToContextWindowUsage` 投影。`/status` 的 `context` 字段目前是多余的第二来源。
+### commands / ui-inprocess
+
+- commands 删除 `getContextUsage` option 与 status `context` 字段。
+- ui-inprocess 在静态查询前确认 primary session。
+- manual compact 用 `usageAfter` 更新 tracker，并发布已有事件。
 
 ---
 
-## 1.5 跨模块一致性
+## 1.5 跨模块与既有文档一致性
 
-- improve-3 D11「占用率测量收口成单一入口」仍被遵守：没有第二套计数器。缺口是入口的**输入**不完整。
-- improve-4 02 明确把静态/手动列为「本批保持 messages-only，占用监测/UI 前必须偿还」。本批兑现，不回退实时路径。
-- `goals-duty` D1 与路子三不冲突：tools 不属于会话组装源。若 02 给信封起名，architecture.md 应补一句「计量对象是请求信封，不是 AssembledContext」（U6）。
-- G2 85% vs 0.95 仍在，本批不修。
+| 既有决策 | 4.1 处理 |
+|----------|----------|
+| improve-3 D11 单一计量入口 | 保持；扩大 measurement 输入 |
+| improve-4 实时 tools-aware | 保持；只补 static/manual 与 final-step names 数据流 |
+| tools 不进入 `AssembledContext` | 保持 |
+| 子代理 scope 隔离 | 以实时链路为权威；静态/UI 不伪造 scope |
+| improve-5 = cache | 保持独立；不再要求它先于第一次压缩审查 |
+| UI 展示后置 | 保持；未来只展示主代理 |
+
+旧 4.1 文档中以下结论已被本轮复审 supersede：
+
+- “Session.isSubagent + agentName 足以静态测量任意 agent”
+- “不传 contextScopeId 时统计 child session 全量是可接受的”
+- “子代理静态查询细化留给 UI 批次”
+- “improve-5 必须先于第一次压缩检查”
 
 ---
 
-## 1.6 改动影响面（现状视角）
+## 1.6 改动影响面
 
-| 区域 | 会动到 | 不会动到 |
-|------|--------|----------|
-| `core/context/types.ts`、`context-manager.ts` | `getUsage` / `CompactOptions` / 可能新增载荷类型 | `AssembledContext` 字段、校准公式、阈值 |
-| `core/system-prompt/assembler.ts` | `build` 入参接收 tool names；`toolsProvider` 退役或降为测试回落 | prompt 文本结构 |
-| `core/lifecycle/lifecycle.ts` | 向 `prepareTurn` 透传 `toolNames`（与 schema 拆开） | `resolveTools` 相对 `prepareTurn` 的时序 |
-| `adapters/ui-runtime/composition.ts` | `getContextUsage` / `compactSession` 解析 tools、从 session 补参 | 实时路径的 resolve 时序（由 Lifecycle 自己改透传） |
-| `adapters/ui-inprocess.ts`、`commands/builtin.ts` | `/status` 不再并行现算第二份；查询路径按 session 身份传参 | HTTP 路径形状、SDK `UiContextWindowUsage` 字段 |
-| 测试 | manager / composition / commands 合同 | tokenCounting 算法单测、Web/TUI 占用条样式 |
-
-兼容：领域 API 是进程内 TypeScript，无外部版本化协议要迁。`/status` 载荷若停止填充 `context` 或改为与 `contextWindow` 同源，属于对内合同，TUI 当前不展示该字段。
+| 区域 | 预计改动 | 明确不动 |
+|------|----------|----------|
+| `core/context` | measurement payload、getUsage/compact tools、assemble options、回归测试 | token algorithm、factor formula、threshold、策略 |
+| `core/system-prompt` | build 输入 toolNames、删除 toolsProvider | prompt 内容结构 |
+| `core/lifecycle` | final step 仍解析 names；透传 names/schemas | 自动压缩算法 |
+| `adapters/ui-runtime` | primary static/manual resolve tools | provider transport、公开协议 |
+| `adapters/ui-inprocess` | primary-only query；compact 后 tracker/event | 新 UI、scope tracker |
+| `commands` | 删除 status `context` 与 getContextUsage option | `contextWindow` 形状 |
+| SDK / HTTP | 不新增字段；child query 返回 nullable unavailable | breakdown/cache/scope 参数 |
+| 文档 | architecture/goals-duty 的计量边界说明 | improve-5 详细设计 |
 
 ---
 
 ## 1.7 SWE 原则审视摘要
 
-| 透镜 | 判断 |
+| 透镜 | 结论 |
 |------|------|
-| 本质 vs 偶然复杂度 | 「tools 每轮重解析、会话上下文跨轮持久」是本质复杂度。把 schema 塞进 `AssembledContext` 或照搬 pi 的三字段（导致 system 双计）都是偶然复杂度 |
-| 耦合方向 | ContextManager 不解析 registry——保持。prompt 拉 registry——应改成调用方注入（DIP） |
-| SRP | 计量入口已经单一；不要为静态路径再写一个计数器 |
-| YAGNI | 载荷层是类型 + 让 `measureUsage` 吃它，不是新包、不是 `StreamInput → Prepared` 两段式（03 A3 reject） |
-| DRY 的正确对象 | 要单一化的是「计量对象=发出去的信封」，不是把 mask 的 per-part 估算和 occupancy 捏成一个函数 |
-| LSP | 主/子代理走同一套 `assemble` / `measure` / `compact`，用参数区分，不加守卫把子代理变成不可替换的特例 |
+| 本质/偶然复杂度 | per-step tools 与 per-subagent scope 是本质复杂度；用 Session 猜 scope、另造 transport request 类型是偶然复杂度 |
+| 高内聚/低耦合 | tool registry 解析留在 composition/Lifecycle；ContextManager 只接受数据 |
+| 信息隐藏 | tracker 是主代理 UI projection，不暴露为通用 subagent runtime store |
+| KISS/YAGNI | 4.1 不扩 HTTP identity、不做 scope-aware UI tracker、不重构 provider request |
+| DRY | 单一的是 measurement payload 和算法，不强行统一“主代理展示”与“子代理内部保护”两种产品需求 |
+| 最小惊讶 | `/status` 不再输出两个不同含义的占用；compact 后展示随结果更新 |
+| 测试作为设计探针 | final-step 和 shared child-session 用例用于验证接口是否表达真实数据流，而非只测实现细节 |
 
 ---
 
-## 1.8 与既有文档关系
+## 1.8 承重问题到方案的映射
 
-| 文档 | 关系 |
-|------|------|
-| [00](./00-discussion.md) | 约束来源。U4、U7 在本文关闭。U1/U2/U3/U5/U6 的推荐答见 02 |
-| [03](./03-reference-projects.md) | 路子三、正确传参、不学三家的多口径。U7 与 pi D2 的算法差异在本文消解 |
-| [improve-4](../improve-4/README.md) | 前序。实时路径是基线，不是重做对象 |
-| [improve-5](../improve-5/README.md) | 后序。本文不引入 cache 字段；improve-5 不回退本批占用模型 |
-| [goals-duty.md](../goals-duty.md) / [architecture.md](../architecture.md) | D1 无需为 tools 改组装源；architecture 是否补信封说明见 02 U6 |
-
----
-
-## 1.9 承重问题清单（02 必须逐条回应）
-
-| ID | 问题 | 去向 |
-|----|------|------|
-| P1 | 静态 `getUsage` / 手动 `compact` 不计 tools | 02 Phase 1 |
-| P2 | 共用 factor 放大 P1（U7：纳入 tools 后同量纲，不双计） | 02 决策表；04 用数值用例钉住 |
-| P3 | 静态路径丢失 `isSubagent` / `agentName` | 02 Phase 2 |
-| P4 | `/status` 双取、`context` 与 `contextWindow` 口径可能不同 | 02 Phase 3 |
-| P5 | prompt 拉 registry、计量拿不到同一次解析的 schema；去掉 `toolsProvider` 后须拆开 `tools`/`toolNames` | 02 Phase 1；04 TC-3 / TC-13 |
-| P6 | `CompactOptions` 无 `tools` / `agentName` | 02 Phase 1–2 |
-| P7 | 既有测试把「两参数 assemble」和「status 双字段」写成合同 | 04 必须改这些合同，否则实施会被旧测试锁死 |
+| ID | 问题 | 02 去向 | 04 验收 |
+|----|------|---------|---------|
+| P1 | static/manual 漏 tools | Phase 1 | TC-1/2/8/9 |
+| P2 | prompt 主动拉 registry | Phase 1 | TC-3 |
+| P3 | final step 不解析 names | Phase 1 | TC-4/5 |
+| P4 | child session 无法静态恢复 scope | Phase 2 | TC-10/11 |
+| P5 | status 双数据源 | Phase 3 | TC-12/13 |
+| P6 | compact 后 tracker stale | Phase 3 | TC-14/15 |
+| P7 | runtime subagent auto compression 需保护 | 全阶段回归 | TC-6/7 |
+| P8 | cache/压缩策略/UI 越界风险 | 边界守卫 | TC-16 + 审查 |

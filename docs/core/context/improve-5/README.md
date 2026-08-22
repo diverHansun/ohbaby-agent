@@ -1,8 +1,8 @@
 # context improve-5 · prompt cache 观测与优化（规划入口）
 
 > 状态：已预留独立批次；仅完成范围登记，尚未进入现状分析与方案设计
-> 日期：2026-08-21
-> 来源：从 [improve-4](../improve-4/README.md) 剥离。**前序实施含 [improve-4.1](../improve-4.1/README.md)**（占用信封 `RequestPayload` + 全路径 tools 计量）。本批不回退那套占用模型。
+> 首次登记：2026-08-21；路线校正：2026-08-22
+> 来源：从 [improve-4](../improve-4/README.md) 剥离。**前序实施含 [improve-4.1](../improve-4.1/README.md)**（request-shaped `ContextMeasurementPayload` + tools-aware 计量），以及 4.1 后的第一次 context 压缩闭环审查。本批不回退那套占用模型。
 >
 > 本目录使用 `plan-code-improvement` 推进。当前 README 与 00 只冻结已确认边界，不构成实施契约；01–04 必须在后续逐项讨论后按顺序产出。
 
@@ -18,9 +18,21 @@ Ohbaby 对外只需要面对 `anthropic` 与 `openai-compatible` 两种 client �
 - 后续需要研究并支持合理的 cache 观测；在有真实观测之后，才讨论命中估算。
 - 未来很可能需要 cache 命中率与差异化 input/cache/output 计费统计。
 - 需要讨论 context 与 LLM client 的协作边界，但不预设最终数据结构。
-- 本批与 improve-4 / **improve-4.1** 独立：不新增 cache 字段、不启用 cache、不做命中率/成本统计或预测；**不回退** 4.1 的 `RequestPayload` 与全路径 tools 计量。占用分母以 4.1 之后的 `measureUsage({ messages, tools })` 为准；cache 只叠加观测/计费，不把启发式改成「仅 uncached」。
+- 本批与 improve-4 / **improve-4.1** 独立：不新增 cache 字段、不启用 cache、不做命中率/成本统计或预测；**不回退** 4.1 的 `ContextMeasurementPayload` 与 tools-aware 计量。占用分母以 4.1 之后的 `measureUsage({ messages, tools })` 为准；cache 只叠加观测/计费，不把启发式改成「仅 uncached」。
 
-## 3. 当前不冻结的事项
+## 3. 路线位置（只登记顺序，不提前分析 cache）
+
+```text
+improve-4.1
+  → 第一次 context 压缩闭环审查
+  → improve-5
+  → 第二次 context 压缩闭环复核
+  → 主代理 context 占用监测与 UI
+```
+
+第一次审查先基于当前数据结构/数据流检查手动压缩、自动压缩、context 剪裁与 prune；improve-5 完成后，第二次复核专门检查 cache usage 语义是否改变压缩输入或 stale-usage 判断。两轮都包含子代理 scoped runtime measurement/自动压缩，但子代理不进入用户 UI。
+
+## 4. 当前不冻结的事项
 
 - cache usage 字段名称、层级与跨 provider 归一化语义
 - cache policy、breakpoint、cache key 与 TTL 配置
@@ -29,7 +41,7 @@ Ohbaby 对外只需要面对 `anthropic` 与 `openai-compatible` 两种 client �
 - 请求前命中估算模型及是否持久化历史统计
 - 首批支持哪些上游服务端扩展字段
 
-## 4. 文档地图
+## 5. 文档地图
 
 | 文档 | 状态 | 作用 |
 |------|------|------|
