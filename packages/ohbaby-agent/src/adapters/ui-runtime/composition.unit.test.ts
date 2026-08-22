@@ -20,7 +20,11 @@ import {
   createInMemoryMessageStore,
   createMessageManager,
 } from "../../core/message/index.js";
-import { SessionEvent } from "../../services/session/index.js";
+import {
+  SessionEvent,
+  type Session,
+  type SessionManager,
+} from "../../services/session/index.js";
 import { createPermissionState } from "../../permission/index.js";
 import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
 import type { RunCompletion } from "../../runtime/run-manager/index.js";
@@ -537,7 +541,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(disposeSandbox).toHaveBeenCalledTimes(1);
   });
 
-  it("passes explicit empty tool inputs on the pre-resolution static paths", async () => {
+  it("uses the primary session agent tools for static usage and manual compaction", async () => {
     const bus = createBus();
     const usage = {
       contextLimit: 10_000,
@@ -558,6 +562,19 @@ describe("createUiRuntimeComposition skill tools", () => {
       usageBefore: usage,
     });
     const getUsage = vi.fn<ContextManager["getUsage"]>().mockReturnValue(usage);
+    const primarySession: Session = {
+      agentName: "plan",
+      childrenIds: [],
+      createdAt: 1,
+      id: "session_1",
+      isSubagent: false,
+      projectId: "project_1",
+      projectRoot: "D:/repo",
+      stats: { messageCount: 0 },
+      status: "active",
+      title: "Plan session",
+      updatedAt: 1,
+    };
     const contextManager = {
       assemble,
       compact,
@@ -579,6 +596,12 @@ describe("createUiRuntimeComposition skill tools", () => {
         store: createInMemoryMessageStore(),
       }),
       permissionState: createPermissionState({ bus }),
+      sessionManager: {
+        create: vi
+          .fn<SessionManager["create"]>()
+          .mockResolvedValue(primarySession),
+        get: vi.fn<SessionManager["get"]>().mockResolvedValue(primarySession),
+      },
       skillRegistry: createMutableSkillRegistry([]),
       workdir: await tempWorkdir(),
     });
@@ -591,24 +614,104 @@ describe("createUiRuntimeComposition skill tools", () => {
       projectRoot: "D:/repo",
       sessionId: "session_1",
     });
+    const definitions = await composition.toolScheduler.getAvailableTools({
+      agentName: "plan",
+      isSubagent: false,
+    });
+    const toolNames = definitions.map((tool) => tool.name);
+    const tools = definitions.map((tool) => ({
+      function: {
+        description: tool.description,
+        name: tool.name,
+        parameters: tool.parameters,
+      },
+      type: "function" as const,
+    }));
+    expect(toolNames.length).toBeGreaterThan(0);
 
     expect(assemble).toHaveBeenCalledWith("session_1", "D:/repo", {
+      agentName: "plan",
       isSubagent: false,
-      toolNames: [],
+      toolNames,
     });
     expect(getUsage).toHaveBeenCalledWith({
       context: assembledContext,
       modelId: "fake-model",
-      tools: undefined,
+      tools,
     });
     expect(compact).toHaveBeenCalledWith("session_1", {
+      agentName: "plan",
       directory: "D:/repo",
       force: true,
       isSubagent: false,
       modelId: "fake-model",
-      toolNames: [],
-      tools: undefined,
+      toolNames,
+      tools,
     });
+  });
+
+  it("rejects static usage and manual compaction for subagent sessions", async () => {
+    const bus = createBus();
+    const contextManager = {
+      assemble: vi.fn<ContextManager["assemble"]>(),
+      compact: vi.fn<ContextManager["compact"]>(),
+      disposeSession: vi.fn<ContextManager["disposeSession"]>(),
+      getUsage: vi.fn<ContextManager["getUsage"]>(),
+      prepareTurn: vi.fn<ContextManager["prepareTurn"]>(),
+      resetTurnCompactionCount:
+        vi.fn<ContextManager["resetTurnCompactionCount"]>(),
+      updateCalibrationFactor:
+        vi.fn<ContextManager["updateCalibrationFactor"]>(),
+    } satisfies ContextManager;
+    const childSession: Session = {
+      agentName: "explore",
+      childrenIds: [],
+      createdAt: 1,
+      id: "session_child",
+      isSubagent: true,
+      parentId: "session_parent",
+      projectId: "project_1",
+      projectRoot: "D:/repo",
+      stats: { messageCount: 0 },
+      status: "active",
+      title: "Child session",
+      updatedAt: 1,
+    };
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      contextManager,
+      llmClient: fakeLlmClient(),
+      messageManager: createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      }),
+      permissionState: createPermissionState({ bus }),
+      sessionManager: {
+        create: vi
+          .fn<SessionManager["create"]>()
+          .mockResolvedValue(childSession),
+        get: vi.fn<SessionManager["get"]>().mockResolvedValue(childSession),
+      },
+      skillRegistry: createMutableSkillRegistry([]),
+      workdir: await tempWorkdir(),
+    });
+
+    await expect(
+      composition.getContextUsage({
+        projectRoot: "D:/repo",
+        sessionId: "session_child",
+      }),
+    ).rejects.toThrow("Cannot inspect context usage for subagent session");
+    await expect(
+      composition.compactSession({
+        projectRoot: "D:/repo",
+        sessionId: "session_child",
+      }),
+    ).rejects.toThrow("Cannot manually compact context for subagent session");
+    expect(contextManager.assemble).not.toHaveBeenCalled();
+    expect(contextManager.compact).not.toHaveBeenCalled();
+    expect(contextManager.getUsage).not.toHaveBeenCalled();
   });
 
   it("interrupts a parent subagent tree from durable run identity after manager eviction", async () => {

@@ -2156,6 +2156,65 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
+  it("returns unavailable for subagent context window usage before cache or runtime fallback", async () => {
+    const childSession: Session = {
+      agentName: "explore",
+      childrenIds: [],
+      createdAt: 1,
+      id: "session_child",
+      isSubagent: true,
+      parentId: "session_parent",
+      projectId: "project_1",
+      projectRoot: "D:/repo",
+      stats: { messageCount: 1 },
+      status: "active",
+      title: "Child",
+      updatedAt: 1,
+    };
+    const createClient = vi.fn(() => Promise.resolve(createFakeLLMClient([])));
+    const client = createInProcessUiBackendClient({
+      createLLMClient: createClient,
+      initialSnapshot: {
+        activeSessionId: "session_child",
+        contextWindowUsages: [
+          {
+            contextWindowRatio: 0.5,
+            contextWindowTokens: 1_000,
+            currentTokens: 500,
+            estimatedAt: "2026-08-22T00:00:00.000Z",
+            modelId: "stale-child-model",
+            sessionId: "session_child",
+          },
+        ],
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-08-22T00:00:00.000Z",
+            id: "session_child",
+            messages: [],
+            projectRoot: "D:/repo",
+            title: "Child",
+            updatedAt: "2026-08-22T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      sessionManager: {
+        create: () => Promise.resolve(childSession),
+        get: () => Promise.resolve(childSession),
+        listByProject: () => Promise.resolve([childSession]),
+        listByProjectRoot: () => Promise.resolve([childSession]),
+        update: () => Promise.resolve(childSession),
+      },
+    });
+
+    await expect(
+      client.getContextWindowUsage({ sessionId: "session_child" }),
+    ).resolves.toBeNull();
+    expect(createClient).not.toHaveBeenCalled();
+  });
+
   it("prepends a runtime system prompt to model requests without storing it in UI history", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-prompt-"));
@@ -4329,12 +4388,8 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("reconciles compaction progress when switching to an idle session", async () => {
-    const {
-      bus,
-      messageManager,
-      releaseCompaction,
-      summaryMessageStarted,
-    } = await createBlockedAutoCompactionContext();
+    const { bus, messageManager, releaseCompaction, summaryMessageStarted } =
+      await createBlockedAutoCompactionContext();
     const client = createInProcessUiBackendClient({
       bus,
       initialSnapshot: createInitialSnapshotWithTwoSessions(),
@@ -4346,9 +4401,7 @@ describe("createInProcessUiBackendClient", () => {
     });
     const compacting = waitForUiEvent(
       client,
-      (
-        event,
-      ): event is Extract<UiEvent, { type: "runtime.updated" }> =>
+      (event): event is Extract<UiEvent, { type: "runtime.updated" }> =>
         event.type === "runtime.updated" &&
         event.status.kind === "running" &&
         event.status.title === "Compacting...",
@@ -4385,9 +4438,7 @@ describe("createInProcessUiBackendClient", () => {
     const stateStore: UiStateStore = {
       ...baseStateStore,
       updateStatusForActiveSession(
-        ...args: Parameters<
-          typeof baseStateStore.updateStatusForActiveSession
-        >
+        ...args: Parameters<typeof baseStateStore.updateStatusForActiveSession>
       ): ReturnType<typeof baseStateStore.updateStatusForActiveSession> {
         if (!changedSelection && args[0] === "session_1") {
           changedSelection = true;
@@ -4429,17 +4480,10 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("reconciles compaction progress when switching to a running session", async () => {
-    const {
-      bus,
-      messageManager,
-      releaseCompaction,
-      summaryMessageStarted,
-    } = await createBlockedAutoCompactionContext();
+    const { bus, messageManager, releaseCompaction, summaryMessageStarted } =
+      await createBlockedAutoCompactionContext();
     const backgroundStarted = createDeferred<undefined>();
-    const baseClient = createInterruptibleGoalLLMClient(
-      [],
-      backgroundStarted,
-    );
+    const baseClient = createInterruptibleGoalLLMClient([], backgroundStarted);
     const llmClient: LLMClientInstance<FakeSdkClient> = {
       ...baseClient,
       config: { ...baseClient.config, contextWindowTokens: 1_000 },
@@ -4452,9 +4496,7 @@ describe("createInProcessUiBackendClient", () => {
     });
     const backgroundRunning = waitForUiEvent(
       client,
-      (
-        event,
-      ): event is Extract<UiEvent, { type: "runtime.updated" }> =>
+      (event): event is Extract<UiEvent, { type: "runtime.updated" }> =>
         event.type === "runtime.updated" && event.status.kind === "running",
     );
     const backgroundSubmission = client.submitPromptAndWait(
@@ -4477,9 +4519,7 @@ describe("createInProcessUiBackendClient", () => {
     );
     const compacting = waitForUiEvent(
       client,
-      (
-        event,
-      ): event is Extract<UiEvent, { type: "runtime.updated" }> =>
+      (event): event is Extract<UiEvent, { type: "runtime.updated" }> =>
         event.type === "runtime.updated" &&
         event.status.kind === "running" &&
         event.status.title === "Compacting...",
@@ -5169,7 +5209,9 @@ describe("createInProcessUiBackendClient", () => {
               return Promise.resolve(createTitleProviderStream(request));
             }
             if (!request.signal) {
-              throw new Error("expected the prompt run to have an abort signal");
+              throw new Error(
+                "expected the prompt run to have an abort signal",
+              );
             }
             providerSignal = request.signal;
             return Promise.resolve(
@@ -5184,9 +5226,9 @@ describe("createInProcessUiBackendClient", () => {
 
     const completion = client.submitPromptAndWait("persist running state");
     await expect(completion).rejects.toBe(storageError);
-    await expect(runLedger.get("run_persistence_failure")).resolves.toMatchObject(
-      { status: "cancelled" },
-    );
+    await expect(
+      runLedger.get("run_persistence_failure"),
+    ).resolves.toMatchObject({ status: "cancelled" });
     expect(providerSignal?.aborted ?? true).toBe(true);
     await client.dispose();
   });
@@ -7450,9 +7492,7 @@ describe("createInProcessUiBackendClient", () => {
     });
     const running = waitForUiEvent(
       client,
-      (
-        event,
-      ): event is Extract<UiEvent, { type: "runtime.updated" }> =>
+      (event): event is Extract<UiEvent, { type: "runtime.updated" }> =>
         event.type === "runtime.updated" && event.status.kind === "running",
       5_000,
     );

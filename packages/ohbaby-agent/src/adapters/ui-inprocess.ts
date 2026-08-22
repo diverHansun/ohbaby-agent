@@ -1538,15 +1538,18 @@ export function createInProcessUiBackendClient(
 
   async function assertCanUseAsPrimarySession(
     sessionId: string | undefined,
+    operation: "compact" | "prompt" = "prompt",
   ): Promise<void> {
     if (!sessionId || !options.sessionManager) {
       return;
     }
     const session = await options.sessionManager.get(sessionId);
     if (session?.isSubagent === true) {
-      throw new Error(
-        `Cannot submit a primary prompt to subagent session: ${sessionId}`,
-      );
+      const action =
+        operation === "compact"
+          ? "manually compact context for"
+          : "submit a primary prompt to";
+      throw new Error(`Cannot ${action} subagent session: ${sessionId}`);
     }
   }
 
@@ -1728,7 +1731,7 @@ export function createInProcessUiBackendClient(
       throw new Error("No active session to compact");
     }
 
-    await assertCanUseAsPrimarySession(sessionId);
+    await assertCanUseAsPrimarySession(sessionId, "compact");
     const [uiSession, coreSession] = await Promise.all([
       stateStore.getSession(sessionId),
       options.sessionManager?.get(sessionId),
@@ -1764,35 +1767,29 @@ export function createInProcessUiBackendClient(
     };
   }
 
-  async function resolveSessionProjectRoot(
-    sessionId: string,
-  ): Promise<string | null> {
-    const [uiSession, coreSession] = await Promise.all([
-      stateStore.getSession(sessionId),
-      options.sessionManager?.get(sessionId),
-    ]);
-    if (!uiSession && !coreSession) {
-      return null;
-    }
-    return (
-      uiSession?.projectRoot ??
-      coreSession?.projectRoot ??
-      (await resolveProjectRoot())
-    );
-  }
-
   async function getContextWindowUsageInternal(input: {
     readonly sessionId: string;
   }): Promise<UiContextWindowUsage | null> {
+    const [coreSession, uiSession] = await Promise.all([
+      options.sessionManager?.get(input.sessionId),
+      stateStore.getSession(input.sessionId),
+    ]);
+    if (coreSession?.isSubagent === true) {
+      return null;
+    }
+
     const cached = contextWindowUsage.get(input.sessionId);
     if (cached) {
       return cached;
     }
 
-    const projectRoot = await resolveSessionProjectRoot(input.sessionId);
-    if (!projectRoot) {
+    if (!coreSession && !uiSession) {
       return null;
     }
+    const projectRoot =
+      uiSession?.projectRoot ??
+      coreSession?.projectRoot ??
+      (await resolveProjectRoot());
 
     const runtime = await runtimeController.getRuntime();
     const usage = await runtime.getContextUsage({

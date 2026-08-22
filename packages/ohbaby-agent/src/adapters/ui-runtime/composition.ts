@@ -374,6 +374,33 @@ export async function createUiRuntimeComposition(
     );
   }
 
+  async function resolvePrimaryContextTools(input: {
+    readonly operation: "inspect context usage" | "manually compact context";
+    readonly sessionId: string;
+  }): Promise<{
+    readonly agentName: string;
+    readonly toolNames: readonly string[];
+    readonly tools: ReturnType<typeof toOpenAiTools>;
+  }> {
+    const session = await sessionManager.get(input.sessionId);
+    if (session?.isSubagent === true) {
+      throw new Error(
+        `Cannot ${input.operation} for subagent session: ${input.sessionId}`,
+      );
+    }
+    const agentName = session?.agentName ?? agentManager.getDefault();
+    const definitions = await resolvePromptTools({
+      agentName,
+      isSubagent: false,
+      sessionId: input.sessionId,
+    });
+    return {
+      agentName,
+      toolNames: definitions.map((tool) => tool.name),
+      tools: toOpenAiTools(definitions),
+    };
+  }
+
   async function resolveMcpToolNames(input: {
     readonly agentName?: string;
     readonly contextScopeId?: string;
@@ -860,13 +887,18 @@ export async function createUiRuntimeComposition(
     },
 
     async compactSession(input): Promise<CompactResult> {
+      const resolved = await resolvePrimaryContextTools({
+        operation: "manually compact context",
+        sessionId: input.sessionId,
+      });
       const result = await contextManager.compact(input.sessionId, {
+        agentName: resolved.agentName,
         directory: input.projectRoot,
         force: input.force ?? true,
-        isSubagent: input.isSubagent ?? false,
+        isSubagent: false,
         modelId: options.llmClient.config.model,
-        toolNames: [],
-        tools: undefined,
+        toolNames: resolved.toolNames,
+        tools: resolved.tools,
       });
       const notice = noticeFromCompactResult(input.sessionId, result);
       if (notice) {
@@ -876,15 +908,23 @@ export async function createUiRuntimeComposition(
     },
 
     async getContextUsage(input): Promise<ContextUsage> {
+      const resolved = await resolvePrimaryContextTools({
+        operation: "inspect context usage",
+        sessionId: input.sessionId,
+      });
       const assembled = await contextManager.assemble(
         input.sessionId,
         input.projectRoot,
-        { isSubagent: false, toolNames: [] },
+        {
+          agentName: resolved.agentName,
+          isSubagent: false,
+          toolNames: resolved.toolNames,
+        },
       );
       return contextManager.getUsage({
         context: assembled,
         modelId: options.llmClient.config.model,
-        tools: undefined,
+        tools: resolved.tools,
       });
     },
 

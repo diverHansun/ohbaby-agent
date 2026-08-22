@@ -38,7 +38,6 @@ export interface UiRuntimeComposition {
   }): Promise<void>;
   compactSession(input: {
     readonly force?: boolean;
-    readonly isSubagent?: boolean;
     readonly projectRoot: string;
     readonly sessionId: string;
   }): Promise<CompactResult>;

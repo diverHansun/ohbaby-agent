@@ -614,6 +614,61 @@ describe("ContextManager", () => {
     expect(JSON.stringify(prepared.messages)).not.toContain("B question");
   });
 
+  it("keeps subagent calibration isolated by context scope", async () => {
+    const messageManager = createMessageManagerFixture();
+    for (const contextScopeId of ["subagent_a", "subagent_b"]) {
+      const message = await messageManager.createMessage({
+        agent: "explore",
+        contextScopeId,
+        role: "user",
+        sessionId: "child_1",
+      });
+      await messageManager.appendPart(message.id, {
+        text: "same scoped question",
+        type: "text",
+      });
+    }
+    const { manager } = createManager({
+      messageManager,
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 100_000,
+      },
+    });
+    const prepareScope = (
+      contextScopeId: string,
+    ): ReturnType<ContextManager["prepareTurn"]> =>
+      manager.prepareTurn({
+        agentName: "explore",
+        contextScopeId,
+        directory: "/repo",
+        isSubagent: true,
+        modelId: "fake-model",
+        sessionId: "child_1",
+      });
+    const [baselineA, baselineB] = await Promise.all([
+      prepareScope("subagent_a"),
+      prepareScope("subagent_b"),
+    ]);
+
+    manager.updateCalibrationFactor(
+      "child_1",
+      baselineA.sentHeuristic * 2,
+      baselineA.sentHeuristic,
+      "subagent_a",
+    );
+    const [calibratedA, unchangedB] = await Promise.all([
+      prepareScope("subagent_a"),
+      prepareScope("subagent_b"),
+    ]);
+
+    expect(calibratedA.usage.currentTokens).toBe(
+      Math.round(calibratedA.sentHeuristic * 1.5),
+    );
+    expect(unchangedB.usage.currentTokens).toBe(unchangedB.sentHeuristic);
+    expect(baselineA.sentHeuristic).toBe(baselineB.sentHeuristic);
+  });
+
   it("assembles system prompt, memory, and message history", async () => {
     const messageManager = createMessageManagerFixture();
     await addTextMessage(messageManager, {

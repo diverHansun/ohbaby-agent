@@ -104,6 +104,13 @@ resolved tool definitions
 - final step 仍先从完整集合派生 `toolNames`，随后将计量与 provider request 的 schemas 置为 `[]`，保持最终步不可调用工具。
 - calibration factor 作用于同一份 `messages + tools` wire heuristic，不对 tool schemas 做第二次加算。
 
+### Primary static/manual 与 subagent runtime 边界
+
+- 主代理的静态占用查询和手动 compact 由 composition 从 Session 取得 `agentName`，解析该 agent 的完整工具定义，再将 names/schemas 一并传入 ContextManager。
+- 子代理占用只服务于 Lifecycle 内部的自动保护，身份键为 `sessionId + contextScopeId`；history、calibration 与 compaction state 均按 scope 隔离。
+- 公开 context-window 查询没有 `contextScopeId` 身份，因此 child session 返回 unavailable，不从 session-only tracker 或静态 fallback 构造伪精确数值。
+- 手动 compact 只允许 primary session；不通过客户端参数接收 `isSubagent`、agentName 或 scope。
+
 ---
 
 ## 二、Design Pattern & Rationale（设计模式与理由）

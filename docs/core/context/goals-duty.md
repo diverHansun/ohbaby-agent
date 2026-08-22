@@ -54,13 +54,14 @@
 - 调用 Message 模块获取历史消息
 - 合并成 LLM 可用的请求格式
 
-**核心接口**：`Context.assemble(sessionId, directory, isSubagent?): Promise<AssembledContext>`
+**核心接口**：`Context.assemble(sessionId, directory, { isSubagent, toolNames, contextScopeId?, agentName? }): Promise<AssembledContext>`
 
 **子代理模式**（`isSubagent = true`）：
 - 不加载 Memory（子代理不继承父代理的 Memory）
-- 不继承父 Session 的历史消息
+- 只读取同一 child Session 下匹配 `contextScopeId` 的历史消息
 - 使用子代理专属的 SystemPrompt
-- 消息流与主代理完全隔离
+- history、calibration 与自动压缩状态按 `sessionId + contextScopeId` 隔离
+- 不提供静态占用查询、手动 compact 或 UI 展示
 
 详见 `docs/agents/context-isolation.md`
 
