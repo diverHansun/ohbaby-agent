@@ -1,6 +1,6 @@
 # context improve-4.1 · tools-aware 计量与主代理静态/手动闭环
 
-> 状态：实施与自动化验收完成；详见 **05**。
+> 状态：实施完成，**独立验收通过（有保留项）**；结论、偏差与保留项详见 **05**。
 > 日期：2026-08-22
 > 规划基线：`main@6436c15`
 > 实施分支：`codex/context-improve-4-1`
@@ -84,7 +84,7 @@ improve-4 已让实时 Lifecycle 把 tool schema 纳入 `sentHeuristic`，但以
 | [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 分阶段实施契约与改动面 |
 | [03-reference-projects.md](./03-reference-projects.md) | pi / opencode / kimi-code 的 adopt/adapt/reject |
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 单测、集成测试、回归与审查门 |
-| [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 实施结果、测试矩阵与独立审查结论 |
+| [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 由验收模式独立产出：实施概况、规划 vs 实际差异、验收项证据、SWE 评估与保留项 |
 
 阅读顺序：README → 00 → 01 → 02 → 03 → 04 → 05。
 
