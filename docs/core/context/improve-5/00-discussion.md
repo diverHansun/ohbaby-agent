@@ -19,16 +19,19 @@
 | 关联模块 | 预计需要 context 与 LLM client/interface-provider 配合；职责与依赖方向尚未定稿 |
 | 设计姿态 | 不提前冻结 cache 字段、统一语义、价格模型或预测算法 |
 
-## 3. 已确认：与 improve-4 的边界
+## 3. 已确认：与 improve-4 / 4.1 的边界
 
-| 项 | improve-4 | improve-5 |
-|----|-----------|-----------|
-| tool schema 进入请求占用 | 做 | 不重复 |
-| cache usage 字段 | 不做 | 待设计 |
-| 主动启用 cache | 不做 | 待设计 |
-| cache 命中率/成本统计 | 不做 | 待设计 |
-| 请求前命中估算 | 不做 | 待真实观测与方案讨论 |
-| 自动压缩过程 spinner | 做 | 不重复 |
+| 项 | improve-4 | improve-4.1 | improve-5 |
+|----|-----------|-------------|-----------|
+| 实时 Lifecycle 的 tool schema 占用 | 做 | 不回退 | 不重复 |
+| 静态 `getContextUsage` / 手动 compact 的 tool schema 占用 | 不做（messages-only 遗留） | 做 | 不重复、不回退 |
+| 占用信封 `RequestPayload` + 共用 factor | 分母已含实时 tools | 全路径同分母 | 不把分母改成「仅 uncached」 |
+| cache usage 字段 | 不做 | 不做 | 待设计 |
+| 主动启用 cache | 不做 | 不做 | 待设计 |
+| cache 命中率/成本统计 | 不做 | 不做 | 待设计 |
+| 请求前命中估算 | 不做 | 不做 | 待真实观测与方案讨论 |
+| 自动压缩过程 spinner | 做 | 不重复 | 不重复 |
+| `/status` 与 tracker 口径 | 未统一 | 做 | 不回退 |
 
 ## 4. 待逐项确认
 
@@ -44,4 +47,4 @@
 
 - 接受 cache token 属于全部 prompt/window 输入量这一概念，但要求在理解 cache 命中、计费和未来统计需求前，不固定字段与归一化语义。
 - 确认 ohbaby 的 compatible 层是 Anthropic / OpenAI-compatible 两种请求形状；其他服务的差异主要体现在服务端机制。
-- 确认所有 cache 字段、cache 启用和命中率统计移出 improve-4；improve-4 Task A 收敛为 tool schema 请求占用修复，cache 作为后续独立批次设计。
+- 确认所有 cache 字段、cache 启用和命中率统计移出 improve-4；improve-4 Task A 只修**实时** Lifecycle 的 tool schema 占用；静态/手动路径由 [improve-4.1](../improve-4.1/README.md) 收口。cache 作为后续独立批次设计。
