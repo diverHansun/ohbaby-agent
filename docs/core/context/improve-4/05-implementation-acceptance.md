@@ -1,7 +1,7 @@
 # 5. 实施验收文档
 
 > 撰写时机：实施完成后，由规划会话的验收模式独立检查后撰写。
-> 2026-08-21 经二次独立审查发现跨会话状态归属缺口；随后完成修复、回归与再次验收。
+> 2026-08-21 二次审查发现跨会话状态归属缺口；`d56ee99` 修复后再做第三次独立审查（对照代码 + 定向复测，不单信实施方 05）。
 
 ## 5.1 元信息
 
@@ -10,8 +10,8 @@
 | 议题 / 批次 | context improve-4：实时 Lifecycle tool schema 计量 + 自动压缩过程态 |
 | 规划文档版本 | 工作区 00–04（实施边界提交 `b408e57`，其后有验收修订） |
 | 实施范围 | 基线 `e59107b`；任务 A `45f6b1f`；任务 B `6e5cd82`；并发隔离 `a6a283f`；跨会话状态归属修复 `d56ee99` |
-| 验收日期 | 2026-08-21 |
-| 结论 | **通过（自动化）**：任务 A/B、跨会话状态归属、边界回归和完整自动化矩阵均通过。真实 provider 下的 TUI/Web 手工观察留给用户最终审查，不阻断代码验收。 |
+| 验收日期 | 2026-08-21（第三次独立审查） |
+| 结论 | **通过（自动化）**：任务 A/B 主路径与跨会话状态归属修复均成立。上次 P2（切走后 `Compacting...` 卡住）已关闭。真实 provider 下 TUI/Web 手工观察仍留给用户，不阻断代码验收。 |
 
 ## 5.2 实施概况（对照 02）
 
@@ -102,6 +102,16 @@
 | 后台 run 终态原先能覆盖前台 status | 已修 P2 | 信息隐藏 / 并发隔离 | adapter 与 Web/TUI 均分开处理 run 记录和 workspace status |
 | null active session 原先可能投影唯一后台 run | 已修 P2 | 空值语义 / 最小惊讶原则 | null 显式解析为无 active run + 归档合同 |
 | 未建立 per-session progress 状态 | 合理取舍 | KISS / 错误抽象护栏 | 当前需求不值得扩 SDK/store/selectors |
+
+### 5.5.4 第三次独立审查（本轮）
+
+对照 `d56ee99` 与当前 adapter / in-process / Web·TUI reducer，结论如下。
+
+上次 P2 已关闭：导航走 `setActiveSessionAndReconcileStatus`；status 写入用 store 同步 `updateStatusForActiveSession`；后台 run 终态不再覆盖前台。合同覆盖切到空闲 B、切到运行中 B、以及 TOCTOU 交错。
+
+本轮复测：相关 8 个 unit 文件 **221 passed**；跨会话 contract 4 项 **passed**。全量 213 files 矩阵本轮未重跑。
+
+残余不改结论：切回不重放 `Compacting...`（有意 KISS）；`submitPromptAndWait` 切 active session 不走 reconcile（短暂旧 status）；persistent-store 新方法无单独单测；Web `runtime.updated` 无 sessionId、依赖后端不乱 publish。
 
 ## 5.6 重要文件修改清单
 
