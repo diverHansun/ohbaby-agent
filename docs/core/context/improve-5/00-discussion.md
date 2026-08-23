@@ -1,63 +1,77 @@
 # 讨论记录与已确认要点
 
-> 2026-08-21 首次冻结。正式现状分析与实施方案尚未开始。
+> 2026-08-21 首次冻结范围；2026-08-23 确认本批方案方向。正式实施须等用户审查 01–04。
 
 ---
 
 ## 1. 背景与动机
 
-在收敛 improve-4 时发现，prompt cache 同时牵涉 context window 占用、服务端缓存命中、LLM client 请求参数、provider usage 扩展字段和差异化计费。若在 improve-4 中直接添加 cache 字段，会在尚未确认各层职责前形成错误抽象。
+improve-4 / 4.1 把「发给模型的 messages + tools 有多大」量清楚了，但账单上更便宜的那一截——**prompt cache 命中**——客户端完全看不见。Anthropic 默认还不缓存；OpenAI-compatible 即使服务端隐式命中，字段也被 `normalizeTokenUsage` 丢掉。
 
-## 2. 已确认：概念与范围
+用户要的不是再发明一套缓存，而是：
+
+1. 看清每次请求读了多少、写了多少、没缓存多少；
+2. 请求形状跟 2026-08 官方协议对齐；
+3. 上下文像磁带一样只在右边接长，好让前缀命中。
+
+---
+
+## 2. 已确认：目标与范围
 
 | 决策项 | 结论 |
 |--------|------|
-| Compatible 的含义 | Ohbaby 项目层面区分 `anthropic` 与 `openai-compatible` 两种 client 请求接口形状 |
-| 服务端差异 | DeepSeek、Gemini 等具体服务的 cache 匹配、TTL、计费与 usage 扩展属于上游服务端机制，不增加第三种 ohbaby compatible 形状 |
-| Context window | cache read/write 对应的输入仍占用窗口；是否缓存不能改变 compaction 的容量口径 |
-| 后续目标 | 研究可靠观测、合理命中估算、命中率统计及 input/cache/output 差异化成本估算 |
-| 关联模块 | 预计需要 context 与 LLM client/interface-provider 配合；职责与依赖方向尚未定稿 |
-| 设计姿态 | 不提前冻结 cache 字段、统一语义、价格模型或预测算法 |
+| 内部模型 | 三元组 **`uncached` / `cacheRead` / `cacheWrite`**，互斥；窗口输入 = 三者之和 |
+| Compatible | 仍只有 `openai-compatible` 与 `anthropic` 两种请求形状 |
+| 协议立场 | **对齐 2026-08 官方字段名**；vendor 差异留在 adapter。不因 DeepSeek 再开第三种 client |
+| 观测 vs 启用 | 先能解析（阶段 A），再发 cache 请求字段（阶段 B），再改前缀（阶段 C） |
+| Anthropic | 必须发 `cache_control`，否则官方 Claude 基本 0 命中 |
+| OpenAI-compatible | 已有 `stream_options.include_usage`；补 `prompt_cache_key`（稳定 session/thread id）。DeepSeek/智谱**不**额外声明 |
+| 前缀规则 | 从左到右精确匹配。动态「今日 git status」、uuid、request id、易变日期/**cwd** 放**本轮 user** 或 metadata，**不进 system 头** |
+| 占用分母 | cached 仍计入窗口；禁止改成只算 uncached |
+| Context vs Client | ContextManager 只管窗口占用与「历史是否只追加」；cache 解析/请求字段归 interface-provider + llm-client |
+| 命中率 | `cacheRead / (uncached + cacheRead + cacheWrite)`；无 cache 活动时不展示百分比 |
+| 价格/预测 | 本批不做 |
+| 关键改动清单 | 不写行号进度表；02 只到文件/符号级改动面 |
 
-## 3. 已确认：与 improve-4 / 4.1 的边界
+---
 
-| 项 | improve-4 | improve-4.1 | improve-5 |
-|----|-----------|-------------|-----------|
-| 实时 Lifecycle 的 tool schema 占用 | 做 | 不回退 | 不重复 |
-| 静态 `getContextUsage` / 手动 compact 的 tool schema 占用 | 不做（messages-only 遗留） | 做 | 不重复、不回退 |
-| request-shaped `ContextMeasurementPayload` + 共用 factor | 分母已含实时 tools | static/manual 补齐 tools；subagent 保持 scoped runtime | 不把分母改成「仅 uncached」 |
-| cache usage 字段 | 不做 | 不做 | 待设计 |
-| 主动启用 cache | 不做 | 不做 | 待设计 |
-| cache 命中率/成本统计 | 不做 | 不做 | 待设计 |
-| 请求前命中估算 | 不做 | 不做 | 待真实观测与方案讨论 |
-| 自动压缩过程 spinner | 做 | 不重复 | 不重复 |
-| `/status` 与 tracker 口径 | 未统一 | 做 | 不回退 |
+## 3. 已确认：边界（本批不做）
 
-路线顺序在 2026-08-22 进一步确认：
+| 项 | 说明 |
+|----|------|
+| 第三种 compatible | Gemini 等差异当上游行为，不新增 client kind |
+| GPT-5.6 显式断点 | `prompt_cache_breakpoint` / `prompt_cache_options.mode=explicit` 记录在 02，本批非必做 |
+| 跨会话持久化命中统计 | 本批只保证当次请求 + 当前 run |
+| compact 策略重写 | 只标注「compact 会打断前缀」；策略复核放 improve-5 之后的第二次压缩审查 |
+| 回退 4.1 | `measureUsage({ messages, tools })` 分母不变 |
+| 子代理 UI | 子代理可走同一套 usage 解析，不进用户占用 UI |
 
-```text
-improve-4.1
-  → 第一次压缩闭环审查
-  → improve-5
-  → 第二次压缩闭环复核
-  → 主代理占用监测与 UI
-  → memory / 长期记忆
-```
+---
 
-这只是 improve-5 的相邻批次登记，不代表 cache 已完成现状分析。子代理占用仅用于 scoped runtime 自动压缩，不进入后续用户 UI。
+## 4. 与关联议题
 
-## 4. 待逐项确认
+| 文档 | 关系 |
+|------|------|
+| improve-4 / 4.1 | 前序；usage 三角字段现状的直接原因；本批在其上**扩展**而非替换占用模型 |
+| `docs/core/context/architecture.md` | 实施后需补一句：cache 三元组在 client 层，占用分母仍含 cached |
+| 知识库 `agent-harness/llm-client/` | 概念与官方字段备忘；本批 01/03 以代码与官方 URL 为准 |
+| 第二次压缩复核 | improve-5 **实施后**才做；检查 cache 是否误导 compact 触发 |
 
-1. 第一阶段优先解决“真实 usage 不丢失”，还是同时主动启用 cache。
-2. Context 只负责窗口占用与理论可缓存前缀，还是也拥有 cache 统计 projection。
-3. LLM client、interface-provider 与未来 cost projection 各自拥有哪部分数据。
-4. 如何处理 compatible 接口下不同服务端的可选 usage 扩展，而不把 vendor 分支泄漏给 ContextManager。
-5. 命中率采用 token coverage、请求命中率还是组合指标。
-6. 价格数据从配置、内置 profile 还是外部同步；如何处理模型、长上下文、TTL 和时间版本差异。
-7. 是否需要持久化 cache 观测，以及按 session/model/provider/cache key 的何种粒度聚合。
+---
 
-## 5. 用户确认记录
+## 5. 参考项目（细节见 03）
 
-- 接受 cache token 属于全部 prompt/window 输入量这一概念，但要求在理解 cache 命中、计费和未来统计需求前，不固定字段与归一化语义。
-- 确认 ohbaby 的 compatible 层是 Anthropic / OpenAI-compatible 两种请求形状；其他服务的差异主要体现在服务端机制。
-- 确认所有 cache 字段、cache 启用和命中率统计移出 improve-4；improve-4 Task A 只修**实时** Lifecycle 的 tool schema 占用；静态/手动路径由 [improve-4.1](../improve-4.1/README.md) 收口。cache 作为后续独立批次设计。
+本地：`code-cli/deepseek-harness`、`claude-code`、`codex`、`opencode`、`pi`、`kimi-code`。
+
+学：disjoint 三元组、流式 cache `>0` 才覆盖、`prompt_cache_key=sessionId`、Anthropic 断点、动态环境进 user。
+
+不学：把每日日期塞进可缓存 system 头；用 messages 哈希当 cache key。
+
+---
+
+## 6. 用户确认摘录（2026-08-23）
+
+1. 收成三元组；同时做好 OpenAI-compatible 与 Anthropic 的请求/消息兼容（先查最新协议）。
+2. 先看是否对齐 2026-08 协议实现，再谈如何兼容。→ **对齐官方名；adapter 翻译；不扩 compatible 种类。**
+3. System/Context 像磁带只在末尾接长；动态 git status / uuid / request id 进本轮 user 或 metadata。
+4. 用 `plan-code-improvement` 写 improve-5；再审查：代码现状、最新协议、code-cli 借鉴。
