@@ -1,6 +1,6 @@
 # 1. 问题基线与当前实施状态
 
-> 时间口径：2026-08-23 对 ohbaby-agent 当前工作区只读勘测；improve-4 / 4.1 已实施，improve-5 尚未进入业务代码。
+> 时间口径：2026-08-23 完成核心代码只读勘测；2026-08-24 复核测试分类、real-smoke runner、E2E 配置与 compiled Web 启动路径。improve-4 / 4.1 已实施，improve-5 尚未进入业务代码。
 > 协议口径：同日获取的 OpenAI、Anthropic、DeepSeek、智谱与 ZenMux 官方文档。
 > 行号为规划快照，后续定位以文件和符号为准。
 
@@ -21,7 +21,7 @@
 | P7 | tools 依赖 registry/filter 顺序，加载 MCP 时既改变 schema 又改变 menu | provider 的最左侧 prefix 发生非必要重排 |
 | P8 | 当前设计文档主要以主代理描述，缺少主/子代理共同验收门 | 容易出现主代理修好、子代理旁路未透传的“半实现” |
 | P9 | “provider 未报告”和“明确报告 0”会被同样表示；即使有 read，DeepSeek/智谱等仍不报告独立 write bucket | 无法区分 unavailable、真实 miss 与“后端可能写但协议不计量” |
-| P10 | 测试固化了丢弃 cache 字段的旧行为，4.1 的真实 scheduler 覆盖仍偏弱 | 单元测试通过但真实工具循环不具备命中条件 |
+| P10 | 测试固化了丢弃 cache 字段的旧行为，4.1 的真实 scheduler 覆盖仍偏弱，也没有从 compiled `ohbaby serve` 验证生产 Web 链路 | 单元测试通过但真实工具循环/发布形态仍可能不具备命中条件 |
 | P11 | context summary 与 session title 也直接调用共享 streaming client，但没有统一 request purpose；summary 只有 sessionId、没有 contextScopeId | 给共享 client 增加默认 cache enhancement 后，辅助请求可能意外携带错误/无 scope 的策略 |
 
 ## 1.2 当前端到端数据流
@@ -377,8 +377,10 @@ scope 生命周期也尚未闭环。`cleanupClosedSubagentScope` 当前只释放
 - subagent 已有 contextScope 隔离测试，但没有 cache key、turn snapshot、tool order 和 usage parity 的联合契约。
 - 没有覆盖 closed subagent scope 的 ContextManager/MCP/tool-sequence 定向清理，也没有覆盖进程重启后的 tool epoch 语义。
 - `run.llm.complete` 的跨 worker/stream transport 没有 usage round-trip 测试。
-- 仓库有 unit / contract / integration / smoke 分类脚本，但没有独立 `test-blueprint.md`；本批沿用现有 Vitest 分类，不另建全局测试规范。
+- 仓库已有 `docs-test/` 项目级测试方法论和 unit / contract / integration / smoke 分类脚本；本批沿用其 co-located + `tests/<type>/<domain>` 规则，不另建一套测试规范。
 - 当前 `scripts/run-real-smoke.mjs` 只接受 ZAI/智谱 key，并硬编码运行 TUI smoke 的若干 test name；即使新增 prompt-cache smoke，`pnpm test:smoke:real` 也不会自动发现，更无法覆盖 Anthropic。
+- 根 `vitest.config.ts` 默认排除 `*.e2e.test.ts`；`vitest.e2e.config.ts` 能发现 package E2E，但 `test:e2e:snapshot` 只显式运行 snapshot 场景。当前没有覆盖 improve-5 主/子代理、compiled server/Web、runtime-part 隐藏和 cache usage 观测的统一 E2E 入口。
+- 仓库已经具备真实发布形态：`pnpm build` 会构建 packages、`ohbaby-web` 并把 Web assets 复制到 `packages/ohbaby-cli/dist/web`；编译后可用 `node packages/ohbaby-cli/dist/bin.js serve` 启动生产 daemon + Web UI。但现有 improve-5 文档尚未把这条路径设为最终系统验收门。
 
 ## 1.10 文档 vs 实现对照
 
@@ -415,6 +417,6 @@ scope 生命周期也尚未闭环。`cleanupClosedSubagentScope` 当前只释放
 - `adapters/ui-state/persistent-store` / `services/session/title-fallback` / transcript export：runtime part 的窄投影与本地隐私边界；
 - `runtime/run-manager/worker` / `adapters/ui-runtime/stream-bridge-run-event-source`：normalized usage 事件透传；
 - `adapters/ui-runtime/prompt-context` / `services/session/title-generator`：辅助 LLM request purpose、scope 与 usage 边界；
-- provider、lifecycle、context、subagent、scheduler、real smoke 测试。
+- provider、lifecycle、context、subagent、scheduler、real smoke 测试；最终验收还会使用编译后的 CLI/server/Web 生产装配，但不借机修改无关 Web 产品行为。
 
 不应借 improve-5 修改 pricing、compact threshold 或新增 provider kind。

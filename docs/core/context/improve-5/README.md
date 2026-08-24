@@ -1,6 +1,6 @@
 # context improve-5 · LLM 请求契约、prompt cache 观测与稳定前缀
 
-> 状态：**规划已按 2026-08-23 用户确认、官方协议复核和三路只读子代理验收完成修订，待用户确认后实施**。
+> 状态：**规划已按 2026-08-24 用户反馈完成修订，并通过架构、协议和测试可执行性三路二轮只读验收；待用户确认后实施**。
 > 代码基线：ohbaby-agent 当前工作区（improve-4 / improve-4.1 已实施）。
 > 本目录是后续实施会话的规格，不在规划会话修改业务代码。
 >
@@ -37,6 +37,8 @@
 11. run-local prompt snapshot 与 scope-owned tool sequence 分离；每个 step 导出 immutable tool snapshot，lazy MCP load 只影响下一 step/epoch。
 12. closed subagent scope 必须定向释放 context、MCP loaded state 与 tool sequence；runtime part 仅对 model serializer 可见，不泄漏到 UI/title/export。
 13. normalized usage 必须无损穿过 lifecycle、run-manager worker、stream bridge 与消息 metadata；整份 usage 缺失时 run aggregate 明确标 partial。
+14. 实施使用临时分支 `codex/improve-5`，按可验证纵切分批；每批都必须完成 unit + integration、只读子代理审查和原子 commit，不能把所有风险积到最后一次提交。
+15. 全部批次完成后从本机编译产物启动 `ohbaby serve`，以 Web 端执行生产链路 E2E；真实 provider cache smoke 与无凭据的普通 CI 分开记账。
 
 ## 3. 本批范围
 
@@ -50,7 +52,7 @@
 - 重划稳定 system 与每轮 runtime context 的边界，删除重复工具文本。
 - 稳定主/子代理各自 scope 的 cache key、环境快照和工具序列。
 - 补 provider contract、生命周期、真实 scheduler、主/子代理隔离和 key-gated real smoke。
-- 实施完成后，与 improve-4 / 4.1 做完整 context 联合回归，再进入第二次压缩复核。
+- 从本机编译产物启动 `ohbaby serve`，通过 Web 端完成 improve-5 的生产链路 E2E。
 
 ### 不做
 
@@ -60,17 +62,21 @@
 - 不引入第三种 interface-provider kind。
 - 不在本批实现完整 Codex WorldState、Anthropic deferred tools 或 mid-conversation tool changes。
 - 不把 GPT-5.6 显式 breakpoint 设为本批默认；但必须解析其 cache-write usage，并为后续决策保留准确观测。
+- 不执行 improve-4～improve-5 的全方位联合回归；该回归由用户在 improve-5 完成后单独进行。本批只保留触及接口所必需的定向兼容测试。
 
 ## 4. 实施阶段
 
-| 阶段 | 目标 | 完成信号 |
-|------|------|----------|
-| A · usage 正确性 | inclusive usage、optional breakdown、stream/retry、aggregate、calibration | 单请求与当前 run 的缓存数字可信 |
-| B · request capability | policy、strategy resolver、scoped key、协议字段 | 只对已知支持端点发送正确字段 |
-| C · request/prefix 收拢 | 单一 envelope、turn snapshot、environment/MCP/tool order | 工具循环中的旧前缀不因客户端重组而移动 |
-| D · 联合验收 | provider contract、主/子代理、scheduler、real smoke、4/4.1 回归 | 可证明请求正确、隔离正确、前缀具备命中条件 |
+| 批次 | 目标 | 批次完成信号 |
+|------|------|--------------|
+| A · usage 与 stream 正确性 | inclusive usage、observed、stream/retry、aggregate、event transport、calibration | normalized usage 在单请求和当前 run 内可信 |
+| B · request capability | policy、purpose、strategy resolver、scoped key、OpenAI/Anthropic wire | 只对已知支持端点发送正确字段，辅助 caller 无旁路 |
+| C · request 收拢 | `PreparedModelRequest`、`additionalMessages` 收拢、initiating user identity | measurement、projection 与 send 同源 |
+| D · prefix 与 MCP | stable system/runtime part、tool sequence、epoch、scope cleanup、UI projection | 主/子代理前缀稳定且 scope 隔离 |
+| E · improve-5 系统验收 | 全量本批测试、real cache smoke、build、compiled `ohbaby serve` Web E2E | 本批实现可运行、可观测、可审计 |
 
-A 必须先完成；没有可信观测，B/C 的效果无法判断。C 完成后才进行最终 cache hit smoke，避免把服务端 miss 与客户端前缀抖动混为一谈。
+A 必须先完成；没有可信观测，B–E 的结果无法解释。每批遵守“实现 → targeted tests → `test:unit` + `test:integration` → 子代理审查 → 修复与复测 → 原子 commit”的闭环。详细 commit 和门禁见 [02 §2.8](./02-optimization-plan-and-change-scope.md#28-分批实施分支与完成信号) 与 [04](./04-test-and-acceptance.md)。
+
+正式实施开始前才从最新、干净的 `main` 创建 `codex/improve-5`；本轮文档修订不提前创建实施分支。各批在同一临时分支上形成独立 commit，不直接合入或推送 `main`，除非用户另行授权。
 
 ## 5. 文档地图
 
@@ -80,9 +86,9 @@ A 必须先完成；没有可信观测，B/C 的效果无法判断。C 完成后
 | [01-problem-analysis-and-current-state.md](./01-problem-analysis-and-current-state.md) | 当前代码、数据流、主/子代理、协议与测试缺口 |
 | [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 数据契约、能力矩阵、request/prefix 架构与实施改动面 |
 | [03-reference-projects.md](./03-reference-projects.md) | 六个本地参考项目与官方协议的 adopt / adapt / reject |
-| [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 风险导向的单测、契约、集成、real smoke 和联合回归 |
+| [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 逐批 unit/integration 门、真实 cache smoke、compiled Web E2E 与最终验收 |
 | `05-implementation-acceptance.md` | 实施完成后由验收模式写入；规划期不存在 |
 
 ## 6. 给后续实施会话的声明
 
-实施以 **02 + 04** 为执行契约。provider 原始字段只在 adapter 边界出现；ContextManager 消费 provider-neutral request payload，不解析 `cached_tokens`、`cache_read_input_tokens` 等 vendor 字段。任何只覆盖主代理而遗漏子代理 scope 的实现，都视为 improve-5 未完成。
+实施以 **02 + 04** 为执行契约。provider 原始字段只在 adapter 边界出现；ContextManager 消费 provider-neutral request payload，不解析 `cached_tokens`、`cache_read_input_tokens` 等 vendor 字段。任何只覆盖主代理、遗漏子代理 scope，或跳过逐批测试/审查直接做一个大提交的实现，都视为 improve-5 未完成。必须等待用户明确同意后才创建临时分支并开始业务代码实施。

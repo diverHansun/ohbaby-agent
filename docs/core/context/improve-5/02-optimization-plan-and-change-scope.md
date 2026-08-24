@@ -51,6 +51,9 @@ agent run（primary 或 subagent）
 | scope tool sequence + cache epoch | P7、P8 | tool resolver、MCP menu |
 | primary/subagent 对称测试门 | P8 | contract / integration / real smoke |
 | 显式 request purpose | P11 | lifecycle、context summary、session title 与 LLM client 边界 |
+| 临时分支 + 五个原子批次 + commit 前审查 | D8 | §2.8 与 04 每批门禁 |
+| compiled `ohbaby serve` Web E2E | P10、D9 | 批次 E 与 04 §4.8 |
+| 全方位 improve-4～5 回归后置 | D10 | 本批只保留触及接口的定向兼容检查 |
 
 ## 2.3 TokenUsage 的唯一内部契约
 
@@ -305,13 +308,37 @@ MCP catalog snapshot 使用稳定 tool identity 排序，并保持已经列出�
 
 `ContextManager`、`McpToolMenu` 和 tool-sequence owner 都提供同语义的 `disposeScope(sessionId, contextScopeId)`；`cleanupClosedSubagentScope` 必须调用三者，避免共享 child session 中已关闭 agent 的历史、loaded set 和 sequence 残留。`disposeSession(sessionId)` 继续作为删除整个 session 时的批量清理，并覆盖其全部 scope。清理操作应幂等。
 
-当前 MCP loaded set 没有持久化恢复契约。若进程重启后不能从持久化状态重建相同 ordered schemas，则为该 scope 建立一个新的 tool epoch：scoped cache key 仍可相同，但首次请求允许 miss/write，之后同 epoch 必须重新稳定并产生 read。runtime user part 的恢复不等于 tool prefix 在重启后必然 byte-stable。
+当前 MCP loaded set 没有持久化恢复契约。若进程重启后不能从持久化状态重建相同 ordered schemas，则为该 scope 建立一个新的 tool epoch：scoped cache key 仍可相同，但首次请求允许 miss/write，之后同 epoch 的 request projection 与 tool sequence 必须重新稳定；真实 provider 是否恢复 cache read 由 M13/G8 验证。runtime user part 的恢复不等于 tool prefix 在重启后必然 byte-stable。
 
-## 2.8 分阶段实施与完成信号
+## 2.8 分批实施、分支与完成信号
 
-### 阶段 A — usage 正确性
+### 2.8.1 临时分支与逐批闭环
 
-改动：
+只有用户明确批准正式实施后，才执行以下准备：
+
+1. 确认当前工作区干净并同步最新 `main`；
+2. 创建单一临时集成分支 `codex/improve-5`；
+3. 五个批次依次在该分支上实施，每批形成一个原子 commit；
+4. 未经用户授权，不直接向 `main` 提交、合并或推送。
+
+每批必须完成同一闭环：
+
+```text
+先写失败测试
+  → 最小实现
+  → 本批 targeted unit/contract/integration
+  → pnpm test:unit + pnpm test:integration
+  → lint + typecheck
+  → 只读子代理审查 diff / 02 / 04 / 主子代理对称性
+  → 主代理吸收 findings 并复测
+  → 原子 commit
+```
+
+子代理不得直接改代码或替主代理提交。审查出现 blocking finding 时，本批不能先 commit 再“下批修”；修复后至少重跑受影响 targeted tests、`test:unit` 和 `test:integration`。commit 只描述该批已经闭环的一个逻辑主题。
+
+### 2.8.2 批次 A — usage、stream 与事件正确性
+
+改动面：
 
 - `services/interface-providers/types.ts`
 - `services/interface-providers/openai-compatible.ts`
@@ -319,50 +346,84 @@ MCP catalog snapshot 使用稳定 tool identity 排序，并保持已经列出�
 - `core/llm-client/types.ts`、`streaming.ts`
 - `core/message/types.ts`
 - `core/lifecycle/lifecycle.ts`
-- `runtime/run-manager/worker.ts`、`adapters/ui-runtime/stream-bridge-run-event-source.ts`
-- `adapters/ui-runtime/prompt-context.ts`、`services/session/title-generator.ts`
-- 对应 provider / streaming / lifecycle tests
+- `runtime/run-manager/worker.ts`
+- `adapters/ui-runtime/stream-bridge-run-event-source.ts`
+- 对应 provider / streaming / lifecycle / event transport tests
 
-完成信号：官方与 compatible fixture 都能输出合法 inclusive usage；Anthropic start usage 不丢；retry 不串 attempt；metadata、aggregate、worker event transport 和 calibration 语义一致；三个 production request purpose 都没有 usage 旁路。
+完成信号：U01–U25 全绿；官方与 compatible fixture 输出合法 inclusive usage；Anthropic start/delta 正确合并；retry 不串 attempt；metadata、aggregate、worker transport 与 calibration 语义一致。审查重点是 raw/canonical 边界、`observed`、缺 usage completeness 和 reasoning-only retry。
 
-### 阶段 B — request capability
+建议 commit：`refactor(llm): normalize cache-aware token usage`
 
-改动：
+### 2.8.3 批次 B — request purpose、capability 与 scoped key
+
+改动面：
 
 - `config/llm/types.ts` 及 config loader/validator/writer/tests；`/connect` 等无关重写不得丢掉已配置 policy
 - capability resolver 与 scoped cache-key helper
-- `InterfaceProviderRequest` 和两 adapter 的 request builder/tests
+- `InterfaceProviderRequest` 和两个 adapter 的 request builder/tests
 - 发送链路透传 `purpose + sessionId + contextScopeId + promptCache`
+- `adapters/ui-runtime/prompt-context.ts`、`services/session/title-generator.ts`
 
-完成信号：表驱动 matrix 与 wire snapshot 全绿；未知 endpoint 在 auto 下无扩展字段；primary/subagent key 稳定且隔离。
+合法 `LLMRequestPurpose` 只有 `agent-step | context-summary | session-title`；`auxiliary` 仅用于描述后两者的类别，不能成为运行时枚举值。
 
-### 阶段 C — request/prefix 收拢
+完成信号：C01–C20 全绿；表驱动 matrix 与 wire snapshot 正确；official Anthropic 在本批先启用 top-level automatic，稳定-system explicit anchor 等批次 D 完成 system/runtime 分界后再加入；未知 endpoint 在 auto 下无扩展字段；primary/subagent key 稳定且隔离；三个 production caller 都显式携带合法 purpose，summary 透传 child scope。
 
-改动：
+建议 commit：`feat(llm): add scoped prompt cache strategies`
 
-- `core/context/types.ts`、`context-manager.ts`、serializer/message model
+### 2.8.4 批次 C — PreparedModelRequest 与 initiating turn
+
+改动面：
+
+- `core/context/types.ts`、`context-manager.ts`
 - `core/lifecycle/lifecycle.ts`
-- `core/agents/runner.ts`、`runtime/run-manager` types/worker（透传独立 initiating user id）
+- `core/agents/runner.ts`
+- `runtime/run-manager` types/worker（透传独立 initiating user id）
+- request assembler、measurement/projection recorder 与对应 tests
+
+完成信号：R01–R08 全绿；`additionalMessages` 双向传播消失；正常、overflow、compact、force 与 max-steps 都只消费同一 `PreparedModelRequest`；measurement 与 adapter send 深等价；initiating id 与 lineage parent 解耦，并以 primary/subagent、并发 run、无新 user resume 的独立测试证明。审查重点是旁路、重复组装、final directive placement 和并发 run ownership。
+
+建议 commit：`refactor(context): unify prepared model requests`
+
+### 2.8.5 批次 D — runtime prefix、tool sequence 与 scope lifecycle
+
+改动面：
+
+- serializer/message model 与 runtime-context metadata
+- `services/interface-providers/anthropic.ts` 的 stable-system explicit anchor（在稳定 system 分界已经可证明后启用）
 - `core/system-prompt/assembler.ts`、`layers/environment.ts`
 - `adapters/ui-runtime/composition.ts`、`adapters/ui-state/persistent-store.ts`
 - `services/session/title-fallback.ts` 与默认 transcript/export projection
 - `mcp/integration/dynamic-tool-menu.ts` 或一个窄的 scope tool-sequence owner
-- 对应 context/system/MCP/lifecycle integration tests
+- ContextManager/MCP/tool-sequence 的 `disposeScope` 与 `disposeSession`
+- 对应 system/context/MCP/UI projection/primary-subagent integration tests
 
-完成信号：`additionalMessages` 双向传播消失；measurement 与 send 使用同一 payload；runtime context 固定在 initiating user；`Available tools` 删除；同 epoch tools 顺序稳定。
+完成信号：PFX01–PFX15、M01–M12、A01–A09 全绿；runtime context 固定在 initiating user；`Available tools` 删除；official Anthropic 的 explicit anchor 只落在最后一个已证明稳定的 system block，并与 top-level automatic 组合；model-visible 与 UI-hidden 投影不串；同 epoch tools 顺序稳定；lazy load 只影响下一 request；closed child scope 定向清理。审查重点是主/子代理对称性、历史不可变、隐私投影、tool epoch 与 cleanup。
 
-### 阶段 D — 联合验收
+建议 commit：`refactor(context): stabilize runtime and tool prefixes`
 
-不再增加新产品能力，只做：
+### 2.8.6 批次 E — improve-5 系统验收
+
+原则上不增加新产品能力，只补验收脚本、fixtures、测试和证据：
 
 - provider contract + primary/subagent integration；
 - 至少两工具的真实 scheduler/tool loop；
-- 动态 MCP load 前后 epoch 断言；
+- 动态 MCP load 前后本地 epoch 断言；
 - 扩展 `scripts/run-real-smoke.mjs`（或新增 cache 专用 runner/package scripts），让 OpenAI-compatible 与 Anthropic 具有独立 env gate、串行执行和明确 pass/skip/fail；
-- key-gated real cache smoke，并覆盖一次真实 epoch 恢复序列；
-- improve-4 / 4.1 request-shaped occupancy、compact、summary、calibration 全量回归。
+- 为 real-cache runner 的枚举、skip/fail 聚合和进程退出码增加独立 unit tests；
+- 有凭据时执行 key-gated real cache smoke 与真实 provider M13 epoch 恢复；
+- 执行完整 format/lint/typecheck/test/build；
+- 通过正常 OpenAI-compatible 配置接入本地 scripted SSE fixture，从本次编译产物、隔离 `OHBABY_HOME`/database 和 `--port 0` 启动 `node packages/ohbaby-cli/dist/bin.js serve`，以 Web 端确定性执行 [04 §4.8](./04-test-and-acceptance.md#48-compiled-web-e2e)；
+- 完成一次面向整个 improve-5 diff 的只读子代理终审。
 
-完成信号见 [04 §4.10](./04-test-and-acceptance.md#410-发布门)。D 通过后才进入 context 模块第二轮实现程度复核。
+完成信号见 [04 §4.10](./04-test-and-acceptance.md#410-发布门)。无 provider credential 时，M13/G8 可明确 skip 且不影响本地 G5，但验收记录必须写“external cache evidence 未验证”，不能伪装成真实命中已通过。
+
+批次 E 不吸收 A–D 的新产品主题。若终审发现产品缺陷，顺序固定为：先在工作区修复 → 运行所属批次 targeted/unit/integration、必要 contract、lint/typecheck → 只读复核该修复 diff → 形成独立 `fix(...)` commit（若所属批次尚未提交，则先在该批闭环）→ 从 committed HEAD 重新执行 §4.9.2、受影响的 §4.7 和完整 §4.8 → 重新终审最终 improve-5 diff；旧 build/Web/real-cache 证据一律作废，禁止“先提交、以后再验证”。
+
+所有复测与重新终审通过后，才形成只包含验收设施和证据的 E acceptance commit。`05` 记录 A–D 以及终审产生的全部额外 fix commit SHA，并记录 E commit subject；它不要求自引用尚未产生的 E SHA，最终交付消息再给出 E/committed HEAD。E commit 后还要从已提交 HEAD 再执行一次完整本地门与 compiled Web E2E；若发生任何修改，重新进入上述闭环。
+
+建议 commit：`test(context): complete improve-5 system verification`
+
+improve-4～improve-5 的全方位联合回归不属于批次 E；由用户在 improve-5 交付后单独执行。
 
 ## 2.9 兼容、迁移与观测
 
@@ -381,7 +442,7 @@ MCP catalog snapshot 使用稳定 tool identity 排序，并保持已经列出�
 | SDK 类型落后于 wire | adapter-local extension + snapshot | 关闭对应 strategy |
 | runtime part 在 UI 泄漏或恢复丢失 | serializer/store/UI 三层 contract tests | 保留 part，临时只隐藏 UI；不能改回每 step 尾插 |
 | tool load 造成 miss | 明确 epoch、只追加 | 禁止加载该 lazy tool；不伪造旧 schema |
-| inclusive calibration 改变 compact 时机 | 对照 4/4.1 回归与 fixture | 修 normalizer；不得回滚为 uncached 分母 |
+| inclusive calibration 改变 compact 时机 | 定向 calibration/context fixtures；完整跨版本回归由用户后续执行 | 修 normalizer；不得回滚为 uncached 分母 |
 | partial usage 被误算为 0% | optional breakdown + aggregate completeness | 隐藏 run hit rate，而不是补 0 |
 
 ### 2.10.1 improve-4.1 验收条款的定向替代
@@ -396,3 +457,4 @@ improve-5 只替代 improve-4.1 中“final system 含 `Available tools: ...`”
 - 完整 Codex WorldState、Anthropic deferred tools；
 - 跨 session 的 cache 命中分析库；
 - primary/subagent 以外另造一条特殊请求链路。
+- improve-4～improve-5 的全方位联合回归；本批只保留被改动接口的定向兼容测试。

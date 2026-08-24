@@ -13,6 +13,8 @@
 5. **primary/subagent 对称。** 每个跨层关键场景必须有 scope 参数化或专门的 subagent case。
 6. **真实 scheduler 优先于纯 resolver mock。** 至少使用两个实际注册 tool，并覆盖一次 lazy MCP load。
 7. **真实测试有成本边界。** API-key gated、串行、有限请求次数、明确超时；失败不得自动无限重试。
+8. **每批都有快速反馈与独立审查。** 每批必须同时跑 unit 与 integration；子代理审查在 commit 前进行，blocking finding 修复并复测后才能提交。
+9. **最终 E2E 使用发布形态。** Web 验收必须从本机 `pnpm build` 的编译产物启动 `ohbaby serve`，不能用 Vite dev server 或 mock UI 代替生产装配。
 
 ## 4.2 层次与文件归类
 
@@ -22,8 +24,11 @@
 | adapter request/response wire | 官方 JSON fixture 与最终 request shape | `*.contract.test.ts` 或现有 provider test |
 | ContextManager + Lifecycle + store + scheduler | 同一 payload、持久化、prefix、primary/subagent | `*.integration.test.ts` |
 | 真实 provider cache | 多 step tool loop 的 write/read 证据 | `*.smoke.test.ts`，由显式 env gate 启用 |
+| 编译产物 + daemon + Web/browser | 用户可见生产链路、流式响应、tool loop、隐藏投影 | opt-in `*.e2e.test.ts` + browser evidence，最终批次执行 |
 
 已有未带分类后缀的 provider / LLM tests 可继续直接运行；新增跨层 case 应遵守现有分类后缀，确保 `test:unit/contract/integration/smoke` 不漏。
+
+这里的 E2E 是仓库已有 `vitest.e2e.config.ts` 管理的 **opt-in 发布验收 overlay**，不是给日常测试新增第五种默认分类。新增局部逻辑和跨模块测试仍分别归入 `unit / contract / integration / smoke`；只有启动完整系统编排的 spec 才使用 `.e2e.test.ts`，并由 E 批显式、精确地发现和执行。
 
 ## 4.3 A：TokenUsage、stream、retry、aggregate
 
@@ -69,7 +74,7 @@
 | C06 | enabled + unknown OpenAI-compatible | 选择 keyed implicit，拒绝时错误含 strategy | P2 |
 | C07 | official OpenAI request | 有 opaque `prompt_cache_key` 与 `include_usage` | P2、P4 |
 | C08 | ZenMux OpenAI / DeepSeek / 智谱 auto | 没有 `prompt_cache_key` | P2 |
-| C09 | official Anthropic request | 顶层 automatic + 最后 stable system block anchor 都存在，marker 数合法 | P2、P5 |
+| C09 | official Anthropic request（批次 B） | 顶层 automatic 存在；stable-system explicit anchor 明确延后到批次 D 的 PFX15 | P2、P5 |
 | C10 | ZenMux Anthropic request | 只有最后一个 eligible block marker，domain messages 未被修改 | P2 |
 | C11 | DeepSeek Anthropic auto | 不发 cache control | P2 |
 | C12 | primary 同 session 连续请求与 retry | key 完全相同 | P4 |
@@ -79,14 +84,16 @@
 | C16 | compact、消息增长、MCP epoch 变化 | key 保持稳定；只改变 provider-relevant prefix | P4、P7 |
 | C17 | OpenAI SDK 未声明的新 wire 字段 | typecheck 通过，extension 只在 adapter 局部 | P2 |
 | C18 | proxy URL、`evil-openai.com`、非 HTTPS/非默认 port | 不会误判为 official capability | P2 |
-| C19 | 三个 production LLM caller + legacy omission | 内部都显式传 purpose；summary 有 contextScopeId，title 是 auxiliary；旧 caller 缺值时 observe-only | P11 |
+| C19 | 三个 production LLM caller + legacy omission | 内部都显式传合法 purpose；summary=`context-summary` 且有 contextScopeId，title=`session-title`；旧 caller 缺值时 observe-only | P11 |
 | C20 | config writer / connect round-trip | 缺失值默认 auto；已有 enabled/disabled 不被无关重写丢失 | P2 |
 
 wire snapshot 不能只断言字段“存在”，还要断言不该出现的字段缺失，防止 `auto` 回退成“compatible 全发”。
 
-## 4.5 C：request 收拢、prefix、environment 与 tools
+C09 只验收在尚未完成 stable/dynamic system 分界时也能安全启用的 top-level automatic；批次 D 建立稳定边界后，再由 PFX15 验收“top-level automatic + 最后 stable system block explicit anchor”的最终组合，避免 B 批凭假边界提前落 marker。
 
-### 4.5.1 request-shaped 与 `additionalMessages`
+## 4.5 C/D：request 收拢、runtime prefix、environment 与 tools
+
+### 4.5.1 批次 C：request-shaped、`additionalMessages` 与 initiating id
 
 | ID | 场景 | 期望 | 覆盖问题 |
 |----|------|------|----------|
@@ -96,10 +103,12 @@ wire snapshot 不能只断言字段“存在”，还要断言不该出现的字
 | R04 | max-steps finalization | tail directive 同时被量到并发送一次，不持久化为 turn context | P6 |
 | R05 | public types/code guard | `additionalMessages` 从 prepare API 与 lifecycle 双传路径消失 | P6 |
 | R06 | measurement recorder + provider spy | 最后一次测量的 `{messages,tools}` 与实际 adapter input 相同 | P6、P10 |
+| R07 | runner → run-manager → worker → lifecycle round-trip | `initiatingUserMessageId` 是独立字段，不折叠进 lineage `parentMessageId`；primary/subagent 参数化均保持原值 | P5、P8 |
+| R08 | primary/subagent 并发 run、resume 无新 user | 并发 initiating id 不串；无新 user 的 resume 保持 absent，不扫描、猜测或回填“最后一条 user” | P5、P8 |
 
-R06 是 improve-4.1 的关键升级：不是分别断言“测量有 tools”和“请求有 tools”，而是记录并比较两端的同一最终 payload。
+R06 是 improve-4.1 的关键升级：不是分别断言“测量有 tools”和“请求有 tools”，而是记录并比较两端的同一最终 payload。R07/R08 则让批次 C 新增的跨层 initiating-id plumbing 在本批内独立闭环；“历史 runtime part 如何恢复”不属于 R08，留给批次 D 的 PFX13/PFX14 证明。
 
-### 4.5.2 runtime snapshot 与稳定前缀
+### 4.5.2 批次 D：runtime snapshot 与稳定前缀
 
 | ID | 场景 | 期望 | 覆盖问题 |
 |----|------|------|----------|
@@ -128,7 +137,7 @@ Anthropic:         [ordered tools, ordered system blocks, ordered message blocks
 
 相邻 step 在同 epoch 下，前一个请求的 projection 必须是后一个请求的结构前缀；只允许新增 assistant/tool result 等 suffix。
 
-### 4.5.3 tool sequence 与 MCP epoch
+### 4.5.3 批次 D：tool sequence 与 MCP epoch
 
 | ID | 场景 | 期望 | 覆盖问题 |
 |----|------|------|----------|
@@ -144,7 +153,6 @@ Anthropic:         [ordered tools, ordered system blocks, ordered message blocks
 | M10 | 真实 scheduler tool loop | 两个 tool schema 都进入 measurement/send，顺序一致 | P10 |
 | M11 | prepare 后、send 前发生 lazy load | 当前 immutable request 不变；新 tool 只进入下一 step/epoch | P6、P7 |
 | M12 | 进程重启且 loaded tools 无法重建 | 同 scoped key 可复用，但创建新 tool epoch；首次 miss/write 允许，随后 sequence 稳定 | P7 |
-| M13 | 真实 provider epoch 恢复 | epoch0 出现 read；load C 后 `[A,B,C]` 且 epoch+1；epoch1 首次可 miss/write，下一请求必须 read>0 | P7、P10 |
 
 ## 4.6 primary / subagent 联合场景
 
@@ -158,7 +166,7 @@ Anthropic:         [ordered tools, ordered system blocks, ordered message blocks
 | A06 | child resume/继续 | 同 child scope key 稳定，旧 runtime prefix 不重写 |
 | A07 | child 结束回到 parent | child usage 不进入错误的 parent context occupancy UI，但请求 metadata 可审计 |
 | A08 | primary 与 child 各触发 compact projection | 两者都保持 improve-4/4.1 的 messages+tools 分母与各自 scope |
-| A09 | child compact 触发 context summary | summary request 带 child scope、purpose=auxiliary，并保持 observe-only，不混入 agent-step hit rate |
+| A09 | child compact 触发 context summary | summary request 带 child scope、`purpose=context-summary`（属于 auxiliary 类请求），并保持 observe-only，不混入 agent-step hit rate |
 
 任何 A03–A09 缺失都意味着“只完善主代理”，本批不能验收。
 
@@ -194,38 +202,98 @@ Anthropic:         [ordered tools, ordered system blocks, ordered message blocks
 - `message_start` 的 creation/read 最终进入 normalized request metadata；
 - 再用一个 child context scope 重复最小序列，证明内部 scoped identity 与 history 不沿用 primary，adapter 与 usage 行为一致。Anthropic wire 没有 OpenAI-style key；若 exact bytes 相同而发生服务端复用，不视为 context 泄漏或测试失败。
 
-如实施环境暂时没有对应 API key，测试可以 `skipIf`，但验收记录必须写“协议 contract 已通过、真实服务命中未验证”，不能把 skipped 当 full pass。improve-5 最终完成门要求 OpenAI-compatible 与 Anthropic 两类各有一次人工或 CI 证据。
+如实施环境暂时没有对应 API key，测试可以 `skipIf`，但验收记录必须写“协议 contract 已通过、真实服务命中未验证”，不能把 skipped 当 full pass。两类真实 read 都存在时 G8 才是 pass；无凭据时 G8 是显式 skip，不影响本地实现门，但不能对外宣称真实缓存已验证。
 
 ### 4.7.4 MCP epoch 恢复门
 
-至少在一个支持真实 cache-read 观测的 provider 上执行：
+该外部场景编号为 **M13**，归入 G8，不属于无凭据也必须通过的本地 G5。至少在一个支持真实 cache-read 观测的 provider 上执行：
 
 1. epoch 0 连续请求直到获得一次 `cacheRead > 0`；
 2. 通过真实 MCP/tool scheduler load C，断言 tools 从 `[A,B]` 变为 `[A,B,C]`，旧工具相对顺序不变且 epoch 只加 1；
 3. epoch 1 第一请求允许 miss 或 creation/write；
 4. epoch 1 下一请求必须出现 `cacheRead > 0`，并证明 request projection 在新 epoch 内重新成为 append-extension。
 
-该场景证明动态加载只是一次明确失效，而不是从此每 step 都因重排无法命中。它必须通过真实 smoke 入口运行，不能只以 M02 的内存序列单测替代。
+该场景证明动态加载只是一次明确失效，而不是从此每 step 都因重排无法命中。它必须通过真实 smoke 入口运行，不能只以 M02 的内存序列单测替代。没有对应 provider credential 时允许明确 skip；G5 仍可通过，但 G8/验收记录必须标记 external epoch recovery 未验证。
 
-## 4.8 improve-4 / 4.1 联合回归
+## 4.8 compiled Web E2E
 
-| 回归项 | 不得退化 |
-|--------|----------|
-| request-shaped occupancy | static、manual、scheduler 三路径都量 `messages + tools` |
-| tool schema denominator | 至少两个真实 tools 时 estimated/context usage 包含完整 schemas |
-| compact projection | compact 前后、force 路径和 final directive 均使用最终 request |
-| cached input | 仍计入 context window 与 calibration |
-| summary/memory | stable system snapshot 不丢已有摘要和 primary memory |
-| scope | primary 与每个 subagent history/calibration/loaded tools 独立 |
-| lifecycle | max steps、abort、retry、tool parsing、finish reason 行为保持 |
-| serializer/store | synthetic runtime part model-visible、UI 隐藏、可恢复 |
-| improve-4.1 旧工具文本断言 | 只删除 final system 中 `Available tools: ...` 的文本期望；final-step `tools=[]` 的 measurement/send 一致性继续保留 |
+### 4.8.1 improve-5 定向兼容检查
 
-联合回归通过后，再按用户约定对 improve-4 / 4.1 / 5 的 context 模块做第二轮全方位实现程度检查；不在 improve-5 中顺手调整 compact 阈值。
+以下是本批直接修改接口的兼容护栏，不等同于 improve-4～improve-5 的全方位联合回归：
+
+| 定向检查 | 不得退化 |
+|----------|----------|
+| request-shaped occupancy | 本批触及的 normal/overflow/force/max-steps 路径都量最终 `messages + tools` |
+| cached input | 仍计入 context window 与 calibration，不改成 uncached 分母 |
+| final directive | max-steps directive 被测量且只发送一次 |
+| final empty tools | final-step `tools=[]` 时 measurement 与 send 同时看到空 tools |
+| improve-4.1 旧工具文本断言 | 只删除 final system 中 `Available tools: ...` 的文本期望，不撤销 tools-aware measurement |
+| primary/subagent touched paths | 本批改动涉及的 history、calibration、summary、tool sequence 均保持 scope 隔离 |
+
+用户将在 improve-5 交付后单独执行 improve-4～improve-5 全方位回归；本批不运行也不在 `05` 中宣称完成该后续工作。
+
+### 4.8.2 编译与启动方式
+
+Web E2E 必须使用本次分支的编译产物，并使用隔离 profile，禁止复用或停止用户当前的全局 daemon。以下变量只表示 E2E 专用的绝对临时路径，不得复用 `$HOME`：
+
+```bash
+pnpm build
+OHBABY_E2E_HOME="$(mktemp -d)"
+OHBABY_E2E_DB="$OHBABY_E2E_HOME/ohbaby-e2e.db"
+OHBABY_HOME="$OHBABY_E2E_HOME" OHBABY_DB_PATH="$OHBABY_E2E_DB" node packages/ohbaby-cli/dist/bin.js serve --port 0
+```
+
+在启动前，应向 `$OHBABY_E2E_HOME` 写入最小测试 `model.json`/`.env`，使正常配置加载器指向 §4.8.3 的本地 scripted OpenAI-compatible SSE endpoint；fixture credential 只能是无权限测试值。`serve` 应运行在一个可管理、可读取 stdout 的独立终端/session 中并保持存活。验收者从 stdout 读取并保存实际 `ohbaby web ready: http://127.0.0.1:<port>` URL 与隔离 profile state 中的 PID；不得硬编码 4096。
+
+浏览器验证完成后，必须在 `finally` 中用**同一组环境变量**执行 stop，再有界轮询 status，直到 `stopped` 或 `not-running`；当前正常 graceful-shutdown 路径预期保留 state 并报告 `stopped`。仅看到 stop 命令返回 `daemon stopped` 不算完成，因为那只代表已发送终止信号：
+
+```bash
+OHBABY_HOME="$OHBABY_E2E_HOME" OHBABY_DB_PATH="$OHBABY_E2E_DB" node packages/ohbaby-cli/dist/bin.js serve stop
+OHBABY_HOME="$OHBABY_E2E_HOME" OHBABY_DB_PATH="$OHBABY_E2E_DB" node packages/ohbaby-cli/dist/bin.js serve status
+```
+
+清理验收还要证明 captured PID 已退出、隔离 profile 的 pid lock 已释放，且 captured 动态端口已拒绝连接或可重新 bind；超时即 E07 fail。只有满足这些条件，才可删除已核验为本次创建的 `$OHBABY_E2E_HOME`。浏览器验收使用 Codex in-app browser 或等价 Playwright-capable automation 操作真实页面，不使用 Vite dev server。API key、auth token、完整 prompt/cache key 不写入截图、日志或 `05`。
+
+### 4.8.3 E2E 场景
+
+| ID | 用户路径 | 必须证明 |
+|----|----------|----------|
+| E01 | 隔离 profile 的 compiled serve 启动并打开实际 URL | 本次没有复用既有 daemon；页面来自 `packages/ohbaby-cli/dist/web`，bootstrap 成功且 daemon 状态可用 |
+| E02 | Web 创建/选择 session 并发送首个 prompt | production HTTP/SSE 链路连接本地 scripted endpoint；assistant delta 与 complete 只出现一次 |
+| E03 | scripted 首响应发出读取安全 fixture/file 的 tool call | tool call/result 真正经过 production adapter、HTTP/SSE、scheduler 与 Web，并在 scripted final 中被消费；不依赖模型临场是否“听话” |
+| E04 | 同一 session 发送短 follow-up | fixture 校验历史继续增长和 scope 稳定；页面无重复消息，第二 model request 沿用同 scope |
+| E05 | 刷新或恢复当前 session | 已持久化消息恢复；浏览器中 runtime part 不出现在气泡、title 或 transcript，且没有重复附着 |
+| E06 | 自动化 subagent E2E | `subagent.e2e.test.ts` 证明 child scope、parent return、并发/清理与主链路对称；浏览器主路径不以随机模型是否主动委派作为唯一证据 |
+| E07 | `finally` stop 隔离 daemon 并轮询 | status 变为 `stopped`（正常路径）或 `not-running`，captured PID 消失、pid lock 与动态端口释放，不影响用户原有 daemon/profile |
+
+E02–E05 的默认硬门使用一个由**正常 OpenAI-compatible 配置**接入的本地 scripted SSE fixture endpoint：按序校验 request，返回 tool call、接收 tool result 后返回 final，再处理 follow-up。它只替代外部模型的非确定性，不绕过 production adapter、HTTP/SSE、daemon、scheduler、database 或 Web。真实 provider/browser 可作为补充 smoke，但不替代 §4.7 的 cache 证据。
+
+证据必须分层：PFX09/R06 的 provider spy 证明 runtime part 对 model serializer 可见；E05 只证明浏览器隐藏与持久化恢复；§4.7 才证明真实服务 cache read/write。E06 的 source-composition E2E 是主/子代理编排的补充证据，不等于 compiled browser E01–E05，也不能替代它们。
 
 ## 4.9 守卫与执行命令
 
-### 阶段内快速命令
+### 4.9.1 每批 commit 前的固定门
+
+| 批次 | targeted tests / 契约 | 子代理审查重点 |
+|------|-----------------------|----------------|
+| A | U01–U25；provider、streaming、lifecycle、worker/source event tests | raw/canonical usage、retry attempt、aggregate completeness、event transport |
+| B | C01–C20；config、capability、wire snapshot、purpose/scope tests | endpoint 误判、非法 purpose、key 隔离、辅助 caller 旁路 |
+| C | R01–R08；ContextManager/Lifecycle request integration | measurement/send 同源、tail placement、initiating id、并发 ownership |
+| D | PFX01–PFX15、M01–M12、A01–A09 | 主/子代理对称、history immutability、UI 隐私、tool epoch、scope cleanup |
+| E | 全部本地门、§4.7 real smoke、§4.8 compiled Web E2E | 整体 diff 对齐、真实运行证据、残余风险与 out-of-scope |
+
+targeted tests 通过后，每个 A–D 批次在 commit 前至少运行：
+
+```bash
+pnpm run test:unit
+pnpm run test:integration
+pnpm run lint
+pnpm run typecheck
+```
+
+涉及 provider wire、event DTO、公开类型或 config 的批次还必须运行 `pnpm run test:contract`。子代理审查在这些命令通过后进行；若吸收 review finding 修改了代码，重新运行受影响 targeted tests、`test:unit`、`test:integration`、lint 和 typecheck，再创建该批原子 commit。
+
+现有测试的定向快速命令示例：
 
 ```bash
 pnpm exec vitest run packages/ohbaby-agent/src/services/interface-providers/openai-compatible.test.ts packages/ohbaby-agent/src/services/interface-providers/anthropic.test.ts packages/ohbaby-agent/src/core/llm-client/llm-client.test.ts
@@ -233,7 +301,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/core/lifecycle/lifecycle.unit.tes
 pnpm exec vitest run packages/ohbaby-agent/src/core/system-prompt/__tests__/assembler.test.ts packages/ohbaby-agent/src/core/system-prompt/__tests__/environment.test.ts packages/ohbaby-agent/src/mcp/integration/dynamic-tool-menu.unit.test.ts packages/ohbaby-agent/src/adapters/ui-runtime/composition.unit.test.ts
 ```
 
-### 完整门
+### 4.9.2 批次 E 完整本地门
 
 ```bash
 pnpm exec prettier --check 'docs/core/context/improve-5/*.md'
@@ -243,9 +311,14 @@ pnpm run typecheck
 pnpm run test:unit
 pnpm run test:contract
 pnpm run test:integration
+pnpm run test:smoke
+pnpm exec vitest run --config vitest.e2e.config.ts
+pnpm exec vitest run --config vitest.e2e.config.ts packages/ohbaby-agent/src/adapters/ui-runtime/subagent.e2e.test.ts
 pnpm run test
 pnpm run build
 ```
+
+完整本地门通过后，按 §4.8 启动 compiled `ohbaby serve` 并完成浏览器 E2E。该命令序列只验收 improve-5 和当前仓库全量测试是否健康，不代表用户后续的 improve-4～improve-5 专项回归已经执行。
 
 real provider smoke 使用项目已有 `.env` 加载约定，但应为 cache 测试增加独立显式 gate，不复用一个含义不同的 TUI smoke flag。当前 `scripts/run-real-smoke.mjs` 硬编码 ZAI/智谱 TUI tests；实施必须扩展它以显式调度新的 OpenAI-compatible 与 Anthropic cache specs，或新增语义清晰的 cache runner，不能只新增一个永远不会被总入口运行的文件。推荐冻结以下入口（具体 credential 名沿用各 provider 现有配置）：
 
@@ -255,7 +328,9 @@ OHBABY_RUN_REAL_CACHE_ANTHROPIC=1 pnpm run test:cache:real:anthropic
 pnpm run test:cache:real
 ```
 
-两个 provider gate 彼此独立，总入口串行调度并明确输出 `pass / skip / fail`；没有凭据是 skip，有 gate 但配置/长度错误是 fail。`pnpm run test:smoke:real` 可再把 cache 总入口纳入项目 real-smoke 汇总，但不能继续只跑旧 TUI test names。G8 的 read 与 M13 epoch 证据必须来自这些生产入口。
+两个 provider gate 彼此独立，总入口串行调度并明确输出 `pass / skip / fail`；没有凭据是 skip，有 gate 但配置/长度错误是 fail。runner 的枚举与状态聚合必须有自己的 unit tests，至少覆盖：无 credential=skip、gate/config error=fail、两个 provider 串行且任一 fail 时总入口非零、M13 独立 skip 不污染 G5。runner 若保留 `.mjs`，这些测试不能假设现有 lint/typecheck 会自动覆盖它。
+
+`pnpm run test:smoke:real` 可再把 cache 总入口纳入项目 real-smoke 汇总，但不能继续只跑旧 TUI test names。G8 的 OpenAI-compatible/Anthropic read 与 M13 epoch 证据必须来自这些生产入口；M13 skip 不影响本地 G5。
 
 守卫：
 
@@ -271,15 +346,19 @@ pnpm run test:cache:real
 |----|------|----------|
 | G1 usage | U01–U25 全绿，不变量与事件透传无例外 | 硬门 |
 | G2 capability | C01–C20 全绿，auto 未盲发 | 硬门 |
-| G3 request identity | R01–R06 全绿，measurement/send 同源 | 硬门 |
+| G3 request identity | R01–R08 全绿，measurement/send 同源且 initiating id 独立 | 硬门 |
 | G4 prefix | PFX01–PFX15 全绿，runtime 固定在 initiating user | 硬门 |
-| G5 tools/MCP | M01–M13 全绿，scope 清理明确，同 epoch 顺序稳定且真实 epoch 可恢复命中 | 硬门 |
-| G6 agent parity | A01–A09 全绿，无 primary-only/auxiliary 旁路 | 硬门 |
-| G7 4/4.1 regression | §4.8 与全量测试全绿 | 硬门 |
-| G8 real cache | OpenAI-compatible 与 Anthropic 各有一次真实 read 证据 | 最终实施验收硬门；普通无 key CI 可条件跳过 |
+| G5 tools/MCP | M01–M12 全绿，scope 清理明确，同 epoch 顺序稳定 | 本地硬门；不依赖 provider key |
+| G6 agent parity | A01–A09 全绿，purpose 枚举合法，无 primary-only/辅助 caller 旁路 | 硬门 |
+| G7 system E2E | 完整本地门全绿，E01–E07 有证据，compiled Web 可完成真实 prompt/tool/follow-up | 硬门 |
+| G8 external cache | OpenAI-compatible 与 Anthropic 各有一次真实 read；M13 至少一个 provider 恢复 epoch read | 外部验证门；无 credential 的普通 CI 可明确 skip，不反向卡住 G5 |
 | G9 文档/范围 | README、00–04、实现注释与配置示例一致；未混入 out-of-scope | 硬门 |
 
-只有 G1–G9 都有结果，才能新增 `05-implementation-acceptance.md` 并把 improve-5 标为完成。`05` 至少记录 commit、执行命令、pass/skip/fail、两类 provider 的脱敏 usage 证据、primary/subagent 证据和剩余风险。
+G1–G7、G9 必须通过；G8 必须有明确的 `pass / skip / fail` 结果。无 credential 时可以写 `skip` 并完成本地实现验收，但 `05` 必须明确标记“external cache hit / M13 未验证”，不得宣称真实服务命中已经通过。有 credential 而 G8 失败则不能验收。满足这些条件后才能新增 `05-implementation-acceptance.md`；`05` 至少记录临时分支、逐批 commits、执行命令、pass/skip/fail、compiled Web E2E、primary/subagent 证据和剩余风险。
+
+G8 聚合规则固定为：任何已执行子门失败则整体 `fail`；OpenAI-compatible read、Anthropic read 与 M13 都通过才是 `pass`；没有失败但至少一个子门因缺 credential 被跳过时，整体记录为 `skip（partial evidence）`，并逐项列出已通过和未验证的子门，不能只写一个模糊的“部分通过”。
+
+用户后续自行执行的 improve-4～improve-5 全方位回归不属于 G1–G9，也不影响 improve-5 本批 `05` 的形成。
 
 ## 4.11 对抗性审查问题
 
@@ -296,5 +375,9 @@ pnpm run test:cache:real
 9. 一个完整 agent-step 没有 usage 时，run totals 是否被错误伪装为完整数据？
 10. child scope 关闭后，ContextManager、MCP loaded set 和 tool sequence 是否都只清理目标 scope？
 11. live/persisted UI、fallback title 或 export 是否泄漏 runtime part 中的 cwd/OS/MCP 名称？
+12. `purpose=auxiliary` 是否被错误写进运行时枚举或 fixture，而不是使用 `context-summary/session-title`？
+13. 没有 provider key 时，M13 是否只进入 G8 skip，而不会让本地 G5 永远失败？
+14. Web E2E 是否真的来自本次 build 的 `dist` 和 `ohbaby serve`，还是偷偷使用了 dev server/mock UI？
+15. 每个批次是否在 commit 前同时有 unit、integration 和子代理审查证据？
 
 任一问题无法用测试或脱敏 request/usage 证据回答，均视为实现未闭环。

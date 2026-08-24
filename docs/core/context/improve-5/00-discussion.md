@@ -1,6 +1,6 @@
 # 讨论记录与已确认要点
 
-> 2026-08-21 首次冻结议题；2026-08-23 完成代码、六个参考项目和官方协议讨论，并由用户确认本轮修订基线。
+> 2026-08-21 首次冻结议题；2026-08-23 完成代码、六个参考项目和官方协议讨论；2026-08-24 根据用户反馈冻结分批实施、测试、审查和 Web E2E 边界。
 > 本文只保留已确认结论。诊断证据见 [01](./01-problem-analysis-and-current-state.md)，实施契约见 [02](./02-optimization-plan-and-change-scope.md)。
 
 ---
@@ -15,7 +15,7 @@ improve-4 / 4.1 已经把实际发送给模型的 `messages + tools` 纳入 cont
 
 本批不是在客户端实现一套 KV cache，而是把服务端 prompt cache 所需的**请求协议、usage 语义、稳定前缀和可验证性**补完整。
 
-## 2. 用户确认的七项基线
+## 2. 用户确认的实施基线
 
 | ID | 决策项 | 已确认结论 |
 |----|--------|------------|
@@ -26,6 +26,9 @@ improve-4 / 4.1 已经把实际发送给模型的 `messages + tools` 纳入 cont
 | D5 | MCP/tools | 确认 scope 内稳定顺序；新加载工具形成明确 cache epoch，不得让既有工具顺序漂移 |
 | D6 | cache key | 基于 `sessionId + contextScopeId`，生成 opaque、bounded、versioned key |
 | D7 | agent 对称性 | 主代理与所有子代理共同使用 improve-5 成果；每个 agent/context scope 隔离，但不得有“只完善主代理”的旁路 |
+| D8 | 分批实施 | 正式实施时从最新干净 `main` 创建临时分支 `codex/improve-5`；按纵切分批，每批完成 unit + integration、子代理只读审查和原子 commit |
+| D9 | 最终系统验收 | 所有批次结束后先全量测试和本机编译，再从编译产物启动 `ohbaby serve`，优先以 Web 端完成生产链路 E2E |
+| D10 | 后续回归边界 | improve-4～improve-5 的全方位联合回归由用户在本批结束后另行执行；improve-5 只做触及接口的定向兼容测试 |
 
 ## 3. TokenUsage 语义
 
@@ -164,11 +167,20 @@ OpenAI 官方建议每个 key 的相关流量维持在约 15 requests/min；scop
 
 - agent-step：`llm:complete` 和 assistant part metadata 保存 normalized TokenUsage；`run.llm.complete` worker transport 与 stream bridge 也必须无损携带同一 usage，不能在跨线程/事件投影时丢掉。auxiliary request 没有业务 assistant part，不为它伪造消息级 metadata。
 - 当前 run：LifecycleResult 聚合 usage；不存派生命中率。
-- 所有生产 LLM caller 显式标记 `agent-step / context-summary / session-title`；后两类先走 `observe-only`，但 summary 必须透传主/子代理的 session/scope，且 auxiliary usage 不混进 agent-step 命中率。
+- 所有生产 LLM caller 显式标记 `agent-step / context-summary / session-title`；后两类先走 `observe-only`，但 summary 必须透传主/子代理的 session/scope，且 auxiliary usage 不混进 agent-step 命中率。`auxiliary` 只是对后两类的类别描述，不是合法 `LLMRequestPurpose` 枚举值，测试不得写 `purpose=auxiliary`。
 - 不建设跨 session 的聚合分析库；“不做长期统计”不等于删除现有消息级 usage metadata。
 - cache breakdown 与 context occupancy 是两个投影：前者描述 provider 如何处理 input，后者描述 input 是否占窗口。
 
-## 9. 本批不做
+## 9. 分支、批次、审查与 commit
+
+1. 当前规划修订不创建实施分支；必须等用户明确同意正式实施。
+2. 实施开始时确认工作区干净、同步最新 `main`，再创建 `codex/improve-5`。所有批次在该临时分支上串行集成，避免多分支重复解决同一跨层接口。
+3. 每批先写会失败的行为测试，再做最小实现；完成后运行本批 targeted unit/contract/integration，以及全仓 `pnpm test:unit` 和 `pnpm test:integration`。
+4. 测试通过后启动与该批风险匹配的只读子代理审查。子代理只检查 diff、02/04 对齐、主/子代理对称性与测试证据，不直接修改代码；主代理吸收 findings 后复测。
+5. 每批形成一个可独立理解和回退的原子 commit。不得把五批压成一个大提交，也不得在测试或审查失败时先提交“稍后修”。
+6. 最后一批执行完整门、真实 cache smoke（有凭据时）和 compiled Web E2E。临时分支是否推送、何时合入 `main` 由用户另行授权。
+
+## 10. 本批不做
 
 | 项 | 原因 |
 |----|------|
@@ -177,7 +189,11 @@ OpenAI 官方建议每个 key 的相关流量维持在约 15 requests/min；scop
 | 1h TTL、cache prewarm、价格引擎 | 成本和产品策略尚未确认 |
 | 完整 WorldState/deferred tools | 超出本批最小闭环，且会扩大模型/端点兼容面 |
 | 子代理专属 UI | 子代理必须正确观测和聚合，但仍遵守当前不进入用户主占用 UI 的边界 |
+| improve-4～improve-5 全方位联合回归 | 用户将在 improve-5 完成后单独执行；本批只验证被本次改动直接触及的兼容契约 |
 
-## 10. 用户确认记录（2026-08-23）
+## 11. 用户确认记录
 
-用户明确确认 D1–D7，并要求文档修订后启动子代理做独立验收和对齐。正式文档由主代理维护；子代理只提供只读 findings，最终修改由主代理吸收。
+- 2026-08-23：用户明确确认 D1–D7，并要求文档修订后启动子代理做独立验收和对齐。
+- 2026-08-24：用户要求先修正文档，再在获批后创建临时分支分批实施；每批执行 unit/integration、子代理审查和 commit；最终全量测试、本机 build，并优先用 compiled `ohbaby serve` 的 Web 端做 E2E。用户将在本批之后自行执行 improve-4～improve-5 的全方位回归。
+
+正式文档由主代理维护；子代理只提供只读 findings，最终修改由主代理吸收。
