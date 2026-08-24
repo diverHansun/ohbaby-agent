@@ -310,9 +310,9 @@ describe("LLM Client Integration Tests", () => {
           textDelta: " world",
           finishReason: "stop",
           tokenUsage: {
-            prompt_tokens: 10,
-            completion_tokens: 5,
-            total_tokens: 15,
+            inputTokens: 10,
+            outputTokens: 5,
+            totalTokens: 15,
           },
         },
       ];
@@ -337,7 +337,7 @@ describe("LLM Client Integration Tests", () => {
       expect(responses[1].isComplete).toBe(true);
       expect(responses[1].finishReason).toBe("stop");
       expect(responses[1].rawFinishReason).toBeUndefined();
-      expect(responses[1].tokenUsage?.total_tokens).toBe(15);
+      expect(responses[1].tokenUsage?.totalTokens).toBe(15);
     });
 
     it("should accumulate and parse tool calls", async () => {
@@ -361,9 +361,9 @@ describe("LLM Client Integration Tests", () => {
           ],
           finishReason: "tool_calls",
           tokenUsage: {
-            prompt_tokens: 20,
-            completion_tokens: 10,
-            total_tokens: 30,
+            inputTokens: 20,
+            outputTokens: 10,
+            totalTokens: 30,
           },
         },
       ];
@@ -403,9 +403,9 @@ describe("LLM Client Integration Tests", () => {
         {
           finishReason: "stop",
           tokenUsage: {
-            prompt_tokens: 10,
-            completion_tokens: 0,
-            total_tokens: 10,
+            inputTokens: 10,
+            outputTokens: 0,
+            totalTokens: 10,
           },
         },
       ];
@@ -601,6 +601,177 @@ describe("LLM Client Integration Tests", () => {
         streamStopReason: "provider_finished",
       });
       expect(responses.at(-1)?.completeMessage.content).toBe("Recovered");
+    });
+
+    it("discards usage from a failed attempt before retrying", async () => {
+      const unavailable = Object.assign(new Error("stream failed"), {
+        status: 503,
+      });
+      streamChatCompletionMock
+        .mockResolvedValueOnce(
+          createAbortingProviderStream(
+            [
+              {
+                tokenUsage: {
+                  inputBreakdown: {
+                    cacheRead: 80,
+                    cacheWrite: 0,
+                    observed: { cacheRead: true, cacheWrite: false },
+                    uncached: 20,
+                  },
+                  inputTokens: 100,
+                  outputTokens: 0,
+                  totalTokens: 100,
+                },
+              },
+            ],
+            unavailable,
+          ),
+        )
+        .mockResolvedValueOnce(
+          createProviderStream([
+            {
+              finishReason: "stop",
+              textDelta: "Recovered",
+              tokenUsage: {
+                inputTokens: 12,
+                outputTokens: 3,
+                totalTokens: 15,
+              },
+            },
+          ]),
+        );
+
+      const responses: StreamingResponse[] = [];
+      for await (const response of streamChatCompletion(
+        mockClient,
+        [{ role: "user" as const, content: "test" }],
+        {
+          retry: {
+            initialDelayMs: 0,
+            maxDelayMs: 0,
+            maxRetriesPerStep: 1,
+            retryAfterCapMs: 0,
+          },
+        },
+      )) {
+        responses.push(response);
+      }
+
+      expect(responses).toHaveLength(2);
+      expect(responses[0].retry).toBeDefined();
+      expect(responses[1].tokenUsage).toMatchObject({
+        inputTokens: 12,
+        outputTokens: 3,
+        totalTokens: 15,
+      });
+      expect(responses[1].tokenUsage?.inputBreakdown).toBeUndefined();
+      const publicUsage = responses[1].tokenUsage;
+      expect(publicUsage).toBeDefined();
+      if (!publicUsage) {
+        throw new Error("expected public token usage");
+      }
+      // These assignments are a source-compatibility assertion: after usage
+      // is narrowed, legacy consumers must still receive numbers, not
+      // `number | undefined`.
+      // eslint-disable-next-line @typescript-eslint/no-deprecated
+      const promptTokens: number = publicUsage.prompt_tokens;
+      // eslint-disable-next-line @typescript-eslint/no-deprecated
+      const completionTokens: number = publicUsage.completion_tokens;
+      // eslint-disable-next-line @typescript-eslint/no-deprecated
+      const totalTokens: number = publicUsage.total_tokens;
+      expect({ promptTokens, completionTokens, totalTokens }).toEqual({
+        promptTokens: 12,
+        completionTokens: 3,
+        totalTokens: 15,
+      });
+      expect(Object.keys(publicUsage)).not.toEqual(
+        expect.arrayContaining([
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+        ]),
+      );
+    });
+
+    it("does not retry after a reasoning delta has been emitted", async () => {
+      const streamError = Object.assign(new Error("socket closed"), {
+        status: 503,
+      });
+      streamChatCompletionMock.mockResolvedValueOnce(
+        createAbortingProviderStream(
+          [{ reasoningDelta: "private thought" }],
+          streamError,
+        ),
+      );
+
+      await expect(
+        (async (): Promise<void> => {
+          for await (const response of streamChatCompletion(
+            mockClient,
+            [{ role: "user" as const, content: "test" }],
+            {
+              retry: {
+                initialDelayMs: 0,
+                maxDelayMs: 0,
+                maxRetriesPerStep: 5,
+                retryAfterCapMs: 0,
+              },
+            },
+          )) {
+            void response;
+          }
+        })(),
+      ).rejects.toBeInstanceOf(ProviderStreamInterruptedError);
+      expect(streamChatCompletionMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not retry after a tool-call delta has been emitted", async () => {
+      const streamError = Object.assign(new Error("socket closed"), {
+        status: 503,
+      });
+      streamChatCompletionMock.mockResolvedValueOnce(
+        createAbortingProviderStream(
+          [
+            {
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"path":"README.md"}',
+                  id: "call_1",
+                  index: 0,
+                  name: "read_file",
+                },
+              ],
+            },
+          ],
+          streamError,
+        ),
+      );
+
+      const responses: StreamingResponse[] = [];
+      await expect(
+        (async (): Promise<void> => {
+          for await (const response of streamChatCompletion(
+            mockClient,
+            [{ role: "user" as const, content: "test" }],
+            {
+              retry: {
+                initialDelayMs: 0,
+                maxDelayMs: 0,
+                maxRetriesPerStep: 5,
+                retryAfterCapMs: 0,
+              },
+            },
+          )) {
+            responses.push(response);
+          }
+        })(),
+      ).rejects.toBeInstanceOf(ProviderStreamInterruptedError);
+      expect(streamChatCompletionMock).toHaveBeenCalledTimes(1);
+      expect(responses).toHaveLength(1);
+      expect(responses.some((response) => response.retry !== undefined)).toBe(
+        false,
+      );
     });
 
     it("returns an aborted partial response when the signal aborts during retry sleep", async () => {

@@ -11,10 +11,21 @@ export type InterfaceProviderFinishReason =
   | "length"
   | "content_filter";
 
+export interface InputTokenBreakdown {
+  readonly uncached: number;
+  readonly cacheRead: number;
+  readonly cacheWrite: number;
+  readonly observed: {
+    readonly cacheRead: boolean;
+    readonly cacheWrite: boolean;
+  };
+}
+
 export interface InterfaceProviderTokenUsage {
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly totalTokens: number;
+  readonly inputBreakdown?: InputTokenBreakdown;
 }
 
 export interface InterfaceProviderToolCallDelta {

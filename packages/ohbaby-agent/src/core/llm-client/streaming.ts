@@ -20,6 +20,7 @@ import type {
   StreamingResponse,
   ParsedToolCall,
   ChatFinishReason,
+  StreamingTokenUsage,
   TokenUsage,
 } from "./types.js";
 import {
@@ -40,6 +41,24 @@ interface AccumulatedToolCall {
     name: string;
     arguments: string;
   };
+}
+
+function withLegacyTokenUsageAliases(usage: TokenUsage): StreamingTokenUsage {
+  const publicUsage = {
+    ...(usage.inputBreakdown === undefined
+      ? {}
+      : { inputBreakdown: usage.inputBreakdown }),
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    totalTokens: usage.totalTokens,
+  } as StreamingTokenUsage;
+
+  Object.defineProperties(publicUsage, {
+    completion_tokens: { enumerable: false, value: usage.outputTokens },
+    prompt_tokens: { enumerable: false, value: usage.inputTokens },
+    total_tokens: { enumerable: false, value: usage.totalTokens },
+  });
+  return publicUsage;
 }
 
 class RetrySleepAbortedError extends Error {
@@ -108,8 +127,29 @@ function buildAbortResponse(input: {
         ? undefined
         : input.accumulatedReasoning,
     streamStopReason: "user_aborted",
-    tokenUsage: input.tokenUsage ?? undefined,
+    tokenUsage:
+      input.tokenUsage === null
+        ? undefined
+        : withLegacyTokenUsageAliases(input.tokenUsage),
   };
+}
+
+function isUsageOnlyEvent(event: {
+  readonly finishReason?: ChatFinishReason;
+  readonly rawFinishReason?: string;
+  readonly reasoningDelta?: string;
+  readonly textDelta?: string;
+  readonly tokenUsage?: TokenUsage;
+  readonly toolCallDeltas?: readonly unknown[];
+}): boolean {
+  return (
+    event.tokenUsage !== undefined &&
+    event.textDelta === undefined &&
+    event.reasoningDelta === undefined &&
+    event.finishReason === undefined &&
+    event.rawFinishReason === undefined &&
+    (event.toolCallDeltas === undefined || event.toolCallDeltas.length === 0)
+  );
 }
 
 function parseToolCalls(
@@ -199,7 +239,7 @@ function validateRequestMaxTokens(
  *   console.log(response.completeMessage.content); // Real-time display
  *
  *   if (response.isComplete) {
- *     console.log('Tokens:', response.tokenUsage?.total_tokens);
+ *     console.log('Tokens:', response.tokenUsage?.totalTokens);
  *     if (response.parsedToolCalls) {
  *       // Handle tool calls
  *     }
@@ -223,17 +263,19 @@ export async function* streamChatCompletion(
   const requestMaxTokens =
     validateRequestMaxTokens(maxTokens) ?? config.maxTokens;
 
-  // Accumulation state - maintained across iterations
-  let accumulatedContent = "";
-  let accumulatedReasoning = "";
-  const accumulatedToolCalls = new Map<number, AccumulatedToolCall>();
-  let finishReason: ChatFinishReason | null = null;
-  let rawFinishReason: string | undefined;
-  let tokenUsage: TokenUsage | null = null;
-
   let failedAttempts = 0;
 
   for (;;) {
+    // Every provider retry is a new attempt. Keeping this state inside the
+    // loop prevents usage, reasoning, finish state, and partial tool calls
+    // from a failed attempt leaking into the replacement stream.
+    let accumulatedContent = "";
+    let accumulatedReasoning = "";
+    const accumulatedToolCalls = new Map<number, AccumulatedToolCall>();
+    let finishReason: ChatFinishReason | null = null;
+    let rawFinishReason: string | undefined;
+    let tokenUsage: TokenUsage | null = null;
+
     try {
       const stream = await provider.streamChatCompletion({
         model: config.model,
@@ -260,6 +302,13 @@ export async function* streamChatCompletion(
         // Capture token usage (typically only in last chunk)
         if (event.tokenUsage) {
           tokenUsage = event.tokenUsage;
+        }
+
+        // Anthropic reports cache accounting in message_start. Retain it for
+        // the eventual terminal response, but do not expose an attempt-local
+        // usage-only frame that may later be discarded by a safe retry.
+        if (isUsageOnlyEvent(event)) {
+          continue;
         }
 
         // Accumulate text content
@@ -331,7 +380,10 @@ export async function* streamChatCompletion(
           rawFinishReason,
           streamStopReason:
             finishReason === null ? undefined : "provider_finished",
-          tokenUsage: tokenUsage ?? undefined,
+          tokenUsage:
+            tokenUsage === null
+              ? undefined
+              : withLegacyTokenUsageAliases(tokenUsage),
         };
       }
       if (!emittedAnyResponse) {
@@ -345,7 +397,10 @@ export async function* streamChatCompletion(
             accumulatedReasoning === "" ? undefined : accumulatedReasoning,
           rawFinishReason,
           streamStopReason: "provider_finished",
-          tokenUsage: tokenUsage ?? undefined,
+          tokenUsage:
+            tokenUsage === null
+              ? undefined
+              : withLegacyTokenUsageAliases(tokenUsage),
         };
       }
       return;
@@ -374,7 +429,13 @@ export async function* streamChatCompletion(
         return;
       }
 
-      if (accumulatedContent !== "" || accumulatedToolCalls.size > 0) {
+      if (
+        accumulatedContent !== "" ||
+        accumulatedReasoning !== "" ||
+        accumulatedToolCalls.size > 0 ||
+        finishReason !== null ||
+        rawFinishReason !== undefined
+      ) {
         throw new ProviderStreamInterruptedError(error);
       }
 

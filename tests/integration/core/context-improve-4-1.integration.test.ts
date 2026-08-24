@@ -159,9 +159,9 @@ describe("context improve-4.1 integration", () => {
               finishReason: "stop",
               textDelta: "final",
               tokenUsage: {
-                completion_tokens: 10,
-                prompt_tokens: 777,
-                total_tokens: 787,
+                inputTokens: 777,
+                outputTokens: 10,
+                totalTokens: 787,
               },
             },
           ],

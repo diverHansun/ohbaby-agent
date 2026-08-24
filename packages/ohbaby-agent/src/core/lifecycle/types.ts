@@ -235,9 +235,13 @@ export interface LifecycleResult {
   /** In-memory only; consumers must normalize and redact before persistence. */
   readonly failureCause?: unknown;
   readonly toolCalls?: readonly ParsedToolCall[];
-  readonly usage?: {
-    readonly inputTokens: number;
-    readonly outputTokens: number;
-    readonly totalTokens: number;
-  };
+  readonly usage?: LifecycleTokenUsage;
+}
+
+export interface LifecycleTokenUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly totalTokens: number;
+  readonly inputBreakdown?: TokenUsage["inputBreakdown"];
+  readonly usageComplete: boolean;
 }

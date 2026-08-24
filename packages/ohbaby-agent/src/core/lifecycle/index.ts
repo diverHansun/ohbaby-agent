@@ -6,5 +6,6 @@ export type {
   LifecycleEvent,
   LifecycleResult,
   LifecycleSessionParams,
+  LifecycleTokenUsage,
   TurnContext,
 } from "./types.js";

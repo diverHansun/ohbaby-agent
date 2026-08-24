@@ -32,11 +32,21 @@ export type ChatCompletionMessage = ChatCompletionMessageParam;
  * Re-export normalized token usage statistics from the provider layer.
  *
  * Contains:
- * - prompt_tokens: Number of tokens in the prompt
- * - completion_tokens: Number of tokens generated
- * - total_tokens: Sum of prompt and completion tokens
+ * - inputTokens: Inclusive provider-reported input tokens
+ * - outputTokens: Number of generated tokens
+ * - totalTokens: Sum of input and output tokens
+ * - inputBreakdown: Optional cache-aware partition of inclusive input tokens
  */
 export type TokenUsage = InterfaceProviderTokenUsage;
+
+export type StreamingTokenUsage = TokenUsage & {
+  /** @deprecated Use inputTokens. */
+  readonly prompt_tokens: number;
+  /** @deprecated Use outputTokens. */
+  readonly completion_tokens: number;
+  /** @deprecated Use totalTokens. */
+  readonly total_tokens: number;
+};
 
 /**
  * Finish reason for chat completion.
@@ -222,11 +232,12 @@ export interface StreamingResponse {
    * Token usage statistics for the complete request.
    *
    * Only populated when isComplete === true.
-   * Contains prompt_tokens, completion_tokens, total_tokens.
+   * Contains canonical inclusive input/output/total token counts and, when the
+   * provider reports enough evidence, a cache-aware input breakdown.
    *
    * Note: May not be present if stream was interrupted by user.
    */
-  tokenUsage?: TokenUsage;
+  tokenUsage?: StreamingTokenUsage;
 }
 
 /**

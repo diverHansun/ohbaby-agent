@@ -9,8 +9,8 @@ import type {
   InterfaceProviderInstance,
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-  InterfaceProviderTokenUsage,
 } from "./types.js";
+import { normalizeOpenAICompatibleUsage } from "./token-usage.js";
 
 function nativeFetchOptions(): Pick<ClientOptions, "fetch"> {
   if (typeof globalThis.fetch !== "function") {
@@ -41,20 +41,6 @@ function mapFinishReason(
     default:
       return undefined;
   }
-}
-
-function normalizeTokenUsage(
-  usage: ChatCompletionChunk["usage"] | undefined | null,
-): InterfaceProviderTokenUsage | undefined {
-  if (!usage) {
-    return undefined;
-  }
-
-  return {
-    prompt_tokens: usage.prompt_tokens,
-    completion_tokens: usage.completion_tokens,
-    total_tokens: usage.total_tokens,
-  };
 }
 
 function nonEmptyString(value: unknown): string | undefined {
@@ -94,7 +80,7 @@ function buildStreamEvent(
   chunk: ChatCompletionChunk,
 ): InterfaceProviderStreamEvent | null {
   if (chunk.choices.length === 0) {
-    const tokenUsage = normalizeTokenUsage(chunk.usage);
+    const tokenUsage = normalizeOpenAICompatibleUsage(chunk.usage);
     return tokenUsage ? { tokenUsage } : null;
   }
 
@@ -109,13 +95,19 @@ function buildStreamEvent(
     mappedToolCallDeltas && mappedToolCallDeltas.length > 0
       ? mappedToolCallDeltas
       : undefined;
+  const textDelta = nonEmptyString(choice.delta.content);
+  const reasoningDelta = reasoningDeltaFromChoiceDelta(choice.delta);
+  const finishReason = mapFinishReason(choice.finish_reason);
+  const tokenUsage = normalizeOpenAICompatibleUsage(chunk.usage);
   const event: InterfaceProviderStreamEvent = {
-    textDelta: nonEmptyString(choice.delta.content),
-    reasoningDelta: reasoningDeltaFromChoiceDelta(choice.delta),
-    toolCallDeltas,
-    finishReason: mapFinishReason(choice.finish_reason),
-    rawFinishReason: choice.finish_reason ?? undefined,
-    tokenUsage: normalizeTokenUsage(chunk.usage),
+    ...(textDelta === undefined ? {} : { textDelta }),
+    ...(reasoningDelta === undefined ? {} : { reasoningDelta }),
+    ...(toolCallDeltas === undefined ? {} : { toolCallDeltas }),
+    ...(finishReason === undefined ? {} : { finishReason }),
+    ...(choice.finish_reason === null
+      ? {}
+      : { rawFinishReason: choice.finish_reason }),
+    ...(tokenUsage === undefined ? {} : { tokenUsage }),
   };
 
   if (
@@ -123,6 +115,7 @@ function buildStreamEvent(
     !event.reasoningDelta &&
     (!event.toolCallDeltas || event.toolCallDeltas.length === 0) &&
     !event.finishReason &&
+    !event.rawFinishReason &&
     !event.tokenUsage
   ) {
     return null;
@@ -176,10 +169,7 @@ export function createOpenAICompatibleProvider(
           const event = buildStreamEvent(chunk);
           if (event) {
             if (pendingTerminalEvent) {
-              if (
-                isUsageOnlyEvent(event) &&
-                pendingTerminalEvent.tokenUsage === undefined
-              ) {
+              if (isUsageOnlyEvent(event)) {
                 const terminalEvent: InterfaceProviderStreamEvent =
                   pendingTerminalEvent;
                 pendingTerminalEvent = {

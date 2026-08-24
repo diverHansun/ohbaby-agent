@@ -34,6 +34,7 @@ export type {
   StreamingResponse,
   // Message and token types
   ChatCompletionMessage,
+  StreamingTokenUsage,
   TokenUsage,
   // Tool-related types
   ParsedToolCall,

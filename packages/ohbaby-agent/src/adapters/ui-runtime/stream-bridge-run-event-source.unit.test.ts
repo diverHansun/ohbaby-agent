@@ -90,6 +90,53 @@ describe("createStreamBridgeRunEventSource", () => {
     await expect(iterator.next()).resolves.toMatchObject({ done: true });
   });
 
+  it("preserves canonical cache-aware usage on llm completion events", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const source = createStreamBridgeRunEventSource(streamBridge);
+    const iterator = source.subscribeRunEvents("run_1")[Symbol.asyncIterator]();
+
+    streamBridge.publish("run/run_1", "run.llm.complete", {
+      finishReason: "stop",
+      sessionId: "session_1",
+      step: 4,
+      timestamp: 123,
+      tokenUsage: {
+        inputBreakdown: {
+          cacheRead: 70,
+          cacheWrite: 10,
+          observed: { cacheRead: true, cacheWrite: true },
+          uncached: 20,
+        },
+        inputTokens: 100,
+        outputTokens: 25,
+        totalTokens: 125,
+      },
+    });
+
+    await expect(nextEvent(iterator)).resolves.toEqual({
+      completeMessage: { content: "", role: "assistant" },
+      finishReason: "stop",
+      sessionId: "session_1",
+      step: 4,
+      timestamp: 123,
+      tokenUsage: {
+        inputBreakdown: {
+          cacheRead: 70,
+          cacheWrite: 10,
+          observed: { cacheRead: true, cacheWrite: true },
+          uncached: 20,
+        },
+        inputTokens: 100,
+        outputTokens: 25,
+        totalTokens: 125,
+      },
+      type: "llm:complete",
+    });
+
+    streamBridge.end("run/run_1");
+    await expect(iterator.next()).resolves.toMatchObject({ done: true });
+  });
+
   it("translates reasoning events from the run stream", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const source = createStreamBridgeRunEventSource(streamBridge);

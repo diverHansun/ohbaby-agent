@@ -1,4 +1,4 @@
-import type { ChatCompletionMessage } from "../llm-client/index.js";
+import type { ChatCompletionMessage, TokenUsage } from "../llm-client/index.js";
 
 export type MessageRole = "user" | "assistant" | "system";
 
@@ -74,11 +74,13 @@ export interface PartBase {
   readonly time?: PartTime;
 }
 
-export interface TokenUsageMetadata {
+export interface LegacyTokenUsageMetadata {
   readonly promptTokens: number;
   readonly completionTokens: number;
   readonly totalTokens: number;
 }
+
+export type TokenUsageMetadata = TokenUsage | LegacyTokenUsageMetadata;
 
 export interface PartMetadata {
   readonly tokenUsage?: TokenUsageMetadata;

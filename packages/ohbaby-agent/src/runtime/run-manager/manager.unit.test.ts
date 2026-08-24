@@ -324,6 +324,17 @@ class CompletingLifecycle implements RunLifecycle {
       timestamp: 30,
       finishReason: "stop",
       completeMessage: { role: "assistant", content: "Hello" },
+      tokenUsage: {
+        inputBreakdown: {
+          cacheRead: 5,
+          cacheWrite: 0,
+          observed: { cacheRead: true, cacheWrite: false },
+          uncached: 2,
+        },
+        inputTokens: 7,
+        outputTokens: 5,
+        totalTokens: 12,
+      },
     };
 
     return {
@@ -354,6 +365,7 @@ class UsageLifecycle implements RunLifecycle {
         inputTokens: 7,
         outputTokens: 5,
         totalTokens: 12,
+        usageComplete: true,
       },
     };
   }
@@ -871,6 +883,21 @@ describe("RunManager", () => {
       event: "run.llm.start",
       scope: "run/run_1",
     });
+    expect(
+      bridge.events.find((event) => event.event === "run.llm.complete"),
+    ).toMatchObject({
+      data: {
+        sessionId: "session_1",
+        step: 1,
+        tokenUsage: {
+          inputTokens: 7,
+          outputTokens: 5,
+          totalTokens: 12,
+        },
+      },
+      event: "run.llm.complete",
+      scope: "run/run_1",
+    });
     expect(bridge.endedScopes).toEqual(["run/run_1"]);
     expect(sandboxManager.released).toEqual(["lease_session_1"]);
     expect(manager.list("session_1")).toEqual([]);
@@ -1043,6 +1070,7 @@ describe("RunManager", () => {
         inputTokens: 7,
         outputTokens: 5,
         totalTokens: 12,
+        usageComplete: true,
       },
     });
   });

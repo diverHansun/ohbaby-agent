@@ -16,8 +16,8 @@ import type {
   InterfaceProviderInstance,
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
-  InterfaceProviderTokenUsage,
 } from "./types.js";
+import { createAnthropicUsageAccumulator } from "./token-usage.js";
 
 type OpenAIMessageWithExtras = ChatCompletionMessageParam & {
   role: string;
@@ -54,29 +54,6 @@ function mapStopReason(
     default:
       return undefined;
   }
-}
-
-function normalizeTokenUsage(
-  usage:
-    | {
-        input_tokens: number | null;
-        output_tokens: number;
-      }
-    | null
-    | undefined,
-): InterfaceProviderTokenUsage | undefined {
-  if (!usage) {
-    return undefined;
-  }
-
-  const promptTokens = usage.input_tokens ?? 0;
-  const completionTokens = usage.output_tokens;
-
-  return {
-    prompt_tokens: promptTokens,
-    completion_tokens: completionTokens,
-    total_tokens: promptTokens + completionTokens,
-  };
 }
 
 function isTextPart(part: unknown): part is { type: string; text: string } {
@@ -326,6 +303,7 @@ function buildRequestParams(
 
 function buildStreamEvent(
   event: RawMessageStreamEvent,
+  tokenUsage: InterfaceProviderStreamEvent["tokenUsage"],
 ): InterfaceProviderStreamEvent | null {
   switch (event.type) {
     case "content_block_start":
@@ -360,7 +338,7 @@ function buildStreamEvent(
       const streamEvent: InterfaceProviderStreamEvent = {
         finishReason: mapStopReason(event.delta.stop_reason),
         rawFinishReason: event.delta.stop_reason ?? undefined,
-        tokenUsage: normalizeTokenUsage(event.usage),
+        tokenUsage,
       };
 
       return streamEvent.finishReason || streamEvent.tokenUsage
@@ -368,6 +346,7 @@ function buildStreamEvent(
         : null;
     }
     case "message_start":
+      return tokenUsage ? { tokenUsage } : null;
     case "content_block_stop":
     case "message_stop":
     default:
@@ -400,8 +379,21 @@ export function createAnthropicProvider(
           void,
           unknown
         > {
+          const usage = createAnthropicUsageAccumulator();
           for await (const rawEvent of stream) {
-            const event = buildStreamEvent(rawEvent);
+            const tokenUsage =
+              rawEvent.type === "message_start"
+                ? usage.update(rawEvent.message.usage)
+                : rawEvent.type === "message_delta"
+                  ? usage.update(rawEvent.usage)
+                  : undefined;
+            if (rawEvent.type === "message_start") {
+              // message_start usage initializes attempt-local accounting. It
+              // is deliberately not exposed as a half-complete provider frame;
+              // the terminal message_delta receives the merged snapshot.
+              continue;
+            }
+            const event = buildStreamEvent(rawEvent, tokenUsage);
             if (event) {
               yield event;
             }

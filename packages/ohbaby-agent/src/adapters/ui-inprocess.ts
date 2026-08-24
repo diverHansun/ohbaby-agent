@@ -2315,7 +2315,7 @@ export function createInProcessUiBackendClient(
     if (completion?.status === "succeeded") {
       return {
         status: "succeeded",
-        ...(completion.usage?.totalTokens === undefined
+        ...(completion.usage?.usageComplete !== true
           ? {}
           : { tokensUsed: completion.usage.totalTokens }),
       };

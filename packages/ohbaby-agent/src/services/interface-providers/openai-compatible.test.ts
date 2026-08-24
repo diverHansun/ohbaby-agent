@@ -121,9 +121,9 @@ describe("openai-compatible provider", () => {
         finishReason: "stop",
         rawFinishReason: "stop",
         tokenUsage: {
-          prompt_tokens: 10,
-          completion_tokens: 2,
-          total_tokens: 12,
+          inputTokens: 10,
+          outputTokens: 2,
+          totalTokens: 12,
         },
       },
     ]);
@@ -329,12 +329,108 @@ describe("openai-compatible provider", () => {
         finishReason: "stop",
         rawFinishReason: "stop",
         tokenUsage: {
-          prompt_tokens: 10,
-          completion_tokens: 2,
-          total_tokens: 12,
+          inputTokens: 10,
+          outputTokens: 2,
+          totalTokens: 12,
         },
       },
     ]);
+  });
+
+  it("prefers final usage-only accounting over preliminary finish-chunk usage", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai",
+      apiKey: "test-key",
+      baseUrl: "https://api.openai.com/v1",
+    });
+    vi.spyOn(provider.client.chat.completions, "create").mockResolvedValue(
+      createChunkStream([
+        createChunk({
+          choices: [
+            {
+              delta: { content: "ok" },
+              finish_reason: "stop",
+              index: 0,
+            },
+          ],
+          usage: {
+            prompt_tokens: 5,
+            completion_tokens: 1,
+            total_tokens: 6,
+          },
+        }),
+        createChunk({
+          choices: [],
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 2,
+            total_tokens: 12,
+          },
+        }),
+      ]) as unknown as Awaited<
+        ReturnType<typeof provider.client.chat.completions.create>
+      >,
+    );
+
+    const stream = await provider.streamChatCompletion({
+      model: "gpt-4",
+      messages: [{ role: "user", content: "Hello" }],
+      temperature: 0,
+      maxTokens: 16,
+    });
+    const events: InterfaceProviderStreamEvent[] = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      {
+        finishReason: "stop",
+        rawFinishReason: "stop",
+        textDelta: "ok",
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 2,
+          totalTokens: 12,
+        },
+      },
+    ]);
+  });
+
+  it("preserves an unknown raw finish reason instead of dropping the event", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai",
+      apiKey: "test-key",
+      baseUrl: "https://api.openai.com/v1",
+    });
+    vi.spyOn(provider.client.chat.completions, "create").mockResolvedValue(
+      createChunkStream([
+        createChunk({
+          choices: [
+            {
+              delta: {},
+              finish_reason: "future_reason" as never,
+              index: 0,
+            },
+          ],
+        }),
+      ]) as unknown as Awaited<
+        ReturnType<typeof provider.client.chat.completions.create>
+      >,
+    );
+
+    const stream = await provider.streamChatCompletion({
+      model: "gpt-4",
+      messages: [{ role: "user", content: "Hello" }],
+      temperature: 0,
+      maxTokens: 16,
+    });
+    const events: InterfaceProviderStreamEvent[] = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([{ rawFinishReason: "future_reason" }]);
   });
 
   it("should stream chunked local SSE responses with native fetch on Node", async () => {
@@ -423,9 +519,9 @@ describe("openai-compatible provider", () => {
           finishReason: "stop",
           rawFinishReason: "stop",
           tokenUsage: {
-            completion_tokens: 2,
-            prompt_tokens: 1,
-            total_tokens: 3,
+            inputTokens: 1,
+            outputTokens: 2,
+            totalTokens: 3,
           },
         },
       ]);

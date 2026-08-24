@@ -402,7 +402,12 @@ export class RunWorker {
         withDefined({
           ...this.streamBase(event),
           timestamp: event.timestamp,
+          step: event.step,
           finishReason: event.finishReason,
+          tokenUsage:
+            event.tokenUsage === undefined
+              ? undefined
+              : safeJsonValue(event.tokenUsage),
         }),
       );
       return;

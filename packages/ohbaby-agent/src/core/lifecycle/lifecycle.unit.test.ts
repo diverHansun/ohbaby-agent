@@ -7,6 +7,7 @@ import { createBus } from "../../bus/index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,
+  readTokenUsageMetadata,
 } from "../message/index.js";
 import type { MessageIdGenerator } from "../message/index.js";
 import { DEFAULT_MAX_STEPS, Lifecycle } from "./index.js";
@@ -369,9 +370,14 @@ describe("Lifecycle.run", () => {
     } as unknown as ToolSchedulerInstance;
     const resetTurnCompactionCount =
       vi.fn<ContextManager["resetTurnCompactionCount"]>();
-    const contextManager = createContextManagerMock(prepareTurn, {
-      resetTurnCompactionCount,
-    });
+    const updateCalibrationFactor =
+      vi.fn<ContextManager["updateCalibrationFactor"]>();
+    const contextManager = {
+      ...createContextManagerMock(prepareTurn, {
+        resetTurnCompactionCount,
+      }),
+      updateCalibrationFactor,
+    };
     const resolvedTools = [
       {
         function: {
@@ -397,6 +403,17 @@ describe("Lifecycle.run", () => {
                 },
               ],
               finishReason: "tool_calls",
+              tokenUsage: {
+                inputBreakdown: {
+                  cacheRead: 80,
+                  cacheWrite: 0,
+                  observed: { cacheRead: true, cacheWrite: false },
+                  uncached: 20,
+                },
+                inputTokens: 100,
+                outputTokens: 5,
+                totalTokens: 105,
+              },
             },
           ],
           [{ textDelta: "Done.", finishReason: "stop" }],
@@ -480,7 +497,20 @@ describe("Lifecycle.run", () => {
       finalResponse: "Done.",
       finishReason: "stop",
       success: true,
+      usage: {
+        inputTokens: 100,
+        outputTokens: 5,
+        totalTokens: 105,
+        usageComplete: false,
+      },
     });
+    expect(result.usage?.inputBreakdown).toBeUndefined();
+    expect(updateCalibrationFactor).toHaveBeenCalledTimes(1);
+    expect(updateCalibrationFactor).toHaveBeenCalledWith(
+      "session_test",
+      100,
+      expect.any(Number),
+    );
   });
 
   it("updates context calibration from provider prompt usage and the prepared heuristic", async () => {
@@ -491,6 +521,7 @@ describe("Lifecycle.run", () => {
       idGenerator: createDeterministicIds(),
       now: () => 1_700_000_000_000,
     });
+    const updatePartSpy = vi.spyOn(messageManager, "updatePart");
     const prepareTurn = vi
       .fn<ContextManager["prepareTurn"]>()
       .mockResolvedValue(
@@ -515,9 +546,15 @@ describe("Lifecycle.run", () => {
               finishReason: "stop",
               textDelta: "Done.",
               tokenUsage: {
-                completion_tokens: 50,
-                prompt_tokens: 456,
-                total_tokens: 506,
+                inputBreakdown: {
+                  cacheRead: 300,
+                  cacheWrite: 0,
+                  observed: { cacheRead: true, cacheWrite: false },
+                  uncached: 156,
+                },
+                inputTokens: 456,
+                outputTokens: 50,
+                totalTokens: 506,
               },
             },
           ],
@@ -530,7 +567,7 @@ describe("Lifecycle.run", () => {
       } as unknown as ToolSchedulerInstance,
     });
 
-    await consumeLifecycleEvents(
+    const { result } = await consumeLifecycleEvents(
       lifecycle.run({
         directory: "D:/repo",
         modelId: "fake-model",
@@ -543,6 +580,51 @@ describe("Lifecycle.run", () => {
       456,
       321,
     );
+    expect(result.usage).toEqual({
+      inputBreakdown: {
+        cacheRead: 300,
+        cacheWrite: 0,
+        observed: { cacheRead: true, cacheWrite: false },
+        uncached: 156,
+      },
+      inputTokens: 456,
+      outputTokens: 50,
+      totalTokens: 506,
+      usageComplete: true,
+    });
+    expect(updatePartSpy).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        metadata: {
+          tokenUsage: {
+            inputBreakdown: {
+              cacheRead: 300,
+              cacheWrite: 0,
+              observed: { cacheRead: true, cacheWrite: false },
+              uncached: 156,
+            },
+            inputTokens: 456,
+            outputTokens: 50,
+            totalTokens: 506,
+          },
+        },
+      }),
+    );
+    const storedUsage = (await messageManager.listBySession("session_test"))
+      .flatMap((message) => message.parts)
+      .map((part) => readTokenUsageMetadata(part.metadata))
+      .find((usage) => usage !== undefined);
+    expect(storedUsage).toEqual({
+      inputBreakdown: {
+        cacheRead: 300,
+        cacheWrite: 0,
+        observed: { cacheRead: true, cacheWrite: false },
+        uncached: 156,
+      },
+      inputTokens: 456,
+      outputTokens: 50,
+      totalTokens: 506,
+    });
   });
 
   it("treats provider output length truncation as a structured terminal failure", async () => {
@@ -624,9 +706,9 @@ describe("Lifecycle.run", () => {
               finishReason: "stop",
               textDelta: "Done.",
               tokenUsage: {
-                completion_tokens: 5,
-                prompt_tokens: 50,
-                total_tokens: 55,
+                inputTokens: 50,
+                outputTokens: 5,
+                totalTokens: 55,
               },
             },
           ],

@@ -156,9 +156,9 @@ describe("anthropic provider", () => {
         finishReason: "stop",
         rawFinishReason: "end_turn",
         tokenUsage: {
-          prompt_tokens: 12,
-          completion_tokens: 4,
-          total_tokens: 16,
+          inputTokens: 12,
+          outputTokens: 4,
+          totalTokens: 16,
         },
       },
     ]);
@@ -280,9 +280,9 @@ describe("anthropic provider", () => {
         finishReason: "tool_calls",
         rawFinishReason: "tool_use",
         tokenUsage: {
-          prompt_tokens: 20,
-          completion_tokens: 8,
-          total_tokens: 28,
+          inputTokens: 20,
+          outputTokens: 8,
+          totalTokens: 28,
         },
       },
     ]);
@@ -332,9 +332,77 @@ describe("anthropic provider", () => {
         finishReason: "stop",
         rawFinishReason: "pause_turn",
         tokenUsage: {
-          prompt_tokens: 5,
-          completion_tokens: 1,
-          total_tokens: 6,
+          inputTokens: 5,
+          outputTokens: 1,
+          totalTokens: 6,
+        },
+      },
+    ]);
+  });
+
+  it("merges message_start cache usage with cumulative message_delta usage", async () => {
+    const provider = createAnthropicProvider({
+      id: "anthropic",
+      apiKey: "test-key",
+      baseUrl: "https://api.anthropic.com",
+    });
+    vi.spyOn(provider.client.messages, "stream").mockReturnValue(
+      createRawStream([
+        {
+          type: "message_start",
+          message: {
+            usage: {
+              cache_creation_input_tokens: 400,
+              cache_read_input_tokens: 600,
+              input_tokens: 100,
+              output_tokens: 0,
+            },
+          },
+        } as unknown as RawMessageStreamEvent,
+        {
+          type: "message_delta",
+          delta: {
+            container: null,
+            stop_reason: "end_turn",
+            stop_details: null,
+            stop_sequence: null,
+          },
+          usage: {
+            input_tokens: 0,
+            output_tokens: 25,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            server_tool_use: null,
+          },
+        },
+      ]),
+    );
+
+    const stream = await provider.streamChatCompletion({
+      model: "claude-3-5-sonnet-latest",
+      messages: [{ role: "user", content: "cached" }],
+      temperature: 0,
+      maxTokens: 32,
+    });
+    const events: InterfaceProviderStreamEvent[] = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      {
+        finishReason: "stop",
+        rawFinishReason: "end_turn",
+        tokenUsage: {
+          inputBreakdown: {
+            cacheRead: 600,
+            cacheWrite: 400,
+            observed: { cacheRead: true, cacheWrite: true },
+            uncached: 100,
+          },
+          inputTokens: 1_100,
+          outputTokens: 25,
+          totalTokens: 1_125,
         },
       },
     ]);

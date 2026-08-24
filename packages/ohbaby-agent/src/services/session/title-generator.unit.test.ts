@@ -64,6 +64,34 @@ describe("session title generator", () => {
     ).resolves.toBeNull();
   });
 
+  it("accepts canonical auxiliary usage without exposing it as session state", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const client = createFakeLLMClient(
+      [
+        { textDelta: "Cache-aware title" },
+        {
+          finishReason: "stop",
+          tokenUsage: {
+            inputBreakdown: {
+              cacheRead: 80,
+              cacheWrite: 0,
+              observed: { cacheRead: true, cacheWrite: false },
+              uncached: 20,
+            },
+            inputTokens: 100,
+            outputTokens: 3,
+            totalTokens: 103,
+          },
+        },
+      ],
+      requests,
+    );
+
+    await expect(
+      generateSessionTitle({ firstUserMessage: "Name it", llmClient: client }),
+    ).resolves.toBe("Cache-aware title");
+  });
+
   it("logs title generation failures to stderr when OHBABY_DEBUG is set", async () => {
     vi.stubEnv("OHBABY_DEBUG", "1");
     const write = vi

@@ -3,6 +3,7 @@ import type { CompactResult, ContextUsage } from "../../core/context/index.js";
 import type {
   LLMClientInstance,
   StreamingResponse,
+  TokenUsage,
 } from "../../core/llm-client/index.js";
 
 type StreamChatCompletion = (
@@ -23,12 +24,18 @@ import {
   noticeFromCompactResult,
 } from "./prompt-context.js";
 
-function streamWithContent(content: string): AsyncIterable<StreamingResponse> {
+function streamWithContent(
+  content: string,
+  tokenUsage?: TokenUsage,
+): AsyncIterable<StreamingResponse> {
   return (async function* (): AsyncGenerator<StreamingResponse, void, unknown> {
     await Promise.resolve();
     yield {
       completeMessage: { content, role: "assistant" },
       isComplete: true,
+      ...(tokenUsage === undefined
+        ? {}
+        : { tokenUsage: tokenUsage as StreamingResponse["tokenUsage"] }),
     };
   })();
 }
@@ -75,6 +82,32 @@ describe("createContextSummaryClient", () => {
       }),
     ).resolves.toBe("valid summary");
     expect(streamChatCompletionMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts canonical auxiliary usage without coupling it to context accounting", async () => {
+    streamChatCompletionMock.mockReturnValueOnce(
+      streamWithContent("summary", {
+        inputBreakdown: {
+          cacheRead: 80,
+          cacheWrite: 0,
+          observed: { cacheRead: true, cacheWrite: false },
+          uncached: 20,
+        },
+        inputTokens: 100,
+        outputTokens: 10,
+        totalTokens: 110,
+      }),
+    );
+    const client = createContextSummaryClient({} as LLMClientInstance);
+
+    await expect(
+      client.generateSummary({
+        history: [],
+        prompt: "summarize",
+        sessionId: "child_session",
+        systemPrompt: "system",
+      }),
+    ).resolves.toBe("summary");
   });
 
   it("throws a clear error after repeated empty summaries", async () => {

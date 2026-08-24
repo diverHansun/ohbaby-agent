@@ -32,6 +32,7 @@ import type {
   LifecycleSessionParams,
   TurnContext,
 } from "./types.js";
+import { aggregateTokenUsage } from "./token-usage.js";
 
 export const DEFAULT_MAX_STEPS = 1000;
 const MAX_STEPS_FINALIZATION_TOOL_MESSAGE =
@@ -89,25 +90,9 @@ function getTextContent(message: ChatCompletionMessage): string {
   return "";
 }
 
-function toUsage(tokenUsage: TokenUsage | undefined): LifecycleResult["usage"] {
-  if (!tokenUsage) {
-    return undefined;
-  }
-
-  return {
-    inputTokens: tokenUsage.prompt_tokens,
-    outputTokens: tokenUsage.completion_tokens,
-    totalTokens: tokenUsage.total_tokens,
-  };
-}
-
 function toPartTokenUsageMetadata(tokenUsage: TokenUsage | undefined):
   | {
-      readonly tokenUsage: {
-        readonly promptTokens: number;
-        readonly completionTokens: number;
-        readonly totalTokens: number;
-      };
+      readonly tokenUsage: TokenUsage;
     }
   | undefined {
   if (!tokenUsage) {
@@ -116,28 +101,18 @@ function toPartTokenUsageMetadata(tokenUsage: TokenUsage | undefined):
 
   return {
     tokenUsage: {
-      promptTokens: tokenUsage.prompt_tokens,
-      completionTokens: tokenUsage.completion_tokens,
-      totalTokens: tokenUsage.total_tokens,
+      ...(tokenUsage.inputBreakdown === undefined
+        ? {}
+        : {
+            inputBreakdown: {
+              ...tokenUsage.inputBreakdown,
+              observed: { ...tokenUsage.inputBreakdown.observed },
+            },
+          }),
+      inputTokens: tokenUsage.inputTokens,
+      outputTokens: tokenUsage.outputTokens,
+      totalTokens: tokenUsage.inputTokens + tokenUsage.outputTokens,
     },
-  };
-}
-
-function addUsage(
-  left: LifecycleResult["usage"],
-  right: LifecycleResult["usage"],
-): LifecycleResult["usage"] {
-  if (!left) {
-    return right;
-  }
-  if (!right) {
-    return left;
-  }
-
-  return {
-    inputTokens: left.inputTokens + right.inputTokens,
-    outputTokens: left.outputTokens + right.outputTokens,
-    totalTokens: left.totalTokens + right.totalTokens,
   };
 }
 
@@ -630,18 +605,18 @@ export class Lifecycle {
         };
       }
 
-      usage = addUsage(usage, toUsage(finalEvent.tokenUsage));
+      usage = aggregateTokenUsage(usage, finalEvent.tokenUsage);
       if (finalEvent.tokenUsage !== undefined) {
         if (params.contextScopeId === undefined) {
           contextManager.updateCalibrationFactor(
             params.sessionId,
-            finalEvent.tokenUsage.prompt_tokens,
+            finalEvent.tokenUsage.inputTokens,
             prepared.sentHeuristic,
           );
         } else {
           contextManager.updateCalibrationFactor(
             params.sessionId,
-            finalEvent.tokenUsage.prompt_tokens,
+            finalEvent.tokenUsage.inputTokens,
             prepared.sentHeuristic,
             params.contextScopeId,
           );

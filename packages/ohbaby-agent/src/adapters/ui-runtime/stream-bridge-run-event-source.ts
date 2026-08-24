@@ -35,6 +35,60 @@ function numberData(
   return typeof value === "number" ? value : undefined;
 }
 
+function nonNegativeInteger(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    Number.isFinite(value) &&
+    value >= 0
+  );
+}
+
+function tokenUsageData(value: unknown): LlmCompleteEvent["tokenUsage"] {
+  const data = objectData(value);
+  if (
+    !data ||
+    !nonNegativeInteger(data.inputTokens) ||
+    !nonNegativeInteger(data.outputTokens)
+  ) {
+    return undefined;
+  }
+
+  const inputTokens = data.inputTokens;
+  const outputTokens = data.outputTokens;
+  const rawBreakdown = objectData(data.inputBreakdown);
+  const observed = objectData(rawBreakdown?.observed);
+  const hasValidBreakdown =
+    rawBreakdown !== undefined &&
+    observed !== undefined &&
+    nonNegativeInteger(rawBreakdown.uncached) &&
+    nonNegativeInteger(rawBreakdown.cacheRead) &&
+    nonNegativeInteger(rawBreakdown.cacheWrite) &&
+    rawBreakdown.uncached + rawBreakdown.cacheRead + rawBreakdown.cacheWrite ===
+      inputTokens &&
+    typeof observed.cacheRead === "boolean" &&
+    typeof observed.cacheWrite === "boolean";
+
+  return {
+    ...(hasValidBreakdown
+      ? {
+          inputBreakdown: {
+            cacheRead: rawBreakdown.cacheRead as number,
+            cacheWrite: rawBreakdown.cacheWrite as number,
+            observed: {
+              cacheRead: observed.cacheRead as boolean,
+              cacheWrite: observed.cacheWrite as boolean,
+            },
+            uncached: rawBreakdown.uncached as number,
+          },
+        }
+      : {}),
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+  };
+}
+
 function scopeData(data: Record<string, unknown>): {
   readonly contextScopeId?: string;
 } {
@@ -115,6 +169,8 @@ function lifecycleEventFromStream(
     };
   }
   if (item.event === "run.llm.complete") {
+    const step = numberData(data, "step");
+    const tokenUsage = tokenUsageData(data.tokenUsage);
     return {
       ...scopeData(data),
       completeMessage: { content: "", role: "assistant" },
@@ -122,7 +178,9 @@ function lifecycleEventFromStream(
         | LlmCompleteEvent["finishReason"]
         | undefined,
       sessionId,
+      ...(step === undefined ? {} : { step }),
       timestamp,
+      ...(tokenUsage === undefined ? {} : { tokenUsage }),
       type: "llm:complete",
     };
   }

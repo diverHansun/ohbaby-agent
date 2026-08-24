@@ -8,6 +8,7 @@ import type {
 
 export type {
   CreateInterfaceProviderOptions,
+  InputTokenBreakdown,
   InterfaceProviderFinishReason,
   InterfaceProviderInstance,
   InterfaceProviderKind,
@@ -19,6 +20,10 @@ export type {
 
 export { createAnthropicProvider } from "./anthropic.js";
 export { createOpenAICompatibleProvider } from "./openai-compatible.js";
+export type {
+  TokenUsageDiagnosticReporter,
+  TokenUsageNormalizationDiagnostic,
+} from "./token-usage.js";
 
 export function resolveInterfaceProviderKind(
   interfaceProvider: InterfaceProviderKind | undefined,
