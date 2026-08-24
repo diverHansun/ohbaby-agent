@@ -63,6 +63,32 @@ describe("messageToUiMessage", () => {
     expect(uiMessage?.status).toBeUndefined();
   });
 
+  it("hides model-only runtime parts while keeping the user text", () => {
+    const info: UserMessage = {
+      agent: "default",
+      id: "message_user",
+      role: "user",
+      sessionId: "session_1",
+      time: { created: 1_000 },
+    };
+    const runtimePart = {
+      ...textPart(
+        "message_user",
+        "<environment_context>secret</environment_context>",
+      ),
+      metadata: { kind: "model-context:runtime:v1" },
+      orderIndex: 1,
+      synthetic: true,
+    } as MessageWithParts["parts"][number];
+
+    expect(
+      messageToUiMessage({
+        info,
+        parts: [textPart("message_user", "hello"), runtimePart],
+      })?.parts,
+    ).toEqual([{ text: "hello", type: "text" }]);
+  });
+
   it("omits todo tool calls and results from a persisted transcript", () => {
     const message = {
       ...assistantMessage({ time: { created: 1_000 } }),

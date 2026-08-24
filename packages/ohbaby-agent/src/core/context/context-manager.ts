@@ -43,13 +43,20 @@ import type {
   ContextManagerOptions,
   ContextMeasurementPayload,
   ContextUsage,
+  AgentRunPromptSnapshot,
+  CreateRunPromptSnapshotInput,
   PreparedTurn,
   PrepareTurnInput,
   PruneResult,
   TokenCounter,
 } from "./types.js";
 import type { ChatCompletionMessage } from "../llm-client/index.js";
-import type { MessageWithParts, Part } from "../message/index.js";
+import {
+  isModelContextPart,
+  MODEL_CONTEXT_RUNTIME_KIND,
+  type MessageWithParts,
+  type Part,
+} from "../message/index.js";
 import type { MergedMemory } from "../memory/index.js";
 
 const CALIBRATION_EMA_ALPHA = 0.5;
@@ -57,6 +64,17 @@ const CALIBRATION_FACTOR_MIN = 0.5;
 const CALIBRATION_FACTOR_MAX = 3.0;
 
 const EMPTY_MEMORY: MergedMemory = { global: "", project: "", merged: "" };
+
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
+  if (value === null || typeof value !== "object" || seen.has(value)) {
+    return value;
+  }
+  seen.add(value);
+  for (const nested of Object.values(value)) {
+    deepFreeze(nested, seen);
+  }
+  return Object.freeze(value);
+}
 
 type SummaryCandidate =
   | CompressionResult
@@ -457,6 +475,14 @@ export function createContextManager(
     }
   }
 
+  function disposeScope(sessionId: string, contextScopeId: string): void {
+    const key = scopedSessionKey({ sessionId, contextScopeId });
+    calibrationFactors.delete(key);
+    maskCutoffs.delete(key);
+    turnCompactionCounts.delete(key);
+    thrashLocks.delete(key);
+  }
+
   function getTurnCompactionCount(
     sessionId: string,
     contextScopeId?: string,
@@ -541,14 +567,14 @@ export function createContextManager(
       memory: input.context.memory,
       systemPrompt: input.context.systemPrompt,
     });
-    return {
+    const request: ContextMeasurementPayload = structuredClone({
       messages:
         input.tailDirectives === undefined
           ? messages
           : [...messages, ...input.tailDirectives],
-      tools:
-        input.tools === undefined ? undefined : [...input.tools],
-    };
+      tools: input.tools === undefined ? undefined : [...input.tools],
+    });
+    return deepFreeze(request);
   }
 
   function measureUsage(
@@ -709,8 +735,8 @@ export function createContextManager(
     directory: string,
     input: ContextAssemblyOptions,
   ): Promise<AssembledContext> {
-    let memory = EMPTY_MEMORY;
-    if (!input.isSubagent) {
+    let memory = input.promptSnapshot?.memory ?? EMPTY_MEMORY;
+    if (input.promptSnapshot === undefined && !input.isSubagent) {
       try {
         memory = await options.memory.load(directory);
       } catch (error) {
@@ -719,14 +745,15 @@ export function createContextManager(
     }
 
     const [systemPrompt, rawHistory] = await Promise.all([
-      options.systemPromptProvider.build({
-        agentName: input.agentName,
-        contextScopeId: input.contextScopeId,
-        sessionId,
-        directory,
-        isSubagent: input.isSubagent,
-        toolNames: input.toolNames,
-      }),
+      input.promptSnapshot?.systemPrompt ??
+        options.systemPromptProvider.build({
+          agentName: input.agentName,
+          contextScopeId: input.contextScopeId,
+          sessionId,
+          directory,
+          isSubagent: input.isSubagent,
+          toolNames: input.toolNames,
+        }),
       input.contextScopeId === undefined
         ? options.messageManager.listBySession(sessionId)
         : options.messageManager.listBySession(sessionId, {
@@ -741,6 +768,55 @@ export function createContextManager(
       sessionId,
       systemPrompt,
       isSubagent: input.isSubagent,
+    });
+  }
+
+  async function createRunPromptSnapshot(
+    input: CreateRunPromptSnapshotInput,
+  ): Promise<AgentRunPromptSnapshot> {
+    let memory = EMPTY_MEMORY;
+    if (!input.isSubagent) {
+      try {
+        memory = await options.memory.load(input.directory);
+      } catch (error) {
+        options.onWarning?.("Unable to load memory for context", error);
+      }
+    }
+
+    const systemPrompt = await options.systemPromptProvider.build(input);
+    if (input.initiatingUserMessageId !== undefined) {
+      const history =
+        input.contextScopeId === undefined
+          ? await options.messageManager.listBySession(input.sessionId)
+          : await options.messageManager.listBySession(input.sessionId, {
+              contextScopeId: input.contextScopeId,
+            });
+      const initiatingMessage = history.find(
+        (message) => message.info.id === input.initiatingUserMessageId,
+      );
+      if (initiatingMessage?.info.role !== "user") {
+        throw new Error(
+          `Initiating user message ${input.initiatingUserMessageId} is not present in the requested context scope`,
+        );
+      }
+      const alreadyAttached = initiatingMessage.parts.some(isModelContextPart);
+      if (!alreadyAttached) {
+        const runtimeContext =
+          await options.systemPromptProvider.buildRuntimeContext?.(input);
+        if (runtimeContext !== undefined && runtimeContext.trim() !== "") {
+          await options.messageManager.appendPart(initiatingMessage.info.id, {
+            metadata: { kind: MODEL_CONTEXT_RUNTIME_KIND },
+            synthetic: true,
+            text: `\n\n${runtimeContext}`,
+            type: "text",
+          });
+        }
+      }
+    }
+
+    return deepFreeze({
+      memory: { ...memory },
+      systemPrompt,
     });
   }
 
@@ -1350,6 +1426,7 @@ export function createContextManager(
       agentName: input.agentName,
       contextScopeId: input.contextScopeId,
       isSubagent,
+      promptSnapshot: input.promptSnapshot,
       toolNames: input.toolNames,
     });
     const unreducedMeasurement = measureContext({
@@ -1454,6 +1531,7 @@ export function createContextManager(
 
   return {
     assemble,
+    createRunPromptSnapshot,
     getUsage(input): ContextUsage {
       return measureContext({
         context: input.context,
@@ -1466,6 +1544,7 @@ export function createContextManager(
     compact,
     prepareTurn,
     resetTurnCompactionCount,
+    disposeScope,
     disposeSession,
   };
 }

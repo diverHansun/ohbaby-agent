@@ -136,6 +136,11 @@ describe("auxiliary token usage isolation", () => {
     const updateCalibrationFactor =
       vi.fn<ContextManager["updateCalibrationFactor"]>();
     const contextManager = {
+      createRunPromptSnapshot: vi.fn().mockResolvedValue({
+        memory: { global: "", merged: "", project: "" },
+        systemPrompt: "stable",
+      }),
+      disposeScope: vi.fn(),
       prepareTurn: vi.fn().mockResolvedValue({
         assembledAt: 1,
         hasSummary: false,

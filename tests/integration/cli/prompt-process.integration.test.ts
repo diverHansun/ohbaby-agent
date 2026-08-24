@@ -407,7 +407,9 @@ describe("CLI prompt process smoke", () => {
       });
       const messages = mainRequest.body.messages;
       expect(Array.isArray(messages) ? messages.at(-1) : null).toMatchObject({
-        content: "hello",
+        content: expect.stringMatching(
+          /^hello\n\n<environment_context>[\s\S]*<\/environment_context>$/u,
+        ) as string,
         role: "user",
       });
 

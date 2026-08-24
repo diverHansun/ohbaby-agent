@@ -224,9 +224,171 @@ describe("prompt-cache wire contract", () => {
     const params = stream.mock.calls[0]?.[0];
     expect(params).toMatchObject({
       cache_control: { type: "ephemeral" },
-      system: "Stable system",
+      system: [
+        {
+          cache_control: { type: "ephemeral" },
+          text: "Stable system",
+          type: "text",
+        },
+      ],
     });
     expect(JSON.stringify(params.messages)).not.toContain("cache_control");
+  });
+
+  it("keeps Anthropic tools, stable system blocks, and prior messages as a structural prefix across tool steps", async () => {
+    const provider = createAnthropicProvider({
+      id: "anthropic",
+      apiKey: "test-key",
+      baseUrl: "https://api.anthropic.com",
+    });
+    const stream = vi
+      .spyOn(provider.client.messages, "stream")
+      .mockReturnValue(emptyStream<RawMessageStreamEvent>());
+    const tools = [
+      {
+        function: {
+          name: "read_fixture",
+          parameters: { properties: {}, type: "object" },
+        },
+        type: "function" as const,
+      },
+      {
+        function: {
+          name: "write_fixture",
+          parameters: { properties: {}, type: "object" },
+        },
+        type: "function" as const,
+      },
+    ];
+    const firstMessages: ChatCompletionMessageParam[] = [
+      { role: "system", content: "Stable system" },
+      { role: "user", content: "Read the fixture" },
+    ];
+    const secondMessages: ChatCompletionMessageParam[] = [
+      ...firstMessages,
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            function: { arguments: "{}", name: "read_fixture" },
+            id: "call_read",
+            type: "function",
+          },
+        ],
+      },
+      { role: "tool", content: "fixture", tool_call_id: "call_read" },
+    ];
+    for (const messages of [firstMessages, secondMessages]) {
+      await provider.streamChatCompletion({
+        maxTokens: 128,
+        messages,
+        model: "claude-sonnet-4-6",
+        promptCache: wirePromptCache({
+          baseUrl: "https://api.anthropic.com",
+          interfaceProvider: "anthropic",
+          messages,
+          provider: "anthropic",
+        }),
+        temperature: 0,
+        tools,
+      });
+    }
+
+    const first = stream.mock.calls[0][0];
+    const second = stream.mock.calls[1][0];
+    expect(second.tools).toEqual(first.tools);
+    expect(second.system).toEqual(first.system);
+    expect(second.messages.slice(0, first.messages.length)).toEqual(
+      first.messages,
+    );
+  });
+
+  it("keeps the official stable-system anchor beyond twenty tool-use/result blocks", async () => {
+    const provider = createAnthropicProvider({
+      id: "anthropic",
+      apiKey: "test-key",
+      baseUrl: "https://api.anthropic.com",
+    });
+    const stream = vi
+      .spyOn(provider.client.messages, "stream")
+      .mockReturnValue(emptyStream<RawMessageStreamEvent>());
+    const toolCalls = Array.from({ length: 21 }, (_, index) => ({
+      function: {
+        arguments: JSON.stringify({ index }),
+        name: "read_fixture",
+      },
+      id: `call_${String(index)}`,
+      type: "function" as const,
+    }));
+    const messages: ChatCompletionMessageParam[] = [
+      { role: "system", content: "Stable system" },
+      { role: "assistant", content: null, tool_calls: toolCalls },
+      ...toolCalls.map((toolCall) => ({
+        role: "tool" as const,
+        content: `result-${toolCall.id}`,
+        tool_call_id: toolCall.id,
+      })),
+    ];
+
+    await provider.streamChatCompletion({
+      maxTokens: 128,
+      messages,
+      model: "claude-sonnet-4-6",
+      promptCache: wirePromptCache({
+        baseUrl: "https://api.anthropic.com",
+        interfaceProvider: "anthropic",
+        messages,
+        policy: "auto",
+        provider: "anthropic",
+      }),
+      temperature: 0,
+      tools: [
+        {
+          function: {
+            name: "read_fixture",
+            parameters: { properties: {}, type: "object" },
+          },
+          type: "function",
+        },
+        {
+          function: {
+            name: "write_fixture",
+            parameters: { properties: {}, type: "object" },
+          },
+          type: "function",
+        },
+      ],
+    });
+
+    const params = stream.mock.calls[0][0];
+    expect(params.messages).toHaveLength(2);
+    expect(params.tools?.map((tool) => tool.name)).toEqual([
+      "read_fixture",
+      "write_fixture",
+    ]);
+    expect(
+      params.messages.flatMap((message) =>
+        Array.isArray(message.content)
+          ? message.content.filter((block) => block.type === "tool_use")
+          : [],
+      ),
+    ).toHaveLength(21);
+    expect(
+      params.messages.flatMap((message) =>
+        Array.isArray(message.content)
+          ? message.content.filter((block) => block.type === "tool_result")
+          : [],
+      ),
+    ).toHaveLength(21);
+    expect(params.system).toEqual([
+      {
+        cache_control: { type: "ephemeral" },
+        text: "Stable system",
+        type: "text",
+      },
+    ]);
+    expect(params.cache_control).toEqual({ type: "ephemeral" });
   });
 
   it("disabled Anthropic omits controls while start/delta cache usage stays active", async () => {

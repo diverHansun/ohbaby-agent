@@ -13,7 +13,13 @@ export interface EnvironmentDetectionOptions {
 export interface GenerateEnvironmentPromptOptions {
   readonly info: EnvironmentInfo;
   readonly minimal: boolean;
-  readonly tools?: readonly string[];
+}
+
+function escapeBoundaryValue(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
 
 function formatDate(date: Date): string {
@@ -63,21 +69,21 @@ export function generateEnvironmentPrompt(
   options: GenerateEnvironmentPromptOptions,
 ): string {
   const lines = [
-    "<environment>",
-    `Current working directory: ${options.info.cwd}`,
-    `Platform: ${options.info.platform}`,
-    `Date: ${options.info.date}`,
+    "<environment_context>",
+    `Current working directory: ${escapeBoundaryValue(options.info.cwd)}`,
+    `Platform: ${escapeBoundaryValue(options.info.platform)}`,
+    `Date: ${escapeBoundaryValue(options.info.date)}`,
     `Git repository: ${String(options.info.isGitRepo)}`,
   ];
 
   if (!options.minimal && options.info.osVersion) {
-    lines.splice(3, 0, `OS version: ${options.info.osVersion}`);
+    lines.splice(
+      3,
+      0,
+      `OS version: ${escapeBoundaryValue(options.info.osVersion)}`,
+    );
   }
 
-  if (!options.minimal && options.tools && options.tools.length > 0) {
-    lines.push(`Available tools: ${options.tools.join(", ")}`);
-  }
-
-  lines.push("</environment>");
+  lines.push("</environment_context>");
   return lines.join("\n");
 }

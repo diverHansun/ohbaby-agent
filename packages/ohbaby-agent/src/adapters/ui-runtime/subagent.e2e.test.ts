@@ -178,11 +178,11 @@ function fakeLlmClient(
   return {
     config: {
       apiKeyEnv: "FAKE_API_KEY",
-      baseUrl: "https://example.invalid/v1",
+      baseUrl: "https://api.openai.com/v1",
       interfaceProvider: "openai-compatible",
       maxTokens: 128,
       model: "fake-model",
-      provider: "fake",
+      provider: "openai",
       temperature: 0,
     },
     provider: {
@@ -355,16 +355,39 @@ describe("subagent runtime e2e", () => {
     );
     expect(scopedOutMessages).toHaveLength(0);
     expect(requests).toHaveLength(4);
-    expect(
-      requests.filter((request) =>
-        JSON.stringify(request.messages).includes("Task: explore"),
-      ),
-    ).toHaveLength(1);
-    expect(
-      requests.filter((request) =>
-        JSON.stringify(request.messages).includes("Task: research"),
-      ),
-    ).toHaveLength(1);
+    const exploreRequests = requests.filter((request) =>
+      JSON.stringify(request.messages).includes("Task: explore"),
+    );
+    const researchRequests = requests.filter((request) =>
+      JSON.stringify(request.messages).includes("Task: research"),
+    );
+    const parentRequests = requests.filter(
+      (request) => request.contextScopeId === undefined,
+    );
+    expect(exploreRequests).toHaveLength(1);
+    expect(researchRequests).toHaveLength(1);
+    expect(parentRequests).toHaveLength(2);
+    expect(exploreRequests[0]).toMatchObject({
+      contextScopeId: "subagent_e2e_1",
+      purpose: "agent-step",
+    });
+    expect(researchRequests[0]).toMatchObject({
+      contextScopeId: "subagent_e2e_2",
+      purpose: "agent-step",
+    });
+    const parentKey = parentRequests[0]?.promptCache.key;
+    const exploreKey = exploreRequests[0]?.promptCache.key;
+    const researchKey = researchRequests[0]?.promptCache.key;
+    expect(parentRequests[1]?.promptCache.key).toBe(parentKey);
+    expect(new Set([parentKey, exploreKey, researchKey]).size).toBe(3);
+    for (const request of [exploreRequests[0], researchRequests[0]]) {
+      expect(JSON.stringify(request.messages)).toContain(
+        "<environment_context>",
+      );
+      expect(
+        JSON.stringify(request.messages).split("<environment_context>"),
+      ).toHaveLength(2);
+    }
   });
 
   it("lets an explore subagent load and execute an admitted MCP tool", async () => {
@@ -447,6 +470,21 @@ describe("subagent runtime e2e", () => {
     expect(firstToolNames).toContain("select_tools");
     expect(firstToolNames).not.toContain(toolName);
     expect(selectedToolNames).toContain(toolName);
+    expect(
+      new Set(exploreRequests.map((request) => request.promptCache.key)).size,
+    ).toBe(1);
+    expect(
+      exploreRequests.every(
+        (request) => request.contextScopeId === "subagent_e2e_1",
+      ),
+    ).toBe(true);
+    expect(
+      exploreRequests.every(
+        (request) =>
+          JSON.stringify(request.messages).split("<environment_context>")
+            .length === 2,
+      ),
+    ).toBe(true);
     expect(
       JSON.stringify(
         await messageManager.listBySession("session_child", {

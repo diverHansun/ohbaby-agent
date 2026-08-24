@@ -26,6 +26,8 @@ import {
   type SessionManager,
 } from "../../services/session/index.js";
 import { createPermissionState } from "../../permission/index.js";
+import { McpToolMenu } from "../../mcp/integration/dynamic-tool-menu.js";
+import { ScopeToolSequence } from "../../mcp/integration/tool-sequence.js";
 import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
 import type { RunCompletion } from "../../runtime/run-manager/index.js";
 import type { Tool } from "../../core/tool-scheduler/index.js";
@@ -472,6 +474,11 @@ describe("createUiRuntimeComposition skill tools", () => {
       ShellJobRegistry.prototype,
       "disposeScope",
     );
+    const disposeMcpSession = vi.spyOn(McpToolMenu.prototype, "disposeSession");
+    const disposeToolSequenceSession = vi.spyOn(
+      ScopeToolSequence.prototype,
+      "disposeSession",
+    );
     const inactiveSubagent = {
       contextScopeId: "subagent_1",
       createdAt: 1,
@@ -494,6 +501,9 @@ describe("createUiRuntimeComposition skill tools", () => {
     const contextManager = {
       assemble: vi.fn<ContextManager["assemble"]>(),
       compact: vi.fn<ContextManager["compact"]>(),
+      createRunPromptSnapshot:
+        vi.fn<ContextManager["createRunPromptSnapshot"]>(),
+      disposeScope: vi.fn<ContextManager["disposeScope"]>(),
       disposeSession,
       getUsage: vi.fn<ContextManager["getUsage"]>(),
       prepareTurn: vi.fn<ContextManager["prepareTurn"]>(),
@@ -521,6 +531,8 @@ describe("createUiRuntimeComposition skill tools", () => {
     bus.publish(SessionEvent.Removed, { sessionId: "session_1" });
 
     expect(disposeSession).toHaveBeenCalledWith("session_1");
+    expect(disposeMcpSession).toHaveBeenCalledWith("session_1");
+    expect(disposeToolSequenceSession).toHaveBeenCalledWith("session_1");
     await vi.waitFor(() => {
       expect(interruptByParent).toHaveBeenCalledWith(
         "session_1",
@@ -578,6 +590,9 @@ describe("createUiRuntimeComposition skill tools", () => {
     const contextManager = {
       assemble,
       compact,
+      createRunPromptSnapshot:
+        vi.fn<ContextManager["createRunPromptSnapshot"]>(),
+      disposeScope: vi.fn<ContextManager["disposeScope"]>(),
       disposeSession: vi.fn<ContextManager["disposeSession"]>(),
       getUsage,
       prepareTurn: vi.fn<ContextManager["prepareTurn"]>(),
@@ -655,6 +670,9 @@ describe("createUiRuntimeComposition skill tools", () => {
     const contextManager = {
       assemble: vi.fn<ContextManager["assemble"]>(),
       compact: vi.fn<ContextManager["compact"]>(),
+      createRunPromptSnapshot:
+        vi.fn<ContextManager["createRunPromptSnapshot"]>(),
+      disposeScope: vi.fn<ContextManager["disposeScope"]>(),
       disposeSession: vi.fn<ContextManager["disposeSession"]>(),
       getUsage: vi.fn<ContextManager["getUsage"]>(),
       prepareTurn: vi.fn<ContextManager["prepareTurn"]>(),
@@ -771,6 +789,26 @@ describe("createUiRuntimeComposition skill tools", () => {
       ShellJobRegistry.prototype,
       "disposeScope",
     );
+    const disposeMcpScope = vi.spyOn(McpToolMenu.prototype, "disposeScope");
+    const disposeToolSequenceScope = vi.spyOn(
+      ScopeToolSequence.prototype,
+      "disposeScope",
+    );
+    const disposeContextScope = vi.fn<ContextManager["disposeScope"]>();
+    const contextManager = {
+      assemble: vi.fn<ContextManager["assemble"]>(),
+      compact: vi.fn<ContextManager["compact"]>(),
+      createRunPromptSnapshot:
+        vi.fn<ContextManager["createRunPromptSnapshot"]>(),
+      disposeScope: disposeContextScope,
+      disposeSession: vi.fn<ContextManager["disposeSession"]>(),
+      getUsage: vi.fn<ContextManager["getUsage"]>(),
+      prepareTurn: vi.fn<ContextManager["prepareTurn"]>(),
+      resetTurnCompactionCount:
+        vi.fn<ContextManager["resetTurnCompactionCount"]>(),
+      updateCalibrationFactor:
+        vi.fn<ContextManager["updateCalibrationFactor"]>(),
+    } satisfies ContextManager;
     const lease = await sandboxManager.acquire({
       contextScopeId: "subagent_1",
       sessionId: "child_1",
@@ -794,6 +832,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     const composition = await createUiRuntimeComposition({
       agentManager: new AgentManager(),
       bus,
+      contextManager,
       llmClient: fakeLlmClient(),
       messageManager: createMessageManager({
         bus,
@@ -840,6 +879,12 @@ describe("createUiRuntimeComposition skill tools", () => {
     runCompletionGate.resolve({ status: "cancelled" });
     await vi.waitFor(() => {
       expect(disposeShellScope).toHaveBeenCalledWith("child_1", "subagent_1");
+      expect(disposeMcpScope).toHaveBeenCalledWith("child_1", "subagent_1");
+      expect(disposeToolSequenceScope).toHaveBeenCalledWith(
+        "child_1",
+        "subagent_1",
+      );
+      expect(disposeContextScope).toHaveBeenCalledWith("child_1", "subagent_1");
       expect(destroyContext).toHaveBeenCalledWith({
         contextScopeId: "subagent_1",
         sessionId: "child_1",
@@ -1503,14 +1548,17 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
     await composition.runManager.waitForCompletion(first.runId);
 
-    const initialContent = requests[0]?.messages[0]?.content;
-    const initialSystem =
+    const initialContent = requests[0]?.messages.find(
+      (message) => message.role === "user",
+    )?.content;
+    const initialRuntime =
       typeof initialContent === "string" ? initialContent : "";
     const initialToolNames =
       requests[0]?.tools?.map((tool) => tool.function.name) ?? [];
-    expect(initialSystem).toContain(`- ${toolName}`);
-    expect(initialSystem).toContain("search available MCP tools by query");
-    expect(initialSystem).not.toContain("A detailed MCP description");
+    const initialRequestJson = JSON.stringify(requests[0]);
+    expect(initialRuntime).toContain(`- ${toolName}`);
+    expect(initialRuntime).toContain("search available MCP tools by query");
+    expect(initialRuntime).not.toContain("A detailed MCP description");
     expect(initialToolNames).toContain("select_tools");
     expect(initialToolNames).not.toContain(toolName);
 
@@ -1548,10 +1596,13 @@ describe("createUiRuntimeComposition skill tools", () => {
     const selectedTool = requests[1]?.tools?.find(
       (tool) => tool.function.name === toolName,
     );
-    const selectedContent = requests[1]?.messages[0]?.content;
-    const selectedSystem =
+    const selectedContent = requests[1]?.messages
+      .filter((message) => message.role === "user")
+      .at(-1)?.content;
+    const selectedRuntime =
       typeof selectedContent === "string" ? selectedContent : "";
-    expect(selectedSystem).not.toContain("<mcp_tools>");
+    expect(selectedRuntime).not.toContain("<mcp_tool_catalog>");
+    expect(JSON.stringify(requests[0])).toBe(initialRequestJson);
     expect(selectedTool?.function.description).toBe(
       "MCP tool loaded on demand. Use its schema to perform the requested operation.",
     );
@@ -1620,6 +1671,49 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(requests.at(-1)?.tools?.map((tool) => tool.function.name)).toContain(
       toolName,
     );
+  });
+
+  it("appends lazy MCP schemas in selection order and keeps later requests stable", async () => {
+    const toolC = "mcp_s6_server_t4_c";
+    const toolD = "mcp_s6_server_t4_d";
+    const { composition, requests, workdir } =
+      await createPromptCompositionForTest({
+        mcpTools: [mcpTool(toolC), mcpTool(toolD)],
+        policyMode: "agent",
+      });
+    const sessionId = "session_mcp_order";
+    const initial = await composition.startSession({
+      agentName: "build",
+      projectRoot: workdir,
+      prompt: "Inspect available tools",
+      sessionId,
+    });
+    await composition.runManager.waitForCompletion(initial.runId);
+
+    await composition.toolScheduler.execute({
+      agentName: "build",
+      callId: "select_ordered",
+      messageId: "message_1",
+      params: { tools: [toolD, toolC] },
+      sessionId,
+      toolName: "select_tools",
+    });
+    for (const prompt of ["Use selected tools", "Continue with same tools"]) {
+      const run = await composition.startSession({
+        agentName: "build",
+        projectRoot: workdir,
+        prompt,
+        sessionId,
+      });
+      await composition.runManager.waitForCompletion(run.runId);
+    }
+
+    const secondNames =
+      requests[1]?.tools?.map((tool) => tool.function.name) ?? [];
+    const thirdNames =
+      requests[2]?.tools?.map((tool) => tool.function.name) ?? [];
+    expect(secondNames.slice(-2)).toEqual([toolD, toolC]);
+    expect(thirdNames).toEqual(secondNames);
   });
 
   it("keeps select_tools available without announcing or exposing MCP schemas when none exist", async () => {

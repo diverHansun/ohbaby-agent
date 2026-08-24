@@ -342,6 +342,20 @@ function applyLastBlockCacheControl(
   return false;
 }
 
+function applyStableSystemCacheControl(
+  converted: ConvertedAnthropicMessages,
+): void {
+  if (typeof converted.system === "string" && converted.system.length > 0) {
+    converted.system = [
+      {
+        cache_control: { type: "ephemeral" },
+        text: converted.system,
+        type: "text",
+      },
+    ];
+  }
+}
+
 function buildRequestParams(
   request: InterfaceProviderRequest,
 ): MessageCreateParams {
@@ -353,6 +367,9 @@ function buildRequestParams(
     throw new Error(
       "Anthropic explicit cache strategy requires an eligible content block.",
     );
+  }
+  if (request.promptCache.strategy === "anthropic-top-level-auto") {
+    applyStableSystemCacheControl(convertedMessages);
   }
   const params: MessageCreateParams = {
     model: request.model,

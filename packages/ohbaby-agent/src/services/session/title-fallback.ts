@@ -1,4 +1,7 @@
-import type { MessageWithParts } from "../../core/message/index.js";
+import {
+  isModelContextPart,
+  type MessageWithParts,
+} from "../../core/message/index.js";
 import {
   createTemporarySessionTitle,
   isDefaultSessionTitle,
@@ -14,7 +17,11 @@ export function createFallbackSessionTitleFromMessages(
 
     const text = message.parts
       .flatMap((part) =>
-        part.type === "text" && part.ignored !== true ? [part.text] : [],
+        part.type === "text" &&
+        part.ignored !== true &&
+        !isModelContextPart(part)
+          ? [part.text]
+          : [],
       )
       .join(" ")
       .trim();

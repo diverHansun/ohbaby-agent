@@ -55,6 +55,7 @@ export type {
 } from "./projection.js";
 export type {
   AssembledContext,
+  AgentRunPromptSnapshot,
   CompactOptions,
   CompactResult,
   CompactStatus,
@@ -65,6 +66,7 @@ export type {
   ContextManager,
   ContextManagerOptions,
   ContextMeasurementPayload,
+  CreateRunPromptSnapshotInput,
   PreparedModelRequest,
   ContextUsage,
   MemoryReader,
@@ -72,6 +74,7 @@ export type {
   PrepareTurnInput,
   PruneResult,
   SystemPromptProvider,
+  SystemPromptProviderInput,
   TokenCounter,
 } from "./types.js";
 

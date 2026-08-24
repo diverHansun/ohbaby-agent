@@ -235,6 +235,11 @@ function createContextManagerMock(
   return {
     assemble: vi.fn(),
     compact: vi.fn(),
+    createRunPromptSnapshot: vi.fn().mockResolvedValue({
+      memory: { global: "", merged: "", project: "" },
+      systemPrompt: "",
+    }),
+    disposeScope: vi.fn(),
     disposeSession: vi.fn(),
     getUsage: vi.fn(),
     async prepareTurn(requestInput): Promise<PreparedTurn> {
@@ -248,16 +253,12 @@ function createContextManagerMock(
           messages:
             requestInput.tailDirectives === undefined
               ? prepared.request.messages
-              : [
-                  ...prepared.request.messages,
-                  ...requestInput.tailDirectives,
-                ],
+              : [...prepared.request.messages, ...requestInput.tailDirectives],
           tools: requestInput.tools,
         },
       };
     },
-    resetTurnCompactionCount:
-      options.resetTurnCompactionCount ?? vi.fn(),
+    resetTurnCompactionCount: options.resetTurnCompactionCount ?? vi.fn(),
     updateCalibrationFactor: vi.fn(),
   };
 }
@@ -386,10 +387,17 @@ describe("Lifecycle.run", () => {
       vi.fn<ContextManager["resetTurnCompactionCount"]>();
     const updateCalibrationFactor =
       vi.fn<ContextManager["updateCalibrationFactor"]>();
+    const createRunPromptSnapshot = vi
+      .fn<ContextManager["createRunPromptSnapshot"]>()
+      .mockResolvedValue({
+        memory: { global: "", merged: "", project: "" },
+        systemPrompt: "stable snapshot",
+      });
     const contextManager = {
       ...createContextManagerMock(prepareTurn, {
         resetTurnCompactionCount,
       }),
+      createRunPromptSnapshot,
       updateCalibrationFactor,
     };
     const resolvedTools = [
@@ -442,6 +450,7 @@ describe("Lifecycle.run", () => {
     const { events, result } = await consumeLifecycleEvents(
       lifecycle.run({
         directory: "D:/repo",
+        initiatingUserMessageId: "user_1",
         modelId: "fake-model",
         sessionId: "session_test",
       }),
@@ -470,6 +479,17 @@ describe("Lifecycle.run", () => {
       }),
     );
     expect(prepareTurn).toHaveBeenCalledTimes(2);
+    expect(createRunPromptSnapshot).toHaveBeenCalledTimes(1);
+    expect(createRunPromptSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initiatingUserMessageId: "user_1",
+        sessionId: "session_test",
+        toolNames: ["read_file"],
+      }),
+    );
+    expect(prepareTurn.mock.calls[0]?.[0].promptSnapshot).toBe(
+      prepareTurn.mock.calls[1]?.[0].promptSnapshot,
+    );
     expect(resetTurnCompactionCount).toHaveBeenCalledTimes(1);
     expect(resetTurnCompactionCount).toHaveBeenCalledWith("session_test");
     expect(resolveTools).toHaveBeenNthCalledWith(1, {

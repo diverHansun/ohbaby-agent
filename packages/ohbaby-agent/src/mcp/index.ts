@@ -29,6 +29,8 @@ export type {
   McpToolRejectionReason,
   McpToolSelection,
 } from "./integration/dynamic-tool-menu.js";
+export { ScopeToolSequence } from "./integration/tool-sequence.js";
+export type { ScopeToolSnapshot } from "./integration/tool-sequence.js";
 export {
   createMcpPromptTool,
   createMcpResourceTool,

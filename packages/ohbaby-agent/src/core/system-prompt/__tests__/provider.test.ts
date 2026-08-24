@@ -10,7 +10,7 @@ const ENVIRONMENT: EnvironmentInfo = {
 };
 
 describe("createSystemPromptProvider", () => {
-  it("adapts system-prompt assembly to ContextManager primary provider input", async () => {
+  it("keeps primary system stable and emits runtime context separately", async () => {
     const provider = createSystemPromptProvider({
       environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
       customInstructionLoader: vi.fn().mockResolvedValue(["Project-only rule"]),
@@ -22,10 +22,43 @@ describe("createSystemPromptProvider", () => {
       isSubagent: false,
       toolNames: ["read", "bash"],
     });
+    const runtimeContext = await provider.buildRuntimeContext?.({
+      sessionId: "session_1",
+      directory: "D:/repo",
+      isSubagent: false,
+      toolNames: ["read", "bash"],
+    });
 
     expect(prompt).toContain("Lychee");
     expect(prompt).toContain("Project-only rule");
-    expect(prompt).toContain("Available tools: read, bash");
+    expect(prompt).not.toContain("D:/repo");
+    expect(prompt).not.toContain("Available tools");
+    expect(runtimeContext).toContain("D:/repo");
+    expect(runtimeContext).not.toContain("Available tools");
+  });
+
+  it("places runtime provider content in the user-turn context only", async () => {
+    const provider = createSystemPromptProvider({
+      customInstructionLoader: vi.fn().mockResolvedValue([]),
+      environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
+      runtimePromptsProvider: vi
+        .fn()
+        .mockResolvedValue(["<mcp_tool_catalog>catalog</mcp_tool_catalog>"]),
+    });
+    const input = {
+      sessionId: "session_1",
+      directory: "D:/repo",
+      isSubagent: false,
+      toolNames: [] as readonly string[],
+    };
+
+    const system = await provider.build(input);
+    const runtime = await provider.buildRuntimeContext?.(input);
+
+    expect(system).not.toContain("mcp_tool_catalog");
+    expect(system).not.toContain("environment_context");
+    expect(runtime).toContain("environment_context");
+    expect(runtime).toContain("mcp_tool_catalog");
   });
 
   it("adds primary agent prompts without switching to subagent assembly", async () => {
@@ -126,7 +159,7 @@ describe("createSystemPromptProvider", () => {
     expect(availableSubagentRolesProvider).toHaveBeenCalledTimes(1);
   });
 
-  it("includes runtime-owned prompt fragments without knowing their domain", async () => {
+  it("keeps runtime-owned fragments out of the stable system prompt", async () => {
     const provider = createSystemPromptProvider({
       customInstructionLoader: vi.fn().mockResolvedValue([]),
       environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
@@ -135,13 +168,16 @@ describe("createSystemPromptProvider", () => {
         .mockResolvedValue(["<runtime_prompt>MCP menu</runtime_prompt>"]),
     });
 
-    const prompt = await provider.build({
+    const input = {
       sessionId: "session_1",
       directory: "D:/repo",
       isSubagent: false,
-      toolNames: ["mcp_bad", "read"],
-    });
+      toolNames: ["mcp_bad", "read"] as readonly string[],
+    };
+    const prompt = await provider.build(input);
+    const runtime = await provider.buildRuntimeContext?.(input);
 
-    expect(prompt).toContain("<runtime_prompt>MCP menu</runtime_prompt>");
+    expect(prompt).not.toContain("<runtime_prompt>MCP menu</runtime_prompt>");
+    expect(runtime).toContain("<runtime_prompt>MCP menu</runtime_prompt>");
   });
 });

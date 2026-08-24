@@ -13,6 +13,7 @@ import type {
   TokenUsage,
 } from "../llm-client/index.js";
 import type {
+  AgentRunPromptSnapshot,
   PreparedModelRequest,
   PreparedTurn,
   PrepareTurnInput,
@@ -359,6 +360,7 @@ export class Lifecycle {
     let finalResponse = "";
     const allToolCalls: ParsedToolCall[] = [];
     let turnStarted = false;
+    let promptSnapshot: AgentRunPromptSnapshot | undefined;
     const activeReasoningByMessageId = new Map<string, string>();
 
     for (let step = 1; step <= maxSteps; step += 1) {
@@ -383,6 +385,19 @@ export class Lifecycle {
           step,
         })) ?? params.tools;
       const toolNames = toolNamesFromSchemas(resolvedTools);
+      promptSnapshot ??= await contextManager.createRunPromptSnapshot({
+        ...(params.contextScopeId === undefined
+          ? {}
+          : { contextScopeId: params.contextScopeId }),
+        ...(params.initiatingUserMessageId === undefined
+          ? {}
+          : { initiatingUserMessageId: params.initiatingUserMessageId }),
+        agentName: params.agent,
+        directory: params.directory,
+        isSubagent: params.isSubagent ?? false,
+        sessionId: params.sessionId,
+        toolNames,
+      });
       const tools = isFinalStep ? [] : resolvedTools;
       const tailDirectives = isFinalStep
         ? [buildMaxStepsFinalizationMessage()]
@@ -399,6 +414,7 @@ export class Lifecycle {
         directory: params.directory,
         isSubagent: params.isSubagent,
         modelId: params.modelId,
+        promptSnapshot,
         sessionId: params.sessionId,
         step,
         toolNames,
@@ -491,6 +507,7 @@ export class Lifecycle {
           force: true,
           isSubagent: params.isSubagent,
           modelId: params.modelId,
+          promptSnapshot,
           sessionId: params.sessionId,
           step,
           toolNames,

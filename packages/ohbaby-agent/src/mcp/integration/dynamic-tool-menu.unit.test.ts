@@ -154,6 +154,28 @@ describe("MCP dynamic tool menu", () => {
     );
   });
 
+  it("disposes only the selected context scope and remains idempotent", () => {
+    const menu = new McpToolMenu();
+    const toolName = "mcp_s7_example_t6_search";
+    const firstScope = {
+      contextScopeId: "subagent_1",
+      sessionId: "session_1",
+    };
+    const secondScope = {
+      contextScopeId: "subagent_2",
+      sessionId: "session_1",
+    };
+    menu.setAvailable([toolName]);
+    menu.select(firstScope, [toolName]);
+    menu.select(secondScope, [toolName]);
+
+    menu.disposeScope("session_1", "subagent_1");
+    menu.disposeScope("session_1", "subagent_1");
+
+    expect(menu.loadedNames(firstScope)).toEqual(new Set());
+    expect(menu.loadedNames(secondScope)).toEqual(new Set([toolName]));
+  });
+
   it("applies the eight-tool limit independently to each session/context scope", () => {
     const menu = new McpToolMenu();
     const toolNames = Array.from(

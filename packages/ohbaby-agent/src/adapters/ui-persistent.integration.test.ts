@@ -525,7 +525,10 @@ function persistentContentToText(content: unknown): string {
 function lastPersistentRequestMessageText(
   request: InterfaceProviderRequest,
 ): string {
-  return persistentContentToText(request.messages.at(-1)?.content);
+  return persistentContentToText(request.messages.at(-1)?.content).split(
+    "\n\n<environment_context>",
+    1,
+  )[0];
 }
 
 function allPersistentRequestMessageText(

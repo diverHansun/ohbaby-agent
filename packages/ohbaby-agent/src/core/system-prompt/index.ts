@@ -16,9 +16,7 @@ export {
   getProjectCustomInstructionsPath,
   loadCustomInstructions,
 } from "./services/custom-instruction-loader.js";
-export type {
-  SystemPromptProviderInput,
-  SystemPromptProviderOptions,
-} from "./assembler.js";
+export type { SystemPromptProviderOptions } from "./assembler.js";
+export type { SystemPromptProviderInput } from "../context/index.js";
 export type { AssembleOptions, EnvironmentInfo, LayerType } from "./types.js";
 export type { CustomInstructionLoadOptions } from "./services/custom-instruction-loader.js";

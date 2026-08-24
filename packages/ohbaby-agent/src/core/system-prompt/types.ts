@@ -31,9 +31,6 @@ export interface AssembleOptions {
   readonly agentPromptAddon?: string;
   readonly isSubagent: boolean;
   readonly availableSubagentRoles?: readonly SubagentRolePromptInfo[];
-  readonly environment: EnvironmentInfo;
   readonly customInstructions?: readonly string[];
   readonly taskKind?: PromptTaskKind;
-  readonly runtimePrompts?: readonly string[];
-  readonly tools?: readonly string[];
 }

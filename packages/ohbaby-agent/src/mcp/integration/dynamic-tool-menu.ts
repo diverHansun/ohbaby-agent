@@ -288,6 +288,10 @@ export class McpToolMenu {
       }
     }
   }
+
+  disposeScope(sessionId: string, contextScopeId: string): void {
+    this.loadedByScope.delete(scopeKey({ sessionId, contextScopeId }));
+  }
 }
 
 function requestedToolNames(params: Record<string, unknown>): string[] {

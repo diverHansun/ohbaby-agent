@@ -1,30 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { SystemPrompt } from "../assembler.js";
-import type { EnvironmentInfo } from "../types.js";
-
-const ENVIRONMENT: EnvironmentInfo = {
-  cwd: "D:/repo",
-  platform: "win32",
-  date: "2026-05-17",
-  isGitRepo: true,
-};
 
 describe("SystemPrompt", () => {
-  it("assembles primary prompts from identity, full environment, custom instructions, and tools", () => {
+  it("assembles stable primary prompts without runtime environment or tools", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "build",
-      environment: ENVIRONMENT,
       customInstructions: ["Prefer Vitest for tests."],
       isSubagent: false,
-      tools: ["read", "bash"],
     });
     const fullPrompt = prompts.join("\n\n");
 
     expect(fullPrompt).toContain("Lychee");
     expect(fullPrompt).toContain("Core Capabilities");
-    expect(fullPrompt).toContain("D:/repo");
-    expect(fullPrompt).toContain("Git repository: true");
-    expect(fullPrompt).toContain("Available tools: read, bash");
+    expect(fullPrompt).not.toContain("D:/repo");
+    expect(fullPrompt).not.toContain("Available tools");
     expect(fullPrompt).toContain("Prefer Vitest for tests.");
   });
 
@@ -33,7 +22,6 @@ describe("SystemPrompt", () => {
       agentName: "build",
       agentPrompt: "Primary agent runtime prompt.",
       customInstructions: ["Project custom instruction."],
-      environment: ENVIRONMENT,
       isSubagent: false,
     });
     const fullPrompt = prompts.join("\n\n");
@@ -48,10 +36,8 @@ describe("SystemPrompt", () => {
   it("includes the selected primary task contract", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "build",
-      environment: ENVIRONMENT,
       isSubagent: false,
       taskKind: "plan",
-      tools: ["read", "grep"],
     });
 
     const fullPrompt = prompts.join("\n\n");
@@ -66,7 +52,6 @@ describe("SystemPrompt", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "build",
       agentPrompt: "Use extra release-note care.",
-      environment: ENVIRONMENT,
       isSubagent: false,
       taskKind: "agent",
     });
@@ -90,21 +75,16 @@ describe("SystemPrompt", () => {
         },
       ],
       customInstructions: ["Project rule."],
-      environment: ENVIRONMENT,
       isSubagent: false,
       taskKind: "agent",
-      runtimePrompts: ["<runtime_prompt>MCP menu</runtime_prompt>"],
-      tools: ["read"],
     });
 
-    expect(prompts).toHaveLength(7);
+    expect(prompts).toHaveLength(5);
     expect(prompts[0]).toContain("# Identity");
     expect(prompts[1]).toContain("<primary_task>");
     expect(prompts[2]).toContain("<agent_prompt_addon>");
     expect(prompts[3]).toContain("<subagent_roles>");
-    expect(prompts[4]).toContain("<runtime_prompt>");
-    expect(prompts[5]).toContain("<environment>");
-    expect(prompts[6]).toContain("<custom_instructions>");
+    expect(prompts[4]).toContain("<custom_instructions>");
   });
 
   it("adds subagent role guidance to primary prompts", () => {
@@ -119,7 +99,6 @@ describe("SystemPrompt", () => {
         { description: "Fast code exploration", role: "explore" },
         { description: "Deep research", role: "research" },
       ],
-      environment: ENVIRONMENT,
       isSubagent: false,
     });
     const fullPrompt = prompts.join("\n\n");
@@ -146,16 +125,13 @@ describe("SystemPrompt", () => {
           role: "generic",
         },
       ],
-      environment: ENVIRONMENT,
       customInstructions: ["This must not leak to subagents."],
       isSubagent: true,
-      tools: ["read"],
     });
     const fullPrompt = prompts.join("\n\n");
 
     expect(fullPrompt).toContain("focused exploration agent");
-    expect(fullPrompt).toContain("D:/repo");
-    expect(fullPrompt).toContain("Git repository: true");
+    expect(fullPrompt).not.toContain("D:/repo");
     expect(fullPrompt).toContain("Core Capabilities");
     expect(fullPrompt).not.toContain("This must not leak");
     expect(fullPrompt).not.toContain("Available tools");
@@ -169,28 +145,21 @@ describe("SystemPrompt", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "explore",
       agentPromptAddon: "Subagent addon.",
-      environment: ENVIRONMENT,
       isSubagent: true,
       taskKind: "explore",
-      runtimePrompts: ["<runtime_prompt>MCP menu</runtime_prompt>"],
-      tools: ["read"],
     });
 
-    expect(prompts).toHaveLength(5);
+    expect(prompts).toHaveLength(3);
     expect(prompts[0]).toContain("<subagent_base>");
     expect(prompts[1]).toContain("<subagent_task>");
     expect(prompts[2]).toContain("<agent_prompt_addon>");
-    expect(prompts[3]).toContain("<runtime_prompt>");
-    expect(prompts[4]).toContain("<environment>");
   });
 
   it("includes the selected subagent task contract", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "explore",
-      environment: ENVIRONMENT,
       isSubagent: true,
       taskKind: "explore",
-      tools: ["read", "grep"],
     });
 
     const fullPrompt = prompts.join("\n\n");
@@ -202,7 +171,6 @@ describe("SystemPrompt", () => {
   it("does not allow subagent prompts to resolve plan task kind", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "generic",
-      environment: ENVIRONMENT,
       isSubagent: true,
       taskKind: "plan",
     });
@@ -216,7 +184,6 @@ describe("SystemPrompt", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "research",
       customInstructions: ["Project-only rule"],
-      environment: ENVIRONMENT,
       isSubagent: true,
       taskKind: "research",
     });
@@ -239,7 +206,6 @@ describe("SystemPrompt", () => {
     expect(() =>
       SystemPrompt.assemble({
         agentName: "",
-        environment: ENVIRONMENT,
         isSubagent: false,
       }),
     ).toThrow(/agentName/);
@@ -250,7 +216,6 @@ describe("SystemPrompt", () => {
       SystemPrompt.assemble({
         agentName: "build",
         agentPrompt: "Primary agent runtime prompt.",
-        environment: ENVIRONMENT,
       } as never),
     ).toThrow(/isSubagent/);
   });

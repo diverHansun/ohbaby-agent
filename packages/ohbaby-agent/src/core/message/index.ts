@@ -4,7 +4,12 @@ export { MessageEvent } from "./events.js";
 export { createMessageManager } from "./manager.js";
 export { createDatabaseMessageStore } from "./database-store.js";
 export { createInMemoryMessageStore } from "./store.js";
-export { getMessageOrigin, isContextSummaryPart } from "./origin.js";
+export {
+  getMessageOrigin,
+  isContextSummaryPart,
+  isModelContextPart,
+  MODEL_CONTEXT_RUNTIME_KIND,
+} from "./origin.js";
 export { toModelMessages } from "./converter.js";
 export { readTokenUsageMetadata } from "./token-usage-metadata.js";
 export type { MessageOrigin } from "./origin.js";

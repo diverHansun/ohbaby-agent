@@ -15,6 +15,7 @@ import {
   type TokenCounter,
 } from "../../../packages/ohbaby-agent/src/core/context/index.js";
 import { Lifecycle } from "../../../packages/ohbaby-agent/src/core/lifecycle/index.js";
+import { toOpenAiTools } from "../../../packages/ohbaby-agent/src/core/agents/index.js";
 import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
 import {
   createDatabaseMessageStore,
@@ -34,6 +35,7 @@ import {
   initDatabase,
   schema,
 } from "../../../packages/ohbaby-agent/src/services/database/index.js";
+import { ScopeToolSequence } from "../../../packages/ohbaby-agent/src/mcp/integration/tool-sequence.js";
 import type {
   ProviderRequest,
   ProviderStreamEvent,
@@ -51,14 +53,15 @@ const SESSION_USAGE: ContextUsage = {
   usageRatio: 0.0012,
 };
 
-function preparedTurn(messages: PreparedModelRequest["messages"]): PreparedTurn {
+function preparedTurn(
+  messages: PreparedModelRequest["messages"],
+): PreparedTurn {
   return {
     assembledAt: 1_700_000_000_000,
     hasSummary: false,
     request: { messages, tools: undefined },
-    sentHeuristic: messages
-      .map((message) => JSON.stringify(message))
-      .join("\n").length,
+    sentHeuristic: messages.map((message) => JSON.stringify(message)).join("\n")
+      .length,
     usage: SESSION_USAGE,
   };
 }
@@ -69,6 +72,11 @@ function createContextManagerMock(
   return {
     assemble: vi.fn(),
     compact: vi.fn(),
+    createRunPromptSnapshot: vi.fn().mockResolvedValue({
+      memory: { global: "", merged: "", project: "" },
+      systemPrompt: "",
+    }),
+    disposeScope: vi.fn(),
     disposeSession: vi.fn(),
     getUsage: vi.fn(),
     prepareTurn,
@@ -390,6 +398,7 @@ describe("lifecycle tool scheduler integration", () => {
       insertSession(sessionId);
 
       const requests: ProviderRequest[] = [];
+      const measurements: PreparedModelRequest[] = [];
       const bus = createBus();
       const scheduler = createToolScheduler({
         bus,
@@ -485,7 +494,11 @@ describe("lifecycle tool scheduler integration", () => {
         systemPromptProvider: createEmptySystemPromptProvider(),
         tokenCounter: createTokenCounter(),
         now: () => 1_700_000_000_000,
+        onRequestMeasured: (request) => measurements.push(request),
       });
+
+      const definitions = await scheduler.getAvailableTools();
+      const tools = toOpenAiTools(definitions);
 
       const lifecycle = new Lifecycle({
         contextManager,
@@ -516,7 +529,12 @@ describe("lifecycle tool scheduler integration", () => {
                 finishReason: "tool_calls",
               },
             ],
-            [{ textDelta: "All metadata was available.", finishReason: "stop" }],
+            [
+              {
+                textDelta: "All metadata was available.",
+                finishReason: "stop",
+              },
+            ],
           ],
           requests,
         ),
@@ -530,10 +548,23 @@ describe("lifecycle tool scheduler integration", () => {
           environment: createEnvironment("D:/workspace/session_metadata"),
           modelId: "fake-model",
           sessionId,
+          tools,
         }),
       );
 
       expect(requests).toHaveLength(2);
+      expect(requests[0]?.tools).toEqual(tools);
+      expect(requests[1]?.tools).toEqual(tools);
+      expect(
+        requests[1]?.messages.slice(0, requests[0]?.messages.length),
+      ).toEqual(requests[0]?.messages);
+      expect(measurements.at(-1)).toEqual({
+        messages: requests[1]?.messages,
+        tools: requests[1]?.tools,
+      });
+      expect(requests[0]?.tools?.map((tool) => tool.function.name)).toEqual(
+        definitions.map((tool) => tool.name),
+      );
       const secondMessages = requests[1]?.messages ?? [];
       const readResult = secondMessages.find(
         (message) =>
@@ -549,9 +580,7 @@ describe("lifecycle tool scheduler integration", () => {
       );
       expect(readResult?.content).toContain('"mtimeMs":1700000000000');
       expect(bashResult?.content).toContain('"exitCode":1');
-      expect(mcpResult?.content).toContain(
-        '"structuredContent":{"total":1}',
-      );
+      expect(mcpResult?.content).toContain('"structuredContent":{"total":1}');
       expect(readResult?.content).not.toContain("internalSecret");
       expect(bashResult?.content).not.toContain('"pid":12345');
       expect(mcpResult?.content).not.toContain("internalSecret");
@@ -605,5 +634,147 @@ describe("lifecycle tool scheduler integration", () => {
       closeDatabase();
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("keeps a prepared request immutable when a lazy tool loads before send and exposes it next step", async () => {
+    const requests: ProviderRequest[] = [];
+    const measurements: PreparedModelRequest[] = [];
+    const epochs: number[] = [];
+    const bus = createBus();
+    const scheduler = createToolScheduler({
+      bus,
+      permission: { ask: () => "once" },
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+    });
+    scheduler.register({
+      category: "readonly",
+      description: "Read a file",
+      execute: () => ({ output: "contents" }),
+      name: "read",
+      parametersJsonSchema: {
+        properties: { path: { type: "string" } },
+        required: ["path"],
+        type: "object",
+      },
+      source: "builtin",
+    });
+    scheduler.register({
+      category: "readonly",
+      description: "Lazy MCP search",
+      execute: () => ({ output: "search" }),
+      mcpServer: "server",
+      mcpToolName: "search",
+      name: "mcp_s6_server_t6_search",
+      parametersJsonSchema: {
+        properties: { query: { type: "string" } },
+        type: "object",
+      },
+      source: "mcp",
+    });
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const user = await messageManager.createMessage({
+      agent: "build",
+      id: "initiating_user",
+      role: "user",
+      sessionId: "session_lazy",
+    });
+    await messageManager.appendPart(user.id, {
+      text: "Read the fixture",
+      type: "text",
+    });
+    const contextManager = createContextManager({
+      bus,
+      llmClient: createContextLLMClient(),
+      memory: createEmptyMemory(),
+      messageManager,
+      onRequestMeasured: (request) => measurements.push(request),
+      systemPromptProvider: createEmptySystemPromptProvider(),
+      tokenCounter: createTokenCounter(),
+    });
+    const sequence = new ScopeToolSequence();
+    let lazyLoaded = false;
+    let firstPreparedRequest: PreparedModelRequest | undefined;
+    let firstPreparedJson = "";
+    const lifecycle = new Lifecycle({
+      contextManager,
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              finishReason: "tool_calls",
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"path":"README.md"}',
+                  id: "call_read",
+                  index: 0,
+                  name: "read",
+                },
+              ],
+            },
+          ],
+          [{ finishReason: "stop", textDelta: "done" }],
+        ],
+        requests,
+      ),
+      messageManager,
+      resolveTools: async () => {
+        const definitions = await scheduler.getAvailableTools();
+        const visible = definitions.filter(
+          (tool) => lazyLoaded || !tool.name.startsWith("mcp_"),
+        );
+        const snapshot = sequence.snapshot(
+          { sessionId: "session_lazy" },
+          visible,
+        );
+        epochs.push(snapshot.epoch);
+        return toOpenAiTools(snapshot.tools);
+      },
+      toolScheduler: scheduler,
+    });
+
+    const loop = lifecycle.run({
+      agent: "build",
+      directory: "D:/repo",
+      environment: createEnvironment("D:/repo"),
+      initiatingUserMessageId: user.id,
+      modelId: "fake-model",
+      sessionId: "session_lazy",
+    });
+    let next = await loop.next();
+    while (!next.done) {
+      if (next.value.type === "context:prepared" && next.value.step === 1) {
+        firstPreparedRequest = measurements.at(-1);
+        expect(firstPreparedRequest).toBeDefined();
+        firstPreparedJson = JSON.stringify(firstPreparedRequest);
+        lazyLoaded = true;
+      }
+      next = await loop.next();
+    }
+
+    const firstNames =
+      requests[0]?.tools?.map((tool) => tool.function.name) ?? [];
+    const secondNames =
+      requests[1]?.tools?.map((tool) => tool.function.name) ?? [];
+    expect(firstNames).toEqual(["read"]);
+    expect(secondNames).toEqual(["read", "mcp_s6_server_t6_search"]);
+    expect(epochs).toEqual([0, 1]);
+    expect(firstPreparedRequest).toEqual({
+      messages: requests[0]?.messages,
+      tools: requests[0]?.tools,
+    });
+    expect(measurements.at(-1)).toEqual({
+      messages: requests[1]?.messages,
+      tools: requests[1]?.tools,
+    });
+    expect(JSON.stringify(firstPreparedRequest)).toBe(firstPreparedJson);
+    expect(Object.isFrozen(requests[0]?.tools?.[0]?.function)).toBe(true);
   });
 });

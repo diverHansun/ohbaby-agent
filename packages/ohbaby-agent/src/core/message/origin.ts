@@ -1,5 +1,7 @@
 import type { MessageWithParts } from "./types.js";
 
+export const MODEL_CONTEXT_RUNTIME_KIND = "model-context:runtime:v1";
+
 export type MessageOrigin =
   | "assistant"
   | "summary"
@@ -21,4 +23,14 @@ export function isContextSummaryPart(
   part: MessageWithParts["parts"][number],
 ): boolean {
   return part.type === "text" && part.metadata?.kind === "context-summary";
+}
+
+export function isModelContextPart(
+  part: MessageWithParts["parts"][number],
+): boolean {
+  return (
+    part.type === "text" &&
+    part.synthetic === true &&
+    part.metadata?.kind === MODEL_CONTEXT_RUNTIME_KIND
+  );
 }

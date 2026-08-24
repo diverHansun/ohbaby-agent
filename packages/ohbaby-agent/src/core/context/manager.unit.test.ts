@@ -4,6 +4,7 @@ import {
   createInMemoryMessageStore,
   createMessageManager,
   isContextSummaryPart,
+  isModelContextPart,
 } from "../message/index.js";
 import type {
   MessageIdGenerator,
@@ -185,6 +186,7 @@ function createManager(
     readonly maxCompactionsPerTurn?: number;
     readonly pruneProtectTokens?: number;
     readonly pruneMinimumTokens?: number;
+    readonly systemPromptProvider?: SystemPromptProvider;
     readonly thrashWindow?: number;
   } = {},
 ): ContextFixture {
@@ -204,9 +206,10 @@ function createManager(
         merged: "global memory\n---\nproject memory",
       }),
     } satisfies MemoryReader);
-  const systemPromptProvider: SystemPromptProvider = {
-    build: vi.fn().mockResolvedValue("system prompt"),
-  };
+  const systemPromptProvider: SystemPromptProvider =
+    options.systemPromptProvider ?? {
+      build: vi.fn().mockResolvedValue("system prompt"),
+    };
   const contextManager = createContextManager({
     bus,
     memory,
@@ -417,6 +420,16 @@ describe("ContextManager", () => {
 
     expect(withTools.request.messages).toEqual(messagesOnly.request.messages);
     expect(withTools.request.tools).toEqual(tools);
+    expect(Object.isFrozen(withTools.request)).toBe(true);
+    expect(Object.isFrozen(withTools.request.messages)).toBe(true);
+    expect(Object.isFrozen(withTools.request.tools)).toBe(true);
+    expect(Object.isFrozen(withTools.request.tools?.[0]?.function)).toBe(true);
+    expect(Object.isFrozen(tools[0]?.function)).toBe(false);
+    expect(() => {
+      (
+        withTools.request.tools?.[0]?.function.parameters as { type?: string }
+      ).type = "array";
+    }).toThrow();
     expect(withTools.sentHeuristic).toBeGreaterThan(messagesOnly.sentHeuristic);
     expect(withTools.usage.currentTokens).toBeGreaterThan(
       messagesOnly.usage.currentTokens,
@@ -477,6 +490,489 @@ describe("ContextManager", () => {
     expect(
       JSON.stringify(await messageManager.listBySession("session_1")),
     ).not.toContain(finalizationMessage.content);
+  });
+
+  it("attaches one scoped runtime part and reuses a run-local prompt snapshot", async () => {
+    const messageManager = createMessageManagerFixture();
+    const user = await messageManager.createMessage({
+      agent: "build",
+      contextScopeId: "subagent_1",
+      id: "user_turn_1",
+      role: "user",
+      sessionId: "child_1",
+    });
+    await messageManager.appendPart(user.id, {
+      text: "inspect the repository",
+      type: "text",
+    });
+    let systemVersion = 0;
+    let runtimeVersion = 0;
+    const systemPromptProvider: SystemPromptProvider = {
+      build: () => {
+        systemVersion += 1;
+        return Promise.resolve(`stable-system-${String(systemVersion)}`);
+      },
+      buildRuntimeContext: () => {
+        runtimeVersion += 1;
+        return Promise.resolve(
+          `<environment_context>runtime-${String(runtimeVersion)}</environment_context>`,
+        );
+      },
+    };
+    const { manager } = createManager({
+      messageManager,
+      systemPromptProvider,
+    });
+
+    const promptSnapshot = await manager.createRunPromptSnapshot({
+      agentName: "explore",
+      contextScopeId: "subagent_1",
+      directory: "/repo",
+      initiatingUserMessageId: user.id,
+      isSubagent: true,
+      sessionId: "child_1",
+      toolNames: [],
+    });
+    await manager.createRunPromptSnapshot({
+      agentName: "explore",
+      contextScopeId: "subagent_1",
+      directory: "/repo",
+      initiatingUserMessageId: user.id,
+      isSubagent: true,
+      sessionId: "child_1",
+      toolNames: [],
+    });
+    const first = await manager.prepareTurn({
+      agentName: "explore",
+      contextScopeId: "subagent_1",
+      directory: "/repo",
+      isSubagent: true,
+      modelId: "model-a",
+      promptSnapshot,
+      sessionId: "child_1",
+      toolNames: [],
+      tools: undefined,
+    });
+    const second = await manager.prepareTurn({
+      agentName: "explore",
+      contextScopeId: "subagent_1",
+      directory: "/changed",
+      isSubagent: true,
+      modelId: "model-a",
+      promptSnapshot,
+      sessionId: "child_1",
+      toolNames: [],
+      tools: undefined,
+    });
+    const stored = await messageManager.listBySession("child_1", {
+      contextScopeId: "subagent_1",
+    });
+    const runtimeParts = stored
+      .flatMap((message) => message.parts)
+      .filter(
+        (part) =>
+          part.type === "text" &&
+          part.metadata?.kind === "model-context:runtime:v1",
+      );
+
+    expect(runtimeParts).toHaveLength(1);
+    expect(runtimeParts[0]).toMatchObject({
+      synthetic: true,
+      text: expect.stringContaining("runtime-1") as string,
+    });
+    expect(first.request.messages).toEqual(second.request.messages);
+    expect(first.request.messages[0]).toEqual({
+      content: "stable-system-1",
+      role: "system",
+    });
+    expect(JSON.stringify(first.request.messages)).toContain("runtime-1");
+    expect(JSON.stringify(first.request.messages)).not.toContain("runtime-2");
+  });
+
+  it("does not attach runtime context for resume and rejects a cross-scope initiating message", async () => {
+    const messageManager = createMessageManagerFixture();
+    const user = await messageManager.createMessage({
+      agent: "explore",
+      contextScopeId: "subagent_a",
+      id: "user_a",
+      role: "user",
+      sessionId: "child_1",
+    });
+    await messageManager.appendPart(user.id, {
+      text: "resume me",
+      type: "text",
+    });
+    const buildRuntimeContext = vi.fn().mockResolvedValue("runtime");
+    const { manager } = createManager({
+      messageManager,
+      systemPromptProvider: {
+        build: vi.fn().mockResolvedValue("stable"),
+        buildRuntimeContext,
+      },
+    });
+
+    await manager.createRunPromptSnapshot({
+      contextScopeId: "subagent_a",
+      directory: "/repo",
+      isSubagent: true,
+      sessionId: "child_1",
+      toolNames: [],
+    });
+    expect(buildRuntimeContext).not.toHaveBeenCalled();
+
+    await expect(
+      manager.createRunPromptSnapshot({
+        contextScopeId: "subagent_b",
+        directory: "/repo",
+        initiatingUserMessageId: user.id,
+        isSubagent: true,
+        sessionId: "child_1",
+        toolNames: [],
+      }),
+    ).rejects.toThrow(/not present in the requested context scope/u);
+    expect(buildRuntimeContext).not.toHaveBeenCalled();
+  });
+
+  it("resumes a child scope without moving or rewriting its persisted runtime part", async () => {
+    const messageManager = createMessageManagerFixture();
+    const user = await messageManager.createMessage({
+      agent: "explore",
+      contextScopeId: "subagent_1",
+      id: "child_user",
+      role: "user",
+      sessionId: "child_session",
+    });
+    await messageManager.appendPart(user.id, {
+      text: "initial child request",
+      type: "text",
+    });
+    let runtimeVersion = 1;
+    const buildRuntimeContext = vi.fn(() =>
+      Promise.resolve(`child-runtime-${String(runtimeVersion)}`),
+    );
+    const { manager } = createManager({
+      messageManager,
+      systemPromptProvider: {
+        build: vi.fn().mockResolvedValue("child-stable"),
+        buildRuntimeContext,
+      },
+    });
+    const initialSnapshot = await manager.createRunPromptSnapshot({
+      agentName: "explore",
+      contextScopeId: "subagent_1",
+      directory: "/repo",
+      initiatingUserMessageId: user.id,
+      isSubagent: true,
+      sessionId: "child_session",
+      toolNames: [],
+    });
+    const initial = await manager.prepareTurn({
+      agentName: "explore",
+      contextScopeId: "subagent_1",
+      directory: "/repo",
+      isSubagent: true,
+      modelId: "model-a",
+      promptSnapshot: initialSnapshot,
+      sessionId: "child_session",
+    });
+    const storedBeforeResume = structuredClone(
+      await messageManager.listBySession("child_session", {
+        contextScopeId: "subagent_1",
+      }),
+    );
+
+    runtimeVersion = 2;
+    const resumedSnapshot = await manager.createRunPromptSnapshot({
+      agentName: "explore",
+      contextScopeId: "subagent_1",
+      directory: "/changed",
+      isSubagent: true,
+      sessionId: "child_session",
+      toolNames: [],
+    });
+    const resumed = await manager.prepareTurn({
+      agentName: "explore",
+      contextScopeId: "subagent_1",
+      directory: "/changed",
+      isSubagent: true,
+      modelId: "model-a",
+      promptSnapshot: resumedSnapshot,
+      sessionId: "child_session",
+    });
+
+    expect(buildRuntimeContext).toHaveBeenCalledOnce();
+    expect(
+      await messageManager.listBySession("child_session", {
+        contextScopeId: "subagent_1",
+      }),
+    ).toEqual(storedBeforeResume);
+    expect(resumed.request.messages).toEqual(initial.request.messages);
+    expect(JSON.stringify(resumed.request)).toContain("child-runtime-1");
+    expect(JSON.stringify(resumed.request)).not.toContain("child-runtime-2");
+  });
+
+  it("keeps the current run stable and admits changed system, memory, and runtime only on the next user turn", async () => {
+    const messageManager = createMessageManagerFixture();
+    const firstUser = await messageManager.createMessage({
+      agent: "build",
+      id: "user_turn_1",
+      role: "user",
+      sessionId: "session_1",
+    });
+    await messageManager.appendPart(firstUser.id, {
+      text: "first request",
+      type: "text",
+    });
+    let version = 1;
+    const { manager } = createManager({
+      memory: {
+        load: () =>
+          Promise.resolve({
+            global: "",
+            merged: `memory-${String(version)}`,
+            project: `memory-${String(version)}`,
+          }),
+      },
+      messageManager,
+      systemPromptProvider: {
+        build: () => Promise.resolve(`stable-system-${String(version)}`),
+        buildRuntimeContext: () =>
+          Promise.resolve(
+            `<environment_context>runtime-${String(version)}</environment_context>`,
+          ),
+      },
+    });
+    const firstSnapshot = await manager.createRunPromptSnapshot({
+      directory: "/repo-v1",
+      initiatingUserMessageId: firstUser.id,
+      isSubagent: false,
+      sessionId: "session_1",
+      toolNames: [],
+    });
+    const firstStored = structuredClone(
+      await messageManager.listBySession("session_1"),
+    );
+
+    version = 2;
+    const reused = await manager.prepareTurn({
+      directory: "/repo-v2",
+      modelId: "model-a",
+      promptSnapshot: firstSnapshot,
+      sessionId: "session_1",
+    });
+    const reusedAgain = await manager.prepareTurn({
+      directory: "/repo-v3",
+      modelId: "model-a",
+      promptSnapshot: firstSnapshot,
+      sessionId: "session_1",
+    });
+    expect(reused.request).toEqual(reusedAgain.request);
+    expect(JSON.stringify(reused.request)).toContain("stable-system-1");
+    expect(JSON.stringify(reused.request)).toContain("memory-1");
+    expect(JSON.stringify(reused.request)).toContain("runtime-1");
+    expect(JSON.stringify(reused.request)).not.toContain("runtime-2");
+
+    const secondUser = await messageManager.createMessage({
+      agent: "build",
+      id: "user_turn_2",
+      role: "user",
+      sessionId: "session_1",
+    });
+    await messageManager.appendPart(secondUser.id, {
+      text: "second request",
+      type: "text",
+    });
+    const secondSnapshot = await manager.createRunPromptSnapshot({
+      directory: "/repo-v2",
+      initiatingUserMessageId: secondUser.id,
+      isSubagent: false,
+      sessionId: "session_1",
+      toolNames: [],
+    });
+    const next = await manager.prepareTurn({
+      directory: "/repo-v2",
+      modelId: "model-a",
+      promptSnapshot: secondSnapshot,
+      sessionId: "session_1",
+    });
+    const afterSecondTurn = await messageManager.listBySession("session_1");
+
+    expect(afterSecondTurn[0]).toEqual(firstStored[0]);
+    expect(JSON.stringify(next.request)).toContain("stable-system-2");
+    expect(JSON.stringify(next.request)).toContain("memory-2");
+    expect(JSON.stringify(next.request)).toContain("runtime-1");
+    expect(JSON.stringify(next.request)).toContain("runtime-2");
+    expect(afterSecondTurn[1]?.parts.filter(isModelContextPart)).toHaveLength(
+      1,
+    );
+  });
+
+  it("creates isolated primary and subagent snapshots concurrently on one shared manager", async () => {
+    const messageManager = createMessageManagerFixture();
+    const primaryUser = await messageManager.createMessage({
+      agent: "build",
+      id: "primary_user",
+      role: "user",
+      sessionId: "parent_session",
+    });
+    await messageManager.appendPart(primaryUser.id, {
+      text: "primary request",
+      type: "text",
+    });
+    const childUser = await messageManager.createMessage({
+      agent: "explore",
+      contextScopeId: "subagent_1",
+      id: "child_user",
+      role: "user",
+      sessionId: "child_session",
+    });
+    await messageManager.appendPart(childUser.id, {
+      text: "child request",
+      type: "text",
+    });
+    const { manager } = createManager({
+      memory: {
+        load: () =>
+          Promise.resolve({
+            global: "primary-memory",
+            merged: "primary-memory",
+            project: "",
+          }),
+      },
+      messageManager,
+      systemPromptProvider: {
+        build: (input) =>
+          Promise.resolve(
+            `stable-${input.contextScopeId ?? "primary"}-${input.directory}`,
+          ),
+        buildRuntimeContext: (input) =>
+          Promise.resolve(
+            `<environment_context>${input.contextScopeId ?? "primary"}-${input.directory}</environment_context>`,
+          ),
+      },
+    });
+    const [primarySnapshot, childSnapshot] = await Promise.all([
+      manager.createRunPromptSnapshot({
+        directory: "/primary",
+        initiatingUserMessageId: primaryUser.id,
+        isSubagent: false,
+        sessionId: "parent_session",
+        toolNames: [],
+      }),
+      manager.createRunPromptSnapshot({
+        agentName: "explore",
+        contextScopeId: "subagent_1",
+        directory: "/child",
+        initiatingUserMessageId: childUser.id,
+        isSubagent: true,
+        sessionId: "child_session",
+        toolNames: [],
+      }),
+    ]);
+    const [primary, child] = await Promise.all([
+      manager.prepareTurn({
+        directory: "/primary",
+        modelId: "model-a",
+        promptSnapshot: primarySnapshot,
+        sessionId: "parent_session",
+      }),
+      manager.prepareTurn({
+        agentName: "explore",
+        contextScopeId: "subagent_1",
+        directory: "/child",
+        isSubagent: true,
+        modelId: "model-a",
+        promptSnapshot: childSnapshot,
+        sessionId: "child_session",
+      }),
+    ]);
+    const primaryWire = JSON.stringify(primary.request);
+    const childWire = JSON.stringify(child.request);
+
+    expect(primaryWire).toContain("stable-primary-/primary");
+    expect(primaryWire).toContain("primary-memory");
+    expect(primaryWire).toContain("primary-/primary");
+    expect(primaryWire).not.toContain("child request");
+    expect(childWire).toContain("stable-subagent_1-/child");
+    expect(childWire).toContain("subagent_1-/child");
+    expect(childWire).not.toContain("primary-memory");
+    expect(childWire).not.toContain("primary request");
+  });
+
+  it("compacts a request containing runtime context without duplicating it as a tail directive", async () => {
+    const messageManager = createMessageManagerFixture();
+    for (const [role, text] of [
+      ["user", "old user ".repeat(20)],
+      ["assistant", "old assistant ".repeat(20)],
+      ["user", "middle user ".repeat(20)],
+      ["assistant", "middle assistant ".repeat(20)],
+    ] as const) {
+      await addTextMessage(messageManager, {
+        role,
+        sessionId: "session_1",
+        text,
+      });
+    }
+    const currentUser = await messageManager.createMessage({
+      agent: "build",
+      id: "current_user",
+      role: "user",
+      sessionId: "session_1",
+    });
+    await messageManager.appendPart(currentUser.id, {
+      text: "current request",
+      type: "text",
+    });
+    const marker = "runtime-compaction-marker";
+    const { manager, measurements } = createManager({
+      llmClient: {
+        generateSummary: vi.fn().mockResolvedValue("## Goal\nshort summary"),
+      },
+      memory: {
+        load: vi
+          .fn()
+          .mockResolvedValue({ global: "", merged: "", project: "" }),
+      },
+      messageManager,
+      systemPromptProvider: {
+        build: vi.fn().mockResolvedValue("stable"),
+        buildRuntimeContext: vi.fn().mockResolvedValue(marker),
+      },
+      tokenCounter: {
+        estimateTokens: (content) => content.length,
+        getLimit: () => 10_000,
+      },
+    });
+    const promptSnapshot = await manager.createRunPromptSnapshot({
+      directory: "/repo",
+      initiatingUserMessageId: currentUser.id,
+      isSubagent: false,
+      sessionId: "session_1",
+      toolNames: [],
+    });
+    const prepared = await manager.prepareTurn({
+      directory: "/repo",
+      force: true,
+      modelId: "model-a",
+      promptSnapshot,
+      sessionId: "session_1",
+    });
+    const markerCount = (value: unknown): number =>
+      JSON.stringify(value).split(marker).length - 1;
+
+    expect(prepared.compaction?.status).toBe("compacted");
+    expect(measurements.some((request) => markerCount(request) === 1)).toBe(
+      true,
+    );
+    expect(measurements.every((request) => markerCount(request) <= 1)).toBe(
+      true,
+    );
+    expect(markerCount(prepared.request)).toBeLessThanOrEqual(1);
+    expect(
+      (await messageManager.listBySession("session_1"))
+        .flatMap((message) => message.parts)
+        .filter(isModelContextPart),
+    ).toHaveLength(1);
   });
 
   it("counts assistant tool calls even when message content is null", () => {
@@ -658,7 +1154,9 @@ describe("ContextManager", () => {
     });
 
     expect(JSON.stringify(prepared.request.messages)).toContain("A question");
-    expect(JSON.stringify(prepared.request.messages)).not.toContain("B question");
+    expect(JSON.stringify(prepared.request.messages)).not.toContain(
+      "B question",
+    );
   });
 
   it("keeps subagent calibration isolated by context scope", async () => {
@@ -714,6 +1212,16 @@ describe("ContextManager", () => {
     );
     expect(unchangedB.usage.currentTokens).toBe(unchangedB.sentHeuristic);
     expect(baselineA.sentHeuristic).toBe(baselineB.sentHeuristic);
+
+    manager.disposeScope("child_1", "subagent_a");
+    const [resetA, stillUnchangedB] = await Promise.all([
+      prepareScope("subagent_a"),
+      prepareScope("subagent_b"),
+    ]);
+    expect(resetA.usage.currentTokens).toBe(resetA.sentHeuristic);
+    expect(stillUnchangedB.usage.currentTokens).toBe(
+      stillUnchangedB.sentHeuristic,
+    );
   });
 
   it("assembles system prompt, memory, and message history", async () => {

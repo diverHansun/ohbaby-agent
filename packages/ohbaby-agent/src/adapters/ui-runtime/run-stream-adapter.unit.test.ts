@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { UiEvent } from "ohbaby-sdk";
 import { createContextWindowUsageTracker } from "../../core/context/index.js";
 import { createInMemoryStreamBridge } from "../../runtime/stream-bridge/index.js";
 import { createInMemoryUiStateStore } from "../ui-state/index.js";
@@ -227,9 +228,7 @@ describe("startRunStreamProjection", () => {
     const stateStore = {
       ...baseStateStore,
       updateStatusForActiveSession(
-        ...args: Parameters<
-          typeof baseStateStore.updateStatusForActiveSession
-        >
+        ...args: Parameters<typeof baseStateStore.updateStatusForActiveSession>
       ): ReturnType<typeof baseStateStore.updateStatusForActiveSession> {
         void baseStateStore.setActiveSessionId("session_2");
         void baseStateStore.setStatus({ kind: "running", runId: "run_2" });
@@ -408,6 +407,107 @@ describe("startRunStreamProjection", () => {
       type: "context.window.updated",
       usage: contextWindowUsage.get("session_1"),
     });
+  });
+
+  it("keeps child context usage from replacing parent occupancy in a shared tracker", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const stateStore = createInMemoryUiStateStore({
+      activeSessionId: "session_parent",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_parent",
+          messages: [],
+          title: "Parent",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+        {
+          createdAt: "2026-05-26T00:00:00.000Z",
+          id: "session_child",
+          messages: [],
+          title: "Child",
+          updatedAt: "2026-05-26T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "idle" },
+    });
+    const published: UiEvent[] = [];
+    const contextWindowUsage = createContextWindowUsageTracker({
+      now: () => "2026-06-06T00:00:00.000Z",
+    });
+    const createProjection = (
+      runId: string,
+      sessionId: string,
+    ): ReturnType<typeof startRunStreamProjection> =>
+      startRunStreamProjection({
+        assistantMessageId: `assistant_${runId}`,
+        autoStart: false,
+        contextWindowUsage,
+        nextMessageId: () => `message_${runId}`,
+        publish: (event): void => {
+          published.push(event);
+        },
+        runId,
+        sessionId,
+        stateStore,
+        streamBridge,
+        timestamp: () => "2026-05-26T00:00:01.000Z",
+      });
+    const parent = createProjection("run_parent", "session_parent");
+    const child = createProjection("run_child", "session_child");
+    parent.start();
+    child.start();
+
+    streamBridge.publish("run/run_parent", "run.context.prepared", {
+      hasSummary: false,
+      runId: "run_parent",
+      sessionId: "session_parent",
+      step: 1,
+      timestamp: 1,
+      usage: {
+        contextLimit: 1_000,
+        currentTokens: 100,
+        modelId: "parent-model",
+        remainingTokens: 900,
+        usageRatio: 0.1,
+      },
+    });
+    streamBridge.publish("run/run_child", "run.context.prepared", {
+      contextScopeId: "subagent_1",
+      hasSummary: false,
+      runId: "run_child",
+      sessionId: "session_child",
+      step: 1,
+      timestamp: 2,
+      usage: {
+        contextLimit: 1_000,
+        currentTokens: 900,
+        modelId: "child-model",
+        remainingTokens: 100,
+        usageRatio: 0.9,
+      },
+    });
+    streamBridge.end("run/run_parent");
+    streamBridge.end("run/run_child");
+    await Promise.all([parent.done, child.done]);
+
+    expect(contextWindowUsage.get("session_parent")).toMatchObject({
+      currentTokens: 100,
+      modelId: "parent-model",
+      sessionId: "session_parent",
+    });
+    expect(contextWindowUsage.get("session_child")).toMatchObject({
+      currentTokens: 900,
+      modelId: "child-model",
+      sessionId: "session_child",
+    });
+    expect(
+      published
+        .filter((event) => event.type === "context.window.updated")
+        .map((event) => event.usage.sessionId),
+    ).toEqual(["session_parent", "session_child"]);
   });
 
   it("does not emit persistent notices for successful context compaction", async () => {

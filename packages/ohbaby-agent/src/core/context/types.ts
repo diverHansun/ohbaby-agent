@@ -9,15 +9,18 @@ export interface MemoryReader {
   load(directory: string): Promise<MergedMemory>;
 }
 
+export interface SystemPromptProviderInput {
+  readonly sessionId: string;
+  readonly contextScopeId?: string;
+  readonly directory: string;
+  readonly isSubagent: boolean;
+  readonly agentName?: string;
+  readonly toolNames: readonly string[];
+}
+
 export interface SystemPromptProvider {
-  build(input: {
-    readonly sessionId: string;
-    readonly contextScopeId?: string;
-    readonly directory: string;
-    readonly isSubagent: boolean;
-    readonly agentName?: string;
-    readonly toolNames: readonly string[];
-  }): Promise<string>;
+  build(input: SystemPromptProviderInput): Promise<string>;
+  buildRuntimeContext?(input: SystemPromptProviderInput): Promise<string>;
 }
 
 export interface TokenCounter {
@@ -69,6 +72,17 @@ export interface ContextAssemblyOptions {
   readonly contextScopeId?: string;
   readonly isSubagent: boolean;
   readonly toolNames: readonly string[];
+  readonly promptSnapshot?: AgentRunPromptSnapshot;
+}
+
+export interface AgentRunPromptSnapshot {
+  readonly systemPrompt: string;
+  readonly memory: MergedMemory;
+}
+
+export interface CreateRunPromptSnapshotInput extends SystemPromptProviderInput {
+  /** Attach dynamic model-only context only for a newly initiated run. */
+  readonly initiatingUserMessageId?: string;
 }
 
 export interface PreparedModelRequest {
@@ -143,6 +157,8 @@ export interface PrepareTurnInput {
   readonly contextScopeId?: string;
   readonly directory: string;
   readonly modelId: string;
+  /** Stable system and memory captured once for this lifecycle run. */
+  readonly promptSnapshot?: AgentRunPromptSnapshot;
   readonly agentName?: string;
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   /** Fires once after an actual automatic compaction rung is selected, before history mutation. */
@@ -176,6 +192,9 @@ export interface ContextManager {
     readonly modelId: string;
     readonly tools: ChatCompletionCreateParams["tools"];
   }): ContextUsage;
+  createRunPromptSnapshot(
+    input: CreateRunPromptSnapshotInput,
+  ): Promise<AgentRunPromptSnapshot>;
   updateCalibrationFactor(
     sessionId: string,
     realPromptTokens: number,
@@ -185,6 +204,7 @@ export interface ContextManager {
   compact(sessionId: string, options: CompactOptions): Promise<CompactResult>;
   prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn>;
   resetTurnCompactionCount(sessionId: string, contextScopeId?: string): void;
+  disposeScope(sessionId: string, contextScopeId: string): void;
   disposeSession(sessionId: string): void;
 }
 

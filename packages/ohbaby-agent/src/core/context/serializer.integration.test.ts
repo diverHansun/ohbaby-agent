@@ -1,7 +1,8 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { messageToUiMessage } from "../../adapters/ui-state/persistent-store.js";
 import { createBus } from "../../bus/index.js";
 import {
   closeDatabase,
@@ -12,11 +13,15 @@ import {
 import {
   createDatabaseMessageStore,
   createMessageManager,
+  isModelContextPart,
   type MessageIdGenerator,
 } from "../message/index.js";
+import { createFallbackSessionTitleFromMessages } from "../../services/session/title-fallback.js";
+import { createContextManager } from "./context-manager.js";
 import { serializeForLlm } from "./serializer.js";
 
 const cleanupPaths: string[] = [];
+let databasePath = "";
 
 function createMessageIds(): MessageIdGenerator {
   let nextMessageId = 1;
@@ -70,7 +75,8 @@ function insertSession(): void {
 beforeEach(async () => {
   const directory = await mkdtemp(join(tmpdir(), "ohbaby-context-db-"));
   cleanupPaths.push(directory);
-  initDatabase({ dbPath: join(directory, "agent.db") });
+  databasePath = join(directory, "agent.db");
+  initDatabase({ dbPath: databasePath });
   insertSession();
 });
 
@@ -84,6 +90,108 @@ afterEach(async () => {
 });
 
 describe("serializeForLlm database metadata projection", () => {
+  it("keeps persisted runtime context model-visible after a database round trip", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+      idGenerator: createMessageIds(),
+      now: createClock(),
+    });
+    const user = await messageManager.createMessage({
+      agent: "build",
+      role: "user",
+      sessionId: "session_1",
+    });
+    await messageManager.appendPart(user.id, {
+      text: "inspect caching",
+      type: "text",
+    });
+    await messageManager.appendPart(user.id, {
+      metadata: { kind: "model-context:runtime:v1" },
+      synthetic: true,
+      text: "\n\n<environment_context>/repo</environment_context>",
+      type: "text",
+    });
+
+    const historyBeforeCrash = await messageManager.listBySession("session_1");
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    const reopenedMessageManager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+      idGenerator: createMessageIds(),
+      now: createClock(),
+    });
+    const history = await reopenedMessageManager.listBySession("session_1");
+    const restoredUser = history[0];
+    expect(history).toEqual(historyBeforeCrash);
+    expect(history[0]?.parts.filter(isModelContextPart)).toHaveLength(1);
+    expect(
+      JSON.stringify(
+        serializeForLlm({
+          history,
+          isSubagent: false,
+          memory: { global: "", project: "", merged: "" },
+          systemPrompt: "stable",
+        }),
+      ),
+    ).toContain("<environment_context>/repo</environment_context>");
+    expect(messageToUiMessage(restoredUser)).toMatchObject({
+      parts: [{ text: "inspect caching", type: "text" }],
+    });
+    expect(createFallbackSessionTitleFromMessages(history)).toBe(
+      "inspect caching",
+    );
+
+    const buildRuntimeContext = vi.fn().mockResolvedValue("new runtime");
+    const contextManager = createContextManager({
+      bus: createBus(),
+      llmClient: {
+        generateSummary: vi.fn().mockResolvedValue("summary"),
+      },
+      memory: {
+        load: vi
+          .fn()
+          .mockResolvedValue({ global: "", merged: "", project: "" }),
+      },
+      messageManager: reopenedMessageManager,
+      systemPromptProvider: {
+        build: vi.fn().mockResolvedValue("stable"),
+        buildRuntimeContext,
+      },
+      tokenCounter: {
+        estimateTokens: (content) => content.length,
+        getLimit: () => 100_000,
+      },
+    });
+    const resumedSnapshot = await contextManager.createRunPromptSnapshot({
+      directory: "/changed",
+      isSubagent: false,
+      sessionId: "session_1",
+      toolNames: [],
+    });
+    const resumed = await contextManager.prepareTurn({
+      directory: "/changed",
+      modelId: "fake-model",
+      promptSnapshot: resumedSnapshot,
+      sessionId: "session_1",
+      toolNames: [],
+      tools: undefined,
+    });
+
+    expect(buildRuntimeContext).not.toHaveBeenCalled();
+    expect(
+      JSON.stringify(resumed.request).split(
+        "<environment_context>/repo</environment_context>",
+      ),
+    ).toHaveLength(2);
+    expect(
+      (
+        await reopenedMessageManager.listBySession("session_1")
+      )[0]?.parts.filter(isModelContextPart),
+    ).toHaveLength(1);
+  });
+
   it("projects bash and MCP metadata after a database round trip", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),

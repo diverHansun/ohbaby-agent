@@ -55,6 +55,17 @@ function providerStream(
 function toolCallStep(index: number): InterfaceProviderStreamEvent {
   return {
     finishReason: "tool_calls",
+    tokenUsage: {
+      inputBreakdown: {
+        cacheRead: Math.max(0, index - 1),
+        cacheWrite: 0,
+        observed: { cacheRead: true, cacheWrite: false },
+        uncached: 2,
+      },
+      inputTokens: Math.max(0, index - 1) + 2,
+      outputTokens: 1,
+      totalTokens: Math.max(0, index - 1) + 3,
+    },
     toolCallDeltas: [
       {
         argumentsDelta: JSON.stringify({ index }),
@@ -86,7 +97,21 @@ function createLongTaskLLMClient(input: {
         }
         return Promise.resolve(
           providerStream([
-            { finishReason: "stop", textDelta: "long subagent complete" },
+            {
+              finishReason: "stop",
+              textDelta: "long subagent complete",
+              tokenUsage: {
+                inputBreakdown: {
+                  cacheRead: input.toolSteps,
+                  cacheWrite: 0,
+                  observed: { cacheRead: true, cacheWrite: false },
+                  uncached: 2,
+                },
+                inputTokens: input.toolSteps + 2,
+                outputTokens: 2,
+                totalTokens: input.toolSteps + 4,
+              },
+            },
           ]),
         );
       },
@@ -96,11 +121,11 @@ function createLongTaskLLMClient(input: {
     },
     config: {
       apiKeyEnv: "FAKE_API_KEY",
-      baseUrl: "https://example.invalid/v1",
+      baseUrl: "https://api.openai.com/v1",
       interfaceProvider: "openai-compatible",
       maxTokens: 128,
       model: "fake-model",
-      provider: "fake",
+      provider: "openai",
       temperature: 0,
     },
   };
@@ -249,7 +274,8 @@ function sandboxLease(input: SandboxAcquireInput): SandboxLease {
     },
     containsTrustedPath: () => true,
     contextId: `context_${scopeKey}`,
-    contextScopeId: typeof input === "string" ? undefined : input.contextScopeId,
+    contextScopeId:
+      typeof input === "string" ? undefined : input.contextScopeId,
     leaseId: `lease_${scopeKey}`,
     preflight: () =>
       Promise.resolve({
@@ -270,7 +296,8 @@ function sandboxLease(input: SandboxAcquireInput): SandboxLease {
       Promise.resolve(`${workdir}/${inputPath}`),
     sessionId,
     scopeKey,
-    trustPath: (input) => Promise.resolve({ kind: input.kind, path: input.path }),
+    trustPath: (input) =>
+      Promise.resolve({ kind: input.kind, path: input.path }),
     trustedRoots: () => [{ kind: "workspace", path: workdir }],
     workdir,
   };
@@ -439,6 +466,10 @@ describe("AgentInstance long task integration", () => {
       messageManager,
       systemPromptProvider: {
         build: () => Promise.resolve("Subagent long task integration."),
+        buildRuntimeContext: (input) =>
+          Promise.resolve(
+            `<environment_context>${input.contextScopeId ?? "primary"}:${input.directory}</environment_context>`,
+          ),
       },
       tokenCounter: createSmallBudgetTokenCounter(),
     });
@@ -494,10 +525,29 @@ describe("AgentInstance long task integration", () => {
       success: true,
     });
     expect(context.prepareCalls.length).toBeGreaterThanOrEqual(52);
-    expect(context.successfulReductionStatuses.length).toBeGreaterThanOrEqual(1);
+    expect(context.successfulReductionStatuses.length).toBeGreaterThanOrEqual(
+      1,
+    );
     expect(context.successfulReductionStatuses).not.toContain("failed");
     expect(context.successfulReductionStatuses).not.toContain("inflated");
     expect(requests).toHaveLength(52);
+    expect(
+      new Set(requests.map((request) => request.promptCache.key)).size,
+    ).toBe(1);
+    expect(requests.every((request) => request.purpose === "agent-step")).toBe(
+      true,
+    );
+    expect(
+      requests.every((request) => request.contextScopeId === "subagent_ac6"),
+    ).toBe(true);
+    const runtimeMarker = "<environment_context>subagent_ac6:";
+    expect(JSON.stringify(requests[0])).toContain(runtimeMarker);
+    expect(
+      requests.every(
+        (request) =>
+          JSON.stringify(request).split("<environment_context>").length <= 2,
+      ),
+    ).toBe(true);
     expect(toolScheduler.executedCallIds).toHaveLength(51);
     const scopedMessages = await messageManager.listBySession("child_ac6", {
       contextScopeId: "subagent_ac6",
@@ -512,5 +562,15 @@ describe("AgentInstance long task integration", () => {
     expect(toolOutputs).toHaveLength(51);
     expect(toolOutputs[0]).toContain("step=1");
     expect(toolOutputs.at(-1)).toContain("step=51");
+    expect(JSON.stringify(scopedMessages)).toContain('"tokenUsage"');
+    expect(
+      scopedMessages
+        .flatMap((message) => message.parts)
+        .filter(
+          (part) =>
+            part.type === "text" &&
+            part.metadata?.kind === "model-context:runtime:v1",
+        ),
+    ).toHaveLength(1);
   });
 });

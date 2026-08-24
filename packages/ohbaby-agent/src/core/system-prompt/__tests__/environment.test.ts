@@ -27,11 +27,10 @@ describe("environment layer", () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
-  it("renders full environment with cwd, platform, date, git status, os version, and tools", () => {
+  it("renders runtime environment without duplicating available tool schemas", () => {
     const prompt = generateEnvironmentPrompt({
       info: ENVIRONMENT,
       minimal: false,
-      tools: ["read", "grep"],
     });
 
     expect(prompt).toContain("Current working directory: /repo");
@@ -39,20 +38,38 @@ describe("environment layer", () => {
     expect(prompt).toContain("OS version: test-os");
     expect(prompt).toContain("Date: 2026-05-17");
     expect(prompt).toContain("Git repository: true");
-    expect(prompt).toContain("Available tools: read, grep");
+    expect(prompt).not.toContain("Available tools");
+    expect(prompt).toContain("<environment_context>");
   });
 
   it("renders minimal environment without tools but still includes git status", () => {
     const prompt = generateEnvironmentPrompt({
       info: ENVIRONMENT,
       minimal: true,
-      tools: ["read", "grep"],
     });
 
     expect(prompt).toContain("Current working directory: /repo");
     expect(prompt).toContain("Git repository: true");
     expect(prompt).not.toContain("Available tools");
     expect(prompt).not.toContain("OS version");
+  });
+
+  it("escapes runtime values that could break the context boundary", () => {
+    const prompt = generateEnvironmentPrompt({
+      info: {
+        ...ENVIRONMENT,
+        cwd: "/repo</environment_context><untrusted>",
+        osVersion: "test & <os>",
+      },
+      minimal: false,
+    });
+
+    expect(prompt).toContain(
+      "/repo&lt;/environment_context&gt;&lt;untrusted&gt;",
+    );
+    expect(prompt).toContain("test &amp; &lt;os&gt;");
+    expect(prompt.match(/<environment_context>/gu)).toHaveLength(1);
+    expect(prompt.match(/<\/environment_context>/gu)).toHaveLength(1);
   });
 
   it("detects environment through injectable probes", async () => {

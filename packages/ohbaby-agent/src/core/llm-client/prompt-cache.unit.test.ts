@@ -197,9 +197,11 @@ describe("scoped prompt cache identity", () => {
       return Promise.resolve(providerStream([{ finishReason: "stop" }]));
     });
 
+    const runtimeMarker =
+      "<environment_context>retry-runtime</environment_context>";
     for await (const _ of streamChatCompletion(
       client,
-      [{ role: "user", content: "Hello" }],
+      [{ role: "user", content: `Hello\n\n${runtimeMarker}` }],
       {
         purpose: "agent-step",
         retry: {
@@ -216,6 +218,10 @@ describe("scoped prompt cache identity", () => {
 
     expect(requests).toHaveLength(2);
     expect(requests[0]?.promptCache.key).toBe(requests[1]?.promptCache.key);
+    expect(requests[1]?.messages).toEqual(requests[0]?.messages);
+    expect(
+      JSON.stringify(requests[1]?.messages).split(runtimeMarker),
+    ).toHaveLength(2);
   });
 
   it("keeps the selected explicit strategy in provider refusal errors", async () => {

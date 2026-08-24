@@ -133,6 +133,12 @@ describe("subagent scoped context integration", () => {
       "scope a short",
     );
     expect(generateSummary).toHaveBeenCalledOnce();
+    expect(generateSummary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contextScopeId: "scope_a",
+        sessionId: "child_1",
+      }),
+    );
     expect(memory.load).not.toHaveBeenCalled();
   });
 });

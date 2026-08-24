@@ -25,6 +25,7 @@ import {
   createInMemoryMessageStore,
   createDatabaseMessageStore,
   createMessageManager,
+  isModelContextPart,
 } from "../core/message/index.js";
 import type {
   MessageIdGenerator,
@@ -1925,11 +1926,13 @@ describe("createInProcessUiBackendClient", () => {
       const persistedMessages = await messageManager.listBySession(
         snapshot.sessions[0].id,
       );
-      expect(
-        persistedMessages.flatMap((message) =>
-          message.parts.map((part) => part.type),
-        ),
-      ).toEqual(["text", "text"]);
+      const persistedParts = persistedMessages.flatMap(
+        (message) => message.parts,
+      );
+      expect(persistedParts.some(isModelContextPart)).toBe(true);
+      expect(persistedParts.some((part) => part.type === "reasoning")).toBe(
+        false,
+      );
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
@@ -4941,12 +4944,19 @@ describe("createInProcessUiBackendClient", () => {
 
     await client.submitPromptAndWait("Use core message");
 
-    await expect(
-      messageManager.listBySession("session_1"),
-    ).resolves.toMatchObject([
+    const persisted = await messageManager.listBySession("session_1");
+    expect(persisted).toMatchObject([
       {
         info: { id: "message_1", role: "user" },
-        parts: [{ id: "part_1", type: "text", text: "Use core message" }],
+        parts: [
+          { id: "part_1", type: "text", text: "Use core message" },
+          {
+            id: "part_2",
+            metadata: { kind: "model-context:runtime:v1" },
+            synthetic: true,
+            type: "text",
+          },
+        ],
       },
       {
         info: {
@@ -4955,7 +4965,7 @@ describe("createInProcessUiBackendClient", () => {
           parentId: "message_1",
           finish: "stop",
         },
-        parts: [{ id: "part_2", type: "text", text: "Core" }],
+        parts: [{ id: "part_3", type: "text", text: "Core" }],
       },
     ]);
   });
@@ -5359,7 +5369,12 @@ describe("createInProcessUiBackendClient", () => {
             if (isTitleGenerationRequest(request)) {
               return Promise.resolve(createTitleProviderStream(request));
             }
-            mainPrompts.push(lastRequestMessageText(request));
+            mainPrompts.push(
+              lastRequestMessageText(request).split(
+                "\n\n<environment_context>",
+                1,
+              )[0],
+            );
             return Promise.resolve(
               (async function* (): AsyncGenerator<
                 InterfaceProviderStreamEvent,

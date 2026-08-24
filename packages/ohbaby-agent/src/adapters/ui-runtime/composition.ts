@@ -83,6 +83,7 @@ import {
   generateMcpToolMenuPrompt,
   McpManager,
   McpToolMenu,
+  ScopeToolSequence,
   type McpClientStatus,
 } from "../../mcp/index.js";
 import {
@@ -252,6 +253,7 @@ export async function createUiRuntimeComposition(
     options.streamBridge ??
     createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
   const mcpToolMenu = new McpToolMenu();
+  const scopeToolSequence = new ScopeToolSequence();
   let registeredMcpToolNames = new Set<string>();
   const toolScheduler = createToolScheduler({
     accessGuard({ request, tool }) {
@@ -355,7 +357,7 @@ export async function createUiRuntimeComposition(
     readonly contextScopeId?: string;
     readonly isSubagent: boolean;
     readonly sessionId: string;
-  }): Promise<ToolDefinition[]> {
+  }): Promise<readonly ToolDefinition[]> {
     const agentName = await resolvePromptAgentName(input);
     const tools = await toolScheduler.getAvailableTools({
       agentName,
@@ -368,10 +370,21 @@ export async function createUiRuntimeComposition(
       },
       tools,
     );
-    return tools.filter(
-      (tool) =>
-        !registeredMcpToolNames.has(tool.name) || loadedMcpTools.has(tool.name),
+    const staticTools = tools.filter(
+      (tool) => !registeredMcpToolNames.has(tool.name),
     );
+    const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
+    const loadedDefinitions = [...loadedMcpTools].flatMap((toolName) => {
+      const tool = toolsByName.get(toolName);
+      return tool === undefined ? [] : [tool];
+    });
+    return scopeToolSequence.snapshot(
+      {
+        contextScopeId: input.contextScopeId,
+        sessionId: input.sessionId,
+      },
+      [...staticTools, ...loadedDefinitions],
+    ).tools;
   }
 
   async function resolvePrimaryContextTools(input: {
@@ -581,6 +594,9 @@ export async function createUiRuntimeComposition(
         sessionId: input.sessionId,
       });
     } finally {
+      contextManager.disposeScope(input.sessionId, input.contextScopeId);
+      mcpToolMenu.disposeScope(input.sessionId, input.contextScopeId);
+      scopeToolSequence.disposeScope(input.sessionId, input.contextScopeId);
       todoService.releaseScope(input.sessionId, input.contextScopeId);
     }
   };
@@ -628,6 +644,7 @@ export async function createUiRuntimeComposition(
     (payload) => {
       contextManager.disposeSession(payload.sessionId);
       mcpToolMenu.disposeSession(payload.sessionId);
+      scopeToolSequence.disposeSession(payload.sessionId);
       todoService.release(payload.sessionId);
       todoWorkScopes.release(payload.sessionId);
       trackLifecycleCleanup(

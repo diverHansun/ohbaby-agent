@@ -1,4 +1,7 @@
-import type { SystemPromptProvider } from "../context/index.js";
+import type {
+  SystemPromptProvider,
+  SystemPromptProviderInput,
+} from "../context/index.js";
 import {
   detectEnvironment,
   generateBasePrompt,
@@ -20,15 +23,6 @@ import type {
   SubagentRolePromptInfo,
   SubagentTaskKind,
 } from "./types.js";
-
-export interface SystemPromptProviderInput {
-  readonly sessionId: string;
-  readonly contextScopeId?: string;
-  readonly directory: string;
-  readonly isSubagent: boolean;
-  readonly agentName?: string;
-  readonly toolNames: readonly string[];
-}
 
 export interface SystemPromptProviderOptions {
   readonly agentNameResolver?: (
@@ -130,7 +124,6 @@ export const SystemPrompt = {
     assertAssembleOptions(options);
     const isSubagent = options.isSubagent;
     const agentPromptAddon = options.agentPromptAddon ?? options.agentPrompt;
-    const runtimePrompts = options.runtimePrompts ?? [];
 
     if (isSubagent) {
       return compactPrompts([
@@ -139,12 +132,6 @@ export const SystemPrompt = {
           resolveSubagentTaskKind(options.agentName, options.taskKind),
         ),
         generateAgentAddonPrompt(agentPromptAddon),
-        ...runtimePrompts,
-        generateEnvironmentPrompt({
-          info: options.environment,
-          minimal: true,
-          tools: options.tools,
-        }),
       ]);
     }
 
@@ -153,12 +140,6 @@ export const SystemPrompt = {
       getPrimaryTaskPrompt(resolvePrimaryTaskKind(options.taskKind)),
       generateAgentAddonPrompt(agentPromptAddon),
       generateSubagentRolesPrompt(options.availableSubagentRoles),
-      ...runtimePrompts,
-      generateEnvironmentPrompt({
-        info: options.environment,
-        minimal: false,
-        tools: options.tools,
-      }),
       generateCustomInstructionsPrompt(options.customInstructions ?? []),
     ]);
   },
@@ -171,12 +152,8 @@ export const SystemPrompt = {
     return SUBAGENT_BASE_PROMPT;
   },
 
-  getEnvironment(
-    info: EnvironmentInfo,
-    minimal = false,
-    tools?: readonly string[],
-  ): string {
-    return generateEnvironmentPrompt({ info, minimal, tools });
+  getEnvironment(info: EnvironmentInfo, minimal = false): string {
+    return generateEnvironmentPrompt({ info, minimal });
   },
 
   getPrimaryBase(): string {
@@ -211,17 +188,12 @@ export function createSystemPromptProvider(
   return {
     async build(input: SystemPromptProviderInput): Promise<string> {
       const agentName = await resolveAgentName(input, options);
-      const [availableSubagentRoles, environment, runtimePrompts, taskKind] =
-        await Promise.all([
-          input.isSubagent
-            ? []
-            : (options.availableSubagentRolesProvider?.(input) ?? []),
-          options.environmentDetector
-            ? options.environmentDetector(input.directory, input)
-            : detectEnvironment(input.directory),
-          options.runtimePromptsProvider?.(input) ?? [],
-          options.taskKindResolver?.(input, agentName),
-        ]);
+      const [availableSubagentRoles, taskKind] = await Promise.all([
+        input.isSubagent
+          ? []
+          : (options.availableSubagentRolesProvider?.(input) ?? []),
+        options.taskKindResolver?.(input, agentName),
+      ]);
       const agentPromptAddon = await resolveAgentPromptAddon(
         agentName,
         input,
@@ -232,11 +204,8 @@ export function createSystemPromptProvider(
         return SystemPrompt.assemble({
           agentName,
           agentPromptAddon,
-          environment,
           isSubagent: true,
-          runtimePrompts,
           taskKind,
-          tools: input.toolNames,
         }).join("\n\n");
       }
 
@@ -253,12 +222,27 @@ export function createSystemPromptProvider(
         agentPromptAddon,
         availableSubagentRoles,
         customInstructions,
-        environment,
         isSubagent: false,
-        runtimePrompts,
         taskKind,
-        tools: input.toolNames,
       }).join("\n\n");
+    },
+
+    async buildRuntimeContext(
+      input: SystemPromptProviderInput,
+    ): Promise<string> {
+      const [environment, runtimePrompts] = await Promise.all([
+        options.environmentDetector
+          ? options.environmentDetector(input.directory, input)
+          : detectEnvironment(input.directory),
+        options.runtimePromptsProvider?.(input) ?? [],
+      ]);
+      return compactPrompts([
+        generateEnvironmentPrompt({
+          info: environment,
+          minimal: input.isSubagent,
+        }),
+        ...runtimePrompts,
+      ]).join("\n\n");
     },
   };
 }

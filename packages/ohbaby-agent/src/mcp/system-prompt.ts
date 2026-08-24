@@ -20,9 +20,9 @@ export function generateMcpToolMenuPrompt(
   }
 
   return [
-    "<mcp_tools>",
+    "<mcp_tool_catalog>",
     ...FIXED_INSTRUCTIONS,
     ...toolNames.map((toolName) => `- ${toolName}`),
-    "</mcp_tools>",
+    "</mcp_tool_catalog>",
   ].join("\n");
 }

@@ -15,7 +15,10 @@ import type {
   ToolPart,
   ToolState,
 } from "../../core/message/index.js";
-import { isContextSummaryPart } from "../../core/message/index.js";
+import {
+  isContextSummaryPart,
+  isModelContextPart,
+} from "../../core/message/index.js";
 import { SUMMARY_AGENT_NAME } from "../../core/context/constants.js";
 import { isActivePart } from "../../core/context/filters.js";
 import type {
@@ -124,6 +127,9 @@ function toolPartToUiParts(part: ToolPart): UiMessagePart[] {
 }
 
 function partToUiParts(part: Part): UiMessagePart[] {
+  if (isModelContextPart(part)) {
+    return [];
+  }
   if (part.type === "text") {
     return [{ text: part.text, type: "text" }];
   }
