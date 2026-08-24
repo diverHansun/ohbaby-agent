@@ -54,6 +54,27 @@ describe("validateModelJson", () => {
     }).not.toThrow();
   });
 
+  it.each(["auto", "enabled", "disabled"])(
+    "should accept apiConfig.promptCache=%s",
+    (promptCache) => {
+      expect(() => {
+        validateModelJson({
+          ...validConfig,
+          apiConfig: { ...validConfig.apiConfig, promptCache },
+        });
+      }).not.toThrow();
+    },
+  );
+
+  it("should reject an unknown apiConfig.promptCache policy", () => {
+    expect(() => {
+      validateModelJson({
+        ...validConfig,
+        apiConfig: { ...validConfig.apiConfig, promptCache: "aggressive" },
+      });
+    }).toThrow(/apiConfig\.promptCache/u);
+  });
+
   it("should reject unknown apiConfig.interfaceProvider", () => {
     const config = {
       ...validConfig,

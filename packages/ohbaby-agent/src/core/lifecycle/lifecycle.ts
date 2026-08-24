@@ -912,6 +912,11 @@ export class Lifecycle {
         this.deps.llmClient,
         [...input.conversationMessages],
         {
+          purpose: "agent-step",
+          sessionId: params.sessionId,
+          ...(params.contextScopeId === undefined
+            ? {}
+            : { contextScopeId: params.contextScopeId }),
           signal: params.signal,
           tools: params.tools,
         },

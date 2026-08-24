@@ -36,6 +36,7 @@ describe("session title generator", () => {
     const title = await generateSessionTitle({
       firstUserMessage: "Please fix sessions. OPENAI_API_KEY=sk-secret-value",
       llmClient: client,
+      sessionId: "session_1",
     });
 
     expect(title).toBe("Sessions UI cards");
@@ -43,6 +44,8 @@ describe("session title generator", () => {
     expect(requests[0]).toMatchObject({
       maxTokens: TITLE_GENERATION_MAX_TOKENS,
       model: "active-model",
+      purpose: "session-title",
+      sessionId: "session_1",
       temperature: 0.8,
     });
     expect(client.config.maxTokens).toBe(8192);

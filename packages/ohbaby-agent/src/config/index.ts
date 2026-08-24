@@ -18,6 +18,7 @@ export type {
   LLMConfig,
   LLMConfigLoadOptions,
   InterfaceProviderKind,
+  PromptCachePolicy,
   ModelJsonConfig,
   ModelJsonModelProfile,
   SetActiveLLMConfigInput,

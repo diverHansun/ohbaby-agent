@@ -804,6 +804,7 @@ export function createContextManager(
 
   async function generateSummaryCandidate(
     sessionId: string,
+    contextScopeId: string | undefined,
     rawHistory: readonly MessageWithParts[],
   ): Promise<SummaryCandidate> {
     const activeHistory = getActiveHistory(rawHistory).filter(
@@ -847,6 +848,7 @@ export function createContextManager(
       try {
         snapshot = await options.llmClient.generateSummary({
           sessionId,
+          ...(contextScopeId === undefined ? {} : { contextScopeId }),
           prompt,
           systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
           history: historyToCompress,
@@ -1151,6 +1153,7 @@ export function createContextManager(
 
     const candidate = await generateSummaryCandidate(
       req.sessionId,
+      req.contextScopeId,
       afterPrune.history,
     );
     if (candidate.status !== "candidate") {

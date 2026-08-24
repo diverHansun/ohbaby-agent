@@ -17,6 +17,7 @@ import type {
 export type {
   LLMConfig,
   InterfaceProviderKind,
+  PromptCachePolicy,
   ModelJsonConfig,
   ModelJsonModelProfile,
   ConfigErrorCode,

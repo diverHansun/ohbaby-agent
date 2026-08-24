@@ -11,6 +11,7 @@ interface WrittenModelJson {
     readonly baseUrl: string;
     readonly apiKeyEnv?: string;
     readonly interfaceProvider?: string;
+    readonly promptCache?: string;
   };
   readonly llmParams: {
     readonly temperature: number;
@@ -111,6 +112,7 @@ describe("setActiveLLMConfig", () => {
       baseUrl: "https://open.bigmodel.cn/api/paas/v4",
       apiKeyEnv: "ZHIPU_API_KEY",
       interfaceProvider: "openai-compatible",
+      promptCache: "auto",
       modelJsonPath: "D:/repo/.ohbaby/model.json",
       envPath: "D:/repo/.env",
     });
@@ -142,6 +144,7 @@ describe("setActiveLLMConfig", () => {
       model: "local-model",
       baseUrl: "http://127.0.0.1:1234/v1",
       interfaceProvider: "openai-compatible",
+      promptCache: "auto",
       modelJsonPath: "D:/repo/.ohbaby/model.json",
     });
   });
@@ -197,6 +200,38 @@ describe("setActiveLLMConfig", () => {
     const envWrite = findWriteCall((file) => file.endsWith(".env"));
     expect(envWrite).toBeUndefined();
   });
+
+  it.each(["enabled", "disabled"] as const)(
+    "should preserve promptCache=%s during an unrelated active-model rewrite",
+    async (promptCache) => {
+      const existingModelJson = {
+        provider: "openai",
+        defaultModel: "gpt-4",
+        apiConfig: {
+          baseUrl: "https://api.openai.com/v1",
+          interfaceProvider: "openai-compatible",
+          promptCache,
+        },
+        llmParams: { temperature: 0.1, maxTokens: 1234 },
+      };
+      vi.mocked(fs.readFile).mockResolvedValue(
+        JSON.stringify(existingModelJson),
+      );
+
+      const result = await setActiveLLMConfig({
+        provider: "openai",
+        model: "gpt-4.1",
+        baseUrl: "https://api.openai.com/v1",
+        modelJsonPath: "D:/repo/.ohbaby/model.json",
+      });
+
+      const modelJson = parseModelJsonWrite(
+        findWriteCall((file) => file.includes("model.json")),
+      );
+      expect(modelJson.apiConfig.promptCache).toBe(promptCache);
+      expect(result.promptCache).toBe(promptCache);
+    },
+  );
 
   it("should update the active per-model profile and max token settings", async () => {
     const existingModelJson = {

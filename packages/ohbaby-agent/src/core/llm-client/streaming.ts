@@ -33,6 +33,8 @@ import {
   type ProviderRetryPolicy,
 } from "./retry.js";
 import { ToolCallParseError } from "./errors.js";
+import { resolvePromptCacheRequest } from "./prompt-cache.js";
+import type { LLMRequestPurpose } from "../../services/interface-providers/index.js";
 
 interface AccumulatedToolCall {
   id: string;
@@ -255,13 +257,34 @@ export async function* streamChatCompletion(
     signal?: AbortSignal;
     tools?: ChatCompletionCreateParams["tools"];
     maxTokens?: number;
+    purpose?: LLMRequestPurpose;
+    sessionId?: string;
+    contextScopeId?: string;
   },
 ): AsyncGenerator<StreamingResponse, void, unknown> {
   const { provider, config } = llmClient;
-  const { retry, signal, tools, maxTokens } = options ?? {};
+  const {
+    retry,
+    signal,
+    tools,
+    maxTokens,
+    purpose,
+    sessionId,
+    contextScopeId,
+  } = options ?? {};
   const retryPolicy = resolveProviderRetryPolicy(retry);
   const requestMaxTokens =
     validateRequestMaxTokens(maxTokens) ?? config.maxTokens;
+  const promptCache = resolvePromptCacheRequest({
+    baseUrl: config.baseUrl,
+    interfaceProvider: config.interfaceProvider,
+    policy: config.promptCache ?? "auto",
+    provider: config.provider,
+    messages,
+    ...(purpose === undefined ? {} : { purpose }),
+    ...(sessionId === undefined ? {} : { sessionId }),
+    ...(contextScopeId === undefined ? {} : { contextScopeId }),
+  });
 
   let failedAttempts = 0;
 
@@ -284,6 +307,10 @@ export async function* streamChatCompletion(
         maxTokens: requestMaxTokens,
         tools,
         signal,
+        ...(purpose === undefined ? {} : { purpose }),
+        ...(sessionId === undefined ? {} : { sessionId }),
+        ...(contextScopeId === undefined ? {} : { contextScopeId }),
+        promptCache,
       });
 
       let emittedAnyResponse = false;
@@ -436,7 +463,10 @@ export async function* streamChatCompletion(
         finishReason !== null ||
         rawFinishReason !== undefined
       ) {
-        throw new ProviderStreamInterruptedError(error);
+        throw annotatePromptCacheError(
+          new ProviderStreamInterruptedError(error),
+          promptCache.strategy,
+        );
       }
 
       failedAttempts += 1;
@@ -445,9 +475,15 @@ export async function* streamChatCompletion(
         !isRetryableProviderError(error)
       ) {
         if (isRetryableProviderError(error)) {
-          throw new ProviderRetryExhaustedError(error, failedAttempts - 1);
+          throw annotatePromptCacheError(
+            new ProviderRetryExhaustedError(
+              annotatePromptCacheError(error, promptCache.strategy),
+              failedAttempts - 1,
+            ),
+            promptCache.strategy,
+          );
         }
-        throw error;
+        throw annotatePromptCacheError(error, promptCache.strategy);
       }
 
       const delayMs = nextRetryDelayMs({
@@ -483,6 +519,34 @@ export async function* streamChatCompletion(
         throw sleepError;
       }
     }
+  }
+}
+
+function annotatePromptCacheError(error: unknown, strategy: string): unknown {
+  if (strategy === "observe-only") {
+    return error;
+  }
+  if (!(error instanceof Error)) {
+    return new Error(`${String(error)} [prompt-cache strategy=${strategy}]`, {
+      cause: error,
+    });
+  }
+  const annotatedMessage = error.message.includes("prompt-cache strategy=")
+    ? error.message
+    : `${error.message} [prompt-cache strategy=${strategy}]`;
+  if (!Object.isExtensible(error)) {
+    return new Error(annotatedMessage, { cause: error });
+  }
+  try {
+    error.message = annotatedMessage;
+    Object.defineProperty(error, "promptCacheStrategy", {
+      configurable: true,
+      enumerable: false,
+      value: strategy,
+    });
+    return error;
+  } catch {
+    return new Error(annotatedMessage, { cause: error });
   }
 }
 

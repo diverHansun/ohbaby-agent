@@ -27,12 +27,14 @@ const TITLE_GENERATION_SYSTEM_PROMPT = [
 export interface GenerateSessionTitleInput {
   readonly firstUserMessage: string;
   readonly llmClient: LLMClientInstance;
+  readonly sessionId?: string;
   readonly timeoutMs?: number;
 }
 
 export async function generateSessionTitle({
   firstUserMessage,
   llmClient,
+  sessionId,
   timeoutMs = DEFAULT_TITLE_GENERATION_TIMEOUT_MS,
 }: GenerateSessionTitleInput): Promise<string | null> {
   const abortController = new AbortController();
@@ -54,6 +56,7 @@ export async function generateSessionTitle({
     llmClient,
     messages,
     abortController.signal,
+    sessionId,
   ).catch((caught: unknown) => {
     logTitleGenerationFailure(caught);
     return null;
@@ -116,10 +119,13 @@ async function collectGeneratedTitle(
   llmClient: LLMClientInstance,
   messages: readonly ChatCompletionMessage[],
   signal: AbortSignal,
+  sessionId: string | undefined,
 ): Promise<string | null> {
   let rawTitle = "";
   for await (const response of streamChatCompletion(llmClient, [...messages], {
     maxTokens: TITLE_GENERATION_MAX_TOKENS,
+    purpose: "session-title",
+    ...(sessionId === undefined ? {} : { sessionId }),
     signal,
   })) {
     const content = response.completeMessage.content;

@@ -43,6 +43,10 @@ export type {
   StreamStopReason,
 } from "./types.js";
 export type { ProviderRetryEvent, ProviderRetryPolicy } from "./retry.js";
+export type {
+  LLMRequestPurpose,
+  PromptCacheRequestStrategy,
+} from "../../services/interface-providers/index.js";
 
 // Re-export error class for convenience
 // Allows consumers to: import { APIUserAbortError } from '@/core/llm-client'

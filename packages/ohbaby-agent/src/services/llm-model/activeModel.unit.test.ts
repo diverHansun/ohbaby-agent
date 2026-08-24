@@ -13,6 +13,7 @@ describe("active model projection", () => {
     apiKeyEnv: "OPENAI_API_KEY",
     baseUrl: "https://api.openai.com/v1",
     interfaceProvider: "openai-compatible",
+    promptCache: "auto",
     temperature: 0.7,
     maxTokens: 4096,
     modelProfiles: [

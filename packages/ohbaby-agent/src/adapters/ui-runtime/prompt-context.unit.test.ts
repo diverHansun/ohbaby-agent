@@ -9,6 +9,11 @@ import type {
 type StreamChatCompletion = (
   llmClient: LLMClientInstance,
   messages: readonly { readonly content: string; readonly role: string }[],
+  options?: {
+    readonly contextScopeId?: string;
+    readonly purpose?: string;
+    readonly sessionId?: string;
+  },
 ) => AsyncIterable<StreamingResponse>;
 
 const streamChatCompletionMock = vi.hoisted(() =>
@@ -132,6 +137,7 @@ describe("createContextSummaryClient", () => {
     const client = createContextSummaryClient({} as LLMClientInstance);
 
     await client.generateSummary({
+      contextScopeId: "subagent_1",
       history: [
         {
           info: {
@@ -173,6 +179,11 @@ describe("createContextSummaryClient", () => {
         content: expect.stringContaining("Use this exact format") as string,
       },
     ]);
+    expect(streamChatCompletionMock.mock.calls[0][2]).toEqual({
+      contextScopeId: "subagent_1",
+      purpose: "context-summary",
+      sessionId: "session_1",
+    });
   });
 });
 

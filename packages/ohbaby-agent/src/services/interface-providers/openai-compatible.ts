@@ -60,7 +60,10 @@ function reasoningDeltaFromChoiceDelta(
 function buildRequestParams(
   request: InterfaceProviderRequest,
 ): ChatCompletionCreateParamsStreaming {
-  const params: ChatCompletionCreateParamsStreaming = {
+  type PromptCacheWireParams = ChatCompletionCreateParamsStreaming & {
+    prompt_cache_key?: string;
+  };
+  const params: PromptCacheWireParams = {
     model: request.model,
     messages: request.messages,
     temperature: request.temperature,
@@ -71,6 +74,10 @@ function buildRequestParams(
 
   if ((request.tools?.length ?? 0) > 0) {
     params.tools = request.tools;
+  }
+
+  if (request.promptCache.strategy === "openai-keyed-implicit") {
+    params.prompt_cache_key = request.promptCache.key;
   }
 
   return params;

@@ -5,6 +5,32 @@ import type {
 
 export type InterfaceProviderKind = "openai-compatible" | "anthropic";
 
+export type LLMRequestPurpose =
+  | "agent-step"
+  | "context-summary"
+  | "session-title";
+
+export type PromptCacheRequestStrategy =
+  | "observe-only"
+  | "openai-keyed-implicit"
+  | "anthropic-top-level-auto"
+  | "anthropic-explicit-last-block";
+
+export type InterfaceProviderPromptCache =
+  | {
+      readonly strategy: "openai-keyed-implicit";
+      readonly key: string;
+      readonly reason: string;
+    }
+  | {
+      readonly strategy: Exclude<
+        PromptCacheRequestStrategy,
+        "openai-keyed-implicit"
+      >;
+      readonly key?: never;
+      readonly reason: string;
+    };
+
 export type InterfaceProviderFinishReason =
   | "stop"
   | "tool_calls"
@@ -51,6 +77,10 @@ export interface InterfaceProviderRequest {
   maxTokens: number;
   tools?: ChatCompletionCreateParams["tools"];
   signal?: AbortSignal;
+  purpose?: LLMRequestPurpose;
+  sessionId?: string;
+  contextScopeId?: string;
+  promptCache: InterfaceProviderPromptCache;
 }
 
 export interface CreateInterfaceProviderOptions {

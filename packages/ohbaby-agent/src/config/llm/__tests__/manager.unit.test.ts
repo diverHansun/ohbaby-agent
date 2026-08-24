@@ -79,6 +79,7 @@ describe("LLMConfigManager", () => {
         apiKeyEnv: "OPENAI_API_KEY",
         baseUrl: "https://api.openai.com/v1",
         interfaceProvider: "openai-compatible",
+        promptCache: "auto",
         temperature: 0.7,
         maxTokens: 4096,
         contextWindowTokens: 128_000,
@@ -97,6 +98,21 @@ describe("LLMConfigManager", () => {
           },
         ],
       });
+    });
+
+    it("should resolve an explicit prompt-cache policy", async () => {
+      vi.mocked(loaders.loadModelJson).mockResolvedValue({
+        ...validModelJson,
+        apiConfig: {
+          ...validModelJson.apiConfig,
+          promptCache: "enabled",
+        },
+      });
+      vi.mocked(loaders.loadApiKey).mockReturnValue("sk-test-key-123");
+
+      await expect(
+        LLMConfigManager.getInstance().load(),
+      ).resolves.toMatchObject({ promptCache: "enabled" });
     });
 
     it("should read API key only from process.env after startup env loading", async () => {

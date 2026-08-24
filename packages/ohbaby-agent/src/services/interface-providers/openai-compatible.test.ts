@@ -94,6 +94,7 @@ describe("openai-compatible provider", () => {
       messages: [{ role: "user", content: "Hello" }],
       temperature: 0.7,
       maxTokens: 128,
+      promptCache: { strategy: "observe-only", reason: "test" },
       tools,
       signal: controller.signal,
     });
@@ -185,6 +186,7 @@ describe("openai-compatible provider", () => {
       messages: [{ role: "user", content: "weather" }],
       temperature: 0.2,
       maxTokens: 64,
+      promptCache: { strategy: "observe-only", reason: "test" },
     });
     const events: InterfaceProviderStreamEvent[] = [];
 
@@ -264,6 +266,7 @@ describe("openai-compatible provider", () => {
       messages: [{ role: "user", content: "Reply with exactly: pong" }],
       temperature: 0,
       maxTokens: 16,
+      promptCache: { strategy: "observe-only", reason: "test" },
     });
     const events: InterfaceProviderStreamEvent[] = [];
 
@@ -316,6 +319,7 @@ describe("openai-compatible provider", () => {
       messages: [{ role: "user", content: "Hello" }],
       temperature: 0.7,
       maxTokens: 128,
+      promptCache: { strategy: "observe-only", reason: "test" },
     });
     const events: InterfaceProviderStreamEvent[] = [];
 
@@ -377,6 +381,7 @@ describe("openai-compatible provider", () => {
       messages: [{ role: "user", content: "Hello" }],
       temperature: 0,
       maxTokens: 16,
+      promptCache: { strategy: "observe-only", reason: "test" },
     });
     const events: InterfaceProviderStreamEvent[] = [];
     for await (const event of stream) {
@@ -424,6 +429,7 @@ describe("openai-compatible provider", () => {
       messages: [{ role: "user", content: "Hello" }],
       temperature: 0,
       maxTokens: 16,
+      promptCache: { strategy: "observe-only", reason: "test" },
     });
     const events: InterfaceProviderStreamEvent[] = [];
     for await (const event of stream) {
@@ -506,6 +512,7 @@ describe("openai-compatible provider", () => {
         messages: [{ role: "user", content: "Hello" }],
         temperature: 0,
         maxTokens: 128,
+        promptCache: { strategy: "observe-only", reason: "test" },
       });
       const events: InterfaceProviderStreamEvent[] = [];
 

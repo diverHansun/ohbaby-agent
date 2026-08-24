@@ -119,6 +119,9 @@ export interface LLMClientInstance<TClient = unknown> {
     /** API protocol adapter used by the runtime client */
     interfaceProvider: LLMConfig["interfaceProvider"];
 
+    /** Prompt-cache request policy resolved from model configuration */
+    promptCache?: LLMConfig["promptCache"];
+
     /** Sampling temperature (0-2). Higher = more random */
     temperature: number;
 

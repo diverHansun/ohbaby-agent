@@ -77,6 +77,7 @@ describe("anthropic provider", () => {
       ],
       temperature: 0.7,
       maxTokens: 512,
+      promptCache: { strategy: "observe-only" as const, reason: "test" },
       tools: [
         {
           type: "function",
@@ -240,6 +241,7 @@ describe("anthropic provider", () => {
       messages: [{ role: "user", content: "Hello" }],
       temperature: 0.2,
       maxTokens: 128,
+      promptCache: { strategy: "observe-only", reason: "test" },
     });
     const events: InterfaceProviderStreamEvent[] = [];
 
@@ -320,6 +322,7 @@ describe("anthropic provider", () => {
       messages: [{ role: "user", content: "pause" }],
       temperature: 0.2,
       maxTokens: 32,
+      promptCache: { strategy: "observe-only", reason: "test" },
     });
     const events: InterfaceProviderStreamEvent[] = [];
 
@@ -383,6 +386,7 @@ describe("anthropic provider", () => {
       messages: [{ role: "user", content: "cached" }],
       temperature: 0,
       maxTokens: 32,
+      promptCache: { strategy: "observe-only", reason: "test" },
     });
     const events: InterfaceProviderStreamEvent[] = [];
     for await (const event of stream) {
@@ -454,6 +458,7 @@ describe("anthropic provider", () => {
     };
     const baseRequest = {
       maxTokens: 32,
+      promptCache: { strategy: "observe-only" as const, reason: "test" },
       messages: [{ role: "user" as const, content: "Continue" }],
       model: "claude-3-5-haiku-latest",
       temperature: 0,

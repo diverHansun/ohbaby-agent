@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { APIUserAbortError } from "@anthropic-ai/sdk/error";
 import type {
+  ContentBlockParam,
   MessageCreateParams,
   MessageParam,
   RawMessageStreamEvent,
@@ -32,6 +33,11 @@ type OpenAIMessageWithExtras = ChatCompletionMessageParam & {
   }[];
   tool_call_id?: string;
 };
+
+interface ConvertedAnthropicMessages {
+  messages: MessageParam[];
+  system?: string | TextBlockParam[];
+}
 
 function mapStopReason(
   stopReason: string | null | undefined,
@@ -175,10 +181,9 @@ function convertAssistantContent(
     : blocks;
 }
 
-function convertMessages(messages: ChatCompletionMessageParam[]): {
-  system?: string;
-  messages: MessageParam[];
-} {
+function convertMessages(
+  messages: ChatCompletionMessageParam[],
+): ConvertedAnthropicMessages {
   const systemParts: string[] = [];
   const anthropicMessages: MessageParam[] = [];
   let pendingToolResults: ToolResultBlockParam[] = [];
@@ -278,10 +283,77 @@ function convertTools(
   });
 }
 
+function applyLastBlockCacheControl(
+  converted: ConvertedAnthropicMessages,
+): boolean {
+  const { messages } = converted;
+  for (
+    let messageIndex = messages.length - 1;
+    messageIndex >= 0;
+    messageIndex -= 1
+  ) {
+    const message = messages[messageIndex];
+    if (typeof message.content === "string") {
+      if (message.content.length === 0) {
+        continue;
+      }
+      messages[messageIndex] = {
+        ...message,
+        content: [
+          {
+            type: "text",
+            text: message.content,
+            cache_control: { type: "ephemeral" },
+          },
+        ],
+      };
+      return true;
+    }
+
+    for (
+      let blockIndex = message.content.length - 1;
+      blockIndex >= 0;
+      blockIndex -= 1
+    ) {
+      const block = message.content[blockIndex];
+      const markedBlock = {
+        ...block,
+        cache_control: { type: "ephemeral" as const },
+      } as ContentBlockParam;
+      messages[messageIndex] = {
+        ...message,
+        content: message.content.map((candidate, index) =>
+          index === blockIndex ? markedBlock : candidate,
+        ),
+      };
+      return true;
+    }
+  }
+  if (typeof converted.system === "string" && converted.system.length > 0) {
+    converted.system = [
+      {
+        type: "text",
+        text: converted.system,
+        cache_control: { type: "ephemeral" },
+      },
+    ];
+    return true;
+  }
+  return false;
+}
+
 function buildRequestParams(
   request: InterfaceProviderRequest,
 ): MessageCreateParams {
   const convertedMessages = convertMessages(request.messages);
+  if (
+    request.promptCache.strategy === "anthropic-explicit-last-block" &&
+    !applyLastBlockCacheControl(convertedMessages)
+  ) {
+    throw new Error(
+      "Anthropic explicit cache strategy requires an eligible content block.",
+    );
+  }
   const params: MessageCreateParams = {
     model: request.model,
     messages: convertedMessages.messages,
@@ -291,6 +363,10 @@ function buildRequestParams(
 
   if (convertedMessages.system?.length) {
     params.system = convertedMessages.system;
+  }
+
+  if (request.promptCache.strategy === "anthropic-top-level-auto") {
+    params.cache_control = { type: "ephemeral" };
   }
 
   const tools = convertTools(request.tools);

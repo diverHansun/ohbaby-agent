@@ -83,11 +83,21 @@ export function createContextSummaryClient(
     async generateSummary(input): Promise<string> {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         let summary = "";
-        for await (const response of streamChatCompletion(llmClient, [
-          { role: "system", content: input.systemPrompt ?? input.prompt },
-          { role: "user", content: serializeHistory(input.history) },
-          { role: "user", content: input.prompt },
-        ])) {
+        for await (const response of streamChatCompletion(
+          llmClient,
+          [
+            { role: "system", content: input.systemPrompt ?? input.prompt },
+            { role: "user", content: serializeHistory(input.history) },
+            { role: "user", content: input.prompt },
+          ],
+          {
+            purpose: "context-summary",
+            sessionId: input.sessionId,
+            ...(input.contextScopeId === undefined
+              ? {}
+              : { contextScopeId: input.contextScopeId }),
+          },
+        )) {
           if (response.isComplete) {
             summary = messageContentToText(response.completeMessage.content);
           }

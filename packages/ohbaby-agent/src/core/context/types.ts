@@ -46,6 +46,7 @@ export interface TokenCounter {
 export interface ContextLLMClient {
   generateSummary(input: {
     readonly sessionId: string;
+    readonly contextScopeId?: string;
     readonly prompt: string;
     readonly systemPrompt?: string;
     readonly history: readonly MessageWithParts[];

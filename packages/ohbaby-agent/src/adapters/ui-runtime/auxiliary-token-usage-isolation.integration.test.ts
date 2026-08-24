@@ -7,6 +7,7 @@ import type {
   LifecycleResult,
 } from "../../core/lifecycle/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
+import { streamChatCompletion } from "../../core/llm-client/index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -117,6 +118,7 @@ describe("auxiliary token usage isolation", () => {
     const summaryClient = createContextSummaryClient(llmClient);
     await expect(
       summaryClient.generateSummary({
+        contextScopeId: "subagent_1",
         history: [],
         prompt: "summarize",
         sessionId: "child_session",
@@ -127,6 +129,7 @@ describe("auxiliary token usage isolation", () => {
       generateSessionTitle({
         firstUserMessage: "Name this child task",
         llmClient,
+        sessionId: "child_session",
       }),
     ).resolves.toBe("Auxiliary title");
 
@@ -173,6 +176,33 @@ describe("auxiliary token usage isolation", () => {
     );
 
     expect(requests).toHaveLength(3);
+    expect(
+      requests.map(({ contextScopeId, promptCache, purpose, sessionId }) => ({
+        contextScopeId,
+        promptCache: promptCache.strategy,
+        purpose,
+        sessionId,
+      })),
+    ).toEqual([
+      {
+        contextScopeId: "subagent_1",
+        promptCache: "observe-only",
+        purpose: "context-summary",
+        sessionId: "child_session",
+      },
+      {
+        contextScopeId: undefined,
+        promptCache: "observe-only",
+        purpose: "session-title",
+        sessionId: "child_session",
+      },
+      {
+        contextScopeId: "subagent_1",
+        promptCache: "observe-only",
+        purpose: "agent-step",
+        sessionId: "child_session",
+      },
+    ]);
     expect(result.usage).toEqual({
       inputBreakdown: {
         cacheRead: 5,
@@ -192,5 +222,39 @@ describe("auxiliary token usage isolation", () => {
       42,
       "subagent_1",
     );
+
+    batches.push([
+      {
+        finishReason: "stop",
+        textDelta: "primary done",
+        tokenUsage: { inputTokens: 8, outputTokens: 2, totalTokens: 10 },
+      },
+    ]);
+    await consume(
+      lifecycle.run({
+        directory: "/workspace",
+        isSubagent: false,
+        modelId: "fake-model",
+        sessionId: "primary_session",
+      }),
+    );
+    expect(requests[3]).toMatchObject({
+      promptCache: { strategy: "observe-only" },
+      purpose: "agent-step",
+      sessionId: "primary_session",
+    });
+    expect(requests[3]).not.toHaveProperty("contextScopeId");
+
+    batches.push([{ finishReason: "stop", textDelta: "legacy" }]);
+    for await (const _ of streamChatCompletion(llmClient, [
+      { role: "user", content: "Legacy external call" },
+    ])) {
+      // Drain the shared-client legacy compatibility path.
+    }
+    expect(requests[4]).toMatchObject({
+      promptCache: { strategy: "observe-only" },
+    });
+    expect(requests[4]).not.toHaveProperty("purpose");
+    expect(requests[4]?.promptCache.key).toBeUndefined();
   });
 });

@@ -4,13 +4,22 @@
  */
 
 import { ConfigError } from "./types.js";
-import type { InterfaceProviderKind, ModelJsonConfig } from "./types.js";
+import type {
+  InterfaceProviderKind,
+  ModelJsonConfig,
+  PromptCachePolicy,
+} from "./types.js";
 
 const ENDPOINT_PATHS = ["/chat/completions", "/messages", "/responses"];
 const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const INTERFACE_PROVIDER_KINDS = new Set<InterfaceProviderKind>([
   "openai-compatible",
   "anthropic",
+]);
+const PROMPT_CACHE_POLICIES = new Set<PromptCachePolicy>([
+  "auto",
+  "enabled",
+  "disabled",
 ]);
 
 function trimTrailingSlashes(value: string): string {
@@ -64,6 +73,25 @@ function validateInterfaceProviderValue(value: unknown): void {
       `Invalid apiConfig.interfaceProvider: ${formatInvalidValue(
         value,
       )}. Must be 'openai-compatible' or 'anthropic'`,
+      "INVALID_FIELD",
+      { value },
+    );
+  }
+}
+
+function validatePromptCacheValue(value: unknown): void {
+  if (value === undefined) {
+    return;
+  }
+
+  if (
+    typeof value !== "string" ||
+    !PROMPT_CACHE_POLICIES.has(value as PromptCachePolicy)
+  ) {
+    throw new ConfigError(
+      `Invalid apiConfig.promptCache: ${formatInvalidValue(
+        value,
+      )}. Must be 'auto', 'enabled', or 'disabled'`,
       "INVALID_FIELD",
       { value },
     );
@@ -202,6 +230,7 @@ export function validateModelJson(
     }
 
     validateInterfaceProviderValue(apiConfig.interfaceProvider);
+    validatePromptCacheValue(apiConfig.promptCache);
   }
 
   // Validate llmParams

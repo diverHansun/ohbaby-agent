@@ -59,6 +59,7 @@ import { Project } from "../project/index.js";
 import { InMemoryPromptSubmissionStore } from "../runtime/prompt-scheduler/index.js";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
 import { createHostLocalSandboxManager } from "./ui-runtime/host-local-environment.js";
+import { reloadLLMConfig } from "../config/index.js";
 import {
   createInMemoryUiStateStore,
   createPersistentUiStateStore,
@@ -1948,6 +1949,22 @@ describe("createInProcessUiBackendClient", () => {
       process.env.USERPROFILE = homeDir;
       globalThis.fetch = (): Promise<Response> =>
         Promise.reject(new Error("metadata probe unavailable"));
+      const modelJsonPath = join(homeDir, ".ohbaby", "model.json");
+      await mkdir(join(homeDir, ".ohbaby"), { recursive: true });
+      await writeFile(
+        modelJsonPath,
+        JSON.stringify({
+          apiConfig: {
+            baseUrl: "https://old.example/v1",
+            interfaceProvider: "openai-compatible",
+            promptCache: "disabled",
+          },
+          defaultModel: "old-model",
+          llmParams: { maxTokens: 4096, temperature: 0.7 },
+          provider: "old-provider",
+        }),
+        "utf-8",
+      );
 
       const client = createInProcessUiBackendClient({
         projectDirectory: projectRoot,
@@ -1967,7 +1984,6 @@ describe("createInProcessUiBackendClient", () => {
         provider: "zenmux",
       });
 
-      const modelJsonPath = join(homeDir, ".ohbaby", "model.json");
       const globalEnvPath = join(homeDir, ".ohbaby", ".env");
       expect(result).toEqual({
         apiKeyEnv: "ZENMUX_API_KEY",
@@ -1994,6 +2010,7 @@ describe("createInProcessUiBackendClient", () => {
           apiKeyEnv: "ZENMUX_API_KEY",
           baseUrl: "https://zenmux.example/v1",
           interfaceProvider: "openai-compatible",
+          promptCache: "disabled",
         },
         defaultModel: "anthropic/claude-sonnet-4.6",
         llmParams: {
@@ -2007,6 +2024,13 @@ describe("createInProcessUiBackendClient", () => {
         "ZENMUX_API_KEY=sk-connect-contract",
       );
       expect(process.env.ZENMUX_API_KEY).toBe("sk-connect-contract");
+      await expect(
+        reloadLLMConfig({
+          envPath: globalEnvPath,
+          modelJsonPath,
+          projectDirectory: projectRoot,
+        }),
+      ).resolves.toMatchObject({ promptCache: "disabled" });
       expect(events.some((event) => event.type === "snapshot.replaced")).toBe(
         true,
       );
@@ -5002,6 +5026,8 @@ describe("createInProcessUiBackendClient", () => {
     expect(titleRequest).toMatchObject({
       maxTokens: 128,
       model: "fake-model",
+      purpose: "session-title",
+      sessionId: "session_1",
       temperature: 0,
     });
   });

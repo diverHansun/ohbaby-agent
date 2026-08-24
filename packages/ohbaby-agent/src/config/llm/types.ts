@@ -3,6 +3,7 @@
  */
 
 export type InterfaceProviderKind = "openai-compatible" | "anthropic";
+export type PromptCachePolicy = "auto" | "enabled" | "disabled";
 
 /**
  * Raw configuration structure from model.json file.
@@ -25,6 +26,9 @@ export interface ModelJsonConfig {
 
     /** API protocol adapter used for this provider */
     interfaceProvider?: InterfaceProviderKind;
+
+    /** Whether ohbaby should add provider prompt-cache request controls */
+    promptCache?: PromptCachePolicy;
   };
 
   /** LLM generation parameters */
@@ -85,6 +89,9 @@ export interface LLMConfig {
 
   /** API protocol adapter used by the runtime client */
   interfaceProvider: InterfaceProviderKind;
+
+  /** Resolved prompt-cache request policy */
+  promptCache: PromptCachePolicy;
 
   /** Sampling temperature */
   temperature: number;

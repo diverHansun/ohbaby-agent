@@ -1662,6 +1662,7 @@ export function createInProcessUiBackendClient(
       const generatedTitle = await generateSessionTitle({
         firstUserMessage: input.firstUserMessage,
         llmClient,
+        sessionId: input.sessionId,
       });
       if (!generatedTitle || generatedTitle === input.expectedTitle) {
         return;

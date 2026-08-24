@@ -71,6 +71,7 @@ export async function createLLMClient(
         : { apiKeyEnv: config.apiKeyEnv }),
       baseUrl: config.baseUrl,
       interfaceProvider: config.interfaceProvider,
+      promptCache: config.promptCache,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
       ...(config.contextWindowTokens === undefined

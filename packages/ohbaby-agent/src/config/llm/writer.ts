@@ -1,6 +1,10 @@
 import * as fs from "node:fs/promises";
 import { getModelJsonPath } from "./loaders.js";
-import type { InterfaceProviderKind, ModelJsonConfig } from "./types.js";
+import type {
+  InterfaceProviderKind,
+  ModelJsonConfig,
+  PromptCachePolicy,
+} from "./types.js";
 import { ConfigError } from "./types.js";
 import { validateModelJson } from "./validation.js";
 import { writeFileAtomically } from "../secrets/atomic-file.js";
@@ -19,6 +23,7 @@ export interface SetActiveLLMConfigInput {
   readonly apiKeyEnv?: string;
   readonly apiKey?: string;
   readonly interfaceProvider?: InterfaceProviderKind;
+  readonly promptCache?: PromptCachePolicy;
   readonly temperature?: number;
   readonly maxTokens?: number;
   readonly contextWindowTokens?: number;
@@ -36,6 +41,7 @@ export interface SetActiveLLMConfigResult {
   readonly baseUrl: string;
   readonly apiKeyEnv?: string;
   readonly interfaceProvider: InterfaceProviderKind;
+  readonly promptCache: PromptCachePolicy;
   readonly modelJsonPath: string;
   readonly envPath?: string;
 }
@@ -143,6 +149,7 @@ function buildModelJson(
   existing: ModelJsonConfig | undefined,
 ): ModelJsonConfig {
   const models = buildModelProfiles(input, existing);
+  const promptCache = input.promptCache ?? existing?.apiConfig.promptCache;
   return {
     provider: input.provider,
     defaultModel: input.model,
@@ -150,6 +157,7 @@ function buildModelJson(
       baseUrl: input.baseUrl,
       ...(input.apiKeyEnv === undefined ? {} : { apiKeyEnv: input.apiKeyEnv }),
       interfaceProvider: input.interfaceProvider ?? DEFAULT_INTERFACE_PROVIDER,
+      ...(promptCache === undefined ? {} : { promptCache }),
     },
     llmParams: buildLLMParams(input, existing),
     ...(models === undefined ? {} : { models }),
@@ -197,6 +205,7 @@ export async function setActiveLLMConfig(
       : { apiKeyEnv: modelJson.apiConfig.apiKeyEnv }),
     interfaceProvider:
       modelJson.apiConfig.interfaceProvider ?? DEFAULT_INTERFACE_PROVIDER,
+    promptCache: modelJson.apiConfig.promptCache ?? "auto",
     modelJsonPath,
     ...(envPath === undefined ? {} : { envPath }),
   };

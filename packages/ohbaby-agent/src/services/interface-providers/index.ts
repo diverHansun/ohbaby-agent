@@ -12,10 +12,13 @@ export type {
   InterfaceProviderFinishReason,
   InterfaceProviderInstance,
   InterfaceProviderKind,
+  InterfaceProviderPromptCache,
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
   InterfaceProviderTokenUsage,
   InterfaceProviderToolCallDelta,
+  LLMRequestPurpose,
+  PromptCacheRequestStrategy,
 } from "./types.js";
 
 export { createAnthropicProvider } from "./anthropic.js";

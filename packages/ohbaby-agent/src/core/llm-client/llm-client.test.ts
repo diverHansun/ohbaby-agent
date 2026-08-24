@@ -113,6 +113,7 @@ describe("LLM Client Integration Tests", () => {
     apiKeyEnv: "OPENAI_API_KEY",
     baseUrl: "https://api.openai.com/v1",
     interfaceProvider: "openai-compatible",
+    promptCache: "auto",
     temperature: 0.7,
     maxTokens: 4096,
   };
@@ -169,6 +170,7 @@ describe("LLM Client Integration Tests", () => {
         apiKeyEnv: "ZHIPU_API_KEY",
         baseUrl: "https://open.bigmodel.cn/api/paas/v4",
         interfaceProvider: "openai-compatible",
+        promptCache: "auto",
         temperature: 0.2,
         maxTokens: 2048,
       };
