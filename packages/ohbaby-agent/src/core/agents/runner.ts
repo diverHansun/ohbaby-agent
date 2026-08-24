@@ -202,6 +202,9 @@ export async function runAgent(
         projectRoot: input.projectRoot,
       }),
       isSubagent: scope.isSubagent,
+      ...(userMessageId === undefined
+        ? {}
+        : { initiatingUserMessageId: userMessageId }),
       maxSteps: input.maxSteps,
       modelId: input.modelId,
       parentMessageId: userMessageId ?? input.parentMessageId,

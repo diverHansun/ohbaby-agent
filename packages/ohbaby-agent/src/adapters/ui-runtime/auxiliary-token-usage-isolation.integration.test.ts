@@ -139,7 +139,10 @@ describe("auxiliary token usage isolation", () => {
       prepareTurn: vi.fn().mockResolvedValue({
         assembledAt: 1,
         hasSummary: false,
-        messages: [{ content: "continue", role: "user" }],
+        request: {
+          messages: [{ content: "continue", role: "user" }],
+          tools: undefined,
+        },
         sentHeuristic: 42,
         usage: {
           contextLimit: 128_000,

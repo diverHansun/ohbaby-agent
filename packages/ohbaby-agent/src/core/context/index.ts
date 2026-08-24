@@ -65,6 +65,7 @@ export type {
   ContextManager,
   ContextManagerOptions,
   ContextMeasurementPayload,
+  PreparedModelRequest,
   ContextUsage,
   MemoryReader,
   PreparedTurn,

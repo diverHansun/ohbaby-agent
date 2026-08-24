@@ -4,6 +4,7 @@ import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";
 import {
   createContextManager,
   type ContextLLMClient,
+  type PreparedModelRequest,
   type ContextUsage,
   type MemoryReader,
   type SystemPromptProvider,
@@ -117,6 +118,7 @@ describe("context improve-4.1 integration", () => {
           Promise.resolve(`Available tools: ${input.toolNames.join(", ")}`),
         ),
     } satisfies SystemPromptProvider;
+    const measurements: PreparedModelRequest[] = [];
     const contextManager = createContextManager({
       bus,
       llmClient: {
@@ -130,6 +132,7 @@ describe("context improve-4.1 integration", () => {
           .mockResolvedValue({ global: "", merged: "", project: "" }),
       } satisfies MemoryReader,
       messageManager,
+      onRequestMeasured: (request) => measurements.push(request),
       systemPromptProvider,
       tokenCounter,
     });
@@ -182,6 +185,7 @@ describe("context improve-4.1 integration", () => {
         sessionId: "session_regular",
       }),
     );
+    const regularMeasurement = measurements.at(-1);
     const final = await consumeLifecycle(
       lifecycle.run({
         directory: "/repo",
@@ -190,9 +194,14 @@ describe("context improve-4.1 integration", () => {
         sessionId: "session_final",
       }),
     );
+    const finalMeasurement = measurements.at(-1);
 
     expect(resolveTools).toHaveBeenCalledTimes(2);
     expect(requests[0]?.tools).toEqual(resolvedTools);
+    expect({
+      messages: requests[0]?.messages,
+      tools: requests[0]?.tools,
+    }).toEqual(regularMeasurement);
     expect(JSON.stringify(requests[0]?.messages)).toContain(
       "Available tools: read_file",
     );
@@ -204,6 +213,10 @@ describe("context improve-4.1 integration", () => {
       ),
     );
     expect(requests[1]?.tools).toEqual([]);
+    expect({
+      messages: requests[1]?.messages,
+      tools: requests[1]?.tools,
+    }).toEqual(finalMeasurement);
     expect(JSON.stringify(requests[1]?.messages)).toContain(
       "Available tools: read_file",
     );

@@ -16,6 +16,7 @@ import type { ToolSchedulerInstance } from "../tool-scheduler/index.js";
 import type {
   ContextManager,
   ContextUsage,
+  PreparedModelRequest,
   PreparedTurn,
 } from "../context/index.js";
 import type {
@@ -209,15 +210,16 @@ const SESSION_USAGE: ContextUsage = {
 };
 
 function preparedTurn(
-  messages: PreparedTurn["messages"],
+  messages: PreparedModelRequest["messages"],
   usage: ContextUsage = SESSION_USAGE,
   sentHeuristic = messages.map((message) => JSON.stringify(message)).join("\n")
     .length,
+  tools?: PreparedModelRequest["tools"],
 ): PreparedTurn {
   return {
     assembledAt: 1_700_000_000_000,
     hasSummary: false,
-    messages,
+    request: { messages, tools },
     sentHeuristic,
     usage,
   };
@@ -225,7 +227,8 @@ function preparedTurn(
 
 function createContextManagerMock(
   prepareTurn: ContextManager["prepareTurn"],
-  input: {
+  options: {
+    readonly assembleRequestFromInput?: boolean;
     readonly resetTurnCompactionCount?: ContextManager["resetTurnCompactionCount"];
   } = {},
 ): ContextManager {
@@ -234,16 +237,27 @@ function createContextManagerMock(
     compact: vi.fn(),
     disposeSession: vi.fn(),
     getUsage: vi.fn(),
-    async prepareTurn(input): Promise<PreparedTurn> {
-      const prepared = await prepareTurn(input);
-      return input.additionalMessages === undefined
-        ? prepared
-        : {
-            ...prepared,
-            messages: [...prepared.messages, ...input.additionalMessages],
-          };
+    async prepareTurn(requestInput): Promise<PreparedTurn> {
+      const prepared = await prepareTurn(requestInput);
+      if (options.assembleRequestFromInput === false) {
+        return prepared;
+      }
+      return {
+        ...prepared,
+        request: {
+          messages:
+            requestInput.tailDirectives === undefined
+              ? prepared.request.messages
+              : [
+                  ...prepared.request.messages,
+                  ...requestInput.tailDirectives,
+                ],
+          tools: requestInput.tools,
+        },
+      };
     },
-    resetTurnCompactionCount: input.resetTurnCompactionCount ?? vi.fn(),
+    resetTurnCompactionCount:
+      options.resetTurnCompactionCount ?? vi.fn(),
     updateCalibrationFactor: vi.fn(),
   };
 }
@@ -326,10 +340,10 @@ describe("Lifecycle.run", () => {
       remainingTokens: 8_000,
       usageRatio: 0.92,
     };
-    const firstTurnMessages: PreparedTurn["messages"] = [
+    const firstTurnMessages: PreparedModelRequest["messages"] = [
       { role: "user", content: "Read README" },
     ];
-    const secondStepMessages: PreparedTurn["messages"] = [
+    const secondStepMessages: PreparedModelRequest["messages"] = [
       { role: "user", content: "Read README" },
       {
         content: null,
@@ -511,6 +525,58 @@ describe("Lifecycle.run", () => {
       100,
       expect.any(Number),
     );
+  });
+
+  it("sends only the measured PreparedTurn request snapshot", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const request = {
+      messages: [{ role: "user" as const, content: "Measured request" }],
+      tools: [],
+    };
+    const prepared = {
+      ...preparedTurn(request.messages),
+      request,
+    };
+    const lifecycle = new Lifecycle({
+      contextManager: {
+        ...createContextManagerMock(() => Promise.resolve(prepared)),
+        prepareTurn: vi.fn().mockResolvedValue(prepared),
+      },
+      llmClient: createSequentialFakeLLMClient(
+        [[{ textDelta: "Done.", finishReason: "stop" }]],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_test",
+        tools: [
+          {
+            function: {
+              name: "must_not_leak",
+              parameters: { type: "object" },
+            },
+            type: "function",
+          },
+        ],
+      }),
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject(request);
   });
 
   it("updates context calibration from provider prompt usage and the prepared heuristic", async () => {
@@ -1151,10 +1217,17 @@ describe("Lifecycle.run", () => {
         "Maximum lifecycle steps reached",
       ) as string,
     });
+    expect(
+      requests[1]?.messages.filter(
+        (message) =>
+          typeof message.content === "string" &&
+          message.content.includes("Maximum lifecycle steps reached"),
+      ),
+    ).toHaveLength(1);
     expect(prepareTurn).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        additionalMessages: [
+        tailDirectives: [
           expect.objectContaining({
             role: "system",
             content: expect.stringContaining(
@@ -1536,18 +1609,42 @@ describe("Lifecycle.run", () => {
       idGenerator: createDeterministicIds(),
       now: () => 1_700_000_000_000,
     });
-    const initialMessages: PreparedTurn["messages"] = [
+    const initialMessages: PreparedModelRequest["messages"] = [
       { role: "user", content: "Summarize a very large project" },
     ];
-    const forcedMessages: PreparedTurn["messages"] = [
+    const forcedMessages: PreparedModelRequest["messages"] = [
       { role: "user", content: "Summarize the compacted project state" },
     ];
+    const initialSnapshotTools = [
+      {
+        function: {
+          name: "initial_snapshot_tool",
+          parameters: { type: "object" },
+        },
+        type: "function" as const,
+      },
+    ];
+    const forcedSnapshotTools: PreparedModelRequest["tools"] = [];
     const prepareTurn = vi
       .fn<ContextManager["prepareTurn"]>()
-      .mockResolvedValueOnce(preparedTurn(initialMessages))
+      .mockResolvedValueOnce(
+        preparedTurn(
+          initialMessages,
+          SESSION_USAGE,
+          undefined,
+          initialSnapshotTools,
+        ),
+      )
       .mockImplementationOnce((input) => {
         input.onCompactionStarted?.();
-        return Promise.resolve(preparedTurn(forcedMessages));
+        return Promise.resolve(
+          preparedTurn(
+            forcedMessages,
+            SESSION_USAGE,
+            undefined,
+            forcedSnapshotTools,
+          ),
+        );
       });
     const overflowError = Object.assign(
       new Error("maximum context length exceeded"),
@@ -1564,7 +1661,9 @@ describe("Lifecycle.run", () => {
     ];
     const resolveTools = vi.fn().mockResolvedValue(resolvedTools);
     const lifecycle = new Lifecycle({
-      contextManager: createContextManagerMock(prepareTurn),
+      contextManager: createContextManagerMock(prepareTurn, {
+        assembleRequestFromInput: false,
+      }),
       llmClient: createFailThenSucceedLLMClient({
         error: overflowError,
         events: [{ textDelta: "Recovered.", finishReason: "stop" }],
@@ -1610,8 +1709,8 @@ describe("Lifecycle.run", () => {
     expect(prepareTurn.mock.calls[0]?.[0].tools).toBe(resolvedTools);
     expect(prepareTurn.mock.calls[1]?.[0].tools).toBe(resolvedTools);
     expect(requests).toHaveLength(2);
-    expect(requests[0]?.tools).toBe(resolvedTools);
-    expect(requests[1]?.tools).toBe(resolvedTools);
+    expect(requests[0]?.tools).toBe(initialSnapshotTools);
+    expect(requests[1]?.tools).toBe(forcedSnapshotTools);
     expect(requests[0]?.messages).toEqual(initialMessages);
     expect(requests[1]?.messages).toEqual(forcedMessages);
     expect(events).toEqual([
@@ -1652,16 +1751,16 @@ describe("Lifecycle.run", () => {
       new Error("maximum context length exceeded"),
       { code: "context_length_exceeded" },
     );
-    const stepOneMessages: PreparedTurn["messages"] = [
+    const stepOneMessages: PreparedModelRequest["messages"] = [
       { role: "user", content: "Start a long tool chain" },
     ];
-    const stepTwoMessages: PreparedTurn["messages"] = [
+    const stepTwoMessages: PreparedModelRequest["messages"] = [
       { role: "user", content: "Continue after first tool" },
     ];
-    const stepThreeMessages: PreparedTurn["messages"] = [
+    const stepThreeMessages: PreparedModelRequest["messages"] = [
       { role: "user", content: "Continue after second tool" },
     ];
-    const forcedMessages: PreparedTurn["messages"] = [
+    const forcedMessages: PreparedModelRequest["messages"] = [
       { role: "user", content: "Continue after forced compaction" },
     ];
     const prepareTurn = vi

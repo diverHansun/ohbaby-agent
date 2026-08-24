@@ -21,6 +21,7 @@ import type {
   CompactOptions,
   ContextManager,
   ContextLLMClient,
+  ContextMeasurementPayload,
   MemoryReader,
   PrepareTurnInput,
   SystemPromptProvider,
@@ -50,6 +51,7 @@ interface ContextFixture {
   readonly compactSkipped: readonly unknown[];
   readonly compressed: readonly unknown[];
   readonly manager: FixtureContextManager;
+  readonly measurements: readonly ContextMeasurementPayload[];
   readonly masked: readonly unknown[];
   readonly memory: MemoryReader;
   readonly pruned: readonly unknown[];
@@ -190,6 +192,7 @@ function createManager(
   const compactSkipped: unknown[] = [];
   const compressed: unknown[] = [];
   const masked: unknown[] = [];
+  const measurements: ContextMeasurementPayload[] = [];
   const pruned: unknown[] = [];
   const turnPrepared: unknown[] = [];
   const memory =
@@ -218,6 +221,7 @@ function createManager(
           .mockResolvedValue("<state_snapshot>short</state_snapshot>"),
       } satisfies ContextLLMClient),
     now: options.now ?? createClock(),
+    onRequestMeasured: (request) => measurements.push(request),
     compressionThreshold: options.compressionThreshold,
     maskEnabled: options.maskEnabled,
     maskConfig: options.maskConfig,
@@ -265,6 +269,7 @@ function createManager(
     compressed,
     masked,
     manager,
+    measurements,
     memory,
     pruned,
     systemPromptProvider,
@@ -410,7 +415,8 @@ describe("ContextManager", () => {
       tools,
     });
 
-    expect(withTools.messages).toEqual(messagesOnly.messages);
+    expect(withTools.request.messages).toEqual(messagesOnly.request.messages);
+    expect(withTools.request.tools).toEqual(tools);
     expect(withTools.sentHeuristic).toBeGreaterThan(messagesOnly.sentHeuristic);
     expect(withTools.usage.currentTokens).toBeGreaterThan(
       messagesOnly.usage.currentTokens,
@@ -433,7 +439,7 @@ describe("ContextManager", () => {
     );
   });
 
-  it("includes ephemeral provider messages in prepared measurement without persisting them", async () => {
+  it("includes tail directives in the measured request without persisting them", async () => {
     const messageManager = createMessageManagerFixture();
     await addTextMessage(messageManager, {
       sessionId: "session_1",
@@ -444,14 +450,17 @@ describe("ContextManager", () => {
       estimateTokens: (content: string): number => content.length,
       getLimit: (): number => 10_000,
     } satisfies TokenCounter;
-    const { manager } = createManager({ messageManager, tokenCounter });
+    const { manager, measurements } = createManager({
+      messageManager,
+      tokenCounter,
+    });
     const finalizationMessage = {
       content: "Summarize the completed work without calling tools.",
       role: "system" as const,
     };
 
     const prepared = await manager.prepareTurn({
-      additionalMessages: [finalizationMessage],
+      tailDirectives: [finalizationMessage],
       directory: "D:/repo",
       modelId: "model-a",
       sessionId: "session_1",
@@ -459,9 +468,10 @@ describe("ContextManager", () => {
       tools: [],
     });
 
-    expect(prepared.messages.at(-1)).toEqual(finalizationMessage);
+    expect(prepared.request.messages.at(-1)).toEqual(finalizationMessage);
+    expect(measurements.at(-1)).toEqual(prepared.request);
     expect(prepared.sentHeuristic).toBe(
-      estimateWireHeuristic(prepared.messages, tokenCounter, []),
+      estimateWireHeuristic(prepared.request.messages, tokenCounter, []),
     );
     expect(prepared.usage.currentTokens).toBe(prepared.sentHeuristic);
     expect(
@@ -647,8 +657,8 @@ describe("ContextManager", () => {
       sessionId: "child_1",
     });
 
-    expect(JSON.stringify(prepared.messages)).toContain("A question");
-    expect(JSON.stringify(prepared.messages)).not.toContain("B question");
+    expect(JSON.stringify(prepared.request.messages)).toContain("A question");
+    expect(JSON.stringify(prepared.request.messages)).not.toContain("B question");
   });
 
   it("keeps subagent calibration isolated by context scope", async () => {
@@ -1061,8 +1071,8 @@ describe("ContextManager", () => {
       sessionId: "session_1",
     });
 
-    expect(prepared.messages[0].role).toBe("system");
-    expect(prepared.messages[0].content).toEqual(
+    expect(prepared.request.messages[0].role).toBe("system");
+    expect(prepared.request.messages[0].content).toEqual(
       expect.stringContaining("system prompt"),
     );
     expect(prepared.compaction).toBeUndefined();
@@ -1208,7 +1218,7 @@ describe("ContextManager", () => {
       sessionId: "session_1",
     });
 
-    expect(prepared.messages).toContainEqual({
+    expect(prepared.request.messages).toContainEqual({
       content: "x".repeat(500),
       role: "tool",
       tool_call_id: "message_1_call",
@@ -1253,7 +1263,7 @@ describe("ContextManager", () => {
       sessionId: "session_1",
     });
 
-    expect(prepared.messages).toContainEqual({
+    expect(prepared.request.messages).toContainEqual({
       content: null,
       role: "assistant",
       tool_calls: [
@@ -1267,7 +1277,7 @@ describe("ContextManager", () => {
         },
       ],
     });
-    expect(prepared.messages).toContainEqual({
+    expect(prepared.request.messages).toContainEqual({
       content: "[Old tool result cleared (was ~500 tokens)]",
       role: "tool",
       tool_call_id: "message_1_call",
@@ -1411,10 +1421,14 @@ describe("ContextManager", () => {
     expect(prepared.usage.usageRatio).toBeGreaterThanOrEqual(0.5);
     expect(prepared.usage.usageRatio).toBeLessThan(0.8);
     expect(prepared.sentHeuristic).toBe(
-      estimateWireHeuristic(prepared.messages, tokenCounter, tools),
+      estimateWireHeuristic(
+        prepared.request.messages,
+        tokenCounter,
+        prepared.request.tools,
+      ),
     );
     expect(prepared.sentHeuristic).toBeGreaterThan(
-      estimateWireHeuristic(prepared.messages, tokenCounter),
+      estimateWireHeuristic(prepared.request.messages, tokenCounter),
     );
     expect(onCompactionStarted).toHaveBeenCalledTimes(1);
     expect(updatePart).toHaveBeenCalled();
@@ -1585,7 +1599,7 @@ describe("ContextManager", () => {
       role: "assistant",
       text: "fourth long text",
     });
-    const { manager } = createManager({
+    const { manager, measurements } = createManager({
       llmClient: {
         generateSummary: vi.fn().mockResolvedValue("## Goal\nshort"),
       },
@@ -1594,15 +1608,38 @@ describe("ContextManager", () => {
     });
 
     const onCompactionStarted = vi.fn();
+    const tailDirective = { content: "tail-r02", role: "system" as const };
+    const tools = [
+      {
+        function: {
+          name: "read_file",
+          parameters: { type: "object" },
+        },
+        type: "function" as const,
+      },
+    ];
     const prepared = await manager.prepareTurn({
       directory: "D:/repo",
       force: true,
       modelId: "model-a",
       onCompactionStarted,
       sessionId: "session_1",
+      tailDirectives: [tailDirective],
+      toolNames: ["read_file"],
+      tools,
     });
 
     expect(prepared.compaction?.status).toBe("compacted");
+    expect(measurements.length).toBeGreaterThan(2);
+    expect(measurements.at(-1)).toEqual(prepared.request);
+    for (const measurement of measurements) {
+      expect(measurement.tools).toEqual(tools);
+      expect(
+        measurement.messages.filter(
+          (message) => message.content === tailDirective.content,
+        ),
+      ).toHaveLength(1);
+    }
     expect(listBySession).toHaveBeenCalledTimes(2);
     expect(loadMemory).toHaveBeenCalledTimes(1);
     expect(onCompactionStarted).toHaveBeenCalledTimes(1);

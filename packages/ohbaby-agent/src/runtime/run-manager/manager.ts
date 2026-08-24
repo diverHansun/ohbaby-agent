@@ -223,6 +223,7 @@ export class RunManager {
         agent: record.options.agent,
         directory: record.options.directory,
         isSubagent: record.options.isSubagent,
+        initiatingUserMessageId: record.options.initiatingUserMessageId,
         maxSteps: record.options.maxSteps,
         modelId: record.options.modelId,
         parentMessageId: record.options.parentMessageId,

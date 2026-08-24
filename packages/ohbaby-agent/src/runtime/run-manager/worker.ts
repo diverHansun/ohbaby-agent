@@ -263,6 +263,12 @@ export class RunWorker {
       ...(this.context.isSubagent === undefined
         ? {}
         : { isSubagent: this.context.isSubagent }),
+      ...(this.context.initiatingUserMessageId === undefined
+        ? {}
+        : {
+            initiatingUserMessageId:
+              this.context.initiatingUserMessageId,
+          }),
       ...(this.context.parentMessageId === undefined
         ? {}
         : { parentMessageId: this.context.parentMessageId }),

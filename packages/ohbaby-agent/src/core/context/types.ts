@@ -71,10 +71,12 @@ export interface ContextAssemblyOptions {
   readonly toolNames: readonly string[];
 }
 
-export interface ContextMeasurementPayload {
+export interface PreparedModelRequest {
   readonly messages: readonly ChatCompletionMessage[];
   readonly tools: ChatCompletionCreateParams["tools"];
 }
+
+export type ContextMeasurementPayload = PreparedModelRequest;
 
 export interface ContextUsage {
   readonly currentTokens: number;
@@ -145,8 +147,8 @@ export interface PrepareTurnInput {
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   /** Fires once after an actual automatic compaction rung is selected, before history mutation. */
   readonly onCompactionStarted?: () => void;
-  /** Ephemeral provider messages included in measurement and sending, but never persisted. */
-  readonly additionalMessages?: readonly ChatCompletionMessage[];
+  /** Ephemeral model-only directives measured and sent exactly once, but never persisted. */
+  readonly tailDirectives?: readonly ChatCompletionMessage[];
   readonly toolNames: readonly string[];
   readonly tools: ChatCompletionCreateParams["tools"];
   readonly isSubagent?: boolean;
@@ -154,7 +156,8 @@ export interface PrepareTurnInput {
 }
 
 export interface PreparedTurn {
-  readonly messages: readonly ChatCompletionMessage[];
+  /** The single measured request snapshot consumed by the provider call. */
+  readonly request: PreparedModelRequest;
   readonly usage: ContextUsage;
   readonly compaction?: CompactResult;
   readonly assembledAt: number;
@@ -212,5 +215,7 @@ export interface ContextManagerOptions {
     readonly placeholderPrefix?: string;
     readonly protectionTokens?: number;
   };
+  /** Receives a detached copy of each occupancy payload for diagnostics and tests. */
+  readonly onRequestMeasured?: (request: PreparedModelRequest) => void;
   readonly onWarning?: (message: string, error?: unknown) => void;
 }

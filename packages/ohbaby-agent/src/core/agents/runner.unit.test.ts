@@ -269,6 +269,7 @@ describe("runAgent", () => {
       agent: "build",
       directory: "D:/repo",
       isSubagent: true,
+      initiatingUserMessageId: "user_1",
       maxSteps: 5,
       modelId: "fake-model",
       parentMessageId: "user_1",
@@ -334,6 +335,9 @@ describe("runAgent", () => {
         parentMessageId: "parent_message",
       }),
     );
+    expect(runCoordinator.create.mock.calls[0]?.[0]).not.toHaveProperty(
+      "initiatingUserMessageId",
+    );
   });
 
   it("keeps primary runs on the requested project root", async () => {
@@ -357,6 +361,7 @@ describe("runAgent", () => {
     expect(runCoordinator.create).toHaveBeenCalledWith(
       expect.objectContaining({
         directory: "/var/folders/project",
+        initiatingUserMessageId: "user_1",
         isSubagent: false,
         sessionId: "session_primary",
       }),

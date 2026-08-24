@@ -75,7 +75,7 @@ type CommittableSummaryCandidate = Extract<
 >;
 
 interface CompactionRequest {
-  readonly additionalMessages?: readonly ChatCompletionMessage[];
+  readonly tailDirectives?: readonly ChatCompletionMessage[];
   readonly assembled: AssembledContext;
   readonly bypassThrashLock: boolean;
   readonly countTurnCompaction: boolean;
@@ -527,12 +527,13 @@ export function createContextManager(
     });
   }
 
-  function renderForModel(input: {
-    readonly additionalMessages?: readonly ChatCompletionMessage[];
+  function assembleModelRequest(input: {
+    readonly tailDirectives?: readonly ChatCompletionMessage[];
     readonly context: AssembledContext;
     readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
     readonly isSubagent: boolean;
-  }): ChatCompletionMessage[] {
+    readonly tools: PrepareTurnInput["tools"];
+  }): ContextMeasurementPayload {
     const messages = serializeForLlm({
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       history: input.context.history,
@@ -540,9 +541,14 @@ export function createContextManager(
       memory: input.context.memory,
       systemPrompt: input.context.systemPrompt,
     });
-    return input.additionalMessages === undefined
-      ? messages
-      : [...messages, ...input.additionalMessages];
+    return {
+      messages:
+        input.tailDirectives === undefined
+          ? messages
+          : [...messages, ...input.tailDirectives],
+      tools:
+        input.tools === undefined ? undefined : [...input.tools],
+    };
   }
 
   function measureUsage(
@@ -573,33 +579,39 @@ export function createContextManager(
   }
 
   function measureContext(input: {
-    readonly additionalMessages?: readonly ChatCompletionMessage[];
+    readonly tailDirectives?: readonly ChatCompletionMessage[];
     readonly context: AssembledContext;
     readonly modelId: string;
     readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
     readonly isSubagent: boolean;
     readonly tools: PrepareTurnInput["tools"];
   }): {
-    readonly messages: readonly ChatCompletionMessage[];
+    readonly request: ContextMeasurementPayload;
     readonly sentHeuristic: number;
     readonly usage: ContextUsage;
   } {
-    const messages = renderForModel({
-      additionalMessages: input.additionalMessages,
+    const request = assembleModelRequest({
+      tailDirectives: input.tailDirectives,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: input.context,
       isSubagent: input.isSubagent,
+      tools: input.tools,
     });
+    const measurement = measureUsage(request, {
+      modelId: input.modelId,
+      sessionId: input.context.sessionId,
+      contextScopeId: input.context.contextScopeId,
+    });
+    if (options.onRequestMeasured !== undefined) {
+      try {
+        options.onRequestMeasured(structuredClone(request));
+      } catch (error) {
+        options.onWarning?.("Unable to record context measurement", error);
+      }
+    }
     return {
-      messages,
-      ...measureUsage(
-        { messages, tools: input.tools },
-        {
-          modelId: input.modelId,
-          sessionId: input.context.sessionId,
-          contextScopeId: input.context.contextScopeId,
-        },
-      ),
+      request,
+      ...measurement,
     };
   }
 
@@ -676,14 +688,14 @@ export function createContextManager(
     context: AssembledContext,
     modelId: string,
     tools: PrepareTurnInput["tools"],
-    additionalMessages?: readonly ChatCompletionMessage[],
+    tailDirectives?: readonly ChatCompletionMessage[],
   ): AssembledContext {
     return reduceContextForModel({
       allowCutoffAdvance: false,
       context,
       publishEvent: false,
       usage: measureContext({
-        additionalMessages,
+        tailDirectives,
         context,
         isSubagent: context.isSubagent,
         modelId,
@@ -1127,7 +1139,7 @@ export function createContextManager(
       systemPrompt: req.assembled.systemPrompt,
     });
     const usageAfterPrune = measureContext({
-      additionalMessages: req.additionalMessages,
+      tailDirectives: req.tailDirectives,
       activeReasoningByMessageId: req.activeReasoningByMessageId,
       context: req.projectForUsage?.(afterPrune) ?? afterPrune,
       isSubagent: req.isSubagent,
@@ -1193,7 +1205,7 @@ export function createContextManager(
       compactedAt: afterPrune.assembledAt,
     });
     const projectedUsage = measureContext({
-      additionalMessages: req.additionalMessages,
+      tailDirectives: req.tailDirectives,
       activeReasoningByMessageId: req.activeReasoningByMessageId,
       context: req.projectForUsage?.(projectedContext) ?? projectedContext,
       isSubagent: req.isSubagent,
@@ -1256,7 +1268,7 @@ export function createContextManager(
       systemPrompt: req.assembled.systemPrompt,
     });
     const usageAfter = measureContext({
-      additionalMessages: req.additionalMessages,
+      tailDirectives: req.tailDirectives,
       activeReasoningByMessageId: req.activeReasoningByMessageId,
       context: req.projectForUsage?.(committedContext) ?? committedContext,
       isSubagent: req.isSubagent,
@@ -1341,7 +1353,7 @@ export function createContextManager(
       toolNames: input.toolNames,
     });
     const unreducedMeasurement = measureContext({
-      additionalMessages: input.additionalMessages,
+      tailDirectives: input.tailDirectives,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: assembled,
       isSubagent,
@@ -1359,7 +1371,7 @@ export function createContextManager(
       reducedBeforeCompaction.history === assembled.history
         ? unreducedUsage
         : measureContext({
-            additionalMessages: input.additionalMessages,
+            tailDirectives: input.tailDirectives,
             activeReasoningByMessageId: input.activeReasoningByMessageId,
             context: reducedBeforeCompaction,
             isSubagent,
@@ -1367,7 +1379,7 @@ export function createContextManager(
             tools: input.tools,
           }).usage;
     const outcome = await runCompaction({
-      additionalMessages: input.additionalMessages,
+      tailDirectives: input.tailDirectives,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       assembled,
       bypassThrashLock: input.force === true,
@@ -1382,7 +1394,7 @@ export function createContextManager(
           context,
           input.modelId,
           input.tools,
-          input.additionalMessages,
+          input.tailDirectives,
         ),
       sessionId: input.sessionId,
       tools: input.tools,
@@ -1394,7 +1406,7 @@ export function createContextManager(
         ? undefined
         : mapOutcomeToCompactResult(outcome);
     const rawFinalMeasurement = measureContext({
-      additionalMessages: input.additionalMessages,
+      tailDirectives: input.tailDirectives,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: finalContext,
       isSubagent,
@@ -1412,7 +1424,7 @@ export function createContextManager(
       reducedFinalContext.history === finalContext.history
         ? rawFinalMeasurement
         : measureContext({
-            additionalMessages: input.additionalMessages,
+            tailDirectives: input.tailDirectives,
             activeReasoningByMessageId: input.activeReasoningByMessageId,
             context: reducedFinalContext,
             isSubagent,
@@ -1420,7 +1432,7 @@ export function createContextManager(
             tools: input.tools,
           });
     const usage = finalMeasurement.usage;
-    const messages = finalMeasurement.messages;
+    const request = finalMeasurement.request;
 
     options.bus.publish(ContextEvent.TurnPrepared, {
       sessionId: input.sessionId,
@@ -1434,7 +1446,7 @@ export function createContextManager(
       assembledAt: finalContext.assembledAt,
       compaction,
       hasSummary: finalContext.hasSummary,
-      messages,
+      request,
       sentHeuristic: finalMeasurement.sentHeuristic,
       usage,
     };

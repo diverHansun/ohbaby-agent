@@ -78,6 +78,7 @@ export interface AgentRunCreateOptions {
   readonly triggerSource: "user";
   readonly agent?: string;
   readonly isSubagent?: boolean;
+  readonly initiatingUserMessageId?: string;
   readonly parentMessageId?: string;
   readonly maxSteps?: number;
   readonly directory: string;

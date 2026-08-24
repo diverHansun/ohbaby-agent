@@ -126,8 +126,12 @@ describe("subagent scoped context integration", () => {
     expect(preparedB.compaction).toBeUndefined();
     expect(JSON.stringify(scopeAAfter)).toContain("scope a short");
     expect(scopeBAfter).toEqual(scopeBBefore);
-    expect(JSON.stringify(preparedB.messages)).toContain("scope-b-sentinel");
-    expect(JSON.stringify(preparedB.messages)).not.toContain("scope a short");
+    expect(JSON.stringify(preparedB.request.messages)).toContain(
+      "scope-b-sentinel",
+    );
+    expect(JSON.stringify(preparedB.request.messages)).not.toContain(
+      "scope a short",
+    );
     expect(generateSummary).toHaveBeenCalledOnce();
     expect(memory.load).not.toHaveBeenCalled();
   });

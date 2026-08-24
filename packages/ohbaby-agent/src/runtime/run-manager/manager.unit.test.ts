@@ -911,8 +911,10 @@ describe("RunManager", () => {
       agentInstanceId: "subagent_1",
       contextScopeId: "subagent_1",
       directory: "D:/repo",
+      initiatingUserMessageId: "user_child_1",
       isSubagent: true,
       modelId: "fake-model",
+      parentMessageId: "assistant_parent_1",
       sessionId: "child_1",
       triggerSource: "user",
     });
@@ -921,8 +923,10 @@ describe("RunManager", () => {
     expect(lifecycle.calls[0]).toMatchObject({
       contextScopeId: "subagent_1",
       directory: "D:/repo",
+      initiatingUserMessageId: "user_child_1",
       isSubagent: true,
       modelId: "fake-model",
+      parentMessageId: "assistant_parent_1",
       sessionId: "child_1",
     });
     expect(sandboxManager.acquired[0]).toEqual({
@@ -1001,6 +1005,66 @@ describe("RunManager", () => {
       "lease_child_1::subagent_1",
       "lease_child_1::subagent_2",
     ]);
+  });
+
+  it("isolates initiating user identity by scope and leaves resume runs absent", async () => {
+    const lifecycle = new CompletingLifecycle();
+    const { manager } = createManager(lifecycle);
+
+    const records = await Promise.all([
+      manager.create({
+        contextScopeId: "primary_scope",
+        directory: "D:/repo",
+        initiatingUserMessageId: "user_primary",
+        modelId: "fake-model",
+        parentMessageId: "parent_primary",
+        sessionId: "shared_session",
+        triggerSource: "user",
+      }),
+      manager.create({
+        contextScopeId: "subagent_scope",
+        directory: "D:/repo",
+        initiatingUserMessageId: "user_subagent",
+        isSubagent: true,
+        modelId: "fake-model",
+        parentMessageId: "parent_subagent",
+        sessionId: "shared_session",
+        triggerSource: "user",
+      }),
+    ]);
+    await Promise.all(
+      records.map((record) => manager.waitForCompletion(record.runId)),
+    );
+
+    const resume = await manager.create({
+      contextScopeId: "primary_scope",
+      directory: "D:/repo",
+      modelId: "fake-model",
+      parentMessageId: "assistant_resume_parent",
+      sessionId: "shared_session",
+      triggerSource: "user",
+    });
+    await manager.waitForCompletion(resume.runId);
+
+    expect(
+      lifecycle.calls.find(
+        (call) => call.contextScopeId === "subagent_scope",
+      ),
+    ).toMatchObject({
+      initiatingUserMessageId: "user_subagent",
+      parentMessageId: "parent_subagent",
+    });
+    const primaryCalls = lifecycle.calls.filter(
+      (call) => call.contextScopeId === "primary_scope",
+    );
+    expect(primaryCalls[0]).toMatchObject({
+      initiatingUserMessageId: "user_primary",
+      parentMessageId: "parent_primary",
+    });
+    expect(primaryCalls[1]).toMatchObject({
+      parentMessageId: "assistant_resume_parent",
+    });
+    expect(primaryCalls[1]).not.toHaveProperty("initiatingUserMessageId");
   });
 
   it("does not let a blocked replacement in one scope lock a sibling scope", async () => {

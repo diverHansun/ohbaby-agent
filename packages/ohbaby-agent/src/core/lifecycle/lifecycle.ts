@@ -12,7 +12,11 @@ import type {
   ParsedToolCall,
   TokenUsage,
 } from "../llm-client/index.js";
-import type { PreparedTurn, PrepareTurnInput } from "../context/index.js";
+import type {
+  PreparedModelRequest,
+  PreparedTurn,
+  PrepareTurnInput,
+} from "../context/index.js";
 import type {
   CoreMessage,
   MessageManager,
@@ -63,7 +67,6 @@ interface ModelStepParams {
   readonly agent?: string;
   readonly parentMessageId?: string;
   readonly signal?: AbortSignal;
-  readonly tools?: LifecycleSessionParams["tools"];
   readonly environment?: LifecycleSessionParams["environment"];
   readonly isSubagent?: boolean;
   readonly maxSteps?: number;
@@ -381,11 +384,11 @@ export class Lifecycle {
         })) ?? params.tools;
       const toolNames = toolNamesFromSchemas(resolvedTools);
       const tools = isFinalStep ? [] : resolvedTools;
-      const additionalMessages = isFinalStep
+      const tailDirectives = isFinalStep
         ? [buildMaxStepsFinalizationMessage()]
         : undefined;
       let prepared = yield* this.prepareTurnWithProgress({
-        ...(additionalMessages === undefined ? {} : { additionalMessages }),
+        ...(tailDirectives === undefined ? {} : { tailDirectives }),
         ...(activeReasoningByMessageId.size === 0
           ? {}
           : { activeReasoningByMessageId }),
@@ -411,8 +414,6 @@ export class Lifecycle {
           usage,
         };
       }
-      let conversationMessages = [...prepared.messages];
-
       if (!turnStarted) {
         turnStarted = true;
         yield {
@@ -442,12 +443,11 @@ export class Lifecycle {
         parentMessageId,
         sessionId: params.sessionId,
         signal: params.signal,
-        tools,
       };
       let stepResult: StepResult;
       try {
         stepResult = yield* this.runModelStep({
-          conversationMessages,
+          request: prepared.request,
           params: runParams,
           parentMessageId,
           step,
@@ -479,7 +479,7 @@ export class Lifecycle {
         }
 
         prepared = yield* this.prepareTurnWithProgress({
-          ...(additionalMessages === undefined ? {} : { additionalMessages }),
+          ...(tailDirectives === undefined ? {} : { tailDirectives }),
           ...(activeReasoningByMessageId.size === 0
             ? {}
             : { activeReasoningByMessageId }),
@@ -506,7 +506,6 @@ export class Lifecycle {
             usage,
           };
         }
-        conversationMessages = [...prepared.messages];
         yield this.createContextPreparedEvent({
           contextScopeId: params.contextScopeId,
           prepared,
@@ -515,7 +514,7 @@ export class Lifecycle {
         });
         try {
           stepResult = yield* this.runModelStep({
-            conversationMessages,
+            request: prepared.request,
             params: runParams,
             parentMessageId,
             step,
@@ -875,7 +874,7 @@ export class Lifecycle {
   }
 
   private async *runModelStep(input: {
-    readonly conversationMessages: readonly ChatCompletionMessage[];
+    readonly request: PreparedModelRequest;
     readonly params: ModelStepParams;
     readonly parentMessageId?: string;
     readonly step: number;
@@ -910,7 +909,7 @@ export class Lifecycle {
     try {
       for await (const response of streamChatCompletion(
         this.deps.llmClient,
-        [...input.conversationMessages],
+        [...input.request.messages],
         {
           purpose: "agent-step",
           sessionId: params.sessionId,
@@ -918,7 +917,7 @@ export class Lifecycle {
             ? {}
             : { contextScopeId: params.contextScopeId }),
           signal: params.signal,
-          tools: params.tools,
+          tools: input.request.tools,
         },
       )) {
         if (response.retry) {

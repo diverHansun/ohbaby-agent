@@ -48,6 +48,8 @@ export interface LifecycleSessionParams {
   readonly directory: string;
   readonly modelId: string;
   readonly agent?: string;
+  /** User message created for this run; absent for resume/continuation runs. */
+  readonly initiatingUserMessageId?: string;
   readonly parentMessageId?: string;
   readonly signal?: AbortSignal;
   readonly tools?: ChatCompletionCreateParams["tools"];

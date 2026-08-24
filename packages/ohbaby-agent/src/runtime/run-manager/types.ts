@@ -35,6 +35,7 @@ export interface CreateRunOptions {
   readonly explicit?: Partial<RunDefaults>;
   readonly agent?: string;
   readonly isSubagent?: boolean;
+  readonly initiatingUserMessageId?: string;
   readonly parentMessageId?: string;
   readonly maxSteps?: number;
   readonly directory: string;
@@ -80,6 +81,7 @@ export interface RunContext {
   readonly abortSignal: AbortSignal;
   readonly agent?: string;
   readonly isSubagent?: boolean;
+  readonly initiatingUserMessageId?: string;
   readonly parentMessageId?: string;
   readonly maxSteps?: number;
   readonly directory: string;

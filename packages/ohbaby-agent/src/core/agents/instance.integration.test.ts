@@ -17,6 +17,11 @@ import type {
   ToolSchedulerInstance,
 } from "../tool-scheduler/index.js";
 import { Lifecycle } from "../lifecycle/index.js";
+import type {
+  LifecycleEvent,
+  LifecycleResult,
+  LifecycleSessionParams,
+} from "../lifecycle/index.js";
 import { createAgentInstanceFactory } from "./instance.js";
 import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
 import { RunManager } from "../../runtime/run-manager/index.js";
@@ -310,6 +315,106 @@ function instrumentContextManager(manager: ContextManager): {
 }
 
 describe("AgentInstance long task integration", () => {
+  it("round-trips distinct initiating user ids for primary and subagent runs", async () => {
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const lifecycleCalls: LifecycleSessionParams[] = [];
+    const recordingLifecycle = {
+      async *run(
+        params: LifecycleSessionParams,
+      ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
+        lifecycleCalls.push(params);
+        await Promise.resolve();
+        yield {
+          sessionId: params.sessionId,
+          timestamp: 1,
+          type: "llm:start",
+        };
+        return {
+          finalResponse: "",
+          finishReason: "stop",
+          success: true,
+        };
+      },
+    };
+    let nextRunId = 1;
+    const toolScheduler = createToolScheduler();
+    const runManager = new RunManager({
+      createRunId: (): string => {
+        const runId = `identity_run_${String(nextRunId)}`;
+        nextRunId += 1;
+        return runId;
+      },
+      lifecycle: recordingLifecycle,
+      policy: {
+        defaults: {
+          user: {
+            disconnectMode: "continue",
+            multitaskStrategy: "reject",
+            permissionProfileId: "test",
+          },
+        },
+      },
+      runLedger: createInMemoryRunLedger(),
+      sandboxManager: sandboxManager(),
+      streamBridge: createInMemoryStreamBridge({ heartbeatIntervalMs: 0 }),
+    });
+    const factory = createAgentInstanceFactory({
+      deps: {
+        messageManager,
+        runCoordinator: runManager,
+        toolScheduler,
+      },
+    });
+    const primary = factory.create({
+      agentName: "build",
+      instanceId: "primary_identity",
+      modelId: "fake-model",
+      projectRoot: "/repo",
+      sessionId: "primary_identity",
+      type: "primary",
+    });
+    const subagent = factory.create({
+      agentName: "explore",
+      contextScopeId: "subagent_identity",
+      instanceId: "subagent_identity",
+      modelId: "fake-model",
+      parentSessionId: "primary_identity",
+      projectRoot: "/repo",
+      sessionId: "child_identity",
+      type: "sub",
+    });
+
+    await primary.turn({
+      initialUserMessageId: "user_primary_identity",
+      prompt: "primary turn",
+      waitMode: "waitForCompletion",
+    });
+    await subagent.turn({
+      initialUserMessageId: "user_subagent_identity",
+      prompt: "subagent turn",
+      waitMode: "waitForCompletion",
+    });
+
+    expect(lifecycleCalls).toHaveLength(2);
+    expect(lifecycleCalls[0]).toMatchObject({
+      initiatingUserMessageId: "user_primary_identity",
+      parentMessageId: "user_primary_identity",
+      sessionId: "primary_identity",
+    });
+    expect(lifecycleCalls[0]).not.toHaveProperty("contextScopeId");
+    expect(lifecycleCalls[1]).toMatchObject({
+      contextScopeId: "subagent_identity",
+      initiatingUserMessageId: "user_subagent_identity",
+      isSubagent: true,
+      parentMessageId: "user_subagent_identity",
+      sessionId: "child_identity",
+    });
+  });
+
   it("runs 50+ subagent tool steps through repeated prepareTurn and compaction", async () => {
     const bus = createBus();
     const messageManager = createMessageManager({

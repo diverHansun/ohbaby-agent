@@ -9,6 +9,7 @@ import {
   type ContextManager,
   type ContextUsage,
   type MemoryReader,
+  type PreparedModelRequest,
   type PreparedTurn,
   type SystemPromptProvider,
   type TokenCounter,
@@ -50,11 +51,11 @@ const SESSION_USAGE: ContextUsage = {
   usageRatio: 0.0012,
 };
 
-function preparedTurn(messages: PreparedTurn["messages"]): PreparedTurn {
+function preparedTurn(messages: PreparedModelRequest["messages"]): PreparedTurn {
   return {
     assembledAt: 1_700_000_000_000,
     hasSummary: false,
-    messages,
+    request: { messages, tools: undefined },
     sentHeuristic: messages
       .map((message) => JSON.stringify(message))
       .join("\n").length,
