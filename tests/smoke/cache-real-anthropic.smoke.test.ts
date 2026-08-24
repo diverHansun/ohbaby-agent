@@ -15,7 +15,7 @@ const runAnthropic = process.env.OHBABY_RUN_REAL_CACHE_ANTHROPIC === "1";
 
 describe("real Anthropic prompt cache", () => {
   (runAnthropic ? it : it.skip)(
-    "records real Anthropic cache creation and read usage",
+    "records real Anthropic cache read usage",
     async () => {
       const profile = resolveAnthropicProfile();
       const harness = await createRealCacheHarness(profile);
@@ -88,10 +88,23 @@ describe("real Anthropic prompt cache", () => {
               (projection) => projection.promptCacheStrategy,
             ),
           ),
-        ).toEqual(new Set(["anthropic-top-level-auto"]));
-        expect(cacheWriteOrReadUsages(primaryUsages.slice(0, 1)).length).toBe(
-          1,
+        ).toEqual(
+          new Set([
+            profile.provider === "zenmux"
+              ? "anthropic-explicit-last-block"
+              : "anthropic-top-level-auto",
+          ]),
         );
+        if (profile.allowsUnreportedImplicitCacheWrite === true) {
+          expect(primaryUsages[0]?.inputBreakdown?.observed).toEqual({
+            cacheRead: true,
+            cacheWrite: true,
+          });
+        } else {
+          expect(
+            cacheWriteOrReadUsages(primaryUsages.slice(0, 1)),
+          ).toHaveLength(1);
+        }
         expect(cacheReadUsages(primaryUsages.slice(1)).length).toBeGreaterThan(
           0,
         );
@@ -110,7 +123,16 @@ describe("real Anthropic prompt cache", () => {
           contextScopeId: childScopeId,
           sessionId: childSessionId,
         });
-        expect(cacheWriteOrReadUsages(childUsages.slice(0, 1))).toHaveLength(1);
+        if (profile.allowsUnreportedImplicitCacheWrite === true) {
+          expect(childUsages[0]?.inputBreakdown?.observed).toEqual({
+            cacheRead: true,
+            cacheWrite: true,
+          });
+        } else {
+          expect(cacheWriteOrReadUsages(childUsages.slice(0, 1))).toHaveLength(
+            1,
+          );
+        }
         expect(cacheReadUsages(childUsages.slice(1)).length).toBeGreaterThan(0);
         expect(
           cacheReadUsages(

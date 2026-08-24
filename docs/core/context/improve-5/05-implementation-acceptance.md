@@ -3,7 +3,7 @@
 > 验收日期：2026-08-24
 > 实施分支：`codex/improve-5`
 > 合并/推送：均未执行
-> 总结：improve-5 代码、测试设施与 compiled Web 主链路已完成；完整仓库门因 packaging 的本机 Node TLS 阻断与既有 format baseline 只能条件验收；真实 provider cache 三个外部门因本机无 credential 明确记为 `skip (partial evidence)`，不能宣称真实服务 cache hit 已验证。
+> 总结：improve-5 代码、测试设施与 compiled Web 主链路已完成；完整仓库门因 packaging 的本机 Node TLS 阻断与既有 format baseline 只能条件验收；ZenMux `deepseek/deepseek-v4-flash` 已补齐 OpenAI-compatible、Anthropic、M13 与真实 Web 证据，G8 由 skip 更新为 pass。
 
 ## 5.1 交付结果
 
@@ -25,6 +25,7 @@
 | C · request | `cd60c28` `refactor(context): unify prepared model requests` | measurement/projection/send 共用 immutable request，收拢 tail messages |
 | D · prefix/MCP | `bf89962` `feat(context): stabilize prompt prefixes and tool epochs` | runtime user snapshot、删除重复 tools 文本、scope tool epoch/cleanup |
 | E · 系统验收 | `test(context): complete improve-5 system verification` | 本文、real-cache runner/fixtures、compiled Web E2E；SHA 见最终交付消息 |
+| F · ZenMux 真实补证 | `test(context): verify ZenMux prompt cache end to end` | 双协议 profile、真实 cache read/M13、真实 provider Web/context UI；SHA 见最终交付消息 |
 
 所有提交都位于临时分支；没有 merge 或 push。
 
@@ -43,7 +44,8 @@
 | 命令/门 | 结果 |
 |---------|------|
 | Batch E targeted runner/harness/serve | 22/22；其中最终 runner+harness 7/7、serve 15/15 |
-| `pnpm run test:unit` | 221 files；1994 passed，2 skipped |
+| Batch F ZenMux resolver/runner/harness | 12/12；包含双协议 credential、reasoning 映射与 URL/Request body length 回归 |
+| `pnpm run test:unit` | 221 files；2000 passed，2 skipped |
 | `pnpm run test:contract` | 14 files；244 passed |
 | `pnpm run test:smoke` | 4 files / 12 tests 全部被发现并因未启用外部门显式 skip |
 | `pnpm exec vitest run --config vitest.e2e.config.ts` | 2 files passed、3 files external skipped；5 passed、5 skipped；subagent 3/3 passed |
@@ -51,30 +53,32 @@
 | `pnpm run lint` | pass |
 | `pnpm run typecheck` | pass |
 | `pnpm run build` | pass；CLI、agent、server、SDK 与 Web compiled assets 全部生成 |
-| improve-5 文档与 Batch E 改动文件 Prettier | pass |
+| improve-5 文档与 Batch E/F 改动文件 Prettier | pass |
 
 contract 首次与 unit/integration 并行执行时，一个既有 TUI 输入时序用例抖动失败；该用例单独复跑通过，随后完整 contract 244/244 通过，因此归类为并发资源抖动，不是保留失败。
 
 ### 5.4.2 明确的环境/基线例外
 
-1. `pnpm run test:integration` 中 45 files / 294 tests 通过；唯一 `tests/integration/cli/packaging-smoke.integration.test.ts` 两次在 `npm install` 阶段 180 秒超时。诊断用 Node 24 直接 `fetch(https://registry.npmjs.org/react)` 复现 `ECONNRESET before secure TLS connection`，而 `curl` 返回 HTTP 200；提高 npm sockets 后仍超时。该用例依赖测试内 Node `fetch` 代理外部 npm registry，属于本机 Node TLS/网络阻断，不是构建或 compiled assets 失败。未修改既有 packaging 测试来制造假绿。
-2. 仓库级 `pnpm run format:check` 报告 43 个**未被本批修改**的既有文件不符合当前 Prettier；本批没有批量重写无关文件。improve-5 文档与所有 Batch E 新增/修改文件已定向检查通过。
+1. `pnpm run test:integration` 的 Batch F 全套运行中，293 个测试通过；`tests/integration/cli/packaging-smoke.integration.test.ts` 在外部 `npm install` 阶段达到 240 秒超时，另一个 daemon resync 用例在同轮高负载下达到 10 秒时序上限。daemon 文件随后隔离复跑 44/44 通过；排除唯一外部安装 smoke 后，完整本地 integration 为 45 files / 294 tests 全通过。此前诊断用 Node 24 直接 `fetch(https://registry.npmjs.org/react)` 复现 `ECONNRESET before secure TLS connection`，而 `curl` 返回 HTTP 200；提高 npm sockets 后仍超时。packaging 用例依赖测试内 Node `fetch` 代理外部 npm registry，属于本机 Node TLS/网络阻断，不是构建或 compiled assets 失败。未修改既有 packaging 测试来制造假绿。
+2. 仓库级 `pnpm run format:check` 报告 43 个**未被本批修改**的既有文件不符合当前 Prettier；本批没有批量重写无关文件。improve-5 文档与所有 Batch E/F 新增/修改文件已定向检查通过。
 3. 因完整 `pnpm test` 会再次调度上述 packaging smoke，确认它等待同一 packaging lock 后终止了重复执行；使用排除该单一外部安装用例的全仓 Vitest 取得 2625/2625 本地可执行测试通过证据。
 
 这些例外意味着“本批功能与生产 E2E 通过”，但不能把仓库当前状态描述为无条件的全量 clean CI。
 
 ## 5.5 G8 real cache 结果
 
-执行 `pnpm run test:smoke:real` 与 `pnpm run test:cache:real`：
+首次无 credential 执行时三门为 `skip (partial evidence)`；2026-08-24 使用用户授权的 ZenMux credential、同一模型 `deepseek/deepseek-v4-flash` 和官方双协议端点再次执行 `pnpm run test:cache:real`。credential 未写入仓库、evidence 或文档，测试结束后已从进程与临时 profile 清除。
 
-| 子门 | 结果 | 原因 |
+| 子门 | 结果 | 脱敏证据 |
 |------|------|------|
-| OpenAI-compatible cache read | skip | 缺 `OPENAI_API_KEY / DEEPSEEK_API_KEY / ZAI_API_KEY / ZHIPU_API_KEY` |
-| Anthropic creation/read + child | skip | 缺 `ANTHROPIC_API_KEY` |
-| M13 MCP epoch recovery | skip | 缺 OpenAI-compatible credential |
-| Aggregate | `skip (partial evidence)` | 无失败，但没有真实 provider read 证据 |
+| OpenAI-compatible cache read | pass | `https://zenmux.ai/api/v1`；最终复验 follow-up `input=5373, cacheRead=5120, uncached=253` |
+| Anthropic primary + child read | pass | `https://zenmux.ai/api/anthropic`；primary 与 child 均观测到 4096/5120 cache read |
+| M13 MCP epoch recovery | pass | 4 个请求、tool epoch `0,0,1,1`；epoch 1 仍读到 4096/5120 |
+| Aggregate | pass | 三个串行外部门全部退出 0，脱敏 evidence 已落盘 |
 
-协议 contract、runner 行为、keyed/keyless projection、真实 MCP transport 和 usage evidence 均已本地验证；真实 provider `tool_choice`、cache creation/read 与 M13 read **未在本机执行**。G8 不能记为 pass。
+该模型默认 thinking mode 拒绝 named/required `tool_choice`。harness 按 ZenMux 官方双协议映射，仅对首个强制工具请求关闭 reasoning；修复了由测试 wrapper 重写 body 却保留旧 `Content-Length` 导致的 Undici 发送失败。真实 Web 仍使用生产默认 thinking mode，不依赖该测试注入。
+
+ZenMux/DeepSeek 的 Anthropic 协议转接采用隐式 cache 写入：一次 cold 复验中首请求的 creation/read 字段均明确出现但数值为 0，随后 primary 读到 5120、child 读到 4096/5120；因此 smoke 对 ZenMux 验收“字段已观测 + 后续非零 read”，不把首请求零值误报成 write。official Anthropic 直连仍保留首请求 creation/read 的严格断言。
 
 ## 5.6 compiled Web E01–E07
 
@@ -104,6 +108,17 @@ E2E_CLEANUP_PASS {"finalStatus":"stopped","pidReleased":true,"portReleased":true
 
 本地 scripted endpoint 的 synthetic `cached_tokens` 只证明 normalization、metadata 与 UI 生产链路，不是 G8 的真实服务 cache hit。
 
+### 5.6.1 真实 ZenMux compiled Web 补证
+
+使用本次 `pnpm build` 产物、隔离 HOME/XDG/AppData/OHBABY_HOME/DB/storage/workspace 和动态端口启动 `ohbaby serve --no-open`；profile 指向 ZenMux OpenAI-compatible 官方端点，模型 context window 显式配置为 1,000,000。真实浏览器完成两轮对话并刷新：
+
+- 两个用户 prompt 与两个精确模型响应均唯一可见；刷新后 4 条消息和同一 session 恢复。
+- 第一轮 provider usage：`input=6819, cacheRead=0, uncached=6819, output=39`。
+- 第二轮 provider usage：`input=6983, cacheRead=6144, uncached=839, output=14`。
+- Web 顶栏在第二轮及刷新后均显示约 `7.1k / 1m`，与 inclusive input/context projection 一致；它没有错误显示成仅约 0.8k 的 uncached 占用。粗略占用约为 0.71%。
+- 页面 title/模型/idle 状态正确，无 framework overlay、console error/warn；runtime environment part 未出现在 transcript。
+- 结束后使用同一隔离环境 stop，状态为 stopped，captured PID 已释放且无匹配的 serve 进程；临时 profile/数据库被定向删除，进程凭证已清除。
+
 ## 5.7 发布门结论
 
 | 门 | 结论 | 证据摘要 |
@@ -115,7 +130,7 @@ E2E_CLEANUP_PASS {"finalStatus":"stopped","pidReleased":true,"portReleased":true
 | G5 tools/MCP | pass | M01–M12 本地门、真实 SDK transport、scope sequence/cleanup |
 | G6 agent parity | pass | primary/subagent integration、metadata、summary/purpose/scope 隔离 |
 | G7 system E2E | conditional / 未满足完整仓库门 | compiled Web E01–E07 pass；packaging Node TLS 与既有 format baseline 阻止无条件 G7 pass，见 §5.4.2 |
-| G8 external cache | skip（partial evidence） | 三门均缺 credential，未宣称真实命中 |
+| G8 external cache | pass | ZenMux OpenAI-compatible、Anthropic primary/child 与 M13 均有真实 cache read |
 | G9 文档/范围 | pass | README、01、02、04、05 与实现一致；后续联合回归明确未执行 |
 
 ## 5.8 终审与 SWE 改动面评估
@@ -126,15 +141,17 @@ E2E_CLEANUP_PASS {"finalStatus":"stopped","pidReleased":true,"portReleased":true
 - 协议/cache：关闭了 keyless projection `digest(undefined)`、前缀不足、Anthropic child 单轮、M13 假 MCP/超请求上限/错误 usage 合并等问题。
 - 测试：关闭了任意 Enter UI 假绿、runner exit code 未测、provider tool 自然服从不确定、验收状态文档缺失等问题。
 
+Batch F 再由同三路子代理做只读终审，最终同样为 0 blocker / 0 major；审查推动补齐 URL 与 `Request` 两条 stale `Content-Length` 回归、把 cold zero 例外收窄为 exact DeepSeek 模型级 capability，并对齐 04 中 ZenMux OpenAI-compatible 网关门。该批没有修改 production `packages/` / `apps/` 文件，tracked diff 与脱敏 evidence 均未发现 credential、完整 prompt 或完整 cache key。
+
 按 SWE “管理复杂度、缩短反馈回路、测试作为设计探针”的原则，本批结论如下：
 
 - **复杂度下降**：vendor cache 字段被限制在 adapter；ContextManager 只认 provider-neutral request；`PreparedModelRequest` 消除了 measurement/send 的平行状态，属于删除偶然复杂度而非增加抽象。
 - **依赖边界清晰**：capability resolver 决定 wire 策略，usage normalizer 决定观测语义，lifecycle 只聚合规范化结果；没有引入第三种 interface provider 或跨 session 分析库，符合 KISS/YAGNI。
 - **可测试性增强**：纯 runner state/exit 函数、provider contracts、主/子代理 integration、真实 SDK transport smoke 与少量 compiled Web E2E 形成测试金字塔；外部 credential 与普通 CI 解耦。
 - **有意识的权衡**：real-cache harness 使用 `chars / 4` 做保守 fail-fast，并允许按模型覆盖阈值；test-only fetch wrapper 只在串行 gate 子进程注入 `tool_choice`。两者降低外部模型非确定性，但不等同精确 tokenizer 或生产 caller 自带 tool-choice。
-- **保留风险**：本机未验证真实 provider cache read；real smoke 的 child 使用 production core scope/path，但不是完整 `SessionSubagentHost` 编排；compiled E2E runner 较长，后续可在不弱化失败清理的前提下提取独立 helper/unit tests。
+- **保留风险**：本轮真实 provider 是 ZenMux 双协议网关，未等同验证 OpenAI/Anthropic 官方直连；real smoke 的 child 使用 production core scope/path，但不是完整 `SessionSubagentHost` 编排；compiled E2E runner 较长，后续可在不弱化失败清理的前提下提取独立 helper/unit tests。
 
-本批没有发现需要再引入产品抽象或扩大范围的实现 blocker；G7 仍受 §5.4.2 的环境/基线验收条件约束，G8 仍待有凭据环境补证。
+本批没有发现需要再引入产品抽象或扩大范围的实现 blocker；G7 仍受 §5.4.2 的环境/基线验收条件约束，G8 的 ZenMux 目标已补证通过。
 
 ## 5.9 明确未执行的后续工作
 

@@ -73,8 +73,10 @@ export function assertCacheableStablePrefix(minimumTokens: number): number {
 }
 
 export interface RealCacheProviderProfile {
+  readonly allowsUnreportedImplicitCacheWrite?: boolean;
   readonly apiKeyEnv: string;
   readonly baseUrl: string;
+  readonly disableReasoningForForcedToolChoice?: boolean;
   readonly interfaceProvider: "anthropic" | "openai-compatible";
   readonly minimumCacheableTokens: number;
   readonly model: string;
@@ -124,6 +126,20 @@ function requireModel(variableName: string): string {
 
 export function resolveOpenAiCompatibleProfile(): RealCacheProviderProfile {
   const model = requireModel("OHBABY_REAL_CACHE_OPENAI_MODEL");
+  if (process.env.ZENMUX_API_KEY?.trim()) {
+    return {
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/v1",
+      disableReasoningForForcedToolChoice:
+        model === "deepseek/deepseek-v4-flash",
+      interfaceProvider: "openai-compatible",
+      minimumCacheableTokens: minimumCacheableTokens(
+        "OHBABY_REAL_CACHE_OPENAI_MIN_TOKENS",
+      ),
+      model,
+      provider: "zenmux",
+    };
+  }
   if (process.env.OPENAI_API_KEY?.trim()) {
     return {
       apiKeyEnv: "OPENAI_API_KEY",
@@ -166,6 +182,24 @@ export function resolveOpenAiCompatibleProfile(): RealCacheProviderProfile {
 }
 
 export function resolveAnthropicProfile(): RealCacheProviderProfile {
+  if (process.env.ZENMUX_API_KEY?.trim()) {
+    const model = requireModel("OHBABY_REAL_CACHE_ANTHROPIC_MODEL");
+    return {
+      ...(model === "deepseek/deepseek-v4-flash"
+        ? { allowsUnreportedImplicitCacheWrite: true }
+        : {}),
+      apiKeyEnv: "ZENMUX_API_KEY",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      disableReasoningForForcedToolChoice:
+        model === "deepseek/deepseek-v4-flash",
+      interfaceProvider: "anthropic",
+      minimumCacheableTokens: minimumCacheableTokens(
+        "OHBABY_REAL_CACHE_ANTHROPIC_MIN_TOKENS",
+      ),
+      model,
+      provider: "zenmux",
+    };
+  }
   if (!process.env.ANTHROPIC_API_KEY?.trim()) {
     throw new Error("No Anthropic real-cache credential is available.");
   }
@@ -260,8 +294,9 @@ function createSummaryClient(): ContextLLMClient {
   };
 }
 
-function installFixtureToolChoice(
+export function installFixtureToolChoice(
   interfaceProvider: RealCacheProviderProfile["interfaceProvider"],
+  disableReasoning = false,
 ): () => void {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
@@ -292,7 +327,20 @@ function installFixtureToolChoice(
             function: { name: CACHE_FIXTURE_READ },
             type: "function",
           };
-    const nextInit = { ...init, body: JSON.stringify(body) };
+    if (disableReasoning) {
+      if (interfaceProvider === "anthropic") {
+        body.thinking = { type: "disabled" };
+      } else {
+        body.reasoning = { enabled: false };
+      }
+    }
+    const nextHeaders = new Headers(init?.headers);
+    nextHeaders.delete("content-length");
+    const nextInit = {
+      ...init,
+      body: JSON.stringify(body),
+      headers: nextHeaders,
+    };
     if (request) {
       const headers = new Headers(request.headers);
       headers.delete("content-length");
@@ -553,7 +601,10 @@ export async function createRealCacheHarness(
     readonly sessionId: string;
     readonly usages: readonly TokenUsage[];
   }[] = [];
-  const restoreFetch = installFixtureToolChoice(profile.interfaceProvider);
+  const restoreFetch = installFixtureToolChoice(
+    profile.interfaceProvider,
+    profile.disableReasoningForForcedToolChoice === true,
+  );
   let rawClient: LLMClientInstance;
   try {
     rawClient = await createLLMClient({

@@ -48,6 +48,23 @@ describe("real cache runner", () => {
     expect(aggregateCacheGateResults(results)).toBe("fail");
   });
 
+  it("uses one ZenMux credential for both protocols and the M13 gate", async () => {
+    const executeGate = vi.fn(() => Promise.resolve(0));
+
+    const results = await runCacheGates({
+      env: { ZENMUX_API_KEY: "test-only" },
+      executeGate,
+      gates: REAL_CACHE_GATES,
+    });
+
+    expect(results).toEqual([
+      { id: "openai-compatible", status: "pass" },
+      { id: "anthropic", status: "pass" },
+      { id: "m13", status: "pass" },
+    ]);
+    expect(executeGate).toHaveBeenCalledTimes(3);
+  });
+
   it("executes provider gates serially and fails the aggregate if one fails", async () => {
     const execution: string[] = [];
     const releaseFirst = Promise.withResolvers<void>();

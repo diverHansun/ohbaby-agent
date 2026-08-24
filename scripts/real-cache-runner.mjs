@@ -5,6 +5,7 @@ import path from "node:path";
 export const REAL_CACHE_GATES = Object.freeze([
   Object.freeze({
     credentialEnvNames: Object.freeze([
+      "ZENMUX_API_KEY",
       "OPENAI_API_KEY",
       "DEEPSEEK_API_KEY",
       "ZAI_API_KEY",
@@ -16,14 +17,15 @@ export const REAL_CACHE_GATES = Object.freeze([
     testName: "records a real OpenAI-compatible cache read",
   }),
   Object.freeze({
-    credentialEnvNames: Object.freeze(["ANTHROPIC_API_KEY"]),
+    credentialEnvNames: Object.freeze(["ZENMUX_API_KEY", "ANTHROPIC_API_KEY"]),
     flagEnvName: "OHBABY_RUN_REAL_CACHE_ANTHROPIC",
     id: "anthropic",
     spec: "tests/smoke/cache-real-anthropic.smoke.test.ts",
-    testName: "records real Anthropic cache creation and read usage",
+    testName: "records real Anthropic cache read usage",
   }),
   Object.freeze({
     credentialEnvNames: Object.freeze([
+      "ZENMUX_API_KEY",
       "OPENAI_API_KEY",
       "DEEPSEEK_API_KEY",
       "ZAI_API_KEY",

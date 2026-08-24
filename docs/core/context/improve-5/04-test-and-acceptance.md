@@ -186,18 +186,19 @@ Anthropic:         [ordered tools, ordered system blocks, ordered message blocks
 
 ### 4.7.2 OpenAI-compatible 门
 
-至少选择一个项目实际使用端点：OpenAI official、DeepSeek official 或智谱 official。
+至少选择一个项目实际使用端点：OpenAI/DeepSeek/智谱 official，或项目实际使用网关的 OpenAI-compatible endpoint。
 
 - 第一请求的 read 可以为 0，也可以因稳定左侧前缀已有缓存而大于 0；不对它做 cold 断言。若 provider 报 cache write 则记录。
 - 在同 epoch 的后续请求中至少一次 `inputBreakdown.cacheRead > 0`。
-- `promptCache=auto` 时，wire 字段符合 capability matrix：例如 OpenAI official 有 key，DeepSeek/智谱没有 key。
+- `promptCache=auto` 时，wire 字段符合 capability matrix：例如 OpenAI official 有 key，DeepSeek/智谱与 ZenMux Chat Completions 没有 key；ZenMux/DeepSeek 的服务端隐式 read 仍作为真实命中验收。
 - 未达到服务最低 prefix 长度时测试应明确 fail-fast 配置错误，不得把必然 miss 当实现 bug。
 
 ### 4.7.3 Anthropic 门
 
-使用 Anthropic official endpoint：
+使用 Anthropic official endpoint，或项目实际使用网关的 Anthropic 协议端点：
 
-- 首个满足长度的请求通常应看到 `cacheWrite > 0`；若更左侧稳定前缀已经被 provider 复用，则允许以 `cacheRead > 0` 取代，不能为了制造 cold 断言而每 step 改前缀；
+- official Anthropic 首个满足长度的请求通常应看到 `cacheWrite > 0`；若更左侧稳定前缀已经被 provider 复用，则允许以 `cacheRead > 0` 取代，不能为了制造 cold 断言而每 step 改前缀；
+- 已实测的 ZenMux `deepseek/deepseek-v4-flash` Anthropic 协议转接采用隐式写入，cold 首请求可能只明确报告 creation/read 字段已观测且两者数值均为 0；此模型级例外不能扩展到 ZenMux 上使用显式 `cache_control` 的其他模型，此时不能伪造 `cacheWrite`，但后续请求仍必须有非零 `cacheRead` 才算通过；
 - 后续同 scope、同 tool epoch 请求看到 `cacheRead > 0`；
 - `message_start` 的 creation/read 最终进入 normalized request metadata；
 - 再用一个 child context scope 重复最小序列，证明内部 scoped identity 与 history 不沿用 primary，adapter 与 usage 行为一致。Anthropic wire 没有 OpenAI-style key；若 exact bytes 相同而发生服务端复用，不视为 context 泄漏或测试失败。
@@ -339,7 +340,9 @@ OHBABY_RUN_REAL_CACHE_M13=1 pnpm run test:cache:real:m13
 pnpm run test:cache:real
 ```
 
-当前 cache smoke 通过已有 provider credential 名选择官方 OpenAI/DeepSeek/智谱或 Anthropic 端点；有 credential 时还必须显式给出 `OHBABY_REAL_CACHE_OPENAI_MODEL` 或 `OHBABY_REAL_CACHE_ANTHROPIC_MODEL`，可按所选模型配置上述最低 token 阈值。缺 credential 是 `skip`，credential 存在但 model/阈值配置非法属于 `fail`，防止 runner 默选一个可能已下线、不支持缓存观测或前缀必然不足的模型。共同 fixture 在 test-only outbound fetch 边界为首个标记请求注入 provider 官方 `tool_choice` 形状，确保真实本地 tool loop 不依赖模型自然服从；请求和响应仍完整经过生产 adapter、Lifecycle 与 scheduler。M13 当前使用已配置的 OpenAI-compatible 端点。
+当前 cache smoke 通过已有 provider credential 名选择官方 OpenAI/DeepSeek/智谱或 Anthropic 端点；`ZENMUX_API_KEY` 则同时选择 ZenMux 官方 `https://zenmux.ai/api/v1` 与 `https://zenmux.ai/api/anthropic` 双协议端点。有 credential 时还必须显式给出 `OHBABY_REAL_CACHE_OPENAI_MODEL` 或 `OHBABY_REAL_CACHE_ANTHROPIC_MODEL`，可按所选模型配置上述最低 token 阈值。缺 credential 是 `skip`，credential 存在但 model/阈值配置非法属于 `fail`，防止 runner 默选一个可能已下线、不支持缓存观测或前缀必然不足的模型。
+
+共同 fixture 在 test-only outbound fetch 边界为首个标记请求注入 provider 官方 `tool_choice` 形状，确保真实本地 tool loop 不依赖模型自然服从；重写 JSON body 时必须删除旧 `Content-Length`。ZenMux `deepseek/deepseek-v4-flash` 默认 thinking mode 不接受 named/required tool choice，因此 harness 只对该模型的首个强制工具请求按 ZenMux 官方协议映射为 non-thinking：OpenAI-compatible 使用 `reasoning.enabled=false`，Anthropic 使用 `thinking.type=disabled`。这只消除 smoke 的工具选择非确定性，不改变生产 adapter 默认参数；请求和响应仍完整经过生产 adapter、Lifecycle 与 scheduler。M13 当前使用已配置的 OpenAI-compatible 端点。
 
 两个 provider gate 彼此独立，总入口串行调度并明确输出 `pass / skip / fail`；没有凭据是 skip，有 gate 但配置/长度错误是 fail。runner 的枚举与状态聚合必须有自己的 unit tests，至少覆盖：无 credential=skip、gate/config error=fail、两个 provider 串行且任一 fail 时总入口非零、M13 独立 skip 不污染 G5。runner 若保留 `.mjs`，这些测试不能假设现有 lint/typecheck 会自动覆盖它。
 
