@@ -87,7 +87,12 @@ export function createContextSummaryClient(
           llmClient,
           [
             { role: "system", content: input.systemPrompt ?? input.prompt },
-            { role: "user", content: serializeHistory(input.history) },
+            {
+              role: "user",
+              content: serializeHistory(input.history, {
+                includeModelContext: false,
+              }),
+            },
             { role: "user", content: input.prompt },
           ],
           {

@@ -4,6 +4,46 @@ import {
   normalizeOpenAICompatibleUsage,
 } from "./token-usage.js";
 import type { TokenUsageNormalizationDiagnostic } from "./token-usage.js";
+import type { InterfaceProviderTokenUsage } from "./types.js";
+
+function expectUsage(
+  actual: InterfaceProviderTokenUsage | undefined,
+  expected: unknown,
+): void {
+  expect(actual).toEqual(expected);
+  if (actual === undefined) {
+    return;
+  }
+
+  for (const value of [
+    actual.inputTokens,
+    actual.outputTokens,
+    actual.totalTokens,
+  ]) {
+    expect(Number.isInteger(value)).toBe(true);
+    expect(value).toBeGreaterThanOrEqual(0);
+  }
+  expect(actual.totalTokens).toBe(actual.inputTokens + actual.outputTokens);
+
+  const breakdown = actual.inputBreakdown;
+  if (breakdown === undefined) {
+    return;
+  }
+  for (const value of [
+    breakdown.cacheRead,
+    breakdown.cacheWrite,
+    breakdown.uncached,
+  ]) {
+    expect(Number.isInteger(value)).toBe(true);
+    expect(value).toBeGreaterThanOrEqual(0);
+  }
+  expect(breakdown.cacheRead + breakdown.cacheWrite + breakdown.uncached).toBe(
+    actual.inputTokens,
+  );
+  const cacheHitRate =
+    actual.inputTokens === 0 ? 0 : breakdown.cacheRead / actual.inputTokens;
+  expect(cacheHitRate).toBeLessThanOrEqual(1);
+}
 
 describe("normalizeOpenAICompatibleUsage", () => {
   it.each([
@@ -34,6 +74,26 @@ describe("normalizeOpenAICompatibleUsage", () => {
           cacheWrite: 0,
           observed: { cacheRead: true, cacheWrite: false },
           uncached: 10,
+        },
+        inputTokens: 10,
+        outputTokens: 2,
+        totalTokens: 12,
+      },
+    },
+    {
+      name: "normalizes a positive nested cached-token read without inventing write data",
+      raw: {
+        completion_tokens: 2,
+        prompt_tokens: 10,
+        prompt_tokens_details: { cached_tokens: 6 },
+        total_tokens: 12,
+      },
+      expected: {
+        inputBreakdown: {
+          cacheRead: 6,
+          cacheWrite: 0,
+          observed: { cacheRead: true, cacheWrite: false },
+          uncached: 4,
         },
         inputTokens: 10,
         outputTokens: 2,
@@ -162,7 +222,7 @@ describe("normalizeOpenAICompatibleUsage", () => {
       },
     },
   ])("$name", ({ raw, expected }) => {
-    expect(normalizeOpenAICompatibleUsage(raw)).toEqual(expected);
+    expectUsage(normalizeOpenAICompatibleUsage(raw), expected);
   });
 
   it("rejects incomplete DeepSeek input accounting without a prompt total", () => {
@@ -176,7 +236,7 @@ describe("normalizeOpenAICompatibleUsage", () => {
   });
 
   it("drops a conflicting DeepSeek breakdown without changing inclusive totals", () => {
-    expect(
+    expectUsage(
       normalizeOpenAICompatibleUsage({
         completion_tokens: 2,
         prompt_cache_hit_tokens: 7,
@@ -184,13 +244,14 @@ describe("normalizeOpenAICompatibleUsage", () => {
         prompt_tokens: 10,
         total_tokens: 12,
       }),
-    ).toEqual({ inputTokens: 10, outputTokens: 2, totalTokens: 12 });
+      { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+    );
   });
 
   it("never derives a negative DeepSeek hit when miss exceeds prompt", () => {
     const diagnostics: TokenUsageNormalizationDiagnostic[] = [];
 
-    expect(
+    expectUsage(
       normalizeOpenAICompatibleUsage(
         {
           completion_tokens: 2,
@@ -200,7 +261,8 @@ describe("normalizeOpenAICompatibleUsage", () => {
         },
         (diagnostic) => diagnostics.push(diagnostic),
       ),
-    ).toEqual({ inputTokens: 10, outputTokens: 2, totalTokens: 12 });
+      { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+    );
     expect(diagnostics).toContainEqual({
       code: "input-breakdown-conflict",
       protocol: "openai-compatible",
@@ -209,24 +271,25 @@ describe("normalizeOpenAICompatibleUsage", () => {
   });
 
   it("normalizes Kimi top-level cached tokens when nested details are absent", () => {
-    expect(
+    expectUsage(
       normalizeOpenAICompatibleUsage({
         cached_tokens: 4,
         completion_tokens: 2,
         prompt_tokens: 10,
         total_tokens: 12,
       }),
-    ).toEqual({
-      inputBreakdown: {
-        cacheRead: 4,
-        cacheWrite: 0,
-        observed: { cacheRead: true, cacheWrite: false },
-        uncached: 6,
+      {
+        inputBreakdown: {
+          cacheRead: 4,
+          cacheWrite: 0,
+          observed: { cacheRead: true, cacheWrite: false },
+          uncached: 6,
+        },
+        inputTokens: 10,
+        outputTokens: 2,
+        totalTokens: 12,
       },
-      inputTokens: 10,
-      outputTokens: 2,
-      totalTokens: 12,
-    });
+    );
   });
 
   it("reports structured diagnostics for raw total and breakdown conflicts", () => {
@@ -266,7 +329,7 @@ describe("createAnthropicUsageAccumulator", () => {
   it("keeps raw Anthropic input inclusive when no cache fields are reported", () => {
     const usage = createAnthropicUsageAccumulator();
 
-    expect(usage.update({ input_tokens: 10, output_tokens: 2 })).toEqual({
+    expectUsage(usage.update({ input_tokens: 10, output_tokens: 2 }), {
       inputTokens: 10,
       outputTokens: 2,
       totalTokens: 12,
@@ -276,47 +339,49 @@ describe("createAnthropicUsageAccumulator", () => {
   it("distinguishes explicit zero cache buckets from missing fields", () => {
     const usage = createAnthropicUsageAccumulator();
 
-    expect(
+    expectUsage(
       usage.update({
         cache_creation_input_tokens: 0,
         cache_read_input_tokens: 0,
         input_tokens: 10,
         output_tokens: 2,
       }),
-    ).toEqual({
-      inputBreakdown: {
-        cacheRead: 0,
-        cacheWrite: 0,
-        observed: { cacheRead: true, cacheWrite: true },
-        uncached: 10,
+      {
+        inputBreakdown: {
+          cacheRead: 0,
+          cacheWrite: 0,
+          observed: { cacheRead: true, cacheWrite: true },
+          uncached: 10,
+        },
+        inputTokens: 10,
+        outputTokens: 2,
+        totalTokens: 12,
       },
-      inputTokens: 10,
-      outputTokens: 2,
-      totalTokens: 12,
-    });
+    );
   });
 
   it("adds Anthropic uncached, creation, and read input exactly once", () => {
     const usage = createAnthropicUsageAccumulator();
 
-    expect(
+    expectUsage(
       usage.update({
         cache_creation_input_tokens: 4,
         cache_read_input_tokens: 6,
         input_tokens: 10,
         output_tokens: 3,
       }),
-    ).toEqual({
-      inputBreakdown: {
-        cacheRead: 6,
-        cacheWrite: 4,
-        observed: { cacheRead: true, cacheWrite: true },
-        uncached: 10,
+      {
+        inputBreakdown: {
+          cacheRead: 6,
+          cacheWrite: 4,
+          observed: { cacheRead: true, cacheWrite: true },
+          uncached: 10,
+        },
+        inputTokens: 20,
+        outputTokens: 3,
+        totalTokens: 23,
       },
-      inputTokens: 20,
-      outputTokens: 3,
-      totalTokens: 23,
-    });
+    );
   });
 
   it.each([
@@ -343,15 +408,17 @@ describe("createAnthropicUsageAccumulator", () => {
   ])("normalizes Anthropic $name independently", ({ cache, expected }) => {
     const usage = createAnthropicUsageAccumulator();
 
-    expect(
+    expectUsage(
       usage.update({ ...cache, input_tokens: 10, output_tokens: 3 }),
-    ).toEqual({
-      inputBreakdown: expected,
-      inputTokens: expected.uncached + expected.cacheRead + expected.cacheWrite,
-      outputTokens: 3,
-      totalTokens:
-        expected.uncached + expected.cacheRead + expected.cacheWrite + 3,
-    });
+      {
+        inputBreakdown: expected,
+        inputTokens:
+          expected.uncached + expected.cacheRead + expected.cacheWrite,
+        outputTokens: 3,
+        totalTokens:
+          expected.uncached + expected.cacheRead + expected.cacheWrite + 3,
+      },
+    );
   });
 
   it("monotonically merges start and final usage without letting placeholders erase data", () => {
@@ -365,24 +432,25 @@ describe("createAnthropicUsageAccumulator", () => {
       output_tokens: 0,
     });
 
-    expect(
+    expectUsage(
       usage.update({
         cache_creation_input_tokens: 0,
         cache_read_input_tokens: 0,
         input_tokens: 0,
         output_tokens: 3,
       }),
-    ).toEqual({
-      inputBreakdown: {
-        cacheRead: 6,
-        cacheWrite: 4,
-        observed: { cacheRead: true, cacheWrite: true },
-        uncached: 10,
+      {
+        inputBreakdown: {
+          cacheRead: 6,
+          cacheWrite: 4,
+          observed: { cacheRead: true, cacheWrite: true },
+          uncached: 10,
+        },
+        inputTokens: 20,
+        outputTokens: 3,
+        totalTokens: 23,
       },
-      inputTokens: 20,
-      outputTokens: 3,
-      totalTokens: 23,
-    });
+    );
     expect(report).toHaveBeenCalledWith({
       code: "non-monotonic-cumulative-field",
       field: "input_tokens",
@@ -403,23 +471,24 @@ describe("createAnthropicUsageAccumulator", () => {
       output_tokens: 0,
     });
 
-    expect(
+    expectUsage(
       usage.update({
         cache_creation_input_tokens: 5,
         cache_read_input_tokens: 8,
         input_tokens: 12,
         output_tokens: 3,
       }),
-    ).toEqual({
-      inputBreakdown: {
-        cacheRead: 8,
-        cacheWrite: 5,
-        observed: { cacheRead: true, cacheWrite: true },
-        uncached: 12,
+      {
+        inputBreakdown: {
+          cacheRead: 8,
+          cacheWrite: 5,
+          observed: { cacheRead: true, cacheWrite: true },
+          uncached: 12,
+        },
+        inputTokens: 25,
+        outputTokens: 3,
+        totalTokens: 28,
       },
-      inputTokens: 25,
-      outputTokens: 3,
-      totalTokens: 28,
-    });
+    );
   });
 });

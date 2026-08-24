@@ -120,7 +120,7 @@ R06 是 improve-4.1 的关键升级：不是分别断言“测量有 tools”和
 | PFX06 | 同一 tool loop 两个 model steps | 旧 system/tools/messages 深等价，只有 assistant/tool suffix 增长 | P5、P7 |
 | PFX07 | retry | runtime part 不重新生成、不移动 | P3、P5 |
 | PFX08 | 下一用户 turn date/cwd 改变 | 旧历史不变，新 runtime part 只作为最新 user suffix | P5 |
-| PFX09 | store + crash/resume + projections | model serializer 可见；live UI、持久化 transcript、fallback title、默认 export 隐藏；数据库恢复后位置不变且不重复附着 | P5 |
+| PFX09 | store + crash/resume + projections | model serializer 可见；live UI、持久化 transcript、fallback title、context-summary 隐藏；数据库恢复后位置不变且不重复附着；若未来增加默认 export，同样必须过滤 | P5 |
 | PFX10 | compaction | part 被正常测量/处理，不在 request 尾重复补回 | P5、P6 |
 | PFX11 | run 中 custom instruction / memory source 改变 | 当前 run snapshot 不漂移；下一 run 才生效 | P5 |
 | PFX12 | runtime text escaping | cwd/tool description 中边界字符不会破坏结构标签 | P5 |
@@ -390,7 +390,7 @@ G8 聚合规则固定为：任何已执行子门失败则整体 `fail`；OpenAI-
 8. mock request prefix 全绿时，是否仍有真实 provider `cacheRead > 0` 证据？
 9. 一个完整 agent-step 没有 usage 时，run totals 是否被错误伪装为完整数据？
 10. child scope 关闭后，ContextManager、MCP loaded set 和 tool sequence 是否都只清理目标 scope？
-11. live/persisted UI、fallback title 或 export 是否泄漏 runtime part 中的 cwd/OS/MCP 名称？
+11. live/persisted UI、fallback title、context-summary 或未来 export 是否泄漏 runtime part 中的 cwd/OS/MCP 名称？（当前仓库没有用户 session-export 产品面，本批不为满足测试编号虚构接口。）
 12. `purpose=auxiliary` 是否被错误写进运行时枚举或 fixture，而不是使用 `context-summary/session-title`？
 13. 没有 provider key 时，M13 是否只进入 G8 skip，而不会让本地 G5 永远失败？
 14. Web E2E 是否真的来自本次 build 的 `dist` 和 `ohbaby serve`，还是偷偷使用了 dev server/mock UI？

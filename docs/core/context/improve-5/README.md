@@ -1,7 +1,7 @@
 # context improve-5 · LLM 请求契约、prompt cache 观测与稳定前缀
 
-> 状态：**improve-5 已于 2026-08-24 在 `codex/improve-5` 分六批实施，架构、协议、定向测试、compiled Web 与 ZenMux 真实双协议验证已完成；完整仓库门仍是条件验收**。
-> 代码基线：improve-4 / improve-4.1 已实施；improve-5 的详细结果、门禁例外与 ZenMux 双协议真实缓存补证见 [05](./05-implementation-acceptance.md)。
+> 状态：**improve-5 已于 2026-08-24 在 `codex/improve-5` 分七批实施；同日晚独立复测确认本地 targeted + unit/contract/integration（排除 packaging）全绿，随后 Batch G 关闭反馈中的可复现覆盖/投影缺口。G7 compiled Web 与 G8 真实 cache 未在独立复测会话重跑，完整仓库门仍是条件验收**。
+> 代码基线：improve-4 / improve-4.1 已实施；分批 commits、门禁例外、ZenMux 证据与独立复测见 [05](./05-implementation-acceptance.md)（含 §5.10）。
 > 本分支尚未合入 `main`，也未推送远端。
 >
 > 前序：[improve-4](../improve-4/README.md) / [improve-4.1](../improve-4.1/README.md) 已建立 request-shaped `{ messages, tools }` 占用计量。本批必须保持 cached input 仍占 context window，不得回退 tools-aware 分母。
@@ -74,10 +74,11 @@
 | D · prefix 与 MCP | stable system/runtime part、tool sequence、epoch、scope cleanup、UI projection | 主/子代理前缀稳定且 scope 隔离 |
 | E · improve-5 系统验收 | 全量本批测试、real cache smoke、build、compiled `ohbaby serve` Web E2E | 本批实现可运行、可观测、可审计 |
 | F · ZenMux 真实补证 | 双协议 cache read、M13、真实 provider compiled Web 与 context UI | G8 由 skip 补为 pass，inclusive UI 语义得到真实证据 |
+| G · 反馈闭环 | U03/PFX06/A08 专测、summary runtime 投影、验收映射校正 | 真实缺口关闭，已有行为覆盖不重复造测试 |
 
-A 必须先完成；没有可信观测，B–F 的结果无法解释。每批遵守“实现 → targeted tests → `test:unit` + `test:integration` → 子代理审查 → 修复与复测 → 原子 commit”的闭环。详细 commit 和门禁见 [02 §2.8](./02-optimization-plan-and-change-scope.md#28-分批实施分支与完成信号) 与 [04](./04-test-and-acceptance.md)。
+A 必须先完成；没有可信观测，B–G 的结果无法解释。每批遵守“实现 → targeted tests → `test:unit` + `test:integration` → 子代理审查 → 修复与复测 → 原子 commit”的闭环。详细 commit 和门禁见 [02 §2.8](./02-optimization-plan-and-change-scope.md#28-分批实施分支与完成信号) 与 [04](./04-test-and-acceptance.md)。
 
-实施已从 `main` 创建临时分支 `codex/improve-5`，A–D 各批形成独立 commit，E 批形成 acceptance commit，F 批补充 ZenMux 真实 provider 证据。分支不直接合入或推送 `main`，除非用户另行授权。
+实施已从 `main` 创建临时分支 `codex/improve-5`，A–D 各批形成独立 commit，E 批形成 acceptance commit，F 批补充 ZenMux 真实 provider 证据，G 批关闭独立复测反馈。分支不直接合入或推送 `main`，除非用户另行授权。
 
 ## 5. 文档地图
 

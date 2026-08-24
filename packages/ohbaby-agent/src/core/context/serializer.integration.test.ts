@@ -18,6 +18,7 @@ import {
 } from "../message/index.js";
 import { createFallbackSessionTitleFromMessages } from "../../services/session/title-fallback.js";
 import { createContextManager } from "./context-manager.js";
+import { serializeHistory } from "./serialization.js";
 import { serializeForLlm } from "./serializer.js";
 
 const cleanupPaths: string[] = [];
@@ -126,6 +127,12 @@ describe("serializeForLlm database metadata projection", () => {
     const restoredUser = history[0];
     expect(history).toEqual(historyBeforeCrash);
     expect(history[0]?.parts.filter(isModelContextPart)).toHaveLength(1);
+    expect(serializeHistory(history)).toContain(
+      "<environment_context>/repo</environment_context>",
+    );
+    expect(
+      serializeHistory(history, { includeModelContext: false }),
+    ).not.toContain("<environment_context>/repo</environment_context>");
     expect(
       JSON.stringify(
         serializeForLlm({

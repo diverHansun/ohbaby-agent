@@ -3,7 +3,7 @@
 > 验收日期：2026-08-24
 > 实施分支：`codex/improve-5`
 > 合并/推送：均未执行
-> 总结：improve-5 代码、测试设施与 compiled Web 主链路已完成；完整仓库门因 packaging 的本机 Node TLS 阻断与既有 format baseline 只能条件验收；ZenMux `deepseek/deepseek-v4-flash` 已补齐 OpenAI-compatible、Anthropic、M13 与真实 Web 证据，G8 由 skip 更新为 pass。
+> 总结：improve-5 代码、测试设施与 compiled Web 主链路已完成；完整仓库门因 packaging 的本机 Node TLS 阻断与既有 format baseline 只能条件验收；ZenMux `deepseek/deepseek-v4-flash` 已补齐 OpenAI-compatible、Anthropic、M13 与真实 Web 证据，G8 由 skip 更新为 pass；Batch G 又关闭了独立复测指出的可复现覆盖与 summary 投影缺口。
 
 ## 5.1 交付结果
 
@@ -26,6 +26,7 @@
 | D · prefix/MCP | `bf89962` `feat(context): stabilize prompt prefixes and tool epochs` | runtime user snapshot、删除重复 tools 文本、scope tool epoch/cleanup |
 | E · 系统验收 | `test(context): complete improve-5 system verification` | 本文、real-cache runner/fixtures、compiled Web E2E；SHA 见最终交付消息 |
 | F · ZenMux 真实补证 | `test(context): verify ZenMux prompt cache end to end` | 双协议 profile、真实 cache read/M13、真实 provider Web/context UI；SHA 见最终交付消息 |
+| G · 反馈闭环 | `fix(context): keep runtime metadata out of summaries` | U03/PFX06/A08 专测、summary model-only 投影与验收映射校正；SHA 见最终交付消息 |
 
 所有提交都位于临时分支；没有 merge 或 push。
 
@@ -45,22 +46,22 @@
 |---------|------|
 | Batch E targeted runner/harness/serve | 22/22；其中最终 runner+harness 7/7、serve 15/15 |
 | Batch F ZenMux resolver/runner/harness | 12/12；包含双协议 credential、reasoning 映射与 URL/Request body length 回归 |
-| `pnpm run test:unit` | 221 files；2000 passed，2 skipped |
-| `pnpm run test:contract` | 14 files；244 passed |
+| `pnpm run test:unit` | 221 files；2001 passed，2 skipped |
+| `pnpm run test:contract` | 14 files；245 passed |
 | `pnpm run test:smoke` | 4 files / 12 tests 全部被发现并因未启用外部门显式 skip |
 | `pnpm exec vitest run --config vitest.e2e.config.ts` | 2 files passed、3 files external skipped；5 passed、5 skipped；subagent 3/3 passed |
-| 排除外部安装 smoke 的全仓 Vitest | 291 files passed、5 skipped；2625 passed、16 skipped |
+| 排除外部安装 smoke 的全仓 Vitest（Batch F 基线） | 291 files passed、5 skipped；2625 passed、16 skipped |
 | `pnpm run lint` | pass |
 | `pnpm run typecheck` | pass |
 | `pnpm run build` | pass；CLI、agent、server、SDK 与 Web compiled assets 全部生成 |
-| improve-5 文档与 Batch E/F 改动文件 Prettier | pass |
+| improve-5 文档与 Batch E/F/G 改动文件 Prettier | pass |
 
-contract 首次与 unit/integration 并行执行时，一个既有 TUI 输入时序用例抖动失败；该用例单独复跑通过，随后完整 contract 244/244 通过，因此归类为并发资源抖动，不是保留失败。
+contract 首次与 unit/integration 并行执行时，一个既有 TUI 输入时序用例抖动失败；该用例单独复跑通过，随后完整 contract 通过；Batch G 再次串行复跑为 245/245，因此归类为并发资源抖动，不是保留失败。
 
 ### 5.4.2 明确的环境/基线例外
 
-1. `pnpm run test:integration` 的 Batch F 全套运行中，293 个测试通过；`tests/integration/cli/packaging-smoke.integration.test.ts` 在外部 `npm install` 阶段达到 240 秒超时，另一个 daemon resync 用例在同轮高负载下达到 10 秒时序上限。daemon 文件随后隔离复跑 44/44 通过；排除唯一外部安装 smoke 后，完整本地 integration 为 45 files / 294 tests 全通过。此前诊断用 Node 24 直接 `fetch(https://registry.npmjs.org/react)` 复现 `ECONNRESET before secure TLS connection`，而 `curl` 返回 HTTP 200；提高 npm sockets 后仍超时。packaging 用例依赖测试内 Node `fetch` 代理外部 npm registry，属于本机 Node TLS/网络阻断，不是构建或 compiled assets 失败。未修改既有 packaging 测试来制造假绿。
-2. 仓库级 `pnpm run format:check` 报告 43 个**未被本批修改**的既有文件不符合当前 Prettier；本批没有批量重写无关文件。improve-5 文档与所有 Batch E/F 新增/修改文件已定向检查通过。
+1. `pnpm run test:integration` 的 Batch F 全套运行中，293 个测试通过；`tests/integration/cli/packaging-smoke.integration.test.ts` 在外部 `npm install` 阶段达到 240 秒超时，另一个 daemon resync 用例在同轮高负载下达到 10 秒时序上限。daemon 文件随后隔离复跑 44/44 通过；Batch G 排除唯一外部安装 smoke 后，完整本地 integration 为 45 files / 295 tests 全通过。此前诊断用 Node 24 直接 `fetch(https://registry.npmjs.org/react)` 复现 `ECONNRESET before secure TLS connection`，而 `curl` 返回 HTTP 200；提高 npm sockets 后仍超时。packaging 用例依赖测试内 Node `fetch` 代理外部 npm registry，属于本机 Node TLS/网络阻断，不是构建或 compiled assets 失败。未修改既有 packaging 测试来制造假绿。
+2. 仓库级 `pnpm run format:check` 报告 43 个**未被本批修改**的既有文件不符合当前 Prettier；本批没有批量重写无关文件。improve-5 文档与所有 Batch E/F/G 新增/修改文件已定向检查通过。
 3. 因完整 `pnpm test` 会再次调度上述 packaging smoke，确认它等待同一 packaging lock 后终止了重复执行；使用排除该单一外部安装用例的全仓 Vitest 取得 2625/2625 本地可执行测试通过证据。
 
 这些例外意味着“本批功能与生产 E2E 通过”，但不能把仓库当前状态描述为无条件的全量 clean CI。
@@ -143,6 +144,8 @@ E2E_CLEANUP_PASS {"finalStatus":"stopped","pidReleased":true,"portReleased":true
 
 Batch F 再由同三路子代理做只读终审，最终同样为 0 blocker / 0 major；审查推动补齐 URL 与 `Request` 两条 stale `Content-Length` 回归、把 cold zero 例外收窄为 exact DeepSeek 模型级 capability，并对齐 04 中 ZenMux OpenAI-compatible 网关门。该批没有修改 production `packages/` / `apps/` 文件，tracked diff 与脱敏 evidence 均未发现 credential、完整 prompt 或完整 cache key。
 
+Batch G 继续由同三路子代理只读终审，最终为 0 blocker / 0 major / 0 minor。架构审查曾指出 A08 重算 usage 时引用外部 tools fixture，可能漏掉最终 request 丢 schema 的回归；修复后改为分别深比较并消费 primary/child 各自的 `request.messages + request.tools`，复审确认关闭。协议审查推动把 keyed prefix 用例收窄命名为 official OpenAI，避免与 ZenMux implicit/无 key 混淆；测试/文档审查逐项确认 U03/U08/C20/R01–R02/PFX06/PFX09/M08/A08 的证据与条件验收口径一致。tracked diff 未发现 credential、Authorization、完整真实 cache key 或原始 evidence。
+
 按 SWE “管理复杂度、缩短反馈回路、测试作为设计探针”的原则，本批结论如下：
 
 - **复杂度下降**：vendor cache 字段被限制在 adapter；ContextManager 只认 provider-neutral request；`PreparedModelRequest` 消除了 measurement/send 的平行状态，属于删除偶然复杂度而非增加抽象。
@@ -156,3 +159,85 @@ Batch F 再由同三路子代理做只读终审，最终同样为 0 blocker / 0 
 ## 5.9 明确未执行的后续工作
 
 用户计划在 improve-5 交付后，对 improve-4、improve-4.1、improve-5 的 context 相关实现做全方位联合回归。该工作**不属于本批**，本记录没有把现有定向兼容测试冒充为后续回归完成。
+
+## 5.10 独立复测（2026-08-24 晚）
+
+> 撰写时机：实施完成后的独立验收会话。该会话没有改产品代码；对照 02/04 与当时 `codex/improve-5` HEAD `ba59287` 分批复跑测试，并由只读子代理审查验收 ID 覆盖。随后 Batch G 对反馈逐项复现、补测和校正本节。
+> 本轮结论：**本地实现门通过（条件验收）**。targeted tests 与 lint/typecheck/unit/contract/integration（排除 packaging）全绿；真实缺口已在 Batch G 关闭，若干原 `partial` 属已有行为覆盖的映射误判；G7 compiled Web 与 G8 真实 cache 在独立复测会话未重跑，仍引用 §5.5/§5.6 的已完成证据。
+
+### 5.10.1 分批 commits
+
+与 §5.2 一致，全部仍是 HEAD 祖先：
+
+| 批次 | Commit |
+|------|--------|
+| 规划冻结 | `29ac10d` |
+| A · usage | `e2bb783` |
+| B · capability | `f3b3a89` |
+| C · request | `cd60c28` |
+| D · prefix/MCP | `bf89962` |
+| E · 系统验收 | `1ad4f26` |
+| F · ZenMux 补证 | `ba59287` |
+| G · 反馈闭环 | 本提交（SHA 见最终交付消息） |
+
+### 5.10.2 分批 targeted tests（本轮实跑）
+
+| 批次 | 命令范围 | 结果 |
+|------|----------|------|
+| A | token-usage / lifecycle / metadata / roundtrip / auxiliary isolation / stream-bridge / llm-client / openai-compatible / anthropic / context-window-usage | 11 files，102 passed |
+| B | prompt-cache / prompt-cache-wire.contract / llm config validation+writer+manager+integration / title-generator / prompt-context | 8 files，125 passed |
+| C | prepared-request.contract / context manager / runner / run-manager / instance.integration / context-improve-4-1 / lifecycle-tool-scheduler | 7 files，107 passed |
+| D | environment / assembler / tool-sequence / dynamic-tool-menu / composition / persistent-store / title-fallback / serializer.integration / context-subagent-scope / run-stream-adapter / ui-inprocess.contract | 11 files，210 passed |
+| E/F 本地 | real-cache-runner + harness unit、serve-awareness、`test:smoke`、`subagent.e2e.test.ts` | unit 14 passed；smoke 12 skipped（无 env gate）；e2e 3 passed |
+| G | token-usage / prompt-cache-wire / prompt-context / serializer / context-subagent-scope | 5 files，46 passed；修复静态扩展字段类型与 A08 request-tools 证据后复验 |
+
+Batch D 的 `ui-inprocess.contract.test.ts` 在沙箱里会因临时目录 `git init` 被拦截出现 5 条假失败；关闭沙箱后 107/107 通过。后续复测该文件须允许 git。
+
+### 5.10.3 仓库门（本轮实跑）
+
+| 命令 | 结果 |
+|------|------|
+| `pnpm run lint` | pass |
+| `pnpm run typecheck` | pass |
+| `pnpm run test:contract` | 14 files，245 passed |
+| `pnpm run test:unit` | 221 files；2001 passed，2 skipped（`ohbaby-home.unit.test.ts`） |
+| integration 排除 `packaging-smoke.integration.test.ts` | 45 files，295 passed |
+| `pnpm run test:smoke` | 4 files / 12 tests 全部 skip（无凭据/gate） |
+| G8 `test:cache:real` | **本轮未执行**。当前环境 `ZENMUX_CONFIGURED=no`；沿用 §5.5 已落盘的 ZenMux evidence，不把未重跑写成新的 pass |
+| G7 compiled Web `test:e2e:compiled-web` | **本轮未执行**。该 runner 需要人工浏览器 + stdin JSON；沿用 §5.6 记录 |
+
+packaging smoke 与仓库级 `format:check` 的既有基线例外仍以 §5.4.2 为准，本轮未为制造假绿去改那些用例。
+
+### 5.10.4 对照 04 的验收 ID 映射与 Batch G 处置
+
+独立复测给出的条目分成三类：真实测试缺口、真实投影缺口，以及已经存在行为证据但映射时遗漏。Batch G 只为前两类补实现/测试；第三类直接校正文档，不为了验收编号重复制造同义用例。
+
+| 批次 / ID | 映射 | 说明 |
+|-----------|------|------|
+| A · U03 | **covered** | 新增「仅 nested `cached_tokens > 0`、无 write」精确 fixture：read 被观测，write 保持未观测，三分量之和等于 input |
+| A · U08 | **covered（共享解析器）** | 智谱与 OpenAI-compatible 共用 provider-neutral nested parser；U03 的正例直接覆盖该 wire shape，避免按 provider 名复制同一 fixture |
+| A · U21 | covered，落点不同 | inclusive calibration 在 `lifecycle.unit.test.ts`，不在 `context-window-usage.unit.test.ts` |
+| A · §4.3 统一 invariant helper | **covered** | `expectUsage` 统一验证整数/非负、`total=input+output`、breakdown 总和与命中率不超过 1 |
+| B · C16 | **covered（跨层证据）** | prompt-cache unit 已验证 append、compact、tool-menu 变化时 scoped key 稳定；PFX06 与 tool-sequence tests 再证明变化落在 provider payload prefix/epoch，而不是 identity key |
+| B · C20 | **covered（原映射误判）** | `ui-inprocess.contract.test.ts` 已从已有 `promptCache: disabled` 执行 `connectModel`，断言写回仍为 disabled，并由 `reloadLLMConfig` 再读确认 |
+| C · R01/R02 | **covered（原映射误判）** | manager unit 覆盖普通、tail、mask、compact/remeasure；`context-improve-4-1.integration.test.ts` 深比较发送的 `{messages, tools}` 与 `onRequestMeasured` |
+| D · PFX06 | **covered** | 在既有 Anthropic contract 之外新增 official OpenAI Chat Completions 两步工具请求，深比较 system、tools 与 prior messages 前缀并验证 key 稳定；ZenMux auto 仍由相邻矩阵断言不发送 key |
+| D · PFX09 | **covered / 当前 export N/A** | live UI、fallback title、持久化已有过滤；context summary 现显式 `includeModelContext: false`。AI title 只消费经脱敏的 initiating prompt，从不调用 `serializeHistory`；仓库当前没有用户 session-export 产品面，不虚构接口 |
+| D · M08 | **covered（行为级）** | 现有 scope/epoch 用例已覆盖 schema/可见集合变化、工具移除、survivor 顺序与 epoch 递增；权限撤销或 MCP 断开最终都投影为同一「可见集合变化」输入 |
+| D · A08 | **covered** | 新增同一 integration 中 primary 与 child 各自触发 compact，校验 scope 隔离、summary 不串线，并用各自最终 `{messages, tools}` 重算 usage |
+
+对抗性审查（04 §4.11）现在可回答：Q1/Q3/Q5/Q7/Q9/Q11/Q12/Q13 有自动化证据；Q8 引用 §5.5 已完成的真实 read，本次反馈闭环没有重新消耗外部凭据；Q14 引用 §5.6 已完成的 compiled Web 证据，本轮未把历史证据伪装成新复验。
+
+### 5.10.5 SWE 改动面评估（独立会话）
+
+大白话：improve-5 把「数字怎么算、字段怎么发、前缀怎么稳」拆开了，复杂度是下降的，不是又堆了一层框架。本轮复测没有跑红，也不该把映射缺口说成实现坏了。
+
+| 发现 | 严重性 | SWE 依据 | 建议 |
+|------|--------|----------|------|
+| vendor cache 字段停在 adapter，ContextManager 只认中性 request | 正面 | 02 耦合方向 / 信息隐藏 | 保持；后续 UI 命中率必须读 `observed`，不能直接用 `cacheRead` |
+| `PreparedModelRequest` 消除 measurement/send 双份状态 | 正面 | 偶然复杂度 / DRY | 保持 |
+| context summary 曾把 runtime text 编入 durable summary 输入 | 已关闭 | SoC：model-only 快照可进入主模型请求，但不应进入人类/summary 投影 | 只在 summary caller 关闭 model-context；默认 serializer 仍包含它，保持主请求与 token 计量不回退 |
+| 04 ID 与测试名不完全对齐 | 已校正 | 测试作为设计探针，但探针标签要能追溯需求 | 补真实缺口；对 C20/M08/R01/R02 引用已有行为证据，不复制测试 |
+| 本轮未重跑 G8 / compiled Web | 条件验收 | 外部依赖与人工步骤不应假装刚验过 | 有凭据后再跑 `test:cache:real`；需要发布形态时再跑 `test:e2e:compiled-web` |
+
+Batch G 的投影改动刻意保持窄边界：默认 `serializeHistory` 仍包含 model-context，避免 compact heuristics 和 context-window 计量少算真实会发送给主模型的 runtime token；只有 durable context summary 输入显式排除该 part。用户计划的 improve-4～improve-5 联合回归仍见 §5.9，本轮未执行。

@@ -156,6 +156,16 @@ describe("createContextSummaryClient", () => {
               text: "hello",
               type: "text",
             },
+            {
+              id: "part_runtime",
+              messageId: "message_1",
+              metadata: { kind: "model-context:runtime:v1" },
+              orderIndex: 1,
+              sessionId: "session_1",
+              synthetic: true,
+              text: "<environment_context>private cwd</environment_context>",
+              type: "text",
+            },
           ],
         },
       ],
@@ -179,6 +189,7 @@ describe("createContextSummaryClient", () => {
         content: expect.stringContaining("Use this exact format") as string,
       },
     ]);
+    expect(JSON.stringify(messages)).not.toContain("private cwd");
     expect(streamChatCompletionMock.mock.calls[0][2]).toEqual({
       contextScopeId: "subagent_1",
       purpose: "context-summary",

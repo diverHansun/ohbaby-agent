@@ -1,6 +1,11 @@
 import type { MessageWithParts, Part } from "../message/index.js";
+import { isModelContextPart } from "../message/origin.js";
 import { isActivePart } from "./filters.js";
 import { isSummaryMessage } from "./summary.js";
+
+export interface SerializeHistoryOptions {
+  readonly includeModelContext?: boolean;
+}
 
 /**
  * @deprecated Use isSummaryMessage from ./summary.js.
@@ -31,13 +36,28 @@ export function serializePart(part: Part): string {
   return part.state.raw;
 }
 
-export function serializeMessage(message: MessageWithParts): string {
-  const parts = message.parts.map(serializePart).filter(Boolean).join("\n");
+export function serializeMessage(
+  message: MessageWithParts,
+  options: SerializeHistoryOptions = {},
+): string {
+  const parts = message.parts
+    .filter(
+      (part) =>
+        options.includeModelContext !== false || !isModelContextPart(part),
+    )
+    .map(serializePart)
+    .filter(Boolean)
+    .join("\n");
   return parts ? `${message.info.role}: ${parts}` : message.info.role;
 }
 
-export function serializeHistory(history: readonly MessageWithParts[]): string {
-  return history.map(serializeMessage).join("\n\n");
+export function serializeHistory(
+  history: readonly MessageWithParts[],
+  options: SerializeHistoryOptions = {},
+): string {
+  return history
+    .map((message) => serializeMessage(message, options))
+    .join("\n\n");
 }
 
 export function getCompletedToolOutput(part: Part): string | undefined {

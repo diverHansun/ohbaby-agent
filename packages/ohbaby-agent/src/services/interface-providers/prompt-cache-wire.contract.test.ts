@@ -191,6 +191,84 @@ describe("prompt-cache wire contract", () => {
     expect(params.stream_options).toEqual({ include_usage: true });
   });
 
+  it("keeps official OpenAI system, tools, and prior messages as a structural prefix across tool steps", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "openai",
+      apiKey: "test-key",
+      baseUrl: "https://api.openai.com/v1",
+    });
+    const create = vi
+      .spyOn(provider.client.chat.completions, "create")
+      .mockResolvedValue(
+        emptyStream<ChatCompletionChunk>() as unknown as Awaited<
+          ReturnType<typeof provider.client.chat.completions.create>
+        >,
+      );
+    const tools = [
+      {
+        function: {
+          name: "read_fixture",
+          parameters: { properties: {}, type: "object" },
+        },
+        type: "function" as const,
+      },
+      {
+        function: {
+          name: "write_fixture",
+          parameters: { properties: {}, type: "object" },
+        },
+        type: "function" as const,
+      },
+    ];
+    const firstMessages: ChatCompletionMessageParam[] = [
+      { role: "system", content: "Stable system" },
+      { role: "user", content: "Read the fixture" },
+    ];
+    const secondMessages: ChatCompletionMessageParam[] = [
+      ...firstMessages,
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            function: { arguments: "{}", name: "read_fixture" },
+            id: "call_read",
+            type: "function",
+          },
+        ],
+      },
+      { role: "tool", content: "fixture", tool_call_id: "call_read" },
+    ];
+    for (const messages of [firstMessages, secondMessages]) {
+      await provider.streamChatCompletion({
+        maxTokens: 128,
+        messages,
+        model: "gpt-5.6",
+        promptCache: wirePromptCache({
+          baseUrl: "https://api.openai.com/v1",
+          interfaceProvider: "openai-compatible",
+          messages,
+          provider: "openai",
+        }),
+        temperature: 0,
+        tools,
+      });
+    }
+
+    const first = create.mock.calls[0][0];
+    const second = create.mock.calls[1][0];
+    const firstExtensions = first as unknown as Record<string, unknown>;
+    const secondExtensions = second as unknown as Record<string, unknown>;
+    expect(second.tools).toEqual(first.tools);
+    expect(second.messages.slice(0, first.messages.length)).toEqual(
+      first.messages,
+    );
+    expect(firstExtensions.prompt_cache_key).toEqual(expect.any(String));
+    expect(secondExtensions.prompt_cache_key).toBe(
+      firstExtensions.prompt_cache_key,
+    );
+  });
+
   it("sends official Anthropic top-level automatic cache control", async () => {
     const provider = createAnthropicProvider({
       id: "anthropic",
