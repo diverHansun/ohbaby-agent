@@ -44,34 +44,45 @@ function hasModelKey() {
 
 loadDotenvIntoProcessEnv();
 
+const vitestEntry = path.join(root, "node_modules", "vitest", "vitest.mjs");
+let tuiExitCode = 0;
 if (!hasModelKey()) {
-  console.error(
-    "Real smoke requires ZAI_API_KEY or ZHIPU_API_KEY in the environment or root .env.",
+  console.log("[real-smoke] tui: skip (missing ZAI_API_KEY or ZHIPU_API_KEY)");
+} else {
+  process.env.OHBABY_RUN_REAL_TUI_SMOKE = "1";
+  const result = spawnSync(
+    process.execPath,
+    [
+      vitestEntry,
+      "run",
+      "tests/smoke/tui-real-provider.smoke.test.tsx",
+      "-t",
+      "submits a prompt through the rendered TUI|interrupts a real rendered TUI run|lets a real model call the read tool",
+    ],
+    {
+      env: process.env,
+      shell: false,
+      stdio: "inherit",
+    },
   );
-  process.exit(1);
+  if (result.error) {
+    console.error(result.error);
+  }
+  tuiExitCode = result.status ?? 1;
+  console.log(`[real-smoke] tui: ${tuiExitCode === 0 ? "pass" : "fail"}`);
 }
 
-process.env.OHBABY_RUN_REAL_TUI_SMOKE = "1";
-
-const vitestEntry = path.join(root, "node_modules", "vitest", "vitest.mjs");
-const result = spawnSync(
+const cacheResult = spawnSync(
   process.execPath,
-  [
-    vitestEntry,
-    "run",
-    "tests/smoke/tui-real-provider.smoke.test.tsx",
-    "-t",
-    "submits a prompt through the rendered TUI|interrupts a real rendered TUI run|lets a real model call the read tool",
-  ],
+  [path.join(root, "scripts", "run-real-cache-smoke.mjs")],
   {
     env: process.env,
     shell: false,
     stdio: "inherit",
   },
 );
-
-if (result.error) {
-  console.error(result.error);
+if (cacheResult.error) {
+  console.error(cacheResult.error);
 }
-
-process.exit(result.status ?? 1);
+const cacheExitCode = cacheResult.status ?? 1;
+process.exit(tuiExitCode === 0 && cacheExitCode === 0 ? 0 : 1);

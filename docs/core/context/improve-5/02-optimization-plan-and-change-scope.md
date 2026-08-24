@@ -412,7 +412,7 @@ MCP catalog snapshot 使用稳定 tool identity 排序，并保持已经列出�
 - 为 real-cache runner 的枚举、skip/fail 聚合和进程退出码增加独立 unit tests；
 - 有凭据时执行 key-gated real cache smoke 与真实 provider M13 epoch 恢复；
 - 执行完整 format/lint/typecheck/test/build；
-- 通过正常 OpenAI-compatible 配置接入本地 scripted SSE fixture，从本次编译产物、隔离 `OHBABY_HOME`/database 和 `--port 0` 启动 `node packages/ohbaby-cli/dist/bin.js serve`，以 Web 端确定性执行 [04 §4.8](./04-test-and-acceptance.md#48-compiled-web-e2e)；
+- 通过正常 OpenAI-compatible 配置接入本地 scripted SSE fixture，从本次编译产物、仓库外临时 workspace、隔离 `OHBABY_HOME`/database/platform data roots 和 `--port 0 --no-open` 启动 `node packages/ohbaby-cli/dist/bin.js serve`，以 Web 端确定性执行 [04 §4.8](./04-test-and-acceptance.md#48-compiled-web-e2e)；
 - 完成一次面向整个 improve-5 diff 的只读子代理终审。
 
 完成信号见 [04 §4.10](./04-test-and-acceptance.md#410-发布门)。无 provider credential 时，M13/G8 可明确 skip 且不影响本地 G5，但验收记录必须写“external cache evidence 未验证”，不能伪装成真实命中已通过。

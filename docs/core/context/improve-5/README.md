@@ -1,8 +1,8 @@
 # context improve-5 · LLM 请求契约、prompt cache 观测与稳定前缀
 
-> 状态：**规划已按 2026-08-24 用户反馈完成修订，并通过架构、协议和测试可执行性三路二轮只读验收；待用户确认后实施**。
-> 代码基线：ohbaby-agent 当前工作区（improve-4 / improve-4.1 已实施）。
-> 本目录是后续实施会话的规格，不在规划会话修改业务代码。
+> 状态：**improve-5 已于 2026-08-24 在 `codex/improve-5` 分五批实施，架构、协议、定向测试与 compiled Web 验证已完成；完整仓库门仍是条件验收**。
+> 代码基线：improve-4 / improve-4.1 已实施；improve-5 的详细结果、门禁例外与外部缓存 skip 见 [05](./05-implementation-acceptance.md)。
+> 本分支尚未合入 `main`，也未推送远端。
 >
 > 前序：[improve-4](../improve-4/README.md) / [improve-4.1](../improve-4.1/README.md) 已建立 request-shaped `{ messages, tools }` 占用计量。本批必须保持 cached input 仍占 context window，不得回退 tools-aware 分母。
 
@@ -76,7 +76,7 @@
 
 A 必须先完成；没有可信观测，B–E 的结果无法解释。每批遵守“实现 → targeted tests → `test:unit` + `test:integration` → 子代理审查 → 修复与复测 → 原子 commit”的闭环。详细 commit 和门禁见 [02 §2.8](./02-optimization-plan-and-change-scope.md#28-分批实施分支与完成信号) 与 [04](./04-test-and-acceptance.md)。
 
-正式实施开始前才从最新、干净的 `main` 创建 `codex/improve-5`；本轮文档修订不提前创建实施分支。各批在同一临时分支上形成独立 commit，不直接合入或推送 `main`，除非用户另行授权。
+实施已从 `main` 创建临时分支 `codex/improve-5`，A–D 各批形成独立 commit，E 批在上述条件验收后形成 acceptance commit。分支不直接合入或推送 `main`，除非用户另行授权。
 
 ## 5. 文档地图
 
@@ -87,8 +87,8 @@ A 必须先完成；没有可信观测，B–E 的结果无法解释。每批遵
 | [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 数据契约、能力矩阵、request/prefix 架构与实施改动面 |
 | [03-reference-projects.md](./03-reference-projects.md) | 六个本地参考项目与官方协议的 adopt / adapt / reject |
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 逐批 unit/integration 门、真实 cache smoke、compiled Web E2E 与最终验收 |
-| `05-implementation-acceptance.md` | 实施完成后由验收模式写入；规划期不存在 |
+| [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 分批 commits、测试结果、compiled Web 证据、G1–G9 与剩余风险 |
 
-## 6. 给后续实施会话的声明
+## 6. 实施后边界声明
 
-实施以 **02 + 04** 为执行契约。provider 原始字段只在 adapter 边界出现；ContextManager 消费 provider-neutral request payload，不解析 `cached_tokens`、`cache_read_input_tokens` 等 vendor 字段。任何只覆盖主代理、遗漏子代理 scope，或跳过逐批测试/审查直接做一个大提交的实现，都视为 improve-5 未完成。必须等待用户明确同意后才创建临时分支并开始业务代码实施。
+实施以 **02 + 04** 为执行契约。provider 原始字段只在 adapter 边界出现；ContextManager 消费 provider-neutral request payload，不解析 `cached_tokens`、`cache_read_input_tokens` 等 vendor 字段。主代理、子代理和辅助 caller 已纳入同一 request/usage/cache/prefix 链路。用户计划的 improve-4～improve-5 全方位联合回归仍是后续独立工作，本批未把它伪装成已完成。

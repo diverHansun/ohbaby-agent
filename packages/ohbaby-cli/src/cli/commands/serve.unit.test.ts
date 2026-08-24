@@ -153,6 +153,15 @@ describe("createServeCommand", () => {
     expect(openUrl).toHaveBeenCalledWith("http://127.0.0.1:4096");
   });
 
+  it("can start the compiled Web server without opening a system browser", async () => {
+    const { openUrl, runtime, stdout } = createRuntime();
+
+    await runServe(["serve", "--port", "0", "--no-open"], runtime);
+
+    expect(stdout.join("")).toBe("ohbaby web ready: http://127.0.0.1:4096\n");
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
   it("passes bundled web assets without a port when the user omitted --port", async () => {
     const { runtime, startDaemonServer } = createRuntime();
 

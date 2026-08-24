@@ -11,6 +11,7 @@ interface ServeArgs extends CliGlobalOptions {
   readonly authToken?: string;
   readonly dbPath?: string;
   readonly host?: string;
+  readonly open?: boolean;
   readonly port?: number;
   readonly webAssetsDir?: string;
 }
@@ -109,6 +110,11 @@ export function createServeCommand(
           describe: "daemon HTTP host",
           type: "string",
         })
+        .option("open", {
+          default: true,
+          describe: "open the Web UI in the system browser after startup",
+          type: "boolean",
+        })
         .option("db-path", {
           describe: "daemon database path",
           type: "string",
@@ -163,6 +169,9 @@ export function createServeCommand(
         ...(port === undefined ? {} : { port }),
       });
       runtime.stdout.write(`ohbaby web ready: ${server.url}\n`);
+      if (args.open === false) {
+        return;
+      }
       try {
         await runtime.openUrl(server.url);
       } catch {

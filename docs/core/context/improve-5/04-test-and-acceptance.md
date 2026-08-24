@@ -176,12 +176,12 @@ Anthropic:         [ordered tools, ordered system blocks, ordered message blocks
 
 新增 key-gated real smoke，结构借鉴 deepseek-harness：
 
-1. 使用确定性的稳定 system/tool schema，长度跨过所选模型的最低 cacheable threshold。
+1. 使用确定性的稳定 system/tool schema，长度跨过所选模型的最低 cacheable threshold。runner 以保守的 `chars / 4` 估算做联网前 fail-fast，默认最低值为 4096；若所选模型阈值不同，分别用 `OHBABY_REAL_CACHE_OPENAI_MIN_TOKENS` / `OHBABY_REAL_CACHE_ANTHROPIC_MIN_TOKENS` 显式覆盖。该估算只用于防止必然 miss，不替代 provider 实报 usage。
 2. 每次 smoke 在首轮 user suffix 使用只在该次测试内固定的 unique marker/session，让本次序列可区分，并在后续请求保持不变；它不能每 step 重生或污染 system。unique suffix **不能保证整个首请求是 cold**：更左侧的稳定 tools/system 可能已有 partial read，因此不得断言首请求 `cacheRead=0`。
 3. turn 1 强制调用真实本地 fixture tool，产生至少两个 model requests。
 4. turn 2 在同一 session/scope 追加短 user message。
 5. 从生产 `llm:complete` / assistant metadata 读取 normalized usage，不从测试专属 parser 读取。
-6. 同时保存脱敏 request projection，证明相邻请求为 append-extension。
+6. 同时把脱敏 request projection 与 normalized usage 保存到 `.ohbaby/test-evidence/improve-5/real-cache/`；只保留 digest、key presence/指纹、strategy、scope/session、tool names/epoch 与 token 数值，不保存 API key、完整 cache key、prompt 或原始 request body。
 7. 首请求之后最多再发 3 个请求；不靠无限重试“刷出”命中。
 
 ### 4.7.2 OpenAI-compatible 门
@@ -234,16 +234,20 @@ Anthropic:         [ordered tools, ordered system blocks, ordered message blocks
 
 ### 4.8.2 编译与启动方式
 
-Web E2E 必须使用本次分支的编译产物，并使用隔离 profile，禁止复用或停止用户当前的全局 daemon。以下变量只表示 E2E 专用的绝对临时路径，不得复用 `$HOME`：
+Web E2E 必须使用本次分支的编译产物，并使用隔离 profile，禁止复用或停止用户当前的全局 daemon。`OHBABY_HOME` 与 `OHBABY_DB_PATH` 只隔离配置和显式数据库，并不足以隔离 legacy config/data migration；因此 E2E 子进程还必须覆盖平台 home/data/config roots，工作目录也必须是仓库外的空临时目录。以下变量只表示 E2E 专用的绝对临时路径，不得复用真实 `$HOME`：
 
 ```bash
 pnpm build
-OHBABY_E2E_HOME="$(mktemp -d)"
+OHBABY_E2E_ROOT="$(mktemp -d)"
+OHBABY_E2E_HOME="$OHBABY_E2E_ROOT/profile"
 OHBABY_E2E_DB="$OHBABY_E2E_HOME/ohbaby-e2e.db"
-OHBABY_HOME="$OHBABY_E2E_HOME" OHBABY_DB_PATH="$OHBABY_E2E_DB" node packages/ohbaby-cli/dist/bin.js serve --port 0
+OHBABY_E2E_WORKSPACE="$OHBABY_E2E_ROOT/workspace"
+mkdir -p "$OHBABY_E2E_HOME" "$OHBABY_E2E_WORKSPACE" "$OHBABY_E2E_ROOT/os-home" "$OHBABY_E2E_ROOT/xdg-data" "$OHBABY_E2E_ROOT/xdg-config" "$OHBABY_E2E_ROOT/appdata" "$OHBABY_E2E_ROOT/localappdata"
+touch "$OHBABY_E2E_HOME/.skip-auto-migrate"
+HOME="$OHBABY_E2E_ROOT/os-home" USERPROFILE="$OHBABY_E2E_ROOT/os-home" XDG_DATA_HOME="$OHBABY_E2E_ROOT/xdg-data" XDG_CONFIG_HOME="$OHBABY_E2E_ROOT/xdg-config" APPDATA="$OHBABY_E2E_ROOT/appdata" LOCALAPPDATA="$OHBABY_E2E_ROOT/localappdata" OHBABY_HOME="$OHBABY_E2E_HOME" OHBABY_DB_PATH="$OHBABY_E2E_DB" OHBABY_STORAGE_ROOT="$OHBABY_E2E_ROOT/storage" node packages/ohbaby-cli/dist/bin.js serve --port 0 --no-open
 ```
 
-在启动前，应向 `$OHBABY_E2E_HOME` 写入最小测试 `model.json`/`.env`，使正常配置加载器指向 §4.8.3 的本地 scripted OpenAI-compatible SSE endpoint；fixture credential 只能是无权限测试值。`serve` 应运行在一个可管理、可读取 stdout 的独立终端/session 中并保持存活。验收者从 stdout 读取并保存实际 `ohbaby web ready: http://127.0.0.1:<port>` URL 与隔离 profile state 中的 PID；不得硬编码 4096。
+在启动前，应向 `$OHBABY_E2E_HOME` 写入最小测试 `model.json`/`.env`，使正常配置加载器指向 §4.8.3 的本地 scripted OpenAI-compatible SSE endpoint；fixture credential 只能是无权限测试值。所有 `serve/start/stop/status` 子进程必须复用同一组隔离环境和 `$OHBABY_E2E_WORKSPACE` cwd。`--no-open` 只抑制系统浏览器副作用，不改变 Web/daemon 装配；`serve` 应运行在一个可管理、可读取 stdout 的独立终端/session 中并保持存活。验收者从 stdout 读取并保存实际 `ohbaby web ready: http://127.0.0.1:<port>` URL 与隔离 profile state 中的 PID；不得硬编码 4096。
 
 浏览器验证完成后，必须在 `finally` 中用**同一组环境变量**执行 stop，再有界轮询 status，直到 `stopped` 或 `not-running`；当前正常 graceful-shutdown 路径预期保留 state 并报告 `stopped`。仅看到 stop 命令返回 `daemon stopped` 不算完成，因为那只代表已发送终止信号：
 
@@ -267,6 +271,12 @@ OHBABY_HOME="$OHBABY_E2E_HOME" OHBABY_DB_PATH="$OHBABY_E2E_DB" node packages/ohb
 | E07 | `finally` stop 隔离 daemon 并轮询 | status 变为 `stopped`（正常路径）或 `not-running`，captured PID 消失、pid lock 与动态端口释放，不影响用户原有 daemon/profile |
 
 E02–E05 的默认硬门使用一个由**正常 OpenAI-compatible 配置**接入的本地 scripted SSE fixture endpoint：按序校验 request，返回 tool call、接收 tool result 后返回 final，再处理 follow-up。它只替代外部模型的非确定性，不绕过 production adapter、HTTP/SSE、daemon、scheduler、database 或 Web。真实 provider/browser 可作为补充 smoke，但不替代 §4.7 的 cache 证据。
+
+compiled runner 不能把任意 Enter 当作 UI 通过。实际浏览器观察完成后，操作者必须向 runner 提交以下单行 JSON；runner 逐字段硬校验，`05` 还要记录这些字段来自本轮真实页面/刷新后的 DOM 观察，而不是从源码复制期望值：
+
+```json
+{"activeSessionStable":true,"followupFinalAfterRefresh":1,"followupFinalBeforeRefresh":1,"followupUserAfterRefresh":1,"runtimeMarkersVisible":false,"titleContainsRuntimeMarker":false,"toolFinalAfterRefresh":1,"toolFinalBeforeRefresh":1,"toolPanelCompleted":true}
+```
 
 证据必须分层：PFX09/R06 的 provider spy 证明 runtime part 对 model serializer 可见；E05 只证明浏览器隐藏与持久化恢复；§4.7 才证明真实服务 cache read/write。E06 的 source-composition E2E 是主/子代理编排的补充证据，不等于 compiled browser E01–E05，也不能替代它们。
 
@@ -325,8 +335,11 @@ real provider smoke 使用项目已有 `.env` 加载约定，但应为 cache 测
 ```bash
 OHBABY_RUN_REAL_CACHE_OPENAI_COMPAT=1 pnpm run test:cache:real:openai-compatible
 OHBABY_RUN_REAL_CACHE_ANTHROPIC=1 pnpm run test:cache:real:anthropic
+OHBABY_RUN_REAL_CACHE_M13=1 pnpm run test:cache:real:m13
 pnpm run test:cache:real
 ```
+
+当前 cache smoke 通过已有 provider credential 名选择官方 OpenAI/DeepSeek/智谱或 Anthropic 端点；有 credential 时还必须显式给出 `OHBABY_REAL_CACHE_OPENAI_MODEL` 或 `OHBABY_REAL_CACHE_ANTHROPIC_MODEL`，可按所选模型配置上述最低 token 阈值。缺 credential 是 `skip`，credential 存在但 model/阈值配置非法属于 `fail`，防止 runner 默选一个可能已下线、不支持缓存观测或前缀必然不足的模型。共同 fixture 在 test-only outbound fetch 边界为首个标记请求注入 provider 官方 `tool_choice` 形状，确保真实本地 tool loop 不依赖模型自然服从；请求和响应仍完整经过生产 adapter、Lifecycle 与 scheduler。M13 当前使用已配置的 OpenAI-compatible 端点。
 
 两个 provider gate 彼此独立，总入口串行调度并明确输出 `pass / skip / fail`；没有凭据是 skip，有 gate 但配置/长度错误是 fail。runner 的枚举与状态聚合必须有自己的 unit tests，至少覆盖：无 credential=skip、gate/config error=fail、两个 provider 串行且任一 fail 时总入口非零、M13 独立 skip 不污染 G5。runner 若保留 `.mjs`，这些测试不能假设现有 lint/typecheck 会自动覆盖它。
 

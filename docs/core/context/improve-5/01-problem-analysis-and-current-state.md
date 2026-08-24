@@ -1,6 +1,6 @@
 # 1. 问题基线与当前实施状态
 
-> 时间口径：2026-08-23 完成核心代码只读勘测；2026-08-24 复核测试分类、real-smoke runner、E2E 配置与 compiled Web 启动路径。improve-4 / 4.1 已实施，improve-5 尚未进入业务代码。
+> 时间口径：本文冻结 2026-08-23～24 的实施前代码勘测；improve-5 已随后在 `codex/improve-5` 完成实施，现状结果见 [05](./05-implementation-acceptance.md)。下文“当前/缺失”均是用于解释改造原因的历史基线，不代表实施后仍然缺失。
 > 协议口径：同日获取的 OpenAI、Anthropic、DeepSeek、智谱与 ZenMux 官方文档。
 > 行号为规划快照，后续定位以文件和符号为准。
 
