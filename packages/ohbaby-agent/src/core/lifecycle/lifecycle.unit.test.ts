@@ -1537,6 +1537,7 @@ describe("Lifecycle.run", () => {
     );
 
     expect(prepareTurn).toHaveBeenCalledTimes(1);
+    expect(prepareTurn.mock.calls[0]?.[0].signal).toBe(abortController.signal);
     expect(requests).toHaveLength(0);
     expect(events).toEqual([]);
     expect(result).toMatchObject({

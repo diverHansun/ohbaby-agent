@@ -340,6 +340,53 @@ describe("atomic context compaction", () => {
     expect(generateSummary).toHaveBeenCalledOnce();
   });
 
+  it("persists one legal view after summary overflow shrinks and retries", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ohbaby-context-overflow-"));
+    cleanupPaths.push(directory);
+    const dbPath = join(directory, "agent.db");
+    initDatabase({ dbPath });
+    insertSession("session_1");
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      idGenerator: createIds("overflow"),
+      store: createDatabaseMessageStore(),
+    });
+    await appendTextHistory(messageManager, "session_1");
+    await appendTextHistory(messageManager, "session_1");
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockRejectedValueOnce(
+        Object.assign(new Error("context length exceeded"), {
+          code: "context_length_exceeded",
+        }),
+      )
+      .mockResolvedValueOnce("overflow-recovered-summary");
+    const contextManager = createManager(messageManager, { generateSummary });
+
+    await expect(compact(contextManager, "session_1")).resolves.toMatchObject({
+      status: "compacted",
+    });
+    expect(generateSummary).toHaveBeenCalledTimes(2);
+    expect(generateSummary.mock.calls[1]?.[0].history.length).toBeLessThan(
+      generateSummary.mock.calls[0]?.[0].history.length ?? 0,
+    );
+
+    const recovered = await reopenHistory(dbPath, "session_1");
+    expect(
+      recovered.filter((message) => message.parts.some(isContextSummaryPart)),
+    ).toHaveLength(1);
+    expect(
+      recovered
+        .filter((message) => message.parts.some(isContextSummaryPart))
+        .flatMap((message) => message.parts)
+        .some(
+          (part) =>
+            part.type === "text" &&
+            part.text.includes("overflow-recovered-summary"),
+        ),
+    ).toBe(true);
+  });
+
   it("rolls back every prune mark when a later mark fails", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-context-prune-"));
     cleanupPaths.push(directory);

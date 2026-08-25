@@ -53,6 +53,7 @@ export interface ContextLLMClient {
     readonly prompt: string;
     readonly systemPrompt?: string;
     readonly history: readonly MessageWithParts[];
+    readonly signal?: AbortSignal;
   }): Promise<string>;
 }
 
@@ -110,16 +111,31 @@ export type CompressionStatus =
   | "inflated";
 
 export type CompressionSkipReason = "stale" | "too-short";
+export type CompressionFailureReason =
+  | "summary-overflow-exhausted"
+  | "summary-overflow-minimum";
 
-export interface CompressionResult {
-  readonly status: CompressionStatus;
+interface CompressionMetrics {
   readonly originalTokens: number;
   readonly newTokens: number;
   readonly savedTokens: number;
-  readonly reason?: CompressionSkipReason;
-  readonly summaryMessageId?: string;
-  readonly error?: string;
 }
+
+export type CompressionResult =
+  | (CompressionMetrics & {
+      readonly status: "compressed";
+      readonly summaryMessageId: string;
+    })
+  | (CompressionMetrics & {
+      readonly status: "skipped";
+      readonly reason: CompressionSkipReason;
+    })
+  | (CompressionMetrics & {
+      readonly status: "failed";
+      readonly error: string;
+      readonly reason?: CompressionFailureReason;
+    })
+  | (CompressionMetrics & { readonly status: "inflated" });
 
 export interface PruneResult {
   readonly prunedCount: number;
@@ -160,6 +176,7 @@ export interface PrepareTurnInput {
   readonly contextScopeId?: string;
   readonly directory: string;
   readonly modelId: string;
+  readonly signal?: AbortSignal;
   /** Stable system and memory captured once for this lifecycle run. */
   readonly promptSnapshot?: AgentRunPromptSnapshot;
   readonly agentName?: string;

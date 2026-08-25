@@ -219,3 +219,5 @@ type CompactionTerminalOutcome =
 
 - `too-short`：active history 不足以生成有效 summary；
 - `stale`：summary Provider await 期间 durable history revision 已变化，候选未提交。
+
+`CompressionResult` 是按 `status` 判别的 union，而不是一组可任意组合的 optional 字段：`compressed` 必有 `summaryMessageId`，`skipped` 必有 skip `reason`，`failed` 必有 `error`，summary overflow 另以 `summary-overflow-exhausted | summary-overflow-minimum` 表示有界终止原因。

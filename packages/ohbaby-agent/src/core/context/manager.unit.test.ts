@@ -51,6 +51,8 @@ type FixtureContextManager = Omit<ContextManager, "compact" | "prepareTurn"> & {
 };
 
 interface ContextFixture {
+  readonly compactionFinished: readonly unknown[];
+  readonly compactionProgress: readonly unknown[];
   readonly compactSkipped: readonly unknown[];
   readonly compressed: readonly unknown[];
   readonly manager: FixtureContextManager;
@@ -193,6 +195,8 @@ function createManager(
   } = {},
 ): ContextFixture {
   const bus = createBus();
+  const compactionFinished: unknown[] = [];
+  const compactionProgress: unknown[] = [];
   const compactSkipped: unknown[] = [];
   const compressed: unknown[] = [];
   const masked: unknown[] = [];
@@ -256,6 +260,12 @@ function createManager(
   bus.subscribe(ContextEvent.Compressed, (payload) => {
     compressed.push(payload);
   });
+  bus.subscribe(ContextEvent.CompactionFinished, (payload) => {
+    compactionFinished.push(payload);
+  });
+  bus.subscribe(ContextEvent.CompactionProgress, (payload) => {
+    compactionProgress.push(payload);
+  });
   bus.subscribe(ContextEvent.CompactSkipped, (payload) => {
     compactSkipped.push(payload);
   });
@@ -270,6 +280,8 @@ function createManager(
   });
 
   return {
+    compactionFinished,
+    compactionProgress,
     compactSkipped,
     compressed,
     masked,
@@ -282,9 +294,30 @@ function createManager(
   };
 }
 
+async function addSummaryOverflowHistory(
+  messageManager: MessageManager,
+  turns: number,
+  contextScopeId?: string,
+): Promise<void> {
+  for (let index = 0; index < turns; index += 1) {
+    await addTextMessage(messageManager, {
+      role: "user",
+      sessionId: "session_1",
+      text: `user-${String(index)} ${"request ".repeat(20)}`,
+      ...(contextScopeId === undefined ? {} : { contextScopeId }),
+    });
+    await addCompletedToolMessage(messageManager, {
+      output: `tool-${String(index)} ${"result ".repeat(20)}`,
+      sessionId: "session_1",
+      ...(contextScopeId === undefined ? {} : { contextScopeId }),
+    });
+  }
+}
+
 async function addTextMessage(
   messageManager: MessageManager,
   input: {
+    readonly contextScopeId?: string;
     readonly sessionId: string;
     readonly role: "user" | "assistant";
     readonly text: string;
@@ -292,6 +325,9 @@ async function addTextMessage(
   },
 ): Promise<void> {
   const message = await messageManager.createMessage({
+    ...(input.contextScopeId === undefined
+      ? {}
+      : { contextScopeId: input.contextScopeId }),
     sessionId: input.sessionId,
     role: input.role,
     agent: "test",
@@ -306,11 +342,15 @@ async function addTextMessage(
 async function addCompletedToolMessage(
   messageManager: MessageManager,
   input: {
+    readonly contextScopeId?: string;
     readonly sessionId: string;
     readonly output: string;
   },
 ): Promise<void> {
   const message = await messageManager.createMessage({
+    ...(input.contextScopeId === undefined
+      ? {}
+      : { contextScopeId: input.contextScopeId }),
     sessionId: input.sessionId,
     role: "assistant",
     agent: "test",
@@ -2684,7 +2724,10 @@ describe("ContextManager", () => {
     });
 
     expect(result.status).toBe("compacted");
-    expect(result.compression?.summaryMessageId).toBe("message_5");
+    expect(result.compression).toMatchObject({
+      status: "compressed",
+      summaryMessageId: "message_5",
+    });
     expect(result.compression?.savedTokens).toBeGreaterThan(0);
     const history = await messageManager.listBySession("session_1");
     const compactedAt = history[0]?.parts[0]?.time?.compacted;
@@ -2883,7 +2926,10 @@ describe("ContextManager", () => {
     });
 
     expect(result.status).toBe("compacted");
-    expect(result.compression?.summaryMessageId).toBe("message_5");
+    expect(result.compression).toMatchObject({
+      status: "compressed",
+      summaryMessageId: "message_5",
+    });
     const context = await manager.assemble("session_1", "D:/repo", {
       isSubagent: false,
       toolNames: [],
@@ -3198,6 +3244,208 @@ describe("ContextManager", () => {
     expect(result.compression?.status).toBe("compressed");
     expect(generateSummary).toHaveBeenCalledTimes(2);
     expect(generateSummary.mock.calls[1][0].prompt).toContain("CRITICAL");
+  });
+
+  it("shrinks summary overflow by complete oldest rounds before retrying", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addSummaryOverflowHistory(messageManager, 8, "child_1");
+    const overflow = Object.assign(new Error("context length exceeded"), {
+      code: "context_length_exceeded",
+    });
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockRejectedValueOnce(overflow)
+      .mockRejectedValueOnce(overflow)
+      .mockResolvedValueOnce("## Goal\nshort");
+    const { compactionProgress, manager } = createManager({
+      llmClient: { generateSummary },
+      messageManager,
+      pruneMinimumTokens: Number.MAX_SAFE_INTEGER,
+    });
+
+    const result = await manager.compact("session_1", {
+      contextScopeId: "child_1",
+      directory: "D:/repo",
+      force: true,
+      isSubagent: true,
+      modelId: "model-a",
+    });
+
+    expect(result.status).toBe("compacted");
+    expect(generateSummary).toHaveBeenCalledTimes(3);
+    const histories = generateSummary.mock.calls.map(
+      ([input]) => input.history,
+    );
+    expect(histories.map((history) => history.length)).toEqual(
+      histories.map((history) => history.length).sort((a, b) => b - a),
+    );
+    expect(histories[1]?.length).toBeLessThan(histories[0]?.length ?? 0);
+    expect(histories[2]?.length).toBeLessThan(histories[1]?.length ?? 0);
+    for (const history of histories.slice(1)) {
+      expect(history[0]?.info.role).toBe("user");
+      const messages = serializeForLlm({
+        history,
+        isSubagent: true,
+        memory: { global: "", merged: "", project: "" },
+        systemPrompt: "",
+      });
+      for (const [index, message] of messages.entries()) {
+        if (message.role !== "tool") {
+          continue;
+        }
+        const previous = messages[index - 1];
+        expect(previous.role).toBe("assistant");
+        expect(
+          "tool_calls" in previous
+            ? previous.tool_calls?.some(
+                (call) => call.id === message.tool_call_id,
+              )
+            : false,
+        ).toBe(true);
+      }
+    }
+    expect(compactionProgress).toMatchObject([
+      {
+        attempt: 1,
+        contextScopeId: "child_1",
+        droppedRounds: 0,
+        sessionId: "session_1",
+      },
+      {
+        attempt: 2,
+        contextScopeId: "child_1",
+        droppedRounds: 1,
+        sessionId: "session_1",
+      },
+      {
+        attempt: 3,
+        contextScopeId: "child_1",
+        droppedRounds: 1,
+        sessionId: "session_1",
+      },
+    ]);
+  });
+
+  it("bounds repeated summary overflow and leaves original history active", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addSummaryOverflowHistory(messageManager, 10);
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockRejectedValue(
+        Object.assign(new Error("maximum context length"), {
+          code: "context_length_exceeded",
+        }),
+      );
+    const { manager } = createManager({
+      llmClient: { generateSummary },
+      messageManager,
+      pruneMinimumTokens: Number.MAX_SAFE_INTEGER,
+    });
+
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
+
+    expect(result).toMatchObject({
+      compression: {
+        reason: "summary-overflow-exhausted",
+        status: "failed",
+      },
+      status: "failed",
+    });
+    expect(generateSummary).toHaveBeenCalledTimes(4);
+    expect(await summaryMessageCount(messageManager, "session_1")).toBe(0);
+    expect(
+      (await messageManager.listBySession("session_1")).every((message) =>
+        message.parts.every((part) => part.time?.compacted === undefined),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not retry non-overflow summary failures", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addSummaryOverflowHistory(messageManager, 8);
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockRejectedValue(new Error("provider unavailable"));
+    const { manager } = createManager({
+      llmClient: { generateSummary },
+      messageManager,
+      pruneMinimumTokens: Number.MAX_SAFE_INTEGER,
+    });
+
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
+
+    expect(result).toMatchObject({
+      compression: { status: "failed" },
+      status: "failed",
+    });
+    expect(generateSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops shrinking when only the most recent user round remains", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addSummaryOverflowHistory(messageManager, 3);
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockRejectedValue(
+        Object.assign(new Error("context window exceeded"), {
+          code: "context_length_exceeded",
+        }),
+      );
+    const { manager } = createManager({
+      llmClient: { generateSummary },
+      messageManager,
+      pruneMinimumTokens: Number.MAX_SAFE_INTEGER,
+    });
+
+    const result = await manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+    });
+
+    expect(result).toMatchObject({
+      compression: {
+        reason: "summary-overflow-minimum",
+        status: "failed",
+      },
+      status: "failed",
+    });
+    expect(generateSummary.mock.calls.length).toBeLessThan(4);
+  });
+
+  it("stops immediately when summary generation is aborted", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addSummaryOverflowHistory(messageManager, 8);
+    const abortError = new Error("cancelled");
+    abortError.name = "AbortError";
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockRejectedValue(abortError);
+    const { compactionFinished, manager } = createManager({
+      llmClient: { generateSummary },
+      messageManager,
+      pruneMinimumTokens: Number.MAX_SAFE_INTEGER,
+    });
+
+    await expect(
+      manager.compact("session_1", {
+        directory: "D:/repo",
+        force: true,
+        modelId: "model-a",
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(generateSummary).toHaveBeenCalledTimes(1);
+    expect(compactionFinished).toMatchObject([
+      { outcome: "aborted", sessionId: "session_1", status: "failed" },
+    ]);
   });
 
   it("locks automatic compaction after repeated zero-savings summary attempts", async () => {

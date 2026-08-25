@@ -13,6 +13,7 @@ type StreamChatCompletion = (
     readonly contextScopeId?: string;
     readonly purpose?: string;
     readonly sessionId?: string;
+    readonly signal?: AbortSignal;
   },
 ) => AsyncIterable<StreamingResponse>;
 
@@ -41,6 +42,17 @@ function streamWithContent(
       ...(tokenUsage === undefined
         ? {}
         : { tokenUsage: tokenUsage as StreamingResponse["tokenUsage"] }),
+    };
+  })();
+}
+
+function abortedStream(): AsyncIterable<StreamingResponse> {
+  return (async function* (): AsyncGenerator<StreamingResponse, void, unknown> {
+    await Promise.resolve();
+    yield {
+      completeMessage: { content: "", role: "assistant" },
+      isComplete: true,
+      streamStopReason: "user_aborted",
     };
   })();
 }
@@ -130,6 +142,41 @@ describe("createContextSummaryClient", () => {
       }),
     ).rejects.toThrow("empty after retries");
     expect(streamChatCompletionMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("forwards cancellation and does not retry an aborted summary stream", async () => {
+    streamChatCompletionMock.mockReturnValueOnce(abortedStream());
+    const client = createContextSummaryClient({} as LLMClientInstance);
+    const controller = new AbortController();
+
+    await expect(
+      client.generateSummary({
+        history: [],
+        prompt: "summarize",
+        sessionId: "session_1",
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(streamChatCompletionMock).toHaveBeenCalledTimes(1);
+    expect(streamChatCompletionMock.mock.calls[0]?.[2]).toMatchObject({
+      signal: controller.signal,
+    });
+  });
+
+  it("does not start summary generation for an already aborted signal", async () => {
+    const client = createContextSummaryClient({} as LLMClientInstance);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      client.generateSummary({
+        history: [],
+        prompt: "summarize",
+        sessionId: "session_1",
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(streamChatCompletionMock).not.toHaveBeenCalled();
   });
 
   it("sends both serialized history and the compression prompt to the model", async () => {

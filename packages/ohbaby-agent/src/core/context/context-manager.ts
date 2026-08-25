@@ -4,6 +4,7 @@ import {
   DEFAULT_COMPACTION_THRESHOLDS,
   KEEP_RECENT_TOKENS,
   MAX_COMPACTION_PER_TURN,
+  MAX_SUMMARY_PROVIDER_ATTEMPTS,
   PRUNE_MINIMUM_TOKENS,
   PRUNE_PROTECT_TOKENS,
   SUMMARY_AGENT_NAME,
@@ -28,6 +29,7 @@ import {
 import { createMaskConfig, reduceForModel } from "./projection.js";
 import { serializeForLlm } from "./serializer.js";
 import { createScopedExclusiveLane } from "./scoped-exclusive-lane.js";
+import { shrinkSummaryHistory } from "./summary-overflow.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
 import { estimateWireHeuristic } from "./token-estimation.js";
 import {
@@ -52,7 +54,10 @@ import type {
   PruneResult,
   TokenCounter,
 } from "./types.js";
-import type { ChatCompletionMessage } from "../llm-client/index.js";
+import {
+  isContextOverflowError,
+  type ChatCompletionMessage,
+} from "../llm-client/index.js";
 import {
   isModelContextPart,
   MODEL_CONTEXT_RUNTIME_KIND,
@@ -106,6 +111,7 @@ interface CompactionRequest {
   readonly tools: PrepareTurnInput["tools"];
   readonly force: boolean;
   readonly sessionId: string;
+  readonly signal?: AbortSignal;
   readonly contextScopeId?: string;
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   readonly isSubagent: boolean;
@@ -134,6 +140,13 @@ interface CompactionOutcome {
 
 function errorToMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "AbortError" || error.name === "APIUserAbortError")
+  );
 }
 
 function scopedEventIdentity(
@@ -251,7 +264,7 @@ function skippedReasonForCompression(
     return "inflated";
   }
   if (compression.status === "skipped") {
-    return compression.reason ?? "too-short";
+    return compression.reason;
   }
   return undefined;
 }
@@ -947,9 +960,13 @@ export function createContextManager(
   }
 
   async function generateSummaryCandidate(
-    sessionId: string,
-    contextScopeId: string | undefined,
+    identity: {
+      readonly attemptId: string;
+      readonly contextScopeId?: string;
+      readonly sessionId: string;
+    },
     rawHistory: readonly MessageWithParts[],
+    signal?: AbortSignal,
   ): Promise<SummaryCandidate> {
     const activeHistory = getActiveHistory(rawHistory).filter(
       (message) => !isSummaryMessage(message),
@@ -987,26 +1004,79 @@ export function createContextManager(
       };
     }
 
+    let summaryHistory = historyToCompress;
     let snapshot = "";
     let newTokens = originalTokens;
+    let providerAttempts = 0;
+    let droppedRounds = 0;
     const prompts = [COMPRESSION_PROMPT, AGGRESSIVE_COMPRESSION_PROMPT];
     for (const prompt of prompts) {
-      try {
-        snapshot = await options.llmClient.generateSummary({
-          sessionId,
-          ...(contextScopeId === undefined ? {} : { contextScopeId }),
-          prompt,
-          systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
-          history: historyToCompress,
+      let generatedForPrompt = false;
+      while (providerAttempts < MAX_SUMMARY_PROVIDER_ATTEMPTS) {
+        providerAttempts += 1;
+        options.bus.publish(ContextEvent.CompactionProgress, {
+          ...identity,
+          attempt: providerAttempts,
+          droppedRounds,
+          inputTokens: tokenCount(
+            options.tokenCounter,
+            serializeHistory(summaryHistory, { includeModelContext: false }),
+          ),
         });
-      } catch (error) {
-        return {
-          status: "failed",
-          originalTokens,
-          newTokens: originalTokens,
-          savedTokens: 0,
-          error: errorToMessage(error),
-        };
+        try {
+          snapshot = await options.llmClient.generateSummary({
+            ...scopedEventIdentity(identity.sessionId, identity.contextScopeId),
+            prompt,
+            systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
+            history: summaryHistory,
+            ...(signal === undefined ? {} : { signal }),
+          });
+          generatedForPrompt = true;
+          break;
+        } catch (error) {
+          if (isAbortError(error)) {
+            throw error;
+          }
+          if (!isContextOverflowError(error)) {
+            return {
+              status: "failed",
+              originalTokens,
+              newTokens: originalTokens,
+              savedTokens: 0,
+              error: errorToMessage(error),
+            };
+          }
+          if (providerAttempts >= MAX_SUMMARY_PROVIDER_ATTEMPTS) {
+            return {
+              status: "failed",
+              originalTokens,
+              newTokens: originalTokens,
+              savedTokens: 0,
+              error: `Summary context overflow recovery exhausted after ${String(providerAttempts)} attempts`,
+              reason: "summary-overflow-exhausted",
+            };
+          }
+          const shrink = shrinkSummaryHistory({
+            history: summaryHistory,
+            tokenCounter: options.tokenCounter,
+          });
+          if (shrink === undefined) {
+            return {
+              status: "failed",
+              originalTokens,
+              newTokens: originalTokens,
+              savedTokens: 0,
+              error:
+                "Summary context overflow recovery stopped to preserve the most recent user round",
+              reason: "summary-overflow-minimum",
+            };
+          }
+          summaryHistory = shrink.history;
+          droppedRounds = shrink.droppedRounds;
+        }
+      }
+      if (!generatedForPrompt) {
+        break;
       }
       snapshot = appendFileOpsSummary(
         snapshot,
@@ -1336,9 +1406,12 @@ export function createContextManager(
     }
 
     const candidate = await generateSummaryCandidate(
-      req.sessionId,
-      req.contextScopeId,
+      {
+        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
+        attemptId: req.attemptId,
+      },
       afterPrune.history,
+      req.signal,
     );
     if (candidate.status !== "candidate") {
       if (candidate.status === "inflated") {
@@ -1369,7 +1442,7 @@ export function createContextManager(
         usageAfterPrune,
         usageAfter: usageAfterPrune,
         projectedContext: afterPrune,
-        error: candidate.error,
+        ...(candidate.status === "failed" ? { error: candidate.error } : {}),
       };
     }
 
@@ -1523,7 +1596,7 @@ export function createContextManager(
       usageAfterPrune,
       usageAfter,
       projectedContext: committedContext,
-      error: compression.error,
+      ...(compression.status === "failed" ? { error: compression.error } : {}),
     };
   }
 
@@ -1551,11 +1624,10 @@ export function createContextManager(
       });
       return outcome;
     } catch (error) {
-      const message = errorToMessage(error);
       options.bus.publish(ContextEvent.CompactionFinished, {
         ...identity,
         attemptId,
-        outcome: /abort/iu.test(message) ? "aborted" : "failed",
+        outcome: isAbortError(error) ? "aborted" : "failed",
         status: "failed",
       });
       throw error;
@@ -1652,6 +1724,7 @@ export function createContextManager(
           input.tools,
           input.tailDirectives,
         ),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
       sessionId: input.sessionId,
       tools: input.tools,
       usageBefore,

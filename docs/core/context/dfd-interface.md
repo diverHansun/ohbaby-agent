@@ -100,7 +100,7 @@ recheck durable revision/history identity
 release lease → publish one terminal event
 ```
 
-在 atomic port 落地前，R3 failpoint 负责证明现有多步 `createMessage → appendPart → updatePart*` 是否能形成非法终态；只有红测试成立才扩生产端口。
+R3 failpoint 已证明旧的 `createMessage → appendPart → updatePart*` 会形成非法部分终态；当前 summary/prune 都通过 7.5.1 的窄原子端口提交。
 
 ## 五、手动 compact 与 prompt 并发
 
@@ -219,6 +219,7 @@ disposeSession(sessionId: string): void
 
 - 所有 event：`sessionId` + primary/child scope identity；primary wire payload 可省略 `contextScopeId`，但只表示 primary；
 - compaction progress/terminal：另有相同 `attemptId`；
+- summary attempt progress 的最小 payload 为 `attempt/inputTokens/droppedRounds`，不含正文；
 - terminal outcome：`success | failed | inflated | skipped | aborted`；
 - `context.compaction.started` 与 `context.compaction.finished` 建立一次 attempt 的开始/唯一终态；`success` 另带具体 rung，prune/summary 细节仍由同 attempt 的领域事件携带；
 - durable commit 先于 success event；event 失败不回滚；replay 不补发。
@@ -229,7 +230,7 @@ disposeSession(sessionId: string): void
 |---|---|---|
 | 普通 Provider transient | Lifecycle/adapter | 按既有 retry/abort 策略 |
 | 原请求 context overflow | Lifecycle + Context | force prepare/compact 后发送新 request |
-| Summary request context overflow | Context summary client | turn-aware bounded shrink |
+| Summary request context overflow | Context + summary client | 最多 4 次 Provider 调用；完整 user round 收缩；最近 user round floor；abort 立即终止 |
 | Summary 非 overflow 失败 | Context | terminal failed，原文保持 active |
 | Durable commit 失败 | Message adapter/Context | 不报告 success；重建必须得到唯一合法 view |
 | Event subscriber 失败 | Bus/observer | 记录但不改变 durable truth |

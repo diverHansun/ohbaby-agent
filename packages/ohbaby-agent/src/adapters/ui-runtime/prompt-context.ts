@@ -82,6 +82,7 @@ export function createContextSummaryClient(
   return {
     async generateSummary(input): Promise<string> {
       for (let attempt = 0; attempt < 2; attempt += 1) {
+        throwIfSummaryAborted(input.signal);
         let summary = "";
         for await (const response of streamChatCompletion(
           llmClient,
@@ -101,8 +102,12 @@ export function createContextSummaryClient(
             ...(input.contextScopeId === undefined
               ? {}
               : { contextScopeId: input.contextScopeId }),
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
           },
         )) {
+          if (response.streamStopReason === "user_aborted") {
+            throw summaryAbortError();
+          }
           if (response.isComplete) {
             summary = messageContentToText(response.completeMessage.content);
           }
@@ -116,6 +121,18 @@ export function createContextSummaryClient(
       throw new Error("Context compact summary was empty after retries");
     },
   };
+}
+
+function throwIfSummaryAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) {
+    throw summaryAbortError();
+  }
+}
+
+function summaryAbortError(): Error {
+  const error = new Error("Context compact summary was aborted");
+  error.name = "AbortError";
+  return error;
 }
 
 function messageContentToText(content: unknown): string {

@@ -1,20 +1,33 @@
 import { z } from "zod";
 import { BusEvent } from "../../bus/index.js";
 
-const CompressionResultSchema = z.object({
-  status: z.union([
-    z.literal("compressed"),
-    z.literal("skipped"),
-    z.literal("failed"),
-    z.literal("inflated"),
-  ]),
+const CompressionMetricsSchema = z.object({
   originalTokens: z.number(),
   newTokens: z.number(),
   savedTokens: z.number(),
-  reason: z.union([z.literal("stale"), z.literal("too-short")]).optional(),
-  summaryMessageId: z.string().optional(),
-  error: z.string().optional(),
 });
+
+const CompressionResultSchema = z.discriminatedUnion("status", [
+  CompressionMetricsSchema.extend({
+    status: z.literal("compressed"),
+    summaryMessageId: z.string(),
+  }),
+  CompressionMetricsSchema.extend({
+    status: z.literal("skipped"),
+    reason: z.union([z.literal("stale"), z.literal("too-short")]),
+  }),
+  CompressionMetricsSchema.extend({
+    status: z.literal("failed"),
+    error: z.string(),
+    reason: z
+      .union([
+        z.literal("summary-overflow-exhausted"),
+        z.literal("summary-overflow-minimum"),
+      ])
+      .optional(),
+  }),
+  CompressionMetricsSchema.extend({ status: z.literal("inflated") }),
+]);
 
 const PruneResultSchema = z.object({
   prunedCount: z.number(),
@@ -75,6 +88,15 @@ export const ContextEvent = {
       outcome: CompactionAttemptOutcomeSchema,
       rung: z.union([z.literal("prune"), z.literal("summary")]).optional(),
       status: CompactStatusSchema,
+    }),
+  ),
+  CompactionProgress: BusEvent.define(
+    "context.compaction.progress",
+    ScopedContextIdentitySchema.extend({
+      attemptId: z.string(),
+      attempt: z.number().int().positive(),
+      droppedRounds: z.number().int().nonnegative(),
+      inputTokens: z.number().nonnegative(),
     }),
   ),
   Compressed: BusEvent.define(

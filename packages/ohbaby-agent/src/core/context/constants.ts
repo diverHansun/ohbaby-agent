@@ -20,6 +20,7 @@ export const THRASH_WINDOW = 2;
 export const THRASH_MIN_SAVINGS_RATIO = 0.1;
 export const THRASH_UNLOCK_DELTA = 0.05;
 export const MAX_COMPACTION_PER_TURN = 2;
+export const MAX_SUMMARY_PROVIDER_ATTEMPTS = 4;
 
 export interface CompactionThresholds {
   readonly mask: number;
