@@ -2080,7 +2080,7 @@ describe("ContextManager", () => {
     expect(wireEstimateCalls).toBe(2);
   });
 
-  it("keeps prepareTurn compaction path to two history reads and one memory load", async () => {
+  it("rechecks durable history before compaction commit without reloading memory", async () => {
     const messageManager = createMessageManagerFixture();
     const listBySession = vi.spyOn(messageManager, "listBySession");
     const loadMemory = vi
@@ -2150,7 +2150,7 @@ describe("ContextManager", () => {
         ),
       ).toHaveLength(1);
     }
-    expect(listBySession).toHaveBeenCalledTimes(2);
+    expect(listBySession).toHaveBeenCalledTimes(3);
     expect(loadMemory).toHaveBeenCalledTimes(1);
     expect(onCompactionStarted).toHaveBeenCalledTimes(1);
   });

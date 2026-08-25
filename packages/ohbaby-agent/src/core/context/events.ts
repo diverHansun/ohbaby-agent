@@ -11,6 +11,7 @@ const CompressionResultSchema = z.object({
   originalTokens: z.number(),
   newTokens: z.number(),
   savedTokens: z.number(),
+  reason: z.union([z.literal("stale"), z.literal("too-short")]).optional(),
   summaryMessageId: z.string().optional(),
   error: z.string().optional(),
 });
@@ -39,25 +40,60 @@ const MaskSkippedReasonSchema = z.union([
   z.literal("all-exempt"),
 ]);
 
+const ScopedContextIdentitySchema = z.object({
+  contextScopeId: z.string().optional(),
+  sessionId: z.string(),
+});
+
+const CompactionAttemptOutcomeSchema = z.union([
+  z.literal("success"),
+  z.literal("failed"),
+  z.literal("inflated"),
+  z.literal("skipped"),
+  z.literal("aborted"),
+]);
+
+const CompactStatusSchema = z.union([
+  z.literal("not-needed"),
+  z.literal("pruned"),
+  z.literal("compacted"),
+  z.literal("failed"),
+  z.literal("inflated"),
+]);
+
 export const ContextEvent = {
+  CompactionStarted: BusEvent.define(
+    "context.compaction.started",
+    ScopedContextIdentitySchema.extend({
+      attemptId: z.string(),
+    }),
+  ),
+  CompactionFinished: BusEvent.define(
+    "context.compaction.finished",
+    ScopedContextIdentitySchema.extend({
+      attemptId: z.string(),
+      outcome: CompactionAttemptOutcomeSchema,
+      rung: z.union([z.literal("prune"), z.literal("summary")]).optional(),
+      status: CompactStatusSchema,
+    }),
+  ),
   Compressed: BusEvent.define(
     "context.compressed",
-    z.object({
-      sessionId: z.string(),
+    ScopedContextIdentitySchema.extend({
+      attemptId: z.string(),
       result: CompressionResultSchema,
     }),
   ),
   Pruned: BusEvent.define(
     "context.pruned",
-    z.object({
-      sessionId: z.string(),
+    ScopedContextIdentitySchema.extend({
+      attemptId: z.string(),
       result: PruneResultSchema,
     }),
   ),
   TurnPrepared: BusEvent.define(
     "context.turn-prepared",
-    z.object({
-      sessionId: z.string(),
+    ScopedContextIdentitySchema.extend({
       usage: ContextUsageSchema,
       tookMs: z.number(),
       triggeredCompaction: z.boolean(),
@@ -65,22 +101,22 @@ export const ContextEvent = {
   ),
   CompactSkipped: BusEvent.define(
     "context.compact-skipped",
-    z.object({
-      sessionId: z.string(),
+    ScopedContextIdentitySchema.extend({
+      attemptId: z.string(),
       reason: z.union([
         z.literal("not-needed"),
         z.literal("too-short"),
         z.literal("inflated"),
         z.literal("thrash-locked"),
         z.literal("per-turn-cap"),
+        z.literal("stale"),
       ]),
       usage: ContextUsageSchema,
     }),
   ),
   Masked: BusEvent.define(
     "context.masked",
-    z.object({
-      sessionId: z.string(),
+    ScopedContextIdentitySchema.extend({
       enabled: z.boolean(),
       maskedPartIds: z.array(z.string()),
       maskedTokens: z.number(),

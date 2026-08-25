@@ -64,6 +64,7 @@ packages/ohbaby-agent/src/core/context/
 ├── compression-prompt.ts        # summary prompt
 ├── file-ops.ts                  # summary 的文件操作事实投影
 ├── events.ts                    # Context event catalog
+├── scoped-exclusive-lane.ts     # session/scope durable mutation 排队
 ├── context-window-usage.ts      # primary UI window projection/tracker
 ├── tool-metadata-projection.ts  # tool metadata 的模型投影
 └── *.test.ts                    # unit/contract/integration/real gates
@@ -79,7 +80,7 @@ packages/ohbaby-agent/src/core/context/
 | Compaction policy | threshold、floor、thrash、cap | `decideCompactionRung()` | 纯函数、输入显式 |
 | Summary candidate | prompt、LLM、overflow shrink | `ContextLLMClient` + candidate functions | 候选不是提交事实 |
 | Durable commit | summary 与 compacted marks | Message port/adapters | 终态唯一；部分失败可恢复 |
-| Scoped coordinator | auto/manual/prompt mutation order | R2 目标边界 | key=`sessionId+scope`，异 scope 并发 |
+| Scoped coordinator | auto/manual/prompt mutation order | per-scope exclusive lane + pre-commit revision check | key=`sessionId+scope`，异 scope 并发 |
 | Observation | progress/window/cache event | Bus + tracker | 不回滚、不重放 durable truth |
 
 这里应用 SRP 的尺度是“独立变化原因”，不是“一函数一类”。只有测试证明变化需要独立替换时才抽窄端口。
@@ -140,13 +141,13 @@ summary rung 先应用模型投影/prune，再生成候选；只有下一次真�
 - `disposeScope()` 只清一个 child，`disposeSession()` 清全部；
 - public static window 查询没有可信 child identity，因此 child session 返回 unavailable，不聚合 sibling 数据。
 
-## 七、并发与恢复目标
+## 七、并发与恢复
 
-联合回归 R2/R3 要补齐以下当前缺口：
+R2 已完成同一 `ContextManager` 内的 per-scope 排队和候选 revision 复核；R3 继续验证 durable commit 的 crash consistency：
 
 1. 同 scope 的 auto+auto、manual+auto、manual+manual 及 prompt Context mutation 共用 exclusive lane；异 scope 保持并发。
-2. logical compaction 从 snapshot 到 terminal 持有 scope lease；auto compact 在 prompt owner 内复用/转交 owner token，不能嵌套死锁。
-3. candidate await 后、提交前复核 durable revision/选中历史身份；stale candidate 不提交。
+2. logical compaction 从 snapshot 到 terminal 持有 scope lease；`prepareTurn()` 内部直接执行 compaction core，不重复进入 lane，因此不会嵌套死锁。
+3. candidate await 后、提交前重读精确 scope history，并复核非 summary active history 的语义 revision；stale candidate 以 `CompressionResult { status: "skipped", reason: "stale" }` 结束，不提交旧候选，prepare 路径使用重读后的最新 view。
 4. failpoint 若证明 summary/mark 多步写可形成非法终态，优先扩展窄的 atomic compaction commit port；不做 catch-only rollback。
 5. summary request 自身 overflow 时按完整 turn/API round 有界缩小，并清前导孤儿 tool result。
 

@@ -213,3 +213,8 @@ type CompactionTerminalOutcome =
 | Summary candidate | ContextLLMClient | one compaction attempt | 非事实，提交前可丢弃 |
 | Context event | Context/adapter | in-process | 非事实，best effort |
 | UI window | tracker | primary projection | 可重建 projection |
+
+`CompressionResult.status="skipped"` 时，`reason` 对当前可观测分支显式区分：
+
+- `too-short`：active history 不足以生成有效 summary；
+- `stale`：summary Provider await 期间 durable history revision 已变化，候选未提交。

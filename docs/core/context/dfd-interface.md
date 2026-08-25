@@ -201,12 +201,12 @@ disposeSession(sessionId: string): void
 
 ## 八、事件接口语义
 
-当前 `events.ts` 的 session-only payload 是 R2 待修缺口。目标契约：
+当前 `events.ts` 的已实现契约：
 
-- 所有 event：`sessionId` + primary/child scope identity；
+- 所有 event：`sessionId` + primary/child scope identity；primary wire payload 可省略 `contextScopeId`，但只表示 primary；
 - compaction progress/terminal：另有相同 `attemptId`；
 - terminal outcome：`success | failed | inflated | skipped | aborted`；
-- `success` 另带具体 rung/result；
+- `context.compaction.started` 与 `context.compaction.finished` 建立一次 attempt 的开始/唯一终态；`success` 另带具体 rung，prune/summary 细节仍由同 attempt 的领域事件携带；
 - durable commit 先于 success event；event 失败不回滚；replay 不补发。
 
 ## 九、错误分类

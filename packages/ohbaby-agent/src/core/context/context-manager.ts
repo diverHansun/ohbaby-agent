@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   COMPRESSION_PRESERVE_RATIO,
   DEFAULT_COMPACTION_THRESHOLDS,
@@ -26,6 +27,7 @@ import {
 } from "./serialization.js";
 import { createMaskConfig, reduceForModel } from "./projection.js";
 import { serializeForLlm } from "./serializer.js";
+import { createScopedExclusiveLane } from "./scoped-exclusive-lane.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
 import { estimateWireHeuristic } from "./token-estimation.js";
 import {
@@ -85,6 +87,7 @@ type SummaryCandidate =
       readonly originalTokens: number;
       readonly savedTokens: number;
       readonly snapshot: string;
+      readonly sourceRevision: string;
     };
 
 type CommittableSummaryCandidate = Extract<
@@ -109,6 +112,10 @@ interface CompactionRequest {
   readonly projectForUsage?: (context: AssembledContext) => AssembledContext;
 }
 
+type AcceptedCompactionRequest = CompactionRequest & {
+  readonly attemptId: string;
+};
+
 interface ThrashLockEntry {
   readonly recentSavingsRatios: readonly number[];
   readonly lockedAtUsageRatio?: number;
@@ -127,6 +134,31 @@ interface CompactionOutcome {
 
 function errorToMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function scopedEventIdentity(
+  sessionId: string,
+  contextScopeId: string | undefined,
+): { readonly contextScopeId?: string; readonly sessionId: string } {
+  return {
+    ...(contextScopeId === undefined ? {} : { contextScopeId }),
+    sessionId,
+  };
+}
+
+function terminalOutcomeForCompaction(
+  outcome: CompactionOutcome,
+): "failed" | "inflated" | "skipped" | "success" {
+  if (outcome.status === "failed") {
+    return "failed";
+  }
+  if (outcome.status === "inflated") {
+    return "inflated";
+  }
+  if (outcome.status === "compacted" || outcome.status === "pruned") {
+    return "success";
+  }
+  return "skipped";
 }
 
 function tokenCount(
@@ -214,12 +246,12 @@ function needsSummaryCompaction(
 
 function skippedReasonForCompression(
   compression: CompressionResult,
-): "inflated" | "too-short" | undefined {
+): "inflated" | "stale" | "too-short" | undefined {
   if (compression.status === "inflated") {
     return "inflated";
   }
   if (compression.status === "skipped") {
-    return "too-short";
+    return compression.reason ?? "too-short";
   }
   return undefined;
 }
@@ -347,6 +379,22 @@ function getActiveHistory(
   return [...summaries, ...nonSummary];
 }
 
+function revisionForHistory(history: readonly MessageWithParts[]): string {
+  return JSON.stringify(
+    history.map((message) => {
+      const { time, ...identity } = message.info;
+      return {
+        identity,
+        parts: message.parts,
+        time: {
+          completed: time.completed,
+          created: time.created,
+        },
+      };
+    }),
+  );
+}
+
 function markCompactedParts(
   history: readonly MessageWithParts[],
   compactedPartIds: ReadonlySet<string>,
@@ -409,6 +457,7 @@ export function createContextManager(
     enabled: options.maskEnabled ?? false,
     minUsageRatio: compactionThresholds.mask,
   });
+  const mutationLane = createScopedExclusiveLane();
 
   function getCalibrationFactor(
     sessionId: string,
@@ -704,6 +753,9 @@ export function createContextManager(
     if (input.publishEvent) {
       options.bus.publish(ContextEvent.Masked, {
         ...result.event,
+        ...(input.context.contextScopeId === undefined
+          ? {}
+          : { contextScopeId: input.context.contextScopeId }),
         maskedPartIds: [...result.event.maskedPartIds],
       });
     }
@@ -817,7 +869,11 @@ export function createContextManager(
   }
 
   async function pruneHistory(
-    sessionId: string,
+    identity: {
+      readonly attemptId: string;
+      readonly contextScopeId?: string;
+      readonly sessionId: string;
+    },
     history: readonly MessageWithParts[],
   ): Promise<{
     readonly compactedAt?: number;
@@ -863,7 +919,7 @@ export function createContextManager(
         protectedCount,
         totalScanned: candidates.length,
       };
-      options.bus.publish(ContextEvent.Pruned, { sessionId, result });
+      options.bus.publish(ContextEvent.Pruned, { ...identity, result });
       return { compactedPartIds: new Set(), result };
     }
 
@@ -882,7 +938,7 @@ export function createContextManager(
       protectedCount,
       totalScanned: candidates.length,
     };
-    options.bus.publish(ContextEvent.Pruned, { sessionId, result });
+    options.bus.publish(ContextEvent.Pruned, { ...identity, result });
     return { compactedAt, compactedPartIds, result };
   }
 
@@ -901,6 +957,7 @@ export function createContextManager(
     if (activeHistory.length <= 2) {
       return {
         status: "skipped",
+        reason: "too-short",
         originalTokens: activeTokens,
         newTokens: activeTokens,
         savedTokens: 0,
@@ -919,6 +976,7 @@ export function createContextManager(
     if (historyToCompress.length === 0 || originalTokens === 0) {
       return {
         status: "skipped",
+        reason: "too-short",
         originalTokens,
         newTokens: originalTokens,
         savedTokens: 0,
@@ -973,17 +1031,54 @@ export function createContextManager(
       newTokens,
       savedTokens: originalTokens - newTokens,
       snapshot,
+      sourceRevision: revisionForHistory(activeHistory),
+    };
+  }
+
+  async function inspectSummaryCandidateRevision(
+    assembled: AssembledContext,
+    candidate: CommittableSummaryCandidate,
+  ): Promise<{
+    readonly context: AssembledContext;
+    readonly isCurrent: boolean;
+  }> {
+    const rawHistory = await options.messageManager.listBySession(
+      assembled.sessionId,
+      {
+        contextScopeId: assembled.contextScopeId,
+      },
+    );
+    const context = assembleFromRawHistory({
+      assembledAt: now(),
+      contextScopeId: assembled.contextScopeId,
+      isSubagent: assembled.isSubagent,
+      memory: assembled.memory,
+      rawHistory,
+      sessionId: assembled.sessionId,
+      systemPrompt: assembled.systemPrompt,
+    });
+    const activeHistory = context.history.filter(
+      (message) => !isSummaryMessage(message),
+    );
+    return {
+      context,
+      isCurrent: revisionForHistory(activeHistory) === candidate.sourceRevision,
     };
   }
 
   async function commitSummaryCandidate(
-    sessionId: string,
+    identity: {
+      readonly attemptId: string;
+      readonly contextScopeId?: string;
+      readonly sessionId: string;
+    },
     candidate: CommittableSummaryCandidate,
-    contextScopeId?: string,
   ): Promise<CompressionResult> {
     const summary = await options.messageManager.createMessage({
-      ...(contextScopeId === undefined ? {} : { contextScopeId }),
-      sessionId,
+      ...(identity.contextScopeId === undefined
+        ? {}
+        : { contextScopeId: identity.contextScopeId }),
+      sessionId: identity.sessionId,
       role: "assistant",
       agent: summaryAgentName,
     });
@@ -1013,7 +1108,7 @@ export function createContextManager(
       savedTokens: candidate.savedTokens,
       summaryMessageId: summary.id,
     } satisfies CompressionResult;
-    options.bus.publish(ContextEvent.Compressed, { sessionId, result });
+    options.bus.publish(ContextEvent.Compressed, { ...identity, result });
     return result;
   }
 
@@ -1114,14 +1209,17 @@ export function createContextManager(
   }
 
   function publishCompactSkippedForCompression(input: {
+    readonly attemptId: string;
     readonly compression: CompressionResult;
+    readonly contextScopeId?: string;
     readonly sessionId: string;
     readonly usage: ContextUsage;
   }): void {
     const skippedReason = skippedReasonForCompression(input.compression);
     if (skippedReason !== undefined) {
       options.bus.publish(ContextEvent.CompactSkipped, {
-        sessionId: input.sessionId,
+        ...scopedEventIdentity(input.sessionId, input.contextScopeId),
+        attemptId: input.attemptId,
         reason: skippedReason,
         usage: input.usage,
       });
@@ -1143,8 +1241,8 @@ export function createContextManager(
     };
   }
 
-  async function runCompaction(
-    req: CompactionRequest,
+  async function runCompactionCore(
+    req: AcceptedCompactionRequest,
   ): Promise<CompactionOutcome> {
     const thrashLocked =
       !req.bypassThrashLock &&
@@ -1169,7 +1267,8 @@ export function createContextManager(
 
     if (rung === "none" || rung === "mask") {
       options.bus.publish(ContextEvent.CompactSkipped, {
-        sessionId: req.sessionId,
+        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
+        attemptId: req.attemptId,
         reason: thrashLocked
           ? "thrash-locked"
           : perTurnCapped
@@ -1193,7 +1292,10 @@ export function createContextManager(
     }
 
     const pruneOutcome = await pruneHistory(
-      req.sessionId,
+      {
+        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
+        attemptId: req.attemptId,
+      },
       req.assembled.history,
     );
     const historyAfterPrune = markCompactedParts(
@@ -1250,7 +1352,9 @@ export function createContextManager(
         });
       }
       publishCompactSkippedForCompression({
+        attemptId: req.attemptId,
         compression: candidate,
+        contextScopeId: req.contextScopeId,
         sessionId: req.sessionId,
         usage: usageAfterPrune,
       });
@@ -1268,6 +1372,49 @@ export function createContextManager(
         usageAfter: usageAfterPrune,
         projectedContext: afterPrune,
         error: candidate.error,
+      };
+    }
+
+    const revision = await inspectSummaryCandidateRevision(
+      afterPrune,
+      candidate,
+    );
+    if (!revision.isCurrent) {
+      const compression = {
+        newTokens: candidate.newTokens,
+        originalTokens: candidate.originalTokens,
+        reason: "stale",
+        savedTokens: 0,
+        status: "skipped",
+      } satisfies CompressionResult;
+      const currentUsage = measureContext({
+        tailDirectives: req.tailDirectives,
+        activeReasoningByMessageId: req.activeReasoningByMessageId,
+        context: req.projectForUsage?.(revision.context) ?? revision.context,
+        isSubagent: req.isSubagent,
+        modelId: req.modelId,
+        tools: req.tools,
+      }).usage;
+      options.bus.publish(ContextEvent.CompactSkipped, {
+        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
+        attemptId: req.attemptId,
+        reason: "stale",
+        usage: currentUsage,
+      });
+      return {
+        compression,
+        prune: pruneOutcome.result,
+        projectedContext: revision.context,
+        status: pruneReducedContext({
+          pruneResult: pruneOutcome.result,
+          usageAfterPrune,
+          usageBefore: req.usageBefore,
+        })
+          ? "pruned"
+          : "not-needed",
+        usageAfter: currentUsage,
+        usageAfterPrune,
+        usageBefore: req.usageBefore,
       };
     }
 
@@ -1293,7 +1440,8 @@ export function createContextManager(
         usageBefore: req.usageBefore,
       });
       options.bus.publish(ContextEvent.CompactSkipped, {
-        sessionId: req.sessionId,
+        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
+        attemptId: req.attemptId,
         reason: "inflated",
         usage: usageAfterPrune,
       });
@@ -1314,9 +1462,11 @@ export function createContextManager(
     }
 
     const compression = await commitSummaryCandidate(
-      req.sessionId,
+      {
+        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
+        attemptId: req.attemptId,
+      },
       candidate,
-      req.contextScopeId,
     );
     recordThrashSavings({
       compression,
@@ -1379,7 +1529,42 @@ export function createContextManager(
     };
   }
 
-  async function compact(
+  async function runCompaction(
+    req: CompactionRequest,
+  ): Promise<CompactionOutcome> {
+    const attemptId = randomUUID();
+    const identity = scopedEventIdentity(req.sessionId, req.contextScopeId);
+    options.bus.publish(ContextEvent.CompactionStarted, {
+      ...identity,
+      attemptId,
+    });
+    try {
+      const outcome = await runCompactionCore({ ...req, attemptId });
+      options.bus.publish(ContextEvent.CompactionFinished, {
+        ...identity,
+        attemptId,
+        outcome: terminalOutcomeForCompaction(outcome),
+        ...(outcome.status === "compacted"
+          ? { rung: "summary" as const }
+          : outcome.status === "pruned"
+            ? { rung: "prune" as const }
+            : {}),
+        status: outcome.status,
+      });
+      return outcome;
+    } catch (error) {
+      const message = errorToMessage(error);
+      options.bus.publish(ContextEvent.CompactionFinished, {
+        ...identity,
+        attemptId,
+        outcome: /abort/iu.test(message) ? "aborted" : "failed",
+        status: "failed",
+      });
+      throw error;
+    }
+  }
+
+  async function compactUnlocked(
     sessionId: string,
     input: CompactOptions,
   ): Promise<CompactResult> {
@@ -1413,7 +1598,9 @@ export function createContextManager(
     return mapOutcomeToCompactResult(outcome);
   }
 
-  async function prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn> {
+  async function prepareTurnUnlocked(
+    input: PrepareTurnInput,
+  ): Promise<PreparedTurn> {
     const startedAt = now();
     const isSubagent = input.isSubagent ?? false;
     const assembled = await assemble(input.sessionId, input.directory, {
@@ -1506,7 +1693,7 @@ export function createContextManager(
     const request = finalMeasurement.request;
 
     options.bus.publish(ContextEvent.TurnPrepared, {
-      sessionId: input.sessionId,
+      ...scopedEventIdentity(input.sessionId, input.contextScopeId),
       tookMs: Math.max(0, now() - startedAt),
       triggeredCompaction:
         compaction !== undefined && compaction.status !== "not-needed",
@@ -1521,6 +1708,29 @@ export function createContextManager(
       sentHeuristic: finalMeasurement.sentHeuristic,
       usage,
     };
+  }
+
+  function compact(
+    sessionId: string,
+    input: CompactOptions,
+  ): Promise<CompactResult> {
+    return mutationLane.run(
+      scopedSessionKey({
+        contextScopeId: input.contextScopeId,
+        sessionId,
+      }),
+      () => compactUnlocked(sessionId, input),
+    );
+  }
+
+  function prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn> {
+    return mutationLane.run(
+      scopedSessionKey({
+        contextScopeId: input.contextScopeId,
+        sessionId: input.sessionId,
+      }),
+      () => prepareTurnUnlocked(input),
+    );
   }
 
   return {

@@ -109,11 +109,14 @@ export type CompressionStatus =
   | "failed"
   | "inflated";
 
+export type CompressionSkipReason = "stale" | "too-short";
+
 export interface CompressionResult {
   readonly status: CompressionStatus;
   readonly originalTokens: number;
   readonly newTokens: number;
   readonly savedTokens: number;
+  readonly reason?: CompressionSkipReason;
   readonly summaryMessageId?: string;
   readonly error?: string;
 }

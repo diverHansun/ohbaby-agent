@@ -60,6 +60,7 @@ export type {
   CompactResult,
   CompactStatus,
   CompressionResult,
+  CompressionSkipReason,
   CompressionStatus,
   ContextAssemblyOptions,
   ContextLLMClient,
