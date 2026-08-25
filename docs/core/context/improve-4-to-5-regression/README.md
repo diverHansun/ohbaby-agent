@@ -1,6 +1,6 @@
 # improve-4～5 Context 联合回归
 
-> 状态：规划修订稿；2026-08-25 已吸收用户确认与独立审查反馈，等待修订后复核。
+> 状态：已实施，条件验收；确定性本地门禁通过，外部 Provider 与部分扩展矩阵仍待后续门禁。
 > 规划基线：`301de2da7996703e2c4254b330f981bf51507e1f`（2026-08-24）。
 > 本目录只定义回归、诊断与后续修复契约；规划阶段不修改生产代码。
 
@@ -57,7 +57,7 @@ improve-4、improve-4.1 和 improve-5 已分别完成定向实施与验收，但
 | [03-reference-projects.md](./03-reference-projects.md) | 记录六个参考项目中 adopt/adapt/reject 的具体取舍 |
 | [context-references/README.md](./context-references/README.md) | 六个项目的逐项目源码调研索引；作为 03 的补充证据，不单独定义方案 |
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 定义状态机、不变量、故障矩阵、CI/外部门禁与验收标准 |
-| `05-implementation-acceptance.md` | 实施完成后由独立验收会话创建；规划期不存在 |
+| [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 记录实际改动、测试证据、规划偏差、独立审查与剩余门禁 |
 
 ## 五、权威关系
 
