@@ -148,7 +148,7 @@ R2 已完成同一 `ContextManager` 内的 per-scope 排队和候选 revision �
 1. 同 scope 的 auto+auto、manual+auto、manual+manual 及 prompt Context mutation 共用 exclusive lane；异 scope 保持并发。
 2. logical compaction 从 snapshot 到 terminal 持有 scope lease；`prepareTurn()` 内部直接执行 compaction core，不重复进入 lane，因此不会嵌套死锁。
 3. candidate await 后、提交前重读精确 scope history，并复核非 summary active history 的语义 revision；stale candidate 以 `CompressionResult { status: "skipped", reason: "stale" }` 结束，不提交旧候选，prepare 路径使用重读后的最新 view。
-4. failpoint 已证明旧的 summary/mark 多步写存在部分终态窗口；当前由窄的 `commitCompaction()` 端口修复，SQLite 使用 `BEGIN IMMEDIATE`，in-memory 在写前完整校验，不做 catch-only rollback。
+4. failpoint 已证明旧的 summary/mark 多步写存在部分终态窗口；当前由窄的 `commitCompaction()` 端口修复，SQLite 使用 `BEGIN IMMEDIATE`，in-memory 在写前完整校验，不做 catch-only rollback。子进程在首个 part update 后被 `SIGKILL` 的 reopen 测试确认 SQLite 会回滚整个未提交事务。
 5. summary request 自身 overflow 已使用单一路径恢复：总 Provider 调用最多 4 次，每次从最旧 user round 裁到下一个 user 边界；保留最近 user round，非 overflow 不进入该重试，abort signal 贯通主/子代理共用 Lifecycle 与 summary client。
 
 ## 八、事件与 UI projection

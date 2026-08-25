@@ -202,7 +202,7 @@ messageManager.commitCompaction({
 })
 ```
 
-Context 只提交业务意图；Message adapter 分配 summary message/part identity，store 在一个原子边界内校验 scope、写可选 summary 并标记全部 parts。SQLite 事务失败或进程在 commit 前终止时不留下 active 空 summary、部分 mark 或双可见 view；Message/Context events 只在 store commit 返回后发布。
+Context 只提交业务意图；Message adapter 分配 summary message/part identity，store 在一个原子边界内校验 scope、写可选 summary 并标记全部 parts。SQLite 事务失败或进程在 commit 前终止时不留下 active 空 summary、部分 mark 或双可见 view；该结论由 SQL failpoint 与事务中途 `SIGKILL` 后 reopen 共同验证。Message/Context events 只在 store commit 返回后发布。
 
 ### 7.6 Scoped cleanup
 
