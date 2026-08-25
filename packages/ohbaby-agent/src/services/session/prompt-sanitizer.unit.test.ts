@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createTemporarySessionTitle,
   isDefaultSessionTitle,
+  redactPromptSecrets,
   sanitizePromptForSessionTitle,
 } from "./prompt-sanitizer.js";
 
@@ -36,6 +37,25 @@ describe("session prompt sanitizer", () => {
     expect(sanitized).toContain('"password":"[redacted]"');
     expect(sanitized).not.toContain("json-api-key-canary");
     expect(sanitized).not.toContain("json-password-canary");
+  });
+
+  it("preserves valid JSON while redacting quoted values with escapes", () => {
+    const sanitized = redactPromptSecrets(
+      JSON.stringify({
+        apiKey: "prefix'json-apostrophe-canary",
+        password: 'prefix "json-quote-canary',
+        token: "prefix\\json-backslash-canary",
+      }),
+    );
+
+    expect(JSON.parse(sanitized)).toEqual({
+      apiKey: "[redacted]",
+      password: "[redacted]",
+      token: "[redacted]",
+    });
+    expect(sanitized).not.toContain("json-apostrophe-canary");
+    expect(sanitized).not.toContain("json-quote-canary");
+    expect(sanitized).not.toContain("json-backslash-canary");
   });
 
   it("collapses whitespace and truncates first-message prompt text", () => {

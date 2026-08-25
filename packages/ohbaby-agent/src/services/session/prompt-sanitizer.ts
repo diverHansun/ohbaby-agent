@@ -41,8 +41,13 @@ export function redactPromptSecrets(value: string): string {
   return value
     .replace(/\b(authorization\s*:\s*bearer\s+)([^\s,;]+)/giu, `$1${REDACTION}`)
     .replace(
-      /(\b[a-z0-9_]*(?:api[_-]?key|token|secret|password|passwd|pwd)[a-z0-9_]*)(["']?\s*[:=]\s*)(?:(["'])[^"']*\3|[^\s,;}\]]+)/giu,
-      `$1$2$3${REDACTION}$3`,
+      /(\b[a-z0-9_]*(?:api[_-]?key|token|secret|password|passwd|pwd)[a-z0-9_]*)(["']?\s*[:=]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^"'\s,;}\]]+)/giu,
+      (_match, key: string, separator: string, rawValue: string) => {
+        const quote = rawValue[0];
+        return quote === '"' || quote === "'"
+          ? `${key}${separator}${quote}${REDACTION}${quote}`
+          : `${key}${separator}${REDACTION}`;
+      },
     )
     .replace(/\bsk-[a-z0-9_-]{8,}\b/giu, REDACTION)
     .replace(/\bgh[pousr]_[a-z0-9_]{8,}\b/giu, REDACTION);
