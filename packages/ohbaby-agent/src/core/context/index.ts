@@ -67,7 +67,6 @@ export type {
   ContextLLMClient,
   ContextManager,
   ContextManagerOptions,
-  ContextMeasurementPayload,
   CreateRunPromptSnapshotInput,
   PreparedModelRequest,
   ContextUsage,

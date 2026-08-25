@@ -7,7 +7,7 @@ import {
   type SystemPromptProvider,
   type TokenCounter,
 } from "../../../packages/ohbaby-agent/src/core/context/index.js";
-import { estimateWireHeuristic } from "../../../packages/ohbaby-agent/src/core/context/token-estimation.js";
+import { estimatePreparedRequestHeuristic } from "../../../packages/ohbaby-agent/src/core/context/token-estimation.js";
 import { createScopedPromptCacheKey } from "../../../packages/ohbaby-agent/src/core/llm-client/prompt-cache.js";
 import {
   createInMemoryMessageStore,
@@ -360,18 +360,10 @@ describe("subagent scoped context integration", () => {
     expect(primary.request.tools).toEqual(tools);
     expect(child.request.tools).toEqual(tools);
     expect(primary.usage.currentTokens).toBe(
-      estimateWireHeuristic(
-        primary.request.messages,
-        tokenCounter,
-        primary.request.tools,
-      ),
+      estimatePreparedRequestHeuristic(primary.request, tokenCounter),
     );
     expect(child.usage.currentTokens).toBe(
-      estimateWireHeuristic(
-        child.request.messages,
-        tokenCounter,
-        child.request.tools,
-      ),
+      estimatePreparedRequestHeuristic(child.request, tokenCounter),
     );
     expect(JSON.stringify(primary.request.messages)).toContain("primary short");
     expect(JSON.stringify(primary.request.messages)).not.toContain(

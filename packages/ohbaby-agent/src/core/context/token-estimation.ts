@@ -1,15 +1,12 @@
-import type { ChatCompletionCreateParams } from "openai/resources/chat/completions/completions";
-import type { ChatCompletionMessage } from "../llm-client/index.js";
-import type { TokenCounter } from "./types.js";
+import type { PreparedModelRequest, TokenCounter } from "./types.js";
 
-export function estimateWireHeuristic(
-  messages: readonly ChatCompletionMessage[],
+export function estimatePreparedRequestHeuristic(
+  request: PreparedModelRequest,
   tokenCounter: Pick<TokenCounter, "estimateTokens">,
-  tools?: ChatCompletionCreateParams["tools"],
 ): number {
-  const payloads = messages.map((message) => JSON.stringify(message));
-  if (tools !== undefined && tools.length > 0) {
-    payloads.push(JSON.stringify(tools));
+  const payloads = request.messages.map((message) => JSON.stringify(message));
+  if (request.tools !== undefined && request.tools.length > 0) {
+    payloads.push(JSON.stringify(request.tools));
   }
   const text = payloads.join("\n");
   return Math.max(0, tokenCounter.estimateTokens(text));

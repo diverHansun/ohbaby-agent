@@ -10,7 +10,7 @@ import {
   type SystemPromptProvider,
   type TokenCounter,
 } from "../../../packages/ohbaby-agent/src/core/context/index.js";
-import { estimateWireHeuristic } from "../../../packages/ohbaby-agent/src/core/context/token-estimation.js";
+import { estimatePreparedRequestHeuristic } from "../../../packages/ohbaby-agent/src/core/context/token-estimation.js";
 import { Lifecycle } from "../../../packages/ohbaby-agent/src/core/lifecycle/index.js";
 import type {
   LLMClientInstance,
@@ -206,10 +206,9 @@ describe("context improve-4.1 integration", () => {
       "Available tools: read_file",
     );
     expect(regular.usages[0]?.currentTokens).toBe(
-      estimateWireHeuristic(
-        requests[0]?.messages ?? [],
+      estimatePreparedRequestHeuristic(
+        { messages: requests[0]?.messages ?? [], tools: resolvedTools },
         tokenCounter,
-        resolvedTools,
       ),
     );
     expect(requests[1]?.tools).toEqual([]);
@@ -221,12 +220,18 @@ describe("context improve-4.1 integration", () => {
       "Available tools: read_file",
     );
     expect(final.usages[0]?.currentTokens).toBe(
-      estimateWireHeuristic(requests[1]?.messages ?? [], tokenCounter, []),
+      estimatePreparedRequestHeuristic(
+        { messages: requests[1]?.messages ?? [], tools: [] },
+        tokenCounter,
+      ),
     );
     expect(updateCalibrationFactor).toHaveBeenCalledWith(
       "session_final",
       777,
-      estimateWireHeuristic(requests[1]?.messages ?? [], tokenCounter, []),
+      estimatePreparedRequestHeuristic(
+        { messages: requests[1]?.messages ?? [], tools: [] },
+        tokenCounter,
+      ),
     );
   });
 

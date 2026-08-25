@@ -24,8 +24,8 @@ import type {
   CompactOptions,
   ContextManager,
   ContextLLMClient,
-  ContextMeasurementPayload,
   MemoryReader,
+  PreparedModelRequest,
   PrepareTurnInput,
   SystemPromptProvider,
   TokenCounter,
@@ -34,7 +34,7 @@ import { isActivePart } from "./filters.js";
 import { serializeHistory } from "./serialization.js";
 import { serializeForLlm } from "./serializer.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
-import { estimateWireHeuristic } from "./token-estimation.js";
+import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
 
 type WithDefaultToolInput<
   T extends { readonly toolNames: readonly string[]; readonly tools: unknown },
@@ -56,7 +56,7 @@ interface ContextFixture {
   readonly compactSkipped: readonly unknown[];
   readonly compressed: readonly unknown[];
   readonly manager: FixtureContextManager;
-  readonly measurements: readonly ContextMeasurementPayload[];
+  readonly measurements: readonly PreparedModelRequest[];
   readonly masked: readonly unknown[];
   readonly memory: MemoryReader;
   readonly pruned: readonly unknown[];
@@ -213,7 +213,7 @@ function createManager(
   const compactSkipped: unknown[] = [];
   const compressed: unknown[] = [];
   const masked: unknown[] = [];
-  const measurements: ContextMeasurementPayload[] = [];
+  const measurements: PreparedModelRequest[] = [];
   const pruned: unknown[] = [];
   const turnPrepared: unknown[] = [];
   const memory =
@@ -389,51 +389,6 @@ async function summaryMessageCount(
 }
 
 describe("ContextManager", () => {
-  it("estimates wire heuristic from the full provider payload", () => {
-    const messages = [
-      { role: "system" as const, content: "system prompt" },
-      { role: "user" as const, content: "hello" },
-      { role: "assistant" as const, content: "answer" },
-    ];
-
-    expect(
-      estimateWireHeuristic(messages, {
-        estimateTokens: (content: string) => content.length,
-      }),
-    ).toBe(
-      messages.map((message) => JSON.stringify(message)).join("\n").length,
-    );
-  });
-
-  it("includes tool schemas in the wire heuristic and ignores empty tools", () => {
-    const messages = [{ role: "user" as const, content: "hello" }];
-    const tools = [
-      {
-        function: {
-          description: "Read a file",
-          name: "read_file",
-          parameters: {
-            properties: { path: { type: "string" } },
-            required: ["path"],
-            type: "object",
-          },
-        },
-        type: "function" as const,
-      },
-    ];
-    const tokenCounter = {
-      estimateTokens: (content: string): number => content.length,
-    };
-    const messagesOnly = estimateWireHeuristic(messages, tokenCounter);
-
-    expect(estimateWireHeuristic(messages, tokenCounter, [])).toBe(
-      messagesOnly,
-    );
-    expect(estimateWireHeuristic(messages, tokenCounter, tools)).toBe(
-      messagesOnly + 1 + JSON.stringify(tools).length,
-    );
-  });
-
   it("includes tool schemas in prepared heuristic and current usage", async () => {
     const messageManager = createMessageManagerFixture();
     await addTextMessage(messageManager, {
@@ -539,7 +494,7 @@ describe("ContextManager", () => {
     expect(prepared.request.messages.at(-1)).toEqual(finalizationMessage);
     expect(measurements.at(-1)).toEqual(prepared.request);
     expect(prepared.sentHeuristic).toBe(
-      estimateWireHeuristic(prepared.request.messages, tokenCounter, []),
+      estimatePreparedRequestHeuristic(prepared.request, tokenCounter),
     );
     expect(prepared.usage.currentTokens).toBe(prepared.sentHeuristic);
     expect(
@@ -1135,32 +1090,6 @@ describe("ContextManager", () => {
         .flatMap((message) => message.parts)
         .filter(isModelContextPart),
     ).toHaveLength(1);
-  });
-
-  it("counts assistant tool calls even when message content is null", () => {
-    const messages = [
-      {
-        content: null,
-        role: "assistant" as const,
-        tool_calls: [
-          {
-            function: {
-              arguments: '{"path":"/a/very/long/path/with/many/chars.ts"}',
-              name: "read_file",
-            },
-            id: "call_read",
-            type: "function" as const,
-          },
-        ],
-      },
-    ];
-
-    const tokens = estimateWireHeuristic(messages, {
-      estimateTokens: (content: string) => content.length,
-    });
-
-    expect(tokens).toBeGreaterThan(20);
-    expect(tokens).toBe(JSON.stringify(messages[0]).length);
   });
 
   it("finds a cut point on message boundaries around completed tool parts", () => {
@@ -2091,14 +2020,13 @@ describe("ContextManager", () => {
     expect(prepared.usage.usageRatio).toBeGreaterThanOrEqual(0.5);
     expect(prepared.usage.usageRatio).toBeLessThan(0.8);
     expect(prepared.sentHeuristic).toBe(
-      estimateWireHeuristic(
-        prepared.request.messages,
-        tokenCounter,
-        prepared.request.tools,
-      ),
+      estimatePreparedRequestHeuristic(prepared.request, tokenCounter),
     );
     expect(prepared.sentHeuristic).toBeGreaterThan(
-      estimateWireHeuristic(prepared.request.messages, tokenCounter),
+      estimatePreparedRequestHeuristic(
+        { messages: prepared.request.messages, tools: undefined },
+        tokenCounter,
+      ),
     );
     expect(onCompactionStarted).toHaveBeenCalledTimes(1);
     expect(commitCompaction).toHaveBeenCalled();

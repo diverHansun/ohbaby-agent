@@ -91,8 +91,6 @@ export interface PreparedModelRequest {
   readonly tools: ChatCompletionCreateParams["tools"];
 }
 
-export type ContextMeasurementPayload = PreparedModelRequest;
-
 export interface ContextUsage {
   readonly currentTokens: number;
   readonly contextLimit: number;

@@ -26,7 +26,7 @@ import { serializeForLlm } from "./serializer.js";
 import { createScopedExclusiveLane } from "./scoped-exclusive-lane.js";
 import { shrinkSummaryHistory } from "./summary-overflow.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
-import { estimateWireHeuristic } from "./token-estimation.js";
+import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
 import {
   decideCompactionRung,
   getContextUsage,
@@ -46,10 +46,10 @@ import type {
   ContextAssemblyOptions,
   ContextManager,
   ContextManagerOptions,
-  ContextMeasurementPayload,
   ContextUsage,
   AgentRunPromptSnapshot,
   CreateRunPromptSnapshotInput,
+  PreparedModelRequest,
   PreparedTurn,
   PrepareTurnInput,
   PruneResult,
@@ -432,7 +432,7 @@ export function createContextManager(
     readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
     readonly isSubagent: boolean;
     readonly tools: PrepareTurnInput["tools"];
-  }): ContextMeasurementPayload {
+  }): PreparedModelRequest {
     const messages = serializeForLlm({
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       history: input.context.history,
@@ -440,7 +440,7 @@ export function createContextManager(
       memory: input.context.memory,
       systemPrompt: input.context.systemPrompt,
     });
-    const request: ContextMeasurementPayload = structuredClone({
+    const request: PreparedModelRequest = structuredClone({
       messages:
         input.tailDirectives === undefined
           ? messages
@@ -451,17 +451,16 @@ export function createContextManager(
   }
 
   function measureUsage(
-    payload: ContextMeasurementPayload,
+    request: PreparedModelRequest,
     input: {
       readonly modelId: string;
       readonly sessionId: string;
       readonly contextScopeId?: string;
     },
   ): { readonly sentHeuristic: number; readonly usage: ContextUsage } {
-    const sentHeuristic = estimateWireHeuristic(
-      payload.messages,
+    const sentHeuristic = estimatePreparedRequestHeuristic(
+      request,
       options.tokenCounter,
-      payload.tools,
     );
     const currentTokens = Math.round(
       sentHeuristic *
@@ -485,7 +484,7 @@ export function createContextManager(
     readonly isSubagent: boolean;
     readonly tools: PrepareTurnInput["tools"];
   }): {
-    readonly request: ContextMeasurementPayload;
+    readonly request: PreparedModelRequest;
     readonly sentHeuristic: number;
     readonly usage: ContextUsage;
   } {
