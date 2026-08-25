@@ -1,20 +1,26 @@
 import type { TokenUsage } from "../llm-client/index.js";
 import type { PartMetadata } from "./types.js";
 
+function record(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 function nonNegativeInteger(value: unknown): value is number {
   return (
     typeof value === "number" &&
     Number.isFinite(value) &&
-    Number.isInteger(value) &&
+    Number.isSafeInteger(value) &&
     value >= 0
   );
 }
 
 function canonicalTokenUsage(value: unknown): TokenUsage | undefined {
-  if (typeof value !== "object" || value === null) {
+  const candidate = record(value);
+  if (!candidate) {
     return undefined;
   }
-  const candidate = value as Record<string, unknown>;
   if (
     !nonNegativeInteger(candidate.inputTokens) ||
     !nonNegativeInteger(candidate.outputTokens)
@@ -24,33 +30,34 @@ function canonicalTokenUsage(value: unknown): TokenUsage | undefined {
 
   const inputTokens = candidate.inputTokens;
   const outputTokens = candidate.outputTokens;
-  const rawBreakdown = candidate.inputBreakdown;
-  if (typeof rawBreakdown !== "object" || rawBreakdown === null) {
+  const totalTokens = inputTokens + outputTokens;
+  if (!Number.isSafeInteger(totalTokens)) {
+    return undefined;
+  }
+  const breakdown = record(candidate.inputBreakdown);
+  if (!breakdown) {
     return {
       inputTokens,
       outputTokens,
-      totalTokens: inputTokens + outputTokens,
+      totalTokens,
     };
   }
 
-  const breakdown = rawBreakdown as Record<string, unknown>;
-  const rawObserved = breakdown.observed;
+  const observed = record(breakdown.observed);
   if (
     !nonNegativeInteger(breakdown.uncached) ||
     !nonNegativeInteger(breakdown.cacheRead) ||
     !nonNegativeInteger(breakdown.cacheWrite) ||
     breakdown.uncached + breakdown.cacheRead + breakdown.cacheWrite !==
       inputTokens ||
-    typeof rawObserved !== "object" ||
-    rawObserved === null
+    !observed
   ) {
     return {
       inputTokens,
       outputTokens,
-      totalTokens: inputTokens + outputTokens,
+      totalTokens,
     };
   }
-  const observed = rawObserved as Record<string, unknown>;
   if (
     typeof observed.cacheRead !== "boolean" ||
     typeof observed.cacheWrite !== "boolean"
@@ -58,7 +65,7 @@ function canonicalTokenUsage(value: unknown): TokenUsage | undefined {
     return {
       inputTokens,
       outputTokens,
-      totalTokens: inputTokens + outputTokens,
+      totalTokens,
     };
   }
 
@@ -74,31 +81,59 @@ function canonicalTokenUsage(value: unknown): TokenUsage | undefined {
     },
     inputTokens,
     outputTokens,
-    totalTokens: inputTokens + outputTokens,
+    totalTokens,
+  };
+}
+
+export function createTokenUsageMetadata(
+  tokenUsage: TokenUsage | undefined,
+): Pick<PartMetadata, "tokenUsage"> | undefined {
+  if (tokenUsage === undefined) {
+    return undefined;
+  }
+
+  return {
+    tokenUsage: {
+      ...(tokenUsage.inputBreakdown === undefined
+        ? {}
+        : {
+            inputBreakdown: {
+              ...tokenUsage.inputBreakdown,
+              observed: { ...tokenUsage.inputBreakdown.observed },
+            },
+          }),
+      inputTokens: tokenUsage.inputTokens,
+      outputTokens: tokenUsage.outputTokens,
+      totalTokens: tokenUsage.inputTokens + tokenUsage.outputTokens,
+    },
   };
 }
 
 export function readTokenUsageMetadata(
-  metadata: PartMetadata | undefined,
+  metadata: unknown,
 ): TokenUsage | undefined {
-  const raw = metadata?.tokenUsage;
+  const raw = record(metadata)?.tokenUsage;
   const canonical = canonicalTokenUsage(raw);
   if (canonical) {
     return canonical;
   }
-  if (raw === undefined) {
+  const legacy = record(raw);
+  if (!legacy) {
     return undefined;
   }
-  const legacy = raw as unknown as Record<string, unknown>;
   if (
     !nonNegativeInteger(legacy.promptTokens) ||
     !nonNegativeInteger(legacy.completionTokens)
   ) {
     return undefined;
   }
+  const totalTokens = legacy.promptTokens + legacy.completionTokens;
+  if (!Number.isSafeInteger(totalTokens)) {
+    return undefined;
+  }
   return {
     inputTokens: legacy.promptTokens,
     outputTokens: legacy.completionTokens,
-    totalTokens: legacy.promptTokens + legacy.completionTokens,
+    totalTokens,
   };
 }

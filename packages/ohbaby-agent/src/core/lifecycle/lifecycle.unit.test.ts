@@ -713,6 +713,133 @@ describe("Lifecycle.run", () => {
     });
   });
 
+  it("persists tool-only and hybrid usage on exactly one part per step", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const toolOnlyUsage = {
+      inputTokens: 50,
+      outputTokens: 2,
+      totalTokens: 52,
+    } as const;
+    const hybridUsage = {
+      inputBreakdown: {
+        cacheRead: 80,
+        cacheWrite: 0,
+        observed: { cacheRead: true, cacheWrite: false },
+        uncached: 20,
+      },
+      inputTokens: 100,
+      outputTokens: 5,
+      totalTokens: 105,
+    } as const;
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValue(
+        preparedTurn([{ role: "user", content: "Run both tools" }]),
+      );
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              finishReason: "tool_calls",
+              tokenUsage: toolOnlyUsage,
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"path":"README.md"}',
+                  id: "call_read",
+                  index: 0,
+                  name: "read_file",
+                },
+                {
+                  argumentsDelta: '{"path":"."}',
+                  id: "call_list",
+                  index: 1,
+                  name: "list_files",
+                },
+              ],
+            },
+          ],
+          [
+            {
+              finishReason: "tool_calls",
+              textDelta: "I will run both tools again.",
+              tokenUsage: hybridUsage,
+              toolCallDeltas: [
+                {
+                  argumentsDelta: '{"path":"README.md"}',
+                  id: "call_read_again",
+                  index: 0,
+                  name: "read_file",
+                },
+                {
+                  argumentsDelta: '{"path":"."}',
+                  id: "call_list_again",
+                  index: 1,
+                  name: "list_files",
+                },
+              ],
+            },
+          ],
+          [{ finishReason: "stop", textDelta: "Done." }],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(
+          ({ calls }) =>
+            Promise.resolve(
+              calls.map((call) => ({
+                callId: call.callId,
+                output: "ok",
+                status: "success" as const,
+              })),
+            ),
+        ),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_hybrid",
+      }),
+    );
+
+    const parts = (
+      await messageManager.listBySession("session_hybrid")
+    ).flatMap((message) => message.parts);
+    const usageParts = parts
+      .map((part) => ({
+        part,
+        usage: readTokenUsageMetadata(part.metadata),
+      }))
+      .filter((entry) => entry.usage !== undefined);
+
+    expect(usageParts).toHaveLength(2);
+    const toolOnlyUsagePart = usageParts.find(
+      (entry) => entry.usage?.inputTokens === toolOnlyUsage.inputTokens,
+    );
+    expect(toolOnlyUsagePart?.part).toMatchObject({
+      callId: "call_read",
+      type: "tool",
+    });
+    expect(toolOnlyUsagePart?.usage).toEqual(toolOnlyUsage);
+    const hybridUsagePart = usageParts.find(
+      (entry) => entry.usage?.inputTokens === hybridUsage.inputTokens,
+    );
+    expect(hybridUsagePart?.part.type).toBe("text");
+    expect(hybridUsagePart?.usage).toEqual(hybridUsage);
+  });
+
   it("treats provider output length truncation as a structured terminal failure", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),
@@ -846,6 +973,18 @@ describe("Lifecycle.run", () => {
     expect(events.every((event) => event.contextScopeId === "subagent_1")).toBe(
       true,
     );
+    const scopedUsageParts = (await messageManager.listBySession("child_1"))
+      .flatMap((message) => message.parts)
+      .filter((part) => readTokenUsageMetadata(part.metadata) !== undefined);
+    expect(scopedUsageParts).toHaveLength(1);
+    expect(scopedUsageParts[0]).toMatchObject({
+      contextScopeId: "subagent_1",
+    });
+    expect(readTokenUsageMetadata(scopedUsageParts[0]?.metadata)).toEqual({
+      inputTokens: 50,
+      outputTokens: 5,
+      totalTokens: 55,
+    });
   });
 
   it("emits reasoning events and passes active reasoning to the next tool-loop prepare", async () => {
@@ -1012,7 +1151,19 @@ describe("Lifecycle.run", () => {
     const lifecycle = new Lifecycle({
       contextManager: createContextManagerMock(prepareTurn),
       llmClient: createSequentialFakeLLMClient(
-        [[{ reasoningDelta: "thinking" }, { finishReason: "stop" }]],
+        [
+          [
+            { reasoningDelta: "thinking" },
+            {
+              finishReason: "stop",
+              tokenUsage: {
+                inputTokens: 7,
+                outputTokens: 1,
+                totalTokens: 8,
+              },
+            },
+          ],
+        ],
         requests,
       ),
       messageManager,
@@ -1042,6 +1193,12 @@ describe("Lifecycle.run", () => {
       finalResponse: "",
       finishReason: "stop",
       success: true,
+      usage: {
+        inputTokens: 7,
+        outputTokens: 1,
+        totalTokens: 8,
+        usageComplete: true,
+      },
     });
     expect(
       emitted.some(

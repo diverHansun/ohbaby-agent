@@ -18,6 +18,7 @@ import type {
   PreparedTurn,
   PrepareTurnInput,
 } from "../context/index.js";
+import { createTokenUsageMetadata } from "../message/index.js";
 import type {
   CoreMessage,
   MessageManager,
@@ -92,32 +93,6 @@ function getTextContent(message: ChatCompletionMessage): string {
   }
 
   return "";
-}
-
-function toPartTokenUsageMetadata(tokenUsage: TokenUsage | undefined):
-  | {
-      readonly tokenUsage: TokenUsage;
-    }
-  | undefined {
-  if (!tokenUsage) {
-    return undefined;
-  }
-
-  return {
-    tokenUsage: {
-      ...(tokenUsage.inputBreakdown === undefined
-        ? {}
-        : {
-            inputBreakdown: {
-              ...tokenUsage.inputBreakdown,
-              observed: { ...tokenUsage.inputBreakdown.observed },
-            },
-          }),
-      inputTokens: tokenUsage.inputTokens,
-      outputTokens: tokenUsage.outputTokens,
-      totalTokens: tokenUsage.inputTokens + tokenUsage.outputTokens,
-    },
-  };
 }
 
 function getErrorMessage(error: unknown): string {
@@ -765,10 +740,14 @@ export class Lifecycle {
 
       const toolCalls = normalizeToolCalls(parsedToolCalls, generateToolCallId);
       allToolCalls.push(...toolCalls.map(toParsedToolCall));
+      // runModelStep already attaches usage to a non-empty text part. Tool
+      // metadata is the fallback for tool-only completions.
+      const tokenUsageForToolPart =
+        finalResponse === "" ? finalEvent.tokenUsage : undefined;
       const toolParts = await this.appendToolParts(
         assistantMessage,
         toolCalls,
-        finalEvent.tokenUsage,
+        tokenUsageForToolPart,
       );
 
       for (const toolCall of toolCalls) {
@@ -1086,7 +1065,7 @@ export class Lifecycle {
         await this.deps.messageManager.updatePart(assistantTextPart.id, {
           metadata: {
             ...assistantTextPart.metadata,
-            ...toPartTokenUsageMetadata(finalEvent.tokenUsage),
+            ...createTokenUsageMetadata(finalEvent.tokenUsage),
           },
         });
       }
@@ -1198,7 +1177,7 @@ export class Lifecycle {
 
     for (const [index, toolCall] of toolCalls.entries()) {
       const metadata =
-        index === 0 ? toPartTokenUsageMetadata(tokenUsage) : undefined;
+        index === 0 ? createTokenUsageMetadata(tokenUsage) : undefined;
       const part = await this.deps.messageManager.appendPart(
         assistantMessage.id,
         {

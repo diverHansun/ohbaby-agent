@@ -11,7 +11,10 @@ export {
   MODEL_CONTEXT_RUNTIME_KIND,
 } from "./origin.js";
 export { toModelMessages } from "./converter.js";
-export { readTokenUsageMetadata } from "./token-usage-metadata.js";
+export {
+  createTokenUsageMetadata,
+  readTokenUsageMetadata,
+} from "./token-usage-metadata.js";
 export type { MessageOrigin } from "./origin.js";
 export type {
   AssistantMessage,
@@ -32,8 +35,6 @@ export type {
   ReasoningPart,
   SystemMessage,
   TextPart,
-  LegacyTokenUsageMetadata,
-  TokenUsageMetadata,
   ToolPart,
   ToolState,
   UpdateMessagePatch,

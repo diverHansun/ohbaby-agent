@@ -74,16 +74,8 @@ export interface PartBase {
   readonly time?: PartTime;
 }
 
-export interface LegacyTokenUsageMetadata {
-  readonly promptTokens: number;
-  readonly completionTokens: number;
-  readonly totalTokens: number;
-}
-
-export type TokenUsageMetadata = TokenUsage | LegacyTokenUsageMetadata;
-
 export interface PartMetadata {
-  readonly tokenUsage?: TokenUsageMetadata;
+  readonly tokenUsage?: TokenUsage;
   readonly [key: string]: unknown;
 }
 

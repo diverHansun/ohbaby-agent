@@ -13,9 +13,11 @@ import {
   type StatementRunResult,
 } from "../../services/database/index.js";
 import { createDatabaseMessageStore } from "./database-store.js";
+import { readTokenUsageMetadata } from "./token-usage-metadata.js";
 import type { Message, MessageStore } from "./types.js";
 
 const cleanupPaths: string[] = [];
+let databasePath = "";
 
 function userMessage(id = "message_1"): Message {
   return {
@@ -51,7 +53,8 @@ function insertSession(): void {
 beforeEach(async () => {
   const directory = await mkdtemp(join(tmpdir(), "ohbaby-message-db-"));
   cleanupPaths.push(directory);
-  initDatabase({ dbPath: join(directory, "agent.db") });
+  databasePath = join(directory, "agent.db");
+  initDatabase({ dbPath: databasePath });
   insertSession();
 });
 
@@ -218,6 +221,60 @@ describe("createDatabaseMessageStore", () => {
         ],
       },
     ]);
+  });
+
+  it("reads legacy token usage metadata after reopening the database", async () => {
+    const store = createDatabaseMessageStore();
+    await store.insertMessage({
+      id: "message_legacy_usage",
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+      time: { created: 1_000 },
+    });
+    const part = await store.appendPart({
+      message: {
+        id: "message_legacy_usage",
+        sessionId: "session_1",
+        role: "assistant",
+        agent: "default",
+        time: { created: 1_000 },
+      },
+      partId: "part_legacy_usage",
+      data: { type: "text", text: "legacy response" },
+      updatedAt: 2_000,
+    });
+    const legacyPart = {
+      ...part,
+      metadata: {
+        tokenUsage: {
+          completionTokens: 3,
+          promptTokens: 10,
+          totalTokens: 999,
+        },
+      },
+    };
+    getDatabase()
+      .prepare(
+        `UPDATE ${schema.part.tableName}
+         SET data = ?
+         WHERE id = ?`,
+      )
+      .run(JSON.stringify(legacyPart), part.id);
+
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    const reopenedStore = createDatabaseMessageStore();
+    const reopened = await reopenedStore.listBySession("session_1");
+    const reopenedPart = reopened
+      .flatMap((message) => message.parts)
+      .find((candidate) => candidate.id === part.id);
+
+    expect(readTokenUsageMetadata(reopenedPart?.metadata)).toEqual({
+      inputTokens: 10,
+      outputTokens: 3,
+      totalTokens: 13,
+    });
   });
 
   it("allocates distinct order indexes during concurrent appends", async () => {

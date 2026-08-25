@@ -138,13 +138,15 @@ export function readTokenUsageMetadata(
 
 Lifecycle 当前私有的 `toPartTokenUsageMetadata` 迁入本模块，正常文本完成和工具调用完成都调用同一个 writer。迁移后删除 Lifecycle 私有 helper，避免两个 writer 漂移。
 
+同一个 model step 的 usage 最多只能持久化到一个 part：有非空 assistant text 时由 text part 承载；没有 text、存在 tool calls 时由第一个 tool part 承载，其他 tool parts 不重复写。reasoning-only 或没有可持久化 part 的 completion 不为 usage 伪造空/synthetic part；此时 `llm:complete` 与 `LifecycleResult` 仍保留运行时 usage 事实。
+
 ### 6.4.3 reader 规则
 
 `readTokenUsageMetadata` 应把参数改成 `unknown`，因为数据库 JSON 在运行时并不因 TypeScript 断言自动可信。读取顺序冻结为：
 
 1. 识别 canonical shape；
 2. `inputTokens/outputTokens` 合法但 breakdown 非法时，保留 inclusive totals、丢弃 breakdown；
-3. canonical 不成立时再识别完整且合法的 legacy `promptTokens/completionTokens`；同一对象即使带有损坏的 canonical 字段，只要 legacy shape 完整合法，仍按 legacy 读取；
+3. canonical 不成立时再识别最小合法 legacy shape：`promptTokens/completionTokens` 均为非负安全整数，且重算结果仍为安全整数；存储的 legacy `totalTokens` 可以缺失或错误，reader 始终重算。同一对象即使带有损坏的 canonical 字段，只要上述两个 legacy 字段合法，仍按 legacy 读取；
 4. legacy 读取不虚构 breakdown，并重算 total；
 5. 完全非法时返回 `undefined`，不抛错、不补零。
 
@@ -168,8 +170,8 @@ export interface PartMetadata {
 | `core/message/token-usage-metadata.ts` | 增加唯一 `create` adapter；reader 接受 `unknown`；canonical/legacy runtime parser 保持私有 |
 | `core/message/index.ts` | 同时导出 creator/reader；移除只服务旧可写类型的导出 |
 | `core/lifecycle/lifecycle.ts` | 删除私有 `toPartTokenUsageMetadata`，两个写入点改用共享 writer |
-| `core/message/database-store.ts` | 不盲信 JSON 类型；至少以 integration test 证明旧 metadata 经 store round-trip 后能由 reader 解析。除非存在产品消费需求，不必为了“看起来有调用”而在 hydration 时改写所有 metadata |
-| `tests/smoke/real-cache-harness.ts` | 继续使用生产 reader；优先从 `llm:complete` 取 usage，assistant metadata 作为生产持久化链的交叉证据 |
+| `core/message/database-store.ts` | 保持通用 JSON round-trip；以 integration test 证明旧 metadata 经 reopen 后能由显式 `readTokenUsageMetadata(unknown)` 解析。本批不把局部 token 收口扩大成完整 Message/Part runtime decoder，也不在 hydration 时改写旧 metadata |
+| `tests/smoke/real-cache-harness.ts` | 继续使用 production storage reader；优先从 `llm:complete` 取 usage，assistant metadata 作为持久化链的交叉证据。当前产品 UI/runtime 不直接消费该 reader，其保留理由是旧库兼容与审计合同 |
 | lifecycle/worker/bridge | 保持传输 canonical usage，不把 metadata parser 反向引入事件链 |
 
 这里不新增 message-level 命中率 UI，也不建设长期统计库；这两项超出本次职责收口。
@@ -253,9 +255,10 @@ JSON.stringify({ messages, tools })
 
 1. Lifecycle 的普通 assistant text path 使用共享 writer，持久化后 reader 深等于 `llm:complete` usage。
 2. tool-call/finalization path 使用同一个 writer，且只有约定的首个 part 携带 usage。
-3. 数据库存入 legacy JSON，重新加载后 production reader 可读，且不会产生 cache breakdown。
-4. 把 canonical usage 的两条生产投影分别验证：① provider → Lifecycle → shared metadata creator → database/reader；② LifecycleEvent → run-manager worker → `run.llm.complete` → stream bridge。现有 worker/bridge integration 已锁定第二条链，本批只在受影响门禁中复跑，不重复制造一套同义测试。两条链都不得丢 `inputBreakdown.observed`，但不能把它们误写成一条串行调用链。
-5. 主代理与子代理分别写入各自 part，不串 session/context scope；auxiliary request 不伪造 assistant metadata。
+3. hybrid text + tool-call path 只在 text part 携带一次 usage，tool parts 不得重复；reasoning-only path 不为 usage 新造 part。
+4. 通过历史 JSON/raw store fixture 存入 legacy metadata，重新加载后 production reader 可读，且不会产生 cache breakdown；不能调用新的 typed creator 伪装旧数据。
+5. 把 canonical usage 的两条生产投影分别验证：① provider → Lifecycle → shared metadata creator → database/reader；② LifecycleEvent → run-manager worker → `run.llm.complete` → stream bridge。现有 worker/bridge integration 已锁定第二条链，本批只在受影响门禁中复跑，不重复制造一套同义测试。两条链都不得丢 `inputBreakdown.observed`，但不能把它们误写成一条串行调用链。
+6. 主代理与子代理分别写入各自 part，不串 session/context scope；auxiliary request 不伪造 assistant metadata。
 
 ### 6.6.3 token estimation 单元与集成测试
 
@@ -313,7 +316,7 @@ current context estimate
 
 本方案作为 improve-5 与联合回归后的一个小型收口批次实施，生产改动分成两个原子 commit；storage/transport 验证随对应 commit 和最终门禁完成，不再制造第三个生产批次：
 
-1. **批次 H1 · metadata storage adapter**：增加 creator、迁移 Lifecycle、收紧 reader 入参和可写类型；补单元测试、Lifecycle text/tool 写入测试与 database legacy reopen round-trip。运行 message/lifecycle/provider targeted tests，并完成 lint、typecheck、unit 与受影响 integration。
+1. **批次 H1 · metadata storage adapter**：增加 creator、迁移 Lifecycle、收紧 reader 入参和可写类型，并修复 hybrid text + tool-call 重复持久化同一 usage；补单元测试、Lifecycle text/tool/hybrid 写入测试与 database legacy reopen round-trip。运行 message/lifecycle/provider targeted tests，并完成 lint、typecheck、unit 与受影响 integration。
 2. **批次 H2 · estimation envelope**：删除无差异 measurement alias，升级完整 `PreparedModelRequest` 接口，保持算法不变；将 helper 行为移入独立 unit test，并复跑 ContextManager、improve-4.1 和 subagent integration。完成 lint、typecheck、unit、contract 与受影响 integration。
 
 最终门禁复跑现有 worker/bridge usage transport integration，确认本批没有影响 canonical usage 的事件投影。由于本批不修改 provider wire、cache key、MCP epoch 或 cache breakdown normalizer，真实 Provider cache smoke 不作为本批硬门；不得把 improve-5 的旧证据冒充新执行结果，也不应为无关代码变化额外消耗外部 credential。
@@ -325,9 +328,10 @@ current context estimate
 1. `rg` 不再发现 `toPartTokenUsageMetadata`、`estimateWireHeuristic` 或 `ContextMeasurementPayload` 的生产/测试入口。
 2. 新代码不增加字段、schema、service、manager、配置项或 provider 方言依赖。
 3. creator/reader 是纯函数；reader 在数据库不可信 JSON 边界 fail closed，但 canonical totals 合法时只丢弃损坏 breakdown。
-4. estimator 数值公式在相同 `{ messages, tools }` 下逐字节保持不变，prepared request 继续 deep-frozen。
-5. 主代理与子代理走相同 estimator/metadata 实现；scope 隔离由既有 `sessionId + contextScopeId` 测试继续证明。
-6. 两个实现 commit 各自 targeted tests 通过；最终 lint、typecheck、unit、contract、受影响 integration 全绿，并完成只读子代理 diff 审查。
+4. 每个 model step 最多一个 durable part 携带 usage；无 part completion 不为 usage 伪造记录。
+5. estimator 数值公式在相同 `{ messages, tools }` 下逐字节保持不变，prepared request 继续 deep-frozen。
+6. 主代理与子代理走相同 estimator/metadata 实现；scope 隔离由既有 `sessionId + contextScopeId` 测试继续证明。
+7. 两个实现 commit 各自 targeted tests 通过；最终 lint、typecheck、unit、contract、受影响 integration 全绿，并完成只读子代理 diff 审查。
 
 ## 6.10 非目标与删除门槛
 
