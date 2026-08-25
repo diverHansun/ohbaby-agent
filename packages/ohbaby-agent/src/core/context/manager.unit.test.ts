@@ -1874,7 +1874,7 @@ describe("ContextManager", () => {
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
       .mockResolvedValue("<state_snapshot>short</state_snapshot>");
-    const updatePart = vi.spyOn(messageManager, "updatePart");
+    const commitCompaction = vi.spyOn(messageManager, "commitCompaction");
     const onCompactionStarted = vi.fn();
     const tokenCounter = {
       estimateTokens: (content: string): number => content.length,
@@ -1941,9 +1941,9 @@ describe("ContextManager", () => {
       estimateWireHeuristic(prepared.request.messages, tokenCounter),
     );
     expect(onCompactionStarted).toHaveBeenCalledTimes(1);
-    expect(updatePart).toHaveBeenCalled();
+    expect(commitCompaction).toHaveBeenCalled();
     expect(onCompactionStarted.mock.invocationCallOrder[0]).toBeLessThan(
-      updatePart.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      commitCompaction.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
     expect(generateSummary).not.toHaveBeenCalled();
   });

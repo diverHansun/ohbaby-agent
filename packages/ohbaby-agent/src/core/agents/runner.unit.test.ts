@@ -97,6 +97,9 @@ function createMessageManager(
   const removeMessage = vi.fn((): Promise<void> => Promise.resolve());
   const manager: MessageManager = {
     appendPart,
+    commitCompaction: vi.fn<MessageManager["commitCompaction"]>(() =>
+      Promise.reject(new Error("Compaction is not used by this fixture")),
+    ),
     createMessage,
     listBySession,
     removeMessage,

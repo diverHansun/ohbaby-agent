@@ -5,8 +5,11 @@ import type {
   MessageScopeFilter,
   Part,
   CreatePartInput,
+  CommitCompactionResult,
   UpdateMessagePatch,
   UpdatePartPatch,
+  StoreCompactionInput,
+  TextPart,
 } from "./types.js";
 
 export function createInMemoryMessageStore(): MessageStore {
@@ -116,6 +119,74 @@ export function createInMemoryMessageStore(): MessageStore {
       parts.set(partId, clone(updated));
       touchMessage(existing.messageId, updatedAt);
       return Promise.resolve(clone(updated));
+    },
+
+    commitCompaction(
+      input: StoreCompactionInput,
+    ): Promise<CommitCompactionResult> {
+      const compactedPartIds = [...new Set(input.compactedPartIds)];
+      const targets = compactedPartIds.map((partId) => {
+        const part = parts.get(partId);
+        if (!part) {
+          throw new Error(`Compaction part not found: ${partId}`);
+        }
+        if (
+          part.sessionId !== input.sessionId ||
+          part.contextScopeId !== input.contextScopeId
+        ) {
+          throw new Error(
+            `Compaction part belongs to another scope: ${partId}`,
+          );
+        }
+        if (part.time?.compacted !== undefined) {
+          throw new Error(`Compaction part is already compacted: ${partId}`);
+        }
+        return part;
+      });
+      if (input.summary !== undefined) {
+        if (messages.has(input.summary.message.id)) {
+          throw new Error(
+            `Message already exists: ${input.summary.message.id}`,
+          );
+        }
+        if (parts.has(input.summary.partId)) {
+          throw new Error(`Part already exists: ${input.summary.partId}`);
+        }
+      }
+
+      const summaryPart =
+        input.summary === undefined
+          ? undefined
+          : (createPart({
+              data: input.summary.data,
+              message: input.summary.message,
+              partId: input.summary.partId,
+            }) as TextPart);
+      if (input.summary !== undefined && summaryPart !== undefined) {
+        messages.set(input.summary.message.id, clone(input.summary.message));
+        parts.set(summaryPart.id, clone(summaryPart));
+      }
+      const updatedParts = targets.map((part) => {
+        const updated = {
+          ...part,
+          time: { ...part.time, compacted: input.compactedAt },
+        } as Part;
+        parts.set(updated.id, clone(updated));
+        touchMessage(updated.messageId, input.updatedAt);
+        return clone(updated);
+      });
+
+      return Promise.resolve({
+        ...(input.summary === undefined || summaryPart === undefined
+          ? {}
+          : {
+              summary: {
+                message: clone(input.summary.message),
+                part: clone(summaryPart),
+              },
+            }),
+        updatedParts,
+      });
     },
 
     listBySession(

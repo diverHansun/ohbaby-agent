@@ -6,6 +6,8 @@ import { toModelMessages as convertToModelMessages } from "./converter.js";
 import type {
   CreateMessageInput,
   CreatePartInput,
+  CommitCompactionInput,
+  CommitCompactionResult,
   Message,
   MessageIdGenerator,
   MessageManager,
@@ -32,14 +34,19 @@ export function createMessageManager(
   const now = options.now ?? Date.now;
   const allocatedMessageIds = new Set<string>();
 
-  async function createMessageRecord(
-    input: CreateMessageInput,
-  ): Promise<Message> {
+  function allocateMessageRecord(input: CreateMessageInput): Message {
     let message = createMessage({ data: input, idGenerator, now });
     while (input.id === undefined && allocatedMessageIds.has(message.id)) {
       message = createMessage({ data: input, idGenerator, now });
     }
     allocatedMessageIds.add(message.id);
+    return message;
+  }
+
+  async function createMessageRecord(
+    input: CreateMessageInput,
+  ): Promise<Message> {
+    const message = allocateMessageRecord(input);
     await options.store.insertMessage(message);
     options.bus.publish(MessageEvent.Updated, { info: message });
     return message;
@@ -93,6 +100,60 @@ export function createMessageManager(
 
     appendPart,
     updatePart,
+
+    async commitCompaction(
+      input: CommitCompactionInput,
+    ): Promise<CommitCompactionResult> {
+      const summaryMessage =
+        input.summary === undefined
+          ? undefined
+          : allocateMessageRecord({
+              agent: input.summary.agent,
+              ...(input.contextScopeId === undefined
+                ? {}
+                : { contextScopeId: input.contextScopeId }),
+              role: "assistant",
+              sessionId: input.sessionId,
+            });
+      if (summaryMessage !== undefined && summaryMessage.role !== "assistant") {
+        throw new Error("Compaction summary must be an assistant message");
+      }
+      const result = await options.store.commitCompaction({
+        compactedAt: input.compactedAt,
+        compactedPartIds: input.compactedPartIds,
+        ...(input.contextScopeId === undefined
+          ? {}
+          : { contextScopeId: input.contextScopeId }),
+        sessionId: input.sessionId,
+        ...(input.summary === undefined || summaryMessage === undefined
+          ? {}
+          : {
+              summary: {
+                data: {
+                  metadata: { kind: "context-summary" },
+                  synthetic: true,
+                  text: input.summary.text,
+                  type: "text",
+                },
+                message: summaryMessage,
+                partId: idGenerator.partId(),
+              },
+            }),
+        updatedAt: now(),
+      });
+      if (result.summary !== undefined) {
+        options.bus.publish(MessageEvent.Updated, {
+          info: result.summary.message,
+        });
+        options.bus.publish(MessageEvent.PartUpdated, {
+          part: result.summary.part,
+        });
+      }
+      for (const part of result.updatedParts) {
+        options.bus.publish(MessageEvent.PartUpdated, { part });
+      }
+      return result;
+    },
 
     listBySession(
       sessionId: string,

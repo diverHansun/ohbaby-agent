@@ -207,11 +207,46 @@ export interface MessageScopeFilter {
   readonly contextScopeId: string | undefined;
 }
 
+export interface CommitCompactionInput {
+  readonly compactedAt: number;
+  readonly compactedPartIds: readonly string[];
+  readonly contextScopeId?: string;
+  readonly sessionId: string;
+  readonly summary?: {
+    readonly agent: string;
+    readonly text: string;
+  };
+}
+
+export interface CommitCompactionResult {
+  readonly summary?: {
+    readonly message: AssistantMessage;
+    readonly part: TextPart;
+  };
+  readonly updatedParts: readonly Part[];
+}
+
+export interface StoreCompactionInput {
+  readonly compactedAt: number;
+  readonly compactedPartIds: readonly string[];
+  readonly contextScopeId?: string;
+  readonly sessionId: string;
+  readonly summary?: {
+    readonly data: Omit<TextPart, keyof PartBase>;
+    readonly message: AssistantMessage;
+    readonly partId: string;
+  };
+  readonly updatedAt: number;
+}
+
 export interface MessageManager {
   createMessage(input: CreateMessageInput): Promise<Message>;
   updateMessage(messageId: string, patch: UpdateMessagePatch): Promise<Message>;
   appendPart(messageId: string, input: CreatePartInput): Promise<Part>;
   updatePart(partId: string, patch: UpdatePartPatch): Promise<Part>;
+  commitCompaction(
+    input: CommitCompactionInput,
+  ): Promise<CommitCompactionResult>;
   listBySession(
     sessionId: string,
     options?: MessageScopeFilter,
@@ -239,6 +274,9 @@ export interface MessageStore {
     patch: Omit<UpdatePartPatch, "delta">,
     updatedAt: number,
   ): Promise<Part>;
+  commitCompaction(
+    input: StoreCompactionInput,
+  ): Promise<CommitCompactionResult>;
   listBySession(
     sessionId: string,
     options?: MessageScopeFilter,

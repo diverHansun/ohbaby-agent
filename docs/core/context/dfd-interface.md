@@ -190,6 +190,20 @@ compact(sessionId: string, options: CompactOptions): Promise<CompactResult>
 
 manual 与 automatic 共用 projection/measurement。公开 UI manual compact 当前只允许 primary，但 core contract 同样携带可选 `contextScopeId`，供内部对称测试。
 
+### 7.5.1 Atomic compaction commit
+
+```typescript
+messageManager.commitCompaction({
+  sessionId,
+  contextScopeId,
+  compactedAt,
+  compactedPartIds,
+  summary?: { agent, text },
+})
+```
+
+Context 只提交业务意图；Message adapter 分配 summary message/part identity，store 在一个原子边界内校验 scope、写可选 summary 并标记全部 parts。SQLite 事务失败或进程在 commit 前终止时不留下 active 空 summary、部分 mark 或双可见 view；Message/Context events 只在 store commit 返回后发布。
+
 ### 7.6 Scoped cleanup
 
 ```typescript

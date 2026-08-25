@@ -79,7 +79,7 @@ packages/ohbaby-agent/src/core/context/
 | Request projection | durable/UI/provider message shape | serializer + projection pure functions | 不写 store、不调 Provider |
 | Compaction policy | threshold、floor、thrash、cap | `decideCompactionRung()` | 纯函数、输入显式 |
 | Summary candidate | prompt、LLM、overflow shrink | `ContextLLMClient` + candidate functions | 候选不是提交事实 |
-| Durable commit | summary 与 compacted marks | Message port/adapters | 终态唯一；部分失败可恢复 |
+| Durable commit | summary 与 compacted marks | `MessageManager.commitCompaction()` + store transaction | summary/prune marks 一次原子提交；事件在提交后发布 |
 | Scoped coordinator | auto/manual/prompt mutation order | per-scope exclusive lane + pre-commit revision check | key=`sessionId+scope`，异 scope 并发 |
 | Observation | progress/window/cache event | Bus + tracker | 不回滚、不重放 durable truth |
 
@@ -148,7 +148,7 @@ R2 已完成同一 `ContextManager` 内的 per-scope 排队和候选 revision �
 1. 同 scope 的 auto+auto、manual+auto、manual+manual 及 prompt Context mutation 共用 exclusive lane；异 scope 保持并发。
 2. logical compaction 从 snapshot 到 terminal 持有 scope lease；`prepareTurn()` 内部直接执行 compaction core，不重复进入 lane，因此不会嵌套死锁。
 3. candidate await 后、提交前重读精确 scope history，并复核非 summary active history 的语义 revision；stale candidate 以 `CompressionResult { status: "skipped", reason: "stale" }` 结束，不提交旧候选，prepare 路径使用重读后的最新 view。
-4. failpoint 若证明 summary/mark 多步写可形成非法终态，优先扩展窄的 atomic compaction commit port；不做 catch-only rollback。
+4. failpoint 已证明旧的 summary/mark 多步写存在部分终态窗口；当前由窄的 `commitCompaction()` 端口修复，SQLite 使用 `BEGIN IMMEDIATE`，in-memory 在写前完整校验，不做 catch-only rollback。
 5. summary request 自身 overflow 时按完整 turn/API round 有界缩小，并清前导孤儿 tool result。
 
 ## 八、事件与 UI projection
@@ -164,7 +164,7 @@ R2 已完成同一 `ContextManager` 内的 per-scope 排队和候选 revision �
 | 决策 | 选择 | 放弃/代价 |
 |---|---|---|
 | Context 存储范式 | 继续使用 MessageStore + 窄端口 | 不获得全量 event sourcing 的统一 replay，但避免高迁移复杂度 |
-| Compaction 修复 | failpoint 后按证据扩 atomic port | 不预先实现 durable marker；若真实介质无事务能力再复议 |
+| Compaction 修复 | `commitCompaction()` atomic port | 不增加 durable marker；当前 SQLite/in-memory 都能提供原子边界 |
 | 并发控制 | per-scope lane + revision check | 同 scope 长 summary 会排队，但 correctness 优先且异 scope 不阻塞 |
 | Memory | primary run snapshot 只读 | 本轮不增加自动长期记忆、RAG 或 child MemoryView |
 | Provider window | 声明 budget + calibration + bounded recovery | 不持久化 observed adaptive ceiling |

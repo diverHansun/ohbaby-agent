@@ -229,6 +229,86 @@ describe("MessageManager", () => {
     ).resolves.toMatchObject([{ info: { id: primary.id } }]);
   });
 
+  it("atomically commits a context summary with all compacted marks", async () => {
+    const bus = createBus();
+    const manager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const first = await manager.createMessage({
+      agent: "build",
+      role: "user",
+      sessionId: "session_1",
+    });
+    const second = await manager.createMessage({
+      agent: "build",
+      role: "assistant",
+      sessionId: "session_1",
+    });
+    const firstPart = await manager.appendPart(first.id, {
+      text: "first",
+      type: "text",
+    });
+    const secondPart = await manager.appendPart(second.id, {
+      text: "second",
+      type: "text",
+    });
+
+    const committed = await manager.commitCompaction({
+      compactedAt: 1_700_000_000_100,
+      compactedPartIds: [firstPart.id, secondPart.id],
+      sessionId: "session_1",
+      summary: { agent: "context-summary", text: "summary" },
+    });
+
+    expect(committed.summary).toMatchObject({
+      message: { role: "assistant", sessionId: "session_1" },
+      part: {
+        metadata: { kind: "context-summary" },
+        synthetic: true,
+        text: "summary",
+      },
+    });
+    expect(committed.updatedParts).toMatchObject([
+      { id: firstPart.id, time: { compacted: 1_700_000_000_100 } },
+      { id: secondPart.id, time: { compacted: 1_700_000_000_100 } },
+    ]);
+  });
+
+  it("does not create a summary when any compaction target is invalid", async () => {
+    const manager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const message = await manager.createMessage({
+      agent: "build",
+      role: "user",
+      sessionId: "session_1",
+    });
+    const part = await manager.appendPart(message.id, {
+      text: "active",
+      type: "text",
+    });
+
+    await expect(
+      manager.commitCompaction({
+        compactedAt: 1_700_000_000_100,
+        compactedPartIds: [part.id, "missing-part"],
+        sessionId: "session_1",
+        summary: { agent: "context-summary", text: "must-not-persist" },
+      }),
+    ).rejects.toThrow(/Compaction part not found/u);
+
+    const history = await manager.listBySession("session_1");
+    expect(history).toHaveLength(1);
+    expect(history[0]?.parts[0]?.id).toBe(part.id);
+    expect(history[0]?.parts[0]?.time?.compacted).toBeUndefined();
+  });
+
   it("allocates distinct part order indexes during concurrent appends", async () => {
     const manager = createMessageManager({
       bus: createBus(),

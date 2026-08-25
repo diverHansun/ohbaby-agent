@@ -211,6 +211,7 @@ type CompactionTerminalOutcome =
 | `PreparedModelRequest` | Context | one provider attempt | immutable prepared request |
 | `ContextUsage` | Context | one measurement | prepared request heuristic + budget |
 | Summary candidate | ContextLLMClient | one compaction attempt | 非事实，提交前可丢弃 |
+| Atomic compaction commit | MessageManager/MessageStore | one durable transaction | 可选 summary + 全部 compacted marks；全成或全不成 |
 | Context event | Context/adapter | in-process | 非事实，best effort |
 | UI window | tracker | primary projection | 可重建 projection |
 

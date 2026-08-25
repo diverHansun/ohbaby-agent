@@ -6,13 +6,16 @@ import {
 } from "../../services/database/index.js";
 import type {
   CreatePartInput,
+  CommitCompactionResult,
   Message,
   MessageStore,
   MessageWithParts,
   MessageScopeFilter,
   Part,
+  TextPart,
   UpdateMessagePatch,
   UpdatePartPatch,
+  StoreCompactionInput,
 } from "./types.js";
 
 interface MessageRow {
@@ -271,6 +274,114 @@ export function createDatabaseMessageStore(
           );
           touchMessage(updated.messageId, updatedAt);
           return clone(updated);
+        }),
+      );
+    },
+
+    commitCompaction(
+      input: StoreCompactionInput,
+    ): Promise<CommitCompactionResult> {
+      return withAsyncBoundary(() =>
+        withImmediateTransaction(() => {
+          const compactedPartIds = [...new Set(input.compactedPartIds)];
+          const targets = compactedPartIds.map((partId) => {
+            const row = db
+              .prepare<PartRow>(
+                `SELECT * FROM ${schema.part.tableName} WHERE id = ?`,
+              )
+              .get(partId);
+            if (!row) {
+              throw new Error(`Compaction part not found: ${partId}`);
+            }
+            const part = rowToPart(row);
+            if (
+              part.sessionId !== input.sessionId ||
+              part.contextScopeId !== input.contextScopeId
+            ) {
+              throw new Error(
+                `Compaction part belongs to another scope: ${partId}`,
+              );
+            }
+            if (part.time?.compacted !== undefined) {
+              throw new Error(
+                `Compaction part is already compacted: ${partId}`,
+              );
+            }
+            return part;
+          });
+
+          let summaryPart: TextPart | undefined;
+          if (input.summary !== undefined) {
+            const timestamps = messageTimestamps(input.summary.message);
+            db.prepare(
+              `INSERT INTO ${schema.message.tableName}
+                (id, session_id, context_scope_id, role, agent, created_at, updated_at, data)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).run(
+              input.summary.message.id,
+              input.summary.message.sessionId,
+              messageContextScope(input.summary.message),
+              input.summary.message.role,
+              messageAgent(input.summary.message),
+              timestamps.createdAt,
+              timestamps.updatedAt,
+              messageToRowData(input.summary.message),
+            );
+            summaryPart = {
+              contextScopeId: input.summary.message.contextScopeId,
+              id: input.summary.partId,
+              messageId: input.summary.message.id,
+              orderIndex: 0,
+              sessionId: input.summary.message.sessionId,
+              ...input.summary.data,
+            };
+            db.prepare(
+              `INSERT INTO ${schema.part.tableName}
+                (id, message_id, session_id, type, order_index, created_at, updated_at, data)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).run(
+              summaryPart.id,
+              summaryPart.messageId,
+              summaryPart.sessionId,
+              summaryPart.type,
+              summaryPart.orderIndex,
+              input.updatedAt,
+              input.updatedAt,
+              partToRowData(summaryPart),
+            );
+          }
+
+          const updatedParts = targets.map((part) => {
+            const updated = {
+              ...part,
+              time: { ...part.time, compacted: input.compactedAt },
+            } as Part;
+            db.prepare(
+              `UPDATE ${schema.part.tableName}
+               SET type = ?, order_index = ?, updated_at = ?, data = ?
+               WHERE id = ?`,
+            ).run(
+              updated.type,
+              updated.orderIndex,
+              input.updatedAt,
+              partToRowData(updated),
+              updated.id,
+            );
+            touchMessage(updated.messageId, input.updatedAt);
+            return clone(updated);
+          });
+
+          return {
+            ...(input.summary === undefined || summaryPart?.type !== "text"
+              ? {}
+              : {
+                  summary: {
+                    message: clone(input.summary.message),
+                    part: clone(summaryPart),
+                  },
+                }),
+            updatedParts,
+          };
         }),
       );
     },

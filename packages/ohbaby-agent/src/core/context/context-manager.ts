@@ -924,13 +924,17 @@ export function createContextManager(
     }
 
     const compactedAt = now();
-    const compactedPartIds = new Set<string>();
-    for (const candidate of prunable) {
-      await options.messageManager.updatePart(candidate.part.id, {
-        time: { ...candidate.part.time, compacted: compactedAt },
-      });
-      compactedPartIds.add(candidate.part.id);
-    }
+    const commit = await options.messageManager.commitCompaction({
+      compactedAt,
+      compactedPartIds: prunable.map((candidate) => candidate.part.id),
+      ...(identity.contextScopeId === undefined
+        ? {}
+        : { contextScopeId: identity.contextScopeId }),
+      sessionId: identity.sessionId,
+    });
+    const compactedPartIds = new Set(
+      commit.updatedParts.map((part) => part.id),
+    );
 
     const result = {
       prunedCount: prunable.length,
@@ -1074,31 +1078,25 @@ export function createContextManager(
     },
     candidate: CommittableSummaryCandidate,
   ): Promise<CompressionResult> {
-    const summary = await options.messageManager.createMessage({
+    const compactedAt = now();
+    const commit = await options.messageManager.commitCompaction({
+      compactedAt,
+      compactedPartIds: candidate.historyToCompress.flatMap((message) =>
+        message.parts
+          .filter((part) => part.time?.compacted === undefined)
+          .map((part) => part.id),
+      ),
       ...(identity.contextScopeId === undefined
         ? {}
         : { contextScopeId: identity.contextScopeId }),
       sessionId: identity.sessionId,
-      role: "assistant",
-      agent: summaryAgentName,
+      summary: {
+        agent: summaryAgentName,
+        text: candidate.snapshot,
+      },
     });
-    await options.messageManager.appendPart(summary.id, {
-      type: "text",
-      text: candidate.snapshot,
-      synthetic: true,
-      metadata: { kind: "context-summary" },
-    });
-    const compactedAt = now();
-    const compactedPartIds = new Set<string>();
-    for (const message of candidate.historyToCompress) {
-      for (const part of message.parts) {
-        compactedPartIds.add(part.id);
-        if (part.time?.compacted === undefined) {
-          await options.messageManager.updatePart(part.id, {
-            time: { ...part.time, compacted: compactedAt },
-          });
-        }
-      }
+    if (commit.summary === undefined) {
+      throw new Error("Compaction commit did not return its summary");
     }
 
     const result = {
@@ -1106,7 +1104,7 @@ export function createContextManager(
       originalTokens: candidate.originalTokens,
       newTokens: candidate.newTokens,
       savedTokens: candidate.savedTokens,
-      summaryMessageId: summary.id,
+      summaryMessageId: commit.summary.message.id,
     } satisfies CompressionResult;
     options.bus.publish(ContextEvent.Compressed, { ...identity, result });
     return result;

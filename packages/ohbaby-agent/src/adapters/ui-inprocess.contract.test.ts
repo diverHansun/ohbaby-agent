@@ -1623,14 +1623,15 @@ async function createBlockedAutoCompactionContext(): Promise<{
 
   const releaseCompaction = createDeferred<undefined>();
   const summaryMessageStarted = createDeferred<undefined>();
-  const createCoreMessage = messageManager.createMessage.bind(messageManager);
-  vi.spyOn(messageManager, "createMessage").mockImplementation(
-    async (input): ReturnType<MessageManager["createMessage"]> => {
-      if (input.agent === "context") {
+  const commitCoreCompaction =
+    messageManager.commitCompaction.bind(messageManager);
+  vi.spyOn(messageManager, "commitCompaction").mockImplementation(
+    async (input): ReturnType<MessageManager["commitCompaction"]> => {
+      if (input.summary !== undefined) {
         summaryMessageStarted.resolve(undefined);
         await releaseCompaction.promise;
       }
-      return createCoreMessage(input);
+      return commitCoreCompaction(input);
     },
   );
 
@@ -4434,13 +4435,14 @@ describe("createInProcessUiBackendClient", () => {
         text: `${String(index)} ${"large context ".repeat(100)}`,
       });
     }
-    const createCoreMessage = messageManager.createMessage.bind(messageManager);
-    vi.spyOn(messageManager, "createMessage").mockImplementation(
-      (input): ReturnType<MessageManager["createMessage"]> => {
-        if (input.agent === "context") {
+    const commitCoreCompaction =
+      messageManager.commitCompaction.bind(messageManager);
+    vi.spyOn(messageManager, "commitCompaction").mockImplementation(
+      (input): ReturnType<MessageManager["commitCompaction"]> => {
+        if (input.summary !== undefined) {
           return Promise.reject(new Error("context preparation failed"));
         }
-        return createCoreMessage(input);
+        return commitCoreCompaction(input);
       },
     );
     const client = createInProcessUiBackendClient({
@@ -8515,6 +8517,9 @@ function createRejectingMessageManager(error: Error): MessageManager {
   const store: MessageStore = {
     ...createInMemoryMessageStore(),
     insertMessage(): Promise<void> {
+      return Promise.reject(error);
+    },
+    commitCompaction(): ReturnType<MessageStore["commitCompaction"]> {
       return Promise.reject(error);
     },
   };

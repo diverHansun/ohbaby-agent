@@ -114,6 +114,9 @@ function createMessageManager(): {
     createMessage,
     manager: {
       appendPart,
+      commitCompaction: vi.fn<MessageManager["commitCompaction"]>(() =>
+        Promise.reject(new Error("Compaction is not used by this fixture")),
+      ),
       createMessage,
       listBySession: vi.fn(
         (): Promise<MessageWithParts[]> => Promise.resolve([]),
