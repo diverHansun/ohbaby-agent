@@ -243,6 +243,47 @@ describe("createContextSummaryClient", () => {
       sessionId: "session_1",
     });
   });
+
+  it("redacts credential canaries before and after summary generation", async () => {
+    const canary = "sk-eval-canary-12345678";
+    streamChatCompletionMock.mockReturnValueOnce(
+      streamWithContent(`## Goal\n- keep OPENAI_API_KEY=${canary}`),
+    );
+    const client = createContextSummaryClient({} as LLMClientInstance);
+
+    const summary = await client.generateSummary({
+      history: [
+        {
+          info: {
+            agent: "test",
+            id: "message_1",
+            role: "user",
+            sessionId: "session_1",
+            time: { created: 1 },
+          },
+          parts: [
+            {
+              id: "part_1",
+              messageId: "message_1",
+              orderIndex: 0,
+              sessionId: "session_1",
+              text: `Do not expose OPENAI_API_KEY=${canary}`,
+              type: "text",
+            },
+          ],
+        },
+      ],
+      prompt: "Use this exact format",
+      sessionId: "session_1",
+      systemPrompt: "system",
+    });
+
+    expect(
+      JSON.stringify(streamChatCompletionMock.mock.calls[0]?.[1]),
+    ).not.toContain(canary);
+    expect(summary).not.toContain(canary);
+    expect(summary).toContain("[redacted]");
+  });
 });
 
 describe("noticeFromCompactResult", () => {

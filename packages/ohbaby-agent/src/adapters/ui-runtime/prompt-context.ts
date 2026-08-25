@@ -11,6 +11,7 @@ import { serializeHistory } from "../../core/context/serialization.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import { streamChatCompletion } from "../../core/llm-client/index.js";
 import type { PromptSecurityFinding } from "../../core/system-prompt/security/index.js";
+import { redactPromptSecrets } from "../../services/session/prompt-sanitizer.js";
 
 export { appendMemoryToSystemPrompt, loadMemoryForPrompt };
 
@@ -90,9 +91,11 @@ export function createContextSummaryClient(
             { role: "system", content: input.systemPrompt ?? input.prompt },
             {
               role: "user",
-              content: serializeHistory(input.history, {
-                includeModelContext: false,
-              }),
+              content: redactPromptSecrets(
+                serializeHistory(input.history, {
+                  includeModelContext: false,
+                }),
+              ),
             },
             { role: "user", content: input.prompt },
           ],
@@ -113,7 +116,7 @@ export function createContextSummaryClient(
           }
         }
 
-        const trimmed = summary.trim();
+        const trimmed = redactPromptSecrets(summary).trim();
         if (trimmed !== "") {
           return trimmed;
         }

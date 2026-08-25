@@ -35,6 +35,7 @@ Rules:
 - Preserve exact file paths, function names, command names, errors, model names, and numbers.
 - Preserve all user intent, but summarize long pasted logs or code instead of copying them wholesale.
 - Keep bullets terse and factual.
+- Never include credentials, tokens, passwords, secret values, or private keys.
 - Do not mention summarization, compression, compacting, or that this is a summary.
 - Do not invent completed work or test results.`;
 

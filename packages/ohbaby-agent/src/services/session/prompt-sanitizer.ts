@@ -12,7 +12,10 @@ export function sanitizePromptForSessionTitle(
   options: SanitizePromptOptions = {},
 ): string {
   const maxLength = options.maxLength ?? DEFAULT_TITLE_PROMPT_MAX_LENGTH;
-  return truncateText(normalizeWhitespace(redactSecrets(prompt)), maxLength);
+  return truncateText(
+    normalizeWhitespace(redactPromptSecrets(prompt)),
+    maxLength,
+  );
 }
 
 export function createTemporarySessionTitle(
@@ -34,7 +37,7 @@ export function isDefaultSessionTitle(title: string): boolean {
   );
 }
 
-function redactSecrets(value: string): string {
+export function redactPromptSecrets(value: string): string {
   return value
     .replace(/\b(authorization\s*:\s*bearer\s+)([^\s,;]+)/giu, `$1${REDACTION}`)
     .replace(
