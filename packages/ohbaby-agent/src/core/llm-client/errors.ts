@@ -27,6 +27,9 @@ function errorStringField(error: unknown, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+const INPUT_TOKEN_LIMIT_PATTERN =
+  /(?:\b(?:context|input|prompt)\b[^\n]{0,80}\btoken limit\b|\btoken limit\b[^\n]{0,80}\b(?:context|input|prompt)\b)/u;
+
 export function isContextOverflowError(error: unknown): boolean {
   const candidates = [
     errorStringField(error, "code"),
@@ -44,6 +47,6 @@ export function isContextOverflowError(error: unknown): boolean {
       value.includes("context window") ||
       value.includes("maximum context") ||
       value.includes("too many tokens") ||
-      value.includes("token limit"),
+      INPUT_TOKEN_LIMIT_PATTERN.test(value),
   );
 }

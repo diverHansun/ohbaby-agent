@@ -656,7 +656,7 @@ describe("ContextManager", () => {
       text: "concurrent request",
       type: "text",
     });
-    const bothBuilding = deferred<undefined>();
+    const firstBuilding = deferred<undefined>();
     const releaseBuild = deferred<undefined>();
     let builders = 0;
     const { manager } = createManager({
@@ -665,9 +665,7 @@ describe("ContextManager", () => {
         build: () => Promise.resolve("stable"),
         buildRuntimeContext: async () => {
           builders += 1;
-          if (builders === 2) {
-            bothBuilding.resolve(undefined);
-          }
+          firstBuilding.resolve(undefined);
           await releaseBuild.promise;
           return `runtime-${String(builders)}`;
         },
@@ -682,16 +680,75 @@ describe("ContextManager", () => {
     } as const;
 
     const first = manager.createRunPromptSnapshot(input);
+    await firstBuilding.promise;
     const second = manager.createRunPromptSnapshot(input);
-    await bothBuilding.promise;
+    await Promise.resolve();
+    expect(builders).toBe(1);
     releaseBuild.resolve(undefined);
     await Promise.all([first, second]);
 
     const runtimeParts = (await messageManager.listBySession("session_1"))
       .flatMap((message) => message.parts)
       .filter(isModelContextPart);
-    expect(builders).toBe(2);
+    expect(builders).toBe(1);
     expect(runtimeParts).toHaveLength(1);
+  });
+
+  it("serializes runtime attachment with prepareTurn in the same scope", async () => {
+    const messageManager = createMessageManagerFixture();
+    const user = await messageManager.createMessage({
+      agent: "build",
+      id: "lane_user",
+      role: "user",
+      sessionId: "session_1",
+    });
+    await messageManager.appendPart(user.id, {
+      text: "serialize runtime",
+      type: "text",
+    });
+    const runtimeBuilding = deferred<undefined>();
+    const releaseRuntime = deferred<undefined>();
+    const listBySession = vi.spyOn(messageManager, "listBySession");
+    const { manager } = createManager({
+      messageManager,
+      systemPromptProvider: {
+        build: () => Promise.resolve("stable"),
+        buildRuntimeContext: async () => {
+          runtimeBuilding.resolve(undefined);
+          await releaseRuntime.promise;
+          return "runtime";
+        },
+      },
+    });
+
+    const snapshot = manager.createRunPromptSnapshot({
+      directory: "/repo",
+      initiatingUserMessageId: user.id,
+      isSubagent: false,
+      sessionId: "session_1",
+      toolNames: [],
+    });
+    await runtimeBuilding.promise;
+    expect(listBySession).toHaveBeenCalledTimes(1);
+
+    const prepared = manager.prepareTurn({
+      directory: "/repo",
+      modelId: "model-a",
+      promptSnapshot: {
+        memory: { global: "", merged: "", project: "" },
+        systemPrompt: "stable",
+      },
+      sessionId: "session_1",
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(listBySession).toHaveBeenCalledTimes(1);
+
+    releaseRuntime.resolve(undefined);
+    await snapshot;
+    await prepared;
+    expect(listBySession).toHaveBeenCalledTimes(2);
   });
 
   it("does not attach runtime context for resume and rejects a cross-scope initiating message", async () => {
