@@ -1,6 +1,6 @@
 # improve-4～5 Context 联合回归
 
-> 状态：已实施，条件验收；确定性本地门禁通过，外部 Provider 与部分扩展矩阵仍待后续门禁。
+> 状态：已实施，条件验收；Context 确定性门禁与 compiled Web 通过，仓库级 integration 仍有 packaging 临时 registry 超时，外部 Provider 与部分扩展矩阵仍待后续门禁。
 > 规划基线：`301de2da7996703e2c4254b330f981bf51507e1f`（2026-08-24）。
 > 本目录只定义回归、诊断与后续修复契约；规划阶段不修改生产代码。
 
