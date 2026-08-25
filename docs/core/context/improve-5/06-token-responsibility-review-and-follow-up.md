@@ -2,7 +2,7 @@
 
 > 复核日期：2026-08-25
 >
-> 性质：improve-5 与 improve-4～5 联合回归后的设计复核；2026-08-25 已批准作为后续小型收口批次实施。本文在验收记录写入前不表示代码已经按本方案修改。
+> 性质：improve-5 与 improve-4～5 联合回归后的设计复核；2026-08-25 已批准并按 H1/H2 两批实施。实际 commits、门禁和审查结果见 [07 验收](./07-token-responsibility-follow-up-acceptance.md)。
 >
 > 范围：provider usage 归一化、请求前 token 估算、prepared request 计量、消息 usage metadata 持久化及相应测试。
 

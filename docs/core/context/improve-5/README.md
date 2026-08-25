@@ -3,6 +3,7 @@
 > 状态：**improve-5 已于 2026-08-24 在 `codex/improve-5` 分七批实施，随后合入 `main`；同日晚独立复测确认本地 targeted + unit/contract/integration（排除 packaging）全绿，Batch G 关闭反馈中的可复现覆盖/投影缺口。G7 compiled Web 与 G8 真实 cache 未在独立复测会话重跑，完整仓库门仍是条件验收**。
 > 代码基线：improve-4 / improve-4.1 已实施；分批 commits、门禁例外、ZenMux 证据与独立复测见 [05](./05-implementation-acceptance.md)（含 §5.10）。
 > 后续状态：improve-4～5 联合回归已实施并条件通过，详见 [联合回归验收](../improve-4-to-5-regression/05-implementation-acceptance.md)。
+> token 职责收口：联合回归后的 H1/H2 小批次已在 `main` 完成并通过全量门禁，详见 [06 方案](./06-token-responsibility-review-and-follow-up.md) 与 [07 验收](./07-token-responsibility-follow-up-acceptance.md)。
 >
 > 前序：[improve-4](../improve-4/README.md) / [improve-4.1](../improve-4.1/README.md) 已建立 request-shaped `{ messages, tools }` 占用计量。本批必须保持 cached input 仍占 context window，不得回退 tools-aware 分母。
 
@@ -91,6 +92,7 @@ A 必须先完成；没有可信观测，B–G 的结果无法解释。每批遵
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 逐批 unit/integration 门、真实 cache smoke、compiled Web E2E 与最终验收 |
 | [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 分批 commits、测试结果、compiled Web 证据、G1–G9 与剩余风险 |
 | [06-token-responsibility-review-and-follow-up.md](./06-token-responsibility-review-and-follow-up.md) | 实施后 token 文件职责复核、metadata 读写收口、estimation 接口升级与测试计划 |
+| [07-token-responsibility-follow-up-acceptance.md](./07-token-responsibility-follow-up-acceptance.md) | H1/H2 实际改动、数据流、测试证据、独立审查与剩余边界 |
 
 ## 6. 实施后边界声明
 
